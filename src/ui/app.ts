@@ -1,4 +1,5 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
+import { BUILD, reportError, setAdapterInfo } from './errors';
 import { initGpu, type Gpu } from '../gpu/device';
 import { configFor, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
@@ -93,17 +94,14 @@ side.innerHTML = `
     <div id="diag"><dl></dl><dl></dl></div>
   </details>
 
-  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit, wheel to zoom</footer>
+  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit, wheel to zoom<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 const canvas = $<HTMLCanvasElement>('view');
 const hud = $('hud');
 
 function fail(e: unknown) {
-  const box = $('error');
-  box.style.display = 'flex';
-  box.textContent = e instanceof Error ? e.message : String(e);
-  console.error(e);
+  reportError(e);
 }
 
 let gpu: Gpu;
@@ -674,6 +672,7 @@ function tick(now: number) {
     gpu = await initGpu();
     // Firefox reports no adapter details; the fallback flag is the one thing worth flagging.
     const name = `${gpu.info.vendor} ${gpu.info.architecture}`.trim() || 'WebGPU adapter';
+    setAdapterInfo(`${name}${gpu.info.description ? ' (' + gpu.info.description + ')' : ''}`);
     $('adapter').textContent = gpu.info.fallback ? `${name} (software fallback: expect it to be slow)` : name;
     renderer = new Renderer(gpu, canvas);
     await renderer.init();

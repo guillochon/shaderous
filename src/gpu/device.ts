@@ -43,7 +43,10 @@ export async function initGpu(): Promise<Gpu> {
     },
   });
   device.addEventListener('uncapturederror', (e) => {
-    console.error('WebGPU error:', (e as GPUUncapturedErrorEvent).error.message);
+    const message = (e as GPUUncapturedErrorEvent).error.message;
+    console.error('WebGPU error:', message);
+    // The page shows these in its error panel (src/ui/errors.ts).
+    globalThis.dispatchEvent?.(new CustomEvent('shaderous-gpu-error', { detail: 'WebGPU error: ' + message }));
   });
 
   const ai = adapter.info;
