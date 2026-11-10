@@ -64,7 +64,11 @@ async function library(h5?: H5): Promise<Library> {
 
 let counter = 0;
 
-export async function writeAthdf(s: Snapshot, h5?: H5): Promise<Uint8Array> {
+/**
+ * @param gzip compression level for the cell data, 1 (fastest) to 9; 0 writes it uncompressed.
+ *             gzip is HDF5's standard filter, so every reader handles it.
+ */
+export async function writeAthdf(s: Snapshot, h5?: H5, gzip = 0): Promise<Uint8Array> {
   const lib = await library(h5);
   const name = `write-${counter++}.athdf`;
   const f = new lib.File(name, 'w');
@@ -113,6 +117,7 @@ export async function writeAthdf(s: Snapshot, h5?: H5): Promise<Uint8Array> {
     maxshape: [present.length, ...perVar],
     chunks: [1, chunkBlocks, nz, ny, nx],
     dtype: '<f4',
+    ...(gzip > 0 ? { compression: 'gzip', compression_opts: gzip } : {}),
   });
   if (present.length > 1) prim.resize([present.length, ...perVar]);
   for (let v = 1; v < present.length; v++) prim.write_slice([[v, v + 1], [], [], [], []], s.data[present[v]]!);

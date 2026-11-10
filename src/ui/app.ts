@@ -331,7 +331,9 @@ function exportState() {
     try {
       const snap = await capture(sim, { program: 'shaderous', build: BUILD, query: linkQuery() });
       const { writeAthdf } = await import('../io/athdf');
-      const bytes = await writeAthdf(snap);
+      // gzip level 1: nearly all of the saving of higher levels (files are 8% to 86% of the raw
+      // size, depending on how smooth the flow is) for the least time.
+      const bytes = await writeAthdf(snap, undefined, 1);
       const name = `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-t${+snap.time.toPrecision(4)}.athdf`;
       const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/x-hdf5' }));
       const a = document.createElement('a');

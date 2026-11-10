@@ -66,6 +66,17 @@ describe('Athena++ HDF5 snapshots', () => {
     expect(s.prim(0.5 + 1 / 32, 0.5 + 1 / 16, 0).rho).toBe(3 * 16 + 0.25);
   });
 
+  it('reads back compressed files, which are smaller', async () => {
+    const s = sample();
+    // Mostly uniform data, as a quiet region of a run would be.
+    for (const v of VARIABLES) s.data[v]!.fill(1.5, 16);
+    const plain = await writeAthdf(s, h5);
+    const packed = await writeAthdf(s, h5, 1);
+    expect(packed.length).toBeLessThan(plain.length);
+    const back = await readAthdf(packed, h5);
+    for (const v of VARIABLES) expect(Array.from(back.data[v]!)).toEqual(Array.from(s.data[v]!));
+  });
+
   it('rejects files that are not snapshots', async () => {
     await expect(readAthdf(new Uint8Array([1, 2, 3, 4]), h5)).rejects.toThrow(/not an HDF5 file/);
   });

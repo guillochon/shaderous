@@ -63,7 +63,10 @@ button, to hand someone the same setup. A bare visit opens Kelvin-Helmholtz at 1
   spaced, square or cubic domain. It is sampled onto the nearest resolution on offer, cell
   centre by cell centre (not conservatively), keeping the current preset's physics.
 - HDF5 comes from h5wasm, loaded the first time either button is used (about 1 MB compressed).
-  A 256^3 state is about 400 MB.
+- The cell data is gzip-compressed at level 1 (HDF5's standard filter; higher levels gain
+  about a percent more for up to twice the time). Uncompressed, a state is 24 bytes per cell,
+  about 400 MB at 256^3. Compressed files measured from 8% of that (an early Sedov blast) to
+  86% (tidal debris), and compressing a hard-to-compress 128^3 state takes about 2 s.
 
 ## Tests
 
