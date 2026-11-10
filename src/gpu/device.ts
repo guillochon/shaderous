@@ -3,7 +3,7 @@
 export interface Gpu {
   adapter: GPUAdapter;
   device: GPUDevice;
-  info: { vendor: string; architecture: string; description: string };
+  info: { vendor: string; architecture: string; description: string; fallback: boolean };
   limits: GPUSupportedLimits;
   maxGrid: number; // largest cubic grid this device can hold
 }
@@ -51,7 +51,12 @@ export async function initGpu(): Promise<Gpu> {
   return {
     adapter,
     device,
-    info: { vendor: ai?.vendor ?? '', architecture: ai?.architecture ?? '', description: ai?.description ?? '' },
+    info: {
+      vendor: ai?.vendor ?? '',
+      architecture: ai?.architecture ?? '',
+      description: ai?.description ?? '',
+      fallback: Boolean((ai as { isFallbackAdapter?: boolean } | undefined)?.isFallbackAdapter),
+    },
     limits: device.limits,
     maxGrid,
   };

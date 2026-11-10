@@ -150,7 +150,8 @@ export const TESTS: TestDef[] = [
   {
     id: 'sod-axes',
     name: 'Sod shock tube along x, y, z',
-    criterion: 'L1 density error < 0.01 against the exact solution; the three runs identical under axis permutation; planar to round-off',
+    criterion:
+      'L1 density error < 0.01 against the exact solution; the three runs agree under axis permutation to 1e-6 (bit-identical in Chrome, last-bit differences in Firefox); planar to round-off',
     async run(gpu) {
       const runs = [];
       for (const [p, axis] of [[sodX, 0], [sodY, 1], [sodZ, 2]] as const) runs.push(await tubeProfile(gpu, p, N_TUBE, axis));
@@ -158,7 +159,7 @@ export const TESTS: TestDef[] = [
       const perm = Math.max(maxDiff(runs[0].prof, runs[1].prof), maxDiff(runs[0].prof, runs[2].prof));
       const spread = Math.max(...runs.map((r) => r.spread));
       return {
-        pass: Math.max(...l1) < 0.01 && perm === 0 && spread < 1e-5,
+        pass: Math.max(...l1) < 0.01 && perm < 1e-6 && spread < 1e-5,
         metrics: { l1_x: l1[0], l1_y: l1[1], l1_z: l1[2], permutation_max_diff: perm, transverse_spread: spread, steps: runs[0].steps },
       };
     },

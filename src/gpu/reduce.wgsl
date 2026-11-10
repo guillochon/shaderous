@@ -1,4 +1,4 @@
-// Hierarchical reduction template. Each invocation folds an 8x8x8 block of inputs into one
+// Hierarchical reduction template. Each invocation folds a block of RED_F^3 inputs into one
 // output record, so sums are accumulated in a tree rather than one long float32 chain.
 //
 // <red_def> supplies:    const RED_K: u32;  const RED_OP = array<u32, RED_K>(...)  (0 sum, 1 max, 2 min)
@@ -8,7 +8,8 @@
 alias Red = array<f32, RED_K>;
 
 override NIN: u32 = 1u;    // inputs per side
-override NOUT: u32 = 1u;   // outputs per side = ceil(NIN / 8)
+override NOUT: u32 = 1u;   // outputs per side = ceil(NIN / RED_F)
+override RED_F: u32 = 4u;  // block side
 
 @group(0) @binding(20) var<storage, read_write> RED_OUT: array<f32>;
 
@@ -42,10 +43,10 @@ fn red_combine(a: Red, b: Red) -> Red {
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= vec3<u32>(NOUT))) { return; }
   var acc = red_identity();
-  for (var z = 0u; z < 8u; z++) {
-    for (var y = 0u; y < 8u; y++) {
-      for (var x = 0u; x < 8u; x++) {
-        let c = gid * 8u + vec3<u32>(x, y, z);
+  for (var z = 0u; z < RED_F; z++) {
+    for (var y = 0u; y < RED_F; y++) {
+      for (var x = 0u; x < RED_F; x++) {
+        let c = gid * RED_F + vec3<u32>(x, y, z);
         if (all(c < vec3<u32>(NIN))) {
           acc = red_combine(acc, red_cell(vec3<i32>(c)));
         }

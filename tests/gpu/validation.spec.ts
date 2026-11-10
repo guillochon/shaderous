@@ -41,12 +41,20 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
   page.on('pageerror', (e) => errors.push(e.message));
   const steps = () => page.evaluate(() => (window as any).shaderousApp.diag?.steps ?? 0);
-  // Wait until the step counter has moved twice; a reset restarts it from zero, so compare for
-  // change rather than for growth past the old value.
+  // Wait until the step counter has moved twice, or the run has reached its end time (small
+  // grids finish a preset within a second). A reset restarts the counter from zero, so compare
+  // for change rather than for growth past the old value.
   const advance = async () => {
     for (let i = 0; i < 2; i++) {
       const before = await steps();
-      await page.waitForFunction((b) => (window as any).shaderousApp.diag && (window as any).shaderousApp.diag.steps !== b, before, { timeout: 60_000 });
+      await page.waitForFunction(
+        (b) => {
+          const d = (window as any).shaderousApp.diag;
+          return d && (d.steps !== b || (d.dt === 0 && d.steps > 0));
+        },
+        before,
+        { timeout: 60_000 },
+      );
     }
   };
 

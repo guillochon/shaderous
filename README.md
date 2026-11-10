@@ -15,7 +15,7 @@ https://guillochon.github.io/shaderous/validate.html
 
 ## Running
 
-Needs Node 20+ and a browser with WebGPU (current Chrome or Edge).
+Needs Node 20+ and a browser with WebGPU (current Chrome, Edge or Firefox).
 
 ```bash
 npm install
@@ -74,6 +74,13 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   under-resolved. Both are selectable in the UI (`gravEnergyFlux` in `SimConfig`).
 - **Float32.** Conservation is at round-off level, but round-off is biased when a uniform
   background sits exactly on a power of two (see `problems/advection.ts`).
+- **A step is five hydro passes:** primitives, timestep reduction, clock, half-step predictor,
+  update. With gravity it adds the Poisson source, V-cycles, a pass that writes the
+  acceleration field, and the second half kick. `sim.profile()` times each pass.
+- **Frame pacing** adapts the number of steps per frame to the GPU. Firefox reports finished
+  GPU work only every ~100 ms, so there the loop steers by backlog rather than by timing.
+  Results agree across browsers to round-off; axis-permuted runs are bit-identical in Chrome
+  and differ in the last bit in Firefox.
 - **Barotropic gas** uses HLL, since there is no contact wave for HLLC to resolve.
 
 ## Licence

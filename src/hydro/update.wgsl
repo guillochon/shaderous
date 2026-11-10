@@ -1,15 +1,16 @@
-// Unsplit MUSCL-Hancock update, gather form: each cell rebuilds the reconstruction of itself
-// and its six neighbours (25-cell stencil) and evaluates its own six face fluxes.
+// Unsplit MUSCL-Hancock update, gather form: each cell evaluates its own six face fluxes from
+// the half-step states written by hydro/predict.wgsl and slopes recomputed from the primitives.
 //
-// Performance note: everything here is straight-line code on locals. Caching the stencil in a
-// shader-local array to avoid repeated loads was measured 3x slower (D3D12, RTX 3080); the
-// dynamic indexing costs far more than the duplicate texture fetches.
+// The stencil is the cell and two neighbours each way along each axis (13 cells): face states
+// of a neighbour need that neighbour's slope along the face normal only.
 //
 // Conservation depends on the two cells sharing a face computing identical fluxes: a face is
 // the upper face of one cell and the lower face of the next, which are different call sites
-// of face_flux(). predict() and face_flux() are pure functions of the cell coordinates, so
-// the results should match bit for bit, and the validation suite checks that they do
-// (DEBUG_FLUX below).
+// of face_flux(). Its inputs are pure functions of the cell coordinates, so the results should
+// match bit for bit, and the validation suite checks that they do (DEBUG_FLUX below).
+//
+// Performance notes (D3D12, RTX 3080): keep this straight-line code on locals. Caching the
+// stencil in a shader-local array was 3x slower than repeating the texture loads.
 #include "hydro/common.wgsl"
 #include <eos>
 #include <limiter>
@@ -18,7 +19,6 @@ struct Side { rho: f32, v: vec3<f32>, p: f32, s: f32, cs: f32, eint: f32 }
 struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 
 #include <riemann>
-#include "gravity/accel.wgsl"
 #include "hydro/dual_energy.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
@@ -26,92 +26,21 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 @group(0) @binding(3) var U2: texture_3d<f32>;
 @group(0) @binding(4) var W1: texture_3d<f32>;
 @group(0) @binding(5) var W2: texture_3d<f32>;
-@group(0) @binding(6) var PHI: texture_3d<f32>;
+@group(0) @binding(6) var G: texture_3d<f32>;
 @group(0) @binding(7) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(8) var O2: texture_storage_3d<rgba32float, write>;
-@group(0) @binding(9) var PHI_OLD: texture_3d<f32>;   // potential one step back
+@group(0) @binding(9) var PA: texture_3d<f32>;
+@group(0) @binding(10) var PB: texture_3d<f32>;
 
-// Potential extrapolated to the middle of the step, for the time-centred energy source.
-fn phi_half(q: vec3<i32>) -> f32 {
-  return 1.5 * phi_ext(PHI, q) - 0.5 * phi_ext(PHI_OLD, q);
-}
+#include "hydro/recon.wgsl"
+#include "gravity/gfield.wgsl"
 
-// Primitive state: a = (rho, vx, vy, vz), b = (p, scalar, c_s, 0).
-struct Q { a: vec4<f32>, b: vec4<f32> }
-
-// Half-step-predicted cell state, its limited slopes, and the shock flag.
-struct Pred { q: Q, sx: Q, sy: Q, sz: Q, flag: f32 }
-
-fn load_q(c: vec3<i32>) -> Q {
+// Half-step state of a cell: a = (rho, v), b = (p, scalar, shock flag, first-order flag).
+// A cell beyond a boundary takes the state of the cell it maps to (mirrored if reflecting).
+fn load_pred(c: vec3<i32>) -> Q {
   let m = bc_map(c);
-  let w1 = textureLoad(W1, m.c, 0);
-  let w2 = textureLoad(W2, m.c, 0);
-  return Q(vec4<f32>(w1.x, w1.yzw * m.flip), vec4<f32>(w2.x, w2.z, w2.y, 0.0));
-}
-
-fn slope(l: Q, c: Q, r: Q) -> Q {
-  return Q(limit4(c.a - l.a, r.a - c.a), limit4(c.b - l.b, r.b - c.b));
-}
-
-fn predict(c: vec3<i32>) -> Pred {
-  let q = load_q(c);
-  let xm = load_q(c + vec3<i32>(-1, 0, 0));
-  let xp = load_q(c + vec3<i32>(1, 0, 0));
-  let ym = load_q(c + vec3<i32>(0, -1, 0));
-  let yp = load_q(c + vec3<i32>(0, 1, 0));
-  let zm = load_q(c + vec3<i32>(0, 0, -1));
-  let zp = load_q(c + vec3<i32>(0, 0, 1));
-
-  var out: Pred;
-  out.sx = slope(xm, q, xp);
-  out.sy = slope(ym, q, yp);
-  out.sz = slope(zm, q, zp);
-
-  // Shock detector: converging flow with a large relative pressure jump.
-  let conv = (xp.a.y - xm.a.y) + (yp.a.z - ym.a.z) + (zp.a.w - zm.a.w);
-  let jump = max(
-    abs(xp.b.x - xm.b.x) / min(xp.b.x, xm.b.x),
-    max(abs(yp.b.x - ym.b.x) / min(yp.b.x, ym.b.x), abs(zp.b.x - zm.b.x) / min(zp.b.x, zm.b.x)),
-  );
-  out.flag = select(0.0, 1.0, conv < 0.0 && jump > P.shock_thresh);
-
-  // Hancock predictor in primitive form, plus half a gravity kick.
-  let h = 0.5 * clock.dt / P.dx;
-  let rho = q.a.x;
-  let v = q.a.yzw;
-  let cs = q.b.z;
-  let dv = out.sx.a.y + out.sy.a.z + out.sz.a.w;
-  let da = v.x * out.sx.a + v.y * out.sy.a + v.z * out.sz.a;
-  let db = v.x * out.sx.b + v.y * out.sy.b + v.z * out.sz.b;
-  let gradp = vec3<f32>(out.sx.b.x, out.sy.b.x, out.sz.b.x);
-  let m = bc_map(c);
-  let g = gravity(PHI, m.c) * m.flip;
-
-  out.q.a = vec4<f32>(
-    rho - h * (da.x + rho * dv),
-    v - h * (da.yzw + gradp / rho) + 0.5 * clock.dt * g,
-  );
-  out.q.b = vec4<f32>(q.b.x - h * (db.x + rho * cs * cs * dv), q.b.y - h * db.y, cs, 0.0);
-
-  // Positivity: if any face state would be non-positive, this cell is first order this step.
-  let rmin = out.q.a.x - 0.5 * max(abs(out.sx.a.x), max(abs(out.sy.a.x), abs(out.sz.a.x)));
-  let pmin = out.q.b.x - 0.5 * max(abs(out.sx.b.x), max(abs(out.sy.b.x), abs(out.sz.b.x)));
-  if (!(rmin > 0.0 && pmin > 0.0)) {
-    let zero = Q(vec4<f32>(0.0), vec4<f32>(0.0));
-    out.q = q;
-    out.sx = zero;
-    out.sy = zero;
-    out.sz = zero;
-  }
-  return out;
-}
-
-fn face(pr: Pred, axis: i32, sgn: f32) -> Q {
-  var s = pr.sx;
-  if (axis == 1) { s = pr.sy; }
-  if (axis == 2) { s = pr.sz; }
-  let hs = 0.5 * sgn;
-  return Q(pr.q.a + hs * s.a, pr.q.b + hs * s.b);
+  let a = textureLoad(PA, m.c, 0);
+  return Q(vec4<f32>(a.x, a.yzw * m.flip), textureLoad(PB, m.c, 0));
 }
 
 // Cyclic rotation that puts the face normal in x, and its inverse.
@@ -126,24 +55,46 @@ fn unrot(v: vec3<f32>, axis: i32) -> vec3<f32> {
   return v;
 }
 
-fn to_side(q: Q, axis: i32) -> Side {
-  var s: Side;
-  s.rho = max(q.a.x, P.rho_floor);
-  s.v = rot(q.a.yzw, axis);
-  s.p = max(q.b.x, P.p_floor);
-  s.s = q.b.y;
-  s.cs = eos_sound_speed(s.rho, s.p);
-  s.eint = eos_eint_from_p(s.rho, s.p);
-  return s;
+// State on one side of a face: the half-step state moved half a cell along its slope
+// (sgn = +1 for the cell's upper face, -1 for its lower). First-order cells have no slope.
+fn to_side(pr: Q, s: Q, sgn: f32, axis: i32) -> Side {
+  let hs = 0.5 * sgn * (1.0 - pr.b.w);
+  let a = pr.a + hs * s.a;
+  let b = pr.b.xy + hs * s.b.xy;
+  var o: Side;
+  o.rho = max(a.x, P.rho_floor);
+  o.v = rot(a.yzw, axis);
+  o.p = max(b.x, P.p_floor);
+  o.s = b.y;
+  o.cs = eos_sound_speed(o.rho, o.p);
+  o.eint = eos_eint_from_p(o.rho, o.p);
+  return o;
 }
 
-// Flux through the face between two cells, along +axis, in grid-aligned components.
-fn face_flux(l: Pred, r: Pred, axis: i32) -> Flux {
-  var w = max(l.flag, r.flag);          // carbuncle fix: HLL next to flagged shocks
+// Flux through the face between cells l and r, along +axis, in grid-aligned components.
+fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32) -> Flux {
+  var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
   if (!EOS_HAS_ENERGY) { w = 1.0; }
-  var F = riemann_flux(to_side(face(l, axis, 1.0), axis), to_side(face(r, axis, -1.0), axis), w);
+  var F = riemann_flux(to_side(l, ls, 1.0, axis), to_side(r, rs, -1.0, axis), w);
   F.mom = unrot(F.mom, axis);
   return F;
+}
+
+struct Faces { lo: Flux, hi: Flux }
+
+// Both faces of cell c along one axis. w0 and p0 are the cell's own primitives and half-step state.
+fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
+  let wm2 = load_q(c - 2 * e);
+  let wm1 = load_q(c - e);
+  let wp1 = load_q(c + e);
+  let wp2 = load_q(c + 2 * e);
+  let sm = slope(wm2, wm1, w0);
+  let s0 = slope(wm1, w0, wp1);
+  let sp = slope(w0, wp1, wp2);
+  return Faces(
+    face_flux(load_pred(c - e), sm, p0, s0, axis),
+    face_flux(p0, s0, load_pred(c + e), sp, axis),
+  );
 }
 
 // Validation hook: when set, the pass writes the six face mass fluxes instead of the new state,
@@ -158,28 +109,25 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);
 
-  let p0 = predict(c);
-  // Flux through each face, along +axis. "l" is the lower face, "h" the upper.
-  let fxl = face_flux(predict(c - ex), p0, 0);
-  let fxh = face_flux(p0, predict(c + ex), 0);
-  let fyl = face_flux(predict(c - ey), p0, 1);
-  let fyh = face_flux(p0, predict(c + ey), 1);
-  let fzl = face_flux(predict(c - ez), p0, 2);
-  let fzh = face_flux(p0, predict(c + ez), 2);
+  let w0 = load_q(c);
+  let p0 = load_pred(c);
+  let fx = axis_fluxes(c, ex, 0, w0, p0);
+  let fy = axis_fluxes(c, ey, 1, w0, p0);
+  let fz = axis_fluxes(c, ez, 2, w0, p0);
 
   if (DEBUG_FLUX) {
-    textureStore(O1, c, vec4<f32>(fxl.m, fxh.m, fyl.m, fyh.m));
-    textureStore(O2, c, vec4<f32>(fzl.m, fzh.m, 0.0, 0.0));
+    textureStore(O1, c, vec4<f32>(fx.lo.m, fx.hi.m, fy.lo.m, fy.hi.m));
+    textureStore(O2, c, vec4<f32>(fz.lo.m, fz.hi.m, 0.0, 0.0));
     return;
   }
 
   // Net inflow per unit dt/dx.
-  let dm = (fxl.m - fxh.m) + (fyl.m - fyh.m) + (fzl.m - fzh.m);
-  let dmom = (fxl.mom - fxh.mom) + (fyl.mom - fyh.mom) + (fzl.mom - fzh.mom);
-  let de = (fxl.e - fxh.e) + (fyl.e - fyh.e) + (fzl.e - fzh.e);
-  let dei = (fxl.ei - fxh.ei) + (fyl.ei - fyh.ei) + (fzl.ei - fzh.ei);
-  let ds = (fxl.s - fxh.s) + (fyl.s - fyh.s) + (fzl.s - fzh.s);
-  let dvn = (fxl.vn - fxh.vn) + (fyl.vn - fyh.vn) + (fzl.vn - fzh.vn);
+  let dm = (fx.lo.m - fx.hi.m) + (fy.lo.m - fy.hi.m) + (fz.lo.m - fz.hi.m);
+  let dmom = (fx.lo.mom - fx.hi.mom) + (fy.lo.mom - fy.hi.mom) + (fz.lo.mom - fz.hi.mom);
+  let de = (fx.lo.e - fx.hi.e) + (fy.lo.e - fy.hi.e) + (fz.lo.e - fz.hi.e);
+  let dei = (fx.lo.ei - fx.hi.ei) + (fy.lo.ei - fy.hi.ei) + (fz.lo.ei - fz.hi.ei);
+  let ds = (fx.lo.s - fx.hi.s) + (fy.lo.s - fy.hi.s) + (fz.lo.s - fz.hi.s);
+  let dvn = (fx.lo.vn - fx.hi.vn) + (fy.lo.vn - fy.hi.vn) + (fz.lo.vn - fz.hi.vn);
 
   // Flux-form gravitational work (P.flags bit 0): each face hands half of F_mass * dphi to the
   // two cells it separates, so the sum over cells telescopes to -d/dt of the potential energy.
@@ -189,9 +137,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let pc = phi_half(c);
     // (Giving each face's work wholly to the downstream cell was tried; it conserves just as
     // well in principle but heats low-density cells more and was worse on the Evrard test.)
-    dw = -0.5 * (fxl.m * (pc - phi_half(c - ex)) + fxh.m * (phi_half(c + ex) - pc)
-               + fyl.m * (pc - phi_half(c - ey)) + fyh.m * (phi_half(c + ey) - pc)
-               + fzl.m * (pc - phi_half(c - ez)) + fzh.m * (phi_half(c + ez) - pc));
+    dw = -0.5 * (fx.lo.m * (pc - phi_half(c - ex)) + fx.hi.m * (phi_half(c + ex) - pc)
+               + fy.lo.m * (pc - phi_half(c - ey)) + fy.hi.m * (phi_half(c + ey) - pc)
+               + fz.lo.m * (pc - phi_half(c - ez)) + fz.hi.m * (phi_half(c + ez) - pc));
   }
 
   let u1 = textureLoad(U1, c, 0);
@@ -207,7 +155,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
   if (P.grav_on != 0u) {
-    kick = 0.5 * clock.dt * u1.x * gravity(PHI, c);
+    kick = 0.5 * clock.dt * u1.x * g_load(c);
     if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
   }
 
@@ -215,7 +163,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let mom = u1.yzw + kick + dtdx * dmom;
   let E = u2.x + ekick + dtdx * (de + dw);
   // Internal energy: advection plus -p div(v), with the half-step pressure and face velocities.
-  let eint = u2.y + dtdx * (dei + max(p0.q.b.x, P.p_floor) * dvn);
+  let eint = u2.y + dtdx * (dei + max(p0.b.x, P.p_floor) * dvn);
   let sc = u2.z + dtdx * ds;
 
   let en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);

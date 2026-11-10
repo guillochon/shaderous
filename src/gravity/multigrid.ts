@@ -135,7 +135,8 @@ export class Multigrid {
     for (let i = 0; i < sweeps; i++) {
       for (const g of lev.smooth) {
         pass.setBindGroup(0, g);
-        this.dispatch(pass, lev.n);
+        // Each colour is half the cells; the shader spreads the dispatch over every other x.
+        pass.dispatchWorkgroups(Math.ceil(lev.n / 16), Math.ceil(lev.n / 8), Math.ceil(lev.n / 4));
       }
     }
   }

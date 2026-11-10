@@ -111,7 +111,8 @@ const NQ = 6;
 interface Pred {
   q: Float64Array;
   s: Float64Array[]; // slopes along x, y, z
-  flag: number;
+  flag: number; // shock detector
+  firstOrder: boolean; // positivity fallback: unpredicted state, no slopes
 }
 
 export class RefHydro {
@@ -234,16 +235,42 @@ export class RefHydro {
     const rmin = qh[0] - 0.5 * Math.max(Math.abs(s[0][0]), Math.abs(s[1][0]), Math.abs(s[2][0]));
     const pmin = qh[4] - 0.5 * Math.max(Math.abs(s[0][4]), Math.abs(s[1][4]), Math.abs(s[2][4]));
     if (!(rmin > 0 && pmin > 0)) {
-      return { q: Float64Array.from(q.slice(0, NQ)), s: [0, 1, 2].map(() => new Float64Array(NQ)), flag };
+      return { q: Float64Array.from(q.slice(0, NQ)), s: [0, 1, 2].map(() => new Float64Array(NQ)), flag, firstOrder: true };
     }
-    return { q: qh, s, flag };
+    return { q: qh, s, flag, firstOrder: false };
   }
 
+  /**
+   * Half-step state, slopes and flags of a cell. As on the GPU, a cell beyond a boundary takes
+   * the half-step state and flags of the cell it maps to (mirrored if reflecting), with slopes
+   * recomputed from the primitives through the boundary mapping.
+   */
   private predict(i: number, j: number, k: number): Pred {
     const c = this.cfg;
-    if (i < 0 || j < 0 || k < 0 || i >= c.nx || j >= c.ny || k >= c.nz) return this.predictRaw(i, j, k);
-    const o = this.index(i, j, k);
-    return (this.preds[o] ??= this.predictRaw(i, j, k));
+    if (i >= 0 && j >= 0 && k >= 0 && i < c.nx && j < c.ny && k < c.nz) {
+      const o = this.index(i, j, k);
+      return (this.preds[o] ??= this.predictRaw(i, j, k));
+    }
+    const [x, fx] = this.bcAxis(i, c.nx, c.bcLo[0], c.bcHi[0]);
+    const [y, fy] = this.bcAxis(j, c.ny, c.bcLo[1], c.bcHi[1]);
+    const [z, fz] = this.bcAxis(k, c.nz, c.bcLo[2], c.bcHi[2]);
+    const src = this.predict(x, y, z);
+    const q = Float64Array.from(src.q);
+    q[1] *= fx;
+    q[2] *= fy;
+    q[3] *= fz;
+    const lim = LIMITERS[c.limiter];
+    const w = this.loadQ(i, j, k);
+    const e = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
+    const s = e.map(([a, b, d]) => {
+      const out = new Float64Array(NQ);
+      if (src.firstOrder) return out;
+      const m = this.loadQ(i - a, j - b, k - d);
+      const pl = this.loadQ(i + a, j + b, k + d);
+      for (let v = 0; v < NQ; v++) out[v] = lim(w[v] - m[v], pl[v] - w[v]);
+      return out;
+    });
+    return { q, s, flag: src.flag, firstOrder: src.firstOrder };
   }
 
   private side(pr: Pred, axis: number, sgn: number): Side {

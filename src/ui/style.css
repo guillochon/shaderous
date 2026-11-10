@@ -44,12 +44,24 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 #colorbar { position: absolute; right: 14px; top: 14px; display: flex; gap: 6px; height: 240px; pointer-events: none; }
 #colorbar canvas { width: 14px; height: 100%; border: 1px solid var(--line); }
 #colorbar .ticks { display: flex; flex-direction: column; justify-content: space-between; font-variant-numeric: tabular-nums; text-shadow: 0 0 3px #000; }
-#hud { position: absolute; left: 12px; top: 10px; color: var(--dim); text-shadow: 0 0 3px #000; pointer-events: none; }
+/* Live readouts sit in fixed-size, layout-contained boxes: changing their text cannot move
+   anything else, so the browser never has to lay out the page for them. */
+#colorbar .ticks span { display: block; width: 76px; height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; contain: strict; }
+#hud {
+  position: absolute; left: 12px; top: 10px; width: 360px; height: 18px; line-height: 18px;
+  white-space: nowrap; overflow: hidden; contain: strict;
+  color: var(--dim); text-shadow: 0 0 3px #000; pointer-events: none; font-variant-numeric: tabular-nums;
+}
 #error { position: absolute; inset: 0; display: none; align-items: center; justify-content: center; padding: 40px; white-space: pre-wrap; color: var(--bad); background: var(--bg); }
 #tf { width: 100%; height: 70px; border: 1px solid var(--line); border-radius: 4px; cursor: crosshair; display: block; }
-#diag { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; font-variant-numeric: tabular-nums; }
+#diag {
+  display: grid; grid-template-columns: 104px minmax(0, 1fr); grid-auto-rows: 18px; column-gap: 8px;
+  margin: 0; height: 252px; /* 14 rows */
+  contain: strict; font-variant-numeric: tabular-nums;
+}
+#diag dt, #diag dd { height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; }
 #diag dt { color: var(--dim); }
-#diag dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
+#diag dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-size: 12px; contain: strict; }
 #diag dd.warn { color: #ffb454; }
 .hint { color: var(--dim); font-size: 11px; margin: 4px 0; }
 

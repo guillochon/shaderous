@@ -342,49 +342,122 @@ function updateRange(d: Diagnostics) {
   view.lo = lo;
   view.hi = hi;
   const a = document.activeElement;
-  if (a !== $('lo')) $<HTMLInputElement>('lo').value = num(lo);
-  if (a !== $('hi')) $<HTMLInputElement>('hi').value = num(hi);
+  if (a !== $('lo')) setValue($<HTMLInputElement>('lo'), num(lo));
+  if (a !== $('hi')) setValue($<HTMLInputElement>('hi'), num(hi));
 }
 
-let diag0: Diagnostics | undefined;
+// The live readouts are written into text nodes created once, inside fixed-size boxes with
+// layout containment (see style.css), and only when the text actually changes. Updating them
+// therefore never rebuilds DOM and never triggers layout of the sidebar or the page.
+function setValue(el: HTMLInputElement, v: string) {
+  if (el.value !== v) el.value = v;
+}
+function liveText(parent: HTMLElement): (v: string) => void {
+  const node = document.createTextNode('');
+  parent.textContent = '';
+  parent.appendChild(node);
+  let last = '';
+  return (v) => {
+    if (v !== last) node.data = last = v;
+  };
+}
+
+const DIAG_ROWS = [
+  'time', 'dt', 'steps', 'mass', 'momentum x', 'momentum y', 'momentum z', 'E kinetic', 'E internal',
+  'E gravitational', 'E total', 'max Mach', 'floored cells', 'Jeans < 4 cells',
+] as const;
+const diagCells = DIAG_ROWS.map((label) => {
+  const dt = document.createElement('dt');
+  dt.textContent = label;
+  const dd = document.createElement('dd');
+  $('diag').append(dt, dd);
+  return { dd, set: liveText(dd), warn: false };
+});
+const setHud = liveText(hud);
+const setCbHi = liveText($('cb-hi'));
+const setCbLo = liveText($('cb-lo'));
+
 function showDiagnostics(d: Diagnostics) {
-  if (!diag0 || d.steps < diag0.steps || d.steps === 0) diag0 = d;
-  const rows: [string, string, boolean?][] = [
-    ['time', num(d.t)],
-    ['dt', num(d.dt)],
-    ['steps', String(d.steps)],
-    ['mass', num(d.mass)],
-    ['momentum', d.momentum.map((p) => p.toExponential(2)).join(' ')],
-    ['E kinetic', num(d.eKin)],
-    ['E internal', num(d.eInt)],
-    ['E gravitational', num(d.eGrav)],
-    ['E total', num(d.eTot)],
-    ['max Mach', num(d.maxMach)],
-    ['floored cells', String(d.floored), d.floored > 0],
-    ['Jeans < 4 cells', String(d.jeansUnresolved), d.jeansUnresolved > 0],
+  const values: [string, boolean][] = [
+    [num(d.t), false],
+    [num(d.dt), false],
+    [String(d.steps), false],
+    [num(d.mass), false],
+    [d.momentum[0].toExponential(3), false],
+    [d.momentum[1].toExponential(3), false],
+    [d.momentum[2].toExponential(3), false],
+    [num(d.eKin), false],
+    [num(d.eInt), false],
+    [num(d.eGrav), false],
+    [num(d.eTot), false],
+    [num(d.maxMach), false],
+    [String(d.floored), d.floored > 0],
+    [String(d.jeansUnresolved), d.jeansUnresolved > 0],
   ];
-  $('diag').innerHTML = rows.map(([k, v, warn]) => `<dt>${k}</dt><dd${warn ? ' class="warn"' : ''}>${v}</dd>`).join('');
-  $('cb-hi').textContent = num(view.hi);
-  $('cb-lo').textContent = num(view.lo);
+  values.forEach(([text, warn], i) => {
+    const cell = diagCells[i];
+    cell.set(text);
+    if (warn !== cell.warn) {
+      cell.warn = warn;
+      cell.dd.classList.toggle('warn', warn);
+    }
+  });
+  setCbHi(num(view.hi));
+  setCbLo(num(view.lo));
 }
 
 // --- frame loop -------------------------------------------------------------------------
-// Each frame encodes nsub substeps plus the render into one command buffer. nsub adapts so the
-// GPU finishes a frame's work in about one display interval; a new frame is only submitted
-// once the previous one has completed, so the queue never backs up.
+// Each frame encodes nsub substeps plus the render into one command buffer, and nsub adapts
+// so the GPU just keeps up with the display.
+//
+// How "keeping up" is detected depends on the browser. Chrome reports completed work
+// promptly, so one frame is in flight at a time and its measured GPU time steers nsub.
+// Firefox only reports completion on a ~100 ms timer; waiting for it would cap the display
+// at 10 fps. There, frames are submitted every display refresh, up to a small backlog, and
+// nsub is steered by how many are still outstanding when a batch of completions arrives.
 let nsub = 1;
-let gpuBusy = false;
+let inflight = 0;
+let capped = false; // a refresh was skipped because the backlog limit was reached
+let batchPending = false;
+let pollMs = 0; // how long the browser takes to report already-finished work
+let maxInflight = 1;
 let frame = 0;
+let lastReadout = 0;
 let stepRate = 0; // steps per second of wall time
 let stepsSubmitted = 0;
 let rateMark = { time: 0, steps: 0 };
 let fps = 0;
 let lastFrameTime = 0;
-const TARGET_MS = 14;
+let refreshMs = 16.7; // display refresh interval, estimated from requestAnimationFrame
+let lastTick = 0;
+const MAX_SUB = 64;
+
+async function measurePollLatency() {
+  let best = Infinity;
+  for (let i = 0; i < 3; i++) {
+    const t0 = performance.now();
+    gpu.device.queue.submit([]);
+    await gpu.device.queue.onSubmittedWorkDone();
+    best = Math.min(best, performance.now() - t0);
+  }
+  pollMs = best;
+}
 
 function tick(now: number) {
   requestAnimationFrame(tick);
-  if (!sim || building || gpuBusy) return;
+  // Refresh interval: follow the shortest recent gap, so skipped refreshes do not inflate it.
+  if (lastTick) {
+    const gap = Math.min(Math.max(now - lastTick, 4), 40);
+    refreshMs = gap < refreshMs ? gap : refreshMs + 0.02 * (gap - refreshMs);
+  }
+  lastTick = now;
+  // Allow enough frames in flight to cover the completion-report delay.
+  maxInflight = pollMs < 8 ? 1 : Math.ceil(pollMs / refreshMs) + 2;
+  if (!sim || building) return;
+  if (inflight >= maxInflight) {
+    capped = true;
+    return;
+  }
   const s = sim;
   const enc = gpu.device.createCommandEncoder();
   const steps = running && !finished ? nsub : stepOnce ? 1 : 0;
@@ -394,21 +467,39 @@ function tick(now: number) {
   renderer.encode(enc, s, view);
   gpu.device.queue.submit([enc.finish()]);
 
-  gpuBusy = true;
+  inflight++;
+  const adapt = steps > 0 && running;
   const t0 = performance.now();
   gpu.device.queue.onSubmittedWorkDone().then(() => {
-    gpuBusy = false;
-    const ms = performance.now() - t0;
-    if (steps > 1 || (steps === 1 && running)) {
-      if (ms < TARGET_MS * 0.7) nsub = Math.min(nsub + 1, 64);
-      else if (ms > TARGET_MS * 1.3) nsub = Math.max(1, Math.floor(nsub * 0.75));
+    inflight--;
+    if (maxInflight === 1) {
+      // Prompt completion: steer on the measured GPU time of this frame.
+      if (!adapt) return;
+      // Aim to use most of one refresh interval.
+      const ms = performance.now() - t0;
+      if (ms < refreshMs * 0.6) nsub = Math.min(nsub + 1, MAX_SUB);
+      else if (ms > refreshMs * 1.1) nsub = Math.max(1, Math.floor(nsub * 0.75));
+    } else if (!batchPending) {
+      // Completions arrive in batches; judge once per batch, after all of them have landed.
+      batchPending = true;
+      setTimeout(() => {
+        batchPending = false;
+        if (running && !finished) {
+          if (capped || inflight >= 3) nsub = Math.max(1, Math.floor(nsub * 0.75));
+          else if (inflight <= 1) nsub = Math.min(nsub + 1, MAX_SUB);
+        }
+        capped = false;
+      }, 0);
     }
   });
 
   if (lastFrameTime) fps = 0.9 * fps + 0.1 * (1000 / Math.max(now - lastFrameTime, 1));
   lastFrameTime = now;
 
-  if (frame++ % 6 === 0) {
+  // Readouts refresh five times a second, whatever the display rate.
+  frame++;
+  if (now - lastReadout >= 200) {
+    lastReadout = now;
     s.readDiagnostics().then((d) => {
       if (!d || s !== sim) return;
       lastDiag = d;
@@ -426,16 +517,19 @@ function tick(now: number) {
       rateMark = { time: now, steps: stepsSubmitted };
     }
     const state = finished ? 'finished' : running ? `${nsub} step${nsub > 1 ? 's' : ''}/frame, ${stepRate.toFixed(0)} steps/s` : 'paused';
-    hud.textContent = `${cfg.n}³  •  ${fps.toFixed(0)} fps  •  ${state}`;
+    setHud(`${cfg.n}³  •  ${fps.toFixed(0)} fps  •  ${state}`);
   }
 }
 
 (async () => {
   try {
     gpu = await initGpu();
-    $('adapter').textContent = `${gpu.info.vendor} ${gpu.info.architecture}`.trim() || 'WebGPU';
+    // Firefox reports no adapter details; the fallback flag is the one thing worth flagging.
+    const name = `${gpu.info.vendor} ${gpu.info.architecture}`.trim() || 'WebGPU adapter';
+    $('adapter').textContent = gpu.info.fallback ? `${name} (software fallback: expect it to be slow)` : name;
     renderer = new Renderer(gpu, canvas);
     await renderer.init();
+    await measurePollLatency();
     editor.set(defaultOpacity(), 'inferno');
     pushTransfer();
     bind();
@@ -450,4 +544,4 @@ function tick(now: number) {
 })();
 
 // Handles for the console and for tests.
-Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get nsub() { return nsub; }, get stepRate() { return stepRate; }, get fps() { return fps; } } });
+Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get nsub() { return nsub; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; } } });

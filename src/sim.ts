@@ -51,7 +51,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     etaDual: 1e-3,
     shockThresh: 0.5,
     jeansFloor: problem.jeansFloor ?? false,
-    vcycles: 2,
+    vcycles: 1, // warm-started from the previous step; a second cycle changes the tests by < 0.2%
     gravEnergyFlux: true,
     ...over,
   };
@@ -89,6 +89,10 @@ export class Sim {
   /** state[parity] = [U1, U2]; `cur` is the parity holding the current state */
   state: GPUTexture[][] = [];
   prim: GPUTexture[] = [];
+  /** half-step predicted primitives and per-cell flags (hydro/predict.wgsl) */
+  pred: GPUTexture[] = [];
+  /** gravitational acceleration and half-step potential (gravity/field.wgsl) */
+  gfield!: GPUTexture;
   cur = 0;
   mg!: Multigrid;
   rhoMean = 0;
@@ -102,6 +106,10 @@ export class Sim {
   private pUpdate!: GPUComputePipeline;
   private pClock!: GPUComputePipeline;
   private pCorrect!: GPUComputePipeline;
+  private pPredict!: GPUComputePipeline;
+  private pField!: GPUComputePipeline;
+  private gPredict!: GPUBindGroup;
+  private gField!: GPUBindGroup;
   private gPrim: GPUBindGroup[] = [];
   private gUpdate: GPUBindGroup[] = [];
   private gCorrect: GPUBindGroup[] = [];
@@ -136,6 +144,8 @@ export class Sim {
       sim.state.push([tex3d(d, n, 'rgba32float', `U1 ${p}`), tex3d(d, n, 'rgba32float', `U2 ${p}`)]);
     }
     sim.prim = [tex3d(d, n, 'rgba32float', 'W1'), tex3d(d, n, 'rgba32float', 'W2')];
+    sim.pred = [tex3d(d, n, 'rgba32float', 'PA'), tex3d(d, n, 'rgba32float', 'PB')];
+    sim.gfield = tex3d(d, n, 'rgba32float', 'gravity field');
     sim.writeParams();
     sim.mg = await Multigrid.create(d, n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]);
 
@@ -147,11 +157,13 @@ export class Sim {
       [MAX, MAX],
       'hydro/timestep.wgsl',
       {},
-      [{ 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: v(phi) }],
+      [{ 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: v(sim.gfield) }],
       'timestep',
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock');
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
+    sim.pField = await computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field');
+    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield) });
     await sim.buildHydro();
     sim.reset();
     return sim;
@@ -168,14 +180,24 @@ export class Sim {
     };
     const v = (t: GPUTexture) => t.createView();
     const phi = this.mg.phi;
-    [this.pPrim, this.pUpdate, this.pCorrect] = await Promise.all([
+    [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect] = await Promise.all([
       computePipeline(d, assemble('hydro/primitives.wgsl', slots), 'primitives'),
+      computePipeline(d, assemble('hydro/predict.wgsl', slots), 'predict'),
       computePipeline(d, assemble('hydro/update.wgsl', slots), 'update'),
       computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
     ]);
     this.gPrim = [];
     this.gUpdate = [];
     this.gCorrect = [];
+    this.gPredict = bindGroup(d, this.pPredict, {
+      0: this.params,
+      1: this.clock,
+      2: v(this.prim[0]),
+      3: v(this.prim[1]),
+      4: v(this.gfield),
+      5: v(this.pred[0]),
+      6: v(this.pred[1]),
+    });
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       this.gPrim.push(
@@ -195,10 +217,11 @@ export class Sim {
           3: v(this.state[p][1]),
           4: v(this.prim[0]),
           5: v(this.prim[1]),
-          6: v(phi),
+          6: v(this.gfield),
           7: v(this.state[o][0]),
           8: v(this.state[o][1]),
-          9: v(this.mg.phiOld),
+          9: v(this.pred[0]),
+          10: v(this.pred[1]),
         }),
       );
       this.gCorrect.push(
@@ -207,7 +230,7 @@ export class Sim {
           1: this.clock,
           2: v(this.state[o][0]),
           3: v(this.state[o][1]),
-          4: v(phi),
+          4: v(this.gfield),
           5: v(this.state[p][0]),
           6: v(this.state[p][1]),
         }),
@@ -299,10 +322,7 @@ export class Sim {
     writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
     d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
     this.writeParams();
-    this.solvePotential(16);
-    const enc = d.createCommandEncoder();
-    this.copyPhiToOld(enc);
-    d.queue.submit([enc.finish()]);
+    this.refreshPotential();
   }
 
   /** Solve for the potential of the current state from the current guess. */
@@ -318,10 +338,21 @@ export class Sim {
 
   /** Call after changing the gravity mode or G at run time. */
   refreshPotential() {
+    if (this.cfg.gravity === 'off') return;
     this.solvePotential(16);
     const enc = this.device.createCommandEncoder();
     this.copyPhiToOld(enc);
+    const pass = enc.beginComputePass();
+    this.encodeField(pass);
+    pass.end();
     this.device.queue.submit([enc.finish()]);
+  }
+
+  /** Acceleration and half-step potential from the current and previous potentials. */
+  private encodeField(pass: GPUComputePassEncoder) {
+    pass.setPipeline(this.pField);
+    pass.setBindGroup(0, this.gField);
+    dispatchN(pass, this.n);
   }
 
   private copyPhiToOld(enc: GPUCommandEncoder) {
@@ -329,7 +360,7 @@ export class Sim {
     enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [n, n, n]);
   }
 
-  /** Encode `count` full steps: primitives, timestep, update, then gravity if enabled. */
+  /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
   encodeSteps(enc: GPUCommandEncoder, count: number) {
     const n = this.n;
     const grav = this.cfg.gravity !== 'off';
@@ -343,6 +374,9 @@ export class Sim {
       pass.setPipeline(this.pClock);
       pass.setBindGroup(0, this.gClock);
       pass.dispatchWorkgroups(1);
+      pass.setPipeline(this.pPredict);
+      pass.setBindGroup(0, this.gPredict);
+      dispatchN(pass, n);
       pass.setPipeline(this.pUpdate);
       pass.setBindGroup(0, this.gUpdate[p]);
       dispatchN(pass, n);
@@ -354,6 +388,7 @@ export class Sim {
         pass = enc.beginComputePass();
         this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
+        this.encodeField(pass);
         pass.setPipeline(this.pCorrect);
         pass.setBindGroup(0, this.gCorrect[p]);
         dispatchN(pass, n);
@@ -362,6 +397,66 @@ export class Sim {
       }
       pass.end();
     }
+  }
+
+  /**
+   * Time each pass in isolation: milliseconds per execution, measured with a readback so the
+   * number is real GPU time in every browser. The state is scratch afterwards; call reset().
+   */
+  async profile(reps = 20): Promise<Record<string, number>> {
+    const d = this.device;
+    const n = this.n;
+    const p = this.cur;
+    const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const time = async (count: number, fn: (pass: GPUComputePassEncoder) => void) => {
+      const run = async (k: number) => {
+        const enc = d.createCommandEncoder();
+        const pass = enc.beginComputePass();
+        for (let i = 0; i < k; i++) fn(pass);
+        pass.end();
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        d.queue.submit([enc.finish()]);
+        const t0 = performance.now();
+        await buf.mapAsync(GPUMapMode.READ);
+        buf.unmap();
+        return performance.now() - t0;
+      };
+      // Difference of two batch sizes cancels the fixed readback latency.
+      const a = await run(count);
+      const b = await run(3 * count);
+      return (b - a) / (2 * count);
+    };
+    const out: Record<string, number> = {};
+    out.primitives = await time(reps, (pass) => {
+      pass.setPipeline(this.pPrim);
+      pass.setBindGroup(0, this.gPrim[p]);
+      dispatchN(pass, n);
+    });
+    out.timestep = await time(reps, (pass) => this.redDt.encode(pass));
+    out.predict = await time(reps, (pass) => {
+      pass.setPipeline(this.pPredict);
+      pass.setBindGroup(0, this.gPredict);
+      dispatchN(pass, n);
+    });
+    out.update = await time(reps, (pass) => {
+      pass.setPipeline(this.pUpdate);
+      pass.setBindGroup(0, this.gUpdate[p]);
+      dispatchN(pass, n);
+    });
+    out.diagnostics = await time(reps, (pass) => this.redDiag.encode(pass, p));
+    if (this.cfg.gravity !== 'off') {
+      out.gravity_source = await time(reps, (pass) => this.mg.encodeSource(pass, p, this.cfg.gravity === 'isolated'));
+      out.vcycle = await time(reps, (pass) => this.mg.encodeVCycle(pass));
+      out.gravity_field = await time(reps, (pass) => this.encodeField(pass));
+      out.gravity_kick = await time(reps, (pass) => {
+        pass.setPipeline(this.pCorrect);
+        pass.setBindGroup(0, this.gCorrect[1 - p]);
+        dispatchN(pass, n);
+      });
+    }
+    buf.destroy();
+    for (const k of Object.keys(out)) out[k] = +out[k].toFixed(3);
+    return out;
   }
 
   step(count = 1) {
@@ -420,24 +515,38 @@ export class Sim {
     }
   }
 
-  /** Step until the clock reaches cfg.tEnd. Returns the number of steps taken. */
+  /**
+   * Step until the clock reaches cfg.tEnd. Returns the number of steps taken.
+   *
+   * Steps are submitted in batches with one clock readback per batch. The batch grows while a
+   * round trip is short (Firefox reports completion only every ~100 ms, so small batches would
+   * be latency-bound) but never beyond the steps estimated to remain, since steps past tEnd
+   * are no-ops that still cost a full pass over the grid.
+   */
   async runToEnd(batch = 16, maxSteps = 1e6): Promise<number> {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
     const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     let steps = 0;
+    let size = batch;
     try {
       for (;;) {
         const enc = this.device.createCommandEncoder();
-        this.encodeSteps(enc, batch);
+        this.encodeSteps(enc, size);
         enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
         this.device.queue.submit([enc.finish()]);
+        const t0 = performance.now();
         await buf.mapAsync(GPUMapMode.READ);
+        const ms = performance.now() - t0;
         const c = new Float32Array(buf.getMappedRange().slice(0));
         buf.unmap();
+        const [dt, t] = c;
         steps = c[3];
-        if (!(c[0] === c[0]) || !(c[1] === c[1])) throw new Error(`clock is NaN after ${steps} steps`);
-        if (c[0] === 0 && c[1] > 0) return steps;
-        if (steps > maxSteps) throw new Error(`no convergence to tEnd after ${steps} steps (t = ${c[1]})`);
+        if (!(dt === dt) || !(t === t)) throw new Error(`clock is NaN after ${steps} steps`);
+        if (dt === 0 && t > 0) return steps;
+        if (steps > maxSteps) throw new Error(`no convergence to tEnd after ${steps} steps (t = ${t})`);
+        if (ms < 150) size = Math.min(size * 2, 512);
+        else if (ms > 400) size = Math.max(batch, size >> 1);
+        if (dt > 0) size = Math.max(1, Math.min(size, Math.ceil(((this.cfg.tEnd - t - dt) / dt) * 1.1) + 1));
       }
     } finally {
       buf.destroy();
@@ -463,13 +572,16 @@ export class Sim {
     const v = (t: GPUTexture) => t.createView();
     const group = bindGroup(d, pipe, {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]),
-      4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.mg.phi),
-      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.mg.phiOld),
+      4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
+      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]),
     });
     const enc = d.createCommandEncoder();
     const pass = enc.beginComputePass();
     pass.setPipeline(this.pPrim);
     pass.setBindGroup(0, this.gPrim[p]);
+    dispatchN(pass, n);
+    pass.setPipeline(this.pPredict);
+    pass.setBindGroup(0, this.gPredict);
     dispatchN(pass, n);
     pass.setPipeline(pipe);
     pass.setBindGroup(0, group);
@@ -531,7 +643,7 @@ export class Sim {
 
   destroy() {
     for (const s of this.state) for (const t of s) t.destroy();
-    for (const t of this.prim) t.destroy();
+    for (const t of [...this.prim, ...this.pred, this.gfield]) t.destroy();
     this.mg.destroy();
   }
 }
