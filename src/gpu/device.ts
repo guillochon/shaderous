@@ -65,7 +65,8 @@ export async function initGpu(): Promise<Gpu> {
   };
 }
 
-const STATE_USAGE =
+// Evaluated on use, so the module can be imported where WebGPU does not exist (unit tests).
+const stateUsage = () =>
   GPUTextureUsage.STORAGE_BINDING |
   GPUTextureUsage.TEXTURE_BINDING |
   GPUTextureUsage.COPY_SRC |
@@ -77,7 +78,7 @@ export function tex3d(device: GPUDevice, n: number, format: GPUTextureFormat, la
     size: [n, n, nz],
     dimension: '3d',
     format,
-    usage: STATE_USAGE,
+    usage: stateUsage(),
   });
 }
 

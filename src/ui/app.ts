@@ -1,5 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
+import { decodeLink, encodeLink, viewDefaults, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { configFor, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
@@ -43,7 +44,7 @@ side.innerHTML = `
       ${field('End time', number('tend', 'placeholder="none"'))}
       <span id="pparams"></span>
     </div>
-    <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button></div>
+    <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
   </section>
 
   <details open>
@@ -265,7 +266,7 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 }
 
 /** Build a simulation for the selected preset and resolution. */
-function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false) {
+function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides) {
   return enqueue(async () => {
     const problem = problemById(problemId);
     if (!problem.supports2d) ndim = 3;
@@ -281,11 +282,21 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       const { n: _n, problem: _p, amrLevels: _l, ...rest } = cfg;
       Object.assign(next, rest);
     } else {
-      view.field = problem.view?.field ?? 0;
-      view.log = problem.view?.log ?? true;
-      view.mode = problem.view?.mode ?? 'volume';
-      view.sliceAxis = problem.view?.axis ?? 2;
-      view.pitch = problem.view?.pitch ?? 0.45;
+      const dv = viewDefaults(problem, ndim);
+      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch });
+    }
+    if (link) {
+      // Settings carried by a shared link, on top of the preset's defaults.
+      Object.assign(next, link.cfg);
+      Object.assign(next.eosParams, link.eosParams);
+      Object.assign(next.params, link.params);
+      if (ndim === 2) next.gravity = 'off';
+      Object.assign(view, link.view);
+      if (link.auto === false) $<HTMLInputElement>('auto').checked = false;
+      if (link.colormap || link.opacity) {
+        editor.set(link.opacity ?? editor.points, link.colormap ?? editor.colormap);
+        pushTransfer();
+      }
     }
     const old = sim;
     sim = undefined;
@@ -300,6 +311,23 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     lastDiag = undefined;
     nsub = 1;
   });
+}
+
+/** The current settings as a query string (see ui/link.ts). */
+function linkQuery(): string {
+  return encodeLink({ cfg, view, auto: $<HTMLInputElement>('auto').checked, colormap: editor.colormap, opacity: editor.points }).toString();
+}
+
+// The address bar follows the settings, so the page can be shared or reloaded as it stands.
+let lastQuery = '';
+let linkFrame = 0;
+function syncAddress(force = false) {
+  if (!cfg || !sim || building) return;
+  if (!force && ++linkFrame % 30) return;
+  const q = linkQuery();
+  if (q === lastQuery) return;
+  lastQuery = q;
+  history.replaceState(null, '', `${location.pathname}?${q}`);
 }
 
 /** Parameter changes that only touch the uniform block. */
@@ -443,6 +471,19 @@ function bind() {
   on('fluxwork', (el) => {
     cfg.gravEnergyFlux = el.checked;
     applyParams();
+  });
+
+  $('share').addEventListener('click', async () => {
+    syncAddress(true);
+    const button = $('share');
+    try {
+      await navigator.clipboard.writeText(location.href);
+      button.textContent = 'Copied';
+    } catch {
+      // No clipboard access: the address bar already holds the link.
+      prompt('Copy this link', location.href);
+    }
+    setTimeout(() => (button.textContent = 'Share'), 2000);
   });
 
   on('mode', (el) => (view.mode = el.value as ViewState['mode']));
@@ -624,6 +665,7 @@ async function measurePollLatency() {
 
 function tick(now: number) {
   requestAnimationFrame(tick);
+  syncAddress();
   // Refresh interval: follow the shortest recent gap, so skipped refreshes do not inflate it.
   if (lastTick) {
     const gap = Math.min(Math.max(now - lastTick, 4), 40);
@@ -719,9 +761,8 @@ function tick(now: number) {
     editor.set(defaultOpacity(), 'inferno');
     pushTransfer();
     bind();
-    const q = new URLSearchParams(location.search);
-    const id = PROBLEMS.some((p) => p.id === q.get('problem')) ? q.get('problem')! : PROBLEMS[0].id;
-    await build(id, +q.get('n')! || 0, q.get('dim') === '2' ? 2 : 3, +q.get('amr')! || 0);
+    const link = decodeLink(new URLSearchParams(location.search));
+    await build(link.problem, link.n, link.ndim, link.amr, false, link);
     requestAnimationFrame(tick);
   } catch (e) {
     fail(e);

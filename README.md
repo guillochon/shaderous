@@ -42,6 +42,11 @@ npm run dev
 Then open http://localhost:5183. The validation suite is at http://localhost:5183/validate.html
 and runs on your own GPU.
 
+The address bar follows the settings: preset, grid, refinement, and whatever differs from the
+preset's defaults (physics, the preset's own parameters, view and camera), for example
+`?problem=tidal-disruption&dim=3&n=128&amr=2&p.beta=2&mode=slice`. Copy it, or use the Share
+button, to hand someone the same setup. A bare visit opens Kelvin-Helmholtz at 1024 squared in 2D.
+
 ## Tests
 
 ```bash

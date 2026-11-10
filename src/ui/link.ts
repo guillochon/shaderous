@@ -1,0 +1,183 @@
+// Shareable links: the simulator's settings as URL query parameters, and back.
+//
+// A link names the preset, dimensionality, resolution and refinement, and then only what
+// differs from that preset's defaults, so most links stay short. Anything unrecognised or
+// out of range in a link is ignored rather than trusted.
+import { configFor, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
+import { EOS_LABELS, type EosKind, type EosParams } from '../eos/eos';
+import { FIELDS, PROBLEMS, problemById, type GravityMode, type Problem } from '../problems';
+import { defaultView, type ViewState } from '../render/renderer';
+import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
+
+/** What a fresh visit shows. */
+export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 1024 };
+
+export interface LinkState {
+  cfg: SimConfig;
+  view: ViewState;
+  /** the displayed range follows the data */
+  auto: boolean;
+  colormap: string;
+  opacity: OpacityPoint[];
+}
+
+export interface LinkOverrides {
+  problem: string;
+  ndim: 2 | 3;
+  n: number; // 0: the default for that dimensionality
+  amr: number;
+  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux'>>;
+  eosParams: Partial<EosParams>;
+  params: Record<string, number>;
+  view: Partial<ViewState>;
+  auto?: boolean;
+  colormap?: string;
+  opacity?: OpacityPoint[];
+}
+
+/** The view a preset opens with. */
+export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
+  const v = defaultView();
+  v.field = problem.view?.field ?? 0;
+  v.log = problem.view?.log ?? true;
+  v.mode = ndim === 2 ? 'slice' : (problem.view?.mode ?? 'volume');
+  v.sliceAxis = ndim === 2 ? 2 : (problem.view?.axis ?? 2);
+  v.pitch = problem.view?.pitch ?? 0.45;
+  return v;
+}
+
+const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
+const flag = (b: boolean) => (b ? '1' : '0');
+const VIEW_NUMBERS = ['field', 'sliceAxis', 'slicePos', 'opacity', 'yaw', 'pitch', 'dist'] as const;
+const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
+  field: 'field', sliceAxis: 'axis', slicePos: 'slice', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist',
+};
+
+export function encodeLink(s: LinkState): URLSearchParams {
+  const { cfg, view } = s;
+  const q = new URLSearchParams();
+  q.set('problem', cfg.problem.id);
+  q.set('dim', String(cfg.ndim));
+  q.set('n', String(cfg.n));
+  if (cfg.amrLevels) q.set('amr', String(cfg.amrLevels));
+
+  const def = configFor(cfg.problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels });
+  const num = (key: string, a: number, b: number) => {
+    if (fmt(a) !== fmt(b)) q.set(key, fmt(a));
+  };
+  const str = (key: string, a: string, b: string) => {
+    if (a !== b) q.set(key, a);
+  };
+  num('tend', cfg.tEnd, def.tEnd);
+  str('eos', cfg.eos, def.eos);
+  num('gamma', cfg.eosParams.gamma, def.eosParams.gamma);
+  num('K', cfg.eosParams.K, def.eosParams.K);
+  num('arad', cfg.eosParams.arad, def.eosParams.arad);
+  str('riemann', cfg.riemann, def.riemann);
+  str('limiter', cfg.limiter, def.limiter);
+  num('cfl', cfg.cfl, def.cfl);
+  str('gravity', cfg.gravity, def.gravity);
+  num('G', cfg.G, def.G);
+  num('vcycles', cfg.vcycles, def.vcycles);
+  str('jfloor', flag(cfg.jeansFloor), flag(def.jeansFloor));
+  num('jcells', cfg.jeansCells, def.jeansCells);
+  str('fluxwork', flag(cfg.gravEnergyFlux), flag(def.gravEnergyFlux));
+  for (const p of cfg.problem.params ?? []) num(`p.${p.id}`, cfg.params[p.id], p.value);
+
+  const dv = viewDefaults(cfg.problem, cfg.ndim);
+  str('mode', view.mode, dv.mode);
+  for (const k of VIEW_NUMBERS) num(VIEW_KEYS[k], view[k], dv[k]);
+  str('log', flag(view.log), flag(dv.log));
+  str('blocks', flag(view.showBlocks), flag(dv.showBlocks));
+  if (!s.auto) {
+    q.set('lo', fmt(view.lo));
+    q.set('hi', fmt(view.hi));
+  }
+  str('cmap', s.colormap, 'inferno');
+  const pts = (p: OpacityPoint[]) => p.map((o) => `${+o.x.toFixed(3)}:${+o.a.toFixed(3)}`).join(',');
+  str('tf', pts(s.opacity), pts(defaultOpacity()));
+  return q;
+}
+
+export function decodeLink(q: URLSearchParams): LinkOverrides {
+  const named = q.get('problem');
+  const known = PROBLEMS.some((p) => p.id === named);
+  // A bare visit gets the default setup; a link that names a preset but no grid gets that
+  // preset in 3D, as links always have.
+  const problem = known ? named! : DEFAULT_SETUP.problem;
+  const out: LinkOverrides = {
+    problem,
+    ndim: known ? (q.get('dim') === '2' ? 2 : 3) : DEFAULT_SETUP.ndim,
+    n: known ? Math.max(0, Math.round(+q.get('n')! || 0)) : DEFAULT_SETUP.n,
+    amr: known ? Math.min(3, Math.max(0, Math.round(+q.get('amr')! || 0))) : 0,
+    cfg: {},
+    eosParams: {},
+    params: {},
+    view: {},
+  };
+  if (!known) return out;
+
+  const num = (key: string, lo = -Infinity, hi = Infinity): number | undefined => {
+    const raw = q.get(key);
+    if (raw === null || raw === '') return undefined;
+    const v = raw === 'inf' ? Infinity : +raw;
+    return Number.isNaN(v) ? undefined : Math.min(hi, Math.max(lo, v));
+  };
+  const pick = <T extends string>(key: string, allowed: readonly T[]): T | undefined => {
+    const raw = q.get(key);
+    return raw !== null && (allowed as readonly string[]).includes(raw) ? (raw as T) : undefined;
+  };
+  const bool = (key: string): boolean | undefined => (q.get(key) === '1' ? true : q.get(key) === '0' ? false : undefined);
+  const put = <O extends object, K extends keyof O>(o: O, k: K, v: O[K] | undefined) => {
+    if (v !== undefined) o[k] = v;
+  };
+
+  put(out.cfg, 'tEnd', num('tend', 0));
+  put(out.cfg, 'eos', pick('eos', Object.keys(EOS_LABELS) as EosKind[]));
+  put(out.cfg, 'riemann', pick<RiemannKind>('riemann', ['hllc', 'hll']));
+  put(out.cfg, 'limiter', pick<LimiterKind>('limiter', ['koren', 'mc', 'vanleer', 'minmod']));
+  put(out.cfg, 'cfl', num('cfl', 0.05, 1));
+  put(out.cfg, 'gravity', pick<GravityMode>('gravity', ['off', 'periodic', 'isolated']));
+  put(out.cfg, 'G', num('G'));
+  const vc = num('vcycles', 1, 8);
+  put(out.cfg, 'vcycles', vc === undefined ? undefined : Math.round(vc));
+  put(out.cfg, 'jeansFloor', bool('jfloor'));
+  const jc = num('jcells', 4, 32);
+  put(out.cfg, 'jeansCells', jc === undefined ? undefined : Math.round(jc));
+  put(out.cfg, 'gravEnergyFlux', bool('fluxwork'));
+  put(out.eosParams, 'gamma', num('gamma', 1, 100));
+  put(out.eosParams, 'K', num('K', 0));
+  put(out.eosParams, 'arad', num('arad', 0));
+  for (const p of problemById(problem).params ?? []) {
+    const v = num(`p.${p.id}`, p.min, p.max);
+    if (v !== undefined) out.params[p.id] = v;
+  }
+
+  put(out.view, 'mode', pick<ViewState['mode']>('mode', ['volume', 'slice']));
+  const field = num('field', 0, FIELDS.length - 1);
+  put(out.view, 'field', field === undefined ? undefined : Math.round(field));
+  const axis = num('axis', 0, 2);
+  put(out.view, 'sliceAxis', axis === undefined ? undefined : Math.round(axis));
+  put(out.view, 'slicePos', num('slice', 0, 0.999));
+  put(out.view, 'opacity', num('opacity', 1, 300));
+  put(out.view, 'yaw', num('yaw'));
+  put(out.view, 'pitch', num('pitch', -1.5, 1.5));
+  put(out.view, 'dist', num('dist', 0.9, 6));
+  put(out.view, 'log', bool('log'));
+  put(out.view, 'showBlocks', bool('blocks'));
+  const lo = num('lo');
+  const hi = num('hi');
+  if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi)) {
+    out.auto = false;
+    out.view.lo = lo;
+    out.view.hi = hi;
+  }
+  out.colormap = pick('cmap', Object.keys(COLORMAPS));
+  const tf = q.get('tf');
+  if (tf) {
+    const pts = tf.split(',').map((s) => s.split(':').map(Number));
+    const ok = pts.length >= 2 && pts.length <= 16 && pts.every((p) => p.length === 2 && p.every((v) => v >= 0 && v <= 1));
+    if (ok) out.opacity = pts.map(([x, a]) => ({ x, a })).sort((a, b) => a.x - b.x);
+  }
+  return out;
+}

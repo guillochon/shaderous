@@ -47,7 +47,7 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .g3 { grid-template-columns: 0.8fr 1fr 1fr; }
 .f { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .f > span { color: var(--dim); font-size: 10.5px; line-height: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .buttons button { height: 26px; padding: 0; }
 #run { border-color: #3a4a66; background: #223049; }
 .jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }

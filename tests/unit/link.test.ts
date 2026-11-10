@@ -1,0 +1,63 @@
+import { describe, expect, it } from 'vitest';
+import { configFor } from '../../src/sim';
+import { problemById } from '../../src/problems';
+import { defaultOpacity } from '../../src/render/transfer';
+import { DEFAULT_SETUP, decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
+
+const state = (id: string, n: number, ndim: 2 | 3) => {
+  const problem = problemById(id);
+  return { cfg: configFor(problem, n, { ndim }), view: viewDefaults(problem, ndim), auto: true, colormap: 'inferno', opacity: defaultOpacity() };
+};
+
+describe('shareable links', () => {
+  it('a bare visit opens the default setup', () => {
+    const l = decodeLink(new URLSearchParams(''));
+    expect([l.problem, l.ndim, l.n]).toEqual([DEFAULT_SETUP.problem, 2, 1024]);
+  });
+
+  it('a link that only names a preset opens it in 3D at the default resolution', () => {
+    const l = decodeLink(new URLSearchParams('problem=sedov'));
+    expect([l.problem, l.ndim, l.n]).toEqual(['sedov', 3, 0]);
+  });
+
+  it('untouched settings give a link with nothing but the preset and grid', () => {
+    expect(encodeLink(state('sedov', 128, 3)).toString()).toBe('problem=sedov&dim=3&n=128');
+  });
+
+  it('changed settings survive a round trip', () => {
+    const s = state('tidal-disruption', 128, 3);
+    s.cfg.amrLevels = 2;
+    s.cfg.tEnd = Infinity;
+    s.cfg.riemann = 'hll';
+    s.cfg.limiter = 'mc';
+    s.cfg.cfl = 0.5;
+    s.cfg.eosParams.gamma = 1.4;
+    s.cfg.gravEnergyFlux = false;
+    s.cfg.params.beta = 2;
+    s.view.mode = 'slice';
+    s.view.field = 3;
+    s.view.yaw = -1.25;
+    s.view.lo = 1e-4;
+    s.view.hi = 2.5;
+    s.auto = false;
+    s.colormap = Object.keys({ viridis: 1 })[0];
+    s.opacity = [{ x: 0, a: 0 }, { x: 0.5, a: 0.4 }, { x: 1, a: 1 }];
+
+    const l = decodeLink(new URLSearchParams(encodeLink(s).toString()));
+    expect([l.problem, l.ndim, l.n, l.amr]).toEqual(['tidal-disruption', 3, 128, 2]);
+    expect(l.cfg).toEqual({ tEnd: Infinity, riemann: 'hll', limiter: 'mc', cfl: 0.5, gravEnergyFlux: false });
+    expect(l.eosParams).toEqual({ gamma: 1.4 });
+    expect(l.params).toEqual({ beta: 2 });
+    expect(l.view).toMatchObject({ mode: 'slice', field: 3, yaw: -1.25, lo: 1e-4, hi: 2.5 });
+    expect(l.auto).toBe(false);
+    expect(l.opacity).toEqual(s.opacity);
+  });
+
+  it('ignores values it does not recognise and clamps the rest', () => {
+    const l = decodeLink(new URLSearchParams('problem=sedov&riemann=exact&cfl=9&eos=<script>&field=99&tf=2:2,x:y&p.nope=3'));
+    expect(l.cfg).toEqual({ cfl: 1 });
+    expect(l.view.field).toBe(4);
+    expect(l.opacity).toBeUndefined();
+    expect(l.params).toEqual({});
+  });
+});
