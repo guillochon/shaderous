@@ -63,7 +63,7 @@ Set `PW_CHANNEL=msedge` to use Edge, or `PW_HEADED=1` if headless Chrome finds n
 ```
 src/
   gpu/         device setup and limit checks, shader preprocessor, hierarchical reductions
-  hydro/       primitives, timestep, clock and update passes; riemann/ and limiters/ modules
+  hydro/       timestep rates, clock, predictor and update passes; riemann/ and limiters/ modules
   eos/         WGSL equation-of-state modules and their float64 mirrors
   gravity/     multigrid passes, multipole boundary, half-kick corrector
   amr/         block tree, block-atlas passes and the adaptive driver; gravity/ for its Poisson solve
@@ -98,9 +98,14 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   test is 2.5 to 5 times smaller than with the MC limiter) and hydrostatic states are
   quieter. The price is that kinks and jumps below 1% are not limited: shock-tube errors are
   a few percent higher on axis-aligned tubes. MC, van Leer and minmod remain selectable.
-- **A step is four hydro passes:** primitives, clock, half-step predictor, update. The
-  primitives pass also does the first stage of the timestep reduction, in workgroup-shared
-  atomics, so the grid is not read a second time for it. With gravity it adds the Poisson source, V-cycles, a pass that writes the
+- **A step is four hydro passes:** timestep rates, clock, half-step predictor, update. On the
+  uniform grid there are no primitive-variable textures: the predictor and the update convert
+  the conserved state as they load it. The flux update is bound by texture fetches (with all
+  of its arithmetic removed it still takes 85% as long), so a pass that only rewrites the
+  state in another form costs more than repeating the conversion. The rates pass writes
+  nothing but the first stage of the timestep reduction, folded in workgroup-shared atomics.
+  Storage buffers in place of 3D textures were measured and are slower (about 1.4 times for
+  the same stencil). With gravity it adds the Poisson source, V-cycles, a pass that writes the
   acceleration field, and the second half kick. `sim.profile()` times each pass.
 - **Frame pacing** adapts the number of steps per frame to the GPU. Firefox reports finished
   GPU work only every ~100 ms, so there the loop steers by backlog rather than by timing.

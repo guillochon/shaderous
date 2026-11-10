@@ -230,7 +230,6 @@ export class Sim implements Simulation {
 
   /** state[parity] = [U1, U2]; `cur` is the parity holding the current state */
   state: GPUTexture[][] = [];
-  prim: GPUTexture[] = [];
   /** half-step predicted primitives and per-cell flags (hydro/predict.wgsl) */
   pred: GPUTexture[] = [];
   /** gravitational acceleration and half-step potential (gravity/field.wgsl) */
@@ -257,7 +256,7 @@ export class Sim implements Simulation {
   private redBh!: Reducer;
   /** perturber state: position, velocity, acceleration, frame acceleration (4 x vec4) */
   private bh: GPUBuffer;
-  private gPredict!: GPUBindGroup;
+  private gPredict: GPUBindGroup[] = [];
   private gField!: GPUBindGroup;
   private gPrim: GPUBindGroup[] = [];
   private gUpdate: GPUBindGroup[] = [];
@@ -294,7 +293,6 @@ export class Sim implements Simulation {
     const nz = sim.nz;
     const t = (label: string) => tex3d(d, n, 'rgba32float', label, nz);
     for (let p = 0; p < 2; p++) sim.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
-    sim.prim = [t('W1'), t('W2')];
     sim.pred = [t('PA'), t('PB')];
     sim.gfield = t('gravity field');
     sim.writeParams();
@@ -350,7 +348,7 @@ export class Sim implements Simulation {
     const v = (t: GPUTexture) => t.createView();
     const phi = this.mg.phi;
     [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect] = await Promise.all([
-      computePipeline(d, assemble('hydro/primitives.wgsl', slots), 'primitives'),
+      computePipeline(d, assemble('hydro/rates.wgsl', slots), 'timestep rates'),
       computePipeline(d, assemble('hydro/predict.wgsl', slots), 'predict'),
       computePipeline(d, assemble('hydro/update.wgsl', slots), 'update'),
       computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
@@ -358,15 +356,7 @@ export class Sim implements Simulation {
     this.gPrim = [];
     this.gUpdate = [];
     this.gCorrect = [];
-    this.gPredict = bindGroup(d, this.pPredict, {
-      0: this.params,
-      1: this.clock,
-      2: v(this.prim[0]),
-      3: v(this.prim[1]),
-      4: v(this.gfield),
-      5: v(this.pred[0]),
-      6: v(this.pred[1]),
-    });
+    this.gPredict = [];
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       this.gPrim.push(
@@ -374,10 +364,19 @@ export class Sim implements Simulation {
           0: this.params,
           1: v(this.state[p][0]),
           2: v(this.state[p][1]),
-          3: v(this.prim[0]),
-          4: v(this.prim[1]),
           5: v(this.gfield),
           6: this.redDt.first,
+        }),
+      );
+      this.gPredict.push(
+        bindGroup(d, this.pPredict, {
+          0: this.params,
+          1: this.clock,
+          2: v(this.state[p][0]),
+          3: v(this.state[p][1]),
+          4: v(this.gfield),
+          5: v(this.pred[0]),
+          6: v(this.pred[1]),
         }),
       );
       this.gUpdate.push(
@@ -386,8 +385,6 @@ export class Sim implements Simulation {
           1: this.clock,
           2: v(this.state[p][0]),
           3: v(this.state[p][1]),
-          4: v(this.prim[0]),
-          5: v(this.prim[1]),
           6: v(this.gfield),
           7: v(this.state[o][0]),
           8: v(this.state[o][1]),
@@ -558,7 +555,7 @@ export class Sim implements Simulation {
       pass.setBindGroup(0, this.gClock);
       pass.dispatchWorkgroups(1);
       pass.setPipeline(this.pPredict);
-      pass.setBindGroup(0, this.gPredict);
+      pass.setBindGroup(0, this.gPredict[p]);
       this.dispatch(pass);
       pass.setPipeline(this.pUpdate);
       pass.setBindGroup(0, this.gUpdate[p]);
@@ -633,7 +630,7 @@ export class Sim implements Simulation {
       return (b - a) / (2 * count);
     };
     const out: Record<string, number> = {};
-    out.primitives = await time(reps, (pass) => {
+    out.rates = await time(reps, (pass) => {
       pass.setPipeline(this.pPrim);
       pass.setBindGroup(0, this.gPrim[p]);
       this.dispatch(pass);
@@ -641,7 +638,7 @@ export class Sim implements Simulation {
     out.timestep = await time(reps, (pass) => this.redDt.encode(pass));
     out.predict = await time(reps, (pass) => {
       pass.setPipeline(this.pPredict);
-      pass.setBindGroup(0, this.gPredict);
+      pass.setBindGroup(0, this.gPredict[p]);
       this.dispatch(pass);
     });
     out.update = await time(reps, (pass) => {
@@ -762,7 +759,7 @@ export class Sim implements Simulation {
     const v = (t: GPUTexture) => t.createView();
     const group = bindGroup(d, pipe, {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]),
-      4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
+      6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]),
     });
     const enc = d.createCommandEncoder();
@@ -771,7 +768,7 @@ export class Sim implements Simulation {
     pass.setBindGroup(0, this.gPrim[p]);
     this.dispatch(pass);
     pass.setPipeline(this.pPredict);
-    pass.setBindGroup(0, this.gPredict);
+    pass.setBindGroup(0, this.gPredict[p]);
     this.dispatch(pass);
     pass.setPipeline(pipe);
     pass.setBindGroup(0, group);
@@ -837,7 +834,7 @@ export class Sim implements Simulation {
 
   destroy() {
     for (const s of this.state) for (const t of s) t.destroy();
-    for (const t of [...this.prim, ...this.pred, this.gfield]) t.destroy();
+    for (const t of [...this.pred, this.gfield]) t.destroy();
     this.mg.destroy();
   }
 }

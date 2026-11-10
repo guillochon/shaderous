@@ -1,6 +1,7 @@
 // Unsplit MUSCL-Hancock update on a uniform grid, gather form: each cell evaluates its own six
-// face fluxes from the half-step states written by hydro/predict.wgsl and slopes recomputed
-// from the primitives.
+// face fluxes from the half-step states written by hydro/predict.wgsl and a reconstruction
+// recomputed from the primitives, which are themselves converted from the conserved state on
+// load (see hydro/recon.wgsl).
 //
 // The stencil is the cell and two neighbours each way along each axis (13 cells): face states
 // of a neighbour need that neighbour's slope along the face normal only.
@@ -17,13 +18,12 @@
 #include <limiter>
 #include "hydro/dual_energy.wgsl"
 #include "hydro/pfloor.wgsl"
+#include "hydro/prim.wgsl"
 #include "hydro/fluff.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
 @group(0) @binding(3) var U2: texture_3d<f32>;
-@group(0) @binding(4) var W1: texture_3d<f32>;
-@group(0) @binding(5) var W2: texture_3d<f32>;
 @group(0) @binding(6) var G: texture_3d<f32>;
 @group(0) @binding(7) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(8) var O2: texture_storage_3d<rgba32float, write>;

@@ -4,11 +4,14 @@
 // Doing this once per cell, instead of seven times inside the update's gather, is the main
 // reason the update pass is cheap.
 #include "hydro/common.wgsl"
+#include <eos>
 #include <limiter>
+#include "hydro/pfloor.wgsl"
+#include "hydro/prim.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
-@group(0) @binding(2) var W1: texture_3d<f32>;
-@group(0) @binding(3) var W2: texture_3d<f32>;
+@group(0) @binding(2) var U1: texture_3d<f32>;
+@group(0) @binding(3) var U2: texture_3d<f32>;
 @group(0) @binding(4) var G: texture_3d<f32>;
 @group(0) @binding(5) var PA: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(6) var PB: texture_storage_3d<rgba32float, write>;

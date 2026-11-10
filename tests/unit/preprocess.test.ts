@@ -45,7 +45,7 @@ describe('shader assembly', () => {
       for (const riemann of ['hllc', 'hll'])
         for (const limiter of ['koren', 'mc', 'vanleer', 'minmod']) {
           const slots = { eos, riemann: `hydro/riemann/${riemann}.wgsl`, limiter: `hydro/limiters/${limiter}.wgsl` };
-          for (const entry of ['hydro/primitives.wgsl', 'hydro/update.wgsl', 'gravity/correct.wgsl']) {
+          for (const entry of ['hydro/rates.wgsl', 'hydro/update.wgsl', 'gravity/correct.wgsl']) {
             const src = assemble(entry, slots);
             expect(src).not.toMatch(/^\s*#include/m);
             expect(src).toContain('fn eos_pressure');
