@@ -75,3 +75,7 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
 - **Float32.** Conservation is at round-off level, but round-off is biased when a uniform
   background sits exactly on a power of two (see `problems/advection.ts`).
 - **Barotropic gas** uses HLL, since there is no contact wave for HLLC to resolve.
+
+## Licence
+
+MIT; see [LICENSE](LICENSE).
