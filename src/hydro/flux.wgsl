@@ -19,8 +19,8 @@ fn unrot(v: vec3<f32>, axis: i32) -> vec3<f32> {
   return v;
 }
 
-// State on one side of a face: the half-step state moved half a cell along its slope
-// (sgn = +1 for the cell's upper face, -1 for its lower). First-order cells have no slope.
+// State on one side of a face: the half-step state plus half the edge increment `s` towards
+// that face (sgn = +1 for the cell's upper face, -1 for its lower). First-order cells have none.
 fn to_side(pr: Q, s: Q, sgn: f32, axis: i32) -> Side {
   let hs = 0.5 * sgn * (1.0 - pr.b.w);
   let a = pr.a + hs * s.a;
@@ -59,12 +59,13 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   let wm1 = load_q(c - e);
   let wp1 = load_q(c + e);
   let wp2 = load_q(c + 2 * e);
-  let sm = slope(wm2, wm1, w0);
-  let s0 = slope(wm1, w0, wp1);
-  let sp = slope(w0, wp1, wp2);
+  let sm = edge_up(wm2, wm1, w0);
+  let lo = edge_dn(wm1, w0, wp1);
+  let hi = edge_up(wm1, w0, wp1);
+  let sp = edge_dn(w0, wp1, wp2);
   return Faces(
-    face_flux(load_pred(c - e), sm, p0, s0, axis),
-    face_flux(p0, s0, load_pred(c + e), sp, axis),
+    face_flux(load_pred(c - e), sm, p0, lo, axis),
+    face_flux(p0, hi, load_pred(c + e), sp, axis),
   );
 }
 
@@ -73,8 +74,8 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
 fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   let wl = load_q(a);
   let wr = load_q(a + e);
-  let sl = slope(load_q(a - e), wl, wr);
-  let sr = slope(wl, wr, load_q(a + 2 * e));
+  let sl = edge_up(load_q(a - e), wl, wr);
+  let sr = edge_dn(wl, wr, load_q(a + 2 * e));
   return face_flux(load_pred(a), sl, load_pred(a + e), sr, axis);
 }
 

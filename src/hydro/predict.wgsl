@@ -22,11 +22,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   g_dx = P.dx;
   let c = vec3<i32>(gid);
+  g_inner = stencil_inside(c, 1);
+  let q = load_q(c);
+  // In 2D the layer is its own neighbour along z.
+  var zm = q;
+  var zp = q;
+  if (P.dims.z != 1u) {
+    zm = load_q(c + vec3<i32>(0, 0, -1));
+    zp = load_q(c + vec3<i32>(0, 0, 1));
+  }
   let pr = predictor(
-    load_q(c),
+    q,
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
     load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
-    load_q(c + vec3<i32>(0, 0, -1)), load_q(c + vec3<i32>(0, 0, 1)),
+    zm, zp,
     g_load(c), vec3<f32>(1.0),
   );
   textureStore(PA, c, pr.a);

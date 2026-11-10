@@ -67,7 +67,7 @@ side.innerHTML = `
       ${field('K (p = K rho^gamma)', number('K', 'min="0"'), 'row-K')}
       ${field('Radiation constant a', number('arad', 'min="0"'), 'row-arad')}
       ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hll', 'HLL')))}
-      ${field('Limiter', select('limiter', opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')))}
+      ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')))}
       ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'))}
     </div>
   </details>

@@ -286,6 +286,40 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'advection-accuracy',
+    name: 'Smooth advection: error and order of convergence (2D)',
+    criterion:
+      'A Gaussian carried once around the box diagonally: mean density error at 256^2 below 2e-4 and largest error below 5e-3 (the peak is not flattened), converging at second order or better from 128^2',
+    async run(gpu) {
+      const err: Record<number, { l1: number; max: number; peak: number }> = {};
+      for (const n of [128, 256]) {
+        await withSim(gpu, advection, n, { ndim: 2, tEnd: 2 }, async (sim) => {
+          const before = (await sim.readState()).u1.slice();
+          await sim.runToEnd(64);
+          const after = (await sim.readState()).u1;
+          let l1 = 0;
+          let max = 0;
+          let peak = 0;
+          for (let i = 0; i < n * n; i++) {
+            const e = Math.abs(after[4 * i] - before[4 * i]);
+            l1 += e;
+            max = Math.max(max, e);
+            peak = Math.max(peak, after[4 * i]);
+          }
+          err[n] = { l1: l1 / (n * n), max, peak: peak - 1.5 };
+        });
+      }
+      const order = Math.log2(err[128].l1 / err[256].l1);
+      return {
+        pass: err[256].l1 < 2e-4 && err[256].max < 5e-3 && order > 1.9,
+        metrics: {
+          l1_128: err[128].l1, l1_256: err[256].l1, max_error_128: err[128].max, max_error_256: err[256].max,
+          peak_height_128: err[128].peak, peak_height_256: err[256].peak, order,
+        },
+      };
+    },
+  },
+  {
     id: 'flux-determinism',
     name: 'Flux determinism',
     criterion: 'Both cells sharing a face compute bit-identical mass fluxes, on every face, for three flows',

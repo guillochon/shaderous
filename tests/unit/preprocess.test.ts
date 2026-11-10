@@ -43,7 +43,7 @@ describe('shader assembly', () => {
   it('assembles the hydro passes for every equation of state, solver and limiter', () => {
     for (const eos of Object.values(EOS_MODULES))
       for (const riemann of ['hllc', 'hll'])
-        for (const limiter of ['mc', 'vanleer', 'minmod']) {
+        for (const limiter of ['koren', 'mc', 'vanleer', 'minmod']) {
           const slots = { eos, riemann: `hydro/riemann/${riemann}.wgsl`, limiter: `hydro/limiters/${limiter}.wgsl` };
           for (const entry of ['hydro/primitives.wgsl', 'hydro/update.wgsl', 'gravity/correct.wgsl']) {
             const src = assemble(entry, slots);

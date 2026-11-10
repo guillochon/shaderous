@@ -70,8 +70,20 @@ struct Mapped {
   side: vec3<f32>,    // -1 / +1 on axes where this is a ghost beyond an outflow-only face
 }
 
+// Set by a pass for a cell whose whole stencil lies inside the grid: its loads skip the
+// boundary mapping, which otherwise runs for every one of them.
+var<private> g_inner: bool = false;
+
+// True if every cell within `reach` of c along the axes in use is inside the grid.
+fn stencil_inside(c: vec3<i32>, reach: i32) -> bool {
+  let n = vec3<i32>(P.dims.xyz);
+  let ok = (c >= vec3<i32>(reach)) & (c < n - reach);
+  return ok.x && ok.y && (ok.z || n.z == 1);
+}
+
 // Every state load goes through this, so there are no ghost cells to fill.
 fn bc_map(c: vec3<i32>) -> Mapped {
+  if (g_inner) { return Mapped(c, vec3<f32>(1.0), vec3<f32>(0.0)); }
   let n = i32(P.n);
   let x = bc_axis(c.x, n, P.bc_lo.x, P.bc_hi.x);
   let y = bc_axis(c.y, n, P.bc_lo.y, P.bc_hi.y);

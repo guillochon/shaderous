@@ -38,15 +38,24 @@ describe('exact Riemann solver', () => {
 describe('limiters', () => {
   it('vanish at extrema, keep the sign, and are exact for linear data', () => {
     for (const lim of Object.values(LIMITERS)) {
-      expect(lim(1, -1)).toBe(0);
-      expect(lim(0, 3)).toBe(0);
+      expect(lim(1, -1, 0)).toBe(0);
+      expect(lim(0, 3, 0)).toBe(0);
       for (const [a, b] of [[1, 2], [2, 1], [-1, -4], [0.3, 0.3]]) {
-        const s = lim(a, b);
+        const s = lim(a, b, 0);
         expect(Math.sign(s)).toBe(Math.sign(a));
         expect(Math.abs(s)).toBeLessThanOrEqual(2 * Math.min(Math.abs(a), Math.abs(b)) + 1e-15);
       }
-      expect(lim(0.3, 0.3)).toBeCloseTo(0.3, 14);
+      expect(lim(0.3, 0.3, 0)).toBeCloseTo(0.3, 14);
     }
+  });
+
+  it('the third-order reconstruction is unlimited where the change is small against the scale', () => {
+    // A smooth maximum: differences of opposite sign, tiny next to the value itself.
+    expect(LIMITERS.koren(0.001, -0.002, 1)).toBeCloseTo((0.001 - 0.004) / 3, 14);
+    // The same differences against no scale at all are a jump, and limited away.
+    expect(LIMITERS.koren(0.001, -0.002, 0)).toBe(0);
+    // A change comparable to the scale is limited as well.
+    expect(LIMITERS.koren(0.5, -0.5, 1)).toBe(0);
   });
 });
 

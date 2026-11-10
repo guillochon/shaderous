@@ -7,7 +7,7 @@ import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } 
 import type { Bc3, GravityMode, Problem } from './problems/types';
 
 export type RiemannKind = 'hllc' | 'hll';
-export type LimiterKind = 'mc' | 'vanleer' | 'minmod';
+export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
 
 export interface SimConfig {
   /** Cells per side. The grid is n x n x n, or n x n x 1 (periodic in z) when ndim is 2. */
@@ -98,7 +98,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     eos: problem.eos,
     eosParams: { ...defaultEosParams(), ...problem.eosParams },
     riemann: 'hllc',
-    limiter: 'mc',
+    limiter: 'koren',
     gravity: ndim === 2 ? 'off' : problem.gravity,
     G: problem.G,
     bcLo: ndim === 2 ? bc2.lo : problem.bcLo,
@@ -308,10 +308,11 @@ export class Sim implements Simulation {
       d,
       [n, n, nz],
       [MAX, MAX],
-      'hydro/timestep.wgsl',
+      '',
       {},
-      [{ 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: v(sim.gfield) }],
+      [],
       'timestep',
+      [n, n, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock');
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
@@ -375,6 +376,8 @@ export class Sim implements Simulation {
           2: v(this.state[p][1]),
           3: v(this.prim[0]),
           4: v(this.prim[1]),
+          5: v(this.gfield),
+          6: this.redDt.first,
         }),
       );
       this.gUpdate.push(

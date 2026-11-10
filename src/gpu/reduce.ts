@@ -20,6 +20,8 @@ interface Stage {
 export class Reducer {
   readonly k: number;
   readonly result: GPUBuffer; // k floats
+  /** records of the first stage (written externally if the reducer was created that way) */
+  first!: GPUBuffer;
   private stages: Stage[] = [];
 
   private constructor(k: number, result: GPUBuffer) {
@@ -30,6 +32,8 @@ export class Reducer {
   /**
    * @param source   registry path of the first-stage red_cell() module
    * @param variants input bindings of the first stage, one map per state parity
+   * @param external the first stage is done by someone else, who writes its records to `first`
+   *                 on a grid of these dimensions; `dims`, `source` and `variants` are then unused
    */
   static async create(
     device: GPUDevice,
@@ -39,13 +43,17 @@ export class Reducer {
     slots: Slots,
     variants: Record<number, Bindable>[],
     label: string,
+    external?: number[],
   ): Promise<Reducer> {
     const k = ops.length;
     const def = `const RED_K = ${k}u;\nconst RED_OP = array<u32, ${k}>(${ops.map((o) => o + 'u').join(', ')});`;
     // Each stage shrinks every axis by RED_F until one record is left. The axes may differ in
     // length (a 2D run has a single layer in z; a block grid is a long row of blocks).
     const sizes: number[][] = [dims.slice()];
+    if (external) sizes.push(external.slice());
     while (sizes[sizes.length - 1].some((d) => d > 1)) sizes.push(sizes[sizes.length - 1].map((d) => Math.ceil(d / RED_F)));
+    // A grid of one block still needs a stage to copy its record to the result.
+    if (external && sizes.length === 2) sizes.push([1, 1, 1]);
 
     const buffers: GPUBuffer[] = [];
     for (let s = 1; s < sizes.length; s++) {
@@ -53,15 +61,16 @@ export class Reducer {
         device.createBuffer({
           label: `${label} stage ${s}`,
           size: Math.max(16, sizes[s][0] * sizes[s][1] * sizes[s][2] * k * 4),
-          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+          usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
         }),
       );
     }
     const red = new Reducer(k, buffers[buffers.length - 1]);
+    red.first = buffers[0];
 
-    const first = assemble('gpu/reduce.wgsl', { ...slots, red_def: def, red_source: source });
+    const first = external ? '' : assemble('gpu/reduce.wgsl', { ...slots, red_def: def, red_source: source });
     const later = assemble('gpu/reduce.wgsl', { red_def: def, red_source: 'gpu/reduce_buffer.wgsl' });
-    for (let s = 1; s < sizes.length; s++) {
+    for (let s = external ? 2 : 1; s < sizes.length; s++) {
       const [ix, iy, iz] = sizes[s - 1];
       const [ox, oy, oz] = sizes[s];
       const constants = { NINX: ix, NINY: iy, NINZ: iz, NOUTX: ox, NOUTY: oy, NOUTZ: oz, RED_F };
@@ -78,7 +87,7 @@ export class Reducer {
   encode(pass: GPUComputePassEncoder, variant = 0) {
     this.stages.forEach((st, i) => {
       pass.setPipeline(st.pipeline);
-      pass.setBindGroup(0, st.groups[i === 0 ? variant : 0]);
+      pass.setBindGroup(0, st.groups[i === 0 ? Math.min(variant, st.groups.length - 1) : 0]);
       pass.dispatchWorkgroups(Math.ceil(st.nout[0] / 4), Math.ceil(st.nout[1] / 4), Math.ceil(st.nout[2] / 4));
     });
   }

@@ -57,11 +57,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);
 
+  // In 2D the single layer is its own neighbour along z: the two z fluxes are equal and cancel,
+  // so they are not computed (and no load leaves the layer, which keeps g_inner valid).
+  let flat = P.dims.z == 1u;
+  g_inner = stencil_inside(c, 2);
   let w0 = load_q(c);
   let p0 = load_pred(c);
   let fx = axis_fluxes(c, ex, 0, w0, p0);
   let fy = axis_fluxes(c, ey, 1, w0, p0);
-  let fz = axis_fluxes(c, ez, 2, w0, p0);
+  var fz = Faces(flux_zero(), flux_zero());
+  if (!flat) { fz = axis_fluxes(c, ez, 2, w0, p0); }
 
   if (DEBUG_FLUX) {
     textureStore(O1, c, vec4<f32>(fx.lo.m, fx.hi.m, fy.lo.m, fy.hi.m));

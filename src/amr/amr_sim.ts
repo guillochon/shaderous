@@ -108,6 +108,8 @@ export class AmrSim implements Simulation {
   private gClock!: GPUBindGroup;
   private gFlag!: GPUBindGroup;
   private redDt!: Reducer;
+  /** the block list changed since the timestep records were last cleared */
+  private dtStale = true;
   private redDiag!: Reducer;
 
   private nAll = 0;
@@ -211,10 +213,11 @@ export class AmrSim implements Simulation {
       d,
       [sim.cap * BS, BS, depth],
       [MAX, MAX],
-      'amr/timestep.wgsl',
+      '',
       {},
-      [{ 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: v(sim.gfield), 30: sim.bt }],
+      [],
       'amr timestep',
+      [sim.cap * 3, 3, cfg.ndim === 2 ? 1 : 5], // one record per workgroup of the assembly pass
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
@@ -279,7 +282,8 @@ export class AmrSim implements Simulation {
       );
       this.gAssemble.push(
         bindGroup(d, this.pAssemble, {
-          0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]), 30: this.bt, 31: this.listAll,
+          0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
+          5: v(this.gfield), 6: this.redDt.first, 30: this.bt, 31: this.listAll,
         }),
       );
       this.gUpdate.push(this.updateGroup(this.pUpdate, p));
@@ -503,6 +507,7 @@ export class AmrSim implements Simulation {
     const d = this.device;
     const { all, leaves, byLevel } = this.tree.lists();
     this.nAll = all.length;
+    this.dtStale = true;
     this.nLeaf = leaves.length;
     this.nLevel = byLevel.map((l) => l.length);
     const pack = (list: Uint32Array) => {
@@ -558,6 +563,11 @@ export class AmrSim implements Simulation {
    */
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
     if (this.pending) this.applyRegrid(enc);
+    if (this.dtStale) {
+      // The block list changed: drop timestep records of workgroups it no longer covers.
+      enc.clearBuffer(this.redDt.first);
+      this.dtStale = false;
+    }
     let done = 0;
     for (; done < count; done++) {
       if (this.levels > 0 && (this.flagInFlight || this.wantMap) && this.stepsSinceFlag >= MAX_STEPS_AHEAD) break;

@@ -7,7 +7,8 @@ and gravity computation runs in WGSL compute shaders on WebGPU. The design is in
 **Live:** https://guillochon.github.io/shaderous/ (needs a WebGPU browser). Validation suite:
 https://guillochon.github.io/shaderous/validate.html
 
-- **Hydro:** unsplit MUSCL-Hancock, piecewise-linear reconstruction, HLLC (or HLL) fluxes,
+- **Hydro:** unsplit MUSCL-Hancock, third-order reconstruction limited only where the flow is
+  not smooth (or a classic slope limiter), HLLC (or HLL) fluxes,
   positivity fallback, shock-flagged HLL blend, dual-energy formalism, floors.
 - **Self-gravity:** multigrid Poisson solve every step, periodic or isolated (multipole) boundaries.
 - **Self-gravity or a uniform field:** a constant external acceleration drives the
@@ -88,8 +89,18 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   under-resolved. Both are selectable in the UI (`gravEnergyFlux` in `SimConfig`).
 - **Float32.** Conservation is at round-off level, but round-off is biased when a uniform
   background sits exactly on a power of two (see `problems/advection.ts`).
-- **A step is five hydro passes:** primitives, timestep reduction, clock, half-step predictor,
-  update. With gravity it adds the Poisson source, V-cycles, a pass that writes the
+- **Reconstruction.** The default gives each face of a cell the value of the parabola through
+  the cell and its two neighbours, which is third-order accurate on the stencil a slope
+  limiter already uses. A three-cell limiter cannot tell a smooth maximum from a jump and
+  flattens both, so the limiter (Koren's) is applied only where a quantity changes by more
+  than 1% of its natural scale across a cell: the density, the pressure, or the sound speed
+  for velocities. A smooth peak then keeps its height (the largest error in the advection
+  test is 2.5 to 5 times smaller than with the MC limiter) and hydrostatic states are
+  quieter. The price is that kinks and jumps below 1% are not limited: shock-tube errors are
+  a few percent higher on axis-aligned tubes. MC, van Leer and minmod remain selectable.
+- **A step is four hydro passes:** primitives, clock, half-step predictor, update. The
+  primitives pass also does the first stage of the timestep reduction, in workgroup-shared
+  atomics, so the grid is not read a second time for it. With gravity it adds the Poisson source, V-cycles, a pass that writes the
   acceleration field, and the second half kick. `sim.profile()` times each pass.
 - **Frame pacing** adapts the number of steps per frame to the GPU. Firefox reports finished
   GPU work only every ~100 ms, so there the loop steers by backlog rather than by timing.

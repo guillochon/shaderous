@@ -5,6 +5,13 @@
 // image, the restriction of a finer block, or an interpolation from a coarser one. (WebGPU
 // cannot read and write one rgba32float texture in the same pass, so ghost zones cannot be
 // copied within a texture.)
+//
+// The pass also does the first stage of the timestep reduction: each workgroup folds the
+// signal rate and acceleration (per cell size) of the leaf cells it covers into shared
+// atomics, and writes one record for the later stages of gpu/reduce.wgsl. Both are
+// non-negative, so their bit patterns order as integers the way the floats do. Records of
+// workgroups beyond the current block list are stale; the driver clears them when the list
+// changes.
 #include "hydro/common.wgsl"
 #include <eos>
 #include <limiter>
@@ -17,6 +24,10 @@
 @group(0) @binding(2) var U2: texture_3d<f32>;
 @group(0) @binding(3) var W1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(4) var W2: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(5) var G: texture_3d<f32>;
+@group(0) @binding(6) var<storage, read_write> RATES: array<f32>;   // (max rate / dx, max |g| / dx) per workgroup
+
+var<workgroup> wg_max: array<atomic<u32>, 2>;
 
 #include "amr/cons.wgsl"
 
@@ -41,23 +52,47 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
 }
 
 @compute @workgroup_size(8, 8, 4)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn main(
+  @builtin(global_invocation_id) gid: vec3<u32>,
+  @builtin(local_invocation_index) lix: u32,
+  @builtin(workgroup_id) wid: vec3<u32>,
+) {
   let inv = inv_padded(gid, NGH);
-  if (!inv.ok) { return; }
-  g_dx = blk_dx(inv.slot);
-  let s = ghost_src(inv.slot, inv.l);
-  if (s.kind == 2) { return; }
+  if (inv.ok) {
+    g_dx = blk_dx(inv.slot);
+    let s = ghost_src(inv.slot, inv.l);
+    if (s.kind != 2) {
+      var u: Cons;
+      if (s.kind == 0) {
+        u = u_at(s.slot, s.l);
+      } else {
+        u = from_coarse(inv.slot, inv.l, s.slot);
+      }
+      var w = prim_from_cons(u.a, u.b);
+      w.w1 = vec4<f32>(w.w1.x, src_velocity(w.w1.yzw, s));
 
-  var u: Cons;
-  if (s.kind == 0) {
-    u = u_at(s.slot, s.l);
-  } else {
-    u = from_coarse(inv.slot, inv.l, s.slot);
+      let c = atl(blk_origin(inv.slot), inv.l);
+      textureStore(W1, c, w.w1);
+      textureStore(W2, c, w.w2);
+
+      let depth = select(BS, 1, is2d());
+      if (all(inv.l >= vec3<i32>(0)) && all(inv.l < vec3<i32>(BS, BS, depth)) && blk_leaf(inv.slot)) {
+        // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
+        let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y;
+        var g = P.gext.xyz;
+        if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
+        atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
+        atomicMax(&wg_max[1], bitcast<u32>(length(g) / g_dx));
+      }
+    }
   }
-  var w = prim_from_cons(u.a, u.b);
-  w.w1 = vec4<f32>(w.w1.x, src_velocity(w.w1.yzw, s));
-
-  let c = atl(blk_origin(inv.slot), inv.l);
-  textureStore(W1, c, w.w1);
-  textureStore(W2, c, w.w2);
+  workgroupBarrier();
+  if (lix == 0u) {
+    // Record grid: 3 workgroups per slot along x, by 3, by 5 (1 in 2D).
+    let a = u32(P.amr.x);
+    let nx = 3u * a * a * select(a, 1u, is2d());
+    let base = ((wid.z * 3u + wid.y) * nx + wid.x) * 2u;
+    RATES[base] = bitcast<f32>(atomicLoad(&wg_max[0]));
+    RATES[base + 1u] = bitcast<f32>(atomicLoad(&wg_max[1]));
+  }
 }

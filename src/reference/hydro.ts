@@ -19,14 +19,24 @@ export interface RefConfig {
   etaDual: number;
   shockThresh: number;
   riemann: 'hllc' | 'hll';
-  limiter: 'mc' | 'vanleer' | 'minmod';
+  limiter: 'mc' | 'vanleer' | 'minmod' | 'koren';
 }
 
-type Limiter = (a: number, b: number) => number;
+/** Edge increment from the differences (far, near) and the quantity's natural scale. */
+type Limiter = (a: number, b: number, scale: number) => number;
+export const KOREN_SMOOTH = 0.01;
 export const LIMITERS: Record<RefConfig['limiter'], Limiter> = {
   mc: (a, b) => (a * b > 0 ? Math.sign(a) * Math.min(2 * Math.abs(a), 2 * Math.abs(b), 0.5 * Math.abs(a + b)) : 0),
   vanleer: (a, b) => (a * b > 0 ? (2 * a * b) / (a + b) : 0),
   minmod: (a, b) => (a * b > 0 ? Math.sign(a) * Math.min(Math.abs(a), Math.abs(b)) : 0),
+  // edge increment (far, near): limited third order (Koren)
+  koren: (far, near, scale) => {
+    const free = (far + 2 * near) / 3;
+    const lim = far * near > 0 ? Math.sign(near) * Math.min(2 * Math.abs(far), 2 * Math.abs(near), Math.abs(free)) : 0;
+    const s = KOREN_SMOOTH * scale;
+    const w = Math.min(Math.max(1.5 - (far * far + near * near) / Math.max(s * s, 1e-30), 0), 1);
+    return lim + (free - lim) * w;
+  },
 };
 
 interface Side {
@@ -110,7 +120,8 @@ const NQ = 6;
 
 interface Pred {
   q: Float64Array;
-  s: Float64Array[]; // slopes along x, y, z
+  su: Float64Array[]; // edge increments towards the upper face along x, y, z
+  sd: Float64Array[]; // and from the lower face
   flag: number; // shock detector
   firstOrder: boolean; // positivity fallback: unpredicted state, no slopes
 }
@@ -202,6 +213,11 @@ export class RefHydro {
     return rate;
   }
 
+  /** Natural scale of each primitive at a cell, by which the limiter judges smoothness. */
+  private static scales(q: ArrayLike<number>): number[] {
+    return [q[0], q[6], q[6], q[6], q[4], 0];
+  }
+
   private predictRaw(i: number, j: number, k: number): Pred {
     const c = this.cfg;
     const lim = LIMITERS[c.limiter];
@@ -211,11 +227,20 @@ export class RefHydro {
       [this.loadQ(i, j - 1, k), this.loadQ(i, j + 1, k)],
       [this.loadQ(i, j, k - 1), this.loadQ(i, j, k + 1)],
     ];
-    const s = nb.map(([m, p]) => {
+    const scale = RefHydro.scales(q);
+    const su = nb.map(([m, p]) => {
       const out = new Float64Array(NQ);
-      for (let v = 0; v < NQ; v++) out[v] = lim(q[v] - m[v], p[v] - q[v]);
+      for (let v = 0; v < NQ; v++) out[v] = lim(q[v] - m[v], p[v] - q[v], scale[v]);
       return out;
     });
+    const sd = nb.map(([m, p]) => {
+      const out = new Float64Array(NQ);
+      for (let v = 0; v < NQ; v++) out[v] = lim(p[v] - q[v], q[v] - m[v], scale[v]);
+      return out;
+    });
+    // Face-to-face difference across the cell, which drives the half-step evolution.
+    const s = su.map((u, d) => u.map((x, v) => 0.5 * (x + sd[d][v])));
+    const big = (v: number) => Math.max(...su.map((u) => Math.abs(u[v])), ...sd.map((u) => Math.abs(u[v])));
     const conv = nb[0][1][1] - nb[0][0][1] + (nb[1][1][2] - nb[1][0][2]) + (nb[2][1][3] - nb[2][0][3]);
     const jump = Math.max(...nb.map(([m, p]) => Math.abs(p[4] - m[4]) / Math.min(p[4], m[4])));
     const flag = conv < 0 && jump > c.shockThresh ? 1 : 0;
@@ -232,12 +257,13 @@ export class RefHydro {
     qh[4] = q[4] - h * (adv(4) + rho * cs * cs * dv);
     qh[5] = q[5] - h * adv(5);
 
-    const rmin = qh[0] - 0.5 * Math.max(Math.abs(s[0][0]), Math.abs(s[1][0]), Math.abs(s[2][0]));
-    const pmin = qh[4] - 0.5 * Math.max(Math.abs(s[0][4]), Math.abs(s[1][4]), Math.abs(s[2][4]));
+    const rmin = qh[0] - 0.5 * big(0);
+    const pmin = qh[4] - 0.5 * big(4);
     if (!(rmin > 0 && pmin > 0)) {
-      return { q: Float64Array.from(q.slice(0, NQ)), s: [0, 1, 2].map(() => new Float64Array(NQ)), flag, firstOrder: true };
+      const zero = () => [0, 1, 2].map(() => new Float64Array(NQ));
+      return { q: Float64Array.from(q.slice(0, NQ)), su: zero(), sd: zero(), flag, firstOrder: true };
     }
-    return { q: qh, s, flag, firstOrder: false };
+    return { q: qh, su, sd, flag, firstOrder: false };
   }
 
   /**
@@ -262,20 +288,22 @@ export class RefHydro {
     const lim = LIMITERS[c.limiter];
     const w = this.loadQ(i, j, k);
     const e = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
-    const s = e.map(([a, b, d]) => {
-      const out = new Float64Array(NQ);
-      if (src.firstOrder) return out;
-      const m = this.loadQ(i - a, j - b, k - d);
-      const pl = this.loadQ(i + a, j + b, k + d);
-      for (let v = 0; v < NQ; v++) out[v] = lim(w[v] - m[v], pl[v] - w[v]);
-      return out;
-    });
-    return { q, s, flag: src.flag, firstOrder: src.firstOrder };
+    const scale = RefHydro.scales(w);
+    const edges = (up: boolean) =>
+      e.map(([a, b, d]) => {
+        const out = new Float64Array(NQ);
+        if (src.firstOrder) return out;
+        const m = this.loadQ(i - a, j - b, k - d);
+        const pl = this.loadQ(i + a, j + b, k + d);
+        for (let v = 0; v < NQ; v++) out[v] = up ? lim(w[v] - m[v], pl[v] - w[v], scale[v]) : lim(pl[v] - w[v], w[v] - m[v], scale[v]);
+        return out;
+      });
+    return { q, su: edges(true), sd: edges(false), flag: src.flag, firstOrder: src.firstOrder };
   }
 
   private side(pr: Pred, axis: number, sgn: number): Side {
     const { eos, rhoFloor, pFloor } = this.cfg;
-    const f = (n: number) => pr.q[n] + 0.5 * sgn * pr.s[axis][n];
+    const f = (n: number) => pr.q[n] + 0.5 * sgn * (sgn > 0 ? pr.su : pr.sd)[axis][n];
     const rho = Math.max(f(0), rhoFloor);
     // Barotropic: the face pressure is a function of the face density, not reconstructed.
     const p = eos.hasEnergy ? Math.max(f(4), pFloor) : Math.max(eos.pressure(rho, 0), pFloor);
