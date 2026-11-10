@@ -37,3 +37,7 @@ fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
 fn eos_temperature(rho: f32, eint: f32) -> f32 {
   return eos_quartic(P.eos.w, P.eos.z * rho / (P.eos.x - 1.0), eint);
 }
+fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
+  let T2 = T * T;
+  return P.eos.z * rho * T / (P.eos.x - 1.0) + P.eos.w * T2 * T2;
+}

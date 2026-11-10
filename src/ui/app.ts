@@ -4,11 +4,11 @@ import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } fr
 import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
-import { configFor, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
+import { configFor, type BrushOp, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
 import { FIELDS, PROBLEMS, problemById, type GravityMode } from '../problems';
-import { defaultView, Renderer, type ViewState } from '../render/renderer';
+import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor, sampleColormap } from '../render/transfer';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -108,7 +108,7 @@ side.innerHTML = `
     <div id="diag"><dl></dl><dl></dl></div>
   </details>
 
-  <footer><a href="validate.html">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 // On a phone the controls are a sheet under the simulation, closed until asked for.
@@ -133,6 +133,90 @@ side.innerHTML = `
 const canvas = $<HTMLCanvasElement>('view');
 const hud = $('hud');
 
+// --- editing tools ------------------------------------------------------------------------
+// A column of tools under the colour bar. Each paints with a soft ball (a disc in 2D) and
+// keeps its own size and softness.
+type ToolKind = BrushOp['kind'];
+const icon = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
+const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = [
+  {
+    kind: 'mass', label: 'Mass',
+    title: 'Mass: click or hold to add gas; Shift removes it',
+    icon: icon('<circle cx="6.5" cy="9.5" r="4.5" fill="currentColor" stroke="none" /><path d="M12.5 1.5v5M10 4h5" />'),
+  },
+  {
+    kind: 'velocity', label: 'Velocity',
+    title: 'Velocity: press, drag in a direction and let go to set the velocity there. A longer drag is faster, up to 5\u00d7 the fastest gas',
+    icon: icon('<path d="M2.5 13.5L13 3M7 3h6v6" />'),
+  },
+  {
+    kind: 'temperature', label: 'Temperature',
+    title: 'Temperature: click to multiply by 1.5, or hold; Shift divides',
+    icon: icon('<path d="M6 9.3V3a2 2 0 0 1 4 0v6.3a3.5 3.5 0 1 1-4 0z" /><path d="M8 6.5v4.5" /><circle cx="8" cy="11.7" r="1.3" fill="currentColor" stroke="none" />'),
+  },
+];
+const toolParams: Record<ToolKind, { size: number; softness: number; amount: number }> = {
+  mass: { size: 0.06, softness: 0.5, amount: 0.25 },
+  velocity: { size: 0.08, softness: 0.5, amount: 0 },
+  temperature: { size: 0.06, softness: 0.5, amount: 0 },
+};
+let tool: ToolKind | null = null;
+const slider = (id: string, label: string, title: string, min: number, max: number) =>
+  `<label class="scrub" id="tp-${id}-row" title="${title}"><input id="tp-${id}" type="range" min="${min}" max="${max}" step="0.01" aria-label="${title}" /><span>${label}<output id="tp-${id}-out"></output></span></label>`;
+$('tools').innerHTML =
+  TOOLS.map((t) => `<button id="tool-${t.kind}" aria-pressed="false" aria-label="${t.label}" title="${t.title}">${t.icon}</button>`).join('') +
+  `<div id="tool-params" hidden>
+    ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
+    ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the centre', 0, 1)}
+    ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
+  </div>`;
+
+function syncTools() {
+  // A barotropic gas has no temperature of its own to change.
+  const noTemp = cfg?.eos === 'barotropic';
+  if (noTemp && tool === 'temperature') tool = null;
+  for (const t of TOOLS) {
+    const b = $<HTMLButtonElement>(`tool-${t.kind}`);
+    b.setAttribute('aria-pressed', String(tool === t.kind));
+    b.disabled = t.kind === 'temperature' && noTemp;
+    b.title = b.disabled ? 'The barotropic equation of state ties the temperature to the density' : t.title;
+  }
+  canvas.classList.toggle('tool', tool !== null);
+  $('tool-params').hidden = tool === null;
+  if (tool === null) {
+    $('brush').style.display = 'none';
+    return;
+  }
+  const q = toolParams[tool];
+  $('tp-amount-row').hidden = tool !== 'mass';
+  for (const k of ['size', 'softness', 'amount'] as const) {
+    const el = $<HTMLInputElement>(`tp-${k}`);
+    el.value = String(q[k]);
+    el.style.setProperty('--p', `${(100 * (q[k] - +el.min)) / (+el.max - +el.min)}%`);
+    // Size is the brush radius and Amount a share of the densest gas, both shown in percent.
+    $(`tp-${k}-out`).textContent = k === 'softness' ? q[k].toFixed(2) : `${Math.round(q[k] * 100)}%`;
+  }
+}
+for (const t of TOOLS) {
+  $(`tool-${t.kind}`).addEventListener('click', () => {
+    tool = tool === t.kind ? null : t.kind;
+    syncTools();
+  });
+}
+for (const k of ['size', 'softness', 'amount'] as const) {
+  $(`tp-${k}`).addEventListener('input', () => {
+    if (!tool) return;
+    toolParams[tool][k] = +$<HTMLInputElement>(`tp-${k}`).value;
+    syncTools();
+  });
+}
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && tool) {
+    tool = null;
+    syncTools();
+  }
+});
+
 function fail(e: unknown) {
   reportError(e);
 }
@@ -147,6 +231,33 @@ let stepOnce = false;
 let building = false;
 let finished = false;
 let lastDiag: Diagnostics | undefined;
+
+/** A press of an editing tool, from pointer down until its last edit has been handed to the GPU. */
+interface Stroke {
+  id: number;
+  kind: ToolKind;
+  /** where it began and where the pointer is now, in CSS pixels from the canvas corner */
+  x0: number;
+  y0: number;
+  x: number;
+  y: number;
+  shift: boolean;
+  /** volume view: distance from the eye of the plane, facing the camera, that the stroke paints on */
+  depth: number;
+  /** false until that plane is known (it takes a readback) */
+  ready: boolean;
+  released: boolean;
+  dabbed: boolean;
+  /** when the pointer went down, and up to when the flow of a held press has been applied (ms) */
+  t0: number;
+  flowed: number;
+  /** the densest gas and the reference speed when the stroke began */
+  rhoMax: number;
+  vRef: number;
+}
+let stroke: Stroke | null = null;
+/** The edit the next frame applies. */
+let pendingBrush: BrushOp | null = null;
 
 const editor = new OpacityEditor($<HTMLCanvasElement>('tf'), pushTransfer);
 
@@ -222,6 +333,7 @@ function syncControls() {
   $<HTMLInputElement>('opacity').value = String(view.opacity);
   $<HTMLSelectElement>('cmap').value = editor.colormap;
   $('run').textContent = running ? 'Pause' : 'Run';
+  syncTools();
 }
 
 /** The preset's own controls (for example mass ratio and impact parameter). */
@@ -309,6 +421,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (snap) Object.assign(next, restartFrom(snap, problem, levels > 0, n >> levels));
     const old = sim;
     sim = undefined;
+    stroke = null;
+    pendingBrush = null;
     old?.destroy();
     cfg = next;
     if (ndim === 2) view.sliceAxis = 2;
@@ -619,13 +733,50 @@ function bind() {
     if (flat()) [view.zoom, view.cx, view.cy] = [1, 0.5, 0.5];
   });
   canvas.addEventListener('pointerdown', (e) => {
-    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     canvas.setPointerCapture(e.pointerId);
+    if (tool && sim && !building && e.button === 0 && pointers.size === 0 && !stroke) {
+      beginStroke(e);
+      return;
+    }
+    if (stroke && !stroke.released) {
+      // A second finger: this is a pinch after all. Whatever has been painted stays.
+      pointers.set(stroke.id, { x: stroke.x + canvas.getBoundingClientRect().left, y: stroke.y + canvas.getBoundingClientRect().top });
+      endStroke(false);
+    }
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
   });
-  const release = (e: PointerEvent) => pointers.delete(e.pointerId);
+  const release = (e: PointerEvent) => {
+    pointers.delete(e.pointerId);
+    if (stroke?.id === e.pointerId && !stroke.released) endStroke(e.type === 'pointerup');
+  };
   canvas.addEventListener('pointerup', release);
   canvas.addEventListener('pointercancel', release);
+  // With a tool in hand the right button moves the view, so it must not open a menu.
+  canvas.addEventListener('contextmenu', (e) => {
+    if (tool) e.preventDefault();
+  });
+  canvas.addEventListener('pointerleave', () => {
+    if (!stroke) $('brush').style.display = 'none';
+  });
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Shift' && stroke) stroke.shift = true;
+  });
+  window.addEventListener('keyup', (e) => {
+    if (e.key === 'Shift' && stroke) stroke.shift = false;
+  });
   canvas.addEventListener('pointermove', (e) => {
+    if (stroke && stroke.id === e.pointerId && !stroke.released) {
+      const r = canvas.getBoundingClientRect();
+      stroke.x = e.clientX - r.left;
+      stroke.y = e.clientY - r.top;
+      stroke.shift = e.shiftKey;
+      drawBrush();
+      return;
+    }
+    if (tool && pointers.size === 0 && !stroke) {
+      const r = canvas.getBoundingClientRect();
+      drawBrush(e.clientX - r.left, e.clientY - r.top);
+    }
     const last = pointers.get(e.pointerId);
     if (!last) return;
     const before = pointers.size === 2 ? spread() : 0;
@@ -656,6 +807,155 @@ function bind() {
     },
     { passive: false },
   );
+}
+
+// --- editing strokes ----------------------------------------------------------------------
+type Vec3 = [number, number, number];
+/** A slice (always, in a 2D run) rather than the volume view. */
+const flatView = () => view.mode === 'slice' || cfg?.ndim === 2;
+/** Screen pixels across the whole slice at zoom 1; 0.94 is the margin in slice.wgsl. */
+const sliceSpan = () => Math.max(1, Math.min(canvas.clientWidth, canvas.clientHeight) * 0.94);
+/** Drag length, in pixels, at which the velocity tool reaches its top speed. */
+const fullDrag = () => 0.25 * Math.min(canvas.clientWidth, canvas.clientHeight);
+
+/**
+ * The point of the box under a point of the canvas, in fractions of the box, with the
+ * directions that screen-right and screen-up correspond to there and the pixels per box length.
+ * In the volume view the point lies on the plane facing the camera at the given distance.
+ */
+function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3; up: Vec3; scale: number } {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (flatView()) {
+    const a = view.cx + (px - w / 2) / (sliceSpan() * view.zoom);
+    const b = view.cy - (py - h / 2) / (sliceSpan() * view.zoom);
+    const axis = cfg.ndim === 2 ? 2 : view.sliceAxis;
+    // The middle of the layer of cells on show.
+    const k = (Math.min(cfg.n - 1, Math.floor(view.slicePos * cfg.n)) + 0.5) / cfg.n;
+    const scale = sliceSpan() * view.zoom;
+    if (axis === 0) return { pos: [k, a, b], right: [0, 1, 0], up: [0, 0, 1], scale };
+    if (axis === 1) return { pos: [a, k, b], right: [1, 0, 0], up: [0, 0, 1], scale };
+    return { pos: [a, b, k], right: [1, 0, 0], up: [0, 1, 0], scale };
+  }
+  const f = cameraFrame(view, w / h);
+  const ux = ((2 * px) / w - 1) * (w / h) * f.tan;
+  const uy = (1 - (2 * py) / h) * f.tan;
+  // Along the ray, fwd + ux right + uy up reaches distance `depth` from the eye, measured along fwd.
+  const pos = [0, 1, 2].map((i) => f.eye[i] + depth * (f.fwd[i] + ux * f.right[i] + uy * f.up[i]) + 0.5) as Vec3;
+  return { pos, right: f.right as Vec3, up: f.up as Vec3, scale: h / (2 * f.tan * depth) };
+}
+
+/** Outline of the brush under the pointer, and the arrow of a velocity stroke. */
+function drawBrush(px?: number, py?: number) {
+  const svg = $('brush');
+  if (!tool || !cfg) {
+    svg.style.display = 'none';
+    return;
+  }
+  const kind = stroke?.kind ?? tool;
+  const drag = stroke?.kind === 'velocity';
+  const x = drag ? stroke!.x0 : (px ?? stroke?.x ?? 0);
+  const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
+  const { scale } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
+  svg.style.display = 'block';
+  const circle = svg.querySelector('circle')!;
+  circle.setAttribute('cx', String(x));
+  circle.setAttribute('cy', String(y));
+  circle.setAttribute('r', String(toolParams[kind].size * scale));
+  const line = svg.querySelector('line')!;
+  line.style.display = drag ? 'block' : 'none';
+  if (drag) {
+    // The arrow stops growing where the speed stops growing.
+    const [dx, dy] = [stroke!.x - x, stroke!.y - y];
+    const k = Math.min(1, fullDrag() / Math.max(Math.hypot(dx, dy), 1e-6));
+    for (const [name, v] of [['x1', x], ['y1', y], ['x2', x + dx * k], ['y2', y + dy * k]] as const) line.setAttribute(name, String(v));
+  }
+}
+
+function beginStroke(e: PointerEvent) {
+  const r = canvas.getBoundingClientRect();
+  const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+  const d = lastDiag;
+  // Fastest gas now. In a flow that is (nearly) at rest that would leave nothing to set, so the
+  // reference never falls below a fifth of the sound speed of the hottest gas.
+  const cs = d ? Math.sqrt(Math.max(0, cfg.eosParams.gamma * (cfg.eos === 'gas_radiation' ? cfg.eosParams.R : 1) * d.ranges[1][1])) : 0;
+  const s: Stroke = {
+    id: e.pointerId, kind: tool!, x0: x, y0: y, x, y, shift: e.shiftKey, depth: view.dist, ready: flatView(),
+    released: false, dabbed: false, t0: performance.now(), flowed: 0,
+    rhoMax: d?.ranges[0][1] ?? 1, vRef: Math.max(d?.ranges[4][1] ?? 0, 0.2 * cs),
+  };
+  stroke = s;
+  if (!s.ready) {
+    // Volume view: paint on the gas that is seen under the pointer, or, where the view is
+    // empty, on the plane through the middle of the box.
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const [ux, uy] = [(2 * x) / w - 1, 1 - (2 * y) / h];
+    renderer.pick(ux, uy).then(
+      (t) => {
+        if (t !== null) {
+          const f = cameraFrame(view, w / h);
+          // Distance along the ray to distance along the view direction.
+          s.depth = t / Math.hypot(1, ux * (w / h) * f.tan, uy * f.tan);
+        }
+        s.ready = true;
+      },
+      () => (s.ready = true),
+    );
+  }
+  drawBrush();
+}
+
+function endStroke(apply: boolean) {
+  if (!stroke) return;
+  stroke.released = true;
+  // A velocity is set on letting go; a cancelled drag sets nothing.
+  if (!apply && stroke.kind === 'velocity') stroke = null;
+  drawBrush();
+}
+
+/** Turn the stroke in progress into this frame's edit. Called once per frame. */
+function advanceStroke(now: number) {
+  const s = stroke;
+  if (!s || !sim || !s.ready) return;
+  const q = toolParams[s.kind];
+  const base = { kind: s.kind, radius: q.size, softness: q.softness, amount: 0, vel: [0, 0, 0] as Vec3 };
+  if (s.kind === 'velocity') {
+    if (!s.released) return;
+    stroke = null;
+    const at = locate(s.x0, s.y0, s.depth);
+    const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
+    const len = Math.hypot(dx, dy);
+    if (len < 4) return; // a click without a drag gives no direction
+    const speed = Math.min(1, len / fullDrag()) * 5 * s.vRef;
+    const vel = [0, 1, 2].map((i) => (speed * (dx * at.right[i] + dy * at.up[i])) / len) as Vec3;
+    pendingBrush = { ...base, pos: at.pos, vel };
+    return;
+  }
+  // Mass and temperature: one full application on the press, then, if the press is held for
+  // a quarter of a second, a steady flow of four applications a second.
+  let strength = 0;
+  if (!s.dabbed) {
+    s.dabbed = true;
+    s.flowed = s.t0 + 250;
+    strength = 1;
+  }
+  if (!s.released && now > s.flowed) {
+    strength += (4 * Math.min(now - s.flowed, 100)) / 1000;
+    s.flowed = now;
+  }
+  if (s.released) {
+    stroke = null;
+    // Self-gravity has to hear about the new mass.
+    const target = sim;
+    if (s.kind === 'mass' && cfg.gravity !== 'off' && cfg.ndim === 3) {
+      setTimeout(() => target.diagnostics().then((d) => target === sim && target.massChanged(d.mass), fail), 0);
+    }
+  }
+  if (strength === 0) return;
+  const sign = s.shift ? -1 : 1;
+  const amount = sign * strength * (s.kind === 'mass' ? q.amount * s.rhoMax : Math.log(1.5));
+  pendingBrush = { ...base, pos: locate(s.x, s.y, s.depth).pos, amount };
 }
 
 /** Displayed range from the latest diagnostics, unless the user typed one. */
@@ -795,6 +1095,12 @@ function tick(now: number) {
   }
   const s = sim;
   const enc = gpu.device.createCommandEncoder();
+  // Edits go in ahead of the steps, whether or not any are taken this frame.
+  advanceStroke(now);
+  if (pendingBrush) {
+    s.encodeBrush(enc, pendingBrush);
+    pendingBrush = null;
+  }
   const steps = running && !finished ? nsub : stepOnce ? 1 : 0;
   stepOnce = false;
   // An adaptive run may take fewer steps than asked while it waits for the mesh to catch up.

@@ -17,3 +17,7 @@ fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
 fn eos_temperature(rho: f32, eint: f32) -> f32 {
   return eos_pressure(rho, eint) / rho;
 }
+fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
+  // The temperature is not free here: it follows the density.
+  return eos_eint_from_p(rho, eos_pressure(rho, 0.0));
+}

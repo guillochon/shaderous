@@ -20,7 +20,7 @@ import { bindGroup, computePipeline, readTexture, tex3d, type Gpu } from '../gpu
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { AmrGravity } from './gravity';
 import { EOS_MODULES, makeEos } from '../eos/eos';
-import { DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, packParams, PARAM_BYTES, type Diagnostics, type SimConfig, type Simulation } from '../sim';
+import { BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, packBrush, packParams, PARAM_BYTES, type BrushOp, type Diagnostics, type SimConfig, type Simulation } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
 /**
@@ -91,6 +91,9 @@ export class AmrSim implements Simulation {
   private gBhKick?: GPUBindGroup;
   private pCorrect!: GPUComputePipeline;
   private gCorrect: GPUBindGroup[] = [];
+  private brush: GPUBuffer;
+  private pBrush!: GPUComputePipeline;
+  private gBrush: GPUBindGroup[] = [];
   private rhoMean = 0;
   private staging: GPUBuffer;
   private stagingBusy = false;
@@ -167,6 +170,7 @@ export class AmrSim implements Simulation {
     const storage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.clock = d.createBuffer({ size: 16, usage: storage });
+    this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bt = d.createBuffer({ size: this.cap * BT_STRIDE * 4, usage: storage });
     this.listAll = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     this.listLeaf = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
@@ -257,13 +261,20 @@ export class AmrSim implements Simulation {
     const d = this.device;
     const slots = this.slots;
     const v = (t: GPUTexture) => t.createView();
-    [this.pAssemble, this.pPredict, this.pUpdate, this.pRegrid, this.pCorrect] = await Promise.all([
+    [this.pAssemble, this.pPredict, this.pUpdate, this.pRegrid, this.pCorrect, this.pBrush] = await Promise.all([
       computePipeline(d, assemble('amr/assemble.wgsl', slots), 'amr assemble'),
       computePipeline(d, assemble('amr/predict.wgsl', slots), 'amr predict'),
       computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update'),
       computePipeline(d, assemble('amr/regrid.wgsl', slots), 'amr regrid'),
       computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct'),
+      computePipeline(d, assemble('amr/brush.wgsl', slots), 'amr brush'),
     ]);
+    this.gBrush = [0, 1].map((p) =>
+      bindGroup(d, this.pBrush, {
+        0: this.params, 1: this.brush, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]),
+        30: this.bt, 31: this.listLeaf,
+      }),
+    );
     this.gPredict = bindGroup(d, this.pPredict, {
       0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 30: this.bt, 31: this.listAll,
     });
@@ -653,6 +664,25 @@ export class AmrSim implements Simulation {
       }
     }
     return done;
+  }
+
+  /** Apply an editing brush to the leaf cells. Like encodeSteps(), submit before the next call. */
+  encodeBrush(enc: GPUCommandEncoder, op: BrushOp) {
+    // A waiting re-mesh goes first: it replaces the tables this pass reads.
+    if (this.pending) this.applyRegrid(enc);
+    this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.pBrush);
+    pass.setBindGroup(0, this.gBrush[this.cur]);
+    this.interior(pass, this.nLeaf);
+    pass.end();
+    this.cur = 1 - this.cur;
+  }
+
+  massChanged(mass: number) {
+    this.rhoMean = mass / this.cfg.problem.box ** this.cfg.ndim;
+    this.writeParams();
+    this.refreshPotential();
   }
 
   /** Call after submitting an encoder that encodeSteps() wrote to. */

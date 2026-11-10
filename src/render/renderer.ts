@@ -42,6 +42,24 @@ export const defaultView = (): ViewState => ({
   showBlocks: true,
 });
 
+/** The orbit camera: around the box centre (the box is [-0.5, 0.5]^3), z up. */
+export function cameraFrame(v: ViewState, aspect: number) {
+  const cp = Math.cos(v.pitch);
+  const eye = [v.dist * cp * Math.cos(v.yaw), v.dist * cp * Math.sin(v.yaw), v.dist * Math.sin(v.pitch)];
+  const fwd = eye.map((c) => -c / v.dist);
+  const right = [fwd[1], -fwd[0], 0];
+  const rl = Math.hypot(right[0], right[1]) || 1;
+  right[0] /= rl;
+  right[1] /= rl;
+  const up = [
+    right[1] * fwd[2] - right[2] * fwd[1],
+    right[2] * fwd[0] - right[0] * fwd[2],
+    right[0] * fwd[1] - right[1] * fwd[0],
+  ];
+  // The field of view applies to the shorter side, so the box always fits.
+  return { eye, fwd, right, up, tan: Math.tan(0.35) / Math.min(aspect, 1) };
+}
+
 export class Renderer {
   private device: GPUDevice;
   private ctx: GPUCanvasContext;
@@ -58,7 +76,10 @@ export class Renderer {
   private pField?: GPUComputePipeline;
   private gField: GPUBindGroup[] = [];
   private dims: number[] = [0, 0, 0];
-  private fieldShader = '';
+  private pPick!: GPUComputePipeline;
+  private gPick?: GPUBindGroup;
+  private pickIn: GPUBuffer;
+  private pickOut: GPUBuffer;
 
   constructor(
     gpu: Gpu,
@@ -76,6 +97,8 @@ export class Renderer {
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
     this.sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    this.pickIn = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.pickOut = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
   }
 
   async init() {
@@ -89,7 +112,11 @@ export class Renderer {
         primitive: { topology: 'triangle-list' },
       });
     };
-    [this.pVolume, this.pSlice] = await Promise.all([make('render/raymarch.wgsl'), make('render/slice.wgsl')]);
+    [this.pVolume, this.pSlice, this.pPick] = await Promise.all([
+      make('render/raymarch.wgsl'),
+      make('render/slice.wgsl'),
+      computePipeline(this.device, assemble('render/pick.wgsl'), 'pick'),
+    ]);
   }
 
   setTransfer(rgba: Uint8Array<ArrayBuffer>) {
@@ -113,11 +140,40 @@ export class Renderer {
       const res = { 0: this.cam, 1: this.vol.createView(), 2: this.tf.createView(), 3: this.sampler };
       this.gVolume = bindGroup(d, this.pVolume, res);
       this.gSlice = bindGroup(d, this.pSlice, res);
+      this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
     }
     this.pField = await computePipeline(d, assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos] }), 'field');
     this.gField = [0, 1].map((p) =>
       bindGroup(d, this.pField!, { 0: sim.paramBuffer, 1: this.viewBuf, 4: this.vol!.createView(), ...sim.fieldResources(p) }),
     );
+  }
+
+  get aspect(): number {
+    return this.canvas.width / this.canvas.height;
+  }
+
+  /**
+   * Volume view: how far along the ray through a point of the canvas (x, y in [-1, 1], y up)
+   * the gas seen there lies, or null if the ray shows next to nothing. Uses the frame last drawn.
+   */
+  async pick(x: number, y: number): Promise<number | null> {
+    if (!this.gPick) return null;
+    const d = this.device;
+    d.queue.writeBuffer(this.pickIn, 0, new Float32Array([x, y, 0, 0]));
+    const out = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.pPick);
+    pass.setBindGroup(0, this.gPick);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    enc.copyBufferToBuffer(this.pickOut, 0, out, 0, 16);
+    d.queue.submit([enc.finish()]);
+    await out.mapAsync(GPUMapMode.READ);
+    const t = new Float32Array(out.getMappedRange())[0];
+    out.unmap();
+    out.destroy();
+    return t > 0 ? t : null;
   }
 
   resize() {
@@ -145,28 +201,15 @@ export class Renderer {
     new Float32Array(vb, 8, 2).set([lo, hi]);
     d.queue.writeBuffer(this.viewBuf, 0, vb);
 
-    // Orbit camera around the box centre, z up.
-    const cp = Math.cos(v.pitch);
-    const eye = [v.dist * cp * Math.cos(v.yaw), v.dist * cp * Math.sin(v.yaw), v.dist * Math.sin(v.pitch)];
-    const fwd = eye.map((c) => -c / v.dist);
-    const right = [fwd[1], -fwd[0], 0];
-    const rl = Math.hypot(right[0], right[1]) || 1;
-    right[0] /= rl;
-    right[1] /= rl;
-    const up = [
-      right[1] * fwd[2] - right[2] * fwd[1],
-      right[2] * fwd[0] - right[0] * fwd[2],
-      right[0] * fwd[1] - right[1] * fwd[0],
-    ];
-    const aspect = this.canvas.width / this.canvas.height;
+    const aspect = this.aspect;
+    const { eye, fwd, right, up, tan } = cameraFrame(v, aspect);
     const samples = Math.min(1.5 * nx, 384);
     d.queue.writeBuffer(
       this.cam,
       0,
       new Float32Array([
         ...eye, 0, ...right, 0, ...up, 0, ...fwd, 0,
-        // The field of view applies to the shorter side, so the box always fits.
-        Math.tan(0.35) / Math.min(aspect, 1), aspect, v.opacity, samples,
+        tan, aspect, v.opacity, samples,
         v.sliceAxis, v.slicePos, nx, nz,
         v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,
       ]),

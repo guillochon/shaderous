@@ -13,3 +13,6 @@ fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
 fn eos_temperature(rho: f32, eint: f32) -> f32 {
   return (P.eos.x - 1.0) * eint / rho;
 }
+fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
+  return rho * T / (P.eos.x - 1.0);
+}

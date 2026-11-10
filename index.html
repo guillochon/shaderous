@@ -13,7 +13,14 @@
       <main id="stage">
         <canvas id="view"></canvas>
         <div id="hud"></div>
-        <div id="colorbar"><canvas width="1" height="256"></canvas><div class="ticks"><span id="cb-hi"></span><span id="cb-lo"></span></div></div>
+        <div id="rail">
+          <div id="colorbar"><span id="cb-hi"></span><canvas width="1" height="256"></canvas><span id="cb-lo"></span></div>
+          <div id="tools"></div>
+        </div>
+        <svg id="brush" aria-hidden="true">
+          <defs><marker id="brush-head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0 0L10 5L0 10z" /></marker></defs>
+          <circle r="0" /><line marker-end="url(#brush-head)" />
+        </svg>
         <div id="error"></div>
       </main>
     </div>

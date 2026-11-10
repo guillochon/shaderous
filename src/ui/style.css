@@ -72,12 +72,47 @@ details[open] > summary .sum { display: none; }
 #sheet-bar { display: none; }
 #stage { position: relative; min-width: 0; min-height: 0; }
 #view { width: 100%; height: 100%; display: block; touch-action: none; }
-#colorbar { position: absolute; right: 14px; top: 14px; display: flex; gap: 6px; height: 240px; pointer-events: none; }
-#colorbar canvas { width: 14px; height: 100%; border: 1px solid var(--line); }
-#colorbar .ticks { display: flex; flex-direction: column; justify-content: space-between; font-variant-numeric: tabular-nums; text-shadow: 0 0 3px #000; }
+/* Right rail: the colour bar with its range above and below it, then the editing tools, all
+   one width. */
+#rail { position: absolute; right: 12px; top: 12px; width: 58px; display: flex; flex-direction: column; gap: 8px; }
+#colorbar { display: flex; flex-direction: column; gap: 2px; pointer-events: none; }
+#colorbar canvas { width: 100%; height: 200px; border: 1px solid var(--line); border-radius: 3px; }
 /* Live readouts sit in fixed-size, layout-contained boxes: changing their text cannot move
    anything else, so the browser never has to lay out the page for them. */
-#colorbar .ticks span { display: block; width: 76px; height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; contain: strict; }
+#colorbar span {
+  display: block; width: 100%; height: 15px; line-height: 15px; font-size: 11px; text-align: center;
+  white-space: nowrap; overflow: hidden; contain: strict;
+  font-variant-numeric: tabular-nums; background: rgba(13, 15, 20, 0.7); border-radius: 3px;
+}
+/* Editing tools: icon buttons, with the active tool's settings below them. */
+#tools { display: flex; flex-direction: column; gap: 4px; }
+#tools button { height: 26px; padding: 0; display: grid; place-items: center; color: var(--dim); background: rgba(29, 35, 48, 0.85); }
+#tools button svg { width: 16px; height: 16px; display: block; }
+#tools button:hover { color: var(--text); }
+#tools button[aria-pressed='true'] { border-color: var(--accent); background: #223049; color: #fff; }
+#tools button:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
+#tool-params { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
+#tool-params[hidden], #tool-params label[hidden] { display: none; }
+/* A slider the size of a text field: the fill is the value, the caption sits on top. */
+.scrub { position: relative; display: block; height: 18px; }
+.scrub input {
+  -webkit-appearance: none; appearance: none; display: block; width: 100%; height: 100%; margin: 0; padding: 0;
+  border: 1px solid var(--line); border-radius: 3px; cursor: ew-resize;
+  background: linear-gradient(to right, #2c4466 var(--p, 0%), rgba(29, 35, 48, 0.85) var(--p, 0%));
+}
+.scrub input:hover { border-color: var(--accent); }
+.scrub input::-webkit-slider-thumb { -webkit-appearance: none; width: 2px; height: 18px; background: var(--accent); }
+.scrub input::-moz-range-thumb { width: 2px; height: 18px; border: 0; border-radius: 0; background: var(--accent); }
+.scrub span {
+  position: absolute; inset: 0; padding: 0 4px; display: flex; justify-content: space-between;
+  font-size: 10px; line-height: 18px; color: #aab3c5; pointer-events: none; white-space: nowrap;
+}
+.scrub output { color: var(--text); font-variant-numeric: tabular-nums; }
+#view.tool { cursor: crosshair; }
+#brush { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; display: none; }
+#brush circle { fill: none; stroke: #fff; stroke-opacity: 0.75; stroke-width: 1; stroke-dasharray: 4 3; }
+#brush line { stroke: #fff; stroke-width: 2; display: none; }
+#brush marker path { fill: #fff; }
 #hud {
   position: absolute; left: 12px; top: 10px; width: 720px; height: 18px; line-height: 18px;
   white-space: nowrap; overflow: hidden; contain: strict;
@@ -164,7 +199,12 @@ body.validate th { color: var(--dim); font-weight: 500; }
   .blurb { font-size: 13px; line-height: 18px; height: 36px; }
   #tf { height: 64px; }
   /* Readouts over the simulation: narrower, and the status line may wrap to two lines. */
-  #hud { left: 10px; top: 8px; width: calc(100% - 118px); height: 34px; line-height: 17px; white-space: normal; font-size: 12px; }
-  #colorbar { right: 8px; top: 8px; height: 150px; }
-  #colorbar .ticks span { width: 64px; font-size: 11px; }
+  #hud { left: 10px; top: 8px; width: calc(100% - 84px); height: 34px; line-height: 17px; white-space: normal; font-size: 12px; }
+  #rail { right: 8px; top: 8px; }
+  #colorbar canvas { height: 120px; }
+  #tools button { height: 34px; }
+  .scrub { height: 26px; }
+  .scrub span { line-height: 26px; }
+  .scrub input::-webkit-slider-thumb { height: 26px; }
+  .scrub input::-moz-range-thumb { height: 26px; }
 }

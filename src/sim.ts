@@ -77,6 +77,10 @@ export interface Simulation {
   writeParams(): void;
   buildHydro(): Promise<void>;
   refreshPotential(): void;
+  /** Encode one application of an editing brush to the current state (running or paused). */
+  encodeBrush(enc: GPUCommandEncoder, op: BrushOp): void;
+  /** Call once gas has been added or removed, with the new total mass: self-gravity is re-solved. */
+  massChanged(mass: number): void;
   destroy(): void;
   /** Size of the uniform volume the renderer displays, and the pass that fills it. */
   readonly displayDims: [number, number, number];
@@ -126,6 +130,32 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     jeansRefine: 16,
     ...over,
   };
+}
+
+/** One application of an editing brush (edit/brush_core.wgsl). */
+export interface BrushOp {
+  kind: 'mass' | 'velocity' | 'temperature';
+  /** centre and radius, in fractions of the box */
+  pos: [number, number, number];
+  radius: number;
+  /** 0: hard edge; 1: falls off all the way from the centre */
+  softness: number;
+  /** mass: density added at the centre (negative removes); temperature: log of the factor */
+  amount: number;
+  /** velocity tool: the velocity to set */
+  vel: [number, number, number];
+}
+
+export const BRUSH_BYTES = 48;
+
+/** Pack the Brush block. The layout must match the struct in edit/brush_core.wgsl. */
+export function packBrush(b: BrushOp): ArrayBuffer {
+  const buf = new ArrayBuffer(BRUSH_BYTES);
+  const f = new Float32Array(buf);
+  f.set([...b.pos, b.radius, ...b.vel, b.softness], 0);
+  new Uint32Array(buf)[8] = b.kind === 'mass' ? 0 : b.kind === 'velocity' ? 1 : 2;
+  f[9] = b.amount;
+  return buf;
 }
 
 /** Number of floats the diagnostics readback holds: clock (4), reduction, perturber position (4). */
@@ -270,6 +300,9 @@ export class Sim implements Simulation {
   private redDiag!: Reducer;
   private staging: GPUBuffer;
   private stagingBusy = false;
+  private brush: GPUBuffer;
+  private pBrush!: GPUComputePipeline;
+  private gBrush: GPUBindGroup[] = [];
 
   private constructor(gpu: Gpu, cfg: SimConfig) {
     this.device = gpu.device;
@@ -284,6 +317,7 @@ export class Sim implements Simulation {
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
     this.bh = d.createBuffer({ size: 64, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.staging = d.createBuffer({
       size: 16 + DIAG_OPS.length * 4 + 16,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -354,12 +388,18 @@ export class Sim implements Simulation {
     const dims = [this.n, this.n, this.nz];
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
-    [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect] = await Promise.all([
+    [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect, this.pBrush] = await Promise.all([
       computePipeline(d, assemble('hydro/rates.wgsl', slots), 'timestep rates'),
       RegionPass.create(d, assemble('hydro/predict.wgsl', slots), 'predict', dims),
       RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update', dims),
       computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
+      computePipeline(d, assemble('edit/brush.wgsl', slots), 'brush'),
     ]);
+    this.gBrush = [0, 1].map((p) =>
+      bindGroup(d, this.pBrush, {
+        0: this.params, 1: this.brush, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]),
+      }),
+    );
     this.gPrim = [];
     this.gUpdate = [];
     this.gCorrect = [];
@@ -612,6 +652,23 @@ export class Sim implements Simulation {
   }
 
   submitted() {}
+
+  encodeBrush(enc: GPUCommandEncoder, op: BrushOp) {
+    this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.pBrush);
+    pass.setBindGroup(0, this.gBrush[this.cur]);
+    this.dispatch(pass);
+    pass.end();
+    this.cur = 1 - this.cur;
+  }
+
+  massChanged(mass: number) {
+    // The periodic solver subtracts the mean density, so it has to follow the edit.
+    this.rhoMean = mass / this.cfg.problem.box ** this.cfg.ndim;
+    this.writeParams();
+    this.refreshPotential();
+  }
 
   get displayDims(): [number, number, number] {
     return [this.n, this.n, this.nz];
