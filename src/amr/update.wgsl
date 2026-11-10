@@ -43,6 +43,8 @@ fn load_pred(c: vec3<i32>) -> Q {
 #include "hydro/flux.wgsl"
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
+#include <cooling>
+#include "hydro/cooling.wgsl"
 
 fn flux_add(a: Flux, b: Flux) -> Flux {
   return Flux(a.m + b.m, a.mom + b.mom, a.e + b.e, a.ei + b.ei, a.s + b.s, a.vn + b.vn);
@@ -187,6 +189,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     nw = NewState(vec4<f32>(rho, mom), vec4<f32>(E, eint, nw.u2.z, 0.0));
   }
   if (has_sources()) { nw = apply_sources(nw, blk_pos(slot, l) / P.box + 0.5, clock.dt); }
+  nw = apply_cooling(nw, clock.dt);
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);
 }

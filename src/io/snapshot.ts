@@ -1,7 +1,7 @@
 // The state of the gas as a set of blocks of primitive variables, independent of how a run
 // stores it: what gets written to a file and read back, and how a run is started from one.
 import { makeEos } from '../eos/eos';
-import type { Prim } from '../problems';
+import type { PointMass, Prim } from '../problems';
 import type { SimConfig } from '../sim';
 
 export const VARIABLES = ['rho', 'press', 'vel1', 'vel2', 'vel3', 'r0'] as const;
@@ -31,7 +31,9 @@ export interface SnapshotMeta {
   build: string;
   /** the settings, as the query string of a shareable link */
   query: string;
-  /** position and velocity of the point-mass perturber, if the run has one */
+  /** the point masses, if the run has any */
+  masses?: PointMass[];
+  /** files written before there could be several: position and velocity of the one mass */
   perturber?: { pos: number[]; vel: number[] };
 }
 
@@ -140,7 +142,8 @@ export class SnapshotSampler {
 export interface Restart {
   time: number;
   steps: number;
-  perturber?: { pos: number[]; vel: number[] };
+  /** the point masses' state, laid over the preset's */
+  masses?: Partial<PointMass>[];
   /** refinement level the mesh should have at a position (adaptive runs) */
   levelAt?: (x: number, y: number, z: number) => number;
 }

@@ -9,12 +9,13 @@ struct Params {
   geom: vec4<f32>,       // (cell volume, number of dimensions, refinement threshold, cells per
                          //   Jeans length below which a block is refined); 2D is per unit length in z
   gext: vec4<f32>,       // uniform external gravitational acceleration
-  bh: vec4<f32>,         // point-mass perturber: (G M, softening length, 1 if present, 0)
+  bh: vec4<f32>,         // point masses (gravity/bh.wgsl): (how many, 1 if the frame accelerates
+                         //   with the gas, 1 if there are any, 1 if there is no Poisson potential)
   fluff: vec4<f32>,      // tenuous-gas limits: (density below which they apply, max specific
                          //   internal energy, max speed, 0); a zero density switches them off
   amr: vec4<u32>,        // block grids: (atlas slots per side, root blocks per side, max level, 0)
   n: u32,                // cells per side along x and y (level 0 on block grids)
-  grav_on: u32,
+  grav_on: u32,          // the gravity field texture is in use: self-gravity, point masses or both
   grav_bc: u32,          // 0 periodic, 1 isolated
   flags: u32,            // bit 0: flux-form gravitational work; bit 1: the grid holds solid or fixed
                          //   cells; bit 2: there are sources or sinks (hydro/sources.wgsl)
@@ -30,6 +31,7 @@ struct Params {
   shock_thresh: f32,     // pressure-jump threshold of the shock detector
   jeans_floor: f32,      // 1 enforces the Truelove pressure floor, 0 disables it
   box: f32,              // box side length
+  cool: vec4<f32>,       // parameters of the cooling function (cooling/*.wgsl)
 }
 
 struct Clock {
@@ -46,6 +48,10 @@ struct Clock {
 // Neither kind is ever updated. Passes only look when this says there is something to find.
 fn has_solids() -> bool {
   return (P.flags & 2u) != 0u;
+}
+// Self-gravity: there is a Poisson potential. (The field texture may hold point masses alone.)
+fn has_potential() -> bool {
+  return P.grav_on != 0u && P.bh.w == 0.0;
 }
 fn has_sources() -> bool {
   return (P.flags & 4u) != 0u;

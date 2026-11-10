@@ -33,7 +33,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let c = atl(blk_origin(inv.slot), inv.l);
   var ind = max(jump(c, vec3<i32>(1, 0, 0)), jump(c, vec3<i32>(0, 1, 0)));
   if (!is2d()) { ind = max(ind, jump(c, vec3<i32>(0, 0, 1))); }
-  if (P.grav_on != 0u && P.geom.w > 0.0) {
+  if (has_potential() && P.geom.w > 0.0) {
     let rho = abs(textureLoad(W1, c, 0).x);
     let cs = textureLoad(W2, c, 0).y;
     let lj = cs * sqrt(3.14159265 / (P.G * rho));

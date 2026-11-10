@@ -18,6 +18,7 @@ export interface Eos {
   soundSpeed(rho: number, p: number): number;
   eintFromP(rho: number, p: number): number;
   temperature(rho: number, eint: number): number;
+  eintFromT(rho: number, T: number): number;
 }
 
 export const EOS_MODULES: Record<EosKind, string> = {
@@ -57,6 +58,7 @@ export function makeEos(kind: EosKind, params: EosParams): Eos {
         soundSpeed: (rho, p) => Math.sqrt((g * p) / rho),
         eintFromP: (_rho, p) => p / (g - 1),
         temperature: (rho, eint) => ((g - 1) * eint) / rho,
+        eintFromT: (rho, T) => (rho * T) / (g - 1),
       };
     case 'barotropic': {
       const pressure = (rho: number) => (g === 1 ? K * rho : K * Math.pow(rho, g));
@@ -68,6 +70,7 @@ export function makeEos(kind: EosKind, params: EosParams): Eos {
         soundSpeed: (rho, p) => Math.sqrt((g * p) / rho),
         eintFromP: (_rho, p) => (g < 1.001 ? 1.5 * p : p / (g - 1)),
         temperature: (rho) => pressure(rho) / rho,
+        eintFromT: (rho) => (g < 1.001 ? 1.5 : 1 / (g - 1)) * pressure(rho),
       };
     }
     case 'gas_radiation':
@@ -91,6 +94,7 @@ export function makeEos(kind: EosKind, params: EosParams): Eos {
           return (R * rho * T) / (g - 1) + a * T ** 4;
         },
         temperature: (rho, eint) => quartic(a, (R * rho) / (g - 1), eint),
+        eintFromT: (rho, T) => (R * rho * T) / (g - 1) + a * T ** 4,
       };
   }
 }

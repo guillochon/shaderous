@@ -46,6 +46,8 @@ fn load_pred(c: vec3<i32>) -> Q {
 #include "hydro/flux.wgsl"
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
+#include <cooling>
+#include "hydro/cooling.wgsl"
 
 // Validation hook: when set, the pass writes the six face mass fluxes instead of the new state,
 // so the test suite can check that both cells sharing a face computed the same bits.
@@ -117,6 +119,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   var nw = advance(u1, u2, net_inflow(fx, fy, fz), dw, p0.b.x, kick, ekick);
   if (has_sources()) { nw = apply_sources(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt); }
+  nw = apply_cooling(nw, clock.dt);
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);
 }

@@ -1,4 +1,5 @@
 import type { Eos, EosKind, EosParams } from '../eos/eos';
+import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 
 export interface Prim {
   rho: number;
@@ -67,17 +68,41 @@ export interface Problem {
   /** Extra controls shown when this preset is selected. Changing one restarts the run. */
   params?: ProblemParam[];
   /**
-   * A point mass moving past the gas. The run is then in the gas's rest frame: the frame
-   * accelerates with the gas's centre of mass. Returns G M and the initial position and
-   * velocity relative to the box centre.
+   * Point masses (at most MAX_MASSES): softened gravity on the gas, each with a sink that
+   * takes gas in. They pull on one another and feel the gas. `dx` is the cell size (the
+   * coarsest level's on an adaptive mesh).
    */
-  perturber?: (params: Record<string, number>, G: number) => { gm: number; pos: number[]; vel: number[] };
+  masses?: (params: Record<string, number>, G: number, dx: number) => PointMass[];
+  /**
+   * With point masses: run in the gas's rest frame, which accelerates with the gas's centre
+   * of mass, instead of an inertial one.
+   */
+  gasFrame?: boolean;
+  /** Optically thin cooling switched on by default, and its parameters. */
+  cooling?: CoolingKind;
+  coolParams?: Partial<CoolingParams>;
   /** Uniform external gravitational acceleration, which may depend on the dimensionality. */
   gext?: (ndim: 2 | 3) => [number, number, number];
   /** Default view; `axis` is the slice normal in 3D (0 x, 1 y, 2 z), `pitch` the camera elevation in radians. */
   view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice'; axis?: number; pitch?: number };
   /** Returns the initial primitive state as a function of position. */
   init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>): (x: number, y: number, z: number) => Prim;
+}
+
+/** A point mass: position and velocity are relative to the box centre. */
+export interface PointMass {
+  /** G M */
+  gm: number;
+  pos: number[];
+  vel: number[];
+  /** Plummer softening length of its gravity (default: two cells) */
+  soft?: number;
+  /** radius within which it takes gas in (default: the softening length; 0 for none) */
+  sinkRadius?: number;
+  /** removal rate at the sink's centre, in units of sqrt(G M / radius^3) (default 1) */
+  sinkRate?: number;
+  /** gas mass accreted so far */
+  accreted?: number;
 }
 
 export const all = (b: number): Bc3 => [b, b, b];

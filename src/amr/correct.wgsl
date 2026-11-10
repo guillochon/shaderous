@@ -13,6 +13,10 @@
 @group(0) @binding(4) var G: texture_3d<f32>;        // gravity field of that state
 @group(0) @binding(5) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(6) var O2: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(7) var<storage, read> BH: Masses;
+
+#include "gravity/bh.wgsl"
+#include "gravity/sink.wgsl"
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -20,13 +24,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!inv.ok) { return; }
   g_dx = blk_dx(inv.slot);
   let c = atl(blk_origin(inv.slot), inv.l);
-  let u1 = textureLoad(N1, c, 0);
-  let u2 = textureLoad(N2, c, 0);
+  var u1 = textureLoad(N1, c, 0);
+  var u2 = textureLoad(N2, c, 0);
   if (abs(u2.w) > 0.5) {
     // Solid and fixed cells keep their state.
     textureStore(O1, c, u1);
     textureStore(O2, c, u2);
     return;
+  }
+  if (P.bh.z != 0.0) {
+    // The point masses' sinks take their gas before the kick, from the state the reduction saw.
+    let left = apply_sinks(u1, u2, blk_pos(inv.slot, inv.l), clock.dt);
+    u1 = left.u1;
+    u2 = left.u2;
   }
 
   let kick = 0.5 * clock.dt * u1.x * (P.gext.xyz + textureLoad(G, c, 0).xyz);

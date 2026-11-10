@@ -6,7 +6,7 @@ import { Sim, type SimConfig, type Simulation } from '../sim';
 import { primitivesFrom, SnapshotSampler, type Restart, type Snapshot, type SnapshotMeta } from './snapshot';
 
 /** Read the state back from the GPU as blocks of primitive variables. */
-export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'perturber'>): Promise<Snapshot> {
+export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses' | 'perturber'>): Promise<Snapshot> {
   const cfg = sim.cfg;
   const half = cfg.problem.box / 2;
   const flat = cfg.ndim === 2;
@@ -52,7 +52,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'pertur
     levels,
     locations,
     data: primitivesFrom(cfg, u1, u2),
-    meta: meta ? { ...meta, perturber: restart.perturber } : undefined,
+    meta: meta ? { ...meta, masses: restart.masses } : undefined,
   };
 }
 
@@ -61,7 +61,7 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
   const sampler = new SnapshotSampler(snap);
   const box = problem.box;
   const frac = (x: number) => x / box + 0.5;
-  const restart: Restart = { time: snap.time, steps: snap.steps, perturber: snap.meta?.perturber };
+  const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined) };
   if (adaptive) {
     // Levels count from the root grid, and the file's root may not be the run's.
     const shift = Math.round(Math.log2(snap.rootSize[0] / rootCells));

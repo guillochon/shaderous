@@ -4,9 +4,10 @@ import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } fr
 import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
-import { configFor, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { configFor, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
+import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { FIELDS, PROBLEMS, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor, sampleColormap } from '../render/transfer';
@@ -96,6 +97,18 @@ side.innerHTML = `
   </details>
 
   <details>
+    <summary>Cooling<span class="sum" id="sum-cool"></span></summary>
+    <div class="g2">
+      ${field('Cooling function', select('cooling', (Object.keys(COOLING_LABELS) as CoolingKind[]).map((k) => opt(k, COOLING_LABELS[k])).join('')))}
+      ${field('Coefficient \u039b\u2080', number('crate', 'min="0"'), 'row-crate')}
+      ${field('Exponent of T', number('calpha', 'step="0.1" min="-4" max="4"'), 'row-calpha')}
+      ${field('Heating rate', number('cheat', 'min="0"'), 'row-cheat')}
+      ${field('Kelvin per unit T', number('ctunit', 'min="0"'), 'row-ctunit')}
+      ${field('Temperature floor', number('ctfloor', 'min="0"'), 'row-ctfloor')}
+    </div>
+  </details>
+
+  <details>
     <summary>Boundaries<span class="sum" id="sum-bc"></span></summary>
     <div class="g2">
       ${['x', 'y', 'z'].map((ax, a) => (['lo', 'hi'] as const).map((side) =>
@@ -152,7 +165,7 @@ const hud = $('hud');
 // --- editing tools ------------------------------------------------------------------------
 // A column of tools under the colour bar. Each paints with a soft ball (a disc in 2D) and
 // keeps its own size and softness.
-type ToolKind = BrushOp['kind'] | 'source';
+type ToolKind = BrushOp['kind'] | 'source' | 'sink';
 const icon = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = [
   {
@@ -177,10 +190,22 @@ const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = 
   },
 ];
 TOOLS.push({
-  kind: 'source', label: 'Source or sink',
-  title: 'Source: click to place one that feeds gas in evenly, or press and drag to aim it (a longer drag is faster). Hold Shift to place a sink, which takes gas away',
+  kind: 'source', label: 'Source',
+  title: 'Source: click to place one that feeds gas in evenly, or press and drag to aim it (a longer drag is faster)',
   icon: icon('<circle cx="8" cy="8" r="2.3" fill="currentColor" stroke="none" /><path d="M8 1.5v2.3M8 12.2v2.3M1.5 8h2.3M12.2 8h2.3M3.4 3.4l1.6 1.6M11 11l1.6 1.6M12.6 3.4L11 5M5 11l-1.6 1.6" />'),
 });
+TOOLS.push({
+  kind: 'sink', label: 'Sink',
+  title: 'Sink: click to place one that takes gas away. Give it a mass and it becomes a point mass: it pulls on the gas, moves, and grows by what it takes in (press and drag to set it moving)',
+  icon: icon('<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.2 2.2" /><path d="M2.5 2.5l3 3M5.5 3v2.5H3M13.5 13.5l-3-3M10.5 13v-2.5H13" />'),
+});
+/** Point masses the sink tool has placed in this run (the simulation holds four in all). */
+let placedMasses = 0;
+/** Why the last tool action did nothing, for the status line. */
+let toolNotice = '';
+const notice = (text: string) => {
+  toolNotice = text;
+};
 /** Ways of drawing an obstacle. */
 type ShapeMode = 'rect' | 'ellipse' | 'polygon';
 const SHAPES: { mode: ShapeMode; title: string; icon: string }[] = [
@@ -194,13 +219,17 @@ const SHAPES: { mode: ShapeMode; title: string; icon: string }[] = [
 ];
 let shapeMode: ShapeMode = 'rect';
 let obstacleErase = false;
-const toolParams: Record<ToolKind, { size: number; softness: number; amount: number }> = {
-  mass: { size: 0.06, softness: 0.5, amount: 0.25 },
-  velocity: { size: 0.08, softness: 0.5, amount: 0 },
-  temperature: { size: 0.06, softness: 0.5, amount: 0 },
-  obstacle: { size: 0, softness: 0, amount: 0 },
-  source: { size: 0.04, softness: 0.5, amount: 0.25 },
+/** `mass` is the sink tool's: the mass of the sink, as a multiple of the gas in the box. */
+const toolParams: Record<ToolKind, { size: number; softness: number; amount: number; mass: number }> = {
+  mass: { size: 0.06, softness: 0.5, amount: 0.25, mass: 0 },
+  velocity: { size: 0.08, softness: 0.5, amount: 0, mass: 0 },
+  temperature: { size: 0.06, softness: 0.5, amount: 0, mass: 0 },
+  obstacle: { size: 0, softness: 0, amount: 0, mass: 0 },
+  source: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0 },
+  sink: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0 },
 };
+/** The sink tool places a point mass rather than a plain sink. */
+const sinkHasMass = () => toolParams.sink.mass > 0;
 let tool: ToolKind | null = null;
 /** Mass tool: new gas brings no momentum of its own. */
 let massAtRest = true;
@@ -212,6 +241,7 @@ $('tools').innerHTML =
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the centre', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
+    ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it only takes gas away, where it was placed. With a mass it is a point mass with softened gravity: it pulls on the gas, moves, and grows by what it takes in', 0, 2)}
     <button id="tool-rest" aria-pressed="true" title="p = 0 for new mass: added gas arrives at rest and shares the momentum already there, slowing the flow. Off: it arrives with the local velocity">p = 0</button>
     <div id="tool-shapes">${SHAPES.map((q) => `<button id="shape-${q.mode}" aria-pressed="false" aria-label="${q.mode}" title="${q.title}">${q.icon}</button>`).join('')}</div>
     <button id="tool-erase" aria-pressed="false" title="Erase: the shape drawn turns obstacle back into gas, at rest">Erase</button>
@@ -235,32 +265,40 @@ function syncTools() {
     return;
   }
   const q = toolParams[tool];
-  $('tp-amount-row').hidden = tool !== 'mass' && tool !== 'source';
-  // The same slider is the amount of a dab of mass and the flux of a source.
-  const flux = tool === 'source';
-  $('tp-amount-row').title = flux
-    ? 'Flux: how fast a source feeds gas in, or a sink takes it away. At 100% a source adds the density of the densest gas in the time the fastest signal takes to cross it'
-    : 'Gas added per click, as a share of the densest gas';
+  $('tp-amount-row').hidden = tool !== 'mass' && tool !== 'source' && tool !== 'sink';
+  $('tp-mass-row').hidden = tool !== 'sink';
+  // A point mass has no soft edge to set: its sink always fades from the centre.
+  $('tp-softness-row').hidden = tool === 'sink' && sinkHasMass();
+  // The same slider is the amount of a dab of mass and the flux of a source or sink.
+  const flux = tool === 'source' || tool === 'sink';
+  $('tp-amount-row').title = tool === 'source'
+    ? 'Flux: how fast the source feeds gas in. At 100% it adds the density of the densest gas in the time the fastest signal takes to cross it'
+    : tool === 'sink'
+      ? 'Flux: how fast the sink takes gas away. Without a mass, 100% empties it in the time the fastest signal takes to cross it; with one, 25% is the orbital rate at its edge'
+      : 'Gas added per click, as a share of the densest gas';
   $('tp-amount-row').querySelector('span')!.firstChild!.textContent = flux ? 'Flux' : 'Amt';
+  const mine = tool === 'sink' ? sources.filter((q) => q.decay > 0).length + placedMasses : sources.filter((q) => q.decay === 0).length;
   $('tool-clear').hidden = !flux;
-  $('tool-clear').textContent = sources.length ? `Clear ${sources.length}` : 'Clear';
-  $<HTMLButtonElement>('tool-clear').disabled = sources.length === 0;
+  $('tool-clear').title = tool === 'sink' ? 'Remove every sink and point mass placed with this tool' : 'Remove every source';
+  $('tool-clear').textContent = mine ? `Clear ${mine}` : 'Clear';
+  $<HTMLButtonElement>('tool-clear').disabled = mine === 0;
   $('tool-rest').hidden = tool !== 'mass';
   $('tool-rest').setAttribute('aria-pressed', String(massAtRest));
   // An obstacle is drawn as a shape, not painted with a brush.
   const shapes = tool === 'obstacle';
-  $('tp-size-row').hidden = $('tp-softness-row').hidden = shapes;
+  $('tp-size-row').hidden = shapes;
+  if (shapes) $('tp-softness-row').hidden = true;
   $('tool-shapes').hidden = $('tool-erase').hidden = !shapes;
   for (const sh of SHAPES) $(`shape-${sh.mode}`).setAttribute('aria-pressed', String(shapeMode === sh.mode));
   $('tool-erase').setAttribute('aria-pressed', String(obstacleErase));
   if (shapes) drawBrush();
   else if (!stroke) $('brush').style.display = 'none'; // until the pointer next moves
-  for (const k of ['size', 'softness', 'amount'] as const) {
+  for (const k of ['size', 'softness', 'amount', 'mass'] as const) {
     const el = $<HTMLInputElement>(`tp-${k}`);
     el.value = String(q[k]);
     el.style.setProperty('--p', `${(100 * (q[k] - +el.min)) / (+el.max - +el.min)}%`);
     // Size is the brush radius and Amount a share of the densest gas, both shown in percent.
-    $(`tp-${k}-out`).textContent = k === 'softness' ? q[k].toFixed(2) : `${Math.round(q[k] * 100)}%`;
+    $(`tp-${k}-out`).textContent = k === 'softness' ? q[k].toFixed(2) : k === 'mass' ? `${q[k].toFixed(2)}\u00d7` : `${Math.round(q[k] * 100)}%`;
   }
 }
 for (const t of TOOLS) {
@@ -278,14 +316,25 @@ for (const sh of SHAPES) {
   });
 }
 $('tool-clear').addEventListener('click', () => {
-  clearSources();
+  // Each tool clears what it placed.
+  const sinks = tool === 'sink';
+  const keep = sources.filter((q) => (q.decay > 0) !== sinks);
+  if (keep.length !== sources.length) {
+    sources = keep;
+    sim?.setSources(sources);
+  }
+  if (sinks && placedMasses) {
+    sim?.removeAddedMasses();
+    placedMasses = 0;
+    lastDiag = undefined;
+  }
   syncTools();
 });
 $('tool-erase').addEventListener('click', () => {
   obstacleErase = !obstacleErase;
   syncTools();
 });
-for (const k of ['size', 'softness', 'amount'] as const) {
+for (const k of ['size', 'softness', 'amount', 'mass'] as const) {
   $(`tp-${k}`).addEventListener('input', () => {
     if (!tool) return;
     toolParams[tool][k] = +$<HTMLInputElement>(`tp-${k}`).value;
@@ -418,6 +467,20 @@ function syncControls() {
   $<HTMLInputElement>('arad').value = String(cfg.eosParams.arad);
   $('row-K').style.display = cfg.eos === 'barotropic' ? '' : 'none';
   $('row-arad').style.display = cfg.eos === 'gas_radiation' ? '' : 'none';
+  // Cooling acts on the internal energy, which a barotropic gas does not have.
+  const canCool = cfg.eos !== 'barotropic';
+  const cool = canCool ? cfg.cooling : 'off';
+  $<HTMLSelectElement>('cooling').value = cool;
+  $<HTMLSelectElement>('cooling').disabled = !canCool;
+  $('sum-cool').textContent = canCool ? COOLING_LABELS[cool].toLowerCase() : 'needs an energy equation';
+  const coolRows: Record<string, [keyof CoolingParams, boolean]> = {
+    crate: ['rate', cool === 'power'], calpha: ['alpha', cool === 'power'], cheat: ['heat', cool !== 'off'],
+    ctunit: ['tUnit', cool === 'ism'], ctfloor: ['tFloor', cool !== 'off'],
+  };
+  for (const [id, [key, shown]] of Object.entries(coolRows)) {
+    $<HTMLInputElement>(id).value = String(cfg.coolParams[key]);
+    $(`row-${id}`).style.display = shown ? '' : 'none';
+  }
   $<HTMLSelectElement>('riemann').value = cfg.riemann;
   $<HTMLSelectElement>('limiter').value = cfg.limiter;
   $<HTMLInputElement>('cfl').value = String(cfg.cfl);
@@ -522,6 +585,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       // Settings carried by a shared link, on top of the preset's defaults.
       Object.assign(next, link.cfg);
       Object.assign(next.eosParams, link.eosParams);
+      Object.assign(next.coolParams, link.coolParams);
       Object.assign(next.params, link.params);
       if (ndim === 2) {
         next.gravity = 'off';
@@ -738,6 +802,18 @@ function bind() {
     cfg.eosParams.arad = numOr(el, cfg.eosParams.arad);
     applyParams();
   });
+  on('cooling', (el) => {
+    cfg.cooling = el.value as CoolingKind;
+    // The cooling function is compiled into the update pass; the run carries on.
+    rebuildPipelines().then(syncControls);
+  });
+  const coolInputs: [string, keyof CoolingParams][] = [['crate', 'rate'], ['calpha', 'alpha'], ['cheat', 'heat'], ['ctunit', 'tUnit'], ['ctfloor', 'tFloor']];
+  for (const [id, key] of coolInputs) {
+    on(id, (el) => {
+      cfg.coolParams[key] = numOr(el, cfg.coolParams[key]);
+      applyParams();
+    });
+  }
   on('riemann', (el) => {
     cfg.riemann = el.value as RiemannKind;
     rebuildPipelines();
@@ -1159,13 +1235,16 @@ function draftPath(d: Draft): string {
 function clearSources() {
   if (sources.length && sim) sim.setSources([]);
   sources = [];
+  placedMasses = 0;
+  toolNotice = '';
 }
 
 /** Draw the markers of the sources and sinks where they are in the current view. */
 let marksDrawn = '';
 function drawSources() {
   let html = '';
-  if (sources.length && cfg) {
+  const masses = lastDiag?.masses ?? [];
+  if ((sources.length || masses.length) && cfg) {
     const m = outlineMatrix();
     const at = (p: number[]) => {
       const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
@@ -1188,6 +1267,15 @@ function drawSources() {
       }
       html += `<g class="${q.decay > 0 ? 'sink' : 'source'}"><circle cx="${c.x}" cy="${c.y}" r="${r}" />${arrow}</g>`;
     }
+    // The point masses, where the last readback found them: the sink's edge and a dot.
+    const box = cfg.problem.box;
+    for (const q of masses) {
+      const pos = q.pos.map((v) => v / box + 0.5);
+      const c = at(pos);
+      if (!(c.w > 0)) continue;
+      const e = at(pos.map((v, i) => v + (q.sinkRadius / box) * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
+      html += `<g class="sink point"><circle cx="${c.x}" cy="${c.y}" r="${Math.hypot(e.x - c.x, e.y - c.y)}" /><circle class="dot" cx="${c.x}" cy="${c.y}" r="2.5" /></g>`;
+    }
   }
   if (html !== marksDrawn) $('marks').innerHTML = marksDrawn = html;
 }
@@ -1208,7 +1296,7 @@ function drawBrush(px?: number, py?: number) {
   }
   const kind = stroke?.kind ?? tool;
   // A velocity, or the aim of a source, is dragged out from where the press began.
-  const drag = stroke?.kind === 'velocity' || (stroke?.kind === 'source' && !stroke.shift);
+  const drag = stroke?.kind === 'velocity' || stroke?.kind === 'source' || (stroke?.kind === 'sink' && sinkHasMass());
   const x = drag ? stroke!.x0 : (px ?? stroke?.x ?? 0);
   const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
   const { scale } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
@@ -1276,8 +1364,38 @@ function endStroke(apply: boolean) {
   if (!stroke) return;
   stroke.released = true;
   // A velocity is set on letting go; a cancelled drag sets nothing.
-  if (!apply && (stroke.kind === 'velocity' || stroke.kind === 'source')) stroke = null;
+  if (!apply && (stroke.kind === 'velocity' || stroke.kind === 'source' || stroke.kind === 'sink')) stroke = null;
   drawBrush();
+}
+
+/**
+ * Place a point mass with the sink tool: at `pos` (in fractions of the box), moving at `vel`.
+ * Its mass is the tool's multiple of the gas now in the box, its sink and its softening the
+ * tool's radius, and its sink's rate the tool's flux (25% is the orbital rate at the edge).
+ */
+function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number }) {
+  if (!sim) return;
+  const box = cfg.problem.box;
+  // The gas in the box sets the scale; with no readback yet, a box of unit density does.
+  const gas = lastDiag?.mass ?? box ** cfg.ndim;
+  // Gravity needs a constant: a preset without one gets G = 1, shown in the Gravity section.
+  if (!(cfg.G > 0)) cfg.G = 1;
+  sim.cfg = cfg;
+  const two = cfg.ndim === 2;
+  const ok = sim.addMass({
+    gm: cfg.G * q.mass * gas,
+    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
+    vel: two ? [vel[0], vel[1], 0] : vel,
+    soft: q.size * box,
+    sinkRadius: q.size * box,
+    sinkRate: 4 * q.amount,
+  });
+  if (ok) {
+    placedMasses++;
+    lastDiag = undefined;
+    syncControls();
+  }
+  notice(ok ? '' : two && cfg.amrLevels > 0 ? 'Point masses need a uniform grid in 2D' : `A run holds at most ${MAX_MASSES} point masses`);
 }
 
 /** Turn the stroke in progress into this frame's edit. Called once per frame. */
@@ -1285,18 +1403,26 @@ function advanceStroke(now: number) {
   const s = stroke;
   if (!s || !sim || !s.ready) return;
   const q = toolParams[s.kind];
-  if (s.kind === 'source') {
+  if (s.kind === 'source' || s.kind === 'sink') {
     if (!s.released) return;
     stroke = null;
+    const sink = s.kind === 'sink';
+    const massive = sink && sinkHasMass();
     const at = locate(s.x0, s.y0, s.depth);
     const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
     const len = Math.hypot(dx, dy);
-    // A drag aims the source; a click (or a drag of a few pixels) leaves it feeding gas in at rest.
-    const speed = s.shift || len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
+    // A drag aims a source, or sets a point mass moving; a click (or a drag of a few pixels)
+    // leaves either at rest. A sink without a mass stays where it is put.
+    const speed = (sink && !massive) || len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
     const vel = [0, 1, 2].map((i) => (speed ? (speed * (dx * at.right[i] + dy * at.up[i])) / len : 0)) as Vec3;
+    if (massive) {
+      placeMass(at.pos, vel, q);
+      syncTools();
+      return;
+    }
     // The flux is measured against the densest gas and the time a signal takes to cross the source.
     const perTime = (q.amount * (s.vRef || 1)) / (q.size * cfg.problem.box);
-    sources.push({ pos: at.pos, radius: q.size, softness: q.softness, vel, rate: s.shift ? 0 : perTime * s.rhoMax, decay: s.shift ? perTime : 0 });
+    sources.push({ pos: at.pos, radius: q.size, softness: q.softness, vel, rate: sink ? 0 : perTime * s.rhoMax, decay: sink ? perTime : 0 });
     if (sources.length > MAX_SOURCES) sources.shift(); // the oldest makes room
     sim.setSources(sources);
     syncTools();
@@ -1544,11 +1670,15 @@ function tick(now: number) {
       stepRate = ((stepsSubmitted - rateMark.steps) * 1000) / (now - rateMark.time);
       rateMark = { time: now, steps: stepsSubmitted };
     }
-    const bh = lastDiag?.perturber;
-    const where = bh ? `  •  perturber at r = ${Math.hypot(...bh).toFixed(2)}` : '';
+    const pm = lastDiag?.masses ?? [];
+    const acc = pm.reduce((a, m) => a + m.accreted, 0);
+    const where = pm.length === 1
+      ? `  •  point mass at r = ${Math.hypot(...pm[0].pos).toFixed(2)}`
+      : pm.length ? `  •  ${pm.length} point masses, separation ${Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])).toFixed(2)}` : '';
+    const took = acc > 0 ? `, accreted ${acc.toPrecision(3)}` : '';
     const state = finished ? 'finished' : running ? `${nsub} step${nsub > 1 ? 's' : ''}/frame, ${stepRate.toFixed(0)} steps/s` : 'paused';
     const mesh = s.status();
-    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${mesh ? '  •  ' + mesh : ''}`);
+    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${where ? took : ''}${mesh ? '  •  ' + mesh : ''}${toolNotice ? '  •  ' + toolNotice : ''}`);
   }
 }
 

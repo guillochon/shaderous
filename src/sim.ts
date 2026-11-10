@@ -5,7 +5,8 @@ import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu 
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { Multigrid } from './gravity/multigrid';
 import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } from './eos/eos';
-import { cellMark, type Bc3, type GravityMode, type Problem } from './problems/types';
+import { cellMark, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
+import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
 
 export type RiemannKind = 'hllc' | 'hll';
@@ -47,7 +48,10 @@ export interface SimConfig {
   amrLevels: number;
   /** Atlas slots per side for the adaptive mesh (0 = choose from the root grid). */
   amrBudget: number;
-  /** Start from a snapshot: its time, step count and perturber rather than the preset's. */
+  /** Optically thin cooling and heating (cooling/*.wgsl); needs an equation of state with an energy. */
+  cooling: CoolingKind;
+  coolParams: CoolingParams;
+  /** Start from a snapshot: its time, step count and point masses rather than the preset's. */
   restart?: Restart;
   /** A block is split where its refinement indicator exceeds refineHi, merged below refineLo. */
   refineHi: number;
@@ -81,6 +85,13 @@ export interface Simulation {
   encodeBrush(enc: GPUCommandEncoder, op: BrushOp): void;
   /** Call once gas has been added or removed, with the new total mass: self-gravity is re-solved. */
   massChanged(mass: number): void;
+  /**
+   * Add a point mass to the run (a reset removes it). Returns false if there is no room for
+   * another, or this grid cannot hold point masses.
+   */
+  addMass(m: PointMass): boolean;
+  /** Remove the point masses added with addMass(), keeping the preset's. */
+  removeAddedMasses(): void;
   /** Replace the sources and sinks (at most MAX_SOURCES; a reset removes them all). */
   setSources(list: SourceSpec[]): void;
   destroy(): void;
@@ -130,8 +141,64 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     refineHi: 0.06,
     refineLo: 0.025,
     jeansRefine: 16,
+    cooling: problem.cooling ?? 'off',
+    coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
     ...over,
   };
+}
+
+/** The modules the hydro shaders are assembled with. */
+export function hydroSlots(c: SimConfig): Record<string, string> {
+  return {
+    eos: EOS_MODULES[c.eos],
+    riemann: `hydro/riemann/${c.riemann}.wgsl`,
+    limiter: `hydro/limiters/${c.limiter}.wgsl`,
+    cooling: COOLING_MODULES[c.cooling],
+  };
+}
+
+export const MAX_MASSES = 4;
+/** Floats in the Masses block (gravity/bh.wgsl): the frame's acceleration, then 16 per mass. */
+export const MASS_FLOATS = 4 + 16 * MAX_MASSES;
+/** Channels of the point masses' reduction (gravity/bh_cell.wgsl). */
+export const MASS_RED = 1 + 7 * MAX_MASSES;
+
+/**
+ * The point masses a run starts with: the preset's, with what a snapshot recorded laid over
+ * them. `dx` is the cell size (the coarsest level's on an adaptive mesh).
+ */
+export function initialMasses(c: SimConfig, dx: number): Required<PointMass>[] {
+  const base = c.problem.masses?.(c.params, c.G, dx) ?? [];
+  const saved = c.restart?.masses ?? [];
+  const out = base.map((m, i) => completeMass({ ...m, ...saved[i] }, dx));
+  // Masses placed by hand before the snapshot was taken come back whole.
+  for (const m of saved.slice(base.length)) {
+    if (m.gm !== undefined && m.pos && m.vel) out.push(completeMass(m as PointMass, dx));
+  }
+  return out.slice(0, MAX_MASSES);
+}
+
+/** A point mass with its defaults filled in: softening of two cells, a sink of that radius. */
+export function completeMass(q: PointMass, dx: number): Required<PointMass> {
+  const soft = q.soft ?? 2 * dx;
+  return { gm: q.gm, pos: q.pos, vel: q.vel, soft, sinkRadius: q.sinkRadius ?? soft, sinkRate: q.sinkRate ?? 1, accreted: q.accreted ?? 0 };
+}
+
+/** Pack the Masses block. The layout must match the struct in gravity/bh.wgsl. */
+export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffer> {
+  const f = new Float32Array(MASS_FLOATS);
+  list.forEach((m, i) => f.set([...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, 0], 4 + 16 * i));
+  return f;
+}
+
+/** The point masses in a Masses block read back from the GPU. */
+export function unpackMasses(f: Float32Array, count: number): Required<PointMass>[] {
+  const out: Required<PointMass>[] = [];
+  for (let i = 0; i < count; i++) {
+    const o = 4 + 16 * i;
+    out.push({ gm: f[o + 3], pos: [f[o], f[o + 1], f[o + 2]], vel: [f[o + 4], f[o + 5], f[o + 6]], soft: f[o + 7], sinkRadius: f[o + 11], sinkRate: f[o + 12], accreted: f[o + 13] });
+  }
+  return out;
 }
 
 /** One application of an editing brush (edit/brush_core.wgsl). */
@@ -235,12 +302,13 @@ export function packBrush(b: BrushOp): ArrayBuffer {
   return buf;
 }
 
-/** Number of floats the diagnostics readback holds: clock (4), reduction, perturber position (4). */
-export const DIAG_FLOATS = 4 + 23 + 4;
+/** Number of floats the diagnostics readback holds: clock (4), reduction, the Masses block. */
+export const DIAG_FLOATS = 4 + 23 + MASS_FLOATS;
 
-/** Decode a diagnostics readback: [clock (4), reduction channels, perturber position (4)]. */
-export function diagnosticsFrom(a: Float32Array, hasPerturber: boolean): Diagnostics {
+/** Decode a diagnostics readback: [clock (4), reduction channels, the Masses block]. */
+export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
   const r = a.subarray(4);
+  const masses = unpackMasses(a.subarray(4 + 23), nMasses);
   const ranges: [number, number][] = [];
   for (let i = 0; i < 5; i++) ranges.push([r[10 + 2 * i], r[11 + 2 * i]]);
   return {
@@ -257,18 +325,19 @@ export function diagnosticsFrom(a: Float32Array, hasPerturber: boolean): Diagnos
     floored: r[8],
     jeansUnresolved: r[9],
     com: [r[20] / r[0], r[21] / r[0], r[22] / r[0]],
-    perturber: hasPerturber ? [r[23], r[24], r[25]] : null,
+    perturber: masses.length ? (masses[0].pos as [number, number, number]) : null,
+    masses,
     ranges,
   };
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 208;
+export const PARAM_BYTES = 224;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean },
+  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -280,12 +349,14 @@ export function packParams(
   // 2D quantities are per unit length along z.
   f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, ...(x.refine ?? [0, 0])], 16);
   f.set([...c.gext, 0], 20);
-  // Perturber: G M, softening of two cells, and whether it is active.
-  f.set([x.perturberGM, 2 * x.dx, x.perturberGM > 0 ? 1 : 0, 0], 24);
+  // Point masses: how many, whether the frame follows the gas, whether there are any, and
+  // whether they are all the field texture holds (no Poisson potential).
+  f.set([x.masses, c.problem.gasFrame ? 1 : 0, x.masses > 0 ? 1 : 0, x.selfGravity ? 0 : 1], 24);
   const fl = c.problem.fluff;
   f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
   u.set(x.amr ?? [0, 0, 0, 0], 32);
-  u.set([c.n, x.selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0)], 36);
+  // The potential of point masses alone is not periodic: its ghosts are extrapolated.
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -303,6 +374,7 @@ export function packParams(
     ],
     40,
   );
+  f.set(packCooling(c.cooling, c.coolParams), 52);
   return buf;
 }
 
@@ -324,12 +396,34 @@ export interface Diagnostics {
   jeansUnresolved: number;
   /** centre of mass of the gas, relative to the box centre */
   com: [number, number, number];
-  /** position of the point-mass perturber relative to the box centre, if there is one */
+  /** position of the first point mass relative to the box centre, if there is one */
   perturber: [number, number, number] | null;
+  /** the point masses as they are now */
+  masses: Required<PointMass>[];
   /** [min, max] per renderable field, in FIELDS order */
   ranges: [number, number][];
 }
 
+
+export interface RestartState {
+  time: number;
+  steps: number;
+  masses?: Required<PointMass>[];
+}
+
+/** Read the clock and the point masses back, for a snapshot. */
+export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer, nMasses: number): Promise<RestartState> {
+  const buf = d.createBuffer({ size: 16 + MASS_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = d.createCommandEncoder();
+  enc.copyBufferToBuffer(clock, 0, buf, 0, 16);
+  enc.copyBufferToBuffer(bh, 0, buf, 16, MASS_FLOATS * 4);
+  d.queue.submit([enc.finish()]);
+  await buf.mapAsync(GPUMapMode.READ);
+  const f = new Float32Array(buf.getMappedRange().slice(0));
+  buf.unmap();
+  buf.destroy();
+  return { time: f[1], steps: f[3], masses: nMasses ? unpackMasses(f.subarray(4), nMasses) : undefined };
+}
 
 export class Sim implements Simulation {
   readonly device: GPUDevice;
@@ -362,10 +456,16 @@ export class Sim implements Simulation {
   private pField!: GPUComputePipeline;
   private pBhDrift!: GPUComputePipeline;
   private pBhKick!: GPUComputePipeline;
+  /** the kick pipeline that only evaluates the accelerations */
+  private pBhEval!: GPUComputePipeline;
   private gBhDrift!: GPUBindGroup;
   private gBhKick!: GPUBindGroup;
+  private gBhEval!: GPUBindGroup;
+  private nMasses = 0;
+  /** how many of them the preset (or a snapshot) brought, rather than addMass() */
+  private nOwnMasses = 0;
   private redBh!: Reducer;
-  /** perturber state: position, velocity, acceleration, frame acceleration (4 x vec4) */
+  /** the point masses (gravity/bh.wgsl) */
   private bh: GPUBuffer;
   private gPredict: RegionGroups[] = [];
   private gField!: GPUBindGroup;
@@ -397,11 +497,11 @@ export class Sim implements Simulation {
       size: 16,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
-    this.bh = d.createBuffer({ size: 64, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.bh = d.createBuffer({ size: MASS_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.staging = d.createBuffer({
-      size: 16 + DIAG_OPS.length * 4 + 16,
+      size: DIAG_FLOATS * 4,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     });
   }
@@ -436,21 +536,24 @@ export class Sim implements Simulation {
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
     sim.pField = await computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field');
     sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock });
-    // Point-mass perturber: its pull on the gas is reduced each step and drives both the
-    // frame's acceleration and the perturber's orbit.
+    // Point masses: their pull on the gas and what their sinks take are reduced each step, and
+    // drive their orbits, their growth and (in the gas's frame) the frame's acceleration.
     sim.redBh = await Reducer.create(
       d,
       [n, n, nz],
-      [SUM, SUM, SUM, SUM],
+      new Array(MASS_RED).fill(SUM),
       'gravity/bh_moment.wgsl',
       {},
-      [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh })),
-      'perturber',
+      [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock })),
+      'point masses',
     );
-    sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'perturber drift');
-    sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 1: sim.clock, 2: sim.bh });
-    sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'perturber kick');
-    sim.gBhKick = bindGroup(d, sim.pBhKick, { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh });
+    sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift');
+    sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
+    sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick');
+    sim.pBhEval = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 });
+    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
+    sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
+    sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
     await sim.buildHydro();
     sim.reset();
     return sim;
@@ -460,11 +563,7 @@ export class Sim implements Simulation {
   async buildHydro() {
     const d = this.device;
     const c = this.cfg;
-    const slots = {
-      eos: EOS_MODULES[c.eos],
-      riemann: `hydro/riemann/${c.riemann}.wgsl`,
-      limiter: `hydro/limiters/${c.limiter}.wgsl`,
-    };
+    const slots = hydroSlots(c);
     const v = (t: GPUTexture) => t.createView();
     const phi = this.mg.phi;
     const dims = [this.n, this.n, this.nz];
@@ -531,6 +630,7 @@ export class Sim implements Simulation {
           4: v(this.gfield),
           5: v(this.state[p][0]),
           6: v(this.state[p][1]),
+          7: this.bh,
         }),
       );
     }
@@ -548,13 +648,12 @@ export class Sim implements Simulation {
   /** Push the current configuration to the GPU parameter block. */
   writeParams() {
     const c = this.cfg;
-    const bh = this.hasPerturber ? c.problem.perturber!(c.params, c.G) : null;
     const buf = packParams(c, {
       dims: [c.n, c.n, this.nz],
       dx: this.dx,
       rhoMean: this.rhoMean,
       selfGravity: this.selfGravity,
-      perturberGM: bh ? bh.gm : 0,
+      masses: this.nMasses,
       solids: this.solids,
       sources: this.nSources > 0,
     });
@@ -568,10 +667,9 @@ export class Sim implements Simulation {
     const nz = this.nz;
     const eos = makeEos(c.eos, c.eosParams);
     const fn = c.problem.init(n, eos, c.ndim, c.params);
-    if (c.problem.perturber) {
-      const bh = c.restart?.perturber ?? c.problem.perturber(c.params, c.G);
-      this.device.queue.writeBuffer(this.bh, 0, new Float32Array([...bh.pos, 0, ...bh.vel, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
-    }
+    const masses = initialMasses(c, this.dx);
+    this.nMasses = this.nOwnMasses = masses.length;
+    this.device.queue.writeBuffer(this.bh, 0, packMasses(masses));
     const u1 = new Float32Array(n * n * nz * 4);
     const u2 = new Float32Array(n * n * nz * 4);
     const half = c.problem.box / 2;
@@ -609,21 +707,9 @@ export class Sim implements Simulation {
     if (c.restart) this.device.queue.writeBuffer(this.clock, 0, new Float32Array([0, c.restart.time, 0, c.restart.steps]));
   }
 
-  /** Time, step count and perturber state, for a snapshot (see io/snapshot.ts). */
-  async readRestart(): Promise<{ time: number; steps: number; perturber?: { pos: number[]; vel: number[] } }> {
-    const d = this.device;
-    const buf = d.createBuffer({ size: 48, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-    const enc = d.createCommandEncoder();
-    enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
-    enc.copyBufferToBuffer(this.bh, 0, buf, 16, 32);
-    d.queue.submit([enc.finish()]);
-    await buf.mapAsync(GPUMapMode.READ);
-    const f = new Float32Array(buf.getMappedRange().slice(0));
-    buf.unmap();
-    buf.destroy();
-    const out: { time: number; steps: number; perturber?: { pos: number[]; vel: number[] } } = { time: f[1], steps: f[3] };
-    if (this.cfg.problem.perturber) out.perturber = { pos: [f[4], f[5], f[6]], vel: [f[8], f[9], f[10]] };
-    return out;
+  /** Time, step count and point masses, for a snapshot (see io/snapshot.ts). */
+  async readRestart(): Promise<RestartState> {
+    return readRestart(this.device, this.clock, this.bh, this.nMasses);
   }
 
   /** Replace the state with raw conserved arrays (rho, m), (E, e_int, rho s, 0). */
@@ -653,13 +739,13 @@ export class Sim implements Simulation {
 
   /** Call after changing the gravity mode or G at run time. */
   refreshPotential() {
-    if (!this.selfGravity) return;
+    if (!this.fieldOn) return;
     this.solvePotential(16);
     const enc = this.device.createCommandEncoder();
-    this.copyPhiToOld(enc);
+    if (this.selfGravity) this.copyPhiToOld(enc);
     const pass = enc.beginComputePass();
-    // The clock's dt is zero here, so this only evaluates the accelerations.
-    if (this.hasPerturber) this.encodePerturberKick(pass, this.cur);
+    // No step is being taken: the masses' accelerations are evaluated, nothing more.
+    if (this.hasMasses) this.encodeMassKick(pass, this.cur, false);
     this.encodeField(pass);
     pass.end();
     this.device.queue.submit([enc.finish()]);
@@ -669,16 +755,23 @@ export class Sim implements Simulation {
     return this.cfg.gravity !== 'off' && this.cfg.ndim === 3;
   }
 
-  /** A perturber needs the self-gravity path (its field shares that texture). */
-  private get hasPerturber(): boolean {
-    return this.selfGravity && !!this.cfg.problem.perturber;
+  private get hasMasses(): boolean {
+    return this.nMasses > 0;
   }
 
-  /** Reduce the perturber's pull on the gas of the given parity, then finish its step. */
-  private encodePerturberKick(pass: GPUComputePassEncoder, parity: number) {
+  /** The gravity field texture is in use: by self-gravity, point masses or both. */
+  private get fieldOn(): boolean {
+    return this.selfGravity || this.hasMasses;
+  }
+
+  /**
+   * Reduce the masses' pull on the gas of the given parity and what their sinks take from it,
+   * then finish their step (`live`) or only evaluate their accelerations.
+   */
+  private encodeMassKick(pass: GPUComputePassEncoder, parity: number, live: boolean) {
     this.redBh.encode(pass, parity);
-    pass.setPipeline(this.pBhKick);
-    pass.setBindGroup(0, this.gBhKick);
+    pass.setPipeline(live ? this.pBhKick : this.pBhEval);
+    pass.setBindGroup(0, live ? this.gBhKick : this.gBhEval);
     pass.dispatchWorkgroups(1);
   }
 
@@ -701,7 +794,7 @@ export class Sim implements Simulation {
   /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
     const selfGravity = this.selfGravity;
-    const anyGravity = selfGravity || this.cfg.gext.some((g) => g !== 0);
+    const anyGravity = this.fieldOn || this.cfg.gext.some((g) => g !== 0);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = enc.beginComputePass();
@@ -721,15 +814,16 @@ export class Sim implements Simulation {
         pass = enc.beginComputePass();
         this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
-        if (this.hasPerturber) {
-          // Move the perturber to the new time, then its pull on the updated gas.
-          pass.setPipeline(this.pBhDrift);
-          pass.setBindGroup(0, this.gBhDrift);
-          pass.dispatchWorkgroups(1);
-          this.encodePerturberKick(pass, 1 - p);
-        }
-        this.encodeField(pass);
       }
+      if (this.hasMasses) {
+        // Move the masses to the new time, then their pull on the updated gas and what their
+        // sinks take from it (removed in the correction pass below).
+        pass.setPipeline(this.pBhDrift);
+        pass.setBindGroup(0, this.gBhDrift);
+        pass.dispatchWorkgroups(1);
+        this.encodeMassKick(pass, 1 - p, true);
+      }
+      if (this.fieldOn) this.encodeField(pass);
       if (anyGravity) {
         // Second half kick, with the acceleration of the updated state.
         pass.setPipeline(this.pCorrect);
@@ -763,6 +857,24 @@ export class Sim implements Simulation {
     this.nSources = Math.min(list.length, MAX_SOURCES);
     this.device.queue.writeBuffer(this.sources, 0, packSources(list));
     this.writeParams();
+  }
+
+  addMass(m: PointMass): boolean {
+    if (this.nMasses >= MAX_MASSES) return false;
+    // Only its own slot is written: the others are mid-orbit on the GPU.
+    this.device.queue.writeBuffer(this.bh, 16 + 64 * this.nMasses, packMasses([completeMass(m, this.dx)]), 4, 16);
+    this.nMasses++;
+    this.writeParams();
+    this.refreshPotential();
+    return true;
+  }
+
+  removeAddedMasses() {
+    if (this.nMasses === this.nOwnMasses) return;
+    this.nMasses = this.nOwnMasses;
+    this.writeParams();
+    // With no masses left the field texture goes out of use; otherwise rebuild it without them.
+    this.refreshPotential();
   }
 
   massChanged(mass: number) {
@@ -858,13 +970,13 @@ export class Sim implements Simulation {
     pass.end();
     enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
     enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
-    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, 16);
+    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, MASS_FLOATS * 4);
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
-      return diagnosticsFrom(a, this.hasPerturber);
+      return diagnosticsFrom(a, this.nMasses);
     } finally {
       this.stagingBusy = false;
     }
@@ -925,11 +1037,7 @@ export class Sim implements Simulation {
     const d = this.device;
     const n = this.n;
     const c = this.cfg;
-    const slots = {
-      eos: EOS_MODULES[c.eos],
-      riemann: `hydro/riemann/${c.riemann}.wgsl`,
-      limiter: `hydro/limiters/${c.limiter}.wgsl`,
-    };
+    const slots = hydroSlots(c);
     // Split by region like the real pass, so faces between the two variants are checked too.
     const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [n, n, this.nz], { DEBUG_FLUX: 1 });
     const p = this.cur;

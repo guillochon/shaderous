@@ -22,7 +22,7 @@ fn red_cell(c: vec3<i32>) -> Red {
 
   var egrav = 0.0;
   var jeans = 0.0;
-  if (P.grav_on != 0u) {
+  if (has_potential()) {
     let phi = textureLoad(PHI, c, 0).x;
     // Periodic potentials are defined up to a constant; weighting by (rho - mean) removes it.
     let w = select(rho, rho - P.rho_mean, P.grav_bc == 0u);

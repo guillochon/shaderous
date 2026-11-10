@@ -10,6 +10,8 @@ import { polytrope } from './polytrope';
 import { evrard } from './evrard';
 import { tidalDisruption } from './tidal_disruption';
 import { sphere } from './sphere';
+import { binary } from './binary';
+import { thermalInstability } from './thermal_instability';
 import { isothermalCollapse } from './isothermal';
 
 export const PROBLEMS: Problem[] = [
@@ -18,6 +20,8 @@ export const PROBLEMS: Problem[] = [
   rayleighTaylor,
   forwardStep,
   tidalDisruption,
+  binary,
+  thermalInstability,
   evrard,
   polytrope,
   isothermalCollapse,

@@ -17,7 +17,8 @@ import { polytrope } from '../problems/polytrope';
 import { evrard } from '../problems/evrard';
 import { tidalDisruption, tdeOrbit, TDE_STAR } from '../problems/tidal_disruption';
 import { sphere, spherePotential } from '../problems/sphere';
-import { all, REFLECT, type Problem } from '../problems/types';
+import { all, PERIODIC, REFLECT, type Problem } from '../problems/types';
+import { binary } from '../problems/binary';
 import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
 
@@ -36,6 +37,14 @@ interface TestDef {
   criterion: string;
   run(gpu: Gpu): Promise<{ pass: boolean; metrics: Record<string, number | string> }>;
 }
+
+/** Uniform gas at rest in a periodic unit box: rho = 1, p = 1 (so T = 1), gamma = 5/3. */
+const stillGas = (over: Partial<Problem>): Problem => ({
+  id: 'still-gas', label: 'Still gas', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
+  bcLo: all(PERIODIC), bcHi: all(PERIODIC), gravity: 'off', G: 1, box: 1, tEnd: 1, supports2d: true,
+  init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 1, s: 0 }),
+  ...over,
+});
 
 async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: Sim) => Promise<T>) {
   const sim = await Sim.create(gpu, configFor(problem, n, over));
@@ -785,14 +794,139 @@ export const TESTS: TestDef[] = [
         const b = await Sim.create(gpu, cfg);
         try {
           const after = await b.readRestart();
-          const d = Math.max(...[0, 1, 2].map((i) => Math.max(Math.abs(before.perturber!.pos[i] - after.perturber!.pos[i]), Math.abs(before.perturber!.vel[i] - after.perturber!.vel[i]))));
+          const d = Math.max(...[0, 1, 2].map((i) => Math.max(Math.abs(before.masses![0].pos[i] - after.masses![0].pos[i]), Math.abs(before.masses![0].vel[i] - after.masses![0].vel[i]))));
           metrics.perturber_difference = d;
-          pass &&= d === 0 && after.time === before.time;
+          pass &&= d === 0 && after.time === before.time && after.masses![0].gm === before.masses![0].gm && after.masses![0].accreted === before.masses![0].accreted;
         } finally {
           b.destroy();
         }
       });
       return { pass, metrics };
+    },
+  },
+  {
+    id: 'cooling',
+    name: 'Optically thin cooling: power-law decay and thermal balance',
+    criterion:
+      'Uniform gas with Lambda ~ T^(1/2) follows T^(1/2) = 1 - t / 3 to 0.1% (uniform and adaptive grids); with heating and a cooling time 100 times shorter than the timestep it settles at the balance temperature to 1%, without overshoot',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      // T = p / rho, e = rho T / (gamma - 1): dT/dt = -(gamma - 1) rho Lambda0 T^alpha.
+      const still = stillGas({ cooling: 'power', coolParams: { rate: 1, alpha: 0.5, heat: 0, tFloor: 0 } });
+      const expected = 1.5 * (1 - 1.2 / 3) ** 2;
+      await withSim(gpu, still, 32, { ndim: 2, tEnd: 1.2 }, async (sim) => {
+        metrics.decay_steps = await sim.runToEnd();
+        const d = await sim.diagnostics();
+        metrics.decay_error = Math.abs(d.eInt - expected) / expected;
+        pass &&= metrics.decay_error < 1e-3;
+      });
+      await withAmr(gpu, still, 32, { ndim: 2, amrLevels: 1, tEnd: 1.2 }, async (sim) => {
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        metrics.decay_error_adaptive = Math.abs(d.eInt - expected) / expected;
+        pass &&= metrics.decay_error_adaptive < 1e-3;
+      });
+      // Stiff: balance at T = 1/4 (heat = rho Lambda0 T^alpha), cooling time about 1e-4.
+      const stiff = stillGas({ cooling: 'power', coolParams: { rate: 1e4, alpha: 0.5, heat: 5e3, tFloor: 0 } });
+      await withSim(gpu, stiff, 32, { ndim: 2, tEnd: 0 }, async (sim) => {
+        let low = Infinity;
+        for (const t of [0.01, 0.02, 0.05, 0.2]) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          await sim.runToEnd();
+          low = Math.min(low, (await sim.diagnostics()).eInt / 1.5);
+        }
+        const T = (await sim.diagnostics()).eInt / 1.5;
+        metrics.balance_temperature = T;
+        metrics.balance_lowest_temperature = low;
+        pass &&= Math.abs(T - 0.25) < 0.0025 && low > 0.2475;
+      });
+      // A temperature floor stops the cooling there.
+      const floored = stillGas({ cooling: 'power', coolParams: { rate: 100, alpha: 0.5, heat: 0, tFloor: 0.3 } });
+      await withSim(gpu, floored, 32, { ndim: 2, tEnd: 0.5 }, async (sim) => {
+        await sim.runToEnd();
+        metrics.floor_temperature = (await sim.diagnostics()).eInt / 1.5;
+        pass &&= Math.abs(metrics.floor_temperature - 0.3) < 0.003;
+      });
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'point-mass-sink',
+    name: 'Point masses: the sink takes exactly what the gas loses',
+    criterion:
+      'A softened mass at the centre of a closed box of gas accretes; gas mass plus accreted mass stays constant to 1e-5, G M grows by G times the accreted mass, and the mass stays at the centre (2D, 3D and adaptive 3D); the same holds for a mass added in mid-run',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const box = stillGas({
+        bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.5,
+        masses: () => [{ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.15 }],
+      });
+      const check = async (tag: string, sim: Sim | AmrSim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const m = d.masses[0];
+        metrics[`${tag}_accreted_fraction`] = m.accreted / d0.mass;
+        metrics[`${tag}_mass_error`] = Math.abs(d.mass + m.accreted - d0.mass) / d0.mass;
+        metrics[`${tag}_gm_error`] = Math.abs(m.gm - 0.05 - m.accreted) / 0.05;
+        metrics[`${tag}_offset`] = Math.hypot(...m.pos);
+        pass &&= m.accreted > 0.003 * d0.mass && metrics[`${tag}_mass_error`] < 1e-5 && metrics[`${tag}_gm_error`] < 1e-4 && metrics[`${tag}_offset`] < 1e-3;
+      };
+      await withSim(gpu, box, 64, { ndim: 2 }, (sim) => check('flat', sim));
+      await withSim(gpu, box, 32, {}, (sim) => check('uniform', sim));
+      await withAmr(gpu, box, 64, { amrLevels: 1 }, (sim) => check('adaptive', sim));
+      // The same mass placed in mid-run (as the sink tool does), then taken away again.
+      const empty = stillGas({ bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.1 });
+      const placed = async (tag: string, sim: Sim | AmrSim) => {
+        await sim.runToEnd();
+        const added = sim.addMass({ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.15 });
+        sim.cfg.tEnd = 0.6;
+        sim.writeParams();
+        await check(tag, sim);
+        sim.removeAddedMasses();
+        pass &&= added && (await sim.diagnostics()).masses.length === 0;
+      };
+      await withSim(gpu, empty, 64, { ndim: 2 }, (sim) => placed('placed_flat', sim));
+      await withAmr(gpu, empty, 64, { amrLevels: 1 }, (sim) => placed('placed_adaptive', sim));
+      // A 2D adaptive mesh has no field atlas to hold one.
+      await withAmr(gpu, empty, 64, { ndim: 2, amrLevels: 1 }, async (sim) => {
+        pass &&= !sim.addMass({ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0] });
+      });
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'binary-orbit',
+    name: 'Point masses: a binary in a disc keeps its orbit (256^2)',
+    criterion:
+      'Over one period of the softened circular orbit the separation stays within 0.5% of 1, the masses return to within 0.03 of where they started, their total momentum stays below 1e-4, and both accrete',
+    async run(gpu) {
+      return withSim(gpu, binary, 256, { ndim: 2, tEnd: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const soft = d0.masses[0].soft;
+        const period = 2 * Math.PI * Math.pow(1 + soft * soft, 0.75);
+        let worst = 0;
+        let last = d0;
+        let steps = 0;
+        for (let i = 1; i <= 16; i++) {
+          sim.cfg.tEnd = (period * i) / 16;
+          sim.writeParams();
+          steps = await sim.runToEnd();
+          last = await sim.diagnostics();
+          const [a, b] = last.masses;
+          worst = Math.max(worst, Math.abs(Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) - 1));
+        }
+        const back = Math.max(...[0, 1].map((i) => Math.hypot(last.masses[i].pos[0] - d0.masses[i].pos[0], last.masses[i].pos[1] - d0.masses[i].pos[1])));
+        const mom = Math.hypot(...[0, 1].map((a) => last.masses[0].gm * last.masses[0].vel[a] + last.masses[1].gm * last.masses[1].vel[a]));
+        const accreted = Math.min(last.masses[0].accreted, last.masses[1].accreted);
+        return {
+          pass: worst < 0.005 && back < 0.03 && mom < 1e-4 && accreted > 0,
+          metrics: { separation_max_deviation: worst, return_offset: back, binary_momentum: mom, least_accreted: accreted, softening: soft, steps },
+        };
+      });
     },
   },
   {

@@ -5,6 +5,7 @@
 // out of range in a link is ignored rather than trusted.
 import { configFor, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
 import { EOS_LABELS, type EosKind, type EosParams } from '../eos/eos';
+import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { FIELDS, PROBLEMS, problemById, type Bc3, type GravityMode, type Problem } from '../problems';
 import { defaultView, type ViewState } from '../render/renderer';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
@@ -29,8 +30,9 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'bcLo' | 'bcHi'>>;
+  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'bcLo' | 'bcHi' | 'cooling'>>;
   eosParams: Partial<EosParams>;
+  coolParams: Partial<CoolingParams>;
   params: Record<string, number>;
   view: Partial<ViewState>;
   auto?: boolean;
@@ -76,6 +78,14 @@ export function encodeLink(s: LinkState): URLSearchParams {
   num('gamma', cfg.eosParams.gamma, def.eosParams.gamma);
   num('K', cfg.eosParams.K, def.eosParams.K);
   num('arad', cfg.eosParams.arad, def.eosParams.arad);
+  str('cool', cfg.cooling, def.cooling);
+  if (cfg.cooling !== 'off') {
+    num('crate', cfg.coolParams.rate, def.coolParams.rate);
+    num('calpha', cfg.coolParams.alpha, def.coolParams.alpha);
+    num('cheat', cfg.coolParams.heat, def.coolParams.heat);
+    num('ctfloor', cfg.coolParams.tFloor, def.coolParams.tFloor);
+    num('ctunit', cfg.coolParams.tUnit, def.coolParams.tUnit);
+  }
   str('riemann', cfg.riemann, def.riemann);
   str('limiter', cfg.limiter, def.limiter);
   num('cfl', cfg.cfl, def.cfl);
@@ -117,6 +127,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
     amr: known ? Math.min(3, Math.max(0, Math.round(+q.get('amr')! || 0))) : 0,
     cfg: {},
     eosParams: {},
+    coolParams: {},
     params: {},
     view: {},
   };
@@ -162,6 +173,12 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.eosParams, 'gamma', num('gamma', 1, 100));
   put(out.eosParams, 'K', num('K', 0));
   put(out.eosParams, 'arad', num('arad', 0));
+  put(out.cfg, 'cooling', pick('cool', Object.keys(COOLING_LABELS) as CoolingKind[]));
+  put(out.coolParams, 'rate', num('crate', 0));
+  put(out.coolParams, 'alpha', num('calpha', -4, 4));
+  put(out.coolParams, 'heat', num('cheat', 0));
+  put(out.coolParams, 'tFloor', num('ctfloor', 0));
+  put(out.coolParams, 'tUnit', num('ctunit', 1e-6));
   for (const p of problemById(problem).params ?? []) {
     const v = num(`p.${p.id}`, p.min, p.max);
     if (v !== undefined) out.params[p.id] = v;

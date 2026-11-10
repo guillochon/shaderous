@@ -57,7 +57,7 @@ fn red_cell(c: vec3<i32>) -> Red {
   // Potential energy in the uniform external field, measured from the box centre.
   var egrav = -rho * dot(P.gext.xyz, x) * dv;
   var jeans = 0.0;
-  if (P.grav_on != 0u) {
+  if (has_potential()) {
     // Periodic potentials are defined up to a constant; weighting by (rho - mean) removes it.
     let w = select(rho, rho - P.rho_mean, P.grav_bc == 0u);
     egrav += 0.5 * w * textureLoad(PHI, a, 0).x * dv;

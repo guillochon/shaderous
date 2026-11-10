@@ -121,6 +121,7 @@ details[open] > summary .sum { display: none; }
 #marks line { stroke: #7fe3a0; stroke-width: 2; stroke-linecap: round; }
 #marks path { fill: #7fe3a0; }
 #marks .sink circle { stroke: #ff9d5c; stroke-dasharray: 3 3; }
+#marks .point circle.dot { fill: #ff9d5c; stroke: none; }
 #brush { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; display: none; }
 /* The brush: a dashed outline at rest; solid, coloured and pulsing while it is being applied
    (blue adds or sets, orange takes away). In a 3D run it is drawn as the ball it is. */

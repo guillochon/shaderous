@@ -13,9 +13,22 @@ https://guillochon.github.io/shaderous/validate.html
 - **Self-gravity:** multigrid Poisson solve every step, periodic or isolated (multipole) boundaries.
 - **Self-gravity or a uniform field:** a constant external acceleration drives the
   Rayleigh-Taylor preset.
+- **Point masses:** up to four, with Plummer-softened gravity on the gas and a sink around each
+  that takes gas in. They pull on one another, feel the gas, and grow by what they accrete.
+  They work with or without self-gravity, in 2D and 3D (on the adaptive mesh in 3D only).
+  Presets bring their own, and the sink tool places more: with its mass slider at zero it
+  places a plain sink that stays put, and with a mass (a multiple of the gas in the box) a
+  point mass, set moving by a drag. A preset without a gravitational constant gets G = 1.
 - **Tidal disruption:** a polytropic star passed by a point mass on a parabolic orbit, run in the
   star's rest frame. The frame accelerates with the gas's centre of mass, the point mass's orbit
   is integrated alongside the gas, and the boundaries let gas out but not in.
+- **Binary accretion:** two point masses on a Kepler orbit inside an isothermal disc. They clear
+  a cavity, draw streams across it and accrete from the discs that form around them.
+- **Optically thin cooling and heating:** a power-law cooling function with uniform heating, or
+  the interstellar curve of Koyama & Inutsuka (2002), chosen when the shaders are assembled
+  and available to every preset whose equation of state has an energy. The thermal instability
+  preset starts interstellar gas in unstable balance and lets it separate into cold clouds and
+  a warm medium.
 - **2D or 3D:** presets that make sense in the plane (shock tubes, blasts, Kelvin-Helmholtz,
   Rayleigh-Taylor, advection) can run on an n x n grid up to 2048 squared. A 2D run is one periodic
   layer of the same 3D scheme, without self-gravity.
@@ -56,7 +69,7 @@ button, to hand someone the same setup. A bare visit opens Kelvin-Helmholtz at 1
   `r0` in a `prim` dataset, block by block, with each block's refinement level and position.
   A uniform grid is one block; an adaptive run writes its leaf blocks. yt opens these files
   as Athena++ data (`yt.load("file.athdf")`), in 2D and 3D, uniform and refined.
-- Files written here also carry the run's settings, time, step count and perturber, so
+- Files written here also carry the run's settings, time, step count and point masses, so
   importing one restores the preset, grid, physics and view, and continues from the same
   state on the same mesh. The loaded run starts paused, and Reset returns to the loaded state.
 - A file from another code needs `rho`, `press` and `vel1`-`vel3` on a Cartesian, uniformly
@@ -91,7 +104,8 @@ src/
   gpu/         device setup and limit checks, shader preprocessor, hierarchical reductions
   hydro/       timestep rates, clock, predictor and update passes; riemann/ and limiters/ modules
   eos/         WGSL equation-of-state modules and their float64 mirrors
-  gravity/     multigrid passes, multipole boundary, half-kick corrector
+  gravity/     multigrid passes, multipole boundary, half-kick corrector, point masses and sinks
+  cooling/     WGSL cooling functions and their float64 mirrors
   amr/         block tree, block-atlas passes and the adaptive driver; gravity/ for its Poisson solve
   render/      field extraction, ray-marcher, slice view, transfer function
   problems/    one file per preset
@@ -168,6 +182,24 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   status line says so) rather than letting a refinement boundary cut through a star at an
   arbitrary place, which disturbs hydrostatic balance. Periodic gravity assumes periodic hydro boundaries on the adaptive mesh.
 - **Barotropic gas** uses HLL, since there is no contact wave for HLLC to resolve.
+- **Point masses** share the gravity field texture with self-gravity, so the hydro passes do
+  not know they exist. Each step they drift, then one reduction over the updated gas gives
+  every mass its pull on the gas (whose reaction moves the mass) and what its sink takes; the
+  second half-kick pass removes exactly that from the cells. The removal rate falls from
+  `sqrt(G M / r^3)` at the centre to zero at the sink radius, and the gas that goes takes its
+  momentum to the mass, so mass and momentum are conserved between the two (to 1e-7 in the
+  validation test). The pull between two masses is softened by the larger of their two
+  lengths. The frame is inertial unless the preset asks for the gas's rest frame, as the
+  tidal disruption does. The timestep is the gas's: nothing limits it for a close encounter
+  of two masses.
+- **Cooling** is applied to the internal energy at the end of the update, at fixed density,
+  in up to 12 second-order substeps that each change the energy by at most a tenth. A substep
+  that would cross thermal balance goes to the balance point instead, so a cooling time far
+  below the timestep is stable and does not overshoot. The timestep is never shortened for
+  cooling: a cell that cools faster than the substeps can follow loses at most 70% of its
+  energy in a step. Temperature is `p / rho` in code units (the interstellar curve takes a
+  conversion to kelvin, and reads the density as atoms per cm^3). There is no conduction, so
+  the smallest clouds of the thermal instability are set by the grid.
 
 ## Licence
 
