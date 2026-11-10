@@ -68,6 +68,7 @@ summary:hover { color: var(--text); }
 .sum { margin-left: auto; text-transform: none; letter-spacing: 0; font-size: 11px; color: #5f6b82; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 details[open] > summary .sum { display: none; }
 #side footer { color: var(--dim); font-size: 11px; border-top: 1px solid var(--line); padding-top: 8px; }
+#sheet-bar { display: none; }
 #stage { position: relative; min-width: 0; min-height: 0; }
 #view { width: 100%; height: 100%; display: block; touch-action: none; }
 #colorbar { position: absolute; right: 14px; top: 14px; display: flex; gap: 6px; height: 240px; pointer-events: none; }
@@ -121,3 +122,47 @@ body.validate th { color: var(--dim); font-weight: 500; }
 .detail dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 4px 0 0; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 .detail dt { color: var(--dim); }
 .detail dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Phones: the simulation takes the screen, and the controls are a sheet along the bottom,
+   closed to a single bar until it is tapped. An open sheet lies over the simulation rather
+   than squeezing it, so the canvas does not resize. */
+@media (max-width: 700px) {
+  :root { --bar: 48px; --safe: env(safe-area-inset-bottom, 0px); }
+  #app { display: block; }
+  #stage { position: fixed; inset: 0 0 calc(var(--bar) + var(--safe)) 0; }
+  #side {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    height: calc(var(--bar) + var(--safe)); max-height: 80dvh; overflow: hidden;
+    border-right: 0; border-top: 1px solid var(--line); border-radius: 12px 12px 0 0;
+    padding: 0 14px calc(14px + var(--safe)); gap: 12px; scrollbar-gutter: auto;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, 0.45);
+  }
+  #side.open { height: auto; overflow-y: auto; overscroll-behavior: contain; }
+  #sheet-bar {
+    display: flex; align-items: center; gap: 10px; flex: none; height: var(--bar);
+    position: sticky; top: 0; z-index: 2; background: var(--panel); margin: 0 -14px; padding: 0 14px;
+  }
+  #sheet-toggle {
+    flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px;
+    background: none; border: 0; padding: 0; text-align: left; font-weight: 600; font-size: 14px;
+  }
+  #sheet-toggle .grip { flex: none; width: 28px; height: 4px; border-radius: 2px; background: #3a4358; }
+  #sheet-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #sheet-toggle::after { content: '\25B4'; color: var(--dim); margin-left: auto; font-size: 12px; }
+  #side.open #sheet-toggle::after { content: '\25BE'; }
+  #sheet-run { flex: none; height: 34px; min-width: 72px; border-color: #3a4a66; background: #223049; font-size: 14px; }
+  /* Touch-sized controls. 16px text also stops iOS from zooming the page on focus. */
+  #side select, #side input[type='number'] { height: 36px; font-size: 16px; }
+  #problem { height: 40px !important; }
+  #side input[type='range'] { height: 36px; }
+  .buttons button { height: 40px; font-size: 15px; }
+  .check { font-size: 14px; min-height: 32px; }
+  summary { font-size: 12px; min-height: 28px; align-items: center; }
+  .f > span { font-size: 11.5px; line-height: 15px; }
+  .blurb { font-size: 13px; line-height: 18px; height: 36px; }
+  #tf { height: 64px; }
+  /* Readouts over the simulation: narrower, and the status line may wrap to two lines. */
+  #hud { left: 10px; top: 8px; width: calc(100% - 118px); height: 34px; line-height: 17px; white-space: normal; font-size: 12px; }
+  #colorbar { right: 8px; top: 8px; height: 150px; }
+  #colorbar .ticks span { width: 64px; font-size: 11px; }
+}

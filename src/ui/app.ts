@@ -23,6 +23,12 @@ const UNIFORM_MAX = { 2: 2048, 3: 256 };
 
 const side = $('side');
 side.innerHTML = `
+  <div id="sheet-bar">
+    <button id="sheet-toggle" aria-expanded="false" aria-controls="side" title="Show or hide the controls">
+      <span class="grip"></span><span id="sheet-title">Controls</span>
+    </button>
+    <button id="sheet-run">Pause</button>
+  </div>
   <header class="brand"><h1>SHADEROUS</h1><span id="adapter"></span></header>
 
   <section>
@@ -94,8 +100,27 @@ side.innerHTML = `
     <div id="diag"><dl></dl><dl></dl></div>
   </details>
 
-  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit, wheel to zoom<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit, wheel or pinch to zoom<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
+
+// On a phone the controls are a sheet under the simulation, closed until asked for.
+{
+  const toggle = $('sheet-toggle');
+  toggle.addEventListener('click', () => {
+    const open = side.classList.toggle('open');
+    toggle.setAttribute('aria-expanded', String(open));
+    if (!open) side.scrollTop = 0;
+  });
+  // The bar's run button stands in for the one inside the closed sheet.
+  const run = $('run');
+  const mirror = $('sheet-run');
+  mirror.addEventListener('click', () => run.click());
+  new MutationObserver(() => (mirror.textContent = run.textContent)).observe(run, { childList: true, characterData: true, subtree: true });
+  const problem = $<HTMLSelectElement>('problem');
+  const title = () => ($('sheet-title').textContent = problem.selectedOptions[0]?.textContent ?? 'Controls');
+  problem.addEventListener('change', title);
+  title();
+}
 
 const canvas = $<HTMLCanvasElement>('view');
 const hud = $('hud');
@@ -442,17 +467,31 @@ function bind() {
   on('lo', manual);
   on('hi', manual);
 
-  // Orbit and zoom.
-  let dragging = false;
+  // Orbit and zoom: drag with one pointer, pinch with two, or use the wheel. Positions are
+  // tracked by hand because touch pointers do not report movementX/Y in every browser.
+  const pointers = new Map<number, { x: number; y: number }>();
+  const spread = () => {
+    const [a, b] = [...pointers.values()];
+    return Math.hypot(a.x - b.x, a.y - b.y);
+  };
   canvas.addEventListener('pointerdown', (e) => {
-    dragging = true;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     canvas.setPointerCapture(e.pointerId);
   });
-  canvas.addEventListener('pointerup', () => (dragging = false));
+  const release = (e: PointerEvent) => pointers.delete(e.pointerId);
+  canvas.addEventListener('pointerup', release);
+  canvas.addEventListener('pointercancel', release);
   canvas.addEventListener('pointermove', (e) => {
-    if (!dragging) return;
-    view.yaw -= e.movementX * 0.006;
-    view.pitch = Math.min(1.5, Math.max(-1.5, view.pitch + e.movementY * 0.006));
+    const last = pointers.get(e.pointerId);
+    if (!last) return;
+    const before = pointers.size === 2 ? spread() : 0;
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 1) {
+      view.yaw -= (e.clientX - last.x) * 0.006;
+      view.pitch = Math.min(1.5, Math.max(-1.5, view.pitch + (e.clientY - last.y) * 0.006));
+    } else if (pointers.size === 2 && before > 0) {
+      view.dist = Math.min(6, Math.max(0.9, (view.dist * before) / Math.max(spread(), 1)));
+    }
   });
   canvas.addEventListener(
     'wheel',
