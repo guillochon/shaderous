@@ -1,0 +1,537 @@
+// The simulation: owns the state textures and encodes hydro + gravity steps.
+import { assemble } from './gpu/shaders';
+import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
+import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
+import { Multigrid } from './gravity/multigrid';
+import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } from './eos/eos';
+import type { Bc3, GravityMode, Problem } from './problems/types';
+
+export type RiemannKind = 'hllc' | 'hll';
+export type LimiterKind = 'mc' | 'vanleer' | 'minmod';
+
+export interface SimConfig {
+  n: number;
+  problem: Problem;
+  eos: EosKind;
+  eosParams: EosParams;
+  riemann: RiemannKind;
+  limiter: LimiterKind;
+  gravity: GravityMode;
+  G: number;
+  bcLo: Bc3;
+  bcHi: Bc3;
+  cfl: number;
+  tEnd: number; // Infinity runs forever
+  rhoFloor: number;
+  pFloor: number;
+  etaDual: number;
+  shockThresh: number;
+  jeansFloor: boolean;
+  vcycles: number; // V-cycles per step (warm-started)
+  /** Flux-form gravitational work (conserves total energy) instead of kick-consistent energy. */
+  gravEnergyFlux: boolean;
+}
+
+export function configFor(problem: Problem, n: number, over: Partial<SimConfig> = {}): SimConfig {
+  return {
+    n,
+    problem,
+    eos: problem.eos,
+    eosParams: { ...defaultEosParams(), ...problem.eosParams },
+    riemann: 'hllc',
+    limiter: 'mc',
+    gravity: problem.gravity,
+    G: problem.G,
+    bcLo: problem.bcLo,
+    bcHi: problem.bcHi,
+    cfl: 0.8,
+    tEnd: problem.tEnd,
+    rhoFloor: problem.rhoFloor ?? 1e-10,
+    pFloor: problem.pFloor ?? 1e-14,
+    etaDual: 1e-3,
+    shockThresh: 0.5,
+    jeansFloor: problem.jeansFloor ?? false,
+    vcycles: 2,
+    gravEnergyFlux: true,
+    ...over,
+  };
+}
+
+// Channel layout of the diagnostics reduction (hydro/diagnostics.wgsl).
+const DIAG_OPS = [SUM, SUM, SUM, SUM, SUM, SUM, SUM, MAX, SUM, SUM, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX];
+
+export interface Diagnostics {
+  t: number;
+  dt: number;
+  steps: number;
+  mass: number;
+  momentum: [number, number, number];
+  eKin: number;
+  eInt: number;
+  eGrav: number;
+  eTot: number;
+  maxMach: number;
+  floored: number;
+  jeansUnresolved: number;
+  /** [min, max] per renderable field, in FIELDS order */
+  ranges: [number, number][];
+}
+
+const dispatchN = (pass: GPUComputePassEncoder, n: number) =>
+  pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), Math.ceil(n / 4));
+
+export class Sim {
+  readonly device: GPUDevice;
+  cfg: SimConfig;
+  readonly n: number;
+  readonly dx: number;
+
+  /** state[parity] = [U1, U2]; `cur` is the parity holding the current state */
+  state: GPUTexture[][] = [];
+  prim: GPUTexture[] = [];
+  cur = 0;
+  mg!: Multigrid;
+  rhoMean = 0;
+
+  private params: GPUBuffer;
+  get paramBuffer(): GPUBuffer {
+    return this.params;
+  }
+  private clock: GPUBuffer;
+  private pPrim!: GPUComputePipeline;
+  private pUpdate!: GPUComputePipeline;
+  private pClock!: GPUComputePipeline;
+  private pCorrect!: GPUComputePipeline;
+  private gPrim: GPUBindGroup[] = [];
+  private gUpdate: GPUBindGroup[] = [];
+  private gCorrect: GPUBindGroup[] = [];
+  private gClock!: GPUBindGroup;
+  private redDt!: Reducer;
+  private redDiag!: Reducer;
+  private staging: GPUBuffer;
+  private stagingBusy = false;
+
+  private constructor(gpu: Gpu, cfg: SimConfig) {
+    this.device = gpu.device;
+    this.cfg = cfg;
+    this.n = cfg.n;
+    this.dx = cfg.problem.box / cfg.n;
+    const d = this.device;
+    this.params = d.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.clock = d.createBuffer({
+      size: 16,
+      usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
+    });
+    this.staging = d.createBuffer({
+      size: 16 + DIAG_OPS.length * 4,
+      usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+    });
+  }
+
+  static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
+    const sim = new Sim(gpu, cfg);
+    const d = sim.device;
+    const n = cfg.n;
+    for (let p = 0; p < 2; p++) {
+      sim.state.push([tex3d(d, n, 'rgba32float', `U1 ${p}`), tex3d(d, n, 'rgba32float', `U2 ${p}`)]);
+    }
+    sim.prim = [tex3d(d, n, 'rgba32float', 'W1'), tex3d(d, n, 'rgba32float', 'W2')];
+    sim.writeParams();
+    sim.mg = await Multigrid.create(d, n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]);
+
+    const v = (t: GPUTexture) => t.createView();
+    const phi = sim.mg.phi;
+    sim.redDt = await Reducer.create(
+      d,
+      n,
+      [MAX, MAX],
+      'hydro/timestep.wgsl',
+      {},
+      [{ 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: v(phi) }],
+      'timestep',
+    );
+    sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock');
+    sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
+    await sim.buildHydro();
+    sim.reset();
+    return sim;
+  }
+
+  /** (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. */
+  async buildHydro() {
+    const d = this.device;
+    const c = this.cfg;
+    const slots = {
+      eos: EOS_MODULES[c.eos],
+      riemann: `hydro/riemann/${c.riemann}.wgsl`,
+      limiter: `hydro/limiters/${c.limiter}.wgsl`,
+    };
+    const v = (t: GPUTexture) => t.createView();
+    const phi = this.mg.phi;
+    [this.pPrim, this.pUpdate, this.pCorrect] = await Promise.all([
+      computePipeline(d, assemble('hydro/primitives.wgsl', slots), 'primitives'),
+      computePipeline(d, assemble('hydro/update.wgsl', slots), 'update'),
+      computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
+    ]);
+    this.gPrim = [];
+    this.gUpdate = [];
+    this.gCorrect = [];
+    for (let p = 0; p < 2; p++) {
+      const o = 1 - p;
+      this.gPrim.push(
+        bindGroup(d, this.pPrim, {
+          0: this.params,
+          1: v(this.state[p][0]),
+          2: v(this.state[p][1]),
+          3: v(this.prim[0]),
+          4: v(this.prim[1]),
+        }),
+      );
+      this.gUpdate.push(
+        bindGroup(d, this.pUpdate, {
+          0: this.params,
+          1: this.clock,
+          2: v(this.state[p][0]),
+          3: v(this.state[p][1]),
+          4: v(this.prim[0]),
+          5: v(this.prim[1]),
+          6: v(phi),
+          7: v(this.state[o][0]),
+          8: v(this.state[o][1]),
+          9: v(this.mg.phiOld),
+        }),
+      );
+      this.gCorrect.push(
+        bindGroup(d, this.pCorrect, {
+          0: this.params,
+          1: this.clock,
+          2: v(this.state[o][0]),
+          3: v(this.state[o][1]),
+          4: v(phi),
+          5: v(this.state[p][0]),
+          6: v(this.state[p][1]),
+        }),
+      );
+    }
+    this.redDiag = await Reducer.create(
+      d,
+      this.n,
+      DIAG_OPS,
+      'hydro/diagnostics.wgsl',
+      slots,
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(phi) })),
+      'diagnostics',
+    );
+  }
+
+  /** Push the current configuration to the GPU parameter block. */
+  writeParams() {
+    const c = this.cfg;
+    const buf = new ArrayBuffer(112);
+    const u = new Uint32Array(buf);
+    const f = new Float32Array(buf);
+    u.set([...c.bcLo, 0], 0);
+    u.set([...c.bcHi, 0], 4);
+    f.set([c.eosParams.gamma, c.eosParams.K, c.eosParams.R, c.eosParams.arad], 8);
+    u.set([c.n, c.gravity === 'off' ? 0 : 1, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 12);
+    f.set(
+      [
+        this.dx,
+        c.cfl,
+        c.G,
+        this.rhoMean,
+        c.rhoFloor,
+        c.pFloor,
+        c.etaDual,
+        Number.isFinite(c.tEnd) ? c.tEnd : 1e30,
+        1e30,
+        c.shockThresh,
+        c.jeansFloor ? 1 : 0,
+        c.problem.box,
+      ],
+      16,
+    );
+    this.device.queue.writeBuffer(this.params, 0, buf);
+  }
+
+  /** Load the problem's initial conditions and solve for the initial potential. */
+  reset() {
+    const c = this.cfg;
+    const n = this.n;
+    const eos = makeEos(c.eos, c.eosParams);
+    const fn = c.problem.init(n, eos);
+    const u1 = new Float32Array(n * n * n * 4);
+    const u2 = new Float32Array(n * n * n * 4);
+    const half = c.problem.box / 2;
+    let mass = 0;
+    let o = 0;
+    for (let k = 0; k < n; k++) {
+      const z = (k + 0.5) * this.dx - half;
+      for (let j = 0; j < n; j++) {
+        const y = (j + 0.5) * this.dx - half;
+        for (let i = 0; i < n; i++, o += 4) {
+          const x = (i + 0.5) * this.dx - half;
+          const w = fn(x, y, z);
+          const p = eos.hasEnergy ? w.p : eos.pressure(w.rho, 0);
+          const eint = eos.eintFromP(w.rho, p);
+          u1[o] = w.rho;
+          u1[o + 1] = w.rho * w.vx;
+          u1[o + 2] = w.rho * w.vy;
+          u1[o + 3] = w.rho * w.vz;
+          u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz);
+          u2[o + 1] = eint;
+          u2[o + 2] = w.rho * w.s;
+          mass += w.rho;
+        }
+      }
+    }
+    this.setState(u1, u2, mass / (n * n * n));
+  }
+
+  /** Replace the state with raw conserved arrays (rho, m), (E, e_int, rho s, 0). */
+  setState(u1: Float32Array, u2: Float32Array, rhoMean: number) {
+    const d = this.device;
+    const n = this.n;
+    this.cur = 0;
+    this.rhoMean = rhoMean;
+    writeTexture(d, this.state[0][0], n, 4, u1);
+    writeTexture(d, this.state[0][1], n, 4, u2);
+    writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
+    d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
+    this.writeParams();
+    this.solvePotential(16);
+    const enc = d.createCommandEncoder();
+    this.copyPhiToOld(enc);
+    d.queue.submit([enc.finish()]);
+  }
+
+  /** Solve for the potential of the current state from the current guess. */
+  solvePotential(cycles: number) {
+    if (this.cfg.gravity === 'off') return;
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    this.mg.encodeSource(pass, this.cur, this.cfg.gravity === 'isolated');
+    for (let i = 0; i < cycles; i++) this.mg.encodeVCycle(pass);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+  }
+
+  /** Call after changing the gravity mode or G at run time. */
+  refreshPotential() {
+    this.solvePotential(16);
+    const enc = this.device.createCommandEncoder();
+    this.copyPhiToOld(enc);
+    this.device.queue.submit([enc.finish()]);
+  }
+
+  private copyPhiToOld(enc: GPUCommandEncoder) {
+    const n = this.n;
+    enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [n, n, n]);
+  }
+
+  /** Encode `count` full steps: primitives, timestep, update, then gravity if enabled. */
+  encodeSteps(enc: GPUCommandEncoder, count: number) {
+    const n = this.n;
+    const grav = this.cfg.gravity !== 'off';
+    for (let i = 0; i < count; i++) {
+      const p = this.cur;
+      let pass = enc.beginComputePass();
+      pass.setPipeline(this.pPrim);
+      pass.setBindGroup(0, this.gPrim[p]);
+      dispatchN(pass, n);
+      this.redDt.encode(pass);
+      pass.setPipeline(this.pClock);
+      pass.setBindGroup(0, this.gClock);
+      pass.dispatchWorkgroups(1);
+      pass.setPipeline(this.pUpdate);
+      pass.setBindGroup(0, this.gUpdate[p]);
+      dispatchN(pass, n);
+      if (grav) {
+        // Keep the old potential, solve for that of the updated density (warm-started), then
+        // apply the second half kick.
+        pass.end();
+        this.copyPhiToOld(enc);
+        pass = enc.beginComputePass();
+        this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
+        for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
+        pass.setPipeline(this.pCorrect);
+        pass.setBindGroup(0, this.gCorrect[p]);
+        dispatchN(pass, n);
+      } else {
+        this.cur = 1 - p;
+      }
+      pass.end();
+    }
+  }
+
+  step(count = 1) {
+    const enc = this.device.createCommandEncoder();
+    this.encodeSteps(enc, count);
+    this.device.queue.submit([enc.finish()]);
+  }
+
+  /**
+   * Reduce and read back the diagnostics. Returns null if a readback is already in flight,
+   * so the frame loop can call this freely without ever waiting on the GPU.
+   */
+  async readDiagnostics(): Promise<Diagnostics | null> {
+    if (this.stagingBusy) return null;
+    this.stagingBusy = true;
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    this.redDiag.encode(pass, this.cur);
+    pass.end();
+    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
+    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
+    this.device.queue.submit([enc.finish()]);
+    try {
+      await this.staging.mapAsync(GPUMapMode.READ);
+      const a = new Float32Array(this.staging.getMappedRange().slice(0));
+      this.staging.unmap();
+      const r = a.subarray(4);
+      const ranges: [number, number][] = [];
+      for (let i = 0; i < 5; i++) ranges.push([r[10 + 2 * i], r[11 + 2 * i]]);
+      return {
+        t: a[1] + a[0],
+        dt: a[0],
+        steps: a[3] + (a[0] > 0 ? 1 : 0),
+        mass: r[0],
+        momentum: [r[1], r[2], r[3]],
+        eKin: r[4],
+        eInt: r[5],
+        eGrav: r[6],
+        eTot: r[4] + r[5] + r[6],
+        maxMach: r[7],
+        floored: r[8],
+        jeansUnresolved: r[9],
+        ranges,
+      };
+    } finally {
+      this.stagingBusy = false;
+    }
+  }
+
+  /** Diagnostics, waiting for any in-flight readback first (tests). */
+  async diagnostics(): Promise<Diagnostics> {
+    for (;;) {
+      const d = await this.readDiagnostics();
+      if (d) return d;
+      await new Promise((r) => setTimeout(r, 1));
+    }
+  }
+
+  /** Step until the clock reaches cfg.tEnd. Returns the number of steps taken. */
+  async runToEnd(batch = 16, maxSteps = 1e6): Promise<number> {
+    if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
+    const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    let steps = 0;
+    try {
+      for (;;) {
+        const enc = this.device.createCommandEncoder();
+        this.encodeSteps(enc, batch);
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        this.device.queue.submit([enc.finish()]);
+        await buf.mapAsync(GPUMapMode.READ);
+        const c = new Float32Array(buf.getMappedRange().slice(0));
+        buf.unmap();
+        steps = c[3];
+        if (!(c[0] === c[0]) || !(c[1] === c[1])) throw new Error(`clock is NaN after ${steps} steps`);
+        if (c[0] === 0 && c[1] > 0) return steps;
+        if (steps > maxSteps) throw new Error(`no convergence to tEnd after ${steps} steps (t = ${c[1]})`);
+      }
+    } finally {
+      buf.destroy();
+    }
+  }
+
+  /**
+   * Flux determinism check: evaluates one step's face mass fluxes and counts the
+   * faces where the two cells sharing the face disagree in any bit. The state is not advanced.
+   */
+  async fluxMismatch(): Promise<{ faces: number; mismatched: number; maxDiff: number }> {
+    const d = this.device;
+    const n = this.n;
+    const c = this.cfg;
+    const slots = {
+      eos: EOS_MODULES[c.eos],
+      riemann: `hydro/riemann/${c.riemann}.wgsl`,
+      limiter: `hydro/limiters/${c.limiter}.wgsl`,
+    };
+    const pipe = await computePipeline(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', { DEBUG_FLUX: 1 });
+    const p = this.cur;
+    const o = 1 - p;
+    const v = (t: GPUTexture) => t.createView();
+    const group = bindGroup(d, pipe, {
+      0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]),
+      4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.mg.phi),
+      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.mg.phiOld),
+    });
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.pPrim);
+    pass.setBindGroup(0, this.gPrim[p]);
+    dispatchN(pass, n);
+    pass.setPipeline(pipe);
+    pass.setBindGroup(0, group);
+    dispatchN(pass, n);
+    pass.end();
+    d.queue.submit([enc.finish()]);
+    const f1 = await readTexture(d, this.state[o][0], n, 4);
+    const f2 = await readTexture(d, this.state[o][1], n, 4);
+    const flux = (i: number, j: number, k: number, f: number) => {
+      const cell = ((k * n + j) * n + i) * 4;
+      return f < 4 ? f1[cell + f] : f2[cell + f - 4];
+    };
+    let faces = 0;
+    let mismatched = 0;
+    let maxDiff = 0;
+    for (let k = 0; k < n; k++)
+      for (let j = 0; j < n; j++)
+        for (let i = 0; i < n; i++)
+          for (let a = 0; a < 3; a++) {
+            const q = [i, j, k];
+            q[a]++;
+            if (q[a] >= n) {
+              if (c.bcLo[a] !== 0) continue; // only periodic faces have a partner cell
+              q[a] = 0;
+            }
+            const mine = flux(i, j, k, 2 * a + 1); // my upper face
+            const theirs = flux(q[0], q[1], q[2], 2 * a); // neighbour's lower face
+            faces++;
+            if (mine !== theirs) {
+              mismatched++;
+              maxDiff = Math.max(maxDiff, Math.abs(mine - theirs));
+            }
+          }
+    return { faces, mismatched, maxDiff };
+  }
+
+  /** Current conserved state as float arrays (validation only). */
+  async readState(): Promise<{ u1: Float32Array; u2: Float32Array }> {
+    const [a, b] = this.state[this.cur];
+    return { u1: await readTexture(this.device, a, this.n, 4), u2: await readTexture(this.device, b, this.n, 4) };
+  }
+
+  async readPotential(): Promise<Float32Array> {
+    return readTexture(this.device, this.mg.phi, this.n, 1);
+  }
+
+  /** Max |residual| of the Poisson solve on the finest level. */
+  async poissonResidual(): Promise<number> {
+    const enc = this.device.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    this.mg.encodeResidual(pass);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+    const r = await readTexture(this.device, this.mg.levels[0].res, this.n, 1);
+    let m = 0;
+    for (let i = 0; i < r.length; i++) m = Math.max(m, Math.abs(r[i]));
+    return m;
+  }
+
+  destroy() {
+    for (const s of this.state) for (const t of s) t.destroy();
+    for (const t of this.prim) t.destroy();
+    this.mg.destroy();
+  }
+}

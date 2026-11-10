@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Shaderous</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/src/ui/style.css" />
+  </head>
+  <body>
+    <div id="app">
+      <aside id="side"></aside>
+      <main id="stage">
+        <canvas id="view"></canvas>
+        <div id="hud"></div>
+        <div id="colorbar"><canvas width="1" height="256"></canvas><div class="ticks"><span id="cb-hi"></span><span id="cb-lo"></span></div></div>
+        <div id="error"></div>
+      </main>
+    </div>
+    <script type="module" src="/src/ui/app.ts"></script>
+  </body>
+</html>
