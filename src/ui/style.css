@@ -50,6 +50,7 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .buttons { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
 .buttons button { height: 26px; padding: 0; }
 #run { border-color: #3a4a66; background: #223049; }
+.io button { height: 24px; padding: 0; font-size: 12px; }
 .jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }
 .jeans .check { height: 24px; }
 #pparams { display: contents; }
@@ -156,6 +157,7 @@ body.validate th { color: var(--dim); font-weight: 500; }
   #problem { height: 40px !important; }
   #side input[type='range'] { height: 36px; }
   .buttons button { height: 40px; font-size: 15px; }
+  .io button { height: 36px; font-size: 14px; }
   .check { font-size: 14px; min-height: 32px; }
   summary { font-size: 12px; min-height: 28px; align-items: center; }
   .f > span { font-size: 11.5px; line-height: 15px; }

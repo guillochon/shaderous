@@ -423,6 +423,34 @@ export class AmrSim implements Simulation {
     return ind;
   }
 
+  private finerInSnapshot(b: Block, levelAt: (x: number, y: number, z: number) => number): boolean {
+    const three = this.cfg.ndim === 3;
+    const size = (BS * this.dx0) / (1 << b.level);
+    const half = this.cfg.problem.box / 2;
+    for (let o = 0; o < (three ? 8 : 4); o++) {
+      const at = (a: number) => (b.c[a] + (((o >> a) & 1) + 0.5) / 2) * size - half;
+      if (levelAt(at(0), at(1), three ? at(2) : 0) > b.level) return true;
+    }
+    return false;
+  }
+
+  /** Time, step count and perturber state, for a snapshot (see io/snapshot.ts). */
+  async readRestart(): Promise<{ time: number; steps: number; perturber?: { pos: number[]; vel: number[] } }> {
+    const d = this.device;
+    const buf = d.createBuffer({ size: 48, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = d.createCommandEncoder();
+    enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+    enc.copyBufferToBuffer(this.bh, 0, buf, 16, 32);
+    d.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const f = new Float32Array(buf.getMappedRange().slice(0));
+    buf.unmap();
+    buf.destroy();
+    const out: { time: number; steps: number; perturber?: { pos: number[]; vel: number[] } } = { time: f[1], steps: f[3] };
+    if (this.cfg.problem.perturber) out.perturber = { pos: [f[4], f[5], f[6]], vel: [f[8], f[9], f[10]] };
+    return out;
+  }
+
   /** Load the problem's initial conditions on a mesh refined to fit them. */
   reset() {
     const c = this.cfg;
@@ -437,13 +465,19 @@ export class AmrSim implements Simulation {
     // a refinement boundary that cuts a steep hydrostatic gradient at an arbitrary place
     // disturbs the balance far more than resolving all of it one level coarser.
     const strict = this.selfGravity;
+    const levelAt = c.restart?.levelAt;
     for (let limit = this.levels; ; limit--) {
       this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi);
       this.tree.levelLimit = limit;
       for (let pass = 0; pass < limit; pass++) {
-        if (!this.tree.adapt((b) => this.indicator(b, prim), c.refineHi, c.refineLo)) break;
+        // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
+        // is finer than it at the centre of one of its children.
+        const changed = levelAt
+          ? this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1)
+          : this.tree.adapt((b) => this.indicator(b, prim), c.refineHi, c.refineLo);
+        if (!changed) break;
       }
-      if (!strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;
+      if (levelAt || !strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;
     }
 
     const three = c.ndim === 3;
@@ -480,9 +514,10 @@ export class AmrSim implements Simulation {
     this.stepsSinceFlag = 0;
     this.regrids = 0;
     this.rhoMean = mass / c.problem.box ** c.ndim;
-    d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
+    // The clock is (dt, t, Kahan compensation, steps).
+    d.queue.writeBuffer(this.clock, 0, new Float32Array(c.restart ? [0, c.restart.time, 0, c.restart.steps] : [0, 0, 0, 0]));
     if (c.problem.perturber) {
-      const bh = c.problem.perturber(c.params, c.G);
+      const bh = c.restart?.perturber ?? c.problem.perturber(c.params, c.G);
       d.queue.writeBuffer(this.bh, 0, new Float32Array([...bh.pos, 0, ...bh.vel, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
     }
     this.writeParams();

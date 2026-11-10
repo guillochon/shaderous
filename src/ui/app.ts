@@ -2,6 +2,8 @@
 import { BUILD, reportError, setAdapterInfo } from './errors';
 import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
+import { capture, restartFrom } from '../io/capture';
+import { maxLevel, type Snapshot } from '../io/snapshot';
 import { configFor, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
@@ -45,6 +47,11 @@ side.innerHTML = `
       <span id="pparams"></span>
     </div>
     <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
+    <div class="g2 io">
+      <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
+      <button id="import" title="Load a state from an .athdf file: one saved here, or another code's with density, velocity and pressure">Import state</button>
+      <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
+    </div>
   </section>
 
   <details open>
@@ -190,7 +197,7 @@ function syncControls() {
   const uniform = cfg.gext.some((g) => g !== 0);
   $('sum-grav').textContent = [cfg.gravity === 'off' ? '' : cfg.gravity, uniform ? 'uniform field' : ''].filter(Boolean).join(' + ') || 'off';
   $<HTMLInputElement>('tend').value = Number.isFinite(cfg.tEnd) ? String(cfg.tEnd) : '';
-  $('blurb').textContent = cfg.problem.blurb;
+  $('blurb').textContent = cfg.restart ? `Loaded from a file, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
   $<HTMLSelectElement>('eos').value = cfg.eos;
   $<HTMLInputElement>('gamma').value = String(+cfg.eosParams.gamma.toFixed(4));
   $<HTMLInputElement>('K').value = String(cfg.eosParams.K);
@@ -266,7 +273,7 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 }
 
 /** Build a simulation for the selected preset and resolution. */
-function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides) {
+function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot) {
   return enqueue(async () => {
     const problem = problemById(problemId);
     if (!problem.supports2d) ndim = 3;
@@ -279,7 +286,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
     if (keepPhysics && cfg && cfg.problem === problem && cfg.ndim === ndim) {
       // Same preset at a new resolution: keep the user's physics choices.
-      const { n: _n, problem: _p, amrLevels: _l, ...rest } = cfg;
+      const { n: _n, problem: _p, amrLevels: _l, restart: _r, ...rest } = cfg;
       Object.assign(next, rest);
     } else {
       const dv = viewDefaults(problem, ndim);
@@ -298,6 +305,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
         pushTransfer();
       }
     }
+    // From a file: the same preset, started from the saved state instead of its own.
+    if (snap) Object.assign(next, restartFrom(snap, problem, levels > 0, n >> levels));
     const old = sim;
     sim = undefined;
     old?.destroy();
@@ -307,10 +316,71 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     await renderer.attach(s);
     sim = s;
     finished = false;
-    running = true; // a freshly loaded problem starts playing
+    running = !snap; // a freshly loaded problem starts playing; a loaded state waits to be looked at
     lastDiag = undefined;
     nsub = 1;
   });
+}
+
+/** Save the state of the gas to an .athdf file (see io/athdf.ts). */
+function exportState() {
+  const button = $('export');
+  return enqueue(async () => {
+    if (!sim) return;
+    button.textContent = 'Exporting…';
+    try {
+      const snap = await capture(sim, { program: 'shaderous', build: BUILD, query: linkQuery() });
+      const { writeAthdf } = await import('../io/athdf');
+      const bytes = await writeAthdf(snap);
+      const name = `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-t${+snap.time.toPrecision(4)}.athdf`;
+      const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/x-hdf5' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = name;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } finally {
+      button.textContent = 'Export state';
+    }
+  });
+}
+
+/** Start a run from an .athdf file: one of ours with its settings, or another code's. */
+async function importState(file: File) {
+  const button = $('import');
+  button.textContent = 'Importing…';
+  try {
+    const { readAthdf } = await import('../io/athdf');
+    const snap = await readAthdf(new Uint8Array(await file.arrayBuffer()));
+    const cubic = snap.rootSize[0] === snap.rootSize[1] && (snap.ndim === 2 || snap.rootSize[2] === snap.rootSize[0]);
+    const width = snap.hi.map((h, a) => h - snap.lo[a]);
+    if (!cubic || Math.abs(width[0] - width[1]) > 1e-4 * width[0] || (snap.ndim === 3 && Math.abs(width[0] - width[2]) > 1e-4 * width[0])) {
+      throw new Error('only square or cubic domains can be loaded');
+    }
+    // Our own file carries its settings. Anyone else's keeps the current ones and takes the
+    // file's dimensionality and the nearest resolution on offer.
+    const own = snap.meta !== undefined;
+    const link = decodeLink(new URLSearchParams(own ? snap.meta!.query : linkQuery()));
+    if (!own) {
+      const problem = problemById(link.problem);
+      if (snap.ndim === 2 && !problem.supports2d) throw new Error(`this file is 2D, and the ${problem.label} preset is 3D only: pick a 2D preset first`);
+      const allowed = snap.ndim === 2 ? RES_2D : RES_3D;
+      const finest = snap.rootSize[0] << maxLevel(snap);
+      const fits = allowed.filter((n) => n <= finest);
+      link.ndim = snap.ndim;
+      link.n = fits.length ? fits[fits.length - 1] : allowed[0];
+      link.amr = maxLevel(snap) > 0 && supportsAmr(problem) ? Math.min(maxLevel(snap), maxAmrLevels(link.n)) : 0;
+      if (link.amr === 0) link.n = Math.min(link.n, UNIFORM_MAX[link.ndim]);
+      // The run continues to wherever the current settings say; a foreign time means nothing here.
+      delete link.cfg.tEnd;
+    }
+    await build(link.problem, link.n, link.ndim, link.amr, false, link, snap);
+  } catch (e) {
+    // A file that cannot be used is not a fault of the page: say so and carry on.
+    alert(`Could not load ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    button.textContent = 'Import state';
+  }
 }
 
 /** The current settings as a query string (see ui/link.ts). */
@@ -471,6 +541,15 @@ function bind() {
   on('fluxwork', (el) => {
     cfg.gravEnergyFlux = el.checked;
     applyParams();
+  });
+
+  $('export').addEventListener('click', () => exportState());
+  const picker = $<HTMLInputElement>('import-file');
+  $('import').addEventListener('click', () => picker.click());
+  picker.addEventListener('change', () => {
+    const file = picker.files?.[0];
+    picker.value = ''; // so the same file can be chosen again
+    if (file) importState(file);
   });
 
   $('share').addEventListener('click', async () => {

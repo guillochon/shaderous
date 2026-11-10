@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'advection', 'advection-accuracy', 'flux-determinism',
-  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
+  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'snapshot-roundtrip', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
 ];
 
 test.describe.configure({ mode: 'serial' });
@@ -113,5 +113,37 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   const d4 = await page.evaluate(() => (window as any).shaderousApp.diag);
   expect(d4.eGrav).toBeLessThan(0);
   expect(Number.isFinite(d4.eTot)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('a state exported from the page can be imported again', async ({ page }) => {
+  const errors: string[] = [];
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  page.on('pageerror', (e) => errors.push(e.message));
+  const app = <T>(f: string) => page.evaluate(`(() => { const a = window.shaderousApp; return ${f}; })()`) as Promise<T>;
+
+  await page.goto('/?problem=sedov&dim=3&n=32&cfl=0.5');
+  await page.waitForFunction(() => (window as any).shaderousApp?.diag?.steps > 10, undefined, { timeout: 60_000 });
+  const [download] = await Promise.all([page.waitForEvent('download'), page.click('#export')]);
+  expect(download.suggestedFilename()).toMatch(/^shaderous-sedov-3d-32-t.*\.athdf$/);
+  const file = await download.path();
+
+  // Move to something else entirely, then load the file: preset, grid, settings and time return.
+  await page.selectOption('#problem', 'kelvin-helmholtz');
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'kelvin-helmholtz' && (window as any).shaderousApp.sim);
+  await page.setInputFiles('#import-file', file);
+  await page.waitForFunction(
+    () => {
+      const a = (window as any).shaderousApp;
+      return a.cfg.restart && a.sim && a.diag && a.diag.t === a.cfg.restart.time;
+    },
+    undefined,
+    { timeout: 60_000 },
+  );
+  expect(await app('[a.cfg.problem.id, a.cfg.ndim, a.cfg.n, a.cfg.cfl]')).toEqual(['sedov', 3, 32, 0.5]);
+  expect(await app<number>('a.cfg.restart.time')).toBeGreaterThan(0);
+  expect(await app<number>('a.cfg.restart.steps')).toBeGreaterThan(10);
+  expect(await page.textContent('#run')).toBe('Run'); // a loaded state waits
+  expect(await app<number>('a.diag.mass')).toBeCloseTo(1, 4);
   expect(errors).toEqual([]);
 });

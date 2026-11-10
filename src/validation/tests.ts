@@ -18,6 +18,8 @@ import { evrard } from '../problems/evrard';
 import { tidalDisruption, tdeOrbit, TDE_STAR } from '../problems/tidal_disruption';
 import { sphere, spherePotential } from '../problems/sphere';
 import { all, REFLECT, type Problem } from '../problems/types';
+import { capture, restartFrom } from '../io/capture';
+import { readAthdf, writeAthdf } from '../io/athdf';
 
 export interface TestResult {
   id: string;
@@ -694,6 +696,103 @@ export const TESTS: TestDef[] = [
           },
         };
       });
+    },
+  },
+  {
+    id: 'snapshot-roundtrip',
+    name: 'Export to HDF5 and import again',
+    criterion:
+      'A run saved to an .athdf file and started again from it has the same time, the same mesh, and a state equal to round-off (1e-5 relative); continued for the same number of steps, the two runs still agree to 1e-4. Checked on a uniform grid, an adaptive mesh, and a run with a perturber',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const worst = (a: Float32Array, b: Float32Array) => {
+        let scale = 0;
+        let diff = 0;
+        for (let i = 0; i < a.length; i += 4) {
+          scale = Math.max(scale, Math.abs(a[i]));
+          diff = Math.max(diff, Math.abs(a[i] - b[i]));
+        }
+        return diff / scale;
+      };
+      const roundtrip = async (s: Sim | AmrSim) => {
+        const bytes = await writeAthdf(await capture(s, { program: 'shaderous', build: 'test', query: '' }));
+        return { bytes: bytes.length, snap: await readAthdf(bytes) };
+      };
+
+      // Uniform grid.
+      await withSim(gpu, sedov, 64, { tEnd: 0.02 }, async (a) => {
+        await a.runToEnd();
+        const { bytes, snap } = await roundtrip(a);
+        const cfg = { ...configFor(sedov, 64, { tEnd: 0.03 }), ...restartFrom(snap, sedov, false, 64) };
+        const b = await Sim.create(gpu, cfg);
+        try {
+          const [da, db] = [await a.diagnostics(), await b.diagnostics()];
+          const state = worst((await a.readState()).u1, (await b.readState()).u1);
+          a.cfg.tEnd = 0.03;
+          a.writeParams();
+          const [sa, sb] = [await a.runToEnd(), await b.runToEnd()];
+          const later = worst((await a.readState()).u1, (await b.readState()).u1);
+          Object.assign(metrics, { uniform_file_bytes: bytes, uniform_time_difference: Math.abs(da.t - db.t), uniform_state_difference: state, uniform_difference_after_continuing: later, uniform_steps_continued: sb });
+          pass &&= da.t === db.t && db.steps === da.steps && state < 1e-5 && later < 1e-4 && sa === sb;
+        } finally {
+          b.destroy();
+        }
+      });
+
+      // Adaptive mesh: the same blocks at the same levels, and the same cells in them.
+      await withAmr(gpu, sedov, 128, { amrLevels: 2, tEnd: 0.02 }, async (a) => {
+        await a.runToEnd();
+        a.flush();
+        const { bytes, snap } = await roundtrip(a);
+        const cfg = { ...configFor(sedov, 128, { amrLevels: 2, tEnd: 0.03 }), ...restartFrom(snap, sedov, true, 32) };
+        const b = await AmrSim.create(gpu, cfg);
+        try {
+          const key = (s: AmrSim) => s.tree.leaves().map((l) => `${l.level}:${l.c.join(',')}`).sort().join(' ');
+          const sameMesh = key(a) === key(b);
+          const [ca, cb] = [await a.readLeaves(), await b.readLeaves()];
+          // Leaves may be stored in a different order; compare cell by cell through positions.
+          const at = new Map<string, number>();
+          for (let q = 0; q < ca.count; q++) at.set(`${ca.x[q]},${ca.y[q]},${ca.z[q]}`, ca.u1[4 * q]);
+          let scale = 0;
+          let diff = 0;
+          let missing = 0;
+          for (let q = 0; q < cb.count; q++) {
+            const v = at.get(`${cb.x[q]},${cb.y[q]},${cb.z[q]}`);
+            if (v === undefined) missing++;
+            else {
+              scale = Math.max(scale, Math.abs(v));
+              diff = Math.max(diff, Math.abs(v - cb.u1[4 * q]));
+            }
+          }
+          const [da, db] = [await a.diagnostics(), await b.diagnostics()];
+          Object.assign(metrics, {
+            adaptive_file_bytes: bytes, adaptive_leaf_blocks: a.tree.stats().leaves, adaptive_same_mesh: sameMesh ? 1 : 0,
+            adaptive_cells_without_a_match: missing, adaptive_state_difference: diff / scale, adaptive_mass_difference: Math.abs(da.mass - db.mass) / da.mass,
+          });
+          pass &&= sameMesh && missing === 0 && cb.count === ca.count && diff / scale < 1e-5 && da.t === db.t;
+        } finally {
+          b.destroy();
+        }
+      });
+
+      // A run with a perturber: its position and velocity come back too.
+      await withSim(gpu, tidalDisruption, 32, { tEnd: 0.5 }, async (a) => {
+        await a.runToEnd();
+        const before = await a.readRestart();
+        const { snap } = await roundtrip(a);
+        const cfg = { ...configFor(tidalDisruption, 32, { tEnd: 1 }), ...restartFrom(snap, tidalDisruption, false, 32) };
+        const b = await Sim.create(gpu, cfg);
+        try {
+          const after = await b.readRestart();
+          const d = Math.max(...[0, 1, 2].map((i) => Math.max(Math.abs(before.perturber!.pos[i] - after.perturber!.pos[i]), Math.abs(before.perturber!.vel[i] - after.perturber!.vel[i]))));
+          metrics.perturber_difference = d;
+          pass &&= d === 0 && after.time === before.time;
+        } finally {
+          b.destroy();
+        }
+      });
+      return { pass, metrics };
     },
   },
   {

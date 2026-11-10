@@ -47,6 +47,24 @@ preset's defaults (physics, the preset's own parameters, view and camera), for e
 `?problem=tidal-disruption&dim=3&n=128&amr=2&p.beta=2&mode=slice`. Copy it, or use the Share
 button, to hand someone the same setup. A bare visit opens Kelvin-Helmholtz at 1024 squared in 2D.
 
+## Saving and loading the state
+
+**Export state** writes the gas as an HDF5 file in the layout Athena++ uses (`.athdf`), and
+**Import state** starts a run from one.
+
+- The file holds the primitive variables `rho`, `press`, `vel1`-`vel3` and the passive scalar
+  `r0` in a `prim` dataset, block by block, with each block's refinement level and position.
+  A uniform grid is one block; an adaptive run writes its leaf blocks. yt opens these files
+  as Athena++ data (`yt.load("file.athdf")`), in 2D and 3D, uniform and refined.
+- Files written here also carry the run's settings, time, step count and perturber, so
+  importing one restores the preset, grid, physics and view, and continues from the same
+  state on the same mesh. The loaded run starts paused, and Reset returns to the loaded state.
+- A file from another code needs `rho`, `press` and `vel1`-`vel3` on a Cartesian, uniformly
+  spaced, square or cubic domain. It is sampled onto the nearest resolution on offer, cell
+  centre by cell centre (not conservatively), keeping the current preset's physics.
+- HDF5 comes from h5wasm, loaded the first time either button is used (about 1 MB compressed).
+  A 256^3 state is about 400 MB.
+
 ## Tests
 
 ```bash
@@ -76,6 +94,7 @@ src/
   problems/    one file per preset
   reference/   float64 CPU implementation of the hydro scheme, exact Riemann solver
   validation/  the in-page validation suite
+  io/          snapshots of the state, and the Athena++ HDF5 reader and writer
   ui/          the simulator front end
   sim.ts       owns the textures and encodes a step
 tests/         unit/ (Vitest) and gpu/ (Playwright)

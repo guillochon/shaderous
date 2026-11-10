@@ -6,6 +6,7 @@ import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { Multigrid } from './gravity/multigrid';
 import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } from './eos/eos';
 import type { Bc3, GravityMode, Problem } from './problems/types';
+import type { Restart } from './io/snapshot';
 
 export type RiemannKind = 'hllc' | 'hll';
 export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
@@ -46,6 +47,8 @@ export interface SimConfig {
   amrLevels: number;
   /** Atlas slots per side for the adaptive mesh (0 = choose from the root grid). */
   amrBudget: number;
+  /** Start from a snapshot: its time, step count and perturber rather than the preset's. */
+  restart?: Restart;
   /** A block is split where its refinement indicator exceeds refineHi, merged below refineLo. */
   refineHi: number;
   refineLo: number;
@@ -441,7 +444,7 @@ export class Sim implements Simulation {
     const eos = makeEos(c.eos, c.eosParams);
     const fn = c.problem.init(n, eos, c.ndim, c.params);
     if (c.problem.perturber) {
-      const bh = c.problem.perturber(c.params, c.G);
+      const bh = c.restart?.perturber ?? c.problem.perturber(c.params, c.G);
       this.device.queue.writeBuffer(this.bh, 0, new Float32Array([...bh.pos, 0, ...bh.vel, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
     }
     const u1 = new Float32Array(n * n * nz * 4);
@@ -470,6 +473,25 @@ export class Sim implements Simulation {
       }
     }
     this.setState(u1, u2, mass / (n * n * nz));
+    // The clock is (dt, t, Kahan compensation, steps).
+    if (c.restart) this.device.queue.writeBuffer(this.clock, 0, new Float32Array([0, c.restart.time, 0, c.restart.steps]));
+  }
+
+  /** Time, step count and perturber state, for a snapshot (see io/snapshot.ts). */
+  async readRestart(): Promise<{ time: number; steps: number; perturber?: { pos: number[]; vel: number[] } }> {
+    const d = this.device;
+    const buf = d.createBuffer({ size: 48, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = d.createCommandEncoder();
+    enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+    enc.copyBufferToBuffer(this.bh, 0, buf, 16, 32);
+    d.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const f = new Float32Array(buf.getMappedRange().slice(0));
+    buf.unmap();
+    buf.destroy();
+    const out: { time: number; steps: number; perturber?: { pos: number[]; vel: number[] } } = { time: f[1], steps: f[3] };
+    if (this.cfg.problem.perturber) out.perturber = { pos: [f[4], f[5], f[6]], vel: [f[8], f[9], f[10]] };
+    return out;
   }
 
   /** Replace the state with raw conserved arrays (rho, m), (E, e_int, rho s, 0). */
