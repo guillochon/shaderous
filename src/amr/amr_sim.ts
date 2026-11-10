@@ -126,7 +126,7 @@ export class AmrSim implements Simulation {
     return this.params;
   }
 
-  private constructor(gpu: Gpu, cfg: SimConfig) {
+  private constructor(gpu: Gpu, cfg: SimConfig, slots = 0) {
     const d = (this.device = gpu.device);
     this.cfg = cfg;
     this.n = cfg.n;
@@ -140,11 +140,12 @@ export class AmrSim implements Simulation {
     // Atlas size: room for the roots plus refinement, within what a texture can hold.
     const limit = Math.floor(Math.min(gpu.limits.maxTextureDimension3D, 2048) / PAD);
     // Default budget: what refining everywhere would need (leaves plus their parents) in 3D,
-    // three quarters of that in 2D, capped so the 3D atlases stay within about 1 GB.
+    // three quarters of that in 2D, capped so the 3D atlases stay within about 3 GB (2197
+    // blocks; create() falls back to a smaller atlas if the GPU cannot hold that).
     const full = roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3);
     const auto = Math.ceil(Math.pow(Math.max(full * (cfg.ndim === 3 ? 1 : 0.75), roots * 2), 1 / cfg.ndim));
-    const [lo, hi] = cfg.ndim === 3 ? [6, 10] : [12, 100];
-    this.slotsPerSide = Math.min(limit, cfg.amrBudget || Math.min(hi, Math.max(lo, auto)));
+    const [lo, hi] = cfg.ndim === 3 ? [6, 13] : [12, 100];
+    this.slotsPerSide = Math.min(limit, slots || cfg.amrBudget || Math.min(hi, Math.max(lo, auto)));
     this.cap = this.slotsPerSide ** cfg.ndim;
     if (roots > this.cap) throw new Error(`${roots} root blocks do not fit in an atlas of ${this.cap}`);
 
@@ -177,8 +178,32 @@ export class AmrSim implements Simulation {
     this.staging = d.createBuffer({ size: DIAG_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   }
 
+  /** Build the simulation; if the GPU runs out of memory, try again with a smaller atlas. */
   static async create(gpu: Gpu, cfg: SimConfig): Promise<AmrSim> {
-    const sim = new AmrSim(gpu, cfg);
+    for (let slots = 0; ; ) {
+      gpu.device.pushErrorScope('out-of-memory');
+      let sim: AmrSim | null = null;
+      let failure: unknown = null;
+      try {
+        sim = await AmrSim.build(gpu, cfg, slots);
+        await gpu.device.queue.onSubmittedWorkDone();
+      } catch (e) {
+        failure = e;
+      }
+      const oom = await gpu.device.popErrorScope();
+      if (!oom && sim) return sim;
+      const tried = sim?.slotsPerSide ?? slots;
+      sim?.destroy();
+      const next = Math.floor(tried * 0.85);
+      const roots = ((cfg.n >> cfg.amrLevels) / BS) ** cfg.ndim;
+      if (!oom || !tried || next ** cfg.ndim < roots * 2) throw failure ?? new Error('not enough GPU memory for the adaptive mesh at this resolution');
+      console.warn(`adaptive mesh: out of GPU memory with ${tried ** cfg.ndim} blocks, retrying with ${next ** cfg.ndim}`);
+      slots = next;
+    }
+  }
+
+  private static async build(gpu: Gpu, cfg: SimConfig, slots: number): Promise<AmrSim> {
+    const sim = new AmrSim(gpu, cfg, slots);
     const d = sim.device;
     const v = (t: GPUTexture) => t.createView();
     const depth = cfg.ndim === 2 ? 1 : BS;

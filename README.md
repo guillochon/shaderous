@@ -110,7 +110,8 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   uniform sphere the error stays below 0.3% with three levels. The solve is many small
   dispatches, so a self-gravitating adaptive step costs noticeably more than a hydro one.
   Refinement also triggers where the Jeans length falls below `jeansRefine` cells (16 by
-  default). The atlas holds at most 1000 blocks in 3D; if the initial mesh of a
+  default). The atlas holds at most 2197 blocks in 3D (about 3 GB of GPU memory with
+  gravity; it shrinks automatically if the GPU cannot allocate that); if the initial mesh of a
   self-gravitating run cannot fit a whole level within that, the level is left out (the
   status line says so) rather than letting a refinement boundary cut through a star at an
   arbitrary place, which disturbs hydrostatic balance. Periodic gravity assumes periodic hydro boundaries on the adaptive mesh.
