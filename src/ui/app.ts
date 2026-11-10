@@ -108,7 +108,7 @@ side.innerHTML = `
     <div id="diag"><dl></dl><dl></dl></div>
   </details>
 
-  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 // On a phone the controls are a sheet under the simulation, closed until asked for.
