@@ -12,7 +12,31 @@ fn red_cell(c: vec3<i32>) -> Red {
   let slot = c.x / BS;
   let big = 3.0e38;
   if (!blk_leaf(slot)) {
-    return Red(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -big, 0.0, 0.0, big, -big, big, -big, big, -big, big, -big, big, -big, 0.0, 0.0, 0.0);
+    var r0: Red;
+    r0[0] = 0.0;
+    r0[1] = 0.0;
+    r0[2] = 0.0;
+    r0[3] = 0.0;
+    r0[4] = 0.0;
+    r0[5] = 0.0;
+    r0[6] = 0.0;
+    r0[7] = -big;
+    r0[8] = 0.0;
+    r0[9] = 0.0;
+    r0[10] = big;
+    r0[11] = -big;
+    r0[12] = big;
+    r0[13] = -big;
+    r0[14] = big;
+    r0[15] = -big;
+    r0[16] = big;
+    r0[17] = -big;
+    r0[18] = big;
+    r0[19] = -big;
+    r0[20] = 0.0;
+    r0[21] = 0.0;
+    r0[22] = 0.0;
+    return r0;
   }
   let l = vec3<i32>(c.x % BS, c.y, c.z);
   let a = atl(blk_origin(slot), l);
@@ -41,11 +65,29 @@ fn red_cell(c: vec3<i32>) -> Red {
   }
   let floored = select(0.0, 1.0, u1.x <= P.rho_floor * 1.0001 || p <= P.p_floor * 1.0001);
 
-  return Red(
-    rho * dv, u1.y * dv, u1.z * dv, u1.w * dv,
-    0.5 * rho * dot(v, v) * dv, eint * dv, egrav,
-    speed / cs, floored, jeans,
-    rho, rho, T, T, s, s, p, p, speed, speed,
-    rho * dv * x.x, rho * dv * x.y, rho * dv * x.z,
-  );
+  var r1: Red;
+  r1[0] = rho * dv;
+  r1[1] = u1.y * dv;
+  r1[2] = u1.z * dv;
+  r1[3] = u1.w * dv;
+  r1[4] = 0.5 * rho * dot(v, v) * dv;
+  r1[5] = eint * dv;
+  r1[6] = egrav;
+  r1[7] = speed / cs;
+  r1[8] = floored;
+  r1[9] = jeans;
+  r1[10] = rho;
+  r1[11] = rho;
+  r1[12] = T;
+  r1[13] = T;
+  r1[14] = s;
+  r1[15] = s;
+  r1[16] = p;
+  r1[17] = p;
+  r1[18] = speed;
+  r1[19] = speed;
+  r1[20] = rho * dv * x.x;
+  r1[21] = rho * dv * x.y;
+  r1[22] = rho * dv * x.z;
+  return r1;
 }

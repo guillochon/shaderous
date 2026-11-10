@@ -35,11 +35,29 @@ fn red_cell(c: vec3<i32>) -> Red {
   egrav -= rho * dot(P.gext.xyz, x) * dv;
   let floored = select(0.0, 1.0, u1.x <= P.rho_floor * 1.0001 || p <= P.p_floor * 1.0001);
 
-  return Red(
-    rho * dv, u1.y * dv, u1.z * dv, u1.w * dv,
-    0.5 * rho * dot(v, v) * dv, eint * dv, egrav,
-    speed / cs, floored, jeans,
-    rho, rho, T, T, s, s, p, p, speed, speed,
-    rho * dv * x.x, rho * dv * x.y, rho * dv * x.z,
-  );
+  var r0: Red;
+  r0[0] = rho * dv;
+  r0[1] = u1.y * dv;
+  r0[2] = u1.z * dv;
+  r0[3] = u1.w * dv;
+  r0[4] = 0.5 * rho * dot(v, v) * dv;
+  r0[5] = eint * dv;
+  r0[6] = egrav;
+  r0[7] = speed / cs;
+  r0[8] = floored;
+  r0[9] = jeans;
+  r0[10] = rho;
+  r0[11] = rho;
+  r0[12] = T;
+  r0[13] = T;
+  r0[14] = s;
+  r0[15] = s;
+  r0[16] = p;
+  r0[17] = p;
+  r0[18] = speed;
+  r0[19] = speed;
+  r0[20] = rho * dv * x.x;
+  r0[21] = rho * dv * x.y;
+  r0[22] = rho * dv * x.z;
+  return r0;
 }

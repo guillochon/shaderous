@@ -1,11 +1,17 @@
 // Hierarchical reduction template. Each invocation folds a block of RED_F^3 inputs into one
 // output record, so sums are accumulated in a tree rather than one long float32 chain.
 //
-// <red_def> supplies:    const RED_K: u32;  const RED_OP = array<u32, RED_K>(...)  (0 sum, 1 max, 2 min)
+// <red_def> supplies:    const RED_K: u32, and RED_MAX, RED_MIN: bit i set if channel i is a
+//                        maximum / minimum (otherwise it is a sum)
 // <red_source> supplies: fn red_cell(c: vec3<i32>) -> Red, and its own input bindings (< 20)
 #include <red_def>
 
 alias Red = array<f32, RED_K>;
+
+// 0 sum, 1 max, 2 min.
+fn red_op(i: u32) -> u32 {
+  return ((RED_MAX >> i) & 1u) + 2u * ((RED_MIN >> i) & 1u);
+}
 
 override NINX: u32 = 1u;   // inputs along each axis
 override NINY: u32 = 1u;
@@ -21,23 +27,22 @@ override RED_F: u32 = 4u;  // block side
 
 fn red_identity() -> Red {
   var r: Red;
-  var ops = RED_OP;
   for (var i = 0u; i < RED_K; i++) {
     r[i] = 0.0;
-    if (ops[i] == 1u) { r[i] = -3.0e38; }
-    if (ops[i] == 2u) { r[i] = 3.0e38; }
+    if (red_op(i) == 1u) { r[i] = -3.0e38; }
+    if (red_op(i) == 2u) { r[i] = 3.0e38; }
   }
   return r;
 }
 
 fn red_combine(a: Red, b: Red) -> Red {
   var r: Red;
-  var ops = RED_OP;
   var aa = a;
   var bb = b;
   for (var i = 0u; i < RED_K; i++) {
-    if (ops[i] == 0u) { r[i] = aa[i] + bb[i]; }
-    else if (ops[i] == 1u) { r[i] = max(aa[i], bb[i]); }
+    let op = red_op(i);
+    if (op == 0u) { r[i] = aa[i] + bb[i]; }
+    else if (op == 1u) { r[i] = max(aa[i], bb[i]); }
     else { r[i] = min(aa[i], bb[i]); }
   }
   return r;
