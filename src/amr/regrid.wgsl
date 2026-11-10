@@ -23,7 +23,8 @@ const RG_STRIDE = 12u;
 
 // Conserved state of a cell (ghosts included) rebuilt from the stored primitives.
 fn cons_from_w(c: vec3<i32>) -> MaybeCons {
-  let w1 = textureLoad(W1, c, 0);
+  var w1 = textureLoad(W1, c, 0);
+  w1.x = abs(w1.x);   // negative marks a solid cell
   let w2 = textureLoad(W2, c, 0);
   let m = w1.x * w1.yzw;
   return MaybeCons(Cons(vec4<f32>(w1.x, m), vec4<f32>(w2.w + 0.5 * dot(m, w1.yzw), w2.w, w1.x * w2.z, 0.0)), true);

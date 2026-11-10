@@ -16,7 +16,7 @@ struct Params {
   n: u32,                // cells per side along x and y (level 0 on block grids)
   grav_on: u32,
   grav_bc: u32,          // 0 periodic, 1 isolated
-  flags: u32,
+  flags: u32,            // bit 0: flux-form gravitational work; bit 1: the grid holds solid or fixed cells
   dx: f32,               // cell size (level 0 on block grids)
   cfl: f32,
   G: f32,
@@ -39,6 +39,13 @@ struct Clock {
 }
 
 @group(0) @binding(0) var<uniform> P: Params;
+
+// Obstacles. The fourth component of the second state texture marks a cell: 1 is solid (a wall
+// the gas reflects off), -1 is fixed (gas held at its state, as an inflow), 0 is ordinary gas.
+// Neither kind is ever updated. Passes only look when this says there is something to find.
+fn has_solids() -> bool {
+  return (P.flags & 2u) != 0u;
+}
 
 // Size of the cell this invocation is working on. Every entry point sets it first: it is P.dx
 // on a uniform grid and depends on the block's level on an adaptive one.

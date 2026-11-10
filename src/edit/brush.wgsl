@@ -16,7 +16,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   let x = (vec3<f32>(gid) + 0.5) / vec3<f32>(P.dims.xyz);
-  let out = brush_apply(textureLoad(N1, c, 0), textureLoad(N2, c, 0), brush_weight(x));
+  let out = brush_apply(textureLoad(N1, c, 0), textureLoad(N2, c, 0), x);
   textureStore(O1, c, out.u1);
   textureStore(O2, c, out.u2);
 }

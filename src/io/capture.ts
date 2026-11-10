@@ -69,7 +69,17 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
   }
   return {
     // The same preset, except that its initial conditions are read out of the snapshot.
-    problem: { ...problem, init: () => (x, y, z) => sampler.prim(frac(x), frac(y), frac(z)) },
+    // (Its obstacles and inflow are not in the file: they come from the preset again.)
+    problem: {
+      ...problem,
+      init: (n, eos, ndim, params) => {
+        const preset = problem.init(n, eos, ndim, params);
+        return (x, y, z) => {
+          const { solid, fixed } = preset(x, y, z);
+          return { ...sampler.prim(frac(x), frac(y), frac(z)), solid, fixed };
+        };
+      },
+    },
     restart,
   };
 }

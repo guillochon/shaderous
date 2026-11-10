@@ -14,8 +14,13 @@
 @group(0) @binding(3) var<storage, read_write> FLAGS: array<atomic<u32>>;
 
 fn jump(c: vec3<i32>, e: vec3<i32>) -> f32 {
-  let rp = textureLoad(W1, c + e, 0).x;
-  let rm = textureLoad(W1, c - e, 0).x;
+  // A negative density marks a solid cell. The surface of an obstacle is always refined, so
+  // its shape is kept at the finest resolution.
+  let sp = textureLoad(W1, c + e, 0).x;
+  let sm = textureLoad(W1, c - e, 0).x;
+  if ((sp < 0.0) != (sm < 0.0)) { return 1.0; }
+  let rp = abs(sp);
+  let rm = abs(sm);
   let pp = textureLoad(W2, c + e, 0).x;
   let pm = textureLoad(W2, c - e, 0).x;
   return max(abs(rp - rm) / (rp + rm), abs(pp - pm) / (pp + pm));
@@ -29,7 +34,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var ind = max(jump(c, vec3<i32>(1, 0, 0)), jump(c, vec3<i32>(0, 1, 0)));
   if (!is2d()) { ind = max(ind, jump(c, vec3<i32>(0, 0, 1))); }
   if (P.grav_on != 0u && P.geom.w > 0.0) {
-    let rho = textureLoad(W1, c, 0).x;
+    let rho = abs(textureLoad(W1, c, 0).x);
     let cs = textureLoad(W2, c, 0).y;
     let lj = cs * sqrt(3.14159265 / (P.G * rho));
     ind = max(ind, P.geom.z * P.geom.w * blk_dx(inv.slot) / lj);

@@ -3,6 +3,7 @@ import { sodX, sodY, sodZ, sodDiag, strongShock } from './shocktube';
 import { sedov, sedovRad } from './sedov';
 import { kelvinHelmholtz } from './kelvin_helmholtz';
 import { rayleighTaylor } from './rayleigh_taylor';
+import { forwardStep } from './forward_step';
 import { advection } from './advection';
 import { jeans } from './jeans';
 import { polytrope } from './polytrope';
@@ -15,6 +16,7 @@ export const PROBLEMS: Problem[] = [
   sedov,
   kelvinHelmholtz,
   rayleighTaylor,
+  forwardStep,
   tidalDisruption,
   evrard,
   polytrope,

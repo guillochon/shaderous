@@ -20,6 +20,7 @@ import { bindGroup, computePipeline, readTexture, tex3d, type Gpu } from '../gpu
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { AmrGravity } from './gravity';
 import { EOS_MODULES, makeEos } from '../eos/eos';
+import { cellMark } from '../problems/types';
 import { BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, packBrush, packParams, PARAM_BYTES, type BrushOp, type Diagnostics, type SimConfig, type Simulation } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
@@ -94,6 +95,8 @@ export class AmrSim implements Simulation {
   private brush: GPUBuffer;
   private pBrush!: GPUComputePipeline;
   private gBrush: GPUBindGroup[] = [];
+  /** the grid holds solid or fixed cells, so the passes must look for them */
+  private solids = false;
   private rhoMean = 0;
   private staging: GPUBuffer;
   private stagingBusy = false;
@@ -335,6 +338,7 @@ export class AmrSim implements Simulation {
       perturberGM: this.hasPerturber ? c.problem.perturber!(c.params, c.G).gm : 0,
       amr: [this.slotsPerSide, this.n0 / BS, this.levels, 0],
       refine: [c.refineHi, c.jeansRefine],
+      solids: this.solids,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
   }
@@ -472,6 +476,11 @@ export class AmrSim implements Simulation {
       const w = fn(x, y, z);
       return eos.hasEnergy ? w : { ...w, p: eos.pressure(w.rho, 0) };
     };
+    // For the mesh, an obstacle counts as a jump in density, so its surface starts refined.
+    const surface = (x: number, y: number, z: number) => {
+      const w = prim(x, y, z);
+      return w.solid ? { rho: 4 * w.rho, p: w.p } : w;
+    };
     // With self-gravity a level that only partly fits the block budget is left out altogether:
     // a refinement boundary that cuts a steep hydrostatic gradient at an arbitrary place
     // disturbs the balance far more than resolving all of it one level coarser.
@@ -485,7 +494,7 @@ export class AmrSim implements Simulation {
         // is finer than it at the centre of one of its children.
         const changed = levelAt
           ? this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1)
-          : this.tree.adapt((b) => this.indicator(b, prim), c.refineHi, c.refineLo);
+          : this.tree.adapt((b) => this.indicator(b, surface), c.refineHi, c.refineLo);
         if (!changed) break;
       }
       if (levelAt || !strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;
@@ -497,6 +506,7 @@ export class AmrSim implements Simulation {
     const u1 = new Float32Array(BS * BS * depth * 4);
     const u2 = new Float32Array(BS * BS * depth * 4);
     let mass = 0;
+    this.solids = false;
     for (const b of this.tree.leaves()) {
       const dx = this.dx0 / (1 << b.level);
       let o = 0;
@@ -505,15 +515,18 @@ export class AmrSim implements Simulation {
           for (let i = 0; i < BS; i++, o += 4) {
             const w = prim((b.c[0] * BS + i + 0.5) * dx - half, (b.c[1] * BS + j + 0.5) * dx - half, three ? (b.c[2] * BS + k + 0.5) * dx - half : 0);
             const eint = eos.eintFromP(w.rho, w.p);
+            const mark = cellMark(w);
+            if (mark) this.solids = true;
+            const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
             mass += w.rho * dx ** c.ndim;
             u1[o] = w.rho;
-            u1[o + 1] = w.rho * w.vx;
-            u1[o + 2] = w.rho * w.vy;
-            u1[o + 3] = w.rho * w.vz;
-            u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz);
+            u1[o + 1] = w.rho * w.vx * go;
+            u1[o + 2] = w.rho * w.vy * go;
+            u1[o + 3] = w.rho * w.vz * go;
+            u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz) * go;
             u2[o + 1] = eint;
             u2[o + 2] = w.rho * w.s;
-            u2[o + 3] = 0;
+            u2[o + 3] = mark;
           }
       const origin = this.origin(b.slot);
       const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
@@ -670,6 +683,10 @@ export class AmrSim implements Simulation {
   encodeBrush(enc: GPUCommandEncoder, op: BrushOp) {
     // A waiting re-mesh goes first: it replaces the tables this pass reads.
     if (this.pending) this.applyRegrid(enc);
+    if (op.kind === 'obstacle' && !this.solids) {
+      this.solids = true;
+      this.writeParams();
+    }
     this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
     const pass = enc.beginComputePass();
     pass.setPipeline(this.pBrush);

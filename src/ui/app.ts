@@ -4,7 +4,7 @@ import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } fr
 import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
-import { configFor, type BrushOp, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
+import { configFor, MAX_OUTLINE_VERTICES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
 import { FIELDS, PROBLEMS, problemById, type GravityMode } from '../problems';
@@ -154,13 +154,34 @@ const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = 
     title: 'Temperature: click to multiply by 1.5, or hold; Shift divides',
     icon: icon('<path d="M6 9.3V3a2 2 0 0 1 4 0v6.3a3.5 3.5 0 1 1-4 0z" /><path d="M8 6.5v4.5" /><circle cx="8" cy="11.7" r="1.3" fill="currentColor" stroke="none" />'),
   },
+  {
+    kind: 'obstacle', label: 'Obstacle',
+    title: 'Obstacle: draw a solid body for the gas to flow around. In 3D it is cut through the box along the line of sight',
+    icon: icon('<path d="M2 13.5h12v-7H8.5v-4H2z" fill="currentColor" stroke="none" />'),
+  },
 ];
+/** Ways of drawing an obstacle. */
+type ShapeMode = 'rect' | 'ellipse' | 'polygon';
+const SHAPES: { mode: ShapeMode; title: string; icon: string }[] = [
+  { mode: 'rect', title: 'Rectangle: drag from corner to corner. Shift makes a square; Alt draws from the centre', icon: icon('<rect x="2.5" y="4" width="11" height="8" />') },
+  { mode: 'ellipse', title: 'Ellipse: drag across it. Shift makes a circle; Alt draws from the centre', icon: icon('<ellipse cx="8" cy="8" rx="5.5" ry="4" />') },
+  {
+    mode: 'polygon',
+    title: 'Polygon: click each corner; a double-click, Enter or a click on the first corner closes it. Shift keeps edges at 45\u00b0 steps; Backspace takes the last corner back',
+    icon: icon('<path d="M3 12.5L4.5 4l6.5-1.5 2.5 6.5-4.5 4z" />'),
+  },
+];
+let shapeMode: ShapeMode = 'rect';
+let obstacleErase = false;
 const toolParams: Record<ToolKind, { size: number; softness: number; amount: number }> = {
   mass: { size: 0.06, softness: 0.5, amount: 0.25 },
   velocity: { size: 0.08, softness: 0.5, amount: 0 },
   temperature: { size: 0.06, softness: 0.5, amount: 0 },
+  obstacle: { size: 0, softness: 0, amount: 0 },
 };
 let tool: ToolKind | null = null;
+/** Mass tool: new gas brings no momentum of its own. */
+let massAtRest = true;
 const slider = (id: string, label: string, title: string, min: number, max: number) =>
   `<label class="scrub" id="tp-${id}-row" title="${title}"><input id="tp-${id}" type="range" min="${min}" max="${max}" step="0.01" aria-label="${title}" /><span>${label}<output id="tp-${id}-out"></output></span></label>`;
 $('tools').innerHTML =
@@ -169,6 +190,9 @@ $('tools').innerHTML =
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the centre', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
+    <button id="tool-rest" aria-pressed="true" title="p = 0 for new mass: added gas arrives at rest and shares the momentum already there, slowing the flow. Off: it arrives with the local velocity">p = 0</button>
+    <div id="tool-shapes">${SHAPES.map((q) => `<button id="shape-${q.mode}" aria-pressed="false" aria-label="${q.mode}" title="${q.title}">${q.icon}</button>`).join('')}</div>
+    <button id="tool-erase" aria-pressed="false" title="Erase: the shape drawn turns obstacle back into gas, at rest">Erase</button>
   </div>`;
 
 function syncTools() {
@@ -189,6 +213,16 @@ function syncTools() {
   }
   const q = toolParams[tool];
   $('tp-amount-row').hidden = tool !== 'mass';
+  $('tool-rest').hidden = tool !== 'mass';
+  $('tool-rest').setAttribute('aria-pressed', String(massAtRest));
+  // An obstacle is drawn as a shape, not painted with a brush.
+  const shapes = tool === 'obstacle';
+  $('tp-size-row').hidden = $('tp-softness-row').hidden = shapes;
+  $('tool-shapes').hidden = $('tool-erase').hidden = !shapes;
+  for (const sh of SHAPES) $(`shape-${sh.mode}`).setAttribute('aria-pressed', String(shapeMode === sh.mode));
+  $('tool-erase').setAttribute('aria-pressed', String(obstacleErase));
+  if (shapes) drawBrush();
+  else if (!stroke) $('brush').style.display = 'none'; // until the pointer next moves
   for (const k of ['size', 'softness', 'amount'] as const) {
     const el = $<HTMLInputElement>(`tp-${k}`);
     el.value = String(q[k]);
@@ -200,9 +234,21 @@ function syncTools() {
 for (const t of TOOLS) {
   $(`tool-${t.kind}`).addEventListener('click', () => {
     tool = tool === t.kind ? null : t.kind;
+    draft = null;
     syncTools();
   });
 }
+for (const sh of SHAPES) {
+  $(`shape-${sh.mode}`).addEventListener('click', () => {
+    shapeMode = sh.mode;
+    draft = null;
+    syncTools();
+  });
+}
+$('tool-erase').addEventListener('click', () => {
+  obstacleErase = !obstacleErase;
+  syncTools();
+});
 for (const k of ['size', 'softness', 'amount'] as const) {
   $(`tp-${k}`).addEventListener('input', () => {
     if (!tool) return;
@@ -210,11 +256,16 @@ for (const k of ['size', 'softness', 'amount'] as const) {
     syncTools();
   });
 }
+$('tool-rest').addEventListener('click', () => {
+  massAtRest = !massAtRest;
+  syncTools();
+});
 window.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && tool) {
-    tool = null;
-    syncTools();
-  }
+  if (e.key !== 'Escape' || !tool) return;
+  // Esc first drops a shape that is being drawn, then puts the tool away.
+  if (draft) draft = null;
+  else tool = null;
+  syncTools();
 });
 
 function fail(e: unknown) {
@@ -256,6 +307,20 @@ interface Stroke {
   vRef: number;
 }
 let stroke: Stroke | null = null;
+
+/** An obstacle being drawn, in CSS pixels from the canvas corner. */
+interface Draft {
+  mode: ShapeMode;
+  /** the pointer dragging a rectangle or ellipse; -1 for a polygon, which is clicked out */
+  id: number;
+  /** where the drag began, or the polygon's corners so far */
+  pts: [number, number][];
+  /** where the pointer is */
+  cur: [number, number];
+}
+let draft: Draft | null = null;
+/** Modifier keys, as last seen: Shift constrains a shape, Alt draws it from its centre. */
+const mods = { shift: false, alt: false };
 /** The edit the next frame applies. */
 let pendingBrush: BrushOp | null = null;
 
@@ -422,6 +487,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     const old = sim;
     sim = undefined;
     stroke = null;
+    draft = null;
     pendingBrush = null;
     old?.destroy();
     cfg = next;
@@ -730,11 +796,42 @@ function bind() {
     clampPan();
   };
   canvas.addEventListener('dblclick', () => {
+    if (tool) {
+      // With a tool in hand a double click is two edits, or the end of a polygon.
+      if (draft?.mode === 'polygon' && draft.pts.length >= 3) commitDraft();
+      return;
+    }
     if (flat()) [view.zoom, view.cx, view.cy] = [1, 0.5, 0.5];
   });
+  const at = (e: PointerEvent): [number, number] => {
+    const r = canvas.getBoundingClientRect();
+    return [e.clientX - r.left, e.clientY - r.top];
+  };
+  const seeMods = (e: { shiftKey: boolean; altKey: boolean }) => {
+    mods.shift = e.shiftKey;
+    mods.alt = e.altKey;
+  };
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
-    if (tool && sim && !building && e.button === 0 && pointers.size === 0 && !stroke) {
+    if (tool === 'obstacle' && sim && !building && e.button === 0 && pointers.size === 0) {
+      seeMods(e);
+      const p = at(e);
+      if (shapeMode !== 'polygon') {
+        draft = { mode: shapeMode, id: e.pointerId, pts: [p], cur: p };
+      } else if (!draft) {
+        draft = { mode: 'polygon', id: -1, pts: [p], cur: p };
+      } else {
+        const q = polygonPoint(draft, p);
+        const [fx, fy] = draft.pts[0];
+        const [lx, ly] = draft.pts[draft.pts.length - 1];
+        if (draft.pts.length >= 3 && Math.hypot(q[0] - fx, q[1] - fy) < 8) commitDraft();
+        // (The second press of a double click lands on the corner just placed.)
+        else if (Math.hypot(q[0] - lx, q[1] - ly) > 2 && draft.pts.length < MAX_OUTLINE_VERTICES) draft.pts.push(q);
+      }
+      drawBrush();
+      return;
+    }
+    if (tool && tool !== 'obstacle' && sim && !building && e.button === 0 && pointers.size === 0 && !stroke) {
       beginStroke(e);
       return;
     }
@@ -747,6 +844,12 @@ function bind() {
   });
   const release = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
+    if (draft && draft.id === e.pointerId) {
+      // A rectangle or ellipse is finished by letting go.
+      if (e.type === 'pointerup') commitDraft();
+      else draft = null;
+      drawBrush();
+    }
     if (stroke?.id === e.pointerId && !stroke.released) endStroke(e.type === 'pointerup');
   };
   canvas.addEventListener('pointerup', release);
@@ -759,12 +862,41 @@ function bind() {
     if (!stroke) $('brush').style.display = 'none';
   });
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Shift' && stroke) stroke.shift = true;
+    if (e.key === 'Shift' && stroke) {
+      stroke.shift = true;
+      drawBrush();
+    }
+    if (!draft) return;
+    if (e.key === 'Shift' || e.key === 'Alt') {
+      seeMods(e);
+      e.preventDefault(); // Alt alone would otherwise open the browser's menu
+    } else if (draft.mode === 'polygon' && e.key === 'Enter' && draft.pts.length >= 3) {
+      commitDraft();
+    } else if (draft.mode === 'polygon' && e.key === 'Backspace') {
+      draft.pts.pop();
+      if (!draft.pts.length) draft = null;
+      e.preventDefault();
+    } else return;
+    drawBrush();
   });
   window.addEventListener('keyup', (e) => {
-    if (e.key === 'Shift' && stroke) stroke.shift = false;
+    if (e.key === 'Shift' && stroke) {
+      stroke.shift = false;
+      drawBrush();
+    }
+    if (draft && (e.key === 'Shift' || e.key === 'Alt')) {
+      seeMods(e);
+      e.preventDefault();
+      drawBrush();
+    }
   });
   canvas.addEventListener('pointermove', (e) => {
+    if (draft && (draft.id === e.pointerId || (draft.id === -1 && pointers.size === 0))) {
+      seeMods(e);
+      draft.cur = at(e);
+      drawBrush();
+      return;
+    }
     if (stroke && stroke.id === e.pointerId && !stroke.released) {
       const r = canvas.getBoundingClientRect();
       stroke.x = e.clientX - r.left;
@@ -845,11 +977,113 @@ function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3
   return { pos, right: f.right as Vec3, up: f.up as Vec3, scale: h / (2 * f.tan * depth) };
 }
 
+// --- obstacles ----------------------------------------------------------------------------
+/** Centre and half-sizes of the rectangle or ellipse being dragged out. */
+function draftBox(d: Draft) {
+  const [x0, y0] = d.pts[0];
+  let dx = d.cur[0] - x0;
+  let dy = d.cur[1] - y0;
+  if (mods.shift) {
+    // Shift: equal sides (a square, a circle).
+    const m = Math.max(Math.abs(dx), Math.abs(dy));
+    dx = dx < 0 ? -m : m;
+    dy = dy < 0 ? -m : m;
+  }
+  // Alt: the press is the centre rather than a corner.
+  return mods.alt ? { cx: x0, cy: y0, hx: Math.abs(dx), hy: Math.abs(dy) } : { cx: x0 + dx / 2, cy: y0 + dy / 2, hx: Math.abs(dx) / 2, hy: Math.abs(dy) / 2 };
+}
+
+/** Where the next corner of a polygon goes: with Shift, at a multiple of 45 degrees from the last. */
+function polygonPoint(d: Draft, p: [number, number]): [number, number] {
+  if (!mods.shift || !d.pts.length) return p;
+  const [lx, ly] = d.pts[d.pts.length - 1];
+  const len = Math.hypot(p[0] - lx, p[1] - ly);
+  const ang = Math.round(Math.atan2(p[1] - ly, p[0] - lx) / (Math.PI / 4)) * (Math.PI / 4);
+  return [lx + len * Math.cos(ang), ly + len * Math.sin(ang)];
+}
+
+/**
+ * Takes a point of the box, in fractions of it, to canvas pixels (after division by the last
+ * component): the inverse of locate(), for every depth at once. Column-major.
+ */
+function outlineMatrix(): number[] {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  // Rows of the matrix: x and y in pixels times the divisor, and the divisor.
+  let rx: number[];
+  let ry: number[];
+  let rw: number[];
+  if (flatView()) {
+    const axis = cfg.ndim === 2 ? 2 : view.sliceAxis;
+    const [ia, ib] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
+    const k = sliceSpan() * view.zoom;
+    rx = [0, 0, 0, w / 2 - view.cx * k];
+    ry = [0, 0, 0, h / 2 + view.cy * k];
+    rx[ia] = k;
+    ry[ib] = -k;
+    rw = [0, 0, 0, 1];
+  } else {
+    const f = cameraFrame(view, w / h);
+    const origin = f.eye.map((c) => c + 0.5); // the eye, in fractions of the box
+    const row = (v: number[]) => [...v, -(v[0] * origin[0] + v[1] * origin[1] + v[2] * origin[2])];
+    rw = row(f.fwd); // distance along the view direction
+    const right = row(f.right);
+    const up = row(f.up);
+    const kx = w / 2 / (f.tan * (w / h));
+    const ky = h / 2 / f.tan;
+    rx = rw.map((d, i) => (w / 2) * d + kx * right[i]);
+    ry = rw.map((d, i) => (h / 2) * d - ky * up[i]);
+  }
+  return [0, 1, 2, 3].flatMap((c) => [rx[c], ry[c], 0, rw[c]]);
+}
+
+/** Hand the finished shape to the simulation. */
+function commitDraft() {
+  const d = draft;
+  draft = null;
+  if (!d) return;
+  let shape: Pick<Outline, 'ellipse' | 'polygon'>;
+  if (d.mode === 'polygon') {
+    shape = { polygon: d.pts.flat() };
+  } else {
+    const b = draftBox(d);
+    if (b.hx < 1 || b.hy < 1) return; // a click, not a drag
+    shape = d.mode === 'ellipse'
+      ? { ellipse: [b.cx, b.cy, b.hx, b.hy] }
+      : { polygon: [b.cx - b.hx, b.cy - b.hy, b.cx + b.hx, b.cy - b.hy, b.cx + b.hx, b.cy + b.hy, b.cx - b.hx, b.cy + b.hy] };
+  }
+  pendingBrush = {
+    kind: 'obstacle', pos: [0, 0, 0], radius: 1, softness: 0, vel: [0, 0, 0],
+    amount: obstacleErase ? -1 : 1,
+    outline: { matrix: outlineMatrix(), ...shape },
+  };
+}
+
+/** The shape being drawn, as an SVG path. */
+function draftPath(d: Draft): string {
+  if (d.mode === 'polygon') {
+    const [fx, fy] = d.pts[0];
+    const next = polygonPoint(d, d.cur);
+    // The corners so far, a rubber band to the pointer, and a ring on the first corner to close on.
+    return `M${[...d.pts, next].map((p) => p.join(' ')).join('L')}` + `M${fx + 4} ${fy}a4 4 0 1 0 -8 0a4 4 0 1 0 8 0`;
+  }
+  const b = draftBox(d);
+  if (d.mode === 'rect') return `M${b.cx - b.hx} ${b.cy - b.hy}h${2 * b.hx}v${2 * b.hy}h${-2 * b.hx}z`;
+  return `M${b.cx - b.hx} ${b.cy}a${b.hx} ${b.hy} 0 1 0 ${2 * b.hx} 0a${b.hx} ${b.hy} 0 1 0 ${-2 * b.hx} 0`;
+}
+
 /** Outline of the brush under the pointer, and the arrow of a velocity stroke. */
 function drawBrush(px?: number, py?: number) {
   const svg = $('brush');
   if (!tool || !cfg) {
     svg.style.display = 'none';
+    return;
+  }
+  svg.classList.toggle('outline', tool === 'obstacle');
+  if (tool === 'obstacle') {
+    svg.style.display = 'block';
+    svg.classList.toggle('minus', obstacleErase);
+    svg.querySelector('path.shape')!.setAttribute('d', draft ? draftPath(draft) : '');
     return;
   }
   const kind = stroke?.kind ?? tool;
@@ -858,10 +1092,21 @@ function drawBrush(px?: number, py?: number) {
   const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
   const { scale } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
   svg.style.display = 'block';
+  // Pressed: the tool is acting (or, for a velocity, being aimed). Shift takes away.
+  const active = !!stroke && !stroke.released;
+  svg.classList.toggle('active', active);
+  svg.classList.toggle('minus', active && stroke!.shift && kind !== 'velocity');
+  svg.classList.toggle('ball', cfg.ndim === 3);
+  const radius = toolParams[kind].size * scale;
   const circle = svg.querySelector('circle')!;
   circle.setAttribute('cx', String(x));
   circle.setAttribute('cy', String(y));
-  circle.setAttribute('r', String(toolParams[kind].size * scale));
+  circle.setAttribute('r', String(radius));
+  // The ball's equator (its great circle in the x-y plane) as the camera sees it: edge-on from
+  // the side, a full circle from above. In a slice it is the outline or a line across it.
+  const tilt = !flatView() ? Math.abs(Math.sin(view.pitch)) : view.sliceAxis === 2 ? 1 : 0;
+  const ellipse = svg.querySelector('ellipse')!;
+  for (const [name, v] of [['cx', x], ['cy', y], ['rx', radius], ['ry', radius * tilt]] as const) ellipse.setAttribute(name, String(v));
   const line = svg.querySelector('line')!;
   line.style.display = drag ? 'block' : 'none';
   if (drag) {
@@ -955,7 +1200,7 @@ function advanceStroke(now: number) {
   if (strength === 0) return;
   const sign = s.shift ? -1 : 1;
   const amount = sign * strength * (s.kind === 'mass' ? q.amount * s.rhoMax : Math.log(1.5));
-  pendingBrush = { ...base, pos: locate(s.x, s.y, s.depth).pos, amount };
+  pendingBrush = { ...base, pos: locate(s.x, s.y, s.depth).pos, amount, atRest: massAtRest };
 }
 
 /** Displayed range from the latest diagnostics, unless the user typed one. */

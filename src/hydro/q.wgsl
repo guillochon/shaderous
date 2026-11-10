@@ -1,7 +1,24 @@
 // Primitive state as the reconstruction sees it, and its limited reconstruction. Requires the
 // limiter.
-//   a = (rho, vx, vy, vz)    b = (p, scalar, c_s, 0)
+//   a = (rho, vx, vy, vz)    b = (p, scalar, c_s, 1 if the cell is solid)
 struct Q { a: vec4<f32>, b: vec4<f32> }
+
+fn q_solid(q: Q) -> bool {
+  return q.b.w > 0.5;
+}
+// The image of a gas cell in a wall normal to `axis`: the same state with the normal velocity
+// reversed. Standing in for the solid cells beyond the wall, it makes the wall reflecting.
+fn q_mirror(q: Q, axis: i32) -> Q {
+  var a = q.a;
+  a[axis + 1] = -a[axis + 1];
+  return Q(a, vec4<f32>(q.b.xyz, 0.0));
+}
+// The same for a half-step state, whose b holds flags that the image keeps.
+fn pred_mirror(p: Q, axis: i32) -> Q {
+  var a = p.a;
+  a[axis + 1] = -a[axis + 1];
+  return Q(a, p.b);
+}
 
 // Twice the increment from a cell's centre to its upper face (edge_up) and from its lower face
 // to its centre (edge_dn), given the cell and its two neighbours along the axis. A slope

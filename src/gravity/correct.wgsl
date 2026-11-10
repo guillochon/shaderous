@@ -22,6 +22,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let c = vec3<i32>(gid);
   let u1 = textureLoad(N1, c, 0);
   let u2 = textureLoad(N2, c, 0);
+  if (abs(u2.w) > 0.5) {
+    // Solid and fixed cells keep their state.
+    textureStore(O1, c, u1);
+    textureStore(O2, c, u2);
+    return;
+  }
 
   let kick = 0.5 * clock.dt * u1.x * g_load(c);
   var mom = u1.yzw + kick;

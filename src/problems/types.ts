@@ -7,7 +7,14 @@ export interface Prim {
   vz: number;
   p: number;
   s: number; // passive scalar
+  /** The cell is part of an obstacle: a solid body the gas reflects off. */
+  solid?: boolean;
+  /** The cell is held at this state for the whole run (an inflow, say). */
+  fixed?: boolean;
 }
+
+/** How a cell's kind is stored with its state: 1 solid, -1 fixed, 0 ordinary gas. */
+export const cellMark = (w: Prim): number => (w.solid ? 1 : w.fixed ? -1 : 0);
 
 export const PERIODIC = 0;
 export const OUTFLOW = 1;

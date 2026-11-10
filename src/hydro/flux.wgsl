@@ -54,29 +54,69 @@ fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32) -> Flux {
 struct Faces { lo: Flux, hi: Flux }
 
 // Both faces of cell c along one axis. w0 and p0 are the cell's own primitives and half-step state.
+//
+// Walls: where a neighbour is solid, the face between is a reflecting wall, and the cells
+// beyond it are replaced by the images of the gas cells on this side (the cell itself for the
+// first, its opposite neighbour for the second). The Riemann problem between a state and its
+// image has no mass or energy flux, only pressure. A gas cell two away from a wall sees the
+// image of its neighbour there, which is what that neighbour sees: both get the same flux.
 fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
-  let wm2 = load_q(c - 2 * e);
-  let wm1 = load_q(c - e);
-  let wp1 = load_q(c + e);
-  let wp2 = load_q(c + 2 * e);
+  var wm2 = load_q(c - 2 * e);
+  var wm1 = load_q(c - e);
+  var wp1 = load_q(c + e);
+  var wp2 = load_q(c + 2 * e);
+  var pm1 = load_pred(c - e);
+  var pp1 = load_pred(c + e);
+  if (has_solids()) {
+    let below = q_solid(wm1);
+    let above = q_solid(wp1);
+    if (below) { wm1 = q_mirror(w0, axis); pm1 = pred_mirror(p0, axis); }
+    if (above) { wp1 = q_mirror(w0, axis); pp1 = pred_mirror(p0, axis); }
+    if (below) { wm2 = q_mirror(wp1, axis); } else if (q_solid(wm2)) { wm2 = q_mirror(wm1, axis); }
+    if (above) { wp2 = q_mirror(wm1, axis); } else if (q_solid(wp2)) { wp2 = q_mirror(wp1, axis); }
+  }
   let sm = edge_up(wm2, wm1, w0);
   let lo = edge_dn(wm1, w0, wp1);
   let hi = edge_up(wm1, w0, wp1);
   let sp = edge_dn(w0, wp1, wp2);
   return Faces(
-    face_flux(load_pred(c - e), sm, p0, lo, axis),
-    face_flux(p0, hi, load_pred(c + e), sp, axis),
+    face_flux(pm1, sm, p0, lo, axis),
+    face_flux(p0, hi, pp1, sp, axis),
   );
 }
 
 // Flux through the single face between cell a and cell a + e. The same arithmetic as
 // axis_fluxes on the same inputs, so the two agree bit for bit.
 fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
-  let wl = load_q(a);
-  let wr = load_q(a + e);
-  let sl = edge_up(load_q(a - e), wl, wr);
-  let sr = edge_dn(wl, wr, load_q(a + 2 * e));
-  return face_flux(load_pred(a), sl, load_pred(a + e), sr, axis);
+  var wl = load_q(a);
+  var wr = load_q(a + e);
+  var wll = load_q(a - e);
+  var wrr = load_q(a + 2 * e);
+  var pl = load_pred(a);
+  var pr = load_pred(a + e);
+  if (has_solids()) {
+    let ls = q_solid(wl);
+    let rs = q_solid(wr);
+    if (ls && rs) { return flux_zero(); }
+    if (rs) {
+      // Wall on the right: as the left cell computes its upper face.
+      if (q_solid(wll)) { wll = q_mirror(wl, axis); }
+      wr = q_mirror(wl, axis);
+      pr = pred_mirror(pl, axis);
+      wrr = q_mirror(wll, axis);
+    } else if (ls) {
+      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); }
+      wl = q_mirror(wr, axis);
+      pl = pred_mirror(pr, axis);
+      wll = q_mirror(wrr, axis);
+    } else {
+      if (q_solid(wll)) { wll = q_mirror(wl, axis); }
+      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); }
+    }
+  }
+  let sl = edge_up(wll, wl, wr);
+  let sr = edge_dn(wl, wr, wrr);
+  return face_flux(pl, sl, pr, sr, axis);
 }
 
 fn flux_zero() -> Flux {

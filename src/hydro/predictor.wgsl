@@ -5,7 +5,22 @@
 // `mask` multiplies the slopes per axis; it is 1 except where a neighbour along that axis is
 // unavailable (ghost cells at the edge of a block next to a coarser one).
 // Requires P, clock, hydro/q.wgsl, and g_dx set.
-fn predictor(q: Q, xm: Q, xp: Q, ym: Q, yp: Q, zm: Q, zp: Q, g: vec3<f32>, mask: vec3<f32>) -> Q {
+fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>, mask: vec3<f32>) -> Q {
+  var xm = xm0;
+  var xp = xp0;
+  var ym = ym0;
+  var yp = yp0;
+  var zm = zm0;
+  var zp = zp0;
+  if (has_solids()) {
+    // A solid neighbour is a wall: the cell sees its own image there.
+    if (q_solid(xm)) { xm = q_mirror(q, 0); }
+    if (q_solid(xp)) { xp = q_mirror(q, 0); }
+    if (q_solid(ym)) { ym = q_mirror(q, 1); }
+    if (q_solid(yp)) { yp = q_mirror(q, 1); }
+    if (q_solid(zm)) { zm = q_mirror(q, 2); }
+    if (q_solid(zp)) { zp = q_mirror(q, 2); }
+  }
   // Face-to-face difference across the cell along each axis (the mean of its two edge
   // increments), which drives the half-step evolution; and the larger of the two, for the
   // positivity check below.

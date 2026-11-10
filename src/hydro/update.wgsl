@@ -56,6 +56,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!rc.mine) { return; }
   g_dx = P.dx;
   let c = rc.c;
+  if (has_solids()) {
+    // Solid and fixed cells keep their state.
+    let held = textureLoad(U2, c, 0);
+    if (abs(held.w) > 0.5) {
+      textureStore(O1, c, textureLoad(U1, c, 0));
+      textureStore(O2, c, held);
+      return;
+    }
+  }
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);

@@ -9,6 +9,7 @@
 fn red_cell(c: vec3<i32>) -> Red {
   let u1 = textureLoad(U1, c, 0);
   let u2 = textureLoad(U2, c, 0);
+  if (u2.w > 0.5) { return red_identity(); }   // solid: no gas
   let dv = P.geom.x;
   let rho = max(u1.x, P.rho_floor);
   let v = u1.yzw / rho;

@@ -69,14 +69,16 @@ fn main(
         u = from_coarse(inv.slot, inv.l, s.slot);
       }
       var w = prim_from_cons(u.a, u.b);
-      w.w1 = vec4<f32>(w.w1.x, src_velocity(w.w1.yzw, s));
+      // The primitives have no spare component: a solid cell is marked by a negative density.
+      let solid = u.b.w > 0.5;
+      w.w1 = vec4<f32>(select(w.w1.x, -w.w1.x, solid), src_velocity(w.w1.yzw, s));
 
       let c = atl(blk_origin(inv.slot), inv.l);
       textureStore(W1, c, w.w1);
       textureStore(W2, c, w.w2);
 
       let depth = select(BS, 1, is2d());
-      if (all(inv.l >= vec3<i32>(0)) && all(inv.l < vec3<i32>(BS, BS, depth)) && blk_leaf(inv.slot)) {
+      if (all(inv.l >= vec3<i32>(0)) && all(inv.l < vec3<i32>(BS, BS, depth)) && blk_leaf(inv.slot) && !solid) {
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
         let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y;
         var g = P.gext.xyz;

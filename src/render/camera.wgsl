@@ -25,3 +25,5 @@ fn vs(@builtin(vertex_index) i: u32) -> VOut {
 }
 
 const BG = vec3<f32>(0.05, 0.058, 0.078);
+// Obstacles: the field volume holds -1 in solid cells.
+const SOLID = vec3<f32>(0.34, 0.37, 0.43);

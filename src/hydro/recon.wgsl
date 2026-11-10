@@ -9,10 +9,12 @@
 
 fn load_q(c: vec3<i32>) -> Q {
   if (INTERIOR) {
-    let w = prim_from_cons(textureLoad(U1, c, 0), textureLoad(U2, c, 0));
-    return Q(w.w1, vec4<f32>(w.w2.x, w.w2.z, w.w2.y, 0.0));
+    let u2 = textureLoad(U2, c, 0);
+    let w = prim_from_cons(textureLoad(U1, c, 0), u2);
+    return Q(w.w1, vec4<f32>(w.w2.x, w.w2.z, w.w2.y, u2.w));
   }
   let m = bc_map(c);
-  let w = prim_from_cons(textureLoad(U1, m.c, 0), textureLoad(U2, m.c, 0));
-  return Q(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, 0.0));
+  let u2 = textureLoad(U2, m.c, 0);
+  let w = prim_from_cons(textureLoad(U1, m.c, 0), u2);
+  return Q(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, u2.w));
 }

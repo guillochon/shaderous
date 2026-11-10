@@ -33,7 +33,8 @@
 fn load_q(c: vec3<i32>) -> Q {
   let w1 = textureLoad(W1, c, 0);
   let w2 = textureLoad(W2, c, 0);
-  return Q(w1, vec4<f32>(w2.x, w2.z, w2.y, 0.0));
+  // A negative density marks a solid cell (amr/assemble.wgsl).
+  return Q(vec4<f32>(abs(w1.x), w1.yzw), vec4<f32>(w2.x, w2.z, w2.y, select(0.0, 1.0, w1.x < 0.0)));
 }
 fn load_pred(c: vec3<i32>) -> Q {
   return Q(textureLoad(PA, c, 0), textureLoad(PB, c, 0));
@@ -109,6 +110,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let l = inv.l;
   g_dx = blk_dx(slot);
   let c = atl(blk_origin(slot), l);
+  if (has_solids()) {
+    // Solid and fixed cells keep their state.
+    let held = textureLoad(U2, c, 0);
+    if (abs(held.w) > 0.5) {
+      textureStore(O1, c, textureLoad(U1, c, 0));
+      textureStore(O2, c, held);
+      return;
+    }
+  }
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);

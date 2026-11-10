@@ -26,11 +26,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
   if (all(gid < P.dims.xyz)) {
     g_dx = P.dx;
     let c = vec3<i32>(gid);
-    let w = prim_from_cons(textureLoad(U1, c, 0), textureLoad(U2, c, 0));
+    let u2 = textureLoad(U2, c, 0);
+    let w = prim_from_cons(textureLoad(U1, c, 0), u2);
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
     let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y;
-    atomicMax(&wg_max[blk], bitcast<u32>(rate));
-    atomicMax(&wg_max[blk + 1u], bitcast<u32>(length(g_load(c))));
+    // Solid cells hold no gas to keep stable.
+    if (u2.w <= 0.5) {
+      atomicMax(&wg_max[blk], bitcast<u32>(rate));
+      atomicMax(&wg_max[blk + 1u], bitcast<u32>(length(g_load(c))));
+    }
   }
   workgroupBarrier();
   let nout = (P.dims.xyz + 3u) / 4u;

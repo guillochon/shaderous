@@ -23,7 +23,8 @@
 fn load_q(c: vec3<i32>) -> Q {
   let w1 = textureLoad(W1, c, 0);
   let w2 = textureLoad(W2, c, 0);
-  return Q(w1, vec4<f32>(w2.x, w2.z, w2.y, 0.0));
+  // A negative density marks a solid cell (amr/assemble.wgsl).
+  return Q(vec4<f32>(abs(w1.x), w1.yzw), vec4<f32>(w2.x, w2.z, w2.y, select(0.0, 1.0, w1.x < 0.0)));
 }
 
 #include "hydro/predictor.wgsl"

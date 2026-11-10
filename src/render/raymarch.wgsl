@@ -35,6 +35,12 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   for (var i = 0; i < count; i++) {
     let p = ro + rd * (t0 + (f32(i) + jitter) * ds);
     let v = textureSampleLevel(VOL, S, p + 0.5, 0.0).r;
+    if (v < -0.5) {
+      // The surface of an obstacle: opaque, darker with depth so its shape reads.
+      col += (1.0 - alpha) * SOLID * (1.15 - 0.6 * f32(i) / f32(count));
+      alpha = 1.0;
+      break;
+    }
     let tf = textureSampleLevel(TF, S, vec2<f32>(v, 0.5), 0.0);
     let a = 1.0 - exp(-tf.a * C.p.z * ds);
     col += (1.0 - alpha) * a * tf.rgb;

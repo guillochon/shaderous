@@ -5,7 +5,7 @@ import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu 
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { Multigrid } from './gravity/multigrid';
 import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } from './eos/eos';
-import type { Bc3, GravityMode, Problem } from './problems/types';
+import { cellMark, type Bc3, type GravityMode, type Problem } from './problems/types';
 import type { Restart } from './io/snapshot';
 
 export type RiemannKind = 'hllc' | 'hll';
@@ -134,27 +134,56 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
 
 /** One application of an editing brush (edit/brush_core.wgsl). */
 export interface BrushOp {
-  kind: 'mass' | 'velocity' | 'temperature';
+  kind: 'mass' | 'velocity' | 'temperature' | 'obstacle';
   /** centre and radius, in fractions of the box */
   pos: [number, number, number];
   radius: number;
   /** 0: hard edge; 1: falls off all the way from the centre */
   softness: number;
-  /** mass: density added at the centre (negative removes); temperature: log of the factor */
+  /**
+   * mass: density added at the centre (negative removes); temperature: log of the factor;
+   * obstacle: positive makes the cells solid, negative turns them back into gas
+   */
   amount: number;
   /** velocity tool: the velocity to set */
   vel: [number, number, number];
+  /** mass tool: new gas brings no momentum (otherwise it arrives with the local velocity) */
+  atRest?: boolean;
+  /** obstacle tool: the outline, drawn on the screen and cut through the box along the line of sight */
+  outline?: Outline;
 }
 
-export const BRUSH_BYTES = 48;
+export interface Outline {
+  /**
+   * Takes a point of the box (in fractions of it, with a 1 appended) to homogeneous screen
+   * coordinates, the units the outline is given in. Column-major, 16 numbers.
+   */
+  matrix: number[];
+  /** an ellipse: centre and half-axes ... */
+  ellipse?: [number, number, number, number];
+  /** ... or a polygon: x, y of each vertex, at most MAX_OUTLINE_VERTICES of them */
+  polygon?: number[];
+}
+
+export const MAX_OUTLINE_VERTICES = 32;
+export const BRUSH_BYTES = 384;
 
 /** Pack the Brush block. The layout must match the struct in edit/brush_core.wgsl. */
 export function packBrush(b: BrushOp): ArrayBuffer {
   const buf = new ArrayBuffer(BRUSH_BYTES);
   const f = new Float32Array(buf);
   f.set([...b.pos, b.radius, ...b.vel, b.softness], 0);
-  new Uint32Array(buf)[8] = b.kind === 'mass' ? 0 : b.kind === 'velocity' ? 1 : 2;
+  const u = new Uint32Array(buf);
+  u[8] = ['mass', 'velocity', 'temperature', 'obstacle'].indexOf(b.kind);
   f[9] = b.amount;
+  u[10] = b.atRest ? 1 : 0;
+  if (b.outline) {
+    const poly = (b.outline.polygon ?? []).slice(0, 2 * MAX_OUTLINE_VERTICES);
+    u[11] = poly.length / 2;
+    f.set(b.outline.matrix, 12);
+    f.set(b.outline.ellipse ?? [0, 0, 1, 1], 28);
+    f.set(poly, 32);
+  }
   return buf;
 }
 
@@ -191,7 +220,7 @@ export const PARAM_BYTES = 208;
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[]; refine?: number[] },
+  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[]; refine?: number[]; solids?: boolean },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -208,7 +237,7 @@ export function packParams(
   const fl = c.problem.fluff;
   f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
   u.set(x.amr ?? [0, 0, 0, 0], 32);
-  u.set([c.n, x.selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 36);
+  u.set([c.n, x.selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -303,6 +332,8 @@ export class Sim implements Simulation {
   private brush: GPUBuffer;
   private pBrush!: GPUComputePipeline;
   private gBrush: GPUBindGroup[] = [];
+  /** the grid holds solid or fixed cells, so the passes must look for them */
+  private solids = false;
 
   private constructor(gpu: Gpu, cfg: SimConfig) {
     this.device = gpu.device;
@@ -472,6 +503,7 @@ export class Sim implements Simulation {
       rhoMean: this.rhoMean,
       selfGravity: this.selfGravity,
       perturberGM: bh ? bh.gm : 0,
+      solids: this.solids,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
   }
@@ -492,6 +524,7 @@ export class Sim implements Simulation {
     const half = c.problem.box / 2;
     let mass = 0;
     let o = 0;
+    this.solids = false;
     for (let k = 0; k < nz; k++) {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx - half;
       for (let j = 0; j < n; j++) {
@@ -501,13 +534,17 @@ export class Sim implements Simulation {
           const w = fn(x, y, z);
           const p = eos.hasEnergy ? w.p : eos.pressure(w.rho, 0);
           const eint = eos.eintFromP(w.rho, p);
+          const mark = cellMark(w);
+          if (mark) this.solids = true;
+          const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
           u1[o] = w.rho;
-          u1[o + 1] = w.rho * w.vx;
-          u1[o + 2] = w.rho * w.vy;
-          u1[o + 3] = w.rho * w.vz;
-          u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz);
+          u1[o + 1] = w.rho * w.vx * go;
+          u1[o + 2] = w.rho * w.vy * go;
+          u1[o + 3] = w.rho * w.vz * go;
+          u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz) * go;
           u2[o + 1] = eint;
           u2[o + 2] = w.rho * w.s;
+          u2[o + 3] = mark;
           mass += w.rho;
         }
       }
@@ -654,6 +691,10 @@ export class Sim implements Simulation {
   submitted() {}
 
   encodeBrush(enc: GPUCommandEncoder, op: BrushOp) {
+    if (op.kind === 'obstacle' && !this.solids) {
+      this.solids = true;
+      this.writeParams();
+    }
     this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
     const pass = enc.beginComputePass();
     pass.setPipeline(this.pBrush);

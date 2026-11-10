@@ -23,6 +23,7 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   if (axis == 1) { c = vec3<i32>(ij.x, k, ij.y); }   // y-normal: x right, z up
   let t = textureLoad(VOL, c, 0);
   var col = textureSampleLevel(TF, S, vec2<f32>(t.r, 0.5), 0.0).rgb;
+  if (t.r < -0.5) { col = SOLID; }
   // Block outlines of an adaptive mesh: g, b, a mark block edges for z-, x- and y-normal slices.
   var edge = t.g;
   if (axis == 0) { edge = t.b; }
