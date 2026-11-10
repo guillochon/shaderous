@@ -20,6 +20,12 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   var c = vec3<i32>(ij.x, ij.y, k);            // z-normal: x right, y up
   if (axis == 0) { c = vec3<i32>(k, ij.x, ij.y); }   // x-normal: y right, z up
   if (axis == 1) { c = vec3<i32>(ij.x, k, ij.y); }   // y-normal: x right, z up
-  let v = textureLoad(VOL, c, 0).r;
-  return vec4<f32>(textureSampleLevel(TF, S, vec2<f32>(v, 0.5), 0.0).rgb, 1.0);
+  let t = textureLoad(VOL, c, 0);
+  var col = textureSampleLevel(TF, S, vec2<f32>(t.r, 0.5), 0.0).rgb;
+  // Block outlines of an adaptive mesh: g, b, a mark block edges for z-, x- and y-normal slices.
+  var edge = t.g;
+  if (axis == 0) { edge = t.b; }
+  if (axis == 1) { edge = t.a; }
+  col = mix(col, vec3<f32>(0.75, 0.8, 0.9), 0.3 * edge * C.r.x);
+  return vec4<f32>(col, 1.0);
 }

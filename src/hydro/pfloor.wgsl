@@ -3,7 +3,7 @@
 // Jeans (Truelove) floor: the pressure at which the Jeans length spans the requested number of
 // cells. P.jeans_floor is (cells / 4)^2, or 0 when the floor is off.
 fn jeans_pressure(rho: f32) -> f32 {
-  return P.jeans_floor * 16.0 * P.G * rho * rho * P.dx * P.dx / 3.14159265;
+  return P.jeans_floor * 16.0 * P.G * rho * rho * g_dx * g_dx / 3.14159265;
 }
 
 fn pressure_floor(rho: f32) -> f32 {

@@ -7,6 +7,7 @@
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  g_dx = P.dx;
   if (gid.x >= arrayLength(&IN)) { return; }
   let rho = IN[gid.x].x;
   let p = IN[gid.x].y;

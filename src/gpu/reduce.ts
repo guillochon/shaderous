@@ -14,8 +14,7 @@ export const RED_F = Number(new URLSearchParams(globalThis.location?.search ?? '
 interface Stage {
   pipeline: GPUComputePipeline;
   groups: GPUBindGroup[]; // one per source variant (state parity)
-  nout: number;
-  noutz: number;
+  nout: number[];
 }
 
 export class Reducer {
@@ -34,8 +33,7 @@ export class Reducer {
    */
   static async create(
     device: GPUDevice,
-    n: number,
-    nz: number,
+    dims: number[],
     ops: number[],
     source: string,
     slots: Slots,
@@ -44,21 +42,17 @@ export class Reducer {
   ): Promise<Reducer> {
     const k = ops.length;
     const def = `const RED_K = ${k}u;\nconst RED_OP = array<u32, ${k}>(${ops.map((o) => o + 'u').join(', ')});`;
-    // Each stage shrinks every axis by RED_F until one record is left. z may be shorter than
-    // x and y (a 2D run has a single layer).
-    const sizes = [n];
-    const sizesZ = [nz];
-    while (sizes[sizes.length - 1] > 1 || sizesZ[sizesZ.length - 1] > 1) {
-      sizes.push(Math.ceil(sizes[sizes.length - 1] / RED_F));
-      sizesZ.push(Math.ceil(sizesZ[sizesZ.length - 1] / RED_F));
-    }
+    // Each stage shrinks every axis by RED_F until one record is left. The axes may differ in
+    // length (a 2D run has a single layer in z; a block grid is a long row of blocks).
+    const sizes: number[][] = [dims.slice()];
+    while (sizes[sizes.length - 1].some((d) => d > 1)) sizes.push(sizes[sizes.length - 1].map((d) => Math.ceil(d / RED_F)));
 
     const buffers: GPUBuffer[] = [];
     for (let s = 1; s < sizes.length; s++) {
       buffers.push(
         device.createBuffer({
           label: `${label} stage ${s}`,
-          size: Math.max(16, sizes[s] ** 2 * sizesZ[s] * k * 4),
+          size: Math.max(16, sizes[s][0] * sizes[s][1] * sizes[s][2] * k * 4),
           usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
         }),
       );
@@ -68,13 +62,15 @@ export class Reducer {
     const first = assemble('gpu/reduce.wgsl', { ...slots, red_def: def, red_source: source });
     const later = assemble('gpu/reduce.wgsl', { red_def: def, red_source: 'gpu/reduce_buffer.wgsl' });
     for (let s = 1; s < sizes.length; s++) {
-      const constants = { NIN: sizes[s - 1], NINZ: sizesZ[s - 1], NOUT: sizes[s], NOUTZ: sizesZ[s], RED_F };
+      const [ix, iy, iz] = sizes[s - 1];
+      const [ox, oy, oz] = sizes[s];
+      const constants = { NINX: ix, NINY: iy, NINZ: iz, NOUTX: ox, NOUTY: oy, NOUTZ: oz, RED_F };
       const pipeline = await computePipeline(device, s === 1 ? first : later, `${label} reduce ${s}`, constants);
       const groups =
         s === 1
           ? variants.map((v) => bindGroup(device, pipeline, { ...v, 20: buffers[0] }))
           : [bindGroup(device, pipeline, { 0: buffers[s - 2], 20: buffers[s - 1] })];
-      red.stages.push({ pipeline, groups, nout: sizes[s], noutz: sizesZ[s] });
+      red.stages.push({ pipeline, groups, nout: sizes[s] });
     }
     return red;
   }
@@ -83,8 +79,7 @@ export class Reducer {
     this.stages.forEach((st, i) => {
       pass.setPipeline(st.pipeline);
       pass.setBindGroup(0, st.groups[i === 0 ? variant : 0]);
-      const d = Math.ceil(st.nout / 4);
-      pass.dispatchWorkgroups(d, d, Math.ceil(st.noutz / 4));
+      pass.dispatchWorkgroups(Math.ceil(st.nout[0] / 4), Math.ceil(st.nout[1] / 4), Math.ceil(st.nout[2] / 4));
     });
   }
 }

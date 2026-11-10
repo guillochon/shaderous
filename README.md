@@ -18,6 +18,10 @@ https://guillochon.github.io/shaderous/validate.html
 - **2D or 3D:** presets that make sense in the plane (shock tubes, blasts, Kelvin-Helmholtz,
   Rayleigh-Taylor, advection) can run on an n x n grid up to 2048 squared. A 2D run is one periodic
   layer of the same 3D scheme, without self-gravity.
+- **Adaptive mesh refinement:** a tree of 16-cell blocks packed into texture atlases, refined
+  where density or pressure jump and merged where they do not. Fluxes are matched across
+  refinement boundaries, so mass, momentum and energy are conserved to round-off. Hydro and
+  uniform gravity only so far; presets with self-gravity run on the uniform grid.
 - **Equations of state:** ideal gas, barotropic (isothermal / polytropic), gas plus radiation
   pressure, chosen when the shaders are assembled.
 
@@ -60,6 +64,7 @@ src/
   hydro/       primitives, timestep, clock and update passes; riemann/ and limiters/ modules
   eos/         WGSL equation-of-state modules and their float64 mirrors
   gravity/     multigrid passes, multipole boundary, half-kick corrector
+  amr/         block tree, block-atlas passes and the adaptive driver
   render/      field extraction, ray-marcher, slice view, transfer function
   problems/    one file per preset
   reference/   float64 CPU implementation of the hydro scheme, exact Riemann solver
@@ -89,6 +94,13 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   GPU work only every ~100 ms, so there the loop steers by backlog rather than by timing.
   Results agree across browsers to round-off; axis-permuted runs are bit-identical in Chrome
   and differ in the last bit in Firefox.
+- **Adaptive mesh.** Ghost cells are never copied within a texture (WebGPU cannot read and
+  write one rgba32float texture in a pass). Instead the primitives pass computes every texel,
+  ghost or not, from wherever its value lives: a neighbouring block, a boundary image, the
+  average of finer cells, or an interpolation from a coarser block. At a refinement boundary
+  the coarse cell recomputes the fine fluxes rather than using its own, which conserves
+  without storing fluxes; this needs every level to take the same timestep. The mesh is
+  rebuilt from the CPU every 8 steps, from a per-block indicator read back without blocking.
 - **Barotropic gas** uses HLL, since there is no contact wave for HLLC to resolve.
 
 ## Licence

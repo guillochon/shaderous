@@ -38,6 +38,46 @@ export interface SimConfig {
   vcycles: number; // V-cycles per step (warm-started)
   /** Flux-form gravitational work (conserves total energy) instead of kick-consistent energy. */
   gravEnergyFlux: boolean;
+  /**
+   * Adaptive mesh: number of refinement levels below the coarsest (0 = uniform grid). `n` is
+   * then the finest resolution and the coarsest level has n >> amrLevels cells per side.
+   */
+  amrLevels: number;
+  /** Atlas slots per side for the adaptive mesh (0 = choose from the root grid). */
+  amrBudget: number;
+  /** A block is split where its refinement indicator exceeds refineHi, merged below refineLo. */
+  refineHi: number;
+  refineLo: number;
+}
+
+/** What the front end, renderer and tests need from a simulation, uniform or adaptive. */
+export interface Simulation {
+  readonly device: GPUDevice;
+  cfg: SimConfig;
+  /** finest cells per side, and along z (1 in 2D) */
+  readonly n: number;
+  readonly nz: number;
+  /** parity of the state textures holding the current state */
+  cur: number;
+  readonly paramBuffer: GPUBuffer;
+  /** Encode up to `count` steps; returns how many were encoded. */
+  encodeSteps(enc: GPUCommandEncoder, count: number): number;
+  /** Call after submitting an encoder that encodeSteps() wrote to. */
+  submitted(): void;
+  readDiagnostics(): Promise<Diagnostics | null>;
+  diagnostics(): Promise<Diagnostics>;
+  runToEnd(batch?: number, maxSteps?: number): Promise<number>;
+  reset(): void;
+  writeParams(): void;
+  buildHydro(): Promise<void>;
+  refreshPotential(): void;
+  destroy(): void;
+  /** Size of the uniform volume the renderer displays, and the pass that fills it. */
+  readonly displayDims: [number, number, number];
+  readonly fieldShader: string;
+  fieldResources(parity: number): Record<number, GPUBuffer | GPUTextureView>;
+  /** Extra text for the status line. */
+  status(): string;
 }
 
 export function configFor(problem: Problem, n: number, over: Partial<SimConfig> = {}): SimConfig {
@@ -73,12 +113,87 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // leaves total momentum drifting about ten times faster in long collapse runs.
     vcycles: 2,
     gravEnergyFlux: true,
+    amrLevels: 0,
+    amrBudget: 0,
+    refineHi: 0.06,
+    refineLo: 0.025,
     ...over,
   };
 }
 
+/** Number of floats the diagnostics readback holds: clock (4), reduction, perturber position (4). */
+export const DIAG_FLOATS = 4 + 23 + 4;
+
+/** Decode a diagnostics readback: [clock (4), reduction channels, perturber position (4)]. */
+export function diagnosticsFrom(a: Float32Array, hasPerturber: boolean): Diagnostics {
+  const r = a.subarray(4);
+  const ranges: [number, number][] = [];
+  for (let i = 0; i < 5; i++) ranges.push([r[10 + 2 * i], r[11 + 2 * i]]);
+  return {
+    t: a[1] + a[0],
+    dt: a[0],
+    steps: a[3] + (a[0] > 0 ? 1 : 0),
+    mass: r[0],
+    momentum: [r[1], r[2], r[3]],
+    eKin: r[4],
+    eInt: r[5],
+    eGrav: r[6],
+    eTot: r[4] + r[5] + r[6],
+    maxMach: r[7],
+    floored: r[8],
+    jeansUnresolved: r[9],
+    com: [r[20] / r[0], r[21] / r[0], r[22] / r[0]],
+    perturber: hasPerturber ? [r[23], r[24], r[25]] : null,
+    ranges,
+  };
+}
+
+/** Size of the Params uniform block (hydro/common.wgsl). */
+export const PARAM_BYTES = 208;
+
+/** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
+export function packParams(
+  c: SimConfig,
+  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[] },
+): ArrayBuffer {
+  const buf = new ArrayBuffer(PARAM_BYTES);
+  const u = new Uint32Array(buf);
+  const f = new Float32Array(buf);
+  u.set([...c.bcLo, 0], 0);
+  u.set([...c.bcHi, 0], 4);
+  f.set([c.eosParams.gamma, c.eosParams.K, c.eosParams.R, c.eosParams.arad], 8);
+  u.set([...x.dims, 0], 12);
+  // 2D quantities are per unit length along z.
+  f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, 0, 0], 16);
+  f.set([...c.gext, 0], 20);
+  // Perturber: G M, softening of two cells, and whether it is active.
+  f.set([x.perturberGM, 2 * x.dx, x.perturberGM > 0 ? 1 : 0, 0], 24);
+  const fl = c.problem.fluff;
+  f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
+  u.set(x.amr ?? [0, 0, 0, 0], 32);
+  u.set([c.n, x.selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 36);
+  f.set(
+    [
+      x.dx,
+      c.cfl,
+      c.G,
+      x.rhoMean,
+      c.rhoFloor,
+      c.pFloor,
+      c.etaDual,
+      Number.isFinite(c.tEnd) ? c.tEnd : 1e30,
+      1e30,
+      c.shockThresh,
+      c.jeansFloor ? (c.jeansCells / 4) ** 2 : 0, // scales the 4-cell floor pressure
+      c.problem.box,
+    ],
+    40,
+  );
+  return buf;
+}
+
 // Channel layout of the diagnostics reduction (hydro/diagnostics.wgsl).
-const DIAG_OPS = [SUM, SUM, SUM, SUM, SUM, SUM, SUM, MAX, SUM, SUM, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, SUM, SUM, SUM];
+export const DIAG_OPS = [SUM, SUM, SUM, SUM, SUM, SUM, SUM, MAX, SUM, SUM, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, SUM, SUM, SUM];
 
 export interface Diagnostics {
   t: number;
@@ -102,7 +217,7 @@ export interface Diagnostics {
 }
 
 
-export class Sim {
+export class Sim implements Simulation {
   readonly device: GPUDevice;
   cfg: SimConfig;
   readonly n: number;
@@ -157,7 +272,7 @@ export class Sim {
     this.nz = cfg.ndim === 2 ? 1 : cfg.n;
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
-    this.params = d.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.clock = d.createBuffer({
       size: 16,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -188,8 +303,7 @@ export class Sim {
     const phi = sim.mg.phi;
     sim.redDt = await Reducer.create(
       d,
-      n,
-      nz,
+      [n, n, nz],
       [MAX, MAX],
       'hydro/timestep.wgsl',
       {},
@@ -204,8 +318,7 @@ export class Sim {
     // frame's acceleration and the perturber's orbit.
     sim.redBh = await Reducer.create(
       d,
-      n,
-      nz,
+      [n, n, nz],
       [SUM, SUM, SUM, SUM],
       'gravity/bh_moment.wgsl',
       {},
@@ -290,8 +403,7 @@ export class Sim {
     }
     this.redDiag = await Reducer.create(
       d,
-      this.n,
-      this.nz,
+      [this.n, this.n, this.nz],
       DIAG_OPS,
       'hydro/diagnostics.wgsl',
       slots,
@@ -303,40 +415,14 @@ export class Sim {
   /** Push the current configuration to the GPU parameter block. */
   writeParams() {
     const c = this.cfg;
-    const buf = new ArrayBuffer(192);
-    const u = new Uint32Array(buf);
-    const f = new Float32Array(buf);
-    const selfGravity = c.gravity !== 'off' && c.ndim === 3;
-    u.set([...c.bcLo, 0], 0);
-    u.set([...c.bcHi, 0], 4);
-    f.set([c.eosParams.gamma, c.eosParams.K, c.eosParams.R, c.eosParams.arad], 8);
-    u.set([c.n, c.n, this.nz, 0], 12);
-    // 2D quantities are per unit length along z.
-    f.set([c.ndim === 2 ? this.dx ** 2 : this.dx ** 3, c.ndim, 0, 0], 16);
-    f.set([...c.gext, 0], 20);
-    // Perturber: G M, softening of two cells, and whether it is active.
     const bh = this.hasPerturber ? c.problem.perturber!(c.params, c.G) : null;
-    f.set([bh ? bh.gm : 0, 2 * this.dx, bh ? 1 : 0, 0], 24);
-    const fl = c.problem.fluff;
-    f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
-    u.set([c.n, selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 32);
-    f.set(
-      [
-        this.dx,
-        c.cfl,
-        c.G,
-        this.rhoMean,
-        c.rhoFloor,
-        c.pFloor,
-        c.etaDual,
-        Number.isFinite(c.tEnd) ? c.tEnd : 1e30,
-        1e30,
-        c.shockThresh,
-        c.jeansFloor ? (c.jeansCells / 4) ** 2 : 0, // scales the 4-cell floor pressure
-        c.problem.box,
-      ],
-      36,
-    );
+    const buf = packParams(c, {
+      dims: [c.n, c.n, this.nz],
+      dx: this.dx,
+      rhoMean: this.rhoMean,
+      selfGravity: this.selfGravity,
+      perturberGM: bh ? bh.gm : 0,
+    });
     this.device.queue.writeBuffer(this.params, 0, buf);
   }
 
@@ -452,7 +538,7 @@ export class Sim {
   }
 
   /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
-  encodeSteps(enc: GPUCommandEncoder, count: number) {
+  encodeSteps(enc: GPUCommandEncoder, count: number): number {
     const selfGravity = this.selfGravity;
     const anyGravity = selfGravity || this.cfg.gext.some((g) => g !== 0);
     for (let i = 0; i < count; i++) {
@@ -497,6 +583,20 @@ export class Sim {
       }
       pass.end();
     }
+    return count;
+  }
+
+  submitted() {}
+
+  get displayDims(): [number, number, number] {
+    return [this.n, this.n, this.nz];
+  }
+  readonly fieldShader = 'render/field.wgsl';
+  fieldResources(parity: number): Record<number, GPUBuffer | GPUTextureView> {
+    return { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView() };
+  }
+  status(): string {
+    return '';
   }
 
   /**
@@ -584,26 +684,7 @@ export class Sim {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
-      const r = a.subarray(4);
-      const ranges: [number, number][] = [];
-      for (let i = 0; i < 5; i++) ranges.push([r[10 + 2 * i], r[11 + 2 * i]]);
-      return {
-        t: a[1] + a[0],
-        dt: a[0],
-        steps: a[3] + (a[0] > 0 ? 1 : 0),
-        mass: r[0],
-        momentum: [r[1], r[2], r[3]],
-        eKin: r[4],
-        eInt: r[5],
-        eGrav: r[6],
-        eTot: r[4] + r[5] + r[6],
-        maxMach: r[7],
-        floored: r[8],
-        jeansUnresolved: r[9],
-        com: [r[20] / r[0], r[21] / r[0], r[22] / r[0]],
-        perturber: this.hasPerturber ? [r[23], r[24], r[25]] : null,
-        ranges,
-      };
+      return diagnosticsFrom(a, this.hasPerturber);
     } finally {
       this.stagingBusy = false;
     }

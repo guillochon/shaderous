@@ -16,6 +16,7 @@ struct View {
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  g_dx = P.dx;
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   let u1 = textureLoad(U1, c, 0);
@@ -31,5 +32,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   if (V.logscale != 0u) { x = log(max(x, 1.0e-30)) * 0.4342944819; }
   let t = clamp((x - V.lo) / max(V.hi - V.lo, 1.0e-20), 0.0, 1.0);
-  textureStore(VOL, c, vec4<f32>(t, 0.0, 0.0, 1.0));
+  textureStore(VOL, c, vec4<f32>(t, 0.0, 0.0, 0.0));
 }

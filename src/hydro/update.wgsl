@@ -1,5 +1,6 @@
-// Unsplit MUSCL-Hancock update, gather form: each cell evaluates its own six face fluxes from
-// the half-step states written by hydro/predict.wgsl and slopes recomputed from the primitives.
+// Unsplit MUSCL-Hancock update on a uniform grid, gather form: each cell evaluates its own six
+// face fluxes from the half-step states written by hydro/predict.wgsl and slopes recomputed
+// from the primitives.
 //
 // The stencil is the cell and two neighbours each way along each axis (13 cells): face states
 // of a neighbour need that neighbour's slope along the face normal only.
@@ -14,11 +15,6 @@
 #include "hydro/common.wgsl"
 #include <eos>
 #include <limiter>
-
-struct Side { rho: f32, v: vec3<f32>, p: f32, s: f32, cs: f32, eint: f32 }
-struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
-
-#include <riemann>
 #include "hydro/dual_energy.wgsl"
 #include "hydro/pfloor.wgsl"
 #include "hydro/fluff.wgsl"
@@ -37,74 +33,16 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 #include "hydro/recon.wgsl"
 #include "gravity/gfield.wgsl"
 
-// Half-step state of a cell: a = (rho, v), b = (p, scalar, shock flag, first-order flag).
-// A cell beyond a boundary takes the state of the cell it maps to (mirrored if reflecting).
+// Half-step state of a cell. A cell beyond a boundary takes the state of the cell it maps to
+// (mirrored if reflecting).
 fn load_pred(c: vec3<i32>) -> Q {
   let m = bc_map(c);
   let a = textureLoad(PA, m.c, 0);
   return Q(vec4<f32>(a.x, bc_velocity(a.yzw, m)), textureLoad(PB, m.c, 0));
 }
 
-// Cyclic rotation that puts the face normal in x, and its inverse.
-fn rot(v: vec3<f32>, axis: i32) -> vec3<f32> {
-  if (axis == 1) { return v.yzx; }
-  if (axis == 2) { return v.zxy; }
-  return v;
-}
-fn unrot(v: vec3<f32>, axis: i32) -> vec3<f32> {
-  if (axis == 1) { return v.zxy; }
-  if (axis == 2) { return v.yzx; }
-  return v;
-}
-
-// State on one side of a face: the half-step state moved half a cell along its slope
-// (sgn = +1 for the cell's upper face, -1 for its lower). First-order cells have no slope.
-fn to_side(pr: Q, s: Q, sgn: f32, axis: i32) -> Side {
-  let hs = 0.5 * sgn * (1.0 - pr.b.w);
-  let a = pr.a + hs * s.a;
-  let b = pr.b.xy + hs * s.b.xy;
-  var o: Side;
-  o.rho = max(a.x, P.rho_floor);
-  o.v = rot(a.yzw, axis);
-  o.s = b.y;
-  if (EOS_HAS_ENERGY) {
-    o.p = max(b.x, P.p_floor);
-    o.cs = eos_sound_speed(o.rho, o.p);
-  } else {
-    // Barotropic: the face pressure is a function of the face density, not reconstructed.
-    let st = baro_state(o.rho);
-    o.p = st.x;
-    o.cs = st.y;
-  }
-  o.eint = eos_eint_from_p(o.rho, o.p);
-  return o;
-}
-
-// Flux through the face between cells l and r, along +axis, in grid-aligned components.
-fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32) -> Flux {
-  var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
-  if (!EOS_HAS_ENERGY) { w = 1.0; }   // no contact wave to resolve (HLLC was tried: no different)
-  var F = riemann_flux(to_side(l, ls, 1.0, axis), to_side(r, rs, -1.0, axis), w);
-  F.mom = unrot(F.mom, axis);
-  return F;
-}
-
-struct Faces { lo: Flux, hi: Flux }
-
-// Both faces of cell c along one axis. w0 and p0 are the cell's own primitives and half-step state.
-fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
-  let wm2 = load_q(c - 2 * e);
-  let wm1 = load_q(c - e);
-  let wp1 = load_q(c + e);
-  let wp2 = load_q(c + 2 * e);
-  let sm = slope(wm2, wm1, w0);
-  let s0 = slope(wm1, w0, wp1);
-  let sp = slope(w0, wp1, wp2);
-  return Faces(
-    face_flux(load_pred(c - e), sm, p0, s0, axis),
-    face_flux(p0, s0, load_pred(c + e), sp, axis),
-  );
-}
+#include "hydro/flux.wgsl"
+#include "hydro/advance.wgsl"
 
 // Validation hook: when set, the pass writes the six face mass fluxes instead of the new state,
 // so the test suite can check that both cells sharing a face computed the same bits.
@@ -113,6 +51,7 @@ override DEBUG_FLUX: bool = false;
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
+  g_dx = P.dx;
   let c = vec3<i32>(gid);
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
@@ -130,14 +69,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
 
-  // Net inflow per unit dt/dx.
-  let dm = (fx.lo.m - fx.hi.m) + (fy.lo.m - fy.hi.m) + (fz.lo.m - fz.hi.m);
-  let dmom = (fx.lo.mom - fx.hi.mom) + (fy.lo.mom - fy.hi.mom) + (fz.lo.mom - fz.hi.mom);
-  let de = (fx.lo.e - fx.hi.e) + (fy.lo.e - fy.hi.e) + (fz.lo.e - fz.hi.e);
-  let dei = (fx.lo.ei - fx.hi.ei) + (fy.lo.ei - fy.hi.ei) + (fz.lo.ei - fz.hi.ei);
-  let ds = (fx.lo.s - fx.hi.s) + (fy.lo.s - fy.hi.s) + (fz.lo.s - fz.hi.s);
-  let dvn = (fx.lo.vn - fx.hi.vn) + (fy.lo.vn - fy.hi.vn) + (fz.lo.vn - fz.hi.vn);
-
   // Flux-form gravitational work (P.flags bit 0): each face hands half of F_mass * dphi to the
   // two cells it separates, so the sum over cells telescopes to -d/dt of the potential energy.
   let flux_work = has_gravity() && (P.flags & 1u) != 0u;
@@ -152,7 +83,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let u1 = textureLoad(U1, c, 0);
   let u2 = textureLoad(U2, c, 0);
-  let dtdx = clock.dt / P.dx;
 
   // Gravity is kick-drift-kick around the flux update: half a kick with the old potential here,
   // the other half in gravity/correct.wgsl once the new potential is known. (Applying the whole
@@ -167,21 +97,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
   }
 
-  let rho = max(u1.x + dtdx * dm, P.rho_floor);
-  let mom = u1.yzw + kick + dtdx * dmom;
-  let E = u2.x + ekick + dtdx * (de + dw);
-  // Internal energy: advection plus -p div(v), with the half-step pressure and face velocities.
-  let eint = u2.y + dtdx * (dei + max(p0.b.x, P.p_floor) * dvn);
-  let sc = u2.z + dtdx * ds;
-
-  var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
-  var mout = mom;
-  let tame = tame_fluff(rho, mom, en.y);
-  if (tame.changed) {
-    mout = tame.mom;
-    en = vec2<f32>(0.5 * dot(mout, mout) / rho + tame.eint, tame.eint);
-  }
-
-  textureStore(O1, c, vec4<f32>(rho, mout));
-  textureStore(O2, c, vec4<f32>(en.x, en.y, sc, 0.0));
+  let nw = advance(u1, u2, net_inflow(fx, fy, fz), dw, p0.b.x, kick, ekick);
+  textureStore(O1, c, nw.u1);
+  textureStore(O2, c, nw.u2);
 }

@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'advection', 'flux-determinism',
-  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
+  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-sedov', 'amr-instabilities', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
 ];
 
 test.describe.configure({ mode: 'serial' });
@@ -95,5 +95,18 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   const d2 = await page.evaluate(() => (window as any).shaderousApp.diag);
   expect(d2.mass).toBeCloseTo(1.5, 3);
   expect(await page.locator('#mode').isDisabled()).toBe(true);
+
+  // Adaptive mesh: switches the grid, keeps running, and conserves mass.
+  await page.selectOption('#levels', '2');
+  await page.waitForFunction(() => (window as any).shaderousApp.sim?.tree !== undefined);
+  await advance();
+  const d3 = await page.evaluate(() => (window as any).shaderousApp.diag);
+  expect(d3.mass).toBeCloseTo(1.5, 5);
+  expect(await page.evaluate(() => (window as any).shaderousApp.sim.status())).toMatch(/blocks/);
+  // Presets with self-gravity cannot use it.
+  await page.selectOption('#problem', 'polytrope');
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'polytrope');
+  await page.waitForFunction(() => (document.getElementById('levels') as HTMLSelectElement).disabled, undefined, { timeout: 30_000 });
+  expect(await page.evaluate(() => (window as any).shaderousApp.cfg.amrLevels)).toBe(0);
   expect(errors).toEqual([]);
 });

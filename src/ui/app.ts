@@ -1,6 +1,7 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { initGpu, type Gpu } from '../gpu/device';
-import { configFor, Sim, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
+import { configFor, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
+import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
 import { FIELDS, PROBLEMS, problemById, type GravityMode } from '../problems';
 import { defaultView, Renderer, type ViewState } from '../render/renderer';
@@ -14,8 +15,10 @@ const field = (label: string, control: string, id = '') => `<label class="f"${id
 const select = (id: string, options: string) => `<select id="${id}">${options}</select>`;
 const number = (id: string, attrs = '') => `<input id="${id}" type="number" step="any" ${attrs} />`;
 
-const RES_3D = [32, 64, 128, 256];
-const RES_2D = [128, 256, 512, 1024, 2048];
+const RES_3D = [32, 64, 128, 256, 512];
+const RES_2D = [128, 256, 512, 1024, 2048, 4096];
+// Largest uniform grids offered; beyond these the mesh must be adaptive.
+const UNIFORM_MAX = { 2: 2048, 3: 256 };
 
 const side = $('side');
 side.innerHTML = `
@@ -27,9 +30,12 @@ side.innerHTML = `
     <div class="g3">
       ${field('Grid', select('dim', opt(3, '3D') + opt(2, '2D')))}
       ${field('Resolution', select('res', ''))}
-      ${field('End time', number('tend', 'placeholder="none"'))}
+      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')))}
     </div>
-    <div class="g2" id="pparams"></div>
+    <div class="g3">
+      ${field('End time', number('tend', 'placeholder="none"'))}
+      <span id="pparams"></span>
+    </div>
     <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button></div>
   </section>
 
@@ -48,6 +54,7 @@ side.innerHTML = `
     <div class="checks">
       <label class="check"><input id="log" type="checkbox" />Log scale</label>
       <label class="check"><input id="auto" type="checkbox" checked />Auto range</label>
+      <label class="check" title="Outline the blocks of an adaptive mesh in the slice view"><input id="blocks" type="checkbox" checked />Blocks</label>
     </div>
     <canvas id="tf" title="Opacity against field value: drag points, double-click to add or remove"></canvas>
   </details>
@@ -100,7 +107,7 @@ function fail(e: unknown) {
 }
 
 let gpu: Gpu;
-let sim: Sim | undefined;
+let sim: Simulation | undefined;
 let renderer: Renderer;
 let cfg: SimConfig;
 const view: ViewState = defaultView();
@@ -140,6 +147,15 @@ function syncControls() {
     res.dataset.dim = String(cfg.ndim);
   }
   res.value = String(cfg.n);
+  for (const o of res.options) o.disabled = cfg.amrLevels === 0 && +o.value > UNIFORM_MAX[cfg.ndim];
+  const levels = $<HTMLSelectElement>('levels');
+  levels.value = String(cfg.amrLevels);
+  const amrOk = supportsAmr(cfg.problem);
+  levels.disabled = !amrOk;
+  levels.title = amrOk ? 'Adaptive mesh: levels of refinement below the coarsest grid' : 'The adaptive mesh does not support self-gravity yet';
+  for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n);
+  $<HTMLInputElement>('blocks').checked = view.showBlocks;
+  $<HTMLInputElement>('blocks').disabled = cfg.amrLevels === 0;
   // A 2D run is always shown as its plane, and has no self-gravity.
   $<HTMLSelectElement>('mode').disabled = two;
   $<HTMLSelectElement>('axis').disabled = two;
@@ -184,7 +200,6 @@ function syncProblemParams() {
   if (box.dataset.problem !== cfg.problem.id) {
     box.dataset.problem = cfg.problem.id;
     box.innerHTML = defs.map((q) => field(q.label, number(`pp-${q.id}`, `min="${q.min}" max="${q.max}" step="${q.step ?? 'any'}"`))).join('');
-    box.style.display = defs.length ? '' : 'none';
     for (const q of defs) {
       const el = $<HTMLInputElement>(`pp-${q.id}`);
       el.addEventListener('change', () => {
@@ -227,17 +242,20 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 }
 
 /** Build a simulation for the selected preset and resolution. */
-function build(problemId: string, n: number, ndim: 2 | 3, keepPhysics = false) {
+function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false) {
   return enqueue(async () => {
     const problem = problemById(problemId);
     if (!problem.supports2d) ndim = 3;
     const allowed = ndim === 2 ? RES_2D : RES_3D;
     if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
-    const next = configFor(problem, n, { ndim });
+    // Refinement: only where the preset allows it, and no deeper than the resolution permits.
+    levels = supportsAmr(problem) ? Math.min(levels, maxAmrLevels(n)) : 0;
+    if (levels === 0) n = Math.min(n, UNIFORM_MAX[ndim]);
+    const next = configFor(problem, n, { ndim, amrLevels: levels });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
     if (keepPhysics && cfg && cfg.problem === problem && cfg.ndim === ndim) {
       // Same preset at a new resolution: keep the user's physics choices.
-      const { n: _n, problem: _p, ...rest } = cfg;
+      const { n: _n, problem: _p, amrLevels: _l, ...rest } = cfg;
       Object.assign(next, rest);
     } else {
       view.field = problem.view?.field ?? 0;
@@ -251,7 +269,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, keepPhysics = false) {
     old?.destroy();
     cfg = next;
     if (ndim === 2) view.sliceAxis = 2;
-    const s = await Sim.create(gpu, cfg);
+    const s = await createSim(gpu, cfg);
     await renderer.attach(s);
     sim = s;
     finished = false;
@@ -295,19 +313,25 @@ function bind() {
     id: $<HTMLSelectElement>('problem').value,
     n: +$<HTMLSelectElement>('res').value,
     ndim: (+$<HTMLSelectElement>('dim').value === 2 ? 2 : 3) as 2 | 3,
+    levels: +$<HTMLSelectElement>('levels').value,
   });
   on('problem', () => {
-    const { id, n, ndim } = picked();
-    build(id, n, ndim);
+    const { id, n, ndim, levels } = picked();
+    build(id, n, ndim, levels);
   });
   on('dim', () => {
-    const { id, ndim } = picked();
-    build(id, 0, ndim); // 0: use the default resolution for that dimensionality
+    const { id, ndim, levels } = picked();
+    build(id, 0, ndim, levels); // 0: use the default resolution for that dimensionality
   });
   on('res', () => {
-    const { id, n, ndim } = picked();
-    build(id, n, ndim, true);
+    const { id, n, ndim, levels } = picked();
+    build(id, n, ndim, levels, true);
   });
+  on('levels', () => {
+    const { id, n, ndim, levels } = picked();
+    build(id, n, ndim, levels, true);
+  });
+  on('blocks', (el) => (view.showBlocks = el.checked));
   on('tend', (el) => {
     cfg.tEnd = el.value === '' ? Infinity : +el.value;
     applyParams();
@@ -580,10 +604,13 @@ function tick(now: number) {
   const enc = gpu.device.createCommandEncoder();
   const steps = running && !finished ? nsub : stepOnce ? 1 : 0;
   stepOnce = false;
-  if (steps) s.encodeSteps(enc, steps);
-  stepsSubmitted += steps;
+  // An adaptive run may take fewer steps than asked while it waits for the mesh to catch up.
+  const taken = steps ? s.encodeSteps(enc, steps) : 0;
+  stepsSubmitted += taken;
+  if (taken < steps && running) nsub = Math.max(1, taken);
   renderer.encode(enc, s, view);
   gpu.device.queue.submit([enc.finish()]);
+  s.submitted();
 
   inflight++;
   const adapt = steps > 0 && running;
@@ -637,7 +664,8 @@ function tick(now: number) {
     const bh = lastDiag?.perturber;
     const where = bh ? `  •  perturber at r = ${Math.hypot(...bh).toFixed(2)}` : '';
     const state = finished ? 'finished' : running ? `${nsub} step${nsub > 1 ? 's' : ''}/frame, ${stepRate.toFixed(0)} steps/s` : 'paused';
-    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}`);
+    const mesh = s.status();
+    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${mesh ? '  •  ' + mesh : ''}`);
   }
 }
 
@@ -655,7 +683,7 @@ function tick(now: number) {
     bind();
     const q = new URLSearchParams(location.search);
     const id = PROBLEMS.some((p) => p.id === q.get('problem')) ? q.get('problem')! : PROBLEMS[0].id;
-    await build(id, +q.get('n')! || 0, q.get('dim') === '2' ? 2 : 3);
+    await build(id, +q.get('n')! || 0, q.get('dim') === '2' ? 2 : 3, +q.get('amr')! || 0);
     requestAnimationFrame(tick);
   } catch (e) {
     fail(e);

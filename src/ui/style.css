@@ -52,7 +52,8 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 #run { border-color: #3a4a66; background: #223049; }
 .jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }
 .jeans .check { height: 24px; }
-.checks { display: flex; gap: 14px; margin-top: 6px; }
+#pparams { display: contents; }
+.checks { display: flex; gap: 12px; margin-top: 6px; }
 .check { display: flex; align-items: center; white-space: nowrap; font-size: 12px; }
 details { border-top: 1px solid var(--line); padding-top: 8px; }
 summary {
@@ -76,7 +77,7 @@ details[open] > summary .sum { display: none; }
    anything else, so the browser never has to lay out the page for them. */
 #colorbar .ticks span { display: block; width: 76px; height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; contain: strict; }
 #hud {
-  position: absolute; left: 12px; top: 10px; width: 520px; height: 18px; line-height: 18px;
+  position: absolute; left: 12px; top: 10px; width: 720px; height: 18px; line-height: 18px;
   white-space: nowrap; overflow: hidden; contain: strict;
   color: var(--dim); text-shadow: 0 0 3px #000; pointer-events: none; font-variant-numeric: tabular-nums;
 }

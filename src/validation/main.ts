@@ -1,6 +1,7 @@
 import { initGpu, type Gpu } from '../gpu/device';
 import { runTest, TESTS, type TestResult } from './tests';
 import { configFor, Sim } from '../sim';
+import { AmrSim } from '../amr/amr_sim';
 import { PROBLEMS, problemById } from '../problems';
 
 declare global {
@@ -66,7 +67,7 @@ const ready = (async () => {
 window.shaderous = {
   ready,
   tests: TESTS.map((t) => t.id),
-  debug: { Sim, configFor, PROBLEMS, problemById, gpu: () => gpu },
+  debug: { Sim, AmrSim, configFor, PROBLEMS, problemById, gpu: () => gpu },
   run: async (id) => {
     await ready;
     return run(id);

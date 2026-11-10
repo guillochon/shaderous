@@ -2,7 +2,8 @@
 // validate.html interactively and by Playwright in tests/gpu.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
-import { configFor, Sim, type SimConfig } from '../sim';
+import { configFor, PARAM_BYTES, Sim, type SimConfig } from '../sim';
+import { AmrSim, type LeafCells } from '../amr/amr_sim';
 import { defaultEosParams, EOS_MODULES, makeEos, type EosKind } from '../eos/eos';
 import { exactRiemann } from '../reference/riemann_exact';
 import { RefHydro } from '../reference/hydro';
@@ -42,6 +43,21 @@ async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<S
     sim.destroy();
   }
 }
+
+async function withAmr<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: AmrSim) => Promise<T>) {
+  const sim = await AmrSim.create(gpu, configFor(problem, n, over));
+  try {
+    return await fn(sim);
+  } finally {
+    sim.destroy();
+  }
+}
+
+/** Uniform-grid index of a leaf cell (for meshes whose leaves all sit at the finest level). */
+const cellIndex = (c: LeafCells, q: number, n: number, box: number, ndim: number) => {
+  const at = (v: number) => Math.round((v + box / 2) / (box / n) - 0.5);
+  return ((ndim === 3 ? at(c.z[q]) : 0) * n + at(c.y[q])) * n + at(c.x[q]);
+};
 
 const rhoAt = (u1: Float32Array, n: number, i: number, j: number, k: number) => u1[((k * n + j) * n + i) * 4];
 
@@ -385,6 +401,138 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'amr-unrefined',
+    name: 'Block grid without refinement against the uniform grid',
+    criterion: 'Identical density in every cell and the same number of steps, for a 2D shock tube and a 3D blast',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      for (const [prob, ndim, n] of [[sodX, 2, 128], [sedov, 3, 64]] as const) {
+        const tEnd = prob === sedov ? 0.02 : prob.tEnd;
+        const uni = await withSim(gpu, prob, n, { ndim, tEnd }, async (sim) => ({ steps: await sim.runToEnd(), u1: (await sim.readState()).u1 }));
+        const blk = await withAmr(gpu, prob, n, { ndim, tEnd, amrLevels: 0 }, async (sim) => ({ steps: await sim.runToEnd(), cells: await sim.readLeaves() }));
+        let worst = 0;
+        for (let q = 0; q < blk.cells.count; q++) worst = Math.max(worst, Math.abs(blk.cells.u1[q * 4] - uni.u1[cellIndex(blk.cells, q, n, prob.box, ndim) * 4]));
+        metrics[`${prob.id}_${ndim}d_max_density_difference`] = worst;
+        metrics[`${prob.id}_${ndim}d_steps`] = blk.steps;
+        pass &&= worst === 0 && blk.steps === uni.steps && blk.cells.count === n ** ndim;
+      }
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'amr-shock-tube',
+    name: 'Adaptive mesh: Sod shock tube (2D, 256 finest, 2 levels)',
+    criterion:
+      'L1 density error < 0.003 (the uniform 256 grid gives 0.002) on under 60% of the cells; mass and energy drift < 1e-6; fluxes bit-identical between same-level blocks and equal to 1e-6 across refinement boundaries; the mesh was rebuilt at least once',
+    async run(gpu) {
+      return withAmr(gpu, sodX, 256, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        const c = await sim.readLeaves();
+        const exact = exactRiemann(sodX.left, sodX.right, 1.4);
+        let err = 0;
+        let area = 0;
+        for (let q = 0; q < c.count; q++) {
+          const a = c.dx[q] ** 2;
+          err += Math.abs(c.u1[q * 4] - exact(c.x[q] / sodX.tEnd).rho) * a;
+          area += a;
+        }
+        const l1 = err / area;
+        const flux = await sim.fluxMismatch();
+        const frac = c.count / 256 ** 2;
+        const dm = Math.abs(d1.mass - d0.mass) / d0.mass;
+        const de = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        return {
+          pass: l1 < 0.003 && frac < 0.6 && dm < 1e-6 && de < 1e-6 && flux.mismatched === 0 && flux.worstCoarseFine < 1e-6 && sim.regrids >= 1,
+          metrics: {
+            l1, fraction_of_uniform_cells: frac, leaf_blocks: sim.tree.stats().leaves, regrids: sim.regrids, mass_drift: dm, energy_drift: de,
+            same_level_faces: flux.faces, same_level_mismatched: flux.mismatched, coarse_fine_faces: flux.coarseFine, coarse_fine_worst: flux.worstCoarseFine, steps,
+          },
+        };
+      });
+    },
+  },
+  {
+    id: 'amr-sedov',
+    name: 'Adaptive mesh: Sedov-Taylor blast (3D, 128 finest, 2 levels)',
+    criterion: 'Shell-averaged shock radius within 2% of the similarity solution; mass and energy conserved to 1e-6; fluxes consistent across levels',
+    async run(gpu) {
+      return withAmr(gpu, sedov, 128, { amrLevels: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        const c = await sim.readLeaves();
+        // Volume-weighted shell average, then the half-height radius of its outer edge.
+        const nb = 128;
+        const bw = 0.5 / nb;
+        const sum = new Float64Array(nb);
+        const vol = new Float64Array(nb);
+        for (let q = 0; q < c.count; q++) {
+          const b = Math.floor(Math.hypot(c.x[q], c.y[q], c.z[q]) / bw);
+          if (b >= nb) continue;
+          const v = c.dx[q] ** 3;
+          sum[b] += c.u1[q * 4] * v;
+          vol[b] += v;
+        }
+        const prof = Array.from(sum, (v, i) => (vol[i] ? v / vol[i] : 1));
+        const half = 0.5 * (Math.max(...prof) + 1);
+        let r = NaN;
+        for (let b = nb - 1; b > 0; b--) {
+          if (prof[b - 1] >= half) {
+            r = (b - 0.5 + (prof[b - 1] - half) / (prof[b - 1] - prof[b])) * bw;
+            break;
+          }
+        }
+        const rExact = SEDOV_XI0['1.4'] * Math.pow(sedov.tEnd ** 2, 0.2);
+        const err = Math.abs(r - rExact) / rExact;
+        const flux = await sim.fluxMismatch();
+        const dm = Math.abs(d1.mass - d0.mass) / d0.mass;
+        const de = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        return {
+          pass: err < 0.02 && dm < 1e-6 && de < 1e-6 && flux.mismatched === 0 && flux.worstCoarseFine < 1e-6,
+          metrics: {
+            shock_radius: r, similarity_radius: rExact, radius_error: err, fraction_of_uniform_cells: c.count / 128 ** 3,
+            leaf_blocks: sim.tree.stats().leaves, regrids: sim.regrids, mass_drift: dm, energy_drift: de,
+            same_level_mismatched: flux.mismatched, coarse_fine_faces: flux.coarseFine, coarse_fine_worst: flux.worstCoarseFine, steps,
+          },
+        };
+      });
+    },
+  },
+  {
+    id: 'amr-instabilities',
+    name: 'Adaptive mesh: Kelvin-Helmholtz and Rayleigh-Taylor (2D, 512 finest, 2 levels)',
+    criterion:
+      'The mesh follows the flow (rebuilt at least 5 times) while mass is conserved to 1e-6 and total energy to 1e-5; the Rayleigh-Taylor mode grows; fluxes consistent across levels',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      for (const [prob, tEnd] of [[kelvinHelmholtz, 1], [rayleighTaylor, 3]] as const) {
+        await withAmr(gpu, prob, 512, { ndim: 2, amrLevels: 2, tEnd }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd();
+          const d1 = await sim.diagnostics();
+          const flux = await sim.fluxMismatch();
+          const dm = Math.abs(d1.mass - d0.mass) / d0.mass;
+          const de = Math.abs(d1.eTot - d0.eTot) / Math.abs(d0.eTot);
+          const st = sim.tree.stats();
+          metrics[`${prob.id}_mass_drift`] = dm;
+          metrics[`${prob.id}_energy_drift`] = de;
+          metrics[`${prob.id}_regrids`] = sim.regrids;
+          metrics[`${prob.id}_fraction_of_uniform_cells`] = st.cells / 512 ** 2;
+          metrics[`${prob.id}_kinetic_energy_growth`] = d1.eKin / d0.eKin;
+          metrics[`${prob.id}_coarse_fine_worst`] = flux.worstCoarseFine;
+          metrics[`${prob.id}_steps`] = steps;
+          pass &&= dm < 1e-6 && de < 1e-5 && sim.regrids >= 5 && flux.mismatched === 0 && flux.worstCoarseFine < 1e-6;
+          if (prob === rayleighTaylor) pass &&= d1.eKin / d0.eKin > 10;
+        });
+      }
+      return { pass, metrics };
+    },
+  },
+  {
     id: 'gpu-vs-cpu',
     name: 'GPU against the float64 CPU reference (32^3)',
     criterion: 'After 20 steps, L1 difference in density and energy < 1e-4 of the mean for a diagonal Sod tube and a blast',
@@ -447,10 +595,10 @@ export const TESTS: TestDef[] = [
       d.queue.writeBuffer(inBuf, 0, inData);
       const outBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
       const readBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-      const params = d.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      const params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       for (const c of cases) {
         const ep = { ...defaultEosParams(), ...c.params };
-        const pb = new Float32Array(48);
+        const pb = new Float32Array(PARAM_BYTES / 4);
         pb.set([ep.gamma, ep.K, ep.R, ep.arad], 8);
         d.queue.writeBuffer(params, 0, pb);
         const pipe = await computePipeline(d, assemble('eos/eos_test.wgsl', { eos: EOS_MODULES[c.kind] }), `eos test ${c.label}`);

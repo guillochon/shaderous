@@ -11,11 +11,12 @@ struct Params {
   bh: vec4<f32>,         // point-mass perturber: (G M, softening length, 1 if present, 0)
   fluff: vec4<f32>,      // tenuous-gas limits: (density below which they apply, max specific
                          //   internal energy, max speed, 0); a zero density switches them off
-  n: u32,                // cells per side along x and y
+  amr: vec4<u32>,        // block grids: (atlas slots per side, root blocks per side, max level, 0)
+  n: u32,                // cells per side along x and y (level 0 on block grids)
   grav_on: u32,
   grav_bc: u32,          // 0 periodic, 1 isolated
   flags: u32,
-  dx: f32,
+  dx: f32,               // cell size (level 0 on block grids)
   cfl: f32,
   G: f32,
   rho_mean: f32,
@@ -37,6 +38,10 @@ struct Clock {
 }
 
 @group(0) @binding(0) var<uniform> P: Params;
+
+// Size of the cell this invocation is working on. Every entry point sets it first: it is P.dx
+// on a uniform grid and depends on the block's level on an adaptive one.
+var<private> g_dx: f32;
 
 // Maps an index along one axis into range. Returns (index, 1 if mirrored by a reflecting face,
 // side): side is -1 / +1 for a ghost cell beyond an outflow-only lower / upper face, else 0.

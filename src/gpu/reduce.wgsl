@@ -7,9 +7,11 @@
 
 alias Red = array<f32, RED_K>;
 
-override NIN: u32 = 1u;    // inputs per side along x and y
-override NINZ: u32 = 1u;   // and along z
-override NOUT: u32 = 1u;   // outputs per side = ceil(NIN / RED_F)
+override NINX: u32 = 1u;   // inputs along each axis
+override NINY: u32 = 1u;
+override NINZ: u32 = 1u;
+override NOUTX: u32 = 1u;  // outputs along each axis = ceil(inputs / RED_F)
+override NOUTY: u32 = 1u;
 override NOUTZ: u32 = 1u;
 override RED_F: u32 = 4u;  // block side
 
@@ -43,19 +45,19 @@ fn red_combine(a: Red, b: Red) -> Red {
 
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= vec3<u32>(NOUT, NOUT, NOUTZ))) { return; }
+  if (any(gid >= vec3<u32>(NOUTX, NOUTY, NOUTZ))) { return; }
   var acc = red_identity();
   for (var z = 0u; z < RED_F; z++) {
     for (var y = 0u; y < RED_F; y++) {
       for (var x = 0u; x < RED_F; x++) {
         let c = gid * RED_F + vec3<u32>(x, y, z);
-        if (all(c < vec3<u32>(NIN, NIN, NINZ))) {
+        if (all(c < vec3<u32>(NINX, NINY, NINZ))) {
           acc = red_combine(acc, red_cell(vec3<i32>(c)));
         }
       }
     }
   }
-  let base = ((gid.z * NOUT + gid.y) * NOUT + gid.x) * RED_K;
+  let base = ((gid.z * NOUTY + gid.y) * NOUTX + gid.x) * RED_K;
   for (var i = 0u; i < RED_K; i++) {
     RED_OUT[base + i] = acc[i];
   }

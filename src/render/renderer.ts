@@ -1,8 +1,8 @@
 // Volume and slice rendering on the simulation's own device.
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, tex3d, type Gpu } from '../gpu/device';
+import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { EOS_MODULES } from '../eos/eos';
-import type { Sim } from '../sim';
+import type { Simulation } from '../sim';
 
 export interface ViewState {
   mode: 'volume' | 'slice';
@@ -16,6 +16,8 @@ export interface ViewState {
   yaw: number;
   pitch: number;
   dist: number;
+  /** Outline the blocks of an adaptive mesh in the slice view. */
+  showBlocks: boolean;
 }
 
 export const defaultView = (): ViewState => ({
@@ -30,6 +32,7 @@ export const defaultView = (): ViewState => ({
   yaw: 0.7,
   pitch: 0.45,
   dist: 2.6,
+  showBlocks: true,
 });
 
 export class Renderer {
@@ -47,8 +50,8 @@ export class Renderer {
   private vol?: GPUTexture;
   private pField?: GPUComputePipeline;
   private gField: GPUBindGroup[] = [];
-  private n = 0;
-  private nz = 0;
+  private dims: number[] = [0, 0, 0];
+  private fieldShader = '';
 
   constructor(
     gpu: Gpu,
@@ -58,8 +61,8 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 96, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.viewBuf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.viewBuf = this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
       format: 'rgba8unorm',
@@ -87,26 +90,26 @@ export class Renderer {
   }
 
   /** Attach to a simulation (new grid, or a rebuilt equation of state). */
-  async attach(sim: Sim) {
+  async attach(sim: Simulation) {
     const d = this.device;
-    if (this.n !== sim.n || this.nz !== sim.nz || !this.vol) {
+    const dims = sim.displayDims;
+    if (!this.vol || dims.some((v, i) => v !== this.dims[i])) {
       this.vol?.destroy();
-      this.vol = tex3d(d, sim.n, 'rgba16float', 'display volume', sim.nz);
-      this.n = sim.n;
-      this.nz = sim.nz;
+      this.vol = d.createTexture({
+        label: 'display volume',
+        size: dims,
+        dimension: '3d',
+        format: 'rgba16float',
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.dims = dims.slice();
       const res = { 0: this.cam, 1: this.vol.createView(), 2: this.tf.createView(), 3: this.sampler };
       this.gVolume = bindGroup(d, this.pVolume, res);
       this.gSlice = bindGroup(d, this.pSlice, res);
     }
-    this.pField = await computePipeline(d, assemble('render/field.wgsl', { eos: EOS_MODULES[sim.cfg.eos] }), 'field');
+    this.pField = await computePipeline(d, assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos] }), 'field');
     this.gField = [0, 1].map((p) =>
-      bindGroup(d, this.pField!, {
-        0: sim.paramBuffer,
-        1: this.viewBuf,
-        2: sim.state[p][0].createView(),
-        3: sim.state[p][1].createView(),
-        4: this.vol!.createView(),
-      }),
+      bindGroup(d, this.pField!, { 0: sim.paramBuffer, 1: this.viewBuf, 4: this.vol!.createView(), ...sim.fieldResources(p) }),
     );
   }
 
@@ -120,12 +123,14 @@ export class Renderer {
     }
   }
 
-  encode(enc: GPUCommandEncoder, sim: Sim, v: ViewState) {
+  encode(enc: GPUCommandEncoder, sim: Simulation, v: ViewState) {
     if (!this.pField || !this.vol) return;
     this.resize();
     const d = this.device;
 
-    const vb = new ArrayBuffer(16);
+    const [nx, ny, nz] = this.dims;
+    const vb = new ArrayBuffer(32);
+    new Uint32Array(vb, 16, 4).set([nx, ny, nz, 0]);
     new Uint32Array(vb, 0, 2).set([v.field, v.log ? 1 : 0]);
     const tiny = 1e-30;
     const lo = v.log ? Math.log10(Math.max(v.lo, tiny)) : v.lo;
@@ -147,7 +152,7 @@ export class Renderer {
       right[0] * fwd[1] - right[1] * fwd[0],
     ];
     const aspect = this.canvas.width / this.canvas.height;
-    const samples = Math.min(1.5 * sim.n, 384);
+    const samples = Math.min(1.5 * nx, 384);
     d.queue.writeBuffer(
       this.cam,
       0,
@@ -155,14 +160,15 @@ export class Renderer {
         ...eye, 0, ...right, 0, ...up, 0, ...fwd, 0,
         // The field of view applies to the shorter side, so the box always fits.
         Math.tan(0.35) / Math.min(aspect, 1), aspect, v.opacity, samples,
-        v.sliceAxis, v.slicePos, sim.n, sim.nz,
+        v.sliceAxis, v.slicePos, nx, nz,
+        v.showBlocks ? 1 : 0, 0, 0, 0,
       ]),
     );
 
     const cp2 = enc.beginComputePass();
     cp2.setPipeline(this.pField);
     cp2.setBindGroup(0, this.gField[sim.cur]);
-    cp2.dispatchWorkgroups(Math.ceil(sim.n / 8), Math.ceil(sim.n / 8), Math.ceil(sim.nz / 4));
+    cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
     cp2.end();
 
     const rp = enc.beginRenderPass({
@@ -171,7 +177,7 @@ export class Renderer {
       ],
     });
     // A 2D run has nothing to ray-march: always show the plane.
-    const volume = v.mode === 'volume' && sim.nz > 1;
+    const volume = v.mode === 'volume' && nz > 1;
     rp.setPipeline(volume ? this.pVolume : this.pSlice);
     rp.setBindGroup(0, volume ? this.gVolume : this.gSlice);
     rp.draw(3);
