@@ -10,6 +10,7 @@ import { sodX, sodY, sodZ, sodDiag, strongShock, shockTube } from '../problems/s
 import { sedov, SEDOV_XI0 } from '../problems/sedov';
 import { advection } from '../problems/advection';
 import { kelvinHelmholtz } from '../problems/kelvin_helmholtz';
+import { rayleighTaylor, RT } from '../problems/rayleigh_taylor';
 import { jeans, JEANS } from '../problems/jeans';
 import { polytrope } from '../problems/polytrope';
 import { evrard } from '../problems/evrard';
@@ -303,6 +304,86 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'two-dimensional',
+    name: '2D grids (one periodic layer in z)',
+    criterion:
+      'Sod along x at 256^2 has L1 density error < 0.003 and is planar; 2D advection conserves mass and momentum to 2e-6; fluxes are bit-identical on every face',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      const n = 256;
+      const sod = await withSim(gpu, sodX, n, { ndim: 2 }, async (sim) => {
+        const steps = await sim.runToEnd();
+        const { u1 } = await sim.readState();
+        const exact = exactRiemann(sodX.left, sodX.right, 1.4);
+        let err = 0;
+        let spread = 0;
+        for (let i = 0; i < n; i++) {
+          const ref = u1[i * 4];
+          err += Math.abs(ref - exact(((i + 0.5) / n - 0.5) / sodX.tEnd).rho);
+          for (let j = 0; j < n; j++) spread = Math.max(spread, Math.abs(u1[(j * n + i) * 4] - ref));
+        }
+        return { l1: err / n, spread, steps };
+      });
+      metrics.sod_l1 = sod.l1;
+      metrics.sod_transverse_spread = sod.spread;
+      metrics.sod_steps = sod.steps;
+      const adv = await withSim(gpu, advection, 256, { ndim: 2, tEnd: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        sim.step(30);
+        const mm = await sim.fluxMismatch();
+        const steps = await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        return {
+          mass: Math.abs(d1.mass - d0.mass) / d0.mass,
+          mom: Math.max(Math.abs(d1.momentum[0] - d0.momentum[0]) / d0.momentum[0], Math.abs(d1.momentum[1] - d0.momentum[1]) / d0.momentum[1]),
+          mismatched: mm.mismatched,
+          steps,
+        };
+      });
+      metrics.advection_mass_drift = adv.mass;
+      metrics.advection_momentum_drift = adv.mom;
+      metrics.flux_mismatched_faces = adv.mismatched;
+      metrics.advection_steps = adv.steps;
+      return { pass: sod.l1 < 0.003 && sod.spread < 1e-5 && adv.mass < 2e-6 && adv.mom < 2e-6 && adv.mismatched === 0, metrics };
+    },
+  },
+  {
+    id: 'rayleigh-taylor',
+    name: 'Rayleigh-Taylor in a uniform field (2D)',
+    criterion:
+      'Unperturbed, the stratified atmosphere stays at rest (max Mach < 1e-3 at t = 2); perturbed, the mode grows and total energy, including potential, is conserved to 1e-3 by t = 3',
+    async run(gpu) {
+      const n = 256;
+      const still: Problem = {
+        ...rayleighTaylor,
+        init: (m, e, ndim) => {
+          const f = rayleighTaylor.init(m, e, ndim);
+          return (x, y, z) => ({ ...f(x, y, z), vx: 0, vy: 0, vz: 0 });
+        },
+      };
+      const rest = await withSim(gpu, still, n, { ndim: 2, tEnd: 2 }, async (sim) => {
+        await sim.runToEnd();
+        return sim.diagnostics();
+      });
+      const run = await withSim(gpu, rayleighTaylor, n, { ndim: 2, tEnd: 3 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        return { d0, d1, steps };
+      });
+      const drift = Math.abs(run.d1.eTot - run.d0.eTot) / Math.abs(run.d0.eTot);
+      const growth = run.d1.eKin / run.d0.eKin;
+      return {
+        pass: rest.maxMach < 1e-3 && growth > 10 && drift < 1e-3,
+        metrics: {
+          hydrostatic_max_mach: rest.maxMach, hydrostatic_ke: rest.eKin, kinetic_energy_growth: growth,
+          energy_drift: drift, mass_drift: Math.abs(run.d1.mass - run.d0.mass) / run.d0.mass,
+          linear_growth_rate_theory: Math.sqrt((RT.g * 4 * Math.PI) / 3), steps: run.steps,
+        },
+      };
+    },
+  },
+  {
     id: 'gpu-vs-cpu',
     name: 'GPU against the float64 CPU reference (32^3)',
     criterion: 'After 20 steps, L1 difference in density and energy < 1e-4 of the mean for a diagonal Sod tube and a blast',
@@ -317,7 +398,7 @@ export const TESTS: TestDef[] = [
           cfl: cfg.cfl, rhoFloor: cfg.rhoFloor, pFloor: cfg.pFloor, etaDual: cfg.etaDual, shockThresh: cfg.shockThresh,
           riemann: cfg.riemann, limiter: cfg.limiter,
         });
-        ref.init(prob.init(n, ref.cfg.eos));
+        ref.init(prob.init(n, ref.cfg.eos, 3));
         for (let i = 0; i < 20; i++) ref.step();
         await withSim(gpu, prob, n, { tEnd: Infinity }, async (sim) => {
           sim.step(20);
@@ -365,10 +446,10 @@ export const TESTS: TestDef[] = [
       d.queue.writeBuffer(inBuf, 0, inData);
       const outBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
       const readBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-      const params = d.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      const params = d.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       for (const c of cases) {
         const ep = { ...defaultEosParams(), ...c.params };
-        const pb = new Float32Array(28);
+        const pb = new Float32Array(40);
         pb.set([ep.gamma, ep.K, ep.R, ep.arad], 8);
         d.queue.writeBuffer(params, 0, pb);
         const pipe = await computePipeline(d, assemble('eos/eos_test.wgsl', { eos: EOS_MODULES[c.kind] }), `eos test ${c.label}`);

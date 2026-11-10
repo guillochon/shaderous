@@ -50,6 +50,7 @@ export class Multigrid {
     mg.multipole = await Reducer.create(
       device,
       n,
+      n,
       new Array(10).fill(SUM),
       'gravity/multipole.wgsl',
       {},

@@ -10,7 +10,11 @@ export type RiemannKind = 'hllc' | 'hll';
 export type LimiterKind = 'mc' | 'vanleer' | 'minmod';
 
 export interface SimConfig {
+  /** Cells per side. The grid is n x n x n, or n x n x 1 (periodic in z) when ndim is 2. */
   n: number;
+  ndim: 2 | 3;
+  /** Uniform external gravitational acceleration. */
+  gext: [number, number, number];
   problem: Problem;
   eos: EosKind;
   eosParams: EosParams;
@@ -33,17 +37,25 @@ export interface SimConfig {
 }
 
 export function configFor(problem: Problem, n: number, over: Partial<SimConfig> = {}): SimConfig {
+  const ndim = over.ndim ?? 3;
+  // 2D: one periodic layer in z, and no self-gravity (the multigrid solver is 3D only).
+  const bc2 = problem.bc2d ?? {
+    lo: [problem.bcLo[0], problem.bcLo[1], 0] as Bc3,
+    hi: [problem.bcHi[0], problem.bcHi[1], 0] as Bc3,
+  };
   return {
     n,
+    ndim,
+    gext: problem.gext?.(ndim) ?? [0, 0, 0],
     problem,
     eos: problem.eos,
     eosParams: { ...defaultEosParams(), ...problem.eosParams },
     riemann: 'hllc',
     limiter: 'mc',
-    gravity: problem.gravity,
+    gravity: ndim === 2 ? 'off' : problem.gravity,
     G: problem.G,
-    bcLo: problem.bcLo,
-    bcHi: problem.bcHi,
+    bcLo: ndim === 2 ? bc2.lo : problem.bcLo,
+    bcHi: ndim === 2 ? bc2.hi : problem.bcHi,
     cfl: 0.8,
     tEnd: problem.tEnd,
     rhoFloor: problem.rhoFloor ?? 1e-10,
@@ -77,13 +89,13 @@ export interface Diagnostics {
   ranges: [number, number][];
 }
 
-const dispatchN = (pass: GPUComputePassEncoder, n: number) =>
-  pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), Math.ceil(n / 4));
 
 export class Sim {
   readonly device: GPUDevice;
   cfg: SimConfig;
   readonly n: number;
+  /** cells along z: n, or 1 in 2D */
+  readonly nz: number;
   readonly dx: number;
 
   /** state[parity] = [U1, U2]; `cur` is the parity holding the current state */
@@ -123,9 +135,10 @@ export class Sim {
     this.device = gpu.device;
     this.cfg = cfg;
     this.n = cfg.n;
+    this.nz = cfg.ndim === 2 ? 1 : cfg.n;
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
-    this.params = d.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.params = d.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.clock = d.createBuffer({
       size: 16,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -140,20 +153,23 @@ export class Sim {
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
     const n = cfg.n;
-    for (let p = 0; p < 2; p++) {
-      sim.state.push([tex3d(d, n, 'rgba32float', `U1 ${p}`), tex3d(d, n, 'rgba32float', `U2 ${p}`)]);
-    }
-    sim.prim = [tex3d(d, n, 'rgba32float', 'W1'), tex3d(d, n, 'rgba32float', 'W2')];
-    sim.pred = [tex3d(d, n, 'rgba32float', 'PA'), tex3d(d, n, 'rgba32float', 'PB')];
-    sim.gfield = tex3d(d, n, 'rgba32float', 'gravity field');
+    const nz = sim.nz;
+    const t = (label: string) => tex3d(d, n, 'rgba32float', label, nz);
+    for (let p = 0; p < 2; p++) sim.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
+    sim.prim = [t('W1'), t('W2')];
+    sim.pred = [t('PA'), t('PB')];
+    sim.gfield = t('gravity field');
     sim.writeParams();
-    sim.mg = await Multigrid.create(d, n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]);
+    // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
+    // (potential, multipoles) still exist; it is never dispatched.
+    sim.mg = await Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]);
 
     const v = (t: GPUTexture) => t.createView();
     const phi = sim.mg.phi;
     sim.redDt = await Reducer.create(
       d,
       n,
+      nz,
       [MAX, MAX],
       'hydro/timestep.wgsl',
       {},
@@ -239,6 +255,7 @@ export class Sim {
     this.redDiag = await Reducer.create(
       d,
       this.n,
+      this.nz,
       DIAG_OPS,
       'hydro/diagnostics.wgsl',
       slots,
@@ -250,13 +267,18 @@ export class Sim {
   /** Push the current configuration to the GPU parameter block. */
   writeParams() {
     const c = this.cfg;
-    const buf = new ArrayBuffer(112);
+    const buf = new ArrayBuffer(160);
     const u = new Uint32Array(buf);
     const f = new Float32Array(buf);
+    const selfGravity = c.gravity !== 'off' && c.ndim === 3;
     u.set([...c.bcLo, 0], 0);
     u.set([...c.bcHi, 0], 4);
     f.set([c.eosParams.gamma, c.eosParams.K, c.eosParams.R, c.eosParams.arad], 8);
-    u.set([c.n, c.gravity === 'off' ? 0 : 1, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 12);
+    u.set([c.n, c.n, this.nz, 0], 12);
+    // 2D quantities are per unit length along z.
+    f.set([c.ndim === 2 ? this.dx ** 2 : this.dx ** 3, c.ndim, 0, 0], 16);
+    f.set([...c.gext, 0], 20);
+    u.set([c.n, selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 24);
     f.set(
       [
         this.dx,
@@ -272,7 +294,7 @@ export class Sim {
         c.jeansFloor ? 1 : 0,
         c.problem.box,
       ],
-      16,
+      28,
     );
     this.device.queue.writeBuffer(this.params, 0, buf);
   }
@@ -281,15 +303,16 @@ export class Sim {
   reset() {
     const c = this.cfg;
     const n = this.n;
+    const nz = this.nz;
     const eos = makeEos(c.eos, c.eosParams);
-    const fn = c.problem.init(n, eos);
-    const u1 = new Float32Array(n * n * n * 4);
-    const u2 = new Float32Array(n * n * n * 4);
+    const fn = c.problem.init(n, eos, c.ndim);
+    const u1 = new Float32Array(n * n * nz * 4);
+    const u2 = new Float32Array(n * n * nz * 4);
     const half = c.problem.box / 2;
     let mass = 0;
     let o = 0;
-    for (let k = 0; k < n; k++) {
-      const z = (k + 0.5) * this.dx - half;
+    for (let k = 0; k < nz; k++) {
+      const z = nz === 1 ? 0 : (k + 0.5) * this.dx - half;
       for (let j = 0; j < n; j++) {
         const y = (j + 0.5) * this.dx - half;
         for (let i = 0; i < n; i++, o += 4) {
@@ -308,7 +331,7 @@ export class Sim {
         }
       }
     }
-    this.setState(u1, u2, mass / (n * n * n));
+    this.setState(u1, u2, mass / (n * n * nz));
   }
 
   /** Replace the state with raw conserved arrays (rho, m), (E, e_int, rho s, 0). */
@@ -317,9 +340,9 @@ export class Sim {
     const n = this.n;
     this.cur = 0;
     this.rhoMean = rhoMean;
-    writeTexture(d, this.state[0][0], n, 4, u1);
-    writeTexture(d, this.state[0][1], n, 4, u2);
-    writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
+    writeTexture(d, this.state[0][0], n, 4, u1, this.nz);
+    writeTexture(d, this.state[0][1], n, 4, u2, this.nz);
+    if (this.cfg.ndim === 3) writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
     d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
     this.writeParams();
     this.refreshPotential();
@@ -327,7 +350,7 @@ export class Sim {
 
   /** Solve for the potential of the current state from the current guess. */
   solvePotential(cycles: number) {
-    if (this.cfg.gravity === 'off') return;
+    if (!this.selfGravity) return;
     const enc = this.device.createCommandEncoder();
     const pass = enc.beginComputePass();
     this.mg.encodeSource(pass, this.cur, this.cfg.gravity === 'isolated');
@@ -338,7 +361,7 @@ export class Sim {
 
   /** Call after changing the gravity mode or G at run time. */
   refreshPotential() {
-    if (this.cfg.gravity === 'off') return;
+    if (!this.selfGravity) return;
     this.solvePotential(16);
     const enc = this.device.createCommandEncoder();
     this.copyPhiToOld(enc);
@@ -348,11 +371,19 @@ export class Sim {
     this.device.queue.submit([enc.finish()]);
   }
 
+  private get selfGravity(): boolean {
+    return this.cfg.gravity !== 'off' && this.cfg.ndim === 3;
+  }
+
+  private dispatch(pass: GPUComputePassEncoder) {
+    pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+  }
+
   /** Acceleration and half-step potential from the current and previous potentials. */
   private encodeField(pass: GPUComputePassEncoder) {
     pass.setPipeline(this.pField);
     pass.setBindGroup(0, this.gField);
-    dispatchN(pass, this.n);
+    this.dispatch(pass);
   }
 
   private copyPhiToOld(enc: GPUCommandEncoder) {
@@ -362,36 +393,38 @@ export class Sim {
 
   /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
   encodeSteps(enc: GPUCommandEncoder, count: number) {
-    const n = this.n;
-    const grav = this.cfg.gravity !== 'off';
+    const selfGravity = this.selfGravity;
+    const anyGravity = selfGravity || this.cfg.gext.some((g) => g !== 0);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = enc.beginComputePass();
       pass.setPipeline(this.pPrim);
       pass.setBindGroup(0, this.gPrim[p]);
-      dispatchN(pass, n);
+      this.dispatch(pass);
       this.redDt.encode(pass);
       pass.setPipeline(this.pClock);
       pass.setBindGroup(0, this.gClock);
       pass.dispatchWorkgroups(1);
       pass.setPipeline(this.pPredict);
       pass.setBindGroup(0, this.gPredict);
-      dispatchN(pass, n);
+      this.dispatch(pass);
       pass.setPipeline(this.pUpdate);
       pass.setBindGroup(0, this.gUpdate[p]);
-      dispatchN(pass, n);
-      if (grav) {
-        // Keep the old potential, solve for that of the updated density (warm-started), then
-        // apply the second half kick.
+      this.dispatch(pass);
+      if (selfGravity) {
+        // Keep the old potential and solve for that of the updated density (warm-started).
         pass.end();
         this.copyPhiToOld(enc);
         pass = enc.beginComputePass();
         this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
         this.encodeField(pass);
+      }
+      if (anyGravity) {
+        // Second half kick, with the acceleration of the updated state.
         pass.setPipeline(this.pCorrect);
         pass.setBindGroup(0, this.gCorrect[p]);
-        dispatchN(pass, n);
+        this.dispatch(pass);
       } else {
         this.cur = 1 - p;
       }
@@ -430,28 +463,28 @@ export class Sim {
     out.primitives = await time(reps, (pass) => {
       pass.setPipeline(this.pPrim);
       pass.setBindGroup(0, this.gPrim[p]);
-      dispatchN(pass, n);
+      this.dispatch(pass);
     });
     out.timestep = await time(reps, (pass) => this.redDt.encode(pass));
     out.predict = await time(reps, (pass) => {
       pass.setPipeline(this.pPredict);
       pass.setBindGroup(0, this.gPredict);
-      dispatchN(pass, n);
+      this.dispatch(pass);
     });
     out.update = await time(reps, (pass) => {
       pass.setPipeline(this.pUpdate);
       pass.setBindGroup(0, this.gUpdate[p]);
-      dispatchN(pass, n);
+      this.dispatch(pass);
     });
     out.diagnostics = await time(reps, (pass) => this.redDiag.encode(pass, p));
-    if (this.cfg.gravity !== 'off') {
+    if (this.selfGravity) {
       out.gravity_source = await time(reps, (pass) => this.mg.encodeSource(pass, p, this.cfg.gravity === 'isolated'));
       out.vcycle = await time(reps, (pass) => this.mg.encodeVCycle(pass));
       out.gravity_field = await time(reps, (pass) => this.encodeField(pass));
       out.gravity_kick = await time(reps, (pass) => {
         pass.setPipeline(this.pCorrect);
         pass.setBindGroup(0, this.gCorrect[1 - p]);
-        dispatchN(pass, n);
+        this.dispatch(pass);
       });
     }
     buf.destroy();
@@ -579,17 +612,17 @@ export class Sim {
     const pass = enc.beginComputePass();
     pass.setPipeline(this.pPrim);
     pass.setBindGroup(0, this.gPrim[p]);
-    dispatchN(pass, n);
+    this.dispatch(pass);
     pass.setPipeline(this.pPredict);
     pass.setBindGroup(0, this.gPredict);
-    dispatchN(pass, n);
+    this.dispatch(pass);
     pass.setPipeline(pipe);
     pass.setBindGroup(0, group);
-    dispatchN(pass, n);
+    this.dispatch(pass);
     pass.end();
     d.queue.submit([enc.finish()]);
-    const f1 = await readTexture(d, this.state[o][0], n, 4);
-    const f2 = await readTexture(d, this.state[o][1], n, 4);
+    const f1 = await readTexture(d, this.state[o][0], n, 4, this.nz);
+    const f2 = await readTexture(d, this.state[o][1], n, 4, this.nz);
     const flux = (i: number, j: number, k: number, f: number) => {
       const cell = ((k * n + j) * n + i) * 4;
       return f < 4 ? f1[cell + f] : f2[cell + f - 4];
@@ -597,13 +630,14 @@ export class Sim {
     let faces = 0;
     let mismatched = 0;
     let maxDiff = 0;
-    for (let k = 0; k < n; k++)
+    const dims = [n, n, this.nz];
+    for (let k = 0; k < this.nz; k++)
       for (let j = 0; j < n; j++)
         for (let i = 0; i < n; i++)
           for (let a = 0; a < 3; a++) {
             const q = [i, j, k];
             q[a]++;
-            if (q[a] >= n) {
+            if (q[a] >= dims[a]) {
               if (c.bcLo[a] !== 0) continue; // only periodic faces have a partner cell
               q[a] = 0;
             }
@@ -621,7 +655,10 @@ export class Sim {
   /** Current conserved state as float arrays (validation only). */
   async readState(): Promise<{ u1: Float32Array; u2: Float32Array }> {
     const [a, b] = this.state[this.cur];
-    return { u1: await readTexture(this.device, a, this.n, 4), u2: await readTexture(this.device, b, this.n, 4) };
+    return {
+      u1: await readTexture(this.device, a, this.n, 4, this.nz),
+      u2: await readTexture(this.device, b, this.n, 4, this.nz),
+    };
   }
 
   async readPotential(): Promise<Float32Array> {

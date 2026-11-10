@@ -12,7 +12,7 @@
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= vec3<u32>(P.n))) { return; }
+  if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   let ph = 1.5 * textureLoad(PHI, c, 0).x - 0.5 * textureLoad(PHI_OLD, c, 0).x;
   textureStore(GOUT, c, vec4<f32>(gravity(PHI, c), ph));

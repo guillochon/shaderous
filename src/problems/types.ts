@@ -35,9 +35,16 @@ export interface Problem {
   pFloor?: number;
   /** Enforce the Truelove pressure floor by default. */
   jeansFloor?: boolean;
-  view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice' };
+  /** The setup also makes sense on a 2D (x, y) grid. */
+  supports2d?: boolean;
+  /** Boundaries to use in 2D, if they differ (z is always periodic there). */
+  bc2d?: { lo: Bc3; hi: Bc3 };
+  /** Uniform external gravitational acceleration, which may depend on the dimensionality. */
+  gext?: (ndim: 2 | 3) => [number, number, number];
+  /** Default view; `axis` is the slice normal in 3D (0 x, 1 y, 2 z). */
+  view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice'; axis?: number };
   /** Returns the initial primitive state as a function of position. */
-  init(n: number, eos: Eos): (x: number, y: number, z: number) => Prim;
+  init(n: number, eos: Eos, ndim: 2 | 3): (x: number, y: number, z: number) => Prim;
 }
 
 export const all = (b: number): Bc3 => [b, b, b];

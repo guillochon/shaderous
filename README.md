@@ -10,6 +10,11 @@ https://guillochon.github.io/shaderous/validate.html
 - **Hydro:** unsplit MUSCL-Hancock, piecewise-linear reconstruction, HLLC (or HLL) fluxes,
   positivity fallback, shock-flagged HLL blend, dual-energy formalism, floors.
 - **Self-gravity:** multigrid Poisson solve every step, periodic or isolated (multipole) boundaries.
+- **Self-gravity or a uniform field:** a constant external acceleration drives the
+  Rayleigh-Taylor preset.
+- **2D or 3D:** presets that make sense in the plane (shock tubes, blasts, Kelvin-Helmholtz,
+  Rayleigh-Taylor, advection) can run on an n x n grid up to 2048 squared. A 2D run is one periodic
+  layer of the same 3D scheme, without self-gravity.
 - **Equations of state:** ideal gas, barotropic (isothermal / polytropic), gas plus radiation
   pressure, chosen when the shaders are assembled.
 

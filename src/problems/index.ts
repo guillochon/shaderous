@@ -2,6 +2,7 @@ import type { Problem } from './types';
 import { sodX, sodY, sodZ, sodDiag, strongShock } from './shocktube';
 import { sedov, sedovRad } from './sedov';
 import { kelvinHelmholtz } from './kelvin_helmholtz';
+import { rayleighTaylor } from './rayleigh_taylor';
 import { advection } from './advection';
 import { jeans } from './jeans';
 import { polytrope } from './polytrope';
@@ -12,6 +13,7 @@ import { isothermalCollapse } from './isothermal';
 export const PROBLEMS: Problem[] = [
   sedov,
   kelvinHelmholtz,
+  rayleighTaylor,
   evrard,
   polytrope,
   isothermalCollapse,

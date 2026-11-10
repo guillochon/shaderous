@@ -68,10 +68,10 @@ const STATE_USAGE =
   GPUTextureUsage.COPY_SRC |
   GPUTextureUsage.COPY_DST;
 
-export function tex3d(device: GPUDevice, n: number, format: GPUTextureFormat, label: string): GPUTexture {
+export function tex3d(device: GPUDevice, n: number, format: GPUTextureFormat, label: string, nz = n): GPUTexture {
   return device.createTexture({
     label,
-    size: [n, n, n],
+    size: [n, n, nz],
     dimension: '3d',
     format,
     usage: STATE_USAGE,
@@ -123,25 +123,26 @@ export async function readTexture(
   tex: GPUTexture,
   n: number,
   channels: 1 | 4,
+  nz = n,
 ): Promise<Float32Array> {
   const bytesPerRow = n * 4 * channels;
   const padded = Math.ceil(bytesPerRow / 256) * 256;
-  const size = padded * n * n;
+  const size = padded * n * nz;
   const buf = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = device.createCommandEncoder();
-  enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: padded, rowsPerImage: n }, [n, n, n]);
+  enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: padded, rowsPerImage: n }, [n, n, nz]);
   device.queue.submit([enc.finish()]);
   await buf.mapAsync(GPUMapMode.READ);
   const src = new Float32Array(buf.getMappedRange());
-  const out = new Float32Array(n * n * n * channels);
+  const out = new Float32Array(n * n * nz * channels);
   const rowF = n * channels;
   const padF = padded / 4;
-  for (let r = 0; r < n * n; r++) out.set(src.subarray(r * padF, r * padF + rowF), r * rowF);
+  for (let r = 0; r < n * nz; r++) out.set(src.subarray(r * padF, r * padF + rowF), r * rowF);
   buf.unmap();
   buf.destroy();
   return out;
 }
 
-export function writeTexture(device: GPUDevice, tex: GPUTexture, n: number, channels: 1 | 4, data: Float32Array) {
-  device.queue.writeTexture({ texture: tex }, data as Float32Array<ArrayBuffer>, { bytesPerRow: n * 4 * channels, rowsPerImage: n }, [n, n, n]);
+export function writeTexture(device: GPUDevice, tex: GPUTexture, n: number, channels: 1 | 4, data: Float32Array, nz = n) {
+  device.queue.writeTexture({ texture: tex }, data as Float32Array<ArrayBuffer>, { bytesPerRow: n * 4 * channels, rowsPerImage: n }, [n, n, nz]);
 }

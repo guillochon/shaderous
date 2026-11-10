@@ -48,6 +48,7 @@ export class Renderer {
   private pField?: GPUComputePipeline;
   private gField: GPUBindGroup[] = [];
   private n = 0;
+  private nz = 0;
 
   constructor(
     gpu: Gpu,
@@ -88,10 +89,11 @@ export class Renderer {
   /** Attach to a simulation (new grid, or a rebuilt equation of state). */
   async attach(sim: Sim) {
     const d = this.device;
-    if (this.n !== sim.n || !this.vol) {
+    if (this.n !== sim.n || this.nz !== sim.nz || !this.vol) {
       this.vol?.destroy();
-      this.vol = tex3d(d, sim.n, 'rgba16float', 'display volume');
+      this.vol = tex3d(d, sim.n, 'rgba16float', 'display volume', sim.nz);
       this.n = sim.n;
+      this.nz = sim.nz;
       const res = { 0: this.cam, 1: this.vol.createView(), 2: this.tf.createView(), 3: this.sampler };
       this.gVolume = bindGroup(d, this.pVolume, res);
       this.gSlice = bindGroup(d, this.pSlice, res);
@@ -153,14 +155,14 @@ export class Renderer {
         ...eye, 0, ...right, 0, ...up, 0, ...fwd, 0,
         // The field of view applies to the shorter side, so the box always fits.
         Math.tan(0.35) / Math.min(aspect, 1), aspect, v.opacity, samples,
-        v.sliceAxis, v.slicePos, sim.n, 0,
+        v.sliceAxis, v.slicePos, sim.n, sim.nz,
       ]),
     );
 
     const cp2 = enc.beginComputePass();
     cp2.setPipeline(this.pField);
     cp2.setBindGroup(0, this.gField[sim.cur]);
-    cp2.dispatchWorkgroups(Math.ceil(sim.n / 8), Math.ceil(sim.n / 8), Math.ceil(sim.n / 4));
+    cp2.dispatchWorkgroups(Math.ceil(sim.n / 8), Math.ceil(sim.n / 8), Math.ceil(sim.nz / 4));
     cp2.end();
 
     const rp = enc.beginRenderPass({
@@ -168,8 +170,10 @@ export class Renderer {
         { view: this.ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
     });
-    rp.setPipeline(v.mode === 'volume' ? this.pVolume : this.pSlice);
-    rp.setBindGroup(0, v.mode === 'volume' ? this.gVolume : this.gSlice);
+    // A 2D run has nothing to ray-march: always show the plane.
+    const volume = v.mode === 'volume' && sim.nz > 1;
+    rp.setPipeline(volume ? this.pVolume : this.pSlice);
+    rp.setBindGroup(0, volume ? this.gVolume : this.gSlice);
     rp.draw(3);
     rp.end();
   }

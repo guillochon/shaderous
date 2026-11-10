@@ -31,6 +31,7 @@ export function shockTube(
     box: 1,
     tEnd,
     pFloor: 1e-12,
+    supports2d: dir[2] === 0,
     view: { mode: 'slice', log: false },
     dir: d,
     left,

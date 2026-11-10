@@ -103,7 +103,7 @@ override DEBUG_FLUX: bool = false;
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= vec3<u32>(P.n))) { return; }
+  if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
@@ -131,15 +131,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   // Flux-form gravitational work (P.flags bit 0): each face hands half of F_mass * dphi to the
   // two cells it separates, so the sum over cells telescopes to -d/dt of the potential energy.
-  let flux_work = P.grav_on != 0u && (P.flags & 1u) != 0u;
+  let flux_work = has_gravity() && (P.flags & 1u) != 0u;
   var dw = 0.0;
   if (flux_work) {
-    let pc = phi_half(c);
     // (Giving each face's work wholly to the downstream cell was tried; it conserves just as
     // well in principle but heats low-density cells more and was worse on the Evrard test.)
-    dw = -0.5 * (fx.lo.m * (pc - phi_half(c - ex)) + fx.hi.m * (phi_half(c + ex) - pc)
-               + fy.lo.m * (pc - phi_half(c - ey)) + fy.hi.m * (phi_half(c + ey) - pc)
-               + fz.lo.m * (pc - phi_half(c - ez)) + fz.hi.m * (phi_half(c + ez) - pc));
+    dw = -0.5 * (fx.hi.m * dphi_half(c, ex) - fx.lo.m * dphi_half(c, -ex)
+               + fy.hi.m * dphi_half(c, ey) - fy.lo.m * dphi_half(c, -ey)
+               + fz.hi.m * dphi_half(c, ez) - fz.lo.m * dphi_half(c, -ez));
   }
 
   let u1 = textureLoad(U1, c, 0);
@@ -154,7 +153,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // the internal energy at the price of total-energy conservation.
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
-  if (P.grav_on != 0u) {
+  if (has_gravity()) {
     kick = 0.5 * clock.dt * u1.x * g_load(c);
     if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
   }

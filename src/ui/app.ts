@@ -9,49 +9,80 @@ import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor, sampleColormap 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const opt = (v: string | number, label: string) => `<option value="${v}">${label}</option>`;
 
+// A labelled control: small caption above the input, laid out on a two- or three-column grid.
+const field = (label: string, control: string, id = '') => `<label class="f"${id ? ` id="${id}"` : ''}><span>${label}</span>${control}</label>`;
+const select = (id: string, options: string) => `<select id="${id}">${options}</select>`;
+const number = (id: string, attrs = '') => `<input id="${id}" type="number" step="any" ${attrs} />`;
+
+const RES_3D = [32, 64, 128, 256];
+const RES_2D = [128, 256, 512, 1024, 2048];
+
 const side = $('side');
 side.innerHTML = `
-  <h1>SHADEROUS</h1>
-  <div class="hint" id="adapter"></div>
+  <header class="brand"><h1>SHADEROUS</h1><span id="adapter"></span></header>
 
-  <h2>Problem</h2>
-  <div class="row"><label>Preset</label><select id="problem">${PROBLEMS.map((p) => opt(p.id, p.label)).join('')}</select></div>
-  <div class="row"><label>Resolution</label><select id="res">${[32, 64, 128, 256].map((n) => opt(n, `${n}³`)).join('')}</select></div>
-  <div class="row"><label>End time</label><input id="tend" type="number" step="any" placeholder="run forever" /></div>
-  <p class="blurb" id="blurb"></p>
-  <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button></div>
+  <section>
+    ${select('problem', PROBLEMS.map((p) => opt(p.id, p.label)).join(''))}
+    <p class="blurb" id="blurb"></p>
+    <div class="g3">
+      ${field('Grid', select('dim', opt(3, '3D') + opt(2, '2D')))}
+      ${field('Resolution', select('res', ''))}
+      ${field('End time', number('tend', 'placeholder="none"'))}
+    </div>
+    <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button></div>
+  </section>
 
-  <h2>Hydro</h2>
-  <div class="row"><label>Equation of state</label><select id="eos">${(Object.keys(EOS_LABELS) as EosKind[]).map((k) => opt(k, EOS_LABELS[k])).join('')}</select></div>
-  <div class="row"><label>gamma</label><input id="gamma" type="number" step="0.01" min="1" /></div>
-  <div class="row" id="row-K"><label>K (p = K rho^gamma)</label><input id="K" type="number" step="any" min="0" /></div>
-  <div class="row" id="row-arad"><label>Radiation const a</label><input id="arad" type="number" step="any" min="0" /></div>
-  <div class="row"><label>Riemann solver</label><select id="riemann">${opt('hllc', 'HLLC')}${opt('hll', 'HLL')}</select></div>
-  <div class="row"><label>Limiter</label><select id="limiter">${opt('mc', 'Monotonized central')}${opt('vanleer', 'van Leer')}${opt('minmod', 'Minmod')}</select></div>
-  <div class="row"><label>CFL number</label><input id="cfl" type="number" step="0.05" min="0.05" max="1" /></div>
+  <details open>
+    <summary>View<span class="sum" id="sum-view"></span></summary>
+    <div class="g2">
+      ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')))}
+      ${field('Field', select('field', FIELDS.map((f, i) => opt(i, f)).join('')))}
+      ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')))}
+      ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />')}
+      ${field('Range min', number('lo'))}
+      ${field('Range max', number('hi'))}
+      ${field('Colour map', select('cmap', Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')))}
+      ${field('Opacity', '<input id="opacity" type="range" min="1" max="300" step="1" />')}
+    </div>
+    <div class="checks">
+      <label class="check"><input id="log" type="checkbox" />Log scale</label>
+      <label class="check"><input id="auto" type="checkbox" checked />Auto range</label>
+    </div>
+    <canvas id="tf" title="Opacity against field value: drag points, double-click to add or remove"></canvas>
+  </details>
 
-  <h2>Gravity</h2>
-  <div class="row"><label>Self-gravity</label><select id="gravity">${opt('off', 'Off')}${opt('periodic', 'Periodic')}${opt('isolated', 'Isolated')}</select></div>
-  <div class="row"><label>G</label><input id="G" type="number" step="any" min="0" /></div>
-  <div class="row"><label>V-cycles / step</label><input id="vcycles" type="number" step="1" min="1" max="8" /></div>
-  <label class="check"><input id="jeansfloor" type="checkbox" />Jeans pressure floor (4 cells)</label>
-  <label class="check"><input id="fluxwork" type="checkbox" />Energy-conserving gravity source</label>
+  <details>
+    <summary>Hydro<span class="sum" id="sum-hydro"></span></summary>
+    <div class="g2">
+      ${field('Equation of state', select('eos', (Object.keys(EOS_LABELS) as EosKind[]).map((k) => opt(k, EOS_LABELS[k])).join('')))}
+      ${field('gamma', number('gamma', 'step="0.01" min="1"'))}
+      ${field('K (p = K rho^gamma)', number('K', 'min="0"'), 'row-K')}
+      ${field('Radiation constant a', number('arad', 'min="0"'), 'row-arad')}
+      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hll', 'HLL')))}
+      ${field('Limiter', select('limiter', opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')))}
+      ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'))}
+    </div>
+  </details>
 
-  <h2>View</h2>
-  <div class="row"><label>Mode</label><select id="mode">${opt('volume', 'Volume')}${opt('slice', 'Slice')}</select></div>
-  <div class="row"><label>Field</label><select id="field">${FIELDS.map((f, i) => opt(i, f)).join('')}</select></div>
-  <div class="row"><label>Slice</label><div class="pair"><select id="axis">${opt(2, 'z')}${opt(1, 'y')}${opt(0, 'x')}</select><input id="slicepos" type="range" min="0" max="0.999" step="0.001" /></div></div>
-  <label class="check"><input id="log" type="checkbox" />Log scale</label>
-  <label class="check"><input id="auto" type="checkbox" checked />Auto range</label>
-  <div class="row"><label>Range</label><div class="pair"><input id="lo" type="number" step="any" /><input id="hi" type="number" step="any" /></div></div>
-  <div class="row"><label>Colour map</label><select id="cmap">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select></div>
-  <div class="row"><label>Opacity</label><input id="opacity" type="range" min="1" max="300" step="1" /></div>
-  <canvas id="tf"></canvas>
-  <div class="hint">Opacity against field value: drag points, double-click to add or remove. Drag the view to orbit, wheel to zoom.</div>
+  <details>
+    <summary>Gravity<span class="sum" id="sum-grav"></span></summary>
+    <div class="g3">
+      ${field('Self-gravity', select('gravity', opt('off', 'Off') + opt('periodic', 'Periodic') + opt('isolated', 'Isolated')))}
+      ${field('G', number('G', 'min="0"'))}
+      ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'))}
+    </div>
+    <div class="checks">
+      <label class="check" title="Keep the Jeans length at 4 cells or more (Truelove)"><input id="jeansfloor" type="checkbox" />Jeans floor</label>
+      <label class="check" title="Flux-form gravitational work: conserves total energy"><input id="fluxwork" type="checkbox" />Conserve energy</label>
+    </div>
+  </details>
 
-  <h2>Diagnostics</h2>
-  <dl id="diag"></dl>
-  <div class="hint"><a href="validate.html">Validation suite</a></div>
+  <details open>
+    <summary>Diagnostics</summary>
+    <div id="diag"><dl></dl><dl></dl></div>
+  </details>
+
+  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit, wheel to zoom</footer>
 `;
 
 const canvas = $<HTMLCanvasElement>('view');
@@ -88,12 +119,31 @@ function pushTransfer() {
   }
 }
 
-const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) < 1e5 ? v.toPrecision(5) : v.toExponential(3));
+const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) < 1e5 ? v.toPrecision(5) : v.toExponential(2));
 
 /** Reflect cfg and view into the controls. */
 function syncControls() {
+  const two = cfg.ndim === 2;
   $<HTMLSelectElement>('problem').value = cfg.problem.id;
-  $<HTMLSelectElement>('res').value = String(cfg.n);
+  const dim = $<HTMLSelectElement>('dim');
+  dim.value = String(cfg.ndim);
+  dim.options[1].disabled = !cfg.problem.supports2d;
+  const res = $<HTMLSelectElement>('res');
+  const wanted = (two ? RES_2D : RES_3D).map((n) => opt(n, two ? `${n}\u00b2` : `${n}\u00b3`)).join('');
+  if (res.dataset.dim !== String(cfg.ndim)) {
+    res.innerHTML = wanted;
+    res.dataset.dim = String(cfg.ndim);
+  }
+  res.value = String(cfg.n);
+  // A 2D run is always shown as its plane, and has no self-gravity.
+  $<HTMLSelectElement>('mode').disabled = two;
+  $<HTMLSelectElement>('axis').disabled = two;
+  $<HTMLInputElement>('slicepos').disabled = two;
+  for (const id of ['gravity', 'G', 'vcycles', 'jeansfloor']) $<HTMLInputElement>(id).disabled = two;
+  $('sum-view').textContent = FIELDS[view.field];
+  $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
+  const uniform = cfg.gext.some((g) => g !== 0);
+  $('sum-grav').textContent = [cfg.gravity === 'off' ? '' : cfg.gravity, uniform ? 'uniform field' : ''].filter(Boolean).join(' + ') || 'off';
   $<HTMLInputElement>('tend').value = Number.isFinite(cfg.tEnd) ? String(cfg.tEnd) : '';
   $('blurb').textContent = cfg.problem.blurb;
   $<HTMLSelectElement>('eos').value = cfg.eos;
@@ -110,9 +160,9 @@ function syncControls() {
   $<HTMLInputElement>('vcycles').value = String(cfg.vcycles);
   $<HTMLInputElement>('jeansfloor').checked = cfg.jeansFloor;
   $<HTMLInputElement>('fluxwork').checked = cfg.gravEnergyFlux;
-  $<HTMLSelectElement>('mode').value = view.mode;
+  $<HTMLSelectElement>('mode').value = two ? 'slice' : view.mode;
   $<HTMLSelectElement>('field').value = String(view.field);
-  $<HTMLSelectElement>('axis').value = String(view.sliceAxis);
+  $<HTMLSelectElement>('axis').value = String(two ? 2 : view.sliceAxis);
   $<HTMLInputElement>('slicepos').value = String(view.slicePos);
   $<HTMLInputElement>('log').checked = view.log;
   $<HTMLInputElement>('opacity').value = String(view.opacity);
@@ -139,12 +189,15 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 }
 
 /** Build a simulation for the selected preset and resolution. */
-function build(problemId: string, n: number, keepPhysics = false) {
+function build(problemId: string, n: number, ndim: 2 | 3, keepPhysics = false) {
   return enqueue(async () => {
     const problem = problemById(problemId);
-    const next = configFor(problem, n);
+    if (!problem.supports2d) ndim = 3;
+    const allowed = ndim === 2 ? RES_2D : RES_3D;
+    if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
+    const next = configFor(problem, n, { ndim });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
-    if (keepPhysics && cfg) {
+    if (keepPhysics && cfg && cfg.problem === problem && cfg.ndim === ndim) {
       // Same preset at a new resolution: keep the user's physics choices.
       const { n: _n, problem: _p, ...rest } = cfg;
       Object.assign(next, rest);
@@ -152,11 +205,13 @@ function build(problemId: string, n: number, keepPhysics = false) {
       view.field = problem.view?.field ?? 0;
       view.log = problem.view?.log ?? true;
       view.mode = problem.view?.mode ?? 'volume';
+      view.sliceAxis = problem.view?.axis ?? 2;
     }
     const old = sim;
     sim = undefined;
     old?.destroy();
     cfg = next;
+    if (ndim === 2) view.sliceAxis = 2;
     const s = await Sim.create(gpu, cfg);
     await renderer.attach(s);
     sim = s;
@@ -197,13 +252,22 @@ function bind() {
     $(id).addEventListener(ev, () => fn($(id) as HTMLInputElement & HTMLSelectElement));
   const numOr = (el: HTMLInputElement, fallback: number) => (el.value === '' || Number.isNaN(+el.value) ? fallback : +el.value);
 
-  on('problem', (el) => {
-    const n = +$<HTMLSelectElement>('res').value;
-    build(el.value, n);
+  const picked = () => ({
+    id: $<HTMLSelectElement>('problem').value,
+    n: +$<HTMLSelectElement>('res').value,
+    ndim: (+$<HTMLSelectElement>('dim').value === 2 ? 2 : 3) as 2 | 3,
   });
-  on('res', (el) => {
-    const id = $<HTMLSelectElement>('problem').value;
-    build(id, +el.value, id === cfg.problem.id);
+  on('problem', () => {
+    const { id, n, ndim } = picked();
+    build(id, n, ndim);
+  });
+  on('dim', () => {
+    const { id, ndim } = picked();
+    build(id, 0, ndim); // 0: use the default resolution for that dimensionality
+  });
+  on('res', () => {
+    const { id, n, ndim } = picked();
+    build(id, n, ndim, true);
   });
   on('tend', (el) => {
     cfg.tEnd = el.value === '' ? Infinity : +el.value;
@@ -290,7 +354,10 @@ function bind() {
   });
 
   on('mode', (el) => (view.mode = el.value as ViewState['mode']));
-  on('field', (el) => (view.field = +el.value));
+  on('field', (el) => {
+    view.field = +el.value;
+    syncControls();
+  });
   on('axis', (el) => (view.sliceAxis = +el.value));
   on('slicepos', (el) => (view.slicePos = +el.value), 'input');
   on('log', (el) => (view.log = el.checked));
@@ -362,15 +429,21 @@ function liveText(parent: HTMLElement): (v: string) => void {
   };
 }
 
-const DIAG_ROWS = [
-  'time', 'dt', 'steps', 'mass', 'momentum x', 'momentum y', 'momentum z', 'E kinetic', 'E internal',
-  'E gravitational', 'E total', 'max Mach', 'floored cells', 'Jeans < 4 cells',
-] as const;
-const diagCells = DIAG_ROWS.map((label) => {
+// [label, tooltip]; the first seven fill the left column, the rest the right.
+const DIAG_ROWS: [string, string][] = [
+  ['t', 'Time'], ['dt', 'Timestep'], ['steps', 'Steps taken'], ['mass', 'Total mass'],
+  ['Mach', 'Maximum Mach number'], ['floor', 'Cells at the density or pressure floor'],
+  ['Jeans', 'Cells whose Jeans length is under 4 cells'],
+  ['p x', 'Total x momentum'], ['p y', 'Total y momentum'], ['p z', 'Total z momentum'],
+  ['E kin', 'Kinetic energy'], ['E int', 'Internal energy'], ['E grav', 'Gravitational energy'], ['E tot', 'Total energy'],
+];
+const diagCols = $('diag').querySelectorAll('dl');
+const diagCells = DIAG_ROWS.map(([label, title], i) => {
   const dt = document.createElement('dt');
   dt.textContent = label;
+  dt.title = title;
   const dd = document.createElement('dd');
-  $('diag').append(dt, dd);
+  diagCols[i < 7 ? 0 : 1].append(dt, dd);
   return { dd, set: liveText(dd), warn: false };
 });
 const setHud = liveText(hud);
@@ -383,16 +456,16 @@ function showDiagnostics(d: Diagnostics) {
     [num(d.dt), false],
     [String(d.steps), false],
     [num(d.mass), false],
-    [d.momentum[0].toExponential(3), false],
-    [d.momentum[1].toExponential(3), false],
-    [d.momentum[2].toExponential(3), false],
+    [num(d.maxMach), false],
+    [String(d.floored), d.floored > 0],
+    [String(d.jeansUnresolved), d.jeansUnresolved > 0],
+    [d.momentum[0].toExponential(2), false],
+    [d.momentum[1].toExponential(2), false],
+    [d.momentum[2].toExponential(2), false],
     [num(d.eKin), false],
     [num(d.eInt), false],
     [num(d.eGrav), false],
     [num(d.eTot), false],
-    [num(d.maxMach), false],
-    [String(d.floored), d.floored > 0],
-    [String(d.jeansUnresolved), d.jeansUnresolved > 0],
   ];
   values.forEach(([text, warn], i) => {
     const cell = diagCells[i];
@@ -517,7 +590,7 @@ function tick(now: number) {
       rateMark = { time: now, steps: stepsSubmitted };
     }
     const state = finished ? 'finished' : running ? `${nsub} step${nsub > 1 ? 's' : ''}/frame, ${stepRate.toFixed(0)} steps/s` : 'paused';
-    setHud(`${cfg.n}³  •  ${fps.toFixed(0)} fps  •  ${state}`);
+    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}`);
   }
 }
 
@@ -535,8 +608,7 @@ function tick(now: number) {
     bind();
     const q = new URLSearchParams(location.search);
     const id = PROBLEMS.some((p) => p.id === q.get('problem')) ? q.get('problem')! : PROBLEMS[0].id;
-    const n = [32, 64, 128, 256].includes(+q.get('n')!) ? +q.get('n')! : 128;
-    await build(id, n);
+    await build(id, +q.get('n')! || 0, q.get('dim') === '2' ? 2 : 3);
     requestAnimationFrame(tick);
   } catch (e) {
     fail(e);

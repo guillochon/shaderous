@@ -5,7 +5,10 @@ struct Params {
   bc_lo: vec4<u32>,      // per-axis lower-face boundary: 0 periodic, 1 outflow, 2 reflecting
   bc_hi: vec4<u32>,      // per-axis upper-face boundary
   eos: vec4<f32>,        // (gamma, K, gas constant R, radiation constant a)
-  n: u32,                // cells per side
+  dims: vec4<u32>,       // cells along x, y, z; z is 1 in 2D runs (one periodic layer)
+  geom: vec4<f32>,       // (cell volume, number of dimensions, 0, 0); 2D is per unit length in z
+  gext: vec4<f32>,       // uniform external gravitational acceleration
+  n: u32,                // cells per side along x and y
   grav_on: u32,
   grav_bc: u32,          // 0 periodic, 1 isolated
   flags: u32,
@@ -34,12 +37,14 @@ struct Clock {
 
 fn bc_axis(i: i32, n: i32, lo: u32, hi: u32) -> vec2<i32> {
   if (i < 0) {
-    if (lo == 0u) { return vec2<i32>(i + n, 0); }
+    // The stencil reaches two cells out; the clamp covers a single-layer axis (n = 1) without
+    // an integer modulo, which is slow and would be evaluated on every load.
+    if (lo == 0u) { return vec2<i32>(max(i + n, 0), 0); }
     if (lo == 1u) { return vec2<i32>(0, 0); }
     return vec2<i32>(-1 - i, 1);
   }
   if (i >= n) {
-    if (hi == 0u) { return vec2<i32>(i - n, 0); }
+    if (hi == 0u) { return vec2<i32>(min(i - n, n - 1), 0); }
     if (hi == 1u) { return vec2<i32>(n - 1, 0); }
     return vec2<i32>(2 * n - 1 - i, 1);
   }
@@ -56,7 +61,7 @@ fn bc_map(c: vec3<i32>) -> Mapped {
   let n = i32(P.n);
   let x = bc_axis(c.x, n, P.bc_lo.x, P.bc_hi.x);
   let y = bc_axis(c.y, n, P.bc_lo.y, P.bc_hi.y);
-  let z = bc_axis(c.z, n, P.bc_lo.z, P.bc_hi.z);
+  let z = bc_axis(c.z, i32(P.dims.z), P.bc_lo.z, P.bc_hi.z);
   return Mapped(
     vec3<i32>(x.x, y.x, z.x),
     vec3<f32>(1.0 - 2.0 * f32(x.y), 1.0 - 2.0 * f32(y.y), 1.0 - 2.0 * f32(z.y)),

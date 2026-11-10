@@ -13,9 +13,11 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
 
   let n = C.q.z;
   let ij = vec2<i32>(floor(st * n));
-  let k = i32(clamp(floor(C.q.y * n), 0.0, n - 1.0));
-  var c = vec3<i32>(ij.x, ij.y, k);            // z-normal: x right, y up
   let axis = i32(C.q.x);
+  // Depth of the grid along the slice normal (1 along z in a 2D run).
+  let depth = select(n, C.q.w, axis == 2);
+  let k = i32(clamp(floor(C.q.y * depth), 0.0, depth - 1.0));
+  var c = vec3<i32>(ij.x, ij.y, k);            // z-normal: x right, y up
   if (axis == 0) { c = vec3<i32>(k, ij.x, ij.y); }   // x-normal: y right, z up
   if (axis == 1) { c = vec3<i32>(ij.x, k, ij.y); }   // y-normal: x right, z up
   let v = textureLoad(VOL, c, 0).r;

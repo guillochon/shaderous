@@ -5,7 +5,7 @@ struct Cam {
   up: vec4<f32>,
   fwd: vec4<f32>,
   p: vec4<f32>,   // tan(fov / 2), aspect, opacity scale, samples across the box
-  q: vec4<f32>,   // slice axis, slice position in [0, 1), cells per side, unused
+  q: vec4<f32>,   // slice axis, slice position in [0, 1), cells per side, cells along z
 }
 @group(0) @binding(0) var<uniform> C: Cam;
 @group(0) @binding(1) var VOL: texture_3d<f32>;

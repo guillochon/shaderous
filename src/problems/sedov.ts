@@ -19,16 +19,18 @@ function blast(id: string, label: string, eos: EosKind, blurb: string): Problem 
     tEnd: 0.06,
     pFloor: 1e-12,
     view: { field: 0, log: false, mode: 'slice' },
-    init: (n, e) => {
-      // Unit energy spread uniformly over the cells within 3.5 dx of the centre.
+    supports2d: true,
+    init: (n, e, ndim) => {
+      // Unit energy spread uniformly over the cells within 3.5 dx of the centre. In 2D this is
+      // energy per unit length along z: a cylindrical blast.
       const dx = 1 / n;
       const r0 = 3.5 * dx;
       let count = 0;
-      for (let k = -4; k < 4; k++)
+      for (let k = ndim === 3 ? -4 : 0; k < (ndim === 3 ? 4 : 1); k++)
         for (let j = -4; j < 4; j++)
           for (let i = -4; i < 4; i++)
-            if (Math.hypot(i + 0.5, j + 0.5, k + 0.5) * dx < r0) count++;
-      const eDep = 1 / (count * dx ** 3);
+            if (Math.hypot(i + 0.5, j + 0.5, ndim === 3 ? k + 0.5 : 0) * dx < r0) count++;
+      const eDep = 1 / (count * dx ** ndim);
       const pHot = e.pressure(1, eDep);
       return (x, y, z) => {
         const hot = Math.hypot(x, y, z) < r0;

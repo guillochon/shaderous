@@ -7,8 +7,10 @@
 
 alias Red = array<f32, RED_K>;
 
-override NIN: u32 = 1u;    // inputs per side
+override NIN: u32 = 1u;    // inputs per side along x and y
+override NINZ: u32 = 1u;   // and along z
 override NOUT: u32 = 1u;   // outputs per side = ceil(NIN / RED_F)
+override NOUTZ: u32 = 1u;
 override RED_F: u32 = 4u;  // block side
 
 @group(0) @binding(20) var<storage, read_write> RED_OUT: array<f32>;
@@ -41,13 +43,13 @@ fn red_combine(a: Red, b: Red) -> Red {
 
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= vec3<u32>(NOUT))) { return; }
+  if (any(gid >= vec3<u32>(NOUT, NOUT, NOUTZ))) { return; }
   var acc = red_identity();
   for (var z = 0u; z < RED_F; z++) {
     for (var y = 0u; y < RED_F; y++) {
       for (var x = 0u; x < RED_F; x++) {
         let c = gid * RED_F + vec3<u32>(x, y, z);
-        if (all(c < vec3<u32>(NIN))) {
+        if (all(c < vec3<u32>(NIN, NIN, NINZ))) {
           acc = red_combine(acc, red_cell(vec3<i32>(c)));
         }
       }

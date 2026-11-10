@@ -18,6 +18,7 @@ export const advection: Problem = {
   G: 0,
   box: 1,
   tEnd: 10,
+  supports2d: true,
   view: { field: 0, log: false, mode: 'slice' },
   init: () => (x, y, z) => {
     const g = Math.exp(-(x * x + y * y + z * z) / (2 * 0.1 * 0.1));

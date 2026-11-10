@@ -160,8 +160,8 @@ export class RefHydro {
   }
 
   private bcAxis(i: number, n: number, lo: number, hi: number): [number, number] {
-    if (i < 0) return lo === 0 ? [i + n, 1] : lo === 1 ? [0, 1] : [-1 - i, -1];
-    if (i >= n) return hi === 0 ? [i - n, 1] : hi === 1 ? [n - 1, 1] : [2 * n - 1 - i, -1];
+    if (i < 0) return lo === 0 ? [((i % n) + n) % n, 1] : lo === 1 ? [0, 1] : [-1 - i, -1];
+    if (i >= n) return hi === 0 ? [i % n, 1] : hi === 1 ? [n - 1, 1] : [2 * n - 1 - i, -1];
     return [i, 1];
   }
 

@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'advection', 'flux-determinism',
-  'reflecting-box', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard',
+  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard',
 ];
 
 test.describe.configure({ mode: 'serial' });
@@ -59,6 +59,8 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   };
 
   await page.goto('/?problem=polytrope&n=32');
+  // The Hydro and Gravity sections start collapsed; open them so their controls can be used.
+  await page.evaluate(() => document.querySelectorAll('details').forEach((d) => (d.open = true)));
   await page.fill('#tend', '');
   await page.dispatchEvent('#tend', 'change'); // no end time: run until told otherwise
   await advance();
@@ -82,5 +84,16 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   const d = await page.evaluate(() => (window as any).shaderousApp.diag);
   expect(Number.isFinite(d.eTot)).toBe(true);
   expect(d.mass).toBeCloseTo(1, 3);
+
+  // 2D: only offered where the preset supports it, and switches the grid to one layer.
+  expect(await page.locator('#dim option[value="2"]').isDisabled()).toBe(true);
+  await page.selectOption('#problem', 'rayleigh-taylor');
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'rayleigh-taylor');
+  await page.selectOption('#dim', '2');
+  await page.waitForFunction(() => (window as any).shaderousApp.sim?.nz === 1);
+  await advance();
+  const d2 = await page.evaluate(() => (window as any).shaderousApp.diag);
+  expect(d2.mass).toBeCloseTo(1.5, 3);
+  expect(await page.locator('#mode').isDisabled()).toBe(true);
   expect(errors).toEqual([]);
 });

@@ -19,7 +19,7 @@
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= vec3<u32>(P.n))) { return; }
+  if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   let q = load_q(c);
   let xm = load_q(c + vec3<i32>(-1, 0, 0));
