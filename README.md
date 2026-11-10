@@ -103,12 +103,15 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   without storing fluxes; this needs every level to take the same timestep. The mesh is
   rebuilt from the CPU every 8 steps, from a per-block indicator read back without blocking.
 - **Gravity on the adaptive mesh.** The potential lives on every block, parents included.
-  Each tree level is solved in turn from the coarsest down: the density is averaged into the
-  parents, ghost cells of a level come from its neighbours or are interpolated from the level
-  above, and a multigrid cycle runs inside the blocks (16, 8, 4, 2 and 1 cells across). The
-  coupling is one-way, so a fine level never corrects the coarse potential beneath it; on a
-  uniform sphere the error stays below 0.3% with three levels. The solve is many small
-  dispatches, so a self-gravitating adaptive step costs noticeably more than a hydro one.
+  The density is averaged into the parents, ghost cells of a level come from its neighbours
+  or are interpolated from the level above, and a multigrid cycle runs inside the blocks (16,
+  8, 4, 2 and 1 cells across). The coupling is one-way, so a fine level never corrects the
+  coarse potential beneath it; on a uniform sphere the error stays below 0.3% with three
+  levels. A fresh mesh is solved level by level from the coarsest down. During a run every
+  level relaxes in the same dispatches, each against the boundary values its coarser level
+  had at the start of the cycle, so the cost does not grow with the depth of the tree; the
+  solve then takes about as long as on a uniform grid of the finest resolution when half the
+  volume is refined, and less when the refined region is smaller.
   Refinement also triggers where the Jeans length falls below `jeansRefine` cells (16 by
   default). The atlas holds at most 2197 blocks in 3D (about 3 GB of GPU memory with
   gravity; it shrinks automatically if the GPU cannot allocate that); if the initial mesh of a

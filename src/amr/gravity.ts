@@ -8,6 +8,7 @@ const PRE = 2; // smoothing sweeps before restriction
 const POST = 2; // and after prolongation
 const COARSE = 8; // sweeps on the coarsest sublevel (one cell per block)
 const NSUB = 5; // sublevels: 16, 8, 4, 2, 1 cells per block side
+const SEQUENTIAL = !!(globalThis as { AMR_GRAVITY_SEQUENTIAL?: boolean }).AMR_GRAVITY_SEQUENTIAL; // debugging: always level by level
 
 export interface GravityContext {
   device: GPUDevice;
@@ -36,10 +37,8 @@ interface Sub {
   bsize: number;
   phi: GPUTexture;
   rhs: GPUTexture;
-  res?: GPUTexture;
   smooth: GPUBindGroup[][]; // [tree level][colour]
-  residual: GPUBindGroup[]; // [tree level]
-  restrict?: GPUBindGroup[]; // into this sublevel from the finer one, [tree level]
+  restrict?: GPUBindGroup[]; // residual of this sublevel onto the coarser one, [tree level]
   prolong?: GPUBindGroup[]; // into this sublevel from the coarser one, [tree level]
 }
 
@@ -47,7 +46,6 @@ export class AmrGravity {
   private sub: Sub[] = [];
   phiOld!: GPUTexture;
   private pSmooth!: GPUComputePipeline;
-  private pResidual!: GPUComputePipeline;
   private pRestrict!: GPUComputePipeline;
   private pProlong!: GPUComputePipeline;
   private pRhs!: GPUComputePipeline;
@@ -62,6 +60,7 @@ export class AmrGravity {
   private gRhsRestrict: GPUBindGroup[] = [];
   private gGhostCoarse: GPUBindGroup[] = [];
   private gGhostRest!: GPUBindGroup;
+  private gGhostCoarseAll!: GPUBindGroup;
   private gField!: GPUBindGroup;
   private gNew!: GPUBindGroup;
 
@@ -76,10 +75,9 @@ export class AmrGravity {
     const d = ctx.device;
     const A = ctx.slotsPerSide;
     const v = (t: GPUTexture) => t.createView();
-    [g.pSmooth, g.pResidual, g.pRestrict, g.pProlong, g.pRhs, g.pRhsRestrict, g.pGhostCoarse, g.pGhostRest, g.pField, g.pNew, g.pInit] = await Promise.all([
+    [g.pSmooth, g.pRestrict, g.pProlong, g.pRhs, g.pRhsRestrict, g.pGhostCoarse, g.pGhostRest, g.pField, g.pNew, g.pInit] = await Promise.all([
       computePipeline(d, assemble('amr/gravity/smooth.wgsl'), 'amr mg smooth'),
-      computePipeline(d, assemble('amr/gravity/residual.wgsl'), 'amr mg residual'),
-      computePipeline(d, assemble('amr/gravity/restrict.wgsl'), 'amr mg restrict'),
+      computePipeline(d, assemble('amr/gravity/restrict.wgsl'), 'amr mg residual + restrict'),
       computePipeline(d, assemble('amr/gravity/prolong.wgsl'), 'amr mg prolong'),
       computePipeline(d, assemble('amr/gravity/rhs.wgsl'), 'amr mg source'),
       computePipeline(d, assemble('amr/gravity/rhs_restrict.wgsl'), 'amr mg source restrict'),
@@ -110,27 +108,24 @@ export class AmrGravity {
         bsize: geom[k].bsize,
         phi: tex3d(d, side, 'r32float', `amr phi k${k}`),
         rhs: tex3d(d, side, 'r32float', `amr rhs k${k}`),
-        res: k < NSUB - 1 ? tex3d(d, side, 'r32float', `amr res k${k}`) : undefined,
         smooth: [],
-        residual: [],
       });
     }
+    // Bind groups are indexed by tree level; one more entry covers every block at once.
+    const lists = [...ctx.listLevel, ctx.listAll];
     for (let k = 0; k < NSUB; k++) {
       const s = g.sub[k];
       const uSmooth = [uniform(k, 0, k + 1), uniform(k, 1, k + 1)]; // "other" = the coarser sublevel
-      const uFromFine = uniform(k, 0, k - 1); // "other" = the finer sublevel
-      for (let l = 0; l <= ctx.levels; l++) {
-        const list = ctx.listLevel[l];
+      for (let l = 0; l <= ctx.levels + 1; l++) {
+        const list = lists[l];
         s.smooth.push(
           uSmooth.map((u) => bindGroup(d, g.pSmooth, { 0: ctx.params, 1: u, 2: v(s.phi), 3: v(s.rhs), 10: ctx.multipole, 30: ctx.bt, 31: list })),
         );
-        if (s.res) {
-          s.residual.push(
-            bindGroup(d, g.pResidual, { 0: ctx.params, 1: uSmooth[0], 2: v(s.phi), 3: v(s.rhs), 4: v(s.res), 10: ctx.multipole, 30: ctx.bt, 31: list }),
+        if (k < NSUB - 1) {
+          const c = g.sub[k + 1];
+          (s.restrict ??= []).push(
+            bindGroup(d, g.pRestrict, { 0: ctx.params, 1: uSmooth[0], 2: v(s.phi), 3: v(s.rhs), 4: v(c.rhs), 5: v(c.phi), 10: ctx.multipole, 30: ctx.bt, 31: list }),
           );
-        }
-        if (k > 0) {
-          (s.restrict ??= []).push(bindGroup(d, g.pRestrict, { 0: ctx.params, 1: uFromFine, 2: v(g.sub[k - 1].res!), 3: v(s.rhs), 4: v(s.phi), 31: list }));
         }
         if (k < NSUB - 1) {
           (s.prolong ??= []).push(bindGroup(d, g.pProlong, { 0: ctx.params, 1: uSmooth[0], 2: v(g.sub[k + 1].phi), 3: v(s.phi), 30: ctx.bt, 31: list }));
@@ -141,6 +136,7 @@ export class AmrGravity {
     const phi0 = v(g.sub[0].phi);
     const rhs0 = v(g.sub[0].rhs);
     g.gRhs = ctx.stateU1.map((t) => bindGroup(d, g.pRhs, { 0: ctx.params, 1: v(t), 2: rhs0, 31: ctx.listLeaf }));
+    g.gGhostCoarseAll = bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAll });
     for (let l = 0; l <= ctx.levels; l++) {
       g.gRhsRestrict.push(bindGroup(d, g.pRhsRestrict, { 0: ctx.params, 2: rhs0, 30: ctx.bt, 31: ctx.listLevel[l] }));
       g.gGhostCoarse.push(bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listLevel[l] }));
@@ -157,6 +153,10 @@ export class AmrGravity {
     const span = Math.max(bsize, 8);
     pass.dispatchWorkgroups(count * (span / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
+  /** Dispatch over the cells of one colour (see smooth.wgsl). */
+  private colour(pass: GPUComputePassEncoder, count: number, bsize: number) {
+    pass.dispatchWorkgroups(Math.ceil((count * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
+  }
   private padded(pass: GPUComputePassEncoder, count: number) {
     pass.dispatchWorkgroups(count * 3, 3, 5);
   }
@@ -166,7 +166,7 @@ export class AmrGravity {
     for (let i = 0; i < sweeps; i++) {
       for (const g of this.sub[k].smooth[level]) {
         pass.setBindGroup(0, g);
-        this.cells(pass, count, this.sub[k].bsize);
+        this.colour(pass, count, this.sub[k].bsize);
       }
     }
   }
@@ -175,11 +175,8 @@ export class AmrGravity {
     const last = NSUB - 1;
     for (let k = 0; k < last; k++) {
       this.smooth(pass, k, level, count, PRE);
-      pass.setPipeline(this.pResidual);
-      pass.setBindGroup(0, this.sub[k].residual[level]);
-      this.cells(pass, count, this.sub[k].bsize);
       pass.setPipeline(this.pRestrict);
-      pass.setBindGroup(0, this.sub[k + 1].restrict![level]);
+      pass.setBindGroup(0, this.sub[k].restrict![level]);
       this.cells(pass, count, this.sub[k + 1].bsize);
     }
     this.smooth(pass, last, level, count, COARSE);
@@ -209,9 +206,12 @@ export class AmrGravity {
   /**
    * Solve every level in turn, then fill the remaining ghost cells. Normally each level starts
    * from its previous potential; a cold start begins each from the coarser level's solution.
+   * `together` relaxes all levels in the same dispatches instead (for small changes only).
    */
-  encodeSolve(pass: GPUComputePassEncoder, nLevel: number[], nAll: number, cycles: number, cold = false) {
+  encodeSolve(pass: GPUComputePassEncoder, nLevel: number[], nAll: number, cycles: number, cold = false, together = false) {
+    together &&= !cold && !SEQUENTIAL;
     for (let l = 0; l <= this.ctx.levels; l++) {
+      if (together) break;
       if (nLevel[l] === 0) continue;
       if (l > 0) {
         if (cold) {
@@ -225,6 +225,19 @@ export class AmrGravity {
         this.padded(pass, nLevel[l]);
       }
       for (let c = 0; c < cycles; c++) this.vcycle(pass, l, nLevel[l]);
+    }
+    if (together) {
+      // Warm start (every step): all levels relax together, each against the boundary values
+      // its coarser level had at the start of the cycle. The lag costs nothing measurable when
+      // the potential changes little per step, and the number of dispatches no longer grows
+      // with the depth of the tree.
+      const all = this.ctx.levels + 1;
+      for (let c = 0; c < cycles; c++) {
+        pass.setPipeline(this.pGhostCoarse);
+        pass.setBindGroup(0, this.gGhostCoarseAll);
+        this.padded(pass, nAll);
+        this.vcycle(pass, all, nAll);
+      }
     }
     pass.setPipeline(this.pGhostRest);
     pass.setBindGroup(0, this.gGhostRest);
@@ -255,7 +268,6 @@ export class AmrGravity {
     for (const s of this.sub) {
       s.phi.destroy();
       s.rhs.destroy();
-      s.res?.destroy();
     }
     this.phiOld.destroy();
   }

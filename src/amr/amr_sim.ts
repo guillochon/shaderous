@@ -336,11 +336,11 @@ export class AmrSim implements Simulation {
    * multipoles, every level's solve, and (optionally) the perturber's step. The field pass is
    * separate because the "previous potential" copy may have to happen in between.
    */
-  private encodeSolve(pass: GPUComputePassEncoder, parity: number, cycles: number, perturber: 'none' | 'kick' | 'step', cold = false) {
+  private encodeSolve(pass: GPUComputePassEncoder, parity: number, cycles: number, perturber: 'none' | 'kick' | 'step', cold = false, together = false) {
     const g = this.grav!;
     g.encodeSource(pass, parity, this.nLevel, this.nLeaf);
     if (this.cfg.gravity === 'isolated') this.redMp!.encode(pass, parity);
-    g.encodeSolve(pass, this.nLevel, this.nAll, cycles, cold);
+    g.encodeSolve(pass, this.nLevel, this.nAll, cycles, cold, together);
     if (this.hasPerturber && perturber !== 'none') {
       if (perturber === 'step') {
         pass.setPipeline(this.pBhDrift!);
@@ -583,7 +583,7 @@ export class AmrSim implements Simulation {
         const g = this.grav!;
         g.copyPhiToOld(enc);
         const gp = enc.beginComputePass();
-        this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step');
+        this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
         g.encodeField(gp, this.nAll);
         gp.setPipeline(this.pCorrect);
         gp.setBindGroup(0, this.gCorrect[p]);
