@@ -21,16 +21,23 @@ fn unrot(v: vec3<f32>, axis: i32) -> vec3<f32> {
 
 // State on one side of a face: the half-step state plus half the edge increment `s` towards
 // that face (sgn = +1 for the cell's upper face, -1 for its lower). First-order cells have none.
-fn to_side(pr: Q, s: Q, sgn: f32, axis: i32) -> Side {
+//
+// `lo` = (density, pressure) is a lower bound from the two cells that share the face. The
+// limiter lets a face value reach the neighbouring cell's value, and the slopes come from the
+// state at the start of the step while the value they are added to is half a step on. At a
+// jump of several decades (the edge of a star in near-vacuum) the face density of the dense
+// cell can therefore land at almost nothing, still positive, with the pressure not following:
+// a state with an enormous sound speed, whose flux empties the light cell in one step.
+fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
   let hs = 0.5 * sgn * (1.0 - pr.b.w);
   let a = pr.a + hs * s.a;
   let b = pr.b.xy + hs * s.b.xy;
   var o: Side;
-  o.rho = max(a.x, P.rho_floor);
+  o.rho = max(a.x, max(lo.x, P.rho_floor));
   o.v = rot(a.yzw, axis);
   o.s = b.y;
   if (EOS_HAS_ENERGY) {
-    o.p = max(b.x, P.p_floor);
+    o.p = max(b.x, max(lo.y, P.p_floor));
     o.cs = eos_sound_speed(o.rho, o.p);
   } else {
     // Barotropic: the face pressure is a function of the face density, not reconstructed.
@@ -46,7 +53,9 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32) -> Side {
 fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32) -> Flux {
   var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
   if (!EOS_HAS_ENERGY) { w = 1.0; }   // no contact wave to resolve (HLLC was tried: no different)
-  var F = riemann_flux(to_side(l, ls, 1.0, axis), to_side(r, rs, -1.0, axis), w);
+  // Neither face state may fall below half the smaller of the two cells' own values.
+  let lo = 0.5 * min(vec2<f32>(l.a.x, l.b.x), vec2<f32>(r.a.x, r.b.x));
+  var F = riemann_flux(to_side(l, ls, 1.0, axis, lo), to_side(r, rs, -1.0, axis, lo), w);
   F.mom = unrot(F.mom, axis);
   return F;
 }

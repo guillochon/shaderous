@@ -48,20 +48,29 @@ fn u_near(slot: i32, l: vec3<i32>) -> MaybeCons {
 
 // Conservative, limited linear interpolation from a coarse cell to one of the fine cells it
 // covers. `par` is the fine cell's parity (0 or 1) along each axis.
+//
+// Each axis's slope is limited on its own, which keeps the fine values between the coarse
+// neighbours along that axis. In a corner of a steep gradient the three add up, and the fine
+// cell furthest down the gradient can undershoot to nothing or below: a density that is then
+// floored while its momentum is not, which makes a ghost cell moving at millions. So all the
+// slopes are scaled back together, by the one factor that keeps the density and both energies
+// of every fine cell at least half the coarse cell's. The factor depends on the coarse data
+// only, so the fine cells still average to the coarse one.
 fn prolong(uc: Cons, xm: MaybeCons, xp: MaybeCons, ym: MaybeCons, yp: MaybeCons, zm: MaybeCons, zp: MaybeCons, par: vec3<i32>) -> Cons {
-  var out = uc;
-  let off = (vec3<f32>(par) - 0.5) * 0.5;   // -1/4 or +1/4 of a coarse cell
-  if (xm.ok && xp.ok) {
-    out.a += off.x * limit4(uc.a - xm.u.a, xp.u.a - uc.a);
-    out.b += off.x * limit4(uc.b - xm.u.b, xp.u.b - uc.b);
-  }
-  if (ym.ok && yp.ok) {
-    out.a += off.y * limit4(uc.a - ym.u.a, yp.u.a - uc.a);
-    out.b += off.y * limit4(uc.b - ym.u.b, yp.u.b - uc.b);
-  }
-  if (zm.ok && zp.ok && !is2d()) {
-    out.a += off.z * limit4(uc.a - zm.u.a, zp.u.a - uc.a);
-    out.b += off.z * limit4(uc.b - zm.u.b, zp.u.b - uc.b);
-  }
-  return out;
+  var sx = Cons(vec4<f32>(0.0), vec4<f32>(0.0));
+  var sy = sx;
+  var sz = sx;
+  if (xm.ok && xp.ok) { sx = Cons(limit4(uc.a - xm.u.a, xp.u.a - uc.a), limit4(uc.b - xm.u.b, xp.u.b - uc.b)); }
+  if (ym.ok && yp.ok) { sy = Cons(limit4(uc.a - ym.u.a, yp.u.a - uc.a), limit4(uc.b - ym.u.b, yp.u.b - uc.b)); }
+  if (zm.ok && zp.ok && !is2d()) { sz = Cons(limit4(uc.a - zm.u.a, zp.u.a - uc.a), limit4(uc.b - zm.u.b, zp.u.b - uc.b)); }
+  // Largest drop below the coarse value among the fine cells: (density, total energy, internal energy).
+  let drop = 0.25 * (abs(vec3<f32>(sx.a.x, sx.b.x, sx.b.y)) + abs(vec3<f32>(sy.a.x, sy.b.x, sy.b.y)) + abs(vec3<f32>(sz.a.x, sz.b.x, sz.b.y)));
+  let room = 0.5 * max(vec3<f32>(uc.a.x, uc.b.x, uc.b.y), vec3<f32>(0.0));
+  let fit = min(vec3<f32>(1.0), room / max(drop, vec3<f32>(1.0e-37)));
+  let f = min(fit.x, min(fit.y, fit.z));
+  let off = f * (vec3<f32>(par) - 0.5) * 0.5;   // -1/4 or +1/4 of a coarse cell, scaled back
+  return Cons(
+    uc.a + off.x * sx.a + off.y * sy.a + off.z * sz.a,
+    uc.b + off.x * sx.b + off.y * sy.b + off.z * sz.b,
+  );
 }
