@@ -7,6 +7,7 @@ import { advection } from './advection';
 import { jeans } from './jeans';
 import { polytrope } from './polytrope';
 import { evrard } from './evrard';
+import { tidalDisruption } from './tidal_disruption';
 import { sphere } from './sphere';
 import { isothermalCollapse } from './isothermal';
 
@@ -14,6 +15,7 @@ export const PROBLEMS: Problem[] = [
   sedov,
   kelvinHelmholtz,
   rayleighTaylor,
+  tidalDisruption,
   evrard,
   polytrope,
   isothermalCollapse,

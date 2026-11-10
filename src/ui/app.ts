@@ -29,6 +29,7 @@ side.innerHTML = `
       ${field('Resolution', select('res', ''))}
       ${field('End time', number('tend', 'placeholder="none"'))}
     </div>
+    <div class="g2" id="pparams"></div>
     <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button></div>
   </section>
 
@@ -128,6 +129,7 @@ const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) <
 function syncControls() {
   const two = cfg.ndim === 2;
   $<HTMLSelectElement>('problem').value = cfg.problem.id;
+  syncProblemParams();
   const dim = $<HTMLSelectElement>('dim');
   dim.value = String(cfg.ndim);
   dim.options[1].disabled = !cfg.problem.supports2d;
@@ -175,6 +177,37 @@ function syncControls() {
   $('run').textContent = running ? 'Pause' : 'Run';
 }
 
+/** The preset's own controls (for example mass ratio and impact parameter). */
+function syncProblemParams() {
+  const box = $('pparams');
+  const defs = cfg.problem.params ?? [];
+  if (box.dataset.problem !== cfg.problem.id) {
+    box.dataset.problem = cfg.problem.id;
+    box.innerHTML = defs.map((q) => field(q.label, number(`pp-${q.id}`, `min="${q.min}" max="${q.max}" step="${q.step ?? 'any'}"`))).join('');
+    box.style.display = defs.length ? '' : 'none';
+    for (const q of defs) {
+      const el = $<HTMLInputElement>(`pp-${q.id}`);
+      el.addEventListener('change', () => {
+        const v = el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value;
+        cfg.params[q.id] = Math.min(q.max, Math.max(q.min, v));
+        // A different orbit is a different run: start again.
+        if (sim) {
+          sim.cfg = cfg;
+          sim.reset();
+          finished = false;
+          running = true;
+          lastDiag = undefined;
+        }
+        syncControls();
+      });
+    }
+  }
+  for (const q of defs) {
+    const el = $<HTMLInputElement>(`pp-${q.id}`);
+    if (document.activeElement !== el) el.value = String(cfg.params[q.id]);
+  }
+}
+
 // Rebuilds are asynchronous (shader compilation). They run one at a time, in the order the
 // controls were touched, so a change made while another is compiling is never dropped.
 let queue: Promise<void> = Promise.resolve();
@@ -211,6 +244,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, keepPhysics = false) {
       view.log = problem.view?.log ?? true;
       view.mode = problem.view?.mode ?? 'volume';
       view.sliceAxis = problem.view?.axis ?? 2;
+      view.pitch = problem.view?.pitch ?? 0.45;
     }
     const old = sim;
     sim = undefined;
@@ -600,8 +634,10 @@ function tick(now: number) {
       stepRate = ((stepsSubmitted - rateMark.steps) * 1000) / (now - rateMark.time);
       rateMark = { time: now, steps: stepsSubmitted };
     }
+    const bh = lastDiag?.perturber;
+    const where = bh ? `  •  perturber at r = ${Math.hypot(...bh).toFixed(2)}` : '';
     const state = finished ? 'finished' : running ? `${nsub} step${nsub > 1 ? 's' : ''}/frame, ${stepRate.toFixed(0)} steps/s` : 'paused';
-    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}`);
+    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}`);
   }
 }
 

@@ -40,5 +40,6 @@ fn red_cell(c: vec3<i32>) -> Red {
     0.5 * rho * dot(v, v) * dv, eint * dv, egrav,
     speed / cs, floored, jeans,
     rho, rho, T, T, s, s, p, p, speed, speed,
+    rho * dv * x.x, rho * dv * x.y, rho * dv * x.z,
   );
 }

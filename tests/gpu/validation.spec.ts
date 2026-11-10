@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'advection', 'flux-determinism',
-  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard',
+  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
 ];
 
 test.describe.configure({ mode: 'serial' });

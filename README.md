@@ -12,6 +12,9 @@ https://guillochon.github.io/shaderous/validate.html
 - **Self-gravity:** multigrid Poisson solve every step, periodic or isolated (multipole) boundaries.
 - **Self-gravity or a uniform field:** a constant external acceleration drives the
   Rayleigh-Taylor preset.
+- **Tidal disruption:** a polytropic star passed by a point mass on a parabolic orbit, run in the
+  star's rest frame. The frame accelerates with the gas's centre of mass, the point mass's orbit
+  is integrated alongside the gas, and the boundaries let gas out but not in.
 - **2D or 3D:** presets that make sense in the plane (shock tubes, blasts, Kelvin-Helmholtz,
   Rayleigh-Taylor, advection) can run on an n x n grid up to 2048 squared. A 2D run is one periodic
   layer of the same 3D scheme, without self-gravity.

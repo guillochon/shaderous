@@ -21,6 +21,7 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 #include <riemann>
 #include "hydro/dual_energy.wgsl"
 #include "hydro/pfloor.wgsl"
+#include "hydro/fluff.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -41,7 +42,7 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 fn load_pred(c: vec3<i32>) -> Q {
   let m = bc_map(c);
   let a = textureLoad(PA, m.c, 0);
-  return Q(vec4<f32>(a.x, a.yzw * m.flip), textureLoad(PB, m.c, 0));
+  return Q(vec4<f32>(a.x, bc_velocity(a.yzw, m)), textureLoad(PB, m.c, 0));
 }
 
 // Cyclic rotation that puts the face normal in x, and its inverse.
@@ -173,8 +174,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let eint = u2.y + dtdx * (dei + max(p0.b.x, P.p_floor) * dvn);
   let sc = u2.z + dtdx * ds;
 
-  let en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
+  var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
+  var mout = mom;
+  let tame = tame_fluff(rho, mom, en.y);
+  if (tame.changed) {
+    mout = tame.mom;
+    en = vec2<f32>(0.5 * dot(mout, mout) / rho + tame.eint, tame.eint);
+  }
 
-  textureStore(O1, c, vec4<f32>(rho, mom));
+  textureStore(O1, c, vec4<f32>(rho, mout));
   textureStore(O2, c, vec4<f32>(en.x, en.y, sc, 0.0));
 }

@@ -14,6 +14,7 @@ import { rayleighTaylor, RT } from '../problems/rayleigh_taylor';
 import { jeans, JEANS } from '../problems/jeans';
 import { polytrope } from '../problems/polytrope';
 import { evrard } from '../problems/evrard';
+import { tidalDisruption, tdeOrbit, TDE_STAR } from '../problems/tidal_disruption';
 import { sphere, spherePotential } from '../problems/sphere';
 import { all, REFLECT, type Problem } from '../problems/types';
 
@@ -357,7 +358,7 @@ export const TESTS: TestDef[] = [
       const still: Problem = {
         ...rayleighTaylor,
         init: (m, e, ndim) => {
-          const f = rayleighTaylor.init(m, e, ndim);
+          const f = rayleighTaylor.init(m, e, ndim, {});
           return (x, y, z) => ({ ...f(x, y, z), vx: 0, vy: 0, vz: 0 });
         },
       };
@@ -398,7 +399,7 @@ export const TESTS: TestDef[] = [
           cfl: cfg.cfl, rhoFloor: cfg.rhoFloor, pFloor: cfg.pFloor, etaDual: cfg.etaDual, shockThresh: cfg.shockThresh,
           riemann: cfg.riemann, limiter: cfg.limiter,
         });
-        ref.init(prob.init(n, ref.cfg.eos, 3));
+        ref.init(prob.init(n, ref.cfg.eos, 3, {}));
         for (let i = 0; i < 20; i++) ref.step();
         await withSim(gpu, prob, n, { tEnd: Infinity }, async (sim) => {
           sim.step(20);
@@ -446,10 +447,10 @@ export const TESTS: TestDef[] = [
       d.queue.writeBuffer(inBuf, 0, inData);
       const outBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
       const readBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-      const params = d.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      const params = d.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       for (const c of cases) {
         const ep = { ...defaultEosParams(), ...c.params };
-        const pb = new Float32Array(40);
+        const pb = new Float32Array(48);
         pb.set([ep.gamma, ep.K, ep.R, ep.arad], 8);
         d.queue.writeBuffer(params, 0, pb);
         const pipe = await computePipeline(d, assemble('eos/eos_test.wgsl', { eos: EOS_MODULES[c.kind] }), `eos test ${c.label}`);
@@ -590,6 +591,52 @@ export const TESTS: TestDef[] = [
             e_total_initial: d0.eTot, e_total_final: last.eTot, max_energy_drift: worst, thermal_peak_time: peakT,
             thermal_peak: peakU, potential_minimum: minW, mass_change: (last.mass - d0.mass) / d0.mass, steps,
             't:kin/int/grav': curve.join(' '),
+          },
+        };
+      });
+    },
+  },
+  {
+    id: 'tidal-disruption',
+    name: 'Tidal disruption (mass ratio 100, beta = 1)',
+    criterion:
+      'The perturber reaches pericentre within 2% of r_t / beta and of the Kepler time; while all the gas is still in the box its centre of mass stays within 0.005 stellar radii of the box centre; the star is disrupted (peak density falls by more than half)',
+    async run(gpu) {
+      const orbit = tdeOrbit({ q: 100, beta: 1 });
+      return withSim(gpu, tidalDisruption, 64, { tEnd: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        let rMin = Infinity;
+        let tMin = 0;
+        let comMax = 0;
+        let tExit = Infinity;
+        let last = d0;
+        let steps = 0;
+        const track: string[] = [];
+        for (let t = 0.125; t <= orbit.tPeri + 5 + 1e-9; t += 0.125) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          steps = await sim.runToEnd();
+          last = await sim.diagnostics();
+          const r = Math.hypot(...last.perturber!);
+          if (r < rMin) [rMin, tMin] = [r, last.t];
+          // Ambient gas trickles out from the start; 0.1% of the mass gone means debris is leaving.
+          if (last.mass < 0.999 * d0.mass) tExit = Math.min(tExit, last.t);
+          else comMax = Math.max(comMax, Math.hypot(...last.com));
+          if (Math.round(t * 8) % 8 === 0) track.push(`${last.t.toFixed(0)}:${r.toFixed(2)}/${last.ranges[0][1].toFixed(2)}`);
+        }
+        const rErr = Math.abs(rMin - orbit.rp) / orbit.rp;
+        const tErr = Math.abs(tMin - orbit.tPeri) / orbit.tPeri;
+        const drop = last.ranges[0][1] / d0.ranges[0][1];
+        return {
+          pass: rErr < 0.02 && tErr < 0.02 && comMax < 0.005 && tExit > orbit.tPeri && drop < 0.5,
+          metrics: {
+            pericentre: rMin, pericentre_expected: orbit.rp, pericentre_error: rErr,
+            pericentre_time: tMin, pericentre_time_kepler: orbit.tPeri,
+            max_com_offset_while_contained: comMax, debris_starts_leaving_at: tExit,
+            final_com_offset_of_gas_in_box: Math.hypot(...last.com),
+            central_density_initial: d0.ranges[0][1], central_density_lane_emden: TDE_STAR.rhoc,
+            peak_density_final_ratio: drop, mass_left_in_box: last.mass / d0.mass, steps,
+            't:r_perturber/rho_max': track.join(' '),
           },
         };
       });

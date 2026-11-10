@@ -76,7 +76,7 @@ details[open] > summary .sum { display: none; }
    anything else, so the browser never has to lay out the page for them. */
 #colorbar .ticks span { display: block; width: 76px; height: 18px; line-height: 18px; white-space: nowrap; overflow: hidden; contain: strict; }
 #hud {
-  position: absolute; left: 12px; top: 10px; width: 360px; height: 18px; line-height: 18px;
+  position: absolute; left: 12px; top: 10px; width: 520px; height: 18px; line-height: 18px;
   white-space: nowrap; overflow: hidden; contain: strict;
   color: var(--dim); text-shadow: 0 0 3px #000; pointer-events: none; font-variant-numeric: tabular-nums;
 }

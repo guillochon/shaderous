@@ -15,6 +15,8 @@ export interface SimConfig {
   ndim: 2 | 3;
   /** Uniform external gravitational acceleration. */
   gext: [number, number, number];
+  /** Values of the preset's own parameters (Problem.params). */
+  params: Record<string, number>;
   problem: Problem;
   eos: EosKind;
   eosParams: EosParams;
@@ -49,6 +51,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     n,
     ndim,
     gext: problem.gext?.(ndim) ?? [0, 0, 0],
+    params: Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value])),
     problem,
     eos: problem.eos,
     eosParams: { ...defaultEosParams(), ...problem.eosParams },
@@ -75,7 +78,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
 }
 
 // Channel layout of the diagnostics reduction (hydro/diagnostics.wgsl).
-const DIAG_OPS = [SUM, SUM, SUM, SUM, SUM, SUM, SUM, MAX, SUM, SUM, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX];
+const DIAG_OPS = [SUM, SUM, SUM, SUM, SUM, SUM, SUM, MAX, SUM, SUM, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, SUM, SUM, SUM];
 
 export interface Diagnostics {
   t: number;
@@ -90,6 +93,10 @@ export interface Diagnostics {
   maxMach: number;
   floored: number;
   jeansUnresolved: number;
+  /** centre of mass of the gas, relative to the box centre */
+  com: [number, number, number];
+  /** position of the point-mass perturber relative to the box centre, if there is one */
+  perturber: [number, number, number] | null;
   /** [min, max] per renderable field, in FIELDS order */
   ranges: [number, number][];
 }
@@ -125,6 +132,13 @@ export class Sim {
   private pCorrect!: GPUComputePipeline;
   private pPredict!: GPUComputePipeline;
   private pField!: GPUComputePipeline;
+  private pBhDrift!: GPUComputePipeline;
+  private pBhKick!: GPUComputePipeline;
+  private gBhDrift!: GPUBindGroup;
+  private gBhKick!: GPUBindGroup;
+  private redBh!: Reducer;
+  /** perturber state: position, velocity, acceleration, frame acceleration (4 x vec4) */
+  private bh: GPUBuffer;
   private gPredict!: GPUBindGroup;
   private gField!: GPUBindGroup;
   private gPrim: GPUBindGroup[] = [];
@@ -143,13 +157,14 @@ export class Sim {
     this.nz = cfg.ndim === 2 ? 1 : cfg.n;
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
-    this.params = d.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.params = d.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.clock = d.createBuffer({
       size: 16,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
+    this.bh = d.createBuffer({ size: 64, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.staging = d.createBuffer({
-      size: 16 + DIAG_OPS.length * 4,
+      size: 16 + DIAG_OPS.length * 4 + 16,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
     });
   }
@@ -184,7 +199,23 @@ export class Sim {
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock');
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
     sim.pField = await computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field');
-    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield) });
+    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock });
+    // Point-mass perturber: its pull on the gas is reduced each step and drives both the
+    // frame's acceleration and the perturber's orbit.
+    sim.redBh = await Reducer.create(
+      d,
+      n,
+      nz,
+      [SUM, SUM, SUM, SUM],
+      'gravity/bh_moment.wgsl',
+      {},
+      [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh })),
+      'perturber',
+    );
+    sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'perturber drift');
+    sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 1: sim.clock, 2: sim.bh });
+    sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'perturber kick');
+    sim.gBhKick = bindGroup(d, sim.pBhKick, { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh });
     await sim.buildHydro();
     sim.reset();
     return sim;
@@ -272,7 +303,7 @@ export class Sim {
   /** Push the current configuration to the GPU parameter block. */
   writeParams() {
     const c = this.cfg;
-    const buf = new ArrayBuffer(160);
+    const buf = new ArrayBuffer(192);
     const u = new Uint32Array(buf);
     const f = new Float32Array(buf);
     const selfGravity = c.gravity !== 'off' && c.ndim === 3;
@@ -283,7 +314,12 @@ export class Sim {
     // 2D quantities are per unit length along z.
     f.set([c.ndim === 2 ? this.dx ** 2 : this.dx ** 3, c.ndim, 0, 0], 16);
     f.set([...c.gext, 0], 20);
-    u.set([c.n, selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 24);
+    // Perturber: G M, softening of two cells, and whether it is active.
+    const bh = this.hasPerturber ? c.problem.perturber!(c.params, c.G) : null;
+    f.set([bh ? bh.gm : 0, 2 * this.dx, bh ? 1 : 0, 0], 24);
+    const fl = c.problem.fluff;
+    f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
+    u.set([c.n, selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, c.gravEnergyFlux ? 1 : 0], 32);
     f.set(
       [
         this.dx,
@@ -299,7 +335,7 @@ export class Sim {
         c.jeansFloor ? (c.jeansCells / 4) ** 2 : 0, // scales the 4-cell floor pressure
         c.problem.box,
       ],
-      28,
+      36,
     );
     this.device.queue.writeBuffer(this.params, 0, buf);
   }
@@ -310,7 +346,11 @@ export class Sim {
     const n = this.n;
     const nz = this.nz;
     const eos = makeEos(c.eos, c.eosParams);
-    const fn = c.problem.init(n, eos, c.ndim);
+    const fn = c.problem.init(n, eos, c.ndim, c.params);
+    if (c.problem.perturber) {
+      const bh = c.problem.perturber(c.params, c.G);
+      this.device.queue.writeBuffer(this.bh, 0, new Float32Array([...bh.pos, 0, ...bh.vel, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+    }
     const u1 = new Float32Array(n * n * nz * 4);
     const u2 = new Float32Array(n * n * nz * 4);
     const half = c.problem.box / 2;
@@ -371,6 +411,8 @@ export class Sim {
     const enc = this.device.createCommandEncoder();
     this.copyPhiToOld(enc);
     const pass = enc.beginComputePass();
+    // The clock's dt is zero here, so this only evaluates the accelerations.
+    if (this.hasPerturber) this.encodePerturberKick(pass, this.cur);
     this.encodeField(pass);
     pass.end();
     this.device.queue.submit([enc.finish()]);
@@ -378,6 +420,19 @@ export class Sim {
 
   private get selfGravity(): boolean {
     return this.cfg.gravity !== 'off' && this.cfg.ndim === 3;
+  }
+
+  /** A perturber needs the self-gravity path (its field shares that texture). */
+  private get hasPerturber(): boolean {
+    return this.selfGravity && !!this.cfg.problem.perturber;
+  }
+
+  /** Reduce the perturber's pull on the gas of the given parity, then finish its step. */
+  private encodePerturberKick(pass: GPUComputePassEncoder, parity: number) {
+    this.redBh.encode(pass, parity);
+    pass.setPipeline(this.pBhKick);
+    pass.setBindGroup(0, this.gBhKick);
+    pass.dispatchWorkgroups(1);
   }
 
   private dispatch(pass: GPUComputePassEncoder) {
@@ -423,6 +478,13 @@ export class Sim {
         pass = enc.beginComputePass();
         this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
+        if (this.hasPerturber) {
+          // Move the perturber to the new time, then its pull on the updated gas.
+          pass.setPipeline(this.pBhDrift);
+          pass.setBindGroup(0, this.gBhDrift);
+          pass.dispatchWorkgroups(1);
+          this.encodePerturberKick(pass, 1 - p);
+        }
         this.encodeField(pass);
       }
       if (anyGravity) {
@@ -516,6 +578,7 @@ export class Sim {
     pass.end();
     enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
     enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
+    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, 16);
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
@@ -537,6 +600,8 @@ export class Sim {
         maxMach: r[7],
         floored: r[8],
         jeansUnresolved: r[9],
+        com: [r[20] / r[0], r[21] / r[0], r[22] / r[0]],
+        perturber: this.hasPerturber ? [r[23], r[24], r[25]] : null,
         ranges,
       };
     } finally {

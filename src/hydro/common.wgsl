@@ -2,12 +2,15 @@
 // Layout must match packParams() in src/sim.ts.
 
 struct Params {
-  bc_lo: vec4<u32>,      // per-axis lower-face boundary: 0 periodic, 1 outflow, 2 reflecting
+  bc_lo: vec4<u32>,      // per-axis lower-face boundary: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only
   bc_hi: vec4<u32>,      // per-axis upper-face boundary
   eos: vec4<f32>,        // (gamma, K, gas constant R, radiation constant a)
   dims: vec4<u32>,       // cells along x, y, z; z is 1 in 2D runs (one periodic layer)
   geom: vec4<f32>,       // (cell volume, number of dimensions, 0, 0); 2D is per unit length in z
   gext: vec4<f32>,       // uniform external gravitational acceleration
+  bh: vec4<f32>,         // point-mass perturber: (G M, softening length, 1 if present, 0)
+  fluff: vec4<f32>,      // tenuous-gas limits: (density below which they apply, max specific
+                         //   internal energy, max speed, 0); a zero density switches them off
   n: u32,                // cells per side along x and y
   grav_on: u32,
   grav_bc: u32,          // 0 periodic, 1 isolated
@@ -35,25 +38,30 @@ struct Clock {
 
 @group(0) @binding(0) var<uniform> P: Params;
 
-fn bc_axis(i: i32, n: i32, lo: u32, hi: u32) -> vec2<i32> {
+// Maps an index along one axis into range. Returns (index, 1 if mirrored by a reflecting face,
+// side): side is -1 / +1 for a ghost cell beyond an outflow-only lower / upper face, else 0.
+fn bc_axis(i: i32, n: i32, lo: u32, hi: u32) -> vec3<i32> {
   if (i < 0) {
     // The stencil reaches two cells out; the clamp covers a single-layer axis (n = 1) without
     // an integer modulo, which is slow and would be evaluated on every load.
-    if (lo == 0u) { return vec2<i32>(max(i + n, 0), 0); }
-    if (lo == 1u) { return vec2<i32>(0, 0); }
-    return vec2<i32>(-1 - i, 1);
+    if (lo == 0u) { return vec3<i32>(max(i + n, 0), 0, 0); }
+    if (lo == 1u) { return vec3<i32>(0, 0, 0); }
+    if (lo == 3u) { return vec3<i32>(0, 0, -1); }
+    return vec3<i32>(-1 - i, 1, 0);
   }
   if (i >= n) {
-    if (hi == 0u) { return vec2<i32>(min(i - n, n - 1), 0); }
-    if (hi == 1u) { return vec2<i32>(n - 1, 0); }
-    return vec2<i32>(2 * n - 1 - i, 1);
+    if (hi == 0u) { return vec3<i32>(min(i - n, n - 1), 0, 0); }
+    if (hi == 1u) { return vec3<i32>(n - 1, 0, 0); }
+    if (hi == 3u) { return vec3<i32>(n - 1, 0, 1); }
+    return vec3<i32>(2 * n - 1 - i, 1, 0);
   }
-  return vec2<i32>(i, 0);
+  return vec3<i32>(i, 0, 0);
 }
 
 struct Mapped {
   c: vec3<i32>,       // in-range cell to load
   flip: vec3<f32>,    // -1 on velocity components mirrored by a reflecting face
+  side: vec3<f32>,    // -1 / +1 on axes where this is a ghost beyond an outflow-only face
 }
 
 // Every state load goes through this, so there are no ghost cells to fill.
@@ -65,5 +73,13 @@ fn bc_map(c: vec3<i32>) -> Mapped {
   return Mapped(
     vec3<i32>(x.x, y.x, z.x),
     vec3<f32>(1.0 - 2.0 * f32(x.y), 1.0 - 2.0 * f32(y.y), 1.0 - 2.0 * f32(z.y)),
+    vec3<f32>(f32(x.z), f32(y.z), f32(z.z)),
   );
+}
+
+// Velocity of a (possibly ghost) cell: mirrored at reflecting faces, and at outflow-only faces
+// the ghost's normal velocity is clamped to point outward, so nothing can flow in.
+fn bc_velocity(v: vec3<f32>, m: Mapped) -> vec3<f32> {
+  let w = v * m.flip;
+  return select(w, max(w * m.side, vec3<f32>(0.0)) * m.side, m.side != vec3<f32>(0.0));
 }
