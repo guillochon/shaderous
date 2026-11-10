@@ -277,7 +277,8 @@ export class RefHydro {
     const { eos, rhoFloor, pFloor } = this.cfg;
     const f = (n: number) => pr.q[n] + 0.5 * sgn * pr.s[axis][n];
     const rho = Math.max(f(0), rhoFloor);
-    const p = Math.max(f(4), pFloor);
+    // Barotropic: the face pressure is a function of the face density, not reconstructed.
+    const p = eos.hasEnergy ? Math.max(f(4), pFloor) : Math.max(eos.pressure(rho, 0), pFloor);
     const v = [f(1), f(2), f(3)];
     return {
       rho,

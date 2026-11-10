@@ -50,6 +50,8 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .buttons { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
 .buttons button { height: 26px; padding: 0; }
 #run { border-color: #3a4a66; background: #223049; }
+.jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }
+.jeans .check { height: 24px; }
 .checks { display: flex; gap: 14px; margin-top: 6px; }
 .check { display: flex; align-items: center; white-space: nowrap; font-size: 12px; }
 details { border-top: 1px solid var(--line); padding-top: 8px; }

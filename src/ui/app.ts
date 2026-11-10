@@ -71,8 +71,11 @@ side.innerHTML = `
       ${field('G', number('G', 'min="0"'))}
       ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'))}
     </div>
+    <div class="g3 jeans">
+      <label class="check" title="Pressure floor that keeps the Jeans length resolved (Truelove)"><input id="jeansfloor" type="checkbox" />Jeans floor</label>
+      ${field('Cells per Jeans length', number('jeanscells', 'step="1" min="4" max="32"'))}
+    </div>
     <div class="checks">
-      <label class="check" title="Keep the Jeans length at 4 cells or more (Truelove)"><input id="jeansfloor" type="checkbox" />Jeans floor</label>
       <label class="check" title="Flux-form gravitational work: conserves total energy"><input id="fluxwork" type="checkbox" />Conserve energy</label>
     </div>
   </details>
@@ -159,6 +162,8 @@ function syncControls() {
   $<HTMLInputElement>('G').value = String(+cfg.G.toPrecision(6));
   $<HTMLInputElement>('vcycles').value = String(cfg.vcycles);
   $<HTMLInputElement>('jeansfloor').checked = cfg.jeansFloor;
+  $<HTMLInputElement>('jeanscells').value = String(cfg.jeansCells);
+  $<HTMLInputElement>('jeanscells').disabled = two || !cfg.jeansFloor;
   $<HTMLInputElement>('fluxwork').checked = cfg.gravEnergyFlux;
   $<HTMLSelectElement>('mode').value = two ? 'slice' : view.mode;
   $<HTMLSelectElement>('field').value = String(view.field);
@@ -347,6 +352,12 @@ function bind() {
   on('jeansfloor', (el) => {
     cfg.jeansFloor = el.checked;
     applyParams();
+    syncControls();
+  });
+  on('jeanscells', (el) => {
+    cfg.jeansCells = Math.min(32, Math.max(4, Math.round(numOr(el, cfg.jeansCells))));
+    applyParams();
+    syncControls();
   });
   on('fluxwork', (el) => {
     cfg.gravEnergyFlux = el.checked;
@@ -432,8 +443,8 @@ function liveText(parent: HTMLElement): (v: string) => void {
 // [label, tooltip]; the first seven fill the left column, the rest the right.
 const DIAG_ROWS: [string, string][] = [
   ['t', 'Time'], ['dt', 'Timestep'], ['steps', 'Steps taken'], ['mass', 'Total mass'],
-  ['Mach', 'Maximum Mach number'], ['floor', 'Cells at the density or pressure floor'],
-  ['Jeans', 'Cells whose Jeans length is under 4 cells'],
+  ['Mach', 'Maximum Mach number'], ['floor', 'Cells at the density or pressure floor (emptied voids, usually)'],
+  ['Jeans', 'Cells whose thermal Jeans length is under 4 cells. With the Jeans floor on these are the cells it is holding up'],
   ['p x', 'Total x momentum'], ['p y', 'Total y momentum'], ['p z', 'Total z momentum'],
   ['E kin', 'Kinetic energy'], ['E int', 'Internal energy'], ['E grav', 'Gravitational energy'], ['E tot', 'Total energy'],
 ];
@@ -458,7 +469,7 @@ function showDiagnostics(d: Diagnostics) {
     [num(d.mass), false],
     [num(d.maxMach), false],
     [String(d.floored), d.floored > 0],
-    [String(d.jeansUnresolved), d.jeansUnresolved > 0],
+    [String(d.jeansUnresolved), d.jeansUnresolved > 0 && !cfg.jeansFloor],
     [d.momentum[0].toExponential(2), false],
     [d.momentum[1].toExponential(2), false],
     [d.momentum[2].toExponential(2), false],

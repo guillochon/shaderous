@@ -31,6 +31,8 @@ export interface SimConfig {
   etaDual: number;
   shockThresh: number;
   jeansFloor: boolean;
+  /** Cells per Jeans length that the pressure floor enforces (Truelove's minimum is 4). */
+  jeansCells: number;
   vcycles: number; // V-cycles per step (warm-started)
   /** Flux-form gravitational work (conserves total energy) instead of kick-consistent energy. */
   gravEnergyFlux: boolean;
@@ -63,7 +65,10 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     etaDual: 1e-3,
     shockThresh: 0.5,
     jeansFloor: problem.jeansFloor ?? false,
-    vcycles: 1, // warm-started from the previous step; a second cycle changes the tests by < 0.2%
+    jeansCells: problem.jeansCells ?? 4,
+    // Warm-started from the previous step. One cycle is enough for the validation tests, but
+    // leaves total momentum drifting about ten times faster in long collapse runs.
+    vcycles: 2,
     gravEnergyFlux: true,
     ...over,
   };
@@ -291,7 +296,7 @@ export class Sim {
         Number.isFinite(c.tEnd) ? c.tEnd : 1e30,
         1e30,
         c.shockThresh,
-        c.jeansFloor ? 1 : 0,
+        c.jeansFloor ? (c.jeansCells / 4) ** 2 : 0, // scales the 4-cell floor pressure
         c.problem.box,
       ],
       28,

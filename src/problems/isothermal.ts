@@ -2,9 +2,14 @@ import { all, PERIODIC, type Problem } from './types';
 
 // Isothermal, self-gravitating periodic box seeded with a few long-wavelength velocity modes.
 // About six Jeans lengths fit across the box, so the gas gathers into filaments and clumps.
-// Isothermal collapse never stops on its own, so the Truelove pressure floor is on by default
-// to hold the cores at the grid's Jeans scale; switch it off to watch the under-resolved-cell
-// counter climb.
+//
+// Isothermal collapse never stops on its own, so a Jeans pressure floor holds the cores at a
+// fixed number of cells. That number matters for how long the run can be trusted: the cores
+// then live for hundreds of their own dynamical times at that resolution, and truncation error
+// in the gravity coupling slowly feeds them energy (they spin up and puff out). At 4 cells per
+// Jeans length, the minimum that prevents artificial fragmentation, the cores lose most of
+// their binding energy within about two box free-fall times of forming; at 8 the drift is
+// several times slower. The preset uses 8 and ends at t = 2.
 export const isothermalCollapse: Problem = {
   id: 'isothermal-collapse',
   label: 'Isothermal turbulent collapse',
@@ -16,9 +21,10 @@ export const isothermalCollapse: Problem = {
   gravity: 'periodic',
   G: 1,
   box: 1,
-  tEnd: 0.9,
+  tEnd: 2,
   rhoFloor: 1e-6,
   jeansFloor: true,
+  jeansCells: 8,
   view: { field: 0, log: true, mode: 'volume' },
   init: () => {
     // Deterministic pseudo-random phases.

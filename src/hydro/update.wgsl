@@ -20,6 +20,7 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 
 #include <riemann>
 #include "hydro/dual_energy.wgsl"
+#include "hydro/pfloor.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -64,9 +65,16 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32) -> Side {
   var o: Side;
   o.rho = max(a.x, P.rho_floor);
   o.v = rot(a.yzw, axis);
-  o.p = max(b.x, P.p_floor);
   o.s = b.y;
-  o.cs = eos_sound_speed(o.rho, o.p);
+  if (EOS_HAS_ENERGY) {
+    o.p = max(b.x, P.p_floor);
+    o.cs = eos_sound_speed(o.rho, o.p);
+  } else {
+    // Barotropic: the face pressure is a function of the face density, not reconstructed.
+    let st = baro_state(o.rho);
+    o.p = st.x;
+    o.cs = st.y;
+  }
   o.eint = eos_eint_from_p(o.rho, o.p);
   return o;
 }
@@ -74,7 +82,7 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32) -> Side {
 // Flux through the face between cells l and r, along +axis, in grid-aligned components.
 fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32) -> Flux {
   var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
-  if (!EOS_HAS_ENERGY) { w = 1.0; }
+  if (!EOS_HAS_ENERGY) { w = 1.0; }   // no contact wave to resolve (HLLC was tried: no different)
   var F = riemann_flux(to_side(l, ls, 1.0, axis), to_side(r, rs, -1.0, axis), w);
   F.mom = unrot(F.mom, axis);
   return F;

@@ -35,6 +35,8 @@ export interface Problem {
   pFloor?: number;
   /** Enforce the Truelove pressure floor by default. */
   jeansFloor?: boolean;
+  /** Cells per Jeans length for that floor (default 4). */
+  jeansCells?: number;
   /** The setup also makes sense on a 2D (x, y) grid. */
   supports2d?: boolean;
   /** Boundaries to use in 2D, if they differ (z is always periodic there). */
