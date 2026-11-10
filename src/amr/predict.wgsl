@@ -14,6 +14,7 @@
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var W1: texture_3d<f32>;
 @group(0) @binding(3) var W2: texture_3d<f32>;
+@group(0) @binding(4) var G: texture_3d<f32>;
 @group(0) @binding(5) var PA: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(6) var PB: texture_storage_3d<rgba32float, write>;
 
@@ -27,7 +28,14 @@ fn load_q(c: vec3<i32>) -> Q {
 
 #include "hydro/predictor.wgsl"
 
-fn predict_cell(c: vec3<i32>, mask: vec3<f32>) -> Q {
+// Acceleration at an interior cell: the uniform field plus self-gravity from the field atlas.
+fn grav_at(c: vec3<i32>) -> vec3<f32> {
+  var g = P.gext.xyz;
+  if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
+  return g;
+}
+
+fn predict_cell(c: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
   let q = load_q(c);
   var zm = q;
   var zp = q;
@@ -40,7 +48,7 @@ fn predict_cell(c: vec3<i32>, mask: vec3<f32>) -> Q {
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
     load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
     zm, zp,
-    P.gext.xyz, mask,
+    g, mask,
   );
 }
 
@@ -54,12 +62,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   var pr: Q;
   if (s.kind == 0) {
-    pr = predict_cell(atl(blk_origin(s.slot), s.l), vec3<f32>(1.0));
+    let src = atl(blk_origin(s.slot), s.l);
+    pr = predict_cell(src, vec3<f32>(1.0), grav_at(src));
     pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s));
   } else {
     // Transverse neighbours of a ghost at the rim of the face would be edge ghosts.
     let rim = (inv.l == vec3<i32>(0)) | (inv.l == vec3<i32>(BS - 1));
-    pr = predict_cell(atl(blk_origin(inv.slot), inv.l), select(vec3<f32>(1.0), vec3<f32>(0.0), rim));
+    // The field atlas holds no acceleration for ghosts; use the adjacent interior cell's.
+    let near = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));
+    pr = predict_cell(atl(blk_origin(inv.slot), inv.l), select(vec3<f32>(1.0), vec3<f32>(0.0), rim), grav_at(near));
   }
   let c = atl(blk_origin(inv.slot), inv.l);
   textureStore(PA, c, pr.a);

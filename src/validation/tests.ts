@@ -533,6 +533,136 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'amr-gravity-static',
+    name: 'Adaptive mesh: Poisson solve and its coupling',
+    criterion:
+      'Potential of a uniform sphere within 1% of the analytic solution everywhere, on meshes with 0, 2 and 3 levels of refinement; Jeans growth rate on the block grid within 5% of linear theory',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      for (const [n, levels] of [[64, 0], [128, 2], [256, 3]] as const) {
+        await withAmr(gpu, sphere, n, { amrLevels: levels, tEnd: Infinity }, async (sim) => {
+          const c = await sim.readLeaves();
+          const phi = await sim.readLeafPotential();
+          let worst = 0;
+          for (let q = 0; q < c.count; q++) {
+            const e = spherePotential(Math.hypot(c.x[q], c.y[q], c.z[q]));
+            worst = Math.max(worst, Math.abs(phi[q] - e) / Math.abs(e));
+          }
+          const st = sim.tree.stats();
+          metrics[`sphere_${n}_L${levels}_max_error`] = worst;
+          metrics[`sphere_${n}_L${levels}_leaf_blocks`] = st.leaves;
+          pass &&= worst < 0.01 && st.deepest === levels;
+        });
+      }
+      await withAmr(gpu, jeans, 64, { amrLevels: 1, refineHi: 1e-6, refineLo: 1e-7 }, async (sim) => {
+        const steps = await sim.runToEnd();
+        const c = await sim.readLeaves();
+        let a = 0;
+        let v = 0;
+        for (let q = 0; q < c.count; q++) {
+          const w = c.dx[q] ** 3;
+          a += (c.u1[q * 4] - 1) * Math.cos(JEANS.k * c.x[q]) * w;
+          v += w;
+        }
+        const rate = Math.acosh((2 * a) / v / JEANS.amp) / jeans.tEnd;
+        const err = Math.abs(rate - JEANS.growth) / JEANS.growth;
+        metrics.jeans_growth_rate = rate;
+        metrics.jeans_error = err;
+        metrics.jeans_steps = steps;
+        pass &&= err < 0.05;
+      });
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'amr-gravity-dynamic',
+    name: 'Adaptive mesh: Evrard collapse and a hydrostatic polytrope (128 finest, 2 levels)',
+    criterion:
+      'Evrard: total energy conserved to 2% through collapse and bounce, thermal energy peaking between t = 0.9 and 1.3. Polytrope: central density within 10% of its initial value over 5 dynamical times',
+    async run(gpu) {
+      const metrics: Record<string, number | string> = {};
+      let pass = true;
+      await withAmr(gpu, evrard, 128, { amrLevels: 2, tEnd: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        let worst = 0;
+        let peakT = 0;
+        let peakU = 0;
+        let last = d0;
+        let steps = 0;
+        for (let i = 1; i <= 12; i++) {
+          sim.cfg.tEnd = 0.125 * i;
+          sim.writeParams();
+          steps = await sim.runToEnd();
+          last = await sim.diagnostics();
+          worst = Math.max(worst, Math.abs(last.eTot - d0.eTot) / Math.abs(d0.eTot));
+          if (last.eInt > peakU) [peakU, peakT] = [last.eInt, last.t];
+        }
+        const st = sim.tree.stats();
+        Object.assign(metrics, {
+          evrard_max_energy_drift: worst, evrard_thermal_peak_time: peakT, evrard_thermal_peak: peakU,
+          evrard_fraction_of_uniform_cells: st.cells / 128 ** 3, evrard_regrids: sim.regrids, evrard_steps: steps,
+        });
+        pass &&= worst < 0.02 && peakT >= 0.9 && peakT <= 1.3;
+      });
+      await withAmr(gpu, polytrope, 128, { amrLevels: 2, tEnd: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const rho0 = d0.ranges[0][1];
+        let worst = 0;
+        let last = d0;
+        let steps = 0;
+        for (let t = 1; t <= 5; t++) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          steps = await sim.runToEnd();
+          last = await sim.diagnostics();
+          worst = Math.max(worst, Math.abs(last.ranges[0][1] - rho0) / rho0);
+        }
+        Object.assign(metrics, {
+          polytrope_central_density_max_deviation: worst, polytrope_energy_drift: Math.abs(last.eTot - d0.eTot) / Math.abs(d0.eTot),
+          polytrope_fraction_of_uniform_cells: sim.tree.stats().cells / 128 ** 3, polytrope_steps: steps,
+        });
+        pass &&= worst < 0.1;
+      });
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'amr-tidal-disruption',
+    name: 'Adaptive mesh: tidal disruption (128 finest, 2 levels)',
+    criterion:
+      'The perturber reaches pericentre within 2% of r_t / beta; while all the gas is in the box its centre of mass stays within 0.005 stellar radii of the box centre; the star is disrupted',
+    async run(gpu) {
+      const orbit = tdeOrbit({ q: 100, beta: 1 });
+      return withAmr(gpu, tidalDisruption, 128, { amrLevels: 2, tEnd: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        let rMin = Infinity;
+        let comMax = 0;
+        let last = d0;
+        let steps = 0;
+        for (let t = 0.25; t <= orbit.tPeri + 3 + 1e-9; t += 0.25) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          steps = await sim.runToEnd();
+          last = await sim.diagnostics();
+          rMin = Math.min(rMin, Math.hypot(...last.perturber!));
+          if (last.mass >= 0.999 * d0.mass) comMax = Math.max(comMax, Math.hypot(...last.com));
+        }
+        // The orbit is sampled every 0.25, so the closest sample can sit a little outside pericentre.
+        const rErr = (rMin - orbit.rp) / orbit.rp;
+        const drop = last.ranges[0][1] / d0.ranges[0][1];
+        const st = sim.tree.stats();
+        return {
+          pass: rErr > -0.02 && rErr < 0.03 && comMax < 0.005 && drop < 0.5,
+          metrics: {
+            closest_sampled_separation: rMin, pericentre_expected: orbit.rp, max_com_offset_while_contained: comMax,
+            peak_density_final_ratio: drop, leaf_blocks: st.leaves, fraction_of_uniform_cells: st.cells / 128 ** 3, regrids: sim.regrids, steps,
+          },
+        };
+      });
+    },
+  },
+  {
     id: 'gpu-vs-cpu',
     name: 'GPU against the float64 CPU reference (32^3)',
     criterion: 'After 20 steps, L1 difference in density and energy < 1e-4 of the mean for a diagonal Sod tube and a blast',

@@ -5,8 +5,8 @@ import { AmrSim } from './amr/amr_sim';
 import { BS } from './amr/tree';
 import type { Problem } from './problems/types';
 
-/** Whether a preset can run on the adaptive grid (self-gravity is not implemented there yet). */
-export const supportsAmr = (p: Problem) => p.gravity === 'off' && !p.perturber;
+/** Whether a preset can run on the adaptive grid: all can in 3D; in 2D, those without self-gravity. */
+export const supportsAmr = (_p: Problem) => true;
 
 /** The deepest refinement that leaves at least one whole block per side at the coarsest level. */
 export function maxAmrLevels(n: number): number {

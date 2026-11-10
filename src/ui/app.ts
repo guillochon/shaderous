@@ -152,7 +152,7 @@ function syncControls() {
   levels.value = String(cfg.amrLevels);
   const amrOk = supportsAmr(cfg.problem);
   levels.disabled = !amrOk;
-  levels.title = amrOk ? 'Adaptive mesh: levels of refinement below the coarsest grid' : 'The adaptive mesh does not support self-gravity yet';
+  levels.title = 'Adaptive mesh: levels of refinement below the coarsest grid';
   for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n);
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
   $<HTMLInputElement>('blocks').disabled = cfg.amrLevels === 0;

@@ -51,6 +51,8 @@ export interface RegridOp {
 
 export class BlockTree {
   readonly nchild: number;
+  /** Deepest level refinement may reach; at most maxLevel. Lowered when the slot budget cannot hold more. */
+  levelLimit: number;
   readonly nface: number;
   readonly blocks = new Map<string, Block>();
   readonly slots: (Block | undefined)[];
@@ -72,6 +74,7 @@ export class BlockTree {
     readonly bcHi: number[],
   ) {
     this.nchild = 1 << ndim;
+    this.levelLimit = maxLevel;
     this.nface = 2 * ndim;
     this.slots = new Array(cap);
     for (let s = cap - 1; s >= 0; s--) this.free.push(s);
@@ -153,7 +156,7 @@ export class BlockTree {
    * blocks that were split (empty if it does not fit or is already at the deepest level).
    */
   refine(b: Block, forbidden?: Set<Block>): Block[] {
-    if (b.children || b.level >= this.maxLevel) return [];
+    if (b.children || b.level >= this.levelLimit) return [];
     const need = new Set<Block>();
     if (this.refineCost(b, need) > this.free.length) return [];
     if (forbidden && [...need].some((q) => forbidden.has(q))) return [];
@@ -205,7 +208,7 @@ export class BlockTree {
     const touched = new Set<Block>();
 
     // Refine, most strongly flagged first so they get the slots if the budget runs out.
-    const wanted = before.filter((b) => ind.get(b)! > hi && b.level < this.maxLevel).sort((a, b) => ind.get(b)! - ind.get(a)!);
+    const wanted = before.filter((b) => ind.get(b)! > hi && b.level < this.levelLimit).sort((a, b) => ind.get(b)! - ind.get(a)!);
     for (const b of wanted) {
       for (const q of this.refine(b)) {
         touched.add(q);
@@ -282,11 +285,14 @@ export class BlockTree {
   }
 
   /** Slot lists the passes are dispatched over: every block (coarsest first), and the leaves. */
-  lists(): { all: Uint32Array; leaves: Uint32Array } {
+  lists(): { all: Uint32Array; leaves: Uint32Array; byLevel: Uint32Array[] } {
     const all = this.all();
+    const byLevel: Uint32Array[] = [];
+    for (let l = 0; l <= this.maxLevel; l++) byLevel.push(Uint32Array.from(all.filter((b) => b.level === l).map((b) => b.slot)));
     return {
       all: Uint32Array.from(all.map((b) => b.slot)),
       leaves: Uint32Array.from(all.filter((b) => !b.children).map((b) => b.slot)),
+      byLevel,
     };
   }
 

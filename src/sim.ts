@@ -48,6 +48,8 @@ export interface SimConfig {
   /** A block is split where its refinement indicator exceeds refineHi, merged below refineLo. */
   refineHi: number;
   refineLo: number;
+  /** With self-gravity, refine where the Jeans length is under this many cells (0 = off). */
+  jeansRefine: number;
 }
 
 /** What the front end, renderer and tests need from a simulation, uniform or adaptive. */
@@ -117,6 +119,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     amrBudget: 0,
     refineHi: 0.06,
     refineLo: 0.025,
+    jeansRefine: 16,
     ...over,
   };
 }
@@ -154,7 +157,7 @@ export const PARAM_BYTES = 208;
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[] },
+  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[]; refine?: number[] },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -164,7 +167,7 @@ export function packParams(
   f.set([c.eosParams.gamma, c.eosParams.K, c.eosParams.R, c.eosParams.arad], 8);
   u.set([...x.dims, 0], 12);
   // 2D quantities are per unit length along z.
-  f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, 0, 0], 16);
+  f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, ...(x.refine ?? [0, 0])], 16);
   f.set([...c.gext, 0], 20);
   // Perturber: G M, softening of two cells, and whether it is active.
   f.set([x.perturberGM, 2 * x.dx, x.perturberGM > 0 ? 1 : 0, 0], 24);

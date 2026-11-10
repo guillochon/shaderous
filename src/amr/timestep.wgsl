@@ -6,6 +6,7 @@
 
 @group(0) @binding(1) var W1: texture_3d<f32>;
 @group(0) @binding(2) var W2: texture_3d<f32>;
+@group(0) @binding(3) var G: texture_3d<f32>;
 
 fn red_cell(c: vec3<i32>) -> Red {
   let slot = c.x / BS;
@@ -16,5 +17,7 @@ fn red_cell(c: vec3<i32>) -> Red {
   let dx = blk_dx(slot);
   // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
   let rate = abs(w1.y) + abs(w1.z) + abs(w1.w) + P.geom.y * cs;
-  return Red(rate / dx, length(P.gext.xyz) / dx);
+  var g = P.gext.xyz;
+  if (P.grav_on != 0u) { g += textureLoad(G, a, 0).xyz; }
+  return Red(rate / dx, length(g) / dx);
 }

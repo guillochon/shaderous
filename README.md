@@ -20,8 +20,9 @@ https://guillochon.github.io/shaderous/validate.html
   layer of the same 3D scheme, without self-gravity.
 - **Adaptive mesh refinement:** a tree of 16-cell blocks packed into texture atlases, refined
   where density or pressure jump and merged where they do not. Fluxes are matched across
-  refinement boundaries, so mass, momentum and energy are conserved to round-off. Hydro and
-  uniform gravity only so far; presets with self-gravity run on the uniform grid.
+  refinement boundaries, so mass, momentum and energy are conserved to round-off. Every
+  preset can use it, including the self-gravitating ones: the potential is solved level by
+  level on the same blocks, and gas that approaches its Jeans length is refined.
 - **Equations of state:** ideal gas, barotropic (isothermal / polytropic), gas plus radiation
   pressure, chosen when the shaders are assembled.
 
@@ -64,7 +65,7 @@ src/
   hydro/       primitives, timestep, clock and update passes; riemann/ and limiters/ modules
   eos/         WGSL equation-of-state modules and their float64 mirrors
   gravity/     multigrid passes, multipole boundary, half-kick corrector
-  amr/         block tree, block-atlas passes and the adaptive driver
+  amr/         block tree, block-atlas passes and the adaptive driver; gravity/ for its Poisson solve
   render/      field extraction, ray-marcher, slice view, transfer function
   problems/    one file per preset
   reference/   float64 CPU implementation of the hydro scheme, exact Riemann solver
@@ -101,6 +102,18 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   the coarse cell recomputes the fine fluxes rather than using its own, which conserves
   without storing fluxes; this needs every level to take the same timestep. The mesh is
   rebuilt from the CPU every 8 steps, from a per-block indicator read back without blocking.
+- **Gravity on the adaptive mesh.** The potential lives on every block, parents included.
+  Each tree level is solved in turn from the coarsest down: the density is averaged into the
+  parents, ghost cells of a level come from its neighbours or are interpolated from the level
+  above, and a multigrid cycle runs inside the blocks (16, 8, 4, 2 and 1 cells across). The
+  coupling is one-way, so a fine level never corrects the coarse potential beneath it; on a
+  uniform sphere the error stays below 0.3% with three levels. The solve is many small
+  dispatches, so a self-gravitating adaptive step costs noticeably more than a hydro one.
+  Refinement also triggers where the Jeans length falls below `jeansRefine` cells (16 by
+  default). The atlas holds at most 1000 blocks in 3D; if the initial mesh of a
+  self-gravitating run cannot fit a whole level within that, the level is left out (the
+  status line says so) rather than letting a refinement boundary cut through a star at an
+  arbitrary place, which disturbs hydrostatic balance. Periodic gravity assumes periodic hydro boundaries on the adaptive mesh.
 - **Barotropic gas** uses HLL, since there is no contact wave for HLLC to resolve.
 
 ## Licence

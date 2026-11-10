@@ -6,7 +6,8 @@ struct Params {
   bc_hi: vec4<u32>,      // per-axis upper-face boundary
   eos: vec4<f32>,        // (gamma, K, gas constant R, radiation constant a)
   dims: vec4<u32>,       // cells along x, y, z; z is 1 in 2D runs (one periodic layer)
-  geom: vec4<f32>,       // (cell volume, number of dimensions, 0, 0); 2D is per unit length in z
+  geom: vec4<f32>,       // (cell volume, number of dimensions, refinement threshold, cells per
+                         //   Jeans length below which a block is refined); 2D is per unit length in z
   gext: vec4<f32>,       // uniform external gravitational acceleration
   bh: vec4<f32>,         // point-mass perturber: (G M, softening length, 1 if present, 0)
   fluff: vec4<f32>,      // tenuous-gas limits: (density below which they apply, max specific

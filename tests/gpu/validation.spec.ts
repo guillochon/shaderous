@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'advection', 'flux-determinism',
-  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-sedov', 'amr-instabilities', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
+  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
 ];
 
 test.describe.configure({ mode: 'serial' });
@@ -103,10 +103,15 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   const d3 = await page.evaluate(() => (window as any).shaderousApp.diag);
   expect(d3.mass).toBeCloseTo(1.5, 5);
   expect(await page.evaluate(() => (window as any).shaderousApp.sim.status())).toMatch(/blocks/);
-  // Presets with self-gravity cannot use it.
+  // Self-gravity runs adaptively too.
   await page.selectOption('#problem', 'polytrope');
-  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'polytrope');
-  await page.waitForFunction(() => (document.getElementById('levels') as HTMLSelectElement).disabled, undefined, { timeout: 30_000 });
-  expect(await page.evaluate(() => (window as any).shaderousApp.cfg.amrLevels)).toBe(0);
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'polytrope' && (window as any).shaderousApp.sim);
+  await page.selectOption('#res', '64');
+  await page.selectOption('#levels', '1');
+  await page.waitForFunction(() => (window as any).shaderousApp.sim?.tree !== undefined && (window as any).shaderousApp.cfg.amrLevels === 1, undefined, { timeout: 60_000 });
+  await advance();
+  const d4 = await page.evaluate(() => (window as any).shaderousApp.diag);
+  expect(d4.eGrav).toBeLessThan(0);
+  expect(Number.isFinite(d4.eTot)).toBe(true);
   expect(errors).toEqual([]);
 });

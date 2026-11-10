@@ -1,5 +1,8 @@
 // Refinement indicator: for every leaf block, the largest normalised jump in density or
 // pressure between a cell's two neighbours along any axis, |q+ - q-| / (q+ + q-).
+// With self-gravity a block is also refined where the Jeans length is short: that indicator is
+// scaled so it crosses the refinement threshold when the Jeans length falls below the
+// requested number of cells.
 // One value per slot, accumulated with an atomic max on the float's bit pattern (which orders
 // the same way as the float for non-negative values).
 #include "hydro/common.wgsl"
@@ -25,5 +28,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let c = atl(blk_origin(inv.slot), inv.l);
   var ind = max(jump(c, vec3<i32>(1, 0, 0)), jump(c, vec3<i32>(0, 1, 0)));
   if (!is2d()) { ind = max(ind, jump(c, vec3<i32>(0, 0, 1))); }
+  if (P.grav_on != 0u && P.geom.w > 0.0) {
+    let rho = textureLoad(W1, c, 0).x;
+    let cs = textureLoad(W2, c, 0).y;
+    let lj = cs * sqrt(3.14159265 / (P.G * rho));
+    ind = max(ind, P.geom.z * P.geom.w * blk_dx(inv.slot) / lj);
+  }
   atomicMax(&FLAGS[u32(inv.slot)], bitcast<u32>(max(ind, 0.0)));
 }

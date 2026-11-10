@@ -21,6 +21,7 @@
 @group(0) @binding(3) var U2: texture_3d<f32>;
 @group(0) @binding(4) var W1: texture_3d<f32>;
 @group(0) @binding(5) var W2: texture_3d<f32>;
+@group(0) @binding(6) var G: texture_3d<f32>;
 @group(0) @binding(7) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(8) var O2: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(9) var PA: texture_3d<f32>;
@@ -125,15 +126,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
 
-  // Gravity here is the uniform external field only, so both half kicks of the
-  // kick-drift-kick step fit in this pass: the acceleration needs no solve.
-  let g = P.gext.xyz;
-  let gravity = any(g != vec3<f32>(0.0));
+  // Gravity: a uniform external field, self-gravity from the field atlas, or both. The step is
+  // kick-drift-kick. With self-gravity the second half kick needs the new potential and runs
+  // as its own pass (amr/correct.wgsl); with only the uniform field it is applied here.
+  let self_gravity = P.grav_on != 0u;
+  var g = P.gext.xyz;
+  if (self_gravity) { g += textureLoad(G, c, 0).xyz; }
+  let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0));
   let flux_work = gravity && (P.flags & 1u) != 0u;
   var dw = 0.0;
   if (flux_work) {
-    // Flux-form work: -1/2 (F_hi dphi(+e) - F_lo dphi(-e)) with dphi(+-e) = -+ g . e dx.
-    dw = 0.5 * g_dx * (g.x * (fx.hi.m + fx.lo.m) + g.y * (fy.hi.m + fy.lo.m) + g.z * (fz.hi.m + fz.lo.m));
+    // Flux-form work: -1/2 (F_hi dphi(+e) - F_lo dphi(-e)). For the uniform field dphi(+-e) is
+    // -+ g . e dx; the self-gravity part differences the half-step potential, ghosts included.
+    let ge = P.gext.xyz;
+    dw = 0.5 * g_dx * (ge.x * (fx.hi.m + fx.lo.m) + ge.y * (fy.hi.m + fy.lo.m) + ge.z * (fz.hi.m + fz.lo.m));
+    if (self_gravity) {
+      let pc = textureLoad(G, c, 0).w;
+      dw -= 0.5 * (fx.hi.m * (textureLoad(G, c + ex, 0).w - pc) - fx.lo.m * (textureLoad(G, c - ex, 0).w - pc)
+                 + fy.hi.m * (textureLoad(G, c + ey, 0).w - pc) - fy.lo.m * (textureLoad(G, c - ey, 0).w - pc)
+                 + fz.hi.m * (textureLoad(G, c + ez, 0).w - pc) - fz.lo.m * (textureLoad(G, c - ez, 0).w - pc));
+    }
   }
 
   let u1 = textureLoad(U1, c, 0);
@@ -147,7 +159,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   var nw = advance(u1, u2, net_inflow(fx, fy, fz), dw, p0.b.x, kick, ekick);
 
-  if (gravity) {
+  if (gravity && !self_gravity) {
     // Second half kick, with the updated density.
     let rho = nw.u1.x;
     let k2 = 0.5 * clock.dt * rho * g;

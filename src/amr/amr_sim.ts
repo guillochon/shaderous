@@ -13,10 +13,12 @@
 // block; the result is read back without blocking, the tree is adapted, and one pass refills
 // the new leaves (copy, prolong or restrict) into the other state texture.
 //
-// Self-gravity is not implemented on the block grid yet; a uniform external field is.
+// With self-gravity (3D), the potential is solved on every tree level after the update
+// (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, tex3d, type Gpu } from '../gpu/device';
-import { MAX, Reducer } from '../gpu/reduce';
+import { MAX, Reducer, SUM } from '../gpu/reduce';
+import { AmrGravity } from './gravity';
 import { EOS_MODULES, makeEos } from '../eos/eos';
 import { DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, packParams, PARAM_BYTES, type Diagnostics, type SimConfig, type Simulation } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
@@ -72,6 +74,24 @@ export class AmrSim implements Simulation {
   private flags: GPUBuffer;
   private flagStaging: GPUBuffer;
   private rg: GPUBuffer;
+  /** one list per tree level, for the per-level gravity solve */
+  private listLevel: GPUBuffer[] = [];
+  private nLevel: number[] = [];
+  /** gravity field atlas: acceleration and half-step potential */
+  private gfield: GPUTexture;
+  /** perturber state (see gravity/bh.wgsl) */
+  private bh: GPUBuffer;
+  private grav?: AmrGravity;
+  private dummyPhi: GPUTexture;
+  private redMp?: Reducer;
+  private redBh?: Reducer;
+  private pBhDrift?: GPUComputePipeline;
+  private pBhKick?: GPUComputePipeline;
+  private gBhDrift?: GPUBindGroup;
+  private gBhKick?: GPUBindGroup;
+  private pCorrect!: GPUComputePipeline;
+  private gCorrect: GPUBindGroup[] = [];
+  private rhoMean = 0;
   private staging: GPUBuffer;
   private stagingBusy = false;
 
@@ -119,10 +139,10 @@ export class AmrSim implements Simulation {
     const roots = nr ** cfg.ndim;
     // Atlas size: room for the roots plus refinement, within what a texture can hold.
     const limit = Math.floor(Math.min(gpu.limits.maxTextureDimension3D, 2048) / PAD);
-    // Default budget: three quarters of what refining everywhere would need (leaves plus their
-    // parents), capped so the atlases stay within about 1 GB in 3D.
+    // Default budget: what refining everywhere would need (leaves plus their parents) in 3D,
+    // three quarters of that in 2D, capped so the 3D atlases stay within about 1 GB.
     const full = roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3);
-    const auto = Math.ceil(Math.pow(Math.max(full * 0.75, roots * 2), 1 / cfg.ndim));
+    const auto = Math.ceil(Math.pow(Math.max(full * (cfg.ndim === 3 ? 1 : 0.75), roots * 2), 1 / cfg.ndim));
     const [lo, hi] = cfg.ndim === 3 ? [6, 10] : [12, 100];
     this.slotsPerSide = Math.min(limit, cfg.amrBudget || Math.min(hi, Math.max(lo, auto)));
     this.cap = this.slotsPerSide ** cfg.ndim;
@@ -147,6 +167,10 @@ export class AmrSim implements Simulation {
     this.bt = d.createBuffer({ size: this.cap * BT_STRIDE * 4, usage: storage });
     this.listAll = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     this.listLeaf = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
+    for (let l = 0; l <= this.levels; l++) this.listLevel.push(d.createBuffer({ size: (this.cap + 1) * 4, usage: storage }));
+    this.gfield = t('gravity field');
+    this.bh = d.createBuffer({ size: 64, usage: storage });
+    this.dummyPhi = d.createTexture({ size: [1, 1, 1], dimension: '3d', format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
     this.flags = d.createBuffer({ size: this.cap * 4, usage: storage });
     this.rg = d.createBuffer({ size: this.cap * RG_STRIDE * 4, usage: storage });
     this.flagStaging = d.createBuffer({ size: this.cap * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -154,7 +178,6 @@ export class AmrSim implements Simulation {
   }
 
   static async create(gpu: Gpu, cfg: SimConfig): Promise<AmrSim> {
-    if (cfg.gravity !== 'off') throw new Error('Self-gravity is not available on the adaptive grid yet.');
     const sim = new AmrSim(gpu, cfg);
     const d = sim.device;
     const v = (t: GPUTexture) => t.createView();
@@ -165,13 +188,28 @@ export class AmrSim implements Simulation {
       [MAX, MAX],
       'amr/timestep.wgsl',
       {},
-      [{ 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 30: sim.bt }],
+      [{ 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: v(sim.gfield), 30: sim.bt }],
       'amr timestep',
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
     sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl'), 'amr flag');
-    sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 31: sim.listLeaf });
+    sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 30: sim.bt, 31: sim.listLeaf });
+    if (cfg.ndim === 3) {
+      // Self-gravity machinery is built for every 3D run, so gravity can be switched on later.
+      const u1 = [0, 1].map((p) => v(sim.state[p][0]));
+      sim.redMp = await Reducer.create(d, [sim.cap * BS, BS, BS], new Array(10).fill(SUM), 'amr/multipole.wgsl', {}, u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole');
+      sim.redBh = await Reducer.create(d, [sim.cap * BS, BS, BS], [SUM, SUM, SUM, SUM], 'amr/bh_moment.wgsl', {}, u1.map((t) => ({ 0: sim.params, 1: t, 2: sim.bh, 30: sim.bt })), 'amr perturber');
+      sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'perturber drift');
+      sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 1: sim.clock, 2: sim.bh });
+      sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'perturber kick');
+      sim.gBhKick = bindGroup(d, sim.pBhKick, { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh });
+      sim.grav = await AmrGravity.create({
+        device: d, slotsPerSide: sim.slotsPerSide, levels: sim.levels, params: sim.params, bt: sim.bt,
+        listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
+        multipole: sim.redMp.result, stateU1: [sim.state[0][0], sim.state[1][0]], gfield: sim.gfield,
+      });
+    }
     await sim.buildHydro();
     sim.reset();
     return sim;
@@ -191,20 +229,29 @@ export class AmrSim implements Simulation {
     const d = this.device;
     const slots = this.slots;
     const v = (t: GPUTexture) => t.createView();
-    [this.pAssemble, this.pPredict, this.pUpdate, this.pRegrid] = await Promise.all([
+    [this.pAssemble, this.pPredict, this.pUpdate, this.pRegrid, this.pCorrect] = await Promise.all([
       computePipeline(d, assemble('amr/assemble.wgsl', slots), 'amr assemble'),
       computePipeline(d, assemble('amr/predict.wgsl', slots), 'amr predict'),
       computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update'),
       computePipeline(d, assemble('amr/regrid.wgsl', slots), 'amr regrid'),
+      computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct'),
     ]);
     this.gPredict = bindGroup(d, this.pPredict, {
-      0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 5: v(this.pred[0]), 6: v(this.pred[1]), 30: this.bt, 31: this.listAll,
+      0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 30: this.bt, 31: this.listAll,
     });
     this.gAssemble = [];
     this.gUpdate = [];
     this.gRegrid = [];
+    this.gCorrect = [];
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
+      // Second half kick: from the updated state (the other parity) back into this one.
+      this.gCorrect.push(
+        bindGroup(d, this.pCorrect, {
+          0: this.params, 1: this.clock, 2: v(this.state[o][0]), 3: v(this.state[o][1]), 4: v(this.gfield),
+          5: v(this.state[p][0]), 6: v(this.state[p][1]), 30: this.bt, 31: this.listLeaf,
+        }),
+      );
       this.gAssemble.push(
         bindGroup(d, this.pAssemble, {
           0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]), 30: this.bt, 31: this.listAll,
@@ -224,7 +271,7 @@ export class AmrSim implements Simulation {
       DIAG_OPS,
       'amr/diagnostics.wgsl',
       slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 30: this.bt })),
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 30: this.bt })),
       'amr diagnostics',
     );
   }
@@ -233,7 +280,7 @@ export class AmrSim implements Simulation {
     const v = (t: GPUTexture) => t.createView();
     const o = 1 - p;
     return bindGroup(this.device, pipe, {
-      0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]),
+      0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 30: this.bt, 31: this.listLeaf,
     });
   }
@@ -243,15 +290,67 @@ export class AmrSim implements Simulation {
     const buf = packParams(c, {
       dims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0],
       dx: this.dx0,
-      rhoMean: 0,
-      selfGravity: false,
-      perturberGM: 0,
+      rhoMean: this.rhoMean,
+      selfGravity: this.selfGravity,
+      perturberGM: this.hasPerturber ? c.problem.perturber!(c.params, c.G).gm : 0,
       amr: [this.slotsPerSide, this.n0 / BS, this.levels, 0],
+      refine: [c.refineHi, c.jeansRefine],
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
   }
 
-  refreshPotential() {}
+  private get selfGravity(): boolean {
+    return this.cfg.gravity !== 'off' && !!this.grav;
+  }
+  private get hasPerturber(): boolean {
+    return this.selfGravity && !!this.cfg.problem.perturber;
+  }
+
+  /**
+   * Encode a full gravity solve for the state of the given parity into an open pass: source,
+   * multipoles, every level's solve, and (optionally) the perturber's step. The field pass is
+   * separate because the "previous potential" copy may have to happen in between.
+   */
+  private encodeSolve(pass: GPUComputePassEncoder, parity: number, cycles: number, perturber: 'none' | 'kick' | 'step', cold = false) {
+    const g = this.grav!;
+    g.encodeSource(pass, parity, this.nLevel, this.nLeaf);
+    if (this.cfg.gravity === 'isolated') this.redMp!.encode(pass, parity);
+    g.encodeSolve(pass, this.nLevel, this.nAll, cycles, cold);
+    if (this.hasPerturber && perturber !== 'none') {
+      if (perturber === 'step') {
+        pass.setPipeline(this.pBhDrift!);
+        pass.setBindGroup(0, this.gBhDrift!);
+        pass.dispatchWorkgroups(1);
+      }
+      this.redBh!.encode(pass, parity);
+      pass.setPipeline(this.pBhKick!);
+      pass.setBindGroup(0, this.gBhKick!);
+      pass.dispatchWorkgroups(1);
+    }
+  }
+
+  /** Solve for the potential of the current state from scratch-ish, and rebuild the field. */
+  private encodeFreshPotential(enc: GPUCommandEncoder, cycles: number, perturber: 'none' | 'kick', newBlocks: boolean) {
+    const g = this.grav!;
+    let pass = enc.beginComputePass();
+    if (newBlocks) g.encodeNewBlocks(pass, this.nLeaf);
+    // Without new blocks to seed this is a cold start: each level begins from the coarser one.
+    this.encodeSolve(pass, this.cur, cycles, perturber, !newBlocks);
+    pass.end();
+    // No history on this mesh: the half-step extrapolation starts from the potential itself.
+    g.copyPhiToOld(enc);
+    pass = enc.beginComputePass();
+    g.encodeField(pass, this.nAll);
+    pass.end();
+  }
+
+  /** Call after changing the gravity mode or G at run time. */
+  refreshPotential() {
+    if (!this.selfGravity) return;
+    const enc = this.device.createCommandEncoder();
+    this.encodeFreshPotential(enc, 12, 'none', false);
+    this.device.queue.submit([enc.finish()]);
+  }
 
   // ---------------------------------------------------------------- initial conditions
 
@@ -305,9 +404,17 @@ export class AmrSim implements Simulation {
       const w = fn(x, y, z);
       return eos.hasEnergy ? w : { ...w, p: eos.pressure(w.rho, 0) };
     };
-    this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi);
-    for (let pass = 0; pass < this.levels; pass++) {
-      if (!this.tree.adapt((b) => this.indicator(b, prim), c.refineHi, c.refineLo)) break;
+    // With self-gravity a level that only partly fits the block budget is left out altogether:
+    // a refinement boundary that cuts a steep hydrostatic gradient at an arbitrary place
+    // disturbs the balance far more than resolving all of it one level coarser.
+    const strict = this.selfGravity;
+    for (let limit = this.levels; ; limit--) {
+      this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi);
+      this.tree.levelLimit = limit;
+      for (let pass = 0; pass < limit; pass++) {
+        if (!this.tree.adapt((b) => this.indicator(b, prim), c.refineHi, c.refineLo)) break;
+      }
+      if (!strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;
     }
 
     const three = c.ndim === 3;
@@ -315,6 +422,7 @@ export class AmrSim implements Simulation {
     const half = c.problem.box / 2;
     const u1 = new Float32Array(BS * BS * depth * 4);
     const u2 = new Float32Array(BS * BS * depth * 4);
+    let mass = 0;
     for (const b of this.tree.leaves()) {
       const dx = this.dx0 / (1 << b.level);
       let o = 0;
@@ -323,6 +431,7 @@ export class AmrSim implements Simulation {
           for (let i = 0; i < BS; i++, o += 4) {
             const w = prim((b.c[0] * BS + i + 0.5) * dx - half, (b.c[1] * BS + j + 0.5) * dx - half, three ? (b.c[2] * BS + k + 0.5) * dx - half : 0);
             const eint = eos.eintFromP(w.rho, w.p);
+            mass += w.rho * dx ** c.ndim;
             u1[o] = w.rho;
             u1[o + 1] = w.rho * w.vx;
             u1[o + 2] = w.rho * w.vy;
@@ -341,9 +450,21 @@ export class AmrSim implements Simulation {
     this.pending = null;
     this.stepsSinceFlag = 0;
     this.regrids = 0;
+    this.rhoMean = mass / c.problem.box ** c.ndim;
     d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
+    if (c.problem.perturber) {
+      const bh = c.problem.perturber(c.params, c.G);
+      d.queue.writeBuffer(this.bh, 0, new Float32Array([...bh.pos, 0, ...bh.vel, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+    }
     this.writeParams();
     this.uploadTree();
+    if (this.selfGravity) {
+      // Cold start: enough cycles per level to converge from zero. The clock's dt is zero, so
+      // the perturber's kick only evaluates its accelerations.
+      const enc = d.createCommandEncoder();
+      this.encodeFreshPotential(enc, 12, 'kick', false);
+      d.queue.submit([enc.finish()]);
+    }
   }
 
   /** Atlas texel of a slot's first interior cell. */
@@ -355,9 +476,10 @@ export class AmrSim implements Simulation {
 
   private uploadTree() {
     const d = this.device;
-    const { all, leaves } = this.tree.lists();
+    const { all, leaves, byLevel } = this.tree.lists();
     this.nAll = all.length;
     this.nLeaf = leaves.length;
+    this.nLevel = byLevel.map((l) => l.length);
     const pack = (list: Uint32Array) => {
       const out = new Uint32Array(this.cap + 1);
       out[0] = list.length;
@@ -367,6 +489,7 @@ export class AmrSim implements Simulation {
     d.queue.writeBuffer(this.bt, 0, this.tree.table() as Int32Array<ArrayBuffer>);
     d.queue.writeBuffer(this.listAll, 0, pack(all));
     d.queue.writeBuffer(this.listLeaf, 0, pack(leaves));
+    byLevel.forEach((l, i) => d.queue.writeBuffer(this.listLevel[i], 0, pack(l)));
     const m = (this.n0 / BS) << this.levels;
     d.queue.writeTexture({ texture: this.idx }, this.tree.indexGrid() as Uint32Array<ArrayBuffer>, { bytesPerRow: m * 4, rowsPerImage: m }, [
       m,
@@ -396,6 +519,9 @@ export class AmrSim implements Simulation {
     pass.end();
     this.cur = 1 - this.cur;
     this.regrids++;
+    // The potential and field belong to the old mesh: solve again on the new one, starting
+    // new blocks from their parents' values.
+    if (this.selfGravity) this.encodeFreshPotential(enc, Math.max(2, this.cfg.vcycles), 'none', true);
   }
 
   /**
@@ -426,7 +552,21 @@ export class AmrSim implements Simulation {
       pass.setBindGroup(0, this.gUpdate[p]);
       this.interior(pass, this.nLeaf);
       pass.end();
-      this.cur = 1 - p;
+      if (this.selfGravity) {
+        // Keep the old potential, solve for that of the updated state (warm-started), rebuild
+        // the field, and apply the second half kick back into this parity.
+        const g = this.grav!;
+        g.copyPhiToOld(enc);
+        const gp = enc.beginComputePass();
+        this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step');
+        g.encodeField(gp, this.nAll);
+        gp.setPipeline(this.pCorrect);
+        gp.setBindGroup(0, this.gCorrect[p]);
+        this.interior(gp, this.nLeaf);
+        gp.end();
+      } else {
+        this.cur = 1 - p;
+      }
       this.stepsSinceFlag++;
 
       if (this.levels > 0 && !this.flagInFlight && !this.wantMap && this.stepsSinceFlag >= REGRID_EVERY) {
@@ -504,12 +644,13 @@ export class AmrSim implements Simulation {
     pass.end();
     enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
     enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
+    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, 16);
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
-      return diagnosticsFrom(a, false);
+      return diagnosticsFrom(a, this.hasPerturber);
     } finally {
       this.stagingBusy = false;
     }
@@ -563,7 +704,9 @@ export class AmrSim implements Simulation {
 
   status(): string {
     const s = this.tree.stats();
-    const full = this.tree.freeSlots < this.tree.nchild ? ', budget full' : '';
+    const full = this.tree.levelLimit < this.levels
+      ? `, block budget limits refinement to ${this.tree.levelLimit} of ${this.levels} levels`
+      : this.tree.freeSlots < this.tree.nchild ? ', budget full' : '';
     return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}`;
   }
 
@@ -599,6 +742,21 @@ export class AmrSim implements Simulation {
             out.u1.set(t1.subarray(src, src + 4), q * 4);
             out.u2.set(t2.subarray(src, src + 4), q * 4);
           }
+    }
+    return out;
+  }
+
+  /** The potential on every leaf cell, in the same order as readLeaves() (validation only). */
+  async readLeafPotential(): Promise<Float32Array> {
+    this.flush();
+    const side = this.slotsPerSide * PAD;
+    const t = await readTexture(this.device, this.grav!.phi, side, 1);
+    const leaves = this.tree.leaves();
+    const out = new Float32Array(leaves.length * BS ** 3);
+    let q = 0;
+    for (const blk of leaves) {
+      const [ox, oy, oz] = this.origin(blk.slot);
+      for (let k = 0; k < BS; k++) for (let j = 0; j < BS; j++) for (let i = 0; i < BS; i++, q++) out[q] = t[((oz + k) * side + oy + j) * side + ox + i];
     }
     return out;
   }
@@ -691,6 +849,7 @@ export class AmrSim implements Simulation {
 
   destroy() {
     for (const s of this.state) for (const t of s) t.destroy();
-    for (const t of [...this.prim, ...this.pred, this.idx]) t.destroy();
+    for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi]) t.destroy();
+    this.grav?.destroy();
   }
 }
