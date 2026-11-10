@@ -16,15 +16,17 @@
 @group(0) @binding(5) var PA: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(6) var PB: texture_storage_3d<rgba32float, write>;
 
+#include "hydro/region.wgsl"
 #include "hydro/recon.wgsl"
 #include "hydro/predictor.wgsl"
 #include "gravity/gfield.wgsl"
 
-@compute @workgroup_size(8, 8, 4)
+@compute @workgroup_size(WGX, WGY, WGZ)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= P.dims.xyz)) { return; }
+  let rc = region_cell(gid);
+  if (!rc.mine) { return; }
   g_dx = P.dx;
-  let c = vec3<i32>(gid);
+  let c = rc.c;
   g_inner = stencil_inside(c, 1);
   let q = load_q(c);
   // In 2D the layer is its own neighbour along z.

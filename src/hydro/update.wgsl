@@ -30,12 +30,14 @@
 @group(0) @binding(9) var PA: texture_3d<f32>;
 @group(0) @binding(10) var PB: texture_3d<f32>;
 
+#include "hydro/region.wgsl"
 #include "hydro/recon.wgsl"
 #include "gravity/gfield.wgsl"
 
 // Half-step state of a cell. A cell beyond a boundary takes the state of the cell it maps to
 // (mirrored if reflecting).
 fn load_pred(c: vec3<i32>) -> Q {
+  if (INTERIOR) { return Q(textureLoad(PA, c, 0), textureLoad(PB, c, 0)); }
   let m = bc_map(c);
   let a = textureLoad(PA, m.c, 0);
   return Q(vec4<f32>(a.x, bc_velocity(a.yzw, m)), textureLoad(PB, m.c, 0));
@@ -48,11 +50,12 @@ fn load_pred(c: vec3<i32>) -> Q {
 // so the test suite can check that both cells sharing a face computed the same bits.
 override DEBUG_FLUX: bool = false;
 
-@compute @workgroup_size(8, 8, 4)
+@compute @workgroup_size(WGX, WGY, WGZ)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= P.dims.xyz)) { return; }
+  let rc = region_cell(gid);
+  if (!rc.mine) { return; }
   g_dx = P.dx;
-  let c = vec3<i32>(gid);
+  let c = rc.c;
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);

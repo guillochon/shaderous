@@ -105,7 +105,13 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   state in another form costs more than repeating the conversion. The rates pass writes
   nothing but the first stage of the timestep reduction, folded in workgroup-shared atomics.
   Storage buffers in place of 3D textures were measured and are slower (about 1.4 times for
-  the same stencil). With gravity it adds the Poisson source, V-cycles, a pass that writes the
+  the same stencil). The predictor and the update are each compiled twice from one source
+  (`hydro/region_pass.ts`): with the boundary mapping compiled out for cells at least two
+  from every face, and in general form for the shell, whose slabs get workgroups two cells
+  thick so they launch no more invocations than they have cells. Fluxes on the seam between
+  the two agree bit for bit (the flux-determinism test covers it). A 2D run uses 16 x 16 x 1
+  workgroups, which more than halves its flux update against 8 x 8 x 4 with three idle
+  layers. With gravity it adds the Poisson source, V-cycles, a pass that writes the
   acceleration field, and the second half kick. `sim.profile()` times each pass.
 - **Frame pacing** adapts the number of steps per frame to the GPU. Firefox reports finished
   GPU work only every ~100 ms, so there the loop steers by backlog rather than by timing.

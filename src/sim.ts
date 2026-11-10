@@ -1,5 +1,6 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
 import { assemble } from './gpu/shaders';
+import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { Multigrid } from './gravity/multigrid';
@@ -244,10 +245,10 @@ export class Sim implements Simulation {
   }
   private clock: GPUBuffer;
   private pPrim!: GPUComputePipeline;
-  private pUpdate!: GPUComputePipeline;
+  private pUpdate!: RegionPass;
   private pClock!: GPUComputePipeline;
   private pCorrect!: GPUComputePipeline;
-  private pPredict!: GPUComputePipeline;
+  private pPredict!: RegionPass;
   private pField!: GPUComputePipeline;
   private pBhDrift!: GPUComputePipeline;
   private pBhKick!: GPUComputePipeline;
@@ -256,10 +257,10 @@ export class Sim implements Simulation {
   private redBh!: Reducer;
   /** perturber state: position, velocity, acceleration, frame acceleration (4 x vec4) */
   private bh: GPUBuffer;
-  private gPredict: GPUBindGroup[] = [];
+  private gPredict: RegionGroups[] = [];
   private gField!: GPUBindGroup;
   private gPrim: GPUBindGroup[] = [];
-  private gUpdate: GPUBindGroup[] = [];
+  private gUpdate: RegionGroups[] = [];
   private gCorrect: GPUBindGroup[] = [];
   private gClock!: GPUBindGroup;
   private redDt!: Reducer;
@@ -347,10 +348,13 @@ export class Sim implements Simulation {
     };
     const v = (t: GPUTexture) => t.createView();
     const phi = this.mg.phi;
+    const dims = [this.n, this.n, this.nz];
+    this.pPredict?.destroy();
+    this.pUpdate?.destroy();
     [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect] = await Promise.all([
       computePipeline(d, assemble('hydro/rates.wgsl', slots), 'timestep rates'),
-      computePipeline(d, assemble('hydro/predict.wgsl', slots), 'predict'),
-      computePipeline(d, assemble('hydro/update.wgsl', slots), 'update'),
+      RegionPass.create(d, assemble('hydro/predict.wgsl', slots), 'predict', dims),
+      RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update', dims),
       computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
     ]);
     this.gPrim = [];
@@ -369,7 +373,7 @@ export class Sim implements Simulation {
         }),
       );
       this.gPredict.push(
-        bindGroup(d, this.pPredict, {
+        this.pPredict.groups({
           0: this.params,
           1: this.clock,
           2: v(this.state[p][0]),
@@ -380,7 +384,7 @@ export class Sim implements Simulation {
         }),
       );
       this.gUpdate.push(
-        bindGroup(d, this.pUpdate, {
+        this.pUpdate.groups({
           0: this.params,
           1: this.clock,
           2: v(this.state[p][0]),
@@ -554,12 +558,8 @@ export class Sim implements Simulation {
       pass.setPipeline(this.pClock);
       pass.setBindGroup(0, this.gClock);
       pass.dispatchWorkgroups(1);
-      pass.setPipeline(this.pPredict);
-      pass.setBindGroup(0, this.gPredict[p]);
-      this.dispatch(pass);
-      pass.setPipeline(this.pUpdate);
-      pass.setBindGroup(0, this.gUpdate[p]);
-      this.dispatch(pass);
+      this.pPredict.encode(pass, this.gPredict[p]);
+      this.pUpdate.encode(pass, this.gUpdate[p]);
       if (selfGravity) {
         // Keep the old potential and solve for that of the updated density (warm-started).
         pass.end();
@@ -637,14 +637,10 @@ export class Sim implements Simulation {
     });
     out.timestep = await time(reps, (pass) => this.redDt.encode(pass));
     out.predict = await time(reps, (pass) => {
-      pass.setPipeline(this.pPredict);
-      pass.setBindGroup(0, this.gPredict[p]);
-      this.dispatch(pass);
+      this.pPredict.encode(pass, this.gPredict[p]);
     });
     out.update = await time(reps, (pass) => {
-      pass.setPipeline(this.pUpdate);
-      pass.setBindGroup(0, this.gUpdate[p]);
-      this.dispatch(pass);
+      this.pUpdate.encode(pass, this.gUpdate[p]);
     });
     out.diagnostics = await time(reps, (pass) => this.redDiag.encode(pass, p));
     if (this.selfGravity) {
@@ -753,11 +749,12 @@ export class Sim implements Simulation {
       riemann: `hydro/riemann/${c.riemann}.wgsl`,
       limiter: `hydro/limiters/${c.limiter}.wgsl`,
     };
-    const pipe = await computePipeline(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', { DEBUG_FLUX: 1 });
+    // Split by region like the real pass, so faces between the two variants are checked too.
+    const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [n, n, this.nz], { DEBUG_FLUX: 1 });
     const p = this.cur;
     const o = 1 - p;
     const v = (t: GPUTexture) => t.createView();
-    const group = bindGroup(d, pipe, {
+    const group = pipe.groups({
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]),
       6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]),
@@ -767,12 +764,8 @@ export class Sim implements Simulation {
     pass.setPipeline(this.pPrim);
     pass.setBindGroup(0, this.gPrim[p]);
     this.dispatch(pass);
-    pass.setPipeline(this.pPredict);
-    pass.setBindGroup(0, this.gPredict[p]);
-    this.dispatch(pass);
-    pass.setPipeline(pipe);
-    pass.setBindGroup(0, group);
-    this.dispatch(pass);
+    this.pPredict.encode(pass, this.gPredict[p]);
+    pipe.encode(pass, group);
     pass.end();
     d.queue.submit([enc.finish()]);
     const f1 = await readTexture(d, this.state[o][0], n, 4, this.nz);
