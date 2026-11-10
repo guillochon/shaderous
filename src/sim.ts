@@ -81,6 +81,8 @@ export interface Simulation {
   encodeBrush(enc: GPUCommandEncoder, op: BrushOp): void;
   /** Call once gas has been added or removed, with the new total mass: self-gravity is re-solved. */
   massChanged(mass: number): void;
+  /** Replace the sources and sinks (at most MAX_SOURCES; a reset removes them all). */
+  setSources(list: SourceSpec[]): void;
   destroy(): void;
   /** Size of the uniform volume the renderer displays, and the pass that fills it. */
   readonly displayDims: [number, number, number];
@@ -165,6 +167,52 @@ export interface Outline {
   polygon?: number[];
 }
 
+/** Whether a point of the box (in fractions of it) lies behind an outline: as in edit/brush_core.wgsl. */
+export function outlineContains(o: Outline, x: number, y: number, z: number): boolean {
+  const m = o.matrix;
+  const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+  if (w <= 0) return false;
+  const sx = (m[0] * x + m[4] * y + m[8] * z + m[12]) / w;
+  const sy = (m[1] * x + m[5] * y + m[9] * z + m[13]) / w;
+  if (o.ellipse) {
+    const [cx, cy, hx, hy] = o.ellipse;
+    return ((sx - cx) / hx) ** 2 + ((sy - cy) / hy) ** 2 <= 1;
+  }
+  const p = o.polygon ?? [];
+  let inside = false;
+  for (let i = 0, j = p.length - 2; i < p.length; j = i, i += 2) {
+    if (p[i + 1] > sy !== p[j + 1] > sy && sx < ((p[j] - p[i]) * (sy - p[i + 1])) / (p[j + 1] - p[i + 1]) + p[i]) inside = !inside;
+  }
+  return inside;
+}
+
+/** A source or sink of gas (hydro/sources.wgsl). */
+export interface SourceSpec {
+  /** centre and radius, in fractions of the box */
+  pos: [number, number, number];
+  radius: number;
+  softness: number;
+  /** velocity of the gas a source adds; zero for one that spreads evenly */
+  vel: [number, number, number];
+  /** a source: density added per unit time at its centre */
+  rate: number;
+  /** a sink: fraction of the gas removed per unit time at its centre (0 for a source) */
+  decay: number;
+}
+
+export const MAX_SOURCES = 8;
+export const SOURCE_BYTES = 16 + 48 * MAX_SOURCES;
+
+/** Pack the Sources block. The layout must match the struct in hydro/sources.wgsl. */
+export function packSources(list: SourceSpec[]): ArrayBuffer {
+  const buf = new ArrayBuffer(SOURCE_BYTES);
+  const f = new Float32Array(buf);
+  const use = list.slice(0, MAX_SOURCES);
+  new Uint32Array(buf)[0] = use.length;
+  use.forEach((q, i) => f.set([...q.pos, q.radius, ...q.vel, q.softness, q.rate, q.decay, 0, 0], 4 + 12 * i));
+  return buf;
+}
+
 export const MAX_OUTLINE_VERTICES = 32;
 export const BRUSH_BYTES = 384;
 
@@ -220,7 +268,7 @@ export const PARAM_BYTES = 208;
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[]; refine?: number[]; solids?: boolean },
+  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; perturberGM: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -237,7 +285,7 @@ export function packParams(
   const fl = c.problem.fluff;
   f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
   u.set(x.amr ?? [0, 0, 0, 0], 32);
-  u.set([c.n, x.selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0)], 36);
+  u.set([c.n, x.selfGravity ? 1 : 0, c.gravity === 'isolated' ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -334,6 +382,8 @@ export class Sim implements Simulation {
   private gBrush: GPUBindGroup[] = [];
   /** the grid holds solid or fixed cells, so the passes must look for them */
   private solids = false;
+  private sources: GPUBuffer;
+  private nSources = 0;
 
   private constructor(gpu: Gpu, cfg: SimConfig) {
     this.device = gpu.device;
@@ -349,6 +399,7 @@ export class Sim implements Simulation {
     });
     this.bh = d.createBuffer({ size: 64, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.staging = d.createBuffer({
       size: 16 + DIAG_OPS.length * 4 + 16,
       usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
@@ -468,6 +519,7 @@ export class Sim implements Simulation {
           8: v(this.state[o][1]),
           9: v(this.pred[0]),
           10: v(this.pred[1]),
+          11: this.sources,
         }),
       );
       this.gCorrect.push(
@@ -504,6 +556,7 @@ export class Sim implements Simulation {
       selfGravity: this.selfGravity,
       perturberGM: bh ? bh.gm : 0,
       solids: this.solids,
+      sources: this.nSources > 0,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
   }
@@ -525,6 +578,8 @@ export class Sim implements Simulation {
     let mass = 0;
     let o = 0;
     this.solids = false;
+    this.nSources = 0;
+    this.device.queue.writeBuffer(this.sources, 0, packSources([]));
     for (let k = 0; k < nz; k++) {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx - half;
       for (let j = 0; j < n; j++) {
@@ -704,6 +759,12 @@ export class Sim implements Simulation {
     this.cur = 1 - this.cur;
   }
 
+  setSources(list: SourceSpec[]) {
+    this.nSources = Math.min(list.length, MAX_SOURCES);
+    this.device.queue.writeBuffer(this.sources, 0, packSources(list));
+    this.writeParams();
+  }
+
   massChanged(mass: number) {
     // The periodic solver subtracts the mean density, so it has to follow the edit.
     this.rhoMean = mass / this.cfg.problem.box ** this.cfg.ndim;
@@ -877,7 +938,7 @@ export class Sim implements Simulation {
     const group = pipe.groups({
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]),
       6: v(this.gfield),
-      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]),
+      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources,
     });
     const enc = d.createCommandEncoder();
     const pass = enc.beginComputePass();

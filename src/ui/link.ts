@@ -5,7 +5,7 @@
 // out of range in a link is ignored rather than trusted.
 import { configFor, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
 import { EOS_LABELS, type EosKind, type EosParams } from '../eos/eos';
-import { FIELDS, PROBLEMS, problemById, type GravityMode, type Problem } from '../problems';
+import { FIELDS, PROBLEMS, problemById, type Bc3, type GravityMode, type Problem } from '../problems';
 import { defaultView, type ViewState } from '../render/renderer';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 
@@ -29,7 +29,7 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux'>>;
+  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'bcLo' | 'bcHi'>>;
   eosParams: Partial<EosParams>;
   params: Record<string, number>;
   view: Partial<ViewState>;
@@ -85,6 +85,8 @@ export function encodeLink(s: LinkState): URLSearchParams {
   str('jfloor', flag(cfg.jeansFloor), flag(def.jeansFloor));
   num('jcells', cfg.jeansCells, def.jeansCells);
   str('fluxwork', flag(cfg.gravEnergyFlux), flag(def.gravEnergyFlux));
+  // Boundaries: one digit per face, the lower faces of x, y, z and then the upper ones.
+  str('bc', [...cfg.bcLo, ...cfg.bcHi].join(''), [...def.bcLo, ...def.bcHi].join(''));
   for (const p of cfg.problem.params ?? []) num(`p.${p.id}`, cfg.params[p.id], p.value);
 
   const dv = viewDefaults(cfg.problem, cfg.ndim);
@@ -148,6 +150,15 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   const jc = num('jcells', 4, 32);
   put(out.cfg, 'jeansCells', jc === undefined ? undefined : Math.round(jc));
   put(out.cfg, 'gravEnergyFlux', bool('fluxwork'));
+  const bc = q.get('bc');
+  if (bc && /^[0-3]{6}$/.test(bc)) {
+    const d = [...bc].map(Number);
+    // Periodic faces come in pairs.
+    if ([0, 1, 2].every((a) => (d[a] === 0) === (d[a + 3] === 0))) {
+      out.cfg.bcLo = d.slice(0, 3) as Bc3;
+      out.cfg.bcHi = d.slice(3) as Bc3;
+    }
+  }
   put(out.eosParams, 'gamma', num('gamma', 1, 100));
   put(out.eosParams, 'K', num('K', 0));
   put(out.eosParams, 'arad', num('arad', 0));

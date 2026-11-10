@@ -21,7 +21,7 @@ import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { AmrGravity } from './gravity';
 import { EOS_MODULES, makeEos } from '../eos/eos';
 import { cellMark } from '../problems/types';
-import { BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, packBrush, packParams, PARAM_BYTES, type BrushOp, type Diagnostics, type SimConfig, type Simulation } from '../sim';
+import { BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, MAX_SOURCES, outlineContains, packBrush, packParams, packSources, PARAM_BYTES, SOURCE_BYTES, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
 /**
@@ -97,6 +97,10 @@ export class AmrSim implements Simulation {
   private gBrush: GPUBindGroup[] = [];
   /** the grid holds solid or fixed cells, so the passes must look for them */
   private solids = false;
+  private sources: GPUBuffer;
+  private nSources = 0;
+  /** counts re-meshes made outside the usual cycle; a refinement check from before one is dropped */
+  private meshEpoch = 0;
   private rhoMean = 0;
   private staging: GPUBuffer;
   private stagingBusy = false;
@@ -174,6 +178,7 @@ export class AmrSim implements Simulation {
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.clock = d.createBuffer({ size: 16, usage: storage });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bt = d.createBuffer({ size: this.cap * BT_STRIDE * 4, usage: storage });
     this.listAll = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     this.listLeaf = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
@@ -324,7 +329,7 @@ export class AmrSim implements Simulation {
     const o = 1 - p;
     return bindGroup(this.device, pipe, {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
-      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 30: this.bt, 31: this.listLeaf,
+      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 30: this.bt, 31: this.listLeaf,
     });
   }
 
@@ -339,8 +344,19 @@ export class AmrSim implements Simulation {
       amr: [this.slotsPerSide, this.n0 / BS, this.levels, 0],
       refine: [c.refineHi, c.jeansRefine],
       solids: this.solids,
+      sources: this.nSources > 0,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
+    // The block table records what lies beyond each face of the domain: follow a change of
+    // boundary. (A face may not become periodic this way: the blocks on either side of it
+    // would have to be balanced first. The front end restarts the run for that.)
+    const tree = this.tree;
+    if (tree && (tree.bcLo.some((b, a) => b !== c.bcLo[a]) || tree.bcHi.some((b, a) => b !== c.bcHi[a]))) {
+      this.flush();
+      tree.bcLo = c.bcLo;
+      tree.bcHi = c.bcHi;
+      this.device.queue.writeBuffer(this.bt, 0, tree.table() as Int32Array<ArrayBuffer>);
+    }
   }
 
   private get selfGravity(): boolean {
@@ -507,6 +523,8 @@ export class AmrSim implements Simulation {
     const u2 = new Float32Array(BS * BS * depth * 4);
     let mass = 0;
     this.solids = false;
+    this.nSources = 0;
+    d.queue.writeBuffer(this.sources, 0, packSources([]));
     for (const b of this.tree.leaves()) {
       const dx = this.dx0 / (1 << b.level);
       let o = 0;
@@ -679,8 +697,46 @@ export class AmrSim implements Simulation {
     return done;
   }
 
-  /** Apply an editing brush to the leaf cells. Like encodeSteps(), submit before the next call. */
+  /** Whether the edge of an outline passes through a block: some of the block inside, some not. */
+  private crossesOutline(b: Block, outline: Outline): boolean {
+    const size = (BS * this.dx0) / (1 << b.level) / this.cfg.problem.box; // as a fraction of the box
+    const n = 8; // samples every two cells, faces included
+    const nz = this.cfg.ndim === 3 ? n : 0;
+    let first: boolean | undefined;
+    for (let k = 0; k <= nz; k++)
+      for (let j = 0; j <= n; j++)
+        for (let i = 0; i <= n; i++) {
+          const inside = outlineContains(outline, (b.c[0] + i / n) * size, (b.c[1] + j / n) * size, nz ? (b.c[2] + k / n) * size : 0.5);
+          if (first === undefined) first = inside;
+          else if (inside !== first) return true;
+        }
+    return false;
+  }
+
+  /**
+   * Refine the mesh to its finest level along the edge of an outline, so that an obstacle
+   * drawn with it gets the sharpest boundary the grid can hold. Each level is its own re-mesh,
+   * submitted here.
+   */
+  private refineOutline(outline: Outline) {
+    this.flush();
+    for (let level = 0; level < this.levels; level++) {
+      // Refine where the edge passes; merge nothing.
+      const ops = this.tree.adapt((b) => (b.level < this.tree.levelLimit && this.crossesOutline(b, outline) ? 1 : 0), 0.5, -1);
+      if (!ops) break;
+      this.pending = { ops };
+      this.flush();
+    }
+    this.meshEpoch++;
+  }
+
+  /**
+   * Apply an editing brush to the leaf cells. Like encodeSteps(), submit before the next call.
+   * An obstacle first refines the mesh along its edge, in command buffers of its own, so `enc`
+   * must hold nothing that depends on the mesh as it was.
+   */
   encodeBrush(enc: GPUCommandEncoder, op: BrushOp) {
+    if (op.kind === 'obstacle' && op.outline && this.levels > 0) this.refineOutline(op.outline);
     // A waiting re-mesh goes first: it replaces the tables this pass reads.
     if (this.pending) this.applyRegrid(enc);
     if (op.kind === 'obstacle' && !this.solids) {
@@ -696,6 +752,12 @@ export class AmrSim implements Simulation {
     this.cur = 1 - this.cur;
   }
 
+  setSources(list: SourceSpec[]) {
+    this.nSources = Math.min(list.length, MAX_SOURCES);
+    this.device.queue.writeBuffer(this.sources, 0, packSources(list));
+    this.writeParams();
+  }
+
   massChanged(mass: number) {
     this.rhoMean = mass / this.cfg.problem.box ** this.cfg.ndim;
     this.writeParams();
@@ -708,12 +770,13 @@ export class AmrSim implements Simulation {
     this.wantMap = false;
     this.flagInFlight = true;
     const tree = this.tree;
+    const epoch = this.meshEpoch;
     this.flagWait = this.flagStaging
       .mapAsync(GPUMapMode.READ)
       .then(() => {
         const ind = new Float32Array(this.flagStaging.getMappedRange().slice(0));
         this.flagStaging.unmap();
-        if (tree !== this.tree) return; // the run was reset meanwhile
+        if (tree !== this.tree || epoch !== this.meshEpoch) return; // the run was reset, or re-meshed by hand, meanwhile
         this.lastIndicators = ind;
         const ops = tree.adapt((b) => ind[b.slot], this.cfg.refineHi, this.cfg.refineLo);
         if (ops) this.pending = { ops };

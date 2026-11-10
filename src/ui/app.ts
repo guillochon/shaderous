@@ -4,10 +4,10 @@ import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } fr
 import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
-import { configFor, MAX_OUTLINE_VERTICES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation } from '../sim';
+import { configFor, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
-import { FIELDS, PROBLEMS, problemById, type GravityMode } from '../problems';
+import { FIELDS, PROBLEMS, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor, sampleColormap } from '../render/transfer';
 
@@ -18,6 +18,14 @@ const opt = (v: string | number, label: string) => `<option value="${v}">${label
 const field = (label: string, control: string, id = '') => `<label class="f"${id ? ` id="${id}"` : ''}><span>${label}</span>${control}</label>`;
 const select = (id: string, options: string) => `<select id="${id}">${options}</select>`;
 const number = (id: string, attrs = '') => `<input id="${id}" type="number" step="any" ${attrs} />`;
+
+// What the gas meets at a face of the box, in the order of the codes in problems/types.ts.
+const BC_KINDS = [
+  { label: 'Periodic', title: 'Gas leaving through this face comes back in through the opposite one (both faces of an axis)' },
+  { label: 'Outflow', title: 'Open: the state at the face continues beyond it, so gas may leave or enter' },
+  { label: 'Reflecting', title: 'A solid wall' },
+  { label: 'Outflow only', title: 'Open for gas leaving; nothing comes in' },
+];
 
 const RES_3D = [32, 64, 128, 256, 512];
 const RES_2D = [128, 256, 512, 1024, 2048, 4096];
@@ -88,6 +96,14 @@ side.innerHTML = `
   </details>
 
   <details>
+    <summary>Boundaries<span class="sum" id="sum-bc"></span></summary>
+    <div class="g2">
+      ${['x', 'y', 'z'].map((ax, a) => (['lo', 'hi'] as const).map((side) =>
+        field(`${ax} ${side === 'lo' ? 'lower' : 'upper'} face`, select(`bc-${side}-${a}`, BC_KINDS.map((k, i) => `<option value="${i}" title="${k.title}">${k.label}</option>`).join('')), `row-bc-${side}-${a}`)).join('')).join('')}
+    </div>
+  </details>
+
+  <details>
     <summary>Gravity<span class="sum" id="sum-grav"></span></summary>
     <div class="g3">
       ${field('Self-gravity', select('gravity', opt('off', 'Off') + opt('periodic', 'Periodic') + opt('isolated', 'Isolated')))}
@@ -136,7 +152,7 @@ const hud = $('hud');
 // --- editing tools ------------------------------------------------------------------------
 // A column of tools under the colour bar. Each paints with a soft ball (a disc in 2D) and
 // keeps its own size and softness.
-type ToolKind = BrushOp['kind'];
+type ToolKind = BrushOp['kind'] | 'source';
 const icon = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = [
   {
@@ -160,6 +176,11 @@ const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = 
     icon: icon('<path d="M2 13.5h12v-7H8.5v-4H2z" fill="currentColor" stroke="none" />'),
   },
 ];
+TOOLS.push({
+  kind: 'source', label: 'Source or sink',
+  title: 'Source: click to place one that feeds gas in evenly, or press and drag to aim it (a longer drag is faster). Hold Shift to place a sink, which takes gas away',
+  icon: icon('<circle cx="8" cy="8" r="2.3" fill="currentColor" stroke="none" /><path d="M8 1.5v2.3M8 12.2v2.3M1.5 8h2.3M12.2 8h2.3M3.4 3.4l1.6 1.6M11 11l1.6 1.6M12.6 3.4L11 5M5 11l-1.6 1.6" />'),
+});
 /** Ways of drawing an obstacle. */
 type ShapeMode = 'rect' | 'ellipse' | 'polygon';
 const SHAPES: { mode: ShapeMode; title: string; icon: string }[] = [
@@ -178,6 +199,7 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   velocity: { size: 0.08, softness: 0.5, amount: 0 },
   temperature: { size: 0.06, softness: 0.5, amount: 0 },
   obstacle: { size: 0, softness: 0, amount: 0 },
+  source: { size: 0.04, softness: 0.5, amount: 0.25 },
 };
 let tool: ToolKind | null = null;
 /** Mass tool: new gas brings no momentum of its own. */
@@ -193,6 +215,7 @@ $('tools').innerHTML =
     <button id="tool-rest" aria-pressed="true" title="p = 0 for new mass: added gas arrives at rest and shares the momentum already there, slowing the flow. Off: it arrives with the local velocity">p = 0</button>
     <div id="tool-shapes">${SHAPES.map((q) => `<button id="shape-${q.mode}" aria-pressed="false" aria-label="${q.mode}" title="${q.title}">${q.icon}</button>`).join('')}</div>
     <button id="tool-erase" aria-pressed="false" title="Erase: the shape drawn turns obstacle back into gas, at rest">Erase</button>
+    <button id="tool-clear" title="Remove every source and sink">Clear</button>
   </div>`;
 
 function syncTools() {
@@ -212,7 +235,16 @@ function syncTools() {
     return;
   }
   const q = toolParams[tool];
-  $('tp-amount-row').hidden = tool !== 'mass';
+  $('tp-amount-row').hidden = tool !== 'mass' && tool !== 'source';
+  // The same slider is the amount of a dab of mass and the flux of a source.
+  const flux = tool === 'source';
+  $('tp-amount-row').title = flux
+    ? 'Flux: how fast a source feeds gas in, or a sink takes it away. At 100% a source adds the density of the densest gas in the time the fastest signal takes to cross it'
+    : 'Gas added per click, as a share of the densest gas';
+  $('tp-amount-row').querySelector('span')!.firstChild!.textContent = flux ? 'Flux' : 'Amt';
+  $('tool-clear').hidden = !flux;
+  $('tool-clear').textContent = sources.length ? `Clear ${sources.length}` : 'Clear';
+  $<HTMLButtonElement>('tool-clear').disabled = sources.length === 0;
   $('tool-rest').hidden = tool !== 'mass';
   $('tool-rest').setAttribute('aria-pressed', String(massAtRest));
   // An obstacle is drawn as a shape, not painted with a brush.
@@ -245,6 +277,10 @@ for (const sh of SHAPES) {
     syncTools();
   });
 }
+$('tool-clear').addEventListener('click', () => {
+  clearSources();
+  syncTools();
+});
 $('tool-erase').addEventListener('click', () => {
   obstacleErase = !obstacleErase;
   syncTools();
@@ -307,6 +343,8 @@ interface Stroke {
   vRef: number;
 }
 let stroke: Stroke | null = null;
+/** The sources and sinks in the run, oldest first. A reset removes them. */
+let sources: SourceSpec[] = [];
 
 /** An obstacle being drawn, in CSS pixels from the canvas corner. */
 interface Draft {
@@ -396,6 +434,16 @@ function syncControls() {
   $<HTMLInputElement>('slicepos').value = String(view.slicePos);
   $<HTMLInputElement>('log').checked = view.log;
   $<HTMLInputElement>('opacity').value = String(view.opacity);
+  // Opacity belongs to the volume view: a slice is drawn solid.
+  $<HTMLInputElement>('opacity').disabled = two || view.mode === 'slice';
+  for (let a = 0; a < 3; a++) {
+    $<HTMLSelectElement>(`bc-lo-${a}`).value = String(cfg.bcLo[a]);
+    $<HTMLSelectElement>(`bc-hi-${a}`).value = String(cfg.bcHi[a]);
+  }
+  // A 2D run has no z faces.
+  $('row-bc-lo-2').style.display = $('row-bc-hi-2').style.display = two ? 'none' : '';
+  const kinds = [...new Set([...cfg.bcLo, ...cfg.bcHi].filter((_, i) => !two || i % 3 !== 2))];
+  $('sum-bc').textContent = kinds.length === 1 ? BC_KINDS[kinds[0]].label.toLowerCase() : 'mixed';
   $<HTMLSelectElement>('cmap').value = editor.colormap;
   $('run').textContent = running ? 'Pause' : 'Run';
   syncTools();
@@ -417,6 +465,7 @@ function syncProblemParams() {
         if (sim) {
           sim.cfg = cfg;
           sim.reset();
+          clearSources();
           finished = false;
           running = true;
           lastDiag = undefined;
@@ -474,7 +523,11 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next, link.cfg);
       Object.assign(next.eosParams, link.eosParams);
       Object.assign(next.params, link.params);
-      if (ndim === 2) next.gravity = 'off';
+      if (ndim === 2) {
+        next.gravity = 'off';
+        next.bcLo = [next.bcLo[0], next.bcLo[1], 0];
+        next.bcHi = [next.bcHi[0], next.bcHi[1], 0];
+      }
       Object.assign(view, link.view);
       if (link.auto === false) $<HTMLInputElement>('auto').checked = false;
       if (link.colormap || link.opacity) {
@@ -489,6 +542,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     stroke = null;
     draft = null;
     pendingBrush = null;
+    sources = [];
     old?.destroy();
     cfg = next;
     if (ndim === 2) view.sliceAxis = 2;
@@ -600,6 +654,7 @@ function rebuildPipelines(resetAfter = false) {
     await renderer.attach(sim);
     if (resetAfter) {
       sim.reset();
+      clearSources();
       lastDiag = undefined;
       if (finished) running = true;
     }
@@ -657,6 +712,7 @@ function bind() {
     if (!sim) return;
     sim.cfg = cfg;
     sim.reset();
+    clearSources();
     if (finished) running = true; // replay a run that had reached its end time
     finished = false;
     lastDiag = undefined;
@@ -747,7 +803,34 @@ function bind() {
     setTimeout(() => (button.textContent = 'Share'), 2000);
   });
 
-  on('mode', (el) => (view.mode = el.value as ViewState['mode']));
+  on('mode', (el) => {
+    view.mode = el.value as ViewState['mode'];
+    syncControls();
+  });
+  for (let a = 0; a < 3; a++) {
+    for (const side of ['lo', 'hi'] as const) {
+      on(`bc-${side}-${a}`, (el) => {
+        const lo = [...cfg.bcLo] as Bc3;
+        const hi = [...cfg.bcHi] as Bc3;
+        const was = lo[a] === 0;
+        (side === 'lo' ? lo : hi)[a] = +el.value;
+        // Periodic faces come in pairs: the opposite face follows into, or out of, periodic.
+        if ((lo[a] === 0) !== (hi[a] === 0)) (side === 'lo' ? hi : lo)[a] = +el.value;
+        cfg.bcLo = lo;
+        cfg.bcHi = hi;
+        if (sim && cfg.amrLevels > 0 && lo[a] === 0 && !was) {
+          // On an adaptive mesh a newly periodic axis joins blocks that were never neighbours
+          // and may differ by several levels: build the mesh again from the start.
+          sim.cfg = cfg;
+          sim.reset();
+          clearSources();
+          finished = false;
+          lastDiag = undefined;
+        } else applyParams();
+        syncControls();
+      });
+    }
+  }
   on('field', (el) => {
     view.field = +el.value;
     syncControls();
@@ -1072,6 +1155,43 @@ function draftPath(d: Draft): string {
   return `M${b.cx - b.hx} ${b.cy}a${b.hx} ${b.hy} 0 1 0 ${2 * b.hx} 0a${b.hx} ${b.hy} 0 1 0 ${-2 * b.hx} 0`;
 }
 
+/** Remove every source and sink (the simulation drops its own on a reset). */
+function clearSources() {
+  if (sources.length && sim) sim.setSources([]);
+  sources = [];
+}
+
+/** Draw the markers of the sources and sinks where they are in the current view. */
+let marksDrawn = '';
+function drawSources() {
+  let html = '';
+  if (sources.length && cfg) {
+    const m = outlineMatrix();
+    const at = (p: number[]) => {
+      const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+      return { x: (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / w, y: (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / w, w };
+    };
+    for (const q of sources) {
+      const c = at(q.pos);
+      if (!(c.w > 0)) continue; // behind the camera
+      // Size on screen: from a point one radius away along an axis in the plane of the view.
+      const e = at(q.pos.map((v, i) => v + q.radius * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
+      const r = Math.hypot(e.x - c.x, e.y - c.y);
+      const speed = Math.hypot(...q.vel);
+      let arrow = '';
+      if (speed > 0) {
+        const tip = at(q.pos.map((v, i) => v + (2.2 * q.radius * q.vel[i]) / speed));
+        const [ux, uy] = [tip.x - c.x, tip.y - c.y];
+        const len = Math.hypot(ux, uy) || 1;
+        const [nx, ny] = [ux / len, uy / len];
+        arrow = `<line x1="${c.x}" y1="${c.y}" x2="${tip.x}" y2="${tip.y}" /><path d="M${tip.x + 5 * nx} ${tip.y + 5 * ny}L${tip.x - 4 * ny} ${tip.y + 4 * nx}L${tip.x + 4 * ny} ${tip.y - 4 * nx}z" />`;
+      }
+      html += `<g class="${q.decay > 0 ? 'sink' : 'source'}"><circle cx="${c.x}" cy="${c.y}" r="${r}" />${arrow}</g>`;
+    }
+  }
+  if (html !== marksDrawn) $('marks').innerHTML = marksDrawn = html;
+}
+
 /** Outline of the brush under the pointer, and the arrow of a velocity stroke. */
 function drawBrush(px?: number, py?: number) {
   const svg = $('brush');
@@ -1087,7 +1207,8 @@ function drawBrush(px?: number, py?: number) {
     return;
   }
   const kind = stroke?.kind ?? tool;
-  const drag = stroke?.kind === 'velocity';
+  // A velocity, or the aim of a source, is dragged out from where the press began.
+  const drag = stroke?.kind === 'velocity' || (stroke?.kind === 'source' && !stroke.shift);
   const x = drag ? stroke!.x0 : (px ?? stroke?.x ?? 0);
   const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
   const { scale } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
@@ -1155,7 +1276,7 @@ function endStroke(apply: boolean) {
   if (!stroke) return;
   stroke.released = true;
   // A velocity is set on letting go; a cancelled drag sets nothing.
-  if (!apply && stroke.kind === 'velocity') stroke = null;
+  if (!apply && (stroke.kind === 'velocity' || stroke.kind === 'source')) stroke = null;
   drawBrush();
 }
 
@@ -1164,6 +1285,23 @@ function advanceStroke(now: number) {
   const s = stroke;
   if (!s || !sim || !s.ready) return;
   const q = toolParams[s.kind];
+  if (s.kind === 'source') {
+    if (!s.released) return;
+    stroke = null;
+    const at = locate(s.x0, s.y0, s.depth);
+    const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
+    const len = Math.hypot(dx, dy);
+    // A drag aims the source; a click (or a drag of a few pixels) leaves it feeding gas in at rest.
+    const speed = s.shift || len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
+    const vel = [0, 1, 2].map((i) => (speed ? (speed * (dx * at.right[i] + dy * at.up[i])) / len : 0)) as Vec3;
+    // The flux is measured against the densest gas and the time a signal takes to cross the source.
+    const perTime = (q.amount * (s.vRef || 1)) / (q.size * cfg.problem.box);
+    sources.push({ pos: at.pos, radius: q.size, softness: q.softness, vel, rate: s.shift ? 0 : perTime * s.rhoMax, decay: s.shift ? perTime : 0 });
+    if (sources.length > MAX_SOURCES) sources.shift(); // the oldest makes room
+    sim.setSources(sources);
+    syncTools();
+    return;
+  }
   const base = { kind: s.kind, radius: q.size, softness: q.softness, amount: 0, vel: [0, 0, 0] as Vec3 };
   if (s.kind === 'velocity') {
     if (!s.released) return;
@@ -1353,6 +1491,7 @@ function tick(now: number) {
   stepsSubmitted += taken;
   if (taken < steps && running) nsub = Math.max(1, taken);
   renderer.encode(enc, s, view);
+  drawSources();
   gpu.device.queue.submit([enc.finish()]);
   s.submitted();
 

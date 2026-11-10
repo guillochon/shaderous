@@ -70,8 +70,8 @@ export class BlockTree {
     readonly nr: number,
     readonly maxLevel: number,
     readonly cap: number,
-    readonly bcLo: number[],
-    readonly bcHi: number[],
+    public bcLo: number[],
+    public bcHi: number[],
   ) {
     this.nchild = 1 << ndim;
     this.levelLimit = maxLevel;

@@ -16,7 +16,8 @@ struct Params {
   n: u32,                // cells per side along x and y (level 0 on block grids)
   grav_on: u32,
   grav_bc: u32,          // 0 periodic, 1 isolated
-  flags: u32,            // bit 0: flux-form gravitational work; bit 1: the grid holds solid or fixed cells
+  flags: u32,            // bit 0: flux-form gravitational work; bit 1: the grid holds solid or fixed
+                         //   cells; bit 2: there are sources or sinks (hydro/sources.wgsl)
   dx: f32,               // cell size (level 0 on block grids)
   cfl: f32,
   G: f32,
@@ -45,6 +46,9 @@ struct Clock {
 // Neither kind is ever updated. Passes only look when this says there is something to find.
 fn has_solids() -> bool {
   return (P.flags & 2u) != 0u;
+}
+fn has_sources() -> bool {
+  return (P.flags & 4u) != 0u;
 }
 
 // Size of the cell this invocation is working on. Every entry point sets it first: it is P.dx
