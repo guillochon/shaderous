@@ -255,12 +255,20 @@ export class AmrSim implements Simulation {
 
   // ---------------------------------------------------------------- initial conditions
 
-  /** Primitive (rho, p) on a block's cells plus one layer around it, from the analytic setup. */
+  /**
+   * Refinement indicator of a block from the analytic setup, for building the initial mesh:
+   * the same normalised jump across two cell widths that the GPU pass measures, but sampled
+   * more finely than the block's own cells. A feature smaller than a coarse cell (a point
+   * explosion, say) would otherwise fall between cell centres and never trigger refinement.
+   */
   private indicator(b: Block, fn: (x: number, y: number, z: number) => { rho: number; p: number }): number {
     const three = this.cfg.ndim === 3;
     const dx = this.dx0 / (1 << b.level);
     const half = this.cfg.problem.box / 2;
-    const m = BS + 2;
+    // Samples per cell: down to the finest level, within a budget per block.
+    const sub = Math.min(1 << (this.levels - b.level), three ? 2 : 4);
+    const h = dx / sub;
+    const m = (BS + 2) * sub; // one cell of margin on each side
     const mz = three ? m : 1;
     const rho = new Float64Array(m * m * mz);
     const pr = new Float64Array(m * m * mz);
@@ -268,21 +276,21 @@ export class AmrSim implements Simulation {
       for (let j = 0; j < m; j++)
         for (let i = 0; i < m; i++) {
           const w = fn(
-            (b.c[0] * BS + i - 0.5) * dx - half,
-            (b.c[1] * BS + j - 0.5) * dx - half,
-            three ? (b.c[2] * BS + k - 0.5) * dx - half : 0,
+            b.c[0] * BS * dx + (i - sub + 0.5) * h - half,
+            b.c[1] * BS * dx + (j - sub + 0.5) * h - half,
+            three ? b.c[2] * BS * dx + (k - sub + 0.5) * h - half : 0,
           );
           rho[(k * m + j) * m + i] = w.rho;
           pr[(k * m + j) * m + i] = w.p;
         }
     let ind = 0;
     const jump = (q: Float64Array, a: number, s: number) => Math.abs(q[a + s] - q[a - s]) / (q[a + s] + q[a - s]);
-    for (let k = three ? 1 : 0; k < (three ? m - 1 : 1); k++)
-      for (let j = 1; j < m - 1; j++)
-        for (let i = 1; i < m - 1; i++) {
+    for (let k = three ? sub : 0; k < (three ? m - sub : 1); k++)
+      for (let j = sub; j < m - sub; j++)
+        for (let i = sub; i < m - sub; i++) {
           const a = (k * m + j) * m + i;
-          ind = Math.max(ind, jump(rho, a, 1), jump(pr, a, 1), jump(rho, a, m), jump(pr, a, m));
-          if (three) ind = Math.max(ind, jump(rho, a, m * m), jump(pr, a, m * m));
+          ind = Math.max(ind, jump(rho, a, sub), jump(pr, a, sub), jump(rho, a, sub * m), jump(pr, a, sub * m));
+          if (three) ind = Math.max(ind, jump(rho, a, sub * m * m), jump(pr, a, sub * m * m));
         }
     return ind;
   }
