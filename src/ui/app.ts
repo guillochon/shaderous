@@ -1,6 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
-import { decodeLink, encodeLink, viewDefaults, type LinkOverrides } from './link';
+import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { configFor, type Diagnostics, type LimiterKind, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
@@ -101,7 +101,7 @@ side.innerHTML = `
     <div id="diag"><dl></dl><dl></dl></div>
   </details>
 
-  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit, wheel or pinch to zoom<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html">Validation suite</a> &middot; drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 // On a phone the controls are a sheet under the simulation, closed until asked for.
@@ -283,7 +283,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next, rest);
     } else {
       const dv = viewDefaults(problem, ndim);
-      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch });
+      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5 });
     }
     if (link) {
       // Settings carried by a shared link, on top of the preset's defaults.
@@ -515,6 +515,28 @@ function bind() {
     const [a, b] = [...pointers.values()];
     return Math.hypot(a.x - b.x, a.y - b.y);
   };
+  // A slice (always, in a 2D run) is panned and zoomed in its plane instead of orbited.
+  const flat = () => view.mode === 'slice' || cfg?.ndim === 2;
+  /** Screen pixels across the whole slice at zoom 1; 0.94 is the margin in slice.wgsl. */
+  const span = () => Math.max(1, Math.min(canvas.clientWidth, canvas.clientHeight) * 0.94);
+  const clampPan = () => {
+    const h = 0.5 / view.zoom;
+    view.cx = Math.min(1 - h, Math.max(h, view.cx));
+    view.cy = Math.min(1 - h, Math.max(h, view.cy));
+  };
+  const zoomAt = (clientX: number, clientY: number, factor: number) => {
+    const r = canvas.getBoundingClientRect();
+    const sx = (clientX - r.left - r.width / 2) / span();
+    const sy = -(clientY - r.top - r.height / 2) / span();
+    const z = Math.min(MAX_ZOOM, Math.max(1, view.zoom * factor));
+    view.cx += sx * (1 / view.zoom - 1 / z);
+    view.cy += sy * (1 / view.zoom - 1 / z);
+    view.zoom = z;
+    clampPan();
+  };
+  canvas.addEventListener('dblclick', () => {
+    if (flat()) [view.zoom, view.cx, view.cy] = [1, 0.5, 0.5];
+  });
   canvas.addEventListener('pointerdown', (e) => {
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     canvas.setPointerCapture(e.pointerId);
@@ -527,7 +549,17 @@ function bind() {
     if (!last) return;
     const before = pointers.size === 2 ? spread() : 0;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pointers.size === 1) {
+    if (flat()) {
+      // Slice: the point under the pointer (or under the middle of a pinch) stays under it.
+      const share = pointers.size === 2 ? 0.5 : 1;
+      const k = share / (span() * view.zoom);
+      view.cx -= (e.clientX - last.x) * k;
+      view.cy += (e.clientY - last.y) * k;
+      if (pointers.size === 2 && before > 0) {
+        const [a, b] = [...pointers.values()];
+        zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, spread() / before);
+      } else clampPan();
+    } else if (pointers.size === 1) {
       view.yaw -= (e.clientX - last.x) * 0.006;
       view.pitch = Math.min(1.5, Math.max(-1.5, view.pitch + (e.clientY - last.y) * 0.006));
     } else if (pointers.size === 2 && before > 0) {
@@ -538,7 +570,8 @@ function bind() {
     'wheel',
     (e) => {
       e.preventDefault();
-      view.dist = Math.min(6, Math.max(0.9, view.dist * Math.exp(e.deltaY * 0.001)));
+      if (flat()) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
+      else view.dist = Math.min(6, Math.max(0.9, view.dist * Math.exp(e.deltaY * 0.001)));
     },
     { passive: false },
   );

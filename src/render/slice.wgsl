@@ -8,7 +8,8 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let fit = 0.94;
   var st = in.uv;
   if (C.p.y > 1.0) { st.x *= C.p.y; } else { st.y /= C.p.y; }
-  st = st / fit * 0.5 + 0.5;
+  // Zoom and pan: C.r.zw is the point of the slice at the centre of the view.
+  st = st / fit * 0.5 / C.r.y + C.r.zw;
   if (any(st < vec2<f32>(0.0)) || any(st >= vec2<f32>(1.0))) { return vec4<f32>(BG, 1.0); }
 
   let n = C.q.z;

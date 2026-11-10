@@ -16,6 +16,10 @@ export interface ViewState {
   yaw: number;
   pitch: number;
   dist: number;
+  /** Slice view: magnification (1 fits the box) and the point of the slice at the view centre. */
+  zoom: number;
+  cx: number;
+  cy: number;
   /** Outline the blocks of an adaptive mesh in the slice view. */
   showBlocks: boolean;
 }
@@ -32,6 +36,9 @@ export const defaultView = (): ViewState => ({
   yaw: 0.7,
   pitch: 0.45,
   dist: 2.6,
+  zoom: 1,
+  cx: 0.5,
+  cy: 0.5,
   showBlocks: true,
 });
 
@@ -161,7 +168,7 @@ export class Renderer {
         // The field of view applies to the shorter side, so the box always fits.
         Math.tan(0.35) / Math.min(aspect, 1), aspect, v.opacity, samples,
         v.sliceAxis, v.slicePos, nx, nz,
-        v.showBlocks ? 1 : 0, 0, 0, 0,
+        v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,
       ]),
     );
 

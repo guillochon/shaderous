@@ -9,6 +9,9 @@ import { FIELDS, PROBLEMS, problemById, type GravityMode, type Problem } from '.
 import { defaultView, type ViewState } from '../render/renderer';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 
+/** Largest magnification of the slice view. */
+export const MAX_ZOOM = 64;
+
 /** What a fresh visit shows. */
 export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 1024 };
 
@@ -48,9 +51,9 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'sliceAxis', 'slicePos', 'opacity', 'yaw', 'pitch', 'dist'] as const;
+const VIEW_NUMBERS = ['field', 'sliceAxis', 'slicePos', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy'] as const;
 const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', sliceAxis: 'axis', slicePos: 'slice', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist',
+  field: 'field', sliceAxis: 'axis', slicePos: 'slice', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy',
 };
 
 export function encodeLink(s: LinkState): URLSearchParams {
@@ -163,6 +166,9 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.view, 'yaw', num('yaw'));
   put(out.view, 'pitch', num('pitch', -1.5, 1.5));
   put(out.view, 'dist', num('dist', 0.9, 6));
+  put(out.view, 'zoom', num('zoom', 1, MAX_ZOOM));
+  put(out.view, 'cx', num('cx', 0, 1));
+  put(out.view, 'cy', num('cy', 0, 1));
   put(out.view, 'log', bool('log'));
   put(out.view, 'showBlocks', bool('blocks'));
   const lo = num('lo');
