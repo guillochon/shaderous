@@ -64,6 +64,7 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 #include "hydro/flux.wgsl"
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
+#include "hydro/damping.wgsl"
 #include <cooling>
 #include "hydro/cooling.wgsl"
 
@@ -138,6 +139,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);
   if (has_sources()) { nw = apply_sources(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt); }
+  nw = apply_damping(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt);
   nw = apply_cooling(nw, clock.dt);
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);

@@ -14,7 +14,43 @@ import { all, OUTFLOW, type PointMass, type Problem } from './types';
 //
 // In 2D the density is the disk's surface density. In 3D the disk has a Gaussian vertical
 // profile of scale height cs / Omega.
-export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3 };
+//
+// Beyond r = `rDamp` the gas is relaxed toward the disk as it started (hydro/damping.wgsl), at
+// a rate that rises from 0 there to once per 0.3 local orbital periods at the box's edge and
+// stays so into the corners. The outer disk is then a reservoir that viscosity draws on, and
+// the outflow boundaries never meet gas that has spread out to them: without it, gas flowed in
+// at the corners, the disk grew to a fifth of the binary's mass, and its pull threw the binary
+// out of the box.
+export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3, rDamp: 4.5 };
+
+/** A number as a WGSL f32 literal. */
+const f32 = (v: number) => (Number.isInteger(v) ? `${v}.0` : String(v));
+
+/** The disk's initial surface density at radius r (also its density in 2D). */
+const surface = (r: number) => {
+  const { rCavity, sigma0, floor, box } = BINARY;
+  return sigma0 * (Math.exp(-((rCavity / r) ** 4)) * Math.exp(-((r / (0.42 * box)) ** 8)) + floor);
+};
+
+/** The same disk, in WGSL, as the damping zone's target. Must match init() below. */
+const DAMPING = `const DAMPING = true;
+fn damping_target(x: vec3<f32>) -> DampTarget {
+  let half = ${f32(BINARY.box / 2)};
+  let r = max(length(x.xy), 1e-6);
+  let ramp = clamp((r - ${f32(BINARY.rDamp)}) / (half - ${f32(BINARY.rDamp)}), 0.0, 1.0);
+  if (ramp <= 0.0) { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }
+  let edge = min(r, half);
+  let rate = ramp * ramp * pow(edge, -1.5) / (0.6 * 3.14159265);
+  let sigma = ${f32(BINARY.sigma0)} * (exp(-pow(${f32(BINARY.rCavity)} / r, 4.0)) * exp(-pow(r / ${f32(0.42 * BINARY.box)}, 8.0)) + ${f32(BINARY.floor)});
+  let v = r / pow(r * r + 0.25, 0.75);
+  var rho = sigma;
+  if (P.dims.z > 1u) {
+    let h = max(${f32(BINARY.cs)} * r / v, 2.0 * g_dx);
+    rho = sigma / (2.50662827 * h) * exp(-x.z * x.z / (2.0 * h * h)) + ${f32(BINARY.sigma0 * BINARY.floor / BINARY.box)};
+  }
+  return DampTarget(rate, rho, vec3<f32>(-v * x.y / r, v * x.x / r, 0.0), ${f32(BINARY.cs * BINARY.cs)} * rho);
+}
+`;
 
 /** The two masses at pericenter, on the x axis, orbiting counter-clockwise about the origin. */
 export function binaryMasses(q: number, ecc: number, soft: number): PointMass[] {
@@ -44,6 +80,7 @@ export const binary: Problem = {
   tEnd: Infinity,
   rhoFloor: 1e-9,
   viscosity: BINARY.nu,
+  damping: DAMPING,
   supports2d: true,
   view: { field: 0, log: true, mode: 'slice', axis: 2, pitch: 1.15 },
   params: [
@@ -54,12 +91,11 @@ export const binary: Problem = {
   // Softening and sink are at least two cells across, or the grid cannot see them.
   masses: (p, _G, dx) => binaryMasses(p.q, p.ecc, Math.max(p.soft, 2 * dx)),
   init: (n, _eos, ndim) => {
-    const { cs, rCavity, sigma0, floor, box } = BINARY;
-    const rOut = 0.42 * box;
+    const { cs, sigma0, floor, box } = BINARY;
     const dx = box / n;
     return (x, y, z) => {
       const r = Math.max(Math.hypot(x, y), 1e-6);
-      const sigma = sigma0 * (Math.exp(-((rCavity / r) ** 4)) * Math.exp(-((r / rOut) ** 8)) + floor);
+      const sigma = surface(r);
       // Circular speed about the total mass, flattened inside the binary's own orbit.
       const v = r / Math.pow(r * r + 0.25, 0.75);
       let rho = sigma;

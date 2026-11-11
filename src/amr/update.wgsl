@@ -118,6 +118,7 @@ fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
 #include "hydro/flux.wgsl"
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
+#include "hydro/damping.wgsl"
 #include <cooling>
 #include "hydro/cooling.wgsl"
 
@@ -328,6 +329,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     nw = NewState(vec4<f32>(rho, mom), vec4<f32>(E, eint, nw.u2.z, 0.0));
   }
   if (has_sources()) { nw = apply_sources(nw, blk_pos(slot, l) / P.box + 0.5, g_dt); }
+  nw = apply_damping(nw, blk_pos(slot, l) / P.box + 0.5, g_dt);
   nw = apply_cooling(nw, g_dt);
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);

@@ -100,6 +100,12 @@ export interface Problem {
   /** Optically thin cooling switched on by default, and its parameters. */
   cooling?: CoolingKind;
   coolParams?: Partial<CoolingParams>;
+  /**
+   * A damping zone (hydro/damping.wgsl): WGSL defining `const DAMPING = true;` and
+   * `fn damping_target(x: vec3<f32>) -> DampTarget`, the state the gas at `x` (relative to the
+   * box center) is relaxed toward and how fast.
+   */
+  damping?: string;
   /** Kinematic viscosity and thermal conduction switched on by default (see SimConfig). */
   viscosity?: number;
   conductivity?: number;

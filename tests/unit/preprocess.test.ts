@@ -3,6 +3,7 @@ import { COOLING_MODULES } from '../../src/cooling/cooling';
 import { preprocess } from '../../src/gpu/preprocess';
 import { assemble, shaderFiles } from '../../src/gpu/shaders';
 import { EOS_MODULES } from '../../src/eos/eos';
+import { binary } from '../../src/problems/binary';
 
 describe('shader preprocessor', () => {
   const files = {
@@ -52,6 +53,7 @@ describe('shader assembly', () => {
                 eos, riemann: `hydro/riemann/${riemann}.wgsl`, limiter: `hydro/limiters/${limiter}.wgsl`, cooling,
                 bins: `amr/bins_${bins}.wgsl`, mid: `amr/mid_${bins}.wgsl`,
                 diffusion: 'const VISCOSITY = true;\nconst CONDUCTION = true;\n',
+                damping: binary.damping!,
               };
               for (const entry of ['hydro/rates.wgsl', 'hydro/update.wgsl', 'amr/update.wgsl', 'amr/assemble.wgsl', 'amr/predict.wgsl', 'gravity/correct.wgsl', 'amr/correct.wgsl']) {
                 const src = assemble(entry, slots);

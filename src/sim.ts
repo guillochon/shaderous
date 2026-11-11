@@ -212,8 +212,12 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     cooling: COOLING_MODULES[c.cooling],
     // Which diffusive fluxes are compiled in (hydro/diffusion.wgsl); their strengths are in P.diff.
     diffusion: `const VISCOSITY = ${c.viscosity > 0};\nconst CONDUCTION = ${conducts(c)};\n`,
+    // The preset's damping zone (hydro/damping.wgsl), or none.
+    damping: c.problem.damping ?? NO_DAMPING,
   };
 }
+
+const NO_DAMPING = 'const DAMPING = false;\nfn damping_target(x: vec3<f32>) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n';
 
 /** Thermal conduction is on: it needs a coefficient and an equation of state with an energy. */
 export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && c.eos !== 'barotropic';
