@@ -1042,7 +1042,23 @@ export class AmrSim implements Simulation {
     return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a)) * PAD + NG];
   }
 
+  private meshVersion = 0;
+  private boxes: { version: number; boxes: Float32Array } | null = null;
+  blockBoxes() {
+    if (this.boxes?.version !== this.meshVersion) {
+      const leaves = this.tree.leaves();
+      const out = new Float32Array(4 * leaves.length);
+      leaves.forEach((b, i) => {
+        const size = (BS * this.dx0) / (1 << b.level) / this.cfg.problem.box;
+        out.set([b.c[0] * size, b.c[1] * size, b.c[2] * size, size], 4 * i);
+      });
+      this.boxes = { version: this.meshVersion, boxes: out };
+    }
+    return this.boxes;
+  }
+
   private uploadTree() {
+    this.meshVersion++;
     const d = this.device;
     const { all, leaves, byLevel } = this.tree.lists();
     this.nAll = all.length;

@@ -1,6 +1,8 @@
 import type { Eos, EosKind, EosParams } from '../eos/eos';
 import type { StarSpec } from './settle';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
+import type { UnitSystem } from '../units/units';
+import type { Composition } from '../units/composition';
 
 export interface Prim {
   rho: number;
@@ -97,6 +99,14 @@ export interface Problem {
   bcHi: Bc3;
   gravity: GravityMode;
   G: number;
+  /**
+   * What one code unit of length, mass and time is in SI, for a setup that stands for
+   * something real (units/units.ts). Without it the problem is scale free and shown in code
+   * units. With it, `G` should be codeG(units).
+   */
+  units?: UnitSystem;
+  /** What the gas is made of (default: solar, fully ionized); sets the kelvin scale. */
+  composition?: Composition;
   box: number; // side length; the domain is [-box/2, box/2]^3
   tEnd: number;
   rhoFloor?: number;

@@ -34,8 +34,81 @@ export interface ViewState {
   zoom: number;
   cx: number;
   cy: number;
-  /** Outline the blocks of an adaptive mesh in the slice view. */
+  /** Outline the blocks of an adaptive mesh, in the slice view and the volume view. */
   showBlocks: boolean;
+}
+
+/** Floats per line vertex: position (box units, centered), color with alpha. */
+const LINE_FLOATS = 7;
+const BLOCK_COLOR = [0.75, 0.8, 0.9, 0.22];
+/** Guides through a tool, one color per axis. */
+const GUIDE_COLORS = [
+  [1, 0.42, 0.42, 0.85],
+  [0.45, 0.9, 0.5, 0.85],
+  [0.45, 0.65, 1, 0.85],
+];
+
+/**
+ * Edges of a set of axis-aligned boxes (lo xyz and size, in fractions of the box), as line
+ * vertices; an edge two blocks share is drawn once.
+ */
+export function boxEdges(boxes: Float32Array): Float32Array<ArrayBuffer> {
+  const seen = new Set<string>();
+  const out: number[] = [];
+  for (let i = 0; i + 3 < boxes.length; i += 4) {
+    const [x, y, z, s] = [boxes[i], boxes[i + 1], boxes[i + 2], boxes[i + 3]];
+    for (let a = 0; a < 3; a++) {
+      const b = (a + 1) % 3;
+      const c = (a + 2) % 3;
+      for (let k = 0; k < 4; k++) {
+        const lo = [x, y, z];
+        lo[b] += k & 1 ? s : 0;
+        lo[c] += k & 2 ? s : 0;
+        const hi = lo.slice();
+        hi[a] += s;
+        const key = `${a}:${lo.map((v) => Math.round(v * 65536)).join(',')}:${Math.round(s * 65536)}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push(lo[0] - 0.5, lo[1] - 0.5, lo[2] - 0.5, ...BLOCK_COLOR, hi[0] - 0.5, hi[1] - 0.5, hi[2] - 0.5, ...BLOCK_COLOR);
+      }
+    }
+  }
+  return new Float32Array(out);
+}
+
+/**
+ * Guides through a point (in fractions of the box): a line along each axis from face to face,
+ * and a small square where it meets each face.
+ */
+export function guideLines(p: [number, number, number]): Float32Array<ArrayBuffer> {
+  const out: number[] = [];
+  const push = (q: number[], col: number[]) => out.push(q[0] - 0.5, q[1] - 0.5, q[2] - 0.5, ...col);
+  const h = 0.015;
+  for (let a = 0; a < 3; a++) {
+    const col = GUIDE_COLORS[a];
+    const ends = [0, 1].map((f) => {
+      const q = p.slice();
+      q[a] = f;
+      return q;
+    });
+    push(ends[0], col);
+    push(ends[1], col);
+    const b = (a + 1) % 3;
+    const c = (a + 2) % 3;
+    for (const e of ends) {
+      const corner = (i: number) => {
+        const q = e.slice();
+        q[b] += i === 1 || i === 2 ? h : -h;
+        q[c] += i >= 2 ? h : -h;
+        return q;
+      };
+      for (let i = 0; i < 4; i++) {
+        push(corner(i), col);
+        push(corner((i + 1) % 4), col);
+      }
+    }
+  }
+  return new Float32Array(out);
 }
 
 export const defaultView = (): ViewState => ({
@@ -84,6 +157,13 @@ export class Renderer {
   private sampler: GPUSampler;
   private pVolume!: GPURenderPipeline;
   private pSlice!: GPURenderPipeline;
+  private pLines!: GPURenderPipeline;
+  private gLines!: GPUBindGroup;
+  private lineBuf: GPUBuffer | null = null;
+  /** Block outline last uploaded: the simulation and the version of its mesh. */
+  private blocksOf: { sim: Simulation; version: number; count: number } | null = null;
+  /** Where the guides through a tool cross (in fractions of the box), or null for none. */
+  guides: [number, number, number] | null = null;
   private gVolume!: GPUBindGroup;
   private gSlice!: GPUBindGroup;
   private vol?: GPUTexture;
@@ -138,11 +218,37 @@ export class Renderer {
         primitive: { topology: 'triangle-list' },
       });
     };
-    [this.pVolume, this.pSlice, this.pPick] = await Promise.all([
+    const lines = this.device.createShaderModule({ code: assemble('render/lines.wgsl'), label: 'lines' });
+    [this.pVolume, this.pSlice, this.pPick, this.pLines] = await Promise.all([
       make('render/raymarch.wgsl'),
       make('render/slice.wgsl'),
       computePipeline(this.device, assemble('render/pick.wgsl'), 'pick'),
+      this.device.createRenderPipelineAsync({
+        label: 'lines',
+        layout: 'auto',
+        vertex: {
+          module: lines,
+          entryPoint: 'line_vs',
+          buffers: [{
+            arrayStride: LINE_FLOATS * 4,
+            attributes: [{ shaderLocation: 0, offset: 0, format: 'float32x3' }, { shaderLocation: 1, offset: 12, format: 'float32x4' }],
+          }],
+        },
+        fragment: {
+          module: lines,
+          entryPoint: 'line_fs',
+          targets: [{
+            format: this.format,
+            blend: {
+              color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+              alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
+            },
+          }],
+        },
+        primitive: { topology: 'line-list' },
+      }),
     ]);
+    this.gLines = bindGroup(this.device, this.pLines, { 0: this.cam });
   }
 
   setTransfer(rgba: Uint8Array<ArrayBuffer>) {
@@ -304,6 +410,45 @@ export class Renderer {
     rp.setPipeline(volume ? this.pVolume : this.pSlice);
     rp.setBindGroup(0, volume ? this.gVolume : this.gSlice);
     rp.draw(3);
+    if (volume) this.drawLines(rp, sim, v.showBlocks);
     rp.end();
+  }
+
+  /** Volume view: the outline of the mesh's blocks, then the guides through a tool. */
+  private drawLines(rp: GPURenderPassEncoder, sim: Simulation, blocks: boolean) {
+    const mesh = blocks ? sim.blockBoxes?.() : null;
+    if (mesh && (this.blocksOf?.sim !== sim || this.blocksOf.version !== mesh.version)) {
+      const edges = boxEdges(mesh.boxes);
+      this.reserveLines(edges.length + guideLines([0, 0, 0]).length);
+      this.device.queue.writeBuffer(this.lineBuf!, 0, edges);
+      this.blocksOf = { sim, version: mesh.version, count: edges.length / LINE_FLOATS };
+    }
+    // The guides go after the block outline, which stays in the buffer while it is hidden.
+    const base = this.blocksOf?.sim === sim ? this.blocksOf.count : 0;
+    const guides = this.guides ? guideLines(this.guides) : null;
+    if (guides) {
+      this.reserveLines(base * LINE_FLOATS + guides.length);
+      this.device.queue.writeBuffer(this.lineBuf!, base * LINE_FLOATS * 4, guides);
+    }
+    if (!(mesh && base) && !guides) return;
+    rp.setPipeline(this.pLines);
+    rp.setBindGroup(0, this.gLines);
+    rp.setVertexBuffer(0, this.lineBuf!);
+    if (mesh && base) rp.draw(base);
+    if (guides) rp.draw(guides.length / LINE_FLOATS, 1, base);
+  }
+
+  /** Room for `floats` floats of line vertices, keeping what the buffer holds. */
+  private reserveLines(floats: number) {
+    const bytes = floats * 4;
+    if (this.lineBuf && this.lineBuf.size >= bytes) return;
+    const next = this.device.createBuffer({ size: Math.max(4096, 2 * bytes), usage: GPUBufferUsage.VERTEX | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC });
+    if (this.lineBuf) {
+      const enc = this.device.createCommandEncoder();
+      enc.copyBufferToBuffer(this.lineBuf, 0, next, 0, this.lineBuf.size);
+      this.device.queue.submit([enc.finish()]);
+      this.lineBuf.destroy();
+    }
+    this.lineBuf = next;
   }
 }

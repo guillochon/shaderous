@@ -180,7 +180,7 @@ $('colorbar').innerHTML = `
   <div class="cb-checks">
     <label class="check" title="The range follows the data"><input id="auto" type="checkbox" checked />Auto</label>
     <label class="check" title="Logarithmic color scale"><input id="log" type="checkbox" />Log</label>
-    <label class="check" title="Outline the blocks of an adaptive mesh in the slice view"><input id="blocks" type="checkbox" checked />Blocks</label>
+    <label class="check" title="Outline the blocks of an adaptive mesh, in the slice and the volume view"><input id="blocks" type="checkbox" checked />Blocks</label>
   </div>
   <select id="cmap" title="Color map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
   <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="1" max="300" step="1" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
@@ -1727,6 +1727,18 @@ function drawSources() {
   if (html !== marksDrawn) $('marks').innerHTML = marksDrawn = html;
 }
 
+/** Center of the brush last drawn (in fractions of the box), for the guides through it. */
+let guideAt: Vec3 | null = null;
+
+/**
+ * Volume view: guides along x, y and z through the center of the brush on show, so it can be
+ * placed in depth. Called once per frame.
+ */
+function updateGuides() {
+  const on = !!tool && tool !== 'obstacle' && tool !== 'query' && !!cfg && cfg.ndim === 3 && !flatView() && $('brush').style.display !== 'none';
+  renderer.guides = on ? guideAt : null;
+}
+
 /** Outline of the brush under the pointer, and the arrow of a velocity stroke. */
 function drawBrush(px?: number, py?: number) {
   const svg = $('brush');
@@ -1746,7 +1758,8 @@ function drawBrush(px?: number, py?: number) {
   const drag = stroke?.kind === 'velocity' || stroke?.kind === 'source' || stroke?.kind === 'star' || (stroke?.kind === 'sink' && sinkHasMass());
   const x = drag ? stroke!.x0 : (px ?? stroke?.x ?? 0);
   const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
-  const { scale } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
+  const { scale, pos } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
+  guideAt = pos;
   svg.style.display = 'block';
   // Pressed: the tool is acting (or, for a velocity, being aimed). Shift takes away.
   const active = !!stroke && !stroke.released;
@@ -2193,6 +2206,7 @@ function tick(now: number) {
   const taken = steps ? s.encodeSteps(enc, steps) : 0;
   stepsSubmitted += taken;
   if (taken < steps && running) nsub = Math.max(1, taken);
+  updateGuides();
   renderer.encode(enc, s, view);
   drawSources();
   gpu.device.queue.submit([enc.finish()]);

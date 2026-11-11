@@ -192,6 +192,11 @@ export interface Simulation {
   fieldResources(parity: number): Record<number, GPUBuffer | GPUTextureView>;
   /** Extra text for the status line. */
   status(): string;
+  /**
+   * Adaptive mesh: the leaf blocks, each as the corner nearest the origin and the side (four
+   * numbers, in fractions of the box), and a version that changes whenever they do.
+   */
+  blockBoxes?(): { version: number; boxes: Float32Array };
 }
 
 export function configFor(problem: Problem, n: number, over: Partial<SimConfig> = {}): SimConfig {
