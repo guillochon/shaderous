@@ -4,6 +4,7 @@ import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } fr
 import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
+import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
@@ -145,6 +146,7 @@ side.innerHTML = `
   <details open>
     <summary>Diagnostics</summary>
     <div id="diag"><dl></dl><dl></dl></div>
+    <div class="io diag-io"><button id="export-diag" title="Save every diagnostics readout of this run (one row per readout) as a CSV file">Export diagnostics</button></div>
   </details>
 
   <footer><a href="validate.html">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
@@ -1064,6 +1066,7 @@ function bind() {
   });
 
   $('export').addEventListener('click', () => exportState());
+  $('export-diag').addEventListener('click', () => exportDiagnostics());
   const picker = $<HTMLInputElement>('import-file');
   $('import').addEventListener('click', () => picker.click());
   picker.addEventListener('change', () => {
@@ -1711,50 +1714,108 @@ function liveText(parent: HTMLElement): (v: string) => void {
   };
 }
 
-// [label, tooltip]; the first seven fill the left column, the rest the right.
-const DIAG_ROWS: [string, string][] = [
-  ['t', 'Time'], ['dt', 'Timestep'], ['steps', 'Steps taken'], ['mass', 'Total mass'],
-  ['Mach', 'Maximum Mach number'], ['floor', 'Cells at the density or pressure floor (emptied voids, usually)'],
-  ['Jeans', 'Cells whose thermal Jeans length is under 4 cells. With the Jeans floor on these are the cells it is holding up'],
-  ['p x', 'Total x momentum'], ['p y', 'Total y momentum'], ['p z', 'Total z momentum'],
-  ['E kin', 'Kinetic energy'], ['E int', 'Internal energy'], ['E grav', 'Gravitational energy'], ['E tot', 'Total energy'],
+// [label, tooltip, CSV column, a count]; the first seven fill the left column, the rest the right.
+const DIAG_ROWS: [string, string, string, boolean?][] = [
+  ['t', 'Time', 't'], ['dt', 'Timestep', 'dt'], ['steps', 'Steps taken', 'steps', true], ['mass', 'Total mass', 'mass'],
+  ['Mach', 'Maximum Mach number', 'max_mach'], ['floor', 'Cells at the density or pressure floor (emptied voids, usually)', 'floored_cells', true],
+  ['Jeans', 'Cells whose thermal Jeans length is under 4 cells. With the Jeans floor on these are the cells it is holding up', 'jeans_unresolved_cells', true],
+  ['p x', 'Total x momentum', 'p_x'], ['p y', 'Total y momentum', 'p_y'], ['p z', 'Total z momentum', 'p_z'],
+  ['E kin', 'Kinetic energy', 'e_kin'], ['E int', 'Internal energy', 'e_int'], ['E grav', 'Gravitational energy', 'e_grav'], ['E tot', 'Total energy', 'e_tot'],
 ];
+/** The diagnostics in DIAG_ROWS order. */
+const diagValues = (d: Diagnostics): number[] => [
+  d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot,
+];
+const diagHistory = new DiagHistory(2);
+/** The run the history belongs to. */
+let diagOf: Simulation | undefined;
 const diagCols = $('diag').querySelectorAll('dl');
+const diagPop = $('diag-pop');
+const diagPopCanvas = diagPop.querySelector('canvas')!;
+const diagPopTitle = diagPop.querySelector('.title')!;
+/** Row whose whole-run plot is showing, if any. */
+let diagHover = -1;
 const diagCells = DIAG_ROWS.map(([label, title], i) => {
   const dt = document.createElement('dt');
   dt.textContent = label;
   dt.title = title;
   const dd = document.createElement('dd');
-  diagCols[i < 7 ? 0 : 1].append(dt, dd);
-  return { dd, set: liveText(dd), warn: false };
+  const spark = document.createElement('canvas');
+  spark.className = 'spark';
+  diagCols[i < 7 ? 0 : 1].append(dt, dd, spark);
+  for (const el of [dd, spark]) {
+    el.addEventListener('pointerenter', () => showDiagPlot(i, dd));
+    el.addEventListener('pointerleave', () => hideDiagPlot());
+  }
+  return { dd, spark, set: liveText(dd), warn: false };
 });
 const setHud = liveText(hud);
 
-function showDiagnostics(d: Diagnostics) {
-  const values: [string, boolean][] = [
-    [num(d.t), false],
-    [num(d.dt), false],
-    [String(d.steps), false],
-    [num(d.mass), false],
-    [num(d.maxMach), false],
-    [String(d.floored), d.floored > 0],
-    [String(d.jeansUnresolved), d.jeansUnresolved > 0 && !cfg.jeansFloor],
-    [d.momentum[0].toExponential(2), false],
-    [d.momentum[1].toExponential(2), false],
-    [d.momentum[2].toExponential(2), false],
-    [num(d.eKin), false],
-    [num(d.eInt), false],
-    [num(d.eGrav), false],
-    [num(d.eTot), false],
-  ];
-  values.forEach(([text, warn], i) => {
+/** The popup with row i's whole run, beside its number. */
+function showDiagPlot(i: number, anchor: HTMLElement) {
+  diagHover = i;
+  diagPop.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  const pw = diagPop.offsetWidth;
+  const ph = diagPop.offsetHeight;
+  // To the right of the side panel where there is room, otherwise above the row.
+  const side = $('side').getBoundingClientRect();
+  let x = side.right + 8;
+  let y = r.top + r.height / 2 - ph / 2;
+  if (x + pw > window.innerWidth - 4) {
+    x = Math.min(window.innerWidth - pw - 4, Math.max(4, r.right - pw));
+    y = r.top - ph - 6;
+    if (y < 4) y = r.bottom + 6;
+  }
+  diagPop.style.left = `${Math.round(x)}px`;
+  diagPop.style.top = `${Math.round(Math.min(window.innerHeight - ph - 4, Math.max(4, y)))}px`;
+  drawDiagPlot();
+}
+function hideDiagPlot() {
+  diagHover = -1;
+  diagPop.hidden = true;
+}
+function drawDiagPlot() {
+  if (diagHover < 0) return;
+  const [label, title, , count] = DIAG_ROWS[diagHover];
+  const rows = diagHistory.rows;
+  const now = rows.length ? fmt3(rows[rows.length - 1][diagHover], count) : '';
+  diagPopTitle.textContent = `${title} (${label})${now ? ` · ${now}` : ''}`;
+  const [xs, ys] = diagHistory.all(diagHover);
+  drawFull(diagPopCanvas, xs, ys, !!count);
+}
+
+function showDiagnostics(d: Diagnostics, of: Simulation) {
+  if (of !== diagOf) {
+    diagHistory.clear();
+    diagOf = of;
+  }
+  const values = diagValues(d);
+  diagHistory.push(values);
+  const warns = [false, false, false, false, false, d.floored > 0, d.jeansUnresolved > 0 && !cfg.jeansFloor];
+  values.forEach((v, i) => {
     const cell = diagCells[i];
-    cell.set(text);
+    cell.set(fmt3(v, DIAG_ROWS[i][3]));
+    const warn = warns[i] ?? false;
     if (warn !== cell.warn) {
       cell.warn = warn;
       cell.dd.classList.toggle('warn', warn);
     }
+    const [xs, ys] = diagHistory.recent(i);
+    drawSpark(cell.spark, xs, ys);
   });
+  drawDiagPlot();
+}
+
+/** Save the diagnostics of the run so far as CSV. */
+function exportDiagnostics() {
+  const csv = diagHistory.csv(DIAG_ROWS.map((r) => r[2]));
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-diagnostics.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 // --- frame loop -------------------------------------------------------------------------
@@ -1891,7 +1952,7 @@ function tick(now: number) {
         syncControls();
       }
       updateRange(d);
-      showDiagnostics(d);
+      showDiagnostics(d, s);
     });
     if (now - rateMark.time > 500) {
       stepRate = ((stepsSubmitted - rateMark.steps) * 1000) / (now - rateMark.time);
