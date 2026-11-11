@@ -799,8 +799,11 @@ function syncAddress(force = false) {
   history.replaceState(null, '', `${location.pathname}?${q}`);
 }
 
-/** A restart or a rebuild of the shaders is under way: the loading chiclet shows. */
-let reloading = false;
+/**
+ * A restart or a rebuild of the shaders is under way: the loading chiclet shows. `shaders`: only
+ * the shaders are being rebuilt, and the run carries on afterwards.
+ */
+let reloading: 'restart' | 'shaders' | null = null;
 /** Resolves once the page has painted (so the loading chiclet is on screen before a long, blocking job). */
 const painted = () => new Promise<void>((r) => requestAnimationFrame(() => setTimeout(r, 0)));
 
@@ -811,7 +814,7 @@ const painted = () => new Promise<void>((r) => requestAnimationFrame(() => setTi
 function restartRun(replay = false) {
   return enqueue(async () => {
     if (!sim) return;
-    reloading = true;
+    reloading = 'restart';
     try {
       await painted();
       sim.cfg = cfg;
@@ -821,7 +824,7 @@ function restartRun(replay = false) {
       finished = false;
       lastDiag = undefined;
     } finally {
-      reloading = false;
+      reloading = null;
     }
   });
 }
@@ -838,7 +841,7 @@ function applyParams() {
 function rebuildPipelines(resetAfter = false) {
   return enqueue(async () => {
     if (!sim) return;
-    reloading = true;
+    reloading = resetAfter ? 'restart' : 'shaders';
     try {
       await painted();
       sim.cfg = cfg;
@@ -853,7 +856,7 @@ function rebuildPipelines(resetAfter = false) {
       }
       finished = false;
     } finally {
-      reloading = false;
+      reloading = null;
     }
   });
 }
@@ -877,7 +880,7 @@ function switchEos(kind: EosKind) {
       rebuildPipelines(true); // queued behind this job
       return;
     }
-    reloading = true;
+    reloading = 'shaders';
     try {
       await painted();
       const s = sim;
@@ -898,7 +901,7 @@ function switchEos(kind: EosKind) {
       lastDiag = undefined;
       finished = false;
     } finally {
-      reloading = false;
+      reloading = null;
     }
   });
 }
@@ -1780,6 +1783,7 @@ let refreshMs = 16.7; // display refresh interval, estimated from requestAnimati
 let lastTick = 0;
 const MAX_SUB = 64;
 const loadingEl = $('loading');
+const loadingText = $('loading-text');
 
 async function measurePollLatency() {
   let best = Infinity;
@@ -1804,8 +1808,12 @@ function tick(now: number) {
   // Allow enough frames in flight to cover the completion-report delay.
   maxInflight = pollMs < 8 ? 1 : Math.ceil(pollMs / refreshMs) + 2;
   // Loading: no simulation yet, a restart or rebuild under way, or a star still settling.
-  const loading = !sim || reloading || sim.preparing;
+  const loading = !sim || !!reloading || sim.preparing;
   if (loadingEl.hidden === loading) loadingEl.hidden = !loading;
+  if (loading) {
+    const text = reloading === 'shaders' && !sim?.preparing ? 'Recomputing shaders…' : 'Loading simulation…';
+    if (loadingText.textContent !== text) loadingText.textContent = text;
+  }
   if (!sim || building) return;
   if (inflight >= maxInflight) {
     capped = true;
