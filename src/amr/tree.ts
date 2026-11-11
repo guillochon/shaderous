@@ -151,6 +151,14 @@ export class BlockTree {
     return cost;
   }
 
+  /** Slots it takes to refine every block of `list`, with whatever balance drags in. */
+  costToRefine(list: Block[]): number {
+    const seen = new Set<Block>();
+    let cost = 0;
+    for (const b of list) cost += this.refineCost(b, seen);
+    return cost;
+  }
+
   /**
    * Split a leaf, first splitting any coarser face neighbour so balance holds. Returns the
    * blocks that were split (empty if it does not fit or is already at the deepest level).
@@ -197,7 +205,9 @@ export class BlockTree {
 
   /**
    * Re-mesh from a refinement indicator per leaf. Leaves above `hi` are split; a parent whose
-   * children are all below `lo`, and have no face neighbour above `hi`, is merged.
+   * children are all below `lo`, and have no face neighbour above `hi`, is merged. A negative
+   * indicator marks a leaf that needs no buffer either (the inside of an obstacle): it merges
+   * whatever its neighbours.
    * Returns, per slot of the new tree, how to fill it from the old tree, or null if nothing changed.
    */
   adapt(indicator: (b: Block) => number, hi: number, lo: number): RegridOp[] | null {
@@ -222,6 +232,7 @@ export class BlockTree {
     // Merge. A leaf next to a strongly flagged one stays, as a buffer ahead of moving features.
     const hot = (b: Block) => {
       if (ind.get(b)! > lo) return true;
+      if (ind.get(b)! < 0) return false;
       for (let f = 0; f < this.nface; f++) {
         const nb = this.neighbour(b, f);
         if (nb.kind !== 'bc' && (ind.get(nb.block) ?? 0) > hi) return true;

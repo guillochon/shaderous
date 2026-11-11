@@ -1208,13 +1208,59 @@ export class AmrSim implements Simulation {
   private refineOutline(outline: Outline) {
     this.flush();
     for (let level = 0; level < this.levels; level++) {
+      const edge = this.tree.leaves().filter((b) => b.level < this.tree.levelLimit && this.crossesOutline(b, outline));
+      if (!edge.length) break;
+      // A flow can hold the whole block budget (a turbulent shear layer does): the obstacle's
+      // edge comes first, so merge blocks elsewhere to make room for it.
+      this.makeRoom(edge, this.tree.costToRefine(edge) - this.tree.freeSlots);
       // Refine where the edge passes; merge nothing.
-      const ops = this.tree.adapt((b) => (b.level < this.tree.levelLimit && this.crossesOutline(b, outline) ? 1 : 0), 0.5, -1);
+      const want = new Set(edge);
+      const ops = this.tree.adapt((b) => (want.has(b) ? 1 : 0), 0.5, -1);
       if (!ops) break;
       this.pending = { ops };
       this.flush();
     }
     this.meshEpoch++;
+  }
+
+  /**
+   * Free at least `need` slots by merging refined blocks away from `keep`: those whose gas
+   * asked least for refinement at the last re-mesh first. Blocks on the surface of an obstacle
+   * (indicator 1) are never merged. Submitted here, as its own re-mesh.
+   */
+  private makeRoom(keep: Block[], need: number) {
+    if (need <= 0) return;
+    const tree = this.tree;
+    // Keep the edge and its face neighbours, so refining the edge does not split them again.
+    const near = new Set<Block>();
+    for (const b of keep) {
+      near.add(b);
+      for (let f = 0; f < tree.nface; f++) {
+        const nb = tree.neighbour(b, f);
+        if (nb.kind !== 'bc') near.add(nb.block);
+      }
+    }
+    const ind = this.lastIndicators;
+    const score = (b: Block) => (ind && ind[b.slot] > 0 ? ind[b.slot] : 0);
+    const parents = new Set<Block>();
+    for (const b of tree.leaves()) if (b.parent) parents.add(b.parent);
+    const candidates = [...parents]
+      .filter((p) => tree.canCoarsen(p) && p.children!.every((ch) => !near.has(ch) && score(ch) < 0.999))
+      .map((p) => ({ p, s: Math.max(...p.children!.map(score)) }))
+      .sort((a, b) => a.s - b.s);
+    const merge = new Set<Block>();
+    let freed = 0;
+    for (const { p } of candidates) {
+      if (freed >= need) break;
+      for (const ch of p.children!) merge.add(ch);
+      freed += tree.nchild;
+    }
+    if (!merge.size) return;
+    // Merge the chosen parents and nothing else; refine nothing.
+    const ops = tree.adapt((b) => (merge.has(b) ? -1 : 1), 2, 0);
+    if (!ops) return;
+    this.pending = { ops };
+    this.flush();
   }
 
   /**
@@ -1293,7 +1339,8 @@ export class AmrSim implements Simulation {
         this.flagStaging.unmap();
         if (tree !== this.tree || epoch !== this.meshEpoch) return; // the run was reset, or re-meshed by hand, meanwhile
         this.lastIndicators = ind;
-        const ops = tree.adapt((b) => ind[b.slot], this.cfg.refineHi, this.cfg.refineLo);
+        // Exactly 0: no gas in the block, only the inside of an obstacle (see amr/flag.wgsl).
+        const ops = tree.adapt((b) => (ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo);
         if (ops) this.pending = { ops };
       })
       .finally(() => {
