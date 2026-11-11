@@ -22,7 +22,7 @@ export const sphere: Problem = {
   gravity: 'isolated',
   G: SPHERE.G,
   box: 1,
-  tEnd: 1.2,
+  tEnd: Infinity,
   rhoFloor: 1e-8,
   pFloor: 1e-12,
   view: { field: 0, log: true, mode: 'volume' },

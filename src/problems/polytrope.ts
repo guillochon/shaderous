@@ -23,7 +23,7 @@ export const polytrope: Problem = {
   gravity: 'isolated',
   G: POLY.G,
   box: 1,
-  tEnd: 10,
+  tEnd: Infinity,
   rhoFloor: 1e-6,
   pFloor: 1e-10,
   view: { field: 0, log: true, mode: 'volume' },

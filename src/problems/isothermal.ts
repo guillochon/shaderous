@@ -21,7 +21,7 @@ export const isothermalCollapse: Problem = {
   gravity: 'periodic',
   G: 1,
   box: 1,
-  tEnd: 2,
+  tEnd: Infinity,
   rhoFloor: 1e-6,
   jeansFloor: true,
   jeansCells: 8,

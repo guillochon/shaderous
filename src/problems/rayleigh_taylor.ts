@@ -20,7 +20,7 @@ export const rayleighTaylor: Problem = {
   G: 0,
   gext: (ndim) => (ndim === 2 ? [0, -RT.g, 0] : [0, 0, -RT.g]),
   box: 1,
-  tEnd: 5,
+  tEnd: Infinity,
   supports2d: true,
   view: { field: 0, log: false, mode: 'slice', axis: 1 },
   init: (_n, _e, ndim) => (x, y, z) => {

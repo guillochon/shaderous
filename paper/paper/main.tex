@@ -225,7 +225,7 @@ The frame is inertial unless a problem asks for another. The tidal disruption pr
 \section{Interface, input and output}
 \label{sec:interface}
 
-Shaderous runs at a web address. A user picks a problem, a grid and the physics, and watches the gas through a ray-marched volume rendering or an axis-aligned slice, both drawn on the same device from the simulation textures. Brushes add mass, velocity or heat; obstacles and sources can be drawn; and the sink tool places point masses. The address bar records the problem, the grid and every setting that differs from the problem's defaults, so a link reproduces a setup.
+Shaderous runs at a web address. A user picks a problem, a grid and the physics, and watches the gas through a ray-marched volume rendering or an axis-aligned slice, both drawn on the same device from the simulation textures. Brushes add mass, velocity or heat; obstacles and sources can be drawn; and the sink tool places point masses. A query tool shows the state of the cell under the pointer and, on the adaptive mesh, the block that holds it, its level and its refinement indicator. The refinement thresholds can be changed during a run. The address bar records the problem, the grid and every setting that differs from the problem's defaults, so a link reproduces a setup.
 
 The state can be exported as an HDF5 file in the layout of Athena++ \citep{Stone2020}, which yt reads directly \citep{Turk2011}, in two and three dimensions and on uniform and adaptive grids. Files written by Shaderous also carry the run's settings, time and point masses, so importing one continues the run on the same mesh.
 

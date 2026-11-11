@@ -5,9 +5,9 @@ import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
-import { conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
-import { EOS_LABELS, type EosKind } from '../eos/eos';
+import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { familyById, familyOf, FIELDS, isSelfGravity, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
@@ -54,13 +54,7 @@ side.innerHTML = `
     ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join(''), 'The problem to simulate: picking one starts it from its initial conditions')}
     <p class="blurb" id="blurb"></p>
     <div class="g3">
-      ${field('Grid', select('dim', opt(3, '3D') + opt(2, '2D')), '', 'Two or three dimensions. A 2D run is one layer of cells in x and y')}
-      ${field('Resolution', select('res', ''), '', 'Cells across the box; on an adaptive mesh, at its finest level')}
-      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')), '', 'Adaptive mesh: levels of refinement below the coarsest grid. Uniform puts every cell at the full resolution')}
-    </div>
-    <div class="g3">
-      ${field('End time', number('tend', 'placeholder="none" min="0"', 1.25), '', 'The run pauses when it reaches this time. Empty runs on without end')}
-      ${field('Variant', select('variant', ''), '', 'Versions of this problem with different setups')}
+      ${field('Variant', select('variant', ''), 'row-variant', 'Versions of this problem with different setups')}
       <span id="pparams"></span>
     </div>
     <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
@@ -70,6 +64,28 @@ side.innerHTML = `
       <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
     </div>
   </section>
+
+  <details open>
+    <summary title="Dimensions, resolution and the adaptive mesh">Grid<span class="sum" id="sum-grid"></span></summary>
+    <div class="g3">
+      ${field('Dimensions', select('dim', opt(3, '3D') + opt(2, '2D')), '', 'Two or three dimensions. A 2D run is one layer of cells in x and y')}
+      ${field('Resolution', select('res', ''), '', 'Cells across the box; on an adaptive mesh, at its finest level')}
+      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')), '', 'Adaptive mesh: levels of refinement below the coarsest grid. Uniform puts every cell at the full resolution')}
+    </div>
+    <div class="g2">
+      ${field('Refine above', number('refhi', 'step="0.05" min="0.05" max="1"'), '', 'Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more. Changes take effect without a restart')}
+      ${field('Merge below', number('reflo', 'step="0.05" min="0" max="1"'), '', 'Adaptive mesh: four sibling blocks are merged where the indicator is below this in all of them. Kept below the refinement threshold. Changes take effect without a restart')}
+    </div>
+  </details>
+
+  <details>
+    <summary title="When the run stops and how long its steps are">Time<span class="sum" id="sum-time"></span></summary>
+    <div class="g3">
+      ${field('End time', number('tend', 'placeholder="none" min="0"', 1.25), '', 'The run pauses when it reaches this time. Empty runs on without end')}
+      ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'), '', 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower')}
+      ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')), '', 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work')}
+    </div>
+  </details>
 
   <details open>
     <summary title="How the gas is drawn">View<span class="sum" id="sum-view"></span></summary>
@@ -90,8 +106,6 @@ side.innerHTML = `
       ${field('Radiation constant a', number('arad', 'min="0"', 2), 'row-arad', 'Radiation pressure a T\u2074 / 3 is added to the gas pressure')}
       ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')), '', 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust')}
       ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')), '', 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust')}
-      ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'), '', 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower')}
-      ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')), '', 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work')}
     </div>
   </details>
 
@@ -249,7 +263,7 @@ const hud = $('hud');
 // --- editing tools ------------------------------------------------------------------------
 // A column of tools under the color bar. Each paints with a soft ball (a disk in 2D) and
 // keeps its own size and softness.
-type ToolKind = Exclude<BrushOp['kind'], 'eos-out' | 'eos-in'> | 'source' | 'sink';
+type ToolKind = Exclude<BrushOp['kind'], 'eos-out' | 'eos-in'> | 'source' | 'sink' | 'query';
 const icon = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = [
   {
@@ -283,6 +297,11 @@ TOOLS.push({
   title: 'Sink: click to place one that takes gas away. Give it a mass and it becomes a point mass: it pulls on the gas, moves, and grows by what it takes in (press and drag to set it moving)',
   icon: icon('<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.2 2.2" /><path d="M2.5 2.5l3 3M5.5 3v2.5H3M13.5 13.5l-3-3M10.5 13v-2.5H13" />'),
 });
+TOOLS.push({
+  kind: 'query', label: 'Query',
+  title: 'Query: hover over the gas to see the cell under the pointer: its state and, on an adaptive mesh, its block. Dragging moves the view',
+  icon: icon('<circle cx="6.8" cy="6.8" r="4.3" /><path d="M10 10l4.5 4.5" /><path d="M6.8 4.9v.01M6.8 6.6v2.6" />'),
+});
 /** Point masses the sink tool has placed in this run (the simulation holds four in all). */
 let placedMasses = 0;
 /** The point masses as last read back, for their markers: refreshed every frame. */
@@ -313,6 +332,7 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   obstacle: { size: 0, softness: 0, amount: 0, mass: 0 },
   source: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0 },
   sink: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0 },
+  query: { size: 0, softness: 0, amount: 0, mass: 0 },
 };
 /** The sink tool places a point mass rather than a plain sink. */
 const sinkHasMass = () => toolParams.sink.mass > 0;
@@ -345,8 +365,9 @@ function syncTools() {
     b.title = b.disabled ? 'The barotropic equation of state ties the temperature to the density' : t.title;
   }
   canvas.classList.toggle('tool', tool !== null);
-  $('tool-params').hidden = tool === null;
-  if (tool === null) {
+  $('tool-params').hidden = tool === null || tool === 'query';
+  if (tool !== 'query') hideCellPop();
+  if (tool === null || tool === 'query') {
     $('brush').style.display = 'none';
     return;
   }
@@ -546,6 +567,11 @@ function syncControls() {
   // G is idle without gravity, unless point masses use it.
   const masses = !!cfg.problem.masses || placedMasses > 0;
   $<HTMLInputElement>('G').disabled = cfg.gravity === 'off' && !masses;
+  $<HTMLInputElement>('refhi').value = String(cfg.refineHi);
+  $<HTMLInputElement>('reflo').value = String(cfg.refineLo);
+  $<HTMLInputElement>('refhi').disabled = $<HTMLInputElement>('reflo').disabled = cfg.amrLevels === 0;
+  $('sum-grid').textContent = `${cfg.n}${two ? '\u00b2' : '\u00b3'}, ${cfg.amrLevels ? `${cfg.amrLevels} level${cfg.amrLevels > 1 ? 's' : ''}` : 'uniform'}`;
+  $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}, CFL ${cfg.cfl}`;
   $('sum-view').textContent = FIELDS[view.field];
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
   const uniform = cfg.gext.some((g) => g !== 0);
@@ -1047,6 +1073,20 @@ function bind() {
   on('cfl', (el) => {
     cfg.cfl = Math.min(1, Math.max(0.05, numOr(el, cfg.cfl)));
     applyParams();
+    syncControls();
+  });
+  // The refinement thresholds are read at every re-mesh: the run carries on. The merge
+  // threshold stays below the refinement one.
+  on('refhi', (el) => {
+    cfg.refineHi = Math.min(1, Math.max(0.05, numOr(el, cfg.refineHi)));
+    cfg.refineLo = Math.min(cfg.refineLo, cfg.refineHi / 2);
+    applyParams();
+    syncControls();
+  });
+  on('reflo', (el) => {
+    cfg.refineLo = Math.min(cfg.refineHi / 2, Math.max(0, numOr(el, cfg.refineLo)));
+    applyParams();
+    syncControls();
   });
   const gravityChanged = () => {
     applyParams();
@@ -1216,7 +1256,7 @@ function bind() {
       drawBrush();
       return;
     }
-    if (tool && tool !== 'obstacle' && sim && !building && e.button === 0 && pointers.size === 0 && !stroke) {
+    if (tool && tool !== 'obstacle' && tool !== 'query' && sim && !building && e.button === 0 && pointers.size === 0 && !stroke) {
       beginStroke(e);
       return;
     }
@@ -1244,6 +1284,7 @@ function bind() {
     if (tool) e.preventDefault();
   });
   canvas.addEventListener('pointerleave', () => {
+    hideCellPop();
     if (!stroke) $('brush').style.display = 'none';
   });
   window.addEventListener('keydown', (e) => {
@@ -1290,7 +1331,11 @@ function bind() {
       drawBrush();
       return;
     }
-    if (tool && pointers.size === 0 && !stroke) {
+    if (tool === 'query') {
+      // While the view is being dragged the cell under the pointer keeps changing; wait.
+      if (pointers.size === 0) queryAt(e.clientX, e.clientY);
+      else hideCellPop();
+    } else if (tool && pointers.size === 0 && !stroke) {
       const r = canvas.getBoundingClientRect();
       drawBrush(e.clientX - r.left, e.clientY - r.top);
     }
@@ -1360,6 +1405,115 @@ function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3
   // Along the ray, fwd + ux right + uy up reaches distance `depth` from the eye, measured along fwd.
   const pos = [0, 1, 2].map((i) => f.eye[i] + depth * (f.fwd[i] + ux * f.right[i] + uy * f.up[i]) + 0.5) as Vec3;
   return { pos, right: f.right as Vec3, up: f.up as Vec3, scale: h / (2 * f.tan * depth) };
+}
+
+// --- query tool ---------------------------------------------------------------------------
+// While it is in hand, the cell under the pointer is read back and shown beside it. One read is
+// in flight at a time: the latest position is read next, and a running simulation is read again
+// every 150 ms while the pointer rests.
+const cellPop = $('cell-pop');
+let queryPoint: { x: number; y: number } | null = null;
+let queryBusy = false;
+
+function queryAt(clientX: number, clientY: number) {
+  queryPoint = { x: clientX, y: clientY };
+  if (!queryBusy) void runQuery();
+}
+
+function hideCellPop() {
+  queryPoint = null;
+  cellPop.hidden = true;
+}
+
+async function runQuery() {
+  const q = queryPoint;
+  const s = sim;
+  if (!q || !s || building) return;
+  queryBusy = true;
+  try {
+    const r = canvas.getBoundingClientRect();
+    const px = q.x - r.left;
+    const py = q.y - r.top;
+    let depth = view.dist;
+    if (!flatView()) {
+      // Volume view: the gas that is seen under the pointer.
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      const [ux, uy] = [(2 * px) / w - 1, 1 - (2 * py) / h];
+      const t = await renderer.pick(ux, uy);
+      if (t === null) {
+        cellPop.hidden = true;
+        return;
+      }
+      const f = cameraFrame(view, w / h);
+      depth = t / Math.hypot(1, ux * (w / h) * f.tan, uy * f.tan);
+    }
+    const f = locate(px, py, depth).pos;
+    if (cfg.ndim === 2) f[2] = 0;
+    if (f.some((v) => v < 0 || v >= 1)) {
+      cellPop.hidden = true;
+      return;
+    }
+    const c = await s.probe(f);
+    if (s !== sim || !queryPoint || tool !== 'query') return;
+    if (!c) cellPop.hidden = true;
+    else showCell(c, queryPoint.x, queryPoint.y);
+  } catch {
+    cellPop.hidden = true;
+  } finally {
+    queryBusy = false;
+    if (queryPoint && queryPoint !== q) void runQuery();
+    else if (queryPoint && running) {
+      setTimeout(() => {
+        if (queryPoint && !queryBusy) void runQuery();
+      }, 150);
+    }
+  }
+}
+
+function showCell(c: CellProbe, x: number, y: number) {
+  const dims = cfg.ndim;
+  const vec = (v: number[]) => `(${v.slice(0, dims).map((a) => fmt3(a)).join(', ')})`;
+  const eos = makeEos(cfg.eos, cfg.eosParams);
+  const rho = c.u1[0];
+  const vel = [c.u1[1] / rho, c.u1[2] / rho, c.u1[3] / rho];
+  const eint = c.u2[1];
+  const p = eos.pressure(rho, eint);
+  const cs = eos.soundSpeed(rho, p);
+  const speed = Math.hypot(...vel.slice(0, dims));
+  const rows: [string, string, string?][] = [
+    ['Position', vec(c.pos)],
+    ['Cell size', fmt3(c.dx)],
+  ];
+  if (c.block) {
+    const b = c.block;
+    rows.push(['Level', `${b.level} of ${cfg.amrLevels}`]);
+    rows.push(['Block', `(${b.coords.join(', ')}), slot ${b.slot}`]);
+    rows.push(['Indicator', b.indicator === null ? 'not yet read' : `${fmt3(b.indicator)} (split ${cfg.refineHi}, merge ${cfg.refineLo})`]);
+  }
+  if (c.u2[3] > 0.5) rows.push(['Obstacle', 'solid cell; gas held for later', 'solid']);
+  rows.push(
+    ['Density', fmt3(rho)],
+    ['Velocity', vec(vel)],
+    ['Speed', fmt3(speed)],
+    ['Mach number', fmt3(cs > 0 ? speed / cs : 0)],
+    ['Pressure', fmt3(p)],
+    ['Temperature', fmt3(eos.temperature(rho, eint))],
+    ['Sound speed', fmt3(cs)],
+    ['Internal energy', `${fmt3(eint / rho)} per mass`],
+    ['Total energy', `${fmt3(c.u2[0])} per volume`],
+    ['Scalar', fmt3(c.u2[2] / rho)],
+  );
+  cellPop.querySelector('.title')!.textContent = `Cell (${c.index.join(', ')})`;
+  cellPop.querySelector('dl')!.innerHTML = rows.map(([k, v, cls]) => `<dt>${k}</dt><dd${cls ? ` class="${cls}"` : ''}>${v}</dd>`).join('');
+  cellPop.hidden = false;
+  // Beside the pointer, kept on screen.
+  const pw = cellPop.offsetWidth;
+  const ph = cellPop.offsetHeight;
+  const left = x + 18 + pw > window.innerWidth - 4 ? x - 18 - pw : x + 18;
+  const top = Math.min(window.innerHeight - ph - 4, Math.max(4, y + 18));
+  cellPop.style.left = `${Math.round(Math.max(4, left))}px`;
+  cellPop.style.top = `${Math.round(top)}px`;
 }
 
 // --- obstacles ----------------------------------------------------------------------------
@@ -1513,7 +1667,7 @@ function drawSources() {
 /** Outline of the brush under the pointer, and the arrow of a velocity stroke. */
 function drawBrush(px?: number, py?: number) {
   const svg = $('brush');
-  if (!tool || !cfg) {
+  if (!tool || !cfg || tool === 'query') {
     svg.style.display = 'none';
     return;
   }
@@ -1659,6 +1813,7 @@ function advanceStroke(now: number) {
     syncTools();
     return;
   }
+  if (s.kind === 'query') return; // the query tool reads, and never starts a stroke
   const base = { kind: s.kind, radius: q.size, softness: q.softness, amount: 0, vel: [0, 0, 0] as Vec3 };
   if (s.kind === 'velocity') {
     if (!s.released) return;

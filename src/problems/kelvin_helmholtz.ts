@@ -11,7 +11,7 @@ export const kelvinHelmholtz: Problem = {
   gravity: 'off',
   G: 0,
   box: 1,
-  tEnd: 2,
+  tEnd: Infinity,
   supports2d: true,
   view: { field: 0, log: false, mode: 'slice' },
   init: () => (x, y, z) => {

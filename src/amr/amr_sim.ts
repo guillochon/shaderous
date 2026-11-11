@@ -22,7 +22,7 @@ import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark, isSelfGravity } from '../problems/types';
 import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from '../problems/settle';
-import { completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
+import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
 /**
@@ -227,6 +227,8 @@ export class AmrSim implements Simulation {
   regrids = 0;
   /** the most recent refinement indicators, by slot (inspection only) */
   lastIndicators: Float32Array | null = null;
+  /** Each leaf's indicator at the last re-mesh, by block (slots are reused as the mesh changes). */
+  private indicatorOf = new WeakMap<Block, number>();
 
   get paramBuffer(): GPUBuffer {
     return this.params;
@@ -1349,6 +1351,30 @@ export class AmrSim implements Simulation {
     return this.cfg.problem.refineMasses ? this.dx0 / (1 << this.levels) : this.dx0;
   }
 
+  async probe(f: [number, number, number]): Promise<CellProbe | null> {
+    this.flush();
+    const three = this.cfg.ndim === 3;
+    const axes = three ? 3 : 2;
+    for (const b of this.tree.leaves()) {
+      const across = this.n0 << b.level; // cells across the box at this level
+      const index = f.slice(0, axes).map((x) => Math.min(across - 1, Math.max(0, Math.floor(x * across))));
+      if (!index.every((i, a) => Math.floor(i / BS) === b.c[a])) continue;
+      const o = this.origin(b.slot);
+      const at = [o[0] + index[0] - b.c[0] * BS, o[1] + index[1] - b.c[1] * BS, three ? o[2] + index[2] - b.c[2] * BS : o[2]] as [number, number, number];
+      const tree = this.tree;
+      const [u1, u2] = await readTexels(this.device, this.state[this.cur], at);
+      const dx = this.dx0 / (1 << b.level);
+      const half = this.cfg.problem.box / 2;
+      const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx - half : 0)) as [number, number, number];
+      return {
+        pos, index, dx, u1: [...u1], u2: [...u2],
+        // A block that has been split or merged since the read would show another's state.
+        block: tree === this.tree ? { level: b.level, coords: b.c.slice(0, axes), slot: b.slot, indicator: this.indicatorOf.get(b) ?? null } : undefined,
+      };
+    }
+    return null;
+  }
+
   retuneMasses() {
     writeMassRadii(this.device, this.bh, this.cfg, this.massDx, this.nOwnMasses);
     this.refreshPotential();
@@ -1375,6 +1401,7 @@ export class AmrSim implements Simulation {
         this.flagStaging.unmap();
         if (tree !== this.tree || epoch !== this.meshEpoch) return; // the run was reset, or re-meshed by hand, meanwhile
         this.lastIndicators = ind;
+        for (const b of tree.leaves()) this.indicatorOf.set(b, ind[b.slot]);
         // Exactly 0: no gas in the block, only the inside of an obstacle (see amr/flag.wgsl).
         const ops = tree.adapt((b) => (ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo);
         if (ops) this.pending = { ops };

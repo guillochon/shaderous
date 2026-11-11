@@ -99,6 +99,37 @@ export interface SimConfig {
   jeansRefine: number;
 }
 
+/** One cell of the grid as the query tool reads it (Simulation.probe). */
+export interface CellProbe {
+  /** cell center, relative to the box center */
+  pos: [number, number, number];
+  /** index of the cell among the cells of its level across the whole box */
+  index: number[];
+  /** cell size */
+  dx: number;
+  /** conserved state: (rho, rho v) and (E, rho e, rho s, solid flag) */
+  u1: number[];
+  u2: number[];
+  /** Adaptive mesh: the leaf block that holds the cell. */
+  block?: { level: number; coords: number[]; slot: number; indicator: number | null };
+}
+
+/**
+ * Read one texel of each texture, at the same coordinates, in one round trip. Each lands at its
+ * own 256-byte offset of the buffer.
+ */
+export async function readTexels(d: GPUDevice, textures: GPUTexture[], at: [number, number, number]): Promise<Float32Array[]> {
+  const buf = d.createBuffer({ size: 256 * textures.length, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = d.createCommandEncoder();
+  textures.forEach((t, i) => enc.copyTextureToBuffer({ texture: t, origin: at }, { buffer: buf, offset: 256 * i }, [1, 1, 1]));
+  d.queue.submit([enc.finish()]);
+  await buf.mapAsync(GPUMapMode.READ);
+  const all = new Float32Array(buf.getMappedRange().slice(0));
+  buf.unmap();
+  buf.destroy();
+  return textures.map((_, i) => all.slice(64 * i, 64 * i + 4));
+}
+
 /** What the front end, renderer and tests need from a simulation, uniform or adaptive. */
 export interface Simulation {
   readonly device: GPUDevice;
@@ -143,6 +174,8 @@ export interface Simulation {
    * for, leaving them where they are and as they move.
    */
   retuneMasses(): void;
+  /** The cell at `f` (in fractions of the box, each in [0, 1)) as it is now. */
+  probe(f: [number, number, number]): Promise<CellProbe | null>;
   /** Replace the sources and sinks (at most MAX_SOURCES; a reset removes them all). */
   setSources(list: SourceSpec[]): void;
   destroy(): void;
@@ -1066,6 +1099,16 @@ export class Sim implements Simulation {
     this.writeParams();
     // With no masses left the field texture goes out of use; otherwise rebuild it without them.
     this.refreshPotential();
+  }
+
+  async probe(f: [number, number, number]): Promise<CellProbe | null> {
+    const cell = (x: number, n: number) => Math.min(n - 1, Math.max(0, Math.floor(x * n)));
+    const index = [cell(f[0], this.n), cell(f[1], this.n), cell(f[2], this.nz)];
+    const [u1, u2] = await readTexels(this.device, this.state[this.cur], index as [number, number, number]);
+    const half = this.cfg.problem.box / 2;
+    const pos = index.map((i) => (i + 0.5) * this.dx - half) as [number, number, number];
+    if (this.nz === 1) pos[2] = 0;
+    return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2] };
   }
 
   retuneMasses() {

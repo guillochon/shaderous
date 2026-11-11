@@ -14,7 +14,7 @@ export const evrard: Problem = {
   gravity: 'isolated',
   G: 1,
   box: 4,
-  tEnd: 3,
+  tEnd: Infinity,
   rhoFloor: 1e-7,
   pFloor: 1e-12,
   view: { field: 0, log: true, mode: 'volume' },

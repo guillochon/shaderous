@@ -54,6 +54,8 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }
 .jeans .check { height: 24px; }
 #pparams { display: contents; }
+/* The variant's name gets a row of its own; the preset's parameters fill the grid below it. */
+#row-variant { grid-column: 1 / -1; }
 .checks { display: flex; gap: 12px; margin-top: 6px; }
 .check { display: flex; align-items: center; white-space: nowrap; font-size: 12px; }
 details { border-top: 1px solid var(--line); padding-top: 8px; }
@@ -208,6 +210,17 @@ details[open] > summary .sum { display: none; }
 #diag-pop[hidden] { display: none; }
 #diag-pop .title { font-size: 11px; color: var(--text); margin-bottom: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #diag-pop canvas { display: block; width: 100%; height: 96px; }
+/* The query tool: the cell under the pointer. */
+#cell-pop {
+  position: fixed; z-index: 20; width: 290px; padding: 6px 8px 7px; pointer-events: none;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+}
+#cell-pop[hidden] { display: none; }
+#cell-pop .title { font-size: 11px; color: var(--text); margin-bottom: 4px; white-space: nowrap; }
+#cell-pop dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: 11px; }
+#cell-pop dt { color: var(--dim); white-space: nowrap; }
+#cell-pop dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#cell-pop dd.solid { color: #ffb454; }
 
 /* validation page */
 body.validate { padding: 20px 28px; height: auto; }

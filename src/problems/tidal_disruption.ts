@@ -54,7 +54,7 @@ export const tidalDisruption: Problem = {
   gravity: 'isolated',
   G: TDE.G,
   box: TDE.box,
-  tEnd: 14,
+  tEnd: Infinity,
   rhoFloor: 1e-10,
   pFloor: 1e-14,
   // Ambient gas and the outermost wisps of debris: no hotter than the star's interior, and no
