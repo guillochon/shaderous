@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'advection-accuracy', 'flux-determinism',
-  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'point-mass-sink', 'binary-orbit', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
+  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'point-mass-sink', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'evrard', 'tidal-disruption',
 ];
 
 test.describe.configure({ mode: 'serial' });
@@ -95,6 +95,17 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   const d2 = await page.evaluate(() => (window as any).shaderousApp.diag);
   expect(d2.mass).toBeCloseTo(1.5, 3);
   expect(await page.locator('#mode').isDisabled()).toBe(true);
+
+  // Viscosity and conduction: switching them on rebuilds the passes, and the run carries on
+  // (onto the adaptive mesh below, too).
+  await page.fill('#visc', '0.001');
+  await page.dispatchEvent('#visc', 'change');
+  await page.fill('#cond', '0.001');
+  await page.dispatchEvent('#cond', 'change');
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.viscosity === 0.001 && (window as any).shaderousApp.cfg.conductivity === 0.001);
+  await advance();
+  expect(await page.textContent('#sum-diff')).toBe('viscosity + conduction');
+  expect((await page.evaluate(() => (window as any).shaderousApp.diag)).mass).toBeCloseTo(1.5, 3);
 
   // Adaptive mesh: switches the grid, keeps running, and conserves mass.
   await page.selectOption('#levels', '2');

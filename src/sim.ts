@@ -69,6 +69,17 @@ export interface SimConfig {
   /** Optically thin cooling and heating (cooling/*.wgsl); needs an equation of state with an energy. */
   cooling: CoolingKind;
   coolParams: CoolingParams;
+  /**
+   * Kinematic viscosity nu: the stress is rho nu (grad v + its transpose - 2/3 div v), and the
+   * walls of obstacles hold the gas (hydro/diffusion.wgsl). 0 is off.
+   */
+  viscosity: number;
+  /**
+   * Thermal conduction: the heat flux is -conductivity * rho * grad T, so an ideal gas's
+   * temperature diffuses at (gamma - 1) * conductivity. Needs an equation of state with an
+   * energy. 0 is off.
+   */
+  conductivity: number;
   /** Start from a snapshot: its time, step count and point masses rather than the preset's. */
   restart?: Restart;
   /** A block is split where its refinement indicator exceeds refineHi, merged below refineLo. */
@@ -171,6 +182,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     jeansRefine: 16,
     cooling: problem.cooling ?? 'off',
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
+    viscosity: problem.viscosity ?? 0,
+    conductivity: problem.conductivity ?? 0,
     ...over,
   };
 }
@@ -192,8 +205,16 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     riemann: `hydro/riemann/${c.riemann}.wgsl`,
     limiter: `hydro/limiters/${c.limiter}.wgsl`,
     cooling: COOLING_MODULES[c.cooling],
+    // Which diffusive fluxes are compiled in (hydro/diffusion.wgsl); their strengths are in P.diff.
+    diffusion: `const VISCOSITY = ${c.viscosity > 0};\nconst CONDUCTION = ${conducts(c)};\n`,
   };
 }
+
+/** Thermal conduction is on: it needs a coefficient and an equation of state with an energy. */
+export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && c.eos !== 'barotropic';
+
+/** Which diffusive fluxes the shaders must be built with: a change here means rebuilding them. */
+export const diffusionKey = (c: SimConfig): string => `${c.viscosity > 0}/${conducts(c)}`;
 
 export const MAX_MASSES = 4;
 /** Floats in the Masses block (gravity/bh.wgsl): the frame's acceleration, then 16 per mass. */
@@ -370,7 +391,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 224;
+export const PARAM_BYTES = 240;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -413,6 +434,7 @@ export function packParams(
     40,
   );
   f.set(packCooling(c.cooling, c.coolParams), 52);
+  f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), 0, 0], 56);
   return buf;
 }
 
@@ -598,7 +620,7 @@ export class Sim implements Simulation {
       [n, n, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock');
-    sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
+    sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.pField = await computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field');
     sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock });
     // Point masses: their pull on the gas and what their sinks take are reduced each step, and

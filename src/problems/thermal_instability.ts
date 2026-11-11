@@ -9,7 +9,13 @@ import { ismLambda } from '../cooling/cooling';
 // Units: density in hydrogen atoms per cm^3, temperature in units of 1000 K, box side 1. The
 // heating rate sets the clock: the cooling time is about 2 / heating, against a sound-crossing
 // time of the box of about 0.65, so structure forms on scales of a few percent of the box.
-export const TI = { tUnit: 1000, modes: 48, kMax: 8 };
+//
+// Thermal conduction (heat flux -kappa rho grad T) sets the smallest scale on which gas can
+// stay out of balance, the length of Field (1965). Without it the clouds are as small as the
+// grid allows, and shrink as the grid is refined. With `kappa` the scale of the structure at
+// t = 0.6 changes by 8% from 512^2 to 1024^2 cells, against 20% without, for a quarter more
+// steps at 1024^2 (the conduction test of the validation suite measures it).
+export const TI = { tUnit: 1000, modes: 48, kMax: 8, kappa: 3e-4 };
 
 /** Temperature (code units) at which gas of density n neither heats nor cools, on the unstable branch. */
 export function balanceTemperature(n: number): number {
@@ -51,6 +57,7 @@ export const thermalInstability: Problem = {
   supports2d: true,
   cooling: 'ism',
   coolParams: { heat: 50, tUnit: TI.tUnit, tFloor: 0.02 },
+  conductivity: TI.kappa,
   view: { field: 0, log: true, mode: 'slice' },
   params: [
     { id: 'n0', label: 'Mean density (cm⁻³)', value: 2, min: 1, max: 8, step: 0.5 },

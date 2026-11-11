@@ -43,6 +43,24 @@ fn load_pred(c: vec3<i32>) -> Q {
   return Q(vec4<f32>(a.x, bc_velocity(a.yzw, m)), textureLoad(PB, m.c, 0));
 }
 
+// For viscosity (hydro/diffusion.wgsl): the velocity alone, which costs one load and no
+// equation of state. A solid cell is at rest.
+fn load_vel(c: vec3<i32>) -> vec3<f32> {
+  if (INTERIOR) {
+    if (has_solids() && textureLoad(U2, c, 0).w > 0.5) { return vec3<f32>(0.0); }
+    let u = textureLoad(U1, c, 0);
+    return u.yzw / max(u.x, P.rho_floor);
+  }
+  let m = bc_map(c);
+  if (has_solids() && textureLoad(U2, m.c, 0).w > 0.5) { return vec3<f32>(0.0); }
+  let u = textureLoad(U1, m.c, 0);
+  return bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
+}
+// Also for viscosity: every cell has all its neighbours here (amr/update.wgsl is where not).
+fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
+  return 0;
+}
+
 #include "hydro/flux.wgsl"
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
@@ -118,7 +136,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
   }
 
-  var nw = advance(u1, u2, net_inflow(fx, fy, fz), dw, p0.b.x, kick, ekick);
+  var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);
   if (has_sources()) { nw = apply_sources(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt); }
   nw = apply_cooling(nw, clock.dt);
   textureStore(O1, c, nw.u1);

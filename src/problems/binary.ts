@@ -8,9 +8,13 @@ import { all, OUTFLOW, type PointMass, type Problem } from './types';
 // each mass takes in what reaches its sink. The masses feel one another and the gas, in an
 // inertial frame; the disc is light, so the orbit barely changes.
 //
+// The disc has a constant kinematic viscosity `nu`, in units of a^2 Omega_b: what carries gas
+// inward to the cavity's edge. 1e-3 is alpha = 0.1 at r = 1 for this sound speed
+// (nu = alpha cs^2 / Omega).
+//
 // In 2D the density is the disc's surface density. In 3D the disc has a Gaussian vertical
 // profile of scale height cs / Omega.
-export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12 };
+export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3 };
 
 /** The two masses at pericentre, on the x axis, orbiting counter-clockwise about the origin. */
 export function binaryMasses(q: number, ecc: number, soft: number): PointMass[] {
@@ -39,6 +43,7 @@ export const binary: Problem = {
   box: BINARY.box,
   tEnd: Infinity,
   rhoFloor: 1e-9,
+  viscosity: BINARY.nu,
   supports2d: true,
   view: { field: 0, log: true, mode: 'slice', axis: 2, pitch: 1.15 },
   params: [

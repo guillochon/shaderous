@@ -49,6 +49,23 @@ fn load_q(c: vec3<i32>) -> Q {
 fn load_pred(c: vec3<i32>) -> Q {
   return Q(textureLoad(PA, c, 0), textureLoad(PB, c, 0));
 }
+// For viscosity (hydro/diffusion.wgsl): the velocity alone. A solid cell is at rest.
+fn load_vel(c: vec3<i32>) -> vec3<f32> {
+  let w1 = textureLoad(W1, c, 0);
+  return select(w1.yzw, vec3<f32>(0.0), w1.x < 0.0);
+}
+// Also for viscosity. The face between the cell at atlas texel `a` and the next one along
+// `axis` lies on the boundary of a block, in the first (+1) or last (-1) row of cells along
+// the transverse axis `t`: beyond that row, on the far side of the face, are edge ghosts,
+// which are never filled. Both blocks that share the face see it so, whichever one asks.
+fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
+  let la = a[axis] % PADW - NGH;
+  if (la != -1 && la != BS - 1) { return 0; }
+  let lt = a[t] % PADW - NGH;
+  if (lt == 0) { return 1; }
+  if (lt == BS - 1) { return -1; }
+  return 0;
+}
 
 
 // For the well-balanced pressure reconstruction (hydro/q.wgsl): the potential difference
@@ -105,10 +122,10 @@ fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
 #include "hydro/cooling.wgsl"
 
 fn flux_add(a: Flux, b: Flux) -> Flux {
-  return Flux(a.m + b.m, a.mom + b.mom, a.e + b.e, a.ei + b.ei, a.s + b.s, a.vn + b.vn);
+  return Flux(a.m + b.m, a.mom + b.mom, a.e + b.e, a.ei + b.ei, a.s + b.s, a.vn + b.vn, a.d + b.d);
 }
 fn flux_scale(f: Flux, w: f32) -> Flux {
-  return Flux(f.m * w, f.mom * w, f.e * w, f.ei * w, f.s * w, f.vn * w);
+  return Flux(f.m * w, f.mom * w, f.e * w, f.ei * w, f.s * w, f.vn * w, f.d * w);
 }
 
 // The block being worked on: its bin, and whether this pass only deposits the second half of
@@ -286,7 +303,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
   }
 
-  var nw = advance(u1, u2, net_inflow(fx, fy, fz), dw, p0.b.x, kick, ekick);
+  var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);
   if (g_deposit) {
     // The kicks, sources and cooling of this step were applied when it started.
     textureStore(O1, c, nw.u1);

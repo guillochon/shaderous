@@ -17,6 +17,7 @@
 #include <limiter>
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
+#include "hydro/diff_rate.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
 
@@ -92,7 +93,7 @@ fn main(
       let depth = select(BS, 1, is2d());
       if (all(inv.l >= vec3<i32>(0)) && all(inv.l < vec3<i32>(BS, BS, depth)) && blk_leaf(inv.slot) && !solid) {
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
-        let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y;
+        let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
