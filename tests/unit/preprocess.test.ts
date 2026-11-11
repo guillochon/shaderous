@@ -65,6 +65,16 @@ describe('shader assembly', () => {
         }
   });
 
+  it('assembles the display passes for every equation of state and cooling function', () => {
+    for (const eos of Object.values(EOS_MODULES))
+      for (const cooling of Object.values(COOLING_MODULES))
+        for (const entry of ['render/field.wgsl', 'amr/field.wgsl']) {
+          const src = assemble(entry, { eos, cooling });
+          expect(src).not.toMatch(/^\s*#include/m);
+          expect(src).toContain('fn field_value');
+        }
+  });
+
   it('assembles the gravity and render passes', () => {
     const entries = [
       'gravity/smooth.wgsl', 'gravity/residual.wgsl', 'gravity/restrict.wgsl', 'gravity/prolong.wgsl',

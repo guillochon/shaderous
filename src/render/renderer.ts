@@ -2,7 +2,21 @@
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { EOS_MODULES } from '../eos/eos';
+import { COOLING_MODULES } from '../cooling/cooling';
+import { SIGNED_FIELDS } from '../problems/types';
 import type { Simulation } from '../sim';
+
+/** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
+const HIST_BINS = 128;
+const RANGE_WORDS = 4 + HIST_BINS;
+/** Edge of histogram bin i, as a value of |field| (HIST_LOG_LO and HIST_PER_DECADE there). */
+const binEdge = (i: number) => 10 ** (i / 3.2 - 20);
+
+/** Inverse of range_key() in render/field_value.wgsl: the float whose ordered bits are k. */
+function fromKey(k: number): number {
+  const bits = k & 0x80000000 ? k ^ 0x80000000 : ~k >>> 0;
+  return new Float32Array(new Uint32Array([bits >>> 0]).buffer)[0];
+}
 
 export interface ViewState {
   mode: 'volume' | 'slice';
@@ -80,6 +94,16 @@ export class Renderer {
   private gPick?: GPUBindGroup;
   private pickIn: GPUBuffer;
   private pickOut: GPUBuffer;
+  /** Range of the field last drawn (render/field_value.wgsl), and its readback. */
+  private rangeBuf: GPUBuffer;
+  private rangeStage: GPUBuffer;
+  private rangeCopied: number | null = null;
+  private rangeBusy = false;
+  /**
+   * The range of the field drawn in a recent frame: its least and greatest values and its
+   * smallest positive value (null if none), for the field it was drawn for.
+   */
+  range: { field: number; lo: number; hi: number; pos: number | null; hist: Uint32Array } | null = null;
 
   constructor(
     gpu: Gpu,
@@ -99,6 +123,8 @@ export class Renderer {
     this.sampler = this.device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     this.pickIn = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.pickOut = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    this.rangeBuf = this.device.createBuffer({ size: RANGE_WORDS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.rangeStage = this.device.createBuffer({ size: RANGE_WORDS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   }
 
   async init() {
@@ -142,10 +168,47 @@ export class Renderer {
       this.gSlice = bindGroup(d, this.pSlice, res);
       this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
     }
-    this.pField = await computePipeline(d, assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos] }), 'field');
+    this.pField = await computePipeline(d, assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling] }), 'field');
     this.gField = [0, 1].map((p) =>
-      bindGroup(d, this.pField!, { 0: sim.paramBuffer, 1: this.viewBuf, 4: this.vol!.createView(), ...sim.fieldResources(p) }),
+      bindGroup(d, this.pField!, { 0: sim.paramBuffer, 1: this.viewBuf, 4: this.vol!.createView(), 8: this.rangeBuf, ...sim.fieldResources(p) }),
     );
+    this.range = null;
+  }
+
+  /** Call after submitting an encoder that encode() wrote to: reads the range back. */
+  submitted() {
+    const field = this.rangeCopied;
+    if (field === null || this.rangeBusy) return;
+    this.rangeCopied = null;
+    this.rangeBusy = true;
+    this.rangeStage
+      .mapAsync(GPUMapMode.READ)
+      .then(() => {
+        const k = new Uint32Array(this.rangeStage.getMappedRange().slice(0));
+        this.rangeStage.unmap();
+        if (k[0] === 0xffffffff) return; // nothing drawn but obstacles
+        this.range = { field, lo: fromKey(k[0]), hi: fromKey(k[1]), pos: k[2] === 0xffffffff ? null : fromKey(k[2]), hist: k.slice(4) };
+      })
+      .catch(() => {})
+      .finally(() => (this.rangeBusy = false));
+  }
+
+  /**
+   * From the last range read back for `field`: the value of |field| below which the share `q`
+   * of the cells drawn lies, to within one histogram bin (a factor of about 2), or null.
+   */
+  quantile(field: number, q: number): number | null {
+    const r = this.range;
+    if (!r || r.field !== field) return null;
+    let total = 0;
+    for (const n of r.hist) total += n;
+    if (!total) return null;
+    let sum = 0;
+    for (let i = 0; i < HIST_BINS; i++) {
+      sum += r.hist[i];
+      if (sum >= q * total) return binEdge(i + 1);
+    }
+    return null;
   }
 
   get aspect(): number {
@@ -194,10 +257,12 @@ export class Renderer {
     const [nx, ny, nz] = this.dims;
     const vb = new ArrayBuffer(32);
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, 0]);
-    new Uint32Array(vb, 0, 2).set([v.field, v.log ? 1 : 0]);
+    // A field of either sign is always shown on a linear scale.
+    const log = v.log && !SIGNED_FIELDS.has(v.field);
+    new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
     const tiny = 1e-30;
-    const lo = v.log ? Math.log10(Math.max(v.lo, tiny)) : v.lo;
-    const hi = v.log ? Math.log10(Math.max(v.hi, tiny)) : v.hi;
+    const lo = log ? Math.log10(Math.max(v.lo, tiny)) : v.lo;
+    const hi = log ? Math.log10(Math.max(v.hi, tiny)) : v.hi;
     new Float32Array(vb, 8, 2).set([lo, hi]);
     d.queue.writeBuffer(this.viewBuf, 0, vb);
 
@@ -215,11 +280,19 @@ export class Renderer {
       ]),
     );
 
+    // The range starts empty: min and smallest positive at the top, max at the bottom.
+    const empty = new Uint32Array(RANGE_WORDS);
+    empty.set([0xffffffff, 0, 0xffffffff, 0]);
+    d.queue.writeBuffer(this.rangeBuf, 0, empty);
     const cp2 = enc.beginComputePass();
     cp2.setPipeline(this.pField);
     cp2.setBindGroup(0, this.gField[sim.cur]);
     cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
     cp2.end();
+    if (!this.rangeBusy && this.rangeCopied === null) {
+      enc.copyBufferToBuffer(this.rangeBuf, 0, this.rangeStage, 0, RANGE_WORDS * 4);
+      this.rangeCopied = v.field;
+    }
 
     const rp = enc.beginRenderPass({
       colorAttachments: [

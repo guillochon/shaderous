@@ -34,8 +34,32 @@ export const GRAVITY_MODES: readonly GravityMode[] = ['off', 'constant', 'period
 /** The mode solves for the gas's own potential (3D only). */
 export const isSelfGravity = (m: GravityMode): boolean => m === 'periodic' || m === 'isolated';
 
-// Fields the renderer can show; order matches field.wgsl.
-export const FIELDS = ['Density', 'Temperature', 'Passive scalar', 'Pressure', 'Speed'] as const;
+/** The quantities the view can show (render/field_value.wgsl computes them, in this order). */
+export const FIELDS = [
+  'Density', 'Temperature', 'Passive scalar', 'Pressure', 'Speed',
+  'Velocity x', 'Velocity y', 'Velocity z', 'Mach number', 'Entropy',
+  'Heating \u2212 cooling', 'Vorticity', 'Velocity divergence', 'Density gradient', 'Refinement level',
+] as const;
+/** What each field shows, for its tooltip. */
+export const FIELD_TIPS = [
+  'Mass per unit volume (per unit area in 2D)',
+  'Temperature from the equation of state',
+  'A dye carried with the gas: where the gas that started in a marked region has gone',
+  'Gas pressure (plus radiation pressure with that equation of state)',
+  'Magnitude of the velocity',
+  'Velocity along x, signed',
+  'Velocity along y, signed',
+  'Velocity along z, signed',
+  'Speed over the local sound speed',
+  'The entropy function p / \u03c1^\u03b3: constant along the flow away from shocks, so it marks where gas has been shocked or heated',
+  'Net heating rate per unit volume from the cooling function: positive where the gas heats, negative where it cools',
+  'Curl of the velocity: its z component, signed, in 2D; its magnitude in 3D. Marks shear layers and eddies',
+  'Divergence of the velocity: negative where the gas is compressed (shocks), positive where it expands',
+  '|\u2207\u03c1| / \u03c1, a numerical schlieren image: picks out shocks, contacts and waves',
+  'Level of the adaptive mesh block that holds each cell (0 is the coarsest)',
+] as const;
+/** Fields that take both signs: shown on a linear scale, centered on zero. */
+export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12]);
 
 export interface ProblemParam {
   id: string;

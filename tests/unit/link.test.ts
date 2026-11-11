@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { configFor } from '../../src/sim';
-import { problemById } from '../../src/problems';
+import { FIELDS, problemById } from '../../src/problems';
 import { defaultOpacity } from '../../src/render/transfer';
 import { DEFAULT_SETUP, decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
 
@@ -58,7 +58,7 @@ describe('shareable links', () => {
   it('ignores values it does not recognize and clamps the rest', () => {
     const l = decodeLink(new URLSearchParams('problem=sedov&riemann=exact&cfl=9&eos=<script>&field=99&tf=2:2,x:y&p.nope=3'));
     expect(l.cfg).toEqual({ cfl: 1 });
-    expect(l.view.field).toBe(4);
+    expect(l.view.field).toBe(FIELDS.length - 1);
     expect(l.opacity).toBeUndefined();
     expect(l.params).toEqual({});
   });

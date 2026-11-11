@@ -9,7 +9,7 @@ import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTL
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELDS, isSelfGravity, MENU, problemById, type Bc3, type GravityMode } from '../problems';
+import { familyById, familyOf, FIELD_TIPS, FIELDS, isSelfGravity, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
@@ -91,7 +91,7 @@ side.innerHTML = `
     <summary title="How the gas is drawn">View<span class="sum" id="sum-view"></span></summary>
     <div class="g2">
       ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')), '', 'Volume renders the gas as a glowing fog seen through the box; Slice shows one plane of cells')}
-      ${field('Field', select('field', FIELDS.map((f, i) => opt(i, f)).join('')), '', 'The quantity the colors show')}
+      ${field('Field', select('field', FIELDS.map((f, i) => `<option value="${i}" title="${FIELD_TIPS[i]}">${f}</option>`).join('')), '', 'The quantity the colors show. Fields of either sign (velocity components, heating, vorticity, divergence) are shown on a linear scale centered on zero')}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), '', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', '', 'Where the slice cuts the box along its normal')}
     </div>
@@ -572,6 +572,13 @@ function syncControls() {
   $<HTMLInputElement>('refhi').disabled = $<HTMLInputElement>('reflo').disabled = cfg.amrLevels === 0;
   $('sum-grid').textContent = `${cfg.n}${two ? '\u00b2' : '\u00b3'}, ${cfg.amrLevels ? `${cfg.amrLevels} level${cfg.amrLevels > 1 ? 's' : ''}` : 'uniform'}`;
   $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}, CFL ${cfg.cfl}`;
+  // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
+  // refinement levels on a uniform grid.
+  const fieldSel = $<HTMLSelectElement>('field');
+  const noField = (i: number) => (i === 7 && two) || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic')) || (i === 14 && cfg.amrLevels === 0);
+  for (const o of fieldSel.options) o.disabled = noField(+o.value);
+  if (noField(view.field)) view.field = 0;
+  $<HTMLInputElement>('log').disabled = SIGNED_FIELDS.has(view.field);
   $('sum-view').textContent = FIELDS[view.field];
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
   const uniform = cfg.gext.some((g) => g !== 0);
@@ -1172,6 +1179,10 @@ function bind() {
   }
   on('field', (el) => {
     view.field = +el.value;
+    // A density gradient spans decades (shocks against smooth flow), so it reads best on a log
+    // scale; refinement levels are a handful of integers.
+    if (view.field === 13) view.log = true;
+    if (view.field === 14) view.log = false;
     syncControls();
   });
   on('axis', (el) => (view.sliceAxis = +el.value));
@@ -1856,9 +1867,27 @@ function advanceStroke(now: number) {
 /** Displayed range from the latest diagnostics, unless the user typed one. */
 function updateRange(d: Diagnostics) {
   if (!$<HTMLInputElement>('auto').checked) return;
-  let [lo, hi] = d.ranges[view.field];
+  // The first fields are ranged by the diagnostics reduction; the rest by the display pass,
+  // over what it last drew.
+  const r = renderer.range;
+  const drawn = view.field >= d.ranges.length;
+  if (drawn && (!r || r.field !== view.field)) return;
+  let [lo, hi] = drawn ? [r!.lo, r!.hi] : d.ranges[view.field];
+  if (drawn) {
+    // A few extreme cells (inside a sink, at the corner of an obstacle) would set the whole
+    // range: the top is the 99.5th percentile of |value| when that is lower.
+    const top = renderer.quantile(view.field, 0.995);
+    if (top !== null) [lo, hi] = [Math.max(lo, -top), Math.min(hi, top)];
+  }
+  const log = view.log && !SIGNED_FIELDS.has(view.field);
+  if (SIGNED_FIELDS.has(view.field)) {
+    // Centered on zero, so a diverging colormap shows the sign.
+    const m = Math.max(Math.abs(lo), Math.abs(hi), 1e-30);
+    [lo, hi] = [-m, m];
+  }
   if (!(hi > lo)) hi = lo + Math.max(Math.abs(lo) * 1e-3, 1e-12);
-  if (view.log) {
+  if (log) {
+    if (drawn && r!.pos !== null) lo = Math.max(lo, r!.pos);
     hi = Math.max(hi, 1e-30);
     lo = Math.max(lo, hi * 1e-5); // at most five decades
   }
@@ -2069,6 +2098,7 @@ function tick(now: number) {
   drawSources();
   gpu.device.queue.submit([enc.finish()]);
   s.submitted();
+  renderer.submitted();
 
   inflight++;
   const adapt = steps > 0 && running;

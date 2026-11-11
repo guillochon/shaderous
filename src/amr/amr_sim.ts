@@ -1506,7 +1506,7 @@ export class AmrSim implements Simulation {
   }
   readonly fieldShader = 'amr/field.wgsl';
   fieldResources(parity: number): Record<number, GPUBuffer | GPUTextureView> {
-    return { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 30: this.bt };
+    return { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 30: this.bt };
   }
 
   status(): string {
