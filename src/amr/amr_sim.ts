@@ -20,7 +20,7 @@ import { bindGroup, computePipeline, readTexture, tex3d, type Bindable, type Gpu
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
-import { cellMark } from '../problems/types';
+import { cellMark, isSelfGravity } from '../problems/types';
 import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from '../problems/settle';
 import { completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
@@ -707,7 +707,7 @@ export class AmrSim implements Simulation {
   }
 
   private get selfGravity(): boolean {
-    return this.cfg.gravity !== 'off' && !!this.grav;
+    return isSelfGravity(this.cfg.gravity) && !!this.grav;
   }
   private get hasMasses(): boolean {
     return this.nMasses > 0;

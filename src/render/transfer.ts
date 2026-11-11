@@ -66,17 +66,25 @@ export function bakeTransfer(colormap: string, pts: OpacityPoint[]): Uint8Array<
   return out;
 }
 
-/** Small canvas editor for the opacity curve: drag points, double-click to add or remove. */
+/**
+ * Small canvas editor for the opacity curve: drag points, double-click to add or remove.
+ * Horizontal, the field value runs left to right and opacity upward; vertical (a colour bar),
+ * the value runs upward and opacity to the right.
+ */
 export class OpacityEditor {
   points = defaultOpacity();
   colormap = 'inferno';
+  /** The curve is drawn and can be edited (it matters only where the gas is drawn translucent). */
+  editable = true;
   private drag = -1;
 
   constructor(
     private canvas: HTMLCanvasElement,
     private onChange: () => void,
+    private vertical = false,
   ) {
     canvas.addEventListener('pointerdown', (e) => {
+      if (!this.editable) return;
       this.drag = this.hit(e);
       if (this.drag >= 0) canvas.setPointerCapture(e.pointerId);
     });
@@ -93,6 +101,7 @@ export class OpacityEditor {
     });
     canvas.addEventListener('pointerup', () => (this.drag = -1));
     canvas.addEventListener('dblclick', (e) => {
+      if (!this.editable) return;
       const i = this.hit(e);
       if (i > 0 && i < this.points.length - 1) {
         this.points.splice(i, 1);
@@ -103,6 +112,13 @@ export class OpacityEditor {
       }
       this.changed();
     });
+    this.draw();
+  }
+
+  setEditable(on: boolean) {
+    if (on === this.editable) return;
+    this.editable = on;
+    this.drag = -1;
     this.draw();
   }
 
@@ -119,40 +135,65 @@ export class OpacityEditor {
 
   private toCurve(e: PointerEvent | MouseEvent): [number, number] {
     const r = this.canvas.getBoundingClientRect();
-    const x = (e.clientX - r.left) / r.width;
-    const a = 1 - (e.clientY - r.top) / r.height;
+    const u = (e.clientX - r.left) / r.width;
+    const v = 1 - (e.clientY - r.top) / r.height;
+    const [x, a] = this.vertical ? [v, u] : [u, v];
     return [Math.min(1, Math.max(0, x)), Math.min(1, Math.max(0, a))];
+  }
+
+  /** A point of the curve in pixels from the canvas corner. */
+  private at(p: OpacityPoint, w: number, h: number): [number, number] {
+    return this.vertical ? [p.a * w, (1 - p.x) * h] : [p.x * w, (1 - p.a) * h];
   }
 
   private hit(e: PointerEvent | MouseEvent): number {
     const r = this.canvas.getBoundingClientRect();
-    return this.points.findIndex(
-      (p) => Math.hypot(p.x * r.width - (e.clientX - r.left), (1 - p.a) * r.height - (e.clientY - r.top)) < 9,
-    );
+    return this.points.findIndex((p) => {
+      const [px, py] = this.at(p, r.width, r.height);
+      return Math.hypot(px - (e.clientX - r.left), py - (e.clientY - r.top)) < 9;
+    });
   }
 
   draw() {
     const c = this.canvas;
-    const w = (c.width = c.clientWidth || 276);
-    const h = (c.height = c.clientHeight || 70);
+    const dpr = Math.min(3, window.devicePixelRatio || 1);
+    const w = c.clientWidth || (this.vertical ? 72 : 276);
+    const h = c.clientHeight || (this.vertical ? 200 : 70);
+    c.width = Math.round(w * dpr);
+    c.height = Math.round(h * dpr);
+    c.style.cursor = this.editable ? 'crosshair' : 'default';
     const g = c.getContext('2d')!;
-    for (let x = 0; x < w; x++) {
-      const [r, gg, b] = sampleColormap(this.colormap, x / (w - 1));
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const len = this.vertical ? h : w;
+    for (let i = 0; i < len; i++) {
+      const t = i / Math.max(len - 1, 1);
+      const [r, gg, b] = sampleColormap(this.colormap, this.vertical ? 1 - t : t);
       g.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
-      g.fillRect(x, 0, 1, h);
+      if (this.vertical) g.fillRect(0, i, w, 1);
+      else g.fillRect(i, 0, 1, h);
     }
-    g.fillStyle = 'rgba(10,12,18,0.55)';
-    g.fillRect(0, 0, w, h);
-    g.strokeStyle = '#fff';
-    g.lineWidth = 1.5;
-    g.beginPath();
-    this.points.forEach((p, i) => (i ? g.lineTo(p.x * w, (1 - p.a) * h) : g.moveTo(p.x * w, (1 - p.a) * h)));
-    g.stroke();
-    for (const p of this.points) {
+    if (!this.editable) return;
+    if (!this.vertical) {
+      g.fillStyle = 'rgba(10,12,18,0.55)';
+      g.fillRect(0, 0, w, h);
+    }
+    const pts = this.points.map((p) => this.at(p, w, h));
+    // A dark edge keeps the curve visible over the bright end of a colour map.
+    for (const [style, width] of [['rgba(0,0,0,0.6)', 3.5], ['#fff', 1.5]] as const) {
+      g.strokeStyle = style;
+      g.lineWidth = width;
       g.beginPath();
-      g.arc(p.x * w, (1 - p.a) * h, 4, 0, 2 * Math.PI);
+      pts.forEach(([x, y], i) => (i ? g.lineTo(x, y) : g.moveTo(x, y)));
+      g.stroke();
+    }
+    for (const [x, y] of pts) {
+      g.beginPath();
+      g.arc(x, y, 4, 0, 2 * Math.PI);
       g.fillStyle = '#fff';
       g.fill();
+      g.strokeStyle = 'rgba(0,0,0,0.6)';
+      g.lineWidth = 1;
+      g.stroke();
     }
   }
 }

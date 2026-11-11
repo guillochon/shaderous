@@ -6,7 +6,7 @@
 import { configFor, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
 import { EOS_LABELS, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { FIELDS, PROBLEMS, problemById, type Bc3, type GravityMode, type Problem } from '../problems';
+import { FIELDS, GRAVITY_MODES, PROBLEMS, problemById, type Bc3, type GravityMode, type Problem } from '../problems';
 import { defaultView, type ViewState } from '../render/renderer';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 
@@ -157,7 +157,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.cfg, 'cfl', num('cfl', 0.05, 1));
   const tb = num('tbins', 0, 3);
   if (tb !== undefined) out.cfg.timeBins = Math.round(tb);
-  put(out.cfg, 'gravity', pick<GravityMode>('gravity', ['off', 'periodic', 'isolated']));
+  put(out.cfg, 'gravity', pick<GravityMode>('gravity', GRAVITY_MODES));
   put(out.cfg, 'G', num('G'));
   const vc = num('vcycles', 1, 8);
   put(out.cfg, 'vcycles', vc === undefined ? undefined : Math.round(vc));

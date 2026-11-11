@@ -8,9 +8,9 @@ import { configFor, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp,
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { FIELDS, PROBLEMS, problemById, type Bc3, type GravityMode } from '../problems';
+import { familyById, familyOf, FIELDS, isSelfGravity, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
-import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor, sampleColormap } from '../render/transfer';
+import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const opt = (v: string | number, label: string) => `<option value="${v}">${label}</option>`;
@@ -44,7 +44,7 @@ side.innerHTML = `
   <header class="brand"><h1>SHADEROUS</h1><span id="adapter"></span></header>
 
   <section>
-    ${select('problem', PROBLEMS.map((p) => opt(p.id, p.label)).join(''))}
+    ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join(''))}
     <p class="blurb" id="blurb"></p>
     <div class="g3">
       ${field('Grid', select('dim', opt(3, '3D') + opt(2, '2D')))}
@@ -53,6 +53,7 @@ side.innerHTML = `
     </div>
     <div class="g3">
       ${field('End time', number('tend', 'placeholder="none"'))}
+      ${field('Variant', select('variant', ''))}
       <span id="pparams"></span>
     </div>
     <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
@@ -70,17 +71,7 @@ side.innerHTML = `
       ${field('Field', select('field', FIELDS.map((f, i) => opt(i, f)).join('')))}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')))}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />')}
-      ${field('Range min', number('lo'))}
-      ${field('Range max', number('hi'))}
-      ${field('Colour map', select('cmap', Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')))}
-      ${field('Opacity', '<input id="opacity" type="range" min="1" max="300" step="1" />')}
     </div>
-    <div class="checks">
-      <label class="check"><input id="log" type="checkbox" />Log scale</label>
-      <label class="check"><input id="auto" type="checkbox" checked />Auto range</label>
-      <label class="check" title="Outline the blocks of an adaptive mesh in the slice view"><input id="blocks" type="checkbox" checked />Blocks</label>
-    </div>
-    <canvas id="tf" title="Opacity against field value: drag points, double-click to add or remove"></canvas>
   </details>
 
   <details>
@@ -120,8 +111,13 @@ side.innerHTML = `
   <details>
     <summary>Gravity<span class="sum" id="sum-grav"></span></summary>
     <div class="g3">
-      ${field('Self-gravity', select('gravity', opt('off', 'Off') + opt('periodic', 'Periodic') + opt('isolated', 'Isolated')))}
-      ${field('G', number('G', 'min="0"'))}
+      ${field('Gravity', select('gravity', [
+        ['off', 'Off', 'No gravity (point masses still pull)'],
+        ['constant', 'Constant', 'A uniform field of strength G pointing down: -y in 2D, -z in 3D'],
+        ['periodic', 'Self, periodic', 'Self-gravity of the gas in a periodic box (3D only)'],
+        ['isolated', 'Self, isolated', 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D only)'],
+      ].map(([v, l, t]) => `<option value="${v}" title="${t}">${l}</option>`).join('')))}
+      ${field('G', number('G', 'min="0"'), 'row-G')}
       ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'))}
     </div>
     <div class="g3 jeans">
@@ -140,6 +136,38 @@ side.innerHTML = `
 
   <footer><a href="validate.html">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
+
+// The colour bar: the range at either end (editable), the opacity curve drawn on the bar, then
+// its settings.
+$('colorbar').innerHTML = `
+  <input id="hi" class="cb-range" type="text" inputmode="decimal" spellcheck="false" title="Top of the displayed range" />
+  <canvas id="tf" title="Colour bar. In the volume view the line is the opacity: drag its points sideways, double-click to add or remove one"></canvas>
+  <input id="lo" class="cb-range" type="text" inputmode="decimal" spellcheck="false" title="Bottom of the displayed range" />
+  <div class="cb-checks">
+    <label class="check" title="The range follows the data"><input id="auto" type="checkbox" checked />Auto</label>
+    <label class="check" title="Logarithmic colour scale"><input id="log" type="checkbox" />Log</label>
+    <label class="check" title="Outline the blocks of an adaptive mesh in the slice view"><input id="blocks" type="checkbox" checked />Blocks</label>
+  </div>
+  <select id="cmap" title="Colour map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
+  <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="1" max="300" step="1" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
+`;
+
+/** Show a preset in the problem and variant menus. */
+function showProblem(id: string) {
+  const fam = familyOf(id);
+  $<HTMLSelectElement>('problem').value = fam.id;
+  const variant = $<HTMLSelectElement>('variant');
+  if (variant.dataset.family !== fam.id) {
+    variant.dataset.family = fam.id;
+    variant.innerHTML = fam.variants.map((v) => opt(v.problem.id, v.label)).join('');
+  }
+  variant.value = id;
+  variant.disabled = fam.variants.length < 2;
+}
+// The page opens on the preset it is about to load, not on the first in the menu.
+const firstLink = decodeLink(new URLSearchParams(location.search));
+showProblem(firstLink.problem);
+$('blurb').textContent = problemById(firstLink.problem).blurb;
 
 // On a phone the controls are a sheet under the simulation, closed until asked for.
 {
@@ -414,17 +442,17 @@ const mods = { shift: false, alt: false };
 /** The edit the next frame applies. */
 let pendingBrush: BrushOp | null = null;
 
-const editor = new OpacityEditor($<HTMLCanvasElement>('tf'), pushTransfer);
+const editor = new OpacityEditor($<HTMLCanvasElement>('tf'), pushTransfer, true);
 
 function pushTransfer() {
   renderer?.setTransfer(bakeTransfer(editor.colormap, editor.points));
-  const cb = document.querySelector<HTMLCanvasElement>('#colorbar canvas')!;
-  const g = cb.getContext('2d')!;
-  for (let y = 0; y < 256; y++) {
-    const [r, gg, b] = sampleColormap(editor.colormap, 1 - y / 255);
-    g.fillStyle = `rgb(${r | 0},${gg | 0},${b | 0})`;
-    g.fillRect(0, y, 1, 1);
-  }
+}
+
+/** The opacity control: its fill and its value. */
+function syncOpacity() {
+  const el = $<HTMLInputElement>('opacity');
+  el.style.setProperty('--p', `${(100 * (+el.value - +el.min)) / (+el.max - +el.min)}%`);
+  $('opacity-out').textContent = el.value;
 }
 
 const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) < 1e5 ? v.toPrecision(5) : v.toExponential(2));
@@ -432,7 +460,7 @@ const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) <
 /** Reflect cfg and view into the controls. */
 function syncControls() {
   const two = cfg.ndim === 2;
-  $<HTMLSelectElement>('problem').value = cfg.problem.id;
+  showProblem(cfg.problem.id);
   syncProblemParams();
   const dim = $<HTMLSelectElement>('dim');
   dim.value = String(cfg.ndim);
@@ -457,7 +485,13 @@ function syncControls() {
   $<HTMLSelectElement>('mode').disabled = two;
   $<HTMLSelectElement>('axis').disabled = two;
   $<HTMLInputElement>('slicepos').disabled = two;
-  for (const id of ['gravity', 'G', 'vcycles', 'jeansfloor']) $<HTMLInputElement>(id).disabled = two;
+  const gravity = $<HTMLSelectElement>('gravity');
+  for (const o of gravity.options) o.disabled = two && isSelfGravity(o.value as GravityMode);
+  const self = isSelfGravity(cfg.gravity);
+  for (const id of ['vcycles', 'jeansfloor']) $<HTMLInputElement>(id).disabled = !self;
+  // G is idle without gravity, unless point masses use it.
+  const masses = !!cfg.problem.masses || placedMasses > 0;
+  $<HTMLInputElement>('G').disabled = cfg.gravity === 'off' && !masses;
   $('sum-view').textContent = FIELDS[view.field];
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
   const uniform = cfg.gext.some((g) => g !== 0);
@@ -496,7 +530,7 @@ function syncControls() {
   $<HTMLInputElement>('vcycles').value = String(cfg.vcycles);
   $<HTMLInputElement>('jeansfloor').checked = cfg.jeansFloor;
   $<HTMLInputElement>('jeanscells').value = String(cfg.jeansCells);
-  $<HTMLInputElement>('jeanscells').disabled = two || !cfg.jeansFloor;
+  $<HTMLInputElement>('jeanscells').disabled = !self || !cfg.jeansFloor;
   $<HTMLInputElement>('fluxwork').checked = cfg.gravEnergyFlux;
   $<HTMLSelectElement>('mode').value = two ? 'slice' : view.mode;
   $<HTMLSelectElement>('field').value = String(view.field);
@@ -505,7 +539,10 @@ function syncControls() {
   $<HTMLInputElement>('log').checked = view.log;
   $<HTMLInputElement>('opacity').value = String(view.opacity);
   // Opacity belongs to the volume view: a slice is drawn solid.
-  $<HTMLInputElement>('opacity').disabled = two || view.mode === 'slice';
+  const solid = two || view.mode === 'slice';
+  $<HTMLInputElement>('opacity').disabled = solid;
+  syncOpacity();
+  editor.setEditable(!solid);
   for (let a = 0; a < 3; a++) {
     $<HTMLSelectElement>(`bc-lo-${a}`).value = String(cfg.bcLo[a]);
     $<HTMLSelectElement>(`bc-hi-${a}`).value = String(cfg.bcHi[a]);
@@ -595,7 +632,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next.coolParams, link.coolParams);
       Object.assign(next.params, link.params);
       if (ndim === 2) {
-        next.gravity = 'off';
+        if (isSelfGravity(next.gravity)) next.gravity = 'off';
         next.bcLo = [next.bcLo[0], next.bcLo[1], 0];
         next.bcHi = [next.bcHi[0], next.bcHi[1], 0];
       }
@@ -610,6 +647,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (snap) Object.assign(next, restartFrom(snap, problem, levels > 0, n >> levels));
     const old = sim;
     sim = undefined;
+    $('loading').hidden = false;
     stroke = null;
     draft = null;
     pendingBrush = null;
@@ -620,8 +658,11 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     const s = await createSim(gpu, cfg);
     await renderer.attach(s);
     sim = s;
+    $('loading').hidden = true;
     finished = false;
-    running = !snap; // a freshly loaded problem starts playing; a loaded state waits to be looked at
+    // A freshly loaded problem starts playing, unless it waits for the user (an empty box); a
+    // loaded state waits to be looked at.
+    running = !snap && !problem.startPaused;
     lastDiag = undefined;
     nsub = 1;
   });
@@ -739,12 +780,18 @@ function bind() {
   const numOr = (el: HTMLInputElement, fallback: number) => (el.value === '' || Number.isNaN(+el.value) ? fallback : +el.value);
 
   const picked = () => ({
-    id: $<HTMLSelectElement>('problem').value,
+    id: $<HTMLSelectElement>('variant').value,
     n: +$<HTMLSelectElement>('res').value,
     ndim: (+$<HTMLSelectElement>('dim').value === 2 ? 2 : 3) as 2 | 3,
     levels: +$<HTMLSelectElement>('levels').value,
   });
-  on('problem', () => {
+  on('problem', (el) => {
+    // A new problem opens on its first variant.
+    showProblem(familyById(el.value).variants[0].problem.id);
+    const { id, n, ndim, levels } = picked();
+    build(id, n, ndim, levels);
+  });
+  on('variant', () => {
     const { id, n, ndim, levels } = picked();
     build(id, n, ndim, levels);
   });
@@ -842,8 +889,12 @@ function bind() {
     sim?.refreshPotential();
   };
   on('gravity', (el) => {
+    const was = cfg.gravity;
     cfg.gravity = el.value as GravityMode;
+    // Turning gravity on starts from G = 1; turning it off leaves G as it was.
+    if (was === 'off' && cfg.gravity !== 'off') cfg.G = 1;
     gravityChanged();
+    syncControls();
   });
   on('G', (el) => {
     cfg.G = numOr(el, cfg.G);
@@ -925,7 +976,10 @@ function bind() {
   on('axis', (el) => (view.sliceAxis = +el.value));
   on('slicepos', (el) => (view.slicePos = +el.value), 'input');
   on('log', (el) => (view.log = el.checked));
-  on('opacity', (el) => (view.opacity = +el.value), 'input');
+  on('opacity', (el) => {
+    view.opacity = +el.value;
+    syncOpacity();
+  }, 'input');
   on('cmap', (el) => {
     editor.colormap = el.value;
     editor.draw();
@@ -1353,7 +1407,8 @@ function beginStroke(e: PointerEvent) {
   const s: Stroke = {
     id: e.pointerId, kind: tool!, x0: x, y0: y, x, y, shift: e.shiftKey, depth: view.dist, ready: flatView(),
     released: false, dabbed: false, t0: performance.now(), flowed: 0,
-    rhoMax: d?.ranges[0][1] ?? 1, vRef: Math.max(d?.ranges[4][1] ?? 0, 0.2 * cs),
+    rhoMax: Math.max(d?.ranges[0][1] ?? 1, cfg.problem.toolScale?.rho ?? 0),
+    vRef: Math.max(d?.ranges[4][1] ?? 0, 0.2 * cs, cfg.problem.toolScale?.v ?? 0),
   };
   stroke = s;
   if (!s.ready) {
@@ -1474,7 +1529,7 @@ function advanceStroke(now: number) {
     stroke = null;
     // Self-gravity has to hear about the new mass.
     const target = sim;
-    if (s.kind === 'mass' && cfg.gravity !== 'off' && cfg.ndim === 3) {
+    if (s.kind === 'mass' && isSelfGravity(cfg.gravity) && cfg.ndim === 3) {
       setTimeout(() => target.diagnostics().then((d) => target === sim && target.massChanged(d.mass), fail), 0);
     }
   }
@@ -1534,8 +1589,6 @@ const diagCells = DIAG_ROWS.map(([label, title], i) => {
   return { dd, set: liveText(dd), warn: false };
 });
 const setHud = liveText(hud);
-const setCbHi = liveText($('cb-hi'));
-const setCbLo = liveText($('cb-lo'));
 
 function showDiagnostics(d: Diagnostics) {
   const values: [string, boolean][] = [
@@ -1562,8 +1615,6 @@ function showDiagnostics(d: Diagnostics) {
       cell.dd.classList.toggle('warn', warn);
     }
   });
-  setCbHi(num(view.hi));
-  setCbLo(num(view.lo));
 }
 
 // --- frame loop -------------------------------------------------------------------------
@@ -1722,8 +1773,7 @@ function tick(now: number) {
     editor.set(defaultOpacity(), 'inferno');
     pushTransfer();
     bind();
-    const link = decodeLink(new URLSearchParams(location.search));
-    await build(link.problem, link.n, link.ndim, link.amr, false, link);
+    await build(firstLink.problem, firstLink.n, firstLink.ndim, firstLink.amr, false, firstLink);
     requestAnimationFrame(tick);
   } catch (e) {
     fail(e);

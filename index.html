@@ -14,7 +14,7 @@
         <canvas id="view"></canvas>
         <div id="hud"></div>
         <div id="rail">
-          <div id="colorbar"><span id="cb-hi"></span><canvas width="1" height="256"></canvas><span id="cb-lo"></span></div>
+          <div id="colorbar"></div>
           <div id="tools"></div>
         </div>
         <svg id="marks" aria-hidden="true"></svg>
@@ -24,6 +24,7 @@
           </defs>
           <circle r="0" /><ellipse /><path class="shape" /><line marker-end="url(#brush-head)" />
         </svg>
+        <div id="loading" role="status"><span class="spin" aria-hidden="true"></span>Loading simulation…</div>
         <div id="error"></div>
       </main>
     </div>

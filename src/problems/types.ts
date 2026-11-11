@@ -25,7 +25,14 @@ export const REFLECT = 2;
 export const OUTFLOW_ONLY = 3;
 export type Bc3 = [number, number, number];
 
-export type GravityMode = 'off' | 'periodic' | 'isolated';
+/**
+ * Gravity: none, a constant downward field of strength G (-y in 2D, -z in 3D, the axis drawn
+ * upward), or self-gravity with periodic or isolated boundaries.
+ */
+export type GravityMode = 'off' | 'constant' | 'periodic' | 'isolated';
+export const GRAVITY_MODES: readonly GravityMode[] = ['off', 'constant', 'periodic', 'isolated'];
+/** The mode solves for the gas's own potential (3D only). */
+export const isSelfGravity = (m: GravityMode): boolean => m === 'periodic' || m === 'isolated';
 
 // Fields the renderer can show; order matches field.wgsl.
 export const FIELDS = ['Density', 'Temperature', 'Passive scalar', 'Pressure', 'Speed'] as const;
@@ -86,6 +93,13 @@ export interface Problem {
   gext?: (ndim: 2 | 3) => [number, number, number];
   /** A polytropic star at rest, settled into the grid's own hydrostatic balance before the run (problems/settle.ts). */
   star?: StarSpec;
+  /** The run waits, paused, for the user to start it. */
+  startPaused?: boolean;
+  /**
+   * Least density and speed the editing tools measure their amounts against, for a box that
+   * holds next to nothing to measure them by.
+   */
+  toolScale?: { rho: number; v: number };
   /** Default view; `axis` is the slice normal in 3D (0 x, 1 y, 2 z), `pitch` the camera elevation in radians. */
   view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice'; axis?: number; pitch?: number };
   /** Returns the initial primitive state as a function of position. */
