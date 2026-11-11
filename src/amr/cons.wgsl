@@ -46,6 +46,26 @@ fn u_near(slot: i32, l: vec3<i32>) -> MaybeCons {
   return MaybeCons(u, true);
 }
 
+// Slope of the momentum along one axis, built from limited slopes of the density and of the
+// velocity (the product rule) and not from the momentum's own differences. Where the density
+// has a local minimum beside much denser gas, its slope is limited to zero while the momentum,
+// which mostly follows the density, still has a large one-sided slope. The fine cells then
+// share one density but get momenta far apart: velocities many times any real one, and a
+// coarse cell that feeds them through the matched fluxes loses momentum faster each step.
+// Built this way a fine cell's velocity differs from the coarse one by at most the limited
+// velocity slope times the density ratio, which the scaling in prolong() keeps under two.
+fn mom_slope(uc: vec4<f32>, um: vec4<f32>, up: vec4<f32>, srho: f32) -> vec3<f32> {
+  let vc = uc.yzw / max(uc.x, P.rho_floor);
+  let vm = um.yzw / max(um.x, P.rho_floor);
+  let vp = up.yzw / max(up.x, P.rho_floor);
+  let sv = limit4(vec4<f32>(vc - vm, 0.0), vec4<f32>(vp - vc, 0.0)).xyz;
+  return vc * srho + uc.x * sv;
+}
+fn slope_between(uc: Cons, m: Cons, p: Cons) -> Cons {
+  let a = limit4(uc.a - m.a, p.a - uc.a);
+  return Cons(vec4<f32>(a.x, mom_slope(uc.a, m.a, p.a, a.x)), limit4(uc.b - m.b, p.b - uc.b));
+}
+
 // Conservative, limited linear interpolation from a coarse cell to one of the fine cells it
 // covers. `par` is the fine cell's parity (0 or 1) along each axis.
 //
@@ -60,9 +80,9 @@ fn prolong(uc: Cons, xm: MaybeCons, xp: MaybeCons, ym: MaybeCons, yp: MaybeCons,
   var sx = Cons(vec4<f32>(0.0), vec4<f32>(0.0));
   var sy = sx;
   var sz = sx;
-  if (xm.ok && xp.ok) { sx = Cons(limit4(uc.a - xm.u.a, xp.u.a - uc.a), limit4(uc.b - xm.u.b, xp.u.b - uc.b)); }
-  if (ym.ok && yp.ok) { sy = Cons(limit4(uc.a - ym.u.a, yp.u.a - uc.a), limit4(uc.b - ym.u.b, yp.u.b - uc.b)); }
-  if (zm.ok && zp.ok && !is2d()) { sz = Cons(limit4(uc.a - zm.u.a, zp.u.a - uc.a), limit4(uc.b - zm.u.b, zp.u.b - uc.b)); }
+  if (xm.ok && xp.ok) { sx = slope_between(uc, xm.u, xp.u); }
+  if (ym.ok && yp.ok) { sy = slope_between(uc, ym.u, yp.u); }
+  if (zm.ok && zp.ok && !is2d()) { sz = slope_between(uc, zm.u, zp.u); }
   // Largest drop below the coarse value among the fine cells: (density, total energy, internal energy).
   let drop = 0.25 * (abs(vec3<f32>(sx.a.x, sx.b.x, sx.b.y)) + abs(vec3<f32>(sy.a.x, sy.b.x, sy.b.y)) + abs(vec3<f32>(sz.a.x, sz.b.x, sz.b.y)));
   let room = 0.5 * max(vec3<f32>(uc.a.x, uc.b.x, uc.b.y), vec3<f32>(0.0));
