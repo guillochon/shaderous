@@ -6,16 +6,22 @@
 
 // Block grids reduce rate / dx and |g| / dx per cell, since dx varies between blocks.
 override PER_DX: bool = false;
+// Per-block timesteps (amr/bins_on.wgsl): the step set here is repeated for a cycle of
+// substeps, and the step just taken is banked by amr/bins_tick.wgsl instead.
+override BANK: bool = true;
+override CYCLE: f32 = 1.0;
 
 @compute @workgroup_size(1)
 fn main() {
   // Bank the step that has just been taken (Kahan summation keeps t accurate in float32).
-  let prev = clock.dt;
-  let y = prev - clock.tc;
-  let tt = clock.t + y;
-  clock.tc = (tt - clock.t) - y;
-  clock.t = tt;
-  if (prev > 0.0) { clock.steps += 1.0; }
+  if (BANK) {
+    let prev = clock.dt;
+    let y = prev - clock.tc;
+    let tt = clock.t + y;
+    clock.tc = (tt - clock.t) - y;
+    clock.t = tt;
+    if (prev > 0.0) { clock.steps += 1.0; }
+  }
 
   let dx = select(P.dx, 1.0, PER_DX);
   var dt = P.cfl * dx / max(RED[0], 1.0e-30);
@@ -27,7 +33,7 @@ fn main() {
   if (remaining <= 1.0e-6 * abs(P.t_end)) {
     dt = 0.0;
   } else {
-    dt = min(dt, remaining);
+    dt = min(dt, remaining / CYCLE);
   }
   clock.dt = dt;
 }

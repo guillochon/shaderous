@@ -26,6 +26,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rc = region_cell(gid);
   if (!rc.mine) { return; }
   g_dx = P.dx;
+  g_dt = clock.dt;
   let c = rc.c;
   g_inner = stencil_inside(c, 1);
   let q = load_q(c);

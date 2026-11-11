@@ -3,9 +3,13 @@
 //         the frame's own acceleration when there are any (interior cells)
 //   w   = potential extrapolated half a step ahead, for the update's time-centred energy
 //         source (interior cells and the first ghost layer)
+// With per-block timesteps the half step is the block's own, and the pass runs over the
+// blocks about to start a step.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include <bins>
+#include "amr/blk_dt.wgsl"
 #include "gravity/bh.wgsl"
 
 @group(0) @binding(1) var PHI: texture_3d<f32>;
@@ -17,6 +21,8 @@
 fn phi(c: vec3<i32>) -> f32 {
   return textureLoad(PHI, c, 0).x;
 }
+
+#include <half>
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -38,7 +44,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     ) * (0.5 / h);
   }
   var ph = 0.0;
-  if (self_gravity) { ph = 1.5 * phi(c) - 0.5 * textureLoad(PHI_OLD, c, 0).x; }
+  if (self_gravity) { ph = phi_half(c, inv.slot); }
   if (P.bh.z != 0.0) {
     let x = blk_pos(inv.slot, l);
     // The frame's acceleration a acts as a uniform field -a, whose potential is a . x.
@@ -46,7 +52,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     ph += dot(BH.frame.xyz, x);
     for (var i = 0u; i < mass_count(); i++) {
       if (nout == 0) { g += bh_accel(x, BH.list[i]); }
-      ph += bh_phi(x, BH.list[i], 0.5 * clock.dt);
+      ph += bh_phi(x, BH.list[i], 0.5 * blk_dt(inv.slot));
     }
   }
   textureStore(GOUT, c, vec4<f32>(g, ph));

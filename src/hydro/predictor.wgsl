@@ -4,7 +4,7 @@
 //   b = (p, scalar at the half step, shock flag, first-order flag)
 // `mask` multiplies the slopes per axis; it is 1 except where a neighbour along that axis is
 // unavailable (ghost cells at the edge of a block next to a coarser one).
-// Requires P, clock, hydro/q.wgsl, and g_dx set.
+// Requires P, hydro/q.wgsl, and g_dx and g_dt set.
 fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>, mask: vec3<f32>) -> Q {
   var xm = xm0;
   var xp = xp0;
@@ -53,7 +53,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   let shock = select(0.0, 1.0, conv < 0.0 && jump > P.shock_thresh);
 
   // Predictor in primitive form, plus half a gravity kick.
-  let h = 0.5 * clock.dt / g_dx;
+  let h = 0.5 * g_dt / g_dx;
   let rho = q.a.x;
   let v = q.a.yzw;
   let cs = q.b.z;
@@ -64,7 +64,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
 
   var a = vec4<f32>(
     rho - h * (da.x + rho * dv),
-    v - h * (da.yzw + gradp / rho) + 0.5 * clock.dt * g,
+    v - h * (da.yzw + gradp / rho) + 0.5 * g_dt * g,
   );
   var b = vec2<f32>(q.b.x - h * (db.x + rho * cs * cs * dv), q.b.y - h * db.y);
 

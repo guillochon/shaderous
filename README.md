@@ -163,8 +163,34 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   ghost or not, from wherever its value lives: a neighbouring block, a boundary image, the
   average of finer cells, or an interpolation from a coarser block. At a refinement boundary
   the coarse cell recomputes the fine fluxes rather than using its own, which conserves
-  without storing fluxes; this needs every level to take the same timestep. The mesh is
+  without storing fluxes. The mesh is
   rebuilt from the CPU every 8 steps, from a per-block indicator read back without blocking.
+- **Local timesteps** (adaptive mesh, off by default; "Local timesteps" under Hydro, `tbins`
+  in a link). Time advances in cycles of up to 8 substeps of the smallest step. At the start
+  of a cycle every block gets a bin from its own signal speed, on the GPU: a block in bin k
+  steps 2^k substeps at a time. Face neighbours are at most one bin apart, a block next to a
+  faster one steps as fast, and a block is never slower than a coarser neighbour. Across a
+  face whose other side steps twice as often, a block takes that side's fluxes, recomputed
+  from its stored states: half when its own step starts, half at its midpoint. So nothing is
+  stored and conservation stays at round-off. A faster block reads a neighbour that is part
+  way through a step from that neighbour's half-step prediction. With self-gravity the
+  potential is solved on every block when a cycle ends and, in between, only on the blocks
+  finishing a step; elsewhere it is carried forward at the rate it last changed there, which
+  is also what extrapolates it half a step ahead for the energy source. Point masses move
+  every substep. The extra passes are not free (measured in 3D: each block update costs about
+  10% more without gravity and 50 to 70% more with it, where every substep also relaxes the
+  potential), so the share of updates actually made is read back every few cycles and the
+  run falls back to one timestep while that share is above 80% (65% with a gravity field);
+  the status line says which. Measured against one timestep: a 3D Sedov blast at 256 with 3
+  levels makes 2.2 times fewer block updates and runs 1.9 times faster; an isothermal
+  collapse at 256 with 3 levels 2.3 times fewer and 1.6 times faster. Smooth flows, and stars
+  that fill their refined region, gain nothing and stay on one timestep; with the option on
+  they still pay for the occasional trial cycles and the bin checks in the passes, measured
+  at 0 to 3% in 3D and 15 to 25% in 2D, where a block is cheap and its ghost cells are a
+  large share of it. A block that steps
+  less often has its half-step potential extrapolated further, so energy is conserved a
+  little less well with gravity: the Evrard collapse loses 2.1 times as much energy at 128
+  cells with 2 levels, 1.1 times at 256 with 3.
 - **Gravity on the adaptive mesh.** The potential lives on every block, parents included.
   The density is averaged into the parents, ghost cells of a level come from its neighbours
   or are interpolated from the level above, and a multigrid cycle runs inside the blocks (16,

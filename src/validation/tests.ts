@@ -70,6 +70,27 @@ async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<S
   }
 }
 
+/** Radius of a blast wave on the adaptive mesh: the half-height point of the outer edge of the shell-averaged density. */
+function leafShockRadius(c: LeafCells): number {
+  const nb = 128;
+  const bw = 0.5 / nb;
+  const sum = new Float64Array(nb);
+  const vol = new Float64Array(nb);
+  for (let q = 0; q < c.count; q++) {
+    const b = Math.floor(Math.hypot(c.x[q], c.y[q], c.z[q]) / bw);
+    if (b >= nb) continue;
+    const v = c.dx[q] ** 3;
+    sum[b] += c.u1[q * 4] * v;
+    vol[b] += v;
+  }
+  const prof = Array.from(sum, (v, i) => (vol[i] ? v / vol[i] : 1));
+  const half = 0.5 * (Math.max(...prof) + 1);
+  for (let b = nb - 1; b > 0; b--) {
+    if (prof[b - 1] >= half) return (b - 0.5 + (prof[b - 1] - half) / (prof[b - 1] - prof[b])) * bw;
+  }
+  return NaN;
+}
+
 async function withAmr<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: AmrSim) => Promise<T>) {
   const sim = await AmrSim.create(gpu, configFor(problem, n, over));
   try {
@@ -524,27 +545,7 @@ export const TESTS: TestDef[] = [
         const steps = await sim.runToEnd();
         const d1 = await sim.diagnostics();
         const c = await sim.readLeaves();
-        // Volume-weighted shell average, then the half-height radius of its outer edge.
-        const nb = 128;
-        const bw = 0.5 / nb;
-        const sum = new Float64Array(nb);
-        const vol = new Float64Array(nb);
-        for (let q = 0; q < c.count; q++) {
-          const b = Math.floor(Math.hypot(c.x[q], c.y[q], c.z[q]) / bw);
-          if (b >= nb) continue;
-          const v = c.dx[q] ** 3;
-          sum[b] += c.u1[q * 4] * v;
-          vol[b] += v;
-        }
-        const prof = Array.from(sum, (v, i) => (vol[i] ? v / vol[i] : 1));
-        const half = 0.5 * (Math.max(...prof) + 1);
-        let r = NaN;
-        for (let b = nb - 1; b > 0; b--) {
-          if (prof[b - 1] >= half) {
-            r = (b - 0.5 + (prof[b - 1] - half) / (prof[b - 1] - prof[b])) * bw;
-            break;
-          }
-        }
+        const r = leafShockRadius(c);
         const rExact = SEDOV_XI0['1.4'] * Math.pow(sedov.tEnd ** 2, 0.2);
         const err = Math.abs(r - rExact) / rExact;
         const flux = await sim.fluxMismatch();
@@ -720,6 +721,57 @@ export const TESTS: TestDef[] = [
           },
         };
       });
+    },
+  },
+  {
+    id: 'amr-time-bins',
+    name: 'Adaptive mesh: per-block timesteps (Sod 2D, Sedov 3D, Evrard collapse)',
+    criterion:
+      'With blocks stepping up to 8 times less often than the fastest: Sod L1 density error < 0.003 and Sedov shock radius within 2%, as with one timestep; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates (a small box: the blast fills much of it); Evrard collapse to t = 0.8 (64 steps) loses no more than 3 times the energy it does with one timestep (about 2 here, 1.1 at twice the resolution: the half-step potential of a block that steps less often is extrapolated further)',
+    async run(gpu) {
+      const bins = { timeBins: 3, timeBinsAlways: true };
+      const drift = (a: { mass: number; eTot: number }, b: { mass: number; eTot: number }) => [Math.abs(b.mass - a.mass) / a.mass, Math.abs(b.eTot - a.eTot) / Math.abs(a.eTot)];
+      const sod = await withAmr(gpu, sodX, 256, { ndim: 2, amrLevels: 2, ...bins }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        const c = await sim.readLeaves();
+        const exact = exactRiemann(sodX.left, sodX.right, 1.4);
+        let err = 0;
+        let area = 0;
+        for (let q = 0; q < c.count; q++) {
+          const a = c.dx[q] ** 2;
+          err += Math.abs(c.u1[q * 4] - exact(c.x[q] / sodX.tEnd).rho) * a;
+          area += a;
+        }
+        return { l1: err / area, drift: drift(d0, d1) };
+      });
+      const blast = await withAmr(gpu, sedov, 128, { amrLevels: 2, ...bins }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        const r = leafShockRadius(await sim.readLeaves());
+        const rExact = SEDOV_XI0['1.4'] * Math.pow(sedov.tEnd ** 2, 0.2);
+        const work = await sim.binWork();
+        return { err: Math.abs(r - rExact) / rExact, drift: drift(d0, d1), share: work.updates / work.single };
+      });
+      const collapse = async (over: Partial<SimConfig>) =>
+        withAmr(gpu, evrard, 128, { amrLevels: 2, tEnd: 0.8, ...over }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd();
+          return drift(d0, await sim.diagnostics())[1];
+        });
+      const eOne = await collapse({});
+      const eBins = await collapse(bins);
+      return {
+        pass:
+          sod.l1 < 0.003 && Math.max(...sod.drift) < 1e-6 && blast.err < 0.02 && Math.max(...blast.drift) < 1e-6 && blast.share < 0.85 && eBins < 3 * eOne,
+        metrics: {
+          sod_l1: sod.l1, sod_mass_drift: sod.drift[0], sod_energy_drift: sod.drift[1],
+          sedov_radius_error: blast.err, sedov_mass_drift: blast.drift[0], sedov_energy_drift: blast.drift[1], sedov_share_of_block_updates: blast.share,
+          evrard_energy_drift_one_timestep: eOne, evrard_energy_drift_per_block: eBins,
+        },
+      };
     },
   },
   {

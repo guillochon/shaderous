@@ -46,11 +46,17 @@ describe('shader assembly', () => {
       for (const riemann of ['hllc', 'hll'])
         for (const limiter of ['koren', 'mc', 'vanleer', 'minmod']) {
           for (const cooling of Object.values(COOLING_MODULES)) {
-            const slots = { eos, riemann: `hydro/riemann/${riemann}.wgsl`, limiter: `hydro/limiters/${limiter}.wgsl`, cooling };
-            for (const entry of ['hydro/rates.wgsl', 'hydro/update.wgsl', 'amr/update.wgsl', 'gravity/correct.wgsl', 'amr/correct.wgsl']) {
-              const src = assemble(entry, slots);
-              expect(src).not.toMatch(/^\s*#include/m);
-              expect(src).toContain('fn eos_pressure');
+            // The adaptive passes come with one timestep for all blocks, or per-block timesteps.
+            for (const bins of ['off', 'on']) {
+              const slots = {
+                eos, riemann: `hydro/riemann/${riemann}.wgsl`, limiter: `hydro/limiters/${limiter}.wgsl`, cooling,
+                bins: `amr/bins_${bins}.wgsl`, mid: `amr/mid_${bins}.wgsl`,
+              };
+              for (const entry of ['hydro/rates.wgsl', 'hydro/update.wgsl', 'amr/update.wgsl', 'amr/assemble.wgsl', 'amr/predict.wgsl', 'gravity/correct.wgsl', 'amr/correct.wgsl']) {
+                const src = assemble(entry, slots);
+                expect(src).not.toMatch(/^\s*#include/m);
+                if (entry !== 'amr/predict.wgsl') expect(src).toContain('fn eos_pressure');
+              }
             }
           }
         }

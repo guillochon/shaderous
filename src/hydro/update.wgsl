@@ -58,6 +58,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rc = region_cell(gid);
   if (!rc.mine) { return; }
   g_dx = P.dx;
+  g_dt = clock.dt;
   let c = rc.c;
   if (has_solids()) {
     // Solid and fixed cells keep their state.

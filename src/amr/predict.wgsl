@@ -5,11 +5,14 @@
 // that cell's own neighbourhood. For a same-level neighbour that is exactly the neighbour's
 // own prediction, so the two blocks compute identical fluxes at their shared face. A ghost
 // next to a coarser block is predicted in place from this block's interpolated ghosts; the
-// transverse slopes are dropped where they would need an edge ghost.
+// transverse slopes are dropped where they would need an edge ghost. Every block predicts
+// with its own step, its ghosts included (per-block timesteps, amr/bins_on.wgsl).
 #include "hydro/common.wgsl"
 #include <limiter>
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include <bins>
+#include "amr/blk_dt.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var W1: texture_3d<f32>;
@@ -58,11 +61,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let inv = inv_padded(gid, 1);
   if (!inv.ok) { return; }
   g_dx = blk_dx(inv.slot);
+  g_dt = blk_dt(inv.slot);
   let s = ghost_src(inv.slot, inv.l);
   if (s.kind == 2) { return; }
 
   var pr: Q;
-  if (s.kind == 0) {
+  // A neighbour part way through a longer step holds primitives of an earlier time. Its ghost
+  // here was filled from its half-step prediction, and is predicted in place, like one next
+  // to a coarser block.
+  let stale = BINS_ON && s.slot != inv.slot && blk_leaf(s.slot) && !blk_active(s.slot);
+  if (s.kind == 0 && !stale) {
     let src = atl(blk_origin(s.slot), s.l);
     pr = predict_cell(src, vec3<f32>(1.0), grav_at(src));
     pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s));

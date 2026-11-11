@@ -30,6 +30,8 @@
 var<workgroup> wg_max: array<atomic<u32>, 2>;
 
 #include "amr/cons.wgsl"
+#include <bins>
+#include <mid>
 
 // Fine ghost cell l of block `slot`, interpolated from the coarser leaf `cs` beyond the face.
 fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
@@ -42,6 +44,16 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);
+  if (mid_block(cs)) {
+    // The coarser block is half way through its step: interpolate its half-step prediction.
+    return prolong(
+      mid_cons(cs, lc),
+      MaybeCons(mid_cons(cs, lc - ex), true), MaybeCons(mid_cons(cs, lc + ex), true),
+      MaybeCons(mid_cons(cs, lc - ey), true), MaybeCons(mid_cons(cs, lc + ey), true),
+      MaybeCons(mid_cons(cs, lc - ez), true), MaybeCons(mid_cons(cs, lc + ez), true),
+      gf & vec3<i32>(1),
+    );
+  }
   return prolong(
     u_at(cs, lc),
     u_near(cs, lc - ex), u_near(cs, lc + ex),
@@ -64,7 +76,7 @@ fn main(
     if (s.kind != 2) {
       var u: Cons;
       if (s.kind == 0) {
-        u = u_at(s.slot, s.l);
+        if (mid_block(s.slot)) { u = mid_cons(s.slot, s.l); } else { u = u_at(s.slot, s.l); }
       } else {
         u = from_coarse(inv.slot, inv.l, s.slot);
       }

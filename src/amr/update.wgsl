@@ -5,8 +5,16 @@
 // cell does not use its own flux through that face. It recomputes the fine fluxes instead,
 // from the fine blocks' stored states with the same function the fine cells use, and takes
 // their average. Both sides then agree on what crossed the face, so mass, momentum and energy
-// are conserved across levels without storing any fluxes. (This relies on every level taking
-// the same timestep.)
+// are conserved across levels without storing any fluxes.
+//
+// Per-block timesteps (amr/bins_on.wgsl) extend the same idea in time. Across a face whose
+// other side steps twice as often, a block does not use its own flux either: it takes the
+// faster side's, recomputed from that side's stored states, for the half of its step that
+// the faster side is now starting. The first half goes into the block's own update; the
+// second is added when the faster side starts its second step, in a pass over the block that
+// changes nothing else (`deposit` below). What crossed the face is then the same on both
+// sides, again without storing fluxes. The bins are such that the faster side is never the
+// coarser one, so at a refinement boundary it is still the fine fluxes that count.
 #include "hydro/common.wgsl"
 #include <eos>
 #include <limiter>
@@ -15,6 +23,8 @@
 #include "hydro/fluff.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include <bins>
+#include "amr/blk_dt.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -49,6 +59,24 @@ fn load_pred(c: vec3<i32>) -> Q {
 fn flux_add(a: Flux, b: Flux) -> Flux {
   return Flux(a.m + b.m, a.mom + b.mom, a.e + b.e, a.ei + b.ei, a.s + b.s, a.vn + b.vn);
 }
+fn flux_scale(f: Flux, w: f32) -> Flux {
+  return Flux(f.m * w, f.mom * w, f.e * w, f.ei * w, f.s * w, f.vn * w);
+}
+
+// The block being worked on: its bin, and whether this pass only deposits the second half of
+// its faster neighbours' fluxes (the block is half way through its step).
+var<private> g_bin: u32 = 0u;
+var<private> g_deposit: bool = false;
+var<private> g_touched: bool = false;
+
+// Share of this block's step for which the flux of the neighbouring leaf `nb` is to be used
+// now: all of it for a neighbour in step with the block, half for a faster one, and in a
+// deposit pass nothing for the former.
+fn share(nb: i32) -> f32 {
+  if (!BINS_ON) { return 1.0; }
+  if (blk_bin(nb) < g_bin) { return 0.5; }
+  return select(1.0, 0.0, g_deposit);
+}
 
 // Average of the fine fluxes through the face that coarse cell l shares with the refined
 // neighbour block `np`. `upper` says the fine blocks lie on the upper side of `np` along `axis`
@@ -59,6 +87,9 @@ fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
   bits[axis] = i32(upper);
   if (is2d()) { bits.z = 0; }
   let ch = bt(np, 12u + u32(bits.x | (bits.y << 1u) | (bits.z << 2u)));
+  let part = share(ch);
+  if (part == 0.0) { return flux_zero(); }
+  g_touched = true;
   let o = blk_origin(ch);
   var e = vec3<i32>(0);
   e[axis] = 1;
@@ -84,8 +115,22 @@ fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
     }
   }
   g_dx = dx_coarse;
-  let w = 1.0 / f32(n1 * n2);
-  return Flux(sum.m * w, sum.mom * w, sum.e * w, sum.ei * w, sum.s * w, sum.vn * w);
+  var w = 1.0 / f32(n1 * n2);
+  if (BINS_ON) { w *= part; }
+  return flux_scale(sum, w);
+}
+
+// The flux through the face shared with the same-level leaf `np`, as `np` computes it, for a
+// neighbour that steps twice as often; otherwise the block's own flux `own`. `upper` as in
+// fine_flux: `np` lies below the block, and the face is the upper face of its last cells.
+fn leaf_flux(own: Flux, np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
+  if (blk_bin(np) >= g_bin) { return own; }
+  g_touched = true;
+  var e = vec3<i32>(0);
+  e[axis] = 1;
+  var a = l;
+  a[axis] = select(-1, BS - 1, upper);
+  return flux_scale(flux_between(atl(blk_origin(np), a), e, axis), 0.5);
 }
 
 // Replace the fluxes through faces shared with a refined neighbour.
@@ -94,10 +139,12 @@ fn match_faces(fl: Faces, slot: i32, axis: i32, l: vec3<i32>) -> Faces {
   if (l[axis] == 0) {
     let np = bt(slot, 6u + u32(2 * axis));
     if (np >= 0 && !blk_leaf(np)) { out.lo = fine_flux(np, axis, true, l); }
+    else if (BINS_ON && np >= 0 && np != slot) { out.lo = leaf_flux(out.lo, np, axis, true, l); }
   }
   if (l[axis] == BS - 1) {
     let np = bt(slot, 7u + u32(2 * axis));
     if (np >= 0 && !blk_leaf(np)) { out.hi = fine_flux(np, axis, false, l); }
+    else if (BINS_ON && np >= 0 && np != slot) { out.hi = leaf_flux(out.hi, np, axis, false, l); }
   }
   return out;
 }
@@ -112,6 +159,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let slot = inv.slot;
   let l = inv.l;
   g_dx = blk_dx(slot);
+  g_dt = blk_dt(slot);
+  g_bin = blk_bin(slot);
+  g_deposit = BINS_ON && !blk_active(slot);
   let c = atl(blk_origin(slot), l);
   if (has_solids()) {
     // Solid and fixed cells keep their state.
@@ -128,10 +178,26 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let w0 = load_q(c);
   let p0 = load_pred(c);
-  let fx = match_faces(axis_fluxes(c, ex, 0, w0, p0), slot, 0, l);
-  let fy = match_faces(axis_fluxes(c, ey, 1, w0, p0), slot, 1, l);
-  var fz = Faces(flux_zero(), flux_zero());
-  if (!is2d()) { fz = match_faces(axis_fluxes(c, ez, 2, w0, p0), slot, 2, l); }
+  let none = Faces(flux_zero(), flux_zero());
+  var fx = none;
+  var fy = none;
+  var fz = none;
+  if (g_deposit) {
+    // Half way through the block's step: only what its faster neighbours carry across the
+    // shared faces during their second step. A cell on no such face is copied as it is.
+    fx = match_faces(none, slot, 0, l);
+    fy = match_faces(none, slot, 1, l);
+    if (!is2d()) { fz = match_faces(none, slot, 2, l); }
+    if (!g_touched) {
+      textureStore(O1, c, textureLoad(U1, c, 0));
+      textureStore(O2, c, textureLoad(U2, c, 0));
+      return;
+    }
+  } else {
+    fx = match_faces(axis_fluxes(c, ex, 0, w0, p0), slot, 0, l);
+    fy = match_faces(axis_fluxes(c, ey, 1, w0, p0), slot, 1, l);
+    if (!is2d()) { fz = match_faces(axis_fluxes(c, ez, 2, w0, p0), slot, 2, l); }
+  }
 
   if (DEBUG_FLUX) {
     textureStore(O1, c, vec4<f32>(fx.lo.m, fx.hi.m, fy.lo.m, fy.hi.m));
@@ -165,17 +231,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let u2 = textureLoad(U2, c, 0);
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
-  if (gravity) {
-    kick = 0.5 * clock.dt * u1.x * g;
+  if (gravity && !g_deposit) {
+    kick = 0.5 * g_dt * u1.x * g;
     if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
   }
 
   var nw = advance(u1, u2, net_inflow(fx, fy, fz), dw, p0.b.x, kick, ekick);
+  if (g_deposit) {
+    // The kicks, sources and cooling of this step were applied when it started.
+    textureStore(O1, c, nw.u1);
+    textureStore(O2, c, nw.u2);
+    return;
+  }
 
   if (gravity && !self_gravity) {
     // Second half kick, with the updated density.
     let rho = nw.u1.x;
-    let k2 = 0.5 * clock.dt * rho * g;
+    let k2 = 0.5 * g_dt * rho * g;
     let mom = nw.u1.yzw + k2;
     var E = nw.u2.x;
     var eint = nw.u2.y;
@@ -188,8 +260,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     nw = NewState(vec4<f32>(rho, mom), vec4<f32>(E, eint, nw.u2.z, 0.0));
   }
-  if (has_sources()) { nw = apply_sources(nw, blk_pos(slot, l) / P.box + 0.5, clock.dt); }
-  nw = apply_cooling(nw, clock.dt);
+  if (has_sources()) { nw = apply_sources(nw, blk_pos(slot, l) / P.box + 0.5, g_dt); }
+  nw = apply_cooling(nw, g_dt);
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);
 }

@@ -8,6 +8,10 @@ const PRE = 2; // smoothing sweeps before restriction
 const POST = 2; // and after prolongation
 const COARSE = 8; // sweeps on the coarsest sublevel (one cell per block)
 const NSUB = 5; // sublevels: 16, 8, 4, 2, 1 cells per block side
+/** The field pass with one timestep for all blocks. */
+export const FIELD_SLOTS = { bins: 'amr/bins_off.wgsl', half: 'amr/gravity/half_off.wgsl' };
+/** And with per-block timesteps: the half step is each block's own. */
+export const FIELD_SLOTS_BINS = { bins: 'amr/bins_on.wgsl', half: '#include "amr/gravity/half_on.wgsl"\n#include "amr/gravity/half_field.wgsl"' };
 const SEQUENTIAL = !!(globalThis as { AMR_GRAVITY_SEQUENTIAL?: boolean }).AMR_GRAVITY_SEQUENTIAL; // debugging: always level by level
 
 export interface GravityContext {
@@ -31,7 +35,15 @@ export interface GravityContext {
   stateU1: GPUTexture[];
   /** gravity field atlas (acceleration, half-step potential) */
   gfield: GPUTexture;
+  /** per-block timesteps: the bins, the lists of the coming substep, and their dispatch sizes */
+  bins: GPUBuffer;
+  listAct: GPUBuffer;
+  listUpd: GPUBuffer;
+  binArgs: GPUBuffer;
 }
+
+/** Byte offset in binArgs of the dispatch sizes of kind i (amr/bins_args.wgsl). */
+const ARG = (i: number) => 12 * i;
 
 interface Sub {
   bsize: number;
@@ -63,6 +75,22 @@ export class AmrGravity {
   private gGhostCoarseAll!: GPUBindGroup;
   private gField!: GPUBindGroup;
   private gNew!: GPUBindGroup;
+  // Per-block timesteps: the passes of a solve restricted to the blocks starting a step.
+  private dphi?: GPUTexture;
+  private pFieldB?: GPUComputePipeline;
+  private pExtrap?: GPUComputePipeline;
+  private pSync?: GPUComputePipeline;
+  private pForget?: GPUComputePipeline;
+  private gFieldB?: GPUBindGroup;
+  private gFieldAllB?: GPUBindGroup;
+  private gExtrap?: GPUBindGroup;
+  private gSync?: GPUBindGroup;
+  private gSyncAll?: GPUBindGroup;
+  private gForget?: GPUBindGroup;
+  private gRhsB: GPUBindGroup[] = [];
+  private gRhsRestrictB!: GPUBindGroup;
+  private gGhostCoarseB!: GPUBindGroup;
+  private gGhostRestB!: GPUBindGroup;
 
   private constructor(private ctx: GravityContext) {}
 
@@ -83,7 +111,7 @@ export class AmrGravity {
       computePipeline(d, assemble('amr/gravity/rhs_restrict.wgsl'), 'amr mg source restrict'),
       computePipeline(d, assemble('amr/gravity/ghost.wgsl'), 'amr mg ghost (coarse)', { MODE: 0 }),
       computePipeline(d, assemble('amr/gravity/ghost.wgsl'), 'amr mg ghost (rest)', { MODE: 1 }),
-      computePipeline(d, assemble('amr/gravity/field.wgsl'), 'amr gravity field'),
+      computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr gravity field'),
       computePipeline(d, assemble('amr/gravity/new_blocks.wgsl'), 'amr mg new blocks'),
       computePipeline(d, assemble('amr/gravity/new_blocks.wgsl'), 'amr mg level init', { ALL: 1 }),
     ]);
@@ -111,12 +139,13 @@ export class AmrGravity {
         smooth: [],
       });
     }
-    // Bind groups are indexed by tree level; one more entry covers every block at once.
-    const lists = [...ctx.listLevel, ctx.listAll];
+    // Bind groups are indexed by tree level; one more entry covers every block at once, and
+    // another the blocks starting a step (per-block timesteps).
+    const lists = [...ctx.listLevel, ctx.listAll, ctx.listAct];
     for (let k = 0; k < NSUB; k++) {
       const s = g.sub[k];
       const uSmooth = [uniform(k, 0, k + 1), uniform(k, 1, k + 1)]; // "other" = the coarser sublevel
-      for (let l = 0; l <= ctx.levels + 1; l++) {
+      for (let l = 0; l <= ctx.levels + 2; l++) {
         const list = lists[l];
         s.smooth.push(
           uSmooth.map((u) => bindGroup(d, g.pSmooth, { 0: ctx.params, 1: u, 2: v(s.phi), 3: v(s.rhs), 10: ctx.multipole, 30: ctx.bt, 31: list })),
@@ -143,21 +172,32 @@ export class AmrGravity {
       g.gInit.push(bindGroup(d, g.pInit, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLevel[l] }));
     }
     g.gGhostRest = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAll });
+    g.gRhsB = ctx.stateU1.map((t) => bindGroup(d, g.pRhs, { 0: ctx.params, 1: v(t), 2: rhs0, 31: ctx.listUpd }));
+    g.gRhsRestrictB = bindGroup(d, g.pRhsRestrict, { 0: ctx.params, 2: rhs0, 30: ctx.bt, 31: ctx.listAct });
+    g.gGhostCoarseB = bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
+    g.gGhostRestB = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
     g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 4: ctx.bh, 5: ctx.clock, 30: ctx.bt, 31: ctx.listAll });
     g.gNew = bindGroup(d, g.pNew, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLeaf });
     return g;
   }
 
-  /** Dispatch over the cells of `count` blocks at a sublevel. */
+  /**
+   * Dispatch over the cells of `count` blocks at a sublevel. A negative count stands for the
+   * blocks starting a step (per-block timesteps): their number is only known on the GPU, and
+   * the sizes come from the table amr/bins_args.wgsl fills.
+   */
   private cells(pass: GPUComputePassEncoder, count: number, bsize: number) {
+    if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(3 + Math.log2(BS / bsize)));
     const span = Math.max(bsize, 8);
     pass.dispatchWorkgroups(count * (span / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
   /** Dispatch over the cells of one colour (see smooth.wgsl). */
   private colour(pass: GPUComputePassEncoder, count: number, bsize: number) {
+    if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(8 + Math.log2(BS / bsize)));
     pass.dispatchWorkgroups(Math.ceil((count * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
   private padded(pass: GPUComputePassEncoder, count: number) {
+    if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(0));
     pass.dispatchWorkgroups(count * 3, 3, 5);
   }
 
@@ -251,6 +291,93 @@ export class AmrGravity {
     this.padded(pass, nAll);
   }
 
+  // ---------------------------------------------------------------- per-block timesteps
+  //
+  // The potential is solved on every block when a cycle ends, and in between only on the
+  // blocks that start a step, which see across their faces the potential of the others
+  // carried forward in time at the rate it last changed there.
+
+  /** Build the passes of per-block timesteps (once; they do not depend on the number of bins). */
+  async setBins() {
+    if (this.pFieldB) return;
+    const ctx = this.ctx;
+    const d = ctx.device;
+    const v = (t: GPUTexture) => t.createView();
+    this.dphi = tex3d(d, ctx.slotsPerSide * PAD, 'r32float', 'amr phi rate');
+    const half = FIELD_SLOTS_BINS.half;
+    [this.pFieldB, this.pExtrap, this.pSync, this.pForget] = await Promise.all([
+      computePipeline(d, assemble('amr/gravity/field.wgsl', { ...FIELD_SLOTS_BINS, half }), 'amr gravity field (bins)'),
+      computePipeline(d, assemble('amr/gravity/extrap.wgsl'), 'amr potential extrapolation'),
+      computePipeline(d, assemble('amr/gravity/sync.wgsl'), 'amr potential rate'),
+      computePipeline(d, assemble('amr/gravity/sync.wgsl'), 'amr potential rate reset', { FORGET: 1 }),
+    ]);
+    const phi0 = v(this.phi);
+    const field = (list: GPUBuffer) =>
+      bindGroup(d, this.pFieldB!, { 0: ctx.params, 1: phi0, 3: v(ctx.gfield), 4: ctx.bh, 5: ctx.clock, 6: v(this.dphi!), 29: ctx.bins, 30: ctx.bt, 31: list });
+    this.gFieldB = field(ctx.listAct);
+    this.gFieldAllB = field(ctx.listAll);
+    this.gExtrap = bindGroup(d, this.pExtrap, { 0: ctx.params, 1: ctx.clock, 2: phi0, 6: v(this.dphi), 29: ctx.bins, 31: ctx.listAll });
+    const sync = (pipe: GPUComputePipeline, list: GPUBuffer) =>
+      bindGroup(d, pipe, { 0: ctx.params, 1: ctx.clock, 2: phi0, 3: v(this.phiOld), 4: v(this.dphi!), 29: ctx.bins, 31: list });
+    this.gSync = sync(this.pSync, ctx.listAct);
+    this.gSyncAll = sync(this.pSync, ctx.listAll);
+    this.gForget = sync(this.pForget, ctx.listAll);
+  }
+
+  /** Source from the blocks the last substep changed, restricted onto their ancestors. */
+  encodeSourceB(pass: GPUComputePassEncoder, parity: number) {
+    pass.setPipeline(this.pRhs);
+    pass.setBindGroup(0, this.gRhsB[parity]);
+    pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(1));
+    // One pass handles a parent of leaves; each further pass reaches one level higher.
+    pass.setPipeline(this.pRhsRestrict);
+    pass.setBindGroup(0, this.gRhsRestrictB);
+    for (let l = 0; l < this.ctx.levels; l++) this.cells(pass, -1, BS);
+  }
+
+  /** Carry the potential one substep forward on the blocks that are not starting a step. */
+  encodeExtrap(pass: GPUComputePassEncoder, nAll: number) {
+    pass.setPipeline(this.pExtrap!);
+    pass.setBindGroup(0, this.gExtrap!);
+    this.cells(pass, nAll, BS);
+  }
+
+  /** Relax the potential on the blocks starting a step, all levels together (a warm start). */
+  encodeSolveB(pass: GPUComputePassEncoder, cycles: number) {
+    const act = this.ctx.levels + 2;
+    for (let c = 0; c < cycles; c++) {
+      pass.setPipeline(this.pGhostCoarse);
+      pass.setBindGroup(0, this.gGhostCoarseB);
+      this.padded(pass, -1);
+      this.vcycle(pass, act, -1);
+    }
+    pass.setPipeline(this.pGhostRest);
+    pass.setBindGroup(0, this.gGhostRestB);
+    this.padded(pass, -1);
+  }
+
+  /** The field with per-block timesteps: for every block, or for the blocks starting a step. */
+  encodeFieldB(pass: GPUComputePassEncoder, nAll: number) {
+    pass.setPipeline(this.pFieldB!);
+    pass.setBindGroup(0, nAll < 0 ? this.gFieldB! : this.gFieldAllB!);
+    this.padded(pass, nAll);
+  }
+
+  /** After a solve: the rate at which the potential changed over the step just finished. */
+  encodeSync(pass: GPUComputePassEncoder, nAll: number) {
+    pass.setPipeline(this.pSync!);
+    pass.setBindGroup(0, nAll < 0 ? this.gSync! : this.gSyncAll!);
+    this.padded(pass, nAll);
+  }
+
+  /** Start the potential's history afresh (a new mesh or a new run). */
+  encodeForget(pass: GPUComputePassEncoder, nAll: number) {
+    if (!this.pForget) return;
+    pass.setPipeline(this.pForget);
+    pass.setBindGroup(0, this.gForget!);
+    this.padded(pass, nAll);
+  }
+
   /** First guess for the potential in blocks the last re-mesh created. */
   encodeNewBlocks(pass: GPUComputePassEncoder, nLeaf: number) {
     pass.setPipeline(this.pNew);
@@ -270,5 +397,6 @@ export class AmrGravity {
       s.rhs.destroy();
     }
     this.phiOld.destroy();
+    this.dphi?.destroy();
   }
 }

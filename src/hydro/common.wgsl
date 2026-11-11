@@ -60,6 +60,9 @@ fn has_sources() -> bool {
 // Size of the cell this invocation is working on. Every entry point sets it first: it is P.dx
 // on a uniform grid and depends on the block's level on an adaptive one.
 var<private> g_dx: f32;
+// Length of the step this invocation is taking. Entry points that advance the state set it:
+// the clock's dt, or a multiple of it for a block of an adaptive mesh that steps less often.
+var<private> g_dt: f32;
 
 // Maps an index along one axis into range. Returns (index, 1 if mirrored by a reflecting face,
 // side): side is -1 / +1 for a ghost cell beyond an outflow-only lower / upper face, else 0.

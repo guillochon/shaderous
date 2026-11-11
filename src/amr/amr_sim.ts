@@ -1,8 +1,8 @@
 // Block-structured adaptive mesh refinement on the GPU.
 //
 // The grid is a tree of 16^3-cell blocks (src/amr/tree.ts) packed into one 3D texture atlas
-// per field, with two ghost layers stored around each block. All levels take the same
-// timestep. A step is:
+// per field, with two ghost layers stored around each block. All blocks take the same
+// timestep, unless per-block timesteps are on (cfg.timeBins, see encodeCycle()). A step is:
 //
 //   assemble   primitives for every block, ghosts included, straight from the conserved state
 //   timestep   reduce the signal rate over leaf cells; set dt
@@ -16,9 +16,9 @@
 // With self-gravity (3D), the potential is solved on every tree level after the update
 // (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, readTexture, tex3d, type Gpu } from '../gpu/device';
+import { bindGroup, computePipeline, readTexture, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
-import { AmrGravity } from './gravity';
+import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark } from '../problems/types';
 import { completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec } from '../sim';
@@ -31,6 +31,23 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp
  */
 const REGRID_EVERY = 8;
 const MAX_STEPS_AHEAD = 24;
+/** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
+const MAX_TIME_BINS = 3;
+/** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
+const BIN_ARGS_BYTES = 256;
+const ARG = (i: number) => 12 * i;
+const BIN_TOTALS = 60;
+/**
+ * Per-block timesteps pay for their extra passes only when enough blocks sit out enough
+ * substeps. Every few cycles the share of block updates actually made is read back; above
+ * these shares (measured: about 0.8 without a gravity field, 0.65 with one, where every
+ * substep also relaxes the potential) the run goes back to one timestep for a while, a
+ * longer while each time the answer is the same.
+ */
+const BIN_POLL_CYCLES = 4;
+const BIN_SHARE_MAX = { hydro: 0.8, field: 0.65 };
+const BIN_PAUSE_STEPS = 192;
+const BIN_PAUSE_MAX = 1536;
 
 interface RegridPlan {
   ops: RegridOp[];
@@ -111,6 +128,66 @@ export class AmrSim implements Simulation {
   private rhoMean = 0;
   private staging: GPUBuffer;
   private stagingBusy = false;
+
+  // Per-block timesteps (amr/bins_on.wgsl): bins and their scratch copy, the per-substep
+  // block lists with their counters and dispatch sizes, and the passes that maintain them.
+  private bins: GPUBuffer;
+  private binsB: GPUBuffer;
+  private listAct: GPUBuffer;
+  private listUpd: GPUBuffer;
+  private listEnd: GPUBuffer;
+  private binCnt: GPUBuffer;
+  private binArgs: GPUBuffer;
+  private pTick?: GPUComputePipeline;
+  private pAdvance?: GPUComputePipeline;
+  private gAdvance?: GPUBindGroup;
+  private gCorrectB: GPUBindGroup[] = [];
+  private gCommitL: GPUBindGroup[] = [];
+  /** the point masses' reduction, in which a sink takes gas from the blocks finishing a step */
+  private redBhB?: Reducer;
+  private gBhKickB?: GPUBindGroup;
+  /** 2D: the point masses' field over the blocks starting a step, and over all of them */
+  private pMassFieldB?: GPUComputePipeline;
+  private gMassFieldB: GPUBindGroup[] = [];
+  private pSetDt?: GPUComputePipeline;
+  private pBinsInit?: GPUComputePipeline;
+  private pBinsDilate?: GPUComputePipeline;
+  private pBinsRelax?: GPUComputePipeline;
+  private pBinsLists?: GPUComputePipeline;
+  private pBinsArgs?: GPUComputePipeline;
+  private pCommit?: GPUComputePipeline;
+  private gTick?: GPUBindGroup;
+  private gSetDt?: GPUBindGroup;
+  private gBinsInit?: GPUBindGroup;
+  private gBinsDilate?: GPUBindGroup;
+  private gBinsRelax: GPUBindGroup[] = [];
+  private gBinsLists?: GPUBindGroup;
+  private gBinsArgs?: GPUBindGroup;
+  /** bind groups over the per-substep lists; [parity] where the state is bound */
+  private gAssembleB: GPUBindGroup[] = [];
+  private gPredictB?: GPUBindGroup;
+  private gUpdateB: GPUBindGroup[] = [];
+  private gCommit: GPUBindGroup[] = [];
+  private gCommitB: GPUBindGroup[] = [];
+  /** the bins the pipelines were built for, and whether the bin buffer is set up for cycles */
+  private builtBins = 0;
+  private binsPrimed: boolean | null = null;
+  /** block updates made, and what a single timestep would have made (per-block timesteps) */
+  private binCycles = 0;
+  private binFullWork = 0;
+  private binFirstWork = 0;
+  // The automatic choice between cycles and single steps (see BIN_SHARE_MAX).
+  private binStaging: GPUBuffer;
+  private binPollBusy = false;
+  private wantBinPoll: { first: number; full: number } | null = null;
+  private binSeen = { updates: 0, single: 0 };
+  private binEpoch = 0;
+  private cyclesSincePoll = 0;
+  /** single steps left before cycles are tried again, and how many the next pause will be */
+  private binPause = 0;
+  private binPauseNext = BIN_PAUSE_STEPS;
+  /** share of block updates made in the last cycles measured (1 = no saving), or null */
+  binShare: number | null = null;
 
   private pAssemble!: GPUComputePipeline;
   private pPredict!: GPUComputePipeline;
@@ -196,6 +273,15 @@ export class AmrSim implements Simulation {
     this.flags = d.createBuffer({ size: this.cap * 4, usage: storage });
     this.rg = d.createBuffer({ size: this.cap * RG_STRIDE * 4, usage: storage });
     this.flagStaging = d.createBuffer({ size: this.cap * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const list = () => d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
+    this.bins = list();
+    this.binsB = list();
+    this.listAct = list();
+    this.listUpd = list();
+    this.listEnd = list();
+    this.binCnt = d.createBuffer({ size: 16, usage: storage });
+    this.binArgs = d.createBuffer({ size: BIN_ARGS_BYTES, usage: storage | GPUBufferUsage.INDIRECT });
+    this.binStaging = d.createBuffer({ size: BIN_ARGS_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     this.staging = d.createBuffer({ size: DIAG_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   }
 
@@ -244,7 +330,7 @@ export class AmrSim implements Simulation {
     sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 30: sim.bt, 31: sim.listLeaf });
     // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
     sim.redBh = await Reducer.create(
-      d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', {},
+      d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_off.wgsl' },
       [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock, 30: sim.bt })), 'amr point masses',
     );
     sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift');
@@ -257,7 +343,7 @@ export class AmrSim implements Simulation {
     if (cfg.ndim === 2) {
       // No self-gravity in 2D, so no solver: the field atlas holds the point masses alone.
       // The potential bindings are never read (there is none), but the pass declares them.
-      sim.pMassField = await computePipeline(d, assemble('amr/gravity/field.wgsl'), 'amr point mass field');
+      sim.pMassField = await computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field');
       sim.gMassField = bindGroup(d, sim.pMassField, {
         0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock, 30: sim.bt, 31: sim.listAll,
       });
@@ -270,6 +356,7 @@ export class AmrSim implements Simulation {
         device: d, slotsPerSide: sim.slotsPerSide, levels: sim.levels, params: sim.params, bt: sim.bt,
         listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
         multipole: sim.redMp.result, stateU1: [sim.state[0][0], sim.state[1][0]], gfield: sim.gfield,
+        bins: sim.bins, listAct: sim.listAct, listUpd: sim.listUpd, binArgs: sim.binArgs,
       });
     }
     await sim.buildHydro();
@@ -277,8 +364,18 @@ export class AmrSim implements Simulation {
     return sim;
   }
 
+  /** Bins of per-block timesteps in use (0 = off). */
+  private get timeBins(): number {
+    return Math.max(0, Math.min(MAX_TIME_BINS, Math.floor(this.cfg.timeBins || 0)));
+  }
+  /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
+  private get binsLive(): boolean {
+    return this.builtBins > 0 && this.binPause === 0;
+  }
+
   private get slots() {
-    return hydroSlots(this.cfg);
+    const on = this.timeBins > 0;
+    return { ...hydroSlots(this.cfg), bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl', mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl' };
   }
 
   /** (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. */
@@ -300,28 +397,54 @@ export class AmrSim implements Simulation {
         30: this.bt, 31: this.listLeaf,
       }),
     );
-    this.gPredict = bindGroup(d, this.pPredict, {
-      0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 30: this.bt, 31: this.listAll,
-    });
+    const K = (this.builtBins = this.timeBins);
+    if (K > 0) await this.buildBins(K);
+    // With per-block timesteps the passes also read the bins, and the assembly the half-step
+    // predictions of blocks part way through a step.
+    const bin: Record<number, Bindable> = K > 0 ? { 29: this.bins! } : {};
+    const mid: Record<number, Bindable> = K > 0 ? { 7: v(this.pred[0]), 8: v(this.pred[1]) } : {};
+    const predict = (list: GPUBuffer) =>
+      bindGroup(d, this.pPredict, {
+        0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 30: this.bt, 31: list, ...bin,
+      });
+    const assembly = (p: number, list: GPUBuffer) =>
+      bindGroup(d, this.pAssemble, {
+        0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
+        5: v(this.gfield), 6: this.redDt.first, 30: this.bt, 31: list, ...bin, ...mid,
+      });
+    this.gPredict = predict(this.listAll);
     this.gAssemble = [];
     this.gUpdate = [];
     this.gRegrid = [];
     this.gCorrect = [];
+    this.gAssembleB = [];
+    this.gUpdateB = [];
+    this.gCommit = [];
+    this.gCommitB = [];
+    this.gCorrectB = [];
+    this.gCommitL = [];
+    if (K > 0) this.gPredictB = predict(this.listAct);
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       // Second half kick: from the updated state (the other parity) back into this one.
-      this.gCorrect.push(
+      const correct = (list: GPUBuffer) =>
         bindGroup(d, this.pCorrect, {
           0: this.params, 1: this.clock, 2: v(this.state[o][0]), 3: v(this.state[o][1]), 4: v(this.gfield),
-          5: v(this.state[p][0]), 6: v(this.state[p][1]), 7: this.bh, 30: this.bt, 31: this.listLeaf,
-        }),
-      );
-      this.gAssemble.push(
-        bindGroup(d, this.pAssemble, {
-          0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
-          5: v(this.gfield), 6: this.redDt.first, 30: this.bt, 31: this.listAll,
-        }),
-      );
+          5: v(this.state[p][0]), 6: v(this.state[p][1]), 7: this.bh, 30: this.bt, 31: list, ...bin,
+        });
+      if (K > 0) {
+        this.gAssembleB.push(assembly(p, this.listAct));
+        this.gUpdateB.push(this.updateGroup(this.pUpdate, p, this.listUpd));
+        // Back from the other parity into this one.
+        const commit = (list: GPUBuffer) =>
+          bindGroup(d, this.pCommit!, { 0: this.params, 1: v(this.state[o][0]), 2: v(this.state[o][1]), 3: v(this.state[p][0]), 4: v(this.state[p][1]), 31: list });
+        this.gCommit.push(commit(this.listLeaf));
+        this.gCommitB.push(commit(this.listUpd));
+        this.gCommitL.push(commit(this.listEnd));
+        this.gCorrectB.push(correct(this.listEnd));
+      }
+      this.gCorrect.push(correct(this.listLeaf));
+      this.gAssemble.push(assembly(p, this.listAll));
       this.gUpdate.push(this.updateGroup(this.pUpdate, p));
       this.gRegrid.push(
         bindGroup(d, this.pRegrid, {
@@ -341,13 +464,218 @@ export class AmrSim implements Simulation {
     );
   }
 
-  private updateGroup(pipe: GPUComputePipeline, p: number): GPUBindGroup {
+  private updateGroup(pipe: GPUComputePipeline, p: number, list = this.listLeaf): GPUBindGroup {
     const v = (t: GPUTexture) => t.createView();
     const o = 1 - p;
+    const bin: Record<number, Bindable> = this.builtBins > 0 ? { 29: this.bins! } : {};
     return bindGroup(this.device, pipe, {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
-      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 30: this.bt, 31: this.listLeaf,
+      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 30: this.bt, 31: list,
+      ...bin,
     });
+  }
+
+  /** Buffers, pipelines and bind groups of per-block timesteps, for cycles of 2^K substeps. */
+  private async buildBins(K: number) {
+    const d = this.device;
+    const cycle = 1 << K;
+    [this.pTick, this.pAdvance, this.pSetDt, this.pBinsInit, this.pBinsDilate, this.pBinsRelax, this.pBinsLists, this.pBinsArgs, this.pCommit] = await Promise.all([
+      computePipeline(d, assemble('amr/bins_tick.wgsl'), 'bins clock', { MODE: 0, CYCLE: cycle }),
+      computePipeline(d, assemble('amr/bins_tick.wgsl'), 'bins substep', { MODE: 1, CYCLE: cycle }),
+      computePipeline(d, assemble('hydro/clock.wgsl'), 'bins timestep', { PER_DX: 1, BANK: 0, CYCLE: cycle }),
+      computePipeline(d, assemble('amr/bins_init.wgsl'), 'bins init', { KMAX: K }),
+      computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins dilate', { KMAX: K, DILATE: 1 }),
+      computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins relax', { KMAX: K }),
+      computePipeline(d, assemble('amr/bins_lists.wgsl'), 'bins lists'),
+      computePipeline(d, assemble('amr/bins_args.wgsl'), 'bins dispatch sizes'),
+      computePipeline(d, assemble('amr/commit.wgsl'), 'amr commit'),
+    ]);
+    const A = this.bins;
+    const B = this.binsB;
+    this.gTick = bindGroup(d, this.pTick, { 1: this.clock, 2: A, 3: this.binCnt });
+    this.gAdvance = bindGroup(d, this.pAdvance, { 1: this.clock, 2: A, 3: this.binCnt });
+    await this.grav?.setBins();
+    const v = (t: GPUTexture) => t.createView();
+    this.redBhB ??= await Reducer.create(
+      d, [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_on.wgsl' },
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: this.bh, 3: v(this.state[p][1]), 4: this.clock, 29: A, 30: this.bt })), 'amr point masses (bins)',
+    );
+    this.gBhKickB = bindGroup(d, this.pBhKick!, { 0: this.params, 1: this.clock, 2: this.redBhB.result, 3: this.bh });
+    if (!this.grav && !this.pMassFieldB) {
+      // 2D: no potential (the bindings are declared but never read).
+      this.pMassFieldB = await computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS_BINS), 'amr point mass field (bins)');
+      this.gMassFieldB = [this.listAct, this.listAll].map((list) =>
+        bindGroup(d, this.pMassFieldB!, { 0: this.params, 1: v(this.dummyPhi), 3: v(this.gfield), 4: this.bh, 5: this.clock, 6: v(this.dummyPhi), 29: A, 30: this.bt, 31: list }),
+      );
+    }
+    this.gSetDt = bindGroup(d, this.pSetDt, { 0: this.params, 1: this.redDt.result, 2: this.clock });
+    this.gBinsInit = bindGroup(d, this.pBinsInit, { 0: this.params, 1: this.clock, 2: this.redDt.first, 3: A, 30: this.bt, 31: this.listAll });
+    this.gBinsDilate = bindGroup(d, this.pBinsDilate, { 0: this.params, 1: A, 2: B, 30: this.bt, 31: this.listAll });
+    this.gBinsRelax = [
+      bindGroup(d, this.pBinsRelax, { 0: this.params, 1: B, 2: A, 30: this.bt, 31: this.listAll }),
+      bindGroup(d, this.pBinsRelax, { 0: this.params, 1: A, 2: B, 30: this.bt, 31: this.listAll }),
+    ];
+    this.gBinsLists = bindGroup(d, this.pBinsLists, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.listEnd, 29: A, 30: this.bt, 31: this.listAll });
+    this.gBinsArgs = bindGroup(d, this.pBinsArgs, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.binArgs, 5: this.listEnd });
+    this.binsPrimed = null;
+    // What was measured with other bins says nothing about these.
+    this.binPause = 0;
+    this.binPauseNext = BIN_PAUSE_STEPS;
+    this.binShare = null;
+  }
+
+  /**
+   * Whenever the run changes between cycles and single steps (point masses come or go), or
+   * starts: clear the bins, which makes every block step every time with the clock's dt until
+   * a cycle assigns them, and drop the history of the potential.
+   */
+  private primeBins(enc: GPUCommandEncoder) {
+    if (this.builtBins === 0) return;
+    const live = this.binsLive;
+    if (this.binsPrimed === live) return;
+    this.device.queue.writeBuffer(this.bins, 0, new Uint32Array(this.cap + 1));
+    if (this.selfGravity) {
+      const pass = enc.beginComputePass();
+      this.grav!.encodeForget(pass, this.nAll);
+      pass.end();
+    }
+    this.binsPrimed = live;
+  }
+
+  /**
+   * One cycle of per-block timesteps: 2^K substeps of the smallest step, after which every
+   * block is at the same time again. On the first substep every block steps, with the passes
+   * and lists of a single timestep; in between come the timestep and the bins, from the rates
+   * the assembly has just measured. On the others the blocks that start a step, and those
+   * owed the second half of a faster neighbour's fluxes, are gathered into lists on the GPU
+   * and the same passes run over those. The state stays in one parity: the update writes the
+   * other, and a copy brings the blocks that stepped back.
+   */
+  private encodeCycle(enc: GPUCommandEncoder) {
+    const p = this.cur;
+    const o = 1 - p;
+    const K = this.builtBins;
+    const n = 1 << K;
+    const blocks = Math.ceil(this.nAll / 64);
+    const g = this.selfGravity ? this.grav! : null;
+    const field = this.fieldOn;
+    const run = (pass: GPUComputePassEncoder, pipe: GPUComputePipeline, group: GPUBindGroup) => {
+      pass.setPipeline(pipe);
+      pass.setBindGroup(0, group);
+    };
+    // The field atlas for every block (count >= 0) or for the blocks starting a step (-1).
+    const fieldB = (pass: GPUComputePassEncoder, count: number) => {
+      if (this.grav) return this.grav.encodeFieldB(pass, count);
+      run(pass, this.pMassFieldB!, this.gMassFieldB[count < 0 ? 0 : 1]);
+      if (count < 0) pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
+      else this.padded(pass, count);
+    };
+    // The point masses move with the smallest step, every substep.
+    const stepMasses = (pass: GPUComputePassEncoder) => {
+      run(pass, this.pBhDrift!, this.gBhDrift!);
+      pass.dispatchWorkgroups(1);
+      this.redBhB!.encode(pass, p);
+      run(pass, this.pBhKick!, this.gBhKickB!);
+      pass.dispatchWorkgroups(1);
+    };
+    for (let s = 0; s < n; s++) {
+      const pass = enc.beginComputePass();
+      run(pass, this.pTick!, this.gTick!);
+      pass.dispatchWorkgroups(1);
+      if (s === 0) {
+        run(pass, this.pAssemble, this.gAssemble[p]);
+        this.padded(pass, this.nAll);
+        this.redDt.encode(pass);
+        run(pass, this.pSetDt!, this.gSetDt!);
+        pass.dispatchWorkgroups(1);
+        run(pass, this.pBinsInit!, this.gBinsInit!);
+        pass.dispatchWorkgroups(blocks);
+        run(pass, this.pBinsDilate!, this.gBinsDilate!);
+        pass.dispatchWorkgroups(blocks);
+        // An odd number of sweeps, so the result lands back in the buffer the passes read.
+        // Each rule moves a bin one block per sweep, and no chain is longer than the number
+        // of bins plus the depth of the tree.
+        const sweeps = (K + this.levels + 2) | 1;
+        for (let i = 0; i < sweeps; i++) {
+          run(pass, this.pBinsRelax!, this.gBinsRelax[i % 2]);
+          pass.dispatchWorkgroups(blocks);
+        }
+        // The half-step potential is each block's own: again, now that the bins are known.
+        if (field) fieldB(pass, this.nAll);
+        run(pass, this.pPredict, this.gPredict);
+        this.padded(pass, this.nAll);
+        run(pass, this.pUpdate, this.gUpdate[p]);
+        this.interior(pass, this.nLeaf);
+        run(pass, this.pCommit!, this.gCommit[p]);
+        this.interior(pass, this.nLeaf);
+        g?.encodeSource(pass, p, this.nLevel, this.nLeaf);
+      } else {
+        run(pass, this.pAssemble, this.gAssembleB[p]);
+        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
+        run(pass, this.pPredict, this.gPredictB!);
+        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
+        run(pass, this.pUpdate, this.gUpdateB[p]);
+        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(1));
+        run(pass, this.pCommit!, this.gCommitB[p]);
+        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(1));
+        g?.encodeSourceB(pass, p);
+      }
+      // On to the next substep: the blocks that start a step then are the ones that have
+      // just finished one. At the end of the cycle that is every block.
+      run(pass, this.pAdvance!, this.gAdvance!);
+      pass.dispatchWorkgroups(1);
+      const last = s === n - 1;
+      if (!last) {
+        run(pass, this.pBinsLists!, this.gBinsLists!);
+        pass.dispatchWorkgroups(blocks);
+        run(pass, this.pBinsArgs!, this.gBinsArgs!);
+        pass.dispatchWorkgroups(1);
+      }
+      if (field) {
+        // The field for the time now reached, where it is needed: the blocks finishing a step
+        // get its closing kick from it, and start their next step in it.
+        if (g && last) {
+          // Isolated boundaries: the multipole moments of the gas, once per cycle. They set
+          // the potential at the edge of the box, which changes slowly. (Every substep was
+          // tried: it costs a pass over every cell and changes the energy error by nothing.)
+          if (this.cfg.gravity === 'isolated') this.redMp!.encode(pass, p);
+          g.encodeSolve(pass, this.nLevel, this.nAll, this.cfg.vcycles, false, true);
+          g.encodeSync(pass, this.nAll);
+        } else if (g) {
+          g.encodeExtrap(pass, this.nAll);
+          g.encodeSolveB(pass, this.cfg.vcycles);
+          g.encodeSync(pass, -1);
+        }
+        if (this.hasMasses) stepMasses(pass);
+        fieldB(pass, last ? this.nAll : -1);
+        // The kick goes through the other state texture and back.
+        run(pass, this.pCorrect, last ? this.gCorrect[o] : this.gCorrectB[o]);
+        if (last) this.interior(pass, this.nLeaf);
+        else pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(2));
+        run(pass, this.pCommit!, last ? this.gCommit[p] : this.gCommitL[p]);
+        if (last) this.interior(pass, this.nLeaf);
+        else pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(2));
+      }
+      pass.end();
+    }
+    this.binCycles++;
+    this.binFirstWork += this.nLeaf;
+    this.binFullWork += this.nLeaf << K;
+  }
+
+  /**
+   * Work done with per-block timesteps since the last reset: block updates made (deposits of
+   * a neighbour's fluxes included), and what a single timestep would have made.
+   */
+  async binWork(): Promise<{ cycles: number; updates: number; single: number }> {
+    const buf = this.device.createBuffer({ size: BIN_ARGS_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = this.device.createCommandEncoder();
+    enc.copyBufferToBuffer(this.binArgs, 0, buf, 0, BIN_ARGS_BYTES);
+    this.device.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const later = new Uint32Array(buf.getMappedRange().slice(0))[BIN_TOTALS];
+    buf.destroy();
+    return { cycles: this.binCycles, updates: this.binFirstWork + later, single: this.binFullWork };
   }
 
   writeParams() {
@@ -435,6 +763,7 @@ export class AmrSim implements Simulation {
     // No history on this mesh: the half-step extrapolation starts from the potential itself.
     if (this.selfGravity) this.grav!.copyPhiToOld(enc);
     pass = enc.beginComputePass();
+    if (this.selfGravity) this.grav!.encodeForget(pass, this.nAll);
     this.encodeField(pass);
     pass.end();
   }
@@ -578,6 +907,16 @@ export class AmrSim implements Simulation {
     this.pending = null;
     this.stepsSinceFlag = 0;
     this.regrids = 0;
+    this.binsPrimed = null;
+    this.binCycles = this.binFirstWork = this.binFullWork = 0;
+    this.binEpoch++;
+    this.binSeen = { updates: 0, single: 0 };
+    this.wantBinPoll = null;
+    this.cyclesSincePoll = 0;
+    this.binPause = 0;
+    this.binPauseNext = BIN_PAUSE_STEPS;
+    this.binShare = null;
+    d.queue.writeBuffer(this.binArgs, 0, new Uint32Array(BIN_ARGS_BYTES / 4));
     this.rhoMean = mass / c.problem.box ** c.ndim;
     // The clock is (dt, t, Kahan compensation, steps).
     d.queue.writeBuffer(this.clock, 0, new Float32Array(c.restart ? [0, c.restart.time, 0, c.restart.steps] : [0, 0, 0, 0]));
@@ -667,9 +1006,21 @@ export class AmrSim implements Simulation {
       enc.clearBuffer(this.redDt.first);
       this.dtStale = false;
     }
+    this.primeBins(enc);
+    const cycle = this.binsLive ? 1 << this.builtBins : 0;
     let done = 0;
-    for (; done < count; done++) {
+    for (; done < count; done += cycle || 1) {
       if (this.levels > 0 && (this.flagInFlight || this.wantMap) && this.stepsSinceFlag >= MAX_STEPS_AHEAD) break;
+      if (cycle) {
+        // Whole cycles only: the mesh, the display and the diagnostics need every block at
+        // the same time. May run past `count`.
+        this.encodeCycle(enc);
+        this.cyclesSincePoll++;
+        this.stepsSinceFlag += cycle;
+        this.encodeFlags(enc);
+        continue;
+      }
+      if (this.binPause > 0) this.binPause--;
       const p = this.cur;
       const pass = enc.beginComputePass();
       pass.setPipeline(this.pAssemble);
@@ -702,21 +1053,62 @@ export class AmrSim implements Simulation {
         this.cur = 1 - p;
       }
       this.stepsSinceFlag++;
-
-      if (this.levels > 0 && !this.flagInFlight && !this.wantMap && this.stepsSinceFlag >= REGRID_EVERY) {
-        // Refinement indicator from this step's primitives.
-        enc.clearBuffer(this.flags);
-        const fp = enc.beginComputePass();
-        fp.setPipeline(this.pFlag);
-        fp.setBindGroup(0, this.gFlag);
-        this.interior(fp, this.nLeaf);
-        fp.end();
-        enc.copyBufferToBuffer(this.flags, 0, this.flagStaging, 0, this.cap * 4);
-        this.wantMap = true;
-        this.stepsSinceFlag = 0;
-      }
+      this.encodeFlags(enc);
+    }
+    if (cycle && this.cyclesSincePoll >= BIN_POLL_CYCLES && !this.binPollBusy && !this.wantBinPoll) {
+      // How much work the last cycles saved: read back without blocking (see submitted()).
+      enc.copyBufferToBuffer(this.binArgs, 0, this.binStaging, 0, BIN_ARGS_BYTES);
+      this.wantBinPoll = { first: this.binFirstWork, full: this.binFullWork };
+      this.cyclesSincePoll = 0;
     }
     return done;
+  }
+
+  /** Read the block-update totals copied by encodeSteps(), and pause the cycles if they save too little. */
+  private pollBins() {
+    const at = this.wantBinPoll;
+    if (!at) return;
+    this.wantBinPoll = null;
+    this.binPollBusy = true;
+    const epoch = this.binEpoch;
+    this.binStaging
+      .mapAsync(GPUMapMode.READ)
+      .then(() => {
+        const later = new Uint32Array(this.binStaging.getMappedRange().slice(0))[BIN_TOTALS];
+        this.binStaging.unmap();
+        if (epoch !== this.binEpoch) return; // the run was reset meanwhile
+        const updates = at.first + later;
+        const du = updates - this.binSeen.updates;
+        const ds = at.full - this.binSeen.single;
+        this.binSeen = { updates, single: at.full };
+        if (ds <= 0) return;
+        this.binShare = du / ds;
+        if (this.cfg.timeBinsAlways) return;
+        if (this.binShare > (this.fieldOn ? BIN_SHARE_MAX.field : BIN_SHARE_MAX.hydro)) {
+          this.binPause = this.binPauseNext;
+          this.binPauseNext = Math.min(BIN_PAUSE_MAX, 2 * this.binPauseNext);
+        } else {
+          this.binPauseNext = BIN_PAUSE_STEPS;
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        this.binPollBusy = false;
+      });
+  }
+
+  /** Every few steps, measure the refinement indicator from the latest primitives. */
+  private encodeFlags(enc: GPUCommandEncoder) {
+    if (this.levels === 0 || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return;
+    enc.clearBuffer(this.flags);
+    const fp = enc.beginComputePass();
+    fp.setPipeline(this.pFlag);
+    fp.setBindGroup(0, this.gFlag);
+    this.interior(fp, this.nLeaf);
+    fp.end();
+    enc.copyBufferToBuffer(this.flags, 0, this.flagStaging, 0, this.cap * 4);
+    this.wantMap = true;
+    this.stepsSinceFlag = 0;
   }
 
   /** Whether the edge of an outline passes through a block: some of the block inside, some not. */
@@ -810,6 +1202,7 @@ export class AmrSim implements Simulation {
 
   /** Call after submitting an encoder that encodeSteps() wrote to. */
   submitted() {
+    this.pollBins();
     if (!this.wantMap) return;
     this.wantMap = false;
     this.flagInFlight = true;
@@ -931,7 +1324,12 @@ export class AmrSim implements Simulation {
     const full = this.tree.levelLimit < this.levels
       ? `, block budget limits refinement to ${this.tree.levelLimit} of ${this.levels} levels`
       : this.tree.freeSlots < this.tree.nchild ? ', budget full' : '';
-    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}`;
+    // Per-block timesteps: what the last cycles measured saved, and whether they are in use.
+    const share = this.binShare;
+    const bins = this.builtBins === 0 || share === null ? ''
+      : this.binPause > 0 ? `, local timesteps paused (would save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates)`
+      : `, local timesteps save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates`;
+    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${bins}`;
   }
 
   /** Every leaf cell with its position and size (validation only; reads the whole atlas). */
@@ -1074,6 +1472,7 @@ export class AmrSim implements Simulation {
   destroy() {
     for (const s of this.state) for (const t of s) t.destroy();
     for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi]) t.destroy();
+    for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
     this.grav?.destroy();
   }
 }

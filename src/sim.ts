@@ -48,6 +48,16 @@ export interface SimConfig {
   amrLevels: number;
   /** Atlas slots per side for the adaptive mesh (0 = choose from the root grid). */
   amrBudget: number;
+  /**
+   * Adaptive mesh: per-block timesteps. A block may step up to 2^timeBins times less often
+   * than the fastest one, where its own signal speeds allow (0 = one timestep for all).
+   */
+  timeBins: number;
+  /**
+   * Keep per-block timesteps on even while they save too little work to pay for their extra
+   * passes. Otherwise such stretches of a run are stepped with one timestep (tests set this).
+   */
+  timeBinsAlways: boolean;
   /** Optically thin cooling and heating (cooling/*.wgsl); needs an equation of state with an energy. */
   cooling: CoolingKind;
   coolParams: CoolingParams;
@@ -143,6 +153,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     gravEnergyFlux: true,
     amrLevels: 0,
     amrBudget: 0,
+    timeBins: 0,
+    timeBinsAlways: false,
     refineHi: 0.06,
     refineLo: 0.025,
     jeansRefine: 16,

@@ -93,6 +93,7 @@ side.innerHTML = `
       ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hll', 'HLL')))}
       ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')))}
       ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'))}
+      ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')))}
     </div>
   </details>
 
@@ -486,6 +487,10 @@ function syncControls() {
   $<HTMLSelectElement>('riemann').value = cfg.riemann;
   $<HTMLSelectElement>('limiter').value = cfg.limiter;
   $<HTMLInputElement>('cfl').value = String(cfg.cfl);
+  const tbins = $<HTMLSelectElement>('tbins');
+  tbins.value = String(cfg.timeBins);
+  tbins.disabled = cfg.amrLevels === 0;
+  tbins.title = 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work';
   $<HTMLSelectElement>('gravity').value = cfg.gravity;
   $<HTMLInputElement>('G').value = String(+cfg.G.toPrecision(6));
   $<HTMLInputElement>('vcycles').value = String(cfg.vcycles);
@@ -822,6 +827,10 @@ function bind() {
   });
   on('limiter', (el) => {
     cfg.limiter = el.value as LimiterKind;
+    rebuildPipelines();
+  });
+  on('tbins', (el) => {
+    cfg.timeBins = Math.min(3, Math.max(0, Math.round(+el.value) || 0));
     rebuildPipelines();
   });
   on('cfl', (el) => {

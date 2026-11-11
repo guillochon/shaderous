@@ -2,6 +2,8 @@
 // mass's total pull on the gas, and what each sink takes this step (gravity/bh_cell.wgsl).
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
+#include <bins>
+#include "amr/blk_dt.wgsl"
 #include "gravity/bh.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
@@ -19,5 +21,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   if (!blk_leaf(slot) || abs(textureLoad(U2, at, 0).w) > 0.5) { u1 = vec4<f32>(0.0); }
   let dx = blk_dx(slot);
   // 2D quantities are per unit length along z.
-  return bh_cell(u1, select(dx * dx * dx, dx * dx, is2d()), blk_pos(slot, l), clock.dt);
+  // With per-block timesteps the sinks take gas from a block as it finishes a step, over the
+  // length of that step (amr/correct.wgsl); the pull on the gas is summed over every cell.
+  let dt = select(0.0, blk_dt(slot), blk_active(slot));
+  return bh_cell(u1, select(dx * dx * dx, dx * dx, is2d()), blk_pos(slot, l), dt);
 }

@@ -30,7 +30,7 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'bcLo' | 'bcHi' | 'cooling'>>;
+  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'bcLo' | 'bcHi' | 'cooling'>>;
   eosParams: Partial<EosParams>;
   coolParams: Partial<CoolingParams>;
   params: Record<string, number>;
@@ -89,6 +89,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   str('riemann', cfg.riemann, def.riemann);
   str('limiter', cfg.limiter, def.limiter);
   num('cfl', cfg.cfl, def.cfl);
+  if (cfg.amrLevels) num('tbins', cfg.timeBins, def.timeBins);
   str('gravity', cfg.gravity, def.gravity);
   num('G', cfg.G, def.G);
   num('vcycles', cfg.vcycles, def.vcycles);
@@ -153,6 +154,8 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.cfg, 'riemann', pick<RiemannKind>('riemann', ['hllc', 'hll']));
   put(out.cfg, 'limiter', pick<LimiterKind>('limiter', ['koren', 'mc', 'vanleer', 'minmod']));
   put(out.cfg, 'cfl', num('cfl', 0.05, 1));
+  const tb = num('tbins', 0, 3);
+  if (tb !== undefined) out.cfg.timeBins = Math.round(tb);
   put(out.cfg, 'gravity', pick<GravityMode>('gravity', ['off', 'periodic', 'isolated']));
   put(out.cfg, 'G', num('G'));
   const vc = num('vcycles', 1, 8);
