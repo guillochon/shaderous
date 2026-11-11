@@ -5,7 +5,7 @@ import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu 
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { Multigrid } from './gravity/multigrid';
 import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } from './eos/eos';
-import { cellMark, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
+import { cellMark, isSelfGravity, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
 import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from './problems/settle';
@@ -143,7 +143,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     eosParams: { ...defaultEosParams(), ...problem.eosParams },
     riemann: 'hllc',
     limiter: 'koren',
-    gravity: ndim === 2 ? 'off' : problem.gravity,
+    gravity: ndim === 2 && isSelfGravity(problem.gravity) ? 'off' : problem.gravity,
     G: problem.G,
     bcLo: ndim === 2 ? bc2.lo : problem.bcLo,
     bcHi: ndim === 2 ? bc2.hi : problem.bcHi,
@@ -171,6 +171,16 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
     ...over,
   };
+}
+
+/**
+ * The uniform gravitational acceleration on the gas: the preset's own, plus the constant field
+ * of strength G pointing down (-y in 2D, -z in 3D) when gravity is 'constant'.
+ */
+export function uniformField(c: SimConfig): [number, number, number] {
+  const g = [...c.gext] as [number, number, number];
+  if (c.gravity === 'constant') g[c.ndim === 2 ? 1 : 2] -= c.G;
+  return g;
 }
 
 /** The modules the hydro shaders are assembled with. */
@@ -374,7 +384,7 @@ export function packParams(
   u.set([...x.dims, 0], 12);
   // 2D quantities are per unit length along z.
   f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, ...(x.refine ?? [0, 0])], 16);
-  f.set([...c.gext, 0], 20);
+  f.set([...uniformField(c), 0], 20);
   // Point masses: how many, whether the frame follows the gas, whether there are any, and
   // whether they are all the field texture holds (no Poisson potential).
   f.set([x.masses, c.problem.gasFrame ? 1 : 0, x.masses > 0 ? 1 : 0, x.selfGravity ? 0 : 1], 24);
@@ -862,7 +872,7 @@ export class Sim implements Simulation {
   }
 
   private get selfGravity(): boolean {
-    return this.cfg.gravity !== 'off' && this.cfg.ndim === 3;
+    return isSelfGravity(this.cfg.gravity) && this.cfg.ndim === 3;
   }
 
   private get hasMasses(): boolean {
@@ -905,7 +915,7 @@ export class Sim implements Simulation {
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
     if (this.settling) return 0; // a star is still being settled
     const selfGravity = this.selfGravity;
-    const anyGravity = this.fieldOn || this.cfg.gext.some((g) => g !== 0);
+    const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = enc.beginComputePass();
