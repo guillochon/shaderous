@@ -58,7 +58,8 @@ side.innerHTML = `
       <span id="pparams"></span>
     </div>
     <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
-    <div class="g2 io">
+    <div class="io">
+      <label class="check" title="Start each problem playing as soon as it loads, and play a finished run again on Reset. Off, a run waits for Play"><input id="autoplay" type="checkbox" />Autoplay</label>
       <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
       <button id="import" title="Load a state from an .athdf file: one saved here, or another code's with density, velocity and pressure">Import state</button>
       <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
@@ -470,6 +471,11 @@ let renderer: Renderer;
 let cfg: SimConfig;
 const view: ViewState = defaultView();
 let running = true;
+/** Whether a run starts playing by itself when it loads or replays (remembered in this browser). */
+let autoplay = true;
+try {
+  autoplay = localStorage.getItem('shaderous.autoplay') !== 'off';
+} catch {}
 let stepOnce = false;
 let building = false;
 let finished = false;
@@ -758,7 +764,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     finished = false;
     // A freshly loaded problem starts playing, unless it waits for the user (an empty box); a
     // loaded state waits to be looked at.
-    running = !snap && !problem.startPaused;
+    running = autoplay && !snap && !problem.startPaused;
     lastDiag = undefined;
     nsub = 1;
   });
@@ -865,7 +871,7 @@ function restartRun(replay = false) {
       sim.cfg = cfg;
       sim.reset();
       clearSources();
-      if (replay) running = true;
+      if (replay) running = autoplay;
       finished = false;
       lastDiag = undefined;
     } finally {
@@ -897,7 +903,7 @@ function rebuildPipelines(resetAfter = false) {
         sim.reset();
         clearSources();
         lastDiag = undefined;
-        if (finished) running = true;
+        if (finished) running = autoplay;
       }
       finished = false;
     } finally {
@@ -985,6 +991,13 @@ function bind() {
     build(id, n, ndim, levels, true);
   });
   on('blocks', (el) => (view.showBlocks = el.checked));
+  $<HTMLInputElement>('autoplay').checked = autoplay;
+  on('autoplay', (el) => {
+    autoplay = el.checked;
+    try {
+      localStorage.setItem('shaderous.autoplay', autoplay ? 'on' : 'off');
+    } catch {}
+  });
   on('tend', (el) => {
     cfg.tEnd = el.value === '' ? Infinity : +el.value;
     applyParams();
