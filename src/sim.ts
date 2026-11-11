@@ -9,6 +9,7 @@ import { cellMark, isSelfGravity, type Bc3, type GravityMode, type PointMass, ty
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
 import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from './problems/settle';
+import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 
 export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
 export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
@@ -155,6 +156,12 @@ export interface Simulation {
   refreshPotential(): void;
   /** Encode one application of an editing brush to the current state (running or paused). */
   encodeBrush(enc: GPUCommandEncoder, op: BrushOp): void;
+  /**
+   * Place a star (a `star` brush). On an adaptive mesh the star is first refined to the finest
+   * level, and the blocks that does not need are merged again afterwards. Submits its own work;
+   * nothing may be encoded meanwhile.
+   */
+  placeStar(op: BrushOp): Promise<void>;
   /** Call once gas has been added or removed, with the new total mass: self-gravity is re-solved. */
   massChanged(mass: number): void;
   /**
@@ -332,7 +339,7 @@ export function unpackMasses(f: Float32Array, count: number): Required<PointMass
 /** One application of an editing brush (edit/brush_core.wgsl). */
 export interface BrushOp {
   /** `eos-out` and `eos-in` act on every cell: see convertEos() in ui/app.ts and edit/brush_core.wgsl. */
-  kind: 'mass' | 'velocity' | 'temperature' | 'obstacle' | 'eos-out' | 'eos-in';
+  kind: 'mass' | 'velocity' | 'temperature' | 'obstacle' | 'eos-out' | 'eos-in' | 'star';
   /** center and radius, in fractions of the box */
   pos: [number, number, number];
   radius: number;
@@ -340,15 +347,42 @@ export interface BrushOp {
   softness: number;
   /**
    * mass: density added at the center (negative removes); temperature: log of the factor;
-   * obstacle: positive makes the cells solid, negative turns them back into gas
+   * obstacle: positive makes the cells solid, negative turns them back into gas;
+   * star: central density
    */
   amount: number;
-  /** velocity tool: the velocity to set */
+  /** velocity tool: the velocity to set; star: its velocity */
   vel: [number, number, number];
   /** mass tool: new gas brings no momentum (otherwise it arrives with the local velocity) */
   atRest?: boolean;
   /** obstacle tool: the outline, drawn on the screen and cut through the box along the line of sight */
   outline?: Outline;
+  /** star: see starBrush() */
+  star?: StarProfile;
+}
+
+/** A polytrope for the star brush: p = K rho^gamma, and rho / rho_c at evenly spaced r / R from 0 to 1. */
+export interface StarProfile {
+  K: number;
+  gamma: number;
+  table: Float32Array;
+}
+
+/** Entries of StarProfile.table: as STAR_TABLE in edit/brush_core.wgsl. */
+export const STAR_TABLE = 64;
+
+/**
+ * The star brush for an n polytrope of central density `rhoc` and radius `radius` (in units
+ * of the box, which is `box` across), at `pos` (in fractions of the box) moving at `vel`.
+ */
+export function starBrush(n: number, rhoc: number, radius: number, box: number, G: number, pos: [number, number, number], vel: [number, number, number]): BrushOp {
+  const poly = laneEmdenCached(n);
+  const table = new Float32Array(STAR_TABLE);
+  for (let i = 0; i < STAR_TABLE - 1; i++) table[i] = Math.pow(poly.theta(i / (STAR_TABLE - 1)), n);
+  return {
+    kind: 'star', pos, radius, softness: 0, amount: rhoc, vel,
+    star: { K: polytropeK(poly, rhoc, radius * box, G), gamma: 1 + 1 / n, table },
+  };
 }
 
 export interface Outline {
@@ -418,7 +452,7 @@ export function packBrush(b: BrushOp): ArrayBuffer {
   const f = new Float32Array(buf);
   f.set([...b.pos, b.radius, ...b.vel, b.softness], 0);
   const u = new Uint32Array(buf);
-  u[8] = ['mass', 'velocity', 'temperature', 'obstacle', 'eos-out', 'eos-in'].indexOf(b.kind);
+  u[8] = ['mass', 'velocity', 'temperature', 'obstacle', 'eos-out', 'eos-in', 'star'].indexOf(b.kind);
   f[9] = b.amount;
   u[10] = b.atRest ? 1 : 0;
   if (b.outline) {
@@ -427,6 +461,10 @@ export function packBrush(b: BrushOp): ArrayBuffer {
     f.set(b.outline.matrix, 12);
     f.set(b.outline.ellipse ?? [0, 0, 1, 1], 28);
     f.set(poly, 32);
+  }
+  if (b.star) {
+    f.set([b.star.K, b.star.gamma], 28);
+    f.set(b.star.table.subarray(0, STAR_TABLE), 32);
   }
   return buf;
 }
@@ -1069,6 +1107,12 @@ export class Sim implements Simulation {
     this.dispatch(pass);
     pass.end();
     this.cur = 1 - this.cur;
+  }
+
+  async placeStar(op: BrushOp) {
+    const enc = this.device.createCommandEncoder();
+    this.encodeBrush(enc, op);
+    this.device.queue.submit([enc.finish()]);
   }
 
   setSources(list: SourceSpec[]) {

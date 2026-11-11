@@ -55,3 +55,21 @@ export function polytropeScales(poly: Polytrope, M: number, R: number, G: number
   const K = (4 * Math.PI * G * R * R * Math.pow(rhoc, 1 - 1 / poly.n)) / ((poly.n + 1) * poly.xi1 ** 2);
   return { rhoc, K };
 }
+
+/** K in p = K rho^(1 + 1/n) of a polytrope of central density `rhoc` and radius R. */
+export function polytropeK(poly: Polytrope, rhoc: number, R: number, G: number): number {
+  return (4 * Math.PI * G * R * R * Math.pow(rhoc, 1 - 1 / poly.n)) / ((poly.n + 1) * poly.xi1 ** 2);
+}
+
+/** Mass of a polytrope of central density `rhoc` and radius R. */
+export function polytropeMass(poly: Polytrope, rhoc: number, R: number): number {
+  return (4 * Math.PI * R ** 3 * rhoc * -poly.dtheta1) / poly.xi1;
+}
+
+const solved = new Map<number, Polytrope>();
+/** laneEmden(n), solved once per index. */
+export function laneEmdenCached(n: number): Polytrope {
+  let p = solved.get(n);
+  if (!p) solved.set(n, (p = laneEmden(n)));
+  return p;
+}

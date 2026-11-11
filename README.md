@@ -19,6 +19,13 @@ https://guillochon.github.io/shaderous/validate.html
   Presets bring their own, and the sink tool places more: with its mass slider at zero it
   places a plain sink that stays put, and with a mass (a multiple of the gas in the box) a
   point mass, set moving by a drag. A preset without a gravitational constant gets G = 1.
+- **Star tool:** places a polytropic star (n = 1, 1.5 or 3) of a chosen radius and central
+  density anywhere in a 3D box, at rest or set moving by a drag. K follows from those as in
+  the polytrope preset. The star takes over the cells where it is denser than the gas already
+  there and carries the passive scalar. It is analytic, not settled into the grid's balance,
+  so it rings a little. Placing one switches self-gravity on if it is off. On the adaptive
+  mesh the star is first refined to the finest level and written; the new blocks the
+  refinement indicator does not want are then merged, and the star is written again on them.
 - **Tidal disruption:** a polytropic star passed by a point mass on a parabolic orbit, run in the
   star's rest frame. The frame accelerates with the gas's center of mass, the point mass's orbit
   is integrated alongside the gas, and the boundaries let gas out but not in.

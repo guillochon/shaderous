@@ -20,7 +20,7 @@ import { bindGroup, computePipeline, readTexture, tex3d, type Bindable, type Gpu
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
-import { cellMark, isSelfGravity } from '../problems/types';
+import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from '../problems/settle';
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
@@ -1290,6 +1290,109 @@ export class AmrSim implements Simulation {
     if (!ops) return;
     this.pending = { ops };
     this.flush();
+  }
+
+  /** Whether a block reaches into a ball (center and radius in fractions of the box). */
+  private touchesBall(b: Block, pos: [number, number, number], r: number): boolean {
+    const size = (BS * this.dx0) / (1 << b.level) / this.cfg.problem.box;
+    let d2 = 0;
+    for (let a = 0; a < this.cfg.ndim; a++) {
+      const lo = b.c[a] * size;
+      // The nearest point of the block to the center, or to its periodic image.
+      const shifts = this.cfg.bcLo[a] === PERIODIC ? [-1, 0, 1] : [0];
+      d2 += Math.min(...shifts.map((k) => (Math.min(Math.max(pos[a] + k, lo), lo + size) - pos[a] - k) ** 2));
+    }
+    return d2 < r * r;
+  }
+
+  /** Refine the mesh to its finest level throughout a ball, one level per re-mesh, submitted here. */
+  private refineBall(pos: [number, number, number], r: number) {
+    this.flush();
+    for (let level = 0; level < this.levels; level++) {
+      const want = this.tree.leaves().filter((b) => b.level < this.tree.levelLimit && this.touchesBall(b, pos, r));
+      if (!want.length) break;
+      this.makeRoom(want, this.tree.costToRefine(want) - this.tree.freeSlots);
+      const set = new Set(want);
+      const ops = this.tree.adapt((b) => (set.has(b) ? 1 : 0), 0.5, -1);
+      if (!ops) break;
+      this.pending = { ops };
+      this.flush();
+    }
+    this.meshEpoch++;
+  }
+
+  /** The refinement indicator of every leaf (by slot) for the current state, read back now. */
+  private async measureIndicators(): Promise<Float32Array> {
+    // The stepping's own read uses the same staging buffer: let it finish (and be ignored).
+    this.meshEpoch++;
+    this.wantMap = false;
+    if (this.flagWait) await this.flagWait.catch(() => {});
+    const enc = this.device.createCommandEncoder();
+    enc.clearBuffer(this.flags);
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.pAssemble);
+    pass.setBindGroup(0, this.gAssemble[this.cur]);
+    this.padded(pass, this.nAll);
+    pass.setPipeline(this.pFlag);
+    pass.setBindGroup(0, this.gFlag);
+    this.interior(pass, this.nLeaf);
+    pass.end();
+    enc.copyBufferToBuffer(this.flags, 0, this.flagStaging, 0, this.cap * 4);
+    this.device.queue.submit([enc.finish()]);
+    this.flagInFlight = true;
+    const done = this.flagStaging.mapAsync(GPUMapMode.READ).then(() => {
+      const ind = new Float32Array(this.flagStaging.getMappedRange().slice(0));
+      this.flagStaging.unmap();
+      return ind;
+    });
+    this.flagWait = done.then(
+      () => {},
+      () => {},
+    );
+    try {
+      return await done;
+    } finally {
+      this.flagInFlight = false;
+      this.stepsSinceFlag = 0;
+    }
+  }
+
+  private submitBrush(op: BrushOp) {
+    const enc = this.device.createCommandEncoder();
+    this.encodeBrush(enc, op);
+    this.device.queue.submit([enc.finish()]);
+  }
+
+  /**
+   * Place a star: refine all of it to the finest level, write it, then merge the new blocks
+   * that the refinement indicator of the gas as placed does not want (never below the mesh as
+   * it was), and write it again on whatever was merged.
+   */
+  async placeStar(op: BrushOp) {
+    if (this.levels === 0) return this.submitBrush(op);
+    const tree = this.tree;
+    const before = new Set(tree.leaves());
+    this.refineBall(op.pos, op.radius);
+    this.submitBrush(op);
+    let merged = false;
+    const between = 0.5 * (this.cfg.refineHi + this.cfg.refineLo);
+    for (let level = 0; level < this.levels; level++) {
+      const ind = await this.measureIndicators();
+      if (tree !== this.tree) return; // the run was reset meanwhile
+      // Only blocks the star made are judged, and only for merging: the rest neither refine nor merge.
+      const ops = tree.adapt(
+        (b) => (before.has(b) ? between : ind[b.slot] === 0 ? -1 : Math.min(ind[b.slot], this.cfg.refineHi)),
+        this.cfg.refineHi,
+        this.cfg.refineLo,
+      );
+      if (!ops) break;
+      merged = true;
+      this.pending = { ops };
+      this.flush();
+    }
+    // Merging averaged the star's profile over the coarser cells: sample it there instead.
+    if (merged) this.submitBrush(op);
+    this.meshEpoch++;
   }
 
   /**

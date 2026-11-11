@@ -137,6 +137,10 @@ details[open] > summary .sum { display: none; }
 #tool-shapes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
 #tools #tool-shapes button { height: 20px; }
 #tools #tool-shapes svg { width: 13px; height: 13px; }
+#tool-index { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+#tool-index[hidden] { display: none; }
+#tools #tool-index button { height: 18px; padding: 0; font-size: 9px; color: #aab3c5; }
+#tools #tool-index button[aria-pressed='true'] { color: #fff; }
 .scrub output { color: var(--text); font-variant-numeric: tabular-nums; }
 #view.tool { cursor: crosshair; }
 /* Markers of the sources (green) and sinks (orange) in the run. */
@@ -281,7 +285,7 @@ body.validate th { color: var(--dim); font-weight: 500; }
   .cb-checks .check { font-size: 12px; min-height: 22px; }
   #colorbar select { height: 26px; font-size: 12px; }
   #tools button { height: 34px; }
-  .scrub, #tools #tool-rest, #tools #tool-erase, #tools #tool-clear, #tools #tool-shapes button { height: 26px; }
+  .scrub, #tools #tool-rest, #tools #tool-erase, #tools #tool-clear, #tools #tool-shapes button, #tools #tool-index button { height: 26px; }
   .scrub span { line-height: 26px; }
   .scrub input::-webkit-slider-thumb { height: 26px; }
   .scrub input::-moz-range-thumb { height: 26px; }

@@ -5,11 +5,11 @@ import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
-import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
+import { familyById, familyOf, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
@@ -265,6 +265,9 @@ const hud = $('hud');
 // A column of tools under the color bar. Each paints with a soft ball (a disk in 2D) and
 // keeps its own size and softness.
 type ToolKind = Exclude<BrushOp['kind'], 'eos-out' | 'eos-in'> | 'source' | 'sink' | 'query';
+/** Polytropic indices the star tool offers. */
+const STAR_INDICES = [1, 1.5, 3];
+const starId = (n: number) => `star-n-${String(n).replace('.', '_')}`;
 const icon = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = [
   {
@@ -297,6 +300,11 @@ TOOLS.push({
   kind: 'sink', label: 'Sink',
   title: 'Sink: click to place one that takes gas away. Give it a mass and it becomes a point mass: it pulls on the gas, moves, and grows by what it takes in (press and drag to set it moving)',
   icon: icon('<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.2 2.2" /><path d="M2.5 2.5l3 3M5.5 3v2.5H3M13.5 13.5l-3-3M10.5 13v-2.5H13" />'),
+});
+TOOLS.push({
+  kind: 'star', label: 'Star',
+  title: 'Star: click to place a polytropic star, or press and drag to set it moving (a longer drag is faster). Size is its radius; it takes over the gas wherever it is denser. Switches self-gravity on',
+  icon: icon('<path d="M8 2.1L9.6 6.4L14.2 6.6L10.6 9.4L11.8 13.9L8 11.3L4.2 13.9L5.4 9.4L1.8 6.6L6.4 6.4z" />'),
 });
 TOOLS.push({
   kind: 'query', label: 'Query',
@@ -333,11 +341,15 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   obstacle: { size: 0, softness: 0, amount: 0, mass: 0 },
   source: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0 },
   sink: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0 },
+  star: { size: 0.1, softness: 0, amount: 0, mass: 0 },
   query: { size: 0, softness: 0, amount: 0, mass: 0 },
 };
 /** The sink tool places a point mass rather than a plain sink. */
 const sinkHasMass = () => toolParams.sink.mass > 0;
 let tool: ToolKind | null = null;
+/** Star tool: polytropic index, and log10 of the central density (1, as in the polytrope preset). */
+let starN = 1.5;
+let starLogRho = 0;
 /** Mass tool: new gas brings no momentum of its own. */
 let massAtRest = true;
 const slider = (id: string, label: string, title: string, min: number, max: number) =>
@@ -348,6 +360,8 @@ $('tools').innerHTML =
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the center', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
+    <label class="scrub" id="tp-rhoc-row" title="Central density of the star"><input id="tp-rhoc" type="range" min="-3" max="3" step="0.05" aria-label="Central density of the star" /><span>ρc<output id="tp-rhoc-out"></output></span></label>
+    <div id="tool-index" title="Polytropic index n: p = K ρ^(1 + 1/n). 1.5 is a convective star, 3 a radiative one like the Sun">${STAR_INDICES.map((n) => `<button id="${starId(n)}" aria-pressed="false" title="n = ${n}">n=${n}</button>`).join('')}</div>
     ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it only takes gas away, where it was placed. With a mass it is a point mass with softened gravity: it pulls on the gas, moves, and grows by what it takes in', 0, 2)}
     <button id="tool-rest" aria-pressed="true" title="p = 0 for new mass: added gas arrives at rest and shares the momentum already there, slowing the flow. Off: it arrives with the local velocity">p = 0</button>
     <div id="tool-shapes">${SHAPES.map((q) => `<button id="shape-${q.mode}" aria-pressed="false" aria-label="${q.mode}" title="${q.title}">${q.icon}</button>`).join('')}</div>
@@ -359,11 +373,16 @@ function syncTools() {
   // A barotropic gas has no temperature of its own to change.
   const noTemp = cfg?.eos === 'barotropic';
   if (noTemp && tool === 'temperature') tool = null;
+  // A star needs self-gravity (3D only), and an equation of state that leaves K free.
+  const noStar = cfg?.ndim === 2
+    ? 'A star needs self-gravity, which a 2D run does not have'
+    : noTemp ? 'The barotropic equation of state fixes the pressure of the gas, so a star’s cannot be chosen' : '';
+  if (noStar && tool === 'star') tool = null;
   for (const t of TOOLS) {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
     b.setAttribute('aria-pressed', String(tool === t.kind));
-    b.disabled = t.kind === 'temperature' && noTemp;
-    b.title = b.disabled ? 'The barotropic equation of state ties the temperature to the density' : t.title;
+    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar);
+    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : 'The barotropic equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
   $('tool-params').hidden = tool === null || tool === 'query';
@@ -375,8 +394,15 @@ function syncTools() {
   const q = toolParams[tool];
   $('tp-amount-row').hidden = tool !== 'mass' && tool !== 'source' && tool !== 'sink';
   $('tp-mass-row').hidden = tool !== 'sink';
-  // A point mass has no soft edge to set: its sink always fades from the center.
-  $('tp-softness-row').hidden = tool === 'sink' && sinkHasMass();
+  // A point mass has no soft edge to set: its sink always fades from the center. A star's
+  // edge is its own profile.
+  $('tp-softness-row').hidden = (tool === 'sink' && sinkHasMass()) || tool === 'star';
+  $('tp-rhoc-row').hidden = $('tool-index').hidden = tool !== 'star';
+  for (const n of STAR_INDICES) $(starId(n)).setAttribute('aria-pressed', String(starN === n));
+  const rc = $<HTMLInputElement>('tp-rhoc');
+  rc.value = String(starLogRho);
+  rc.style.setProperty('--p', `${(100 * (starLogRho + 3)) / 6}%`);
+  $('tp-rhoc-out').textContent = String(+(10 ** starLogRho).toPrecision(2));
   // The same slider is the amount of a dab of mass and the flux of a source or sink.
   const flux = tool === 'source' || tool === 'sink';
   $('tp-amount-row').title = tool === 'source'
@@ -446,6 +472,16 @@ for (const k of ['size', 'softness', 'amount', 'mass'] as const) {
   $(`tp-${k}`).addEventListener('input', () => {
     if (!tool) return;
     toolParams[tool][k] = +$<HTMLInputElement>(`tp-${k}`).value;
+    syncTools();
+  });
+}
+$('tp-rhoc').addEventListener('input', () => {
+  starLogRho = +$<HTMLInputElement>('tp-rhoc').value;
+  syncTools();
+});
+for (const n of STAR_INDICES) {
+  $(starId(n)).addEventListener('click', () => {
+    starN = n;
     syncTools();
   });
 }
@@ -1707,7 +1743,7 @@ function drawBrush(px?: number, py?: number) {
   }
   const kind = stroke?.kind ?? tool;
   // A velocity, or the aim of a source, is dragged out from where the press began.
-  const drag = stroke?.kind === 'velocity' || stroke?.kind === 'source' || (stroke?.kind === 'sink' && sinkHasMass());
+  const drag = stroke?.kind === 'velocity' || stroke?.kind === 'source' || stroke?.kind === 'star' || (stroke?.kind === 'sink' && sinkHasMass());
   const x = drag ? stroke!.x0 : (px ?? stroke?.x ?? 0);
   const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
   const { scale } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
@@ -1776,7 +1812,7 @@ function endStroke(apply: boolean) {
   if (!stroke) return;
   stroke.released = true;
   // A velocity is set on letting go; a canceled drag sets nothing.
-  if (!apply && (stroke.kind === 'velocity' || stroke.kind === 'source' || stroke.kind === 'sink')) stroke = null;
+  if (!apply && (stroke.kind === 'velocity' || stroke.kind === 'source' || stroke.kind === 'sink' || stroke.kind === 'star')) stroke = null;
   drawBrush();
 }
 
@@ -1810,6 +1846,41 @@ function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass
   notice(ok ? '' : `A run holds at most ${MAX_MASSES} point masses`);
 }
 
+/**
+ * Place a polytropic star of the tool's index, central density and radius at `pos` (in
+ * fractions of the box), moving at `vel`. Switches self-gravity on if it is off: isolated, or
+ * periodic in a fully periodic box.
+ */
+function placeStar(pos: Vec3, vel: Vec3) {
+  if (!sim || cfg.ndim !== 3) return;
+  const notes: string[] = [];
+  if (!isSelfGravity(cfg.gravity)) {
+    // A uniform field's strength is not a gravitational constant.
+    if (!(cfg.G > 0) || cfg.gravity === 'constant') cfg.G = 1;
+    cfg.gravity = [...cfg.bcLo, ...cfg.bcHi].every((b) => b === PERIODIC) ? 'periodic' : 'isolated';
+    notes.push(`self-gravity switched on (${cfg.gravity})`);
+  }
+  const q = toolParams.star;
+  const cells = q.size * cfg.n;
+  if (cells < 8) notes.push(`the star is only ${cells.toFixed(1)} cells in radius`);
+  if (cfg.eos === 'ideal' && cfg.eosParams.gamma < 1 + 1 / starN) notes.push('\u03b3 < 1 + 1/n: the star is convectively unstable');
+  notice(notes.join('; '));
+  const op = starBrush(starN, 10 ** starLogRho, q.size, cfg.problem.box, cfg.G, pos, vel);
+  const target = sim;
+  syncControls();
+  enqueue(async () => {
+    if (target !== sim) return;
+    applyParams();
+    target.refreshPotential();
+    await target.placeStar(op);
+    if (target !== sim) return;
+    // Self-gravity has to hear about the new mass.
+    const d = await target.diagnostics();
+    if (target === sim) target.massChanged(d.mass);
+    lastDiag = undefined;
+  });
+}
+
 /** Turn the stroke in progress into this frame's edit. Called once per frame. */
 function advanceStroke(now: number) {
   const s = stroke;
@@ -1838,6 +1909,18 @@ function advanceStroke(now: number) {
     if (sources.length > MAX_SOURCES) sources.shift(); // the oldest makes room
     sim.setSources(sources);
     syncTools();
+    return;
+  }
+  if (s.kind === 'star') {
+    if (!s.released) return;
+    stroke = null;
+    const at = locate(s.x0, s.y0, s.depth);
+    const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
+    const len = Math.hypot(dx, dy);
+    // As for a point mass: a drag sets the star moving, a click leaves it at rest.
+    const speed = len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
+    const vel = [0, 1, 2].map((i) => (speed ? (speed * (dx * at.right[i] + dy * at.up[i])) / len : 0)) as Vec3;
+    placeStar(at.pos, vel);
     return;
   }
   if (s.kind === 'query') return; // the query tool reads, and never starts a stroke
