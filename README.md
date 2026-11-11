@@ -8,7 +8,7 @@ and gravity computation runs in WGSL compute shaders on WebGPU. The design is in
 https://guillochon.github.io/shaderous/validate.html
 
 - **Hydro:** unsplit MUSCL-Hancock, third-order reconstruction limited only where the flow is
-  not smooth (or a classic slope limiter), HLLC (or HLL) fluxes,
+  not smooth (or a classic slope limiter), HLLC (optionally with a low-Mach fix, or HLL) fluxes,
   positivity fallback, shock-flagged HLL blend, dual-energy formalism, floors.
 - **Self-gravity:** multigrid Poisson solve every step, periodic or isolated (multipole) boundaries.
 - **Self-gravity or a uniform field:** a constant external acceleration drives the
@@ -208,6 +208,46 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   status line says so) rather than letting a refinement boundary cut through a star at an
   arbitrary place, which disturbs hydrostatic balance. Periodic gravity assumes periodic hydro boundaries on the adaptive mesh.
 - **Barotropic gas** uses HLL, since there is no contact wave for HLLC to resolve.
+- **HLLC, low Mach** (a third choice of Riemann solver). A Godunov flux damps a velocity jump
+  at a rate set by the sound speed, so slow flow is damped far faster than it moves. Following
+  Thornber et al. (2008) the velocity jump handed to HLLC is scaled by the local Mach number,
+  with a floor of 0.3: this scheme's time integration (one predictor, one update) with the
+  unlimited third-order reconstruction relies on the solver's damping, and a Gresho vortex at
+  Mach 0.01 gains kinetic energy without bound for a floor of 0.1 or less. So the fix removes
+  up to 70% of the damping of slow flow, not all of it: that vortex on 64 x 64 cells loses 6%
+  of its kinetic energy in two time units where plain HLLC loses 15%. Above Mach 1, shocks
+  included, it is plain HLLC. (Scaling the acoustic wave speeds instead, as in HLLC-LM, takes
+  the damping of pressure jumps away too and is unstable here even at Mach 0.03.)
+- **Well-balanced reconstruction** (always on, for equations of state with an energy; `wb=0`
+  in a link turns it off for comparison). In hydrostatic balance it is not the
+  pressure that is smooth across a stratified cell but its balance with gravity. So what is
+  limited and reconstructed is each neighbour's deviation from that balance,
+  `(p_r - p_c) + (rho_c + rho_r) / 2 * (phi_r - phi_c)`, and the balanced part of the step to
+  the face, `-rho_c * dphi`, is added back unlimited (after Kappeli & Mishra 2014). Where the
+  cells obey that trapezoid rule the two cells sharing a face agree on its pressure, and a
+  cell's two face pressures differ by exactly what the gravity kick adds to its momentum, so
+  the state holds to round-off however steep it is. Walls and obstacles are exact too: the
+  image beyond a wall has the cell's own potential, while the wall face itself is reached
+  along the true one. The shock detector measures pressure jumps against the same balance,
+  or a steep atmosphere at rest would be flagged as a shock. An isothermal column falling by
+  e every 4 cells keeps its largest Mach number at 4e-5 after a sound crossing (0.35
+  without); the background of the Rayleigh-Taylor preset is 240 times quieter and the error
+  of the Jeans growth rate 12 times smaller. On the adaptive mesh the potential is
+  kept on both ghost layers for this.
+- **Stars start in the grid's own balance.** A star set up from its analytic profile is in
+  balance with the analytic potential, not with the one the Poisson solver finds on the grid,
+  and answers the mismatch by ringing. So the polytrope and the star of the tidal disruption
+  are settled before the first step, in the manner of Zingale et al. (2002) for mapped stellar
+  models: the density is set to satisfy `h(rho) + phi = C` with the grid's potential and the
+  star's mass, the potential is solved again, and the two are repeated until the density
+  changes by less than 1e-5 (6 to 8 rounds; the first moves it by about 1%). For n = 1 that
+  relation is exactly the trapezoid rule above. On the adaptive mesh (128 cells, 2 levels)
+  the settled n = 1 polytrope's central density then strays by 0.14% over three dynamical
+  times against 0.26% for the plain scheme, and its energy by 0.33% against 0.77%. On a
+  uniform grid of 64 cells over ten dynamical times the energy also drifts less (2.0%
+  against 3.5%), but the central density strays further (2.5% against 0.7%). The ambient gas
+  around the star is uniform, not in balance, and falls onto it at up to Mach 0.8; with less
+  damping in the scheme, the star shows more of that.
 - **Point masses** share the gravity field texture with self-gravity, so the hydro passes do
   not know they exist. Each step they drift, then one reduction over the updated gas gives
   every mass its pull on the gas (whose reaction moves the mass) and what its sink takes; the

@@ -18,7 +18,8 @@ struct Params {
   grav_on: u32,          // the gravity field texture is in use: self-gravity, point masses or both
   grav_bc: u32,          // 0 periodic, 1 isolated
   flags: u32,            // bit 0: flux-form gravitational work; bit 1: the grid holds solid or fixed
-                         //   cells; bit 2: there are sources or sinks (hydro/sources.wgsl)
+                         //   cells; bit 2: there are sources or sinks (hydro/sources.wgsl); bit 3:
+                         //   well-balanced pressure reconstruction (hydro/q.wgsl)
   dx: f32,               // cell size (level 0 on block grids)
   cfl: f32,
   G: f32,
@@ -56,6 +57,14 @@ fn has_potential() -> bool {
 fn has_sources() -> bool {
   return (P.flags & 4u) != 0u;
 }
+// Well-balanced pressure reconstruction (hydro/q.wgsl) is on.
+fn well_balanced() -> bool {
+  return (P.flags & 8u) != 0u;
+}
+// For it: potential differences across the faces on one side of a cell, per axis, as the
+// deviations from balance see them (`seen`: none across a wall or an outflow face) and for
+// the increment to the face (`face`: the true difference across a wall).
+struct PhiSteps { seen: vec3<f32>, face: vec3<f32> }
 
 // Size of the cell this invocation is working on. Every entry point sets it first: it is P.dx
 // on a uniform grid and depends on the block's level on an adaptive one.

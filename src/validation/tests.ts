@@ -2,7 +2,7 @@
 // validate.html interactively and by Playwright in tests/gpu.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
-import { configFor, PARAM_BYTES, Sim, type SimConfig } from '../sim';
+import { configFor, PARAM_BYTES, Sim, type RiemannKind, type SimConfig } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
 import { defaultEosParams, EOS_MODULES, makeEos, type EosKind } from '../eos/eos';
 import { exactRiemann } from '../reference/riemann_exact';
@@ -45,6 +45,54 @@ const stillGas = (over: Partial<Problem>): Problem => ({
   init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 1, s: 0 }),
   ...over,
 });
+
+/**
+ * Gresho vortex: a steady vortex in a periodic unit box, the pressure balancing the centrifugal
+ * force, with the background pressure setting the Mach number of its fastest gas (speed 1 at
+ * r = 0.2). Nothing should change; what does is the solver's own dissipation.
+ */
+const gresho = (mach: number, tEnd = 1): Problem => {
+  const gamma = 1.4;
+  const p0 = 1 / (gamma * mach * mach);
+  return stillGas({
+    id: 'gresho', eosParams: { gamma }, tEnd,
+    init: () => (x, y) => {
+      const r = Math.hypot(x, y);
+      let u = 0;
+      let p = p0 - 2 + 4 * Math.log(2);
+      if (r < 0.2) {
+        u = 5 * r;
+        p = p0 + 12.5 * r * r;
+      } else if (r < 0.4) {
+        u = 2 - 5 * r;
+        p = p0 + 12.5 * r * r + 4 * (1 - 5 * r - Math.log(0.2) + Math.log(r));
+      }
+      const c = r > 0 ? [-y / r, x / r] : [0, 0];
+      return { rho: 1, vx: u * c[0], vy: u * c[1], vz: 0, p, s: 0 };
+    },
+  });
+};
+
+/**
+ * An isothermal column at rest in a uniform field, between two walls: p = rho (so the
+ * temperature is 1) falling by e every `cells` cells. The cell values obey the trapezoid rule
+ * p[j+1] - p[j] = -g dx (rho[j] + rho[j+1]) / 2 exactly, which is the balance the well-balanced
+ * reconstruction holds.
+ */
+const column = (cells: number): Problem =>
+  stillGas({
+    id: 'column', eosParams: { gamma: 1.4 }, tEnd: 1,
+    bcLo: [0, 2, 0], bcHi: [0, 2, 0],
+    gext: () => [0, -64 / cells, 0],
+    init: (n) => {
+      const a = (64 / cells) / n / 2; // g dx / 2, with p = rho
+      const q = (1 - a) / (1 + a);
+      return (_x, y) => {
+        const p = Math.pow(q, Math.round((y + 0.5) * n - 0.5));
+        return { rho: p, vx: 0, vy: 0, vz: 0, p, s: 0 };
+      };
+    },
+  });
 
 /** The binary on a 2D adaptive mesh: largest deviation of the separation from 1 over one period. */
 async function adaptiveBinary(gpu: Gpu, period: number): Promise<number> {
@@ -314,6 +362,61 @@ export const TESTS: TestDef[] = [
         const d = await sim.diagnostics();
         return { pass: e1 / e0 > 5 && Number.isFinite(d.eTot), metrics: { transverse_ke_growth: e1 / e0, max_mach: d.maxMach, steps } };
       });
+    },
+  },
+  {
+    id: 'low-mach',
+    name: 'HLLC with the low-Mach fix: Gresho vortex at Mach 0.01, and a Sod shock tube',
+    criterion:
+      'After t = 2 (1.6 turns) on a 64 x 64 grid the vortex loses less than half the kinetic energy it loses with plain HLLC, and gains none; Sod L1 density error < 0.01, as with plain HLLC',
+    async run(gpu) {
+      const n = 64;
+      const kept = (riemann: RiemannKind) =>
+        withSim(gpu, gresho(0.01, 2), n, { ndim: 2, riemann }, async (sim) => {
+          const ke = async () => {
+            const { u1 } = await sim.readState();
+            let e = 0;
+            for (let o = 0; o < u1.length; o += 4) e += (0.5 * (u1[o + 1] ** 2 + u1[o + 2] ** 2)) / u1[o];
+            return e;
+          };
+          const e0 = await ke();
+          const steps = await sim.runToEnd();
+          return { kept: (await ke()) / e0, steps };
+        });
+      const plain = await kept('hllc');
+      const fixed = await kept('hllclm');
+      const tube = await withSim(gpu, sodX, N_TUBE, { riemann: 'hllclm' }, async (sim) => {
+        await sim.runToEnd();
+        return l1VsExact(axisProfile((await sim.readState()).u1, N_TUBE, 0).prof, sodX, sodX.tEnd, 1 / N_TUBE);
+      });
+      return {
+        pass: fixed.kept < 1 && 1 - fixed.kept < 0.5 * (1 - plain.kept) && tube < 0.01,
+        metrics: { kinetic_energy_kept_hllc: plain.kept, kinetic_energy_kept_low_mach: fixed.kept, sod_l1: tube, steps: fixed.steps },
+      };
+    },
+  },
+  {
+    id: 'well-balanced',
+    name: 'Well-balanced reconstruction: a stratified column at rest between walls',
+    criterion:
+      'A 64-cell isothermal column whose density falls by e every 4 cells (a factor of 9e6 in all), in discrete hydrostatic balance, after one sound crossing: with the well-balanced reconstruction the largest Mach number stays below 1e-4 on the uniform grid and on the block grid, and is at least 100 times smaller than without it',
+    async run(gpu) {
+      const over = { ndim: 2 as const, tEnd: 1 };
+      const mach = async (wellBalanced: boolean, blocks: boolean) => {
+        const go = async (sim: Sim | AmrSim) => {
+          await sim.runToEnd();
+          return (await sim.diagnostics()).maxMach;
+        };
+        return blocks ? withAmr(gpu, column(4), 64, { ...over, amrLevels: 0, wellBalanced }, go) : withSim(gpu, column(4), 64, { ...over, wellBalanced }, go);
+      };
+      const plain = await mach(false, false);
+      const balanced = await mach(true, false);
+      const plainBlocks = await mach(false, true);
+      const balancedBlocks = await mach(true, true);
+      return {
+        pass: balanced < 1e-4 && balancedBlocks < 1e-4 && balanced < 0.01 * plain && balancedBlocks < 0.01 * plainBlocks,
+        metrics: { max_mach_plain: plain, max_mach_well_balanced: balanced, max_mach_plain_blocks: plainBlocks, max_mach_well_balanced_blocks: balancedBlocks },
+      };
     },
   },
   {
@@ -1007,7 +1110,7 @@ export const TESTS: TestDef[] = [
         const ref = new RefHydro({
           nx: n, ny: n, nz: n, dx: prob.box / n, eos: makeEos(cfg.eos, cfg.eosParams), bcLo: cfg.bcLo, bcHi: cfg.bcHi,
           cfl: cfg.cfl, rhoFloor: cfg.rhoFloor, pFloor: cfg.pFloor, etaDual: cfg.etaDual, shockThresh: cfg.shockThresh,
-          riemann: cfg.riemann, limiter: cfg.limiter,
+          riemann: cfg.riemann === 'hll' ? 'hll' : 'hllc', limiter: cfg.limiter,
         });
         ref.init(prob.init(n, ref.cfg.eos, 3, {}));
         for (let i = 0; i < 20; i++) ref.step();

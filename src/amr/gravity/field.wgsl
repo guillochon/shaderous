@@ -2,7 +2,8 @@
 //   xyz = acceleration: self-gravity from the new potential, plus the point masses' pull minus
 //         the frame's own acceleration when there are any (interior cells)
 //   w   = potential extrapolated half a step ahead, for the update's time-centred energy
-//         source (interior cells and the first ghost layer)
+//         source (interior cells and the first ghost layer) and the well-balanced pressure
+//         reconstruction (both ghost layers)
 // With per-block timesteps the half step is the block's own, and the pass runs over the
 // blocks about to start a step.
 #include "hydro/common.wgsl"
@@ -26,7 +27,7 @@ fn phi(c: vec3<i32>) -> f32 {
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let inv = inv_padded(gid, 1);
+  let inv = inv_padded(gid, 2);
   if (!inv.ok) { return; }
   let l = inv.l;
   let out = vec3<i32>(l < vec3<i32>(0)) + vec3<i32>(l >= vec3<i32>(BS));

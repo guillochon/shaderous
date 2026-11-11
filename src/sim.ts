@@ -8,8 +8,9 @@ import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } 
 import { cellMark, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
+import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from './problems/settle';
 
-export type RiemannKind = 'hllc' | 'hll';
+export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
 export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
 
 export interface SimConfig {
@@ -41,6 +42,13 @@ export interface SimConfig {
   vcycles: number; // V-cycles per step (warm-started)
   /** Flux-form gravitational work (conserves total energy) instead of kick-consistent energy. */
   gravEnergyFlux: boolean;
+  /**
+   * Well-balanced pressure reconstruction: deviations from hydrostatic balance are what is
+   * reconstructed, so a static stratified state holds to round-off (hydro/q.wgsl). Applies
+   * with gravity and an equation of state that carries an energy. Always on, but for the
+   * tests that compare against the plain reconstruction.
+   */
+  wellBalanced: boolean;
   /**
    * Adaptive mesh: number of refinement levels below the coarsest (0 = uniform grid). `n` is
    * then the finest resolution and the coarsest level has n >> amrLevels cells per side.
@@ -151,6 +159,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // leaves total momentum drifting about ten times faster in long collapse runs.
     vcycles: 2,
     gravEnergyFlux: true,
+    wellBalanced: true,
     amrLevels: 0,
     amrBudget: 0,
     timeBins: 0,
@@ -373,7 +382,7 @@ export function packParams(
   f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0)], 36);
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' ? 8 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -600,6 +609,7 @@ export class Sim implements Simulation {
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
     await sim.buildHydro();
     sim.reset();
+    await sim.settled;
     return sim;
   }
 
@@ -749,6 +759,62 @@ export class Sim implements Simulation {
     this.setState(u1, u2, mass / (n * n * nz));
     // The clock is (dt, t, Kahan compensation, steps).
     if (c.restart) this.device.queue.writeBuffer(this.clock, 0, new Float32Array([0, c.restart.time, 0, c.restart.steps]));
+    this.startSettling(u1, u2);
+  }
+
+  /** Resolves once a star in the initial conditions has been settled (see problems/settle.ts). */
+  settled: Promise<void> = Promise.resolve();
+  private settleEpoch = 0;
+  private settling = false;
+  /** largest relative change of density in each round of the last settling (inspection) */
+  settleLog: number[] = [];
+
+  /**
+   * Settle a star into the grid's own hydrostatic balance: no steps are taken until it has.
+   * A reset meanwhile abandons it.
+   */
+  private startSettling(u1: Float32Array, u2: Float32Array) {
+    const epoch = ++this.settleEpoch;
+    const c = this.cfg;
+    const star = c.problem.star;
+    this.settling = false;
+    this.settled = Promise.resolve();
+    if (!star || c.restart || !c.wellBalanced || !this.selfGravity) return;
+    this.settling = true;
+    const eos = makeEos(c.eos, c.eosParams);
+    const vol = this.dx ** 3;
+    this.settled = (async () => {
+      try {
+        let mass = 0;
+        let peak = 0;
+        for (let o = 0; o < u1.length; o += 4) {
+          if (u1[o] > star.rhoCut) mass += u1[o] * vol;
+          peak = Math.max(peak, u1[o]);
+        }
+        this.settleLog = [];
+        for (let round = 0; round < SETTLE_ROUNDS; round++) {
+          const phi = await this.readPotential();
+          if (epoch !== this.settleEpoch) return;
+          const rho = balancedDensity(star, phi, () => vol, mass);
+          let change = 0;
+          for (let q = 0, o = 0; q < rho.length; q++, o += 4) {
+            const [r, eint, tag] = settledCell(star, rho[q], eos.eintFromP);
+            change = Math.max(change, Math.abs(r - u1[o]));
+            u1[o] = r;
+            u2[o] = eint;
+            u2[o + 1] = eint;
+            u2[o + 2] = tag;
+          }
+          this.settleLog.push(change / peak);
+          writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
+          writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
+          this.refreshPotential();
+          if (change < SETTLE_TOL * peak) break;
+        }
+      } finally {
+        if (epoch === this.settleEpoch) this.settling = false;
+      }
+    })();
   }
 
   /** Time, step count and point masses, for a snapshot (see io/snapshot.ts). */
@@ -837,6 +903,7 @@ export class Sim implements Simulation {
 
   /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
+    if (this.settling) return 0; // a star is still being settled
     const selfGravity = this.selfGravity;
     const anyGravity = this.fieldOn || this.cfg.gext.some((g) => g !== 0);
     for (let i = 0; i < count; i++) {
@@ -1051,6 +1118,7 @@ export class Sim implements Simulation {
    */
   async runToEnd(batch = 16, maxSteps = 1e6): Promise<number> {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
+    await this.settled;
     const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     let steps = 0;
     let size = batch;
@@ -1165,6 +1233,7 @@ export class Sim implements Simulation {
   }
 
   destroy() {
+    this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     for (const t of [...this.pred, this.gfield]) t.destroy();
     this.mg.destroy();

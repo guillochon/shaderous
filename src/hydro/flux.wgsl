@@ -2,6 +2,15 @@
 // limiter, hydro/q.wgsl, hydro/pfloor.wgsl, g_dx set, and two loaders supplied by the grid:
 //   load_q(c)     primitives of a cell
 //   load_pred(c)  its half-step state: a = (rho, v), b = (p, scalar, shock flag, first-order flag)
+// and, for the well-balanced pressure reconstruction (hydro/q.wgsl), the difference of the
+// gravitational potential between two adjacent cells, phi(c + (k + 1) e) - phi(c + k e):
+//   dphi_step(c, axis, k)  for the cell being updated, k from -2 to 1, as (seen, face): `seen`
+//                          takes a cell beyond a boundary to have the potential of the cell
+//                          its state is taken from, `face` is the true difference across a
+//                          reflecting face (and equals `seen` everywhere else)
+//   dphi_face(a, axis, k)  the plain difference, with no boundary involved, for flux_between
+// Both form the difference from the same two values whichever cell asks, so the two cells
+// sharing a face still compute the same flux bit for bit.
 struct Side { rho: f32, v: vec3<f32>, p: f32, s: f32, cs: f32, eint: f32 }
 struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 
@@ -76,18 +85,31 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   var wp2 = load_q(c + 2 * e);
   var pm1 = load_pred(c - e);
   var pp1 = load_pred(c + e);
+  // Potential steps between the five cells, lowest pair first: as the deviations see them,
+  // and the true ones across this cell's two faces.
+  var d = vec4<f32>(0.0);
+  var t = vec2<f32>(0.0);
+  if (well_balanced()) {
+    let below = dphi_step(c, axis, -1);
+    let above = dphi_step(c, axis, 0);
+    d = vec4<f32>(dphi_step(c, axis, -2).x, below.x, above.x, dphi_step(c, axis, 1).x);
+    t = vec2<f32>(below.y, above.y);
+  }
   if (has_solids()) {
     let below = q_solid(wm1);
     let above = q_solid(wp1);
-    if (below) { wm1 = q_mirror(w0, axis); pm1 = pred_mirror(p0, axis); }
-    if (above) { wp1 = q_mirror(w0, axis); pp1 = pred_mirror(p0, axis); }
-    if (below) { wm2 = q_mirror(wp1, axis); } else if (q_solid(wm2)) { wm2 = q_mirror(wm1, axis); }
-    if (above) { wp2 = q_mirror(wm1, axis); } else if (q_solid(wp2)) { wp2 = q_mirror(wp1, axis); }
+    // An image has the potential of the cell it mirrors.
+    if (below) { wm1 = q_mirror(w0, axis); pm1 = pred_mirror(p0, axis); d.y = 0.0; }
+    if (above) { wp1 = q_mirror(w0, axis); pp1 = pred_mirror(p0, axis); d.z = 0.0; }
+    if (below) { wm2 = q_mirror(wp1, axis); d.x = -d.z; } else if (q_solid(wm2)) { wm2 = q_mirror(wm1, axis); d.x = 0.0; }
+    if (above) { wp2 = q_mirror(wm1, axis); d.w = -d.y; } else if (q_solid(wp2)) { wp2 = q_mirror(wp1, axis); d.w = 0.0; }
   }
-  let sm = edge_up(wm2, wm1, w0);
-  let lo = edge_dn(wm1, w0, wp1);
-  let hi = edge_up(wm1, w0, wp1);
-  let sp = edge_dn(w0, wp1, wp2);
+  // A neighbour that is this cell's image in a wall (the step the deviations see is not the
+  // true one) reaches the wall from the other side: the negative of the true step.
+  let sm = edge_up(wm2, wm1, w0, d.x, d.y, select(-t.x, t.x, d.y == t.x));
+  let lo = edge_dn(wm1, w0, wp1, d.y, d.z, t.x);
+  let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
+  let sp = edge_dn(w0, wp1, wp2, d.z, d.w, select(-t.y, t.y, d.z == t.y));
   return Faces(
     face_flux(pm1, sm, p0, lo, axis),
     face_flux(p0, hi, pp1, sp, axis),
@@ -103,28 +125,43 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   var wrr = load_q(a + 2 * e);
   var pl = load_pred(a);
   var pr = load_pred(a + e);
+  // Potential steps between the four cells, lowest pair first.
+  var d = vec3<f32>(0.0);
+  if (well_balanced()) {
+    d = vec3<f32>(dphi_face(a, axis, -1), dphi_face(a, axis, 0), dphi_face(a, axis, 1));
+  }
+  let across = d.y;
+  var sides = vec2<f32>(1.0);
   if (has_solids()) {
     let ls = q_solid(wl);
     let rs = q_solid(wr);
     if (ls && rs) { return flux_zero(); }
     if (rs) {
       // Wall on the right: as the left cell computes its upper face.
-      if (q_solid(wll)) { wll = q_mirror(wl, axis); }
+      if (q_solid(wll)) { wll = q_mirror(wl, axis); d.x = 0.0; }
       wr = q_mirror(wl, axis);
       pr = pred_mirror(pl, axis);
       wrr = q_mirror(wll, axis);
+      d.y = 0.0;
+      d.z = -d.x;
+      sides.y = -1.0;
     } else if (ls) {
-      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); }
+      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); d.z = 0.0; }
       wl = q_mirror(wr, axis);
       pl = pred_mirror(pr, axis);
       wll = q_mirror(wrr, axis);
+      d.y = 0.0;
+      d.x = -d.z;
+      sides.x = -1.0;
     } else {
-      if (q_solid(wll)) { wll = q_mirror(wl, axis); }
-      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); }
+      if (q_solid(wll)) { wll = q_mirror(wl, axis); d.x = 0.0; }
+      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); d.z = 0.0; }
     }
   }
-  let sl = edge_up(wll, wl, wr);
-  let sr = edge_dn(wl, wr, wrr);
+  // `across` is the true step across the face; a cell that is the other's image in a wall
+  // reaches the wall from its own side.
+  let sl = edge_up(wll, wl, wr, d.x, d.y, across * sides.x);
+  let sr = edge_dn(wl, wr, wrr, d.y, d.z, across * sides.y);
   return face_flux(pl, sl, pr, sr, axis);
 }
 

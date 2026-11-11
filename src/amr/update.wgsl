@@ -50,6 +50,54 @@ fn load_pred(c: vec3<i32>) -> Q {
   return Q(textureLoad(PA, c, 0), textureLoad(PB, c, 0));
 }
 
+
+// For the well-balanced pressure reconstruction (hydro/q.wgsl): the potential difference
+// between the adjacent cells l + k e and l + (k + 1) e of block `slot` along an axis, as
+// (seen, face), from the field atlas (which holds the potential on two ghost layers) plus the
+// uniform field, which is exact. `seen` is what the deviations from balance are measured
+// against: beyond a face of the domain the potential is that of the cell the state there is
+// taken from, like the state itself. `face` is what takes the pressure from a cell's centre
+// to its face: the same, except across a reflecting face of the domain, where it is the true
+// difference (the atlas's ghost cells there continue the potential in a straight line).
+fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
+  let ra = l[axis] + k;
+  let ia = row_src(slot, axis, ra);
+  let ib = row_src(slot, axis, ra + 1);
+  let o = blk_origin(slot);
+  var a = l;
+  var b = l;
+  a[axis] = ia;
+  b[axis] = ib;
+  var seen = -P.gext[axis] * f32(ib - ia) * g_dx;
+  if (P.grav_on != 0u) { seen += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+  var face = seen;
+  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
+  if (wall) {
+    a[axis] = ra;
+    b[axis] = ra + 1;
+    face = -P.gext[axis] * g_dx;
+    if (P.grav_on != 0u) { face += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+  }
+  return vec2<f32>(seen, face);
+}
+
+// The cell being updated, for dphi_step.
+var<private> g_slot: i32 = 0;
+var<private> g_cell: vec3<i32> = vec3<i32>(0);
+
+fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
+  return dphi_blk(g_slot, g_cell, axis, k);
+}
+// Within another block's stored cells and ghosts, across a face it shares with a block: no
+// boundary of the domain is involved.
+fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
+  var e = vec3<i32>(0);
+  e[axis] = 1;
+  var d = -P.gext[axis] * g_dx;
+  if (P.grav_on != 0u) { d += textureLoad(G, a + (k + 1) * e, 0).w - textureLoad(G, a + k * e, 0).w; }
+  return d;
+}
+
 #include "hydro/flux.wgsl"
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
@@ -162,6 +210,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   g_dt = blk_dt(slot);
   g_bin = blk_bin(slot);
   g_deposit = BINS_ON && !blk_active(slot);
+  g_slot = slot;
+  g_cell = l;
   let c = atl(blk_origin(slot), l);
   if (has_solids()) {
     // Solid and fixed cells keep their state.

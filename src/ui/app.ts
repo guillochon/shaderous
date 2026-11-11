@@ -90,7 +90,7 @@ side.innerHTML = `
       ${field('gamma', number('gamma', 'step="0.01" min="1"'))}
       ${field('K (p = K rho^gamma)', number('K', 'min="0"'), 'row-K')}
       ${field('Radiation constant a', number('arad', 'min="0"'), 'row-arad')}
-      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hll', 'HLL')))}
+      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')))}
       ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')))}
       ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'))}
       ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')))}

@@ -1,6 +1,6 @@
 // Per-block timesteps, for the blocks whose potential has just been solved at the end of a
 // step: the rate at which it changed over that step (see amr/gravity/half_on.wgsl), and the
-// potential itself as the reference for the next one. Cells and the first ghost layer, which
+// potential itself as the reference for the next one. Cells and both ghost layers, which
 // the field pass also reads.
 //
 // FORGET starts the history afresh instead, on a new mesh or a new run: no rate, and the
@@ -20,7 +20,7 @@ override FORGET: bool = false;
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let inv = inv_padded(gid, 1);
+  let inv = inv_padded(gid, 2);
   if (!inv.ok) { return; }
   let c = blk_origin(inv.slot) + inv.l;
   let now = textureLoad(PHI, c, 0).x;

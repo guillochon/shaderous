@@ -1,4 +1,5 @@
 import type { Eos, EosKind, EosParams } from '../eos/eos';
+import type { StarSpec } from './settle';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 
 export interface Prim {
@@ -83,6 +84,8 @@ export interface Problem {
   coolParams?: Partial<CoolingParams>;
   /** Uniform external gravitational acceleration, which may depend on the dimensionality. */
   gext?: (ndim: 2 | 3) => [number, number, number];
+  /** A polytropic star at rest, settled into the grid's own hydrostatic balance before the run (problems/settle.ts). */
+  star?: StarSpec;
   /** Default view; `axis` is the slice normal in 3D (0 x, 1 y, 2 z), `pitch` the camera elevation in radians. */
   view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice'; axis?: number; pitch?: number };
   /** Returns the initial primitive state as a function of position. */

@@ -42,7 +42,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
     load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
     zm, zp,
-    g_load(c), vec3<f32>(1.0),
+    g_load(c), vec3<f32>(1.0), dphi_cell(c, -1), dphi_cell(c, 0),
   );
   textureStore(PA, c, pr.a);
   textureStore(PB, c, pr.b);

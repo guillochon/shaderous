@@ -1,4 +1,4 @@
-// Fills the first ghost layer of the potential, in place (r32float can be read and written in
+// Fills the two ghost layers of the potential, in place (r32float can be read and written in
 // one pass). MODE selects which faces:
 //   0  faces whose neighbour is one level coarser: trilinear interpolation of the coarser
 //      level's potential to the ghost-cell centre. Run on a level before it is solved; these
@@ -24,7 +24,7 @@ fn coarse_phi(cs: i32, q: vec3<i32>, fallback: f32) -> f32 {
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let inv = inv_padded(gid, 1);
+  let inv = inv_padded(gid, 2);
   if (!inv.ok) { return; }
   let l = inv.l;
   let out = vec3<i32>(l < vec3<i32>(0)) + vec3<i32>(l >= vec3<i32>(BS));
@@ -67,7 +67,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     q[axis] += select(BS, -BS, upper);
     v = textureLoad(PHI, blk_origin(nb) + q).x;
   } else {
-    v = 2.0 * textureLoad(PHI, c + e).x - textureLoad(PHI, c + 2 * e).x;
+    // How far outside: 1 or 2 cells. The first interior cell and the one after it.
+    let depth = select(-l[axis], l[axis] - BS + 1, upper);
+    let p0 = textureLoad(PHI, c + depth * e).x;
+    let p1 = textureLoad(PHI, c + (depth + 1) * e).x;
+    if (depth == 1) { v = 2.0 * p0 - p1; } else { v = 3.0 * p0 - 2.0 * p1; }
   }
   textureStore(PHI, c, vec4<f32>(v, 0.0, 0.0, 0.0));
 }

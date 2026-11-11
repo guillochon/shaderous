@@ -67,6 +67,7 @@ export const tidalDisruption: Problem = {
     { id: 'beta', label: 'Impact parameter \u03b2', value: 1, min: 0.2, max: 8, step: 0.1 },
   ],
   gasFrame: true,
+  star: { n: TDE.n, K: TDE_STAR.K, rhoCut: TDE.rhoCut * TDE_STAR.rhoc, rhoAmb: TDE.rhoAmb * TDE_STAR.rhoc },
   masses: (p, G) => {
     const o = orbitFor(p);
     return [{ gm: G * TDE.M * p.q, pos: o.pos, vel: o.vel }];

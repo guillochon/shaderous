@@ -4,8 +4,13 @@
 //   b = (p, scalar at the half step, shock flag, first-order flag)
 // `mask` multiplies the slopes per axis; it is 1 except where a neighbour along that axis is
 // unavailable (ghost cells at the edge of a block next to a coarser one).
+// `lo` and `hi` are the potential differences from the lower neighbour to the cell and from the
+// cell to the upper neighbour, for the well-balanced pressure slopes (hydro/q.wgsl): zero
+// when that is off.
 // Requires P, hydro/q.wgsl, and g_dx and g_dt set.
-fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>, mask: vec3<f32>) -> Q {
+fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>, mask: vec3<f32>, lo: PhiSteps, hi: PhiSteps) -> Q {
+  var dl = lo.seen;
+  var dr = hi.seen;
   var xm = xm0;
   var xp = xp0;
   var ym = ym0;
@@ -14,27 +19,28 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   var zp = zp0;
   if (has_solids()) {
     // A solid neighbour is a wall: the cell sees its own image there.
-    if (q_solid(xm)) { xm = q_mirror(q, 0); }
-    if (q_solid(xp)) { xp = q_mirror(q, 0); }
-    if (q_solid(ym)) { ym = q_mirror(q, 1); }
-    if (q_solid(yp)) { yp = q_mirror(q, 1); }
-    if (q_solid(zm)) { zm = q_mirror(q, 2); }
-    if (q_solid(zp)) { zp = q_mirror(q, 2); }
+    // (The potential is mirrored with it: no difference across the wall.)
+    if (q_solid(xm)) { xm = q_mirror(q, 0); dl.x = 0.0; }
+    if (q_solid(xp)) { xp = q_mirror(q, 0); dr.x = 0.0; }
+    if (q_solid(ym)) { ym = q_mirror(q, 1); dl.y = 0.0; }
+    if (q_solid(yp)) { yp = q_mirror(q, 1); dr.y = 0.0; }
+    if (q_solid(zm)) { zm = q_mirror(q, 2); dl.z = 0.0; }
+    if (q_solid(zp)) { zp = q_mirror(q, 2); dr.z = 0.0; }
   }
   // Face-to-face difference across the cell along each axis (the mean of its two edge
   // increments), which drives the half-step evolution; and the larger of the two, for the
   // positivity check below.
-  let ux = edge_up(xm, q, xp);
-  let uy = edge_up(ym, q, yp);
-  let uz = edge_up(zm, q, zp);
+  let ux = edge_up(xm, q, xp, dl.x, dr.x, hi.face.x);
+  let uy = edge_up(ym, q, yp, dl.y, dr.y, hi.face.y);
+  let uz = edge_up(zm, q, zp, dl.z, dr.z, hi.face.z);
   var sx = ux;
   var sy = uy;
   var sz = uz;
   var big = vec2<f32>(max(abs(ux.a.x), max(abs(uy.a.x), abs(uz.a.x))), max(abs(ux.b.x), max(abs(uy.b.x), abs(uz.b.x))));
   if (!LIMITER_SYMMETRIC) {
-    let lx = edge_dn(xm, q, xp);
-    let ly = edge_dn(ym, q, yp);
-    let lz = edge_dn(zm, q, zp);
+    let lx = edge_dn(xm, q, xp, dl.x, dr.x, lo.face.x);
+    let ly = edge_dn(ym, q, yp, dl.y, dr.y, lo.face.y);
+    let lz = edge_dn(zm, q, zp, dl.z, dr.z, lo.face.z);
     sx = Q(0.5 * (ux.a + lx.a), 0.5 * (ux.b + lx.b));
     sy = Q(0.5 * (uy.a + ly.a), 0.5 * (uy.b + ly.b));
     sz = Q(0.5 * (uz.a + lz.a), 0.5 * (uz.b + lz.b));
@@ -46,9 +52,16 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
 
   // Shock detector: converging flow with a large relative pressure jump.
   let conv = (xp.a.y - xm.a.y) + (yp.a.z - ym.a.z) + (zp.a.w - zm.a.w);
+  // Measured against hydrostatic balance (hydro/q.wgsl): a steep atmosphere at rest is not a
+  // shock, however much its pressure changes across two cells. (hs is zero without gravity.)
+  let hs = 0.5 * vec3<f32>(
+    (xm.a.x + q.a.x) * dl.x + (q.a.x + xp.a.x) * dr.x,
+    (ym.a.x + q.a.x) * dl.y + (q.a.x + yp.a.x) * dr.y,
+    (zm.a.x + q.a.x) * dl.z + (q.a.x + zp.a.x) * dr.z,
+  );
   let jump = max(
-    abs(xp.b.x - xm.b.x) / min(xp.b.x, xm.b.x),
-    max(abs(yp.b.x - ym.b.x) / min(yp.b.x, ym.b.x), abs(zp.b.x - zm.b.x) / min(zp.b.x, zm.b.x)),
+    abs(xp.b.x - xm.b.x + hs.x) / min(xp.b.x, xm.b.x),
+    max(abs(yp.b.x - ym.b.x + hs.y) / min(yp.b.x, ym.b.x), abs(zp.b.x - zm.b.x + hs.z) / min(zp.b.x, zm.b.x)),
   );
   let shock = select(0.0, 1.0, conv < 0.0 && jump > P.shock_thresh);
 

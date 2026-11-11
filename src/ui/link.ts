@@ -30,7 +30,7 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'bcLo' | 'bcHi' | 'cooling'>>;
+  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling'>>;
   eosParams: Partial<EosParams>;
   coolParams: Partial<CoolingParams>;
   params: Record<string, number>;
@@ -96,6 +96,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   str('jfloor', flag(cfg.jeansFloor), flag(def.jeansFloor));
   num('jcells', cfg.jeansCells, def.jeansCells);
   str('fluxwork', flag(cfg.gravEnergyFlux), flag(def.gravEnergyFlux));
+  str('wb', flag(cfg.wellBalanced), flag(def.wellBalanced));
   // Boundaries: one digit per face, the lower faces of x, y, z and then the upper ones.
   str('bc', [...cfg.bcLo, ...cfg.bcHi].join(''), [...def.bcLo, ...def.bcHi].join(''));
   for (const p of cfg.problem.params ?? []) num(`p.${p.id}`, cfg.params[p.id], p.value);
@@ -151,7 +152,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
 
   put(out.cfg, 'tEnd', num('tend', 0));
   put(out.cfg, 'eos', pick('eos', Object.keys(EOS_LABELS) as EosKind[]));
-  put(out.cfg, 'riemann', pick<RiemannKind>('riemann', ['hllc', 'hll']));
+  put(out.cfg, 'riemann', pick<RiemannKind>('riemann', ['hllc', 'hllclm', 'hll']));
   put(out.cfg, 'limiter', pick<LimiterKind>('limiter', ['koren', 'mc', 'vanleer', 'minmod']));
   put(out.cfg, 'cfl', num('cfl', 0.05, 1));
   const tb = num('tbins', 0, 3);
@@ -164,6 +165,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   const jc = num('jcells', 4, 32);
   put(out.cfg, 'jeansCells', jc === undefined ? undefined : Math.round(jc));
   put(out.cfg, 'gravEnergyFlux', bool('fluxwork'));
+  put(out.cfg, 'wellBalanced', bool('wb'));
   const bc = q.get('bc');
   if (bc && /^[0-3]{6}$/.test(bc)) {
     const d = [...bc].map(Number);

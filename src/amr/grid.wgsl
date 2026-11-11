@@ -88,6 +88,19 @@ fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
   return s;
 }
 
+// Local index along an axis of the cell whose state stands for cell i of a block's row, where
+// i may lie up to two cells outside the block: the mirror image beyond a reflecting face of
+// the domain, the edge cell beyond an outflow face, and i itself otherwise (then it is a
+// stored ghost of a neighbouring block).
+fn row_src(slot: i32, axis: i32, i: i32) -> i32 {
+  if (i >= 0 && i < BS) { return i; }
+  let upper = i >= BS;
+  let nb = bt(slot, 6u + u32(2 * axis) + u32(upper));
+  if (nb == -3) { return select(-1 - i, 2 * BS - 1 - i, upper); }
+  if (nb == -2 || nb == -4) { return select(0, BS - 1, upper); }
+  return i;
+}
+
 fn src_velocity(v: vec3<f32>, s: Src) -> vec3<f32> {
   return bc_velocity(v, Mapped(vec3<i32>(0), s.flip, s.side));
 }

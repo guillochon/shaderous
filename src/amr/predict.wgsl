@@ -39,7 +39,40 @@ fn grav_at(c: vec3<i32>) -> vec3<f32> {
   return g;
 }
 
-fn predict_cell(c: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
+
+// For the well-balanced pressure reconstruction (hydro/q.wgsl): the potential difference
+// between the adjacent cells l + k e and l + (k + 1) e of block `slot` along an axis, as
+// (seen, face), from the field atlas (which holds the potential on two ghost layers) plus the
+// uniform field, which is exact. `seen` is what the deviations from balance are measured
+// against: beyond a face of the domain the potential is that of the cell the state there is
+// taken from, like the state itself. `face` is what takes the pressure from a cell's centre
+// to its face: the same, except across a reflecting face of the domain, where it is the true
+// difference (the atlas's ghost cells there continue the potential in a straight line).
+fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
+  let ra = l[axis] + k;
+  let ia = row_src(slot, axis, ra);
+  let ib = row_src(slot, axis, ra + 1);
+  let o = blk_origin(slot);
+  var a = l;
+  var b = l;
+  a[axis] = ia;
+  b[axis] = ib;
+  var seen = -P.gext[axis] * f32(ib - ia) * g_dx;
+  if (P.grav_on != 0u) { seen += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+  var face = seen;
+  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
+  if (wall) {
+    a[axis] = ra;
+    b[axis] = ra + 1;
+    face = -P.gext[axis] * g_dx;
+    if (P.grav_on != 0u) { face += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+  }
+  return vec2<f32>(seen, face);
+}
+
+// Cell l of block `slot` (a ghost, when predicted in place), half a step on.
+fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
+  let c = atl(blk_origin(slot), l);
   let q = load_q(c);
   var zm = q;
   var zp = q;
@@ -47,12 +80,27 @@ fn predict_cell(c: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
     zm = load_q(c + vec3<i32>(0, 0, -1));
     zp = load_q(c + vec3<i32>(0, 0, 1));
   }
+  var lo = PhiSteps(vec3<f32>(0.0), vec3<f32>(0.0));
+  var hi = lo;
+  if (well_balanced()) {
+    let nax = select(3, 2, is2d());
+    for (var axis = 0; axis < nax; axis++) {
+      // Not along an axis whose slope is dropped: its neighbours would be edge ghosts.
+      if (mask[axis] == 0.0) { continue; }
+      let below = dphi_blk(slot, l, axis, -1);
+      let above = dphi_blk(slot, l, axis, 0);
+      lo.seen[axis] = below.x;
+      lo.face[axis] = below.y;
+      hi.seen[axis] = above.x;
+      hi.face[axis] = above.y;
+    }
+  }
   return predictor(
     q,
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
     load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
     zm, zp,
-    g, mask,
+    g, mask, lo, hi,
   );
 }
 
@@ -72,14 +120,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let stale = BINS_ON && s.slot != inv.slot && blk_leaf(s.slot) && !blk_active(s.slot);
   if (s.kind == 0 && !stale) {
     let src = atl(blk_origin(s.slot), s.l);
-    pr = predict_cell(src, vec3<f32>(1.0), grav_at(src));
+    pr = predict_cell(s.slot, s.l, vec3<f32>(1.0), grav_at(src));
     pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s));
   } else {
     // Transverse neighbours of a ghost at the rim of the face would be edge ghosts.
     let rim = (inv.l == vec3<i32>(0)) | (inv.l == vec3<i32>(BS - 1));
     // The field atlas holds no acceleration for ghosts; use the adjacent interior cell's.
     let near = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));
-    pr = predict_cell(atl(blk_origin(inv.slot), inv.l), select(vec3<f32>(1.0), vec3<f32>(0.0), rim), grav_at(near));
+    pr = predict_cell(inv.slot, inv.l, select(vec3<f32>(1.0), vec3<f32>(0.0), rim), grav_at(near));
   }
   let c = atl(blk_origin(inv.slot), inv.l);
   textureStore(PA, c, pr.a);

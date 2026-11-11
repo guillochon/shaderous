@@ -27,6 +27,7 @@ export const polytrope: Problem = {
   rhoFloor: 1e-6,
   pFloor: 1e-10,
   view: { field: 0, log: true, mode: 'volume' },
+  star: { n: 1, K: POLY_K, rhoCut: POLY.rhoCut, rhoAmb: POLY.rhoAmb },
   init: () => (x, y, z) => {
     const rho = polytropeDensity(Math.hypot(x, y, z));
     const p = POLY_K * Math.max(rho, POLY.rhoCut) ** 2;

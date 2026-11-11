@@ -43,7 +43,7 @@ describe('shader assembly', () => {
 
   it('assembles the hydro passes for every equation of state, solver and limiter', () => {
     for (const eos of Object.values(EOS_MODULES))
-      for (const riemann of ['hllc', 'hll'])
+      for (const riemann of ['hllc', 'hllclm', 'hll'])
         for (const limiter of ['koren', 'mc', 'vanleer', 'minmod']) {
           for (const cooling of Object.values(COOLING_MODULES)) {
             // The adaptive passes come with one timestep for all blocks, or per-block timesteps.

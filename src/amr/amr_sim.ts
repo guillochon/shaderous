@@ -21,6 +21,7 @@ import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark } from '../problems/types';
+import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from '../problems/settle';
 import { completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
@@ -361,6 +362,7 @@ export class AmrSim implements Simulation {
     }
     await sim.buildHydro();
     sim.reset();
+    await sim.settled;
     return sim;
   }
 
@@ -932,6 +934,73 @@ export class AmrSim implements Simulation {
       this.encodeFreshPotential(enc, 12, 'kick', false);
       d.queue.submit([enc.finish()]);
     }
+    this.startSettling();
+  }
+
+  /** Resolves once a star in the initial conditions has been settled (see problems/settle.ts). */
+  settled: Promise<void> = Promise.resolve();
+  private settleEpoch = 0;
+  private settling = false;
+  /** largest relative change of density in each round of the last settling (inspection) */
+  settleLog: number[] = [];
+
+  /**
+   * Settle a star into the mesh's own hydrostatic balance: no steps are taken until it has.
+   * A reset meanwhile abandons it. The mesh stays as the analytic star refined it.
+   */
+  private startSettling() {
+    const epoch = ++this.settleEpoch;
+    const c = this.cfg;
+    const d = this.device;
+    const star = c.problem.star;
+    this.settling = false;
+    this.settled = Promise.resolve();
+    if (!star || c.restart || !c.wellBalanced || !this.selfGravity) return;
+    this.settling = true;
+    const eos = makeEos(c.eos, c.eosParams);
+    const tree = this.tree;
+    this.settled = (async () => {
+      try {
+        const cells = await this.readLeaves();
+        if (epoch !== this.settleEpoch) return;
+        const { u1, u2 } = cells;
+        const vol = (q: number) => cells.dx[q] ** 3;
+        let mass = 0;
+        let peak = 0;
+        for (let q = 0; q < cells.count; q++) {
+          if (u1[q * 4] > star.rhoCut) mass += u1[q * 4] * vol(q);
+          peak = Math.max(peak, u1[q * 4]);
+        }
+        const leaves = tree.leaves();
+        const per = BS ** 3 * 4;
+        const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
+        this.settleLog = [];
+        for (let round = 0; round < SETTLE_ROUNDS; round++) {
+          const phi = await this.readLeafPotential();
+          if (epoch !== this.settleEpoch || tree !== this.tree) return;
+          const rho = balancedDensity(star, phi, vol, mass);
+          let change = 0;
+          for (let q = 0, o = 0; q < rho.length; q++, o += 4) {
+            const [r, eint, tag] = settledCell(star, rho[q], eos.eintFromP);
+            change = Math.max(change, Math.abs(r - u1[o]));
+            u1[o] = r;
+            u2[o] = eint;
+            u2[o + 1] = eint;
+            u2[o + 2] = tag;
+          }
+          this.settleLog.push(change / peak);
+          leaves.forEach((b, i) => {
+            const origin = this.origin(b.slot);
+            d.queue.writeTexture({ texture: this.state[this.cur][0], origin }, u1.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
+            d.queue.writeTexture({ texture: this.state[this.cur][1], origin }, u2.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
+          });
+          this.refreshPotential();
+          if (change < SETTLE_TOL * peak) break;
+        }
+      } finally {
+        if (epoch === this.settleEpoch) this.settling = false;
+      }
+    })();
   }
 
   /** Atlas texel of a slot's first interior cell. */
@@ -1000,6 +1069,7 @@ export class AmrSim implements Simulation {
    * replaces the tables that earlier passes in an unsubmitted encoder would still expect.
    */
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
+    if (this.settling) return 0; // a star is still being settled
     if (this.pending) this.applyRegrid(enc);
     if (this.dtStale) {
       // The block list changed: drop timestep records of workgroups it no longer covers.
@@ -1245,6 +1315,7 @@ export class AmrSim implements Simulation {
 
   /** Take exactly `count` steps, re-meshing as it goes (tests). */
   async advance(count: number) {
+    await this.settled;
     let left = count;
     while (left > 0) {
       left -= this.step(Math.min(left, REGRID_EVERY));
@@ -1284,6 +1355,7 @@ export class AmrSim implements Simulation {
   /** Step until the clock reaches cfg.tEnd, re-meshing as it goes. Returns the steps taken. */
   async runToEnd(_batch = 16, maxSteps = 1e6): Promise<number> {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
+    await this.settled;
     const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     try {
       for (;;) {
@@ -1470,6 +1542,7 @@ export class AmrSim implements Simulation {
   }
 
   destroy() {
+    this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi]) t.destroy();
     for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
