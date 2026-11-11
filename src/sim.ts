@@ -1128,7 +1128,7 @@ export class Sim implements Simulation {
   }
   readonly fieldShader = 'render/field.wgsl';
   fieldResources(parity: number): Record<number, GPUBuffer | GPUTextureView> {
-    return { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView() };
+    return { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView() };
   }
   status(): string {
     return '';

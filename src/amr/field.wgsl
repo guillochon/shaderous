@@ -24,6 +24,7 @@ struct View {
 @group(0) @binding(4) var VOL: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(5) var IDX: texture_3d<u32>;   // leaf slot per deepest-level block
 @group(0) @binding(6) var W1: texture_3d<f32>;    // primitives: (density, negative if solid; velocity)
+@group(0) @binding(7) var GF: texture_3d<f32>;    // gravity field: acceleration, potential in w
 @group(0) @binding(8) var<storage, read_write> RANGE: array<atomic<u32>, 132>;
 
 fn neighbor(c: vec3<i32>) -> vec4<f32> {
@@ -61,7 +62,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let u2 = textureLoad(U2, c, 0);
     var g: Grad;
     if (field_needs_grad(V.field)) { g = gradients(c, g_dx); }
-    var x = field_value(V.field, u1, u2, g, f32(level));
+    // The uniform field's potential, measured from the box center, is not in the texture.
+    let phi = textureLoad(GF, c, 0).w - dot(P.gext.xyz, blk_pos(slot, l));
+    var x = field_value(V.field, u1, u2, g, f32(level), phi);
     let solid = u2.w > 0.5;
     if (!solid) { range_add(x); }
     if (V.logscale != 0u) { x = log(max(x, 1.0e-30)) * 0.4342944819; }

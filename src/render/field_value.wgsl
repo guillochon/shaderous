@@ -24,8 +24,10 @@ fn field_needs_grad(f: u32) -> bool {
   return f == F_VORTICITY || f == F_DIVERGENCE || f == F_DENSITY_GRADIENT;
 }
 
-// The value of field f at a cell with conserved state u1, u2, gradients g and refinement level.
-fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32) -> f32 {
+// The value of field f at a cell with conserved state u1, u2, gradients g, refinement level and
+// gravitational potential phi (self-gravity, point masses, an accelerating frame and a uniform
+// field together). g_dx is the cell size.
+fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32, phi: f32) -> f32 {
   let rho = max(u1.x, P.rho_floor);
   let v = u1.yzw / rho;
   let eint = u2.y;
@@ -56,6 +58,14 @@ fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32) -> f32
     case 12u { return g.dvx.x + g.dvy.y + g.dvz.z; }
     case 13u { return length(g.drho) / rho; }
     case 14u { return level; }
+    case 15u { return phi; }
+    case 16u { return 0.5 * rho * dot(v, v); }
+    // The Jeans length in cells: Truelove et al. ask for at least four.
+    case 17u {
+      if (!(P.G > 0.0)) { return 0.0; }
+      let p = max(eos_pressure(rho, eint), P.p_floor);
+      return eos_sound_speed(rho, p) * sqrt(3.14159265 / (P.G * rho)) / g_dx;
+    }
     default { return rho; }
   }
 }

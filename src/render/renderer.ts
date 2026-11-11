@@ -3,7 +3,7 @@ import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { EOS_MODULES } from '../eos/eos';
 import { COOLING_MODULES } from '../cooling/cooling';
-import { SIGNED_FIELDS } from '../problems/types';
+import { LINEAR_FIELDS } from '../problems/types';
 import type { Simulation } from '../sim';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
@@ -258,7 +258,7 @@ export class Renderer {
     const vb = new ArrayBuffer(32);
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, 0]);
     // A field of either sign is always shown on a linear scale.
-    const log = v.log && !SIGNED_FIELDS.has(v.field);
+    const log = v.log && !LINEAR_FIELDS.has(v.field);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
     const tiny = 1e-30;
     const lo = log ? Math.log10(Math.max(v.lo, tiny)) : v.lo;

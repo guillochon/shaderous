@@ -15,6 +15,7 @@ struct View {
 @group(0) @binding(2) var U1: texture_3d<f32>;
 @group(0) @binding(3) var U2: texture_3d<f32>;
 @group(0) @binding(4) var VOL: texture_storage_3d<rgba16float, write>;
+@group(0) @binding(7) var GF: texture_3d<f32>;   // gravity field: acceleration, potential in w
 @group(0) @binding(8) var<storage, read_write> RANGE: array<atomic<u32>, 132>;
 
 // Velocity and density of a neighboring cell, clamped to the grid.
@@ -46,7 +47,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let u2 = textureLoad(U2, c, 0);
     var g: Grad;
     if (field_needs_grad(V.field)) { g = gradients(c); }
-    var x = field_value(V.field, u1, u2, g, 0.0);
+    // The uniform field's potential, measured from the box center, is not in the texture.
+    let pos = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+    let phi = textureLoad(GF, c, 0).w - dot(P.gext.xyz, select(pos, vec3<f32>(pos.xy, 0.0), P.dims.z == 1u));
+    var x = field_value(V.field, u1, u2, g, 0.0, phi);
     let solid = u2.w > 0.5;
     if (!solid) { range_add(x); }
     if (V.logscale != 0u) { x = log(max(x, 1.0e-30)) * 0.4342944819; }

@@ -9,7 +9,7 @@ import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTL
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_TIPS, FIELDS, isSelfGravity, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
+import { familyById, familyOf, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
@@ -575,10 +575,13 @@ function syncControls() {
   // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
   // refinement levels on a uniform grid.
   const fieldSel = $<HTMLSelectElement>('field');
-  const noField = (i: number) => (i === 7 && two) || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic')) || (i === 14 && cfg.amrLevels === 0);
+  // Nor a potential without gravity, nor a Jeans length without self-gravity.
+  const pulled = cfg.gravity !== 'off' || cfg.gext.some((g) => g !== 0) || !!cfg.problem.masses || placedMasses > 0;
+  const noField = (i: number) => (i === 7 && two) || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic')) || (i === 14 && cfg.amrLevels === 0)
+    || (i === 15 && !pulled) || (i === 17 && !self);
   for (const o of fieldSel.options) o.disabled = noField(+o.value);
   if (noField(view.field)) view.field = 0;
-  $<HTMLInputElement>('log').disabled = SIGNED_FIELDS.has(view.field);
+  $<HTMLInputElement>('log').disabled = LINEAR_FIELDS.has(view.field);
   $('sum-view').textContent = FIELDS[view.field];
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
   const uniform = cfg.gext.some((g) => g !== 0);
@@ -1879,7 +1882,7 @@ function updateRange(d: Diagnostics) {
     const top = renderer.quantile(view.field, 0.995);
     if (top !== null) [lo, hi] = [Math.max(lo, -top), Math.min(hi, top)];
   }
-  const log = view.log && !SIGNED_FIELDS.has(view.field);
+  const log = view.log && !LINEAR_FIELDS.has(view.field);
   if (SIGNED_FIELDS.has(view.field)) {
     // Centered on zero, so a diverging colormap shows the sign.
     const m = Math.max(Math.abs(lo), Math.abs(hi), 1e-30);

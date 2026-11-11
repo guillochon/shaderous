@@ -39,6 +39,7 @@ export const FIELDS = [
   'Density', 'Temperature', 'Passive scalar', 'Pressure', 'Speed',
   'Velocity x', 'Velocity y', 'Velocity z', 'Mach number', 'Entropy',
   'Heating \u2212 cooling', 'Vorticity', 'Velocity divergence', 'Density gradient', 'Refinement level',
+  'Gravitational potential', 'Kinetic energy', 'Jeans length (cells)',
 ] as const;
 /** What each field shows, for its tooltip. */
 export const FIELD_TIPS = [
@@ -57,9 +58,14 @@ export const FIELD_TIPS = [
   'Divergence of the velocity: negative where the gas is compressed (shocks), positive where it expands',
   '|\u2207\u03c1| / \u03c1, a numerical schlieren image: picks out shocks, contacts and waves',
   'Level of the adaptive mesh block that holds each cell (0 is the coarsest)',
+  'Gravitational potential: self-gravity, point masses and any uniform field together (with an accelerating frame, its own potential too)',
+  'Kinetic energy per unit volume, \u03c1 v\u00b2 / 2',
+  'Jeans length c_s (\u03c0 / G\u03c1)^\u00bd in cells. Below 4 a self-gravitating region can fragment artificially (Truelove et al. 1997)',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
 export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12]);
+/** Fields always shown on a linear scale: the signed ones, refinement levels and the potential. */
+export const LINEAR_FIELDS: ReadonlySet<number> = new Set([...SIGNED_FIELDS, 14, 15]);
 
 export interface ProblemParam {
   id: string;
