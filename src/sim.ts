@@ -128,6 +128,11 @@ export interface Simulation {
   readMasses(): Promise<Required<PointMass>[] | null>;
   /** Remove the point masses added with addMass(), keeping the preset's. */
   removeAddedMasses(): void;
+  /**
+   * Give the preset's point masses the softening and sink radii its current parameters ask
+   * for, leaving them where they are and as they move.
+   */
+  retuneMasses(): void;
   /** Replace the sources and sinks (at most MAX_SOURCES; a reset removes them all). */
   setSources(list: SourceSpec[]): void;
   destroy(): void;
@@ -243,6 +248,20 @@ export function completeMass(q: PointMass, dx: number): Required<PointMass> {
   return { gm: q.gm, pos: q.pos, vel: q.vel, soft, sinkRadius: q.sinkRadius ?? soft, sinkRate: q.sinkRate ?? 1, accreted: q.accreted ?? 0 };
 }
 
+/**
+ * Write the softening and sink radii of the preset's point masses (from its current parameters)
+ * into the Masses block, leaving their positions, velocities and masses as the run has them.
+ */
+export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: number, count: number) {
+  const base = (c.problem.masses?.(c.params, c.G, dx) ?? []).slice(0, count);
+  base.forEach((q, i) => {
+    const m = completeMass(q, dx);
+    const at = 16 + 64 * i;
+    d.queue.writeBuffer(bh, at + 28, new Float32Array([m.soft]));
+    d.queue.writeBuffer(bh, at + 44, new Float32Array([m.sinkRadius]));
+  });
+}
+
 /** Pack the Masses block. The layout must match the struct in gravity/bh.wgsl. */
 export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffer> {
   const f = new Float32Array(MASS_FLOATS);
@@ -262,7 +281,8 @@ export function unpackMasses(f: Float32Array, count: number): Required<PointMass
 
 /** One application of an editing brush (edit/brush_core.wgsl). */
 export interface BrushOp {
-  kind: 'mass' | 'velocity' | 'temperature' | 'obstacle';
+  /** `eos-out` and `eos-in` act on every cell: see convertEos() in ui/app.ts and edit/brush_core.wgsl. */
+  kind: 'mass' | 'velocity' | 'temperature' | 'obstacle' | 'eos-out' | 'eos-in';
   /** centre and radius, in fractions of the box */
   pos: [number, number, number];
   radius: number;
@@ -348,7 +368,7 @@ export function packBrush(b: BrushOp): ArrayBuffer {
   const f = new Float32Array(buf);
   f.set([...b.pos, b.radius, ...b.vel, b.softness], 0);
   const u = new Uint32Array(buf);
-  u[8] = ['mass', 'velocity', 'temperature', 'obstacle'].indexOf(b.kind);
+  u[8] = ['mass', 'velocity', 'temperature', 'obstacle', 'eos-out', 'eos-in'].indexOf(b.kind);
   f[9] = b.amount;
   u[10] = b.atRest ? 1 : 0;
   if (b.outline) {
@@ -1028,6 +1048,11 @@ export class Sim implements Simulation {
     this.nMasses = this.nOwnMasses;
     this.writeParams();
     // With no masses left the field texture goes out of use; otherwise rebuild it without them.
+    this.refreshPotential();
+  }
+
+  retuneMasses() {
+    writeMassRadii(this.device, this.bh, this.cfg, this.dx, this.nOwnMasses);
     this.refreshPotential();
   }
 

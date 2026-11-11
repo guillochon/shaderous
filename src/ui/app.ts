@@ -243,7 +243,7 @@ const hud = $('hud');
 // --- editing tools ------------------------------------------------------------------------
 // A column of tools under the colour bar. Each paints with a soft ball (a disc in 2D) and
 // keeps its own size and softness.
-type ToolKind = BrushOp['kind'] | 'source' | 'sink';
+type ToolKind = Exclude<BrushOp['kind'], 'eos-out' | 'eos-in'> | 'source' | 'sink';
 const icon = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
 const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = [
   {
@@ -622,8 +622,14 @@ function syncProblemParams() {
       el.addEventListener('change', () => {
         const v = el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value;
         cfg.params[q.id] = Math.min(q.max, Math.max(q.min, v));
-        // A different orbit is a different run: start again.
-        restartRun(true);
+        if (q.live && sim) {
+          // Only the point masses' sizes: the run carries on.
+          sim.cfg = cfg;
+          sim.retuneMasses();
+        } else {
+          // Part of the initial conditions (an orbit, the gas's starting state): start again.
+          restartRun(true);
+        }
         syncControls();
       });
     }
@@ -852,6 +858,51 @@ function rebuildPipelines(resetAfter = false) {
   });
 }
 
+/**
+ * A new equation of state, mid-run. The stored internal energy means something different under
+ * the new one, so each cell's pressure is carried across instead: written out under the old
+ * equation of state, the passes rebuilt, and read back in under the new one (see the brush
+ * kinds `eos-out` and `eos-in`).
+ */
+function switchEos(kind: EosKind) {
+  const setEos = () => {
+    cfg.eos = kind;
+    // An energy equation needs gamma above 1 (as the gamma field enforces).
+    if (kind !== 'barotropic') cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
+  };
+  return enqueue(async () => {
+    if (!sim || sim.preparing) {
+      // A star's balance was worked out for the old equation of state: settle it again.
+      setEos();
+      rebuildPipelines(true); // queued behind this job
+      return;
+    }
+    reloading = true;
+    try {
+      await painted();
+      const s = sim;
+      const convert = (k: 'eos-out' | 'eos-in') => {
+        const enc = gpu.device.createCommandEncoder();
+        s.encodeBrush(enc, { kind: k, pos: [0.5, 0.5, 0.5], radius: 1, softness: 0, amount: 0, vel: [0, 0, 0] });
+        // One pass per submit: the brush block is written through the queue.
+        gpu.device.queue.submit([enc.finish()]);
+      };
+      convert('eos-out');
+      setEos();
+      s.cfg = cfg;
+      s.writeParams();
+      await s.buildHydro();
+      await renderer.attach(s);
+      convert('eos-in');
+      s.refreshPotential();
+      lastDiag = undefined;
+      finished = false;
+    } finally {
+      reloading = false;
+    }
+  });
+}
+
 function bind() {
   const on = (id: string, fn: (el: HTMLInputElement & HTMLSelectElement) => void, ev = 'change') =>
     $(id).addEventListener(ev, () => fn($(id) as HTMLInputElement & HTMLSelectElement));
@@ -919,10 +970,8 @@ function bind() {
   });
 
   on('eos', (el) => {
-    cfg.eos = el.value as EosKind;
-    // The stored internal energy means something different under a new equation of state,
-    // so start the problem again.
-    rebuildPipelines(true);
+    switchEos(el.value as EosKind);
+    syncControls();
   });
   on('gamma', (el) => {
     cfg.eosParams.gamma = Math.max(1, numOr(el, cfg.eosParams.gamma));

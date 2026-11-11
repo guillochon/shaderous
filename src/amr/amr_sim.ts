@@ -22,7 +22,7 @@ import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark, isSelfGravity } from '../problems/types';
 import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from '../problems/settle';
-import { completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
 /**
@@ -1264,6 +1264,11 @@ export class AmrSim implements Simulation {
     if (this.nMasses === this.nOwnMasses) return;
     this.nMasses = this.nOwnMasses;
     this.writeParams();
+    this.refreshPotential();
+  }
+
+  retuneMasses() {
+    writeMassRadii(this.device, this.bh, this.cfg, this.dx0, this.nOwnMasses);
     this.refreshPotential();
   }
 

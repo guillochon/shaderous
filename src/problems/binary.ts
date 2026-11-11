@@ -49,7 +49,7 @@ export const binary: Problem = {
   params: [
     { id: 'q', label: 'Mass ratio', value: 1, min: 0.01, max: 1, factor: 1.25 },
     { id: 'ecc', label: 'Eccentricity', value: 0, min: 0, max: 0.8, step: 0.05 },
-    { id: 'soft', label: 'Softening and sink radius', value: 0.06, min: 0.01, max: 0.5, step: 0.01 },
+    { id: 'soft', label: 'Softening and sink radius', value: 0.06, min: 0.01, max: 0.5, step: 0.01, live: true },
   ],
   // Softening and sink are at least two cells across, or the grid cannot see them.
   masses: (p, _G, dx) => binaryMasses(p.q, p.ecc, Math.max(p.soft, 2 * dx)),

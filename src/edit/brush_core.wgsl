@@ -5,7 +5,8 @@
 struct Brush {
   pos: vec4<f32>,   // centre in fractions of the box, radius (fraction of the box) in w
   vel: vec4<f32>,   // velocity tool: the velocity to set; softness in w (0 hard edge, 1 soft to the centre)
-  kind: u32,        // 0 mass, 1 velocity, 2 temperature, 3 obstacle
+  kind: u32,        // 0 mass, 1 velocity, 2 temperature, 3 obstacle,
+                    // 4 and 5 a change of equation of state (every cell, see brush_apply)
   amount: f32,      // mass: density added at full weight (negative removes);
                     // temperature: log of the factor applied at full weight;
                     // obstacle: positive makes cells solid, negative turns them back into gas
@@ -62,6 +63,24 @@ struct Cons { u1: vec4<f32>, u2: vec4<f32> }
 
 // The state of a cell at `x` (in fractions of the box) after the brush.
 fn brush_apply(u1: vec4<f32>, u2: vec4<f32>, x: vec3<f32>) -> Cons {
+  // A new equation of state mid-run, in two passes with a rebuild between them. Under the old
+  // one, 4 stores each cell's pressure in place of its internal energy; under the new one, 5
+  // turns that pressure back into an internal energy. The pressure carries across unchanged,
+  // so the flow does not jump. Solid cells keep their gas at rest (E = e_int), and are
+  // converted the same way.
+  if (B.kind == 4u) {
+    let rho = max(u1.x, P.rho_floor);
+    var p = eos_pressure(rho, u2.y);
+    if (!(p >= P.p_floor)) { p = P.p_floor; }
+    return Cons(u1, vec4<f32>(u2.x, p, u2.zw));
+  }
+  if (B.kind == 5u) {
+    let rho = max(u1.x, P.rho_floor);
+    var ei = eos_eint_from_p(rho, u2.y);
+    if (!EOS_HAS_ENERGY) { ei = eos_eint_from_p(rho, eos_pressure(rho, 0.0)); }
+    let ke = 0.5 * dot(u1.yzw, u1.yzw) / rho;
+    return Cons(u1, vec4<f32>(ke + ei, ei, u2.zw));
+  }
   if (B.kind == 3u) {
     if (!in_outline(x)) { return Cons(u1, u2); }
     if (B.amount > 0.0) {

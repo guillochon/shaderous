@@ -47,6 +47,12 @@ export interface ProblemParam {
   step?: number;
   /** The arrows multiply or divide by this instead, for a quantity that spans decades. */
   factor?: number;
+  /**
+   * The value can change mid-run: it only sets the point masses' softening and sink radius,
+   * which the run takes up where the masses are now. Without this flag the value is part of
+   * the initial conditions, and changing it starts the run again.
+   */
+  live?: boolean;
 }
 
 export interface Problem {
@@ -76,7 +82,7 @@ export interface Problem {
    * the speed at `v`. See hydro/fluff.wgsl.
    */
   fluff?: { rho: number; u: number; v: number };
-  /** Extra controls shown when this preset is selected. Changing one restarts the run. */
+  /** Extra controls shown when this preset is selected. Changing one restarts the run, unless it is `live`. */
   params?: ProblemParam[];
   /**
    * Point masses (at most MAX_MASSES): softened gravity on the gas, each with a sink that
