@@ -108,8 +108,8 @@ side.innerHTML = `
   <details>
     <summary>Diffusion<span class="sum" id="sum-diff"></span></summary>
     <div class="g2">
-      ${field('Viscosity \u03bd', number('visc', 'min="0" title="Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off."', 2))}
-      ${field('Conductivity \u03ba', number('cond', 'min="0" title="The heat flux is -\u03ba \u03c1 grad T: the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off."', 2))}
+      ${field('Viscosity \u03bd', number('visc', 'min="0" data-start="0.0001" title="Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off."', 2))}
+      ${field('Conductivity \u03ba', number('cond', 'min="0" data-start="0.0001" title="The heat flux is -\u03ba \u03c1 grad T: the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off."', 2))}
     </div>
   </details>
 
@@ -201,11 +201,16 @@ $('blurb').textContent = problemById(firstLink.problem).blurb;
     // Typing comes with an input type; a step of the arrows does not.
     if (!k || (e as InputEvent).inputType) return;
     const v0 = from.get(el);
-    // From zero or an empty field there is nothing to multiply: the browser's step stands.
-    if (v0 === undefined || !(v0 > 0) || el.value === '') return;
+    // A field that is off at zero names the value its first step up goes to (data-start), and
+    // steps back down to zero from there.
+    const start = el.dataset.start ? +el.dataset.start : 0;
+    // From zero or an empty field there is otherwise nothing to multiply: the browser's step stands.
+    if (v0 === undefined || el.value === '' || (!(v0 > 0) && !start)) return;
     const dir = Math.sign(+el.value - v0);
     if (!dir) return;
     let v = +(v0 * k ** dir).toPrecision(3);
+    if (start && !(v0 > 0)) v = dir > 0 ? start : 0;
+    else if (start && dir < 0 && v0 <= start) v = 0;
     if (el.min !== '') v = Math.max(+el.min, v);
     if (el.max !== '') v = Math.min(+el.max, v);
     el.value = String(v);
