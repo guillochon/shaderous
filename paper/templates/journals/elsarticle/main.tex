@@ -1,0 +1,92 @@
+%% <<TITLE_COMMENT>>
+%% Elsevier journals (Icarus, Acta Astronautica, New Astronomy, Astronomy and Computing,
+%% J. Comput. Phys., ...): elsarticle.cls with numbered references.
+%% One source, two typesettings, each built by a three-line wrapper that sets \papermode:
+%%   submit.tex   -> submit.pdf    single column, 12 pt: the format Elsevier asks for at submission
+%%   preprint.tex -> preprint.pdf  two columns (5p, Times), close to the published article; this goes to arXiv
+%% Build both:  cd paper && latexmk -pdf
+%% arXiv:       python util/arxiv_zip.py
+\providecommand{\papermode}{submit}
+\newif\iftwocol
+\def\pmpreprint{preprint}\edef\pmgiven{\papermode}
+\ifx\pmpreprint\pmgiven \twocoltrue \fi
+\iftwocol
+  \documentclass[final,5p]{elsarticle}
+\else
+  \documentclass[preprint,12pt]{elsarticle}
+\fi
+
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\iftwocol
+  % 5p sets a 522 pt text width, leaving 37 pt side margins on A4; arXiv stamps its
+  % identifier down the left margin, so narrow the text to clear it.
+  \geometry{textwidth=486pt}
+  \usepackage{newtxtext,newtxmath}
+\else
+  \usepackage{lmodern}
+  \usepackage{amssymb}
+\fi
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+% Numbered references in citation order, sorted and compressed inside one \citep.
+\biboptions{sort&compress}
+
+% Paper-wide macros, the ADS journal abbreviations, and the theorem environments.
+\input{macros}
+
+% Highlights are a submission item that the published article does not print: the
+% preprint typesets them into a box that is thrown away.
+\iftwocol
+  \AtBeginDocument{\renewenvironment{highlights}{\setbox0=\vbox\bgroup\begin{itemize}}{\end{itemize}\egroup}}
+\fi
+
+\iftwocol
+  \emergencystretch=3em
+\else
+  \relpenalty=10000
+  \binoppenalty=10000
+  \emergencystretch=1em
+\fi
+
+\journal{\todo{Journal name}}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{<<TITLE>>}
+
+<<AUTHORS>>
+
+% The abstract is primitive TeX on purpose: arXiv and the journal take it as pasted text.
+\begin{abstract}
+<<ABSTRACT>>
+\end{abstract}
+
+% Three to five bullets, each at most 85 characters including spaces.
+\begin{highlights}
+\item \todo{First highlight.}
+\item \todo{Second highlight.}
+\item \todo{Third highlight.}
+\end{highlights}
+
+\begin{keyword}
+<<KEYWORDS>>
+\end{keyword}
+
+\end{frontmatter}
+
+%% ---- BODY ----
+<<BODY>>
+%% ---- END BODY ----
+
+\bibliographystyle{elsarticle-num-names}
+\bibliography{<<BIBS>>}
+
+\end{document}

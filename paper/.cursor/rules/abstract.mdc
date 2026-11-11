@@ -1,0 +1,41 @@
+---
+description: Abstract and title limits for arXiv and journal forms (1920 characters, no custom macros, no citation commands)
+alwaysApply: true
+---
+
+# Abstract and title
+
+The title and the abstract are pasted into the arXiv form and the journal's submission system as plain text. Both systems reject or mangle anything that needs the preamble.
+
+## Length (hard requirement)
+
+The abstract of `paper/main.tex` must be **1920 characters or fewer** (`abstract_limit` in `paper.toml`). This is an arXiv hard limit, not a preference. Do not finish an abstract edit that exceeds it.
+
+- Count the collapsed abstract body (whitespace squeezed to single spaces), **including TeX commands**. For A&A's structured abstract, count all five parts together.
+- Journals add word limits (often 250 words); the journal skill's reference file gives the one for the selected class.
+- If the abstract is over the limit, cut whole side points (a list of methods, a second example, survey counts) before tightening sentences. `readability.mdc` rule 7 applies: do not compress.
+
+## No custom macros
+
+Forbidden in `\title{...}` and the abstract: every `\newcommand`, `\providecommand` and `\def` from the preamble and `paper/macros.tex` (`\Msun`, `\todo`, `\dd`, `\R`, the paper's own macros), and every citation command (`\citep`, `\citet`, `\cite`, ...). Standard TeX is fine: `\textit`, `\emph`, `$\approx$`, `$\sim$`, `$\beta$`, `$M_\odot$`, `~`.
+
+```tex
+% BAD
+masses of 1.4\,\Msun{} \citep{Hogg2010}
+% GOOD
+masses of 1.4 $M_\odot$ (Hogg et al. 2010)
+```
+
+## Citations
+
+Cite earlier work as plain text: "Hogg et al. (2010)". The abstract must not open with a citation command. It may open with the name of a proposal that the paper tests, if that proposal is its subject.
+
+## Check
+
+After any change to the title or abstract, run
+
+```bash
+python util/check_abstract.py
+```
+
+It prints the collapsed length, any forbidden macros in the abstract or the title, and whether the abstract opens with a citation command. It exits nonzero on a violation.

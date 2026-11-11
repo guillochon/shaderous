@@ -1,0 +1,23 @@
+# ADS token for util/check_citations.py. Never commit it.
+.env
+
+# arXiv upload written by util/arxiv_zip.py
+*-arxiv.zip
+
+# local copy from util/push_public.py --dry-run
+.public-snapshot/
+
+# rendered review pages from util/edits.py
+edits/*.html
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+
+# editors and OS
+.DS_Store
+Thumbs.db
+*.swp

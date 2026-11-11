@@ -1,0 +1,40 @@
+---
+description: How to compile the paper and what a clean build means
+alwaysApply: true
+---
+
+# Compiling
+
+Build both layouts from `paper/`:
+
+```bash
+cd paper
+latexmk -pdf
+```
+
+`latexmkrc` lists `submit.tex` and `preprint.tex`, so a bare `latexmk -pdf` builds `submit.pdf` and `preprint.pdf`. To build only one, name it: `latexmk -pdf preprint.tex`.
+
+MiKTeX's `latexmk` needs Perl. Without it, run the cycle by hand for each wrapper:
+
+```bash
+pdflatex -interaction=nonstopmode preprint
+bibtex preprint
+pdflatex -interaction=nonstopmode preprint
+pdflatex -interaction=nonstopmode preprint
+```
+
+`python util/build.py` does whichever of the two works and reports the problems below.
+
+## A clean build
+
+A change is not finished until both layouts compile with:
+
+- zero errors;
+- zero undefined references and zero undefined citations;
+- no "multiply defined" labels;
+- no overfull boxes wider than 1 pt in the body text (fix by rewording, not by `\sloppy`);
+- no "Float too large" warnings.
+
+`util/build.py` prints each of these from the logs and exits nonzero on any error, undefined reference or undefined citation.
+
+Never commit build products (`*.aux`, `*.log`, `*.bbl`, the PDFs of `main`, `submit` and `preprint`); `paper/.gitignore` lists them.

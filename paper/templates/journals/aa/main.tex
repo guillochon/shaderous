@@ -1,0 +1,52 @@
+%% <<TITLE_COMMENT>>
+%% Astronomy & Astrophysics: aa.cls (EDP Sciences; on CTAN, TeX Live and MiKTeX as "aa").
+%% A&A is two columns for both submission and publication; the wrappers exist so every
+%% journal builds the same two files. preprint.pdf goes to arXiv.
+%% A&A requires a structured abstract: context, aims, methods, results, conclusions.
+%% Build both:  cd paper && latexmk -pdf
+%% arXiv:       python util/arxiv_zip.py
+\providecommand{\papermode}{submit}
+\newif\iftwocol
+\def\pmpreprint{preprint}\edef\pmgiven{\papermode}
+\ifx\pmpreprint\pmgiven \twocoltrue \fi
+\documentclass[longauth]{aa}
+
+\usepackage[T1]{fontenc}
+\usepackage{txfonts}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+% Paper-wide macros, the ADS journal abbreviations, and the theorem environments.
+\input{macros}
+
+\emergencystretch=3em
+
+\begin{document}
+
+\title{<<TITLE>>}
+\titlerunning{<<SHORT_TITLE>>}
+
+<<AUTHORS>>
+
+\date{Received XXX / Accepted YYY}
+
+% The abstract is primitive TeX on purpose: arXiv and the journal take it as pasted text.
+% Structured: \abstract{context}{aims}{methods}{results}{conclusions}.
+\abstract{<<ABSTRACT>>}{}{}{}{}
+
+\keywords{<<KEYWORDS>>}
+
+\maketitle
+
+%% ---- BODY ----
+<<BODY>>
+%% ---- END BODY ----
+
+\bibliographystyle{aa}
+\bibliography{<<BIBS>>}
+
+\end{document}

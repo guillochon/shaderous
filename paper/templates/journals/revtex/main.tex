@@ -1,0 +1,55 @@
+%% <<TITLE_COMMENT>>
+%% American Physical Society journals (PRD, PRL, PRX, PRE, ...): REVTeX 4.2.
+%% Change "prd" below to the target journal (prl, prx, pre, ...).
+%% One source, two typesettings, each built by a three-line wrapper that sets \papermode:
+%%   submit.tex   -> submit.pdf    single column, double spaced: APS "preprint" layout for referees
+%%   preprint.tex -> preprint.pdf  two columns, close to the published article; this goes to arXiv
+%% Build both:  cd paper && latexmk -pdf
+%% arXiv:       python util/arxiv_zip.py
+\providecommand{\papermode}{submit}
+\newif\iftwocol
+\def\pmpreprint{preprint}\edef\pmgiven{\papermode}
+\ifx\pmpreprint\pmgiven \twocoltrue \fi
+\iftwocol
+  \documentclass[aps,prd,twocolumn,superscriptaddress,nofootinbib,showpacs=false]{revtex4-2}
+\else
+  \documentclass[aps,prd,preprint,superscriptaddress,nofootinbib]{revtex4-2}
+\fi
+
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+% Paper-wide macros, the ADS journal abbreviations, and the theorem environments.
+\input{macros}
+
+\emergencystretch=3em
+
+\begin{document}
+
+\title{<<TITLE>>}
+
+<<AUTHORS>>
+
+\date{\today}
+
+% The abstract is primitive TeX on purpose: arXiv and the journal take it as pasted text.
+\begin{abstract}
+<<ABSTRACT>>
+\end{abstract}
+
+% APS dropped PACS codes; keywords are not printed. Kept for reference: <<KEYWORDS>>
+
+\maketitle
+
+%% ---- BODY ----
+<<BODY>>
+%% ---- END BODY ----
+
+\bibliography{<<BIBS>>}
+
+\end{document}

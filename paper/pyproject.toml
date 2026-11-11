@@ -1,0 +1,32 @@
+[project]
+name = "paper"
+version = "0.1.0"
+description = "Manuscript, figures and checks for one paper"
+requires-python = ">=3.11"
+# The util/ scripts use only the standard library. These are for the figure scripts;
+# add whatever the paper's own analysis needs.
+dependencies = [
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["util"]

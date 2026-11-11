@@ -1,0 +1,12 @@
+---
+description: Use em-dashes sparingly in manuscript prose
+alwaysApply: true
+---
+
+# Em-dashes
+
+Use em-dashes (`---` in TeX, — in text) sparingly in `paper/main.tex` and the notes in `research/`. Prefer a comma, parentheses, a colon, or a second sentence.
+
+Do not use an em-dash pair for an aside that parentheses can carry, or a single em-dash where a colon or period would do.
+
+Journal markup is not prose: the AAS keyword separator ` --- `, a table note that begins `Note---`, and number ranges with an en-dash (`0.2--0.4`) are fine. `python util/check_style.py` counts prose em-dashes and warns above the rate set in `paper.toml` (`[style] max_em_dashes_per_1000`).

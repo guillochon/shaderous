@@ -1,0 +1,3 @@
+# A bare `latexmk -pdf` in this directory builds both typesettings of main.tex:
+#   submit.pdf and preprint.pdf (see the header of main.tex for what each one is).
+@default_files = ('submit.tex', 'preprint.tex');

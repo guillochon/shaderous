@@ -1,0 +1,21 @@
+# LaTeX build products
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.toc
+*.spl
+build.out
+main.pdf
+submit.pdf
+preprint.pdf
+# the previous source that util/new_paper.py --switch saves
+main.tex.bak
+# figure previews (the PDFs are the deliverables; PNGs are for quick checks)
+figures/*.png
+# Raw ADS BibTeX from util/check_citations.py. Not the bibliography.
+ads_export_raw.bib

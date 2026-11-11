@@ -1,0 +1,75 @@
+---
+description: Writing style for manuscript prose, captions and research notes
+alwaysApply: true
+---
+
+# Writing style
+
+Applies to `paper/main.tex`, everything it `\input`s, figure captions, and the notes in `research/`. `python util/check_style.py` catches the mechanical part of these rules.
+
+## Voice and tense
+
+- First person plural for what we did: "we fit", "we find". Not "the authors", not passive voice where a person acted.
+- Past tense for what we did, present tense for what is true and what the paper shows: "We fit the model to 312 light curves. The slope is $0.52 \pm 0.03$. Figure 2 shows the residuals."
+- Plain, precise words. Say what you mean once; do not hedge every sentence. Put a caveat where it applies, not as a reflex.
+
+## Spelling
+
+Use American spelling throughout: "color", "behavior", "modeling", "labeled", "normalize", "parametrization", "analyze", "center", "gray". Do not mix in British forms, and do not switch to them for a journal that is based in the UK or Europe. Keep the original spelling in a quotation, a proper name or the title of a cited work.
+
+`check_style.py` warns on common British spellings. Put `% style-ok` at the end of a source line that has to keep one.
+
+## People
+
+Never use gendered pronouns for other authors (`he`, `she`, `his`, `her`, `him`, `himself`, `herself`). Always use singular `they` / `their` / `them`.
+
+```tex
+% BAD
+\citet{Hogg2010} recommend a mixture model because he had seen outliers dominate fits.
+% GOOD
+\citet{Hogg2010} recommend a mixture model because they had seen outliers dominate fits.
+```
+
+An object name that contains "Her" (Her X-1, HZ Her) is not a pronoun: put `% style-ok` at the end of that source line so `check_style.py` skips it.
+
+## Words to avoid
+
+Never use "honestly" and its variants, or "trap" and its variants. Avoid the words that mark machine-written prose ("delve", "tapestry", "crucially", "notably", "seamlessly", "groundbreaking"). The list lives in `paper.toml` under `[style] banned`; add to it rather than to this file.
+
+Do not call a result "novel", "first" or "unprecedented" unless you have checked the literature and can cite the closest earlier work.
+
+## Section titles
+
+Section and subsection titles name the subject that the section lays out, as a short noun phrase: "Limits on the energy budget", not a sentence fragment such as "The transmitter is a swarm, and that sets a ceiling". No colons, no questions, no puns.
+
+## Inline math
+
+Keep a short inline equation on one line. The single-column layouts set `\relpenalty=10000` and `\binoppenalty=10000`, so a relation or a binary operator is not a line break. When a formula is long enough that it has to be allowed to break, wrap that formula only:
+
+```tex
+{\relpenalty=200 $...$}
+```
+
+A tie in the prose (`10~d`, `20~Mpc`, `Figure~\ref{fig:x}`, `Section~\ref{sec:y}`) binds a number to its unit or a label to its number. Inside `$...$`, `~` adds a visible gap on top of the math spacing, so it is not how a formula stays together.
+
+## Provisional text
+
+Anything that is a placeholder, a guess, or waiting on a result goes in `\todo{...}`, which prints red. Never leave a provisional number in black. `check_style.py` lists every `\todo` that is left; there must be none at submission.
+
+## Cross-references
+
+- Every figure, table, equation and section that the text refers to has a `\label`, and the text refers to it by `\ref`, never by a typed number.
+- Prefixes: `sec:`, `fig:`, `tab:`, `eq:`, `app:`, `thm:`, `lem:`, `prop:`, `def:`.
+- Capitalize "Figure", "Table", "Section", "Equation" before a number. The journal reference file says whether that class abbreviates them ("Fig.", "Sect.", "Eq.").
+
+## Mathematical exposition
+
+These rules apply wherever a paper derives something. Notation and equation formatting are in `math-notation.mdc`. They come from a collaborator's reading of an LLM-assisted manuscript. The reader found the results sound, but found the math clunky: mixed coordinates, chains of substitutions, and long detours that the paper did not need. A model that is revising a paper over many rounds tends to fixate on a side question and add rigor to it. Each addition looks reasonable on its own, but the main line of the paper gets lost.
+
+- **Every piece of math serves a result that the paper uses.** Before writing or keeping a derivation, name what later in the paper depends on it. If nothing does, cut it to a sentence, a footnote or an appendix. This applies especially to formal certificates (group theory, existence and uniqueness proofs, rigor beyond what the claim needs) attached to a side remark.
+- **One coordinate system and one set of variables per argument.** Do not switch frames, units or parametrizations in the middle of a derivation. When a limit really needs its own coordinates, introduce them once and say why. If the paper uses more than two systems, list them in a table that says where each one is used. Use the same mass ratio, the same length unit and the same sign convention from the introduction to the appendices.
+- **One derivation per result.** Do not present the same quantity in two or three representations in the main text. Keep the one that is used, and move any other to an appendix as a check. If a result needs a chain of substitutions, put the chain in an appendix, and give the result and a one-line reason in the main text. Convert between variables once, in a single displayed relation, rather than at every coefficient.
+- **Picture, result, heuristic, pointer.** Open each derivation with the physical picture in words. Then state the result, then give a heuristic of a few lines that shows where it comes from, then point to the appendix for the full calculation. A reader should be able to follow the main text without opening the appendices.
+- **Keep the checks apart from the derivation.** Convergence tests, digit-by-digit agreement, alternative evaluations, reports of literature searches ("we found no prior ...") and disclaimers ("this is not a formal proof") belong in the methods section or an appendix. In the main text, say once how the result was checked.
+- **Cite mathematics only where the result depends on it.** A reference to a mathematics text that supports a side point is a sign that the side point should go.
+- **Scale depth to importance.** The space that a calculation takes should match how much the paper's conclusions depend on it. When you add detail in one place, look for something to cut in another. Before finishing, reread the main text alone and check that a reader could state the paper's main results from it.

@@ -1,0 +1,24 @@
+---
+description: Where downloaded papers and research notes go
+alwaysApply: true
+---
+
+# Research sources and notes
+
+## Downloaded papers
+
+Whenever you download a paper for research (arXiv `.tex`, HTML, PDF, or extracted text), keep it in a dedicated subfolder of `research/`. Do not leave sources in the repo root, in `paper/`, in `util/`, or in a temp directory.
+
+- Name the folder after the citation key in the bib file, lowercase and compact (`research/hogg2010/`, `research/foremanmackey2013/`).
+- Keep the `.tex` (and any `.bbl` or macros needed to read it) or the extracted text. Skip large ancillary files unless they are needed to verify a claim.
+- A downloaded third-party source is never part of a public snapshot. `util/push_public.py` skips every `research/` subfolder.
+
+## Notes
+
+- Working notes (a derivation, an injection test, a literature summary, a decision and its reasons) are `research/<topic>.md`. Write them in the same style as the paper.
+- Do not paste a downloaded paper into a note; quote at most the sentence you need and give the citation key.
+- Referee reports and responses are `research/review<N>.md` and `research/response<N>.md`. They stay private: `push_public.py` never copies `review*.md`.
+
+## Claims about other work
+
+When the manuscript says what another paper found, check it against that paper's text (download it into `research/<key>/` if needed), not against memory or a citing paper.

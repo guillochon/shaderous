@@ -1,0 +1,63 @@
+%% <<TITLE_COMMENT>>
+%% Monthly Notices of the Royal Astronomical Society: mnras.cls.
+%% MNRAS typesets in two columns for both submission and publication, so both wrappers
+%% give the same layout; submit.tex is kept so every journal builds the same two files.
+%%   submit.tex   -> submit.pdf
+%%   preprint.tex -> preprint.pdf  (this goes to arXiv)
+%% Build both:  cd paper && latexmk -pdf
+%% arXiv:       python util/arxiv_zip.py
+\providecommand{\papermode}{submit}
+\newif\iftwocol
+\def\pmpreprint{preprint}\edef\pmgiven{\papermode}
+\ifx\pmpreprint\pmgiven \twocoltrue \fi
+\documentclass[fleqn,usenatbib]{mnras}
+
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+% Paper-wide macros, the ADS journal abbreviations, and the theorem environments.
+\input{macros}
+
+\emergencystretch=3em
+
+\title[<<SHORT_TITLE>>]{<<TITLE>>}
+
+<<AUTHORS>>
+
+\date{Accepted XXX. Received YYY; in original form ZZZ}
+\pubyear{\the\year}
+
+\begin{document}
+\label{firstpage}
+\pagerange{\pageref{firstpage}--\pageref{lastpage}}
+\maketitle
+
+% The abstract is primitive TeX on purpose: arXiv and the journal take it as pasted text.
+\begin{abstract}
+<<ABSTRACT>>
+\end{abstract}
+
+% MNRAS keywords must come from the journal's fixed list, separated by " -- ".
+\begin{keywords}
+<<KEYWORDS>>
+\end{keywords}
+
+%% ---- BODY ----
+<<BODY>>
+%% ---- END BODY ----
+
+\section*{Data Availability}
+\todo{MNRAS requires a data availability statement.}
+
+\bibliographystyle{mnras}
+\bibliography{<<BIBS>>}
+
+\bsp
+\label{lastpage}
+\end{document}

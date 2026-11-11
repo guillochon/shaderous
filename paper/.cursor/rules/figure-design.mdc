@@ -1,0 +1,53 @@
+---
+description: How figures are made, styled and placed in the manuscript
+alwaysApply: true
+---
+
+# Figure design
+
+Applies when editing `paper/figures/*.py`, the figure environments in `paper/main.tex`, or anything under `paper/figures/`.
+
+## Every figure has a script
+
+Each figure is drawn by `paper/figures/make_<name>.py`, which writes `paper/figures/<name>.pdf`. The PDF is committed; the script is the record of how it was made. Never edit a PDF by hand or paste in a figure from elsewhere. Run scripts from the repo root:
+
+```bash
+uv run python paper/figures/make_example.py
+```
+
+A script that needs slow or private inputs says so in its docstring and in `paper/README.md`.
+
+## Shared style
+
+Every script imports `paper/figures/style.py` and calls `style.apply()`. It sets the fonts, sizes, line widths and the palette, so the figures look like one set. Change a style there, not in one script.
+
+- Size figures to the journal column: `style.COLUMN` for one column, `style.PAGE` for a full-width `figure*`. Do not scale a figure in LaTeX by more than about 10 per cent; redraw it instead.
+- Vector PDF for line art. Rasterize only dense scatter or images (`rasterized=True` on that artist) so the PDF stays small.
+- Every axis has a label with units in parentheses or brackets, the way the field writes them: "Time (d)", "$\log_{10} M$ [$M_\odot$]".
+
+## Colors
+
+Use the palette in `style.py` in its order, and keep a quantity's color the same across all figures. The default palette is colorblind-safe; do not encode meaning with red against green. Use a perceptually uniform colormap (`viridis`, `cividis`) for continuous values and a diverging one (`RdBu_r`) only for signed values centered on zero.
+
+## Legends and labels
+
+One legend style everywhere: white face, 80% opacity, no edge (set in `style.py`). Place labels off the data. If they must sit on a curve or a histogram, give them the same 80% white background:
+
+```python
+ax.text(x, y, "label", bbox=style.LABEL_BOX)
+```
+
+Keep in-plot font size and legend spacing the same across figures. Shrink a label or the legend spacing only when it will not fit.
+
+## Captions
+
+A caption says what is plotted, what every symbol, color and line means, and the one thing the reader should take from it. It does not repeat the discussion.
+
+## Placement in the manuscript
+
+Each figure should share its page with body text. Never two figures on one page; never a figure (or table) alone on a page with no text.
+
+- A figure appears as soon as possible after the text first refers to it. The reference and the figure can be on the same page, but the figure must not come before its first reference.
+- Prefer `[t]` placement. Do not use `\clearpage` or `[H]` to force a float; if one is stuck or sits alone, move it earlier in the source (still after its first discussion).
+- In two-column layouts, put a page or more of source text between consecutive `figure*` environments so that one wide float ships per page.
+- After building, run `python util/check_floats.py` on the PDF that will be published (`paper/preprint.pdf` by default). It flags floats that land more than a page after their first reference, before it, or on a page with another figure.

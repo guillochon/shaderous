@@ -1,0 +1,46 @@
+---
+description: Conventions for equations, notation, theorems and proofs
+alwaysApply: true
+---
+
+# Mathematics
+
+## Equations are part of sentences
+
+A displayed equation is read as part of the sentence around it and takes its punctuation: a comma or period at the end of the display, inside the math. The text after a display continues the sentence in lower case ("where $x$ is ...") unless the sentence has ended.
+
+```tex
+The energy is
+\begin{equation}
+E = \frac{1}{2} m v^2 ,
+\label{eq:energy}
+\end{equation}
+where $m$ is the mass.
+```
+
+## Numbering
+
+- Number an equation only if the text refers to it. Use `equation*` or `\[ \]` otherwise. Never `$$ $$` and never `eqnarray`; use `align` for multi-line displays.
+- Refer to equations as `Equation~(\ref{eq:x})`, or `\eqref{eq:x}` under `amsart`. Follow the journal reference file where the class abbreviates ("Eq. (1)").
+
+## Notation
+
+- Define every symbol at its first use, in the sentence that introduces it. If the paper uses more than about fifteen symbols, add a table of notation.
+- One symbol, one meaning, throughout the paper and its appendices. Check before reusing a letter.
+- Upright (roman) type for operators, labels and units: `\mathrm{d}x` (or `\dd x`), `\exp`, `\ln`, `\max`, `M_{\rm disk}` (a label is not a variable), `\mathrm{km\,s^{-1}}`. Italic for variables only.
+- Vectors in bold (`\mathbf{v}` or `\boldsymbol{\theta}`), matrices in bold upright capitals; state the convention once.
+- Use `\left( \right)` only where the contents are tall; otherwise plain parentheses or `\bigl( \bigr)`.
+- Prefer `\ldots` for lists and `\cdots` between operators: $x_1, \ldots, x_n$ and $x_1 + \cdots + x_n$.
+- Macros for repeated notation go in `paper/macros.tex`, never in the title or abstract.
+
+## Theorems and proofs
+
+- `theorem`, `lemma`, `proposition`, `corollary`, `definition`, `example` and `remark` are defined in `paper/macros.tex`, numbered within sections on one shared counter. Label them `thm:`, `lem:`, `prop:`, `cor:`, `def:`.
+- State hypotheses in full inside the statement. A reader should be able to use the result without reading the proof.
+- Every proof ends with the `proof` environment's end mark; do not add a second QED.
+- Say where a proof is not yours ("The proof follows \citet{X}, Lemma 3") and where a step is routine but omitted.
+
+## Numbers in math
+
+- Uncertainties as $0.52 \pm 0.03$, or $0.52^{+0.04}_{-0.03}$ when asymmetric. See `numbers-and-units.mdc`.
+- Write $10^{-3}$, not 1e-3, in prose and tables. A multiplication sign is `\times`, not `x` or `*`.

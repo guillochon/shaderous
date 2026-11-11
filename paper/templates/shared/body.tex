@@ -1,0 +1,77 @@
+%% Everything between the BODY markers is journal-independent: util/new_paper.py --switch
+%% carries it to another journal class unchanged. Keep class-specific markup out of it.
+
+\section{Introduction}
+\label{sec:intro}
+
+\todo{Open with the problem and why it matters, in terms a reader outside the subfield can follow. Then say what is known, citing the work that established it \citep{Hogg2010, ForemanMackey2013}, and what is not. The last paragraph says what this paper does and what each section contains, in full sentences.}
+
+\section{Methods}
+\label{sec:methods}
+
+\todo{Describe what we did in enough detail that a competent reader could repeat it. Every number quoted here should be traceable to a script in this repository or to a note in research/.}
+
+Number an equation only if the text refers to it, and punctuate a displayed equation as part of its sentence. The likelihood of $N$ independent measurements $y_i$ with Gaussian uncertainties $\sigma_i$ under a model $f(x;\theta)$ is
+\begin{equation}
+\ln \mathcal{L}(\theta) = -\frac{1}{2} \sum_{i=1}^{N} \left[ \frac{\left(y_i - f(x_i;\theta)\right)^2}{\sigma_i^2} + \ln\left(2\pi\sigma_i^2\right) \right],
+\label{eq:likelihood}
+\end{equation}
+and we sample the posterior with an affine-invariant ensemble sampler \citep{Goodman2010, ForemanMackey2013}. Equation~(\ref{eq:likelihood}) assumes that the uncertainties are known; Section~\ref{sec:discussion} discusses what happens when they are not.
+
+\begin{proposition}
+\label{prop:example}
+If every $\sigma_i = \sigma$ and $f$ is linear in $\theta$, the maximum of $\mathcal{L}$ is the ordinary least-squares solution.
+\end{proposition}
+
+\begin{proof}
+With equal $\sigma_i$ the second term in Equation~(\ref{eq:likelihood}) does not depend on $\theta$, so maximizing $\ln\mathcal{L}$ minimizes $\sum_i (y_i - f(x_i;\theta))^2$.
+\end{proof}
+
+\section{Results}
+\label{sec:results}
+
+\todo{State each result once, with its uncertainty, and point to the figure or table that shows it.} Figure~\ref{fig:example} shows simulated measurements around a straight line, and Table~\ref{tab:example} lists the fitted values. % drawn by paper/figures/make_example.py
+
+\begin{figure}
+\centering
+\includegraphics[width=\columnwidth]{figures/example.pdf}
+\caption{A caption says what is plotted, what the symbols and colors mean, and what the reader should take away. Points: simulated measurements with $1\sigma$ uncertainties. Line: the input model.}
+\label{fig:example}
+\end{figure}
+
+\begin{table}
+\centering
+\caption{Example table. Units go in the column heads, not in the cells.}
+\label{tab:example}
+\begin{tabular}{lcc}
+\toprule
+Quantity & Value & Uncertainty \\
+\midrule
+Slope $m$ & 0.52 & 0.03 \\
+Intercept $b$ (dex) & $-1.10$ & 0.07 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Discussion}
+\label{sec:discussion}
+
+\todo{What the results mean, what they do not show, and how they compare with earlier work.}
+
+\section{Conclusions}
+\label{sec:conclusions}
+
+\todo{The findings, in the order of their importance. No new material.}
+
+\begin{acknowledgments}
+\todo{Funding, data providers, and the people who helped.}
+\end{acknowledgments}
+
+\software{NumPy \citep{Harris2020}, Matplotlib \citep{Hunter2007}, Astropy \citep{Astropy2022}}
+
+\appendix
+
+\section{Derivations}
+\label{app:derivations}
+
+\todo{Material that a careful reader needs but that interrupts the argument. Delete this appendix if it is empty.}

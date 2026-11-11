@@ -1,0 +1,58 @@
+%% <<TITLE_COMMENT>>
+%% AAS Journals (ApJ, ApJL, ApJS, AJ, PSJ, RNAAS): AASTeX 7.0.1, aastex701.cls.
+%% One source, two typesettings, each built by a three-line wrapper that sets \papermode:
+%%   submit.tex   -> submit.pdf    single column, easy to referee and to read on screen
+%%   preprint.tex -> preprint.pdf  two columns, close to the published article; this goes to arXiv
+%% Build both:  cd paper && latexmk -pdf
+%% arXiv:       python util/arxiv_zip.py
+\providecommand{\papermode}{submit}
+\newif\iftwocol
+\def\pmpreprint{preprint}\edef\pmgiven{\papermode}
+\ifx\pmpreprint\pmgiven \twocoltrue \fi
+\iftwocol
+  \documentclass[twocolumn]{aastex701}
+\else
+  \documentclass{aastex701}
+\fi
+
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{booktabs}
+
+% Paper-wide macros, the ADS journal abbreviations, and the theorem environments.
+\input{macros}
+
+% Keep short inline math on one line in the single-column layout. A long formula that
+% must break is wrapped as {\relpenalty=200 $...$}. Two columns keep TeX's defaults.
+\iftwocol
+  \emergencystretch=3em
+\else
+  \relpenalty=10000
+  \binoppenalty=10000
+  \emergencystretch=1em
+\fi
+
+\shorttitle{<<SHORT_TITLE>>}
+\shortauthors{<<SHORT_AUTHORS>>}
+
+\begin{document}
+
+\title{<<TITLE>>}
+
+<<AUTHORS>>
+
+% The abstract is primitive TeX on purpose: arXiv and the journal take it as pasted text.
+\begin{abstract}
+<<ABSTRACT>>
+\end{abstract}
+
+\keywords{<<KEYWORDS>>}
+
+%% ---- BODY ----
+<<BODY>>
+%% ---- END BODY ----
+
+\bibliographystyle{aasjournalv7}
+\bibliography{<<BIBS>>}
+
+\end{document}

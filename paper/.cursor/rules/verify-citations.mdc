@@ -1,0 +1,37 @@
+---
+description: Check every citation against ADS (or Crossref and arXiv) after adding or changing references
+alwaysApply: true
+---
+
+# Verify citations
+
+Whenever citations are added, removed or retargeted, or `.bib` entries change, check the bibliography before finishing. Do not skip because the keys look familiar. A plausible-looking reference that does not exist, or that has the wrong year, volume or first author, is the most damaging error a manuscript can carry.
+
+The bibliography files are listed in `paper.toml` (`bibs`) and live in `paper/`. They are **hand-written** entries in the ADS style: keep the journal macros (`\apj`, `\mnras`, `\pasp`, ...), which `paper/macros.tex` defines for classes that lack them. Do not replace a bib file with an export; the check writes `paper/ads_export_raw.bib` only as a comparison dump, and that file is gitignored.
+
+## Never cite from memory
+
+Find every new reference in a real index (ADS, arXiv, Crossref, MathSciNet, or the `scix` skill) before you write its entry. Copy the DOI and arXiv id from the index. If you cannot find a paper, say so; do not reconstruct it.
+
+## Commands
+
+Offline, every time:
+
+```bash
+python util/check_citations.py --keys     # every \cite key exists; no duplicates; lists uncited entries
+python util/sort_citations.py --check     # multi-key citations in chronological order
+```
+
+Online, after any bib change:
+
+```bash
+python util/check_citations.py            # each entry against ADS, or Crossref + arXiv without a token
+```
+
+- `ADS_TOKEN` lives in `.env` at the repo root (https://ui.adsabs.harvard.edu/user/settings/token). Do not commit `.env` and do not print the token.
+- With a token, each entry is looked up by DOI, then arXiv id, then first author, year and title, and the bibcodes go to `paper/bibcodes.json`. Without one, entries with a DOI are checked against Crossref and entries with only an arXiv id against arXiv. Use `--source open` to force that for papers ADS does not index well (much of pure mathematics).
+- Multi-key citations stay in chronological order. `python util/sort_citations.py` (without `--check`) rewrites them.
+
+## Done means
+
+A citation change is done when `check_citations.py` reports no mismatches, `sort_citations.py --check` passes, and both layouts compile with zero undefined citations (`latexmk -pdf` in `paper/`, then search the logs for "undefined").

@@ -1,0 +1,31 @@
+---
+description: Numbers, uncertainties, units and significant figures in the manuscript
+alwaysApply: true
+---
+
+# Numbers and units
+
+## Every number is traceable
+
+Every count, measurement, threshold and derived quantity in `paper/main.tex` must come from a script in this repository, a figure script in `paper/figures/`, a note in `research/`, or a cited paper. When you change a number, change it at the source and regenerate; do not edit the number in the text alone. If a number cannot be traced, put it in `\todo{}` until it can.
+
+## Precision
+
+- Quote a value to the precision its uncertainty supports: one or two significant figures in the uncertainty, and the value rounded to the same decimal place. $0.523 \pm 0.031$ becomes $0.52 \pm 0.03$.
+- Say what an uncertainty is the first time it appears: "$1\sigma$", "68 per cent credible interval", "standard error of the mean".
+- Upper and lower limits state their confidence level: "$< 3.2$ at 95 per cent confidence".
+- Do not write "significant" for a result without its statistic and the test.
+
+## Units
+
+- A space between a number and its unit, tied so it does not break: `10~d`, `3.2~kpc`, `5~per cent` (or `5\%` where the journal uses it).
+- Units upright, with negative exponents rather than a slash in running text: `km~s$^{-1}$` or `$30\,\mathrm{km\,s^{-1}}$`.
+- Astronomy: $M_\odot$, $R_\odot$, $L_\odot$ (macros `\Msun`, `\Rsun`, `\Lsun` in the body, never in the abstract); magnitudes are unitless but name the band and system ("$V = 12.3$ mag (Vega)"); state the cosmology once if distances depend on it.
+- Times: d, yr, Gyr, s. Angles: arcsec ($''$), mas, deg. Use one form throughout.
+
+## Writing numbers
+
+- Words for one to nine in prose when they count things ("three stars"), numerals for 10 and above and for every measurement with a unit ("3~d").
+- Thousands separators in large numbers in prose ("97,725 light curves"); none in tables of data.
+- $10^{6}$ rather than "1e6" or "a million" when precision matters.
+- A range uses an en-dash and units once: `0.2--0.4~mag`.

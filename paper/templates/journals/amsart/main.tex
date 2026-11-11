@@ -1,0 +1,58 @@
+%% <<TITLE_COMMENT>>
+%% Mathematics: amsart.cls (AMS journals, and the usual arXiv math.* layout), with natbib
+%% numbered citations so that \citet and \citep work as in the astronomy classes.
+%% amsart is single column for both layouts; the wrappers exist so every journal builds
+%% the same two files. preprint.pdf goes to arXiv.
+%% Build both:  cd paper && latexmk -pdf
+%% arXiv:       python util/arxiv_zip.py
+\providecommand{\papermode}{submit}
+\newif\iftwocol
+\def\pmpreprint{preprint}\edef\pmgiven{\papermode}
+\ifx\pmpreprint\pmgiven \twocoltrue \fi
+\documentclass[11pt]{amsart}
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage[margin=1.1in]{geometry}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue!50!black,citecolor=blue!50!black,urlcolor=blue!50!black}
+
+% Paper-wide macros, the ADS journal abbreviations, and the theorem environments.
+\input{macros}
+
+\relpenalty=10000
+\binoppenalty=10000
+\emergencystretch=1em
+
+\begin{document}
+
+\title[<<SHORT_TITLE>>]{<<TITLE>>}
+
+<<AUTHORS>>
+
+% Mathematics Subject Classification 2020: https://mathscinet.ams.org/msc/msc2020.html
+\subjclass[2020]{\todo{Primary 00A00; Secondary 00A00}}
+\keywords{<<KEYWORDS>>}
+\date{\today}
+
+% The abstract is primitive TeX on purpose: arXiv and the journal take it as pasted text.
+\begin{abstract}
+<<ABSTRACT>>
+\end{abstract}
+
+\maketitle
+
+%% ---- BODY ----
+<<BODY>>
+%% ---- END BODY ----
+
+\bibliographystyle{plainnat}
+\bibliography{<<BIBS>>}
+
+\end{document}

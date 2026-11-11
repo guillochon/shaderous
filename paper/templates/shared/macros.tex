@@ -1,0 +1,126 @@
+%% Paper-wide macros. main.tex \inputs this after the class and its packages, so it works
+%% unchanged under every journal in templates/journals/.
+%%
+%% Rules (.cursor/rules/abstract.mdc): none of these may appear in \title or the abstract,
+%% which are pasted into arXiv and journal forms as plain text. util/check_abstract.py
+%% rejects any command defined here that shows up there.
+%%
+%% Use \providecommand for anything a class may already define, so the class version wins.
+
+%% ---------------------------------------------------------------- provisional text
+% Placeholder or provisional text is set in red so it cannot be mistaken for a result.
+% util/check_style.py lists every \todo left in the manuscript.
+\providecommand{\todo}[1]{\textcolor{red}{#1}}
+
+%% ---------------------------------------------------------------- portable back matter
+% AASTeX and REVTeX define these; the other classes get plain equivalents, so the body
+% can use them under any journal.
+\ifdefined\acknowledgments\else
+  \newenvironment{acknowledgments}{\section*{Acknowledgments}}{}
+\fi
+\providecommand{\software}[1]{\par\medskip\noindent\textit{Software:} #1\par}
+\providecommand{\facilities}[1]{\par\medskip\noindent\textit{Facilities:} #1\par}
+
+%% ---------------------------------------------------------------- theorem environments
+% amsart loads amsthm; the astronomy classes do not. Numbered within sections.
+% elsarticle defines \openbox and mnras defines a proof environment, both of which amsthm
+% would define again; clear them so amsthm's versions are used everywhere.
+\ifdefined\theoremstyle\else
+  \ifdefined\openbox\let\openbox\relax\fi
+  \ifdefined\proof\let\proof\relax\let\endproof\relax\fi
+  \usepackage{amsthm}
+\fi
+\ifdefined\theorem\else
+  \theoremstyle{plain}
+  \newtheorem{theorem}{Theorem}[section]
+  \newtheorem{lemma}[theorem]{Lemma}
+  \newtheorem{proposition}[theorem]{Proposition}
+  \newtheorem{corollary}[theorem]{Corollary}
+  \theoremstyle{definition}
+  \newtheorem{definition}[theorem]{Definition}
+  \newtheorem{example}[theorem]{Example}
+  \theoremstyle{remark}
+  \newtheorem{remark}[theorem]{Remark}
+\fi
+
+%% ---------------------------------------------------------------- mathematics
+% Upright differential with the right spacing: \int f(x)\dd x.
+\providecommand{\dd}{\mathop{}\!\mathrm{d}}
+\providecommand{\R}{\mathbb{R}}
+\providecommand{\C}{\mathbb{C}}
+\providecommand{\Z}{\mathbb{Z}}
+\providecommand{\N}{\mathbb{N}}
+\providecommand{\Q}{\mathbb{Q}}
+\providecommand{\E}{\mathbb{E}}
+\providecommand{\abs}[1]{\left\lvert #1\right\rvert}
+\providecommand{\norm}[1]{\left\lVert #1\right\rVert}
+\providecommand{\Var}{\operatorname{Var}}
+\providecommand{\Cov}{\operatorname{Cov}}
+\providecommand{\sgn}{\operatorname{sgn}}
+\providecommand{\bigO}{\mathcal{O}}
+
+%% ---------------------------------------------------------------- astronomy
+\providecommand{\Msun}{\ensuremath{M_\odot}}
+\providecommand{\Rsun}{\ensuremath{R_\odot}}
+\providecommand{\Lsun}{\ensuremath{L_\odot}}
+\providecommand{\Mearth}{\ensuremath{M_\oplus}}
+\providecommand{\Rearth}{\ensuremath{R_\oplus}}
+\providecommand{\Mjup}{\ensuremath{M_{\rm J}}}
+\providecommand{\Rjup}{\ensuremath{R_{\rm J}}}
+\providecommand{\kms}{\ensuremath{\mathrm{km\,s^{-1}}}}
+\providecommand{\Hnot}{\ensuremath{H_0}}
+
+%% ---------------------------------------------------------------- journal abbreviations
+% The macros that ADS writes into BibTeX. AASTeX, mnras and aa define them already;
+% elsarticle, REVTeX and amsart do not.
+\providecommand{\aj}{AJ}
+\providecommand{\actaa}{Acta Astron.}
+\providecommand{\araa}{ARA\&A}
+\providecommand{\apj}{ApJ}
+\providecommand{\apjl}{ApJL}
+\providecommand{\apjs}{ApJS}
+\providecommand{\ao}{Appl.\ Opt.}
+\providecommand{\apss}{Ap\&SS}
+\providecommand{\aap}{A\&A}
+\providecommand{\aapr}{A\&A~Rev.}
+\providecommand{\aaps}{A\&AS}
+\providecommand{\azh}{AZh}
+\providecommand{\baas}{BAAS}
+\providecommand{\icarus}{Icarus}
+\providecommand{\jcap}{JCAP}
+\providecommand{\jrasc}{JRASC}
+\providecommand{\memras}{MmRAS}
+\providecommand{\mnras}{MNRAS}
+\providecommand{\na}{New Astron.}
+\providecommand{\nar}{New Astron.\ Rev.}
+\providecommand{\pra}{Phys.\ Rev.\ A}
+\providecommand{\prb}{Phys.\ Rev.\ B}
+\providecommand{\prc}{Phys.\ Rev.\ C}
+\providecommand{\prd}{Phys.\ Rev.\ D}
+\providecommand{\pre}{Phys.\ Rev.\ E}
+\providecommand{\prl}{Phys.\ Rev.\ Lett.}
+\providecommand{\pasa}{PASA}
+\providecommand{\pasp}{PASP}
+\providecommand{\pasj}{PASJ}
+\providecommand{\psj}{PSJ}
+\providecommand{\qjras}{QJRAS}
+\providecommand{\skytel}{S\&T}
+\providecommand{\solphys}{Sol.\ Phys.}
+\providecommand{\sovast}{Soviet Ast.}
+\providecommand{\ssr}{Space Sci.\ Rev.}
+\providecommand{\zap}{ZAp}
+\providecommand{\nat}{Nature}
+\providecommand{\natas}{Nature Astron.}
+\providecommand{\iaucirc}{IAU~Circ.}
+\providecommand{\aplett}{Astrophys.\ Lett.}
+\providecommand{\apspr}{Astrophys.\ Space Phys.\ Res.}
+\providecommand{\grl}{Geophys.\ Res.\ Lett.}
+\providecommand{\jgr}{J.\ Geophys.\ Res.}
+\providecommand{\jqsrt}{JQSRT}
+\providecommand{\physrep}{Phys.\ Rep.}
+\providecommand{\physscr}{Phys.\ Scr.}
+\providecommand{\planss}{Planet.\ Space Sci.}
+\providecommand{\procspie}{Proc.\ SPIE}
+
+%% ---------------------------------------------------------------- this paper
+% Add the paper's own macros below. Keep them few: a reader should not need a glossary.
