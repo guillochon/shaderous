@@ -53,7 +53,7 @@ describe('shader assembly', () => {
                 eos, riemann: `hydro/riemann/${riemann}.wgsl`, limiter: `hydro/limiters/${limiter}.wgsl`, cooling,
                 bins: `amr/bins_${bins}.wgsl`, mid: `amr/mid_${bins}.wgsl`,
                 diffusion: 'const VISCOSITY = true;\nconst CONDUCTION = true;\n',
-                damping: binary.damping!,
+                damping: binary.damping!.wgsl,
               };
               for (const entry of ['hydro/rates.wgsl', 'hydro/update.wgsl', 'amr/update.wgsl', 'amr/assemble.wgsl', 'amr/predict.wgsl', 'gravity/correct.wgsl', 'amr/correct.wgsl']) {
                 const src = assemble(entry, slots);

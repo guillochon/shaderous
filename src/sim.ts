@@ -80,6 +80,13 @@ export interface SimConfig {
    * energy. 0 is off.
    */
   conductivity: number;
+  /**
+   * The preset's damping zone (Problem.damping): where it starts, as a distance from the box
+   * center, and how fast it relaxes the gas at the box's edge (the preset defines the unit).
+   * A rate of 0 switches it off.
+   */
+  dampRadius: number;
+  dampRate: number;
   /** Start from a snapshot: its time, step count and point masses rather than the preset's. */
   restart?: Restart;
   /** A block is split where its refinement indicator exceeds refineHi, merged below refineLo. */
@@ -189,6 +196,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
     viscosity: problem.viscosity ?? 0,
     conductivity: problem.conductivity ?? 0,
+    dampRadius: problem.damping?.radius ?? 0,
+    dampRate: problem.damping?.rate ?? 0,
     ...over,
   };
 }
@@ -213,7 +222,7 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     // Which diffusive fluxes are compiled in (hydro/diffusion.wgsl); their strengths are in P.diff.
     diffusion: `const VISCOSITY = ${c.viscosity > 0};\nconst CONDUCTION = ${conducts(c)};\n`,
     // The preset's damping zone (hydro/damping.wgsl), or none.
-    damping: c.problem.damping ?? NO_DAMPING,
+    damping: c.problem.damping?.wgsl ?? NO_DAMPING,
   };
 }
 
@@ -458,7 +467,7 @@ export function packParams(
     40,
   );
   f.set(packCooling(c.cooling, c.coolParams), 52);
-  f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), 0, 0], 56);
+  f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), Math.max(0, c.dampRadius), Math.max(0, c.dampRate)], 56);
   return buf;
 }
 

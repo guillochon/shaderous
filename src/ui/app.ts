@@ -121,6 +121,8 @@ side.innerHTML = `
       ${['x', 'y', 'z'].map((ax, a) => (['lo', 'hi'] as const).map((side) =>
         field(`${ax} ${side === 'lo' ? 'lower' : 'upper'} face`, select(`bc-${side}-${a}`, BC_KINDS.map((k, i) => `<option value="${i}" title="${k.title}">${k.label}</option>`).join('')), `row-bc-${side}-${a}`,
           `What the gas meets at the ${side === 'lo' ? 'lower' : 'upper'} ${ax} face of the box`)).join('')).join('')}
+      ${field('Damping from r', number('dampr', 'min="0" step="0.25"'), 'row-dampr', 'Radius from the box center where the damping zone starts. Beyond it the gas is relaxed toward the state it started in, more strongly toward the edge, so waves and gas leave quietly and the boundaries see the initial state')}
+      ${field('Damping rate', number('damprate', 'min="0" step="0.5"'), 'row-damprate', 'How many times per local orbital period the gas at the box edge is relaxed toward its initial state. The rate rises from 0 at the inner radius. 0 is off')}
     </div>
   </details>
 
@@ -606,7 +608,12 @@ function syncControls() {
   // A 2D run has no z faces.
   $('row-bc-lo-2').style.display = $('row-bc-hi-2').style.display = two ? 'none' : '';
   const kinds = [...new Set([...cfg.bcLo, ...cfg.bcHi].filter((_, i) => !two || i % 3 !== 2))];
-  $('sum-bc').textContent = kinds.length === 1 ? BC_KINDS[kinds[0]].label.toLowerCase() : 'mixed';
+  // The damping zone belongs to presets that define one.
+  const damps = !!cfg.problem.damping;
+  $('row-dampr').style.display = $('row-damprate').style.display = damps ? '' : 'none';
+  $<HTMLInputElement>('dampr').value = String(cfg.dampRadius);
+  $<HTMLInputElement>('damprate').value = String(cfg.dampRate);
+  $('sum-bc').textContent = (kinds.length === 1 ? BC_KINDS[kinds[0]].label.toLowerCase() : 'mixed') + (damps && cfg.dampRate > 0 ? ' + damping' : '');
   $<HTMLSelectElement>('cmap').value = editor.colormap;
   $('run').textContent = running ? 'Pause' : 'Run';
   syncTools();
@@ -1014,6 +1021,17 @@ function bind() {
   };
   on('visc', (el) => diffusion((v) => (cfg.viscosity = v), el, cfg.viscosity));
   on('cond', (el) => diffusion((v) => (cfg.conductivity = v), el, cfg.conductivity));
+  // The damping zone's radius and rate are parameters: the run carries on.
+  on('dampr', (el) => {
+    cfg.dampRadius = Math.max(0, numOr(el, cfg.dampRadius));
+    applyParams();
+    syncControls();
+  });
+  on('damprate', (el) => {
+    cfg.dampRate = Math.max(0, numOr(el, cfg.dampRate));
+    applyParams();
+    syncControls();
+  });
   on('riemann', (el) => {
     cfg.riemann = el.value as RiemannKind;
     rebuildPipelines();

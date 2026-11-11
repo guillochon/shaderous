@@ -16,12 +16,12 @@ import { all, OUTFLOW, type PointMass, type Problem } from './types';
 // profile of scale height cs / Omega.
 //
 // Beyond r = `rDamp` the gas is relaxed toward the disk as it started (hydro/damping.wgsl), at
-// a rate that rises from 0 there to once per 0.3 local orbital periods at the box's edge and
-// stays so into the corners. The outer disk is then a reservoir that viscosity draws on, and
+// a rate that rises from 0 there to `damp` times per local orbital period at the box's edge
+// and stays so into the corners. Both can be changed in the Boundaries section during a run. The outer disk is then a reservoir that viscosity draws on, and
 // the outflow boundaries never meet gas that has spread out to them: without it, gas flowed in
 // at the corners, the disk grew to a fifth of the binary's mass, and its pull threw the binary
 // out of the box.
-export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3, rDamp: 4.5 };
+export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3, rDamp: 4.5, damp: 3 };
 
 /** A number as a WGSL f32 literal. */
 const f32 = (v: number) => (Number.isInteger(v) ? `${v}.0` : String(v));
@@ -32,15 +32,19 @@ const surface = (r: number) => {
   return sigma0 * (Math.exp(-((rCavity / r) ** 4)) * Math.exp(-((r / (0.42 * box)) ** 8)) + floor);
 };
 
-/** The same disk, in WGSL, as the damping zone's target. Must match init() below. */
+/**
+ * The same disk, in WGSL, as the damping zone's target. Must match init() below. The zone
+ * starts at radius P.diff.z; P.diff.w is its rate at the box's edge, per local orbital period.
+ */
 const DAMPING = `const DAMPING = true;
 fn damping_target(x: vec3<f32>) -> DampTarget {
   let half = ${f32(BINARY.box / 2)};
+  let r0 = P.diff.z;
   let r = max(length(x.xy), 1e-6);
-  let ramp = clamp((r - ${f32(BINARY.rDamp)}) / (half - ${f32(BINARY.rDamp)}), 0.0, 1.0);
-  if (ramp <= 0.0) { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }
+  if (P.diff.w <= 0.0 || r <= r0 || r0 >= half) { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }
+  let ramp = min((r - r0) / (half - r0), 1.0);
   let edge = min(r, half);
-  let rate = ramp * ramp * pow(edge, -1.5) / (0.6 * 3.14159265);
+  let rate = P.diff.w * ramp * ramp * pow(edge, -1.5) / 6.28318531;
   let sigma = ${f32(BINARY.sigma0)} * (exp(-pow(${f32(BINARY.rCavity)} / r, 4.0)) * exp(-pow(r / ${f32(0.42 * BINARY.box)}, 8.0)) + ${f32(BINARY.floor)});
   let v = r / pow(r * r + 0.25, 0.75);
   var rho = sigma;
@@ -80,7 +84,7 @@ export const binary: Problem = {
   tEnd: Infinity,
   rhoFloor: 1e-9,
   viscosity: BINARY.nu,
-  damping: DAMPING,
+  damping: { wgsl: DAMPING, radius: BINARY.rDamp, rate: BINARY.damp },
   supports2d: true,
   view: { field: 0, log: true, mode: 'slice', axis: 2, pitch: 1.15 },
   params: [

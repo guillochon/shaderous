@@ -101,11 +101,13 @@ export interface Problem {
   cooling?: CoolingKind;
   coolParams?: Partial<CoolingParams>;
   /**
-   * A damping zone (hydro/damping.wgsl): WGSL defining `const DAMPING = true;` and
+   * A damping zone (hydro/damping.wgsl). `wgsl` defines `const DAMPING = true;` and
    * `fn damping_target(x: vec3<f32>) -> DampTarget`, the state the gas at `x` (relative to the
-   * box center) is relaxed toward and how fast.
+   * box center) is relaxed toward and how fast; it reads the zone's inner radius and rate from
+   * P.diff.z and P.diff.w. `radius` and `rate` are their defaults (SimConfig.dampRadius and
+   * dampRate).
    */
-  damping?: string;
+  damping?: { wgsl: string; radius: number; rate: number };
   /** Kinematic viscosity and thermal conduction switched on by default (see SimConfig). */
   viscosity?: number;
   conductivity?: number;

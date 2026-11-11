@@ -34,7 +34,8 @@ struct Params {
   box: f32,              // box side length
   cool: vec4<f32>,       // parameters of the cooling function (cooling/*.wgsl)
   diff: vec4<f32>,       // diffusion (hydro/diffusion.wgsl): (kinematic viscosity, conductivity
-                         //   per unit density, 0, 0)
+                         //   per unit density), then the damping zone's inner radius and rate
+                         //   (hydro/damping.wgsl)
 }
 
 struct Clock {

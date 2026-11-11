@@ -30,7 +30,7 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity'>>;
+  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'dampRadius' | 'dampRate'>>;
   eosParams: Partial<EosParams>;
   coolParams: Partial<CoolingParams>;
   params: Record<string, number>;
@@ -88,6 +88,8 @@ export function encodeLink(s: LinkState): URLSearchParams {
   }
   num('nu', cfg.viscosity, def.viscosity);
   num('kappa', cfg.conductivity, def.conductivity);
+  num('dampr', cfg.dampRadius, def.dampRadius);
+  num('damprate', cfg.dampRate, def.dampRate);
   str('riemann', cfg.riemann, def.riemann);
   str('limiter', cfg.limiter, def.limiter);
   num('cfl', cfg.cfl, def.cfl);
@@ -188,6 +190,8 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.coolParams, 'tUnit', num('ctunit', 1e-6));
   put(out.cfg, 'viscosity', num('nu', 0, 1e30));
   put(out.cfg, 'conductivity', num('kappa', 0, 1e30));
+  put(out.cfg, 'dampRadius', num('dampr', 0, 1e30));
+  put(out.cfg, 'dampRate', num('damprate', 0, 1e30));
   for (const p of problemById(problem).params ?? []) {
     const v = num(`p.${p.id}`, p.min, p.max);
     if (v !== undefined) out.params[p.id] = v;
