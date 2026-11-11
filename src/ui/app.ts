@@ -17,8 +17,9 @@ const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getEleme
 const opt = (v: string | number, label: string) => `<option value="${v}">${label}</option>`;
 
 // A labelled control: small caption above the input, laid out on a two- or three-column grid.
-const field = (label: string, control: string, id = '') => `<label class="f"${id ? ` id="${id}"` : ''}><span>${label}</span>${control}</label>`;
-const select = (id: string, options: string) => `<select id="${id}">${options}</select>`;
+const field = (label: string, control: string, id = '', tip = '') =>
+  `<label class="f"${id ? ` id="${id}"` : ''}${tip ? ` title="${tip}"` : ''}><span>${label}</span>${control}</label>`;
+const select = (id: string, options: string, tip = '') => `<select id="${id}"${tip ? ` title="${tip}"` : ''}>${options}</select>`;
 /**
  * A number field. A `step` in attrs is the change per click of its arrows (1 without one); a
  * `factor` makes the arrows multiply or divide by it instead (see the handler further down).
@@ -45,24 +46,24 @@ side.innerHTML = `
     <button id="sheet-toggle" aria-expanded="false" aria-controls="side" title="Show or hide the controls">
       <span class="grip"></span><span id="sheet-title">Controls</span>
     </button>
-    <button id="sheet-run">Pause</button>
+    <button id="sheet-run" title="Run or pause the simulation (space)">Pause</button>
   </div>
   <header class="brand"><h1>SHADEROUS</h1><span id="adapter"></span></header>
 
   <section>
-    ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join(''))}
+    ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join(''), 'The problem to simulate: picking one starts it from its initial conditions')}
     <p class="blurb" id="blurb"></p>
     <div class="g3">
-      ${field('Grid', select('dim', opt(3, '3D') + opt(2, '2D')))}
-      ${field('Resolution', select('res', ''))}
-      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')))}
+      ${field('Grid', select('dim', opt(3, '3D') + opt(2, '2D')), '', 'Two or three dimensions. A 2D run is one layer of cells in x and y')}
+      ${field('Resolution', select('res', ''), '', 'Cells across the box; on an adaptive mesh, at its finest level')}
+      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')), '', 'Adaptive mesh: levels of refinement below the coarsest grid. Uniform puts every cell at the full resolution')}
     </div>
     <div class="g3">
-      ${field('End time', number('tend', 'placeholder="none" min="0"', 1.25))}
-      ${field('Variant', select('variant', ''))}
+      ${field('End time', number('tend', 'placeholder="none" min="0"', 1.25), '', 'The run pauses when it reaches this time. Empty runs on without end')}
+      ${field('Variant', select('variant', ''), '', 'Versions of this problem with different setups')}
       <span id="pparams"></span>
     </div>
-    <div class="buttons"><button id="run">Pause</button><button id="step">Step</button><button id="reset">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
+    <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
     <div class="g2 io">
       <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
       <button id="import" title="Load a state from an .athdf file: one saved here, or another code's with density, velocity and pressure">Import state</button>
@@ -71,72 +72,73 @@ side.innerHTML = `
   </section>
 
   <details open>
-    <summary>View<span class="sum" id="sum-view"></span></summary>
+    <summary title="How the gas is drawn">View<span class="sum" id="sum-view"></span></summary>
     <div class="g2">
-      ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')))}
-      ${field('Field', select('field', FIELDS.map((f, i) => opt(i, f)).join('')))}
-      ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')))}
-      ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />')}
+      ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')), '', 'Volume renders the gas as a glowing fog seen through the box; Slice shows one plane of cells')}
+      ${field('Field', select('field', FIELDS.map((f, i) => opt(i, f)).join('')), '', 'The quantity the colours show')}
+      ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), '', 'The axis the slice is perpendicular to')}
+      ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', '', 'Where the slice cuts the box along its normal')}
     </div>
   </details>
 
   <details>
-    <summary>Hydro<span class="sum" id="sum-hydro"></span></summary>
+    <summary title="Equation of state and the hydrodynamics solver">Hydro<span class="sum" id="sum-hydro"></span></summary>
     <div class="g2">
-      ${field('Equation of state', select('eos', (Object.keys(EOS_LABELS) as EosKind[]).map((k) => opt(k, EOS_LABELS[k])).join('')))}
-      ${field('gamma', number('gamma', 'step="0.05" min="1"'))}
-      ${field('K (p = K rho^gamma)', number('K', 'min="0"', 2), 'row-K')}
-      ${field('Radiation constant a', number('arad', 'min="0"', 2), 'row-arad')}
-      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')))}
-      ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')))}
-      ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'))}
-      ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')))}
+      ${field('Equation of state', select('eos', (Object.keys(EOS_LABELS) as EosKind[]).map((k) => opt(k, EOS_LABELS[k])).join('')), '', 'How pressure follows from density and internal energy. Changing it carries each cell\u2019s pressure over, and the run continues')}
+      ${field('gamma', number('gamma', 'step="0.05" min="1"'), '', 'Adiabatic index \u03b3: p = (\u03b3 - 1) \u03c1 e for an ideal gas, p = K \u03c1^\u03b3 for a barotropic one')}
+      ${field('K (p = K rho^gamma)', number('K', 'min="0"', 2), 'row-K', 'Barotropic constant K: p = K \u03c1^\u03b3. With \u03b3 = 1 it is the square of the sound speed')}
+      ${field('Radiation constant a', number('arad', 'min="0"', 2), 'row-arad', 'Radiation pressure a T\u2074 / 3 is added to the gas pressure')}
+      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')), '', 'How the flux between neighbouring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust')}
+      ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')), '', 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust')}
+      ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'), '', 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower')}
+      ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')), '', 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work')}
     </div>
   </details>
 
   <details>
-    <summary>Cooling<span class="sum" id="sum-cool"></span></summary>
+    <summary title="Radiative cooling and heating">Cooling<span class="sum" id="sum-cool"></span></summary>
     <div class="g2">
-      ${field('Cooling function', select('cooling', (Object.keys(COOLING_LABELS) as CoolingKind[]).map((k) => opt(k, COOLING_LABELS[k])).join('')))}
-      ${field('Coefficient \u039b\u2080', number('crate', 'min="0"', 2), 'row-crate')}
-      ${field('Exponent of T', number('calpha', 'step="0.25" min="-4" max="4"'), 'row-calpha')}
-      ${field('Heating rate', number('cheat', 'min="0"', 2), 'row-cheat')}
-      ${field('Kelvin per unit T', number('ctunit', 'min="0"', 2), 'row-ctunit')}
-      ${field('Temperature floor', number('ctfloor', 'min="0"', 2), 'row-ctfloor')}
+      ${field('Cooling function', select('cooling', (Object.keys(COOLING_LABELS) as CoolingKind[]).map((k) => opt(k, COOLING_LABELS[k])).join('')), '', 'Optically thin radiative cooling (and heating) of the gas')}
+      ${field('Coefficient \u039b\u2080', number('crate', 'min="0"', 2), 'row-crate', 'Power law: the cooling rate per unit volume is \u03c1\u00b2 \u039b\u2080 T^\u03b1')}
+      ${field('Exponent of T', number('calpha', 'step="0.25" min="-4" max="4"'), 'row-calpha', 'Power law: the exponent \u03b1 of T in the cooling rate (1/2 is bremsstrahlung)')}
+      ${field('Heating rate', number('cheat', 'min="0"', 2), 'row-cheat', 'Heating per unit mass (power law), or the heating rate at unit density (interstellar)')}
+      ${field('Kelvin per unit T', number('ctunit', 'min="0"', 2), 'row-ctunit', 'Interstellar: kelvin per code unit of temperature (code density is atoms per cm\u00b3)')}
+      ${field('Temperature floor', number('ctfloor', 'min="0"', 2), 'row-ctfloor', 'Gas at or below this temperature does not cool')}
     </div>
   </details>
 
   <details>
-    <summary>Diffusion<span class="sum" id="sum-diff"></span></summary>
+    <summary title="Viscosity and thermal conduction">Diffusion<span class="sum" id="sum-diff"></span></summary>
     <div class="g2">
-      ${field('Viscosity \u03bd', number('visc', 'min="0" data-start="0.0001" title="Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off."', 2))}
-      ${field('Conductivity \u03ba', number('cond', 'min="0" data-start="0.0001" title="The heat flux is -\u03ba \u03c1 grad T: the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off."', 2))}
+      ${field('Viscosity \u03bd', number('visc', 'min="0" data-start="0.0001"', 2), '', 'Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off')}
+      ${field('Conductivity \u03ba', number('cond', 'min="0" data-start="0.0001"', 2), '', 'Thermal conduction: the heat flux is -\u03ba \u03c1 grad T, so the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off')}
     </div>
   </details>
 
   <details>
-    <summary>Boundaries<span class="sum" id="sum-bc"></span></summary>
+    <summary title="What happens to gas at the faces of the box">Boundaries<span class="sum" id="sum-bc"></span></summary>
     <div class="g2">
       ${['x', 'y', 'z'].map((ax, a) => (['lo', 'hi'] as const).map((side) =>
-        field(`${ax} ${side === 'lo' ? 'lower' : 'upper'} face`, select(`bc-${side}-${a}`, BC_KINDS.map((k, i) => `<option value="${i}" title="${k.title}">${k.label}</option>`).join('')), `row-bc-${side}-${a}`)).join('')).join('')}
+        field(`${ax} ${side === 'lo' ? 'lower' : 'upper'} face`, select(`bc-${side}-${a}`, BC_KINDS.map((k, i) => `<option value="${i}" title="${k.title}">${k.label}</option>`).join('')), `row-bc-${side}-${a}`,
+          `What the gas meets at the ${side === 'lo' ? 'lower' : 'upper'} ${ax} face of the box`)).join('')).join('')}
     </div>
   </details>
 
   <details>
-    <summary>Gravity<span class="sum" id="sum-grav"></span></summary>
+    <summary title="Uniform gravity and self-gravity">Gravity<span class="sum" id="sum-grav"></span></summary>
     <div class="g3">
       ${field('Gravity', select('gravity', [
         ['off', 'Off', 'No gravity (point masses still pull)'],
         ['constant', 'Constant', 'A uniform field of strength G pointing down: -y in 2D, -z in 3D'],
         ['periodic', 'Self, periodic', 'Self-gravity of the gas in a periodic box (3D only)'],
         ['isolated', 'Self, isolated', 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D only)'],
-      ].map(([v, l, t]) => `<option value="${v}" title="${t}">${l}</option>`).join('')))}
-      ${field('G', number('G', 'min="0"', 1.5), 'row-G')}
-      ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'))}
+      ].map(([v, l, t]) => `<option value="${v}" title="${t}">${l}</option>`).join('')), '', 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way')}
+      ${field('G', number('G', 'min="0"', 1.5), 'row-G', 'Gravitational constant, or the strength of the uniform field')}
+      ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'), '', 'Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost')}
     </div>
     <div class="g3 jeans">
       <label class="check" title="Pressure floor that keeps the Jeans length resolved (Truelove)"><input id="jeansfloor" type="checkbox" />Jeans floor</label>
-      ${field('Cells per Jeans length', number('jeanscells', 'step="1" min="4" max="32"'))}
+      ${field('Cells per Jeans length', number('jeanscells', 'step="1" min="4" max="32"'), '', 'The Jeans floor raises the pressure so the Jeans length spans at least this many cells')}
     </div>
     <div class="checks">
       <label class="check" title="Flux-form gravitational work: conserves total energy"><input id="fluxwork" type="checkbox" />Conserve energy</label>
@@ -144,12 +146,12 @@ side.innerHTML = `
   </details>
 
   <details open>
-    <summary>Diagnostics</summary>
+    <summary title="Totals and extremes over the box, read back five times a second. Hover a number for its whole run">Diagnostics</summary>
     <div id="diag"><dl></dl><dl></dl></div>
     <div class="io diag-io"><button id="export-diag" title="Save every diagnostics readout of this run (one row per readout) as a CSV file">Export diagnostics</button></div>
   </details>
 
-  <footer><a href="validate.html">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 // The colour bar: the range at either end (editable), the opacity curve drawn on the bar, then
@@ -528,7 +530,6 @@ function syncControls() {
   levels.value = String(cfg.amrLevels);
   const amrOk = supportsAmr(cfg.problem);
   levels.disabled = !amrOk;
-  levels.title = 'Adaptive mesh: levels of refinement below the coarsest grid';
   for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n);
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
   $<HTMLInputElement>('blocks').disabled = cfg.amrLevels === 0;
@@ -580,7 +581,6 @@ function syncControls() {
   const tbins = $<HTMLSelectElement>('tbins');
   tbins.value = String(cfg.timeBins);
   tbins.disabled = cfg.amrLevels === 0;
-  tbins.title = 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work';
   $<HTMLSelectElement>('gravity').value = cfg.gravity;
   $<HTMLInputElement>('G').value = String(+cfg.G.toPrecision(6));
   $<HTMLInputElement>('vcycles').value = String(cfg.vcycles);
@@ -618,7 +618,7 @@ function syncProblemParams() {
   const defs = cfg.problem.params ?? [];
   if (box.dataset.problem !== cfg.problem.id) {
     box.dataset.problem = cfg.problem.id;
-    box.innerHTML = defs.map((q) => field(q.label, number(`pp-${q.id}`, `min="${q.min}" max="${q.max}"${q.step ? ` step="${q.step}"` : ''}`, q.factor))).join('');
+    box.innerHTML = defs.map((q) => field(q.label, number(`pp-${q.id}`, `min="${q.min}" max="${q.max}"${q.step ? ` step="${q.step}"` : ''}`, q.factor), '', q.title ?? '')).join('');
     for (const q of defs) {
       const el = $<HTMLInputElement>(`pp-${q.id}`);
       el.addEventListener('change', () => {

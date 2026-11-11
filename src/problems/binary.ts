@@ -47,9 +47,9 @@ export const binary: Problem = {
   supports2d: true,
   view: { field: 0, log: true, mode: 'slice', axis: 2, pitch: 1.15 },
   params: [
-    { id: 'q', label: 'Mass ratio', value: 1, min: 0.01, max: 1, factor: 1.25 },
-    { id: 'ecc', label: 'Eccentricity', value: 0, min: 0, max: 0.8, step: 0.05 },
-    { id: 'soft', label: 'Softening and sink radius', value: 0.06, min: 0.01, max: 0.5, step: 0.01, live: true },
+    { id: 'q', label: 'Mass ratio', title: 'Mass of the lighter body over the heavier one. Sets the orbit: changing it starts the run again', value: 1, min: 0.01, max: 1, factor: 1.25 },
+    { id: 'ecc', label: 'Eccentricity', title: 'Eccentricity of the binary’s orbit. Changing it starts the run again', value: 0, min: 0, max: 0.8, step: 0.05 },
+    { id: 'soft', label: 'Softening and sink radius', title: 'Radius within which each mass’s pull is softened and it takes in gas (at least two cells). Changes take effect without a restart', value: 0.06, min: 0.01, max: 0.5, step: 0.01, live: true },
   ],
   // Softening and sink are at least two cells across, or the grid cannot see them.
   masses: (p, _G, dx) => binaryMasses(p.q, p.ecc, Math.max(p.soft, 2 * dx)),

@@ -63,8 +63,8 @@ export const tidalDisruption: Problem = {
   // Look down on the orbital plane.
   view: { field: 0, log: true, mode: 'volume', pitch: 1.15 },
   params: [
-    { id: 'q', label: 'Perturber : star mass', value: 100, min: 1, max: 1e6, factor: 2 },
-    { id: 'beta', label: 'Impact parameter \u03b2', value: 1, min: 0.2, max: 8, step: 0.1 },
+    { id: 'q', label: 'Perturber : star mass', title: 'Mass of the black hole over the star\u2019s. Sets the orbit: changing it starts the run again', value: 100, min: 1, max: 1e6, factor: 2 },
+    { id: 'beta', label: 'Impact parameter \u03b2', title: 'Tidal radius over pericentre distance: above 1 the star passes inside the tidal radius. Changing it starts the run again', value: 1, min: 0.2, max: 8, step: 0.1 },
   ],
   gasFrame: true,
   star: { n: TDE.n, K: TDE_STAR.K, rhoCut: TDE.rhoCut * TDE_STAR.rhoc, rhoAmb: TDE.rhoAmb * TDE_STAR.rhoc },

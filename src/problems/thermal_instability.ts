@@ -60,8 +60,8 @@ export const thermalInstability: Problem = {
   conductivity: TI.kappa,
   view: { field: 0, log: true, mode: 'slice' },
   params: [
-    { id: 'n0', label: 'Mean density (cm⁻³)', value: 2, min: 1, max: 8, step: 0.5 },
-    { id: 'amp', label: 'Perturbation', value: 0.02, min: 0.001, max: 0.3, factor: 1.5 },
+    { id: 'n0', label: 'Mean density (cm⁻³)', title: 'Mean density of the gas, which starts in thermal balance. Changing it starts the run again', value: 2, min: 1, max: 8, step: 0.5 },
+    { id: 'amp', label: 'Perturbation', title: 'Amplitude of the initial density perturbations. Changing it starts the run again', value: 0.02, min: 0.001, max: 0.3, factor: 1.5 },
   ],
   init: (_n, _eos, ndim, params) => {
     const T0 = balanceTemperature(params.n0);
