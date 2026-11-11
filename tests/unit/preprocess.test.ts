@@ -69,7 +69,7 @@ describe('shader assembly', () => {
     for (const eos of Object.values(EOS_MODULES))
       for (const cooling of Object.values(COOLING_MODULES))
         for (const entry of ['render/field.wgsl', 'amr/field.wgsl']) {
-          const src = assemble(entry, { eos, cooling });
+          const src = assemble(entry, { eos, cooling, diffusion: 'const VISCOSITY = false;\nconst CONDUCTION = true;\n' });
           expect(src).not.toMatch(/^\s*#include/m);
           expect(src).toContain('fn field_value');
         }

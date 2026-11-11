@@ -30,9 +30,10 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'dampRadius' | 'dampRate'>>;
+  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'dampRadius' | 'dampRate'>>;
   eosParams: Partial<EosParams>;
   coolParams: Partial<CoolingParams>;
+  fluff: Partial<SimConfig['fluff']>;
   params: Record<string, number>;
   view: Partial<ViewState>;
   auto?: boolean;
@@ -96,6 +97,10 @@ export function encodeLink(s: LinkState): URLSearchParams {
   if (cfg.amrLevels) num('tbins', cfg.timeBins, def.timeBins);
   if (cfg.amrLevels) num('refhi', cfg.refineHi, def.refineHi);
   if (cfg.amrLevels) num('reflo', cfg.refineLo, def.refineLo);
+  if (cfg.amrLevels) num('refrho', cfg.refineRho, def.refineRho);
+  num('frho', cfg.fluff.rho, def.fluff.rho);
+  num('fu', cfg.fluff.u, def.fluff.u);
+  num('fv', cfg.fluff.v, def.fluff.v);
   str('gravity', cfg.gravity, def.gravity);
   num('G', cfg.G, def.G);
   num('vcycles', cfg.vcycles, def.vcycles);
@@ -136,6 +141,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
     cfg: {},
     eosParams: {},
     coolParams: {},
+    fluff: {},
     params: {},
     view: {},
   };
@@ -163,6 +169,10 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.cfg, 'cfl', num('cfl', 0.05, 1));
   put(out.cfg, 'refineHi', num('refhi', 0.05, 1));
   put(out.cfg, 'refineLo', num('reflo', 0, 1));
+  put(out.cfg, 'refineRho', num('refrho', 0));
+  put(out.fluff, 'rho', num('frho', 0));
+  put(out.fluff, 'u', num('fu', 0));
+  put(out.fluff, 'v', num('fv', 0));
   const tb = num('tbins', 0, 3);
   if (tb !== undefined) out.cfg.timeBins = Math.round(tb);
   put(out.cfg, 'gravity', pick<GravityMode>('gravity', GRAVITY_MODES));

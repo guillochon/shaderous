@@ -96,6 +96,13 @@ export interface SimConfig {
    */
   refineHi: number;
   refineLo: number;
+  /** Gas below this density does not ask for refinement (amr/flag.wgsl); 0 is off. */
+  refineRho: number;
+  /**
+   * Limits on tenuous gas (hydro/fluff.wgsl): below density `rho`, the specific internal
+   * energy is capped at `u` and the speed at `v`. A zero density switches them off.
+   */
+  fluff: { rho: number; u: number; v: number };
   /** With self-gravity, refine where the Jeans length is under this many cells (0 = off). */
   jeansRefine: number;
 }
@@ -240,6 +247,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // FLASH's defaults for the same indicator.
     refineHi: 0.8,
     refineLo: 0.2,
+    refineRho: problem.refineRho ?? problem.fluff?.rho ?? (problem.star ? 10 * problem.star.rhoAmb : 0),
+    fluff: { ...(problem.fluff ?? { rho: 0, u: 0, v: 0 }) },
     jeansRefine: 16,
     cooling: problem.cooling ?? 'off',
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
@@ -504,7 +513,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 240;
+export const PARAM_BYTES = 256;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -524,8 +533,8 @@ export function packParams(
   // Point masses: how many, whether the frame follows the gas, whether there are any, and
   // whether they are all the field texture holds (no Poisson potential).
   f.set([x.masses, c.problem.frame === 'gas' ? 1 : c.problem.frame === 'masses' ? 2 : 0, x.masses > 0 ? 1 : 0, x.selfGravity ? 0 : 1], 24);
-  const fl = c.problem.fluff;
-  f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
+  const fl = c.fluff;
+  f.set(fl.rho > 0 ? [fl.rho, fl.u > 0 ? fl.u : 1e30, fl.v > 0 ? fl.v : 1e30, 0] : [0, 0, 0, 0], 28);
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
   u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0)], 36);
@@ -548,6 +557,7 @@ export function packParams(
   );
   f.set(packCooling(c.cooling, c.coolParams), 52);
   f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), Math.max(0, c.dampRadius), Math.max(0, c.dampRate)], 56);
+  f.set([Math.max(0, c.refineRho), 0, 0, 0], 60);
   return buf;
 }
 

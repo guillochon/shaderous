@@ -9,9 +9,10 @@ import { fieldMeasure, readout, type Measure, type Readout } from './units_view'
 import type { DisplaySystem } from '../units/units';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
+import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
+import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
@@ -77,6 +78,7 @@ side.innerHTML = `
     </div>
     <div class="g2">
       ${field('Refine above', number('refhi', 'step="0.05" min="0.05" max="1"'), '', 'Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more. Changes take effect without a restart')}
+      ${field('Refine above density', number('refrho', 'min="0"', 10), '', 'Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off. Changes take effect without a restart')}
       ${field('Merge below', number('reflo', 'step="0.05" min="0" max="1"'), '', 'Adaptive mesh: four sibling blocks are merged where the indicator is below this in all of them. Kept below the refinement threshold. Changes take effect without a restart')}
     </div>
   </details>
@@ -94,7 +96,7 @@ side.innerHTML = `
     <summary title="How the gas is drawn">View<span class="sum" id="sum-view"></span></summary>
     <div class="g2">
       ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')), '', 'Volume renders the gas as a glowing fog seen through the box; Slice shows one plane of cells')}
-      ${field('Field', select('field', FIELDS.map((f, i) => `<option value="${i}" title="${FIELD_TIPS[i]}">${f}</option>`).join('')), '', 'The quantity the colors show. Fields of either sign (velocity components, heating, vorticity, divergence) are shown on a linear scale centered on zero')}
+      ${field('Field', select('field', FIELD_MENU.map((g) => `<optgroup label="${g.group}">${g.fields.map((i) => `<option value="${i}" title="${FIELD_TIPS[i]}">${FIELDS[i]}</option>`).join('')}</optgroup>`).join('')), '', 'The quantity the colors show. Fields of either sign (velocity components, heating, vorticity, divergence) are shown on a linear scale centered on zero')}
       ${field('Units', select('units', opt('cgs', 'cgs') + opt('si', 'SI') + opt('code', 'Code')), '', 'Units the readouts are shown in: the color bar, the query tool and the diagnostics. Only a setup that stands for something real (a star, say) has physical units; the others are in code units')}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), '', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', '', 'Where the slice cuts the box along its normal')}
@@ -108,6 +110,9 @@ side.innerHTML = `
       ${field('gamma', number('gamma', 'step="0.05" min="1"'), '', 'Adiabatic index \u03b3: p = (\u03b3 - 1) \u03c1 e for an ideal gas, p = K \u03c1^\u03b3 for a barotropic one')}
       ${field('K (p = K rho^gamma)', number('K', 'min="0"', 2), 'row-K', 'Barotropic constant K: p = K \u03c1^\u03b3. With \u03b3 = 1 it is the square of the sound speed')}
       ${field('Radiation constant a', number('arad', 'min="0"', 2), 'row-arad', 'Radiation pressure a T\u2074 / 3 is added to the gas pressure')}
+      ${field('Tenuous below density', number('fluffrho', 'min="0"', 10), '', 'Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off. Placing a star with the star tool sets these from the star if they are off')}
+      ${field('Max specific energy', number('fluffu', 'min="0"', 2), 'row-fluffu', 'Largest internal energy per unit mass tenuous gas may have. 0 is no cap')}
+      ${field('Max speed', number('fluffv', 'min="0"', 2), 'row-fluffv', 'Largest speed tenuous gas may have. 0 is no cap')}
       ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')), '', 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust')}
       ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')), '', 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust')}
     </div>
@@ -638,6 +643,12 @@ function syncControls() {
   const masses = !!cfg.problem.masses || placedMasses > 0;
   $<HTMLInputElement>('G').disabled = cfg.gravity === 'off' && !masses;
   $<HTMLInputElement>('refhi').value = String(cfg.refineHi);
+  $<HTMLInputElement>('refrho').value = String(+cfg.refineRho.toPrecision(4));
+  $<HTMLInputElement>('refrho').disabled = cfg.amrLevels === 0;
+  $<HTMLInputElement>('fluffrho').value = String(+cfg.fluff.rho.toPrecision(4));
+  $<HTMLInputElement>('fluffu').value = String(+cfg.fluff.u.toPrecision(4));
+  $<HTMLInputElement>('fluffv').value = String(+cfg.fluff.v.toPrecision(4));
+  $<HTMLInputElement>('fluffu').disabled = $<HTMLInputElement>('fluffv').disabled = !(cfg.fluff.rho > 0);
   $<HTMLInputElement>('reflo').value = String(cfg.refineLo);
   $<HTMLInputElement>('refhi').disabled = $<HTMLInputElement>('reflo').disabled = cfg.amrLevels === 0;
   $('sum-grid').textContent = `${cfg.n}${two ? '\u00b2' : '\u00b3'}, ${cfg.amrLevels ? `${cfg.amrLevels} level${cfg.amrLevels > 1 ? 's' : ''}` : 'uniform'}`;
@@ -803,6 +814,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next, link.cfg);
       Object.assign(next.eosParams, link.eosParams);
       Object.assign(next.coolParams, link.coolParams);
+      next.fluff = { ...next.fluff, ...link.fluff };
       Object.assign(next.params, link.params);
       if (ndim === 2) {
         if (isSelfGravity(next.gravity)) next.gravity = 'off';
@@ -1175,6 +1187,19 @@ function bind() {
     applyParams();
     syncControls();
   });
+  on('refrho', (el) => {
+    cfg.refineRho = Math.max(0, numOr(el, cfg.refineRho));
+    applyParams();
+    syncControls();
+  });
+  // The tenuous-gas caps are parameters: the run carries on.
+  for (const [id, key] of [['fluffrho', 'rho'], ['fluffu', 'u'], ['fluffv', 'v']] as const) {
+    on(id, (el) => {
+      cfg.fluff = { ...cfg.fluff, [key]: Math.max(0, numOr(el, cfg.fluff[key])) };
+      applyParams();
+      syncControls();
+    });
+  }
   on('reflo', (el) => {
     cfg.refineLo = Math.min(cfg.refineHi / 2, Math.max(0, numOr(el, cfg.refineLo)));
     applyParams();
@@ -1276,7 +1301,7 @@ function bind() {
     view.field = +el.value;
     // A density gradient spans decades (shocks against smooth flow), so it reads best on a log
     // scale; refinement levels are a handful of integers.
-    if (view.field === 13) view.log = true;
+    if (view.field === 13 || view.field === 18) view.log = true;
     if (view.field === 14) view.log = false;
     syncControls();
   });
@@ -1925,8 +1950,24 @@ function placeStar(pos: Vec3, vel: Vec3) {
   const cells = q.size * cfg.n;
   if (cells < 8) notes.push(`the star is only ${cells.toFixed(1)} cells in radius`);
   if (cfg.eos === 'ideal' && cfg.eosParams.gamma < 1 + 1 / starN) notes.push('\u03b3 < 1 + 1/n: the star is convectively unstable');
-  notice(notes.join('; '));
   const op = starBrush(starN, 10 ** starLogRho, q.size, cfg.problem.box, cfg.G, pos, vel);
+  // Thin gas around a star should neither set the timestep nor ask for refinement: unless the
+  // run has its own settings, take them from this star.
+  const rhoc = 10 ** starLogRho;
+  if (!(cfg.fluff.rho > 0)) {
+    const radius = q.size * cfg.problem.box;
+    const g = cfg.eosParams.gamma;
+    // Twice the central specific internal energy, four times the surface escape speed.
+    const uc = (op.star!.K * rhoc ** (1 / starN)) / Math.max(g - 1, 0.05);
+    const vEsc = Math.sqrt((2 * cfg.G * polytropeMass(laneEmdenCached(starN), rhoc, radius)) / radius);
+    cfg.fluff = { rho: 1e-5 * rhoc, u: 2 * uc, v: 4 * vEsc };
+    notes.push('tenuous-gas caps set from the star (Hydro)');
+  }
+  if (cfg.amrLevels > 0 && !(cfg.refineRho > 0)) {
+    cfg.refineRho = 1e-5 * rhoc;
+    notes.push('ambient gas no longer refines (Grid)');
+  }
+  notice(notes.join('; '));
   const target = sim;
   syncControls();
   enqueue(async () => {

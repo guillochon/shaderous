@@ -9,6 +9,8 @@
 // requested number of cells.
 // Where a preset asks for it (P.flags bit 4), every block that comes near a point mass is
 // refined to the finest level, so its softening and sink are resolved as well as they can be.
+// Gas thinner than P.refine.x (ambient gas around a star, say) does not ask for refinement by
+// the indicator: its ripples, relative to its own tiny density, are not worth resolving.
 // One value per slot, accumulated with an atomic max on the float's bit pattern (which orders
 // the same way as the float for non-negative values). Every gas cell writes at least a tiny
 // positive value, so a block that reads exactly 0 lies wholly inside an obstacle.
@@ -96,6 +98,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   var ind = lohner(c);
+  if (textureLoad(W1, c, 0).x < P.refine.x) { ind = 0.0; }
   // Above any threshold the refinement criterion may be given.
   if (near_mass(inv.slot, inv.l)) { ind = 1e30; }
   if (has_potential() && P.geom.w > 0.0) {

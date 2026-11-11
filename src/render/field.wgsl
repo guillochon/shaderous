@@ -50,6 +50,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     // The uniform field's potential, measured from the box center, is not in the texture.
     let pos = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
     let phi = textureLoad(GF, c, 0).w - dot(P.gext.xyz, select(pos, vec3<f32>(pos.xy, 0.0), P.dims.z == 1u));
+    g_acc = P.gext.xyz;
+    if (P.grav_on != 0u) { g_acc += textureLoad(GF, c, 0).xyz; }
     var x = field_value(V.field, u1, u2, g, 0.0, phi);
     let solid = u2.w > 0.5;
     if (!solid) { range_add(x); }

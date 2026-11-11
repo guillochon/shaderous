@@ -5,6 +5,10 @@
 // buffer RANGE: array<atomic<u32>, 132>: min, max, smallest positive, unused, then a histogram
 // of |value| in HIST_BINS bins of log10 |value| (render/renderer.ts reads it).
 #include <cooling>
+#include "hydro/diff_rate.wgsl"
+
+// Acceleration at the cell, for the timestep limit: set by the display pass beside g_dx.
+var<private> g_acc: vec3<f32>;
 
 // Gradients at a cell: of each velocity component and of the density (zero along an axis the
 // grid does not have).
@@ -65,6 +69,16 @@ fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32, phi: f
       if (!(P.G > 0.0)) { return 0.0; }
       let p = max(eos_pressure(rho, eint), P.p_floor);
       return eos_sound_speed(rho, p) * sqrt(3.14159265 / (P.G * rho)) / g_dx;
+    }
+    // The step this cell allows, as hydro/rates.wgsl and amr/assemble.wgsl reduce it and
+    // hydro/clock.wgsl turns it into dt: the signal speed summed over the axes, and gravity.
+    case 18u {
+      let p = max(eos_pressure(rho, eint), P.p_floor);
+      let rate = abs(v.x) + abs(v.y) + abs(v.z) + P.geom.y * eos_sound_speed(rho, p) + diff_speed(rho, eint);
+      var dt = g_dx / max(rate, 1.0e-30);
+      let a = length(g_acc);
+      if (a > 0.0) { dt = min(dt, sqrt(g_dx / a)); }
+      return P.cfl * dt;
     }
     default { return rho; }
   }

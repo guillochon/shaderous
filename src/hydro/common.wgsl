@@ -37,6 +37,7 @@ struct Params {
   diff: vec4<f32>,       // diffusion (hydro/diffusion.wgsl): (kinematic viscosity, conductivity
                          //   per unit density), then the damping zone's inner radius and rate
                          //   (hydro/damping.wgsl)
+  refine: vec4<f32>,     // block grids: (density below which gas does not ask for refinement, 0, 0, 0)
 }
 
 struct Clock {
