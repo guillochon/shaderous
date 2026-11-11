@@ -941,6 +941,9 @@ export class AmrSim implements Simulation {
   settled: Promise<void> = Promise.resolve();
   private settleEpoch = 0;
   private settling = false;
+  get preparing(): boolean {
+    return this.settling;
+  }
   /** largest relative change of density in each round of the last settling (inspection) */
   settleLog: number[] = [];
 

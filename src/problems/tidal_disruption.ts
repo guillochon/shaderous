@@ -63,7 +63,7 @@ export const tidalDisruption: Problem = {
   // Look down on the orbital plane.
   view: { field: 0, log: true, mode: 'volume', pitch: 1.15 },
   params: [
-    { id: 'q', label: 'Perturber : star mass', value: 100, min: 1, max: 1e6 },
+    { id: 'q', label: 'Perturber : star mass', value: 100, min: 1, max: 1e6, factor: 2 },
     { id: 'beta', label: 'Impact parameter \u03b2', value: 1, min: 0.2, max: 8, step: 0.1 },
   ],
   gasFrame: true,

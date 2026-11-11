@@ -43,7 +43,10 @@ export interface ProblemParam {
   value: number;
   min: number;
   max: number;
+  /** Change per click of the field's arrows. */
   step?: number;
+  /** The arrows multiply or divide by this instead, for a quantity that spans decades. */
+  factor?: number;
 }
 
 export interface Problem {

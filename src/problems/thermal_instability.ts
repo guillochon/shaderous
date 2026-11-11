@@ -53,8 +53,8 @@ export const thermalInstability: Problem = {
   coolParams: { heat: 50, tUnit: TI.tUnit, tFloor: 0.02 },
   view: { field: 0, log: true, mode: 'slice' },
   params: [
-    { id: 'n0', label: 'Mean density (cm⁻³)', value: 2, min: 1, max: 8, step: 0.1 },
-    { id: 'amp', label: 'Perturbation', value: 0.02, min: 0.001, max: 0.3, step: 0.001 },
+    { id: 'n0', label: 'Mean density (cm⁻³)', value: 2, min: 1, max: 8, step: 0.5 },
+    { id: 'amp', label: 'Perturbation', value: 0.02, min: 0.001, max: 0.3, factor: 1.5 },
   ],
   init: (_n, _eos, ndim, params) => {
     const T0 = balanceTemperature(params.n0);

@@ -42,7 +42,7 @@ export const binary: Problem = {
   supports2d: true,
   view: { field: 0, log: true, mode: 'slice', axis: 2, pitch: 1.15 },
   params: [
-    { id: 'q', label: 'Mass ratio', value: 1, min: 0.01, max: 1, step: 0.01 },
+    { id: 'q', label: 'Mass ratio', value: 1, min: 0.01, max: 1, factor: 1.25 },
     { id: 'ecc', label: 'Eccentricity', value: 0, min: 0, max: 0.8, step: 0.05 },
     { id: 'soft', label: 'Softening and sink radius', value: 0.06, min: 0.01, max: 0.5, step: 0.01 },
   ],

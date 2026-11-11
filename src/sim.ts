@@ -96,6 +96,8 @@ export interface Simulation {
   diagnostics(): Promise<Diagnostics>;
   runToEnd(batch?: number, maxSteps?: number): Promise<number>;
   reset(): void;
+  /** A star in the initial conditions is still being settled: no steps are taken yet. */
+  readonly preparing: boolean;
   writeParams(): void;
   buildHydro(): Promise<void>;
   refreshPotential(): void;
@@ -776,6 +778,9 @@ export class Sim implements Simulation {
   settled: Promise<void> = Promise.resolve();
   private settleEpoch = 0;
   private settling = false;
+  get preparing(): boolean {
+    return this.settling;
+  }
   /** largest relative change of density in each round of the last settling (inspection) */
   settleLog: number[] = [];
 
