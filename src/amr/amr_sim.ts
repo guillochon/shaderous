@@ -30,6 +30,11 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp
  * Signals cross at most about a third of a cell per step, and a block is 16 cells with a
  * buffer block kept around flagged ones, so 24 steps cannot carry a feature out of its refinement.
  */
+/**
+ * Most blocks a 3D atlas holds by default (13^3): its textures then take about 3 GB. A 2D atlas
+ * of the same size in bytes holds PAD times as many.
+ */
+const MAX_BLOCKS_3D = 13 ** 3;
 const REGRID_EVERY = 8;
 const MAX_STEPS_AHEAD = 24;
 /** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
@@ -75,8 +80,12 @@ export class AmrSim implements Simulation {
   /** cells per side at level 0, and its cell size */
   readonly n0: number;
   readonly dx0: number;
-  /** atlas slots per side, and in total */
+  /**
+   * Atlas slots per side of a layer, layers of slots along z (in 3D as many as slotsPerSide, a
+   * cube; in 2D one cell deep each, as many as the budget needs), and slots in total.
+   */
   readonly slotsPerSide: number;
+  readonly layers: number;
   readonly cap: number;
   tree!: BlockTree;
   cur = 0;
@@ -236,18 +245,26 @@ export class AmrSim implements Simulation {
     const roots = nr ** cfg.ndim;
     // Atlas size: room for the roots plus refinement, within what a texture can hold.
     const limit = Math.floor(Math.min(gpu.limits.maxTextureDimension3D, 2048) / PAD);
-    // Default budget: what refining everywhere would need (leaves plus their parents) in 3D,
-    // three quarters of that in 2D, capped so the 3D atlases stay within about 3 GB (2197
-    // blocks; create() falls back to a smaller atlas if the GPU cannot hold that).
-    const full = roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3);
-    const auto = Math.ceil(Math.pow(Math.max(full * (cfg.ndim === 3 ? 1 : 0.75), roots * 2), 1 / cfg.ndim));
-    const [lo, hi] = cfg.ndim === 3 ? [6, 13] : [12, 100];
-    this.slotsPerSide = Math.min(limit, slots || cfg.amrBudget || Math.min(hi, Math.max(lo, auto)));
-    this.cap = this.slotsPerSide ** cfg.ndim;
+    // Default budget: what refining everywhere would need (leaves plus their parents), within
+    // about 3 GB of atlas textures: MAX_BLOCKS_3D blocks in 3D, and in 2D, whose blocks are
+    // PAD times smaller, PAD times as many. create() falls back to a smaller atlas if the GPU
+    // cannot hold that.
+    const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
+    const explicit = slots || cfg.amrBudget;
+    if (cfg.ndim === 3) {
+      const auto = Math.min(Math.round(Math.cbrt(MAX_BLOCKS_3D)), Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9)));
+      this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto);
+      this.layers = this.slotsPerSide;
+    } else {
+      const want = explicit || Math.min(MAX_BLOCKS_3D * PAD, Math.max(full, roots * 2, 144));
+      this.layers = Math.ceil(want / limit ** 2);
+      this.slotsPerSide = Math.min(limit, Math.ceil(Math.sqrt(want / this.layers) - 1e-9));
+    }
+    this.cap = this.slotsPerSide ** 2 * this.layers;
     if (roots > this.cap) throw new Error(`${roots} root blocks do not fit in an atlas of ${this.cap}`);
 
     const side = this.slotsPerSide * PAD;
-    const t = (label: string) => tex3d(d, side, 'rgba32float', label, cfg.ndim === 2 ? 1 : side);
+    const t = (label: string) => tex3d(d, side, 'rgba32float', label, this.layers * (cfg.ndim === 2 ? 1 : PAD));
     for (let p = 0; p < 2; p++) this.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
     this.prim = [t('W1'), t('W2')];
     this.pred = [t('PA'), t('PB')];
@@ -300,12 +317,12 @@ export class AmrSim implements Simulation {
       }
       const oom = await gpu.device.popErrorScope();
       if (!oom && sim) return sim;
-      const tried = sim?.slotsPerSide ?? slots;
+      const tried = sim?.cap ?? slots;
       sim?.destroy();
-      const next = Math.floor(tried * 0.85);
+      const next = Math.floor(tried * 0.85 ** cfg.ndim);
       const roots = ((cfg.n >> cfg.amrLevels) / BS) ** cfg.ndim;
-      if (!oom || !tried || next ** cfg.ndim < roots * 2) throw failure ?? new Error('not enough GPU memory for the adaptive mesh at this resolution');
-      console.warn(`adaptive mesh: out of GPU memory with ${tried ** cfg.ndim} blocks, retrying with ${next ** cfg.ndim}`);
+      if (!oom || !tried || next < roots * 2) throw failure ?? new Error('not enough GPU memory for the adaptive mesh at this resolution');
+      console.warn(`adaptive mesh: out of GPU memory with ${tried} blocks, retrying with ${next}`);
       slots = next;
     }
   }
@@ -688,7 +705,7 @@ export class AmrSim implements Simulation {
       rhoMean: this.rhoMean,
       selfGravity: this.selfGravity,
       masses: this.hasMasses ? this.nMasses : 0,
-      amr: [this.slotsPerSide, this.n0 / BS, this.levels, 0],
+      amr: [this.slotsPerSide, this.n0 / BS, this.levels, this.layers],
       refine: [c.refineHi, c.jeansRefine],
       solids: this.solids,
       sources: this.nSources > 0,
@@ -1009,7 +1026,7 @@ export class AmrSim implements Simulation {
   /** Atlas texel of a slot's first interior cell. */
   private origin(slot: number): [number, number, number] {
     const a = this.slotsPerSide;
-    if (this.cfg.ndim === 2) return [(slot % a) * PAD + NG, Math.floor(slot / a) * PAD + NG, 0];
+    if (this.cfg.ndim === 2) return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a))];
     return [(slot % a) * PAD + NG, (Math.floor(slot / a) % a) * PAD + NG, Math.floor(slot / (a * a)) * PAD + NG];
   }
 
@@ -1450,7 +1467,7 @@ export class AmrSim implements Simulation {
     const s = this.tree.stats();
     const full = this.tree.levelLimit < this.levels
       ? `, block budget limits refinement to ${this.tree.levelLimit} of ${this.levels} levels`
-      : this.tree.freeSlots < this.tree.nchild ? ', budget full' : '';
+      : this.tree.freeSlots < this.tree.nchild ? `, block budget full (${this.cap} with their parents)` : '';
     // Per-block timesteps: what the last cycles measured saved, and whether they are in use.
     const share = this.binShare;
     const bins = this.builtBins === 0 || share === null ? ''
@@ -1463,7 +1480,7 @@ export class AmrSim implements Simulation {
   async readLeaves(): Promise<LeafCells> {
     this.flush();
     const side = this.slotsPerSide * PAD;
-    const depthTex = this.cfg.ndim === 2 ? 1 : side;
+    const depthTex = this.cfg.ndim === 2 ? this.layers : side;
     const [a, b] = this.state[this.cur];
     const t1 = await readTexture(this.device, a, side, 4, depthTex);
     const t2 = await readTexture(this.device, b, side, 4, depthTex);
@@ -1534,7 +1551,7 @@ export class AmrSim implements Simulation {
     pass.end();
     d.queue.submit([enc.finish()]);
     const side = this.slotsPerSide * PAD;
-    const depthTex = this.cfg.ndim === 2 ? 1 : side;
+    const depthTex = this.cfg.ndim === 2 ? this.layers : side;
     const f1 = await readTexture(d, this.state[1 - p][0], side, 4, depthTex);
     const f2 = await readTexture(d, this.state[1 - p][1], side, 4, depthTex);
     const three = this.cfg.ndim === 3;

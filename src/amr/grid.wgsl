@@ -31,14 +31,15 @@ fn blk_dx(slot: i32) -> f32 {
 fn blk_origin(slot: i32) -> vec3<i32> {
   let a = i32(P.amr.x);
   if (is2d()) {
-    return vec3<i32>((slot % a) * PADW + NGH, (slot / a) * PADW + NGH, 0);
+    // Layers of a x a slots, one cell deep, stacked along z.
+    return vec3<i32>((slot % a) * PADW + NGH, ((slot / a) % a) * PADW + NGH, slot / (a * a));
   }
   return vec3<i32>(slot % a, (slot / a) % a, slot / (a * a)) * PADW + NGH;
 }
 
 // Atlas texel of local cell l of the block whose origin is o. l may be a face ghost.
 fn atl(o: vec3<i32>, l: vec3<i32>) -> vec3<i32> {
-  if (is2d()) { return vec3<i32>(o.xy + l.xy, 0); }
+  if (is2d()) { return vec3<i32>(o.xy + l.xy, o.z); }
   return o + l;
 }
 

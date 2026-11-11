@@ -105,7 +105,7 @@ fn main(
   if (lix == 0u) {
     // Record grid: 3 workgroups per slot along x, by 3, by 5 (1 in 2D).
     let a = u32(P.amr.x);
-    let nx = 3u * a * a * select(a, 1u, is2d());
+    let nx = 3u * a * a * P.amr.w;   // 3 per slot
     let base = ((wid.z * 3u + wid.y) * nx + wid.x) * 2u;
     RATES[base] = bitcast<f32>(atomicLoad(&wg_max[0]));
     RATES[base + 1u] = bitcast<f32>(atomicLoad(&wg_max[1]));

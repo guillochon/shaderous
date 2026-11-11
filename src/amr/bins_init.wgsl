@@ -19,7 +19,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var k = KMAX;
   if (blk_leaf(slot) && clock.dt > 0.0) {
     let a = P.amr.x;
-    let nx = 3u * a * a * select(a, 1u, is2d());
+    let nx = 3u * a * a * P.amr.w;   // 3 per slot
     let nz = select(5u, 1u, is2d());
     var rate = 0.0;
     var g = 0.0;
