@@ -825,14 +825,24 @@ export class AmrSim implements Simulation {
           rho[(k * m + j) * m + i] = w.rho;
           pr[(k * m + j) * m + i] = w.p;
         }
+    // The normalized second derivative of amr/flag.wgsl, at the finest spacing sampled.
     let ind = 0;
-    const jump = (q: Float64Array, a: number, s: number) => Math.abs(q[a + s] - q[a - s]) / (q[a + s] + q[a - s]);
+    const strides = three ? [sub, sub * m, sub * m * m] : [sub, sub * m];
+    const lohner = (q: Float64Array, a: number) => {
+      let num = 0;
+      let den = 0;
+      for (const s of strides) {
+        const [qp, q0, qm] = [q[a + s], q[a], q[a - s]];
+        num += (qp - 2 * q0 + qm) ** 2;
+        den += (Math.abs(qp - q0) + Math.abs(q0 - qm) + 0.01 * (Math.abs(qp) + 2 * Math.abs(q0) + Math.abs(qm))) ** 2;
+      }
+      return den > 0 ? Math.sqrt(num / den) : 0;
+    };
     for (let k = three ? sub : 0; k < (three ? m - sub : 1); k++)
       for (let j = sub; j < m - sub; j++)
         for (let i = sub; i < m - sub; i++) {
           const a = (k * m + j) * m + i;
-          ind = Math.max(ind, jump(rho, a, sub), jump(pr, a, sub), jump(rho, a, sub * m), jump(pr, a, sub * m));
-          if (three) ind = Math.max(ind, jump(rho, a, sub * m * m), jump(pr, a, sub * m * m));
+          ind = Math.max(ind, lohner(rho, a), lohner(pr, a));
         }
     return ind;
   }

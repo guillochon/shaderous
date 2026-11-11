@@ -89,7 +89,10 @@ export interface SimConfig {
   dampRate: number;
   /** Start from a snapshot: its time, step count and point masses rather than the preset's. */
   restart?: Restart;
-  /** A block is split where its refinement indicator exceeds refineHi, merged below refineLo. */
+  /**
+   * A block is split where its refinement indicator (a normalized second derivative, between 0
+   * and 1: amr/flag.wgsl) exceeds refineHi, merged below refineLo.
+   */
   refineHi: number;
   refineLo: number;
   /** With self-gravity, refine where the Jeans length is under this many cells (0 = off). */
@@ -189,8 +192,9 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     amrBudget: 0,
     timeBins: 0,
     timeBinsAlways: false,
-    refineHi: 0.06,
-    refineLo: 0.025,
+    // FLASH's defaults for the same indicator.
+    refineHi: 0.8,
+    refineLo: 0.2,
     jeansRefine: 16,
     cooling: problem.cooling ?? 'off',
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
