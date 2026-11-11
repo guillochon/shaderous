@@ -1,9 +1,13 @@
 import { all, OUTFLOW_ONLY, type Problem } from './types';
 import { laneEmden, polytropeScales } from './lane_emden';
+import { ASTRO } from '../units/constants';
+import { COMPOSITIONS } from '../units/composition';
+import { codeG, gravityUnits } from '../units/units';
 
 // Tidal disruption: a polytropic star passed by a point mass on a parabolic orbit.
 //
-// Units: G = M_star = R_star = 1, so the star's dynamical time is 1. The star is an n = 3/2
+// Units: G = M_star = R_star = 1, so the star's dynamical time is 1. The star is the Sun:
+// one code unit is a solar radius, a solar mass, and sqrt(R_sun^3 / G M_sun) = 1593 s. The star is an n = 3/2
 // polytrope of gamma = 5/3 gas. The run is in the star's rest frame: the frame accelerates
 // with the gas's center of mass, so the star stays at the box center while the point mass
 // swings past. The orbit lies in the x-y plane with pericenter on the +x axis.
@@ -14,6 +18,8 @@ import { laneEmden, polytropeScales } from './lane_emden';
 // The boundaries let gas leave but not enter. Once debris starts to leave, the frame follows
 // the gas that is still in the box.
 export const TDE = { n: 1.5, M: 1, R: 1, G: 1, start: 3, rhoAmb: 1e-6, rhoCut: 1e-4, box: 8 };
+
+export const TDE_UNITS = gravityUnits('solar', TDE.R * ASTRO.Rsun, TDE.M * ASTRO.Msun);
 
 const star = laneEmden(TDE.n);
 export const TDE_STAR = { ...polytropeScales(star, TDE.M, TDE.R, TDE.G), theta: (s: number) => star.theta(s) };
@@ -52,7 +58,9 @@ export const tidalDisruption: Problem = {
   bcLo: all(OUTFLOW_ONLY),
   bcHi: all(OUTFLOW_ONLY),
   gravity: 'isolated',
-  G: TDE.G,
+  G: codeG(TDE_UNITS),
+  units: TDE_UNITS,
+  composition: COMPOSITIONS.solar,
   box: TDE.box,
   tEnd: Infinity,
   rhoFloor: 1e-10,

@@ -5,6 +5,8 @@ import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
+import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
+import type { DisplaySystem } from '../units/units';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
@@ -93,6 +95,7 @@ side.innerHTML = `
     <div class="g2">
       ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')), '', 'Volume renders the gas as a glowing fog seen through the box; Slice shows one plane of cells')}
       ${field('Field', select('field', FIELDS.map((f, i) => `<option value="${i}" title="${FIELD_TIPS[i]}">${f}</option>`).join('')), '', 'The quantity the colors show. Fields of either sign (velocity components, heating, vorticity, divergence) are shown on a linear scale centered on zero')}
+      ${field('Units', select('units', opt('cgs', 'cgs') + opt('si', 'SI') + opt('code', 'Code')), '', 'Units the readouts are shown in: the color bar, the query tool and the diagnostics. Only a setup that stands for something real (a star, say) has physical units; the others are in code units')}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), '', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', '', 'Where the slice cuts the box along its normal')}
     </div>
@@ -174,6 +177,7 @@ side.innerHTML = `
 // The color bar: the range at either end (editable), the opacity curve drawn on the bar, then
 // its settings.
 $('colorbar').innerHTML = `
+  <div id="cb-unit" class="cb-unit" title="Unit of the displayed field"></div>
   <input id="hi" class="cb-range" type="text" inputmode="decimal" spellcheck="false" title="Top of the displayed range" />
   <canvas id="tf" title="Color bar. In the volume view the line is the opacity: drag its points sideways, double-click to add or remove one"></canvas>
   <input id="lo" class="cb-range" type="text" inputmode="decimal" spellcheck="false" title="Bottom of the displayed range" />
@@ -506,6 +510,30 @@ let sim: Simulation | undefined;
 let renderer: Renderer;
 let cfg: SimConfig;
 const view: ViewState = defaultView();
+/** System the readouts are shown in, for a problem with physical units. */
+let unitSys: DisplaySystem = (() => {
+  try {
+    const v = localStorage.getItem('shaderous.units');
+    return v === 'si' || v === 'code' ? v : 'cgs';
+  } catch {
+    return 'cgs';
+  }
+})();
+/** How the current run's values are shown. */
+const units = (): Readout => readout(cfg.problem.units, cfg.problem.composition, unitSys);
+/** What the field on view measures. */
+const viewMeasure = (): Measure => fieldMeasure(view.field, cfg.eosParams.gamma);
+
+/** The ends of the color bar, and its unit, in the displayed units. */
+function showRange() {
+  const u = units();
+  const m = viewMeasure();
+  const k = u.scale(m);
+  const a = document.activeElement;
+  if (a !== $('lo')) setValue($<HTMLInputElement>('lo'), num(view.lo * k));
+  if (a !== $('hi')) setValue($<HTMLInputElement>('hi'), num(view.hi * k));
+  $('cb-unit').textContent = u.label(m);
+}
 let running = true;
 /** Whether a run starts playing by itself when it loads or replays (remembered in this browser). */
 let autoplay = true;
@@ -624,7 +652,12 @@ function syncControls() {
   for (const o of fieldSel.options) o.disabled = noField(+o.value);
   if (noField(view.field)) view.field = 0;
   $<HTMLInputElement>('log').disabled = LINEAR_FIELDS.has(view.field);
-  $('sum-view').textContent = FIELDS[view.field];
+  const unitSel = $<HTMLSelectElement>('units');
+  unitSel.value = cfg.problem.units ? unitSys : 'code';
+  unitSel.disabled = !cfg.problem.units;
+  const unitLabel = units().label(viewMeasure());
+  $('sum-view').textContent = unitLabel ? `${FIELDS[view.field]}, ${unitLabel}` : FIELDS[view.field];
+  showRange();
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
   const uniform = cfg.gext.some((g) => g !== 0);
   $('sum-grav').textContent = [cfg.gravity === 'off' ? '' : cfg.gravity, uniform ? 'uniform field' : ''].filter(Boolean).join(' + ') || 'off';
@@ -1229,6 +1262,16 @@ function bind() {
       });
     }
   }
+  on('units', (el) => {
+    unitSys = el.value as DisplaySystem;
+    try {
+      localStorage.setItem('shaderous.units', unitSys);
+    } catch {
+      // Not remembered; the choice still holds for this page.
+    }
+    syncControls();
+    if (diagOf) showDiagUnits();
+  });
   on('field', (el) => {
     view.field = +el.value;
     // A density gradient spans decades (shocks against smooth flow), so it reads best on a log
@@ -1251,8 +1294,9 @@ function bind() {
   });
   const manual = () => {
     $<HTMLInputElement>('auto').checked = false;
-    view.lo = numOr($<HTMLInputElement>('lo'), view.lo);
-    view.hi = numOr($<HTMLInputElement>('hi'), view.hi);
+    const k = units().scale(viewMeasure());
+    view.lo = numOr($<HTMLInputElement>('lo'), view.lo * k) / k;
+    view.hi = numOr($<HTMLInputElement>('hi'), view.hi * k) / k;
   };
   on('lo', manual);
   on('hi', manual);
@@ -1536,7 +1580,11 @@ async function runQuery() {
 
 function showCell(c: CellProbe, x: number, y: number) {
   const dims = cfg.ndim;
-  const vec = (v: number[]) => `(${v.slice(0, dims).map((a) => fmt3(a)).join(', ')})`;
+  const u = units();
+  const vec = (v: number[], m: Measure) => {
+    const l = u.label(m);
+    return `(${v.slice(0, dims).map((a) => fmt3(a * u.scale(m))).join(', ')})${l ? ` ${l}` : ''}`;
+  };
   const eos = makeEos(cfg.eos, cfg.eosParams);
   const rho = c.u1[0];
   const vel = [c.u1[1] / rho, c.u1[2] / rho, c.u1[3] / rho];
@@ -1545,8 +1593,8 @@ function showCell(c: CellProbe, x: number, y: number) {
   const cs = eos.soundSpeed(rho, p);
   const speed = Math.hypot(...vel.slice(0, dims));
   const rows: [string, string, string?][] = [
-    ['Position', vec(c.pos)],
-    ['Cell size', fmt3(c.dx)],
+    ['Position', vec(c.pos, 'length')],
+    ['Cell size', u.fmt(c.dx, 'length')],
   ];
   if (c.block) {
     const b = c.block;
@@ -1556,15 +1604,15 @@ function showCell(c: CellProbe, x: number, y: number) {
   }
   if (c.u2[3] > 0.5) rows.push(['Obstacle', 'solid cell; gas held for later', 'solid']);
   rows.push(
-    ['Density', fmt3(rho)],
-    ['Velocity', vec(vel)],
-    ['Speed', fmt3(speed)],
+    ['Density', u.fmt(rho, 'density')],
+    ['Velocity', vec(vel, 'velocity')],
+    ['Speed', u.fmt(speed, 'velocity')],
     ['Mach number', fmt3(cs > 0 ? speed / cs : 0)],
-    ['Pressure', fmt3(p)],
-    ['Temperature', fmt3(eos.temperature(rho, eint))],
-    ['Sound speed', fmt3(cs)],
-    ['Internal energy', `${fmt3(eint / rho)} per mass`],
-    ['Total energy', `${fmt3(c.u2[0])} per volume`],
+    ['Pressure', u.fmt(p, 'pressure')],
+    ['Temperature', u.fmt(eos.temperature(rho, eint), 'temperature')],
+    ['Sound speed', u.fmt(cs, 'velocity')],
+    ['Internal energy', u.label('specificEnergy') ? u.fmt(eint / rho, 'specificEnergy') : `${fmt3(eint / rho)} per mass`],
+    ['Total energy', u.label('pressure') ? u.fmt(c.u2[0], 'pressure') : `${fmt3(c.u2[0])} per volume`],
     ['Scalar', fmt3(c.u2[2] / rho)],
   );
   cellPop.querySelector('.title')!.textContent = `Cell (${c.index.join(', ')})`;
@@ -2005,9 +2053,7 @@ function updateRange(d: Diagnostics) {
   }
   view.lo = lo;
   view.hi = hi;
-  const a = document.activeElement;
-  if (a !== $('lo')) setValue($<HTMLInputElement>('lo'), num(lo));
-  if (a !== $('hi')) setValue($<HTMLInputElement>('hi'), num(hi));
+  showRange();
 }
 
 // The live readouts are written into text nodes created once, inside fixed-size boxes with
@@ -2034,6 +2080,8 @@ const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['p x', 'Total x momentum', 'p_x'], ['p y', 'Total y momentum', 'p_y'], ['p z', 'Total z momentum', 'p_z'],
   ['E kin', 'Kinetic energy', 'e_kin'], ['E int', 'Internal energy', 'e_int'], ['E grav', 'Gravitational energy', 'e_grav'], ['E tot', 'Total energy', 'e_tot'],
 ];
+/** What each diagnostic measures, in DIAG_ROWS order. */
+const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy'];
 /** The diagnostics in DIAG_ROWS order. */
 const diagValues = (d: Diagnostics): number[] => [
   d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot,
@@ -2059,8 +2107,19 @@ const diagCells = DIAG_ROWS.map(([label, title], i) => {
     el.addEventListener('pointerenter', () => showDiagPlot(i, dd));
     el.addEventListener('pointerleave', () => hideDiagPlot());
   }
-  return { dd, spark, set: liveText(dd), warn: false };
+  return { dt, dd, spark, set: liveText(dd), warn: false };
 });
+/** Put the unit of each diagnostic in its tooltip, and show the latest values in the current units. */
+function showDiagUnits() {
+  const u = units();
+  diagCells.forEach((cell, i) => {
+    const l = u.label(DIAG_MEASURES[i]);
+    cell.dt.title = l ? `${DIAG_ROWS[i][1]}, in ${l}` : DIAG_ROWS[i][1];
+  });
+  const rows = diagHistory.rows;
+  if (rows.length) rows[rows.length - 1].forEach((v, i) => diagCells[i].set(fmt3(v * u.scale(DIAG_MEASURES[i]), DIAG_ROWS[i][3])));
+  drawDiagPlot();
+}
 const setHud = liveText(hud);
 
 /** The popup with row i's whole run, beside its number. */
@@ -2091,23 +2150,29 @@ function drawDiagPlot() {
   if (diagHover < 0) return;
   const [label, title, , count] = DIAG_ROWS[diagHover];
   const rows = diagHistory.rows;
-  const now = rows.length ? fmt3(rows[rows.length - 1][diagHover], count) : '';
-  diagPopTitle.textContent = `${title} (${label})${now ? ` · ${now}` : ''}`;
+  const u = units();
+  const m = DIAG_MEASURES[diagHover];
+  const k = u.scale(m);
+  const l = u.label(m);
+  const now = rows.length ? fmt3(rows[rows.length - 1][diagHover] * k, count) : '';
+  diagPopTitle.textContent = `${title} (${label})${now ? ` · ${now}${l ? ` ${l}` : ''}` : ''}`;
   const [xs, ys] = diagHistory.all(diagHover);
-  drawFull(diagPopCanvas, xs, ys, !!count);
+  drawFull(diagPopCanvas, xs, k === 1 ? ys : ys.map((y) => y * k), !!count);
 }
 
 function showDiagnostics(d: Diagnostics, of: Simulation) {
   if (of !== diagOf) {
     diagHistory.clear();
     diagOf = of;
+    showDiagUnits();
   }
+  const u = units();
   const values = diagValues(d);
   diagHistory.push(values);
   const warns = [false, false, false, false, false, d.floored > 0, d.jeansUnresolved > 0 && !cfg.jeansFloor];
   values.forEach((v, i) => {
     const cell = diagCells[i];
-    cell.set(fmt3(v, DIAG_ROWS[i][3]));
+    cell.set(fmt3(v * u.scale(DIAG_MEASURES[i]), DIAG_ROWS[i][3]));
     const warn = warns[i] ?? false;
     if (warn !== cell.warn) {
       cell.warn = warn;

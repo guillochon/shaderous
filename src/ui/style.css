@@ -85,6 +85,11 @@ details[open] > summary .sum { display: none; }
   display: block; width: 100%; height: 17px; padding: 0 2px; font-size: 11px; text-align: center;
   font-variant-numeric: tabular-nums; background: rgba(13, 15, 20, 0.7); border-color: transparent; border-radius: 3px;
 }
+#colorbar .cb-unit {
+  min-height: 13px; font-size: 10px; line-height: 13px; text-align: center; color: #aab3c5;
+  overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+}
+#colorbar .cb-unit:empty { display: none; }
 #colorbar .cb-range:hover, #colorbar .cb-range:focus { border-color: var(--accent); outline: none; }
 .cb-checks {
   display: flex; flex-direction: column; gap: 1px; margin-top: 2px; padding: 2px 4px;
