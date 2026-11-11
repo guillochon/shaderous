@@ -326,7 +326,7 @@ export class AmrSim implements Simulation {
       [sim.cap * 3, 3, cfg.ndim === 2 ? 1 : 5], // one record per workgroup of the assembly pass
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
-    sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
+    sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl'), 'amr flag');
     sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 30: sim.bt, 31: sim.listLeaf });
     // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
@@ -510,7 +510,7 @@ export class AmrSim implements Simulation {
         bindGroup(d, this.pMassFieldB!, { 0: this.params, 1: v(this.dummyPhi), 3: v(this.gfield), 4: this.bh, 5: this.clock, 6: v(this.dummyPhi), 29: A, 30: this.bt, 31: list }),
       );
     }
-    this.gSetDt = bindGroup(d, this.pSetDt, { 0: this.params, 1: this.redDt.result, 2: this.clock });
+    this.gSetDt = bindGroup(d, this.pSetDt, { 0: this.params, 1: this.redDt.result, 2: this.clock, 3: this.bh });
     this.gBinsInit = bindGroup(d, this.pBinsInit, { 0: this.params, 1: this.clock, 2: this.redDt.first, 3: A, 30: this.bt, 31: this.listAll });
     this.gBinsDilate = bindGroup(d, this.pBinsDilate, { 0: this.params, 1: A, 2: B, 30: this.bt, 31: this.listAll });
     this.gBinsRelax = [

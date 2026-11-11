@@ -19,6 +19,7 @@ import { tidalDisruption, tdeOrbit, TDE_STAR } from '../problems/tidal_disruptio
 import { sphere, spherePotential } from '../problems/sphere';
 import { all, PERIODIC, REFLECT, type Problem } from '../problems/types';
 import { binary } from '../problems/binary';
+import { thermalInstability } from '../problems/thermal_instability';
 import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
 
@@ -1023,6 +1024,153 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'viscosity',
+    name: 'Viscosity: shear waves decay at nu k^2, walls hold the gas, energy is conserved',
+    criterion:
+      'The kinetic energy of a shear wave falls as exp(-2 nu k^2 t) to 1% along an axis and along the diagonal (2D, 3D and on a block grid) and to 3% between two no-slip walls (uniform grid, and refined at the walls); total energy is conserved to 1e-6 throughout (1e-5 where refined); Kelvin-Helmholtz with viscosity and conduction on a mesh that refines and coarsens, with per-block timesteps, conserves mass to 1e-6 and energy to 1e-5',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const nu = 0.01;
+      const A = 0.05;
+      const k0 = 2 * Math.PI;
+      // A wave of wavevector k0 (kx, ky, 0) whose velocity, along `dir`, is perpendicular to it.
+      const shear = (kx: number, ky: number, dir: number[]) =>
+        stillGas({
+          id: 'shear-wave',
+          init: () => (x, y) => {
+            const s = A * Math.sin(k0 * (kx * x + ky * y));
+            return { rho: 1, vx: s * dir[0], vy: s * dir[1], vz: s * dir[2], p: 1, s: 0 };
+          },
+        });
+      const decay = async (tag: string, sim: Sim | AmrSim, k2: number, tol: number, etol = 1e-6) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        const expected = Math.exp(-2 * nu * k2 * sim.cfg.tEnd);
+        metrics[`${tag}_decay_error`] = Math.abs(d1.eKin / d0.eKin / expected - 1);
+        metrics[`${tag}_energy_drift`] = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        pass &&= metrics[`${tag}_decay_error`] < tol && metrics[`${tag}_energy_drift`] < etol;
+      };
+      const r = Math.SQRT1_2;
+      const on = { viscosity: nu };
+      await withSim(gpu, shear(1, 0, [0, 1, 0]), 64, { ndim: 2, tEnd: 1.2, ...on }, (sim) => decay('axis', sim, k0 * k0, 0.01));
+      await withSim(gpu, shear(1, 1, [-r, r, 0]), 64, { ndim: 2, tEnd: 0.6, ...on }, (sim) => decay('diagonal', sim, 2 * k0 * k0, 0.01));
+      await withSim(gpu, shear(1, 1, [0, 0, 1]), 32, { tEnd: 0.6, ...on }, (sim) => decay('out_of_plane_3d', sim, 2 * k0 * k0, 0.01));
+      // Blocks of 16 cells, none refined: every block face has the rim rows of amr/update.wgsl.
+      await withAmr(gpu, shear(1, 1, [-r, r, 0]), 128, { ndim: 2, amrLevels: 1, tEnd: 0.6, ...on }, (sim) => decay('diagonal_blocks', sim, 2 * k0 * k0, 0.01));
+      await withAmr(gpu, shear(1, 1, [-r, r, 0]), 64, { amrLevels: 1, tEnd: 0.3, ...on }, (sim) => decay('diagonal_blocks_3d', sim, 2 * k0 * k0, 0.01));
+
+      // Between two walls half a box apart the mode that vanishes on both has the same k0.
+      // (Density and pressure off a power of two: on one, float32 round-off is biased, and
+      // over the thousands of steps of the refined run the drift would show.)
+      const channel = stillGas({
+        id: 'channel',
+        init: () => (_x, y) => (Math.abs(y) > 0.25 ? { rho: 1.3, vx: 0, vy: 0, vz: 0, p: 1.3, s: 0, solid: true } : { rho: 1.3, vx: A * Math.cos(k0 * y), vy: 0, vz: 0, p: 1.3, s: 0 }),
+      });
+      await withSim(gpu, channel, 64, { ndim: 2, tEnd: 1.2, ...on }, (sim) => decay('walls', sim, k0 * k0, 0.03));
+      // Blocks an eighth of the box tall: those along the walls are refined, the rest are not.
+      await withAmr(gpu, channel, 256, { ndim: 2, amrLevels: 1, tEnd: 0.6, ...on }, async (sim) => {
+        await decay('walls_refined', sim, k0 * k0, 0.03, 1e-5);
+        metrics.walls_refined_fraction_of_uniform_cells = sim.tree.stats().cells / 256 ** 2;
+        pass &&= metrics.walls_refined_fraction_of_uniform_cells < 1;
+      });
+
+      // Conservation where fluxes are matched between levels and between timesteps.
+      await withAmr(gpu, kelvinHelmholtz, 256, { ndim: 2, amrLevels: 2, tEnd: 1.5, viscosity: 2e-4, conductivity: 2e-4, timeBins: 2, timeBinsAlways: true }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        metrics.refined_mass_drift = Math.abs(d1.mass - d0.mass) / d0.mass;
+        metrics.refined_energy_drift = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        metrics.refined_momentum_drift = Math.hypot(d1.momentum[0] - d0.momentum[0], d1.momentum[1] - d0.momentum[1]);
+        metrics.refined_regrids = sim.regrids;
+        metrics.refined_fraction_of_uniform_cells = sim.tree.stats().cells / 256 ** 2;
+        pass &&= metrics.refined_mass_drift < 1e-6 && metrics.refined_energy_drift < 1e-5 && metrics.refined_momentum_drift < 1e-5 && sim.regrids >= 2 && metrics.refined_fraction_of_uniform_cells < 1;
+      });
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'conduction',
+    name: 'Thermal conduction: a temperature wave at constant pressure decays at kappa k^2 (gamma - 1) / gamma',
+    criterion:
+      'A 1% temperature wave in pressure balance keeps its shape and falls as exp(-kappa k^2 (gamma - 1) t / gamma) to 1% (uniform grid and block grid), with total energy conserved to 1e-6; in the thermal instability at t = 0.6 the scale of the structure changes by less than 12% from 512^2 to 1024^2 cells with the preset\'s conduction, and by more than 15% without',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const kappa = 0.02;
+      const gamma = 5 / 3;
+      const a = 0.01;
+      const k = 2 * Math.PI;
+      const rate = (kappa * k * k * (gamma - 1)) / gamma;
+      // T = 1 + a cos(k x) at p = 1. As the wave fades the gas flows towards where it was hot;
+      // starting with that velocity leaves no sound wave behind.
+      const wave = stillGas({
+        id: 'temperature-wave', tEnd: 2,
+        init: () => (x) => ({ rho: 1 / (1 + a * Math.cos(k * x)), vx: (-rate * a * Math.sin(k * x)) / k, vy: 0, vz: 0, p: 1, s: 0 }),
+      });
+      // Amplitude of the wave in 1 / rho, which is T at constant pressure.
+      const amplitude = (rho: (q: number) => number, x: (q: number) => number, count: number) => {
+        let s = 0;
+        for (let q = 0; q < count; q++) s += (1 / rho(q) - 1) * Math.cos(k * x(q));
+        return (2 * s) / count;
+      };
+      const check = async (tag: string, sim: Sim | AmrSim, amp: () => Promise<number>) => {
+        const d0 = await sim.diagnostics();
+        const a0 = await amp();
+        await sim.runToEnd();
+        const d1 = await sim.diagnostics();
+        metrics[`${tag}_decay_error`] = Math.abs((await amp()) / a0 / Math.exp(-rate * sim.cfg.tEnd) - 1);
+        metrics[`${tag}_energy_drift`] = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        pass &&= metrics[`${tag}_decay_error`] < 0.01 && metrics[`${tag}_energy_drift`] < 1e-6;
+      };
+      await withSim(gpu, wave, 64, { ndim: 2, conductivity: kappa }, (sim) =>
+        check('uniform', sim, async () => {
+          const { u1 } = await sim.readState();
+          return amplitude((q) => u1[4 * q], (q) => ((q % 64) + 0.5) / 64 - 0.5, 64 * 64);
+        }));
+      await withAmr(gpu, wave, 128, { ndim: 2, amrLevels: 1, conductivity: kappa }, (sim) =>
+        check('blocks', sim, async () => {
+          const c = await sim.readLeaves();
+          return amplitude((q) => c.u1[4 * q], (q) => c.x[q], c.count);
+        }));
+
+      // Thermal instability: conduction, not the grid, sets the size of the clouds. The scale
+      // is the wavelength 2 pi sqrt(<d^2> / <|grad d|^2>) of d = ln(rho) less its mean, as a
+      // fraction of the box.
+      const scale = (n: number, conductivity: number) =>
+        withSim(gpu, thermalInstability, n, { ndim: 2, tEnd: 0.6, conductivity }, async (sim) => {
+          await sim.runToEnd(64);
+          const { u1 } = await sim.readState();
+          const ln = new Float64Array(n * n);
+          let mean = 0;
+          for (let q = 0; q < n * n; q++) mean += ln[q] = Math.log(u1[4 * q]);
+          mean /= n * n;
+          let s2 = 0;
+          let g2 = 0;
+          for (let j = 0; j < n; j++) {
+            for (let i = 0; i < n; i++) {
+              const d = ln[j * n + i];
+              s2 += (d - mean) ** 2;
+              g2 += ((ln[j * n + ((i + 1) % n)] - d) ** 2 + (ln[((j + 1) % n) * n + i] - d) ** 2) * n * n;
+            }
+          }
+          return 2 * Math.PI * Math.sqrt(s2 / g2);
+        });
+      const kappaTi = thermalInstability.conductivity ?? 0;
+      const change = async (tag: string, conductivity: number) => {
+        const coarse = await scale(512, conductivity);
+        const fine = await scale(1024, conductivity);
+        metrics[`clouds_${tag}_scale_512`] = coarse;
+        metrics[`clouds_${tag}_scale_1024`] = fine;
+        return (metrics[`clouds_${tag}_change`] = Math.abs(fine / coarse - 1));
+      };
+      pass &&= kappaTi > 0 && (await change('conducting', kappaTi)) < 0.12 && (await change('plain', 0)) > 0.15;
+      return { pass, metrics };
+    },
+  },
+  {
     id: 'point-mass-sink',
     name: 'Point masses: the sink takes exactly what the gas loses',
     criterion:
@@ -1093,6 +1241,61 @@ export const TESTS: TestDef[] = [
         return {
           pass: worst < 0.005 && back < 0.03 && mom < 1e-4 && accreted > 0 && (await adaptiveBinary(gpu, period)) < 0.005,
           metrics: { separation_max_deviation: worst, return_offset: back, binary_momentum: mom, least_accreted: accreted, softening: soft, steps },
+        };
+      });
+    },
+  },
+  {
+    id: 'point-mass-encounter',
+    name: 'Point masses: the timestep follows a close encounter',
+    criterion:
+      'Two masses on an orbit of eccentricity 0.9 in near-empty gas, whose own timestep is several times the pericentre passage: over two periods the mean step of each 96th of a period stays within a sixteenth of the CFL number times the lesser of r / v and sqrt(r^3 / G M) (to 10%), and the energy of the orbit is conserved to 1%',
+    async run(gpu) {
+      const ecc = 0.9;
+      const soft = 0.02;
+      const far = 1 + ecc;
+      // Apocentre of a Kepler orbit with G M = 1 and semi-major axis 1.
+      const v = Math.sqrt((1 - ecc) / (1 + ecc));
+      const pair = stillGas({
+        id: 'encounter', box: 8, tEnd: 0,
+        bcLo: all(1), bcHi: all(1),
+        init: () => () => ({ rho: 1e-6, vx: 0, vy: 0, vz: 0, p: 1e-6, s: 0 }),
+        masses: () => [
+          { gm: 0.5, pos: [-far / 2, 0, 0], vel: [0, -v / 2, 0], soft, sinkRadius: 0 },
+          { gm: 0.5, pos: [far / 2, 0, 0], vel: [0, v / 2, 0], soft, sinkRadius: 0 },
+        ],
+      });
+      return withSim(gpu, pair, 32, { ndim: 2 }, async (sim) => {
+        const orbit = (m: { pos: number[]; vel: number[] }[]) => {
+          const r = Math.hypot(m[0].pos[0] - m[1].pos[0], m[0].pos[1] - m[1].pos[1], soft);
+          const u = Math.hypot(m[0].vel[0] - m[1].vel[0], m[0].vel[1] - m[1].vel[1]);
+          return { r, u, e: 0.5 * u * u - 1 / r };
+        };
+        const e0 = orbit((await sim.diagnostics()).masses).e;
+        let worst = 0;
+        let over = 0;
+        let closest = Infinity;
+        let least = Infinity;
+        let steps = 0;
+        let before = orbit((await sim.diagnostics()).masses);
+        const chunks = 96;
+        for (let i = 1; i <= 2 * chunks; i++) {
+          sim.cfg.tEnd = (2 * Math.PI * i) / chunks;
+          sim.writeParams();
+          const taken = await sim.runToEnd();
+          const now = orbit((await sim.diagnostics()).masses);
+          worst = Math.max(worst, Math.abs(now.e / e0 - 1));
+          // The mean step of the chunk against the limit at its ends, whichever is the looser.
+          const limit = (o: { r: number; u: number }) => 0.0625 * sim.cfg.cfl * Math.min(o.r / o.u, Math.sqrt(o.r ** 3));
+          over = Math.max(over, (2 * Math.PI) / chunks / (taken - steps) / Math.max(limit(before), limit(now)));
+          steps = taken;
+          closest = Math.min(closest, now.r);
+          least = Math.min(least, limit(now));
+          before = now;
+        }
+        return {
+          pass: worst < 0.01 && over < 1.1 && closest < 0.25,
+          metrics: { orbit_energy_error: worst, mean_step_over_limit: over, closest_separation_seen: closest, least_limit: least, steps },
         };
       });
     },

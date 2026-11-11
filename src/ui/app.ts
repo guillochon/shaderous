@@ -4,7 +4,7 @@ import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } fr
 import { initGpu, type Gpu } from '../gpu/device';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
-import { configFor, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { EOS_LABELS, type EosKind } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
@@ -102,6 +102,14 @@ side.innerHTML = `
       ${field('Heating rate', number('cheat', 'min="0"', 2), 'row-cheat')}
       ${field('Kelvin per unit T', number('ctunit', 'min="0"', 2), 'row-ctunit')}
       ${field('Temperature floor', number('ctfloor', 'min="0"', 2), 'row-ctfloor')}
+    </div>
+  </details>
+
+  <details>
+    <summary>Diffusion<span class="sum" id="sum-diff"></span></summary>
+    <div class="g2">
+      ${field('Viscosity \u03bd', number('visc', 'min="0" title="Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off."', 2))}
+      ${field('Conductivity \u03ba', number('cond', 'min="0" title="The heat flux is -\u03ba \u03c1 grad T: the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off."', 2))}
     </div>
   </details>
 
@@ -554,6 +562,11 @@ function syncControls() {
     $<HTMLInputElement>(id).value = String(cfg.coolParams[key]);
     $(`row-${id}`).style.display = shown ? '' : 'none';
   }
+  // Conduction moves heat, which a barotropic gas does not carry.
+  $<HTMLInputElement>('visc').value = String(cfg.viscosity);
+  $<HTMLInputElement>('cond').value = String(cfg.conductivity);
+  $<HTMLInputElement>('cond').disabled = !canCool;
+  $('sum-diff').textContent = [cfg.viscosity > 0 ? 'viscosity' : '', conducts(cfg) ? 'conduction' : ''].filter(Boolean).join(' + ') || 'off';
   $<HTMLSelectElement>('riemann').value = cfg.riemann;
   $<HTMLSelectElement>('limiter').value = cfg.limiter;
   $<HTMLInputElement>('cfl').value = String(cfg.cfl);
@@ -931,6 +944,17 @@ function bind() {
       applyParams();
     });
   }
+  // The diffusive fluxes are compiled in only while they are in use: switching one on or off
+  // rebuilds the passes, a new strength is only a parameter. The run carries on either way.
+  const diffusion = (set: (v: number) => void, el: HTMLInputElement, was: number) => {
+    const before = diffusionKey(cfg);
+    set(Math.max(0, numOr(el, was)));
+    if (diffusionKey(cfg) === before) applyParams();
+    else rebuildPipelines();
+    syncControls();
+  };
+  on('visc', (el) => diffusion((v) => (cfg.viscosity = v), el, cfg.viscosity));
+  on('cond', (el) => diffusion((v) => (cfg.conductivity = v), el, cfg.conductivity));
   on('riemann', (el) => {
     cfg.riemann = el.value as RiemannKind;
     rebuildPipelines();

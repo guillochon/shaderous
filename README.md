@@ -22,13 +22,21 @@ https://guillochon.github.io/shaderous/validate.html
 - **Tidal disruption:** a polytropic star passed by a point mass on a parabolic orbit, run in the
   star's rest frame. The frame accelerates with the gas's centre of mass, the point mass's orbit
   is integrated alongside the gas, and the boundaries let gas out but not in.
-- **Binary accretion:** two point masses on a Kepler orbit inside an isothermal disc. They clear
-  a cavity, draw streams across it and accrete from the discs that form around them.
+- **Binary accretion:** two point masses on a Kepler orbit inside an isothermal disc with a
+  constant kinematic viscosity (1e-3 in units of the binary's separation squared times its
+  orbital frequency: alpha = 0.1 at the binary's separation). They clear a cavity, draw
+  streams across it and accrete from the discs that form around them.
 - **Optically thin cooling and heating:** a power-law cooling function with uniform heating, or
   the interstellar curve of Koyama & Inutsuka (2002), chosen when the shaders are assembled
   and available to every preset whose equation of state has an energy. The thermal instability
   preset starts interstellar gas in unstable balance and lets it separate into cold clouds and
-  a warm medium.
+  a warm medium, with thermal conduction setting the size of the clouds.
+- **Viscosity and thermal conduction:** a constant kinematic viscosity with the full stress
+  tensor, and a conductivity per unit density (the heat flux is `-kappa rho grad T`), on the
+  uniform grid and the adaptive mesh. The binary's disc is viscous and the thermal
+  instability conducts; elsewhere both are off, and every preset can set them under
+  Diffusion (`nu` and `kappa` in a link). Conduction needs an equation of state with an
+  energy. Obstacles hold a viscous gas at their walls.
 - **2D or 3D:** presets that make sense in the plane (shock tubes, blasts, Kelvin-Helmholtz,
   Rayleigh-Taylor, advection) can run on an n x n grid up to 2048 squared. A 2D run is one periodic
   layer of the same 3D scheme, without self-gravity.
@@ -256,16 +264,52 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   momentum to the mass, so mass and momentum are conserved between the two (to 1e-7 in the
   validation test). The pull between two masses is softened by the larger of their two
   lengths. The frame is inertial unless the preset asks for the gas's rest frame, as the
-  tidal disruption does. The timestep is the gas's: nothing limits it for a close encounter
-  of two masses.
+  tidal disruption does. Each pair of masses also limits the timestep, to a sixteenth of the
+  CFL number times the lesser of `r / v` and `sqrt(r^3 / G M)` for their softened separation
+  and relative speed (a twentieth at the default CFL number: about 125 steps for a circular
+  orbit). The gas alone would step straight through a close encounter: two masses on an
+  orbit of eccentricity 0.9 in near-empty gas keep the orbit's energy to 0.7% over two
+  periods with the limit, and lose 94% of it without. The binary preset's gas already steps
+  more finely than its orbit asks for.
 - **Cooling** is applied to the internal energy at the end of the update, at fixed density,
   in up to 12 second-order substeps that each change the energy by at most a tenth. A substep
   that would cross thermal balance goes to the balance point instead, so a cooling time far
   below the timestep is stable and does not overshoot. The timestep is never shortened for
   cooling: a cell that cools faster than the substeps can follow loses at most 70% of its
   energy in a step. Temperature is `p / rho` in code units (the interstellar curve takes a
-  conversion to kelvin, and reads the density as atoms per cm^3). There is no conduction, so
-  the smallest clouds of the thermal instability are set by the grid.
+  conversion to kelvin, and reads the density as atoms per cm^3). Without conduction the
+  smallest clouds of the thermal instability are set by the grid and shrink as it is
+  refined: the scale of the structure at t = 0.6 falls by 20% from 512^2 to 1024^2 cells.
+  With the preset's conduction (`kappa` = 3e-4) it changes by 8%, for a quarter more steps
+  at 1024^2.
+- **Viscosity and conduction** are explicit fluxes added to each face's Riemann flux, from
+  the state at the start of the step: `-tau . n` and `-(tau . n) . v` for the stress
+  `tau = rho nu (grad v + its transpose - 2/3 div v)`, and `-kappa rho grad T` for the heat,
+  with `nu` and `kappa` constant (as Athena++ defines `nu_iso` and `kappa_iso`; an ideal
+  gas's temperature diffuses at `(gamma - 1) kappa`). Derivatives along a face's normal are
+  differences of its two cells, those across it the mean of the two cells' centred
+  differences, which reach the cells diagonally across from the one being updated. Being
+  part of the face flux, they inherit what holds for it: the two cells of a face compute the
+  same bits, and across refinement boundaries and between blocks on different timesteps both
+  sides use one flux, so momentum and energy stay conserved to round-off. On the adaptive
+  mesh the edge ghost cells such a difference would need on the rim of a block's face are
+  never filled; there both blocks take one-sided differences along the rim instead. What the
+  stress dissipates goes into the separately advected internal energy as the energy the
+  faces carry in, less what the cell's kinetic energy gains. An obstacle's face is a wall at
+  rest half a cell away that the gas sticks to and that passes no heat; the faces of the box
+  stay as they are for the gas (a reflecting one is a plane of symmetry, without shear
+  stress). The timestep counts diffusion as a signal speed of `2.5 d D / dx` beside the
+  gas's own, for `d` dimensions and the larger diffusivity `D` of `4/3 nu` and the thermal
+  one: it falls as `dx^2` where diffusion dominates, and per-block timesteps take that up
+  like any other signal. There is no implicit or super-stepped solve, so strong diffusion on
+  a fine mesh is slow. Which of the two are in use is compiled into the passes: switched off
+  they cost nothing, conduction alone adds no measurable time, and viscosity makes the flux
+  update 1.6 times as long in 2D and 1.8 times in 3D (its cross derivatives are 4 and 8 more
+  loads per face). Measured: the kinetic energy of a shear wave falls as
+  `exp(-2 nu k^2 t)` to 0.1% on 64 cells per wavelength (along an axis or the diagonal, on
+  the uniform grid and across block faces) and to 0.3% in 3D on 32; between two no-slip walls
+  to 0.05%; a temperature wave at constant pressure decays at `kappa k^2 (gamma - 1) / gamma`
+  to 0.3%.
 
 ## Licence
 

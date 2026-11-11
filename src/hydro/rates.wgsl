@@ -10,6 +10,7 @@
 #include <eos>
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
+#include "hydro/diff_rate.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -29,7 +30,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let u2 = textureLoad(U2, c, 0);
     let w = prim_from_cons(textureLoad(U1, c, 0), u2);
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
-    let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y;
+    let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(w.w1.x, w.w2.w);
     // Solid cells hold no gas to keep stable.
     if (u2.w <= 0.5) {
       atomicMax(&wg_max[blk], bitcast<u32>(rate));

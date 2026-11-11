@@ -9,12 +9,16 @@
 //                          its state is taken from, `face` is the true difference across a
 //                          reflecting face (and equals `seen` everywhere else)
 //   dphi_face(a, axis, k)  the plain difference, with no boundary involved, for flux_between
+// and, for viscosity (hydro/diffusion.wgsl), load_vel(c) and face_rim(a, axis, t).
 // Both form the difference from the same two values whichever cell asks, so the two cells
 // sharing a face still compute the same flux bit for bit.
 struct Side { rho: f32, v: vec3<f32>, p: f32, s: f32, cs: f32, eint: f32 }
-struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
+// `d` is the viscous part of the flux on its own, (momentum, energy), which a cell needs to
+// work out how much the viscosity heats it (hydro/diffusion.wgsl).
+struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32, d: vec4<f32> }
 
 #include <riemann>
+#include "hydro/diffusion.wgsl"
 
 // Cyclic rotation that puts the face normal in x, and its inverse.
 fn rot(v: vec3<f32>, axis: i32) -> vec3<f32> {
@@ -85,6 +89,9 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   var wp2 = load_q(c + 2 * e);
   var pm1 = load_pred(c - e);
   var pp1 = load_pred(c + e);
+  // The neighbours as they are (solid or not), for the diffusive fluxes.
+  let nm1 = wm1;
+  let np1 = wp1;
   // Potential steps between the five cells, lowest pair first: as the deviations see them,
   // and the true ones across this cell's two faces.
   var d = vec4<f32>(0.0);
@@ -111,8 +118,8 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
   let sp = edge_dn(w0, wp1, wp2, d.z, d.w, select(-t.y, t.y, d.z == t.y));
   return Faces(
-    face_flux(pm1, sm, p0, lo, axis),
-    face_flux(p0, hi, pp1, sp, axis),
+    add_diffusion(face_flux(pm1, sm, p0, lo, axis), c - e, e, axis, nm1, w0),
+    add_diffusion(face_flux(p0, hi, pp1, sp, axis), c, e, axis, w0, np1),
   );
 }
 
@@ -125,6 +132,8 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   var wrr = load_q(a + 2 * e);
   var pl = load_pred(a);
   var pr = load_pred(a + e);
+  let nl = wl;
+  let nr = wr;
   // Potential steps between the four cells, lowest pair first.
   var d = vec3<f32>(0.0);
   if (well_balanced()) {
@@ -162,11 +171,11 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   // reaches the wall from its own side.
   let sl = edge_up(wll, wl, wr, d.x, d.y, across * sides.x);
   let sr = edge_dn(wl, wr, wrr, d.y, d.z, across * sides.y);
-  return face_flux(pl, sl, pr, sr, axis);
+  return add_diffusion(face_flux(pl, sl, pr, sr, axis), a, e, axis, nl, nr);
 }
 
 fn flux_zero() -> Flux {
-  return Flux(0.0, vec3<f32>(0.0), 0.0, 0.0, 0.0, 0.0);
+  return Flux(0.0, vec3<f32>(0.0), 0.0, 0.0, 0.0, 0.0, vec4<f32>(0.0));
 }
 
 // Net inflow through a cell's faces, per unit dt/dx.
@@ -181,4 +190,14 @@ fn net_inflow(fx: Faces, fy: Faces, fz: Faces) -> Net {
     (fx.lo.s - fx.hi.s) + (fy.lo.s - fy.hi.s) + (fz.lo.s - fz.hi.s),
     (fx.lo.vn - fx.hi.vn) + (fy.lo.vn - fy.hi.vn) + (fz.lo.vn - fz.hi.vn),
   );
+}
+
+// The same, with the heat that viscosity leaves in the cell (whose velocity is v) added to the
+// internal energy's share.
+fn net_inflow_heated(fx: Faces, fy: Faces, fz: Faces, v: vec3<f32>) -> Net {
+  var net = net_inflow(fx, fy, fz);
+  if (VISCOSITY) {
+    net.ei += (visc_heat(fx.lo, v) - visc_heat(fx.hi, v)) + (visc_heat(fy.lo, v) - visc_heat(fy.hi, v)) + (visc_heat(fz.lo, v) - visc_heat(fz.hi, v));
+  }
+  return net;
 }
