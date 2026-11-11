@@ -26,7 +26,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let out = vec3<i32>(l < vec3<i32>(0)) + vec3<i32>(l >= vec3<i32>(BS));
   let nout = out.x + out.y + out.z;
   if (nout > 1) { return; }
-  let c = blk_origin(inv.slot) + l;
+  let c = atl(blk_origin(inv.slot), l);
   var g = vec3<f32>(0.0);
   let self_gravity = has_potential();
   if (nout == 0 && self_gravity) {

@@ -46,6 +46,21 @@ const stillGas = (over: Partial<Problem>): Problem => ({
   ...over,
 });
 
+/** The binary on a 2D adaptive mesh: largest deviation of the separation from 1 over one period. */
+async function adaptiveBinary(gpu: Gpu, period: number): Promise<number> {
+  return withAmr(gpu, binary, 256, { ndim: 2, amrLevels: 2, tEnd: 0 }, async (sim) => {
+    let worst = 0;
+    for (let i = 1; i <= 8; i++) {
+      sim.cfg.tEnd = (period * i) / 8;
+      sim.writeParams();
+      await sim.runToEnd();
+      const [a, b] = (await sim.diagnostics()).masses;
+      worst = Math.max(worst, Math.abs(Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) - 1));
+    }
+    return worst;
+  });
+}
+
 async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: Sim) => Promise<T>) {
   const sim = await Sim.create(gpu, configFor(problem, n, over));
   try {
@@ -856,7 +871,7 @@ export const TESTS: TestDef[] = [
     id: 'point-mass-sink',
     name: 'Point masses: the sink takes exactly what the gas loses',
     criterion:
-      'A softened mass at the centre of a closed box of gas accretes; gas mass plus accreted mass stays constant to 1e-5, G M grows by G times the accreted mass, and the mass stays at the centre (2D, 3D and adaptive 3D); the same holds for a mass added in mid-run',
+      'A softened mass at the centre of a closed box of gas accretes; gas mass plus accreted mass stays constant to 1e-5, G M grows by G times the accreted mass, and the mass stays at the centre (2D and 3D, uniform and adaptive); the same holds for a mass added in mid-run',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -891,10 +906,8 @@ export const TESTS: TestDef[] = [
       };
       await withSim(gpu, empty, 64, { ndim: 2 }, (sim) => placed('placed_flat', sim));
       await withAmr(gpu, empty, 64, { amrLevels: 1 }, (sim) => placed('placed_adaptive', sim));
-      // A 2D adaptive mesh has no field atlas to hold one.
-      await withAmr(gpu, empty, 64, { ndim: 2, amrLevels: 1 }, async (sim) => {
-        pass &&= !sim.addMass({ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0] });
-      });
+      await withAmr(gpu, empty, 64, { ndim: 2, amrLevels: 1 }, (sim) => placed('placed_flat_adaptive', sim));
+      await withAmr(gpu, box, 64, { ndim: 2, amrLevels: 1 }, (sim) => check('flat_adaptive', sim));
       return { pass, metrics };
     },
   },
@@ -923,7 +936,7 @@ export const TESTS: TestDef[] = [
         const mom = Math.hypot(...[0, 1].map((a) => last.masses[0].gm * last.masses[0].vel[a] + last.masses[1].gm * last.masses[1].vel[a]));
         const accreted = Math.min(last.masses[0].accreted, last.masses[1].accreted);
         return {
-          pass: worst < 0.005 && back < 0.03 && mom < 1e-4 && accreted > 0,
+          pass: worst < 0.005 && back < 0.03 && mom < 1e-4 && accreted > 0 && (await adaptiveBinary(gpu, period)) < 0.005,
           metrics: { separation_max_deviation: worst, return_offset: back, binary_momentum: mom, least_accreted: accreted, softening: soft, steps },
         };
       });

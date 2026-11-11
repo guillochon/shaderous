@@ -15,7 +15,7 @@ https://guillochon.github.io/shaderous/validate.html
   Rayleigh-Taylor preset.
 - **Point masses:** up to four, with Plummer-softened gravity on the gas and a sink around each
   that takes gas in. They pull on one another, feel the gas, and grow by what they accrete.
-  They work with or without self-gravity, in 2D and 3D (on the adaptive mesh in 3D only).
+  They work with or without self-gravity, in 2D and 3D, on the uniform grid and the adaptive mesh.
   Presets bring their own, and the sink tool places more: with its mass slider at zero it
   places a plain sink that stays put, and with a mass (a multiple of the gas in the box) a
   point mass, set moving by a drag. A preset without a gravitational constant gets G = 1.

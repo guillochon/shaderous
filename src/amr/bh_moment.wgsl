@@ -18,5 +18,6 @@ fn red_cell(c: vec3<i32>) -> Red {
   var u1 = textureLoad(U1, at, 0);
   if (!blk_leaf(slot) || abs(textureLoad(U2, at, 0).w) > 0.5) { u1 = vec4<f32>(0.0); }
   let dx = blk_dx(slot);
-  return bh_cell(u1, dx * dx * dx, blk_pos(slot, l), clock.dt);
+  // 2D quantities are per unit length along z.
+  return bh_cell(u1, select(dx * dx * dx, dx * dx, is2d()), blk_pos(slot, l), clock.dt);
 }

@@ -21,7 +21,7 @@ import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { AmrGravity } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark } from '../problems/types';
-import { completeMass, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
 /**
@@ -94,6 +94,9 @@ export class AmrSim implements Simulation {
   private gBhDrift?: GPUBindGroup;
   private gBhKick?: GPUBindGroup;
   private gBhEval?: GPUBindGroup;
+  /** 2D: the field pass for point masses alone (a 3D run uses its gravity solver's) */
+  private pMassField?: GPUComputePipeline;
+  private gMassField?: GPUBindGroup;
   private pCorrect!: GPUComputePipeline;
   private gCorrect: GPUBindGroup[] = [];
   private brush: GPUBuffer;
@@ -239,21 +242,30 @@ export class AmrSim implements Simulation {
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock });
     sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl'), 'amr flag');
     sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 30: sim.bt, 31: sim.listLeaf });
+    // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
+    sim.redBh = await Reducer.create(
+      d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', {},
+      [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock, 30: sim.bt })), 'amr point masses',
+    );
+    sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift');
+    sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
+    sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick');
+    sim.pBhEval = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 });
+    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
+    sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
+    sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
+    if (cfg.ndim === 2) {
+      // No self-gravity in 2D, so no solver: the field atlas holds the point masses alone.
+      // The potential bindings are never read (there is none), but the pass declares them.
+      sim.pMassField = await computePipeline(d, assemble('amr/gravity/field.wgsl'), 'amr point mass field');
+      sim.gMassField = bindGroup(d, sim.pMassField, {
+        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock, 30: sim.bt, 31: sim.listAll,
+      });
+    }
     if (cfg.ndim === 3) {
       // Self-gravity machinery is built for every 3D run, so gravity can be switched on later.
       const u1 = [0, 1].map((p) => v(sim.state[p][0]));
       sim.redMp = await Reducer.create(d, [sim.cap * BS, BS, BS], new Array(10).fill(SUM), 'amr/multipole.wgsl', {}, u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole');
-      sim.redBh = await Reducer.create(
-        d, [sim.cap * BS, BS, BS], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', {},
-        [0, 1].map((p) => ({ 0: sim.params, 1: u1[p], 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock, 30: sim.bt })), 'amr point masses',
-      );
-      sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift');
-      sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
-      sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick');
-      sim.pBhEval = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 });
-      const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
-      sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
-      sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
       sim.grav = await AmrGravity.create({
         device: d, slotsPerSide: sim.slotsPerSide, levels: sim.levels, params: sim.params, bt: sim.bt,
         listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
@@ -367,9 +379,19 @@ export class AmrSim implements Simulation {
   private get selfGravity(): boolean {
     return this.cfg.gravity !== 'off' && !!this.grav;
   }
-  /** Point masses use the field atlas, which only a 3D run has. */
   private get hasMasses(): boolean {
-    return this.nMasses > 0 && !!this.grav;
+    return this.nMasses > 0;
+  }
+
+  /** Acceleration and half-step potential for every block, into the field atlas. */
+  private encodeField(pass: GPUComputePassEncoder) {
+    if (this.grav) {
+      this.grav.encodeField(pass, this.nAll);
+    } else {
+      pass.setPipeline(this.pMassField!);
+      pass.setBindGroup(0, this.gMassField!);
+      this.padded(pass, this.nAll);
+    }
   }
   /** The gravity field atlas is in use: by self-gravity, point masses or both. */
   private get fieldOn(): boolean {
@@ -383,8 +405,8 @@ export class AmrSim implements Simulation {
    * is separate because the "previous potential" copy may have to happen in between.
    */
   private encodeSolve(pass: GPUComputePassEncoder, parity: number, cycles: number, perturber: 'none' | 'kick' | 'step', cold = false, together = false) {
-    const g = this.grav!;
     if (this.selfGravity) {
+      const g = this.grav!;
       g.encodeSource(pass, parity, this.nLevel, this.nLeaf);
       if (this.cfg.gravity === 'isolated') this.redMp!.encode(pass, parity);
       g.encodeSolve(pass, this.nLevel, this.nAll, cycles, cold, together);
@@ -405,16 +427,15 @@ export class AmrSim implements Simulation {
 
   /** Solve for the potential of the current state from scratch-ish, and rebuild the field. */
   private encodeFreshPotential(enc: GPUCommandEncoder, cycles: number, perturber: 'none' | 'kick', newBlocks: boolean) {
-    const g = this.grav!;
     let pass = enc.beginComputePass();
-    if (newBlocks && this.selfGravity) g.encodeNewBlocks(pass, this.nLeaf);
+    if (newBlocks && this.selfGravity) this.grav!.encodeNewBlocks(pass, this.nLeaf);
     // Without new blocks to seed this is a cold start: each level begins from the coarser one.
     this.encodeSolve(pass, this.cur, cycles, perturber, !newBlocks);
     pass.end();
     // No history on this mesh: the half-step extrapolation starts from the potential itself.
-    if (this.selfGravity) g.copyPhiToOld(enc);
+    if (this.selfGravity) this.grav!.copyPhiToOld(enc);
     pass = enc.beginComputePass();
-    g.encodeField(pass, this.nAll);
+    this.encodeField(pass);
     pass.end();
   }
 
@@ -669,11 +690,10 @@ export class AmrSim implements Simulation {
         // Keep the old potential, solve for that of the updated state (warm-started), move
         // the point masses, rebuild the field, and apply the second half kick (and the
         // masses' sinks) back into this parity.
-        const g = this.grav!;
-        if (this.selfGravity) g.copyPhiToOld(enc);
+        if (this.selfGravity) this.grav!.copyPhiToOld(enc);
         const gp = enc.beginComputePass();
         this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
-        g.encodeField(gp, this.nAll);
+        this.encodeField(gp);
         gp.setPipeline(this.pCorrect);
         gp.setBindGroup(0, this.gCorrect[p]);
         this.interior(gp, this.nLeaf);
@@ -760,9 +780,14 @@ export class AmrSim implements Simulation {
     this.writeParams();
   }
 
+  private massReader?: MassReader;
+  readMasses() {
+    this.massReader ??= new MassReader(this.device, this.bh);
+    return this.massReader.read(this.nMasses);
+  }
+
   addMass(m: Parameters<Simulation['addMass']>[0]): boolean {
-    // Point masses use the field atlas, which only a 3D run has.
-    if (!this.grav || this.nMasses >= MAX_MASSES) return false;
+    if (this.nMasses >= MAX_MASSES) return false;
     this.device.queue.writeBuffer(this.bh, 16 + 64 * this.nMasses, packMasses([completeMass(m, this.dx0)]), 4, 16);
     this.nMasses++;
     this.writeParams();
@@ -906,8 +931,7 @@ export class AmrSim implements Simulation {
     const full = this.tree.levelLimit < this.levels
       ? `, block budget limits refinement to ${this.tree.levelLimit} of ${this.levels} levels`
       : this.tree.freeSlots < this.tree.nchild ? ', budget full' : '';
-    const flat = this.nMasses > 0 && !this.grav ? ', point masses need a uniform grid in 2D (ignored here)' : '';
-    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${flat}`;
+    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}`;
   }
 
   /** Every leaf cell with its position and size (validation only; reads the whole atlas). */

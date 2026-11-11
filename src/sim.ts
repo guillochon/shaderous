@@ -90,6 +90,11 @@ export interface Simulation {
    * another, or this grid cannot hold point masses.
    */
   addMass(m: PointMass): boolean;
+  /**
+   * The point masses as they are now, or null if there are none or the last such read has not
+   * come back yet. Cheap enough to call every frame.
+   */
+  readMasses(): Promise<Required<PointMass>[] | null>;
   /** Remove the point masses added with addMass(), keeping the preset's. */
   removeAddedMasses(): void;
   /** Replace the sources and sinks (at most MAX_SOURCES; a reset removes them all). */
@@ -423,6 +428,33 @@ export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer,
   buf.unmap();
   buf.destroy();
   return { time: f[1], steps: f[3], masses: nMasses ? unpackMasses(f.subarray(4), nMasses) : undefined };
+}
+
+/**
+ * Reads the point masses back without ever waiting on the GPU, for drawing them every frame:
+ * a call made while the last one is still in flight returns null.
+ */
+export class MassReader {
+  private buf: GPUBuffer;
+  private busy = false;
+  constructor(private device: GPUDevice, private bh: GPUBuffer) {
+    this.buf = device.createBuffer({ size: MASS_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  }
+  async read(count: number): Promise<Required<PointMass>[] | null> {
+    if (this.busy || count === 0) return null;
+    this.busy = true;
+    const enc = this.device.createCommandEncoder();
+    enc.copyBufferToBuffer(this.bh, 0, this.buf, 0, MASS_FLOATS * 4);
+    this.device.queue.submit([enc.finish()]);
+    try {
+      await this.buf.mapAsync(GPUMapMode.READ);
+      const f = new Float32Array(this.buf.getMappedRange().slice(0));
+      this.buf.unmap();
+      return unpackMasses(f, count);
+    } finally {
+      this.busy = false;
+    }
+  }
 }
 
 export class Sim implements Simulation {
@@ -857,6 +889,12 @@ export class Sim implements Simulation {
     this.nSources = Math.min(list.length, MAX_SOURCES);
     this.device.queue.writeBuffer(this.sources, 0, packSources(list));
     this.writeParams();
+  }
+
+  private massReader?: MassReader;
+  readMasses() {
+    this.massReader ??= new MassReader(this.device, this.bh);
+    return this.massReader.read(this.nMasses);
   }
 
   addMass(m: PointMass): boolean {

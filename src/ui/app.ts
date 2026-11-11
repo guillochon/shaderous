@@ -201,6 +201,8 @@ TOOLS.push({
 });
 /** Point masses the sink tool has placed in this run (the simulation holds four in all). */
 let placedMasses = 0;
+/** The point masses as last read back, for their markers: refreshed every frame. */
+let liveMasses: { of: Simulation; list: Diagnostics['masses'] } | null = null;
 /** Why the last tool action did nothing, for the status line. */
 let toolNotice = '';
 const notice = (text: string) => {
@@ -1243,7 +1245,9 @@ function clearSources() {
 let marksDrawn = '';
 function drawSources() {
   let html = '';
-  const masses = lastDiag?.masses ?? [];
+  // Between resets and the first readback there is nothing to draw (lastDiag is cleared then).
+  const live = liveMasses && liveMasses.of === sim ? liveMasses.list : null;
+  const masses = (lastDiag && live ? live : lastDiag?.masses) ?? [];
   if ((sources.length || masses.length) && cfg) {
     const m = outlineMatrix();
     const at = (p: number[]) => {
@@ -1399,7 +1403,7 @@ function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass
     lastDiag = undefined;
     syncControls();
   }
-  notice(ok ? '' : two && cfg.amrLevels > 0 ? 'Point masses need a uniform grid in 2D' : `A run holds at most ${MAX_MASSES} point masses`);
+  notice(ok ? '' : `A run holds at most ${MAX_MASSES} point masses`);
 }
 
 /** Turn the stroke in progress into this frame's edit. Called once per frame. */
@@ -1653,6 +1657,16 @@ function tick(now: number) {
 
   if (lastFrameTime) fps = 0.9 * fps + 0.1 * (1000 / Math.max(now - lastFrameTime, 1));
   lastFrameTime = now;
+
+  // The masses move every step: their markers follow from a readback of their own, each frame.
+  if (sim) {
+    const of = sim;
+    of.readMasses().then((list) => {
+      if (of !== sim) return;
+      if (list) liveMasses = { of, list };
+      else if (!lastDiag?.masses.length) liveMasses = null;
+    });
+  }
 
   // Readouts refresh five times a second, whatever the display rate.
   frame++;
