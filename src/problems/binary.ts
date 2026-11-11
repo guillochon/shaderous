@@ -1,27 +1,27 @@
 import { all, OUTFLOW, type PointMass, type Problem } from './types';
 
-// Binary accretion: two point masses on a Kepler orbit inside a gas disc that orbits them both.
+// Binary accretion: two point masses on a Kepler orbit inside a gas disk that orbits them both.
 //
 // Units: G = 1, total mass 1, semi-major axis 1, so the binary's period is 2 pi. The gas is
 // globally isothermal with sound speed `cs` (Mach 10 at r = 1) and starts on circular orbits
 // outside a cavity of radius 2.5. The binary clears the cavity, pulls streams across it, and
 // each mass takes in what reaches its sink. The masses feel one another and the gas, in an
-// inertial frame; the disc is light, so the orbit barely changes.
+// inertial frame; the disk is light, so the orbit barely changes.
 //
-// The disc has a constant kinematic viscosity `nu`, in units of a^2 Omega_b: what carries gas
+// The disk has a constant kinematic viscosity `nu`, in units of a^2 Omega_b: what carries gas
 // inward to the cavity's edge. 1e-3 is alpha = 0.1 at r = 1 for this sound speed
 // (nu = alpha cs^2 / Omega).
 //
-// In 2D the density is the disc's surface density. In 3D the disc has a Gaussian vertical
+// In 2D the density is the disk's surface density. In 3D the disk has a Gaussian vertical
 // profile of scale height cs / Omega.
 export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3 };
 
-/** The two masses at pericentre, on the x axis, orbiting counter-clockwise about the origin. */
+/** The two masses at pericenter, on the x axis, orbiting counter-clockwise about the origin. */
 export function binaryMasses(q: number, ecc: number, soft: number): PointMass[] {
   const m1 = 1 / (1 + q);
   const m2 = q / (1 + q);
   const r = 1 - ecc;
-  // Pericentre speed of the Kepler orbit, lowered to match the softened pull between the two
+  // Pericenter speed of the Kepler orbit, lowered to match the softened pull between the two
   // (so that a circular orbit stays circular).
   const v = Math.sqrt((1 + ecc) / (1 - ecc)) * Math.pow((r * r) / (r * r + soft * soft), 0.75);
   return [
@@ -33,7 +33,7 @@ export function binaryMasses(q: number, ecc: number, soft: number): PointMass[] 
 export const binary: Problem = {
   id: 'binary',
   label: 'Binary accretion',
-  blurb: 'Two point masses orbiting inside a gas disc: they clear a cavity, draw streams across it and accrete.',
+  blurb: 'Two point masses orbiting inside a gas disk: they clear a cavity, draw streams across it and accrete.',
   eos: 'barotropic',
   eosParams: { gamma: 1, K: BINARY.cs ** 2 },
   bcLo: all(OUTFLOW),

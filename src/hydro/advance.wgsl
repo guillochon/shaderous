@@ -1,5 +1,5 @@
 // The conservative update of one cell from its net face fluxes, with the first gravity half
-// kick, dual-energy synchronisation and the tenuous-gas limits.
+// kick, dual-energy synchronization and the tenuous-gas limits.
 // Requires P, hydro/flux.wgsl (Net), hydro/dual_energy.wgsl, hydro/fluff.wgsl, g_dx and g_dt set.
 struct NewState { u1: vec4<f32>, u2: vec4<f32> }
 

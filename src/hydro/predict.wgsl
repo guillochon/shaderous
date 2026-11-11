@@ -30,7 +30,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let c = rc.c;
   g_inner = stencil_inside(c, 1);
   let q = load_q(c);
-  // In 2D the layer is its own neighbour along z.
+  // In 2D the layer is its own neighbor along z.
   var zm = q;
   var zp = q;
   if (P.dims.z != 1u) {

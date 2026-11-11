@@ -14,7 +14,7 @@
 //     invocations than they have cells, and those are not free.
 import { bindGroup, computePipeline, type Bindable } from '../gpu/device';
 
-const REACH = 2; // cells a stencil may extend from its centre
+const REACH = 2; // cells a stencil may extend from its center
 
 interface Dispatch {
   origin: number[]; // first cell

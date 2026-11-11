@@ -1,7 +1,7 @@
 // Primitives for every block, ghosts included, in one pass from the conserved state.
 //
 // Nothing is filled in place: each texel of W, interior or ghost, is computed from wherever
-// its value lives in U. That is the cell itself, a neighbouring block's cell, a boundary
+// its value lives in U. That is the cell itself, a neighboring block's cell, a boundary
 // image, the restriction of a finer block, or an interpolation from a coarser one. (WebGPU
 // cannot read and write one rgba32float texture in the same pass, so ghost zones cannot be
 // copied within a texture.)

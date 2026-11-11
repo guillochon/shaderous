@@ -3,8 +3,8 @@
 // recomputed from the primitives, which are themselves converted from the conserved state on
 // load (see hydro/recon.wgsl).
 //
-// The stencil is the cell and two neighbours each way along each axis (13 cells): face states
-// of a neighbour need that neighbour's slope along the face normal only.
+// The stencil is the cell and two neighbors each way along each axis (13 cells): face states
+// of a neighbor need that neighbor's slope along the face normal only.
 //
 // Conservation depends on the two cells sharing a face computing identical fluxes: a face is
 // the upper face of one cell and the lower face of the next, which are different call sites
@@ -56,7 +56,7 @@ fn load_vel(c: vec3<i32>) -> vec3<f32> {
   let u = textureLoad(U1, m.c, 0);
   return bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
 }
-// Also for viscosity: every cell has all its neighbours here (amr/update.wgsl is where not).
+// Also for viscosity: every cell has all its neighbors here (amr/update.wgsl is where not).
 fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
   return 0;
 }
@@ -91,7 +91,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);
 
-  // In 2D the single layer is its own neighbour along z: the two z fluxes are equal and cancel,
+  // In 2D the single layer is its own neighbor along z: the two z fluxes are equal and cancel,
   // so they are not computed (and no load leaves the layer, which keeps g_inner valid).
   let flat = P.dims.z == 1u;
   g_inner = stencil_inside(c, 2);

@@ -21,7 +21,7 @@ function blast(id: string, label: string, eos: EosKind, blurb: string): Problem 
     view: { field: 0, log: false, mode: 'slice' },
     supports2d: true,
     init: (n, e, ndim) => {
-      // Unit energy spread uniformly over the cells within 3.5 dx of the centre. In 2D this is
+      // Unit energy spread uniformly over the cells within 3.5 dx of the center. In 2D this is
       // energy per unit length along z: a cylindrical blast.
       const dx = 1 / n;
       const r0 = 3.5 * dx;

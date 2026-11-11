@@ -1,9 +1,9 @@
 // Fills the two ghost layers of the potential, in place (r32float can be read and written in
 // one pass). MODE selects which faces:
-//   0  faces whose neighbour is one level coarser: trilinear interpolation of the coarser
-//      level's potential to the ghost-cell centre. Run on a level before it is solved; these
+//   0  faces whose neighbor is one level coarser: trilinear interpolation of the coarser
+//      level's potential to the ghost-cell center. Run on a level before it is solved; these
 //      values are its boundary condition there.
-//   1  every other face, after all levels are solved: copies from same-level neighbours, and
+//   1  every other face, after all levels are solved: copies from same-level neighbors, and
 //      linear extrapolation at isolated domain boundaries (matching a one-sided gradient).
 // The hydro passes then difference the potential without knowing about block boundaries.
 #include "hydro/common.wgsl"
@@ -44,8 +44,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var gc = gf >> vec3<u32>(1u);
     gc = ((gc % nc) + nc) % nc;
     let lc = gc - blk_coord(cs) * BS;
-    // The ghost centre sits a quarter of a coarse cell off the centre of coarse cell lc, towards
-    // the neighbour given by the fine index's parity.
+    // The ghost center sits a quarter of a coarse cell off the center of coarse cell lc, toward
+    // the neighbor given by the fine index's parity.
     let d = 2 * (gf & vec3<i32>(1)) - 1;
     let base = textureLoad(PHI, blk_origin(cs) + lc).x;
     var sum = 0.0;

@@ -54,7 +54,7 @@ fn red_cell(c: vec3<i32>) -> Red {
   let T = eos_temperature(rho, eint);
   let s = u2.z / rho;
   let x = blk_pos(slot, l);
-  // Potential energy in the uniform external field, measured from the box centre.
+  // Potential energy in the uniform external field, measured from the box center.
   var egrav = -rho * dot(P.gext.xyz, x) * dv;
   var jeans = 0.0;
   if (has_potential()) {

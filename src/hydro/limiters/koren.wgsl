@@ -1,8 +1,8 @@
 // Third-order reconstruction, limited only where the flow is not smooth.
 //
 // Each face of a cell gets its own increment. Unlimited, the face value is that of the
-// parabola through the cell and its two neighbours, c + (far + 2 near) / 6, where `near` is
-// the difference towards the face and `far` the difference away from it: third-order accurate
+// parabola through the cell and its two neighbors, c + (far + 2 near) / 6, where `near` is
+// the difference toward the face and `far` the difference away from it: third-order accurate
 // on the same three-cell stencil a slope limiter uses.
 //
 // A limiter that only looks at three cells cannot tell a smooth maximum from a jump, and

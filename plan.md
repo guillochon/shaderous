@@ -18,7 +18,7 @@ Adaptive mesh refinement, magnetic fields, radiation transport, cosmological exp
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Grid | Uniform Cartesian, cell-centred | Simplest thing that maps onto 3D textures |
+| Grid | Uniform Cartesian, cell-centered | Simplest thing that maps onto 3D textures |
 | Hydro scheme | Unsplit MUSCL-Hancock, piecewise-linear reconstruction, HLLC flux | Second order in one pass per step, so only two copies of the state |
 | Flux evaluation | Gather: each cell computes its own six face fluxes | No write races, no flux storage; costs 2x flux evaluations |
 | State storage | `rgba32float` 3D textures | Not subject to the 128 MB default storage-buffer binding limit |
@@ -37,7 +37,7 @@ Per step:
 
 1. **Primitives pass.** Convert conserved to primitive variables and call the equation of state once per cell (pressure, sound speed). Write to the primitive textures.
 2. **Timestep pass.** Reduce max(|v| + c_s)/dx and the gravity limit sqrt(dx/|g|) over the grid, write dt to a small buffer.
-3. **Update pass.** For each cell: limited slopes (monotonized-central limiter) for itself and its six neighbours, Hancock half-step predictor, HLLC flux at six faces, conservative update plus gravity source. Stencil is 25 cells.
+3. **Update pass.** For each cell: limited slopes (monotonized-central limiter) for itself and its six neighbors, Hancock half-step predictor, HLLC flux at six faces, conservative update plus gravity source. Stencil is 25 cells.
 4. **Swap** the two state texture sets.
 
 Conservation relies on both cells that share a face computing bit-identical fluxes from identical inputs. This is tested, not assumed (section 7).
@@ -76,8 +76,8 @@ Solve the Poisson equation for the potential, then apply -rho grad(phi) to momen
 
 - **Solver:** V-cycle multigrid with red-black Gauss-Seidel smoothing, full-weighting restriction, trilinear prolongation. One `r32float` texture per level.
 - **Periodic boundaries:** subtract mean density from the source.
-- **Isolated boundaries:** a reduction pass computes mass, centre of mass, and quadrupole moments; the boundary values of the potential come from that multipole expansion.
-- **Time coupling:** predictor uses the old potential; after the hydro update, solve for the new potential and apply a correction so the source is time-centred.
+- **Isolated boundaries:** a reduction pass computes mass, center of mass, and quadrupole moments; the boundary values of the potential come from that multipole expansion.
+- **Time coupling:** predictor uses the old potential; after the hydro update, solve for the new potential and apply a correction so the source is time-centered.
 - **Resolution check:** flag cells where the Jeans length is under 4 cells (Truelove criterion) and show the count. Optional pressure floor to enforce it.
 
 ### 3.5 Boundary conditions
@@ -127,7 +127,7 @@ A small preprocessor resolves `#include` and injects the chosen equation of stat
 ## 5. Rendering and UI
 
 - Ray-marched volume of density, temperature, or the passive scalar, log-scaled with an editable transfer function.
-- Axis-aligned slice view with a colour bar, for checking against reference plots.
+- Axis-aligned slice view with a color bar, for checking against reference plots.
 - Controls: problem preset, resolution, equation of state and its parameters, gravity on/off and boundary type, CFL number, pause/step/reset.
 - Live readouts: time, dt, total mass, momentum, energy (kinetic, internal, gravitational), max Mach number, floored-cell count, under-resolved Jeans count.
 

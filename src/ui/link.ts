@@ -1,7 +1,7 @@
 // Shareable links: the simulator's settings as URL query parameters, and back.
 //
 // A link names the preset, dimensionality, resolution and refinement, and then only what
-// differs from that preset's defaults, so most links stay short. Anything unrecognised or
+// differs from that preset's defaults, so most links stay short. Anything unrecognized or
 // out of range in a link is ignored rather than trusted.
 import { configFor, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
 import { EOS_LABELS, type EosKind, type EosParams } from '../eos/eos';

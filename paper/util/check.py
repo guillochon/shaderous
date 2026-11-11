@@ -21,7 +21,7 @@ import sys
 
 from paperconf import JOURNALS, MAIN, ROOT, SKILL, load, utf8_stdout
 
-# The \documentclass each template uses, to recognise the class in paper/main.tex.
+# The \documentclass each template uses, to recognize the class in paper/main.tex.
 CLASS_OF = {}
 for template in JOURNALS.glob("*/main.tex"):
     match = re.search(r"\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}", template.read_text(encoding="utf-8"))

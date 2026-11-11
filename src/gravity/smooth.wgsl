@@ -1,5 +1,5 @@
-// One colour of a red-black Gauss-Seidel sweep, in place. A cell only reads the other colour,
-// so the read-write texture is race-free. The dispatch covers only cells of this colour
+// One color of a red-black Gauss-Seidel sweep, in place. A cell only reads the other color,
+// so the read-write texture is race-free. The dispatch covers only cells of this color
 // (half the grid along x), so no invocations are wasted on the other one.
 #include "gravity/mg_common.wgsl"
 #include "gravity/multipole_eval.wgsl"
@@ -11,7 +11,7 @@
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  // x runs over every other cell; the offset makes (x + y + z) & 1 equal the colour.
+  // x runs over every other cell; the offset makes (x + y + z) & 1 equal the color.
   let x = 2u * gid.x + ((gid.y + gid.z + L.color) & 1u);
   if (x >= L.n || gid.y >= L.n || gid.z >= L.n) { return; }
   let c = vec3<i32>(i32(x), i32(gid.y), i32(gid.z));

@@ -283,13 +283,13 @@ export function unpackMasses(f: Float32Array, count: number): Required<PointMass
 export interface BrushOp {
   /** `eos-out` and `eos-in` act on every cell: see convertEos() in ui/app.ts and edit/brush_core.wgsl. */
   kind: 'mass' | 'velocity' | 'temperature' | 'obstacle' | 'eos-out' | 'eos-in';
-  /** centre and radius, in fractions of the box */
+  /** center and radius, in fractions of the box */
   pos: [number, number, number];
   radius: number;
-  /** 0: hard edge; 1: falls off all the way from the centre */
+  /** 0: hard edge; 1: falls off all the way from the center */
   softness: number;
   /**
-   * mass: density added at the centre (negative removes); temperature: log of the factor;
+   * mass: density added at the center (negative removes); temperature: log of the factor;
    * obstacle: positive makes the cells solid, negative turns them back into gas
    */
   amount: number;
@@ -307,7 +307,7 @@ export interface Outline {
    * coordinates, the units the outline is given in. Column-major, 16 numbers.
    */
   matrix: number[];
-  /** an ellipse: centre and half-axes ... */
+  /** an ellipse: center and half-axes ... */
   ellipse?: [number, number, number, number];
   /** ... or a polygon: x, y of each vertex, at most MAX_OUTLINE_VERTICES of them */
   polygon?: number[];
@@ -334,15 +334,15 @@ export function outlineContains(o: Outline, x: number, y: number, z: number): bo
 
 /** A source or sink of gas (hydro/sources.wgsl). */
 export interface SourceSpec {
-  /** centre and radius, in fractions of the box */
+  /** center and radius, in fractions of the box */
   pos: [number, number, number];
   radius: number;
   softness: number;
   /** velocity of the gas a source adds; zero for one that spreads evenly */
   vel: [number, number, number];
-  /** a source: density added per unit time at its centre */
+  /** a source: density added per unit time at its center */
   rate: number;
-  /** a sink: fraction of the gas removed per unit time at its centre (0 for a source) */
+  /** a sink: fraction of the gas removed per unit time at its center (0 for a source) */
   decay: number;
 }
 
@@ -474,9 +474,9 @@ export interface Diagnostics {
   maxMach: number;
   floored: number;
   jeansUnresolved: number;
-  /** centre of mass of the gas, relative to the box centre */
+  /** center of mass of the gas, relative to the box center */
   com: [number, number, number];
-  /** position of the first point mass relative to the box centre, if there is one */
+  /** position of the first point mass relative to the box center, if there is one */
   perturber: [number, number, number] | null;
   /** the point masses as they are now */
   masses: Required<PointMass>[];
@@ -1258,7 +1258,7 @@ export class Sim implements Simulation {
               q[a] = 0;
             }
             const mine = flux(i, j, k, 2 * a + 1); // my upper face
-            const theirs = flux(q[0], q[1], q[2], 2 * a); // neighbour's lower face
+            const theirs = flux(q[0], q[1], q[2], 2 * a); // neighbor's lower face
             faces++;
             if (mine !== theirs) {
               mismatched++;

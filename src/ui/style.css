@@ -72,7 +72,7 @@ details[open] > summary .sum { display: none; }
 #sheet-bar { display: none; }
 #stage { position: relative; min-width: 0; min-height: 0; }
 #view { width: 100%; height: 100%; display: block; touch-action: none; }
-/* Right rail: the colour bar with its range above and below it and its settings under it,
+/* Right rail: the color bar with its range above and below it and its settings under it,
    then the editing tools, all one width. */
 #rail { position: absolute; right: 12px; top: 12px; width: 66px; display: flex; flex-direction: column; gap: 14px; }
 #colorbar { display: flex; flex-direction: column; gap: 3px; }
@@ -145,7 +145,7 @@ details[open] > summary .sum { display: none; }
 #marks .point circle.dot { fill: #ff9d5c; stroke: none; }
 #marks .point circle.ring { stroke-dasharray: none; stroke-width: 1; stroke-opacity: 0.6; }
 #brush { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; display: none; }
-/* The brush: a dashed outline at rest; solid, coloured and pulsing while it is being applied
+/* The brush: a dashed outline at rest; solid, colored and pulsing while it is being applied
    (blue adds or sets, orange takes away). In a 3D run it is drawn as the ball it is. */
 #brush { --tint: #fff; }
 #brush.active { --tint: var(--accent); }

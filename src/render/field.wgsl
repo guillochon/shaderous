@@ -1,4 +1,4 @@
-// Extracts the displayed quantity from the conserved state, normalised to [0, 1], into a
+// Extracts the displayed quantity from the conserved state, normalized to [0, 1], into a
 // filterable rgba16float volume shared by the ray-marcher and the slice view.
 #include "hydro/common.wgsl"
 #include <eos>

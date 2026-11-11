@@ -1,10 +1,10 @@
 // Ghost data from a block that is part way through a longer step (per-block timesteps).
 //
-// Such a block's stored state is already that of the end of its step. Its neighbour one bin
+// Such a block's stored state is already that of the end of its step. Its neighbor one bin
 // faster starts a step exactly at its midpoint, and what the block has for that time is its
 // half-step prediction, kept from the start of its step: the scheme's own estimate of the
 // state there, second-order where the flow is smooth. The prediction covers the block's cells
-// and its first ghost layer, which is what interpolating to a finer neighbour needs.
+// and its first ghost layer, which is what interpolating to a finer neighbor needs.
 // Requires amr/cons.wgsl, the equation of state and <bins>.
 @group(0) @binding(7) var MPA: texture_3d<f32>;   // (rho, v)
 @group(0) @binding(8) var MPB: texture_3d<f32>;   // (p, scalar, flags)

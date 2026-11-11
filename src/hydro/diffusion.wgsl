@@ -24,7 +24,7 @@
 // the grid:
 //   load_vel(c)             velocity of a cell (zero for a solid one)
 //   face_rim(a, axis, t)    0 where both cells of the face between a and a + e_axis have their
-//                           two neighbours along the transverse axis t; +1 / -1 where only the
+//                           two neighbors along the transverse axis t; +1 / -1 where only the
 //                           upper / lower ones can be read (the rim of a block's face)
 #include <diffusion>
 
@@ -33,7 +33,7 @@ fn q_temperature(q: Q) -> f32 {
 }
 
 // dx times the derivative of the velocity along the transverse axis t, at the face between
-// cell a and cell a + e: the mean of the centred differences in the two cells, or of one-sided
+// cell a and cell a + e: the mean of the centered differences in the two cells, or of one-sided
 // ones at a rim. vl and vr are the velocities of the two cells.
 fn visc_across(a: vec3<i32>, e: vec3<i32>, axis: i32, t: i32, vl: vec3<f32>, vr: vec3<f32>) -> vec3<f32> {
   var tv = vec3<i32>(0);
@@ -72,7 +72,7 @@ fn add_diffusion(Fin: Flux, a: vec3<i32>, e: vec3<i32>, axis: i32, l: Q, r: Q) -
     var d2 = vec3<f32>(0.0);
     var vf = 0.5 * (vl + vr);
     if (wall) {
-      // The wall is at rest half a cell from the gas cell's centre, and nothing varies along it.
+      // The wall is at rest half a cell from the gas cell's center, and nothing varies along it.
       dn = select(2.0 * vr, -2.0 * vl, rs);
       vf = vec3<f32>(0.0);
     } else {

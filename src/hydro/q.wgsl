@@ -20,8 +20,8 @@ fn pred_mirror(p: Q, axis: i32) -> Q {
   return Q(a, p.b);
 }
 
-// Twice the increment from a cell's centre to its upper face (edge_up) and from its lower face
-// to its centre (edge_dn), given the cell and its two neighbours along the axis. A slope
+// Twice the increment from a cell's center to its upper face (edge_up) and from its lower face
+// to its center (edge_dn), given the cell and its two neighbors along the axis. A slope
 // limiter gives the same for both; a third-order one does not.
 //
 // The limiter is also given the natural scale of each quantity at the cell, to judge
@@ -29,21 +29,21 @@ fn pred_mirror(p: Q, axis: i32) -> Q {
 // scalar has none (zero: always limited).
 //
 // Well-balanced reconstruction of the pressure. `dl` and `dr` are the differences of the
-// gravitational potential from the lower neighbour to the cell and from the cell to the upper
-// neighbour (zero where there is no gravity, or the option is off: then this is the plain
+// gravitational potential from the lower neighbor to the cell and from the cell to the upper
+// neighbor (zero where there is no gravity, or the option is off: then this is the plain
 // reconstruction, bit for bit). In hydrostatic balance the pressure follows dp = -rho dphi,
 // and it is that balance, not the pressure, that is smooth across a stratified cell. So what
-// is limited and reconstructed is each neighbour's deviation from balance with the cell,
+// is limited and reconstructed is each neighbor's deviation from balance with the cell,
 //   (p_r - p_c) + (rho_c + rho_r) / 2 * dr      and the same below,
 // and the balanced part, -rho_c * dphi to the face, is added back unlimited. Where the gas
 // obeys the trapezoid rule p_r - p_c = -(rho_c + rho_r) / 2 * dr exactly, the deviations
 // vanish, the two cells sharing a face agree on its pressure, and the pressures of a cell's
 // two faces differ by -rho_c (phi_r - phi_l) / 2: what the gravity kick adds to its momentum,
-// with the acceleration a centred difference of the potential. The static state then holds
+// with the acceleration a centered difference of the potential. The static state then holds
 // to round-off, however steep. (After Kappeli & Mishra 2014, with the balance defined by the
 // potential differences this code's kicks use.)
 //
-// `df` is the potential difference towards the face the increment is for: `dr` or `dl`,
+// `df` is the potential difference toward the face the increment is for: `dr` or `dl`,
 // except next to a wall. The cell beyond a wall is the image of this one and has its
 // potential, so there is no deviation across the wall (dl or dr is zero), but the wall face
 // still lies half a cell down the true potential: df is the true difference there, and its

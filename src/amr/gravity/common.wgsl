@@ -5,7 +5,7 @@
 //   - between same-level blocks the stencil reads straight across
 //   - where the region beyond a face is coarser, the ghost cell holds a value interpolated
 //     from the coarser level's finished solution (a Dirichlet condition; "one-way" coupling)
-//   - at the domain boundary: periodic neighbours, or the multipole expansion (isolated)
+//   - at the domain boundary: periodic neighbors, or the multipole expansion (isolated)
 // Parents see the restricted density of their children, so each level is a complete solve.
 //
 // Each level is accelerated by multigrid within the blocks: sublevel k has BS >> k cells per
@@ -51,7 +51,7 @@ fn g_inv(gid: vec3<u32>) -> GInv {
   return GInv(true, i32(LIST[1u + b]), l);
 }
 
-// Follow same-level neighbours to the block that holds cell l, which may lie outside `slot`
+// Follow same-level neighbors to the block that holds cell l, which may lie outside `slot`
 // along any axes. ok is false if that walks off the level (a coarser region or the domain edge).
 struct GRes { ok: bool, slot: i32, l: vec3<i32> }
 

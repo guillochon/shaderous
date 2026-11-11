@@ -1,6 +1,6 @@
 // Trilinear prolongation of the coarse error, added to the finer sublevel in place. GL
 // describes the fine sublevel; its "other" fields describe the coarse one. Coarse cells beyond
-// the block are found through its neighbours; off the level the error is taken as zero.
+// the block are found through its neighbors; off the level the error is taken as zero.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
@@ -20,7 +20,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let inv = g_inv(gid);
   if (!inv.ok) { return; }
   let cc = inv.l / 2;
-  let d = 2 * (inv.l % 2) - 1;   // towards the second-nearest coarse cell along each axis
+  let d = 2 * (inv.l % 2) - 1;   // toward the second-nearest coarse cell along each axis
   var sum = 0.0;
   for (var i = 0; i < 8; i++) {
     let s = vec3<i32>(i & 1, (i >> 1u) & 1, (i >> 2u) & 1);

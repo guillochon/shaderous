@@ -93,7 +93,7 @@ export interface Problem {
    */
   masses?: (params: Record<string, number>, G: number, dx: number) => PointMass[];
   /**
-   * With point masses: run in the gas's rest frame, which accelerates with the gas's centre
+   * With point masses: run in the gas's rest frame, which accelerates with the gas's center
    * of mass, instead of an inertial one.
    */
   gasFrame?: boolean;
@@ -120,7 +120,7 @@ export interface Problem {
   init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>): (x: number, y: number, z: number) => Prim;
 }
 
-/** A point mass: position and velocity are relative to the box centre. */
+/** A point mass: position and velocity are relative to the box center. */
 export interface PointMass {
   /** G M */
   gm: number;
@@ -130,7 +130,7 @@ export interface PointMass {
   soft?: number;
   /** radius within which it takes gas in (default: the softening length; 0 for none) */
   sinkRadius?: number;
-  /** removal rate at the sink's centre, in units of sqrt(G M / radius^3) (default 1) */
+  /** removal rate at the sink's center, in units of sqrt(G M / radius^3) (default 1) */
   sinkRate?: number;
   /** gas mass accreted so far */
   accreted?: number;

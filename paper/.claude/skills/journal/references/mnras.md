@@ -24,8 +24,8 @@ The template uses `[fleqn,usenatbib]` and newtx Times fonts.
 
 ## Body
 
-- British spelling and MNRAS house style (for example "per cent", "colour",
-  "modelling"). The copy editors convert, but write it this way to avoid surprises.
+- MNRAS house style is British spelling and "per cent". This paper keeps American spelling
+  and "percent" for every journal (see `writing-style.mdc`); the copy editors convert.
 - Units as `km\,s$^{-1}$`, not `km/s`.
 - Cite with `\citet` / `\citep` (the `usenatbib` option); style `mnras.bst`.
 - A **Data Availability** section is mandatory; the template puts it after the body, outside
@@ -43,5 +43,5 @@ The template uses `[fleqn,usenatbib]` and newtx Times fonts.
 
 - Replace the keywords with entries from the MNRAS list.
 - Fill in the Data Availability section.
-- Convert spelling to British and "%" in prose to "per cent".
+- Keep American spelling (`writing-style.mdc`); the MNRAS copy editors convert it.
 - Check that figures fit a column (`\columnwidth`) or use `figure*`.

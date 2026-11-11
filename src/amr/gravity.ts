@@ -49,7 +49,7 @@ interface Sub {
   bsize: number;
   phi: GPUTexture;
   rhs: GPUTexture;
-  smooth: GPUBindGroup[][]; // [tree level][colour]
+  smooth: GPUBindGroup[][]; // [tree level][color]
   restrict?: GPUBindGroup[]; // residual of this sublevel onto the coarser one, [tree level]
   prolong?: GPUBindGroup[]; // into this sublevel from the coarser one, [tree level]
 }
@@ -191,8 +191,8 @@ export class AmrGravity {
     const span = Math.max(bsize, 8);
     pass.dispatchWorkgroups(count * (span / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
-  /** Dispatch over the cells of one colour (see smooth.wgsl). */
-  private colour(pass: GPUComputePassEncoder, count: number, bsize: number) {
+  /** Dispatch over the cells of one color (see smooth.wgsl). */
+  private color(pass: GPUComputePassEncoder, count: number, bsize: number) {
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(8 + Math.log2(BS / bsize)));
     pass.dispatchWorkgroups(Math.ceil((count * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
@@ -206,7 +206,7 @@ export class AmrGravity {
     for (let i = 0; i < sweeps; i++) {
       for (const g of this.sub[k].smooth[level]) {
         pass.setBindGroup(0, g);
-        this.colour(pass, count, this.sub[k].bsize);
+        this.color(pass, count, this.sub[k].bsize);
       }
     }
   }

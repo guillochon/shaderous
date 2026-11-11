@@ -1,9 +1,9 @@
-// Sources and sinks of gas: soft-edged balls (discs in 2D) that add gas, or take it away, at a
+// Sources and sinks of gas: soft-edged balls (disks in 2D) that add gas, or take it away, at a
 // steady rate for as long as they exist. Applied to a cell's state at the end of its update.
 // Requires P, the equation of state, hydro/dual_energy.wgsl and hydro/advance.wgsl (NewState).
 // Layout matches packSources() in src/sim.ts.
 struct Source {
-  pos: vec4<f32>,    // centre in fractions of the box, radius (fraction of the box) in w
+  pos: vec4<f32>,    // center in fractions of the box, radius (fraction of the box) in w
   vel: vec4<f32>,    // velocity of the gas a source adds (zero: it arrives at rest and spreads
                      //   evenly); softness of the edge in w
   rate: vec4<f32>,   // x: density added per unit time at full weight (a source)

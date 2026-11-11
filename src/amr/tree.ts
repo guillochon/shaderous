@@ -4,7 +4,7 @@
 // The domain is covered by nr^ndim root blocks. Every block holds BS^ndim cells and may be
 // split into 2^ndim children of half the cell size. Leaves carry the solution; parents carry
 // nothing (coarse data next to a fine region is restricted on the fly from the children).
-// Face neighbours never differ by more than one level (2:1 balance).
+// Face neighbors never differ by more than one level (2:1 balance).
 
 export const BS = 16; // cells per block side
 export const NG = 2; // ghost layers
@@ -15,7 +15,7 @@ export const RG_STRIDE = 12; // ints per block in the regrid table
 // Block table layout (i32), per slot:
 //   [0] level   [1..3] block coordinates at that level   [4] flags: 1 active, 2 leaf
 //   [5] parent slot (-1 for roots)
-//   [6..11] same-level face neighbour (-x, +x, -y, +y, -z, +z): slot, or
+//   [6..11] same-level face neighbor (-x, +x, -y, +y, -z, +z): slot, or
 //           NB_COARSE where the region beyond is one level coarser, or -1 - (boundary type)
 //           at a physical boundary (outflow 1, reflecting 2, outflow-only 3)
 //   [12..19] child slots (octant = x | y << 1 | z << 2), -1 for leaves
@@ -40,7 +40,7 @@ export interface Block {
   children: Block[] | null;
 }
 
-export type Neighbour = { kind: 'same'; block: Block } | { kind: 'coarse'; block: Block } | { kind: 'bc'; type: number };
+export type Neighbor = { kind: 'same'; block: Block } | { kind: 'coarse'; block: Block } | { kind: 'bc'; type: number };
 
 export interface RegridOp {
   kind: number;
@@ -122,7 +122,7 @@ export class BlockTree {
   }
 
   /** What lies beyond face f (0..5: -x, +x, -y, +y, -z, +z) of a block. */
-  neighbour(b: Block, f: number): Neighbour {
+  neighbor(b: Block, f: number): Neighbor {
     const axis = f >> 1;
     const c = b.c.slice();
     c[axis] += f & 1 ? 1 : -1;
@@ -145,7 +145,7 @@ export class BlockTree {
     seen.add(b);
     let cost = this.nchild;
     for (let f = 0; f < this.nface; f++) {
-      const nb = this.neighbour(b, f);
+      const nb = this.neighbor(b, f);
       if (nb.kind === 'coarse') cost += this.refineCost(nb.block, seen);
     }
     return cost;
@@ -160,7 +160,7 @@ export class BlockTree {
   }
 
   /**
-   * Split a leaf, first splitting any coarser face neighbour so balance holds. Returns the
+   * Split a leaf, first splitting any coarser face neighbor so balance holds. Returns the
    * blocks that were split (empty if it does not fit or is already at the deepest level).
    */
   refine(b: Block, forbidden?: Set<Block>): Block[] {
@@ -172,7 +172,7 @@ export class BlockTree {
     const split = (q: Block) => {
       if (q.children) return;
       for (let f = 0; f < this.nface; f++) {
-        const nb = this.neighbour(q, f);
+        const nb = this.neighbor(q, f);
         if (nb.kind === 'coarse') split(nb.block);
       }
       q.children = [];
@@ -191,7 +191,7 @@ export class BlockTree {
     if (!p.children || p.children.some((ch) => ch.children)) return false;
     for (const ch of p.children) {
       for (let f = 0; f < this.nface; f++) {
-        const nb = this.neighbour(ch, f);
+        const nb = this.neighbor(ch, f);
         if (nb.kind === 'same' && nb.block.children) return false; // a finer leaf would end up two levels away
       }
     }
@@ -205,9 +205,9 @@ export class BlockTree {
 
   /**
    * Re-mesh from a refinement indicator per leaf. Leaves above `hi` are split; a parent whose
-   * children are all below `lo`, and have no face neighbour above `hi`, is merged. A negative
+   * children are all below `lo`, and have no face neighbor above `hi`, is merged. A negative
    * indicator marks a leaf that needs no buffer either (the inside of an obstacle): it merges
-   * whatever its neighbours.
+   * whatever its neighbors.
    * Returns, per slot of the new tree, how to fill it from the old tree, or null if nothing changed.
    */
   adapt(indicator: (b: Block) => number, hi: number, lo: number): RegridOp[] | null {
@@ -234,7 +234,7 @@ export class BlockTree {
       if (ind.get(b)! > lo) return true;
       if (ind.get(b)! < 0) return false;
       for (let f = 0; f < this.nface; f++) {
-        const nb = this.neighbour(b, f);
+        const nb = this.neighbor(b, f);
         if (nb.kind !== 'bc' && (ind.get(nb.block) ?? 0) > hi) return true;
       }
       return false;
@@ -267,10 +267,10 @@ export class BlockTree {
       t[o + 5] = b.parent ? b.parent.slot : -1;
       for (let f = 0; f < 6; f++) {
         if (f >= this.nface) {
-          t[o + 6 + f] = b.slot; // 2D: the single layer is its own neighbour in z
+          t[o + 6 + f] = b.slot; // 2D: the single layer is its own neighbor in z
           continue;
         }
-        const nb = this.neighbour(b, f);
+        const nb = this.neighbor(b, f);
         if (nb.kind === 'same') t[o + 6 + f] = nb.block.slot;
         else if (nb.kind === 'coarse') {
           t[o + 6 + f] = NB_COARSE;

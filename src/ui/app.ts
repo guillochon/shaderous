@@ -16,7 +16,7 @@ import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../rende
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const opt = (v: string | number, label: string) => `<option value="${v}">${label}</option>`;
 
-// A labelled control: small caption above the input, laid out on a two- or three-column grid.
+// A labeled control: small caption above the input, laid out on a two- or three-column grid.
 const field = (label: string, control: string, id = '', tip = '') =>
   `<label class="f"${id ? ` id="${id}"` : ''}${tip ? ` title="${tip}"` : ''}><span>${label}</span>${control}</label>`;
 const select = (id: string, options: string, tip = '') => `<select id="${id}"${tip ? ` title="${tip}"` : ''}>${options}</select>`;
@@ -75,7 +75,7 @@ side.innerHTML = `
     <summary title="How the gas is drawn">View<span class="sum" id="sum-view"></span></summary>
     <div class="g2">
       ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')), '', 'Volume renders the gas as a glowing fog seen through the box; Slice shows one plane of cells')}
-      ${field('Field', select('field', FIELDS.map((f, i) => opt(i, f)).join('')), '', 'The quantity the colours show')}
+      ${field('Field', select('field', FIELDS.map((f, i) => opt(i, f)).join('')), '', 'The quantity the colors show')}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), '', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', '', 'Where the slice cuts the box along its normal')}
     </div>
@@ -88,7 +88,7 @@ side.innerHTML = `
       ${field('gamma', number('gamma', 'step="0.05" min="1"'), '', 'Adiabatic index \u03b3: p = (\u03b3 - 1) \u03c1 e for an ideal gas, p = K \u03c1^\u03b3 for a barotropic one')}
       ${field('K (p = K rho^gamma)', number('K', 'min="0"', 2), 'row-K', 'Barotropic constant K: p = K \u03c1^\u03b3. With \u03b3 = 1 it is the square of the sound speed')}
       ${field('Radiation constant a', number('arad', 'min="0"', 2), 'row-arad', 'Radiation pressure a T\u2074 / 3 is added to the gas pressure')}
-      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')), '', 'How the flux between neighbouring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust')}
+      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')), '', 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust')}
       ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')), '', 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust')}
       ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'), '', 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower')}
       ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')), '', 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work')}
@@ -154,18 +154,18 @@ side.innerHTML = `
   <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
-// The colour bar: the range at either end (editable), the opacity curve drawn on the bar, then
+// The color bar: the range at either end (editable), the opacity curve drawn on the bar, then
 // its settings.
 $('colorbar').innerHTML = `
   <input id="hi" class="cb-range" type="text" inputmode="decimal" spellcheck="false" title="Top of the displayed range" />
-  <canvas id="tf" title="Colour bar. In the volume view the line is the opacity: drag its points sideways, double-click to add or remove one"></canvas>
+  <canvas id="tf" title="Color bar. In the volume view the line is the opacity: drag its points sideways, double-click to add or remove one"></canvas>
   <input id="lo" class="cb-range" type="text" inputmode="decimal" spellcheck="false" title="Bottom of the displayed range" />
   <div class="cb-checks">
     <label class="check" title="The range follows the data"><input id="auto" type="checkbox" checked />Auto</label>
-    <label class="check" title="Logarithmic colour scale"><input id="log" type="checkbox" />Log</label>
+    <label class="check" title="Logarithmic color scale"><input id="log" type="checkbox" />Log</label>
     <label class="check" title="Outline the blocks of an adaptive mesh in the slice view"><input id="blocks" type="checkbox" checked />Blocks</label>
   </div>
-  <select id="cmap" title="Colour map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
+  <select id="cmap" title="Color map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
   <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="1" max="300" step="1" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
 `;
 
@@ -245,7 +245,7 @@ const canvas = $<HTMLCanvasElement>('view');
 const hud = $('hud');
 
 // --- editing tools ------------------------------------------------------------------------
-// A column of tools under the colour bar. Each paints with a soft ball (a disc in 2D) and
+// A column of tools under the color bar. Each paints with a soft ball (a disk in 2D) and
 // keeps its own size and softness.
 type ToolKind = Exclude<BrushOp['kind'], 'eos-out' | 'eos-in'> | 'source' | 'sink';
 const icon = (body: string) => `<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${body}</svg>`;
@@ -293,8 +293,8 @@ const notice = (text: string) => {
 /** Ways of drawing an obstacle. */
 type ShapeMode = 'rect' | 'ellipse' | 'polygon';
 const SHAPES: { mode: ShapeMode; title: string; icon: string }[] = [
-  { mode: 'rect', title: 'Rectangle: drag from corner to corner. Shift makes a square; Alt draws from the centre', icon: icon('<rect x="2.5" y="4" width="11" height="8" />') },
-  { mode: 'ellipse', title: 'Ellipse: drag across it. Shift makes a circle; Alt draws from the centre', icon: icon('<ellipse cx="8" cy="8" rx="5.5" ry="4" />') },
+  { mode: 'rect', title: 'Rectangle: drag from corner to corner. Shift makes a square; Alt draws from the center', icon: icon('<rect x="2.5" y="4" width="11" height="8" />') },
+  { mode: 'ellipse', title: 'Ellipse: drag across it. Shift makes a circle; Alt draws from the center', icon: icon('<ellipse cx="8" cy="8" rx="5.5" ry="4" />') },
   {
     mode: 'polygon',
     title: 'Polygon: click each corner; a double-click, Enter or a click on the first corner closes it. Shift keeps edges at 45\u00b0 steps; Backspace takes the last corner back',
@@ -323,7 +323,7 @@ $('tools').innerHTML =
   TOOLS.map((t) => `<button id="tool-${t.kind}" aria-pressed="false" aria-label="${t.label}" title="${t.title}">${t.icon}</button>`).join('') +
   `<div id="tool-params" hidden>
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
-    ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the centre', 0, 1)}
+    ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the center', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
     ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it only takes gas away, where it was placed. With a mass it is a point mass with softened gravity: it pulls on the gas, moves, and grows by what it takes in', 0, 2)}
     <button id="tool-rest" aria-pressed="true" title="p = 0 for new mass: added gas arrives at rest and shares the momentum already there, slowing the flow. Off: it arrives with the local velocity">p = 0</button>
@@ -351,7 +351,7 @@ function syncTools() {
   const q = toolParams[tool];
   $('tp-amount-row').hidden = tool !== 'mass' && tool !== 'source' && tool !== 'sink';
   $('tp-mass-row').hidden = tool !== 'sink';
-  // A point mass has no soft edge to set: its sink always fades from the centre.
+  // A point mass has no soft edge to set: its sink always fades from the center.
   $('tp-softness-row').hidden = tool === 'sink' && sinkHasMass();
   // The same slider is the amount of a dab of mass and the flux of a source or sink.
   const flux = tool === 'source' || tool === 'sink';
@@ -490,7 +490,7 @@ interface Draft {
   cur: [number, number];
 }
 let draft: Draft | null = null;
-/** Modifier keys, as last seen: Shift constrains a shape, Alt draws it from its centre. */
+/** Modifier keys, as last seen: Shift constrains a shape, Alt draws it from its center. */
 const mods = { shift: false, alt: false };
 /** The edit the next frame applies. */
 let pendingBrush: BrushOp | null = null;
@@ -1104,7 +1104,7 @@ function bind() {
         cfg.bcLo = lo;
         cfg.bcHi = hi;
         if (sim && cfg.amrLevels > 0 && lo[a] === 0 && !was) {
-          // On an adaptive mesh a newly periodic axis joins blocks that were never neighbours
+          // On an adaptive mesh a newly periodic axis joins blocks that were never neighbors
           // and may differ by several levels: build the mesh again from the start.
           restartRun();
         } else applyParams();
@@ -1345,7 +1345,7 @@ function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3
 }
 
 // --- obstacles ----------------------------------------------------------------------------
-/** Centre and half-sizes of the rectangle or ellipse being dragged out. */
+/** Center and half-sizes of the rectangle or ellipse being dragged out. */
 function draftBox(d: Draft) {
   const [x0, y0] = d.pts[0];
   let dx = d.cur[0] - x0;
@@ -1356,7 +1356,7 @@ function draftBox(d: Draft) {
     dx = dx < 0 ? -m : m;
     dy = dy < 0 ? -m : m;
   }
-  // Alt: the press is the centre rather than a corner.
+  // Alt: the press is the center rather than a corner.
   return mods.alt ? { cx: x0, cy: y0, hx: Math.abs(dx), hy: Math.abs(dy) } : { cx: x0 + dx / 2, cy: y0 + dy / 2, hx: Math.abs(dx) / 2, hy: Math.abs(dy) / 2 };
 }
 
@@ -1485,7 +1485,7 @@ function drawSources() {
       if (!(c.w > 0)) continue;
       const e = at(pos.map((v, i) => v + (q.sinkRadius / box) * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
       // The sink's edge, and a ring that stays large enough to find when the sink is only a
-      // few pixels across (a binary's in a wide disc).
+      // few pixels across (a binary's in a wide disk).
       const r = Math.hypot(e.x - c.x, e.y - c.y);
       const ring = r < 9 ? `<circle class="ring" cx="${c.x}" cy="${c.y}" r="11" />` : '';
       html += `<g class="sink point">${ring}<circle cx="${c.x}" cy="${c.y}" r="${r}" /><circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
@@ -1578,7 +1578,7 @@ function beginStroke(e: PointerEvent) {
 function endStroke(apply: boolean) {
   if (!stroke) return;
   stroke.released = true;
-  // A velocity is set on letting go; a cancelled drag sets nothing.
+  // A velocity is set on letting go; a canceled drag sets nothing.
   if (!apply && (stroke.kind === 'velocity' || stroke.kind === 'source' || stroke.kind === 'sink')) stroke = null;
   drawBrush();
 }

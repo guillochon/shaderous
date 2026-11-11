@@ -6,7 +6,7 @@ export interface TubeState {
   p: number;
 }
 
-/** Riemann problem with the discontinuity through the box centre, normal to `dir`. */
+/** Riemann problem with the discontinuity through the box center, normal to `dir`. */
 export function shockTube(
   id: string,
   label: string,

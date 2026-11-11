@@ -60,7 +60,7 @@ interface RegridPlan {
 }
 
 export interface LeafCells {
-  /** per leaf cell: position of the centre, cell size, and the conserved state */
+  /** per leaf cell: position of the center, cell size, and the conserved state */
   x: Float32Array;
   y: Float32Array;
   z: Float32Array;
@@ -566,7 +566,7 @@ export class AmrSim implements Simulation {
    * block is at the same time again. On the first substep every block steps, with the passes
    * and lists of a single timestep; in between come the timestep and the bins, from the rates
    * the assembly has just measured. On the others the blocks that start a step, and those
-   * owed the second half of a faster neighbour's fluxes, are gathered into lists on the GPU
+   * owed the second half of a faster neighbor's fluxes, are gathered into lists on the GPU
    * and the same passes run over those. The state stays in one parity: the update writes the
    * other, and a copy brings the blocks that stepped back.
    */
@@ -684,7 +684,7 @@ export class AmrSim implements Simulation {
 
   /**
    * Work done with per-block timesteps since the last reset: block updates made (deposits of
-   * a neighbour's fluxes included), and what a single timestep would have made.
+   * a neighbor's fluxes included), and what a single timestep would have made.
    */
   async binWork(): Promise<{ cycles: number; updates: number; single: number }> {
     const buf = this.device.createBuffer({ size: BIN_ARGS_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -799,9 +799,9 @@ export class AmrSim implements Simulation {
 
   /**
    * Refinement indicator of a block from the analytic setup, for building the initial mesh:
-   * the same normalised jump across two cell widths that the GPU pass measures, but sampled
+   * the same normalized jump across two cell widths that the GPU pass measures, but sampled
    * more finely than the block's own cells. A feature smaller than a coarse cell (a point
-   * explosion, say) would otherwise fall between cell centres and never trigger refinement.
+   * explosion, say) would otherwise fall between cell centers and never trigger refinement.
    */
   private indicator(b: Block, fn: (x: number, y: number, z: number) => { rho: number; p: number }): number {
     const three = this.cfg.ndim === 3;
@@ -878,7 +878,7 @@ export class AmrSim implements Simulation {
       this.tree.levelLimit = limit;
       for (let pass = 0; pass < limit; pass++) {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
-        // is finer than it at the centre of one of its children.
+        // is finer than it at the center of one of its children.
         const changed = levelAt
           ? this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1)
           : this.tree.adapt((b) => this.indicator(b, surface), c.refineHi, c.refineLo);
@@ -1248,12 +1248,12 @@ export class AmrSim implements Simulation {
   private makeRoom(keep: Block[], need: number) {
     if (need <= 0) return;
     const tree = this.tree;
-    // Keep the edge and its face neighbours, so refining the edge does not split them again.
+    // Keep the edge and its face neighbors, so refining the edge does not split them again.
     const near = new Set<Block>();
     for (const b of keep) {
       near.add(b);
       for (let f = 0; f < tree.nface; f++) {
-        const nb = tree.neighbour(b, f);
+        const nb = tree.neighbor(b, f);
         if (nb.kind !== 'bc') near.add(nb.block);
       }
     }
@@ -1568,7 +1568,7 @@ export class AmrSim implements Simulation {
     for (const b of this.tree.leaves()) {
       for (let axis = 0; axis < this.cfg.ndim; axis++) {
         for (let side = 0; side < 2; side++) {
-          const nb = this.tree.neighbour(b, 2 * axis + side);
+          const nb = this.tree.neighbor(b, 2 * axis + side);
           // Physical boundaries have no partner; a coarser partner is checked from its own side.
           if (nb.kind !== 'same') continue;
           const refined = !!nb.block.children;

@@ -83,7 +83,7 @@ describe('point masses', () => {
     expect(m.gm).toBe(100);
   });
 
-  it('the binary starts at rest in its centre-of-mass frame', () => {
+  it('the binary starts at rest in its center-of-mass frame', () => {
     for (const q of [1, 0.3]) {
       const [a, b] = binaryMasses(q, 0.2, 0.05);
       expect(a.gm + b.gm).toBeCloseTo(1, 12);

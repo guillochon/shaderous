@@ -1,6 +1,6 @@
 // Boundary potential for isolated boundaries from the monopole + quadrupole of the mass
-// distribution (the dipole vanishes about the centre of mass).
-// MP = (M, M x, M y, M z, M xx, M yy, M zz, M xy, M xz, M yz), positions relative to the box centre.
+// distribution (the dipole vanishes about the center of mass).
+// MP = (M, M x, M y, M z, M xx, M yy, M zz, M xy, M xz, M yz), positions relative to the box center.
 @group(0) @binding(10) var<storage, read> MP: array<f32>;
 
 fn phi_boundary(x: vec3<f32>) -> f32 {
@@ -10,7 +10,7 @@ fn phi_boundary(x: vec3<f32>) -> f32 {
   let d = x - com;
   let r2 = dot(d, d);
   let r = sqrt(r2);
-  // Second moments about the centre of mass.
+  // Second moments about the center of mass.
   let sxx = MP[4] - M * com.x * com.x;
   let syy = MP[5] - M * com.y * com.y;
   let szz = MP[6] - M * com.z * com.z;

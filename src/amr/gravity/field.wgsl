@@ -1,7 +1,7 @@
 // Gravity field atlas, written once per step after the Poisson solve, for every block:
 //   xyz = acceleration: self-gravity from the new potential, plus the point masses' pull minus
 //         the frame's own acceleration when there are any (interior cells)
-//   w   = potential extrapolated half a step ahead, for the update's time-centred energy
+//   w   = potential extrapolated half a step ahead, for the update's time-centered energy
 //         source (interior cells and the first ghost layer) and the well-balanced pressure
 //         reconstruction (both ghost layers)
 // With per-block timesteps the half step is the block's own, and the pass runs over the

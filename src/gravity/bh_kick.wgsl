@@ -8,16 +8,16 @@
 //
 // The frame is inertial unless P.bh.y is set. Then it accelerates with the gas, at abar, the
 // mass-weighted mean of the masses' pull on it. In that frame the masses exert no net force on
-// the gas, so its centre of mass stays where it started, and every mass accelerates by -abar
+// the gas, so its center of mass stays where it started, and every mass accelerates by -abar
 // more. For one mass that is -(1 + m / M) abar.
 //
 // Nothing here assumes the gas is a point, so an orbit responds to the tides it raises. Once
 // gas leaves the box, "the gas" means what is still inside it.
 //
 // (Two alternatives to the accelerating frame were tried and dropped. A restoring spring on
-// the centre of mass visibly shoves the remaining gas each time debris exits. Following a
-// density-squared-weighted centroid instead keeps the densest gas centred, but lets the true
-// centre of mass wander by several percent of the stellar radius during a disruption.)
+// the center of mass visibly shoves the remaining gas each time debris exits. Following a
+// density-squared-weighted centroid instead keeps the densest gas centered, but lets the true
+// center of mass wander by several percent of the stellar radius during a disruption.)
 #include "hydro/common.wgsl"
 #include "gravity/bh.wgsl"
 

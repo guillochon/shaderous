@@ -20,12 +20,12 @@ https://guillochon.github.io/shaderous/validate.html
   places a plain sink that stays put, and with a mass (a multiple of the gas in the box) a
   point mass, set moving by a drag. A preset without a gravitational constant gets G = 1.
 - **Tidal disruption:** a polytropic star passed by a point mass on a parabolic orbit, run in the
-  star's rest frame. The frame accelerates with the gas's centre of mass, the point mass's orbit
+  star's rest frame. The frame accelerates with the gas's center of mass, the point mass's orbit
   is integrated alongside the gas, and the boundaries let gas out but not in.
-- **Binary accretion:** two point masses on a Kepler orbit inside an isothermal disc with a
+- **Binary accretion:** two point masses on a Kepler orbit inside an isothermal disk with a
   constant kinematic viscosity (1e-3 in units of the binary's separation squared times its
   orbital frequency: alpha = 0.1 at the binary's separation). They clear a cavity, draw
-  streams across it and accrete from the discs that form around them.
+  streams across it and accrete from the disks that form around them.
 - **Optically thin cooling and heating:** a power-law cooling function with uniform heating, or
   the interstellar curve of Koyama & Inutsuka (2002), chosen when the shaders are assembled
   and available to every preset whose equation of state has an energy. The thermal instability
@@ -33,7 +33,7 @@ https://guillochon.github.io/shaderous/validate.html
   a warm medium, with thermal conduction setting the size of the clouds.
 - **Viscosity and thermal conduction:** a constant kinematic viscosity with the full stress
   tensor, and a conductivity per unit density (the heat flux is `-kappa rho grad T`), on the
-  uniform grid and the adaptive mesh. The binary's disc is viscous and the thermal
+  uniform grid and the adaptive mesh. The binary's disk is viscous and the thermal
   instability conducts; elsewhere both are off, and every preset can set them under
   Diffusion (`nu` and `kappa` in a link). Conduction needs an equation of state with an
   energy. Obstacles hold a viscous gas at their walls.
@@ -82,7 +82,7 @@ button, to hand someone the same setup. A bare visit opens Kelvin-Helmholtz at 1
   state on the same mesh. The loaded run starts paused, and Reset returns to the loaded state.
 - A file from another code needs `rho`, `press` and `vel1`-`vel3` on a Cartesian, uniformly
   spaced, square or cubic domain. It is sampled onto the nearest resolution on offer, cell
-  centre by cell centre (not conservatively), keeping the current preset's physics.
+  center by cell center (not conservatively), keeping the current preset's physics.
 - HDF5 comes from h5wasm, loaded the first time either button is used (about 1 MB compressed).
 - The cell data is gzip-compressed at level 1 (HDF5's standard filter; higher levels gain
   about a percent more for up to twice the time). Uncompressed, a state is 24 bytes per cell,
@@ -139,7 +139,7 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
 - **Float32.** Conservation is at round-off level, but round-off is biased when a uniform
   background sits exactly on a power of two (see `problems/advection.ts`).
 - **Reconstruction.** The default gives each face of a cell the value of the parabola through
-  the cell and its two neighbours, which is third-order accurate on the stencil a slope
+  the cell and its two neighbors, which is third-order accurate on the stencil a slope
   limiter already uses. A three-cell limiter cannot tell a smooth maximum from a jump and
   flattens both, so the limiter (Koren's) is applied only where a quantity changes by more
   than 1% of its natural scale across a cell: the density, the pressure, or the sound speed
@@ -168,7 +168,7 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   and differ in the last bit in Firefox.
 - **Adaptive mesh.** Ghost cells are never copied within a texture (WebGPU cannot read and
   write one rgba32float texture in a pass). Instead the primitives pass computes every texel,
-  ghost or not, from wherever its value lives: a neighbouring block, a boundary image, the
+  ghost or not, from wherever its value lives: a neighboring block, a boundary image, the
   average of finer cells, or an interpolation from a coarser block. At a refinement boundary
   the coarse cell recomputes the fine fluxes rather than using its own, which conserves
   without storing fluxes. The mesh is
@@ -176,12 +176,12 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
 - **Local timesteps** (adaptive mesh, off by default; "Local timesteps" under Hydro, `tbins`
   in a link). Time advances in cycles of up to 8 substeps of the smallest step. At the start
   of a cycle every block gets a bin from its own signal speed, on the GPU: a block in bin k
-  steps 2^k substeps at a time. Face neighbours are at most one bin apart, a block next to a
-  faster one steps as fast, and a block is never slower than a coarser neighbour. Across a
+  steps 2^k substeps at a time. Face neighbors are at most one bin apart, a block next to a
+  faster one steps as fast, and a block is never slower than a coarser neighbor. Across a
   face whose other side steps twice as often, a block takes that side's fluxes, recomputed
   from its stored states: half when its own step starts, half at its midpoint. So nothing is
-  stored and conservation stays at round-off. A faster block reads a neighbour that is part
-  way through a step from that neighbour's half-step prediction. With self-gravity the
+  stored and conservation stays at round-off. A faster block reads a neighbor that is part
+  way through a step from that neighbor's half-step prediction. With self-gravity the
   potential is solved on every block when a cycle ends and, in between, only on the blocks
   finishing a step; elsewhere it is carried forward at the rate it last changed there, which
   is also what extrapolates it half a step ahead for the energy source. Point masses move
@@ -200,7 +200,7 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   little less well with gravity: the Evrard collapse loses 2.1 times as much energy at 128
   cells with 2 levels, 1.1 times at 256 with 3.
 - **Gravity on the adaptive mesh.** The potential lives on every block, parents included.
-  The density is averaged into the parents, ghost cells of a level come from its neighbours
+  The density is averaged into the parents, ghost cells of a level come from its neighbors
   or are interpolated from the level above, and a multigrid cycle runs inside the blocks (16,
   8, 4, 2 and 1 cells across). The coupling is one-way, so a fine level never corrects the
   coarse potential beneath it; on a uniform sphere the error stays below 0.3% with three
@@ -229,7 +229,7 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
 - **Well-balanced reconstruction** (always on, for equations of state with an energy; `wb=0`
   in a link turns it off for comparison). In hydrostatic balance it is not the
   pressure that is smooth across a stratified cell but its balance with gravity. So what is
-  limited and reconstructed is each neighbour's deviation from that balance,
+  limited and reconstructed is each neighbor's deviation from that balance,
   `(p_r - p_c) + (rho_c + rho_r) / 2 * (phi_r - phi_c)`, and the balanced part of the step to
   the face, `-rho_c * dphi`, is added back unlimited (after Kappeli & Mishra 2014). Where the
   cells obey that trapezoid rule the two cells sharing a face agree on its pressure, and a
@@ -260,7 +260,7 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   not know they exist. Each step they drift, then one reduction over the updated gas gives
   every mass its pull on the gas (whose reaction moves the mass) and what its sink takes; the
   second half-kick pass removes exactly that from the cells. The removal rate falls from
-  `sqrt(G M / r^3)` at the centre to zero at the sink radius, and the gas that goes takes its
+  `sqrt(G M / r^3)` at the center to zero at the sink radius, and the gas that goes takes its
   momentum to the mass, so mass and momentum are conserved between the two (to 1e-7 in the
   validation test). The pull between two masses is softened by the larger of their two
   lengths. The frame is inertial unless the preset asks for the gas's rest frame, as the
@@ -287,7 +287,7 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   `tau = rho nu (grad v + its transpose - 2/3 div v)`, and `-kappa rho grad T` for the heat,
   with `nu` and `kappa` constant (as Athena++ defines `nu_iso` and `kappa_iso`; an ideal
   gas's temperature diffuses at `(gamma - 1) kappa`). Derivatives along a face's normal are
-  differences of its two cells, those across it the mean of the two cells' centred
+  differences of its two cells, those across it the mean of the two cells' centered
   differences, which reach the cells diagonally across from the one being updated. Being
   part of the face flux, they inherit what holds for it: the two cells of a face compute the
   same bits, and across refinement boundaries and between blocks on different timesteps both
@@ -311,6 +311,6 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   to 0.05%; a temperature wave at constant pressure decays at `kappa k^2 (gamma - 1) / gamma`
   to 0.3%.
 
-## Licence
+## License
 
 MIT; see [LICENSE](LICENSE).

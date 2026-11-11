@@ -4,9 +4,9 @@ import { BlockTree, BT_STRIDE, FLAG_LEAF, NB_COARSE, RG_COPY, RG_PROLONG, RG_RES
 const periodic = [0, 0, 0];
 const outflow = [1, 1, 1];
 
-/** Every leaf's face neighbours are at most one level away. */
+/** Every leaf's face neighbors are at most one level away. */
 function balanced(t: BlockTree) {
-  for (const b of t.leaves()) for (let f = 0; f < t.nface; f++) t.neighbour(b, f); // throws if a region is two levels coarser
+  for (const b of t.leaves()) for (let f = 0; f < t.nface; f++) t.neighbor(b, f); // throws if a region is two levels coarser
   for (const b of t.all()) {
     if (!b.children) continue;
     for (const ch of b.children) expect(ch.parent).toBe(b);
@@ -30,7 +30,7 @@ describe('block tree', () => {
     expect(t.leaves()).toHaveLength(8);
     covers(t);
     const b = t.get(0, [0, 0, 0])!;
-    const nb = t.neighbour(b, 0);
+    const nb = t.neighbor(b, 0);
     expect(nb.kind).toBe('same');
     expect(nb.kind === 'same' && nb.block.c).toEqual([1, 0, 0]); // wrapped
   });
@@ -38,16 +38,16 @@ describe('block tree', () => {
   it('reports physical boundaries', () => {
     const t = new BlockTree(2, 2, 1, 16, outflow, [2, 3, 0]);
     const b = t.get(0, [1, 1, 0])!;
-    expect(t.neighbour(b, 0).kind).toBe('same');
-    expect(t.neighbour(b, 1)).toEqual({ kind: 'bc', type: 2 });
-    expect(t.neighbour(b, 3)).toEqual({ kind: 'bc', type: 3 });
+    expect(t.neighbor(b, 0).kind).toBe('same');
+    expect(t.neighbor(b, 1)).toEqual({ kind: 'bc', type: 2 });
+    expect(t.neighbor(b, 3)).toEqual({ kind: 'bc', type: 3 });
     const tab = t.table();
     expect(tab[b.slot * BT_STRIDE + 6 + 1]).toBe(-3);
     expect(tab[b.slot * BT_STRIDE + 6 + 3]).toBe(-4);
-    expect(tab[b.slot * BT_STRIDE + 6 + 4]).toBe(b.slot); // 2D: its own neighbour in z
+    expect(tab[b.slot * BT_STRIDE + 6 + 4]).toBe(b.slot); // 2D: its own neighbor in z
   });
 
-  it('refines and keeps 2:1 balance by splitting coarser neighbours', () => {
+  it('refines and keeps 2:1 balance by splitting coarser neighbors', () => {
     const t = new BlockTree(2, 4, 3, 400, outflow, outflow);
     let b: Block = t.get(0, [1, 1, 0])!;
     for (let l = 0; l < 3; l++) {
@@ -72,12 +72,12 @@ describe('block tree', () => {
     expect(u.count).toBe(8);
   });
 
-  it('records coarse neighbours and children in the block table', () => {
+  it('records coarse neighbors and children in the block table', () => {
     const t = new BlockTree(2, 2, 1, 16, outflow, outflow);
     const p = t.get(0, [0, 0, 0])!;
     t.refine(p);
     const tab = t.table();
-    const ch = p.children![1]; // x = 1, y = 0: its +x neighbour is the coarse block (1, 0)
+    const ch = p.children![1]; // x = 1, y = 0: its +x neighbor is the coarse block (1, 0)
     const o = ch.slot * BT_STRIDE;
     expect(tab[o]).toBe(1);
     expect(tab[o + 4] & FLAG_LEAF).toBe(FLAG_LEAF);
@@ -87,7 +87,7 @@ describe('block tree', () => {
     expect(tab[o + 6 + 0]).toBe(p.children![0].slot);
     expect(tab[p.slot * BT_STRIDE + 4] & FLAG_LEAF).toBe(0);
     expect(Array.from(tab.subarray(p.slot * BT_STRIDE + 12, p.slot * BT_STRIDE + 16))).toEqual(p.children!.map((c) => c.slot));
-    // The coarse block sees the parent as its same-level neighbour.
+    // The coarse block sees the parent as its same-level neighbor.
     expect(tab[t.get(0, [1, 0, 0])!.slot * BT_STRIDE + 6 + 0]).toBe(p.slot);
   });
 
@@ -116,7 +116,7 @@ describe('block tree', () => {
     const t = new BlockTree(2, 4, 2, 400, periodic, periodic);
     const a = t.get(0, [1, 1, 0])!;
     t.refine(a);
-    t.refine(a.children![3]); // forces neighbours of a to split too
+    t.refine(a.children![3]); // forces neighbors of a to split too
     balanced(t);
     const deep = a.children![3].children!;
     // Quiet everywhere except the deepest blocks: their parents' siblings must stay refined.

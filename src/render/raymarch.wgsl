@@ -1,5 +1,5 @@
 // Emission-absorption ray-marcher through the unit box, front to back, with a 1D transfer
-// function (colour and opacity against the normalised field value).
+// function (color and opacity against the normalized field value).
 #include "render/camera.wgsl"
 
 fn hash(p: vec2<f32>) -> f32 {

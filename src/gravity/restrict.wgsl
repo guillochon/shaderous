@@ -1,4 +1,4 @@
-// Restrict the fine residual to the coarse right-hand side (cell-centred full weighting is the
+// Restrict the fine residual to the coarse right-hand side (cell-centered full weighting is the
 // average of the eight children) and zero the coarse error. L describes the coarse level.
 #include "gravity/mg_common.wgsl"
 

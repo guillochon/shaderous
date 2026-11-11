@@ -1,5 +1,5 @@
 // Multipole reduction source on the block grid: mass and its first and second moments about
-// the box centre, over leaf cells.
+// the box center, over leaf cells.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
 

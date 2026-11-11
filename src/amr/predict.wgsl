@@ -2,7 +2,7 @@
 // first ghost layer.
 //
 // A ghost's half-step state is the prediction of whatever cell it stands for, evaluated from
-// that cell's own neighbourhood. For a same-level neighbour that is exactly the neighbour's
+// that cell's own neighborhood. For a same-level neighbor that is exactly the neighbor's
 // own prediction, so the two blocks compute identical fluxes at their shared face. A ghost
 // next to a coarser block is predicted in place from this block's interpolated ghosts; the
 // transverse slopes are dropped where they would need an edge ghost. Every block predicts
@@ -45,7 +45,7 @@ fn grav_at(c: vec3<i32>) -> vec3<f32> {
 // (seen, face), from the field atlas (which holds the potential on two ghost layers) plus the
 // uniform field, which is exact. `seen` is what the deviations from balance are measured
 // against: beyond a face of the domain the potential is that of the cell the state there is
-// taken from, like the state itself. `face` is what takes the pressure from a cell's centre
+// taken from, like the state itself. `face` is what takes the pressure from a cell's center
 // to its face: the same, except across a reflecting face of the domain, where it is the true
 // difference (the atlas's ghost cells there continue the potential in a straight line).
 fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
@@ -85,7 +85,7 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
   if (well_balanced()) {
     let nax = select(3, 2, is2d());
     for (var axis = 0; axis < nax; axis++) {
-      // Not along an axis whose slope is dropped: its neighbours would be edge ghosts.
+      // Not along an axis whose slope is dropped: its neighbors would be edge ghosts.
       if (mask[axis] == 0.0) { continue; }
       let below = dphi_blk(slot, l, axis, -1);
       let above = dphi_blk(slot, l, axis, 0);
@@ -114,7 +114,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (s.kind == 2) { return; }
 
   var pr: Q;
-  // A neighbour part way through a longer step holds primitives of an earlier time. Its ghost
+  // A neighbor part way through a longer step holds primitives of an earlier time. Its ghost
   // here was filled from its half-step prediction, and is predicted in place, like one next
   // to a coarser block.
   let stale = BINS_ON && s.slot != inv.slot && blk_leaf(s.slot) && !blk_active(s.slot);
@@ -123,7 +123,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     pr = predict_cell(s.slot, s.l, vec3<f32>(1.0), grav_at(src));
     pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s));
   } else {
-    // Transverse neighbours of a ghost at the rim of the face would be edge ghosts.
+    // Transverse neighbors of a ghost at the rim of the face would be edge ghosts.
     let rim = (inv.l == vec3<i32>(0)) | (inv.l == vec3<i32>(BS - 1));
     // The field atlas holds no acceleration for ghosts; use the adjacent interior cell's.
     let near = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));

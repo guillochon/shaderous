@@ -1,7 +1,7 @@
 // Unsplit MUSCL-Hancock update on the block grid: the same gather as hydro/update.wgsl, over
 // the cells of leaf blocks, with ghost cells read straight from the block's own storage.
 //
-// Flux matching at refinement boundaries. Where a leaf's face neighbour is refined, the coarse
+// Flux matching at refinement boundaries. Where a leaf's face neighbor is refined, the coarse
 // cell does not use its own flux through that face. It recomputes the fine fluxes instead,
 // from the fine blocks' stored states with the same function the fine cells use, and takes
 // their average. Both sides then agree on what crossed the face, so mass, momentum and energy
@@ -73,7 +73,7 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 // (seen, face), from the field atlas (which holds the potential on two ghost layers) plus the
 // uniform field, which is exact. `seen` is what the deviations from balance are measured
 // against: beyond a face of the domain the potential is that of the cell the state there is
-// taken from, like the state itself. `face` is what takes the pressure from a cell's centre
+// taken from, like the state itself. `face` is what takes the pressure from a cell's center
 // to its face: the same, except across a reflecting face of the domain, where it is the true
 // difference (the atlas's ghost cells there continue the potential in a straight line).
 fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
@@ -129,13 +129,13 @@ fn flux_scale(f: Flux, w: f32) -> Flux {
 }
 
 // The block being worked on: its bin, and whether this pass only deposits the second half of
-// its faster neighbours' fluxes (the block is half way through its step).
+// its faster neighbors' fluxes (the block is half way through its step).
 var<private> g_bin: u32 = 0u;
 var<private> g_deposit: bool = false;
 var<private> g_touched: bool = false;
 
-// Share of this block's step for which the flux of the neighbouring leaf `nb` is to be used
-// now: all of it for a neighbour in step with the block, half for a faster one, and in a
+// Share of this block's step for which the flux of the neighboring leaf `nb` is to be used
+// now: all of it for a neighbor in step with the block, half for a faster one, and in a
 // deposit pass nothing for the former.
 fn share(nb: i32) -> f32 {
   if (!BINS_ON) { return 1.0; }
@@ -144,7 +144,7 @@ fn share(nb: i32) -> f32 {
 }
 
 // Average of the fine fluxes through the face that coarse cell l shares with the refined
-// neighbour block `np`. `upper` says the fine blocks lie on the upper side of `np` along `axis`
+// neighbor block `np`. `upper` says the fine blocks lie on the upper side of `np` along `axis`
 // (the coarse cell is beyond them), in which case the face is the fine cells' upper face.
 fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
   let h = vec3<i32>(l >= vec3<i32>(BS / 2));
@@ -186,7 +186,7 @@ fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
 }
 
 // The flux through the face shared with the same-level leaf `np`, as `np` computes it, for a
-// neighbour that steps twice as often; otherwise the block's own flux `own`. `upper` as in
+// neighbor that steps twice as often; otherwise the block's own flux `own`. `upper` as in
 // fine_flux: `np` lies below the block, and the face is the upper face of its last cells.
 fn leaf_flux(own: Flux, np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
   if (blk_bin(np) >= g_bin) { return own; }
@@ -198,7 +198,7 @@ fn leaf_flux(own: Flux, np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
   return flux_scale(flux_between(atl(blk_origin(np), a), e, axis), 0.5);
 }
 
-// Replace the fluxes through faces shared with a refined neighbour.
+// Replace the fluxes through faces shared with a refined neighbor.
 fn match_faces(fl: Faces, slot: i32, axis: i32, l: vec3<i32>) -> Faces {
   var out = fl;
   if (l[axis] == 0) {
@@ -250,7 +250,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var fy = none;
   var fz = none;
   if (g_deposit) {
-    // Half way through the block's step: only what its faster neighbours carry across the
+    // Half way through the block's step: only what its faster neighbors carry across the
     // shared faces during their second step. A cell on no such face is copied as it is.
     fx = match_faces(none, slot, 0, l);
     fy = match_faces(none, slot, 1, l);

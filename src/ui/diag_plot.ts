@@ -117,7 +117,7 @@ function palette() {
   return colors;
 }
 
-/** The colour of a line with this trend. */
+/** The color of a line with this trend. */
 export function trendColor(t: -1 | 0 | 1): string {
   const c = palette();
   return t > 0 ? c.good : t < 0 ? c.bad : c.dim;
@@ -168,7 +168,7 @@ function trace(ctx: CanvasRenderingContext2D, xs: number[], ys: number[], x0: nu
   return [lo, hi];
 }
 
-/** A sparkline, coloured by its trend. */
+/** A sparkline, colored by its trend. */
 export function drawSpark(canvas: HTMLCanvasElement, xs: number[], ys: number[]) {
   const p = prepare(canvas);
   if (!p) return;
@@ -180,7 +180,7 @@ export function drawSpark(canvas: HTMLCanvasElement, xs: number[], ys: number[])
   trace(ctx, xs, ys, 1, 1.5, w - 2, h - 3);
 }
 
-/** The whole run: the line, coloured by its trend, with the range of the values and of the steps. */
+/** The whole run: the line, colored by its trend, with the range of the values and of the steps. */
 export function drawFull(canvas: HTMLCanvasElement, xs: number[], ys: number[], count: boolean) {
   const p = prepare(canvas);
   if (!p) return;

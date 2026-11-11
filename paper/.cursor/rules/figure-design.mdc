@@ -21,7 +21,7 @@ A script that needs slow or private inputs says so in its docstring and in `pape
 
 Every script imports `paper/figures/style.py` and calls `style.apply()`. It sets the fonts, sizes, line widths and the palette, so the figures look like one set. Change a style there, not in one script.
 
-- Size figures to the journal column: `style.COLUMN` for one column, `style.PAGE` for a full-width `figure*`. Do not scale a figure in LaTeX by more than about 10 per cent; redraw it instead.
+- Size figures to the journal column: `style.COLUMN` for one column, `style.PAGE` for a full-width `figure*`. Do not scale a figure in LaTeX by more than about 10 percent; redraw it instead.
 - Vector PDF for line art. Rasterize only dense scatter or images (`rasterized=True` on that artist) so the PDF stays small.
 - Every axis has a label with units in parentheses or brackets, the way the field writes them: "Time (d)", "$\log_{10} M$ [$M_\odot$]".
 

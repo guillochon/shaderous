@@ -1,8 +1,8 @@
 // The 7-point Laplacian on one tree level of the block grid. Requires amr/gravity/common.wgsl,
 // gravity/multipole_eval.wgsl, and PHI: a storage texture with read access.
 //
-// g_nb returns (value, diag): the neighbour's contribution to the sum, and 1 if it added the
-// centre cell to the diagonal. h^2 Lap(phi) = sum - (6 + diag total) * phi_c.
+// g_nb returns (value, diag): the neighbor's contribution to the sum, and 1 if it added the
+// center cell to the diagonal. h^2 Lap(phi) = sum - (6 + diag total) * phi_c.
 
 fn g_nb(slot: i32, o: vec3<i32>, l: vec3<i32>, axis: i32, upper: bool) -> vec2<f32> {
   var q = l;

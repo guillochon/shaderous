@@ -1,4 +1,4 @@
-// Multipole reduction source: mass and its first and second moments about the box centre.
+// Multipole reduction source: mass and its first and second moments about the box center.
 #include "hydro/common.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;

@@ -1,6 +1,6 @@
-// One colour of a red-black Gauss-Seidel sweep over the blocks of one tree level, in place.
-// The colouring is global (parity of the cell's index across the level), so cells of one
-// colour only ever read the other, also across block faces.
+// One color of a red-black Gauss-Seidel sweep over the blocks of one tree level, in place.
+// The coloring is global (parity of the cell's index across the level), so cells of one
+// color only ever read the other, also across block faces.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
@@ -14,9 +14,9 @@
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  // Only cells of this colour get an invocation: along x a block takes half as many threads
+  // Only cells of this color get an invocation: along x a block takes half as many threads
   // as it has cells, and the cell's x follows from the parity of y + z. (Block sizes above one
-  // cell are even, so a cell's colour does not depend on where its block sits.)
+  // cell are even, so a cell's color does not depend on where its block sits.)
   let B = GL.bsize;
   let half = u32(max(B / 2, 1));
   let b = gid.x / half;

@@ -32,11 +32,11 @@ fn unrot(v: vec3<f32>, axis: i32) -> vec3<f32> {
   return v;
 }
 
-// State on one side of a face: the half-step state plus half the edge increment `s` towards
+// State on one side of a face: the half-step state plus half the edge increment `s` toward
 // that face (sgn = +1 for the cell's upper face, -1 for its lower). First-order cells have none.
 //
 // `lo` = (density, pressure) is a lower bound from the two cells that share the face. The
-// limiter lets a face value reach the neighbouring cell's value, and the slopes come from the
+// limiter lets a face value reach the neighboring cell's value, and the slopes come from the
 // state at the start of the step while the value they are added to is half a step on. At a
 // jump of several decades (the edge of a star in near-vacuum) the face density of the dense
 // cell can therefore land at almost nothing, still positive, with the pressure not following:
@@ -77,11 +77,11 @@ struct Faces { lo: Flux, hi: Flux }
 
 // Both faces of cell c along one axis. w0 and p0 are the cell's own primitives and half-step state.
 //
-// Walls: where a neighbour is solid, the face between is a reflecting wall, and the cells
+// Walls: where a neighbor is solid, the face between is a reflecting wall, and the cells
 // beyond it are replaced by the images of the gas cells on this side (the cell itself for the
-// first, its opposite neighbour for the second). The Riemann problem between a state and its
+// first, its opposite neighbor for the second). The Riemann problem between a state and its
 // image has no mass or energy flux, only pressure. A gas cell two away from a wall sees the
-// image of its neighbour there, which is what that neighbour sees: both get the same flux.
+// image of its neighbor there, which is what that neighbor sees: both get the same flux.
 fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   var wm2 = load_q(c - 2 * e);
   var wm1 = load_q(c - e);
@@ -89,7 +89,7 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   var wp2 = load_q(c + 2 * e);
   var pm1 = load_pred(c - e);
   var pp1 = load_pred(c + e);
-  // The neighbours as they are (solid or not), for the diffusive fluxes.
+  // The neighbors as they are (solid or not), for the diffusive fluxes.
   let nm1 = wm1;
   let np1 = wp1;
   // Potential steps between the five cells, lowest pair first: as the deviations see them,
@@ -111,7 +111,7 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
     if (below) { wm2 = q_mirror(wp1, axis); d.x = -d.z; } else if (q_solid(wm2)) { wm2 = q_mirror(wm1, axis); d.x = 0.0; }
     if (above) { wp2 = q_mirror(wm1, axis); d.w = -d.y; } else if (q_solid(wp2)) { wp2 = q_mirror(wp1, axis); d.w = 0.0; }
   }
-  // A neighbour that is this cell's image in a wall (the step the deviations see is not the
+  // A neighbor that is this cell's image in a wall (the step the deviations see is not the
   // true one) reaches the wall from the other side: the negative of the true step.
   let sm = edge_up(wm2, wm1, w0, d.x, d.y, select(-t.x, t.x, d.y == t.x));
   let lo = edge_dn(wm1, w0, wp1, d.y, d.z, t.x);

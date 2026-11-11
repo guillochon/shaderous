@@ -1,6 +1,6 @@
 // Second half of the gravity kick, applied after the hydro update with the acceleration from
 // the potential of the updated density. Together with the half kick in hydro/update.wgsl the
-// momentum source is dt/2 (rho^n g^n + rho^{n+1} g^{n+1}), i.e. time-centred.
+// momentum source is dt/2 (rho^n g^n + rho^{n+1} g^{n+1}), i.e. time-centered.
 #include "hydro/common.wgsl"
 #include <eos>
 #include "hydro/dual_energy.wgsl"

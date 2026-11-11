@@ -1,4 +1,4 @@
-// Transfer function: a colour map plus a piecewise-linear opacity curve, baked to 256 RGBA texels.
+// Transfer function: a color map plus a piecewise-linear opacity curve, baked to 256 RGBA texels.
 
 type RGB = [number, number, number];
 
@@ -50,7 +50,7 @@ export const COLORMAPS: Record<string, RGB[]> = {
     [192, 64, 0], [224, 96, 0], [255, 128, 1], [255, 160, 33], [255, 192, 65], [255, 224, 97],
     [255, 255, 129], [255, 255, 161], [255, 255, 193], [255, 255, 225], [255, 255, 255],
   ],
-  // Diverging: two hues meeting at a light centre, for signed fields
+  // Diverging: two hues meeting at a light center, for signed fields
   coolwarm: [
     [59, 76, 192], [78, 104, 216], [98, 130, 234], [119, 154, 247], [141, 176, 254], [163, 194, 254],
     [185, 208, 249], [204, 217, 237], [221, 220, 220], [236, 211, 197], [245, 196, 172], [247, 176, 147],
@@ -122,7 +122,7 @@ export function bakeTransfer(colormap: string, pts: OpacityPoint[]): Uint8Array<
 
 /**
  * Small canvas editor for the opacity curve: drag points, double-click to add or remove.
- * Horizontal, the field value runs left to right and opacity upward; vertical (a colour bar),
+ * Horizontal, the field value runs left to right and opacity upward; vertical (a color bar),
  * the value runs upward and opacity to the right.
  */
 export class OpacityEditor {
@@ -232,7 +232,7 @@ export class OpacityEditor {
       g.fillRect(0, 0, w, h);
     }
     const pts = this.points.map((p) => this.at(p, w, h));
-    // A dark edge keeps the curve visible over the bright end of a colour map.
+    // A dark edge keeps the curve visible over the bright end of a color map.
     for (const [style, width] of [['rgba(0,0,0,0.6)', 3.5], ['#fff', 1.5]] as const) {
       g.strokeStyle = style;
       g.lineWidth = width;

@@ -31,7 +31,7 @@ fn phi_self(q: vec3<i32>) -> f32 {
 // `seen` is what the deviations from balance are measured against: a cell beyond a boundary
 // has the potential of the cell its state is taken from (its mirror image at a reflecting
 // face, the edge cell at an outflow face), like the state itself. `face` is what takes the
-// pressure from a cell's centre to its face: the same, except across a reflecting face,
+// pressure from a cell's center to its face: the same, except across a reflecting face,
 // where it is the true difference (the potential continued in a straight line), so that the
 // pressure on the wall is the hydrostatic one. The external part is exact, as in dphi_half.
 fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {

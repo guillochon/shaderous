@@ -45,7 +45,7 @@ export const isothermalCollapse: Problem = {
       }
       return v;
     };
-    // Normalise to an rms Mach number of 5 (c_s = 0.1).
+    // Normalize to an rms Mach number of 5 (c_s = 0.1).
     let sum = 0;
     for (let i = 0; i < 512; i++) {
       const v = velocity(rnd() - 0.5, rnd() - 0.5, rnd() - 0.5);

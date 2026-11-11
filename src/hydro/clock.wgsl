@@ -31,7 +31,7 @@ fn main() {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
   }
   // Point masses: the gas knows nothing of two masses passing close to one another. Each pair
-  // limits the step to a fraction of the time in which it turns about its common centre,
+  // limits the step to a fraction of the time in which it turns about its common center,
   // sqrt(r^3 / G M), and of the time it takes to cross its own separation, r / v, with r
   // softened as the pull between the two is (gravity/bh_kick.wgsl). At the usual CFL number of
   // 0.8 the fraction is a twentieth: some 125 steps for a circular orbit, and an orbit of

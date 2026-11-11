@@ -2,10 +2,10 @@
 // slopes, and records the two per-cell decisions the update needs. Returns
 //   a = (rho, vx, vy, vz) at the half step
 //   b = (p, scalar at the half step, shock flag, first-order flag)
-// `mask` multiplies the slopes per axis; it is 1 except where a neighbour along that axis is
+// `mask` multiplies the slopes per axis; it is 1 except where a neighbor along that axis is
 // unavailable (ghost cells at the edge of a block next to a coarser one).
-// `lo` and `hi` are the potential differences from the lower neighbour to the cell and from the
-// cell to the upper neighbour, for the well-balanced pressure slopes (hydro/q.wgsl): zero
+// `lo` and `hi` are the potential differences from the lower neighbor to the cell and from the
+// cell to the upper neighbor, for the well-balanced pressure slopes (hydro/q.wgsl): zero
 // when that is off.
 // Requires P, hydro/q.wgsl, and g_dx and g_dt set.
 fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>, mask: vec3<f32>, lo: PhiSteps, hi: PhiSteps) -> Q {
@@ -18,7 +18,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   var zm = zm0;
   var zp = zp0;
   if (has_solids()) {
-    // A solid neighbour is a wall: the cell sees its own image there.
+    // A solid neighbor is a wall: the cell sees its own image there.
     // (The potential is mirrored with it: no difference across the wall.)
     if (q_solid(xm)) { xm = q_mirror(q, 0); dl.x = 0.0; }
     if (q_solid(xp)) { xp = q_mirror(q, 0); dr.x = 0.0; }

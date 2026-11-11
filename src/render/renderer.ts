@@ -16,7 +16,7 @@ export interface ViewState {
   yaw: number;
   pitch: number;
   dist: number;
-  /** Slice view: magnification (1 fits the box) and the point of the slice at the view centre. */
+  /** Slice view: magnification (1 fits the box) and the point of the slice at the view center. */
   zoom: number;
   cx: number;
   cy: number;
@@ -42,7 +42,7 @@ export const defaultView = (): ViewState => ({
   showBlocks: true,
 });
 
-/** The orbit camera: around the box centre (the box is [-0.5, 0.5]^3), z up. */
+/** The orbit camera: around the box center (the box is [-0.5, 0.5]^3), z up. */
 export function cameraFrame(v: ViewState, aspect: number) {
   const cp = Math.cos(v.pitch);
   const eye = [v.dist * cp * Math.cos(v.yaw), v.dist * cp * Math.sin(v.yaw), v.dist * Math.sin(v.pitch)];

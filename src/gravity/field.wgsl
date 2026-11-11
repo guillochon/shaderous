@@ -2,7 +2,7 @@
 //   xyz = acceleration: self-gravity from the new potential, plus the point masses' pull minus
 //         the frame's own acceleration when there are any
 //   w   = potential extrapolated half a step ahead, which the next update uses for its
-//         time-centred energy source (1.5 phi - 0.5 phi_old for self-gravity)
+//         time-centered energy source (1.5 phi - 0.5 phi_old for self-gravity)
 // The hydro passes then need one load per cell instead of six potential loads.
 #include "hydro/common.wgsl"
 #include "gravity/accel.wgsl"

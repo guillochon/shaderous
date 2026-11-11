@@ -6,7 +6,7 @@
 //                    NumVariables, DatasetNames, VariableNames
 //   Levels           int32  [blocks]
 //   LogicalLocations int64  [blocks, 3]     position at the block's own level
-//   x1f, x2f, x3f    float32 [blocks, n+1]  cell faces;   x1v, x2v, x3v  [blocks, n]  centres
+//   x1f, x2f, x3f    float32 [blocks, n+1]  cell faces;   x1v, x2v, x3v  [blocks, n]  centers
 //   prim             float32 [variables, blocks, nx3, nx2, nx1]
 //
 // A uniform grid is one block. The passive scalar is the variable "r0" of "prim". Files this
@@ -95,15 +95,15 @@ export async function writeAthdf(s: Snapshot, h5?: H5, gzip = 0): Promise<Uint8A
   for (let a = 0; a < 3; a++) {
     const n = s.blockSize[a];
     const faces = new Float32Array(nb * (n + 1));
-    const centres = new Float32Array(nb * n);
+    const centers = new Float32Array(nb * n);
     for (let b = 0; b < nb; b++) {
       const dx = (s.hi[a] - s.lo[a]) / (s.rootSize[a] << s.levels[b]);
       const x0 = s.lo[a] + s.locations[3 * b + a] * n * dx;
       for (let i = 0; i <= n; i++) faces[b * (n + 1) + i] = x0 + i * dx;
-      for (let i = 0; i < n; i++) centres[b * n + i] = x0 + (i + 0.5) * dx;
+      for (let i = 0; i < n; i++) centers[b * n + i] = x0 + (i + 0.5) * dx;
     }
     f.create_dataset({ name: `x${a + 1}f`, data: faces, shape: [nb, n + 1], dtype: '<f4' });
-    f.create_dataset({ name: `x${a + 1}v`, data: centres, shape: [nb, n], dtype: '<f4' });
+    f.create_dataset({ name: `x${a + 1}v`, data: centers, shape: [nb, n], dtype: '<f4' });
   }
 
   // The cell data is written one variable at a time, so no second copy of all of it is needed:

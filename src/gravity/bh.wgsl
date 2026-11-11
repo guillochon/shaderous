@@ -3,10 +3,10 @@
 // are any, 1 if there is no Poisson potential to add them to).
 // Layout matches packMasses() in src/sim.ts.
 struct Mass {
-  pos: vec4<f32>,     // position relative to the box centre; G M in w
+  pos: vec4<f32>,     // position relative to the box center; G M in w
   vel: vec4<f32>,     // velocity; softening length in w
   acc: vec4<f32>,     // its acceleration in this frame; sink radius in w
-  sink: vec4<f32>,    // x: removal rate at the sink's centre, in units of sqrt(G M / r_sink^3)
+  sink: vec4<f32>,    // x: removal rate at the sink's center, in units of sqrt(G M / r_sink^3)
                       // y: gas mass accreted so far
                       // z: the rate in use this step, per unit time (set as the mass drifts, so
                       //    that it does not change when the mass grows in mid-step)
@@ -20,7 +20,7 @@ fn mass_count() -> u32 {
   return u32(P.bh.x);
 }
 
-// Centre of a uniform-grid cell. A 2D run lies in the plane z = 0, where the masses are.
+// Center of a uniform-grid cell. A 2D run lies in the plane z = 0, where the masses are.
 fn cell_pos(c: vec3<i32>) -> vec3<f32> {
   let x = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
   return vec3<f32>(x.xy, select(x.z, 0.0, P.dims.z == 1u));
@@ -40,7 +40,7 @@ fn bh_phi(x: vec3<f32>, m: Mass, ahead: f32) -> f32 {
 }
 
 // Fraction of a cell's gas (density rho, at x) that a mass's sink takes in a step of length dt.
-// The rate falls smoothly from the centre to nothing at the sink radius, and the gas is never
+// The rate falls smoothly from the center to nothing at the sink radius, and the gas is never
 // taken below the density floor. The pass that removes the gas and the reduction that hands it
 // to the mass both call this with the same arguments, so nothing is lost between them.
 fn sink_fraction(m: Mass, x: vec3<f32>, rho: f32, dt: f32) -> f32 {

@@ -1,7 +1,7 @@
 import { execSync } from 'node:child_process';
 import { defineConfig } from 'vitest/config';
 
-// Shown in the page footer and in error reports, so a stale cached page is recognisable.
+// Shown in the page footer and in error reports, so a stale cached page is recognizable.
 function build(): string {
   try {
     const hash = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();

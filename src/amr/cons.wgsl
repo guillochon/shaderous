@@ -70,7 +70,7 @@ fn slope_between(uc: Cons, m: Cons, p: Cons) -> Cons {
 // covers. `par` is the fine cell's parity (0 or 1) along each axis.
 //
 // Each axis's slope is limited on its own, which keeps the fine values between the coarse
-// neighbours along that axis. In a corner of a steep gradient the three add up, and the fine
+// neighbors along that axis. In a corner of a steep gradient the three add up, and the fine
 // cell furthest down the gradient can undershoot to nothing or below: a density that is then
 // floored while its momentum is not, which makes a ghost cell moving at millions. So all the
 // slopes are scaled back together, by the one factor that keeps the density and both energies

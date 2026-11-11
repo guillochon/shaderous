@@ -1,5 +1,5 @@
-// Refinement indicator: for every leaf block, the largest normalised jump in density or
-// pressure between a cell's two neighbours along any axis, |q+ - q-| / (q+ + q-).
+// Refinement indicator: for every leaf block, the largest normalized jump in density or
+// pressure between a cell's two neighbors along any axis, |q+ - q-| / (q+ + q-).
 // With self-gravity a block is also refined where the Jeans length is short: that indicator is
 // scaled so it crosses the refinement threshold when the Jeans length falls below the
 // requested number of cells.
@@ -27,7 +27,7 @@ fn solid_surface(c: vec3<i32>) -> bool {
 
 fn jump(c: vec3<i32>, e: vec3<i32>) -> f32 {
   // A negative density marks a solid cell. The surface of an obstacle is always refined, so
-  // its shape is kept at the finest resolution. A gas cell's solid neighbour holds no flow to
+  // its shape is kept at the finest resolution. A gas cell's solid neighbor holds no flow to
   // compare with.
   let sp = textureLoad(W1, c + e, 0).x;
   let sm = textureLoad(W1, c - e, 0).x;

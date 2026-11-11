@@ -1,6 +1,6 @@
 // Resamples the block grid onto the uniform display volume that the ray-marcher and slice
-// view read. Each display voxel takes the value of the leaf cell under its centre.
-//   r = displayed quantity, normalised to [0, 1]
+// view read. Each display voxel takes the value of the leaf cell under its center.
+//   r = displayed quantity, normalized to [0, 1]
 //   g, b, a = 1 on the lower boundary of a block, one display voxel wide, as seen in a z-, x-
 //             or y-normal slice
 #include "hydro/common.wgsl"

@@ -157,7 +157,7 @@ const cellIndex = (c: LeafCells, q: number, n: number, box: number, ndim: number
 
 const rhoAt = (u1: Float32Array, n: number, i: number, j: number, k: number) => u1[((k * n + j) * n + i) * 4];
 
-/** Density along a grid axis through the box centre, plus the largest deviation across the transverse plane. */
+/** Density along a grid axis through the box center, plus the largest deviation across the transverse plane. */
 function axisProfile(u1: Float32Array, n: number, axis: number) {
   const prof = new Float64Array(n);
   let spread = 0;
@@ -204,7 +204,7 @@ const maxDiff = (a: Float64Array, b: Float64Array) => a.reduce((m, v, i) => Math
 function shockRadius(u1: Float32Array, n: number, box: number, dir?: [number, number, number]) {
   const dx = box / n;
   if (dir) {
-    // Along a ray from the centre: last sample (outside-in) above the half-way density.
+    // Along a ray from the center: last sample (outside-in) above the half-way density.
     const norm = Math.hypot(...dir);
     let peak = 0;
     const vals: [number, number][] = [];
@@ -796,7 +796,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-tidal-disruption',
     name: 'Adaptive mesh: tidal disruption (128 finest, 2 levels)',
     criterion:
-      'The perturber reaches pericentre within 2% of r_t / beta; while all the gas is in the box its centre of mass stays within 0.005 stellar radii of the box centre; the star is disrupted',
+      'The perturber reaches pericenter within 2% of r_t / beta; while all the gas is in the box its center of mass stays within 0.005 stellar radii of the box center; the star is disrupted',
     async run(gpu) {
       const orbit = tdeOrbit({ q: 100, beta: 1 });
       return withAmr(gpu, tidalDisruption, 128, { amrLevels: 2, tEnd: 0 }, async (sim) => {
@@ -813,14 +813,14 @@ export const TESTS: TestDef[] = [
           rMin = Math.min(rMin, Math.hypot(...last.perturber!));
           if (last.mass >= 0.999 * d0.mass) comMax = Math.max(comMax, Math.hypot(...last.com));
         }
-        // The orbit is sampled every 0.25, so the closest sample can sit a little outside pericentre.
+        // The orbit is sampled every 0.25, so the closest sample can sit a little outside pericenter.
         const rErr = (rMin - orbit.rp) / orbit.rp;
         const drop = last.ranges[0][1] / d0.ranges[0][1];
         const st = sim.tree.stats();
         return {
           pass: rErr > -0.02 && rErr < 0.03 && comMax < 0.005 && drop < 0.5,
           metrics: {
-            closest_sampled_separation: rMin, pericentre_expected: orbit.rp, max_com_offset_while_contained: comMax,
+            closest_sampled_separation: rMin, pericenter_expected: orbit.rp, max_com_offset_while_contained: comMax,
             peak_density_final_ratio: drop, leaf_blocks: st.leaves, fraction_of_uniform_cells: st.cells / 128 ** 3, regrids: sim.regrids, steps,
           },
         };
@@ -1104,7 +1104,7 @@ export const TESTS: TestDef[] = [
       const a = 0.01;
       const k = 2 * Math.PI;
       const rate = (kappa * k * k * (gamma - 1)) / gamma;
-      // T = 1 + a cos(k x) at p = 1. As the wave fades the gas flows towards where it was hot;
+      // T = 1 + a cos(k x) at p = 1. As the wave fades the gas flows toward where it was hot;
       // starting with that velocity leaves no sound wave behind.
       const wave = stillGas({
         id: 'temperature-wave', tEnd: 2,
@@ -1174,7 +1174,7 @@ export const TESTS: TestDef[] = [
     id: 'point-mass-sink',
     name: 'Point masses: the sink takes exactly what the gas loses',
     criterion:
-      'A softened mass at the centre of a closed box of gas accretes; gas mass plus accreted mass stays constant to 1e-5, G M grows by G times the accreted mass, and the mass stays at the centre (2D and 3D, uniform and adaptive); the same holds for a mass added in mid-run',
+      'A softened mass at the center of a closed box of gas accretes; gas mass plus accreted mass stays constant to 1e-5, G M grows by G times the accreted mass, and the mass stays at the center (2D and 3D, uniform and adaptive); the same holds for a mass added in mid-run',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -1216,7 +1216,7 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'binary-orbit',
-    name: 'Point masses: a binary in a disc keeps its orbit (256^2)',
+    name: 'Point masses: a binary in a disk keeps its orbit (256^2)',
     criterion:
       'Over one period of the softened circular orbit the separation stays within 0.5% of 1, the masses return to within 0.03 of where they started, their total momentum stays below 1e-4, and both accrete',
     async run(gpu) {
@@ -1249,12 +1249,12 @@ export const TESTS: TestDef[] = [
     id: 'point-mass-encounter',
     name: 'Point masses: the timestep follows a close encounter',
     criterion:
-      'Two masses on an orbit of eccentricity 0.9 in near-empty gas, whose own timestep is several times the pericentre passage: over two periods the mean step of each 96th of a period stays within a sixteenth of the CFL number times the lesser of r / v and sqrt(r^3 / G M) (to 10%), and the energy of the orbit is conserved to 1%',
+      'Two masses on an orbit of eccentricity 0.9 in near-empty gas, whose own timestep is several times the pericenter passage: over two periods the mean step of each 96th of a period stays within a sixteenth of the CFL number times the lesser of r / v and sqrt(r^3 / G M) (to 10%), and the energy of the orbit is conserved to 1%',
     async run(gpu) {
       const ecc = 0.9;
       const soft = 0.02;
       const far = 1 + ecc;
-      // Apocentre of a Kepler orbit with G M = 1 and semi-major axis 1.
+      // Apocenter of a Kepler orbit with G M = 1 and semi-major axis 1.
       const v = Math.sqrt((1 - ecc) / (1 + ecc));
       const pair = stillGas({
         id: 'encounter', box: 8, tEnd: 0,
@@ -1516,7 +1516,7 @@ export const TESTS: TestDef[] = [
     id: 'tidal-disruption',
     name: 'Tidal disruption (mass ratio 100, beta = 1)',
     criterion:
-      'The perturber reaches pericentre within 2% of r_t / beta and of the Kepler time; while all the gas is still in the box its centre of mass stays within 0.005 stellar radii of the box centre; the star is disrupted (peak density falls by more than half)',
+      'The perturber reaches pericenter within 2% of r_t / beta and of the Kepler time; while all the gas is still in the box its center of mass stays within 0.005 stellar radii of the box center; the star is disrupted (peak density falls by more than half)',
     async run(gpu) {
       const orbit = tdeOrbit({ q: 100, beta: 1 });
       return withSim(gpu, tidalDisruption, 64, { tEnd: 0 }, async (sim) => {
@@ -1546,8 +1546,8 @@ export const TESTS: TestDef[] = [
         return {
           pass: rErr < 0.02 && tErr < 0.02 && comMax < 0.005 && tExit > orbit.tPeri && drop < 0.5,
           metrics: {
-            pericentre: rMin, pericentre_expected: orbit.rp, pericentre_error: rErr,
-            pericentre_time: tMin, pericentre_time_kepler: orbit.tPeri,
+            pericenter: rMin, pericenter_expected: orbit.rp, pericenter_error: rErr,
+            pericenter_time: tMin, pericenter_time_kepler: orbit.tPeri,
             max_com_offset_while_contained: comMax, debris_starts_leaving_at: tExit,
             final_com_offset_of_gas_in_box: Math.hypot(...last.com),
             central_density_initial: d0.ranges[0][1], central_density_lane_emden: TDE_STAR.rhoc,

@@ -1,12 +1,12 @@
-// Neighbour sum of the 7-point Laplacian with boundary handling. Requires PHI (a storage
+// Neighbor sum of the 7-point Laplacian with boundary handling. Requires PHI (a storage
 // texture with read access), P, L and phi_boundary().
 //
 // nb_sum returns (sum, diag) such that  h^2 Lap(phi) = sum - diag * phi_c.
-// Periodic: neighbours wrap. Isolated: Dirichlet data at the face, ghost = 2 phi_face - phi_c,
+// Periodic: neighbors wrap. Isolated: Dirichlet data at the face, ghost = 2 phi_face - phi_c,
 // which moves one phi_c per boundary face onto the diagonal. Coarse levels solve for the
 // error, whose boundary value is zero.
 
-// Contribution of one neighbour: (value added to the sum, 1 if it added to the diagonal).
+// Contribution of one neighbor: (value added to the sum, 1 if it added to the diagonal).
 fn nb_one(c: vec3<i32>, o: vec3<i32>) -> vec2<f32> {
   let n = i32(L.n);
   let q = c + o;

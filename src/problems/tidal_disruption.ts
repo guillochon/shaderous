@@ -5,11 +5,11 @@ import { laneEmden, polytropeScales } from './lane_emden';
 //
 // Units: G = M_star = R_star = 1, so the star's dynamical time is 1. The star is an n = 3/2
 // polytrope of gamma = 5/3 gas. The run is in the star's rest frame: the frame accelerates
-// with the gas's centre of mass, so the star stays at the box centre while the point mass
-// swings past. The orbit lies in the x-y plane with pericentre on the +x axis.
+// with the gas's center of mass, so the star stays at the box center while the point mass
+// swings past. The orbit lies in the x-y plane with pericenter on the +x axis.
 //
 //   mass ratio q = M_perturber / M_star        tidal radius r_t = R_star q^(1/3)
-//   impact parameter beta = r_t / r_p          beta = 1 puts pericentre at the tidal radius
+//   impact parameter beta = r_t / r_p          beta = 1 puts pericenter at the tidal radius
 //
 // The boundaries let gas leave but not enter. Once debris starts to leave, the frame follows
 // the gas that is still in the box.
@@ -18,14 +18,14 @@ export const TDE = { n: 1.5, M: 1, R: 1, G: 1, start: 3, rhoAmb: 1e-6, rhoCut: 1
 const star = laneEmden(TDE.n);
 export const TDE_STAR = { ...polytropeScales(star, TDE.M, TDE.R, TDE.G), theta: (s: number) => star.theta(s) };
 
-/** Relative parabolic orbit about the star at the origin: state at separation `r` before pericentre. */
+/** Relative parabolic orbit about the star at the origin: state at separation `r` before pericenter. */
 export function parabolicOrbit(q: number, beta: number, r: number) {
   const rt = TDE.R * Math.cbrt(q);
   const rp = rt / beta;
   const mu = TDE.G * TDE.M * (1 + q);
   const f = -Math.acos(Math.min(1, Math.max(-1, (2 * rp) / r - 1))); // true anomaly, negative on the way in
   const speed = Math.sqrt(mu / (2 * rp));
-  // Time until pericentre, from Barker's equation.
+  // Time until pericenter, from Barker's equation.
   const D = Math.tan(-f / 2);
   const tPeri = Math.sqrt((2 * rp ** 3) / mu) * (D + D ** 3 / 3);
   return {
@@ -39,7 +39,7 @@ export function parabolicOrbit(q: number, beta: number, r: number) {
 
 const orbitFor = (p: Record<string, number>) => {
   const rt = TDE.R * Math.cbrt(p.q);
-  // Start a few tidal radii out, and never inside pericentre.
+  // Start a few tidal radii out, and never inside pericenter.
   return parabolicOrbit(p.q, p.beta, Math.max(TDE.start * rt, (1.5 * rt) / p.beta));
 };
 
@@ -58,13 +58,13 @@ export const tidalDisruption: Problem = {
   rhoFloor: 1e-10,
   pFloor: 1e-14,
   // Ambient gas and the outermost wisps of debris: no hotter than the star's interior, and no
-  // faster than a few times the orbital speed at pericentre.
+  // faster than a few times the orbital speed at pericenter.
   fluff: { rho: 1e-5 * TDE_STAR.rhoc, u: 1.5, v: 20 },
   // Look down on the orbital plane.
   view: { field: 0, log: true, mode: 'volume', pitch: 1.15 },
   params: [
     { id: 'q', label: 'Perturber : star mass', title: 'Mass of the black hole over the star\u2019s. Sets the orbit: changing it starts the run again', value: 100, min: 1, max: 1e6, factor: 2 },
-    { id: 'beta', label: 'Impact parameter \u03b2', title: 'Tidal radius over pericentre distance: above 1 the star passes inside the tidal radius. Changing it starts the run again', value: 1, min: 0.2, max: 8, step: 0.1 },
+    { id: 'beta', label: 'Impact parameter \u03b2', title: 'Tidal radius over pericenter distance: above 1 the star passes inside the tidal radius. Changing it starts the run again', value: 1, min: 0.2, max: 8, step: 0.1 },
   ],
   gasFrame: true,
   star: { n: TDE.n, K: TDE_STAR.K, rhoCut: TDE.rhoCut * TDE_STAR.rhoc, rhoAmb: TDE.rhoAmb * TDE_STAR.rhoc },

@@ -5,7 +5,7 @@
 // src/amr/amr_sim.ts and must match:
 //   0  padded pass over LA          1  interior pass over LU       2  interior pass over LL
 //   3..7   multigrid, all cells of LA at sublevels of 16, 8, 4, 2, 1 cells per block side
-//   8..12  the same for one colour of a red-black sweep
+//   8..12  the same for one color of a red-black sweep
 // followed by the totals: ARGS[60] block updates, ARGS[61] blocks assembled.
 #include "hydro/common.wgsl"
 
@@ -34,7 +34,7 @@ fn main() {
   put(0u, na * 3u, 3u, select(5u, 1u, flat));
   put(1u, nu * 2u, 2u, select(4u, 1u, flat));
   put(2u, nl * 2u, 2u, select(4u, 1u, flat));
-  // Multigrid (src/amr/gravity.ts, cells() and colour()).
+  // Multigrid (src/amr/gravity.ts, cells() and color()).
   put(3u, na * 2u, 2u, 4u);
   put(4u, na, 1u, 2u);
   put(5u, na, 1u, 1u);

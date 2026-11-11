@@ -1,4 +1,4 @@
-// Dual-energy synchronisation (after Bryan et al. 1995). Given the conservatively updated total
+// Dual-energy synchronization (after Bryan et al. 1995). Given the conservatively updated total
 // energy and the separately advected internal energy, returns the pair (E, e_int) to store.
 // E - KE is used where float32 resolves it; elsewhere the advected e_int is kept and E is
 // rebuilt from it. Barotropic equations of state slave e_int to the density.

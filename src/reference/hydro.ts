@@ -120,7 +120,7 @@ const NQ = 6;
 
 interface Pred {
   q: Float64Array;
-  su: Float64Array[]; // edge increments towards the upper face along x, y, z
+  su: Float64Array[]; // edge increments toward the upper face along x, y, z
   sd: Float64Array[]; // and from the lower face
   flag: number; // shock detector
   firstOrder: boolean; // positivity fallback: unpredicted state, no slopes
@@ -148,7 +148,7 @@ export class RefHydro {
     return (k * this.cfg.ny + j) * this.cfg.nx + i;
   }
 
-  /** Fill from primitive initial conditions; positions are cell centres with the box centred on 0. */
+  /** Fill from primitive initial conditions; positions are cell centers with the box centered on 0. */
   init(fn: (x: number, y: number, z: number) => { rho: number; vx: number; vy: number; vz: number; p: number; s: number }) {
     const { nx, ny, nz, dx, eos } = this.cfg;
     for (let k = 0; k < nz; k++)

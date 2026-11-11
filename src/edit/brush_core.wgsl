@@ -1,10 +1,10 @@
-// Editing brush: a soft-edged ball (a disc in 2D) that adds or removes gas, sets the velocity
+// Editing brush: a soft-edged ball (a disk in 2D) that adds or removes gas, sets the velocity
 // or scales the temperature of the cells inside it. Shared by the uniform and block grids.
 // Requires P, the equation of state and hydro/dual_energy.wgsl. Layout matches packBrush() in
 // src/sim.ts.
 struct Brush {
-  pos: vec4<f32>,   // centre in fractions of the box, radius (fraction of the box) in w
-  vel: vec4<f32>,   // velocity tool: the velocity to set; softness in w (0 hard edge, 1 soft to the centre)
+  pos: vec4<f32>,   // center in fractions of the box, radius (fraction of the box) in w
+  vel: vec4<f32>,   // velocity tool: the velocity to set; softness in w (0 hard edge, 1 soft to the center)
   kind: u32,        // 0 mass, 1 velocity, 2 temperature, 3 obstacle,
                     // 4 and 5 a change of equation of state (every cell, see brush_apply)
   amount: f32,      // mass: density added at full weight (negative removes);
@@ -15,7 +15,7 @@ struct Brush {
   // Obstacle: the outline is drawn on the screen and cut through the box along the line of
   // sight. `m` takes a point of the box (in fractions) to homogeneous screen coordinates.
   m: mat4x4<f32>,
-  shape: vec4<f32>,                // ellipse: centre and half-axes
+  shape: vec4<f32>,                // ellipse: center and half-axes
   verts: array<vec4<f32>, 16>,     // polygon: two vertices per element
 }
 @group(0) @binding(1) var<uniform> B: Brush;
@@ -47,7 +47,7 @@ fn in_outline(x: vec3<f32>) -> bool {
     let d = (s - B.shape.xy) / B.shape.zw;
     return dot(d, d) <= 1.0;
   }
-  // Even-odd rule: count the edges a ray towards +x crosses.
+  // Even-odd rule: count the edges a ray toward +x crosses.
   var inside = false;
   var j = B.nvert - 1u;
   for (var i = 0u; i < B.nvert; i++) {

@@ -3,7 +3,7 @@
 //   0             gas mass
 //   1 + 7 i ...   for mass i: its pull on the gas (m a, 3), then what its sink takes from the
 //                 cell this step: mass (1) and momentum (3)
-// `vol` is the cell's volume, `x` its centre, u1 its (rho, momentum), `dt` the step.
+// `vol` is the cell's volume, `x` its center, u1 its (rho, momentum), `dt` the step.
 fn bh_cell(u1: vec4<f32>, vol: f32, x: vec3<f32>, dt: f32) -> Red {
   var r: Red;
   for (var k = 0u; k < 29u; k++) { r[k] = 0.0; }

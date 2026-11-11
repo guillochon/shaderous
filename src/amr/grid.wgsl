@@ -43,7 +43,7 @@ fn atl(o: vec3<i32>, l: vec3<i32>) -> vec3<i32> {
   return o + l;
 }
 
-// Centre of local cell l, relative to the box centre.
+// Center of local cell l, relative to the box center.
 fn blk_pos(slot: i32, l: vec3<i32>) -> vec3<f32> {
   var x = (vec3<f32>(blk_coord(slot) * BS + l) + 0.5) * blk_dx(slot) - 0.5 * P.box;
   if (is2d()) { x.z = 0.0; }
@@ -51,9 +51,9 @@ fn blk_pos(slot: i32, l: vec3<i32>) -> vec3<f32> {
 }
 
 // Where the value of a (possibly ghost) cell comes from.
-//   kind 0: cell `l` of block `slot` at the same level: the cell itself, a neighbour's cell, or
+//   kind 0: cell `l` of block `slot` at the same level: the cell itself, a neighbor's cell, or
 //           its image in a physical boundary (then flip / side say how to treat the velocity)
-//   kind 1: beyond a face whose neighbour is one level coarser; `slot` is that coarser leaf
+//   kind 1: beyond a face whose neighbor is one level coarser; `slot` is that coarser leaf
 //   kind 2: an edge or corner ghost, which nothing uses
 struct Src { kind: i32, slot: i32, l: vec3<i32>, flip: vec3<f32>, side: vec3<f32> }
 
@@ -71,7 +71,7 @@ fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
   let upper = l[axis] >= BS;
   let nb = bt(slot, 6u + u32(2 * axis) + u32(upper));
   if (nb >= 0) {
-    // Same-level neighbour (periodic wrap included).
+    // Same-level neighbor (periodic wrap included).
     s.slot = nb;
     s.l[axis] = l[axis] + select(BS, -BS, upper);
   } else if (nb == -1) {
@@ -92,7 +92,7 @@ fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
 // Local index along an axis of the cell whose state stands for cell i of a block's row, where
 // i may lie up to two cells outside the block: the mirror image beyond a reflecting face of
 // the domain, the edge cell beyond an outflow face, and i itself otherwise (then it is a
-// stored ghost of a neighbouring block).
+// stored ghost of a neighboring block).
 fn row_src(slot: i32, axis: i32, i: i32) -> i32 {
   if (i >= 0 && i < BS) { return i; }
   let upper = i >= BS;

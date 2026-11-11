@@ -55,7 +55,7 @@ describe('shareable links', () => {
     expect(l.opacity).toEqual(s.opacity);
   });
 
-  it('ignores values it does not recognise and clamps the rest', () => {
+  it('ignores values it does not recognize and clamps the rest', () => {
     const l = decodeLink(new URLSearchParams('problem=sedov&riemann=exact&cfl=9&eos=<script>&field=99&tf=2:2,x:y&p.nope=3'));
     expect(l.cfg).toEqual({ cfl: 1 });
     expect(l.view.field).toBe(4);

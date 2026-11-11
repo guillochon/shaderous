@@ -3,7 +3,7 @@
 //       with self-gravity the blocks whose potential is solved for that time
 //   LL  the leaves among them: they have just finished a step, and get its closing gravity kick
 //   LU  those leaves, plus the leaves at the midpoint of their step that have a faster
-//       neighbour and so receive the second half of its fluxes: updated and committed
+//       neighbor and so receive the second half of its fluxes: updated and committed
 // The order within a list is whatever the atomic counter hands out; no result depends on it.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
@@ -15,8 +15,8 @@
 @group(0) @binding(3) var<storage, read_write> CNT: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> LL: array<u32>;
 
-// Whether a leaf has a face neighbour (a leaf at its level, or finer leaves) in a faster bin.
-fn faster_neighbour(slot: i32) -> bool {
+// Whether a leaf has a face neighbor (a leaf at its level, or finer leaves) in a faster bin.
+fn faster_neighbor(slot: i32) -> bool {
   let k = blk_bin(slot);
   let nf = select(6u, 4u, is2d());
   for (var f = 0u; f < nf; f++) {
@@ -53,7 +53,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let n = atomicAdd(&CNT[2], 1u);
     LL[1u + n] = u32(slot);
   }
-  if (leaf && (on || (blk_half(slot) && faster_neighbour(slot)))) {
+  if (leaf && (on || (blk_half(slot) && faster_neighbor(slot)))) {
     let n = atomicAdd(&CNT[1], 1u);
     LU[1u + n] = u32(slot);
   }
