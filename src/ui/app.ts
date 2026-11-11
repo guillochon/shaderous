@@ -110,8 +110,8 @@ side.innerHTML = `
   <details>
     <summary title="Viscosity and thermal conduction">Diffusion<span class="sum" id="sum-diff"></span></summary>
     <div class="g2">
-      ${field('Viscosity \u03bd', number('visc', 'min="0" data-start="0.0001"', 2), '', 'Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off')}
-      ${field('Conductivity \u03ba', number('cond', 'min="0" data-start="0.0001"', 2), '', 'Thermal conduction: the heat flux is -\u03ba \u03c1 grad T, so the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off')}
+      ${field('Viscosity \u03bd', number('visc', 'min="0" data-start="0.0001"', 1.25), '', 'Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off')}
+      ${field('Conductivity \u03ba', number('cond', 'min="0" data-start="0.0001"', 1.25), '', 'Thermal conduction: the heat flux is -\u03ba \u03c1 grad T, so the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off')}
     </div>
   </details>
 
