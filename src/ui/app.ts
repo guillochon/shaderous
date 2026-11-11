@@ -1484,11 +1484,9 @@ function drawSources() {
       const c = at(pos);
       if (!(c.w > 0)) continue;
       const e = at(pos.map((v, i) => v + (q.sinkRadius / box) * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
-      // The sink's edge, and a ring that stays large enough to find when the sink is only a
-      // few pixels across (a binary's in a wide disk).
+      // The sink's edge, at its true radius however small, and a dot at the mass.
       const r = Math.hypot(e.x - c.x, e.y - c.y);
-      const ring = r < 9 ? `<circle class="ring" cx="${c.x}" cy="${c.y}" r="11" />` : '';
-      html += `<g class="sink point">${ring}<circle cx="${c.x}" cy="${c.y}" r="${r}" /><circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
+      html += `<g class="sink point"><circle cx="${c.x}" cy="${c.y}" r="${r}" /><circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
     }
   }
   if (html !== marksDrawn) $('marks').innerHTML = marksDrawn = html;
