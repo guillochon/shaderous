@@ -88,15 +88,21 @@ export interface Problem {
   params?: ProblemParam[];
   /**
    * Point masses (at most MAX_MASSES): softened gravity on the gas, each with a sink that
-   * takes gas in. They pull on one another and feel the gas. `dx` is the cell size (the
-   * coarsest level's on an adaptive mesh).
+   * takes gas in. They pull on one another and feel the gas. `dx` is the cell size the
+   * masses sit in: on an adaptive mesh, the finest level's if `refineMasses` is set, otherwise
+   * the coarsest level's.
    */
   masses?: (params: Record<string, number>, G: number, dx: number) => PointMass[];
   /**
-   * With point masses: run in the gas's rest frame, which accelerates with the gas's center
-   * of mass, instead of an inertial one.
+   * On an adaptive mesh, keep the gas around every point mass at the finest level, so that
+   * softening and sinks can be as small as the finest cells allow (amr/flag.wgsl).
    */
-  gasFrame?: boolean;
+  refineMasses?: boolean;
+  /**
+   * With point masses: run in a frame that accelerates with the gas's center of mass ('gas')
+   * or the point masses' ('masses') instead of an inertial one (gravity/bh_kick.wgsl).
+   */
+  frame?: 'gas' | 'masses';
   /** Optically thin cooling switched on by default, and its parameters. */
   cooling?: CoolingKind;
   coolParams?: Partial<CoolingParams>;

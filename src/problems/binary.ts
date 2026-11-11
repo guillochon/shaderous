@@ -21,6 +21,10 @@ import { all, OUTFLOW, type PointMass, type Problem } from './types';
 // the outflow boundaries never meet gas that has spread out to them: without it, gas flowed in
 // at the corners, the disk grew to a fifth of the binary's mass, and its pull threw the binary
 // out of the box.
+//
+// The run follows the binary's center of mass (gravity/bh_kick.wgsl), so the damping zone
+// and the box move with it, as an outer disk would. On an adaptive mesh the gas around both
+// masses is kept at the finest level, and their softening and sinks are sized by its cells.
 export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3, rDamp: 4.5, damp: 3 };
 
 /** A number as a WGSL f32 literal. */
@@ -84,6 +88,8 @@ export const binary: Problem = {
   tEnd: Infinity,
   rhoFloor: 1e-9,
   viscosity: BINARY.nu,
+  refineMasses: true,
+  frame: 'masses',
   damping: { wgsl: DAMPING, radius: BINARY.rDamp, rate: BINARY.damp },
   supports2d: true,
   view: { field: 0, log: true, mode: 'slice', axis: 2, pitch: 1.15 },

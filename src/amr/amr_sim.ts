@@ -345,7 +345,7 @@ export class AmrSim implements Simulation {
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl'), 'amr flag');
-    sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 30: sim.bt, 31: sim.listLeaf });
+    sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf });
     // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
     sim.redBh = await Reducer.create(
       d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_off.wgsl' },
@@ -939,7 +939,7 @@ export class AmrSim implements Simulation {
     this.rhoMean = mass / c.problem.box ** c.ndim;
     // The clock is (dt, t, Kahan compensation, steps).
     d.queue.writeBuffer(this.clock, 0, new Float32Array(c.restart ? [0, c.restart.time, 0, c.restart.steps] : [0, 0, 0, 0]));
-    const masses = initialMasses(c, this.dx0);
+    const masses = initialMasses(c, this.massDx);
     this.nMasses = this.nOwnMasses = masses.length;
     d.queue.writeBuffer(this.bh, 0, packMasses(masses));
     this.writeParams();
@@ -1330,8 +1330,17 @@ export class AmrSim implements Simulation {
     this.refreshPotential();
   }
 
+  /**
+   * The cell size the preset's point masses are sized by (their default softening and sink
+   * radius): the finest level's where the mesh is kept fully refined around them, otherwise
+   * the coarsest level's, which is all they can count on.
+   */
+  get massDx(): number {
+    return this.cfg.problem.refineMasses ? this.dx0 / (1 << this.levels) : this.dx0;
+  }
+
   retuneMasses() {
-    writeMassRadii(this.device, this.bh, this.cfg, this.dx0, this.nOwnMasses);
+    writeMassRadii(this.device, this.bh, this.cfg, this.massDx, this.nOwnMasses);
     this.refreshPotential();
   }
 

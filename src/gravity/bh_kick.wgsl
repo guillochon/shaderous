@@ -6,10 +6,18 @@
 // each pair softened by the larger of its two lengths, so the pair's forces are equal and
 // opposite.
 //
-// The frame is inertial unless P.bh.y is set. Then it accelerates with the gas, at abar, the
+// The frame is inertial unless P.bh.y is set. At 1 it accelerates with the gas, at abar, the
 // mass-weighted mean of the masses' pull on it. In that frame the masses exert no net force on
 // the gas, so its center of mass stays where it started, and every mass accelerates by -abar
 // more. For one mass that is -(1 + m / M) abar.
+//
+// At 2 it accelerates with the point masses' center of mass instead, at the mean pull of the
+// gas on them (their pulls on one another cancel), so that center stays put and the gas
+// accelerates by -abar. The box, its boundaries and any damping zone then go where the masses
+// go, as an outer disk held by a damping zone would: held fixed to the box instead, the disk
+// takes up none of the masses' recoil, and pulls them on toward whichever side they are nearer.
+// The momentum the sinks take in, and rounding in the masses' pulls on one another, would
+// still move the center slowly: its velocity is set back to zero after every kick.
 //
 // Nothing here assumes the gas is a point, so an orbit responds to the tides it raises. Once
 // gas leaves the box, "the gas" means what is still inside it.
@@ -50,11 +58,19 @@ fn main() {
 
   let m = RED[0];
   var abar = vec3<f32>(0.0);
-  if (P.bh.y != 0.0 && m > 0.0) {
+  if (P.bh.y == 1.0 && m > 0.0) {
     for (var i = 0u; i < n; i++) {
       let o = 1u + 7u * i;
       abar += vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]) / m;
     }
+  } else if (P.bh.y == 2.0) {
+    var gm = 0.0;
+    for (var i = 0u; i < n; i++) {
+      let o = 1u + 7u * i;
+      abar -= P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]);
+      gm += BH.list[i].pos.w;
+    }
+    abar /= max(gm, 1e-30);
   }
   BH.frame = vec4<f32>(abar, 0.0);
   for (var i = 0u; i < n; i++) {
@@ -71,5 +87,17 @@ fn main() {
     }
     BH.list[i].acc = vec4<f32>(acc, b.acc.w);
     if (LIVE) { BH.list[i].vel = vec4<f32>(BH.list[i].vel.xyz + 0.5 * clock.dt * acc, b.vel.w); }
+  }
+  if (LIVE && P.bh.y == 2.0) {
+    var p = vec3<f32>(0.0);
+    var gm = 0.0;
+    for (var i = 0u; i < n; i++) {
+      p += BH.list[i].pos.w * BH.list[i].vel.xyz;
+      gm += BH.list[i].pos.w;
+    }
+    let vc = p / max(gm, 1e-30);
+    for (var i = 0u; i < n; i++) {
+      BH.list[i].vel = vec4<f32>(BH.list[i].vel.xyz - vc, BH.list[i].vel.w);
+    }
   }
 }

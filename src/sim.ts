@@ -443,12 +443,12 @@ export function packParams(
   f.set([...uniformField(c), 0], 20);
   // Point masses: how many, whether the frame follows the gas, whether there are any, and
   // whether they are all the field texture holds (no Poisson potential).
-  f.set([x.masses, c.problem.gasFrame ? 1 : 0, x.masses > 0 ? 1 : 0, x.selfGravity ? 0 : 1], 24);
+  f.set([x.masses, c.problem.frame === 'gas' ? 1 : c.problem.frame === 'masses' ? 2 : 0, x.masses > 0 ? 1 : 0, x.selfGravity ? 0 : 1], 24);
   const fl = c.problem.fluff;
   f.set(fl ? [fl.rho, fl.u, fl.v, 0] : [0, 0, 0, 0], 28);
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' ? 8 : 0)], 36);
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0)], 36);
   f.set(
     [
       x.dx,

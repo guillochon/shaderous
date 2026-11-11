@@ -3,6 +3,8 @@
 // With self-gravity a block is also refined where the Jeans length is short: that indicator is
 // scaled so it crosses the refinement threshold when the Jeans length falls below the
 // requested number of cells.
+// Where a preset asks for it (P.flags bit 4), every block that comes near a point mass is
+// refined to the finest level, so its softening and sink are resolved as well as they can be.
 // One value per slot, accumulated with an atomic max on the float's bit pattern (which orders
 // the same way as the float for non-negative values). Every gas cell writes at least a tiny
 // positive value, so a block that reads exactly 0 lies wholly inside an obstacle.
@@ -10,10 +12,27 @@ const GAS_MIN = 1e-30;
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include "gravity/bh.wgsl"
 
 @group(0) @binding(1) var W1: texture_3d<f32>;
 @group(0) @binding(2) var W2: texture_3d<f32>;
 @group(0) @binding(3) var<storage, read_write> FLAGS: array<atomic<u32>>;
+@group(0) @binding(4) var<storage, read> BH: Masses;
+
+// The cell lies near a point mass: within twice its softening or sink radius, whichever is
+// larger, and at least four of this block's cells.
+fn near_mass(slot: i32, l: vec3<i32>) -> bool {
+  if ((P.flags & 16u) == 0u) { return false; }
+  let x = blk_pos(slot, l);
+  for (var i = 0u; i < min(mass_count(), 4u); i++) {
+    let m = BH.list[i];
+    var d = x - m.pos.xyz;
+    if (is2d()) { d.z = 0.0; }
+    let r = max(2.0 * max(m.vel.w, m.acc.w), 4.0 * blk_dx(slot));
+    if (dot(d, d) < r * r) { return true; }
+  }
+  return false;
+}
 
 // A solid cell with a gas cell beside it.
 fn solid_surface(c: vec3<i32>) -> bool {
@@ -53,6 +72,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   var ind = max(jump(c, vec3<i32>(1, 0, 0)), jump(c, vec3<i32>(0, 1, 0)));
   if (!is2d()) { ind = max(ind, jump(c, vec3<i32>(0, 0, 1))); }
+  // Above any threshold the refinement criterion may be given.
+  if (near_mass(inv.slot, inv.l)) { ind = 1e30; }
   if (has_potential() && P.geom.w > 0.0) {
     let rho = abs(textureLoad(W1, c, 0).x);
     let cs = textureLoad(W2, c, 0).y;

@@ -1,6 +1,7 @@
 // Point masses: softened gravity on the gas, and a sink around each that takes gas in.
-// Requires P. P.bh = (number of masses, 1 if the frame accelerates with the gas, 1 if there
-// are any, 1 if there is no Poisson potential to add them to).
+// Requires P. P.bh = (number of masses, 1 if the frame accelerates with the gas or 2 if with
+// the masses (gravity/bh_kick.wgsl), 1 if there are any, 1 if there is no Poisson potential to
+// add them to).
 // Layout matches packMasses() in src/sim.ts.
 struct Mass {
   pos: vec4<f32>,     // position relative to the box center; G M in w
@@ -12,7 +13,7 @@ struct Mass {
                       //    that it does not change when the mass grows in mid-step)
 }
 struct Masses {
-  frame: vec4<f32>,   // acceleration of the frame: the mass-weighted mean pull on the gas, or zero
+  frame: vec4<f32>,   // acceleration of the frame (gravity/bh_kick.wgsl), or zero
   list: array<Mass, 4>,
 }
 

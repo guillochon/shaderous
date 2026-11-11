@@ -66,7 +66,7 @@ export const tidalDisruption: Problem = {
     { id: 'q', label: 'Perturber : star mass', title: 'Mass of the black hole over the star\u2019s. Sets the orbit: changing it starts the run again', value: 100, min: 1, max: 1e6, factor: 2 },
     { id: 'beta', label: 'Impact parameter \u03b2', title: 'Tidal radius over pericenter distance: above 1 the star passes inside the tidal radius. Changing it starts the run again', value: 1, min: 0.2, max: 8, step: 0.1 },
   ],
-  gasFrame: true,
+  frame: 'gas',
   star: { n: TDE.n, K: TDE_STAR.K, rhoCut: TDE.rhoCut * TDE_STAR.rhoc, rhoAmb: TDE.rhoAmb * TDE_STAR.rhoc },
   masses: (p, G) => {
     const o = orbitFor(p);
