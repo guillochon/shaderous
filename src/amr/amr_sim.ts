@@ -93,6 +93,9 @@ export class AmrSim implements Simulation {
   private idx: GPUTexture;
   private params: GPUBuffer;
   private clock: GPUBuffer;
+  /** A copy of the clock, for the timestep of a step not yet taken (previewDt). */
+  private clockPreview: GPUBuffer;
+  private gClockPreview!: GPUBindGroup;
   private bt: GPUBuffer;
   private listAll: GPUBuffer;
   private listLeaf: GPUBuffer;
@@ -286,6 +289,7 @@ export class AmrSim implements Simulation {
     const storage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.clock = d.createBuffer({ size: 16, usage: storage });
+    this.clockPreview = d.createBuffer({ size: 16, usage: storage });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bt = d.createBuffer({ size: this.cap * BT_STRIDE * 4, usage: storage });
@@ -359,6 +363,7 @@ export class AmrSim implements Simulation {
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
+    sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl'), 'amr flag');
     sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf });
     // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
@@ -1588,10 +1593,46 @@ export class AmrSim implements Simulation {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
-      return diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0);
+      const diag = diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0);
+      if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
+      return diag;
     } finally {
       this.stagingBusy = false;
     }
+  }
+
+  /**
+   * The timestep the next step will take, before any has been: the clock holds a step's dt only
+   * once the step starts, so a run loaded paused would show 0. The step's own timestep passes
+   * (assembly, reduction, clock) run on a copy of the clock; what the assembly rewrites is
+   * rebuilt by every step anyway. With per-block timesteps this is the smallest step, the one
+   * the fastest blocks take. Called with the staging buffer held.
+   */
+  private async previewDt(): Promise<number> {
+    // A re-mesh waiting to be applied, or a star being settled: the next step will tell.
+    if (this.settling || this.pending) return 0;
+    const enc = this.device.createCommandEncoder();
+    if (this.dtStale) {
+      // As encodeSteps does: drop timestep records of workgroups the block list no longer covers.
+      enc.clearBuffer(this.redDt.first);
+      this.dtStale = false;
+    }
+    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
+    const pass = beginPass(enc);
+    pass.setPipeline(this.pAssemble);
+    pass.setBindGroup(0, this.gAssemble[this.cur]);
+    this.padded(pass, this.nAll);
+    this.redDt.encode(pass);
+    pass.setPipeline(this.pClock);
+    pass.setBindGroup(0, this.gClockPreview);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    enc.copyBufferToBuffer(this.clockPreview, 0, this.staging, 0, 4);
+    this.device.queue.submit([enc.finish()]);
+    await this.staging.mapAsync(GPUMapMode.READ, 0, 4);
+    const dt = new Float32Array(this.staging.getMappedRange(0, 4))[0];
+    this.staging.unmap();
+    return dt;
   }
 
   async diagnostics(): Promise<Diagnostics> {

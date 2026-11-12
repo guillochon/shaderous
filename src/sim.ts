@@ -660,6 +660,9 @@ export class Sim implements Simulation {
     return this.params;
   }
   private clock: GPUBuffer;
+  /** A copy of the clock, for the timestep of a step not yet taken (previewDt). */
+  private clockPreview: GPUBuffer;
+  private gClockPreview!: GPUBindGroup;
   private pPrim!: GPUComputePipeline;
   private pUpdate!: RegionPass;
   private pClock!: GPUComputePipeline;
@@ -709,6 +712,7 @@ export class Sim implements Simulation {
       size: 16,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
+    this.clockPreview = d.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.bh = d.createBuffer({ size: MASS_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -756,6 +760,7 @@ export class Sim implements Simulation {
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock');
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
+    sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     sim.pField = await computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field');
     sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock });
     // Point masses: their pull on the gas and what their sinks take are reduced each step, and
@@ -1286,10 +1291,39 @@ export class Sim implements Simulation {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
-      return diagnosticsFrom(a, this.nMasses);
+      const diag = diagnosticsFrom(a, this.nMasses);
+      if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
+      return diag;
     } finally {
       this.stagingBusy = false;
     }
+  }
+
+  /**
+   * The timestep the next step will take, before any has been: the clock holds a step's dt only
+   * once the step starts, so a run loaded paused would show 0. The step's own timestep passes run
+   * on a copy of the clock; the primitives they rewrite are rebuilt by every step anyway.
+   * Called with the staging buffer held.
+   */
+  private async previewDt(): Promise<number> {
+    if (this.settling) return 0;
+    const enc = this.device.createCommandEncoder();
+    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
+    const pass = beginPass(enc);
+    pass.setPipeline(this.pPrim);
+    pass.setBindGroup(0, this.gPrim[this.cur]);
+    this.dispatch(pass);
+    this.redDt.encode(pass);
+    pass.setPipeline(this.pClock);
+    pass.setBindGroup(0, this.gClockPreview);
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    enc.copyBufferToBuffer(this.clockPreview, 0, this.staging, 0, 4);
+    this.device.queue.submit([enc.finish()]);
+    await this.staging.mapAsync(GPUMapMode.READ, 0, 4);
+    const dt = new Float32Array(this.staging.getMappedRange(0, 4))[0];
+    this.staging.unmap();
+    return dt;
   }
 
   /** Diagnostics, waiting for any in-flight readback first (tests). */
