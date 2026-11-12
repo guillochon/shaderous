@@ -11,6 +11,8 @@ export interface Prim {
   vz: number;
   p: number;
   s: number; // passive scalar
+  /** Mass fractions of the problem's species (Problem.species), in its order; summing to 1. */
+  X?: readonly number[];
   /** The cell is part of an obstacle: a solid body the gas reflects off. */
   solid?: boolean;
   /** The cell is held at this state for the whole run (an inflow, say). */
@@ -116,6 +118,11 @@ export interface Problem {
   units?: UnitSystem;
   /** What the gas is made of (default: solar, fully ionized); sets the kelvin scale. */
   composition?: Composition;
+  /**
+   * Species whose mass fractions the gas carries, by name (e.g. 'he4', 'c12'): advected with
+   * the mass and summing to 1 in every cell (species/species.ts). Any number; none by default.
+   */
+  species?: readonly string[];
   box: number; // side length; the domain is [-box/2, box/2]^3
   tEnd: number;
   rhoFloor?: number;

@@ -62,6 +62,7 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 }
 
 #include "hydro/flux.wgsl"
+#include <species>
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
 #include "hydro/damping.wgsl"
@@ -108,6 +109,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(O2, c, vec4<f32>(fz.lo.m, fz.hi.m, 0.0, 0.0));
     return;
   }
+  store_mass_flux(c, fx, fy, fz, flat);
 
   // Flux-form gravitational work (P.flags bit 0): each face hands half of F_mass * dphi to the
   // two cells it separates, so the sum over cells telescopes to -d/dt of the potential energy.

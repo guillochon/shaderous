@@ -438,6 +438,69 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'species',
+    name: 'Species carried with the gas (2D)',
+    criterion:
+      'On a density bump carried twice around the box, five species (two groups of four) with a sharp-edged one among them: mass fractions stay in [0, 1] and sum to 1 within 1e-5, the mass of each species is kept within 1e-5 of the total, and one at 0.2 everywhere stays 0.2 within 1e-5. Without the sharp one, a smooth species returns at least as accurately as the passive scalar carrying the same profile (mean error 3.5e-4 at 128^2).',
+    async run(gpu) {
+      const n = 128;
+      const smooth = (x: number, y: number) => 0.3 + 0.2 * Math.sin(2 * Math.PI * x) * Math.sin(2 * Math.PI * y);
+      const carry = (sharp: number) =>
+        stillGas({
+          id: 'species-advection', tEnd: 2, species: ['a', 'b', 'c', 'd', 'e'],
+          init: () => (x, y) => {
+            const a = smooth(x, y);
+            const b = Math.abs(x) < 0.2 && Math.abs(y) < 0.2 ? sharp : 0;
+            const rest = 1 - a - b - 0.2;
+            return {
+              rho: 1 + 0.5 * Math.exp(-((x - 0.1) ** 2 + y ** 2) / 0.02), vx: 1, vy: 0.5, vz: 0, p: 1, s: a,
+              X: [a, b, 0.2, rest * 0.75, rest * 0.25],
+            };
+          },
+        });
+      const mass = (X: Float32Array[], u1: Float32Array) => X.map((x) => x.reduce((s, v, q) => s + v * u1[4 * q], 0));
+      const run = (sharp: number) =>
+        withSim(gpu, carry(sharp), n, { ndim: 2 }, async (sim) => {
+          const X0 = await sim.readSpecies();
+          const m0 = mass(X0, (await sim.readState()).u1);
+          await sim.runToEnd(64);
+          const X1 = await sim.readSpecies();
+          const st = await sim.readState();
+          const m1 = mass(X1, st.u1);
+          let sumErr = 0;
+          let lo = Infinity;
+          let hi = -Infinity;
+          let flatErr = 0;
+          let l1 = 0;
+          let l1Scalar = 0;
+          for (let q = 0; q < n * n; q++) {
+            let s = 0;
+            for (const x of X1) {
+              s += x[q];
+              lo = Math.min(lo, x[q]);
+              hi = Math.max(hi, x[q]);
+            }
+            sumErr = Math.max(sumErr, Math.abs(s - 1));
+            flatErr = Math.max(flatErr, Math.abs(X1[2][q] - 0.2));
+            l1 += Math.abs(X1[0][q] - X0[0][q]) / (n * n);
+            l1Scalar += Math.abs(st.u2[4 * q + 2] / st.u1[4 * q] - X0[0][q]) / (n * n);
+          }
+          return { sumErr, lo, hi, flatErr, l1, l1Scalar, massErr: Math.max(...m0.map((m, i) => Math.abs(m1[i] - m))) / m0.reduce((a, b) => a + b, 0) };
+        });
+      const mixed = await run(0.3);
+      const plain = await run(0);
+      const ok = (r: typeof mixed) => r.sumErr < 1e-5 && r.lo >= 0 && r.hi <= 1 + 1e-6 && r.massErr < 1e-5 && r.flatErr < 1e-5;
+      return {
+        pass: ok(mixed) && ok(plain) && plain.l1 <= plain.l1Scalar,
+        metrics: {
+          sum_error: Math.max(mixed.sumErr, plain.sumErr), min_fraction: Math.min(mixed.lo, plain.lo), max_fraction: Math.max(mixed.hi, plain.hi),
+          species_mass_drift: Math.max(mixed.massErr, plain.massErr), constant_species_error: Math.max(mixed.flatErr, plain.flatErr),
+          smooth_species_l1: plain.l1, passive_scalar_l1: plain.l1Scalar, smooth_species_l1_beside_sharp_one: mixed.l1,
+        },
+      };
+    },
+  },
+  {
     id: 'advection-accuracy',
     name: 'Smooth advection: error and order of convergence (2D)',
     criterion:

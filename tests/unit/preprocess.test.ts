@@ -54,6 +54,7 @@ describe('shader assembly', () => {
                 bins: `amr/bins_${bins}.wgsl`, mid: `amr/mid_${bins}.wgsl`,
                 diffusion: 'const VISCOSITY = true;\nconst CONDUCTION = true;\n',
                 damping: binary.damping!.wgsl,
+                species: `hydro/species_${bins}.wgsl`,
               };
               for (const entry of ['hydro/rates.wgsl', 'hydro/update.wgsl', 'amr/update.wgsl', 'amr/assemble.wgsl', 'amr/predict.wgsl', 'gravity/correct.wgsl', 'amr/correct.wgsl']) {
                 const src = assemble(entry, slots);
@@ -63,6 +64,17 @@ describe('shader assembly', () => {
             }
           }
         }
+  });
+
+  it('assembles the species passes for any number of groups', () => {
+    for (const groups of [1, 4]) {
+      for (const entry of ['hydro/species_predict.wgsl', 'hydro/species.wgsl']) {
+        const src = assemble(entry, { species_n: `const NG: u32 = ${groups}u;
+` });
+        expect(src).not.toMatch(/^\s*#include/m);
+        expect(src).toContain(`const NG: u32 = ${groups}u;`);
+      }
+    }
   });
 
   it('assembles the display passes for every equation of state and cooling function', () => {

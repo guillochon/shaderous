@@ -3,3 +3,12 @@ dist/
 test-results/
 playwright-report/
 *.athdf
+
+# Burning-network training (tools/burn): environment and generated data
+tools/burn/.venv/
+tools/burn/data/
+tools/burn/__pycache__/
+tools/burn/*.log
+tools/burn/*.err
+tools/burn/aprox13.py
+tools/burn/*.pt

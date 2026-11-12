@@ -12,6 +12,7 @@ import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, t
 import type { Restart } from './io/snapshot';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
+import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
 
 export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
 export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
@@ -289,6 +290,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     diffusion: `const VISCOSITY = ${c.viscosity > 0};\nconst CONDUCTION = ${conducts(c)};\n`,
     // The preset's damping zone (hydro/damping.wgsl), or none.
     damping: c.problem.damping?.wgsl ?? NO_DAMPING,
+    // Whether the update records face mass fluxes for the species pass (species/species.ts).
+    species: speciesSlot(speciesGroups(c.problem)),
   };
 }
 
@@ -659,6 +662,22 @@ export class Sim implements Simulation {
   /** gravitational acceleration and half-step potential (gravity/field.wgsl) */
   gfield!: GPUTexture;
   cur = 0;
+  /**
+   * Species (species/species.ts): rho X in groups of four stacked along z, ping-pong with their
+   * own parity `speciesCur` (the state's can return to where it was within a step), and the
+   * face mass fluxes the update records for them. Empty without species.
+   */
+  species: GPUTexture[] = [];
+  speciesCur = 0;
+  readonly speciesGroups: number;
+  /** mass fractions half a step ahead (hydro/species_predict.wgsl) */
+  private speciesHalf?: GPUTexture;
+  private massFlux?: GPUBuffer;
+  private pSpeciesPredict?: GPUComputePipeline;
+  private pSpecies?: GPUComputePipeline;
+  /** gSpecies[state parity][species parity], and the same for the predictor */
+  private gSpecies: GPUBindGroup[][] = [];
+  private gSpeciesPredict: GPUBindGroup[][] = [];
   mg!: Multigrid;
   rhoMean = 0;
 
@@ -712,6 +731,7 @@ export class Sim implements Simulation {
     this.cfg = cfg;
     this.n = cfg.n;
     this.nz = cfg.ndim === 2 ? 1 : cfg.n;
+    this.speciesGroups = speciesGroups(cfg.problem);
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -748,6 +768,12 @@ export class Sim implements Simulation {
     for (let p = 0; p < 2; p++) sim.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
     sim.pred = [t('PA'), t('PB')];
     sim.gfield = t('gravity field');
+    const G = sim.speciesGroups;
+    if (G > 0) {
+      for (let p = 0; p < 2; p++) sim.species.push(tex3d(d, n, 'rgba32float', `species ${p}`, nz * G));
+      sim.speciesHalf = tex3d(d, n, 'rgba32float', 'species half step', nz * G);
+      sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (n + 1) ** 2 * (nz + 1), usage: GPUBufferUsage.STORAGE });
+    }
     sim.writeParams();
     // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
     // (potential, multipoles) still exist; it is never dispatched.
@@ -854,6 +880,7 @@ export class Sim implements Simulation {
           9: v(this.pred[0]),
           10: v(this.pred[1]),
           11: this.sources,
+          ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
         }),
       );
       this.gCorrect.push(
@@ -868,6 +895,26 @@ export class Sim implements Simulation {
           7: this.bh,
         }),
       );
+    }
+    if (this.speciesGroups > 0) {
+      const ns = { species_n: speciesConst(this.speciesGroups) };
+      [this.pSpeciesPredict, this.pSpecies] = await Promise.all([
+        computePipeline(d, assemble('hydro/species_predict.wgsl', ns), 'species half step'),
+        computePipeline(d, assemble('hydro/species.wgsl', ns), 'species'),
+      ]);
+      const both = (pipe: GPUComputePipeline, more: (p: number, q: number) => Record<number, GPUBindingResource | GPUBuffer>) =>
+        [0, 1].map((p) =>
+          [0, 1].map((q) =>
+            bindGroup(d, pipe, { 0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.species[q]), ...more(p, q) }),
+          ),
+        );
+      this.gSpeciesPredict = both(this.pSpeciesPredict, () => ({ 6: v(this.speciesHalf!) }));
+      this.gSpecies = both(this.pSpecies, (p, q) => ({
+        4: v(this.state[1 - p][0]),
+        6: v(this.species[1 - q]),
+        7: this.massFlux!,
+        8: v(this.speciesHalf!),
+      }));
     }
     this.redDiag = await Reducer.create(
       d,
@@ -907,6 +954,8 @@ export class Sim implements Simulation {
     this.device.queue.writeBuffer(this.bh, 0, packMasses(masses));
     const u1 = new Float32Array(n * n * nz * 4);
     const u2 = new Float32Array(n * n * nz * 4);
+    const G = this.speciesGroups;
+    const sp = new Float32Array(n * n * nz * 4 * G);
     const half = c.problem.box / 2;
     let mass = 0;
     let o = 0;
@@ -933,11 +982,16 @@ export class Sim implements Simulation {
           u2[o + 1] = eint;
           u2[o + 2] = w.rho * w.s;
           u2[o + 3] = mark;
+          if (G) packSpecies(sp, o, n * n * nz * 4, G, w.rho, w.X);
           mass += w.rho;
         }
       }
     }
     this.setState(u1, u2, mass / (n * n * nz));
+    if (G) {
+      this.speciesCur = 0;
+      writeTexture(this.device, this.species[0], n, 4, sp, nz * G);
+    }
     // The clock is (dt, t, Kahan compensation, steps).
     if (c.restart) this.device.queue.writeBuffer(this.clock, 0, new Float32Array([0, c.restart.time, 0, c.restart.steps]));
     this.startSettling(u1, u2);
@@ -1109,6 +1163,15 @@ export class Sim implements Simulation {
       pass.dispatchWorkgroups(1);
       this.pPredict.encode(pass, this.gPredict[p]);
       this.pUpdate.encode(pass, this.gUpdate[p]);
+      if (this.pSpecies) {
+        const q = this.speciesCur;
+        for (const [pipe, g] of [[this.pSpeciesPredict!, this.gSpeciesPredict], [this.pSpecies, this.gSpecies]] as const) {
+          pass.setPipeline(pipe);
+          pass.setBindGroup(0, g[p][q]);
+          pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+        }
+        this.speciesCur = 1 - q;
+      }
       if (selfGravity) {
         // Keep the old potential and solve for that of the updated density (warm-started).
         pass.end();
@@ -1456,6 +1519,26 @@ export class Sim implements Simulation {
     };
   }
 
+  /**
+   * Mass fractions of every cell (validation): X[i][cell], the cells in the order of
+   * readState(). Empty without species.
+   */
+  async readSpecies(): Promise<Float32Array[]> {
+    const G = this.speciesGroups;
+    if (!G) return [];
+    const raw = await readTexture(this.device, this.species[this.speciesCur], this.n, 4, this.nz * G);
+    const { u1 } = await this.readState();
+    const cells = this.n * this.n * this.nz;
+    const ns = this.cfg.problem.species!.length;
+    const X = Array.from({ length: ns }, () => new Float32Array(cells));
+    for (let i = 0; i < ns; i++) {
+      const g = Math.floor(i / SPECIES_PER_GROUP);
+      const k = i % SPECIES_PER_GROUP;
+      for (let q = 0; q < cells; q++) X[i][q] = raw[(g * cells + q) * 4 + k] / u1[q * 4];
+    }
+    return X;
+  }
+
   async readPotential(): Promise<Float32Array> {
     return readTexture(this.device, this.mg.phi, this.n, 1);
   }
@@ -1476,7 +1559,9 @@ export class Sim implements Simulation {
   destroy() {
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
-    for (const t of [...this.pred, this.gfield]) t.destroy();
+    for (const t of [...this.pred, this.gfield, ...this.species]) t.destroy();
+    this.speciesHalf?.destroy();
+    this.massFlux?.destroy();
     this.mg.destroy();
   }
 }
