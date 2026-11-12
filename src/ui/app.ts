@@ -12,6 +12,7 @@ import { fieldMeasure, readout, type Measure, type Readout } from './units_view'
 import type { DisplaySystem } from '../units/units';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
+import { speciesNuclides } from '../species/mixture';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, type EosKind, type EosParams } from '../eos/eos';
@@ -1386,7 +1387,10 @@ function bind() {
   on('gamma', (el) => {
     cfg.eosParams.gamma = Math.max(1, numOr(el, cfg.eosParams.gamma));
     if (cfg.eos !== 'barotropic') cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
-    applyParams();
+    // Where the species set the equation of state, gamma is part of each species' heat capacity,
+    // which the shaders are built with (species/mixture.ts).
+    if (speciesNuclides(cfg.problem.species)) rebuildPipelines();
+    else applyParams();
   });
   on('K', (el) => {
     cfg.eosParams.K = numOr(el, cfg.eosParams.K);

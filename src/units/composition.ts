@@ -49,6 +49,11 @@ export const SPECIES = {
   s32: { name: 's32', A: 32, Z: 16 },
   fe56: { name: 'fe56', A: 56, Z: 26 },
   ni56: { name: 'ni56', A: 56, Z: 28 },
+  /**
+   * Dry air as one species, for laboratory flows: its mean molecular mass and charge (78% N2,
+   * 21% O2, 1% Ar by volume). Not a nuclide; with a 'neutral' composition it has mu = 28.96.
+   */
+  air: { name: 'air', A: 28.96, Z: 14.48 },
 } as const satisfies Record<string, Species>;
 
 /** A composition from mass fractions keyed by species name; the fractions are normalized. */

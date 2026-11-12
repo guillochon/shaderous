@@ -2,6 +2,7 @@ import type { Problem } from './types';
 import { sodX, sodY, sodZ, sodDiag, strongShock } from './shocktube';
 import { sedov, sedovRad } from './sedov';
 import { kelvinHelmholtz, kelvinHelmholtzHeH } from './kelvin_helmholtz';
+import { shockBubble } from './shock_bubble';
 import { rayleighTaylor } from './rayleigh_taylor';
 import { forwardStep } from './forward_step';
 import { advection } from './advection';
@@ -65,6 +66,7 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
       },
       single(strongShock),
       single(forwardStep),
+      single(shockBubble),
     ],
   },
   {

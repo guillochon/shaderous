@@ -140,29 +140,33 @@ export function quartic(A: number, B: number, C: number, iters = 8): number {
 
 /**
  * The constants of an equation of state for a cell of a mixture with moments `k`
- * (species/mixture.ts), as the WGSL modules derive them with a varying composition: the gas
- * constant scaled by k[0], the degenerate electrons' density scale divided by k[1] (Ye
- * relative to the reference's), and the ionizing gas's hydrogen and other particles k[2], k[3].
- * The ideal gas's temperature also takes k[0]; makeEos() applies that.
+ * (species/mixture.ts), as the WGSL modules derive them with a varying composition: gamma is
+ * 1 + k[0] / k[3], the gas constant is scaled by k[0], the degenerate electrons' density scale
+ * divided by k[1] (Ye relative to the reference's), and the ionizing gas's hydrogen nuclei are
+ * k[2] and its other particles k[0] - zh1 k[2] (zh1 = 1 + z_H, hydrogenParticles()). The ideal
+ * gas's temperature also takes k[0]; makeEos() applies that.
  */
-export function mixtureParams(kind: EosKind, params: EosParams, k: readonly number[]): EosParams {
+export function mixtureParams(kind: EosKind, params: EosParams, k: readonly number[], zh1 = 2): EosParams {
   const out = { ...params };
+  if (kind === 'barotropic') return out;
+  out.gamma = 1 + k[0] / k[3];
   if (kind === 'gas_radiation' || kind === 'degenerate') out.R = params.R * k[0];
   if (kind === 'degenerate') out.degRho = params.degRho / k[1];
   if (kind === 'ionizing') {
     out.ionH = k[2];
-    out.ionOther = k[3];
+    out.ionOther = k[0] - zh1 * k[2];
   }
   return out;
 }
 
 /**
  * An equation of state. With moments `k` (species/mixture.ts) it is that of a cell of a
- * mixture whose composition varies; without, the uniform one of `params`.
+ * mixture whose composition varies (`zh1` as for mixtureParams); without, the uniform one of
+ * `params`.
  */
-export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[]): Eos {
+export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[], zh1 = 2): Eos {
   if (k) {
-    const eos = makeEos(kind, mixtureParams(kind, params, k));
+    const eos = makeEos(kind, mixtureParams(kind, params, k, zh1));
     if (kind !== 'ideal') return eos;
     const x = k[0];
     return { ...eos, temperature: (rho, eint) => eos.temperature(rho, eint) / x, eintFromT: (rho, T) => eos.eintFromT(rho, T * x) };

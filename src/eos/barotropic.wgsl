@@ -3,6 +3,12 @@
 const EOS_HAS_ENERGY = false;
 const EOS_KEEP_TOTAL = false;
 
+// The polytropic index, as the other modules name their adiabatic index. The composition does
+// not reach a barotropic gas.
+fn eos_gamma() -> f32 {
+  return P.eos.x;
+}
+
 fn eos_pressure(rho: f32, eint: f32) -> f32 {
   if (P.eos.x == 1.0) { return P.eos.y * rho; }
   return P.eos.y * pow(rho, P.eos.x);

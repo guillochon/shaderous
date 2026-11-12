@@ -10,12 +10,19 @@
 //      p_gas = x rho T)
 //   y  electrons per nucleon relative to the reference's, Ye / Ye_ref (the degenerate
 //      electrons' density scale goes as 1 / Ye)
-//   z  hydrogen nuclei per atomic mass unit, times mu_ref (the h of eos/ionizing.wgsl)
-//   w  every other particle per atomic mass unit, times mu_ref (its o)
+//   z  hydrogen nuclei per atomic mass unit, times mu_ref (the h of eos/ionizing.wgsl; its o,
+//      every other particle, is x - (1 + z_H) z)
+//   w  the heat capacity at constant volume relative to the reference's, as x is the gas
+//      constant: the sum of X_i x_i / (gamma_i - 1), so that the gas's gamma is 1 + x / w
+//
+// Each species has its own adiabatic index gamma_i (Problem.speciesGamma, else the run's
+// gamma). Summing heat capacities by mass is the mixing rule of gases at one temperature
+// (Dalton): p = x rho T and e = w rho T. Where two gases meet at one pressure and one
+// temperature it is exact: a cell holding both by volume has the pressure of each.
 //
 // The reference composition is the problem's own (default solar); its kelvin scale stays the
-// run's, and in it the four are (1, 1, h, o) as the uniform modules have them. How many free
-// electrons each species gives is the reference's ionization.
+// run's, and in it x = y = 1 and z is the uniform modules' h. How many free electrons each
+// species gives is the reference's ionization.
 //
 // A run without species, or with species that are only tracers (any name that is not a
 // nuclide), keeps one composition everywhere, and its shaders are built exactly as before
@@ -47,16 +54,27 @@ function electrons(s: Species, ref: Composition): number {
   return i >= 0 ? ref.ionization[i] : s.Z;
 }
 
-/** Each species' contribution per unit mass fraction to the four moments. */
-export function momentCoefficients(nuclides: readonly Species[], ref: Composition = COMPOSITIONS.solar): Moments[] {
+/**
+ * Each species' contribution per unit mass fraction to the four moments. `gamma` is the
+ * adiabatic index of every species without one of its own in `gammas`.
+ */
+export function momentCoefficients(
+  nuclides: readonly Species[],
+  ref: Composition = COMPOSITIONS.solar,
+  gamma = 5 / 3,
+  gammas: Partial<Record<string, number>> = {},
+): Moments[] {
   const mu = meanMolecularWeight(ref);
   const ye = nuclearAverages(ref).ye;
   return nuclides.map((s) => {
     const n = (mu * (1 + electrons(s, ref))) / s.A;
-    const h = s.name === 'h1';
-    return [n, s.Z / s.A / ye, h ? mu / s.A : 0, h ? 0 : n];
+    const g = gammas[s.name] ?? gamma;
+    return [n, s.Z / s.A / ye, s.name === 'h1' ? mu / s.A : 0, n / (g - 1)];
   });
 }
+
+/** 1 + z_H: the particles a hydrogen nucleus brings, with its electrons in the reference composition. */
+export const hydrogenParticles = (ref: Composition = COMPOSITIONS.solar): number => 1 + electrons(SPECIES.h1, ref);
 
 /**
  * The moments of a cell with mass fractions X (normalized as packSpecies stores them: missing
@@ -75,11 +93,20 @@ export function mixMoments(coeffs: readonly Moments[], X: readonly number[] | un
   return m;
 }
 
-/** The problem's coefficients, or null when its composition is the same everywhere. */
-export function problemCoefficients(p: { species?: readonly string[]; composition?: Composition }): Moments[] | null {
+type MixtureProblem = { species?: readonly string[]; composition?: Composition; speciesGamma?: Partial<Record<string, number>> };
+
+/**
+ * The problem's coefficients, or null when its composition is the same everywhere. `gamma` is
+ * the run's adiabatic index, for the species the problem gives none of their own.
+ */
+export function problemCoefficients(p: MixtureProblem, gamma: number): Moments[] | null {
   const nuc = speciesNuclides(p.species);
-  return nuc ? momentCoefficients(nuc, p.composition ?? COMPOSITIONS.solar) : null;
+  return nuc ? momentCoefficients(nuc, p.composition ?? COMPOSITIONS.solar, gamma, p.speciesGamma) : null;
 }
+
+/** The <comp> slot for a problem and the run's gamma (see compSlot). */
+export const problemCompSlot = (p: MixtureProblem, gamma: number, groups: number): string =>
+  compSlot(problemCoefficients(p, gamma), groups, hydrogenParticles(p.composition ?? COMPOSITIONS.solar));
 
 const f = (x: number): string => {
   const s = Math.fround(x).toPrecision(9);
@@ -91,16 +118,19 @@ const f = (x: number): string => {
  * eos/comp_off.wgsl, sized for the species passes when there are tracers; otherwise the
  * varying one with the coefficients written in.
  */
-export function compSlot(coeffs: readonly Moments[] | null, groups: number): string {
+export function compSlot(coeffs: readonly Moments[] | null, groups: number, zh1 = 2): string {
   if (!coeffs) {
     if (groups === 0) return 'eos/comp_off.wgsl';
     return `const COMP = false;
 const COMP_NG: u32 = ${groups}u;
+const COMP_ZH1: f32 = 2.0;
 var<private> g_comp: vec4<f32>;
 fn comp_use(k: vec4<f32>) {}
 fn comp_tex(c: vec3<i32>) -> vec4<f32> { return vec4<f32>(1.0, 1.0, 0.0, 0.0); }
 fn comp_store(c: vec3<i32>, k: vec4<f32>) {}
 fn comp_moments(u: array<vec4<f32>, COMP_NG>) -> vec4<f32> { return vec4<f32>(1.0, 1.0, 0.0, 0.0); }
+fn comp_jump(a: vec4<f32>, b: vec4<f32>) -> f32 { return 0.0; }
+fn comp_first_order(c: vec3<i32>) -> f32 { return 0.0; }
 `;
   }
   // One matrix per group of four, its columns the species' coefficients (zero for padding).
@@ -116,6 +146,8 @@ fn comp_moments(u: array<vec4<f32>, COMP_NG>) -> vec4<f32> { return vec4<f32>(1.
   const terms = mats.map((m, g) => `${m} * u[${g}]`).join(' + ');
   const sum = mats.map((_m, g) => `dot(u[${g}], vec4<f32>(1.0))`).join(' + ');
   return `const COMP_NG: u32 = ${groups}u;
+// Particles per hydrogen nucleus, its electrons included (eos/ionizing.wgsl: o = x - COMP_ZH1 z).
+const COMP_ZH1: f32 = ${f(zh1)};
 ${COMP_ON_HEADER}
 // Moments of a cell from its rho X (or X), groups of four, normalized by their sum as
 // fractions() normalizes them; a cell with none is all the first species.
@@ -137,7 +169,23 @@ var<private> g_comp: vec4<f32>;
 @group(0) @binding(26) var KO: texture_storage_3d<rgba32float, write>;
 fn comp_use(k: vec4<f32>) { g_comp = k; }
 fn comp_tex(c: vec3<i32>) -> vec4<f32> { return textureLoad(KC, c, 0); }
-fn comp_store(c: vec3<i32>, k: vec4<f32>) { textureStore(KO, c, k); }`;
+fn comp_store(c: vec3<i32>, k: vec4<f32>) { textureStore(KO, c, k); }
+// Where gamma jumps between neighboring cells (two gases that meet), the hydro and the species
+// go to first order: reconstructed separately, the density and the mass fractions at a face
+// would not agree on how much of each gas crossed it, and the pressure would oscillate there.
+// The weight runs from 0 where the gammas - 1 (x / w) of two neighbors differ by 1% to 1 where
+// they differ by 5%: a jump, not a gradient the mesh resolves. (Every mixed cell first order made
+// the mixing layer smear itself ever wider; only jumps of 10% let the interface ripple at the
+// grid scale; a sharp switch turned round-off into differences between mirror-image cells. The
+// shock-bubble preset is what they were judged on.) The predictors blend their half-step state
+// toward the cell as it is by the weight and record it as their first-order flag (the w of the
+// half-step state, KF here), for the species passes to do the same.
+@group(0) @binding(24) var KF: texture_3d<f32>;
+fn comp_jump(a: vec4<f32>, b: vec4<f32>) -> f32 {
+  let rel = abs(a.x * b.w - b.x * a.w) / (a.x * b.w);
+  return clamp((rel - 0.01) * 25.0, 0.0, 1.0);
+}
+fn comp_first_order(c: vec3<i32>) -> f32 { return textureLoad(KF, c, 0).w; }`;
 
 /**
  * The <comp_src> slot of amr/assemble.wgsl: where the composition varies, the moments of every

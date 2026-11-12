@@ -64,7 +64,7 @@ fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32, phi: f
       return length(v) / max(eos_sound_speed(rho, p), 1.0e-30);
     }
     // The entropy function p / rho^gamma: constant along a flow line away from shocks.
-    case 9u { return eos_pressure(rho, eint) / pow(rho, P.eos.x); }
+    case 9u { return eos_pressure(rho, eint) / pow(rho, eos_gamma()); }
     // Heating minus cooling, per unit volume (the rate of change of rho e).
     case 10u {
       if (!COOLING || !EOS_HAS_ENERGY) { return 0.0; }

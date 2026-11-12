@@ -36,6 +36,7 @@ checkbox. A bare visit opens Kelvin-Helmholtz at $`1024^2`$ in 2D. Examples used
 |---|---|
 | Kelvin-Helmholtz, 2D | [`?problem=kelvin-helmholtz`](https://guillochon.github.io/shaderous/?problem=kelvin-helmholtz) |
 | Sod shock tube | [`?problem=sod-x&dim=2&n=256`](https://guillochon.github.io/shaderous/?problem=sod-x&dim=2&n=256) |
+| Shock hitting a helium bubble, 2D | [`?problem=shock-bubble&dim=2&n=512`](https://guillochon.github.io/shaderous/?problem=shock-bubble&dim=2&n=512) |
 | Sedov-Taylor blast, 3D | [`?problem=sedov&dim=3&n=128`](https://guillochon.github.io/shaderous/?problem=sedov&dim=3&n=128) |
 | Tidal disruption, 3D with refinement | [`?problem=tidal-disruption&dim=3&n=128&amr=2`](https://guillochon.github.io/shaderous/?problem=tidal-disruption&dim=3&n=128&amr=2) |
 

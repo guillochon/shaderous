@@ -16,17 +16,29 @@
 // method kept inside a bracket (the two values of x bound it), in a fixed number of steps.
 //
 // P.eos = (gamma, unused, unused, unused), P.eos2 = (h, o, T_i, rho_s). Where the composition
-// varies (eos/comp_on), h and o are the cell's own, g_comp.z and g_comp.w.
+// varies (eos/comp_on), h and o are the cell's own: g_comp.z, and g_comp.x less the hydrogen's
+// particles; gamma is the cell's (eos_gamma).
 const EOS_HAS_ENERGY = true;
 // Where E - KE cannot be trusted, rebuild E from the advected e_int (hydro/dual_energy.wgsl).
 const EOS_KEEP_TOTAL = false;
+
+// The gas's adiabatic index, and gamma - 1. Where the composition varies (eos/comp_on) they are
+// the cell's: 1 + x / w from its particles x and heat capacity w (species/mixture.ts).
+fn eos_gamma() -> f32 {
+  if (COMP) { return 1.0 + g_comp.x / g_comp.w; }
+  return P.eos.x;
+}
+fn eos_gm1() -> f32 {
+  if (COMP) { return g_comp.x / g_comp.w; }
+  return P.eos.x - 1.0;
+}
 
 fn ion_h() -> f32 {
   if (COMP) { return g_comp.z; }
   return P.eos2.x;
 }
 fn ion_o() -> f32 {
-  if (COMP) { return g_comp.w; }
+  if (COMP) { return g_comp.x - COMP_ZH1 * g_comp.z; }
   return P.eos2.y;
 }
 
@@ -60,7 +72,7 @@ fn ion_solve(rho: f32, goal: f32, by_p: bool) -> f32 {
   let h = ion_h();
   let o = ion_o();
   let Ti = P.eos2.z;
-  let gm1 = P.eos.x - 1.0;
+  let gm1 = eos_gm1();
   var lo: f32;
   var hi: f32;
   if (by_p) {
@@ -103,7 +115,7 @@ fn eos_sound_speed(rho: f32, p: f32) -> f32 {
   let xs = ion_x(rho, T);
   let h = ion_h();
   let Ti = P.eos2.z;
-  let gm1 = P.eos.x - 1.0;
+  let gm1 = eos_gm1();
   let n = ion_n(xs.x);
   let xT = ion_dxdT(xs.y, T);
   let w = T / gm1 + Ti;                        // what ionizing one more nucleus costs, per h
@@ -121,7 +133,7 @@ fn eos_temperature(rho: f32, eint: f32) -> f32 {
 }
 fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
   let x = ion_x(rho, T).x;
-  return rho * (T * ion_n(x) / (P.eos.x - 1.0) + ion_h() * x * P.eos2.z);
+  return rho * (T * ion_n(x) / eos_gm1() + ion_h() * x * P.eos2.z);
 }
 
 // Least e_int the dual-energy switch accepts (hydro/dual_energy.wgsl): that of the pressure floor.

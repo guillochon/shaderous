@@ -37,6 +37,12 @@ fn face_flux(slot: i32, a: vec3<i32>, axis: i32, F: f32) -> array<vec4<f32>, NG>
   let s = slopes(load_sx(u - e), load_sx(u), load_sx(u + e));
   var xf: array<vec4<f32>, NG>;
   for (var g = 0u; g < NG; g++) { xf[g] = textureLoad(SH, sp(u, g), 0) + toward * s[g]; }
+  // Toward first order as far as the hydro is (comp_first_order): the upwind cell as it is.
+  if (COMP) {
+    let w = comp_first_order(u);
+    let x0 = load_sx(u);
+    for (var g = 0u; g < NG; g++) { xf[g] = mix(xf[g], x0[g], w); }
+  }
   xf = face_fractions(xf);
   for (var g = 0u; g < NG; g++) { xf[g] *= F; }
   return xf;

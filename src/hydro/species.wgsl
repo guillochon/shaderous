@@ -35,6 +35,11 @@ fn axis_inflow(c: vec3<i32>, axis: i32, cells: array<array<vec4<f32>, NG>, 5>, a
     let m = bc_map(c + (up - 2) * e).c;
     var xf: array<vec4<f32>, NG>;
     for (var g = 0u; g < NG; g++) { xf[g] = textureLoad(SH, group_at(m, g), 0) + toward * s[g]; }
+    // Toward first order as far as the hydro is (comp_first_order): the upwind cell as it is.
+    if (COMP) {
+      let w = comp_first_order(m);
+      for (var g = 0u; g < NG; g++) { xf[g] = mix(xf[g], cells[up][g], w); }
+    }
     xf = face_fractions(xf);
     let w = select(-F, F, side == 0);  // inflow through the lower face, outflow through the upper
     for (var g = 0u; g < NG; g++) { (*acc)[g] += w * xf[g]; }

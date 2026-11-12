@@ -129,6 +129,11 @@ export interface Problem {
    * the mass and summing to 1 in every cell (species/species.ts). Any number; none by default.
    */
   species?: readonly string[];
+  /**
+   * Adiabatic index of each species by name, where the species set the equation of state
+   * (species/mixture.ts); the others take the run's gamma.
+   */
+  speciesGamma?: Partial<Record<string, number>>;
   box: number; // side length; the domain is [-box/2, box/2]^3
   tEnd: number;
   /** Time between checkpoints, when the page is asked to save them (problem time units). */

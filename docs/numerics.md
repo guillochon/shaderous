@@ -486,21 +486,26 @@ scaling the new values to the new density.
 A problem without species pays nothing. A problem with many pays only for the species pass.
 
 **Composition in the equation of state** (`src/species/mixture.ts`). When every species is a
-nuclide (`h1`, `he4`, `c12`, ...), the equation of state follows each cell's own mixture. Each
-module needs at most four numbers, and each is a mass-weighted sum over the species, so they
-mix linearly:
+nuclide (`h1`, `he4`, `c12`, ...) or `air` (dry air as one species, for laboratory flows), the
+equation of state follows each cell's own mixture. Each species may have its own adiabatic
+index $`\gamma_i`$ (`Problem.speciesGamma`, else the run's). Each module needs at most four
+numbers, and each is a mass-weighted sum over the species, so they mix linearly:
 
 ```math
 k_1 = \mu_\text{ref}\sum_i \frac{X_i(1 + z_i)}{A_i},\quad
 k_2 = \frac{1}{Y_{e,\text{ref}}}\sum_i \frac{X_i Z_i}{A_i},\quad
 k_3 = \mu_\text{ref} X_\text{H},\quad
-k_4 = \mu_\text{ref}\sum_{i \ne \text{H}} \frac{X_i(1 + z_i)}{A_i}.
+k_4 = \mu_\text{ref}\sum_i \frac{X_i(1 + z_i)}{A_i(\gamma_i - 1)}.
 ```
 
 The problem's own composition is the reference: it keeps the kelvin scale and says how many
 free electrons $`z_i`$ each species gives. $`k_1 = \mu_\text{ref}/\mu`$ scales the gas constant
-(and the ideal gas's temperature), $`k_2 = Y_e/Y_{e,\text{ref}}`$ divides the degenerate
-electrons' density scale, and $`k_3, k_4`$ are the ionizing gas's $`h`$ and $`o`$. The moments
+and $`k_4`$ the heat capacity, so the gas has $`p = k_1\rho T`$, $`e = k_4\rho T`$ and
+$`\gamma = 1 + k_1/k_4`$: heat capacities summed by mass, the mixing rule of ideal gases at one
+temperature. It is exact where two gases meet at one pressure and temperature, and it gives
+Quirk & Karni's helium bubble with 28% air (density 0.182, $`\gamma = 1.648`$) from the two gases
+alone. $`k_2 = Y_e/Y_{e,\text{ref}}`$ divides the degenerate electrons' density scale, and $`k_3`$
+and $`k_1 - (1 + z_\text{H})k_3`$ are the ionizing gas's $`h`$ and $`o`$. The moments
 live in one texture beside the state. The species passes write them whenever they write
 $`\rho X_i`$, and on the adaptive mesh the primitives pass gathers them for every ghost, as it
 gathers the state. Every pass sets the cell's composition before calling the equation of
@@ -513,6 +518,22 @@ time the same as before it existed. Mixing by mass fraction keeps an ideal gas o
 $`\gamma`$ exactly in pressure balance across a contact, since its pressure does not depend on
 the composition. The other equations of state err by about 1% in the cells where two gases
 mix (the `species-eos` test).
+
+**Different gammas** are the hard case. A conservative scheme carrying mass fractions makes
+the pressure oscillate where two gases with different $`\gamma`$ meet
+([Karni 1996][Karni1996]; [Quirk & Karni 1996][QuirkKarni1996]). Here the second-order
+reconstruction is the cause: the density and the mass fractions are reconstructed separately
+(in different passes), so at a face they disagree on how much of each gas crossed it. A
+helium-air contact at one temperature, carried across the box, erred by 3.7% in pressure and
+8% in velocity. So where $`\gamma - 1`$ jumps between neighbors, both the hydro and the species
+go toward first order. The predictor blends its half-step state toward the cell's own state by
+a weight that rises from 0 where the neighbors differ by 1% to 1 where they differ by 5%, and
+the species passes blend their face values by the same weight. The contact then errs by 0.2%
+in pressure. At unequal temperatures the mixing rule itself is no longer exact, and the error
+is 2.8% for helium twice as hot as the air. The weight is continuous: an on/off switch turned
+round-off into differences between mirror-image cells (5% in the shock-bubble problem against
+$`10^{-6}`$ now). A threshold of 0.1% made every mixed cell first order, and the mixing layer
+smeared itself ever wider.
 
 ## 13. Self-gravity
 
@@ -760,7 +781,7 @@ The species machinery of [§12](#12-passive-scalar-and-species) and the composit
 
 ## 21. Validation
 
-The validation suite (`src/validation/tests.ts`) has 38 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 39 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -825,6 +846,8 @@ result.
 [vanLeer1979]: https://doi.org/10.1016/0021-9991(79)90145-1
 [VazquezSemadeni2007]: https://doi.org/10.1086/510771
 [Zingale2002]: https://doi.org/10.1086/342754
+[Karni1996]: https://doi.org/10.1137/S106482759528003X
+[QuirkKarni1996]: https://doi.org/10.1017/S0022112096007069
 
 - Bate, M. R., Bonnell, I. A., & Price, N. M. (1995). Modelling accretion in protobinary systems. MNRAS 277, 362. [doi:10.1093/mnras/277.2.362](https://doi.org/10.1093/mnras/277.2.362)
 - Berger, M. J., & Oliger, J. (1984). Adaptive Mesh Refinement for Hyperbolic Partial Differential Equations. Journal of Computational Physics 53, 484. [doi:10.1016/0021-9991(84)90073-1](https://doi.org/10.1016/0021-9991(84)90073-1)

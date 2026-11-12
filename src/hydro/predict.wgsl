@@ -37,13 +37,23 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     zm = load_q(c + vec3<i32>(0, 0, -1));
     zp = load_q(c + vec3<i32>(0, 0, 1));
   }
-  let pr = predictor(
+  var pr = predictor(
     q,
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
     load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
     zm, zp,
     g_load(c), vec3<f32>(1.0), dphi_cell(c, -1), dphi_cell(c, 0),
   );
+  if (COMP) {
+    // Toward first order where two gases with different gammas meet (comp_jump).
+    let k = load_comp(c);
+    var w = max(max(comp_jump(k, load_comp(c + vec3<i32>(-1, 0, 0))), comp_jump(k, load_comp(c + vec3<i32>(1, 0, 0)))),
+                max(comp_jump(k, load_comp(c + vec3<i32>(0, -1, 0))), comp_jump(k, load_comp(c + vec3<i32>(0, 1, 0)))));
+    if (P.dims.z != 1u) {
+      w = max(w, max(comp_jump(k, load_comp(c + vec3<i32>(0, 0, -1))), comp_jump(k, load_comp(c + vec3<i32>(0, 0, 1)))));
+    }
+    if (w > 0.0) { pr = toward_first_order(q, pr, w); }
+  }
   textureStore(PA, c, pr.a);
   textureStore(PB, c, pr.b);
 }

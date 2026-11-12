@@ -8,6 +8,13 @@
 // cell to the upper neighbor, for the well-balanced pressure slopes (hydro/q.wgsl): zero
 // when that is off.
 // Requires P, hydro/q.wgsl, and g_dx and g_dt set.
+
+// The half-step state `pr` of cell q moved toward first order by weight w: at w = 1 the cell as
+// it is with no slopes, as the positivity check below makes it.
+fn toward_first_order(q: Q, pr: Q, w: f32) -> Q {
+  return Q(mix(pr.a, q.a, w), vec4<f32>(mix(pr.b.xy, q.b.xy, w), pr.b.z, max(pr.b.w, w)));
+}
+
 fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>, mask: vec3<f32>, lo: PhiSteps, hi: PhiSteps) -> Q {
   var dl = lo.seen;
   var dr = hi.seen;

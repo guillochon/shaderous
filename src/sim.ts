@@ -13,7 +13,7 @@ import type { Restart } from './io/snapshot';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
-import { compSlot, mixMoments, problemCoefficients, type Moments } from './species/mixture';
+import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 
 export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
 export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
@@ -306,7 +306,7 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     // Whether the update records face mass fluxes for the species pass (species/species.ts).
     species: speciesSlot(speciesGroups(c.problem)),
     // One composition everywhere, or the species' own in every cell (species/mixture.ts).
-    comp: compSlot(problemCoefficients(c.problem), speciesGroups(c.problem)),
+    comp: problemCompSlot(c.problem, c.eosParams.gamma, speciesGroups(c.problem)),
   };
 }
 
@@ -690,7 +690,9 @@ export class Sim implements Simulation {
    * the four composition moments, and the moments of every cell, which the species pass writes
    * with rho X and the hydro passes read. Null and absent for a uniform composition.
    */
-  readonly compCoeffs: Moments[] | null;
+  get compCoeffs(): Moments[] | null {
+    return problemCoefficients(this.cfg.problem, this.cfg.eosParams.gamma);
+  }
   private comp?: GPUTexture;
   /** mass fractions half a step ahead (hydro/species_predict.wgsl) */
   private speciesHalf?: GPUTexture;
@@ -754,7 +756,6 @@ export class Sim implements Simulation {
     this.n = cfg.n;
     this.nz = cfg.ndim === 2 ? 1 : cfg.n;
     this.speciesGroups = speciesGroups(cfg.problem);
-    this.compCoeffs = problemCoefficients(cfg.problem);
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -948,7 +949,7 @@ export class Sim implements Simulation {
         6: v(this.species[1 - q]),
         7: this.massFlux!,
         8: v(this.speciesHalf!),
-        ...((this.comp ? { 26: v(this.comp) } : {}) as Record<number, GPUTextureView>),
+        ...((this.comp ? { 26: v(this.comp), 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>),
       }));
     }
     this.redDiag = await Reducer.create(
@@ -1011,7 +1012,7 @@ export class Sim implements Simulation {
           if (km) {
             const m = mixMoments(kc!, w.X);
             km.set(m, o);
-            ce = makeEos(c.eos, c.eosParams, m);
+            ce = makeEos(c.eos, c.eosParams, m, hydrogenParticles(c.problem.composition));
           }
           const p = ce.hasEnergy ? w.p : ce.pressure(w.rho, 0);
           const eint = ce.eintFromP(w.rho, p);

@@ -33,6 +33,12 @@ fn load_q(c: vec3<i32>) -> Q {
 
 #include "hydro/predictor.wgsl"
 
+// Composition moments of a cell, ghosts included (amr/assemble.wgsl stores them).
+fn load_comp(c: vec3<i32>) -> vec4<f32> {
+  if (!COMP) { return vec4<f32>(0.0); }
+  return comp_tex(c);
+}
+
 // Acceleration at an interior cell: the uniform field plus self-gravity from the field atlas.
 fn grav_at(c: vec3<i32>) -> vec3<f32> {
   var g = P.gext.xyz;
@@ -96,13 +102,28 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
       hi.face[axis] = above.y;
     }
   }
-  return predictor(
+  let pr = predictor(
     q,
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
     load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
     zm, zp,
     g, mask, lo, hi,
   );
+  if (COMP) {
+    // Toward first order where two gases with different gammas meet (comp_jump), looking only
+    // along the axes whose neighbors exist.
+    let k = load_comp(c);
+    var w = 0.0;
+    let nax = select(3, 2, is2d());
+    for (var axis = 0; axis < nax; axis++) {
+      if (mask[axis] == 0.0) { continue; }
+      var e = vec3<i32>(0);
+      e[axis] = 1;
+      w = max(w, max(comp_jump(k, load_comp(c - e)), comp_jump(k, load_comp(c + e))));
+    }
+    if (w > 0.0) { return toward_first_order(q, pr, w); }
+  }
+  return pr;
 }
 
 @compute @workgroup_size(FLAT_WG)
