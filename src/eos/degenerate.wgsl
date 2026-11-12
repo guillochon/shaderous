@@ -89,3 +89,12 @@ fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
   let T2 = T * T;
   return deg_pe(rho).y + P.eos.z * rho * T / (P.eos.x - 1.0) + P.eos.w * T2 * T2;
 }
+
+// Least e_int the dual-energy switch accepts (hydro/dual_energy.wgsl). Not the zero-temperature
+// energy E_deg: cold gas sits right on it, so truncation errors take e_int just below it as
+// often as just above, and flooring them back up would add energy every step (13% of the total
+// across a white dwarf collision). Below E_deg the pressure is simply P_deg and T is 0, so the
+// total energy stays as the conservative update made it.
+fn eos_eint_floor(rho: f32) -> f32 {
+  return 0.0;
+}

@@ -28,3 +28,8 @@ fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
   let T2 = T * T;
   return P.eos.z * rho * T / (P.eos.x - 1.0) + P.eos.w * T2 * T2;
 }
+
+// Least e_int the dual-energy switch accepts (hydro/dual_energy.wgsl): that of the pressure floor.
+fn eos_eint_floor(rho: f32) -> f32 {
+  return eos_eint_from_p(rho, P.p_floor);
+}

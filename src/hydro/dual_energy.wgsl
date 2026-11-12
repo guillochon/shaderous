@@ -1,12 +1,13 @@
 // Dual-energy synchronization (after Bryan et al. 1995). Given the conservatively updated total
 // energy and the separately advected internal energy, returns the pair (E, e_int) to store.
 // E - KE is used where float32 resolves it; elsewhere the advected e_int is kept and E is
-// rebuilt from it. Barotropic equations of state slave e_int to the density.
+// rebuilt from it. Barotropic equations of state slave e_int to the density. The least e_int
+// accepted is the equation of state's own (eos_eint_floor).
 // Requires P and the equation of state.
 fn dual_energy(rho: f32, ke: f32, E: f32, eint: f32) -> vec2<f32> {
   if (EOS_HAS_ENERGY) {
     let eth = E - ke;
-    let emin = eos_eint_from_p(rho, P.p_floor);
+    let emin = eos_eint_floor(rho);
     if (eth > P.eta_dual * E && eth >= emin) {
       return vec2<f32>(E, eth);          // E stays exactly as the conservative update made it
     }

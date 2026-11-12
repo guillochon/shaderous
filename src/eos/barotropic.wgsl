@@ -21,3 +21,8 @@ fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
   // The temperature is not free here: it follows the density.
   return eos_eint_from_p(rho, eos_pressure(rho, 0.0));
 }
+
+// Least e_int the dual-energy switch accepts (hydro/dual_energy.wgsl): that of the pressure floor.
+fn eos_eint_floor(rho: f32) -> f32 {
+  return eos_eint_from_p(rho, P.p_floor);
+}

@@ -14,6 +14,7 @@ import { binary } from './binary';
 import { thermalInstability } from './thermal_instability';
 import { isothermalCollapse } from './isothermal';
 import { empty } from './empty';
+import { wdCollision } from './stellar_collision';
 
 /** A problem in the menu: one or more variants of the same setup, each a preset of its own. */
 export interface ProblemFamily {
@@ -58,7 +59,13 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
   },
   {
     group: 'Self-gravity',
-    families: [single(polytrope), single(evrard), single(sphere), single(isothermalCollapse)],
+    families: [
+      single(polytrope),
+      single(evrard),
+      single(sphere),
+      single(isothermalCollapse),
+      { id: 'stellar-collision', label: 'Stellar collision', variants: [{ label: 'White dwarfs (C/O)', problem: wdCollision }] },
+    ],
   },
   {
     group: 'Point masses',
