@@ -2,13 +2,14 @@
 import { BUILD, reportError, setAdapterInfo } from './errors';
 import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
+import { allocationSurvived, memoryBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
 import type { DisplaySystem } from '../units/units';
-import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
@@ -41,8 +42,13 @@ const BC_KINDS = [
 
 const RES_3D = [32, 64, 128, 256, 512];
 const RES_2D = [128, 256, 512, 1024, 2048, 4096];
-// Largest uniform grids offered; beyond these the mesh must be adaptive.
+// Largest uniform grids offered; beyond these the mesh must be adaptive. A phone, or a device
+// that crashed before, offers only the ones within its memory budget (gpu/memory.ts).
 const UNIFORM_MAX = { 2: 2048, 3: 256 };
+function uniformMax(ndim: 2 | 3): number {
+  const fits = (ndim === 2 ? RES_2D : RES_3D).filter((n) => n <= UNIFORM_MAX[ndim] && n ** ndim * Sim.cellBytes(ndim) <= memoryBudget());
+  return fits.length ? fits[fits.length - 1] : (ndim === 2 ? RES_2D : RES_3D)[0];
+}
 
 const side = $('side');
 side.innerHTML = `
@@ -630,7 +636,7 @@ function syncControls() {
     res.dataset.dim = String(cfg.ndim);
   }
   res.value = String(cfg.n);
-  for (const o of res.options) o.disabled = cfg.amrLevels === 0 && +o.value > UNIFORM_MAX[cfg.ndim];
+  for (const o of res.options) o.disabled = cfg.amrLevels === 0 && +o.value > uniformMax(cfg.ndim);
   const levels = $<HTMLSelectElement>('levels');
   levels.value = String(cfg.amrLevels);
   const amrOk = supportsAmr(cfg.problem);
@@ -781,12 +787,18 @@ function syncProblemParams() {
 // Rebuilds are asynchronous (shader compilation). They run one at a time, in the order the
 // controls were touched, so a change made while another is compiling is never dropped.
 let queue: Promise<void> = Promise.resolve();
+/** Counts builds, so a survival check (below) belongs to the build that started it. */
+let buildGen = 0;
+/** How long a new run must last before its allocation counts as safe. */
+const SURVIVAL_MS = 4000;
 function enqueue(job: () => Promise<void>): Promise<void> {
   queue = queue.then(async () => {
     building = true;
     try {
       await job();
     } catch (e) {
+      // A build that failed with an error left the page alive: not a crash to learn from.
+      allocationSurvived();
       fail(e);
     } finally {
       building = false;
@@ -805,7 +817,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
     // Refinement: only where the preset allows it, and no deeper than the resolution permits.
     levels = supportsAmr(problem) ? Math.min(levels, maxAmrLevels(n)) : 0;
-    if (levels === 0) n = Math.min(n, UNIFORM_MAX[ndim]);
+    if (levels === 0) n = Math.min(n, uniformMax(ndim));
     const next = configFor(problem, n, { ndim, amrLevels: levels });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
     if (keepPhysics && cfg && cfg.problem === problem && cfg.ndim === ndim) {
@@ -843,12 +855,22 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     draft = null;
     pendingBrush = null;
     sources = [];
-    old?.destroy();
+    if (old) {
+      old.destroy();
+      // Let the GPU finish with the old run so its memory is free before the new one takes its
+      // own: the two together are what kills the page on a phone.
+      await gpu.device.queue.onSubmittedWorkDone();
+    }
     cfg = next;
     if (ndim === 2) view.sliceAxis = 2;
     const s = await createSim(gpu, cfg);
     await renderer.attach(s);
     sim = s;
+    // The page survived the allocation for a few seconds: it is safe (gpu/memory.ts).
+    const gen = ++buildGen;
+    setTimeout(() => {
+      if (gen === buildGen && sim === s) allocationSurvived();
+    }, SURVIVAL_MS);
     finished = false;
     // A freshly loaded problem starts playing, unless it waits for the user (an empty box); a
     // loaded state waits to be looked at.
@@ -908,7 +930,7 @@ async function importState(file: File) {
       link.ndim = snap.ndim;
       link.n = fits.length ? fits[fits.length - 1] : allowed[0];
       link.amr = maxLevel(snap) > 0 && supportsAmr(problem) ? Math.min(maxLevel(snap), maxAmrLevels(link.n)) : 0;
-      if (link.amr === 0) link.n = Math.min(link.n, UNIFORM_MAX[link.ndim]);
+      if (link.amr === 0) link.n = Math.min(link.n, uniformMax(link.ndim));
       // The run continues to wherever the current settings say; a foreign time means nothing here.
       delete link.cfg.tEnd;
     }

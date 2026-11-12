@@ -19,6 +19,7 @@ import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
+import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
@@ -254,17 +255,27 @@ export class AmrSim implements Simulation {
     // cannot hold that.
     const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
     const explicit = slots || cfg.amrBudget;
+    // Most blocks the device's memory budget allows (gpu/memory.ts: 1 GB on a phone, less after
+    // a crash), the atlas being nearly all of a run's memory.
+    const fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim));
     if (cfg.ndim === 3) {
       const auto = Math.min(Math.round(Math.cbrt(MAX_BLOCKS_3D)), Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9)));
-      this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto);
+      this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
       this.layers = this.slotsPerSide;
     } else {
-      const want = explicit || Math.min(MAX_BLOCKS_3D * PAD, Math.max(full, roots * 2, 144));
+      const want = Math.min(explicit || Math.min(MAX_BLOCKS_3D * PAD, Math.max(full, roots * 2, 144)), Math.max(1, fit));
       this.layers = Math.ceil(want / limit ** 2);
-      this.slotsPerSide = Math.min(limit, Math.ceil(Math.sqrt(want / this.layers) - 1e-9));
+      this.slotsPerSide = Math.min(limit, Math.floor(Math.sqrt(fit / this.layers) + 1e-9), Math.ceil(Math.sqrt(want / this.layers) - 1e-9));
     }
     this.cap = this.slotsPerSide ** 2 * this.layers;
-    if (roots > this.cap) throw new Error(`${roots} root blocks do not fit in an atlas of ${this.cap}`);
+    if (roots > this.cap) {
+      throw new Error(
+        fit < Infinity && roots > fit
+          ? `${roots} root blocks need more GPU memory than this device allows (${Math.round(memoryBudget() / 2 ** 20)} MB): pick a lower resolution or more refinement levels`
+          : `${roots} root blocks do not fit in an atlas of ${this.cap}`,
+      );
+    }
+    noteAllocation(this.cap * AmrSim.blockBytes(cfg.ndim));
 
     const side = this.slotsPerSide * PAD;
     const t = (label: string) => tex3d(d, side, 'rgba32float', label, this.layers * (cfg.ndim === 2 ? 1 : PAD));
@@ -304,6 +315,14 @@ export class AmrSim implements Simulation {
     this.binArgs = d.createBuffer({ size: BIN_ARGS_BYTES, usage: storage | GPUBufferUsage.INDIRECT });
     this.binStaging = d.createBuffer({ size: BIN_ARGS_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     this.staging = d.createBuffer({ size: DIAG_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  }
+
+  /**
+   * GPU bytes per atlas block: eight rgba32float textures (two state pairs, primitives,
+   * predictor) and two r32float ones (gravity's previous potential and its rate).
+   */
+  static blockBytes(ndim: 2 | 3): number {
+    return PAD ** ndim * (8 * 16 + 2 * 4);
   }
 
   /** Build the simulation; if the GPU runs out of memory, try again with a smaller atlas. */

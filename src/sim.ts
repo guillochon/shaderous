@@ -2,6 +2,7 @@
 import { assemble } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
+import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
@@ -717,7 +718,17 @@ export class Sim implements Simulation {
     });
   }
 
+  /**
+   * GPU bytes per cell of a uniform grid: seven rgba32float textures (two state pairs, predictor
+   * pair, gravity field) and, in 3D, the multigrid solver's r32float levels (potential, source,
+   * residual at each coarser level, about 8/7 of a grid each, and the previous potential).
+   */
+  static cellBytes(ndim: 2 | 3): number {
+    return 7 * 16 + (ndim === 3 ? 4 + 3 * 4 * (8 / 7) : 0);
+  }
+
   static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
+    noteAllocation(cfg.n ** cfg.ndim * Sim.cellBytes(cfg.ndim));
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
     const n = cfg.n;
