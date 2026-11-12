@@ -1001,7 +1001,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     // loaded state waits to be looked at.
     running = autoplay && !snap && !problem.startPaused;
     lastDiag = undefined;
-    nsub = 1;
+    batch = 1;
+    msPerStep = busyMs = busySteps = 0;
   });
 }
 
@@ -2581,20 +2582,21 @@ function exportDiagnostics() {
 }
 
 // --- frame loop -------------------------------------------------------------------------
-// Each frame encodes nsub substeps plus the render into one command buffer, and nsub adapts
-// so the GPU just keeps up with the display.
+// Stepping runs apart from the display. Steps go out in batches, and a new batch is submitted
+// as soon as one is reported done, keeping a few queued so the GPU never waits on the page:
+// not for a display refresh, and not for an adaptive run's refinement check, which is
+// answered within a batch. The display draws each refresh, behind whatever steps are queued.
 //
-// How "keeping up" is detected depends on the browser. Chrome reports completed work
-// promptly, so one frame is in flight at a time and its measured GPU time steers nsub.
-// Firefox only reports completion on a ~100 ms timer; waiting for it would cap the display
-// at 10 fps. There, frames are submitted every display refresh, up to a small backlog, and
-// nsub is steered by how many are still outstanding when a batch of completions arrives.
-let nsub = 1;
-let inflight = 0;
-let capped = false; // a refresh was skipped because the backlog limit was reached
-let batchPending = false;
+// A batch aims at half a refresh of GPU time, so the queue (and the delay of what is drawn)
+// stays near one refresh. Chrome reports completed work promptly; Firefox only on a ~100 ms
+// timer, so there batches are longer and more of them are queued to cover the wait.
+let batch = 1; // steps per batch
+let queued = 0; // batches submitted and not yet reported done
+let msPerStep = 0; // GPU time per step, render included, measured from completed batches
+let busyMs = 0; // GPU time and steps since msPerStep was last updated
+let busySteps = 0;
+let lastDone = 0; // when the last batch was reported done
 let pollMs = 0; // how long the browser takes to report already-finished work
-let maxInflight = 1;
 let frame = 0;
 let lastReadout = 0;
 let stepRate = 0; // steps per second of wall time
@@ -2604,9 +2606,53 @@ let fps = 0;
 let lastFrameTime = 0;
 let refreshMs = 16.7; // display refresh interval, estimated from requestAnimationFrame
 let lastTick = 0;
-const MAX_SUB = 64;
+const MAX_BATCH = 64;
 const loadingEl = $('loading');
 const loadingText = $('loading-text');
+
+/** GPU time a batch aims at, and how many batches to keep queued. */
+const batchMs = () => Math.max(refreshMs / 2, pollMs / 4);
+const depth = () => 2 + Math.ceil(pollMs / batchMs());
+
+/** Submit batches of steps until enough are queued. Runs from each completion and each refresh. */
+function pump() {
+  const s = sim;
+  while (s && s === sim && !building && running && !finished && queued < depth()) {
+    const enc = gpu.device.createCommandEncoder();
+    const timed = frameTiming.open();
+    // An adaptive run may take fewer steps than asked while it waits for the mesh to catch up.
+    // Submit whatever it encoded even so: that can include a re-mesh.
+    const taken = s.encodeSteps(enc, batch);
+    if (timed) frameTiming.close(enc, taken);
+    gpu.device.queue.submit([enc.finish()]);
+    s.submitted();
+    if (timed) frameTiming.submitted();
+    stepsSubmitted += taken;
+    queued++;
+    const t0 = performance.now();
+    gpu.device.queue.onSubmittedWorkDone().then(() => {
+      queued--;
+      const now = performance.now();
+      if (s !== sim) return;
+      // The batch could start once submitted and once the work before it was done.
+      busyMs += now - Math.max(t0, lastDone);
+      busySteps += taken;
+      lastDone = now;
+      if (busyMs > 4 * batchMs() && busySteps > 0) {
+        const m = busyMs / busySteps;
+        msPerStep = msPerStep ? 0.5 * (msPerStep + m) : m;
+        batch = Math.min(MAX_BATCH, Math.max(1, Math.round(batchMs() / msPerStep)));
+        busyMs = busySteps = 0;
+      }
+      pump();
+    });
+    if (taken < batch) {
+      // Held for a refinement check: go on the moment it is answered (or at the next refresh).
+      s.stepsResume()?.then(pump);
+      return;
+    }
+  }
+}
 
 async function measurePollLatency() {
   let best = Infinity;
@@ -2669,8 +2715,6 @@ function tick(now: number) {
     refreshMs = gap < refreshMs ? gap : refreshMs + 0.02 * (gap - refreshMs);
   }
   lastTick = now;
-  // Allow enough frames in flight to cover the completion-report delay.
-  maxInflight = pollMs < 8 ? 1 : Math.ceil(pollMs / refreshMs) + 2;
   // Loading: no simulation yet, a restart or rebuild under way, or a star still settling.
   const loading = !sim || !!reloading || sim.preparing;
   if (loadingEl.hidden === loading) loadingEl.hidden = !loading;
@@ -2679,26 +2723,23 @@ function tick(now: number) {
     if (loadingText.textContent !== text) loadingText.textContent = text;
   }
   if (!sim || building) return;
-  if (inflight >= maxInflight) {
-    capped = true;
-    return;
-  }
   const s = sim;
+  // Top up the steps (normally done as batches complete), then edit and draw behind them.
+  pump();
   const enc = gpu.device.createCommandEncoder();
-  // Edits go in ahead of the steps, whether or not any are taken this frame.
   advanceStroke(now);
   if (pendingBrush) {
     s.encodeBrush(enc, pendingBrush);
     pendingBrush = null;
   }
-  const steps = running && !finished ? nsub : stepOnce ? 1 : 0;
+  let timed = false;
+  if (stepOnce && !running) {
+    timed = frameTiming.open();
+    const taken = s.encodeSteps(enc, 1);
+    if (timed) frameTiming.close(enc, taken);
+    stepsSubmitted += taken;
+  }
   stepOnce = false;
-  // An adaptive run may take fewer steps than asked while it waits for the mesh to catch up.
-  const timed = frameTiming.open();
-  const taken = steps ? s.encodeSteps(enc, steps) : 0;
-  if (timed) frameTiming.close(enc, taken);
-  stepsSubmitted += taken;
-  if (taken < steps && running) nsub = Math.max(1, taken);
   updateGuides();
   renderer.densityCut = densityCut();
   renderer.slice = sliceLayout();
@@ -2708,32 +2749,6 @@ function tick(now: number) {
   s.submitted();
   renderer.submitted();
   if (timed) frameTiming.submitted();
-
-  inflight++;
-  const adapt = steps > 0 && running;
-  const t0 = performance.now();
-  gpu.device.queue.onSubmittedWorkDone().then(() => {
-    inflight--;
-    if (maxInflight === 1) {
-      // Prompt completion: steer on the measured GPU time of this frame.
-      if (!adapt) return;
-      // Aim to use most of one refresh interval.
-      const ms = performance.now() - t0;
-      if (ms < refreshMs * 0.6) nsub = Math.min(nsub + 1, MAX_SUB);
-      else if (ms > refreshMs * 1.1) nsub = Math.max(1, Math.floor(nsub * 0.75));
-    } else if (!batchPending) {
-      // Completions arrive in batches; judge once per batch, after all of them have landed.
-      batchPending = true;
-      setTimeout(() => {
-        batchPending = false;
-        if (running && !finished) {
-          if (capped || inflight >= 3) nsub = Math.max(1, Math.floor(nsub * 0.75));
-          else if (inflight <= 1) nsub = Math.min(nsub + 1, MAX_SUB);
-        }
-        capped = false;
-      }, 0);
-    }
-  });
 
   if (lastFrameTime) fps = 0.9 * fps + 0.1 * (1000 / Math.max(now - lastFrameTime, 1));
   lastFrameTime = now;
@@ -2791,7 +2806,7 @@ function tick(now: number) {
       ? `  •  point mass at r = ${Math.hypot(...pm[0].pos).toFixed(2)}`
       : pm.length ? `  •  ${pm.length} point masses, separation ${Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])).toFixed(2)}` : '';
     const took = acc > 0 ? `, accreted ${acc.toPrecision(3)}` : '';
-    const state = finished ? 'finished' : running ? `${nsub} step${nsub > 1 ? 's' : ''}/frame, ${stepRate.toFixed(0)} steps/s` : 'paused';
+    const state = finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused';
     const mesh = s.status();
     setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${where ? took : ''}${mesh ? '  •  ' + mesh : ''}${toolNotice ? '  •  ' + toolNotice : ''}`);
   }
@@ -2820,4 +2835,4 @@ function tick(now: number) {
 })();
 
 // Handles for the console and for tests.
-Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get nsub() { return nsub; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; }, timing: { ...frameTiming, set: setTiming } } });
+Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get batch() { return batch; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; }, timing: { ...frameTiming, set: setTiming } } });

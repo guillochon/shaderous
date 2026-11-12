@@ -163,6 +163,11 @@ export interface Simulation {
   encodeSteps(enc: GPUCommandEncoder, count: number): number;
   /** Call after submitting an encoder that encodeSteps() wrote to. */
   submitted(): void;
+  /**
+   * When encodeSteps() took fewer steps than asked because it is waiting on a refinement check,
+   * a promise that settles once the check is answered and stepping can go on; otherwise null.
+   */
+  stepsResume(): Promise<void> | null;
   readDiagnostics(): Promise<Diagnostics | null>;
   diagnostics(): Promise<Diagnostics>;
   runToEnd(batch?: number, maxSteps?: number): Promise<number>;
@@ -1249,6 +1254,10 @@ export class Sim implements Simulation {
   }
 
   submitted() {}
+
+  stepsResume(): Promise<void> | null {
+    return null;
+  }
 
   encodeBrush(enc: GPUCommandEncoder, op: BrushOp) {
     if (op.kind === 'obstacle' && !this.solids) {

@@ -1762,6 +1762,10 @@ export class AmrSim implements Simulation {
       });
   }
 
+  stepsResume(): Promise<void> | null {
+    return this.flagInFlight && this.flagWait ? this.flagWait.catch(() => {}) : null;
+  }
+
   /**
    * Bring the GPU's mesh up to date with the tree. The tree is adapted as soon as indicators
    * arrive, but the GPU tables only change at the start of the next batch of steps; anything
