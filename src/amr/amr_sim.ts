@@ -1277,8 +1277,9 @@ export class AmrSim implements Simulation {
     this.dtStale = true;
     this.nLeaf = leaves.length;
     this.nLevel = byLevel.map((l) => l.length);
+    // Only the count and the listed slots: what lies past them is never read.
     const pack = (list: Uint32Array) => {
-      const out = new Uint32Array(this.cap + 1);
+      const out = new Uint32Array(list.length + 1);
       out[0] = list.length;
       out.set(list, 1);
       return out;
@@ -1360,7 +1361,10 @@ export class AmrSim implements Simulation {
         this.encodeCycle(enc);
         this.cyclesSincePoll++;
         this.stepsSinceFlag += cycle;
-        this.encodeFlags(enc);
+        if (this.encodeFlags(enc)) {
+          done += cycle;
+          break;
+        }
         continue;
       }
       if (this.binPause > 0) this.binPause--;
@@ -1397,7 +1401,10 @@ export class AmrSim implements Simulation {
         this.cur = 1 - p;
       }
       this.stepsSinceFlag++;
-      this.encodeFlags(enc);
+      if (this.encodeFlags(enc)) {
+        done++;
+        break;
+      }
     }
     if (cycle && this.cyclesSincePoll >= BIN_POLL_CYCLES && !this.binPollBusy && !this.wantBinPoll) {
       // How much work the last cycles saved: read back without blocking (see submitted()).
@@ -1441,9 +1448,14 @@ export class AmrSim implements Simulation {
       });
   }
 
-  /** Every few steps, measure the refinement indicator from the latest primitives. */
-  private encodeFlags(enc: GPUCommandEncoder) {
-    if (this.levels === 0 || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return;
+  /**
+   * Every few steps, measure the refinement indicator from the latest primitives. Returns
+   * whether a check was encoded: encodeSteps() then ends
+   * the batch, so the check can be read back as soon as it is done rather than after steps
+   * queued behind it in the same submission: the flow may only run MAX_STEPS_AHEAD past it.
+   */
+  private encodeFlags(enc: GPUCommandEncoder): boolean {
+    if (this.levels === 0 || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return false;
     enc.clearBuffer(this.flags);
     const fp = beginPass(enc);
     fp.setPipeline(this.pFlag);
@@ -1453,6 +1465,7 @@ export class AmrSim implements Simulation {
     enc.copyBufferToBuffer(this.flags, 0, this.flagStaging, 0, this.cap * 4);
     this.wantMap = true;
     this.stepsSinceFlag = 0;
+    return true;
   }
 
   /** Whether the edge of an outline passes through a block: some of the block inside, some not. */

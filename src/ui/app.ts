@@ -1003,6 +1003,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     lastDiag = undefined;
     batch = 1;
     msPerStep = busyMs = busySteps = 0;
+    resuming = false; // a hold on the last run's mesh does not carry over
   });
 }
 
@@ -2592,6 +2593,8 @@ function exportDiagnostics() {
 // timer, so there batches are longer and more of them are queued to cover the wait.
 let batch = 1; // steps per batch
 let queued = 0; // batches submitted and not yet reported done
+let queuedSteps = 0; // the steps in them
+let resuming = false; // stepping is held, waiting on a refinement check
 let msPerStep = 0; // GPU time per step, render included, measured from completed batches
 let busyMs = 0; // GPU time and steps since msPerStep was last updated
 let busySteps = 0;
@@ -2610,28 +2613,50 @@ const MAX_BATCH = 64;
 const loadingEl = $('loading');
 const loadingText = $('loading-text');
 
-/** GPU time a batch aims at, and how many batches to keep queued. */
+/**
+ * GPU time a batch aims at, and how much to keep queued: enough to cover the delay in
+ * reporting completion, plus QUEUE_MS for the page being busy elsewhere (an adaptive run's
+ * re-mesh can hold the page for a few milliseconds). Until a step has been timed, three batches;
+ * never fewer than two, so a step longer than all that still has the next one queued behind it.
+ */
+const QUEUE_MS = 12;
 const batchMs = () => Math.max(refreshMs / 2, pollMs / 4);
-const depth = () => 2 + Math.ceil(pollMs / batchMs());
+const queueFull = () => queued >= 64 || (queued >= 2 && (msPerStep ? queuedSteps * msPerStep >= pollMs + QUEUE_MS : queued >= 3));
 
 /** Submit batches of steps until enough are queued. Runs from each completion and each refresh. */
 function pump() {
   const s = sim;
-  while (s && s === sim && !building && running && !finished && queued < depth()) {
+  while (s && s === sim && !building && !resuming && running && !finished && !queueFull()) {
     const enc = gpu.device.createCommandEncoder();
     const timed = frameTiming.open();
-    // An adaptive run may take fewer steps than asked while it waits for the mesh to catch up.
-    // Submit whatever it encoded even so: that can include a re-mesh.
+    // An adaptive run may take fewer steps than asked: it ends a batch at each refinement check,
+    // and holds back while the flow is too far ahead of the mesh. Submit whatever it encoded
+    // even so: that can include a re-mesh.
     const taken = s.encodeSteps(enc, batch);
     if (timed) frameTiming.close(enc, taken);
     gpu.device.queue.submit([enc.finish()]);
     s.submitted();
     if (timed) frameTiming.submitted();
+    if (!taken) {
+      // Held for a refinement check: go on the moment it is answered (or at the next refresh,
+      // for any other hold, such as a star still settling).
+      const resume = s.stepsResume();
+      if (resume) {
+        resuming = true;
+        resume.then(() => {
+          resuming = false;
+          pump();
+        });
+      }
+      return;
+    }
     stepsSubmitted += taken;
     queued++;
+    queuedSteps += taken;
     const t0 = performance.now();
     gpu.device.queue.onSubmittedWorkDone().then(() => {
       queued--;
+      queuedSteps -= taken;
       const now = performance.now();
       if (s !== sim) return;
       // The batch could start once submitted and once the work before it was done.
@@ -2646,11 +2671,7 @@ function pump() {
       }
       pump();
     });
-    if (taken < batch) {
-      // Held for a refinement check: go on the moment it is answered (or at the next refresh).
-      s.stepsResume()?.then(pump);
-      return;
-    }
+    // A short batch (an adaptive run ends one at each refinement check) just goes on to the next.
   }
 }
 

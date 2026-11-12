@@ -54,9 +54,27 @@ export class BlockTree {
   /** Deepest level refinement may reach; at most maxLevel. Lowered when the slot budget cannot hold more. */
   levelLimit: number;
   readonly nface: number;
-  readonly blocks = new Map<string, Block>();
+  /** Every block, keyed by key(level, c). */
+  readonly blocks = new Map<number, Block>();
   readonly slots: (Block | undefined)[];
   private free: number[] = [];
+  /** Blocks per side at the deepest level: bounds every block coordinate. */
+  private readonly span: number;
+  /** all(), cached until the tree next changes (see changed()). */
+  private sorted: Block[] | null = null;
+  /**
+   * The block table and index grid, kept between re-meshes and brought up to date
+   * incrementally: a re-mesh at a fine level touches a small part of them, and rebuilding
+   * them whole held the page for long enough to starve the GPU.
+   */
+  private tab: Int32Array | null = null;
+  private grid: Uint32Array | null = null;
+  /** Slots whose block-table rows may have changed since table() was last called. */
+  private dirtyRows = new Set<number>();
+  /** Blocks that may have become leaves since indexGrid() was last called. */
+  private newLeaves: Block[] = [];
+  private lo: number[];
+  private hi: number[];
 
   /**
    * @param ndim     2 or 3
@@ -70,12 +88,15 @@ export class BlockTree {
     readonly nr: number,
     readonly maxLevel: number,
     readonly cap: number,
-    public bcLo: number[],
-    public bcHi: number[],
+    bcLo: number[],
+    bcHi: number[],
   ) {
+    this.lo = bcLo;
+    this.hi = bcHi;
     this.nchild = 1 << ndim;
     this.levelLimit = maxLevel;
     this.nface = 2 * ndim;
+    this.span = nr << maxLevel;
     this.slots = new Array(cap);
     for (let s = cap - 1; s >= 0; s--) this.free.push(s);
     const nroot = nr ** ndim;
@@ -84,20 +105,59 @@ export class BlockTree {
       for (let j = 0; j < nr; j++) for (let i = 0; i < nr; i++) this.create(0, [i, j, k], null);
   }
 
-  private key(level: number, c: number[]): string {
-    return `${level}:${c[0]}:${c[1]}:${c[2]}`;
+  // A number rather than a string: the tables are rebuilt from neighbor lookups on every re-mesh.
+  private key(level: number, c0: number, c1: number, c2: number): number {
+    return ((level * this.span + c2) * this.span + c1) * this.span + c0;
+  }
+
+  get bcLo(): number[] {
+    return this.lo;
+  }
+  set bcLo(v: number[]) {
+    this.lo = v;
+    this.tab = null; // boundary faces are in every edge block's row
+  }
+  get bcHi(): number[] {
+    return this.hi;
+  }
+  set bcHi(v: number[]) {
+    this.hi = v;
+    this.tab = null;
+  }
+
+  private changed() {
+    this.sorted = null;
+  }
+
+  /**
+   * A block was added or is about to go: its row, its parent's (leaf flag and children) and
+   * its same-level face neighbors' (same-level or coarser neighbor) change. No finer block can
+   * border it: 2:1 balance rules that out when it is created, and canCoarsen() when it goes.
+   */
+  private touch(b: Block) {
+    this.dirtyRows.add(b.slot);
+    if (b.parent) this.dirtyRows.add(b.parent.slot);
+    for (let f = 0; f < this.nface; f++) {
+      const nb = this.sameLevel(b, f);
+      if (nb) this.dirtyRows.add(nb.slot);
+    }
   }
 
   private create(level: number, c: number[], parent: Block | null): Block {
     const slot = this.free.pop()!;
     const b: Block = { slot, level, c, parent, children: null };
     this.slots[slot] = b;
-    this.blocks.set(this.key(level, c), b);
+    this.blocks.set(this.key(level, c[0], c[1], c[2] ?? 0), b);
+    this.changed();
+    this.touch(b);
+    this.newLeaves.push(b);
     return b;
   }
 
   private remove(b: Block) {
-    this.blocks.delete(this.key(b.level, b.c));
+    this.touch(b);
+    this.blocks.delete(this.key(b.level, b.c[0], b.c[1], b.c[2] ?? 0));
+    this.changed();
     this.slots[b.slot] = undefined;
     this.free.push(b.slot);
   }
@@ -109,32 +169,55 @@ export class BlockTree {
     return this.cap - this.free.length;
   }
 
-  /** Every block, coarsest first. */
+  /** Every block, coarsest first, and by slot within a level. */
   all(): Block[] {
-    return [...this.blocks.values()].sort((a, b) => a.level - b.level || a.slot - b.slot);
+    if (!this.sorted) {
+      const byLevel: Block[][] = Array.from({ length: this.maxLevel + 1 }, () => []);
+      for (const b of this.slots) if (b) byLevel[b.level].push(b);
+      this.sorted = byLevel.flat();
+    }
+    return this.sorted.slice();
   }
   leaves(): Block[] {
     return this.all().filter((b) => !b.children);
   }
 
   get(level: number, c: number[]): Block | undefined {
-    return this.blocks.get(this.key(level, c));
+    return this.blocks.get(this.key(level, c[0], c[1], c[2] ?? 0));
+  }
+
+  /** The block of the same level beyond face f, if there is one (none at a closed boundary). */
+  private sameLevel(b: Block, f: number): Block | undefined {
+    const axis = f >> 1;
+    const n = this.nr << b.level;
+    let v = b.c[axis] + (f & 1 ? 1 : -1);
+    if (v < 0 || v >= n) {
+      if ((f & 1 ? this.hi[axis] : this.lo[axis]) !== 0) return undefined;
+      v = (v + n) % n;
+    }
+    return this.blocks.get(this.key(b.level, axis === 0 ? v : b.c[0], axis === 1 ? v : b.c[1], axis === 2 ? v : (b.c[2] ?? 0)));
   }
 
   /** What lies beyond face f (0..5: -x, +x, -y, +y, -z, +z) of a block. */
   neighbor(b: Block, f: number): Neighbor {
     const axis = f >> 1;
-    const c = b.c.slice();
-    c[axis] += f & 1 ? 1 : -1;
+    let c0 = b.c[0];
+    let c1 = b.c[1];
+    let c2 = b.c[2] ?? 0;
+    const step = f & 1 ? 1 : -1;
     const n = this.nr << b.level;
-    if (c[axis] < 0 || c[axis] >= n) {
+    let v = (axis === 0 ? c0 : axis === 1 ? c1 : c2) + step;
+    if (v < 0 || v >= n) {
       const type = f & 1 ? this.bcHi[axis] : this.bcLo[axis];
       if (type !== 0) return { kind: 'bc', type };
-      c[axis] = (c[axis] + n) % n;
+      v = (v + n) % n;
     }
-    const same = this.get(b.level, c);
+    if (axis === 0) c0 = v;
+    else if (axis === 1) c1 = v;
+    else c2 = v;
+    const same = this.blocks.get(this.key(b.level, c0, c1, c2));
     if (same) return { kind: 'same', block: same };
-    const coarse = this.get(b.level - 1, c.map((v) => v >> 1));
+    const coarse = b.level > 0 ? this.blocks.get(this.key(b.level - 1, c0 >> 1, c1 >> 1, c2 >> 1)) : undefined;
     if (!coarse) throw new Error(`2:1 balance broken at level ${b.level} block ${b.c} face ${f}`);
     return { kind: 'coarse', block: coarse };
   }
@@ -176,6 +259,7 @@ export class BlockTree {
         if (nb.kind === 'coarse') split(nb.block);
       }
       q.children = [];
+      this.changed();
       for (let o = 0; o < this.nchild; o++) {
         const c = [2 * q.c[0] + (o & 1), 2 * q.c[1] + ((o >> 1) & 1), this.ndim === 3 ? 2 * q.c[2] + ((o >> 2) & 1) : 0];
         q.children.push(this.create(q.level + 1, c, q));
@@ -201,6 +285,8 @@ export class BlockTree {
   coarsen(p: Block) {
     for (const ch of p.children!) this.remove(ch);
     p.children = null;
+    this.changed();
+    this.newLeaves.push(p);
   }
 
   /**
@@ -255,12 +341,26 @@ export class BlockTree {
     return out;
   }
 
-  /** The block table uploaded to the GPU. */
+  /**
+   * The block table uploaded to the GPU. The same array is returned each time, updated in
+   * place: upload it before the tree next changes, and do not modify it.
+   */
   table(): Int32Array {
-    const t = new Int32Array(this.cap * BT_STRIDE).fill(-1);
-    for (let s = 0; s < this.cap; s++) t[s * BT_STRIDE + 4] = 0;
-    for (const b of this.blocks.values()) {
-      const o = b.slot * BT_STRIDE;
+    let t = this.tab;
+    if (!t) {
+      t = this.tab = new Int32Array(this.cap * BT_STRIDE);
+      for (let s = 0; s < this.cap; s++) this.writeRow(t, s);
+    } else for (const s of this.dirtyRows) this.writeRow(t, s);
+    this.dirtyRows.clear();
+    return t;
+  }
+
+  private writeRow(t: Int32Array, slot: number) {
+    const o = slot * BT_STRIDE;
+    t.fill(-1, o, o + BT_STRIDE);
+    t[o + 4] = 0;
+    const b = this.slots[slot];
+    if (b) {
       t[o] = b.level;
       t.set(b.c, o + 1);
       t[o + 4] = FLAG_ACTIVE | (b.children ? 0 : FLAG_LEAF);
@@ -279,7 +379,6 @@ export class BlockTree {
       }
       if (b.children) b.children.forEach((ch, i) => (t[o + 12 + i] = ch.slot));
     }
-    return t;
   }
 
   static regridTable(ops: RegridOp[], cap: number): Int32Array {
@@ -298,31 +397,47 @@ export class BlockTree {
   /** Slot lists the passes are dispatched over: every block (coarsest first), and the leaves. */
   lists(): { all: Uint32Array; leaves: Uint32Array; byLevel: Uint32Array[] } {
     const all = this.all();
+    const out = new Uint32Array(all.length);
+    const leaves: number[] = [];
+    const counts = new Array(this.maxLevel + 1).fill(0);
+    all.forEach((b, i) => {
+      out[i] = b.slot;
+      counts[b.level]++;
+      if (!b.children) leaves.push(b.slot);
+    });
+    // all() is coarsest first, so each level is a run of it.
     const byLevel: Uint32Array[] = [];
-    for (let l = 0; l <= this.maxLevel; l++) byLevel.push(Uint32Array.from(all.filter((b) => b.level === l).map((b) => b.slot)));
-    return {
-      all: Uint32Array.from(all.map((b) => b.slot)),
-      leaves: Uint32Array.from(all.filter((b) => !b.children).map((b) => b.slot)),
-      byLevel,
-    };
+    let at = 0;
+    for (const n of counts) {
+      byLevel.push(out.slice(at, at + n));
+      at += n;
+    }
+    return { all: out, leaves: Uint32Array.from(leaves), byLevel };
   }
 
   /**
    * Leaf slot covering each block-sized cell of the deepest level: a lookup from position to
-   * block, (nr << maxLevel) per side.
+   * block, (nr << maxLevel) per side. Like table(), the same array updated in place.
    */
   indexGrid(): Uint32Array {
     const m = this.nr << this.maxLevel;
     const mz = this.ndim === 3 ? m : 1;
-    const g = new Uint32Array(m * m * mz);
-    for (const b of this.blocks.values()) {
-      if (b.children) continue;
+    // Every cell lies in exactly one leaf, so filling the new leaves covers whatever changed.
+    let g = this.grid;
+    let fill: Iterable<Block> = this.newLeaves;
+    if (!g) {
+      g = this.grid = new Uint32Array(m * m * mz);
+      fill = this.blocks.values();
+    }
+    for (const b of fill) {
+      if (b.children || this.slots[b.slot] !== b) continue;
       const span = 1 << (this.maxLevel - b.level);
       const z0 = this.ndim === 3 ? b.c[2] * span : 0;
       for (let k = z0; k < z0 + (this.ndim === 3 ? span : 1); k++)
         for (let j = b.c[1] * span; j < (b.c[1] + 1) * span; j++)
           g.fill(b.slot, (k * m + j) * m + b.c[0] * span, (k * m + j) * m + (b.c[0] + 1) * span);
     }
+    this.newLeaves = [];
     return g;
   }
 

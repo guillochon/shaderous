@@ -24,6 +24,43 @@ function covers(t: BlockTree) {
 }
 
 describe('block tree', () => {
+  it('keeps its block table and index grid up to date across re-meshes', () => {
+    // Two trees take the same re-meshes: one is read after every one (updated in place), the
+    // other only at the end (built whole).
+    for (const [ndim, bc] of [[2, periodic], [2, [1, 2, 0]], [3, periodic], [3, outflow]] as const) {
+      const make = () => new BlockTree(ndim, 2, ndim === 2 ? 4 : 3, 3000, [...bc], [...bc]);
+      const a = make();
+      const b = make();
+      let seed = 7;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let round = 0; round < 10; round++) {
+        const ind = Array.from({ length: 3000 }, () => rnd() * 1.2);
+        a.adapt((x) => ind[x.slot], 0.8, 0.3);
+        b.adapt((x) => ind[x.slot], 0.8, 0.3);
+        a.table();
+        a.indexGrid();
+      }
+      expect(a.table()).toEqual(b.table());
+      expect(a.indexGrid()).toEqual(b.indexGrid());
+      covers(a);
+      // A change of boundaries reaches the table read before it (b's is built only now).
+      const flipped = bc.map((x) => (x ? 0 : 1));
+      a.bcLo = flipped;
+      const b2 = make();
+      b2.bcLo = flipped;
+      let s2 = 7;
+      const rnd2 = () => (s2 = (s2 * 16807) % 2147483647) / 2147483647;
+      for (let round = 0; round < 10; round++) {
+        const ind = Array.from({ length: 3000 }, () => rnd2() * 1.2);
+        // Same re-meshes as a's, made under the old boundaries; only the table read differs.
+        b2.bcLo = [...bc];
+        b2.adapt((x) => ind[x.slot], 0.8, 0.3);
+      }
+      b2.bcLo = flipped;
+      expect(a.table()).toEqual(b2.table());
+    }
+  });
+
   it('starts as a uniform root grid', () => {
     const t = new BlockTree(3, 2, 2, 64, periodic, periodic);
     expect(t.count).toBe(8);
