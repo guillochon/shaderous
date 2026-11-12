@@ -132,16 +132,16 @@ On the uniform grid the state is two pairs of `rgba32float` 3D textures:
 
 | Texture | Channels |
 |---|---|
-| `U1` | $\rho$, $\rho v_x$, $\rho v_y$, $\rho v_z$ |
-| `U2` | $E$, $\rho e$, $\rho s$ (passive scalar), spare |
+| `U1` | $`\rho`$, $`\rho v_x`$, $`\rho v_y`$, $`\rho v_z`$ |
+| `U2` | $`E`$, $`\rho e`$, $`\rho s`$ (passive scalar), spare |
 
 Each pair has a ping and a pong copy; a step reads one and writes the other. Other storage:
 
-- **Gravity:** one `r32float` texture per multigrid level for each of $\Phi$, the right-hand side
-  and the residual, plus an `rgba32float` field texture holding $-\nabla\Phi$ (with the
+- **Gravity:** one `r32float` texture per multigrid level for each of $`\Phi`$, the right-hand side
+  and the residual, plus an `rgba32float` field texture holding $`-\nabla\Phi`$ (with the
   point-mass pull added in).
 - **Species:** an extra `rgba32float` texture with four mass fractions per texel, the groups of
-  four stacked along $z$. Group $g$ of cell $(x, y, z)$ is texel $(x, y, z + g\,n_z)$.
+  four stacked along $`z`$. Group $`g`$ of cell $`(x, y, z)`$ is texel $`(x, y, z + g\,n_z)`$.
 
 On the uniform grid there are **no primitive-variable textures**. The predictor and the update
 convert the conserved state as they load it. The flux update is bound by texture fetches: with
@@ -154,10 +154,10 @@ another form therefore costs more than repeating the conversion.
 
 | Pass | Shader | Work |
 |---|---|---|
-| 1. Rates | `hydro/rates.wgsl` | Reads the state once and writes only the first stage of the timestep reduction: max signal rate and max $\lvert g\rvert$ per $4^3$ block, folded in workgroup-shared atomics. |
-| 2. Clock | `hydro/clock.wgsl` + `gpu/reduce.wgsl` | Finishes the reduction, applies the point-mass and output limits, and writes $\Delta t$ and the time to a small buffer that later passes read. |
+| 1. Rates | `hydro/rates.wgsl` | Reads the state once and writes only the first stage of the timestep reduction: max signal rate and max $`\lvert g\rvert`$ per $`4^3`$ block, folded in workgroup-shared atomics. |
+| 2. Clock | `hydro/clock.wgsl` + `gpu/reduce.wgsl` | Finishes the reduction, applies the point-mass and output limits, and writes $`\Delta t`$ and the time to a small buffer that later passes read. |
 | 3. Predictor | `hydro/predictor.wgsl` | Limited slopes, the half-step primitive state, shock and first-order flags. |
-| 4. Update | `hydro/update.wgsl` | Face states, Riemann solves on all $2d$ faces, diffusion fluxes, the conservative update, the first half kick, cooling, dual-energy sync, floors. |
+| 4. Update | `hydro/update.wgsl` | Face states, Riemann solves on all $`2d`$ faces, diffusion fluxes, the conservative update, the first half kick, cooling, dual-energy sync, floors. |
 | 5. Species *(optional)* | `hydro/species*.wgsl` | Move each species with the face mass fluxes the update recorded. |
 | 6. Gravity *(optional)* | `gravity/rhs.wgsl`, V-cycles, `gravity/field.wgsl` | New source, warm-started V-cycles, the field texture. |
 | 7. Correct *(optional)* | `gravity/correct.wgsl`, `bh_*.wgsl` | Second half kick; point masses kick, drift and accrete. |
@@ -179,9 +179,9 @@ it.
 
 ### Workgroup shapes
 
-3D passes use $8\times8\times4$ workgroups (256 invocations, the default limit). A 2D run uses
-$16\times16\times1$, which more than halves the cost of its flux update compared with
-$8\times8\times4$ and three idle layers.
+3D passes use $`8\times8\times4`$ workgroups (256 invocations, the default limit). A 2D run uses
+$`16\times16\times1`$, which more than halves the cost of its flux update compared with
+$`8\times8\times4`$ and three idle layers.
 
 ## Gathered fluxes and bit-identical faces
 
@@ -200,7 +200,7 @@ ensures that:
   including the potential differences of the well-balanced reconstruction and the diffusion
   gradients;
 - the Riemann solver is called with the same (left, right) order from both sides, in the
-  frame where the face normal is $+x$.
+  frame where the face normal is $`+x`$.
 
 The trade: two flux evaluations per face, in exchange for **no flux storage, no second pass,
 and no write races**. The idea extends to refinement and time-bin boundaries, where a cell
@@ -221,8 +221,8 @@ viscosity) walls by the same functions. In the interior variant `bc_map` is comp
 ## Reductions and the GPU-resident timestep
 
 `gpu/reduce.ts` and `gpu/reduce.wgsl` implement multi-stage hierarchical reductions (sum, max,
-min) for any number of values per cell. Each stage folds $4^3$ blocks of the previous stage's
-records ($4$ measured faster than $8$: shorter serial loops, more threads). Sums are formed
+min) for any number of values per cell. Each stage folds $`4^3`$ blocks of the previous stage's
+records ($`4`$ measured faster than $`8`$: shorter serial loops, more threads). Sums are formed
 hierarchically to limit single-precision round-off in diagnostics. Maxima of non-negative
 floats are accumulated with atomic max on their bit patterns, since those order the same way as
 the floats.
@@ -233,12 +233,12 @@ machinery and are copied to a mapped buffer that the CPU reads whenever it is re
 
 ## Multigrid on textures
 
-`gravity/multigrid.ts`. Each level is an `r32float` texture set ($\Phi$, right-hand side,
-residual), from $n^3$ down to $2^3$. Red-black Gauss-Seidel smoothing reads and writes $\Phi$ in
+`gravity/multigrid.ts`. Each level is an `r32float` texture set ($`\Phi`$, right-hand side,
+residual), from $`n^3`$ down to $`2^3`$. Red-black Gauss-Seidel smoothing reads and writes $`\Phi`$ in
 place, one color per dispatch. Restriction and trilinear prolongation are separate small passes.
 For isolated boundaries a reduction gathers the mass moments, and `multipole_eval.wgsl` gives
 the boundary potential through the same index-mapping trick the hydro uses. The potential of
-the previous step is kept, both as a warm start and to extrapolate $\Phi^{n+1/2}$ for the
+the previous step is kept, both as a warm start and to extrapolate $`\Phi^{n+1/2}`$ for the
 energy source.
 
 ## Adaptive mesh
@@ -252,10 +252,10 @@ and face neighbors, with at most one level of difference across a face. Whenever
 changes it is uploaded as flat tables: per-block records, neighbor slots, and the lists of
 blocks each pass is dispatched over.
 
-The **data** lives in one 3D **texture atlas** per field. Each block of $16^3$ cells (with 2
-ghost layers, so $20^3$ texels, padded to $24$ where a pass needs it) occupies a slot in the
+The **data** lives in one 3D **texture atlas** per field. Each block of $`16^3`$ cells (with 2
+ghost layers, so $`20^3`$ texels, padded to $`24`$ where a pass needs it) occupies a slot in the
 atlas. Parents keep their slots, because gravity and restriction use them. In 3D the atlas
-holds at most 2197 ($13^3$) blocks, about 3 GB with gravity, and shrinks to fit the
+holds at most 2197 ($`13^3`$) blocks, about 3 GB with gravity, and shrinks to fit the
 [memory budget](#gpu-memory-budget). If the initial mesh of a self-gravitating run cannot fit a
 whole level, that level is left out (the status line says so) rather than letting a refinement
 boundary cut through a star at an arbitrary place.
@@ -282,7 +282,7 @@ a block, ghost or interior, from wherever its value lives:
 | inside the block | the block itself |
 | in a same-level neighbor | that neighbor's slot |
 | beyond a physical boundary | the boundary image of an interior cell |
-| over a finer neighbor | the average of the $2^d$ finer cells covering it |
+| over a finer neighbor | the average of the $`2^d`$ finer cells covering it |
 | over a coarser neighbor | limited linear interpolation from the coarse block |
 
 There is no separate exchange step, and no ghost cell is ever stale.
@@ -291,16 +291,16 @@ There is no separate exchange step, and no ghost cell is ever stale.
 
 Berger-Colella AMR, and the GPU codes that follow it, store the fluxes the fine side computes on
 a coarse face and correct the coarse cell afterwards. In Shaderous the coarse cell instead
-**recomputes the $2^{d-1}$ fine fluxes** that tile its face, from the same fine states and with
+**recomputes the $`2^{d-1}`$ fine fluxes** that tile its face, from the same fine states and with
 the same arithmetic as the fine cells, and sums them. Nothing is stored. The fluxes agree bit
-for bit between blocks on the same level and to $10^{-6}$ across levels, and mass, momentum and
+for bit between blocks on the same level and to $`10^{-6}`$ across levels, and mass, momentum and
 energy are conserved to round-off.
 
 ### Thread layout on blocks
 
 Passes over a block and its ghost layers (18 or 20 texels across, not a multiple of 8) run as
-flat rows of 64 threads per block (`inv_flat` in `amr/list.wgsl`). $8\times8\times4$ tiles had
-left about half their threads idle there. In 2D the four $z$-layers of a workgroup take four
+flat rows of 64 threads per block (`inv_flat` in `amr/list.wgsl`). $`8\times8\times4`$ tiles had
+left about half their threads idle there. In 2D the four $`z`$-layers of a workgroup take four
 consecutive blocks. Together with predicting only leaves, this made a 2D Kelvin-Helmholtz step
 (2048², 3 levels) 2.8 times faster and a 3D Sedov step 19% faster.
 
@@ -317,7 +317,7 @@ applied during the first construction too.
 
 ### Gravity on blocks
 
-`amr/gravity.ts`, `amr/gravity/*.wgsl`. Every block, parents included, holds $\Phi$. A cycle
+`amr/gravity.ts`, `amr/gravity/*.wgsl`. Every block, parents included, holds $`\Phi`$. A cycle
 restricts the density upward, fills each level's ghosts from its neighbors or by interpolation
 from the level above, and runs a multigrid V-cycle *inside* each block (16, 8, 4, 2, 1 cells).
 All levels relax in the same dispatches, so the cost does not grow with tree depth. A gate pass
@@ -352,8 +352,8 @@ directly. Nothing is copied to the CPU.
 
 - **Field extraction** (`field.wgsl`, `field_value.wgsl`) computes the displayed quantity per
   cell into a texture. The quantities are density, temperature, pressure, scalar, speed and
-  velocity components, Mach number, entropy $p/\rho^\gamma$, net heating, vorticity,
-  divergence, $|\nabla\rho|/\rho$, potential, kinetic energy density, Jeans length in cells,
+  velocity components, Mach number, entropy $`p/\rho^\gamma`$, net heating, vorticity,
+  divergence, $`|\nabla\rho|/\rho`$, potential, kinetic energy density, Jeans length in cells,
   timestep limit, mass fraction of each species, and refinement level. The color range follows
   the field, ignoring the most extreme 0.5% of cells for derived fields.
 - **Ray-marcher** (`raymarch.wgsl`): front-to-back emission-absorption through the unit box with
@@ -368,7 +368,7 @@ directly. Nothing is copied to the CPU.
 
 ## Frame loop and pacing
 
-`ui/app.ts`. Each frame encodes $N$ steps and a render pass into command buffers. $N$ adapts to
+`ui/app.ts`. Each frame encodes $`N`$ steps and a render pass into command buffers. $`N`$ adapts to
 how long the GPU takes. The loop measures completed work with `queue.onSubmittedWorkDone()`.
 Firefox reports finished GPU work only about every 100 ms, so there the loop instead submits a
 frame every display refresh up to a small backlog and steers by the backlog. Results agree
@@ -395,10 +395,10 @@ before the next one allocates, so memory never spikes during a rebuild.
   one continues the same run on the same mesh. Species are written as variables named after
   them (`he4`, `c12`). A file from another code is sampled onto the nearest available
   resolution.
-- **Checkpoints** (`io/checkpoints.ts`) write the same file every $\Delta t$. In Chrome and Edge
+- **Checkpoints** (`io/checkpoints.ts`) write the same file every $`\Delta t`$. In Chrome and Edge
   they go to a folder chosen once through the File System Access API; other browsers download
   them. The cell data is gzip-compressed at level 1. Uncompressed, a state is 24 bytes per cell (about 400 MB at
-  $256^3$); compressed files measured 8% (an early Sedov blast) to 86% (tidal debris) of that.
+  $`256^3`$); compressed files measured 8% (an early Sedov blast) to 86% (tidal debris) of that.
 - **Links** (`ui/link.ts`): the address bar holds the preset, dimension, resolution, refinement
   and *only what differs from the preset's defaults*, for example
   `?problem=tidal-disruption&dim=3&n=128&amr=2&p.beta=2&mode=slice`. Anything unrecognized or out

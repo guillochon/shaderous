@@ -21,8 +21,8 @@ fit the time available.
 
 **Hardware and browsers.** Shaderous needs a browser with WebGPU: current Chrome or Edge on
 Windows, macOS and ChromeOS, recent Firefox, and Safari on recent macOS and iOS. Integrated
-laptop GPUs run every 2D problem and 3D problems at $64^3$ to $128^3$ comfortably. Discrete GPUs
-reach $256^3$ and deep adaptive meshes. Phones work for 2D problems and small 3D ones, and the
+laptop GPUs run every 2D problem and 3D problems at $`64^3`$ to $`128^3`$ comfortably. Discrete GPUs
+reach $`256^3`$ and deep adaptive meshes. Phones work for 2D problems and small 3D ones, and the
 right-hand panel can be hidden on a small screen. Before class, open the
 [validation page](https://guillochon.github.io/shaderous/validate.html) on a lab machine. If
 the tests pass, that machine is ready.
@@ -30,7 +30,7 @@ the tests pass, that machine is ready.
 **Links are the handout.** The address bar always reflects the current setup: preset, grid,
 refinement, physics options and view. Set up what you want students to see, then copy the
 address or use **Share**. A link opens paused or running, depending on the **Autoplay**
-checkbox. A bare visit opens Kelvin-Helmholtz at $1024^2$ in 2D. Examples used below:
+checkbox. A bare visit opens Kelvin-Helmholtz at $`1024^2`$ in 2D. Examples used below:
 
 | What | Link |
 |---|---|
@@ -119,7 +119,7 @@ back, and part escapes.
 
 - Ask students to predict, before running it, whether the whole star will be swallowed.
 - Relate it to observed flares from galaxy centers.
-- Change the impact parameter $\beta$ (how deep the orbit goes) to compare a near miss with a
+- Change the impact parameter $`\beta`$ (how deep the orbit goes) to compare a near miss with a
   full disruption.
 
 ### Assessment ideas
@@ -154,16 +154,16 @@ slice view.
    Which quantities are continuous across the contact?
 2. Use the query tool to read the post-shock state and check the Rankine-Hugoniot jump
    conditions.
-3. Repeat at $n = 64$, $128$, $256$, $512$. How does the width of the shock (in cells and in
+3. Repeat at $`n = 64`$, $`128`$, $`256`$, $`512`$. How does the width of the shock (in cells and in
    physical units) change? Why is the contact smeared more than the shock?
 4. Compare limiters (add `&limiter=minmod`, `&limiter=mc` to the link). Which keeps the contact
    sharpest? Which oscillates?
 5. Try the [strong shock tube](https://guillochon.github.io/shaderous/?problem=strong-shock&dim=2&n=256)
-   (pressure ratio $10^5$). What makes it harder?
+   (pressure ratio $`10^5`$). What makes it harder?
 
 ### Activity 2: Sedov-Taylor and dimensional analysis
 
-Using only $E$, $\rho$ and $t$, derive $R(t) = \xi_0\,(Et^2/\rho)^{1/5}$. Then open the
+Using only $`E`$, $`\rho`$ and $`t`$, derive $`R(t) = \xi_0\,(Et^2/\rho)^{1/5}`$. Then open the
 [3D blast](https://guillochon.github.io/shaderous/?problem=sedov&dim=3&n=128), export states at
 several times (or read the shock radius from the slice), and fit the exponent. Discuss why the
 fit deviates early on (the blast still remembers its initial size) and late (it reaches the box
@@ -172,18 +172,18 @@ edges).
 ### Activity 3: Growth rates of instabilities
 
 - **Kelvin-Helmholtz:** measure the growth of the transverse velocity (from exported states,
-  or the $v_y$ field in slice view) in the linear phase. Compare runs at two resolutions. Is the growth rate
+  or the $`v_y`$ field in slice view) in the linear phase. Compare runs at two resolutions. Is the growth rate
   converged?
 - **Rayleigh-Taylor:** for an incompressible interface, linear theory gives growth at
-  $\sigma = \sqrt{A g k}$ with $A$ the Atwood number. Estimate $\sigma$ from the run and discuss
+  $`\sigma = \sqrt{A g k}`$ with $`A`$ the Atwood number. Estimate $`\sigma`$ from the run and discuss
   why compressibility and the finite interface thickness change it.
 - **Jeans instability:** open [Jeans](https://guillochon.github.io/shaderous/?problem=jeans).
-  Derive the dispersion relation $\omega^2 = c_s^2k^2 - 4\pi G\rho_0$ and the Jeans length.
+  Derive the dispersion relation $`\omega^2 = c_s^2k^2 - 4\pi G\rho_0`$ and the Jeans length.
   Which perturbations grow and which oscillate?
 
 ### Activity 4: Hydrostatic equilibrium and stellar structure
 
-1. Solve the Lane-Emden equation for $n = 1$ (it has the closed form $\theta = \sin\xi/\xi$).
+1. Solve the Lane-Emden equation for $`n = 1`$ (it has the closed form $`\theta = \sin\xi/\xi`$).
 2. Open the [polytrope](https://guillochon.github.io/shaderous/?problem=polytrope&dim=3&n=64)
    and compare the radial density profile (from the slice or an exported file) with the
    solution.
@@ -208,7 +208,7 @@ cold clouds and a warm medium.
 
 Open the [binary](https://guillochon.github.io/shaderous/?problem=binary). Two point masses
 orbit inside a viscous disk, clear a cavity, and feed through streams. Discuss angular
-momentum transport, the role of viscosity ($\alpha$ prescription), and why the cavity is about
+momentum transport, the role of viscosity ($`\alpha`$ prescription), and why the cavity is about
 twice the binary's separation.
 
 ### Lab module: "Is it converged?"
@@ -255,7 +255,7 @@ and WGSL, and each physics module is a small file. Students can clone the reposi
   [Mach 3 forward step](https://guillochon.github.io/shaderous/?problem=forward-step).
 
 **Reconstruction and limiters.**
-- Derive the third-order face value $q_c + (\delta_\text{far} + 2\delta_\text{near})/6$ and show
+- Derive the third-order face value $`q_c + (\delta_\text{far} + 2\delta_\text{near})/6`$ and show
   where TVD limiters clip extrema. Measure the convergence order of smooth advection
   (`?problem=advection`) with each limiter.
 - Change the smoothness threshold `SMOOTH` in `hydro/recon.wgsl` and explore the trade between
@@ -309,7 +309,7 @@ and WGSL, and each physics module is a small file. Students can clone the reposi
 5. **Performance study.** Use **Time GPU passes** to profile each pipeline on two GPUs. Build a
    roofline argument for why the flux update is limited by memory, and test one optimization.
 6. **A science question.** Use Shaderous as a fast exploration tool, for example how the
-   disruption of a star depends on $\beta$ and the polytropic index, or how a binary's
+   disruption of a star depends on $`\beta`$ and the polytropic index, or how a binary's
    accretion rate depends on viscosity. Check the key result against a production code
    such as Athena++ ([Stone et al. 2020](https://doi.org/10.3847/1538-4365/ab929b)) or FLASH
    ([Fryxell et al. 2000](https://doi.org/10.1086/317361)).
