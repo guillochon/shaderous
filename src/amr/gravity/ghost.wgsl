@@ -22,17 +22,26 @@ fn coarse_phi(cs: i32, q: vec3<i32>, fallback: f32) -> f32 {
   return textureLoad(PHI, blk_origin(r.slot) + r.l).x;
 }
 
-@compute @workgroup_size(8, 8, 4)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let inv = inv_padded(gid, 2);
-  if (!inv.ok) { return; }
-  let l = inv.l;
-  let out = vec3<i32>(l < vec3<i32>(0)) + vec3<i32>(l >= vec3<i32>(BS));
-  if (out.x + out.y + out.z != 1) { return; }
-  var axis = 0;
-  if (out.y != 0) { axis = 1; }
-  if (out.z != 0) { axis = 2; }
-  let upper = l[axis] >= BS;
+// Only the face ghosts get an invocation: per block, 6 faces x 2 layers x BS x BS cells, in
+// rows of 64 (workgroup x), one block of the list per workgroup row (y). Edge and corner ghosts
+// are never used.
+const FACE_GHOSTS = 6 * 2 * BS * BS;
+
+@compute @workgroup_size(64)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
+  let i = i32(wid.x * 64u + lix);
+  if (wid.y >= LIST[0] || i >= FACE_GHOSTS) { return; }
+  let slot = i32(LIST[1u + wid.y]);
+  let face = i / (2 * BS * BS);          // -x, +x, -y, +y, -z, +z
+  let r = i % (2 * BS * BS);
+  let layer = r / (BS * BS);             // 0 next to the block, 1 beyond
+  let axis = face / 2;
+  let upper = (face & 1) == 1;
+  var l = vec3<i32>(0);
+  l[(axis + 1) % 3] = r % BS;
+  l[(axis + 2) % 3] = (r / BS) % BS;
+  l[axis] = select(-1 - layer, BS + layer, upper);
+  let inv = Inv(true, slot, l);
   let nb = bt(inv.slot, 6u + u32(2 * axis) + u32(upper));
   let c = blk_origin(inv.slot) + l;
 

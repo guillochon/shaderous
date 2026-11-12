@@ -196,6 +196,11 @@ export class AmrGravity {
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(8 + Math.log2(BS / bsize)));
     pass.dispatchWorkgroups(Math.ceil((count * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
+  /** Dispatch over the face ghosts of `count` blocks (ghost.wgsl): 6 x 2 x 16 x 16 cells, in rows of 64. */
+  private faces(pass: GPUComputePassEncoder, count: number) {
+    if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(15));
+    if (count > 0) pass.dispatchWorkgroups((6 * 2 * BS * BS) / 64, count, 1);
+  }
   private padded(pass: GPUComputePassEncoder, count: number) {
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(0));
     pass.dispatchWorkgroups(count * 3, 3, 5);
@@ -262,7 +267,7 @@ export class AmrGravity {
         // Boundary condition from the coarser level's finished solution.
         pass.setPipeline(this.pGhostCoarse);
         pass.setBindGroup(0, this.gGhostCoarse[l]);
-        this.padded(pass, nLevel[l]);
+        this.faces(pass, nLevel[l]);
       }
       for (let c = 0; c < cycles; c++) this.vcycle(pass, l, nLevel[l]);
     }
@@ -275,13 +280,13 @@ export class AmrGravity {
       for (let c = 0; c < cycles; c++) {
         pass.setPipeline(this.pGhostCoarse);
         pass.setBindGroup(0, this.gGhostCoarseAll);
-        this.padded(pass, nAll);
+        this.faces(pass, nAll);
         this.vcycle(pass, all, nAll);
       }
     }
     pass.setPipeline(this.pGhostRest);
     pass.setBindGroup(0, this.gGhostRest);
-    this.padded(pass, nAll);
+    this.faces(pass, nAll);
   }
 
   /** Acceleration and half-step potential for every block. */
@@ -348,12 +353,12 @@ export class AmrGravity {
     for (let c = 0; c < cycles; c++) {
       pass.setPipeline(this.pGhostCoarse);
       pass.setBindGroup(0, this.gGhostCoarseB);
-      this.padded(pass, -1);
+      this.faces(pass, -1);
       this.vcycle(pass, act, -1);
     }
     pass.setPipeline(this.pGhostRest);
     pass.setBindGroup(0, this.gGhostRestB);
-    this.padded(pass, -1);
+    this.faces(pass, -1);
   }
 
   /** The field with per-block timesteps: for every block, or for the blocks starting a step. */

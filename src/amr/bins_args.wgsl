@@ -8,6 +8,7 @@
 //   8..12  the same for one color of a red-black sweep
 //   13 flat pass (amr/list.wgsl, inv_flat) over LL with one ghost layer: the prediction
 //   14 flat pass over LA with two ghost layers: the assembly
+//   15 face ghosts of LA (amr/gravity/ghost.wgsl): 6 x 2 x 16 x 16 cells in rows of 64
 // followed by the totals: ARGS[60] block updates, ARGS[61] blocks assembled.
 #include "hydro/common.wgsl"
 
@@ -58,6 +59,7 @@ fn main() {
   put(13u, (select(w * w * w, w * w, flat) + 63u) / 64u, nl, 1u);
   let w2 = 20u; // and two
   put(14u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, na, 1u);
+  put(15u, 48u, na, 1u);
   ARGS[60] += nu;
   ARGS[61] += na;
 }
