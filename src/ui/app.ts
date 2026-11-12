@@ -201,6 +201,37 @@ side.innerHTML = `
   <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
+// On a phone the rail lies over the simulation, so it can be put away (remembered in this
+// browser), leaving only the button that brings it back.
+{
+  const rail = $('rail');
+  const toggle = $<HTMLButtonElement>('rail-toggle');
+  const show = (open: boolean) => {
+    rail.classList.toggle('closed', !open);
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.textContent = open ? 'Hide ▸' : '◂ Tools';
+    toggle.title = open ? 'Hide the color bar and the editing tools' : 'Show the color bar and the editing tools';
+  };
+  let open = true;
+  try {
+    open = localStorage.getItem('shaderous.rail') !== 'closed';
+  } catch {}
+  show(open);
+  toggle.addEventListener('click', () => {
+    open = !open;
+    show(open);
+    // A tool left picked would edit the gas with nothing on screen to say so.
+    if (!open && tool) {
+      draft = null;
+      tool = null;
+      syncTools();
+    }
+    try {
+      localStorage.setItem('shaderous.rail', open ? 'open' : 'closed');
+    } catch {}
+  });
+}
+
 // The color bar: the range at either end (editable), the opacity curve drawn on the bar, then
 // its settings.
 $('colorbar').innerHTML = `
