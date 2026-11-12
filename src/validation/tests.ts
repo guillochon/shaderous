@@ -634,7 +634,7 @@ export const TESTS: TestDef[] = [
     id: 'shock-bubble',
     name: 'Shock hitting a helium bubble (2D, two gammas)',
     criterion:
-      'The shock-bubble preset (Mach 1.22 in air, gamma 1.4, into helium with 28% air, gamma 5/3) to t = 0.6, the bubble flattened and rolling up, on 256^2 and on an adaptive mesh 256 finest with 2 levels: the helium is kept to 1e-5 of its mass, mass fractions stay in [0, 1], the pressure stays positive and finite, faces match bit for bit (across refinement boundaries too), and the helium moves downstream by at least 0.2. On the uniform grid the helium stays mirror-symmetric about the axis to 1e-5',
+      'The shock-bubble preset (Mach 1.22 in air, gamma 1.4, into helium with 28% air, gamma 5/3) to t = 0.6, the bubble flattened and rolling up, on 256^2 and on an adaptive mesh 256 finest with 2 levels: the helium is kept to 1e-5 of its mass, mass fractions stay in [0, 1], the pressure stays positive and finite, faces match bit for bit (across refinement boundaries too), and the helium moves downstream by at least 0.2. On the adaptive mesh over 95% of the helium is at the finest level when it ends, which the mass fractions in the refinement indicator see to (the density and pressure alone let the bubble drift onto coarse blocks). On the uniform grid the helium stays mirror-symmetric about the axis to 1e-5',
     async run(gpu) {
       const n = 256;
       const problem: Problem = { ...shockBubble, tEnd: 0.6 };
@@ -684,14 +684,27 @@ export const TESTS: TestDef[] = [
         pass &&= asym < 1e-5;
       });
       await withAmr(gpu, problem, n, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        let finest = 0;
         const read = async () => {
           const c = await sim.readLeaves();
           const X = await sim.readLeafSpecies();
+          // The share of the helium on the finest level: the bubble is small enough that the
+          // blocks its interface asks for cover it.
+          let all = 0;
+          let fine = 0;
+          for (let q = 0; q < c.count; q++) {
+            const m = X[0][q] * c.u1[4 * q] * c.dx[q] ** 2;
+            all += m;
+            if (c.dx[q] < 1.5 / n) fine += m;
+          }
+          finest = fine / all;
           return helium(X, c.u1, (q) => c.x[q], (q) => c.dx[q] ** 2, c.count);
         };
         const before = await read();
         await sim.runToEnd();
         const after = await read();
+        metrics.amr_helium_at_finest_level = finest;
+        pass &&= finest > 0.95;
         const flux = await sim.fluxMismatch();
         judge('amr', before, after, await sim.diagnostics(), flux.mismatched);
         metrics.amr_regrids = sim.regrids;

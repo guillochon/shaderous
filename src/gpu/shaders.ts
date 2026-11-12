@@ -12,7 +12,11 @@ for (const [k, v] of Object.entries(raw)) shaderFiles[k.replace(/^\.\.\//, '').r
 
 // Slots most shaders never set: the composition (species/mixture.ts) is uniform unless a run's
 // species say otherwise.
-const DEFAULT_SLOTS: Slots = { comp: 'eos/comp_off.wgsl', comp_src: 'amr/comp_src_off.wgsl' };
+const DEFAULT_SLOTS: Slots = {
+  comp: 'eos/comp_off.wgsl',
+  comp_src: 'amr/comp_src_off.wgsl',
+  flag_species: 'fn species_indicator(c: vec3<i32>) -> f32 { return 0.0; }\n',
+};
 
 export function assemble(entry: string, slots: Slots = {}): string {
   return preprocess(entry, shaderFiles, { ...DEFAULT_SLOTS, ...slots });

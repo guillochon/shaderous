@@ -26,7 +26,7 @@ import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
-import { packSpecies, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
+import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
 
 /**
@@ -413,8 +413,12 @@ export class AmrSim implements Simulation {
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
-    sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl'), 'amr flag');
-    sim.gFlag = bindGroup(d, sim.pFlag, { 0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf });
+    // With species the indicator also reads their fractions, ghosts included (amr/species_assemble.wgsl).
+    sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl', { flag_species: flagSpeciesSlot(sim.speciesGroups, sim.speciesDepth) }), 'amr flag');
+    sim.gFlag = bindGroup(d, sim.pFlag, {
+      0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf,
+      ...((sim.speciesX ? { 5: v(sim.speciesX) } : {}) as Record<number, GPUTextureView>),
+    });
     // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
     sim.redBh = await Reducer.create(
       d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_off.wgsl' },
@@ -943,7 +947,7 @@ export class AmrSim implements Simulation {
    * more finely than the block's own cells. A feature smaller than a coarse cell (a point
    * explosion, say) would otherwise fall between cell centers and never trigger refinement.
    */
-  private indicator(b: Block, fn: (x: number, y: number, z: number) => { rho: number; p: number }): number {
+  private indicator(b: Block, fn: (x: number, y: number, z: number) => { rho: number; p: number; X?: readonly number[] }): number {
     const three = this.cfg.ndim === 3;
     const dx = this.dx0 / (1 << b.level);
     const half = this.cfg.problem.box / 2;
@@ -954,6 +958,9 @@ export class AmrSim implements Simulation {
     const mz = three ? m : 1;
     const rho = new Float64Array(m * m * mz);
     const pr = new Float64Array(m * m * mz);
+    // The species' mass fractions, normalized as packSpecies stores them.
+    const ns = this.cfg.problem.species?.length ?? 0;
+    const xs = Array.from({ length: ns }, () => new Float64Array(m * m * mz));
     for (let k = 0; k < mz; k++)
       for (let j = 0; j < m; j++)
         for (let i = 0; i < m; i++) {
@@ -964,6 +971,11 @@ export class AmrSim implements Simulation {
           );
           rho[(k * m + j) * m + i] = w.rho;
           pr[(k * m + j) * m + i] = w.p;
+          if (ns) {
+            let sum = 0;
+            for (let s = 0; s < ns; s++) sum += Math.max(w.X?.[s] ?? 0, 0);
+            for (let s = 0; s < ns; s++) xs[s][(k * m + j) * m + i] = sum > 0 ? Math.max(w.X?.[s] ?? 0, 0) / sum : s === 0 ? 1 : 0;
+          }
         }
     // Gas dense enough that the preset wants it at the finest level (stars): as amr/flag.wgsl.
     const dense = this.cfg.refineDense;
@@ -981,11 +993,18 @@ export class AmrSim implements Simulation {
       }
       return den > 0 ? Math.sqrt(num / den) : 0;
     };
+    // The mass fractions' jumps between neighbors, as species_indicator (species/species.ts).
+    const jump = (q: Float64Array, a: number) => {
+      let j = 0;
+      for (const s of strides) j = Math.max(j, Math.abs(q[a + s] - q[a]), Math.abs(q[a] - q[a - s]));
+      return SPECIES_JUMP_SCALE * j;
+    };
     for (let k = three ? sub : 0; k < (three ? m - sub : 1); k++)
       for (let j = sub; j < m - sub; j++)
         for (let i = sub; i < m - sub; i++) {
           const a = (k * m + j) * m + i;
           ind = Math.max(ind, lohner(rho, a), lohner(pr, a));
+          for (const x of xs) ind = Math.max(ind, jump(x, a));
         }
     return ind;
   }
@@ -1530,6 +1549,12 @@ export class AmrSim implements Simulation {
     pass.setPipeline(this.pAssemble);
     pass.setBindGroup(0, this.assembleGroup(this.cur));
     this.flat(pass, this.nAll, NG);
+    if (this.speciesGroups) {
+      // The species' fractions with ghosts, for their part of the indicator.
+      pass.setPipeline(this.pSpecies[0]);
+      pass.setBindGroup(0, this.gSpecies[0][this.cur][this.speciesCur]);
+      this.flat(pass, this.nLeaf, NG);
+    }
     pass.setPipeline(this.pFlag);
     pass.setBindGroup(0, this.gFlag);
     this.interior(pass, this.nLeaf);

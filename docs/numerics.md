@@ -687,6 +687,12 @@ disk at the finest level in our tests. Further criteria:
   (`refineDense`). The white dwarf problems do this, because a star's smooth interior does not
   raise $`\chi`$.
 - **Point masses:** a problem can keep every block near its masses at the finest level.
+- **Composition:** with species, a jump in any mass fraction between neighboring cells counts
+  as $`8\,|\Delta X|`$, so a jump of 0.1 reaches the refinement threshold. Here a first
+  difference is the right measure, since a mass fraction is nearly piecewise constant. To
+  $`\chi`$, an interface spread over a few coarse cells is a smooth profile, which is never
+  refined back. In the shock-bubble problem the bubble drifted onto coarse blocks that way,
+  ending with 24% of its helium at the finest level; with this criterion, 99%.
 - **Thin gas** below a density cutoff never asks for refinement, so ripples in the ambient
   medium around a star do not refine it.
 

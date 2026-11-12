@@ -9,6 +9,11 @@
 // requested number of cells.
 // Where a preset asks for it (P.flags bit 4), every block that comes near a point mass is
 // refined to the finest level, so its softening and sink are resolved as well as they can be.
+// With species, the indicator also takes the jumps in each species' mass fraction between
+// neighbors (<flag_species>, species/species.ts), so an interface is refined even where density
+// and pressure are smooth across it: two gases in pressure and temperature balance, or an
+// interface that has spread over a few coarse cells (which this indicator, built to ignore
+// smooth profiles, would then leave coarse for good).
 // Gas thinner than P.refine.x (ambient gas around a star, say) does not ask for refinement by
 // the indicator: its ripples, relative to its own tiny density, are not worth resolving. Gas
 // denser than P.refine.y, where a preset sets it, is refined to the finest level outright.
@@ -26,6 +31,8 @@ const EPS = 0.01;
 @group(0) @binding(2) var W2: texture_3d<f32>;
 @group(0) @binding(3) var<storage, read_write> FLAGS: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read> BH: Masses;
+
+#include <flag_species>
 
 // The cell lies near a point mass: within twice its softening or sink radius, whichever is
 // larger, and at least four of this block's cells.
@@ -98,7 +105,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (solid_surface(c)) { atomicMax(&FLAGS[u32(inv.slot)], bitcast<u32>(1.0)); }
     return;
   }
-  var ind = lohner(c);
+  var ind = max(lohner(c), species_indicator(c));
   if (textureLoad(W1, c, 0).x < P.refine.x) { ind = 0.0; }
   // Above any threshold the refinement criterion may be given.
   if (near_mass(inv.slot, inv.l)) { ind = 1e30; }
