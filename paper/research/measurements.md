@@ -41,8 +41,25 @@ Every number quoted in `paper/main.tex` comes from one of the sources below. All
 | Block size | 16 cells per side, two ghost layers | `src/amr/amr_sim.ts` header |
 | Mesh refinement check interval | `src/amr/amr_sim.ts` | header comment |
 | Lines of WGSL and TypeScript in `src/` | 4,532 and 10,163 | `find src -name "*.wgsl" | xargs cat | wc -l` (and `*.ts`) |
-| Number of validation tests | 35 | `src/validation/tests.ts` |
+| Number of validation tests | 35 (36 from `db8c5c7`) | `src/validation/tests.ts` |
 | Validation pass criteria | as quoted in Table 2 | `criterion:` fields in `src/validation/tests.ts` |
+
+## Measured in the browser, November 2026
+
+Runs driven through the in-page console on an NVIDIA Ampere GPU in Chrome, with the commits named. GPU times come from the timestamp-query panel (`src/gpu/timing.ts`).
+
+| Quantity | Value | Commit, setup |
+|---|---|---|
+| AMR step, GPU time: 2D Kelvin-Helmholtz 2048^2 with 3 levels; 3D Sedov 256 with 2 levels | 1.19 to 0.43 ms (2.8 times); 1.02 to 0.82 ms (19%) | `e745009` (flat dispatch, four 2D blocks per workgroup) against `8388aad` |
+| Saha equation of state: least Gamma_1 in the ionization zone | between 1 and 1.3 (solar, rho = 1e-9 g/cm^3) | `967ab54`, `tests/unit/eos_physical.test.ts` |
+| Degenerate series below x = 1/2 | agree with the closed forms to 1e-7 at 0.3 <= x < 0.5 | same |
+| Collision energy with E rebuilt at resets, and with E kept (1.0 + 0.8 M_sun, head-on, 256 with 2 levels, box 12) | +2.3% at the greatest compression; -0.6% through the bounce | `7ef7ccf` and `0fcf59e` |
+| Collision without gravity: energy until gas leaves the box | +0.34% with E rebuilt; 0.000% with E kept | same, 128^3 |
+| Settling of white dwarfs: relaxation, tolerance, rounds, time | 1.6, 1e-3, 7 to 12 rounds, 1.6 s (collision 256 with 2 levels) to 5.5 s (512 with 3 levels) | `7ef7ccf` |
+| 1 M_sun white dwarf: central density, unsettled (256 with 2 levels, box 8) | swung from 17.0 to 12.8 and back to 13.9 (25%) | `7a837cd` |
+| 1 M_sun white dwarf, settled (128 with 2 levels, box 3, 2.5 time units = 6 dynamical times) | within 3.5% (14.23 to 14.88 about 14.38) | `db8c5c7` with the change of `0fcf59e` |
+| Cold white dwarf test (0.6 M_sun, 64^3): central density, energy | within 3.3%; energy to 1.3e-5 | `0fcf59e`, `white-dwarf` in `src/validation/tests.ts` |
+| Number of validation tests | 36 | `src/validation/tests.ts` at `0fcf59e` |
 
 ## Not yet measured
 
