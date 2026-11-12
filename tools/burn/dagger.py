@@ -4,7 +4,8 @@ A model trained only on reference trajectories, applied over and over, drifts of
 states it has never seen, where it errs more and drifts further. This rolls the current
 model out the way the simulator would (train.roll: steps of a fixed dt, the temperature
 following the energy released), from the starts of the training trajectories with steps of
-1e-8 to 1e-2 s, collects states it visits, and burns each with the reference network
+1e-8 to 1e-2 s, collects states it visits (most of them from rollouts that ended far from the reference),
+and burns each with the reference network
 (burner.py). The new trajectories, written to data/dagger_<round>.npz, teach the next model
 the way back from its own mistakes.
 
@@ -33,27 +34,34 @@ def burn_one(args):
 
 
 def main():
-    ck = torch.load(train.HERE / sys.argv[1])
     rnd = int(sys.argv[2])
     want = int(sys.argv[3]) if len(sys.argv) > 3 else 6000
-    model = train.Burner(ck["width"], ck.get("depth", 3)).to(train.dev)
-    model.load_state_dict(ck["state"])
-    model.eval()
+    model = train.load_model(sys.argv[1])
     rho, X, T, t = train.load()
     rng = np.random.default_rng(100 + rnd)
-    pick = rng.choice(len(rho), size=min(want, len(rho)), replace=False)
-    # Start anywhere along the trajectory, with a step from 1e-8 to 1e-2 s, for up to 400 steps.
-    k0 = rng.integers(0, X.shape[1] - 1, size=len(pick))
+    # Many rollouts, cheap on the GPU: from a trajectory's start (as fresh gas meets the
+    # simulator) or anywhere along it, with a step from 1e-8 to 1e-2 s, for 400 steps.
+    pick = rng.choice(len(rho), size=min(5 * want, len(rho)), replace=False)
+    k0 = np.where(rng.random(len(pick)) < 0.5, 0, rng.integers(0, X.shape[1] - 1, size=len(pick)))
     dt = 10 ** rng.uniform(-8, -2, size=len(pick))
     t0 = time.time()
-    _, _, seen = train.roll(model, rho[pick], X[pick, k0], T[pick, k0], dt, 400, record=8)
+    Xend, _, seen = train.roll(model, rho[pick], X[pick, k0], T[pick, k0], dt, 400, record=8)
     r = torch.cat([s[0] for s in seen]).cpu().numpy()
     Ts = torch.cat([s[1] for s in seen]).cpu().numpy()
     Xs = torch.cat([s[2] for s in seen]).cpu().numpy().astype(np.float64)
-    # Keep states the reference can burn (its rates end at 1e10 K), one per rollout on average.
+    row = np.tile(np.arange(len(pick)), len(seen))
+    # How far each rollout ended from the reference at the nearest recorded time: the states
+    # of the rollouts that went wrong are the ones worth burning.
+    k_end = np.clip(np.searchsorted(t, t[k0] + 400 * dt), 0, len(t) - 1)
+    err = np.abs(Xend.cpu().numpy() - X[pick, k_end]).sum(axis=1)
+    # Keep states the reference can burn (its rates end at 1e10 K): every state of a rollout
+    # that ended more than 0.1 off (up to half of them), the rest at random.
     ok = (Ts > 1e8) & (Ts < 1.2e10) & np.isfinite(Xs).all(axis=1)
-    idx = np.flatnonzero(ok)
-    idx = rng.choice(idx, size=min(want, len(idx)), replace=False)
+    bad = np.flatnonzero(ok & (err[row] > 0.1))
+    bad = rng.choice(bad, size=min(want // 2, len(bad)), replace=False)
+    rest = np.setdiff1d(np.flatnonzero(ok), bad)
+    idx = np.concatenate([bad, rng.choice(rest, size=min(want - len(bad), len(rest)), replace=False)])
+    print(f"{(err > 0.1).mean():.2%} of {len(pick)} rollouts ended more than 0.1 off; {len(bad)} of their states kept", flush=True)
     Xs = np.clip(Xs[idx], 0, None)
     Xs /= Xs.sum(axis=1, keepdims=True)
     jobs = list(zip(r[idx].astype(float), Ts[idx].astype(float), Xs))

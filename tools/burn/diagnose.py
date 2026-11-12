@@ -19,11 +19,8 @@ CHECK = (0.003, 0.03, 0.1, 1.0)
 
 
 def main():
-    ck = torch.load(train.HERE / sys.argv[1])
     dt = float(sys.argv[2]) if len(sys.argv) > 2 else 1e-3
-    model = train.Burner(ck["width"], ck.get("depth", 3)).to(train.dev)
-    model.load_state_dict(ck["state"])
-    model.eval()
+    model = train.load_model(sys.argv[1])
     rho, X, T, t = train.load()
     # The fuel and mixture trajectories' own validation split (the first files loaded).
     rng = np.random.default_rng(7)
