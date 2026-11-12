@@ -4,7 +4,7 @@
 [paper]
 # Short machine name: names the arXiv zip (<slug>-arxiv.zip) and the public snapshot.
 slug = "shaderous"
-title = "Shaderous: Conservative Self-gravitating Hydrodynamics with Adaptive Mesh Refinement in Web Browser Compute Shaders"
+title = "Shaderous: A Browser-based Hydrodynamics Code for Physics Research and Teaching"
 # Running head, for the classes that print one (mnras, aa, amsart). Empty means the title.
 short_title = "Shaderous"
 # The journal class. One of the folders in templates/journals/. The journal skill
