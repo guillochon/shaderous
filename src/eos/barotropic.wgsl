@@ -1,6 +1,7 @@
 // Barotropic: p = K rho^gamma. gamma = 1 is isothermal with K = c_s^2.
 // The energy equation is ignored; e_int is slaved to the density.
 const EOS_HAS_ENERGY = false;
+const EOS_KEEP_TOTAL = false;
 
 fn eos_pressure(rho: f32, eint: f32) -> f32 {
   if (P.eos.x == 1.0) { return P.eos.y * rho; }

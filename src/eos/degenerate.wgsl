@@ -16,6 +16,13 @@
 // P.eos = (gamma, unused, R, a), P.eos2 = (rho_d, A, 0, 0). In single precision the thermal
 // part is resolved only where it is more than about 1e-6 of the degenerate pressure.
 const EOS_HAS_ENERGY = true;
+// Where E - KE cannot be trusted, keep E as the conservative update made it and take the
+// pressure from the advected e_int (hydro/dual_energy.wgsl). The pressure is always defined,
+// P_deg at the least: E - KE below zero does not leave the gas without one, as it would an
+// ideal gas. Rebuilding E there made energy: the one cell ahead of each strong shock in a white
+// dwarf collision has its E - KE dip below zero (a velocity overshoot in cold gas falling into
+// a deep well), and filling it back in each step added 2.5% of the total at the bounce.
+const EOS_KEEP_TOTAL = true;
 
 #include "eos/quartic.wgsl"
 

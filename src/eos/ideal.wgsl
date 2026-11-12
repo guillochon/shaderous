@@ -1,5 +1,7 @@
 // Ideal gas, p = (gamma - 1) e_int. Temperature in units where p = rho T.
 const EOS_HAS_ENERGY = true;
+// Where E - KE cannot be trusted, rebuild E from the advected e_int (hydro/dual_energy.wgsl).
+const EOS_KEEP_TOTAL = false;
 
 fn eos_pressure(rho: f32, eint: f32) -> f32 {
   return (P.eos.x - 1.0) * eint;

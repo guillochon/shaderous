@@ -17,6 +17,8 @@
 //
 // P.eos = (gamma, unused, unused, unused), P.eos2 = (h, o, T_i, rho_s).
 const EOS_HAS_ENERGY = true;
+// Where E - KE cannot be trusted, rebuild E from the advected e_int (hydro/dual_energy.wgsl).
+const EOS_KEEP_TOTAL = false;
 
 // (x, dx/dlnS) at (rho, T). Written so neither end loses precision: x = 2 / (1 + sqrt(1 + 4/S)),
 // and S dx/dS = x (1 - x) / (2 - x). Beyond |ln S| = 80 the gas is taken as fully neutral or

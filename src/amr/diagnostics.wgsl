@@ -72,7 +72,9 @@ fn red_cell(c: vec3<i32>) -> Red {
   r1[2] = u1.z * dv;
   r1[3] = u1.w * dv;
   r1[4] = 0.5 * rho * dot(v, v) * dv;
-  r1[5] = eint * dv;
+  // Internal energy as the total holds it, E - KE (the same as e_int wherever the two are
+  // synchronized; where an equation of state keeps E apart from e_int, the total is E).
+  r1[5] = (u2.x - 0.5 * rho * dot(v, v)) * dv;
   r1[6] = egrav;
   r1[7] = speed / cs;
   r1[8] = floored;

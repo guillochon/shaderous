@@ -3,6 +3,8 @@
 //   e_int = R rho T / (gamma - 1) + a T^4
 // P.eos = (gamma, unused, R, a). Temperature comes from a fixed-count Newton iteration.
 const EOS_HAS_ENERGY = true;
+// Where E - KE cannot be trusted, rebuild E from the advected e_int (hydro/dual_energy.wgsl).
+const EOS_KEEP_TOTAL = false;
 
 #include "eos/quartic.wgsl"
 

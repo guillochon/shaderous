@@ -13,6 +13,7 @@ fn dual_energy(rho: f32, ke: f32, E: f32, eint: f32) -> vec2<f32> {
     }
     var ei = eint;
     if (!(ei >= emin)) { ei = emin; }
+    if (EOS_KEEP_TOTAL) { return vec2<f32>(E, ei); }
     return vec2<f32>(ke + ei, ei);
   }
   let ei = eos_eint_from_p(rho, eos_pressure(rho, 0.0));
