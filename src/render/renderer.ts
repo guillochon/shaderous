@@ -165,6 +165,11 @@ export class Renderer {
   private noSpecies?: GPUTexture;
   /** Volume view: the least density drawn (0 draws all the gas). */
   densityCut = 0;
+  /**
+   * Slice view at zoom 1, in CSS pixels: the width of the slice, and how far its middle sits
+   * left of the canvas's middle. Unset, it is centered with a small margin.
+   */
+  slice: { span: number; shift: number } | null = null;
   private tf: GPUTexture;
   private sampler: GPUSampler;
   private pVolume!: GPURenderPipeline;
@@ -394,11 +399,18 @@ export class Renderer {
     const aspect = this.aspect;
     const { eye, fwd, right, up, tan } = cameraFrame(v, aspect);
     const samples = Math.min(1.5 * nx, 384);
+    const cw = Math.max(1, this.canvas.clientWidth);
+    const ch = Math.max(1, this.canvas.clientHeight);
+    const slice = this.slice ?? { span: 0.94 * Math.min(cw, ch), shift: 0 };
     d.queue.writeBuffer(
       this.cam,
       0,
       new Float32Array([
-        ...eye, 0, ...right, 0, ...up, 0, ...fwd, 0,
+        // The slice view's layout (see camera.wgsl) in the spare fourth components.
+        ...eye, slice.shift / slice.span,
+        ...right, cw / (2 * slice.span),
+        ...up, ch / (2 * slice.span),
+        ...fwd, 0,
         tan, aspect, v.opacity, samples,
         v.sliceAxis, v.slicePos, nx, nz,
         v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,

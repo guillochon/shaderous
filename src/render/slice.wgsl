@@ -4,12 +4,10 @@
 
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
-  // Largest centered square that fits, with a small margin.
-  let fit = 0.94;
-  var st = in.uv;
-  if (C.p.y > 1.0) { st.x *= C.p.y; } else { st.y /= C.p.y; }
-  // Zoom and pan: C.r.zw is the point of the slice at the center of the view.
-  st = st / fit * 0.5 / C.r.y + C.r.zw;
+  // The square laid out by the app (sliceLayout), in units of its width from its middle.
+  let st0 = vec2<f32>(in.uv.x * C.right.w + C.eye.w, in.uv.y * C.up.w);
+  // Zoom and pan: C.r.zw is the point of the slice at the middle of that square.
+  let st = st0 / C.r.y + C.r.zw;
   if (any(st < vec2<f32>(0.0)) || any(st >= vec2<f32>(1.0))) { return vec4<f32>(BG, 1.0); }
 
   let n = C.q.z;

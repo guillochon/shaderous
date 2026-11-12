@@ -1,5 +1,7 @@
 // Shared by the ray-marcher and the slice view: camera block and a fullscreen triangle.
 struct Cam {
+  // The slice view at zoom 1, in units of its width: eye.w how far its middle sits left of
+  // the canvas's middle, right.w and up.w half the canvas's width and height.
   eye: vec4<f32>,
   right: vec4<f32>,
   up: vec4<f32>,

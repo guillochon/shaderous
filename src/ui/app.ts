@@ -1623,8 +1623,6 @@ function bind() {
   };
   // A slice (always, in a 2D run) is panned and zoomed in its plane instead of orbited.
   const flat = () => view.mode === 'slice' || cfg?.ndim === 2;
-  /** Screen pixels across the whole slice at zoom 1; 0.94 is the margin in slice.wgsl. */
-  const span = () => Math.max(1, Math.min(canvas.clientWidth, canvas.clientHeight) * 0.94);
   const clampPan = () => {
     const h = 0.5 / view.zoom;
     view.cx = Math.min(1 - h, Math.max(h, view.cx));
@@ -1632,8 +1630,8 @@ function bind() {
   };
   const zoomAt = (clientX: number, clientY: number, factor: number) => {
     const r = canvas.getBoundingClientRect();
-    const sx = (clientX - r.left - r.width / 2) / span();
-    const sy = -(clientY - r.top - r.height / 2) / span();
+    const sx = (clientX - r.left - r.width / 2 + sliceShift()) / sliceSpan();
+    const sy = -(clientY - r.top - r.height / 2) / sliceSpan();
     const z = Math.min(MAX_ZOOM, Math.max(1, view.zoom * factor));
     view.cx += sx * (1 / view.zoom - 1 / z);
     view.cy += sy * (1 / view.zoom - 1 / z);
@@ -1766,7 +1764,7 @@ function bind() {
     if (flat()) {
       // Slice: the point under the pointer (or under the middle of a pinch) stays under it.
       const share = pointers.size === 2 ? 0.5 : 1;
-      const k = share / (span() * view.zoom);
+      const k = share / (sliceSpan() * view.zoom);
       view.cx -= (e.clientX - last.x) * k;
       view.cy += (e.clientY - last.y) * k;
       if (pointers.size === 2 && before > 0) {
@@ -1795,8 +1793,28 @@ function bind() {
 type Vec3 = [number, number, number];
 /** A slice (always, in a 2D run) rather than the volume view. */
 const flatView = () => view.mode === 'slice' || cfg?.ndim === 2;
-/** Screen pixels across the whole slice at zoom 1; 0.94 is the margin in slice.wgsl. */
-const sliceSpan = () => Math.max(1, Math.min(canvas.clientWidth, canvas.clientHeight) * 0.94);
+const phone = window.matchMedia('(max-width: 700px)');
+/**
+ * Where the slice sits at zoom 1: the screen pixels across it, and how far its middle sits left
+ * of the canvas's middle. It is the largest centered square that fits with a small margin,
+ * unless that reaches under the rail on the right (color bar and tools): then it moves flush
+ * against the canvas's left edge, and shrinks if it still does not fit beside the rail. Phones
+ * keep it centered: there the rail lies over the simulation anyway and can be put away.
+ */
+function sliceLayout(): { span: number; shift: number } {
+  const w = canvas.clientWidth;
+  const span = Math.max(1, Math.min(w, canvas.clientHeight) * 0.94);
+  if (phone.matches) return { span, shift: 0 };
+  // The rail's left edge, less the same gap as between the rail and the right edge.
+  const room = $('rail').getBoundingClientRect().left - canvas.getBoundingClientRect().left - 12;
+  if ((w + span) / 2 <= room) return { span, shift: 0 };
+  const fit = Math.max(1, Math.min(span, room));
+  return { span: fit, shift: (w - fit) / 2 };
+}
+/** Screen pixels across the whole slice at zoom 1. */
+const sliceSpan = () => sliceLayout().span;
+/** Screen pixels the slice's middle sits left of the canvas's middle. */
+const sliceShift = () => sliceLayout().shift;
 /** Drag length, in pixels, at which the velocity tool reaches its top speed. */
 const fullDrag = () => 0.25 * Math.min(canvas.clientWidth, canvas.clientHeight);
 
@@ -1809,7 +1827,7 @@ function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (flatView()) {
-    const a = view.cx + (px - w / 2) / (sliceSpan() * view.zoom);
+    const a = view.cx + (px - w / 2 + sliceShift()) / (sliceSpan() * view.zoom);
     const b = view.cy - (py - h / 2) / (sliceSpan() * view.zoom);
     const axis = cfg.ndim === 2 ? 2 : view.sliceAxis;
     // The middle of the layer of cells on show.
@@ -1980,7 +1998,7 @@ function outlineMatrix(): number[] {
     const axis = cfg.ndim === 2 ? 2 : view.sliceAxis;
     const [ia, ib] = axis === 0 ? [1, 2] : axis === 1 ? [0, 2] : [0, 1];
     const k = sliceSpan() * view.zoom;
-    rx = [0, 0, 0, w / 2 - view.cx * k];
+    rx = [0, 0, 0, w / 2 - sliceShift() - view.cx * k];
     ry = [0, 0, 0, h / 2 + view.cy * k];
     rx[ia] = k;
     ry[ib] = -k;
@@ -2677,6 +2695,7 @@ function tick(now: number) {
   if (taken < steps && running) nsub = Math.max(1, taken);
   updateGuides();
   renderer.densityCut = densityCut();
+  renderer.slice = sliceLayout();
   renderer.encode(enc, s, view);
   drawSources();
   gpu.device.queue.submit([enc.finish()]);
