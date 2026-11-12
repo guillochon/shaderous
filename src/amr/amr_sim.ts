@@ -311,11 +311,11 @@ export class AmrSim implements Simulation {
   }
 
   /**
-   * GPU bytes per atlas block: eight rgba32float textures (two state pairs, primitives,
-   * predictor) and two r32float ones (gravity's previous potential and its rate).
+   * GPU bytes per atlas block: nine rgba32float textures (two state pairs, primitives,
+   * predictor, gravity field) and two r32float ones (gravity's previous potential and its rate).
    */
   static blockBytes(ndim: 2 | 3): number {
-    return PAD ** ndim * (8 * 16 + 2 * 4);
+    return PAD ** ndim * (9 * 16 + 2 * 4);
   }
 
   /** Build the simulation; if the GPU runs out of memory, try again with a smaller atlas. */

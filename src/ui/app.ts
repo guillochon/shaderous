@@ -862,9 +862,14 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     sources = [];
     if (old) {
       old.destroy();
-      // Let the GPU finish with the old run so its memory is free before the new one takes its
-      // own: the two together are what kills the page on a phone.
+      // Free the old run's memory before the new one takes its own: the two together are what
+      // kills the page on a phone. Waiting for its work to finish is not enough: the browser
+      // releases destroyed textures a little later (measured on Chrome under D3D12: both runs
+      // were held for about a second), so wait for a second round of work and a moment more.
       await gpu.device.queue.onSubmittedWorkDone();
+      gpu.device.queue.submit([]);
+      await gpu.device.queue.onSubmittedWorkDone();
+      await new Promise((r) => setTimeout(r, 250));
     }
     cfg = next;
     if (ndim === 2) view.sliceAxis = 2;
