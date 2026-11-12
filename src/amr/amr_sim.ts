@@ -36,6 +36,8 @@ import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type M
  */
 const REGRID_EVERY = 8;
 const MAX_STEPS_AHEAD = 24;
+/** Samples of the initial conditions per pass when building the starting mesh, shared by its leaves. */
+const INDICATOR_SAMPLES = 1 << 24;
 /** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
 const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
@@ -947,12 +949,16 @@ export class AmrSim implements Simulation {
    * more finely than the block's own cells. A feature smaller than a coarse cell (a point
    * explosion, say) would otherwise fall between cell centers and never trigger refinement.
    */
-  private indicator(b: Block, fn: (x: number, y: number, z: number) => { rho: number; p: number; X?: readonly number[] }): number {
+  private indicator(b: Block, fn: (x: number, y: number, z: number) => { rho: number; p: number; X?: readonly number[] }, leaves: number): number {
     const three = this.cfg.ndim === 3;
     const dx = this.dx0 / (1 << b.level);
     const half = this.cfg.problem.box / 2;
-    // Samples per cell: down to the finest level, within a budget per block.
-    const sub = Math.min(1 << (this.levels - b.level), three ? 2 : 4);
+    // Samples per cell: down to the finest level, within a budget. A few blocks share a total
+    // budget per pass, so a deep mesh still sees a feature a few finest cells across (a blast)
+    // that coarse sampling of a root block would step over; many blocks get the floor per block.
+    const floor = three ? 2 : 4;
+    const share = Math.floor(Math.pow(INDICATOR_SAMPLES / Math.max(leaves, 1), 1 / this.cfg.ndim) / (BS + 2));
+    const sub = Math.min(1 << (this.levels - b.level), Math.max(floor, share > 0 ? 1 << Math.floor(Math.log2(share)) : 0));
     const h = dx / sub;
     const m = (BS + 2) * sub; // one cell of margin on each side
     const mz = three ? m : 1;
@@ -1051,9 +1057,10 @@ export class AmrSim implements Simulation {
       for (let pass = 0; pass < limit; pass++) {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
         // is finer than it at the center of one of its children.
+        const leaves = levelAt ? 0 : this.tree.leaves().length;
         const changed = levelAt
           ? this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1)
-          : this.tree.adapt((b) => this.indicator(b, surface), c.refineHi, c.refineLo);
+          : this.tree.adapt((b) => this.indicator(b, surface, leaves), c.refineHi, c.refineLo);
         if (!changed) break;
       }
       if (levelAt || !strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;

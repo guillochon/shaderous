@@ -141,7 +141,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
     problem,
     ndim: known ? (q.get('dim') === '2' ? 2 : 3) : DEFAULT_SETUP.ndim,
     n: known ? Math.max(0, Math.round(+q.get('n')! || 0)) : DEFAULT_SETUP.n,
-    amr: known ? Math.min(3, Math.max(0, Math.round(+q.get('amr')! || 0))) : 0,
+    amr: known ? Math.min(5, Math.max(0, Math.round(+q.get('amr')! || 0))) : 0,
     cfg: {},
     eosParams: {},
     coolParams: {},

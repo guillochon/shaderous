@@ -84,7 +84,7 @@ side.innerHTML = `
     <div class="g3">
       ${field('Dimensions', select('dim', opt(3, '3D') + opt(2, '2D')), '', 'Two or three dimensions. A 2D run is one layer of cells in x and y')}
       ${field('Resolution', select('res', ''), '', 'Cells across the box; on an adaptive mesh, at its finest level')}
-      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')), '', 'Adaptive mesh: levels of refinement below the coarsest grid. Uniform puts every cell at the full resolution')}
+      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3, 4, 5].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')), '', 'Adaptive mesh: levels of refinement below the coarsest grid. Uniform puts every cell at the full resolution')}
     </div>
     <div class="g2">
       ${field('Refine above', number('refhi', 'step="0.05" min="0.05" max="1"'), '', 'Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more. Changes take effect without a restart')}
