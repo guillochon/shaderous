@@ -154,6 +154,8 @@ export interface Problem {
   frame?: 'gas' | 'masses';
   /** Density below which gas does not ask for refinement (default: the fluff density, else ten times a star's ambient density, else 0, off). */
   refineRho?: number;
+  /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */
+  refineDense?: number;
   /** Optically thin cooling switched on by default, and its parameters. */
   cooling?: CoolingKind;
   coolParams?: Partial<CoolingParams>;

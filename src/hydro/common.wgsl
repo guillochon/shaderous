@@ -37,7 +37,8 @@ struct Params {
   diff: vec4<f32>,       // diffusion (hydro/diffusion.wgsl): (kinematic viscosity, conductivity
                          //   per unit density), then the damping zone's inner radius and rate
                          //   (hydro/damping.wgsl)
-  refine: vec4<f32>,     // block grids: (density below which gas does not ask for refinement, 0, 0, 0)
+  refine: vec4<f32>,     // block grids: (density below which gas does not ask for refinement, density
+                         //   above which it is always refined to the finest level (0: none), 0, 0)
   eos2: vec4<f32>,       // more equation-of-state constants, per module (eos/degenerate.wgsl,
                          //   eos/ionizing.wgsl); zero for the others
 }

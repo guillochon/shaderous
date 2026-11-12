@@ -26,9 +26,11 @@ import type { Eos } from '../eos/eos';
 // far above 4/3, so the small mismatch of the mapping meets little restoring force, and its
 // central density swung by 20% in its fundamental mode (period about 6 s).
 export const WD_COLLISION = {
-  box: 8,
+  box: 12,
   /** starting separation, in sums of the radii */
-  starts: 2,
+  starts: 4,
+  /** density above which the mesh is always at its finest (code units: 2e6 g/cm^3) */
+  dense: 1,
 };
 
 /** The two dwarfs as the parameters place them. */
@@ -88,6 +90,9 @@ export const wdCollision: Problem = {
   // Ambient gas and the thinnest debris: no hotter than the stars' outer layers get when
   // shocked, no faster than a few times the speed at contact.
   fluff: { rho: 10 * WD_AMBIENT.rhoAmb, u: 3, v: 10 },
+  // The stars' interiors are smooth, so the second-derivative indicator alone would leave them
+  // on coarse blocks: hold everything denser than this at the finest level.
+  refineDense: WD_COLLISION.dense,
   view: { field: 0, log: true, mode: 'volume', pitch: 1.15 },
   params: [
     { id: 'm1', label: 'Mass 1 (M☉)', title: 'Mass of the first white dwarf, in solar masses (carbon-oxygen white dwarfs are 0.5 to 1.3). Changing it starts the run again', value: 1.0, min: 0.5, max: 1.3, step: 0.05 },

@@ -100,6 +100,8 @@ export interface SimConfig {
   refineLo: number;
   /** Gas below this density does not ask for refinement (amr/flag.wgsl); 0 is off. */
   refineRho: number;
+  /** adaptive mesh: density above which gas is always refined to the finest level (0: none) */
+  refineDense: number;
   /**
    * Limits on tenuous gas (hydro/fluff.wgsl): below density `rho`, the specific internal
    * energy is capped at `u` and the speed at `v`. A zero density switches them off.
@@ -250,6 +252,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     refineHi: 0.8,
     refineLo: 0.2,
     refineRho: problem.refineRho ?? problem.fluff?.rho ?? (problem.star ? 10 * problem.star.rhoAmb : 0),
+    refineDense: problem.refineDense ?? 0,
     fluff: { ...(problem.fluff ?? { rho: 0, u: 0, v: 0 }) },
     jeansRefine: 16,
     cooling: problem.cooling ?? 'off',
@@ -559,7 +562,7 @@ export function packParams(
   );
   f.set(packCooling(c.cooling, c.coolParams), 52);
   f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), Math.max(0, c.dampRadius), Math.max(0, c.dampRate)], 56);
-  f.set([Math.max(0, c.refineRho), 0, 0, 0], 60);
+  f.set([Math.max(0, c.refineRho), Math.max(0, c.refineDense), 0, 0], 60);
   f.set(eosConstants2(c.eos, c.eosParams), 64);
   return buf;
 }

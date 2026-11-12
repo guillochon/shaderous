@@ -847,6 +847,9 @@ export class AmrSim implements Simulation {
           rho[(k * m + j) * m + i] = w.rho;
           pr[(k * m + j) * m + i] = w.p;
         }
+    // Gas dense enough that the preset wants it at the finest level (stars): as amr/flag.wgsl.
+    const dense = this.cfg.refineDense;
+    if (dense > 0 && rho.some((r) => r > dense)) return Infinity;
     // The normalized second derivative of amr/flag.wgsl, at the finest spacing sampled.
     let ind = 0;
     const strides = three ? [sub, sub * m, sub * m * m] : [sub, sub * m];

@@ -33,6 +33,8 @@ export const whiteDwarfStar: Problem = {
   rhoFloor: 1e-10,
   pFloor: 1e-14,
   fluff: { rho: 10 * WD_AMBIENT.rhoAmb, u: 3, v: 10 },
+  // Smooth inside, so held at the finest level outright above this density (2e6 g/cm^3).
+  refineDense: 1,
   view: { field: 0, log: true, mode: 'slice', axis: 2 },
   params: [
     { id: 'm', label: 'Mass (M☉)', title: 'Mass of the white dwarf, in solar masses (carbon-oxygen white dwarfs are 0.5 to 1.3). Changing it starts the run again', value: 0.6, min: 0.5, max: 1.3, step: 0.05 },
