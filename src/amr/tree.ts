@@ -11,6 +11,11 @@ export const NG = 2; // ghost layers
 export const PAD = BS + 2 * NG; // stored cells per block side, in the atlas
 export const BT_STRIDE = 32; // ints per block in the block table
 export const RG_STRIDE = 12; // ints per block in the regrid table
+/** A box of index-grid cells: origin and size, (x, y, z). */
+export interface GridBox {
+  o: [number, number, number];
+  s: [number, number, number];
+}
 
 // Block table layout (i32), per slot:
 //   [0] level   [1..3] block coordinates at that level   [4] flags: 1 active, 2 leaf
@@ -417,28 +422,77 @@ export class BlockTree {
 
   /**
    * Leaf slot covering each block-sized cell of the deepest level: a lookup from position to
-   * block, (nr << maxLevel) per side. Like table(), the same array updated in place.
+   * block, (nr << maxLevel) per side. Like table(), the same array updated in place. Given
+   * `boxes`, adds to it the boxes (in cells) that changed since the last call, so only those
+   * need uploading: the whole grid on the first call, else a few slabs around the re-mesh.
    */
-  indexGrid(): Uint32Array {
+  indexGrid(boxes?: GridBox[]): Uint32Array {
     const m = this.nr << this.maxLevel;
-    const mz = this.ndim === 3 ? m : 1;
+    const d3 = this.ndim === 3;
+    const mz = d3 ? m : 1;
     // Every cell lies in exactly one leaf, so filling the new leaves covers whatever changed.
     let g = this.grid;
-    let fill: Iterable<Block> = this.newLeaves;
     if (!g) {
       g = this.grid = new Uint32Array(m * m * mz);
-      fill = this.blocks.values();
+      for (const b of this.blocks.values()) if (!b.children) this.fillLeaf(g, b, m);
+      this.newLeaves = [];
+      boxes?.push({ o: [0, 0, 0], s: [m, m, mz] });
+      return g;
     }
-    for (const b of fill) {
+    // The extent filled along the inner axes (x, and y in 3D) of each row of the outer axis
+    // (y in 2D, z in 3D), merged into boxes below.
+    const lo0 = new Int32Array(m).fill(m);
+    const hi0 = new Int32Array(m);
+    const lo1 = new Int32Array(m).fill(m);
+    const hi1 = new Int32Array(m);
+    for (const b of this.newLeaves) {
       if (b.children || this.slots[b.slot] !== b) continue;
+      this.fillLeaf(g, b, m);
       const span = 1 << (this.maxLevel - b.level);
-      const z0 = this.ndim === 3 ? b.c[2] * span : 0;
-      for (let k = z0; k < z0 + (this.ndim === 3 ? span : 1); k++)
-        for (let j = b.c[1] * span; j < (b.c[1] + 1) * span; j++)
-          g.fill(b.slot, (k * m + j) * m + b.c[0] * span, (k * m + j) * m + (b.c[0] + 1) * span);
+      const x0 = b.c[0] * span;
+      const y0 = b.c[1] * span;
+      const o0 = (d3 ? b.c[2] : b.c[1]) * span;
+      for (let o = o0; o < o0 + span; o++) {
+        lo0[o] = Math.min(lo0[o], x0);
+        hi0[o] = Math.max(hi0[o], x0 + span);
+        if (d3) {
+          lo1[o] = Math.min(lo1[o], y0);
+          hi1[o] = Math.max(hi1[o], y0 + span);
+        }
+      }
     }
     this.newLeaves = [];
+    if (!boxes) return g;
+    // Runs of changed rows, bridging gaps of a few rows: each box costs a copy call, and an
+    // unchanged row inside one costs only its bytes.
+    const GAP = 4;
+    for (let o = 0; o < m; ) {
+      if (hi0[o] === 0) {
+        o++;
+        continue;
+      }
+      let a0 = m, b0 = 0, a1 = m, b1 = 0;
+      let end = o;
+      for (let k = o; k < m && k <= end + GAP; k++) {
+        if (hi0[k] === 0) continue;
+        a0 = Math.min(a0, lo0[k]);
+        b0 = Math.max(b0, hi0[k]);
+        a1 = Math.min(a1, lo1[k]);
+        b1 = Math.max(b1, hi1[k]);
+        end = k;
+      }
+      boxes.push(d3 ? { o: [a0, a1, o], s: [b0 - a0, b1 - a1, end + 1 - o] } : { o: [a0, o, 0], s: [b0 - a0, end + 1 - o, 1] });
+      o = end + 1;
+    }
     return g;
+  }
+
+  private fillLeaf(g: Uint32Array, b: Block, m: number) {
+    const span = 1 << (this.maxLevel - b.level);
+    const z0 = this.ndim === 3 ? b.c[2] * span : 0;
+    for (let k = z0; k < z0 + (this.ndim === 3 ? span : 1); k++)
+      for (let j = b.c[1] * span; j < (b.c[1] + 1) * span; j++)
+        g.fill(b.slot, (k * m + j) * m + b.c[0] * span, (k * m + j) * m + (b.c[0] + 1) * span);
   }
 
   /** Leaves, cells and the finest level in use. */

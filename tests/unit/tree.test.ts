@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BlockTree, BT_STRIDE, FLAG_LEAF, NB_COARSE, RG_COPY, RG_PROLONG, RG_RESTRICT, type Block } from '../../src/amr/tree';
+import { BlockTree, BT_STRIDE, FLAG_LEAF, NB_COARSE, RG_COPY, RG_PROLONG, RG_RESTRICT, type Block, type GridBox } from '../../src/amr/tree';
 
 const periodic = [0, 0, 0];
 const outflow = [1, 1, 1];
@@ -58,6 +58,38 @@ describe('block tree', () => {
       }
       b2.bcLo = flipped;
       expect(a.table()).toEqual(b2.table());
+    }
+  });
+
+  it('reports the index-grid boxes that changed', () => {
+    // A copy updated only inside the reported boxes, as the GPU texture is, stays equal.
+    for (const ndim of [2, 3] as const) {
+      const t = new BlockTree(ndim, 2, ndim === 2 ? 4 : 3, 3000, periodic, periodic);
+      const m = t.nr << t.maxLevel;
+      const copy = new Uint32Array(m * m * (ndim === 3 ? m : 1));
+      let seed = 11;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      let partial = 0;
+      for (let round = 0; round < 12; round++) {
+        if (round) {
+          const ind = Array.from({ length: 3000 }, () => rnd() * 1.2);
+          t.adapt((x) => ind[x.slot], 0.8, 0.3);
+        }
+        const boxes: GridBox[] = [];
+        const g = t.indexGrid(boxes);
+        let cells = 0;
+        for (const { o, s } of boxes) {
+          cells += s[0] * s[1] * s[2];
+          for (let z = o[2]; z < o[2] + s[2]; z++)
+            for (let y = o[1]; y < o[1] + s[1]; y++) {
+              const at = (z * m + y) * m + o[0];
+              copy.set(g.subarray(at, at + s[0]), at);
+            }
+        }
+        if (round && cells < g.length) partial++;
+        expect(copy).toEqual(g);
+      }
+      expect(partial).toBeGreaterThan(0); // not every re-mesh re-sends the whole grid
     }
   });
 

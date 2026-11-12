@@ -25,7 +25,7 @@ import { makeEos } from '../eos/eos';
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
-import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
+import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type GridBox, type RegridOp } from './tree';
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
 
@@ -1288,12 +1288,17 @@ export class AmrSim implements Simulation {
     d.queue.writeBuffer(this.listAll, 0, pack(all));
     d.queue.writeBuffer(this.listLeaf, 0, pack(leaves));
     byLevel.forEach((l, i) => d.queue.writeBuffer(this.listLevel[i], 0, pack(l)));
+    // Only what changed: a re-mesh at a fine level touches a few slabs of the grid.
     const m = (this.n0 / BS) << this.levels;
-    d.queue.writeTexture({ texture: this.idx }, this.tree.indexGrid() as Uint32Array<ArrayBuffer>, { bytesPerRow: m * 4, rowsPerImage: m }, [
-      m,
-      m,
-      this.cfg.ndim === 3 ? m : 1,
-    ]);
+    const boxes: GridBox[] = [];
+    const grid = this.tree.indexGrid(boxes) as Uint32Array<ArrayBuffer>;
+    for (const { o, s } of boxes)
+      d.queue.writeTexture(
+        { texture: this.idx, origin: o },
+        grid,
+        { offset: ((o[2] * m + o[1]) * m + o[0]) * 4, bytesPerRow: m * 4, rowsPerImage: m },
+        s,
+      );
   }
 
   // ---------------------------------------------------------------- stepping
