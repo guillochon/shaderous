@@ -3,7 +3,7 @@ import { physicalEosParams, type EosParams } from '../../src/eos/eos';
 import { COMPOSITIONS } from '../../src/units/composition';
 import { ASTRO } from '../../src/units/constants';
 import { gravityUnits, codeG } from '../../src/units/units';
-import { whiteDwarf } from '../../src/problems/white_dwarf';
+import { degenerateBarotrope, whiteDwarf } from '../../src/problems/white_dwarf';
 import { collisionOrbit } from '../../src/problems/stellar_collision';
 
 // Code units of 1e4 km and one solar mass, with G = 1.
@@ -60,6 +60,24 @@ describe('the collision orbit', () => {
       expect(d).toBeGreaterThan(R1 + R2);
       expect(Math.hypot(...o.pos[0]) + R1).toBeLessThan(4);
       expect(Math.hypot(...o.pos[1]) + R2).toBeLessThan(4);
+    }
+  });
+});
+
+describe('the degenerate barotrope', () => {
+  it('inverts its enthalpy, h = int dp / rho', () => {
+    const b = degenerateBarotrope(scales);
+    for (const rho of [1e-6, 1e-3, 0.1, 1, 30, 1e3]) {
+      // Integrate dp / rho from (near) zero density up to rho, in log rho.
+      let h = 0;
+      const steps = 20000;
+      const lo = Math.log(1e-14);
+      const dl = (Math.log(rho) - lo) / steps;
+      for (let i = 0; i < steps; i++) {
+        const r0 = Math.exp(lo + i * dl), r1 = Math.exp(lo + (i + 1) * dl);
+        h += (b.pressure(r1) - b.pressure(r0)) / Math.sqrt(r0 * r1);
+      }
+      expect(rel(b.rhoOfH(h), rho)).toBeLessThan(1e-4);
     }
   });
 });

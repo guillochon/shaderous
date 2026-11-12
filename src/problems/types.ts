@@ -1,5 +1,5 @@
 import type { Eos, EosKind, EosParams } from '../eos/eos';
-import type { StarSpec } from './settle';
+import type { Settling, StarSpec } from './settle';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
@@ -172,6 +172,8 @@ export interface Problem {
   gext?: (ndim: 2 | 3) => [number, number, number];
   /** A polytropic star at rest, settled into the grid's own hydrostatic balance before the run (problems/settle.ts). */
   star?: StarSpec;
+  /** Stars of any cold equation of state, at rest or moving, to settle likewise (in place of `star`). */
+  settle?: (params: Record<string, number>, eos: Eos) => Settling;
   /** The run waits, paused, for the user to start it. */
   startPaused?: boolean;
   /**

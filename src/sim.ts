@@ -10,7 +10,7 @@ import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, physicalEosParam
 import { cellMark, isSelfGravity, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
-import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from './problems/settle';
+import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 
 export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
@@ -944,8 +944,9 @@ export class Sim implements Simulation {
   get preparing(): boolean {
     return this.settling;
   }
-  /** largest relative change of density in each round of the last settling (inspection) */
+  /** largest relative change of density in each round of the last settling, and how long it took (inspection) */
   settleLog: number[] = [];
+  settleMs = 0;
 
   /**
    * Settle a star into the grid's own hydrostatic balance: no steps are taken until it has.
@@ -954,43 +955,49 @@ export class Sim implements Simulation {
   private startSettling(u1: Float32Array, u2: Float32Array) {
     const epoch = ++this.settleEpoch;
     const c = this.cfg;
-    const star = c.problem.star;
     this.settling = false;
     this.settled = Promise.resolve();
-    if (!star || c.restart || !c.wellBalanced || !this.selfGravity) return;
-    this.settling = true;
+    if (c.restart || !c.wellBalanced || !this.selfGravity) return;
     const eos = makeEos(c.eos, c.eosParams);
+    const set = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
+    if (!set) return;
+    this.settling = true;
     const vol = this.dx ** 3;
+    const n = this.n;
+    const half = c.problem.box / 2;
+    const at = (i: number) => (i + 0.5) * this.dx - half;
+    const cells: SettleCells = {
+      count: u1.length / 4,
+      pos: (q) => [at(q % n), at(Math.floor(q / n) % n), at(Math.floor(q / (n * n)))],
+      vol: () => vol,
+      u1,
+      u2,
+    };
+    const t0 = performance.now();
     this.settled = (async () => {
       try {
-        let mass = 0;
         let peak = 0;
-        for (let o = 0; o < u1.length; o += 4) {
-          if (u1[o] > star.rhoCut) mass += u1[o] * vol;
-          peak = Math.max(peak, u1[o]);
-        }
+        for (let o = 0; o < u1.length; o += 4) peak = Math.max(peak, u1[o]);
+        const settler = new Settler(set, cells);
         this.settleLog = [];
         for (let round = 0; round < SETTLE_ROUNDS; round++) {
           const phi = await this.readPotential();
           if (epoch !== this.settleEpoch) return;
-          const rho = balancedDensity(star, phi, () => vol, mass);
-          let change = 0;
-          for (let q = 0, o = 0; q < rho.length; q++, o += 4) {
-            const [r, eint, tag] = settledCell(star, rho[q], eos.eintFromP);
-            change = Math.max(change, Math.abs(r - u1[o]));
-            u1[o] = r;
-            u2[o] = eint;
-            u2[o + 1] = eint;
-            u2[o + 2] = tag;
-          }
+          const change = settler.round(phi);
           this.settleLog.push(change / peak);
           writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
-          writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
           this.refreshPotential();
-          if (change < SETTLE_TOL * peak) break;
+          if (change < (set.tol ?? SETTLE_TOL) * peak) break;
         }
+        settler.finish(eos.eintFromP);
+        writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
+        writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
+        this.refreshPotential();
       } finally {
-        if (epoch === this.settleEpoch) this.settling = false;
+        if (epoch === this.settleEpoch) {
+          this.settling = false;
+          this.settleMs = performance.now() - t0;
+        }
       }
     })();
   }

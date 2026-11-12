@@ -23,7 +23,7 @@ import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
-import { balancedDensity, settledCell, SETTLE_ROUNDS, SETTLE_TOL } from '../problems/settle';
+import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 
@@ -993,8 +993,9 @@ export class AmrSim implements Simulation {
   get preparing(): boolean {
     return this.settling;
   }
-  /** largest relative change of density in each round of the last settling (inspection) */
+  /** largest relative change of density in each round of the last settling, and how long it took (inspection) */
   settleLog: number[] = [];
+  settleMs = 0;
 
   /**
    * Settle a star into the mesh's own hydrostatic balance: no steps are taken until it has.
@@ -1004,53 +1005,59 @@ export class AmrSim implements Simulation {
     const epoch = ++this.settleEpoch;
     const c = this.cfg;
     const d = this.device;
-    const star = c.problem.star;
     this.settling = false;
     this.settled = Promise.resolve();
-    if (!star || c.restart || !c.wellBalanced || !this.selfGravity) return;
-    this.settling = true;
+    if (c.restart || !c.wellBalanced || !this.selfGravity) return;
     const eos = makeEos(c.eos, c.eosParams);
+    const set = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
+    if (!set) return;
+    this.settling = true;
     const tree = this.tree;
+    const t0 = performance.now();
     this.settled = (async () => {
       try {
-        const cells = await this.readLeaves();
+        const leaf = await this.readLeaves();
         if (epoch !== this.settleEpoch) return;
+        const cells: SettleCells = {
+          count: leaf.count,
+          pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]],
+          vol: (q) => leaf.dx[q] ** 3,
+          u1: leaf.u1,
+          u2: leaf.u2,
+        };
         const { u1, u2 } = cells;
-        const vol = (q: number) => cells.dx[q] ** 3;
-        let mass = 0;
         let peak = 0;
-        for (let q = 0; q < cells.count; q++) {
-          if (u1[q * 4] > star.rhoCut) mass += u1[q * 4] * vol(q);
-          peak = Math.max(peak, u1[q * 4]);
-        }
-        const leaves = tree.leaves();
-        const per = BS ** 3 * 4;
+        for (let q = 0; q < cells.count; q++) peak = Math.max(peak, u1[q * 4]);
+        const settler = new Settler(set, cells);
+        const per = BS ** 3;
+        // Only the blocks a star may reach are ever rewritten.
+        const leaves = tree.leaves().filter((_, i) => settler.owner.subarray(i * per, (i + 1) * per).some((o) => o >= 0));
+        const index = new Map(tree.leaves().map((b, i) => [b, i]));
         const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
+        const upload = (tex: GPUTexture, u: Float32Array) =>
+          leaves.forEach((b) => {
+            const i = index.get(b)!;
+            d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
+          });
         this.settleLog = [];
         for (let round = 0; round < SETTLE_ROUNDS; round++) {
           const phi = await this.readLeafPotential();
           if (epoch !== this.settleEpoch || tree !== this.tree) return;
-          const rho = balancedDensity(star, phi, vol, mass);
-          let change = 0;
-          for (let q = 0, o = 0; q < rho.length; q++, o += 4) {
-            const [r, eint, tag] = settledCell(star, rho[q], eos.eintFromP);
-            change = Math.max(change, Math.abs(r - u1[o]));
-            u1[o] = r;
-            u2[o] = eint;
-            u2[o + 1] = eint;
-            u2[o + 2] = tag;
-          }
+          const change = settler.round(phi);
           this.settleLog.push(change / peak);
-          leaves.forEach((b, i) => {
-            const origin = this.origin(b.slot);
-            d.queue.writeTexture({ texture: this.state[this.cur][0], origin }, u1.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
-            d.queue.writeTexture({ texture: this.state[this.cur][1], origin }, u2.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
-          });
+          upload(this.state[this.cur][0], u1);
           this.refreshPotential();
-          if (change < SETTLE_TOL * peak) break;
+          if (change < (set.tol ?? SETTLE_TOL) * peak) break;
         }
+        settler.finish(eos.eintFromP);
+        upload(this.state[this.cur][0], u1);
+        upload(this.state[this.cur][1], u2);
+        this.refreshPotential();
       } finally {
-        if (epoch === this.settleEpoch) this.settling = false;
+        if (epoch === this.settleEpoch) {
+          this.settling = false;
+          this.settleMs = performance.now() - t0;
+        }
       }
     })();
   }

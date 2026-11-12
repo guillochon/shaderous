@@ -14,6 +14,7 @@ import { kelvinHelmholtz } from '../problems/kelvin_helmholtz';
 import { rayleighTaylor, RT } from '../problems/rayleigh_taylor';
 import { jeans, JEANS } from '../problems/jeans';
 import { polytrope } from '../problems/polytrope';
+import { whiteDwarfStar } from '../problems/white_dwarf_star';
 import { evrard } from '../problems/evrard';
 import { tidalDisruption, tdeOrbit, TDE_STAR } from '../problems/tidal_disruption';
 import { sphere, spherePotential } from '../problems/sphere';
@@ -1477,6 +1478,35 @@ export const TESTS: TestDef[] = [
           metrics: {
             central_density_initial: rho0, central_density_final: last.ranges[0][1], max_deviation: worst,
             energy_drift: Math.abs(last.eTot - d0.eTot) / Math.abs(d0.eTot), max_mach: last.maxMach, steps,
+          },
+        };
+      });
+    },
+  },
+  {
+    id: 'white-dwarf',
+    name: 'Cold white dwarf in hydrostatic equilibrium (degenerate electrons, settled)',
+    criterion: 'A 0.6 M_sun C/O white dwarf, settled into the grid’s balance, keeps its central density within 5% over about three dynamical times (t <= 3), with total energy conserved to 1e-3',
+    async run(gpu) {
+      return withSim(gpu, whiteDwarfStar, 64, { tEnd: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const rho0 = d0.ranges[0][1];
+        let worst = 0;
+        let last = d0;
+        let steps = 0;
+        for (let t = 0.5; t <= 3; t += 0.5) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          steps = await sim.runToEnd();
+          last = await sim.diagnostics();
+          worst = Math.max(worst, Math.abs(last.ranges[0][1] - rho0) / rho0);
+        }
+        const drift = Math.abs(last.eTot - d0.eTot) / Math.abs(d0.eTot);
+        return {
+          pass: worst < 0.05 && drift < 1e-3,
+          metrics: {
+            central_density_initial: rho0, central_density_final: last.ranges[0][1], max_deviation: worst,
+            energy_drift: drift, settle_rounds: sim.settleLog.length, settle_ms: sim.settleMs, steps,
           },
         };
       });

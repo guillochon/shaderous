@@ -6,7 +6,11 @@
 // integrated outward from the center (RK4), with the central density found by bisection so
 // that the star has the mass asked for. Everything is in code units, given the equation of
 // state's two scales: rho_d (where p_F = m_e c, which carries Ye) and the pressure scale A.
-import { degFG } from '../eos/eos';
+import { degFG, type Eos } from '../eos/eos';
+import { ASTRO } from '../units/constants';
+import { gravityUnits } from '../units/units';
+import type { Barotrope, Settling } from './settle';
+import type { Prim } from './types';
 
 export interface WhiteDwarf {
   M: number;
@@ -120,3 +124,70 @@ export function whiteDwarf(M: number, s: DegenerateScales, G = 1): WhiteDwarf {
   cache.set(key, wd);
   return wd;
 }
+
+/**
+ * The cold degenerate gas as a barotrope, for settling (problems/settle.ts). Its enthalpy is
+ * h = int dP / rho = (8 A / rho_d) (sqrt(1 + x^2) - 1), so x = sqrt(u (2 + u)) with
+ * u = h rho_d / (8 A), written so that small h loses nothing.
+ */
+export function degenerateBarotrope(s: DegenerateScales): Barotrope {
+  return {
+    pressure: (rho) => coldPressure(s, rho),
+    rhoOfH: (h) => {
+      if (!(h > 0)) return 0;
+      const u = (h * s.degRho) / (8 * s.degP);
+      return s.degRho * Math.sqrt(u * (2 + u)) ** 3;
+    },
+  };
+}
+
+/** Code units for white dwarfs: 10^4 km, one solar mass, and the time that makes G = 1 (2.75 s). */
+export const WD_UNITS = gravityUnits('white dwarf', 1e7, ASTRO.Msun);
+
+/** Density below which gas is ambient around white dwarfs, and the ambient density (code units). */
+export const WD_AMBIENT = { rhoCut: 1e-4, rhoAmb: 1e-6 };
+
+/** A white dwarf placed in the box: its structure, center, velocity and the dye its gas carries. */
+export interface PlacedDwarf {
+  wd: WhiteDwarf;
+  center: number[];
+  vel: number[];
+  scalar: number;
+}
+
+/** The initial state of white dwarfs in light ambient gas at rest, in pressure balance with their outermost layers. */
+export function dwarfsInit(s: DegenerateScales, dwarfs: PlacedDwarf[]): (x: number, y: number, z: number) => Prim {
+  const { rhoCut, rhoAmb } = WD_AMBIENT;
+  const pAmb = coldPressure(s, rhoCut);
+  return (x, y, z) => {
+    for (const d of dwarfs) {
+      const rho = d.wd.rho(Math.hypot(x - d.center[0], y - d.center[1], z - d.center[2]));
+      if (rho > rhoCut) {
+        // Cold: the degenerate pressure alone.
+        const [vx, vy, vz] = d.vel;
+        return { rho, vx, vy, vz, p: coldPressure(s, rho), s: d.scalar };
+      }
+    }
+    return { rho: rhoAmb, vx: 0, vy: 0, vz: 0, p: pAmb, s: 0 };
+  };
+}
+
+/** The same white dwarfs, to be settled into the grid's own balance (problems/settle.ts). */
+export function dwarfsSettling(s: DegenerateScales, dwarfs: PlacedDwarf[], G: number): Settling {
+  const barotrope = degenerateBarotrope(s);
+  return {
+    // A settled dwarf stays within a few cells of its analytic radius: 1.5 radii bounds the work.
+    stars: dwarfs.map((d) => ({ barotrope, center: d.center, vel: d.vel, R: d.wd.R, reach: 1.5 * d.wd.R, scalar: d.scalar })),
+    rhoCut: WD_AMBIENT.rhoCut,
+    rhoAmb: WD_AMBIENT.rhoAmb,
+    pAmb: coldPressure(s, WD_AMBIENT.rhoCut),
+    G,
+    // A 0.6 M_sun dwarf settled to 1e-3 (12 rounds) stays as still as one settled to 1e-5 (26):
+    // its central density swings by about 1% either way, from what the settling cannot reach.
+    tol: 1e-3,
+    relax: 1.6,
+  };
+}
+
+/** The degenerate scales of an equation of state's parameters. */
+export const scalesOf = (eos: Eos): DegenerateScales => ({ degRho: eos.params.degRho, degP: eos.params.degP });

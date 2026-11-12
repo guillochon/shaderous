@@ -1,8 +1,8 @@
 import { all, OUTFLOW_ONLY, type Problem } from './types';
-import { ASTRO } from '../units/constants';
 import { COMPOSITIONS } from '../units/composition';
-import { codeG, gravityUnits } from '../units/units';
-import { coldPressure, whiteDwarf, type DegenerateScales } from './white_dwarf';
+import { codeG } from '../units/units';
+import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf } from './white_dwarf';
+import type { Eos } from '../eos/eos';
 
 // Stellar collisions: two stars on a parabolic orbit about their common center of mass, set
 // up a little way apart and left to fall together under their own gravity (isolated
@@ -20,21 +20,26 @@ import { coldPressure, whiteDwarf, type DegenerateScales } from './white_dwarf';
 // The orbit lies in the x-y plane with pericenter along +x. The impact parameter b is the
 // pericenter distance in units of the sum of the two radii: 0 is head-on, 1 a graze. The stars
 // start STARTS times that sum apart (less if they would not fit in the box), moving as the
-// parabolic orbit has them there. Their profiles are mapped onto the grid as they are, not
-// settled into the grid's own balance first (problems/settle.ts handles a single polytrope at
-// rest), so they ring as the run starts: the central density of a 1 M_sun dwarf swings by about
-// 20% in its fundamental mode (period about 6 s). Its core is mildly relativistic, with Gamma_1
-// not far above 4/3, so the small mismatch of the mapping meets little restoring force.
+// parabolic orbit has them there. Both are then settled into the grid's own hydrostatic
+// balance, each in its own potential, keeping their velocities (problems/settle.ts). Mapped
+// as they are, they would ring: a 1 M_sun dwarf's core is mildly relativistic, with Gamma_1 not
+// far above 4/3, so the small mismatch of the mapping meets little restoring force, and its
+// central density swung by 20% in its fundamental mode (period about 6 s).
 export const WD_COLLISION = {
   box: 8,
   /** starting separation, in sums of the radii */
   starts: 2,
-  /** density below which gas is ambient, and the ambient density (code units) */
-  rhoCut: 1e-4,
-  rhoAmb: 1e-6,
 };
 
-export const WD_UNITS = gravityUnits('white dwarf', 1e7, ASTRO.Msun);
+/** The two dwarfs as the parameters place them. */
+function placed(p: Record<string, number>, eos: Eos): PlacedDwarf[] {
+  const G = codeG(WD_UNITS);
+  const s = scalesOf(eos);
+  const wds = [whiteDwarf(p.m1, s, G), whiteDwarf(p.m2, s, G)];
+  const o = collisionOrbit(p.m1, p.m2, wds[0].R, wds[1].R, p.b, G, WD_COLLISION.box);
+  // The passive scalar tells the two stars apart.
+  return wds.map((wd, i) => ({ wd, center: o.pos[i], vel: o.vel[i], scalar: i === 0 ? 1 : 0.5 }));
+}
 
 /** Positions and velocities of the two stars (relative to the center of mass) at the start. */
 export function collisionOrbit(m1: number, m2: number, R1: number, R2: number, b: number, G: number, box: number) {
@@ -82,32 +87,13 @@ export const wdCollision: Problem = {
   pFloor: 1e-14,
   // Ambient gas and the thinnest debris: no hotter than the stars' outer layers get when
   // shocked, no faster than a few times the speed at contact.
-  fluff: { rho: 10 * WD_COLLISION.rhoAmb, u: 3, v: 10 },
+  fluff: { rho: 10 * WD_AMBIENT.rhoAmb, u: 3, v: 10 },
   view: { field: 0, log: true, mode: 'volume', pitch: 1.15 },
   params: [
     { id: 'm1', label: 'Mass 1 (M☉)', title: 'Mass of the first white dwarf, in solar masses (carbon-oxygen white dwarfs are 0.5 to 1.3). Changing it starts the run again', value: 1.0, min: 0.5, max: 1.3, step: 0.05 },
     { id: 'm2', label: 'Mass 2 (M☉)', title: 'Mass of the second white dwarf, in solar masses. Changing it starts the run again', value: 0.8, min: 0.5, max: 1.3, step: 0.05 },
     { id: 'b', label: 'Impact parameter', title: 'Pericenter distance of the parabolic orbit over the sum of the two radii: 0 is head-on, 1 just grazes. Changing it starts the run again', value: 0, min: 0, max: 1.5, step: 0.1 },
   ],
-  init: (_n, eos, _ndim, p) => {
-    const G = codeG(WD_UNITS);
-    const s: DegenerateScales = { degRho: eos.params.degRho, degP: eos.params.degP };
-    const stars = [whiteDwarf(p.m1, s, G), whiteDwarf(p.m2, s, G)];
-    const o = collisionOrbit(p.m1, p.m2, stars[0].R, stars[1].R, p.b, G, WD_COLLISION.box);
-    const { rhoCut, rhoAmb } = WD_COLLISION;
-    const pAmb = coldPressure(s, rhoCut);
-    return (x, y, z) => {
-      for (let i = 0; i < 2; i++) {
-        const [cx, cy, cz] = o.pos[i];
-        const rho = stars[i].rho(Math.hypot(x - cx, y - cy, z - cz));
-        if (rho > rhoCut) {
-          const [vx, vy, vz] = o.vel[i];
-          // Cold: the degenerate pressure alone. The passive scalar tells the two stars apart.
-          return { rho, vx, vy, vz, p: coldPressure(s, rho), s: i === 0 ? 1 : 0.5 };
-        }
-      }
-      // Light ambient gas at rest, in pressure balance with the stars' outermost layers.
-      return { rho: rhoAmb, vx: 0, vy: 0, vz: 0, p: pAmb, s: 0 };
-    };
-  },
+  settle: (p, eos) => dwarfsSettling(scalesOf(eos), placed(p, eos), codeG(WD_UNITS)),
+  init: (_n, eos, _ndim, p) => dwarfsInit(scalesOf(eos), placed(p, eos)),
 };
