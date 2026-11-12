@@ -2745,6 +2745,9 @@ function tick(now: number) {
           syncControls();
         }
       }
+      // A clock held at a checkpoint reads dt = 0 (the step it is about to take) at a time
+      // already shown: leave it out of the readouts and their history.
+      if (d.dt === 0 && ckpt.on && d.t < cfg.tEnd * (1 - 1e-5)) return;
       updateRange(d);
       showDiagnostics(d, s);
       showDensityCut();
