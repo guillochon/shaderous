@@ -17,6 +17,7 @@ struct View {
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
   nd: vec4<u32>,   // display volume size
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view)
 }
 @group(0) @binding(1) var<uniform> V: View;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -76,7 +77,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     // Position within the block in display voxels; the first voxel along an axis is the outline.
     let within = (frac * f32(nblk) - vec3<f32>(blk_coord(slot))) * vec3<f32>(V.nd.xyz) / f32(nblk);
     let edge = vec3<f32>(within < vec3<f32>(1.0));
-    textureStore(VOL, vec3<i32>(gid), vec4<f32>(t, max(edge.x, edge.y), max(edge.y, edge.z), max(edge.x, edge.z)));
+    // g: block outlines for z-normal slices; in the volume view, whether the gas is dense enough
+    // to be shown (the volume view draws its outlines as lines).
+    let shown = select(0.0, 1.0, log(max(u1.x, 1.0e-30)) * 0.4342944819 >= V.cut.x);
+    let green = select(max(edge.x, edge.y), shown, V.cut.y != 0.0);
+    textureStore(VOL, vec3<i32>(gid), vec4<f32>(t, green, max(edge.y, edge.z), max(edge.x, edge.z)));
   }
   range_end(lix);
 }

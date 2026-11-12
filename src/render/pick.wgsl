@@ -26,10 +26,11 @@ fn main() {
     var alpha = 0.0;
     for (var i = 0; i < count; i++) {
       let t = t0 + (f32(i) + 0.5) * ds;
-      let v = textureSampleLevel(VOL, S, ro + rd * t + 0.5, 0.0).r;
+      let s = textureSampleLevel(VOL, S, ro + rd * t + 0.5, 0.0);
+      let v = s.r;
       let tf = textureSampleLevel(TF, S, vec2<f32>(v, 0.5), 0.0);
-      // An obstacle (-1) stops the ray.
-      let a = (1.0 - alpha) * select(1.0 - exp(-tf.a * C.p.z * ds), 1.0, v < -0.5);
+      // An obstacle (-1) stops the ray; gas below the minimum density (g = 0) is not there.
+      let a = (1.0 - alpha) * select((1.0 - exp(-tf.a * C.p.z * ds)) * s.g, 1.0, v < -0.5);
       seen += a;
       sum += a * t;
       alpha += a;

@@ -34,7 +34,8 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   var alpha = 0.0;
   for (var i = 0; i < count; i++) {
     let p = ro + rd * (t0 + (f32(i) + jitter) * ds);
-    let v = textureSampleLevel(VOL, S, p + 0.5, 0.0).r;
+    let s = textureSampleLevel(VOL, S, p + 0.5, 0.0);
+    let v = s.r;
     if (v < -0.5) {
       // The surface of an obstacle: opaque, darker with depth so its shape reads.
       col += (1.0 - alpha) * SOLID * (1.15 - 0.6 * f32(i) / f32(count));
@@ -42,7 +43,8 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
       break;
     }
     let tf = textureSampleLevel(TF, S, vec2<f32>(v, 0.5), 0.0);
-    let a = 1.0 - exp(-tf.a * C.p.z * ds);
+    // g: 1 where the gas is at least the minimum density, 0 where it is hidden (render/field.wgsl).
+    let a = (1.0 - exp(-tf.a * C.p.z * ds)) * s.g;
     col += (1.0 - alpha) * a * tf.rgb;
     alpha += (1.0 - alpha) * a;
     if (alpha > 0.995) { break; }

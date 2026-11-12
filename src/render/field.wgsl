@@ -10,6 +10,14 @@ struct View {
   logscale: u32,
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
+  nd: vec4<u32>,   // display volume size (used by the block-grid version)
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view)
+}
+
+// Volume view: 1 where the gas is dense enough to be shown, stored in g. The slice view keeps g
+// for the block outlines of an adaptive mesh.
+fn shown(rho: f32) -> f32 {
+  return select(0.0, 1.0, log(max(rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
 }
 @group(0) @binding(1) var<uniform> V: View;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -58,7 +66,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     if (V.logscale != 0u) { x = log(max(x, 1.0e-30)) * 0.4342944819; }
     var t = clamp((x - V.lo) / max(V.hi - V.lo, 1.0e-20), 0.0, 1.0);
     if (solid) { t = -1.0; }   // solid: drawn as a body, not as gas
-    textureStore(VOL, c, vec4<f32>(t, 0.0, 0.0, 0.0));
+    textureStore(VOL, c, vec4<f32>(t, select(0.0, shown(u1.x), V.cut.y != 0.0), 0.0, 0.0));
   }
   range_end(lix);
 }

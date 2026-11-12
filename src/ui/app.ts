@@ -106,7 +106,7 @@ side.innerHTML = `
       ${field('Field', select('field', FIELD_MENU.map((g) => `<optgroup label="${g.group}">${g.fields.map((i) => `<option value="${i}" title="${FIELD_TIPS[i]}">${FIELDS[i]}</option>`).join('')}</optgroup>`).join('')), '', 'The quantity the colors show. Fields of either sign (velocity components, heating, vorticity, divergence) are shown on a linear scale centered on zero')}
       ${field('Units', select('units', opt('cgs', 'cgs') + opt('si', 'SI') + opt('code', 'Code')), '', 'Units the readouts are shown in: the color bar, the query tool and the diagnostics. Only a setup that stands for something real (a star, say) has physical units; the others are in code units')}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), '', 'The axis the slice is perpendicular to')}
-      ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', '', 'Where the slice cuts the box along its normal')}
+      ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', 'row-slicepos', 'Where the slice cuts the box along its normal')}
     </div>
   </details>
 
@@ -547,6 +547,33 @@ const units = (): Readout => readout(cfg.problem.units, cfg.problem.composition,
 /** What the field on view measures. */
 const viewMeasure = (): Measure => fieldMeasure(view.field, cfg.eosParams.gamma);
 
+/**
+ * Volume view: the least density drawn, from the slider's place between the smallest and largest
+ * density in the box (log scale). 0 when the slider is at the bottom: all the gas is drawn, even
+ * as the smallest density changes.
+ */
+function densityCut(): number {
+  const r = lastDiag?.ranges[0];
+  if (!(view.minRho > 0) || !r || !(r[1] > 0)) return 0;
+  const lo = Math.log10(Math.max(r[0], r[1] * 1e-30));
+  const hi = Math.log10(r[1]);
+  return 10 ** (lo + view.minRho * (hi - lo));
+}
+
+/** The label of the slider: the slice position, or in the volume view the least density drawn. */
+function showDensityCut() {
+  if (!cfg) return;
+  const label = $('row-slicepos').querySelector('span')!;
+  let text = 'Slice position';
+  if (cfg.ndim === 3 && view.mode === 'volume') {
+    const r = lastDiag?.ranges[0];
+    const rho = view.minRho > 0 ? densityCut() : r?.[0];
+    const u = units();
+    text = rho === undefined ? 'Minimum density' : `Minimum density: ${num(rho * u.scale('density'))} ${u.label('density')}`.trimEnd();
+  }
+  if (label.textContent !== text) label.textContent = text;
+}
+
 /** The ends of the color bar, and its unit, in the displayed units. */
 function showRange() {
   const u = units();
@@ -733,7 +760,15 @@ function syncControls() {
   $<HTMLSelectElement>('mode').value = two ? 'slice' : view.mode;
   $<HTMLSelectElement>('field').value = String(view.field);
   $<HTMLSelectElement>('axis').value = String(two ? 2 : view.sliceAxis);
-  $<HTMLInputElement>('slicepos').value = String(view.slicePos);
+  // The slider places the slice, or in the volume view sets the least density drawn.
+  const cutting = !two && view.mode === 'volume';
+  const slider = $<HTMLInputElement>('slicepos');
+  slider.max = cutting ? '1' : '0.999';
+  slider.value = String(cutting ? view.minRho : view.slicePos);
+  $('row-slicepos').title = cutting
+    ? 'Volume view: gas thinner than this is not drawn, whatever the field shown. The slider runs from the smallest density in the box to the largest, on a log scale'
+    : 'Where the slice cuts the box along its normal';
+  showDensityCut();
   $<HTMLInputElement>('log').checked = view.log;
   $<HTMLInputElement>('opacity').value = String(view.opacity);
   // Opacity belongs to the volume view: a slice is drawn solid.
@@ -831,7 +866,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next, rest);
     } else {
       const dv = viewDefaults(problem, ndim);
-      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5 });
+      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5, minRho: 0 });
     }
     if (link) {
       // Settings carried by a shared link, on top of the preset's defaults.
@@ -1376,7 +1411,12 @@ function bind() {
     syncControls();
   });
   on('axis', (el) => (view.sliceAxis = +el.value));
-  on('slicepos', (el) => (view.slicePos = +el.value), 'input');
+  on('slicepos', (el) => {
+    if (view.mode === 'volume' && cfg.ndim === 3) {
+      view.minRho = +el.value;
+      showDensityCut();
+    } else view.slicePos = +el.value;
+  }, 'input');
   on('log', (el) => (view.log = el.checked));
   on('opacity', (el) => {
     view.opacity = +el.value;
@@ -2426,6 +2466,7 @@ function tick(now: number) {
   stepsSubmitted += taken;
   if (taken < steps && running) nsub = Math.max(1, taken);
   updateGuides();
+  renderer.densityCut = densityCut();
   renderer.encode(enc, s, view);
   drawSources();
   gpu.device.queue.submit([enc.finish()]);
@@ -2494,6 +2535,7 @@ function tick(now: number) {
       }
       updateRange(d);
       showDiagnostics(d, s);
+      showDensityCut();
     });
     if (now - rateMark.time > 500) {
       stepRate = ((stepsSubmitted - rateMark.steps) * 1000) / (now - rateMark.time);

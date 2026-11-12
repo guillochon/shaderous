@@ -54,9 +54,9 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'sliceAxis', 'slicePos', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy'] as const;
+const VIEW_NUMBERS = ['field', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy'] as const;
 const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', sliceAxis: 'axis', slicePos: 'slice', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy',
+  field: 'field', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy',
 };
 
 export function encodeLink(s: LinkState): URLSearchParams {
@@ -217,6 +217,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   const axis = num('axis', 0, 2);
   put(out.view, 'sliceAxis', axis === undefined ? undefined : Math.round(axis));
   put(out.view, 'slicePos', num('slice', 0, 0.999));
+  put(out.view, 'minRho', num('rhocut', 0, 1));
   put(out.view, 'opacity', num('opacity', 1, 300));
   put(out.view, 'yaw', num('yaw'));
   put(out.view, 'pitch', num('pitch', -1.5, 1.5));

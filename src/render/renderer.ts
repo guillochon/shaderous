@@ -26,6 +26,11 @@ export interface ViewState {
   hi: number;
   sliceAxis: number;
   slicePos: number; // [0, 1)
+  /**
+   * Volume view: the least density drawn, as a fraction of the way from the smallest density in
+   * the box to the largest, on a log scale. 0 draws all the gas.
+   */
+  minRho: number;
   opacity: number;
   yaw: number;
   pitch: number;
@@ -119,6 +124,7 @@ export const defaultView = (): ViewState => ({
   hi: 1,
   sliceAxis: 2,
   slicePos: 0.5,
+  minRho: 0,
   opacity: 40,
   yaw: 0.7,
   pitch: 0.45,
@@ -153,6 +159,8 @@ export class Renderer {
   private format: GPUTextureFormat;
   private cam: GPUBuffer;
   private viewBuf: GPUBuffer;
+  /** Volume view: the least density drawn (0 draws all the gas). */
+  densityCut = 0;
   private tf: GPUTexture;
   private sampler: GPUSampler;
   private pVolume!: GPURenderPipeline;
@@ -194,7 +202,7 @@ export class Renderer {
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
     this.cam = this.device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.viewBuf = this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.viewBuf = this.device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
       format: 'rgba8unorm',
@@ -361,8 +369,11 @@ export class Renderer {
     const d = this.device;
 
     const [nx, ny, nz] = this.dims;
-    const vb = new ArrayBuffer(32);
+    const vb = new ArrayBuffer(48);
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, 0]);
+    // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
+    const marched = v.mode === 'volume' && nz > 1;
+    new Float32Array(vb, 32, 2).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0]);
     // A field of either sign is always shown on a linear scale.
     const log = v.log && !LINEAR_FIELDS.has(v.field);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
