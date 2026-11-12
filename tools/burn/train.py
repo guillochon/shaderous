@@ -1,7 +1,7 @@
 """Train the burning surrogate: a small network that steps the alpha chain's mass fractions
 forward by dt at fixed density, with the self-heating that burner.py integrates.
 
-    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt]
+    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel]
 
 Input  log10 rho, log10 T, log10 dt (all scaled to about [-1, 1]) and the 13 mass fractions
        (as X^(1/4), which spreads out the trace species).
@@ -123,7 +123,10 @@ class Pairs:
         return (self.log_rho[tr], self.log_T[tr, i], torch.log10(dt), self.X[tr, i]), self.X[tr, j]
 
 
-def loss_fn(Xp, Xt, X0, hard=0.0):
+REL_EPS = 1e-8   # 1e10 erg/g, and the same in mass fraction
+
+
+def loss_fn(Xp, Xt, X0, hard=0.0, rel=0.0):
     l_x = (Xp - Xt).abs().sum(dim=1)                       # composition, absolute
     e_p = ((Xp - X0) * Q).sum(dim=1)
     e_t = ((Xt - X0) * Q).sum(dim=1)
@@ -131,7 +134,16 @@ def loss_fn(Xp, Xt, X0, hard=0.0):
     # Pairs over which the composition changes a lot (ignition, the march to the iron group)
     # are few and the hardest; `hard` weights them up.
     w = 1.0 + hard * (Xt - X0).abs().sum(dim=1)
-    return (w * (l_x + l_e)).mean() / w.mean(), l_x, l_e
+    loss = (w * (l_x + l_e)).mean() / w.mean()
+    if rel > 0:
+        # The change over the step relative to its size: before a runaway the energy released
+        # per step is tiny, invisible to the absolute errors, and a model that gets it low
+        # never heats the gas enough to ignite it.
+        d_t = (Xt - X0).abs().sum(dim=1)
+        r_x = ((Xp - X0) - (Xt - X0)).abs().sum(dim=1) / (d_t + REL_EPS)
+        r_e = l_e / (e_t.abs() + REL_EPS)
+        loss = loss + rel * (r_x.clamp(max=1.0) + r_e.clamp(max=1.0)).mean()
+    return loss, l_x, l_e
 
 
 @torch.no_grad()
@@ -199,6 +211,7 @@ def main():
     width = int(sys.argv[2]) if len(sys.argv) > 2 else 64
     depth = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     hard = float(sys.argv[4]) if len(sys.argv) > 4 else 0.0
+    rel = float(sys.argv[6]) if len(sys.argv) > 6 else 0.0
     tag = f"w{width}d{depth}h{hard:g}"
     rho, X, T, t = load()
     rng = np.random.default_rng(1)
@@ -215,7 +228,7 @@ def main():
     t0 = time.time()
     for s in range(steps):
         (r, Tl, dt, X0), Xt = train.sample(8192)
-        loss, _, _ = loss_fn(model(r, Tl, dt, X0), Xt, X0, hard)
+        loss, _, _ = loss_fn(model(r, Tl, dt, X0), Xt, X0, hard, rel)
         opt.zero_grad(set_to_none=True)
         loss.backward()
         opt.step()
