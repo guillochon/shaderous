@@ -295,3 +295,14 @@ body.validate th { color: var(--dim); font-weight: 500; }
   .scrub input::-webkit-slider-thumb { height: 26px; }
   .scrub input::-moz-range-thumb { height: 26px; }
 }
+
+/* GPU timing (Performance section) */
+#timing { margin-top: 6px; font-size: 11px; color: var(--dim); }
+#timing table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+#timing th, #timing td { padding: 1px 4px 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
+#timing th:first-child, #timing td:first-child { width: 52%; }
+#timing th { font-weight: normal; border-bottom: 1px solid var(--line, rgba(127, 127, 127, 0.3)); }
+#timing td { color: var(--text); }
+#timing .num { text-align: right; font-family: ui-monospace, Consolas, monospace; }
+#timing tr:last-child td { border-top: 1px solid var(--line, rgba(127, 127, 127, 0.3)); }
+#timing .timing-note { margin: 4px 0 0; }

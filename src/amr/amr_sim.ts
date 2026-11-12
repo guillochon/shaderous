@@ -18,6 +18,7 @@
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
+import { beginPass } from '../gpu/timing';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
@@ -556,7 +557,7 @@ export class AmrSim implements Simulation {
     if (this.binsPrimed === live) return;
     this.device.queue.writeBuffer(this.bins, 0, new Uint32Array(this.cap + 1));
     if (this.selfGravity) {
-      const pass = enc.beginComputePass();
+      const pass = beginPass(enc);
       this.grav!.encodeForget(pass, this.nAll);
       pass.end();
     }
@@ -600,7 +601,7 @@ export class AmrSim implements Simulation {
       pass.dispatchWorkgroups(1);
     };
     for (let s = 0; s < n; s++) {
-      const pass = enc.beginComputePass();
+      const pass = beginPass(enc);
       run(pass, this.pTick!, this.gTick!);
       pass.dispatchWorkgroups(1);
       if (s === 0) {
@@ -776,14 +777,14 @@ export class AmrSim implements Simulation {
 
   /** Solve for the potential of the current state from scratch-ish, and rebuild the field. */
   private encodeFreshPotential(enc: GPUCommandEncoder, cycles: number, perturber: 'none' | 'kick', newBlocks: boolean) {
-    let pass = enc.beginComputePass();
+    let pass = beginPass(enc);
     if (newBlocks && this.selfGravity) this.grav!.encodeNewBlocks(pass, this.nLeaf);
     // Without new blocks to seed this is a cold start: each level begins from the coarser one.
     this.encodeSolve(pass, this.cur, cycles, perturber, !newBlocks);
     pass.end();
     // No history on this mesh: the half-step extrapolation starts from the potential itself.
     if (this.selfGravity) this.grav!.copyPhiToOld(enc);
-    pass = enc.beginComputePass();
+    pass = beginPass(enc);
     if (this.selfGravity) this.grav!.encodeForget(pass, this.nAll);
     this.encodeField(pass);
     pass.end();
@@ -1097,7 +1098,7 @@ export class AmrSim implements Simulation {
     this.pending = null;
     this.uploadTree();
     this.device.queue.writeBuffer(this.rg, 0, BlockTree.regridTable(plan.ops, this.cap) as Int32Array<ArrayBuffer>);
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     pass.setPipeline(this.pRegrid);
     pass.setBindGroup(0, this.gRegrid[this.cur]);
     this.interior(pass, this.nLeaf);
@@ -1140,7 +1141,7 @@ export class AmrSim implements Simulation {
       }
       if (this.binPause > 0) this.binPause--;
       const p = this.cur;
-      const pass = enc.beginComputePass();
+      const pass = beginPass(enc);
       pass.setPipeline(this.pAssemble);
       pass.setBindGroup(0, this.gAssemble[p]);
       this.padded(pass, this.nAll);
@@ -1160,7 +1161,7 @@ export class AmrSim implements Simulation {
         // the point masses, rebuild the field, and apply the second half kick (and the
         // masses' sinks) back into this parity.
         if (this.selfGravity) this.grav!.copyPhiToOld(enc);
-        const gp = enc.beginComputePass();
+        const gp = beginPass(enc);
         this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
         this.encodeField(gp);
         gp.setPipeline(this.pCorrect);
@@ -1219,7 +1220,7 @@ export class AmrSim implements Simulation {
   private encodeFlags(enc: GPUCommandEncoder) {
     if (this.levels === 0 || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return;
     enc.clearBuffer(this.flags);
-    const fp = enc.beginComputePass();
+    const fp = beginPass(enc);
     fp.setPipeline(this.pFlag);
     fp.setBindGroup(0, this.gFlag);
     this.interior(fp, this.nLeaf);
@@ -1345,7 +1346,7 @@ export class AmrSim implements Simulation {
     if (this.flagWait) await this.flagWait.catch(() => {});
     const enc = this.device.createCommandEncoder();
     enc.clearBuffer(this.flags);
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
     pass.setBindGroup(0, this.gAssemble[this.cur]);
     this.padded(pass, this.nAll);
@@ -1425,7 +1426,7 @@ export class AmrSim implements Simulation {
       this.writeParams();
     }
     this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     pass.setPipeline(this.pBrush);
     pass.setBindGroup(0, this.gBrush[this.cur]);
     this.interior(pass, this.nLeaf);
@@ -1564,7 +1565,7 @@ export class AmrSim implements Simulation {
     if (this.stagingBusy) return null;
     this.stagingBusy = true;
     const enc = this.device.createCommandEncoder();
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     this.redDiag.encode(pass, this.cur);
     pass.end();
     enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
@@ -1703,7 +1704,7 @@ export class AmrSim implements Simulation {
     const pipe = await computePipeline(d, assemble('amr/update.wgsl', this.slots), 'amr update (flux debug)', { DEBUG_FLUX: 1 });
     const p = this.cur;
     const enc = d.createCommandEncoder();
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
     pass.setBindGroup(0, this.gAssemble[p]);
     this.padded(pass, this.nAll);

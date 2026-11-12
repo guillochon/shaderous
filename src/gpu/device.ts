@@ -35,8 +35,10 @@ export async function initGpu(): Promise<Gpu> {
   }
   if (problems.length) throw new Error('WebGPU adapter is below the minimum configuration:\n' + problems.join('\n'));
 
-  // Ask for the adapter's full buffer size so large readbacks (validation) work.
+  // Ask for the adapter's full buffer size so large readbacks (validation) work, and for
+  // timestamps where there are any (the optional per-pass timing, src/gpu/timing.ts).
   const device = await adapter.requestDevice({
+    requiredFeatures: adapter.features.has('timestamp-query') ? ['timestamp-query'] : [],
     requiredLimits: {
       maxBufferSize: adapter.limits.maxBufferSize,
       maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,

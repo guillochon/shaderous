@@ -3,6 +3,7 @@ import { assemble } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
+import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
 import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
@@ -1000,7 +1001,7 @@ export class Sim implements Simulation {
   solvePotential(cycles: number) {
     if (!this.selfGravity) return;
     const enc = this.device.createCommandEncoder();
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     this.mg.encodeSource(pass, this.cur, this.cfg.gravity === 'isolated');
     for (let i = 0; i < cycles; i++) this.mg.encodeVCycle(pass);
     pass.end();
@@ -1013,7 +1014,7 @@ export class Sim implements Simulation {
     this.solvePotential(16);
     const enc = this.device.createCommandEncoder();
     if (this.selfGravity) this.copyPhiToOld(enc);
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     // No step is being taken: the masses' accelerations are evaluated, nothing more.
     if (this.hasMasses) this.encodeMassKick(pass, this.cur, false);
     this.encodeField(pass);
@@ -1068,7 +1069,7 @@ export class Sim implements Simulation {
     const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
-      let pass = enc.beginComputePass();
+      let pass = beginPass(enc);
       pass.setPipeline(this.pPrim);
       pass.setBindGroup(0, this.gPrim[p]);
       this.dispatch(pass);
@@ -1082,7 +1083,7 @@ export class Sim implements Simulation {
         // Keep the old potential and solve for that of the updated density (warm-started).
         pass.end();
         this.copyPhiToOld(enc);
-        pass = enc.beginComputePass();
+        pass = beginPass(enc);
         this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
       }
@@ -1116,7 +1117,7 @@ export class Sim implements Simulation {
       this.writeParams();
     }
     this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     pass.setPipeline(this.pBrush);
     pass.setBindGroup(0, this.gBrush[this.cur]);
     this.dispatch(pass);
@@ -1205,7 +1206,7 @@ export class Sim implements Simulation {
     const time = async (count: number, fn: (pass: GPUComputePassEncoder) => void) => {
       const run = async (k: number) => {
         const enc = d.createCommandEncoder();
-        const pass = enc.beginComputePass();
+        const pass = beginPass(enc);
         for (let i = 0; i < k; i++) fn(pass);
         pass.end();
         enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
@@ -1263,7 +1264,7 @@ export class Sim implements Simulation {
     if (this.stagingBusy) return null;
     this.stagingBusy = true;
     const enc = this.device.createCommandEncoder();
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     this.redDiag.encode(pass, this.cur);
     pass.end();
     enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
@@ -1348,7 +1349,7 @@ export class Sim implements Simulation {
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources,
     });
     const enc = d.createCommandEncoder();
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     pass.setPipeline(this.pPrim);
     pass.setBindGroup(0, this.gPrim[p]);
     this.dispatch(pass);
@@ -1403,7 +1404,7 @@ export class Sim implements Simulation {
   /** Max |residual| of the Poisson solve on the finest level. */
   async poissonResidual(): Promise<number> {
     const enc = this.device.createCommandEncoder();
-    const pass = enc.beginComputePass();
+    const pass = beginPass(enc);
     this.mg.encodeResidual(pass);
     pass.end();
     this.device.queue.submit([enc.finish()]);

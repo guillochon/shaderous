@@ -2,6 +2,7 @@
 import { BUILD, reportError, setAdapterInfo } from './errors';
 import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
+import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
@@ -174,6 +175,12 @@ side.innerHTML = `
     <summary title="Totals and extremes over the box, read back five times a second. Hover a number for its whole run">Diagnostics</summary>
     <div id="diag"><dl></dl><dl></dl></div>
     <div class="io diag-io"><button id="export-diag" title="Save every diagnostics readout of this run (one row per readout) as a CSV file">Export diagnostics</button></div>
+  </details>
+
+  <details id="perf">
+    <summary title="GPU time of each pass of the simulation, from timestamp queries">Performance</summary>
+    <label class="check" title="Time every pipeline of the simulation on the GPU. Each run of one pipeline then gets its own pass, which costs a few percent while this is on and nothing while it is off. Chrome rounds timestamps to 100 µs unless its WebGPU Developer Features flag is on"><input id="gputiming" type="checkbox" />Time GPU passes</label>
+    <div id="timing"></div>
   </details>
 
   <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
@@ -1078,6 +1085,17 @@ function bind() {
     try {
       localStorage.setItem('shaderous.autoplay', autoplay ? 'on' : 'off');
     } catch {}
+  });
+  const timingBox = $<HTMLInputElement>('gputiming');
+  timingBox.disabled = !timingAvailable();
+  if (timingBox.disabled) {
+    timingBox.parentElement!.title = 'This GPU or browser does not offer timestamp queries';
+    $('timing').textContent = 'Timestamps are not available here.';
+  }
+  on('gputiming', (el) => {
+    setTiming(el.checked);
+    lastTiming = 0;
+    $('timing').textContent = el.checked ? 'Measuring…' : '';
   });
   on('tend', (el) => {
     cfg.tEnd = el.value === '' ? Infinity : +el.value;
@@ -2275,6 +2293,34 @@ async function measurePollLatency() {
   pollMs = best;
 }
 
+let lastTiming = 0;
+
+/** The GPU time per step of each pipeline, slowest first. */
+function showTiming(r: TimingReport) {
+  const box = $('timing');
+  if (!r.steps) {
+    box.textContent = running ? 'Measuring…' : 'Run the simulation to time its passes.';
+    return;
+  }
+  const table = document.createElement('table');
+  const row = (cells: string[], head = false) => {
+    const tr = table.insertRow();
+    cells.forEach((c, i) => {
+      const td = document.createElement(head ? 'th' : 'td');
+      td.textContent = c;
+      if (i > 0) td.className = 'num';
+      tr.appendChild(td);
+    });
+  };
+  row(['Pipeline', 'ms/step', '%', 'passes'], true);
+  for (const x of r.rows) row([x.label, x.msPerStep.toFixed(3), (100 * x.share).toFixed(1), x.passesPerStep.toFixed(x.passesPerStep % 1 ? 1 : 0)]);
+  row(['Total', r.msPerStep.toFixed(3), '100', '']);
+  const note = document.createElement('p');
+  note.className = 'timing-note';
+  note.textContent = `${r.steps} steps in ${r.frames} frames${r.skipped ? `, ${r.skipped} frames untimed` : ''}`;
+  box.replaceChildren(table, note);
+}
+
 function tick(now: number) {
   requestAnimationFrame(tick);
   syncAddress();
@@ -2309,7 +2355,9 @@ function tick(now: number) {
   const steps = running && !finished ? nsub : stepOnce ? 1 : 0;
   stepOnce = false;
   // An adaptive run may take fewer steps than asked while it waits for the mesh to catch up.
+  const timed = frameTiming.open();
   const taken = steps ? s.encodeSteps(enc, steps) : 0;
+  if (timed) frameTiming.close(enc, taken);
   stepsSubmitted += taken;
   if (taken < steps && running) nsub = Math.max(1, taken);
   updateGuides();
@@ -2318,6 +2366,7 @@ function tick(now: number) {
   gpu.device.queue.submit([enc.finish()]);
   s.submitted();
   renderer.submitted();
+  if (timed) frameTiming.submitted();
 
   inflight++;
   const adapt = steps > 0 && running;
@@ -2358,6 +2407,13 @@ function tick(now: number) {
     });
   }
 
+  // GPU timing, when on: once a second, over the second just past.
+  if (now - lastTiming >= 1000) {
+    lastTiming = now;
+    const r = frameTiming.report();
+    if (r) showTiming(r);
+  }
+
   // Readouts refresh five times a second, whatever the display rate.
   frame++;
   if (now - lastReadout >= 200) {
@@ -2393,6 +2449,7 @@ function tick(now: number) {
 (async () => {
   try {
     gpu = await initGpu();
+    initTiming(gpu.device);
     // Firefox reports no adapter details; the fallback flag is the one thing worth flagging.
     const name = `${gpu.info.vendor} ${gpu.info.architecture}`.trim() || 'WebGPU adapter';
     setAdapterInfo(`${name}${gpu.info.description ? ' (' + gpu.info.description + ')' : ''}`);
@@ -2411,4 +2468,4 @@ function tick(now: number) {
 })();
 
 // Handles for the console and for tests.
-Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get nsub() { return nsub; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; } } });
+Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get nsub() { return nsub; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; }, timing: { ...frameTiming, set: setTiming } } });
