@@ -13,7 +13,7 @@ import type { DisplaySystem } from '../units/units';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
-import { createSim, maxAmrLevels, supportsAmr } from '../create';
+import { amrFits, createSim, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
@@ -44,7 +44,7 @@ const BC_KINDS = [
 ];
 
 const RES_3D = [32, 64, 128, 256, 512];
-const RES_2D = [128, 256, 512, 1024, 2048, 4096];
+const RES_2D = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 // Largest uniform grids offered; beyond these the mesh must be adaptive. A phone, or a device
 // that crashed before, offers only the ones within its memory budget (gpu/memory.ts).
 const UNIFORM_MAX = { 2: 2048, 3: 256 };
@@ -723,12 +723,14 @@ function syncControls() {
     res.dataset.dim = String(cfg.ndim);
   }
   res.value = String(cfg.n);
-  for (const o of res.options) o.disabled = cfg.amrLevels === 0 && +o.value > uniformMax(cfg.ndim);
+  // Past the uniform limit a grid needs refinement levels, and enough of them for its root
+  // blocks to fit in GPU memory (picking it raises the levels to that, see build()).
+  for (const o of res.options) o.disabled = +o.value > uniformMax(cfg.ndim) && (cfg.amrLevels === 0 || minAmrLevels(+o.value, cfg.ndim) === 0);
   const levels = $<HTMLSelectElement>('levels');
   levels.value = String(cfg.amrLevels);
   const amrOk = supportsAmr(cfg.problem);
   levels.disabled = !amrOk;
-  for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n);
+  for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n) || (+o.value > 0 && !amrFits(cfg.n, cfg.ndim, +o.value));
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
   $<HTMLInputElement>('blocks').disabled = cfg.amrLevels === 0;
   // A 2D run is always shown as its plane, and has no self-gravity.
@@ -925,6 +927,10 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
     // Refinement: only where the preset allows it, and no deeper than the resolution permits.
     levels = supportsAmr(problem) ? Math.min(levels, maxAmrLevels(n)) : 0;
+    // Enough levels for the root blocks to fit in GPU memory; a grid no level count fits goes
+    // down to the largest uniform one.
+    if (levels > 0 && !amrFits(n, ndim, levels)) levels = Math.max(levels, minAmrLevels(n, ndim));
+    if (levels > 0 && !amrFits(n, ndim, levels)) levels = 0;
     if (levels === 0) n = Math.min(n, uniformMax(ndim));
     const next = configFor(problem, n, { ndim, amrLevels: levels });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
