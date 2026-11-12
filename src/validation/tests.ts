@@ -1577,7 +1577,7 @@ export const TESTS: TestDef[] = [
     id: 'point-mass-sink',
     name: 'Point masses: the sink takes exactly what the gas loses',
     criterion:
-      'A softened mass at the center of a closed box of gas accretes; gas mass plus accreted mass stays constant to 1e-5, G M grows by G times the accreted mass, and the mass stays at the center (2D and 3D, uniform and adaptive); the same holds for a mass added in mid-run',
+      'A softened mass at the center of a closed box of gas accretes; gas mass plus accreted mass stays constant to 1e-5, G M grows by G times the accreted mass, and the mass stays at the center (2D and 3D, uniform and adaptive); the same holds for a mass added in mid-run, and for a sink so slow that each step takes in under half float32 resolution of G M (G M growth within 1e-3 of the accreted mass)',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -1614,6 +1614,23 @@ export const TESTS: TestDef[] = [
       await withAmr(gpu, empty, 64, { amrLevels: 1 }, (sim) => placed('placed_adaptive', sim));
       await withAmr(gpu, empty, 64, { ndim: 2, amrLevels: 1 }, (sim) => placed('placed_flat_adaptive', sim));
       await withAmr(gpu, box, 64, { ndim: 2, amrLevels: 1 }, (sim) => check('flat_adaptive', sim));
+      // A sink so slow that each step takes far less than float32 resolution of G M (as a
+      // binary's sinks do): G M must still grow by G times what was taken in.
+      const slow = stillGas({
+        bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.5,
+        masses: () => [{ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.15, sinkRate: 1e-7 }],
+      });
+      const growth = async (tag: string, sim: Sim | AmrSim) => {
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const m = d.masses[0];
+        metrics[`${tag}_steps`] = d.steps;
+        metrics[`${tag}_accreted_per_step_over_ulp`] = m.accreted / d.steps / (2 ** -24 * 0.05);
+        metrics[`${tag}_gm_growth_error`] = Math.abs(m.gm - 0.05 - m.accreted) / m.accreted;
+        pass &&= m.accreted > 0 && metrics[`${tag}_accreted_per_step_over_ulp`] < 0.5 && metrics[`${tag}_gm_growth_error`] < 1e-3;
+      };
+      await withSim(gpu, slow, 64, { ndim: 2 }, (sim) => growth('slow_flat', sim));
+      await withAmr(gpu, slow, 64, { ndim: 2, amrLevels: 1 }, (sim) => growth('slow_flat_adaptive', sim));
       return { pass, metrics };
     },
   },

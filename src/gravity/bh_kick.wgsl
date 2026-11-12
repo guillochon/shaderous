@@ -41,20 +41,34 @@ override LIVE: bool = true;
 fn main() {
   let n = mass_count();
   // Accretion: the sink's gas arrives with its momentum. What it brought (mass, momentum, and
-  // angular momentum about the mass) is kept for the diagnostics.
+  // angular momentum about the mass) is kept for the diagnostics. A step's share is usually
+  // far below float32 resolution of the totals, so each is summed with Kahan compensation
+  // (as the clock is, hydro/clock.wgsl): added plainly, a binary's G M never grows at all.
   if (LIVE && P.G > 0.0) {
     for (var i = 0u; i < n; i++) {
       let o = 1u + 10u * i;
       let dm = RED[o + 3u];
       if (dm > 0.0) {
         let b = BH.list[i];
-        let mass = b.pos.w / P.G;
-        let v = (mass * b.vel.xyz + vec3<f32>(RED[o + 4u], RED[o + 5u], RED[o + 6u])) / (mass + dm);
-        BH.list[i].pos = vec4<f32>(b.pos.xyz, b.pos.w + P.G * dm);
-        BH.list[i].vel = vec4<f32>(v, b.vel.w);
-        BH.list[i].sink = vec4<f32>(b.sink.x, b.sink.y + dm, b.sink.zw);
-        BH.list[i].accp = vec4<f32>(b.accp.xyz + vec3<f32>(RED[o + 4u], RED[o + 5u], RED[o + 6u]), 0.0);
-        BH.list[i].accl = vec4<f32>(b.accl.xyz + vec3<f32>(RED[o + 7u], RED[o + 8u], RED[o + 9u]), 0.0);
+        let dp = vec3<f32>(RED[o + 4u], RED[o + 5u], RED[o + 6u]);
+        let dl = vec3<f32>(RED[o + 7u], RED[o + 8u], RED[o + 9u]);
+        let mass = (b.pos.w - b.cmass.x) / P.G;
+        // (M v + dp) / (M + dm), as a change to v so that it too can be compensated
+        let dv = (dp - dm * b.vel.xyz) / (mass + dm);
+        let gm = kahan1(b.pos.w, b.cmass.x, P.G * dm);
+        let acc = kahan1(b.sink.y, b.cmass.y, dm);
+        let v = kahan3(b.vel.xyz, b.cvel.xyz, dv);
+        let p = kahan3(b.accp.xyz, b.cp.xyz, dp);
+        let l = kahan3(b.accl.xyz, b.cl.xyz, dl);
+        BH.list[i].pos = vec4<f32>(b.pos.xyz, gm.x);
+        BH.list[i].vel = vec4<f32>(v.s, b.vel.w);
+        BH.list[i].sink = vec4<f32>(b.sink.x, acc.x, b.sink.zw);
+        BH.list[i].accp = vec4<f32>(p.s, 0.0);
+        BH.list[i].accl = vec4<f32>(l.s, 0.0);
+        BH.list[i].cmass = vec4<f32>(gm.y, acc.y, 0.0, 0.0);
+        BH.list[i].cvel = vec4<f32>(v.c, 0.0);
+        BH.list[i].cp = vec4<f32>(p.c, 0.0);
+        BH.list[i].cl = vec4<f32>(l.c, 0.0);
       }
     }
   }

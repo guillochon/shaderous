@@ -325,7 +325,7 @@ export const diffusionKey = (c: SimConfig): string => `${c.viscosity > 0}/${cond
 
 export const MAX_MASSES = 4;
 /** Floats per mass in the Masses block (gravity/bh.wgsl). */
-export const MASS_STRIDE = 24;
+export const MASS_STRIDE = 40;
 /** Floats in the Masses block: the frame's acceleration, then MASS_STRIDE per mass. */
 export const MASS_FLOATS = 4 + MASS_STRIDE * MAX_MASSES;
 /** Channels of the point masses' reduction (gravity/bh_cell.wgsl). */
@@ -372,8 +372,17 @@ export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: nu
 /** Pack the Masses block. The layout must match the struct in gravity/bh.wgsl. */
 export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffer> {
   const f = new Float32Array(MASS_FLOATS);
+  // A value summed with Kahan compensation goes in as its float32 rounding, with the
+  // compensation set to what that rounding added, so that nothing is lost in the round trip.
+  const c = (v: number) => Math.fround(v) - v;
   list.forEach((m, i) =>
-    f.set([...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, 0, ...m.accretedMomentum, 0, ...m.accretedSpin, 0], 4 + MASS_STRIDE * i),
+    f.set(
+      [
+        ...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, 0, ...m.accretedMomentum, 0, ...m.accretedSpin, 0,
+        c(m.gm), c(m.accreted), 0, 0, ...m.vel.map(c), 0, ...m.accretedMomentum.map(c), 0, ...m.accretedSpin.map(c), 0,
+      ],
+      4 + MASS_STRIDE * i,
+    ),
   );
   return f;
 }
@@ -383,9 +392,11 @@ export function unpackMasses(f: Float32Array, count: number): Required<PointMass
   const out: Required<PointMass>[] = [];
   for (let i = 0; i < count; i++) {
     const o = 4 + MASS_STRIDE * i;
+    // Kahan-summed values, less their compensation (gravity/bh.wgsl), in double precision.
+    const v3 = (at: number, c: number) => [f[at] - f[c], f[at + 1] - f[c + 1], f[at + 2] - f[c + 2]];
     out.push({
-      gm: f[o + 3], pos: [f[o], f[o + 1], f[o + 2]], vel: [f[o + 4], f[o + 5], f[o + 6]], soft: f[o + 7], sinkRadius: f[o + 11], sinkRate: f[o + 12], accreted: f[o + 13],
-      accretedMomentum: [f[o + 16], f[o + 17], f[o + 18]], accretedSpin: [f[o + 20], f[o + 21], f[o + 22]],
+      gm: f[o + 3] - f[o + 24], pos: [f[o], f[o + 1], f[o + 2]], vel: v3(o + 4, o + 28), soft: f[o + 7], sinkRadius: f[o + 11], sinkRate: f[o + 12],
+      accreted: f[o + 13] - f[o + 25], accretedMomentum: v3(o + 16, o + 32), accretedSpin: v3(o + 20, o + 36),
     });
   }
   return out;

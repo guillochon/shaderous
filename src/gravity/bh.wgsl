@@ -13,10 +13,30 @@ struct Mass {
                       //    that it does not change when the mass grows in mid-step)
   accp: vec4<f32>,    // momentum of the gas accreted so far (xyz)
   accl: vec4<f32>,    // angular momentum of that gas about the mass, in its rest frame (xyz)
+  // Kahan compensations (gravity/bh_kick.wgsl): what each step's accretion adds is far below
+  // float32 resolution of the totals it goes into (a binary's sinks take some 1e-9 of their mass
+  // a step), so the rounding is carried here. The true value is the stored one minus these.
+  cmass: vec4<f32>,   // x: for G M, y: for the accreted mass
+  cvel: vec4<f32>,    // xyz: for the velocity
+  cp: vec4<f32>,      // xyz: for accp
+  cl: vec4<f32>,      // xyz: for accl
 }
 struct Masses {
   frame: vec4<f32>,   // acceleration of the frame (gravity/bh_kick.wgsl), or zero
   list: array<Mass, 4>,
+}
+
+// Kahan summation: add x to s, whose rounding so far is c. Returns the new (s, c).
+fn kahan1(s: f32, c: f32, x: f32) -> vec2<f32> {
+  let y = x - c;
+  let t = s + y;
+  return vec2<f32>(t, (t - s) - y);
+}
+struct Kahan3 { s: vec3<f32>, c: vec3<f32> }
+fn kahan3(s: vec3<f32>, c: vec3<f32>, x: vec3<f32>) -> Kahan3 {
+  let y = x - c;
+  let t = s + y;
+  return Kahan3(t, (t - s) - y);
 }
 
 fn mass_count() -> u32 {
@@ -53,6 +73,9 @@ fn sink_fraction(m: Mass, x: vec3<f32>, rho: f32, dt: f32) -> f32 {
   let q = dot(d, d) / (rs * rs);
   if (q >= 1.0) { return 0.0; }
   let w = (1.0 - q) * (1.0 - q);
-  let f = 1.0 - exp(-w * m.sink.z * dt);
+  // 1 - exp(-k), which in float32 is 0 for k under 3e-8 and coarsely rounded well above that
+  // (a slow sink, or the edge of any sink): the series is used there instead.
+  let k = w * m.sink.z * dt;
+  let f = select(1.0 - exp(-k), k * (1.0 - k * (0.5 - k / 6.0)), k < 1.0e-3);
   return clamp(min(f, 1.0 - P.rho_floor / rho), 0.0, 1.0);
 }
