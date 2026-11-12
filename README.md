@@ -1,7 +1,7 @@
 # Shaderous
 
-**Self-gravitating astrophysical gas dynamics, with shocks and adaptive mesh refinement,
-running entirely on your GPU inside a web browser.**
+**Compressible gas dynamics, with shocks, gravity and adaptive mesh refinement, running
+entirely on your GPU inside a web browser. For physics research and teaching.**
 
 **▶ Open it: https://guillochon.github.io/shaderous/** · Validation suite:
 [validate.html](https://guillochon.github.io/shaderous/validate.html) · Requires a browser
@@ -11,11 +11,13 @@ with WebGPU (current Chrome, Edge, Firefox or Safari).
 
 **In the browser (no install).** Open the [live site](https://guillochon.github.io/shaderous/).
 It starts with a 2D Kelvin-Helmholtz instability. Choose another problem from the left
-panel: shock tubes, blasts, instabilities, stars, white dwarf collisions, tidal disruptions,
-accreting binaries. Drag in the view to rotate it, and use the brushes to stir, heat or add
+panel: shock tubes, blasts, instabilities, a supersonic wind tunnel, and astrophysical flows
+such as stars, white dwarf collisions, tidal disruptions and accreting binaries. Drag in the view to rotate it, and use the brushes to stir, heat or add
 gas. The address bar always describes the current setup, so copying it (or pressing
 **Share**) gives someone else the same run. Some examples:
 
+- [Rayleigh-Taylor instability](https://guillochon.github.io/shaderous/?problem=rayleigh-taylor)
+- [A Mach 3 wind tunnel with a step](https://guillochon.github.io/shaderous/?problem=forward-step)
 - [Sedov-Taylor blast in 3D](https://guillochon.github.io/shaderous/?problem=sedov&dim=3&n=128)
 - [A star torn apart by a black hole, on an adaptive mesh](https://guillochon.github.io/shaderous/?problem=tidal-disruption&dim=3&n=128&amr=2)
 - [Thermal instability of the interstellar medium](https://guillochon.github.io/shaderous/?problem=thermal-instability)
@@ -41,10 +43,15 @@ http://localhost:5183/validate.html). `npm test` runs the unit tests in Node, an
 
 ## What it is
 
-Shaderous is a three-dimensional finite-volume code for compressible, self-gravitating gas.
-Every fluid and gravity computation runs in WGSL compute shaders through WebGPU, so it runs
-on GPUs from any vendor, from a phone to a workstation, with nothing to install. It uses
-the methods of production astrophysics codes:
+Shaderous is a three-dimensional finite-volume code for compressible gas dynamics. Every
+fluid and gravity computation runs in WGSL compute shaders through WebGPU, so it runs on GPUs
+from any vendor, from a phone to a workstation, with nothing to install. Nothing in the
+scheme is specific to astrophysics: it solves the compressible Euler equations with optional
+gravity, diffusion, heating and cooling, and fits a fluid dynamics course as well as an
+astrophysics one. The problems that ship with it are mostly astrophysical because they test
+every part of the code at once: strong shocks, self-gravity, stars that must stay in
+hydrostatic balance, accreting point masses, cooling, and matter as far from an ideal gas as
+degenerate electrons. It uses the methods of production simulation codes:
 
 - an unsplit MUSCL-Hancock scheme with third-order reconstruction and HLLC fluxes;
 - a multigrid Poisson solver with periodic or isolated boundaries;
