@@ -2,7 +2,7 @@
 import { BUILD, reportError, setAdapterInfo } from './errors';
 import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
-import { allocationSurvived, memoryBudget } from '../gpu/memory';
+import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
 import { maxLevel, type Snapshot } from '../io/snapshot';
@@ -184,7 +184,12 @@ side.innerHTML = `
   </details>
 
   <details id="perf">
-    <summary title="GPU time of each pass of the simulation, from timestamp queries">Performance</summary>
+    <summary title="GPU memory for the simulation, and the GPU time of each of its passes">Performance</summary>
+    <div class="g2 gpumem">
+      ${field('GPU memory (GB)', number('gpumem', 'step="0.25" min="0.25" inputmode="decimal"'), '', 'Most GPU memory the simulation may take: it sets how many blocks the adaptive mesh can hold and which uniform grids are offered. Browsers do not say how much there is, so it is guessed: 2.5 GB on a desktop, 2 GB where the GPU shares the system’s memory, 1 GB on a phone or tablet, at most a third of the system’s memory where the browser reports it, and lower after the page has crashed. Set more if your GPU can take it. Changing it starts the run again; a crash goes back to the automatic value')}
+      <button id="gpumem-auto" type="button" title="Go back to the automatic value">Auto</button>
+    </div>
+    <div id="gpumem-note"></div>
     <label class="check" title="Time every pipeline of the simulation on the GPU. Each run of one pipeline then gets its own pass, which costs a few percent while this is on and nothing while it is off. Chrome rounds timestamps to 100 µs unless its WebGPU Developer Features flag is on"><input id="gputiming" type="checkbox" />Time GPU passes</label>
     <div id="timing"></div>
   </details>
@@ -1118,6 +1123,26 @@ function bind() {
     setTiming(el.checked);
     lastTiming = 0;
     $('timing').textContent = el.checked ? 'Measuring…' : '';
+  });
+  // GPU memory: the automatic budget unless the user sets one (gpu/memory.ts). A new budget
+  // starts the run again at its size.
+  showMemory();
+  const rebuildForMemory = () => {
+    showMemory();
+    const { id, n, ndim, levels } = picked();
+    build(id, n, ndim, levels, true);
+  };
+  on('gpumem', (el) => {
+    const gb = +el.value;
+    const auto = autoBudget().bytes;
+    // An empty field, or the automatic value typed back in, means automatic.
+    setUserBudget(el.value === '' || !(gb > 0) || Math.abs(gb * GB - auto) < 0.005 * GB ? null : Math.max(0.25, gb) * GB);
+    rebuildForMemory();
+  });
+  $('gpumem-auto').addEventListener('click', () => {
+    if (userBudget() === null) return;
+    setUserBudget(null);
+    rebuildForMemory();
   });
   on('tend', (el) => {
     cfg.tEnd = el.value === '' ? Infinity : +el.value;
@@ -2317,6 +2342,19 @@ async function measurePollLatency() {
 
 let lastTiming = 0;
 
+/** The GPU memory field and the line under it: the budget in force, and the automatic one. */
+function showMemory() {
+  const gb = (b: number) => `${+(b / GB).toFixed(2)}`;
+  const auto = autoBudget();
+  const user = userBudget();
+  $<HTMLInputElement>('gpumem').value = gb(user ?? auto.bytes);
+  $('gpumem-auto').toggleAttribute('disabled', user === null);
+  const crash = lastCrash() ? ` The page crashed last time, holding about ${gb(lastCrash())} GB.` : '';
+  $('gpumem-note').textContent = user === null
+    ? `Automatic: ${gb(auto.bytes)} GB (${auto.reason}).${crash}`
+    : `Set by you; automatic would be ${gb(auto.bytes)} GB (${auto.reason}).${crash}`;
+}
+
 /** The GPU time per step of each pipeline, slowest first. */
 function showTiming(r: TimingReport) {
   const box = $('timing');
@@ -2471,6 +2509,7 @@ function tick(now: number) {
 (async () => {
   try {
     gpu = await initGpu();
+    setAdapter(gpu.info);
     initTiming(gpu.device);
     // Firefox reports no adapter details; the fallback flag is the one thing worth flagging.
     const name = `${gpu.info.vendor} ${gpu.info.architecture}`.trim() || 'WebGPU adapter';

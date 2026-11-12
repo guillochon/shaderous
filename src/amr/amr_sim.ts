@@ -32,11 +32,6 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp
  * Signals cross at most about a third of a cell per step, and a block is 16 cells with a
  * buffer block kept around flagged ones, so 24 steps cannot carry a feature out of its refinement.
  */
-/**
- * Most blocks a 3D atlas holds by default (13^3): its textures then take about 3 GB. A 2D atlas
- * of the same size in bytes holds PAD times as many.
- */
-const MAX_BLOCKS_3D = 13 ** 3;
 const REGRID_EVERY = 8;
 const MAX_STEPS_AHEAD = 24;
 /** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
@@ -249,21 +244,19 @@ export class AmrSim implements Simulation {
     const roots = nr ** cfg.ndim;
     // Atlas size: room for the roots plus refinement, within what a texture can hold.
     const limit = Math.floor(Math.min(gpu.limits.maxTextureDimension3D, 2048) / PAD);
-    // Default budget: what refining everywhere would need (leaves plus their parents), within
-    // about 3 GB of atlas textures: MAX_BLOCKS_3D blocks in 3D, and in 2D, whose blocks are
-    // PAD times smaller, PAD times as many. create() falls back to a smaller atlas if the GPU
-    // cannot hold that.
+    // Default size: what refining everywhere would need (leaves plus their parents), within the
+    // device's GPU memory budget (gpu/memory.ts: set by the user, or guessed: 2.5 GB on a
+    // desktop, 13^3 blocks in 3D, 1 GB on a phone, less after a crash), the atlas being nearly
+    // all of a run's memory. create() falls back to a smaller atlas if the GPU cannot hold that.
     const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
     const explicit = slots || cfg.amrBudget;
-    // Most blocks the device's memory budget allows (gpu/memory.ts: 1 GB on a phone, less after
-    // a crash), the atlas being nearly all of a run's memory.
     const fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim));
     if (cfg.ndim === 3) {
-      const auto = Math.min(Math.round(Math.cbrt(MAX_BLOCKS_3D)), Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9)));
+      const auto = Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9));
       this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
       this.layers = this.slotsPerSide;
     } else {
-      const want = Math.min(explicit || Math.min(MAX_BLOCKS_3D * PAD, Math.max(full, roots * 2, 144)), Math.max(1, fit));
+      const want = Math.min(explicit || Math.max(full, roots * 2, 144), Math.max(1, fit));
       this.layers = Math.ceil(want / limit ** 2);
       this.slotsPerSide = Math.min(limit, Math.floor(Math.sqrt(fit / this.layers) + 1e-9), Math.ceil(Math.sqrt(want / this.layers) - 1e-9));
     }

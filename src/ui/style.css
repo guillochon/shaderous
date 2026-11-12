@@ -297,6 +297,9 @@ body.validate th { color: var(--dim); font-weight: 500; }
 }
 
 /* GPU timing (Performance section) */
+.gpumem { align-items: end; }
+.gpumem button { height: 24px; padding: 0; font-size: 12px; }
+#gpumem-note { margin: 4px 0 8px; font-size: 11px; color: var(--dim); }
 #timing { margin-top: 6px; font-size: 11px; color: var(--dim); }
 #timing table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 #timing th, #timing td { padding: 1px 4px 1px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: left; }
