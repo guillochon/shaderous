@@ -29,6 +29,13 @@ https://guillochon.github.io/shaderous/validate.html
 - **Tidal disruption:** a polytropic star passed by a point mass on a parabolic orbit, run in the
   star's rest frame. The frame accelerates with the gas's center of mass, the point mass's orbit
   is integrated alongside the gas, and the boundaries let gas out but not in.
+- **White dwarfs:** a cold carbon-oxygen white dwarf at rest (0.6 M_sun by default), and two
+  that collide on a parabolic orbit (1.0 and 0.8 M_sun by default; the impact parameter is
+  the pericenter distance over the sum of the radii, 0 head-on). Each star is built in
+  hydrostatic equilibrium under its degenerate electrons (`problems/white_dwarf.ts`) and
+  settled into the grid's balance; the gas follows the degenerate equation of state, in units
+  of 10^4 km and one solar mass. Gas denser than 2e6 g/cm^3 is held at the finest level of
+  the adaptive mesh.
 - **Binary accretion:** two point masses on a Kepler orbit inside an isothermal disk with a
   constant kinematic viscosity (1e-3 in units of the binary's separation squared times its
   orbital frequency: alpha = 0.1 at the binary's separation). They clear a cavity, draw
@@ -53,7 +60,11 @@ https://guillochon.github.io/shaderous/validate.html
   preset can use it, including the self-gravitating ones: the potential is solved level by
   level on the same blocks, and gas that approaches its Jeans length is refined.
 - **Equations of state:** ideal gas, barotropic (isothermal / polytropic), gas plus radiation
-  pressure, chosen when the shaders are assembled.
+  pressure, gas plus radiation plus degenerate electrons (Chandrasekhar's zero-temperature
+  gas at any degree of relativity, for white dwarfs), and hydrogen that ionizes in Saha
+  equilibrium, chosen when the shaders are assembled. The last two take their constants from
+  the problem's composition and units (the electrons per nucleon, the hydrogen fraction),
+  and from code-unit scales of 1 for a problem without units.
 
 ## Running
 
@@ -102,8 +113,8 @@ button, to hand someone the same setup. A bare visit opens Kelvin-Helmholtz at 1
 npm test
 ```
 
-runs the unit tests (preprocessor, equations of state, exact Riemann solver, float64
-reference scheme) in Node.
+runs the unit tests (preprocessor, equations of state, white dwarf structure and the
+collision orbit, exact Riemann solver, float64 reference scheme) in Node.
 
 ```bash
 npm run test:gpu
@@ -145,6 +156,17 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   under-resolved. Both are selectable in the UI (`gravEnergyFlux` in `SimConfig`).
 - **Float32.** Conservation is at round-off level, but round-off is biased when a uniform
   background sits exactly on a power of two (see `problems/advection.ts`).
+- **Dual energy in degenerate gas.** Where `E - KE` cannot be trusted the dual-energy switch
+  rebuilds the total energy from the advected internal energy, except in degenerate gas
+  (`EOS_KEEP_TOTAL` in each equation of state's module). There it keeps `E` as the
+  conservative update left it and takes only the pressure from the internal energy, because
+  the pressure is defined (that of the cold electrons at least) even where `E - KE` is
+  negative. In a white dwarf collision the cell ahead of each strong shock has `E - KE` dip
+  below zero, and rebuilding `E` there added 2.3% to the total energy at the greatest
+  compression; kept, it changes by 0.6% through the collision, and a run without gravity
+  conserves it exactly until gas leaves the box. The least internal energy accepted is also
+  each equation of state's own: a floor at the zero-temperature energy, which cold degenerate
+  gas sits right on, pushed truncation errors up every step.
 - **Reconstruction.** The default gives each face of a cell the value of the parabola through
   the cell and its two neighbors, which is third-order accurate on the stencil a slope
   limiter already uses. A three-cell limiter cannot tell a smooth maximum from a jump and
@@ -180,6 +202,14 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   the coarse cell recomputes the fine fluxes rather than using its own, which conserves
   without storing fluxes. The mesh is
   rebuilt from the CPU every 8 steps, from a per-block indicator read back without blocking.
+  A preset can hold every block with gas above a density at the finest level (`refineDense`),
+  as the white dwarf presets do: a star's smooth interior does not raise the indicator. The
+  passes over a block and its ghost layers (18 or 20 cells across) run as rows of 64 threads
+  per block (`inv_flat` in `amr/list.wgsl`), since 8 x 8 x 4 tiles left about half their
+  threads idle there; predicted states are made for leaves only; and in 2D the four layers
+  of a workgroup take four blocks. A step of 2D Kelvin-Helmholtz (2048, 3 levels) takes 2.8
+  times less GPU time for it, a 3D Sedov blast 19% less. **Time GPU passes** in the
+  Performance panel reports each pipeline's GPU time from timestamp queries (`gpu/timing.ts`).
 - **Local timesteps** (adaptive mesh, off by default; "Local timesteps" under Hydro, `tbins`
   in a link). Time advances in cycles of up to 8 substeps of the smallest step. At the start
   of a cycle every block gets a bin from its own signal speed, on the GPU: a block in bin k
@@ -213,7 +243,10 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   coarse potential beneath it; on a uniform sphere the error stays below 0.3% with three
   levels. A fresh mesh is solved level by level from the coarsest down. During a run every
   level relaxes in the same dispatches, each against the boundary values its coarser level
-  had at the start of the cycle, so the cost does not grow with the depth of the tree; the
+  had at the start of the cycle, so the cost does not grow with the depth of the tree.
+  Prolongation reads the patch of coarse cells a workgroup needs into workgroup memory once,
+  and the ghost fills launch threads only for face ghosts; together they cut the step of a 3D
+  Evrard collapse from 3.88 to 3.55 ms of GPU time, with identical results. The
   solve then takes about as long as on a uniform grid of the finest resolution when half the
   volume is refined, and less when the refined region is smaller.
   Refinement also triggers where the Jeans length falls below `jeansRefine` cells (16 by
@@ -251,11 +284,18 @@ tests/         unit/ (Vitest) and gpu/ (Playwright)
   kept on both ghost layers for this.
 - **Stars start in the grid's own balance.** A star set up from its analytic profile is in
   balance with the analytic potential, not with the one the Poisson solver finds on the grid,
-  and answers the mismatch by ringing. So the polytrope and the star of the tidal disruption
-  are settled before the first step, in the manner of Zingale et al. (2002) for mapped stellar
-  models: the density is set to satisfy `h(rho) + phi = C` with the grid's potential and the
-  star's mass, the potential is solved again, and the two are repeated until the density
-  changes by less than 1e-5 (6 to 8 rounds; the first moves it by about 1%). For n = 1 that
+  and answers the mismatch by ringing. So every star of a preset is settled before the first
+  step, in the manner of Zingale et al. (2002) for mapped stellar models: the density is set
+  to satisfy `h(rho) + phi = C` with the grid's potential and the star's mass, `h` being the
+  enthalpy of its cold gas, the potential is solved again, and the two are repeated until the
+  density changes by less than 1e-5 (6 to 8 rounds for a polytrope; the first moves it by
+  about 1%). Several stars settle together, each in its own potential (the grid's, less the
+  others' pull as point masses), and a moving star keeps its velocity (`problems/settle.ts`).
+  A round only reshapes the density; the constant comes from regula falsi started at the last
+  round's. White dwarfs over-relax by 1.6 and stop at 1e-3: 7 to 12 rounds, 1.6 s for the
+  collision at 256 with 2 levels and 5.5 s at 512 with 3. Unsettled, a 1 M_sun dwarf, whose
+  nearly relativistic core gives it little restoring force, swung by 25% in central density;
+  settled it stays within 3.5% over six dynamical times. For n = 1 that
   relation is exactly the trapezoid rule above. On the adaptive mesh (128 cells, 2 levels)
   the settled n = 1 polytrope's central density then strays by 0.14% over three dynamical
   times against 0.26% for the plain scheme, and its energy by 0.33% against 0.77%. On a
