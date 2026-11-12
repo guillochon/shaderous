@@ -1,7 +1,7 @@
 import type { Problem } from './types';
 import { sodX, sodY, sodZ, sodDiag, strongShock } from './shocktube';
 import { sedov, sedovRad } from './sedov';
-import { kelvinHelmholtz } from './kelvin_helmholtz';
+import { kelvinHelmholtz, kelvinHelmholtzHeH } from './kelvin_helmholtz';
 import { rayleighTaylor } from './rayleigh_taylor';
 import { forwardStep } from './forward_step';
 import { advection } from './advection';
@@ -27,11 +27,20 @@ export interface ProblemFamily {
 /** A problem with a single variant, which the menu calls "Standard". */
 const single = (p: Problem): ProblemFamily => ({ id: p.id, label: p.label, variants: [{ label: 'Standard', problem: p }] });
 
+const kelvinHelmholtzFamily: ProblemFamily = {
+  id: 'kelvin-helmholtz',
+  label: 'Kelvin-Helmholtz',
+  variants: [
+    { label: 'Standard', problem: kelvinHelmholtz },
+    { label: 'Helium in hydrogen', problem: kelvinHelmholtzHeH },
+  ],
+};
+
 /** The problem menu, in loose groups. The first variant of a problem is the one it opens with. */
 export const MENU: { group: string; families: ProblemFamily[] }[] = [
   {
     group: 'Instabilities',
-    families: [single(kelvinHelmholtz), single(rayleighTaylor), single(thermalInstability), single(jeans)],
+    families: [kelvinHelmholtzFamily, single(rayleighTaylor), single(thermalInstability), single(jeans)],
   },
   {
     group: 'Shocks and blasts',
