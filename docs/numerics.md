@@ -398,11 +398,12 @@ assembled:
   [Vázquez-Semadeni et al. (2007)][VazquezSemadeni2007]:
 
 ```math
-\Gamma = 2\times10^{-26}\ \text{erg s}^{-1}, \qquad
-\frac{\Lambda(T)}{\Gamma} = 10^{7}\exp\left(\frac{-1.184\times10^5}{T + 1000}\right) + 1.4\times10^{-2}\sqrt{T}\exp\left(\frac{-92}{T}\right)\ \text{cm}^3,
+\frac{\Lambda(T)}{\Gamma} = 10^{7}\exp\left(\frac{-1.184\times10^5}{T + 1000}\right) + 1.4\times10^{-2}\sqrt{T}\exp\left(\frac{-92}{T}\right),
 ```
 
-with $`\mathcal{C} - \mathcal{H} = n^2\Lambda - n\Gamma`$.
+with $`\mathcal{C} - \mathcal{H} = n^2\Lambda - n\Gamma`$, where $`n`$ is the number density of
+hydrogen atoms in cm⁻³, $`T`$ the temperature in kelvin, and $`\Gamma`$ the heating rate per
+atom, a parameter of the problem.
 
 Cooling acts on the internal energy at fixed density at the end of the update, in up to 12
 second-order substeps that each change the energy by at most a tenth. A substep that would
@@ -736,7 +737,7 @@ disk grew until its uneven pull pushed the binary out of the box.
 problems. It is not yet used by the simulator.
 
 - **Reference network.** `burner.py` integrates the 13-isotope α-chain (aprox13,
-  [Timmes 1999][Timmes1999]; the network module is generated with pynucastro,
+  [Timmes et al. 2000][Timmes2000]; the network module is generated with pynucastro,
   [Smith Clark et al. 2023][Smith2023]) at constant density with self-heating. At constant density
   the degenerate electrons' energy does not change, so
 
@@ -815,7 +816,7 @@ result.
 [Stone2020]: https://doi.org/10.3847/1538-4365/ab929b
 [Taylor1950]: https://doi.org/10.1098/rspa.1950.0049
 [Thornber2008]: https://doi.org/10.1016/j.jcp.2008.01.036
-[Timmes1999]: https://doi.org/10.1086/313257
+[Timmes2000]: https://doi.org/10.1086/313407
 [Toro1994]: https://doi.org/10.1007/BF01414629
 [Toro2009]: https://doi.org/10.1007/b79761
 [Truelove1997]: https://doi.org/10.1086/310975
@@ -863,7 +864,7 @@ result.
 - Stone, J. M., et al. (2020). The Athena++ Adaptive Mesh Refinement Framework: Design and Magnetohydrodynamic Solvers. ApJS 249, 4. [doi:10.3847/1538-4365/ab929b](https://doi.org/10.3847/1538-4365/ab929b)
 - Taylor, G. (1950). The Formation of a Blast Wave by a Very Intense Explosion. I. Theoretical Discussion. Proceedings of the Royal Society of London Series A 201, 159. [doi:10.1098/rspa.1950.0049](https://doi.org/10.1098/rspa.1950.0049)
 - Thornber, B., et al. (2008). An improved reconstruction method for compressible flows with low Mach number features. Journal of Computational Physics 227, 4873. [doi:10.1016/j.jcp.2008.01.036](https://doi.org/10.1016/j.jcp.2008.01.036)
-- Timmes, F. X. (1999). Integration of nuclear reaction networks for stellar hydrodynamics. ApJS 124, 241. [doi:10.1086/313257](https://doi.org/10.1086/313257)
+- Timmes, F. X., Hoffman, R. D., & Woosley, S. E. (2000). An inexpensive nuclear energy generation network for stellar hydrodynamics. ApJS 129, 377. [doi:10.1086/313407](https://doi.org/10.1086/313407)
 - Toro, E. F., Spruce, M., & Speares, W. (1994). Restoration of the contact surface in the HLL-Riemann solver. Shock Waves 4, 25. [doi:10.1007/BF01414629](https://doi.org/10.1007/BF01414629)
 - Toro, E. F. (2009). Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction, 3rd ed. Springer. [doi:10.1007/b79761](https://doi.org/10.1007/b79761)
 - Truelove, J. K., et al. (1997). The Jeans Condition: A New Constraint on Spatial Resolution in Simulations of Isothermal Self-gravitational Hydrodynamics. ApJL 489, L179. [doi:10.1086/310975](https://doi.org/10.1086/310975)

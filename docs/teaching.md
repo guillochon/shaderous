@@ -240,8 +240,8 @@ readable code.
 
 **Format.** Assigned reading from [numerics.md](numerics.md) and
 [architecture.md](architecture.md) alongside a textbook (see below), problem sets that
-include changing the source, and term projects. The code is about 15,000 lines of TypeScript
-and WGSL, and each physics module is a small file. Students can clone the repository, run
+include changing the source, and term projects. The code is about 6,000 lines of WGSL and
+15,000 of TypeScript, and each physics module is a small file. Students can clone the repository, run
 `npm install && npm run dev`, and change a shader in minutes.
 
 ### Topics and exercises

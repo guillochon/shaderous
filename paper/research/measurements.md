@@ -43,6 +43,15 @@ Every number quoted in `paper/main.tex` comes from one of the sources below. All
 | Lines of WGSL and TypeScript in `src/` | 4,532 and 10,163 | `find src -name "*.wgsl" | xargs cat | wc -l` (and `*.ts`) |
 | Number of validation tests | 35 (36 from `db8c5c7`) | `src/validation/tests.ts` |
 | Validation pass criteria | as quoted in Table 2 | `criterion:` fields in `src/validation/tests.ts` |
+| Lines of WGSL and TypeScript in `src/` at `dd42075` | 6,235 and 14,978 (quoted as about 6,000 and 15,000) | same commands |
+| CFL number; dual-energy threshold; shock-detector threshold; density and pressure floors | 0.8; 1e-3; 0.5; 1e-10 and 1e-14 | `configFor` in `src/sim.ts` |
+| Smoothness threshold and blend of the reconstruction | 0.01 of the scale; weight `clamp(1.5 - eta, 0, 1)` | `src/hydro/recon.wgsl` |
+| Multigrid sweeps and V-cycles | 2 before, 2 after, 8 on the coarsest level; 2 V-cycles uniform, up to 3 on the adaptive mesh | `src/gravity/multigrid.ts`, `vcycles` in `src/sim.ts` |
+| Refinement filter | EPS = 0.01 | `src/amr/flag.wgsl` |
+| GPU memory budgets | 2.5 GB discrete, 2 GB shared, 1 GB phone | `src/gpu/memory.ts` |
+| Reduction fold per stage | 4^3 records | `RED_F` in `src/gpu/reduce.ts` |
+| Species: no local timesteps | per-block timesteps are off with species | header of `src/amr/species.wgsl` |
+| Burning network | 13-isotope alpha chain built with pynucastro; softmax output; DAgger rounds | `tools/burn/build_net.py`, `train.py`, `dagger.py` |
 
 ## Measured in the browser, November 2026
 
