@@ -64,13 +64,13 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
   );
 }
 
-@compute @workgroup_size(8, 8, 4)
+@compute @workgroup_size(FLAT_WG)
 fn main(
-  @builtin(global_invocation_id) gid: vec3<u32>,
   @builtin(local_invocation_index) lix: u32,
   @builtin(workgroup_id) wid: vec3<u32>,
+  @builtin(num_workgroups) num_wg: vec3<u32>,
 ) {
-  let inv = inv_padded(gid, NGH);
+  let inv = inv_flat(wid, lix, NGH);
   if (inv.ok) {
     g_dx = blk_dx(inv.slot);
     let s = ghost_src(inv.slot, inv.l);
@@ -103,10 +103,8 @@ fn main(
   }
   workgroupBarrier();
   if (lix == 0u) {
-    // Record grid: 3 workgroups per slot along x, by 3, by 5 (1 in 2D).
-    let a = u32(P.amr.x);
-    let nx = 3u * a * a * P.amr.w;   // 3 per slot
-    let base = ((wid.z * 3u + wid.y) * nx + wid.x) * 2u;
+    // Record grid: the workgroups of a block along x, the blocks of the list along y.
+    let base = (wid.y * num_wg.x + wid.x) * 2u;
     RATES[base] = bitcast<f32>(atomicLoad(&wg_max[0]));
     RATES[base + 1u] = bitcast<f32>(atomicLoad(&wg_max[1]));
   }

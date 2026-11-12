@@ -1,5 +1,6 @@
-// Hancock predictor on the block grid: half-step states for every block's cells and for the
-// first ghost layer.
+// Hancock predictor on the block grid: half-step states for every leaf's cells and for the
+// first ghost layer. (Nothing reads the predictions of parents: the update and the flux
+// matching at refinement boundaries only look at leaves.)
 //
 // A ghost's half-step state is the prediction of whatever cell it stands for, evaluated from
 // that cell's own neighborhood. For a same-level neighbor that is exactly the neighbor's
@@ -104,9 +105,9 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
   );
 }
 
-@compute @workgroup_size(8, 8, 4)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let inv = inv_padded(gid, 1);
+@compute @workgroup_size(FLAT_WG)
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
+  let inv = inv_flat(wid, lix, 1);
   if (!inv.ok) { return; }
   g_dx = blk_dx(inv.slot);
   g_dt = blk_dt(inv.slot);

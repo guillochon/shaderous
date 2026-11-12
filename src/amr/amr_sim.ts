@@ -39,6 +39,8 @@ const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
+/** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
+const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
 const BIN_TOTALS = 60;
 /**
  * Per-block timesteps pay for their extra passes only when enough blocks sit out enough
@@ -359,7 +361,7 @@ export class AmrSim implements Simulation {
       {},
       [],
       'amr timestep',
-      [sim.cap * 3, 3, cfg.ndim === 2 ? 1 : 5], // one record per workgroup of the assembly pass
+      [flatGroups(cfg.ndim, NG), sim.cap, 1], // one record per workgroup of the assembly pass
     );
     sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
@@ -451,7 +453,7 @@ export class AmrSim implements Simulation {
         0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
         5: v(this.gfield), 6: this.redDt.first, 30: this.bt, 31: list, ...bin, ...mid,
       });
-    this.gPredict = predict(this.listAll);
+    this.gPredict = predict(this.listLeaf);
     this.gAssemble = [];
     this.gUpdate = [];
     this.gRegrid = [];
@@ -462,7 +464,7 @@ export class AmrSim implements Simulation {
     this.gCommitB = [];
     this.gCorrectB = [];
     this.gCommitL = [];
-    if (K > 0) this.gPredictB = predict(this.listAct);
+    if (K > 0) this.gPredictB = predict(this.listEnd);
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       // Second half kick: from the updated state (the other parity) back into this one.
@@ -522,7 +524,7 @@ export class AmrSim implements Simulation {
       computePipeline(d, assemble('amr/bins_tick.wgsl'), 'bins clock', { MODE: 0, CYCLE: cycle }),
       computePipeline(d, assemble('amr/bins_tick.wgsl'), 'bins substep', { MODE: 1, CYCLE: cycle }),
       computePipeline(d, assemble('hydro/clock.wgsl'), 'bins timestep', { PER_DX: 1, BANK: 0, CYCLE: cycle }),
-      computePipeline(d, assemble('amr/bins_init.wgsl'), 'bins init', { KMAX: K }),
+      computePipeline(d, assemble('amr/bins_init.wgsl'), 'bins init', { KMAX: K, ASM_WG: flatGroups(this.cfg.ndim, NG) }),
       computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins dilate', { KMAX: K, DILATE: 1 }),
       computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins relax', { KMAX: K }),
       computePipeline(d, assemble('amr/bins_lists.wgsl'), 'bins lists'),
@@ -623,7 +625,7 @@ export class AmrSim implements Simulation {
       pass.dispatchWorkgroups(1);
       if (s === 0) {
         run(pass, this.pAssemble, this.gAssemble[p]);
-        this.padded(pass, this.nAll);
+        this.flat(pass, this.nAll, NG);
         this.redDt.encode(pass);
         run(pass, this.pSetDt!, this.gSetDt!);
         pass.dispatchWorkgroups(1);
@@ -642,7 +644,7 @@ export class AmrSim implements Simulation {
         // The half-step potential is each block's own: again, now that the bins are known.
         if (field) fieldB(pass, this.nAll);
         run(pass, this.pPredict, this.gPredict);
-        this.padded(pass, this.nAll);
+        this.flat(pass, this.nLeaf, 1);
         run(pass, this.pUpdate, this.gUpdate[p]);
         this.interior(pass, this.nLeaf);
         run(pass, this.pCommit!, this.gCommit[p]);
@@ -650,9 +652,9 @@ export class AmrSim implements Simulation {
         g?.encodeSource(pass, p, this.nLevel, this.nLeaf);
       } else {
         run(pass, this.pAssemble, this.gAssembleB[p]);
-        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
+        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(14));
         run(pass, this.pPredict, this.gPredictB!);
-        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
+        pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(13));
         run(pass, this.pUpdate, this.gUpdateB[p]);
         pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(1));
         run(pass, this.pCommit!, this.gCommitB[p]);
@@ -1103,11 +1105,18 @@ export class AmrSim implements Simulation {
 
   // ---------------------------------------------------------------- stepping
 
+  // See amr/list.wgsl: in 2D each workgroup covers four blocks.
   private padded(pass: GPUComputePassEncoder, count: number) {
-    pass.dispatchWorkgroups(count * 3, 3, this.cfg.ndim === 2 ? 1 : 5);
+    if (this.cfg.ndim === 2) pass.dispatchWorkgroups(Math.ceil(count / 4) * 3, 3, 1);
+    else pass.dispatchWorkgroups(count * 3, 3, 5);
+  }
+  /** Dispatch for inv_flat() (amr/list.wgsl): cells and `reach` ghost layers of `count` blocks. */
+  private flat(pass: GPUComputePassEncoder, count: number, reach: number) {
+    if (count > 0) pass.dispatchWorkgroups(flatGroups(this.cfg.ndim, reach), count, 1);
   }
   private interior(pass: GPUComputePassEncoder, count: number) {
-    pass.dispatchWorkgroups(count * 2, 2, this.cfg.ndim === 2 ? 1 : 4);
+    if (this.cfg.ndim === 2) pass.dispatchWorkgroups(Math.ceil(count / 4) * 2, 2, 1);
+    else pass.dispatchWorkgroups(count * 2, 2, 4);
   }
 
   private applyRegrid(enc: GPUCommandEncoder) {
@@ -1161,14 +1170,14 @@ export class AmrSim implements Simulation {
       const pass = beginPass(enc);
       pass.setPipeline(this.pAssemble);
       pass.setBindGroup(0, this.gAssemble[p]);
-      this.padded(pass, this.nAll);
+      this.flat(pass, this.nAll, NG);
       this.redDt.encode(pass);
       pass.setPipeline(this.pClock);
       pass.setBindGroup(0, this.gClock);
       pass.dispatchWorkgroups(1);
       pass.setPipeline(this.pPredict);
       pass.setBindGroup(0, this.gPredict);
-      this.padded(pass, this.nAll);
+      this.flat(pass, this.nLeaf, 1);
       pass.setPipeline(this.pUpdate);
       pass.setBindGroup(0, this.gUpdate[p]);
       this.interior(pass, this.nLeaf);
@@ -1366,7 +1375,7 @@ export class AmrSim implements Simulation {
     const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
     pass.setBindGroup(0, this.gAssemble[this.cur]);
-    this.padded(pass, this.nAll);
+    this.flat(pass, this.nAll, NG);
     pass.setPipeline(this.pFlag);
     pass.setBindGroup(0, this.gFlag);
     this.interior(pass, this.nLeaf);
@@ -1621,7 +1630,7 @@ export class AmrSim implements Simulation {
     const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
     pass.setBindGroup(0, this.gAssemble[this.cur]);
-    this.padded(pass, this.nAll);
+    this.flat(pass, this.nAll, NG);
     this.redDt.encode(pass);
     pass.setPipeline(this.pClock);
     pass.setBindGroup(0, this.gClockPreview);
@@ -1760,10 +1769,10 @@ export class AmrSim implements Simulation {
     const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
     pass.setBindGroup(0, this.gAssemble[p]);
-    this.padded(pass, this.nAll);
+    this.flat(pass, this.nAll, NG);
     pass.setPipeline(this.pPredict);
     pass.setBindGroup(0, this.gPredict);
-    this.padded(pass, this.nAll);
+    this.flat(pass, this.nLeaf, 1);
     pass.setPipeline(pipe);
     pass.setBindGroup(0, this.updateGroup(pipe, p));
     this.interior(pass, this.nLeaf);

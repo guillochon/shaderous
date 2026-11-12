@@ -1,6 +1,6 @@
 // First guess at every leaf block's bin, at the start of a cycle: the largest power of two of
 // the clock's dt that the block's own signal rate and acceleration allow. The rates are the
-// records the assembly pass wrote, three by three by five workgroups per block along the list.
+// records the assembly pass wrote: a row of ASM_WG per block, one block of the list per row.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
@@ -10,6 +10,7 @@
 @group(0) @binding(3) var<storage, read_write> KOUT: array<u32>;
 
 override KMAX: u32 = 3u;
+override ASM_WG: u32 = 125u; // workgroups of the assembly pass per block
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -18,19 +19,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let slot = i32(LIST[1u + i]);
   var k = KMAX;
   if (blk_leaf(slot) && clock.dt > 0.0) {
-    let a = P.amr.x;
-    let nx = 3u * a * a * P.amr.w;   // 3 per slot
-    let nz = select(5u, 1u, is2d());
     var rate = 0.0;
     var g = 0.0;
-    for (var z = 0u; z < nz; z++) {
-      for (var y = 0u; y < 3u; y++) {
-        for (var x = 3u * i; x < 3u * i + 3u; x++) {
-          let base = ((z * 3u + y) * nx + x) * 2u;
-          rate = max(rate, RATES[base]);
-          g = max(g, RATES[base + 1u]);
-        }
-      }
+    for (var x = 0u; x < ASM_WG; x++) {
+      let base = (i * ASM_WG + x) * 2u;
+      rate = max(rate, RATES[base]);
+      g = max(g, RATES[base + 1u]);
     }
     // The block's own limit, as hydro/clock.wgsl forms the global one.
     var dtb = P.cfl / max(rate, 1.0e-30);

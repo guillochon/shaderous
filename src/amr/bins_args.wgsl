@@ -6,6 +6,8 @@
 //   0  padded pass over LA          1  interior pass over LU       2  interior pass over LL
 //   3..7   multigrid, all cells of LA at sublevels of 16, 8, 4, 2, 1 cells per block side
 //   8..12  the same for one color of a red-black sweep
+//   13 flat pass (amr/list.wgsl, inv_flat) over LL with one ghost layer: the prediction
+//   14 flat pass over LA with two ghost layers: the assembly
 // followed by the totals: ARGS[60] block updates, ARGS[61] blocks assembled.
 #include "hydro/common.wgsl"
 
@@ -30,10 +32,17 @@ fn main() {
   LA[0] = na;
   LU[0] = nu;
   LL[0] = nl;
-  // Padded passes: 3 x 3 x 5 workgroups per block; interior passes: 2 x 2 x 4.
-  put(0u, na * 3u, 3u, select(5u, 1u, flat));
-  put(1u, nu * 2u, 2u, select(4u, 1u, flat));
-  put(2u, nl * 2u, 2u, select(4u, 1u, flat));
+  // Padded passes: 3 x 3 x 5 workgroups per block; interior passes: 2 x 2 x 4. In 2D a
+  // workgroup covers four blocks (amr/list.wgsl): 3 x 3 or 2 x 2 per four.
+  if (flat) {
+    put(0u, (na + 3u) / 4u * 3u, 3u, 1u);
+    put(1u, (nu + 3u) / 4u * 2u, 2u, 1u);
+    put(2u, (nl + 3u) / 4u * 2u, 2u, 1u);
+  } else {
+    put(0u, na * 3u, 3u, 5u);
+    put(1u, nu * 2u, 2u, 4u);
+    put(2u, nl * 2u, 2u, 4u);
+  }
   // Multigrid (src/amr/gravity.ts, cells() and color()).
   put(3u, na * 2u, 2u, 4u);
   put(4u, na, 1u, 2u);
@@ -45,6 +54,10 @@ fn main() {
   put(10u, (na + 3u) / 4u, 1u, 1u);
   put(11u, (na + 7u) / 8u, 1u, 1u);
   put(12u, (na + 7u) / 8u, 1u, 1u);
+  let w = 18u; // block side (16) plus a ghost layer on each face
+  put(13u, (select(w * w * w, w * w, flat) + 63u) / 64u, nl, 1u);
+  let w2 = 20u; // and two
+  put(14u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, na, 1u);
   ARGS[60] += nu;
   ARGS[61] += na;
 }
