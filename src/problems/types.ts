@@ -131,6 +131,8 @@ export interface Problem {
   species?: readonly string[];
   box: number; // side length; the domain is [-box/2, box/2]^3
   tEnd: number;
+  /** Time between checkpoints, when the page is asked to save them (problem time units). */
+  checkpointDt?: number;
   rhoFloor?: number;
   pFloor?: number;
   /** Enforce the Truelove pressure floor by default. */

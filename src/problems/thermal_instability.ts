@@ -54,6 +54,7 @@ export const thermalInstability: Problem = {
   G: 0,
   box: 1,
   tEnd: Infinity,
+  checkpointDt: 0.05,
   supports2d: true,
   cooling: 'ism',
   coolParams: { heat: 50, tUnit: TI.tUnit, tFloor: 0.02 },

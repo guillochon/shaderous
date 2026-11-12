@@ -94,6 +94,11 @@ export interface SimConfig {
   /** Start from a snapshot: its time, step count and point masses rather than the preset's. */
   restart?: Restart;
   /**
+   * A time the clock stops at short of tEnd, as it does at tEnd: the page sets it to the next
+   * checkpoint, and moves it on once the checkpoint is written. Not a setting of the run.
+   */
+  tStop?: number;
+  /**
    * A block is split where its refinement indicator (a normalized second derivative, between 0
    * and 1: amr/flag.wgsl) exceeds refineHi, merged below refineLo.
    */
@@ -565,7 +570,7 @@ export function packParams(
       c.rhoFloor,
       c.pFloor,
       c.etaDual,
-      Number.isFinite(c.tEnd) ? c.tEnd : 1e30,
+      Math.min(Number.isFinite(c.tEnd) ? c.tEnd : 1e30, c.tStop ?? 1e30),
       1e30,
       c.shockThresh,
       c.jeansFloor ? (c.jeansCells / 4) ** 2 : 0, // scales the 4-cell floor pressure

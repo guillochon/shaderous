@@ -63,6 +63,7 @@ export const tidalDisruption: Problem = {
   composition: COMPOSITIONS.solar,
   box: TDE.box,
   tEnd: Infinity,
+  checkpointDt: 0.5,
   rhoFloor: 1e-10,
   pFloor: 1e-14,
   // Ambient gas and the outermost wisps of debris: no hotter than the star's interior, and no

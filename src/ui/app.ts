@@ -5,6 +5,7 @@ import { initGpu, type Gpu } from '../gpu/device';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
+import { canPickFolder, checkpointIndex, download, downloadSink, nextCheckpoint, pickFolder, type CheckpointSink } from '../io/checkpoints';
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
@@ -98,6 +99,11 @@ side.innerHTML = `
       ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'), '', 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower')}
       ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')), '', 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work')}
     </div>
+    <div class="g2 ckpt">
+      <label class="check" title="Save the state as an .athdf file (as Export state does) every time the clock reaches a multiple of the interval. The run stops on each of those times exactly while the file is written. You pick a folder for them first; a browser that cannot write to a folder downloads each one"><input id="ckpt" type="checkbox" />Save checkpoints</label>
+      ${field('Checkpoint every', number('ckdt', 'min="0"', 2), '', 'Time between checkpoints, in code time units. Each problem starts with an interval of its own')}
+    </div>
+    <div id="ckpt-note"></div>
   </details>
 
   <details open>
@@ -630,6 +636,18 @@ let stepOnce = false;
 let building = false;
 let finished = false;
 let lastDiag: Diagnostics | undefined;
+/**
+ * Checkpoints: off until the user asks. While on, cfg.tStop holds the clock at the next one
+ * until it is written (see armCheckpoints and the diagnostics readout in tick).
+ */
+const ckpt = {
+  on: false,
+  every: 1,
+  sink: null as CheckpointSink | null,
+  busy: false,
+  written: 0,
+  error: '',
+};
 
 /** A press of an editing tool, from pointer down until its last edit has been handed to the GPU. */
 interface Stroke {
@@ -733,7 +751,8 @@ function syncControls() {
   $<HTMLInputElement>('reflo').value = String(cfg.refineLo);
   $<HTMLInputElement>('refhi').disabled = $<HTMLInputElement>('reflo').disabled = cfg.amrLevels === 0;
   $('sum-grid').textContent = `${cfg.n}${two ? '\u00b2' : '\u00b3'}, ${cfg.amrLevels ? `${cfg.amrLevels} level${cfg.amrLevels > 1 ? 's' : ''}` : 'uniform'}`;
-  $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}, CFL ${cfg.cfl}`;
+  $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}, CFL ${cfg.cfl}${ckpt.on ? `, checkpoints every ${+ckpt.every.toPrecision(6)}` : ''}`;
+  showCheckpoints();
   // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
   // refinement levels on a uniform grid.
   const fieldSel = $<HTMLSelectElement>('field');
@@ -940,6 +959,9 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     }
     // From a file: the same preset, started from the saved state instead of its own.
     if (snap) Object.assign(next, restartFrom(snap, problem, levels > 0, n >> levels));
+    // A new problem brings its own checkpoint interval; the clock starts at the snapshot's time, if any.
+    if (cfg?.problem !== problem) ckpt.every = defaultCheckpointDt(problem);
+    next.tStop = ckpt.on ? nextCheckpoint(next.restart?.time ?? 0, ckpt.every) : undefined;
     const old = sim;
     sim = undefined;
     stroke = null;
@@ -976,29 +998,111 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
   });
 }
 
-/** Save the state of the gas to an .athdf file (see io/athdf.ts). */
+/** The state of the gas as an .athdf file (see io/athdf.ts), and its time. */
+async function athdfOf(s: Simulation) {
+  const snap = await capture(s, { program: 'shaderous', build: BUILD, query: linkQuery() });
+  const { writeAthdf } = await import('../io/athdf');
+  // gzip level 1: nearly all of the saving of higher levels (files are 8% to 86% of the raw
+  // size, depending on how smooth the flow is) for the least time.
+  const bytes = await writeAthdf(snap, undefined, 1);
+  return { time: snap.time, bytes, stem: `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}` };
+}
+
+/** Save the state of the gas to an .athdf file. */
 function exportState() {
   const button = $('export');
   return enqueue(async () => {
     if (!sim) return;
     button.textContent = 'Exporting…';
     try {
-      const snap = await capture(sim, { program: 'shaderous', build: BUILD, query: linkQuery() });
-      const { writeAthdf } = await import('../io/athdf');
-      // gzip level 1: nearly all of the saving of higher levels (files are 8% to 86% of the raw
-      // size, depending on how smooth the flow is) for the least time.
-      const bytes = await writeAthdf(snap, undefined, 1);
-      const name = `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-t${+snap.time.toPrecision(4)}.athdf`;
-      const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type: 'application/x-hdf5' }));
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = name;
-      a.click();
-      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const { time, bytes, stem } = await athdfOf(sim);
+      download(`${stem}-t${+time.toPrecision(4)}.athdf`, bytes);
     } finally {
       button.textContent = 'Export state';
     }
   });
+}
+
+/** A problem's checkpoint interval, before the user changes it. */
+const defaultCheckpointDt = (p: SimConfig['problem']) => p.checkpointDt ?? (Number.isFinite(p.tEnd) ? p.tEnd / 10 : 1);
+
+/**
+ * Hold the clock at the first checkpoint after time `t` (or release it, with checkpoints off).
+ * Writes the uniform block of a running simulation; a new one picks cfg.tStop up as it is built.
+ */
+function armCheckpoints(t: number) {
+  if (!cfg) return;
+  cfg.tStop = ckpt.on ? nextCheckpoint(t, ckpt.every) : undefined;
+  if (sim) {
+    sim.cfg = cfg;
+    sim.writeParams();
+  }
+  showCheckpoints();
+}
+
+/** Write the checkpoint the clock of `s` is held at, then let the run go on to the next. */
+function saveCheckpoint(s: Simulation) {
+  ckpt.busy = true;
+  return enqueue(async () => {
+    try {
+      if (sim !== s || !ckpt.on || !ckpt.sink) return;
+      const { time, bytes, stem } = await athdfOf(s);
+      // Numbered, so the files sort in time order whatever the interval.
+      const k = String(checkpointIndex(time, ckpt.every)).padStart(4, '0');
+      await ckpt.sink.write(`${stem}-ckpt${k}-t${+time.toPrecision(4)}.athdf`, bytes);
+      ckpt.written++;
+      if (sim === s) armCheckpoints(time);
+    } catch (e) {
+      // A folder that went away, or permission withdrawn: stop rather than hold the run.
+      ckpt.on = false;
+      ckpt.error = `Checkpoints stopped: ${(e as Error)?.message ?? e}`;
+      armCheckpoints(0);
+    } finally {
+      ckpt.busy = false;
+    }
+  });
+}
+
+/** The checkpoint controls and the line under them. */
+function showCheckpoints() {
+  $<HTMLInputElement>('ckpt').checked = ckpt.on;
+  $<HTMLInputElement>('ckdt').value = String(+ckpt.every.toPrecision(6));
+  const note = $('ckpt-note');
+  if (ckpt.error) note.textContent = ckpt.error;
+  else if (!ckpt.on) note.textContent = '';
+  else {
+    const next = cfg?.tStop !== undefined && !(cfg.tStop > cfg.tEnd) ? `, next at t = ${+cfg.tStop.toPrecision(6)}` : '';
+    note.textContent = `Saving to ${ckpt.sink?.where}: ${ckpt.written} so far${next}.`;
+  }
+}
+
+/** Switch checkpoints on (asking for a folder, if the browser can write to one) or off. */
+async function setCheckpoints(on: boolean) {
+  ckpt.error = '';
+  if (on) {
+    let sink: CheckpointSink | null = downloadSink;
+    if (canPickFolder()) {
+      try {
+        sink = await pickFolder();
+      } catch {
+        sink = downloadSink; // a picker that refuses (in a frame, say): downloads still work
+      }
+    }
+    if (!sink) {
+      showCheckpoints(); // cancelled: stay off
+      return;
+    }
+    ckpt.sink = sink;
+    ckpt.written = 0;
+  }
+  ckpt.on = on;
+  armCheckpoints(await clockNow());
+}
+
+/** The time on the simulation's clock now (the readouts can be a fifth of a second behind). */
+async function clockNow(): Promise<number> {
+  const d = sim && !sim.preparing ? await sim.diagnostics() : undefined;
+  return d?.t ?? lastDiag?.t ?? cfg?.restart?.time ?? 0;
 }
 
 /** Start a run from an .athdf file: one of ours with its settings, or another code's. */
@@ -1076,6 +1180,7 @@ function restartRun(replay = false) {
       await painted();
       sim.cfg = cfg;
       sim.reset();
+      armCheckpoints(cfg.restart?.time ?? 0);
       clearSources();
       if (replay) running = autoplay;
       finished = false;
@@ -1107,6 +1212,7 @@ function rebuildPipelines(resetAfter = false) {
       await renderer.attach(sim);
       if (resetAfter) {
         sim.reset();
+        armCheckpoints(cfg.restart?.time ?? 0);
         clearSources();
         lastDiag = undefined;
         if (finished) running = autoplay;
@@ -1234,6 +1340,12 @@ function bind() {
     if (userBudget() === null) return;
     setUserBudget(null);
     rebuildForMemory();
+  });
+  on('ckpt', (el) => void setCheckpoints(el.checked));
+  on('ckdt', (el) => {
+    ckpt.every = +el.value > 0 ? +el.value : defaultCheckpointDt(cfg.problem);
+    if (ckpt.on) clockNow().then(armCheckpoints);
+    else showCheckpoints();
   });
   on('tend', (el) => {
     cfg.tEnd = el.value === '' ? Infinity : +el.value;
@@ -2623,9 +2735,15 @@ function tick(now: number) {
       lastDiag = d;
       // dt = 0 after some progress means the clock reached the end time.
       if (d.dt === 0 && d.steps > 0 && running && !finished) {
-        finished = true;
-        running = false;
-        syncControls();
+        if (ckpt.on && cfg.tStop !== undefined && d.t >= cfg.tStop * (1 - 1e-5)) {
+          // Held at a checkpoint: write it, and the run goes on.
+          if (!ckpt.busy) saveCheckpoint(s);
+        } else if (!ckpt.on || !(d.t < cfg.tEnd * (1 - 1e-5))) {
+          // (With checkpoints on, a stale readout from a checkpoint just written is no end.)
+          finished = true;
+          running = false;
+          syncControls();
+        }
       }
       updateRange(d);
       showDiagnostics(d, s);

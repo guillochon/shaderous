@@ -30,6 +30,7 @@ export const whiteDwarfStar: Problem = {
   composition: COMPOSITIONS.carbonOxygen,
   box: WD_STAR.box,
   tEnd: Infinity,
+  checkpointDt: 0.5,
   rhoFloor: 1e-10,
   pFloor: 1e-14,
   fluff: { rho: 10 * WD_AMBIENT.rhoAmb, u: 3, v: 10 },

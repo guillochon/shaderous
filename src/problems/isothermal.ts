@@ -22,6 +22,7 @@ export const isothermalCollapse: Problem = {
   G: 1,
   box: 1,
   tEnd: Infinity,
+  checkpointDt: 0.1,
   rhoFloor: 1e-6,
   jeansFloor: true,
   jeansCells: 8,

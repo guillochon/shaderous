@@ -23,6 +23,7 @@ export const sphere: Problem = {
   G: SPHERE.G,
   box: 1,
   tEnd: Infinity,
+  checkpointDt: 0.05,
   rhoFloor: 1e-8,
   pFloor: 1e-12,
   view: { field: 0, log: true, mode: 'volume' },

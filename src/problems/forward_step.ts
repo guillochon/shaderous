@@ -24,6 +24,7 @@ export const forwardStep: Problem = {
   G: 0,
   box: 3,
   tEnd: 4,
+  checkpointDt: 0.2,
   supports2d: true,
   view: { field: 0, log: false, mode: 'slice' },
   init: () => (x, y) => {

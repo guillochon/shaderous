@@ -15,6 +15,7 @@ export const evrard: Problem = {
   G: 1,
   box: 4,
   tEnd: Infinity,
+  checkpointDt: 0.1,
   rhoFloor: 1e-7,
   pFloor: 1e-12,
   view: { field: 0, log: true, mode: 'volume' },

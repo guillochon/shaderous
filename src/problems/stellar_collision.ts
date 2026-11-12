@@ -85,6 +85,7 @@ export const wdCollision: Problem = {
   composition: COMPOSITIONS.carbonOxygen,
   box: WD_COLLISION.box,
   tEnd: Infinity,
+  checkpointDt: 0.5,
   rhoFloor: 1e-10,
   pFloor: 1e-14,
   // Ambient gas and the thinnest debris: no hotter than the stars' outer layers get when

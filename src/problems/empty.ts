@@ -16,6 +16,7 @@ export const empty: Problem = {
   G: 0,
   box: 1,
   tEnd: Infinity,
+  checkpointDt: 0.1,
   rhoFloor: EMPTY.rho,
   pFloor: EMPTY.p,
   supports2d: true,

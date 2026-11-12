@@ -21,6 +21,7 @@ export const jeans: Problem = {
   G: JEANS.G,
   box: 1,
   tEnd: 0.5,
+  checkpointDt: 0.05,
   view: { field: 0, log: false, mode: 'slice' },
   init: (_n, e) => (x) => {
     const g = e.params.gamma;

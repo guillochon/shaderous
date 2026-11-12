@@ -17,6 +17,7 @@ function blast(id: string, label: string, eos: EosKind, blurb: string): Problem 
     G: 0,
     box: 1,
     tEnd: 0.06,
+    checkpointDt: 0.005,
     pFloor: 1e-12,
     view: { field: 0, log: false, mode: 'slice' },
     supports2d: true,

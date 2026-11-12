@@ -86,6 +86,7 @@ export const binary: Problem = {
   G: 1,
   box: BINARY.box,
   tEnd: Infinity,
+  checkpointDt: 1,
   rhoFloor: 1e-9,
   viscosity: BINARY.nu,
   refineMasses: true,

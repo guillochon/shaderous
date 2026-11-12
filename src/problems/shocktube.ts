@@ -30,6 +30,7 @@ export function shockTube(
     G: 0,
     box: 1,
     tEnd,
+    checkpointDt: tEnd / 10,
     pFloor: 1e-12,
     supports2d: dir[2] === 0,
     view: { mode: 'slice', log: false },

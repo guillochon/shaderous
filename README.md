@@ -102,6 +102,11 @@ button, to hand someone the same setup. A bare visit opens Kelvin-Helmholtz at 1
   spaced, square or cubic domain. It is sampled onto the nearest resolution on offer, cell
   center by cell center (not conservatively), keeping the current preset's physics.
 - HDF5 comes from h5wasm, loaded the first time either button is used (about 1 MB compressed).
+- **Save checkpoints** (under Time, off by default) writes the same file every time the clock
+  reaches a multiple of **Checkpoint every**, which each problem sets to suit its own timescale.
+  The run stops on each of those times exactly while the file is written. In Chrome and Edge
+  you pick a folder once and the files go there, numbered in time order
+  (`…-ckpt0003-t0.3.athdf`); other browsers download each one.
 - The cell data is gzip-compressed at level 1 (HDF5's standard filter; higher levels gain
   about a percent more for up to twice the time). Uncompressed, a state is 24 bytes per cell,
   about 400 MB at 256^3. Compressed files measured from 8% of that (an early Sedov blast) to
