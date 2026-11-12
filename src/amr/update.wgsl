@@ -116,6 +116,7 @@ fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
 }
 
 #include "hydro/flux.wgsl"
+#include <species>
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
 #include "hydro/damping.wgsl"
@@ -262,9 +263,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       return;
     }
   } else {
-    fx = match_faces(axis_fluxes(c, ex, 0, w0, p0), slot, 0, l);
-    fy = match_faces(axis_fluxes(c, ey, 1, w0, p0), slot, 1, l);
-    if (!is2d()) { fz = match_faces(axis_fluxes(c, ez, 2, w0, p0), slot, 2, l); }
+    let ox = axis_fluxes(c, ex, 0, w0, p0);
+    let oy = axis_fluxes(c, ey, 1, w0, p0);
+    var oz = none;
+    if (!is2d()) { oz = axis_fluxes(c, ez, 2, w0, p0); }
+    // With species, their pass needs the mass fluxes as this cell computed them.
+    store_mass_flux(slot, l, c, ox, oy, oz);
+    fx = match_faces(ox, slot, 0, l);
+    fy = match_faces(oy, slot, 1, l);
+    if (!is2d()) { fz = match_faces(oz, slot, 2, l); }
   }
 
   if (DEBUG_FLUX) {

@@ -1,7 +1,7 @@
 """Train the burning surrogate: a small network that steps the alpha chain's mass fractions
 forward by dt at fixed density, with the self-heating that burner.py integrates.
 
-    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard]
+    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt]
 
 Input  log10 rho, log10 T, log10 dt (all scaled to about [-1, 1]) and the 13 mass fractions
        (as X^(1/4), which spreads out the trace species).
@@ -34,7 +34,7 @@ N_A = 6.02214076e23
 A = np.array([4, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56], dtype=np.float64)
 MASS = None  # set from aprox13.py below
 LOG_RHO = (4.0, 10.0)
-LOG_T = (8.0, 10.0)
+LOG_T = (8.0, 10.5)
 LOG_DT = (-12.0, 0.0)
 
 
@@ -95,7 +95,10 @@ class Burner(nn.Module):
 
 
 def load():
-    parts = [np.load(DATA / f) for f in ("fuel.npz", "mix.npz")]
+    """Every trajectory file in data/: fuel and mixture starts (gen_data.py) and the states
+    earlier models wandered into (dagger.py)."""
+    files = sorted(f for f in DATA.glob("*.npz") if f.name != "fuel_pool.npz")
+    parts = [np.load(f) for f in files]
     rho = np.concatenate([p["rho"] for p in parts])
     X = np.concatenate([p["X"] for p in parts]).astype(np.float32)
     T = np.concatenate([p["T"] for p in parts])
@@ -142,25 +145,48 @@ def evaluate(model, pairs, n=200_000):
     return {"X_l1": torch.quantile(l_x, q).tolist(), "e_err": torch.quantile(l_e, q).tolist(), "X_l1_max": l_x.max().item(), "e_err_max": l_e.max().item()}
 
 
+KB, MU, ARAD = 1.380649e-16, 1.66053906660e-24, 7.5657e-15
+A_T = torch.tensor(A, dtype=torch.float32, device=dev)
+Z_T = torch.tensor([2, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28], dtype=torch.float32, device=dev)
+
+
+def heat(X0, X1, rho, T):
+    """Temperature after the composition changes from X0 to X1 at density rho, the energy it
+    released going into heat (one explicit step of the specific heat, as burner.py's)."""
+    de = ((X1 - X0) * Q).sum(dim=1) * 1e18
+    cv = 1.5 * KB / MU * (X1 / A_T * (Z_T + 1)).sum(dim=1) + 4 * ARAD * T**3 / rho
+    return (T + de / cv).clamp(1e7, 3e10)
+
+
+@torch.no_grad()
+def roll(model, rho, X0, T0, dt, steps, record=0):
+    """Apply the model `steps` times with step dt (per row), the temperature following the
+    energy released, as the simulator's would. Returns the final (X, T) and, if record > 0,
+    that many states visited along the way (rho, T, X) at random steps."""
+    X = torch.as_tensor(X0, dtype=torch.float32, device=dev).clone()
+    T = torch.as_tensor(T0, dtype=torch.float32, device=dev).clone()
+    r = torch.as_tensor(rho, dtype=torch.float32, device=dev)
+    lr, ld = torch.log10(r), torch.log10(torch.as_tensor(dt, dtype=torch.float32, device=dev))
+    seen = []
+    at = set(np.random.default_rng(2).choice(steps, size=min(record, steps), replace=False).tolist()) if record else set()
+    for s in range(steps):
+        X1 = model(lr, torch.log10(T), ld, X)
+        T = heat(X, X1, r, T)
+        X = X1
+        if s in at:
+            seen.append((r.clone(), T.clone(), X.clone()))
+    return X, T, seen
+
+
 @torch.no_grad()
 def rollout(model, rho, X, T, t, dt_hydro):
     """Apply the model with steps of dt_hydro from each trajectory's start to t = 0.1 s
-    (composing it many times), and compare with the reference there."""
+    (composing it many times, the temperature following the energy released), and compare
+    with the reference there."""
     model.eval()
     k_end = int(np.searchsorted(t, 0.1))
     steps = int(round(t[k_end] / dt_hydro))
-    m = len(rho)
-    Xc = torch.tensor(X[:, 0], device=dev)
-    lr = torch.tensor(np.log10(rho), dtype=torch.float32, device=dev)
-    lT = torch.tensor(np.log10(T[:, 0]), dtype=torch.float32, device=dev)
-    ld = torch.full((m,), math.log10(dt_hydro), device=dev)
-    # The temperature between steps comes from the reference trajectory (in the simulator it
-    # comes from the energy the step released); this tests how composition errors compound.
-    tt = np.arange(1, steps + 1) * dt_hydro
-    for s in range(steps):
-        kk = min(int(np.searchsorted(t, tt[s] - dt_hydro)), len(t) - 1)
-        lT = torch.tensor(np.log10(np.clip(T[:, kk], 1e7, 2e10)), dtype=torch.float32, device=dev)
-        Xc = model(lr, lT, ld, Xc)
+    Xc, _, _ = roll(model, rho, X[:, 0], T[:, 0], np.full(len(rho), dt_hydro), steps)
     Xt = torch.tensor(X[:, k_end], device=dev)
     X0 = torch.tensor(X[:, 0], device=dev)
     _, l_x, l_e = loss_fn(Xc, Xt, X0)
@@ -196,7 +222,8 @@ def main():
         sched.step()
         if (s + 1) % 5000 == 0 or s == 0:
             print(f"step {s + 1}: loss {loss.item():.4g}  val {evaluate(model, val)}  {time.time() - t0:.0f} s", flush=True)
-    torch.save({"state": model.state_dict(), "width": width, "depth": depth}, HERE / f"model_{tag}.pt")
+    out = sys.argv[5] if len(sys.argv) > 5 else f"model_{tag}.pt"
+    torch.save({"state": model.state_dict(), "width": width, "depth": depth}, HERE / out)
     for dt in (1e-5, 1e-3, 1e-2):
         print(f"rollout dt={dt:g}:", rollout(model, rho[va], X[va], T[va], t, dt), flush=True)
 

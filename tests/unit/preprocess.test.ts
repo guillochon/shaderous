@@ -68,8 +68,10 @@ describe('shader assembly', () => {
 
   it('assembles the species passes for any number of groups', () => {
     for (const groups of [1, 4]) {
-      for (const entry of ['hydro/species_predict.wgsl', 'hydro/species.wgsl']) {
+      const entries = ['hydro/species_predict.wgsl', 'hydro/species.wgsl', 'amr/species_assemble.wgsl', 'amr/species_predict.wgsl', 'amr/species.wgsl', 'amr/species_regrid.wgsl'];
+      for (const entry of entries) {
         const src = assemble(entry, { species_n: `const NG: u32 = ${groups}u;
+const SP_DEPTH: i32 = 40;
 ` });
         expect(src).not.toMatch(/^\s*#include/m);
         expect(src).toContain(`const NG: u32 = ${groups}u;`);

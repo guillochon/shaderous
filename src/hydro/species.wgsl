@@ -4,7 +4,7 @@
 // Each face carries F X_i, with F its mass flux and X_i the upwind cell's mass fraction half
 // a step ahead (hydro/species_predict.wgsl) plus half its limited slope toward the face: the
 // MUSCL-Hancock reconstruction the passive scalar gets. The slopes of all species are limited
-// together (hydro/species_common.wgsl), so face values sum to one and sum_i rho X_i moves
+// together (hydro/species_slopes.wgsl), so face values sum to one and sum_i rho X_i moves
 // exactly as rho does: mass fractions stay in [0, 1] and keep summing to one, and a species
 // that is the same everywhere stays so. What rounding leaves is removed by scaling the new
 // values to the new density. Solid and fixed cells keep theirs.
@@ -21,9 +21,9 @@ fn mf_index(c: vec3<i32>, axis: i32) -> u32 {
   return ((u.z * n.y + u.y) * n.x + u.x) * 3u + u32(axis);
 }
 
-// Net inflow of every species through the two faces of cell c along one axis, given the five
-// cells around it at the start of the step, k = -2 .. 2 (index k + 2).
-fn axis_inflow(c: vec3<i32>, axis: i32, cells: array<Cell, 5>, acc: ptr<function, array<vec4<f32>, NG>>) {
+// Net inflow of every species through the two faces of cell c along one axis, given the
+// fractions of the five cells around it at the start of the step, k = -2 .. 2 (index k + 2).
+fn axis_inflow(c: vec3<i32>, axis: i32, cells: array<array<vec4<f32>, NG>, 5>, acc: ptr<function, array<vec4<f32>, NG>>) {
   let e = unit(axis);
   for (var side = 0; side < 2; side++) {
     // Face between cells k = side - 1 and k = side (index side + 1 and side + 2).
@@ -33,12 +33,9 @@ fn axis_inflow(c: vec3<i32>, axis: i32, cells: array<Cell, 5>, acc: ptr<function
     let s = slopes(cells[up - 1], cells[up], cells[up + 1]);
     let m = bc_map(c + (up - 2) * e).c;
     var xf: array<vec4<f32>, NG>;
-    var sum = 0.0;
-    for (var g = 0u; g < NG; g++) {
-      xf[g] = clamp(textureLoad(SH, group_at(m, g), 0) + toward * s[g], vec4<f32>(0.0), vec4<f32>(1.0));
-      sum += dot(xf[g], vec4<f32>(1.0));
-    }
-    let w = select(-F, F, side == 0) / max(sum, 1e-30);  // inflow through the lower face, outflow through the upper
+    for (var g = 0u; g < NG; g++) { xf[g] = textureLoad(SH, group_at(m, g), 0) + toward * s[g]; }
+    xf = face_fractions(xf);
+    let w = select(-F, F, side == 0);  // inflow through the lower face, outflow through the upper
     for (var g = 0u; g < NG; g++) { (*acc)[g] += w * xf[g]; }
   }
 }
@@ -58,8 +55,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var a = 0; a < 3; a++) {
     if (a == 2 && flat) { break; }
     let e = unit(a);
-    var cells: array<Cell, 5>;
-    for (var k = 0; k < 5; k++) { cells[k] = load_cell(c + (k - 2) * e); }
+    var cells: array<array<vec4<f32>, NG>, 5>;
+    for (var k = 0; k < 5; k++) { cells[k] = load_x(c + (k - 2) * e); }
     axis_inflow(c, a, cells, &acc);
   }
   let dtdx = clock.dt / P.dx;

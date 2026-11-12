@@ -26,6 +26,7 @@ import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
+import { packSpecies, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 
 /**
  * Steps between refinement checks, and how far the flow may run past an unanswered check.
@@ -92,6 +93,23 @@ export class AmrSim implements Simulation {
   state: GPUTexture[][] = [];
   private prim: GPUTexture[] = [];
   private pred: GPUTexture[] = [];
+  /**
+   * Species (species/species.ts), in atlases laid out like the state's with the groups of four
+   * stacked along z, `speciesDepth` texels apart: rho X ping-pong with its own parity
+   * `speciesCur`, the fractions with ghosts (SX) and half a step ahead (SH), and the face mass
+   * fluxes the update records for them. Empty without species, which also turn per-block
+   * timesteps off.
+   */
+  species: GPUTexture[] = [];
+  speciesCur = 0;
+  readonly speciesGroups: number;
+  private speciesDepth = 0;
+  private speciesX?: GPUTexture;
+  private speciesHalf?: GPUTexture;
+  private massFlux?: GPUBuffer;
+  private pSpecies: GPUComputePipeline[] = [];
+  /** per pipeline (assemble, predict, move, regrid): [state parity][species parity] */
+  private gSpecies: GPUBindGroup[][][] = [];
   private idx: GPUTexture;
   private params: GPUBuffer;
   private clock: GPUBuffer;
@@ -239,6 +257,7 @@ export class AmrSim implements Simulation {
   private constructor(gpu: Gpu, cfg: SimConfig, slots = 0) {
     const d = (this.device = gpu.device);
     this.cfg = cfg;
+    this.speciesGroups = speciesGroups(cfg.problem);
     this.n = cfg.n;
     this.nz = cfg.ndim === 2 ? 1 : cfg.n;
     this.levels = cfg.amrLevels;
@@ -280,6 +299,20 @@ export class AmrSim implements Simulation {
     for (let p = 0; p < 2; p++) this.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
     this.prim = [t('W1'), t('W2')];
     this.pred = [t('PA'), t('PB')];
+    const G = this.speciesGroups;
+    if (G > 0) {
+      this.speciesDepth = this.layers * (cfg.ndim === 2 ? 1 : PAD);
+      const depth = this.speciesDepth * G;
+      if (depth > d.limits.maxTextureDimension3D) {
+        throw new Error(`${cfg.problem.species!.length} species need an atlas ${depth} texels deep, more than this GPU allows (${d.limits.maxTextureDimension3D}): pick a lower resolution`);
+      }
+      const ts = (label: string) => tex3d(d, side, 'rgba32float', label, depth);
+      this.species = [ts('species 0'), ts('species 1')];
+      this.speciesX = ts('species fractions');
+      this.speciesHalf = ts('species half step');
+      const faces = (BS + 1) ** 2 * (cfg.ndim === 3 ? BS + 1 : 1) * 3 * 4;
+      this.massFlux = d.createBuffer({ label: 'face mass fluxes', size: this.cap * faces, usage: GPUBufferUsage.STORAGE });
+    }
     const m = nr << this.levels;
     this.idx = d.createTexture({
       label: 'leaf index',
@@ -407,6 +440,8 @@ export class AmrSim implements Simulation {
 
   /** Bins of per-block timesteps in use (0 = off). */
   private get timeBins(): number {
+    // Species are moved with one timestep for all blocks (amr/species.wgsl).
+    if (this.speciesGroups > 0) return 0;
     return Math.max(0, Math.min(MAX_TIME_BINS, Math.floor(this.cfg.timeBins || 0)));
   }
   /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
@@ -416,7 +451,12 @@ export class AmrSim implements Simulation {
 
   private get slots() {
     const on = this.timeBins > 0;
-    return { ...hydroSlots(this.cfg), bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl', mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl' };
+    return {
+      ...hydroSlots(this.cfg),
+      bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl',
+      mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl',
+      species: this.speciesGroups > 0 ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
+    };
   }
 
   /** (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. */
@@ -494,6 +534,7 @@ export class AmrSim implements Simulation {
         }),
       );
     }
+    if (this.speciesGroups > 0) await this.buildSpecies();
     this.redDiag = await Reducer.create(
       d,
       [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS],
@@ -505,6 +546,51 @@ export class AmrSim implements Simulation {
     );
   }
 
+  /** Pipelines and bind groups of the species passes (amr/species_*.wgsl). */
+  private async buildSpecies() {
+    const d = this.device;
+    const v = (t: GPUTexture) => t.createView();
+    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n` };
+    this.pSpecies = await Promise.all(
+      ['assemble', 'predict', '', 'regrid'].map((k) =>
+        computePipeline(d, assemble(k ? `amr/species_${k}.wgsl` : 'amr/species.wgsl', ns), `amr species ${k || 'move'}`),
+      ),
+    );
+    const [pA, pP, pM, pR] = this.pSpecies;
+    const sx = v(this.speciesX!);
+    const sh = v(this.speciesHalf!);
+    const per = (f: (p: number, q: number) => GPUBindGroup) => [0, 1].map((p) => [0, 1].map((q) => f(p, q)));
+    this.gSpecies = [
+      per((_p, q) => bindGroup(d, pA, { 0: this.params, 3: v(this.species[q]), 4: v(this.speciesX!), 30: this.bt, 31: this.listLeaf })),
+      per(() => bindGroup(d, pP, { 0: this.params, 1: this.clock, 2: v(this.prim[0]), 4: sx, 5: v(this.speciesHalf!), 30: this.bt, 31: this.listLeaf })),
+      per((p, q) =>
+        bindGroup(d, pM, {
+          0: this.params, 1: this.clock, 3: v(this.state[p][1]), 4: v(this.state[1 - p][0]), 5: v(this.species[q]), 6: v(this.species[1 - q]),
+          7: this.massFlux!, 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf,
+        }),
+      ),
+      // Re-meshing goes from the state of parity p to the other.
+      per((p, q) => bindGroup(d, pR, { 0: this.params, 2: v(this.species[q]), 4: v(this.state[1 - p][0]), 6: v(this.species[1 - q]), 7: this.rg, 31: this.listLeaf })),
+    ];
+  }
+
+  /** Move the species through the step just updated from parity p (after the update's dispatch). */
+  private encodeSpecies(pass: GPUComputePassEncoder, p: number) {
+    if (!this.speciesGroups) return;
+    const q = this.speciesCur;
+    const [pA, pP, pM] = this.pSpecies;
+    pass.setPipeline(pA);
+    pass.setBindGroup(0, this.gSpecies[0][p][q]);
+    this.flat(pass, this.nLeaf, NG);
+    pass.setPipeline(pP);
+    pass.setBindGroup(0, this.gSpecies[1][p][q]);
+    this.flat(pass, this.nLeaf, 1);
+    pass.setPipeline(pM);
+    pass.setBindGroup(0, this.gSpecies[2][p][q]);
+    this.interior(pass, this.nLeaf);
+    this.speciesCur = 1 - q;
+  }
+
   private updateGroup(pipe: GPUComputePipeline, p: number, list = this.listLeaf): GPUBindGroup {
     const v = (t: GPUTexture) => t.createView();
     const o = 1 - p;
@@ -513,6 +599,7 @@ export class AmrSim implements Simulation {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 30: this.bt, 31: list,
       ...bin,
+      ...((this.massFlux ? { 12: this.massFlux } : {}) as Record<number, GPUBuffer>),
     });
   }
 
@@ -927,6 +1014,9 @@ export class AmrSim implements Simulation {
     const half = c.problem.box / 2;
     const u1 = new Float32Array(BS * BS * depth * 4);
     const u2 = new Float32Array(BS * BS * depth * 4);
+    const G = this.speciesGroups;
+    const blockCells = BS * BS * depth;
+    const sp = new Float32Array(blockCells * 4 * G);
     let mass = 0;
     this.solids = false;
     this.nSources = 0;
@@ -951,13 +1041,19 @@ export class AmrSim implements Simulation {
             u2[o + 1] = eint;
             u2[o + 2] = w.rho * w.s;
             u2[o + 3] = mark;
+            if (G) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);
           }
       const origin = this.origin(b.slot);
       const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
       d.queue.writeTexture({ texture: this.state[0][0], origin }, u1, layout, [BS, BS, depth]);
       d.queue.writeTexture({ texture: this.state[0][1], origin }, u2, layout, [BS, BS, depth]);
+      for (let g = 0; g < G; g++) {
+        const og = [origin[0], origin[1], origin[2] + g * this.speciesDepth];
+        d.queue.writeTexture({ texture: this.species[0], origin: og }, sp.subarray(g * blockCells * 4, (g + 1) * blockCells * 4), layout, [BS, BS, depth]);
+      }
     }
     this.cur = 0;
+    this.speciesCur = 0;
     this.pending = null;
     this.stepsSinceFlag = 0;
     this.regrids = 0;
@@ -1138,6 +1234,12 @@ export class AmrSim implements Simulation {
     pass.setPipeline(this.pRegrid);
     pass.setBindGroup(0, this.gRegrid[this.cur]);
     this.interior(pass, this.nLeaf);
+    if (this.speciesGroups) {
+      pass.setPipeline(this.pSpecies[3]);
+      pass.setBindGroup(0, this.gSpecies[3][this.cur][this.speciesCur]);
+      this.interior(pass, this.nLeaf);
+      this.speciesCur = 1 - this.speciesCur;
+    }
     pass.end();
     this.cur = 1 - this.cur;
     this.regrids++;
@@ -1191,6 +1293,7 @@ export class AmrSim implements Simulation {
       pass.setPipeline(this.pUpdate);
       pass.setBindGroup(0, this.gUpdate[p]);
       this.interior(pass, this.nLeaf);
+      this.encodeSpecies(pass, p);
       pass.end();
       if (this.fieldOn) {
         // Keep the old potential, solve for that of the updated state (warm-started), move
@@ -1750,6 +1853,36 @@ export class AmrSim implements Simulation {
     return out;
   }
 
+  /**
+   * Mass fractions of every leaf cell (validation): X[i][cell], the cells in the order of
+   * readLeaves(). Empty without species.
+   */
+  async readLeafSpecies(): Promise<Float32Array[]> {
+    const G = this.speciesGroups;
+    if (!G) return [];
+    this.flush();
+    const side = this.slotsPerSide * PAD;
+    const raw = await readTexture(this.device, this.species[this.speciesCur], side, 4, this.speciesDepth * G);
+    const leaves = this.tree.leaves();
+    const depth = this.cfg.ndim === 3 ? BS : 1;
+    const count = leaves.length * BS * BS * depth;
+    const ns = this.cfg.problem.species!.length;
+    const X = Array.from({ length: ns }, () => new Float32Array(count));
+    let q = 0;
+    for (const blk of leaves) {
+      const [ox, oy, oz] = this.origin(blk.slot);
+      for (let k = 0; k < depth; k++)
+        for (let j = 0; j < BS; j++)
+          for (let i = 0; i < BS; i++, q++) {
+            let sum = 0;
+            const at = (g: number) => (((oz + k + g * this.speciesDepth) * side + oy + j) * side + ox + i) * 4;
+            for (let g = 0; g < G; g++) for (let c = 0; c < 4; c++) sum += raw[at(g) + c];
+            for (let s = 0; s < ns; s++) X[s][q] = raw[at(Math.floor(s / SPECIES_PER_GROUP)) + (s % SPECIES_PER_GROUP)] / sum;
+          }
+    }
+    return X;
+  }
+
   /** The potential on every leaf cell, in the same order as readLeaves() (validation only). */
   async readLeafPotential(): Promise<Float32Array> {
     this.flush();
@@ -1854,7 +1987,10 @@ export class AmrSim implements Simulation {
   destroy() {
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
-    for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi]) t.destroy();
+    for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi, ...this.species]) t.destroy();
+    this.speciesX?.destroy();
+    this.speciesHalf?.destroy();
+    this.massFlux?.destroy();
     for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
     this.grav?.destroy();
   }

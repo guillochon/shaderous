@@ -704,6 +704,72 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'amr-species',
+    name: 'Adaptive mesh: species carried with the gas (2D, 256 finest, 2 levels)',
+    criterion:
+      'The species test on a mesh whose finest level follows the density bump: mass fractions stay in [0, 1] and sum to 1 within 1e-5, the mass of each species is kept within 1e-5 of the total, one at 0.2 everywhere stays 0.2 within 1e-5, and the mesh was rebuilt; without the sharp-edged species, a smooth one ends within 2e-3 (mean) of the passive scalar carrying the same profile',
+    async run(gpu) {
+      const smooth = (x: number, y: number) => 0.3 + 0.2 * Math.sin(2 * Math.PI * x) * Math.sin(2 * Math.PI * y);
+      const carry = (sharp: number) =>
+        stillGas({
+          id: 'species-advection', tEnd: 2, species: ['a', 'b', 'c', 'd', 'e'],
+          init: () => (x, y) => {
+            const a = smooth(x, y);
+            const b = Math.abs(x) < 0.2 && Math.abs(y) < 0.2 ? sharp : 0;
+            const rest = 1 - a - b - 0.2;
+            return {
+              rho: 1 + 0.5 * Math.exp(-((x - 0.1) ** 2 + y ** 2) / 0.02), vx: 1, vy: 0.5, vz: 0, p: 1, s: a,
+              X: [a, b, 0.2, rest * 0.75, rest * 0.25],
+            };
+          },
+        });
+      const run = (sharp: number) =>
+        withAmr(gpu, carry(sharp), 256, { ndim: 2, amrLevels: 2, refineDense: 1.2 }, async (sim) => {
+          const mass = async () => {
+            const c = await sim.readLeaves();
+            const X = await sim.readLeafSpecies();
+            return { c, X, m: X.map((x) => x.reduce((s, v, q) => s + v * c.u1[4 * q] * c.dx[q] ** 2, 0)) };
+          };
+          const before = await mass();
+          await sim.runToEnd();
+          const { c, X, m } = await mass();
+          let sumErr = 0;
+          let lo = Infinity;
+          let hi = -Infinity;
+          let flatErr = 0;
+          let vsScalar = 0;
+          let area = 0;
+          for (let q = 0; q < c.count; q++) {
+            let s = 0;
+            for (const x of X) {
+              s += x[q];
+              lo = Math.min(lo, x[q]);
+              hi = Math.max(hi, x[q]);
+            }
+            sumErr = Math.max(sumErr, Math.abs(s - 1));
+            flatErr = Math.max(flatErr, Math.abs(X[2][q] - 0.2));
+            const a = c.dx[q] ** 2;
+            vsScalar += Math.abs(X[0][q] - c.u2[4 * q + 2] / c.u1[4 * q]) * a;
+            area += a;
+          }
+          const total = before.m.reduce((a, b) => a + b, 0);
+          const massErr = Math.max(...before.m.map((v, i) => Math.abs(m[i] - v))) / total;
+          return { sumErr, lo, hi, flatErr, massErr, vsScalar: vsScalar / area, regrids: sim.regrids, leaves: sim.tree.stats().leaves };
+        });
+      const mixed = await run(0.3);
+      const plain = await run(0);
+      const ok = (r: typeof mixed) => r.sumErr < 1e-5 && r.lo >= 0 && r.hi <= 1 + 1e-6 && r.massErr < 1e-5 && r.flatErr < 1e-5 && r.regrids >= 1;
+      return {
+        pass: ok(mixed) && ok(plain) && plain.vsScalar < 2e-3,
+        metrics: {
+          sum_error: Math.max(mixed.sumErr, plain.sumErr), min_fraction: Math.min(mixed.lo, plain.lo), max_fraction: Math.max(mixed.hi, plain.hi),
+          species_mass_drift: Math.max(mixed.massErr, plain.massErr), constant_species_error: Math.max(mixed.flatErr, plain.flatErr),
+          smooth_species_vs_passive_scalar: plain.vsScalar, beside_sharp_one: mixed.vsScalar, regrids: mixed.regrids, leaf_blocks: mixed.leaves,
+        },
+      };
+    },
+  },
+  {
     id: 'amr-sedov',
     name: 'Adaptive mesh: Sedov-Taylor blast (3D, 128 finest, 2 levels)',
     criterion: 'Shell-averaged shock radius within 2% of the similarity solution; mass and energy conserved to 1e-6; fluxes consistent across levels',

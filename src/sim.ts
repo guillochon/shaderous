@@ -905,10 +905,10 @@ export class Sim implements Simulation {
       const both = (pipe: GPUComputePipeline, more: (p: number, q: number) => Record<number, GPUBindingResource | GPUBuffer>) =>
         [0, 1].map((p) =>
           [0, 1].map((q) =>
-            bindGroup(d, pipe, { 0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.species[q]), ...more(p, q) }),
+            bindGroup(d, pipe, { 0: this.params, 1: this.clock, 3: v(this.state[p][1]), 5: v(this.species[q]), ...more(p, q) }),
           ),
         );
-      this.gSpeciesPredict = both(this.pSpeciesPredict, () => ({ 6: v(this.speciesHalf!) }));
+      this.gSpeciesPredict = both(this.pSpeciesPredict, (p) => ({ 2: v(this.state[p][0]), 6: v(this.speciesHalf!) }));
       this.gSpecies = both(this.pSpecies, (p, q) => ({
         4: v(this.state[1 - p][0]),
         6: v(this.species[1 - q]),
