@@ -240,8 +240,11 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     jeansFloor: problem.jeansFloor ?? false,
     jeansCells: problem.jeansCells ?? 4,
     // Warm-started from the previous step. One cycle is enough for the validation tests, but
-    // leaves total momentum drifting about ten times faster in long collapse runs.
-    vcycles: 2,
+    // leaves total momentum drifting about ten times faster in long collapse runs. On the
+    // adaptive mesh this is the most a step runs: cycles after the first run only while they
+    // still cut the residual (amr/gravity/gate.wgsl), and three help where the potential
+    // changes fast, as at the bounce of a stellar collision.
+    vcycles: (over.amrLevels ?? 0) > 0 ? 3 : 2,
     gravEnergyFlux: true,
     wellBalanced: true,
     amrLevels: 0,

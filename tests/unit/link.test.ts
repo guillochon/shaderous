@@ -4,9 +4,9 @@ import { FIELDS, problemById } from '../../src/problems';
 import { defaultOpacity } from '../../src/render/transfer';
 import { DEFAULT_SETUP, decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
 
-const state = (id: string, n: number, ndim: 2 | 3) => {
+const state = (id: string, n: number, ndim: 2 | 3, amrLevels = 0) => {
   const problem = problemById(id);
-  return { cfg: configFor(problem, n, { ndim }), view: viewDefaults(problem, ndim), auto: true, colormap: 'inferno', opacity: defaultOpacity() };
+  return { cfg: configFor(problem, n, { ndim, amrLevels }), view: viewDefaults(problem, ndim), auto: true, colormap: 'inferno', opacity: defaultOpacity() };
 };
 
 describe('shareable links', () => {
@@ -25,8 +25,7 @@ describe('shareable links', () => {
   });
 
   it('changed settings survive a round trip', () => {
-    const s = state('tidal-disruption', 128, 3);
-    s.cfg.amrLevels = 2;
+    const s = state('tidal-disruption', 128, 3, 2);
     s.cfg.tEnd = 20;
     s.cfg.riemann = 'hll';
     s.cfg.limiter = 'mc';

@@ -832,7 +832,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-time-bins',
     name: 'Adaptive mesh: per-block timesteps (Sod 2D, Sedov 3D, Evrard collapse)',
     criterion:
-      'With blocks stepping up to 8 times less often than the fastest: Sod L1 density error < 0.003 and Sedov shock radius within 2%, as with one timestep; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates (a small box: the blast fills much of it); Evrard collapse to t = 0.8 (64 steps) loses no more than 3 times the energy it does with one timestep (about 2 here, 1.1 at twice the resolution: the half-step potential of a block that steps less often is extrapolated further)',
+      'With blocks stepping up to 8 times less often than the fastest: Sod L1 density error < 0.003 and Sedov shock radius within 2%, as with one timestep; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates (a small box: the blast fills much of it); Evrard collapse to t = 0.8 (64 steps) loses no more than 3 times the energy it does with one timestep, both at two V-cycles a step (about 2 here, 1.1 at twice the resolution: the half-step potential of a block that steps less often is extrapolated further)',
     async run(gpu) {
       const bins = { timeBins: 3, timeBinsAlways: true };
       const drift = (a: { mass: number; eTot: number }, b: { mass: number; eTot: number }) => [Math.abs(b.mass - a.mass) / a.mass, Math.abs(b.eTot - a.eTot) / Math.abs(a.eTot)];
@@ -861,7 +861,7 @@ export const TESTS: TestDef[] = [
         return { err: Math.abs(r - rExact) / rExact, drift: drift(d0, d1), share: work.updates / work.single };
       });
       const collapse = async (over: Partial<SimConfig>) =>
-        withAmr(gpu, evrard, 128, { amrLevels: 2, tEnd: 0.8, ...over }, async (sim) => {
+        withAmr(gpu, evrard, 128, { amrLevels: 2, tEnd: 0.8, vcycles: 2, ...over }, async (sim) => {
           const d0 = await sim.diagnostics();
           await sim.runToEnd();
           return drift(d0, await sim.diagnostics())[1];

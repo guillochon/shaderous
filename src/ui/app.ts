@@ -170,7 +170,7 @@ side.innerHTML = `
         ['isolated', 'Self, isolated', 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D only)'],
       ].map(([v, l, t]) => `<option value="${v}" title="${t}">${l}</option>`).join('')), '', 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way')}
       ${field('G', number('G', 'min="0"', 1.5), 'row-G', 'Gravitational constant, or the strength of the uniform field')}
-      ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'), '', 'Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost')}
+      ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'), '', 'Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step: cycles after the first run only while the residual is above 1e-4 of the source and still falling')}
     </div>
     <div class="g3 jeans">
       <label class="check" title="Pressure floor that keeps the Jeans length resolved (Truelove)"><input id="jeansfloor" type="checkbox" />Jeans floor</label>
@@ -908,6 +908,9 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (keepPhysics && cfg && cfg.problem === problem && cfg.ndim === ndim) {
       // Same preset at a new resolution: keep the user's physics choices.
       const { n: _n, problem: _p, amrLevels: _l, restart: _r, ...rest } = cfg;
+      // The most V-cycles a step runs depends on the mesh: left at the old mesh's default, it
+      // takes the new one's.
+      if (rest.vcycles === configFor(problem, cfg.n, { ndim, amrLevels: cfg.amrLevels }).vcycles) rest.vcycles = next.vcycles;
       Object.assign(next, rest);
     } else {
       const dv = viewDefaults(problem, ndim);

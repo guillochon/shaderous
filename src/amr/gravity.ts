@@ -13,6 +13,13 @@ export const FIELD_SLOTS = { bins: 'amr/bins_off.wgsl', half: 'amr/gravity/half_
 /** And with per-block timesteps: the half step is each block's own. */
 export const FIELD_SLOTS_BINS = { bins: 'amr/bins_on.wgsl', half: '#include "amr/gravity/half_on.wgsl"\n#include "amr/gravity/half_field.wgsl"' };
 const SEQUENTIAL = !!(globalThis as { AMR_GRAVITY_SEQUENTIAL?: boolean }).AMR_GRAVITY_SEQUENTIAL; // debugging: always level by level
+/**
+ * Cycles after the first of a warm-started solve run only while the residual stays above
+ * this, relative to the largest source term (amr/gravity/gate.wgsl).
+ */
+export const VCYCLE_TOL = Number(new URLSearchParams(globalThis.location?.search ?? '').get('vtol')) || 1e-4;
+/** A dispatch count that stands for "as many as the gate says" (cells(), color(), faces()). */
+const GATED = -2;
 
 export interface GravityContext {
   device: GPUDevice;
@@ -75,6 +82,17 @@ export class AmrGravity {
   private gGhostCoarseAll!: GPUBindGroup;
   private gField!: GPUBindGroup;
   private gNew!: GPUBindGroup;
+  // Adaptive cycles: the residual after a cycle, and the gate that sizes the next one.
+  private pResidual!: GPUComputePipeline;
+  private pGate!: GPUComputePipeline;
+  private pGateRecord!: GPUComputePipeline;
+  private gGateRecord!: GPUBindGroup;
+  private gResidual!: GPUBindGroup;
+  private gGate!: GPUBindGroup;
+  private res!: GPUBuffer;
+  private gateArgs!: GPUBuffer;
+  /** [0] cycles run beyond the first, [1] the last relative residual (float bits), [2] residuals measured */
+  stats!: GPUBuffer;
   // Per-block timesteps: the passes of a solve restricted to the blocks starting a step.
   private dphi?: GPUTexture;
   private pFieldB?: GPUComputePipeline;
@@ -178,6 +196,19 @@ export class AmrGravity {
     g.gGhostRestB = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
     g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 4: ctx.bh, 5: ctx.clock, 30: ctx.bt, 31: ctx.listAll });
     g.gNew = bindGroup(d, g.pNew, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLeaf });
+
+    [g.pResidual, g.pGate, g.pGateRecord] = await Promise.all([
+      computePipeline(d, assemble('amr/gravity/residual.wgsl'), 'amr mg residual check'),
+      computePipeline(d, assemble('amr/gravity/gate.wgsl'), 'amr mg cycle gate', { TOL: VCYCLE_TOL }),
+      computePipeline(d, assemble('amr/gravity/gate.wgsl'), 'amr mg cycle gate', { RECORD: 1 }),
+    ]);
+    g.res = d.createBuffer({ label: 'amr mg residual', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    g.gateArgs = d.createBuffer({ label: 'amr mg gated sizes', size: 33 * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
+    g.stats = d.createBuffer({ label: 'amr mg cycle stats', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    const uRes = uniform(0, 0, 1);
+    g.gResidual = bindGroup(d, g.pResidual, { 0: ctx.params, 1: uRes, 2: phi0, 3: rhs0, 4: g.res, 10: ctx.multipole, 30: ctx.bt, 31: ctx.listAll });
+    g.gGate = bindGroup(d, g.pGate, { 1: g.res, 2: g.gateArgs, 3: g.stats, 31: ctx.listAll });
+    g.gGateRecord = bindGroup(d, g.pGateRecord, { 1: g.res, 2: g.gateArgs, 3: g.stats, 31: ctx.listAll });
     return g;
   }
 
@@ -187,17 +218,20 @@ export class AmrGravity {
    * the sizes come from the table amr/bins_args.wgsl fills.
    */
   private cells(pass: GPUComputePassEncoder, count: number, bsize: number) {
+    if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(Math.log2(BS / bsize)));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(3 + Math.log2(BS / bsize)));
     const span = Math.max(bsize, 8);
     pass.dispatchWorkgroups(count * (span / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
   /** Dispatch over the cells of one color (see smooth.wgsl). */
   private color(pass: GPUComputePassEncoder, count: number, bsize: number) {
+    if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(5 + Math.log2(BS / bsize)));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(8 + Math.log2(BS / bsize)));
     pass.dispatchWorkgroups(Math.ceil((count * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
   }
   /** Dispatch over the face ghosts of `count` blocks (ghost.wgsl): 6 x 2 x 16 x 16 cells, in rows of 64. */
   private faces(pass: GPUComputePassEncoder, count: number) {
+    if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(10));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(15));
     if (count > 0) pass.dispatchWorkgroups((6 * 2 * BS * BS) / 64, count, 1);
   }
@@ -276,12 +310,34 @@ export class AmrGravity {
       // its coarser level had at the start of the cycle. The lag costs nothing measurable when
       // the potential changes little per step, and the number of dispatches no longer grows
       // with the depth of the tree.
+      //
+      // `cycles` is the most it runs. After the first, each further cycle runs only if the
+      // residual the last one left is above VCYCLE_TOL of the largest source term and that
+      // cycle halved it at least: a residual pass measures it and a gate pass sizes the next
+      // cycle's dispatches, all on the GPU. (The first is measured too, before the first cycle.)
       const all = this.ctx.levels + 1;
+      if (cycles > 1) {
+        pass.setPipeline(this.pResidual);
+        pass.setBindGroup(0, this.gResidual);
+        this.cells(pass, nAll, BS);
+        pass.setPipeline(this.pGateRecord);
+        pass.setBindGroup(0, this.gGateRecord);
+        pass.dispatchWorkgroups(1);
+      }
       for (let c = 0; c < cycles; c++) {
+        const count = c === 0 ? nAll : GATED;
+        if (c > 0) {
+          pass.setPipeline(this.pResidual);
+          pass.setBindGroup(0, this.gResidual);
+          this.cells(pass, c === 1 ? nAll : GATED, BS);
+          pass.setPipeline(this.pGate);
+          pass.setBindGroup(0, this.gGate);
+          pass.dispatchWorkgroups(1);
+        }
         pass.setPipeline(this.pGhostCoarse);
         pass.setBindGroup(0, this.gGhostCoarseAll);
-        this.faces(pass, nAll);
-        this.vcycle(pass, all, nAll);
+        this.faces(pass, count);
+        this.vcycle(pass, all, count);
       }
     }
     pass.setPipeline(this.pGhostRest);
