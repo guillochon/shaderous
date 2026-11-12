@@ -1,7 +1,7 @@
 // Species on the block grid, third pass: move every leaf cell's rho X with the mass fluxes the
 // update recorded (amr/species_on.wgsl), reconstructed as on the uniform grid
 // (hydro/species.wgsl): the upwind cell's fractions half a step ahead (SH) plus half its
-// limited slope (from SX) toward the face, the slopes of all species limited together.
+// limited slope (from SX) toward the face, limited as on the uniform grid.
 //
 // Through a face shared with a refined neighbor, a coarse cell takes the average of the fine
 // cells' species fluxes, each reconstructed in the fine block as the fine cell itself did: the

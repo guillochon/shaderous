@@ -20,8 +20,11 @@ export interface Snapshot {
   /** refinement level and position (in blocks, at that level) of each block; leaves only */
   levels: Int32Array;
   locations: Int32Array; // 3 per block
-  /** one array per variable: blocks in order, each block as [z][y][x] */
-  data: Partial<Record<Variable, Float32Array>>;
+  /**
+   * one array per variable: blocks in order, each block as [z][y][x]. Besides VARIABLES, the
+   * mass fraction of each species the run carries, under the species' name (Problem.species).
+   */
+  data: Partial<Record<Variable, Float32Array>> & Record<string, Float32Array | undefined>;
   /** written by this program: enough to set the run up again exactly */
   meta?: SnapshotMeta;
 }
@@ -124,12 +127,17 @@ export class SnapshotSampler {
     return hit;
   }
 
-  /** Primitive state at a point. */
-  prim(fx: number, fy: number, fz: number): Prim {
+  /**
+   * Primitive state at a point, with the mass fractions of `species` if the file has every one
+   * of them (otherwise none).
+   */
+  prim(fx: number, fy: number, fz: number, species?: readonly string[]): Prim {
     const { block, cell } = this.where(fx, fy, fz);
     const o = block * this.cells + cell;
     const d = this.snap.data;
-    return { rho: d.rho![o], vx: d.vel1![o], vy: d.vel2![o], vz: d.vel3![o], p: d.press![o], s: d.r0 ? d.r0[o] : 0 };
+    const w: Prim = { rho: d.rho![o], vx: d.vel1![o], vy: d.vel2![o], vz: d.vel3![o], p: d.press![o], s: d.r0 ? d.r0[o] : 0 };
+    if (species?.length && species.every((k) => d[k])) w.X = species.map((k) => d[k]![o]);
+    return w;
   }
 
   /** Refinement level of the block at a point. */

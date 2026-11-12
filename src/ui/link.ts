@@ -54,9 +54,9 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy'] as const;
+const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy'] as const;
 const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy',
+  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy',
 };
 
 export function encodeLink(s: LinkState): URLSearchParams {
@@ -222,6 +222,8 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.view, 'mode', pick<ViewState['mode']>('mode', ['volume', 'slice']));
   const field = num('field', 0, FIELDS.length - 1);
   put(out.view, 'field', field === undefined ? undefined : Math.round(field));
+  const species = num('species', 0, (problemById(problem).species?.length ?? 1) - 1);
+  put(out.view, 'species', species === undefined ? undefined : Math.round(species));
   const axis = num('axis', 0, 2);
   put(out.view, 'sliceAxis', axis === undefined ? undefined : Math.round(axis));
   put(out.view, 'slicePos', num('slice', 0, 0.999));

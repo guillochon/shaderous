@@ -23,6 +23,22 @@ const F_VORTICITY = 11u;
 const F_DIVERGENCE = 12u;
 const F_DENSITY_GRADIENT = 13u;
 const F_LEVEL = 14u;
+const F_MASS_FRACTION = 19u;
+
+// Mass fraction of species V.sp.x at texel c of the state: its rho X over the sum of all of
+// them (species/species.ts), read from S, the groups of four V.sp.y texels apart along z.
+// Requires S and V; 0 without species.
+fn mass_fraction(c: vec3<i32>) -> f32 {
+  if (V.sp.z == 0u) { return 0.0; }
+  var sum = 0.0;
+  var mine = 0.0;
+  for (var g = 0u; g < V.sp.z; g++) {
+    let u = textureLoad(S, c + vec3<i32>(0, 0, i32(g * V.sp.y)), 0);
+    sum += dot(u, vec4<f32>(1.0));
+    if (g == V.sp.x / 4u) { mine = u[V.sp.x % 4u]; }
+  }
+  return mine / max(sum, 1.0e-30);
+}
 
 fn field_needs_grad(f: u32) -> bool {
   return f == F_VORTICITY || f == F_DIVERGENCE || f == F_DENSITY_GRADIENT;

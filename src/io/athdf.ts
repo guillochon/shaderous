@@ -9,12 +9,13 @@
 //   x1f, x2f, x3f    float32 [blocks, n+1]  cell faces;   x1v, x2v, x3v  [blocks, n]  centers
 //   prim             float32 [variables, blocks, nx3, nx2, nx1]
 //
-// A uniform grid is one block. The passive scalar is the variable "r0" of "prim". Files this
+// A uniform grid is one block. The passive scalar is the variable "r0" of "prim", and each
+// species' mass fraction the variable named after the species ("he4", "c12"). Files this
 // program writes also carry a "Shaderous" attribute (JSON) with the settings of the run.
 //
 // HDF5 itself comes from h5wasm (the HDF5 library compiled to WebAssembly), loaded on first
 // use: it is several megabytes and most visits never need it.
-import { blockCells, blockCount, maxLevel, VARIABLES, type Snapshot, type SnapshotMeta, type Variable } from './snapshot';
+import { blockCells, blockCount, maxLevel, VARIABLES, type Snapshot, type SnapshotMeta } from './snapshot';
 
 // The part of h5wasm used here, so a caller (the unit tests, under Node) can supply its build.
 export interface H5 {
@@ -74,7 +75,8 @@ export async function writeAthdf(s: Snapshot, h5?: H5, gzip = 0): Promise<Uint8A
   const f = new lib.File(name, 'w');
   const nb = blockCount(s);
   const [nx, ny, nz] = s.blockSize;
-  const present = VARIABLES.filter((v) => s.data[v]);
+  // The primitives first, in their order, then the species.
+  const present = [...VARIABLES.filter((v) => s.data[v]), ...Object.keys(s.data).filter((k) => !(VARIABLES as readonly string[]).includes(k) && s.data[k])];
 
   f.create_attribute('NumCycles', s.steps, null, '<i4');
   f.create_attribute('Time', s.time, null, '<f4');
@@ -192,8 +194,9 @@ export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
     let first = 0;
     for (let d = 0; d < sets.length; d++) {
       for (let v = 0; v < counts[d]; v++) {
-        const variable = names[first + v] as Variable;
-        if (!VARIABLES.includes(variable) || snap.data[variable]) continue;
+        // Every variable is kept: the primitives, and species a run may carry.
+        const variable = names[first + v];
+        if (!variable || snap.data[variable]) continue;
         const set = dataset(sets[d]);
         const got = set.slice([[v, v + 1], [], [], [], []]) as ArrayLike<number>;
         if (got.length !== nb * cells) throw new Error(`"${sets[d]}" does not have the shape the header describes`);

@@ -3,8 +3,8 @@
 //
 // Each face carries F X_i, with F its mass flux and X_i the upwind cell's mass fraction half
 // a step ahead (hydro/species_predict.wgsl) plus half its limited slope toward the face: the
-// MUSCL-Hancock reconstruction the passive scalar gets. The slopes of all species are limited
-// together (hydro/species_slopes.wgsl), so face values sum to one and sum_i rho X_i moves
+// MUSCL-Hancock reconstruction the passive scalar gets. Each species is limited on its own and
+// the slopes then made to sum to zero (hydro/species_slopes.wgsl), so face values sum to one and sum_i rho X_i moves
 // exactly as rho does: mass fractions stay in [0, 1] and keep summing to one, and a species
 // that is the same everywhere stays so. What rounding leaves is removed by scaling the new
 // values to the new density. Solid and fixed cells keep theirs.

@@ -17,6 +17,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
   let u1: Float32Array;
   let u2: Float32Array;
   let restart: Awaited<ReturnType<Sim['readRestart']>>;
+  let X: Float32Array[];
 
   if (sim instanceof AmrSim) {
     // Leaves come back block by block, each as [z][y][x]: the layout a snapshot uses.
@@ -28,6 +29,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     levels = Int32Array.from(leaves.map((b) => b.level));
     locations = Int32Array.from(leaves.flatMap((b) => [b.c[0], b.c[1], flat ? 0 : b.c[2]]));
     ({ u1, u2 } = cells);
+    X = await sim.readLeafSpecies();
     restart = await sim.readRestart();
   } else if (sim instanceof Sim) {
     // A uniform grid is a single block.
@@ -36,6 +38,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     levels = new Int32Array(1);
     locations = new Int32Array(3);
     ({ u1, u2 } = await sim.readState());
+    X = await sim.readSpecies();
     restart = await sim.readRestart();
   } else {
     throw new Error('this kind of simulation cannot be exported');
@@ -51,7 +54,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     steps: Math.round(restart.steps),
     levels,
     locations,
-    data: primitivesFrom(cfg, u1, u2),
+    data: { ...primitivesFrom(cfg, u1, u2), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])) },
     meta: meta ? { ...meta, masses: restart.masses } : undefined,
   };
 }
@@ -75,8 +78,10 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
       init: (n, eos, ndim, params) => {
         const preset = problem.init(n, eos, ndim, params);
         return (x, y, z) => {
-          const { solid, fixed } = preset(x, y, z);
-          return { ...sampler.prim(frac(x), frac(y), frac(z)), solid, fixed };
+          const { solid, fixed, X } = preset(x, y, z);
+          // Species the file lacks start as the preset has them.
+          const w = sampler.prim(frac(x), frac(y), frac(z), problem.species);
+          return { ...w, X: w.X ?? X, solid, fixed };
         };
       },
     },

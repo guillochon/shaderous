@@ -13,25 +13,30 @@ fn mc(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
   return select(vec4<f32>(0.0), s, a * b > vec4<f32>(0.0));
 }
 
-// Slopes of every species of a cell with fractions o, between its neighbors m and p, with one
-// limiter for all: the central slopes, scaled by the smallest ratio of any species'
-// monotonized-central slope to its central one. Central slopes sum to zero (the fractions sum
-// to one in every cell), so the scaled ones do too, and each species stays within its own
-// limit. (Limiting each species on its own leaves face values that do not sum to one; scaling
-// them back, as consistent multi-fluid advection does (Plewa & Mueller 1999), changes a
-// species that is the same everywhere.)
+// Slopes of every species of a cell with fractions o, between its neighbors m and p. Each
+// species gets its own monotonized-central slope, so a sharp front in one species does not
+// flatten the others. Those slopes need not sum to zero, and face values must sum to one: the
+// excess is taken back from the slopes of the sign that has too much, each in proportion to
+// its size. That only shrinks slopes (each stays within its own limit, so no face value
+// leaves the range of its neighbors), and a species with no slope, such as one that is the
+// same everywhere, is left alone. (Scaling face values back to sum to one, as consistent
+// multi-fluid advection does (Plewa & Mueller 1999), would change such a species.)
 fn slopes(m: array<vec4<f32>, NG>, o: array<vec4<f32>, NG>, p: array<vec4<f32>, NG>) -> array<vec4<f32>, NG> {
-  var phi = 1.0;
+  var s: array<vec4<f32>, NG>;
+  var up = 0.0;     // sum of the positive slopes
+  var down = 0.0;   // sum of the negative ones, as a positive number
   for (var g = 0u; g < NG; g++) {
     let a = o[g] - m[g];
     let b = p[g] - o[g];
-    let c = 0.5 * (a + b);
     let real = max(abs(a), abs(b)) > vec4<f32>(SLOPE_FLOOR);
-    let r = select(vec4<f32>(1.0), mc(a, b) / c, real & (abs(c) > vec4<f32>(1e-30)));
-    phi = min(phi, min(min(r.x, r.y), min(r.z, r.w)));
+    s[g] = select(vec4<f32>(0.0), mc(a, b), real);
+    up += dot(max(s[g], vec4<f32>(0.0)), vec4<f32>(1.0));
+    down -= dot(min(s[g], vec4<f32>(0.0)), vec4<f32>(1.0));
   }
-  var s: array<vec4<f32>, NG>;
-  for (var g = 0u; g < NG; g++) { s[g] = 0.5 * phi * (p[g] - m[g]); }
+  // Scale the larger side down to the smaller one.
+  let kp = select(1.0, down / up, up > down);
+  let kn = select(1.0, up / down, down > up);
+  for (var g = 0u; g < NG; g++) { s[g] = select(s[g] * kn, s[g] * kp, s[g] > vec4<f32>(0.0)); }
   return s;
 }
 

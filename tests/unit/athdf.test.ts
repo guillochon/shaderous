@@ -39,6 +39,27 @@ describe('Athena++ HDF5 snapshots', () => {
     expect(back.meta).toEqual(s.meta);
   });
 
+  it('round-trips species as variables named after them', async () => {
+    const s = sample();
+    const n = s.levels.length * 16;
+    s.data.he4 = Float32Array.from({ length: n }, (_, i) => i / n);
+    s.data.c12 = Float32Array.from({ length: n }, (_, i) => 1 - i / n);
+    const bytes = await writeAthdf(s, h5);
+    const back = await readAthdf(bytes, h5);
+    expect(Array.from(back.data.he4!)).toEqual(Array.from(s.data.he4));
+    expect(Array.from(back.data.c12!)).toEqual(Array.from(s.data.c12));
+    const sampler = new SnapshotSampler(back);
+    // Root block, cell (1, 2) is cell 9 of block 0.
+    expect(sampler.prim(0.1875, 0.625, 0, ['c12', 'he4']).X).toEqual([back.data.c12![9], back.data.he4![9]]);
+    // A species the file lacks: none of them are read.
+    expect(sampler.prim(0.1875, 0.625, 0, ['c12', 'o16']).X).toBeUndefined();
+    (await h5.ready).FS.writeFile('species.athdf', bytes);
+    const f = new h5wasm.File('species.athdf', 'r');
+    expect(f.attrs.VariableNames.value).toEqual([...VARIABLES, 'he4', 'c12']);
+    f.close();
+    (await h5.ready).FS.unlink('species.athdf');
+  });
+
   it('writes the layout other tools expect', async () => {
     const bytes = await writeAthdf(sample(), h5);
     (await h5.ready).FS.writeFile('check.athdf', bytes);

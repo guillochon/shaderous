@@ -11,6 +11,14 @@ import type { Problem } from '../problems/types';
 /** Mass fractions per texel. */
 export const SPECIES_PER_GROUP = 4;
 
+/** A species name as the menus show it: 'c12' as ¹²C, 'he4' as ⁴He; any other name as it is. */
+export function speciesLabel(name: string): string {
+  const m = /^([a-z]{1,2})(\d+)$/i.exec(name);
+  if (!m) return name;
+  const sup = '⁰¹²³⁴⁵⁶⁷⁸⁹';
+  return [...m[2]].map((d) => sup[+d]).join('') + m[1][0].toUpperCase() + m[1].slice(1).toLowerCase();
+}
+
 /** How many groups of four a problem's species fill (0 without species). */
 export const speciesGroups = (p: Pick<Problem, 'species'>): number => Math.ceil((p.species?.length ?? 0) / SPECIES_PER_GROUP);
 

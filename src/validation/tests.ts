@@ -49,6 +49,25 @@ const stillGas = (over: Partial<Problem>): Problem => ({
 });
 
 /**
+ * Five species (two groups of four) on a density bump carried diagonally around the box: a
+ * smooth one (and the passive scalar with the same profile), one with sharp edges of height
+ * `sharp`, one at 0.2 everywhere, and two sharing the rest.
+ */
+const speciesCarry = (sharp: number, tEnd = 2): Problem =>
+  stillGas({
+    id: 'species-advection', tEnd, species: ['a', 'b', 'c', 'd', 'e'],
+    init: () => (x, y) => {
+      const a = 0.3 + 0.2 * Math.sin(2 * Math.PI * x) * Math.sin(2 * Math.PI * y);
+      const b = Math.abs(x) < 0.2 && Math.abs(y) < 0.2 ? sharp : 0;
+      const rest = 1 - a - b - 0.2;
+      return {
+        rho: 1 + 0.5 * Math.exp(-((x - 0.1) ** 2 + y ** 2) / 0.02), vx: 1, vy: 0.5, vz: 0, p: 1, s: a,
+        X: [a, b, 0.2, rest * 0.75, rest * 0.25],
+      };
+    },
+  });
+
+/**
  * Gresho vortex: a steady vortex in a periodic unit box, the pressure balancing the centrifugal
  * force, with the background pressure setting the Mach number of its fastest gas (speed 1 at
  * r = 0.2). Nothing should change; what does is the solver's own dissipation.
@@ -441,26 +460,12 @@ export const TESTS: TestDef[] = [
     id: 'species',
     name: 'Species carried with the gas (2D)',
     criterion:
-      'On a density bump carried twice around the box, five species (two groups of four) with a sharp-edged one among them: mass fractions stay in [0, 1] and sum to 1 within 1e-5, the mass of each species is kept within 1e-5 of the total, and one at 0.2 everywhere stays 0.2 within 1e-5. Without the sharp one, a smooth species returns at least as accurately as the passive scalar carrying the same profile (mean error 3.5e-4 at 128^2).',
+      'On a density bump carried twice around the box, five species (two groups of four) with a sharp-edged one among them: mass fractions stay in [0, 1] and sum to 1 within 1e-5, the mass of each species is kept within 1e-5 of the total, and one at 0.2 everywhere stays 0.2 within 1e-5. A smooth species returns at least as accurately as the passive scalar carrying the same profile (mean error 3.5e-4 at 128^2), and beside the sharp one (each species limited on its own) its mean error stays below 5e-4.',
     async run(gpu) {
       const n = 128;
-      const smooth = (x: number, y: number) => 0.3 + 0.2 * Math.sin(2 * Math.PI * x) * Math.sin(2 * Math.PI * y);
-      const carry = (sharp: number) =>
-        stillGas({
-          id: 'species-advection', tEnd: 2, species: ['a', 'b', 'c', 'd', 'e'],
-          init: () => (x, y) => {
-            const a = smooth(x, y);
-            const b = Math.abs(x) < 0.2 && Math.abs(y) < 0.2 ? sharp : 0;
-            const rest = 1 - a - b - 0.2;
-            return {
-              rho: 1 + 0.5 * Math.exp(-((x - 0.1) ** 2 + y ** 2) / 0.02), vx: 1, vy: 0.5, vz: 0, p: 1, s: a,
-              X: [a, b, 0.2, rest * 0.75, rest * 0.25],
-            };
-          },
-        });
       const mass = (X: Float32Array[], u1: Float32Array) => X.map((x) => x.reduce((s, v, q) => s + v * u1[4 * q], 0));
       const run = (sharp: number) =>
-        withSim(gpu, carry(sharp), n, { ndim: 2 }, async (sim) => {
+        withSim(gpu, speciesCarry(sharp), n, { ndim: 2 }, async (sim) => {
           const X0 = await sim.readSpecies();
           const m0 = mass(X0, (await sim.readState()).u1);
           await sim.runToEnd(64);
@@ -491,7 +496,7 @@ export const TESTS: TestDef[] = [
       const plain = await run(0);
       const ok = (r: typeof mixed) => r.sumErr < 1e-5 && r.lo >= 0 && r.hi <= 1 + 1e-6 && r.massErr < 1e-5 && r.flatErr < 1e-5;
       return {
-        pass: ok(mixed) && ok(plain) && plain.l1 <= plain.l1Scalar,
+        pass: ok(mixed) && ok(plain) && plain.l1 <= plain.l1Scalar && mixed.l1 < 5e-4,
         metrics: {
           sum_error: Math.max(mixed.sumErr, plain.sumErr), min_fraction: Math.min(mixed.lo, plain.lo), max_fraction: Math.max(mixed.hi, plain.hi),
           species_mass_drift: Math.max(mixed.massErr, plain.massErr), constant_species_error: Math.max(mixed.flatErr, plain.flatErr),
@@ -707,24 +712,10 @@ export const TESTS: TestDef[] = [
     id: 'amr-species',
     name: 'Adaptive mesh: species carried with the gas (2D, 256 finest, 2 levels)',
     criterion:
-      'The species test on a mesh whose finest level follows the density bump: mass fractions stay in [0, 1] and sum to 1 within 1e-5, the mass of each species is kept within 1e-5 of the total, one at 0.2 everywhere stays 0.2 within 1e-5, and the mesh was rebuilt; without the sharp-edged species, a smooth one ends within 2e-3 (mean) of the passive scalar carrying the same profile',
+      'The species test on a mesh whose finest level follows the density bump: mass fractions stay in [0, 1] and sum to 1 within 1e-5, the mass of each species is kept within 1e-5 of the total, one at 0.2 everywhere stays 0.2 within 1e-5, and the mesh was rebuilt; a smooth species ends within 1.3e-3 (mean) of the passive scalar carrying the same profile, and within 1.5e-3 beside the sharp-edged one (ghosts next to coarser blocks interpolated, each species limited on its own)',
     async run(gpu) {
-      const smooth = (x: number, y: number) => 0.3 + 0.2 * Math.sin(2 * Math.PI * x) * Math.sin(2 * Math.PI * y);
-      const carry = (sharp: number) =>
-        stillGas({
-          id: 'species-advection', tEnd: 2, species: ['a', 'b', 'c', 'd', 'e'],
-          init: () => (x, y) => {
-            const a = smooth(x, y);
-            const b = Math.abs(x) < 0.2 && Math.abs(y) < 0.2 ? sharp : 0;
-            const rest = 1 - a - b - 0.2;
-            return {
-              rho: 1 + 0.5 * Math.exp(-((x - 0.1) ** 2 + y ** 2) / 0.02), vx: 1, vy: 0.5, vz: 0, p: 1, s: a,
-              X: [a, b, 0.2, rest * 0.75, rest * 0.25],
-            };
-          },
-        });
       const run = (sharp: number) =>
-        withAmr(gpu, carry(sharp), 256, { ndim: 2, amrLevels: 2, refineDense: 1.2 }, async (sim) => {
+        withAmr(gpu, speciesCarry(sharp), 256, { ndim: 2, amrLevels: 2, refineDense: 1.2 }, async (sim) => {
           const mass = async () => {
             const c = await sim.readLeaves();
             const X = await sim.readLeafSpecies();
@@ -760,7 +751,7 @@ export const TESTS: TestDef[] = [
       const plain = await run(0);
       const ok = (r: typeof mixed) => r.sumErr < 1e-5 && r.lo >= 0 && r.hi <= 1 + 1e-6 && r.massErr < 1e-5 && r.flatErr < 1e-5 && r.regrids >= 1;
       return {
-        pass: ok(mixed) && ok(plain) && plain.vsScalar < 2e-3,
+        pass: ok(mixed) && ok(plain) && plain.vsScalar < 1.3e-3 && mixed.vsScalar < 1.5e-3,
         metrics: {
           sum_error: Math.max(mixed.sumErr, plain.sumErr), min_fraction: Math.min(mixed.lo, plain.lo), max_fraction: Math.max(mixed.hi, plain.hi),
           species_mass_drift: Math.max(mixed.massErr, plain.massErr), constant_species_error: Math.max(mixed.flatErr, plain.flatErr),
@@ -1012,7 +1003,7 @@ export const TESTS: TestDef[] = [
     id: 'snapshot-roundtrip',
     name: 'Export to HDF5 and import again',
     criterion:
-      'A run saved to an .athdf file and started again from it has the same time, the same mesh, and a state equal to round-off (1e-5 relative); continued for the same number of steps, the two runs still agree to 1e-4. Checked on a uniform grid, an adaptive mesh, and a run with a perturber',
+      'A run saved to an .athdf file and started again from it has the same time, the same mesh, and a state equal to round-off (1e-5 relative); continued for the same number of steps, the two runs still agree to 1e-4. Checked on a uniform grid, an adaptive mesh, and a run with a perturber; with species, on both grids, every mass fraction comes back to 1e-6',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -1081,6 +1072,46 @@ export const TESTS: TestDef[] = [
             adaptive_cells_without_a_match: missing, adaptive_state_difference: diff / scale, adaptive_mass_difference: Math.abs(da.mass - db.mass) / da.mass,
           });
           pass &&= sameMesh && missing === 0 && cb.count === ca.count && diff / scale < 1e-5 && da.t === db.t;
+        } finally {
+          b.destroy();
+        }
+      });
+
+      // Species, on both grids: every cell's mass fractions come back.
+      const carried = speciesCarry(0.3, 0.2);
+      await withSim(gpu, carried, 64, { ndim: 2 }, async (a) => {
+        await a.runToEnd();
+        const { snap } = await roundtrip(a);
+        const b = await Sim.create(gpu, { ...configFor(carried, 64, { ndim: 2 }), ...restartFrom(snap, carried, false, 64) });
+        try {
+          const [xa, xb] = [await a.readSpecies(), await b.readSpecies()];
+          metrics.uniform_species_difference = Math.max(...xa.map((x, i) => x.reduce((m, v, q) => Math.max(m, Math.abs(v - xb[i][q])), 0)));
+          pass &&= xa.length === 5 && metrics.uniform_species_difference < 1e-6;
+        } finally {
+          b.destroy();
+        }
+      });
+      await withAmr(gpu, carried, 128, { ndim: 2, amrLevels: 2, refineDense: 1.2 }, async (a) => {
+        await a.runToEnd();
+        a.flush();
+        const { snap } = await roundtrip(a);
+        const b = await AmrSim.create(gpu, { ...configFor(carried, 128, { ndim: 2, amrLevels: 2, refineDense: 1.2 }), ...restartFrom(snap, carried, true, 32) });
+        try {
+          const species = async (s: AmrSim) => {
+            const c = await s.readLeaves();
+            const X = await s.readLeafSpecies();
+            return new Map(Array.from({ length: c.count }, (_, q) => [`${c.x[q]},${c.y[q]}`, X.map((x) => x[q])]));
+          };
+          const [ma, mb] = [await species(a), await species(b)];
+          let diff = 0;
+          let missing = 0;
+          for (const [k, xa] of ma) {
+            const xb = mb.get(k);
+            if (!xb) missing++;
+            else diff = Math.max(diff, ...xa.map((v, i) => Math.abs(v - xb[i])));
+          }
+          Object.assign(metrics, { adaptive_species_difference: diff, adaptive_species_cells_without_a_match: missing });
+          pass &&= missing === 0 && ma.size === mb.size && diff < 1e-6;
         } finally {
           b.destroy();
         }

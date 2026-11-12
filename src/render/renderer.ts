@@ -21,6 +21,8 @@ function fromKey(k: number): number {
 export interface ViewState {
   mode: 'volume' | 'slice';
   field: number;
+  /** Mass fraction field: which species (in the order of Problem.species) */
+  species: number;
   log: boolean;
   lo: number; // displayed range in field units
   hi: number;
@@ -119,6 +121,7 @@ export function guideLines(p: [number, number, number]): Float32Array<ArrayBuffe
 export const defaultView = (): ViewState => ({
   mode: 'volume',
   field: 0,
+  species: 0,
   log: true,
   lo: 0,
   hi: 1,
@@ -159,6 +162,7 @@ export class Renderer {
   private format: GPUTextureFormat;
   private cam: GPUBuffer;
   private viewBuf: GPUBuffer;
+  private noSpecies?: GPUTexture;
   /** Volume view: the least density drawn (0 draws all the gas). */
   densityCut = 0;
   private tf: GPUTexture;
@@ -202,7 +206,7 @@ export class Renderer {
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
     this.cam = this.device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.viewBuf = this.device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
       format: 'rgba8unorm',
@@ -283,8 +287,10 @@ export class Renderer {
       this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
     }
     this.pField = await computePipeline(d, assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling], diffusion: hydroSlots(sim.cfg).diffusion }), 'field');
-    this.gField = [0, 1].map((p) =>
-      bindGroup(d, this.pField!, { 0: sim.paramBuffer, 1: this.viewBuf, 4: this.vol!.createView(), 8: this.rangeBuf, ...sim.fieldResources(p) }),
+    // One per parity of the state and of the species (a run without species binds a stand-in).
+    this.noSpecies ??= d.createTexture({ label: 'no species', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING });
+    this.gField = [0, 1, 2, 3].map((k) =>
+      bindGroup(d, this.pField!, { 0: sim.paramBuffer, 1: this.viewBuf, 4: this.vol!.createView(), 8: this.rangeBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources(k >> 1, k & 1) }),
     );
     this.range = null;
   }
@@ -369,7 +375,9 @@ export class Renderer {
     const d = this.device;
 
     const [nx, ny, nz] = this.dims;
-    const vb = new ArrayBuffer(48);
+    const vb = new ArrayBuffer(64);
+    // Mass fraction: which species, the texels between groups of four, and how many groups.
+    new Uint32Array(vb, 48, 4).set([v.species, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), 0]);
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, 0]);
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
@@ -403,7 +411,7 @@ export class Renderer {
     d.queue.writeBuffer(this.rangeBuf, 0, empty);
     const cp2 = enc.beginComputePass();
     cp2.setPipeline(this.pField);
-    cp2.setBindGroup(0, this.gField[sim.cur]);
+    cp2.setBindGroup(0, this.gField[2 * sim.cur + sim.speciesCur]);
     cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
     cp2.end();
     if (!this.rangeBusy && this.rangeCopied === null) {

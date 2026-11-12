@@ -18,6 +18,7 @@ struct View {
   hi: f32,
   nd: vec4<u32>,   // display volume size
   cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view)
+  sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups
 }
 @group(0) @binding(1) var<uniform> V: View;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -27,6 +28,7 @@ struct View {
 @group(0) @binding(6) var W1: texture_3d<f32>;    // primitives: (density, negative if solid; velocity)
 @group(0) @binding(7) var GF: texture_3d<f32>;    // gravity field: acceleration, potential in w
 @group(0) @binding(8) var<storage, read_write> RANGE: array<atomic<u32>, 132>;
+@group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
 
 fn neighbor(c: vec3<i32>) -> vec4<f32> {
   let w = textureLoad(W1, c, 0);
@@ -68,6 +70,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     g_acc = P.gext.xyz;
     if (P.grav_on != 0u) { g_acc += textureLoad(GF, c, 0).xyz; }
     var x = field_value(V.field, u1, u2, g, f32(level), phi);
+    if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
     let solid = u2.w > 0.5;
     if (!solid) { range_add(x); }
     if (V.logscale != 0u) { x = log(max(x, 1.0e-30)) * 0.4342944819; }

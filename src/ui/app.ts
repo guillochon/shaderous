@@ -10,11 +10,12 @@ import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
 import type { DisplaySystem } from '../units/units';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { speciesLabel } from '../species/species';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
+import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
@@ -742,12 +743,14 @@ function syncControls() {
     || (i === 15 && !pulled) || (i === 17 && !self);
   for (const o of fieldSel.options) o.disabled = noField(+o.value);
   if (noField(view.field)) view.field = 0;
+  syncSpeciesFields(fieldSel);
   $<HTMLInputElement>('log').disabled = LINEAR_FIELDS.has(view.field);
   const unitSel = $<HTMLSelectElement>('units');
   unitSel.value = cfg.problem.units ? unitSys : 'code';
   unitSel.disabled = !cfg.problem.units;
   const unitLabel = units().label(viewMeasure());
-  $('sum-view').textContent = unitLabel ? `${FIELDS[view.field]}, ${unitLabel}` : FIELDS[view.field];
+  const fieldName = view.field === MASS_FRACTION_FIELD ? `X(${speciesLabel(cfg.problem.species![view.species])})` : FIELDS[view.field];
+  $('sum-view').textContent = unitLabel ? `${fieldName}, ${unitLabel}` : fieldName;
   showRange();
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
   const uniform = cfg.gext.some((g) => g !== 0);
@@ -803,7 +806,7 @@ function syncControls() {
   $<HTMLInputElement>('jeanscells').disabled = !self || !cfg.jeansFloor;
   $<HTMLInputElement>('fluxwork').checked = cfg.gravEnergyFlux;
   $<HTMLSelectElement>('mode').value = two ? 'slice' : view.mode;
-  $<HTMLSelectElement>('field').value = String(view.field);
+  $<HTMLSelectElement>('field').value = view.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${view.species}` : String(view.field);
   $<HTMLSelectElement>('axis').value = String(two ? 2 : view.sliceAxis);
   // The slider places the slice, or in the volume view sets the least density drawn.
   const cutting = !two && view.mode === 'volume';
@@ -1459,7 +1462,10 @@ function bind() {
     if (diagOf) showDiagUnits();
   });
   on('field', (el) => {
-    view.field = +el.value;
+    // A species' mass fraction is the field and the species, as "19:2".
+    const [f, sp] = el.value.split(':');
+    view.field = +f;
+    if (sp !== undefined) view.species = +sp;
     // A density gradient spans decades (shocks against smooth flow), so it reads best on a log
     // scale; refinement levels are a handful of integers.
     if (view.field === 13 || view.field === 18) view.log = true;
@@ -2229,6 +2235,38 @@ function advanceStroke(now: number) {
   const sign = s.shift ? -1 : 1;
   const amount = sign * strength * (s.kind === 'mass' ? q.amount * s.rhoMax : Math.log(1.5));
   pendingBrush = { ...base, pos: locate(s.x, s.y, s.depth).pos, amount, atRest: massAtRest };
+}
+
+/**
+ * The field menu's Composition group: a mass fraction for each species the run carries, as
+ * values "19:i" (field, species). Rebuilt when the species change; a view of a species the
+ * run does not carry falls back to the density.
+ */
+function syncSpeciesFields(sel: HTMLSelectElement) {
+  const species = cfg.problem.species ?? [];
+  const key = species.join(',');
+  let group = sel.querySelector<HTMLOptGroupElement>('optgroup[data-species]');
+  if ((group?.dataset.species ?? '') !== key) {
+    group?.remove();
+    group = null;
+    if (species.length) {
+      group = document.createElement('optgroup');
+      group.label = 'Composition';
+      group.dataset.species = key;
+      species.forEach((name, i) => {
+        const o = document.createElement('option');
+        o.value = `${MASS_FRACTION_FIELD}:${i}`;
+        o.textContent = `X(${speciesLabel(name)})`;
+        o.title = `${FIELD_TIPS[MASS_FRACTION_FIELD]}: ${speciesLabel(name)}`;
+        group!.append(o);
+      });
+      sel.append(group);
+    }
+  }
+  if (view.field === MASS_FRACTION_FIELD && !(view.species < species.length)) {
+    if (species.length) view.species = 0;
+    else view.field = 0;
+  }
 }
 
 /** Displayed range from the latest diagnostics, unless the user typed one. */

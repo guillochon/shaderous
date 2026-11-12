@@ -201,7 +201,14 @@ export interface Simulation {
   /** Size of the uniform volume the renderer displays, and the pass that fills it. */
   readonly displayDims: [number, number, number];
   readonly fieldShader: string;
-  fieldResources(parity: number): Record<number, GPUBuffer | GPUTextureView>;
+  /** The display pass's resources with the state at `parity` and the species at `speciesParity`. */
+  fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView>;
+  /**
+   * Species (species/species.ts): the parity of the textures holding rho X now, and the
+   * texels along z from one group of four to the next (0 without species).
+   */
+  speciesCur: number;
+  readonly speciesStride: number;
   /** Extra text for the status line. */
   status(): string;
   /**
@@ -1280,8 +1287,13 @@ export class Sim implements Simulation {
     return [this.n, this.n, this.nz];
   }
   readonly fieldShader = 'render/field.wgsl';
-  fieldResources(parity: number): Record<number, GPUBuffer | GPUTextureView> {
-    return { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView() };
+  fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
+    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView() };
+    if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
+    return r;
+  }
+  get speciesStride(): number {
+    return this.speciesGroups ? this.nz : 0;
   }
   status(): string {
     return '';

@@ -43,9 +43,14 @@ export const FIELDS = [
   'Density', 'Temperature', 'Passive scalar', 'Pressure', 'Speed',
   'Velocity x', 'Velocity y', 'Velocity z', 'Mach number', 'Entropy',
   'Heating \u2212 cooling', 'Vorticity', 'Velocity divergence', 'Density gradient', 'Refinement level',
-  'Gravitational potential', 'Kinetic energy', 'Jeans length (cells)', 'Timestep limit',
+  'Gravitational potential', 'Kinetic energy', 'Jeans length (cells)', 'Timestep limit', 'Mass fraction',
 ] as const;
-/** The field menu: FIELDS by index, in groups (the indices themselves are the shaders' order). */
+/** The mass fraction field: one menu entry per species the run carries (ViewState.species). */
+export const MASS_FRACTION_FIELD = 19;
+/**
+ * The field menu: FIELDS by index, in groups (the indices themselves are the shaders' order).
+ * A run with species also gets a Composition group, one mass fraction per species.
+ */
 export const FIELD_MENU: { group: string; fields: number[] }[] = [
   { group: 'Gas', fields: [0, 3, 1, 9, 10, 2] },
   { group: 'Flow', fields: [4, 5, 6, 7, 8, 16] },
@@ -74,6 +79,7 @@ export const FIELD_TIPS = [
   'Kinetic energy per unit volume, \u03c1 v\u00b2 / 2',
   'Jeans length c_s (\u03c0 / G\u03c1)^\u00bd in cells. Below 4 a self-gravitating region can fragment artificially (Truelove et al. 1997)',
   'The step each cell would allow: CFL \u00d7 dx over its signal speed (|v| summed over the axes, the sound speed once per axis, diffusion), or over \u221a(dx / |g|) where gravity is stronger. The smallest sets the run\u2019s step (point-mass orbits can set it lower still)',
+  'The share of the mass in one species, carried with the gas',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
 export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12]);
