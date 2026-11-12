@@ -173,7 +173,7 @@ density itself, the pressure itself, or the sound speed for the velocities. With
 
 $$
 \eta = \frac{\delta_\text{far}^2 + \delta_\text{near}^2}{(\varepsilon S)^2},
-\qquad w = \operatorname{clamp}(1.5 - \eta,\ 0,\ 1),
+\qquad w = \mathrm{clamp}(1.5 - \eta,\ 0,\ 1),
 $$
 
 the increment is $w$ times the unlimited one plus $(1 - w)$ times the limited one. The
@@ -182,7 +182,7 @@ central limiter:
 
 $$
 \Delta_\text{lim} = \begin{cases}
-\operatorname{sgn}(\delta_\text{near})\,\min\left(2|\delta_\text{far}|,\ 2|\delta_\text{near}|,\ \tfrac13|\delta_\text{far} + 2\delta_\text{near}|\right) & \delta_\text{far}\,\delta_\text{near} > 0,\\
+\mathrm{sgn}(\delta_\text{near})\,\min\left(2|\delta_\text{far}|,\ 2|\delta_\text{near}|,\ \tfrac13|\delta_\text{far} + 2\delta_\text{near}|\right) & \delta_\text{far}\,\delta_\text{near} > 0,\\
 0 & \text{otherwise.}
 \end{cases}
 $$
@@ -199,9 +199,9 @@ forward differences, each gives a slope $\sigma$ with $q_\text{face} = q_c \pm \
 
 | Limiter | Slope $\sigma$ (zero where $ab \le 0$) | Reference |
 |---|---|---|
-| Monotonized central (MC) | $\operatorname{sgn}(a)\min\left(2\lvert a\rvert,\ 2\lvert b\rvert,\ \tfrac12\lvert a+b\rvert\right)$ | [van Leer (1977)][vanLeer1977] |
+| Monotonized central (MC) | $\mathrm{sgn}(a)\min\left(2\lvert a\rvert,\ 2\lvert b\rvert,\ \tfrac12\lvert a+b\rvert\right)$ | [van Leer (1977)][vanLeer1977] |
 | van Leer | $\dfrac{2ab}{a+b}$ | [van Leer (1974)][vanLeer1974] |
-| minmod | $\operatorname{sgn}(a)\min\left(\lvert a\rvert,\ \lvert b\rvert\right)$ | [Roe (1986)][Roe1986] |
+| minmod | $\mathrm{sgn}(a)\min\left(\lvert a\rvert,\ \lvert b\rvert\right)$ | [Roe (1986)][Roe1986] |
 
 The MC slope is also used wherever a single slope is needed: in prolongation on the adaptive
 mesh, and for the species ([§12](#12-passive-scalar-and-species)).
