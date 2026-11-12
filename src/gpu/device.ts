@@ -20,10 +20,33 @@ const NEEDED: Partial<Record<keyof GPUSupportedLimits, number>> = {
   maxTextureDimension3D: 256,
 };
 
+// Shown when there is no WebGPU at all, or no GPU behind it: what to try, most likely first.
+const NO_API_HELP = `WebGPU is not available in this browser.
+
+This browser is too old or does not support WebGPU. Try a recent Chrome or Edge.
+Recent Firefox and Safari support WebGPU on some systems but not all.`;
+
+const NO_ADAPTER_HELP = `No WebGPU adapter found.
+
+The browser supports WebGPU but could not get a GPU to run it on. Things to try:
+
+1. Check what the browser reports: open chrome://gpu (edge://gpu in Edge) and look
+   at the "WebGPU" line. If it says disabled or software only, the page says why.
+2. Turn on hardware acceleration: Settings > System > "Use graphics acceleration
+   when available", then restart the browser.
+3. Update the graphics driver from NVIDIA, AMD or Intel directly (not Windows Update).
+   Browsers block WebGPU on old or known-bad drivers.
+4. Try another browser. Chrome or Edge is the safest choice. On Linux, Chrome may
+   need chrome://flags/#enable-unsafe-webgpu (and #enable-vulkan) turned on.
+5. Remote Desktop, virtual machines, some managed work browsers and very old
+   integrated GPUs often have no WebGPU adapter. Run it locally on a real GPU.
+6. On a laptop with two GPUs, put the browser on the dedicated one (Windows:
+   Settings > System > Display > Graphics > the browser > High performance).`;
+
 export async function initGpu(): Promise<Gpu> {
-  if (!('gpu' in navigator)) throw new Error('WebGPU is not available in this browser.');
+  if (!('gpu' in navigator)) throw new Error(NO_API_HELP);
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
-  if (!adapter) throw new Error('No WebGPU adapter found.');
+  if (!adapter) throw new Error(NO_ADAPTER_HELP);
 
   const problems: string[] = [];
   for (const [k, v] of Object.entries(NEEDED)) {
