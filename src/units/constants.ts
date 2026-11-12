@@ -6,6 +6,11 @@ export const SI = {
   mu: 1.6605390666e-27, // atomic mass unit, kg
   c: 299792458, // m s^-1
   arad: 7.565733250280007e-16, // radiation constant 4 sigma / c, J m^-3 K^-4
+  me: 9.1093837015e-31, // electron mass, kg
+  h: 6.62607015e-34, // Planck constant, J s
+  eV: 1.602176634e-19, // J
+  /** ionization energy of hydrogen, J */
+  chiH: 13.598434 * 1.602176634e-19,
 } as const;
 
 export const ASTRO = {

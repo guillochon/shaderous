@@ -79,6 +79,10 @@ export function encodeLink(s: LinkState): URLSearchParams {
   num('gamma', cfg.eosParams.gamma, def.eosParams.gamma);
   num('K', cfg.eosParams.K, def.eosParams.K);
   num('arad', cfg.eosParams.arad, def.eosParams.arad);
+  num('degrho', cfg.eosParams.degRho, def.eosParams.degRho);
+  num('degp', cfg.eosParams.degP, def.eosParams.degP);
+  num('iont', cfg.eosParams.ionT, def.eosParams.ionT);
+  num('ionrho', cfg.eosParams.ionRho, def.eosParams.ionRho);
   str('cool', cfg.cooling, def.cooling);
   if (cfg.cooling !== 'off') {
     num('crate', cfg.coolParams.rate, def.coolParams.rate);
@@ -196,6 +200,10 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.eosParams, 'gamma', num('gamma', 1, 100));
   put(out.eosParams, 'K', num('K', 0));
   put(out.eosParams, 'arad', num('arad', 0));
+  put(out.eosParams, 'degRho', num('degrho', 1e-30));
+  put(out.eosParams, 'degP', num('degp', 1e-30));
+  put(out.eosParams, 'ionT', num('iont', 1e-30));
+  put(out.eosParams, 'ionRho', num('ionrho', 1e-30));
   put(out.cfg, 'cooling', pick('cool', Object.keys(COOLING_LABELS) as CoolingKind[]));
   put(out.coolParams, 'rate', num('crate', 0));
   put(out.coolParams, 'alpha', num('calpha', -4, 4));

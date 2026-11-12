@@ -12,7 +12,7 @@ import type { DisplaySystem } from '../units/units';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { createSim, maxAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
-import { EOS_LABELS, makeEos, type EosKind } from '../eos/eos';
+import { EOS_LABELS, makeEos, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
@@ -117,6 +117,10 @@ side.innerHTML = `
       ${field('gamma', number('gamma', 'step="0.05" min="1"'), '', 'Adiabatic index \u03b3: p = (\u03b3 - 1) \u03c1 e for an ideal gas, p = K \u03c1^\u03b3 for a barotropic one')}
       ${field('K (p = K rho^gamma)', number('K', 'min="0"', 2), 'row-K', 'Barotropic constant K: p = K \u03c1^\u03b3. With \u03b3 = 1 it is the square of the sound speed')}
       ${field('Radiation constant a', number('arad', 'min="0"', 2), 'row-arad', 'Radiation pressure a T\u2074 / 3 is added to the gas pressure')}
+      ${field('Degeneracy density', number('degrho', 'min="0"', 2), 'row-degrho', 'Density at which the electrons\u2019 Fermi momentum reaches m\u2091c: well below it their pressure goes as \u03c1^5/3, well above it as \u03c1^4/3. For a problem with physical units it is set from the composition (about 2\u00d710\u2076 g/cm\u00b3 for C/O); in code units')}
+      ${field('Degeneracy pressure scale', number('degp', 'min="0"', 2), 'row-degp', 'The scale \u03c0 m\u2091\u2074 c\u2075 / 3h\u00b3 of the degenerate electron pressure (6\u00d710\u00b2\u00b2 dyn/cm\u00b2). Set from physical constants for a problem with physical units; in code units')}
+      ${field('Ionization temperature', number('iont', 'min="0"', 2), 'row-iont', 'The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Hydrogen is half ionized well below it (around 10\u2074 K at stellar-atmosphere densities). Set from physical constants for a problem with physical units')}
+      ${field('Saha density', number('ionrho', 'min="0"', 2), 'row-ionrho', 'Density scale of the Saha equation, \u03bc m\u1d64 (2\u03c0 m\u2091 k T\u1d62 / h\u00b2)^3/2 in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a problem with physical units')}
       ${field('Tenuous below density', number('fluffrho', 'min="0"', 10), '', 'Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off. Placing a star with the star tool sets these from the star if they are off')}
       ${field('Max specific energy', number('fluffu', 'min="0"', 2), 'row-fluffu', 'Largest internal energy per unit mass tenuous gas may have. 0 is no cap')}
       ${field('Max speed', number('fluffv', 'min="0"', 2), 'row-fluffv', 'Largest speed tenuous gas may have. 0 is no cap')}
@@ -723,8 +727,18 @@ function syncControls() {
   $<HTMLInputElement>('gamma').value = String(+cfg.eosParams.gamma.toFixed(4));
   $<HTMLInputElement>('K').value = String(cfg.eosParams.K);
   $<HTMLInputElement>('arad').value = String(cfg.eosParams.arad);
+  const eosRows: [string, keyof EosParams, boolean][] = [
+    ['degrho', 'degRho', cfg.eos === 'degenerate'],
+    ['degp', 'degP', cfg.eos === 'degenerate'],
+    ['iont', 'ionT', cfg.eos === 'ionizing'],
+    ['ionrho', 'ionRho', cfg.eos === 'ionizing'],
+  ];
+  for (const [id, key, shown] of eosRows) {
+    $<HTMLInputElement>(id).value = String(+cfg.eosParams[key].toPrecision(6));
+    $(`row-${id}`).style.display = shown ? '' : 'none';
+  }
   $('row-K').style.display = cfg.eos === 'barotropic' ? '' : 'none';
-  $('row-arad').style.display = cfg.eos === 'gas_radiation' ? '' : 'none';
+  $('row-arad').style.display = cfg.eos === 'gas_radiation' || cfg.eos === 'degenerate' ? '' : 'none';
   // Cooling acts on the internal energy, which a barotropic gas does not have.
   const canCool = cfg.eos !== 'barotropic';
   const cool = canCool ? cfg.cooling : 'off';
@@ -1233,6 +1247,14 @@ function bind() {
     cfg.eosParams.arad = numOr(el, cfg.eosParams.arad);
     applyParams();
   });
+  for (const [id, key] of [['degrho', 'degRho'], ['degp', 'degP'], ['iont', 'ionT'], ['ionrho', 'ionRho']] as const) {
+    on(id, (el) => {
+      // Scales of the equation of state: only positive values mean anything.
+      const v = numOr(el, cfg.eosParams[key]);
+      if (v > 0) cfg.eosParams[key] = v;
+      applyParams();
+    });
+  }
   on('cooling', (el) => {
     cfg.cooling = el.value as CoolingKind;
     // The cooling function is compiled into the update pass; the run carries on.

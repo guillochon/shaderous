@@ -4,7 +4,7 @@ import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { configFor, PARAM_BYTES, Sim, type RiemannKind, type SimConfig } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
-import { defaultEosParams, EOS_MODULES, makeEos, type EosKind } from '../eos/eos';
+import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, type EosKind } from '../eos/eos';
 import { exactRiemann } from '../reference/riemann_exact';
 import { RefHydro } from '../reference/hydro';
 import { sodX, sodY, sodZ, sodDiag, strongShock, shockTube } from '../problems/shocktube';
@@ -1342,7 +1342,7 @@ export const TESTS: TestDef[] = [
   {
     id: 'eos',
     name: 'Equations of state on the GPU',
-    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4; gas+radiation reduces to its ideal-gas and pure-radiation limits',
+    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4; gas+radiation reduces to its ideal-gas and pure-radiation limits. The degenerate case puts each pressure on top of the degenerate one; the ionizing case spans neutral to fully ionized gas',
     async run(gpu) {
       const d = gpu.device;
       const metrics: Record<string, number> = {};
@@ -1356,9 +1356,10 @@ export const TESTS: TestDef[] = [
         { kind: 'gas_radiation', label: 'gasrad', params: { gamma: 5 / 3, R: 1, arad: 1 } },
         { kind: 'gas_radiation', label: 'gasrad_no_radiation', params: { gamma: 5 / 3, R: 1, arad: 0 } },
         { kind: 'gas_radiation', label: 'gasrad_radiation_only', params: { gamma: 5 / 3, R: 1e-12, arad: 1 } },
+        { kind: 'degenerate', label: 'degenerate', params: { gamma: 5 / 3, R: 1, arad: 1e-2, degRho: 1, degP: 1 } },
+        { kind: 'ionizing', label: 'ionizing', params: { gamma: 5 / 3 } },
       ];
       const inData = new Float32Array(pairs.length * 4);
-      pairs.forEach(([rho, p], i) => inData.set([rho, p, 0, 0], i * 4));
       const inBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       d.queue.writeBuffer(inBuf, 0, inData);
       const outBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
@@ -1366,8 +1367,14 @@ export const TESTS: TestDef[] = [
       const params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       for (const c of cases) {
         const ep = { ...defaultEosParams(), ...c.params };
+        const eos = makeEos(c.kind, ep);
+        // Degenerate gas cannot be below its zero-temperature pressure: test the thermal part on top.
+        const cp = c.kind === 'degenerate' ? pairs.map(([rho, p]) => [rho, eos.pressure(rho, 0) + p]) : pairs;
+        cp.forEach(([rho, p], i) => inData.set([rho, p, 0, 0], i * 4));
+        d.queue.writeBuffer(inBuf, 0, inData);
         const pb = new Float32Array(PARAM_BYTES / 4);
         pb.set([ep.gamma, ep.K, ep.R, ep.arad], 8);
+        pb.set(eosConstants2(c.kind, ep), 64);
         d.queue.writeBuffer(params, 0, pb);
         const pipe = await computePipeline(d, assemble('eos/eos_test.wgsl', { eos: EOS_MODULES[c.kind] }), `eos test ${c.label}`);
         const enc = d.createCommandEncoder();
@@ -1382,9 +1389,8 @@ export const TESTS: TestDef[] = [
         const out = new Float32Array(readBuf.getMappedRange().slice(0));
         readBuf.unmap();
 
-        const eos = makeEos(c.kind, ep);
         let round = 0, mirror = 0, limit = 0;
-        pairs.forEach(([rho, p], i) => {
+        cp.forEach(([rho, p], i) => {
           const [eint, pBack, cs] = out.subarray(i * 4, i * 4 + 3);
           const pIn = eos.hasEnergy ? p : eos.pressure(rho, 0);
           const rel = (a: number, b: number) => Math.abs(a - b) / Math.abs(b);

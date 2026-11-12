@@ -6,7 +6,7 @@ import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
-import { defaultEosParams, EOS_MODULES, makeEos, type EosKind, type EosParams } from './eos/eos';
+import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
@@ -222,7 +222,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     params: Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value])),
     problem,
     eos: problem.eos,
-    eosParams: { ...defaultEosParams(), ...problem.eosParams },
+    eosParams: { ...defaultEosParams(), ...physicalEosParams(problem.units, problem.composition), ...problem.eosParams },
     riemann: 'hllc',
     limiter: 'koren',
     gravity: ndim === 2 && isSelfGravity(problem.gravity) ? 'off' : problem.gravity,
@@ -515,7 +515,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 256;
+export const PARAM_BYTES = 272;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -560,6 +560,7 @@ export function packParams(
   f.set(packCooling(c.cooling, c.coolParams), 52);
   f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), Math.max(0, c.dampRadius), Math.max(0, c.dampRate)], 56);
   f.set([Math.max(0, c.refineRho), 0, 0, 0], 60);
+  f.set(eosConstants2(c.eos, c.eosParams), 64);
   return buf;
 }
 
