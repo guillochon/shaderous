@@ -4,16 +4,25 @@
 // texture reads, not by its Riemann solves). Requires P, the equation of state,
 // hydro/pfloor.wgsl, hydro/prim.wgsl, hydro/region.wgsl, the limiter, g_dx set, and bindings
 // U1, U2.
-// (Block grids define load_q themselves: their ghost cells are stored.)
+// (Block grids define load_q and load_comp themselves: their ghost cells are stored.)
 #include "hydro/q.wgsl"
+
+// Composition moments of a cell, or of the cell a ghost maps to (species/mixture.ts).
+fn load_comp(c: vec3<i32>) -> vec4<f32> {
+  if (!COMP) { return vec4<f32>(0.0); }
+  if (INTERIOR) { return comp_tex(c); }
+  return comp_tex(bc_map(c).c);
+}
 
 fn load_q(c: vec3<i32>) -> Q {
   if (INTERIOR) {
+    comp_use(comp_tex(c));
     let u2 = textureLoad(U2, c, 0);
     let w = prim_from_cons(textureLoad(U1, c, 0), u2);
     return Q(w.w1, vec4<f32>(w.w2.x, w.w2.z, w.w2.y, u2.w));
   }
   let m = bc_map(c);
+  comp_use(comp_tex(m.c));
   let u2 = textureLoad(U2, m.c, 0);
   let w = prim_from_cons(textureLoad(U1, m.c, 0), u2);
   return Q(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, u2.w));

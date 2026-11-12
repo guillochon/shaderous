@@ -10,6 +10,10 @@ export const shaderFiles: Record<string, string> = {};
 // Glob keys are relative to this file: "../hydro/x.wgsl", but "./x.wgsl" for files in gpu/.
 for (const [k, v] of Object.entries(raw)) shaderFiles[k.replace(/^\.\.\//, '').replace(/^\.\//, 'gpu/')] = v;
 
+// Slots most shaders never set: the composition (species/mixture.ts) is uniform unless a run's
+// species say otherwise.
+const DEFAULT_SLOTS: Slots = { comp: 'eos/comp_off.wgsl', comp_src: 'amr/comp_src_off.wgsl' };
+
 export function assemble(entry: string, slots: Slots = {}): string {
-  return preprocess(entry, shaderFiles, slots);
+  return preprocess(entry, shaderFiles, { ...DEFAULT_SLOTS, ...slots });
 }

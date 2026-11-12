@@ -9,7 +9,9 @@
 //                          its state is taken from, `face` is the true difference across a
 //                          reflecting face (and equals `seen` everywhere else)
 //   dphi_face(a, axis, k)  the plain difference, with no boundary involved, for flux_between
-// and, for viscosity (hydro/diffusion.wgsl), load_vel(c) and face_rim(a, axis, t).
+// and, for viscosity (hydro/diffusion.wgsl), load_vel(c) and face_rim(a, axis, t), and for a
+// composition that varies (species/mixture.ts), load_comp(c): the moments of a cell. Each face
+// state takes the composition of the cell it was reconstructed in.
 // Both form the difference from the same two values whichever cell asks, so the two cells
 // sharing a face still compute the same flux bit for bit.
 struct Side { rho: f32, v: vec3<f32>, p: f32, s: f32, cs: f32, eint: f32 }
@@ -62,13 +64,18 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
   return o;
 }
 
-// Flux through the face between cells l and r, along +axis, in grid-aligned components.
-fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32) -> Flux {
+// Flux through the face between cells l and r, along +axis, in grid-aligned components. kl
+// and kr are the two cells' composition moments.
+fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>) -> Flux {
   var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
   if (!EOS_HAS_ENERGY) { w = 1.0; }   // no contact wave to resolve (HLLC was tried: no different)
   // Neither face state may fall below half the smaller of the two cells' own values.
   let lo = 0.5 * min(vec2<f32>(l.a.x, l.b.x), vec2<f32>(r.a.x, r.b.x));
-  var F = riemann_flux(to_side(l, ls, 1.0, axis, lo), to_side(r, rs, -1.0, axis, lo), w);
+  comp_use(kl);
+  let sl = to_side(l, ls, 1.0, axis, lo);
+  comp_use(kr);
+  let sr = to_side(r, rs, -1.0, axis, lo);
+  var F = riemann_flux(sl, sr, w);
   F.mom = unrot(F.mom, axis);
   return F;
 }
@@ -92,6 +99,10 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   // The neighbors as they are (solid or not), for the diffusive fluxes.
   let nm1 = wm1;
   let np1 = wp1;
+  // Compositions: an image in a wall has that of the cell it mirrors, this one.
+  let k0 = load_comp(c);
+  var km1 = load_comp(c - e);
+  var kp1 = load_comp(c + e);
   // Potential steps between the five cells, lowest pair first: as the deviations see them,
   // and the true ones across this cell's two faces.
   var d = vec4<f32>(0.0);
@@ -106,8 +117,8 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
     let below = q_solid(wm1);
     let above = q_solid(wp1);
     // An image has the potential of the cell it mirrors.
-    if (below) { wm1 = q_mirror(w0, axis); pm1 = pred_mirror(p0, axis); d.y = 0.0; }
-    if (above) { wp1 = q_mirror(w0, axis); pp1 = pred_mirror(p0, axis); d.z = 0.0; }
+    if (below) { wm1 = q_mirror(w0, axis); pm1 = pred_mirror(p0, axis); d.y = 0.0; km1 = k0; }
+    if (above) { wp1 = q_mirror(w0, axis); pp1 = pred_mirror(p0, axis); d.z = 0.0; kp1 = k0; }
     if (below) { wm2 = q_mirror(wp1, axis); d.x = -d.z; } else if (q_solid(wm2)) { wm2 = q_mirror(wm1, axis); d.x = 0.0; }
     if (above) { wp2 = q_mirror(wm1, axis); d.w = -d.y; } else if (q_solid(wp2)) { wp2 = q_mirror(wp1, axis); d.w = 0.0; }
   }
@@ -118,8 +129,8 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
   let sp = edge_dn(w0, wp1, wp2, d.z, d.w, select(-t.y, t.y, d.z == t.y));
   return Faces(
-    add_diffusion(face_flux(pm1, sm, p0, lo, axis), c - e, e, axis, nm1, w0),
-    add_diffusion(face_flux(p0, hi, pp1, sp, axis), c, e, axis, w0, np1),
+    add_diffusion(face_flux(pm1, sm, p0, lo, axis, km1, k0), c - e, e, axis, nm1, w0),
+    add_diffusion(face_flux(p0, hi, pp1, sp, axis, k0, kp1), c, e, axis, w0, np1),
   );
 }
 
@@ -134,6 +145,8 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   var pr = load_pred(a + e);
   let nl = wl;
   let nr = wr;
+  var kl = load_comp(a);
+  var kr = load_comp(a + e);
   // Potential steps between the four cells, lowest pair first.
   var d = vec3<f32>(0.0);
   if (well_balanced()) {
@@ -150,6 +163,7 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
       if (q_solid(wll)) { wll = q_mirror(wl, axis); d.x = 0.0; }
       wr = q_mirror(wl, axis);
       pr = pred_mirror(pl, axis);
+      kr = kl;
       wrr = q_mirror(wll, axis);
       d.y = 0.0;
       d.z = -d.x;
@@ -158,6 +172,7 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
       if (q_solid(wrr)) { wrr = q_mirror(wr, axis); d.z = 0.0; }
       wl = q_mirror(wr, axis);
       pl = pred_mirror(pr, axis);
+      kl = kr;
       wll = q_mirror(wrr, axis);
       d.y = 0.0;
       d.x = -d.z;
@@ -171,7 +186,7 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   // reaches the wall from its own side.
   let sl = edge_up(wll, wl, wr, d.x, d.y, across * sides.x);
   let sr = edge_dn(wl, wr, wrr, d.y, d.z, across * sides.y);
-  return add_diffusion(face_flux(pl, sl, pr, sr, axis), a, e, axis, nl, nr);
+  return add_diffusion(face_flux(pl, sl, pr, sr, axis, kl, kr), a, e, axis, nl, nr);
 }
 
 fn flux_zero() -> Flux {

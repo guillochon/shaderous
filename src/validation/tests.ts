@@ -2,9 +2,11 @@
 // validate.html interactively and by Playwright in tests/gpu.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
-import { configFor, PARAM_BYTES, Sim, type RiemannKind, type SimConfig } from '../sim';
+import { configFor, PARAM_BYTES, Sim, type Diagnostics, type RiemannKind, type SimConfig } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
-import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, type EosKind } from '../eos/eos';
+import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, type EosKind, type EosParams } from '../eos/eos';
+import { mixMoments, problemCoefficients } from '../species/mixture';
+import { COMPOSITIONS } from '../units/composition';
 import { exactRiemann } from '../reference/riemann_exact';
 import { RefHydro } from '../reference/hydro';
 import { sodX, sodY, sodZ, sodDiag, strongShock, shockTube } from '../problems/shocktube';
@@ -66,6 +68,56 @@ const speciesCarry = (sharp: number, tEnd = 2): Problem =>
       };
     },
   });
+
+
+/**
+ * Two gases side by side in pressure balance, with species that set the equation of state
+ * (species/mixture.ts): a disc of helium, twice as dense, in hydrogen, p = 1 everywhere, at
+ * rest or carried diagonally across the periodic box.
+ */
+const twoGases = (eos: EosKind, eosParams: Partial<EosParams>, moving: boolean, tEnd: number): Problem =>
+  stillGas({
+    id: 'two-gases', eos, eosParams, tEnd, species: ['h1', 'he4'],
+    init: () => (x, y) => {
+      const he = Math.hypot(x, y) < 0.25;
+      return { rho: he ? 2 : 1, vx: moving ? 1 : 0, vy: moving ? 0.5 : 0, vz: 0, p: 1, s: he ? 1 : 0, X: he ? [0, 1] : [1, 0] };
+    },
+  });
+
+/** The equations of state the two-gas tests cover, each with constants that make the composition matter. */
+const MIXED_EOS: { kind: EosKind; params: Partial<EosParams> }[] = [
+  { kind: 'ideal', params: { gamma: 5 / 3 } },
+  { kind: 'gas_radiation', params: { gamma: 5 / 3, R: 1, arad: 1 } },
+  { kind: 'degenerate', params: { gamma: 5 / 3, R: 1, arad: 1e-2, degRho: 1, degP: 0.2 } },
+  { kind: 'ionizing', params: { gamma: 5 / 3 } },
+];
+
+/**
+ * How a two-gas run looks: the largest speed off the carrying velocity v0 and the largest
+ * pressure error, both from the state as the CPU's float64 equations of state read it with each
+ * cell's own composition; and the GPU's own temperature and pressure ranges against the CPU's.
+ */
+function twoGasErrors(cfg: SimConfig, cells: { u1: Float32Array; u2: Float32Array; X: Float32Array[]; count: number }, v0: [number, number], diag: Diagnostics) {
+  const coeffs = problemCoefficients(cfg.problem)!;
+  let dv = 0;
+  let dp = 0;
+  let tLo = Infinity;
+  let tHi = -Infinity;
+  for (let q = 0; q < cells.count; q++) {
+    const rho = cells.u1[4 * q];
+    dv = Math.max(dv, Math.hypot(cells.u1[4 * q + 1] / rho - v0[0], cells.u1[4 * q + 2] / rho - v0[1]));
+    const eos = makeEos(cfg.eos, cfg.eosParams, mixMoments(coeffs, cells.X.map((x) => x[q])));
+    const eint = cells.u2[4 * q + 1];
+    dp = Math.max(dp, Math.abs(eos.pressure(rho, eint) - 1));
+    const T = eos.temperature(rho, eint);
+    tLo = Math.min(tLo, T);
+    tHi = Math.max(tHi, T);
+  }
+  const [gLo, gHi] = diag.ranges[1];
+  const [pLo, pHi] = diag.ranges[3];
+  const tErr = Math.max(Math.abs(gLo - tLo) / tLo, Math.abs(gHi - tHi) / tHi);
+  return { dv, dp, tErr, gpuDp: Math.max(Math.abs(pLo - 1), Math.abs(pHi - 1)), tRatio: tHi / tLo };
+}
 
 /**
  * Gresho vortex: a steady vortex in a periodic unit box, the pressure balancing the centrifugal
@@ -506,6 +558,59 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'species-eos',
+    name: 'Species that set the equation of state (2D)',
+    criterion:
+      "A disc of helium twice as dense as the hydrogen around it, in pressure balance, under an ideal gas, gas plus radiation, degenerate electrons and ionizing hydrogen. At rest it stays at rest (speeds under 1e-5) with p = 1 to 1e-5, and the GPU's temperature and pressure ranges match the float64 equations of state of each cell's composition to 1e-5. Carried once across the box the pressure stays within each equation of state's bound (balanced to 1e-5 for the ideal gas, whose pressure does not depend on the composition; within 0.05 for the others, which err where the two gases mix: 0.3% to 1.3% at 64^2) and the faces match bit for bit. With a uniform composition, carrying species that set the equation of state changes a Sod shock tube under gas plus radiation by under 1e-5 of its range",
+    async run(gpu) {
+      const n = 64;
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      // Moving contacts: what each equation of state is allowed (the mixing cells).
+      const moveBound: Record<string, number> = { ideal: 1e-5, gas_radiation: 0.05, degenerate: 0.05, ionizing: 0.05 };
+      for (const c of MIXED_EOS) {
+        for (const moving of [false, true]) {
+          const r = await withSim(gpu, twoGases(c.kind, c.params, moving, moving ? 1 : 0.25), n, { ndim: 2 }, async (sim) => {
+            await sim.runToEnd();
+            const st = await sim.readState();
+            const X = await sim.readSpecies();
+            const e = twoGasErrors(sim.cfg, { ...st, X, count: n * n }, moving ? [1, 0.5] : [0, 0], await sim.diagnostics());
+            const flux = moving ? await sim.fluxMismatch() : { mismatched: 0 };
+            return { ...e, mismatched: flux.mismatched };
+          });
+          const tag = `${c.kind}_${moving ? 'moving' : 'static'}`;
+          metrics[`${tag}_speed`] = r.dv;
+          metrics[`${tag}_pressure_error`] = r.dp;
+          metrics[`${tag}_gpu_temperature_error`] = r.tErr;
+          if (!moving) metrics[`${c.kind}_temperature_ratio`] = r.tRatio;
+          if (moving) metrics[`${tag}_mismatched_faces`] = r.mismatched;
+          if (moving) pass &&= r.dp < moveBound[c.kind] && r.mismatched === 0;
+          else pass &&= r.dv < 1e-5 && r.dp < 1e-5 && r.gpuDp < 1e-5 && r.tErr < 1e-5;
+        }
+      }
+      // A uniform composition carried as species gives the run it would have had without them.
+      const solar = COMPOSITIONS.solar;
+      const sod = (species: boolean): Problem =>
+        stillGas({
+          id: 'sod-gasrad', eos: 'gas_radiation', eosParams: { gamma: 5 / 3, R: 1, arad: 0.3 }, tEnd: 0.15,
+          bcLo: [1, 0, 0], bcHi: [1, 0, 0],
+          ...(species ? { species: solar.species.map((x) => x.name) } : {}),
+          init: () => (x) => ({ rho: x < 0 ? 1 : 0.125, vx: 0, vy: 0, vz: 0, p: x < 0 ? 1 : 0.1, s: 0, X: solar.X }),
+        });
+      const runSod = (species: boolean) => withSim(gpu, sod(species), n, { ndim: 2 }, async (sim) => (await sim.runToEnd(), sim.readState()));
+      const [a, b] = [await runSod(false), await runSod(true)];
+      let diff = 0;
+      let scale = 0;
+      for (let i = 0; i < a.u1.length; i++) {
+        diff = Math.max(diff, Math.abs(a.u1[i] - b.u1[i]), Math.abs(a.u2[i] - b.u2[i]));
+        scale = Math.max(scale, Math.abs(a.u1[i]), Math.abs(a.u2[i]));
+      }
+      metrics.uniform_composition_difference = diff / scale;
+      pass &&= diff / scale < 1e-5;
+      return { pass, metrics };
+    },
+  },
+  {
     id: 'advection-accuracy',
     name: 'Smooth advection: error and order of convergence (2D)',
     criterion:
@@ -758,6 +863,39 @@ export const TESTS: TestDef[] = [
           smooth_species_vs_passive_scalar: plain.vsScalar, beside_sharp_one: mixed.vsScalar, regrids: mixed.regrids, leaf_blocks: mixed.leaves,
         },
       };
+    },
+  },
+  {
+    id: 'amr-species-eos',
+    name: 'Adaptive mesh: species that set the equation of state (2D, 256 finest, 2 levels)',
+    criterion:
+      'The two-gas test of species-eos on a mesh whose finest level holds the helium disc, under gas plus radiation: at rest it stays at rest (speeds under 1e-5) with p = 1 to 1e-5, and the GPU temperature range matches the float64 equation of state to 1e-5; carried once across the box (the mesh rebuilt as the disc moves) the pressure stays within 0.05 of 1 and the faces match bit for bit, also across refinement boundaries',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const c = MIXED_EOS[1];
+      for (const moving of [false, true]) {
+        const r = await withAmr(gpu, twoGases(c.kind, c.params, moving, moving ? 1 : 0.25), 256, { ndim: 2, amrLevels: 2, refineDense: 1.5 }, async (sim) => {
+          await sim.runToEnd();
+          const cells = await sim.readLeaves();
+          const X = await sim.readLeafSpecies();
+          const e = twoGasErrors(sim.cfg, { ...cells, X }, moving ? [1, 0.5] : [0, 0], await sim.diagnostics());
+          const flux = await sim.fluxMismatch();
+          return { ...e, flux, regrids: sim.regrids, leaves: sim.tree.stats().leaves };
+        });
+        const tag = moving ? 'moving' : 'static';
+        metrics[`${tag}_speed`] = r.dv;
+        metrics[`${tag}_pressure_error`] = r.dp;
+        metrics[`${tag}_gpu_temperature_error`] = r.tErr;
+        metrics[`${tag}_mismatched_faces`] = r.flux.mismatched;
+        metrics[`${tag}_coarse_fine_worst`] = r.flux.worstCoarseFine;
+        metrics[`${tag}_leaf_blocks`] = r.leaves;
+        if (moving) metrics.regrids = r.regrids;
+        pass &&= r.flux.mismatched === 0;
+        if (moving) pass &&= r.dp < 0.05 && r.regrids >= 1;
+        else pass &&= r.dv < 1e-5 && r.dp < 1e-5 && r.gpuDp < 1e-5 && r.tErr < 1e-5;
+      }
+      return { pass, metrics };
     },
   },
   {

@@ -142,6 +142,9 @@ Each pair has a ping and a pong copy; a step reads one and writes the other. Oth
   point-mass pull added in).
 - **Species:** an extra `rgba32float` texture with four mass fractions per texel, the groups of
   four stacked along $`z`$. Group $`g`$ of cell $`(x, y, z)`$ is texel $`(x, y, z + g\,n_z)`$.
+  When the species set the equation of state, one more `rgba32float` texture holds each cell's
+  four composition moments (`species/mixture.ts`); hydro passes read it at binding 27, and the
+  passes that write it use binding 26.
 
 On the uniform grid there are **no primitive-variable textures**. The predictor and the update
 convert the conserved state as they load it. The flux update is bound by texture fetches: with

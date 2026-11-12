@@ -43,6 +43,7 @@ fn red_cell(c: vec3<i32>) -> Red {
   let u1 = textureLoad(U1, a, 0);
   let u2 = textureLoad(U2, a, 0);
   if (u2.w > 0.5) { return red_identity(); }   // solid: no gas
+  comp_use(comp_tex(a));
   let dx = blk_dx(slot);
   let dv = select(dx * dx * dx, dx * dx, is2d());
   let rho = max(u1.x, P.rho_floor);

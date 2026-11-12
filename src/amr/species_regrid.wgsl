@@ -1,7 +1,8 @@
 // Species on re-meshing (after amr/regrid.wgsl has filled the new state): every leaf of the new
 // tree from the old one. An unchanged block is copied; a merged block takes the average of its
 // old children's rho X, as its density is their average; a new child takes its old parent's
-// fractions times its own new density, which keeps them summing to one and within bounds.
+// fractions times its own new density, which keeps them summing to one and within bounds. The
+// composition moments, where they vary (species/mixture.ts), follow.
 #include "amr/species_common.wgsl"
 
 @group(0) @binding(2) var S: texture_3d<f32>;     // rho X on the old mesh
@@ -53,4 +54,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     u = load_s(atl(blk_origin(src), l));
   }
   for (var g = 0u; g < NG; g++) { textureStore(SO, sp(c, g), u[g]); }
+  if (COMP) { comp_store(c, comp_moments(u)); }
 }

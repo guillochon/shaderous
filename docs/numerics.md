@@ -484,6 +484,35 @@ scaling the new values to the new density.
 
 A problem without species pays nothing. A problem with many pays only for the species pass.
 
+**Composition in the equation of state** (`src/species/mixture.ts`). When every species is a
+nuclide (`h1`, `he4`, `c12`, ...), the equation of state follows each cell's own mixture. Each
+module needs at most four numbers, and each is a mass-weighted sum over the species, so they
+mix linearly:
+
+```math
+k_1 = \mu_\text{ref}\sum_i \frac{X_i(1 + z_i)}{A_i},\quad
+k_2 = \frac{1}{Y_{e,\text{ref}}}\sum_i \frac{X_i Z_i}{A_i},\quad
+k_3 = \mu_\text{ref} X_\text{H},\quad
+k_4 = \mu_\text{ref}\sum_{i \ne \text{H}} \frac{X_i(1 + z_i)}{A_i}.
+```
+
+The problem's own composition is the reference: it keeps the kelvin scale and says how many
+free electrons $`z_i`$ each species gives. $`k_1 = \mu_\text{ref}/\mu`$ scales the gas constant
+(and the ideal gas's temperature), $`k_2 = Y_e/Y_{e,\text{ref}}`$ divides the degenerate
+electrons' density scale, and $`k_3, k_4`$ are the ionizing gas's $`h`$ and $`o`$. The moments
+live in one texture beside the state. The species passes write them whenever they write
+$`\rho X_i`$, and on the adaptive mesh the primitives pass gathers them for every ghost, as it
+gathers the state. Every pass sets the cell's composition before calling the equation of
+state, and each face state of the Riemann problem takes the composition of the cell it was
+reconstructed in.
+
+Without species, or with tracers only (names that are not nuclides), the shaders are built
+with the constant `COMP = false` (`eos/comp_off.wgsl`) and all of this folds away: such runs
+time the same as before it existed. Mixing by mass fraction keeps an ideal gas of one
+$`\gamma`$ exactly in pressure balance across a contact, since its pressure does not depend on
+the composition. The other equations of state err by about 1% in the cells where two gases
+mix (the `species-eos` test).
+
 ## 13. Self-gravity
 
 ### Multigrid on the uniform grid
@@ -730,7 +759,7 @@ The species machinery of [§12](#12-passive-scalar-and-species) and the composit
 
 ## 21. Validation
 
-The validation suite (`src/validation/tests.ts`) has 36 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 38 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

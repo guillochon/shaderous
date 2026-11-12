@@ -1,14 +1,15 @@
 // What the gas is made of: a list of species and their mass fractions.
 //
-// Today a problem has one composition everywhere, and only its mean molecular weight mu
-// reaches the physics (temperature in kelvin, the radiation EOS). The shape is that of a
-// nuclear network's state, so that a burning network can take it over unchanged:
+// A problem's composition is its reference: it fixes the kelvin scale (through mu) and the
+// constants of the equations of state. A problem whose species are nuclides (Problem.species)
+// carries rho X_i per cell and has the equation of state follow each cell's own mixture
+// (species/mixture.ts), with the reference's ionization. The shape is that of a nuclear
+// network's state, so that a burning network can take it over unchanged:
 //
-//   - `species` fixes the network's isotopes and their order. Once composition varies in
-//     space, each species' mass fraction becomes an advected scalar in that order (rho X_i
-//     conserved), and these functions run per cell on those scalars.
-//   - Everything derived here (mu, abar, zbar, ye) is what EOS and rate routines take, so a
-//     per-cell version is the same arithmetic over the cell's X_i.
+//   - `species` fixes the network's isotopes and their order. Each species' mass fraction is
+//     an advected scalar in that order (rho X_i conserved).
+//   - Everything derived here (mu, abar, zbar, ye) is what EOS and rate routines take; the
+//     per-cell versions are the same arithmetic over the cell's X_i, as mass-weighted sums.
 //
 // A is the nucleon number, used as the mass in atomic mass units; that is the convention of
 // network codes, and it is good to under 1% for everything up to iron.

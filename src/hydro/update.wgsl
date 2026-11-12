@@ -125,6 +125,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let u1 = textureLoad(U1, c, 0);
   let u2 = textureLoad(U2, c, 0);
+  // From here on the equation of state is this cell's.
+  comp_use(comp_tex(c));
 
   // Gravity is kick-drift-kick around the flux update: half a kick with the old potential here,
   // the other half in gravity/correct.wgsl once the new potential is known. (Applying the whole

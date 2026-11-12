@@ -1,4 +1,6 @@
-// Ideal gas, p = (gamma - 1) e_int. Temperature in units where p = rho T.
+// Ideal gas, p = (gamma - 1) e_int. Temperature in units where p = rho T for the reference
+// composition; where the composition varies (eos/comp_on), p = x rho T with x = g_comp.x, the
+// particles per unit mass relative to the reference's. The pressure does not depend on it.
 const EOS_HAS_ENERGY = true;
 // Where E - KE cannot be trusted, rebuild E from the advected e_int (hydro/dual_energy.wgsl).
 const EOS_KEEP_TOTAL = false;
@@ -13,9 +15,11 @@ fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
   return p / (P.eos.x - 1.0);
 }
 fn eos_temperature(rho: f32, eint: f32) -> f32 {
+  if (COMP) { return (P.eos.x - 1.0) * eint / (rho * g_comp.x); }
   return (P.eos.x - 1.0) * eint / rho;
 }
 fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
+  if (COMP) { return rho * g_comp.x * T / (P.eos.x - 1.0); }
   return rho * T / (P.eos.x - 1.0);
 }
 

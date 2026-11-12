@@ -52,6 +52,10 @@ struct Clock {
 
 @group(0) @binding(0) var<uniform> P: Params;
 
+// The composition the equation of state is evaluated for: one everywhere, or per cell
+// (species/mixture.ts).
+#include <comp>
+
 // Obstacles. The fourth component of the second state texture marks a cell: 1 is solid (a wall
 // the gas reflects off), -1 is fixed (gas held at its state, as an inflow), 0 is ordinary gas.
 // Neither kind is ever updated. Passes only look when this says there is something to find.

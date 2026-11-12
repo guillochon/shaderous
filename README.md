@@ -51,7 +51,8 @@ the methods of production astrophysics codes:
 - block-structured adaptive mesh refinement with per-block timesteps;
 - point masses with sinks;
 - equations of state from an ideal gas to degenerate electrons and ionizing hydrogen;
-- optically thin cooling, viscosity, thermal conduction, and species carried with the gas.
+- optically thin cooling, viscosity, thermal conduction, and species carried with the gas,
+  whose composition sets the equation of state cell by cell.
 
 WebGPU is a graphics interface, and fitting a conservative scheme into it shaped the design.
 No face flux is ever stored: the two cells that share a face compute bit-identical fluxes, so

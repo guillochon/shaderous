@@ -28,6 +28,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   g_dx = blk_dx(inv.slot);
   g_dt = blk_dt(inv.slot);
   let c = atl(blk_origin(inv.slot), inv.l);
+  comp_use(comp_tex(c));
   var u1 = textureLoad(N1, c, 0);
   var u2 = textureLoad(N2, c, 0);
   if (abs(u2.w) > 0.5) {

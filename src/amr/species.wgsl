@@ -6,7 +6,9 @@
 // Through a face shared with a refined neighbor, a coarse cell takes the average of the fine
 // cells' species fluxes, each reconstructed in the fine block as the fine cell itself did: the
 // same matching amr/update.wgsl does for the mass, so species are conserved across levels as
-// the mass is. One timestep for all blocks (per-block timesteps are off with species).
+// the mass is. One timestep for all blocks (per-block timesteps are off with species). Where
+// the composition sets the equation of state (species/mixture.ts), each cell's new moments are
+// written beside its rho X.
 #include "amr/species_common.wgsl"
 #include "amr/species_index.wgsl"
 
@@ -88,7 +90,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let l = inv.l;
   let c = atl(blk_origin(slot), l);
   if (has_solids() && abs(textureLoad(U2, c, 0).w) > 0.5) {
-    for (var g = 0u; g < NG; g++) { textureStore(SO, sp(c, g), textureLoad(S, sp(c, g), 0)); }
+    var u: array<vec4<f32>, NG>;
+    for (var g = 0u; g < NG; g++) {
+      u[g] = textureLoad(S, sp(c, g), 0);
+      textureStore(SO, sp(c, g), u[g]);
+    }
+    if (COMP) { comp_store(c, comp_moments(u)); }
     return;
   }
   var acc: array<vec4<f32>, NG>;
@@ -111,4 +118,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   let scale = textureLoad(N1, c, 0).x / max(sum, 1e-30);
   for (var g = 0u; g < NG; g++) { textureStore(SO, sp(c, g), out[g] * scale); }
+  if (COMP) { comp_store(c, comp_moments(out)); }
 }

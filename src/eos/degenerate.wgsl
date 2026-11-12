@@ -14,7 +14,9 @@
 // two is negligible.
 //
 // P.eos = (gamma, unused, R, a), P.eos2 = (rho_d, A, 0, 0). In single precision the thermal
-// part is resolved only where it is more than about 1e-6 of the degenerate pressure.
+// part is resolved only where it is more than about 1e-6 of the degenerate pressure. Where the
+// composition varies (eos/comp_on), R is scaled by the cell's g_comp.x and rho_d divided by its
+// g_comp.y (Ye relative to the reference's).
 const EOS_HAS_ENERGY = true;
 // Where E - KE cannot be trusted, keep E as the conservative update made it and take the
 // pressure from the advected e_int (hydro/dual_energy.wgsl). The pressure is always defined,
@@ -25,6 +27,15 @@ const EOS_HAS_ENERGY = true;
 const EOS_KEEP_TOTAL = true;
 
 #include "eos/quartic.wgsl"
+
+fn eos_R() -> f32 {
+  if (COMP) { return P.eos.z * g_comp.x; }
+  return P.eos.z;
+}
+fn deg_rho_d() -> f32 {
+  if (COMP) { return P.eos2.x / g_comp.y; }
+  return P.eos2.x;
+}
 
 // (f(x), g(x)). Below x = 1/2 both are differences of nearly equal terms, so they are summed as
 // series instead: f = 8 sum_k c_k x^(5+2k) / (5+2k) with c_k the coefficients of (1+x^2)^(-1/2),
@@ -54,7 +65,7 @@ fn deg_fg(x: f32) -> vec2<f32> {
 }
 
 fn deg_x(rho: f32) -> f32 {
-  return pow(rho / P.eos2.x, 1.0 / 3.0);
+  return pow(rho / deg_rho_d(), 1.0 / 3.0);
 }
 
 // (P_deg, E_deg) at density rho.
@@ -64,9 +75,9 @@ fn deg_pe(rho: f32) -> vec2<f32> {
 
 fn eos_pressure(rho: f32, eint: f32) -> f32 {
   let d = deg_pe(rho);
-  let T = eos_quartic(P.eos.w, P.eos.z * rho / (P.eos.x - 1.0), max(eint - d.y, 0.0));
+  let T = eos_quartic(P.eos.w, eos_R() * rho / (P.eos.x - 1.0), max(eint - d.y, 0.0));
   let T2 = T * T;
-  return d.x + P.eos.z * rho * T + P.eos.w * T2 * T2 / 3.0;
+  return d.x + eos_R() * rho * T + P.eos.w * T2 * T2 / 3.0;
 }
 fn eos_sound_speed(rho: f32, p: f32) -> f32 {
   let x = deg_x(rho);
@@ -77,24 +88,24 @@ fn eos_sound_speed(rho: f32, p: f32) -> f32 {
   let pth = max(p - pd, 0.0);
   var ct2 = 0.0;
   if (pth > 0.0) {
-    let T = eos_quartic(P.eos.w / 3.0, P.eos.z * rho, pth);
-    let beta = clamp(P.eos.z * rho * T / pth, 0.0, 1.0);
+    let T = eos_quartic(P.eos.w / 3.0, eos_R() * rho, pth);
+    let beta = clamp(eos_R() * rho * T / pth, 0.0, 1.0);
     ct2 = eos_gamma1_gas_rad(beta, P.eos.x) * pth / rho;
   }
   return sqrt(cd2 + ct2);
 }
 fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
   let d = deg_pe(rho);
-  let T = eos_quartic(P.eos.w / 3.0, P.eos.z * rho, max(p - d.x, 0.0));
+  let T = eos_quartic(P.eos.w / 3.0, eos_R() * rho, max(p - d.x, 0.0));
   let T2 = T * T;
-  return d.y + P.eos.z * rho * T / (P.eos.x - 1.0) + P.eos.w * T2 * T2;
+  return d.y + eos_R() * rho * T / (P.eos.x - 1.0) + P.eos.w * T2 * T2;
 }
 fn eos_temperature(rho: f32, eint: f32) -> f32 {
-  return eos_quartic(P.eos.w, P.eos.z * rho / (P.eos.x - 1.0), max(eint - deg_pe(rho).y, 0.0));
+  return eos_quartic(P.eos.w, eos_R() * rho / (P.eos.x - 1.0), max(eint - deg_pe(rho).y, 0.0));
 }
 fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
   let T2 = T * T;
-  return deg_pe(rho).y + P.eos.z * rho * T / (P.eos.x - 1.0) + P.eos.w * T2 * T2;
+  return deg_pe(rho).y + eos_R() * rho * T / (P.eos.x - 1.0) + P.eos.w * T2 * T2;
 }
 
 // Least e_int the dual-energy switch accepts (hydro/dual_energy.wgsl). Not the zero-temperature

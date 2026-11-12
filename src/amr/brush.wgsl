@@ -19,6 +19,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   g_dx = blk_dx(inv.slot);
   let c = atl(blk_origin(inv.slot), inv.l);
   let x = blk_pos(inv.slot, inv.l) / P.box + 0.5;
+  comp_use(comp_tex(c));
   let out = brush_apply(textureLoad(N1, c, 0), textureLoad(N2, c, 0), x);
   textureStore(O1, c, out.u1);
   textureStore(O2, c, out.u2);

@@ -15,17 +15,27 @@
 // Gamma_1 dips well below gamma in the ionization zone. T comes from e_int, or p, by Newton's
 // method kept inside a bracket (the two values of x bound it), in a fixed number of steps.
 //
-// P.eos = (gamma, unused, unused, unused), P.eos2 = (h, o, T_i, rho_s).
+// P.eos = (gamma, unused, unused, unused), P.eos2 = (h, o, T_i, rho_s). Where the composition
+// varies (eos/comp_on), h and o are the cell's own, g_comp.z and g_comp.w.
 const EOS_HAS_ENERGY = true;
 // Where E - KE cannot be trusted, rebuild E from the advected e_int (hydro/dual_energy.wgsl).
 const EOS_KEEP_TOTAL = false;
+
+fn ion_h() -> f32 {
+  if (COMP) { return g_comp.z; }
+  return P.eos2.x;
+}
+fn ion_o() -> f32 {
+  if (COMP) { return g_comp.w; }
+  return P.eos2.y;
+}
 
 // (x, dx/dlnS) at (rho, T). Written so neither end loses precision: x = 2 / (1 + sqrt(1 + 4/S)),
 // and S dx/dS = x (1 - x) / (2 - x). Beyond |ln S| = 80 the gas is taken as fully neutral or
 // fully ionized (x is then within 1e-17 of that), with no dependence on rho or T.
 fn ion_x(rho: f32, T: f32) -> vec2<f32> {
-  if (!(P.eos2.x > 0.0) || !(T > 0.0)) { return vec2<f32>(0.0); }
-  let lnS = log(P.eos2.w / (P.eos2.x * rho)) + 1.5 * log(T / P.eos2.z) - P.eos2.z / T;
+  if (!(ion_h() > 0.0) || !(T > 0.0)) { return vec2<f32>(0.0); }
+  let lnS = log(P.eos2.w / (ion_h() * rho)) + 1.5 * log(T / P.eos2.z) - P.eos2.z / T;
   if (lnS < -80.0) { return vec2<f32>(0.0); }
   if (lnS > 80.0) { return vec2<f32>(1.0, 0.0); }
   let x = 2.0 / (1.0 + sqrt(1.0 + 4.0 * exp(-lnS)));
@@ -40,15 +50,15 @@ fn ion_dxdT(g: f32, T: f32) -> f32 {
 }
 
 fn ion_n(x: f32) -> f32 {
-  return P.eos2.x * (1.0 + x) + P.eos2.y;
+  return ion_h() * (1.0 + x) + ion_o();
 }
 
 // Code temperature at which e_int / rho (if `by_p` is false) or p / rho (if true) is `goal`.
 // Both grow with T. Between the fully neutral and fully ionized answers; Newton's step is taken
 // when it lands inside the bracket, the midpoint otherwise.
 fn ion_solve(rho: f32, goal: f32, by_p: bool) -> f32 {
-  let h = P.eos2.x;
-  let o = P.eos2.y;
+  let h = ion_h();
+  let o = ion_o();
   let Ti = P.eos2.z;
   let gm1 = P.eos.x - 1.0;
   var lo: f32;
@@ -91,7 +101,7 @@ fn eos_sound_speed(rho: f32, p: f32) -> f32 {
   //   c^2 = p_rho + p_T dT/drho,  dT/drho = (p / rho^2 - u_rho) / u_T.
   let T = ion_solve(rho, p / rho, true);
   let xs = ion_x(rho, T);
-  let h = P.eos2.x;
+  let h = ion_h();
   let Ti = P.eos2.z;
   let gm1 = P.eos.x - 1.0;
   let n = ion_n(xs.x);
@@ -111,7 +121,7 @@ fn eos_temperature(rho: f32, eint: f32) -> f32 {
 }
 fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
   let x = ion_x(rho, T).x;
-  return rho * (T * ion_n(x) / (P.eos.x - 1.0) + P.eos2.x * x * P.eos2.z);
+  return rho * (T * ion_n(x) / (P.eos.x - 1.0) + ion_h() * x * P.eos2.z);
 }
 
 // Least e_int the dual-energy switch accepts (hydro/dual_energy.wgsl): that of the pressure floor.

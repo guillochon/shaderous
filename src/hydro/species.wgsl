@@ -7,7 +7,8 @@
 // the slopes then made to sum to zero (hydro/species_slopes.wgsl), so face values sum to one and sum_i rho X_i moves
 // exactly as rho does: mass fractions stay in [0, 1] and keep summing to one, and a species
 // that is the same everywhere stays so. What rounding leaves is removed by scaling the new
-// values to the new density. Solid and fixed cells keep theirs.
+// values to the new density. Solid and fixed cells keep theirs. Where the composition sets the
+// equation of state (species/mixture.ts), the cell's moments are written beside them.
 #include "hydro/species_common.wgsl"
 
 @group(0) @binding(4) var N1: texture_3d<f32>;   // state after the update
@@ -45,7 +46,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   if (held(c)) {
-    for (var g = 0u; g < NG; g++) { textureStore(SO, group_at(c, g), textureLoad(S, group_at(c, g), 0)); }
+    var u: array<vec4<f32>, NG>;
+    for (var g = 0u; g < NG; g++) {
+      u[g] = textureLoad(S, group_at(c, g), 0);
+      textureStore(SO, group_at(c, g), u[g]);
+    }
+    if (COMP) { comp_store(c, comp_moments(u)); }
     return;
   }
   // Every cell of the stencil, two each way along the axes in use.
@@ -68,4 +74,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   let scale = textureLoad(N1, c, 0).x / max(sum, 1e-30);
   for (var g = 0u; g < NG; g++) { textureStore(SO, group_at(c, g), out[g] * scale); }
+  if (COMP) { comp_store(c, comp_moments(out)); }
 }

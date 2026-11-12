@@ -21,7 +21,7 @@
 // plane of symmetry, with no shear stress on it.
 //
 // Requires P, the equation of state, hydro/q.wgsl, Flux (hydro/flux.wgsl), g_dx set, and from
-// the grid:
+// the grid (with load_comp(c), the composition of a cell, for conduction):
 //   load_vel(c)             velocity of a cell (zero for a solid one)
 //   face_rim(a, axis, t)    0 where both cells of the face between a and a + e_axis have their
 //                           two neighbors along the transverse axis t; +1 / -1 where only the
@@ -93,7 +93,11 @@ fn add_diffusion(Fin: Flux, a: vec3<i32>, e: vec3<i32>, axis: i32, l: Q, r: Q) -
     F.d = vec4<f32>(-tau, work);
   }
   if (CONDUCTION && !wall) {
-    let q = -P.diff.y * rho * (q_temperature(r) - q_temperature(l)) * inv;
+    // Each temperature with its own cell's composition.
+    comp_use(load_comp(a + e));
+    let tr = q_temperature(r);
+    comp_use(load_comp(a));
+    let q = -P.diff.y * rho * (tr - q_temperature(l)) * inv;
     F.e += q;
     F.ei += q;
   }

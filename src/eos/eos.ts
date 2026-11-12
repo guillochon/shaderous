@@ -138,7 +138,35 @@ export function quartic(A: number, B: number, C: number, iters = 8): number {
   return T;
 }
 
-export function makeEos(kind: EosKind, params: EosParams): Eos {
+/**
+ * The constants of an equation of state for a cell of a mixture with moments `k`
+ * (species/mixture.ts), as the WGSL modules derive them with a varying composition: the gas
+ * constant scaled by k[0], the degenerate electrons' density scale divided by k[1] (Ye
+ * relative to the reference's), and the ionizing gas's hydrogen and other particles k[2], k[3].
+ * The ideal gas's temperature also takes k[0]; makeEos() applies that.
+ */
+export function mixtureParams(kind: EosKind, params: EosParams, k: readonly number[]): EosParams {
+  const out = { ...params };
+  if (kind === 'gas_radiation' || kind === 'degenerate') out.R = params.R * k[0];
+  if (kind === 'degenerate') out.degRho = params.degRho / k[1];
+  if (kind === 'ionizing') {
+    out.ionH = k[2];
+    out.ionOther = k[3];
+  }
+  return out;
+}
+
+/**
+ * An equation of state. With moments `k` (species/mixture.ts) it is that of a cell of a
+ * mixture whose composition varies; without, the uniform one of `params`.
+ */
+export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[]): Eos {
+  if (k) {
+    const eos = makeEos(kind, mixtureParams(kind, params, k));
+    if (kind !== 'ideal') return eos;
+    const x = k[0];
+    return { ...eos, temperature: (rho, eint) => eos.temperature(rho, eint) / x, eintFromT: (rho, T) => eos.eintFromT(rho, T * x) };
+  }
   const { gamma: g, K, R, arad: a } = params;
   switch (kind) {
     case 'ideal':

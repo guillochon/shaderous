@@ -12,6 +12,10 @@
 // non-negative, so their bit patterns order as integers the way the floats do. Records of
 // workgroups beyond the current block list are stale; the driver clears them when the list
 // changes.
+//
+// Where the species set the equation of state (species/mixture.ts), each texel's composition
+// moments are gathered from rho X like its state, used for its primitives and stored (KO) for
+// the update.
 #include "hydro/common.wgsl"
 #include <eos>
 #include <limiter>
@@ -33,6 +37,7 @@ var<workgroup> wg_max: array<atomic<u32>, 2>;
 #include "amr/cons.wgsl"
 #include <bins>
 #include <mid>
+#include <comp_src>
 
 // Fine ghost cell l of block `slot`, interpolated from the coarser leaf `cs` beyond the face.
 fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
@@ -81,12 +86,17 @@ fn main(
       } else {
         u = from_coarse(inv.slot, inv.l, s.slot);
       }
+      let c = atl(blk_origin(inv.slot), inv.l);
+      if (COMP) {
+        let k = comp_assembled(inv.slot, inv.l, s);
+        comp_use(k);
+        comp_store(c, k);
+      }
       var w = prim_from_cons(u.a, u.b);
       // The primitives have no spare component: a solid cell is marked by a negative density.
       let solid = u.b.w > 0.5;
       w.w1 = vec4<f32>(select(w.w1.x, -w.w1.x, solid), src_velocity(w.w1.yzw, s));
 
-      let c = atl(blk_origin(inv.slot), inv.l);
       textureStore(W1, c, w.w1);
       textureStore(W2, c, w.w2);
 

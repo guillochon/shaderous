@@ -49,6 +49,12 @@ fn load_q(c: vec3<i32>) -> Q {
 fn load_pred(c: vec3<i32>) -> Q {
   return Q(textureLoad(PA, c, 0), textureLoad(PB, c, 0));
 }
+// Composition moments of a cell (species/mixture.ts), ghosts included: amr/assemble.wgsl
+// stores them beside the primitives.
+fn load_comp(c: vec3<i32>) -> vec4<f32> {
+  if (!COMP) { return vec4<f32>(0.0); }
+  return comp_tex(c);
+}
 // For viscosity (hydro/diffusion.wgsl): the velocity alone. A solid cell is at rest.
 fn load_vel(c: vec3<i32>) -> vec3<f32> {
   let w1 = textureLoad(W1, c, 0);
@@ -304,6 +310,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
   let u1 = textureLoad(U1, c, 0);
   let u2 = textureLoad(U2, c, 0);
+  // From here on the equation of state is this cell's.
+  comp_use(comp_tex(c));
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
   if (gravity && !g_deposit) {

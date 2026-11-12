@@ -27,6 +27,7 @@ import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type RegridOp } from './tree';
 import { packSpecies, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
+import { compSrcSlot, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
 
 /**
  * Steps between refinement checks, and how far the flow may run past an unanswered check.
@@ -103,6 +104,14 @@ export class AmrSim implements Simulation {
   species: GPUTexture[] = [];
   speciesCur = 0;
   readonly speciesGroups: number;
+  /**
+   * Where the species set the equation of state (species/mixture.ts): each species' share of
+   * the composition moments, and the moments of every cell in an atlas like the primitives',
+   * ghosts included (amr/assemble.wgsl writes them all; the species passes write the leaves'
+   * cells with rho X). Null and absent for a uniform composition.
+   */
+  readonly compCoeffs: Moments[] | null;
+  private comp?: GPUTexture;
   private speciesDepth = 0;
   private speciesX?: GPUTexture;
   private speciesHalf?: GPUTexture;
@@ -226,6 +235,8 @@ export class AmrSim implements Simulation {
   private pFlag!: GPUComputePipeline;
   private pRegrid!: GPUComputePipeline;
   private gAssemble: GPUBindGroup[] = [];
+  /** With a varying composition: the assembly also reads rho X, so [state parity][species parity]. */
+  private gAssembleQ: GPUBindGroup[][] = [];
   private gPredict!: GPUBindGroup;
   private gUpdate: GPUBindGroup[] = [];
   private gRegrid: GPUBindGroup[] = [];
@@ -258,6 +269,7 @@ export class AmrSim implements Simulation {
     const d = (this.device = gpu.device);
     this.cfg = cfg;
     this.speciesGroups = speciesGroups(cfg.problem);
+    this.compCoeffs = problemCoefficients(cfg.problem);
     this.n = cfg.n;
     this.nz = cfg.ndim === 2 ? 1 : cfg.n;
     this.levels = cfg.amrLevels;
@@ -312,6 +324,7 @@ export class AmrSim implements Simulation {
       this.speciesHalf = ts('species half step');
       const faces = (BS + 1) ** 2 * (cfg.ndim === 3 ? BS + 1 : 1) * 3 * 4;
       this.massFlux = d.createBuffer({ label: 'face mass fluxes', size: this.cap * faces, usage: GPUBufferUsage.STORAGE });
+      if (this.compCoeffs) this.comp = t('composition');
     }
     const m = nr << this.levels;
     this.idx = d.createTexture({
@@ -456,7 +469,18 @@ export class AmrSim implements Simulation {
       bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl',
       mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl',
       species: this.speciesGroups > 0 ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
+      comp_src: compSrcSlot(this.compCoeffs, this.speciesDepth),
     };
+  }
+
+  /** The composition moments for a pass that reads them (binding 27), if they vary. */
+  private get compIn(): Record<number, GPUTextureView> {
+    return this.comp ? { 27: this.comp.createView() } : {};
+  }
+
+  /** The assembly's bind group for the state of parity p (and the species as they are now). */
+  private assembleGroup(p: number): GPUBindGroup {
+    return this.comp ? this.gAssembleQ[p][this.speciesCur] : this.gAssemble[p];
   }
 
   /** (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. */
@@ -475,7 +499,7 @@ export class AmrSim implements Simulation {
     this.gBrush = [0, 1].map((p) =>
       bindGroup(d, this.pBrush, {
         0: this.params, 1: this.brush, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]),
-        30: this.bt, 31: this.listLeaf,
+        30: this.bt, 31: this.listLeaf, ...this.compIn,
       }),
     );
     const K = (this.builtBins = this.timeBins);
@@ -488,10 +512,11 @@ export class AmrSim implements Simulation {
       bindGroup(d, this.pPredict, {
         0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 30: this.bt, 31: list, ...bin,
       });
-    const assembly = (p: number, list: GPUBuffer) =>
+    const assembly = (p: number, list: GPUBuffer, q = -1) =>
       bindGroup(d, this.pAssemble, {
         0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
         5: v(this.gfield), 6: this.redDt.first, 30: this.bt, 31: list, ...bin, ...mid,
+        ...((q >= 0 ? { 25: v(this.species[q]), 26: v(this.comp!) } : {}) as Record<number, GPUTextureView>),
       });
     this.gPredict = predict(this.listLeaf);
     this.gAssemble = [];
@@ -511,7 +536,7 @@ export class AmrSim implements Simulation {
       const correct = (list: GPUBuffer) =>
         bindGroup(d, this.pCorrect, {
           0: this.params, 1: this.clock, 2: v(this.state[o][0]), 3: v(this.state[o][1]), 4: v(this.gfield),
-          5: v(this.state[p][0]), 6: v(this.state[p][1]), 7: this.bh, 30: this.bt, 31: list, ...bin,
+          5: v(this.state[p][0]), 6: v(this.state[p][1]), 7: this.bh, 30: this.bt, 31: list, ...bin, ...this.compIn,
         });
       if (K > 0) {
         this.gAssembleB.push(assembly(p, this.listAct));
@@ -525,7 +550,8 @@ export class AmrSim implements Simulation {
         this.gCorrectB.push(correct(this.listEnd));
       }
       this.gCorrect.push(correct(this.listLeaf));
-      this.gAssemble.push(assembly(p, this.listAll));
+      if (this.comp) this.gAssembleQ[p] = [0, 1].map((q) => assembly(p, this.listAll, q));
+      else this.gAssemble.push(assembly(p, this.listAll));
       this.gUpdate.push(this.updateGroup(this.pUpdate, p));
       this.gRegrid.push(
         bindGroup(d, this.pRegrid, {
@@ -541,7 +567,7 @@ export class AmrSim implements Simulation {
       DIAG_OPS,
       'amr/diagnostics.wgsl',
       slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 30: this.bt })),
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 30: this.bt, ...this.compIn })),
       'amr diagnostics',
     );
   }
@@ -550,7 +576,8 @@ export class AmrSim implements Simulation {
   private async buildSpecies() {
     const d = this.device;
     const v = (t: GPUTexture) => t.createView();
-    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n` };
+    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n`, comp: hydroSlots(this.cfg).comp };
+    const kout = (this.comp ? { 26: v(this.comp) } : {}) as Record<number, GPUTextureView>;
     this.pSpecies = await Promise.all(
       ['assemble', 'predict', '', 'regrid'].map((k) =>
         computePipeline(d, assemble(k ? `amr/species_${k}.wgsl` : 'amr/species.wgsl', ns), `amr species ${k || 'move'}`),
@@ -566,11 +593,11 @@ export class AmrSim implements Simulation {
       per((p, q) =>
         bindGroup(d, pM, {
           0: this.params, 1: this.clock, 3: v(this.state[p][1]), 4: v(this.state[1 - p][0]), 5: v(this.species[q]), 6: v(this.species[1 - q]),
-          7: this.massFlux!, 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf,
+          7: this.massFlux!, 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf, ...kout,
         }),
       ),
       // Re-meshing goes from the state of parity p to the other.
-      per((p, q) => bindGroup(d, pR, { 0: this.params, 2: v(this.species[q]), 4: v(this.state[1 - p][0]), 6: v(this.species[1 - q]), 7: this.rg, 31: this.listLeaf })),
+      per((p, q) => bindGroup(d, pR, { 0: this.params, 2: v(this.species[q]), 4: v(this.state[1 - p][0]), 6: v(this.species[1 - q]), 7: this.rg, 31: this.listLeaf, ...kout })),
     ];
   }
 
@@ -599,6 +626,7 @@ export class AmrSim implements Simulation {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 30: this.bt, 31: list,
       ...bin,
+      ...this.compIn,
       ...((this.massFlux ? { 12: this.massFlux } : {}) as Record<number, GPUBuffer>),
     });
   }
@@ -711,7 +739,7 @@ export class AmrSim implements Simulation {
       run(pass, this.pTick!, this.gTick!);
       pass.dispatchWorkgroups(1);
       if (s === 0) {
-        run(pass, this.pAssemble, this.gAssemble[p]);
+        run(pass, this.pAssemble, this.assembleGroup(p));
         this.flat(pass, this.nAll, NG);
         this.redDt.encode(pass);
         run(pass, this.pSetDt!, this.gSetDt!);
@@ -1017,6 +1045,8 @@ export class AmrSim implements Simulation {
     const G = this.speciesGroups;
     const blockCells = BS * BS * depth;
     const sp = new Float32Array(blockCells * 4 * G);
+    const kc = this.compCoeffs;
+    const km = kc ? new Float32Array(blockCells * 4) : undefined;
     let mass = 0;
     this.solids = false;
     this.nSources = 0;
@@ -1028,7 +1058,14 @@ export class AmrSim implements Simulation {
         for (let j = 0; j < BS; j++)
           for (let i = 0; i < BS; i++, o += 4) {
             const w = prim((b.c[0] * BS + i + 0.5) * dx - half, (b.c[1] * BS + j + 0.5) * dx - half, three ? (b.c[2] * BS + k + 0.5) * dx - half : 0);
-            const eint = eos.eintFromP(w.rho, w.p);
+            // Where the species set the equation of state, the cell's own.
+            let ce = eos;
+            if (km) {
+              const m = mixMoments(kc!, w.X);
+              km.set(m, o);
+              ce = makeEos(c.eos, c.eosParams, m);
+            }
+            const eint = ce.eintFromP(w.rho, w.p);
             const mark = cellMark(w);
             if (mark) this.solids = true;
             const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
@@ -1047,6 +1084,7 @@ export class AmrSim implements Simulation {
       const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
       d.queue.writeTexture({ texture: this.state[0][0], origin }, u1, layout, [BS, BS, depth]);
       d.queue.writeTexture({ texture: this.state[0][1], origin }, u2, layout, [BS, BS, depth]);
+      if (km) d.queue.writeTexture({ texture: this.comp!, origin }, km, layout, [BS, BS, depth]);
       for (let g = 0; g < G; g++) {
         const og = [origin[0], origin[1], origin[2] + g * this.speciesDepth];
         d.queue.writeTexture({ texture: this.species[0], origin: og }, sp.subarray(g * blockCells * 4, (g + 1) * blockCells * 4), layout, [BS, BS, depth]);
@@ -1281,7 +1319,7 @@ export class AmrSim implements Simulation {
       const p = this.cur;
       const pass = beginPass(enc);
       pass.setPipeline(this.pAssemble);
-      pass.setBindGroup(0, this.gAssemble[p]);
+      pass.setBindGroup(0, this.assembleGroup(p));
       this.flat(pass, this.nAll, NG);
       this.redDt.encode(pass);
       pass.setPipeline(this.pClock);
@@ -1487,7 +1525,7 @@ export class AmrSim implements Simulation {
     enc.clearBuffer(this.flags);
     const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
-    pass.setBindGroup(0, this.gAssemble[this.cur]);
+    pass.setBindGroup(0, this.assembleGroup(this.cur));
     this.flat(pass, this.nAll, NG);
     pass.setPipeline(this.pFlag);
     pass.setBindGroup(0, this.gFlag);
@@ -1742,7 +1780,7 @@ export class AmrSim implements Simulation {
     enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
     const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
-    pass.setBindGroup(0, this.gAssemble[this.cur]);
+    pass.setBindGroup(0, this.assembleGroup(this.cur));
     this.flat(pass, this.nAll, NG);
     this.redDt.encode(pass);
     pass.setPipeline(this.pClock);
@@ -1803,7 +1841,7 @@ export class AmrSim implements Simulation {
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
     const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 30: this.bt };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
-    return r;
+    return { ...r, ...this.compIn };
   }
   get speciesStride(): number {
     return this.speciesGroups ? this.speciesDepth : 0;
@@ -1916,7 +1954,7 @@ export class AmrSim implements Simulation {
     const enc = d.createCommandEncoder();
     const pass = beginPass(enc);
     pass.setPipeline(this.pAssemble);
-    pass.setBindGroup(0, this.gAssemble[p]);
+    pass.setBindGroup(0, this.assembleGroup(p));
     this.flat(pass, this.nAll, NG);
     pass.setPipeline(this.pPredict);
     pass.setBindGroup(0, this.gPredict);
@@ -1993,6 +2031,7 @@ export class AmrSim implements Simulation {
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi, ...this.species]) t.destroy();
+    this.comp?.destroy();
     this.speciesX?.destroy();
     this.speciesHalf?.destroy();
     this.massFlux?.destroy();

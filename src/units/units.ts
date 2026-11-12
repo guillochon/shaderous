@@ -85,8 +85,9 @@ export const kelvinPerCodeT = (u: UnitSystem, mu: number): number => mu * thetaK
 
 /**
  * Gas constant and radiation constant in code units, for EosParams. The gas constant stays 1
- * (code T = p_gas / rho); mu enters the radiation constant through the kelvin scale. When mu
- * varies per cell, the EOS will take theta and mu instead.
+ * (code T = p_gas / rho); mu enters the radiation constant through the kelvin scale. Where mu
+ * varies per cell, the kelvin scale stays the reference composition's and the gas constant is
+ * scaled by mu_ref / mu in each cell (species/mixture.ts).
  */
 export function eosConstants(u: UnitSystem, comp: Composition): { R: number; arad: number } {
   const tk = kelvinPerCodeT(u, meanMolecularWeight(comp));

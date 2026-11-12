@@ -62,6 +62,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let phi = textureLoad(GF, c, 0).w - dot(P.gext.xyz, select(pos, vec3<f32>(pos.xy, 0.0), P.dims.z == 1u));
     g_acc = P.gext.xyz;
     if (P.grav_on != 0u) { g_acc += textureLoad(GF, c, 0).xyz; }
+    comp_use(comp_tex(c));
     var x = field_value(V.field, u1, u2, g, 0.0, phi);
     if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
     let solid = u2.w > 0.5;

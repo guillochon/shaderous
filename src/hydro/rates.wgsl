@@ -28,6 +28,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     g_dx = P.dx;
     let c = vec3<i32>(gid);
     let u2 = textureLoad(U2, c, 0);
+    comp_use(comp_tex(c));
     let w = prim_from_cons(textureLoad(U1, c, 0), u2);
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
     let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(w.w1.x, w.w2.w);
