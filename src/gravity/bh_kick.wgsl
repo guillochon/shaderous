@@ -40,10 +40,11 @@ override LIVE: bool = true;
 @compute @workgroup_size(1)
 fn main() {
   let n = mass_count();
-  // Accretion: the sink's gas arrives with its momentum.
+  // Accretion: the sink's gas arrives with its momentum. What it brought (mass, momentum, and
+  // angular momentum about the mass) is kept for the diagnostics.
   if (LIVE && P.G > 0.0) {
     for (var i = 0u; i < n; i++) {
-      let o = 1u + 7u * i;
+      let o = 1u + 10u * i;
       let dm = RED[o + 3u];
       if (dm > 0.0) {
         let b = BH.list[i];
@@ -52,6 +53,8 @@ fn main() {
         BH.list[i].pos = vec4<f32>(b.pos.xyz, b.pos.w + P.G * dm);
         BH.list[i].vel = vec4<f32>(v, b.vel.w);
         BH.list[i].sink = vec4<f32>(b.sink.x, b.sink.y + dm, b.sink.zw);
+        BH.list[i].accp = vec4<f32>(b.accp.xyz + vec3<f32>(RED[o + 4u], RED[o + 5u], RED[o + 6u]), 0.0);
+        BH.list[i].accl = vec4<f32>(b.accl.xyz + vec3<f32>(RED[o + 7u], RED[o + 8u], RED[o + 9u]), 0.0);
       }
     }
   }
@@ -60,13 +63,13 @@ fn main() {
   var abar = vec3<f32>(0.0);
   if (P.bh.y == 1.0 && m > 0.0) {
     for (var i = 0u; i < n; i++) {
-      let o = 1u + 7u * i;
+      let o = 1u + 10u * i;
       abar += vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]) / m;
     }
   } else if (P.bh.y == 2.0) {
     var gm = 0.0;
     for (var i = 0u; i < n; i++) {
-      let o = 1u + 7u * i;
+      let o = 1u + 10u * i;
       abar -= P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]);
       gm += BH.list[i].pos.w;
     }
@@ -75,7 +78,7 @@ fn main() {
   BH.frame = vec4<f32>(abar, 0.0);
   for (var i = 0u; i < n; i++) {
     let b = BH.list[i];
-    let o = 1u + 7u * i;
+    let o = 1u + 10u * i;
     var acc = -abar - P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]) / b.pos.w;
     for (var j = 0u; j < n; j++) {
       if (j == i) { continue; }

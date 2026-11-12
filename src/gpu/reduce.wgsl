@@ -2,7 +2,8 @@
 // output record, so sums are accumulated in a tree rather than one long float32 chain.
 //
 // <red_def> supplies:    const RED_K: u32, and RED_MAX, RED_MIN: bit i set if channel i is a
-//                        maximum / minimum (otherwise it is a sum)
+//                        maximum / minimum (otherwise it is a sum); RED_MAX_HI, RED_MIN_HI
+//                        the same for channels 32 and up
 // <red_source> supplies: fn red_cell(c: vec3<i32>) -> Red, and its own input bindings (< 20)
 #include <red_def>
 
@@ -10,6 +11,7 @@ alias Red = array<f32, RED_K>;
 
 // 0 sum, 1 max, 2 min.
 fn red_op(i: u32) -> u32 {
+  if (i >= 32u) { return ((RED_MAX_HI >> (i - 32u)) & 1u) + 2u * ((RED_MIN_HI >> (i - 32u)) & 1u); }
   return ((RED_MAX >> i) & 1u) + 2u * ((RED_MIN >> i) & 1u);
 }
 

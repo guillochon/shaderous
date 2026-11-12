@@ -324,10 +324,12 @@ export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && c.eos !
 export const diffusionKey = (c: SimConfig): string => `${c.viscosity > 0}/${conducts(c)}`;
 
 export const MAX_MASSES = 4;
-/** Floats in the Masses block (gravity/bh.wgsl): the frame's acceleration, then 16 per mass. */
-export const MASS_FLOATS = 4 + 16 * MAX_MASSES;
+/** Floats per mass in the Masses block (gravity/bh.wgsl). */
+export const MASS_STRIDE = 24;
+/** Floats in the Masses block: the frame's acceleration, then MASS_STRIDE per mass. */
+export const MASS_FLOATS = 4 + MASS_STRIDE * MAX_MASSES;
 /** Channels of the point masses' reduction (gravity/bh_cell.wgsl). */
-export const MASS_RED = 1 + 7 * MAX_MASSES;
+export const MASS_RED = 1 + 10 * MAX_MASSES;
 
 /**
  * The point masses a run starts with: the preset's, with what a snapshot recorded laid over
@@ -347,7 +349,10 @@ export function initialMasses(c: SimConfig, dx: number): Required<PointMass>[] {
 /** A point mass with its defaults filled in: softening of two cells, a sink of that radius. */
 export function completeMass(q: PointMass, dx: number): Required<PointMass> {
   const soft = q.soft ?? 2 * dx;
-  return { gm: q.gm, pos: q.pos, vel: q.vel, soft, sinkRadius: q.sinkRadius ?? soft, sinkRate: q.sinkRate ?? 1, accreted: q.accreted ?? 0 };
+  return {
+    gm: q.gm, pos: q.pos, vel: q.vel, soft, sinkRadius: q.sinkRadius ?? soft, sinkRate: q.sinkRate ?? 1,
+    accreted: q.accreted ?? 0, accretedMomentum: q.accretedMomentum ?? [0, 0, 0], accretedSpin: q.accretedSpin ?? [0, 0, 0],
+  };
 }
 
 /**
@@ -358,7 +363,7 @@ export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: nu
   const base = (c.problem.masses?.(c.params, c.G, dx) ?? []).slice(0, count);
   base.forEach((q, i) => {
     const m = completeMass(q, dx);
-    const at = 16 + 64 * i;
+    const at = 16 + 4 * MASS_STRIDE * i;
     d.queue.writeBuffer(bh, at + 28, new Float32Array([m.soft]));
     d.queue.writeBuffer(bh, at + 44, new Float32Array([m.sinkRadius]));
   });
@@ -367,7 +372,9 @@ export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: nu
 /** Pack the Masses block. The layout must match the struct in gravity/bh.wgsl. */
 export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffer> {
   const f = new Float32Array(MASS_FLOATS);
-  list.forEach((m, i) => f.set([...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, 0], 4 + 16 * i));
+  list.forEach((m, i) =>
+    f.set([...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, 0, ...m.accretedMomentum, 0, ...m.accretedSpin, 0], 4 + MASS_STRIDE * i),
+  );
   return f;
 }
 
@@ -375,8 +382,11 @@ export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffe
 export function unpackMasses(f: Float32Array, count: number): Required<PointMass>[] {
   const out: Required<PointMass>[] = [];
   for (let i = 0; i < count; i++) {
-    const o = 4 + 16 * i;
-    out.push({ gm: f[o + 3], pos: [f[o], f[o + 1], f[o + 2]], vel: [f[o + 4], f[o + 5], f[o + 6]], soft: f[o + 7], sinkRadius: f[o + 11], sinkRate: f[o + 12], accreted: f[o + 13] });
+    const o = 4 + MASS_STRIDE * i;
+    out.push({
+      gm: f[o + 3], pos: [f[o], f[o + 1], f[o + 2]], vel: [f[o + 4], f[o + 5], f[o + 6]], soft: f[o + 7], sinkRadius: f[o + 11], sinkRate: f[o + 12], accreted: f[o + 13],
+      accretedMomentum: [f[o + 16], f[o + 17], f[o + 18]], accretedSpin: [f[o + 20], f[o + 21], f[o + 22]],
+    });
   }
   return out;
 }
@@ -1294,7 +1304,7 @@ export class Sim implements Simulation {
   addMass(m: PointMass): boolean {
     if (this.nMasses >= MAX_MASSES) return false;
     // Only its own slot is written: the others are mid-orbit on the GPU.
-    this.device.queue.writeBuffer(this.bh, 16 + 64 * this.nMasses, packMasses([completeMass(m, this.dx)]), 4, 16);
+    this.device.queue.writeBuffer(this.bh, 16 + 4 * MASS_STRIDE * this.nMasses, packMasses([completeMass(m, this.dx)]), 4, MASS_STRIDE);
     this.nMasses++;
     this.writeParams();
     this.refreshPotential();

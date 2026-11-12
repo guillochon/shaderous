@@ -203,16 +203,20 @@ details[open] > summary .sum { display: none; }
 }
 /* Diagnostics: two fixed columns of seven fixed-height rows. */
 #diag { display: grid; grid-template-columns: 1fr 1fr; column-gap: 9px; height: 119px; contain: strict; }
-#diag dl {
+#diag dl, #diag-sinks dl {
   display: grid; grid-template-columns: 34px minmax(0, 1fr) 24px; grid-auto-rows: 17px; column-gap: 3px;
   margin: 0; font-variant-numeric: tabular-nums;
 }
-#diag dt, #diag dd { height: 17px; line-height: 17px; white-space: nowrap; overflow: hidden; }
-#diag dt { color: var(--dim); font-size: 11px; }
-#diag dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; contain: strict; }
+:is(#diag, #diag-sinks) :is(dt, dd) { height: 17px; line-height: 17px; white-space: nowrap; overflow: hidden; }
+:is(#diag, #diag-sinks) dt { color: var(--dim); font-size: 11px; }
+:is(#diag, #diag-sinks) dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; contain: strict; }
 #diag dd.warn { color: #ffb454; }
-#diag dd, #diag .spark { cursor: default; }
-#diag .spark { width: 24px; height: 17px; display: block; }
+:is(#diag, #diag-sinks) :is(dd, .spark) { cursor: default; }
+:is(#diag, #diag-sinks) .spark { width: 24px; height: 17px; display: block; }
+/* One block per point mass's sink, two to a row. */
+#diag-sinks { display: grid; grid-template-columns: 1fr 1fr; column-gap: 9px; row-gap: 6px; margin-top: 8px; }
+#diag-sinks[hidden], #diag-sinks .sink[hidden] { display: none; }
+#diag-sinks .sink-head { color: var(--text); font-size: 11px; line-height: 15px; border-bottom: 1px solid var(--line); margin-bottom: 2px; }
 .diag-io { margin-top: 8px; display: grid; }
 /* The whole run of one diagnostic, while its number or sparkline is hovered. */
 #diag-pop {

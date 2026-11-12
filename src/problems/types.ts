@@ -223,6 +223,10 @@ export interface PointMass {
   sinkRate?: number;
   /** gas mass accreted so far */
   accreted?: number;
+  /** momentum that gas brought in */
+  accretedMomentum?: number[];
+  /** angular momentum that gas brought in, about the mass and in its rest frame */
+  accretedSpin?: number[];
 }
 
 export const all = (b: number): Bc3 => [b, b, b];

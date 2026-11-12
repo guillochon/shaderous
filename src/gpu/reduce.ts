@@ -46,11 +46,12 @@ export class Reducer {
     external?: number[],
   ): Promise<Reducer> {
     const k = ops.length;
-    // The operation of each channel, as two bit masks. (No array constants or array
-    // constructors anywhere in these shaders: Safari's Metal backend fails to compile them.)
-    if (k > 32) throw new Error('a reduction has at most 32 channels');
-    const mask = (op: number) => ops.reduce((m, o, i) => (o === op ? m | (1 << i) : m), 0) >>> 0;
-    const def = `const RED_K = ${k}u;\nconst RED_MAX = ${mask(MAX)}u;\nconst RED_MIN = ${mask(MIN)}u;`;
+    // The operation of each channel, as two bit masks, and two more for channels 32 and up. (No
+    // array constants or array constructors anywhere in these shaders: Safari's Metal backend
+    // fails to compile them.)
+    if (k > 64) throw new Error('a reduction has at most 64 channels');
+    const mask = (op: number, from: number) => ops.slice(from, from + 32).reduce((m, o, i) => (o === op ? m | (1 << i) : m), 0) >>> 0;
+    const def = `const RED_K = ${k}u;\nconst RED_MAX = ${mask(MAX, 0)}u;\nconst RED_MIN = ${mask(MIN, 0)}u;\nconst RED_MAX_HI = ${mask(MAX, 32)}u;\nconst RED_MIN_HI = ${mask(MIN, 32)}u;`;
     // Each stage shrinks every axis by RED_F until one record is left. The axes may differ in
     // length (a 2D run has a single layer in z; a block grid is a long row of blocks).
     const sizes: number[][] = [dims.slice()];

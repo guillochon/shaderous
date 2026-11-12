@@ -24,7 +24,7 @@ import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
-import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
+import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type GridBox, type RegridOp } from './tree';
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
@@ -1697,7 +1697,7 @@ export class AmrSim implements Simulation {
 
   addMass(m: Parameters<Simulation['addMass']>[0]): boolean {
     if (this.nMasses >= MAX_MASSES) return false;
-    this.device.queue.writeBuffer(this.bh, 16 + 64 * this.nMasses, packMasses([completeMass(m, this.dx0)]), 4, 16);
+    this.device.queue.writeBuffer(this.bh, 16 + 4 * MASS_STRIDE * this.nMasses, packMasses([completeMass(m, this.dx0)]), 4, MASS_STRIDE);
     this.nMasses++;
     this.writeParams();
     this.refreshPotential();

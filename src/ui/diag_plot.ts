@@ -64,19 +64,26 @@ export class DiagHistory {
     return this.column(col, 0);
   }
 
+  /** Rows may be shorter than others (a column added in mid-run) or hold NaN: those are skipped. */
   private column(col: number, from: number): [number[], number[]] {
     const xs: number[] = [];
     const ys: number[] = [];
     for (let i = from; i < this.rows.length; i++) {
+      const y = this.rows[i][col];
+      if (y === undefined || !Number.isFinite(y)) continue;
       xs.push(this.rows[i][this.stepCol]);
-      ys.push(this.rows[i][col]);
+      ys.push(y);
     }
     return [xs, ys];
   }
 
-  /** The history as CSV, with the given column names (8 significant figures: the readouts are float32). */
-  csv(header: string[]): string {
-    return [header.join(','), ...this.rows.map((r) => r.map((v) => String(+v.toPrecision(8))).join(','))].join('\n') + '\n';
+  /**
+   * Columns `cols` of the history as CSV, under the given names (8 significant figures: the
+   * readouts are float32). A value a row lacks is left empty.
+   */
+  csv(cols: number[], header: string[]): string {
+    const cell = (v: number | undefined) => (v === undefined || !Number.isFinite(v) ? '' : String(+v.toPrecision(8)));
+    return [header.join(','), ...this.rows.map((r) => cols.map((i) => cell(r[i])).join(','))].join('\n') + '\n';
   }
 }
 

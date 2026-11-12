@@ -11,6 +11,8 @@ struct Mass {
                       // y: gas mass accreted so far
                       // z: the rate in use this step, per unit time (set as the mass drifts, so
                       //    that it does not change when the mass grows in mid-step)
+  accp: vec4<f32>,    // momentum of the gas accreted so far (xyz)
+  accl: vec4<f32>,    // angular momentum of that gas about the mass, in its rest frame (xyz)
 }
 struct Masses {
   frame: vec4<f32>,   // acceleration of the frame (gravity/bh_kick.wgsl), or zero

@@ -192,7 +192,8 @@ side.innerHTML = `
   <details open>
     <summary title="Totals and extremes over the box, read back five times a second. Hover a number for its whole run">Diagnostics</summary>
     <div id="diag"><dl></dl><dl></dl></div>
-    <div class="io diag-io"><button id="export-diag" title="Save every diagnostics readout of this run (one row per readout) as a CSV file">Export diagnostics</button></div>
+    <div id="diag-sinks" hidden></div>
+    <div class="io diag-io"><button id="export-diag" title="Save every diagnostics readout of this run (one row per readout) as a CSV file, with each sink’s mass, accretion rate, accreted momentum and angular momentum, position and velocity">Export diagnostics</button></div>
   </details>
 
   <details id="perf">
@@ -2473,45 +2474,148 @@ const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null
 const diagValues = (d: Diagnostics): number[] => [
   d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot,
 ];
+
+/** One column of the diagnostics history. */
+interface DiagCol {
+  label: string;
+  title: string;
+  /** CSV column name, or null for a column only the panel shows */
+  csv: string | null;
+  measure: Measure;
+  count?: boolean;
+}
+const MASS_RATE: Measure = [1, 0, -1];
+const ANGULAR_MOMENTUM: Measure = [1, 2, -1];
+const FORCE: Measure = [1, 1, -2];
+const TORQUE: Measure = [1, 2, -2];
+/** One sink field: [CSV suffix (null: panel only), panel label, tooltip, measure]. */
+type SinkField = [string | null, string, string, Measure];
+const xyz = (name: string, title: string, measure: Measure): SinkField[] =>
+  (['x', 'y', 'z'] as const).map((a) => [`${name}_${a}`, '', `${title}, ${a}`, measure]);
+/**
+ * Each sink's columns, after the diagnostics above, one set per point mass that has been in the
+ * run. The first SINK_SHOWN are shown in the panel. The rates are averaged over the time since
+ * the readout before.
+ */
+const SINK_FIELDS: SinkField[] = [
+  ['mass', 'M', 'Mass, with the gas it has taken in', 'mass'],
+  ['mdot', 'Ṁ', 'Accretion rate', MASS_RATE],
+  ['accreted', 'ΔM', 'Gas mass taken in so far', 'mass'],
+  [null, 'Δp', 'Momentum the accreted gas brought in (magnitude)', 'momentum'],
+  [null, 'ΔL', '', ANGULAR_MOMENTUM], // its title depends on the dimension: see colTitle
+  ...xyz('p_acc', 'Momentum the accreted gas brought in', 'momentum'),
+  ...xyz('l_acc', 'Angular momentum the accreted gas brought in, about the sink in its rest frame', ANGULAR_MOMENTUM),
+  ...xyz('f_acc', 'Rate the accreted gas brings momentum in', FORCE),
+  ...xyz('torque_acc', 'Rate the accreted gas brings angular momentum in', TORQUE),
+  ...xyz('pos', 'Position from the box center', 'length'),
+  ...xyz('vel', 'Velocity', 'velocity'),
+];
+/** Sink fields the panel shows. */
+const SINK_SHOWN = 5;
+const BASE_COLS = DIAG_ROWS.length;
+const DIAG_COLS: DiagCol[] = [
+  ...DIAG_ROWS.map(([label, title, csv, count], i) => ({ label, title, csv, measure: DIAG_MEASURES[i], count })),
+  ...Array.from({ length: MAX_MASSES }, (_, i) =>
+    SINK_FIELDS.map(([csv, label, title, measure]) => ({ label: label || (csv ?? ''), title, csv: csv && `sink${i + 1}_${csv}`, measure })),
+  ).flat(),
+];
+const sinkCol = (i: number, field: number) => BASE_COLS + SINK_FIELDS.length * i + field;
+/** The tooltip of column `c`. */
+function colTitle(c: number): string {
+  if (c < BASE_COLS) return DIAG_COLS[c].title;
+  const i = Math.floor((c - BASE_COLS) / SINK_FIELDS.length);
+  const field = (c - BASE_COLS) % SINK_FIELDS.length;
+  const title =
+    field !== 4
+      ? DIAG_COLS[c].title
+      : cfg.ndim === 2
+        ? 'Angular momentum the accreted gas brought in, about the sink in its rest frame (z; positive is counterclockwise)'
+        : 'Angular momentum the accreted gas brought in, about the sink in its rest frame (magnitude)';
+  return `Sink ${i + 1}: ${title}`;
+}
+
+/** What each sink had at the readout before, for the rates. */
+let sinkPrev: { t: number; acc: number; p: number[]; l: number[]; rates: number[] }[] = [];
+const norm = (v: number[]) => Math.hypot(v[0], v[1], v[2]);
+/** The sink columns of a readout: SINK_FIELDS.length per mass. */
+function sinkValues(d: Diagnostics): number[] {
+  const out: number[] = [];
+  d.masses.forEach((m, i) => {
+    const prev = sinkPrev[i];
+    const p = m.accretedMomentum;
+    const l = m.accretedSpin;
+    let rates = new Array<number>(7).fill(NaN);
+    if (prev && d.t > prev.t) {
+      const h = d.t - prev.t;
+      rates = [(m.accreted - prev.acc) / h, ...p.map((v, k) => (v - prev.p[k]) / h), ...l.map((v, k) => (v - prev.l[k]) / h)];
+    } else if (prev && d.t === prev.t) rates = prev.rates; // paused: the readout repeats
+    sinkPrev[i] = { t: d.t, acc: m.accreted, p, l, rates };
+    const mass = cfg.G > 0 ? m.gm / cfg.G : NaN;
+    const lShown = cfg.ndim === 2 ? l[2] : norm(l);
+    out.push(mass, rates[0], m.accreted, norm(p), lShown, ...p, ...l, ...rates.slice(1), ...m.pos, ...m.vel);
+  });
+  return out;
+}
+
 const diagHistory = new DiagHistory(2);
 /** The run the history belongs to. */
 let diagOf: Simulation | undefined;
 const diagCols = $('diag').querySelectorAll('dl');
+const sinkPanel = $('diag-sinks');
 const diagPop = $('diag-pop');
 const diagPopCanvas = diagPop.querySelector('canvas')!;
 const diagPopTitle = diagPop.querySelector('.title')!;
-/** Row whose whole-run plot is showing, if any. */
+/** Column whose whole-run plot is showing, if any. */
 let diagHover = -1;
-const diagCells = DIAG_ROWS.map(([label, title], i) => {
+interface DiagCell { col: number; dt: HTMLElement; dd: HTMLElement; spark: HTMLCanvasElement; set: (v: string) => void; warn: boolean }
+function diagCell(col: number, label: string, into: Element): DiagCell {
   const dt = document.createElement('dt');
   dt.textContent = label;
-  dt.title = title;
   const dd = document.createElement('dd');
   const spark = document.createElement('canvas');
   spark.className = 'spark';
-  diagCols[i < 7 ? 0 : 1].append(dt, dd, spark);
+  into.append(dt, dd, spark);
   for (const el of [dd, spark]) {
-    el.addEventListener('pointerenter', () => showDiagPlot(i, dd));
+    el.addEventListener('pointerenter', () => showDiagPlot(col, dd));
     el.addEventListener('pointerleave', () => hideDiagPlot());
   }
-  return { dt, dd, spark, set: liveText(dd), warn: false };
+  return { col, dt, dd, spark, set: liveText(dd), warn: false };
+}
+const diagCells = DIAG_ROWS.map(([label], i) => diagCell(i, label, diagCols[i < 7 ? 0 : 1]));
+/** Each sink's block in the panel, shown while that mass is in the run. */
+const sinkBlocks = Array.from({ length: MAX_MASSES }, (_, i) => {
+  const box = document.createElement('div');
+  box.className = 'sink';
+  box.hidden = true;
+  const head = document.createElement('div');
+  head.className = 'sink-head';
+  head.textContent = `Sink ${i + 1}`;
+  const dl = document.createElement('dl');
+  box.append(head, dl);
+  sinkPanel.append(box);
+  return { box, cells: SINK_FIELDS.slice(0, SINK_SHOWN).map(([, label], k) => diagCell(sinkCol(i, k), label, dl)) };
 });
+let sinksShown = 0;
+const allCells = () => [...diagCells, ...sinkBlocks.flatMap((b) => b.cells)];
+const shownValue = (v: number | undefined, c: DiagCol, u: Readout) => (v !== undefined && Number.isFinite(v) ? fmt3(v * u.scale(c.measure), c.count) : '–');
+
 /** Put the unit of each diagnostic in its tooltip, and show the latest values in the current units. */
 function showDiagUnits() {
   const u = units();
-  diagCells.forEach((cell, i) => {
-    const l = u.label(DIAG_MEASURES[i]);
-    cell.dt.title = l ? `${DIAG_ROWS[i][1]}, in ${l}` : DIAG_ROWS[i][1];
-  });
-  const rows = diagHistory.rows;
-  if (rows.length) rows[rows.length - 1].forEach((v, i) => diagCells[i].set(fmt3(v * u.scale(DIAG_MEASURES[i]), DIAG_ROWS[i][3])));
+  const last = diagHistory.rows[diagHistory.rows.length - 1];
+  for (const cell of allCells()) {
+    const c = DIAG_COLS[cell.col];
+    const l = u.label(c.measure);
+    cell.dt.title = l ? `${colTitle(cell.col)}, in ${l}` : colTitle(cell.col);
+    if (last) cell.set(shownValue(last[cell.col], c, u));
+  }
   drawDiagPlot();
 }
 const setHud = liveText(hud);
 
-/** The popup with row i's whole run, beside its number. */
-function showDiagPlot(i: number, anchor: HTMLElement) {
-  diagHover = i;
+/** The popup with column `col`'s whole run, beside its number. */
+function showDiagPlot(col: number, anchor: HTMLElement) {
+  diagHover = col;
   diagPop.hidden = false;
   const r = anchor.getBoundingClientRect();
   const pw = diagPop.offsetWidth;
@@ -2535,45 +2639,56 @@ function hideDiagPlot() {
 }
 function drawDiagPlot() {
   if (diagHover < 0) return;
-  const [label, title, , count] = DIAG_ROWS[diagHover];
+  const c = DIAG_COLS[diagHover];
   const rows = diagHistory.rows;
   const u = units();
-  const m = DIAG_MEASURES[diagHover];
-  const k = u.scale(m);
-  const l = u.label(m);
-  const now = rows.length ? fmt3(rows[rows.length - 1][diagHover] * k, count) : '';
-  diagPopTitle.textContent = `${title} (${label})${now ? ` · ${now}${l ? ` ${l}` : ''}` : ''}`;
+  const k = u.scale(c.measure);
+  const l = u.label(c.measure);
+  const v = rows[rows.length - 1]?.[diagHover];
+  const now = v !== undefined && Number.isFinite(v) ? fmt3(v * k, c.count) : '';
+  diagPopTitle.textContent = `${colTitle(diagHover)} (${c.label})${now ? ` · ${now}${l ? ` ${l}` : ''}` : ''}`;
   const [xs, ys] = diagHistory.all(diagHover);
-  drawFull(diagPopCanvas, xs, k === 1 ? ys : ys.map((y) => y * k), !!count);
+  drawFull(diagPopCanvas, xs, k === 1 ? ys : ys.map((y) => y * k), !!c.count);
 }
 
 function showDiagnostics(d: Diagnostics, of: Simulation) {
+  const last = diagHistory.rows[diagHistory.rows.length - 1];
   if (of !== diagOf) {
     diagHistory.clear();
+    sinkPrev = [];
     diagOf = of;
     showDiagUnits();
-  }
+  } else if (last && d.steps < last[2]) sinkPrev = []; // the run went back: its history starts again
   const u = units();
-  const values = diagValues(d);
+  const values = [...diagValues(d), ...sinkValues(d)];
   diagHistory.push(values);
+  const n = d.masses.length;
+  if (n !== sinksShown) {
+    sinksShown = n;
+    sinkBlocks.forEach((b, i) => (b.box.hidden = i >= n));
+    sinkPanel.hidden = n === 0;
+    showDiagUnits();
+  }
   const warns = [false, false, false, false, false, d.floored > 0, d.jeansUnresolved > 0 && !cfg.jeansFloor];
-  values.forEach((v, i) => {
-    const cell = diagCells[i];
-    cell.set(fmt3(v * u.scale(DIAG_MEASURES[i]), DIAG_ROWS[i][3]));
-    const warn = warns[i] ?? false;
+  const cells = [...diagCells, ...sinkBlocks.slice(0, n).flatMap((b) => b.cells)];
+  for (const cell of cells) {
+    cell.set(shownValue(values[cell.col], DIAG_COLS[cell.col], u));
+    const warn = warns[cell.col] ?? false;
     if (warn !== cell.warn) {
       cell.warn = warn;
       cell.dd.classList.toggle('warn', warn);
     }
-    const [xs, ys] = diagHistory.recent(i);
+    const [xs, ys] = diagHistory.recent(cell.col);
     drawSpark(cell.spark, xs, ys);
-  });
+  }
   drawDiagPlot();
 }
 
-/** Save the diagnostics of the run so far as CSV. */
+/** Save the diagnostics of the run so far as CSV, with the columns of every sink that was in it. */
 function exportDiagnostics() {
-  const csv = diagHistory.csv(DIAG_ROWS.map((r) => r[2]));
+  const width = diagHistory.rows.reduce((w, r) => Math.max(w, r.length), BASE_COLS);
+  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv ? [i] : []));
+  const csv = diagHistory.csv(cols, cols.map((i) => DIAG_COLS[i].csv!));
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');
   a.href = url;
