@@ -180,11 +180,11 @@ def load_model(name):
     return model
 
 
-def load():
+def load(names=None):
     """Every trajectory file in data/: fuel and mixture starts (gen_data.py) and the states
     earlier models wandered into (dagger.py). Fractions in double precision: their changes
     over a short step are far below single precision's rounding of the fractions themselves."""
-    files = sorted(f for f in DATA.glob("*.npz") if f.name != "fuel_pool.npz")
+    files = sorted(f for f in DATA.glob("*.npz") if f.name != "fuel_pool.npz" and (names is None or f.name in names))
     parts = [np.load(f) for f in files]
     rho = np.concatenate([p["rho"] for p in parts])
     X = np.concatenate([p["X"] for p in parts]).astype(np.float64)

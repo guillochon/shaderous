@@ -21,8 +21,9 @@ CHECK = (0.003, 0.03, 0.1, 1.0)
 def main():
     dt = float(sys.argv[2]) if len(sys.argv) > 2 else 1e-3
     model = train.load_model(sys.argv[1])
-    rho, X, T, t = train.load()
-    # The fuel and mixture trajectories' own validation split (the first files loaded).
+    # A fixed set: fuel and mixture starts only (gen_data.py). The DAgger files hold states
+    # chosen because some model went wrong there, and grow with every round.
+    rho, X, T, t = train.load({"fuel.npz", "mix.npz"})
     rng = np.random.default_rng(7)
     va = rng.choice(len(rho), size=600, replace=False)
     rho, X, T = rho[va], X[va], T[va]
@@ -30,10 +31,13 @@ def main():
     Xc, Tc = X[:, 0], T[:, 0]
     done = 0
     for tc in CHECK:
-        steps = int(round((tc - done) / dt))
-        Xm, Tm, _ = train.roll(model, rho, Xc, Tc, np.full(len(rho), dt), steps)
-        Xc, Tc, done = Xm.cpu().numpy(), Tm.cpu().numpy(), done + steps * dt
+        # To the reference's own time nearest tc, exactly (the step stretched to fit): a cell
+        # that ignites between tc and the nearest output would otherwise count as wrong.
         k = int(np.argmin(np.abs(t - tc)))
+        steps = max(1, int(round((t[k] - done) / dt)))
+        h = (t[k] - done) / steps
+        Xm, Tm, _ = train.roll(model, rho, Xc, Tc, np.full(len(rho), h), steps)
+        Xc, Tc, done = Xm.cpu().numpy(), Tm.cpu().numpy(), t[k]
         errs[tc] = (np.abs(Xc - X[:, k]).sum(axis=1), Xc.copy(), k)
     print(f"dt = {dt:g}; L1 at " + ", ".join(f"{tc:g} s: p50 {np.quantile(e[0], 0.5):.2g} p99 {np.quantile(e[0], 0.99):.2g}" for tc, e in errs.items()))
     top = lambda x: ", ".join(f"{NAMES[i]} {x[i]:.2f}" for i in np.argsort(-x)[:3])
