@@ -11,6 +11,8 @@
 % Placeholder or provisional text is set in red so it cannot be mistaken for a result.
 % util/check_style.py lists every \todo left in the manuscript.
 \providecommand{\todo}[1]{\textcolor{red}{#1}}
+% A framed box that stands in for a figure not yet drawn: height, then what it will show.
+\providecommand{\figplaceholder}[2]{\fbox{\parbox[c][#1][c]{0.92\linewidth}{\centering\todo{Placeholder. #2}}}}
 
 %% ---------------------------------------------------------------- portable back matter
 % AASTeX and REVTeX define these; the other classes get plain equivalents, so the body
