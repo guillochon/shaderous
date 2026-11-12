@@ -8,6 +8,7 @@ import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
 import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
+import { BurnPass, type BurnSpec } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from './problems/settle';
@@ -296,6 +297,9 @@ export function uniformField(c: SimConfig): [number, number, number] {
   if (c.gravity === 'constant') g[c.ndim === 2 ? 1 : 2] -= c.G;
   return g;
 }
+
+/** The run's burning of fuel to ash (burn/burn.ts), from the preset and its parameters, or null. */
+export const burnSpec = (c: SimConfig): BurnSpec | null => c.problem.burn?.(c.params) ?? null;
 
 /** The modules the hydro shaders are assembled with. */
 export function hydroSlots(c: SimConfig): Record<string, string> {
@@ -728,6 +732,8 @@ export class Sim implements Simulation {
   /** gSpecies[state parity][species parity], and the same for the predictor */
   private gSpecies: GPUBindGroup[][] = [];
   private gSpeciesPredict: GPUBindGroup[][] = [];
+  /** Burning of fuel to ash (burn/burn.ts), after the species pass; none without. */
+  private burn?: BurnPass;
   mg!: Multigrid;
   rhoMean = 0;
 
@@ -977,6 +983,16 @@ export class Sim implements Simulation {
         8: v(this.speciesHalf!),
         ...((this.comp ? { 26: v(this.comp), 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>),
       }));
+    }
+    this.burn?.destroy();
+    this.burn = undefined;
+    const burn = burnSpec(c);
+    if (burn && this.speciesGroups > 0) {
+      if (this.comp) throw new Error('burning with species that set the equation of state is not supported');
+      this.burn = await BurnPass.create(d, burn, c.problem.species, {
+        dims: [this.n, this.n, this.nz], stride: this.nz, groups: this.speciesGroups, slots,
+        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1],
+      });
     }
     this.redDiag = await Reducer.create(
       d,
@@ -1268,6 +1284,12 @@ export class Sim implements Simulation {
         this.dispatch(pass);
       } else {
         this.cur = 1 - p;
+      }
+      if (this.burn) {
+        // Burn the step's end state into the other parities (burn/burn.ts).
+        this.burn.encode(pass, this.cur, this.speciesCur);
+        this.cur = 1 - this.cur;
+        this.speciesCur = 1 - this.speciesCur;
       }
       pass.end();
     }
@@ -1642,6 +1664,7 @@ export class Sim implements Simulation {
   destroy() {
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
+    this.burn?.destroy();
     for (const t of [...this.pred, this.gfield, ...this.species]) t.destroy();
     this.comp?.destroy();
     this.speciesHalf?.destroy();

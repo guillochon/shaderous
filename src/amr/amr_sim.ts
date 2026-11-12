@@ -22,9 +22,10 @@ import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
+import { BurnPass } from '../burn/burn';
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
-import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii } from '../sim';
+import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type GridBox, type RegridOp } from './tree';
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
@@ -124,6 +125,8 @@ export class AmrSim implements Simulation {
   private pSpecies: GPUComputePipeline[] = [];
   /** per pipeline (assemble, predict, move, regrid): [state parity][species parity] */
   private gSpecies: GPUBindGroup[][][] = [];
+  /** Burning of fuel to ash (burn/burn.ts), over the whole atlas after the species pass; none without. */
+  private burn?: BurnPass;
   private idx: GPUTexture;
   private params: GPUBuffer;
   private clock: GPUBuffer;
@@ -609,6 +612,28 @@ export class AmrSim implements Simulation {
       // Re-meshing goes from the state of parity p to the other.
       per((p, q) => bindGroup(d, pR, { 0: this.params, 2: v(this.species[q]), 4: v(this.state[1 - p][0]), 6: v(this.species[1 - q]), 7: this.rg, 31: this.listLeaf, ...kout })),
     ];
+    this.burn?.destroy();
+    this.burn = undefined;
+    const burn = burnSpec(this.cfg);
+    if (burn) {
+      if (this.comp) throw new Error('burning with species that set the equation of state is not supported');
+      const t = this.state[0][0];
+      // Every texel of the atlas: the pass is pointwise, and copies what it does not burn.
+      this.burn = await BurnPass.create(d, burn, this.cfg.problem.species, {
+        dims: [t.width, t.height, t.depthOrArrayLayers], stride: this.speciesDepth, groups: this.speciesGroups, slots: hydroSlots(this.cfg),
+        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1],
+      });
+    }
+  }
+
+  /** Burn the state as it is now into the other parities (burn/burn.ts), in a pass of its own. */
+  private encodeBurn(enc: GPUCommandEncoder) {
+    if (!this.burn) return;
+    const pass = beginPass(enc);
+    this.burn.encode(pass, this.cur, this.speciesCur);
+    pass.end();
+    this.cur = 1 - this.cur;
+    this.speciesCur = 1 - this.speciesCur;
   }
 
   /** Move the species through the step just updated from parity p (after the update's dispatch). */
@@ -1405,6 +1430,7 @@ export class AmrSim implements Simulation {
       } else {
         this.cur = 1 - p;
       }
+      this.encodeBurn(enc);
       this.stepsSinceFlag++;
       if (this.encodeFlags(enc)) {
         done++;
@@ -2110,6 +2136,7 @@ export class AmrSim implements Simulation {
     this.comp?.destroy();
     this.speciesX?.destroy();
     this.speciesHalf?.destroy();
+    this.burn?.destroy();
     this.massFlux?.destroy();
     for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
     this.grav?.destroy();

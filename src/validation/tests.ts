@@ -8,6 +8,7 @@ import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, type EosKind, ty
 import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
 import { COMPOSITIONS, composition } from '../units/composition';
 import { bubbleDensity, shockBubble } from '../problems/shock_bubble';
+import { detonationStable, DETONATION_CJ_SPEED, zndOf } from '../problems/detonation';
 import { exactRiemann } from '../reference/riemann_exact';
 import { RefHydro } from '../reference/hydro';
 import { sodX, sodY, sodZ, sodDiag, strongShock, shockTube } from '../problems/shocktube';
@@ -234,6 +235,55 @@ async function withAmr<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<S
   } finally {
     sim.destroy();
   }
+}
+
+// Detonations (problems/detonation.ts): where the front is, as the farthest point along the line
+// y = 0 at which the pressure falls through 10, between the fuel's 1 and the spike's 42. With
+// gamma 1.2 the pressure is 0.2 e_int.
+const DET_P = 10;
+
+function frontOf(xs: number[], ps: number[]): number {
+  for (let i = xs.length - 2; i >= 0; i--) {
+    if (ps[i] > DET_P && ps[i + 1] <= DET_P) return xs[i] + ((ps[i] - DET_P) / (ps[i] - ps[i + 1])) * (xs[i + 1] - xs[i]);
+  }
+  return NaN;
+}
+
+/** The detonation front and the fuel left 8 to 15 units behind it, on a uniform 2D grid. */
+function detonationRow(u1: Float32Array, u2: Float32Array, X: Float32Array[], n: number, box: number) {
+  const j = n >> 1;
+  const dx = box / n;
+  const xs: number[] = [];
+  const ps: number[] = [];
+  for (let i = 0; i < n; i++) {
+    xs.push(-box / 2 + (i + 0.5) * dx);
+    ps.push(0.2 * u2[4 * (j * n + i) + 1]);
+  }
+  const front = frontOf(xs, ps);
+  let left = 0;
+  let cells = 0;
+  let spike = 0;
+  for (let i = 0; i < n; i++) {
+    const behind = front - xs[i];
+    if (behind > 8 && behind < 15) {
+      left += X[0][j * n + i];
+      cells++;
+    }
+    if (behind > -1 && behind < 3) spike = Math.max(spike, ps[i]);
+  }
+  return { front, fuelLeft: left / Math.max(cells, 1), spike };
+}
+
+/** The same on the adaptive mesh, from the leaf cells along y = 0. */
+function detonationLeaves(c: LeafCells, X: Float32Array[]) {
+  const row: { x: number; p: number; f: number }[] = [];
+  for (let q = 0; q < c.count; q++) if (Math.abs(c.y[q]) < c.dx[q]) row.push({ x: c.x[q], p: 0.2 * c.u2[4 * q + 1], f: X[0][q] });
+  row.sort((a, b) => a.x - b.x);
+  // Two leaves may straddle y = 0 at each x: keep one per x.
+  const one = row.filter((r, i) => i === 0 || r.x !== row[i - 1].x);
+  const front = frontOf(one.map((r) => r.x), one.map((r) => r.p));
+  const behind = one.filter((r) => front - r.x > 8 && front - r.x < 15);
+  return { front, fuelLeft: behind.reduce((a, r) => a + r.f, 0) / Math.max(behind.length, 1) };
 }
 
 /** Uniform-grid index of a leaf cell (for meshes whose leaves all sit at the finest level). */
@@ -715,6 +765,40 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'detonation',
+    name: 'Detonation at the Chapman-Jouguet speed (2D, 512^2)',
+    criterion:
+      'The stable detonation of the single-step Arrhenius model (gamma 1.2, q = 50, Ea = 25; 12.8 cells per half-reaction length), started from its exact ZND profile: from t = 1 to t = 3 the front runs within 1% of the Chapman-Jouguet speed 6.809, and the gas 8 to 15 units behind it has burned all but 1e-3 of its fuel. Reported beside it: the speed with burning suppressed in cells flagged as shocks, which falls short of CJ by an error first order in the cell size (about 5% here, half that at twice the resolution)',
+    async run(gpu) {
+      const n = 512;
+      const box = detonationStable.box;
+      const run = (shockburn: number) =>
+        withSim(gpu, detonationStable, n, { ndim: 2, params: { ea: 25, overdrive: 1, shockburn } }, async (sim) => {
+          const at = async (t: number) => {
+            sim.cfg.tEnd = t;
+            sim.writeParams();
+            await sim.runToEnd();
+            const st = await sim.readState();
+            return detonationRow(st.u1, st.u2, await sim.readSpecies(), n, box);
+          };
+          const a = await at(1);
+          const b = await at(3);
+          return { speed: (b.front - a.front) / 2, fuelLeft: b.fuelLeft, spike: b.spike };
+        });
+      const plain = await run(1);
+      const suppressed = await run(0);
+      const err = plain.speed / DETONATION_CJ_SPEED - 1;
+      return {
+        pass: Math.abs(err) < 0.01 && plain.fuelLeft < 1e-3,
+        metrics: {
+          front_speed: plain.speed, cj_speed: DETONATION_CJ_SPEED, relative_error: err, fuel_left_behind: plain.fuelLeft,
+          peak_pressure: plain.spike, znd_spike: zndOf({ ea: 25, overdrive: 1 }).vonNeumann.p,
+          speed_no_burning_in_shocks: suppressed.speed, relative_error_no_burning_in_shocks: suppressed.speed / DETONATION_CJ_SPEED - 1,
+        },
+      };
+    },
+  },
+  {
     id: 'advection-accuracy',
     name: 'Smooth advection: error and order of convergence (2D)',
     criterion:
@@ -1000,6 +1084,30 @@ export const TESTS: TestDef[] = [
         else pass &&= r.dv < 1e-5 && r.dp < 1e-5 && r.gpuDp < 1e-5 && r.tErr < 1e-5;
       }
       return { pass, metrics };
+    },
+  },
+  {
+    id: 'amr-detonation',
+    name: 'Adaptive mesh: detonation at the Chapman-Jouguet speed (2D, 512 finest, 2 levels)',
+    criterion:
+      'The detonation test on a mesh three-quarters coarser away from the front: from t = 1 to t = 3 the front runs within 1% of the Chapman-Jouguet speed 6.809, the gas 8 to 15 units behind it has burned all but 1e-3 of its fuel, and the mesh was rebuilt as the front moved',
+    async run(gpu) {
+      return withAmr(gpu, detonationStable, 512, { ndim: 2, amrLevels: 2, params: { ea: 25, overdrive: 1, shockburn: 1 } }, async (sim) => {
+        const at = async (t: number) => {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          await sim.runToEnd();
+          return detonationLeaves(await sim.readLeaves(), await sim.readLeafSpecies());
+        };
+        const a = await at(1);
+        const b = await at(3);
+        const speed = (b.front - a.front) / 2;
+        const err = speed / DETONATION_CJ_SPEED - 1;
+        return {
+          pass: Math.abs(err) < 0.01 && b.fuelLeft < 1e-3 && sim.regrids >= 1,
+          metrics: { front_speed: speed, cj_speed: DETONATION_CJ_SPEED, relative_error: err, fuel_left_behind: b.fuelLeft, regrids: sim.regrids, leaf_blocks: sim.tree.stats().leaves },
+        };
+      });
     },
   },
   {

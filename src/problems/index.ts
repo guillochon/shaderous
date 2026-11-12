@@ -3,6 +3,7 @@ import { sodX, sodY, sodZ, sodDiag, strongShock } from './shocktube';
 import { sedov, sedovRad } from './sedov';
 import { kelvinHelmholtz, kelvinHelmholtzHeH } from './kelvin_helmholtz';
 import { shockBubble } from './shock_bubble';
+import { detonationCellular, detonationPulsating, detonationStable } from './detonation';
 import { rayleighTaylor } from './rayleigh_taylor';
 import { forwardStep } from './forward_step';
 import { advection } from './advection';
@@ -67,6 +68,15 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
       single(strongShock),
       single(forwardStep),
       single(shockBubble),
+      {
+        id: 'detonation',
+        label: 'Detonation',
+        variants: [
+          { label: 'Stable', problem: detonationStable },
+          { label: 'Pulsating', problem: detonationPulsating },
+          { label: 'Cellular (2D)', problem: detonationCellular },
+        ],
+      },
     ],
   },
   {
