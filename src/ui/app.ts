@@ -762,9 +762,15 @@ function syncControls() {
   const fieldSel = $<HTMLSelectElement>('field');
   // Nor a potential without gravity, nor a Jeans length without self-gravity.
   const pulled = cfg.gravity !== 'off' || cfg.gext.some((g) => g !== 0) || !!cfg.problem.masses || placedMasses > 0;
+  // A barotropic gas carries no internal energy of its own, so it has no temperature or entropy
+  // to show: those two are left out of the menu altogether.
+  const noHeat = (i: number) => (i === 1 || i === 9) && cfg.eos === 'barotropic';
   const noField = (i: number) => (i === 7 && two) || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic')) || (i === 14 && cfg.amrLevels === 0)
-    || (i === 15 && !pulled) || (i === 17 && !self);
-  for (const o of fieldSel.options) o.disabled = noField(+o.value);
+    || (i === 15 && !pulled) || (i === 17 && !self) || noHeat(i);
+  for (const o of fieldSel.options) {
+    o.disabled = noField(+o.value);
+    o.hidden = noHeat(+o.value);
+  }
   if (noField(view.field)) view.field = 0;
   syncSpeciesFields(fieldSel);
   $<HTMLInputElement>('log').disabled = LINEAR_FIELDS.has(view.field);
