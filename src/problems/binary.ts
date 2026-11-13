@@ -1,4 +1,6 @@
 import { all, OUTFLOW, type PointMass, type Problem } from './types';
+import { ASTRO } from '../units/constants';
+import { gravityUnits } from '../units/units';
 
 // Binary accretion: two point masses on a Kepler orbit inside a gas disk that orbits them both.
 //
@@ -26,6 +28,11 @@ import { all, OUTFLOW, type PointMass, type Problem } from './types';
 // and the box move with it, as an outer disk would. On an adaptive mesh the gas around both
 // masses is kept at the finest level, and their softening and sinks are sized by its cells.
 export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3, rDamp: 4.5, damp: 3 };
+
+// The setup is scale-free; physical units put it at one scale: two massive black holes of
+// 1e5 solar masses each (a total of 2e5, the unit of mass, whatever the mass ratio) 0.01 pc
+// apart. The orbital period is then about 210 years.
+export const BINARY_UNITS = gravityUnits('massive black holes', 0.01 * ASTRO.pc, 2e5 * ASTRO.Msun);
 
 /** A number as a WGSL f32 literal. */
 const f32 = (v: number) => (Number.isInteger(v) ? `${v}.0` : String(v));
@@ -92,6 +99,7 @@ export const binary: Problem = {
   bcHi: all(OUTFLOW),
   gravity: 'off',
   G: 1,
+  units: BINARY_UNITS,
   box: BINARY.box,
   tEnd: Infinity,
   checkpointDt: 1,
