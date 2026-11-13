@@ -56,7 +56,15 @@ export interface ViewState {
   /** Volume view: draw the gas as fog (off, the isosurfaces show alone), and the surfaces' opacity. */
   fog: boolean;
   surfaceOpacity: number;
+  /** A white background instead of the dark one, in every view (for figures on a page). */
+  light: boolean;
+  /** Volume view: outline the box. */
+  box: boolean;
 }
+
+/** The background behind the box: dark, or white with `light`. */
+const BG_DARK = [0.05, 0.058, 0.078];
+const BG_LIGHT = [1, 1, 1];
 
 /** Floats per line vertex: position (box units, centered), color with alpha. */
 const LINE_FLOATS = 7;
@@ -153,6 +161,8 @@ export const defaultView = (): ViewState => ({
   nContours: 8,
   fog: true,
   surfaceOpacity: 0.5,
+  light: false,
+  box: true,
 });
 
 /**
@@ -280,7 +290,7 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
@@ -562,6 +572,7 @@ export class Renderer {
         // The color scale, for the color of each contour's level (as in the View uniform).
         // Without isosurfaces the fog is all there is to see.
         log ? 1 : 0, lo, hi, v.fog || !v.contours ? 1 : 0,
+        ...(v.light ? BG_LIGHT : BG_DARK), v.box ? 1 : 0,
       ]),
     );
 

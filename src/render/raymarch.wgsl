@@ -56,7 +56,7 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let thi = max(ta, tb);
   let t0 = max(max(tlo.x, max(tlo.y, tlo.z)), 0.0);
   let t1 = min(thi.x, min(thi.y, thi.z));
-  if (t1 <= t0) { return vec4<f32>(BG, 1.0); }
+  if (t1 <= t0) { return vec4<f32>(C.bg.rgb, 1.0); }
 
   let jitter = hash(in.pos.xy);
   var col = vec3<f32>(0.0);
@@ -114,12 +114,14 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
     if (alpha > 0.995) { break; }
     t += ds;
   }
-  col += (1.0 - alpha) * BG;
+  col += (1.0 - alpha) * C.bg.rgb;
 
-  // Box outline: far edges are dimmed by the gas in front of them.
+  // Box outline, unless C.bg.w is 0: far edges are dimmed by the gas in front of them. On a light
+  // background the outline is darker than the background, on a dark one lighter.
   let w = 0.004;
   let near = edge(ro + rd * t0, w);
   let far = edge(ro + rd * t1, w) * (1.0 - alpha);
-  col = mix(col, vec3<f32>(0.45, 0.5, 0.6), 0.6 * max(near, far));
+  let ink = select(vec3<f32>(0.45, 0.5, 0.6), vec3<f32>(0.35, 0.38, 0.45), dot(C.bg.rgb, vec3<f32>(1.0)) > 1.5);
+  col = mix(col, ink, 0.6 * max(near, far) * C.bg.w);
   return vec4<f32>(col, 1.0);
 }

@@ -125,6 +125,8 @@ export function encodeLink(s: LinkState): URLSearchParams {
   str('blocks', flag(view.showBlocks), flag(dv.showBlocks));
   str('contours', flag(view.contours), flag(dv.contours));
   str('fog', flag(view.fog), flag(dv.fog));
+  str('light', flag(view.light), flag(dv.light));
+  str('box', flag(view.box), flag(dv.box));
   if (!s.auto) {
     q.set('lo', fmt(view.lo));
     q.set('hi', fmt(view.hi));
@@ -246,6 +248,8 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.view, 'showBlocks', bool('blocks'));
   put(out.view, 'contours', bool('contours'));
   put(out.view, 'fog', bool('fog'));
+  put(out.view, 'light', bool('light'));
+  put(out.view, 'box', bool('box'));
   put(out.view, 'surfaceOpacity', num('isoa', 0.05, 1));
   const ncont = num('ncont', 1, MAX_CONTOURS);
   put(out.view, 'nContours', ncont === undefined ? undefined : Math.round(ncont));

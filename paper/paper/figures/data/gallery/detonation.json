@@ -1,0 +1,27 @@
+{
+ "name": "detonation",
+ "setup": "problem=detonation-cellular&dim=3&n=128",
+ "t": 30,
+ "steps": 3080,
+ "view": {
+  "showBlocks": false,
+  "contours": true,
+  "nContours": 5,
+  "fog": false,
+  "surfaceOpacity": 0.45,
+  "light": true,
+  "box": false,
+  "colormap": "turbo",
+  "mode": "volume",
+  "field": 0,
+  "log": true,
+  "autoRange": true
+ },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 0.45,
+  "dist": 2.6
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}

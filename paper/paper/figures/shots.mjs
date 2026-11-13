@@ -39,11 +39,12 @@ for (const shot of shots) {
     // `steps`: then that many ordinary steps. A run that lands on a time shortens its last step,
     // and with per-block timesteps that last cycle's bins are not the run's usual ones.
     if (shot.steps) r = await s.call('run', { steps: shot.steps });
-    if (shot.view) await s.call('view', shot.view);
+    // The whole view in force (a preset sets its own camera angles), for the figure's axes triad.
+    let full = await s.call('view', shot.view ?? {});
     // One image per entry of `images`, each with its own view on top of the shot's.
     let errors = [];
     for (const img of shot.images ?? [{ name: shot.name }]) {
-      if (img.view) await s.call('view', img.view);
+      if (img.view) full = await s.call('view', img.view);
       const file = path.join(outDir, `${img.name}.png`);
       if (shot.page) {
         // Let the page's own loop draw the paused run and refresh its readouts.
@@ -53,7 +54,7 @@ for (const shot of shots) {
         writeFileSync(file, pngBytes(await s.call('screenshot', { width, height })));
       }
       errors = await s.call('errors');
-      const meta = { name: img.name, setup: st.query, t: r.t, steps: r.steps, view: { ...shot.view, ...img.view }, adapter: st.adapter, errors };
+      const meta = { name: img.name, setup: st.query, t: r.t, steps: r.steps, view: { ...shot.view, ...img.view }, camera: { yaw: full.yaw, pitch: full.pitch, dist: full.dist }, adapter: st.adapter, errors };
       writeFileSync(path.join(outDir, `${img.name}.json`), JSON.stringify(meta, null, 1) + '\n');
     }
     log(`${shot.name}: ${st.query} to t = ${r.t} (${r.steps} steps, ${((Date.now() - t0) / 1000).toFixed(0)} s)${errors.length ? `, ${errors.length} page error(s)` : ''}`);

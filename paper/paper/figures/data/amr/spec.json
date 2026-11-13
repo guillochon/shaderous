@@ -25,22 +25,6 @@
   ]
  },
  {
-  "name": "wd",
-  "setup": "problem=wd-collision&dim=3&n=256&amr=2",
-  "until": 4,
-  "width": 1400,
-  "view": {
-   "showBlocks": true,
-   "dist": 0.4,
-   "contours": true,
-   "nContours": 5,
-   "fog": false,
-   "surfaceOpacity": 0.4,
-   "lo": 0.1,
-   "hi": 100
-  }
- },
- {
   "name": "sedov",
   "setup": "problem=sedov&dim=3&n=256&amr=3&tbins=3",
   "until": 0.05,

@@ -1,0 +1,25 @@
+{
+ "name": "interface",
+ "setup": "problem=binary&dim=3&n=128&p.incl=90",
+ "t": 62.831851959228516,
+ "steps": 2831,
+ "view": {
+  "mode": "volume",
+  "showBlocks": false,
+  "contours": true,
+  "nContours": 5,
+  "fog": false,
+  "surfaceOpacity": 0.4,
+  "lo": 0.000001,
+  "hi": 0.003,
+  "pitch": 0.5,
+  "dist": 1.5
+ },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 0.5,
+  "dist": 1.5
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}

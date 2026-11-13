@@ -2,15 +2,18 @@
 
     uv run python paper/figures/make_tde.py          # plot from data/tde/
     uv run python paper/figures/make_tde.py --run    # first run both cases again (minutes on a GPU)
+    uv run python paper/figures/make_tde.py --shots  # take only the two images again
 
 The runs are the tidal-disruption presets "Partial, gamma = 5/3" (beta = 0.6) and "Full, gamma = 5/3"
 (beta = 1.5), each on its own grid, run with the code's command-line runner
 (tools/headless/cli.mjs, docs/headless.md) in headless Chrome: debris energies at every output
-(--debris) and an image of the volume view. --run needs Node, npm install in the code's
+(--debris). The two images are taken by shots.mjs, which runs each case to t = 6 in the same
+way and saves the volume view (data/tde/images/spec.json gives the view). --run needs Node, npm install in the code's
 repository, Chrome and a GPU; the outputs are written to paper/figures/data/tde/<case>/.
 
 (a, b) The density at t = 6, about two dynamical times after pericenter, as five isosurfaces
-evenly spaced in log density from 0.01 to 10 (code units), drawn by the code's own ray-marcher. (c) Mass per unit specific orbital energy about the black hole,
+evenly spaced in log density from 0.01 to 10 (code units), drawn by the code's own ray-marcher
+on a white background, with an axes triad drawn here from the camera's angles. (c) Mass per unit specific orbital energy about the black hole,
 in units of the spread Delta e = G M_bh R_star / r_t^2, at the last output (t = 40): what had left the box
 and what was still in it, the surviving core set apart. (d) The return rate of the bound debris
 to pericenter, from Kepler's third law, against time since pericenter.
@@ -41,7 +44,6 @@ CASES = {
     "full": {"problem": "tidal-disruption-full", "label": r"Full, $\beta = 1.5$", "color": style.PALETTE[1]},
 }
 T_END = 40
-T_IMAGE = 6
 EVERY = 2
 
 
@@ -50,31 +52,40 @@ def run() -> None:
         out = DATA / name
         cmd = [
             "node", str(CODE / "tools/headless/cli.mjs"), "run", "--problem", case["problem"],
-            "--until", str(T_END), "--every", str(EVERY), "--debris", "--png", "--width", "900",
-            "--view", "showBlocks=false", "--view", "dist=1.3", "--view", "contours=true", "--view", "nContours=5",
-            "--view", "fog=false", "--view", "surfaceOpacity=0.4", "--view", "lo=0.01", "--view", "hi=10",
+            "--until", str(T_END), "--every", str(EVERY), "--debris",
             "--low-priority", "--out", str(out),
         ]
         print(" ".join(cmd), file=sys.stderr)
         subprocess.run(cmd, check=True, cwd=CODE)
-        # Keep what the figure uses: the image at T_IMAGE, the last debris report, the manifest.
+        # Keep what the figure uses: the last debris report and the manifest.
         for f in out.iterdir():
-            keep = f.name in ("manifest.json", "diag.jsonl") or f.name.endswith(f"-t{T_IMAGE}.png") or f.name.endswith(f"-t{T_END}-debris.json")
+            keep = f.name in ("manifest.json", "diag.jsonl") or f.name.endswith(f"-t{T_END}-debris.json")
             if not keep:
                 f.unlink()
 
 
-def load(name: str) -> tuple[dict, Path]:
-    d = DATA / name
-    report = json.loads(next(d.glob(f"*-t{T_END}-debris.json")).read_text())
-    return report, next(d.glob(f"*-t{T_IMAGE}.png"))
+def shots() -> None:
+    images = DATA / "images"
+    subprocess.run(["node", str(HERE / "shots.mjs"), str(images / "spec.json"), str(images)], check=True, cwd=CODE)
+
+
+def load(name: str) -> tuple[dict, Path, dict]:
+    report = json.loads(next((DATA / name).glob(f"*-t{T_END}-debris.json")).read_text())
+    meta = json.loads((DATA / "images" / f"{name}.json").read_text())
+    if meta["errors"]:
+        raise SystemExit(f"{name}: the page reported errors: {meta['errors']}")
+    return report, DATA / "images" / f"{name}.png", meta
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", action="store_true", help="run both cases again first")
-    if ap.parse_args().run:
+    ap.add_argument("--shots", action="store_true", help="take the two images again first")
+    args = ap.parse_args()
+    if args.run:
         run()
+    if args.run or args.shots:
+        shots()
 
     style.apply()
     # One column: the two renderings above, the two plots below.
@@ -86,12 +97,13 @@ def main() -> None:
     ax_t = fig.add_subplot(grid[1, 1])
 
     for i, (name, case) in enumerate(CASES.items()):
-        r, png = load(name)
+        r, png, meta = load(name)
         ax = img_axes[i]
-        ax.imshow(mpimg.imread(png), interpolation="none")
+        ax.imshow(style.crop_to_content(mpimg.imread(png), 1.0, margin=0.12), interpolation="none")
         ax.set_axis_off()
+        style.triad(ax, meta["camera"]["yaw"], meta["camera"]["pitch"], at=(0.12, 0.12), size=0.09)
         ax.text(0.03, 0.97, f"({'ab'[i]}) {case['label']}", transform=ax.transAxes, va="top", ha="left",
-                fontsize=style.LABEL_SIZE - 1, color="white")
+                fontsize=style.LABEL_SIZE - 1, color=style.INK)
 
         de, nb = r["de"], len(r["escaped"])
         e = (r["lo"] + (np.arange(nb) + 0.5) * r["width"]) / de

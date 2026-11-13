@@ -312,6 +312,8 @@ Changes what is drawn, leaving the run alone. These keys are accepted:
 | `zoom`, `cx`, `cy` | Slice view: magnification, and the point at the center of the view |
 | `showBlocks`, `contours`, `nContours` | Mesh block outlines, and contour lines (isosurfaces in the volume view) |
 | `fog`, `surfaceOpacity` | Volume view: draw the gas as fog (off leaves the isosurfaces alone), and how opaque the isosurfaces are |
+| `light` | A white background instead of the dark one |
+| `box` | Volume view: outline the box (on by default) |
 | `colormap` | A name from `describe().colormaps` |
 | `autoRange` | Fit the color range to the data |
 

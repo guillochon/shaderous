@@ -5,13 +5,21 @@
  "steps": 1110,
  "view": {
   "showBlocks": false,
-  "dist": 0.9,
   "contours": true,
   "nContours": 5,
   "fog": false,
   "surfaceOpacity": 0.4,
+  "light": true,
+  "box": false,
+  "colormap": "turbo",
+  "dist": 0.9,
   "lo": 0.01,
-  "hi": 30
+  "hi": 10
+ },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 1.15,
+  "dist": 0.9
  },
  "adapter": "nvidia ampere",
  "errors": []

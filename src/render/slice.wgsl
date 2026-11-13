@@ -89,7 +89,7 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   // Zoom and pan: C.r.zw is the point of the slice at the middle of that square.
   let st = st0 / C.r.y + C.r.zw;
   let line = contour(st);
-  if (any(st < vec2<f32>(0.0)) || any(st >= vec2<f32>(1.0))) { return vec4<f32>(BG, 1.0); }
+  if (any(st < vec2<f32>(0.0)) || any(st >= vec2<f32>(1.0))) { return vec4<f32>(C.bg.rgb, 1.0); }
   let m = textureLoad(MAP, vec2<i32>(floor(st * f32(textureDimensions(MAP).x))), 0);
   var col = textureSampleLevel(TF, S, vec2<f32>(m.r, 0.5), 0.0).rgb;
   if (m.r < -0.5) { col = SOLID; }

@@ -10,10 +10,9 @@ the setup in force, the time reached and the GPU. --run needs Node, npm install 
 repository, Chrome and a GPU.
 
 (a, b) A 2D Kelvin-Helmholtz instability on 2048^2 at the finest level, three levels: density
-with the outlines of the blocks, and the refinement level. (c) Two white dwarfs at the greatest
-compression of a head-on collision (t = 4, where the central density peaks), as five isosurfaces
-of the density (0.1 to 100, code units) with the block outlines. (d) A slice through a 3D Sedov blast (256 cells at the finest
-level, three levels) with per-block timesteps, colored by each block's time bin.
+with the outlines of the blocks, and the refinement level. (c) A slice through a 3D Sedov blast
+(256 cells at the finest level, three levels) with per-block timesteps, colored by each block's
+time bin.
 """
 
 from __future__ import annotations
@@ -37,8 +36,7 @@ CODE = HERE.parents[2]
 PANELS = [
     ("kh-density", "(a) Kelvin-Helmholtz, density", None),
     ("kh-level", "(b) Refinement level", "level"),
-    ("wd", "(c) White dwarfs at greatest compression", None),
-    ("sedov", "(d) Sedov blast, time bin", "bin"),
+    ("sedov", "(c) Sedov blast, time bin", "bin"),
 ]
 BG = np.array([0.05, 0.058, 0.078])  # the renderer's background (render/camera.wgsl)
 
@@ -71,7 +69,7 @@ def main() -> None:
         subprocess.run(["node", str(HERE / "shots.mjs"), str(DATA / "spec.json"), str(DATA)], check=True, cwd=CODE)
 
     style.apply()
-    fig, axes = plt.subplots(1, 4, figsize=(style.PAGE, style.PAGE / 4 + 0.05), layout="constrained")
+    fig, axes = plt.subplots(1, 3, figsize=(style.PAGE, style.PAGE / 3 + 0.05), layout="constrained")
     fig.get_layout_engine().set(w_pad=0.01, h_pad=0.01, wspace=0.01)
     for ax, (name, label, k) in zip(axes, PANELS, strict=True):
         meta = json.loads((DATA / f"{name}.json").read_text())

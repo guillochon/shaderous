@@ -11,6 +11,7 @@ struct Cam {
   r: vec4<f32>,   // 1 to outline the blocks of an adaptive mesh, slice zoom, slice view center in [0, 1]^2
   k: vec4<f32>,   // contours (isosurfaces in the volume view): how many (0 for none), log10 of the range they divide, the one highlighted (0 for none)
   sc: vec4<f32>,  // the color scale: 1 if logarithmic, its ends (in log10 when logarithmic); w: volume view, 1 to draw the gas as fog
+  bg: vec4<f32>,  // the background color; w: volume view, 1 to outline the box
 }
 @group(0) @binding(0) var<uniform> C: Cam;
 @group(0) @binding(1) var VOL: texture_3d<f32>;
@@ -28,7 +29,6 @@ fn vs(@builtin(vertex_index) i: u32) -> VOut {
   return VOut(vec4<f32>(p, 0.0, 1.0), p);
 }
 
-const BG = vec3<f32>(0.05, 0.058, 0.078);
 
 // The color of contour level k (counted from 1): C.k.x levels evenly spaced in log10 |value| from
 // C.k.y to C.k.z, the ends left out. `neg`: the level of a field of either sign taken below zero.

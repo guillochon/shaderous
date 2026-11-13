@@ -1,33 +1,41 @@
 [
  {
-  "name": "interface",
-  "setup": "problem=tidal-disruption-full",
-  "until": 6,
-  "page": true,
-  "width": 1600,
-  "height": 1000,
-  "view": {
-   "contours": true,
-   "nContours": 5,
-   "fog": false,
-   "surfaceOpacity": 0.4,
-   "lo": 0.01,
-   "hi": 10
-  }
- },
- {
   "name": "wd",
   "setup": "problem=wd-collision&dim=3&n=256&amr=2&p.b=0.6",
   "until": 7,
   "view": {
    "showBlocks": false,
-   "dist": 0.9,
    "contours": true,
    "nContours": 5,
    "fog": false,
    "surfaceOpacity": 0.4,
+   "light": true,
+   "box": false,
+   "colormap": "turbo",
+   "dist": 0.9,
    "lo": 0.01,
-   "hi": 30
+   "hi": 10
+  },
+  "width": 1400
+ },
+ {
+  "name": "detonation",
+  "setup": "problem=detonation-cellular&dim=3&n=128",
+  "until": 30,
+  "width": 1400,
+  "view": {
+   "showBlocks": false,
+   "contours": true,
+   "nContours": 5,
+   "fog": false,
+   "surfaceOpacity": 0.45,
+   "light": true,
+   "box": false,
+   "colormap": "turbo",
+   "mode": "volume",
+   "field": 0,
+   "log": true,
+   "autoRange": true
   }
  },
  {

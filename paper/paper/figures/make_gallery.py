@@ -1,4 +1,4 @@
-"""Shaderous in the browser: the interface, and three frames from its renderer.
+"""Problems Shaderous sets up: four frames from its own renderer.
 
     uv run python paper/figures/make_gallery.py          # assemble from data/gallery/
     uv run python paper/figures/make_gallery.py --run    # take the shots again (minutes on a GPU)
@@ -28,12 +28,12 @@ HERE = Path(__file__).resolve().parent
 DATA = HERE / "data" / "gallery"
 CODE = HERE.parents[2]
 PANELS = [
-    ("interface", "(a) Tidal disruption, the whole interface"),
-    ("wd", "(b) Colliding white dwarfs"),
+    ("wd", "(a) Colliding white dwarfs"),
+    ("detonation", "(b) Cellular detonation"),
     ("binary", "(c) Circumbinary disk"),
     ("thermal", "(d) Thermal instability"),
 ]
-ASPECT = 1.6  # every panel is cropped to the interface's 16:10
+ASPECT = 4 / 3  # every panel is cropped to 4:3
 SLICES = {"binary", "thermal"}  # slice views, drawn inside a margin of background
 BG = np.array([0.05, 0.058, 0.078])  # the renderer's background (render/camera.wgsl)
 
@@ -73,10 +73,13 @@ def main() -> None:
         if meta["errors"]:
             raise SystemExit(f"{name}: the page reported errors: {meta['errors']}")
         img = mpimg.imread(DATA / f"{name}.png")
-        if name in SLICES:
-            img = trim(img)
-        ax.imshow(crop(img, ASPECT), interpolation="none")
+        # A slice fills its panel; a 3D view is cut to its isosurfaces.
+        img = crop(trim(img), ASPECT) if name in SLICES else style.crop_to_content(img, ASPECT)
+        ax.imshow(img, interpolation="none")
         ax.set_axis_off()
+        if name not in SLICES:
+            cam = meta["camera"]
+            style.triad(ax, cam["yaw"], cam["pitch"], at=(0.07, 0.1), size=0.06)
         ax.text(0.015, 0.975, label, transform=ax.transAxes, va="top", ha="left", fontsize=style.LABEL_SIZE, bbox=style.LABEL_BOX)
         print(f"{name}: {meta['setup']} at t = {meta['t']:.4g} ({meta['steps']} steps)")
     style.save(fig, "gallery")
