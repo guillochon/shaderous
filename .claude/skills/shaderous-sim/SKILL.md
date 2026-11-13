@@ -83,6 +83,11 @@ npm run headless -- sweep --problem sedov --dim 2 --vary n=128,256,512 --until 0
 - Run long jobs in the background and at low priority: add `--low-priority`. On Windows you
   can also prefix the command with `cmd //c start //b //wait //belownormal`, but then use flags
   instead of a query string, since `cmd` splits commands on `&`.
+- `--debris` writes the debris energies and dM/dt at each output, for problems that track them
+  (the tidal disruption). `python tools/headless/plot_dmdt.py RUNDIR` draws dM/dε and dM/dt.
+  Read dM/dt only a few dynamical times past pericenter, once it stops changing between
+  outputs. Check the budget: `diagnostics.mass` plus `totals.escaped` plus the accreted mass
+  should equal the starting mass.
 - Outputs go under `runs/`, which git ignores. Show the user images with the file tools; read
   numbers from `diag.jsonl` and the slices.
 

@@ -8,7 +8,7 @@
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { lowerPriority, openSession, pngBytes, setupQuery } from './session.mjs';
+import { debrisSummary, lowerPriority, openSession, pngBytes, setupQuery } from './session.mjs';
 
 const HELP = `Usage: node tools/headless/cli.mjs <command> [setup] [options]
 
@@ -36,6 +36,8 @@ Outputs (diag.jsonl and manifest.json are always written)
   --slice VAR          A slice of this variable at each output, as JSON (repeatable)
   --slice-axis A --slice-pos P --slice-res R
   --athdf              An .athdf file at each output
+  --debris             Debris energies and dM/dt at each output, as JSON (problems that track
+                       them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py
 
 Sweeps
   --vary KEY=V1,V2,..  Values of a setup key, repeatable; every combination is run
@@ -56,7 +58,7 @@ const { values: o, positionals } = parseArgs({
     out: { type: 'string' }, png: { type: 'boolean' }, width: { type: 'string' }, height: { type: 'string' },
     view: { type: 'string', multiple: true },
     slice: { type: 'string', multiple: true }, 'slice-axis': { type: 'string' }, 'slice-pos': { type: 'string' }, 'slice-res': { type: 'string' },
-    athdf: { type: 'boolean' },
+    athdf: { type: 'boolean' }, debris: { type: 'boolean' },
     vary: { type: 'string', multiple: true },
     url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' }, quiet: { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
@@ -177,6 +179,15 @@ async function runOne(session, q, dir) {
       const sl = await call('slice', { variable, axis: num(o['slice-axis'], 'slice-axis'), pos: num(o['slice-pos'], 'slice-pos'), res: num(o['slice-res'], 'slice-res') });
       writeFileSync(path.join(dir, `${name}-${variable}.json`), JSON.stringify(sl) + '\n');
       files.push(`${name}-${variable}.json`);
+    }
+    if (o.debris) {
+      const r = await call('debris');
+      writeFileSync(path.join(dir, `${name}-debris.json`), JSON.stringify(r) + '\n');
+      files.push(`${name}-debris.json`);
+      const s = debrisSummary(r);
+      const p = s.physical;
+      log(`    debris: escaped ${s.totals.escaped.toPrecision(4)}  in box ${s.totals.inBox.toPrecision(4)}  core ${s.totals.core.toPrecision(5)}  bound ${s.totals.bound.toPrecision(4)}` +
+        (p ? `  dM/dt peak ${p.peakMsunPerYear.toPrecision(3)} Msun/yr at ${p.peakDaysAfterPericenter.toPrecision(3)} d after pericenter` : ''));
     }
     if (o.athdf) {
       const f = await call('athdf');

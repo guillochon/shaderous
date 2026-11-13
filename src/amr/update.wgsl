@@ -222,6 +222,37 @@ fn match_faces(fl: Faces, slot: i32, axis: i32, l: vec3<i32>) -> Faces {
   return out;
 }
 
+#include <debris>
+
+// Debris energies (debris/debris.wgsl): the gas leaving through a face of the domain this
+// step (the block's own step), binned by its orbital energy with the cell's velocity and
+// potential at the face. A face of the domain has no neighbor to match fluxes with, so this is
+// all that crosses it.
+fn escape(slot: i32, l: vec3<i32>, c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Faces, fz: Faces) {
+  let lo = vec3<f32>(fx.lo.m, fy.lo.m, fz.lo.m);
+  let hi = vec3<f32>(fx.hi.m, fy.hi.m, fz.hi.m);
+  // The passive scalar's flux, for problems that bin only the gas it marks.
+  let los = vec3<f32>(fx.lo.s, fy.lo.s, fz.lo.s);
+  let his = vec3<f32>(fx.hi.s, fy.hi.s, fz.hi.s);
+  let xc = blk_pos(slot, l);
+  let adt = select(g_dx * g_dx, g_dx, is2d()) * g_dt;
+  let phi = textureLoad(G, c, 0).w;
+  for (var a = 0; a < 3; a++) {
+    if (a == 2 && is2d()) { break; }
+    // Beyond a face of the domain the neighbor entry is -1 - (boundary type), at most -2.
+    if (l[a] == 0 && bt(slot, 6u + u32(2 * a)) <= -2) {
+      var x = xc;
+      x[a] -= 0.5 * g_dx;
+      deb_tally(x, v, phi, -lo[a] * adt, -los[a] * adt);
+    }
+    if (l[a] == BS - 1 && bt(slot, 7u + u32(2 * a)) <= -2) {
+      var x = xc;
+      x[a] += 0.5 * g_dx;
+      deb_tally(x, v, phi, hi[a] * adt, his[a] * adt);
+    }
+  }
+}
+
 // Validation hook: when set, the pass writes the face mass fluxes instead of the new state.
 override DEBUG_FLUX: bool = false;
 
@@ -278,6 +309,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     fx = match_faces(ox, slot, 0, l);
     fy = match_faces(oy, slot, 1, l);
     if (!is2d()) { fz = match_faces(oz, slot, 2, l); }
+    if (DEBRIS) { escape(slot, l, c, w0.a.yzw, fx, fy, fz); }
   }
 
   if (DEBUG_FLUX) {

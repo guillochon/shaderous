@@ -14,6 +14,7 @@ import type { Restart } from './io/snapshot';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
+import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
 import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 
 export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
@@ -228,6 +229,15 @@ export interface Simulation {
    * numbers, in fractions of the box), and a version that changes whenever they do.
    */
   blockBoxes?(): { version: number; boxes: Float32Array };
+  /**
+   * Debris energies (debris/debris.ts): the gas binned by its orbital energy about the
+   * problem's chosen point mass, what has left the box and what is in it, with the return rate
+   * of the bound part. Null if the problem does not ask for them. Takes a census of the grid,
+   * so call it between steps.
+   */
+  debris(): Promise<DebrisReport | null>;
+  /** The mass that has left the box per energy bin, as a snapshot keeps it; null without debris. */
+  debrisLedger(): Promise<DebrisLedger | null>;
 }
 
 export function configFor(problem: Problem, n: number, over: Partial<SimConfig> = {}): SimConfig {
@@ -317,6 +327,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     species: speciesSlot(speciesGroups(c.problem)),
     // One composition everywhere, or the species' own in every cell (species/mixture.ts).
     comp: problemCompSlot(c.problem, c.eosParams.gamma, speciesGroups(c.problem)),
+    // Whether the update tallies the gas leaving the box by its orbital energy (debris/debris.ts).
+    debris: debrisSlot(c),
   };
 }
 
@@ -782,6 +794,9 @@ export class Sim implements Simulation {
   private solids = false;
   private sources: GPUBuffer;
   private nSources = 0;
+  /** debris energies (debris/debris.ts), if the problem asks for them, and their census pass */
+  private debrisBuf?: DebrisBuffers;
+  private pCensus?: GPUComputePipeline;
 
   private constructor(gpu: Gpu, cfg: SimConfig) {
     this.device = gpu.device;
@@ -831,6 +846,11 @@ export class Sim implements Simulation {
       sim.speciesHalf = tex3d(d, n, 'rgba32float', 'species half step', nz * G);
       sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (n + 1) ** 2 * (nz + 1), usage: GPUBufferUsage.STORAGE });
       if (sim.compCoeffs) sim.comp = t('composition');
+    }
+    const spec = debrisSpec(cfg);
+    if (spec) {
+      sim.debrisBuf = new DebrisBuffers(d, spec);
+      sim.pCensus = await computePipeline(d, assemble('debris/census.wgsl'), 'debris census');
     }
     sim.writeParams();
     // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
@@ -947,6 +967,7 @@ export class Sim implements Simulation {
           10: v(this.pred[1]),
           11: this.sources,
           ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
+          ...(this.debrisBuf?.bindings(this.bh) ?? {}),
           ...k,
         }),
       );
@@ -1031,6 +1052,7 @@ export class Sim implements Simulation {
     const masses = initialMasses(c, this.dx);
     this.nMasses = this.nOwnMasses = masses.length;
     this.device.queue.writeBuffer(this.bh, 0, packMasses(masses));
+    this.debrisBuf?.reset(c.restart?.debris);
     const u1 = new Float32Array(n * n * nz * 4);
     const u2 = new Float32Array(n * n * nz * 4);
     const G = this.speciesGroups;
@@ -1154,6 +1176,29 @@ export class Sim implements Simulation {
   /** Time, step count and point masses, for a snapshot (see io/snapshot.ts). */
   async readRestart(): Promise<RestartState> {
     return readRestart(this.device, this.clock, this.bh, this.nMasses);
+  }
+
+  async debrisLedger(): Promise<DebrisLedger | null> {
+    return this.debrisBuf ? this.debrisBuf.readLedger() : null;
+  }
+
+  async debris(): Promise<DebrisReport | null> {
+    const b = this.debrisBuf;
+    if (!b) return null;
+    const d = await this.diagnostics();
+    const v0 = d.momentum.map((p) => p / d.mass);
+    const group = bindGroup(this.device, this.pCensus!, {
+      0: this.params, 1: this.state[this.cur][0].createView(), 2: this.state[this.cur][1].createView(), 3: this.mg.phi.createView(), 20: this.bh, 21: b.census,
+    });
+    const census = await b.takeCensus((enc) => {
+      const pass = beginPass(enc);
+      pass.setPipeline(this.pCensus!);
+      pass.setBindGroup(0, group);
+      pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+      pass.end();
+    }, this.selfGravity, v0, d.ranges[0][1]);
+    const r = await this.readRestart();
+    return b.report(r.time, r.masses?.[b.spec.mass]?.gm ?? 0, await b.readLedger(), census);
   }
 
   /** Replace the state with raw conserved arrays (rho, m), (E, e_int, rho s, 0). */
@@ -1581,6 +1626,7 @@ export class Sim implements Simulation {
       6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources,
       ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
+      ...(this.debrisBuf?.bindings(this.bh) ?? {}),
       ...this.compIn,
     });
     const enc = d.createCommandEncoder();
@@ -1678,6 +1724,7 @@ export class Sim implements Simulation {
     this.comp?.destroy();
     this.speciesHalf?.destroy();
     this.massFlux?.destroy();
+    this.debrisBuf?.destroy();
     this.mg.destroy();
   }
 }

@@ -69,6 +69,37 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 #include <cooling>
 #include "hydro/cooling.wgsl"
 
+#include <debris>
+
+// Debris energies (debris/debris.wgsl): the gas leaving through an open face of the box this
+// step, binned by its orbital energy with the cell's velocity and potential at the face.
+fn escape(c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Faces, fz: Faces, flat: bool) {
+  let n = vec3<i32>(P.dims.xyz);
+  let lo = vec3<f32>(fx.lo.m, fy.lo.m, fz.lo.m);
+  let hi = vec3<f32>(fx.hi.m, fy.hi.m, fz.hi.m);
+  // The passive scalar's flux, for problems that bin only the gas it marks.
+  let los = vec3<f32>(fx.lo.s, fy.lo.s, fz.lo.s);
+  let his = vec3<f32>(fx.hi.s, fy.hi.s, fz.hi.s);
+  var xc = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+  if (flat) { xc.z = 0.0; }
+  // Face area times dt (P.geom.x is the cell volume, per unit length in z in 2D).
+  let adt = P.geom.x / P.dx * clock.dt;
+  let phi = textureLoad(G, c, 0).w;
+  for (var a = 0; a < 3; a++) {
+    if (a == 2 && flat) { break; }
+    if (c[a] == 0 && P.bc_lo[a] != 0u) {
+      var x = xc;
+      x[a] -= 0.5 * P.dx;
+      deb_tally(x, v, phi, -lo[a] * adt, -los[a] * adt);
+    }
+    if (c[a] == n[a] - 1 && P.bc_hi[a] != 0u) {
+      var x = xc;
+      x[a] += 0.5 * P.dx;
+      deb_tally(x, v, phi, hi[a] * adt, his[a] * adt);
+    }
+  }
+}
+
 // Validation hook: when set, the pass writes the six face mass fluxes instead of the new state,
 // so the test suite can check that both cells sharing a face computed the same bits.
 override DEBUG_FLUX: bool = false;
@@ -110,6 +141,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   store_mass_flux(c, fx, fy, fz, flat);
+  if (DEBRIS) { escape(c, w0.a.yzw, fx, fy, fz, flat); }
 
   // Flux-form gravitational work (P.flags bit 0): each face hands half of F_mass * dphi to the
   // two cells it separates, so the sum over cells telescopes to -d/dt of the potential energy.

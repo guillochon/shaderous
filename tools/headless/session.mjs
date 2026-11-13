@@ -99,3 +99,32 @@ export async function openSession(opts = {}) {
 
 /** A PNG data URL as bytes. */
 export const pngBytes = (dataUrl) => Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
+
+const MSUN_KG = 1.98847e30;
+const DAY_S = 86400;
+const YEAR_S = 3.15576e7;
+/**
+ * The headline numbers of a debris() report: where the mass is, the surviving core, and the
+ * peak of the return rate, in code units and, where the problem has units, in days and solar
+ * masses per year.
+ */
+export function debrisSummary(r) {
+  const k = r.dmdt.rate.reduce((b, x, i, a) => (x > a[b] ? i : b), 0);
+  const peak = r.dmdt.rate.length ? { t: r.dmdt.t[k], rate: r.dmdt.rate[k] } : null;
+  const first = r.dmdt.rate.findIndex((x) => x > 0);
+  const out = {
+    t: r.t, tPeri: r.tPeri, de: r.de, gm: r.gm, totals: r.totals, core: r.core,
+    below: r.below, above: r.above,
+    firstReturn: first >= 0 ? r.dmdt.t[first] : null,
+    peak,
+  };
+  if (r.units && peak) {
+    const days = (t) => ((t - r.tPeri) * r.units.time) / DAY_S;
+    out.physical = {
+      firstReturnDaysAfterPericenter: first >= 0 ? days(r.dmdt.t[first]) : null,
+      peakDaysAfterPericenter: days(peak.t),
+      peakMsunPerYear: (peak.rate * r.units.mass * YEAR_S) / (r.units.time * MSUN_KG),
+    };
+  }
+  return out;
+}

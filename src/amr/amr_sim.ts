@@ -28,6 +28,7 @@ import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
+import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
 
 /**
@@ -149,6 +150,9 @@ export class AmrSim implements Simulation {
   private gfield: GPUTexture;
   /** the point masses (gravity/bh.wgsl) */
   private bh: GPUBuffer;
+  /** debris energies (debris/debris.ts), if the problem asks for them, and their census pass */
+  private debrisBuf?: DebrisBuffers;
+  private pCensus?: GPUComputePipeline;
   private nMasses = 0;
   private nOwnMasses = 0;
   private grav?: AmrGravity;
@@ -466,6 +470,11 @@ export class AmrSim implements Simulation {
         bins: sim.bins, listAct: sim.listAct, listUpd: sim.listUpd, binArgs: sim.binArgs,
       });
     }
+    const spec = debrisSpec(cfg);
+    if (spec) {
+      sim.debrisBuf = new DebrisBuffers(d, spec);
+      sim.pCensus = await computePipeline(d, assemble('debris/census_amr.wgsl'), 'amr debris census');
+    }
     await sim.buildHydro();
     sim.reset();
     await sim.settled;
@@ -673,6 +682,7 @@ export class AmrSim implements Simulation {
       ...bin,
       ...this.compIn,
       ...((this.massFlux ? { 12: this.massFlux } : {}) as Record<number, GPUBuffer>),
+      ...(this.debrisBuf?.bindings(this.bh) ?? {}),
     });
   }
 
@@ -1080,6 +1090,30 @@ export class AmrSim implements Simulation {
     return readRestart(this.device, this.clock, this.bh, this.hasMasses ? this.nMasses : 0);
   }
 
+  async debrisLedger(): Promise<DebrisLedger | null> {
+    return this.debrisBuf ? this.debrisBuf.readLedger() : null;
+  }
+
+  async debris(): Promise<DebrisReport | null> {
+    const b = this.debrisBuf;
+    if (!b) return null;
+    const d = await this.diagnostics();
+    const v0 = d.momentum.map((p) => p / d.mass);
+    const v = (t: GPUTexture) => t.createView();
+    const group = bindGroup(this.device, this.pCensus!, {
+      0: this.params, 1: v(this.state[this.cur][0]), 2: v(this.state[this.cur][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 20: this.bh, 21: b.census, 30: this.bt, 31: this.listLeaf,
+    });
+    const census = await b.takeCensus((enc) => {
+      const pass = beginPass(enc);
+      pass.setPipeline(this.pCensus!);
+      pass.setBindGroup(0, group);
+      this.interior(pass, this.nLeaf);
+      pass.end();
+    }, this.selfGravity, v0, d.ranges[0][1]);
+    const r = await this.readRestart();
+    return b.report(r.time, r.masses?.[b.spec.mass]?.gm ?? 0, await b.readLedger(), census);
+  }
+
   /** Load the problem's initial conditions on a mesh refined to fit them. */
   reset() {
     const c = this.cfg;
@@ -1199,6 +1233,7 @@ export class AmrSim implements Simulation {
     const masses = initialMasses(c, this.massDx);
     this.nMasses = this.nOwnMasses = masses.length;
     d.queue.writeBuffer(this.bh, 0, packMasses(masses));
+    this.debrisBuf?.reset(c.restart?.debris);
     this.writeParams();
     this.uploadTree();
     if (this.fieldOn) {
@@ -2167,6 +2202,7 @@ export class AmrSim implements Simulation {
     this.speciesHalf?.destroy();
     this.burn?.destroy();
     this.massFlux?.destroy();
+    this.debrisBuf?.destroy();
     for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
     this.grav?.destroy();
   }

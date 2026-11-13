@@ -44,6 +44,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     throw new Error('this kind of simulation cannot be exported');
   }
 
+  const debris = await sim.debrisLedger();
   return {
     ndim: cfg.ndim,
     rootSize,
@@ -55,7 +56,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     levels,
     locations,
     data: { ...primitivesFrom(cfg, u1, u2), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])) },
-    meta: meta ? { ...meta, masses: restart.masses } : undefined,
+    meta: meta ? { ...meta, masses: restart.masses, ...(debris ? { debris } : {}) } : undefined,
   };
 }
 
@@ -64,7 +65,7 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
   const sampler = new SnapshotSampler(snap);
   const box = problem.box;
   const frac = (x: number) => x / box + 0.5;
-  const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined) };
+  const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined), debris: snap.meta?.debris };
   if (adaptive) {
     // Levels count from the root grid, and the file's root may not be the run's.
     const shift = Math.round(Math.log2(snap.rootSize[0] / rootCells));

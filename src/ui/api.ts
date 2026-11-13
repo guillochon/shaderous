@@ -14,6 +14,7 @@ import type { Diagnostics, SimConfig, Simulation } from '../sim';
 import { EOS_LABELS } from '../eos/eos';
 import { COOLING_LABELS } from '../cooling/cooling';
 import { FAMILIES, FIELDS, GRAVITY_MODES } from '../problems';
+import { problemUnits } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
 import { BUILD, errorLog } from './errors';
@@ -370,6 +371,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
             variant,
             blurb: p.blurb,
             supports2d: !!p.supports2d,
+            debris: !!p.debris,
             tEnd: Number.isFinite(p.tEnd) ? p.tEnd : null,
             species: p.species ?? [],
             params: (p.params ?? []).map((q) => ({ id: q.id, label: q.label, value: q.value, min: q.min, max: q.max, title: q.title ?? '', live: !!q.live, kind: q.kind ?? 'number' })),
@@ -426,6 +428,21 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
 
     /** Totals, extremes and point masses, read back now. Code units. */
     diagnostics: () => serial(async () => diagJson(await current().diagnostics())),
+
+    /**
+     * Debris energies: the gas binned by its specific orbital energy about the problem's point
+     * mass, what has left the box and what is in it (a surviving core apart), and the return
+     * rate of the bound part, dM/dt. Code units, with the time and mass units in seconds and
+     * kilograms where the problem has them. Only for problems that track debris.
+     */
+    debris: () =>
+      serial(async () => {
+        const cfg = app.cfg();
+        const r = await current().debris();
+        if (!r) throw new Error(`${cfg.problem.id} does not track debris energies: see describe(), problems[].debris`);
+        const u = problemUnits(cfg.problem, cfg.params);
+        return { ...r, units: u ? { time: u.time, mass: u.mass } : null };
+      }),
 
     /** Each variable's least, greatest and volume-weighted mean value over the box. */
     stats: () =>

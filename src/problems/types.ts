@@ -187,6 +187,16 @@ export interface Problem {
    */
   masses?: (params: Record<string, number>, G: number, dx: number, ndim: 2 | 3) => PointMass[];
   /**
+   * Debris energies (debris/debris.ts): bin the gas by its specific orbital energy about one
+   * point mass, both what leaves the box and what is still in it, for the rate at which bound
+   * debris returns (dM/dt). `mass` is the index of the point mass, `de` the energy scale the
+   * bins are laid out in (the spread of a tidal disruption, G M_bh R_star / r_t^2), `tPeri` the
+   * time of pericenter, and `refMass` a mass the fixed-point totals are scaled to. With
+   * `scalar`, only the gas the passive scalar marks (the star's) is binned; the rest (the
+   * ambient medium) is counted apart.
+   */
+  debris?: (params: Record<string, number>, G: number) => { mass: number; de: number; tPeri: number; refMass: number; scalar?: boolean };
+  /**
    * On an adaptive mesh, keep the gas around every point mass at the finest level, so that
    * softening and sinks can be as small as the finest cells allow (amr/flag.wgsl).
    */

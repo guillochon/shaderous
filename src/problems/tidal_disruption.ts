@@ -81,6 +81,13 @@ export const tidalDisruption: Problem = {
     const o = orbitFor(p);
     return [{ gm: G * TDE.M * p.q, pos: o.pos, vel: o.vel }];
   },
+  // Debris energies about the black hole, in units of the spread a disruption gives them,
+  // G M_bh R_star / r_t^2, with the time of pericenter for their return rate. Only the star's
+  // gas (the passive scalar) is binned, not the ambient medium.
+  debris: (p, G) => {
+    const o = orbitFor(p);
+    return { mass: 0, de: (G * TDE.M * p.q * TDE.R) / (o.rt * o.rt), tPeri: o.tPeri, refMass: TDE.M, scalar: true };
+  },
   init: () => {
     const { rhoc, K } = TDE_STAR;
     const g = 1 + 1 / TDE.n;

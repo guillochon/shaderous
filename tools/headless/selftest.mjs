@@ -55,6 +55,15 @@ const check = (ok, what) => {
   check(Math.abs(back.t - r.t) < 1e-6, 'load_athdf continues at the same time');
   const ctl = json(await tool('control', { id: 'riemann', value: 'hll' }));
   check(ctl.query.includes('riemann=hll'), 'control');
+  const noDebris = await tool('debris');
+  check(noDebris.isError && /does not track debris/.test(noDebris.content[0].text), 'debris on a problem without it is a tool error');
+  const tde = json(await tool('load', { setup: 'problem=tidal-disruption&dim=3&n=32&p.q=1000000&p.beta=1' }));
+  const tde0 = json(await tool('diagnostics'));
+  await tool('run', { until: 1 });
+  const tde1 = json(await tool('diagnostics'));
+  const deb = json(await tool('debris', { save_path: path.join(tmp, 'debris.json') }));
+  const budget = (tde1.mass + deb.totals.escaped - tde0.mass) / tde0.mass;
+  check(tde.problem === 'tidal-disruption' && deb.totals.escaped > 0 && Math.abs(budget) < 1e-5 && existsSync(deb.saved), `debris: mass budget closes (${budget.toExponential(1)})`);
   const bad = await tool('load', { setup: { problem: 'no-such-problem' } });
   check(bad.isError && /unknown problem/.test(bad.content[0].text), 'a bad call is reported as a tool error');
   const unknown = await rpc('tools/call', { name: 'nope', arguments: {} });

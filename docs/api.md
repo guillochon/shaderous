@@ -141,7 +141,7 @@ page cannot start, for example when the browser has no WebGPU.
 Everything there is to choose from:
 
 - `problems`: one entry per preset, with `id`, `label`, `family`, `variant`, `blurb`,
-  `supports2d`, `tEnd`, `species`, and `params`. Each parameter has `id`, `label`, `value`
+  `supports2d`, `debris` (whether `debris()` works for it), `tEnd`, `species`, and `params`. Each parameter has `id`, `label`, `value`
   (the default), `min`, `max`, `title`, `live` and `kind`.
 - `fields`: the fields the view can show, as `{ index, name }`.
 - `variables`: what `slice` and `stats` can read.
@@ -215,6 +215,54 @@ The run's diagnostics, read back now:
 - `com`: the gas's center of mass relative to the box center;
 - `masses`: the point masses, with position, velocity, mass and accreted mass;
 - `ranges`: the least and greatest value of each field, keyed by field name.
+
+### `debris() → object`
+
+Debris energies, for problems that track them (`describe().problems[i].debris`; the tidal
+disruption does). The gas is binned by its specific orbital energy about the problem's point
+mass,
+
+ε = ½ |v − v<sub>bh</sub>|² + φ,
+
+where φ is the full potential at the gas: the point mass's and the gas's own. Two parts are
+added up:
+
+- **What has left the box.** The update tallies the gas crossing each open face of the box,
+  binned by its energy as it crosses. Once out, the gas moves almost ballistically in the point
+  mass's potential, so its energy no longer changes. The tally runs for the whole run, and
+  `.athdf` files keep it, so a run continued from one carries on with it.
+- **What is in the box.** This is a census taken when you call. A surviving core is set apart
+  first: gas is bound to it where ½ |v − v<sub>core</sub>|² + φ<sub>self</sub> < 0, and
+  v<sub>core</sub> is found by iterating from the gas's mean velocity. Without self-gravity
+  there is no core.
+
+A problem may bin only the gas its passive scalar marks. The tidal disruption does this, so
+its bins hold the star's gas and not the ambient medium around it. The rest is counted apart,
+as `ambient`.
+
+The tallies are exact 64-bit fixed-point sums, so they add no rounding of their own. The mass
+in the box, plus what left, plus what the sinks accreted, equals the starting mass to within
+the rounding of `diagnostics().mass`.
+
+| Key | Meaning |
+| --- | --- |
+| `t`, `tPeri` | The time now, and the time of pericenter |
+| `gm`, `de` | G M of the point mass, and the energy scale (for a tidal disruption, the spread G M<sub>bh</sub> R<sub>★</sub> / r<sub>t</sub>²) |
+| `lo`, `width` | Bin k covers energies `lo + k·width` to `lo + (k+1)·width`. There are 500 bins across ±5 `de` |
+| `escaped`, `inBox` | Mass per bin: what has left the box, and what is in it, the core apart |
+| `below`, `above` | Mass below the first bin and above the last, as `[escaped, in box]` |
+| `ambient` | Gas left out of the bins (the ambient medium, where the scalar marks the debris), as `[escaped, in box]` |
+| `core` | `{ mass, vel }` of the surviving core, or null |
+| `totals` | `escaped` and `inBox` (all the gas, ambient included), `core`; `bound` and `unbound` (the binned debris with ε < 0 and ε > 0); `ambient` |
+| `dmdt` | `{ t, rate }`: the bound debris by when it returns to pericenter, earliest first |
+| `units` | `{ time, mass }`: seconds and kilograms per code unit, or null |
+
+The return times come from Kepler's third law, t = t<sub>peri</sub> + 2π G M (−2ε)<sup>−3/2</sup>,
+and the rate is dM/dt = dM/dε · (2π G M)<sup>2/3</sup> / 3 · (t − t<sub>peri</sub>)<sup>−5/3</sup>.
+Run a few dynamical times past pericenter before reading it, so that the energies have
+stopped changing. Until then the core is not settled either: while the star is still
+stretched, the gas that will fall back onto it can read as unbound. The census reads the grid
+once per iteration, which takes milliseconds.
 
 ### `stats() → { t, steps, variables }`
 
@@ -323,6 +371,17 @@ the same build sets up the same run. Results may still differ slightly between G
 
 **Watching while a script drives.** Leave out `headless=1` and open the page in a visible
 window. The view keeps drawing while the script steps the run.
+
+**The return rate of a tidal disruption.** Run past pericenter, then read the debris:
+
+```js
+await S('load', { problem: 'tidal-disruption', dim: 3, n: 128, amr: 2, 'p.q': 1e6, 'p.beta': 1 });
+await S('runTo', 8);
+const { dmdt, core, totals } = await S('debris');
+```
+
+The runner does the same at every output with `--debris`, and
+`tools/headless/plot_dmdt.py` plots the result ([headless.md](headless.md)).
 
 **Changing physics partway through.**
 

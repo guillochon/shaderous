@@ -87,6 +87,7 @@ Each run writes a folder, `--out DIR`, which defaults to `runs/<problem>-<date>`
 | `NNNN-tT.png` | A screenshot at each output, with `--png`. Set the size with `--width` and `--height`, and what is drawn with `--view KEY=VALUE` |
 | `NNNN-tT-VAR.json` | A slice of variable VAR at each output, with `--slice VAR` (repeatable). Set it with `--slice-axis`, `--slice-pos` and `--slice-res`; the format is that of `slice()` in [api.md](api.md#reference) |
 | `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`. yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them |
+| `NNNN-tT-debris.json` | Debris energies and the return rate dM/dt at each output, with `--debris`, for problems that track them (the tidal disruption). The format is that of `debris()` in [api.md](api.md#reference) |
 
 A `--view` setting is any key of `view()` in [api.md](api.md#reference), such as
 `--view mode=slice`, `--view field=pressure` (a field by name or index), `--view colormap=viridis`
@@ -119,6 +120,22 @@ A long 3D run, at low priority so the machine stays responsive, with checkpoints
 ```bash
 npm run headless -- run --problem tidal-disruption --dim 3 --n 256 --amr 3 --every 0.5 --athdf --low-priority --out runs/tde
 ```
+
+A tidal disruption's return rate, the classic dM/dt diagram. Run a few dynamical times past
+pericenter with `--debris`, then plot the last output:
+
+```bash
+npm run headless -- run --problem tidal-disruption --dim 3 --n 128 --amr 2 --set p.q=1000000 --set p.beta=1 --until 8 --every 1 --debris --low-priority --out runs/tde
+```
+
+```bash
+python tools/headless/plot_dmdt.py runs/tde
+```
+
+The plot shows dM/dε, split into what has left the box and what is still in it, and dM/dt
+against time since pericenter. It uses solar masses per year and years where the problem has
+units. Give it several outputs (`runs/tde/*-debris.json`) to see whether dM/dt has stopped
+changing. It needs numpy and matplotlib.
 
 ### Options
 
@@ -175,6 +192,7 @@ runner.
 | `controls`, `control` | List the panel's controls, or set one mid-run as a person would |
 | `restart` | Starts again from the initial conditions |
 | `save_athdf`, `load_athdf` | Write the state to an `.athdf` file, or start a run from one |
+| `debris` | Gives debris energies and the return rate dM/dt, for problems that track them: totals, the surviving core, the first return and the peak. `save_path` writes the full report |
 | `errors` | Lists what the page has reported going wrong |
 
 File paths are relative to the server's working directory, which for Claude Code is the

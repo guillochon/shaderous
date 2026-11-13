@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import { lowerPriority, openSession } from './session.mjs';
+import { debrisSummary, lowerPriority, openSession } from './session.mjs';
 
 const { values: o } = parseArgs({
   options: { url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' } },
@@ -200,6 +200,22 @@ const TOOLS = [
     description: 'Start a run from an .athdf file: one Shaderous wrote continues exactly; another code\'s is loaded into the current problem. Paused at the file\'s time.',
     inputSchema: obj({ path: { type: 'string' } }, ['path']),
     run: async ({ path: p }) => text(await call('loadAthdf', readFileSync(resolvePath(p)).toString('base64'))),
+  },
+  {
+    name: 'debris',
+    description: 'Debris energies, for problems that track them (describe: problems[].debris, e.g. tidal-disruption): the gas binned by its specific orbital energy about the point mass, both what has left the box (tallied as it left) and what is in it, a surviving self-bound core set apart, and the return rate of the bound debris to pericenter, dM/dt (Kepler). Returns totals, the core, the first return and the peak of dM/dt (in days and solar masses per year where the problem has units). save_path writes the full report (bins, dmdt.t and dmdt.rate) as JSON.',
+    inputSchema: obj({ save_path: { type: 'string', description: 'Write the full report as JSON to this file' } }),
+    async run({ save_path }) {
+      const r = await call('debris');
+      const out = debrisSummary(r);
+      if (save_path) {
+        const file = resolvePath(save_path);
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, JSON.stringify(r) + '\n');
+        out.saved = file;
+      }
+      return text(out);
+    },
   },
   {
     name: 'errors',
