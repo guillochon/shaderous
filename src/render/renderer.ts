@@ -454,10 +454,16 @@ export class Renderer {
     return t > 0 ? t : null;
   }
 
+  /**
+   * Draw at this size in pixels instead of the canvas's size on the page (a screenshot asked for
+   * at a given size, or taken while the page is not laid out, as in a hidden tab).
+   */
+  fixedSize: [number, number] | null = null;
+
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
-    const w = Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
-    const h = Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
+    const w = this.fixedSize ? this.fixedSize[0] : Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
+    const h = this.fixedSize ? this.fixedSize[1] : Math.max(1, Math.floor(this.canvas.clientHeight * dpr));
     if (this.canvas.width !== w || this.canvas.height !== h) {
       this.canvas.width = w;
       this.canvas.height = h;
@@ -491,8 +497,8 @@ export class Renderer {
     const aspect = this.aspect;
     const { eye, fwd, right, up, tan } = cameraFrame(v, aspect);
     const samples = Math.min(1.5 * nx, 384);
-    const cw = Math.max(1, this.canvas.clientWidth);
-    const ch = Math.max(1, this.canvas.clientHeight);
+    const cw = Math.max(1, this.fixedSize ? this.fixedSize[0] : this.canvas.clientWidth);
+    const ch = Math.max(1, this.fixedSize ? this.fixedSize[1] : this.canvas.clientHeight);
     const slice = this.slice ?? { span: 0.94 * Math.min(cw, ch), shift: 0 };
     d.queue.writeBuffer(
       this.cam,

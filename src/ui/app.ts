@@ -20,6 +20,7 @@ import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling
 import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
+import { installApi } from './api';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const opt = (v: string | number, label: string) => `<option value="${v}">${label}</option>`;
@@ -791,6 +792,14 @@ function showRange() {
   $('cb-unit').textContent = u.label(m);
 }
 let running = true;
+/**
+ * `?headless=1`: the page is driven by a script through window.shaderous (ui/api.ts, see
+ * docs/api.md). Nothing plays by itself, and the frame loop draws nothing: the view is drawn
+ * when a screenshot asks for it, and the GPU is left to the steps the script asks for.
+ */
+const headless = new URLSearchParams(location.search).get('headless') === '1';
+/** The script is stepping the run: the frame loop takes no steps of its own meanwhile. */
+let driving = false;
 /** Whether a run starts playing by itself when it loads or replays (remembered in this browser). */
 let autoplay = true;
 try {
@@ -1222,7 +1231,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     finished = false;
     // A freshly loaded problem starts playing, unless it waits for the user (an empty box); a
     // loaded state waits to be looked at.
-    running = autoplay && !snap && !problem.startPaused;
+    running = autoplay && !headless && !snap && !problem.startPaused;
     lastDiag = undefined;
     batch = 1;
     msPerStep = busyMs = busySteps = 0;
@@ -1337,13 +1346,25 @@ async function clockNow(): Promise<number> {
   return d?.t ?? lastDiag?.t ?? cfg?.restart?.time ?? 0;
 }
 
-/** Start a run from an .athdf file: one of ours with its settings, or another code's. */
+/** Start a run from an .athdf file, chosen in the page. */
 async function importState(file: File) {
   const button = $('import');
   button.textContent = 'Importing…';
   try {
+    await importAthdf(new Uint8Array(await file.arrayBuffer()));
+  } catch (e) {
+    // A file that cannot be used is not a fault of the page: say so and carry on.
+    alert(`Could not load ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
+  } finally {
+    button.textContent = 'Import state';
+  }
+}
+
+/** Start a run from the bytes of an .athdf file: one of ours with its settings, or another code's. */
+async function importAthdf(bytes: Uint8Array) {
+  {
     const { readAthdf } = await import('../io/athdf');
-    const snap = await readAthdf(new Uint8Array(await file.arrayBuffer()));
+    const snap = await readAthdf(bytes);
     const cubic = snap.rootSize[0] === snap.rootSize[1] && (snap.ndim === 2 || snap.rootSize[2] === snap.rootSize[0]);
     const width = snap.hi.map((h, a) => h - snap.lo[a]);
     if (!cubic || Math.abs(width[0] - width[1]) > 1e-4 * width[0] || (snap.ndim === 3 && Math.abs(width[0] - width[2]) > 1e-4 * width[0])) {
@@ -1367,11 +1388,6 @@ async function importState(file: File) {
       delete link.cfg.tEnd;
     }
     await build(link.problem, link.n, link.ndim, link.amr, false, link, snap);
-  } catch (e) {
-    // A file that cannot be used is not a fault of the page: say so and carry on.
-    alert(`Could not load ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
-  } finally {
-    button.textContent = 'Import state';
   }
 }
 
@@ -1389,7 +1405,7 @@ function syncAddress(force = false) {
   const q = linkQuery();
   if (q === lastQuery) return;
   lastQuery = q;
-  history.replaceState(null, '', `${location.pathname}?${q}`);
+  history.replaceState(null, '', `${location.pathname}?${q}${headless ? '&headless=1' : ''}`);
 }
 
 /**
@@ -3064,7 +3080,7 @@ const queueFull = () => queued >= 64 || (queued >= 2 && (msPerStep ? queuedSteps
 /** Submit batches of steps until enough are queued. Runs from each completion and each refresh. */
 function pump() {
   const s = sim;
-  while (s && s === sim && !building && !resuming && running && !finished && !queueFull()) {
+  while (s && s === sim && !building && !resuming && running && !driving && !finished && !queueFull()) {
     const enc = gpu.device.createCommandEncoder();
     const timed = frameTiming.open();
     // An adaptive run may take fewer steps than asked: it ends a batch at each refinement check,
@@ -3181,7 +3197,7 @@ function tick(now: number) {
     const text = reloading === 'shaders' && !sim?.preparing ? 'Recomputing shaders…' : 'Loading simulation…';
     if (loadingText.textContent !== text) loadingText.textContent = text;
   }
-  if (!sim || building) return;
+  if (!sim || building || headless) return;
   const s = sim;
   // Top up the steps (normally done as batches complete), then edit and draw behind them.
   pump();
@@ -3274,7 +3290,8 @@ function tick(now: number) {
   }
 }
 
-(async () => {
+/** The page is up: WebGPU found and the first run built (or failed, which window.shaderous reports). */
+const ready = (async () => {
   try {
     gpu = await initGpu();
     setAdapter(gpu.info);
@@ -3293,8 +3310,75 @@ function tick(now: number) {
     requestAnimationFrame(tick);
   } catch (e) {
     fail(e);
+    throw e;
   }
 })();
+
+// window.shaderous: the page as a script or an agent drives it (ui/api.ts, docs/api.md).
+installApi(
+  {
+    gpu: () => gpu,
+    sim: () => sim,
+    cfg: () => cfg,
+    view,
+    canvas,
+    resolutions: () => ({ 2: RES_2D, 3: RES_3D, uniformMax: { 2: uniformMax(2), 3: uniformMax(3) } }),
+    async idle() {
+      let q: Promise<void>;
+      do {
+        q = queue;
+        await q;
+      } while (q !== queue);
+    },
+    build: (link) => build(link.problem, link.n, link.ndim, link.amr, false, link),
+    importAthdf,
+    restart: () => restartRun(),
+    running: () => running,
+    finished: () => finished,
+    setRunning(on) {
+      if (on === running) return;
+      running = on && !finished;
+      syncControls();
+    },
+    setFinished(on) {
+      finished = on;
+      if (on) running = false;
+      syncControls();
+    },
+    setDriving(on) {
+      driving = on;
+    },
+    rearm: (t) => armCheckpoints(t),
+    query: () => linkQuery(),
+    refresh(d) {
+      lastDiag = d;
+      updateRange(d);
+      showDensityCut();
+    },
+    draw(size) {
+      if (!sim) return;
+      const enc = gpu.device.createCommandEncoder();
+      renderer.fixedSize = size;
+      renderer.densityCut = densityCut();
+      // At a size of its own the slice is centered: the panel and rail are not in the picture.
+      renderer.slice = size ? { span: 0.94 * Math.min(...size), shift: 0 } : sliceLayout();
+      renderer.encode(enc, sim, view);
+      gpu.device.queue.submit([enc.finish()]);
+      sim.submitted();
+      renderer.submitted();
+    },
+    athdf: () => athdfOf(sim!),
+    setColormap(name) {
+      editor.set(editor.points, name);
+      pushTransfer();
+    },
+    setAutoRange(on) {
+      $<HTMLInputElement>('auto').checked = on;
+    },
+    sync: () => syncControls(),
+  },
+  ready,
+);
 
 // Handles for the console and for tests.
 Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get batch() { return batch; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; }, timing: { ...frameTiming, set: setTiming } } });

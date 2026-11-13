@@ -99,6 +99,9 @@ function render() {
   box.querySelector<HTMLButtonElement>('#err-reload')!.onclick = () => location.reload();
 }
 
+/** Everything reported so far, oldest first (the report keeps the first 50). */
+export const errorLog = (): readonly string[] => entries;
+
 /** Add an error to the report and show it. Repeats of the same message are counted once. */
 export function reportError(e: unknown) {
   const text = e instanceof Error ? e.message + (e.stack && !e.stack.includes(e.message) ? '\n' + e.stack : '') : String(e);
