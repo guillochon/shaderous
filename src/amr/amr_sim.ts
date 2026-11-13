@@ -1879,7 +1879,14 @@ export class AmrSim implements Simulation {
    * rebuilt by every step anyway. With per-block timesteps this is the smallest step, the one
    * the fastest blocks take. Called with the staging buffer held.
    */
+  /**
+   * Set by destroy(). A readback that was waiting when the run was replaced must not then
+   * encode work on its destroyed textures (previewDt, after readDiagnostics' map).
+   */
+  private destroyed = false;
+
   private async previewDt(): Promise<number> {
+    if (this.destroyed) return 0;
     // A re-mesh waiting to be applied, or a star being settled: the next step will tell.
     if (this.settling || this.pending) return 0;
     const enc = this.device.createCommandEncoder();
@@ -2139,6 +2146,7 @@ export class AmrSim implements Simulation {
   }
 
   destroy() {
+    this.destroyed = true;
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi, ...this.species]) t.destroy();

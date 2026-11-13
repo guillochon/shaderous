@@ -1485,7 +1485,14 @@ export class Sim implements Simulation {
    * on a copy of the clock; the primitives they rewrite are rebuilt by every step anyway.
    * Called with the staging buffer held.
    */
+  /**
+   * Set by destroy(). A readback that was waiting when the run was replaced must not then
+   * encode work on its destroyed textures (previewDt, after readDiagnostics' map).
+   */
+  private destroyed = false;
+
   private async previewDt(): Promise<number> {
+    if (this.destroyed) return 0;
     if (this.settling) return 0;
     const enc = this.device.createCommandEncoder();
     enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
@@ -1662,6 +1669,7 @@ export class Sim implements Simulation {
   }
 
   destroy() {
+    this.destroyed = true;
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     this.burn?.destroy();
