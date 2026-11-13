@@ -850,15 +850,28 @@ export class Sim implements Simulation {
   }
 
   static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
+    // Every grid, 2D included, lives in 3D textures, whose side WebGPU caps (2048 on most
+    // adapters). Past it the textures are invalid and every step would silently do nothing.
+    const side = gpu.device.limits.maxTextureDimension3D;
+    if (cfg.n > side) {
+      throw new Error(`a uniform grid of ${cfg.n} cells per side is larger than this GPU's 3D textures allow (${side}); use the adaptive mesh`);
+    }
     noteAllocation(cfg.n ** cfg.ndim * Sim.cellBytes(cfg.ndim));
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
     const n = cfg.n;
     const nz = sim.nz;
     const t = (label: string) => tex3d(d, n, 'rgba32float', label, nz);
+    d.pushErrorScope('out-of-memory');
     for (let p = 0; p < 2; p++) sim.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
     sim.pred = [t('PA'), t('PB')];
     sim.gfield = t('gravity field');
+    const oom = await d.popErrorScope();
+    if (oom) {
+      sim.destroy();
+      const gb = (cfg.n ** cfg.ndim * Sim.cellBytes(cfg.ndim)) / 1024 ** 3;
+      throw new Error(`out of GPU memory for a uniform grid of ${cfg.n}^${cfg.ndim} cells (about ${gb.toFixed(1)} GB): ${oom.message}`);
+    }
     const G = sim.speciesGroups;
     if (G > 0) {
       for (let p = 0; p < 2; p++) sim.species.push(tex3d(d, n, 'rgba32float', `species ${p}`, nz * G));
@@ -1744,6 +1757,6 @@ export class Sim implements Simulation {
     this.speciesHalf?.destroy();
     this.massFlux?.destroy();
     this.debrisBuf?.destroy();
-    this.mg.destroy();
+    this.mg?.destroy();
   }
 }
