@@ -290,7 +290,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     }
   }
 
-  const VIEW_KEYS = ['mode', 'field', 'species', 'log', 'lo', 'hi', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'showBlocks', 'contours', 'nContours'];
+  const VIEW_KEYS = ['mode', 'field', 'species', 'log', 'lo', 'hi', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'showBlocks', 'contours', 'nContours', 'fog', 'surfaceOpacity'];
 
   function setView(changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean }) {
     const { colormap, autoRange, ...v } = changes;

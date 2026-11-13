@@ -134,7 +134,7 @@ const TOOLS = [
   },
   {
     name: 'screenshot',
-    description: 'A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), log, lo, hi, sliceAxis, slicePos, yaw, pitch, dist, zoom, cx, cy, showBlocks, contours, colormap, autoRange. Settings persist for later screenshots.',
+    description: 'A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), log, lo, hi, sliceAxis, slicePos, yaw, pitch, dist, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, colormap, autoRange. Settings persist for later screenshots.',
     inputSchema: obj({
       width: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 768' },
       height: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default: width' },

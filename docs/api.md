@@ -261,7 +261,8 @@ Changes what is drawn, leaving the run alone. These keys are accepted:
 | `minRho`, `opacity` | Volume view: least density drawn, and opacity |
 | `yaw`, `pitch`, `dist` | Volume view: camera angles and distance |
 | `zoom`, `cx`, `cy` | Slice view: magnification, and the point at the center of the view |
-| `showBlocks`, `contours`, `nContours` | Mesh block outlines, and contour lines |
+| `showBlocks`, `contours`, `nContours` | Mesh block outlines, and contour lines (isosurfaces in the volume view) |
+| `fog`, `surfaceOpacity` | Volume view: draw the gas as fog (off leaves the isosurfaces alone), and how opaque the isosurfaces are |
 | `colormap` | A name from `describe().colormaps` |
 | `autoRange` | Fit the color range to the data |
 
