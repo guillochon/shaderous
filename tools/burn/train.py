@@ -1,7 +1,7 @@
 """Train the burning surrogate: a small network that steps the alpha chain's mass fractions
 forward by dt at fixed density, with the self-heating that burner.py integrates.
 
-    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr]
+    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr] [logw]
 
 Input  log10 rho, log10 T, log10 dt (all scaled to about [-1, 1]) and the 13 mass fractions
        (as X^(1/4), which spreads out the trace species).
@@ -141,17 +141,24 @@ class Burner(nn.Module):
     sum_j X_j exp(a_j), so that Y_i - X_i = X_i (expm1(a_i) - m) / (1 + m) with
     m = sum_j X_j expm1(a_j) stays exact however small the change. The other is a softmax over
     free logits, which makes species the cell does not have yet (fresh fuel, ahead of every
-    burning front: with the first part alone a species at zero never appears)."""
+    burning front: with the first part alone a species at zero never appears).
+
+    'rates2' models take two such steps one after the other, each with its own target and
+    rate: the step's whole change shares one fraction 1 - exp(-k dt), so no species can lose
+    more of itself in a step than that fraction, and a trace of fuel that burns in a
+    millisecond while the rest simmers (He in C/O, captured onto C12 and O16) cannot burn at
+    all. The first takes such a trace, the second the slow change after it."""
 
     def __init__(self, width=64, depth=3, arch="delta"):
         super().__init__()
         self.arch = arch
-        self.rates = arch == "rates"
+        self.rates = arch in ("rates", "rates2")
+        self.stages = 2 if arch == "rates2" else 1
         layers, n = [], 16 + (len(RATE_INPUTS) if self.rates else 0)
         for _ in range(depth):
             layers += [nn.Linear(n, width), nn.SiLU()]
             n = width
-        layers.append(nn.Linear(n, 28))
+        layers.append(nn.Linear(n, 28 * self.stages))
         self.net = nn.Sequential(*layers)
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
@@ -159,6 +166,28 @@ class Burner(nn.Module):
     def forward(self, log_rho, log_T, log_dt, X):
         X = X.clamp_min(0.0)
         z = self.net(features(log_rho, log_T, log_dt, X, self.rates))
+        if self.stages == 1:
+            return self.relax(z, X, log_dt)
+        D1 = self.relax(z[:, :28], X, log_dt)
+        parts = self.parts   # the aux losses train the first step alone, keeping its rate
+        D2 = self.relax(z[:, 28:], (X + D1).clamp_min(0.0), log_dt)
+        self.parts = parts   # off the dead zone; the second takes what it cannot do
+        return D1 + D2
+
+    def load_single(self, state):
+        """A one-step model's weights as the first step of this one, the second starting as
+        no change at all at a small rate (target the cell itself, free share 1e-9)."""
+        last = f"net.{len(self.net) - 1}"
+        w, b = state.pop(last + ".weight"), state.pop(last + ".bias")
+        self.load_state_dict(state, strict=False)
+        with torch.no_grad():
+            head = self.net[-1]
+            head.weight.zero_(); head.bias.zero_()
+            head.weight[:28] = w; head.bias[:28] = b
+            head.bias[28 + 13] = -1.4    # log10 k = -2
+            head.bias[28 + 27] = -18.0
+
+    def relax(self, z, X, log_dt):
         em1 = torch.expm1(z[:, :13].clamp(-30.0, 30.0))
         m = (X * em1).sum(dim=1, keepdim=True)             # sum_j X_j expm1(a_j), with sum X = 1
         toward = X * (em1 - m) / (1.0 + m)                 # the scaled target minus X
@@ -172,9 +201,89 @@ class Burner(nn.Module):
         return c[:, None] * dY
 
 
+# The reaction channels of aprox13 (forward direction; a channel's net flux takes either
+# sign, its reverse included): reactant and product counts by species index (he4 0, c12 1,
+# o16 2, ne20 3, mg24 4, si28 5, s32 6, ar36 7, ca40 8, ti44 9, cr48 10, fe52 11, ni56 12).
+CHANNELS = [
+    {1: -1, 0: -1, 2: 1},            # C12 + He4 -> O16
+    {2: -1, 0: -1, 3: 1},            # O16 + He4 -> Ne20
+    {3: -1, 0: -1, 4: 1},            # Ne20 + He4 -> Mg24
+    {1: -2, 0: 1, 3: 1},             # C12 + C12 -> He4 + Ne20
+    {1: -1, 2: -1, 0: 1, 4: 1},      # C12 + O16 -> He4 + Mg24
+    {2: -2, 0: 1, 5: 1},             # O16 + O16 -> He4 + Si28
+    {3: -1, 1: -1, 0: 1, 5: 1},      # Ne20 + C12 -> He4 + Si28
+    {0: -3, 1: 1},                   # 3 He4 -> C12
+] + [{0: -1, i: -1, i + 1: 1} for i in range(4, 12)]   # Mg24 + He4 -> Si28 ... Fe52 + He4 -> Ni56
+
+
+def stoichiometry():
+    """Change in mass fraction per unit of each channel's extent (in moles per gram), 13 by
+    16: A_i times the change in species i's count. Every column sums to zero (each reaction
+    keeps its nucleons)."""
+    M = np.zeros((13, len(CHANNELS)))
+    for k, ch in enumerate(CHANNELS):
+        for i, n in ch.items():
+            M[i, k] = n * A[i]
+    assert np.abs(M.sum(axis=0)).max() == 0
+    return torch.tensor(M, dtype=torch.float32, device=dev)
+
+
+STOICH = stoichiometry()
+# Order the channels are applied in, up the chain (the fusions that make helium first, so
+# that the captures after them can use it); a second pass goes back down (photodisintegration
+# cascades from the iron group down).
+ORDER = [3, 4, 5, 6, 7, 0, 1, 2] + list(range(8, 16))
+PASSES = ORDER + ORDER[::-1]
+REACT = [[(i, -n) for i, n in ch.items() if n < 0] for ch in CHANNELS]   # reactant (index, count)
+PROD = [[(i, n) for i, n in ch.items() if n > 0] for ch in CHANNELS]
+A_T32 = torch.tensor(A, dtype=torch.float32, device=dev)
+
+
+class FluxBurner(Burner):
+    """The step's change in composition through the network's reactions ('flux' models), so
+    that a species appears only as its reaction's reactants disappear (a model free to change
+    each species on its own learned to make Ne20 from a trace of He4 without using the He4
+    up, and ran simmering C/O away).
+
+    The 16 channels (CHANNELS) are applied one after another, twice (PASSES), each forward
+    and then backward: forward it burns a fraction f of what its reactants allow, as the
+    cell is at that point, backward a fraction of what its products allow. So no species
+    goes below zero, a channel's products are there for the channels after it, and mass is
+    conserved exactly, whatever the weights. f = 1 - exp(-10^(q + log10 dt)) with q the
+    log10 of a rate (1/s) from the network: zero as dt goes to zero, all of it for a step
+    much longer than 1 / rate, and never exactly zero, so that its gradient, which goes as f,
+    reaches every channel at any size (a fraction of a signed output got stuck below zero,
+    where a channel backward through products the cell does not have does nothing at all).
+    The change is summed on its own, not as a difference of fractions, so changes far below
+    the fractions' rounding survive."""
+
+    def __init__(self, width=64, depth=3, arch="flux"):
+        super().__init__(width, depth, "rates")
+        self.arch = arch
+        n = self.net[-1].in_features
+        self.net[-1] = nn.Linear(n, 2 * len(PASSES))
+        nn.init.zeros_(self.net[-1].weight)
+        nn.init.zeros_(self.net[-1].bias)
+
+    def forward(self, log_rho, log_T, log_dt, X):
+        X = X.clamp_min(0.0)
+        z = self.net(features(log_rho, log_T, log_dt, X, True))
+        q = 10.0 * z - 5.0                                     # log10 rate, 1/s
+        f = -torch.expm1(-torch.pow(10.0, (q + log_dt[:, None]).clamp(-38.0, 6.0)))
+        D = torch.zeros_like(X)
+        for j, k in enumerate(PASSES):
+            for side, sign in ((REACT[k], 1.0), (PROD[k], -1.0)):
+                Y = (X + D).clamp_min(0.0) / A_T32             # moles per gram now
+                room = torch.stack([Y[:, i] / n for i, n in side], dim=1).amin(dim=1)
+                D = D + (sign * f[:, 2 * j + (sign < 0)] * room)[:, None] * STOICH[:, k]
+        self.parts = None
+        return D
+
+
 def load_model(name):
     ck = torch.load(HERE / name)
-    model = Burner(ck["width"], ck.get("depth", 3), ck.get("arch", "delta")).to(dev)
+    arch = ck.get("arch", "delta")
+    model = (FluxBurner if arch == "flux" else Burner)(ck["width"], ck.get("depth", 3), arch).to(dev)
     model.load_state_dict(ck["state"])
     model.eval()
     return model
@@ -386,6 +495,7 @@ def main():
     init = sys.argv[10] if len(sys.argv) > 10 and sys.argv[10] != "-" else None
     unroll = float(sys.argv[11]) if len(sys.argv) > 11 else 0.0
     lr = float(sys.argv[12]) if len(sys.argv) > 12 else 2e-3   # lower to fine-tune a trained model
+    logw = float(sys.argv[13]) if len(sys.argv) > 13 else 0.0
     tag = f"w{width}d{depth}h{hard:g}"
     rho, X, T, t = load()
     rng = np.random.default_rng(1)
@@ -395,17 +505,32 @@ def main():
     train, val = Pairs(rho[tr], X[tr], T[tr], t), Pairs(rho[va], X[va], T[va], t)
     print(f"{len(tr)} training and {nval} validation trajectories, {X.shape[1]} times each, on {dev}")
 
-    model = Burner(width, depth, arch).to(dev)
+    model = (FluxBurner if arch == "flux" else Burner)(width, depth, arch).to(dev)
     if init:
-        model.load_state_dict(torch.load(HERE / init)["state"])
+        ck = torch.load(HERE / init)
+        if arch == "rates2" and ck["arch"] != "rates2":
+            model.load_single(ck["state"])
+        else:
+            model.load_state_dict(ck["state"])
         print("starting from", init)
     print(sum(p.numel() for p in model.parameters()), "parameters")
-    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5, eps=1e-20 if arch == "flux" else 1e-8)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps, pct_start=0.05)
     t0 = time.time()
     for s in range(steps):
         (r, Tl, dt, X0), Dt, et = train.sample(8192, fresh)
-        loss, _, _ = loss_fn(model(r, Tl, dt, X0), Dt, et, hard, rel, model.parts, aux)
+        Dp = model(r, Tl, dt, X0)
+        loss, _, _ = loss_fn(Dp, Dt, et, hard, rel, model.parts, aux)
+        if arch == "flux":
+            # The channels' fractions start at zero, where their gradient is about 1e-15:
+            # errors on a log scale reach them however small the change.
+            loss = loss + aux * log_loss(Dp, Dt, et)
+        elif logw > 0:
+            # Each species' change on a log scale: the absolute errors barely see a step that
+            # makes the right amount of a product out of the wrong reactant (Ne20 out of C/O
+            # with the trace He that should have made it left in place, 1.6e-3 of He in a
+            # step that changes 1.5e-2), and that He then burns again every step after.
+            loss = loss + logw * log_loss(Dp, Dt, et)
         if unroll > 0:
             # A stretch of n steps (2 to 32) between two times of a trajectory, judged where
             # it ends: absolute and relative errors as for single steps.
