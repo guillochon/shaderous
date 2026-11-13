@@ -151,6 +151,26 @@ export const defaultView = (): ViewState => ({
 });
 
 /**
+ * The color scale as the shaders take it: logarithmic or not (a field of either sign is always
+ * shown on a linear scale), and its ends, in log10 when logarithmic.
+ */
+export function colorScale(v: ViewState): { log: boolean; lo: number; hi: number } {
+  const log = v.log && !LINEAR_FIELDS.has(v.field);
+  const tiny = 1e-30;
+  return { log, lo: log ? Math.log10(Math.max(v.lo, tiny)) : v.lo, hi: log ? Math.log10(Math.max(v.hi, tiny)) : v.hi };
+}
+
+/** A half-precision float, from its bits. */
+function halfToFloat(h: number): number {
+  const s = h & 0x8000 ? -1 : 1;
+  const e = (h >> 10) & 0x1f;
+  const m = h & 0x3ff;
+  if (e === 0) return s * m * 2 ** -24;
+  if (e === 31) return m ? NaN : s * Infinity;
+  return s * (1 + m / 1024) * 2 ** (e - 15);
+}
+
+/**
  * The range of |field|, in log10, that the contour levels divide evenly: the displayed range
  * when it is positive, else (a range reaching zero or below) the four decades under its largest
  * magnitude.
@@ -212,6 +232,8 @@ export class Renderer {
   private lineBuf: GPUBuffer | null = null;
   /** Block outline last uploaded: the simulation and the version of its mesh. */
   private blocksOf: { sim: Simulation; version: number; count: number } | null = null;
+  /** The contour drawn highlighted (its level, counted from 1), or 0 for none. */
+  hoverLevel = 0;
   /** Where the guides through a tool cross (in fractions of the box), or null for none. */
   guides: [number, number, number] | null = null;
   private gVolume!: GPUBindGroup;
@@ -331,7 +353,7 @@ export class Renderer {
         label: 'slice and projection map',
         size: [side, side],
         format: 'rgba16float',
-        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
       });
       this.gSlice = bindGroup(d, this.pSlice, { 0: this.cam, 2: this.tf.createView(), 3: this.sampler, 4: this.map.createView() });
     }
@@ -455,12 +477,8 @@ export class Renderer {
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
     new Float32Array(vb, 32, 3).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, nz > 1 ? v.slicePos : 0]);
-    // A field of either sign is always shown on a linear scale.
-    const log = v.log && !LINEAR_FIELDS.has(v.field);
+    const { log, lo, hi } = colorScale(v);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
-    const tiny = 1e-30;
-    const lo = log ? Math.log10(Math.max(v.lo, tiny)) : v.lo;
-    const hi = log ? Math.log10(Math.max(v.hi, tiny)) : v.hi;
     new Float32Array(vb, 8, 2).set([lo, hi]);
     d.queue.writeBuffer(this.viewBuf, 0, vb);
 
@@ -482,7 +500,7 @@ export class Renderer {
         tan, aspect, v.opacity, samples,
         v.sliceAxis, v.slicePos, nx, nz,
         v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,
-        v.contours ? Math.max(1, Math.round(v.nContours)) : 0, ...contourRange(v.lo, v.hi), 0,
+        v.contours ? Math.max(1, Math.round(v.nContours)) : 0, ...contourRange(v.lo, v.hi), v.contours ? this.hoverLevel : 0,
         // The color scale, for the color of each contour's level (as in the View uniform).
         log ? 1 : 0, lo, hi, 0,
       ]),
@@ -526,6 +544,71 @@ export class Renderer {
     rp.draw(3);
     if (volume) this.drawLines(rp, sim, v.showBlocks);
     rp.end();
+  }
+
+  /**
+   * Slice and projection views, from the map last drawn: the contour line within `tolPx` screen
+   * pixels of the point (a, b) of the map (in fractions of its side), as its level (counted from
+   * 1, as the shader counts them) and the value it marks, or null. `pxPerSide`: screen pixels
+   * across the whole map. Mirrors contour() in render/slice.wgsl.
+   */
+  async contourAt(a: number, b: number, v: ViewState, pxPerSide: number, tolPx = 5): Promise<{ level: number; value: number } | null> {
+    const map = this.map;
+    if (!map || !v.contours || map.width < 2) return null;
+    const side = map.width;
+    const gx = a * side - 0.5;
+    const gy = b * side - 0.5;
+    const [ix, iy] = [Math.floor(gx), Math.floor(gy)];
+    const [fx, fy] = [gx - ix, gy - iy];
+    const clampi = (i: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, i));
+    const ox = clampi(ix, 0, side - 2);
+    const oy = clampi(iy, 0, side - 2);
+    const patch = await this.readMapPatch(map, ox, oy);
+    if (!patch || map !== this.map) return null;
+    // Texel (x, y) of the map, clamped to it as textureLoad is in the shader: rgba.
+    const at = (x: number, y: number) => {
+      const i = 4 * (2 * (clampi(y, 0, side - 1) - oy) + (clampi(x, 0, side - 1) - ox));
+      return patch.subarray(i, i + 4);
+    };
+    const [p00, p10, p01, p11] = [at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1)];
+    if (Math.min(p00[0], p10[0], p01[0], p11[0]) < -0.5) return null; // beside a solid
+    const lerp = (u: number, w: number, s: number) => u + (w - u) * s;
+    const bil = (c: number) => lerp(lerp(p00[c], p10[c], fx), lerp(p01[c], p11[c], fx), fy);
+    const n = Math.max(1, Math.round(v.nContours));
+    const [l0, l1] = contourRange(v.lo, v.hi);
+    const per = (n + 1) / Math.max(l1 - l0, 1e-6); // levels per unit of log10 |value|
+    const f = (bil(2) - l0) * per;
+    // Gradient of f per texel, then per screen pixel.
+    const dfx = lerp(p10[2] - p00[2], p11[2] - p01[2], fy) * per;
+    const dfy = lerp(p01[2] - p00[2], p11[2] - p10[2], fx) * per;
+    const perPx = (Math.hypot(dfx, dfy) * side) / pxPerSide;
+    const k = Math.round(f);
+    if (k < 1 || k > n || Math.abs(f - k) > tolPx * perPx) return null;
+    // The line is where the value is minus the level when it lies below zero on a linear scale.
+    const { log, lo, hi } = colorScale(v);
+    const neg = !log && bil(0) < -lo / Math.max(hi - lo, 1e-20);
+    const value = 10 ** (l0 + k / per);
+    return { level: k, value: neg ? -value : value };
+  }
+
+  /** Texels (x, y) to (x + 1, y + 1) of the map, as rgba floats, row by row. */
+  private async readMapPatch(map: GPUTexture, x: number, y: number): Promise<Float32Array | null> {
+    const d = this.device;
+    const buf = d.createBuffer({ size: 256 + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    try {
+      const enc = d.createCommandEncoder();
+      enc.copyTextureToBuffer({ texture: map, origin: [x, y] }, { buffer: buf, bytesPerRow: 256 }, [2, 2]);
+      d.queue.submit([enc.finish()]);
+      await buf.mapAsync(GPUMapMode.READ);
+      const raw = new Uint16Array(buf.getMappedRange().slice(0));
+      const out = new Float32Array(16);
+      for (let row = 0; row < 2; row++) for (let i = 0; i < 8; i++) out[row * 8 + i] = halfToFloat(raw[row * 128 + i]);
+      return out;
+    } catch {
+      return null;
+    } finally {
+      buf.destroy();
+    }
   }
 
   /** Volume view: the outline of the mesh's blocks, then the guides through a tool. */

@@ -13,6 +13,9 @@ struct Line {
   ink: vec3<f32>,
 }
 
+// The contour under the pointer (Renderer.hoverLevel): drawn wider, in a color of its own.
+const HOVER_INK = vec3<f32>(0.2, 0.9, 1.0);
+
 // The ink of the line at level k: dark if the level's own color is light, light if it is dark,
 // so a line keeps one ink along its whole length (choosing by the cell under each pixel flips
 // it from cell to cell where the colors sit near the threshold). `neg`: the line is where the
@@ -53,8 +56,11 @@ fn contour(st: vec2<f32>) -> Line {
   let t = mix(mix(a.r, b.r, fr.x), mix(c.r, d.r, fr.x), fr.y);
   let zero = -C.sc.y / max(C.sc.z - C.sc.y, 1.0e-20);
   let neg = C.sc.x == 0.0 && t < zero;
-  let alpha = select(0.0, (1.0 - smoothstep(0.5, 1.25, px)) * (1.0 - smoothstep(0.2, 0.4, fw)), on);
-  return Line(alpha, ink(k, neg));
+  let hot = k == C.k.w;
+  let width = select(vec2<f32>(0.5, 1.25), vec2<f32>(1.0, 2.0), hot);
+  let crowd = select(1.0 - smoothstep(0.2, 0.4, fw), 1.0, hot);
+  let alpha = select(0.0, (1.0 - smoothstep(width.x, width.y, px)) * crowd, on);
+  return Line(select(alpha, alpha / 0.85, hot), select(ink(k, neg), HOVER_INK, hot));
 }
 
 @fragment

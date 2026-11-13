@@ -743,6 +743,9 @@ let unitSys: DisplaySystem = (() => {
 })();
 /** How the current run's values are shown. */
 const units = (): Readout => readout(problemUnits(cfg.problem, cfg.params), cfg.problem.composition, unitSys);
+/** The name of the field on view. */
+const viewFieldName = () =>
+  view.field === MASS_FRACTION_FIELD ? `X(${speciesLabel(cfg.problem.species![view.species])})` : projecting() && view.field === 0 ? 'Column density' : FIELDS[view.field];
 /** The projection view (a 2D run is always shown as its plane). */
 const projecting = () => view.mode === 'projection' && cfg?.ndim === 3;
 /** What the field on view measures: density projected is a column density, mass per area. */
@@ -947,7 +950,7 @@ function syncControls() {
   unitSel.value = cfg.problem.units ? unitSys : 'code';
   unitSel.disabled = !cfg.problem.units;
   const unitLabel = units().label(viewMeasure());
-  const fieldName = view.field === MASS_FRACTION_FIELD ? `X(${speciesLabel(cfg.problem.species![view.species])})` : projecting() && view.field === 0 ? 'Column density' : FIELDS[view.field];
+  const fieldName = viewFieldName();
   $('sum-view').textContent = unitLabel ? `${fieldName}, ${unitLabel}` : fieldName;
   showRange();
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
@@ -1934,6 +1937,7 @@ function bind() {
   });
   canvas.addEventListener('pointerleave', () => {
     hideCellPop();
+    clearContourHover();
     if (!stroke) $('brush').style.display = 'none';
   });
   window.addEventListener('keydown', (e) => {
@@ -1988,6 +1992,8 @@ function bind() {
       const r = canvas.getBoundingClientRect();
       drawBrush(e.clientX - r.left, e.clientY - r.top);
     }
+    if (pointers.size === 0) contourHover(e.clientX, e.clientY);
+    else clearContourHover();
     const last = pointers.get(e.pointerId);
     if (!last) return;
     const before = pointers.size === 2 ? spread() : 0;
@@ -2187,6 +2193,84 @@ function showCell(c: CellProbe, x: number, y: number) {
   const top = Math.min(window.innerHeight - ph - 4, Math.max(4, y + 18));
   cellPop.style.left = `${Math.round(Math.max(4, left))}px`;
   cellPop.style.top = `${Math.round(top)}px`;
+}
+
+// --- contour labels -----------------------------------------------------------------------
+// While the run is paused, the contour under the pointer (slice and projection views) is drawn
+// highlighted and its value shown beside the pointer. The map under the pointer is read back,
+// one read at a time; the latest position is read next.
+const contourPop = $('contour-pop');
+let contourPoint: { x: number; y: number } | null = null;
+let contourBusy = false;
+/** What the label was last found for: the pointer, the view, and whether the run was paused. */
+let contourKey = '';
+
+const contoursHoverable = () => !running && view.contours && !tool && !!sim && !building && flatView();
+
+function contourHover(clientX: number, clientY: number) {
+  contourPoint = { x: clientX, y: clientY };
+  if (!contoursHoverable()) return hideContourLabel();
+  if (!contourBusy) void runContourHover();
+}
+
+function hideContourLabel() {
+  renderer.hoverLevel = 0;
+  contourPop.hidden = true;
+  contourKey = '';
+}
+
+function clearContourHover() {
+  contourPoint = null;
+  hideContourLabel();
+}
+
+/** The label follows the view while the pointer rests (zoom, a new range, another field). */
+function refreshContourHover() {
+  if (!contourPoint) return;
+  if (!contoursHoverable()) {
+    if (renderer.hoverLevel || !contourPop.hidden) hideContourLabel();
+    return;
+  }
+  const key = contourViewKey();
+  if (key !== contourKey && !contourBusy) void runContourHover();
+}
+
+const contourViewKey = () =>
+  [contourPoint?.x, contourPoint?.y, view.field, view.species, view.mode, view.sliceAxis, view.slicePos, view.lo, view.hi, view.log, view.nContours, view.zoom, view.cx, view.cy, unitSys].join();
+
+async function runContourHover() {
+  const q = contourPoint;
+  if (!q || !contoursHoverable()) return;
+  contourBusy = true;
+  const key = contourViewKey();
+  try {
+    const r = canvas.getBoundingClientRect();
+    const span = sliceSpan() * view.zoom;
+    const a = view.cx + (q.x - r.left - canvas.clientWidth / 2 + sliceShift()) / span;
+    const b = view.cy - (q.y - r.top - canvas.clientHeight / 2) / span;
+    const hit = a >= 0 && a < 1 && b >= 0 && b < 1 ? await renderer.contourAt(a, b, view, span) : null;
+    if (contourPoint !== q || !contoursHoverable()) return;
+    contourKey = key;
+    if (!hit) {
+      renderer.hoverLevel = 0;
+      contourPop.hidden = true;
+      return;
+    }
+    renderer.hoverLevel = hit.level;
+    contourPop.textContent = `${viewFieldName()} = ${units().fmt(hit.value, viewMeasure())}`;
+    contourPop.hidden = false;
+    // Beside the pointer, kept on screen.
+    const pw = contourPop.offsetWidth;
+    const ph = contourPop.offsetHeight;
+    const left = q.x + 14 + pw > window.innerWidth - 4 ? q.x - 14 - pw : q.x + 14;
+    contourPop.style.left = `${Math.round(Math.max(4, left))}px`;
+    contourPop.style.top = `${Math.round(Math.min(window.innerHeight - ph - 4, Math.max(4, q.y - ph - 10)))}px`;
+  } catch {
+    hideContourLabel();
+  } finally {
+    contourBusy = false;
+    if (contourPoint && contourPoint !== q) void runContourHover();
+  }
 }
 
 // --- obstacles ----------------------------------------------------------------------------
@@ -3109,6 +3193,7 @@ function tick(now: number) {
   }
   stepOnce = false;
   updateGuides();
+  refreshContourHover();
   renderer.densityCut = densityCut();
   renderer.slice = sliceLayout();
   renderer.encode(enc, s, view);
