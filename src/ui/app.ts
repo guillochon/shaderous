@@ -17,7 +17,7 @@ import { amrFits, createSim, maxAmrLevels, minAmrLevels, supportsAmr } from '../
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode } from '../problems';
+import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
@@ -871,11 +871,28 @@ function syncProblemParams() {
   const defs = cfg.problem.params ?? [];
   if (box.dataset.problem !== cfg.problem.id) {
     box.dataset.problem = cfg.problem.id;
-    box.innerHTML = defs.map((q) => field(q.label, number(`pp-${q.id}`, `min="${q.min}" max="${q.max}"${q.step ? ` step="${q.step}"` : ''}`, q.factor), '', q.title ?? '')).join('');
+    const range = (q: ProblemParam) => `min="${q.min}" max="${q.max}"${q.step ? ` step="${q.step}"` : ''}`;
+    box.innerHTML = defs
+      .map((q) => {
+        const tip = q.title ?? '';
+        if (q.kind === 'checkbox') return `<label class="check pcheck" id="pp-${q.id}-row" title="${tip}"><input id="pp-${q.id}" type="checkbox" />${q.label}</label>`;
+        if (q.kind === 'slider') {
+          return `<div class="f pslider" id="pp-${q.id}-row" title="${tip}"><span>${q.label}</span><div><input id="pp-${q.id}-slide" type="range" ${range(q)} aria-label="${q.label}" />${number(`pp-${q.id}`, range(q))}</div></div>`;
+        }
+        return field(q.label, number(`pp-${q.id}`, range(q), q.factor), `pp-${q.id}-row`, tip);
+      })
+      .join('');
     for (const q of defs) {
       const el = $<HTMLInputElement>(`pp-${q.id}`);
+      const slide = q.kind === 'slider' ? $<HTMLInputElement>(`pp-${q.id}-slide`) : null;
+      // Dragging the slider shows its value in the field; letting go applies it.
+      slide?.addEventListener('input', () => (el.value = slide.value));
+      slide?.addEventListener('change', () => {
+        el.value = slide.value;
+        el.dispatchEvent(new Event('change'));
+      });
       el.addEventListener('change', () => {
-        const v = el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value;
+        const v = q.kind === 'checkbox' ? (el.checked ? 1 : 0) : el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value;
         cfg.params[q.id] = Math.min(q.max, Math.max(q.min, v));
         if (q.live && sim) {
           // Only the point masses' sizes: the run carries on.
@@ -890,8 +907,12 @@ function syncProblemParams() {
     }
   }
   for (const q of defs) {
+    $(`pp-${q.id}-row`).hidden = !!q.dims && q.dims !== cfg.ndim;
     const el = $<HTMLInputElement>(`pp-${q.id}`);
-    if (document.activeElement !== el) el.value = String(cfg.params[q.id]);
+    if (q.kind === 'checkbox') el.checked = !!cfg.params[q.id];
+    else if (document.activeElement !== el) el.value = String(cfg.params[q.id]);
+    const slide = q.kind === 'slider' ? $<HTMLInputElement>(`pp-${q.id}-slide`) : null;
+    if (slide && document.activeElement !== slide) slide.value = String(cfg.params[q.id]);
   }
 }
 

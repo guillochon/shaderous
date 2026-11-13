@@ -60,17 +60,25 @@ fn damping_target(x: vec3<f32>) -> DampTarget {
 }
 `;
 
-/** The two masses at pericenter, on the x axis, orbiting counter-clockwise about the origin. */
-export function binaryMasses(q: number, ecc: number, soft: number): PointMass[] {
+/**
+ * The two masses at pericenter, on the x axis. With `incl` 0 they orbit counter-clockwise
+ * about the origin, as the disk does. Otherwise the orbit is tilted about the x axis (the line
+ * of nodes, through pericenter) by `incl` degrees: 180 is a retrograde orbit in the disk's plane.
+ */
+export function binaryMasses(q: number, ecc: number, soft: number, incl = 0): PointMass[] {
   const m1 = 1 / (1 + q);
   const m2 = q / (1 + q);
   const r = 1 - ecc;
   // Pericenter speed of the Kepler orbit, lowered to match the softened pull between the two
   // (so that a circular orbit stays circular).
   const v = Math.sqrt((1 + ecc) / (1 - ecc)) * Math.pow((r * r) / (r * r + soft * soft), 0.75);
+  // Exact at the ends, so that a flat orbit has no vertical velocity at all.
+  const a = (incl * Math.PI) / 180;
+  const cy = incl === 0 ? 1 : incl === 180 ? -1 : Math.cos(a);
+  const cz = incl === 0 || incl === 180 ? 0 : Math.sin(a);
   return [
-    { gm: m1, pos: [-m2 * r, 0, 0], vel: [0, -m2 * v, 0], soft, sinkRadius: soft },
-    { gm: m2, pos: [m1 * r, 0, 0], vel: [0, m1 * v, 0], soft, sinkRadius: soft },
+    { gm: m1, pos: [-m2 * r, 0, 0], vel: [0, -m2 * v * cy, -m2 * v * cz], soft, sinkRadius: soft },
+    { gm: m2, pos: [m1 * r, 0, 0], vel: [0, m1 * v * cy, m1 * v * cz], soft, sinkRadius: soft },
   ];
 }
 
@@ -98,9 +106,11 @@ export const binary: Problem = {
     { id: 'q', label: 'Mass ratio', title: 'Mass of the lighter body over the heavier one. Sets the orbit: changing it starts the run again', value: 1, min: 0.01, max: 1, factor: 1.25 },
     { id: 'ecc', label: 'Eccentricity', title: 'Eccentricity of the binary’s orbit. Changing it starts the run again', value: 0, min: 0, max: 0.8, step: 0.05 },
     { id: 'soft', label: 'Softening and sink radius', title: 'Radius within which each mass’s pull is softened and it takes in gas (at least two cells). Changes take effect without a restart', value: 0.06, min: 0.01, max: 0.5, step: 0.01, live: true },
+    { id: 'incl', label: 'Binary inclination (°)', title: 'Angle between the binary’s orbit and the disk, in degrees, tilted about the line through pericenter: 0 orbits with the disk, 90 is polar, 180 against it. Changing it starts the run again', value: 0, min: 0, max: 180, step: 1, kind: 'slider', dims: 3 },
+    { id: 'retro', label: 'Retrograde', title: 'The binary orbits against the disk’s rotation. Changing it starts the run again', value: 0, min: 0, max: 1, kind: 'checkbox', dims: 2 },
   ],
   // Softening and sink are at least two cells across, or the grid cannot see them.
-  masses: (p, _G, dx) => binaryMasses(p.q, p.ecc, Math.max(p.soft, 2 * dx)),
+  masses: (p, _G, dx, ndim) => binaryMasses(p.q, p.ecc, Math.max(p.soft, 2 * dx), ndim === 3 ? p.incl : p.retro ? 180 : 0),
   init: (n, _eos, ndim) => {
     const { cs, sigma0, floor, box } = BINARY;
     const dx = box / n;

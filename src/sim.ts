@@ -340,7 +340,7 @@ export const MASS_RED = 1 + 10 * MAX_MASSES;
  * them. `dx` is the cell size (the coarsest level's on an adaptive mesh).
  */
 export function initialMasses(c: SimConfig, dx: number): Required<PointMass>[] {
-  const base = c.problem.masses?.(c.params, c.G, dx) ?? [];
+  const base = c.problem.masses?.(c.params, c.G, dx, c.ndim) ?? [];
   const saved = c.restart?.masses ?? [];
   const out = base.map((m, i) => completeMass({ ...m, ...saved[i] }, dx));
   // Masses placed by hand before the snapshot was taken come back whole.
@@ -364,7 +364,7 @@ export function completeMass(q: PointMass, dx: number): Required<PointMass> {
  * into the Masses block, leaving their positions, velocities and masses as the run has them.
  */
 export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: number, count: number) {
-  const base = (c.problem.masses?.(c.params, c.G, dx) ?? []).slice(0, count);
+  const base = (c.problem.masses?.(c.params, c.G, dx, c.ndim) ?? []).slice(0, count);
   base.forEach((q, i) => {
     const m = completeMass(q, dx);
     const at = 16 + 4 * MASS_STRIDE * i;

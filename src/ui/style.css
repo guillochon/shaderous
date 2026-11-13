@@ -55,6 +55,11 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }
 .jeans .check { height: 24px; }
 #pparams { display: contents; }
+#pparams [hidden] { display: none; }
+/* A slider takes a row of its own, with a field beside it for typing the value. */
+.pslider { grid-column: 1 / -1; }
+.pslider > div { display: grid; grid-template-columns: 1fr 64px; gap: 8px; align-items: center; }
+.pcheck { align-self: end; height: 24px; }
 /* The variant's name gets a row of its own; the preset's parameters fill the grid below it. */
 #row-variant { grid-column: 1 / -1; }
 .checks { display: flex; gap: 12px; margin-top: 6px; }

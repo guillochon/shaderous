@@ -109,6 +109,13 @@ export interface ProblemParam {
    * the initial conditions, and changing it starts the run again.
    */
   live?: boolean;
+  /**
+   * How the control looks: a number field (the default), a slider with a number field beside
+   * it for typing a value, or a checkbox (value 0 or 1).
+   */
+  kind?: 'number' | 'slider' | 'checkbox';
+  /** Shown, and used, only on a grid of this many dimensions. */
+  dims?: 2 | 3;
 }
 
 export interface Problem {
@@ -166,7 +173,7 @@ export interface Problem {
    * masses sit in: on an adaptive mesh, the finest level's if `refineMasses` is set, otherwise
    * the coarsest level's.
    */
-  masses?: (params: Record<string, number>, G: number, dx: number) => PointMass[];
+  masses?: (params: Record<string, number>, G: number, dx: number, ndim: 2 | 3) => PointMass[];
   /**
    * On an adaptive mesh, keep the gas around every point mass at the finest level, so that
    * softening and sinks can be as small as the finest cells allow (amr/flag.wgsl).
