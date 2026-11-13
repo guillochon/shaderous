@@ -19,6 +19,10 @@ Whenever you download a paper for research (arXiv `.tex`, HTML, PDF, or extracte
 - Do not paste a downloaded paper into a note; quote at most the sentence you need and give the citation key.
 - Referee reports and responses are `research/review<N>.md` and `research/response<N>.md`. They stay private: `push_public.py` never copies `review*.md`.
 
+## The manuscript stands alone
+
+The notes in `research/` support the manuscript; the manuscript never points to them. Do not write "see `research/<topic>.md`", "a note in the repository", or any path or file of this repository in the text, a caption or a footnote. Put what the reader needs in the paper itself. The data-availability statement may give the repository's URL as a whole.
+
 ## Claims about other work
 
 When the manuscript says what another paper found, check it against that paper's text (download it into `research/<key>/` if needed), not against memory or a citing paper.

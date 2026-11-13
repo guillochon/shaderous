@@ -73,7 +73,7 @@ Section~\ref{sec:prior} compares Shaderous with earlier work. Section~\ref{sec:w
 \section{Relation to earlier work}
 \label{sec:prior}
 
-We searched for earlier codes in three literatures (see \texttt{research/prior-art.md} in the paper repository): general-purpose computation in graphics shaders, GPU codes for astrophysical fluids, and scientific simulators that run in a browser.
+We searched for earlier codes in three literatures: general-purpose computation in graphics shaders, GPU codes for astrophysical fluids, and scientific simulators that run in a browser.
 
 The shader-era solvers are the closest in spirit. \citet{Hagen2006} solved the compressible Euler equations on uniform grids in fragment programs, and \citet{Goodnight2003} and \citet{Bolz2003} ran multigrid in the same way. Adaptive data structures in textures also came from computer graphics: \citet{Lefohn2006} built page tables and octrees in textures for random access on the GPU. Shaderous uses compute shaders rather than fragment programs, but it inherits the same model of state held in textures and updated by one invocation per cell. It adds what those solvers did not have: self-gravity, adaptive refinement with conservative coupling between levels, local timesteps, and the physics of astrophysical problems.
 
