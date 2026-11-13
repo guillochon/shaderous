@@ -27,6 +27,7 @@ fn shown(rho: f32) -> f32 {
 @group(0) @binding(7) var GF: texture_3d<f32>;   // gravity field: acceleration, potential in w
 @group(0) @binding(8) var<storage, read_write> RANGE: array<atomic<u32>, 132>;
 @group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
+@group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
 
 // Velocity and density of a neighboring cell, clamped to the grid.
 fn neighbor(c: vec3<i32>) -> vec4<f32> {
@@ -65,6 +66,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     comp_use(comp_tex(c));
     var x = field_value(V.field, u1, u2, g, 0.0, phi);
     if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
+    if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
     let solid = u2.w > 0.5;
     if (!solid) { range_add(x); }
     if (V.logscale != 0u) { x = log(max(x, 1.0e-30)) * 0.4342944819; }

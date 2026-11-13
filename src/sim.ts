@@ -1379,7 +1379,7 @@ export class Sim implements Simulation {
   }
   readonly fieldShader = 'render/field.wgsl';
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
-    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView() };
+    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView() };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }

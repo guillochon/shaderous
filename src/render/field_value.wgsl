@@ -24,6 +24,7 @@ const F_DIVERGENCE = 12u;
 const F_DENSITY_GRADIENT = 13u;
 const F_LEVEL = 14u;
 const F_MASS_FRACTION = 19u;
+const F_SHOCK = 20u;
 
 // Mass fraction of species V.sp.x at texel c of the state: its rho X over the sum of all of
 // them (species/species.ts), read from S, the groups of four V.sp.y texels apart along z.

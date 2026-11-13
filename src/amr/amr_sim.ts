@@ -1958,7 +1958,7 @@ export class AmrSim implements Simulation {
   }
   readonly fieldShader = 'amr/field.wgsl';
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
-    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 30: this.bt };
+    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 30: this.bt };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }
