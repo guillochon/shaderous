@@ -178,10 +178,14 @@ export class Renderer {
   private sampler: GPUSampler;
   private pVolume!: GPURenderPipeline;
   private pSlice!: GPURenderPipeline;
-  private pColumn!: GPURenderPipeline;
-  private gColumn?: GPUBindGroup;
-  /** Projection view: the projected field, one texel per column (render/project.wgsl). */
-  private proj?: GPUTexture;
+  private gSlice?: GPUBindGroup;
+  /**
+   * Slice and projection views: the 2D map they draw, one texel per cell of the finest level
+   * (render/project.wgsl), and the passes that fill it.
+   */
+  private map?: GPUTexture;
+  private pPlane?: GPUComputePipeline;
+  private gPlane: GPUBindGroup[] = [];
   private pProject?: GPUComputePipeline;
   private gProject: GPUBindGroup[] = [];
   private pLines!: GPURenderPipeline;
@@ -192,7 +196,6 @@ export class Renderer {
   /** Where the guides through a tool cross (in fractions of the box), or null for none. */
   guides: [number, number, number] | null = null;
   private gVolume!: GPUBindGroup;
-  private gSlice!: GPUBindGroup;
   private vol?: GPUTexture;
   private pField?: GPUComputePipeline;
   private gField: GPUBindGroup[] = [];
@@ -246,10 +249,9 @@ export class Renderer {
       });
     };
     const lines = this.device.createShaderModule({ code: assemble('render/lines.wgsl'), label: 'lines' });
-    [this.pVolume, this.pSlice, this.pColumn, this.pPick, this.pLines] = await Promise.all([
+    [this.pVolume, this.pSlice, this.pPick, this.pLines] = await Promise.all([
       make('render/raymarch.wgsl'),
       make('render/slice.wgsl'),
-      make('render/column.wgsl'),
       computePipeline(this.device, assemble('render/pick.wgsl'), 'pick'),
       this.device.createRenderPipelineAsync({
         label: 'lines',
@@ -299,29 +301,34 @@ export class Renderer {
       this.dims = dims.slice();
       const res = { 0: this.cam, 1: this.vol.createView(), 2: this.tf.createView(), 3: this.sampler };
       this.gVolume = bindGroup(d, this.pVolume, res);
-      this.gSlice = bindGroup(d, this.pSlice, res);
       this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
     }
-    // The projection's map: one texel per cell of the finest level, on either kind of grid,
-    // whatever the display volume is capped at (a 2D run is not projected).
+    // The slice's and the projection's map: one texel per cell of the finest level, on either
+    // kind of grid, whatever the display volume is capped at.
     const side = Math.min(sim.n, d.limits.maxTextureDimension2D);
-    if (!this.proj || this.proj.width !== side) {
-      this.proj?.destroy();
-      this.proj = d.createTexture({
-        label: 'projection',
+    if (!this.map || this.map.width !== side) {
+      this.map?.destroy();
+      this.map = d.createTexture({
+        label: 'slice and projection map',
         size: [side, side],
         format: 'rgba16float',
         usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
       });
-      this.gColumn = bindGroup(d, this.pColumn, { 0: this.cam, 2: this.tf.createView(), 3: this.sampler, 4: this.proj.createView() });
+      this.gSlice = bindGroup(d, this.pSlice, { 0: this.cam, 2: this.tf.createView(), 3: this.sampler, 4: this.map.createView() });
     }
     const code = assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling], diffusion: hydroSlots(sim.cfg).diffusion, comp: hydroSlots(sim.cfg).comp });
-    [this.pField, this.pProject] = await Promise.all([computePipeline(d, code, 'field'), computePipeline(d, code, 'projection', undefined, 'project')]);
+    [this.pField, this.pPlane, this.pProject] = await Promise.all([
+      computePipeline(d, code, 'field'),
+      computePipeline(d, code, 'slice', undefined, 'slice'),
+      computePipeline(d, code, 'projection', undefined, 'project'),
+    ]);
     // One per parity of the state and of the species (a run without species binds a stand-in).
     this.noSpecies ??= d.createTexture({ label: 'no species', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING });
-    const common = (k: number) => ({ 0: sim.paramBuffer, 1: this.viewBuf, 8: this.rangeBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources(k >> 1, k & 1) });
-    this.gField = [0, 1, 2, 3].map((k) => bindGroup(d, this.pField!, { ...common(k), 4: this.vol!.createView() }));
-    this.gProject = [0, 1, 2, 3].map((k) => bindGroup(d, this.pProject!, { ...common(k), 11: this.proj!.createView() }));
+    const common = (k: number) => ({ 0: sim.paramBuffer, 1: this.viewBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources(k >> 1, k & 1) });
+    this.gField = [0, 1, 2, 3].map((k) => bindGroup(d, this.pField!, { ...common(k), 4: this.vol!.createView(), 8: this.rangeBuf }));
+    // The slice pass records no range: the display pass does, over the whole box.
+    this.gPlane = [0, 1, 2, 3].map((k) => bindGroup(d, this.pPlane!, { ...common(k), 11: this.map!.createView() }));
+    this.gProject = [0, 1, 2, 3].map((k) => bindGroup(d, this.pProject!, { ...common(k), 8: this.rangeBuf, 11: this.map!.createView() }));
     this.range = null;
   }
 
@@ -419,14 +426,16 @@ export class Renderer {
     const [nx, ny, nz] = this.dims;
     const vb = new ArrayBuffer(64);
     // Mass fraction: which species, the texels between groups of four, and how many groups.
-    // Projection: the axis summed along, and the side of its map.
+    // Slice and projection: the axis (a 2D run shows its plane), the slice's position along it,
+    // and the side of their map.
     const projAxis = this.projectionAxis(v);
-    const side = this.proj!.width;
-    new Uint32Array(vb, 48, 4).set([v.species, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), projAxis ?? 0]);
+    const axis = nz > 1 ? v.sliceAxis : 2;
+    const side = this.map!.width;
+    new Uint32Array(vb, 48, 4).set([v.species, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), axis]);
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, side]);
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
-    new Float32Array(vb, 32, 2).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0]);
+    new Float32Array(vb, 32, 3).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, nz > 1 ? v.slicePos : 0]);
     // A field of either sign is always shown on a linear scale.
     const log = v.log && !LINEAR_FIELDS.has(v.field);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
@@ -471,6 +480,11 @@ export class Renderer {
       cp2.setPipeline(this.pField);
       cp2.setBindGroup(0, this.gField[parity]);
       cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
+      if (v.mode !== 'volume' || nz === 1) {
+        cp2.setPipeline(this.pPlane!);
+        cp2.setBindGroup(0, this.gPlane[parity]);
+        cp2.dispatchWorkgroups(Math.ceil(side / 16), Math.ceil(side / 8));
+      }
     }
     cp2.end();
     if (!this.rangeBusy && this.rangeCopied === null) {
@@ -485,8 +499,8 @@ export class Renderer {
     });
     // A 2D run has nothing to ray-march: always show the plane.
     const volume = v.mode === 'volume' && nz > 1;
-    rp.setPipeline(volume ? this.pVolume : projAxis !== null ? this.pColumn : this.pSlice);
-    rp.setBindGroup(0, volume ? this.gVolume : projAxis !== null ? this.gColumn! : this.gSlice);
+    rp.setPipeline(volume ? this.pVolume : this.pSlice);
+    rp.setBindGroup(0, volume ? this.gVolume : this.gSlice!);
     rp.draw(3);
     if (volume) this.drawLines(rp, sim, v.showBlocks);
     rp.end();

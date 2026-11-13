@@ -1,9 +1,10 @@
-// Resamples the block grid onto the uniform display volume that the ray-marcher and slice
-// view read. Each display voxel takes the value of the leaf cell under its center
-// (render/field_value.wgsl), and the pass records the range of what it draws.
+// Resamples the block grid onto the uniform display volume that the ray-marcher reads. Each
+// display voxel takes the value of the leaf cell under its center (render/field_value.wgsl),
+// and the pass records the range of what it draws.
 //   r = displayed quantity, normalized to [0, 1]
-//   g, b, a = 1 on the lower boundary of a block, one display voxel wide, as seen in a z-, x-
-//             or y-normal slice
+//   g = volume view: 1 where the gas is dense enough to be shown
+// The slice and projection views read the leaf cells themselves, at the finest level's
+// resolution (plane() and column() below, render/project.wgsl).
 // Derivatives come from the primitive variables, whose ghost cells hold the neighbors across
 // block faces at the block's own level (as of the last assembly pass).
 #include "hydro/common.wgsl"
@@ -17,9 +18,9 @@ struct View {
   logscale: u32,
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
-  nd: vec4<u32>,   // display volume size; projection map size in w
-  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view)
-  sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; projection axis in w
+  nd: vec4<u32>,   // display volume size; slice and projection map size in w
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); slice position in z
+  sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; slice or projection axis in w
 }
 @group(0) @binding(1) var<uniform> V: View;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -93,6 +94,23 @@ fn leaf(v: vec3<i32>) -> Leaf {
   return leaf_at((vec3<f32>(v) + 0.5) / vec3<f32>(V.nd.xyz));
 }
 
+// Slice: the leaf cell under the center of texel `ij` of the map, in the middle of the layer of
+// finest cells V.cut.z of the way along `axis`, and 1 on the lower edges of its block, one texel
+// wide.
+fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
+  let finest = f32(i32(P.amr.y << P.amr.z) * BS);
+  let side = f32(V.nd.w);
+  var p = vec3<f32>(0.0);
+  p[ab.x] = (f32(ij.x) + 0.5) / side;
+  p[ab.y] = (f32(ij.y) + 0.5) / side;
+  p[axis] = (clamp(floor(V.cut.z * finest), 0.0, finest - 1.0) + 0.5) / finest;
+  let f = leaf_at(p);
+  // Position within the block, in texels of the map.
+  let within = (p * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * side / f32(f.nblk);
+  let edge = select(0.0, 1.0, within[ab.x] < 1.0 || within[ab.y] < 1.0);
+  return Plane(leaf_value(f), edge);
+}
+
 // Projection: the leaf cells along `axis` through the center of texel `ij` of the map, each
 // crossed whole, so the integral is exact at every level of refinement. Each step looks up the
 // leaf a quarter of a finest cell past the last boundary and moves to its far face.
@@ -121,16 +139,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let q = leaf_value(f);
     if (!q.solid) { range_add(q.x); }
     // Solid: drawn as a body, not as gas.
-    let t = display_t(q.x, q.solid);
-
-    // Position within the block in display voxels; the first voxel along an axis is the outline.
-    let within = (f.frac * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * vec3<f32>(V.nd.xyz) / f32(f.nblk);
-    let edge = vec3<f32>(within < vec3<f32>(1.0));
-    // g: block outlines for z-normal slices; in the volume view, whether the gas is dense enough
-    // to be shown (the volume view draws its outlines as lines).
+    // The volume view draws block outlines as lines.
     let shown = select(0.0, 1.0, log(max(q.rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
-    let green = select(max(edge.x, edge.y), shown, V.cut.y != 0.0);
-    textureStore(VOL, vec3<i32>(gid), vec4<f32>(t, green, max(edge.y, edge.z), max(edge.x, edge.z)));
+    textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), 0.0, 0.0));
   }
   range_end(lix);
 }

@@ -1,6 +1,7 @@
 // Extracts the displayed quantity from the conserved state, normalized to [0, 1], into a
-// filterable rgba16float volume shared by the ray-marcher and the slice view, and records the
-// range of what it draws (render/field_value.wgsl).
+// filterable rgba16float volume the ray-marcher reads, and records the range of what it draws
+// (render/field_value.wgsl). The slice and projection views read the cells themselves
+// (plane() and column() below, render/project.wgsl).
 #include "hydro/common.wgsl"
 #include <eos>
 #include "render/field_value.wgsl"
@@ -11,13 +12,12 @@ struct View {
   logscale: u32,
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
-  nd: vec4<u32>,   // display volume size (used by the block-grid version); projection map size in w
-  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view)
-  sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; projection axis in w
+  nd: vec4<u32>,   // display volume size (used by the block-grid version); slice and projection map size in w
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); slice position in z
+  sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; slice or projection axis in w
 }
 
-// Volume view: 1 where the gas is dense enough to be shown, stored in g. The slice view keeps g
-// for the block outlines of an adaptive mesh.
+// Volume view: 1 where the gas is dense enough to be shown, stored in g.
 fn shown(rho: f32) -> f32 {
   return select(0.0, 1.0, log(max(rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
 }
@@ -66,6 +66,16 @@ fn voxel(c: vec3<i32>) -> Cell {
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
   return Cell(x, u1.x, u2.w > 0.5);
+}
+
+// Slice: the cell under texel `ij` of the map (one texel per cell), no outlines.
+fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
+  let depth = f32(P.dims[axis]);
+  var c = vec3<i32>(0);
+  c[ab.x] = ij.x;
+  c[ab.y] = ij.y;
+  c[axis] = i32(clamp(floor(V.cut.z * depth), 0.0, depth - 1.0));
+  return Plane(voxel(c), 0.0);
 }
 
 // Projection: the cells along `axis` through cell `ij` of the map (one map texel per cell).

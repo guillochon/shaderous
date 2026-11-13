@@ -1,11 +1,17 @@
 // Shared by the display passes of the uniform grid (render/field.wgsl) and the block grid
-// (amr/field.wgsl): the normalization of a value for the transfer function, and the projection
-// view's pass, which integrates along the axis V.sp.w through the center of each texel of a
-// V.nd.w x V.nd.w map (the simulation's resolution). Density becomes the column density (the
+// (amr/field.wgsl): the normalization of a value for the transfer function, and the passes that
+// fill the 2D map the slice and projection views draw (render/slice.wgsl), one texel per cell of
+// the finest level: r the value normalized as display_t() makes it, g 1 on a block's outline.
+//
+// The map is V.nd.w texels on a side (the simulation's resolution), across the two axes other
+// than V.sp.w. The slice pass takes the cell under each texel's center, in the layer of cells
+// V.cut.z of the way along V.sp.w. The projection pass integrates along V.sp.w through each
+// texel's center. Density becomes the column density (the
 // integral of rho dl); any other field the mass-weighted mean along the line of sight (that of
 // rho x dl over that of rho dl). Solid cells are left out; a column with nothing but solid is
 // drawn as a body.
-// Requires V, P, RANGE and the field shader's column(), which walks the cells the line crosses.
+// Requires V, P, RANGE and the field shader's column(), which walks the cells the line crosses,
+// and plane(), the cell under a texel of the slice.
 
 struct Cell {
   x: f32,       // the field's value
@@ -44,6 +50,22 @@ fn map_axes(axis: i32) -> vec2<i32> {
   if (axis == 0) { return vec2<i32>(1, 2); }
   if (axis == 1) { return vec2<i32>(0, 2); }
   return vec2<i32>(0, 1);
+}
+
+// The value under a texel of the slice, and whether the texel lies on a block's outline.
+struct Plane {
+  q: Cell,
+  edge: f32,
+}
+
+// One thread per texel of the map. The range comes from the display pass over the whole box.
+@compute @workgroup_size(16, 8, 1)
+fn slice(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (all(gid.xy < vec2<u32>(V.nd.w))) {
+    let axis = i32(V.sp.w);
+    let s = plane(vec2<i32>(gid.xy), map_axes(axis), axis);
+    textureStore(PROJ, vec2<i32>(gid.xy), vec4<f32>(display_t(s.q.x, s.q.solid), s.edge, 0.0, 0.0));
+  }
 }
 
 // One thread per texel of the map. 128 threads, one per bin of the range's histogram.
