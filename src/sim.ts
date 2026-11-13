@@ -7,7 +7,7 @@ import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
 import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
-import { cellMark, isSelfGravity, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
+import { cellMark, isSelfGravity, problemUnits, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { BurnPass, type BurnSpec } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
@@ -237,14 +237,15 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     lo: [problem.bcLo[0], problem.bcLo[1], 0] as Bc3,
     hi: [problem.bcHi[0], problem.bcHi[1], 0] as Bc3,
   };
+  const params = Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value]));
   return {
     n,
     ndim,
     gext: problem.gext?.(ndim) ?? [0, 0, 0],
-    params: Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value])),
+    params,
     problem,
     eos: problem.eos,
-    eosParams: { ...defaultEosParams(), ...physicalEosParams(problem.units, problem.composition), ...problem.eosParams },
+    eosParams: { ...defaultEosParams(), ...physicalEosParams(problemUnits(problem, params), problem.composition), ...problem.eosParams },
     riemann: 'hllc',
     limiter: 'koren',
     gravity: ndim === 2 && isSelfGravity(problem.gravity) ? 'off' : problem.gravity,

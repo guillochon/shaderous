@@ -15,9 +15,9 @@ import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
-import { EOS_LABELS, makeEos, type EosKind, type EosParams } from '../eos/eos';
+import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam } from '../problems';
+import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 
@@ -587,7 +587,7 @@ let unitSys: DisplaySystem = (() => {
   }
 })();
 /** How the current run's values are shown. */
-const units = (): Readout => readout(cfg.problem.units, cfg.problem.composition, unitSys);
+const units = (): Readout => readout(problemUnits(cfg.problem, cfg.params), cfg.problem.composition, unitSys);
 /** What the field on view measures. */
 const viewMeasure = (): Measure => fieldMeasure(view.field, cfg.eosParams.gamma);
 
@@ -901,7 +901,14 @@ function syncProblemParams() {
       el.addEventListener('change', () => {
         const v = q.kind === 'checkbox' ? (el.checked ? 1 : 0) : el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value;
         cfg.params[q.id] = Math.min(q.max, Math.max(q.min, v));
-        if (q.live && sim) {
+        // Units that follow the parameters change the physical constants an equation of state
+        // other than a barotropic one takes from them: refresh those (the preset's own values
+        // still win), and the run must start again.
+        const physical = typeof cfg.problem.units === 'function' && cfg.eos !== 'barotropic';
+        if (physical) Object.assign(cfg.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
+        if (q.scale && !physical) {
+          // Only the physical units: the run is the same in code units.
+        } else if (q.live && sim) {
           // Only the point masses' sizes: the run carries on.
           sim.cfg = cfg;
           sim.retuneMasses();

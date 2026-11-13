@@ -29,10 +29,10 @@ import { gravityUnits } from '../units/units';
 // masses is kept at the finest level, and their softening and sinks are sized by its cells.
 export const BINARY = { cs: 0.1, rCavity: 2.5, sigma0: 1e-4, floor: 1e-4, box: 12, nu: 1e-3, rDamp: 4.5, damp: 3 };
 
-// The setup is scale-free; physical units put it at one scale: two massive black holes of
-// 1e5 solar masses each (a total of 2e5, the unit of mass, whatever the mass ratio) 0.01 pc
-// apart. The orbital period is then about 210 years.
-export const BINARY_UNITS = gravityUnits('massive black holes', 0.01 * ASTRO.pc, 2e5 * ASTRO.Msun);
+// The setup is scale-free; its physical units come from the heavier mass `m1` (solar masses)
+// and the semi-major axis `sep` (parsecs). The unit of mass is the total, m1 (1 + q). By default
+// two black holes of 1e5 solar masses 0.01 pc apart, whose orbital period is about 210 years.
+export const binaryUnits = (p: Record<string, number>) => gravityUnits('binary', p.sep * ASTRO.pc, p.m1 * (1 + p.q) * ASTRO.Msun);
 
 /** A number as a WGSL f32 literal. */
 const f32 = (v: number) => (Number.isInteger(v) ? `${v}.0` : String(v));
@@ -99,7 +99,7 @@ export const binary: Problem = {
   bcHi: all(OUTFLOW),
   gravity: 'off',
   G: 1,
-  units: BINARY_UNITS,
+  units: binaryUnits,
   box: BINARY.box,
   tEnd: Infinity,
   checkpointDt: 1,
@@ -111,6 +111,8 @@ export const binary: Problem = {
   supports2d: true,
   view: { field: 0, log: true, mode: 'slice', axis: 2, pitch: 1.15 },
   params: [
+    { id: 'm1', label: 'm₁ (M☉)', title: 'Mass of the heavier body, in solar masses. It sets only the physical units the readouts are shown in (with the separation). A barotropic gas runs on unchanged; another equation of state takes physical constants from them, and starts again', value: 1e5, min: 1e-3, max: 1e11, factor: 2, scale: true },
+    { id: 'sep', label: 'Separation (pc)', title: 'Semi-major axis of the binary’s orbit, in parsecs. It sets only the physical units the readouts are shown in (with m₁). A barotropic gas runs on unchanged; another equation of state takes physical constants from them, and starts again', value: 0.01, min: 1e-9, max: 100, factor: 2, scale: true },
     { id: 'q', label: 'Mass ratio', title: 'Mass of the lighter body over the heavier one. Sets the orbit: changing it starts the run again', value: 1, min: 0.01, max: 1, factor: 1.25 },
     { id: 'ecc', label: 'Eccentricity', title: 'Eccentricity of the binary’s orbit. Changing it starts the run again', value: 0, min: 0, max: 0.8, step: 0.05 },
     { id: 'soft', label: 'Softening and sink radius', title: 'Radius within which each mass’s pull is softened and it takes in gas (at least two cells). Changes take effect without a restart', value: 0.06, min: 0.01, max: 0.5, step: 0.01, live: true },

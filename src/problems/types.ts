@@ -110,6 +110,12 @@ export interface ProblemParam {
    */
   live?: boolean;
   /**
+   * The value only sets the physical scale (Problem.units): nothing in code units depends on
+   * it, so with a barotropic gas a change relabels the readouts and the run carries on. Any
+   * other equation of state takes physical constants from the units, and starts again.
+   */
+  scale?: boolean;
+  /**
    * How the control looks: a number field (the default), a slider with a number field beside
    * it for typing a value, or a checkbox (value 0 or 1).
    */
@@ -131,9 +137,10 @@ export interface Problem {
   /**
    * What one code unit of length, mass and time is in SI, for a setup that stands for
    * something real (units/units.ts). Without it the problem is scale free and shown in code
-   * units. With it, `G` should be codeG(units).
+   * units. With it, `G` should be codeG(units). It may depend on the preset's parameters
+   * (problemUnits below), for a scale-free setup whose physical scale is up to the user.
    */
-  units?: UnitSystem;
+  units?: UnitSystem | ((params: Record<string, number>) => UnitSystem);
   /** What the gas is made of (default: solar, fully ionized); sets the kelvin scale. */
   composition?: Composition;
   /**
@@ -247,3 +254,7 @@ export interface PointMass {
 }
 
 export const all = (b: number): Bc3 => [b, b, b];
+
+/** A preset's physical units for these values of its parameters, or undefined if it is scale free. */
+export const problemUnits = (p: Problem, params: Record<string, number>): UnitSystem | undefined =>
+  typeof p.units === 'function' ? p.units(params) : p.units;
