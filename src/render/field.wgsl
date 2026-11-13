@@ -13,7 +13,7 @@ struct View {
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
   nd: vec4<u32>,   // display volume size (used by the block-grid version); slice and projection map size in w
-  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); slice position in z
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); slice position in z; 1 with isosurfaces on
   sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; slice or projection axis in w
 }
 

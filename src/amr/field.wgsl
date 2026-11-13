@@ -3,7 +3,9 @@
 // and the pass records the range of what it draws.
 //   r = displayed quantity, normalized to [0, 1]
 //   g = volume view: 1 where the gas is dense enough to be shown
-//   b = log10 |displayed quantity|, for the isosurfaces
+//   b = log10 |displayed quantity|, for the isosurfaces: with them on (V.cut.w), interpolated
+//       trilinearly between the centers of leaf cells the size of the one under the voxel, so a
+//       coarse cell does not show as a block of one value (smooth_log() below)
 // The slice and projection views read the leaf cells themselves, at the finest level's
 // resolution (plane() and column() below, render/project.wgsl).
 // Derivatives come from the primitive variables, whose ghost cells hold the neighbors across
@@ -20,7 +22,7 @@ struct View {
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
   nd: vec4<u32>,   // display volume size; slice and projection map size in w
-  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); slice position in z
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); slice position in z; 1 with isosurfaces on
   sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; slice or projection axis in w
 }
 @group(0) @binding(1) var<uniform> V: View;
@@ -132,6 +134,28 @@ fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
   return s;
 }
 
+// log10 |value| at the center of display voxel `gid`, in leaf `f`, of value `own`: trilinear
+// between the centers of the 8 nearest cells of f's size, each taken from the leaf under it
+// (finer, coarser or the same), so the ray-marcher's isosurfaces are smooth across coarse cells.
+// A leaf no larger than a display voxel keeps its own value; so does a solid's neighbor.
+fn smooth_log(f: Leaf, own: f32) -> f32 {
+  let ncell = f32(f.nblk * BS);
+  if (is2d() || ncell >= f32(V.nd.x)) { return own; }
+  let g = f.frac * ncell - 0.5;
+  let i0 = floor(g);
+  let fr = g - i0;
+  var acc = 0.0;
+  for (var c = 0u; c < 8u; c++) {
+    let o = vec3<f32>(f32(c & 1u), f32((c >> 1u) & 1u), f32((c >> 2u) & 1u));
+    // Cell centers past the box are taken from the edge cells, as the boundary does.
+    let at = clamp((i0 + o + 0.5) / ncell, vec3<f32>(0.5 / ncell), vec3<f32>(1.0 - 0.5 / ncell));
+    let q = leaf_value(leaf_at(at));
+    let w = mix(1.0 - fr, fr, o);
+    acc += w.x * w.y * w.z * select(log10_abs(q.x), own, q.solid);
+  }
+  return acc;
+}
+
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
   range_begin(lix);
@@ -142,8 +166,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     // Solid: drawn as a body, not as gas.
     // The volume view draws block outlines as lines.
     let shown = select(0.0, 1.0, log(max(q.rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
-    // b: log10 |value|, for the isosurfaces.
-    textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), log10_abs(q.x), 0.0));
+    // b: log10 |value|, for the isosurfaces (smoothed across coarse cells when they are on).
+    var lg = log10_abs(q.x);
+    if (V.cut.w != 0.0 && !q.solid) { lg = smooth_log(f, lg); }
+    textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), lg, 0.0));
   }
   range_end(lix);
 }

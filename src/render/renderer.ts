@@ -481,7 +481,8 @@ export class Renderer {
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, side]);
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
-    new Float32Array(vb, 32, 3).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, nz > 1 ? v.slicePos : 0]);
+    // With isosurfaces on, the block grid's pass smooths log10 |field| across coarse cells.
+    new Float32Array(vb, 32, 4).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, nz > 1 ? v.slicePos : 0, marched && v.contours ? 1 : 0]);
     const { log, lo, hi } = colorScale(v);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
     new Float32Array(vb, 8, 2).set([lo, hi]);
