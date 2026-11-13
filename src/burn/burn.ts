@@ -66,6 +66,12 @@ export function burnCell(spec: BurnSpec, temperature: (rho: number, e: number) =
  * the reaction zone is refined down to about 30 cells per half-reaction length (or to the
  * finest level). Cold fuel (exp(-Ea / T) tiny) and burned gas (f near 0) ask for nothing, but
  * fuel heating toward a runaway does, before the front reaches it.
+ *
+ * It is capped at 1, the most Lohner's indicator of a sharp shock gives: when the block budget
+ * runs out, the most strongly flagged blocks are refined first (BlockTree.adapt), and uncapped
+ * (about 24 on a coarse block of the reaction zone) the burning would take slots ahead of the
+ * shock. A front that runs into coarse blocks smears its shock, heats the fuel too little to
+ * light it promptly, and can leave unburned cells behind.
  */
 export const BURN_REFINE_SCALE = 64;
 
@@ -76,7 +82,7 @@ export function burnIndicator(spec: BurnSpec, eos: Pick<Eos, 'temperature' | 'so
   if (!(f > 0 && e > 0 && cs > 0)) return 0;
   const T = eos.temperature(rho, e);
   if (!(T > 0)) return 0;
-  return (BURN_REFINE_SCALE * dx * spec.q * f * spec.k * Math.exp(-spec.ea / T) * rho) / (e * cs);
+  return Math.min((BURN_REFINE_SCALE * dx * spec.q * f * spec.k * Math.exp(-spec.ea / T) * rho) / (e * cs), 1);
 }
 
 /**
@@ -97,7 +103,7 @@ fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 {
   if (!(f > 0.0 && e > 0.0 && cs > 0.0 && rho > 0.0)) { return 0.0; }
   let T = eos_temperature(rho, e);
   if (!(T > 0.0)) { return 0.0; }
-  return ${n(BURN_REFINE_SCALE)} * dx * ${n(spec.q)} * f * ${n(spec.k)} * exp(-${n(spec.ea)} / T) * rho / (e * cs);
+  return min(${n(BURN_REFINE_SCALE)} * dx * ${n(spec.q)} * f * ${n(spec.k)} * exp(-${n(spec.ea)} / T) * rho / (e * cs), 1.0);
 }
 `;
 }

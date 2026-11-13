@@ -70,19 +70,26 @@ describe('refinement on the burning', () => {
     const s = z.at(1);
     const T = s.p / s.rho;
     const l = (Math.sqrt((G * s.p) / s.rho) * (s.p / (G - 1))) / (s.rho * Q * s.f * z.K * Math.exp(-25 / T));
-    expect(burnIndicator(spec, eos, s.rho, s.p, s.f, 0.1)).toBeCloseTo((BURN_REFINE_SCALE * 0.1) / l, 9);
+    expect(burnIndicator(spec, eos, s.rho, s.p, s.f, 0.01)).toBeCloseTo((BURN_REFINE_SCALE * 0.01) / l, 9);
   });
 
   it('asks the reaction zone of the steady detonation for about 30 cells per half-reaction length', () => {
     // The shortest burning length, about 2.5 half-reaction lengths just behind the half-burned point.
+    // At a cell size small enough to stay under the cap of 1.
+    const dx = 0.01;
     let peak = 0;
     for (let x = 0; x < 6; x += 0.01) {
       const s = z.at(x);
-      peak = Math.max(peak, burnIndicator(spec, eos, s.rho, s.p, s.f, 1));
+      peak = Math.max(peak, burnIndicator(spec, eos, s.rho, s.p, s.f, dx));
     }
-    const cells = peak / 0.8; // cells per half-reaction length where it crosses the default threshold
+    const cells = peak / dx / 0.8; // cells per half-reaction length where it crosses the default threshold
     expect(cells).toBeGreaterThan(25);
     expect(cells).toBeLessThan(40);
+  });
+
+  it('never outranks a shock (capped at 1)', () => {
+    const s = z.at(1);
+    expect(burnIndicator(spec, eos, s.rho, s.p, s.f, 1)).toBe(1);
   });
 
   it('asks nothing of cold fuel or burned gas', () => {
