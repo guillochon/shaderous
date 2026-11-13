@@ -111,7 +111,154 @@ def rate_features(log_rho, log_T, X):
     return torch.cat(out, dim=1)
 
 
+# The full set ('full' models): every term of aprox13's dY/dt, each reaction forward and
+# backward, screened as the reference burner screens them (screen5). A term is
+# (coefficient, abundance powers {species: power}, power of rho, rate); a rate is a REACLIB
+# rate with its screening pairs, or ("approx", "fwd" or "rev", nucleus, nucleus + alpha,
+# intermediate): aprox13's (a,g) + (a,p)(p,g) combinations up the chain from Mg24.
+ZS = np.array([2, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28], dtype=np.float64)
+SCREEN_PAIRS = {
+    "He4_C12": (2, 4, 6, 12), "He4_O16": (2, 4, 8, 16), "He4_Ne20": (2, 4, 10, 20),
+    "C12_C12": (6, 12, 6, 12), "C12_O16": (6, 12, 8, 16), "O16_O16": (8, 16, 8, 16),
+    "C12_Ne20": (6, 12, 10, 20), "He4_Mg24": (2, 4, 12, 24), "He4_Si28": (2, 4, 14, 28),
+    "He4_He4": (2, 4, 2, 4), "He4_Be8": (2, 4, 4, 8), "He4_S32": (2, 4, 16, 32),
+    "He4_Ar36": (2, 4, 18, 36), "He4_Ca40": (2, 4, 20, 40), "He4_Ti44": (2, 4, 22, 44),
+    "He4_Cr48": (2, 4, 24, 48), "He4_Fe52": (2, 4, 26, 52),
+    "p_Al27": (1, 1, 13, 27), "p_P31": (1, 1, 15, 31), "p_Cl35": (1, 1, 17, 35),
+    "p_K39": (1, 1, 19, 39), "p_Sc43": (1, 1, 21, 43), "p_V47": (1, 1, 23, 47),
+    "p_Mn51": (1, 1, 25, 51), "p_Co55": (1, 1, 27, 55),
+}
+_CHAIN = [("Mg24", "Si28", "Al27", 4), ("Si28", "S32", "P31", 5), ("S32", "Ar36", "Cl35", 6),
+          ("Ar36", "Ca40", "K39", 7), ("Ca40", "Ti44", "Sc43", 8), ("Ti44", "Cr48", "V47", 9),
+          ("Cr48", "Fe52", "Mn51", 10), ("Fe52", "Ni56", "Co55", 11)]
+FULL_TERMS = [
+    (1.0, {0: 1, 1: 1}, 1, ("C12_He4_to_O16_reaclib", ["He4_C12"])),
+    (1.0, {2: 1}, 0, ("O16_to_He4_C12_reaclib", [])),
+    (1.0, {0: 1, 2: 1}, 1, ("O16_He4_to_Ne20_reaclib", ["He4_O16"])),
+    (1.0, {3: 1}, 0, ("Ne20_to_He4_O16_reaclib", [])),
+    (1.0, {0: 1, 3: 1}, 1, ("Ne20_He4_to_Mg24_reaclib", ["He4_Ne20"])),
+    (1.0, {4: 1}, 0, ("Mg24_to_He4_Ne20_reaclib", [])),
+    (0.5, {1: 2}, 1, ("C12_C12_to_He4_Ne20_reaclib", ["C12_C12"])),
+    (1.0, {0: 1, 3: 1}, 1, ("Ne20_He4_to_C12_C12_reaclib", ["He4_Ne20"])),
+    (1.0, {1: 1, 2: 1}, 1, ("O16_C12_to_He4_Mg24_reaclib", ["C12_O16"])),
+    (1.0, {0: 1, 4: 1}, 1, ("Mg24_He4_to_C12_O16_reaclib", ["He4_Mg24"])),
+    (0.5, {2: 2}, 1, ("O16_O16_to_He4_Si28_reaclib", ["O16_O16"])),
+    (1.0, {0: 1, 5: 1}, 1, ("Si28_He4_to_O16_O16_reaclib", ["He4_Si28"])),
+    (1.0, {1: 1, 3: 1}, 1, ("Ne20_C12_to_He4_Si28_reaclib", ["C12_Ne20"])),
+    (1.0, {0: 1, 5: 1}, 1, ("Si28_He4_to_C12_Ne20_reaclib", ["He4_Si28"])),
+    (1 / 6, {0: 3}, 2, ("He4_He4_He4_to_C12_reaclib", ["He4_He4", "He4_Be8"])),
+    (1.0, {1: 1}, 0, ("C12_to_3He4_reaclib", [])),
+] + [t for a, b, mid, i in _CHAIN for t in (
+    (1.0, {0: 1, i: 1}, 1, ("approx", "fwd", a, b, mid)),
+    (1.0, {i + 1: 1}, 0, ("approx", "rev", a, b, mid)))]
+
+
+def _screen_consts():
+    from pynucastro.constants import constants as c
+    co2 = np.cbrt(27 * np.pi**2 * c.q_e**4 * c.m_u_C18 / (2 * c.k * c.hbar**2)) / 3
+    aa = c.q_e**2 / (np.cbrt(3 * c.m_u_C18 / (4 * np.pi)) * c.k)
+    return float(co2), float(aa)
+
+
+CO2, AA_FAC = _screen_consts()
+
+
+def screen5(T, rho, Y, pair):
+    """pynucastro's screen5 (Wallace 1982: Graboske weak, Alastuey-Itoh strong), batched:
+    the log of the factor a pair's rate is multiplied by."""
+    z1, a1, z2, a2 = (float(v) for v in pair)
+    Zt = torch.tensor(ZS, dtype=torch.float32, device=dev)
+    ytot = Y.sum(dim=1)
+    zbar = (Zt * Y).sum(dim=1) / ytot
+    z2bar = (Zt**2 * Y).sum(dim=1) / ytot
+    rr = rho * ytot
+    qlam0z = 1.88e8 / T * torch.sqrt(rr / T * (z2bar + zbar))
+    taufac = CO2 / torch.pow(T, 1 / 3)
+    gamp = AA_FAC / T * torch.pow(rr * zbar, 1 / 3)
+    zs13 = (z1 + z2) ** (1 / 3)
+    zhat = (z1 + z2) ** (5 / 3) - z1 ** (5 / 3) - z2 ** (5 / 3)
+    zhat2 = (z1 + z2) ** (5 / 12) - z1 ** (5 / 12) - z2 ** (5 / 12)
+    lzav = (5 / 3) * math.log(z1 * z2 / (z1 + z2))
+    aznut = (z1**2 * z2**2 * a1 * a2 / (a1 + a2)) ** (1 / 3)
+    fact, bb = 2 ** (1 / 3), z1 * z2
+    gamef = fact * bb / zs13 * gamp
+    tau12 = taufac * aznut
+    alph12 = gamef / tau12
+    cap = alph12 > 1.6
+    alph12 = torch.where(cap, torch.full_like(alph12, 1.6), alph12)
+    gamef = torch.where(cap, 1.6 * tau12, gamef)
+    gamp = torch.where(cap, gamef * zs13 / (fact * bb), gamp)
+    h12w = bb * qlam0z
+    cc = (0.896434 * gamp * zhat - 3.44740 * gamp**0.25 * zhat2
+          - 0.5551 * (torch.log(gamp) + lzav) - 2.996)
+    a3 = alph12**3
+    ss = tau12 * (5 / 32 - alph12 * (0.014 + 0.0128 * alph12))
+    vv = gamef * alph12 * (0.0055 + alph12 * (-0.0098 + 0.0048 * alph12))
+    h12 = cc - a3 * (ss + vv) + torch.log(torch.clamp_min(1.0 - 0.0562 * a3, 0.77))
+    gx, gs = 0.3, 0.8
+    mix = (h12w * (gs - gamef) + h12 * (gamef - gx)) / (gs - gx)
+    h = torch.where(gamef > gx, torch.where(gamef <= gs, mix, h12), h12w)
+    return h.clamp_min(0.0)
+
+
+_SETS = {}
+
+
+def ln_reaclib(name, basis):
+    if name not in _SETS:
+        _SETS[name] = torch.tensor(reaclib_sets(name), dtype=torch.float32, device=dev)
+    return torch.logsumexp(basis @ _SETS[name].T, dim=1)
+
+
+def full_rate_terms(log_rho, log_T, X):
+    """ln of every term of aprox13's dY/dt (FULL_TERMS), screened."""
+    T = torch.pow(10.0, log_T)
+    rho = torch.pow(10.0, log_rho)
+    T9 = (T * 1e-9).clamp(0.01, 10.0)
+    basis = torch.stack([torch.ones_like(T9), 1 / T9, T9 ** (-1 / 3), T9 ** (1 / 3), T9, T9 ** (5 / 3), torch.log(T9)], dim=1)
+    Y = X.clamp_min(0.0) / torch.tensor(A, dtype=torch.float32, device=dev)
+    scr = {k: screen5(T, rho, Y.clamp_min(1e-30), v) for k, v in SCREEN_PAIRS.items()}
+    lnY = torch.log(Y + 1e-30)
+    out = []
+    for coef, powers, nrho, rate in FULL_TERMS:
+        if rate[0] == "approx":
+            _, way, a, b, mid = rate
+            ag = ln_reaclib(f"{a}_He4_to_{b}_reaclib", basis) + scr[f"He4_{a}"]
+            ap = ln_reaclib(f"{a}_He4_to_p_{mid}_reaclib", basis) + scr[f"He4_{a}"]
+            pg = ln_reaclib(f"{mid}_p_to_{b}_reaclib", basis) + scr[f"p_{mid}"]
+            pa = ln_reaclib(f"{mid}_p_to_He4_{a}_reaclib", basis) + scr[f"p_{mid}"]
+            ga = ln_reaclib(f"{b}_to_He4_{a}_reaclib", basis)
+            gp = ln_reaclib(f"{b}_to_p_{mid}_reaclib", basis)
+            both = torch.logaddexp(pg, pa)
+            ln_lam = torch.logaddexp(ag, ap + pg - both) if way == "fwd" else torch.logaddexp(ga, pa + gp - both)
+        else:
+            name, pairs = rate
+            ln_lam = ln_reaclib(name, basis)
+            for k in pairs:
+                ln_lam = ln_lam + scr[k]
+        ln = ln_lam + math.log(coef) + nrho * math.log(10) * log_rho
+        for i, n in powers.items():
+            ln = ln + n * lnY[:, i]
+        out.append(ln[:, None])
+    return torch.cat(out, dim=1)
+
+
+def full_rate_features(log_rho, log_T, X):
+    """full_rate_terms as log10, clipped and scaled to about [-1, 1]."""
+    log10 = full_rate_terms(log_rho, log_T, X) / math.log(10)
+    return (log10.clamp(-30.0, 10.0) + 10.0) / 20.0
+
+
 def features(log_rho, log_T, log_dt, X, rates=False):
+    if rates == "full":
+        return torch.cat([
+            scale(log_rho, LOG_RHO)[:, None],
+            scale(log_T, LOG_T)[:, None],
+            scale(log_dt, LOG_DT)[:, None],
+            X.clamp_min(0.0) ** 0.25,
+            (torch.log10(X.clamp_min(0.0) + 1e-30).clamp(-30.0, 0.0) + 15.0) / 15.0,
+            full_rate_features(log_rho, log_T, X),
+        ], dim=1)
     f = [
         scale(log_rho, LOG_RHO)[:, None],
         scale(log_T, LOG_T)[:, None],
@@ -152,12 +299,12 @@ class Burner(nn.Module):
     def __init__(self, width=64, depth=3, arch="delta"):
         super().__init__()
         self.arch = arch
-        self.rates = arch in ("rates", "rates2", "rates2t", "flow2")
-        self.stages = 2 if arch in ("rates2", "rates2t", "flow2") else 1
+        self.rates = "full" if arch == "flow2f" else arch in ("rates", "rates2", "rates2t", "flow2")
+        self.stages = 2 if arch in ("rates2", "rates2t", "flow2", "flow2f") else 1
         self.take = arch == "rates2t"
-        self.flow = arch == "flow2"
+        self.flow = arch in ("flow2", "flow2f")
         self.width = 41 if self.take else 27 if self.flow else 28   # outputs per step
-        layers, n = [], 16 + (len(RATE_INPUTS) if self.rates else 0)
+        layers, n = [], 16 + (13 + len(FULL_TERMS) if self.rates == "full" else len(RATE_INPUTS) if self.rates else 0)
         for _ in range(depth):
             layers += [nn.Linear(n, width), nn.SiLU()]
             n = width
@@ -241,8 +388,12 @@ class Burner(nn.Module):
         product here costs only the species that make it: Ne20 out of O16 and He, the C12
         left alone (the relaxation took it out of C12 and O16 alike, both its parts, and the
         He that should have made it stayed and burned again every step after)."""
-        loss = X * torch.sigmoid(z[:, 1:14])
-        dY = loss.sum(dim=1, keepdim=True) * torch.softmax(z[:, 14:27], dim=1) - loss
+        # Logits bounded smoothly to +-40 (shares down to 4e-18): unbounded, long training
+        # drove them to thousands, saturated, and pure He stopped burning (the He it lost
+        # handed back to He by a softmax at 1 to within float precision).
+        u = 40.0 * torch.tanh(z[:, 1:27] / 40.0)
+        loss = X * torch.sigmoid(u[:, :13])
+        dY = loss.sum(dim=1, keepdim=True) * torch.softmax(u[:, 13:], dim=1) - loss
         log_k = 5.0 + 5.0 * z[:, 0]
         kdt = torch.pow(10.0, (log_k + log_dt).clamp(max=6.0))
         c = -torch.expm1(-kdt)
