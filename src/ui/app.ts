@@ -110,10 +110,10 @@ side.innerHTML = `
   <details open>
     <summary title="How the gas is drawn">View<span class="sum" id="sum-view"></span></summary>
     <div class="g2">
-      ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice')), '', 'Volume renders the gas as a glowing fog seen through the box; Slice shows one plane of cells')}
+      ${field('Mode', select('mode', opt('volume', 'Volume') + opt('slice', 'Slice') + opt('projection', 'Projection')), '', 'Volume renders the gas as a glowing fog seen through the box; Slice shows one plane of cells; Projection looks through the whole box along an axis: density summed into a column density, any other field averaged along the line of sight, weighted by mass')}
       ${field('Field', select('field', FIELD_MENU.map((g) => `<optgroup label="${g.group}">${g.fields.map((i) => `<option value="${i}" title="${FIELD_TIPS[i]}">${FIELDS[i]}</option>`).join('')}</optgroup>`).join('')), '', 'The quantity the colors show. Fields of either sign (velocity components, heating, vorticity, divergence) are shown on a linear scale centered on zero')}
       ${field('Units', select('units', opt('cgs', 'cgs') + opt('si', 'SI') + opt('code', 'Code')), '', 'Units the readouts are shown in: the color bar, the query tool and the diagnostics. Only a setup that stands for something real (a star, say) has physical units; the others are in code units')}
-      ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), '', 'The axis the slice is perpendicular to')}
+      ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), 'row-axis', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', 'row-slicepos', 'Where the slice cuts the box along its normal')}
     </div>
   </details>
@@ -741,8 +741,10 @@ let unitSys: DisplaySystem = (() => {
 })();
 /** How the current run's values are shown. */
 const units = (): Readout => readout(problemUnits(cfg.problem, cfg.params), cfg.problem.composition, unitSys);
-/** What the field on view measures. */
-const viewMeasure = (): Measure => fieldMeasure(view.field, cfg.eosParams.gamma);
+/** The projection view (a 2D run is always shown as its plane). */
+const projecting = () => view.mode === 'projection' && cfg?.ndim === 3;
+/** What the field on view measures: density projected is a column density, mass per area. */
+const viewMeasure = (): Measure => (projecting() && view.field === 0 ? [1, -2, 0] : fieldMeasure(view.field, cfg.eosParams.gamma));
 
 /**
  * Volume view: the least density drawn, from the slider's place between the smallest and largest
@@ -890,7 +892,12 @@ function syncControls() {
   // A 2D run is always shown as its plane, and has no self-gravity.
   $<HTMLSelectElement>('mode').disabled = two;
   $<HTMLSelectElement>('axis').disabled = two;
-  $<HTMLInputElement>('slicepos').disabled = two;
+  // A projection looks through the whole box: there is no plane to place.
+  $<HTMLInputElement>('slicepos').disabled = two || view.mode === 'projection';
+  const axisLabel = view.mode === 'projection' && !two ? 'Line of sight' : 'Slice normal';
+  const axisRow = $('row-axis');
+  if (axisRow.querySelector('span')!.textContent !== axisLabel) axisRow.querySelector('span')!.textContent = axisLabel;
+  axisRow.title = view.mode === 'projection' && !two ? 'The axis the projection sums along' : 'The axis the slice is perpendicular to';
   const gravity = $<HTMLSelectElement>('gravity');
   for (const o of gravity.options) o.disabled = two && isSelfGravity(o.value as GravityMode);
   const self = isSelfGravity(cfg.gravity);
@@ -932,7 +939,7 @@ function syncControls() {
   unitSel.value = cfg.problem.units ? unitSys : 'code';
   unitSel.disabled = !cfg.problem.units;
   const unitLabel = units().label(viewMeasure());
-  const fieldName = view.field === MASS_FRACTION_FIELD ? `X(${speciesLabel(cfg.problem.species![view.species])})` : FIELDS[view.field];
+  const fieldName = view.field === MASS_FRACTION_FIELD ? `X(${speciesLabel(cfg.problem.species![view.species])})` : projecting() && view.field === 0 ? 'Column density' : FIELDS[view.field];
   $('sum-view').textContent = unitLabel ? `${fieldName}, ${unitLabel}` : fieldName;
   showRange();
   $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
@@ -1003,7 +1010,7 @@ function syncControls() {
   $<HTMLInputElement>('log').checked = view.log;
   $<HTMLInputElement>('opacity').value = String(view.opacity);
   // Opacity belongs to the volume view: a slice is drawn solid.
-  const solid = two || view.mode === 'slice';
+  const solid = two || view.mode !== 'volume';
   $<HTMLInputElement>('opacity').disabled = solid;
   syncOpacity();
   editor.setEditable(!solid);
@@ -1829,8 +1836,8 @@ function bind() {
     const [a, b] = [...pointers.values()];
     return Math.hypot(a.x - b.x, a.y - b.y);
   };
-  // A slice (always, in a 2D run) is panned and zoomed in its plane instead of orbited.
-  const flat = () => view.mode === 'slice' || cfg?.ndim === 2;
+  // A slice or a projection (always, in a 2D run) is panned and zoomed in its plane instead of orbited.
+  const flat = () => view.mode !== 'volume' || cfg?.ndim === 2;
   const clampPan = () => {
     const h = 0.5 / view.zoom;
     view.cx = Math.min(1 - h, Math.max(h, view.cx));
@@ -1999,8 +2006,8 @@ function bind() {
 
 // --- editing strokes ----------------------------------------------------------------------
 type Vec3 = [number, number, number];
-/** A slice (always, in a 2D run) rather than the volume view. */
-const flatView = () => view.mode === 'slice' || cfg?.ndim === 2;
+/** A slice or a projection (always, in a 2D run) rather than the volume view. */
+const flatView = () => view.mode !== 'volume' || cfg?.ndim === 2;
 const phone = window.matchMedia('(max-width: 700px)');
 /**
  * Where the slice sits at zoom 1: the screen pixels across it, and how far its middle sits left
@@ -2623,14 +2630,16 @@ function updateRange(d: Diagnostics) {
   if (!$<HTMLInputElement>('auto').checked) return;
   // The first fields are ranged by the diagnostics reduction; the rest by the display pass,
   // over what it last drew.
+  // A projection is always ranged over the columns it drew.
   const r = renderer.range;
-  const drawn = view.field >= d.ranges.length;
-  if (drawn && (!r || r.field !== view.field)) return;
+  const key = renderer.rangeKey(view);
+  const drawn = projecting() || view.field >= d.ranges.length;
+  if (drawn && (!r || r.key !== key)) return;
   let [lo, hi] = drawn ? [r!.lo, r!.hi] : d.ranges[view.field];
   if (drawn) {
     // A few extreme cells (inside a sink, at the corner of an obstacle) would set the whole
     // range: the top is the 99.5th percentile of |value| when that is lower.
-    const top = renderer.quantile(view.field, 0.995);
+    const top = renderer.quantile(key, 0.995);
     if (top !== null) [lo, hi] = [Math.max(lo, -top), Math.min(hi, top)];
   }
   const log = view.log && !LINEAR_FIELDS.has(view.field);

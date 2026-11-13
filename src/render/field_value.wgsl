@@ -19,6 +19,7 @@ struct Grad {
   drho: vec3<f32>,
 }
 
+const F_DENSITY = 0u;
 const F_VORTICITY = 11u;
 const F_DIVERGENCE = 12u;
 const F_DENSITY_GRADIENT = 13u;

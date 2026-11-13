@@ -112,6 +112,7 @@ export async function computePipeline(
   code: string,
   label: string,
   constants?: Record<string, number>,
+  entryPoint = 'main',
 ): Promise<GPUComputePipeline> {
   const module = device.createShaderModule({ label, code });
   const info = await module.getCompilationInfo();
@@ -126,7 +127,7 @@ export async function computePipeline(
   return device.createComputePipelineAsync({
     label,
     layout: 'auto',
-    compute: { module, entryPoint: 'main', constants },
+    compute: { module, entryPoint, constants },
   });
 }
 

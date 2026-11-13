@@ -1,4 +1,4 @@
-// Volume and slice rendering on the simulation's own device.
+// Volume, slice and projection rendering on the simulation's own device.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { EOS_MODULES } from '../eos/eos';
@@ -19,7 +19,11 @@ function fromKey(k: number): number {
 }
 
 export interface ViewState {
-  mode: 'volume' | 'slice';
+  /**
+   * Projection: along the slice axis, density summed into a column density and any other field
+   * averaged, weighted by mass.
+   */
+  mode: 'volume' | 'slice' | 'projection';
   field: number;
   /** Mass fraction field: which species (in the order of Problem.species) */
   species: number;
@@ -174,6 +178,12 @@ export class Renderer {
   private sampler: GPUSampler;
   private pVolume!: GPURenderPipeline;
   private pSlice!: GPURenderPipeline;
+  private pColumn!: GPURenderPipeline;
+  private gColumn?: GPUBindGroup;
+  /** Projection view: the projected field, one texel per column (render/project.wgsl). */
+  private proj?: GPUTexture;
+  private pProject?: GPUComputePipeline;
+  private gProject: GPUBindGroup[] = [];
   private pLines!: GPURenderPipeline;
   private gLines!: GPUBindGroup;
   private lineBuf: GPUBuffer | null = null;
@@ -194,13 +204,13 @@ export class Renderer {
   /** Range of the field last drawn (render/field_value.wgsl), and its readback. */
   private rangeBuf: GPUBuffer;
   private rangeStage: GPUBuffer;
-  private rangeCopied: number | null = null;
+  private rangeCopied: string | null = null;
   private rangeBusy = false;
   /**
    * The range of the field drawn in a recent frame: its least and greatest values and its
-   * smallest positive value (null if none), for the field it was drawn for.
+   * smallest positive value (null if none), for what it was drawn for (rangeKey()).
    */
-  range: { field: number; lo: number; hi: number; pos: number | null; hist: Uint32Array } | null = null;
+  range: { key: string; lo: number; hi: number; pos: number | null; hist: Uint32Array } | null = null;
 
   constructor(
     gpu: Gpu,
@@ -236,9 +246,10 @@ export class Renderer {
       });
     };
     const lines = this.device.createShaderModule({ code: assemble('render/lines.wgsl'), label: 'lines' });
-    [this.pVolume, this.pSlice, this.pPick, this.pLines] = await Promise.all([
+    [this.pVolume, this.pSlice, this.pColumn, this.pPick, this.pLines] = await Promise.all([
       make('render/raymarch.wgsl'),
       make('render/slice.wgsl'),
+      make('render/column.wgsl'),
       computePipeline(this.device, assemble('render/pick.wgsl'), 'pick'),
       this.device.createRenderPipelineAsync({
         label: 'lines',
@@ -286,24 +297,34 @@ export class Renderer {
         usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
       });
       this.dims = dims.slice();
+      // The projection's map is square: the grid's side along each axis (a 2D run is not projected).
+      this.proj?.destroy();
+      this.proj = d.createTexture({
+        label: 'projection',
+        size: [dims[0], dims[0]],
+        format: 'rgba16float',
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      });
       const res = { 0: this.cam, 1: this.vol.createView(), 2: this.tf.createView(), 3: this.sampler };
       this.gVolume = bindGroup(d, this.pVolume, res);
       this.gSlice = bindGroup(d, this.pSlice, res);
+      this.gColumn = bindGroup(d, this.pColumn, { 0: this.cam, 2: res[2], 3: this.sampler, 4: this.proj.createView() });
       this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
     }
-    this.pField = await computePipeline(d, assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling], diffusion: hydroSlots(sim.cfg).diffusion, comp: hydroSlots(sim.cfg).comp }), 'field');
+    const code = assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling], diffusion: hydroSlots(sim.cfg).diffusion, comp: hydroSlots(sim.cfg).comp });
+    [this.pField, this.pProject] = await Promise.all([computePipeline(d, code, 'field'), computePipeline(d, code, 'projection', undefined, 'project')]);
     // One per parity of the state and of the species (a run without species binds a stand-in).
     this.noSpecies ??= d.createTexture({ label: 'no species', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING });
-    this.gField = [0, 1, 2, 3].map((k) =>
-      bindGroup(d, this.pField!, { 0: sim.paramBuffer, 1: this.viewBuf, 4: this.vol!.createView(), 8: this.rangeBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources(k >> 1, k & 1) }),
-    );
+    const common = (k: number) => ({ 0: sim.paramBuffer, 1: this.viewBuf, 8: this.rangeBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources(k >> 1, k & 1) });
+    this.gField = [0, 1, 2, 3].map((k) => bindGroup(d, this.pField!, { ...common(k), 4: this.vol!.createView() }));
+    this.gProject = [0, 1, 2, 3].map((k) => bindGroup(d, this.pProject!, { ...common(k), 11: this.proj!.createView() }));
     this.range = null;
   }
 
   /** Call after submitting an encoder that encode() wrote to: reads the range back. */
   submitted() {
-    const field = this.rangeCopied;
-    if (field === null || this.rangeBusy) return;
+    const key = this.rangeCopied;
+    if (key === null || this.rangeBusy) return;
     this.rangeCopied = null;
     this.rangeBusy = true;
     this.rangeStage
@@ -312,19 +333,31 @@ export class Renderer {
         const k = new Uint32Array(this.rangeStage.getMappedRange().slice(0));
         this.rangeStage.unmap();
         if (k[0] === 0xffffffff) return; // nothing drawn but obstacles
-        this.range = { field, lo: fromKey(k[0]), hi: fromKey(k[1]), pos: k[2] === 0xffffffff ? null : fromKey(k[2]), hist: k.slice(4) };
+        this.range = { key, lo: fromKey(k[0]), hi: fromKey(k[1]), pos: k[2] === 0xffffffff ? null : fromKey(k[2]), hist: k.slice(4) };
       })
       .catch(() => {})
       .finally(() => (this.rangeBusy = false));
   }
 
+  /** Projection view (a 2D run has nothing to project): the axis summed along, or null. */
+  projectionAxis(v: ViewState): number | null {
+    return v.mode === 'projection' && this.dims[2] > 1 ? v.sliceAxis : null;
+  }
+
+  /** What a range is drawn for: the field, and in the projection view the axis it is summed along. */
+  rangeKey(v: ViewState): string {
+    const axis = this.projectionAxis(v);
+    return axis === null ? String(v.field) : `${v.field}@${axis}`;
+  }
+
   /**
-   * From the last range read back for `field`: the value of |field| below which the share `q`
-   * of the cells drawn lies, to within one histogram bin (a factor of about 2), or null.
+   * From the last range read back for `key` (rangeKey()): the value of |field| below which the
+   * share `q` of the cells (or columns) drawn lies, to within one histogram bin (a factor of
+   * about 2), or null.
    */
-  quantile(field: number, q: number): number | null {
+  quantile(key: string, q: number): number | null {
     const r = this.range;
-    if (!r || r.field !== field) return null;
+    if (!r || r.key !== key) return null;
     let total = 0;
     for (const n of r.hist) total += n;
     if (!total) return null;
@@ -382,11 +415,14 @@ export class Renderer {
     const [nx, ny, nz] = this.dims;
     const vb = new ArrayBuffer(64);
     // Mass fraction: which species, the texels between groups of four, and how many groups.
-    new Uint32Array(vb, 48, 4).set([v.species, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), 0]);
+    // Projection: the axis summed along, and the length of a display voxel along it.
+    const projAxis = this.projectionAxis(v);
+    new Uint32Array(vb, 48, 4).set([v.species, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), projAxis ?? 0]);
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, 0]);
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
-    new Float32Array(vb, 32, 2).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0]);
+    const dl = sim.cfg.problem.box / this.dims[projAxis ?? 2];
+    new Float32Array(vb, 32, 3).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, dl]);
     // A field of either sign is always shown on a linear scale.
     const log = v.log && !LINEAR_FIELDS.has(v.field);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
@@ -422,13 +458,21 @@ export class Renderer {
     empty.set([0xffffffff, 0, 0xffffffff, 0]);
     d.queue.writeBuffer(this.rangeBuf, 0, empty);
     const cp2 = enc.beginComputePass();
-    cp2.setPipeline(this.pField);
-    cp2.setBindGroup(0, this.gField[2 * sim.cur + sim.speciesCur]);
-    cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
+    const parity = 2 * sim.cur + sim.speciesCur;
+    if (projAxis !== null) {
+      // The map's side along each screen axis is the grid's side (the grid is a cube).
+      cp2.setPipeline(this.pProject!);
+      cp2.setBindGroup(0, this.gProject[parity]);
+      cp2.dispatchWorkgroups(Math.ceil(nx / 16), Math.ceil(nx / 8));
+    } else {
+      cp2.setPipeline(this.pField);
+      cp2.setBindGroup(0, this.gField[parity]);
+      cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
+    }
     cp2.end();
     if (!this.rangeBusy && this.rangeCopied === null) {
       enc.copyBufferToBuffer(this.rangeBuf, 0, this.rangeStage, 0, RANGE_WORDS * 4);
-      this.rangeCopied = v.field;
+      this.rangeCopied = this.rangeKey(v);
     }
 
     const rp = enc.beginRenderPass({
@@ -438,8 +482,8 @@ export class Renderer {
     });
     // A 2D run has nothing to ray-march: always show the plane.
     const volume = v.mode === 'volume' && nz > 1;
-    rp.setPipeline(volume ? this.pVolume : this.pSlice);
-    rp.setBindGroup(0, volume ? this.gVolume : this.gSlice);
+    rp.setPipeline(volume ? this.pVolume : projAxis !== null ? this.pColumn : this.pSlice);
+    rp.setBindGroup(0, volume ? this.gVolume : projAxis !== null ? this.gColumn! : this.gSlice);
     rp.draw(3);
     if (volume) this.drawLines(rp, sim, v.showBlocks);
     rp.end();

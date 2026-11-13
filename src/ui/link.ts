@@ -219,7 +219,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
     if (v !== undefined) out.params[p.id] = v;
   }
 
-  put(out.view, 'mode', pick<ViewState['mode']>('mode', ['volume', 'slice']));
+  put(out.view, 'mode', pick<ViewState['mode']>('mode', ['volume', 'slice', 'projection']));
   const field = num('field', 0, FIELDS.length - 1);
   put(out.view, 'field', field === undefined ? undefined : Math.round(field));
   const species = num('species', 0, (problemById(problem).species?.length ?? 1) - 1);

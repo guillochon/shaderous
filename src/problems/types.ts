@@ -233,7 +233,7 @@ export interface Problem {
    */
   toolScale?: { rho: number; v: number };
   /** Default view; `axis` is the slice normal in 3D (0 x, 1 y, 2 z), `pitch` the camera elevation in radians. */
-  view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice'; axis?: number; pitch?: number };
+  view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice' | 'projection'; axis?: number; pitch?: number };
   /** Returns the initial primitive state as a function of position. */
   init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>): (x: number, y: number, z: number) => Prim;
 }
