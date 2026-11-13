@@ -427,7 +427,7 @@ const slider = (id: string, label: string, title: string, min: number, max: numb
   `<label class="scrub" id="tp-${id}-row" title="${title}"><input id="tp-${id}" type="range" min="${min}" max="${max}" step="0.01" aria-label="${title}" /><span>${label}<output id="tp-${id}-out"></output></span></label>`;
 $('tools').innerHTML =
   TOOLS.map((t) => `<button id="tool-${t.kind}" aria-pressed="false" aria-label="${t.label}" title="${t.title}">${t.icon}</button>`).join('') +
-  `<div id="tool-params" hidden>
+  `<div id="tool-params"><div id="tool-params-in">
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the center', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
@@ -438,7 +438,7 @@ $('tools').innerHTML =
     <div id="tool-shapes">${SHAPES.map((q) => `<button id="shape-${q.mode}" aria-pressed="false" aria-label="${q.mode}" title="${q.title}">${q.icon}</button>`).join('')}</div>
     <button id="tool-erase" aria-pressed="false" title="Erase: the shape drawn turns obstacle back into gas, at rest">Erase</button>
     <button id="tool-clear" title="Remove every source and sink">Clear</button>
-  </div>`;
+  </div></div>`;
 
 function syncTools() {
   // A barotropic gas has no temperature of its own to change.
@@ -456,7 +456,19 @@ function syncTools() {
     b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : 'The barotropic equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
-  $('tool-params').hidden = tool === null || tool === 'query';
+  // The tool's settings slide out under its own button, pushing the buttons below it down.
+  const panel = $('tool-params');
+  const open = tool !== null && tool !== 'query';
+  if (open) {
+    const b = $(`tool-${tool}`);
+    if (b.nextElementSibling !== panel) {
+      // From another tool's: shut, move under this one, and open from there.
+      panel.classList.remove('open');
+      b.after(panel);
+      void panel.offsetHeight; // lay out the shut panel first, so the opening animates
+    }
+  }
+  panel.classList.toggle('open', open);
   if (tool !== 'query') hideCellPop();
   if (tool === null || tool === 'query') {
     $('brush').style.display = 'none';
@@ -497,13 +509,39 @@ function syncTools() {
   $('tool-erase').setAttribute('aria-pressed', String(obstacleErase));
   if (shapes) drawBrush();
   else if (!stroke) $('brush').style.display = 'none'; // until the pointer next moves
+  const mr = massRange();
+  if (mr && tool === 'sink' && q.mass > 0) q.mass = Math.min(mr.hi, Math.max(mr.lo, q.mass));
   for (const k of ['size', 'softness', 'amount', 'mass'] as const) {
     const el = $<HTMLInputElement>(`tp-${k}`);
-    el.value = String(q[k]);
-    el.style.setProperty('--p', `${(100 * (q[k] - +el.min)) / (+el.max - +el.min)}%`);
+    const log = k === 'mass' && mr;
+    if (k === 'mass') [el.min, el.max, el.step] = log ? ['0', '1', '0.001'] : ['0', '2', '0.01'];
+    const pos = log ? massPos(q.mass, mr) : q[k];
+    el.value = String(pos);
+    el.style.setProperty('--p', `${(100 * (pos - +el.min)) / (+el.max - +el.min)}%`);
   }
   showToolValues();
 }
+
+/**
+ * With point masses in the run, the sink tool's Mass slider is logarithmic: from 1e-3 of the
+ * lightest to 1e3 times the heaviest, with exactly 0 (a sink without a mass) at its left end.
+ * Without any it is linear, from 0 to twice the gas in the box. Both in multiples of that gas,
+ * as the tool's setting is. The last range read is kept while a new readout is awaited (just
+ * after a mass is placed there is none).
+ */
+let lastMassRange: { lo: number; hi: number } | null = null;
+function massRange(): { lo: number; hi: number } | null {
+  const d = lastDiag;
+  if (!d) return lastMassRange;
+  const gas = d.mass > 0 ? d.mass : cfg.problem.box ** cfg.ndim;
+  const ms = cfg.G > 0 ? d.masses.map((m) => m.gm / cfg.G / gas).filter((m) => m > 0) : [];
+  lastMassRange = ms.length ? { lo: 1e-3 * Math.min(...ms), hi: 1e3 * Math.max(...ms) } : null;
+  return lastMassRange;
+}
+/** Position (0 to 1) of a mass on the logarithmic slider, and the mass at a position. */
+const massPos = (x: number, r: { lo: number; hi: number }) =>
+  x <= 0 ? 0 : Math.min(1, Math.max(0.001, Math.log(x / r.lo) / Math.log(r.hi / r.lo)));
+const massAt = (p: number, r: { lo: number; hi: number }) => (p <= 0 ? 0 : r.lo * (r.hi / r.lo) ** p);
 
 type ToolSlider = 'size' | 'softness' | 'amount' | 'mass' | 'rhoc';
 const TOOL_SLIDERS: ToolSlider[] = ['size', 'softness', 'amount', 'mass', 'rhoc'];
@@ -550,7 +588,7 @@ function showToolValues() {
   for (const k of TOOL_SLIDERS) {
     const { unit } = toolReadout(k);
     const v = toolShown(k);
-    $(`tp-${k}-out`).textContent = unit === '%' ? `${Math.round(v)}%` : unit === '\u00d7' || k === 'softness' ? `${v.toFixed(2)}${unit}` : `${fmt3(v)}${unit}`;
+    $(`tp-${k}-out`).textContent = unit === '%' ? `${Math.round(v)}%` : k === 'softness' ? v.toFixed(2) : `${fmt3(v)}${unit}`;
   }
 }
 
@@ -583,7 +621,10 @@ function editToolValue(k: ToolSlider) {
     if (!apply || !Number.isFinite(v) || tool === null || tool === 'query') return;
     const x = v / toolReadout(k).factor;
     if (k === 'rhoc' && !(x > 0)) return;
-    const setting = Math.min(+range.max, Math.max(+range.min, k === 'rhoc' ? Math.log10(x) : x));
+    const mr = k === 'mass' ? massRange() : null;
+    const setting = mr
+      ? (x <= 0 ? 0 : Math.min(mr.hi, Math.max(mr.lo, x)))
+      : Math.min(+range.max, Math.max(+range.min, k === 'rhoc' ? Math.log10(x) : x));
     if (k === 'rhoc') starLogRho = setting;
     else toolParams[tool][k] = setting;
     syncTools();
@@ -640,7 +681,9 @@ $('tool-erase').addEventListener('click', () => {
 for (const k of ['size', 'softness', 'amount', 'mass'] as const) {
   $(`tp-${k}`).addEventListener('input', () => {
     if (!tool) return;
-    toolParams[tool][k] = +$<HTMLInputElement>(`tp-${k}`).value;
+    const v = +$<HTMLInputElement>(`tp-${k}`).value;
+    const mr = k === 'mass' ? massRange() : null;
+    toolParams[tool][k] = mr ? massAt(v, mr) : v;
     syncTools();
   });
 }
