@@ -26,7 +26,7 @@ import { BurnPass, burnIndicator, burnIndices, flagBurnSlot } from '../burn/burn
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
-import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, type GridBox, type RegridOp } from './tree';
+import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
 
@@ -1326,13 +1326,14 @@ export class AmrSim implements Simulation {
     const m = (this.n0 / BS) << this.levels;
     const boxes: GridBox[] = [];
     const grid = this.tree.indexGrid(boxes) as Uint32Array<ArrayBuffer>;
-    for (const { o, s } of boxes)
-      d.queue.writeTexture(
-        { texture: this.idx, origin: o },
-        grid,
-        { offset: ((o[2] * m + o[1]) * m + o[0]) * 4, bytesPerRow: m * 4, rowsPerImage: m },
-        s,
-      );
+    // Each box is copied out on its own and written from its start. Writing it straight from
+    // the whole grid, at an offset with the grid's row and image strides, is valid WebGPU, but
+    // Firefox drew stale blocks that way (the index kept slots the re-mesh had reused), while
+    // Chrome drew the same state correctly.
+    for (const { o, s } of boxes) {
+      const data = gridBox(grid, m, o, s) as Uint32Array<ArrayBuffer>;
+      d.queue.writeTexture({ texture: this.idx, origin: o }, data, { offset: 0, bytesPerRow: s[0] * 4, rowsPerImage: s[1] }, s);
+    }
   }
 
   // ---------------------------------------------------------------- stepping

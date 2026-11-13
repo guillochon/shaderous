@@ -12,6 +12,21 @@ export const PAD = BS + 2 * NG; // stored cells per block side, in the atlas
 export const BT_STRIDE = 32; // ints per block in the block table
 export const RG_STRIDE = 12; // ints per block in the regrid table
 /** A box of index-grid cells: origin and size, (x, y, z). */
+/**
+ * The cells of box (origin o, size s) of an m x m (x m) index grid, packed x fastest from the
+ * start of their own array (the grid itself when the box is all of it).
+ */
+export function gridBox(grid: Uint32Array, m: number, o: readonly number[], s: readonly number[]): Uint32Array {
+  if (s[0] * s[1] * s[2] === grid.length) return grid;
+  const out = new Uint32Array(s[0] * s[1] * s[2]);
+  for (let k = 0; k < s[2]; k++)
+    for (let j = 0; j < s[1]; j++) {
+      const from = ((o[2] + k) * m + o[1] + j) * m + o[0];
+      out.set(grid.subarray(from, from + s[0]), (k * s[1] + j) * s[0]);
+    }
+  return out;
+}
+
 export interface GridBox {
   o: [number, number, number];
   s: [number, number, number];

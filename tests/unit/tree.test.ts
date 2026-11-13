@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BlockTree, BT_STRIDE, FLAG_LEAF, NB_COARSE, RG_COPY, RG_PROLONG, RG_RESTRICT, type Block, type GridBox } from '../../src/amr/tree';
+import { BlockTree, BT_STRIDE, gridBox, FLAG_LEAF, NB_COARSE, RG_COPY, RG_PROLONG, RG_RESTRICT, type Block, type GridBox } from '../../src/amr/tree';
 
 const periodic = [0, 0, 0];
 const outflow = [1, 1, 1];
@@ -80,10 +80,13 @@ describe('block tree', () => {
         let cells = 0;
         for (const { o, s } of boxes) {
           cells += s[0] * s[1] * s[2];
-          for (let z = o[2]; z < o[2] + s[2]; z++)
-            for (let y = o[1]; y < o[1] + s[1]; y++) {
-              const at = (z * m + y) * m + o[0];
-              copy.set(g.subarray(at, at + s[0]), at);
+          // As the GPU texture is written: each box packed on its own (gridBox), from its start.
+          const data = gridBox(g, m, o, s);
+          expect(data.length).toBe(s[0] * s[1] * s[2]);
+          for (let k = 0; k < s[2]; k++)
+            for (let j = 0; j < s[1]; j++) {
+              const at = ((o[2] + k) * m + o[1] + j) * m + o[0];
+              copy.set(data.subarray((k * s[1] + j) * s[0], (k * s[1] + j + 1) * s[0]), at);
             }
         }
         if (round && cells < g.length) partial++;
