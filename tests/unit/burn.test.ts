@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { burnCell, cjSpeed, znd } from '../../src/burn/burn';
+import { BURN_REFINE_SCALE, burnCell, burnIndicator, cjSpeed, znd } from '../../src/burn/burn';
+import { defaultEosParams, makeEos } from '../../src/eos/eos';
 
 // The standard parameters of detonation numerics: gamma 1.2, q 50, unburned rho = p = 1.
 const G = 1.2;
@@ -56,5 +57,37 @@ describe('burnCell', () => {
     const q0 = { ...spec, q: 1e-9 };
     const [f] = burnCell(q0, T, 1, 1, 100, 0.01);
     expect(f).toBeCloseTo(Math.exp(-30 * Math.exp(-25 / 20) * 0.01), 9);
+  });
+});
+
+describe('refinement on the burning', () => {
+  const D = cjSpeed(G, Q);
+  const z = znd(G, Q, 25, D);
+  const spec = { fuel: 'fuel', ash: 'ash', q: Q, ea: 25, k: z.K };
+  const eos = makeEos('ideal', { ...defaultEosParams(), gamma: G });
+
+  it('is BURN_REFINE_SCALE cells over the burning length c_s e / (rho q f k)', () => {
+    const s = z.at(1);
+    const T = s.p / s.rho;
+    const l = (Math.sqrt((G * s.p) / s.rho) * (s.p / (G - 1))) / (s.rho * Q * s.f * z.K * Math.exp(-25 / T));
+    expect(burnIndicator(spec, eos, s.rho, s.p, s.f, 0.1)).toBeCloseTo((BURN_REFINE_SCALE * 0.1) / l, 9);
+  });
+
+  it('asks the reaction zone of the steady detonation for about 30 cells per half-reaction length', () => {
+    // The shortest burning length, about 2.5 half-reaction lengths just behind the half-burned point.
+    let peak = 0;
+    for (let x = 0; x < 6; x += 0.01) {
+      const s = z.at(x);
+      peak = Math.max(peak, burnIndicator(spec, eos, s.rho, s.p, s.f, 1));
+    }
+    const cells = peak / 0.8; // cells per half-reaction length where it crosses the default threshold
+    expect(cells).toBeGreaterThan(25);
+    expect(cells).toBeLessThan(40);
+  });
+
+  it('asks nothing of cold fuel or burned gas', () => {
+    expect(burnIndicator(spec, eos, 1, 1, 1, 1)).toBeLessThan(1e-6);
+    expect(burnIndicator(spec, eos, 1.7, 20, 1e-9, 1)).toBeLessThan(1e-4);
+    expect(burnIndicator(spec, eos, 1, 1, 0, 1)).toBe(0);
   });
 });

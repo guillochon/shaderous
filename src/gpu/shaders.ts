@@ -16,6 +16,7 @@ const DEFAULT_SLOTS: Slots = {
   comp: 'eos/comp_off.wgsl',
   comp_src: 'amr/comp_src_off.wgsl',
   flag_species: 'fn species_indicator(c: vec3<i32>) -> f32 { return 0.0; }\n',
+  flag_burn: 'fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 { return 0.0; }\n',
 };
 
 export function assemble(entry: string, slots: Slots = {}): string {

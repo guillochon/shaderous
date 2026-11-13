@@ -283,7 +283,16 @@ function detonationLeaves(c: LeafCells, X: Float32Array[]) {
   const one = row.filter((r, i) => i === 0 || r.x !== row[i - 1].x);
   const front = frontOf(one.map((r) => r.x), one.map((r) => r.p));
   const behind = one.filter((r) => front - r.x > 8 && front - r.x < 15);
-  return { front, fuelLeft: behind.reduce((a, r) => a + r.f, 0) / Math.max(behind.length, 1) };
+  // Cells of the reaction zone (1% to 99% of the fuel burned) that are not at the finest level.
+  const finest = c.dx.reduce((a, v) => Math.min(a, v), Infinity);
+  let zone = 0;
+  let zoneCoarse = 0;
+  for (let q = 0; q < c.count; q++)
+    if (X[0][q] > 0.01 && X[0][q] < 0.99) {
+      zone++;
+      if (c.dx[q] > 1.5 * finest) zoneCoarse++;
+    }
+  return { front, fuelLeft: behind.reduce((a, r) => a + r.f, 0) / Math.max(behind.length, 1), zoneCoarse: zoneCoarse / Math.max(zone, 1) };
 }
 
 /** Uniform-grid index of a leaf cell (for meshes whose leaves all sit at the finest level). */
@@ -1090,7 +1099,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-detonation',
     name: 'Adaptive mesh: detonation at the Chapman-Jouguet speed (2D, 512 finest, 2 levels)',
     criterion:
-      'The detonation test on a mesh three-quarters coarser away from the front: from t = 1 to t = 3 the front runs within 1% of the Chapman-Jouguet speed 6.809, the gas 8 to 15 units behind it has burned all but 1e-3 of its fuel, and the mesh was rebuilt as the front moved',
+      'The detonation test on a mesh three-quarters coarser away from the front: from t = 1 to t = 3 the front runs within 1% of the Chapman-Jouguet speed 6.809, the gas 8 to 15 units behind it has burned all but 1e-3 of its fuel, the whole reaction zone (1% to 99% burned) is at the finest level, and the mesh was rebuilt as the front moved',
     async run(gpu) {
       return withAmr(gpu, detonationStable, 512, { ndim: 2, amrLevels: 2, params: { ea: 25, overdrive: 1, shockburn: 1 } }, async (sim) => {
         const at = async (t: number) => {
@@ -1104,8 +1113,11 @@ export const TESTS: TestDef[] = [
         const speed = (b.front - a.front) / 2;
         const err = speed / DETONATION_CJ_SPEED - 1;
         return {
-          pass: Math.abs(err) < 0.01 && b.fuelLeft < 1e-3 && sim.regrids >= 1,
-          metrics: { front_speed: speed, cj_speed: DETONATION_CJ_SPEED, relative_error: err, fuel_left_behind: b.fuelLeft, regrids: sim.regrids, leaf_blocks: sim.tree.stats().leaves },
+          pass: Math.abs(err) < 0.01 && b.fuelLeft < 1e-3 && sim.regrids >= 1 && a.zoneCoarse === 0 && b.zoneCoarse === 0,
+          metrics: {
+            front_speed: speed, cj_speed: DETONATION_CJ_SPEED, relative_error: err, fuel_left_behind: b.fuelLeft, regrids: sim.regrids, leaf_blocks: sim.tree.stats().leaves,
+            reaction_zone_coarse_t1: a.zoneCoarse, reaction_zone_coarse_t3: b.zoneCoarse,
+          },
         };
       });
     },

@@ -8,6 +8,7 @@
 import { bindGroup, computePipeline, type Bindable } from '../gpu/device';
 import { assemble } from '../gpu/shaders';
 import { speciesConst } from '../species/species';
+import type { Eos } from '../eos/eos';
 
 /** What a problem burns, from its parameters (Problem.burn). */
 export interface BurnSpec {
@@ -53,6 +54,52 @@ export function burnCell(spec: BurnSpec, temperature: (rho: number, e: number) =
     left -= h;
   }
   return [f, e];
+}
+
+/**
+ * Refinement on the burning (amr/flag.wgsl, <flag_burn>). The burning length is how far sound
+ * travels while the burn releases the cell's internal energy at its present rate,
+ * l = c_s e / (rho q f k), with e the internal energy density and k = K exp(-Ea / T). The
+ * indicator is BURN_REFINE_SCALE dx / l: a block is refined while l is under 80 of its cells
+ * (the default threshold, 0.8) and may merge once l is over 320. In the steady detonation
+ * l bottoms out at about 2.5 half-reaction lengths, a little behind the half-burned point, so
+ * the reaction zone is refined down to about 30 cells per half-reaction length (or to the
+ * finest level). Cold fuel (exp(-Ea / T) tiny) and burned gas (f near 0) ask for nothing, but
+ * fuel heating toward a runaway does, before the front reaches it.
+ */
+export const BURN_REFINE_SCALE = 64;
+
+/** The burning's refinement indicator at one cell of cell size dx, as amr/flag.wgsl. */
+export function burnIndicator(spec: BurnSpec, eos: Pick<Eos, 'temperature' | 'soundSpeed' | 'eintFromP'>, rho: number, p: number, f: number, dx: number): number {
+  const e = eos.eintFromP(rho, p);
+  const cs = eos.soundSpeed(rho, p);
+  if (!(f > 0 && e > 0 && cs > 0)) return 0;
+  const T = eos.temperature(rho, e);
+  if (!(T > 0)) return 0;
+  return (BURN_REFINE_SCALE * dx * spec.q * f * spec.k * Math.exp(-spec.ea / T) * rho) / (e * cs);
+}
+
+/**
+ * The <flag_burn> slot of amr/flag.wgsl: burn_indicator() from the primitives (W1, W2: rho;
+ * p, c_s, scalar, e_int) and the fuel's mass fraction in the species with ghosts (SXF, from
+ * <flag_species>), with the burn's constants written in.
+ */
+export function flagBurnSlot(spec: BurnSpec, species: readonly string[] | undefined): string {
+  const [fi] = burnIndices(spec, species);
+  const n = (x: number) => (Number.isInteger(x) ? x.toFixed(1) : String(x));
+  return `#include <eos>
+fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 {
+  let rho = textureLoad(W1, c, 0).x;
+  let w2 = textureLoad(W2, c, 0);
+  let f = textureLoad(SXF, c + vec3<i32>(0, 0, ${fi >> 2} * FLAG_SP_DEPTH), 0)[${fi & 3}];
+  let e = w2.w;
+  let cs = w2.y;
+  if (!(f > 0.0 && e > 0.0 && cs > 0.0 && rho > 0.0)) { return 0.0; }
+  let T = eos_temperature(rho, e);
+  if (!(T > 0.0)) { return 0.0; }
+  return ${n(BURN_REFINE_SCALE)} * dx * ${n(spec.q)} * f * ${n(spec.k)} * exp(-${n(spec.ea)} / T) * rho / (e * cs);
+}
+`;
 }
 
 /** Bytes of the Burn uniform of hydro/burn.wgsl. */

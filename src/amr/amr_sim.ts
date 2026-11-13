@@ -22,7 +22,7 @@ import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
-import { BurnPass } from '../burn/burn';
+import { BurnPass, burnIndicator, burnIndices, flagBurnSlot } from '../burn/burn';
 import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
@@ -420,7 +420,11 @@ export class AmrSim implements Simulation {
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     // With species the indicator also reads their fractions, ghosts included (amr/species_assemble.wgsl).
-    sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl', { flag_species: flagSpeciesSlot(sim.speciesGroups, sim.speciesDepth) }), 'amr flag');
+    // With burning, also how fast it burns (burn/burn.ts).
+    const burn = burnSpec(cfg);
+    const flagSlots: Record<string, string> = { flag_species: flagSpeciesSlot(sim.speciesGroups, sim.speciesDepth) };
+    if (burn) Object.assign(flagSlots, { flag_burn: flagBurnSlot(burn, cfg.problem.species), eos: hydroSlots(cfg).eos });
+    sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl', flagSlots), 'amr flag');
     sim.gFlag = bindGroup(d, sim.pFlag, {
       0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf,
       ...((sim.speciesX ? { 5: v(sim.speciesX) } : {}) as Record<number, GPUTextureView>),
@@ -1039,12 +1043,17 @@ export class AmrSim implements Simulation {
       for (const s of strides) j = Math.max(j, Math.abs(q[a + s] - q[a]), Math.abs(q[a] - q[a - s]));
       return SPECIES_JUMP_SCALE * j;
     };
+    // How fast it burns, against the block's cells (burnIndicator, as amr/flag.wgsl).
+    const burn = burnSpec(this.cfg);
+    const fuel = burn ? xs[burnIndices(burn, this.cfg.problem.species)[0]] : null;
+    const eos = burn ? makeEos(this.cfg.eos, this.cfg.eosParams) : null;
     for (let k = three ? sub : 0; k < (three ? m - sub : 1); k++)
       for (let j = sub; j < m - sub; j++)
         for (let i = sub; i < m - sub; i++) {
           const a = (k * m + j) * m + i;
           ind = Math.max(ind, lohner(rho, a), lohner(pr, a));
           for (const x of xs) ind = Math.max(ind, jump(x, a));
+          if (fuel) ind = Math.max(ind, burnIndicator(burn!, eos!, rho[a], pr[a], fuel[a], dx));
         }
     return ind;
   }
