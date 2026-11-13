@@ -1,6 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
-import { decodeLink, encodeLink, viewDefaults, MAX_ZOOM, type LinkOverrides } from './link';
+import { decodeLink, encodeLink, viewDefaults, MAX_CONTOURS, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
@@ -115,6 +115,7 @@ side.innerHTML = `
       ${field('Units', select('units', opt('cgs', 'cgs') + opt('si', 'SI') + opt('code', 'Code')), '', 'Units the readouts are shown in: the color bar, the query tool and the diagnostics. Only a setup that stands for something real (a star, say) has physical units; the others are in code units')}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), 'row-axis', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', 'row-slicepos', 'Where the slice cuts the box along its normal')}
+      ${field('Contours', number('ncont', `min="1" max="${MAX_CONTOURS}" step="1"`), 'row-ncont', 'How many contour lines the slice and projection views draw when Contours is on (beside the color bar): evenly spaced in log |value| between the ends of the displayed range, the ends themselves left out. A range reaching zero or below is contoured in |value| over the four decades under its largest magnitude')}
     </div>
   </details>
 
@@ -252,6 +253,7 @@ $('colorbar').innerHTML = `
     <label class="check" title="The range follows the data"><input id="auto" type="checkbox" checked />Auto</label>
     <label class="check" title="Logarithmic color scale"><input id="log" type="checkbox" />Log</label>
     <label class="check" title="Outline the blocks of an adaptive mesh, in the slice and the volume view"><input id="blocks" type="checkbox" checked />Blocks</label>
+    <label class="check" title="Contour lines in the slice and projection views, evenly spaced in log |value| across the displayed range (how many: View, Contours)"><input id="contours" type="checkbox" />Contours</label>
   </div>
   <select id="cmap" title="Color map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
   <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="1" max="300" step="1" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
@@ -888,6 +890,12 @@ function syncControls() {
   levels.disabled = !amrOk;
   for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n) || (+o.value > 0 && !amrFits(cfg.n, cfg.ndim, +o.value));
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
+  // Contours belong to the slice and projection views (always, in a 2D run).
+  const contourable = two || view.mode !== 'volume';
+  $<HTMLInputElement>('contours').checked = view.contours;
+  $<HTMLInputElement>('contours').disabled = !contourable;
+  $<HTMLInputElement>('ncont').value = String(view.nContours);
+  $<HTMLInputElement>('ncont').disabled = !contourable || !view.contours;
   $<HTMLInputElement>('blocks').disabled = cfg.amrLevels === 0;
   // A 2D run is always shown as its plane, and has no self-gravity.
   $<HTMLSelectElement>('mode').disabled = two;
@@ -1519,6 +1527,14 @@ function bind() {
     build(id, n, ndim, levels, true);
   });
   on('blocks', (el) => (view.showBlocks = el.checked));
+  on('contours', (el) => {
+    view.contours = el.checked;
+    syncControls();
+  });
+  // The lines follow the count as it is typed or stepped; leaving the field tidies what it shows.
+  const contourCount = (el: HTMLInputElement) => Math.min(MAX_CONTOURS, Math.max(1, Math.round(numOr(el, view.nContours))));
+  on('ncont', (el) => (view.nContours = contourCount(el)), 'input');
+  on('ncont', (el) => (el.value = String((view.nContours = contourCount(el)))));
   $<HTMLInputElement>('autoplay').checked = autoplay;
   on('autoplay', (el) => {
     autoplay = el.checked;

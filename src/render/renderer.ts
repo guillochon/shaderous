@@ -47,6 +47,12 @@ export interface ViewState {
   cy: number;
   /** Outline the blocks of an adaptive mesh, in the slice view and the volume view. */
   showBlocks: boolean;
+  /**
+   * Slice and projection views: contour lines, nContours of them, evenly spaced in log10 |field|
+   * inside the displayed range (contourRange()).
+   */
+  contours: boolean;
+  nContours: number;
 }
 
 /** Floats per line vertex: position (box units, centered), color with alpha. */
@@ -140,7 +146,20 @@ export const defaultView = (): ViewState => ({
   cx: 0.5,
   cy: 0.5,
   showBlocks: true,
+  contours: false,
+  nContours: 8,
 });
+
+/**
+ * The range of |field|, in log10, that the contour levels divide evenly: the displayed range
+ * when it is positive, else (a range reaching zero or below) the four decades under its largest
+ * magnitude.
+ */
+export function contourRange(lo: number, hi: number): [number, number] {
+  const top = Math.max(Math.abs(lo), Math.abs(hi), 1e-30);
+  const bottom = lo > 0 ? Math.min(lo, hi) : top * 1e-4;
+  return [Math.log10(bottom), Math.log10(lo > 0 ? Math.max(lo, hi) : top)];
+}
 
 /** The orbit camera: around the box center (the box is [-0.5, 0.5]^3), z up. */
 export function cameraFrame(v: ViewState, aspect: number) {
@@ -223,7 +242,7 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 112, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
@@ -463,6 +482,7 @@ export class Renderer {
         tan, aspect, v.opacity, samples,
         v.sliceAxis, v.slicePos, nx, nz,
         v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,
+        v.contours ? Math.max(1, Math.round(v.nContours)) : 0, ...contourRange(v.lo, v.hi), 0,
       ]),
     );
 

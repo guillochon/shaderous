@@ -12,6 +12,8 @@ import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer
 
 /** Largest magnification of the slice view. */
 export const MAX_ZOOM = 64;
+/** Most contour lines the slice and projection views draw. */
+export const MAX_CONTOURS = 40;
 
 /** What a fresh visit shows. */
 export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 1024 };
@@ -54,9 +56,9 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy'] as const;
+const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'nContours'] as const;
 const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy',
+  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont',
 };
 
 export function encodeLink(s: LinkState): URLSearchParams {
@@ -121,6 +123,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   for (const k of VIEW_NUMBERS) num(VIEW_KEYS[k], view[k], dv[k]);
   str('log', flag(view.log), flag(dv.log));
   str('blocks', flag(view.showBlocks), flag(dv.showBlocks));
+  str('contours', flag(view.contours), flag(dv.contours));
   if (!s.auto) {
     q.set('lo', fmt(view.lo));
     q.set('hi', fmt(view.hi));
@@ -237,6 +240,9 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.view, 'cy', num('cy', 0, 1));
   put(out.view, 'log', bool('log'));
   put(out.view, 'showBlocks', bool('blocks'));
+  put(out.view, 'contours', bool('contours'));
+  const ncont = num('ncont', 1, MAX_CONTOURS);
+  put(out.view, 'nContours', ncont === undefined ? undefined : Math.round(ncont));
   const lo = num('lo');
   const hi = num('hi');
   if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi)) {
