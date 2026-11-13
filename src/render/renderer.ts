@@ -242,7 +242,7 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 144, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
@@ -483,6 +483,8 @@ export class Renderer {
         v.sliceAxis, v.slicePos, nx, nz,
         v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,
         v.contours ? Math.max(1, Math.round(v.nContours)) : 0, ...contourRange(v.lo, v.hi), 0,
+        // The color scale, for the color of each contour's level (as in the View uniform).
+        log ? 1 : 0, lo, hi, 0,
       ]),
     );
 

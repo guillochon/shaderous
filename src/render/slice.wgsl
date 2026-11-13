@@ -7,12 +7,31 @@
 // b: log10 |value|.
 @group(0) @binding(4) var MAP: texture_2d<f32>;
 
+// A contour line at a pixel: how strongly the pixel lies on it, and the ink it is drawn in.
+struct Line {
+  a: f32,
+  ink: vec3<f32>,
+}
+
+// The ink of the line at level k: dark if the level's own color is light, light if it is dark,
+// so a line keeps one ink along its whole length (choosing by the cell under each pixel flips
+// it from cell to cell where the colors sit near the threshold). `neg`: the line is where the
+// value is minus the level (a contour of |value| in a field of either sign).
+fn ink(k: f32, neg: bool) -> vec3<f32> {
+  let lg = C.k.y + k * (C.k.z - C.k.y) / (C.k.x + 1.0);
+  var x = select(pow(10.0, lg), -pow(10.0, lg), neg);
+  if (C.sc.x != 0.0) { x = lg; }
+  let t = clamp((x - C.sc.y) / max(C.sc.z - C.sc.y, 1.0e-20), 0.0, 1.0);
+  let col = textureSampleLevel(TF, S, vec2<f32>(t, 0.5), 0.0).rgb;
+  return select(vec3<f32>(0.95), vec3<f32>(0.05), dot(col, vec3<f32>(0.299, 0.587, 0.114)) > 0.5);
+}
+
 // How strongly a pixel lies on a contour line: C.k.x levels, evenly spaced in log10 |value| from
 // C.k.y to C.k.z, the end levels left out (so n lines fall inside the range). log10 |value| is
 // interpolated between the four nearest cell centers, and the line is about a pixel wide at any
 // zoom. Lines are left out next to a solid, and fade where levels crowd within a few pixels.
 // Called in uniform control flow (it takes derivatives).
-fn contour(st: vec2<f32>) -> f32 {
+fn contour(st: vec2<f32>) -> Line {
   let side = i32(textureDimensions(MAP).x);
   let g = st * f32(side) - 0.5;
   let i0 = vec2<i32>(floor(g));
@@ -30,7 +49,12 @@ fn contour(st: vec2<f32>) -> f32 {
   let px = abs(f - k) / max(fw, 1.0e-6);   // pixels to the nearest level
   let gas = min(min(a.r, b.r), min(c.r, d.r)) > -0.5;
   let on = gas && C.k.x > 0.0 && k >= 1.0 && k <= C.k.x;
-  return select(0.0, (1.0 - smoothstep(0.5, 1.25, px)) * (1.0 - smoothstep(0.2, 0.4, fw)), on);
+  // Which side of zero (on a linear scale, where the field may take either sign).
+  let t = mix(mix(a.r, b.r, fr.x), mix(c.r, d.r, fr.x), fr.y);
+  let zero = -C.sc.y / max(C.sc.z - C.sc.y, 1.0e-20);
+  let neg = C.sc.x == 0.0 && t < zero;
+  let alpha = select(0.0, (1.0 - smoothstep(0.5, 1.25, px)) * (1.0 - smoothstep(0.2, 0.4, fw)), on);
+  return Line(alpha, ink(k, neg));
 }
 
 @fragment
@@ -46,8 +70,6 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   if (m.r < -0.5) { col = SOLID; }
   // Block outlines of an adaptive mesh.
   col = mix(col, vec3<f32>(0.75, 0.8, 0.9), 0.3 * m.g * C.r.x);
-  // Contours: dark on light colors, light on dark ones.
-  let ink = select(vec3<f32>(0.95), vec3<f32>(0.05), dot(col, vec3<f32>(0.299, 0.587, 0.114)) > 0.5);
-  col = mix(col, ink, 0.85 * line);
+  col = mix(col, line.ink, 0.85 * line.a);
   return vec4<f32>(col, 1.0);
 }

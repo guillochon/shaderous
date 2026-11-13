@@ -10,6 +10,7 @@ struct Cam {
   q: vec4<f32>,   // slice axis, slice position in [0, 1), cells per side, cells along z
   r: vec4<f32>,   // 1 to outline the blocks of an adaptive mesh, slice zoom, slice view center in [0, 1]^2
   k: vec4<f32>,   // slice and projection contours: how many (0 for none), log10 of the range they divide
+  sc: vec4<f32>,  // the color scale: 1 if logarithmic, its ends (in log10 when logarithmic)
 }
 @group(0) @binding(0) var<uniform> C: Cam;
 @group(0) @binding(1) var VOL: texture_3d<f32>;
