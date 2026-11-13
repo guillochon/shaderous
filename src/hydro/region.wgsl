@@ -8,7 +8,10 @@ override WGX: u32 = 8u;
 override WGY: u32 = 8u;
 override WGZ: u32 = 4u;
 
-struct Region { origin: vec3<u32>, lo: vec3<u32>, hi: vec3<u32> }
+// `end` is where this dispatch's own cells stop: its workgroups are rounded up, and the cells
+// they reach beyond it belong to another slab, which must be the only one to handle them (a
+// pass that adds to a total with atomics, such as the debris tally, would count them twice).
+struct Region { origin: vec3<u32>, lo: vec3<u32>, hi: vec3<u32>, end: vec3<u32> }
 @group(1) @binding(0) var<uniform> REGION: Region;
 
 // The cell of this invocation, and whether this pipeline is the one that handles it.
@@ -17,5 +20,5 @@ struct RegionCell { c: vec3<i32>, mine: bool }
 fn region_cell(gid: vec3<u32>) -> RegionCell {
   let cell = gid + REGION.origin;
   let inside = all(cell >= REGION.lo) && all(cell < REGION.hi);
-  return RegionCell(vec3<i32>(cell), inside == INTERIOR && all(cell < P.dims.xyz));
+  return RegionCell(vec3<i32>(cell), inside == INTERIOR && all(cell < REGION.end) && all(cell < P.dims.xyz));
 }

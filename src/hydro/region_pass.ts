@@ -92,8 +92,9 @@ export class RegionPass {
           WGZ: w.wg[2],
         });
         const regions = w.list.map((r) => {
-          const buffer = device.createBuffer({ size: 48, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-          device.queue.writeBuffer(buffer, 0, new Uint32Array([...r.origin, 0, ...split.lo, 0, ...split.hi, 0]));
+          const buffer = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+          const end = r.origin.map((o, a) => o + r.size[a]);
+          device.queue.writeBuffer(buffer, 0, new Uint32Array([...r.origin, 0, ...split.lo, 0, ...split.hi, 0, ...end, 0]));
           pass.buffers.push(buffer);
           return {
             group: device.createBindGroup({ layout: pipeline.getBindGroupLayout(1), entries: [{ binding: 0, resource: { buffer } }] }),
