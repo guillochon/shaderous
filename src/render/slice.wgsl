@@ -21,11 +21,7 @@ const HOVER_INK = vec3<f32>(0.2, 0.9, 1.0);
 // it from cell to cell where the colors sit near the threshold). `neg`: the line is where the
 // value is minus the level (a contour of |value| in a field of either sign).
 fn ink(k: f32, neg: bool) -> vec3<f32> {
-  let lg = C.k.y + k * (C.k.z - C.k.y) / (C.k.x + 1.0);
-  var x = select(pow(10.0, lg), -pow(10.0, lg), neg);
-  if (C.sc.x != 0.0) { x = lg; }
-  let t = clamp((x - C.sc.y) / max(C.sc.z - C.sc.y, 1.0e-20), 0.0, 1.0);
-  let col = textureSampleLevel(TF, S, vec2<f32>(t, 0.5), 0.0).rgb;
+  let col = level_color(k, neg);
   return select(vec3<f32>(0.95), vec3<f32>(0.05), dot(col, vec3<f32>(0.299, 0.587, 0.114)) > 0.5);
 }
 

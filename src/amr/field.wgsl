@@ -3,6 +3,7 @@
 // and the pass records the range of what it draws.
 //   r = displayed quantity, normalized to [0, 1]
 //   g = volume view: 1 where the gas is dense enough to be shown
+//   b = log10 |displayed quantity|, for the isosurfaces
 // The slice and projection views read the leaf cells themselves, at the finest level's
 // resolution (plane() and column() below, render/project.wgsl).
 // Derivatives come from the primitive variables, whose ghost cells hold the neighbors across
@@ -141,7 +142,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     // Solid: drawn as a body, not as gas.
     // The volume view draws block outlines as lines.
     let shown = select(0.0, 1.0, log(max(q.rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
-    textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), 0.0, 0.0));
+    // b: log10 |value|, for the isosurfaces.
+    textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), log10_abs(q.x), 0.0));
   }
   range_end(lix);
 }

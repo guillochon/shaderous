@@ -115,7 +115,8 @@ side.innerHTML = `
       ${field('Units', select('units', opt('cgs', 'cgs') + opt('si', 'SI') + opt('code', 'Code')), '', 'Units the readouts are shown in: the color bar, the query tool and the diagnostics. Only a setup that stands for something real (a star, say) has physical units; the others are in code units')}
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), 'row-axis', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', 'row-slicepos', 'Where the slice cuts the box along its normal')}
-      ${field('Contours', number('ncont', `min="1" max="${MAX_CONTOURS}" step="1"`), 'row-ncont', 'How many contour lines the slice and projection views draw when Contours is on (beside the color bar): evenly spaced in log |value| between the ends of the displayed range, the ends themselves left out. A range reaching zero or below is contoured in |value| over the four decades under its largest magnitude')}
+      ${field('Contours', number('ncont', `min="1" max="${MAX_CONTOURS}" step="1"`), 'row-ncont', 'How many contour lines the slice and projection views draw, or isosurfaces the volume view draws, when Contours is on (beside the color bar): evenly spaced in log |value| between the ends of the displayed range, the ends themselves left out. A range reaching zero or below is contoured in |value| over the four decades under its largest magnitude')}
+      ${field('Surface opacity', '<input id="isoa" type="range" min="0.05" max="1" step="0.05" />', 'row-isoa', 'Volume view, with Contours on: how opaque each isosurface is. Below 1 the surfaces behind show through')}
     </div>
   </details>
 
@@ -253,7 +254,8 @@ $('colorbar').innerHTML = `
     <label class="check" title="The range follows the data"><input id="auto" type="checkbox" checked />Auto</label>
     <label class="check" title="Logarithmic color scale"><input id="log" type="checkbox" />Log</label>
     <label class="check" title="Outline the blocks of an adaptive mesh, in the slice and the volume view"><input id="blocks" type="checkbox" checked />Blocks</label>
-    <label class="check" title="Contour lines in the slice and projection views, evenly spaced in log |value| across the displayed range (how many: View, Contours)"><input id="contours" type="checkbox" />Contours</label>
+    <label class="check" title="Contour lines in the slice and projection views, isosurfaces in the volume view, evenly spaced in log |value| across the displayed range (how many: View, Contours)"><input id="contours" type="checkbox" />Contours</label>
+    <label class="check" title="Volume view: draw the gas as a glowing fog. Off, with Contours on, the isosurfaces show alone"><input id="fog" type="checkbox" checked />Fog</label>
   </div>
   <select id="cmap" title="Color map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
   <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="1" max="300" step="1" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
@@ -893,12 +895,15 @@ function syncControls() {
   levels.disabled = !amrOk;
   for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n) || (+o.value > 0 && !amrFits(cfg.n, cfg.ndim, +o.value));
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
-  // Contours belong to the slice and projection views (always, in a 2D run).
-  const contourable = two || view.mode !== 'volume';
+  // Contours: lines in the slice and projection views, isosurfaces in the volume view.
+  const marching = !two && view.mode === 'volume';
   $<HTMLInputElement>('contours').checked = view.contours;
-  $<HTMLInputElement>('contours').disabled = !contourable;
   $<HTMLInputElement>('ncont').value = String(view.nContours);
-  $<HTMLInputElement>('ncont').disabled = !contourable || !view.contours;
+  $<HTMLInputElement>('ncont').disabled = !view.contours;
+  $<HTMLInputElement>('fog').checked = view.fog;
+  $<HTMLInputElement>('fog').disabled = !marching || !view.contours;
+  $<HTMLInputElement>('isoa').value = String(view.surfaceOpacity);
+  $<HTMLInputElement>('isoa').disabled = !marching || !view.contours;
   $<HTMLInputElement>('blocks').disabled = cfg.amrLevels === 0;
   // A 2D run is always shown as its plane, and has no self-gravity.
   $<HTMLSelectElement>('mode').disabled = two;
@@ -1534,6 +1539,8 @@ function bind() {
     view.contours = el.checked;
     syncControls();
   });
+  on('fog', (el) => (view.fog = el.checked));
+  on('isoa', (el) => (view.surfaceOpacity = +el.value), 'input');
   // The lines follow the count as it is typed or stepped; leaving the field tidies what it shows.
   const contourCount = (el: HTMLInputElement) => Math.min(MAX_CONTOURS, Math.max(1, Math.round(numOr(el, view.nContours))));
   on('ncont', (el) => (view.nContours = contourCount(el)), 'input');

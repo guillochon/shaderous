@@ -1,5 +1,7 @@
 // Emission-absorption ray-marcher through the unit box, front to back, with a 1D transfer
-// function (color and opacity against the normalized field value).
+// function (color and opacity against the normalized field value). With contours on it also
+// draws isosurfaces at their levels (C.k, as the slice view's lines), lit, in the color of their
+// level, C.fwd.w opaque; C.sc.w 0 leaves the fog out, so the surfaces show alone.
 #include "render/camera.wgsl"
 
 fn hash(p: vec2<f32>) -> f32 {
@@ -10,6 +12,31 @@ fn hash(p: vec2<f32>) -> f32 {
 fn edge(p: vec3<f32>, w: f32) -> f32 {
   let a = step(vec3<f32>(0.5 - w), abs(p));
   return step(1.5, a.x + a.y + a.z);
+}
+
+// Volume view's isosurfaces: in units of the spacing between levels, level k lies at f = k.
+fn iso_f(p: vec3<f32>) -> f32 {
+  return (textureSampleLevel(VOL, S, p + 0.5, 0.0).b - C.k.y) * (C.k.x + 1.0) / max(C.k.z - C.k.y, 1.0e-6);
+}
+
+// The isosurface through p (in the box, [-0.5, 0.5]^3) seen along rd, lit: a key light above
+// and to the right of the camera, a fill from the camera, and a highlight.
+fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>) -> vec3<f32> {
+  let e = 1.0 / C.q.z;
+  let gr = vec3<f32>(
+    iso_f(p + vec3<f32>(e, 0.0, 0.0)) - iso_f(p - vec3<f32>(e, 0.0, 0.0)),
+    iso_f(p + vec3<f32>(0.0, e, 0.0)) - iso_f(p - vec3<f32>(0.0, e, 0.0)),
+    iso_f(p + vec3<f32>(0.0, 0.0, e)) - iso_f(p - vec3<f32>(0.0, 0.0, e)),
+  );
+  var n = normalize(gr + vec3<f32>(1.0e-12));
+  if (dot(n, rd) > 0.0) { n = -n; }
+  let key = normalize(-rd + 0.6 * C.up.xyz + 0.4 * C.right.xyz);
+  let diff = max(dot(n, key), 0.0);
+  let fill = max(dot(n, -rd), 0.0);
+  let spec = pow(max(dot(n, normalize(key - rd)), 0.0), 40.0);
+  // Lifted a little so the levels at the dark end of a color map still read against the background.
+  let c = mix(base, vec3<f32>(1.0), 0.12);
+  return c * (0.18 + 0.62 * diff + 0.25 * fill) + 0.35 * spec;
 }
 
 @fragment
@@ -32,6 +59,11 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let jitter = hash(in.pos.xy);
   var col = vec3<f32>(0.0);
   var alpha = 0.0;
+  let iso = C.k.x > 0.0;
+  let zero = -C.sc.y / max(C.sc.z - C.sc.y, 1.0e-20);   // the color scale's value at zero
+  var fprev = 0.0;
+  var pprev = vec3<f32>(0.0);
+  var have = false;   // fprev, pprev hold the last sample
   for (var i = 0; i < count; i++) {
     let p = ro + rd * (t0 + (f32(i) + jitter) * ds);
     let s = textureSampleLevel(VOL, S, p + 0.5, 0.0);
@@ -42,11 +74,36 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
       alpha = 1.0;
       break;
     }
-    let tf = textureSampleLevel(TF, S, vec2<f32>(v, 0.5), 0.0);
-    // g: 1 where the gas is at least the minimum density, 0 where it is hidden (render/field.wgsl).
-    let a = (1.0 - exp(-tf.a * C.p.z * ds)) * s.g;
-    col += (1.0 - alpha) * a * tf.rgb;
-    alpha += (1.0 - alpha) * a;
+    if (iso) {
+      // A level crossed since the last sample (the first, if several), in shown gas: found to a
+      // thirty-second of the step by bisection, then lit. It lies in front of this sample's fog.
+      let f = (s.b - C.k.y) * (C.k.x + 1.0) / max(C.k.z - C.k.y, 1.0e-6);
+      let up = f > fprev;
+      let k = select(floor(fprev), floor(fprev) + 1.0, up);
+      if (have && s.g > 0.5 && floor(f) != floor(fprev) && k >= 1.0 && k <= C.k.x) {
+        var a = pprev;
+        var b = p;
+        for (var j = 0; j < 5; j++) {
+          let m = 0.5 * (a + b);
+          if ((iso_f(m) < k) == up) { a = m; } else { b = m; }
+        }
+        let h = 0.5 * (a + b);
+        let neg = C.sc.x == 0.0 && v < zero;
+        let sa = C.fwd.w;
+        col += (1.0 - alpha) * sa * iso_shade(h, rd, level_color(k, neg));
+        alpha += (1.0 - alpha) * sa;
+      }
+      fprev = f;
+      pprev = p;
+      have = true;
+    }
+    if (C.sc.w != 0.0) {
+      let tf = textureSampleLevel(TF, S, vec2<f32>(v, 0.5), 0.0);
+      // g: 1 where the gas is at least the minimum density, 0 where it is hidden (render/field.wgsl).
+      let a = (1.0 - exp(-tf.a * C.p.z * ds)) * s.g;
+      col += (1.0 - alpha) * a * tf.rgb;
+      alpha += (1.0 - alpha) * a;
+    }
     if (alpha > 0.995) { break; }
   }
   col += (1.0 - alpha) * BG;

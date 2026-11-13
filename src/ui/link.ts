@@ -56,9 +56,9 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'nContours'] as const;
+const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'nContours', 'surfaceOpacity'] as const;
 const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont',
+  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont', surfaceOpacity: 'isoa',
 };
 
 export function encodeLink(s: LinkState): URLSearchParams {
@@ -124,6 +124,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   str('log', flag(view.log), flag(dv.log));
   str('blocks', flag(view.showBlocks), flag(dv.showBlocks));
   str('contours', flag(view.contours), flag(dv.contours));
+  str('fog', flag(view.fog), flag(dv.fog));
   if (!s.auto) {
     q.set('lo', fmt(view.lo));
     q.set('hi', fmt(view.hi));
@@ -241,6 +242,8 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   put(out.view, 'log', bool('log'));
   put(out.view, 'showBlocks', bool('blocks'));
   put(out.view, 'contours', bool('contours'));
+  put(out.view, 'fog', bool('fog'));
+  put(out.view, 'surfaceOpacity', num('isoa', 0.05, 1));
   const ncont = num('ncont', 1, MAX_CONTOURS);
   put(out.view, 'nContours', ncont === undefined ? undefined : Math.round(ncont));
   const lo = num('lo');

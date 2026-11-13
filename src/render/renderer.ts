@@ -48,11 +48,14 @@ export interface ViewState {
   /** Outline the blocks of an adaptive mesh, in the slice view and the volume view. */
   showBlocks: boolean;
   /**
-   * Slice and projection views: contour lines, nContours of them, evenly spaced in log10 |field|
-   * inside the displayed range (contourRange()).
+   * Contour lines in the slice and projection views, isosurfaces in the volume view: nContours
+   * of them, evenly spaced in log10 |field| inside the displayed range (contourRange()).
    */
   contours: boolean;
   nContours: number;
+  /** Volume view: draw the gas as fog (off, the isosurfaces show alone), and the surfaces' opacity. */
+  fog: boolean;
+  surfaceOpacity: number;
 }
 
 /** Floats per line vertex: position (box units, centered), color with alpha. */
@@ -148,6 +151,8 @@ export const defaultView = (): ViewState => ({
   showBlocks: true,
   contours: false,
   nContours: 8,
+  fog: true,
+  surfaceOpacity: 0.5,
 });
 
 /**
@@ -496,13 +501,14 @@ export class Renderer {
         ...eye, slice.shift / slice.span,
         ...right, cw / (2 * slice.span),
         ...up, ch / (2 * slice.span),
-        ...fwd, 0,
+        ...fwd, v.surfaceOpacity,
         tan, aspect, v.opacity, samples,
         v.sliceAxis, v.slicePos, nx, nz,
         v.showBlocks ? 1 : 0, v.zoom, v.cx, v.cy,
         v.contours ? Math.max(1, Math.round(v.nContours)) : 0, ...contourRange(v.lo, v.hi), v.contours ? this.hoverLevel : 0,
         // The color scale, for the color of each contour's level (as in the View uniform).
-        log ? 1 : 0, lo, hi, 0,
+        // Without isosurfaces the fog is all there is to see.
+        log ? 1 : 0, lo, hi, v.fog || !v.contours ? 1 : 0,
       ]),
     );
 

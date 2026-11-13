@@ -99,7 +99,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let q = voxel(c);
     if (!q.solid) { range_add(q.x); }
     // Solid: drawn as a body, not as gas.
-    textureStore(VOL, c, vec4<f32>(display_t(q.x, q.solid), select(0.0, shown(q.rho), V.cut.y != 0.0), 0.0, 0.0));
+    // b: log10 |value|, for the isosurfaces.
+    textureStore(VOL, c, vec4<f32>(display_t(q.x, q.solid), select(0.0, shown(q.rho), V.cut.y != 0.0), log10_abs(q.x), 0.0));
   }
   range_end(lix);
 }
