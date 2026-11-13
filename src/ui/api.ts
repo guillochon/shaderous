@@ -372,6 +372,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
             blurb: p.blurb,
             supports2d: !!p.supports2d,
             debris: !!p.debris,
+            grid: p.grid ?? null,
             tEnd: Number.isFinite(p.tEnd) ? p.tEnd : null,
             species: p.species ?? [],
             params: (p.params ?? []).map((q) => ({ id: q.id, label: q.label, value: q.value, min: q.min, max: q.max, title: q.title ?? '', live: !!q.live, kind: q.kind ?? 'number' })),

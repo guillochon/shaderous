@@ -138,14 +138,17 @@ export function encodeLink(s: LinkState): URLSearchParams {
 export function decodeLink(q: URLSearchParams): LinkOverrides {
   const named = q.get('problem');
   const known = PROBLEMS.some((p) => p.id === named);
-  // A bare visit gets the default setup; a link that names a preset but no grid gets that
-  // preset in 3D, as links always have.
+  // A bare visit gets the default setup. A link that names a preset but no grid gets the
+  // preset's own grid (Problem.grid), or else 3D at the default size, as links always have. A
+  // link that gives the cells but no levels is uniform: links leave out amr=0.
   const problem = known ? named! : DEFAULT_SETUP.problem;
+  const grid = known ? problemById(problem).grid : undefined;
+  const dim = q.get('dim');
   const out: LinkOverrides = {
     problem,
-    ndim: known ? (q.get('dim') === '2' ? 2 : 3) : DEFAULT_SETUP.ndim,
-    n: known ? Math.max(0, Math.round(+q.get('n')! || 0)) : DEFAULT_SETUP.n,
-    amr: known ? Math.min(5, Math.max(0, Math.round(+q.get('amr')! || 0))) : 0,
+    ndim: known ? (dim ? (dim === '2' ? 2 : 3) : (grid?.ndim ?? 3)) : DEFAULT_SETUP.ndim,
+    n: known ? (q.has('n') ? Math.max(0, Math.round(+q.get('n')! || 0)) : (grid?.n ?? 0)) : DEFAULT_SETUP.n,
+    amr: known ? Math.min(5, Math.max(0, Math.round(q.has('amr') ? +q.get('amr')! || 0 : q.has('n') ? 0 : (grid?.amr ?? 0)))) : 0,
     cfg: {},
     eosParams: {},
     coolParams: {},

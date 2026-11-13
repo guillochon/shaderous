@@ -125,7 +125,7 @@ A tidal disruption's return rate, the classic dM/dt diagram. Run a few dynamical
 pericenter with `--debris`, then plot the last output:
 
 ```bash
-npm run headless -- run --problem tidal-disruption --dim 3 --n 128 --amr 2 --set p.q=1000000 --set p.beta=1 --until 8 --every 1 --debris --low-priority --out runs/tde
+npm run headless -- run --problem tidal-disruption-full --dim 3 --n 128 --amr 2 --until 20 --every 1 --debris --low-priority --out runs/tde
 ```
 
 ```bash

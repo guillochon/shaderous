@@ -1528,14 +1528,20 @@ function bind() {
     ndim: (+$<HTMLSelectElement>('dim').value === 2 ? 2 : 3) as 2 | 3,
     levels: +$<HTMLSelectElement>('levels').value,
   });
+  // A preset with a grid of its own (Problem.grid) opens on it; another keeps the grid chosen.
+  const pickedPreset = () => {
+    const p = picked();
+    const g = problemById(p.id).grid;
+    return g ? { ...p, ndim: g.ndim ?? p.ndim, n: g.n ?? p.n, levels: g.amr ?? p.levels } : p;
+  };
   on('problem', (el) => {
     // A new problem opens on its first variant.
     showProblem(familyById(el.value).variants[0].problem.id);
-    const { id, n, ndim, levels } = picked();
+    const { id, n, ndim, levels } = pickedPreset();
     build(id, n, ndim, levels);
   });
   on('variant', () => {
-    const { id, n, ndim, levels } = picked();
+    const { id, n, ndim, levels } = pickedPreset();
     build(id, n, ndim, levels);
   });
   on('dim', () => {

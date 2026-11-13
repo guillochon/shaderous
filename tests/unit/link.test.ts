@@ -20,6 +20,17 @@ describe('shareable links', () => {
     expect([l.problem, l.ndim, l.n]).toEqual(['sedov', 3, 0]);
   });
 
+  it('a link that only names a preset with a grid of its own opens on that grid', () => {
+    const l = decodeLink(new URLSearchParams('problem=tidal-disruption-n3'));
+    expect([l.ndim, l.n, l.amr]).toEqual([3, 512, 4]);
+  });
+
+  it('a link that gives the cells but no levels is uniform, whatever the preset opens on', () => {
+    const l = decodeLink(new URLSearchParams('problem=tidal-disruption-n3&dim=3&n=128'));
+    expect([l.ndim, l.n, l.amr]).toEqual([3, 128, 0]);
+    expect(decodeLink(new URLSearchParams('problem=tidal-disruption-n3&n=128&amr=1')).amr).toBe(1);
+  });
+
   it('untouched settings give a link with nothing but the preset and grid', () => {
     expect(encodeLink(state('sedov', 128, 3)).toString()).toBe('problem=sedov&dim=3&n=128');
   });

@@ -18,8 +18,8 @@
 // plus one below and one above. GPU layout in debris/debris.wgsl.
 import type { SimConfig } from '../sim';
 
-export const DEBRIS_BINS = 500;
-export const DEBRIS_SPAN = 5;
+export const DEBRIS_BINS = 1000;
+export const DEBRIS_SPAN = 10;
 const HEAD_BYTES = 48;
 /** Fixed-point units per reference mass: 2^52 leaves 2^11 reference masses of headroom. */
 const FIX = 2 ** 52;

@@ -113,7 +113,7 @@ range each value is clamped to.
 | Key | Meaning |
 | --- | --- |
 | `problem` | Preset id (`describe().problems`) |
-| `dim`, `n`, `amr` | 2 or 3 dimensions, cells per side, levels of refinement (0 to 5) |
+| `dim`, `n`, `amr` | 2 or 3 dimensions, cells per side, levels of refinement (0 to 5). Leave out `n` to get the preset's own grid (`describe().problems[i].grid`), or 3D at the default size. With `n` but no `amr`, the grid is uniform |
 | `tend` | End time (`inf` for none) |
 | `eos`, `gamma`, `K` | Equation of state and its constants |
 | `riemann`, `limiter`, `cfl` | Riemann solver, slope limiter, Courant number |
@@ -141,7 +141,8 @@ page cannot start, for example when the browser has no WebGPU.
 Everything there is to choose from:
 
 - `problems`: one entry per preset, with `id`, `label`, `family`, `variant`, `blurb`,
-  `supports2d`, `debris` (whether `debris()` works for it), `tEnd`, `species`, and `params`. Each parameter has `id`, `label`, `value`
+  `supports2d`, `debris` (whether `debris()` works for it), `grid` (the grid it opens on, or
+  null), `tEnd`, `species`, and `params`. Each parameter has `id`, `label`, `value`
   (the default), `min`, `max`, `title`, `live` and `kind`.
 - `fields`: the fields the view can show, as `{ index, name }`.
 - `variables`: what `slice` and `stats` can read.
@@ -248,7 +249,7 @@ the rounding of `diagnostics().mass`.
 | --- | --- |
 | `t`, `tPeri` | The time now, and the time of pericenter |
 | `gm`, `de` | G M of the point mass, and the energy scale (for a tidal disruption, the spread G M<sub>bh</sub> R<sub>★</sub> / r<sub>t</sub>²) |
-| `lo`, `width` | Bin k covers energies `lo + k·width` to `lo + (k+1)·width`. There are 500 bins across ±5 `de` |
+| `lo`, `width` | Bin k covers energies `lo + k·width` to `lo + (k+1)·width`. There are 1000 bins across ±10 `de` |
 | `escaped`, `inBox` | Mass per bin: what has left the box, and what is in it, the core apart |
 | `below`, `above` | Mass below the first bin and above the last, as `[escaped, in box]` |
 | `ambient` | Gas left out of the bins (the ambient medium, where the scalar marks the debris), as `[escaped, in box]` |
@@ -375,7 +376,7 @@ window. The view keeps drawing while the script steps the run.
 **The return rate of a tidal disruption.** Run past pericenter, then read the debris:
 
 ```js
-await S('load', { problem: 'tidal-disruption', dim: 3, n: 128, amr: 2, 'p.q': 1e6, 'p.beta': 1 });
+await S('load', { problem: 'tidal-disruption-full', dim: 3, n: 128, amr: 2 });
 await S('runTo', 8);
 const { dmdt, core, totals } = await S('debris');
 ```

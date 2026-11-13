@@ -1282,7 +1282,7 @@ export const TESTS: TestDef[] = [
       'The perturber reaches pericenter within 2% of r_t / beta; while all the gas is in the box its center of mass stays within 0.005 stellar radii of the box center; the star is disrupted',
     async run(gpu) {
       const orbit = tdeOrbit({ q: 100, beta: 1 });
-      return withAmr(gpu, tidalDisruption, 128, { amrLevels: 2, tEnd: 0 }, async (sim) => {
+      return withAmr(gpu, tidalDisruption, 128, { amrLevels: 2, tEnd: 0, params: { q: 100, beta: 1 } }, async (sim) => {
         const d0 = await sim.diagnostics();
         let rMin = Infinity;
         let comMax = 0;
@@ -1480,11 +1480,11 @@ export const TESTS: TestDef[] = [
       });
 
       // A run with a perturber: its position and velocity come back too.
-      await withSim(gpu, tidalDisruption, 32, { tEnd: 0.5 }, async (a) => {
+      await withSim(gpu, tidalDisruption, 32, { tEnd: 0.5, params: { q: 100, beta: 1 } }, async (a) => {
         await a.runToEnd();
         const before = await a.readRestart();
         const { snap } = await roundtrip(a);
-        const cfg = { ...configFor(tidalDisruption, 32, { tEnd: 1 }), ...restartFrom(snap, tidalDisruption, false, 32) };
+        const cfg = { ...configFor(tidalDisruption, 32, { tEnd: 1, params: { q: 100, beta: 1 } }), ...restartFrom(snap, tidalDisruption, false, 32) };
         const b = await Sim.create(gpu, cfg);
         try {
           const after = await b.readRestart();
@@ -2094,7 +2094,7 @@ export const TESTS: TestDef[] = [
       'The perturber reaches pericenter within 2% of r_t / beta and of the Kepler time; while all the gas is still in the box its center of mass stays within 0.005 stellar radii of the box center; the star is disrupted (peak density falls by more than half)',
     async run(gpu) {
       const orbit = tdeOrbit({ q: 100, beta: 1 });
-      return withSim(gpu, tidalDisruption, 64, { tEnd: 0 }, async (sim) => {
+      return withSim(gpu, tidalDisruption, 64, { tEnd: 0, params: { q: 100, beta: 1 } }, async (sim) => {
         const d0 = await sim.diagnostics();
         let rMin = Infinity;
         let tMin = 0;

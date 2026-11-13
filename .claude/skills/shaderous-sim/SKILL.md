@@ -28,6 +28,9 @@ values clamped, so **read back `state().query`** to see what actually took effec
 
 - Get problem ids and parameters from `describe` (MCP), `npm run headless -- describe [id]`, or
   `shaderous.describe()`. Don't guess them.
+- Some presets open on a grid of their own (`describe` gives it as `grid`): leave out `n` and
+  `amr` to get it. The γ = 4/3 tidal disruptions need theirs (256³, 3 levels): on a coarser
+  grid the star settles too compact and survives encounters that should disrupt it.
 - Grid sizes: 2D runs take n from 128 up, 3D runs from 32 up. Above `resolutions.uniformMax`,
   a grid needs `amr` of 1 or more.
 - Some problems are 3D only (`supports2d: false`). For those, `dim=2` is ignored.

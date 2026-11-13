@@ -80,7 +80,7 @@ describe('point masses', () => {
     const m = initialMasses(cfg, 0.125)[0];
     expect(m.pos).toEqual([1, 2, 3]);
     expect(m.accreted).toBe(0.5);
-    expect(m.gm).toBe(100);
+    expect(m.gm).toBe(cfg.G * cfg.params.q);
   });
 
   it('the binary starts at rest in its center-of-mass frame', () => {

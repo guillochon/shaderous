@@ -187,6 +187,13 @@ export interface Problem {
    */
   masses?: (params: Record<string, number>, G: number, dx: number, ndim: 2 | 3) => PointMass[];
   /**
+   * The grid the preset opens on: dimensions, cells per side (the finest level's on an
+   * adaptive mesh) and levels of refinement. Picking the preset from the menu switches to it,
+   * and a link that names the preset without a grid gets it. Without one, the menu keeps the
+   * grid already chosen and a link gets the 3D default. Memory limits still apply.
+   */
+  grid?: { ndim?: 2 | 3; n?: number; amr?: number };
+  /**
    * Debris energies (debris/debris.ts): bin the gas by its specific orbital energy about one
    * point mass, both what leaves the box and what is still in it, for the rate at which bound
    * debris returns (dM/dt). `mass` is the index of the point mass, `de` the energy scale the
