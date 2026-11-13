@@ -3,6 +3,8 @@ dist/
 test-results/
 playwright-report/
 *.athdf
+# Outputs of the command-line runner (tools/headless)
+runs/
 
 # Burning-network training (tools/burn): environment and generated data
 tools/burn/.venv/

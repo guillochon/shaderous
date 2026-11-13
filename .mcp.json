@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "shaderous": {
+      "command": "node",
+      "args": ["tools/headless/mcp.mjs"]
+    }
+  }
+}

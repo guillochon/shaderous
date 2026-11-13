@@ -84,6 +84,7 @@ own GPU, in the browser or from the command line.
 | **[Numerics](docs/numerics.md)** | Every part of the solver in detail: equations, discretization, Riemann solvers, reconstruction, gravity, AMR, local timesteps, equations of state, cooling, diffusion, species. With references. |
 | **[Architecture](docs/architecture.md)** | How the code maps onto WebGPU: constraints, data layout, shader assembly, gathered fluxes, ghost cells on load, the AMR atlas, GPU scheduling, rendering, memory, I/O and testing. |
 | **[Scripting API](docs/api.md)** | Driving the simulator from a script or an AI agent, headless or not: `window.shaderous` loads setups, steps to exact times, reads the gas back, takes screenshots, and saves and loads `.athdf` files. |
+| **[Headless runs](docs/headless.md)** | The command-line runner (single runs and parameter sweeps, writing diagnostics, images, slices and `.athdf` files) and the MCP server that gives AI agents the simulator as tools. |
 
 The method paper is in progress in [`paper/`](paper/), and the original design plan is in
 [plan.md](plan.md).

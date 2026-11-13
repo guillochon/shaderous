@@ -3318,6 +3318,7 @@ const ready = (async () => {
 installApi(
   {
     gpu: () => gpu,
+    adapter: () => `${gpu.info.vendor} ${gpu.info.architecture}${gpu.info.description ? ` (${gpu.info.description})` : ''}${gpu.info.fallback ? ' [software fallback]' : ''}`.trim(),
     sim: () => sim,
     cfg: () => cfg,
     view,

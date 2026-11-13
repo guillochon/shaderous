@@ -9,6 +9,9 @@ and loads `.athdf` files, and sets any control in the panel.
 The code is in [src/ui/api.ts](../src/ui/api.ts), and
 [tests/gpu/api.spec.ts](../tests/gpu/api.spec.ts) exercises all of it.
 
+For runs without writing any browser code, use the command-line runner or the MCP server built
+on this API. Both are in [headless.md](headless.md).
+
 **Contents**
 
 1. [Quick start](#quick-start)
@@ -161,7 +164,8 @@ the nearest resolution on offer.
 ### `state() → object`
 
 Returns `problem`, `label`, `ndim`, `n`, `amr`, `t`, `dt`, `steps`, `tEnd` (null if none),
-`running`, `finished` and `preparing`, plus `query`, the setup as a query string.
+`running`, `finished` and `preparing`, plus `query`, the setup as a query string, and
+`adapter`, the GPU adapter the run is on.
 `preparing` is true while a star in the initial conditions is still being settled into
 hydrostatic balance. No steps are taken during that time, and `run` waits for it to finish.
 

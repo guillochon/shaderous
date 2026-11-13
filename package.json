@@ -10,7 +10,10 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:gpu": "playwright test"
+    "test:gpu": "playwright test",
+    "test:headless": "node tools/headless/selftest.mjs",
+    "headless": "node tools/headless/cli.mjs",
+    "mcp": "node tools/headless/mcp.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",

@@ -1,0 +1,101 @@
+// A headless simulator: the page served (by Vite from this checkout, or from a URL given), opened
+// in Chrome with WebGPU, and its scripting API (window.shaderous, docs/api.md) callable from
+// Node. Shared by the command-line runner (cli.mjs) and the MCP server (mcp.mjs).
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+
+/** Run this process, and the browser it starts (which inherits it on Windows), at low priority. */
+export function lowerPriority() {
+  try {
+    os.setPriority(os.constants.priority.PRIORITY_BELOW_NORMAL);
+  } catch {
+    // Not permitted here: carry on at normal priority.
+  }
+}
+
+/** A setup as a query string: a link, a query string, or an object of query keys. */
+export function setupQuery(setup) {
+  if (!setup) return '';
+  if (typeof setup === 'string') return setup.replace(/^[^?]*\?/, '').replace(/^\?/, '');
+  return new URLSearchParams(Object.entries(setup).map(([k, v]) => [k, typeof v === 'boolean' ? (v ? '1' : '0') : String(v)])).toString();
+}
+
+/** The message of an error thrown inside the page, without Playwright's wrapping. */
+function pageMessage(e) {
+  const m = String(e?.message ?? e);
+  const inner = m.match(/page\.evaluate: (?:Error: )?([\s\S]*?)(?:\n\s+at |\n\nCall log|$)/);
+  return (inner ? inner[1] : m).trim();
+}
+
+/**
+ * Open a simulator page.
+ * - url: where the page is served (default: start Vite on a free port, serving this checkout)
+ * - setup: the run to open on (query string, link or object); default the page's own
+ * - headed: show the browser window (when headless Chrome finds no GPU adapter)
+ * - width, height: the window, which sets a screenshot's default size
+ * - log: where progress messages go (default stderr)
+ */
+export async function openSession(opts = {}) {
+  const log = opts.log ?? ((m) => process.stderr.write(m + '\n'));
+  let server = null;
+  let base = opts.url;
+  if (!base) {
+    const { createServer } = await import('vite');
+    server = await createServer({
+      root: REPO,
+      configFile: path.join(REPO, 'vite.config.ts'),
+      server: { port: 0, strictPort: false, host: '127.0.0.1' },
+      logLevel: 'error',
+      clearScreen: false,
+    });
+    await server.listen();
+    base = server.resolvedUrls.local[0];
+  }
+  const { chromium } = await import('@playwright/test');
+  const args = ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist'];
+  if (process.platform === 'win32') args.push('--use-angle=d3d11');
+  let browser;
+  try {
+    browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome', headless: !opts.headed, args });
+  } catch (e) {
+    await server?.close();
+    throw new Error(`could not start Chrome (${pageMessage(e)}). Install Chrome, or set PW_CHANNEL=msedge for Edge.`);
+  }
+  const page = await browser.newPage({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 } });
+  const pageErrors = [];
+  page.on('pageerror', (e) => pageErrors.push(e.message));
+
+  const u = new URL(base);
+  const q = new URLSearchParams(setupQuery(opts.setup));
+  q.set('headless', '1');
+  u.search = q.toString();
+  log(`shaderous: opening ${u.origin}${u.pathname}`);
+  await page.goto(u.toString());
+  const close = async () => {
+    await browser.close().catch(() => {});
+    await server?.close().catch(() => {});
+  };
+  try {
+    await page.waitForFunction(() => window.shaderous, undefined, { timeout: 60_000 });
+    await page.evaluate(() => window.shaderous.ready);
+  } catch (e) {
+    await close();
+    throw new Error(`the simulator did not start: ${pageMessage(e)}${pageErrors.length ? `\n${pageErrors.join('\n')}` : ''}`);
+  }
+
+  /** Call window.shaderous[name](...args) in the page; errors come back as plain Errors. */
+  const call = async (name, ...callArgs) => {
+    try {
+      return await page.evaluate(([n, a]) => window.shaderous[n](...a), [name, callArgs]);
+    } catch (e) {
+      throw new Error(pageMessage(e));
+    }
+  };
+  return { page, call, close, url: u.toString() };
+}
+
+/** A PNG data URL as bytes. */
+export const pngBytes = (dataUrl) => Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');

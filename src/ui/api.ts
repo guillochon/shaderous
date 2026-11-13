@@ -21,6 +21,8 @@ import { BUILD, errorLog } from './errors';
 /** What the page lends the API: its state, and the operations its own controls use. */
 export interface AppHooks {
   gpu(): Gpu;
+  /** The GPU adapter, as the page names it. */
+  adapter(): string;
   sim(): Simulation | undefined;
   cfg(): SimConfig;
   view: ViewState;
@@ -177,6 +179,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       finished: app.finished(),
       preparing: s.preparing,
       query: app.query(),
+      adapter: app.adapter(),
     };
   }
 
