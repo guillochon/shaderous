@@ -18,6 +18,10 @@
 @group(0) @binding(4) var<storage, read_write> ARGS: array<u32>;
 @group(0) @binding(5) var<storage, read_write> LL: array<u32>;
 
+// Slabs of a long 2D list (amr/list.wgsl): must match SLAB_QUADS and FLAT_ROWS there.
+const SLAB_QUADS = 16384u;
+const FLAT_ROWS = 32768u;
+
 fn put(i: u32, x: u32, y: u32, z: u32) {
   ARGS[3u * i] = x;
   ARGS[3u * i + 1u] = y;
@@ -36,9 +40,12 @@ fn main() {
   // Padded passes: 3 x 3 x 5 workgroups per block; interior passes: 2 x 2 x 4. In 2D a
   // workgroup covers four blocks (amr/list.wgsl): 3 x 3 or 2 x 2 per four.
   if (flat) {
-    put(0u, (na + 3u) / 4u * 3u, 3u, 1u);
-    put(1u, (nu + 3u) / 4u * 2u, 2u, 1u);
-    put(2u, (nl + 3u) / 4u * 2u, 2u, 1u);
+    let qa = (na + 3u) / 4u;
+    let qu = (nu + 3u) / 4u;
+    let ql = (nl + 3u) / 4u;
+    put(0u, min(qa, SLAB_QUADS) * 3u, 3u, (qa + SLAB_QUADS - 1u) / SLAB_QUADS);
+    put(1u, min(qu, SLAB_QUADS) * 2u, 2u, (qu + SLAB_QUADS - 1u) / SLAB_QUADS);
+    put(2u, min(ql, SLAB_QUADS) * 2u, 2u, (ql + SLAB_QUADS - 1u) / SLAB_QUADS);
   } else {
     put(0u, na * 3u, 3u, 5u);
     put(1u, nu * 2u, 2u, 4u);
@@ -56,9 +63,9 @@ fn main() {
   put(11u, (na + 7u) / 8u, 1u, 1u);
   put(12u, (na + 7u) / 8u, 1u, 1u);
   let w = 18u; // block side (16) plus a ghost layer on each face
-  put(13u, (select(w * w * w, w * w, flat) + 63u) / 64u, nl, 1u);
+  put(13u, (select(w * w * w, w * w, flat) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);
   let w2 = 20u; // and two
-  put(14u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, na, 1u);
+  put(14u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
   put(15u, 48u, na, 1u);
   ARGS[60] += nu;
   ARGS[61] += na;

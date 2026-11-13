@@ -114,7 +114,7 @@ fn main(
   workgroupBarrier();
   if (lix == 0u) {
     // Record grid: the workgroups of a block along x, the blocks of the list along y.
-    let base = (wid.y * num_wg.x + wid.x) * 2u;
+    let base = (flat_row(wid) * num_wg.x + wid.x) * 2u;
     RATES[base] = bitcast<f32>(atomicLoad(&wg_max[0]));
     RATES[base + 1u] = bitcast<f32>(atomicLoad(&wg_max[1]));
   }

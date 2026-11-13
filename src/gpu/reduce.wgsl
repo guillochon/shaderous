@@ -22,6 +22,10 @@ override NOUTX: u32 = 1u;  // outputs along each axis = ceil(inputs / RED_F)
 override NOUTY: u32 = 1u;
 override NOUTZ: u32 = 1u;
 override RED_F: u32 = 4u;  // block side
+// A long x axis needs more workgroups than a dispatch may have along one axis: it is then cut
+// into slabs of RED_XG workgroups, stacked along z after the RED_ZG workgroups z itself needs.
+override RED_XG: u32 = 65535u;
+override RED_ZG: u32 = 1u;
 
 @group(0) @binding(20) var<storage, read_write> RED_OUT: array<f32>;
 
@@ -51,7 +55,8 @@ fn red_combine(a: Red, b: Red) -> Red {
 }
 
 @compute @workgroup_size(4, 4, 4)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_id) lid: vec3<u32>) {
+  let gid = vec3<u32>(wid.x + (wid.z / RED_ZG) * RED_XG, wid.y, wid.z % RED_ZG) * 4u + lid;
   if (any(gid >= vec3<u32>(NOUTX, NOUTY, NOUTZ))) { return; }
   var acc = red_identity();
   for (var z = 0u; z < RED_F; z++) {

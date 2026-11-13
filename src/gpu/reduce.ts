@@ -14,7 +14,8 @@ export const RED_F = Number(new URLSearchParams(globalThis.location?.search ?? '
 interface Stage {
   pipeline: GPUComputePipeline;
   groups: GPUBindGroup[]; // one per source variant (state parity)
-  nout: number[];
+  /** workgroups dispatched: x in slabs stacked along z where it is longer than the device allows */
+  dispatch: [number, number, number];
 }
 
 export class Reducer {
@@ -78,13 +79,17 @@ export class Reducer {
     for (let s = external ? 2 : 1; s < sizes.length; s++) {
       const [ix, iy, iz] = sizes[s - 1];
       const [ox, oy, oz] = sizes[s];
-      const constants = { NINX: ix, NINY: iy, NINZ: iz, NOUTX: ox, NOUTY: oy, NOUTZ: oz, RED_F };
+      const gx = Math.ceil(ox / 4);
+      const gz = Math.ceil(oz / 4);
+      const slabs = Math.ceil(gx / device.limits.maxComputeWorkgroupsPerDimension);
+      const xg = Math.ceil(gx / slabs);
+      const constants = { NINX: ix, NINY: iy, NINZ: iz, NOUTX: ox, NOUTY: oy, NOUTZ: oz, RED_F, RED_XG: xg, RED_ZG: gz };
       const pipeline = await computePipeline(device, s === 1 ? first : later, `${label} reduce ${s}`, constants);
       const groups =
         s === 1
           ? variants.map((v) => bindGroup(device, pipeline, { ...v, 20: buffers[0] }))
           : [bindGroup(device, pipeline, { 0: buffers[s - 2], 20: buffers[s - 1] })];
-      red.stages.push({ pipeline, groups, nout: sizes[s] });
+      red.stages.push({ pipeline, groups, dispatch: [xg, Math.ceil(oy / 4), gz * slabs] });
     }
     return red;
   }
@@ -93,7 +98,7 @@ export class Reducer {
     this.stages.forEach((st, i) => {
       pass.setPipeline(st.pipeline);
       pass.setBindGroup(0, st.groups[i === 0 ? Math.min(variant, st.groups.length - 1) : 0]);
-      pass.dispatchWorkgroups(Math.ceil(st.nout[0] / 4), Math.ceil(st.nout[1] / 4), Math.ceil(st.nout[2] / 4));
+      pass.dispatchWorkgroups(...st.dispatch);
     });
   }
 }

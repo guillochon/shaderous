@@ -45,6 +45,9 @@ const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
+/** Slabs of a long 2D block list (amr/list.wgsl): must match SLAB_QUADS and FLAT_ROWS there. */
+const SLAB_QUADS = 16384;
+const FLAT_ROWS = 32768;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
 const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
 const BIN_TOTALS = 60;
@@ -296,7 +299,10 @@ export class AmrSim implements Simulation {
     const fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim));
     if (cfg.ndim === 3) {
       const auto = Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9));
-      this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
+      // 3D passes run three workgroups per block along x (and gravity's one per block along y),
+      // so the blocks must stay within a third of what a dispatch may have along an axis.
+      const most = Math.floor(Math.cbrt(Math.floor(gpu.limits.maxComputeWorkgroupsPerDimension / 3)) + 1e-9);
+      this.slotsPerSide = Math.min(limit, most, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
       this.layers = this.slotsPerSide;
     } else {
       const want = Math.min(explicit || Math.max(full, roots * 2, 144), Math.max(1, fit));
@@ -1338,18 +1344,23 @@ export class AmrSim implements Simulation {
 
   // ---------------------------------------------------------------- stepping
 
-  // See amr/list.wgsl: in 2D each workgroup covers four blocks.
+  // See amr/list.wgsl: in 2D each workgroup covers four blocks, and a long list is cut into
+  // slabs along z, to stay within the workgroups a dispatch may have along an axis.
   private padded(pass: GPUComputePassEncoder, count: number) {
-    if (this.cfg.ndim === 2) pass.dispatchWorkgroups(Math.ceil(count / 4) * 3, 3, 1);
-    else pass.dispatchWorkgroups(count * 3, 3, 5);
+    if (this.cfg.ndim === 2) {
+      const q = Math.ceil(count / 4);
+      pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * 3, 3, Math.ceil(q / SLAB_QUADS));
+    } else pass.dispatchWorkgroups(count * 3, 3, 5);
   }
   /** Dispatch for inv_flat() (amr/list.wgsl): cells and `reach` ghost layers of `count` blocks. */
   private flat(pass: GPUComputePassEncoder, count: number, reach: number) {
-    if (count > 0) pass.dispatchWorkgroups(flatGroups(this.cfg.ndim, reach), count, 1);
+    if (count > 0) pass.dispatchWorkgroups(flatGroups(this.cfg.ndim, reach), Math.min(count, FLAT_ROWS), Math.ceil(count / FLAT_ROWS));
   }
   private interior(pass: GPUComputePassEncoder, count: number) {
-    if (this.cfg.ndim === 2) pass.dispatchWorkgroups(Math.ceil(count / 4) * 2, 2, 1);
-    else pass.dispatchWorkgroups(count * 2, 2, 4);
+    if (this.cfg.ndim === 2) {
+      const q = Math.ceil(count / 4);
+      pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * 2, 2, Math.ceil(q / SLAB_QUADS));
+    } else pass.dispatchWorkgroups(count * 2, 2, 4);
   }
 
   private applyRegrid(enc: GPUCommandEncoder) {
