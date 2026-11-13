@@ -1,7 +1,7 @@
 """Train the burning surrogate: a small network that steps the alpha chain's mass fractions
 forward by dt at fixed density, with the self-heating that burner.py integrates.
 
-    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr] [logw]
+    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr] [logw] [resw]
 
 Input  log10 rho, log10 T, log10 dt (all scaled to about [-1, 1]) and the 13 mass fractions
        (as X^(1/4), which spreads out the trace species).
@@ -152,52 +152,101 @@ class Burner(nn.Module):
     def __init__(self, width=64, depth=3, arch="delta"):
         super().__init__()
         self.arch = arch
-        self.rates = arch in ("rates", "rates2")
-        self.stages = 2 if arch == "rates2" else 1
+        self.rates = arch in ("rates", "rates2", "rates2t", "flow2")
+        self.stages = 2 if arch in ("rates2", "rates2t", "flow2") else 1
+        self.take = arch == "rates2t"
+        self.flow = arch == "flow2"
+        self.width = 41 if self.take else 27 if self.flow else 28   # outputs per step
         layers, n = [], 16 + (len(RATE_INPUTS) if self.rates else 0)
         for _ in range(depth):
             layers += [nn.Linear(n, width), nn.SiLU()]
             n = width
-        layers.append(nn.Linear(n, 28 * self.stages))
+        layers.append(nn.Linear(n, self.width * self.stages))
         self.net = nn.Sequential(*layers)
         nn.init.zeros_(self.net[-1].weight)
         nn.init.zeros_(self.net[-1].bias)
+        if self.flow:
+            with torch.no_grad():
+                for k in range(self.stages):
+                    self.net[-1].bias[k * 27 + 1:k * 27 + 14] = -4.0   # each species loses 2% of itself
 
     def forward(self, log_rho, log_T, log_dt, X):
         X = X.clamp_min(0.0)
         z = self.net(features(log_rho, log_T, log_dt, X, self.rates))
         if self.stages == 1:
             return self.relax(z, X, log_dt)
-        D1 = self.relax(z[:, :28], X, log_dt)
-        parts = self.parts   # the aux losses train the first step alone, keeping its rate
-        D2 = self.relax(z[:, 28:], (X + D1).clamp_min(0.0), log_dt)
-        self.parts = parts   # off the dead zone; the second takes what it cannot do
+        P = self.width
+        D1 = self.relax(z[:, :P], X, log_dt)
+        p1 = self.parts
+        D2 = self.relax(z[:, P:], (X + D1).clamp_min(0.0), log_dt)
+        # The aux losses train each step's rate off the dead zone: the first on the whole
+        # change, the second on what the first left of it.
+        self.parts = [p1 + (None,), self.parts + (D1.detach(),)]
         return D1 + D2
 
-    def load_single(self, state):
-        """A one-step model's weights as the first step of this one, the second starting as
-        no change at all at a small rate (target the cell itself, free share 1e-9)."""
+    def load_from(self, state, arch):
+        """The weights of a model with fewer outputs ('rates', 'rates2') as the same steps of
+        this one: a missing second step starts as no change at all at a small rate (target
+        the cell itself, free share 1e-9), missing take logits as taking from every species
+        in proportion (share sigmoid(2), near what the older models do, all of it)."""
+        old = Burner(1, 1, arch)
         last = f"net.{len(self.net) - 1}"
         w, b = state.pop(last + ".weight"), state.pop(last + ".bias")
         self.load_state_dict(state, strict=False)
+        P = self.width
         with torch.no_grad():
             head = self.net[-1]
             head.weight.zero_(); head.bias.zero_()
-            head.weight[:28] = w; head.bias[:28] = b
-            head.bias[28 + 13] = -1.4    # log10 k = -2
-            head.bias[28 + 27] = -18.0
+            for k in range(self.stages):
+                o = k * P
+                if k < old.stages:
+                    head.weight[o:o + 28] = w[k * old.width:k * old.width + 28]
+                    head.bias[o:o + 28] = b[k * old.width:k * old.width + 28]
+                    if old.take:
+                        head.weight[o + 28:o + 41] = w[k * old.width + 28:k * old.width + 41]
+                        head.bias[o + 28:o + 41] = b[k * old.width + 28:k * old.width + 41]
+                else:
+                    head.bias[o + 13] = -1.4    # log10 k = -2
+                    head.bias[o + 27] = -18.0
+                if self.take and not (k < old.stages and old.take):
+                    head.bias[o + 28:o + 41] = 2.0   # share 0.88: at 12 the sigmoid is flat and never trains
 
     def relax(self, z, X, log_dt):
+        if self.flow:
+            return self.flow_step(z, X, log_dt)
         em1 = torch.expm1(z[:, :13].clamp(-30.0, 30.0))
         m = (X * em1).sum(dim=1, keepdim=True)             # sum_j X_j expm1(a_j), with sum X = 1
         toward = X * (em1 - m) / (1.0 + m)                 # the scaled target minus X
         w = torch.sigmoid(z[:, 27] - 2.0)[:, None]         # share of the free target
-        free = torch.softmax(z[:, 14:27], dim=1) - X
+        if self.take:
+            # Mass for the free target taken from each species by a share of its own, not
+            # from all of them in proportion: Ne20 made out of the O16 and the He alone, C12
+            # left alone, as alpha capture does in simmering C/O.
+            share = X * torch.sigmoid(z[:, 28:41])
+            free = share.sum(dim=1, keepdim=True) * torch.softmax(z[:, 14:27], dim=1) - share
+        else:
+            free = torch.softmax(z[:, 14:27], dim=1) - X
         dY = (1.0 - w) * toward + w * free                 # Y - X
         log_k = 5.0 + 5.0 * z[:, 13]                       # log10 of the rate, 1/s
         kdt = torch.pow(10.0, (log_k + log_dt).clamp(max=6.0))
         c = -torch.expm1(-kdt)
         self.parts = (dY, c, log_k + log_dt)               # for the training losses
+        return c[:, None] * dY
+
+
+    def flow_step(self, z, X, log_dt):
+        """'flow2' steps: each species loses a share of itself, sigmoid(u_i), and what is lost
+        goes to the species by a softmax g, D = (1 - exp(-k dt)) (M g - X sigmoid(u)) with
+        M = sum_i X_i sigmoid(u_i). Unlike the relaxation's target, which normalizes, a
+        product here costs only the species that make it: Ne20 out of O16 and He, the C12
+        left alone (the relaxation took it out of C12 and O16 alike, both its parts, and the
+        He that should have made it stayed and burned again every step after)."""
+        loss = X * torch.sigmoid(z[:, 1:14])
+        dY = loss.sum(dim=1, keepdim=True) * torch.softmax(z[:, 14:27], dim=1) - loss
+        log_k = 5.0 + 5.0 * z[:, 0]
+        kdt = torch.pow(10.0, (log_k + log_dt).clamp(max=6.0))
+        c = -torch.expm1(-kdt)
+        self.parts = (dY, c, log_k + log_dt)
         return c[:, None] * dY
 
 
@@ -377,6 +426,16 @@ def log_loss(Dp, Dt, et):
     return (l_x + l_e).mean() / 20.0   # asinh(1 / LOG_EPS) is about 24
 
 
+def reservoir_loss(Dp, Dt, X0):
+    """Each species' error relative to how much of it there is (before or after the step,
+    whichever is more): what matters for the steps after this one. A step that leaves half
+    a trace of fuel in place errs by little of the composition, but that fuel burns again
+    in every step after it (He in simmering C/O: 1.6e-3 of He left, Ne20 made instead out of
+    C12, and the gas runs away in 0.1 s where it should simmer for seconds)."""
+    size = torch.maximum(X0, X0 + Dt).clamp_min(0.0) + 1e-6   # species below this barely matter
+    return torch.log1p((Dp - Dt).abs() / size).sum(dim=1).mean()
+
+
 def loss_fn(Dp, Dt, et, hard=0.0, rel=0.0, parts=None, aux=0.0):
     """Errors in the change of composition (L1) and in the energy released (1e18 erg/g),
     absolute, and if `rel`, relative to the reference's: before a runaway the energy released
@@ -401,14 +460,22 @@ def loss_fn(Dp, Dt, et, hard=0.0, rel=0.0, parts=None, aux=0.0):
         # c_ref is how far along (Y - X) the reference moved: the target is trained by that
         # much (relative to the change), and log c is pulled toward log c_ref, which has no
         # dead zone.
-        dY, c, log_kdt = parts
-        g = dY.detach()
-        c_ref = ((Dt * g).sum(dim=1) / (g**2).sum(dim=1).clamp_min(1e-30)).clamp(1e-14, 1.0)
-        l_y = (c_ref[:, None] * dY - Dt).abs().sum(dim=1) / (d_t + REL_EPS)
-        log_c = torch.where(c > 1e-6, torch.log10(c.clamp_min(1e-30)), log_kdt)   # 1 - exp(-x) = x for small x
-        l_c = torch.where(d_t > 1e-13, (log_c - torch.log10(c_ref)).abs().clamp(max=30.0), torch.zeros_like(c))
-        loss = loss + aux * (torch.log1p(l_y).mean() + 0.1 * l_c.mean())
+        if isinstance(parts, list):
+            loss = loss + sum(aux_loss(Dt if done is None else Dt - done, *p, aux) for *p, done in parts)
+        else:
+            loss = loss + aux_loss(Dt, *parts, aux)
     return loss, l_x, l_e
+
+
+def aux_loss(Dt, dY, c, log_kdt, aux):
+    """loss_fn's aux terms for one relaxation step toward Dt."""
+    d_t = Dt.abs().sum(dim=1)
+    g = dY.detach()
+    c_ref = ((Dt * g).sum(dim=1) / (g**2).sum(dim=1).clamp_min(1e-30)).clamp(1e-14, 1.0)
+    l_y = (c_ref[:, None] * dY - Dt).abs().sum(dim=1) / (d_t + REL_EPS)
+    log_c = torch.where(c > 1e-6, torch.log10(c.clamp_min(1e-30)), log_kdt)   # 1 - exp(-x) = x for small x
+    l_c = torch.where(d_t > 1e-13, (log_c - torch.log10(c_ref)).abs().clamp(max=30.0), torch.zeros_like(c))
+    return aux * (torch.log1p(l_y).mean() + 0.1 * l_c.mean())
 
 
 @torch.no_grad()
@@ -496,6 +563,7 @@ def main():
     unroll = float(sys.argv[11]) if len(sys.argv) > 11 else 0.0
     lr = float(sys.argv[12]) if len(sys.argv) > 12 else 2e-3   # lower to fine-tune a trained model
     logw = float(sys.argv[13]) if len(sys.argv) > 13 else 0.0
+    resw = float(sys.argv[14]) if len(sys.argv) > 14 else 0.0
     tag = f"w{width}d{depth}h{hard:g}"
     rho, X, T, t = load()
     rng = np.random.default_rng(1)
@@ -508,8 +576,8 @@ def main():
     model = (FluxBurner if arch == "flux" else Burner)(width, depth, arch).to(dev)
     if init:
         ck = torch.load(HERE / init)
-        if arch == "rates2" and ck["arch"] != "rates2":
-            model.load_single(ck["state"])
+        if arch != ck["arch"]:
+            model.load_from(ck["state"], ck["arch"])
         else:
             model.load_state_dict(ck["state"])
         print("starting from", init)
@@ -531,6 +599,8 @@ def main():
             # with the trace He that should have made it left in place, 1.6e-3 of He in a
             # step that changes 1.5e-2), and that He then burns again every step after.
             loss = loss + logw * log_loss(Dp, Dt, et)
+        if resw > 0:
+            loss = loss + resw * reservoir_loss(Dp, Dt, X0)
         if unroll > 0:
             # A stretch of n steps (2 to 32) between two times of a trajectory, judged where
             # it ends: absolute and relative errors as for single steps.
