@@ -763,9 +763,10 @@ function syncControls() {
   // Nor a potential without gravity, nor a Jeans length without self-gravity.
   const pulled = cfg.gravity !== 'off' || cfg.gext.some((g) => g !== 0) || !!cfg.problem.masses || placedMasses > 0;
   // A barotropic gas carries no internal energy of its own, so it has no temperature or entropy
-  // to show: those two are left out of the menu altogether.
-  const noHeat = (i: number) => (i === 1 || i === 9) && cfg.eos === 'barotropic';
-  const noField = (i: number) => (i === 7 && two) || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic')) || (i === 14 && cfg.amrLevels === 0)
+  // to show, and nothing heats or cools without a cooling function: those are left out of the
+  // menu altogether.
+  const noHeat = (i: number) => ((i === 1 || i === 9) && cfg.eos === 'barotropic') || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic'));
+  const noField = (i: number) => (i === 7 && two) || (i === 14 && cfg.amrLevels === 0)
     || (i === 15 && !pulled) || (i === 17 && !self) || noHeat(i);
   for (const o of fieldSel.options) {
     o.disabled = noField(+o.value);
