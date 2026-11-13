@@ -420,7 +420,7 @@ before the next one allocates, so memory never spikes during a rebuild.
   $`256^3`$); compressed files measured 8% (an early Sedov blast) to 86% (tidal debris) of that.
 - **Links** (`ui/link.ts`): the address bar holds the preset, dimension, resolution, refinement
   and *only what differs from the preset's defaults*, for example
-  `?problem=tidal-disruption&dim=3&n=128&amr=2&p.beta=2&mode=slice`. Anything unrecognized or out
+  `?problem=tidal-disruption&dim=3&n=256&amr=3&p.beta=2&mode=slice`. Anything unrecognized or out
   of range in a link is ignored rather than trusted.
 - **Snapshots in memory** (`io/capture.ts`) save a running simulation and start runs from it; Reset returns to the loaded state.
 

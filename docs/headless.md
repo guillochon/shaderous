@@ -118,14 +118,14 @@ values, the setup in force, the final time and steps, why the run stopped, and t
 A long 3D run, at low priority so the machine stays responsive, with checkpoints:
 
 ```bash
-npm run headless -- run --problem tidal-disruption --dim 3 --n 256 --amr 3 --every 0.5 --athdf --low-priority --out runs/tde
+npm run headless -- run --problem tidal-disruption-full --dim 3 --n 512 --amr 4 --every 0.5 --athdf --low-priority --out runs/tde
 ```
 
 A tidal disruption's return rate, the classic dM/dt diagram. Run a few dynamical times past
 pericenter with `--debris`, then plot the last output:
 
 ```bash
-npm run headless -- run --problem tidal-disruption-full --dim 3 --n 128 --amr 2 --until 20 --every 1 --debris --low-priority --out runs/tde
+npm run headless -- run --problem tidal-disruption-full --until 20 --every 1 --debris --low-priority --out runs/tde
 ```
 
 ```bash

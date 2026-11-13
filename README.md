@@ -19,7 +19,7 @@ gas. The address bar always describes the current setup, so copying it (or press
 - [Rayleigh-Taylor instability](https://guillochon.github.io/shaderous/?problem=rayleigh-taylor)
 - [A Mach 3 wind tunnel with a step](https://guillochon.github.io/shaderous/?problem=forward-step)
 - [Sedov-Taylor blast in 3D](https://guillochon.github.io/shaderous/?problem=sedov&dim=3&n=128)
-- [A star torn apart by a black hole, on an adaptive mesh](https://guillochon.github.io/shaderous/?problem=tidal-disruption-full&dim=3&n=128&amr=2)
+- [A star torn apart by a black hole, on an adaptive mesh](https://guillochon.github.io/shaderous/?problem=tidal-disruption-full)
 - [Thermal instability of the interstellar medium](https://guillochon.github.io/shaderous/?problem=thermal-instability)
 - [A binary accreting from a circumbinary disk](https://guillochon.github.io/shaderous/?problem=binary)
 

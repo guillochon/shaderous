@@ -28,7 +28,9 @@ import { codeG, gravityUnits } from '../units/units';
 // the full variant opens at 2.5.
 //
 // The boundaries let gas leave but not enter. Once debris starts to leave, the frame follows
-// the gas that is still in the box.
+// the gas that is still in the box. Every variant has a box 16 stellar radii across, so the debris
+// and what is left of the star stay on the grid for longer; TDE.box, 8, is the box the validation
+// tests were calibrated in.
 export const TDE = { n: 1.5, M: 1, R: 1, G: 1, start: 3, rhoAmb: 1e-6, rhoCut: 1e-4, box: 8 };
 
 export const TDE_UNITS = gravityUnits('solar', TDE.R * ASTRO.Rsun, TDE.M * ASTRO.Msun);
@@ -151,25 +153,27 @@ function tde(v: TdeVariant): Problem {
   };
 }
 
+// The gamma = 5/3 star: finest cells of 1/16 of its radius, 256 across the box with three levels.
+const N15_SETUP = { grid: { n: 256, amr: 3 }, box: 16 };
+
 /** The default: a gamma = 5/3 star that loses its outer layers and survives. */
 export const tidalDisruption = tde({
   id: 'tidal-disruption',
   blurb: 'A Sun-like γ = 5/3 star grazes a million-solar-mass black hole (β = 0.6): it loses its outer layers and survives. In the star’s rest frame.',
   n: 1.5,
   beta: 0.6,
-  grid: { n: 128, amr: 2 },
+  ...N15_SETUP,
 });
 export const tidalDisruptionFull = tde({
   id: 'tidal-disruption-full',
   blurb: 'A Sun-like γ = 5/3 star passes deep inside the tidal radius of a million-solar-mass black hole (β = 1.5) and is torn apart. In the star’s rest frame.',
   n: 1.5,
   beta: 1.5,
-  grid: { n: 128, amr: 2 },
+  ...N15_SETUP,
 });
-// The gamma = 4/3 star: a box twice as wide, so the debris and what is left of the star stay
-// on the grid longer, at the same finest cell size as the gamma = 5/3 runs on 256 cells with
-// three levels; an ambient medium as dense as theirs in absolute terms, and a cut low enough
-// to keep it cooler than the star's center.
+// The gamma = 4/3 star: finest cells of 1/32 of its radius, 512 across the box with four levels;
+// an ambient medium as dense as the gamma = 5/3 star's in absolute terms, and a cut low enough to
+// keep it cooler than the star's center.
 const N3_SETUP = { grid: { n: 512, amr: 4 }, box: 16, rhoCut: 2e-6, rhoAmb: 1e-7 };
 
 export const tidalDisruptionN3 = tde({
