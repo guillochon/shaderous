@@ -1,0 +1,401 @@
+{
+  "program": "shaderous",
+  "build": "9084436 (2026-11-13)",
+  "adapter": "nvidia ampere",
+  "setup": "problem=evrard&dim=3&n=128&amr=2",
+  "view": {},
+  "problem": "evrard",
+  "started": "2026-11-13T15:23:54.165Z",
+  "command": [
+    "run",
+    "--problem",
+    "evrard",
+    "--dim",
+    "3",
+    "--n",
+    "128",
+    "--amr",
+    "2",
+    "--set",
+    "fluxwork=1",
+    "--until",
+    "3",
+    "--every",
+    "0.05",
+    "--low-priority",
+    "--quiet",
+    "--out",
+    "C:\\Users\\guill\\shaderous\\.claude\\worktrees\\shaderous-headless-agent-6e9a1d\\paper\\paper\\figures\\data\\gravity\\evrard-adaptive-flux"
+  ],
+  "outputs": [
+    {
+      "output": 0,
+      "t": 0,
+      "steps": 0,
+      "files": []
+    },
+    {
+      "output": 1,
+      "t": 0.05000000074505806,
+      "steps": 2,
+      "files": []
+    },
+    {
+      "output": 2,
+      "t": 0.10000000149011612,
+      "steps": 4,
+      "files": []
+    },
+    {
+      "output": 3,
+      "t": 0.15000000596046448,
+      "steps": 6,
+      "files": []
+    },
+    {
+      "output": 4,
+      "t": 0.19999998807907104,
+      "steps": 8,
+      "files": []
+    },
+    {
+      "output": 5,
+      "t": 0.25,
+      "steps": 11,
+      "files": []
+    },
+    {
+      "output": 6,
+      "t": 0.30000001192092896,
+      "steps": 14,
+      "files": []
+    },
+    {
+      "output": 7,
+      "t": 0.3499999940395355,
+      "steps": 17,
+      "files": []
+    },
+    {
+      "output": 8,
+      "t": 0.4000000059604645,
+      "steps": 21,
+      "files": []
+    },
+    {
+      "output": 9,
+      "t": 0.44999998807907104,
+      "steps": 25,
+      "files": []
+    },
+    {
+      "output": 10,
+      "t": 0.5,
+      "steps": 30,
+      "files": []
+    },
+    {
+      "output": 11,
+      "t": 0.550000011920929,
+      "steps": 35,
+      "files": []
+    },
+    {
+      "output": 12,
+      "t": 0.6000000238418579,
+      "steps": 41,
+      "files": []
+    },
+    {
+      "output": 13,
+      "t": 0.6499999761581421,
+      "steps": 48,
+      "files": []
+    },
+    {
+      "output": 14,
+      "t": 0.699999988079071,
+      "steps": 56,
+      "files": []
+    },
+    {
+      "output": 15,
+      "t": 0.75,
+      "steps": 64,
+      "files": []
+    },
+    {
+      "output": 16,
+      "t": 0.800000011920929,
+      "steps": 73,
+      "files": []
+    },
+    {
+      "output": 17,
+      "t": 0.8500000238418579,
+      "steps": 83,
+      "files": []
+    },
+    {
+      "output": 18,
+      "t": 0.8999999761581421,
+      "steps": 94,
+      "files": []
+    },
+    {
+      "output": 19,
+      "t": 0.949999988079071,
+      "steps": 106,
+      "files": []
+    },
+    {
+      "output": 20,
+      "t": 1,
+      "steps": 118,
+      "files": []
+    },
+    {
+      "output": 21,
+      "t": 1.0499999523162842,
+      "steps": 130,
+      "files": []
+    },
+    {
+      "output": 22,
+      "t": 1.100000023841858,
+      "steps": 142,
+      "files": []
+    },
+    {
+      "output": 23,
+      "t": 1.149999976158142,
+      "steps": 155,
+      "files": []
+    },
+    {
+      "output": 24,
+      "t": 1.2000000476837158,
+      "steps": 169,
+      "files": []
+    },
+    {
+      "output": 25,
+      "t": 1.25,
+      "steps": 185,
+      "files": []
+    },
+    {
+      "output": 26,
+      "t": 1.2999999523162842,
+      "steps": 203,
+      "files": []
+    },
+    {
+      "output": 27,
+      "t": 1.350000023841858,
+      "steps": 224,
+      "files": []
+    },
+    {
+      "output": 28,
+      "t": 1.399999976158142,
+      "steps": 255,
+      "files": []
+    },
+    {
+      "output": 29,
+      "t": 1.4500000476837158,
+      "steps": 291,
+      "files": []
+    },
+    {
+      "output": 30,
+      "t": 1.5,
+      "steps": 323,
+      "files": []
+    },
+    {
+      "output": 31,
+      "t": 1.5499999523162842,
+      "steps": 352,
+      "files": []
+    },
+    {
+      "output": 32,
+      "t": 1.600000023841858,
+      "steps": 379,
+      "files": []
+    },
+    {
+      "output": 33,
+      "t": 1.649999976158142,
+      "steps": 404,
+      "files": []
+    },
+    {
+      "output": 34,
+      "t": 1.7000000476837158,
+      "steps": 428,
+      "files": []
+    },
+    {
+      "output": 35,
+      "t": 1.75,
+      "steps": 452,
+      "files": []
+    },
+    {
+      "output": 36,
+      "t": 1.7999999523162842,
+      "steps": 475,
+      "files": []
+    },
+    {
+      "output": 37,
+      "t": 1.850000023841858,
+      "steps": 497,
+      "files": []
+    },
+    {
+      "output": 38,
+      "t": 1.899999976158142,
+      "steps": 519,
+      "files": []
+    },
+    {
+      "output": 39,
+      "t": 1.9500000476837158,
+      "steps": 540,
+      "files": []
+    },
+    {
+      "output": 40,
+      "t": 2,
+      "steps": 560,
+      "files": []
+    },
+    {
+      "output": 41,
+      "t": 2.049999952316284,
+      "steps": 580,
+      "files": []
+    },
+    {
+      "output": 42,
+      "t": 2.0999999046325684,
+      "steps": 599,
+      "files": []
+    },
+    {
+      "output": 43,
+      "t": 2.1500000953674316,
+      "steps": 618,
+      "files": []
+    },
+    {
+      "output": 44,
+      "t": 2.200000047683716,
+      "steps": 636,
+      "files": []
+    },
+    {
+      "output": 45,
+      "t": 2.25,
+      "steps": 654,
+      "files": []
+    },
+    {
+      "output": 46,
+      "t": 2.299999952316284,
+      "steps": 671,
+      "files": []
+    },
+    {
+      "output": 47,
+      "t": 2.3499999046325684,
+      "steps": 688,
+      "files": []
+    },
+    {
+      "output": 48,
+      "t": 2.4000000953674316,
+      "steps": 705,
+      "files": []
+    },
+    {
+      "output": 49,
+      "t": 2.450000047683716,
+      "steps": 722,
+      "files": []
+    },
+    {
+      "output": 50,
+      "t": 2.5,
+      "steps": 738,
+      "files": []
+    },
+    {
+      "output": 51,
+      "t": 2.549999952316284,
+      "steps": 754,
+      "files": []
+    },
+    {
+      "output": 52,
+      "t": 2.5999999046325684,
+      "steps": 770,
+      "files": []
+    },
+    {
+      "output": 53,
+      "t": 2.6500000953674316,
+      "steps": 782,
+      "files": []
+    },
+    {
+      "output": 54,
+      "t": 2.700000047683716,
+      "steps": 791,
+      "files": []
+    },
+    {
+      "output": 55,
+      "t": 2.75,
+      "steps": 800,
+      "files": []
+    },
+    {
+      "output": 56,
+      "t": 2.799999952316284,
+      "steps": 809,
+      "files": []
+    },
+    {
+      "output": 57,
+      "t": 2.8499999046325684,
+      "steps": 818,
+      "files": []
+    },
+    {
+      "output": 58,
+      "t": 2.9000000953674316,
+      "steps": 827,
+      "files": []
+    },
+    {
+      "output": 59,
+      "t": 2.950000047683716,
+      "steps": 836,
+      "files": []
+    },
+    {
+      "output": 60,
+      "t": 3,
+      "steps": 845,
+      "files": []
+    }
+  ],
+  "finished": "2026-11-13T15:24:08.779Z",
+  "stopped": "time",
+  "seconds": 14.613
+}

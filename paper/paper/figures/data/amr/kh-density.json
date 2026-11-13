@@ -1,0 +1,12 @@
+{
+ "name": "kh-density",
+ "setup": "problem=kelvin-helmholtz&dim=2&n=2048&amr=3",
+ "t": 1.5,
+ "steps": 19223,
+ "view": {
+  "showBlocks": true,
+  "field": 0
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}

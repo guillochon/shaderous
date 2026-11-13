@@ -1,0 +1,9 @@
+{
+ "name": "interface",
+ "setup": "problem=tidal-disruption-full&dim=3&n=128&amr=2",
+ "t": 6,
+ "steps": 1109,
+ "view": {},
+ "adapter": "nvidia ampere",
+ "errors": []
+}

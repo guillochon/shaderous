@@ -1,0 +1,11 @@
+{
+ "name": "binary",
+ "setup": "problem=binary&dim=2&n=1024",
+ "t": 125.66370391845703,
+ "steps": 53267,
+ "view": {
+  "showBlocks": false
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}

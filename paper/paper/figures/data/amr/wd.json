@@ -1,0 +1,12 @@
+{
+ "name": "wd",
+ "setup": "problem=wd-collision&dim=3&n=256&amr=2",
+ "t": 4,
+ "steps": 545,
+ "view": {
+  "showBlocks": true,
+  "dist": 0.4
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}

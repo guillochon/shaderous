@@ -1,0 +1,51 @@
+[
+ {
+  "name": "kh",
+  "setup": "problem=kelvin-helmholtz&dim=2&n=2048&amr=3",
+  "until": 1.5,
+  "width": 1400,
+  "view": {
+   "showBlocks": true
+  },
+  "images": [
+   {
+    "name": "kh-density",
+    "view": {
+     "field": 0
+    }
+   },
+   {
+    "name": "kh-level",
+    "view": {
+     "field": 14,
+     "lo": 0,
+     "hi": 3
+    }
+   }
+  ]
+ },
+ {
+  "name": "wd",
+  "setup": "problem=wd-collision&dim=3&n=256&amr=2",
+  "until": 4,
+  "width": 1400,
+  "view": {
+   "showBlocks": true,
+   "dist": 0.4
+  }
+ },
+ {
+  "name": "sedov",
+  "setup": "problem=sedov&dim=3&n=256&amr=3&tbins=3",
+  "until": 0.05,
+  "width": 1400,
+  "view": {
+   "mode": "slice",
+   "field": 21,
+   "lo": 0,
+   "hi": 3,
+   "showBlocks": true
+  },
+  "steps": 16
+ }
+]

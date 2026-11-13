@@ -1,0 +1,136 @@
+{
+  "program": "shaderous",
+  "build": "9084436 (2026-11-13)",
+  "adapter": "nvidia ampere",
+  "setup": "problem=tidal-disruption-full&dim=3&n=128&amr=2",
+  "view": {
+    "showBlocks": false,
+    "dist": 1.9
+  },
+  "problem": "tidal-disruption-full",
+  "started": "2026-11-13T15:00:29.959Z",
+  "command": [
+    "run",
+    "--problem",
+    "tidal-disruption-full",
+    "--until",
+    "20",
+    "--every",
+    "2",
+    "--debris",
+    "--png",
+    "--width",
+    "900",
+    "--view",
+    "showBlocks=false",
+    "--view",
+    "dist=1.9",
+    "--low-priority",
+    "--out",
+    "C:\\Users\\guill\\shaderous\\.claude\\worktrees\\shaderous-headless-agent-6e9a1d\\paper\\paper\\figures\\data\\tde\\full"
+  ],
+  "outputs": [
+    {
+      "output": 0,
+      "t": 0,
+      "steps": 0,
+      "files": [
+        "0000-t0.png",
+        "0000-t0-debris.json"
+      ]
+    },
+    {
+      "output": 1,
+      "t": 2,
+      "steps": 122,
+      "files": [
+        "0001-t2.png",
+        "0001-t2-debris.json"
+      ]
+    },
+    {
+      "output": 2,
+      "t": 4,
+      "steps": 663,
+      "files": [
+        "0002-t4.png",
+        "0002-t4-debris.json"
+      ]
+    },
+    {
+      "output": 3,
+      "t": 6,
+      "steps": 1107,
+      "files": [
+        "0003-t6.png",
+        "0003-t6-debris.json"
+      ]
+    },
+    {
+      "output": 4,
+      "t": 8,
+      "steps": 1501,
+      "files": [
+        "0004-t8.png",
+        "0004-t8-debris.json"
+      ]
+    },
+    {
+      "output": 5,
+      "t": 10,
+      "steps": 1815,
+      "files": [
+        "0005-t10.png",
+        "0005-t10-debris.json"
+      ]
+    },
+    {
+      "output": 6,
+      "t": 12,
+      "steps": 2010,
+      "files": [
+        "0006-t12.png",
+        "0006-t12-debris.json"
+      ]
+    },
+    {
+      "output": 7,
+      "t": 14,
+      "steps": 2167,
+      "files": [
+        "0007-t14.png",
+        "0007-t14-debris.json"
+      ]
+    },
+    {
+      "output": 8,
+      "t": 16,
+      "steps": 2279,
+      "files": [
+        "0008-t16.png",
+        "0008-t16-debris.json"
+      ]
+    },
+    {
+      "output": 9,
+      "t": 18,
+      "steps": 2379,
+      "files": [
+        "0009-t18.png",
+        "0009-t18-debris.json"
+      ]
+    },
+    {
+      "output": 10,
+      "t": 20,
+      "steps": 2464,
+      "files": [
+        "0010-t20.png",
+        "0010-t20-debris.json"
+      ]
+    }
+  ],
+  "finished": "2026-11-13T15:01:10.433Z",
+  "stopped": "time",
+  "seconds": 40.474
+}

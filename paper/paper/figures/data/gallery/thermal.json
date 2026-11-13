@@ -1,0 +1,12 @@
+{
+ "name": "thermal",
+ "setup": "problem=thermal-instability&dim=2&n=1024",
+ "t": 0.6000000238418579,
+ "steps": 3572,
+ "view": {
+  "field": 1,
+  "showBlocks": false
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}
