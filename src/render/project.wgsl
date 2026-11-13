@@ -2,7 +2,9 @@
 // (amr/field.wgsl): the normalization of a value for the transfer function, and the passes that
 // fill the 2D map the slice and projection views draw (render/slice.wgsl), one texel per cell of
 // the finest level: r the value normalized as display_t() makes it, g 1 on a block's outline,
-// b log10 |value| (for the contour lines, whatever the color scale).
+// b log10 |value| (for the contour lines, whatever the color scale), a the side of the cell the
+// texel shows, in texels (1 on a uniform grid; a power of two on an adaptive mesh), so the contour
+// lines can be interpolated between the centers of the cells themselves.
 //
 // The map is V.nd.w texels on a side (the simulation's resolution), across the two axes other
 // than V.sp.w. The slice pass takes the cell under each texel's center, in the layer of cells
@@ -20,19 +22,28 @@ struct Cell {
   solid: bool,
 }
 
-// Integrals along a line of sight: rho dl, rho x dl, and whether any gas was crossed.
+// Integrals along a line of sight: rho dl, rho x dl, rho dl log2 of the cell's side in map
+// texels, and whether any gas was crossed.
 struct Column {
   m: f32,
   mx: f32,
+  ml: f32,
   gas: bool,
 }
 
-fn column_add(s: ptr<function, Column>, q: Cell, dl: f32) {
+// Adds a cell crossed for a length dl, `texels` map texels on a side.
+fn column_add(s: ptr<function, Column>, q: Cell, dl: f32, texels: f32) {
   if (q.solid) { return; }
   let w = max(q.rho, P.rho_floor) * dl;
   (*s).m += w;
   (*s).mx += w * q.x;
+  (*s).ml += w * log2(texels);
   (*s).gas = true;
+}
+
+// A projection's cell side for its contours: the mass-weighted typical cell along the column.
+fn column_texels(s: Column) -> f32 {
+  return exp2(round(s.ml / max(s.m, 1.0e-30)));
 }
 
 @group(0) @binding(11) var PROJ: texture_storage_2d<rgba16float, write>;
@@ -61,6 +72,7 @@ fn map_axes(axis: i32) -> vec2<i32> {
 struct Plane {
   q: Cell,
   edge: f32,
+  texels: f32,   // the side of the cell, in map texels
 }
 
 // One thread per texel of the map. The range comes from the display pass over the whole box.
@@ -69,7 +81,7 @@ fn slice(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (all(gid.xy < vec2<u32>(V.nd.w))) {
     let axis = i32(V.sp.w);
     let s = plane(vec2<i32>(gid.xy), map_axes(axis), axis);
-    textureStore(PROJ, vec2<i32>(gid.xy), vec4<f32>(display_t(s.q.x, s.q.solid), s.edge, log10_abs(s.q.x), 0.0));
+    textureStore(PROJ, vec2<i32>(gid.xy), vec4<f32>(display_t(s.q.x, s.q.solid), s.edge, log10_abs(s.q.x), s.texels));
   }
 }
 
@@ -82,7 +94,7 @@ fn project(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocat
     let s = column(vec2<i32>(gid.xy), map_axes(axis), axis);
     let x = select(s.mx / max(s.m, 1.0e-30), s.m, V.field == F_DENSITY);
     if (s.gas) { range_add(x); }
-    textureStore(PROJ, vec2<i32>(gid.xy), vec4<f32>(display_t(x, !s.gas), 0.0, log10_abs(x), 0.0));
+    textureStore(PROJ, vec2<i32>(gid.xy), vec4<f32>(display_t(x, !s.gas), 0.0, log10_abs(x), column_texels(s)));
   }
   range_end(lix);
 }

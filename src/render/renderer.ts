@@ -554,55 +554,67 @@ export class Renderer {
    */
   async contourAt(a: number, b: number, v: ViewState, pxPerSide: number, tolPx = 5): Promise<{ level: number; value: number } | null> {
     const map = this.map;
-    if (!map || !v.contours || map.width < 2) return null;
+    if (!map || !v.contours) return null;
     const side = map.width;
-    const gx = a * side - 0.5;
-    const gy = b * side - 0.5;
+    const clampi = (i: number) => Math.min(side - 1, Math.max(0, i));
+    // The side of the cell under the point, in texels, then the 4 x 4 cell centers around it.
+    const here = await this.readMapTexels(map, [[clampi(Math.floor(a * side)), clampi(Math.floor(b * side))]]);
+    if (!here || map !== this.map) return null;
+    const cell = Math.max(here[3], 1);
+    const gx = (a * side) / cell - 0.5;
+    const gy = (b * side) / cell - 0.5;
     const [ix, iy] = [Math.floor(gx), Math.floor(gy)];
     const [fx, fy] = [gx - ix, gy - iy];
-    const clampi = (i: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, i));
-    const ox = clampi(ix, 0, side - 2);
-    const oy = clampi(iy, 0, side - 2);
-    const patch = await this.readMapPatch(map, ox, oy);
-    if (!patch || map !== this.map) return null;
-    // Texel (x, y) of the map, clamped to it as textureLoad is in the shader: rgba.
-    const at = (x: number, y: number) => {
-      const i = 4 * (2 * (clampi(y, 0, side - 1) - oy) + (clampi(x, 0, side - 1) - ox));
-      return patch.subarray(i, i + 4);
-    };
-    const [p00, p10, p01, p11] = [at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1)];
-    if (Math.min(p00[0], p10[0], p01[0], p11[0]) < -0.5) return null; // beside a solid
-    const lerp = (u: number, w: number, s: number) => u + (w - u) * s;
-    const bil = (c: number) => lerp(lerp(p00[c], p10[c], fx), lerp(p01[c], p11[c], fx), fy);
+    const spots: [number, number][] = [];
+    for (let j = 0; j < 4; j++) for (let i = 0; i < 4; i++) spots.push([clampi(Math.floor((ix + i - 0.5) * cell)), clampi(Math.floor((iy + j - 0.5) * cell))]);
+    const texels = await this.readMapTexels(map, spots);
+    if (!texels || map !== this.map) return null;
+    // The cubic B-spline's weights and their derivatives, as in bspline() in the shader.
+    const w = (t: number) => [(1 - t) ** 3, 3 * t ** 3 - 6 * t ** 2 + 4, -3 * t ** 3 + 3 * t ** 2 + 3 * t + 1, t ** 3].map((q) => q / 6);
+    const dw = (t: number) => [-((1 - t) ** 2) / 2, (3 * t ** 2 - 4 * t) / 2, (-3 * t ** 2 + 2 * t + 1) / 2, t ** 2 / 2];
+    const [wx, wy, dwx, dwy] = [w(fx), w(fy), dw(fx), dw(fy)];
+    let lg = 0;
+    let t = 0;
+    let gxl = 0;
+    let gyl = 0;
+    for (let j = 0; j < 4; j++) {
+      for (let i = 0; i < 4; i++) {
+        const m = texels.subarray(4 * (4 * j + i), 4 * (4 * j + i) + 4);
+        if (m[0] < -0.5) return null; // within two cells of a solid
+        lg += wx[i] * wy[j] * m[2];
+        t += wx[i] * wy[j] * m[0];
+        gxl += dwx[i] * wy[j] * m[2];
+        gyl += wx[i] * dwy[j] * m[2];
+      }
+    }
     const n = Math.max(1, Math.round(v.nContours));
     const [l0, l1] = contourRange(v.lo, v.hi);
     const per = (n + 1) / Math.max(l1 - l0, 1e-6); // levels per unit of log10 |value|
-    const f = (bil(2) - l0) * per;
-    // Gradient of f per texel, then per screen pixel.
-    const dfx = lerp(p10[2] - p00[2], p11[2] - p01[2], fy) * per;
-    const dfy = lerp(p01[2] - p00[2], p11[2] - p10[2], fx) * per;
-    const perPx = (Math.hypot(dfx, dfy) * side) / pxPerSide;
+    const f = (lg - l0) * per;
+    // Gradient of f per cell, then per screen pixel.
+    const perPx = (Math.hypot(gxl, gyl) * per * side) / (cell * pxPerSide);
     const k = Math.round(f);
     if (k < 1 || k > n || Math.abs(f - k) > tolPx * perPx) return null;
     // The line is where the value is minus the level when it lies below zero on a linear scale.
     const { log, lo, hi } = colorScale(v);
-    const neg = !log && bil(0) < -lo / Math.max(hi - lo, 1e-20);
+    const neg = !log && t < -lo / Math.max(hi - lo, 1e-20);
     const value = 10 ** (l0 + k / per);
     return { level: k, value: neg ? -value : value };
   }
 
-  /** Texels (x, y) to (x + 1, y + 1) of the map, as rgba floats, row by row. */
-  private async readMapPatch(map: GPUTexture, x: number, y: number): Promise<Float32Array | null> {
+  /** Texels of the map, as rgba floats, four per texel in the order given. */
+  private async readMapTexels(map: GPUTexture, at: [number, number][]): Promise<Float32Array | null> {
     const d = this.device;
-    const buf = d.createBuffer({ size: 256 + 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    // One texel per 256 bytes of the buffer, where a copy may start.
+    const buf = d.createBuffer({ size: 256 * at.length, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     try {
       const enc = d.createCommandEncoder();
-      enc.copyTextureToBuffer({ texture: map, origin: [x, y] }, { buffer: buf, bytesPerRow: 256 }, [2, 2]);
+      at.forEach(([x, y], i) => enc.copyTextureToBuffer({ texture: map, origin: [x, y] }, { buffer: buf, offset: 256 * i }, [1, 1]));
       d.queue.submit([enc.finish()]);
       await buf.mapAsync(GPUMapMode.READ);
       const raw = new Uint16Array(buf.getMappedRange().slice(0));
-      const out = new Float32Array(16);
-      for (let row = 0; row < 2; row++) for (let i = 0; i < 8; i++) out[row * 8 + i] = halfToFloat(raw[row * 128 + i]);
+      const out = new Float32Array(4 * at.length);
+      for (let i = 0; i < at.length; i++) for (let c = 0; c < 4; c++) out[4 * i + c] = halfToFloat(raw[128 * i + c]);
       return out;
     } catch {
       return null;

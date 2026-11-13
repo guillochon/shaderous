@@ -108,14 +108,14 @@ fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
   // Position within the block, in texels of the map.
   let within = (p * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * side / f32(f.nblk);
   let edge = select(0.0, 1.0, within[ab.x] < 1.0 || within[ab.y] < 1.0);
-  return Plane(leaf_value(f), edge);
+  return Plane(leaf_value(f), edge, side / f32(f.nblk * BS));
 }
 
 // Projection: the leaf cells along `axis` through the center of texel `ij` of the map, each
 // crossed whole, so the integral is exact at every level of refinement. Each step looks up the
 // leaf a quarter of a finest cell past the last boundary and moves to its far face.
 fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
-  var s = Column(0.0, 0.0, false);
+  var s = Column(0.0, 0.0, 0.0, false);
   let finest = f32(i32(P.amr.y << P.amr.z) * BS);
   var p = vec3<f32>(0.0);
   p[ab.x] = (f32(ij.x) + 0.5) / f32(V.nd.w);
@@ -125,7 +125,7 @@ fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
     p[axis] = at + 0.25 / finest;
     let f = leaf_at(p);
     let ncell = f32(f.nblk * BS);
-    column_add(&s, leaf_value(f), g_dx);
+    column_add(&s, leaf_value(f), g_dx, f32(V.nd.w) / ncell);
     at = (floor(p[axis] * ncell) + 1.0) / ncell;
   }
   return s;

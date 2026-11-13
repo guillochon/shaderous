@@ -75,18 +75,18 @@ fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
   c[ab.x] = ij.x;
   c[ab.y] = ij.y;
   c[axis] = i32(clamp(floor(V.cut.z * depth), 0.0, depth - 1.0));
-  return Plane(voxel(c), 0.0);
+  return Plane(voxel(c), 0.0, 1.0);
 }
 
 // Projection: the cells along `axis` through cell `ij` of the map (one map texel per cell).
 fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
-  var s = Column(0.0, 0.0, false);
+  var s = Column(0.0, 0.0, 0.0, false);
   var c = vec3<i32>(0);
   c[ab.x] = ij.x;
   c[ab.y] = ij.y;
   for (var k = 0; k < i32(P.dims[axis]); k++) {
     c[axis] = k;
-    column_add(&s, voxel(c), P.dx);
+    column_add(&s, voxel(c), P.dx, 1.0);
   }
   return s;
 }
