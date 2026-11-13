@@ -1,7 +1,7 @@
 """Train the burning surrogate: a small network that steps the alpha chain's mass fractions
 forward by dt at fixed density, with the self-heating that burner.py integrates.
 
-    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr] [logw] [resw]
+    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr] [logw] [resw] [seed] [teacher.pt|-] [teach]
 
 Input  log10 rho, log10 T, log10 dt (all scaled to about [-1, 1]) and the 13 mass fractions
        (as X^(1/4), which spreads out the trace species).
@@ -15,7 +15,16 @@ as the input and the later as the target, so every step length is represented.
 
 Writes tools/burn/model.pt and prints validation errors, including a rollout check: the
 model applied over and over with hydro-like steps along held-out trajectories.
+
+The weights written are a running average of the weights over training (decay EMA_DECAY,
+about the last 2000 steps), which lands in flatter minima than the last step's weights and
+evaluates better; the last step's are written beside them as <out>_raw.pt. `seed` sets the
+initial weights and the batches (the split into training and validation stays fixed). With a
+teacher (a larger trained model) and `teach` > 0, each step also fits the teacher's steps from
+states near the batch's (perturbed in density, temperature, step and composition, and mixed
+with each other as a front mixes fuel and ash), where it has no reference trajectory.
 """
+import copy
 import math
 import sys
 import time
@@ -701,6 +710,23 @@ def rollout(model, rho, X, T, t, dt_hydro):
     model.train()
     return {"steps": steps, "X_l1_p50": torch.quantile(l_x, 0.5).item(), "X_l1_p99": torch.quantile(l_x, 0.99).item(), "X_l1_max": l_x.max().item(), "e_err_p99": torch.quantile(l_e, 0.99).item(), "e_err_max": l_e.max().item()}
 
+EMA_DECAY = 0.9995
+
+
+@torch.no_grad()
+def nearby(r, Tl, dt, X0):
+    """States near a batch's: the inputs a teacher labels for the student."""
+    b = len(r)
+    g = lambda s: s * torch.randn(b, device=dev)
+    r = (r + g(0.2)).clamp(*LOG_RHO)
+    Tl = (Tl + g(0.03)).clamp(8.0, 10.0)
+    dt = (dt + g(0.5)).clamp(-9.0, 0.0)
+    X = X0 * torch.exp(0.5 * torch.randn_like(X0))
+    m = 0.5 * torch.rand(b, 1, device=dev) * (torch.rand(b, 1, device=dev) < 0.5)
+    X = (1 - m) * X + m * X[torch.randperm(b, device=dev)]
+    return r, Tl, dt, X / X.sum(dim=1, keepdim=True)
+
+
 def main():
     steps = int(sys.argv[1]) if len(sys.argv) > 1 else 40000
     width = int(sys.argv[2]) if len(sys.argv) > 2 else 64
@@ -715,6 +741,10 @@ def main():
     lr = float(sys.argv[12]) if len(sys.argv) > 12 else 2e-3   # lower to fine-tune a trained model
     logw = float(sys.argv[13]) if len(sys.argv) > 13 else 0.0
     resw = float(sys.argv[14]) if len(sys.argv) > 14 else 0.0
+    seed = int(sys.argv[15]) if len(sys.argv) > 15 else 0
+    teacher = load_model(sys.argv[16]) if len(sys.argv) > 16 and sys.argv[16] != "-" else None
+    teach = float(sys.argv[17]) if len(sys.argv) > 17 else 0.0
+    torch.manual_seed(seed)
     tag = f"w{width}d{depth}h{hard:g}"
     rho, X, T, t = load()
     rng = np.random.default_rng(1)
@@ -733,11 +763,12 @@ def main():
             model.load_state_dict(ck["state"])
         print("starting from", init)
     print(sum(p.numel() for p in model.parameters()), "parameters")
+    ema = copy.deepcopy(model)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-5, eps=1e-20 if arch == "flux" else 1e-8)
     sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=lr, total_steps=steps, pct_start=0.05)
     t0 = time.time()
-    for s in range(steps):
-        (r, Tl, dt, X0), Dt, et = train.sample(8192, fresh)
+
+    def step_loss(r, Tl, dt, X0, Dt, et):
         Dp = model(r, Tl, dt, X0)
         loss, _, _ = loss_fn(Dp, Dt, et, hard, rel, model.parts, aux)
         if arch == "flux":
@@ -752,6 +783,16 @@ def main():
             loss = loss + logw * log_loss(Dp, Dt, et)
         if resw > 0:
             loss = loss + resw * reservoir_loss(Dp, Dt, X0)
+        return loss
+
+    for s in range(steps):
+        (r, Tl, dt, X0), Dt, et = train.sample(8192, fresh)
+        loss = step_loss(r, Tl, dt, X0, Dt, et)
+        if teacher is not None and teach > 0:
+            near = nearby(r[:4096], Tl[:4096], dt[:4096], X0[:4096])
+            with torch.no_grad():
+                Dq = teacher(*near)
+            loss = loss + teach * step_loss(*near, Dq, (Dq * Q).sum(dim=1))
         if unroll > 0:
             # A stretch of n steps (2 to 32) between two times of a trajectory, judged where
             # it ends: absolute and relative errors as for single steps.
@@ -767,13 +808,23 @@ def main():
             # Clipped: gradients through a chain of 32 steps run 40 times those of one.
             torch.nn.utils.clip_grad_norm_(model.parameters(), 100.0)
             opt.step()
+            with torch.no_grad():
+                for pe, p in zip(ema.parameters(), model.parameters()):
+                    pe.lerp_(p, 1.0 - EMA_DECAY)
         sched.step()
         if (s + 1) % min(5000, max(500, steps // 10)) == 0 or s == 0:
             print(f"step {s + 1}: loss {loss.item():.4g}  val {evaluate(model, val)}  {time.time() - t0:.0f} s", flush=True)
+    with torch.random.fork_rng():
+        torch.manual_seed(12345)
+        print("last weights:    ", evaluate(model, val))
+        torch.manual_seed(12345)
+        print("averaged weights:", evaluate(ema, val), flush=True)
     out = sys.argv[5] if len(sys.argv) > 5 else f"model_{tag}.pt"
-    torch.save({"state": model.state_dict(), "width": width, "depth": depth, "arch": arch}, HERE / out)
+    meta = {"width": width, "depth": depth, "arch": arch}
+    torch.save({"state": ema.state_dict(), **meta}, HERE / out)
+    torch.save({"state": model.state_dict(), **meta}, HERE / out.replace(".pt", "_raw.pt"))
     for dt in (1e-5, 1e-3, 1e-2):
-        print(f"rollout dt={dt:g}:", rollout(model, rho[va], X[va], T[va], t, dt), flush=True)
+        print(f"rollout dt={dt:g}:", rollout(ema, rho[va], X[va], T[va], t, dt), flush=True)
 
 
 if __name__ == "__main__":
