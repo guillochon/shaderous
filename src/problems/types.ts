@@ -116,6 +116,11 @@ export interface ProblemParam {
    */
   scale?: boolean;
   /**
+   * With the readouts in physical units (cgs or SI), the field shows the value in this unit:
+   * the code value times `factor(params)`, with ` (label)` after the field's name.
+   */
+  unit?: { label: string; factor: (params: Record<string, number>) => number };
+  /**
    * How the control looks: a number field (the default), a slider with a number field beside
    * it for typing a value, or a checkbox (value 0 or 1).
    */

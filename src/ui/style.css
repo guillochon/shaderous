@@ -129,6 +129,33 @@ details[open] > summary .sum { display: none; }
 #tools button:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
 #tool-params { display: flex; flex-direction: column; gap: 3px; margin-top: 2px; }
 #tool-params[hidden], #tool-params label[hidden] { display: none; }
+/*
+ * A tool slider shows its name only. Pointed at (or while its value is typed in), it reaches out
+ * to the left over the stage, wide enough for its value with a unit ("1.48e16 cm").
+ */
+#tool-params .scrub input[type='range'], #tool-params .scrub span {
+  left: auto; right: 0; width: 100%; transition: width 0.15s ease-out;
+}
+#tool-params .scrub input[type='range'] { position: absolute; top: 0; }
+#tool-params .scrub:hover input[type='range'], #tool-params .scrub:hover span,
+#tool-params .scrub.editing input[type='range'], #tool-params .scrub.editing span { width: 136px; }
+#tool-params .scrub span { overflow: hidden; gap: 6px; }
+#tool-params .scrub output {
+  max-width: 0; opacity: 0; overflow: hidden; pointer-events: auto; cursor: text;
+  transition: max-width 0.15s ease-out, opacity 0.15s ease-out;
+}
+#tool-params .scrub:hover output { max-width: 120px; opacity: 1; }
+#tool-params .scrub.editing output { visibility: hidden; }
+/* Nothing to point with on a touch screen (and its rail clips what reaches out): show the value. */
+@media (hover: none) {
+  #tool-params .scrub output { max-width: none; opacity: 1; }
+}
+/* Typing a value: a field over the right of the bar. */
+.scrub-edit {
+  position: absolute; top: 0; right: 0; height: 100%; width: 84px; padding: 0 4px; z-index: 1;
+  font-size: 10px; text-align: right; border: 1px solid var(--accent); border-radius: 3px;
+  background: #16202f; color: var(--text);
+}
 /* A slider the size of a text field: the fill is the value, the caption sits on top. */
 .scrub { position: relative; display: block; height: 18px; }
 .scrub input {

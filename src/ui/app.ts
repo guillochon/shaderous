@@ -473,7 +473,6 @@ function syncTools() {
   const rc = $<HTMLInputElement>('tp-rhoc');
   rc.value = String(starLogRho);
   rc.style.setProperty('--p', `${(100 * (starLogRho + 3)) / 6}%`);
-  $('tp-rhoc-out').textContent = String(+(10 ** starLogRho).toPrecision(2));
   // The same slider is the amount of a dab of mass and the flux of a source or sink.
   const flux = tool === 'source' || tool === 'sink';
   $('tp-amount-row').title = tool === 'source'
@@ -502,9 +501,108 @@ function syncTools() {
     const el = $<HTMLInputElement>(`tp-${k}`);
     el.value = String(q[k]);
     el.style.setProperty('--p', `${(100 * (q[k] - +el.min)) / (+el.max - +el.min)}%`);
-    // Size is the brush radius and Amount a share of the densest gas, both shown in percent.
-    $(`tp-${k}-out`).textContent = k === 'softness' ? q[k].toFixed(2) : k === 'mass' ? `${q[k].toFixed(2)}\u00d7` : `${Math.round(q[k] * 100)}%`;
   }
+  showToolValues();
+}
+
+type ToolSlider = 'size' | 'softness' | 'amount' | 'mass' | 'rhoc';
+const TOOL_SLIDERS: ToolSlider[] = ['size', 'softness', 'amount', 'mass', 'rhoc'];
+
+/** A tool slider's setting: what the slider holds (the log of the density for a star's). */
+const toolSetting = (k: ToolSlider): number => (k === 'rhoc' ? starLogRho : toolParams[tool!][k]);
+
+/**
+ * How a tool slider's value is shown: the number is the setting (10 to its power, for a star's
+ * density) times `factor`, followed by `unit`. In physical units that is what the tool sets:
+ * the brush radius, the gas a dab adds, a source's or sink's flux and a point mass's mass, at
+ * the scales the tools measure against now (so it follows the run). In code units, or for a
+ * scale-free problem, it is the share the slider sets: size and amount in percent, mass as a
+ * multiple of the gas in the box.
+ */
+function toolReadout(k: ToolSlider): { factor: number; unit: string } {
+  const q = toolParams[tool!];
+  const u = units();
+  const shown = u.physical && unitSys !== 'code';
+  const box = cfg.problem.box;
+  const { rhoMax, vRef } = toolRefs();
+  const phys = (factor: number, m: Measure) => ({ factor: factor * u.scale(m), unit: ` ${u.label(m)}` });
+  switch (k) {
+    case 'size': return shown ? phys(box, 'length') : { factor: 100, unit: '%' };
+    case 'softness': return { factor: 1, unit: '' };
+    case 'mass': return shown ? phys(lastDiag?.mass ?? box ** cfg.ndim, 'mass') : { factor: 1, unit: '\u00d7' };
+    case 'rhoc': return shown ? phys(1, 'density') : { factor: 1, unit: '' };
+    case 'amount': {
+      // A point mass's flux is a share of the orbital rate at its edge, in any units.
+      if (!shown || (tool === 'sink' && sinkHasMass())) return { factor: 100, unit: '%' };
+      // As the source code below measures it: against the densest gas and the time a signal
+      // takes to cross the source.
+      const perAmount = (vRef || 1) / (q.size * box);
+      return tool === 'source' ? phys(perAmount * rhoMax, [1, -3, -1]) : tool === 'sink' ? phys(perAmount, 'rate') : phys(rhoMax, 'density');
+    }
+  }
+}
+
+/** The number a tool slider shows (without its unit). */
+const toolShown = (k: ToolSlider) => (k === 'rhoc' ? 10 ** starLogRho : toolSetting(k)) * toolReadout(k).factor;
+
+function showToolValues() {
+  if (!cfg || tool === null || tool === 'query') return;
+  for (const k of TOOL_SLIDERS) {
+    const { unit } = toolReadout(k);
+    const v = toolShown(k);
+    $(`tp-${k}-out`).textContent = unit === '%' ? `${Math.round(v)}%` : unit === '\u00d7' || k === 'softness' ? `${v.toFixed(2)}${unit}` : `${fmt3(v)}${unit}`;
+  }
+}
+
+/**
+ * A click on a tool slider's number turns it into a field to type the value in, in the units
+ * shown. Enter or leaving the field applies it (kept within the slider's range); Escape does not.
+ */
+function editToolValue(k: ToolSlider) {
+  if (tool === null || tool === 'query') return;
+  const row = $(`tp-${k}-row`);
+  const range = $<HTMLInputElement>(`tp-${k}`);
+  const edit = document.createElement('input');
+  edit.type = 'text';
+  edit.className = 'scrub-edit';
+  const v0 = toolShown(k);
+  // Very large or small numbers in exponent form ("1.481e16"), others as they are.
+  edit.value = v0 !== 0 && (Math.abs(v0) >= 1e5 || Math.abs(v0) < 1e-3) ? (+v0.toPrecision(4)).toExponential().replace('e+', 'e') : String(+v0.toPrecision(4));
+  edit.setAttribute('aria-label', `${row.title} (${toolReadout(k).unit.trim() || 'value'})`);
+  row.classList.add('editing');
+  row.append(edit);
+  edit.focus();
+  edit.select();
+  let done = false;
+  const finish = (apply: boolean) => {
+    if (done) return;
+    done = true;
+    const v = parseFloat(edit.value);
+    edit.remove();
+    row.classList.remove('editing');
+    if (!apply || !Number.isFinite(v) || tool === null || tool === 'query') return;
+    const x = v / toolReadout(k).factor;
+    if (k === 'rhoc' && !(x > 0)) return;
+    const setting = Math.min(+range.max, Math.max(+range.min, k === 'rhoc' ? Math.log10(x) : x));
+    if (k === 'rhoc') starLogRho = setting;
+    else toolParams[tool][k] = setting;
+    syncTools();
+  };
+  edit.addEventListener('keydown', (e) => {
+    e.stopPropagation(); // the page's shortcuts (space runs) stay out of the field
+    if (e.key === 'Enter') finish(true);
+    else if (e.key === 'Escape') finish(false);
+  });
+  edit.addEventListener('blur', () => finish(true));
+}
+for (const k of TOOL_SLIDERS) {
+  const out = $(`tp-${k}-out`);
+  out.title = 'Click to type a value';
+  out.addEventListener('pointerdown', (e) => e.stopPropagation());
+  out.addEventListener('click', (e) => {
+    e.preventDefault(); // not a click on the slider the label holds
+    editToolValue(k);
+  });
 }
 for (const t of TOOLS) {
   $(`tool-${t.kind}`).addEventListener('click', () => {
@@ -872,6 +970,9 @@ function syncControls() {
   syncTools();
 }
 
+/** Factor from a preset parameter's code value to the value its field shows (ProblemParam.unit). */
+const paramUnit = (q: ProblemParam) => (q.unit && units().physical && unitSys !== 'code' ? q.unit.factor(cfg.params) : 1);
+
 /** The preset's own controls (for example mass ratio and impact parameter). */
 function syncProblemParams() {
   const box = $('pparams');
@@ -899,7 +1000,7 @@ function syncProblemParams() {
         el.dispatchEvent(new Event('change'));
       });
       el.addEventListener('change', () => {
-        const v = q.kind === 'checkbox' ? (el.checked ? 1 : 0) : el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value;
+        const v = q.kind === 'checkbox' ? (el.checked ? 1 : 0) : el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value / paramUnit(q);
         cfg.params[q.id] = Math.min(q.max, Math.max(q.min, v));
         // Units that follow the parameters change the physical constants an equation of state
         // other than a barotropic one takes from them: refresh those (the preset's own values
@@ -923,8 +1024,16 @@ function syncProblemParams() {
   for (const q of defs) {
     $(`pp-${q.id}-row`).hidden = !!q.dims && q.dims !== cfg.ndim;
     const el = $<HTMLInputElement>(`pp-${q.id}`);
+    // A field with a unit of its own shows it, and its value and range, in physical units.
+    const k = paramUnit(q);
+    if (q.unit) {
+      $(`pp-${q.id}-row`).querySelector('span')!.textContent = k !== 1 ? `${q.label} (${q.unit.label})` : q.label;
+      el.min = String(+(q.min * k).toPrecision(6));
+      el.max = String(+(q.max * k).toPrecision(6));
+      el.step = q.step ? String(+(q.step * k).toPrecision(6)) : 'any';
+    }
     if (q.kind === 'checkbox') el.checked = !!cfg.params[q.id];
-    else if (document.activeElement !== el) el.value = String(cfg.params[q.id]);
+    else if (document.activeElement !== el) el.value = String(+(cfg.params[q.id] * k).toPrecision(6));
     const slide = q.kind === 'slider' ? $<HTMLInputElement>(`pp-${q.id}-slide`) : null;
     if (slide && document.activeElement !== slide) slide.value = String(cfg.params[q.id]);
   }
@@ -2209,18 +2318,25 @@ function drawBrush(px?: number, py?: number) {
   }
 }
 
-function beginStroke(e: PointerEvent) {
-  const r = canvas.getBoundingClientRect();
-  const [x, y] = [e.clientX - r.left, e.clientY - r.top];
+/** The scales the tools measure against now: the densest gas and a reference speed. */
+function toolRefs(): { rhoMax: number; vRef: number } {
   const d = lastDiag;
   // Fastest gas now. In a flow that is (nearly) at rest that would leave nothing to set, so the
   // reference never falls below a fifth of the sound speed of the hottest gas.
   const cs = d ? Math.sqrt(Math.max(0, cfg.eosParams.gamma * (cfg.eos === 'gas_radiation' ? cfg.eosParams.R : 1) * d.ranges[1][1])) : 0;
+  return {
+    rhoMax: Math.max(d?.ranges[0][1] ?? 1, cfg.problem.toolScale?.rho ?? 0),
+    vRef: Math.max(d?.ranges[4][1] ?? 0, 0.2 * cs, cfg.problem.toolScale?.v ?? 0),
+  };
+}
+
+function beginStroke(e: PointerEvent) {
+  const r = canvas.getBoundingClientRect();
+  const [x, y] = [e.clientX - r.left, e.clientY - r.top];
   const s: Stroke = {
     id: e.pointerId, kind: tool!, x0: x, y0: y, x, y, shift: e.shiftKey, depth: view.dist, ready: flatView(),
     released: false, dabbed: false, t0: performance.now(), flowed: 0,
-    rhoMax: Math.max(d?.ranges[0][1] ?? 1, cfg.problem.toolScale?.rho ?? 0),
-    vRef: Math.max(d?.ranges[4][1] ?? 0, 0.2 * cs, cfg.problem.toolScale?.v ?? 0),
+    ...toolRefs(),
   };
   stroke = s;
   if (!s.ready) {
@@ -2687,6 +2803,7 @@ function drawDiagPlot() {
 }
 
 function showDiagnostics(d: Diagnostics, of: Simulation) {
+  showToolValues();
   const last = diagHistory.rows[diagHistory.rows.length - 1];
   if (of !== diagOf) {
     diagHistory.clear();
@@ -2973,10 +3090,12 @@ function tick(now: number) {
     }
     const pm = lastDiag?.masses ?? [];
     const acc = pm.reduce((a, m) => a + m.accreted, 0);
+    // In the units the view shows.
+    const u = units();
     const where = pm.length === 1
-      ? `  •  point mass at r = ${Math.hypot(...pm[0].pos).toFixed(2)}`
-      : pm.length ? `  •  ${pm.length} point masses, separation ${Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])).toFixed(2)}` : '';
-    const took = acc > 0 ? `, accreted ${acc.toPrecision(3)}` : '';
+      ? `  •  point mass at r = ${u.fmt(Math.hypot(...pm[0].pos), 'length')}`
+      : pm.length ? `  •  ${pm.length} point masses, separation ${u.fmt(Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])), 'length')}` : '';
+    const took = acc > 0 ? `, accreted ${u.fmt(acc, 'mass')}` : '';
     const state = finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused';
     const mesh = s.status();
     setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${where ? took : ''}${mesh ? '  •  ' + mesh : ''}${toolNotice ? '  •  ' + toolNotice : ''}`);
