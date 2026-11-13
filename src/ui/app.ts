@@ -951,7 +951,7 @@ function syncControls() {
   // to show, and nothing heats or cools without a cooling function: those are left out of the
   // menu altogether.
   const noHeat = (i: number) => ((i === 1 || i === 9) && cfg.eos === 'barotropic') || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic'));
-  const noField = (i: number) => (i === 7 && two) || (i === 14 && cfg.amrLevels === 0)
+  const noField = (i: number) => (i === 7 && two) || (i === 14 && cfg.amrLevels === 0) || (i === 21 && (cfg.amrLevels === 0 || !(cfg.timeBins > 0)))
     || (i === 15 && !pulled) || (i === 17 && !self) || noHeat(i);
   for (const o of fieldSel.options) {
     o.disabled = noField(+o.value);
@@ -1848,7 +1848,7 @@ function bind() {
     // A density gradient spans decades (shocks against smooth flow), so it reads best on a log
     // scale; refinement levels are a handful of integers.
     if (view.field === 13 || view.field === 18) view.log = true;
-    if (view.field === 14) view.log = false;
+    if (view.field === 14 || view.field === 21) view.log = false;
     syncControls();
   });
   on('axis', (el) => (view.sliceAxis = +el.value));

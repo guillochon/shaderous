@@ -534,6 +534,8 @@ export class AmrSim implements Simulation {
     );
     const K = (this.builtBins = this.timeBins);
     if (K > 0) await this.buildBins(K);
+    // Off, every block is in bin 0, as the display's time-bin field shows it (amr/field.wgsl).
+    else d.queue.writeBuffer(this.bins, 0, new Uint32Array(this.cap + 1));
     // With per-block timesteps the passes also read the bins, and the assembly the half-step
     // predictions of blocks part way through a step.
     const bin: Record<number, Bindable> = K > 0 ? { 29: this.bins! } : {};
@@ -2008,7 +2010,7 @@ export class AmrSim implements Simulation {
     return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
   }
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
-    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 30: this.bt };
+    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 29: this.bins, 30: this.bt };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }

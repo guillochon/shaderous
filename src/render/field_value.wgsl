@@ -26,6 +26,7 @@ const F_DENSITY_GRADIENT = 13u;
 const F_LEVEL = 14u;
 const F_MASS_FRACTION = 19u;
 const F_SHOCK = 20u;
+const F_TIME_BIN = 21u;   // set by the block grid's display pass (amr/field.wgsl); 0 elsewhere
 
 // Mass fraction of species V.sp.x at texel c of the state: its rho X over the sum of all of
 // them (species/species.ts), read from S, the groups of four V.sp.y texels apart along z.
@@ -98,6 +99,7 @@ fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32, phi: f
       if (a > 0.0) { dt = min(dt, sqrt(g_dx / a)); }
       return P.cfl * dt;
     }
+    case 21u { return 0.0; }
     default { return rho; }
   }
 }

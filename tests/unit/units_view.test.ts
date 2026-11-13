@@ -7,7 +7,8 @@ import { displayLabel, kelvinPerCodeT, unitOf } from '../../src/units/units';
 
 describe('unit readouts', () => {
   it('assigns a measure to every view field', () => {
-    expect(FIELDS.length).toBe(21);
+    expect(FIELDS.length).toBe(22);
+    expect(fieldMeasure(21, 5 / 3)).toBeNull();
     expect(fieldMeasure(18, 5 / 3)).toBe('time');
     expect(fieldMeasure(0, 5 / 3)).toBe('density');
     expect(fieldMeasure(1, 5 / 3)).toBe('temperature');

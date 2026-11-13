@@ -36,6 +36,8 @@ function pageMessage(e) {
  * - setup: the run to open on (query string, link or object); default the page's own
  * - headed: show the browser window (when headless Chrome finds no GPU adapter)
  * - width, height: the window, which sets a screenshot's default size
+ * - interactive: open the page as a person sees it (it draws and plays by itself) rather
+ *   than in headless mode, for screenshots of the whole interface
  * - log: where progress messages go (default stderr)
  */
 export async function openSession(opts = {}) {
@@ -70,7 +72,7 @@ export async function openSession(opts = {}) {
 
   const u = new URL(base);
   const q = new URLSearchParams(setupQuery(opts.setup));
-  q.set('headless', '1');
+  if (!opts.interactive) q.set('headless', '1');
   u.search = q.toString();
   log(`shaderous: opening ${u.origin}${u.pathname}`);
   await page.goto(u.toString());

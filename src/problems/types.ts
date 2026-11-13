@@ -45,12 +45,14 @@ export const FIELDS = [
   'Velocity x', 'Velocity y', 'Velocity z', 'Mach number', 'Entropy',
   'Heating \u2212 cooling', 'Vorticity', 'Velocity divergence', 'Density gradient', 'Refinement level',
   'Gravitational potential', 'Kinetic energy', 'Jeans length (cells)', 'Timestep limit', 'Mass fraction',
-  'Shock',
+  'Shock', 'Time bin',
 ] as const;
 /** The mass fraction field: one menu entry per species the run carries (ViewState.species). */
 export const MASS_FRACTION_FIELD = 19;
 /** The solver's shock flag (hydro/predictor.wgsl): 1 in the cells it treats as a shock. */
 export const SHOCK_FIELD = 20;
+/** Adaptive mesh with per-block timesteps: the time bin of each cell's block (amr/bins_on.wgsl). */
+export const TIME_BIN_FIELD = 21;
 /**
  * The field menu: FIELDS by index, in groups (the indices themselves are the shaders' order).
  * A run with species also gets a Composition group, one mass fraction per species.
@@ -60,7 +62,7 @@ export const FIELD_MENU: { group: string; fields: number[] }[] = [
   { group: 'Flow', fields: [4, 5, 6, 7, 8, 16] },
   { group: 'Derivatives', fields: [11, 12, 13, 20] },
   { group: 'Gravity', fields: [15, 17] },
-  { group: 'Mesh and timestep', fields: [14, 18] },
+  { group: 'Mesh and timestep', fields: [14, 21, 18] },
 ];
 /** What each field shows, for its tooltip. */
 export const FIELD_TIPS = [
@@ -85,11 +87,12 @@ export const FIELD_TIPS = [
   'The step each cell would allow: CFL \u00d7 dx over its signal speed (|v| summed over the axes, the sound speed once per axis, diffusion), or over \u221a(dx / |g|) where gravity is stronger. The smallest sets the run\u2019s step (point-mass orbits can set it lower still)',
   'The share of the mass in one species, carried with the gas',
   'The solver’s shock detector, as of the last step: 1 where the flow converges and the pressure jumps by more than the shock threshold between neighbors (the cells it treats as a shock, and where burning stops when it is not allowed inside shocks), 0 elsewhere',
+  'With per-block timesteps on the adaptive mesh: the time bin of the block that holds each cell. A block in bin k steps 2^k times the smallest step (0 is the fastest)',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
 export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12]);
 /** Fields always shown on a linear scale: the signed ones, refinement levels, the potential and the shock flag. */
-export const LINEAR_FIELDS: ReadonlySet<number> = new Set([...SIGNED_FIELDS, 14, 15, 20]);
+export const LINEAR_FIELDS: ReadonlySet<number> = new Set([...SIGNED_FIELDS, 14, 15, 20, 21]);
 
 export interface ProblemParam {
   id: string;

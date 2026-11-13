@@ -39,6 +39,8 @@ struct View {
 @group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
 @group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
 @group(0) @binding(12) var DA: texture_storage_3d<rgba16float, write>;   // display atlas (`atlas`)
+// Per-block timesteps (amr/bins_on.wgsl): BIN[1 + slot] is a block's time bin; all zero when off.
+@group(0) @binding(29) var<storage, read> TBIN: array<u32>;
 
 fn neighbor(c: vec3<i32>) -> vec4<f32> {
   let w = textureLoad(W1, c, 0);
@@ -93,6 +95,7 @@ fn leaf_value(f: Leaf) -> Cell {
   var x = field_value(V.field, u1, u2, g, f32(f.level), phi);
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
+  if (V.field == F_TIME_BIN) { x = f32(TBIN[1u + u32(f.slot)]); }
   return Cell(x, u1.x, u2.w > 0.5);
 }
 

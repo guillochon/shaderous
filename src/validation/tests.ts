@@ -168,7 +168,7 @@ const gresho = (mach: number, tEnd = 1): Problem => {
  * p[j+1] - p[j] = -g dx (rho[j] + rho[j+1]) / 2 exactly, which is the balance the well-balanced
  * reconstruction holds.
  */
-const column = (cells: number): Problem =>
+export const column = (cells: number): Problem =>
   stillGas({
     id: 'column', eosParams: { gamma: 1.4 }, tEnd: 1,
     bcLo: [0, 2, 0], bcHi: [0, 2, 0],
@@ -198,7 +198,7 @@ async function adaptiveBinary(gpu: Gpu, period: number): Promise<number> {
   });
 }
 
-async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: Sim) => Promise<T>) {
+export async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: Sim) => Promise<T>) {
   const sim = await Sim.create(gpu, configFor(problem, n, over));
   try {
     return await fn(sim);
@@ -228,7 +228,7 @@ function leafShockRadius(c: LeafCells): number {
   return NaN;
 }
 
-async function withAmr<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: AmrSim) => Promise<T>) {
+export async function withAmr<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: AmrSim) => Promise<T>) {
   const sim = await AmrSim.create(gpu, configFor(problem, n, over));
   try {
     return await fn(sim);
