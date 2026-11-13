@@ -1,14 +1,20 @@
 {
   "program": "shaderous",
-  "build": "9084436 (2026-11-13)",
+  "build": "bf220c9 (2026-11-13)",
   "adapter": "nvidia ampere",
   "setup": "problem=tidal-disruption&dim=3&n=128&amr=2",
   "view": {
     "showBlocks": false,
-    "dist": 1.9
+    "dist": 1.9,
+    "contours": true,
+    "nContours": 5,
+    "fog": false,
+    "surfaceOpacity": 0.4,
+    "lo": 0.01,
+    "hi": 10
   },
   "problem": "tidal-disruption",
-  "started": "2026-11-13T14:59:53.208Z",
+  "started": "2026-11-13T16:09:36.195Z",
   "command": [
     "run",
     "--problem",
@@ -25,6 +31,18 @@
     "showBlocks=false",
     "--view",
     "dist=1.9",
+    "--view",
+    "contours=true",
+    "--view",
+    "nContours=5",
+    "--view",
+    "fog=false",
+    "--view",
+    "surfaceOpacity=0.4",
+    "--view",
+    "lo=0.01",
+    "--view",
+    "hi=10",
     "--low-priority",
     "--out",
     "C:\\Users\\guill\\shaderous\\.claude\\worktrees\\shaderous-headless-agent-6e9a1d\\paper\\paper\\figures\\data\\tde\\partial"
@@ -130,7 +148,7 @@
       ]
     }
   ],
-  "finished": "2026-11-13T15:00:16.696Z",
+  "finished": "2026-11-13T16:10:02.462Z",
   "stopped": "time",
-  "seconds": 23.487
+  "seconds": 26.266
 }

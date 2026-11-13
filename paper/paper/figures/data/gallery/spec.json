@@ -1,6 +1,50 @@
 [
- {"name": "interface", "setup": "problem=tidal-disruption-full", "until": 6, "page": true, "width": 1600, "height": 1000},
- {"name": "wd", "setup": "problem=wd-collision&dim=3&n=256&amr=2&p.b=0.6", "until": 7, "view": {"showBlocks": false, "dist": 0.9}},
- {"name": "binary", "setup": "problem=binary&dim=2&n=1024", "until": 125.66370614359172, "view": {"showBlocks": false}},
- {"name": "thermal", "setup": "problem=thermal-instability&dim=2&n=1024", "until": 0.6, "view": {"field": 1, "showBlocks": false}}
+ {
+  "name": "interface",
+  "setup": "problem=tidal-disruption-full",
+  "until": 6,
+  "page": true,
+  "width": 1600,
+  "height": 1000,
+  "view": {
+   "contours": true,
+   "nContours": 5,
+   "fog": false,
+   "surfaceOpacity": 0.4,
+   "lo": 0.01,
+   "hi": 10
+  }
+ },
+ {
+  "name": "wd",
+  "setup": "problem=wd-collision&dim=3&n=256&amr=2&p.b=0.6",
+  "until": 7,
+  "view": {
+   "showBlocks": false,
+   "dist": 0.9,
+   "contours": true,
+   "nContours": 5,
+   "fog": false,
+   "surfaceOpacity": 0.4,
+   "lo": 0.01,
+   "hi": 30
+  }
+ },
+ {
+  "name": "binary",
+  "setup": "problem=binary&dim=2&n=1024",
+  "until": 125.66370614359172,
+  "view": {
+   "showBlocks": false
+  }
+ },
+ {
+  "name": "thermal",
+  "setup": "problem=thermal-instability&dim=2&n=1024",
+  "until": 0.6,
+  "view": {
+   "field": 1,
+   "showBlocks": false
+  }
+ }
 ]

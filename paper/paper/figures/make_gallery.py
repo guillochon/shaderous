@@ -5,7 +5,8 @@
 
 The shots are taken by shots.mjs, which runs each setup to a time in headless Chrome with the
 code's scripting interface (docs/api.md) and saves the view; the interface is a screenshot of the
-whole page as a person sees it. data/gallery/spec.json lists the setups (each a link's query
+whole page as a person sees it. The 3D panels show isosurfaces of the density, with the
+fog of the volume view off; spec.json gives each one's levels. data/gallery/spec.json lists the setups (each a link's query
 string), the times and the views; beside each image, a JSON file records the setup in force, the
 time reached and the GPU. --run needs Node, npm install in the code's repository, Chrome and a GPU.
 """

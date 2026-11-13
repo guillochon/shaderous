@@ -9,8 +9,8 @@ The runs are the tidal-disruption presets "Partial, gamma = 5/3" (beta = 0.6) an
 (--debris) and an image of the volume view. --run needs Node, npm install in the code's
 repository, Chrome and a GPU; the outputs are written to paper/figures/data/tde/<case>/.
 
-(a, b) Volume renderings of the density at t = 6, about two dynamical times after pericenter,
-by the code's own ray-marcher. (c) Mass per unit specific orbital energy about the black hole,
+(a, b) The density at t = 6, about two dynamical times after pericenter, as five isosurfaces
+evenly spaced in log density from 0.01 to 10 (code units), drawn by the code's own ray-marcher. (c) Mass per unit specific orbital energy about the black hole,
 in units of the spread Delta e = G M_bh R_star / r_t^2, at the last output: what had left the box
 and what was still in it, the surviving core set apart. (d) The return rate of the bound debris
 to pericenter, from Kepler's third law, against time since pericenter.
@@ -51,7 +51,9 @@ def run() -> None:
         cmd = [
             "node", str(CODE / "tools/headless/cli.mjs"), "run", "--problem", case["problem"],
             "--until", str(T_END), "--every", str(EVERY), "--debris", "--png", "--width", "900",
-            "--view", "showBlocks=false", "--view", "dist=1.9", "--low-priority", "--out", str(out),
+            "--view", "showBlocks=false", "--view", "dist=1.9", "--view", "contours=true", "--view", "nContours=5",
+            "--view", "fog=false", "--view", "surfaceOpacity=0.4", "--view", "lo=0.01", "--view", "hi=10",
+            "--low-priority", "--out", str(out),
         ]
         print(" ".join(cmd), file=sys.stderr)
         subprocess.run(cmd, check=True, cwd=CODE)

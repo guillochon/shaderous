@@ -11,8 +11,8 @@ repository, Chrome and a GPU.
 
 (a, b) A 2D Kelvin-Helmholtz instability on 2048^2 at the finest level, three levels: density
 with the outlines of the blocks, and the refinement level. (c) Two white dwarfs at the greatest
-compression of a head-on collision (t = 4, where the central density peaks), as a volume
-rendering with the block outlines. (d) A slice through a 3D Sedov blast (256 cells at the finest
+compression of a head-on collision (t = 4, where the central density peaks), as five isosurfaces
+of the density (0.1 to 100, code units) with the block outlines. (d) A slice through a 3D Sedov blast (256 cells at the finest
 level, three levels) with per-block timesteps, colored by each block's time bin.
 """
 
