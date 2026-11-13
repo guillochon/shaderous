@@ -1,0 +1,17 @@
+{
+  "notes": "Published single-GPU throughputs of AthenaK and the peak memory bandwidths of the devices, for the performance figure. See paper/research/performance-baseline.md for what each measurement ran.",
+  "athenak": {
+    "source": "Stone2026, Section 5.1, Table 1: hydrodynamics, linear wave on a uniform 512 x 256 x 256 grid in 128^3 MeshBlocks, one device",
+    "cells": 33554432,
+    "points": [
+      {"device": "V100", "updates_per_second": 2.98e8, "bandwidth_gb_s": [900, 900]},
+      {"device": "A100", "updates_per_second": 6.14e8, "bandwidth_gb_s": [1555, 2039]}
+    ]
+  },
+  "bandwidth_gb_s": {
+    "V100": {"value": [900, 900], "source": "https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf", "note": "900 GB/s for both the SXM2 and PCIe cards (the V100S, 1134 GB/s, is a different product)"},
+    "A100": {"value": [1555, 2039], "source": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "note": "1555 GB/s for the 40 GB card, 2039 GB/s for the 80 GB SXM card (1935 for the 80 GB PCIe); Stone2026 does not say which"},
+    "RTX 3080 12GB": {"value": [912, 912], "source": "https://www.gigabyte.com/Graphics-Card/GV-N3080GAMING-OC-12GD/sp", "note": "384-bit GDDR6X at 19 Gbps; the 10 GB card has 760 GB/s. The machine's card reports 12288 MiB (nvidia-smi)"}
+  },
+  "this_device": "RTX 3080 12GB"
+}

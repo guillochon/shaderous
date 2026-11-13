@@ -35,7 +35,7 @@ All throughputs are cell updates per second on one device, counting one update p
 
 ## What makes a comparison with Shaderous fair
 
-Shaderous's own measurement (`paper/figures/data/performance/throughput.json`): 9.3 x 10^8 cells/s for a 3D Sedov blast on a uniform 256^3 grid, and 1.25 x 10^9 in 2D at 2048^2, on an NVIDIA RTX 3080 (Ampere) in Chrome. These were measured while the GPU may have had other work, and are to be measured again before they are quoted.
+Shaderous's own measurement (`paper/figures/data/performance/throughput.json`, 2026-11-13, the GPU otherwise idle, normal priority, median of three runs): 1.45 x 10^9 cells/s for a 3D Sedov blast on a uniform 256^3 grid, and 1.88 x 10^9 in 2D at 2048^2, on an NVIDIA RTX 3080 12 GB (Ampere) in Chrome 156. These are the largest uniform grids that run: 512^3 loses the device, and 4096^2 returns without doing the work. The earlier 9.3 x 10^8, and the 5.9 x 10^7 with four levels, were measured while the GPU had other work.
 
 - Physics: compare with AthenaK's hydrodynamics column. K-Athena reports only MHD, which AthenaK finds to be about two times slower than hydrodynamics on GPUs.
 - Precision: Shaderous runs in single precision. K-Athena runs in double; AthenaK does not say. Single precision moves half the bytes per cell, so on a bandwidth-limited code it is worth up to about a factor of two by itself.
@@ -44,8 +44,19 @@ Shaderous's own measurement (`paper/figures/data/performance/throughput.json`): 
 - Hardware: the codes are bandwidth-limited, so dividing by each device's peak memory bandwidth puts the V100 and A100 numbers beside the RTX 3080's. The bandwidths should come from the vendors' datasheets, for the device variants that the papers used, which the papers do not name.
 - Test problem: linear waves (both Athena papers) against a Sedov blast or Kelvin-Helmholtz (Shaderous). A smooth wave and a blast do the same work per cell in a code without adaptive physics, but Shaderous's blast also exercises its shock detector and first-order fallback.
 
+## Bandwidths and the comparison
+
+Peak memory bandwidth from the vendors' datasheets (sources in `paper/figures/data/performance/reference.json`): V100 900 GB/s (SXM2 and PCIe alike), A100 1555 GB/s (40 GB) or 2039 GB/s (80 GB SXM; 1935 for the 80 GB PCIe), RTX 3080 12 GB 912 GB/s (the 10 GB card has 760). Cell updates per second per GB/s:
+
+| | per GB/s |
+|---|---|
+| Shaderous, 3D uniform 256^3 | 1.59 x 10^6 |
+| Shaderous, 2D uniform 2048^2 | 2.06 x 10^6 |
+| AthenaK, V100 | 3.3 x 10^5 |
+| AthenaK, A100 | 3.0 to 3.9 x 10^5 |
+
+Shaderous takes 4 to 5 times as many updates per unit of bandwidth in 3D. Single precision (up to 2) and one stage against two (up to 2) could explain a factor of up to 4.
+
 ## Next
 
-1. Measure Shaderous again with the GPU otherwise idle, at normal priority, including a 3D uniform run at the largest size that fits.
-2. Find the peak memory bandwidth of the V100, A100 and RTX 3080 from the vendors' datasheets, and the variants the papers used if any other source gives them.
-3. Plot AthenaK's V100 and A100 hydrodynamics points on the performance figure, raw and per unit of bandwidth, with the caveats on precision and stages in the caption.
+1. Measure an integrated GPU, and Firefox.
