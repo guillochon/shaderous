@@ -11,8 +11,8 @@ struct View {
   logscale: u32,
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
-  nd: vec4<u32>,   // display volume size (used by the block-grid version)
-  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); projection: dl in z
+  nd: vec4<u32>,   // display volume size (used by the block-grid version); projection map size in w
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view)
   sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; projection axis in w
 }
 
@@ -66,6 +66,19 @@ fn voxel(c: vec3<i32>) -> Cell {
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
   return Cell(x, u1.x, u2.w > 0.5);
+}
+
+// Projection: the cells along `axis` through cell `ij` of the map (one map texel per cell).
+fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
+  var s = Column(0.0, 0.0, false);
+  var c = vec3<i32>(0);
+  c[ab.x] = ij.x;
+  c[ab.y] = ij.y;
+  for (var k = 0; k < i32(P.dims[axis]); k++) {
+    c[axis] = k;
+    column_add(&s, voxel(c), P.dx);
+  }
+  return s;
 }
 
 @compute @workgroup_size(8, 8, 4)

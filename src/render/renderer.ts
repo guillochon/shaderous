@@ -297,19 +297,23 @@ export class Renderer {
         usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
       });
       this.dims = dims.slice();
-      // The projection's map is square: the grid's side along each axis (a 2D run is not projected).
-      this.proj?.destroy();
-      this.proj = d.createTexture({
-        label: 'projection',
-        size: [dims[0], dims[0]],
-        format: 'rgba16float',
-        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
-      });
       const res = { 0: this.cam, 1: this.vol.createView(), 2: this.tf.createView(), 3: this.sampler };
       this.gVolume = bindGroup(d, this.pVolume, res);
       this.gSlice = bindGroup(d, this.pSlice, res);
-      this.gColumn = bindGroup(d, this.pColumn, { 0: this.cam, 2: res[2], 3: this.sampler, 4: this.proj.createView() });
       this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
+    }
+    // The projection's map: one texel per cell of the finest level, on either kind of grid,
+    // whatever the display volume is capped at (a 2D run is not projected).
+    const side = Math.min(sim.n, d.limits.maxTextureDimension2D);
+    if (!this.proj || this.proj.width !== side) {
+      this.proj?.destroy();
+      this.proj = d.createTexture({
+        label: 'projection',
+        size: [side, side],
+        format: 'rgba16float',
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+      });
+      this.gColumn = bindGroup(d, this.pColumn, { 0: this.cam, 2: this.tf.createView(), 3: this.sampler, 4: this.proj.createView() });
     }
     const code = assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling], diffusion: hydroSlots(sim.cfg).diffusion, comp: hydroSlots(sim.cfg).comp });
     [this.pField, this.pProject] = await Promise.all([computePipeline(d, code, 'field'), computePipeline(d, code, 'projection', undefined, 'project')]);
@@ -415,14 +419,14 @@ export class Renderer {
     const [nx, ny, nz] = this.dims;
     const vb = new ArrayBuffer(64);
     // Mass fraction: which species, the texels between groups of four, and how many groups.
-    // Projection: the axis summed along, and the length of a display voxel along it.
+    // Projection: the axis summed along, and the side of its map.
     const projAxis = this.projectionAxis(v);
+    const side = this.proj!.width;
     new Uint32Array(vb, 48, 4).set([v.species, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), projAxis ?? 0]);
-    new Uint32Array(vb, 16, 4).set([nx, ny, nz, 0]);
+    new Uint32Array(vb, 16, 4).set([nx, ny, nz, side]);
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
-    const dl = sim.cfg.problem.box / this.dims[projAxis ?? 2];
-    new Float32Array(vb, 32, 3).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, dl]);
+    new Float32Array(vb, 32, 2).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0]);
     // A field of either sign is always shown on a linear scale.
     const log = v.log && !LINEAR_FIELDS.has(v.field);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
@@ -460,10 +464,9 @@ export class Renderer {
     const cp2 = enc.beginComputePass();
     const parity = 2 * sim.cur + sim.speciesCur;
     if (projAxis !== null) {
-      // The map's side along each screen axis is the grid's side (the grid is a cube).
       cp2.setPipeline(this.pProject!);
       cp2.setBindGroup(0, this.gProject[parity]);
-      cp2.dispatchWorkgroups(Math.ceil(nx / 16), Math.ceil(nx / 8));
+      cp2.dispatchWorkgroups(Math.ceil(side / 16), Math.ceil(side / 8));
     } else {
       cp2.setPipeline(this.pField);
       cp2.setBindGroup(0, this.gField[parity]);

@@ -17,8 +17,8 @@ struct View {
   logscale: u32,
   lo: f32,         // range ends, in log10 units when logscale is set
   hi: f32,
-  nd: vec4<u32>,   // display volume size
-  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view); projection: dl in z
+  nd: vec4<u32>,   // display volume size; projection map size in w
+  cut: vec4<f32>,  // volume view: log10 of the minimum density shown, and 1 (0 in the slice view)
   sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; projection axis in w
 }
 @group(0) @binding(1) var<uniform> V: View;
@@ -48,17 +48,17 @@ fn gradients(c: vec3<i32>, dx: f32) -> Grad {
   return Grad(vec3<f32>(d[0].x, d[1].x, d[2].x), vec3<f32>(d[0].y, d[1].y, d[2].y), vec3<f32>(d[0].z, d[1].z, d[2].z), vec3<f32>(d[0].w, d[1].w, d[2].w));
 }
 
-// The leaf cell under the center of display voxel v. Sets g_dx to its size.
+// The leaf cell at a point of the box. Sets g_dx to its size.
 struct Leaf {
   slot: i32,
   level: i32,
   nblk: i32,         // blocks across the domain at its level
   l: vec3<i32>,      // cell within the block
   c: vec3<i32>,      // texel in the atlas
-  frac: vec3<f32>,   // voxel center, in fractions of the box
+  frac: vec3<f32>,   // the point, in fractions of the box
 }
-fn leaf(v: vec3<i32>) -> Leaf {
-  var frac = (vec3<f32>(v) + 0.5) / vec3<f32>(V.nd.xyz);
+fn leaf_at(frac0: vec3<f32>) -> Leaf {
+  var frac = frac0;
   if (is2d()) { frac.z = 0.0; }
   let m = i32(P.amr.y << P.amr.z);
   let slot = i32(textureLoad(IDX, vec3<i32>(frac * f32(m)), 0).x);
@@ -88,7 +88,30 @@ fn leaf_value(f: Leaf) -> Cell {
   return Cell(x, u1.x, u2.w > 0.5);
 }
 
-fn voxel(v: vec3<i32>) -> Cell { return leaf_value(leaf(v)); }
+// The leaf cell under the center of display voxel v.
+fn leaf(v: vec3<i32>) -> Leaf {
+  return leaf_at((vec3<f32>(v) + 0.5) / vec3<f32>(V.nd.xyz));
+}
+
+// Projection: the leaf cells along `axis` through the center of texel `ij` of the map, each
+// crossed whole, so the integral is exact at every level of refinement. Each step looks up the
+// leaf a quarter of a finest cell past the last boundary and moves to its far face.
+fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
+  var s = Column(0.0, 0.0, false);
+  let finest = f32(i32(P.amr.y << P.amr.z) * BS);
+  var p = vec3<f32>(0.0);
+  p[ab.x] = (f32(ij.x) + 0.5) / f32(V.nd.w);
+  p[ab.y] = (f32(ij.y) + 0.5) / f32(V.nd.w);
+  var at = 0.0;   // the boundary reached, in fractions of the box
+  for (var i = 0; i < i32(finest) && at < 1.0; i++) {
+    p[axis] = at + 0.25 / finest;
+    let f = leaf_at(p);
+    let ncell = f32(f.nblk * BS);
+    column_add(&s, leaf_value(f), g_dx);
+    at = (floor(p[axis] * ncell) + 1.0) / ncell;
+  }
+  return s;
+}
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
