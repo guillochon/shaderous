@@ -427,7 +427,7 @@ const slider = (id: string, label: string, title: string, min: number, max: numb
   `<label class="scrub" id="tp-${id}-row" title="${title}"><input id="tp-${id}" type="range" min="${min}" max="${max}" step="0.01" aria-label="${title}" /><span>${label}<output id="tp-${id}-out"></output></span></label>`;
 $('tools').innerHTML =
   TOOLS.map((t) => `<button id="tool-${t.kind}" aria-pressed="false" aria-label="${t.label}" title="${t.title}">${t.icon}</button>`).join('') +
-  `<div id="tool-params"><div id="tool-params-in">
+  `<div id="tool-params" class="tool-params"><div class="tool-params-in">
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the center', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
@@ -462,7 +462,19 @@ function syncTools() {
   if (open) {
     const b = $(`tool-${tool}`);
     if (b.nextElementSibling !== panel) {
-      // From another tool's: shut, move under this one, and open from there.
+      // From another tool's: shut, move under this one, and open from there. If it was open,
+      // a copy of it stays behind and slides shut at the same time, then goes.
+      if (panel.classList.contains('open')) {
+        const ghost = panel.cloneNode(true) as HTMLElement;
+        ghost.removeAttribute('id');
+        for (const el of ghost.querySelectorAll('[id]')) el.removeAttribute('id');
+        ghost.classList.add('ghost');
+        ghost.inert = true;
+        panel.before(ghost);
+        void ghost.offsetHeight;
+        ghost.classList.remove('open');
+        setTimeout(() => ghost.remove(), 300);
+      }
       panel.classList.remove('open');
       b.after(panel);
       void panel.offsetHeight; // lay out the shut panel first, so the opening animates

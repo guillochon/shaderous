@@ -132,34 +132,34 @@ details[open] > summary .sum { display: none; }
  * margin takes back the column's gap); open, it slides to its height. While it slides it is
  * clipped at its own edges except the left one, where a slider reaches out when pointed at.
  */
-#tool-params {
+.tool-params {
   display: grid; grid-template-rows: 0fr; margin-top: -4px; visibility: hidden;
   clip-path: inset(0 0 0 -200px);
   transition: grid-template-rows 0.15s ease-out, margin-top 0.15s ease-out, visibility 0s 0.15s;
 }
-#tool-params.open { grid-template-rows: 1fr; margin-top: 0; visibility: visible; transition-delay: 0s; }
-#tool-params-in { min-height: 0; display: flex; flex-direction: column; gap: 3px; }
-#tool-params label[hidden] { display: none; }
+.tool-params.open { grid-template-rows: 1fr; margin-top: 0; visibility: visible; transition-delay: 0s; }
+.tool-params-in { min-height: 0; display: flex; flex-direction: column; gap: 3px; }
+.tool-params label[hidden] { display: none; }
 /*
  * A tool slider shows its name only. Pointed at (or while its value is typed in), it reaches out
  * to the left over the stage, wide enough for its value with a unit ("1.48e16 cm").
  */
-#tool-params .scrub input[type='range'], #tool-params .scrub span {
+.tool-params .scrub input[type='range'], .tool-params .scrub span {
   left: auto; right: 0; width: 100%; transition: width 0.15s ease-out;
 }
-#tool-params .scrub input[type='range'] { position: absolute; top: 0; }
-#tool-params .scrub:hover input[type='range'], #tool-params .scrub:hover span,
-#tool-params .scrub.editing input[type='range'], #tool-params .scrub.editing span { width: 136px; }
-#tool-params .scrub span { overflow: hidden; gap: 6px; }
-#tool-params .scrub output {
+.tool-params .scrub input[type='range'] { position: absolute; top: 0; }
+.tool-params .scrub:hover input[type='range'], .tool-params .scrub:hover span,
+.tool-params .scrub.editing input[type='range'], .tool-params .scrub.editing span { width: 136px; }
+.tool-params .scrub span { overflow: hidden; gap: 6px; }
+.tool-params .scrub output {
   max-width: 0; opacity: 0; overflow: hidden; pointer-events: auto; cursor: text;
   transition: max-width 0.15s ease-out, opacity 0.15s ease-out;
 }
-#tool-params .scrub:hover output { max-width: 120px; opacity: 1; }
-#tool-params .scrub.editing output { visibility: hidden; }
+.tool-params .scrub:hover output { max-width: 120px; opacity: 1; }
+.tool-params .scrub.editing output { visibility: hidden; }
 /* Nothing to point with on a touch screen (and its rail clips what reaches out): show the value. */
 @media (hover: none) {
-  #tool-params .scrub output { max-width: none; opacity: 1; }
+  .tool-params .scrub output { max-width: none; opacity: 1; }
 }
 /* Typing a value: a field over the right of the bar. */
 .scrub-edit {
