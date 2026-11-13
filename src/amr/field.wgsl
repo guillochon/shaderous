@@ -7,7 +7,9 @@
 //       trilinearly between the centers of leaf cells the size of the one under the voxel, so a
 //       coarse cell does not show as a block of one value (smooth_log() below)
 // The slice and projection views read the leaf cells themselves, at the finest level's
-// resolution (plane() and column() below, render/project.wgsl).
+// resolution (plane() and column() below, render/project.wgsl). So does the 3D volume view,
+// through `atlas` below, which writes the same three channels for every leaf cell into an
+// atlas the ray-marcher reads at each block's own resolution (render/volume_atlas.wgsl).
 // Derivatives come from the primitive variables, whose ghost cells hold the neighbors across
 // block faces at the block's own level (as of the last assembly pass).
 #include "hydro/common.wgsl"
@@ -15,6 +17,7 @@
 #include "amr/grid.wgsl"
 #include "render/field_value.wgsl"
 #include "render/project.wgsl"
+#include "amr/list.wgsl"
 
 struct View {
   field: u32,      // index into FIELDS (src/problems/types.ts)
@@ -35,6 +38,7 @@ struct View {
 @group(0) @binding(8) var<storage, read_write> RANGE: array<atomic<u32>, 132>;
 @group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
 @group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
+@group(0) @binding(12) var DA: texture_storage_3d<rgba16float, write>;   // display atlas (`atlas`)
 
 fn neighbor(c: vec3<i32>) -> vec4<f32> {
   let w = textureLoad(W1, c, 0);
@@ -170,6 +174,38 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     var lg = log10_abs(q.x);
     if (V.cut.w != 0.0 && !q.solid) { lg = smooth_log(f, lg); }
     textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), lg, 0.0));
+  }
+  range_end(lix);
+}
+
+// The display atlas of a 3D adaptive mesh (render/volume_atlas.wgsl): each leaf block's cells,
+// and one layer of border cells all round holding the leaf there (of any level; at the faces of
+// the domain, the edge cells), so the ray-marcher's trilinear filter is continuous across
+// blocks. Dispatched over the leaf list like the padded passes. Records the range as the uniform
+// pass does, each cell counted as the number of finest cells it covers.
+@compute @workgroup_size(8, 8, 4)
+fn atlas(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
+  range_begin(lix);
+  let inv = inv_padded(gid, 1);
+  if (inv.ok) {
+    let slot = inv.slot;
+    let l = inv.l;
+    let level = i32(bt(slot, 0u));
+    let nblk = i32(P.amr.y) * (1 << u32(level));
+    let ncell = f32(nblk * BS);
+    let inside = all(l >= vec3<i32>(0)) && all(l < vec3<i32>(BS));
+    let at = (vec3<f32>(blk_coord(slot) * BS + l) + 0.5) / ncell;
+    var f: Leaf;
+    if (inside) {
+      g_dx = blk_dx(slot);
+      f = Leaf(slot, level, nblk, l, atl(blk_origin(slot), l), at);
+    } else {
+      f = leaf_at(clamp(at, vec3<f32>(0.5 / ncell), vec3<f32>(1.0 - 0.5 / ncell)));
+    }
+    let q = leaf_value(f);
+    if (inside && !q.solid) { range_add_w(q.x, 1u << (3u * (P.amr.z - u32(level)))); }
+    let shown = select(0.0, 1.0, log(max(q.rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
+    textureStore(DA, atl(blk_origin(slot), l), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), log10_abs(q.x), 0.0));
   }
   range_end(lix);
 }

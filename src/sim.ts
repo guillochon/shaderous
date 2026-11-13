@@ -230,6 +230,11 @@ export interface Simulation {
    */
   blockBoxes?(): { version: number; boxes: Float32Array };
   /**
+   * A 3D adaptive mesh: what the volume view needs to ray-march the leaf blocks at their own
+   * resolution (render/volume_atlas.wgsl) instead of the resampled display volume.
+   */
+  displayAtlas?(): DisplayAtlas | null;
+  /**
    * Debris energies (debris/debris.ts): the gas binned by its orbital energy about the
    * problem's chosen point mass, what has left the box and what is in it, with the return rate
    * of the bound part. Null if the problem does not ask for them. Takes a census of the grid,
@@ -238,6 +243,20 @@ export interface Simulation {
   debris(): Promise<DebrisReport | null>;
   /** The mass that has left the box per energy bin, as a snapshot keeps it; null without debris. */
   debrisLedger(): Promise<DebrisLedger | null>;
+}
+
+/** See Simulation.displayAtlas. */
+export interface DisplayAtlas {
+  /** atlas texels along each side (the state atlas's) */
+  side: number;
+  slotsPerSide: number;
+  /** root blocks per side, and the finest level */
+  roots: number;
+  levels: number;
+  /** leaf slot per block of the finest level, and the list of leaf slots with how many there are */
+  idx: GPUTexture;
+  list: GPUBuffer;
+  leaves: number;
 }
 
 export function configFor(problem: Problem, n: number, over: Partial<SimConfig> = {}): SimConfig {

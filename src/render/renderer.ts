@@ -4,7 +4,7 @@ import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { EOS_MODULES } from '../eos/eos';
 import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS } from '../problems/types';
-import { hydroSlots, type Simulation } from '../sim';
+import { hydroSlots, type DisplayAtlas, type Simulation } from '../sim';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
 const HIST_BINS = 128;
@@ -243,6 +243,17 @@ export class Renderer {
   guides: [number, number, number] | null = null;
   private gVolume!: GPUBindGroup;
   private vol?: GPUTexture;
+  /**
+   * A 3D adaptive mesh's volume view ray-marches its leaf blocks at their own resolution
+   * (render/volume_atlas.wgsl): the display pass's `atlas` entry fills the display atlas, and
+   * the uniform display volume above is a 1-texel stand-in. Null on other grids.
+   */
+  private atlas: { sim: Simulation; tex: GPUTexture; info: DisplayAtlas } | null = null;
+  private atlasUni: GPUBuffer;
+  private pVolumeAtlas!: GPURenderPipeline;
+  private pPickAtlas!: GPUComputePipeline;
+  private pAtlas?: GPUComputePipeline;
+  private gAtlas: GPUBindGroup[] = [];
   private pField?: GPUComputePipeline;
   private gField: GPUBindGroup[] = [];
   private dims: number[] = [0, 0, 0];
@@ -281,11 +292,13 @@ export class Renderer {
     this.pickOut = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     this.rangeBuf = this.device.createBuffer({ size: RANGE_WORDS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.rangeStage = this.device.createBuffer({ size: RANGE_WORDS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    this.atlasUni = this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
 
   async init() {
-    const make = async (file: string) => {
-      const module = this.device.createShaderModule({ code: assemble(file), label: file });
+    const atlas = { volume: 'render/volume_atlas.wgsl' };
+    const make = async (file: string, slots = {}) => {
+      const module = this.device.createShaderModule({ code: assemble(file, slots), label: file });
       return this.device.createRenderPipelineAsync({
         label: file,
         layout: 'auto',
@@ -295,10 +308,12 @@ export class Renderer {
       });
     };
     const lines = this.device.createShaderModule({ code: assemble('render/lines.wgsl'), label: 'lines' });
-    [this.pVolume, this.pSlice, this.pPick, this.pLines] = await Promise.all([
+    [this.pVolume, this.pVolumeAtlas, this.pSlice, this.pPick, this.pPickAtlas, this.pLines] = await Promise.all([
       make('render/raymarch.wgsl'),
+      make('render/raymarch.wgsl', atlas),
       make('render/slice.wgsl'),
       computePipeline(this.device, assemble('render/pick.wgsl'), 'pick'),
+      computePipeline(this.device, assemble('render/pick.wgsl', atlas), 'pick (adaptive mesh)'),
       this.device.createRenderPipelineAsync({
         label: 'lines',
         layout: 'auto',
@@ -335,17 +350,46 @@ export class Renderer {
   async attach(sim: Simulation) {
     const d = this.device;
     const dims = sim.displayDims;
-    if (!this.vol || dims.some((v, i) => v !== this.dims[i])) {
+    const info = sim.displayAtlas?.() ?? null;
+    // On a 3D adaptive mesh the uniform volume is only a stand-in (see `atlas`).
+    const volDims = info ? [1, 1, 1] : dims;
+    const have = this.vol ? [this.vol.width, this.vol.height, this.vol.depthOrArrayLayers] : null;
+    if (!have || volDims.some((v, i) => v !== have[i])) {
       this.vol?.destroy();
       this.vol = d.createTexture({
         label: 'display volume',
-        size: dims,
+        size: volDims,
         dimension: '3d',
         format: 'rgba16float',
         usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
       });
-      this.dims = dims.slice();
-      const res = { 0: this.cam, 1: this.vol.createView(), 2: this.tf.createView(), 3: this.sampler };
+    }
+    this.dims = dims.slice();
+    if (info) {
+      if (!this.atlas || this.atlas.tex.width !== info.side) {
+        this.atlas?.tex.destroy();
+        const tex = d.createTexture({
+          label: 'display atlas',
+          size: [info.side, info.side, info.side],
+          dimension: '3d',
+          format: 'rgba16float',
+          usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING,
+        });
+        this.atlas = { sim, tex, info };
+      }
+      this.atlas = { ...this.atlas, sim, info };
+      const a = new ArrayBuffer(32);
+      new Uint32Array(a, 0, 4).set([info.slotsPerSide, info.roots, info.levels, 0]);
+      new Float32Array(a, 16, 4).set([info.side, info.side, info.side, 0]);
+      d.queue.writeBuffer(this.atlasUni, 0, a);
+      const bt = sim.fieldResources(0, 0)[30] as GPUBuffer;
+      const res = { 0: this.cam, 1: this.atlas.tex.createView(), 2: this.tf.createView(), 3: this.sampler, 7: info.idx.createView(), 8: this.atlasUni, 30: bt };
+      this.gVolume = bindGroup(d, this.pVolumeAtlas, res);
+      this.gPick = bindGroup(d, this.pPickAtlas, { ...res, 4: this.pickIn, 5: this.pickOut });
+    } else {
+      this.atlas?.tex.destroy();
+      this.atlas = null;
+      const res = { 0: this.cam, 1: this.vol!.createView(), 2: this.tf.createView(), 3: this.sampler };
       this.gVolume = bindGroup(d, this.pVolume, res);
       this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
     }
@@ -363,10 +407,11 @@ export class Renderer {
       this.gSlice = bindGroup(d, this.pSlice, { 0: this.cam, 2: this.tf.createView(), 3: this.sampler, 4: this.map.createView() });
     }
     const code = assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling], diffusion: hydroSlots(sim.cfg).diffusion, comp: hydroSlots(sim.cfg).comp });
-    [this.pField, this.pPlane, this.pProject] = await Promise.all([
+    [this.pField, this.pPlane, this.pProject, this.pAtlas] = await Promise.all([
       computePipeline(d, code, 'field'),
       computePipeline(d, code, 'slice', undefined, 'slice'),
       computePipeline(d, code, 'projection', undefined, 'project'),
+      info ? computePipeline(d, code, 'display atlas', undefined, 'atlas') : Promise.resolve(undefined),
     ]);
     // One per parity of the state and of the species (a run without species binds a stand-in).
     this.noSpecies ??= d.createTexture({ label: 'no species', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING });
@@ -375,6 +420,7 @@ export class Renderer {
     // The slice pass records no range: the display pass does, over the whole box.
     this.gPlane = [0, 1, 2, 3].map((k) => bindGroup(d, this.pPlane!, { ...common(k), 11: this.map!.createView() }));
     this.gProject = [0, 1, 2, 3].map((k) => bindGroup(d, this.pProject!, { ...common(k), 8: this.rangeBuf, 11: this.map!.createView() }));
+    this.gAtlas = info ? [0, 1, 2, 3].map((k) => bindGroup(d, this.pAtlas!, { ...common(k), 8: this.rangeBuf, 12: this.atlas!.tex.createView(), 31: info.list })) : [];
     this.range = null;
   }
 
@@ -441,7 +487,7 @@ export class Renderer {
     const out = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const enc = d.createCommandEncoder();
     const pass = enc.beginComputePass();
-    pass.setPipeline(this.pPick);
+    pass.setPipeline(this.atlas ? this.pPickAtlas : this.pPick);
     pass.setBindGroup(0, this.gPick);
     pass.dispatchWorkgroups(1);
     pass.end();
@@ -530,9 +576,17 @@ export class Renderer {
       cp2.setBindGroup(0, this.gProject[parity]);
       cp2.dispatchWorkgroups(Math.ceil(side / 16), Math.ceil(side / 8));
     } else {
-      cp2.setPipeline(this.pField);
-      cp2.setBindGroup(0, this.gField[parity]);
-      cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
+      if (this.atlas?.sim === sim) {
+        // Every leaf cell and its border, as the padded passes are dispatched (amr/list.wgsl).
+        const leaves = sim.displayAtlas!()!.leaves;
+        cp2.setPipeline(this.pAtlas!);
+        cp2.setBindGroup(0, this.gAtlas[parity]);
+        if (leaves > 0) cp2.dispatchWorkgroups(leaves * 3, 3, 5);
+      } else {
+        cp2.setPipeline(this.pField);
+        cp2.setBindGroup(0, this.gField[parity]);
+        cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
+      }
       if (v.mode !== 'volume' || nz === 1) {
         cp2.setPipeline(this.pPlane!);
         cp2.setBindGroup(0, this.gPlane[parity]);
@@ -552,7 +606,7 @@ export class Renderer {
     });
     // A 2D run has nothing to ray-march: always show the plane.
     const volume = v.mode === 'volume' && nz > 1;
-    rp.setPipeline(volume ? this.pVolume : this.pSlice);
+    rp.setPipeline(volume ? (this.atlas ? this.pVolumeAtlas : this.pVolume) : this.pSlice);
     rp.setBindGroup(0, volume ? this.gVolume : this.gSlice!);
     rp.draw(3);
     if (volume) this.drawLines(rp, sim, v.showBlocks);

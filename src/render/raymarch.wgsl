@@ -2,7 +2,10 @@
 // function (color and opacity against the normalized field value). With contours on it also
 // draws isosurfaces at their levels (C.k, as the slice view's lines), lit, in the color of their
 // level, C.fwd.w opaque; C.sc.w 0 leaves the fog out, so the surfaces show alone.
+// What it marches through comes from the <volume> slot: the uniform display volume
+// (render/volume_uniform.wgsl) or an adaptive mesh's leaf blocks (render/volume_atlas.wgsl).
 #include "render/camera.wgsl"
+#include <volume>
 
 fn hash(p: vec2<f32>) -> f32 {
   return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
@@ -16,13 +19,14 @@ fn edge(p: vec3<f32>, w: f32) -> f32 {
 
 // Volume view's isosurfaces: in units of the spacing between levels, level k lies at f = k.
 fn iso_f(p: vec3<f32>) -> f32 {
-  return (textureSampleLevel(VOL, S, p + 0.5, 0.0).b - C.k.y) * (C.k.x + 1.0) / max(C.k.z - C.k.y, 1.0e-6);
+  return (vol_look(p).s.b - C.k.y) * (C.k.x + 1.0) / max(C.k.z - C.k.y, 1.0e-6);
 }
 
 // The isosurface through p (in the box, [-0.5, 0.5]^3) seen along rd, lit: a key light above
 // and to the right of the camera, a fill from the camera, and a highlight.
 fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>) -> vec3<f32> {
-  let e = 1.0 / C.q.z;
+  // Differences across the cell the surface passes through.
+  let e = vol_look(p).cell;
   let gr = vec3<f32>(
     iso_f(p + vec3<f32>(e, 0.0, 0.0)) - iso_f(p - vec3<f32>(e, 0.0, 0.0)),
     iso_f(p + vec3<f32>(0.0, e, 0.0)) - iso_f(p - vec3<f32>(0.0, e, 0.0)),
@@ -54,8 +58,6 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let t1 = min(thi.x, min(thi.y, thi.z));
   if (t1 <= t0) { return vec4<f32>(BG, 1.0); }
 
-  let ds = 1.0 / C.p.w;
-  let count = min(i32(ceil((t1 - t0) / ds)), 1024);
   let jitter = hash(in.pos.xy);
   var col = vec3<f32>(0.0);
   var alpha = 0.0;
@@ -64,13 +66,18 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   var fprev = 0.0;
   var pprev = vec3<f32>(0.0);
   var have = false;   // fprev, pprev hold the last sample
-  for (var i = 0; i < count; i++) {
-    let p = ro + rd * (t0 + (f32(i) + jitter) * ds);
-    let s = textureSampleLevel(VOL, S, p + 0.5, 0.0);
+  // Each sample stands for the stretch of ray up to the next one, whose length depends on the
+  // cell it is in (vol_step); the first is placed a random part of a step in, against banding.
+  var t = t0 + jitter * vol_step(vol_look(ro + rd * t0));
+  for (var i = 0; i < VOL_MAX_SAMPLES && t < t1; i++) {
+    let p = ro + rd * t;
+    let look = vol_look(p);
+    let s = look.s;
+    let ds = vol_step(look);
     let v = s.r;
     if (v < -0.5) {
       // The surface of an obstacle: opaque, darker with depth so its shape reads.
-      col += (1.0 - alpha) * SOLID * (1.15 - 0.6 * f32(i) / f32(count));
+      col += (1.0 - alpha) * SOLID * (1.15 - 0.6 * (t - t0) / (t1 - t0));
       alpha = 1.0;
       break;
     }
@@ -105,6 +112,7 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
       alpha += (1.0 - alpha) * a;
     }
     if (alpha > 0.995) { break; }
+    t += ds;
   }
   col += (1.0 - alpha) * BG;
 

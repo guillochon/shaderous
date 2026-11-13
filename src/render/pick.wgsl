@@ -2,6 +2,7 @@
 // along it the gas that the viewer sees lies (the mean distance, weighted by each sample's
 // contribution to the pixel). The editing tools use it to place a brush on what was clicked.
 #include "render/camera.wgsl"
+#include <volume>
 
 struct PickIn { uv: vec2<f32> }   // [-1, 1], y up
 @group(0) @binding(4) var<uniform> I: PickIn;
@@ -21,12 +22,12 @@ fn main() {
   var seen = 0.0;
   var sum = 0.0;
   if (t1 > t0) {
-    let ds = 1.0 / C.p.w;
-    let count = min(i32(ceil((t1 - t0) / ds)), 1024);
     var alpha = 0.0;
-    for (var i = 0; i < count; i++) {
-      let t = t0 + (f32(i) + 0.5) * ds;
-      let s = textureSampleLevel(VOL, S, ro + rd * t + 0.5, 0.0);
+    var t = t0 + 0.5 * vol_step(vol_look(ro + rd * t0));
+    for (var i = 0; i < VOL_MAX_SAMPLES && t < t1; i++) {
+      let look = vol_look(ro + rd * t);
+      let s = look.s;
+      let ds = vol_step(look);
       let v = s.r;
       let tf = textureSampleLevel(TF, S, vec2<f32>(v, 0.5), 0.0);
       // An obstacle (-1) stops the ray; gas below the minimum density (g = 0) is not there.
@@ -35,6 +36,7 @@ fn main() {
       sum += a * t;
       alpha += a;
       if (alpha > 0.995) { break; }
+      t += ds;
     }
   }
   O[0] = select(-1.0, sum / max(seen, 1.0e-6), seen > 0.02);

@@ -361,12 +361,27 @@ directly. Nothing is copied to the CPU.
   timestep limit, mass fraction of each species, and refinement level. The color range follows
   the field, ignoring the most extreme 0.5% of cells for derived fields.
 - **Ray-marcher** (`raymarch.wgsl`): front-to-back emission-absorption through the unit box with
-  a 1D transfer function and a dithered start to hide banding.
+  a 1D transfer function and a dithered start to hide banding. What it marches through comes
+  from a slot:
+  - On a uniform grid (and a 2D mesh), a display volume of at most $`256^3`$, sampled at a
+    fixed step (`volume_uniform.wgsl`).
+  - On a 3D adaptive mesh, the leaf blocks at their own resolution (`volume_atlas.wgsl`). The
+    display pass's `atlas` entry (`amr/field.wgsl`) writes each leaf block's display values into
+    an atlas laid out like the state's. Each block gets one ring of border cells holding the leaf
+    there, at any level, so hardware trilinear filtering is continuous across blocks.
+  - A sample finds its leaf through the leaf index and the block table. The ray then moves on by
+    two thirds of that cell, so fine regions are sampled finely and the coarse rest cheaply.
+  - The atlas costs 8 bytes per atlas texel: about 140 MB at the default block budget, the same
+    as the $`256^3`$ volume it replaces. A volume at the finest resolution would be 1 GiB at
+    $`512^3`$.
+  - The color range comes from the same pass, each cell counted as the number of finest cells
+    it covers.
 - **Slice** (`slice.wgsl`): an axis-aligned slice with zoom up to 64× and a color bar.
 - **Lines** (`lines.wgsl`): block outlines of the adaptive mesh and tool guides over the volume
   view.
 - **Picking** (`pick.wgsl`): the query tool reads one cell's state (and its block, level and
-  indicator) through a tiny readback.
+  indicator) through a tiny readback. Its depth pick marches a ray through the same volume slot
+  as the ray-marcher.
 - **Brushes** (`edit/brush*.wgsl`, `amr/brush.wgsl`) write mass, velocity, heat, obstacles,
   sources and stars straight into the state textures.
 

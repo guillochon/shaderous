@@ -131,6 +131,11 @@ fn range_begin(lix: u32) {
 }
 
 fn range_add(x: f32) {
+  range_add_w(x, 1u);
+}
+
+// As range_add, counting the value w times in the histogram (a cell as large as w others).
+fn range_add_w(x: f32, w: u32) {
   if (x != x || abs(x) > 3.0e38) { return; }
   let k = range_key(x);
   atomicMin(&w_lo, k);
@@ -139,7 +144,7 @@ fn range_add(x: f32) {
   let a = abs(x);
   var bin = 0u;
   if (a > 0.0) { bin = u32(clamp(floor((log(a) * 0.4342944819 - HIST_LOG_LO) * HIST_PER_DECADE), 0.0, f32(HIST_BINS - 1u))); }
-  atomicAdd(&w_hist[bin], 1u);
+  atomicAdd(&w_hist[bin], w);
 }
 
 fn range_end(lix: u32) {
