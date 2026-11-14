@@ -388,3 +388,11 @@ body.validate .buttons-cell button + button { margin-left: 4px; }
 #timing .num { text-align: right; font-family: ui-monospace, Consolas, monospace; }
 #timing tr:last-child td { border-top: 1px solid var(--line, rgba(127, 127, 127, 0.3)); }
 #timing .timing-note { margin: 4px 0 0; }
+/* Validation: a header row per group of tests, with its Run group button and tally. */
+body.validate tr.group th { padding-top: 18px; border-bottom: 1px solid var(--line); color: var(--text); font-size: 13px; }
+body.validate tr.group .group-name { font-weight: 600; }
+body.validate tr.group .group-count { color: var(--dim); font-weight: 400; margin-left: 4px; }
+body.validate tr.group button { margin-left: 10px; font-weight: 400; }
+body.validate tr.group .group-tally { margin-left: 10px; font-weight: 400; color: var(--dim); }
+body.validate tr.group .group-tally.pass { color: var(--good); }
+body.validate tr.group .group-tally.fail { color: var(--bad); }

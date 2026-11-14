@@ -31,17 +31,68 @@ const NL = String.fromCharCode(10);
 const BUILD_STAMP = typeof __BUILD__ === 'string' ? __BUILD__ : 'dev';
 const copyFailing = document.getElementById('copy-failing') as HTMLButtonElement;
 
-for (const t of TESTS) {
-  const tr = document.createElement('tr');
-  tr.innerHTML = `<td class="buttons-cell"><button class="run">Run</button><button class="copy" hidden title="Copy this test's result, with the build, browser and GPU, as text">Copy</button></td><td>${t.name}</td><td class="status">-</td><td class="detail">${t.criterion}</td><td class="time"></td>`;
-  tr.querySelector('.run')!.addEventListener('click', () => run(t.id));
-  const copy = tr.querySelector('.copy') as HTMLButtonElement;
-  copy.addEventListener('click', () => {
-    const r = results.get(t.id);
-    if (r) void copyText(copy, context() + NL + NL + report(r));
-  });
-  tbody.appendChild(tr);
-  rows.set(t.id, tr);
+/**
+ * The table's groups, by subject; within each, tests keep the order of TESTS. A test in none of
+ * them goes to Other, so a new test is never left off the page.
+ */
+const GROUPS: { name: string; ids: string[] }[] = [
+  { name: 'Hydrodynamics', ids: ['sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'rayleigh-taylor', 'low-mach', 'well-balanced', 'advection', 'advection-accuracy', 'flux-determinism', 'reflecting-box', 'two-dimensional'] },
+  { name: 'Species, equations of state and burning', ids: ['species', 'species-eos', 'shock-bubble', 'detonation', 'eos'] },
+  { name: 'Cooling and diffusion', ids: ['cooling', 'viscosity', 'conduction'] },
+  { name: 'Gravity and point masses', ids: ['sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption', 'point-mass-sink', 'binary-orbit', 'point-mass-encounter'] },
+  { name: 'Adaptive mesh', ids: TESTS.map((t) => t.id).filter((id) => id.startsWith('amr-')) },
+  { name: 'Magnetic fields', ids: TESTS.map((t) => t.id).filter((id) => id.startsWith('mhd-')) },
+  { name: 'Against the reference, and files', ids: ['gpu-vs-cpu', 'snapshot-roundtrip'] },
+];
+{
+  const placed = new Set(GROUPS.flatMap((g) => g.ids));
+  const rest = TESTS.map((t) => t.id).filter((id) => !placed.has(id));
+  if (rest.length) GROUPS.push({ name: 'Other', ids: rest });
+  // Each group in the order of TESTS, and only the tests that exist.
+  for (const g of GROUPS) g.ids = TESTS.map((t) => t.id).filter((id) => g.ids.includes(id));
+}
+/** Each group's header: its tally of results. */
+const tallies: { ids: string[]; el: HTMLElement }[] = [];
+
+for (const g of GROUPS) {
+  if (!g.ids.length) continue;
+  const head = document.createElement('tr');
+  head.className = 'group';
+  head.innerHTML = `<th colspan="5"><span class="group-name">${g.name}</span> <span class="group-count">${g.ids.length} tests</span> <button class="run-group" title="Run the tests of this group, in order">Run group</button> <span class="group-tally"></span></th>`;
+  head.querySelector('.run-group')!.addEventListener('click', () => runMany(g.ids));
+  tbody.appendChild(head);
+  tallies.push({ ids: g.ids, el: head.querySelector('.group-tally')! });
+  for (const id of g.ids) {
+    const t = TESTS.find((x) => x.id === id)!;
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td class="buttons-cell"><button class="run">Run</button><button class="copy" hidden title="Copy this test's result, with the build, browser and GPU, as text">Copy</button></td><td>${t.name}</td><td class="status">-</td><td class="detail">${t.criterion}</td><td class="time"></td>`;
+    tr.querySelector('.run')!.addEventListener('click', () => run(t.id));
+    const copy = tr.querySelector('.copy') as HTMLButtonElement;
+    copy.addEventListener('click', () => {
+      const r = results.get(t.id);
+      if (r) void copyText(copy, context() + NL + NL + report(r));
+    });
+    tbody.appendChild(tr);
+    rows.set(t.id, tr);
+  }
+}
+
+/** Each group's tally: how many of its tests have passed and failed so far. */
+function showTallies() {
+  for (const { ids, el } of tallies) {
+    const done = ids.map((id) => results.get(id)).filter((r): r is TestResult => !!r);
+    const failed = done.filter((r) => !r.pass).length;
+    el.textContent = done.length ? `${done.length - failed} passed${failed ? `, ${failed} failed` : ''}` : '';
+    el.className = 'group-tally' + (failed ? ' fail' : done.length === ids.length ? ' pass' : '');
+  }
+}
+
+/** Run tests in turn (each waits for the one before, see run()). */
+async function runMany(ids: string[]): Promise<TestResult[]> {
+  await ready;
+  const out: TestResult[] = [];
+  for (const id of ids) out.push(await run(id));
+  return out;
 }
 
 /** Where the tests ran: build, page, browser and GPU. */
@@ -98,6 +149,7 @@ function run(id: string): Promise<TestResult> {
     results.set(id, r);
     (tr.querySelector('.copy') as HTMLButtonElement).hidden = false;
     showCopyFailing();
+    showTallies();
     return r;
   });
   chain = p.catch(() => {});
@@ -123,12 +175,8 @@ window.shaderous = {
     await ready;
     return run(id);
   },
-  runAll: async () => {
-    await ready;
-    const out: TestResult[] = [];
-    for (const t of TESTS) out.push(await run(t.id));
-    return out;
-  },
+  // In the table's order, group by group.
+  runAll: () => runMany(GROUPS.flatMap((g) => g.ids)),
 };
 
 document.getElementById('run-all')!.addEventListener('click', () => window.shaderous.runAll());
