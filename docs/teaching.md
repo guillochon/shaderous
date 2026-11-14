@@ -5,11 +5,12 @@ no account, and no cluster time to request. A setup can be handed to a class as 
 properties make it practical for teaching, from a ten-minute demonstration in a general
 education course to a graduate project on numerical methods.
 
-This guide suggests uses at three levels. The activities are starting points: each comes with
+This guide suggests uses at four levels. The activities are starting points: each comes with
 a link that opens the setup it describes, and the questions can be shortened or extended to
 fit the time available.
 
 - [Before class: practicalities](#before-class-practicalities)
+- [Primary and secondary school](#primary-and-secondary-school)
 - [Undergraduates, non-majors](#undergraduates-non-majors)
 - [Undergraduates, physics and astronomy majors](#undergraduates-physics-and-astronomy-majors)
 - [Graduate students](#graduate-students)
@@ -55,6 +56,147 @@ intervals, which is useful for a time series.
 not a production code: it runs on one GPU in single precision, and has no magnetic fields or
 radiation transport. Say so when students compare its results to the literature. For
 advanced students, the reasons for its limits make good material in their own right.
+
+---
+
+## Primary and secondary school
+
+*Ages about 6 to 18, in science lessons on air and water, weather, forces, energy, the Sun
+and stars, or space.*
+
+**Goals.** Spark curiosity, and practice the habit of predicting before looking. Younger
+students should see that air and water flow and swirl, that hot things rise and spread out,
+that stars are giant balls of hot gas, and that scientists use computers to try out things that
+are too big, too far away or too dangerous to do for real. Older students can tie what they see
+to ideas from their physics and chemistry courses: density and buoyancy, pressure, gravity,
+energy, and the speed of sound. They can also start to ask how far a simulation can be trusted.
+
+**Format.** For younger students, the teacher demonstrates on a projector or large screen, 5 to
+10 minutes at a time, and the class watches together. Where children do touch the page, keep it
+to one action at a time: a volunteer comes up to press play, or to make one stroke with a brush,
+while the class watches. Older students can watch the same demonstrations, then work in pairs
+on lab computers or laptops for a lesson. They can change settings, switch views, and use the
+query tool to read numbers off the screen.
+
+**Tips for teachers.**
+- Prepare each link in advance and open it paused, so nothing happens until the class is ready.
+  Hide the right-hand panel so the picture fills the screen.
+- Explain the colors once: bright means a lot of gas, dark means very little. With younger
+  classes, keep to the default view. Older students can switch to temperature or speed and
+  compare.
+- Use a **predict, watch, explain** routine. Pause, ask "what do you think will happen?", take a
+  show of hands, then press play.
+- Pause often. Students notice more in a still picture than in a moving one.
+- Pair each demonstration with a hands-on version students can see or do themselves (below).
+  The simulation is most convincing when it looks like something they have watched happen.
+- The sizes and speeds are not to scale, and the colors are chosen by the program. If a student
+  asks "is that what it really looks like?", praise the question and discuss it. With older
+  students it leads to a good conversation about what a model is.
+
+Each demonstration below starts with what works for the whole range, followed by ideas for
+**older students**.
+
+### Demo 1: Swirls in the wind (Kelvin-Helmholtz)
+
+Open [Kelvin-Helmholtz](https://guillochon.github.io/shaderous/?problem=kelvin-helmholtz).
+Two streams of air slide past each other in opposite directions, and the line between them
+curls up into waves and swirls.
+
+- Ask: where have you seen swirls like these? (Clouds on a windy day, waves on the sea, milk
+  stirred into tea, pictures of the planet Jupiter.)
+- Let a volunteer stir a quiet patch with the velocity brush, then watch the swirl spread.
+- *Try it:* drip a little milk or food coloring into a glass of water and watch it curl.
+- **Older students:** switch the view to vorticity to show where the gas spins. Ask why wind
+  blowing over the sea makes waves, and why the waves grow instead of fading.
+
+### Demo 2: Heavy on top (Rayleigh-Taylor)
+
+Open [Rayleigh-Taylor](https://guillochon.github.io/shaderous/?problem=rayleigh-taylor).
+Heavy gas sits on top of light gas. Before pressing play, ask the class what they think will
+happen. Fingers of heavy gas sink and mushroom-shaped plumes of light gas rise.
+
+- Compare with a lava lamp, or with the mushroom cloud above a big fire or volcano.
+- *Try it:* pour a little water carefully onto oil in a clear cup, and talk about which one ends
+  up on top and why.
+- **Older students:** connect it to density and buoyancy. Why does the less dense gas rise? Why
+  does it rise in plumes rather than all at once? Link it to hot air balloons and convection in
+  a pan of water or in the Sun.
+
+### Demo 3: An explosion (Sedov blast)
+
+Open the [3D blast](https://guillochon.github.io/shaderous/?problem=sedov&dim=3&n=64). A burst
+of heat in the middle pushes out a round shell of gas in every direction.
+
+- Ask: what shape will it make? Many students guess it will be lumpy or a star shape. It stays
+  round because it pushes equally every way.
+- Connect it to fireworks, and to a star that explodes at the end of its life (a supernova).
+  The leftover clouds from real supernovae are some of the most beautiful pictures in astronomy.
+- With a volunteer, use the heat brush in a second spot and watch the two shells meet.
+- **Older students:** switch to the slice view. The shell is thin and dense, and the inside is
+  hot and nearly empty. Pause at several times and measure the radius on the screen. Does the
+  blast slow down as it grows? Tell the story of G. I. Taylor estimating the energy of the first
+  atomic bomb from photographs of its fireball.
+
+### Demo 4: How a star holds itself together (polytrope)
+
+Open the [star](https://guillochon.github.io/shaderous/?problem=polytrope&dim=3&n=64). It sits
+still because two things are balanced: gravity pulls all the gas inward, and the hot gas pushes
+outward.
+
+- Show balance with a body example: two students press their palms together with equal force.
+  Neither moves. If one pushes harder, they both move.
+- Use the heat brush on the middle of the star. Ask first: will it get bigger, smaller, or
+  wobble? Then watch.
+- Remind them that the Sun is a star like this, and much, much bigger than the Earth.
+- **Older students:** use the query tool to read the density and temperature at the center and
+  near the edge. Where is the star hottest, and why? Ask what happens when a star runs out of
+  fuel and its pressure drops, and connect it to white dwarfs, neutron stars and black holes.
+
+### Demo 5: A star gets too close to a black hole (tidal disruption)
+
+Open the [tidal disruption](https://guillochon.github.io/shaderous/?problem=tidal-disruption-full).
+A star swings close to a black hole and gets stretched out into a long stream, like spaghetti.
+
+- Ask before playing: will the black hole swallow the whole star? (No. Some of the gas falls in
+  and some is flung away.)
+- Explain stretching with a simple picture: the side of the star nearer the black hole is pulled
+  harder than the far side, so the star is pulled longer and longer.
+- This demo is often the favorite. It works well as the last one.
+- **Older students:** relate the stretching to the Moon's pull on the Earth's oceans, which makes
+  the tides. Compare the variants: a star that only grazes the black hole loses its outer layers
+  and survives (Partial), while one that passes deeper is torn apart (Full).
+
+### Demo 6: Make your own (empty box)
+
+Open the [empty box](https://guillochon.github.io/shaderous/?problem=empty&dim=2&n=256). There
+is nothing in it until someone adds something. Let a few volunteers take turns, each with one
+tool: one adds gas with the mass brush, the next pushes it with the velocity brush, the next
+heats a spot, the next draws a wall with the obstacle tool for the gas to hit. The class
+predicts what each addition will do before the volunteer presses play.
+
+**Older students** can work in pairs to set up a situation of their own and present it to the
+class: what they built, what they predicted, and what happened.
+
+### Demo 7 (older students): A shock wave (Sod shock tube and shock bubble)
+
+Open the [shock tube](https://guillochon.github.io/shaderous/?problem=sod-x&dim=2&n=256). High
+pressure gas on one side is suddenly released into low pressure gas, as when a balloon pops.
+
+- Identify the shock wave moving into the low pressure gas. Use the query tool to compare the
+  density, pressure and temperature on either side of it.
+- Discuss sonic booms and thunder: a shock is a disturbance that moves faster than sound.
+- Then open the [shock hitting a bubble](https://guillochon.github.io/shaderous/?problem=shock-bubble&dim=2&n=512).
+  A shock hits a bubble of light helium. Predict what happens to the bubble before playing.
+
+### Follow-up ideas
+
+- **Draw what you saw.** Students draw one of the demos before and after, with a sentence or
+  label saying what changed.
+- **Match the pictures.** Print screenshots of each demo next to photographs of clouds, a lava
+  lamp, fireworks and a supernova remnant, and have the class match them up.
+- **"I predicted, I saw."** A two-column chart on the board for each demo, filled in together.
+- **Older students: a lab report.** Pick one demo, change one setting, and write up the question,
+  the prediction, what happened, and one way the simulation differs from the real thing.
 
 ---
 
