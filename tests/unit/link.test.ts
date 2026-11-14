@@ -12,7 +12,7 @@ const state = (id: string, n: number, ndim: 2 | 3, amrLevels = 0) => {
 describe('shareable links', () => {
   it('a bare visit opens the default setup', () => {
     const l = decodeLink(new URLSearchParams(''));
-    expect([l.problem, l.ndim, l.n]).toEqual([DEFAULT_SETUP.problem, 2, 1024]);
+    expect([l.problem, l.ndim, l.n, l.amr]).toEqual([DEFAULT_SETUP.problem, 2, 512, 3]);
   });
 
   it('a link that only names a preset opens it in 3D at the default resolution', () => {

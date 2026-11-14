@@ -16,7 +16,7 @@ export const MAX_ZOOM = 64;
 export const MAX_CONTOURS = 40;
 
 /** What a fresh visit shows. */
-export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 1024 };
+export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 512, amr: 3 };
 
 export interface LinkState {
   cfg: SimConfig;
@@ -150,7 +150,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
     problem,
     ndim: known ? (dim ? (dim === '2' ? 2 : 3) : (grid?.ndim ?? 3)) : DEFAULT_SETUP.ndim,
     n: known ? (q.has('n') ? Math.max(0, Math.round(+q.get('n')! || 0)) : (grid?.n ?? 0)) : DEFAULT_SETUP.n,
-    amr: known ? Math.min(5, Math.max(0, Math.round(q.has('amr') ? +q.get('amr')! || 0 : q.has('n') ? 0 : (grid?.amr ?? 0)))) : 0,
+    amr: known ? Math.min(5, Math.max(0, Math.round(q.has('amr') ? +q.get('amr')! || 0 : q.has('n') ? 0 : (grid?.amr ?? 0)))) : DEFAULT_SETUP.amr,
     cfg: {},
     eosParams: {},
     coolParams: {},
