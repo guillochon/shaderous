@@ -387,14 +387,19 @@ export class AmrSim implements Simulation {
     return PAD ** ndim * (9 * 16 + 2 * 4);
   }
 
-  /** Build the simulation; if the GPU runs out of memory, try again with a smaller atlas. */
-  static async create(gpu: Gpu, cfg: SimConfig): Promise<AmrSim> {
+  /**
+   * Build the simulation; if the GPU runs out of memory, try again with a smaller atlas.
+   * @param opts.deferUpdate return before the update pass has compiled (the slowest by far:
+   *   2.2 s of a 3.4 s build on a cold cache, measured for the 2D default). The run can be
+   *   shown meanwhile; it is `preparing`, and takes no steps, until `compiled` resolves.
+   */
+  static async create(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<AmrSim> {
     for (let slots = 0; ; ) {
       gpu.device.pushErrorScope('out-of-memory');
       let sim: AmrSim | null = null;
       let failure: unknown = null;
       try {
-        sim = await AmrSim.build(gpu, cfg, slots);
+        sim = await AmrSim.build(gpu, cfg, slots, !!opts.deferUpdate);
         await gpu.device.queue.onSubmittedWorkDone();
       } catch (e) {
         failure = e;
@@ -411,56 +416,24 @@ export class AmrSim implements Simulation {
     }
   }
 
-  private static async build(gpu: Gpu, cfg: SimConfig, slots: number): Promise<AmrSim> {
+  private static async build(gpu: Gpu, cfg: SimConfig, slots: number, deferUpdate: boolean): Promise<AmrSim> {
     const sim = new AmrSim(gpu, cfg, slots);
     const d = sim.device;
     const v = (t: GPUTexture) => t.createView();
     const depth = cfg.ndim === 2 ? 1 : BS;
-    sim.redDt = await Reducer.create(
-      d,
-      [sim.cap * BS, BS, depth],
-      [MAX, MAX],
-      '',
-      {},
-      [],
-      'amr timestep',
-      [flatGroups(cfg.ndim, NG), sim.cap, 1], // one record per workgroup of the assembly pass
-    );
-    sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 });
-    sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
-    sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
+    // Every pipeline is asked for before any is awaited, so the browser compiles them all at
+    // once (gpu/device.ts). The hydro passes, the slowest, start first; buildHydro below finds
+    // them compiled or compiling.
+    sim.hydroPipelines();
     // With species the indicator also reads their fractions, ghosts included (amr/species_assemble.wgsl).
     // With burning, also how fast it burns (burn/burn.ts).
     const burn = burnSpec(cfg);
     const flagSlots: Record<string, string> = { flag_species: flagSpeciesSlot(sim.speciesGroups, sim.speciesDepth) };
     if (burn) Object.assign(flagSlots, { flag_burn: flagBurnSlot(burn, cfg.problem.species), eos: hydroSlots(cfg).eos });
-    sim.pFlag = await computePipeline(d, assemble('amr/flag.wgsl', flagSlots), 'amr flag');
-    sim.gFlag = bindGroup(d, sim.pFlag, {
-      0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf,
-      ...((sim.speciesX ? { 5: v(sim.speciesX) } : {}) as Record<number, GPUTextureView>),
-    });
-    // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
-    sim.redBh = await Reducer.create(
-      d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_off.wgsl' },
-      [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock, 30: sim.bt })), 'amr point masses',
-    );
-    sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift');
-    sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
-    sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick');
-    sim.pBhEval = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 });
-    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
-    sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
-    sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
-    if (cfg.ndim === 2) {
-      // No self-gravity in 2D, so no solver: the field atlas holds the point masses alone.
-      // The potential bindings are never read (there is none), but the pass declares them.
-      sim.pMassField = await computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field');
-      sim.gMassField = bindGroup(d, sim.pMassField, {
-        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock, 30: sim.bt, 31: sim.listAll,
-      });
-    }
-    if (cfg.ndim === 3) {
-      // Self-gravity machinery is built for every 3D run, so gravity can be switched on later.
+    const spec = debrisSpec(cfg);
+    if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
+    // 3D: self-gravity machinery is built for every run, so gravity can be switched on later.
+    const gravity = async () => {
       const u1 = [0, 1].map((p) => v(sim.state[p][0]));
       sim.redMp = await Reducer.create(d, [sim.cap * BS, BS, BS], new Array(10).fill(SUM), 'amr/multipole.wgsl', {}, u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole');
       sim.grav = await AmrGravity.create({
@@ -469,13 +442,50 @@ export class AmrSim implements Simulation {
         multipole: sim.redMp.result, stateU1: [sim.state[0][0], sim.state[1][0]], gfield: sim.gfield,
         bins: sim.bins, listAct: sim.listAct, listUpd: sim.listUpd, binArgs: sim.binArgs,
       });
+    };
+    [sim.redDt, sim.pClock, sim.pFlag, sim.redBh, sim.pBhDrift, sim.pBhKick, sim.pBhEval, sim.pMassField, sim.pCensus] = await Promise.all([
+      Reducer.create(
+        d,
+        [sim.cap * BS, BS, depth],
+        [MAX, MAX],
+        '',
+        {},
+        [],
+        'amr timestep',
+        [flatGroups(cfg.ndim, NG), sim.cap, 1], // one record per workgroup of the assembly pass
+      ),
+      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 }),
+      computePipeline(d, assemble('amr/flag.wgsl', flagSlots), 'amr flag'),
+      // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
+      Reducer.create(
+        d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_off.wgsl' },
+        [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock, 30: sim.bt })), 'amr point masses',
+      ),
+      computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift'),
+      computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick'),
+      computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 }),
+      // No self-gravity in 2D, so no solver: the field atlas holds the point masses alone.
+      cfg.ndim === 2 ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
+      spec ? computePipeline(d, assemble('debris/census_amr.wgsl'), 'amr debris census') : undefined,
+      cfg.ndim === 3 ? gravity() : undefined,
+    ]);
+    sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
+    sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
+    sim.gFlag = bindGroup(d, sim.pFlag, {
+      0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf,
+      ...((sim.speciesX ? { 5: v(sim.speciesX) } : {}) as Record<number, GPUTextureView>),
+    });
+    sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
+    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
+    sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
+    sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
+    if (sim.pMassField) {
+      // The potential bindings are never read (there is none), but the pass declares them.
+      sim.gMassField = bindGroup(d, sim.pMassField, {
+        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock, 30: sim.bt, 31: sim.listAll,
+      });
     }
-    const spec = debrisSpec(cfg);
-    if (spec) {
-      sim.debrisBuf = new DebrisBuffers(d, spec);
-      sim.pCensus = await computePipeline(d, assemble('debris/census_amr.wgsl'), 'amr debris census');
-    }
-    await sim.buildHydro();
+    await sim.buildHydro(deferUpdate);
     sim.reset();
     await sim.settled;
     return sim;
@@ -525,18 +535,45 @@ export class AmrSim implements Simulation {
     return { TILE: fits ? 1 : 0, TILE_2D: flat ? 1 : 0 };
   }
 
-  /** (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. */
-  async buildHydro() {
+  /** The hydro passes' pipelines for the current settings (compiled once, see gpu/device.ts). */
+  private hydroPipelines() {
     const d = this.device;
     const slots = this.slots;
-    const v = (t: GPUTexture) => t.createView();
-    [this.pAssemble, this.pPredict, this.pUpdate, this.pRegrid, this.pCorrect, this.pBrush] = await Promise.all([
+    return [
       computePipeline(d, assemble('amr/assemble.wgsl', slots), 'amr assemble'),
       computePipeline(d, assemble('amr/predict.wgsl', slots), 'amr predict'),
       computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update', this.tileConstants()),
       computePipeline(d, assemble('amr/regrid.wgsl', slots), 'amr regrid'),
       computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct'),
       computePipeline(d, assemble('amr/brush.wgsl', slots), 'amr brush'),
+    ] as const;
+  }
+
+  /**
+   * (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. Deferred, the
+   * update pass is bound once it has compiled, and steps wait for it (see `create`).
+   */
+  async buildHydro(deferUpdate = false) {
+    const epoch = ++this.hydroEpoch;
+    const d = this.device;
+    const slots = this.slots;
+    const v = (t: GPUTexture) => t.createView();
+    // The diagnostics' reduction compiles alongside the hydro passes.
+    const diag = Reducer.create(
+      d,
+      [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS],
+      DIAG_OPS,
+      'amr/diagnostics.wgsl',
+      slots,
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 30: this.bt, ...this.compIn })),
+      'amr diagnostics',
+    );
+    diag.catch(() => {}); // a failure is reported where it is awaited, below
+    const [assembleP, predictP, updateP, regridP, correctP, brushP] = this.hydroPipelines();
+    // Not deferred, the update pass changes over together with the others.
+    let pUpdate: GPUComputePipeline | undefined;
+    [this.pAssemble, this.pPredict, this.pRegrid, this.pCorrect, this.pBrush, pUpdate] = await Promise.all([
+      assembleP, predictP, regridP, correctP, brushP, deferUpdate ? undefined : updateP,
     ]);
     this.gBrush = [0, 1].map((p) =>
       bindGroup(d, this.pBrush, {
@@ -565,11 +602,9 @@ export class AmrSim implements Simulation {
       });
     this.gPredict = predict(this.listLeaf);
     this.gAssemble = [];
-    this.gUpdate = [];
     this.gRegrid = [];
     this.gCorrect = [];
     this.gAssembleB = [];
-    this.gUpdateB = [];
     this.gCommit = [];
     this.gCommitB = [];
     this.gCorrectB = [];
@@ -585,7 +620,6 @@ export class AmrSim implements Simulation {
         });
       if (K > 0) {
         this.gAssembleB.push(assembly(p, this.listAct));
-        this.gUpdateB.push(this.updateGroup(this.pUpdate, p, this.listUpd));
         // Back from the other parity into this one.
         const commit = (list: GPUBuffer) =>
           bindGroup(d, this.pCommit!, { 0: this.params, 1: v(this.state[o][0]), 2: v(this.state[o][1]), 3: v(this.state[p][0]), 4: v(this.state[p][1]), 31: list });
@@ -597,7 +631,6 @@ export class AmrSim implements Simulation {
       this.gCorrect.push(correct(this.listLeaf));
       if (this.comp) this.gAssembleQ[p] = [0, 1].map((q) => assembly(p, this.listAll, q));
       else this.gAssemble.push(assembly(p, this.listAll));
-      this.gUpdate.push(this.updateGroup(this.pUpdate, p));
       this.gRegrid.push(
         bindGroup(d, this.pRegrid, {
           0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
@@ -605,16 +638,27 @@ export class AmrSim implements Simulation {
         }),
       );
     }
+    const bindUpdate = (pipe: GPUComputePipeline) => {
+      if (epoch !== this.hydroEpoch) return; // rebuilt since
+      this.pUpdate = pipe;
+      this.gUpdate = [0, 1].map((p) => this.updateGroup(pipe, p));
+      this.gUpdateB = K > 0 ? [0, 1].map((p) => this.updateGroup(pipe, p, this.listUpd)) : [];
+      this.compiling = false;
+    };
+    if (pUpdate) bindUpdate(pUpdate);
     if (this.speciesGroups > 0) await this.buildSpecies();
-    this.redDiag = await Reducer.create(
-      d,
-      [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS],
-      DIAG_OPS,
-      'amr/diagnostics.wgsl',
-      slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 30: this.bt, ...this.compIn })),
-      'amr diagnostics',
-    );
+    this.redDiag = await diag;
+    if (!deferUpdate) {
+      this.compiled = Promise.resolve();
+      return;
+    }
+    this.compiling = true;
+    this.compiled = updateP.then(bindUpdate, (e) => {
+      // Nothing awaits a deferred build: say what went wrong where errors are shown.
+      if (epoch === this.hydroEpoch) globalThis.dispatchEvent?.(new CustomEvent('shaderous-gpu-error', { detail: `The update pass failed to compile: ${(e as Error)?.message ?? e}` }));
+      throw e;
+    });
+    this.compiled.catch(() => {});
   }
 
   /** Pipelines and bind groups of the species passes (amr/species_*.wgsl). */
@@ -1266,8 +1310,13 @@ export class AmrSim implements Simulation {
   private settleEpoch = 0;
   private settling = false;
   get preparing(): boolean {
-    return this.settling;
+    return this.settling || this.compiling;
   }
+  /** The update pass is still compiling (a deferred build, see `create`): no steps are taken yet. */
+  compiling = false;
+  /** Resolves once the update pass is compiled and bound. */
+  compiled: Promise<void> = Promise.resolve();
+  private hydroEpoch = 0;
   /** largest relative change of density in each round of the last settling, and how long it took (inspection) */
   settleLog: number[] = [];
   settleMs = 0;
@@ -1444,7 +1493,7 @@ export class AmrSim implements Simulation {
    * replaces the tables that earlier passes in an unsubmitted encoder would still expect.
    */
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
-    if (this.settling) return 0; // a star is still being settled
+    if (this.settling || this.compiling) return 0; // a star is still being settled, or the update pass compiling
     if (this.pending) this.applyRegrid(enc);
     if (this.dtStale) {
       // The block list changed: drop timestep records of workgroups it no longer covers.
@@ -1878,6 +1927,7 @@ export class AmrSim implements Simulation {
   }
 
   stepsResume(): Promise<void> | null {
+    if (this.compiling) return this.compiled.catch(() => {});
     return this.flagInFlight && this.flagWait ? this.flagWait.catch(() => {}) : null;
   }
 
@@ -1903,6 +1953,7 @@ export class AmrSim implements Simulation {
 
   /** Take exactly `count` steps, re-meshing as it goes (tests). */
   async advance(count: number) {
+    await this.compiled;
     await this.settled;
     let left = count;
     while (left > 0) {
@@ -1986,6 +2037,7 @@ export class AmrSim implements Simulation {
   /** Step until the clock reaches cfg.tEnd, re-meshing as it goes. Returns the steps taken. */
   async runToEnd(_batch = 16, maxSteps = 1e6): Promise<number> {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
+    await this.compiled;
     await this.settled;
     const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     try {
@@ -2017,7 +2069,8 @@ export class AmrSim implements Simulation {
     const nd = Math.min(this.n, this.cfg.ndim === 2 ? 2048 : 256);
     return [nd, nd, this.cfg.ndim === 2 ? 1 : nd];
   }
-  readonly fieldShader = 'amr/field.wgsl';
+  static readonly fieldShader = 'amr/field.wgsl';
+  readonly fieldShader = AmrSim.fieldShader;
   displayAtlas(): DisplayAtlas | null {
     if (this.cfg.ndim !== 3) return null;
     return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };

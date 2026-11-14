@@ -109,28 +109,63 @@ export function tex3d(device: GPUDevice, n: number, format: GPUTextureFormat, la
   });
 }
 
-export async function computePipeline(
+// Compute pipelines by device and by what they compile: the same shader asked for twice (by
+// two passes, or by the next run of the same setup) is compiled once. Pipelines with layout
+// 'auto' are immutable and hold no resources, so passes can share them. The oldest go first
+// past a few hundred, so a long session of different setups does not keep them all.
+const pipelineCache = new WeakMap<GPUDevice, Map<string, Promise<GPUComputePipeline>>>();
+const PIPELINE_CACHE_MAX = 400;
+
+/**
+ * A compute pipeline, compiled in the background. Ask for every pipeline a setup needs before
+ * awaiting any of them: the browser compiles them in parallel, so a build costs about its
+ * slowest compile rather than the sum of them all (measured on a cold cache: 3.4 s for the
+ * 2D adaptive mesh when each was awaited in turn, dominated by the update pass's 1.7 s).
+ */
+export function computePipeline(
   device: GPUDevice,
   code: string,
   label: string,
   constants?: Record<string, number>,
   entryPoint = 'main',
 ): Promise<GPUComputePipeline> {
+  let cache = pipelineCache.get(device);
+  if (!cache) pipelineCache.set(device, (cache = new Map()));
+  const key = `${entryPoint}\n${constants ? JSON.stringify(Object.entries(constants).sort()) : ''}\n${code}`;
+  let p = cache.get(key);
+  if (p) {
+    // Most recently used last, so the oldest is the first one dropped.
+    cache.delete(key);
+    cache.set(key, p);
+    return p;
+  }
+  p = compilePipeline(device, code, label, constants, entryPoint);
+  cache.set(key, p);
+  p.catch(() => cache.delete(key));
+  if (cache.size > PIPELINE_CACHE_MAX) cache.delete(cache.keys().next().value!);
+  return p;
+}
+
+async function compilePipeline(
+  device: GPUDevice,
+  code: string,
+  label: string,
+  constants: Record<string, number> | undefined,
+  entryPoint: string,
+): Promise<GPUComputePipeline> {
   const module = device.createShaderModule({ label, code });
-  const info = await module.getCompilationInfo();
-  const errors = info.messages.filter((m) => m.type === 'error');
-  if (errors.length) {
+  try {
+    return await device.createComputePipelineAsync({ label, layout: 'auto', compute: { module, entryPoint, constants } });
+  } catch (e) {
+    // The compiler's messages, with the offending lines, say more than the pipeline's error.
+    // Asked for only on failure: waiting for them first holds every compile up by a round trip.
+    const info = await module.getCompilationInfo();
+    const errors = info.messages.filter((m) => m.type === 'error');
+    if (!errors.length) throw e;
     const lines = code.split('\n');
-    const msg = errors
-      .map((m) => `${label}:${m.lineNum}:${m.linePos} ${m.message}\n    ${lines[m.lineNum - 1] ?? ''}`)
-      .join('\n');
+    const msg = errors.map((m) => `${label}:${m.lineNum}:${m.linePos} ${m.message}\n    ${lines[m.lineNum - 1] ?? ''}`).join('\n');
     throw new Error('WGSL compile error\n' + msg);
   }
-  return device.createComputePipelineAsync({
-    label,
-    layout: 'auto',
-    compute: { module, entryPoint, constants },
-  });
 }
 
 export type Bindable = GPUBuffer | GPUTextureView | GPUSampler;

@@ -250,7 +250,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
 
   async function waitPrepared(s: Simulation, t0: number, timeoutMs?: number): Promise<Diagnostics> {
     while (s.preparing) {
-      if (timeoutMs !== undefined && performance.now() - t0 > timeoutMs) throw new Error('timed out while the initial star was settling');
+      if (timeoutMs !== undefined && performance.now() - t0 > timeoutMs) throw new Error('timed out while preparing the run (a star settling, or shaders compiling)');
       await sleep(20);
     }
     return s.diagnostics();

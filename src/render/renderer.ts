@@ -4,7 +4,7 @@ import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { EOS_MODULES } from '../eos/eos';
 import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS } from '../problems/types';
-import { hydroSlots, type DisplayAtlas, type Simulation } from '../sim';
+import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
 const HIST_BINS = 128;
@@ -356,6 +356,22 @@ export class Renderer {
     this.device.queue.writeTexture({ texture: this.tf }, rgba, { bytesPerRow: 1024 }, [256, 1]);
   }
 
+  /**
+   * The passes that turn a run's state into what is shown: compiled once per shader and
+   * settings (gpu/device.ts), so asking for them before the run is built has them compiling
+   * alongside its own pipelines, and `attach` then finds them ready.
+   */
+  fieldPipelines(fieldShader: string, cfg: SimConfig, atlas: boolean) {
+    const d = this.device;
+    const code = assemble(fieldShader, { eos: EOS_MODULES[cfg.eos], cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp });
+    return Promise.all([
+      computePipeline(d, code, 'field'),
+      computePipeline(d, code, 'slice', undefined, 'slice'),
+      computePipeline(d, code, 'projection', undefined, 'project'),
+      atlas ? computePipeline(d, code, 'display atlas', undefined, 'atlas') : Promise.resolve(undefined),
+    ]);
+  }
+
   /** Attach to a simulation (new grid, or a rebuilt equation of state). */
   async attach(sim: Simulation) {
     const d = this.device;
@@ -416,13 +432,7 @@ export class Renderer {
       });
       this.gSlice = bindGroup(d, this.pSlice, { 0: this.cam, 2: this.tf.createView(), 3: this.sampler, 4: this.map.createView() });
     }
-    const code = assemble(sim.fieldShader, { eos: EOS_MODULES[sim.cfg.eos], cooling: COOLING_MODULES[sim.cfg.cooling], diffusion: hydroSlots(sim.cfg).diffusion, comp: hydroSlots(sim.cfg).comp });
-    [this.pField, this.pPlane, this.pProject, this.pAtlas] = await Promise.all([
-      computePipeline(d, code, 'field'),
-      computePipeline(d, code, 'slice', undefined, 'slice'),
-      computePipeline(d, code, 'projection', undefined, 'project'),
-      info ? computePipeline(d, code, 'display atlas', undefined, 'atlas') : Promise.resolve(undefined),
-    ]);
+    [this.pField, this.pPlane, this.pProject, this.pAtlas] = await this.fieldPipelines(sim.fieldShader, sim.cfg, !!info);
     // One per parity of the state and of the species (a run without species binds a stand-in).
     this.noSpecies ??= d.createTexture({ label: 'no species', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING });
     const common = (k: number) => ({ 0: sim.paramBuffer, 1: this.viewBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources(k >> 1, k & 1) });

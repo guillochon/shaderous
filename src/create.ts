@@ -31,6 +31,13 @@ export function minAmrLevels(n: number, ndim: 2 | 3): number {
   return 0;
 }
 
-export async function createSim(gpu: Gpu, cfg: SimConfig): Promise<Simulation> {
-  return cfg.amrLevels > 0 ? AmrSim.create(gpu, cfg) : Sim.create(gpu, cfg);
+/** The shader that displays a configuration's run (Simulation.fieldShader), before it exists. */
+export const fieldShaderFor = (cfg: SimConfig) => (cfg.amrLevels > 0 ? AmrSim.fieldShader : Sim.fieldShader);
+
+/**
+ * @param opts.deferUpdate on the adaptive mesh, return before the slowest pass has compiled: the
+ *   run can be drawn meanwhile, and is `preparing` (takes no steps) until it has (AmrSim.create).
+ */
+export async function createSim(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<Simulation> {
+  return cfg.amrLevels > 0 ? AmrSim.create(gpu, cfg, opts) : Sim.create(gpu, cfg);
 }

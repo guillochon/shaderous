@@ -76,6 +76,8 @@ export class Reducer {
 
     const first = external ? '' : assemble('gpu/reduce.wgsl', { ...slots, red_def: def, red_source: source });
     const later = assemble('gpu/reduce.wgsl', { red_def: def, red_source: 'gpu/reduce_buffer.wgsl' });
+    // Every stage's pipeline is asked for before any is awaited, so they compile together.
+    const stages = [];
     for (let s = external ? 2 : 1; s < sizes.length; s++) {
       const [ix, iy, iz] = sizes[s - 1];
       const [ox, oy, oz] = sizes[s];
@@ -84,12 +86,16 @@ export class Reducer {
       const slabs = Math.ceil(gx / device.limits.maxComputeWorkgroupsPerDimension);
       const xg = Math.ceil(gx / slabs);
       const constants = { NINX: ix, NINY: iy, NINZ: iz, NOUTX: ox, NOUTY: oy, NOUTZ: oz, RED_F, RED_XG: xg, RED_ZG: gz };
-      const pipeline = await computePipeline(device, s === 1 ? first : later, `${label} reduce ${s}`, constants);
+      const pipeline = computePipeline(device, s === 1 ? first : later, `${label} reduce ${s}`, constants);
+      stages.push({ s, pipeline, dispatch: [xg, Math.ceil(oy / 4), gz * slabs] as [number, number, number] });
+    }
+    for (const { s, pipeline: pending, dispatch } of stages) {
+      const pipeline = await pending;
       const groups =
         s === 1
           ? variants.map((v) => bindGroup(device, pipeline, { ...v, 20: buffers[0] }))
           : [bindGroup(device, pipeline, { 0: buffers[s - 2], 20: buffers[s - 1] })];
-      red.stages.push({ pipeline, groups, dispatch: [xg, Math.ceil(oy / 4), gz * slabs] });
+      red.stages.push({ pipeline, groups, dispatch });
     }
     return red;
   }

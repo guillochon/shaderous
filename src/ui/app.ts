@@ -13,7 +13,7 @@ import type { DisplaySystem } from '../units/units';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
-import { amrFits, createSim, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
+import { amrFits, createSim, fieldShaderFor, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
@@ -1220,7 +1220,11 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     }
     cfg = next;
     if (ndim === 2) view.sliceAxis = 2;
-    const s = await createSim(gpu, cfg);
+    // The display's pipelines compile alongside the run's own; attach then finds them ready.
+    renderer.fieldPipelines(fieldShaderFor(cfg), cfg, cfg.amrLevels > 0 && cfg.ndim === 3).catch(() => {});
+    // Shown as soon as it can be drawn; on the adaptive mesh it starts stepping once its update
+    // pass has compiled (gpu/device.ts), the slowest part of a first load.
+    const s = await createSim(gpu, cfg, { deferUpdate: true });
     await renderer.attach(s);
     sim = s;
     // The page survived the allocation for a few seconds: it is safe (gpu/memory.ts).
@@ -3200,7 +3204,7 @@ function tick(now: number) {
   const loading = !sim || !!reloading || sim.preparing;
   if (loadingEl.hidden === loading) loadingEl.hidden = !loading;
   if (loading) {
-    const text = reloading === 'shaders' && !sim?.preparing ? 'Recomputing shaders…' : 'Loading simulation…';
+    const text = (reloading === 'shaders' && !sim?.preparing) || sim?.compiling ? 'Compiling shaders…' : 'Loading simulation…';
     if (loadingText.textContent !== text) loadingText.textContent = text;
   }
   if (!sim || building || headless) return;

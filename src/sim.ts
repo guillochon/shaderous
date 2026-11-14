@@ -174,8 +174,10 @@ export interface Simulation {
   diagnostics(): Promise<Diagnostics>;
   runToEnd(batch?: number, maxSteps?: number): Promise<number>;
   reset(): void;
-  /** A star in the initial conditions is still being settled: no steps are taken yet. */
+  /** A star in the initial conditions is still being settled, or a pass compiling: no steps are taken yet. */
   readonly preparing: boolean;
+  /** A pass the steps need is still compiling (part of `preparing`). */
+  readonly compiling?: boolean;
   writeParams(): void;
   buildHydro(): Promise<void>;
   refreshPotential(): void;
@@ -880,51 +882,59 @@ export class Sim implements Simulation {
       if (sim.compCoeffs) sim.comp = t('composition');
     }
     const spec = debrisSpec(cfg);
-    if (spec) {
-      sim.debrisBuf = new DebrisBuffers(d, spec);
-      sim.pCensus = await computePipeline(d, assemble('debris/census.wgsl'), 'debris census');
-    }
+    if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     sim.writeParams();
-    // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
-    // (potential, multipoles) still exist; it is never dispatched.
-    sim.mg = await Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]);
 
+    // Every pipeline is asked for before any is awaited, so the browser compiles them all at
+    // once (gpu/device.ts). The hydro passes wait only for the solver's potential and the
+    // timestep's first records, which they bind.
     const v = (t: GPUTexture) => t.createView();
+    const hydro = (async () => {
+      // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
+      // (potential, multipoles) still exist; it is never dispatched.
+      [sim.mg, sim.redDt] = await Promise.all([
+        Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]),
+        Reducer.create(
+          d,
+          [n, n, nz],
+          [MAX, MAX],
+          '',
+          {},
+          [],
+          'timestep',
+          [n, n, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
+        ),
+      ]);
+      await sim.buildHydro();
+    })();
+    [sim.pClock, sim.pField, sim.redBh, sim.pBhDrift, sim.pBhKick, sim.pBhEval, sim.pCensus] = await Promise.all([
+      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock'),
+      computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field'),
+      // Point masses: their pull on the gas and what their sinks take are reduced each step, and
+      // drive their orbits, their growth and (in the gas's frame) the frame's acceleration.
+      Reducer.create(
+        d,
+        [n, n, nz],
+        new Array(MASS_RED).fill(SUM),
+        'gravity/bh_moment.wgsl',
+        {},
+        [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock })),
+        'point masses',
+      ),
+      computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift'),
+      computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick'),
+      computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 }),
+      spec ? computePipeline(d, assemble('debris/census.wgsl'), 'debris census') : undefined,
+      hydro,
+    ]);
     const phi = sim.mg.phi;
-    sim.redDt = await Reducer.create(
-      d,
-      [n, n, nz],
-      [MAX, MAX],
-      '',
-      {},
-      [],
-      'timestep',
-      [n, n, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
-    );
-    sim.pClock = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock');
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
-    sim.pField = await computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field');
     sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock });
-    // Point masses: their pull on the gas and what their sinks take are reduced each step, and
-    // drive their orbits, their growth and (in the gas's frame) the frame's acceleration.
-    sim.redBh = await Reducer.create(
-      d,
-      [n, n, nz],
-      new Array(MASS_RED).fill(SUM),
-      'gravity/bh_moment.wgsl',
-      {},
-      [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock })),
-      'point masses',
-    );
-    sim.pBhDrift = await computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift');
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
-    sim.pBhKick = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick');
-    sim.pBhEval = await computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 });
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
-    await sim.buildHydro();
     sim.reset();
     await sim.settled;
     return sim;
@@ -944,6 +954,17 @@ export class Sim implements Simulation {
     const k = this.compIn;
     const phi = this.mg.phi;
     const dims = [this.n, this.n, this.nz];
+    // The diagnostics' reduction compiles alongside the hydro passes.
+    const diag = Reducer.create(
+      d,
+      [this.n, this.n, this.nz],
+      DIAG_OPS,
+      'hydro/diagnostics.wgsl',
+      slots,
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(phi), ...k })),
+      'diagnostics',
+    );
+    diag.catch(() => {}); // a failure is reported where it is awaited, below
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
     [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect, this.pBrush] = await Promise.all([
@@ -1048,15 +1069,7 @@ export class Sim implements Simulation {
         params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1],
       });
     }
-    this.redDiag = await Reducer.create(
-      d,
-      [this.n, this.n, this.nz],
-      DIAG_OPS,
-      'hydro/diagnostics.wgsl',
-      slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(phi), ...k })),
-      'diagnostics',
-    );
+    this.redDiag = await diag;
   }
 
   /** Push the current configuration to the GPU parameter block. */
@@ -1455,7 +1468,8 @@ export class Sim implements Simulation {
   get displayDims(): [number, number, number] {
     return [this.n, this.n, this.nz];
   }
-  readonly fieldShader = 'render/field.wgsl';
+  static readonly fieldShader = 'render/field.wgsl';
+  readonly fieldShader = Sim.fieldShader;
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
     const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView() };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
