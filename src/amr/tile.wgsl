@@ -90,6 +90,8 @@ fn tile_fluxes(wid: vec3<u32>, li: u32) {
         g_face_slot = slot;
         g_face_l = lu;
         g_dx = blk_dx(slot);
+        g_fb_slot = slot;
+        g_fb_l = lu - e;
         let F = flux_between(atl(blk_origin(slot), lu - e), e, axis);
         tf_a[ii] = vec4<f32>(F.m, F.mom);
         tf_b[ii] = vec4<f32>(F.e, F.ei, F.s, F.vn);

@@ -4,6 +4,7 @@
 // Doing this once per cell, instead of seven times inside the update's gather, is the main
 // reason the update pass is cheap.
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <eos>
 #include <limiter>
 #include "hydro/pfloor.wgsl"

@@ -7,6 +7,7 @@
 // gpu/reduce.wgsl expect. Both values are non-negative, so comparing their bit patterns as
 // integers orders them as floats.
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <eos>
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"

@@ -1,9 +1,9 @@
 // Gravity field atlas, written once per step after the Poisson solve, for every block:
-//   xyz = acceleration: self-gravity from the new potential, plus the point masses' pull minus
-//         the frame's own acceleration when there are any (interior cells)
-//   w   = potential extrapolated half a step ahead, for the update's time-centered energy
-//         source (interior cells and the first ghost layer) and the well-balanced pressure
-//         reconstruction (both ghost layers)
+//   xyz = self-gravity's acceleration, from the new potential (interior cells)
+//   w   = self-gravity's potential extrapolated half a step ahead, for the update's
+//         time-centered energy source (interior cells and the first ghost layer) and the
+//         well-balanced pressure reconstruction (both ghost layers)
+// The point masses and the frame are not in it: each pass adds them itself (gravity/ext.wgsl).
 // With per-block timesteps the half step is the block's own, and the pass runs over the
 // blocks about to start a step.
 #include "hydro/common.wgsl"
@@ -11,12 +11,10 @@
 #include "amr/list.wgsl"
 #include <bins>
 #include "amr/blk_dt.wgsl"
-#include "gravity/bh.wgsl"
 
 @group(0) @binding(1) var PHI: texture_3d<f32>;
 @group(0) @binding(2) var PHI_OLD: texture_3d<f32>;
 @group(0) @binding(3) var GOUT: texture_storage_3d<rgba32float, write>;
-@group(0) @binding(4) var<storage, read> BH: Masses;
 @group(0) @binding(5) var<storage, read> clock: Clock;
 
 fn phi(c: vec3<i32>) -> f32 {
@@ -46,15 +44,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   var ph = 0.0;
   if (self_gravity) { ph = phi_half(c, inv.slot); }
-  if (P.bh.z != 0.0) {
-    let x = blk_pos(inv.slot, l);
-    // The frame's acceleration a acts as a uniform field -a, whose potential is a . x.
-    if (nout == 0) { g -= BH.frame.xyz; }
-    ph += dot(BH.frame.xyz, x);
-    for (var i = 0u; i < mass_count(); i++) {
-      if (nout == 0) { g += bh_accel(x, BH.list[i]); }
-      ph += bh_phi(x, BH.list[i], 0.5 * blk_dt(inv.slot));
-    }
-  }
   textureStore(GOUT, c, vec4<f32>(g, ph));
 }

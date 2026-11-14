@@ -482,7 +482,7 @@ export class AmrSim implements Simulation {
     if (sim.pMassField) {
       // The potential bindings are never read (there is none), but the pass declares them.
       sim.gMassField = bindGroup(d, sim.pMassField, {
-        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock, 30: sim.bt, 31: sim.listAll,
+        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 30: sim.bt, 31: sim.listAll,
       });
     }
     await sim.buildHydro(deferUpdate);
@@ -591,13 +591,13 @@ export class AmrSim implements Simulation {
     const mid: Record<number, Bindable> = K > 0 ? { 7: v(this.pred[0]), 8: v(this.pred[1]) } : {};
     const predict = (list: GPUBuffer) =>
       bindGroup(d, this.pPredict, {
-        0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 30: this.bt, 31: list, ...bin,
+        0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 20: this.bh, 30: this.bt, 31: list, ...bin,
         ...this.compIn,
       });
     const assembly = (p: number, list: GPUBuffer, q = -1) =>
       bindGroup(d, this.pAssemble, {
         0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
-        5: v(this.gfield), 6: this.redDt.first, 30: this.bt, 31: list, ...bin, ...mid,
+        5: v(this.gfield), 6: this.redDt.first, 20: this.bh, 30: this.bt, 31: list, ...bin, ...mid,
         ...((q >= 0 ? { 25: v(this.species[q]), 26: v(this.comp!) } : {}) as Record<number, GPUTextureView>),
       });
     this.gPredict = predict(this.listLeaf);
@@ -736,7 +736,7 @@ export class AmrSim implements Simulation {
     const bin: Record<number, Bindable> = this.builtBins > 0 ? { 29: this.bins! } : {};
     return bindGroup(this.device, pipe, {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
-      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 30: this.bt, 31: list,
+      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 20: this.bh, 30: this.bt, 31: list,
       ...bin,
       ...this.compIn,
       ...((this.massFlux ? { 12: this.massFlux } : {}) as Record<number, GPUBuffer>),
@@ -775,7 +775,7 @@ export class AmrSim implements Simulation {
       // 2D: no potential (the bindings are declared but never read).
       this.pMassFieldB = await computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS_BINS), 'amr point mass field (bins)');
       this.gMassFieldB = [this.listAct, this.listAll].map((list) =>
-        bindGroup(d, this.pMassFieldB!, { 0: this.params, 1: v(this.dummyPhi), 3: v(this.gfield), 4: this.bh, 5: this.clock, 6: v(this.dummyPhi), 29: A, 30: this.bt, 31: list }),
+        bindGroup(d, this.pMassFieldB!, { 0: this.params, 1: v(this.dummyPhi), 3: v(this.gfield), 5: this.clock, 6: v(this.dummyPhi), 29: A, 30: this.bt, 31: list }),
       );
     }
     this.gSetDt = bindGroup(d, this.pSetDt, { 0: this.params, 1: this.redDt.result, 2: this.clock, 3: this.bh });
@@ -2076,7 +2076,7 @@ export class AmrSim implements Simulation {
     return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
   }
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
-    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 29: this.bins, 30: this.bt };
+    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 29: this.bins, 30: this.bt, 20: this.bh };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }

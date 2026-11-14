@@ -19,6 +19,7 @@
 @group(0) @binding(7) var<storage, read> BH: Masses;
 
 #include "gravity/bh.wgsl"
+#include "gravity/ext.wgsl"
 #include "gravity/sink.wgsl"
 
 @compute @workgroup_size(8, 8, 4)
@@ -44,13 +45,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     u2 = left.u2;
   }
 
-  let kick = 0.5 * g_dt * u1.x * (P.gext.xyz + textureLoad(G, c, 0).xyz);
+  let kx = 0.5 * g_dt * u1.x * ext_accel(blk_pos(inv.slot, inv.l));
+  let kick = 0.5 * g_dt * u1.x * (P.gext.xyz + textureLoad(G, c, 0).xyz) + kx;
   var mom = u1.yzw + kick;
   var E = u2.x;
   var eint = u2.y;
   if ((P.flags & 1u) == 0u) {
     E += dot(kick, u1.yzw + 0.5 * kick) / u1.x;
   } else {
+    // The point masses' and the frame's part of the kick adds its own energy (gravity/ext.wgsl);
+    // self-gravity's work for the whole step is already in E.
+    E += dot(kx, u1.yzw + 0.5 * kick) / u1.x;
     let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x, E, eint);
     E = en.x;
     eint = en.y;

@@ -297,7 +297,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // still cut the residual (amr/gravity/gate.wgsl), and three help where the potential
     // changes fast, as at the bounce of a stellar collision.
     vcycles: (over.amrLevels ?? 0) > 0 ? 3 : 2,
-    gravEnergyFlux: problem.gravEnergyFlux ?? true,
+    gravEnergyFlux: true,
     wellBalanced: true,
     amrLevels: 0,
     amrBudget: 0,
@@ -930,7 +930,7 @@ export class Sim implements Simulation {
     const phi = sim.mg.phi;
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
-    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.bh, 5: sim.clock });
+    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield) });
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
@@ -988,6 +988,7 @@ export class Sim implements Simulation {
       this.gPrim.push(
         bindGroup(d, this.pPrim, {
           0: this.params,
+          20: this.bh,
           1: v(this.state[p][0]),
           2: v(this.state[p][1]),
           5: v(this.gfield),
@@ -998,6 +999,7 @@ export class Sim implements Simulation {
       this.gPredict.push(
         this.pPredict.groups({
           0: this.params,
+          20: this.bh,
           1: this.clock,
           2: v(this.state[p][0]),
           3: v(this.state[p][1]),
@@ -1010,6 +1012,7 @@ export class Sim implements Simulation {
       this.gUpdate.push(
         this.pUpdate.groups({
           0: this.params,
+          20: this.bh,
           1: this.clock,
           2: v(this.state[p][0]),
           3: v(this.state[p][1]),
@@ -1471,7 +1474,7 @@ export class Sim implements Simulation {
   static readonly fieldShader = 'render/field.wgsl';
   readonly fieldShader = Sim.fieldShader;
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
-    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView() };
+    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 20: this.bh };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }
@@ -1669,7 +1672,7 @@ export class Sim implements Simulation {
     const v = (t: GPUTexture) => t.createView();
     const group = pipe.groups({
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]),
-      6: v(this.gfield),
+      6: v(this.gfield), 20: this.bh,
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources,
       ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
       ...(this.debrisBuf?.bindings(this.bh) ?? {}),

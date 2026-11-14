@@ -13,6 +13,7 @@
 // Derivatives come from the primitive variables, whose ghost cells hold the neighbors across
 // block faces at the block's own level (as of the last assembly pass).
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <eos>
 #include "amr/grid.wgsl"
 #include "render/field_value.wgsl"
@@ -34,7 +35,7 @@ struct View {
 @group(0) @binding(4) var VOL: texture_storage_3d<rgba16float, write>;
 @group(0) @binding(5) var IDX: texture_3d<u32>;   // leaf slot per deepest-level block
 @group(0) @binding(6) var W1: texture_3d<f32>;    // primitives: (density, negative if solid; velocity)
-@group(0) @binding(7) var GF: texture_3d<f32>;    // gravity field: acceleration, potential in w
+@group(0) @binding(7) var GF: texture_3d<f32>;    // self-gravity's field: acceleration, potential in w
 @group(0) @binding(8) var<storage, read_write> RANGE: array<atomic<u32>, 132>;
 @group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
 @group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
@@ -88,7 +89,8 @@ fn leaf_value(f: Leaf) -> Cell {
   var g: Grad;
   if (field_needs_grad(V.field)) { g = gradients(c, g_dx); }
   // The uniform field's potential, measured from the box center, is not in the texture.
-  let phi = textureLoad(GF, c, 0).w - dot(P.gext.xyz, blk_pos(f.slot, f.l));
+  let xp = blk_pos(f.slot, f.l);
+  let phi = textureLoad(GF, c, 0).w + ext_phi(xp) - dot(P.gext.xyz, xp);
   g_acc = P.gext.xyz;
   if (P.grav_on != 0u) { g_acc += textureLoad(GF, c, 0).xyz; }
   comp_use(comp_tex(c));

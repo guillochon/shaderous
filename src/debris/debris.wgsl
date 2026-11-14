@@ -5,8 +5,8 @@
 // The totals are 64-bit fixed-point sums, kept as (low, high) pairs of u32 atomics with the
 // carry propagated by hand. Integer addition is exact and order-free, so the totals do not drift
 // however many small amounts go into them, and the same run gives the same bits every time.
-// Requires P and gravity/bh.wgsl.
-@group(0) @binding(20) var<storage, read> BH: Masses;
+// Requires P.
+#include "gravity/ext_bind.wgsl"
 
 struct DebrisHead {
   bins: vec4<f32>,  // (energy at the lower edge of the first bin, bins per unit energy,
@@ -70,8 +70,10 @@ fn deb_bin(v: vec3<f32>, phi: f32, dm: f32, ds: f32) {
 // The update's tally: as deb_bin, with `phi` the potential the hydro passes use (the gravity
 // field's w, computed for this step: self-gravity, the point masses half a step ahead, and the
 // frame's fictitious term, which is taken out here).
-fn deb_tally(x: vec3<f32>, v: vec3<f32>, phi: f32, dm: f32, ds: f32) {
-  deb_bin(v, phi - dot(BH.frame.xyz, x), dm, ds);
+// `phi_self` is the gas's own potential at the half step; the masses' is added here, moved on by
+// `ahead` (half the step), as the potential about them.
+fn deb_tally(x: vec3<f32>, v: vec3<f32>, phi_self: f32, ahead: f32, dm: f32, ds: f32) {
+  deb_bin(v, phi_self + ext_phi_masses(x, ahead), dm, ds);
 }
 
 // Census of one cell (conserved state u1, u2, the gas's own potential phi_self, volume dv):

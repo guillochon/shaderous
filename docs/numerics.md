@@ -600,12 +600,18 @@ hydrostatic balance, which slowly cools a star.
    conserved. It can overheat low-density cells next to a sharp density contrast.
 2. **Kick form.** Each kick $`\mathbf{k}`$ adds exactly the kinetic energy it creates,
    $`\mathbf{k}\cdot(\mathbf{m} + \mathbf{k}/2)/\rho`$. Gravity then never changes the internal
-   energy, but total energy is not conserved where the flow is under-resolved. The tidal
-   disruptions use it. Their debris is cold and fast (thermal energy about a thousandth of the
-   total), and each step the tidal field changes its kinetic energy by hundreds of times its
-   internal energy. The flux form's truncation-level mismatch with the kicks then lands in
-   $`E - \tfrac12\rho v^2`$: it cut the entropy of the leading half of a $`\gamma = 4/3`$ star
-   a hundredfold.
+   energy, but total energy is not conserved where the flow is under-resolved.
+
+The two forms apply to self-gravity and the uniform field. The pull of the point masses and of
+the accelerating frame ([§15](#15-point-masses-and-sinks)) always takes the kick form, whichever
+is chosen, from the very acceleration the kick applies. Debris torn from a star is cold and fast
+(thermal energy about a thousandth of the total), and each step the tidal field changes its
+kinetic energy by hundreds of times its internal energy. Taken in flux form, the
+truncation-level mismatch between that work and the kick lands in
+$`E - \tfrac12\rho v^2`$: it cut the entropy of the leading half of a disrupted $`n = 3`$ star
+a hundredfold, after which the dual-energy switch kept the drained value. In kick form the
+star's entropy holds to 0.1 dex. These fields are external, so the gas's own energy is not
+conserved under them in either form.
 
 The half-step potential $`\Phi^{n+1/2}`$ is extrapolated from the last two solves.
 
@@ -618,8 +624,12 @@ Plummer-softened gravity ([Plummer 1911][Plummer1911]),
 \Phi_\text{pm}(\mathbf{x}) = -\sum_k\frac{GM_k}{\sqrt{|\mathbf{x} - \mathbf{x}_k|^2 + \epsilon_k^2}},
 ```
 
-and share the gravity-field texture with self-gravity, so the hydro passes do not know they
-exist. Each step the masses drift. One reduction over the updated gas then gives each mass
+The gravity-field texture holds self-gravity alone. Every pass that needs the masses' pull or
+potential (the kicks, the predictor, the timestep, the well-balanced reconstruction, the debris
+tally) adds it from the masses as they are when it runs (`gravity/ext.wgsl`). Each mass's
+potential step between neighboring cells is formed as
+$`GM(q_1 - q_0)/(r_0 r_1 (r_0 + r_1))`$ with $`q = r^2 + \epsilon^2`$, not as the difference
+of two potentials thousands of times larger. Each step the masses drift. One reduction over the updated gas then gives each mass
 its pull from the gas (the reaction to its pull on the gas) and what its sink takes. The
 second half-kick pass removes exactly that from the cells. The pull between two masses is
 softened by the larger of their two softening lengths.

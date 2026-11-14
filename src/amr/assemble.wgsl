@@ -17,6 +17,7 @@
 // moments are gathered from rho X like its state, used for its primitives and stored (KO) for
 // the update.
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <eos>
 #include <limiter>
 #include "hydro/pfloor.wgsl"
@@ -102,6 +103,7 @@ fn main(
         let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
+        g += ext_accel(blk_pos(inv.slot, inv.l));
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
         atomicMax(&wg_max[1], bitcast<u32>(length(g) / g_dx));
       }

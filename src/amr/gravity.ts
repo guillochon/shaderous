@@ -194,7 +194,7 @@ export class AmrGravity {
     g.gRhsRestrictB = bindGroup(d, g.pRhsRestrict, { 0: ctx.params, 2: rhs0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostCoarseB = bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostRestB = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
-    g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 4: ctx.bh, 5: ctx.clock, 30: ctx.bt, 31: ctx.listAll });
+    g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 30: ctx.bt, 31: ctx.listAll });
     g.gNew = bindGroup(d, g.pNew, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLeaf });
 
     [g.pResidual, g.pGate, g.pGateRecord] = await Promise.all([
@@ -374,7 +374,7 @@ export class AmrGravity {
     ]);
     const phi0 = v(this.phi);
     const field = (list: GPUBuffer) =>
-      bindGroup(d, this.pFieldB!, { 0: ctx.params, 1: phi0, 3: v(ctx.gfield), 4: ctx.bh, 5: ctx.clock, 6: v(this.dphi!), 29: ctx.bins, 30: ctx.bt, 31: list });
+      bindGroup(d, this.pFieldB!, { 0: ctx.params, 1: phi0, 3: v(ctx.gfield), 5: ctx.clock, 6: v(this.dphi!), 29: ctx.bins, 30: ctx.bt, 31: list });
     this.gFieldB = field(ctx.listAct);
     this.gFieldAllB = field(ctx.listAll);
     this.gExtrap = bindGroup(d, this.pExtrap, { 0: ctx.params, 1: ctx.clock, 2: phi0, 6: v(this.dphi), 29: ctx.bins, 31: ctx.listAll });

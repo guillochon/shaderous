@@ -15,6 +15,7 @@
 // stencil in a shader-local array was 3x slower than repeating the texture loads. The interior
 // pipeline computes each face once per workgroup instead, when it can: see hydro/tile.wgsl.
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <eos>
 #include <limiter>
 #include "hydro/dual_energy.wgsl"
@@ -92,12 +93,12 @@ fn escape(c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Faces, fz: Faces, flat: boo
     if (c[a] == 0 && P.bc_lo[a] != 0u) {
       var x = xc;
       x[a] -= 0.5 * P.dx;
-      deb_tally(x, v, phi, -lo[a] * adt, -los[a] * adt);
+      deb_tally(x, v, phi, 0.5 * clock.dt, -lo[a] * adt, -los[a] * adt);
     }
     if (c[a] == n[a] - 1 && P.bc_hi[a] != 0u) {
       var x = xc;
       x[a] += 0.5 * P.dx;
-      deb_tally(x, v, phi, hi[a] * adt, his[a] * adt);
+      deb_tally(x, v, phi, 0.5 * clock.dt, hi[a] * adt, his[a] * adt);
     }
   }
 }
@@ -178,12 +179,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   // kick after the fluxes would drain 1/2 rho g^2 dt^2 of internal energy per step from gas in
   // hydrostatic balance.) The energy source is either the flux-form work accumulated above, or
   // exactly the kinetic energy the kick adds, k . (m + k/2) / rho, which keeps gravity out of
-  // the internal energy at the price of total-energy conservation.
+  // the internal energy at the price of total-energy conservation. The flux form covers
+  // self-gravity and the uniform field; the point masses' and the frame's part of the kick
+  // always adds its energy in kick form (gravity/ext.wgsl).
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
-  if (has_gravity()) {
-    kick = 0.5 * clock.dt * u1.x * g_load(c);
-    if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
+  if (has_gravity() || ext_on()) {
+    let kx = 0.5 * clock.dt * u1.x * ext_accel(cell_pos(c));
+    kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
+    let ke = select(kx, kick, !flux_work);
+    ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
   }
 
   var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);

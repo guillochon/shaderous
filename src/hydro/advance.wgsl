@@ -4,7 +4,8 @@
 struct NewState { u1: vec4<f32>, u2: vec4<f32> }
 
 // `dw` is the flux-form gravitational work per unit dt/dx; `kick` the momentum of the half
-// kick and `ekick` its kinetic energy (zero when the flux form carries the energy);
+// kick and `ekick` its kinetic energy (with the flux form, only the point masses' and the
+// frame's share: gravity/ext.wgsl);
 // `p_half` the cell's half-step pressure.
 fn advance(u1: vec4<f32>, u2: vec4<f32>, net: Net, dw: f32, p_half: f32, kick: vec3<f32>, ekick: f32) -> NewState {
   let dtdx = g_dt / g_dx;

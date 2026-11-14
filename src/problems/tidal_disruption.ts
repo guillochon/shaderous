@@ -8,9 +8,13 @@ import { codeG, gravityUnits } from '../units/units';
 //
 // Units: G = M_star = R_star = 1, so the star's dynamical time is 1. The star has the Sun's
 // mass and radius: one code unit is a solar radius, a solar mass, and
-// sqrt(R_sun^3 / G M_sun) = 1593 s. It is a polytrope whose gas has gamma = 1 + 1/n: n = 3/2
-// and gamma = 5/3 (convective, like a low-mass star), or n = 3 and gamma = 4/3 (centrally
-// concentrated, like the Sun's interior). The run is in the star's rest frame: the frame
+// sqrt(R_sun^3 / G M_sun) = 1593 s. It is a polytrope of index n, structural gamma = 1 + 1/n:
+// n = 3/2 and gamma = 5/3 (convective, like a low-mass star), or n = 3 and gamma = 4/3
+// (centrally concentrated, like the Sun's interior). Its gas is ideal with Gamma = 5/3 in
+// either case, as in Guillochon & Ramirez-Ruiz (2013): a star's structure is softer than its
+// gas only because radiation carries its heat outward, and once disrupted the gas responds
+// with its own Gamma. (A gamma = 4/3 gas would also leave the star marginally stable.) The
+// run is in the star's rest frame: the frame
 // accelerates with the gas's center of mass, so the star stays at the box center while the
 // point mass swings past. The orbit lies in the x-y plane with pericenter on the +x axis.
 //
@@ -23,9 +27,12 @@ import { codeG, gravityUnits } from '../units/units';
 // All have a million-solar-mass black hole. The gamma = 4/3 star's dense core needs a finer
 // grid, so its variants open on one: at 128 cells across with two levels it settles to about
 // twice the Lane-Emden central density, is bound more tightly, and survives even beta = 4. On
-// its own grid (finest cell 1/32 of its radius) it is still somewhat too compact (central
-// density 15% high): beta = 2 leaves a core of 0.94 solar masses, beta = 2.5 destroys it, so
-// the full variant opens at 2.5.
+// its own grid (finest cell 1/32 of its radius, central density 15% high) its peak density
+// recollapses after beta = 1.8 and keeps falling after beta = 2 (by t = 12), so it is destroyed
+// from between the two, as Guillochon & Ramirez-Ruiz find; the full variant opens at 2.5, well
+// past that. (The census's self-bound core, an energy test, still holds a few tenths of a
+// solar mass at t = 12 even at beta = 2.5, and keeps shrinking: some gas always moves with
+// the core, as they note. Peak density is the surer test.)
 //
 // The boundaries let gas leave but not enter. Once debris starts to leave, the frame follows
 // the gas that is still in the box. Every variant has a box 16 stellar radii across, so the debris
@@ -68,8 +75,11 @@ const orbitFor = (p: Record<string, number>) => {
   return parabolicOrbit(p.q, p.beta, Math.max(TDE.start * rt, (1.5 * rt) / p.beta));
 };
 
-/** Specific internal energy at the center of a star of index n: n p / rho = n K rho_c^(1/n). */
-const centralEint = (n: number, st: { K: number; rhoc: number }) => n * st.K * st.rhoc ** (1 / n);
+/** The gas's adiabatic index, whatever the star's polytropic index. */
+const TDE_GAMMA = 5 / 3;
+
+/** Specific internal energy at the center of a star of index n: p / ((Gamma - 1) rho), p = K rho^(1 + 1/n). */
+const centralEint = (n: number, st: { K: number; rhoc: number }) => (st.K * st.rhoc ** (1 / n)) / (TDE_GAMMA - 1);
 
 interface TdeVariant {
   id: string;
@@ -104,7 +114,7 @@ function tde(v: TdeVariant): Problem {
     label: 'Tidal disruption',
     blurb: v.blurb,
     eos: 'ideal',
-    eosParams: { gamma: 1 + 1 / n },
+    eosParams: { gamma: TDE_GAMMA },
     bcLo: all(OUTFLOW_ONLY),
     bcHi: all(OUTFLOW_ONLY),
     gravity: 'isolated',
@@ -117,12 +127,6 @@ function tde(v: TdeVariant): Problem {
     checkpointDt: 0.5,
     rhoFloor: 1e-10,
     pFloor: 1e-14,
-    // Gravity's work as the kinetic energy each kick creates, not in flux form. The debris is
-    // cold and fast (Mach 50 in the frame, thermal energy a thousandth of the total) and the
-    // tidal field changes its kinetic energy by hundreds of times its internal energy each
-    // step, so the flux form's truncation-level mismatch with the kicks, taken out of E - KE,
-    // drained the entropy of the leading half of a gamma = 4/3 star by a factor of 100.
-    gravEnergyFlux: false,
     // Ambient gas and the outermost wisps of debris: no hotter than the star's interior (1.5 for
     // the n = 3/2 star, in proportion to the central internal energy for another), and no
     // faster than a few times the orbital speed at pericenter.

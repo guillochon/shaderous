@@ -16,6 +16,7 @@
 // sides, again without storing fluxes. The bins are such that the faster side is never the
 // coarser one, so at a refinement boundary it is still the fine fluxes that count.
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <eos>
 #include <limiter>
 #include "hydro/dual_energy.wgsl"
@@ -93,6 +94,9 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   b[axis] = ib;
   var seen = -P.gext[axis] * f32(ib - ia) * g_dx;
   if (P.grav_on != 0u) { seen += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+  var e = vec3<f32>(0.0);
+  e[axis] = g_dx;
+  seen += ext_dphi(blk_pos(slot, a), e * f32(ib - ia), 0.0);
   var face = seen;
   let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
   if (wall) {
@@ -100,6 +104,7 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
     b[axis] = ra + 1;
     face = -P.gext[axis] * g_dx;
     if (P.grav_on != 0u) { face += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+    face += ext_dphi(blk_pos(slot, a), e, 0.0);
   }
   return vec2<f32>(seen, face);
 }
@@ -121,13 +126,18 @@ fn wall_step(a: vec3<i32>, axis: i32, across: f32) -> vec3<f32> {
   let image = select(1.0, -1.0, across != t);
   return vec3<f32>(t, select(1.0, image, g_face_l[axis] == 0), select(1.0, image, g_face_l[axis] == BS));
 }
+// The cell `a` that flux_between is given, as a block and a cell in it, for the point masses'
+// part of dphi_face: its callers set it.
+var<private> g_fb_slot: i32 = 0;
+var<private> g_fb_l: vec3<i32> = vec3<i32>(0);
+
 fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
   if (g_face_wall) { return dphi_blk(g_face_slot, g_face_l, axis, k - 1).x; }
   var e = vec3<i32>(0);
   e[axis] = 1;
   var d = -P.gext[axis] * g_dx;
   if (P.grav_on != 0u) { d += textureLoad(G, a + (k + 1) * e, 0).w - textureLoad(G, a + k * e, 0).w; }
-  return d;
+  return d + ext_dphi(blk_pos(g_fb_slot, g_fb_l + k * e), vec3<f32>(e) * g_dx, 0.0);
 }
 
 #include "hydro/flux.wgsl"
@@ -192,6 +202,7 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
     var n2 = 1;
     var dx = g_dx;
     var w = 0.5;
+    var src = np;   // the block that holds those cells
     if (!blk_leaf(np)) {
       // The refined neighbor's child that shares this cell's face.
       let h = vec3<i32>(l >= vec3<i32>(BS / 2));
@@ -205,6 +216,7 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
         continue;
       }
       o = blk_origin(ch);
+      src = ch;
       // The fine cell on the lower side of the face: the last interior cell, or the ghost at -1.
       a0 = 2 * (l - (BS / 2) * h);
       // In 2D the faces are edges: two fine ones per coarse one, both in the plane.
@@ -231,6 +243,8 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
         var a = a0;
         a[t1] += i;
         a[t2] += j;
+        g_fb_slot = src;
+        g_fb_l = a;
         sum = flux_add(sum, flux_between(atl(o, a), e, axis));
       }
     }
@@ -261,12 +275,12 @@ fn escape(slot: i32, l: vec3<i32>, c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Fa
     if (l[a] == 0 && bt(slot, 6u + u32(2 * a)) <= -2) {
       var x = xc;
       x[a] -= 0.5 * g_dx;
-      deb_tally(x, v, phi, -lo[a] * adt, -los[a] * adt);
+      deb_tally(x, v, phi, 0.5 * g_dt, -lo[a] * adt, -los[a] * adt);
     }
     if (l[a] == BS - 1 && bt(slot, 7u + u32(2 * a)) <= -2) {
       var x = xc;
       x[a] += 0.5 * g_dx;
-      deb_tally(x, v, phi, hi[a] * adt, his[a] * adt);
+      deb_tally(x, v, phi, 0.5 * g_dt, hi[a] * adt, his[a] * adt);
     }
   }
 }
@@ -356,6 +370,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   let self_gravity = P.grav_on != 0u;
   var g = P.gext.xyz;
   if (self_gravity) { g += textureLoad(G, c, 0).xyz; }
+  // The point masses' pull and the frame's: kicked with the rest, its energy always in kick
+  // form (gravity/ext.wgsl).
+  let gx = ext_accel(blk_pos(slot, l));
   let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0));
   let flux_work = gravity && (P.flags & 1u) != 0u;
   var dw = 0.0;
@@ -379,8 +396,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
   if (gravity && !g_deposit) {
-    kick = 0.5 * g_dt * u1.x * g;
-    if (!flux_work) { ekick = dot(kick, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor); }
+    let kx = 0.5 * g_dt * u1.x * gx;
+    kick = 0.5 * g_dt * u1.x * g + kx;
+    let ke = select(kx, kick, !flux_work);
+    ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
   }
 
   var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);

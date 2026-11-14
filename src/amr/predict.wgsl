@@ -9,6 +9,7 @@
 // transverse slopes are dropped where they would need an edge ghost. Every block predicts
 // with its own step, its ghosts included (per-block timesteps, amr/bins_on.wgsl).
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <limiter>
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
@@ -66,6 +67,9 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   b[axis] = ib;
   var seen = -P.gext[axis] * f32(ib - ia) * g_dx;
   if (P.grav_on != 0u) { seen += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+  var e = vec3<f32>(0.0);
+  e[axis] = g_dx;
+  seen += ext_dphi(blk_pos(slot, a), e * f32(ib - ia), 0.0);
   var face = seen;
   let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
   if (wall) {
@@ -73,6 +77,7 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
     b[axis] = ra + 1;
     face = -P.gext[axis] * g_dx;
     if (P.grav_on != 0u) { face += textureLoad(G, atl(o, b), 0).w - textureLoad(G, atl(o, a), 0).w; }
+    face += ext_dphi(blk_pos(slot, a), e, 0.0);
   }
   return vec2<f32>(seen, face);
 }
@@ -156,7 +161,8 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     // The field atlas holds no acceleration for ghosts; use the adjacent interior cell's.
     gpos = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));
   }
-  var pr = predict_cell(slot, l, mask, grav_at(gpos));
+  // The point masses' pull at the cell predicted (gravity/ext.wgsl), which the field atlas leaves out.
+  var pr = predict_cell(slot, l, mask, grav_at(gpos) + ext_accel(blk_pos(slot, l)));
   if (at_source) { pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s)); }
   let c = atl(blk_origin(inv.slot), inv.l);
   textureStore(PA, c, pr.a);

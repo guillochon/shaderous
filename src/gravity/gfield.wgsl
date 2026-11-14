@@ -1,6 +1,8 @@
 // Gravity as the hydro passes see it: the self-gravity field texture written by
-// gravity/field.wgsl plus a uniform external acceleration.
-// Requires P and a binding `G: texture_3d<f32>`.
+// gravity/field.wgsl, a uniform external acceleration, and the point masses' pull with the
+// frame's (gravity/ext.wgsl).
+// Requires P, a binding `G: texture_3d<f32>` and one `BH: Masses`.
+#include "gravity/ext.wgsl"
 
 fn has_gravity() -> bool {
   return P.grav_on != 0u || any(P.gext.xyz != vec3<f32>(0.0));
@@ -8,6 +10,11 @@ fn has_gravity() -> bool {
 
 // Acceleration at an in-range cell.
 fn g_load(c: vec3<i32>) -> vec3<f32> {
+  return g_self(c) + ext_accel(cell_pos(c));
+}
+// The same without the point masses and the frame: self-gravity and the uniform field, whose
+// work the flux form accounts for.
+fn g_self(c: vec3<i32>) -> vec3<f32> {
   var g = P.gext.xyz;
   if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
   return g;
@@ -46,6 +53,7 @@ fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   if (abs(apart) > 1) { apart = 1; }
   var seen = -P.gext[axis] * f32(apart) * P.dx;
   if (P.grav_on != 0u) { seen += textureLoad(G, b, 0).w - textureLoad(G, a, 0).w; }
+  seen += ext_dphi(cell_pos(a), vec3<f32>(e * apart) * P.dx, 0.0);
   var face = seen;
   let n = select(i32(P.n), i32(P.dims.z), axis == 2);
   let at_lo = ia == -1 && P.bc_lo[axis] == 2u;
@@ -57,6 +65,7 @@ fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
       let i0 = c + (k + select(-1, 1, at_lo)) * e;
       face += textureLoad(G, i0 + e, 0).w - textureLoad(G, i0, 0).w;
     }
+    face += ext_dphi(cell_pos(c + k * e), vec3<f32>(e) * P.dx, 0.0);
   }
   return vec2<f32>(seen, face);
 }

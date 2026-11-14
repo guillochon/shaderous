@@ -40,7 +40,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     u2 = left.u2;
   }
 
-  let kick = 0.5 * clock.dt * u1.x * g_load(c);
+  let kx = 0.5 * clock.dt * u1.x * ext_accel(cell_pos(c));
+  let kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
   var mom = u1.yzw + kick;
   var E = u2.x;
   var eint = u2.y;
@@ -48,7 +49,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // Kick-consistent energy: add exactly the kinetic energy of the kick (no cancellation).
     E += dot(kick, u1.yzw + 0.5 * kick) / u1.x;
   } else {
-    // Flux-form energy: E already holds the work for the whole step; re-derive e_int.
+    // Flux-form energy: E already holds self-gravity's work for the whole step; the point
+    // masses' and the frame's part of the kick adds its own (gravity/ext.wgsl). Then re-derive
+    // e_int.
+    E += dot(kx, u1.yzw + 0.5 * kick) / u1.x;
     let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x, E, eint);
     E = en.x;
     eint = en.y;
