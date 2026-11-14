@@ -31,7 +31,8 @@ the tests pass, that machine is ready.
 **Links are the handout.** The address bar always reflects the current setup: preset, grid,
 refinement, physics options and view. Set up what you want students to see, then copy the
 address or use **Share**. A link opens paused or running, depending on the **Autoplay**
-checkbox. A bare visit opens Kelvin-Helmholtz at $`1024^2`$ in 2D. Examples used below:
+checkbox. With **Autoload** off, a change of problem, grid or initial conditions waits until
+you press Run, so a large setup is loaded once instead of at every change. A bare visit opens Kelvin-Helmholtz at $`1024^2`$ in 2D. Examples used below:
 
 | What | Link |
 |---|---|

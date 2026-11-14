@@ -75,6 +75,7 @@ side.innerHTML = `
     <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
     <div class="io">
       <label class="check" title="Start each problem playing as soon as it loads, and play a finished run again on Reset. Off, a run waits for Play"><input id="autoplay" type="checkbox" />Autoplay</label>
+      <label class="check" title="Load the simulation as soon as a setting that needs a new one changes: the problem, the grid, a parameter of the initial conditions. Off, such changes wait until you press Run, so several can be made before a large grid is set up once"><input id="autoload" type="checkbox" />Autoload</label>
       <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
       <button id="import" title="Load a state from an .athdf file: one saved here, or another code's with density, velocity and pressure">Import state</button>
       <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
@@ -808,6 +809,20 @@ let autoplay = true;
 try {
   autoplay = localStorage.getItem('shaderous.autoplay') !== 'off';
 } catch {}
+/**
+ * Whether a change that needs a new simulation loads it at once (remembered in this browser).
+ * Off, the change waits for Run (see `pending`). A script's changes always load.
+ */
+let autoload = true;
+try {
+  autoload = headless || localStorage.getItem('shaderous.autoload') !== 'off';
+} catch {}
+/**
+ * With Autoload off: what waits for Run. `pick`: the problem and grid chosen in the menus, to be
+ * built; without one, the present run starts again from its initial conditions (a preset
+ * parameter changed). `keepPhysics`: as build() takes it.
+ */
+let pending: { pick?: { id: string; n: number; ndim: 2 | 3; levels: number }; keepPhysics: boolean } | null = null;
 let stepOnce = false;
 let building = false;
 let finished = false;
@@ -886,26 +901,30 @@ const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) <
 /** Reflect cfg and view into the controls. */
 function syncControls() {
   const two = cfg.ndim === 2;
-  showProblem(cfg.problem.id);
+  // The problem and grid menus show a choice that waits for Run (Autoload off), else the run's own.
+  const g = pending?.pick ?? { id: cfg.problem.id, n: cfg.n, ndim: cfg.ndim, levels: cfg.amrLevels };
+  const gProblem = problemById(g.id);
+  const g2 = g.ndim === 2;
+  showProblem(g.id);
   syncProblemParams();
   const dim = $<HTMLSelectElement>('dim');
-  dim.value = String(cfg.ndim);
-  dim.options[1].disabled = !cfg.problem.supports2d;
+  dim.value = String(g.ndim);
+  dim.options[1].disabled = !gProblem.supports2d;
   const res = $<HTMLSelectElement>('res');
-  const wanted = (two ? RES_2D : RES_3D).map((n) => opt(n, two ? `${n}\u00b2` : `${n}\u00b3`)).join('');
-  if (res.dataset.dim !== String(cfg.ndim)) {
+  const wanted = (g2 ? RES_2D : RES_3D).map((n) => opt(n, g2 ? `${n}\u00b2` : `${n}\u00b3`)).join('');
+  if (res.dataset.dim !== String(g.ndim)) {
     res.innerHTML = wanted;
-    res.dataset.dim = String(cfg.ndim);
+    res.dataset.dim = String(g.ndim);
   }
-  res.value = String(cfg.n);
+  res.value = String(g.n);
   // Past the uniform limit a grid needs refinement levels, and enough of them for its root
   // blocks to fit in GPU memory (picking it raises the levels to that, see build()).
-  for (const o of res.options) o.disabled = +o.value > uniformMax(cfg.ndim) && (cfg.amrLevels === 0 || minAmrLevels(+o.value, cfg.ndim) === 0);
+  for (const o of res.options) o.disabled = +o.value > uniformMax(g.ndim) && (g.levels === 0 || minAmrLevels(+o.value, g.ndim) === 0);
   const levels = $<HTMLSelectElement>('levels');
-  levels.value = String(cfg.amrLevels);
-  const amrOk = supportsAmr(cfg.problem);
+  levels.value = String(g.levels);
+  const amrOk = supportsAmr(gProblem);
   levels.disabled = !amrOk;
-  for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(cfg.n) || (+o.value > 0 && !amrFits(cfg.n, cfg.ndim, +o.value));
+  for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(g.n) || (+o.value > 0 && !amrFits(g.n, g.ndim, +o.value));
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
   // Contours: lines in the slice and projection views, isosurfaces in the volume view.
   const marching = !two && view.mode === 'volume';
@@ -949,7 +968,7 @@ function syncControls() {
   $<HTMLInputElement>('fluffu').disabled = $<HTMLInputElement>('fluffv').disabled = !(cfg.fluff.rho > 0);
   $<HTMLInputElement>('reflo').value = String(cfg.refineLo);
   $<HTMLInputElement>('refhi').disabled = $<HTMLInputElement>('reflo').disabled = cfg.amrLevels === 0;
-  $('sum-grid').textContent = `${cfg.n}${two ? '\u00b2' : '\u00b3'}, ${cfg.amrLevels ? `${cfg.amrLevels} level${cfg.amrLevels > 1 ? 's' : ''}` : 'uniform'}`;
+  $('sum-grid').textContent = `${g.n}${g2 ? '\u00b2' : '\u00b3'}, ${g.levels ? `${g.levels} level${g.levels > 1 ? 's' : ''}` : 'uniform'}`;
   $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}, CFL ${cfg.cfl}${ckpt.on ? `, checkpoints every ${+ckpt.every.toPrecision(6)}` : ''}`;
   showCheckpoints();
   // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
@@ -981,7 +1000,11 @@ function syncControls() {
   const uniform = cfg.gext.some((g) => g !== 0);
   $('sum-grav').textContent = [cfg.gravity === 'off' ? '' : cfg.gravity, uniform ? 'uniform field' : ''].filter(Boolean).join(' + ') || 'off';
   $<HTMLInputElement>('tend').value = Number.isFinite(cfg.tEnd) ? String(cfg.tEnd) : '';
-  $('blurb').textContent = cfg.restart ? `Loaded from a file, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
+  $('blurb').textContent = pending
+    ? pending.pick
+      ? `Not loaded yet: press Run to load ${gProblem.label} at ${g.n}${g2 ? '²' : '³'}${g.levels ? ` with ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''}.`
+      : 'Changed, not loaded yet: press Run to start again with the new parameters.'
+    : cfg.restart ? `Loaded from a file, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
   $<HTMLSelectElement>('eos').value = cfg.eos;
   $<HTMLInputElement>('gamma').value = String(+cfg.eosParams.gamma.toFixed(4));
   $<HTMLInputElement>('K').value = String(cfg.eosParams.K);
@@ -1112,7 +1135,7 @@ function syncProblemParams() {
           sim.retuneMasses();
         } else {
           // Part of the initial conditions (an orbit, the gas's starting state): start again.
-          restartRun(true);
+          restartOrWait(true);
         }
         syncControls();
       });
@@ -1160,20 +1183,57 @@ function enqueue(job: () => Promise<void>): Promise<void> {
   return queue;
 }
 
+/** The grid a preset gets for the one asked for: what it supports and what fits in GPU memory. */
+function resolveGrid(problem: ReturnType<typeof problemById>, n: number, ndim: 2 | 3, levels: number) {
+  if (!problem.supports2d) ndim = 3;
+  const allowed = ndim === 2 ? RES_2D : RES_3D;
+  if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
+  // Refinement: only where the preset allows it, and no deeper than the resolution permits.
+  levels = supportsAmr(problem) ? Math.min(levels, maxAmrLevels(n)) : 0;
+  // Enough levels for the root blocks to fit in GPU memory; a grid no level count fits goes
+  // down to the largest uniform one.
+  if (levels > 0 && !amrFits(n, ndim, levels)) levels = Math.max(levels, minAmrLevels(n, ndim));
+  if (levels > 0 && !amrFits(n, ndim, levels)) levels = 0;
+  if (levels === 0) n = Math.min(n, uniformMax(ndim));
+  return { n, ndim, levels };
+}
+
+/** A new problem or grid from the menus: built now, or (Autoload off) left waiting for Run. */
+function load(id: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false) {
+  if (autoload) return void build(id, n, ndim, levels, keepPhysics);
+  // Physics choices carry over only if every change waiting would have kept them.
+  pending = { pick: { id, ...resolveGrid(problemById(id), n, ndim, levels) }, keepPhysics: keepPhysics && (pending?.pick ? pending.keepPhysics : true) };
+  running = false;
+  if (cfg) syncControls();
+}
+
+/** New initial conditions for the present run: started again now, or (Autoload off) on Run. */
+function restartOrWait(replay = false) {
+  if (autoload) return void restartRun(replay);
+  pending ??= { keepPhysics: true };
+  running = false;
+}
+
+/**
+ * Load what waits for Run. `play`: whether the run then plays; left out, as Autoplay has it.
+ */
+function loadPending(play?: boolean) {
+  const p = pending;
+  if (!p) return;
+  pending = null;
+  const job = p.pick ? build(p.pick.id, p.pick.n, p.pick.ndim, p.pick.levels, p.keepPhysics) : restartRun(true);
+  job.then(() => {
+    if (play !== undefined && sim) running = play;
+    if (cfg) syncControls();
+  });
+}
+
 /** Build a simulation for the selected preset and resolution. */
 function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot) {
+  pending = null; // whatever waited for Run is superseded
   return enqueue(async () => {
     const problem = problemById(problemId);
-    if (!problem.supports2d) ndim = 3;
-    const allowed = ndim === 2 ? RES_2D : RES_3D;
-    if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
-    // Refinement: only where the preset allows it, and no deeper than the resolution permits.
-    levels = supportsAmr(problem) ? Math.min(levels, maxAmrLevels(n)) : 0;
-    // Enough levels for the root blocks to fit in GPU memory; a grid no level count fits goes
-    // down to the largest uniform one.
-    if (levels > 0 && !amrFits(n, ndim, levels)) levels = Math.max(levels, minAmrLevels(n, ndim));
-    if (levels > 0 && !amrFits(n, ndim, levels)) levels = 0;
-    if (levels === 0) n = Math.min(n, uniformMax(ndim));
+    ({ n, ndim, levels } = resolveGrid(problem, n, ndim, levels));
     const next = configFor(problem, n, { ndim, amrLevels: levels });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
     if (keepPhysics && cfg && cfg.problem === problem && cfg.ndim === ndim) {
@@ -1561,23 +1621,23 @@ function bind() {
     // A new problem opens on its first variant.
     showProblem(familyById(el.value).variants[0].problem.id);
     const { id, n, ndim, levels } = pickedPreset();
-    build(id, n, ndim, levels);
+    load(id, n, ndim, levels);
   });
   on('variant', () => {
     const { id, n, ndim, levels } = pickedPreset();
-    build(id, n, ndim, levels);
+    load(id, n, ndim, levels);
   });
   on('dim', () => {
     const { id, ndim, levels } = picked();
-    build(id, 0, ndim, levels); // 0: use the default resolution for that dimensionality
+    load(id, 0, ndim, levels); // 0: use the default resolution for that dimensionality
   });
   on('res', () => {
     const { id, n, ndim, levels } = picked();
-    build(id, n, ndim, levels, true);
+    load(id, n, ndim, levels, true);
   });
   on('levels', () => {
     const { id, n, ndim, levels } = picked();
-    build(id, n, ndim, levels, true);
+    load(id, n, ndim, levels, true);
   });
   on('blocks', (el) => (view.showBlocks = el.checked));
   on('contours', (el) => {
@@ -1604,6 +1664,15 @@ function bind() {
       localStorage.setItem('shaderous.autoplay', autoplay ? 'on' : 'off');
     } catch {}
   });
+  $<HTMLInputElement>('autoload').checked = autoload;
+  on('autoload', (el) => {
+    autoload = el.checked;
+    try {
+      localStorage.setItem('shaderous.autoload', autoload ? 'on' : 'off');
+    } catch {}
+    // Switched back on with a change waiting: it loads now.
+    if (autoload) loadPending();
+  });
   const timingBox = $<HTMLInputElement>('gputiming');
   timingBox.disabled = !timingAvailable();
   if (timingBox.disabled) {
@@ -1621,7 +1690,7 @@ function bind() {
   const rebuildForMemory = () => {
     showMemory();
     const { id, n, ndim, levels } = picked();
-    build(id, n, ndim, levels, true);
+    load(id, n, ndim, levels, true);
   };
   on('gpumem', (el) => {
     const gb = +el.value;
@@ -1646,6 +1715,8 @@ function bind() {
     applyParams();
   });
   $('run').addEventListener('click', () => {
+    // A change waiting for Run (Autoload off): load it, then play.
+    if (pending) return loadPending(true);
     running = !running;
     if (running && finished) {
       // Past the end time: keep going without a limit.
@@ -1663,12 +1734,15 @@ function bind() {
     $('run').click();
   });
   $('step').addEventListener('click', () => {
+    // A change waiting for Run: Step and Reset load it too, and leave it paused.
+    if (pending) return loadPending(false);
     running = false;
     stepOnce = true;
     syncControls();
   });
   $('reset').addEventListener('click', () => {
     if (!sim) return;
+    if (pending) return loadPending(false);
     restartRun(finished); // replay a run that had reached its end time
     syncControls();
   });
@@ -1854,7 +1928,7 @@ function bind() {
         if (sim && cfg.amrLevels > 0 && lo[a] === 0 && !was) {
           // On an adaptive mesh a newly periodic axis joins blocks that were never neighbors
           // and may differ by several levels: build the mesh again from the start.
-          restartRun();
+          restartOrWait();
         } else applyParams();
         syncControls();
       });
@@ -3325,7 +3399,7 @@ function tick(now: number) {
       ? `  •  point mass at r = ${u.fmt(Math.hypot(...pm[0].pos), 'length')}`
       : pm.length ? `  •  ${pm.length} point masses, separation ${u.fmt(Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])), 'length')}` : '';
     const took = acc > 0 ? `, accreted ${u.fmt(acc, 'mass')}` : '';
-    const state = finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused';
+    const state = pending ? 'press Run to load' : finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused';
     const mesh = s.status();
     setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${where ? took : ''}${mesh ? '  •  ' + mesh : ''}${toolNotice ? '  •  ' + toolNotice : ''}`);
   }
