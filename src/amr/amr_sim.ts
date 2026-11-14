@@ -192,6 +192,8 @@ export class AmrSim implements Simulation {
   private listAct: GPUBuffer;
   private listUpd: GPUBuffer;
   private listEnd: GPUBuffer;
+  /** Per-block timesteps: the leaves that only take a deposit this substep (amr/bins_lists.wgsl, LD). */
+  private listDep: GPUBuffer;
   private binCnt: GPUBuffer;
   private binArgs: GPUBuffer;
   private pTick?: GPUComputePipeline;
@@ -376,6 +378,7 @@ export class AmrSim implements Simulation {
     this.listAct = list();
     this.listUpd = list();
     this.listEnd = list();
+    this.listDep = list();
     this.binCnt = d.createBuffer({ size: 16, usage: storage });
     this.binArgs = d.createBuffer({ size: BIN_ARGS_BYTES, usage: storage | GPUBufferUsage.INDIRECT });
     this.binStaging = d.createBuffer({ size: BIN_ARGS_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
@@ -486,6 +489,7 @@ export class AmrSim implements Simulation {
         texture: (label) => tex3d(d, side, 'rgba32float', label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg,
         state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots,
+        bins: { A: sim.bins, LL: sim.listEnd, LU: sim.listUpd, LD: sim.listDep, args: sim.binArgs },
       });
     }
     // With a magnetic field the refinement indicator reads its assembly's primitives (the same layout).
@@ -512,9 +516,8 @@ export class AmrSim implements Simulation {
 
   /** Bins of per-block timesteps in use (0 = off). */
   private get timeBins(): number {
-    // Species are moved with one timestep for all blocks (amr/species.wgsl), and so far a
-    // magnetic field too (docs/mhd-plan.md, phase 2).
-    if (this.speciesGroups > 0 || this.cfg.problem.mhd) return 0;
+    // Species are moved with one timestep for all blocks (amr/species.wgsl).
+    if (this.speciesGroups > 0) return 0;
     return Math.max(0, Math.min(MAX_TIME_BINS, Math.floor(this.cfg.timeBins || 0)));
   }
   /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
@@ -602,6 +605,7 @@ export class AmrSim implements Simulation {
       }),
     );
     const K = (this.builtBins = this.timeBins);
+    await this.mhd?.setBins(K > 0);
     if (K > 0) await this.buildBins(K);
     // Off, every block is in bin 0, as the display's time-bin field shows it (amr/field.wgsl).
     else d.queue.writeBuffer(this.bins, 0, new Uint32Array(this.cap + 1));
@@ -801,15 +805,17 @@ export class AmrSim implements Simulation {
       );
     }
     this.gSetDt = bindGroup(d, this.pSetDt, { 0: this.params, 1: this.redDt.result, 2: this.clock, 3: this.bh });
-    this.gBinsInit = bindGroup(d, this.pBinsInit, { 0: this.params, 1: this.clock, 2: this.redDt.first, 3: A, 30: this.bt, 31: this.listAll });
+    // The rates come one row per block of the assembly's list: with a field, the leaves (parents
+    // are set from their children by the sweeps that follow).
+    this.gBinsInit = bindGroup(d, this.pBinsInit, { 0: this.params, 1: this.clock, 2: this.redDt.first, 3: A, 30: this.bt, 31: this.mhd ? this.listLeaf : this.listAll });
     const idx = v(this.idx);
     this.gBinsDilate = bindGroup(d, this.pBinsDilate, { 0: this.params, 1: A, 2: B, 28: idx, 30: this.bt, 31: this.listAll });
     this.gBinsRelax = [
       bindGroup(d, this.pBinsRelax, { 0: this.params, 1: B, 2: A, 28: idx, 30: this.bt, 31: this.listAll }),
       bindGroup(d, this.pBinsRelax, { 0: this.params, 1: A, 2: B, 28: idx, 30: this.bt, 31: this.listAll }),
     ];
-    this.gBinsLists = bindGroup(d, this.pBinsLists, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.listEnd, 28: idx, 29: A, 30: this.bt, 31: this.listAll });
-    this.gBinsArgs = bindGroup(d, this.pBinsArgs, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.binArgs, 5: this.listEnd });
+    this.gBinsLists = bindGroup(d, this.pBinsLists, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.listEnd, 5: this.listDep, 28: idx, 29: A, 30: this.bt, 31: this.listAll });
+    this.gBinsArgs = bindGroup(d, this.pBinsArgs, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.binArgs, 5: this.listEnd, 6: this.listDep });
     this.binsPrimed = null;
     // What was measured with other bins says nothing about these.
     this.binPause = 0;
@@ -871,28 +877,45 @@ export class AmrSim implements Simulation {
       run(pass, this.pBhKick!, this.gBhKickB!);
       pass.dispatchWorkgroups(1);
     };
+    // The timestep from the rates the assembly measured, then the bins.
+    const setBins = (pass: GPUComputePassEncoder) => {
+      this.redDt.encode(pass);
+      run(pass, this.pSetDt!, this.gSetDt!);
+      pass.dispatchWorkgroups(1);
+      run(pass, this.pBinsInit!, this.gBinsInit!);
+      pass.dispatchWorkgroups(blocks);
+      run(pass, this.pBinsDilate!, this.gBinsDilate!);
+      pass.dispatchWorkgroups(blocks);
+      // An odd number of sweeps, so the result lands back in the buffer the passes read.
+      // Each rule moves a bin one block per sweep, and no chain is longer than the number
+      // of bins plus the depth of the tree.
+      const sweeps = (K + this.levels + 2) | 1;
+      for (let i = 0; i < sweeps; i++) {
+        run(pass, this.pBinsRelax!, this.gBinsRelax[i % 2]);
+        pass.dispatchWorkgroups(blocks);
+      }
+    };
+    const mhd = this.mhd;
     for (let s = 0; s < n; s++) {
       const pass = beginPass(enc);
       run(pass, this.pTick!, this.gTick!);
       pass.dispatchWorkgroups(1);
-      if (s === 0) {
+      if (mhd) {
+        // A magnetic field (mhd/amr_mhd.ts): every leaf steps on the first substep, the leaves
+        // starting a step and those owed a deposit on the others; then cells and faces back.
+        if (s === 0) {
+          mhd.encodeFull(pass, p, () => this.flat(pass, this.nLeaf, NG), () => setBins(pass));
+          run(pass, this.pCommit!, this.gCommit[p]);
+          this.interior(pass, this.nLeaf);
+        } else {
+          mhd.encodeSubstep(pass, p);
+          run(pass, this.pCommit!, this.gCommitB[p]);
+          pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(1));
+        }
+      } else if (s === 0) {
         run(pass, this.pAssemble, this.assembleGroup(p));
         this.flat(pass, this.nAll, NG);
-        this.redDt.encode(pass);
-        run(pass, this.pSetDt!, this.gSetDt!);
-        pass.dispatchWorkgroups(1);
-        run(pass, this.pBinsInit!, this.gBinsInit!);
-        pass.dispatchWorkgroups(blocks);
-        run(pass, this.pBinsDilate!, this.gBinsDilate!);
-        pass.dispatchWorkgroups(blocks);
-        // An odd number of sweeps, so the result lands back in the buffer the passes read.
-        // Each rule moves a bin one block per sweep, and no chain is longer than the number
-        // of bins plus the depth of the tree.
-        const sweeps = (K + this.levels + 2) | 1;
-        for (let i = 0; i < sweeps; i++) {
-          run(pass, this.pBinsRelax!, this.gBinsRelax[i % 2]);
-          pass.dispatchWorkgroups(blocks);
-        }
+        setBins(pass);
         // The half-step potential is each block's own: again, now that the bins are known.
         if (field) fieldB(pass, this.nAll);
         run(pass, this.pPredict, this.gPredict);
@@ -2368,7 +2391,9 @@ export class AmrSim implements Simulation {
    * mean of the fine faces on it (to rounding). Returns how many same-level copies differ, and
    * the largest coarse-fine difference over the largest face value.
    */
-  async faceConsistency(): Promise<{ shared: number; mismatched: number; coarseFine: number; cfFaces: number }> {
+  async faceConsistency(): Promise<{ shared: number; mismatched: number; coarseFine: number; cfFaces: number; worst: string[] }> {
+    const bins = await this.readBins();
+    const worst: string[] = [];
     const side = this.slotsPerSide * PAD;
     const depth = this.layers * (this.cfg.ndim === 2 ? 1 : PAD);
     const f = await this.mhd!.readAtlas(this.cur, side, depth);
@@ -2410,7 +2435,14 @@ export class AmrSim implements Simulation {
               const m = [...l];
               m[a] = 0;
               shared++;
-              if (at(nb.block.slot, m, a) !== mine) mismatched++;
+              if (at(nb.block.slot, m, a) !== mine) {
+                mismatched++;
+                // The first few, for a failed test's report: where, and the two blocks' bins.
+                if (worst.length < 8) {
+                  const d = Math.abs(at(nb.block.slot, m, a) - mine);
+                  worst.push(`L${b.level} [${b.c}] bin ${bins[b.slot]} / [${nb.block.c}] bin ${bins[nb.block.slot]}: axis ${a} at ${i},${j} off by ${d.toExponential(2)}`);
+                }
+              }
             } else if (nb.kind === 'same') {
               // Refined beyond: the mean of the children's faces on this one.
               let sum = 0;
@@ -2429,14 +2461,31 @@ export class AmrSim implements Simulation {
                   }
               }
               if (count) {
-                coarseFine = Math.max(coarseFine, Math.abs(sum / count - mine));
+                const d = Math.abs(sum / count - mine);
+                if (d > coarseFine && d > 1e-7 * big && worst.length < 8) {
+                  worst.push(`coarse [${b.c}] bin ${bins[b.slot]} / fine bins ${nb.block.children!.map((c) => bins[c.slot])}: axis ${a} at ${i},${j} off by ${d.toExponential(2)}`);
+                }
+                coarseFine = Math.max(coarseFine, d);
                 cfFaces++;
               }
             }
           }
       }
     }
-    return { shared, mismatched, coarseFine: big > 0 ? coarseFine / big : 0, cfFaces };
+    return { shared, mismatched, coarseFine: big > 0 ? coarseFine / big : 0, cfFaces, worst };
+  }
+
+  /** Each slot's time bin (0 when they are off). */
+  private async readBins(): Promise<Uint32Array> {
+    const d = this.device;
+    const buf = d.createBuffer({ size: this.bins.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = d.createCommandEncoder();
+    enc.copyBufferToBuffer(this.bins, 0, buf, 0, this.bins.size);
+    d.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const r = new Uint32Array(buf.getMappedRange().slice(0)).subarray(1);
+    buf.destroy();
+    return r;
   }
 
   /** Magnetic energy and divergence of the current state; null without a magnetic field. */
@@ -2457,7 +2506,7 @@ export class AmrSim implements Simulation {
     this.burn?.destroy();
     this.massFlux?.destroy();
     this.debrisBuf?.destroy();
-    for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
+    for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.listDep, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
     this.grav?.destroy();
   }
 }

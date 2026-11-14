@@ -8,6 +8,7 @@
 #include "hydro/pfloor.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include <bins>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var W1: texture_3d<f32>;
@@ -60,6 +61,6 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     if (t.x < BS) { E.x = corner(0, t, eref(t - ey - ez), eref(t - ez), eref(t - ey), r111); }
     if (t.y < BS) { E.y = corner(1, t, eref(t - ez - ex), eref(t - ex), eref(t - ez), r111); }
   }
-  let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
+  let dt = stage_dt(inv.slot, STAGE);
   textureStore(EO, atl(g_o, t), vec4<f32>((dt / g_dx) * E, 0.0));
 }

@@ -12,6 +12,7 @@
 #include "hydro/pfloor.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include <bins>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var W1: texture_3d<f32>;
@@ -38,7 +39,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   let t = inv.l;
   g_dx = blk_dx(slot);
   let o = blk_origin(slot);
-  let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
+  let dt = stage_dt(slot, STAGE);
   let outside = vec3<i32>(t < vec3<i32>(0)) + vec3<i32>(t >= vec3<i32>(BS));
   for (var a = 0; a < naxes(); a++) {
     if (t[a] < 0 || t[a] > BS) { continue; }

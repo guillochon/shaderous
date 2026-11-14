@@ -17,8 +17,14 @@ timestep, as section 4b designs it. The design changed in two places:
 - ghost faces get limited tangential slopes;
 - a boundary face is read from the block at its own level.
 
-There are three validation tests, plus edge 2:1 balance in the tree. Still to do in phase 2:
-time bins (section 5).
+There are three validation tests, plus edge 2:1 balance in the tree.
+
+Phase 2 done (2026-11-14): time bins as section 5b designs them (numerics.md section 21). Changes
+from the design: the fluxes, edges and update of a substep run chunk by chunk of the flux
+scratch, with dispatch sizes made on the GPU (`mhd/amr_chunk_args.wgsl`), so bins need not fit
+one chunk; and the edge definer search skips cells beyond a non-periodic boundary. The saving is
+modest on the field presets: 85% of the block updates for the 2D blast early on, 98-100% for the
+rotor, the loop and the 3D blast, whose signal speeds vary by less than a bin's factor of 2.
 
 Phase 3 done (2026-11-14): divergence-free re-meshing of the field (mhd/amr_regrid.wgsl), with
 a least-change projection inside each coarse cell (Walsh transform of the hypercube Laplacian)
@@ -361,8 +367,8 @@ least as fast):
 
 **Lists and dispatch.** The MHD passes run over GPU-built lists with indirect dispatch (new
 triples in `bins_args`): the active leaves, the deposit leaves, and the active leaves with both
-ghost layers for the assembly. With bins on, the flux scratch must hold every leaf in one chunk;
-otherwise bins stay off for that run.
+ghost layers for the assembly. (Built instead: the fluxes, edges and update go chunk by chunk
+of the flux scratch, with per-chunk sizes made on the GPU; see the status above.)
 
 **Tests.**
 - Blast (2D and 3D) and field loop with bins on agree with bins off within tolerance.

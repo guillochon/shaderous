@@ -34,6 +34,12 @@ fn reg_entry(slot: i32, a: i32, hi: bool, t1: i32, t2: i32) -> u32 {
   return 2u * ((u32(slot) * 6u + plane) * u32(BS * BS) + u32(t1 + BS * t2));
 }
 
+// The step of a block, its stage's share: the clock's dt times 2^bin (time bins), halved in stage 1.
+fn stage_dt(slot: i32, stage: u32) -> f32 {
+  let dt = clock.dt * f32(1u << blk_bin(slot));
+  return select(dt, 0.5 * dt, stage == 1u);
+}
+
 // A chunk's block for workgroup row `row`, and the local texel for invocation i of a box
 // starting at `lo`, `w` texels per side (one layer along z in 2D).
 struct BoxInv { ok: bool, slot: i32, row: u32, l: vec3<i32> }
@@ -44,7 +50,8 @@ fn inv_box(wid: vec3<u32>, lix: u32, lo: i32, w: i32) -> BoxInv {
   let i = i32(wid.x * FLAT_WG + lix);
   var l = vec3<i32>(i % w, (i / w) % w, i / (w * w)) + lo;
   if (is2d()) { l.z = 0; }
-  if (row >= CHUNK.count || i >= n) { return BoxInv(false, 0, row, l); }
+  // With time bins the list is built on the GPU, and CHUNK covers all of it: LIST[0] bounds it.
+  if (row >= CHUNK.count || CHUNK.first + row >= LIST[0] || i >= n) { return BoxInv(false, 0, row, l); }
   return BoxInv(true, i32(LIST[1u + CHUNK.first + row]), row, l);
 }
 

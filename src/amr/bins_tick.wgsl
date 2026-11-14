@@ -25,5 +25,6 @@ fn main() {
     atomicStore(&CNT[0], 0u);
     atomicStore(&CNT[1], 0u);
     atomicStore(&CNT[2], 0u);
+    atomicStore(&CNT[3], 0u);
   }
 }

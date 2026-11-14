@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'species', 'species-eos', 'shock-bubble', 'detonation', 'advection-accuracy', 'flux-determinism',
   'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-species', 'amr-species-eos', 'amr-detonation', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'point-mass-sink', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption',
-  'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving',
+  'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins',
 ];
 
 test.describe.configure({ mode: 'serial' });
@@ -17,6 +17,8 @@ test('the page lists the same tests as this file', async ({ page }) => {
 
 for (const id of TESTS) {
   test(id, async ({ page }) => {
+    // What a test logs (details of a failure) goes to the report.
+    page.on('console', (m) => m.type() === 'log' && console.log(m.text()));
     await page.goto('/validate.html');
     await page.evaluate(() => window.shaderous.ready);
     const r = await page.evaluate((t) => window.shaderous.run(t), id);

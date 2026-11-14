@@ -806,8 +806,8 @@ The species machinery of [§12](#12-passive-scalar-and-species) and the composit
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
 rotor, Brio-Wu, the field loop and the Alfvén wave) solve ideal MHD, coupled to the gas
 dynamics alone. It runs on the uniform grid and on the adaptive mesh, which re-meshes with the
-field (below). So far every block takes the same timestep. Time bins, gravity, point masses
-and field-line tubes are the later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
+field (below), with per-block timesteps. Gravity, point masses and field-line tubes are the
+later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
@@ -927,10 +927,36 @@ $`E`$ includes $`B^2/2`$.
 
   The tree and leaf index of the old mesh are copied before the new one is uploaded, for these
   lookups. In the `mhd-amr-moving` test, a dense field loop carried once around the box is
-  re-meshed 144 times (the `field-loop-dense` preset). $`
-abla\cdot B`$ stays at
+  re-meshed 144 times (the `field-loop-dense` preset). $`\nabla\cdot B`$ stays at
   $`1.5\times10^{-7}`$, same-level shared faces are bit for bit, coarse faces equal their fine
   mean to $`6\times10^{-10}`$, and 96% of the magnetic energy is kept (uniform 256²: 96%).
+- **Time bins** (`cfg.timeBins`, the `tbins` key; plan section 5b). Blocks take steps of
+  $`2^k`$ times the smallest, as for the gas alone (§18), with the field's own rules:
+  - Neighbors across faces, edges and (2D) vertices are at most one bin apart, and a block is
+    never slower than a coarser one. So beside a block that starts a step, a neighbor is either
+    starting one too or exactly at its midpoint.
+  - The assembly reads a neighbor's ghosts as a blend of its state and its half-step store,
+    weighted for the time the receiving block's stage needs: the neighbor's start, its
+    midpoint, its end (extrapolated, from a faster neighbor in stage 2), or 3/4 of its step.
+  - Each edge is defined by the finest leaf around it and, among those, the fastest. A slower
+    block takes a faster neighbor's first-substep fluxes (times 1/2) and edge impulses in its
+    own step, and the second ones in a deposit at its midpoint (`LD`, the leaves at their
+    midpoint with a faster neighbor across a face, edge or vertex). So both copies of a shared
+    face see the same impulses.
+  - The passes run over lists built on the GPU, with dispatch sizes made there too: the
+    assembly, the commit and the deposits from `amr/bins_args.wgsl`, the fluxes, edges and
+    update chunk by chunk of the flux scratch from `mhd/amr_chunk_args.wgsl`.
+
+  An edge whose cells lie beyond an outflow or reflecting boundary takes nothing from there: the
+  definer search skips them (mapped back into the box, they named a neighbor's edge one cell
+  off). In the `mhd-amr-bins` test (2 bins, kept on), the rotor, the dense field loop and the
+  2D and 3D blasts keep $`\nabla\cdot B`$ at $`2\times10^{-7}`$, every shared face bit for bit, energy
+  as with one timestep, and magnetic energy within $`10^{-4}`$ of the run with one timestep.
+  The saving depends on the contrast in signal speed. The 2D blast at $`t = 0.05`$ makes 85%
+  of the block updates of one timestep. The rotor, the loop and the 3D blast make 98-100%:
+  their signal speeds differ by less than the factor of 2 between bins almost everywhere. With
+  3 bins the 2D blast makes 89%: neighbors are pulled into the fastest bin for a longer cycle.
+  Chunked substeps change no bit (`mhd-amr-chunks`).
 - **CPU reference.** `src/reference/mhd.ts` is the same scheme in float64. After 30 steps of
   Orszag-Tang at 128² and 15 of a 3D blast the GPU agrees with it to $`10^{-7}`$ in density,
   energy and face field.

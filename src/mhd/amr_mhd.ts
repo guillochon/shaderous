@@ -7,8 +7,9 @@
 //   update    per chunk (fluxes recomputed first when the leaves span several chunks): cells
 //             and faces, with fine fluxes and fine edges taken at refinement boundaries
 //
-// The mesh stays as it was built (no regridding with a field until phase 3), and every block
-// takes the same timestep (time bins come later in phase 2).
+// Re-meshing moves the faces with the cells (encodeRegrid()). With time bins, a cycle's first
+// substep steps every leaf (encodeFull()) and the others the leaves of the GPU's lists
+// (encodeSubstep(), docs/mhd-plan.md section 5b).
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
@@ -48,7 +49,27 @@ interface Deps {
   /** the timestep reduction's first-stage records, which the assembly writes */
   rates: GPUBuffer;
   slots: Record<string, string>;
+  /** Per-block timesteps (amr/bins_on.wgsl): the bins, the lists of a substep and their dispatch sizes. */
+  bins: BinsDeps;
 }
+
+/** What the passes of a substep of time bins work from (src/amr/amr_sim.ts, encodeCycle()). */
+export interface BinsDeps {
+  /** BIN: the substep and each block's bin */
+  A: GPUBuffer;
+  /** the leaves starting a step (LL), those updated (LU) and those taking a deposit (LD) */
+  LL: GPUBuffer;
+  LU: GPUBuffer;
+  LD: GPUBuffer;
+  /** indirect dispatch sizes (amr/bins_args.wgsl) */
+  args: GPUBuffer;
+}
+
+/** Offsets of the field's dispatches in the indirect arguments (amr/bins_args.wgsl). */
+const ARG = (i: number) => 12 * i;
+const ARG_ASSEMBLE = 16;
+const ARG_COMMIT = 17;
+const ARG_DEPOSIT = 18;
 
 export class AmrMhd {
   faces: GPUTexture[] = [];
@@ -89,6 +110,26 @@ export class AmrMhd {
   private gUpdate: GPUBindGroup[][][] = [];
   private redMag!: Reducer;
   private ndim: 2 | 3;
+  /** With time bins: the passes built to read them, and their bind groups over the substep's lists. */
+  private binsOn = false;
+  private pCommit?: GPUComputePipeline;
+  /** the dispatch sizes of a substep's fluxes, edges and update, per chunk (mhd/amr_chunk_args.wgsl) */
+  private pChunkArgs?: GPUComputePipeline;
+  private gChunkArgs?: GPUBindGroup;
+  private chunkArgs: GPUBuffer;
+  /** a chunk that covers any list (its length bounds it) */
+  private allChunk: GPUBuffer;
+  /** [parity][stage] over LL */
+  private gAssembleL: GPUBindGroup[][] = [];
+  /** [parity][stage][chunk] over LL */
+  private gFluxL: GPUBindGroup[][][] = [];
+  private gEmfL: GPUBindGroup[][][] = [];
+  private gUpdateL: GPUBindGroup[][][] = [];
+  /** [parity] over LD */
+  private gDeposit: GPUBindGroup[] = [];
+  /** [parity] faces back from the other parity: over LU, and over every leaf */
+  private gCommitU: GPUBindGroup[] = [];
+  private gCommitAll: GPUBindGroup[] = [];
 
   private constructor(private dep: Deps) {
     const d = dep.device;
@@ -109,9 +150,12 @@ export class AmrMhd {
       label: 'old leaf index', size: [dep.idx.width, dep.idx.height, dep.idx.depthOrArrayLayers], dimension: '3d', format: 'r32uint',
       usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
     });
+    this.allChunk = d.createBuffer({ label: 'MHD whole list', size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(this.allChunk, 0, new Uint32Array([0, 0xffffffff, 0, 0]));
     for (let i = 0; i * this.perChunk < dep.cap; i++) {
       this.chunkBufs.push(d.createBuffer({ label: `MHD chunk ${i}`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
     }
+    this.chunkArgs = d.createBuffer({ label: 'MHD chunk dispatch sizes', size: 24 * this.chunkBufs.length, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
   }
 
   /** The W textures are the hydro primitives' (W1, W2) when given, so the display can share them. */
@@ -134,13 +178,27 @@ export class AmrMhd {
     }
   }
 
+  /**
+   * Build the step's passes with time bins on or off (the run's cfg.timeBins changed). On, they
+   * read each block's bin, and a cycle steps through encodeFull() and encodeSubstep().
+   */
+  async setBins(on: boolean) {
+    if (on === this.binsOn) return;
+    this.binsOn = on;
+    await this.build();
+  }
+
   private async build() {
     const { device: d, cfg, params, clock, bt, listLeaf, idx, state, half, rates } = this.dep;
-    const slots = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
+    const B = this.dep.bins;
+    const on = this.binsOn;
+    // Re-meshing and the diagnostics never read the bins.
+    const still = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
+    const slots = { ...still, bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl' };
     const v = (x: GPUTexture) => x.createView();
-    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red] = await Promise.all([
-      computePipeline(d, assemble('mhd/amr_regrid.wgsl', slots), 'MHD re-mesh faces'),
-      computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', slots), 'MHD re-mesh energy'),
+    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca] = await Promise.all([
+      computePipeline(d, assemble('mhd/amr_regrid.wgsl', still), 'MHD re-mesh faces'),
+      computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', still), 'MHD re-mesh energy'),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1, ASM_STAGE: 1 }),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 2', { RATES_ON: 0, ASM_STAGE: 2 }),
       computePipeline(d, assemble('mhd/amr_flux.wgsl', slots), 'MHD block fluxes 1', { STAGE: 1 }),
@@ -154,11 +212,18 @@ export class AmrMhd {
         [this.dep.cap * BS, BS, this.ndim === 2 ? 1 : BS],
         [SUM, MAX, MAX],
         'mhd/amr_diagnostics.wgsl',
-        slots,
+        still,
         [0, 1].map((p) => ({ 0: params, 4: v(this.faces[p]), 30: bt })),
         'magnetic diagnostics (blocks)',
       ),
+      computePipeline(d, assemble('mhd/amr_commit.wgsl'), 'MHD commit faces'),
+      computePipeline(d, assemble('mhd/amr_chunk_args.wgsl'), 'MHD chunk dispatch sizes', {
+        PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length, X_FLUX: this.groups(FBOX), X_BOX: this.groups(BS + 1),
+      }),
     ]);
+    this.pCommit = cm;
+    this.pChunkArgs = ca;
+    this.gChunkArgs = bindGroup(d, ca, { 1: B.LL, 2: this.chunkArgs });
     this.pRegrid = rgp;
     this.pEnergy = enp;
     this.pAssemble = [a1, a2];
@@ -166,14 +231,21 @@ export class AmrMhd {
     this.pEmf = [e1, e2];
     this.pUpdate = [u1, u2];
     this.redMag = red;
-    const W = { 2: v(this.w[0]), 3: v(this.w[1]), 4: v(this.w[2]) };
-    const common = { 0: params, 30: bt, 31: listLeaf };
+    const bin: Record<number, GPUBuffer> = on ? { 29: B.A } : {};
+    const common = { 0: params, 30: bt, 31: listLeaf, ...bin };
     this.gAssemble = [];
     this.gFlux = [];
     this.gEmf = [];
     this.gUpdate = [];
     this.gRegrid = [];
     this.gEnergy = [];
+    this.gAssembleL = [];
+    this.gFluxL = [];
+    this.gEmfL = [];
+    this.gUpdateL = [];
+    this.gDeposit = [];
+    this.gCommitU = [];
+    this.gCommitAll = [];
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       // Re-meshing from parity p: faces into o (with the old tree), then energy and all back into p.
@@ -195,34 +267,106 @@ export class AmrMhd {
       const out = { 3: v(this.w[0]), 4: v(this.w[1]), 5: v(this.w[2]), 6: v(this.fa), 12: rates, 28: v(idx) };
       // Both stages read the state and the half-step stores; ASM_STAGE weighs them.
       const stores = { 1: v(state[p][0]), 2: v(state[p][1]), 9: v(this.faces[p]), 16: v(this.halfFaces), 17: v(half[0]), 18: v(half[1]) };
-      this.gAssemble.push([
-        bindGroup(d, a1, { ...common, ...out, ...stores }),
-        bindGroup(d, a2, { ...common, ...out, ...stores }),
-      ]);
-      const perChunk = (fn: (c: GPUBuffer) => GPUBindGroup) => this.chunkBufs.map(fn);
-      this.gFlux.push(
-        [f1, f2].map((pipe) =>
-          perChunk((c) => bindGroup(d, pipe, { ...common, 1: clock, ...W, 5: v(this.fa), 6: this.scratch, 7: this.register, 14: c })),
-        ),
-      );
-      this.gEmf.push(
-        [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...common, 1: clock, ...W, 6: this.scratch, 8: v(this.emf), 14: c }))),
-      );
-      // Stage 1 writes the half-step state; its compensation output (13) is unused and takes the
-      // other parity's, which stage 2 then overwrites.
-      const upd = (pipe: GPUComputePipeline, outs: Record<number, GPUTextureView>) =>
-        perChunk((c) =>
-          bindGroup(d, pipe, {
-            ...common, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
-            6: this.scratch, 7: this.register, 8: v(this.emf), ...outs, 13: v(this.comps[o]), 14: c,
-            15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx),
-          }),
-        );
-      this.gUpdate.push([
-        upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }),
-        upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }),
-      ]);
+      const W = { 2: v(this.w[0]), 3: v(this.w[1]), 4: v(this.w[2]) };
+      // The step's bind groups over a list of leaves, per stage (and per chunk, but the assembly's).
+      const groups = (list: GPUBuffer, chunks: GPUBuffer[]) => {
+        const c0 = { ...common, 31: list };
+        const perChunk = (fn: (c: GPUBuffer) => GPUBindGroup) => chunks.map(fn);
+        // Stage 1 writes the half-step state; its compensation output (13) is unused and takes the
+        // other parity's, which stage 2 then overwrites.
+        const upd = (pipe: GPUComputePipeline, outs: Record<number, GPUTextureView>) =>
+          perChunk((c) =>
+            bindGroup(d, pipe, {
+              ...c0, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
+              6: this.scratch, 7: this.register, 8: v(this.emf), ...outs, 13: v(this.comps[o]), 14: c,
+              15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx),
+            }),
+          );
+        return {
+          assemble: [bindGroup(d, a1, { ...c0, ...out, ...stores }), bindGroup(d, a2, { ...c0, ...out, ...stores })],
+          flux: [f1, f2].map((pipe) =>
+            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), 6: this.scratch, 7: this.register, 14: c })),
+          ),
+          emf: [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 6: this.scratch, 8: v(this.emf), 14: c }))),
+          update: [
+            upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }),
+            upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }),
+          ],
+        };
+      };
+      const all = groups(listLeaf, this.chunkBufs);
+      this.gAssemble.push(all.assemble);
+      this.gFlux.push(all.flux);
+      this.gEmf.push(all.emf);
+      this.gUpdate.push(all.update);
+      if (!on) continue;
+      // A substep's leaves in the same chunks of rows, with dispatch sizes made on the GPU.
+      const sub = groups(B.LL, this.chunkBufs);
+      this.gAssembleL.push(sub.assemble);
+      this.gFluxL.push(sub.flux);
+      this.gEmfL.push(sub.emf);
+      this.gUpdateL.push(sub.update);
+      // The deposits read no fluxes of their own, only the register and the edge atlas.
+      this.gDeposit.push(groups(B.LD, [this.allChunk]).update[1][0]);
+      const commit = (list: GPUBuffer) =>
+        bindGroup(d, cm, { 0: params, 31: list, 1: v(this.faces[o]), 2: v(this.comps[o]), 3: v(this.faces[p]), 4: v(this.comps[p]) });
+      this.gCommitU.push(commit(B.LU));
+      this.gCommitAll.push(commit(listLeaf));
     }
+  }
+
+  /**
+   * With time bins, the first substep of a cycle: the step of every leaf over its own bin's
+   * step, as encode() takes it; `timestep` sets the clock's dt and the bins between the rates
+   * and the fluxes. Then the faces of every leaf back into `parity` (the cells are the caller's).
+   */
+  encodeFull(pass: GPUComputePassEncoder, parity: number, assembleDispatch: () => void, timestep: () => void) {
+    this.encode(pass, parity, assembleDispatch, timestep);
+    pass.setPipeline(this.pCommit!);
+    pass.setBindGroup(0, this.gCommitAll[parity]);
+    pass.dispatchWorkgroups(this.groups(BS + 1), this.nLeaf);
+  }
+
+  /**
+   * A later substep of a cycle: the step of the leaves that start one (LL), then the deposits
+   * of the leaves at their midpoint (LD), from the state at `parity` into the other; then the
+   * faces of all of them (LU) back. The cells are the caller's to bring back.
+   */
+  encodeSubstep(pass: GPUComputePassEncoder, parity: number) {
+    const args = this.dep.bins.args;
+    const ca = this.chunkArgs;
+    // Chunks of the leaf count bound those of the list; the ones past its end dispatch nothing.
+    const n = this.chunks();
+    pass.setPipeline(this.pChunkArgs!);
+    pass.setBindGroup(0, this.gChunkArgs!);
+    pass.dispatchWorkgroups(1);
+    for (let s = 0; s < 2; s++) {
+      pass.setPipeline(this.pAssemble[s]);
+      pass.setBindGroup(0, this.gAssembleL[parity][s]);
+      pass.dispatchWorkgroupsIndirect(args, ARG(ARG_ASSEMBLE));
+      const fluxes = (i: number) => {
+        pass.setPipeline(this.pFlux[s]);
+        pass.setBindGroup(0, this.gFluxL[parity][s][i]);
+        pass.dispatchWorkgroupsIndirect(ca, 24 * i);
+      };
+      for (let i = 0; i < n; i++) {
+        fluxes(i);
+        pass.setPipeline(this.pEmf[s]);
+        pass.setBindGroup(0, this.gEmfL[parity][s][i]);
+        pass.dispatchWorkgroupsIndirect(ca, 24 * i + 12);
+      }
+      for (let i = 0; i < n; i++) {
+        if (n > 1) fluxes(i);
+        pass.setPipeline(this.pUpdate[s]);
+        pass.setBindGroup(0, this.gUpdateL[parity][s][i]);
+        pass.dispatchWorkgroupsIndirect(ca, 24 * i + 12);
+      }
+    }
+    pass.setBindGroup(0, this.gDeposit[parity]);
+    pass.dispatchWorkgroupsIndirect(args, ARG(ARG_DEPOSIT));
+    pass.setPipeline(this.pCommit!);
+    pass.setBindGroup(0, this.gCommitU[parity]);
+    pass.dispatchWorkgroupsIndirect(args, ARG(ARG_COMMIT));
   }
 
   /** Workgroups per block for a box of `w` texels per side. */
@@ -328,6 +472,8 @@ export class AmrMhd {
     this.btOld.destroy();
     this.idxOld.destroy();
     this.register.destroy();
+    this.chunkArgs.destroy();
+    this.allChunk.destroy();
     for (const b of this.chunkBufs) b.destroy();
   }
 }

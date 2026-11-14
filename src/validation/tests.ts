@@ -2535,27 +2535,36 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'mhd-amr-chunks',
-    name: 'MHD on blocks: stepping the leaves in chunks changes nothing (blast 3D, 128 finest, 1 level)',
+    name: 'MHD on blocks: stepping the leaves in chunks changes nothing (blast 3D, 128 finest, 1 level; 2D, 512 finest, 1 level, with per-block timesteps)',
     criterion:
-      'With the flux scratch holding one block at a time (every leaf its own chunk, fluxes computed again for the update) and with all leaves in one chunk, 10 steps across a refinement boundary give the same state and faces bit for bit',
+      'With the flux scratch holding one block at a time (3D; every leaf its own chunk, fluxes computed again for the update) or 16 (2D, with 2 bins of per-block timesteps, the chunks of the list of each substep sized on the GPU) and with all leaves in one chunk, 10 steps (2D: cycles) across a refinement boundary give the same state and faces bit for bit',
     async run(gpu) {
-      const runs: Float32Array[][] = [];
-      for (const bytes of [null, 1]) {
-        setMhdScratchBytes(bytes);
-        try {
-          await withAmr(gpu, mhdBlast, 128, { ndim: 3, amrLevels: 1 }, async (sim) => {
-            sim.step(10);
-            const c = await sim.readLeaves();
-            const side = (sim as unknown as { slotsPerSide: number }).slotsPerSide * PAD_BLOCK;
-            runs.push([c.u1, c.u2, await sim.mhd!.readAtlas(sim.cur, side, side)]);
-          });
-        } finally {
-          setMhdScratchBytes(null);
+      const metrics: Record<string, number> = {};
+      const cases: [string, number, number, Partial<SimConfig>, number][] = [
+        ['blast_3d', 128, 3, {}, 1],
+        // 2D: 2 (fields) x 18^2 faces x 48 bytes a block.
+        ['blast_2d_bins', 512, 2, { timeBins: 2, timeBinsAlways: true }, 16 * 2 * 18 * 18 * 48],
+      ];
+      for (const [k, n, ndim, over, small] of cases) {
+        const runs: Float32Array[][] = [];
+        for (const bytes of [null, small]) {
+          setMhdScratchBytes(bytes);
+          try {
+            await withAmr(gpu, mhdBlast, n, { ndim: ndim as 2 | 3, amrLevels: 1, ...over }, async (sim) => {
+              sim.step(10);
+              const c = await sim.readLeaves();
+              const side = (sim as unknown as { slotsPerSide: number }).slotsPerSide * PAD_BLOCK;
+              runs.push([c.u1, c.u2, await sim.mhd!.readAtlas(sim.cur, side, ndim === 2 ? (sim as unknown as { layers: number }).layers : side)]);
+            });
+          } finally {
+            setMhdScratchBytes(null);
+          }
         }
+        let diff = 0;
+        for (let j = 0; j < 3; j++) for (let i = 0; i < runs[0][j].length; i++) if (runs[0][j][i] !== runs[1][j][i]) diff++;
+        metrics[`${k}_differing_values`] = diff;
       }
-      let diff = 0;
-      for (let k = 0; k < 3; k++) for (let i = 0; i < runs[0][k].length; i++) if (runs[0][k][i] !== runs[1][k][i]) diff++;
-      return { pass: diff === 0, metrics: { differing_values: diff } };
+      return { pass: Object.values(metrics).every((d) => d === 0), metrics };
     },
   },
   {
@@ -2601,6 +2610,58 @@ export const TESTS: TestDef[] = [
         m.blast_coarse_fine = faces.coarseFine;
         pass &&= m.blast_regrids >= 1 && m.blast_divB < 1e-6 && m.blast_energy_error < 1e-3 && m.blast_mass_error < 1e-6 && faces.mismatched === 0 && faces.coarseFine < 1e-6;
       });
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-amr-bins',
+    name: 'MHD with per-block timesteps: rotor, dense field loop (2D, 256 finest, 1 level), blast (2D, 512 finest, to t = 0.05; 3D, 128 finest; 1 level)',
+    criterion:
+      'With blocks stepping up to 4 times less often than the fastest (2 bins, kept on): |div B| dx / max |B| below 1e-6; faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); mass conserved to 3e-6 and total energy within 1e-4 of its drift with one timestep; magnetic energy within 0.5% of the run with one timestep and peak density within 1%; the loop keeps at least 94% of its magnetic energy; never more block updates than with one timestep (deposits included), and under 90% of them for the early 2D blast, where the gas far from it is slow (in the others, and the 2D blast later on, the signal speeds differ by less than the factor of 2 between bins almost everywhere)',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      // The blast in 2D, early on, has the contrast in signal speed that bins save work on; in the others
+      // it is less than the factor of 2 a bin takes, and they check the stepping alone.
+      const cases: [Problem, number, 2 | 3, number, string][] = [
+        [mhdRotor, 256, 2, Infinity, 'rotor'],
+        [fieldLoopDense, 256, 2, 0.5, 'loop'],
+        [mhdBlast, 512, 2, 0.05, 'blast_2d'],
+        [mhdBlast, 128, 3, Infinity, 'blast_3d'],
+      ];
+      for (const [prob, n, ndim, tEnd, k] of cases) {
+        const over = { ndim, amrLevels: 1, ...(Number.isFinite(tEnd) ? { tEnd } : {}) };
+        const one = await withAmr(gpu, prob, n, over, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          return { d0, d: await sim.diagnostics() };
+        });
+        await withAmr(gpu, prob, n, { ...over, timeBins: 2, timeBinsAlways: true }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          const faces = await sim.faceConsistency();
+          const work = await sim.binWork();
+          m[`${k}_divB`] = d.magnetic!.divB;
+          m[`${k}_mass_error`] = Math.abs(d.mass / d0.mass - 1);
+          m[`${k}_energy_error`] = Math.abs(d.eTot / d0.eTot - 1);
+          m[`${k}_energy_error_one_timestep`] = Math.abs(one.d.eTot / one.d0.eTot - 1);
+          m[`${k}_magnetic_vs_one_timestep`] = Math.abs(d.magnetic!.eMag / one.d.magnetic!.eMag - 1);
+          m[`${k}_peak_density_vs_one_timestep`] = Math.abs(d.ranges[0][1] / one.d.ranges[0][1] - 1);
+          m[`${k}_magnetic_kept`] = d.magnetic!.eMag / d0.magnetic!.eMag;
+          m[`${k}_shared_mismatched`] = faces.mismatched;
+          m[`${k}_coarse_fine_difference`] = faces.coarseFine;
+          m[`${k}_cycles`] = work.cycles;
+          m[`${k}_share_of_block_updates`] = work.updates / work.single;
+          faces.worst.forEach((w, i) => console.log(`${k} face ${i}: ${w}`));
+          pass &&=
+            m[`${k}_divB`] < 1e-6 && faces.mismatched === 0 && faces.coarseFine < 1e-6 && m[`${k}_mass_error`] < 3e-6 &&
+            m[`${k}_energy_error`] < m[`${k}_energy_error_one_timestep`] + 1e-4 && m[`${k}_magnetic_vs_one_timestep`] < 0.005 &&
+            m[`${k}_peak_density_vs_one_timestep`] < 0.01 && work.cycles > 0 && work.updates <= work.single &&
+            (k !== 'blast_2d' || m[`${k}_share_of_block_updates`] < 0.9) &&
+            (prob !== fieldLoopDense || m[`${k}_magnetic_kept`] > 0.94);
+        });
+      }
       return { pass, metrics: m };
     },
   },

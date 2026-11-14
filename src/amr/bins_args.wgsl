@@ -9,6 +9,10 @@
 //   13 flat pass (amr/list.wgsl, inv_flat) over LL with one ghost layer: the prediction
 //   14 flat pass over LA with two ghost layers: the assembly
 //   15 face ghosts of LA (amr/gravity/ghost.wgsl): 6 x 2 x 16 x 16 cells in rows of 64
+//   16  the magnetic field's assembly over LL (two ghost layers; mhd/amr_mhd.ts, whose
+//       fluxes, edges and update over LL are sized per chunk by mhd/amr_chunk_args.wgsl)
+//   17  boxes of 17 texels per side over LU (the field's faces back)
+//   18  the same over LD (the field's deposits)
 // followed by the totals: ARGS[60] block updates, ARGS[61] blocks assembled.
 #include "hydro/common.wgsl"
 
@@ -17,6 +21,7 @@
 @group(0) @binding(3) var<storage, read_write> CNT: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> ARGS: array<u32>;
 @group(0) @binding(5) var<storage, read_write> LL: array<u32>;
+@group(0) @binding(6) var<storage, read_write> LD: array<u32>;
 
 // Slabs of a long 2D list (amr/list.wgsl): must match SLAB_QUADS and FLAT_ROWS there.
 const SLAB_QUADS = 16384u;
@@ -33,6 +38,8 @@ fn main() {
   let na = atomicLoad(&CNT[0]);
   let nu = atomicLoad(&CNT[1]);
   let nl = atomicLoad(&CNT[2]);
+  let nd = atomicLoad(&CNT[3]);
+  LD[0] = nd;
   let flat = P.dims.z == 1u;
   LA[0] = na;
   LU[0] = nu;
@@ -67,6 +74,10 @@ fn main() {
   let w2 = 20u; // and two
   put(14u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
   put(15u, 48u, na, 1u);
+  let box17 = (select(17u * 17u * 17u, 17u * 17u, flat) + 63u) / 64u;
+  put(16u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);
+  put(17u, box17, nu, 1u);
+  put(18u, box17, nd, 1u);
   ARGS[60] += nu;
   ARGS[61] += na;
 }

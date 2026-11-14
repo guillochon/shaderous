@@ -4,6 +4,7 @@
 //   LL  the leaves among them: they have just finished a step, and get its closing gravity kick
 //   LU  those leaves, plus the leaves at the midpoint of their step that have a faster
 //       neighbor and so receive the second half of its fluxes: updated and committed
+//   LD  those midpoint leaves alone (the magnetic field's deposit pass, mhd/amr_update.wgsl)
 // The order within a list is whatever the atomic counter hands out; no result depends on it.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
@@ -14,6 +15,7 @@
 @group(0) @binding(2) var<storage, read_write> LU: array<u32>;
 @group(0) @binding(3) var<storage, read_write> CNT: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> LL: array<u32>;
+@group(0) @binding(5) var<storage, read_write> LD: array<u32>;
 @group(0) @binding(28) var IDX: texture_3d<u32>;
 
 #include "amr/bins_edges.wgsl"
@@ -64,8 +66,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let n = atomicAdd(&CNT[2], 1u);
     LL[1u + n] = u32(slot);
   }
-  if (leaf && (on || (blk_half(slot) && faster_neighbor(slot)))) {
+  let deposit = leaf && !on && blk_half(slot) && faster_neighbor(slot);
+  if (leaf && (on || deposit)) {
     let n = atomicAdd(&CNT[1], 1u);
     LU[1u + n] = u32(slot);
+  }
+  if (deposit) {
+    let n = atomicAdd(&CNT[3], 1u);
+    LD[1u + n] = u32(slot);
   }
 }

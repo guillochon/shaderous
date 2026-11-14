@@ -20,6 +20,7 @@
 #include "hydro/fluff.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include <bins>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;   // state at the start of the step
@@ -91,8 +92,31 @@ var<private> g_slot: i32;
 var<private> g_o: vec3<i32>;
 var<private> g_level: u32;
 
-// Impulse along c at the block's edge texel t: its own, or where a finer leaf touches the edge,
-// the finer block's, as this block's share.
+// The block's bin, and whether this is its deposit (time bins: it is at its midpoint, and takes
+// its faster neighbors' second substep on the faces and edges it shares with them).
+var<private> g_bin: u32 = 0u;
+var<private> g_deposit: bool = false;
+var<private> g_touched: bool = false;
+
+// What this block's update adds along edge c at its edge texel t (docs/mhd-plan.md, 4b and 5b).
+// Each edge has one definer, the finest leaf around it and among those the fastest; this block
+// integrates the definer's impulses over its own step:
+//  - itself (or a leaf in step with it at its level): its own impulse;
+//  - a finer leaf: the mean of its two impulses along the edge (one at a 2D vertex), times
+//    dx_fine / dx = 1/2;
+//  - a leaf one bin faster: its impulse for its first substep now (stage 2), and the one for its
+//    second at this block's midpoint (the deposit). Stage 1, which only makes the half-step
+//    state, keeps this block's own.
+// In a deposit only the edges with a faster definer contribute.
+fn beyond_wall(level: u32, g: vec3<i32>) -> bool {
+  let n = n_at(level);
+  for (var a = 0; a < naxes(); a++) {
+    if (g[a] < 0 && P.bc_lo[a] != 0u) { return true; }
+    if (g[a] >= n[a] && P.bc_hi[a] != 0u) { return true; }
+  }
+  return false;
+}
+
 fn impulse(c: i32, t: vec3<i32>) -> f32 {
   let a = (c + 1) % 3;
   let b = (c + 2) % 3;
@@ -101,11 +125,14 @@ fn impulse(c: i32, t: vec3<i32>) -> f32 {
   let on_a = !flat_a && (t[a] == 0 || t[a] == BS);
   let on_b = !flat_b && (t[b] == 0 || t[b] == BS);
   let own = textureLoad(EI, atl(g_o, t), 0)[c];
-  if (!on_a && !on_b) { return own; }
+  if (!on_a && !on_b) { return select(own, 0.0, g_deposit); }
   // The cells around the edge: offsets 0 or -1 along a and b (only along the axis in use in 2D).
   let g = blk_coord(g_slot) * BS + t;
   let na = select(2, 1, flat_a);
   let nb = select(2, 1, flat_b);
+  var best = own;
+  var best_level = g_level;
+  var best_bin = g_bin;
   for (var j = 0; j < nb; j++) {
     for (var i = 0; i < na; i++) {
       var cell = t;
@@ -113,28 +140,56 @@ fn impulse(c: i32, t: vec3<i32>) -> f32 {
       cell[b] -= j;
       let inside = all(cell >= vec3<i32>(0)) && all(cell < vec3<i32>(BS, BS, select(BS, 1, is2d())));
       if (inside) { continue; }
-      let gc = blk_coord(g_slot) * BS + cell;
-      let h = holder(g_level, map_cell(g_level, gc).g);
-      if (h.rel != 1) { continue; }
-      // A finer leaf: its edge segments along this one, read from the fine cell beside the edge.
-      var fcell = 2 * g;
-      fcell[a] -= i;
-      fcell[b] -= j;
-      if (is2d()) { fcell.z = 0; }
-      let f = holder(g_level + 1u, map_cell(g_level + 1u, fcell).g);
-      var le = local_of(f.slot, map_cell(g_level + 1u, fcell).g);
-      le[a] += i;
-      le[b] += j;
-      if (is2d()) { le.z = 0; }
-      let fo = blk_origin(f.slot);
-      // The fine impulse is (dt / dx_fine) E: half of it is this block's, per fine segment.
-      if (is2d() && c == 2) { return 0.5 * textureLoad(EI, atl(fo, le), 0)[c]; }
-      var le2 = le;
-      le2[c] += 1;
-      return 0.25 * (textureLoad(EI, atl(fo, le), 0)[c] + textureLoad(EI, atl(fo, le2), 0)[c]);
+      // Beyond a wall or open boundary no block defines the edge (the cell would map back
+      // into this one or a neighbor, off by a cell); across a periodic one the wrap is exact.
+      let raw = blk_coord(g_slot) * BS + cell;
+      if (beyond_wall(g_level, raw)) { continue; }
+      let gm = map_cell(g_level, raw).g;
+      let h = holder(g_level, gm);
+      if (h.rel == 1) {
+        // A finer leaf: its edge segments along this one, from the fine cell beside the edge.
+        var fcell = 2 * g;
+        fcell[a] -= i;
+        fcell[b] -= j;
+        if (is2d()) { fcell.z = 0; }
+        let fm = map_cell(g_level + 1u, fcell).g;
+        let f = holder(g_level + 1u, fm);
+        let fb = blk_bin(f.slot);
+        if (best_level == g_level + 1u && fb >= best_bin) { continue; }
+        var le = local_of(f.slot, fm);
+        le[a] += i;
+        le[b] += j;
+        if (is2d()) { le.z = 0; }
+        let fo = blk_origin(f.slot);
+        if (is2d() && c == 2) {
+          best = 0.5 * textureLoad(EI, atl(fo, le), 0)[c];
+        } else {
+          var le2 = le;
+          le2[c] += 1;
+          best = 0.25 * (textureLoad(EI, atl(fo, le), 0)[c] + textureLoad(EI, atl(fo, le2), 0)[c]);
+        }
+        best_level = g_level + 1u;
+        best_bin = fb;
+      } else if (BINS_ON && h.rel == 0 && h.slot != g_slot && best_level == g_level) {
+        // A leaf at this level, faster than the best so far: its own impulse along the edge.
+        let qb = blk_bin(h.slot);
+        if (qb >= best_bin) { continue; }
+        var le = local_of(h.slot, gm);
+        le[a] += i;
+        le[b] += j;
+        if (is2d()) { le.z = 0; }
+        best = textureLoad(EI, atl(blk_origin(h.slot), le), 0)[c];
+        best_bin = qb;
+      }
     }
   }
-  return own;
+  let faster = best_bin < g_bin;
+  if (g_deposit) {
+    if (faster) { g_touched = true; }
+    return select(0.0, best, faster);
+  }
+  if (faster && STAGE == 1u) { return own; }
+  return best;
 }
 
 fn two_sum(a: f32, b: f32) -> vec2<f32> {
@@ -177,10 +232,16 @@ fn new_face(a: i32, t: vec3<i32>) -> vec2<f32> {
 
 struct Fl { a: vec4<f32>, b: vec4<f32> }
 
-// Flux through the lower face along `axis` of cell t of this block (t[axis] in [0, BS]): its
-// own, or on a face of the block whose neighbor is refined, the mean of the fine fluxes.
+// Flux through the lower face along `axis` of cell t of this block (t[axis] in [0, BS]), per
+// unit of this block's step:
+//  - on a face of the block whose neighbor is refined, the mean of the fine fluxes (register);
+//  - with time bins, across a face whose other side is one bin faster (a same-level leaf, or
+//    the fine children), that side's flux for its first substep times 1/2 now (stage 2), the
+//    other half at this block's midpoint (the deposit); stage 1 keeps its own;
+//  - otherwise its own (scratch). A deposit takes only the faster sides' faces.
 fn flux_at(row: u32, axis: i32, t: vec3<i32>) -> Fl {
   let hi = t[axis] == BS;
+  let zero = Fl(vec4<f32>(0.0), vec4<f32>(0.0));
   if (t[axis] == 0 || hi) {
     let np = bt(g_slot, 6u + u32(2 * axis) + select(0u, 1u, hi));
     if (np >= 0 && !blk_leaf(np)) {
@@ -190,25 +251,40 @@ fn flux_at(row: u32, axis: i32, t: vec3<i32>) -> Fl {
       bits[axis] = select(1, 0, hi);
       if (is2d()) { bits.z = 0; }
       let ch = bt(np, 12u + u32(bits.x | (bits.y << 1u) | (bits.z << 2u)));
-      let t1 = (axis + 1) % 3;
-      let t2 = (axis + 2) % 3;
-      let m1 = select(2, 1, is2d() && t1 == 2);
-      let m2 = select(2, 1, is2d() && t2 == 2);
-      var fa = vec4<f32>(0.0);
-      var fb = vec4<f32>(0.0);
-      for (var j = 0; j < m2; j++) {
-        for (var i = 0; i < m1; i++) {
-          let f1 = select(2 * (l[t1] - (BS / 2) * h[t1]) + i, 0, m1 == 1);
-          let f2 = select(2 * (l[t2] - (BS / 2) * h[t2]) + j, 0, m2 == 1);
-          let r = reg_entry(ch, axis, !hi, f1, f2);
-          fa += REG[r];
-          fb += REG[r + 1u];
+      let faster = BINS_ON && blk_bin(ch) < g_bin;
+      if (g_deposit && !faster) { return zero; }
+      if (!(faster && STAGE == 1u)) {
+        if (g_deposit) { g_touched = true; }
+        let t1 = (axis + 1) % 3;
+        let t2 = (axis + 2) % 3;
+        let m1 = select(2, 1, is2d() && t1 == 2);
+        let m2 = select(2, 1, is2d() && t2 == 2);
+        var fa = vec4<f32>(0.0);
+        var fb = vec4<f32>(0.0);
+        for (var j = 0; j < m2; j++) {
+          for (var i = 0; i < m1; i++) {
+            let f1 = select(2 * (l[t1] - (BS / 2) * h[t1]) + i, 0, m1 == 1);
+            let f2 = select(2 * (l[t2] - (BS / 2) * h[t2]) + j, 0, m2 == 1);
+            let r = reg_entry(ch, axis, !hi, f1, f2);
+            fa += REG[r];
+            fb += REG[r + 1u];
+          }
         }
+        let w = select(1.0, 0.5, faster) / f32(m1 * m2);
+        return Fl(fa * w, fb * w);
       }
-      let w = 1.0 / f32(m1 * m2);
-      return Fl(fa * w, fb * w);
+    } else if (BINS_ON && np >= 0 && np != g_slot && blk_leaf(np) && blk_bin(np) < g_bin) {
+      // A faster leaf at this level: its flux through the face, from its side of the register.
+      if (STAGE == 2u) {
+        if (g_deposit) { g_touched = true; }
+        let t1 = (axis + 1) % 3;
+        let t2 = (axis + 2) % 3;
+        let r = reg_entry(np, axis, !hi, select(t[t1], 0, is2d() && t1 == 2), select(t[t2], 0, is2d() && t2 == 2));
+        return Fl(0.5 * REG[r], 0.5 * REG[r + 1u]);
+      }
     }
   }
+  if (g_deposit) { return zero; }
   let i = flux_entry(row, axis, t);
   return Fl(FL[i], FL[i + 1u]);
 }
@@ -238,8 +314,11 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   g_slot = inv.slot;
   g_o = blk_origin(inv.slot);
   g_level = u32(bt(inv.slot, 0u));
+  g_bin = blk_bin(inv.slot);
+  // Time bins: a block dispatched while not starting a step takes its deposit.
+  g_deposit = BINS_ON && !blk_active(inv.slot);
   g_dx = blk_dx(inv.slot);
-  let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
+  let dt = stage_dt(inv.slot, STAGE);
   g_dt = dt;
   let dtdx = dt / g_dx;
   let depth = select(BS, 1, is2d());
@@ -267,24 +346,33 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   var net_a = vec4<f32>(0.0);
   var net_b = vec4<f32>(0.0);
   var bc = vec3<f32>(0.0);
+  g_touched = false;
+  for (var a = 0; a < naxes(); a++) {
+    var e = vec3<i32>(0);
+    e[a] = 1;
+    let lo = flux_at(inv.row, a, t);
+    let hi = flux_at(inv.row, a, t + e);
+    net_a += lo.a - hi.a;
+    net_b += lo.b - hi.b;
+  }
   for (var a = 0; a < 3; a++) {
     var e = vec3<i32>(0);
     e[a] = 1;
-    if (a < naxes()) {
-      let lo = flux_at(inv.row, a, t);
-      let hi = flux_at(inv.row, a, t + e);
-      net_a += lo.a - hi.a;
-      net_b += lo.b - hi.b;
-      bc[a] = 0.5 * (bout[a] + new_face(a, t + e).x);
-    } else {
-      // 2D: B_z's face is the cell's only one along z.
-      bc[a] = bout[a];
-    }
+    // (2D: B_z's face is the cell's only one along z.)
+    if (a < naxes()) { bc[a] = 0.5 * (bout[a] + new_face(a, t + e).x); } else { bc[a] = bout[a]; }
   }
   let u1 = textureLoad(U1, x, 0);
   let u2 = textureLoad(U2, x, 0);
-  // Pressure for p div v: the stage's assembled state (the start in stage 1, the half step in 2).
-  let ph = textureLoad(W2, x, 0).x;
+  // A deposit that touches neither the cell's fluxes nor its faces leaves it as it is.
+  if (g_deposit && !g_touched) {
+    textureStore(O1, x, u1);
+    textureStore(O2, x, u2);
+    return;
+  }
+  // Pressure for p div v: the stage's assembled state (the start in stage 1, the half step in
+  // 2); a deposit, which is not assembled, its stored state.
+  var ph = textureLoad(W2, x, 0).x;
+  if (g_deposit) { ph = eos_pressure(max(u1.x, P.rho_floor), u2.y); }
   var flag = 0.0;
   if (STAGE == 1u) { flag = shock_flag(t); }
   let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
