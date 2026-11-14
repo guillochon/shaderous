@@ -57,7 +57,7 @@ fn own_flux(slot: i32, l: vec3<i32>, axis: i32, side: i32) -> array<vec4<f32>, N
 }
 
 // Average of the fine species fluxes through the face coarse cell l shares with the refined
-// neighbor `np` (amr/update.wgsl fine_flux): `upper` says the fine blocks lie on np's upper side.
+// neighbor `np` (amr/update.wgsl match_faces): `upper` says the fine blocks lie on np's upper side.
 fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> array<vec4<f32>, NG> {
   let h = vec3<i32>(l >= vec3<i32>(BS / 2));
   var bits = h;

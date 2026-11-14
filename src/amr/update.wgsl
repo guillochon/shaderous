@@ -161,73 +161,81 @@ fn share(nb: i32) -> f32 {
   return select(1.0, 0.0, g_deposit);
 }
 
-// Average of the fine fluxes through the face that coarse cell l shares with the refined
-// neighbor block `np`. `upper` says the fine blocks lie on the upper side of `np` along `axis`
-// (the coarse cell is beyond them), in which case the face is the fine cells' upper face.
-fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
-  let h = vec3<i32>(l >= vec3<i32>(BS / 2));
-  var bits = h;
-  bits[axis] = i32(upper);
-  if (is2d()) { bits.z = 0; }
-  let ch = bt(np, 12u + u32(bits.x | (bits.y << 1u) | (bits.z << 2u)));
-  let part = share(ch);
-  if (part == 0.0) { return flux_zero(); }
-  g_touched = true;
-  let o = blk_origin(ch);
-  var e = vec3<i32>(0);
-  e[axis] = 1;
-  // The fine cell on the lower side of the face: the last interior cell, or the ghost at -1.
-  var f = 2 * (l - (BS / 2) * h);
-  f[axis] = select(-1, BS - 1, upper);
-  let t1 = (axis + 1) % 3;
-  let t2 = (axis + 2) % 3;
-  // In 2D the faces are edges: two fine ones per coarse one, both in the plane.
-  let n1 = select(2, 1, is2d() && t1 == 2);
-  let n2 = select(2, 1, is2d() && t2 == 2);
-
-  // The fine cells computed these fluxes with their own cell size.
-  let dx_coarse = g_dx;
-  g_dx = 0.5 * dx_coarse;
-  var sum = flux_zero();
-  for (var j = 0; j < n2; j++) {
-    for (var i = 0; i < n1; i++) {
-      var a = f;
-      a[t1] += i;
-      a[t2] += j;
-      sum = flux_add(sum, flux_between(atl(o, a), e, axis));
+// Replace the fluxes `own` through the cell's faces on its block's faces with its neighbors':
+//  - a refined neighbor's: the average of the fine fluxes through the face, as the fine cells
+//    computed them with their own cell size;
+//  - with time bins, a same-level leaf that steps twice as often: its flux through the face,
+//    as it computes it, for half of this block's step.
+// Every face goes through one loop with a single call of flux_between. Compilers inline each
+// call of it (with the Riemann solver), and unroll small loops: as calls for each face of each
+// axis, in the deposit and the full pass, it was copied dozens of times, and the pass took
+// 1.5 s to compile, two thirds of it these copies (measured on Chrome, D3D12, cold cache).
+fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3> {
+  var out = own;
+  // Lower and upper face of x, then of y, then of z: entry 6 + k of the block table.
+  let sides = select(6, 4, is2d());
+  for (var k = 0; k < sides; k++) {
+    let axis = k / 2;
+    let hi = (k & 1) == 1;
+    if (l[axis] != select(0, BS - 1, hi)) { continue; }
+    let np = bt(slot, 6u + u32(k));
+    if (np < 0) { continue; }
+    // `upper`: `np` lies below the block, and the face is the upper face of its cells.
+    let upper = !hi;
+    var e = vec3<i32>(0);
+    e[axis] = 1;
+    // The faces to add up: the cells of block `o` below them from `a0` on, n1 x n2 of them
+    // across the face (axes t1, t2), with their cell size dx, weighted by w.
+    var o: vec3<i32>;
+    var a0: vec3<i32>;
+    var n1 = 1;
+    var n2 = 1;
+    var dx = g_dx;
+    var w = 0.5;
+    if (!blk_leaf(np)) {
+      // The refined neighbor's child that shares this cell's face.
+      let h = vec3<i32>(l >= vec3<i32>(BS / 2));
+      var bits = h;
+      bits[axis] = i32(upper);
+      if (is2d()) { bits.z = 0; }
+      let ch = bt(np, 12u + u32(bits.x | (bits.y << 1u) | (bits.z << 2u)));
+      let part = share(ch);
+      if (part == 0.0) {
+        if (hi) { out[axis].hi = flux_zero(); } else { out[axis].lo = flux_zero(); }
+        continue;
+      }
+      o = blk_origin(ch);
+      // The fine cell on the lower side of the face: the last interior cell, or the ghost at -1.
+      a0 = 2 * (l - (BS / 2) * h);
+      // In 2D the faces are edges: two fine ones per coarse one, both in the plane.
+      n1 = select(2, 1, is2d() && (axis + 1) % 3 == 2);
+      n2 = select(2, 1, is2d() && (axis + 2) % 3 == 2);
+      dx = 0.5 * g_dx;
+      w = 1.0 / f32(n1 * n2);
+      if (BINS_ON) { w *= part; }
+    } else if (BINS_ON && np != slot && blk_bin(np) < g_bin) {
+      o = blk_origin(np);
+      a0 = l;
+    } else {
+      continue;
     }
-  }
-  g_dx = dx_coarse;
-  var w = 1.0 / f32(n1 * n2);
-  if (BINS_ON) { w *= part; }
-  return flux_scale(sum, w);
-}
-
-// The flux through the face shared with the same-level leaf `np`, as `np` computes it, for a
-// neighbor that steps twice as often; otherwise the block's own flux `own`. `upper` as in
-// fine_flux: `np` lies below the block, and the face is the upper face of its last cells.
-fn leaf_flux(own: Flux, np: i32, axis: i32, upper: bool, l: vec3<i32>) -> Flux {
-  if (blk_bin(np) >= g_bin) { return own; }
-  g_touched = true;
-  var e = vec3<i32>(0);
-  e[axis] = 1;
-  var a = l;
-  a[axis] = select(-1, BS - 1, upper);
-  return flux_scale(flux_between(atl(blk_origin(np), a), e, axis), 0.5);
-}
-
-// Replace the fluxes through faces shared with a refined neighbor.
-fn match_faces(fl: Faces, slot: i32, axis: i32, l: vec3<i32>) -> Faces {
-  var out = fl;
-  if (l[axis] == 0) {
-    let np = bt(slot, 6u + u32(2 * axis));
-    if (np >= 0 && !blk_leaf(np)) { out.lo = fine_flux(np, axis, true, l); }
-    else if (BINS_ON && np >= 0 && np != slot) { out.lo = leaf_flux(out.lo, np, axis, true, l); }
-  }
-  if (l[axis] == BS - 1) {
-    let np = bt(slot, 7u + u32(2 * axis));
-    if (np >= 0 && !blk_leaf(np)) { out.hi = fine_flux(np, axis, false, l); }
-    else if (BINS_ON && np >= 0 && np != slot) { out.hi = leaf_flux(out.hi, np, axis, false, l); }
+    g_touched = true;
+    a0[axis] = select(-1, BS - 1, upper);
+    let t1 = (axis + 1) % 3;
+    let t2 = (axis + 2) % 3;
+    let dx_own = g_dx;
+    g_dx = dx;
+    var sum = flux_zero();
+    for (var j = 0; j < n2; j++) {
+      for (var i = 0; i < n1; i++) {
+        var a = a0;
+        a[t1] += i;
+        a[t2] += j;
+        sum = flux_add(sum, flux_between(atl(o, a), e, axis));
+      }
+    }
+    g_dx = dx_own;
+    if (hi) { out[axis].hi = flux_scale(sum, w); } else { out[axis].lo = flux_scale(sum, w); }
   }
   return out;
 }
@@ -298,21 +306,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   let w0 = load_q(c);
   let p0 = load_pred(c);
   let none = Faces(flux_zero(), flux_zero());
-  var fx = none;
-  var fy = none;
-  var fz = none;
-  if (g_deposit) {
-    // Half way through the block's step: only what its faster neighbors carry across the
-    // shared faces during their second step. A cell on no such face is copied as it is.
-    fx = match_faces(none, slot, 0, l);
-    fy = match_faces(none, slot, 1, l);
-    if (!is2d()) { fz = match_faces(none, slot, 2, l); }
-    if (!g_touched) {
-      textureStore(O1, c, textureLoad(U1, c, 0));
-      textureStore(O2, c, textureLoad(U2, c, 0));
-      return;
-    }
-  } else {
+  // Half way through the block's step (deposit), only what its faster neighbors carry across
+  // the shared faces during their second step: the cell's own fluxes are left at zero.
+  var own = array<Faces, 3>(none, none, none);
+  if (!g_deposit) {
     var ox: Faces;
     var oy: Faces;
     var oz = none;
@@ -330,10 +327,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     }
     // With species, their pass needs the mass fluxes as this cell computed them.
     store_mass_flux(slot, l, c, ox, oy, oz);
-    fx = match_faces(ox, slot, 0, l);
-    fy = match_faces(oy, slot, 1, l);
-    if (!is2d()) { fz = match_faces(oz, slot, 2, l); }
-    if (DEBRIS) { escape(slot, l, c, w0.a.yzw, fx, fy, fz); }
+    own = array<Faces, 3>(ox, oy, oz);
+  }
+  let matched = match_faces(own, slot, l);
+  let fx = matched[0];
+  let fy = matched[1];
+  let fz = matched[2];
+  if (g_deposit) {
+    // A cell on no face shared with a faster neighbor is copied as it is.
+    if (!g_touched) {
+      textureStore(O1, c, textureLoad(U1, c, 0));
+      textureStore(O2, c, textureLoad(U2, c, 0));
+      return;
+    }
+  } else if (DEBRIS) {
+    escape(slot, l, c, w0.a.yzw, fx, fy, fz);
   }
 
   if (DEBUG_FLUX) {
