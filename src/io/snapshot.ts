@@ -30,8 +30,17 @@ export interface Snapshot {
   meta?: SnapshotMeta;
 }
 
+/**
+ * Version of what our files carry. Raise it when a change makes an older file's settings read
+ * differently in a way the alias tables in ui/link.ts cannot undo, and handle the older number
+ * where the file is loaded.
+ */
+export const SNAPSHOT_FORMAT = 1;
+
 export interface SnapshotMeta {
   program: 'shaderous';
+  /** SNAPSHOT_FORMAT when written; absent in files from before it was numbered, which are format 1 */
+  format?: number;
   build: string;
   /** the settings, as the query string of a shareable link */
   query: string;

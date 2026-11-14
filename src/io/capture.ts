@@ -3,7 +3,7 @@ import { AmrSim } from '../amr/amr_sim';
 import { BS } from '../amr/tree';
 import type { Problem } from '../problems';
 import { Sim, type SimConfig, type Simulation } from '../sim';
-import { primitivesFrom, SnapshotSampler, type Restart, type Snapshot, type SnapshotMeta } from './snapshot';
+import { primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Restart, type Snapshot, type SnapshotMeta } from './snapshot';
 
 /** Read the state back from the GPU as blocks of primitive variables. */
 export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses' | 'perturber'>): Promise<Snapshot> {
@@ -56,7 +56,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     levels,
     locations,
     data: { ...primitivesFrom(cfg, u1, u2), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])) },
-    meta: meta ? { ...meta, masses: restart.masses, ...(debris ? { debris } : {}) } : undefined,
+    meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}) } : undefined,
   };
 }
 

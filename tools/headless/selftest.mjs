@@ -53,6 +53,7 @@ const check = (ok, what) => {
   check(existsSync(saved.saved), 'save_athdf');
   const back = json(await tool('load_athdf', { path: saved.saved }));
   check(Math.abs(back.t - r.t) < 1e-6, 'load_athdf continues at the same time');
+  check(Array.isArray(back.warnings) && back.warnings.length === 0, 'load_athdf of a file from this build has no warnings');
   const ctl = json(await tool('control', { id: 'riemann', value: 'hll' }));
   check(ctl.query.includes('riemann=hll'), 'control');
   const noDebris = await tool('debris');

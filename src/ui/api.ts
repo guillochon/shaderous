@@ -33,7 +33,8 @@ export interface AppHooks {
   /** Resolves once every queued rebuild has finished. */
   idle(): Promise<void>;
   build(link: LinkOverrides): Promise<void>;
-  importAthdf(bytes: Uint8Array): Promise<void>;
+  /** resolves to what an older file of ours could not carry over as written */
+  importAthdf(bytes: Uint8Array): Promise<string[]>;
   restart(): Promise<void>;
   running(): boolean;
   finished(): boolean;
@@ -399,11 +400,17 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         return state();
       }),
 
-    /** Start a run from an .athdf file, given as base64: one of ours with its settings, or another code's. */
+    /**
+     * Start a run from an .athdf file, given as base64: one of ours with its settings, or another
+     * code's. `warnings` lists what an older file of ours could not carry over as written.
+     */
     loadAthdf: (base64: string) =>
       serial(async () => {
-        await built(() => app.importAthdf(fromBase64(base64)));
-        return state();
+        let warnings: string[] = [];
+        await built(async () => {
+          warnings = await app.importAthdf(fromBase64(base64));
+        });
+        return { ...(await state()), warnings };
       }),
 
     /** The run: problem, grid, clock, and the query string that reproduces its setup. */

@@ -9,6 +9,7 @@ import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling
 import { FIELDS, GRAVITY_MODES, PROBLEMS, problemById, type Bc3, type GravityMode, type Problem } from '../problems';
 import { defaultView, type ViewState } from '../render/renderer';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
+import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../io/snapshot';
 
 /** Largest magnification of the slice view. */
 export const MAX_ZOOM = 64;
@@ -137,9 +138,79 @@ export function encodeLink(s: LinkState): URLSearchParams {
   return q;
 }
 
-export function decodeLink(q: URLSearchParams): LinkOverrides {
+/**
+ * Names that have changed, old on the left and today's on the right, so links and files made
+ * before a rename still open the same preset with the same settings. Add to these, never
+ * remove, whenever a preset id or a link key is renamed.
+ */
+export const PROBLEM_ALIASES: Record<string, string> = {};
+export const KEY_ALIASES: Record<string, string> = {};
+
+/** What decoding a link could not use. */
+export interface LinkReport {
+  /** the preset the link names, if this build has no such preset (or the link names none) */
+  unknownProblem?: string;
+  /** keys this build does not read, values it rejects, and values held to its limits */
+  ignored: string[];
+}
+
+/** The link with old names replaced by today's. A key given under both names keeps today's. */
+function renamed(q: URLSearchParams): URLSearchParams {
+  const out = new URLSearchParams();
+  for (const [k, v] of q) if (!(k in KEY_ALIASES)) out.append(k, v);
+  for (const [k, v] of q) if (k in KEY_ALIASES && !out.has(KEY_ALIASES[k])) out.append(KEY_ALIASES[k], v);
+  const p = out.get('problem');
+  if (p !== null && p in PROBLEM_ALIASES) out.set('problem', PROBLEM_ALIASES[p]);
+  return out;
+}
+
+/** The link's parameters, noting which keys were looked at. */
+class Reading extends URLSearchParams {
+  readonly seen = new Set<string>();
+  override get(name: string) {
+    this.seen.add(name);
+    return super.get(name);
+  }
+  override has(name: string, value?: string) {
+    this.seen.add(name);
+    return value === undefined ? super.has(name) : super.has(name, value);
+  }
+}
+
+/**
+ * The settings a file of ours was written with, and what this build reads differently. Throws
+ * if this build does not have the file's preset: its gas would land in another problem.
+ */
+export function snapshotSettings(meta: SnapshotMeta, build: string): { link: LinkOverrides; warnings: string[] } {
+  const report: LinkReport = { ignored: [] };
+  const link = decodeLink(new URLSearchParams(meta.query), report);
+  const by = `build ${meta.build}`;
+  if (report.unknownProblem !== undefined) {
+    throw new Error(report.unknownProblem ? `this file is from ${by}, for the preset "${report.unknownProblem}", which this build does not have` : `this file is from ${by} and does not name its preset`);
+  }
+  const warnings: string[] = [];
+  const format = meta.format ?? 1;
+  if (format > SNAPSHOT_FORMAT) warnings.push(`this file is from ${by}, which writes a newer format (${format}) than this build reads (${SNAPSHOT_FORMAT}): some settings may be read wrongly`);
+  else if (meta.build !== build) warnings.push(`this file is from ${by}; this is build ${build}. Any setting whose meaning or default has changed between them takes this build's`);
+  if (report.ignored.length) warnings.push(`settings this build could not use as written, so it uses its own: ${report.ignored.join(', ')}`);
+  return { link, warnings };
+}
+
+export function decodeLink(link: URLSearchParams, report?: LinkReport): LinkOverrides {
+  const q = new Reading(renamed(link));
+  const out = decodeRenamed(q, report);
+  if (report) {
+    // Without its preset nothing in a link is read.
+    const unread = [...new Set(q.keys())].filter((k) => (report.unknownProblem === undefined ? !q.seen.has(k) : k !== 'problem'));
+    report.ignored.push(...unread);
+  }
+  return out;
+}
+
+function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   const named = q.get('problem');
   const known = PROBLEMS.some((p) => p.id === named);
+  if (!known && report) report.unknownProblem = named ?? '';
   // A bare visit gets the default setup. A link that names a preset but no grid gets the
   // preset's own grid (Problem.grid), or else 3D at the default size, as links always have. A
   // link that gives the cells but no levels is uniform: links leave out amr=0.
@@ -160,17 +231,28 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
   };
   if (!known) return out;
 
+  const rejected = (key: string, raw: string, note = 'not a value this build accepts') => report?.ignored.push(`${key}=${raw} (${note})`);
   const num = (key: string, lo = -Infinity, hi = Infinity): number | undefined => {
     const raw = q.get(key);
     if (raw === null || raw === '') return undefined;
     const v = raw === 'inf' ? Infinity : +raw;
-    return Number.isNaN(v) ? undefined : Math.min(hi, Math.max(lo, v));
+    if (Number.isNaN(v)) return void rejected(key, raw);
+    const held = Math.min(hi, Math.max(lo, v));
+    if (held !== v) rejected(key, raw, `held to ${fmt(held)}`);
+    return held;
   };
   const pick = <T extends string>(key: string, allowed: readonly T[]): T | undefined => {
     const raw = q.get(key);
-    return raw !== null && (allowed as readonly string[]).includes(raw) ? (raw as T) : undefined;
+    if (raw === null) return undefined;
+    if ((allowed as readonly string[]).includes(raw)) return raw as T;
+    return void rejected(key, raw);
   };
-  const bool = (key: string): boolean | undefined => (q.get(key) === '1' ? true : q.get(key) === '0' ? false : undefined);
+  const bool = (key: string): boolean | undefined => {
+    const raw = q.get(key);
+    if (raw === null) return undefined;
+    if (raw === '1' || raw === '0') return raw === '1';
+    return void rejected(key, raw);
+  };
   const put = <O extends object, K extends keyof O>(o: O, k: K, v: O[K] | undefined) => {
     if (v !== undefined) o[k] = v;
   };
@@ -204,8 +286,8 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
     if ([0, 1, 2].every((a) => (d[a] === 0) === (d[a + 3] === 0))) {
       out.cfg.bcLo = d.slice(0, 3) as Bc3;
       out.cfg.bcHi = d.slice(3) as Bc3;
-    }
-  }
+    } else rejected('bc', bc);
+  } else if (bc) rejected('bc', bc);
   put(out.eosParams, 'gamma', num('gamma', 1, 100));
   put(out.eosParams, 'K', num('K', 0));
   put(out.eosParams, 'arad', num('arad', 0));
@@ -266,6 +348,7 @@ export function decodeLink(q: URLSearchParams): LinkOverrides {
     const pts = tf.split(',').map((s) => s.split(':').map(Number));
     const ok = pts.length >= 2 && pts.length <= 16 && pts.every((p) => p.length === 2 && p.every((v) => v >= 0 && v <= 1));
     if (ok) out.opacity = pts.map(([x, a]) => ({ x, a })).sort((a, b) => a.x - b.x);
+    else rejected('tf', tf);
   }
   return out;
 }

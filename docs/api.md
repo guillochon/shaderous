@@ -162,6 +162,11 @@ its own setup, so the run continues exactly where the file left off. A file from
 (Athena++, or anything else that writes the same layout) is loaded into the current preset at
 the nearest resolution on offer.
 
+The result is `state()` plus `warnings`, a list that is empty unless one of our files came
+from another build: it then says so, and names any setting this build could not use as
+written (a key it no longer reads, a value it rejects or holds to its limits). Those settings
+take this build's values. A file of ours whose preset this build does not have is refused.
+
 ### `state() → object`
 
 Returns `problem`, `label`, `ndim`, `n`, `amr`, `t`, `dt`, `steps`, `tEnd` (null if none),

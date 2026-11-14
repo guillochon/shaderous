@@ -1,6 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
-import { decodeLink, encodeLink, viewDefaults, MAX_CONTOURS, MAX_ZOOM, type LinkOverrides } from './link';
+import { decodeLink, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
@@ -1355,7 +1355,8 @@ async function importState(file: File) {
   const button = $('import');
   button.textContent = 'Importing…';
   try {
-    await importAthdf(new Uint8Array(await file.arrayBuffer()));
+    const warnings = await importAthdf(new Uint8Array(await file.arrayBuffer()));
+    if (warnings.length) alert(`Loaded ${file.name}, with differences:\n\n${warnings.map((w) => `• ${w}`).join('\n\n')}`);
   } catch (e) {
     // A file that cannot be used is not a fault of the page: say so and carry on.
     alert(`Could not load ${file.name}: ${e instanceof Error ? e.message : String(e)}`);
@@ -1364,8 +1365,11 @@ async function importState(file: File) {
   }
 }
 
-/** Start a run from the bytes of an .athdf file: one of ours with its settings, or another code's. */
-async function importAthdf(bytes: Uint8Array) {
+/**
+ * Start a run from the bytes of an .athdf file: one of ours with its settings, or another
+ * code's. Returns what an older file of ours could not carry over as written.
+ */
+async function importAthdf(bytes: Uint8Array): Promise<string[]> {
   {
     const { readAthdf } = await import('../io/athdf');
     const snap = await readAthdf(bytes);
@@ -1377,7 +1381,10 @@ async function importAthdf(bytes: Uint8Array) {
     // Our own file carries its settings. Anyone else's keeps the current ones and takes the
     // file's dimensionality and the nearest resolution on offer.
     const own = snap.meta !== undefined;
-    const link = decodeLink(new URLSearchParams(own ? snap.meta!.query : linkQuery()));
+    let warnings: string[] = [];
+    let link: LinkOverrides;
+    if (own) ({ link, warnings } = snapshotSettings(snap.meta!, BUILD));
+    else link = decodeLink(new URLSearchParams(linkQuery()));
     if (!own) {
       const problem = problemById(link.problem);
       if (snap.ndim === 2 && !problem.supports2d) throw new Error(`this file is 2D, and the ${problem.label} preset is 3D only: pick a 2D preset first`);
@@ -1392,6 +1399,8 @@ async function importAthdf(bytes: Uint8Array) {
       delete link.cfg.tEnd;
     }
     await build(link.problem, link.n, link.ndim, link.amr, false, link, snap);
+    for (const w of warnings) console.warn(`import: ${w}`);
+    return warnings;
   }
 }
 

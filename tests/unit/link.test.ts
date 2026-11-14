@@ -2,7 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { configFor } from '../../src/sim';
 import { FIELDS, problemById } from '../../src/problems';
 import { defaultOpacity } from '../../src/render/transfer';
-import { DEFAULT_SETUP, decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
+import { DEFAULT_SETUP, decodeLink, encodeLink, KEY_ALIASES, PROBLEM_ALIASES, snapshotSettings, viewDefaults, type LinkReport } from '../../src/ui/link';
+import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../../src/io/snapshot';
 
 const state = (id: string, n: number, ndim: 2 | 3, amrLevels = 0) => {
   const problem = problemById(id);
@@ -71,5 +72,63 @@ describe('shareable links', () => {
     expect(l.view.field).toBe(FIELDS.length - 1);
     expect(l.opacity).toBeUndefined();
     expect(l.params).toEqual({});
+  });
+
+  it('a link the page wrote reads back with nothing left over', () => {
+    const s = state('tidal-disruption', 128, 3, 2);
+    s.cfg.cfl = 0.5;
+    s.cfg.params.beta = 2;
+    s.view.lo = 1e-4;
+    s.view.hi = 2.5;
+    s.auto = false;
+    s.opacity = [{ x: 0, a: 0 }, { x: 1, a: 1 }];
+    const report: LinkReport = { ignored: [] };
+    decodeLink(encodeLink(s), report);
+    expect(report).toEqual({ ignored: [] });
+  });
+
+  it('reports what it ignores, rejects or holds to its limits', () => {
+    const report: LinkReport = { ignored: [] };
+    decodeLink(new URLSearchParams('problem=sedov&riemann=exact&cfl=9&wb=yes&p.nope=3&oldkey=1'), report);
+    expect(report.unknownProblem).toBeUndefined();
+    expect(report.ignored).toEqual(expect.arrayContaining(['riemann=exact (not a value this build accepts)', 'cfl=9 (held to 1)', 'wb=yes (not a value this build accepts)', 'p.nope', 'oldkey']));
+    expect(report.ignored).toHaveLength(5);
+  });
+
+  it('reads renamed presets and keys under their new names, preferring the new key', () => {
+    PROBLEM_ALIASES['old-sedov'] = 'sedov';
+    KEY_ALIASES.courant = 'cfl';
+    try {
+      const report: LinkReport = { ignored: [] };
+      const l = decodeLink(new URLSearchParams('problem=old-sedov&dim=2&courant=0.3'), report);
+      expect([l.problem, l.ndim, l.cfg.cfl]).toEqual(['sedov', 2, 0.3]);
+      expect(report).toEqual({ ignored: [] });
+      expect(decodeLink(new URLSearchParams('problem=sedov&courant=0.3&cfl=0.6')).cfg.cfl).toBe(0.6);
+    } finally {
+      delete PROBLEM_ALIASES['old-sedov'];
+      delete KEY_ALIASES.courant;
+    }
+  });
+});
+
+describe('settings of our own snapshots', () => {
+  const meta = (query: string, extra: Partial<SnapshotMeta> = {}): SnapshotMeta => ({ program: 'shaderous', build: 'abc', query, ...extra });
+
+  it('a file from this build loads quietly', () => {
+    const { link, warnings } = snapshotSettings(meta('problem=sedov&dim=2&n=128', { format: SNAPSHOT_FORMAT }), 'abc');
+    expect([link.problem, link.ndim, link.n]).toEqual(['sedov', 2, 128]);
+    expect(warnings).toEqual([]);
+  });
+
+  it('refuses a file whose preset this build does not have, rather than loading the default', () => {
+    expect(() => snapshotSettings(meta('problem=gone&dim=2&n=128'), 'abc')).toThrow(/preset "gone", which this build does not have/);
+    expect(() => snapshotSettings(meta(''), 'abc')).toThrow(/does not name its preset/);
+  });
+
+  it('warns about another build, a newer format and settings it could not use', () => {
+    expect(snapshotSettings(meta('problem=sedov'), 'def').warnings).toEqual([expect.stringMatching(/^this file is from build abc; this is build def/)]);
+    expect(snapshotSettings(meta('problem=sedov', { format: SNAPSHOT_FORMAT + 1 }), 'def').warnings[0]).toMatch(/newer format/);
+    const w = snapshotSettings(meta('problem=sedov&oldkey=1'), 'abc').warnings;
+    expect(w).toEqual(['settings this build could not use as written, so it uses its own: oldkey']);
   });
 });
