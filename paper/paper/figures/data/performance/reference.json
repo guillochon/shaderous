@@ -11,7 +11,11 @@
   "bandwidth_gb_s": {
     "V100": {"value": [900, 900], "source": "https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf", "note": "900 GB/s for both the SXM2 and PCIe cards (the V100S, 1134 GB/s, is a different product)"},
     "A100": {"value": [1555, 2039], "source": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "note": "1555 GB/s for the 40 GB card, 2039 GB/s for the 80 GB SXM card (1935 for the 80 GB PCIe); Stone2026 does not say which"},
+    "Apple M4 Pro": {"value": [273, 273], "source": "https://www.apple.com/macbook-pro/specs/", "note": "Unified LPDDR5X memory shared by the CPU and the integrated GPU, 273 GB/s on every M4 Pro (the M4 has 120, the M4 Max 410 or 546). Measured on a 14-inch MacBook Pro with the 20-core GPU and 48 GB"},
     "RTX 3080 12GB": {"value": [912, 912], "source": "https://www.gigabyte.com/Graphics-Card/GV-N3080GAMING-OC-12GD/sp", "note": "384-bit GDDR6X at 19 Gbps; the 10 GB card has 760 GB/s. The machine's card reports 12288 MiB (nvidia-smi)"}
   },
-  "this_device": "RTX 3080 12GB"
+  "devices": [
+    {"name": "RTX 3080 12GB", "label": "RTX 3080 (discrete)", "data": "throughput.json"},
+    {"name": "Apple M4 Pro", "label": "M4 Pro (integrated)", "data": "throughput_m4pro.json"}
+  ]
 }
