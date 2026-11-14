@@ -135,22 +135,29 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
   let s = ghost_src(inv.slot, inv.l);
   if (s.kind == 2) { return; }
 
-  var pr: Q;
   // A neighbor part way through a longer step holds primitives of an earlier time. Its ghost
   // here was filled from its half-step prediction, and is predicted in place, like one next
   // to a coarser block.
   let stale = BINS_ON && s.slot != inv.slot && blk_leaf(s.slot) && !blk_active(s.slot);
-  if (s.kind == 0 && !stale) {
-    let src = atl(blk_origin(s.slot), s.l);
-    pr = predict_cell(s.slot, s.l, vec3<f32>(1.0), grav_at(src));
-    pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s));
-  } else {
+  let at_source = s.kind == 0 && !stale;
+  // The cell to predict, which axes it may use, and where its acceleration is read. One call
+  // of predict_cell for both kinds: compilers inline every call, and two copies of the
+  // predictor were over a third of the pass's compile time.
+  var slot = s.slot;
+  var l = s.l;
+  var mask = vec3<f32>(1.0);
+  var gpos = atl(blk_origin(s.slot), s.l);
+  if (!at_source) {
+    slot = inv.slot;
+    l = inv.l;
     // Transverse neighbors of a ghost at the rim of the face would be edge ghosts.
     let rim = (inv.l == vec3<i32>(0)) | (inv.l == vec3<i32>(BS - 1));
+    mask = select(vec3<f32>(1.0), vec3<f32>(0.0), rim);
     // The field atlas holds no acceleration for ghosts; use the adjacent interior cell's.
-    let near = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));
-    pr = predict_cell(inv.slot, inv.l, select(vec3<f32>(1.0), vec3<f32>(0.0), rim), grav_at(near));
+    gpos = atl(blk_origin(inv.slot), clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1)));
   }
+  var pr = predict_cell(slot, l, mask, grav_at(gpos));
+  if (at_source) { pr.a = vec4<f32>(pr.a.x, src_velocity(pr.a.yzw, s)); }
   let c = atl(blk_origin(inv.slot), inv.l);
   textureStore(PA, c, pr.a);
   textureStore(PB, c, pr.b);

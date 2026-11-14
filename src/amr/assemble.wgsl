@@ -47,26 +47,22 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
   gc = ((gc % nc) + nc) % nc;                         // periodic wrap
   var lc = gc - blk_coord(cs) * BS;
   if (is2d()) { lc.z = 0; }
-  let ex = vec3<i32>(1, 0, 0);
-  let ey = vec3<i32>(0, 1, 0);
-  let ez = vec3<i32>(0, 0, 1);
-  if (mid_block(cs)) {
-    // The coarser block is half way through its step: interpolate its half-step prediction.
-    return prolong(
-      mid_cons(cs, lc),
-      MaybeCons(mid_cons(cs, lc - ex), true), MaybeCons(mid_cons(cs, lc + ex), true),
-      MaybeCons(mid_cons(cs, lc - ey), true), MaybeCons(mid_cons(cs, lc + ey), true),
-      MaybeCons(mid_cons(cs, lc - ez), true), MaybeCons(mid_cons(cs, lc + ez), true),
-      gf & vec3<i32>(1),
-    );
+  // The coarse cell (k = 0) and its neighbors along -x, +x, -y, +y, -z, +z, read in one loop
+  // with one call of each reader. Compilers inline every call, unrolled loops included (u_at
+  // restricts a refined block's cells on the fly): written out per neighbor and per kind of
+  // block, these copies were three quarters of the pass's compile time. In 2D the z
+  // neighbors are left unread (not ok), which prolong ignores there anyway.
+  // A coarser block half way through its step is interpolated from its half-step prediction.
+  let mid = mid_block(cs);
+  var v: array<MaybeCons, 7>;
+  let n = select(7, 5, is2d());
+  for (var k = 0; k < n; k++) {
+    var at = lc;
+    if (k > 0) { at[(k - 1) / 2] += select(-1, 1, (k & 1) == 0); }
+    // An interior cell is its own source (u_near of the center is u_at's value exactly).
+    if (mid) { v[k] = MaybeCons(mid_cons(cs, at), true); } else { v[k] = u_near(cs, at); }
   }
-  return prolong(
-    u_at(cs, lc),
-    u_near(cs, lc - ex), u_near(cs, lc + ex),
-    u_near(cs, lc - ey), u_near(cs, lc + ey),
-    u_near(cs, lc - ez), u_near(cs, lc + ez),
-    gf & vec3<i32>(1),
-  );
+  return prolong(v[0].u, v[1], v[2], v[3], v[4], v[5], v[6], gf & vec3<i32>(1));
 }
 
 @compute @workgroup_size(FLAT_WG)
