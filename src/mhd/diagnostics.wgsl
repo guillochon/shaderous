@@ -1,6 +1,6 @@
 // Magnetic diagnostics reduction source (mhd/mhd.ts, MAG_OPS): magnetic energy, the largest
-// |div B| dx of any cell (from its six faces), and the largest |B| at a cell center, which
-// normalizes the divergence.
+// |div B| dx of any cell (from its six faces), the largest |B| at a cell center, which
+// normalizes the divergence, and the largest 1 / beta = B^2 / 2p (the least plasma beta).
 #include "hydro/common.wgsl"
 #include <eos>
 #include "hydro/pfloor.wgsl"
@@ -24,5 +24,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   r[0] = 0.5 * dot(B, B) * P.geom.x;
   r[1] = abs(div);
   r[2] = length(B);
+  let u1 = textureLoad(U1, c, 0);
+  let p = eos_pressure(max(u1.x, P.rho_floor), textureLoad(U2, c, 0).y);
+  r[3] = 0.5 * dot(B, B) / max(p, 1.0e-30);
   return r;
 }

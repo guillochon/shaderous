@@ -223,7 +223,8 @@ The run's diagnostics, read back now:
 - `ranges`: the least and greatest value of each field, keyed by field name;
 - `magnetic`, for a run with a magnetic field: `eMag` (the magnetic energy, which `eTot`
   includes and `eInt` then does not), `divB` (the largest |div B| dx of any cell over
-  the largest |B|) and `bMax`.
+  the largest |B|), `bMax` and `betaMin` (the least plasma beta, 2p / B^2, of any cell).
+  The panel's Diagnostics show the same four as E mag, |B| max, β min and ∇·B.
 
 ### `debris() → object`
 

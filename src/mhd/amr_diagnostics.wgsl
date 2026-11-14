@@ -1,10 +1,13 @@
 // Magnetic diagnostics on the block grid (mhd/diagnostics.wgsl on the uniform grid), over leaf
-// cells: magnetic energy, the largest |div B| dx of a cell from its six faces, and the largest
-// |B| at a cell center. Every face a leaf cell needs is the block's own (texel BS holds its upper
-// faces).
+// cells: magnetic energy, the largest |div B| dx of a cell from its six faces, the largest |B|
+// at a cell center, and the largest 1 / beta = B^2 / 2p (the least plasma beta). Every face a
+// leaf cell needs is the block's own (texel BS holds its upper faces).
 #include "hydro/common.wgsl"
+#include <eos>
 #include "amr/grid.wgsl"
 
+@group(0) @binding(1) var U1: texture_3d<f32>;
+@group(0) @binding(2) var U2: texture_3d<f32>;
 @group(0) @binding(4) var BF: texture_3d<f32>;
 
 fn red_cell(c: vec3<i32>) -> Red {
@@ -12,6 +15,7 @@ fn red_cell(c: vec3<i32>) -> Red {
   r[0] = 0.0;
   r[1] = 0.0;
   r[2] = 0.0;
+  r[3] = 0.0;
   let slot = c.x / BS;
   if (!blk_leaf(slot)) { return r; }
   let l = vec3<i32>(c.x % BS, c.y, c.z);
@@ -31,5 +35,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   r[0] = 0.5 * dot(B, B) * select(dx * dx * dx, dx * dx, is2d());
   r[1] = abs(div);
   r[2] = length(B);
+  let c0 = atl(o, l);
+  let p = eos_pressure(max(textureLoad(U1, c0, 0).x, P.rho_floor), textureLoad(U2, c0, 0).y);
+  r[3] = 0.5 * dot(B, B) / max(p, 1.0e-30);
   return r;
 }

@@ -44,12 +44,21 @@ fn bface(a: i32, t: vec3<i32>) -> f32 {
   return textureLoad(BF, face_texel(a, t), 0)[a];
 }
 
-// Cell-centered field of an in-range cell.
+// Cell-centered field of an in-range cell. Its faces are texels c and c + e along each axis,
+// and need none of face_texel's mapping but one: the grid's upper face along a periodic axis is
+// cell 0's lower face. (The same texels as bface() would read, so the same bits; but bface()'s
+// mapping, six times over, made every shader reading the field slow to compile: the edge
+// fields' four or seven cells took 0.45 s in Chrome, 0.1 s without it.)
 fn bcell(c: vec3<i32>) -> vec3<f32> {
+  let n = mhd_dims();
+  let up = c + 1;
+  let wrap = vec3<bool>(up.x >= n.x && P.bc_lo[0] == 0u, up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
+  let hi = select(up, vec3<i32>(0), wrap);
+  let lo = textureLoad(BF, c, 0);
   return 0.5 * vec3<f32>(
-    bface(0, c) + bface(0, c + vec3<i32>(1, 0, 0)),
-    bface(1, c) + bface(1, c + vec3<i32>(0, 1, 0)),
-    bface(2, c) + bface(2, c + vec3<i32>(0, 0, 1)),
+    lo.x + textureLoad(BF, vec3<i32>(hi.x, c.y, c.z), 0).x,
+    lo.y + textureLoad(BF, vec3<i32>(c.x, hi.y, c.z), 0).y,
+    lo.z + textureLoad(BF, vec3<i32>(c.x, c.y, hi.z), 0).z,
   );
 }
 

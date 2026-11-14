@@ -681,7 +681,7 @@ export interface Diagnostics {
   /** [min, max] per renderable field, in FIELDS order */
   ranges: [number, number][];
   /**
-   * With a magnetic field (Simulation.diagnostics only): its energy, which eTot includes and
+   * With a magnetic field: its energy, which eTot includes and
    * eInt then does not, and the largest |div B| dx relative to the largest |B|.
    */
   magnetic?: MagDiagnostics;
@@ -789,10 +789,11 @@ export class Sim implements Simulation {
   private clockPreview: GPUBuffer;
   private gClockPreview!: GPUBindGroup;
   private pPrim!: GPUComputePipeline;
-  private pUpdate!: RegionPass;
+  /** The hydro step's passes; null with a magnetic field, whose step is its own (mhd/mhd.ts). */
+  private pUpdate: RegionPass | null = null;
   private pClock!: GPUComputePipeline;
   private pCorrect!: GPUComputePipeline;
-  private pPredict!: RegionPass;
+  private pPredict: RegionPass | null = null;
   private pField!: GPUComputePipeline;
   private pBhDrift!: GPUComputePipeline;
   private pBhKick!: GPUComputePipeline;
@@ -986,10 +987,13 @@ export class Sim implements Simulation {
     diag.catch(() => {}); // a failure is reported where it is awaited, below
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
+    // A magnetized run steps with the MHD passes alone: the hydro update (the slowest pass of all
+    // to compile) and prediction are not built for it.
+    const hydro = !c.problem.mhd;
     [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect, this.pBrush] = await Promise.all([
       computePipeline(d, assemble('hydro/rates.wgsl', slots), 'timestep rates'),
-      RegionPass.create(d, assemble('hydro/predict.wgsl', slots), 'predict', dims),
-      RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update', dims, {}, true),
+      hydro ? RegionPass.create(d, assemble('hydro/predict.wgsl', slots), 'predict', dims) : null,
+      hydro ? RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update', dims, {}, true) : null,
       computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
       computePipeline(d, assemble('edit/brush.wgsl', slots), 'brush'),
     ]);
@@ -1015,6 +1019,7 @@ export class Sim implements Simulation {
           ...k,
         }),
       );
+      if (!this.pPredict || !this.pUpdate) continue;
       this.gPredict.push(
         this.pPredict.groups({
           0: this.params,
@@ -1397,8 +1402,8 @@ export class Sim implements Simulation {
         pass.end();
         continue;
       }
-      this.pPredict.encode(pass, this.gPredict[p]);
-      this.pUpdate.encode(pass, this.gUpdate[p]);
+      this.pPredict!.encode(pass, this.gPredict[p]);
+      this.pUpdate!.encode(pass, this.gUpdate[p]);
       if (this.pSpecies) {
         const q = this.speciesCur;
         for (const [pipe, g] of [[this.pSpeciesPredict!, this.gSpeciesPredict], [this.pSpecies, this.gSpecies]] as const) {
@@ -1586,10 +1591,10 @@ export class Sim implements Simulation {
     });
     out.timestep = await time(reps, (pass) => this.redDt.encode(pass));
     out.predict = await time(reps, (pass) => {
-      this.pPredict.encode(pass, this.gPredict[p]);
+      this.pPredict?.encode(pass, this.gPredict[p]);
     });
     out.update = await time(reps, (pass) => {
-      this.pUpdate.encode(pass, this.gUpdate[p]);
+      this.pUpdate?.encode(pass, this.gUpdate[p]);
     });
     out.diagnostics = await time(reps, (pass) => this.redDiag.encode(pass, p));
     if (this.selfGravity) {
@@ -1634,6 +1639,12 @@ export class Sim implements Simulation {
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.nMasses);
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
+      // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
+      // energy (E - KE there includes B^2 / 2).
+      if (this.mhd) {
+        diag.magnetic = await this.mhd.diagnostics(this.cur);
+        diag.eInt -= diag.magnetic.eMag;
+      }
       return diag;
     } finally {
       this.stagingBusy = false;
@@ -1676,13 +1687,7 @@ export class Sim implements Simulation {
   async diagnostics(): Promise<Diagnostics> {
     for (;;) {
       const d = await this.readDiagnostics();
-      if (d) {
-        if (this.mhd) {
-          d.magnetic = await this.mhd.diagnostics(this.cur);
-          d.eInt -= d.magnetic.eMag;
-        }
-        return d;
-      }
+      if (d) return d;
       await new Promise((r) => setTimeout(r, 1));
     }
   }
@@ -1753,6 +1758,7 @@ export class Sim implements Simulation {
     pass.setPipeline(this.pPrim);
     pass.setBindGroup(0, this.gPrim[p]);
     this.dispatch(pass);
+    if (!this.pPredict) throw new Error('fluxMismatch checks the hydro update, which a magnetized run does not have');
     this.pPredict.encode(pass, this.gPredict[p]);
     pipe.encode(pass, group);
     pass.end();

@@ -277,16 +277,30 @@ fn face_lvl(level: u32, a: i32, g0: vec3<i32>) -> vec2<f32> {
 // its value plus a limited slope along each axis across it, a quarter of a coarse cell either
 // way, so the fine faces on it keep its mean. A slope whose neighbor is not held at that level
 // (coarser still, or beyond a closed boundary handled as copies) is zero.
+//
+// The five faces are read in one loop, so face_lvl is compiled into it once: every call site of
+// these functions is inlined, and written out five times here (and again in face_at, and in each
+// of the assembly's face reads) the block grid's passes took seconds to compile. The loops'
+// bounds come from loop_count() (amr/grid.wgsl), so the compiler keeps them loops.
 fn coarse_face_sloped(level: u32, a: i32, gc: vec3<i32>, par: vec3<i32>) -> f32 {
-  let v0 = face_lvl(level - 1u, a, gc).x;
+  // 0: the face; 1, 2: below and above it along a + 1; 3, 4: along a + 2 (not along z in 2D).
+  var f: array<vec2<f32>, 5>;
+  for (var i = 0; i < loop_count(5); i++) {
+    var e = vec3<i32>(0);
+    if (i > 0) {
+      let t = (a + 1 + (i - 1) / 2) % 3;
+      if (is2d() && t == 2) { continue; }
+      e[t] = select(1, -1, (i & 1) == 1);
+    }
+    f[i] = face_lvl(level - 1u, a, gc + e);
+  }
+  let v0 = f[0].x;
   var v = v0;
   for (var k = 1; k < 3; k++) {
     let t = (a + k) % 3;
     if (is2d() && t == 2) { continue; }
-    var e = vec3<i32>(0);
-    e[t] = 1;
-    let m = face_lvl(level - 1u, a, gc - e);
-    let p = face_lvl(level - 1u, a, gc + e);
+    let m = f[2 * k - 1];
+    let p = f[2 * k];
     if (m.y > 0.0 && p.y > 0.0) {
       let s = limit4(vec4<f32>(v0 - m.x, 0.0, 0.0, 0.0), vec4<f32>(p.x - v0, 0.0, 0.0, 0.0)).x;
       v += s * (f32(par[t]) - 0.5) * 0.5;
@@ -327,20 +341,31 @@ fn face_at(level: u32, a: i32, g0: vec3<i32>) -> f32 {
   var gc = g >> vec3<u32>(1u);
   if (is2d()) { gc.z = 0; }
   let par = g & vec3<i32>(1);
-  if ((g[a] & 1) == 0) { return sgn * coarse_face_sloped(level, a, gc, par); }
-  var up = gc;
-  up[a] += 1;
-  return sgn * 0.5 * (coarse_face_sloped(level, a, gc, par) + coarse_face_sloped(level, a, up, par));
+  // On a coarse face, that face; between two, the mean of both (in one loop: see loop_count).
+  let between = (g[a] & 1) != 0;
+  var sum = 0.0;
+  for (var j = 0; j < loop_count(select(1, 2, between)); j++) {
+    var c = gc;
+    c[a] += j;
+    sum += coarse_face_sloped(level, a, c, par);
+  }
+  return sgn * select(sum, 0.5 * sum, between);
 }
 
-// Cell-centered field of global cell g at `level`: the mean of its two faces along each axis.
-fn bcell_at(level: u32, g: vec3<i32>) -> vec3<f32> {
-  var B: vec3<f32>;
-  for (var a = 0; a < 3; a++) {
+// The faces of global cell g at `level`: its lower faces, and the cell-centered field, the mean
+// of its two faces along each axis. The six faces are read in one loop (see loop_count).
+struct CellFaces { lo: vec3<f32>, B: vec3<f32> }
+fn faces_at(level: u32, g: vec3<i32>) -> CellFaces {
+  var f: array<f32, 6>;
+  for (var i = 0; i < loop_count(6); i++) {
+    let a = i % 3;
     var e = vec3<i32>(0);
-    e[a] = 1;
-    if (a == 2 && is2d()) { e = vec3<i32>(0); }
-    B[a] = 0.5 * (face_at(level, a, g) + face_at(level, a, g + e));
+    if (i >= 3 && !(a == 2 && is2d())) { e[a] = 1; }
+    f[i] = face_at(level, a, g + e);
   }
-  return B;
+  let lo = vec3<f32>(f[0], f[1], f[2]);
+  return CellFaces(lo, 0.5 * (lo + vec3<f32>(f[3], f[4], f[5])));
+}
+fn bcell_at(level: u32, g: vec3<i32>) -> vec3<f32> {
+  return faces_at(level, g).B;
 }

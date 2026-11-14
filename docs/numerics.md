@@ -873,7 +873,18 @@ $`E`$ includes $`B^2/2`$.
   impulses are added with error-free sums (Knuth's TwoSum). The pair carries the face's exact
   sum of impulses, and $`\max|\nabla\cdot B|\,\Delta x/\max|B|`$ stays at a few roundings for
   good: $`7\times10^{-8}`$ after 751 steps and $`9\times10^{-8}`$ after 3483. The diagnostics
-  report it (`magnetic.divB`, and the field "Magnetic divergence").
+  report it (`magnetic.divB`, and the field "Magnetic divergence"), as the panel's ∇·B row,
+  with the magnetic energy, the largest |B| and the least plasma beta.
+- **Compile time.** GPU compilers inline every function at every call, so a lookup called at
+  several places, or in a loop they unroll, is compiled that many times. The block grid's
+  assembly took 4 s to compile in Chrome (far more in Firefox), with the face lookup inlined
+  about a hundred times. The passes now make such calls from one loop whose bound the compiler
+  cannot see through (`loop_count`, `amr/grid.wgsl`), with the same arithmetic in the same
+  order: assembly 0.45 s, update 0.26 s, re-meshing 0.9 s. The uniform grid's cell-centered
+  field reads its six faces directly instead of through the boundary mapping (edge fields
+  0.45 s to 0.14 s). A magnetized run builds no hydro update or prediction, which it never
+  runs (the hydro update was the slowest compile of a load). `tools/compile_times.mjs` times
+  each pipeline of a setup, alone, on a cold shader cache.
 - **Memory.** Five face textures (field and compensation at both parities, and the half step)
   add 80 bytes per cell to the uniform grid's 112 (`MhdPasses.cellBytes`), plus the slab
   buffers.

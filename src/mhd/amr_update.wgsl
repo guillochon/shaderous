@@ -209,20 +209,16 @@ fn new_face(a: i32, t: vec3<i32>) -> vec2<f32> {
   let x = atl(g_o, t);
   var s = textureLoad(BF, x, 0)[a];
   var comp = textureLoad(BC, x, 0)[a];
-  var r: vec2<f32>;
-  if (!(is2d() && b == 2)) {
-    r = two_sum(s, -impulse(c, t + eb));
-    s = r.x;
-    comp += r.y;
-    r = two_sum(s, impulse(c, t));
-    s = r.x;
-    comp += r.y;
-  }
-  if (!(is2d() && c == 2)) {
-    r = two_sum(s, impulse(b, t + ec));
-    s = r.x;
-    comp += r.y;
-    r = two_sum(s, -impulse(b, t));
+  // The four edges, in this order: -E_c at t + eb, +E_c at t, +E_b at t + ec, -E_b at t. In one
+  // loop, so impulse() is compiled into it once (loop_count, amr/grid.wgsl).
+  for (var k = 0; k < loop_count(4); k++) {
+    let along_c = k < 2;
+    if (is2d() && select(c, b, along_c) == 2) { continue; }
+    var off = vec3<i32>(0);
+    if (k == 0) { off = eb; }
+    if (k == 2) { off = ec; }
+    let sgn = select(1.0, -1.0, k == 0 || k == 3);
+    let r = two_sum(s, sgn * impulse(select(b, c, along_c), t + off));
     s = r.x;
     comp += r.y;
   }
@@ -324,42 +320,65 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   let depth = select(BS, 1, is2d());
   let top = vec3<i32>(BS, BS, depth);
 
-  // The block's faces at this texel: along a, index up to BS; across it, inside the block.
+  // The block's faces at this texel (i < 3: along a, index up to BS; across it, inside the
+  // block), and for a cell, its upper faces (i >= 3), for its field. In one loop, so new_face is
+  // compiled into it once (loop_count, amr/grid.wgsl). What the faces at this texel touch does
+  // not count toward a deposit's (g_touched below); what the cell's upper faces touch does.
+  let inside = all(t < top);
   var bout = vec3<f32>(0.0);
   var cout = vec3<f32>(0.0);
-  for (var a = 0; a < 3; a++) {
-    var ok = t[a] <= top[a] && !(is2d() && a == 2 && t.z != 0);
-    for (var b = 0; b < 3; b++) {
-      if (b != a && t[b] >= top[b]) { ok = false; }
+  var bup = vec3<f32>(0.0);
+  g_touched = false;
+  for (var i = 0; i < loop_count(6); i++) {
+    let a = i % 3;
+    let upper = i >= 3;
+    var e = vec3<i32>(0);
+    var ok = inside && a < naxes();
+    if (upper) {
+      e[a] = 1;
+    } else {
+      ok = t[a] <= top[a] && !(is2d() && a == 2 && t.z != 0);
+      for (var b = 0; b < 3; b++) {
+        if (b != a && t[b] >= top[b]) { ok = false; }
+      }
     }
-    if (ok) {
-      let f = new_face(a, t);
+    if (!ok) { continue; }
+    let touched = g_touched;
+    let f = new_face(a, t + e);
+    if (upper) {
+      bup[a] = f.x;
+    } else {
       bout[a] = f.x;
       cout[a] = f.y;
+      g_touched = touched;
     }
   }
   let x = atl(g_o, t);
   textureStore(OB, x, vec4<f32>(bout, 0.0));
   if (STAGE == 2u) { textureStore(OC, x, vec4<f32>(cout, 0.0)); }
 
-  if (any(t >= top)) { return; }
+  if (!inside) { return; }
   var net_a = vec4<f32>(0.0);
   var net_b = vec4<f32>(0.0);
   var bc = vec3<f32>(0.0);
-  g_touched = false;
-  for (var a = 0; a < naxes(); a++) {
+  // Each axis's lower and upper fluxes, in one loop (flux_at compiled into it once); the pair's
+  // difference is taken before it is added, as it always was.
+  var lo = Fl(vec4<f32>(0.0), vec4<f32>(0.0));
+  for (var j = 0; j < loop_count(2 * naxes()); j++) {
+    let a = j / 2;
     var e = vec3<i32>(0);
-    e[a] = 1;
-    let lo = flux_at(inv.row, a, t);
-    let hi = flux_at(inv.row, a, t + e);
-    net_a += lo.a - hi.a;
-    net_b += lo.b - hi.b;
+    if ((j & 1) == 1) { e[a] = 1; }
+    let f = flux_at(inv.row, a, t + e);
+    if ((j & 1) == 0) {
+      lo = f;
+    } else {
+      net_a += lo.a - f.a;
+      net_b += lo.b - f.b;
+    }
   }
   for (var a = 0; a < 3; a++) {
-    var e = vec3<i32>(0);
-    e[a] = 1;
     // (2D: B_z's face is the cell's only one along z.)
-    if (a < naxes()) { bc[a] = 0.5 * (bout[a] + new_face(a, t + e).x); } else { bc[a] = bout[a]; }
+    if (a < naxes()) { bc[a] = 0.5 * (bout[a] + bup[a]); } else { bc[a] = bout[a]; }
   }
   let u1 = textureLoad(U1, x, 0);
   let u2 = textureLoad(U2, x, 0);

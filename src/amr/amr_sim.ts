@@ -251,6 +251,7 @@ export class AmrSim implements Simulation {
   binShare: number | null = null;
 
   private pAssemble!: GPUComputePipeline;
+  /** The hydro prediction and update: not built with a magnetic field, whose step is its own (mhd/amr_mhd.ts). */
   private pPredict!: GPUComputePipeline;
   private pUpdate!: GPUComputePipeline;
   private pClock!: GPUComputePipeline;
@@ -575,14 +576,19 @@ export class AmrSim implements Simulation {
     return { TILE: fits ? 1 : 0, TILE_2D: flat ? 1 : 0 };
   }
 
-  /** The hydro passes' pipelines for the current settings (compiled once, see gpu/device.ts). */
+  /**
+   * The hydro passes' pipelines for the current settings (compiled once, see gpu/device.ts). A
+   * magnetized run steps with the MHD passes alone: no prediction or update (the update, the
+   * slowest pass of all to compile, would only hold its load up).
+   */
   private hydroPipelines() {
     const d = this.device;
     const slots = this.slots;
+    const hydro = !this.cfg.problem.mhd;
     return [
       computePipeline(d, assemble('amr/assemble.wgsl', slots), 'amr assemble'),
-      computePipeline(d, assemble('amr/predict.wgsl', slots), 'amr predict'),
-      computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update', this.tileConstants()),
+      hydro ? computePipeline(d, assemble('amr/predict.wgsl', slots), 'amr predict') : null,
+      hydro ? computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update', this.tileConstants()) : null,
       computePipeline(d, assemble('amr/regrid.wgsl', slots), 'amr regrid'),
       computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct'),
       computePipeline(d, assemble('amr/brush.wgsl', slots), 'amr brush'),
@@ -611,10 +617,12 @@ export class AmrSim implements Simulation {
     diag.catch(() => {}); // a failure is reported where it is awaited, below
     const [assembleP, predictP, updateP, regridP, correctP, brushP] = this.hydroPipelines();
     // Not deferred, the update pass changes over together with the others.
-    let pUpdate: GPUComputePipeline | undefined;
-    [this.pAssemble, this.pPredict, this.pRegrid, this.pCorrect, this.pBrush, pUpdate] = await Promise.all([
+    let pUpdate: GPUComputePipeline | null | undefined;
+    let pPredict: GPUComputePipeline | null;
+    [this.pAssemble, pPredict, this.pRegrid, this.pCorrect, this.pBrush, pUpdate] = await Promise.all([
       assembleP, predictP, regridP, correctP, brushP, deferUpdate ? undefined : updateP,
     ]);
+    if (pPredict) this.pPredict = pPredict;
     this.gBrush = [0, 1].map((p) =>
       bindGroup(d, this.pBrush, {
         0: this.params, 1: this.brush, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]),
@@ -641,7 +649,7 @@ export class AmrSim implements Simulation {
         5: v(this.gfield), 6: this.redDt.first, 20: this.bh, 30: this.bt, 31: list, ...bin, ...mid,
         ...((q >= 0 ? { 25: v(this.species[q]), 26: v(this.comp!) } : {}) as Record<number, GPUTextureView>),
       });
-    this.gPredict = predict(this.listLeaf);
+    if (pPredict) this.gPredict = predict(this.listLeaf);
     this.gAssemble = [];
     this.gRegrid = [];
     this.gCorrect = [];
@@ -650,7 +658,7 @@ export class AmrSim implements Simulation {
     this.gCommitB = [];
     this.gCorrectB = [];
     this.gCommitL = [];
-    if (K > 0) this.gPredictB = predict(this.listEnd);
+    if (K > 0 && pPredict) this.gPredictB = predict(this.listEnd);
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       // Second half kick: from the updated state (the other parity) back into this one.
@@ -690,8 +698,9 @@ export class AmrSim implements Simulation {
     if (pUpdate) bindUpdate(pUpdate);
     if (this.speciesGroups > 0) await this.buildSpecies();
     this.redDiag = await diag;
-    if (!deferUpdate) {
+    if (!deferUpdate || !updateP) {
       this.compiled = Promise.resolve();
+      this.compiling = false;
       return;
     }
     this.compiling = true;
@@ -2094,6 +2103,12 @@ export class AmrSim implements Simulation {
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0);
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
+      // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
+      // energy (E - KE there includes B^2 / 2).
+      if (this.mhd) {
+        diag.magnetic = await this.mhd.diagnostics(this.cur);
+        diag.eInt -= diag.magnetic.eMag;
+      }
       return diag;
     } finally {
       this.stagingBusy = false;
@@ -2149,13 +2164,7 @@ export class AmrSim implements Simulation {
   async diagnostics(): Promise<Diagnostics> {
     for (;;) {
       const d = await this.readDiagnostics();
-      if (d) {
-        if (this.mhd) {
-          d.magnetic = await this.mhd.diagnostics(this.cur);
-          d.eInt -= d.magnetic.eMag;
-        }
-        return d;
-      }
+      if (d) return d;
       await new Promise((r) => setTimeout(r, 1));
     }
   }

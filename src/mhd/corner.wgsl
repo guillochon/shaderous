@@ -12,8 +12,9 @@ struct Ref { e: vec3<f32>, v: vec3<f32>, cs: f32 }
 // values along their line (their eqs. 54-59): the parabola through three faces in a row,
 // (6 E_j + 3 E_toward - E_away) / 8. It needs the faces two along each line, which the uniform
 // grid's flux buffers hold (mhd/flux_index.wgsl) and the block grid's do not: modes 2 and 3 are
-// the uniform grid's only.
-override EDGE_MODE: u32 = 0u;
+// the uniform grid's only. EDGE_MODE is a constant (the <edge_mode> slot, set by mhd/mhd.ts), not
+// an override, so the schemes not in use are not compiled; the mean, the default, is the smallest.
+#include <edge_mode>
 
 // E along axis c at the edge on the lower a and b faces of cell t (a = c + 1, b = c + 2),
 // given the four cells around it: r00 at t - ea - eb, r10 at t - eb, r01 at t - ea, r11 at t.

@@ -75,9 +75,9 @@ fn main(
       var u: Cons;
       if (count == 0) { u = u_leaf_m(slot, l); } else { u = cons_at(level, g); }
       let w = prim_from_cons(u.a, u.b);
-      let B = bcell_at(level, g);
-      var f = vec3<f32>(0.0);
-      for (var a = 0; a < 3; a++) { f[a] = face_at(level, a, g); }
+      let cf = faces_at(level, g);
+      let B = cf.B;
+      let f = cf.lo;
       let c = atl(blk_origin(slot), l);
       textureStore(W1, c, w.w1);
       textureStore(W2, c, w.w2);

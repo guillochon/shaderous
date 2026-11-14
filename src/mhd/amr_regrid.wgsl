@@ -53,10 +53,12 @@ const RG_STRIDE = 12u;
 fn outer_face(lf: u32, a: i32, gf: vec3<i32>) -> f32 {
   let held = face_lvl(lf, a, gf);
   if (held.y > 0.0) { return held.x; }
-  g_copied = false;
   var gc = gf >> vec3<u32>(1u);
   if (is2d()) { gc.z = 0; }
-  return coarse_face_sloped(lf, a, gc, gf & vec3<i32>(1));
+  let v = coarse_face_sloped(lf, a, gc, gf & vec3<i32>(1));
+  // Prolonged, not copied (the coarse faces read on the way set g_copied for themselves).
+  g_copied = false;
+  return v;
 }
 
 // The face along a below fine cell gf (level lf, inside the old parent leaf), when gf's parity
@@ -69,24 +71,28 @@ fn inner_face(lf: u32, a: i32, gf: vec3<i32>) -> f32 {
   // ((a * 2 + side) * 2 + s1) * 2 + s2, s1 along a + 1 and s2 along a + 2.
   var outer: array<f32, 24>;
   var inner: array<f32, 12>;
-  for (var ax = 0; ax < d; ax++) {
+  // Every outer face in one loop, (axis, side, s1, s2) from its index, so outer_face is compiled
+  // into it once (see loop_count, mhd/amr_common.wgsl).
+  for (var i = 0; i < loop_count(d * 8); i++) {
+    let ax = i / 8;
+    let side = (i / 4) & 1;
+    let s1 = (i / 2) & 1;
+    let s2 = i & 1;
     let t1 = (ax + 1) % 3;
     let t2 = (ax + 2) % 3;
-    for (var s2 = 0; s2 < 2; s2++) {
-      for (var s1 = 0; s1 < 2; s1++) {
-        if (is2d() && ((t1 == 2 && s1 == 1) || (t2 == 2 && s2 == 1))) { continue; }
-        var g = base;
-        g[t1] += s1;
-        g[t2] += s2;
-        if (is2d()) { g.z = 0; }
-        let lo = outer_face(lf, ax, g);
-        var gh = g;
-        gh[ax] += 2;
-        let hi = outer_face(lf, ax, gh);
-        outer[((ax * 2 + 0) * 2 + s1) * 2 + s2] = lo;
-        outer[((ax * 2 + 1) * 2 + s1) * 2 + s2] = hi;
-        inner[(ax * 2 + s1) * 2 + s2] = 0.5 * (lo + hi);
-      }
+    if (is2d() && ((t1 == 2 && s1 == 1) || (t2 == 2 && s2 == 1))) { continue; }
+    var g = base;
+    g[t1] += s1;
+    g[t2] += s2;
+    g[ax] += 2 * side;
+    if (is2d()) { g.z = 0; }
+    outer[((ax * 2 + side) * 2 + s1) * 2 + s2] = outer_face(lf, ax, g);
+  }
+  for (var ax = 0; ax < d; ax++) {
+    for (var s = 0; s < 4; s++) {
+      let lo = outer[(ax * 2 + 0) * 4 + s];
+      let hi = outer[(ax * 2 + 1) * 4 + s];
+      inner[ax * 4 + s] = 0.5 * (lo + hi);
     }
   }
   // Divergence of each fine cell c (bit k of c: its position along axis k) with those faces.

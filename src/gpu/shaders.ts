@@ -19,6 +19,8 @@ const DEFAULT_SLOTS: Slots = {
   volume: 'render/volume_uniform.wgsl',
   flag_species: 'fn species_indicator(c: vec3<i32>) -> f32 { return 0.0; }\n',
   flag_burn: 'fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 { return 0.0; }\n',
+  // MHD edge fields (mhd/corner.wgsl): Gardiner & Stone's mean unless mhd/mhd.ts picks another.
+  edge_mode: 'const EDGE_MODE: u32 = 0u;\n',
 };
 
 export function assemble(entry: string, slots: Slots = {}): string {

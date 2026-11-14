@@ -35,7 +35,7 @@ export function mhdUnsupported(c: SimConfig): string | null {
 }
 
 /** Magnetic diagnostics channels: magnetic energy, max |div B| dx, max |B|. */
-const MAG_OPS = [SUM, MAX, MAX];
+const MAG_OPS = [SUM, MAX, MAX, MAX];
 
 export interface MagDiagnostics {
   /** total magnetic energy, sum of B^2 / 2 over the cells */
@@ -44,6 +44,13 @@ export interface MagDiagnostics {
   divB: number;
   /** largest |B| at a cell center */
   bMax: number;
+  /** least plasma beta, 2p / B^2, of any cell (Infinity where there is no field) */
+  betaMin: number;
+}
+
+/** The magnetic diagnostics from their reduction (MAG_OPS order). */
+export function magneticFrom(r: Float32Array): MagDiagnostics {
+  return { eMag: r[0], divB: r[2] > 0 ? r[1] / r[2] : 0, bMax: r[2], betaMin: r[3] > 0 ? 1 / r[3] : Infinity };
 }
 
 /**
@@ -226,12 +233,14 @@ export class MhdPasses {
   private async build(rates: GPUBuffer) {
     const { device: d, cfg, params, clock, state, half, comp } = this.dep;
     const slots = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg) };
+    // The edge scheme is compiled in (mhd/corner.wgsl), so the others are not compiled at all.
+    const edgeSlots = { ...slots, edge_mode: `const EDGE_MODE: u32 = ${EDGE_MODES[edgeScheme]}u;\n` };
     const v = (t: GPUTexture) => t.createView();
     const [f1, f2, e1, e2, u1, u2, prates, red] = await Promise.all([
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 2', { STAGE: 2 }),
-      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 1', { STAGE: 1, EDGE_MODE: EDGE_MODES[edgeScheme] }),
-      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 2', { STAGE: 2, EDGE_MODE: EDGE_MODES[edgeScheme] }),
+      computePipeline(d, assemble('mhd/emf.wgsl', edgeSlots), 'edge impulses 1', { STAGE: 1 }),
+      computePipeline(d, assemble('mhd/emf.wgsl', edgeSlots), 'edge impulses 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/rates.wgsl', slots), 'MHD timestep rates'),
@@ -241,7 +250,7 @@ export class MhdPasses {
         MAG_OPS,
         'mhd/diagnostics.wgsl',
         slots,
-        [0, 1].map((p) => ({ 0: params, 4: v(this.faces[p]), ...comp })),
+        [0, 1].map((p) => ({ 0: params, 1: v(this.dep.state[p][0]), 2: v(this.dep.state[p][1]), 4: v(this.faces[p]), ...comp })),
         'magnetic diagnostics',
       ),
     ]);
@@ -343,13 +352,13 @@ export class MhdPasses {
     this.redMag.encode(pass, parity);
     pass.end();
     const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-    enc.copyBufferToBuffer(this.redMag.result, 0, buf, 0, 12);
+    enc.copyBufferToBuffer(this.redMag.result, 0, buf, 0, 16);
     d.queue.submit([enc.finish()]);
     await buf.mapAsync(GPUMapMode.READ);
     const r = new Float32Array(buf.getMappedRange().slice(0));
     buf.unmap();
     buf.destroy();
-    return { eMag: r[0], divB: r[2] > 0 ? r[1] / r[2] : 0, bMax: r[2] };
+    return magneticFrom(r);
   }
 
   destroy() {

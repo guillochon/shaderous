@@ -73,7 +73,7 @@ side.innerHTML = `
       ${field('Variant', select('variant', ''), 'row-variant', 'Versions of this problem with different setups')}
       <span id="pparams"></span>
     </div>
-    <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button></div>
+    <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button><button id="load" hidden title="Autoload is off: load the changes that wait (problem, grid, initial conditions), paused. Run loads them and plays">Load</button></div>
     <div class="io">
       <label class="check" title="Start each problem playing as soon as it loads, and play a finished run again on Reset. Off, a run waits for Play"><input id="autoplay" type="checkbox" />Autoplay</label>
       <label class="check" title="Load the simulation as soon as a setting that needs a new one changes: the problem, the grid, a parameter of the initial conditions. Off, such changes wait until you press Run, so several can be made before a large grid is set up once"><input id="autoload" type="checkbox" />Autoload</label>
@@ -1088,7 +1088,16 @@ function syncControls() {
   $('sum-bc').textContent = (kinds.length === 1 ? BC_KINDS[kinds[0]].label.toLowerCase() : 'mixed') + (damps && cfg.dampRate > 0 ? ' + damping' : '');
   $<HTMLSelectElement>('cmap').value = editor.colormap;
   $('run').textContent = running ? 'Pause' : 'Run';
+  showLoad();
   syncTools();
+}
+
+/** The Load button: there with Autoload off, and ready when a change waits. */
+function showLoad() {
+  const b = $<HTMLButtonElement>('load');
+  b.hidden = autoload;
+  b.disabled = !pending;
+  b.classList.toggle('waiting', !!pending);
 }
 
 /** Factor from a preset parameter's code value to the value its field shows (ProblemParam.unit). */
@@ -1214,6 +1223,7 @@ function restartOrWait(replay = false) {
   if (autoload) return void restartRun(replay);
   pending ??= { keepPhysics: true };
   running = false;
+  showLoad();
 }
 
 /**
@@ -1678,6 +1688,7 @@ function bind() {
     } catch {}
     // Switched back on with a change waiting: it loads now.
     if (autoload) loadPending();
+    showLoad();
   });
   const timingBox = $<HTMLInputElement>('gputiming');
   timingBox.disabled = !timingAvailable();
@@ -1739,6 +1750,8 @@ function bind() {
     e.preventDefault();
     $('run').click();
   });
+  // Load (Autoload off): what waits, paused.
+  $('load').addEventListener('click', () => loadPending(false));
   $('step').addEventListener('click', () => {
     // A change waiting for Run: Step and Reset load it too, and leave it paused.
     if (pending) return loadPending(false);
@@ -2919,20 +2932,30 @@ function liveText(parent: HTMLElement): (v: string) => void {
   };
 }
 
-// [label, tooltip, CSV column, a count]; the first seven fill the left column, the rest the right.
+// [label, tooltip, CSV column, a count]; DIAG_SIDE puts each in the left (0) or right column.
+// The last MAG_ROWS are a magnetic field's, shown only with one.
 const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['t', 'Time', 't'], ['dt', 'Timestep', 'dt'], ['steps', 'Steps taken', 'steps', true], ['mass', 'Total mass', 'mass'],
   ['Mach', 'Maximum Mach number', 'max_mach'], ['floor', 'Cells at the density or pressure floor (emptied voids, usually)', 'floored_cells', true],
   ['Jeans', 'Cells whose thermal Jeans length is under 4 cells. With the Jeans floor on these are the cells it is holding up', 'jeans_unresolved_cells', true],
   ['p x', 'Total x momentum', 'p_x'], ['p y', 'Total y momentum', 'p_y'], ['p z', 'Total z momentum', 'p_z'],
-  ['E kin', 'Kinetic energy', 'e_kin'], ['E int', 'Internal energy', 'e_int'], ['E grav', 'Gravitational energy', 'e_grav'], ['E tot', 'Total energy', 'e_tot'],
+  ['E kin', 'Kinetic energy', 'e_kin'], ['E int', 'Internal energy', 'e_int'], ['E grav', 'Gravitational energy', 'e_grav'], ['E tot', 'Total energy (with a magnetic field, its energy included)', 'e_tot'],
+  ['E mag', 'Magnetic energy, the sum of B² / 2 over the cells (code units: B_Gauss = √(4π) B)', 'e_mag'],
+  ['|B| max', 'Largest field strength at a cell center (code units: B_Gauss = √(4π) B)', 'b_max'],
+  ['β min', 'Least plasma beta, 2p / B², of any cell: below 1 the field’s pressure dominates the gas’s', 'beta_min'],
+  ['∇·B', 'Largest |div B| dx of any cell, over the largest |B|: constrained transport keeps it at float32 round-off (about 1e-7)', 'div_b'],
 ];
-/** What each diagnostic measures, in DIAG_ROWS order. */
-const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy'];
+const MAG_ROWS = 4;
+const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0];
+/** What each diagnostic measures, in DIAG_ROWS order (the field's in code units). */
+const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'energy', null, null, null];
 /** The diagnostics in DIAG_ROWS order. */
 const diagValues = (d: Diagnostics): number[] => [
   d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot,
+  ...(d.magnetic ? [d.magnetic.eMag, d.magnetic.bMax, d.magnetic.betaMin, d.magnetic.divB] : new Array<number>(MAG_ROWS).fill(NaN)),
 ];
+/** Whether column c is one of a magnetic field's. */
+const magneticCol = (c: number) => c >= DIAG_ROWS.length - MAG_ROWS && c < DIAG_ROWS.length;
 
 /** One column of the diagnostics history. */
 interface DiagCol {
@@ -3040,7 +3063,16 @@ function diagCell(col: number, label: string, into: Element): DiagCell {
   }
   return { col, dt, dd, spark, set: liveText(dd), warn: false };
 }
-const diagCells = DIAG_ROWS.map(([label], i) => diagCell(i, label, diagCols[i < 7 ? 0 : 1]));
+const diagCells = DIAG_ROWS.map(([label], i) => diagCell(i, label, diagCols[DIAG_SIDE[i]]));
+/** Show the magnetic field's rows with one, hide them without. */
+function showMagneticRows(on: boolean) {
+  $('diag').classList.toggle('mag', on);
+  for (const c of diagCells) {
+    if (!magneticCol(c.col)) continue;
+    for (const el of [c.dt, c.dd, c.spark]) el.style.display = on ? '' : 'none';
+  }
+}
+showMagneticRows(false);
 /** Each sink's block in the panel, shown while that mass is in the run. */
 const sinkBlocks = Array.from({ length: MAX_MASSES }, (_, i) => {
   const box = document.createElement('div');
@@ -3117,6 +3149,7 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
     diagHistory.clear();
     sinkPrev = [];
     diagOf = of;
+    showMagneticRows(!!of.cfg.problem.mhd);
     showDiagUnits();
   } else if (last && d.steps < last[2]) sinkPrev = []; // the run went back: its history starts again
   const u = units();
@@ -3147,7 +3180,8 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
 /** Save the diagnostics of the run so far as CSV, with the columns of every sink that was in it. */
 function exportDiagnostics() {
   const width = diagHistory.rows.reduce((w, r) => Math.max(w, r.length), BASE_COLS);
-  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv ? [i] : []));
+  // A magnetic field's columns only with one.
+  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) ? [i] : []));
   const csv = diagHistory.csv(cols, cols.map((i) => DIAG_COLS[i].csv!));
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');

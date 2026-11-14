@@ -17,6 +17,13 @@ fn bt(slot: i32, k: u32) -> i32 {
 fn is2d() -> bool {
   return P.dims.z == 1u;
 }
+// n, as a loop bound the shader compiler cannot see through (P.dims.x is never 0): it then keeps
+// the loop a loop. A large function called in a loop is compiled into it once; unrolled, or
+// called at several places, it is inlined at every one (the MHD block passes took seconds to
+// compile that way).
+fn loop_count(n: i32) -> i32 {
+  return select(n, 0, P.dims.x == 0u);
+}
 fn blk_leaf(slot: i32) -> bool {
   return (bt(slot, 4u) & 3) == 3;
 }
