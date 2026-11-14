@@ -9,6 +9,8 @@
 //                          its state is taken from, `face` is the true difference across a
 //                          reflecting face (and equals `seen` everywhere else)
 //   dphi_face(a, axis, k)  the plain difference, with no boundary involved, for flux_between
+//   wall_step(a, axis, s)  for flux_between, the true step across a face whose plain step is s,
+//                          and the sign each side takes it with (gravity/gfield.wgsl)
 // and, for viscosity (hydro/diffusion.wgsl), load_vel(c) and face_rim(a, axis, t), and for a
 // composition that varies (species/mixture.ts), load_comp(c): the moments of a cell. Each face
 // state takes the composition of the cell it was reconstructed in.
@@ -153,6 +155,9 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
     d = vec3<f32>(dphi_face(a, axis, -1), dphi_face(a, axis, 0), dphi_face(a, axis, 1));
   }
   let across = d.y;
+  // The true step across, and its sign for a side that is the image of the other in a wall of
+  // the grid: what axis_fluxes uses there. Elsewhere (across, 1, 1).
+  let ws = wall_step(a, axis, across);
   var sides = vec2<f32>(1.0);
   if (has_solids()) {
     let ls = q_solid(wl);
@@ -182,10 +187,10 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
       if (q_solid(wrr)) { wrr = q_mirror(wr, axis); d.z = 0.0; }
     }
   }
-  // `across` is the true step across the face; a cell that is the other's image in a wall
-  // reaches the wall from its own side.
-  let sl = edge_up(wll, wl, wr, d.x, d.y, across * sides.x);
-  let sr = edge_dn(wl, wr, wrr, d.y, d.z, across * sides.y);
+  // ws.x is the true step across the face; a cell that is the other's image in a wall reaches
+  // the wall from its own side.
+  let sl = edge_up(wll, wl, wr, d.x, d.y, ws.x * (sides.x * ws.y));
+  let sr = edge_dn(wl, wr, wrr, d.y, d.z, ws.x * (sides.y * ws.z));
   return add_diffusion(face_flux(pl, sl, pr, sr, axis, kl, kr), a, e, axis, nl, nr);
 }
 

@@ -949,7 +949,7 @@ export class Sim implements Simulation {
     [this.pPrim, this.pPredict, this.pUpdate, this.pCorrect, this.pBrush] = await Promise.all([
       computePipeline(d, assemble('hydro/rates.wgsl', slots), 'timestep rates'),
       RegionPass.create(d, assemble('hydro/predict.wgsl', slots), 'predict', dims),
-      RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update', dims),
+      RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update', dims, {}, true),
       computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
       computePipeline(d, assemble('edit/brush.wgsl', slots), 'brush'),
     ]);
@@ -1649,7 +1649,7 @@ export class Sim implements Simulation {
     const c = this.cfg;
     const slots = hydroSlots(c);
     // Split by region like the real pass, so faces between the two variants are checked too.
-    const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [n, n, this.nz], { DEBUG_FLUX: 1 });
+    const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [n, n, this.nz], { DEBUG_FLUX: 1 }, true);
     const p = this.cur;
     const o = 1 - p;
     const v = (t: GPUTexture) => t.createView();

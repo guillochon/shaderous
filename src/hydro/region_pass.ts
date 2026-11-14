@@ -12,9 +12,19 @@
 //   - The shell is REACH cells thick, so its six slabs get workgroups that are REACH thick
 //     along the slab's normal. With the usual workgroup the slabs launch several times more
 //     invocations than they have cells, and those are not free.
+//   - The shape of the workgroup hardly matters (Apple M4 Pro, Chrome: every shape of 64 to
+//     256 invocations within a few percent of the defaults), so a pass with a face-flux tile in
+//     workgroup memory (hydro/tile.wgsl) takes whichever shape lets its tile fit.
 import { bindGroup, computePipeline, type Bindable } from '../gpu/device';
 
 const REACH = 2; // cells a stencil may extend from its center
+const FACE_BYTES = 48; // one face flux in the tile of hydro/tile.wgsl, viscous part included
+
+/** Bytes of workgroup memory the face-flux tile of hydro/tile.wgsl takes for workgroup `wg`. */
+export function tileBytes(wg: number[], flat: boolean): number {
+  const [x, y, z] = wg;
+  return FACE_BYTES * ((x + 1) * y * z + x * (y + 1) * z + (flat ? 0 : x * y * (z + 1)));
+}
 
 interface Dispatch {
   origin: number[]; // first cell
@@ -31,10 +41,14 @@ export interface Split {
 }
 
 /** The interior box and the slabs that hold every cell outside it. */
-export function splitRegions(dims: number[]): Split {
+export function splitRegions(dims: number[], tile = false): Split {
   const flat = dims[2] === 1;
-  // 256 invocations per workgroup either way; a single layer gets them all in the plane.
-  const wg = flat ? [16, 16, 1] : [8, 8, 4];
+  // 256 invocations per workgroup either way; a single layer gets them all in the plane. A 3D
+  // face-flux tile for 8 x 8 x 4 would take 42 KB, more than devices offer: half as many.
+  const wg = flat ? [16, 16, 1] : tile ? [8, 4, 4] : [8, 8, 4];
+  // A pass with a face-flux tile is not split: one pipeline computes every face, so that the
+  // two workgroups sharing a face run the same compiled code on it (hydro/tile.wgsl).
+  if (tile) return { lo: [0, 0, 0], hi: [0, 0, 0], interior: null, shell: [{ origin: [0, 0, 0], size: dims, wg }] };
   // An axis with a single layer (2D) has no boundary cells along it.
   const lo = dims.map((n) => (n === 1 ? 0 : REACH));
   const hi = dims.map((n) => (n === 1 ? 1 : n - REACH));
@@ -70,8 +84,18 @@ export class RegionPass {
 
   private constructor(private device: GPUDevice) {}
 
-  static async create(device: GPUDevice, code: string, label: string, dims: number[], constants: Record<string, number> = {}): Promise<RegionPass> {
-    const split = splitRegions(dims);
+  /**
+   * `tile`: the shader includes hydro/tile.wgsl. The pass then runs as a single pipeline over
+   * the whole grid, which computes each face once per workgroup if the tile fits in the
+   * device's workgroup memory, and gathers if not.
+   */
+  static async create(device: GPUDevice, code: string, label: string, dims: number[], constants: Record<string, number> = {}, tile = false): Promise<RegionPass> {
+    const split = splitRegions(dims, tile);
+    if (tile) {
+      const flat = dims[2] === 1;
+      const fits = tileBytes(split.shell[0].wg, flat) <= device.limits.maxComputeWorkgroupStorageSize;
+      constants = { TILE: fits ? 1 : 0, TILE_FLAT: flat ? 1 : 0, ...constants };
+    }
     const pass = new RegionPass(device);
     // One pipeline per distinct (variant, workgroup size).
     const wanted = new Map<string, { interior: boolean; wg: number[]; list: Dispatch[] }>();

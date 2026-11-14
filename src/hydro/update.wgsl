@@ -12,7 +12,8 @@
 // match bit for bit, and the validation suite checks that they do (DEBUG_FLUX below).
 //
 // Performance notes (D3D12, RTX 3080): keep this straight-line code on locals. Caching the
-// stencil in a shader-local array was 3x slower than repeating the texture loads.
+// stencil in a shader-local array was 3x slower than repeating the texture loads. The interior
+// pipeline computes each face once per workgroup instead, when it can: see hydro/tile.wgsl.
 #include "hydro/common.wgsl"
 #include <eos>
 #include <limiter>
@@ -62,6 +63,7 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 }
 
 #include "hydro/flux.wgsl"
+#include "hydro/tile.wgsl"
 #include <species>
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
@@ -105,11 +107,14 @@ fn escape(c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Faces, fz: Faces, flat: boo
 override DEBUG_FLUX: bool = false;
 
 @compute @workgroup_size(WGX, WGY, WGZ)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let rc = region_cell(gid);
-  if (!rc.mine) { return; }
+fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>,
+        @builtin(local_invocation_index) li: u32) {
   g_dx = P.dx;
   g_dt = clock.dt;
+  // The whole workgroup computes the faces of its box, before any invocation can leave.
+  if (tiled()) { tile_fluxes(vec3<i32>(wid * vec3<u32>(WGX, WGY, WGZ) + REGION.origin), li); }
+  let rc = region_cell(gid);
+  if (!rc.mine) { return; }
   let c = rc.c;
   if (has_solids()) {
     // Solid and fixed cells keep their state.
@@ -130,10 +135,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   g_inner = stencil_inside(c, 2);
   let w0 = load_q(c);
   let p0 = load_pred(c);
-  let fx = axis_fluxes(c, ex, 0, w0, p0);
-  let fy = axis_fluxes(c, ey, 1, w0, p0);
+  var fx: Faces;
+  var fy: Faces;
   var fz = Faces(flux_zero(), flux_zero());
-  if (!flat) { fz = axis_fluxes(c, ez, 2, w0, p0); }
+  if (tiled()) {
+    fx = tile_faces(0, c, ex);
+    fy = tile_faces(1, c, ey);
+    if (!flat) { fz = tile_faces(2, c, ez); }
+  } else {
+    fx = axis_fluxes(c, ex, 0, w0, p0);
+    fy = axis_fluxes(c, ey, 1, w0, p0);
+    if (!flat) { fz = axis_fluxes(c, ez, 2, w0, p0); }
+  }
 
   if (DEBUG_FLUX) {
     textureStore(O1, c, vec4<f32>(fx.lo.m, fx.hi.m, fy.lo.m, fy.hi.m));

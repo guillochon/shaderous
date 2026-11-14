@@ -16,10 +16,9 @@ fn main() {
   if (MODE == 0u) {
     // Kahan summation keeps t accurate in float32 (as in hydro/clock.wgsl).
     let prev = clock.dt;
-    let y = prev - clock.tc;
-    let tt = clock.t + y;
-    clock.tc = (tt - clock.t) - y;
-    clock.t = tt;
+    let k = kahan1(clock.t, clock.tc, prev);
+    clock.t = k.x;
+    clock.tc = k.y;
     if (prev > 0.0) { clock.steps += 1.0; }
   } else {
     BIN[0] = (BIN[0] + 1u) % CYCLE;

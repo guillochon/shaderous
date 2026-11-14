@@ -111,9 +111,18 @@ var<private> g_cell: vec3<i32> = vec3<i32>(0);
 fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   return dphi_blk(g_slot, g_cell, axis, k);
 }
-// Within another block's stored cells and ghosts, across a face it shares with a block: no
-// boundary of the domain is involved.
+// For flux_between (hydro/flux.wgsl). Within another block's stored cells and ghosts, across a
+// face it shares with a block, no boundary of the domain is involved: the plain difference.
+// A face on the domain's edge, computed by the face-flux tile (amr/tile.wgsl), takes its steps
+// from dphi_blk, as axis_fluxes does.
+fn wall_step(a: vec3<i32>, axis: i32, across: f32) -> vec3<f32> {
+  if (!g_face_wall || !well_balanced()) { return vec3<f32>(across, 1.0, 1.0); }
+  let t = dphi_blk(g_face_slot, g_face_l, axis, -1).y;
+  let image = select(1.0, -1.0, across != t);
+  return vec3<f32>(t, select(1.0, image, g_face_l[axis] == 0), select(1.0, image, g_face_l[axis] == BS));
+}
 fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
+  if (g_face_wall) { return dphi_blk(g_face_slot, g_face_l, axis, k - 1).x; }
   var e = vec3<i32>(0);
   e[axis] = 1;
   var d = -P.gext[axis] * g_dx;
@@ -122,6 +131,7 @@ fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
 }
 
 #include "hydro/flux.wgsl"
+#include "amr/tile.wgsl"
 #include <species>
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
@@ -257,7 +267,10 @@ fn escape(slot: i32, l: vec3<i32>, c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Fa
 override DEBUG_FLUX: bool = false;
 
 @compute @workgroup_size(8, 8, 4)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>,
+        @builtin(local_invocation_id) lid: vec3<u32>, @builtin(local_invocation_index) li: u32) {
+  // The whole workgroup computes the faces of its cells, before any invocation can leave.
+  if (TILE) { tile_fluxes(wid, li); }
   let inv = inv_interior(gid);
   if (!inv.ok) { return; }
   let slot = inv.slot;
@@ -300,10 +313,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       return;
     }
   } else {
-    let ox = axis_fluxes(c, ex, 0, w0, p0);
-    let oy = axis_fluxes(c, ey, 1, w0, p0);
+    var ox: Faces;
+    var oy: Faces;
     var oz = none;
-    if (!is2d()) { oz = axis_fluxes(c, ez, 2, w0, p0); }
+    if (TILE) {
+      // This cell's box (one of four in 2D, one layer each) and its place in it.
+      let b = select(0u, lid.z, TILE_2D);
+      let f = select(vec3<i32>(lid), vec3<i32>(i32(lid.x), i32(lid.y), 0), TILE_2D);
+      ox = tile_faces(b, 0, f, ex);
+      oy = tile_faces(b, 1, f, ey);
+      if (!is2d()) { oz = tile_faces(b, 2, f, ez); }
+    } else {
+      ox = axis_fluxes(c, ex, 0, w0, p0);
+      oy = axis_fluxes(c, ey, 1, w0, p0);
+      if (!is2d()) { oz = axis_fluxes(c, ez, 2, w0, p0); }
+    }
     // With species, their pass needs the mass fluxes as this cell computed them.
     store_mass_flux(slot, l, c, ox, oy, oz);
     fx = match_faces(ox, slot, 0, l);

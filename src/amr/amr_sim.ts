@@ -513,6 +513,18 @@ export class AmrSim implements Simulation {
     return this.comp ? this.gAssembleQ[p][this.speciesCur] : this.gAssemble[p];
   }
 
+  /**
+   * The update's face-flux tile (amr/tile.wgsl): on if it fits in the device's workgroup
+   * memory. 576 faces in 2D, 896 in 3D, of 32 bytes each plus 16 for the viscous part; 3D with
+   * viscosity (43 KB) gathers instead.
+   */
+  private tileConstants(): Record<string, number> {
+    const flat = this.cfg.ndim === 2;
+    const bytes = (flat ? 576 : 896) * (this.cfg.viscosity > 0 ? 48 : 32);
+    const fits = bytes <= this.device.limits.maxComputeWorkgroupStorageSize;
+    return { TILE: fits ? 1 : 0, TILE_2D: flat ? 1 : 0 };
+  }
+
   /** (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. */
   async buildHydro() {
     const d = this.device;
@@ -521,7 +533,7 @@ export class AmrSim implements Simulation {
     [this.pAssemble, this.pPredict, this.pUpdate, this.pRegrid, this.pCorrect, this.pBrush] = await Promise.all([
       computePipeline(d, assemble('amr/assemble.wgsl', slots), 'amr assemble'),
       computePipeline(d, assemble('amr/predict.wgsl', slots), 'amr predict'),
-      computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update'),
+      computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update', this.tileConstants()),
       computePipeline(d, assemble('amr/regrid.wgsl', slots), 'amr regrid'),
       computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct'),
       computePipeline(d, assemble('amr/brush.wgsl', slots), 'amr brush'),
@@ -705,8 +717,9 @@ export class AmrSim implements Simulation {
     ]);
     const A = this.bins;
     const B = this.binsB;
-    this.gTick = bindGroup(d, this.pTick, { 1: this.clock, 2: A, 3: this.binCnt });
-    this.gAdvance = bindGroup(d, this.pAdvance, { 1: this.clock, 2: A, 3: this.binCnt });
+    // 0: Kahan summation of the clock reads P (opaque() in hydro/common.wgsl), in both modes.
+    this.gTick = bindGroup(d, this.pTick, { 0: this.params, 1: this.clock, 2: A, 3: this.binCnt });
+    this.gAdvance = bindGroup(d, this.pAdvance, { 0: this.params, 1: this.clock, 2: A, 3: this.binCnt });
     await this.grav?.setBins();
     const v = (t: GPUTexture) => t.createView();
     this.redBhB ??= await Reducer.create(
@@ -2120,7 +2133,7 @@ export class AmrSim implements Simulation {
   async fluxMismatch(): Promise<{ faces: number; mismatched: number; coarseFine: number; worstCoarseFine: number }> {
     const d = this.device;
     this.flush();
-    const pipe = await computePipeline(d, assemble('amr/update.wgsl', this.slots), 'amr update (flux debug)', { DEBUG_FLUX: 1 });
+    const pipe = await computePipeline(d, assemble('amr/update.wgsl', this.slots), 'amr update (flux debug)', { DEBUG_FLUX: 1, ...this.tileConstants() });
     const p = this.cur;
     const enc = d.createCommandEncoder();
     const pass = beginPass(enc);

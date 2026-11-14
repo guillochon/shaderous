@@ -961,7 +961,8 @@ export const TESTS: TestDef[] = [
   {
     id: 'amr-unrefined',
     name: 'Block grid without refinement against the uniform grid',
-    criterion: 'Identical density in every cell and the same number of steps, for a 2D shock tube and a 3D blast',
+    criterion:
+      'Density in every cell within 1e-5 of the uniform grid\'s, relative, and the same number of steps, for a 2D shock tube and a 3D blast. (Not to the bit: the two grids run different shaders, and WGSL lets a compiler fuse and reassociate floating-point arithmetic differently in each; on an Apple M4 Pro in Chrome the 3D blast differs by a few float32 units.)',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -970,10 +971,17 @@ export const TESTS: TestDef[] = [
         const uni = await withSim(gpu, prob, n, { ndim, tEnd }, async (sim) => ({ steps: await sim.runToEnd(), u1: (await sim.readState()).u1 }));
         const blk = await withAmr(gpu, prob, n, { ndim, tEnd, amrLevels: 0 }, async (sim) => ({ steps: await sim.runToEnd(), cells: await sim.readLeaves() }));
         let worst = 0;
-        for (let q = 0; q < blk.cells.count; q++) worst = Math.max(worst, Math.abs(blk.cells.u1[q * 4] - uni.u1[cellIndex(blk.cells, q, n, prob.box, ndim) * 4]));
+        let rel = 0;
+        for (let q = 0; q < blk.cells.count; q++) {
+          const u = uni.u1[cellIndex(blk.cells, q, n, prob.box, ndim) * 4];
+          const d = Math.abs(blk.cells.u1[q * 4] - u);
+          worst = Math.max(worst, d);
+          rel = Math.max(rel, d / Math.abs(u));
+        }
         metrics[`${prob.id}_${ndim}d_max_density_difference`] = worst;
+        metrics[`${prob.id}_${ndim}d_max_relative_difference`] = rel;
         metrics[`${prob.id}_${ndim}d_steps`] = blk.steps;
-        pass &&= worst === 0 && blk.steps === uni.steps && blk.cells.count === n ** ndim;
+        pass &&= rel < 1e-5 && blk.steps === uni.steps && blk.cells.count === n ** ndim;
       }
       return { pass, metrics };
     },

@@ -26,18 +26,7 @@ struct Masses {
   list: array<Mass, 4>,
 }
 
-// Kahan summation: add x to s, whose rounding so far is c. Returns the new (s, c).
-fn kahan1(s: f32, c: f32, x: f32) -> vec2<f32> {
-  let y = x - c;
-  let t = s + y;
-  return vec2<f32>(t, (t - s) - y);
-}
-struct Kahan3 { s: vec3<f32>, c: vec3<f32> }
-fn kahan3(s: vec3<f32>, c: vec3<f32>, x: vec3<f32>) -> Kahan3 {
-  let y = x - c;
-  let t = s + y;
-  return Kahan3(t, (t - s) - y);
-}
+// (Kahan summation, kahan1 and kahan3, is in hydro/common.wgsl.)
 
 fn mass_count() -> u32 {
   return u32(P.bh.x);

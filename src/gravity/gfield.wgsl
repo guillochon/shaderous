@@ -63,6 +63,17 @@ fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
 fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
   return dphi_step(a, axis, k).x;
 }
+// For flux_between (hydro/flux.wgsl), the face between a and a + e, whose potential step as
+// the deviations see it is `across`: the true step, and for each side -1 where that side is
+// the image of the other in a reflecting wall of the grid, so that it reaches the wall from its
+// own side (as axis_fluxes has it); (across, 1, 1) on every other face, bit for bit.
+fn wall_step(a: vec3<i32>, axis: i32, across: f32) -> vec3<f32> {
+  if (!well_balanced()) { return vec3<f32>(across, 1.0, 1.0); }
+  let t = dphi_step(a, axis, 0).y;
+  let n = select(i32(P.n), i32(P.dims.z), axis == 2);
+  let image = select(1.0, -1.0, across != t);
+  return vec3<f32>(t, select(1.0, image, a[axis] < 0), select(1.0, image, a[axis] + 1 >= n));
+}
 // The steps below and above cell c along each axis, for the predictor.
 fn dphi_cell(c: vec3<i32>, k: i32) -> PhiSteps {
   var s = PhiSteps(vec3<f32>(0.0), vec3<f32>(0.0));

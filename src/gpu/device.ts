@@ -65,6 +65,8 @@ export async function initGpu(): Promise<Gpu> {
     requiredLimits: {
       maxBufferSize: adapter.limits.maxBufferSize,
       maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
+      // For the flux update's stencil tile (hydro/tile.wgsl).
+      maxComputeWorkgroupStorageSize: adapter.limits.maxComputeWorkgroupStorageSize,
     },
   });
   device.addEventListener('uncapturederror', (e) => {

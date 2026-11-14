@@ -38,7 +38,8 @@ struct Params {
                          //   per unit density), then the damping zone's inner radius and rate
                          //   (hydro/damping.wgsl)
   refine: vec4<f32>,     // block grids: (density below which gas does not ask for refinement, density
-                         //   above which it is always refined to the finest level (0: none), 0, 0)
+                         //   above which it is always refined to the finest level (0: none), 0,
+                         //   0 always: the zero that opaque() hides from the compiler)
   eos2: vec4<f32>,       // more equation-of-state constants, per module (eos/degenerate.wgsl,
                          //   eos/ionizing.wgsl); zero for the others
 }
@@ -51,6 +52,34 @@ struct Clock {
 }
 
 @group(0) @binding(0) var<uniform> P: Params;
+
+// x itself, bit for bit, in a form the compiler cannot see through: XOR with a zero it does not
+// know is zero (P.refine.w). WGSL lets a compiler reassociate floating-point arithmetic (WGSL
+// 15.7.5), and Dawn compiles Metal shaders in relaxed math mode, which does. An expression whose
+// exact value is zero, such as Kahan summation's compensation, is then simplified to zero; a
+// value passed through here is a fresh unknown and its rounding is kept.
+fn opaque(x: f32) -> f32 {
+  return bitcast<f32>(bitcast<u32>(x) ^ bitcast<u32>(P.refine.w));
+}
+fn opaque3(x: vec3<f32>) -> vec3<f32> {
+  return bitcast<vec3<f32>>(bitcast<vec3<u32>>(x) ^ vec3<u32>(bitcast<u32>(P.refine.w)));
+}
+
+// Kahan summation: add x to s, whose rounding so far is c. Returns the new (s, c). Each rounded
+// intermediate goes through opaque(), so that (t - s) - y is computed as written: otherwise it
+// is algebraically zero, and on Metal it was (the compensation lost, a slow sink's G M grew by
+// a seventh of what it took in).
+fn kahan1(s: f32, c: f32, x: f32) -> vec2<f32> {
+  let y = opaque(x - c);
+  let t = opaque(s + y);
+  return vec2<f32>(t, opaque(t - s) - y);
+}
+struct Kahan3 { s: vec3<f32>, c: vec3<f32> }
+fn kahan3(s: vec3<f32>, c: vec3<f32>, x: vec3<f32>) -> Kahan3 {
+  let y = opaque3(x - c);
+  let t = opaque3(s + y);
+  return Kahan3(t, opaque3(t - s) - y);
+}
 
 // The composition the equation of state is evaluated for: one everywhere, or per cell
 // (species/mixture.ts).

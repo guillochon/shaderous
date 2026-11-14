@@ -442,6 +442,22 @@ before the next one allocates, so memory never spikes during a rebuild.
 - The flux update is bound by texture fetches, not arithmetic. This is why the uniform grid
   stores no primitives and why a slope-storage pass was never added.
 - Textures beat storage buffers for the stencil by about 1.4×.
+- Nearly all of the update's cost is face work (reconstruction and Riemann solves), which the
+  gather form does twice per face. On the uniform grid the update therefore computes each face
+  of its workgroup's box once, into workgroup memory, and each cell reads its six
+  (`hydro/tile.wgsl`); faces on the box's edge are computed again by the neighboring workgroup,
+  so no flux leaves the pass. On an Apple M4 Pro in Chrome this made the largest uniform grids
+  1.3 to 1.5 times faster (256^3 and 2048^2; adaptive meshes use their own update). Caching the
+  stencil's cell states in workgroup memory instead was slower than the texture loads it
+  replaced, and the shape of the workgroup made no difference within a few percent.
+- Bit-identical faces cannot rest on two copies of the same arithmetic. WGSL allows a compiler
+  to fuse and reassociate floating-point operations (WGSL 15.7.5), and Dawn compiles Metal
+  shaders in relaxed math mode: on an Apple M4 Pro the gather's two call sites for a face (a
+  cell's lower face and its neighbor's upper face) disagreed in the last bit on thousands of
+  faces, and the flux checks of the validation suite failed. The tiled update instead computes
+  every shared face with the same code in one compiled pipeline (it is not split into interior
+  and shell pipelines like the other stencil passes), and every face agrees. This costs about
+  10% against splitting it, for the boundary mapping that runs at run time.
 - Viscosity makes the flux update 1.6× (2D) to 1.8× (3D) as long, because of the extra diagonal
   loads. Conduction alone is not measurable.
 - Systematic throughput measurements (cell updates per second on named GPUs and browsers) have
