@@ -2,6 +2,7 @@
 import { BUILD, reportError, setAdapterInfo } from './errors';
 import { decodeLink, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
+import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
@@ -1169,6 +1170,7 @@ const SURVIVAL_MS = 4000;
 function enqueue(job: () => Promise<void>): Promise<void> {
   queue = queue.then(async () => {
     building = true;
+    resetCompileCount();
     try {
       await job();
     } catch (e) {
@@ -1278,6 +1280,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     pendingBrush = null;
     sources = [];
     if (old) {
+      setLoadStage('Freeing the last run');
       old.destroy();
       // Free the old run's memory before the new one takes its own: the two together are what
       // kills the page on a phone. Waiting for its work to finish is not enough: the browser
@@ -1294,8 +1297,9 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     renderer.fieldPipelines(fieldShaderFor(cfg), cfg, cfg.amrLevels > 0 && cfg.ndim === 3).catch(() => {});
     // Shown as soon as it can be drawn; on the adaptive mesh it starts stepping once its update
     // pass has compiled (gpu/device.ts), the slowest part of a first load.
-    const s = await createSim(gpu, cfg, { deferUpdate: true });
-    await renderer.attach(s);
+    const s = await createSim(gpu, cfg, { deferUpdate: true }).finally(() => setLoadStage(''));
+    setLoadStage('Preparing the display');
+    await renderer.attach(s).finally(() => setLoadStage(''));
     sim = s;
     // The page survived the allocation for a few seconds: it is safe (gpu/memory.ts).
     const gen = ++buildGen;
@@ -1508,6 +1512,7 @@ function restartRun(replay = false) {
     if (!sim) return;
     reloading = 'restart';
     try {
+      setLoadStage(INIT_STAGE);
       await painted();
       sim.cfg = cfg;
       sim.reset();
@@ -1518,6 +1523,7 @@ function restartRun(replay = false) {
       lastDiag = undefined;
     } finally {
       reloading = null;
+      endLoadStage(INIT_STAGE); // a star now settling has named its own
     }
   });
 }
@@ -3182,6 +3188,32 @@ const MAX_BATCH = 64;
 const loadingEl = $('loading');
 const loadingText = $('loading-text');
 
+/** What the loading notice says: the stage the load is at (gpu/progress.ts), with a count while shaders compile. */
+function loadingMessage(): string {
+  const stage = loadStage();
+  const c = compileProgress();
+  const compiling = `${COMPILE_STAGE}${c.pending > 0 && c.total > 1 ? ` (${c.done} of ${c.total})` : ''}…`;
+  if (stage === COMPILE_STAGE) return compiling;
+  if (stage) return `${stage}…`;
+  if ((reloading === 'shaders' && !sim?.preparing) || sim?.compiling) return compiling;
+  return 'Loading simulation…';
+}
+function showLoadingMessage() {
+  const text = loadingMessage();
+  if (loadingText.textContent !== text) loadingText.textContent = text;
+}
+// The notice follows a load as it goes, the first one included (the frame loop is not running
+// yet). Before a stage that blocks the page it is given a frame to show. A page that is drawing
+// no frames (hidden, or out of sight while still reporting itself visible, where timers are
+// throttled too) must not hold the load up: whether frames are coming is watched directly.
+let lastFrameAt = 0;
+const frameBeat = () => {
+  lastFrameAt = performance.now();
+  requestAnimationFrame(frameBeat);
+};
+requestAnimationFrame(frameBeat);
+watchLoading(showLoadingMessage, () => (headless || performance.now() - lastFrameAt > 250 ? Promise.resolve() : painted()));
+
 /**
  * GPU time a batch aims at, and how much to keep queued: enough to cover the delay in
  * reporting completion, plus QUEUE_MS for the page being busy elsewhere (an adaptive run's
@@ -3308,10 +3340,7 @@ function tick(now: number) {
   // Loading: no simulation yet, a restart or rebuild under way, or a star still settling.
   const loading = !sim || !!reloading || sim.preparing;
   if (loadingEl.hidden === loading) loadingEl.hidden = !loading;
-  if (loading) {
-    const text = (reloading === 'shaders' && !sim?.preparing) || sim?.compiling ? 'Compiling shaders…' : 'Loading simulation…';
-    if (loadingText.textContent !== text) loadingText.textContent = text;
-  }
+  if (loading) showLoadingMessage();
   if (!sim || building || headless) return;
   const s = sim;
   // Top up the steps (normally done as batches complete), then edit and draw behind them.
@@ -3408,6 +3437,7 @@ function tick(now: number) {
 /** The page is up: WebGPU found and the first run built (or failed, which window.shaderous reports). */
 const ready = (async () => {
   try {
+    setLoadStage('Starting WebGPU');
     gpu = await initGpu();
     setAdapter(gpu.info);
     initTiming(gpu.device);
@@ -3415,6 +3445,7 @@ const ready = (async () => {
     const name = `${gpu.info.vendor} ${gpu.info.architecture}`.trim() || 'WebGPU adapter';
     setAdapterInfo(`${name}${gpu.info.description ? ' (' + gpu.info.description + ')' : ''}`);
     $('adapter').textContent = gpu.info.fallback ? `${name} (software fallback: expect it to be slow)` : name;
+    setLoadStage('Preparing the display');
     renderer = new Renderer(gpu, canvas);
     await renderer.init();
     await measurePollLatency();

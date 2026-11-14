@@ -17,6 +17,7 @@
 // (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, tex3d, type Bindable, type Gpu } from '../gpu/device';
+import { COMPILE_STAGE, INIT_STAGE, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
@@ -440,7 +441,9 @@ export class AmrSim implements Simulation {
   }
 
   private static async build(gpu: Gpu, cfg: SimConfig, slots: number, deferUpdate: boolean): Promise<AmrSim> {
+    setLoadStage('Allocating the mesh');
     const sim = new AmrSim(gpu, cfg, slots);
+    setLoadStage(COMPILE_STAGE);
     const d = sim.device;
     const v = (t: GPUTexture) => t.createView();
     const depth = cfg.ndim === 2 ? 1 : BS;
@@ -521,7 +524,9 @@ export class AmrSim implements Simulation {
       });
     }
     await sim.buildHydro(deferUpdate);
+    await showLoadStage(INIT_STAGE);
     sim.reset();
+    endLoadStage(INIT_STAGE);
     await sim.settled;
     return sim;
   }
@@ -1409,6 +1414,7 @@ export class AmrSim implements Simulation {
     const t0 = performance.now();
     this.settled = (async () => {
       try {
+        setLoadStage(settleStage(0));
         const leaf = await this.readLeaves();
         if (epoch !== this.settleEpoch) return;
         const cells: SettleCells = {
@@ -1434,6 +1440,7 @@ export class AmrSim implements Simulation {
           });
         this.settleLog = [];
         for (let round = 0; round < SETTLE_ROUNDS; round++) {
+          setLoadStage(settleStage(round));
           const phi = await this.readLeafPotential();
           if (epoch !== this.settleEpoch || tree !== this.tree) return;
           const change = settler.round(phi);
@@ -1449,6 +1456,7 @@ export class AmrSim implements Simulation {
       } finally {
         if (epoch === this.settleEpoch) {
           this.settling = false;
+          setLoadStage('');
           this.settleMs = performance.now() - t0;
         }
       }

@@ -1,4 +1,5 @@
 // Device setup, limit checks, and small texture / pipeline helpers.
+import { countCompile } from './progress';
 
 export interface Gpu {
   adapter: GPUAdapter;
@@ -140,6 +141,7 @@ export function computePipeline(
     return p;
   }
   p = compilePipeline(device, code, label, constants, entryPoint);
+  countCompile(p);
   cache.set(key, p);
   p.catch(() => cache.delete(key));
   if (cache.size > PIPELINE_CACHE_MAX) cache.delete(cache.keys().next().value!);

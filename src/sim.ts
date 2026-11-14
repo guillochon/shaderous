@@ -2,6 +2,7 @@
 import { assemble } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
+import { COMPILE_STAGE, INIT_STAGE, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
 import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
@@ -873,6 +874,7 @@ export class Sim implements Simulation {
       if (why) throw new Error(`MHD: ${why}`);
     }
     noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
+    setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
     const n = cfg.n;
@@ -903,6 +905,7 @@ export class Sim implements Simulation {
     // once (gpu/device.ts). The hydro passes wait only for the solver's potential and the
     // timestep's first records, which they bind.
     const v = (t: GPUTexture) => t.createView();
+    setLoadStage(COMPILE_STAGE);
     const hydro = (async () => {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
@@ -949,7 +952,9 @@ export class Sim implements Simulation {
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
+    await showLoadStage(INIT_STAGE);
     sim.reset();
+    endLoadStage(INIT_STAGE);
     await sim.settled;
     return sim;
   }
@@ -1231,6 +1236,7 @@ export class Sim implements Simulation {
         const settler = new Settler(set, cells);
         this.settleLog = [];
         for (let round = 0; round < SETTLE_ROUNDS; round++) {
+          setLoadStage(settleStage(round));
           const phi = await this.readPotential();
           if (epoch !== this.settleEpoch) return;
           const change = settler.round(phi);
@@ -1246,6 +1252,7 @@ export class Sim implements Simulation {
       } finally {
         if (epoch === this.settleEpoch) {
           this.settling = false;
+          setLoadStage('');
           this.settleMs = performance.now() - t0;
         }
       }
