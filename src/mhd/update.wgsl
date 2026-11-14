@@ -61,7 +61,10 @@ fn impulse(t: vec3<i32>) -> vec3<f32> {
 fn two_sum(a: f32, b: f32) -> vec2<f32> {
   let s = opaque(a + b);
   let bb = opaque(s - a);
-  return vec2<f32>(s, (a - opaque(s - bb)) + (b - bb));
+  // Each error term through opaque() too: (a - x) + (b - bb) is otherwise free to be regrouped
+  // as (a + b) - (x + bb), which loses the very rounding this recovers. Firefox's shader compiler
+  // did (div B grew as an uncompensated sum's, 4e-6 after 751 steps of Orszag-Tang).
+  return vec2<f32>(s, opaque(a - opaque(s - bb)) + opaque(b - bb));
 }
 
 // The face along a of texel t after the stage, as (b, c): the pair at the start plus the
