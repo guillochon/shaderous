@@ -805,10 +805,9 @@ The species machinery of [§12](#12-passive-scalar-and-species) and the composit
 
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
 rotor, Brio-Wu, the field loop and the Alfvén wave) solve ideal MHD, coupled to the gas
-dynamics alone. It runs on the uniform grid, and on the adaptive mesh as the initial
-conditions refined it: the mesh does not yet follow the flow with a field, and every block
-takes the same timestep. Regridding, time bins, gravity, point masses and field-line tubes are
-the later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
+dynamics alone. It runs on the uniform grid and on the adaptive mesh, which re-meshes with the
+field (below). So far every block takes the same timestep. Time bins, gravity, point masses
+and field-line tubes are the later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
@@ -907,6 +906,31 @@ $`E`$ includes $`B^2/2`$.
   - magnetic energy is within 0.3% (rotor) and 0.1% (blast) of the uniform grid at the finest
     resolution;
   - chunking changes no bit.
+- **Re-meshing** (`mhd/amr_regrid.wgsl`, plan section 6), beside the cells' re-meshing and with
+  the same table:
+  - A copied block keeps its faces and their compensations.
+  - A merged block's face is the mean of the old children's faces on it. On its boundary it
+    takes instead the copy (and compensation) of an old leaf at its level, so the two copies
+    agree bit for bit.
+  - A new child first gets the fine faces on each coarse cell's faces. Where an old leaf at the
+    fine level held one, it is copied with its compensation (never interpolated where fine data
+    exist). Otherwise the coarse face is used, with limited slopes across it that keep its mean.
+    The faces inside each coarse cell then start from the mean of the two outer faces in line
+    with them. They are corrected by the least change, $`\delta = -A^\top L^{+} r`$, that makes
+    every fine cell divergence-free. Here $`r`$ is the fine cells' divergence, $`A`$ the
+    incidence of interior faces on cells, and $`L = AA^\top`$ the Laplacian of the hypercube of
+    $`2^d`$ fine cells. The Walsh functions diagonalize it (eigenvalue $`2|s|`$), so $`L^+`$ is a
+    transform and a division. The construction aims where [Tóth & Roe (2002)][TR02] do (exactly
+    divergence-free, conservative, existing fine faces kept), but it is not their formulas.
+  - The total energy of re-meshed cells is rebuilt from their kinetic and internal energy and
+    the new $`B^2/2`$.
+
+  The tree and leaf index of the old mesh are copied before the new one is uploaded, for these
+  lookups. In the `mhd-amr-moving` test, a dense field loop carried once around the box is
+  re-meshed 144 times (the `field-loop-dense` preset). $`
+abla\cdot B`$ stays at
+  $`1.5	imes10^{-7}`$, same-level shared faces are bit for bit, coarse faces equal their fine
+  mean to $`6	imes10^{-10}`$, and 96% of the magnetic energy is kept (uniform 256²: 96%).
 - **CPU reference.** `src/reference/mhd.ts` is the same scheme in float64. After 30 steps of
   Orszag-Tang at 128² and 15 of a 3D blast the GPU agrees with it to $`10^{-7}`$ in density,
   energy and face field.
@@ -950,7 +974,7 @@ was not available to check, so they are not implemented, and the default stays t
 
 ## 22. Validation
 
-The validation suite (`src/validation/tests.ts`) has 54 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 55 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -1012,6 +1036,7 @@ result.
 [SG09]: https://doi.org/10.1016/j.newast.2008.06.003
 [Lee13]: https://doi.org/10.1016/j.jcp.2013.02.049
 [LD09]: https://doi.org/10.1016/j.jcp.2008.08.026
+[TR02]: https://doi.org/10.1006/jcph.2002.7120
 [GS05]: https://doi.org/10.1016/j.jcp.2004.11.016
 [MK05]: https://doi.org/10.1016/j.jcp.2005.02.017
 [Truelove1997]: https://doi.org/10.1086/310975

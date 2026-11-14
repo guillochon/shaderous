@@ -17,7 +17,14 @@ timestep, as section 4b designs it. The design changed in two places:
 - a boundary face is read from the block at its own level.
 
 There are three validation tests, plus edge 2:1 balance in the tree. Still to do in phase 2:
-time bins (section 5). The mesh is frozen with a field until phase 3's regridding.
+time bins (section 5).
+
+Phase 3 done (2026-11-14): divergence-free re-meshing of the field (mhd/amr_regrid.wgsl), with
+a least-change projection inside each coarse cell (Walsh transform of the hypercube Laplacian)
+in place of Toth & Roe's explicit formulas. Copied faces carry their compensations. The energy
+is rebuilt from the gas's. The refinement checks run with a field. There is a moving-mesh test on
+the new `field-loop-dense` preset. Not done: restarting an adaptive-mesh run with a field from a
+snapshot.
 
 Goal: ideal magnetohydrodynamics on the uniform grid and the adaptive mesh, with per-block
 time bins from the first adaptive-mesh milestone, so that Shaderous can repeat the magnetized

@@ -39,6 +39,8 @@ interface Deps {
   bt: GPUBuffer;
   listLeaf: GPUBuffer;
   idx: GPUTexture;
+  /** the regrid table (amr/tree.ts RG_*) */
+  rg: GPUBuffer;
   /** state[parity] = [U1, U2] */
   state: GPUTexture[][];
   /** the half-step conserved state (the hydro predictor's textures) */
@@ -58,6 +60,17 @@ export class AmrMhd {
   get prim(): GPUTexture {
     return this.w[0];
   }
+  /** The assembled primitives W1 and W2, for the refinement indicator and the cells' re-meshing. */
+  get primitives(): GPUTexture[] {
+    return [this.w[0], this.w[1]];
+  }
+  /** The old tree, copied before a re-mesh replaces it. */
+  private btOld: GPUBuffer;
+  private idxOld: GPUTexture;
+  private pRegrid!: GPUComputePipeline;
+  private pEnergy!: GPUComputePipeline;
+  private gRegrid: GPUBindGroup[] = [];
+  private gEnergy: GPUBindGroup[] = [];
   private emf: GPUTexture;
   private scratch: GPUBuffer;
   private register: GPUBuffer;
@@ -91,6 +104,11 @@ export class AmrMhd {
     this.perChunk = Math.max(1, Math.min(dep.cap, Math.floor(scratchBytes / perBlock), 65535));
     this.scratch = d.createBuffer({ label: 'MHD flux scratch', size: this.perChunk * perBlock, usage: GPUBufferUsage.STORAGE });
     this.register = d.createBuffer({ label: 'MHD flux register', size: dep.cap * 6 * BS * BS * 32, usage: GPUBufferUsage.STORAGE });
+    this.btOld = d.createBuffer({ label: 'old block table', size: dep.bt.size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.idxOld = d.createTexture({
+      label: 'old leaf index', size: [dep.idx.width, dep.idx.height, dep.idx.depthOrArrayLayers], dimension: '3d', format: 'r32uint',
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+    });
     for (let i = 0; i * this.perChunk < dep.cap; i++) {
       this.chunkBufs.push(d.createBuffer({ label: `MHD chunk ${i}`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
     }
@@ -120,7 +138,9 @@ export class AmrMhd {
     const { device: d, cfg, params, clock, bt, listLeaf, idx, state, half, rates } = this.dep;
     const slots = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
     const v = (x: GPUTexture) => x.createView();
-    const [a1, a2, f1, f2, e1, e2, u1, u2, red] = await Promise.all([
+    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red] = await Promise.all([
+      computePipeline(d, assemble('mhd/amr_regrid.wgsl', slots), 'MHD re-mesh faces'),
+      computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', slots), 'MHD re-mesh energy'),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1 }),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 2', { RATES_ON: 0 }),
       computePipeline(d, assemble('mhd/amr_flux.wgsl', slots), 'MHD block fluxes 1', { STAGE: 1 }),
@@ -139,6 +159,8 @@ export class AmrMhd {
         'magnetic diagnostics (blocks)',
       ),
     ]);
+    this.pRegrid = rgp;
+    this.pEnergy = enp;
     this.pAssemble = [a1, a2];
     this.pFlux = [f1, f2];
     this.pEmf = [e1, e2];
@@ -150,6 +172,24 @@ export class AmrMhd {
     this.gFlux = [];
     this.gEmf = [];
     this.gUpdate = [];
+    this.gRegrid = [];
+    this.gEnergy = [];
+    for (let p = 0; p < 2; p++) {
+      const o = 1 - p;
+      // Re-meshing from parity p: faces into o (with the old tree), then energy and all back into p.
+      this.gRegrid.push(
+        bindGroup(d, rgp, {
+          0: params, 30: this.btOld, 31: listLeaf, 7: this.dep.rg, 28: v(this.idxOld),
+          9: v(this.faces[p]), 10: v(this.comps[p]), 11: v(this.faces[o]), 13: v(this.comps[o]),
+        }),
+      );
+      this.gEnergy.push(
+        bindGroup(d, enp, {
+          0: params, 31: listLeaf, 7: this.dep.rg, 1: v(state[o][0]), 2: v(state[o][1]), 3: v(this.faces[o]), 4: v(this.comps[o]),
+          5: v(state[p][0]), 6: v(state[p][1]), 8: v(this.faces[p]), 10: v(this.comps[p]),
+        }),
+      );
+    }
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       const out = { 3: v(this.w[0]), 4: v(this.w[1]), 5: v(this.w[2]), 6: v(this.fa), 12: rates, 28: v(idx) };
@@ -222,6 +262,25 @@ export class AmrMhd {
     }
   }
 
+  /** Copy the block table and leaf index, before a re-mesh uploads the new ones. */
+  snapshotTree(enc: GPUCommandEncoder) {
+    enc.copyBufferToBuffer(this.dep.bt, 0, this.btOld, 0, this.dep.bt.size);
+    enc.copyTextureToTexture({ texture: this.dep.idx }, { texture: this.idxOld }, [this.dep.idx.width, this.dep.idx.height, this.dep.idx.depthOrArrayLayers]);
+  }
+
+  /**
+   * After amr/regrid.wgsl has re-meshed the cells from parity p into the other: re-mesh the faces
+   * likewise (mhd/amr_regrid.wgsl), then rebuild the energy and bring state and faces back into
+   * parity p (mhd/amr_regrid_energy.wgsl). The run stays in parity p.
+   */
+  encodeRegrid(pass: GPUComputePassEncoder, p: number) {
+    for (const [pipe, g] of [[this.pRegrid, this.gRegrid[p]], [this.pEnergy, this.gEnergy[p]]] as const) {
+      pass.setPipeline(pipe);
+      pass.setBindGroup(0, g);
+      pass.dispatchWorkgroups(this.groups(BS + 1), this.nLeaf);
+    }
+  }
+
   /** Encode the start-of-step assembly alone, which measures the timestep rates. */
   encodeAssembly(pass: GPUComputePassEncoder, parity: number, dispatch: () => void) {
     pass.setPipeline(this.pAssemble[0]);
@@ -264,6 +323,8 @@ export class AmrMhd {
   destroy() {
     for (const x of [...this.faces, ...this.comps, this.halfFaces, this.fa, ...this.w, this.emf]) x.destroy();
     this.scratch.destroy();
+    this.btOld.destroy();
+    this.idxOld.destroy();
     this.register.destroy();
     for (const b of this.chunkBufs) b.destroy();
   }

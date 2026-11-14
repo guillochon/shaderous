@@ -94,6 +94,25 @@ export const fieldLoop: Problem = {
 };
 
 /**
+ * The field loop with the loop's gas twice as dense as its surroundings, at the same pressure: a
+ * contact that the adaptive mesh refines around and must follow across the box, refining ahead
+ * of the loop and merging behind it, with the field re-meshed divergence-free each time
+ * (mhd/amr_regrid.wgsl). On a uniform grid it is the field loop with a passive density contrast.
+ */
+export const fieldLoopDense: Problem = {
+  ...fieldLoop,
+  id: 'field-loop-dense',
+  blurb: 'The field loop in gas twice as dense as its surroundings: on the adaptive mesh, the refinement follows the loop around the box.',
+  grid: { ndim: 2, n: 256, amr: 1 },
+  // The loop's gas (density 2) is always kept at the finest level, so the refinement moves with it.
+  refineDense: 1.5,
+  init: () => (x, y) => {
+    const inside = Math.hypot(x, y) < 0.3;
+    return { rho: inside ? 2 : 1, vx: 2, vy: 1, vz: 0, p: 1, s: inside ? 1 : 0 };
+  },
+};
+
+/**
  * MHD rotor (Balsara & Spicer 1999; the first rotor of Toth 2000): a dense disk spinning in a
  * uniform field B_x = 5 / sqrt(4 pi), gamma = 1.4. Torsional Alfven waves carry its angular
  * momentum away and squeeze it into an oblong.

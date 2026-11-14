@@ -351,7 +351,8 @@ export class AmrSim implements Simulation {
       size: [m, m, cfg.ndim === 3 ? m : 1],
       dimension: '3d',
       format: 'r32uint',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST,
+      // COPY_SRC: re-meshing a magnetic field reads the old index (mhd/amr_regrid.wgsl).
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC,
     });
     const storage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -478,8 +479,19 @@ export class AmrSim implements Simulation {
     ]);
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
+    if (cfg.problem.mhd) {
+      const side = sim.slotsPerSide * PAD;
+      sim.mhd = await AmrMhd.create({
+        device: d, cfg, cap: sim.cap,
+        texture: (label) => tex3d(d, side, 'rgba32float', label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
+        params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg,
+        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots,
+      });
+    }
+    // With a magnetic field the refinement indicator reads its assembly's primitives (the same layout).
+    const flagW = sim.mhd ? sim.mhd.primitives : sim.prim;
     sim.gFlag = bindGroup(d, sim.pFlag, {
-      0: sim.params, 1: v(sim.prim[0]), 2: v(sim.prim[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf,
+      0: sim.params, 1: v(flagW[0]), 2: v(flagW[1]), 3: sim.flags, 4: sim.bh, 30: sim.bt, 31: sim.listLeaf,
       ...((sim.speciesX ? { 5: v(sim.speciesX) } : {}) as Record<number, GPUTextureView>),
     });
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
@@ -493,15 +505,6 @@ export class AmrSim implements Simulation {
       });
     }
     await sim.buildHydro(deferUpdate);
-    if (cfg.problem.mhd) {
-      const side = sim.slotsPerSide * PAD;
-      sim.mhd = await AmrMhd.create({
-        device: d, cfg, cap: sim.cap,
-        texture: (label) => tex3d(d, side, 'rgba32float', label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
-        params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx,
-        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots,
-      });
-    }
     sim.reset();
     await sim.settled;
     return sim;
@@ -650,7 +653,8 @@ export class AmrSim implements Simulation {
       else this.gAssemble.push(assembly(p, this.listAll));
       this.gRegrid.push(
         bindGroup(d, this.pRegrid, {
-          0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
+          0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]),
+          3: v((this.mhd?.primitives ?? this.prim)[0]), 4: v((this.mhd?.primitives ?? this.prim)[1]),
           5: v(this.state[o][0]), 6: v(this.state[o][1]), 7: this.rg, 31: this.listLeaf,
         }),
       );
@@ -1494,12 +1498,25 @@ export class AmrSim implements Simulation {
   private applyRegrid(enc: GPUCommandEncoder) {
     const plan = this.pending!;
     this.pending = null;
+    if (this.mhd) {
+      // Before the new tree replaces it: the primitives of the current state with their ghosts
+      // (the slopes of prolongation), and a copy of the old block table and leaf index, which
+      // the field's re-meshing looks up. Submitted now, ahead of the new tree's upload.
+      const pre = this.device.createCommandEncoder();
+      const pp = beginPass(pre);
+      this.mhd.encodeAssembly(pp, this.cur, () => this.flat(pp, this.nLeaf, NG));
+      pp.end();
+      this.mhd.snapshotTree(pre);
+      this.device.queue.submit([pre.finish()]);
+    }
     this.uploadTree();
     this.device.queue.writeBuffer(this.rg, 0, BlockTree.regridTable(plan.ops, this.cap) as Int32Array<ArrayBuffer>);
     const pass = beginPass(enc);
     pass.setPipeline(this.pRegrid);
     pass.setBindGroup(0, this.gRegrid[this.cur]);
     this.interior(pass, this.nLeaf);
+    // The field's faces, then the energy rebuilt and everything back in this parity.
+    this.mhd?.encodeRegrid(pass, this.cur);
     if (this.speciesGroups) {
       pass.setPipeline(this.pSpecies[3]);
       pass.setBindGroup(0, this.gSpecies[3][this.cur][this.speciesCur]);
@@ -1507,7 +1524,7 @@ export class AmrSim implements Simulation {
       this.speciesCur = 1 - this.speciesCur;
     }
     pass.end();
-    this.cur = 1 - this.cur;
+    if (!this.mhd) this.cur = 1 - this.cur;
     this.regrids++;
     // The potential and field belong to the old mesh: solve again on the new one, starting
     // new blocks from their parents' values.
@@ -1564,6 +1581,10 @@ export class AmrSim implements Simulation {
         mp.end();
         this.cur = 1 - p;
         this.stepsSinceFlag++;
+        if (this.encodeFlags(enc)) {
+          done++;
+          break;
+        }
         continue;
       }
       const pass = beginPass(enc);
@@ -1653,11 +1674,11 @@ export class AmrSim implements Simulation {
    * queued behind it in the same submission: the flow may only run MAX_STEPS_AHEAD past it.
    */
   private encodeFlags(enc: GPUCommandEncoder): boolean {
-    // With a magnetic field the mesh stays as it was built (regridding is phase 3 of docs/mhd-plan.md).
-    if (this.mhd) return false;
     if (this.levels === 0 || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return false;
     enc.clearBuffer(this.flags);
     const fp = beginPass(enc);
+    // With a magnetic field: the indicator reads the primitives of the state as it is now.
+    if (this.mhd) this.mhd.encodeAssembly(fp, this.cur, () => this.flat(fp, this.nLeaf, NG));
     fp.setPipeline(this.pFlag);
     fp.setBindGroup(0, this.gFlag);
     this.interior(fp, this.nLeaf);
@@ -2166,8 +2187,7 @@ export class AmrSim implements Simulation {
     const bins = this.builtBins === 0 || share === null ? ''
       : this.binPause > 0 ? `, local timesteps paused (would save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates)`
       : `, local timesteps save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates`;
-    const fixed = this.mhd ? ', mesh fixed (it does not yet follow the flow with a magnetic field)' : '';
-    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${bins}${fixed}`;
+    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${bins}`;
   }
 
   /** Every leaf cell with its position and size (validation only; reads the whole atlas). */

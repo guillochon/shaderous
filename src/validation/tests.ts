@@ -29,7 +29,7 @@ import { binary } from '../problems/binary';
 import { thermalInstability } from '../problems/thermal_instability';
 import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
-import { alfvenWave, brioWu, fieldLoop, mhdBlast, mhdRotor, orszagTang } from '../problems/mhd';
+import { alfvenWave, brioWu, fieldLoop, fieldLoopDense, mhdBlast, mhdRotor, orszagTang } from '../problems/mhd';
 import { initialFaces, setMhdSlabBytes } from '../mhd/mhd';
 import { RefMhd } from '../reference/mhd';
 import { setMhdScratchBytes } from '../mhd/amr_mhd';
@@ -2469,9 +2469,11 @@ export const TESTS: TestDef[] = [
         sim.step(40);
         return sim.diagnostics();
       });
-      return withAmr(gpu, orszagTang, 256, { ndim: 2, amrLevels: 1 }, async (sim) => {
+      // A refinement threshold the indicator (at most 1) never reaches: the mesh stays as it starts.
+      // Run to the uniform run's time (a block grid's step() stops early at refinement checks).
+      return withAmr(gpu, orszagTang, 256, { ndim: 2, amrLevels: 1, refineHi: 2, tEnd: uni.t }, async (sim) => {
         const levels = new Set(sim.tree.leaves().map((b) => b.level));
-        sim.step(40);
+        await sim.runToEnd(64);
         const d = await sim.diagnostics();
         const faces = await sim.faceConsistency();
         const rel = (x: number, y: number) => Math.abs(x - y) / Math.max(Math.abs(y), 1e-30);
@@ -2491,9 +2493,9 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'mhd-amr-refined',
-    name: 'MHD on a refined static mesh: rotor (2D, 256 finest, 1 level) and blast (3D, 128 finest, 1 level)',
+    name: 'MHD on a refined mesh, re-meshed as it goes: rotor (2D, 256 finest, 1 level) and blast (3D, 128 finest, 1 level)',
     criterion:
-      'Mass and total energy conserved to 3e-6; |div B| dx / max |B| below 1e-6; faces shared by two leaves at one level agree bit for bit, and a coarse face on a refinement boundary is the mean of the fine faces on it to 1e-6 of the largest face; magnetic energy within 1% (rotor) and 0.5% (blast) of the uniform grid at the finest resolution, and the rotor\'s peak density within 3%',
+      'Mass conserved to 3e-6 and total energy to 1e-4 (re-meshing keeps the gas energy, not the field\'s); |div B| dx / max |B| below 1e-6; faces shared by two leaves at one level agree bit for bit, and a coarse face on a refinement boundary is the mean of the fine faces on it to 1e-6 of the largest face; magnetic energy within 1% (rotor) and 0.5% (blast) of the uniform grid at the finest resolution, and the rotor\'s peak density within 3%',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -2523,7 +2525,7 @@ export const TESTS: TestDef[] = [
           m[`${k}_magnetic_vs_uniform`] = Math.abs(d.magnetic!.eMag / uni.magnetic!.eMag - 1);
           m[`${k}_peak_density_vs_uniform`] = Math.abs(d.ranges[0][1] / uni.ranges[0][1] - 1);
           pass &&=
-            levels.size === 2 && m[`${k}_energy_error`] < 3e-6 && m[`${k}_mass_error`] < 3e-6 && m[`${k}_divB`] < 1e-6 &&
+            levels.size === 2 && m[`${k}_energy_error`] < 1e-4 && m[`${k}_mass_error`] < 3e-6 && m[`${k}_divB`] < 1e-6 &&
             faces.mismatched === 0 && faces.cfFaces > 0 && faces.coarseFine < 1e-6 &&
             m[`${k}_magnetic_vs_uniform`] < magTol && m[`${k}_peak_density_vs_uniform`] < rhoTol;
         });
@@ -2554,6 +2556,52 @@ export const TESTS: TestDef[] = [
       let diff = 0;
       for (let k = 0; k < 3; k++) for (let i = 0; i < runs[0][k].length; i++) if (runs[0][k][i] !== runs[1][k][i]) diff++;
       return { pass: diff === 0, metrics: { differing_values: diff } };
+    },
+  },
+  {
+    id: 'mhd-amr-moving',
+    name: 'MHD on a moving mesh: the dense field loop around the box (2D, 256 finest, 1 level) and a blast (3D, 128 finest, 1 level)',
+    criterion:
+      'Re-meshing at least 20 times (refining ahead of the loop, merging behind it): |div B| dx / max |B| below 1e-6 throughout and at the end; faces two leaves share agree (bit for bit at one level, coarse the mean of fine to 1e-6); mass conserved to 1e-6; the loop keeps at least 94% of its magnetic energy and is back at the center (density center within 1e-3); the 3D blast re-meshes with |div B| below 1e-6 and its total energy within 1e-3 (re-meshing keeps the gas energy, not the field\'s)',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      await withAmr(gpu, fieldLoopDense, 256, { ndim: 2, amrLevels: 1 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        let worstDiv = 0;
+        for (const t of [0.25, 0.5, 0.75, 1]) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          await sim.runToEnd(64);
+          worstDiv = Math.max(worstDiv, (await sim.diagnostics()).magnetic!.divB);
+        }
+        const d = await sim.diagnostics();
+        const faces = await sim.faceConsistency();
+        const regrids = (sim as unknown as { regrids: number }).regrids;
+        m.loop_regrids = regrids;
+        m.loop_divB_worst = worstDiv;
+        m.loop_mass_error = Math.abs(d.mass / d0.mass - 1);
+        m.loop_magnetic_kept = d.magnetic!.eMag / d0.magnetic!.eMag;
+        m.loop_center_offset = Math.hypot(d.com[0], d.com[1]);
+        m.loop_shared_mismatched = faces.mismatched;
+        m.loop_coarse_fine = faces.coarseFine;
+        pass &&= regrids >= 20 && worstDiv < 1e-6 && m.loop_mass_error < 1e-6 && m.loop_magnetic_kept > 0.94 && m.loop_center_offset < 1e-3 &&
+          faces.mismatched === 0 && faces.coarseFine < 1e-6;
+      });
+      await withAmr(gpu, mhdBlast, 128, { ndim: 3, amrLevels: 1 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        const faces = await sim.faceConsistency();
+        m.blast_regrids = (sim as unknown as { regrids: number }).regrids;
+        m.blast_divB = d.magnetic!.divB;
+        m.blast_energy_error = Math.abs(d.eTot / d0.eTot - 1);
+        m.blast_mass_error = Math.abs(d.mass / d0.mass - 1);
+        m.blast_shared_mismatched = faces.mismatched;
+        m.blast_coarse_fine = faces.coarseFine;
+        pass &&= m.blast_regrids >= 1 && m.blast_divB < 1e-6 && m.blast_energy_error < 1e-3 && m.blast_mass_error < 1e-6 && faces.mismatched === 0 && faces.coarseFine < 1e-6;
+      });
+      return { pass, metrics: m };
     },
   },
 ];

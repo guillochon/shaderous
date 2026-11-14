@@ -115,6 +115,11 @@ fn face_own(slot: i32, a: i32, l: vec3<i32>) -> f32 {
   return textureLoad(BF, atl(blk_origin(slot), l), 0)[a];
 }
 
+// The texel of the last face face_lvl returned as a plain copy of a leaf's own face (copied
+// true), for a pass that also wants that face's compensation (mhd/amr_regrid.wgsl).
+var<private> g_copied: bool = false;
+var<private> g_copied_at: vec3<i32>;
+
 // Face a with face index g0 (along a: a face index, 0 to n; across: cell indices) at `level`,
 // held at that level or restricted from a finer one: (value, 1), or (0, 0) where the region is
 // coarser. Across a reflecting face of the domain the normal field changes sign; an outflow
@@ -146,7 +151,12 @@ fn face_lvl(level: u32, a: i32, g0: vec3<i32>) -> vec2<f32> {
   var c = g;
   c[a] = min(g[a], n[a] - 1);
   let h = holder(level, c);
-  if (h.rel == 0) { return vec2<f32>(sgn * face_own(h.slot, a, local_of(h.slot, g)), 1.0); }
+  g_copied = false;
+  if (h.rel == 0) {
+    g_copied = sgn > 0.0;
+    g_copied_at = atl(blk_origin(h.slot), local_of(h.slot, g));
+    return vec2<f32>(sgn * face_own(h.slot, a, local_of(h.slot, g)), 1.0);
+  }
   // A face between two cells is also the upper face of the cell below it (texel BS of its
   // block). Where the cell above is at another level, the cell below's block holds the face at
   // this level as it evolves it: on a refinement boundary, the fine block's own face, which
@@ -158,6 +168,8 @@ fn face_lvl(level: u32, a: i32, g0: vec3<i32>) -> vec2<f32> {
     if (hb.rel == 0) {
       var lb = local_of(hb.slot, cb);
       lb[a] += 1;
+      g_copied = sgn > 0.0;
+      g_copied_at = atl(blk_origin(hb.slot), lb);
       return vec2<f32>(sgn * face_own(hb.slot, a, lb), 1.0);
     }
   }
