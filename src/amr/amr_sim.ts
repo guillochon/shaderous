@@ -1197,7 +1197,7 @@ export class AmrSim implements Simulation {
     const levelAt = c.restart?.levelAt;
     const sampled = new Map<Block, { sub: number; ind: number }>();
     for (let limit = this.levels; ; limit--) {
-      this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi);
+      this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi, c.problem.mhd !== undefined);
       this.tree.levelLimit = limit;
       for (let pass = 0; pass < limit; pass++) {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot

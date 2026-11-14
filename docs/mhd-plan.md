@@ -170,6 +170,88 @@ edge neighbors within one level too (and, for the averaging rule, corners). Exte
 rule and the block table with edge neighbors; check how many extra refinements it adds on the
 TDE meshes.
 
+## 4b. Phase 2 design: MHD on the block grid (written 2026-11-14, at the start of phase 2)
+
+This refines sections 3 to 5 now that phase 1 exists. It follows the uniform grid's
+structure (mhd/*.wgsl): per stage, fluxes, then edge impulses, then the update of cells and
+faces. Each pass reads only the block's own padded storage, whose ghosts an assembly pass has
+filled, as the hydro passes on blocks do.
+
+**Edge ghosts.** Hydro on blocks fills face ghosts only. The edge field at a block's edge needs
+the cell diagonally across it, and the stage-2 flux of a face in the ghost row beside the edge
+reconstructs along that row. So MHD assembly also fills edge ghosts, over the region where one
+coordinate is up to two cells outside the block and a second is one cell outside. Corner ghosts
+(three coordinates outside) are never needed.
+
+**One lookup for every ghost.** A ghost cell's value is found from its global position. Each
+axis is mapped through the domain's boundary (wrap, mirror, clamp). The index texture `IDX` (the
+leaf slot per finest-level block) then gives the leaf that covers the cell.
+- Leaf at the same level: copy.
+- One level coarser: prolong.
+- One level finer: restrict from the same-level parent (`u_at`).
+
+The same lookup serves face and edge ghosts, and the 2:1 balance across edges (below) bounds
+the level difference by one.
+
+**Data per block** (atlas layout, `PADW = 20`; texel `l` holds the lower faces of cell `l`, and
+texel `BS` holds the block's upper faces along each axis):
+- face field and compensation, both parities (as on the uniform grid);
+- the half-step face field;
+- the assembled face field, ghosts included;
+- the assembled cell-centered field `W3`;
+- the edge impulses `E` (an atlas, so a coarser neighbor can read a finer block's boundary
+  edges after every block's edge pass);
+- a flux register: each block's fluxes through its six faces, `6 x BS^2` faces of two `vec4`
+  (`4 x BS` in 2D), for the coarser neighbor's flux matching;
+- the half-step conserved state, in the hydro predictor's two textures.
+
+Interior fluxes go to a scratch buffer for a chunk of blocks at a time, like the uniform grid's
+slabs. When every leaf fits in one chunk (the usual case), the fluxes are computed once. When
+they do not, phase B recomputes them.
+
+**Prolongation for ghosts.** Each component is linear along its own axis, between the two
+coarse faces, and constant across it:
+- a fine face that lies on a coarse face takes that face's value;
+- a fine face between two coarse faces takes their mean;
+- a fine cell's centered component is linear between the coarse faces at a quarter and three
+  quarters.
+
+The sum of a fine cell's face differences is then half the coarse cell's, so a ghost cell of a
+divergence-free coarse cell is divergence-free. Phase 3's regridding adds limited tangential
+slopes (Toth & Roe). Restriction is the area mean of the fine faces, and the mean of the fine
+centered fields.
+
+**Edges at refinement boundaries.** Every edge has one value, and the finest blocks touching it
+set it. A block finds, for each edge on its boundary, the leaves around that edge (`IDX` at the
+four cells around it). Where one is finer, it uses the mean of the finer block's two edge
+impulses along it (one in 2D), from that block's `E` atlas. This covers the faces in the
+refinement boundary and the faces normal to it beside it. It also covers edges a block shares
+with a finer block only diagonally (no common face). Blocks at the same level compute shared
+edges identically, from identical ghost data.
+
+**Fluxes at refinement boundaries.** As for hydro: a coarse cell beside a finer block takes the
+mean of the fine fluxes, here read from the fine block's flux register rather than recomputed.
+
+**Edge 2:1 balance.** Blocks that share an edge (in 3D) or a vertex (in 2D, where the edge
+fields sit at vertices) may differ by at most one level. It is a tree option, on for runs with
+a magnetic field, so hydro meshes do not change.
+
+**Order of a step** (single timestep):
+1. Assemble the start state (cells, centered field, faces, ghosts); timestep rates from it.
+2. Stage 1, for every chunk: fluxes, flux register, edge impulses into `E`.
+3. Stage 1, for every chunk (fluxes recomputed if chunked): update into the half-step state.
+4. Assemble the half-step state.
+5. Stage 2 likewise, into the other parity.
+
+Phase 2 freezes the mesh, so regridding stays off with a field until phase 3.
+
+**Initial fields on blocks.** Faces come from line integrals of `A` along edges, each sampled
+at the midpoints of its finest-level segments. A coarse face is then exactly the mean of the
+fine faces covering it, and every leaf starts consistent across levels.
+
+**Time bins** (section 5) follow in the same phase, once single-timestep MHD on a static mesh
+passes its tests.
+
 ## 5. Time bins from the start
 
 Per-block time bins (numerics.md section 18) are part of the adaptive-mesh milestone, not a

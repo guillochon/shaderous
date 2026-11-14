@@ -4,7 +4,9 @@
 // The domain is covered by nr^ndim root blocks. Every block holds BS^ndim cells and may be
 // split into 2^ndim children of half the cell size. Leaves carry the solution; parents carry
 // nothing (coarse data next to a fine region is restricted on the fly from the children).
-// Face neighbors never differ by more than one level (2:1 balance).
+// Face neighbors never differ by more than one level (2:1 balance). With `edgeBalance`, the
+// same holds for blocks that share only an edge (3D) or a vertex (2D): constrained transport
+// for magnetic fields defines each edge's field from the blocks around it (docs/mhd-plan.md).
 
 export const BS = 16; // cells per block side
 export const NG = 2; // ghost layers
@@ -95,6 +97,8 @@ export class BlockTree {
   private newLeaves: Block[] = [];
   private lo: number[];
   private hi: number[];
+  /** Offsets to the blocks sharing only an edge (3D) or a vertex (2D), when edgeBalance is on. */
+  private readonly diagonals: number[][];
 
   /**
    * @param ndim     2 or 3
@@ -110,9 +114,23 @@ export class BlockTree {
     readonly cap: number,
     bcLo: number[],
     bcHi: number[],
+    readonly edgeBalance = false,
   ) {
     this.lo = bcLo;
     this.hi = bcHi;
+    this.diagonals = [];
+    if (edgeBalance) {
+      // Two of the axes in use offset by one: the 4 vertex neighbors in 2D, the 12 edge neighbors in 3D.
+      for (let a = 0; a < ndim; a++)
+        for (let b = a + 1; b < ndim; b++)
+          for (const sa of [-1, 1])
+            for (const sb of [-1, 1]) {
+              const d = [0, 0, 0];
+              d[a] = sa;
+              d[b] = sb;
+              this.diagonals.push(d);
+            }
+    }
     this.nchild = 1 << ndim;
     this.levelLimit = maxLevel;
     this.nface = 2 * ndim;
@@ -242,15 +260,51 @@ export class BlockTree {
     return { kind: 'coarse', block: coarse };
   }
 
+  /**
+   * The leaf (or, if the region is refined further, the same-level block) covering the block
+   * at offset d from b: at b's level, or the coarser leaf around it. Null beyond a closed
+   * boundary of the domain.
+   */
+  atOffset(b: Block, d: number[]): Block | null {
+    const c = [b.c[0], b.c[1], b.c[2] ?? 0];
+    const n = this.nr << b.level;
+    for (let a = 0; a < 3; a++) {
+      if (!d[a]) continue;
+      let v = c[a] + d[a];
+      if (v < 0 || v >= n) {
+        if ((d[a] > 0 ? this.hi[a] : this.lo[a]) !== 0) return null;
+        v = (v + n) % n;
+      }
+      c[a] = v;
+    }
+    for (let l = b.level; l >= 0; l--) {
+      const s = b.level - l;
+      const q = this.blocks.get(this.key(l, c[0] >> s, c[1] >> s, c[2] >> s));
+      if (q) return q;
+    }
+    return null;
+  }
+
+  /** Coarser blocks that must be split before b is (face neighbors, and with edgeBalance the diagonal ones). */
+  private coarserAround(b: Block): Block[] {
+    const out: Block[] = [];
+    for (let f = 0; f < this.nface; f++) {
+      const nb = this.neighbor(b, f);
+      if (nb.kind === 'coarse') out.push(nb.block);
+    }
+    for (const d of this.diagonals) {
+      const q = this.atOffset(b, d);
+      if (q && q.level < b.level) out.push(q);
+    }
+    return out;
+  }
+
   /** Whether refining `b` (and whatever balance drags in) fits in the free slots. */
   private refineCost(b: Block, seen: Set<Block>): number {
     if (seen.has(b) || b.children) return 0;
     seen.add(b);
     let cost = this.nchild;
-    for (let f = 0; f < this.nface; f++) {
-      const nb = this.neighbor(b, f);
-      if (nb.kind === 'coarse') cost += this.refineCost(nb.block, seen);
-    }
+    for (const q of this.coarserAround(b)) cost += this.refineCost(q, seen);
     return cost;
   }
 
@@ -274,10 +328,7 @@ export class BlockTree {
     const done: Block[] = [];
     const split = (q: Block) => {
       if (q.children) return;
-      for (let f = 0; f < this.nface; f++) {
-        const nb = this.neighbor(q, f);
-        if (nb.kind === 'coarse') split(nb.block);
-      }
+      for (const nb of this.coarserAround(q)) split(nb);
       q.children = [];
       this.changed();
       for (let o = 0; o < this.nchild; o++) {
@@ -297,6 +348,10 @@ export class BlockTree {
       for (let f = 0; f < this.nface; f++) {
         const nb = this.neighbor(ch, f);
         if (nb.kind === 'same' && nb.block.children) return false; // a finer leaf would end up two levels away
+      }
+      for (const d of this.diagonals) {
+        const q = this.atOffset(ch, d);
+        if (q && q.level === ch.level && q.children) return false;
       }
     }
     return true;

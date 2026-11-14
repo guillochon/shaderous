@@ -209,3 +209,62 @@ describe('block tree', () => {
     expect(levels).toEqual([...levels].sort((x, y) => x - y));
   });
 });
+
+describe('edge balance (magnetic fields)', () => {
+  /** Offsets to the blocks sharing an edge (3D) or a vertex (2D). */
+  const diagonals = (ndim: number) => {
+    const out: number[][] = [];
+    for (let a = 0; a < ndim; a++)
+      for (let b = a + 1; b < ndim; b++)
+        for (const sa of [-1, 1])
+          for (const sb of [-1, 1]) {
+            const d = [0, 0, 0];
+            d[a] = sa;
+            d[b] = sb;
+            out.push(d);
+          }
+    return out;
+  };
+  /** The largest level difference between a leaf and a coarser leaf it shares only an edge or vertex with. */
+  const worst = (t: BlockTree) => {
+    let w = 0;
+    for (const b of t.leaves())
+      for (const d of diagonals(t.ndim)) {
+        const q = t.atOffset(b, d);
+        if (q && !q.children) w = Math.max(w, b.level - q.level);
+      }
+    return w;
+  };
+
+  it('keeps blocks that share an edge or vertex within one level, through refining and merging', () => {
+    for (const [ndim, bc] of [[2, periodic], [2, outflow], [3, periodic], [3, outflow]] as const) {
+      const t = new BlockTree(ndim, 2, ndim === 2 ? 4 : 3, 4000, [...bc], [...bc], true);
+      let seed = 3;
+      const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+      for (let round = 0; round < 12; round++) {
+        const ind = Array.from({ length: 4000 }, () => rnd() * 1.2);
+        t.adapt((x) => ind[x.slot], 0.85, 0.3);
+        balanced(t);
+        covers(t);
+        expect(worst(t)).toBeLessThanOrEqual(1);
+      }
+    }
+  });
+
+  it('is needed: without it a single deep refinement leaves diagonal blocks two levels apart', () => {
+    for (const ndim of [2, 3] as const) {
+      const without = new BlockTree(ndim, 2, 3, 4000, periodic, periodic);
+      const withIt = new BlockTree(ndim, 2, 3, 4000, periodic, periodic, true);
+      for (const t of [without, withIt]) {
+        // Refine toward one corner of a root block, three times.
+        let b = t.leaves()[0];
+        for (let l = 0; l < 3; l++) {
+          t.refine(b);
+          b = b.children![0];
+        }
+      }
+      expect(worst(without)).toBe(2);
+      expect(worst(withIt)).toBe(1);
+    }
+  });
+});
