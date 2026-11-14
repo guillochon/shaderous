@@ -21,6 +21,8 @@ const POINTS = { space: 512, plane: 1024 };
 const STEP = { space: 1 / 256, plane: 1 / 512 };
 /** Voxels per side of the field-line volume, at most: 3D, and in a plane. */
 const VOXELS = { space: 128, plane: 1024 };
+/** 2D: corners of the flux function's grid per side, at most (render/aflux.wgsl). */
+const FLUX_GRID = 2048;
 /** Lines in the plane: width of the tube drawn, in CSS pixels. */
 const LINE_WIDTH = 3;
 /** Tube radius, in units of the box side. */
@@ -49,15 +51,14 @@ export class FieldLines {
   private pFlat!: GPURenderPipeline;
   private traceLayout!: GPUBindGroupLayout;
   /** 2D: the flux function at the volume's cell corners, its range, and its passes. */
-  private aBuf: GPUBuffer;
+  private aBuf: GPUBuffer | null = null;
   private aRange: GPUBuffer;
+  private aGrid: GPUBuffer;
   private drawFlux: GPUBuffer;
-  private pRow!: GPUComputePipeline;
-  private pCols!: GPUComputePipeline;
   private pFlux!: GPURenderPipeline;
-  private gRow?: GPUBindGroup;
-  private gCols?: GPUBindGroup;
   private gFlux?: GPUBindGroup;
+  /** 2D: the flux function's passes for the run (one bind group per parity of its faces), and its grid's side. */
+  private aflux: { pRow: GPUComputePipeline; pCols: GPUComputePipeline; groups: GPUBindGroup[]; m: number } | null = null;
   /** What drawFlat() draws this frame: traced lines, the flux function's contours, or nothing. */
   private flatKind: 'lines' | 'flux' | null = null;
   /** The run drawn: its sampling pass (one bind group per parity), volume and trace bind group. */
@@ -91,7 +92,7 @@ export class FieldLines {
     this.pts = d.createBuffer({ label: 'field-line points', size: MAX_FIELD_LINES * most * 16, usage: GPUBufferUsage.STORAGE });
     this.keep = d.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.frame = d.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
-    this.aBuf = d.createBuffer({ label: 'flux function', size: (VOXELS.plane + 1) ** 2 * 4, usage: GPUBufferUsage.STORAGE });
+    this.aGrid = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.aRange = d.createBuffer({ size: 8, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.drawFlux = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sampler = d.createSampler({ magFilter: 'linear', minFilter: 'linear', addressModeU: 'clamp-to-edge', addressModeV: 'clamp-to-edge', addressModeW: 'clamp-to-edge' });
@@ -115,9 +116,7 @@ export class FieldLines {
       color: { srcFactor: 'src-alpha', dstFactor: 'one-minus-src-alpha', operation: 'add' },
       alpha: { srcFactor: 'one', dstFactor: 'one-minus-src-alpha', operation: 'add' },
     };
-    [this.pRow, this.pCols, this.pFlux] = await Promise.all([
-      d.createComputePipelineAsync({ label: 'flux function row', layout: 'auto', compute: { module: flux, entryPoint: 'row' } }),
-      d.createComputePipelineAsync({ label: 'flux function columns', layout: 'auto', compute: { module: flux, entryPoint: 'cols' } }),
+    [this.pFlux] = await Promise.all([
       d.createRenderPipelineAsync({
         label: 'flux function contours',
         layout: 'auto',
@@ -164,6 +163,7 @@ export class FieldLines {
     this.run?.bv.destroy();
     this.run?.vv.destroy();
     this.run = null;
+    this.aflux = null;
     this.placedFor = '';
     if (!sim || !sim.cfg.problem.mhd) return;
     const amr = sim.fieldShader === 'amr/field.wgsl';
@@ -214,12 +214,38 @@ export class FieldLines {
     const res = { 0: cam, 4: this.pts, 5: this.frame, 6: this.draw };
     this.gTube = bindGroup(d, this.pTube, res);
     this.gFlat = bindGroup(d, this.pFlat, res);
-    if (flat) {
-      const a = { 4: bv.createView(), 5: this.aBuf, 6: this.aRange };
-      this.gRow = bindGroup(d, this.pRow, a);
-      this.gCols = bindGroup(d, this.pCols, a);
-      this.gFlux = bindGroup(d, this.pFlux, { ...a, 0: cam, 7: this.drawFlux, 8: this.frame });
+    if (flat) await this.attachFlux(sim, amr, bv, cam);
+  }
+
+  /**
+   * 2D: the flux function's passes (render/aflux.wgsl), integrating the run's own face field on a
+   * grid of up to FLUX_GRID cells per side, and the contour pass that draws it.
+   */
+  private async attachFlux(sim: Simulation, amr: boolean, bv: GPUTexture, cam: GPUBuffer) {
+    const d = this.device;
+    const m = Math.min(sim.n, FLUX_GRID);
+    d.queue.writeBuffer(this.aGrid, 0, new Uint32Array([m, sim.n / m, 0, 0]));
+    const bytes = (m + 1) ** 2 * 4;
+    if (!this.aBuf || this.aBuf.size < bytes) {
+      this.aBuf?.destroy();
+      this.aBuf = d.createBuffer({ label: 'flux function', size: bytes, usage: GPUBufferUsage.STORAGE });
     }
+    const entries: Entry[] = [buf(0, 'uniform'), tex(13), buf(17, 'storage'), buf(18, 'storage'), buf(19, 'uniform')];
+    if (amr) entries.push({ binding: 5, visibility: C, texture: { sampleType: 'uint', viewDimension: '3d' } }, buf(30, 'read-only-storage'));
+    const layout = d.createBindGroupLayout({ label: 'flux function', entries });
+    const pl = d.createPipelineLayout({ bindGroupLayouts: [layout] });
+    const module = d.createShaderModule({ code: assemble('render/aflux.wgsl', { aface: amr ? 'amr/aface.wgsl' : 'render/aface_uniform.wgsl' }), label: 'flux function' });
+    const [pRow, pCols] = await Promise.all(
+      ['row', 'cols'].map((entryPoint) => d.createComputePipelineAsync({ label: `flux function ${entryPoint}`, layout: pl, compute: { module, entryPoint } })),
+    );
+    const groups = [0, 1].map((p) => {
+      const r = sim.fieldResources(p, 0);
+      const pick: Record<number, GPUBuffer | GPUTextureView> = { 0: sim.paramBuffer, 13: r[13], 17: this.aBuf!, 18: this.aRange, 19: this.aGrid };
+      if (amr) Object.assign(pick, { 5: r[5], 30: r[30] });
+      return d.createBindGroup({ layout, entries: Object.entries(pick).map(([b, x]) => ({ binding: +b, resource: x instanceof GPUBuffer ? { buffer: x } : x })) });
+    });
+    this.aflux = { pRow, pCols, groups, m };
+    this.gFlux = bindGroup(d, this.pFlux, { 0: cam, 4: bv.createView(), 5: this.aBuf!, 6: this.aRange, 7: this.drawFlux, 8: this.frame });
   }
 
   /** Lines are drawn for this run and view: it has a field, they are on, and it is not a projection. */
@@ -242,22 +268,22 @@ export class FieldLines {
     const d = this.device;
     const flat = sim.nz === 1;
     const count = Math.min(MAX_FIELD_LINES, Math.max(1, Math.round(v.fieldLineCount)));
-    if (flat) {
+    if (flat && this.aflux) {
       // 2D: the flux function's contours, one per level.
+      const af = this.aflux;
       d.queue.writeBuffer(this.aRange, 0, new Uint32Array([0xffffffff, 0]));
       d.queue.writeBuffer(this.frame, 0, new Uint32Array([0, 0x7f7fffff, 0, 0]));
-      d.queue.writeBuffer(this.drawFlux, 0, new Float32Array([count, LINE_WIDTH * dpr, v.light ? 1 : 0, 0]));
+      d.queue.writeBuffer(this.drawFlux, 0, new Float32Array([count, LINE_WIDTH * dpr, v.light ? 1 : 0, af.m]));
       const m = run.bv;
       const cp = enc.beginComputePass({ label: 'flux function' });
       cp.setPipeline(run.pSample);
       cp.setBindGroup(0, run.gSample[sim.cur]);
       cp.dispatchWorkgroups(Math.ceil(m.width / 4), Math.ceil(m.height / 4), 1);
-      cp.setPipeline(this.pRow);
-      cp.setBindGroup(0, this.gRow!);
+      cp.setPipeline(af.pRow);
+      cp.setBindGroup(0, af.groups[sim.cur]);
       cp.dispatchWorkgroups(1);
-      cp.setPipeline(this.pCols);
-      cp.setBindGroup(0, this.gCols!);
-      cp.dispatchWorkgroups(Math.ceil((m.width + 1) / 64));
+      cp.setPipeline(af.pCols);
+      cp.dispatchWorkgroups(Math.ceil((af.m + 1) / 64));
       cp.end();
       this.flatKind = 'flux';
       return;
@@ -351,7 +377,8 @@ export class FieldLines {
   destroy() {
     this.run?.bv.destroy();
     this.run?.vv.destroy();
-    for (const b of [this.params, this.draw, this.seeds, this.pts, this.keep, this.frame, this.aBuf, this.aRange, this.drawFlux]) b.destroy();
+    for (const b of [this.params, this.draw, this.seeds, this.pts, this.keep, this.frame, this.aRange, this.aGrid, this.drawFlux]) b.destroy();
+    this.aBuf?.destroy();
     const t = this.targets;
     if (t) for (const x of [t.color, t.dist, t.depth]) x.destroy();
   }

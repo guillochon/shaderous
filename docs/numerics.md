@@ -967,8 +967,13 @@ $`E`$ includes $`B^2/2`$.
   resampled onto a small volume (up to $`128^3`$ in 3D, $`1024^2`$ in 2D; `render/bsample.wgsl`,
   `amr/bsample.wgsl`, from the leaf cell under each voxel on blocks).
   - In 2D the lines are contours of the flux function $`A_z`$ ($`B_x = \partial_y A_z`$,
-    $`B_y = -\partial_x A_z`$), integrated from that volume along its bottom row and up each
-    column (`render/fluxfunction.wgsl`). The same flux passes between any two lines, so they
+    $`B_y = -\partial_x A_z`$), integrated from the face field itself along the bottom row and
+    up each column, on a grid of up to $`2048^2`$ corners (`render/aflux.wgsl`). The faces are
+    divergence-free to round-off, so the flux to a corner does not depend on the path, and
+    neighboring columns agree. On blocks, a face of the finest level inside a coarser cell takes
+    the normal component interpolated linearly between that cell's faces, which keeps the field
+    divergence-free there. (Integrated first from the resampled cell-centered field, each column
+    drifted on its own and the contours came out jagged at 2048^2.) The same flux passes between any two lines, so they
     crowd where the field is strong; and since $`A_z`$ moves with the gas in ideal MHD, so do
     they. The count is the number of levels, evenly spaced across the range of $`A_z`$.
   - In the plane (2D, and the slice view of a 3D run) the lines are drawn as flat tubes three
