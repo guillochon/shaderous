@@ -117,6 +117,12 @@ function tde(v: TdeVariant): Problem {
     checkpointDt: 0.5,
     rhoFloor: 1e-10,
     pFloor: 1e-14,
+    // Gravity's work as the kinetic energy each kick creates, not in flux form. The debris is
+    // cold and fast (Mach 50 in the frame, thermal energy a thousandth of the total) and the
+    // tidal field changes its kinetic energy by hundreds of times its internal energy each
+    // step, so the flux form's truncation-level mismatch with the kicks, taken out of E - KE,
+    // drained the entropy of the leading half of a gamma = 4/3 star by a factor of 100.
+    gravEnergyFlux: false,
     // Ambient gas and the outermost wisps of debris: no hotter than the star's interior (1.5 for
     // the n = 3/2 star, in proportion to the central internal energy for another), and no
     // faster than a few times the orbital speed at pericenter.

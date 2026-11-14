@@ -600,7 +600,12 @@ hydrostatic balance, which slowly cools a star.
    conserved. It can overheat low-density cells next to a sharp density contrast.
 2. **Kick form.** Each kick $`\mathbf{k}`$ adds exactly the kinetic energy it creates,
    $`\mathbf{k}\cdot(\mathbf{m} + \mathbf{k}/2)/\rho`$. Gravity then never changes the internal
-   energy, but total energy is not conserved where the flow is under-resolved.
+   energy, but total energy is not conserved where the flow is under-resolved. The tidal
+   disruptions use it. Their debris is cold and fast (thermal energy about a thousandth of the
+   total), and each step the tidal field changes its kinetic energy by hundreds of times its
+   internal energy. The flux form's truncation-level mismatch with the kicks then lands in
+   $`E - \tfrac12\rho v^2`$: it cut the entropy of the leading half of a $`\gamma = 4/3`$ star
+   a hundredfold.
 
 The half-step potential $`\Phi^{n+1/2}`$ is extrapolated from the last two solves.
 

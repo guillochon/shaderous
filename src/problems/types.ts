@@ -171,6 +171,12 @@ export interface Problem {
   jeansFloor?: boolean;
   /** Cells per Jeans length for that floor (default 4). */
   jeansCells?: number;
+  /**
+   * Gravitational work in flux form (the default, conserves total energy) or, if false, as the
+   * kinetic energy each kick creates, which never changes the internal energy. See
+   * SimConfig.gravEnergyFlux.
+   */
+  gravEnergyFlux?: boolean;
   /** The setup also makes sense on a 2D (x, y) grid. */
   supports2d?: boolean;
   /** Boundaries to use in 2D, if they differ (z is always periodic there). */

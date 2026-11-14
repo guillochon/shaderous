@@ -297,7 +297,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // still cut the residual (amr/gravity/gate.wgsl), and three help where the potential
     // changes fast, as at the bounce of a stellar collision.
     vcycles: (over.amrLevels ?? 0) > 0 ? 3 : 2,
-    gravEnergyFlux: true,
+    gravEnergyFlux: problem.gravEnergyFlux ?? true,
     wellBalanced: true,
     amrLevels: 0,
     amrBudget: 0,
