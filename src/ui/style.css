@@ -306,6 +306,8 @@ body.validate th { color: var(--dim); font-weight: 500; }
 .detail dl { display: grid; grid-template-columns: auto 1fr; gap: 0 12px; margin: 4px 0 0; font-family: ui-monospace, Consolas, monospace; font-size: 12px; }
 .detail dt { color: var(--dim); }
 .detail dd { margin: 0; overflow-wrap: anywhere; }
+body.validate .buttons-cell { white-space: nowrap; }
+body.validate .buttons-cell button + button { margin-left: 4px; }
 
 /* Phones: the simulation takes the screen, and the controls are a sheet along the bottom,
    closed to a single bar until it is tapped. An open sheet lies over the simulation rather
