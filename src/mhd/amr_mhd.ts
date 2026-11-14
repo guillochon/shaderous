@@ -29,6 +29,12 @@ const FLAT_WG = 64;
 /** Per atlas texel: the face field and its compensation at both parities, half-step faces, assembled faces and field, edge impulses. */
 export const MHD_BLOCK_TEXTURES = 8;
 
+/** Bytes of the flux register per slot: six faces of BS^2 cells (BS in 2D), two vec4 each (mhd/amr_block.wgsl, reg_entry). */
+export const registerBytes = (ndim: 2 | 3) => 6 * (ndim === 3 ? BS * BS : BS) * 32;
+
+/** The most bytes one buffer bound to a pass may have on this device. */
+export const maxBinding = (d: GPUDevice) => Math.min(d.limits.maxBufferSize, d.limits.maxStorageBufferBindingSize);
+
 interface Deps {
   device: GPUDevice;
   cfg: SimConfig;
@@ -142,9 +148,9 @@ export class AmrMhd {
     this.w = [t('MHD W1'), t('MHD W2'), t('assembled centered field')];
     this.emf = t('edge impulses');
     const perBlock = (this.ndim === 3 ? 3 * FBOX ** 3 : 2 * FBOX ** 2) * 48;
-    this.perChunk = Math.max(1, Math.min(dep.cap, Math.floor(scratchBytes / perBlock), 65535));
+    this.perChunk = Math.max(1, Math.min(dep.cap, Math.floor(Math.min(scratchBytes, maxBinding(d)) / perBlock), 65535));
     this.scratch = d.createBuffer({ label: 'MHD flux scratch', size: this.perChunk * perBlock, usage: GPUBufferUsage.STORAGE });
-    this.register = d.createBuffer({ label: 'MHD flux register', size: dep.cap * 6 * BS * BS * 32, usage: GPUBufferUsage.STORAGE });
+    this.register = d.createBuffer({ label: 'MHD flux register', size: dep.cap * registerBytes(this.ndim), usage: GPUBufferUsage.STORAGE });
     this.btOld = d.createBuffer({ label: 'old block table', size: dep.bt.size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.idxOld = d.createTexture({
       label: 'old leaf index', size: [dep.idx.width, dep.idx.height, dep.idx.depthOrArrayLayers], dimension: '3d', format: 'r32uint',

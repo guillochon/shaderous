@@ -30,7 +30,7 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
-import { AmrMhd, blockFaces, MHD_BLOCK_TEXTURES } from '../mhd/amr_mhd';
+import { AmrMhd, blockFaces, maxBinding, MHD_BLOCK_TEXTURES, registerBytes } from '../mhd/amr_mhd';
 import { mhdUnsupported } from '../mhd/mhd';
 
 /**
@@ -54,6 +54,8 @@ const FLAT_ROWS = 32768;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
 const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
 const BIN_TOTALS = 60;
+/** The first line of a (GPU error) message. */
+const firstLine = (s: string) => s.split(/\r?\n/)[0];
 /**
  * Per-block timesteps pay for their extra passes only when enough blocks sit out enough
  * substeps. Every few cycles the share of block updates actually made is read back; above
@@ -304,7 +306,9 @@ export class AmrSim implements Simulation {
     // all of a run's memory. create() falls back to a smaller atlas if the GPU cannot hold that.
     const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
     const explicit = slots || cfg.amrBudget;
-    const fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined));
+    let fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined));
+    // A magnetic field's flux register is one buffer of a few kB per block: no more blocks than it may hold.
+    if (cfg.problem.mhd) fit = Math.min(fit, Math.floor(maxBinding(d) / registerBytes(cfg.ndim)));
     if (cfg.ndim === 3) {
       const auto = Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9));
       // 3D passes run three workgroups per block along x (and gravity's one per block along y),
@@ -390,8 +394,8 @@ export class AmrSim implements Simulation {
    * predictor, gravity field) and two r32float ones (gravity's previous potential and its rate).
    */
   static blockBytes(ndim: 2 | 3, mhd = false): number {
-    // A magnetic field adds its own atlas textures (mhd/amr_mhd.ts).
-    return PAD ** ndim * (9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_TEXTURES * 16 : 0));
+    // A magnetic field adds its own atlas textures and its flux register (mhd/amr_mhd.ts).
+    return PAD ** ndim * (9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_TEXTURES * 16 : 0)) + (mhd ? registerBytes(ndim) : 0);
   }
 
   /**
@@ -406,7 +410,12 @@ export class AmrSim implements Simulation {
       if (why) throw new Error(`MHD: ${why}`);
     }
     for (let slots = 0; ; ) {
+      // A resource the GPU cannot make (out of memory, or larger than it allows one to be, which
+      // is a validation error) fails the attempt, which is made again with fewer blocks. The
+      // validation scope also keeps the errors that follow from it (views of a texture that was
+      // never made) out of the page's error list.
       gpu.device.pushErrorScope('out-of-memory');
+      gpu.device.pushErrorScope('validation');
       let sim: AmrSim | null = null;
       let failure: unknown = null;
       try {
@@ -415,14 +424,17 @@ export class AmrSim implements Simulation {
       } catch (e) {
         failure = e;
       }
-      const oom = await gpu.device.popErrorScope();
+      const invalid = await gpu.device.popErrorScope();
+      const oom = (await gpu.device.popErrorScope()) ?? invalid;
       if (!oom && sim) return sim;
       const tried = sim?.cap ?? slots;
       sim?.destroy();
       const next = Math.floor(tried * 0.85 ** cfg.ndim);
       const roots = ((cfg.n >> cfg.amrLevels) / BS) ** cfg.ndim;
-      if (!oom || !tried || next < roots * 2) throw failure ?? new Error('not enough GPU memory for the adaptive mesh at this resolution');
-      console.warn(`adaptive mesh: out of GPU memory with ${tried} blocks, retrying with ${next}`);
+      if (!oom || !tried || next < roots * 2) {
+        throw failure ?? new Error(`not enough GPU memory for the adaptive mesh at this resolution${invalid ? ` (${firstLine(invalid.message)})` : ''}`);
+      }
+      console.warn(`adaptive mesh: ${invalid ? `could not make its resources (${firstLine(invalid.message)})` : 'out of GPU memory'} with ${tried} blocks, retrying with ${next}`);
       slots = next;
     }
   }

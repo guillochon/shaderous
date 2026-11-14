@@ -28,10 +28,14 @@ fn flux_entry(row: u32, a: i32, t: vec3<i32>) -> u32 {
   return 3u * ((row * u32(naxes()) + u32(a)) * fbox_cells() + i);
 }
 // Register entry (in vec4) of the face along a at the block's lower (hi false) or upper side,
-// at cell (t1, t2) across it.
+// at cell (t1, t2) across it. A face holds BS^2 cells, BS in 2D, where the coordinate along z is
+// 0 (t2 for an x face, t1 for a y face), so the other one alone places the cell; mhd/amr_mhd.ts
+// sizes the register to match (registerBytes).
 fn reg_entry(slot: i32, a: i32, hi: bool, t1: i32, t2: i32) -> u32 {
   let plane = u32(2 * a) + select(0u, 1u, hi);
-  return 2u * ((u32(slot) * 6u + plane) * u32(BS * BS) + u32(t1 + BS * t2));
+  let cells = select(u32(BS * BS), u32(BS), is2d());
+  let i = select(t1 + BS * t2, t1 + t2, is2d());
+  return 2u * ((u32(slot) * 6u + plane) * cells + u32(i));
 }
 
 // The step of a block, its stage's share: the clock's dt times 2^bin (time bins), halved in stage 1.
