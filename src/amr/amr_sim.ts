@@ -394,6 +394,8 @@ export class AmrSim implements Simulation {
    *   shown meanwhile; it is `preparing`, and takes no steps, until `compiled` resolves.
    */
   static async create(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<AmrSim> {
+    // Without this a magnetized preset would run as plain hydro, its field silently dropped.
+    if (cfg.problem.mhd) throw new Error('MHD: the adaptive mesh does not carry a magnetic field yet; use a uniform grid');
     for (let slots = 0; ; ) {
       gpu.device.pushErrorScope('out-of-memory');
       let sim: AmrSim | null = null;

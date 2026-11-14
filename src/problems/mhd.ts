@@ -29,7 +29,7 @@ export const brioWu: Problem = {
   bcHi: all(OUTFLOW),
   tEnd: 0.1,
   checkpointDt: 0.01,
-  grid: { ndim: 2, n: 256 },
+  grid: { ndim: 2, n: 256, amr: 0 },
   view: { mode: 'slice', field: 0, log: false },
   mhd: { face: () => (axis, x) => (axis === 0 ? 0.75 : axis === 1 ? (x < 0 ? 1 : -1) : 0) },
   init: () => (x) => (x < 0 ? { rho: 1, vx: 0, vy: 0, vz: 0, p: 1, s: 1 } : { rho: 0.125, vx: 0, vy: 0, vz: 0, p: 0.1, s: 0 }),
@@ -50,7 +50,7 @@ export const orszagTang: Problem = {
   bcHi: all(PERIODIC),
   tEnd: 0.5,
   checkpointDt: 0.05,
-  grid: { ndim: 2, n: 256 },
+  grid: { ndim: 2, n: 256, amr: 0 },
   view: { mode: 'slice', field: 3, log: false },
   mhd: {
     potential: () => (x, y) => {
@@ -82,7 +82,7 @@ export const fieldLoop: Problem = {
   bcHi: all(PERIODIC),
   tEnd: 1,
   checkpointDt: 0.1,
-  grid: { ndim: 2, n: 128 },
+  grid: { ndim: 2, n: 256, amr: 0 },
   view: { mode: 'slice', field: 25, log: false },
   mhd: {
     potential: () => (x, y) => {
@@ -108,7 +108,7 @@ export const mhdRotor: Problem = {
   bcHi: all(OUTFLOW),
   tEnd: 0.15,
   checkpointDt: 0.015,
-  grid: { ndim: 2, n: 256 },
+  grid: { ndim: 2, n: 256, amr: 0 },
   view: { mode: 'slice', field: 0, log: false },
   mhd: { face: () => (axis) => (axis === 0 ? 5 / SQ4PI : 0) },
   init: () => (x, y) => {
@@ -137,7 +137,7 @@ export const mhdBlast: Problem = {
   bcHi: all(PERIODIC),
   tEnd: 0.2,
   checkpointDt: 0.02,
-  grid: { ndim: 2, n: 256 },
+  grid: { ndim: 2, n: 256, amr: 0 },
   view: { mode: 'slice', field: 3, log: true },
   mhd: { face: () => (axis) => (axis < 2 ? Math.SQRT1_2 : 0) },
   init: (_n, _e, ndim) => (x, y, z) => {
@@ -164,7 +164,7 @@ export const alfvenWave: Problem = {
   bcHi: all(PERIODIC),
   tEnd: AW.lambda,
   checkpointDt: AW.lambda / 10,
-  grid: { ndim: 2, n: 128 },
+  grid: { ndim: 2, n: 512, amr: 0 },
   view: { mode: 'slice', field: 7, log: false },
   mhd: {
     // In the frame (x1 along the wave, x2 across it in the plane, z): A_z = x2 B_par + amp
