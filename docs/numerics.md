@@ -901,8 +901,26 @@ default limiter, 4% with MC or minmod, and 12% at 256². It is the same with HLL
 so neither the reconstruction nor the Riemann solver causes it. It comes from the edge fields,
 and the edge-field formula has been compared line by line with Athena++'s
 `field/calculate_corner_e.cpp` (the same weights, grouping and signs). In 1D it reduces
-exactly to the Godunov flux. So this is a property of the scheme, not a bug. Lee's
-upwind-biased edge fields ([MHD plan](mhd-plan.md) §2) are the remedy to try if it matters.
+exactly to the Godunov flux. So this is a property of the scheme, not a bug.
+
+**Lee's upwind averaging, tried.** [Lee (2013)][Lee13] argues that for flow mostly along one
+axis the edge estimates from faces downstream of the edge carry no information about it, and
+keeps only the upwind ones (upwind-MEC). The edge pass has that selection as an option
+(`EDGE_UPWIND`, `setMhdEdge('upwind')` in `mhd/mhd.ts`), applied to Gardiner & Stone's four
+estimates. Against the mean, at $`t = 1`$:
+
+| Field loop | Mean | Upwind |
+| --- | --- | --- |
+| Peak $`|B|`$ / initial, 128² and 256² | 1.08, 1.12 | 1.15, 1.17 |
+| Peak $`|B|`$, advected at 0.57° to x (Lee's hard case), 128² | 1.08 | 1.27 |
+| Largest $`|B|`$ outside the loop / initial | 0.17 to 0.25 | 0.26 to 0.38 |
+| Mean error of $`|B|`$ and of its azimuthal direction inside | 0.015 to 0.024 | 0.032 to 0.074 |
+
+Orszag-Tang and the Alfvén wave are unchanged to a percent. So the selection alone makes things
+worse, and the mean shows no small-angle trouble here. Lee's estimates also carry
+second-derivative terms from [Lee & Deane (2009)][LD09], which he credits with damping
+oscillations at discontinuities. Their definition is not in the 2013 paper, and the 2009 paper
+was not available to check, so they are not implemented, and the default stays the mean.
 
 ## 22. Validation
 
@@ -966,6 +984,8 @@ result.
 [Toro1994]: https://doi.org/10.1007/BF01414629
 [Toro2009]: https://doi.org/10.1007/b79761
 [SG09]: https://doi.org/10.1016/j.newast.2008.06.003
+[Lee13]: https://doi.org/10.1016/j.jcp.2013.02.049
+[LD09]: https://doi.org/10.1016/j.jcp.2008.08.026
 [GS05]: https://doi.org/10.1016/j.jcp.2004.11.016
 [MK05]: https://doi.org/10.1016/j.jcp.2005.02.017
 [Truelove1997]: https://doi.org/10.1086/310975

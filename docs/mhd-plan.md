@@ -6,8 +6,9 @@ VL2 + CT with GS05 edge fields, HLLD with an HLLE fallback at flagged shocks, co
 one slab of z layers at a time (80 bytes per cell more than hydro), a float64 CPU reference,
 snapshots that restart a magnetized run exactly, display fields and diagnostics, eight
 validation tests. Known: the field loop's |B| overshoots on its leading edge (8% at 128^2),
-a property of the GS05 edge fields as Athena++ implements them. Lee's upwind edge fields
-(section 2) are the option if that matters. Gravity, point masses, species, cooling and diffusion
+a property of the GS05 edge fields as Athena++ implements them. Lee's upwind selection was
+tried (an option, off by default) and made the loop worse; his second-derivative terms
+(Lee & Deane 2009) were not available to check (numerics.md section 21). Gravity, point masses, species, cooling and diffusion
 are refused with a field until phase 4.
 
 Goal: ideal magnetohydrodynamics on the uniform grid and the adaptive mesh, with per-block
