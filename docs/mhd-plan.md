@@ -297,6 +297,79 @@ later addition. The existing rules carry over, with edges added:
 Regridding happens at cycle ends, when all blocks are synchronized, so it does not interact
 with the bins.
 
+### 5b. Implementation design (written 2026-11-14, before the time-bin code)
+
+This builds on the block passes of section 4b and the hydro cycle (`AmrSim.encodeCycle`,
+`amr/bins_*.wgsl`). Neighbors (across faces, edges and, in 2D, vertices) are at most one bin
+apart, and a block is never slower than a coarser one. So at any substep a neighbor N of an
+active block A is either active too (at its start) or exactly at its midpoint.
+
+**What the stores hold.** At a substep, before any update:
+- the state textures (parity p) hold an active block's start state, and an inactive (mid-step)
+  block's end state, written at its start;
+- the half-step textures (PA, PB, half faces) hold every block's last stage-1 result. For a
+  mid-step block that is its state at its midpoint, which is now.
+
+**Ghost reads blended by time.** A's assembly reads N as a blend α·S + β·H of N's state texture
+S and half-step H, chosen from N's bin and activity relative to A:
+
+| A's stage | N | Time wanted | α, β |
+| --- | --- | --- | --- |
+| 1 (A's start) | active | N's start | 1, 0 |
+| 1 | mid-step (slower) | N's midpoint | 0, 1 |
+| 2 (A's midpoint) | active, same bin | N's midpoint | 0, 1 |
+| 2 | active, one bin faster | N's end (its first substep) | -1, 2 (extrapolated; falls back to H if not positive) |
+| 2 | mid-step (slower) | N at 3/4 of its step | 1/2, 1/2 |
+
+The blend applies to cells and faces alike, inside every loader of the assembly (copy,
+restriction, prolongation): `amr_common`'s readers take the receiving block's bin and stage.
+The extrapolated and interpolated values are ghosts only: they shape reconstruction near A's
+boundary. The fluxes and edge fields that cross the boundary come from the faster side
+(below).
+
+**Bins.**
+- `bins_init` takes the MHD assembly's records (fast magnetosonic rates), over the leaf list.
+- `bins_relax` gains edge (3D) and vertex (2D) neighbors, through the leaf index (`IDX`), with
+  the same rules as faces.
+- `bins_lists` likewise counts a block as having a faster neighbor when one touches it only
+  along an edge.
+
+**A substep.**
+1. Assemble the active leaves' start (stage 1, blended).
+2. Fluxes and edges for the active leaves.
+3. Update them into the half-step stores.
+4. Assemble their half step (stage 2, blended).
+5. Fluxes and edges again.
+6. Update into parity o.
+7. Deposits.
+8. Commit the stepped and deposited blocks back to parity p.
+
+The first substep of a cycle assembles every leaf and computes dt and the bins in between, as
+the hydro cycle does.
+
+**Slow side of a bin boundary** (S one bin slower than a neighbor F; the finer side is always at
+least as fast):
+- Cells: on a face shared with F, S takes F's stage-2 flux from the register, times 1/2, in its
+  own update at its start. The other 1/2 comes in a deposit pass at its midpoint, from F's
+  second substep. This is the hydro rule, with the register in place of recomputation.
+- Faces: an edge touched by a faster leaf takes that leaf's stage-2 impulse, scaled by
+  `dx_F / dx_S`, at S's start. A deposit at S's midpoint adds F's second impulse to every face
+  of S around that edge, with the same compensated sums. The deposit also updates the cells
+  beside those faces: their energy from the deposited fluxes, and their B^2 / 2 through the
+  dual-energy sync. Every edge's definer is the finest leaf touching it, and among those the
+  fastest. Each block integrates the definer's impulses over its own step.
+
+**Lists and dispatch.** The MHD passes run over GPU-built lists with indirect dispatch (new
+triples in `bins_args`): the active leaves, the deposit leaves, and the active leaves with both
+ghost layers for the assembly. With bins on, the flux scratch must hold every leaf in one chunk;
+otherwise bins stay off for that run.
+
+**Tests.**
+- Blast (2D and 3D) and field loop with bins on agree with bins off within tolerance.
+- Every face two leaves share is bit-identical at cycle ends.
+- div B stays at round-off.
+- The work saved is reported.
+
 ## 6. Regridding without divergence defects
 
 This is where FLASH's runs picked up defects ([GM17]).
