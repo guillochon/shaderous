@@ -287,6 +287,11 @@ export interface MhdSpec {
    * side and nz along z: a run restarted from a file (io/capture.ts restartFrom).
    */
   faces?: (n: number, nz: number) => Float32Array;
+  /**
+   * Or, on blocks, a leaf's faces as amr/amr_mhd.ts blockFaces lays them out, from its level
+   * and position in blocks: a run restarted from a file of its own mesh.
+   */
+  block?: (level: number, c: number[]) => Float32Array;
 }
 
 /** A point mass: position and velocity are relative to the box center. */

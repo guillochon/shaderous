@@ -48,6 +48,29 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
   // cell's lower faces (Bf1-3) with the upper boundary faces in the metadata, for a restart.
   const mag: Record<string, Float32Array> = {};
   let mhdMeta: SnapshotMeta['mhd'];
+  let faces: Float32Array | undefined;
+  if (sim instanceof AmrSim && sim.mhd) {
+    // Blocks: every face of every leaf (Snapshot.faces), and the cell-centered field from them.
+    const leaves = sim.tree.leaves();
+    const W = BS + 1;
+    const D = flat ? 1 : W;
+    const per = W * W * D;
+    const atlas = await sim.leafFaces(leaves);
+    faces = new Float32Array(leaves.length * per * 3);
+    for (const k of ['Bcc1', 'Bcc2', 'Bcc3']) mag[k] = new Float32Array(leaves.length * BS * BS * (flat ? 1 : BS));
+    for (let b = 0; b < leaves.length; b++) {
+      const src = atlas[b];
+      for (let t = 0; t < per; t++) for (let a = 0; a < 3; a++) faces[3 * (b * per + t) + a] = src[4 * t + a];
+      let o = b * BS * BS * (flat ? 1 : BS);
+      for (let k = 0; k < (flat ? 1 : BS); k++)
+        for (let j = 0; j < BS; j++)
+          for (let i = 0; i < BS; i++, o++) {
+            const t = (k * W + j) * W + i;
+            const up = [t + 1, t + W, flat ? t : t + W * W];
+            for (let a = 0; a < 3; a++) mag[`Bcc${a + 1}`][o] = 0.5 * (src[4 * t + a] + src[4 * up[a] + a]);
+          }
+    }
+  }
   if (sim instanceof Sim && sim.mhd) {
     const f = await sim.mhd.readFaces(sim.cur);
     const n = sim.n;
@@ -92,6 +115,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     levels,
     locations,
     data: { ...primitivesFrom(cfg, u1, u2), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag },
+    ...(faces ? { faces } : {}),
     meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
   };
 }
@@ -109,10 +133,32 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
   }
   // A magnetic field comes back face by face, which needs the grid it was saved on.
   let mhd = problem.mhd;
-  if (mhd) {
+  if (mhd && adaptive) {
+    // Blocks: each leaf's faces from the file, which must hold that very leaf (the mesh is
+    // rebuilt from the file's levels, so it is the file's mesh).
+    const faces = snap.faces;
+    const shift = Math.round(Math.log2(snap.rootSize[0] / rootCells));
+    if (!faces || shift !== 0 || snap.blockSize[0] !== BS) {
+      throw new Error('a magnetized run on blocks restarts only from a file it wrote itself, with the same root grid');
+    }
+    const flat = snap.ndim === 2;
+    const W = BS + 1;
+    const per = W * W * (flat ? 1 : W);
+    const index = new Map<string, number>();
+    for (let b = 0; b < snap.levels.length; b++) index.set(`${snap.levels[b]}:${snap.locations[3 * b]},${snap.locations[3 * b + 1]},${flat ? 0 : snap.locations[3 * b + 2]}`, b);
+    mhd = {
+      block: (level, c) => {
+        const b = index.get(`${level}:${c[0]},${c[1]},${flat ? 0 : c[2]}`);
+        if (b === undefined) throw new Error(`the file has no block at level ${level}, [${c}]: a magnetized run restarts only on the mesh it was saved on`);
+        const out = new Float32Array(per * 4);
+        for (let t = 0; t < per; t++) for (let a = 0; a < 3; a++) out[4 * t + a] = faces[3 * (b * per + t) + a];
+        return out;
+      },
+    };
+  } else if (mhd) {
     const m = snap.meta?.mhd;
     const d = snap.data;
-    if (adaptive || !m || !d.Bf1 || !d.Bf2 || !d.Bf3 || m.n !== rootCells || snap.rootSize[0] !== rootCells) {
+    if (!m || !d.Bf1 || !d.Bf2 || !d.Bf3 || m.n !== rootCells || snap.rootSize[0] !== rootCells) {
       throw new Error('a magnetized run restarts only from a file it wrote itself, on the same uniform grid');
     }
     mhd = {

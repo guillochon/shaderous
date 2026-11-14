@@ -488,6 +488,7 @@ export class AmrMhd {
  */
 export function blockFaces(cfg: SimConfig, b: Block, dx0: number, maxLevel: number): Float32Array {
   const spec = cfg.problem.mhd!;
+  if (spec.block) return spec.block(b.level, b.c);
   const flat = cfg.ndim === 2;
   const W = BS + 1;
   const D = flat ? 1 : W;

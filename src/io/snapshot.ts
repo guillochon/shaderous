@@ -26,6 +26,13 @@ export interface Snapshot {
    * mass fraction of each species the run carries, under the species' name (Problem.species).
    */
   data: Partial<Record<Variable, Float32Array>> & Record<string, Float32Array | undefined>;
+  /**
+   * A magnetized run on blocks: every face of every block, (bx + 1) x (by + 1) x (bz + 1) texels
+   * per block (bz + 1 is 1 in 2D) as [z][y][x], each holding the lower faces (b_x, b_y, b_z) of
+   * the cell at that texel. The texels at index bx (by, bz) hold the block's upper faces. Written
+   * to the file as the dataset "ShaderousFaces"; other readers ignore it.
+   */
+  faces?: Float32Array;
   /** written by this program: enough to set the run up again exactly */
   meta?: SnapshotMeta;
 }

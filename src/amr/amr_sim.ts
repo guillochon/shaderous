@@ -2475,6 +2475,29 @@ export class AmrSim implements Simulation {
     return { shared, mismatched, coarseFine: big > 0 ? coarseFine / big : 0, cfFaces, worst };
   }
 
+  /**
+   * The faces of each of `leaves` (amr/amr_mhd.ts blockFaces' layout: (BS + 1)^d texels of four
+   * floats, the fourth unused), as the run holds them now.
+   */
+  async leafFaces(leaves: Block[]): Promise<Float32Array[]> {
+    const side = this.slotsPerSide * PAD;
+    const flat = this.cfg.ndim === 2;
+    const depth = this.layers * (flat ? 1 : PAD);
+    const f = await this.mhd!.readAtlas(this.cur, side, depth);
+    const W = BS + 1;
+    const D = flat ? 1 : W;
+    return leaves.map((b) => {
+      const o = this.origin(b.slot);
+      const out = new Float32Array(W * W * D * 4);
+      for (let k = 0; k < D; k++)
+        for (let j = 0; j < W; j++) {
+          const at = 4 * (((o[2] + k) * side + o[1] + j) * side + o[0]);
+          out.set(f.subarray(at, at + 4 * W), 4 * (k * W + j) * W);
+        }
+      return out;
+    });
+  }
+
   /** Each slot's time bin (0 when they are off). */
   private async readBins(): Promise<Uint32Array> {
     const d = this.device;

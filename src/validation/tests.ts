@@ -33,7 +33,7 @@ import { alfvenWave, brioWu, fieldLoop, fieldLoopDense, mhdBlast, mhdRotor, orsz
 import { initialFaces, setMhdSlabBytes } from '../mhd/mhd';
 import { RefMhd } from '../reference/mhd';
 import { setMhdScratchBytes } from '../mhd/amr_mhd';
-import { PAD as PAD_BLOCK } from '../amr/tree';
+import { BS, PAD as PAD_BLOCK } from '../amr/tree';
 
 export interface TestResult {
   id: string;
@@ -2417,9 +2417,9 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'mhd-restart',
-    name: 'MHD: a magnetized run saved to .athdf and restarted (rotor 2D at 128, blast 3D at 32, outflow boxes)',
+    name: 'MHD: a magnetized run saved to .athdf and restarted (rotor 2D at 128, blast 3D at 32, outflow boxes; on blocks, the dense field loop 2D at 256 and the blast 3D at 128, 1 level)',
     criterion:
-      'The restarted run starts with the very face field it was saved with (bit for bit, the upper boundary faces included) and |div B| dx / max |B| below 1e-6; after 10 more steps of each, densities agree to 1e-5 (the file holds pressure, not internal energy, so the state comes back to rounding)',
+      'The restarted run starts with the very face field it was saved with (bit for bit, the upper boundary faces included) and |div B| dx / max |B| below 1e-6; after 10 more steps of each, densities agree to 1e-5 (the file holds pressure, not internal energy, so the state comes back to rounding). On blocks: the restart has the same leaves with the same faces bit for bit, shared faces agree, |div B| below 1e-6, and 3 more steps of each (before either re-meshes) give densities that agree to 1e-5',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -2450,6 +2450,63 @@ export const TESTS: TestDef[] = [
             metrics[`${k}_divB_restarted`] = div;
             metrics[`${k}_max_rel_density_difference`] = drho;
             pass &&= differ === 0 && div < 1e-6 && drho < 1e-5;
+          } finally {
+            b.destroy();
+          }
+        });
+      }
+      // On blocks: the file holds every leaf's faces, and the restart rebuilds the same mesh.
+      const blocks: [Problem, number, 2 | 3, string][] = [
+        [fieldLoopDense, 256, 2, 'loop_blocks'],
+        [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 128, 3, 'blast_blocks'],
+      ];
+      const key = (l: { level: number; c: number[] }) => `${l.level}:${l.c}`;
+      for (const [prob, n, ndim, k] of blocks) {
+        const over = { ndim, amrLevels: 1, tEnd: Infinity };
+        await withAmr(gpu, prob, n, over, async (a) => {
+          a.step(20);
+          const snap = await readAthdf(await writeAthdf(await capture(a, { program: 'shaderous', build: 'test', query: '' })));
+          const leavesA = a.tree.leaves();
+          const saved = new Map((await a.leafFaces(leavesA)).map((f, i) => [key(leavesA[i]), f]));
+          const b = await AmrSim.create(gpu, { ...configFor(prob, n, over), ...restartFrom(snap, prob, true, n >> 1) });
+          try {
+            const leavesB = b.tree.leaves();
+            const back = await b.leafFaces(leavesB);
+            let differ = 0;
+            let missing = 0;
+            leavesB.forEach((l, i) => {
+              const f = saved.get(key(l));
+              if (!f) return void missing++;
+              for (let t = 0; t < f.length; t++) if (t % 4 !== 3 && f[t] !== back[i][t]) differ++;
+            });
+            const div = (await b.diagnostics()).magnetic!.divB;
+            const faces = await b.faceConsistency();
+            // A few steps, before either run checks its refinement: the same mesh, cell for cell.
+            const ra = a.regrids;
+            a.step(3);
+            b.step(3);
+            const db = await b.diagnostics();
+            const ca = await a.readLeaves();
+            const cb = await b.readLeaves();
+            const cells = BS * BS * (ndim === 2 ? 1 : BS);
+            const at = new Map(a.tree.leaves().map((l, i) => [key(l), i]));
+            let drho = 0;
+            b.tree.leaves().forEach((l, i) => {
+              const j = at.get(key(l));
+              if (j === undefined) return;
+              for (let q = 0; q < cells; q++) drho = Math.max(drho, Math.abs(ca.u1[4 * (j * cells + q)] - cb.u1[4 * (i * cells + q)]) / ca.u1[4 * (j * cells + q)]);
+            });
+            metrics[`${k}_leaves`] = leavesB.length;
+            metrics[`${k}_leaves_not_in_file`] = missing + Math.abs(leavesA.length - leavesB.length);
+            metrics[`${k}_faces_differing`] = differ;
+            metrics[`${k}_shared_mismatched`] = faces.mismatched;
+            metrics[`${k}_divB_restarted`] = div;
+            metrics[`${k}_regrids_meanwhile`] = a.regrids - ra + b.regrids;
+            metrics[`${k}_max_rel_density_difference`] = drho;
+            metrics[`${k}_divB_later`] = db.magnetic!.divB;
+            pass &&=
+              metrics[`${k}_leaves_not_in_file`] === 0 && differ === 0 && faces.mismatched === 0 && div < 1e-6 && db.magnetic!.divB < 1e-6 &&
+              metrics[`${k}_regrids_meanwhile`] === 0 && drho < 1e-5;
           } finally {
             b.destroy();
           }

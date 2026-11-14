@@ -123,6 +123,11 @@ export async function writeAthdf(s: Snapshot, h5?: H5, gzip = 0): Promise<Uint8A
   });
   if (present.length > 1) prim.resize([present.length, ...perVar]);
   for (let v = 1; v < present.length; v++) prim.write_slice([[v, v + 1], [], [], [], []], s.data[present[v]]!);
+  if (s.faces) {
+    // A magnetized run on blocks: the face field (Snapshot.faces), for a restart.
+    const shape = [nb, nz === 1 ? 1 : nz + 1, ny + 1, nx + 1, 3];
+    f.create_dataset({ name: 'ShaderousFaces', data: s.faces, shape, dtype: '<f4', ...(gzip > 0 ? { compression: 'gzip', compression_opts: gzip, chunks: [1, ...shape.slice(1)] } : {}) });
+  }
 
   f.flush();
   f.close();
@@ -203,6 +208,12 @@ export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
         snap.data[variable] = got instanceof Float32Array ? got : Float32Array.from(got);
       }
       first += counts[d];
+    }
+
+    const faces = f.get('ShaderousFaces') as H5Dataset | null;
+    if (faces?.shape) {
+      const v = faces.value as ArrayLike<number>;
+      snap.faces = v instanceof Float32Array ? v : Float32Array.from(v);
     }
 
     const meta = f.attrs.Shaderous?.value;

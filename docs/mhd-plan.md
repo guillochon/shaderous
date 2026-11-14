@@ -30,8 +30,8 @@ Phase 3 done (2026-11-14): divergence-free re-meshing of the field (mhd/amr_regr
 a least-change projection inside each coarse cell (Walsh transform of the hypercube Laplacian)
 in place of Toth & Roe's explicit formulas. Copied faces carry their compensations. The energy
 is rebuilt from the gas's. The refinement checks run with a field. There is a moving-mesh test on
-the new `field-loop-dense` preset. Not done: restarting an adaptive-mesh run with a field from a
-snapshot.
+the new `field-loop-dense` preset. Restarting an adaptive-mesh run with a field from a snapshot
+followed (the leaves' faces in the file's `ShaderousFaces` dataset).
 
 Goal: ideal magnetohydrodynamics on the uniform grid and the adaptive mesh, with per-block
 time bins from the first adaptive-mesh milestone, so that Shaderous can repeat the magnetized

@@ -878,9 +878,14 @@ $`E`$ includes $`B^2/2`$.
   add 80 bytes per cell to the uniform grid's 112 (`MhdPasses.cellBytes`), plus the slab
   buffers.
 - **Snapshots.** A file of a magnetized run holds the cell-centered field (`Bcc1`-`Bcc3`, as
-  Athena++ names them) for analysis, and each cell's lower faces (`Bf1`-`Bf3`) with the upper
-  boundary faces in the metadata, from which a restart on the same grid rebuilds the face field
-  exactly. A restart on another grid, or on the adaptive mesh, is refused.
+  Athena++ names them) for analysis. For a restart, a uniform grid's file adds each cell's lower
+  faces (`Bf1`-`Bf3`) with the upper boundary faces in the metadata. A block grid's file adds
+  every face of every leaf, upper faces included, in one more dataset (`ShaderousFaces`, which
+  other readers ignore). Either way a restart on the same grid or mesh rebuilds the face field
+  bit for bit. The mesh comes back from the file's levels; a leaf the file lacks (another root
+  grid, another block size) refuses the restart, as does a uniform grid of another size. The
+  compensations restart at zero (`mhd-restart`: densities agree with the original run to
+  $`4\times10^{-7}`$ three steps later, on blocks as on the uniform grid).
 - **Block grid** (`mhd/amr_*.wgsl`, `mhd/amr_mhd.ts`; plan section 4b). The same three passes per
   stage, block by block, after an assembly that fills every leaf's ghosts. That includes the
   edge ghosts beside its edges, where one coordinate is up to two cells out and a second is one
