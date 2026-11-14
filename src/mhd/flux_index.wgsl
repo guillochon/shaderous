@@ -7,15 +7,17 @@
 
 struct Slab { z0: i32, nz: i32, last: u32, unused: u32 }
 
-// The flux grid: cells t in [-1, n] along x and y, and in [z0 - 1, z0 + nz] along z (the
-// single layer in 2D), three vec4 per entry (mhd/flux.wgsl).
+// The flux grid: cells t in [-2, n + 1] along x and y, and in [z0 - 2, z0 + nz + 1] along z
+// (the single layer in 2D), three vec4 per entry (mhd/flux.wgsl). Two rows beyond the grid: the
+// edge fields need the faces of one, and Lee & Deane's estimates (mhd/corner.wgsl) one more
+// along each line of faces.
 fn flux_dims() -> vec3<i32> {
   let n = vec3<i32>(P.dims.xyz);
-  return vec3<i32>(n.xy + 2, select(SLAB.nz + 2, 1, n.z == 1));
+  return vec3<i32>(n.xy + 4, select(SLAB.nz + 4, 1, n.z == 1));
 }
-// Index offset: the flux grid's first entry is cell (-1, -1, z0 - 1), or (-1, -1, 0) in 2D.
+// Index offset: the flux grid's first entry is cell (-2, -2, z0 - 2), or (-2, -2, 0) in 2D.
 fn flux_first() -> vec3<i32> {
-  return vec3<i32>(-1, -1, select(SLAB.z0 - 1, 0, P.dims.z == 1u));
+  return vec3<i32>(-2, -2, select(SLAB.z0 - 2, 0, P.dims.z == 1u));
 }
 // Entry of cell t. Along z in 2D every index is the single layer.
 fn flux_index(t: vec3<i32>) -> u32 {

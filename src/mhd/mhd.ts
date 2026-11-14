@@ -130,10 +130,17 @@ interface MhdDeps {
 }
 
 /**
- * How the edge fields are averaged (mhd/emf.wgsl): 'mean', Gardiner & Stone (2005) as Athena++
- * does it, or 'upwind', Lee (2013)'s upwind-MEC selection of the same estimates.
+ * How the edge fields are formed (mhd/corner.wgsl), from estimates carried to the edge from the
+ * four faces around it:
+ *   'mean'        Gardiner & Stone (2005), as Athena++ does it: the mean of their estimates
+ *   'upwind'      Lee (2013)'s upwind selection of those same estimates
+ *   'mec'         Lee & Deane (2009): the mean of Taylor estimates with central derivatives
+ *                 along each line of faces
+ *   'upwind-mec'  Lee (2013): the upwind selection of Lee & Deane's estimates
+ * The last two are on the uniform grid only.
  */
-export type EdgeScheme = 'mean' | 'upwind';
+export type EdgeScheme = 'mean' | 'upwind' | 'mec' | 'upwind-mec';
+const EDGE_MODES: Record<EdgeScheme, number> = { mean: 0, upwind: 1, mec: 2, 'upwind-mec': 3 };
 let edgeScheme: EdgeScheme = 'mean';
 /** Change it for runs built from now on (comparisons and tests). */
 export function setMhdEdge(e: EdgeScheme) {
@@ -150,8 +157,8 @@ export function setMhdSlabBytes(b: number | null) {
 /** Layers of cells per slab of a 3D grid of side n (the whole grid if it fits). */
 export function slabLayers(n: number, nz: number): number {
   if (nz === 1) return 1;
-  const layer = 3 * (n + 2) ** 2 * 48 + (n + 1) ** 2 * 16;
-  return Math.max(4, Math.min(nz, Math.floor(slabBytes / layer) - 2));
+  const layer = 3 * (n + 4) ** 2 * 48 + (n + 1) ** 2 * 16;
+  return Math.max(4, Math.min(nz, Math.floor(slabBytes / layer) - 4));
 }
 
 export class MhdPasses {
@@ -196,7 +203,7 @@ export class MhdPasses {
     for (let p = 0; p < 2; p++) m.comps.push(tex3d(d, n + 1, 'rgba32float', `face compensation ${p}`, fz));
     m.halfFaces = tex3d(d, n + 1, 'rgba32float', 'half-step face field', fz);
     const S = slabLayers(n, nz);
-    const flux = (n + 2) * (n + 2) * (nz === 1 ? 1 : S + 2) * 3 * 16;
+    const flux = (n + 4) * (n + 4) * (nz === 1 ? 1 : S + 4) * 3 * 16;
     for (let a = 0; a < 3; a++) m.flux.push(d.createBuffer({ label: `MHD fluxes ${'xyz'[a]}`, size: flux, usage: GPUBufferUsage.STORAGE }));
     m.emf = d.createBuffer({ label: 'edge impulses', size: (n + 1) * (n + 1) * (nz === 1 ? 1 : S + 1) * 16, usage: GPUBufferUsage.STORAGE });
     for (let z0 = 0; z0 < nz; z0 += S) {
@@ -223,8 +230,8 @@ export class MhdPasses {
     const [f1, f2, e1, e2, u1, u2, prates, red] = await Promise.all([
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 2', { STAGE: 2 }),
-      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 1', { STAGE: 1, EDGE_UPWIND: edgeScheme === 'upwind' ? 1 : 0 }),
-      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 2', { STAGE: 2, EDGE_UPWIND: edgeScheme === 'upwind' ? 1 : 0 }),
+      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 1', { STAGE: 1, EDGE_MODE: EDGE_MODES[edgeScheme] }),
+      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 2', { STAGE: 2, EDGE_MODE: EDGE_MODES[edgeScheme] }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/rates.wgsl', slots), 'MHD timestep rates'),
@@ -295,7 +302,7 @@ export class MhdPasses {
         const last = sl.z0 + sl.nz >= nz;
         pass.setPipeline(this.pFlux[s]);
         pass.setBindGroup(0, this.gFlux[parity][s][i]);
-        this.dispatch(pass, [n + 2, n + 2, flat ? 1 : sl.nz + 2]);
+        this.dispatch(pass, [n + 4, n + 4, flat ? 1 : sl.nz + 4]);
         pass.setPipeline(this.pEmf[s]);
         pass.setBindGroup(0, this.gEmf[parity][s][i]);
         this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + 1]);

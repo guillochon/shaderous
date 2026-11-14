@@ -901,8 +901,8 @@ $`E`$ includes $`B^2/2`$.
   than one chunk. In tests:
   - an unrefined block grid matches the uniform grid to $`10^{-7}`$, and every face that two
     blocks share is bit for bit the same;
-  - on refined meshes (rotor 2D, blast 3D) energy is conserved to $`2	imes10^{-7}`$, and each
-    coarse face equals its fine mean to $`6	imes10^{-8}`$;
+  - on refined meshes (rotor 2D, blast 3D) energy is conserved to $`2\times10^{-7}`$, and each
+    coarse face equals its fine mean to $`6\times10^{-8}`$;
   - magnetic energy is within 0.3% (rotor) and 0.1% (blast) of the uniform grid at the finest
     resolution;
   - chunking changes no bit.
@@ -929,8 +929,8 @@ $`E`$ includes $`B^2/2`$.
   lookups. In the `mhd-amr-moving` test, a dense field loop carried once around the box is
   re-meshed 144 times (the `field-loop-dense` preset). $`
 abla\cdot B`$ stays at
-  $`1.5	imes10^{-7}`$, same-level shared faces are bit for bit, coarse faces equal their fine
-  mean to $`6	imes10^{-10}`$, and 96% of the magnetic energy is kept (uniform 256²: 96%).
+  $`1.5\times10^{-7}`$, same-level shared faces are bit for bit, coarse faces equal their fine
+  mean to $`6\times10^{-10}`$, and 96% of the magnetic energy is kept (uniform 256²: 96%).
 - **CPU reference.** `src/reference/mhd.ts` is the same scheme in float64. After 30 steps of
   Orszag-Tang at 128² and 15 of a 3D blast the GPU agrees with it to $`10^{-7}`$ in density,
   energy and face field.
@@ -967,10 +967,32 @@ estimates. Against the mean, at $`t = 1`$:
 | Mean error of $`|B|`$ and of its azimuthal direction inside | 0.015 to 0.024 | 0.032 to 0.074 |
 
 Orszag-Tang and the Alfvén wave are unchanged to a percent. So the selection alone makes things
-worse, and the mean shows no small-angle trouble here. Lee's estimates also carry
-second-derivative terms from [Lee & Deane (2009)][LD09], which he credits with damping
-oscillations at discontinuities. Their definition is not in the 2013 paper, and the 2009 paper
-was not available to check, so they are not implemented, and the default stays the mean.
+worse, and the mean shows no small-angle trouble here.
+
+**Lee & Deane's estimates, tried.** Lee's upwind-MEC selects among the estimates of
+[Lee & Deane (2009)][LD09], not Gardiner & Stone's. Each face's field is carried to the edge by
+a Taylor series, $`E + \tfrac{\Delta}{2}E' + \tfrac{\Delta^2}{8}E''`$, with central differences
+of the face values along their line (their eqs. 54 to 59). That is the parabola through three
+faces in a row, $`(6E_j + 3E_{
+m toward} - E_{
+m away})/8`$. Both are options on the uniform
+grid (`setMhdEdge('mec')` and `'upwind-mec'`). They need the faces two along each line, so the
+flux buffers hold a second ghost row. The four constructions at $`t = 1`$:
+
+| Field loop | GS05 mean | GS05 upwind | LD09 MEC | Lee upwind-MEC |
+| --- | --- | --- | --- | --- |
+| Magnetic energy kept, 128² / 256² | 93.3% / 96.1% | 93.3% / 96.2% | 94.5% / 96.7% | 94.6% / 96.9% |
+| Peak $`|B|`$ / initial, 128² / 256² | 1.08 / 1.12 | 1.15 / 1.17 | 1.21 / 1.26 | 1.17 / 1.19 |
+| Stray $`|B|`$ outside, 128² / 256² | 0.17 / 0.25 | 0.26 / 0.38 | 0.22 / 0.33 | 0.21 / 0.31 |
+| Interior error, 128² / 256² | 0.019 / 0.015 | 0.054 / 0.032 | 0.031 / 0.021 | 0.028 / 0.020 |
+| At 0.57°: kept, peak, stray, interior error | 94.2%, 1.08, 0.17, 0.024 | 94.4%, 1.27, 0.35, 0.074 | 95.6%, 1.23, 0.34, 0.059 | 97.1%, 1.19, 0.16, 0.019 |
+
+Orszag-Tang and the Alfvén wave move by under 0.2% in every column. Lee's full upwind-MEC is
+the least dissipative. In the small-angle case it was designed for, it also keeps the loop's
+shape best, with the least stray field and the smallest interior error. But it raises the peak
+overshoot, and at 45° the plain mean is cleaner on every shape measure. The default stays the
+mean (Gardiner & Stone, as Athena++). The block grid has the mean and the upwind selection only
+(its flux box holds one ghost row).
 
 ## 22. Validation
 

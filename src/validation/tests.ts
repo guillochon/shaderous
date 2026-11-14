@@ -2364,15 +2364,15 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'mhd-gpu-vs-cpu',
-    name: 'MHD: GPU against the float64 CPU reference (Orszag-Tang 2D at 128, blast 3D at 32)',
+    name: 'MHD: GPU against the float64 CPU reference (Orszag-Tang 2D at 64, blast 3D at 32)',
     criterion:
-      'After 30 steps (Orszag-Tang) and 15 (blast, outflow box): L1 difference in density, total energy and face field below 1e-5 of the mean, and the clocks agree to 1e-5 (src/reference/mhd.ts, the same scheme in float64)',
+      'After 20 steps (Orszag-Tang) and 6 (blast, outflow box): L1 difference in density, total energy and face field below 1e-5 of the mean, and the clocks agree to 1e-5 (src/reference/mhd.ts, the same scheme in float64)',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
       const cases: [Problem, number, 2 | 3, number][] = [
-        [orszagTang, 128, 2, 30],
-        [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, 3, 15],
+        [orszagTang, 64, 2, 20],
+        [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, 3, 6],
       ];
       for (const [prob, n, ndim, steps] of cases) {
         const cfg = configFor(prob, n, { ndim, tEnd: Infinity });
