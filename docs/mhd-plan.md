@@ -1,6 +1,13 @@
 # Plan: ideal MHD with constrained transport
 
-Status: approved 2026-11-14; phase 1 (uniform grid) in progress.
+Status: approved 2026-11-14. Phase 1 (uniform grid) done 2026-11-14: VL2 + CT with GS05 edge
+fields, HLLE and HLLD, display fields and diagnostics, five validation tests (numerics.md
+section 21). Deviations from the plan below: fluxes are stored once per face in storage buffers
+(no workgroup tile yet), which costs 208 bytes per cell; and div B in float32 grows as a random
+walk of rounding (about 3.5e-6 of max |B| after 750 steps), so the tests use 1e-5, not 1e-6.
+Not yet done from phase 1: an MHD CPU reference solver, and the HLLD shock fallback (the shock
+flag is not computed, so HLLD is used everywhere)); and snapshots (.athdf, checkpoints) do not
+carry the face field yet, so a magnetized run cannot be saved and restarted.
 
 Goal: ideal magnetohydrodynamics on the uniform grid and the adaptive mesh, with per-block
 time bins from the first adaptive-mesh milestone, so that Shaderous can repeat the magnetized

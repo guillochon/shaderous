@@ -21,7 +21,9 @@ export function fieldMeasure(field: number, gamma: number): Measure {
     case 15: return 'specificEnergy';
     case 16: return 'pressure';
     case 18: return 'time';
-    default: return null; // passive scalar, Mach number, refinement level, Jeans length in cells, time bin
+    // Passive scalar, Mach number, refinement level, Jeans length in cells, time bin; and the
+    // magnetic fields, shown in code units until a magnetized preset has physical ones.
+    default: return null;
   }
 }
 

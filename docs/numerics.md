@@ -31,8 +31,9 @@ precision, are pointed out where they occur.
 18. [Local (per-block) timesteps](#18-local-per-block-timesteps)
 19. [Accelerating frames and damping zones](#19-accelerating-frames-and-damping-zones)
 20. [Nuclear burning surrogate (in development)](#20-nuclear-burning-surrogate-in-development)
-21. [Validation](#21-validation)
-22. [References](#references)
+21. [Ideal MHD (in development)](#21-ideal-mhd-in-development)
+22. [Validation](#22-validation)
+23. [References](#references)
 
 ---
 
@@ -800,9 +801,82 @@ problems. It is not yet used by the simulator.
 The species machinery of [§12](#12-passive-scalar-and-species) and the composition in
 `src/units/composition.ts` are laid out so that a network can take over their state unchanged.
 
-## 21. Validation
+## 21. Ideal MHD (in development)
 
-The validation suite (`src/validation/tests.ts`) has 39 tests. It runs on your own GPU at
+Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
+rotor, Brio-Wu, the field loop and the Alfvén wave) solve ideal MHD. So far this works on the
+uniform grid only, coupled to the gas dynamics alone. The adaptive mesh with time bins,
+gravity, point masses and field-line tubes are the later phases of
+[the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
+$`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
+$`E`$ includes $`B^2/2`$.
+
+- **Constrained transport.** The field lives on the cell faces: one texture holds $`b_x`$,
+  $`b_y`$, $`b_z`$ on each cell's lower faces, with one more texel per axis for the grid's
+  upper faces. Each face is updated from the electric fields on its four edges,
+
+  ```math
+  b_x^{n+1} = b_x^n - \frac{\Delta t}{\Delta x}\left[(E_z^{j+1/2} - E_z^{j-1/2}) - (E_y^{k+1/2} - E_y^{k-1/2})\right],
+  ```
+
+  so every edge enters the faces around it with opposite signs, and the divergence of every cell
+  ($`\sum`$ over its six faces) does not change. The cell-centered field is the mean of each
+  axis's two faces.
+- **Integrator.** The van Leer predictor-corrector of [Stone & Gardiner (2009)][SG09], as in
+  Athena++. Stage 1 takes half a step with first-order fluxes from the cells' own states.
+  Stage 2 takes the full step from the start, with fluxes from a limited linear reconstruction
+  of the half-step primitives (the run's limiter on $`\rho`$, $`\mathbf{v}`$, $`p`$, the scalar
+  and the two tangential field components). Each stage has three passes:
+  - fluxes, each face computed once into storage buffers, so the two cells sharing it read the same bits;
+  - edge electric fields;
+  - the update of cells and faces.
+
+  The half-step state uses the hydro predictor's textures. The internal energy's
+  $`p\,\nabla\cdot\mathbf{v}`$ takes the pressure at the start in stage 1 and at the half step in
+  stage 2.
+- **Edge electric fields.** The construction of [Gardiner & Stone (2005)][GS05], in Athena++'s
+  form. By duality, a face normal to $`a`$ carries $`E_{t_2} = -F_a(B_{t_1})`$ and
+  $`E_{t_1} = F_a(B_{t_2})`$. The edge value is the mean of the four face values around it plus
+  their differences from the cell-centered reference $`-\mathbf{v}\times\mathbf{B}`$, upwinded
+  by the sign of the mass flux through the faces. This is what keeps a field loop carried by a
+  uniform flow intact. In 2D the in-plane components $`E_x`$, $`E_y`$ are face values.
+- **Riemann solvers.** HLLD ([Miyoshi & Kusano 2005][MK05]) by default, used for the HLLC and
+  low-Mach HLLC settings. It resolves contacts and Alfvén waves. HLLE, with Davis estimates from
+  the fast magnetosonic speeds, is used for the HLL setting. The face's own $`b_n`$ is the
+  normal field on both sides.
+- **Timestep.** The signal speed is $`|v_x| + |v_y| + |v_z| + d\,c_f`$, with $`d`$ the number of
+  dimensions and $`c_f = \sqrt{c_s^2 + B^2/\rho}`$ the fastest magnetosonic speed.
+- **Dual energy and floors.** The synchronization of §7 uses $`E - KE - B^2/2`$, where
+  $`B`$ is the new cell-centered field.
+- **Boundaries.** Periodic axes map the upper face to the lower face of cell 0. At an outflow
+  face the boundary faces are evolved like any other, with edge fields from ghost cells that
+  copy the edge cells. At a reflecting face the ghost's normal field changes sign, as its
+  normal velocity does. The tangential face indices of ghost cells are mapped like cells.
+- **Initial fields.** A preset gives a vector potential $`\mathbf{A}`$, sampled at the edge
+  centers, and $`b`$ is its discrete curl, so the divergence starts at zero up to rounding. Or
+  it gives the face values of a field that is divergence-free by construction.
+- **Divergence in float32.** CT keeps the divergence at the level of rounding, but each face
+  update rounds independently, so $`\max|\nabla\cdot B|\,\Delta x / \max|B|`$ grows like a random
+  walk: about $`10^{-6}`$ after 50 steps of Orszag-Tang and $`3.5\times10^{-6}`$ after 750. It does
+  not grow systematically. The diagnostics report it (`magnetic.divB`, and the field
+  "Magnetic divergence").
+- **Memory.** Three face textures, nine flux vec4s and one edge vec4 per cell add 208 bytes per
+  cell to the uniform grid's 112 (`MhdPasses.cellBytes`). This is the price of computing each
+  face once without a workgroup tile. Fusing the passes into a tiled one is left for later.
+
+Measured (RTX 3080, Chrome), all in the validation suite:
+
+| Test | Result |
+| --- | --- |
+| Brio-Wu, 256 cells | Compound wave at $`x = -0.03`$, slow shock at 0.146, $`\min v_y = -1.593`$; energy to $`2\times10^{-7}`$; HLLD and HLLE agree to 0.002 in mean density |
+| Alfvén wave, one period | $`L_1(v_z) = 7.9\times10^{-5}`$ at 128², $`1.97\times10^{-5}`$ at 256²: order 2.00 |
+| Field loop, 128², $`t = 1`$ | 93% of the magnetic energy kept (MC limiter 94%), peak $`|B|`$ 8% high near the singular center |
+| Orszag-Tang, 256², $`t = 0.5`$ | Energy to $`7\times10^{-8}`$, $`\nabla\cdot B`$ $`3.5\times10^{-6}`$ |
+| Blast, 64³ | Energy to $`10^{-7}`$, stretched twice as far along the field as across it |
+
+## 22. Validation
+
+The validation suite (`src/validation/tests.ts`) has 48 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -813,7 +887,7 @@ vortex, the well-balanced column, AMR versions of the shock problems, flux match
 levels and time bins, the sphere potential, the Jeans instability ([Jeans 1902][Jeans1902]), a
 polytrope, a cold white dwarf, the Evrard collapse ([Evrard 1988][Evrard1988]), tidal
 disruption, cooling, viscosity, conduction, sinks, binary orbits, the equations of state, HDF5
-round trips, and GPU against CPU reference. Each test's pass criterion is printed next to its
+round trips, GPU against CPU reference, and the MHD tests of §21. Each test's pass criterion is printed next to its
 result.
 
 ---
@@ -861,6 +935,9 @@ result.
 [Timmes2000]: https://doi.org/10.1086/313407
 [Toro1994]: https://doi.org/10.1007/BF01414629
 [Toro2009]: https://doi.org/10.1007/b79761
+[SG09]: https://doi.org/10.1016/j.newast.2008.06.003
+[GS05]: https://doi.org/10.1016/j.jcp.2004.11.016
+[MK05]: https://doi.org/10.1016/j.jcp.2005.02.017
 [Truelove1997]: https://doi.org/10.1086/310975
 [vanLeer1974]: https://doi.org/10.1016/0021-9991(74)90019-9
 [vanLeer1977]: https://doi.org/10.1016/0021-9991(77)90095-X

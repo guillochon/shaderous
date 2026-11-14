@@ -27,6 +27,7 @@ const F_LEVEL = 14u;
 const F_MASS_FRACTION = 19u;
 const F_SHOCK = 20u;
 const F_TIME_BIN = 21u;   // set by the block grid's display pass (amr/field.wgsl); 0 elsewhere
+const F_MAGNETIC = 22u;   // B_x, B_y, B_z, |B|, plasma beta, |div B| dx / |B|: render/field.wgsl, with a field
 
 // Mass fraction of species V.sp.x at texel c of the state: its rho X over the sum of all of
 // them (species/species.ts), read from S, the groups of four V.sp.y texels apart along z.
@@ -99,7 +100,8 @@ fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32, phi: f
       if (a > 0.0) { dt = min(dt, sqrt(g_dx / a)); }
       return P.cfl * dt;
     }
-    case 21u { return 0.0; }
+    // Time bin and the magnetic fields: set by the display passes that have them.
+    case 21u, 22u, 23u, 24u, 25u, 26u, 27u { return 0.0; }
     default { return rho; }
   }
 }

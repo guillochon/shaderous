@@ -220,7 +220,10 @@ The run's diagnostics, read back now:
 - `jeansUnresolved`: cells where the Jeans length is under-resolved;
 - `com`: the gas's center of mass relative to the box center;
 - `masses`: the point masses, with position, velocity, mass and accreted mass;
-- `ranges`: the least and greatest value of each field, keyed by field name.
+- `ranges`: the least and greatest value of each field, keyed by field name;
+- `magnetic`, for a run with a magnetic field: `eMag` (the magnetic energy, which `eTot`
+  includes and `eInt` then does not), `divB` (the largest |div B| dx of any cell over
+  the largest |B|) and `bMax`.
 
 ### `debris() → object`
 

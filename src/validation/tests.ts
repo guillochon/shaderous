@@ -29,6 +29,7 @@ import { binary } from '../problems/binary';
 import { thermalInstability } from '../problems/thermal_instability';
 import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
+import { alfvenWave, brioWu, fieldLoop, mhdBlast, orszagTang } from '../problems/mhd';
 
 export interface TestResult {
   id: string;
@@ -2139,6 +2140,187 @@ export const TESTS: TestDef[] = [
             peak_density_final_ratio: drop, mass_left_in_box: last.mass / d0.mass, steps,
             't:r_perturber/rho_max': track.join(' '),
           },
+        };
+      });
+    },
+  },
+  {
+    id: 'mhd-brio-wu',
+    name: 'MHD: Brio-Wu shock tube (2D, 256 cells, HLLD and HLLE)',
+    criterion:
+      'Total energy and mass conserved to 1e-6 and momentum equal to what the boundaries let in (0.09, -0.15) to 1e-5; the compound wave peak at x in [-0.05, -0.01], the slow shock at x in [0.13, 0.16] and min v_y in [-1.62, -1.55] (Brio & Wu 1988); HLLD and HLLE agree to a mean density difference below 0.01',
+    async run(gpu) {
+      const n = 256;
+      const rows: Float64Array[] = [];
+      const m: Record<string, number> = {};
+      let ok = true;
+      for (const riemann of ['hllc', 'hll'] as RiemannKind[]) {
+        await withSim(gpu, brioWu, n, { ndim: 2, riemann }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          const { u1 } = await sim.readState();
+          const j = n / 2;
+          const rho = new Float64Array(n);
+          let vyMin = Infinity;
+          for (let i = 0; i < n; i++) {
+            const o = 4 * (j * n + i);
+            rho[i] = u1[o];
+            vyMin = Math.min(vyMin, u1[o + 2] / u1[o]);
+          }
+          rows.push(rho);
+          const x = (i: number) => (i + 0.5) / n - 0.5;
+          // Compound wave: the density peak just left of the contact; slow shock: the last drop below 0.18.
+          let peak = -1;
+          for (let i = 0; i < n; i++) if (x(i) > -0.1 && x(i) < 0.03 && (peak < 0 || rho[i] > rho[peak])) peak = i;
+          let slow = 0;
+          for (let i = n - 1; i > 0; i--) {
+            if (rho[i - 1] > 0.18 && rho[i] <= 0.18) {
+              slow = i;
+              break;
+            }
+          }
+          const k = riemann === 'hll' ? 'hlle' : 'hlld';
+          const eErr = Math.abs(d.eTot / d0.eTot - 1);
+          const mErr = Math.abs(d.mass / d0.mass - 1);
+          const pErr = Math.max(Math.abs(d.momentum[0] - 0.09), Math.abs(d.momentum[1] + 0.15));
+          Object.assign(m, {
+            [`${k}_energy_error`]: eErr, [`${k}_mass_error`]: mErr, [`${k}_momentum_error`]: pErr,
+            [`${k}_compound_x`]: x(peak), [`${k}_slow_shock_x`]: x(slow), [`${k}_vy_min`]: vyMin, [`${k}_divB`]: d.magnetic!.divB,
+          });
+          ok &&= eErr < 1e-6 && mErr < 1e-6 && pErr < 1e-5 && x(peak) > -0.05 && x(peak) < -0.01 && x(slow) > 0.13 && x(slow) < 0.16 && vyMin > -1.62 && vyMin < -1.55;
+        });
+      }
+      let diff = 0;
+      for (let i = 0; i < n; i++) diff += Math.abs(rows[0][i] - rows[1][i]) / n;
+      m.hlld_vs_hlle_mean_density_difference = diff;
+      return { pass: ok && diff < 0.01, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-orszag-tang',
+    name: 'MHD: Orszag-Tang vortex (2D, 256 cells, to t = 0.5)',
+    criterion:
+      'Mass and total energy conserved to 1e-6 (periodic box); max |div B| dx / max |B| below 1e-5 (float32 rounding, which accumulates over the 750 steps); magnetic energy 0.059 to 0.064 and peak pressure 0.48 to 0.54 (this code, HLLD; regression ranges)',
+    async run(gpu) {
+      return withSim(gpu, orszagTang, 256, { ndim: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        const mg = d.magnetic!;
+        const eErr = Math.abs(d.eTot / d0.eTot - 1);
+        const mErr = Math.abs(d.mass / d0.mass - 1);
+        const pmax = d.ranges[3][1];
+        return {
+          pass: eErr < 1e-6 && mErr < 1e-6 && mg.divB < 1e-5 && mg.eMag > 0.059 && mg.eMag < 0.064 && pmax > 0.48 && pmax < 0.54,
+          metrics: { energy_error: eErr, mass_error: mErr, divB: mg.divB, magnetic_energy: mg.eMag, magnetic_energy_initial: d0.magnetic!.eMag, peak_pressure: pmax, steps },
+        };
+      });
+    },
+  },
+  {
+    id: 'mhd-field-loop',
+    name: 'MHD: field loop carried once around the box (2D, 128 cells)',
+    criterion:
+      'After t = 1 (back at its start): at least 90% of the magnetic energy left, peak |B| within 10% of the initial 1e-3, the field-energy centroid within one cell of the box center, and max |div B| dx / max |B| below 1e-5 (Gardiner & Stone 2005)',
+    async run(gpu) {
+      const n = 128;
+      return withSim(gpu, fieldLoop, n, { ndim: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        const f = await sim.mhd!.readFaces(sim.cur);
+        // Centroid of B^2 at the cell centers, the periodic way (angles), in cells from the center.
+        const fx = n + 1;
+        const face = (a: number, i: number, j: number) => f[4 * ((j % n) * fx + (i % n)) + a];
+        let cx = 0;
+        let sx = 0;
+        let cy = 0;
+        let sy = 0;
+        for (let j = 0; j < n; j++) {
+          for (let i = 0; i < n; i++) {
+            const bx = 0.5 * (face(0, i, j) + face(0, i + 1, j));
+            const by = 0.5 * (face(1, i, j) + face(1, i, j + 1));
+            const w = bx * bx + by * by;
+            const ti = (2 * Math.PI * (i + 0.5)) / n;
+            const tj = (2 * Math.PI * (j + 0.5)) / n;
+            cx += w * Math.cos(ti);
+            sx += w * Math.sin(ti);
+            cy += w * Math.cos(tj);
+            sy += w * Math.sin(tj);
+          }
+        }
+        const pos = (c: number, s: number) => (((Math.atan2(s, c) / (2 * Math.PI)) * n + n) % n) - n / 2;
+        const off = Math.hypot(pos(cx, sx), pos(cy, sy));
+        const kept = d.magnetic!.eMag / d0.magnetic!.eMag;
+        const peak = d.magnetic!.bMax / 1e-3;
+        return {
+          pass: kept > 0.9 && Math.abs(peak - 1) < 0.1 && off < 1 && d.magnetic!.divB < 1e-5,
+          metrics: { magnetic_energy_kept: kept, peak_field_ratio: peak, centroid_offset_cells: off, divB: d.magnetic!.divB, steps },
+        };
+      });
+    },
+  },
+  {
+    id: 'mhd-alfven-wave',
+    name: 'MHD: circularly polarized Alfven wave, one period (2D, 128 and 256 cells)',
+    criterion: 'Mean error of v_z against the exact solution below 3e-5 at 256^2, converging at second order or better from 128^2 (Toth 2000); max |div B| dx / max |B| below 1e-6',
+    async run(gpu) {
+      const err: Record<number, number> = {};
+      let div = 0;
+      for (const n of [128, 256]) {
+        await withSim(gpu, alfvenWave, n, { ndim: 2 }, async (sim) => {
+          await sim.runToEnd(64);
+          const { u1 } = await sim.readState();
+          let e = 0;
+          for (let j = 0; j < n; j++) {
+            for (let i = 0; i < n; i++) {
+              const x = (i + 0.5) / n - 0.5;
+              const y = (j + 0.5) / n - 0.5;
+              const o = 4 * (j * n + i);
+              e += Math.abs(u1[o + 3] / u1[o] - 0.1 * Math.cos(2 * Math.PI * (x + y)));
+            }
+          }
+          err[n] = e / (n * n);
+          div = Math.max(div, (await sim.diagnostics()).magnetic!.divB);
+        });
+      }
+      const order = Math.log2(err[128] / err[256]);
+      return { pass: err[256] < 3e-5 && order > 1.9 && div < 1e-6, metrics: { l1_128: err[128], l1_256: err[256], order, divB: div } };
+    },
+  },
+  {
+    id: 'mhd-blast-3d',
+    name: 'MHD: blast wave in an oblique field (3D, 64 cells)',
+    criterion:
+      'Mass and total energy conserved to 1e-6 (periodic box); max |div B| dx / max |B| below 1e-5; the blast stretched along the field: the second moment of the excess pressure along (1, 1, 0) at least 1.3 times that across it, in the mid-plane',
+    async run(gpu) {
+      const n = 64;
+      return withSim(gpu, mhdBlast, n, { ndim: 3 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        const { u2 } = await sim.readState();
+        const k = n / 2;
+        let along = 0;
+        let across = 0;
+        for (let j = 0; j < n; j++) {
+          for (let i = 0; i < n; i++) {
+            const o = 4 * ((k * n + j) * n + i);
+            const x = (i + 0.5) / n - 0.5;
+            const y = (j + 0.5) / n - 0.5;
+            // Pressure above the ambient 0.1, from the internal energy (gamma = 5/3).
+            const w = Math.max(u2[o + 1] * (2 / 3) - 0.1, 0);
+            along += (w * (x + y) ** 2) / 2;
+            across += (w * (x - y) ** 2) / 2;
+          }
+        }
+        const eErr = Math.abs(d.eTot / d0.eTot - 1);
+        const mErr = Math.abs(d.mass / d0.mass - 1);
+        const ratio = along / across;
+        return {
+          pass: eErr < 1e-6 && mErr < 1e-6 && d.magnetic!.divB < 1e-5 && ratio > 1.3,
+          metrics: { energy_error: eErr, mass_error: mErr, divB: d.magnetic!.divB, elongation: ratio, steps },
         };
       });
     },

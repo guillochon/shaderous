@@ -16,6 +16,7 @@ import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
 import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
 import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
+import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 
 export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
 export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
@@ -676,6 +677,11 @@ export interface Diagnostics {
   masses: Required<PointMass>[];
   /** [min, max] per renderable field, in FIELDS order */
   ranges: [number, number][];
+  /**
+   * With a magnetic field (Simulation.diagnostics only): its energy, which eTot includes and
+   * eInt then does not, and the largest |div B| dx relative to the largest |B|.
+   */
+  magnetic?: MagDiagnostics;
 }
 
 
@@ -818,6 +824,8 @@ export class Sim implements Simulation {
   /** debris energies (debris/debris.ts), if the problem asks for them, and their census pass */
   private debrisBuf?: DebrisBuffers;
   private pCensus?: GPUComputePipeline;
+  /** Ideal MHD (mhd/mhd.ts): the face field and the passes that take a step with it; none without. */
+  mhd?: MhdPasses;
 
   private constructor(gpu: Gpu, cfg: SimConfig) {
     this.device = gpu.device;
@@ -858,7 +866,11 @@ export class Sim implements Simulation {
     if (cfg.n > side) {
       throw new Error(`a uniform grid of ${cfg.n} cells per side is larger than this GPU's 3D textures allow (${side}); use the adaptive mesh`);
     }
-    noteAllocation(cfg.n ** cfg.ndim * Sim.cellBytes(cfg.ndim));
+    if (mhdOn(cfg)) {
+      const why = mhdUnsupported(cfg);
+      if (why) throw new Error(`MHD: ${why}`);
+    }
+    noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
     const n = cfg.n;
@@ -1073,6 +1085,16 @@ export class Sim implements Simulation {
       });
     }
     this.redDiag = await diag;
+    if (mhdOn(c)) {
+      if (this.mhd) {
+        await this.mhd.rebuild(this.redDt.first, slots, k);
+      } else {
+        this.mhd = await MhdPasses.create(
+          { device: d, cfg: c, n: this.n, nz: this.nz, params: this.params, clock: this.clock, state: this.state, half: this.pred, slots, comp: k },
+          this.redDt.first,
+        );
+      }
+    }
   }
 
   /** Push the current configuration to the GPU parameter block. */
@@ -1108,6 +1130,8 @@ export class Sim implements Simulation {
     const kc = this.compCoeffs;
     const km = kc ? new Float32Array(n * n * nz * 4) : undefined;
     const half = c.problem.box / 2;
+    // The magnetic field on the faces, and its energy in each cell's total.
+    const faces = mhdOn(c) ? initialFaces(c, n, nz, this.dx) : null;
     let mass = 0;
     let o = 0;
     this.solids = false;
@@ -1137,6 +1161,10 @@ export class Sim implements Simulation {
           u1[o + 2] = w.rho * w.vy * go;
           u1[o + 3] = w.rho * w.vz * go;
           u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz) * go;
+          if (faces) {
+            const B = cellField(c, faces, n, nz, i, j, k);
+            u2[o] += 0.5 * (B[0] * B[0] + B[1] * B[1] + B[2] * B[2]);
+          }
           u2[o + 1] = eint;
           u2[o + 2] = w.rho * w.s;
           u2[o + 3] = mark;
@@ -1146,6 +1174,7 @@ export class Sim implements Simulation {
       }
     }
     this.setState(u1, u2, mass / (n * n * nz));
+    if (faces) this.mhd!.setFaces(faces);
     if (G) {
       this.speciesCur = 0;
       writeTexture(this.device, this.species[0], n, 4, sp, nz * G);
@@ -1312,6 +1341,17 @@ export class Sim implements Simulation {
     pass.dispatchWorkgroups(1);
   }
 
+  /** First stage of the timestep reduction: the signal rates of the state at `parity`. */
+  private encodeRates(pass: GPUComputePassEncoder, parity: number) {
+    if (this.mhd) {
+      this.mhd.encodeRates(pass, parity);
+      return;
+    }
+    pass.setPipeline(this.pPrim);
+    pass.setBindGroup(0, this.gPrim[parity]);
+    this.dispatch(pass);
+  }
+
   private dispatch(pass: GPUComputePassEncoder) {
     pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
   }
@@ -1336,13 +1376,18 @@ export class Sim implements Simulation {
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = beginPass(enc);
-      pass.setPipeline(this.pPrim);
-      pass.setBindGroup(0, this.gPrim[p]);
-      this.dispatch(pass);
+      this.encodeRates(pass, p);
       this.redDt.encode(pass);
       pass.setPipeline(this.pClock);
       pass.setBindGroup(0, this.gClock);
       pass.dispatchWorkgroups(1);
+      if (this.mhd) {
+        // Ideal MHD: its own two-stage step, and nothing else (mhdUnsupported lists what is not yet coupled).
+        this.mhd.encode(pass, p);
+        this.cur = 1 - p;
+        pass.end();
+        continue;
+      }
       this.pPredict.encode(pass, this.gPredict[p]);
       this.pUpdate.encode(pass, this.gUpdate[p]);
       if (this.pSpecies) {
@@ -1474,12 +1519,21 @@ export class Sim implements Simulation {
   static readonly fieldShader = 'render/field.wgsl';
   readonly fieldShader = Sim.fieldShader;
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
-    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 20: this.bh };
+    const r: Record<number, GPUBuffer | GPUTextureView> = {
+      2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 20: this.bh,
+      13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(),
+    };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }
   get speciesStride(): number {
     return this.speciesGroups ? this.nz : 0;
+  }
+  /** The display pass's face field without a magnetic field: one texel of nothing. */
+  private placeholderFaces?: GPUTexture;
+  private noFaces(): GPUTexture {
+    this.placeholderFaces ??= tex3d(this.device, 1, 'rgba32float', 'no face field', 1);
+    return this.placeholderFaces;
   }
   status(): string {
     return '';
@@ -1592,9 +1646,7 @@ export class Sim implements Simulation {
     const enc = this.device.createCommandEncoder();
     enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
     const pass = beginPass(enc);
-    pass.setPipeline(this.pPrim);
-    pass.setBindGroup(0, this.gPrim[this.cur]);
-    this.dispatch(pass);
+    this.encodeRates(pass, this.cur);
     this.redDt.encode(pass);
     pass.setPipeline(this.pClock);
     pass.setBindGroup(0, this.gClockPreview);
@@ -1612,7 +1664,13 @@ export class Sim implements Simulation {
   async diagnostics(): Promise<Diagnostics> {
     for (;;) {
       const d = await this.readDiagnostics();
-      if (d) return d;
+      if (d) {
+        if (this.mhd) {
+          d.magnetic = await this.mhd.diagnostics(this.cur);
+          d.eInt -= d.magnetic.eMag;
+        }
+        return d;
+      }
       await new Promise((r) => setTimeout(r, 1));
     }
   }
@@ -1775,5 +1833,12 @@ export class Sim implements Simulation {
     this.massFlux?.destroy();
     this.debrisBuf?.destroy();
     this.mg?.destroy();
+    this.mhd?.destroy();
+    this.placeholderFaces?.destroy();
+  }
+
+  /** Magnetic energy and divergence of the current state; null without a magnetic field. */
+  async magnetic(): Promise<MagDiagnostics | null> {
+    return this.mhd ? this.mhd.diagnostics(this.cur) : null;
   }
 }

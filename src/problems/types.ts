@@ -46,6 +46,7 @@ export const FIELDS = [
   'Heating \u2212 cooling', 'Vorticity', 'Velocity divergence', 'Density gradient', 'Refinement level',
   'Gravitational potential', 'Kinetic energy', 'Jeans length (cells)', 'Timestep limit', 'Mass fraction',
   'Shock', 'Time bin',
+  'Magnetic field x', 'Magnetic field y', 'Magnetic field z', 'Magnetic field strength', 'Plasma beta', 'Magnetic divergence',
 ] as const;
 /** The mass fraction field: one menu entry per species the run carries (ViewState.species). */
 export const MASS_FRACTION_FIELD = 19;
@@ -53,6 +54,8 @@ export const MASS_FRACTION_FIELD = 19;
 export const SHOCK_FIELD = 20;
 /** Adaptive mesh with per-block timesteps: the time bin of each cell's block (amr/bins_on.wgsl). */
 export const TIME_BIN_FIELD = 21;
+/** The magnetic fields (mhd/mhd.ts): B_x, B_y, B_z, |B|, plasma beta, |div B| dx / |B|. Shown only for a run with a field. */
+export const MAGNETIC_FIELDS: readonly number[] = [22, 23, 24, 25, 26, 27];
 /**
  * The field menu: FIELDS by index, in groups (the indices themselves are the shaders' order).
  * A run with species also gets a Composition group, one mass fraction per species.
@@ -63,6 +66,7 @@ export const FIELD_MENU: { group: string; fields: number[] }[] = [
   { group: 'Derivatives', fields: [11, 12, 13, 20] },
   { group: 'Gravity', fields: [15, 17] },
   { group: 'Mesh and timestep', fields: [14, 21, 18] },
+  { group: 'Magnetic field', fields: [25, 22, 23, 24, 26, 27] },
 ];
 /** What each field shows, for its tooltip. */
 export const FIELD_TIPS = [
@@ -88,9 +92,15 @@ export const FIELD_TIPS = [
   'The share of the mass in one species, carried with the gas',
   'The solver’s shock detector, as of the last step: 1 where the flow converges and the pressure jumps by more than the shock threshold between neighbors (the cells it treats as a shock, and where burning stops when it is not allowed inside shocks), 0 elsewhere',
   'With per-block timesteps on the adaptive mesh: the time bin of the block that holds each cell. A block in bin k steps 2^k times the smallest step (0 is the fastest)',
+  'Magnetic field along x at the cell center, signed (in units where the magnetic pressure is B² / 2)',
+  'Magnetic field along y at the cell center, signed',
+  'Magnetic field along z at the cell center, signed',
+  'Magnitude of the magnetic field at the cell center (in units where the magnetic pressure is B² / 2)',
+  'Gas pressure over magnetic pressure, 2p / B²: below 1 the field dominates',
+  'The discrete divergence of the magnetic field from the cell’s six faces, |∇·B| dx / |B|: zero up to round-off, since constrained transport keeps it there',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
-export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12]);
+export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12, 22, 23, 24]);
 /** Fields always shown on a linear scale: the signed ones, refinement levels, the potential and the shock flag. */
 export const LINEAR_FIELDS: ReadonlySet<number> = new Set([...SIGNED_FIELDS, 14, 15, 20, 21]);
 
@@ -254,8 +264,24 @@ export interface Problem {
   toolScale?: { rho: number; v: number };
   /** Default view; `axis` is the slice normal in 3D (0 x, 1 y, 2 z), `pitch` the camera elevation in radians. */
   view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice' | 'projection'; axis?: number; pitch?: number };
+  /**
+   * A magnetic field, which makes the run ideal MHD (mhd/mhd.ts). Units: the magnetic pressure
+   * is B^2 / 2, so plasma beta is 2 p / B^2.
+   */
+  mhd?: MhdSpec;
   /** Returns the initial primitive state as a function of position. */
   init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>): (x: number, y: number, z: number) => Prim;
+}
+
+/**
+ * The initial magnetic field. Either a vector potential A, whose discrete curl on the cell faces
+ * is divergence-free to round-off, or the field on the faces directly, for a field that is
+ * divergence-free by construction (one that varies only along the axis normal to it, say).
+ * Positions are relative to the box center; `axis` is the face normal (0 x, 1 y, 2 z).
+ */
+export interface MhdSpec {
+  potential?: (params: Record<string, number>, ndim: 2 | 3) => (x: number, y: number, z: number) => [number, number, number];
+  face?: (params: Record<string, number>, ndim: 2 | 3) => (axis: number, x: number, y: number, z: number) => number;
 }
 
 /** A point mass: position and velocity are relative to the box center. */

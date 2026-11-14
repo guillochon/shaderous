@@ -18,6 +18,7 @@ import { isothermalCollapse } from './isothermal';
 import { empty } from './empty';
 import { wdCollision } from './stellar_collision';
 import { whiteDwarfStar } from './white_dwarf_star';
+import { alfvenWave, brioWu, fieldLoop, mhdBlast, mhdRotor, orszagTang } from './mhd';
 
 /** A problem in the menu: one or more variants of the same setup, each a preset of its own. */
 export interface ProblemFamily {
@@ -105,6 +106,10 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
       },
       single(binary),
     ],
+  },
+  {
+    group: 'Magnetic fields',
+    families: [single(orszagTang), single(mhdBlast), single(mhdRotor), single(brioWu), single(fieldLoop), single(alfvenWave)],
   },
   {
     group: 'Tests and sandbox',

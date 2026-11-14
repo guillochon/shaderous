@@ -17,7 +17,7 @@ import { amrFits, createSim, fieldShaderFor, maxAmrLevels, minAmrLevels, support
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_MENU, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
+import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 import { installApi } from './api';
@@ -2741,6 +2741,11 @@ function advanceStroke(now: number) {
  * run does not carry falls back to the density.
  */
 function syncSpeciesFields(sel: HTMLSelectElement) {
+  // The magnetic fields, only for a run that has a field.
+  const mhd = cfg.problem.mhd !== undefined;
+  const mag = [...sel.querySelectorAll('optgroup')].find((g) => g.label === 'Magnetic field');
+  if (mag) mag.hidden = !mhd;
+  if (!mhd && MAGNETIC_FIELDS.includes(view.field)) view.field = 0;
   const species = cfg.problem.species ?? [];
   const key = species.join(',');
   let group = sel.querySelector<HTMLOptGroupElement>('optgroup[data-species]');

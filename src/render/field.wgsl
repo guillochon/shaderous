@@ -5,6 +5,8 @@
 #include "hydro/common.wgsl"
 #include "gravity/ext_bind.wgsl"
 #include <eos>
+#include "hydro/pfloor.wgsl"
+#include "hydro/prim.wgsl"
 #include "render/field_value.wgsl"
 #include "render/project.wgsl"
 
@@ -30,6 +32,29 @@ fn shown(rho: f32) -> f32 {
 @group(0) @binding(8) var<storage, read_write> RANGE: array<atomic<u32>, 132>;
 @group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
 @group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
+@group(0) @binding(13) var BF: texture_3d<f32>;   // face-centered magnetic field (mhd/common.wgsl); a placeholder without one
+
+#include "mhd/common.wgsl"
+
+// The magnetic fields, F_MAGNETIC onward, at cell c whose gas pressure is p.
+fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
+  let B = bcell(c);
+  let b2 = dot(B, B);
+  switch (f - F_MAGNETIC) {
+    case 0u, 1u, 2u { return B[f - F_MAGNETIC]; }
+    case 3u { return sqrt(b2); }
+    case 4u { return 2.0 * p / max(b2, 1.0e-30); }
+    default {
+      var div = 0.0;
+      for (var a = 0; a < 3; a++) {
+        var e = vec3<i32>(0);
+        e[a] = 1;
+        div += bface(a, c + e) - bface(a, c);
+      }
+      return abs(div) / max(sqrt(b2), 1.0e-30);
+    }
+  }
+}
 
 // Velocity and density of a neighboring cell, clamped to the grid.
 fn neighbor(c: vec3<i32>) -> vec4<f32> {
@@ -67,6 +92,7 @@ fn voxel(c: vec3<i32>) -> Cell {
   var x = field_value(V.field, u1, u2, g, 0.0, phi);
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
+  if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + 6u) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y)); }
   return Cell(x, u1.x, u2.w > 0.5);
 }
 
