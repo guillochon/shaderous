@@ -1,0 +1,305 @@
+// MHD update on the block grid, for one stage (mhd/update.wgsl on the uniform grid): the
+// conservative update of each leaf cell and the constrained-transport update of the block's
+// faces (with compensated sums), over the texels [0, BS] of each block.
+//
+// Refinement boundaries (docs/mhd-plan.md, section 4b):
+//  - a cell beside a refined neighbor takes the mean of the fine fluxes through that face, from
+//    the fine blocks' flux register, in place of its own;
+//  - every edge has one value, set by the finest blocks around it: for an edge on the block's
+//    surface the leaves of the cells around it are looked up (IDX), and where one is finer the
+//    mean of the fine block's two impulses along the edge (one at a 2D vertex) is used, scaled
+//    to this block's cell size. That covers the faces in the refinement boundary and the faces
+//    beside it, and edges a block shares with a finer one only diagonally.
+// Blocks at the same level compute shared faces and edges from identical inputs, so their
+// copies agree.
+#include "hydro/common.wgsl"
+#include <eos>
+#include <limiter>
+#include "hydro/dual_energy.wgsl"
+#include "hydro/pfloor.wgsl"
+#include "hydro/fluff.wgsl"
+#include "amr/grid.wgsl"
+#include "amr/list.wgsl"
+
+@group(0) @binding(1) var<storage, read> clock: Clock;
+@group(0) @binding(2) var U1: texture_3d<f32>;   // state at the start of the step
+@group(0) @binding(3) var U2: texture_3d<f32>;
+@group(0) @binding(4) var BF: texture_3d<f32>;   // its faces
+@group(0) @binding(5) var BC: texture_3d<f32>;   // and their compensations
+@group(0) @binding(6) var<storage, read> FL: array<vec4<f32>>;
+@group(0) @binding(7) var<storage, read> REG: array<vec4<f32>>;
+@group(0) @binding(8) var EI: texture_3d<f32>;    // edge impulses of every leaf
+@group(0) @binding(9) var O1: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(10) var O2: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(11) var OB: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(13) var OC: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(14) var<uniform> CHUNK: Chunk;
+@group(0) @binding(15) var W1: texture_3d<f32>;   // the stage's assembled state
+@group(0) @binding(16) var W2: texture_3d<f32>;
+@group(0) @binding(17) var W3: texture_3d<f32>;
+@group(0) @binding(28) var IDX: texture_3d<u32>;
+
+override STAGE: u32 = 1u;
+
+#include "mhd/state.wgsl"
+#include "mhd/amr_block.wgsl"
+
+// For the lookups of amr_common's that this pass uses (map_cell, holder, local_of).
+fn n_at(level: u32) -> vec3<i32> {
+  let n = i32(P.amr.y) * BS * (1 << level);
+  return select(vec3<i32>(n), vec3<i32>(n, n, 1), is2d());
+}
+struct GCell { g: vec3<i32>, flip: vec3<f32>, side: vec3<f32> }
+fn map_cell(level: u32, g0: vec3<i32>) -> GCell {
+  let n = n_at(level);
+  var o = GCell(g0, vec3<f32>(1.0), vec3<f32>(0.0));
+  for (var a = 0; a < 3; a++) {
+    let i = g0[a];
+    if (i >= 0 && i < n[a]) { continue; }
+    let up = i >= n[a];
+    let bc = select(P.bc_lo[a], P.bc_hi[a], up);
+    if (bc == 0u) {
+      o.g[a] = ((i % n[a]) + n[a]) % n[a];
+    } else if (bc == 2u) {
+      o.g[a] = select(-1 - i, 2 * n[a] - 1 - i, up);
+      o.flip[a] = -1.0;
+    } else {
+      o.g[a] = select(0, n[a] - 1, up);
+    }
+  }
+  return o;
+}
+struct Holder { slot: i32, rel: i32 }
+fn holder(level: u32, g: vec3<i32>) -> Holder {
+  let shift = P.amr.z - level;
+  var fb = (g << vec3<u32>(shift)) / BS;
+  if (is2d()) { fb.z = 0; }
+  var s = i32(textureLoad(IDX, fb, 0).x);
+  let ls = u32(bt(s, 0u));
+  if (ls == level) { return Holder(s, 0); }
+  if (ls < level) { return Holder(s, -1); }
+  for (var k = ls; k > level; k--) { s = bt(s, 5u); }
+  return Holder(s, 1);
+}
+fn local_of(slot: i32, g: vec3<i32>) -> vec3<i32> {
+  var l = g - blk_coord(slot) * BS;
+  if (is2d()) { l.z = 0; }
+  return l;
+}
+
+var<private> g_slot: i32;
+var<private> g_o: vec3<i32>;
+var<private> g_level: u32;
+
+// Impulse along c at the block's edge texel t: its own, or where a finer leaf touches the edge,
+// the finer block's, as this block's share.
+fn impulse(c: i32, t: vec3<i32>) -> f32 {
+  let a = (c + 1) % 3;
+  let b = (c + 2) % 3;
+  let flat_a = is2d() && a == 2;
+  let flat_b = is2d() && b == 2;
+  let on_a = !flat_a && (t[a] == 0 || t[a] == BS);
+  let on_b = !flat_b && (t[b] == 0 || t[b] == BS);
+  let own = textureLoad(EI, atl(g_o, t), 0)[c];
+  if (!on_a && !on_b) { return own; }
+  // The cells around the edge: offsets 0 or -1 along a and b (only along the axis in use in 2D).
+  let g = blk_coord(g_slot) * BS + t;
+  let na = select(2, 1, flat_a);
+  let nb = select(2, 1, flat_b);
+  for (var j = 0; j < nb; j++) {
+    for (var i = 0; i < na; i++) {
+      var cell = t;
+      cell[a] -= i;
+      cell[b] -= j;
+      let inside = all(cell >= vec3<i32>(0)) && all(cell < vec3<i32>(BS, BS, select(BS, 1, is2d())));
+      if (inside) { continue; }
+      let gc = blk_coord(g_slot) * BS + cell;
+      let h = holder(g_level, map_cell(g_level, gc).g);
+      if (h.rel != 1) { continue; }
+      // A finer leaf: its edge segments along this one, read from the fine cell beside the edge.
+      var fcell = 2 * g;
+      fcell[a] -= i;
+      fcell[b] -= j;
+      if (is2d()) { fcell.z = 0; }
+      let f = holder(g_level + 1u, map_cell(g_level + 1u, fcell).g);
+      var le = local_of(f.slot, map_cell(g_level + 1u, fcell).g);
+      le[a] += i;
+      le[b] += j;
+      if (is2d()) { le.z = 0; }
+      let fo = blk_origin(f.slot);
+      // The fine impulse is (dt / dx_fine) E: half of it is this block's, per fine segment.
+      if (is2d() && c == 2) { return 0.5 * textureLoad(EI, atl(fo, le), 0)[c]; }
+      var le2 = le;
+      le2[c] += 1;
+      return 0.25 * (textureLoad(EI, atl(fo, le), 0)[c] + textureLoad(EI, atl(fo, le2), 0)[c]);
+    }
+  }
+  return own;
+}
+
+fn two_sum(a: f32, b: f32) -> vec2<f32> {
+  let s = opaque(a + b);
+  let bb = opaque(s - a);
+  return vec2<f32>(s, (a - opaque(s - bb)) + (b - bb));
+}
+
+// Face along a of texel t after the stage, as (b, c), from the pair at the start.
+fn new_face(a: i32, t: vec3<i32>) -> vec2<f32> {
+  let b = (a + 1) % 3;
+  let c = (a + 2) % 3;
+  var eb = vec3<i32>(0);
+  eb[b] = 1;
+  var ec = vec3<i32>(0);
+  ec[c] = 1;
+  let x = atl(g_o, t);
+  var s = textureLoad(BF, x, 0)[a];
+  var comp = textureLoad(BC, x, 0)[a];
+  var r: vec2<f32>;
+  if (!(is2d() && b == 2)) {
+    r = two_sum(s, -impulse(c, t + eb));
+    s = r.x;
+    comp += r.y;
+    r = two_sum(s, impulse(c, t));
+    s = r.x;
+    comp += r.y;
+  }
+  if (!(is2d() && c == 2)) {
+    r = two_sum(s, impulse(b, t + ec));
+    s = r.x;
+    comp += r.y;
+    r = two_sum(s, -impulse(b, t));
+    s = r.x;
+    comp += r.y;
+  }
+  let hi = opaque(s + comp);
+  return vec2<f32>(hi, comp - opaque(hi - s));
+}
+
+struct Fl { a: vec4<f32>, b: vec4<f32> }
+
+// Flux through the lower face along `axis` of cell t of this block (t[axis] in [0, BS]): its
+// own, or on a face of the block whose neighbor is refined, the mean of the fine fluxes.
+fn flux_at(row: u32, axis: i32, t: vec3<i32>) -> Fl {
+  let hi = t[axis] == BS;
+  if (t[axis] == 0 || hi) {
+    let np = bt(g_slot, 6u + u32(2 * axis) + select(0u, 1u, hi));
+    if (np >= 0 && !blk_leaf(np)) {
+      let l = t;
+      let h = vec3<i32>(l >= vec3<i32>(BS / 2));
+      var bits = h;
+      bits[axis] = select(1, 0, hi);
+      if (is2d()) { bits.z = 0; }
+      let ch = bt(np, 12u + u32(bits.x | (bits.y << 1u) | (bits.z << 2u)));
+      let t1 = (axis + 1) % 3;
+      let t2 = (axis + 2) % 3;
+      let m1 = select(2, 1, is2d() && t1 == 2);
+      let m2 = select(2, 1, is2d() && t2 == 2);
+      var fa = vec4<f32>(0.0);
+      var fb = vec4<f32>(0.0);
+      for (var j = 0; j < m2; j++) {
+        for (var i = 0; i < m1; i++) {
+          let f1 = select(2 * (l[t1] - (BS / 2) * h[t1]) + i, 0, m1 == 1);
+          let f2 = select(2 * (l[t2] - (BS / 2) * h[t2]) + j, 0, m2 == 1);
+          let r = reg_entry(ch, axis, !hi, f1, f2);
+          fa += REG[r];
+          fb += REG[r + 1u];
+        }
+      }
+      let w = 1.0 / f32(m1 * m2);
+      return Fl(fa * w, fb * w);
+    }
+  }
+  let i = flux_entry(row, axis, t);
+  return Fl(FL[i], FL[i + 1u]);
+}
+
+// Shock flag of cell l at the start of the step, from the assembled start state.
+fn shock_flag(l: vec3<i32>) -> f32 {
+  var conv = 0.0;
+  var jump = 0.0;
+  for (var a = 0; a < naxes(); a++) {
+    var e = vec3<i32>(0);
+    e[a] = 1;
+    let m = mq_block(g_o, l - e);
+    let p = mq_block(g_o, l + e);
+    conv += p.a[a + 1] - m.a[a + 1];
+    let pm = m.b.x + 0.5 * dot(m.B, m.B);
+    let pp = p.b.x + 0.5 * dot(p.B, p.B);
+    jump = max(jump, abs(pp - pm) / min(pp, pm));
+  }
+  return select(0.0, 1.0, conv < 0.0 && jump > P.shock_thresh);
+}
+
+@compute @workgroup_size(FLAT_WG)
+fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: vec3<u32>) {
+  let inv = inv_box(wid, lix, 0, BS + 1);
+  if (!inv.ok) { return; }
+  let t = inv.l;
+  g_slot = inv.slot;
+  g_o = blk_origin(inv.slot);
+  g_level = u32(bt(inv.slot, 0u));
+  g_dx = blk_dx(inv.slot);
+  let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
+  g_dt = dt;
+  let dtdx = dt / g_dx;
+  let depth = select(BS, 1, is2d());
+  let top = vec3<i32>(BS, BS, depth);
+
+  // The block's faces at this texel: along a, index up to BS; across it, inside the block.
+  var bout = vec3<f32>(0.0);
+  var cout = vec3<f32>(0.0);
+  for (var a = 0; a < 3; a++) {
+    var ok = t[a] <= top[a] && !(is2d() && a == 2 && t.z != 0);
+    for (var b = 0; b < 3; b++) {
+      if (b != a && t[b] >= top[b]) { ok = false; }
+    }
+    if (ok) {
+      let f = new_face(a, t);
+      bout[a] = f.x;
+      cout[a] = f.y;
+    }
+  }
+  let x = atl(g_o, t);
+  textureStore(OB, x, vec4<f32>(bout, 0.0));
+  if (STAGE == 2u) { textureStore(OC, x, vec4<f32>(cout, 0.0)); }
+
+  if (any(t >= top)) { return; }
+  var net_a = vec4<f32>(0.0);
+  var net_b = vec4<f32>(0.0);
+  var bc = vec3<f32>(0.0);
+  for (var a = 0; a < 3; a++) {
+    var e = vec3<i32>(0);
+    e[a] = 1;
+    if (a < naxes()) {
+      let lo = flux_at(inv.row, a, t);
+      let hi = flux_at(inv.row, a, t + e);
+      net_a += lo.a - hi.a;
+      net_b += lo.b - hi.b;
+      bc[a] = 0.5 * (bout[a] + new_face(a, t + e).x);
+    } else {
+      // 2D: B_z's face is the cell's only one along z.
+      bc[a] = bout[a];
+    }
+  }
+  let u1 = textureLoad(U1, x, 0);
+  let u2 = textureLoad(U2, x, 0);
+  // Pressure for p div v: the stage's assembled state (the start in stage 1, the half step in 2).
+  let ph = textureLoad(W2, x, 0).x;
+  var flag = 0.0;
+  if (STAGE == 1u) { flag = shock_flag(t); }
+  let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
+  let mom = u1.yzw + dtdx * net_a.yzw;
+  let E = u2.x + dtdx * net_b.x;
+  let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w);
+  let sc = u2.z + dtdx * net_b.z;
+  let eb = 0.5 * dot(bc, bc);
+  var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);
+  var mout = mom;
+  let tame = tame_fluff(rho, mom, en.y);
+  if (tame.changed) {
+    mout = tame.mom;
+    en = vec2<f32>(0.5 * dot(mout, mout) / rho + eb + tame.eint, tame.eint);
+  }
+  textureStore(O1, x, vec4<f32>(rho, mout));
+  textureStore(O2, x, vec4<f32>(en.x, en.y, sc, flag));
+}

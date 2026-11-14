@@ -60,3 +60,61 @@ describe('initial magnetic fields (mhd/mhd.ts)', () => {
     expect(err).toBeLessThan(5e-3 * s);
   });
 });
+
+describe('initial magnetic fields on blocks (mhd/amr_mhd.ts)', () => {
+  it('gives a coarse block faces that are exactly the means of its children faces', async () => {
+    const { blockFaces } = await import('../../src/mhd/amr_mhd');
+    const BS = 16;
+    const p: Problem = {
+      ...orszagTang,
+      box: 2,
+      mhd: { potential: () => (x, y, z) => [Math.sin(3 * y + z) * Math.cos(2 * x), Math.cos(5 * z - x) * y, Math.sin(4 * x * y + z)] },
+    };
+    for (const ndim of [2, 3] as const) {
+      const c = { ...cfgOf(p, ndim), ndim } as SimConfig;
+      const dx0 = 2 / BS; // one root block across the box
+      const coarse = blockFaces(c, { slot: 0, level: 0, c: [0, 0, 0], parent: null, children: null }, dx0, 1);
+      const W = BS + 1;
+      const D = ndim === 3 ? W : 1;
+      const at = (f: Float32Array, a: number, i: number, j: number, k: number) => f[4 * ((k * W + j) * W + i) + a];
+      const kids = new Map<string, Float32Array>();
+      for (let o = 0; o < (ndim === 3 ? 8 : 4); o++) {
+        const cc = [o & 1, (o >> 1) & 1, (o >> 2) & 1];
+        kids.set(cc.join(), blockFaces(c, { slot: 1, level: 1, c: cc, parent: null, children: null }, dx0, 1));
+      }
+      // A fine face at global fine index g (normal a), from the child that holds it.
+      const fine = (a: number, g: number[]) => {
+        const cc = g.map((v, ax) => Math.min(ax === a ? (v === 2 * BS ? 1 : v >> 4) : v >> 4, 1));
+        if (ndim === 2) cc[2] = 0;
+        const l = g.map((v, ax) => v - cc[ax] * BS);
+        return at(kids.get(cc.join())!, a, l[0], l[1], ndim === 3 ? l[2] : 0);
+      };
+      let worst = 0;
+      let big = 0;
+      for (let k = 0; k < (ndim === 3 ? BS : 1); k++)
+        for (let j = 0; j < BS; j++)
+          for (let i = 0; i < BS; i++)
+            for (let a = 0; a < ndim; a++) {
+              const g = [i, j, k];
+              const v = at(coarse, a, i, j, k);
+              const t = [0, 1, 2].filter((x) => x !== a && (ndim === 3 || x !== 2));
+              let sum = 0;
+              let n = 0;
+              for (let q = 0; q < (t.length > 1 ? 2 : 1); q++)
+                for (let r = 0; r < 2; r++) {
+                  const gf = g.map((x) => 2 * x);
+                  gf[t[0]] += r;
+                  if (t.length > 1) gf[t[1]] += q;
+                  if (ndim === 2) gf[2] = 0;
+                  sum += fine(a, gf);
+                  n++;
+                }
+              worst = Math.max(worst, Math.abs(sum / n - v));
+              big = Math.max(big, Math.abs(v));
+            }
+      void D;
+      expect(big).toBeGreaterThan(0.3);
+      expect(worst / big).toBeLessThan(1e-6);
+    }
+  });
+});

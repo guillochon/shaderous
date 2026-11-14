@@ -40,6 +40,30 @@ struct View {
 @group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
 @group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
 @group(0) @binding(12) var DA: texture_storage_3d<rgba16float, write>;   // display atlas (`atlas`)
+@group(0) @binding(13) var BF: texture_3d<f32>;   // face-centered magnetic field (mhd/amr_mhd.ts); a placeholder without one
+
+// The magnetic fields, F_MAGNETIC onward, at the leaf cell at atlas texel c, whose gas pressure
+// is p: from the block's own faces (texel BS holds its upper ones).
+fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
+  let lo = textureLoad(BF, c, 0).xyz;
+  var hi = lo;
+  var div = 0.0;
+  for (var a = 0; a < 3; a++) {
+    if (a == 2 && is2d()) { break; }
+    var e = vec3<i32>(0);
+    e[a] = 1;
+    hi[a] = textureLoad(BF, c + e, 0)[a];
+    div += hi[a] - lo[a];
+  }
+  let B = 0.5 * (lo + hi);
+  let b2 = dot(B, B);
+  switch (f - F_MAGNETIC) {
+    case 0u, 1u, 2u { return B[f - F_MAGNETIC]; }
+    case 3u { return sqrt(b2); }
+    case 4u { return 2.0 * p / max(b2, 1.0e-30); }
+    default { return abs(div) / max(sqrt(b2), 1.0e-30); }
+  }
+}
 // Per-block timesteps (amr/bins_on.wgsl): BIN[1 + slot] is a block's time bin; all zero when off.
 @group(0) @binding(29) var<storage, read> TBIN: array<u32>;
 
@@ -98,6 +122,7 @@ fn leaf_value(f: Leaf) -> Cell {
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
   if (V.field == F_TIME_BIN) { x = f32(TBIN[1u + u32(f.slot)]); }
+  if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + 6u) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y)); }
   return Cell(x, u1.x, u2.w > 0.5);
 }
 

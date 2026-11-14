@@ -30,6 +30,8 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
+import { AmrMhd, blockFaces, MHD_BLOCK_TEXTURES } from '../mhd/amr_mhd';
+import { mhdUnsupported } from '../mhd/mhd';
 
 /**
  * Steps between refinement checks, and how far the flow may run past an unanswered check.
@@ -300,7 +302,7 @@ export class AmrSim implements Simulation {
     // all of a run's memory. create() falls back to a smaller atlas if the GPU cannot hold that.
     const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
     const explicit = slots || cfg.amrBudget;
-    const fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim));
+    const fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined));
     if (cfg.ndim === 3) {
       const auto = Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9));
       // 3D passes run three workgroups per block along x (and gravity's one per block along y),
@@ -321,7 +323,7 @@ export class AmrSim implements Simulation {
           : `${roots} root blocks do not fit in an atlas of ${this.cap}`,
       );
     }
-    noteAllocation(this.cap * AmrSim.blockBytes(cfg.ndim));
+    noteAllocation(this.cap * AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined));
 
     const side = this.slotsPerSide * PAD;
     const t = (label: string) => tex3d(d, side, 'rgba32float', label, this.layers * (cfg.ndim === 2 ? 1 : PAD));
@@ -383,8 +385,9 @@ export class AmrSim implements Simulation {
    * GPU bytes per atlas block: nine rgba32float textures (two state pairs, primitives,
    * predictor, gravity field) and two r32float ones (gravity's previous potential and its rate).
    */
-  static blockBytes(ndim: 2 | 3): number {
-    return PAD ** ndim * (9 * 16 + 2 * 4);
+  static blockBytes(ndim: 2 | 3, mhd = false): number {
+    // A magnetic field adds its own atlas textures (mhd/amr_mhd.ts).
+    return PAD ** ndim * (9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_TEXTURES * 16 : 0));
   }
 
   /**
@@ -394,8 +397,10 @@ export class AmrSim implements Simulation {
    *   shown meanwhile; it is `preparing`, and takes no steps, until `compiled` resolves.
    */
   static async create(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<AmrSim> {
-    // Without this a magnetized preset would run as plain hydro, its field silently dropped.
-    if (cfg.problem.mhd) throw new Error('MHD: the adaptive mesh does not carry a magnetic field yet; use a uniform grid');
+    if (cfg.problem.mhd) {
+      const why = mhdUnsupported(cfg);
+      if (why) throw new Error(`MHD: ${why}`);
+    }
     for (let slots = 0; ; ) {
       gpu.device.pushErrorScope('out-of-memory');
       let sim: AmrSim | null = null;
@@ -488,6 +493,15 @@ export class AmrSim implements Simulation {
       });
     }
     await sim.buildHydro(deferUpdate);
+    if (cfg.problem.mhd) {
+      const side = sim.slotsPerSide * PAD;
+      sim.mhd = await AmrMhd.create({
+        device: d, cfg, cap: sim.cap,
+        texture: (label) => tex3d(d, side, 'rgba32float', label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
+        params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx,
+        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots,
+      });
+    }
     sim.reset();
     await sim.settled;
     return sim;
@@ -495,8 +509,9 @@ export class AmrSim implements Simulation {
 
   /** Bins of per-block timesteps in use (0 = off). */
   private get timeBins(): number {
-    // Species are moved with one timestep for all blocks (amr/species.wgsl).
-    if (this.speciesGroups > 0) return 0;
+    // Species are moved with one timestep for all blocks (amr/species.wgsl), and so far a
+    // magnetic field too (docs/mhd-plan.md, phase 2).
+    if (this.speciesGroups > 0 || this.cfg.problem.mhd) return 0;
     return Math.max(0, Math.min(MAX_TIME_BINS, Math.floor(this.cfg.timeBins || 0)));
   }
   /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
@@ -1236,6 +1251,8 @@ export class AmrSim implements Simulation {
     d.queue.writeBuffer(this.sources, 0, packSources([]));
     for (const b of this.tree.leaves()) {
       const dx = this.dx0 / (1 << b.level);
+      // A magnetic field: the leaf's faces, and their energy in each cell's total.
+      const faces = this.mhd ? blockFaces(c, b, this.dx0, this.levels) : null;
       let o = 0;
       for (let k = 0; k < depth; k++)
         for (let j = 0; j < BS; j++)
@@ -1258,12 +1275,21 @@ export class AmrSim implements Simulation {
             u1[o + 2] = w.rho * w.vy * go;
             u1[o + 3] = w.rho * w.vz * go;
             u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz) * go;
+            if (faces) {
+              const W = BS + 1;
+              const f = (a: number, ii: number, jj: number, kk: number) => faces[4 * ((kk * W + jj) * W + ii) + a];
+              const bx = 0.5 * (f(0, i, j, k) + f(0, i + 1, j, k));
+              const by = 0.5 * (f(1, i, j, k) + f(1, i, j + 1, k));
+              const bz = three ? 0.5 * (f(2, i, j, k) + f(2, i, j, k + 1)) : f(2, i, j, k);
+              u2[o] += 0.5 * (bx * bx + by * by + bz * bz);
+            }
             u2[o + 1] = eint;
             u2[o + 2] = w.rho * w.s;
             u2[o + 3] = mark;
             if (G) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);
           }
       const origin = this.origin(b.slot);
+      if (faces) this.mhd!.writeFaces(origin, faces);
       const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
       d.queue.writeTexture({ texture: this.state[0][0], origin }, u1, layout, [BS, BS, depth]);
       d.queue.writeTexture({ texture: this.state[0][1], origin }, u2, layout, [BS, BS, depth]);
@@ -1417,6 +1443,7 @@ export class AmrSim implements Simulation {
     this.nAll = all.length;
     this.dtStale = true;
     this.nLeaf = leaves.length;
+    this.mhd?.setLeaves(this.nLeaf);
     this.nLevel = byLevel.map((l) => l.length);
     // Only the count and the listed slots: what lies past them is never read.
     const pack = (list: Uint32Array) => {
@@ -1521,6 +1548,24 @@ export class AmrSim implements Simulation {
       }
       if (this.binPause > 0) this.binPause--;
       const p = this.cur;
+      if (this.mhd) {
+        const mp = beginPass(enc);
+        this.mhd.encode(
+          mp,
+          p,
+          () => this.flat(mp, this.nLeaf, NG),
+          () => {
+            this.redDt.encode(mp);
+            mp.setPipeline(this.pClock);
+            mp.setBindGroup(0, this.gClock);
+            mp.dispatchWorkgroups(1);
+          },
+        );
+        mp.end();
+        this.cur = 1 - p;
+        this.stepsSinceFlag++;
+        continue;
+      }
       const pass = beginPass(enc);
       pass.setPipeline(this.pAssemble);
       pass.setBindGroup(0, this.assembleGroup(p));
@@ -1608,6 +1653,8 @@ export class AmrSim implements Simulation {
    * queued behind it in the same submission: the flow may only run MAX_STEPS_AHEAD past it.
    */
   private encodeFlags(enc: GPUCommandEncoder): boolean {
+    // With a magnetic field the mesh stays as it was built (regridding is phase 3 of docs/mhd-plan.md).
+    if (this.mhd) return false;
     if (this.levels === 0 || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return false;
     enc.clearBuffer(this.flags);
     const fp = beginPass(enc);
@@ -2012,9 +2059,14 @@ export class AmrSim implements Simulation {
     }
     enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
     const pass = beginPass(enc);
-    pass.setPipeline(this.pAssemble);
-    pass.setBindGroup(0, this.assembleGroup(this.cur));
-    this.flat(pass, this.nAll, NG);
+    if (this.mhd) {
+      // A magnetic field: its own assembly measures the rates, with the fast magnetosonic speed.
+      this.mhd.encodeAssembly(pass, this.cur, () => this.flat(pass, this.nLeaf, NG));
+    } else {
+      pass.setPipeline(this.pAssemble);
+      pass.setBindGroup(0, this.assembleGroup(this.cur));
+      this.flat(pass, this.nAll, NG);
+    }
     this.redDt.encode(pass);
     pass.setPipeline(this.pClock);
     pass.setBindGroup(0, this.gClockPreview);
@@ -2031,7 +2083,13 @@ export class AmrSim implements Simulation {
   async diagnostics(): Promise<Diagnostics> {
     for (;;) {
       const d = await this.readDiagnostics();
-      if (d) return d;
+      if (d) {
+        if (this.mhd) {
+          d.magnetic = await this.mhd.diagnostics(this.cur);
+          d.eInt -= d.magnetic.eMag;
+        }
+        return d;
+      }
       await new Promise((r) => setTimeout(r, 1));
     }
   }
@@ -2078,12 +2136,24 @@ export class AmrSim implements Simulation {
     return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
   }
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
-    const r: Record<number, GPUBuffer | GPUTextureView> = { 2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(), 6: this.prim[0].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 29: this.bins, 30: this.bt, 20: this.bh };
+    // With a magnetic field the primitives come from its own assembly (the same layout), and the
+    // display reads the faces; without, one placeholder texel.
+    const r: Record<number, GPUBuffer | GPUTextureView> = {
+      2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(),
+      6: (this.mhd?.prim ?? this.prim[0]).createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(),
+      13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(), 29: this.bins, 30: this.bt, 20: this.bh,
+    };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }
   get speciesStride(): number {
     return this.speciesGroups ? this.speciesDepth : 0;
+  }
+  /** The display pass's face field without a magnetic field: one texel of nothing. */
+  private placeholderFaces?: GPUTexture;
+  private noFaces(): GPUTexture {
+    this.placeholderFaces ??= tex3d(this.device, 1, 'rgba32float', 'no face field', 1);
+    return this.placeholderFaces;
   }
 
   status(): string {
@@ -2096,7 +2166,8 @@ export class AmrSim implements Simulation {
     const bins = this.builtBins === 0 || share === null ? ''
       : this.binPause > 0 ? `, local timesteps paused (would save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates)`
       : `, local timesteps save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates`;
-    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${bins}`;
+    const fixed = this.mhd ? ', mesh fixed (it does not yet follow the flow with a magnetic field)' : '';
+    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${bins}${fixed}`;
   }
 
   /** Every leaf cell with its position and size (validation only; reads the whole atlas). */
@@ -2266,7 +2337,94 @@ export class AmrSim implements Simulation {
     return { faces, mismatched, coarseFine, worstCoarseFine: worst };
   }
 
+  /** Ideal MHD on the blocks (mhd/amr_mhd.ts); none without a magnetic field. */
+  mhd?: AmrMhd;
+
+  /**
+   * Validation: every face two leaves both hold, compared. Between leaves at the same level the
+   * copies should agree bit for bit; across a refinement boundary the coarse face should be the
+   * mean of the fine faces on it (to rounding). Returns how many same-level copies differ, and
+   * the largest coarse-fine difference over the largest face value.
+   */
+  async faceConsistency(): Promise<{ shared: number; mismatched: number; coarseFine: number; cfFaces: number }> {
+    const side = this.slotsPerSide * PAD;
+    const depth = this.layers * (this.cfg.ndim === 2 ? 1 : PAD);
+    const f = await this.mhd!.readAtlas(this.cur, side, depth);
+    const flat = this.cfg.ndim === 2;
+    const at = (slot: number, l: number[], a: number) => {
+      const o = this.origin(slot);
+      const x = o[0] + l[0];
+      const y = o[1] + l[1];
+      const z = flat ? o[2] : o[2] + l[2];
+      return f[4 * ((z * side + y) * side + x) + a];
+    };
+    let shared = 0;
+    let mismatched = 0;
+    let coarseFine = 0;
+    let cfFaces = 0;
+    let big = 0;
+    const axes = flat ? 2 : 3;
+    for (const b of this.tree.leaves()) {
+      for (let k = 0; k < 2 * axes; k++) {
+        const a = k >> 1;
+        const up = (k & 1) === 1;
+        const nb = this.tree.neighbor(b, k);
+        if (nb.kind === 'bc') continue;
+        // Same-level pairs are counted once, from the lower block; refined neighbors on either side.
+        if (!up && !(nb.kind === 'same' && nb.block.children)) continue;
+        const t1 = (a + 1) % 3;
+        const t2 = (a + 2) % 3;
+        const n1 = flat && t1 === 2 ? 1 : BS;
+        const n2 = flat && t2 === 2 ? 1 : BS;
+        for (let j = 0; j < n2; j++)
+          for (let i = 0; i < n1; i++) {
+            const l = [0, 0, 0];
+            l[a] = up ? BS : 0;
+            l[t1] = i;
+            l[t2] = j;
+            const mine = at(b.slot, l, a);
+            big = Math.max(big, Math.abs(mine));
+            if (nb.kind === 'same' && !nb.block.children) {
+              const m = [...l];
+              m[a] = 0;
+              shared++;
+              if (at(nb.block.slot, m, a) !== mine) mismatched++;
+            } else if (nb.kind === 'same') {
+              // Refined beyond: the mean of the children's faces on this one.
+              let sum = 0;
+              let count = 0;
+              for (const ch of nb.block.children!) {
+                if ((ch.c[a] & 1) !== (up ? 0 : 1)) continue; // the children on the near side
+                for (let q = 0; q < (flat && t2 === 2 ? 1 : 2); q++)
+                  for (let p = 0; p < (flat && t1 === 2 ? 1 : 2); p++) {
+                    const gl = [0, 0, 0];
+                    gl[a] = up ? 0 : BS;
+                    gl[t1] = 2 * (b.c[t1] * BS + i) + p - ch.c[t1] * BS;
+                    gl[t2] = flat && t2 === 2 ? 0 : 2 * (b.c[t2] * BS + j) + q - ch.c[t2] * BS;
+                    if (gl[t1] < 0 || gl[t1] >= BS || gl[t2] < 0 || gl[t2] >= (flat && t2 === 2 ? 1 : BS)) continue;
+                    sum += at(ch.slot, gl, a);
+                    count++;
+                  }
+              }
+              if (count) {
+                coarseFine = Math.max(coarseFine, Math.abs(sum / count - mine));
+                cfFaces++;
+              }
+            }
+          }
+      }
+    }
+    return { shared, mismatched, coarseFine: big > 0 ? coarseFine / big : 0, cfFaces };
+  }
+
+  /** Magnetic energy and divergence of the current state; null without a magnetic field. */
+  async magnetic() {
+    return this.mhd ? this.mhd.diagnostics(this.cur) : null;
+  }
+
   destroy() {
+    this.mhd?.destroy();
+    this.placeholderFaces?.destroy();
     this.destroyed = true;
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();

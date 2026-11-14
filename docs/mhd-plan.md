@@ -11,6 +11,14 @@ tried (an option, off by default) and made the loop worse; his second-derivative
 (Lee & Deane 2009) were not available to check (numerics.md section 21). Gravity, point masses, species, cooling and diffusion
 are refused with a field until phase 4.
 
+Phase 2 progress (2026-11-14): MHD runs on the block grid on a static mesh with a single
+timestep, as section 4b designs it. The design changed in two places:
+- ghost faces get limited tangential slopes;
+- a boundary face is read from the block at its own level.
+
+There are three validation tests, plus edge 2:1 balance in the tree. Still to do in phase 2:
+time bins (section 5). The mesh is frozen with a field until phase 3's regridding.
+
 Goal: ideal magnetohydrodynamics on the uniform grid and the adaptive mesh, with per-block
 time bins from the first adaptive-mesh milestone, so that Shaderous can repeat the magnetized
 tidal disruptions of [Guillochon & McCourt (2017)][GM17]. The magnetic field is kept

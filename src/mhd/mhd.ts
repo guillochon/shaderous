@@ -26,7 +26,6 @@ export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/
  * sources and the adaptive mesh come in later phases of docs/mhd-plan.md.
  */
 export function mhdUnsupported(c: SimConfig): string | null {
-  if (c.amrLevels > 0) return 'the adaptive mesh does not carry a magnetic field yet; use a uniform grid';
   if (c.gravity !== 'off' || c.gext.some((g) => g !== 0)) return 'gravity is not coupled to the magnetic field yet';
   if (c.problem.masses) return 'point masses are not coupled to the magnetic field yet';
   if (c.problem.species?.length) return 'species are not carried with a magnetic field yet';

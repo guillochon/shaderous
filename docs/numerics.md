@@ -804,10 +804,11 @@ The species machinery of [§12](#12-passive-scalar-and-species) and the composit
 ## 21. Ideal MHD (in development)
 
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
-rotor, Brio-Wu, the field loop and the Alfvén wave) solve ideal MHD. So far this works on the
-uniform grid only, coupled to the gas dynamics alone. The adaptive mesh with time bins,
-gravity, point masses and field-line tubes are the later phases of
-[the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
+rotor, Brio-Wu, the field loop and the Alfvén wave) solve ideal MHD, coupled to the gas
+dynamics alone. It runs on the uniform grid, and on the adaptive mesh as the initial
+conditions refined it: the mesh does not yet follow the flow with a field, and every block
+takes the same timestep. Regridding, time bins, gravity, point masses and field-line tubes are
+the later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
@@ -881,6 +882,31 @@ $`E`$ includes $`B^2/2`$.
   Athena++ names them) for analysis, and each cell's lower faces (`Bf1`-`Bf3`) with the upper
   boundary faces in the metadata, from which a restart on the same grid rebuilds the face field
   exactly. A restart on another grid, or on the adaptive mesh, is refused.
+- **Block grid** (`mhd/amr_*.wgsl`, `mhd/amr_mhd.ts`; plan section 4b). The same three passes per
+  stage, block by block, after an assembly that fills every leaf's ghosts. That includes the
+  edge ghosts beside its edges, where one coordinate is up to two cells out and a second is one
+  cell out. Every ghost is found from its global position through the leaf index (`IDX`):
+  copied from a leaf at its level, restricted from a finer one, or prolonged from a coarser
+  one. A face on a refinement boundary is taken from the block on its own level. Prolonged faces
+  carry limited slopes across them (without them, the jagged fine ghost field set off
+  odd-even noise along refinement boundaries with HLLD). At a refinement boundary:
+  - a coarse cell takes the mean of the fine fluxes, from the fine blocks' flux register;
+  - every edge takes the value of the finest blocks around it (looked up through `IDX`, so
+    blocks that share only an edge or a vertex are covered too), from their edge atlas;
+  - so each coarse face stays the mean of the fine faces on it.
+
+  The tree keeps 2:1 balance across edges (3D) and vertices (2D) for runs with a field. Initial
+  faces come from line integrals of $`\mathbf{A}`$ summed over the finest level's segments, so
+  a coarse face starts as exactly the mean of its fine ones. The flux scratch holds a chunk of
+  leaves at a time (256 MB), with fluxes computed again for the update when there is more
+  than one chunk. In tests:
+  - an unrefined block grid matches the uniform grid to $`10^{-7}`$, and every face that two
+    blocks share is bit for bit the same;
+  - on refined meshes (rotor 2D, blast 3D) energy is conserved to $`2	imes10^{-7}`$, and each
+    coarse face equals its fine mean to $`6	imes10^{-8}`$;
+  - magnetic energy is within 0.3% (rotor) and 0.1% (blast) of the uniform grid at the finest
+    resolution;
+  - chunking changes no bit.
 - **CPU reference.** `src/reference/mhd.ts` is the same scheme in float64. After 30 steps of
   Orszag-Tang at 128² and 15 of a 3D blast the GPU agrees with it to $`10^{-7}`$ in density,
   energy and face field.
@@ -924,7 +950,7 @@ was not available to check, so they are not implemented, and the default stays t
 
 ## 22. Validation
 
-The validation suite (`src/validation/tests.ts`) has 51 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 54 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

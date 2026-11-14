@@ -6,8 +6,11 @@ import { BS } from './amr/tree';
 import { memoryBudget } from './gpu/memory';
 import type { Problem } from './problems/types';
 
-/** Whether a preset can run on the adaptive grid: all but those with a magnetic field, which the adaptive mesh does not carry yet (docs/mhd-plan.md, phase 2). */
-export const supportsAmr = (p: Problem) => p.mhd === undefined;
+/**
+ * Whether a preset can run on the adaptive grid: all can. (With a magnetic field the mesh stays as
+ * the initial conditions refined it, until regridding carries the field: docs/mhd-plan.md.)
+ */
+export const supportsAmr = (_p: Problem) => true;
 
 /** The deepest refinement that leaves at least one whole block per side at the coarsest level. */
 export function maxAmrLevels(n: number): number {

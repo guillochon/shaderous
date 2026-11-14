@@ -32,6 +32,8 @@ import { readAthdf, writeAthdf } from '../io/athdf';
 import { alfvenWave, brioWu, fieldLoop, mhdBlast, mhdRotor, orszagTang } from '../problems/mhd';
 import { initialFaces, setMhdSlabBytes } from '../mhd/mhd';
 import { RefMhd } from '../reference/mhd';
+import { setMhdScratchBytes } from '../mhd/amr_mhd';
+import { PAD as PAD_BLOCK } from '../amr/tree';
 
 export interface TestResult {
   id: string;
@@ -2454,6 +2456,104 @@ export const TESTS: TestDef[] = [
         });
       }
       return { pass, metrics };
+    },
+  },
+  {
+    id: 'mhd-amr-unrefined',
+    name: 'MHD on blocks without refinement against the uniform grid (Orszag-Tang 2D, 128 root cells)',
+    criterion:
+      'A block grid that the initial conditions do not refine takes the uniform grid\'s steps: after 40 steps the kinetic, internal and magnetic energies, time and peak density agree to 1e-6, every face two blocks share agrees bit for bit, and |div B| dx / max |B| stays below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const uni = await withSim(gpu, orszagTang, 128, { ndim: 2 }, async (sim) => {
+        sim.step(40);
+        return sim.diagnostics();
+      });
+      return withAmr(gpu, orszagTang, 256, { ndim: 2, amrLevels: 1 }, async (sim) => {
+        const levels = new Set(sim.tree.leaves().map((b) => b.level));
+        sim.step(40);
+        const d = await sim.diagnostics();
+        const faces = await sim.faceConsistency();
+        const rel = (x: number, y: number) => Math.abs(x - y) / Math.max(Math.abs(y), 1e-30);
+        m.leaf_levels = levels.size;
+        m.kinetic = rel(d.eKin, uni.eKin);
+        m.internal = rel(d.eInt, uni.eInt);
+        m.magnetic = rel(d.magnetic!.eMag, uni.magnetic!.eMag);
+        m.time = rel(d.t, uni.t);
+        m.peak_density = rel(d.ranges[0][1], uni.ranges[0][1]);
+        m.shared_faces = faces.shared;
+        m.shared_mismatched = faces.mismatched;
+        m.divB = d.magnetic!.divB;
+        const worst = Math.max(m.kinetic, m.internal, m.magnetic, m.time, m.peak_density);
+        return { pass: levels.size === 1 && worst < 1e-6 && faces.mismatched === 0 && faces.shared > 0 && m.divB < 1e-6, metrics: m };
+      });
+    },
+  },
+  {
+    id: 'mhd-amr-refined',
+    name: 'MHD on a refined static mesh: rotor (2D, 256 finest, 1 level) and blast (3D, 128 finest, 1 level)',
+    criterion:
+      'Mass and total energy conserved to 3e-6; |div B| dx / max |B| below 1e-6; faces shared by two leaves at one level agree bit for bit, and a coarse face on a refinement boundary is the mean of the fine faces on it to 1e-6 of the largest face; magnetic energy within 1% (rotor) and 0.5% (blast) of the uniform grid at the finest resolution, and the rotor\'s peak density within 3%',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const cases: [Problem, number, 2 | 3, number, number][] = [
+        [mhdRotor, 256, 2, 0.01, 0.03],
+        [mhdBlast, 128, 3, 0.005, 1],
+      ];
+      for (const [prob, n, ndim, magTol, rhoTol] of cases) {
+        const k = prob.id;
+        const uni = await withSim(gpu, prob, n, { ndim }, async (sim) => {
+          await sim.runToEnd(64);
+          return sim.diagnostics();
+        });
+        await withAmr(gpu, prob, n, { ndim, amrLevels: 1 }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const levels = new Set(sim.tree.leaves().map((b) => b.level));
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          const faces = await sim.faceConsistency();
+          m[`${k}_levels`] = levels.size;
+          m[`${k}_energy_error`] = Math.abs(d.eTot / d0.eTot - 1);
+          m[`${k}_mass_error`] = Math.abs(d.mass / d0.mass - 1);
+          m[`${k}_divB`] = d.magnetic!.divB;
+          m[`${k}_shared_mismatched`] = faces.mismatched;
+          m[`${k}_coarse_fine_faces`] = faces.cfFaces;
+          m[`${k}_coarse_fine_difference`] = faces.coarseFine;
+          m[`${k}_magnetic_vs_uniform`] = Math.abs(d.magnetic!.eMag / uni.magnetic!.eMag - 1);
+          m[`${k}_peak_density_vs_uniform`] = Math.abs(d.ranges[0][1] / uni.ranges[0][1] - 1);
+          pass &&=
+            levels.size === 2 && m[`${k}_energy_error`] < 3e-6 && m[`${k}_mass_error`] < 3e-6 && m[`${k}_divB`] < 1e-6 &&
+            faces.mismatched === 0 && faces.cfFaces > 0 && faces.coarseFine < 1e-6 &&
+            m[`${k}_magnetic_vs_uniform`] < magTol && m[`${k}_peak_density_vs_uniform`] < rhoTol;
+        });
+      }
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-amr-chunks',
+    name: 'MHD on blocks: stepping the leaves in chunks changes nothing (blast 3D, 128 finest, 1 level)',
+    criterion:
+      'With the flux scratch holding one block at a time (every leaf its own chunk, fluxes computed again for the update) and with all leaves in one chunk, 10 steps across a refinement boundary give the same state and faces bit for bit',
+    async run(gpu) {
+      const runs: Float32Array[][] = [];
+      for (const bytes of [null, 1]) {
+        setMhdScratchBytes(bytes);
+        try {
+          await withAmr(gpu, mhdBlast, 128, { ndim: 3, amrLevels: 1 }, async (sim) => {
+            sim.step(10);
+            const c = await sim.readLeaves();
+            const side = (sim as unknown as { slotsPerSide: number }).slotsPerSide * PAD_BLOCK;
+            runs.push([c.u1, c.u2, await sim.mhd!.readAtlas(sim.cur, side, side)]);
+          });
+        } finally {
+          setMhdScratchBytes(null);
+        }
+      }
+      let diff = 0;
+      for (let k = 0; k < 3; k++) for (let i = 0; i < runs[0][k].length; i++) if (runs[0][k][i] !== runs[1][k][i]) diff++;
+      return { pass: diff === 0, metrics: { differing_values: diff } };
     },
   },
 ];

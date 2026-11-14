@@ -53,9 +53,7 @@ fn bcell(c: vec3<i32>) -> vec3<f32> {
   );
 }
 
-// Primitive state of a cell for MHD:
-//   a = (rho, vx, vy, vz)    b = (p, scalar, sound speed, e_int per volume)    B = cell-centered field
-struct MQ { a: vec4<f32>, b: vec4<f32>, B: vec3<f32> }
+#include "mhd/state.wgsl"
 
 // The state of a cell, or of the cell a ghost maps to (velocity and field mirrored at a
 // reflecting face: the normal components change sign).
@@ -66,12 +64,3 @@ fn mq_load(c: vec3<i32>) -> MQ {
   return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), bcell(m.c) * m.flip);
 }
 
-// Fastest magnetosonic speed of a state, over all directions: sqrt(c_s^2 + B^2 / rho).
-fn fast_max(rho: f32, cs: f32, B: vec3<f32>) -> f32 {
-  return sqrt(cs * cs + dot(B, B) / rho);
-}
-
-// Electric field -v x B at a cell center.
-fn efield(v: vec3<f32>, B: vec3<f32>) -> vec3<f32> {
-  return cross(B, v);
-}
