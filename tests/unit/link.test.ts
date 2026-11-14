@@ -42,7 +42,7 @@ describe('shareable links', () => {
     s.cfg.limiter = 'mc';
     s.cfg.cfl = 0.5;
     s.cfg.eosParams.gamma = 1.4;
-    s.cfg.gravEnergyFlux = false;
+    s.cfg.gravEnergyFlux = true;
     s.cfg.viscosity = 0.002;
     s.cfg.conductivity = 0.5;
     s.cfg.params.beta = 2;
@@ -57,7 +57,7 @@ describe('shareable links', () => {
 
     const l = decodeLink(new URLSearchParams(encodeLink(s).toString()));
     expect([l.problem, l.ndim, l.n, l.amr]).toEqual(['tidal-disruption', 3, 128, 2]);
-    expect(l.cfg).toEqual({ tEnd: 20, riemann: 'hll', limiter: 'mc', cfl: 0.5, gravEnergyFlux: false, viscosity: 0.002, conductivity: 0.5 });
+    expect(l.cfg).toEqual({ tEnd: 20, riemann: 'hll', limiter: 'mc', cfl: 0.5, gravEnergyFlux: true, viscosity: 0.002, conductivity: 0.5 });
     expect(l.eosParams).toEqual({ gamma: 1.4 });
     expect(l.params).toEqual({ beta: 2 });
     expect(l.view).toMatchObject({ mode: 'slice', field: 3, yaw: -1.25, lo: 1e-4, hi: 2.5 });
