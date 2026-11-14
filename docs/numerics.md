@@ -806,8 +806,8 @@ The species machinery of [§12](#12-passive-scalar-and-species) and the composit
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
 rotor, Brio-Wu, the field loop and the Alfvén wave) solve ideal MHD, coupled to the gas
 dynamics alone. It runs on the uniform grid and on the adaptive mesh, which re-meshes with the
-field (below), with per-block timesteps. Gravity, point masses and field-line tubes are the
-later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
+field (below), with per-block timesteps, and draws its field lines (below). Gravity and point
+masses are the later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
@@ -962,6 +962,36 @@ $`E`$ includes $`B^2/2`$.
   their signal speeds differ by less than the factor of 2 between bins almost everywhere. With
   3 bins the 2D blast makes 89%: neighbors are pulled into the fastest bin for a longer cycle.
   Chunked substeps change no bit (`mhd-amr-chunks`).
+- **Field lines** (`render/fieldlines.ts`; plan section 10; the view's Field lines switch,
+  on by default with a field). Each frame the cell-centered field and the velocity are
+  resampled onto a small volume (up to $`128^3`$ in 3D, $`1024^2`$ in 2D; `render/bsample.wgsl`,
+  `amr/bsample.wgsl`, from the leaf cell under each voxel on blocks).
+  - In 2D the lines are contours of the flux function $`A_z`$ ($`B_x = \partial_y A_z`$,
+    $`B_y = -\partial_x A_z`$), integrated from that volume along its bottom row and up each
+    column (`render/fluxfunction.wgsl`). The same flux passes between any two lines, so they
+    crowd where the field is strong; and since $`A_z`$ moves with the gas in ideal MHD, so do
+    they. The count is the number of levels, evenly spaced across the range of $`A_z`$.
+  - In the plane (2D, and the slice view of a 3D run) the lines are drawn as flat tubes three
+    pixels wide: shaded, outlined, colored by $`|B|`$ (teal weak, white strong) as the volume
+    view's tubes are, so they read apart from the view's contour lines, which are thin and
+    flat. Where flux-function levels come closer than about twice that width they fade out.
+  - In 3D the lines are traced from seeds (`render/fieldlines.wgsl`): from each seed both ways
+    along $`\hat{B}`$ with midpoint steps of 1/256 of the box (1/512 in a plane), up to a box
+    length each way, until it leaves the box, closes on itself, or the field fades below 1% of
+    its largest value. The seeds move with the gas (the clock's time since the last frame times
+    the velocity), so each stays on its line as the field evolves and the picture does not
+    flicker. A seed is placed again, where it leaves the box or where its field falls below 2%
+    of the largest, as one of 24 random points drawn with weight $`|B|^2`$ (magnetic energy).
+  - Volume view: each segment is a capsule drawn on a camera-facing quad, found and lit per
+    pixel (ray-capsule intersection), colored by $`\log|B|`$ along the lines (teal weak, white
+    strong). The tubes go into a color and distance target first; the ray-marcher stops at a
+    tube's distance and lays the gas in front of it over it, so tubes behind dense gas fade.
+  - Slice view of a 3D run: the lines follow the field's components in the slice plane, from
+    seeds in the plane weighted by $`|B|`$, drawn as lines over the slice. (The field in a
+    plane of a 3D run is not divergence-free, so it has no flux function.)
+
+  The `api.spec.ts` test draws them on Orszag-Tang (2D) and the blast in 3D, uniform and on
+  blocks, in both views.
 - **CPU reference.** `src/reference/mhd.ts` is the same scheme in float64. After 30 steps of
   Orszag-Tang at 128² and 15 of a 3D blast the GPU agrees with it to $`10^{-7}`$ in density,
   energy and face field.

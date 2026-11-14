@@ -162,6 +162,8 @@ export interface Simulation {
   /** parity of the state textures holding the current state */
   cur: number;
   readonly paramBuffer: GPUBuffer;
+  /** The clock on the GPU: (dt, t, Kahan term, steps), as float32. */
+  readonly clockBuffer: GPUBuffer;
   /** Encode up to `count` steps; returns how many were encoded. */
   encodeSteps(enc: GPUCommandEncoder, count: number): number;
   /** Call after submitting an encoder that encodeSteps() wrote to. */
@@ -1518,6 +1520,9 @@ export class Sim implements Simulation {
   }
   static readonly fieldShader = 'render/field.wgsl';
   readonly fieldShader = Sim.fieldShader;
+  get clockBuffer(): GPUBuffer {
+    return this.clock;
+  }
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
     const r: Record<number, GPUBuffer | GPUTextureView> = {
       2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 20: this.bh,

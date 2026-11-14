@@ -7,6 +7,11 @@
 #include "render/camera.wgsl"
 #include <volume>
 
+// Field lines drawn as tubes before the gas (render/fieldtubes.wgsl): their color, and how far
+// along the ray they lie, in r (0 where there is none). The gas in front of a tube is drawn over it.
+@group(0) @binding(9) var TUBE: texture_2d<f32>;
+@group(0) @binding(10) var TUBE_T: texture_2d<f32>;
+
 fn hash(p: vec2<f32>) -> f32 {
   return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
 }
@@ -58,6 +63,10 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let t1 = min(thi.x, min(thi.y, thi.z));
   if (t1 <= t0) { return vec4<f32>(C.bg.rgb, 1.0); }
 
+  let tp = min(vec2<i32>(in.pos.xy), vec2<i32>(textureDimensions(TUBE_T)) - 1);
+  let tube_t = textureLoad(TUBE_T, tp, 0).r;
+  let tube = tube_t > 0.0;
+  let tend = select(t1, min(t1, tube_t), tube);
   let jitter = hash(in.pos.xy);
   var col = vec3<f32>(0.0);
   var alpha = 0.0;
@@ -69,7 +78,7 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   // Each sample stands for the stretch of ray up to the next one, whose length depends on the
   // cell it is in (vol_step); the first is placed a random part of a step in, against banding.
   var t = t0 + jitter * vol_step(vol_look(ro + rd * t0));
-  for (var i = 0; i < VOL_MAX_SAMPLES && t < t1; i++) {
+  for (var i = 0; i < VOL_MAX_SAMPLES && t < tend; i++) {
     let p = ro + rd * t;
     let look = vol_look(p);
     let s = look.s;
@@ -113,6 +122,11 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
     }
     if (alpha > 0.995) { break; }
     t += ds;
+  }
+  if (tube) {
+    let tc = textureLoad(TUBE, tp, 0);
+    col += (1.0 - alpha) * tc.a * tc.rgb;
+    alpha += (1.0 - alpha) * tc.a;
   }
   col += (1.0 - alpha) * C.bg.rgb;
 

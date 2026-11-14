@@ -19,6 +19,7 @@ import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } 
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
+import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 import { installApi } from './api';
 
@@ -118,6 +119,7 @@ side.innerHTML = `
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', 'row-slicepos', 'Where the slice cuts the box along its normal')}
       ${field('Contours', number('ncont', `min="1" max="${MAX_CONTOURS}" step="1"`), 'row-ncont', 'How many contour lines the slice and projection views draw, or isosurfaces the volume view draws, when Contours is on (beside the color bar): evenly spaced in log |value| between the ends of the displayed range, the ends themselves left out. A range reaching zero or below is contoured in |value| over the four decades under its largest magnitude')}
       ${field('Surface opacity', '<input id="isoa" type="range" min="0.05" max="1" step="0.05" />', 'row-isoa', 'Volume view, with Contours on: how opaque each isosurface is. Below 1 the surfaces behind show through')}
+      ${field('Field lines', number('nflines', `min="1" max="${MAX_FIELD_LINES}" step="1"`), 'row-nflines', 'A run with a magnetic field, with Field lines on (beside the color bar): how many lines. In 2D they are contours of the flux function, this many levels: the same magnetic flux passes between any two, so they crowd where the field is strong. In 3D, this many lines traced from seeds that move with the gas, so each stays the same line as the field evolves: tubes colored by |B| in the volume view (teal weak, white strong), lines along the field in the plane in the slice view')}
     </div>
   </details>
 
@@ -257,6 +259,7 @@ $('colorbar').innerHTML = `
     <label class="check" title="Outline the blocks of an adaptive mesh, in the slice and the volume view"><input id="blocks" type="checkbox" checked />Blocks</label>
     <label class="check" title="Contour lines in the slice and projection views, isosurfaces in the volume view, evenly spaced in log |value| across the displayed range (how many: View, Contours)"><input id="contours" type="checkbox" />Contours</label>
     <label class="check" title="Volume view: draw the gas as a glowing fog. Off, with Contours on, the isosurfaces show alone"><input id="fog" type="checkbox" checked />Fog</label>
+    <label class="check" id="flines-check" title="Magnetic field lines: tubes in the volume view, lines in the plane in the slice view and in 2D (how many: View, Field lines)"><input id="flines" type="checkbox" />Field lines</label>
   </div>
   <select id="cmap" title="Color map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
   <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="1" max="300" step="1" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
@@ -913,6 +916,13 @@ function syncControls() {
   $<HTMLInputElement>('fog').disabled = !marching || !view.contours;
   $<HTMLInputElement>('isoa').value = String(view.surfaceOpacity);
   $<HTMLInputElement>('isoa').disabled = !marching || !view.contours;
+  // Field lines: only with a magnetic field, and not through a projection.
+  const magnetic = !!cfg.problem.mhd;
+  $('flines-check').hidden = $('row-nflines').hidden = !magnetic;
+  $<HTMLInputElement>('flines').checked = view.fieldLines;
+  $<HTMLInputElement>('flines').disabled = view.mode === 'projection' && !two;
+  $<HTMLInputElement>('nflines').value = String(view.fieldLineCount);
+  $<HTMLInputElement>('nflines').disabled = !view.fieldLines;
   $<HTMLInputElement>('blocks').disabled = cfg.amrLevels === 0;
   // A 2D run is always shown as its plane, and has no self-gravity.
   $<HTMLSelectElement>('mode').disabled = two;
@@ -1175,7 +1185,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next, rest);
     } else {
       const dv = viewDefaults(problem, ndim);
-      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5, minRho: 0 });
+      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5, minRho: 0, fieldLines: dv.fieldLines, fieldLineCount: dv.fieldLineCount });
     }
     if (link) {
       // Settings carried by a shared link, on top of the preset's defaults.
@@ -1580,6 +1590,13 @@ function bind() {
   const contourCount = (el: HTMLInputElement) => Math.min(MAX_CONTOURS, Math.max(1, Math.round(numOr(el, view.nContours))));
   on('ncont', (el) => (view.nContours = contourCount(el)), 'input');
   on('ncont', (el) => (el.value = String((view.nContours = contourCount(el)))));
+  on('flines', (el) => {
+    view.fieldLines = el.checked;
+    syncControls();
+  });
+  const lineCount = (el: HTMLInputElement) => Math.min(MAX_FIELD_LINES, Math.max(1, Math.round(numOr(el, view.fieldLineCount))));
+  on('nflines', (el) => (view.fieldLineCount = lineCount(el)), 'input');
+  on('nflines', (el) => (el.value = String((view.fieldLineCount = lineCount(el)))));
   $<HTMLInputElement>('autoplay').checked = autoplay;
   on('autoplay', (el) => {
     autoplay = el.checked;

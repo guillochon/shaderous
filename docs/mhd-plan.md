@@ -33,6 +33,17 @@ is rebuilt from the gas's. The refinement checks run with a field. There is a mo
 the new `field-loop-dense` preset. Restarting an adaptive-mesh run with a field from a snapshot
 followed (the leaves' faces in the file's `ShaderousFaces` dataset).
 
+Phase 5 (field lines) done (2026-11-14), ahead of phase 4: numerics.md section 21, Field lines.
+Changes from section 10:
+- In 2D the lines are contours of the flux function A_z, not traced: evenly spaced in flux,
+  and moving with the gas without seeds.
+- Seeds in 3D are weighted by |B|^2 over the whole box (not restricted to the star's gas). There
+  is no seeding mode, box or sphere, or Reseed button.
+- Tubes have one radius and are colored by log |B| along the lines.
+- View keys are `fieldLines` and `fieldLineCount` (links: `flines`, `nflines`), not the `tube*`
+  names.
+- The block outlines are still drawn over the volume, without the tubes' depth.
+
 Goal: ideal magnetohydrodynamics on the uniform grid and the adaptive mesh, with per-block
 time bins from the first adaptive-mesh milestone, so that Shaderous can repeat the magnetized
 tidal disruptions of [Guillochon & McCourt (2017)][GM17]. The magnetic field is kept

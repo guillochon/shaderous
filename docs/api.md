@@ -322,6 +322,7 @@ Changes what is drawn, leaving the run alone. These keys are accepted:
 | `fog`, `surfaceOpacity` | Volume view: draw the gas as fog (off leaves the isosurfaces alone), and how opaque the isosurfaces are |
 | `light` | A white background instead of the dark one |
 | `box` | Volume view: outline the box (on by default) |
+| `fieldLines`, `fieldLineCount` | A run with a magnetic field: draw field lines (on by default with a field), and how many (1 to 1024). In 2D they are contours of the flux function, that many levels; in 3D, tubes in the volume view and lines in the plane in the slice view, that many seeds. Link keys `flines`, `nflines` |
 | `colormap` | A name from `describe().colormaps` |
 | `autoRange` | Fit the color range to the data |
 

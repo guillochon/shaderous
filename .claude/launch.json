@@ -4,8 +4,22 @@
     {
       "name": "shaderous",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev"],
+      "runtimeArgs": [
+        "run",
+        "dev"
+      ],
       "port": 5183
+    },
+    {
+      "name": "shaderous-alt",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "--port",
+        "5193",
+        "--strictPort"
+      ],
+      "port": 5193
     }
   ]
 }

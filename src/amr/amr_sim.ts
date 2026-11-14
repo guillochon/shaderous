@@ -2177,6 +2177,9 @@ export class AmrSim implements Simulation {
   }
   static readonly fieldShader = 'amr/field.wgsl';
   readonly fieldShader = AmrSim.fieldShader;
+  get clockBuffer(): GPUBuffer {
+    return this.clock;
+  }
   displayAtlas(): DisplayAtlas | null {
     if (this.cfg.ndim !== 3) return null;
     return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };

@@ -8,6 +8,7 @@ import { EOS_LABELS, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { FIELDS, GRAVITY_MODES, PROBLEMS, problemById, type Bc3, type GravityMode, type Problem } from '../problems';
 import { defaultView, type ViewState } from '../render/renderer';
+import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../io/snapshot';
 
@@ -52,14 +53,18 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
   v.mode = ndim === 2 ? 'slice' : (problem.view?.mode ?? 'volume');
   v.sliceAxis = ndim === 2 ? 2 : (problem.view?.axis ?? 2);
   v.pitch = problem.view?.pitch ?? 0.45;
+  // A magnetized run shows its field lines.
+  v.fieldLines = !!problem.mhd;
+  // 2D: contours of the flux function, fewer than the tubes of 3D.
+  v.fieldLineCount = ndim === 2 ? 24 : 160;
   return v;
 }
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'nContours', 'surfaceOpacity'] as const;
+const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'nContours', 'surfaceOpacity', 'fieldLineCount'] as const;
 const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont', surfaceOpacity: 'isoa',
+  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont', surfaceOpacity: 'isoa', fieldLineCount: 'nflines',
 };
 
 export function encodeLink(s: LinkState): URLSearchParams {
@@ -128,6 +133,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   str('fog', flag(view.fog), flag(dv.fog));
   str('light', flag(view.light), flag(dv.light));
   str('box', flag(view.box), flag(dv.box));
+  str('flines', flag(view.fieldLines), flag(dv.fieldLines));
   if (!s.auto) {
     q.set('lo', fmt(view.lo));
     q.set('hi', fmt(view.hi));
@@ -332,6 +338,9 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   put(out.view, 'fog', bool('fog'));
   put(out.view, 'light', bool('light'));
   put(out.view, 'box', bool('box'));
+  put(out.view, 'fieldLines', bool('flines'));
+  const nfl = num('nflines', 1, MAX_FIELD_LINES);
+  put(out.view, 'fieldLineCount', nfl === undefined ? undefined : Math.round(nfl));
   put(out.view, 'surfaceOpacity', num('isoa', 0.05, 1));
   const ncont = num('ncont', 1, MAX_CONTOURS);
   put(out.view, 'nContours', ncont === undefined ? undefined : Math.round(ncont));

@@ -99,3 +99,27 @@ test('drives the panel controls and reports bad calls', async ({ page }) => {
   // A failed call leaves the API serving the next one.
   expect((await call(page, 'step', 1)).taken).toBe(1);
 });
+
+test('draws magnetic field lines: contours in 2D, tubes and slices in 3D, on blocks too', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  const cases: [string, Record<string, unknown>, Record<string, unknown>][] = [
+    ['orszag-tang-lines', { problem: 'orszag-tang', dim: 2, n: 256 }, { field: 3 }],
+    ['blast-3d-tubes', { problem: 'mhd-blast', dim: 3, n: 64 }, { mode: 'volume' }],
+    ['blast-3d-blocks-tubes', { problem: 'mhd-blast', dim: 3, n: 128, amr: 1 }, { mode: 'volume' }],
+    ['blast-3d-blocks-slice-lines', { problem: 'mhd-blast', dim: 3, n: 128, amr: 1 }, { mode: 'slice' }],
+  ];
+  for (const [name, setup, view] of cases) {
+    await call(page, 'load', setup);
+    await call(page, 'runTo', 0.05);
+    // On by default with a field; the picture changes when they are turned off.
+    expect((await call(page, 'view', view)).fieldLines).toBe(true);
+    const on = await call(page, 'screenshot', { width: 512, height: 512 });
+    await call(page, 'view', { fieldLines: false });
+    const off = await call(page, 'screenshot', { width: 512, height: 512 });
+    expect(on).not.toBe(off);
+    await call(page, 'view', { fieldLines: true });
+    await savePng(page, on, name);
+  }
+  expect(await call(page, 'errors')).toEqual([]);
+});

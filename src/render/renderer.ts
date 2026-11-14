@@ -5,6 +5,7 @@ import { EOS_MODULES } from '../eos/eos';
 import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
+import { FieldLines } from './fieldlines';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
 const HIST_BINS = 128;
@@ -60,6 +61,12 @@ export interface ViewState {
   light: boolean;
   /** Volume view: outline the box. */
   box: boolean;
+  /**
+   * A run with a magnetic field: draw field lines (render/fieldlines.ts), as tubes in the volume
+   * view and in the plane over a slice or a 2D run; and how many.
+   */
+  fieldLines: boolean;
+  fieldLineCount: number;
 }
 
 /** The background behind the box: dark, or white with `light`. */
@@ -163,6 +170,8 @@ export const defaultView = (): ViewState => ({
   surfaceOpacity: 0.5,
   light: false,
   box: true,
+  fieldLines: false,
+  fieldLineCount: 160,
 });
 
 /**
@@ -252,6 +261,13 @@ export class Renderer {
   /** Where the guides through a tool cross (in fractions of the box), or null for none. */
   guides: [number, number, number] | null = null;
   private gVolume!: GPUBindGroup;
+  /** The volume view's resources but the field lines' tubes, its pipeline, and its bind group with the tubes as of FieldLines.version. */
+  private volumeRes: Record<number, GPUBuffer | GPUTextureView | GPUSampler> = {};
+  private volumePipe?: GPURenderPipeline;
+  private gVolumeTubes: { version: number; group: GPUBindGroup } | null = null;
+  /** No tubes: one texel at distance 0. */
+  private noTube: GPUTexture;
+  readonly fieldLines: FieldLines;
   private vol?: GPUTexture;
   /**
    * A 3D adaptive mesh's volume view ray-marches its leaf blocks at their own resolution
@@ -303,6 +319,8 @@ export class Renderer {
     this.rangeBuf = this.device.createBuffer({ size: RANGE_WORDS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.rangeStage = this.device.createBuffer({ size: RANGE_WORDS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     this.atlasUni = this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.noTube = this.device.createTexture({ label: 'no tubes', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
+    this.fieldLines = new FieldLines(this.device, this.format);
   }
 
   async init() {
@@ -350,6 +368,27 @@ export class Renderer {
       }),
     ]);
     this.gLines = bindGroup(this.device, this.pLines, { 0: this.cam });
+    await this.fieldLines.init();
+  }
+
+  /** Bind the volume view: its pipeline and resources, without tubes (9, 10) and with the field lines' when drawn. */
+  private setVolume(pipe: GPURenderPipeline, res: Record<number, GPUBuffer | GPUTextureView | GPUSampler>) {
+    this.volumePipe = pipe;
+    this.volumeRes = res;
+    const none = this.noTube.createView();
+    this.gVolume = bindGroup(this.device, pipe, { ...res, 9: none, 10: none });
+    this.gVolumeTubes = null;
+  }
+
+  /** The volume view's bind group with this frame's tubes. */
+  private volumeWithTubes(): GPUBindGroup {
+    const t = this.fieldLines.tubeViews!;
+    const version = this.fieldLines.version;
+    if (this.gVolumeTubes?.version !== version) {
+      const group = bindGroup(this.device, this.volumePipe!, { ...this.volumeRes, 9: t.color.createView(), 10: t.dist.createView() });
+      this.gVolumeTubes = { version, group };
+    }
+    return this.gVolumeTubes.group;
   }
 
   setTransfer(rgba: Uint8Array<ArrayBuffer>) {
@@ -410,13 +449,13 @@ export class Renderer {
       d.queue.writeBuffer(this.atlasUni, 0, a);
       const bt = sim.fieldResources(0, 0)[30] as GPUBuffer;
       const res = { 0: this.cam, 1: this.atlas.tex.createView(), 2: this.tf.createView(), 3: this.sampler, 7: info.idx.createView(), 8: this.atlasUni, 30: bt };
-      this.gVolume = bindGroup(d, this.pVolumeAtlas, res);
+      this.setVolume(this.pVolumeAtlas, res);
       this.gPick = bindGroup(d, this.pPickAtlas, { ...res, 4: this.pickIn, 5: this.pickOut });
     } else {
       this.atlas?.tex.destroy();
       this.atlas = null;
       const res = { 0: this.cam, 1: this.vol!.createView(), 2: this.tf.createView(), 3: this.sampler };
-      this.gVolume = bindGroup(d, this.pVolume, res);
+      this.setVolume(this.pVolume, res);
       this.gPick = bindGroup(d, this.pPick, { ...res, 4: this.pickIn, 5: this.pickOut });
     }
     // The slice's and the projection's map: one texel per cell of the finest level, on either
@@ -442,6 +481,7 @@ export class Renderer {
     this.gProject = [0, 1, 2, 3].map((k) => bindGroup(d, this.pProject!, { ...common(k), 8: this.rangeBuf, 11: this.map!.createView() }));
     this.gAtlas = info ? [0, 1, 2, 3].map((k) => bindGroup(d, this.pAtlas!, { ...common(k), 8: this.rangeBuf, 12: this.atlas!.tex.createView(), 31: info.list })) : [];
     this.range = null;
+    await this.fieldLines.attach(sim, this.cam);
   }
 
   /** Call after submitting an encoder that encode() wrote to: reads the range back. */
@@ -620,17 +660,21 @@ export class Renderer {
       this.rangeCopied = this.rangeKey(v);
     }
 
+    // A 2D run has nothing to ray-march: always show the plane.
+    const volume = v.mode === 'volume' && nz > 1;
+    // Field lines: traced, and in the volume view drawn as tubes the ray-marcher composites.
+    const dpr = this.fixedSize ? 1 : this.canvas.width / Math.max(1, this.canvas.clientWidth);
+    this.fieldLines.encode(enc, sim, v, this.canvas.width, this.canvas.height, dpr, volume);
     const rp = enc.beginRenderPass({
       colorAttachments: [
         { view: this.ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
     });
-    // A 2D run has nothing to ray-march: always show the plane.
-    const volume = v.mode === 'volume' && nz > 1;
     rp.setPipeline(volume ? (this.atlas ? this.pVolumeAtlas : this.pVolume) : this.pSlice);
-    rp.setBindGroup(0, volume ? this.gVolume : this.gSlice!);
+    rp.setBindGroup(0, volume ? (this.fieldLines.tubesDrawn ? this.volumeWithTubes() : this.gVolume) : this.gSlice!);
     rp.draw(3);
     if (volume) this.drawLines(rp, sim, v.showBlocks);
+    else if (v.mode !== 'projection' || nz === 1) this.fieldLines.drawFlat(rp);
     rp.end();
   }
 
