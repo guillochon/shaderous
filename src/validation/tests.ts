@@ -29,7 +29,9 @@ import { binary } from '../problems/binary';
 import { thermalInstability } from '../problems/thermal_instability';
 import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
-import { alfvenWave, brioWu, fieldLoop, mhdBlast, orszagTang } from '../problems/mhd';
+import { alfvenWave, brioWu, fieldLoop, mhdBlast, mhdRotor, orszagTang } from '../problems/mhd';
+import { initialFaces, setMhdSlabBytes } from '../mhd/mhd';
+import { RefMhd } from '../reference/mhd';
 
 export interface TestResult {
   id: string;
@@ -2201,7 +2203,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-orszag-tang',
     name: 'MHD: Orszag-Tang vortex (2D, 256 cells, to t = 0.5)',
     criterion:
-      'Mass and total energy conserved to 1e-6 (periodic box); max |div B| dx / max |B| below 1e-5 (float32 rounding, which accumulates over the 750 steps); magnetic energy 0.059 to 0.064 and peak pressure 0.48 to 0.54 (this code, HLLD; regression ranges)',
+      'Mass and total energy conserved to 1e-6 (periodic box); max |div B| dx / max |B| below 1e-6 (the compensated face sums keep it at rounding, however many steps); magnetic energy 0.059 to 0.064 and peak pressure 0.48 to 0.54 (this code, HLLD; regression ranges)',
     async run(gpu) {
       return withSim(gpu, orszagTang, 256, { ndim: 2 }, async (sim) => {
         const d0 = await sim.diagnostics();
@@ -2212,7 +2214,7 @@ export const TESTS: TestDef[] = [
         const mErr = Math.abs(d.mass / d0.mass - 1);
         const pmax = d.ranges[3][1];
         return {
-          pass: eErr < 1e-6 && mErr < 1e-6 && mg.divB < 1e-5 && mg.eMag > 0.059 && mg.eMag < 0.064 && pmax > 0.48 && pmax < 0.54,
+          pass: eErr < 1e-6 && mErr < 1e-6 && mg.divB < 1e-6 && mg.eMag > 0.059 && mg.eMag < 0.064 && pmax > 0.48 && pmax < 0.54,
           metrics: { energy_error: eErr, mass_error: mErr, divB: mg.divB, magnetic_energy: mg.eMag, magnetic_energy_initial: d0.magnetic!.eMag, peak_pressure: pmax, steps },
         };
       });
@@ -2222,7 +2224,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-field-loop',
     name: 'MHD: field loop carried once around the box (2D, 128 cells)',
     criterion:
-      'After t = 1 (back at its start): at least 90% of the magnetic energy left, peak |B| within 10% of the initial 1e-3, the field-energy centroid within one cell of the box center, and max |div B| dx / max |B| below 1e-5 (Gardiner & Stone 2005)',
+      'After t = 1 (back at its start): at least 90% of the magnetic energy left, peak |B| within 10% of the initial 1e-3, the field-energy centroid within one cell of the box center, and max |div B| dx / max |B| below 1e-6 (Gardiner & Stone 2005)',
     async run(gpu) {
       const n = 128;
       return withSim(gpu, fieldLoop, n, { ndim: 2 }, async (sim) => {
@@ -2255,7 +2257,7 @@ export const TESTS: TestDef[] = [
         const kept = d.magnetic!.eMag / d0.magnetic!.eMag;
         const peak = d.magnetic!.bMax / 1e-3;
         return {
-          pass: kept > 0.9 && Math.abs(peak - 1) < 0.1 && off < 1 && d.magnetic!.divB < 1e-5,
+          pass: kept > 0.9 && Math.abs(peak - 1) < 0.1 && off < 1 && d.magnetic!.divB < 1e-6,
           metrics: { magnetic_energy_kept: kept, peak_field_ratio: peak, centroid_offset_cells: off, divB: d.magnetic!.divB, steps },
         };
       });
@@ -2293,7 +2295,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-blast-3d',
     name: 'MHD: blast wave in an oblique field (3D, 64 cells)',
     criterion:
-      'Mass and total energy conserved to 1e-6 (periodic box); max |div B| dx / max |B| below 1e-5; the blast stretched along the field: the second moment of the excess pressure along (1, 1, 0) at least 1.3 times that across it, in the mid-plane',
+      'Mass conserved to 1e-6 and total energy to 3e-6 (periodic box: a few roundings of the float32 totals, near 0.7); max |div B| dx / max |B| below 1e-6; the blast stretched along the field: the second moment of the excess pressure along (1, 1, 0) at least 1.3 times that across it, in the mid-plane',
     async run(gpu) {
       const n = 64;
       return withSim(gpu, mhdBlast, n, { ndim: 3 }, async (sim) => {
@@ -2319,10 +2321,139 @@ export const TESTS: TestDef[] = [
         const mErr = Math.abs(d.mass / d0.mass - 1);
         const ratio = along / across;
         return {
-          pass: eErr < 1e-6 && mErr < 1e-6 && d.magnetic!.divB < 1e-5 && ratio > 1.3,
+          pass: eErr < 3e-6 && mErr < 1e-6 && d.magnetic!.divB < 1e-6 && ratio > 1.3,
           metrics: { energy_error: eErr, mass_error: mErr, divB: d.magnetic!.divB, elongation: ratio, steps },
         };
       });
+    },
+  },
+  {
+    id: 'mhd-slabs',
+    name: 'MHD: stepping in slabs changes nothing (3D, 64 cells, outflow box)',
+    criterion:
+      'A blast in an oblique field stepped 40 times with the flux and edge buffers covering 4 layers at a time (16 slabs) and with one slab for the whole grid: the states and face fields agree bit for bit, and |div B| dx / max |B| stays below 1e-6 in both',
+    async run(gpu) {
+      const n = 64;
+      const blast: Problem = { ...mhdBlast, bcLo: all(1), bcHi: all(1) };
+      const runs: { u1: Float32Array; u2: Float32Array; f: Float32Array; div: number }[] = [];
+      for (const bytes of [null, 1]) {
+        // 1 byte: the fewest layers a slab may have (4).
+        setMhdSlabBytes(bytes);
+        try {
+          await withSim(gpu, blast, n, { ndim: 3 }, async (sim) => {
+            sim.step(40);
+            const { u1, u2 } = await sim.readState();
+            const f = await sim.mhd!.readFaces(sim.cur);
+            runs.push({ u1, u2, f, div: (await sim.diagnostics()).magnetic!.divB });
+          });
+        } finally {
+          setMhdSlabBytes(null);
+        }
+      }
+      let diff = 0;
+      for (const k of ['u1', 'u2', 'f'] as const) {
+        const a = runs[0][k];
+        const b = runs[1][k];
+        for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
+      }
+      const div = Math.max(runs[0].div, runs[1].div);
+      return { pass: diff === 0 && div < 1e-6, metrics: { differing_values: diff, divB: div } };
+    },
+  },
+  {
+    id: 'mhd-gpu-vs-cpu',
+    name: 'MHD: GPU against the float64 CPU reference (Orszag-Tang 2D at 128, blast 3D at 32)',
+    criterion:
+      'After 30 steps (Orszag-Tang) and 15 (blast, outflow box): L1 difference in density, total energy and face field below 1e-5 of the mean, and the clocks agree to 1e-5 (src/reference/mhd.ts, the same scheme in float64)',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const cases: [Problem, number, 2 | 3, number][] = [
+        [orszagTang, 128, 2, 30],
+        [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, 3, 15],
+      ];
+      for (const [prob, n, ndim, steps] of cases) {
+        const cfg = configFor(prob, n, { ndim, tEnd: Infinity });
+        const nz = ndim === 2 ? 1 : n;
+        const faces = initialFaces(cfg, n, nz, prob.box / n);
+        const ref = new RefMhd({
+          n, nz, dx: prob.box / n, eos: makeEos(cfg.eos, cfg.eosParams), bcLo: cfg.bcLo, bcHi: cfg.bcHi, cfl: cfg.cfl,
+          rhoFloor: cfg.rhoFloor, pFloor: cfg.pFloor, etaDual: cfg.etaDual, shockThresh: cfg.shockThresh,
+          riemann: cfg.riemann === 'hll' ? 'hlle' : 'hlld', limiter: cfg.limiter,
+        });
+        ref.init(prob.init(n, ref.cfg.eos, ndim, {}), faces);
+        for (let i = 0; i < steps; i++) ref.step();
+        await withSim(gpu, prob, n, { ndim, tEnd: Infinity }, async (sim) => {
+          sim.step(steps);
+          const { u1, u2 } = await sim.readState();
+          const f = await sim.mhd!.readFaces(sim.cur);
+          const d = await sim.diagnostics();
+          let dr = 0, sr = 0, de = 0, se = 0, db = 0, sb = 0;
+          for (let o = 0; o < n * n * nz; o++) {
+            dr += Math.abs(u1[o * 4] - ref.U[0][o]);
+            sr += Math.abs(ref.U[0][o]);
+            de += Math.abs(u2[o * 4] - ref.U[4][o]);
+            se += Math.abs(ref.U[4][o]);
+          }
+          // Faces held by in-range texels (every texel of the grid of faces holds valid ones or zeros on both).
+          for (let q = 0; q < ref.B[0].length; q++) {
+            for (let a = 0; a < 3; a++) {
+              db += Math.abs(f[4 * q + a] - ref.B[a][q]);
+              sb += Math.abs(ref.B[a][q]);
+            }
+          }
+          const k = prob.id;
+          metrics[`${k}_rho_l1`] = dr / sr;
+          metrics[`${k}_energy_l1`] = de / se;
+          metrics[`${k}_field_l1`] = db / sb;
+          metrics[`${k}_time_diff`] = Math.abs(d.t - ref.t) / ref.t;
+          pass &&= dr / sr < 1e-5 && de / se < 1e-5 && db / sb < 1e-5 && Math.abs(d.t - ref.t) / ref.t < 1e-5;
+        });
+      }
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'mhd-restart',
+    name: 'MHD: a magnetized run saved to .athdf and restarted (rotor 2D at 128, blast 3D at 32, outflow boxes)',
+    criterion:
+      'The restarted run starts with the very face field it was saved with (bit for bit, the upper boundary faces included) and |div B| dx / max |B| below 1e-6; after 10 more steps of each, densities agree to 1e-5 (the file holds pressure, not internal energy, so the state comes back to rounding)',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const cases: [Problem, number, 2 | 3][] = [
+        [mhdRotor, 128, 2],
+        [{ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, 3],
+      ];
+      for (const [prob, n, ndim] of cases) {
+        const k = prob.id;
+        await withSim(gpu, prob, n, { ndim, tEnd: Infinity }, async (a) => {
+          a.step(20);
+          const bytes = await writeAthdf(await capture(a, { program: 'shaderous', build: 'test', query: '' }));
+          const snap = await readAthdf(bytes);
+          const saved = await a.mhd!.readFaces(a.cur);
+          const b = await Sim.create(gpu, { ...configFor(prob, n, { ndim, tEnd: Infinity }), ...restartFrom(snap, prob, false, n) });
+          try {
+            const back = await b.mhd!.readFaces(b.cur);
+            let differ = 0;
+            for (let i = 0; i < saved.length; i++) if (i % 4 !== 3 && saved[i] !== back[i]) differ++;
+            const div = (await b.diagnostics()).magnetic!.divB;
+            a.step(10);
+            b.step(10);
+            const ra = (await a.readState()).u1;
+            const rb = (await b.readState()).u1;
+            let drho = 0;
+            for (let i = 0; i < ra.length; i += 4) drho = Math.max(drho, Math.abs(ra[i] - rb[i]) / ra[i]);
+            metrics[`${k}_faces_differing`] = differ;
+            metrics[`${k}_divB_restarted`] = div;
+            metrics[`${k}_max_rel_density_difference`] = drho;
+            pass &&= differ === 0 && div < 1e-6 && drho < 1e-5;
+          } finally {
+            b.destroy();
+          }
+        });
+      }
+      return { pass, metrics };
     },
   },
 ];

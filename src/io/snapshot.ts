@@ -50,6 +50,13 @@ export interface SnapshotMeta {
   perturber?: { pos: number[]; vel: number[] };
   /** debris energies (debris/debris.ts): the mass that has left the box, per energy bin */
   debris?: DebrisLedger;
+  /**
+   * A magnetized run (mhd/mhd.ts): its grid, and the faces on the grid's upper boundary along
+   * each axis that is not periodic (the data's Bf1-3 hold each cell's lower faces), as planes
+   * [k][j], [k][i] and [j][i]; empty along a periodic axis. With these the face field comes back
+   * exactly, divergence-free.
+   */
+  mhd?: { n: number; nz: number; upper: number[][] };
 }
 
 export const blockCells = (s: Snapshot) => s.blockSize[0] * s.blockSize[1] * s.blockSize[2];

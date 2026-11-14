@@ -44,6 +44,42 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     throw new Error('this kind of simulation cannot be exported');
   }
 
+  // A magnetic field: cell-centered for analysis (Bcc1-3, as Athena++ names them), and each
+  // cell's lower faces (Bf1-3) with the upper boundary faces in the metadata, for a restart.
+  const mag: Record<string, Float32Array> = {};
+  let mhdMeta: SnapshotMeta['mhd'];
+  if (sim instanceof Sim && sim.mhd) {
+    const f = await sim.mhd.readFaces(sim.cur);
+    const n = sim.n;
+    const nz = sim.nz;
+    const fx = n + 1;
+    const texel = (i: number, j: number, k: number) => 4 * ((k * fx + j) * fx + i);
+    const up = (a: number, m: number, len: number) => (m + 1 === len && cfg.bcLo[a] === 0 ? 0 : m + 1);
+    for (const k of ['Bf1', 'Bf2', 'Bf3', 'Bcc1', 'Bcc2', 'Bcc3']) mag[k] = new Float32Array(n * n * nz);
+    for (let k = 0; k < nz; k++)
+      for (let j = 0; j < n; j++)
+        for (let i = 0; i < n; i++) {
+          const o = (k * n + j) * n + i;
+          const hi = [texel(up(0, i, n), j, k), texel(i, up(1, j, n), k), texel(i, j, nz === 1 ? 0 : up(2, k, nz))];
+          for (let a = 0; a < 3; a++) {
+            const lo = f[texel(i, j, k) + a];
+            mag[`Bf${a + 1}`][o] = lo;
+            mag[`Bcc${a + 1}`][o] = 0.5 * (lo + f[hi[a] + a]);
+          }
+        }
+    const upper = [0, 1, 2].map((a) => {
+      if (cfg.bcLo[a] === 0 || (a === 2 && nz === 1)) return [];
+      const plane: number[] = [];
+      const [l1, l2] = a === 2 ? [n, n] : [n, nz];
+      for (let q = 0; q < l2; q++)
+        for (let p = 0; p < l1; p++) {
+          const t = a === 0 ? texel(n, p, q) : a === 1 ? texel(p, n, q) : texel(p, q, nz);
+          plane.push(f[t + a]);
+        }
+      return plane;
+    });
+    mhdMeta = { n, nz, upper };
+  }
   const debris = await sim.debrisLedger();
   return {
     ndim: cfg.ndim,
@@ -55,8 +91,8 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     steps: Math.round(restart.steps),
     levels,
     locations,
-    data: { ...primitivesFrom(cfg, u1, u2), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])) },
-    meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}) } : undefined,
+    data: { ...primitivesFrom(cfg, u1, u2), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag },
+    meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
   };
 }
 
@@ -71,11 +107,44 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
     const shift = Math.round(Math.log2(snap.rootSize[0] / rootCells));
     restart.levelAt = (x, y, z) => Math.max(0, sampler.level(frac(x), frac(y), frac(z)) + shift);
   }
+  // A magnetic field comes back face by face, which needs the grid it was saved on.
+  let mhd = problem.mhd;
+  if (mhd) {
+    const m = snap.meta?.mhd;
+    const d = snap.data;
+    if (adaptive || !m || !d.Bf1 || !d.Bf2 || !d.Bf3 || m.n !== rootCells || snap.rootSize[0] !== rootCells) {
+      throw new Error('a magnetized run restarts only from a file it wrote itself, on the same uniform grid');
+    }
+    mhd = {
+      faces: (n, nz) => {
+        if (n !== m.n || nz !== m.nz) throw new Error('a magnetized run restarts only on the grid it was saved on');
+        const fx = n + 1;
+        const fz = nz === 1 ? 1 : nz + 1;
+        const f = new Float32Array(fx * fx * fz * 4);
+        const texel = (i: number, j: number, k: number) => 4 * ((k * fx + j) * fx + i);
+        const B = [d.Bf1!, d.Bf2!, d.Bf3!];
+        for (let k = 0; k < nz; k++)
+          for (let j = 0; j < n; j++)
+            for (let i = 0; i < n; i++) for (let a = 0; a < 3; a++) f[texel(i, j, k) + a] = B[a][(k * n + j) * n + i];
+        m.upper.forEach((plane, a) => {
+          if (!plane.length) return;
+          const [l1, l2] = a === 2 ? [n, n] : [n, nz];
+          for (let q = 0; q < l2; q++)
+            for (let p = 0; p < l1; p++) {
+              const t = a === 0 ? texel(n, p, q) : a === 1 ? texel(p, n, q) : texel(p, q, nz);
+              f[t + a] = plane[q * l1 + p];
+            }
+        });
+        return f;
+      },
+    };
+  }
   return {
     // The same preset, except that its initial conditions are read out of the snapshot.
     // (Its obstacles and inflow are not in the file: they come from the preset again.)
     problem: {
       ...problem,
+      ...(mhd ? { mhd } : {}),
       init: (n, eos, ndim, params) => {
         const preset = problem.init(n, eos, ndim, params);
         return (x, y, z) => {

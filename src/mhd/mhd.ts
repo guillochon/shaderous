@@ -61,6 +61,11 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
   const fz = nz === 1 ? 1 : nz + 1;
   const out = new Float32Array(fx * fx * fz * 4);
   const flat = nz === 1;
+  if (spec.faces) {
+    const f = spec.faces(n, nz);
+    if (f.length !== out.length) throw new Error(`MHD: the face field is for another grid (${f.length / 4} texels, not ${out.length / 4})`);
+    return f;
+  }
   // Face (lower) and center positions along an axis.
   const lo = (i: number) => i * dx - half;
   const mid = (i: number) => (i + 0.5) * dx - half;
@@ -125,35 +130,52 @@ interface MhdDeps {
   comp: Record<number, GPUTextureView>;
 }
 
+/** Bytes the flux and edge buffers of one slab may take, which sets how many layers it has. */
+let slabBytes = 192 * 1024 ** 2;
+/** Change it for runs built from now on (validation: many thin slabs on a small grid); null restores the default. */
+export function setMhdSlabBytes(b: number | null) {
+  slabBytes = b ?? 192 * 1024 ** 2;
+}
+
+/** Layers of cells per slab of a 3D grid of side n (the whole grid if it fits). */
+export function slabLayers(n: number, nz: number): number {
+  if (nz === 1) return 1;
+  const layer = 3 * (n + 2) ** 2 * 48 + (n + 1) ** 2 * 16;
+  return Math.max(4, Math.min(nz, Math.floor(slabBytes / layer) - 2));
+}
+
 export class MhdPasses {
   /** face fields, faces[parity] with the state's parity */
   faces: GPUTexture[] = [];
+  /** what each face's float32 rounding has left out (mhd/update.wgsl), by parity */
+  comps: GPUTexture[] = [];
   /** half-step face field */
   halfFaces!: GPUTexture;
   private flux: GPUBuffer[] = [];
   private emf!: GPUBuffer;
+  /** per slab: its first layer, its layers, and its (first layer, layers, last) uniform */
+  private slabs: { z0: number; nz: number; buf: GPUBuffer }[] = [];
   private pFlux: GPUComputePipeline[] = [];
-  private pEmf!: GPUComputePipeline;
+  private pEmf: GPUComputePipeline[] = [];
   private pUpdate: GPUComputePipeline[] = [];
   pRates!: GPUComputePipeline;
-  /** per state parity: [stage 1, stage 2] bind groups of each pass */
-  private gFlux: GPUBindGroup[][] = [];
-  private gEmf: GPUBindGroup[][] = [];
-  private gUpdate: GPUBindGroup[][] = [];
+  /** [parity][stage][slab] bind groups of each pass */
+  private gFlux: GPUBindGroup[][][] = [];
+  private gEmf: GPUBindGroup[][][] = [];
+  private gUpdate: GPUBindGroup[][][] = [];
   gRates: GPUBindGroup[] = [];
   private redMag!: Reducer;
   private dep: MhdDeps;
 
-  /** Bytes per cell of the MHD textures and buffers: three face textures, nine flux vec4s, one edge vec4. */
-  static readonly cellBytes = (3 + 9 + 1) * 16;
+  /**
+   * Bytes per cell of the MHD textures: five face textures (two parities of the field and of its
+   * compensation, and the half step). The flux and edge buffers hold one slab of layers at a
+   * time (slabLayers) and are not counted per cell.
+   */
+  static readonly cellBytes = 5 * 16;
 
   private constructor(dep: MhdDeps) {
     this.dep = dep;
-  }
-
-  get fd(): number[] {
-    const { n, nz } = this.dep;
-    return [n + 1, n + 1, nz === 1 ? 1 : nz + 1];
   }
 
   static async create(dep: MhdDeps, rates: GPUBuffer): Promise<MhdPasses> {
@@ -161,10 +183,18 @@ export class MhdPasses {
     const { device: d, n, nz } = dep;
     const fz = nz === 1 ? 1 : nz + 1;
     for (let p = 0; p < 2; p++) m.faces.push(tex3d(d, n + 1, 'rgba32float', `face field ${p}`, fz));
+    for (let p = 0; p < 2; p++) m.comps.push(tex3d(d, n + 1, 'rgba32float', `face compensation ${p}`, fz));
     m.halfFaces = tex3d(d, n + 1, 'rgba32float', 'half-step face field', fz);
-    const flux = (n + 2) * (n + 2) * (nz === 1 ? 1 : nz + 2) * 3 * 16;
+    const S = slabLayers(n, nz);
+    const flux = (n + 2) * (n + 2) * (nz === 1 ? 1 : S + 2) * 3 * 16;
     for (let a = 0; a < 3; a++) m.flux.push(d.createBuffer({ label: `MHD fluxes ${'xyz'[a]}`, size: flux, usage: GPUBufferUsage.STORAGE }));
-    m.emf = d.createBuffer({ label: 'edge electric fields', size: (n + 1) * (n + 1) * fz * 16, usage: GPUBufferUsage.STORAGE });
+    m.emf = d.createBuffer({ label: 'edge impulses', size: (n + 1) * (n + 1) * (nz === 1 ? 1 : S + 1) * 16, usage: GPUBufferUsage.STORAGE });
+    for (let z0 = 0; z0 < nz; z0 += S) {
+      const k = Math.min(S, nz - z0);
+      const buf = d.createBuffer({ label: `MHD slab ${z0}`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      d.queue.writeBuffer(buf, 0, new Int32Array([z0, k, z0 + k >= nz ? 1 : 0, 0]));
+      m.slabs.push({ z0, nz: k, buf });
+    }
     await m.build(rates);
     return m;
   }
@@ -180,10 +210,11 @@ export class MhdPasses {
     const { device: d, cfg, params, clock, state, half, comp } = this.dep;
     const slots = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg) };
     const v = (t: GPUTexture) => t.createView();
-    const [f1, f2, emf, u1, u2, prates, red] = await Promise.all([
+    const [f1, f2, e1, e2, u1, u2, prates, red] = await Promise.all([
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 2', { STAGE: 2 }),
-      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge electric fields'),
+      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 1', { STAGE: 1 }),
+      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/rates.wgsl', slots), 'MHD timestep rates'),
@@ -198,7 +229,7 @@ export class MhdPasses {
       ),
     ]);
     this.pFlux = [f1, f2];
-    this.pEmf = emf;
+    this.pEmf = [e1, e2];
     this.pUpdate = [u1, u2];
     this.pRates = prates;
     this.redMag = red;
@@ -211,17 +242,24 @@ export class MhdPasses {
       const o = 1 - p;
       const start = { 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]) };
       const mid = { 2: v(half[0]), 3: v(half[1]), 4: v(this.halfFaces) };
+      const perSlab = (fn: (slab: GPUBuffer) => GPUBindGroup) => this.slabs.map((s) => fn(s.buf));
       this.gFlux.push([
-        bindGroup(d, f1, { 0: params, 1: clock, ...start, ...fl, ...comp }),
-        bindGroup(d, f2, { 0: params, 1: clock, ...mid, ...fl, ...comp }),
+        perSlab((sb) => bindGroup(d, f1, { 0: params, 1: clock, ...start, ...fl, 14: sb, ...comp })),
+        perSlab((sb) => bindGroup(d, f2, { 0: params, 1: clock, ...mid, ...fl, 14: sb, ...comp })),
       ]);
       this.gEmf.push([
-        bindGroup(d, emf, { 0: params, ...start, ...fl, 8: this.emf, ...comp }),
-        bindGroup(d, emf, { 0: params, ...mid, ...fl, 8: this.emf, ...comp }),
+        perSlab((sb) => bindGroup(d, e1, { 0: params, 1: clock, ...start, ...fl, 8: this.emf, 14: sb, ...comp })),
+        perSlab((sb) => bindGroup(d, e2, { 0: params, 1: clock, ...mid, ...fl, 8: this.emf, 14: sb, ...comp })),
       ]);
-      // Stage 1 writes the half-step state, so its unused half-step inputs (12, 13) take the start's.
+      // Stage 1 writes the half-step state, so its unused half-step inputs (12, 13) take the
+      // start's, and its unused compensation output (16) the other parity's, which stage 2
+      // overwrites.
       const upd = (pipe: GPUComputePipeline, out: Record<number, GPUTextureView>, h: GPUTexture[]) =>
-        bindGroup(d, pipe, { 0: params, 1: clock, ...start, ...fl, 8: this.emf, ...out, 12: v(h[0]), 13: v(h[1]), ...comp });
+        perSlab((sb) =>
+          bindGroup(d, pipe, {
+            0: params, 1: clock, ...start, ...fl, 8: this.emf, ...out, 12: v(h[0]), 13: v(h[1]), 14: sb, 15: v(this.comps[p]), 16: v(this.comps[o]), ...comp,
+          }),
+        );
       this.gUpdate.push([
         upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }, state[p]),
         upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }, half),
@@ -234,20 +272,27 @@ export class MhdPasses {
     pass.dispatchWorkgroups(Math.ceil(dims[0] / 8), Math.ceil(dims[1] / 8), Math.ceil(dims[2] / 4));
   }
 
-  /** Encode the two stages of a step from the state at `parity` into the other parity (the clock already holds dt). */
+  /**
+   * Encode the two stages of a step from the state at `parity` into the other parity (the clock
+   * already holds dt). Each stage runs slab by slab; stage 2 starts once stage 1 has written the
+   * whole half-step state, which its stencils reach across slabs for.
+   */
   encode(pass: GPUComputePassEncoder, parity: number) {
     const { n, nz } = this.dep;
-    const fluxDims = [n + 2, n + 2, nz === 1 ? 1 : nz + 2];
+    const flat = nz === 1;
     for (let s = 0; s < 2; s++) {
-      pass.setPipeline(this.pFlux[s]);
-      pass.setBindGroup(0, this.gFlux[parity][s]);
-      this.dispatch(pass, fluxDims);
-      pass.setPipeline(this.pEmf);
-      pass.setBindGroup(0, this.gEmf[parity][s]);
-      this.dispatch(pass, this.fd);
-      pass.setPipeline(this.pUpdate[s]);
-      pass.setBindGroup(0, this.gUpdate[parity][s]);
-      this.dispatch(pass, this.fd);
+      this.slabs.forEach((sl, i) => {
+        const last = sl.z0 + sl.nz >= nz;
+        pass.setPipeline(this.pFlux[s]);
+        pass.setBindGroup(0, this.gFlux[parity][s][i]);
+        this.dispatch(pass, [n + 2, n + 2, flat ? 1 : sl.nz + 2]);
+        pass.setPipeline(this.pEmf[s]);
+        pass.setBindGroup(0, this.gEmf[parity][s][i]);
+        this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + 1]);
+        pass.setPipeline(this.pUpdate[s]);
+        pass.setBindGroup(0, this.gUpdate[parity][s][i]);
+        this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + (last ? 1 : 0)]);
+      });
     }
   }
 
@@ -259,10 +304,12 @@ export class MhdPasses {
     this.dispatch(pass, [n, n, nz]);
   }
 
-  /** Upload a face field (initialFaces' layout) as the state at parity 0. */
-  setFaces(faces: Float32Array) {
+  /** Upload a face field (initialFaces' layout) as the state at `parity`, with nothing to compensate. */
+  setFaces(faces: Float32Array, parity = 0) {
     const { n, nz } = this.dep;
-    writeTexture(this.dep.device, this.faces[0], n + 1, 4, faces, nz === 1 ? 1 : nz + 1);
+    const fz = nz === 1 ? 1 : nz + 1;
+    writeTexture(this.dep.device, this.faces[parity], n + 1, 4, faces, fz);
+    writeTexture(this.dep.device, this.comps[parity], n + 1, 4, new Float32Array(faces.length), fz);
   }
 
   /** The face field at `parity`, in initialFaces' layout (slow: tests and snapshots). */
@@ -289,8 +336,9 @@ export class MhdPasses {
   }
 
   destroy() {
-    for (const t of this.faces) t.destroy();
+    for (const t of [...this.faces, ...this.comps]) t.destroy();
     this.halfFaces?.destroy();
+    for (const sl of this.slabs) sl.buf.destroy();
     for (const b of this.flux) b.destroy();
     this.emf?.destroy();
   }

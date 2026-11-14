@@ -91,7 +91,8 @@ fn voxel(c: vec3<i32>) -> Cell {
   comp_use(comp_tex(c));
   var x = field_value(V.field, u1, u2, g, 0.0, phi);
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
-  if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
+  // (With MHD, PB is the half-step state's second texture, and the flag its fourth channel.)
+  if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0)[select(2, 3, (P.flags & 32u) != 0u)]; }
   if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + 6u) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y)); }
   return Cell(x, u1.x, u2.w > 0.5);
 }

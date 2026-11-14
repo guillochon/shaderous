@@ -27,7 +27,7 @@ fn periodic_axis(a: i32) -> bool {
 // to two cells beyond the grid: they are mapped as a cell's would be. A face normal to `a` is
 // tangential to the boundaries along the other axes, where its field is even (mirrored as it
 // is at a reflecting wall, copied at an outflow).
-fn bface(a: i32, t: vec3<i32>) -> f32 {
+fn face_texel(a: i32, t: vec3<i32>) -> vec3<i32> {
   let n = mhd_dims();
   var s = t;
   for (var b = 0; b < 3; b++) {
@@ -38,7 +38,10 @@ fn bface(a: i32, t: vec3<i32>) -> f32 {
       s[b] = bc_axis(s[b], n[b], P.bc_lo[b], P.bc_hi[b]).x;
     }
   }
-  return textureLoad(BF, s, 0)[a];
+  return s;
+}
+fn bface(a: i32, t: vec3<i32>) -> f32 {
+  return textureLoad(BF, face_texel(a, t), 0)[a];
 }
 
 // Cell-centered field of an in-range cell.

@@ -828,8 +828,13 @@ $`E`$ includes $`B^2/2`$.
   of the half-step primitives (the run's limiter on $`\rho`$, $`\mathbf{v}`$, $`p`$, the scalar
   and the two tangential field components). Each stage has three passes:
   - fluxes, each face computed once into storage buffers, so the two cells sharing it read the same bits;
-  - edge electric fields;
+  - edge electric fields, stored as the stage's impulses $`(\Delta t/\Delta x)\,E`$;
   - the update of cells and faces.
+
+  The passes run slab by slab along z, so the flux and edge buffers hold one slab of layers
+  (at most 192 MB together, `slabLayers`), not the whole grid. Faces and edges on the plane
+  between two slabs are computed by both, with the same pipelines from the same inputs, so the
+  result is bit for bit the same as with one slab (the `mhd-slabs` test).
 
   The half-step state uses the hydro predictor's textures. The internal energy's
   $`p\,\nabla\cdot\mathbf{v}`$ takes the pressure at the start in stage 1 and at the half step in
@@ -843,7 +848,11 @@ $`E`$ includes $`B^2/2`$.
 - **Riemann solvers.** HLLD ([Miyoshi & Kusano 2005][MK05]) by default, used for the HLLC and
   low-Mach HLLC settings. It resolves contacts and Alfvén waves. HLLE, with Davis estimates from
   the fast magnetosonic speeds, is used for the HLL setting. The face's own $`b_n`$ is the
-  normal field on both sides.
+  normal field on both sides. Next to shocks HLLD falls back to HLLE, as HLLC does to HLL:
+  stage 1 flags the cells where the flow converges and the total pressure $`p + B^2/2`$ jumps
+  by more than the shock threshold between neighbors, and stage 2's fluxes take HLLE where
+  either side is flagged. The flag is in the half-step state's fourth channel, which the
+  "Shock" field shows.
 - **Timestep.** The signal speed is $`|v_x| + |v_y| + |v_z| + d\,c_f`$, with $`d`$ the number of
   dimensions and $`c_f = \sqrt{c_s^2 + B^2/\rho}`$ the fastest magnetosonic speed.
 - **Dual energy and floors.** The synchronization of §7 uses $`E - KE - B^2/2`$, where
@@ -855,14 +864,26 @@ $`E`$ includes $`B^2/2`$.
 - **Initial fields.** A preset gives a vector potential $`\mathbf{A}`$, sampled at the edge
   centers, and $`b`$ is its discrete curl, so the divergence starts at zero up to rounding. Or
   it gives the face values of a field that is divergence-free by construction.
-- **Divergence in float32.** CT keeps the divergence at the level of rounding, but each face
-  update rounds independently, so $`\max|\nabla\cdot B|\,\Delta x / \max|B|`$ grows like a random
-  walk: about $`10^{-6}`$ after 50 steps of Orszag-Tang and $`3.5\times10^{-6}`$ after 750. It does
-  not grow systematically. The diagnostics report it (`magnetic.divB`, and the field
-  "Magnetic divergence").
-- **Memory.** Three face textures, nine flux vec4s and one edge vec4 per cell add 208 bytes per
-  cell to the uniform grid's 112 (`MhdPasses.cellBytes`). This is the price of computing each
-  face once without a workgroup tile. Fusing the passes into a tiled one is left for later.
+- **Divergence in float32.** Each edge impulse is one stored number that the four faces
+  around the edge add with opposite signs, so in exact arithmetic no cell's divergence changes.
+  In float32 each face's sum rounds on its own, and over many steps the rounding would walk
+  the divergence away from zero (to $`3.5\times10^{-6}`$ of $`\max|B|`$ after 750 steps of
+  Orszag-Tang, before this was fixed). So each face is a pair: the field $`b`$ and a
+  compensation $`c`$ (a second face texture) holding what $`b`$'s rounding dropped, and the
+  impulses are added with error-free sums (Knuth's TwoSum). The pair carries the face's exact
+  sum of impulses, and $`\max|\nabla\cdot B|\,\Delta x/\max|B|`$ stays at a few roundings for
+  good: $`7\times10^{-8}`$ after 751 steps and $`9\times10^{-8}`$ after 3483. The diagnostics
+  report it (`magnetic.divB`, and the field "Magnetic divergence").
+- **Memory.** Five face textures (field and compensation at both parities, and the half step)
+  add 80 bytes per cell to the uniform grid's 112 (`MhdPasses.cellBytes`), plus the slab
+  buffers.
+- **Snapshots.** A file of a magnetized run holds the cell-centered field (`Bcc1`-`Bcc3`, as
+  Athena++ names them) for analysis, and each cell's lower faces (`Bf1`-`Bf3`) with the upper
+  boundary faces in the metadata, from which a restart on the same grid rebuilds the face field
+  exactly. A restart on another grid, or on the adaptive mesh, is refused.
+- **CPU reference.** `src/reference/mhd.ts` is the same scheme in float64. After 30 steps of
+  Orszag-Tang at 128² and 15 of a 3D blast the GPU agrees with it to $`10^{-7}`$ in density,
+  energy and face field.
 
 Measured (RTX 3080, Chrome), all in the validation suite:
 
@@ -870,13 +891,22 @@ Measured (RTX 3080, Chrome), all in the validation suite:
 | --- | --- |
 | Brio-Wu, 256 cells | Compound wave at $`x = -0.03`$, slow shock at 0.146, $`\min v_y = -1.593`$; energy to $`2\times10^{-7}`$; HLLD and HLLE agree to 0.002 in mean density |
 | Alfvén wave, one period | $`L_1(v_z) = 7.9\times10^{-5}`$ at 128², $`1.97\times10^{-5}`$ at 256²: order 2.00 |
-| Field loop, 128², $`t = 1`$ | 93% of the magnetic energy kept (MC limiter 94%), peak $`|B|`$ 8% high near the singular center |
-| Orszag-Tang, 256², $`t = 0.5`$ | Energy to $`7\times10^{-8}`$, $`\nabla\cdot B`$ $`3.5\times10^{-6}`$ |
-| Blast, 64³ | Energy to $`10^{-7}`$, stretched twice as far along the field as across it |
+| Field loop, 128², $`t = 1`$ | 93% of the magnetic energy kept (MC limiter 94%); peak $`|B|`$ 8% high (see below) |
+| Orszag-Tang, 256², $`t = 0.5`$ | Energy to $`9\times10^{-8}`$, $`\nabla\cdot B`$ $`7\times10^{-8}`$ |
+| Blast, 64³ | Energy to $`10^{-6}`$, stretched twice as far along the field as across it |
+
+**The field loop's peak.** $`|B|`$ overshoots its initial value on the loop's leading edge,
+and at its center, where the field's direction is undefined. The overshoot is 8% at 128² with the
+default limiter, 4% with MC or minmod, and 12% at 256². It is the same with HLLE as with HLLD,
+so neither the reconstruction nor the Riemann solver causes it. It comes from the edge fields,
+and the edge-field formula has been compared line by line with Athena++'s
+`field/calculate_corner_e.cpp` (the same weights, grouping and signs). In 1D it reduces
+exactly to the Godunov flux. So this is a property of the scheme, not a bug. Lee's
+upwind-biased edge fields ([MHD plan](mhd-plan.md) §2) are the remedy to try if it matters.
 
 ## 22. Validation
 
-The validation suite (`src/validation/tests.ts`) has 48 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 51 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

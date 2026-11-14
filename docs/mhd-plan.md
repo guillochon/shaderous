@@ -1,13 +1,14 @@
 # Plan: ideal MHD with constrained transport
 
-Status: approved 2026-11-14. Phase 1 (uniform grid) done 2026-11-14: VL2 + CT with GS05 edge
-fields, HLLE and HLLD, display fields and diagnostics, five validation tests (numerics.md
-section 21). Deviations from the plan below: fluxes are stored once per face in storage buffers
-(no workgroup tile yet), which costs 208 bytes per cell; and div B in float32 grows as a random
-walk of rounding (about 3.5e-6 of max |B| after 750 steps), so the tests use 1e-5, not 1e-6.
-Not yet done from phase 1: an MHD CPU reference solver, and the HLLD shock fallback (the shock
-flag is not computed, so HLLD is used everywhere)); and snapshots (.athdf, checkpoints) do not
-carry the face field yet, so a magnetized run cannot be saved and restarted.
+Status: approved 2026-11-14. Phase 1 (uniform grid) done 2026-11-14 (numerics.md section 21):
+VL2 + CT with GS05 edge fields, HLLD with an HLLE fallback at flagged shocks, compensated
+(TwoSum) face sums that hold div B at a few float32 roundings for good, flux and edge buffers
+one slab of z layers at a time (80 bytes per cell more than hydro), a float64 CPU reference,
+snapshots that restart a magnetized run exactly, display fields and diagnostics, eight
+validation tests. Known: the field loop's |B| overshoots on its leading edge (8% at 128^2),
+a property of the GS05 edge fields as Athena++ implements them. Lee's upwind edge fields
+(section 2) are the option if that matters. Gravity, point masses, species, cooling and diffusion
+are refused with a field until phase 4.
 
 Goal: ideal magnetohydrodynamics on the uniform grid and the adaptive mesh, with per-block
 time bins from the first adaptive-mesh milestone, so that Shaderous can repeat the magnetized

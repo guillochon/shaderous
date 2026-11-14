@@ -6,9 +6,12 @@
 // By the duality between the induction equation's fluxes and the electric field, the face
 // normal to a (frame t1 = a + 1, t2 = a + 2) carries E_t2 = -F_a(B_t1) and E_t1 = F_a(B_t2).
 //
-// One invocation per texel t in [0, n] along each axis: E_x at (i, j - 1/2, k - 1/2), E_y at
-// (i - 1/2, j, k - 1/2), E_z at (i - 1/2, j - 1/2, k). In 2D, E_x and E_y lie on the y and x
-// faces, and are those faces' values.
+// One invocation per texel t in [0, n] along each axis (along z, the slab's layers and the
+// plane above it): E_x at (i, j - 1/2, k - 1/2), E_y at (i - 1/2, j, k - 1/2), E_z at
+// (i - 1/2, j - 1/2, k). In 2D, E_x and E_y lie on the y and x faces, and are those faces'
+// values. What is stored is the stage's impulse (dt/dx) E: the very number that every face
+// around the edge adds or subtracts (mhd/update.wgsl), so that their sum over a cell's faces
+// cancels exactly.
 #include "hydro/common.wgsl"
 #include <eos>
 #include "hydro/pfloor.wgsl"
@@ -21,6 +24,10 @@
 @group(0) @binding(6) var<storage, read> FY: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read> FZ: array<vec4<f32>>;
 @group(0) @binding(8) var<storage, read_write> EMF: array<vec4<f32>>;
+@group(0) @binding(1) var<storage, read> clock: Clock;
+@group(0) @binding(14) var<uniform> SLAB: Slab;
+
+override STAGE: u32 = 1u;
 
 #include "mhd/common.wgsl"
 #include "mhd/flux_index.wgsl"
@@ -73,7 +80,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ed = emf_dims();
   if (any(vec3<i32>(gid) >= ed)) { return; }
   g_dx = P.dx;
-  let t = vec3<i32>(gid);
+  let t = vec3<i32>(gid) + vec3<i32>(0, 0, emf_first());
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);
@@ -95,5 +102,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let Ey = corner(1, t, eref(t - ez - ex).y, e010.y, ez0.y, e111.y);
     E = vec3<f32>(Ex, Ey, Ez);
   }
-  EMF[emf_index(t)] = vec4<f32>(E, 0.0);
+  let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
+  EMF[emf_index(t)] = vec4<f32>((dt / P.dx) * E, 0.0);
 }

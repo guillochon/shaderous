@@ -282,6 +282,11 @@ export interface Problem {
 export interface MhdSpec {
   potential?: (params: Record<string, number>, ndim: 2 | 3) => (x: number, y: number, z: number) => [number, number, number];
   face?: (params: Record<string, number>, ndim: 2 | 3) => (axis: number, x: number, y: number, z: number) => number;
+  /**
+   * Or every face at once, as mhd/mhd.ts initialFaces lays them out for a grid of n cells per
+   * side and nz along z: a run restarted from a file (io/capture.ts restartFrom).
+   */
+  faces?: (n: number, nz: number) => Float32Array;
 }
 
 /** A point mass: position and velocity are relative to the box center. */

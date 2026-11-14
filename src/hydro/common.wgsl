@@ -20,7 +20,8 @@ struct Params {
   flags: u32,            // bit 0: flux-form gravitational work; bit 1: the grid holds solid or fixed
                          //   cells; bit 2: there are sources or sinks (hydro/sources.wgsl); bit 3:
                          //   well-balanced pressure reconstruction (hydro/q.wgsl); bit 4:
-                         //   block grids are refined fully around the point masses (amr/flag.wgsl)
+                         //   block grids are refined fully around the point masses (amr/flag.wgsl);
+                         //   bit 5: ideal MHD (mhd/mhd.ts)
   dx: f32,               // cell size (level 0 on block grids)
   cfl: f32,
   G: f32,

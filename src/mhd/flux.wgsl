@@ -4,11 +4,13 @@
 // same bits.
 //
 //   STAGE 1: first order, from the cells' own states at the start of the step.
-//   STAGE 2: limited linear reconstruction of the primitives from the half-step state.
+//   STAGE 2: limited linear reconstruction of the primitives from the half-step state, and the
+//            shock flags stage 1 left in it.
 //
-// The faces stored are those of cells t in [-1, n] along each axis whose index along the
-// face's own normal is in [0, n] (in 2D, the single layer along z, and no z faces): the edge
-// electric fields on the grid's boundary need the faces of one row of ghost cells beyond it.
+// The faces stored are those of cells t in [-1, n] along each axis (along z, one layer beyond
+// each side of the slab: mhd/flux_index.wgsl) whose index along the face's own normal is in
+// [0, n] (in 2D, the single layer along z, and no z faces): the edge electric fields on the
+// grid's boundary need the faces of one row of ghost cells beyond it.
 // Ghost cells take their state through the boundary mapping, as everywhere.
 //
 // Flux buffer of axis a, three vec4 per face (mhd/flux_index.wgsl):
@@ -29,6 +31,7 @@
 @group(0) @binding(5) var<storage, read_write> FX: array<vec4<f32>>;
 @group(0) @binding(6) var<storage, read_write> FY: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read_write> FZ: array<vec4<f32>>;
+@group(0) @binding(14) var<uniform> SLAB: Slab;
 
 override STAGE: u32 = 1u;
 
@@ -113,7 +116,12 @@ fn face(t: vec3<i32>, axis: i32) -> FaceOut {
   let sl = make_side(l, axis, lo);
   comp_use(comp_tex(bc_map(t).c));
   let sr = make_side(r, axis, lo);
-  var F = mhd_riemann(sl, sr, bn, 0.0);
+  // Next to a shock that stage 1 flagged (the half-step state's U2.w), HLLD falls back to HLLE,
+  // as HLLC does to HLL: carbuncles and odd-even decoupling grow from too little dissipation
+  // along a shock front.
+  var w = 0.0;
+  if (STAGE == 2u) { w = max(textureLoad(U2, bc_map(t - e).c, 0).w, textureLoad(U2, bc_map(t).c, 0).w); }
+  var F = mhd_riemann(sl, sr, bn, w);
   F.mom = unrot(F.mom, axis);
   // Upwind weight for the edge fields (Athena++): the mass flux over a density, as a fraction of
   // a cell per step, saturated hard.
@@ -137,7 +145,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(vec3<i32>(gid) >= fd)) { return; }
   g_dx = P.dx;
   g_dt = clock.dt;
-  let t = vec3<i32>(gid) - flux_offset();
+  let t = vec3<i32>(gid) + flux_first();
   let n = mhd_dims();
   let axes = select(3, 2, P.dims.z == 1u);
   let i = flux_index(t);
