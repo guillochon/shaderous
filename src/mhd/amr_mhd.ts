@@ -141,8 +141,8 @@ export class AmrMhd {
     const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red] = await Promise.all([
       computePipeline(d, assemble('mhd/amr_regrid.wgsl', slots), 'MHD re-mesh faces'),
       computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', slots), 'MHD re-mesh energy'),
-      computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1 }),
-      computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 2', { RATES_ON: 0 }),
+      computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1, ASM_STAGE: 1 }),
+      computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 2', { RATES_ON: 0, ASM_STAGE: 2 }),
       computePipeline(d, assemble('mhd/amr_flux.wgsl', slots), 'MHD block fluxes 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/amr_flux.wgsl', slots), 'MHD block fluxes 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/amr_emf.wgsl', slots), 'MHD block edges 1', { STAGE: 1 }),
@@ -179,7 +179,7 @@ export class AmrMhd {
       // Re-meshing from parity p: faces into o (with the old tree), then energy and all back into p.
       this.gRegrid.push(
         bindGroup(d, rgp, {
-          0: params, 30: this.btOld, 31: listLeaf, 7: this.dep.rg, 28: v(this.idxOld),
+          0: params, 30: this.btOld, 31: listLeaf, 7: this.dep.rg, 28: v(this.idxOld), 16: v(this.halfFaces),
           9: v(this.faces[p]), 10: v(this.comps[p]), 11: v(this.faces[o]), 13: v(this.comps[o]),
         }),
       );
@@ -193,9 +193,11 @@ export class AmrMhd {
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       const out = { 3: v(this.w[0]), 4: v(this.w[1]), 5: v(this.w[2]), 6: v(this.fa), 12: rates, 28: v(idx) };
+      // Both stages read the state and the half-step stores; ASM_STAGE weighs them.
+      const stores = { 1: v(state[p][0]), 2: v(state[p][1]), 9: v(this.faces[p]), 16: v(this.halfFaces), 17: v(half[0]), 18: v(half[1]) };
       this.gAssemble.push([
-        bindGroup(d, a1, { ...common, ...out, 1: v(state[p][0]), 2: v(state[p][1]), 9: v(this.faces[p]) }),
-        bindGroup(d, a2, { ...common, ...out, 1: v(half[0]), 2: v(half[1]), 9: v(this.halfFaces) }),
+        bindGroup(d, a1, { ...common, ...out, ...stores }),
+        bindGroup(d, a2, { ...common, ...out, ...stores }),
       ]);
       const perChunk = (fn: (c: GPUBuffer) => GPUBindGroup) => this.chunkBufs.map(fn);
       this.gFlux.push(

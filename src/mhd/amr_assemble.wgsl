@@ -9,6 +9,8 @@
 // is up to two cells out and a second one cell out, which the edge fields at the block's edges
 // and the fluxes of the ghost rows beside them need. Corner ghosts are never needed.
 //
+// ASM_STAGE says which (mhd/amr_common.wgsl): the start of each block's step (1) or its
+// midpoint (2), with every neighbor read at that time (blended between its stores with time bins).
 // With RATES the pass also does the first stage of the timestep reduction, as amr/assemble.wgsl
 // does: the signal rate per cell size over each workgroup's leaf cells, with the fastest
 // magnetosonic speed.
@@ -27,6 +29,9 @@
 @group(0) @binding(5) var W3: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(6) var FA: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(9) var BF: texture_3d<f32>;
+@group(0) @binding(16) var HF: texture_3d<f32>;   // the half-step stores (mhd/amr_common.wgsl's blend)
+@group(0) @binding(17) var H1: texture_3d<f32>;
+@group(0) @binding(18) var H2: texture_3d<f32>;
 @group(0) @binding(28) var IDX: texture_3d<u32>;
 @group(0) @binding(12) var<storage, read_write> RATES: array<f32>;
 
@@ -35,6 +40,7 @@ override RATES_ON: bool = true;
 var<workgroup> wg_max: array<atomic<u32>, 2>;
 
 #include "amr/cons.wgsl"
+#include <bins>
 #include "mhd/amr_common.wgsl"
 
 @compute @workgroup_size(FLAT_WG)
@@ -63,10 +69,11 @@ fn main(
     let deep = i32(far.x > 1) + i32(far.y > 1) + i32(far.z > 1);
     if (count <= 1 || (count == 2 && deep <= 1)) {
       g_dx = blk_dx(slot);
+      g_recv_bin = blk_bin(slot);
       let level = u32(bt(slot, 0u));
       let g = blk_coord(slot) * BS + l;
       var u: Cons;
-      if (count == 0) { u = u_leaf(slot, l); } else { u = cons_at(level, g); }
+      if (count == 0) { u = u_leaf_m(slot, l); } else { u = cons_at(level, g); }
       let w = prim_from_cons(u.a, u.b);
       let B = bcell_at(level, g);
       var f = vec3<f32>(0.0);

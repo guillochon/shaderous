@@ -13,8 +13,78 @@
 // axis and constant across it, which keeps a fine cell divergence-free inside a
 // divergence-free coarse one; restriction is the area mean.
 //
-// Requires P, amr/grid.wgsl, amr/cons.wgsl (u_leaf, u_at, u_near, prolong), and bindings U1, U2
-// (conserved state), BF (faces) and IDX (texture_3d<u32>).
+// Requires P, amr/grid.wgsl, amr/cons.wgsl (Cons, MaybeCons, prolong), <bins>, and bindings U1,
+// U2 (conserved state), BF (faces), H1, H2, HF (the half-step stores) and IDX (texture_3d<u32>).
+
+// Time: which state a block's stores stand for, as a block in bin g_recv_bin sees them at stage
+// ASM_STAGE of its step (docs/mhd-plan.md, section 5b). A neighbor's value is the blend
+// w.x S + w.y H of its state texture S (U1, U2, BF) and its half-step stores H (H1, H2, HF):
+//   stage 1 (the receiver's start): an active block's start (S), a mid-step one's midpoint (H)
+//   stage 2 (the receiver's midpoint): an active block in the same bin at its midpoint (H); one
+//     bin faster, at the end of its first substep, extrapolated (2 H - S); one bin slower and
+//     active, a quarter through (S + H) / 2; mid-step (slower), three quarters through, between
+//     its midpoint and the end its state texture already holds (S + H) / 2
+// Without time bins every block is active and in step: stage 1 reads S and stage 2 H.
+// Requires <bins> and bindings H1, H2, HF.
+var<private> g_recv_bin: u32 = 0u;
+override ASM_STAGE: u32 = 1u;
+
+fn src_weights(slot: i32) -> vec2<f32> {
+  if (!BINS_ON) { return select(vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), ASM_STAGE == 1u); }
+  let act = blk_active(slot);
+  if (ASM_STAGE == 1u) { return select(vec2<f32>(0.0, 1.0), vec2<f32>(1.0, 0.0), act); }
+  if (!act) { return vec2<f32>(0.5, 0.5); }
+  let k = blk_bin(slot);
+  if (k == g_recv_bin) { return vec2<f32>(0.0, 1.0); }
+  if (k < g_recv_bin) { return vec2<f32>(-1.0, 2.0); }
+  return vec2<f32>(0.5, 0.5);
+}
+
+// Conserved state of interior cell l of leaf `slot`, at the time the receiver wants.
+fn u_leaf_m(slot: i32, l: vec3<i32>) -> Cons {
+  let c = atl(blk_origin(slot), l);
+  let w = src_weights(slot);
+  if (w.y == 0.0) { return Cons(textureLoad(U1, c, 0), textureLoad(U2, c, 0)); }
+  let h = Cons(textureLoad(H1, c, 0), textureLoad(H2, c, 0));
+  if (w.x == 0.0) { return h; }
+  let s = Cons(textureLoad(U1, c, 0), textureLoad(U2, c, 0));
+  let b = Cons(w.x * s.a + w.y * h.a, vec4<f32>(w.x * s.b.xyz + w.y * h.b.xyz, h.b.w));
+  // An extrapolation that leaves no density or internal energy falls back to the half step.
+  if (w.x < 0.0 && !(b.a.x > 0.0 && b.b.y > 0.0)) { return h; }
+  return b;
+}
+
+// Interior cell l of any block, restricted from the children of a parent (amr/cons.wgsl's u_at).
+fn u_at_m(slot: i32, l: vec3<i32>) -> Cons {
+  if (blk_leaf(slot)) { return u_leaf_m(slot, l); }
+  let h = vec3<i32>(l >= vec3<i32>(BS / 2));
+  let ch = bt(slot, 12u + u32(h.x | (h.y << 1u) | (h.z << 2u)));
+  if (ch < 0 || !blk_leaf(ch)) { return Cons(vec4<f32>(1.0, 0.0, 0.0, 0.0), vec4<f32>(1.0, 1.0, 0.0, 0.0)); }
+  let f = 2 * (l - (BS / 2) * h);
+  var a = vec4<f32>(0.0);
+  var b = vec4<f32>(0.0);
+  let nz = select(2, 1, is2d());
+  for (var k = 0; k < nz; k++) {
+    for (var j = 0; j < 2; j++) {
+      for (var i = 0; i < 2; i++) {
+        let u = u_leaf_m(ch, f + vec3<i32>(i, j, k));
+        a += u.a;
+        b += u.b;
+      }
+    }
+  }
+  let w = select(0.125, 0.25, is2d());
+  return Cons(a * w, b * w);
+}
+
+// A cell of block `slot` that may lie one cell outside it (amr/cons.wgsl's u_near).
+fn u_near_m(slot: i32, l: vec3<i32>) -> MaybeCons {
+  let s = ghost_src(slot, l);
+  if (s.kind != 0) { return MaybeCons(Cons(vec4<f32>(0.0), vec4<f32>(0.0)), false); }
+  var u = u_at_m(s.slot, s.l);
+  u.a = vec4<f32>(u.a.x, u.a.yzw * s.flip);
+  return MaybeCons(u, true);
+}
 
 // Cells per side of the domain at a level (1 along z in 2D).
 fn n_at(level: u32) -> vec3<i32> {
@@ -78,9 +148,9 @@ fn cons_at(level: u32, g0: vec3<i32>) -> Cons {
   let h = holder(level, m.g);
   var u: Cons;
   if (h.rel == 0) {
-    u = u_leaf(h.slot, local_of(h.slot, m.g));
+    u = u_leaf_m(h.slot, local_of(h.slot, m.g));
   } else if (h.rel == 1) {
-    u = u_at(h.slot, local_of(h.slot, m.g));
+    u = u_at_m(h.slot, local_of(h.slot, m.g));
   } else {
     u = prolong_at(m.g, h.slot);
   }
@@ -104,7 +174,7 @@ fn prolong_at(gf: vec3<i32>, cs: i32) -> Cons {
   for (var k = 0; k < n; k++) {
     var at = lc;
     if (k > 0) { at[(k - 1) / 2] += select(-1, 1, (k & 1) == 0); }
-    v[k] = u_near(cs, at);
+    v[k] = u_near_m(cs, at);
   }
   return prolong(v[0].u, v[1], v[2], v[3], v[4], v[5], v[6], gf & vec3<i32>(1));
 }
@@ -112,7 +182,11 @@ fn prolong_at(gf: vec3<i32>, cs: i32) -> Cons {
 // The face texel of block `slot` holding face a of local cell l at the block's own level (l in
 // the block's face range).
 fn face_own(slot: i32, a: i32, l: vec3<i32>) -> f32 {
-  return textureLoad(BF, atl(blk_origin(slot), l), 0)[a];
+  let c = atl(blk_origin(slot), l);
+  let w = src_weights(slot);
+  if (w.y == 0.0) { return textureLoad(BF, c, 0)[a]; }
+  if (w.x == 0.0) { return textureLoad(HF, c, 0)[a]; }
+  return w.x * textureLoad(BF, c, 0)[a] + w.y * textureLoad(HF, c, 0)[a];
 }
 
 // The texel of the last face face_lvl returned as a plain copy of a leaf's own face (copied

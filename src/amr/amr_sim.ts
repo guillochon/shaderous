@@ -774,9 +774,10 @@ export class AmrSim implements Simulation {
       computePipeline(d, assemble('amr/bins_tick.wgsl'), 'bins substep', { MODE: 1, CYCLE: cycle }),
       computePipeline(d, assemble('hydro/clock.wgsl'), 'bins timestep', { PER_DX: 1, BANK: 0, CYCLE: cycle }),
       computePipeline(d, assemble('amr/bins_init.wgsl'), 'bins init', { KMAX: K, ASM_WG: flatGroups(this.cfg.ndim, NG) }),
-      computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins dilate', { KMAX: K, DILATE: 1 }),
-      computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins relax', { KMAX: K }),
-      computePipeline(d, assemble('amr/bins_lists.wgsl'), 'bins lists'),
+      // With a magnetic field, blocks sharing only an edge are neighbors too (amr/bins_edges.wgsl).
+      computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins dilate', { KMAX: K, DILATE: 1, EDGES: this.mhd ? 1 : 0 }),
+      computePipeline(d, assemble('amr/bins_relax.wgsl'), 'bins relax', { KMAX: K, EDGES: this.mhd ? 1 : 0 }),
+      computePipeline(d, assemble('amr/bins_lists.wgsl'), 'bins lists', { EDGES: this.mhd ? 1 : 0 }),
       computePipeline(d, assemble('amr/bins_args.wgsl'), 'bins dispatch sizes'),
       computePipeline(d, assemble('amr/commit.wgsl'), 'amr commit'),
     ]);
@@ -801,12 +802,13 @@ export class AmrSim implements Simulation {
     }
     this.gSetDt = bindGroup(d, this.pSetDt, { 0: this.params, 1: this.redDt.result, 2: this.clock, 3: this.bh });
     this.gBinsInit = bindGroup(d, this.pBinsInit, { 0: this.params, 1: this.clock, 2: this.redDt.first, 3: A, 30: this.bt, 31: this.listAll });
-    this.gBinsDilate = bindGroup(d, this.pBinsDilate, { 0: this.params, 1: A, 2: B, 30: this.bt, 31: this.listAll });
+    const idx = v(this.idx);
+    this.gBinsDilate = bindGroup(d, this.pBinsDilate, { 0: this.params, 1: A, 2: B, 28: idx, 30: this.bt, 31: this.listAll });
     this.gBinsRelax = [
-      bindGroup(d, this.pBinsRelax, { 0: this.params, 1: B, 2: A, 30: this.bt, 31: this.listAll }),
-      bindGroup(d, this.pBinsRelax, { 0: this.params, 1: A, 2: B, 30: this.bt, 31: this.listAll }),
+      bindGroup(d, this.pBinsRelax, { 0: this.params, 1: B, 2: A, 28: idx, 30: this.bt, 31: this.listAll }),
+      bindGroup(d, this.pBinsRelax, { 0: this.params, 1: A, 2: B, 28: idx, 30: this.bt, 31: this.listAll }),
     ];
-    this.gBinsLists = bindGroup(d, this.pBinsLists, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.listEnd, 29: A, 30: this.bt, 31: this.listAll });
+    this.gBinsLists = bindGroup(d, this.pBinsLists, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.listEnd, 28: idx, 29: A, 30: this.bt, 31: this.listAll });
     this.gBinsArgs = bindGroup(d, this.pBinsArgs, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.binArgs, 5: this.listEnd });
     this.binsPrimed = null;
     // What was measured with other bins says nothing about these.

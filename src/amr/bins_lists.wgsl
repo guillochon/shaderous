@@ -14,6 +14,9 @@
 @group(0) @binding(2) var<storage, read_write> LU: array<u32>;
 @group(0) @binding(3) var<storage, read_write> CNT: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> LL: array<u32>;
+@group(0) @binding(28) var IDX: texture_3d<u32>;
+
+#include "amr/bins_edges.wgsl"
 
 // Whether a leaf has a face neighbor (a leaf at its level, or finer leaves) in a faster bin.
 fn faster_neighbor(slot: i32) -> bool {
@@ -33,6 +36,14 @@ fn faster_neighbor(slot: i32) -> bool {
       if (((ch >> axis) & 1u) != want) { continue; }
       let c = bt(nb, 12u + ch);
       if (c >= 0 && blk_leaf(c) && blk_bin(c) < k) { return true; }
+    }
+  }
+  if (EDGES) {
+    // Or one that shares only an edge or vertex (its edge fields come from the faster side).
+    var diag: array<i32, 24>;
+    let nd = diag_leaves(slot, &diag);
+    for (var i = 0; i < nd; i++) {
+      if (blk_bin(diag[i]) < k) { return true; }
     }
   }
   return false;

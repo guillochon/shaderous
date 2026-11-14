@@ -35,8 +35,14 @@
 @group(0) @binding(11) var OB: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(13) var OC: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(28) var IDX: texture_3d<u32>;
+// The half-step stores the shared readers declare (read with weight 0 here: no time bins at a
+// re-mesh, which comes at the end of a cycle).
+@group(0) @binding(16) var HF: texture_3d<f32>;
+@group(0) @binding(17) var H1: texture_3d<f32>;
+@group(0) @binding(18) var H2: texture_3d<f32>;
 
 #include "amr/cons.wgsl"
+#include "amr/bins_off.wgsl"
 #include "mhd/amr_common.wgsl"
 
 const RG_STRIDE = 12u;

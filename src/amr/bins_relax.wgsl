@@ -13,6 +13,9 @@
 
 @group(0) @binding(1) var<storage, read> KIN: array<u32>;
 @group(0) @binding(2) var<storage, read_write> KOUT: array<u32>;
+@group(0) @binding(28) var IDX: texture_3d<u32>;
+
+#include "amr/bins_edges.wgsl"
 
 override KMAX: u32 = 3u;
 override DILATE: bool = false;
@@ -37,6 +40,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         k = min(k, KIN[1u + u32(nb)] + select(1u, 0u, DILATE));
       } else if (nb == -1) {
         k = min(k, KIN[1u + u32(bt(slot, 20u + f))]);
+      }
+    }
+    if (EDGES) {
+      // The same rules for blocks that share only an edge or vertex.
+      var diag: array<i32, 24>;
+      let nd = diag_leaves(slot, &diag);
+      let level = bt(slot, 0u);
+      for (var i = 0; i < nd; i++) {
+        let q = diag[i];
+        if (bt(q, 0u) < level) {
+          k = min(k, KIN[1u + u32(q)]);
+        } else {
+          k = min(k, KIN[1u + u32(q)] + select(1u, 0u, DILATE));
+        }
       }
     }
   }
