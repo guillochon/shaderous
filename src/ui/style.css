@@ -123,6 +123,7 @@ details[open] > summary .sum { display: none; }
   animation: loading-spin 0.8s linear infinite;
 }
 @keyframes loading-spin { to { transform: rotate(360deg); } }
+#loading.waiting .spin { display: none; }
 /* Editing tools: icon buttons, with the active tool's settings below them. */
 #tools { display: flex; flex-direction: column; gap: 4px; }
 #tools button { height: 26px; padding: 0; display: grid; place-items: center; color: var(--dim); background: rgba(29, 35, 48, 0.85); }
@@ -249,8 +250,8 @@ details[open] > summary .sum { display: none; }
 }
 /* Diagnostics: two fixed columns of seven fixed-height rows. */
 #diag { display: grid; grid-template-columns: 1fr 1fr; column-gap: 9px; height: 119px; contain: strict; }
-/* With a magnetic field: its rows too (11 in the left column). */
-#diag.mag { height: 187px; }
+/* With a magnetic field: its rows too (9 a column). */
+#diag.mag { height: 153px; }
 #diag dl, #diag-sinks dl {
   display: grid; grid-template-columns: 34px minmax(0, 1fr) 24px; grid-auto-rows: 17px; column-gap: 3px;
   margin: 0; font-variant-numeric: tabular-nums;

@@ -1240,8 +1240,12 @@ function loadPending(play?: boolean) {
   });
 }
 
-/** Build a simulation for the selected preset and resolution. */
-function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot) {
+/**
+ * Build a simulation for the selected preset and resolution. `hold`: only set it up (settings,
+ * view, panel), and leave the simulation itself waiting for Run or Load, as Autoload off has
+ * it: the first load of a page with Autoload off.
+ */
+function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false) {
   pending = null; // whatever waited for Run is superseded
   return enqueue(async () => {
     const problem = problemById(problemId);
@@ -1283,6 +1287,15 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     // A new problem brings its own checkpoint interval; the clock starts at the snapshot's time, if any.
     if (cfg?.problem !== problem) ckpt.every = defaultCheckpointDt(problem);
     next.tStop = ckpt.on ? nextCheckpoint(next.restart?.time ?? 0, ckpt.every) : undefined;
+    if (hold) {
+      // Its settings are kept (Load takes them as a change of grid that keeps the physics).
+      cfg = next;
+      if (ndim === 2) view.sliceAxis = 2;
+      pending = { pick: { id: problemId, n, ndim, levels }, keepPhysics: true };
+      running = false;
+      setLoadStage('');
+      return;
+    }
     const old = sim;
     sim = undefined;
     stroke = null;
@@ -2946,7 +2959,8 @@ const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['∇·B', 'Largest |div B| dx of any cell, over the largest |B|: constrained transport keeps it at float32 round-off (about 1e-7)', 'div_b'],
 ];
 const MAG_ROWS = 4;
-const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0];
+// Seven a side; a field's four rows two a side (|B| max, beta min left; E mag, div B right).
+const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1];
 /** What each diagnostic measures, in DIAG_ROWS order (the field's in code units). */
 const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'energy', null, null, null];
 /** The diagnostics in DIAG_ROWS order. */
@@ -3230,11 +3244,15 @@ function loadingMessage(): string {
   if (stage === COMPILE_STAGE) return compiling;
   if (stage) return `${stage}…`;
   if ((reloading === 'shaders' && !sim?.preparing) || sim?.compiling) return compiling;
+  // Autoload off, nothing loaded yet: the page waits for the user.
+  if (!sim && pending && !building) return 'Autoload is off: press Run or Load to load it';
   return 'Loading simulation…';
 }
 function showLoadingMessage() {
   const text = loadingMessage();
   if (loadingText.textContent !== text) loadingText.textContent = text;
+  // Waiting for the user (Autoload off), not loading: no spinner.
+  loadingEl.classList.toggle('waiting', !sim && !!pending && !building);
 }
 // The notice follows a load as it goes, the first one included (the frame loop is not running
 // yet). Before a stage that blocks the page it is given a frame to show. A page that is drawing
@@ -3486,7 +3504,8 @@ const ready = (async () => {
     editor.set(defaultOpacity(), 'inferno');
     pushTransfer();
     bind();
-    await build(firstLink.problem, firstLink.n, firstLink.ndim, firstLink.amr, false, firstLink);
+    // With Autoload off the page opens on the problem's settings, and loads it on Run or Load.
+    await build(firstLink.problem, firstLink.n, firstLink.ndim, firstLink.amr, false, firstLink, undefined, !autoload);
     requestAnimationFrame(tick);
   } catch (e) {
     fail(e);
