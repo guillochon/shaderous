@@ -20,7 +20,8 @@ be running beforehand.
 1. [Requirements](#requirements)
 2. [Command-line runner](#command-line-runner)
 3. [MCP server](#mcp-server)
-4. [Troubleshooting](#troubleshooting)
+4. [Cloud GPUs and Linux servers](#cloud-gpus-and-linux-servers), and the largest run so far
+5. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -204,6 +205,39 @@ File paths are relative to the server's working directory, which for Claude Code
 project root. A tool that fails returns its error message as a tool error, with `isError` set,
 so the model can correct its call.
 
+## Cloud GPUs and Linux servers
+
+The runner works on a rented GPU (a Runpod pod, for example) as it does on a desktop. On
+Linux it passes `--use-angle=vulkan --enable-features=Vulkan --disable-vulkan-surface` to
+Chrome; without the last, headless Chrome's GPU process crashes and WebGPU falls back to
+SwiftShader. What the machine needs:
+
+- The NVIDIA Vulkan driver inside the container: set `NVIDIA_DRIVER_CAPABILITIES=all` on the
+  pod or container.
+- Node and a browser. The Playwright Docker image (`mcr.microsoft.com/playwright:v<version>-noble`,
+  the version in `package-lock.json`) has both, but not Chrome: set `PW_CHANNEL=shell` to use
+  Playwright's own headless shell.
+- Then `git clone`, `npm ci`, and run as usual. `state` and `manifest.json` should name the
+  adapter `nvidia <architecture>`, such as `nvidia lovelace`.
+- `--gpu-memory` set to what the card holds, less a few GB for the browser, or the adaptive
+  mesh keeps the desktop default of 2.5 GB.
+
+### Largest run so far
+
+The magnetized accretion disk (`mri-disk`) at 512^3 with 3 levels of refinement and
+`--gpu-memory 16`, on an RTX 4090 (24 GB) on 2026-11-15. The adaptive mesh had room for
+5,832 blocks of 16^3 cells, about 24 million cells, and the run held 16.8 GB of GPU memory
+throughout. The load took 90 s, all of it building the initial disk on the CPU, which looks
+like a hang but isn't. One orbit at r = 1 (t = 2π, 6,359 steps) then took 14 minutes, with
+the GPU 92 to 98% busy. Over that orbit the magnetic energy grew 5.4 times and the Maxwell
+stress reached α = 0.009, as the shear wound the loops into trailing spirals.
+
+![The MRI disk over one orbit on an RTX 4090: density edge-on and face-on, and the field strength face-on and edge-on, at 0, 1/4, 1/2, 3/4 and 1 orbit](img/mri-disk-rtx4090.jpg)
+
+The script that took these screenshots (several views at each eighth of an orbit) used the
+same session as the runner: `openSession({ gpuMemory: 16 })`, then `load`, `run({ until })`,
+`view` and `screenshot` through `call`, as in [the scripting API](api.md).
+
 ## Troubleshooting
 
 - **"the simulator did not start: ... WebGPU"**: Chrome found no WebGPU adapter. Try
@@ -211,13 +245,9 @@ so the model can correct its call.
   `--use-angle=d3d11`, which headless Chrome needs there.
 - **"could not start Chrome"**: Chrome isn't installed where Playwright looks. Install it, or
   use Edge with `PW_CHANNEL=msedge`.
-- **A Linux GPU server or cloud pod**: the runner passes `--use-angle=vulkan
-  --enable-features=Vulkan --disable-vulkan-surface` on Linux (without the last, the GPU
-  process crashes headless and Chrome falls back to SwiftShader). The container needs the
-  NVIDIA Vulkan driver: set `NVIDIA_DRIVER_CAPABILITIES=all`. In the Playwright Docker image
-  (`mcr.microsoft.com/playwright:v<version>-noble`), which has no Chrome, set `PW_CHANNEL=shell`
-  to use Playwright's own headless shell. The adapter is then `nvidia <architecture>`. A large 3D
-  load builds its initial data on the CPU first: 90 s for the MRI disk at 512^3 with 3 levels.
+- **The adapter is SwiftShader on a Linux GPU server or pod**: the container lacks the NVIDIA
+  Vulkan driver, or Chrome is not the headless shell. See
+  [Cloud GPUs and Linux servers](#cloud-gpus-and-linux-servers).
 - **It runs but is very slow**: check `adapter` in `state` or `manifest.json`. A software
   fallback adapter is 100 or more times slower than a GPU.
 - **A command line with `&` in the setup misbehaves on Windows**: `cmd` splits commands on `&`.
