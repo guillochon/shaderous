@@ -15,3 +15,4 @@ tools/burn/*.err
 tools/burn/aprox13.py
 tools/burn/*.pt
 !tools/burn/aprox13_surrogate.pt
+tools/burn/*.npz
