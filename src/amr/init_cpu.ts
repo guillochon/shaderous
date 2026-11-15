@@ -59,7 +59,10 @@ export function surfaceOf(fn: Setup, eos: Eos): (x: number, y: number, z: number
 export function samplesPerCell(cfg: SimConfig, levels: number, level: number, leaves: number): number {
   const three = cfg.ndim === 3;
   const floor = three ? 2 : 4;
-  const budget = three ? INDICATOR_SAMPLES_3D : INDICATOR_SAMPLES_2D;
+  // The 3D budget was sized for grids up to 512^3. A finer grid gets more in proportion to its
+  // cells, so the samples per finest cell stay as they were: a blast 3.5 finest cells across
+  // at 1024^3 with 5 levels is otherwise stepped over at the root level, and never refined.
+  const budget = three ? INDICATOR_SAMPLES_3D * Math.max(1, (cfg.n / 512) ** 3) : INDICATOR_SAMPLES_2D;
   const share = Math.floor(Math.pow(budget / Math.max(leaves, 1), 1 / cfg.ndim) / (BS + 2));
   return Math.min(1 << (levels - level), Math.max(floor, share > 0 ? 1 << Math.floor(Math.log2(share)) : 0));
 }

@@ -47,7 +47,9 @@ const BC_KINDS = [
   { label: 'Outflow only', title: 'Open for gas leaving; nothing comes in' },
 ];
 
-const RES_3D = [32, 64, 128, 256, 512];
+// 3D grids past 256^3 are adaptive only (UNIFORM_MAX): the mesh's memory goes by its blocks,
+// not by n, so a finer finest level costs only where the setup refines to it.
+const RES_3D = [32, 64, 128, 256, 512, 1024, 2048];
 const RES_2D = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 // Largest uniform grids offered; beyond these the mesh must be adaptive. A phone, or a device
 // that crashed before, offers only the ones within its memory budget (gpu/memory.ts).
