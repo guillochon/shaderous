@@ -355,6 +355,11 @@ a frame time never moves a checkpoint, and a checkpoint's shortened step is the 
 takes unrecorded as well. A browser
 without an H.264 encoder fails with a message saying so.
 
+A run steps 2 to 3 times slower while it records: each frame is drawn, read back and encoded,
+and the clock holds at each frame time. On the 128³ MRI disk (`mri-disk`), from t = 1.5 to
+2.5 at 1920 x 1080 with 101 frames, on one desktop GPU, recording took 4.6 s against 1.6 s for the same run
+unrecorded on a uniform grid, and 5.5 s against 2.2 s with one level of refinement.
+
 ### `stopRecording() → boolean` and `recordingStatus() → { frames, seconds, t } | null`
 
 End the recording under way (it resolves as usual, with `stopped: 'stopped'`), and report its
