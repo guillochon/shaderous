@@ -63,22 +63,25 @@ fn main() {
     put(1u, min(nu, SLAB_BLOCKS) * 2u, 2u, 4u * su);
     put(2u, min(nl, SLAB_BLOCKS) * 2u, 2u, 4u * sl);
   }
-  // Multigrid (src/amr/gravity.ts, cells() and color()).
-  put(3u, na * 2u, 2u, 4u);
-  put(4u, na, 1u, 2u);
-  put(5u, na, 1u, 1u);
-  put(6u, na, 1u, 1u);
-  put(7u, na, 1u, 1u);
-  put(8u, na, 2u, 4u);
-  put(9u, (na + 1u) / 2u, 1u, 2u);
-  put(10u, (na + 3u) / 4u, 1u, 1u);
-  put(11u, (na + 7u) / 8u, 1u, 1u);
-  put(12u, (na + 7u) / 8u, 1u, 1u);
+  // Multigrid (src/amr/gravity.ts, cells() and color(); amr/dispatch.ts gravityCells and
+  // gravityColor), in slabs of SLAB_BLOCKS along z, 4 ceil(bsize / 4) invocations each.
+  let ma = min(na, SLAB_BLOCKS);
+  let ga = (na + SLAB_BLOCKS - 1u) / SLAB_BLOCKS;
+  put(3u, ma * 2u, 2u, 4u * ga);
+  put(4u, ma, 1u, 2u * ga);
+  put(5u, ma, 1u, ga);
+  put(6u, ma, 1u, ga);
+  put(7u, ma, 1u, ga);
+  put(8u, ma, 2u, 4u * ga);
+  put(9u, (ma + 1u) / 2u, 1u, 2u * ga);
+  put(10u, (ma + 3u) / 4u, 1u, ga);
+  put(11u, (ma + 7u) / 8u, 1u, ga);
+  put(12u, (ma + 7u) / 8u, 1u, ga);
   let w = 18u; // block side (16) plus a ghost layer on each face
   put(13u, (select(w * w * w, w * w, flat) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);
   let w2 = 20u; // and two
   put(14u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
-  put(15u, 48u, na, 1u);
+  put(15u, 48u, min(na, FLAT_ROWS), (na + FLAT_ROWS - 1u) / FLAT_ROWS);
   let box17 = (select(17u * 17u * 17u, 17u * 17u, flat) + 63u) / 64u;
   put(16u, (select(w2 * w2 * w2, w2 * w2, flat) + 63u) / 64u, min(nl, FLAT_ROWS), (nl + FLAT_ROWS - 1u) / FLAT_ROWS);
   put(17u, box17, nu, 1u);

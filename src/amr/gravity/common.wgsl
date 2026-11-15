@@ -43,10 +43,18 @@ fn g_h(slot: i32) -> f32 {
 // Decode an invocation into a block of the dispatched list and a cell of it.
 struct GInv { ok: bool, slot: i32, l: vec3<i32> }
 
+// Invocations a block takes along z at a sublevel of `bsize` cells: whole workgroups of four.
+// A list longer than SLAB_BLOCKS is dispatched in slabs of that many blocks stacked along z
+// (amr/list.wgsl, AmrGravity.cells() and color()).
+fn g_zspan(bsize: i32) -> u32 {
+  return 4u * u32((bsize + 3) / 4);
+}
+
 fn g_inv(gid: vec3<u32>) -> GInv {
   let span = u32(max(GL.bsize, 8));
-  let b = gid.x / span;
-  let l = vec3<i32>(i32(gid.x % span), i32(gid.y), i32(gid.z));
+  let zs = g_zspan(GL.bsize);
+  let b = gid.x / span + (gid.z / zs) * SLAB_BLOCKS;
+  let l = vec3<i32>(i32(gid.x % span), i32(gid.y), i32(gid.z % zs));
   if (b >= LIST[0] || any(l >= vec3<i32>(GL.bsize))) { return GInv(false, 0, l); }
   return GInv(true, i32(LIST[1u + b]), l);
 }

@@ -18,8 +18,9 @@
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let span = u32(max(GL.obsize, 8));
-  let b = gid.x / span;
-  let lc = vec3<i32>(i32(gid.x % span), i32(gid.y), i32(gid.z));
+  let zs = g_zspan(GL.obsize);
+  let b = gid.x / span + (gid.z / zs) * SLAB_BLOCKS;
+  let lc = vec3<i32>(i32(gid.x % span), i32(gid.y), i32(gid.z % zs));
   if (b >= LIST[0] || any(lc >= vec3<i32>(GL.obsize))) { return; }
   let slot = i32(LIST[1u + b]);
   let o = g_origin(slot);

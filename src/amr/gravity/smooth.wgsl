@@ -19,10 +19,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // cell are even, so a cell's color does not depend on where its block sits.)
   let B = GL.bsize;
   let half = u32(max(B / 2, 1));
-  let b = gid.x / half;
-  if (b >= LIST[0] || i32(gid.y) >= B || i32(gid.z) >= B) { return; }
+  let zs = g_zspan(B);
+  let b = gid.x / half + (gid.z / zs) * SLAB_BLOCKS;
+  let z = i32(gid.z % zs);
+  if (b >= LIST[0] || i32(gid.y) >= B || z >= B) { return; }
   let slot = i32(LIST[1u + b]);
-  var l = vec3<i32>(0, i32(gid.y), i32(gid.z));
+  var l = vec3<i32>(0, i32(gid.y), z);
   if (B == 1) {
     let g = blk_coord(slot);
     if (u32((g.x + g.y + g.z) & 1) != GL.color) { return; }

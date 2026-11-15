@@ -27,8 +27,9 @@ fn main(
   @builtin(local_invocation_index) lix: u32,
 ) {
   let span = u32(max(GL.bsize, 8));
-  let b = (wid.x * 8u) / span;
-  let l0 = vec3<i32>(i32((wid.x * 8u) % span), i32(wid.y * 8u), i32(wid.z * 4u));
+  let zs = g_zspan(GL.bsize);
+  let b = (wid.x * 8u) / span + ((wid.z * 4u) / zs) * SLAB_BLOCKS;
+  let l0 = vec3<i32>(i32((wid.x * 8u) % span), i32(wid.y * 8u), i32((wid.z * 4u) % zs));
   let cb = l0 / 2 - vec3<i32>(1);   // coarse cell at tile index (0, 0, 0)
   if (b < LIST[0] && lix < 144u) {
     let slot = i32(LIST[1u + b]);

@@ -51,13 +51,16 @@ fn main() {
   let run = measured && rel > TOL && rel < PROGRESS * prev;
   let n = select(0u, LIST[0], run);
   if (run) { STATS[0] += 1u; }
+  // In slabs of SLAB_BLOCKS stacked along z, as AmrGravity sizes them (amr/dispatch.ts).
+  let m = min(n, SLAB_BLOCKS);
+  let slabs = (n + SLAB_BLOCKS - 1u) / SLAB_BLOCKS;
   for (var k = 0u; k < 5u; k++) {
     let b = 16u >> k;
     let span = max(b, 8u);
     let gy = (b + 7u) / 8u;
-    let gz = (b + 3u) / 4u;
-    put(k, n * (span / 8u), select(0u, gy, run), select(0u, gz, run));
-    put(5u + k, (n * max(b / 2u, 1u) + 7u) / 8u, select(0u, gy, run), select(0u, gz, run));
+    let gz = (b + 3u) / 4u * slabs;
+    put(k, m * (span / 8u), select(0u, gy, run), select(0u, gz, run));
+    put(5u + k, (m * max(b / 2u, 1u) + 7u) / 8u, select(0u, gy, run), select(0u, gz, run));
   }
-  put(10u, select(0u, 48u, run), n, 1u);
+  put(10u, select(0u, 48u, run), min(n, FLAT_ROWS), (n + FLAT_ROWS - 1u) / FLAT_ROWS);
 }

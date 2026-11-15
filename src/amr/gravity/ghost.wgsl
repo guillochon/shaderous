@@ -23,15 +23,16 @@ fn coarse_phi(cs: i32, q: vec3<i32>, fallback: f32) -> f32 {
 }
 
 // Only the face ghosts get an invocation: per block, 6 faces x 2 layers x BS x BS cells, in
-// rows of 64 (workgroup x), one block of the list per workgroup row (y). Edge and corner ghosts
-// are never used.
+// rows of 64 (workgroup x), one block of the list per workgroup row (y), the rows in slabs of
+// FLAT_ROWS along z as a flat pass's (amr/list.wgsl). Edge and corner ghosts are never used.
 const FACE_GHOSTS = 6 * 2 * BS * BS;
 
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
   let i = i32(wid.x * 64u + lix);
-  if (wid.y >= LIST[0] || i >= FACE_GHOSTS) { return; }
-  let slot = i32(LIST[1u + wid.y]);
+  let row = flat_row(wid);
+  if (row >= LIST[0] || i >= FACE_GHOSTS) { return; }
+  let slot = i32(LIST[1u + row]);
   let face = i / (2 * BS * BS);          // -x, +x, -y, +y, -z, +z
   let r = i % (2 * BS * BS);
   let layer = r / (BS * BS);             // 0 next to the block, 1 beyond

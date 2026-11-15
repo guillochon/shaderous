@@ -3,7 +3,7 @@
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, tex3d } from '../gpu/device';
 import { BS, PAD } from './tree';
-import { padded3d } from './dispatch';
+import { gravityCells, gravityColor, padded3d, rows } from './dispatch';
 
 const PRE = 2; // smoothing sweeps before restriction
 const POST = 2; // and after prolongation
@@ -221,20 +221,19 @@ export class AmrGravity {
   private cells(pass: GPUComputePassEncoder, count: number, bsize: number) {
     if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(Math.log2(BS / bsize)));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(3 + Math.log2(BS / bsize)));
-    const span = Math.max(bsize, 8);
-    pass.dispatchWorkgroups(count * (span / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
+    pass.dispatchWorkgroups(...gravityCells(count, bsize));
   }
   /** Dispatch over the cells of one color (see smooth.wgsl). */
   private color(pass: GPUComputePassEncoder, count: number, bsize: number) {
     if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(5 + Math.log2(BS / bsize)));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(8 + Math.log2(BS / bsize)));
-    pass.dispatchWorkgroups(Math.ceil((count * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4));
+    pass.dispatchWorkgroups(...gravityColor(count, bsize));
   }
   /** Dispatch over the face ghosts of `count` blocks (ghost.wgsl): 6 x 2 x 16 x 16 cells, in rows of 64. */
   private faces(pass: GPUComputePassEncoder, count: number) {
     if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(10));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(15));
-    if (count > 0) pass.dispatchWorkgroups((6 * 2 * BS * BS) / 64, count, 1);
+    if (count > 0) pass.dispatchWorkgroups(...rows((6 * 2 * BS * BS) / 64, count));
   }
   private padded(pass: GPUComputePassEncoder, count: number) {
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(0));

@@ -30,7 +30,7 @@ import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
-import { interior3d, padded3d } from './dispatch';
+import { FLAT_ROWS, interior3d, padded3d } from './dispatch';
 import { flagSpeciesSlot, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
@@ -48,19 +48,13 @@ const MAX_STEPS_AHEAD = 24;
 const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
-/**
- * Most blocks a 3D mesh with self-gravity may hold: its multigrid (amr/gravity.ts, cells())
- * runs two workgroups per block along x at the finest sublevel, without slabs.
- */
-export const gravityMaxBlocks = (limits: { maxComputeWorkgroupsPerDimension: number }) => Math.floor(limits.maxComputeWorkgroupsPerDimension / 2);
 /** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
 const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
-/** Slabs of a long 2D block list (amr/list.wgsl): must match SLAB_QUADS and FLAT_ROWS there. */
+/** Slabs of a long 2D block list (amr/list.wgsl): must match SLAB_QUADS there (FLAT_ROWS: amr/dispatch.ts). */
 const SLAB_QUADS = 16384;
-const FLAT_ROWS = 32768;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
 const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
 const BIN_TOTALS = 60;
@@ -330,11 +324,9 @@ export class AmrSim implements Simulation {
     if (!rendersTo3d(d)) fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** cfg.ndim * 16 * Math.max(1, this.speciesGroups))));
     if (cfg.ndim === 3) {
       const auto = Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9));
-      // 3D passes over the blocks run in slabs along z (amr/dispatch.ts), so the dispatch limit
-      // does not bound the blocks; self-gravity's multigrid, two workgroups per block along x
-      // unslabbed, does (gravityMaxBlocks).
-      const most = isSelfGravity(cfg.gravity) ? Math.floor(Math.cbrt(gravityMaxBlocks(gpu.limits)) + 1e-9) : Infinity;
-      this.slotsPerSide = Math.min(limit, most, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
+      // 3D passes over the blocks, self-gravity's multigrid's too, run in slabs along z
+      // (amr/dispatch.ts), so the dispatch limit does not bound the blocks.
+      this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
       this.layers = this.slotsPerSide;
     } else {
       const want = Math.min(explicit || Math.max(full, roots * 2, 144), Math.max(1, fit));
@@ -625,11 +617,6 @@ export class AmrSim implements Simulation {
    * update pass is bound once it has compiled, and steps wait for it (see `create`).
    */
   async buildHydro(deferUpdate = false) {
-    // Self-gravity switched on in a mesh sized without it may hold more blocks than its
-    // multigrid can dispatch over.
-    if (this.cfg.ndim === 3 && isSelfGravity(this.cfg.gravity) && this.cap > gravityMaxBlocks(this.device.limits)) {
-      throw new Error(`self-gravity can use at most ${gravityMaxBlocks(this.device.limits)} blocks, and this mesh has room for ${this.cap}: lower the GPU memory setting, then switch gravity on`);
-    }
     const epoch = ++this.hydroEpoch;
     const d = this.device;
     const slots = this.slots;

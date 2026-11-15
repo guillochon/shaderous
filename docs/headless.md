@@ -223,8 +223,9 @@ SwiftShader. What the machine needs:
   mesh keeps the desktop default of 2.5 GB.
 - The largest 3D adaptive mesh with a magnetic field is 35^3 = 42,875 blocks of 16^3 cells,
   about 110 GB in use, set by the field's flux register (one buffer within the 2 GiB a binding
-  may have). With species it is 33^3 blocks (their face fluxes, likewise); with self-gravity,
-  31^3 (its multigrid's dispatches). An RTX PRO 6000 (96 GB) holds 32^3 blocks; the MRI disk at
+  may have). With species it is 33^3 blocks (their face fluxes, likewise). Without either, and
+  with self-gravity, only the card's memory bounds it: every pass over the blocks is dispatched
+  in slabs. An RTX PRO 6000 (96 GB) holds 32^3 blocks; the MRI disk at
   1024^3 with 4 levels ran on an H200 at 35^3 (117 GB, load 23 s, 10 steps in 10 s). At 2048^3
   the blocks run out a level short of the finest. Atlas textures past 4 GiB are made render
   attachments, so WebGPU zero-fills them with a render pass: through a staging buffer, as it
