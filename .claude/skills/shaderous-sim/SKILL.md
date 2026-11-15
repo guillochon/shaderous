@@ -86,6 +86,10 @@ npm run headless -- sweep --problem sedov --dim 2 --vary n=128,256,512 --until 0
 - Run long jobs in the background and at low priority: add `--low-priority`. On Windows you
   can also prefix the command with `cmd //c start //b //wait //belownormal`, but then use flags
   instead of a query string, since `cmd` splits commands on `&`.
+- `--gpu-memory GB` sets the GPU memory the simulation may take (default 2.5 GB on a desktop):
+  it sets how many blocks the adaptive mesh can hold. A big 3D adaptive run that reports
+  "block budget full" in its status wants more if the GPU has it. With the MCP tools, use
+  `control {id: "gpumem", value: GB}` (it restarts the run).
 - `--debris` writes the debris energies and dM/dt at each output, for problems that track them
   (the tidal disruption). `python tools/headless/plot_dmdt.py RUNDIR` draws dM/dε and dM/dt.
   Read dM/dt only a few dynamical times past pericenter, once it stops changing between

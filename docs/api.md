@@ -382,6 +382,10 @@ It then waits for whatever the change starts, such as a rebuild of the shaders o
 
 This lets you change a run partway through, the way a user can: switch the Riemann solver,
 the equation of state, gravity, viscosity, or a preset parameter, without starting from t = 0.
+
+The GPU memory the simulation may take is the control `gpumem`, in GB: `control('gpumem', 4)`
+sets it (it decides how many blocks the adaptive mesh can hold, and starts the run again), and
+`control('gpumem', '')` returns to the guessed default. The page keeps it for later visits.
 Changes that a person's edit would restart (initial conditions, resolution) restart here too.
 
 Number fields hold values in the units the panel shows. For a problem with physical units,

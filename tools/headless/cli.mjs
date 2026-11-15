@@ -57,6 +57,8 @@ Other
   --url URL            Use the page served here (default: serve this checkout with Vite)
   --headed             Show the browser (if headless Chrome finds no GPU adapter)
   --low-priority       Run at below-normal CPU priority (the browser inherits it on Windows)
+  --gpu-memory GB      GPU memory the simulation may take (the panel's setting; default 2.5 on a
+                       desktop): how many blocks the adaptive mesh can hold
   --quiet              No progress messages
 `;
 
@@ -73,6 +75,7 @@ const { values: o, positionals } = parseArgs({
     mp4: { type: 'boolean' }, 'frame-every': { type: 'string' }, 'frame-dt': { type: 'string' }, fps: { type: 'string' }, 'no-overlays': { type: 'boolean' },
     vary: { type: 'string', multiple: true },
     url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' }, quiet: { type: 'boolean' },
+    'gpu-memory': { type: 'string' },
     help: { type: 'boolean', short: 'h' },
   },
 });
@@ -264,7 +267,7 @@ async function runOne(session, q, dir) {
   return { dir, setup: st.query, t: r.t, steps: r.steps, stopped, seconds: manifest.seconds, errors: errors.length };
 }
 
-const session = await openSession({ url: o.url, headed: o.headed, log });
+const session = await openSession({ url: o.url, headed: o.headed, gpuMemory: o['gpu-memory'], log });
 let code = 0;
 try {
   if (command === 'describe') {

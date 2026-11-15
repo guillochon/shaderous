@@ -96,8 +96,8 @@ export const FIELD_TIPS = [
   'Magnetic field along y at the cell center, signed',
   'Magnetic field along z at the cell center, signed',
   'Magnitude of the magnetic field at the cell center (in units where the magnetic pressure is B² / 2)',
-  'Gas pressure over magnetic pressure, 2p / B²: below 1 the field dominates',
-  'The discrete divergence of the magnetic field from the cell’s six faces, |∇·B| dx / |B|: zero up to round-off, since constrained transport keeps it there',
+  'Gas pressure over magnetic pressure, 2p / B²: below 1 the field dominates. Where the field is weaker than 1e-4 of its strongest (gas it has not reached, holding round-off) B² is taken as that much, so that gas does not set the color range',
+  'The discrete divergence of the magnetic field from the cell’s six faces, |∇·B| dx, over the strongest |B| anywhere (as the ∇·B diagnostic): zero up to round-off, since constrained transport keeps it there',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
 export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12, 22, 23, 24]);

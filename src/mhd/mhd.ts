@@ -191,6 +191,14 @@ export class MhdPasses {
   private gUpdate: GPUBindGroup[][][] = [];
   gRates: GPUBindGroup[] = [];
   private redMag!: Reducer;
+  /** The magnetic diagnostics' reduction result (MAG_OPS order), for the display's magnetic fields. */
+  get magResult(): GPUBuffer {
+    return this.redMag.result;
+  }
+  /** Reduce the magnetic diagnostics of the state at `parity` into magResult (the display's). */
+  encodeMagnetic(pass: GPUComputePassEncoder, parity: number) {
+    this.redMag.encode(pass, parity);
+  }
   private dep: MhdDeps;
 
   /**

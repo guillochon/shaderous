@@ -14,21 +14,22 @@ import { parseArgs } from 'node:util';
 import { debrisSummary, lowerPriority, openSession } from './session.mjs';
 
 const { values: o } = parseArgs({
-  options: { url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' } },
+  options: { url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' }, 'gpu-memory': { type: 'string' } },
 });
 if (o['low-priority']) lowerPriority();
 const log = (m) => process.stderr.write(`[shaderous-mcp] ${m}\n`);
 
 const INSTRUCTIONS = `Shaderous is a GPU gas dynamics code (compressible Euler equations with gravity, cooling, adaptive mesh refinement). These tools drive one simulation in a headless browser.
 Typical use: describe (pick a problem) -> load (a setup: problem, dim, n, amr and other keys) -> run (to a time, landed on exactly, or a number of steps) -> diagnostics / stats / slice / probe for numbers, screenshot to look at it -> save_athdf to keep the state, record for a movie.
-All values are in code units; positions are fractions of the box (0 to 1). A run stays paused between calls. load restarts from t = 0; control changes a setting mid-run as a person would.`;
+All values are in code units; positions are fractions of the box (0 to 1). A run stays paused between calls. load restarts from t = 0; control changes a setting mid-run as a person would.
+GPU memory (how many blocks the adaptive mesh can hold) is the control "gpumem", in GB: control {id: "gpumem", value: 4} sets it and starts the run again; value "" returns to the guessed default (2.5 GB on a desktop). The server's --gpu-memory option sets it before the first run.`;
 
 // --- the simulator page, opened on first use -----------------------------------------------
 let session = null;
 let opening = null;
 async function sim() {
   if (session) return session;
-  opening ??= openSession({ url: o.url, headed: o.headed, log }).then((s) => (session = s)).finally(() => (opening = null));
+  opening ??= openSession({ url: o.url, headed: o.headed, gpuMemory: o['gpu-memory'], log }).then((s) => (session = s)).finally(() => (opening = null));
   return opening;
 }
 const call = async (name, ...args) => (await sim()).call(name, ...args);

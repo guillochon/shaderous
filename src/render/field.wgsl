@@ -33,6 +33,12 @@ fn shown(rho: f32) -> f32 {
 @group(0) @binding(9) var S: texture_3d<f32>;     // rho X of the species, groups stacked along z
 @group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
 @group(0) @binding(13) var BF: texture_3d<f32>;   // face-centered magnetic field (mhd/common.wgsl); a placeholder without one
+// The magnetic diagnostics' reduction (mhd/mhd.ts, MAG_OPS), as of the frame: [2] is the largest
+// |B| anywhere. The divergence is shown over it, as the run's ∇·B diagnostic is, and the plasma
+// beta takes at least (1e-4 of it)^2 for B^2: a block the field has not reached holds only
+// round-off, whose divergence over its own |B| and whose beta would otherwise set the color range.
+// A placeholder without a field.
+@group(0) @binding(14) var<storage, read> MAG: array<f32, 4>;
 
 #include "mhd/common.wgsl"
 
@@ -43,7 +49,10 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
   switch (f - F_MAGNETIC) {
     case 0u, 1u, 2u { return B[f - F_MAGNETIC]; }
     case 3u { return sqrt(b2); }
-    case 4u { return 2.0 * p / max(b2, 1.0e-30); }
+    case 4u {
+      let floor = 1.0e-4 * MAG[2];
+      return 2.0 * p / max(b2, max(floor * floor, 1.0e-30));
+    }
     default {
       var div = 0.0;
       for (var a = 0; a < 3; a++) {
@@ -51,7 +60,7 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
         e[a] = 1;
         div += bface(a, c + e) - bface(a, c);
       }
-      return abs(div) / max(sqrt(b2), 1.0e-30);
+      return abs(div) / max(MAG[2], 1.0e-30);
     }
   }
 }

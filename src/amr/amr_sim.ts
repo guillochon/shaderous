@@ -31,7 +31,7 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type
 import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
-import { AmrMhd, blockFaces, maxBinding, MHD_BLOCK_TEXTURES, registerBytes } from '../mhd/amr_mhd';
+import { AmrMhd, blockFaces, maxBinding, MHD_BLOCK_BYTES, registerBytes } from '../mhd/amr_mhd';
 import { mhdUnsupported } from '../mhd/mhd';
 
 /**
@@ -397,7 +397,7 @@ export class AmrSim implements Simulation {
    */
   static blockBytes(ndim: 2 | 3, mhd = false): number {
     // A magnetic field adds its own atlas textures and its flux register (mhd/amr_mhd.ts).
-    return PAD ** ndim * (9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_TEXTURES * 16 : 0)) + (mhd ? registerBytes(ndim) : 0);
+    return PAD ** ndim * (9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_BYTES : 0)) + (mhd ? registerBytes(ndim) : 0);
   }
 
   /**
@@ -411,6 +411,7 @@ export class AmrSim implements Simulation {
       const why = mhdUnsupported(cfg);
       if (why) throw new Error(`MHD: ${why}`);
     }
+    let lastTried: number | null = null;
     for (let slots = 0; ; ) {
       // A resource the GPU cannot make (out of memory, or larger than it allows one to be, which
       // is a validation error) fails the attempt, which is made again with fewer blocks. The
@@ -433,7 +434,11 @@ export class AmrSim implements Simulation {
       sim?.destroy();
       const next = Math.floor(tried * 0.85 ** cfg.ndim);
       const roots = ((cfg.n >> cfg.amrLevels) / BS) ** cfg.ndim;
-      if (!oom || !tried || next < roots * 2) {
+      // An atlas no smaller than the last one tried (a 3D atlas rounds a request up to a cube)
+      // fails again the same way: give up rather than try it forever.
+      const stuck = lastTried !== null && tried >= lastTried;
+      lastTried = tried;
+      if (!oom || !tried || next < roots * 2 || stuck) {
         throw failure ?? new Error(`not enough GPU memory for the adaptive mesh at this resolution${invalid ? ` (${firstLine(invalid.message)})` : ''}`);
       }
       console.warn(`adaptive mesh: ${invalid ? `could not make its resources (${firstLine(invalid.message)})` : 'out of GPU memory'} with ${tried} blocks, retrying with ${next}`);
@@ -502,7 +507,8 @@ export class AmrSim implements Simulation {
       const side = sim.slotsPerSide * PAD;
       sim.mhd = await AmrMhd.create({
         device: d, cfg, cap: sim.cap,
-        texture: (label) => tex3d(d, side, 'rgba32float', label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
+        texture: (label, format = 'rgba32float') => tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
+        prim: sim.prim,
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg,
         state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFlux,
         bins: { A: sim.bins, LL: sim.listEnd, LU: sim.listUpd, LD: sim.listDep, args: sim.binArgs },
@@ -2252,6 +2258,7 @@ export class AmrSim implements Simulation {
       2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(),
       6: (this.mhd?.prim ?? this.prim[0]).createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(),
       13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(), 29: this.bins, 30: this.bt, 20: this.bh,
+      14: this.mhd?.magResult ?? this.noMag(),
     };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
@@ -2261,6 +2268,15 @@ export class AmrSim implements Simulation {
   }
   /** The display pass's face field without a magnetic field: one texel of nothing. */
   private placeholderFaces?: GPUTexture;
+  private placeholderMag?: GPUBuffer;
+  /** Without a field, the display's magnetic reduction binding: four words nothing reads. */
+  private noMag(): GPUBuffer {
+    this.placeholderMag ??= this.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
+    return this.placeholderMag;
+  }
+  encodeMagnetic(pass: GPUComputePassEncoder, parity: number) {
+    this.mhd?.encodeMagnetic(pass, parity);
+  }
   private noFaces(): GPUTexture {
     this.placeholderFaces ??= tex3d(this.device, 1, 'rgba32float', 'no face field', 1);
     return this.placeholderFaces;

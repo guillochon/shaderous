@@ -38,6 +38,10 @@ function pageMessage(e) {
  * - width, height: the window, which sets a screenshot's default size
  * - interactive: open the page as a person sees it (it draws and plays by itself) rather
  *   than in headless mode, for screenshots of the whole interface
+ * - gpuMemory: the GPU memory the simulation may take, in GB (the panel's "GPU memory" setting):
+ *   it sets how many blocks the adaptive mesh can hold. Set before the page loads, so its first
+ *   run is built with it (each session starts from a fresh browser profile, with the guessed
+ *   default, 2.5 GB on a desktop).
  * - log: where progress messages go (default stderr)
  */
 export async function openSession(opts = {}) {
@@ -69,6 +73,12 @@ export async function openSession(opts = {}) {
   const page = await browser.newPage({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 } });
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
+  if (opts.gpuMemory !== undefined) {
+    const gb = Number(opts.gpuMemory);
+    if (!(gb >= 0.25)) throw new Error(`GPU memory must be a number of GB, at least 0.25 (got "${opts.gpuMemory}")`);
+    // The page's own budget key (src/gpu/memory.ts, USER_KEY), read when it starts.
+    await page.addInitScript((bytes) => localStorage.setItem('shaderous.gpuBudget', String(bytes)), Math.round(gb * 1024 ** 3));
+  }
 
   const u = new URL(base);
   const q = new URLSearchParams(setupQuery(opts.setup));

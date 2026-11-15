@@ -10,7 +10,7 @@
 // Stage 2's first-order flux correction (mhd/face_flux.wgsl) applies to every face computed
 // here, the ghost rows' included: a face both blocks beside it compute must come out the same
 // from both, and the edge fields of either take the ghost rows' faces. The suspect test and the
-// first-order flux read stage 1's assembly, ghosts included, kept apart for it.
+// first-order flux read what stage 1's assembly kept, ghosts included.
 //
 // Viscosity and conduction (hydro/diffusion_core.wgsl) are added to the faces the block's own
 // cells use, from the stage's assembled state: its edge ghosts give every such face the
@@ -32,12 +32,11 @@
 @group(0) @binding(6) var<storage, read_write> FL: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read_write> REG: array<vec4<f32>>;
 @group(0) @binding(14) var<uniform> CHUNK: Chunk;
-// Stage 1's assembly (the start of the step), for stage 2's first-order flux correction
-// (mhd/face_flux.wgsl); in stage 1 the same textures as W1, W2, W3 and FA.
-@group(0) @binding(8) var S1: texture_3d<f32>;
-@group(0) @binding(9) var S2: texture_3d<f32>;
-@group(0) @binding(10) var S3: texture_3d<f32>;
-@group(0) @binding(11) var SA: texture_3d<f32>;
+// What stage 1's assembly kept for stage 2's first-order flux correction (mhd/amr_keep.wgsl):
+// (rho, v), (p, scalar, b_x, b_y), (b_z, cell-centered field), the faces each texel's lower ones.
+@group(0) @binding(8) var K0: texture_3d<f32>;
+@group(0) @binding(9) var K1: texture_3d<f32>;
+@group(0) @binding(10) var K2: texture_3d<f32>;
 
 override STAGE: u32 = 1u;
 
@@ -47,11 +46,16 @@ override STAGE: u32 = 1u;
 #include <mhd_riemann>
 #include "mhd/face_flux.wgsl"
 
-// A texel of stage 1's assembly, as mq_block reads the stage's.
+// Stage 1's lower face along a at texel c, as kept.
+fn kept_face(c: vec3<i32>, a: i32) -> f32 {
+  if (a == 2) { return textureLoad(K2, c, 0).x; }
+  return textureLoad(K1, c, 0)[2 + a];
+}
+// A texel of stage 1's assembly, as mq_block reads the stage's. The sound speed and internal
+// energy, which the first-order flux does not read, are left out.
 fn mq_start(c: vec3<i32>) -> MQ {
-  let w1 = textureLoad(S1, c, 0);
-  let w2 = textureLoad(S2, c, 0);
-  return MQ(w1, vec4<f32>(w2.x, w2.z, w2.y, w2.w), textureLoad(S3, c, 0).xyz);
+  let k1 = textureLoad(K1, c, 0);
+  return MQ(textureLoad(K0, c, 0), vec4<f32>(k1.x, k1.y, 0.0, 0.0), textureLoad(K2, c, 0).yzw);
 }
 
 // For the diffusive fluxes, at atlas texel c: the assembled velocity. One composition (MHD on
@@ -99,11 +103,11 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     var F: FaceOut;
     let cl = atl(o, t - e);
     let cr = atl(o, t);
-    if (STAGE == 2u && (fofc_suspect(textureLoad(S1, cl, 0).x, ql.a.x) || fofc_suspect(textureLoad(S1, cr, 0).x, qr.a.x))) {
+    if (STAGE == 2u && (fofc_suspect(textureLoad(K0, cl, 0).x, ql.a.x) || fofc_suspect(textureLoad(K0, cr, 0).x, qr.a.x))) {
       // First-order flux correction: the first-order HLLE flux of the state at the start.
       let sl = mq_start(cl);
       let sr = mq_start(cr);
-      F = face_of(sl, sl, sr, sr, textureLoad(SA, cr, 0)[a], a, false, 1.0, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+      F = face_of(sl, sl, sr, sr, kept_face(cr, a), a, false, 1.0, vec4<f32>(0.0), vec4<f32>(0.0), dt);
     } else {
       F = face_of(qll, ql, qr, qrr, textureLoad(FA, cr, 0)[a], a, STAGE == 2u, w, vec4<f32>(0.0), vec4<f32>(0.0), dt);
     }

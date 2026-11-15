@@ -41,6 +41,12 @@ struct View {
 @group(0) @binding(10) var PB: texture_3d<f32>;   // predictor's (p, scalar, shock flag, first order), as of the last step
 @group(0) @binding(12) var DA: texture_storage_3d<rgba16float, write>;   // display atlas (`atlas`)
 @group(0) @binding(13) var BF: texture_3d<f32>;   // face-centered magnetic field (mhd/amr_mhd.ts); a placeholder without one
+// The magnetic diagnostics' reduction (mhd/mhd.ts, MAG_OPS), as of the frame: [2] is the largest
+// |B| anywhere. The divergence is shown over it, as the run's ∇·B diagnostic is, and the plasma
+// beta takes at least (1e-4 of it)^2 for B^2: a block the field has not reached holds only
+// round-off, whose divergence over its own |B| and whose beta would otherwise set the color range.
+// A placeholder without a field.
+@group(0) @binding(14) var<storage, read> MAG: array<f32, 4>;
 
 // The magnetic fields, F_MAGNETIC onward, at the leaf cell at atlas texel c, whose gas pressure
 // is p: from the block's own faces (texel BS holds its upper ones).
@@ -60,8 +66,11 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
   switch (f - F_MAGNETIC) {
     case 0u, 1u, 2u { return B[f - F_MAGNETIC]; }
     case 3u { return sqrt(b2); }
-    case 4u { return 2.0 * p / max(b2, 1.0e-30); }
-    default { return abs(div) / max(sqrt(b2), 1.0e-30); }
+    case 4u {
+      let floor = 1.0e-4 * MAG[2];
+      return 2.0 * p / max(b2, max(floor * floor, 1.0e-30));
+    }
+    default { return abs(div) / max(MAG[2], 1.0e-30); }
   }
 }
 // Per-block timesteps (amr/bins_on.wgsl): BIN[1 + slot] is a block's time bin; all zero when off.

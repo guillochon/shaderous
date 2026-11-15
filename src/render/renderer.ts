@@ -3,7 +3,7 @@ import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { EOS_MODULES } from '../eos/eos';
 import { COOLING_MODULES } from '../cooling/cooling';
-import { LINEAR_FIELDS } from '../problems/types';
+import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
 import { FieldLines } from './fieldlines';
 
@@ -632,6 +632,8 @@ export class Renderer {
     d.queue.writeBuffer(this.rangeBuf, 0, empty);
     const cp2 = enc.beginComputePass();
     const parity = 2 * sim.cur + sim.speciesCur;
+    // The plasma beta and the field's divergence read the largest |B| (render/field.wgsl).
+    if (v.field === MAGNETIC_FIELDS[4] || v.field === MAGNETIC_FIELDS[5]) sim.encodeMagnetic?.(cp2, sim.cur);
     if (projAxis !== null) {
       cp2.setPipeline(this.pProject!);
       cp2.setBindGroup(0, this.gProject[parity]);

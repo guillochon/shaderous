@@ -229,6 +229,11 @@ export interface Simulation {
   /** The display pass's resources with the state at `parity` and the species at `speciesParity`. */
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView>;
   /**
+   * With a field: reduce its magnetic diagnostics for the state at `parity`, which the display's
+   * magnetic fields read (fieldResources' binding 14).
+   */
+  encodeMagnetic?(pass: GPUComputePassEncoder, parity: number): void;
+  /**
    * Species (species/species.ts): the parity of the textures holding rho X now, and the
    * texels along z from one group of four to the next (0 without species).
    */
@@ -1563,6 +1568,7 @@ export class Sim implements Simulation {
     const r: Record<number, GPUBuffer | GPUTextureView> = {
       2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 20: this.bh,
       13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(),
+      14: this.mhd?.magResult ?? this.noMag(),
     };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
@@ -1575,6 +1581,15 @@ export class Sim implements Simulation {
   private noFaces(): GPUTexture {
     this.placeholderFaces ??= tex3d(this.device, 1, 'rgba32float', 'no face field', 1);
     return this.placeholderFaces;
+  }
+  private placeholderMag?: GPUBuffer;
+  /** Without a field, the display's magnetic reduction binding: four words nothing reads. */
+  private noMag(): GPUBuffer {
+    this.placeholderMag ??= this.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
+    return this.placeholderMag;
+  }
+  encodeMagnetic(pass: GPUComputePassEncoder, parity: number) {
+    this.mhd?.encodeMagnetic(pass, parity);
   }
   status(): string {
     return '';

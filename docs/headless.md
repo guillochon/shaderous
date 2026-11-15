@@ -145,6 +145,7 @@ changing. It needs numpy and matplotlib.
 | `--url URL` | Use the page served at URL (for example the live site) instead of serving this checkout |
 | `--headed` | Show the browser window, for when headless Chrome finds no GPU adapter |
 | `--low-priority` | Run at below-normal CPU priority. On Windows the browser inherits it |
+| `--gpu-memory GB` | GPU memory the simulation may take, the panel's "GPU memory" setting: it sets how many blocks the adaptive mesh can hold. Each run starts a fresh browser profile with the guessed default (2.5 GB on a desktop), so a big adaptive run on a large GPU wants it set |
 | `--quiet` | No progress lines on stderr |
 
 ## MCP server
@@ -173,8 +174,10 @@ elsewhere, give the command with an absolute path:
 With Claude Code you can also run
 `claude mcp add shaderous -- node /path/to/shaderous/tools/headless/mcp.mjs`.
 
-The server accepts `--url URL`, `--headed` and `--low-priority`, which mean the same as for the
-runner.
+The server accepts `--url URL`, `--headed`, `--low-priority` and `--gpu-memory GB`, which mean
+the same as for the runner. Mid-session, the `control` tool sets the GPU memory too:
+`control {id: "gpumem", value: 4}` (in GB; it starts the run again), and `value: ""` returns to the
+guessed default.
 
 ### Tools
 
