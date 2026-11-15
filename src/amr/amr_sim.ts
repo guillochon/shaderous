@@ -23,6 +23,7 @@ import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
+import { Multipoles } from '../gravity/multipole';
 import { makeEos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
@@ -50,7 +51,7 @@ const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
 /** The GPU's settling (amr/settle.wgsl): its uniform's size, and the most stars it takes. */
-const SETTLE_BYTES = 496;
+const SETTLE_BYTES = 560;
 const SETTLE_MAX_STARS = 4;
 /** The first window of the face mass flux records: a binding's largest size, aligned for the second's offset. */
 const massFluxWindowBytes = (d: GPUDevice) => Math.floor(d.limits.maxStorageBufferBindingSize / d.limits.minStorageBufferOffsetAlignment) * d.limits.minStorageBufferOffsetAlignment;
@@ -145,12 +146,21 @@ export class AmrSim implements Simulation {
   /**
    * The face mass flux records as the shaders bind them (amr/species_index.wgsl): MF (binding 7
    * in the species pass, 12 in the updates) the first window, MF_HI (32) the rest, and the
-   * index of the first record past the first window (MF_SPLIT). A mesh whose records fit in one
-   * binding has the whole buffer as MF and a placeholder as MF_HI, never read.
+   * index of the first record past the first window. A mesh whose records fit in one binding
+   * has the whole buffer as MF and no MF_HI: its shaders bind no more than they ever did (one
+   * more storage buffer took the MHD update with self-gravity and time bins past the 8 a stage
+   * may have on most devices).
    */
-  massFluxWindows: { lo: Bindable; hi: Bindable; split: number } | null = null;
-  private get mfSplitSlot(): string {
-    return `const MF_SPLIT: u32 = ${this.massFluxWindows?.split ?? 0xffffffff}u;\n`;
+  massFluxWindows: { lo: Bindable; hi: Bindable | null; split: number } | null = null;
+  /** The mf_load and mf_store slots (amr/species.wgsl, amr/species_on.wgsl, mhd/amr_update.wgsl). */
+  private get mfSlots(): Record<string, string> {
+    const w = this.massFluxWindows;
+    if (!w?.hi) return {};
+    const decl = (access: string) => `@group(0) @binding(32) var<storage, ${access}> MF_HI: array<f32>;\nconst MF_SPLIT: u32 = ${w.split}u;\n`;
+    return {
+      mf_load: decl('read') + 'fn mf_load(i: u32) -> f32 {\n  if (i < MF_SPLIT) { return MF[i]; }\n  return MF_HI[i - MF_SPLIT];\n}\n',
+      mf_store: decl('read_write') + 'fn mf_store(i: u32, v: f32) {\n  if (i < MF_SPLIT) { MF[i] = v; } else { MF_HI[i - MF_SPLIT] = v; }\n}\n',
+    };
   }
   private pSpecies: GPUComputePipeline[] = [];
   /** per pipeline (assemble, predict, move, regrid): [state parity][species parity] */
@@ -183,7 +193,7 @@ export class AmrSim implements Simulation {
   private nOwnMasses = 0;
   private grav?: AmrGravity;
   private dummyPhi: GPUTexture;
-  private redMp?: Reducer;
+  private redMp?: Multipoles;
   private redBh?: Reducer;
   private pBhDrift?: GPUComputePipeline;
   private pBhKick?: GPUComputePipeline;
@@ -390,7 +400,7 @@ export class AmrSim implements Simulation {
       const window = massFluxWindowBytes(d);
       this.massFluxWindows =
         bytes <= window
-          ? { lo: this.massFlux, hi: d.createBuffer({ label: 'face mass fluxes (no second window)', size: 256, usage: GPUBufferUsage.STORAGE }), split: 0xffffffff }
+          ? { lo: this.massFlux, hi: null, split: 0xffffffff }
           : { lo: { buffer: this.massFlux, offset: 0, size: window }, hi: { buffer: this.massFlux, offset: window, size: bytes - window }, split: window / 4 };
       if (this.compCoeffs) this.comp = t('composition');
     }
@@ -511,7 +521,7 @@ export class AmrSim implements Simulation {
     // 3D: self-gravity machinery is built for every run, so gravity can be switched on later.
     const gravity = async () => {
       const u1 = [0, 1].map((p) => v(sim.state[p][0]));
-      sim.redMp = await Reducer.create(d, [sim.cap * BS, BS, BS], new Array(10).fill(SUM), 'amr/multipole.wgsl', {}, u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole');
+      sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, BS], 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole');
       sim.grav = await AmrGravity.create({
         device: d, slotsPerSide: sim.slotsPerSide, levels: sim.levels, params: sim.params, bt: sim.bt,
         listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
@@ -601,7 +611,7 @@ export class AmrSim implements Simulation {
       mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl',
       species: this.speciesGroups > 0 ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
       comp_src: compSrcSlot(this.compCoeffs, this.speciesDepth),
-      mf_split: this.mfSplitSlot,
+      ...this.mfSlots,
     };
   }
 
@@ -769,7 +779,7 @@ export class AmrSim implements Simulation {
   private async buildSpecies() {
     const d = this.device;
     const v = (t: GPUTexture) => t.createView();
-    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n`, comp: hydroSlots(this.cfg).comp, mf_split: this.mfSplitSlot };
+    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n`, comp: hydroSlots(this.cfg).comp, ...this.mfSlots };
     const kout = (this.comp ? { 26: v(this.comp) } : {}) as Record<number, GPUTextureView>;
     const kflag = (this.comp ? { 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>;
     this.pSpecies = await Promise.all(
@@ -789,7 +799,7 @@ export class AmrSim implements Simulation {
       per((p, q) =>
         bindGroup(d, pM, {
           0: this.params, 1: this.clock, 3: v(this.state[p][1]), 4: v(this.state[1 - p][0]), 5: v(this.species[q]), 6: v(this.species[1 - q]),
-          7: this.massFluxWindows!.lo, 32: this.massFluxWindows!.hi, 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf, ...kout, ...kflag,
+          7: this.massFluxWindows!.lo, ...((this.massFluxWindows!.hi ? { 32: this.massFluxWindows!.hi } : {}) as Record<number, Bindable>), 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf, ...kout, ...kflag,
         }),
       ),
       // Re-meshing goes from the state of parity p to the other.
@@ -846,7 +856,7 @@ export class AmrSim implements Simulation {
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 20: this.bh, 30: this.bt, 31: list,
       ...bin,
       ...this.compIn,
-      ...((this.massFluxWindows ? { 12: this.massFluxWindows.lo, 32: this.massFluxWindows.hi } : {}) as Record<number, Bindable>),
+      ...((this.massFluxWindows ? { 12: this.massFluxWindows.lo, ...(this.massFluxWindows.hi ? { 32: this.massFluxWindows.hi } : {}) } : {}) as Record<number, Bindable>),
       ...(this.debrisBuf?.bindings(this.bh) ?? {}),
     });
   }
@@ -1450,10 +1460,11 @@ export class AmrSim implements Simulation {
   private async settleOnGpu(set: Settling, stale: () => boolean) {
     const d = this.device;
     const code = assemble('amr/settle.wgsl', this.slots);
-    const [pMeasure0, pMeasure1, pMeasure2, pApply, pFinish, pCopy] = await Promise.all([
+    const [pMeasure0, pMeasure1, pMeasure2, pMeasure3, pApply, pFinish, pCopy] = await Promise.all([
       computePipeline(d, code, 'settle masses', { MODE: 0 }, 'measure'),
       computePipeline(d, code, 'settle least potential', { MODE: 1 }, 'measure'),
       computePipeline(d, code, 'settle trial masses', { MODE: 2 }, 'measure'),
+      computePipeline(d, code, 'settle centers of mass', { MODE: 3 }, 'measure'),
       computePipeline(d, code, 'settle apply', undefined, 'apply'),
       computePipeline(d, code, 'settle finish', undefined, 'finish'),
       computePipeline(d, code, 'settle copy back', undefined, 'copy_back'),
@@ -1474,6 +1485,8 @@ export class AmrSim implements Simulation {
     const stars = set.stars;
     const mass = stars.map(() => 0);
     const C: number[] = stars.map(() => 0);
+    // Where each star's mass is: the others' pull on it is taken from there.
+    const at = stars.map((st) => [st.center[0], st.center[1], st.center[2] ?? 0]);
     const relax = set.relax ?? 1;
     // The uniform (amr/settle.wgsl, Settle): star S of the measures, and their trial values of C.
     const pack = (star: number, cands: number[] = []) => {
@@ -1482,23 +1495,24 @@ export class AmrSim implements Simulation {
       u[1] = star;
       f.set([set.rhoCut, set.rhoAmb, set.pAmb, relax, set.G], 4);
       stars.forEach((st, i) => {
-        const o = 12 + 20 * i;
+        const o = 12 + 24 * i;
         const g = st.barotrope.gpu!;
         f.set([st.center[0], st.center[1], st.center[2] ?? 0, st.R, st.reach ?? 3e38, mass[i], st.scalar, g.kind === 'polytrope' ? 0 : 1], o);
         f.set(g.kind === 'polytrope' ? [g.n, g.K, (g.n + 1) * g.K, 0] : [g.degRho, g.degP, 0, 0], o + 8);
         f.set([st.vel[0], st.vel[1], st.vel[2] ?? 0, 0], o + 12);
         const hi = Math.fround(C[i]);
         f.set([hi, C[i] - hi], o + 16);
+        f.set(at[i], o + 20);
       });
       cands.forEach((c, k) => {
         const hi = Math.fround(c);
-        f.set([hi, c - hi], 92 + 2 * k);
+        f.set([hi, c - hi], 108 + 2 * k);
       });
       d.queue.writeBuffer(uni, 0, f);
     };
     // Bind groups for the current parity: the measures read it; apply and finish write the other.
     const groupsFor = (p: number) => ({
-      measure: [pMeasure0, pMeasure1, pMeasure2].map((pipe) =>
+      measure: [pMeasure0, pMeasure1, pMeasure2, pMeasure3].map((pipe) =>
         bindGroup(d, pipe, { 0: this.params, 10: uni, 2: v(this.state[p][0]), 4: phi, 11: out, 30: this.bt, 31: this.listLeaf }),
       ),
       apply: bindGroup(d, pApply, {
@@ -1603,6 +1617,15 @@ export class AmrSim implements Simulation {
       for (let round = 0; round < SETTLE_ROUNDS; round++) {
         setLoadStage(settleStage(round));
         if (stale()) return;
+        if (stars.length > 1) {
+          pack(0);
+          const mom = await measure(pMeasure3, bg.measure[3]);
+          stars.forEach((_, i) => {
+            const s4 = [0, 0, 0, 0];
+            for (let r = 0; r < nRows; r++) for (let a = 0; a < 4; a++) s4[a] += mom[r * NC + 4 * i + a];
+            if (s4[0] > 0) at[i] = [s4[1] / s4[0], s4[2] / s4[0], s4[3] / s4[0]];
+          });
+        }
         for (let i = 0; i < stars.length; i++) await solveC(i);
         pack(0);
         const ch = await measure(pApply, bg.apply);
@@ -2748,7 +2771,6 @@ export class AmrSim implements Simulation {
     this.speciesHalf?.destroy();
     this.burn?.destroy();
     this.massFlux?.destroy();
-    if (this.massFluxWindows && this.massFluxWindows.hi instanceof GPUBuffer) this.massFluxWindows.hi.destroy();
     this.debrisBuf?.destroy();
     for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.listDep, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
     this.grav?.destroy();

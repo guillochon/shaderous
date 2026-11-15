@@ -21,6 +21,13 @@
 // not there to be held against. A star that moves keeps its velocity: settling only reshapes
 // its density.
 //
+// x_j is where star j's mass is in the round, its center of mass, so that the pull left out is
+// the one in the grid's potential even if the companion has shifted. Nothing holds a star in
+// place (moved whole, it is as balanced as before), so any net force left over moves it a
+// little every round, and the rounds do not end: two 0.64 M_sun white dwarfs a third of the box
+// from its center crept toward each other until the isolated boundary's multipoles went past
+// the quadrupole (gravity/multipole_eval.wgsl).
+//
 // On an adaptive mesh the rounds run on the GPU (amr/settle.wgsl, AmrSim.settleOnGpu) when each
 // star's gas is one it knows (Barotrope.gpu): only per-block sums come back, where the Settler
 // here reads the whole mesh back, some 100 bytes a cell, more than a page may hold on a mesh of
@@ -181,12 +188,12 @@ export interface SettleCells {
  * Settles the stars of a Settling on a grid's cells, round by round. A round only reshapes the
  * density (all the potential depends on); finish() then writes each cell's whole state: the
  * star's velocity, the internal energy of its cold gas, the dye, or the ambient gas. Which
- * star a cell can belong to, each star's mass and the others' pull on it are fixed at the start.
+ * star a cell can belong to and each star's mass are fixed at the start; the others' pull follows
+ * where their mass is.
  */
 export class Settler {
-  /** per star: the cells that may become part of it, and its own potential's correction there */
+  /** per star: the cells that may become part of it */
   private cells: Int32Array[] = [];
-  private pull: Float64Array[] = [];
   private mass: number[] = [];
   /** per star: its constant C of the last round */
   private C: (number | undefined)[] = [];
@@ -219,18 +226,23 @@ export class Settler {
       if (grid.u1[q * 4] > set.rhoCut) this.mass[best] += grid.u1[q * 4] * this.vol[q];
     }
     this.cells = mine.map((m) => Int32Array.from(m));
-    // Each star is balanced in its own potential: the grid's, less the others' pull, which
-    // outside a spherical star is that of a point of its mass.
-    this.pull = this.cells.map((idx, i) => {
-      const add = new Float64Array(idx.length);
-      set.stars.forEach((o, j) => {
-        if (j === i) return;
-        idx.forEach((q, k) => {
-          const [x, y, z] = grid.pos(q);
-          add[k] += (set.G * this.mass[j]) / Math.hypot(x - o.center[0], y - o.center[1], z - o.center[2]);
-        });
-      });
-      return add;
+  }
+
+  /** Each star's center of mass as its density stands (its placement if it has none above the cut). */
+  private centers(): number[][] {
+    const u1 = this.grid.u1;
+    return this.set.stars.map((s, i) => {
+      let m = 0;
+      const c = [0, 0, 0];
+      for (const q of this.cells[i]) {
+        const r = u1[q * 4];
+        if (!(r > this.set.rhoCut)) continue;
+        const dm = r * this.vol[q];
+        const x = this.grid.pos(q);
+        m += dm;
+        for (let a = 0; a < 3; a++) c[a] += dm * x[a];
+      }
+      return m > 0 ? c.map((v) => v / m) : [s.center[0], s.center[1], s.center[2] ?? 0];
     });
   }
 
@@ -239,10 +251,20 @@ export class Settler {
     const u1 = this.grid.u1;
     const { rhoCut, rhoAmb } = this.set;
     let change = 0;
+    // Each star is balanced in its own potential: the grid's, less the others' pull, which
+    // outside a spherical star is that of a point of its mass at its center of mass.
+    const at = this.set.stars.length > 1 ? this.centers() : [];
     this.set.stars.forEach((s, i) => {
       const idx = this.cells[i];
       const ph = new Float64Array(idx.length);
-      for (let k = 0; k < idx.length; k++) ph[k] = phi[idx[k]] + this.pull[i][k];
+      for (let k = 0; k < idx.length; k++) {
+        let p = phi[idx[k]];
+        if (at.length) {
+          const [x, y, z] = this.grid.pos(idx[k]);
+          for (let j = 0; j < at.length; j++) if (j !== i) p += (this.set.G * this.mass[j]) / Math.hypot(x - at[j][0], y - at[j][1], z - at[j][2]);
+        }
+        ph[k] = p;
+      }
       const { rho, C } = balancedDensity(s.barotrope.rhoOfH, ph, idx, this.vol, this.mass[i], rhoCut, this.C[i]);
       this.C[i] = C;
       for (let k = 0; k < idx.length; k++) {

@@ -45,10 +45,8 @@
 // matching at refinement boundaries (amr/species.wgsl matches the species' itself), in the
 // layout of amr/species_index.wgsl. A placeholder without species.
 @group(0) @binding(12) var<storage, read_write> MF: array<f32>;
-@group(0) @binding(32) var<storage, read_write> MF_HI: array<f32>;   // the records past MF_SPLIT
-fn mf_store(i: u32, v: f32) {
-  if (i < MF_SPLIT) { MF[i] = v; } else { MF_HI[i - MF_SPLIT] = v; }
-}
+// mf_store(i, v): into MF, or MF and MF_HI where the records are split (as amr/species.wgsl).
+#include <mf_store>
 override SPECIES_FLUX: bool = false;    // the gravity field atlas: acceleration, potential in w (ghosts included)
 
 override STAGE: u32 = 1u;

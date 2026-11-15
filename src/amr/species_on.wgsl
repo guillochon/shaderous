@@ -6,13 +6,10 @@
 // hydro/flux.wgsl (Faces).
 const SPECIES = true;
 @group(0) @binding(12) var<storage, read_write> MF: array<f32>;
-@group(0) @binding(32) var<storage, read_write> MF_HI: array<f32>;   // the records past MF_SPLIT
+// mf_store(i, v): into MF, or MF and MF_HI where the records are split (as amr/species.wgsl).
+#include <mf_store>
 
 #include "amr/species_index.wgsl"
-
-fn mf_store(i: u32, v: f32) {
-  if (i < MF_SPLIT) { MF[i] = v; } else { MF_HI[i - MF_SPLIT] = v; }
-}
 
 fn store_mass_flux(slot: i32, l: vec3<i32>, c: vec3<i32>, fx: Faces, fy: Faces, fz: Faces) {
   let lo = vec3<f32>(fx.lo.m, fy.lo.m, fz.lo.m);

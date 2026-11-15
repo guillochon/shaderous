@@ -22,7 +22,8 @@ const DEFAULT_SLOTS: Slots = {
   // MHD edge fields (mhd/corner.wgsl): Gardiner & Stone's mean unless mhd/mhd.ts picks another.
   edge_mode: 'const EDGE_MODE: u32 = 0u;\n',
   // Face mass flux records in one window (amr/species_index.wgsl) unless AmrSim splits them.
-  mf_split: 'const MF_SPLIT: u32 = 0xffffffffu;\n',
+  mf_load: 'fn mf_load(i: u32) -> f32 { return MF[i]; }\n',
+  mf_store: 'fn mf_store(i: u32, v: f32) { MF[i] = v; }\n',
 };
 
 export function assemble(entry: string, slots: Slots = {}): string {

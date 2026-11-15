@@ -3,7 +3,7 @@
 // each of phi, the right-hand side and the residual.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, tex3d } from '../gpu/device';
-import { Reducer, SUM } from '../gpu/reduce';
+import { Multipoles } from './multipole';
 
 const PRE = 2; // smoothing sweeps before restriction
 const POST = 2; // and after prolongation
@@ -23,7 +23,7 @@ interface Level {
 export class Multigrid {
   levels: Level[] = [];
   phiOld!: GPUTexture; // potential one step back, for extrapolating to the half step
-  multipole!: Reducer;
+  multipole!: Multipoles;
   private pSmooth!: GPUComputePipeline;
   private pResidual!: GPUComputePipeline;
   private pRestrict!: GPUComputePipeline;
@@ -47,12 +47,10 @@ export class Multigrid {
     const mg = new Multigrid();
     mg.phiOld = tex3d(device, n, 'r32float', 'phi old');
 
-    mg.multipole = await Reducer.create(
+    mg.multipole = await Multipoles.create(
       device,
       [n, n, n],
-      new Array(10).fill(SUM),
       'gravity/multipole.wgsl',
-      {},
       stateU1.map((t) => ({ 0: params, 1: t.createView() })),
       'multipole',
     );

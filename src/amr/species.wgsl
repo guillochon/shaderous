@@ -18,15 +18,11 @@
 @group(0) @binding(5) var S: texture_3d<f32>;     // rho X at the start of the step
 @group(0) @binding(6) var SO: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(7) var<storage, read> MF: array<f32>;
-@group(0) @binding(32) var<storage, read> MF_HI: array<f32>;   // the records past MF_SPLIT
+// mf_load(i), the recorded face mass flux at index i (amr/species_index.wgsl): from MF, or
+// from MF and MF_HI (binding 32) where the records are split in two windows (AmrSim.massFluxWindows).
+#include <mf_load>
 @group(0) @binding(8) var SX: texture_3d<f32>;
 @group(0) @binding(9) var SH: texture_3d<f32>;
-
-// The recorded face mass flux at index i (amr/species_index.wgsl).
-fn mf_load(i: u32) -> f32 {
-  if (i < MF_SPLIT) { return MF[i]; }
-  return MF_HI[i - MF_SPLIT];
-}
 
 fn load_sx(c: vec3<i32>) -> array<vec4<f32>, NG> {
   var x: array<vec4<f32>, NG>;

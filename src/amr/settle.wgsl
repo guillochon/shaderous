@@ -8,6 +8,8 @@
 //   measure, MODE 0: per block, each star's mass (cells denser than the cut) and the densest cell
 //   measure, MODE 1: per block, the least potential among star S's cells
 //   measure, MODE 2: per block, star S's mass at 16 trial values of C
+//   measure, MODE 3: per block, each star's mass and its moments m x, m y, m z (its center of
+//                    mass, where the others' pull on it is taken from)
 //   apply:           a round's new density, from the current state into the other parity;
 //                    per block, the largest change
 //   finish:          every star cell's whole state from its settled density (cold gas at the
@@ -26,6 +28,7 @@ struct SStar {
   b: vec4<f32>, // barotrope: polytrope (n, K, (n + 1) K, 0); degenerate (rho_d, A, 0, 0)
   v: vec4<f32>, // velocity
   k: vec4<f32>, // C as two floats (C = k.x + k.y)
+  q: vec4<f32>, // center of mass, where its pull on the other stars comes from
 }
 struct Settle {
   h: vec4<u32>,        // number of stars, star S of measure modes 1 and 2
@@ -68,7 +71,7 @@ fn pull(i: u32, x: vec3<f32>) -> f32 {
   var p = 0.0;
   for (var j = 0u; j < S.h.x; j++) {
     if (j == i) { continue; }
-    p += S.g.x * S.stars[j].r.y / length(x - S.stars[j].c.xyz);
+    p += S.g.x * S.stars[j].r.y / length(x - S.stars[j].q.xyz);
   }
   return p;
 }
@@ -159,6 +162,18 @@ fn measure(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_inde
         let rho = textureLoad(N1, c, 0).x;
         if (rho > S.f.x) { acc[u32(who)] += rho * vol; }
         acc[4] = max(acc[4], rho);
+        continue;
+      }
+      if (MODE == 3u) {
+        let rho = textureLoad(N1, c, 0).x;
+        if (rho > S.f.x) {
+          let m = rho * vol;
+          let o4 = 4u * u32(who);
+          acc[o4] += m;
+          acc[o4 + 1u] += m * x.x;
+          acc[o4 + 2u] += m * x.y;
+          acc[o4 + 3u] += m * x.z;
+        }
         continue;
       }
       if (u32(who) != star) { continue; }

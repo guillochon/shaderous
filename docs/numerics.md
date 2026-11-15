@@ -554,16 +554,22 @@ smeared itself ever wider.
 - Warm-started from the previous potential. The default is 2 V-cycles per step (3 on the
   adaptive mesh, where later cycles run only while they still reduce the residual).
 - **Periodic** boundaries subtract the mean density, $`\bar\rho_\text{per} = \langle\rho\rangle`$.
-- **Isolated** boundaries: a reduction computes the mass $`M`$, center of mass and second moments
-  $`S_{ij}`$ of the gas, and the boundary potential comes from the monopole and quadrupole
-  (the dipole vanishes about the center of mass):
+- **Isolated** boundaries: a reduction sums the gas's moments $`\sum m\,x^a y^b z^c`$ about the box
+  center for $`a + b + c \le 4`$ (35 of them), a pass moves them to the center of mass, and the
+  boundary potential is the multipole expansion about it to $`l = 4`$
+  (`gravity/multipole_eval.wgsl`):
 
 ```math
-\Phi_\text{bdry}(\mathbf{x}) = -G\left[\frac{M}{r} + \frac{Q_{ij}d_i d_j}{2r^5}\right],
-\qquad Q_{ij} = 3S_{ij} - S_{kk}\,\delta_{ij},
+\Phi_\text{bdry}(\mathbf{x}) = -G \sum_{l=0}^{4} \frac{1}{r^{l+1}} \sum m\,|\mathbf{y}|^l
+P_l\!\left(\hat{\mathbf{n}}\cdot\hat{\mathbf{y}}\right),
 ```
 
-where $`\mathbf{d}`$ is the position relative to the center of mass and $`r = |\mathbf{d}|`$.
+where $`\mathbf{d} = r\,\hat{\mathbf{n}}`$ is the position relative to the center of mass and
+$`\mathbf{y}`$ the gas's. Each $`|\mathbf{y}|^l P_l`$ is a polynomial of degree $`l`$ in
+$`\hat{\mathbf{n}}\cdot\mathbf{y}`$ and $`|\mathbf{y}|^2`$, so the sum comes from the moments. Up to the
+quadrupole only, as it was, two white dwarfs a third of the box from its center felt its edge
+pull them toward the middle with about a third of each other's pull, and could not be settled
+into balance (`problems/settle.ts`).
 
 ### Multigrid on the adaptive mesh
 
