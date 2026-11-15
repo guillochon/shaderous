@@ -322,6 +322,11 @@ export class AmrSim implements Simulation {
     if (cfg.problem.mhd) fit = Math.min(fit, Math.floor(maxBinding(d) / registerBytes(cfg.ndim)));
     // So with species, whose face mass fluxes are one buffer of some 59 kB per block in 3D.
     if (this.speciesGroups > 0) fit = Math.min(fit, Math.floor(maxBinding(d) / speciesFaceBytes(cfg.ndim)));
+    // WebGPU zero-fills a texture on first use through one staging buffer of the texture's size,
+    // which may be no larger than a buffer may be (4 GiB on NVIDIA): a 35^3-block atlas's 5.5 GB
+    // textures lost the device. Each atlas texture holds PAD^d texels of 16 bytes per block; the
+    // species' one stacks its groups along z.
+    fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** cfg.ndim * 16 * Math.max(1, this.speciesGroups))));
     if (cfg.ndim === 3) {
       const auto = Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9));
       // 3D passes over the blocks run in slabs along z (amr/dispatch.ts), so the dispatch limit

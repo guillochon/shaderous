@@ -67,6 +67,10 @@ export async function openSession(opts = {}) {
   // --disable-vulkan-surface the GPU process crashes headless, and Chrome falls back to
   // SwiftShader. The container needs the NVIDIA Vulkan driver (NVIDIA_DRIVER_CAPABILITIES=all).
   if (process.platform === 'linux') args.push('--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface');
+  // SHADEROUS_NO_GPU_COMPOSITING=1: Chrome's own drawing off the GPU, for data-center GPUs with
+  // little graphics hardware. On an H200 its compositor's first Vulkan submit lost the device,
+  // which took WebGPU down with it. Runs, diagnostics and slices work so; screenshots do not.
+  if (process.env.SHADEROUS_NO_GPU_COMPOSITING) args.push('--disable-gpu-compositing', '--disable-gpu-rasterization', '--disable-accelerated-2d-canvas');
   // PW_CHANNEL=shell: Playwright's own Chromium headless shell (the Playwright Docker images
   // have it, not Chrome); on a Linux pod it is the one that finds the GPU.
   const channel = process.env.PW_CHANNEL ?? 'chrome';
