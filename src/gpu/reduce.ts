@@ -11,6 +11,32 @@ export const MIN = 2;
 // Block side folded per stage. 4 measured faster than 8 (shorter serial loops, more threads).
 export const RED_F = Number(new URLSearchParams(globalThis.location?.search ?? '').get('redf')) || 4;
 
+/**
+ * The record's size and the functions that handle a whole record (reduce.wgsl), written out
+ * channel by channel. Every index is then a constant, and the compiler can keep a record in
+ * registers: looped over, with the channel's operation looked up as it goes, a record of up to
+ * 64 floats sat in each thread's local memory, several copies of it at once, and on Firefox
+ * (Direct3D) the multipole and point-mass sums ran up to 50 times slower than in Chrome. (No
+ * array constants or array constructors anywhere in these shaders: Safari's Metal backend
+ * fails to compile them.)
+ */
+export function reduceDefs(ops: number[], fromBuffer = false): string {
+  const k = ops.length;
+  const each = (f: (i: number) => string) => ops.map((_, i) => `  ${f(i)}\n`).join('');
+  const identity = (i: number) => (ops[i] === MAX ? '-3.0e38' : ops[i] === MIN ? '3.0e38' : '0.0');
+  const combine = (i: number) => (ops[i] === MAX ? `max(a[${i}], b[${i}])` : ops[i] === MIN ? `min(a[${i}], b[${i}])` : `a[${i}] + b[${i}]`);
+  return (
+    `const RED_K = ${k}u;\n` +
+    `alias Red = array<f32, ${k}>;\n` +
+    // Each channel's starting value: 0 for a sum, the lowest float for a maximum, the highest for a minimum.
+    `fn red_identity() -> Red {\n  var r: Red;\n${each((i) => `r[${i}] = ${identity(i)};`)}  return r;\n}\n` +
+    `fn red_combine(a: Red, b: Red) -> Red {\n  var r: Red;\n${each((i) => `r[${i}] = ${combine(i)};`)}  return r;\n}\n` +
+    `fn red_store(base: u32, r: Red) {\n${each((i) => `RED_OUT[base + ${i}u] = r[${i}];`)}}\n` +
+    // The stages after the first read the records before them (reduce_buffer.wgsl).
+    (fromBuffer ? `fn red_load(base: u32) -> Red {\n  var r: Red;\n${each((i) => `r[${i}] = RED_IN[base + ${i}u];`)}  return r;\n}\n` : '')
+  );
+}
+
 interface Stage {
   pipeline: GPUComputePipeline;
   groups: GPUBindGroup[]; // one per source variant (state parity)
@@ -47,12 +73,9 @@ export class Reducer {
     external?: number[],
   ): Promise<Reducer> {
     const k = ops.length;
-    // The operation of each channel, as two bit masks, and two more for channels 32 and up. (No
-    // array constants or array constructors anywhere in these shaders: Safari's Metal backend
-    // fails to compile them.)
     if (k > 64) throw new Error('a reduction has at most 64 channels');
-    const mask = (op: number, from: number) => ops.slice(from, from + 32).reduce((m, o, i) => (o === op ? m | (1 << i) : m), 0) >>> 0;
-    const def = `const RED_K = ${k}u;\nconst RED_MAX = ${mask(MAX, 0)}u;\nconst RED_MIN = ${mask(MIN, 0)}u;\nconst RED_MAX_HI = ${mask(MAX, 32)}u;\nconst RED_MIN_HI = ${mask(MIN, 32)}u;`;
+    const def = reduceDefs(ops);
+    const defLater = reduceDefs(ops, true);
     // Each stage shrinks every axis by RED_F until one record is left. The axes may differ in
     // length (a 2D run has a single layer in z; a block grid is a long row of blocks).
     const sizes: number[][] = [dims.slice()];
@@ -75,7 +98,7 @@ export class Reducer {
     red.first = buffers[0];
 
     const first = external ? '' : assemble('gpu/reduce.wgsl', { ...slots, red_def: def, red_source: source });
-    const later = assemble('gpu/reduce.wgsl', { red_def: def, red_source: 'gpu/reduce_buffer.wgsl' });
+    const later = assemble('gpu/reduce.wgsl', { red_def: defLater, red_source: 'gpu/reduce_buffer.wgsl' });
     // Every stage's pipeline is asked for before any is awaited, so they compile together.
     const stages = [];
     for (let s = external ? 2 : 1; s < sizes.length; s++) {
