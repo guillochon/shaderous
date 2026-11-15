@@ -7,6 +7,9 @@ on:
     branches: [main]
     paths:
       - "tools/burn/**"
+      - "tools/eos/helm.py"
+      - "src/eos/helmholtz_table.bin"
+      - "src/eos/helmholtz_meta.ts"
       - ".github/workflows/burn-image.yml"
   workflow_dispatch:
 
@@ -37,7 +40,8 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - uses: docker/build-push-action@v6
         with:
-          context: tools/burn
+          context: .
+          file: tools/burn/Dockerfile
           push: true
           tags: |
             ghcr.io/${{ github.repository_owner }}/shaderous-burn:latest

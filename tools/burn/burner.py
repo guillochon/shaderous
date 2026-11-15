@@ -2,11 +2,13 @@
 reference that the neural network learns to reproduce.
 
 The state is the molar abundances Y_i (= X_i / A_i) and the temperature. The energy each
-reaction releases goes into the thermal energy of the equation of state the simulator uses
-for white dwarfs (src/eos/degenerate.wgsl): at constant density the degenerate electrons'
-energy does not change, so
-    dT/dt = eps / c_v,  c_v = (3/2) k / (mu m_u) + 4 a T^3 / rho
-with mu the mean mass per particle of the fully ionized composition.
+reaction releases goes into the gas's thermal energy, by the equation of state the simulator
+uses for burning white dwarf matter (src/eos/helmholtz.ts: the electron-positron gas at any
+degeneracy, ideal ions, radiation; read from the same table through tools/eos/helm.py). At
+constant density the thermal energy e(T, n_i) follows the energy released, eps, and burning
+also changes the number of ions, n_i = sum Y_i per atomic mass unit, each holding 3/2 k T:
+    de/dt = eps  =>  dT/dt = (eps - (3/2) k T / m_u * sum dY_i/dt) / c_v,   c_v = de/dT
+as the simulator has it: the energy added to the gas's, and T read back with the new ions.
 """
 import importlib.util
 from pathlib import Path
@@ -15,6 +17,10 @@ import numpy as np
 from scipy.integrate import solve_ivp
 
 from pynucastro.screening import screen5
+
+import sys as _sys
+_sys.path.append(str(Path(__file__).resolve().parents[1] / "eos"))
+import helm  # noqa: E402
 
 HERE = Path(__file__).parent
 _spec = importlib.util.spec_from_file_location("aprox13", HERE / "aprox13.py")
@@ -32,9 +38,9 @@ T_MAX = 1.0e10  # where the rate fits end
 
 
 def cv(Y, rho, T):
-    """Specific heat at constant volume, erg / g / K."""
-    per_mu = float(np.sum(Y * (Z + 1.0)))  # particles per m_u
-    return 1.5 * KB * per_mu / MU + 4.0 * ARAD * T**3 / rho
+    """Specific heat at constant volume, erg / g / K, by the simulator's equation of state."""
+    _, de = helm.thermo(rho, np.log(T), float(np.sum(Y)))
+    return float(de) / T
 
 
 def _rhs(t, s, rho):
@@ -42,7 +48,8 @@ def _rhs(t, s, rho):
     T = min(max(s[N], 1e7), T_MAX)
     dY = net.rhs(t, Y, rho, T, screen5)
     eps = net.energy_release(dY)
-    return np.append(dY, eps / cv(Y, rho, T))
+    # The ions' share of the energy changes with their number at fixed T.
+    return np.append(dY, (eps - 1.5 * KB * T / MU * float(np.sum(dY))) / cv(Y, rho, T))
 
 
 def burn(X, rho, T, dt, rtol=1e-7, atol=1e-12, t_eval=None):

@@ -8,7 +8,7 @@ before (rounds 26 and 29).
 
 The models given are scored and the best is the first parent. Variants (train.py's last two
 arguments, the overshoot penalty and the temperature-slope weight):
-  a  the rounds 27-29 recipe (teacher distillation, weight averaging)
+  a  the rounds 27-29 recipe (teacher distillation unless BURN_TEACHER=-, weight averaging)
   b  a + the overshoot penalty (ow 20)
   c  b + the temperature slope (jw 1; needs tpairs.npz)
 Each round writes round_<r>.json: every variant's scores, the choice, and the time it took.
@@ -23,6 +23,10 @@ from pathlib import Path
 HERE = Path(__file__).parent
 PY = sys.executable
 VARIANTS = {"a": ("0", "0"), "b": ("20", "0"), "c": ("20", "1")}
+# The teacher distilled from (train.py's teacher and teach arguments): BURN_TEACHER=- for none,
+# as after a change to the reference burner's physics, which a teacher trained before it lacks.
+TEACHER = os.environ.get("BURN_TEACHER", "aprox13_surrogate.pt")
+TEACH = "0" if TEACHER == "-" else os.environ.get("BURN_TEACH", "1")
 
 
 def metric(s):
@@ -66,7 +70,7 @@ def main():
             m = f"model_dagger_{r}{v}.pt"
             models.append(m)
             cmds.append([PY, "train.py", "30000", "128", "4", "4", m, "0.3", "0.2", "flow2f", "1", best, "0", "5e-4",
-                         "1", "0.3", str(10 * r + i), "aprox13_surrogate.pt", "1", ow, jw])
+                         "1", "0.3", str(10 * r + i), TEACHER, TEACH, ow, jw])
         codes = run_all(cmds, [f"train_dagger_{Path(m).stem[len('model_dagger_'):]}.log" for m in models], env)
         models = [m for m, c in zip(models, codes) if c == 0 and (HERE / m).exists()]
         scores = score_all(models, str(r))

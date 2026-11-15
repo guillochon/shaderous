@@ -651,30 +651,25 @@ def evaluate(model, pairs, n=200_000):
     return {"X_l1": torch.quantile(l_x, q).tolist(), "e_err": torch.quantile(l_e, q).tolist(), "X_l1_max": l_x.max().item(), "e_err_max": l_e.max().item()}
 
 
-KB, MU, ARAD = 1.380649e-16, 1.66053906660e-24, 7.5657e-15
+sys.path.append(str(HERE.parent / "eos"))
+import helm  # noqa: E402
+
 A_T = torch.tensor(A, dtype=torch.float32, device=dev)
 Z_T = torch.tensor([2, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28], dtype=torch.float32, device=dev)
 
 
 def heat(D, X1, rho, T):
     """Temperature after a step that changed the composition by D (to X1) at density rho, the
-    energy it released going into heat: the T1 at which the gas holds that much more thermal
-    energy, c_ion (T1 - T) + a (T1^4 - T^4) / rho = de, with the ions' specific heat of X1, as
-    the reference integrates c_v dT and the simulator adds the release to the internal energy.
-    A single explicit step, T + de / c_v(T), overshoots badly when an ignition releases a lot
-    at once: radiation's c_v grows as T^3, and evaluated at the start the gas heats far past
-    where the reference does (8e9 K for 5e9), photodisintegrates to helium, and stays there.
-    Newton's method from above (the left side is convex in T1), so it never undershoots."""
-    # In units of 1e9 K and 1e18 erg/g: T^4 in K overflows single precision above 4e9 K.
-    de = (D * Q).sum(dim=1)
-    c_ion = 1.5 * KB / MU * (X1 / A_T * (Z_T + 1)).sum(dim=1) * 1e-9
-    b = ARAD * 1e18 / rho
-    t0 = T * 1e-9
-    t1 = torch.where(de > 0, t0 + de / c_ion, t0)
-    for _ in range(40):
-        f = c_ion * (t1 - t0) + b * (t1**4 - t0**4) - de
-        t1 = t1 - f / (c_ion + 4 * b * t1**3)
-    return (t1 * 1e9).clamp(1e7, 3e10)
+    energy it released going into heat, as Shaderous has it: the release added to the gas's
+    thermal energy, and T read back by its equation of state (src/eos/helmholtz.ts, the same
+    table through tools/eos/helm.py) with the new number of ions,
+        e(rho, T1, n_i(X1)) = e(rho, T, n_i(X1 - D)) + Q . D.
+    Newton's method in ln T from T, in double precision, differentiable (the unrolled training
+    loss runs through it). The burner (burner.py) integrates the same relation in time."""
+    de = (D * Q).sum(dim=1) * 1e18
+    ia1 = (X1.clamp_min(0.0) / A_T).sum(dim=1)
+    ia0 = ((X1 - D).clamp_min(0.0) / A_T).sum(dim=1)
+    return helm.heat_t(rho, T, ia0, ia1, de, iters=10).clamp(1e7, 3e10)
 
 
 @torch.no_grad()
