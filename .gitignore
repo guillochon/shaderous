@@ -18,3 +18,9 @@ tools/burn/*.pt
 tools/burn/*.npz
 tools/burn/*.json
 tools/burn/pod/
+
+# EOS network (tools/eos): generated data, fits and benchmark assets
+tools/eos/data/
+tools/eos/*.pt
+tools/eos/__pycache__/
+tools/eos/bench/assets/
