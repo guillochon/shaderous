@@ -34,10 +34,17 @@ def workers():
     n = os.cpu_count() or 1
     if hasattr(os, "sched_getaffinity"):
         n = min(n, len(os.sched_getaffinity(0)))
-    try:
+    try:  # cgroup v2
         quota, period = open("/sys/fs/cgroup/cpu.max").read().split()
         if quota != "max":
             n = min(n, max(1, int(quota) // int(period)))
+    except (OSError, ValueError):
+        pass
+    try:  # cgroup v1 (some hosts): a quota of -1 is none
+        quota = int(open("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read())
+        period = int(open("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read())
+        if quota > 0:
+            n = min(n, max(1, quota // period))
     except (OSError, ValueError):
         pass
     return max(1, n - 2)
