@@ -74,3 +74,34 @@ Runs driven through the in-page console on an NVIDIA Ampere GPU in Chrome, with 
 
 - Throughput (cell updates per second) on named GPUs and browsers: needs a benchmark run at normal priority. The manuscript leaves these in `\todo{}`.
 - The measured values (not the criteria) of each validation test: needs a run of `npm run test:gpu` with the JSON report saved here.
+
+## Added with the update to the code at `1bb702b` (2026-11-15)
+
+Numbers that `edits/code-catchup.py` adds to the manuscript. "numerics" is `docs/numerics.md` in the code's repository; a commit means its message, which records the measurement.
+
+| Quantity | Value | Source |
+|---|---|---|
+| Helium-air contact at one temperature: pressure error without and with the first-order blend; blend thresholds | 3.7% and 0.2%; 1% to 5% in gamma - 1 | numerics §12 |
+| Shock-bubble: mirror-cell differences with an on-off switch; helium at the finest level without and with the composition criterion | 5%; 24% and 99% | numerics §12, §17 |
+| Arrhenius burn: substeps, energy per substep, burning-length refinement threshold | 8; a fifth of the internal energy; 80 cells | `src/burn/burn.ts`, `src/hydro/burn.wgsl` |
+| Arrhenius detonation: resolution, speed with burning in shocks, shortfall without | 12.8 cells per half-reaction length; within 1% of CJ; 5%, halving with resolution | `detonation` test in `src/validation/tests.ts`; `src/problems/detonation.ts` |
+| Network: layers, units, DAgger rounds, half-precision weights | 4 x 128; round 30 | commit `6f68adb`; `src/burn/network.ts` |
+| Network: GPU against float64 mirror | within 2% (L1) on 48 held-out states | `burn-network` test |
+| Network: least temperature and density that burn; longest network step | 1e8 K, 1e4 g/cm^3; 10 ms | `src/burn/network.ts` |
+| Burning limiter: tube detonations 0.5 to 4 km; collision of two 0.64 M_sun dwarfs on 940 km cells | f < 0.2 stops detonations, f >= 0.3 matches; Ni56 0.45 M_sun unlimited, 0.008 and 0.056 at f = 0.1 and 0.4 | commit `4c1667e` |
+| Point masses in kick form: entropy of the disrupted n = 3 star | cut a hundredfold in flux form; holds to about 0.1 dex (0.12) | numerics §14; commits `3cd1a52`, `74aec88` |
+| n = 3 star of Gamma = 5/3 gas: destroyed between beta | 1.8 and 2 (against 1.85 of Guillochon & Ramirez-Ruiz 2013) | commit `74aec88` |
+| Face-flux tile: speed-up of the largest uniform grids on an Apple M4 Pro; cost of not splitting the update | 1.3 to 1.5 times; about 10% | `docs/architecture.md`, "Performance notes" |
+| MHD divergence: without compensation; with | 3.5e-6 after 750 steps of Orszag-Tang; 7e-8 after 751, 9e-8 after 3483 | numerics §21 |
+| MHD memory | 80 bytes per cell on top of 112 | numerics §21 ("Memory") |
+| Edge electric fields, field loop at 128^2 | energy kept 93.3% (GS05) against 94.5% and 94.6%; peak 1.08 against 1.15 to 1.21; stray 0.17 against 0.21 to 0.26 | numerics §21 (Lee's estimates) |
+| First-order flux correction threshold | density changed by a factor of 4 in stage 1 | numerics §21 |
+| MHD on refined blocks: energy; magnetic energy against the uniform grid | 2e-7; 0.3% (rotor), 0.1% (blast) | numerics §21 ("Block grid") |
+| Moving mesh: rebuilds, divergence, magnetic energy kept | 144; 1.5e-7; 96% (uniform 256^2: 96%) | numerics §21 ("Re-meshing") |
+| MHD time bins: share of block updates | 85% (2D blast, t = 0.05); 98 to 100% (rotor, loop, 3D blast) | numerics §21 ("Time bins") |
+| Magnetized disk: beta, Alfven ceiling; alphas and Q after three orbits at 256^3 with 2 levels | 50, 3; alpha_M 0.026, alpha_R 0.003, Q_z 4.2, Q_phi 15 | numerics §21 ("Magnetized accretion disk", "Disk diagnostics") |
+| Largest run: RTX 4090, 512^3 with 3 levels | 5,832 blocks, about 24 million cells, 16.8 GB, 6,359 steps in 14 min per orbit; magnetic energy x5.4, alpha 0.009 | `docs/headless.md`, "Largest run so far" |
+| 3D mesh limits; H200 run | 35^3 (field), 33^3 (species); with self-gravity only memory since `a9d3ab9` (was 31^3); 1024^3 with 4 levels at 35^3 = 42,875 blocks of 16^3 = 175,616,000 cells (quoted as about 175 million), 117 GB, 10 steps in 10 s | `docs/headless.md`; commits `dc34d29`, `1bb702b` |
+| Throughput on the Apple M4 Pro | from `paper/figures/data/performance/throughput_m4pro.json` via `make_performance.py` | commit `34beb4a` |
+| Lines of WGSL and TypeScript in `src/` at `1bb702b` | 12,002 and 26,501 | `find src -name "*.wgsl" | xargs cat | wc -l` (and `*.ts`) |
+| Number of validation tests | 64 | `src/validation/tests.ts` at `1bb702b` |
