@@ -292,6 +292,7 @@ export class Renderer {
   private rangeStage: GPUBuffer;
   private rangeCopied: string | null = null;
   private rangeBusy = false;
+  private rangeRead: Promise<void> = Promise.resolve();
   /**
    * The range of the field drawn in a recent frame: its least and greatest values and its
    * smallest positive value (null if none), for what it was drawn for (rangeKey()).
@@ -490,7 +491,7 @@ export class Renderer {
     if (key === null || this.rangeBusy) return;
     this.rangeCopied = null;
     this.rangeBusy = true;
-    this.rangeStage
+    this.rangeRead = this.rangeStage
       .mapAsync(GPUMapMode.READ)
       .then(() => {
         const k = new Uint32Array(this.rangeStage.getMappedRange().slice(0));
@@ -500,6 +501,11 @@ export class Renderer {
       })
       .catch(() => {})
       .finally(() => (this.rangeBusy = false));
+  }
+
+  /** Resolves once the range readback under way, if any, has been taken up. */
+  rangeSettled(): Promise<void> {
+    return this.rangeRead;
   }
 
   /** Projection view (a 2D run has nothing to project): the axis summed along, or null. */

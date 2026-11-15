@@ -55,6 +55,10 @@ export interface AppHooks {
    * canvas's size on the page. A size holds until the next draw.
    */
   draw(size: [number, number] | null, asPage?: boolean): void;
+  /** Resolves once the range read back from the last draw, if any, has been taken up. */
+  rangeSettled(): Promise<void>;
+  /** Whether the displayed range follows from what a draw finds (not from `d`, nor typed in). */
+  rangedByDrawing(d: Diagnostics): boolean;
   /** The view area's size as the page draws it, in pixels (0 x 0 without a layout). */
   viewSize(): [number, number];
   athdf(): Promise<{ time: number; bytes: Uint8Array; stem: string }>;
@@ -494,13 +498,19 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
    * canvas to `read` in the same task as the draw: the canvas holds the frame only until the
    * task ends.
    */
-  async function drawFresh<T>(s: Simulation, size: [number, number] | null, read: (c: HTMLCanvasElement) => T, asPage = false): Promise<T> {
-    if (!s.preparing) app.refresh(await s.diagnostics());
-    // Fields ranged by the display pass need one frame drawn before their range is known.
+  async function drawFresh<T>(s: Simulation, size: [number, number] | null, read: (c: HTMLCanvasElement) => T, asPage = false, known?: Diagnostics): Promise<T> {
+    const d = s.preparing ? null : (known ?? (await s.diagnostics()));
+    // A range readback still under way would leave this draw's range unread.
+    await app.rangeSettled();
+    if (d) app.refresh(d);
     app.draw(size, asPage);
-    await app.gpu().device.queue.onSubmittedWorkDone();
-    if (!s.preparing) app.refresh(await s.diagnostics());
-    app.draw(size, asPage);
+    // Fields ranged by the display pass need one frame drawn before their range is known: draw
+    // again with it. The state is the same, so the readouts are too.
+    if (d && app.rangedByDrawing(d)) {
+      await app.rangeSettled();
+      app.refresh(d);
+      app.draw(size, asPage);
+    }
     return read(app.canvas);
   }
 
@@ -569,13 +579,13 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     const startSteps = d.steps;
     let frameSteps = -1;
     const frame = async () => {
+      d = await s.diagnostics();
       await drawFresh(s, size, (canvas) => {
         const g = writer.ctx;
         g.drawImage(canvas, 0, 0, width, height);
         paintOverlays(g, width, height, app.overlayInfo(), overlays);
-      }, asPage);
+      }, asPage, d);
       await writer.add();
-      d = await s.diagnostics();
       frameSteps = d.steps;
       state.status = { frames: writer.frames, seconds: writer.seconds, t: d.t };
       app.recordProgress(state.status);

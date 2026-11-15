@@ -3701,6 +3701,8 @@ const api = installApi(
       sim.submitted();
       renderer.submitted();
     },
+    rangeSettled: () => renderer.rangeSettled(),
+    rangedByDrawing: (d) => $<HTMLInputElement>('auto').checked && (projecting() || view.field >= d.ranges.length),
     athdf: () => athdfOf(sim!),
     setColormap(name) {
       editor.set(editor.points, name);
