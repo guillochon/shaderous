@@ -23,15 +23,17 @@ import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
-import { burnIndicator, burnIndices, createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
-import { cellMark, isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
+import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
+import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
-import { flagSpeciesSlot, packSpecies, speciesGroups, SPECIES_JUMP_SCALE, SPECIES_PER_GROUP } from '../species/species';
+import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
+import { InitRun } from './init_pool';
+import { flagSpeciesSlot, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
-import { compSrcSlot, hydrogenParticles, mixMoments, problemCoefficients, type Moments } from '../species/mixture';
-import { AmrMhd, blockFaces, maxBinding, MHD_BLOCK_BYTES, registerBytes } from '../mhd/amr_mhd';
+import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
+import { AmrMhd, maxBinding, MHD_BLOCK_BYTES, registerBytes } from '../mhd/amr_mhd';
 import { mhdUnsupported } from '../mhd/mhd';
 
 /**
@@ -41,9 +43,6 @@ import { mhdUnsupported } from '../mhd/mhd';
  */
 const REGRID_EVERY = 8;
 const MAX_STEPS_AHEAD = 24;
-/** Samples of the initial conditions per pass when building the starting mesh, shared by its leaves. */
-const INDICATOR_SAMPLES_2D = 1 << 25;
-const INDICATOR_SAMPLES_3D = 1 << 24;
 /** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
 const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
@@ -533,7 +532,7 @@ export class AmrSim implements Simulation {
     }
     await sim.buildHydro(deferUpdate);
     await showLoadStage(INIT_STAGE);
-    sim.reset();
+    await sim.reset();
     endLoadStage(INIT_STAGE);
     await sim.settled;
     return sim;
@@ -1141,102 +1140,6 @@ export class AmrSim implements Simulation {
 
   // ---------------------------------------------------------------- initial conditions
 
-  /**
-   * Refinement indicator of a block from the analytic setup, for building the initial mesh:
-   * the same normalized jump across two cell widths that the GPU pass measures, but sampled
-   * more finely than the block's own cells. A feature smaller than a coarse cell (a point
-   * explosion, say) would otherwise fall between cell centers and never trigger refinement.
-   */
-  /**
-   * Samples per cell side when building the starting mesh: down to the finest level, within a
-   * budget. A few blocks share a total budget per pass, so a deep mesh still sees a feature a few
-   * finest cells across (a blast) that coarse sampling of a root block would step over; many
-   * blocks get the floor per block.
-   */
-  private samplesPerCell(level: number, leaves: number): number {
-    const three = this.cfg.ndim === 3;
-    const floor = three ? 2 : 4;
-    const budget = three ? INDICATOR_SAMPLES_3D : INDICATOR_SAMPLES_2D;
-    const share = Math.floor(Math.pow(budget / Math.max(leaves, 1), 1 / this.cfg.ndim) / (BS + 2));
-    return Math.min(1 << (this.levels - level), Math.max(floor, share > 0 ? 1 << Math.floor(Math.log2(share)) : 0));
-  }
-
-  private indicator(b: Block, fn: (x: number, y: number, z: number) => { rho: number; p: number; X?: readonly number[] }, sub: number): number {
-    const three = this.cfg.ndim === 3;
-    const dx = this.dx0 / (1 << b.level);
-    const half = this.cfg.problem.box / 2;
-    const h = dx / sub;
-    const m = (BS + 2) * sub; // one cell of margin on each side
-    const mz = three ? m : 1;
-    const at = (i: number, a: number) => b.c[a] * BS * dx + (i - sub + 0.5) * h - half;
-    // Gas dense enough that the preset wants it at the finest level (stars): as amr/flag.wgsl.
-    // Any sample above it decides the block, so with several samples per cell one per cell is
-    // looked at first (the cell-centered ones of the full sampling below): a block inside a
-    // star or disk is then settled at a small fraction of the cost.
-    const dense = this.cfg.refineDense;
-    if (dense > 0 && sub > 1) {
-      const first = sub >> 1;
-      for (let k = three ? first : 0; k < mz; k += sub)
-        for (let j = first; j < m; j += sub)
-          for (let i = first; i < m; i += sub) if (fn(at(i, 0), at(j, 1), three ? at(k, 2) : 0).rho > dense) return Infinity;
-    }
-    const rho = new Float64Array(m * m * mz);
-    const pr = new Float64Array(m * m * mz);
-    // The species' mass fractions, normalized as packSpecies stores them.
-    const ns = this.cfg.problem.species?.length ?? 0;
-    const xs = Array.from({ length: ns }, () => new Float64Array(m * m * mz));
-    for (let k = 0; k < mz; k++)
-      for (let j = 0; j < m; j++)
-        for (let i = 0; i < m; i++) {
-          const w = fn(at(i, 0), at(j, 1), three ? at(k, 2) : 0);
-          if (dense > 0 && w.rho > dense) return Infinity;
-          rho[(k * m + j) * m + i] = w.rho;
-          pr[(k * m + j) * m + i] = w.p;
-          if (ns) {
-            let sum = 0;
-            for (let s = 0; s < ns; s++) sum += Math.max(w.X?.[s] ?? 0, 0);
-            for (let s = 0; s < ns; s++) xs[s][(k * m + j) * m + i] = sum > 0 ? Math.max(w.X?.[s] ?? 0, 0) / sum : s === 0 ? 1 : 0;
-          }
-        }
-    // The normalized second derivative of amr/flag.wgsl, at the finest spacing sampled.
-    let ind = 0;
-    const strides = three ? [sub, sub * m, sub * m * m] : [sub, sub * m];
-    const ns2 = strides.length;
-    const lohner = (q: Float64Array, a: number) => {
-      let num = 0;
-      let den = 0;
-      const q0 = q[a];
-      for (let t = 0; t < ns2; t++) {
-        const s = strides[t];
-        const qp = q[a + s];
-        const qm = q[a - s];
-        num += (qp - 2 * q0 + qm) ** 2;
-        den += (Math.abs(qp - q0) + Math.abs(q0 - qm) + 0.01 * (Math.abs(qp) + 2 * Math.abs(q0) + Math.abs(qm))) ** 2;
-      }
-      return den > 0 ? Math.sqrt(num / den) : 0;
-    };
-    // The mass fractions' jumps between neighbors, as species_indicator (species/species.ts).
-    const jump = (q: Float64Array, a: number) => {
-      let j = 0;
-      for (const s of strides) j = Math.max(j, Math.abs(q[a + s] - q[a]), Math.abs(q[a] - q[a - s]));
-      return SPECIES_JUMP_SCALE * j;
-    };
-    // How fast it burns, against the block's cells (burnIndicator, as amr/flag.wgsl).
-    const spec = burnSpec(this.cfg);
-    const burn = spec && !isNetworkBurn(spec) ? spec : null;
-    const fuel = burn ? xs[burnIndices(burn, this.cfg.problem.species)[0]] : null;
-    const eos = burn ? makeEos(this.cfg.eos, this.cfg.eosParams) : null;
-    for (let k = three ? sub : 0; k < (three ? m - sub : 1); k++)
-      for (let j = sub; j < m - sub; j++)
-        for (let i = sub; i < m - sub; i++) {
-          const a = (k * m + j) * m + i;
-          ind = Math.max(ind, lohner(rho, a), lohner(pr, a));
-          for (const x of xs) ind = Math.max(ind, jump(x, a));
-          if (fuel) ind = Math.max(ind, burnIndicator(burn!, eos!, rho[a], pr[a], fuel[a], dx));
-        }
-    return ind;
-  }
-
   private finerInSnapshot(b: Block, levelAt: (x: number, y: number, z: number) => number): boolean {
     const three = this.cfg.ndim === 3;
     const size = (BS * this.dx0) / (1 << b.level);
@@ -1277,26 +1180,27 @@ export class AmrSim implements Simulation {
     return b.report(r.time, r.masses?.[b.spec.mass]?.gm ?? 0, await b.readLedger(), census);
   }
 
-  /** Load the problem's initial conditions on a mesh refined to fit them. */
-  reset() {
+  /**
+   * Load the problem's initial conditions on a mesh refined to fit them. The CPU work (sampling
+   * the setup for the mesh, and each leaf's state) is spread over workers where it can be
+   * (amr/init_pool.ts), and done on the page otherwise, with the same result.
+   */
+  async reset() {
+    this.resetting = true;
+    try {
+      await this.resetState();
+    } finally {
+      this.resetting = false;
+    }
+  }
+
+  private async resetState() {
     const c = this.cfg;
     const d = this.device;
     const eos = makeEos(c.eos, c.eosParams);
     const fn = c.problem.init(this.n, eos, c.ndim, c.params);
-    // The pressure of a state from the setup: its own, or the equation of state's from the
-    // density alone where the gas has no energy of its own (barotropic).
-    const pressureOf = (w: { rho: number; p: number }) => (eos.hasEnergy ? w.p : eos.pressure(w.rho, 0));
-    // For the mesh, an obstacle counts as a jump in density, so its surface starts refined.
-    // The indicator reads each sample at once and keeps none, so one object is reused for
-    // them all: the mesh takes tens of millions of samples for a large 3D start.
-    const sample = { rho: 0, p: 0, X: undefined as readonly number[] | undefined };
-    const surface = (x: number, y: number, z: number) => {
-      const w = fn(x, y, z);
-      sample.rho = w.solid ? 4 * w.rho : w.rho;
-      sample.p = pressureOf(w);
-      sample.X = w.solid ? undefined : w.X;
-      return sample;
-    };
+    const surface = surfaceOf(fn, eos);
+    let run = await InitRun.start(c, this.n, this.dx0, this.levels);
     // With self-gravity a level that only partly fits the block budget is left out altogether:
     // a refinement boundary that cuts a steep hydrostatic gradient at an arbitrary place
     // disturbs the balance far more than resolving all of it one level coarser.
@@ -1309,89 +1213,60 @@ export class AmrSim implements Simulation {
       for (let pass = 0; pass < limit; pass++) {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
         // is finer than it at the center of one of its children.
-        const leaves = levelAt ? 0 : this.tree.leaves().length;
-        const changed = levelAt
-          ? this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1)
-          : this.tree.adapt((b) => {
-              // A block kept from the last pass was sampled at least as finely then (the
-              // budget is shared by more leaves now): only new blocks are sampled.
-              const sub = this.samplesPerCell(b.level, leaves);
-              const seen = sampled.get(b);
-              if (seen && seen.sub >= sub) return seen.ind;
-              const ind = this.indicator(b, surface, sub);
-              sampled.set(b, { sub, ind });
-              return ind;
-            }, c.refineHi, c.refineLo);
-        if (!changed) break;
+        if (levelAt) {
+          if (!this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1)) break;
+          continue;
+        }
+        // A block kept from the last pass was sampled at least as finely then (the budget is
+        // shared by more leaves now): only new blocks are sampled. The indicators of all the
+        // leaves are found first (adapt asks for exactly these), on the workers if there are any.
+        const leaves = this.tree.leaves();
+        const todo: { b: Block; sub: number }[] = [];
+        for (const b of leaves) {
+          const sub = samplesPerCell(c, this.levels, b.level, leaves.length);
+          const seen = sampled.get(b);
+          if (!seen || seen.sub < sub) todo.push({ b, sub });
+        }
+        let values: Float64Array | null = null;
+        if (run && todo.length > 1) values = await run.indicators(todo.map(({ b, sub }) => ({ level: b.level, c: b.c, sub }))).catch(() => ((run = null), null));
+        todo.forEach(({ b, sub }, i) => sampled.set(b, { sub, ind: values ? values[i] : indicator(c, this.dx0, b, surface, sub) }));
+        if (!this.tree.adapt((b) => sampled.get(b)!.ind, c.refineHi, c.refineLo)) break;
       }
       if (levelAt || !strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;
     }
 
     const three = c.ndim === 3;
     const depth = three ? BS : 1;
-    const half = c.problem.box / 2;
-    const u1 = new Float32Array(BS * BS * depth * 4);
-    const u2 = new Float32Array(BS * BS * depth * 4);
     const G = this.speciesGroups;
     const blockCells = BS * BS * depth;
-    const sp = new Float32Array(blockCells * 4 * G);
-    const kc = this.compCoeffs;
-    const km = kc ? new Float32Array(blockCells * 4) : undefined;
-    let mass = 0;
+    const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
+    const leaves = this.tree.leaves();
+    // Each leaf's mass, summed in leaf order at the end, so the total is the same whoever made them.
+    const leafMass = new Float64Array(leaves.length);
     this.solids = false;
     this.nSources = 0;
     d.queue.writeBuffer(this.sources, 0, packSources([]));
-    for (const b of this.tree.leaves()) {
-      const dx = this.dx0 / (1 << b.level);
-      // A magnetic field: the leaf's faces, and their energy in each cell's total.
-      const faces = this.mhd ? blockFaces(c, b, this.dx0, this.levels) : null;
-      let o = 0;
-      for (let k = 0; k < depth; k++)
-        for (let j = 0; j < BS; j++)
-          for (let i = 0; i < BS; i++, o += 4) {
-            const w = fn((b.c[0] * BS + i + 0.5) * dx - half, (b.c[1] * BS + j + 0.5) * dx - half, three ? (b.c[2] * BS + k + 0.5) * dx - half : 0);
-            const p = pressureOf(w);
-            // Where the species set the equation of state, the cell's own.
-            let ce = eos;
-            if (km) {
-              const m = mixMoments(kc!, w.X);
-              km.set(m, o);
-              ce = makeEos(c.eos, c.eosParams, m, hydrogenParticles(c.problem.composition));
-            }
-            const eint = ce.eintFromP(w.rho, p);
-            const mark = cellMark(w);
-            if (mark) this.solids = true;
-            const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
-            mass += w.rho * dx ** c.ndim;
-            u1[o] = w.rho;
-            u1[o + 1] = w.rho * w.vx * go;
-            u1[o + 2] = w.rho * w.vy * go;
-            u1[o + 3] = w.rho * w.vz * go;
-            u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz) * go;
-            if (faces) {
-              const W = BS + 1;
-              const f = (a: number, ii: number, jj: number, kk: number) => faces[4 * ((kk * W + jj) * W + ii) + a];
-              const bx = 0.5 * (f(0, i, j, k) + f(0, i + 1, j, k));
-              const by = 0.5 * (f(1, i, j, k) + f(1, i, j + 1, k));
-              const bz = three ? 0.5 * (f(2, i, j, k) + f(2, i, j, k + 1)) : f(2, i, j, k);
-              u2[o] += 0.5 * (bx * bx + by * by + bz * bz);
-            }
-            u2[o + 1] = eint;
-            u2[o + 2] = w.rho * w.s;
-            u2[o + 3] = mark;
-            if (G) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);
-          }
-      const origin = this.origin(b.slot);
-      if (faces) this.mhd!.writeFaces(origin, faces);
-      const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
-      d.queue.writeTexture({ texture: this.state[0][0], origin }, u1, layout, [BS, BS, depth]);
-      d.queue.writeTexture({ texture: this.state[0][1], origin }, u2, layout, [BS, BS, depth]);
-      if (km) d.queue.writeTexture({ texture: this.comp!, origin }, km, layout, [BS, BS, depth]);
+    const write = (i: number, s: LeafState) => {
+      const origin = this.origin(leaves[i].slot);
+      if (s.faces) this.mhd!.writeFaces(origin, s.faces);
+      d.queue.writeTexture({ texture: this.state[0][0], origin }, s.u1, layout, [BS, BS, depth]);
+      d.queue.writeTexture({ texture: this.state[0][1], origin }, s.u2, layout, [BS, BS, depth]);
+      if (s.km) d.queue.writeTexture({ texture: this.comp!, origin }, s.km, layout, [BS, BS, depth]);
       for (let g = 0; g < G; g++) {
         const og = [origin[0], origin[1], origin[2] + g * this.speciesDepth];
-        d.queue.writeTexture({ texture: this.species[0], origin: og }, sp.subarray(g * blockCells * 4, (g + 1) * blockCells * 4), layout, [BS, BS, depth]);
+        d.queue.writeTexture({ texture: this.species[0], origin: og }, s.sp!.subarray(g * blockCells * 4, (g + 1) * blockCells * 4), layout, [BS, BS, depth]);
       }
+      leafMass[i] = s.mass;
+      if (s.solids) this.solids = true;
+    };
+    let filled = false;
+    if (run && leaves.length > 1) filled = await run.leaves(leaves, write).then(() => true, () => false);
+    if (!filled) {
+      const ctx = { cfg: c, dx0: this.dx0, levels: this.levels, fn, eos, kc: this.compCoeffs, groups: G, mhd: !!this.mhd };
+      leaves.forEach((b, i) => write(i, leafState(ctx, b)));
     }
+    let mass = 0;
+    for (const m of leafMass) mass += m;
     this.cur = 0;
     this.speciesCur = 0;
     this.pending = null;
@@ -1431,8 +1306,10 @@ export class AmrSim implements Simulation {
   private settleEpoch = 0;
   private settling = false;
   get preparing(): boolean {
-    return this.settling || this.compiling;
+    return this.settling || this.compiling || this.resetting;
   }
+  /** reset() is building the initial state (it waits on workers): no steps are taken yet. */
+  private resetting = false;
   /** The update pass is still compiling (a deferred build, see `create`): no steps are taken yet. */
   compiling = false;
   /** Resolves once the update pass is compiled and bound. */

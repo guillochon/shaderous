@@ -184,7 +184,8 @@ export interface Simulation {
   readDiagnostics(): Promise<Diagnostics | null>;
   diagnostics(): Promise<Diagnostics>;
   runToEnd(batch?: number, maxSteps?: number): Promise<number>;
-  reset(): void;
+  /** Load the initial conditions (the adaptive mesh's may wait on workers: amr/init_pool.ts). */
+  reset(): void | Promise<void>;
   /** A star in the initial conditions is still being settled, or a pass compiling: no steps are taken yet. */
   readonly preparing: boolean;
   /** A pass the steps need is still compiling (part of `preparing`). */

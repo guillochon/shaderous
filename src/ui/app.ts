@@ -1632,7 +1632,7 @@ function restartRun(replay = false) {
       setLoadStage(INIT_STAGE);
       await painted();
       sim.cfg = cfg;
-      sim.reset();
+      await sim.reset();
       armCheckpoints(cfg.restart?.time ?? 0);
       clearSources();
       if (replay) running = autoplay;
@@ -1665,7 +1665,7 @@ function rebuildPipelines(resetAfter = false) {
       await sim.buildHydro();
       await renderer.attach(sim);
       if (resetAfter) {
-        sim.reset();
+        await sim.reset();
         armCheckpoints(cfg.restart?.time ?? 0);
         clearSources();
         lastDiag = undefined;
