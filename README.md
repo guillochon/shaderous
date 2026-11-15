@@ -72,7 +72,9 @@ degenerate electrons. It uses the methods of production simulation codes:
 - optically thin cooling, viscosity, thermal conduction, and species carried with the gas,
   whose composition (and each species' own gamma) sets the equation of state cell by cell;
 - nuclear burning from fuel to ash by a single-step Arrhenius reaction, with steady (ZND)
-  detonations as initial conditions and as references.
+  detonations as initial conditions and as references, and of the 13-isotope alpha chain
+  (aprox13's reactions) by a small neural network trained on the reference network's burns
+  (tools/burn), for carbon-oxygen detonations and burning white dwarf collisions.
 
 WebGPU is a graphics interface, and fitting a conservative scheme into it shaped the design.
 No face flux is ever stored: the two cells that share a face compute bit-identical fluxes, so
@@ -87,7 +89,7 @@ run, and for sharing a reproducible setup as a link. It is not a replacement for
 Athena++, FLASH or RAMSES: it runs on one GPU, within the memory the browser allows, and has
 no radiation transport. The state can be exported as Athena++-style HDF5 that
 [yt](https://yt-project.org/) reads directly, and a run can be recorded as an MP4 movie. A
-suite of 62 validation tests runs on your own GPU, in the browser or from the command line.
+suite of 64 validation tests runs on your own GPU, in the browser or from the command line.
 Scripts and AI agents can drive the simulator too: through a JavaScript API in the page, a
 command-line runner for single runs and parameter sweeps, or an MCP server.
 

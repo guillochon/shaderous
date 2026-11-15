@@ -3,6 +3,7 @@ import { COMPOSITIONS } from '../units/composition';
 import { codeG } from '../units/units';
 import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf } from './white_dwarf';
 import type { Eos } from '../eos/eos';
+import { NET_SPECIES } from '../burn/network';
 
 // Stellar collisions: two stars on a parabolic orbit about their common center of mass, set
 // up a little way apart and left to fall together under their own gravity (isolated
@@ -102,4 +103,34 @@ export const wdCollision: Problem = {
   ],
   settle: (p, eos) => dwarfsSettling(scalesOf(eos), placed(p, eos), codeG(WD_UNITS)),
   init: (_n, eos, _ndim, p) => dwarfsInit(scalesOf(eos), placed(p, eos)),
+};
+
+/** Mass fractions of the dwarfs' carbon-oxygen, in the burning network's order. */
+const CO_X = NET_SPECIES.map((s) => (s === 'c12' || s === 'o16' ? 0.5 : 0));
+
+// The same collision with nuclear burning: the 13 isotopes of the alpha chain carried with the
+// gas, and burned by the trained network (burn/network.ts) wherever the gas is hotter than
+// 1e8 K and denser than 1e4 g/cm^3. The equation of state follows each cell's composition. The
+// default is the head-on collision of two 0.64 M_sun dwarfs, which detonates on contact in
+// simulations that resolve it (Raskin et al. 2010; Kushnir et al. 2013): the shocked gas where
+// they meet burns carbon, and a detonation runs back into both stars, leaving iron-group and
+// intermediate-mass ash.
+export const wdCollisionBurning: Problem = {
+  ...wdCollision,
+  id: 'wd-collision-burning',
+  label: 'White dwarf collision with burning',
+  blurb:
+    'Two carbon-oxygen white dwarfs colliding, with nuclear burning: a trained neural network of the 13-isotope alpha chain (aprox13) burns the shocked gas. Head-on, two 0.64 M☉ dwarfs detonate where they meet. Masses in solar masses; the impact parameter is the pericenter distance over the sum of the radii (0 is head-on).',
+  species: NET_SPECIES,
+  burn: (p) => ({ network: 'aprox13', inShocks: p.shockburn > 0.5 }),
+  params: [
+    { id: 'm1', label: 'Mass 1 (M☉)', title: 'Mass of the first white dwarf, in solar masses (carbon-oxygen white dwarfs are 0.5 to 1.3). Changing it starts the run again', value: 0.64, min: 0.5, max: 1.3, step: 0.01 },
+    { id: 'm2', label: 'Mass 2 (M☉)', title: 'Mass of the second white dwarf, in solar masses. Changing it starts the run again', value: 0.64, min: 0.5, max: 1.3, step: 0.01 },
+    { id: 'b', label: 'Impact parameter', title: 'Pericenter distance of the parabolic orbit over the sum of the two radii: 0 is head-on, 1 just grazes. Changing it starts the run again', value: 0, min: 0, max: 1.5, step: 0.1 },
+    { id: 'shockburn', label: 'Burn inside shocks', title: 'Let cells the shock detector flags burn (1) or not (0). Off, as in most supernova codes: a captured shock is a few cells of numerical smearing. Changing it starts the run again', value: 0, min: 0, max: 1, step: 1 },
+  ],
+  init: (n, eos, ndim, p) => {
+    const at = wdCollision.init(n, eos, ndim, p);
+    return (x, y, z) => ({ ...at(x, y, z), X: CO_X });
+  },
 };

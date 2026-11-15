@@ -1,7 +1,7 @@
 import type { Eos, EosKind, EosParams } from '../eos/eos';
 import type { Settling, StarSpec } from './settle';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
-import type { BurnSpec } from '../burn/burn';
+import type { AnyBurnSpec } from '../burn/burn';
 import type { UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
 
@@ -245,10 +245,12 @@ export interface Problem {
   cooling?: CoolingKind;
   coolParams?: Partial<CoolingParams>;
   /**
-   * Nuclear burning of one species into another (burn/burn.ts), from the preset's parameters:
-   * a pass after the species pass on either grid. Needs the two species in `species`.
+   * Nuclear burning, from the preset's parameters: a pass after the species pass on either
+   * grid. One reaction of one species into another (burn/burn.ts; needs the two species in
+   * `species`), or the trained network of the alpha chain (burn/network.ts; needs its 13
+   * species, in its order, and physical units).
    */
-  burn?: (params: Record<string, number>) => BurnSpec;
+  burn?: (params: Record<string, number>) => AnyBurnSpec;
   /**
    * A damping zone (hydro/damping.wgsl). `wgsl` defines `const DAMPING = true;` and
    * `fn damping_target(x: vec3<f32>) -> DampTarget`, the state the gas at `x` (relative to the

@@ -9,6 +9,9 @@ import { bindGroup, computePipeline, type Bindable } from '../gpu/device';
 import { assemble } from '../gpu/shaders';
 import { speciesConst } from '../species/species';
 import type { Eos } from '../eos/eos';
+import { NetBurnPass, netUnits, type NetworkBurnSpec } from './network';
+import type { Composition } from '../units/composition';
+import type { UnitSystem } from '../units/units';
 
 /** What a problem burns, from its parameters (Problem.burn). */
 export interface BurnSpec {
@@ -28,6 +31,11 @@ export interface BurnSpec {
    */
   inShocks?: boolean;
 }
+
+/** What a problem burns: one reaction (BurnSpec) or the trained network (burn/network.ts). */
+export type AnyBurnSpec = BurnSpec | NetworkBurnSpec;
+
+export const isNetworkBurn = (s: AnyBurnSpec): s is NetworkBurnSpec => 'network' in s;
 
 /** Substeps of hydro/burn.wgsl. */
 export const BURN_SUBSTEPS = 8;
@@ -128,6 +136,28 @@ export interface BurnTargets {
   species: GPUTexture[];
   /** the predictor's second texture: (p, scalar, shock flag, first order) */
   pb: GPUTexture;
+  /** the composition moments' texture, where the species set the equation of state */
+  comp?: GPUTexture;
+}
+
+/** A burn pass on one grid, of either kind. */
+export interface Burner {
+  encode(pass: GPUComputePassEncoder, s: number, q: number): void;
+  destroy(): void;
+}
+
+/** The problem's side of a burn pass: its species, and for the network its units and composition. */
+export interface BurnProblem {
+  species?: readonly string[];
+  units?: UnitSystem;
+  composition?: Composition;
+}
+
+/** The burn pass for a spec of either kind. */
+export async function createBurnPass(d: GPUDevice, spec: AnyBurnSpec, p: BurnProblem, t: BurnTargets): Promise<Burner> {
+  if (isNetworkBurn(spec)) return NetBurnPass.create(d, spec, p.species, netUnits(p.units, p.composition), t);
+  if (t.comp) throw new Error('burning one reaction with species that set the equation of state is not supported');
+  return BurnPass.create(d, spec, p.species, t);
 }
 
 /** The species indices of a burn, checked against the problem's species. */

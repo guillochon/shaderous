@@ -37,7 +37,7 @@ const copyFailing = document.getElementById('copy-failing') as HTMLButtonElement
  */
 const GROUPS: { name: string; ids: string[] }[] = [
   { name: 'Hydrodynamics', ids: ['sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'rayleigh-taylor', 'low-mach', 'well-balanced', 'advection', 'advection-accuracy', 'flux-determinism', 'reflecting-box', 'two-dimensional'] },
-  { name: 'Species, equations of state and burning', ids: ['species', 'species-eos', 'shock-bubble', 'detonation', 'eos'] },
+  { name: 'Species, equations of state and burning', ids: ['species', 'species-eos', 'shock-bubble', 'detonation', 'burn-network', 'eos'] },
   { name: 'Cooling and diffusion', ids: ['cooling', 'viscosity', 'conduction'] },
   { name: 'Gravity and point masses', ids: ['sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption', 'point-mass-sink', 'binary-orbit', 'point-mass-encounter'] },
   { name: 'Adaptive mesh', ids: TESTS.map((t) => t.id).filter((id) => id.startsWith('amr-')) },

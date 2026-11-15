@@ -23,8 +23,8 @@ import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
-import { BurnPass, burnIndicator, burnIndices, flagBurnSlot } from '../burn/burn';
-import { cellMark, isSelfGravity, PERIODIC } from '../problems/types';
+import { burnIndicator, burnIndices, createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
+import { cellMark, isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
 import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
@@ -135,7 +135,7 @@ export class AmrSim implements Simulation {
   /** per pipeline (assemble, predict, move, regrid): [state parity][species parity] */
   private gSpecies: GPUBindGroup[][][] = [];
   /** Burning of fuel to ash (burn/burn.ts), over the whole atlas after the species pass; none without. */
-  private burn?: BurnPass;
+  private burn?: Burner;
   private idx: GPUTexture;
   private params: GPUBuffer;
   private clock: GPUBuffer;
@@ -461,7 +461,8 @@ export class AmrSim implements Simulation {
     // With burning, also how fast it burns (burn/burn.ts).
     const burn = burnSpec(cfg);
     const flagSlots: Record<string, string> = { flag_species: flagSpeciesSlot(sim.speciesGroups, sim.speciesDepth) };
-    if (burn) Object.assign(flagSlots, { flag_burn: flagBurnSlot(burn, cfg.problem.species), eos: hydroSlots(cfg).eos });
+    // (The network's fronts are refined on the jumps in its species alone.)
+    if (burn && !isNetworkBurn(burn)) Object.assign(flagSlots, { flag_burn: flagBurnSlot(burn, cfg.problem.species), eos: hydroSlots(cfg).eos });
     const spec = debrisSpec(cfg);
     if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     // 3D: self-gravity machinery is built for every run, so gravity can be switched on later.
@@ -754,12 +755,11 @@ export class AmrSim implements Simulation {
     this.burn = undefined;
     const burn = burnSpec(this.cfg);
     if (burn) {
-      if (this.comp) throw new Error('burning with species that set the equation of state is not supported');
       const t = this.state[0][0];
       // Every texel of the atlas: the pass is pointwise, and copies what it does not burn.
-      this.burn = await BurnPass.create(d, burn, this.cfg.problem.species, {
+      this.burn = await createBurnPass(d, burn, { ...this.cfg.problem, units: problemUnits(this.cfg.problem, this.cfg.params) }, {
         dims: [t.width, t.height, t.depthOrArrayLayers], stride: this.speciesDepth, groups: this.speciesGroups, slots: hydroSlots(this.cfg),
-        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1],
+        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], comp: this.comp,
       });
     }
   }
@@ -1212,7 +1212,8 @@ export class AmrSim implements Simulation {
       return SPECIES_JUMP_SCALE * j;
     };
     // How fast it burns, against the block's cells (burnIndicator, as amr/flag.wgsl).
-    const burn = burnSpec(this.cfg);
+    const spec = burnSpec(this.cfg);
+    const burn = spec && !isNetworkBurn(spec) ? spec : null;
     const fuel = burn ? xs[burnIndices(burn, this.cfg.problem.species)[0]] : null;
     const eos = burn ? makeEos(this.cfg.eos, this.cfg.eosParams) : null;
     for (let k = three ? sub : 0; k < (three ? m - sub : 1); k++)

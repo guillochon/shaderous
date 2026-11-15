@@ -1,6 +1,8 @@
 // Validation suite (plan section 7). Runs in the page against the real GPU; driven by
 // validate.html interactively and by Playwright in tests/gpu.
 import { assemble } from '../gpu/shaders';
+import { netFeatures, netSlot, netStep, netWeights } from '../burn/network';
+import NET_CASES from '../burn/aprox13_net_cases.json';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { configFor, PARAM_BYTES, Sim, type Diagnostics, type RiemannKind, type SimConfig } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
@@ -1925,6 +1927,54 @@ export const TESTS: TestDef[] = [
         });
       }
       return { pass, metrics };
+    },
+  },
+  {
+    id: 'burn-network',
+    name: 'Burning network on the GPU (13-isotope alpha chain)',
+    criterion: 'One step of the trained network (hydro/burn_net_core.wgsl, single precision) on 48 states from held-out burns: its inputs within 1e-3 of the float64 mirror, and its change in composition within 2% (L1) of the mirror',
+    async run(gpu) {
+      const d = gpu.device;
+      const cases = NET_CASES as { logRho: number; logT: number; logDt: number; X: number[] }[];
+      const STRIDE = 128;
+      const inData = new Float32Array(cases.length * 16);
+      cases.forEach((c, k) => inData.set([c.logRho, c.logT, c.logDt, ...c.X], k * 16));
+      const buf = (size: number, usage: number) => d.createBuffer({ size, usage });
+      const inBuf = buf(inData.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      d.queue.writeBuffer(inBuf, 0, inData);
+      const bytes = cases.length * STRIDE * 4;
+      const outBuf = buf(bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+      const readBuf = buf(bytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+      const w = netWeights();
+      const wBuf = buf(w.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      d.queue.writeBuffer(wBuf, 0, w as Float32Array<ArrayBuffer>);
+      const pipe = await computePipeline(d, assemble('burn/net_test.wgsl', { burn_net: netSlot() }), 'burn network test');
+      const enc = d.createCommandEncoder();
+      const pass_ = enc.beginComputePass();
+      pass_.setPipeline(pipe);
+      pass_.setBindGroup(0, bindGroup(d, pipe, { 1: inBuf, 2: outBuf, 10: wBuf }));
+      pass_.dispatchWorkgroups(Math.ceil(cases.length / 64));
+      pass_.end();
+      enc.copyBufferToBuffer(outBuf, 0, readBuf, 0, bytes);
+      d.queue.submit([enc.finish()]);
+      await readBuf.mapAsync(GPUMapMode.READ);
+      const out = new Float32Array(readBuf.getMappedRange().slice(0));
+      readBuf.unmap();
+      [inBuf, outBuf, readBuf, wBuf].forEach((b) => b.destroy());
+      let feat = 0;
+      let step = 0;
+      cases.forEach((c, k) => {
+        const o = k * STRIDE;
+        const f = netFeatures(c.logRho, c.logT, c.logDt, c.X);
+        f.forEach((v, i) => (feat = Math.max(feat, Math.abs(out[o + 13 + i] - v))));
+        const D = netStep(c.logRho, c.logT, c.logDt, c.X);
+        const size = D.reduce((s, x) => s + Math.abs(x), 0);
+        const err = D.reduce((s, x, i) => s + Math.abs(out[o + i] - x), 0);
+        const rel = err / (size + 1e-6);
+        if (rel > 0.02) console.log(`burn-network case ${k}: L1 error ${err.toExponential(2)} of ${size.toExponential(2)}`);
+        step = Math.max(step, rel);
+      });
+      return { pass: feat < 1e-3 && step < 0.02, metrics: { inputs_max_abs: feat, step_max_rel_l1: step } };
     },
   },
   {

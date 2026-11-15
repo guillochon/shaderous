@@ -47,6 +47,11 @@ export const SPECIES = {
   mg24: { name: 'mg24', A: 24, Z: 12 },
   si28: { name: 'si28', A: 28, Z: 14 },
   s32: { name: 's32', A: 32, Z: 16 },
+  ar36: { name: 'ar36', A: 36, Z: 18 },
+  ca40: { name: 'ca40', A: 40, Z: 20 },
+  ti44: { name: 'ti44', A: 44, Z: 22 },
+  cr48: { name: 'cr48', A: 48, Z: 24 },
+  fe52: { name: 'fe52', A: 52, Z: 26 },
   fe56: { name: 'fe56', A: 56, Z: 26 },
   ni56: { name: 'ni56', A: 56, Z: 28 },
   /**

@@ -17,7 +17,8 @@ import { mriDisk } from './mri_disk';
 import { thermalInstability } from './thermal_instability';
 import { isothermalCollapse } from './isothermal';
 import { empty } from './empty';
-import { wdCollision } from './stellar_collision';
+import { wdCollision, wdCollisionBurning } from './stellar_collision';
+import { coDetonation } from './co_detonation';
 import { whiteDwarfStar } from './white_dwarf_star';
 import { alfvenWave, brioWu, fieldLoop, fieldLoopDense, mhdBlast, mhdRotor, orszagTang } from './mhd';
 
@@ -77,6 +78,7 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
           { label: 'Stable', problem: detonationStable },
           { label: 'Pulsating', problem: detonationPulsating },
           { label: 'Cellular (2D)', problem: detonationCellular },
+          { label: 'Carbon–oxygen (network)', problem: coDetonation },
         ],
       },
     ],
@@ -97,7 +99,14 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
       single(evrard),
       single(sphere),
       single(isothermalCollapse),
-      { id: 'stellar-collision', label: 'Stellar collision', variants: [{ label: 'White dwarfs (C/O)', problem: wdCollision }] },
+      {
+        id: 'stellar-collision',
+        label: 'Stellar collision',
+        variants: [
+          { label: 'White dwarfs (C/O)', problem: wdCollision },
+          { label: 'White dwarfs, burning', problem: wdCollisionBurning },
+        ],
+      },
     ],
   },
   {
