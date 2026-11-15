@@ -60,7 +60,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var x: array<vec4<f32>, NG>;
   var sum = 0.0;
   for (var g = 0u; g < NG; g++) {
-    x[g] = textureLoad(S, c + vec3<i32>(0, 0, i32(g) * stride), 0);
+    x[g] = textureLoad(S, c + species_group(i32(g), stride), 0);
     sum += dot(max(x[g], vec4<f32>(0.0)), vec4<f32>(1.0));
   }
   let rho = u1.x;
@@ -117,6 +117,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   textureStore(O1, c, u1);
   textureStore(O2, c, u2);
-  for (var g = 0u; g < NG; g++) { textureStore(SO, c + vec3<i32>(0, 0, i32(g) * stride), x[g]); }
+  for (var g = 0u; g < NG; g++) { textureStore(SO, c + species_group(i32(g), stride), x[g]); }
   if (COMP) { comp_store(c, comp_moments(x)); }
 }

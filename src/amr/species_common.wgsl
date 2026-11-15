@@ -10,5 +10,5 @@
 #include "hydro/species_slopes.wgsl"
 
 fn sp(c: vec3<i32>, g: u32) -> vec3<i32> {
-  return c + vec3<i32>(0, 0, i32(g) * SP_DEPTH);
+  return c + species_group(i32(g), SP_DEPTH);
 }

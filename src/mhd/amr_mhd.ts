@@ -11,7 +11,7 @@
 // substep steps every leaf (encodeFull()) and the others the leaves of the GPU's lists
 // (encodeSubstep(), docs/mhd-plan.md section 5b).
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, readTexture } from '../gpu/device';
+import { bindGroup, computePipeline, readTexture, type Bindable } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { BS, type Block } from '../amr/tree';
@@ -48,8 +48,8 @@ interface Deps {
   bh: GPUBuffer;
   /** the hydro atlas's primitives W1 and W2, which the assembly writes (a run with a field has no other use for them) */
   prim: GPUTexture[];
-  /** with species: the leaves' face mass fluxes the species pass reads (amr/species.wgsl) */
-  massFlux?: GPUBuffer;
+  /** with species: the leaves' face mass fluxes the species pass reads, as two windows (amr/species_index.wgsl) */
+  massFlux?: { lo: Bindable; hi: Bindable };
   cfg: SimConfig;
   cap: number;
   /** a new atlas texture the size of the state's */
@@ -329,7 +329,8 @@ export class AmrMhd {
               ...c0, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
               6: this.scratch, 7: this.register, 8: v(this.emf), ...outs, 13: v(this.comps[o]), 14: c,
               15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
-              12: this.dep.massFlux ?? this.noFlux(),
+              12: this.dep.massFlux?.lo ?? this.noFlux(0),
+              32: this.dep.massFlux?.hi ?? this.noFlux(1),
             }),
           );
         return {
@@ -380,11 +381,14 @@ export class AmrMhd {
     this.encodeCommitFaces(pass, parity);
   }
 
-  /** Without species, the update's mass-flux binding: one word that nothing reads. */
-  private placeholderFlux?: GPUBuffer;
-  private noFlux(): GPUBuffer {
-    this.placeholderFlux ??= this.dep.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
-    return this.placeholderFlux;
+  /**
+   * Without species, the update's two mass-flux bindings (MF and MF_HI): a few words that nothing
+   * reads, two buffers since a pass may not bind one buffer twice for writing.
+   */
+  private placeholderFlux: GPUBuffer[] = [];
+  private noFlux(i: 0 | 1): GPUBuffer {
+    this.placeholderFlux[i] ??= this.dep.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
+    return this.placeholderFlux[i];
   }
 
   /** Every leaf's faces (and compensations) from the other parity into `parity`. */

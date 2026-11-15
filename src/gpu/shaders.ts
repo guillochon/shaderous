@@ -21,6 +21,8 @@ const DEFAULT_SLOTS: Slots = {
   flag_burn: 'fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 { return 0.0; }\n',
   // MHD edge fields (mhd/corner.wgsl): Gardiner & Stone's mean unless mhd/mhd.ts picks another.
   edge_mode: 'const EDGE_MODE: u32 = 0u;\n',
+  // Face mass flux records in one window (amr/species_index.wgsl) unless AmrSim splits them.
+  mf_split: 'const MF_SPLIT: u32 = 0xffffffffu;\n',
 };
 
 export function assemble(entry: string, slots: Slots = {}): string {

@@ -202,7 +202,7 @@ const COMP_SP_DEPTH: i32 = ${depth};
 
 fn comp_rhox_leaf(slot: i32, l: vec3<i32>, u: ptr<function, array<vec4<f32>, COMP_NG>>) {
   let c = atl(blk_origin(slot), l);
-  for (var g = 0u; g < COMP_NG; g++) { (*u)[g] += textureLoad(SC, c + vec3<i32>(0, 0, i32(g) * COMP_SP_DEPTH), 0); }
+  for (var g = 0u; g < COMP_NG; g++) { (*u)[g] += textureLoad(SC, c + species_group(i32(g), COMP_SP_DEPTH), 0); }
 }
 
 fn comp_rhox(slot: i32, l: vec3<i32>) -> array<vec4<f32>, COMP_NG> {

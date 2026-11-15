@@ -38,7 +38,7 @@ fn mass_fraction(c: vec3<i32>) -> f32 {
   var sum = 0.0;
   var mine = 0.0;
   for (var g = 0u; g < V.sp.z; g++) {
-    let u = textureLoad(S, c + vec3<i32>(0, 0, i32(g * V.sp.y)), 0);
+    let u = textureLoad(S, c + species_group(i32(g), i32(V.sp.y)), 0);
     sum += dot(u, vec4<f32>(1.0));
     if (g == V.sp.x / 4u) { mine = u[V.sp.x % 4u]; }
   }

@@ -2,7 +2,8 @@
 //
 // They are stored apart from the hydrodynamic state, as rho X_i in groups of four: an
 // rgba32float texture whose groups are stacked along z (group g of cell (x, y, z) is the texel
-// (x, y, z + g nz)). The hydro passes never touch them. The update records the mass flux
+// (x, y, z + g nz)), and along y too past 2048 texels (speciesGroupOffset). The hydro passes
+// never touch them. The update records the mass flux
 // through every face (hydro/species_on.wgsl), and a pass of its own then moves every species
 // with it (hydro/species.wgsl), so a problem without species pays nothing and one with many
 // pays only for that pass.
@@ -21,6 +22,28 @@ export function speciesLabel(name: string): string {
 
 /** How many groups of four a problem's species fill (0 without species). */
 export const speciesGroups = (p: Pick<Problem, 'species'>): number => Math.ceil((p.species?.length ?? 0) / SPECIES_PER_GROUP);
+
+/** The deepest a species atlas's stack of groups goes along z: the 3D texture size WebGPU guarantees. */
+const GROUP_STACK = 2048;
+
+/**
+ * Where group g sits in a species atlas whose groups are `stride` texels apart, as the shaders
+ * place it (hydro/common.wgsl, species_group): stacked along z as far as GROUP_STACK texels,
+ * then in further stacks along y, `stride` texels on. Up to that depth it is (0, 0, g stride),
+ * as it always was; a 3D adaptive mesh's 13 species (four groups) of 35^3 blocks need two stacks.
+ */
+export function speciesGroupOffset(g: number, stride: number): [number, number, number] {
+  const gz = Math.max(1, Math.floor(GROUP_STACK / stride));
+  return [0, Math.floor(g / gz) * stride, (g % gz) * stride];
+}
+
+/** The size of a species atlas of `groups` groups `stride` texels apart, over a [w, h, stride] atlas. */
+export function speciesAtlasSize(w: number, h: number, stride: number, groups: number): [number, number, number] {
+  const gz = Math.max(1, Math.floor(GROUP_STACK / stride));
+  const stacks = Math.ceil(groups / gz);
+  // More than one stack lies along y, `stride` texels apart: a 3D atlas, as tall as it is deep.
+  return [w, stacks > 1 ? stacks * stride : h, Math.min(groups, gz) * stride];
+}
 
 /**
  * The `species` slot of the update shaders: whether they record face mass fluxes, and where.
@@ -52,7 +75,7 @@ fn species_indicator(c: vec3<i32>) -> f32 {
   var jump = vec4<f32>(0.0);
   let axes = select(3, 2, is2d());
   for (var g = 0u; g < FLAG_NG; g++) {
-    let o = vec3<i32>(0, 0, i32(g) * FLAG_SP_DEPTH);
+    let o = species_group(i32(g), FLAG_SP_DEPTH);
     let x0 = textureLoad(SXF, c + o, 0);
     for (var a = 0; a < axes; a++) {
       var e = vec3<i32>(0);

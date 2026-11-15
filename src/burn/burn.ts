@@ -105,7 +105,7 @@ export function flagBurnSlot(spec: BurnSpec, species: readonly string[] | undefi
 fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 {
   let rho = textureLoad(W1, c, 0).x;
   let w2 = textureLoad(W2, c, 0);
-  let f = textureLoad(SXF, c + vec3<i32>(0, 0, ${fi >> 2} * FLAG_SP_DEPTH), 0)[${fi & 3}];
+  let f = textureLoad(SXF, c + species_group(${fi >> 2}, FLAG_SP_DEPTH), 0)[${fi & 3}];
   let e = w2.w;
   let cs = w2.y;
   if (!(f > 0.0 && e > 0.0 && cs > 0.0 && rho > 0.0)) { return 0.0; }

@@ -31,7 +31,7 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
 import { FLAT_ROWS, interior3d, padded3d } from './dispatch';
-import { flagSpeciesSlot, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
+import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
 import { AmrMhd, maxBinding, MHD_BLOCK_BYTES, registerBytes } from '../mhd/amr_mhd';
@@ -48,6 +48,10 @@ const MAX_STEPS_AHEAD = 24;
 const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
+/** The first window of the face mass flux records: a binding's largest size, aligned for the second's offset. */
+const massFluxWindowBytes = (d: GPUDevice) => Math.floor(d.limits.maxStorageBufferBindingSize / d.limits.minStorageBufferOffsetAlignment) * d.limits.minStorageBufferOffsetAlignment;
+/** Most bytes of face mass flux records: two windows, in a buffer no larger than a buffer may be. */
+const massFluxMaxBytes = (d: GPUDevice) => Math.min(d.limits.maxBufferSize, massFluxWindowBytes(d) + d.limits.maxStorageBufferBindingSize);
 /** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
 const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
@@ -134,6 +138,16 @@ export class AmrSim implements Simulation {
   private speciesX?: GPUTexture;
   private speciesHalf?: GPUTexture;
   private massFlux?: GPUBuffer;
+  /**
+   * The face mass flux records as the shaders bind them (amr/species_index.wgsl): MF (binding 7
+   * in the species pass, 12 in the updates) the first window, MF_HI (32) the rest, and the
+   * index of the first record past the first window (MF_SPLIT). A mesh whose records fit in one
+   * binding has the whole buffer as MF and a placeholder as MF_HI, never read.
+   */
+  massFluxWindows: { lo: Bindable; hi: Bindable; split: number } | null = null;
+  private get mfSplitSlot(): string {
+    return `const MF_SPLIT: u32 = ${this.massFluxWindows?.split ?? 0xffffffff}u;\n`;
+  }
   private pSpecies: GPUComputePipeline[] = [];
   /** per pipeline (assemble, predict, move, regrid): [state parity][species parity] */
   private gSpecies: GPUBindGroup[][][] = [];
@@ -314,8 +328,9 @@ export class AmrSim implements Simulation {
     let fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined));
     // A magnetic field's flux register is one buffer of a few kB per block: no more blocks than it may hold.
     if (cfg.problem.mhd) fit = Math.min(fit, Math.floor(maxBinding(d) / registerBytes(cfg.ndim)));
-    // So with species, whose face mass fluxes are one buffer of some 59 kB per block in 3D.
-    if (this.speciesGroups > 0) fit = Math.min(fit, Math.floor(maxBinding(d) / speciesFaceBytes(cfg.ndim)));
+    // With species, the face mass fluxes are one buffer of some 59 kB per block in 3D, bound as
+    // two windows of at most a binding's size each (massFluxWindows).
+    if (this.speciesGroups > 0) fit = Math.min(fit, Math.floor(massFluxMaxBytes(d) / speciesFaceBytes(cfg.ndim)));
     // Where the atlas textures cannot be render attachments, WebGPU zero-fills each on first use
     // through one staging buffer of its size, which may be no larger than a buffer may be (4 GiB
     // on NVIDIA; see tex3d in gpu/device.ts): a 35^3-block atlas's 5.5 GB textures lost the
@@ -327,6 +342,12 @@ export class AmrSim implements Simulation {
       // 3D passes over the blocks, self-gravity's multigrid's too, run in slabs along z
       // (amr/dispatch.ts), so the dispatch limit does not bound the blocks.
       this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
+      // With species, their atlas's stacks of groups must fit a texture's sides too (thirteen
+      // species, four groups: 51^3 blocks).
+      if (this.speciesGroups > 0) {
+        const fits = (s: number) => Math.max(...speciesAtlasSize(s * PAD, s * PAD, s * PAD, this.speciesGroups).slice(1)) <= gpu.limits.maxTextureDimension3D;
+        while (this.slotsPerSide > 1 && !fits(this.slotsPerSide)) this.slotsPerSide--;
+      }
       this.layers = this.slotsPerSide;
     } else {
       const want = Math.min(explicit || Math.max(full, roots * 2, 144), Math.max(1, fit));
@@ -351,15 +372,22 @@ export class AmrSim implements Simulation {
     const G = this.speciesGroups;
     if (G > 0) {
       this.speciesDepth = this.layers * (cfg.ndim === 2 ? 1 : PAD);
-      const depth = this.speciesDepth * G;
-      if (depth > d.limits.maxTextureDimension3D) {
-        throw new Error(`${cfg.problem.species!.length} species need an atlas ${depth} texels deep, more than this GPU allows (${d.limits.maxTextureDimension3D}): pick a lower resolution`);
+      // The groups stack along z, and past 2048 texels in further stacks along y (species/species.ts).
+      const [, sy, sz] = speciesAtlasSize(side, side, this.speciesDepth, G);
+      if (Math.max(sy, sz) > d.limits.maxTextureDimension3D) {
+        throw new Error(`${cfg.problem.species!.length} species need an atlas ${sy} x ${sz} texels, more than this GPU allows (${d.limits.maxTextureDimension3D}): pick a lower resolution`);
       }
-      const ts = (label: string) => tex3d(d, side, 'rgba32float', label, depth);
+      const ts = (label: string) => tex3d(d, side, 'rgba32float', label, sz, sy);
       this.species = [ts('species 0'), ts('species 1')];
       this.speciesX = ts('species fractions');
       this.speciesHalf = ts('species half step');
-      this.massFlux = d.createBuffer({ label: 'face mass fluxes', size: this.cap * speciesFaceBytes(cfg.ndim), usage: GPUBufferUsage.STORAGE });
+      const bytes = this.cap * speciesFaceBytes(cfg.ndim);
+      this.massFlux = d.createBuffer({ label: 'face mass fluxes', size: bytes, usage: GPUBufferUsage.STORAGE });
+      const window = massFluxWindowBytes(d);
+      this.massFluxWindows =
+        bytes <= window
+          ? { lo: this.massFlux, hi: d.createBuffer({ label: 'face mass fluxes (no second window)', size: 256, usage: GPUBufferUsage.STORAGE }), split: 0xffffffff }
+          : { lo: { buffer: this.massFlux, offset: 0, size: window }, hi: { buffer: this.massFlux, offset: window, size: bytes - window }, split: window / 4 };
       if (this.compCoeffs) this.comp = t('composition');
     }
     const m = nr << this.levels;
@@ -520,7 +548,7 @@ export class AmrSim implements Simulation {
         texture: (label, format = 'rgba32float') => tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
         prim: sim.prim,
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg,
-        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFlux,
+        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFluxWindows ?? undefined,
         bins: { A: sim.bins, LL: sim.listEnd, LU: sim.listUpd, LD: sim.listDep, args: sim.binArgs },
       });
     }
@@ -567,6 +595,7 @@ export class AmrSim implements Simulation {
       mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl',
       species: this.speciesGroups > 0 ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
       comp_src: compSrcSlot(this.compCoeffs, this.speciesDepth),
+      mf_split: this.mfSplitSlot,
     };
   }
 
@@ -734,7 +763,7 @@ export class AmrSim implements Simulation {
   private async buildSpecies() {
     const d = this.device;
     const v = (t: GPUTexture) => t.createView();
-    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n`, comp: hydroSlots(this.cfg).comp };
+    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n`, comp: hydroSlots(this.cfg).comp, mf_split: this.mfSplitSlot };
     const kout = (this.comp ? { 26: v(this.comp) } : {}) as Record<number, GPUTextureView>;
     const kflag = (this.comp ? { 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>;
     this.pSpecies = await Promise.all(
@@ -754,7 +783,7 @@ export class AmrSim implements Simulation {
       per((p, q) =>
         bindGroup(d, pM, {
           0: this.params, 1: this.clock, 3: v(this.state[p][1]), 4: v(this.state[1 - p][0]), 5: v(this.species[q]), 6: v(this.species[1 - q]),
-          7: this.massFlux!, 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf, ...kout, ...kflag,
+          7: this.massFluxWindows!.lo, 32: this.massFluxWindows!.hi, 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf, ...kout, ...kflag,
         }),
       ),
       // Re-meshing goes from the state of parity p to the other.
@@ -811,7 +840,7 @@ export class AmrSim implements Simulation {
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 20: this.bh, 30: this.bt, 31: list,
       ...bin,
       ...this.compIn,
-      ...((this.massFlux ? { 12: this.massFlux } : {}) as Record<number, GPUBuffer>),
+      ...((this.massFluxWindows ? { 12: this.massFluxWindows.lo, 32: this.massFluxWindows.hi } : {}) as Record<number, Bindable>),
       ...(this.debrisBuf?.bindings(this.bh) ?? {}),
     });
   }
@@ -1263,7 +1292,8 @@ export class AmrSim implements Simulation {
       d.queue.writeTexture({ texture: this.state[0][1], origin }, s.u2, layout, [BS, BS, depth]);
       if (s.km) d.queue.writeTexture({ texture: this.comp!, origin }, s.km, layout, [BS, BS, depth]);
       for (let g = 0; g < G; g++) {
-        const og = [origin[0], origin[1], origin[2] + g * this.speciesDepth];
+        const go = speciesGroupOffset(g, this.speciesDepth);
+        const og = [origin[0] + go[0], origin[1] + go[1], origin[2] + go[2]];
         d.queue.writeTexture({ texture: this.species[0], origin: og }, s.sp!.subarray(g * blockCells * 4, (g + 1) * blockCells * 4), layout, [BS, BS, depth]);
       }
       leafMass[i] = s.mass;
@@ -2201,12 +2231,12 @@ export class AmrSim implements Simulation {
 
   /**
    * Boxes of `w` texels per side (w^3; w^2 in 2D) at the first interior cell of each block's
-   * slot in an atlas texture (offset `zOffset` texels along z, for the species' groups), packed
+   * slot in an atlas texture (offset by `offset` texels, for the species' groups), packed
    * block by block as [z][y][x][channel]. Each box is copied on its own, into staging buffers
    * of at most READ_CHUNK_BYTES: a whole atlas texture of a large mesh is several GB, more
    * than the browser maps at once.
    */
-  private async readBoxes(tex: GPUTexture, blocks: Block[], channels: 1 | 4, w = BS, zOffset = 0): Promise<Float32Array> {
+  private async readBoxes(tex: GPUTexture, blocks: Block[], channels: 1 | 4, w = BS, offset: readonly number[] = [0, 0, 0]): Promise<Float32Array> {
     const d = this.device;
     const depth = this.cfg.ndim === 2 ? 1 : w;
     const rowBytes = w * channels * 4;
@@ -2223,7 +2253,7 @@ export class AmrSim implements Simulation {
       const enc = d.createCommandEncoder();
       part.forEach((b, i) => {
         const o = this.origin(b.slot);
-        enc.copyTextureToBuffer({ texture: tex, origin: [o[0], o[1], o[2] + zOffset] }, { buffer: buf, offset: i * perBlock, bytesPerRow, rowsPerImage: w }, [w, w, depth]);
+        enc.copyTextureToBuffer({ texture: tex, origin: [o[0] + offset[0], o[1] + offset[1], o[2] + offset[2]] }, { buffer: buf, offset: i * perBlock, bytesPerRow, rowsPerImage: w }, [w, w, depth]);
       });
       d.queue.submit([enc.finish()]);
       await buf.mapAsync(GPUMapMode.READ);
@@ -2281,7 +2311,7 @@ export class AmrSim implements Simulation {
     const tex = this.species[this.speciesCur];
     // Each group of four species is a stack of the atlas's depth along z.
     const raw: Float32Array[] = [];
-    for (let g = 0; g < G; g++) raw.push(await this.readBoxes(tex, leaves, 4, BS, g * this.speciesDepth));
+    for (let g = 0; g < G; g++) raw.push(await this.readBoxes(tex, leaves, 4, BS, speciesGroupOffset(g, this.speciesDepth)));
     const depth = this.cfg.ndim === 3 ? BS : 1;
     const count = leaves.length * BS * BS * depth;
     const ns = this.cfg.problem.species!.length;
@@ -2520,6 +2550,7 @@ export class AmrSim implements Simulation {
     this.speciesHalf?.destroy();
     this.burn?.destroy();
     this.massFlux?.destroy();
+    if (this.massFluxWindows && this.massFluxWindows.hi instanceof GPUBuffer) this.massFluxWindows.hi.destroy();
     this.debrisBuf?.destroy();
     for (const b of [this.bins, this.binsB, this.listAct, this.listUpd, this.listEnd, this.listDep, this.binCnt, this.binArgs, this.binStaging]) b.destroy();
     this.grav?.destroy();

@@ -88,6 +88,15 @@ fn kahan3(s: vec3<f32>, c: vec3<f32>, x: vec3<f32>) -> Kahan3 {
 // (species/mixture.ts).
 #include <comp>
 
+// Where group g of four species sits in a species atlas whose groups are `stride` texels apart
+// (species/species.ts, speciesGroupOffset): stacked along z as far as 2048 texels, the deepest
+// a 3D texture is sure to be, and then in further stacks along y, as many texels on. A 3D
+// adaptive mesh's atlas is as tall as it is deep, so the stacks do not overlap.
+fn species_group(g: i32, stride: i32) -> vec3<i32> {
+  let gz = max(1, 2048 / stride);
+  return vec3<i32>(0, (g / gz) * stride, (g % gz) * stride);
+}
+
 // Obstacles. The fourth component of the second state texture marks a cell: 1 is solid (a wall
 // the gas reflects off), -1 is fixed (gas held at its state, as an inflow), 0 is ordinary gas.
 // Neither kind is ever updated. Passes only look when this says there is something to find.

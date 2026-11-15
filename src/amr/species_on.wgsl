@@ -6,19 +6,24 @@
 // hydro/flux.wgsl (Faces).
 const SPECIES = true;
 @group(0) @binding(12) var<storage, read_write> MF: array<f32>;
+@group(0) @binding(32) var<storage, read_write> MF_HI: array<f32>;   // the records past MF_SPLIT
 
 #include "amr/species_index.wgsl"
+
+fn mf_store(i: u32, v: f32) {
+  if (i < MF_SPLIT) { MF[i] = v; } else { MF_HI[i - MF_SPLIT] = v; }
+}
 
 fn store_mass_flux(slot: i32, l: vec3<i32>, c: vec3<i32>, fx: Faces, fy: Faces, fz: Faces) {
   let lo = vec3<f32>(fx.lo.m, fy.lo.m, fz.lo.m);
   let hi = vec3<f32>(fx.hi.m, fy.hi.m, fz.hi.m);
   let nax = select(3, 2, is2d());
   for (var a = 0; a < nax; a++) {
-    MF[mf_index(slot, l, a)] = lo[a];
+    mf_store(mf_index(slot, l, a), lo[a]);
     var e = vec3<i32>(0);
     e[a] = 1;
     let up = l + e;
     let held = up[a] < BS && has_solids() && abs(textureLoad(U2, c + e, 0).w) > 0.5;
-    if (up[a] == BS || held) { MF[mf_index(slot, up, a)] = hi[a]; }
+    if (up[a] == BS || held) { mf_store(mf_index(slot, up, a), hi[a]); }
   }
 }

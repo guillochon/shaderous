@@ -53,7 +53,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var u1 = textureLoad(U1, c, 0);
   var u2 = textureLoad(U2, c, 0);
   var x: array<vec4<f32>, NG>;
-  for (var g = 0u; g < NG; g++) { x[g] = textureLoad(S, c + vec3<i32>(0, 0, i32(g) * stride), 0); }
+  for (var g = 0u; g < NG; g++) { x[g] = textureLoad(S, c + species_group(i32(g), stride), 0); }
 
   let fi = B.b.x;
   let ai = B.b.y;
@@ -97,5 +97,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   textureStore(O1, c, u1);
   textureStore(O2, c, u2);
-  for (var g = 0u; g < NG; g++) { textureStore(SO, c + vec3<i32>(0, 0, i32(g) * stride), x[g]); }
+  for (var g = 0u; g < NG; g++) { textureStore(SO, c + species_group(i32(g), stride), x[g]); }
 }

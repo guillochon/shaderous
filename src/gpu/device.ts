@@ -127,12 +127,13 @@ export async function probeRenderable3d(device: GPUDevice): Promise<boolean> {
 /** Bytes per texel of the formats the atlases use (16 for any other, to be safe). */
 const texelBytes = (format: GPUTextureFormat) => (format.startsWith('r32') ? 4 : format.startsWith('rg32') ? 8 : 16);
 
-export function tex3d(device: GPUDevice, n: number, format: GPUTextureFormat, label: string, nz = n): GPUTexture {
+/** A 3D state texture n x ny x nz (ny = n unless given: the species atlas stacks its groups along y too). */
+export function tex3d(device: GPUDevice, n: number, format: GPUTextureFormat, label: string, nz = n, ny = n): GPUTexture {
   // Past one buffer's size, cleared by a render pass instead of a staging buffer (see above).
-  const tooBig = n * n * nz * texelBytes(format) > device.limits.maxBufferSize;
+  const tooBig = n * ny * nz * texelBytes(format) > device.limits.maxBufferSize;
   return device.createTexture({
     label,
-    size: [n, n, nz],
+    size: [n, ny, nz],
     dimension: '3d',
     format,
     usage: stateUsage() | (tooBig && rendersTo3d(device) ? GPUTextureUsage.RENDER_ATTACHMENT : 0),
@@ -199,7 +200,8 @@ async function compilePipeline(
   }
 }
 
-export type Bindable = GPUBuffer | GPUTextureView | GPUSampler;
+/** A resource to bind: a whole buffer, a window of one ({ buffer, offset, size }), a view or a sampler. */
+export type Bindable = GPUBuffer | GPUBufferBinding | GPUTextureView | GPUSampler;
 
 /** Bind group from a sparse {binding: resource} map against a pipeline's auto layout. */
 export function bindGroup(
@@ -210,7 +212,7 @@ export function bindGroup(
 ): GPUBindGroup {
   const entries: GPUBindGroupEntry[] = Object.entries(resources).map(([b, r]) => ({
     binding: Number(b),
-    resource: r instanceof GPUBuffer ? { buffer: r } : (r as GPUTextureView | GPUSampler),
+    resource: r instanceof GPUBuffer ? { buffer: r } : 'buffer' in r ? r : (r as GPUTextureView | GPUSampler),
   }));
   return device.createBindGroup({ label, layout: pipeline.getBindGroupLayout(0), entries });
 }

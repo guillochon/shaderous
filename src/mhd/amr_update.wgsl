@@ -45,6 +45,10 @@
 // matching at refinement boundaries (amr/species.wgsl matches the species' itself), in the
 // layout of amr/species_index.wgsl. A placeholder without species.
 @group(0) @binding(12) var<storage, read_write> MF: array<f32>;
+@group(0) @binding(32) var<storage, read_write> MF_HI: array<f32>;   // the records past MF_SPLIT
+fn mf_store(i: u32, v: f32) {
+  if (i < MF_SPLIT) { MF[i] = v; } else { MF_HI[i - MF_SPLIT] = v; }
+}
 override SPECIES_FLUX: bool = false;    // the gravity field atlas: acceleration, potential in w (ghosts included)
 
 override STAGE: u32 = 1u;
@@ -405,7 +409,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
       for (var b = 0; b < 3; b++) {
         if (b != a && t[b] >= top[b]) { ok = false; }
       }
-      if (ok) { MF[mf_index(g_slot, t, a)] = FL[flux_entry(inv.row, a, t)].x; }
+      if (ok) { mf_store(mf_index(g_slot, t, a), FL[flux_entry(inv.row, a, t)].x); }
     }
   }
   textureStore(OB, x, vec4<f32>(bout, 0.0));

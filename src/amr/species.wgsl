@@ -18,8 +18,15 @@
 @group(0) @binding(5) var S: texture_3d<f32>;     // rho X at the start of the step
 @group(0) @binding(6) var SO: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(7) var<storage, read> MF: array<f32>;
+@group(0) @binding(32) var<storage, read> MF_HI: array<f32>;   // the records past MF_SPLIT
 @group(0) @binding(8) var SX: texture_3d<f32>;
 @group(0) @binding(9) var SH: texture_3d<f32>;
+
+// The recorded face mass flux at index i (amr/species_index.wgsl).
+fn mf_load(i: u32) -> f32 {
+  if (i < MF_SPLIT) { return MF[i]; }
+  return MF_HI[i - MF_SPLIT];
+}
 
 fn load_sx(c: vec3<i32>) -> array<vec4<f32>, NG> {
   var x: array<vec4<f32>, NG>;
@@ -52,7 +59,7 @@ fn face_flux(slot: i32, a: vec3<i32>, axis: i32, F: f32) -> array<vec4<f32>, NG>
 fn own_flux(slot: i32, l: vec3<i32>, axis: i32, side: i32) -> array<vec4<f32>, NG> {
   var e = vec3<i32>(0);
   e[axis] = 1;
-  let F = MF[mf_index(slot, l + side * e, axis)];
+  let F = mf_load(mf_index(slot, l + side * e, axis));
   return face_flux(slot, l + (side - 1) * e, axis, F);
 }
 
@@ -78,7 +85,7 @@ fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> array<vec4<f32>, 
       var a = f;
       a[t1] += i;
       a[t2] += j;
-      let F = MF[mf_index(ch, a + e, axis)];
+      let F = mf_load(mf_index(ch, a + e, axis));
       let ff = face_flux(ch, a, axis, F);
       for (var g = 0u; g < NG; g++) { sum[g] += ff[g]; }
     }
