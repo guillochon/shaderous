@@ -76,6 +76,7 @@ export async function initGpu(): Promise<Gpu> {
     // The page shows these in its error panel (src/ui/errors.ts).
     globalThis.dispatchEvent?.(new CustomEvent('shaderous-gpu-error', { detail: 'WebGPU error: ' + message }));
   });
+  await probeRenderable3d(device);
 
   const ai = adapter.info;
   const maxGrid = Math.min(adapter.limits.maxTextureDimension3D, 512);
@@ -100,13 +101,41 @@ const stateUsage = () =>
   GPUTextureUsage.COPY_SRC |
   GPUTextureUsage.COPY_DST;
 
+/**
+ * Devices whose 3D storage textures may also be render attachments. WebGPU zero-fills a texture
+ * on first use; Dawn does it with a render pass when the texture may be rendered to, and
+ * otherwise by copying from a staging buffer of the whole texture's size, which may be no
+ * larger than a buffer may be (maxBufferSize, 4 GiB on NVIDIA). A large mesh's atlas textures
+ * pass that (5.5 GB at 35^3 blocks lost the device), so a texture past it is made renderable
+ * where it can be; smaller ones are not, since steps ran some 2.5% slower with renderable atlas
+ * textures (MRI disk, 256^3 with 2 levels, RTX 3080). Where it cannot be, the atlas keeps each
+ * texture within maxBufferSize (amr/amr_sim.ts).
+ */
+const renderable3d = new WeakMap<GPUDevice, boolean>();
+export const rendersTo3d = (device: GPUDevice) => renderable3d.get(device) ?? false;
+
+/** Whether this device takes a 3D rgba32float storage texture that is also a render attachment. */
+export async function probeRenderable3d(device: GPUDevice): Promise<boolean> {
+  device.pushErrorScope('validation');
+  const t = device.createTexture({ size: [4, 4, 4], dimension: '3d', format: 'rgba32float', usage: stateUsage() | GPUTextureUsage.RENDER_ATTACHMENT });
+  const error = await device.popErrorScope();
+  t.destroy();
+  renderable3d.set(device, !error);
+  return !error;
+}
+
+/** Bytes per texel of the formats the atlases use (16 for any other, to be safe). */
+const texelBytes = (format: GPUTextureFormat) => (format.startsWith('r32') ? 4 : format.startsWith('rg32') ? 8 : 16);
+
 export function tex3d(device: GPUDevice, n: number, format: GPUTextureFormat, label: string, nz = n): GPUTexture {
+  // Past one buffer's size, cleared by a render pass instead of a staging buffer (see above).
+  const tooBig = n * n * nz * texelBytes(format) > device.limits.maxBufferSize;
   return device.createTexture({
     label,
     size: [n, n, nz],
     dimension: '3d',
     format,
-    usage: stateUsage(),
+    usage: stateUsage() | (tooBig && rendersTo3d(device) ? GPUTextureUsage.RENDER_ATTACHMENT : 0),
   });
 }
 
