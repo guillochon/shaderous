@@ -425,6 +425,69 @@ once and used in both places.
 - **Brush tools.** Mass and velocity brushes keep the face fields; a "field" brush (add a loop
   or a uniform field through a vector potential) can come later.
 
+### 7b. Phase 4 implementation design (written 2026-11-14, at the start of phase 4)
+
+Today the MHD step runs alone (`mhdUnsupported` refuses gravity, point masses, species,
+cooling, viscosity and conduction). The hydro step brings these in at three places: the
+predictor and the update (sources inside the flux update), a second-half gravity kick after the
+new potential is solved (`gravity/correct.wgsl`, which also applies the point masses' sinks),
+and separate passes (species transport, from the update's mass fluxes). The MHD step gets the
+same three, with the field's energy kept out of what they touch.
+
+**Gravity (self-gravity, the uniform field, point masses, the accelerating frame).**
+Kick-drift-kick as in the hydro step:
+- Stage 1 (the half-step state) adds the whole source over dt/2: momentum + (dt/2) rho^n g^n, and
+  its kinetic energy to E. Without it the stage-2 reconstruction would not see gravity, and a
+  star would not stay balanced to second order.
+- Stage 2 adds the first half kick, (dt/2) rho^n g^n, as the hydro update does. Its energy goes
+  in kick form, k . (m + k/2) / rho, or with `gravEnergyFlux` as the flux-form work
+  -1/2 sum_faces F_mass dphi from the stage's own mass fluxes (FX/FY/FZ hold them), the point
+  masses' and the frame's part always in kick form.
+- After the step, as in the hydro step: the old potential kept, the new one solved on the updated
+  state, the masses drifted and kicked, the field rebuilt, and the correction pass applies the
+  second half kick from the updated state (parity o) back into parity p. With a field the face
+  textures are then copied from o to p (`copyTextureToTexture`, faces and compensations), so the
+  run stays in parity p as the hydro step's does.
+
+**What the field changes in the passes that touch E.** E holds B^2/2. Wherever a pass rebuilds E
+from kinetic and internal energy, or scales it, the field's part is kept:
+- the dual-energy sync and the fluff limits (`dual_energy`, `tame_fluff`): E - KE - B^2/2, as
+  the MHD update already does;
+- sinks (`apply_sinks`) take a fraction of the gas, its kinetic and internal energy, not the
+  field's: E = B^2/2 + (1 - f)(E - B^2/2). The field stays where it is (flux cannot be removed
+  without breaking CT); this goes in the docs;
+- cooling changes E by exactly the change of e_int, so it needs nothing.
+The correction pass reads the cell-centered field of the updated faces for this (an optional
+binding: the hydro run binds the one-texel placeholder and the field's part is zero).
+
+**The block grid.** The same, block by block: the half-step and first-half kicks in
+`mhd/amr_update.wgsl` from the field atlas, then the existing potential solve and
+`amr/correct.wgsl` with the face field read for B^2/2, and the faces copied back over the leaves
+(the `mhd/amr_commit.wgsl` pass). Time bins with a field: off while gravity or point masses are
+on (bins_live), in this phase; the hydro cycle's half-step potentials carry over later.
+
+**Species and the passive scalar.** The scalar is already in the MHD fluxes. Species move by the
+same pass as in the hydro step, which reads the update's mass fluxes; the MHD update writes them
+to the same buffer (`store_mass_flux`) in stage 2, and the species' predictor uses the stage-1
+state. On blocks the species pass takes the MHD block fluxes likewise.
+
+**Cooling.** `apply_cooling` after the stage-2 update, in both update shaders.
+
+**Viscosity and conduction.** Their face fluxes added to the MHD face fluxes (`face_flux.wgsl`)
+in stage 2, isotropic (no Braginskii). Last of the phase.
+
+**Initial fields on stars.** A dipole or a random (Kolmogorov) vector potential, tapered by the
+star's pressure (section 8). The pressure used is the preset's own profile (Lane-Emden), not the
+settled one: the curl of any A is divergence-free, and at beta >= 10^4 the field does not change
+the balance. Line integrals along each edge as now (`blockFaces`, `initialFaces`), so coarse and
+fine faces agree. A "magnetized polytrope" variant of the polytrope preset (dipole, beta 10^3 at
+the center) is the phase's acceptance test: at rest for 2 dynamical times, peak speed and
+central density as the unmagnetized polytrope's, div B at rounding, magnetic energy kept.
+
+**Order of work.** (A) gravity, point masses, frames, sinks and cooling on the uniform grid;
+(B) the same on blocks; (C) initial fields and the magnetized polytrope; (D) species;
+(E) viscosity and conduction. Each part lifts its refusals from `mhdUnsupported`, with tests.
+
 ## 8. Initial fields
 
 From a vector potential A on cell edges, b = curl A with the discrete curl on each face, so

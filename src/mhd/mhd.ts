@@ -26,10 +26,13 @@ export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/
  * sources and the adaptive mesh come in later phases of docs/mhd-plan.md.
  */
 export function mhdUnsupported(c: SimConfig): string | null {
-  if (c.gravity !== 'off' || c.gext.some((g) => g !== 0)) return 'gravity is not coupled to the magnetic field yet';
-  if (c.problem.masses) return 'point masses are not coupled to the magnetic field yet';
+  // Gravity, point masses and cooling act on a field on the uniform grid (docs/mhd-plan.md 7b);
+  // on blocks they follow (phase 4, part B).
+  const blocks = c.amrLevels > 0;
+  if (blocks && (c.gravity !== 'off' || c.gext.some((g) => g !== 0))) return 'gravity is not coupled to the magnetic field on the adaptive mesh yet';
+  if (blocks && c.problem.masses) return 'point masses are not coupled to the magnetic field on the adaptive mesh yet';
   if (c.problem.species?.length) return 'species are not carried with a magnetic field yet';
-  if (c.cooling !== 'off') return 'cooling is not coupled to the magnetic field yet';
+  if (blocks && c.cooling !== 'off') return 'cooling is not coupled to the magnetic field on the adaptive mesh yet';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not coupled to the magnetic field yet';
   return null;
 }
@@ -134,6 +137,9 @@ interface MhdDeps {
   slots: Record<string, string>;
   /** the composition texture binding, if the composition varies */
   comp: Record<number, GPUTextureView>;
+  /** gravity: self-gravity's field texture, and the point masses (mhd/update.wgsl) */
+  gfield: GPUTexture;
+  bh: GPUBuffer;
 }
 
 /**
@@ -284,18 +290,30 @@ export class MhdPasses {
         perSlab((sb) =>
           bindGroup(d, pipe, {
             0: params, 1: clock, ...start, ...fl, 8: this.emf, ...out, 12: v(h[0]), 13: v(h[1]), 14: sb, 15: v(this.comps[p]), 16: v(this.comps[o]), ...comp,
+            17: v(this.dep.gfield), 20: this.dep.bh,
           }),
         );
       this.gUpdate.push([
         upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }, state[p]),
         upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }, half),
       ]);
-      this.gRates.push(bindGroup(d, prates, { 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 4: v(this.faces[p]), 6: rates, ...comp }));
+      this.gRates.push(bindGroup(d, prates, { 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.dep.gfield), 6: rates, 20: this.dep.bh, ...comp }));
     }
   }
 
   private dispatch(pass: GPUComputePassEncoder, dims: number[]) {
     pass.dispatchWorkgroups(Math.ceil(dims[0] / 8), Math.ceil(dims[1] / 8), Math.ceil(dims[2] / 4));
+  }
+
+  /**
+   * Copy the faces and their compensations from parity `from` to `to`: where a pass outside the
+   * step (the second half kick, a brush) has moved the cell state to the other parity, the
+   * field goes with it.
+   */
+  copyFaces(enc: GPUCommandEncoder, from: number, to: number) {
+    for (const t of [this.faces, this.comps]) {
+      enc.copyTextureToTexture({ texture: t[from] }, { texture: t[to] }, [t[from].width, t[from].height, t[from].depthOrArrayLayers]);
+    }
   }
 
   /**

@@ -19,6 +19,13 @@
 //   STAGE 2: a full step from the state at the start, with fluxes of the half-step state, and
 //            the new compensations.
 //
+// Gravity (self-gravity, the uniform field, point masses and the frame; docs/mhd-plan.md 7b):
+// stage 1 adds the whole source over its half step, so the half-step state the stage-2 fluxes
+// come from feels it; stage 2 adds the first half of the step's kick, (dt/2) rho^n g^n, and
+// gravity/correct.wgsl the second, with the potential of the updated state. The kick's energy
+// is its kinetic energy, or with flux-form work (P.flags bit 0) -1/2 sum F_mass dphi over the
+// faces, as in hydro/update.wgsl. Cooling acts at the end of stage 2.
+//
 // One invocation per texel t in [0, n] along x and y and the slab's layers along z (and the
 // grid's upper z faces on the last slab; mhd/flux_index.wgsl): the cell t if it is in the grid,
 // and the faces texel t holds that exist. The internal energy's p div v takes the pressure at
@@ -29,6 +36,7 @@
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
 #include "hydro/fluff.wgsl"
+#include <cooling>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;   // state at the start of the step
@@ -46,8 +54,14 @@
 @group(0) @binding(14) var<uniform> SLAB: Slab;
 @group(0) @binding(15) var BC: texture_3d<f32>;   // compensations of the faces at the start
 @group(0) @binding(16) var OC: texture_storage_3d<rgba32float, write>;   // new ones (stage 2)
+@group(0) @binding(17) var G: texture_3d<f32>;   // self-gravity's field: acceleration, potential in w
 
 override STAGE: u32 = 1u;
+
+#include "gravity/ext_bind.wgsl"
+#include "gravity/gfield.wgsl"
+struct NewState { u1: vec4<f32>, u2: vec4<f32> }
+#include "hydro/cooling.wgsl"
 
 #include "mhd/common.wgsl"
 #include "mhd/flux_index.wgsl"
@@ -192,9 +206,29 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   } else {
     ph = prim_from_cons(textureLoad(H1, t, 0), textureLoad(H2, t, 0)).w2.x;
   }
+  // Gravity: the half step's whole source in stage 1, the first half kick in stage 2.
+  var kick = vec3<f32>(0.0);
+  var ekick = 0.0;
+  var dw = 0.0;
+  if (has_gravity() || ext_on()) {
+    let w = select(0.5 * dt, dt, STAGE == 1u);
+    let kx = w * u1.x * ext_accel(cell_pos(t));
+    kick = w * u1.x * g_self(t) + kx;
+    let flux_work = STAGE == 2u && has_gravity() && (P.flags & 1u) != 0u;
+    if (flux_work) {
+      // Each face hands half of F_mass dphi to the two cells it separates (hydro/update.wgsl).
+      for (var a = 0; a < axes; a++) {
+        var e = vec3<i32>(0);
+        e[a] = 1;
+        dw -= 0.5 * (flux_at(a, t + e).a.x * dphi_half(t, e) - flux_at(a, t).a.x * dphi_half(t, -e));
+      }
+    }
+    let ke = select(kick, kx, flux_work);
+    ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
+  }
   let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
-  let mom = u1.yzw + dtdx * net_a.yzw;
-  let E = u2.x + dtdx * net_b.x;
+  let mom = u1.yzw + kick + dtdx * net_a.yzw;
+  let E = u2.x + ekick + dtdx * (net_b.x + dw);
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w);
   let sc = u2.z + dtdx * net_b.z;
   let eb = 0.5 * dot(bc, bc);
@@ -205,6 +239,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     mout = tame.mom;
     en = vec2<f32>(0.5 * dot(mout, mout) / rho + eb + tame.eint, tame.eint);
   }
-  textureStore(O1, t, vec4<f32>(rho, mout));
-  textureStore(O2, t, vec4<f32>(en.x, en.y, sc, flag));
+  var st = NewState(vec4<f32>(rho, mout), vec4<f32>(en.x, en.y, sc, flag));
+  // Cooling over the whole step (it changes E by exactly the change of e_int).
+  if (STAGE == 2u) { st = apply_cooling(st, clock.dt); }
+  textureStore(O1, t, st.u1);
+  textureStore(O2, t, st.u2);
 }

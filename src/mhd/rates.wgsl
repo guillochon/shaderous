@@ -1,6 +1,8 @@
 // First stage of the timestep reduction for MHD on a uniform grid: hydro/rates.wgsl with the
-// fastest magnetosonic speed, sqrt(c_s^2 + B^2 / rho), in place of the sound speed.
+// fastest magnetosonic speed, sqrt(c_s^2 + B^2 / rho), in place of the sound speed, and the
+// acceleration as there.
 #include "hydro/common.wgsl"
+#include "gravity/ext_bind.wgsl"
 #include <eos>
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
@@ -8,9 +10,11 @@
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
 @group(0) @binding(4) var BF: texture_3d<f32>;
+@group(0) @binding(5) var G: texture_3d<f32>;
 @group(0) @binding(6) var<storage, read_write> RATES: array<f32>;   // (max rate, max |g|) per block
 
 #include "mhd/common.wgsl"
+#include "gravity/gfield.wgsl"
 
 var<workgroup> wg_max: array<atomic<u32>, 8>;
 
@@ -25,6 +29,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let cf = fast_max(w.w1.x, w.w2.y, bcell(c));
     let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * cf;
     atomicMax(&wg_max[blk], bitcast<u32>(rate));
+    atomicMax(&wg_max[blk + 1u], bitcast<u32>(length(g_load(c))));
   }
   workgroupBarrier();
   let nout = (P.dims.xyz + 3u) / 4u;
@@ -32,6 +37,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
   if (all((lid & vec3<u32>(3u)) == vec3<u32>(0u)) && all(o < nout)) {
     let base = ((o.z * nout.y + o.y) * nout.x + o.x) * 2u;
     RATES[base] = bitcast<f32>(atomicLoad(&wg_max[blk]));
-    RATES[base + 1u] = 0.0;
+    RATES[base + 1u] = bitcast<f32>(atomicLoad(&wg_max[blk + 1u]));
   }
 }

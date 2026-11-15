@@ -17,7 +17,7 @@ import { advection } from '../problems/advection';
 import { kelvinHelmholtz } from '../problems/kelvin_helmholtz';
 import { rayleighTaylor, RT } from '../problems/rayleigh_taylor';
 import { jeans, JEANS } from '../problems/jeans';
-import { polytrope } from '../problems/polytrope';
+import { POLY, POLY_K, polytrope } from '../problems/polytrope';
 import { whiteDwarfStar } from '../problems/white_dwarf_star';
 import { evrard } from '../problems/evrard';
 import { tidalDisruption, tdeOrbit, TDE, TDE_STAR } from '../problems/tidal_disruption';
@@ -2750,6 +2750,84 @@ export const TESTS: TestDef[] = [
             (prob !== fieldLoopDense || m[`${k}_magnetic_kept`] > 0.94);
         });
       }
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-gravity',
+    name: 'MHD with gravity, point masses and cooling (uniform grid)',
+    criterion:
+      'A uniform field exerts no force, so with one the gas must do what it does without: an n = 1 polytrope threaded by a field at beta 1000 at its center (64^3, self-gravity, to t = 2) keeps its central density within 5% and to 0.03 of the unmagnetized star (the field is dragged by the thin hot gas around the star, which settles onto it either way and is the fastest gas on the grid: the Mach number is reported, bounded at 3); a stratified column with a horizontal field (2D, uniform gravity, beta 1e4 at its foot, one sound crossing) stays as still as without one (Mach at most twice plus 1e-3); gas with a field cooling as Lambda ~ T^(1/2) follows the analytic decay to 1e-3; a sink in magnetized gas keeps gas plus accreted mass to 1e-5 and leaves the field (its energy within 5%). Throughout |div B| dx / max |B| stays below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const divOk = (d: Diagnostics) => d.magnetic!.divB < 1e-6;
+      // A field along z, B = sqrt(2 p_c / beta) with beta 1000 at the star's center.
+      const bStar = Math.sqrt((2 * POLY_K * POLY.rhoc ** 2) / 1000);
+      const magStar: Problem = { ...polytrope, id: 'polytrope-uniform-field', mhd: { face: () => (axis) => (axis === 2 ? bStar : 0) } };
+      const star = async (prob: Problem) =>
+        withSim(gpu, prob, 64, { tEnd: 2 }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          return { dev: Math.abs(d.ranges[0][1] / d0.ranges[0][1] - 1), mach: d.maxMach, d0, d };
+        });
+      const plain = await star(polytrope);
+      const mag = await star(magStar);
+      m.star_central_density_change = mag.dev;
+      m.star_central_density_change_unmagnetized = plain.dev;
+      m.star_max_mach = mag.mach;
+      m.star_max_mach_unmagnetized = plain.mach;
+      m.star_kinetic_energy = mag.d.eKin;
+      m.star_kinetic_energy_unmagnetized = plain.d.eKin;
+      m.star_magnetic_energy_change = Math.abs(mag.d.magnetic!.eMag / mag.d0.magnetic!.eMag - 1);
+      m.star_divB = mag.d.magnetic!.divB;
+      pass &&= mag.dev < 0.05 && Math.abs(mag.dev - plain.dev) < 0.03 && mag.mach < 3 && divOk(mag.d);
+      // The column, falling by e every 8 cells, without the well-balanced reconstruction (MHD's
+      // reconstruction does not have it), with and without a field along x.
+      const col = column(8);
+      const bCol = Math.sqrt(2 / 1e4);
+      const magCol: Problem = { ...col, id: 'column-field', mhd: { face: () => (axis) => (axis === 0 ? bCol : 0) } };
+      const still = async (prob: Problem) =>
+        withSim(gpu, prob, 64, { ndim: 2, tEnd: 1, wellBalanced: false }, async (sim) => {
+          await sim.runToEnd();
+          return sim.diagnostics();
+        });
+      const colPlain = await still(col);
+      const colMag = await still(magCol);
+      m.column_max_mach = colMag.maxMach;
+      m.column_max_mach_unmagnetized = colPlain.maxMach;
+      m.column_divB = colMag.magnetic!.divB;
+      pass &&= colMag.maxMach < 2 * colPlain.maxMach + 1e-3 && divOk(colMag);
+      // Cooling, as in the cooling test, with a field: e_int (without B^2/2) decays the same.
+      const cool = stillGas({
+        cooling: 'power', coolParams: { rate: 1, alpha: 0.5, heat: 0, tFloor: 0 },
+        mhd: { face: () => (axis) => (axis === 0 ? 0.5 : 0) },
+      });
+      await withSim(gpu, cool, 32, { ndim: 2, tEnd: 1.2 }, async (sim) => {
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const expected = 1.5 * (1 - 1.2 / 3) ** 2;
+        m.cooling_decay_error = Math.abs(d.eInt - expected) / expected;
+        pass &&= m.cooling_decay_error < 1e-3 && divOk(d);
+      });
+      // A sink in magnetized gas (2D, closed box).
+      const sinkBox = stillGas({
+        bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.5,
+        masses: () => [{ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.15 }],
+        mhd: { face: () => (axis) => (axis === 0 ? 0.3 : 0) },
+      });
+      await withSim(gpu, sinkBox, 64, { ndim: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const mass = d.masses[0];
+        m.sink_accreted_fraction = mass.accreted / d0.mass;
+        m.sink_mass_error = Math.abs(d.mass + mass.accreted - d0.mass) / d0.mass;
+        m.sink_magnetic_energy_change = Math.abs(d.magnetic!.eMag / d0.magnetic!.eMag - 1);
+        m.sink_divB = d.magnetic!.divB;
+        pass &&= mass.accreted > 0.003 * d0.mass && m.sink_mass_error < 1e-5 && m.sink_magnetic_energy_change < 0.05 && divOk(d);
+      });
       return { pass, metrics: m };
     },
   },

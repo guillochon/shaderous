@@ -994,7 +994,8 @@ export class Sim implements Simulation {
       computePipeline(d, assemble('hydro/rates.wgsl', slots), 'timestep rates'),
       hydro ? RegionPass.create(d, assemble('hydro/predict.wgsl', slots), 'predict', dims) : null,
       hydro ? RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update', dims, {}, true) : null,
-      computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct'),
+      // With a field the correction keeps its energy out of what it rebuilds (MHD).
+      computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct', { MHD: mhdOn(c) ? 1 : 0 }),
       computePipeline(d, assemble('edit/brush.wgsl', slots), 'brush'),
     ]);
     this.gBrush = [0, 1].map((p) =>
@@ -1051,19 +1052,6 @@ export class Sim implements Simulation {
           ...k,
         }),
       );
-      this.gCorrect.push(
-        bindGroup(d, this.pCorrect, {
-          0: this.params,
-          1: this.clock,
-          2: v(this.state[o][0]),
-          3: v(this.state[o][1]),
-          4: v(this.gfield),
-          5: v(this.state[p][0]),
-          6: v(this.state[p][1]),
-          7: this.bh,
-          ...k,
-        }),
-      );
     }
     if (this.speciesGroups > 0) {
       const ns = { species_n: speciesConst(this.speciesGroups), comp: slots.comp };
@@ -1102,11 +1090,23 @@ export class Sim implements Simulation {
         await this.mhd.rebuild(this.redDt.first, slots, k);
       } else {
         this.mhd = await MhdPasses.create(
-          { device: d, cfg: c, n: this.n, nz: this.nz, params: this.params, clock: this.clock, state: this.state, half: this.pred, slots, comp: k },
+          {
+            device: d, cfg: c, n: this.n, nz: this.nz, params: this.params, clock: this.clock, state: this.state, half: this.pred, slots, comp: k,
+            gfield: this.gfield, bh: this.bh,
+          },
           this.redDt.first,
         );
       }
     }
+    // The second half kick, from the updated state (parity o) back into p; with a field, it reads
+    // the updated faces too (a placeholder texel without one).
+    this.gCorrect = [0, 1].map((p) => {
+      const o = 1 - p;
+      return bindGroup(d, this.pCorrect, {
+        0: this.params, 1: this.clock, 2: v(this.state[o][0]), 3: v(this.state[o][1]), 4: v(this.gfield),
+        5: v(this.state[p][0]), 6: v(this.state[p][1]), 7: this.bh, 8: v(this.mhd?.faces[o] ?? this.noFaces()), ...k,
+      });
+    });
   }
 
   /** Push the current configuration to the GPU parameter block. */
@@ -1144,6 +1144,8 @@ export class Sim implements Simulation {
     const half = c.problem.box / 2;
     // The magnetic field on the faces, and its energy in each cell's total.
     const faces = mhdOn(c) ? initialFaces(c, n, nz, this.dx) : null;
+    // Each cell's B^2 / 2, which a star's settling (it rebuilds E) adds back.
+    const emag = faces ? new Float32Array(n * n * nz) : null;
     let mass = 0;
     let o = 0;
     this.solids = false;
@@ -1175,7 +1177,8 @@ export class Sim implements Simulation {
           u2[o] = eint + 0.5 * w.rho * (w.vx * w.vx + w.vy * w.vy + w.vz * w.vz) * go;
           if (faces) {
             const B = cellField(c, faces, n, nz, i, j, k);
-            u2[o] += 0.5 * (B[0] * B[0] + B[1] * B[1] + B[2] * B[2]);
+            emag![o / 4] = 0.5 * (B[0] * B[0] + B[1] * B[1] + B[2] * B[2]);
+            u2[o] += emag![o / 4];
           }
           u2[o + 1] = eint;
           u2[o + 2] = w.rho * w.s;
@@ -1194,7 +1197,7 @@ export class Sim implements Simulation {
     }
     // The clock is (dt, t, Kahan compensation, steps).
     if (c.restart) this.device.queue.writeBuffer(this.clock, 0, new Float32Array([0, c.restart.time, 0, c.restart.steps]));
-    this.startSettling(u1, u2);
+    this.startSettling(u1, u2, emag);
   }
 
   /** Resolves once a star in the initial conditions has been settled (see problems/settle.ts). */
@@ -1212,7 +1215,7 @@ export class Sim implements Simulation {
    * Settle a star into the grid's own hydrostatic balance: no steps are taken until it has.
    * A reset meanwhile abandons it.
    */
-  private startSettling(u1: Float32Array, u2: Float32Array) {
+  private startSettling(u1: Float32Array, u2: Float32Array, emag: Float32Array | null = null) {
     const epoch = ++this.settleEpoch;
     const c = this.cfg;
     this.settling = false;
@@ -1251,6 +1254,8 @@ export class Sim implements Simulation {
           if (change < (set.tol ?? SETTLE_TOL) * peak) break;
         }
         settler.finish(eos.eintFromP);
+        // The settled E is the gas's own: a magnetic field's energy goes back in.
+        if (emag) for (let q = 0; q < emag.length; q++) u2[4 * q] += emag[q];
         writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
         writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
         this.refreshPotential();
@@ -1396,14 +1401,13 @@ export class Sim implements Simulation {
       pass.setBindGroup(0, this.gClock);
       pass.dispatchWorkgroups(1);
       if (this.mhd) {
-        // Ideal MHD: its own two-stage step, and nothing else (mhdUnsupported lists what is not yet coupled).
+        // Ideal MHD: its own two-stage step, with gravity's first half kick and cooling in it
+        // (mhd/update.wgsl); the second half kick follows below as for the gas alone.
         this.mhd.encode(pass, p);
-        this.cur = 1 - p;
-        pass.end();
-        continue;
+      } else {
+        this.pPredict!.encode(pass, this.gPredict[p]);
+        this.pUpdate!.encode(pass, this.gUpdate[p]);
       }
-      this.pPredict!.encode(pass, this.gPredict[p]);
-      this.pUpdate!.encode(pass, this.gUpdate[p]);
       if (this.pSpecies) {
         const q = this.speciesCur;
         for (const [pipe, g] of [[this.pSpeciesPredict!, this.gSpeciesPredict], [this.pSpecies, this.gSpecies]] as const) {
@@ -1435,6 +1439,12 @@ export class Sim implements Simulation {
         pass.setPipeline(this.pCorrect);
         pass.setBindGroup(0, this.gCorrect[p]);
         this.dispatch(pass);
+        if (this.mhd) {
+          // The state is back in parity p; its faces follow it.
+          pass.end();
+          this.mhd.copyFaces(enc, 1 - p, p);
+          pass = beginPass(enc);
+        }
       } else {
         this.cur = 1 - p;
       }
@@ -1466,6 +1476,8 @@ export class Sim implements Simulation {
     pass.setBindGroup(0, this.gBrush[this.cur]);
     this.dispatch(pass);
     pass.end();
+    // A brush leaves the field as it is: the faces go along to the brushed state's parity.
+    this.mhd?.copyFaces(enc, this.cur, 1 - this.cur);
     this.cur = 1 - this.cur;
   }
 
