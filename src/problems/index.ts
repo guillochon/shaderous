@@ -8,7 +8,7 @@ import { rayleighTaylor } from './rayleigh_taylor';
 import { forwardStep } from './forward_step';
 import { advection } from './advection';
 import { jeans } from './jeans';
-import { polytrope } from './polytrope';
+import { polytrope, polytropeDipole, polytropeRandom } from './polytrope';
 import { evrard } from './evrard';
 import { tidalDisruption, tidalDisruptionFull, tidalDisruptionN3, tidalDisruptionN3Full } from './tidal_disruption';
 import { sphere } from './sphere';
@@ -83,7 +83,15 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
   {
     group: 'Self-gravity',
     families: [
-      single(polytrope),
+      {
+        id: 'polytrope',
+        label: polytrope.label,
+        variants: [
+          { label: 'Standard', problem: polytrope },
+          { label: 'Dipole field', problem: polytropeDipole },
+          { label: 'Random field', problem: polytropeRandom },
+        ],
+      },
       single(whiteDwarfStar),
       single(evrard),
       single(sphere),

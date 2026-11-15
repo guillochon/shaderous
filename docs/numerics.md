@@ -804,10 +804,11 @@ The species machinery of [§12](#12-passive-scalar-and-species) and the composit
 ## 21. Ideal MHD (in development)
 
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
-rotor, Brio-Wu, the field loop and the Alfvén wave) solve ideal MHD, coupled to the gas
-dynamics alone. It runs on the uniform grid and on the adaptive mesh, which re-meshes with the
-field (below), with per-block timesteps, and draws its field lines (below). Gravity and point
-masses are the later phases of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
+rotor, Brio-Wu, the field loop and the Alfvén wave; and the polytrope's "Dipole field" and
+"Random field" variants) solve ideal MHD, with gravity, point masses, sinks and cooling (below).
+It runs on the uniform grid and on the adaptive mesh, which re-meshes with the field (below),
+with per-block timesteps, and draws its field lines (below). Species, viscosity and conduction
+with a field are the rest of phase 4 of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
@@ -875,6 +876,34 @@ $`E`$ includes $`B^2/2`$.
   good: $`7\times10^{-8}`$ after 751 steps and $`9\times10^{-8}`$ after 3483. The diagnostics
   report it (`magnetic.divB`, and the field "Magnetic divergence"), as the panel's ∇·B row,
   with the magnetic energy, the largest |B| and the least plasma beta.
+- **Gravity, point masses, sinks and cooling** (plan section 7b). Kick-drift-kick as in the
+  hydro step: stage 1 adds the half step's whole source, so the half-step state the stage-2
+  fluxes come from feels it; stage 2 adds the first half kick, in kinetic form or, with
+  Conserve energy on, as flux-form work from its own mass fluxes; after the step the potential
+  is solved for the updated state, the masses move, and the correction pass applies the second
+  half kick. That pass writes the cells back into the state's parity, and the faces are copied
+  there after them (the leaves' faces, on blocks). E holds $`B^2/2`$, which stays out of what
+  the correction rebuilds and of what a sink takes: a sink removes a share of the gas's mass,
+  momentum and kinetic and internal energy, and leaves the field where it is (flux cannot be
+  removed without breaking constrained transport). Cooling acts at the end of stage 2 and
+  changes E by exactly the change of $`e_\text{int}`$. On blocks, time bins pause while
+  self-gravity or point masses act on a field. A star's settling keeps the field's energy. In
+  `mhd-gravity` and `mhd-gravity-blocks`: a polytrope threaded by a uniform field (beta 1000)
+  is as balanced as without it, a stratified column with a horizontal field as still, cooling
+  follows the analytic decay to $`10^{-5}`$, and a sink keeps the mass budget to $`10^{-7}`$
+  with the field's energy left. (MHD's reconstruction has no well-balanced pressure: the column
+  is compared with the hydro column without it.)
+- **Fields inside stars** (`mhd/star_fields.ts`, plan section 8). A dipole along z,
+  $`\mathbf{A} = A_0 \max(p - p_\text{cut}, 0)\,(-y, x, 0)`$, normalized by $`B_z = 2A_0(p_c -
+  p_\text{cut})`$ at the center to the requested beta; or a random field, a sum of 64 Fourier
+  modes of A between $`2\pi/R`$ and 8 times that with $`|A_k| \propto k^{-17/6}`$ (a Kolmogorov
+  $`E_B(k) \propto k^{-5/3}`$), tapered the same way and scaled so that the mean $`B^2`$ within
+  $`R/5`$ of the center gives the beta. The taper takes the preset's own pressure profile, not
+  the settled one. The faces are the line integrals of A as for every other field, so coarse and
+  fine agree and $`\nabla\cdot B`$ is at rounding. In `mhd-star-fields` the dipole polytrope
+  (beta 1000) keeps its central density to 0.5% (0.1% on blocks) and its magnetic energy to 2%
+  for two dynamical times; the random field loses 15% of its energy in one, its small scales
+  being a few cells across at $`64^3`$.
 - **Compile time.** GPU compilers inline every function at every call, so a lookup called at
   several places, or in a loop they unroll, is compiled that many times. The block grid's
   assembly took 4 s to compile in Chrome (far more in Firefox), with the face lookup inlined

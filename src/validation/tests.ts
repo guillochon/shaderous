@@ -17,7 +17,7 @@ import { advection } from '../problems/advection';
 import { kelvinHelmholtz } from '../problems/kelvin_helmholtz';
 import { rayleighTaylor, RT } from '../problems/rayleigh_taylor';
 import { jeans, JEANS } from '../problems/jeans';
-import { POLY, POLY_K, polytrope } from '../problems/polytrope';
+import { POLY, POLY_K, polytrope, polytropeDipole, polytropeRandom } from '../problems/polytrope';
 import { whiteDwarfStar } from '../problems/white_dwarf_star';
 import { evrard } from '../problems/evrard';
 import { tidalDisruption, tdeOrbit, TDE, TDE_STAR } from '../problems/tidal_disruption';
@@ -2903,6 +2903,45 @@ export const TESTS: TestDef[] = [
         m.sink_magnetic_energy_change = Math.abs(d.magnetic!.eMag / d0.magnetic!.eMag - 1);
         pass &&= mass.accreted > 0.003 * d0.mass && m.sink_mass_error < 1e-5 && m.sink_magnetic_energy_change < 0.05 && (await ok(sim, d, 'sink'));
       });
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-star-fields',
+    name: 'Magnetized polytropes: a dipole and a random field inside the star (64^3; blocks 128 finest, 1 level)',
+    criterion:
+      'A dipole confined to the n = 1 polytrope (beta 1000 at its center) for two dynamical times: the least beta starts within 10% of 1000, the central density stays within 5% and to 0.03 of the unmagnetized star\'s, the magnetic energy within 5% (the field, closed inside the star, stays where it was put), on the uniform grid and on blocks (shared faces agreeing); a random Kolmogorov field (beta 1000 at the center on average) for one: the central density within 5%. Throughout |div B| dx / max |B| below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const run = async (prob: Problem, blocks: boolean, tEnd: number, tag: string) => {
+        const go = async (sim: Sim | AmrSim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          if (prob.mhd) {
+            m[`${tag}_beta_min_initial`] = d0.magnetic!.betaMin;
+            m[`${tag}_magnetic_energy_change`] = Math.abs(d.magnetic!.eMag / d0.magnetic!.eMag - 1);
+            m[`${tag}_divB`] = d.magnetic!.divB;
+            if (sim instanceof AmrSim) m[`${tag}_shared_mismatched`] = (await sim.faceConsistency()).mismatched;
+          }
+          m[`${tag}_central_density_change`] = Math.abs(d.ranges[0][1] / d0.ranges[0][1] - 1);
+          m[`${tag}_max_mach`] = d.maxMach;
+          return m[`${tag}_central_density_change`];
+        };
+        return blocks ? withAmr(gpu, prob, 128, { amrLevels: 1, tEnd }, go) : withSim(gpu, prob, 64, { tEnd }, go);
+      };
+      const plain = await run(polytrope, false, 2, 'plain');
+      const dipole = await run(polytropeDipole, false, 2, 'dipole');
+      const plainBlocks = await run(polytrope, true, 2, 'plain_blocks');
+      const dipoleBlocks = await run(polytropeDipole, true, 2, 'dipole_blocks');
+      const random = await run(polytropeRandom, false, 1, 'random');
+      for (const [tag, dev, ref] of [['dipole', dipole, plain], ['dipole_blocks', dipoleBlocks, plainBlocks]] as const) {
+        pass &&=
+          Math.abs(m[`${tag}_beta_min_initial`] / 1000 - 1) < 0.1 && dev < 0.05 && Math.abs(dev - ref) < 0.03 &&
+          m[`${tag}_magnetic_energy_change`] < 0.05 && m[`${tag}_divB`] < 1e-6 && (m[`${tag}_shared_mismatched`] ?? 0) === 0;
+      }
+      pass &&= random < 0.05 && m.random_divB < 1e-6;
       return { pass, metrics: m };
     },
   },

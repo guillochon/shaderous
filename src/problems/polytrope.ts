@@ -1,4 +1,5 @@
-import { all, OUTFLOW, type Problem } from './types';
+import { all, OUTFLOW, type Problem, type ProblemParam } from './types';
+import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
 
 // n = 1 polytrope: rho = rho_c sin(xi) / xi with xi = pi r / R, p = K rho^2, K = 2 G R^2 / pi.
 // Evolved with an ideal gas of gamma = 2, so the energy equation and dual-energy switch are
@@ -34,4 +35,37 @@ export const polytrope: Problem = {
     const p = POLY_K * Math.max(rho, POLY.rhoCut) ** 2;
     return { rho: Math.max(rho, POLY.rhoAmb), vx: 0, vy: 0, vz: 0, p, s: rho > POLY.rhoCut ? 1 : 0 };
   },
+};
+
+/** The polytrope's pressure profile, for the fields below: confined to where p > p_c / 100. */
+const POLY_STAR: StarProfile = {
+  pressure: (r) => POLY_K * polytropeDensity(r) ** 2,
+  pc: POLY_K * POLY.rhoc ** 2,
+  pcut: 0.01 * POLY_K * POLY.rhoc ** 2,
+  radius: POLY.R,
+};
+
+const betaParam: ProblemParam = {
+  id: 'beta', label: 'Plasma beta at the center', value: 1000, min: 10, max: 1e7, factor: 10,
+  title: 'Ratio of the gas pressure to the magnetic pressure B^2 / 2 at the star\'s center: the larger, the weaker the field',
+};
+
+/** The polytrope with a dipole field inside it, along z (mhd/star_fields.ts). */
+export const polytropeDipole: Problem = {
+  ...polytrope,
+  id: 'polytrope-dipole',
+  label: 'Polytrope with a dipole field',
+  blurb: 'The n = 1 polytrope threaded by a dipole field confined to the star (beta 1000 at its center): its field lines close inside it, and at this beta it stays in balance.',
+  params: [betaParam],
+  mhd: { potential: (p) => dipoleField(POLY_STAR, p.beta) },
+};
+
+/** The polytrope with a random (Kolmogorov) field inside it (mhd/star_fields.ts). */
+export const polytropeRandom: Problem = {
+  ...polytrope,
+  id: 'polytrope-random',
+  label: 'Polytrope with a random field',
+  blurb: 'The n = 1 polytrope threaded by a tangled field with a Kolmogorov spectrum, confined to the star (beta 1000 at its center on average).',
+  params: [betaParam, { id: 'seed', label: 'Random seed', value: 1, min: 1, max: 9999, step: 1, title: 'Which random field: each seed gives another' }],
+  mhd: { potential: (p) => randomField(POLY_STAR, p.beta, Math.round(p.seed)) },
 };

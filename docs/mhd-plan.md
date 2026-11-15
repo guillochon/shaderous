@@ -33,6 +33,13 @@ is rebuilt from the gas's. The refinement checks run with a field. There is a mo
 the new `field-loop-dense` preset. Restarting an adaptive-mesh run with a field from a snapshot
 followed (the leaves' faces in the file's `ShaderousFaces` dataset).
 
+Phase 4 progress (2026-11-14), as section 7b designs it: parts A (gravity, point masses, frames,
+sinks and cooling on the uniform grid), B (the same on blocks; time bins pause while self-gravity
+or point masses act on a field) and C (dipole and random fields inside stars, the polytrope's
+"Dipole field" and "Random field" variants) are done, with the magnetized polytrope staying at
+rest (`mhd-star-fields`). Still to do: species (D), viscosity and conduction (E), and time bins
+with self-gravity and a field.
+
 Phase 5 (field lines) done (2026-11-14), ahead of phase 4: numerics.md section 21, Field lines.
 Changes from section 10:
 - In 2D the lines are contours of the flux function A_z, not traced: evenly spaced in flux,
