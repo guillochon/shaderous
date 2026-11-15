@@ -1,7 +1,7 @@
 """Train the burning surrogate: a small network that steps the alpha chain's mass fractions
 forward by dt at fixed density, with the self-heating that burner.py integrates.
 
-    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr] [logw] [resw] [seed] [teacher.pt|-] [teach]
+    tools/burn/.venv/Scripts/python tools/burn/train.py [steps] [width] [depth] [hard] [out.pt] [rel] [fresh] [arch] [aux] [init.pt|-] [unroll] [lr] [logw] [resw] [seed] [teacher.pt|-] [teach] [ow] [jw]
 
 Input  log10 rho, log10 T, log10 dt (all scaled to about [-1, 1]) and the 13 mass fractions
        (as X^(1/4), which spreads out the trace species).
@@ -26,6 +26,7 @@ with each other as a front mixes fuel and ash), where it has no reference trajec
 """
 import copy
 import math
+import os
 import sys
 import time
 from pathlib import Path
@@ -535,6 +536,8 @@ class Pairs:
         dt = (self.t[j] - self.t[i]).float()
         D = self.X[tr, j] - self.X[tr, i]
         inputs = (self.log_rho[tr], self.log_T[tr, i], torch.log10(dt), self.X[tr, i].float())
+        self.ends = ((self.X[tr, -1] - self.X[tr, i]).float(),
+                     (self.X[tr, -1] - self.X[tr, -6]).abs().sum(dim=1) < 1e-3)
         return inputs, D.float(), (D * Q64).sum(dim=1).float()
 
 
@@ -744,6 +747,16 @@ def main():
     seed = int(sys.argv[15]) if len(sys.argv) > 15 else 0
     teacher = load_model(sys.argv[16]) if len(sys.argv) > 16 and sys.argv[16] != "-" else None
     teach = float(sys.argv[17]) if len(sys.argv) > 17 else 0.0
+    # Overshoot penalty and temperature slope (patch.py, where they were tried first): on
+    # trajectories that settle into (quasi-)equilibrium, any change beyond where the
+    # reference ends; and the difference between steps from one state at temperatures 1%
+    # apart against the reference's (tpairs.npz, gen_tpairs.py).
+    ow = float(sys.argv[18]) if len(sys.argv) > 18 else 0.0
+    jw = float(sys.argv[19]) if len(sys.argv) > 19 else 0.0
+    tpairs = None
+    if jw > 0:
+        from patch import TPairs
+        tpairs = TPairs(HERE / "tpairs.npz")
     torch.manual_seed(seed)
     tag = f"w{width}d{depth}h{hard:g}"
     rho, X, T, t = load()
@@ -783,11 +796,19 @@ def main():
             loss = loss + logw * log_loss(Dp, Dt, et)
         if resw > 0:
             loss = loss + resw * reservoir_loss(Dp, Dt, X0)
+        step_loss.Dp = Dp
         return loss
 
     for s in range(steps):
         (r, Tl, dt, X0), Dt, et = train.sample(8192, fresh)
         loss = step_loss(r, Tl, dt, X0, Dt, et)
+        if ow > 0:
+            rem, settled = train.ends
+            beyond = torch.relu(step_loss.Dp * torch.sign(rem) - rem.abs()).sum(dim=1)
+            loss = loss + ow * (beyond * settled).sum() / settled.sum().clamp_min(1)
+        if tpairs is not None:
+            tr_, T0_, T1_, ld_, Xp, diff, ediff = tpairs.sample(4096)
+            loss = loss + jw * log_loss(model(tr_, T1_, ld_, Xp) - model(tr_, T0_, ld_, Xp), diff, ediff)
         if teacher is not None and teach > 0:
             near = nearby(r[:4096], Tl[:4096], dt[:4096], X0[:4096])
             with torch.no_grad():
@@ -823,7 +844,9 @@ def main():
     meta = {"width": width, "depth": depth, "arch": arch}
     torch.save({"state": ema.state_dict(), **meta}, HERE / out)
     torch.save({"state": model.state_dict(), **meta}, HERE / out.replace(".pt", "_raw.pt"))
-    for dt in (1e-5, 1e-3, 1e-2):
+    # BURN_NO_ROLLOUT=1 skips these (score.py runs its own checks; the 1e-5 s one takes
+    # longer than the rest of a short run).
+    for dt in () if os.environ.get("BURN_NO_ROLLOUT") else (1e-5, 1e-3, 1e-2):
         print(f"rollout dt={dt:g}:", rollout(ema, rho[va], X[va], T[va], t, dt), flush=True)
 
 
