@@ -6,6 +6,7 @@ import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
 import { FieldLines } from './fieldlines';
+import { padded3d } from '../amr/dispatch';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
 const HIST_BINS = 128;
@@ -650,7 +651,10 @@ export class Renderer {
         const leaves = sim.displayAtlas!()!.leaves;
         cp2.setPipeline(this.pAtlas!);
         cp2.setBindGroup(0, this.gAtlas[parity]);
-        if (leaves > 0) cp2.dispatchWorkgroups(leaves * 3, 3, 5);
+        if (leaves > 0) {
+          const [x, y, z] = sim.cfg.ndim === 3 ? padded3d(leaves) : [leaves * 3, 3, 5];
+          cp2.dispatchWorkgroups(x, y, z);
+        }
       } else {
         cp2.setPipeline(this.pField);
         cp2.setBindGroup(0, this.gField[parity]);

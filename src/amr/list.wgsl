@@ -7,13 +7,16 @@
 // (the dispatch has a quarter as many workgroups along x and one along z).
 //
 // A GPU runs at most 65535 workgroups along each axis of a dispatch, fewer than a fine 2D mesh
-// has blocks (4096^2 cells is 65536 root blocks). So a 2D list longer than a slab is cut into
-// slabs stacked along z: SLAB_QUADS groups of four blocks per slab in an interior or padded
-// pass, FLAT_ROWS blocks per slab in a flat one. A 3D mesh holds few enough blocks not to need
-// it (AmrSim caps it). The host (amr_sim.ts) and amr/bins_args.wgsl dispatch to match.
+// has blocks (4096^2 cells is 65536 root blocks), and a 3D pass runs two or three workgroups per
+// block along x. So a long list is cut into slabs stacked along z: in 2D, SLAB_QUADS groups of
+// four blocks per slab in an interior or padded pass; in 3D, SLAB_BLOCKS blocks per slab, each
+// slab taking a block's depth of workgroups along z (16 cells in an interior pass, 20 in a
+// padded one); FLAT_ROWS blocks per slab in a flat pass. The host (amr/dispatch.ts) and
+// amr/bins_args.wgsl dispatch to match.
 @group(0) @binding(31) var<storage, read> LIST: array<u32>;
 
 const SLAB_QUADS = 16384u;
+const SLAB_BLOCKS = 16384u;
 const FLAT_ROWS = 32768u;
 
 struct Inv { ok: bool, slot: i32, l: vec3<i32> }
@@ -25,6 +28,9 @@ fn inv_interior(gid: vec3<u32>) -> Inv {
   if (is2d()) {
     b = 4u * (b + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u;
     l.z = 0;
+  } else {
+    b += (gid.z / u32(BS)) * SLAB_BLOCKS;
+    l.z = i32(gid.z % u32(BS));
   }
   if (b >= LIST[0] || l.y >= BS) { return Inv(false, 0, l); }
   return Inv(true, i32(LIST[1u + b]), l);
@@ -58,6 +64,10 @@ fn inv_padded(gid: vec3<u32>, reach: i32) -> Inv {
   if (is2d()) {
     b = 4u * (b + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u;
     l.z = 0;
+  } else {
+    // Five workgroups of four along z per block (24 x 24 x 20 invocations).
+    b += (gid.z / 20u) * SLAB_BLOCKS;
+    l.z = i32(gid.z % 20u) - reach;
   }
   let top = BS + reach;
   if (b >= LIST[0] || l.x >= top || l.y >= top || l.z >= top) { return Inv(false, 0, l); }

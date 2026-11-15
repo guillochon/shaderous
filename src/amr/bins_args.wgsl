@@ -23,8 +23,9 @@
 @group(0) @binding(5) var<storage, read_write> LL: array<u32>;
 @group(0) @binding(6) var<storage, read_write> LD: array<u32>;
 
-// Slabs of a long 2D list (amr/list.wgsl): must match SLAB_QUADS and FLAT_ROWS there.
+// Slabs of a long list (amr/list.wgsl): must match SLAB_QUADS, SLAB_BLOCKS and FLAT_ROWS there.
 const SLAB_QUADS = 16384u;
+const SLAB_BLOCKS = 16384u;
 const FLAT_ROWS = 32768u;
 
 fn put(i: u32, x: u32, y: u32, z: u32) {
@@ -54,9 +55,13 @@ fn main() {
     put(1u, min(qu, SLAB_QUADS) * 2u, 2u, (qu + SLAB_QUADS - 1u) / SLAB_QUADS);
     put(2u, min(ql, SLAB_QUADS) * 2u, 2u, (ql + SLAB_QUADS - 1u) / SLAB_QUADS);
   } else {
-    put(0u, na * 3u, 3u, 5u);
-    put(1u, nu * 2u, 2u, 4u);
-    put(2u, nl * 2u, 2u, 4u);
+    // In slabs of SLAB_BLOCKS stacked along z, a block's depth of workgroups each (amr/dispatch.ts).
+    let sa = (na + SLAB_BLOCKS - 1u) / SLAB_BLOCKS;
+    let su = (nu + SLAB_BLOCKS - 1u) / SLAB_BLOCKS;
+    let sl = (nl + SLAB_BLOCKS - 1u) / SLAB_BLOCKS;
+    put(0u, min(na, SLAB_BLOCKS) * 3u, 3u, 5u * sa);
+    put(1u, min(nu, SLAB_BLOCKS) * 2u, 2u, 4u * su);
+    put(2u, min(nl, SLAB_BLOCKS) * 2u, 2u, 4u * sl);
   }
   // Multigrid (src/amr/gravity.ts, cells() and color()).
   put(3u, na * 2u, 2u, 4u);

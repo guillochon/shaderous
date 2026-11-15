@@ -3,6 +3,7 @@
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, tex3d } from '../gpu/device';
 import { BS, PAD } from './tree';
+import { padded3d } from './dispatch';
 
 const PRE = 2; // smoothing sweeps before restriction
 const POST = 2; // and after prolongation
@@ -237,7 +238,7 @@ export class AmrGravity {
   }
   private padded(pass: GPUComputePassEncoder, count: number) {
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(0));
-    pass.dispatchWorkgroups(count * 3, 3, 5);
+    pass.dispatchWorkgroups(...padded3d(count));
   }
 
   private smooth(pass: GPUComputePassEncoder, k: number, level: number, count: number, sweeps: number) {
