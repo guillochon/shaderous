@@ -122,6 +122,7 @@ range each value is clamped to.
 | `nu`, `kappa` | Viscosity and conductivity |
 | `bc` | Six digits: kind of boundary at the lower x, y, z faces and then the upper ones |
 | `refhi`, `reflo`, `refrho`, `tbins` | Refinement thresholds and time bins (adaptive runs) |
+| `frho`, `fu`, `fv`, `fva` | Limits on tenuous gas (density below which they apply, its largest specific internal energy and speed) and, with a magnetic field, the largest Alfvén speed anywhere (mass is added where it would pass) |
 | `p.<id>` | One of the preset's own parameters (`describe().problems[i].params`) |
 | `mode`, `field`, `axis`, `slice`, `log`, `cmap`, `lo`, `hi`, ... | The view |
 

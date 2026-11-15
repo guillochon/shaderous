@@ -113,6 +113,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   num('frho', cfg.fluff.rho, def.fluff.rho);
   num('fu', cfg.fluff.u, def.fluff.u);
   num('fv', cfg.fluff.v, def.fluff.v);
+  num('fva', cfg.fluff.va ?? 0, def.fluff.va ?? 0);
   str('gravity', cfg.gravity, def.gravity);
   num('G', cfg.G, def.G);
   num('vcycles', cfg.vcycles, def.vcycles);
@@ -274,6 +275,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   put(out.fluff, 'rho', num('frho', 0));
   put(out.fluff, 'u', num('fu', 0));
   put(out.fluff, 'v', num('fv', 0));
+  put(out.fluff, 'va', num('fva', 0));
   const tb = num('tbins', 0, 3);
   if (tb !== undefined) out.cfg.timeBins = Math.round(tb);
   put(out.cfg, 'gravity', pick<GravityMode>('gravity', GRAVITY_MODES));

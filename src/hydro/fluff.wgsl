@@ -16,3 +16,13 @@ fn tame_fluff(rho: f32, mom: vec3<f32>, eint: f32) -> Tamed {
   }
   return o;
 }
+
+// The Alfven speed ceiling (MHD): where the field is strong for the gas it threads, mass is added
+// at rest until v_A = |B| / sqrt(rho) is P.fluff.w at most (0 for none). Field that rises out
+// of a disk into its thin corona, or that a sink leaves behind once it has taken the gas, would
+// otherwise set an ever smaller timestep. Not conservative: the mass it adds is the price.
+fn alfven_floor(rho: f32, b2: f32) -> f32 {
+  let va = P.fluff.w;
+  if (!(va > 0.0)) { return rho; }
+  return max(rho, b2 / (va * va));
+}

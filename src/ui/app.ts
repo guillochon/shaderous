@@ -158,6 +158,7 @@ side.innerHTML = `
       ${field('Tenuous below density', number('fluffrho', 'min="0"', 10), '', 'Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off. Placing a star with the star tool sets these from the star if they are off')}
       ${field('Max specific energy', number('fluffu', 'min="0"', 2), 'row-fluffu', 'Largest internal energy per unit mass tenuous gas may have. 0 is no cap')}
       ${field('Max speed', number('fluffv', 'min="0"', 2), 'row-fluffv', 'Largest speed tenuous gas may have. 0 is no cap')}
+      ${field('Max Alfv\u00e9n speed', number('fluffva', 'min="0"', 2), 'row-fluffva', 'With a magnetic field: largest Alfv\u00e9n speed |B| / \u221a\u03c1 anywhere. Where the field is stronger than that for the gas it threads (a disk\u2019s thin corona, the gas a sink has emptied), mass is added at rest until it is not, so those few cells cannot set the timestep. Not conservative. 0 is no cap')}
       ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')), '', 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust')}
       ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')), '', 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust')}
     </div>
@@ -1051,6 +1052,8 @@ function syncControls() {
   $<HTMLInputElement>('fluffrho').value = String(+cfg.fluff.rho.toPrecision(4));
   $<HTMLInputElement>('fluffu').value = String(+cfg.fluff.u.toPrecision(4));
   $<HTMLInputElement>('fluffv').value = String(+cfg.fluff.v.toPrecision(4));
+  $<HTMLInputElement>('fluffva').value = String(+(cfg.fluff.va ?? 0).toPrecision(4));
+  $('row-fluffva').hidden = !cfg.problem.mhd;
   $<HTMLInputElement>('fluffu').disabled = $<HTMLInputElement>('fluffv').disabled = !(cfg.fluff.rho > 0);
   $<HTMLInputElement>('reflo').value = String(cfg.refineLo);
   $<HTMLInputElement>('refhi').disabled = $<HTMLInputElement>('reflo').disabled = cfg.amrLevels === 0;
@@ -1965,9 +1968,9 @@ function bind() {
     syncControls();
   });
   // The tenuous-gas caps are parameters: the run carries on.
-  for (const [id, key] of [['fluffrho', 'rho'], ['fluffu', 'u'], ['fluffv', 'v']] as const) {
+  for (const [id, key] of [['fluffrho', 'rho'], ['fluffu', 'u'], ['fluffv', 'v'], ['fluffva', 'va']] as const) {
     on(id, (el) => {
-      cfg.fluff = { ...cfg.fluff, [key]: Math.max(0, numOr(el, cfg.fluff[key])) };
+      cfg.fluff = { ...cfg.fluff, [key]: Math.max(0, numOr(el, cfg.fluff[key] ?? 0)) };
       applyParams();
       syncControls();
     });

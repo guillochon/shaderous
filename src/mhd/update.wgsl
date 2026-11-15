@@ -66,6 +66,7 @@ override STAGE: u32 = 1u;
 #include "gravity/ext_bind.wgsl"
 #include "gravity/gfield.wgsl"
 struct NewState { u1: vec4<f32>, u2: vec4<f32> }
+#include "hydro/damping.wgsl"
 #include "hydro/cooling.wgsl"
 
 #include "mhd/common.wgsl"
@@ -280,14 +281,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ke = select(kick, kx, flux_work);
     ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
   }
-  let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
+  let eb = 0.5 * dot(bc, bc);
+  let rho_new = max(u1.x + dtdx * net_a.x, P.rho_floor);
+  let rho = alfven_floor(rho_new, 2.0 * eb);
   let mom = u1.yzw + kick + dtdx * net_a.yzw;
-  let E = u2.x + ekick + dtdx * (net_b.x + dw);
+  // Mass the Alfven ceiling adds comes at rest: the kinetic energy it takes stays out of the heat.
+  let E = u2.x + ekick + dtdx * (net_b.x + dw) - 0.5 * dot(mom, mom) * (1.0 / rho_new - 1.0 / rho);
   var heat = 0.0;
   if (VISCOSITY) { heat = visc_heating(t, axes); }
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
-  let eb = 0.5 * dot(bc, bc);
   var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);
   var mout = mom;
   let tame = tame_fluff(rho, mom, en.y);
@@ -296,6 +299,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     en = vec2<f32>(0.5 * dot(mout, mout) / rho + eb + tame.eint, tame.eint);
   }
   var st = NewState(vec4<f32>(rho, mout), vec4<f32>(en.x, en.y, sc, flag));
+  // The damping zone over the whole step, on the gas alone: B^2 / 2 stays out of it.
+  if (STAGE == 2u && DAMPING) {
+    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), (vec3<f32>(t) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt);
+    st = NewState(d.u1, vec4<f32>(d.u2.x + eb, d.u2.yz, flag));
+  }
   // Cooling over the whole step (it changes E by exactly the change of e_int).
   if (STAGE == 2u) { st = apply_cooling(st, clock.dt); }
   textureStore(O1, t, st.u1);

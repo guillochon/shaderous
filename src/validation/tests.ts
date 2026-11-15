@@ -26,6 +26,7 @@ const tdeTest: Problem = { ...tidalDisruption, box: TDE.box };
 import { sphere, spherePotential } from '../problems/sphere';
 import { all, PERIODIC, REFLECT, type Problem } from '../problems/types';
 import { binary } from '../problems/binary';
+import { MRI, mriDisk } from '../problems/mri_disk';
 import { thermalInstability } from '../problems/thermal_instability';
 import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
@@ -3208,6 +3209,38 @@ export const TESTS: TestDef[] = [
       const pass =
         m.magnetic_energy_error < 0.03 && Math.abs(m.beta_center / 2500 - 1) < 0.05 && m.peak_density_vs_hydro < 0.05 && m.mass_left_vs_hydro < 0.05 &&
         m.divB < 1e-6 && m.shared_mismatched === 0;
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-disk',
+    name: 'Magnetized accretion disk: field loops in a disk around a point mass (uniform 64^3 for half an orbit at r = 1; blocks 64 finest, 1 level, for one orbit)',
+    criterion:
+      "The preset's disk (beta = 50 where its loops meet) stays a disk: on both grids the mass in the box stays within 3% of its start and the kinetic energy within 5% (the damping zone holds the outer edge, which the field must not upset), no cell's Alfven speed passes the ceiling (least beta at least 2 cs^2 / v_A,max^2, less 1%), |div B| dx / max |B| stays below 1e-6, and on blocks the shared faces agree",
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const floorBeta = (2 * MRI.cs ** 2) / MRI.vaMax ** 2;
+      const check = async (sim: { diagnostics(): Promise<Diagnostics> }, tag: string, d0: Diagnostics) => {
+        const d = await sim.diagnostics();
+        m[`${tag}_mass`] = d.mass / d0.mass;
+        m[`${tag}_kinetic`] = d.eKin / d0.eKin;
+        m[`${tag}_beta_min_over_ceiling`] = d.magnetic!.betaMin / floorBeta;
+        m[`${tag}_divB`] = d.magnetic!.divB;
+      };
+      await withSim(gpu, mriDisk, 64, { tEnd: Math.PI }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        await check(sim, 'uniform', d0);
+      });
+      await withAmr(gpu, mriDisk, 64, { amrLevels: 1, tEnd: 2 * Math.PI }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        await check(sim, 'blocks', d0);
+        m.shared_mismatched = (await sim.faceConsistency()).mismatched;
+      });
+      const pass = (['uniform', 'blocks'] as const).every(
+        (t) => Math.abs(m[`${t}_mass`] - 1) < 0.03 && Math.abs(m[`${t}_kinetic`] - 1) < 0.05 && m[`${t}_beta_min_over_ceiling`] > 0.99 && m[`${t}_divB`] < 1e-6,
+      ) && m.shared_mismatched === 0;
       return { pass, metrics: m };
     },
   },

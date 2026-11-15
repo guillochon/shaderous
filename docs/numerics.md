@@ -774,6 +774,8 @@ Beyond 4.5 binary separations the density, velocity and specific internal energy
 the initial disk, at a rate that rises from zero there to three times per local orbital period
 at the box edge (6 separations). Without the zone, gas flowed in through the corners, and the
 disk grew until its uneven pull pushed the binary out of the box.
+With a magnetic field (the magnetized accretion disk) the zone acts on the gas alone: B^2 / 2 is
+taken out of E before it and put back after, and the field is left to the induction equation.
 
 ## 20. Nuclear burning surrogate (in development)
 
@@ -934,6 +936,28 @@ $`E`$ includes $`B^2/2`$.
   erg on the presets' grid (6.8e44 from their own lattice at theirs); the least beta, about
   0.1, is in the edge cells just inside the cut. `mhd-tidal-disruption` checks the dipole's
   energy and central beta and runs the grazing encounter against its hydro control.
+- **Magnetized accretion disk** (`problems/mri_disk.ts`, "Point masses" group). A globally
+  isothermal disk (c_s = 0.15, so H / r = 0.15 r^(1/2)) around one Plummer-softened point mass
+  with a sink, in exact vertical and radial balance with the softened potential: the density is
+  rho_mid(R) exp(-(Phi(R, z) - Phi(R, 0)) / c_s^2), with rho_mid proportional to R^(-3/2) (a flat
+  surface density) tapered inside R = 0.75 and outside R = 3, and the rotation
+  v_phi^2 = R^2 / (R^2 + eps^2)^(3/2) + c_s^2 dln(rho_mid) / dln(R), the same at every height. The
+  disk holds a hundredth of the central mass. The field is four poloidal loops with no net flux,
+  as in [Hawley (2000)][Hawley2000] but laid along R: A_phi proportional to
+  max(exp(-z^2 / 2H^2) - e^-2, 0) sin(pi ln(R / 0.75) / ln 1.35), closing at |z| = 2H, scaled so
+  that beta = 50 at the midplane where two loops meet. The MRI's fastest wavelength there,
+  2 pi v_A / Omega = 1.3 H, spans some 6 cells at r = 1 on the default 256^3 mesh (2 levels) and
+  15 at r = 1.85; [Hawley, Guan & Krolik (2011)][Hawley2011] ask for 8 to 10. The finest level
+  holds the gas denser than 5e-5 (about 2H from the midplane) and the sink. The damping zone of
+  section 19 holds the outer disk beyond R = 3.25; with a field it acts on the gas alone and
+  leaves B^2 / 2 in E as it was. Field that rises into the corona, and field a sink leaves
+  behind, meet the Alfven ceiling below. `mhd-disk` runs it on both grids.
+- **Alfven ceiling** (`hydro/fluff.wgsl` `alfven_floor`; `Problem.fluff.va`, the panel's "Max
+  Alfven speed", link key `fva`). Where |B| / sqrt(rho) would pass the ceiling after a cell's
+  update, mass is added at rest until it does not: momentum stays, so the added gas takes kinetic
+  energy but not heat. Off (0) except in the disk, where it is 3, a little above the orbital
+  speed at the sink's edge. Not conservative: the added mass is the price of a timestep that a
+  few nearly empty magnetized cells would otherwise set.
 - **Fields inside stars** (`mhd/star_fields.ts`, plan section 8). A dipole along z,
   $`\mathbf{A} = A_0 \max(p - p_\text{cut}, 0)\,(-y, x, 0)`$, normalized by $`B_z = 2A_0(p_c -
   p_\text{cut})`$ at the center to the requested beta; or a random field, a sum of 64 Fourier
@@ -1196,6 +1220,8 @@ result.
 [Chandrasekhar1935]: https://doi.org/10.1093/mnras/95.3.207
 [Davis1988]: https://doi.org/10.1137/0909030
 [deValBorro2006]: https://doi.org/10.1111/j.1365-2966.2006.10488.x
+[Hawley2000]: https://doi.org/10.1086/308180
+[Hawley2011]: https://doi.org/10.1088/0004-637X/738/1/84
 [Evrard1988]: https://doi.org/10.1093/mnras/235.3.911
 [Farris2014]: https://doi.org/10.1088/0004-637X/783/2/134
 [Federrath2010]: https://doi.org/10.1088/0004-637X/713/1/269
@@ -1261,6 +1287,8 @@ result.
 - Guillochon, J., et al. (2009). Three-dimensional Simulations of Tidally Disrupted Solar-type Stars and the Observational Signatures of Shock Breakout. ApJ 705, 844. [doi:10.1088/0004-637X/705/1/844](https://doi.org/10.1088/0004-637X/705/1/844)
 - Guillochon, J., & Ramirez-Ruiz, E. (2013). Hydrodynamical Simulations to Determine the Feeding Rate of Black Holes by the Tidal Disruption of Stars: The Importance of the Impact Parameter and Stellar Structure. ApJ 767, 25. [doi:10.1088/0004-637X/767/1/25](https://doi.org/10.1088/0004-637X/767/1/25)
 - Harten, A., Lax, P. D., & van Leer, B. (1983). On Upstream Differencing and Godunov-Type Schemes for Hyperbolic Conservation Laws. SIAM Review 25, 35. [doi:10.1137/1025002](https://doi.org/10.1137/1025002)
+- Hawley, J. F. (2000). Global Magnetohydrodynamical Simulations of Accretion Tori. ApJ 528, 462. [doi:10.1086/308180](https://doi.org/10.1086/308180)
+- Hawley, J. F., Guan, X., & Krolik, J. H. (2011). Assessing Quantitative Results in Accretion Simulations: From Local to Global. ApJ 738, 84. [doi:10.1088/0004-637X/738/1/84](https://doi.org/10.1088/0004-637X/738/1/84)
 - Jeans, J. H. (1902). The Stability of a Spherical Nebula. Philosophical Transactions of the Royal Society of London Series A 199, 1. [doi:10.1098/rsta.1902.0012](https://doi.org/10.1098/rsta.1902.0012)
 - Käppeli, R., & Mishra, S. (2014). Well-balanced schemes for the Euler equations with gravitation. Journal of Computational Physics 259, 199. [doi:10.1016/j.jcp.2013.11.028](https://doi.org/10.1016/j.jcp.2013.11.028)
 - Koren, B. (1993). A robust upwind discretization method for advection, diffusion and source terms. In Numerical Methods for Advection-Diffusion Problems, Notes on Numerical Fluid Mechanics 45, 117. Vieweg. [OpenAlex](https://openalex.org/W2125064741)

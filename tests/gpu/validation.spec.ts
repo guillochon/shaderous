@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'species', 'species-eos', 'shock-bubble', 'detonation', 'advection-accuracy', 'flux-determinism',
   'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-species', 'amr-species-eos', 'amr-detonation', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'point-mass-sink', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption',
-  'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-diffusion', 'mhd-tidal-disruption',
+  'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-diffusion', 'mhd-tidal-disruption', 'mhd-disk',
 ];
 
 test.describe.configure({ mode: 'serial' });

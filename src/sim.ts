@@ -121,9 +121,10 @@ export interface SimConfig {
   refineDense: number;
   /**
    * Limits on tenuous gas (hydro/fluff.wgsl): below density `rho`, the specific internal
-   * energy is capped at `u` and the speed at `v`. A zero density switches them off.
+   * energy is capped at `u` and the speed at `v`. A zero density switches them off. With a
+   * magnetic field, `va` caps the Alfven speed everywhere by adding mass (0 or absent: none).
    */
-  fluff: { rho: number; u: number; v: number };
+  fluff: { rho: number; u: number; v: number; va?: number };
   /** With self-gravity, refine where the Jeans length is under this many cells (0 = off). */
   jeansRefine: number;
 }
@@ -639,7 +640,8 @@ export function packParams(
   // whether they are all the field texture holds (no Poisson potential).
   f.set([x.masses, c.problem.frame === 'gas' ? 1 : c.problem.frame === 'masses' ? 2 : 0, x.masses > 0 ? 1 : 0, x.selfGravity ? 0 : 1], 24);
   const fl = c.fluff;
-  f.set(fl.rho > 0 ? [fl.rho, fl.u > 0 ? fl.u : 1e30, fl.v > 0 ? fl.v : 1e30, 0] : [0, 0, 0, 0], 28);
+  f.set(fl.rho > 0 ? [fl.rho, fl.u > 0 ? fl.u : 1e30, fl.v > 0 ? fl.v : 1e30] : [0, 0, 0], 28);
+  f[31] = c.problem.mhd && (fl.va ?? 0) > 0 ? fl.va! : 0;
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
   u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);

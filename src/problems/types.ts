@@ -194,9 +194,10 @@ export interface Problem {
   bc2d?: { lo: Bc3; hi: Bc3 };
   /**
    * Limits on tenuous gas: below density `rho`, cap the specific internal energy at `u` and
-   * the speed at `v`. See hydro/fluff.wgsl.
+   * the speed at `v`. With a magnetic field, `va` caps the Alfven speed everywhere by adding
+   * mass (hydro/fluff.wgsl alfven_floor). See hydro/fluff.wgsl.
    */
-  fluff?: { rho: number; u: number; v: number };
+  fluff?: { rho: number; u: number; v: number; va?: number };
   /** Extra controls shown when this preset is selected. Changing one restarts the run, unless it is `live`. */
   params?: ProblemParam[];
   /**

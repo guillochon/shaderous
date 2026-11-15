@@ -54,6 +54,11 @@ disruptions); section 8's taper by (p - p_cut) and normalization at the center w
 The edge of a star in near-vacuum needed a first-order flux correction first. Still to do: the
 runs and the comparison with GM17's figures.
 
+Beyond the plan (2026-11-14): a magnetized accretion disk preset, `mri-disk` (numerics.md
+section 21, Magnetized accretion disk), with what it needed: the damping zone in both MHD
+updates, and an Alfven speed ceiling. Still to add: the stresses (alpha_Maxwell,
+alpha_Reynolds) and the MRI quality factors Q_z, Q_phi as diagnostics or views.
+
 Phase 5 (field lines) done (2026-11-14), ahead of phase 4: numerics.md section 21, Field lines.
 Changes from section 10:
 - In 2D the lines are contours of the flux function A_z, not traced: evenly spaced in flux,

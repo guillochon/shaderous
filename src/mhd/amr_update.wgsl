@@ -54,6 +54,7 @@ override STAGE: u32 = 1u;
 #include "gravity/ext_bind.wgsl"
 #include "amr/species_index.wgsl"
 struct NewState { u1: vec4<f32>, u2: vec4<f32> }
+#include "hydro/damping.wgsl"
 #include "hydro/cooling.wgsl"
 
 // Viscous heating (hydro/diffusion_core.wgsl), as mhd/update.wgsl has it: the stresses of the
@@ -481,14 +482,16 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     let ke = select(kick, kx, flux_work);
     ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
   }
-  let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
+  let eb = 0.5 * dot(bc, bc);
+  let rho_new = max(u1.x + dtdx * net_a.x, P.rho_floor);
+  let rho = alfven_floor(rho_new, 2.0 * eb);
   var mom = u1.yzw + kick + dtdx * net_a.yzw;
-  var E = u2.x + ekick + dtdx * (net_b.x + dw);
+  // Mass the Alfven ceiling adds comes at rest: the kinetic energy it takes stays out of the heat.
+  var E = u2.x + ekick + dtdx * (net_b.x + dw) - 0.5 * dot(mom, mom) * (1.0 / rho_new - 1.0 / rho);
   var heat = 0.0;
   if (VISCOSITY && !g_deposit) { heat = visc_heating(x); }
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
-  let eb = 0.5 * dot(bc, bc);
   if (STAGE == 2u && gravity && !self_gravity && !g_deposit) {
     // The uniform field alone: the second half kick here, with the updated density.
     let k2 = 0.5 * dt * rho * g;
@@ -503,6 +506,11 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     en = vec2<f32>(0.5 * dot(mout, mout) / rho + eb + tame.eint, tame.eint);
   }
   var st = NewState(vec4<f32>(rho, mout), vec4<f32>(en.x, en.y, sc, flag));
+  // The damping zone over the block's step, on the gas alone: B^2 / 2 stays out of it.
+  if (STAGE == 2u && DAMPING && !g_deposit) {
+    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), blk_pos(inv.slot, t) / P.box + 0.5, dt);
+    st = NewState(d.u1, vec4<f32>(d.u2.x + eb, d.u2.yz, flag));
+  }
   // Cooling over the block's step (it changes E by exactly the change of e_int).
   if (STAGE == 2u && !g_deposit) { st = apply_cooling(st, dt); }
   textureStore(O1, x, st.u1);

@@ -12,7 +12,8 @@ struct Params {
   bh: vec4<f32>,         // point masses (gravity/bh.wgsl): (how many, 1 if the frame accelerates
                          //   with the gas or 2 if with the masses, 1 if there are any, 1 if there is no Poisson potential)
   fluff: vec4<f32>,      // tenuous-gas limits: (density below which they apply, max specific
-                         //   internal energy, max speed, 0); a zero density switches them off
+                         //   internal energy, max speed, max Alfven speed); a zero density
+                         //   switches the first three off, a zero Alfven speed the last
   amr: vec4<u32>,        // block grids: (atlas slots per side of a layer, root blocks per side, max level, layers of slots)
   n: u32,                // cells per side along x and y (level 0 on block grids)
   grav_on: u32,          // the gravity field texture is in use: self-gravity, point masses or both

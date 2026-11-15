@@ -13,6 +13,7 @@ import { evrard } from './evrard';
 import { tidalDisruption, tidalDisruptionDipole, tidalDisruptionFull, tidalDisruptionFullRandom, tidalDisruptionN3, tidalDisruptionN3Full, tidalDisruptionRandom } from './tidal_disruption';
 import { sphere } from './sphere';
 import { binary } from './binary';
+import { mriDisk } from './mri_disk';
 import { thermalInstability } from './thermal_instability';
 import { isothermalCollapse } from './isothermal';
 import { empty } from './empty';
@@ -116,6 +117,7 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
         ],
       },
       single(binary),
+      single(mriDisk),
     ],
   },
   {
