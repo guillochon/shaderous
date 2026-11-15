@@ -191,3 +191,42 @@ test('a movie with a time cadence leaves the run exactly as it would have been',
     expect(rec.values).toEqual(plain.values);
   }
 });
+
+test('checkpoints are written while a movie records, and while the API steps', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  // A folder held in memory, in place of the one the user would pick.
+  await page.evaluate(() => {
+    const files: string[] = [];
+    (window as any).__ckptFiles = files;
+    (window as any).showDirectoryPicker = async () => ({
+      name: 'test',
+      getFileHandle: async (name: string) => ({
+        createWritable: async () => ({ write: async () => void files.push(name), close: async () => {} }),
+      }),
+    });
+  });
+  const files = () => page.evaluate(() => [...(window as any).__ckptFiles] as string[]);
+  await call(page, 'load', { problem: 'sedov', dim: 2, n: 128 });
+  await call(page, 'control', 'ckdt', 0.002);
+  await call(page, 'control', 'ckpt', true);
+  // The folder is picked asynchronously: wait for the first checkpoint to be armed.
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.tStop !== undefined);
+
+  // run() goes through checkpoints, writing each, to its own stop.
+  const r = await call(page, 'run', { until: 0.005 });
+  expect(r.stopped).toBe('time');
+  expect(r.t).toBeCloseTo(0.005, 6);
+  expect((await files()).map((f) => f.match(/ckpt(\d+)/)![1])).toEqual(['0001', '0002']);
+
+  // A recording, with either cadence, does too.
+  const m = await call(page, 'record', { every: 2, until: 0.009, width: 320, height: 180, download: false });
+  expect(m.stopped).toBe('time');
+  expect(m.t).toBeCloseTo(0.009, 6);
+  const m2 = await call(page, 'record', { dt: 5e-4, until: 0.013, width: 320, height: 180, download: false });
+  expect(m2.stopped).toBe('time');
+  expect(m2.frames).toBeGreaterThan(5);
+  expect((await files()).map((f) => f.match(/ckpt(\d+)/)![1])).toEqual(['0001', '0002', '0003', '0004', '0005', '0006']);
+  expect((await call(page, 'state')).finished).toBe(false);
+  expect(await call(page, 'errors')).toEqual([]);
+});

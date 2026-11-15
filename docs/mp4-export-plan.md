@@ -5,7 +5,9 @@ Status: built 2026-11-14 (steps 1 to 6). Decisions made while building:
 - **Muxer**: Mediabunny (MPL-2.0), pinned; `mp4-muxer` is deprecated in its favor. Its
   `CanvasSource` encodes from the compositing canvas and applies the encoder's backpressure.
 - **Every nth frame** is read as every nth simulation step (section 3), as proposed.
-- **Checkpoints**: recording refuses to start while they are on (section 4).
+- **Checkpoints**: the API's stepping loop writes a checkpoint the clock is held at and arms
+  the next, as the page's own loop does when it plays, so recordings (and `run()`) go through
+  them (section 4).
 - **The soft stop** lives in `P.refine.z`, a spare slot of the params block, so the block's
   layout is unchanged; 1e30 means none. Uniform and adaptive runs (with local timesteps) share
   `hydro/clock.wgsl`, so one rule covers both. The GPU test confirms a `dt` recording leaves

@@ -3698,6 +3698,7 @@ const api = installApi(
       syncRecordButton();
     },
     checkpointsOn: () => ckpt.on,
+    writeCheckpoint: () => (sim ? saveCheckpoint(sim) : Promise.resolve()),
     stepRate: () => stepRate,
   },
   ready,

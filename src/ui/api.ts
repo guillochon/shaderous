@@ -67,8 +67,10 @@ export interface AppHooks {
   setRecording(size: [number, number] | null): void;
   /** A frame of the recording under way has been added. */
   recordProgress(status: RecordingStatus): void;
-  /** Checkpoints are on (they hold the clock, as a movie's frame times would). */
+  /** Checkpoints are on: the clock is held at each (cfg.tStop) until it is written. */
   checkpointsOn(): boolean;
+  /** Write the checkpoint the clock is held at, and arm the next (as the page does when it plays). */
+  writeCheckpoint(): Promise<void>;
   /** The page's measured step rate when it last played, in steps per second (0 if unknown). */
   stepRate(): number;
 }
@@ -274,6 +276,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     app.setDriving(true);
     const t0 = performance.now();
     const stopWas = cfg.tStop;
+    // The checkpoint the clock is armed to stop at, if any (cfg.tStop is `until` when sooner).
+    let checkpoint = stopWas;
     let lastDt = 0;
     const result = (d: Diagnostics, start: number, stopped: RunResult['stopped']): RunResult => ({
       t: d.t, dt: d.dt, steps: d.steps, taken: d.steps - start, seconds: (performance.now() - t0) / 1000, stopped, lastDt: d.dt > 0 ? d.dt : lastDt,
@@ -301,6 +305,20 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         // clock's dt is that of the last step, so only a step taken here tells.
         if (d.dt === 0 && rounds > 0) {
           if (until !== undefined && d.t >= until * (1 - 1e-4)) return result(d, start, 'time');
+          // Held at a checkpoint short of the end time: write it, as the page's own loop does
+          // when it plays, and go on to the next.
+          if (checkpoint !== undefined && app.checkpointsOn() && d.t >= checkpoint * (1 - 1e-5) && !(d.t >= cfg.tEnd * (1 - 1e-5))) {
+            await app.writeCheckpoint();
+            if (app.sim() !== s) throw new Error('the run was replaced while stepping');
+            // The page has armed the next one (none if checkpoints stopped on an error).
+            checkpoint = cfg.tStop;
+            if (checkpoint !== undefined && !(checkpoint > d.t * (1 + 1e-6))) throw new Error(`the checkpoint at t = ${d.t} could not be written, and holds the clock`);
+            if (until !== undefined) cfg.tStop = Math.min(until, checkpoint ?? Infinity);
+            s.cfg = cfg;
+            s.writeParams();
+            rounds = 0;
+            continue;
+          }
           // Short of every hard stop: held at the frame time.
           const hard = Math.min(Number.isFinite(cfg.tEnd) ? cfg.tEnd : Infinity, cfg.tStop ?? Infinity);
           if (frameAt !== undefined && d.t < hard * (1 - 1e-4)) return result(d, start, 'frame');
@@ -407,7 +425,6 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     if (opts.every !== undefined && !(opts.every >= 1)) throw new Error('`every` is a number of steps, 1 or more');
     if (opts.dt !== undefined && !(opts.dt > 0)) throw new Error('`dt` is a time interval, more than 0');
     if (opts.frames !== undefined && !(opts.frames >= 1)) throw new Error('`frames` is a number of frames, 1 or more');
-    if (app.checkpointsOn()) throw new Error('turn checkpoints off to record: both stop the clock');
     // The encoder and muxer load with the first recording.
     const { MovieWriter, movieSize } = await import('../io/movie');
     const fps = Math.max(1, Math.min(240, opts.fps ?? 30));

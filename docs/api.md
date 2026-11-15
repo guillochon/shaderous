@@ -194,6 +194,9 @@ The result is `{ t, dt, steps, taken, seconds, stopped }`. `stopped` is one of:
 To run past `tEnd`, load the setup with a later `tend`, or `control('tend', '')` for no end
 time.
 
+With checkpoints on (the panel's Save checkpoints), the clock stops on each checkpoint time
+exactly, as it does when the page plays: `run()` writes the checkpoint there and goes on.
+
 Steps go to the GPU in batches of about a tenth of a second, with one readback per batch.
 
 ### `step(n = 1)` and `runTo(t, timeoutMs?)`
@@ -333,7 +336,9 @@ It also ends at the run's end time, at ten minutes of movie, when the run is rep
 
 While it records, the page's canvas shows the movie's frames, letterboxed, and the camera does
 not follow the pointer; view changes through the panel or `view()` still apply, and are
-recorded. Recording refuses to start with checkpoints on, since both stop the clock. A browser
+recorded. Checkpoints that are on are written as the run reaches them, as `run()` writes them;
+a frame time never moves a checkpoint, and a checkpoint's shortened step is the one the run
+takes unrecorded as well. A browser
 without an H.264 encoder fails with a message saying so.
 
 ### `stopRecording() → boolean` and `recordingStatus() → { frames, seconds, t } | null`
