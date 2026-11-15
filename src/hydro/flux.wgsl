@@ -55,14 +55,16 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
   o.s = b.y;
   if (EOS_HAS_ENERGY) {
     o.p = max(b.x, max(lo.y, P.p_floor));
-    o.cs = eos_sound_speed(o.rho, o.p);
+    let f = eos_face(o.rho, o.p);
+    o.cs = f.x;
+    o.eint = f.y;
   } else {
     // Barotropic: the face pressure is a function of the face density, not reconstructed.
     let st = baro_state(o.rho);
     o.p = st.x;
     o.cs = st.y;
+    o.eint = eos_eint_from_p(o.rho, o.p);
   }
-  o.eint = eos_eint_from_p(o.rho, o.p);
   return o;
 }
 

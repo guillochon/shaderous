@@ -140,3 +140,9 @@ fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
 fn eos_eint_floor(rho: f32) -> f32 {
   return eos_eint_from_p(rho, P.p_floor);
 }
+
+// A face state's sound speed and internal energy density (hydro/flux.wgsl): here simply the two
+// functions above; a module whose inversions are costly (eos/helmholtz.wgsl) shares the work.
+fn eos_face(rho: f32, p: f32) -> vec2<f32> {
+  return vec2<f32>(eos_sound_speed(rho, p), eos_eint_from_p(rho, p));
+}

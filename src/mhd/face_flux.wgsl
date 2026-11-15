@@ -34,13 +34,15 @@ fn make_side(r: Rq, axis: i32, lo: vec2<f32>) -> MSide {
   s.bt = r.b.zw;
   if (EOS_HAS_ENERGY) {
     s.p = max(r.b.x, max(lo.y, P.p_floor));
-    s.cs = eos_sound_speed(s.rho, s.p);
+    let f = eos_face(s.rho, s.p);
+    s.cs = f.x;
+    s.eint = f.y;
   } else {
     let st = baro_state(s.rho);
     s.p = st.x;
     s.cs = st.y;
+    s.eint = eos_eint_from_p(s.rho, s.p);
   }
-  s.eint = eos_eint_from_p(s.rho, s.p);
   return s;
 }
 

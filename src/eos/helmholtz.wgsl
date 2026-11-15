@@ -262,6 +262,24 @@ fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
   if (lnT > -1e29) { eth = helm_thermo(rc, lnT, ye, ia).e * rho / P.eos.y; }
   return d.y + eth;
 }
+// A face state's sound speed and internal energy density (hydro/flux.wgsl), from one Newton
+// solve for its temperature: eos_sound_speed and eos_eint_from_p each solve for the same one,
+// and at every face of every cell those solves were nearly all of the update's time.
+fn eos_face(rho: f32, p: f32) -> vec2<f32> {
+  let rc = rho * P.eos.x;
+  let ye = helm_ye();
+  let ia = helm_ions();
+  let d = deg_pe(rho);
+  var c2 = deg_c2(rho);
+  var eth = 0.0;
+  let lnT = helm_solve(rc, max(p - d.x, 0.0) / rho * P.eos.y, ye, ia, true);
+  if (lnT > -1e29) {
+    let t = helm_thermo(rc, lnT, ye, ia);
+    c2 += (t.dprho + t.dpr * (t.dpr / t.de)) / P.eos.y;
+    eth = t.e * rho / P.eos.y;
+  }
+  return vec2<f32>(sqrt(c2), d.y + eth);
+}
 fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
   let d = deg_pe(rho);
   if (!(T > 0.0)) { return d.y; }
