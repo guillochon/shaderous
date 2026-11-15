@@ -44,6 +44,8 @@ import { mhdUnsupported } from '../mhd/mhd';
  */
 const REGRID_EVERY = 8;
 const MAX_STEPS_AHEAD = 24;
+/** Most bytes read back from the GPU in one staging buffer (AmrSim.readBoxes). */
+const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
 /**
@@ -2204,37 +2206,71 @@ export class AmrSim implements Simulation {
     return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${bins}`;
   }
 
-  /** Every leaf cell with its position and size (validation only; reads the whole atlas). */
+  /**
+   * Boxes of `w` texels per side (w^3; w^2 in 2D) at the first interior cell of each block's
+   * slot in an atlas texture (offset `zOffset` texels along z, for the species' groups), packed
+   * block by block as [z][y][x][channel]. Each box is copied on its own, into staging buffers
+   * of at most READ_CHUNK_BYTES: a whole atlas texture of a large mesh is several GB, more
+   * than the browser maps at once.
+   */
+  private async readBoxes(tex: GPUTexture, blocks: Block[], channels: 1 | 4, w = BS, zOffset = 0): Promise<Float32Array> {
+    const d = this.device;
+    const depth = this.cfg.ndim === 2 ? 1 : w;
+    const rowBytes = w * channels * 4;
+    const bytesPerRow = Math.ceil(rowBytes / 256) * 256;
+    const perBlock = bytesPerRow * w * depth;
+    const per = w * w * depth * channels;
+    const out = new Float32Array(blocks.length * per);
+    const chunk = Math.max(1, Math.floor(READ_CHUNK_BYTES / perBlock));
+    const rowF = rowBytes / 4;
+    const padF = bytesPerRow / 4;
+    for (let start = 0; start < blocks.length; start += chunk) {
+      const part = blocks.slice(start, start + chunk);
+      const buf = d.createBuffer({ label: 'atlas readback', size: perBlock * part.length, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+      const enc = d.createCommandEncoder();
+      part.forEach((b, i) => {
+        const o = this.origin(b.slot);
+        enc.copyTextureToBuffer({ texture: tex, origin: [o[0], o[1], o[2] + zOffset] }, { buffer: buf, offset: i * perBlock, bytesPerRow, rowsPerImage: w }, [w, w, depth]);
+      });
+      d.queue.submit([enc.finish()]);
+      await buf.mapAsync(GPUMapMode.READ);
+      const src = new Float32Array(buf.getMappedRange());
+      for (let i = 0; i < part.length; i++) {
+        const from = (i * perBlock) / 4;
+        const to = (start + i) * per;
+        for (let r = 0; r < w * depth; r++) out.set(src.subarray(from + r * padF, from + r * padF + rowF), to + r * rowF);
+      }
+      buf.unmap();
+      buf.destroy();
+    }
+    return out;
+  }
+
+  /** Every leaf cell with its position and size, the leaves in tree order. */
   async readLeaves(): Promise<LeafCells> {
     this.flush();
-    const side = this.slotsPerSide * PAD;
-    const depthTex = this.cfg.ndim === 2 ? this.layers : side;
     const [a, b] = this.state[this.cur];
-    const t1 = await readTexture(this.device, a, side, 4, depthTex);
-    const t2 = await readTexture(this.device, b, side, 4, depthTex);
     const leaves = this.tree.leaves();
+    const u1 = await this.readBoxes(a, leaves, 4);
+    const u2 = await this.readBoxes(b, leaves, 4);
     const three = this.cfg.ndim === 3;
     const depth = three ? BS : 1;
     const count = leaves.length * BS * BS * depth;
     const out: LeafCells = {
       x: new Float32Array(count), y: new Float32Array(count), z: new Float32Array(count), dx: new Float32Array(count),
-      u1: new Float32Array(count * 4), u2: new Float32Array(count * 4), count,
+      u1, u2, count,
     };
     const half = this.cfg.problem.box / 2;
     let q = 0;
     for (const blk of leaves) {
       const dx = this.dx0 / (1 << blk.level);
-      const [ox, oy, oz] = this.origin(blk.slot);
       for (let k = 0; k < depth; k++)
         for (let j = 0; j < BS; j++)
           for (let i = 0; i < BS; i++, q++) {
-            const src = (((oz + k) * side + oy + j) * side + ox + i) * 4;
             out.x[q] = (blk.c[0] * BS + i + 0.5) * dx - half;
             out.y[q] = (blk.c[1] * BS + j + 0.5) * dx - half;
             out.z[q] = three ? (blk.c[2] * BS + k + 0.5) * dx - half : 0;
             out.dx[q] = dx;
-            out.u1.set(t1.subarray(src, src + 4), q * 4);
-            out.u2.set(t2.subarray(src, src + 4), q * 4);
           }
     }
     return out;
@@ -2248,24 +2284,19 @@ export class AmrSim implements Simulation {
     const G = this.speciesGroups;
     if (!G) return [];
     this.flush();
-    const side = this.slotsPerSide * PAD;
-    const raw = await readTexture(this.device, this.species[this.speciesCur], side, 4, this.speciesDepth * G);
     const leaves = this.tree.leaves();
+    const tex = this.species[this.speciesCur];
+    // Each group of four species is a stack of the atlas's depth along z.
+    const raw: Float32Array[] = [];
+    for (let g = 0; g < G; g++) raw.push(await this.readBoxes(tex, leaves, 4, BS, g * this.speciesDepth));
     const depth = this.cfg.ndim === 3 ? BS : 1;
     const count = leaves.length * BS * BS * depth;
     const ns = this.cfg.problem.species!.length;
     const X = Array.from({ length: ns }, () => new Float32Array(count));
-    let q = 0;
-    for (const blk of leaves) {
-      const [ox, oy, oz] = this.origin(blk.slot);
-      for (let k = 0; k < depth; k++)
-        for (let j = 0; j < BS; j++)
-          for (let i = 0; i < BS; i++, q++) {
-            let sum = 0;
-            const at = (g: number) => (((oz + k + g * this.speciesDepth) * side + oy + j) * side + ox + i) * 4;
-            for (let g = 0; g < G; g++) for (let c = 0; c < 4; c++) sum += raw[at(g) + c];
-            for (let s = 0; s < ns; s++) X[s][q] = raw[at(Math.floor(s / SPECIES_PER_GROUP)) + (s % SPECIES_PER_GROUP)] / sum;
-          }
+    for (let q = 0; q < count; q++) {
+      let sum = 0;
+      for (let g = 0; g < G; g++) for (let c = 0; c < 4; c++) sum += raw[g][q * 4 + c];
+      for (let s = 0; s < ns; s++) X[s][q] = raw[Math.floor(s / SPECIES_PER_GROUP)][q * 4 + (s % SPECIES_PER_GROUP)] / sum;
     }
     return X;
   }
@@ -2273,16 +2304,7 @@ export class AmrSim implements Simulation {
   /** The potential on every leaf cell, in the same order as readLeaves() (validation only). */
   async readLeafPotential(): Promise<Float32Array> {
     this.flush();
-    const side = this.slotsPerSide * PAD;
-    const t = await readTexture(this.device, this.grav!.phi, side, 1);
-    const leaves = this.tree.leaves();
-    const out = new Float32Array(leaves.length * BS ** 3);
-    let q = 0;
-    for (const blk of leaves) {
-      const [ox, oy, oz] = this.origin(blk.slot);
-      for (let k = 0; k < BS; k++) for (let j = 0; j < BS; j++) for (let i = 0; i < BS; i++, q++) out[q] = t[((oz + k) * side + oy + j) * side + ox + i];
-    }
-    return out;
+    return this.readBoxes(this.grav!.phi, this.tree.leaves(), 1);
   }
 
   /**
@@ -2469,22 +2491,10 @@ export class AmrSim implements Simulation {
    * floats, the fourth unused), as the run holds them now.
    */
   async leafFaces(leaves: Block[]): Promise<Float32Array[]> {
-    const side = this.slotsPerSide * PAD;
-    const flat = this.cfg.ndim === 2;
-    const depth = this.layers * (flat ? 1 : PAD);
-    const f = await this.mhd!.readAtlas(this.cur, side, depth);
     const W = BS + 1;
-    const D = flat ? 1 : W;
-    return leaves.map((b) => {
-      const o = this.origin(b.slot);
-      const out = new Float32Array(W * W * D * 4);
-      for (let k = 0; k < D; k++)
-        for (let j = 0; j < W; j++) {
-          const at = 4 * (((o[2] + k) * side + o[1] + j) * side + o[0]);
-          out.set(f.subarray(at, at + 4 * W), 4 * (k * W + j) * W);
-        }
-      return out;
-    });
+    const per = W * W * (this.cfg.ndim === 2 ? 1 : W) * 4;
+    const f = await this.readBoxes(this.mhd!.faces[this.cur], leaves, 4, W);
+    return leaves.map((_, i) => f.subarray(i * per, (i + 1) * per));
   }
 
   /** Each slot's time bin (0 when they are off). */
