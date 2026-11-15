@@ -579,34 +579,57 @@ export function blockFaces(cfg: SimConfig, b: Block, dx0: number, maxLevel: numb
   const at = (i: number, a: number) => (b.c[a] * BS + i) * h - half;
   if (spec.potential) {
     const A = spec.potential(cfg.params, cfg.ndim);
-    // Line integral of A_c along the edge from p over one cell along c (2D, c = z: the point value).
-    const I = (c: number, p: number[]) => {
-      if (flat && c === 2) return A(p[0], p[1], 0)[2];
-      let s = 0;
-      for (let m = 0; m < sub; m++) {
-        const q = [...p];
-        q[c] += ((m + 0.5) * h) / sub;
-        s += A(q[0], q[1], flat ? 0 : q[2])[c];
+    // Line integrals of A_c along every edge of the block, each computed once: E[c] at point
+    // (i, j, k) is the integral along c over one cell from that point (2D, c = z: the point
+    // value). The texels' faces reach one point past the last texel, so N points per axis, and
+    // an edge along c starts at most W points along it. Every face shares each edge's single
+    // value, so the circulations add up around a cell exactly as the edges do.
+    const N = W + 1;
+    const NZ = flat ? 1 : N;
+    const idx = (i: number, j: number, k: number) => (k * N + j) * N + i;
+    const E = [0, 1, 2].map((c) => {
+      const e = new Float64Array(N * N * NZ);
+      const point = flat && c === 2;
+      const ni = c === 0 ? W : N;
+      const nj = c === 1 ? W : N;
+      const nk = flat ? 1 : c === 2 ? W : N;
+      for (let k = 0; k < nk; k++) {
+        const z = flat ? 0 : at(k, 2);
+        for (let j = 0; j < nj; j++) {
+          const y = at(j, 1);
+          for (let i = 0; i < ni; i++) {
+            const x = at(i, 0);
+            if (point) {
+              e[idx(i, j, k)] = A(x, y, 0)[2];
+              continue;
+            }
+            let s = 0;
+            for (let m = 0; m < sub; m++) {
+              const d = ((m + 0.5) * h) / sub;
+              s += A(c === 0 ? x + d : x, c === 1 ? y + d : y, c === 2 ? z + d : z)[c];
+            }
+            e[idx(i, j, k)] = (s * h) / sub;
+          }
+        }
       }
-      return (s * h) / sub;
-    };
+      return e;
+    });
+    const [Ex, Ey, Ez] = E;
     const hz = flat ? 1 : h;
     for (let k = 0; k < D; k++)
       for (let j = 0; j < W; j++)
         for (let i = 0; i < W; i++) {
           const o = 4 * ((k * W + j) * W + i);
-          const p = [at(i, 0), at(j, 1), flat ? 0 : at(k, 2)];
-          const off = (a: number) => {
-            const q = [...p];
-            q[a] += h;
-            return q;
-          };
+          const p = idx(i, j, k);
+          const pi = idx(i + 1, j, k);
+          const pj = idx(i, j + 1, k);
+          const pk = flat ? p : idx(i, j, k + 1);
           // Circulation around each face, over its area (2D: per unit length in z).
-          const dzAy = flat ? 0 : I(1, off(2)) - I(1, p);
-          const dzAx = flat ? 0 : I(0, off(2)) - I(0, p);
-          out[o] = (I(2, off(1)) - I(2, p) - dzAy) / (h * hz);
-          out[o + 1] = (dzAx - (I(2, off(0)) - I(2, p))) / (h * hz);
-          out[o + 2] = (I(1, off(0)) - I(1, p) - (I(0, off(1)) - I(0, p))) / (h * h);
+          const dzAy = flat ? 0 : Ey[pk] - Ey[p];
+          const dzAx = flat ? 0 : Ex[pk] - Ex[p];
+          out[o] = (Ez[pj] - Ez[p] - dzAy) / (h * hz);
+          out[o + 1] = (dzAx - (Ez[pi] - Ez[p])) / (h * hz);
+          out[o + 2] = (Ey[pi] - Ey[p] - (Ex[pj] - Ex[p])) / (h * h);
         }
   } else if (spec.face) {
     const F = spec.face(cfg.params, cfg.ndim);

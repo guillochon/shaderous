@@ -227,8 +227,10 @@ SwiftShader. What the machine needs:
 The magnetized accretion disk (`mri-disk`) at 512^3 with 3 levels of refinement and
 `--gpu-memory 16`, on an RTX 4090 (24 GB) on 2026-11-15. The adaptive mesh had room for
 5,832 blocks of 16^3 cells, about 24 million cells, and the run held 16.8 GB of GPU memory
-throughout. The load took 90 s, all of it building the initial disk on the CPU, which looks
-like a hang but isn't. One orbit at r = 1 (t = 2π, 6,359 steps) then took 14 minutes, with
+throughout. The load took 90 s, all of it building the initial disk on the CPU in one thread,
+which looks like a hang but isn't. Most of that was the initial field's edge integrals, since
+made 4 times faster, so the same load should now take about 30 s (estimated, not yet
+measured). One orbit at r = 1 (t = 2π, 6,359 steps) then took 14 minutes, with
 the GPU 92 to 98% busy. Over that orbit the magnetic energy grew 5.4 times and the Maxwell
 stress reached α = 0.009, as the shear wound the loops into trailing spirals.
 
