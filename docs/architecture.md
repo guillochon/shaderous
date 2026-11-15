@@ -54,7 +54,7 @@ Stepping never waits for the CPU, and the CPU never waits for a step.
 ## What WebGPU constrains
 
 Four properties of the interface (not of the hardware) shaped the design. The
-[original plan](../plan.md) lists the limits that were checked when development began.
+[original plan](../plans/original-plan.md) lists the limits that were checked when development began.
 
 | Constraint | What follows from it |
 |---|---|

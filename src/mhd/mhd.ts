@@ -1,4 +1,4 @@
-// Ideal MHD on the uniform grid (docs/mhd-plan.md): the van Leer predictor-corrector with
+// Ideal MHD on the uniform grid (plans/mhd-plan.md): the van Leer predictor-corrector with
 // constrained transport (Stone & Gardiner 2009), the Gardiner & Stone (2005) edge electric
 // fields, and HLLE or HLLD fluxes. A step is, after the timestep:
 //
@@ -22,12 +22,12 @@ export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/
 
 /**
  * Why this configuration cannot run with a magnetic field, or null if it can. Since phase 4 of
- * docs/mhd-plan.md every physics option couples to the field; this stays as the one place to
+ * plans/mhd-plan.md every physics option couples to the field; this stays as the one place to
  * refuse a future option that does not.
  */
 export function mhdUnsupported(c: SimConfig): string | null {
   // Gravity, point masses, cooling, species, viscosity and conduction all act on a field
-  // (docs/mhd-plan.md 7b).
+  // (plans/mhd-plan.md 7b).
   return null;
 }
 

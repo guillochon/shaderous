@@ -1,5 +1,5 @@
 // MHD face fluxes on the uniform grid, for one stage of the van Leer integrator (Stone &
-// Gardiner 2009; docs/mhd-plan.md). Each invocation computes the fluxes through the lower
+// Gardiner 2009; plans/mhd-plan.md). Each invocation computes the fluxes through the lower
 // faces of one cell, so every face is computed once and the two cells it separates read the
 // same bits.
 //

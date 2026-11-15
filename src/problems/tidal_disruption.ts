@@ -102,7 +102,7 @@ interface TdeVariant {
    */
   rhoCut?: number;
   rhoAmb?: number;
-  /** a magnetic field inside the star (docs/mhd-plan.md section 11) */
+  /** a magnetic field inside the star (plans/mhd-plan.md section 11) */
   field?: 'dipole' | 'random';
 }
 

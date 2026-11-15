@@ -1,4 +1,4 @@
-// Per-block timesteps with a magnetic field (docs/mhd-plan.md, section 5b): blocks that share
+// Per-block timesteps with a magnetic field (plans/mhd-plan.md, section 5b): blocks that share
 // only an edge (3D) or a vertex (2D) are neighbors too, since constrained transport defines each
 // edge's field from every block around it. These are found through the leaf index IDX. Off
 // (EDGES false) for hydro, which needs face neighbors alone. Requires P, amr/grid.wgsl and

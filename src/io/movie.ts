@@ -1,4 +1,4 @@
-// An MP4 movie written frame by frame (docs/mp4-export-plan.md, section 5): each frame is
+// An MP4 movie written frame by frame (plans/mp4-export-plan.md, section 5): each frame is
 // painted onto a 2D compositing canvas, encoded as H.264 by WebCodecs as soon as it is added,
 // and muxed into a file held in memory. Only the encoded stream is kept, never the images.
 // Nothing here knows about the simulation.

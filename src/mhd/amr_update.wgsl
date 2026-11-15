@@ -2,7 +2,7 @@
 // conservative update of each leaf cell and the constrained-transport update of the block's
 // faces (with compensated sums), over the texels [0, BS] of each block.
 //
-// Refinement boundaries (docs/mhd-plan.md, section 4b):
+// Refinement boundaries (plans/mhd-plan.md, section 4b):
 //  - a cell beside a refined neighbor takes the mean of the fine fluxes through that face, from
 //    the fine blocks' flux register, in place of its own;
 //  - every edge has one value, set by the finest blocks around it: for an edge on the block's
@@ -144,7 +144,7 @@ var<private> g_bin: u32 = 0u;
 var<private> g_deposit: bool = false;
 var<private> g_touched: bool = false;
 
-// What this block's update adds along edge c at its edge texel t (docs/mhd-plan.md, 4b and 5b).
+// What this block's update adds along edge c at its edge texel t (plans/mhd-plan.md, 4b and 5b).
 // Each edge has one definer, the finest leaf around it and among those the fastest; this block
 // integrates the definer's impulses over its own step:
 //  - itself (or a leaf in step with it at its level): its own impulse;
@@ -452,7 +452,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (g_deposit) { ph = eos_pressure(max(u1.x, P.rho_floor), u2.y); }
   var flag = 0.0;
   if (STAGE == 1u) { flag = shock_flag(t); }
-  // Gravity, as amr/update.wgsl has it (docs/mhd-plan.md 7b): stage 1 the half step's whole
+  // Gravity, as amr/update.wgsl has it (plans/mhd-plan.md 7b): stage 1 the half step's whole
   // source, stage 2 the first half kick; the second comes from amr/correct.wgsl with
   // self-gravity or point masses, or below with the uniform field alone. Flux-form work from
   // the stage's mass fluxes and the field atlas's potential (ghosts included). A deposit adds

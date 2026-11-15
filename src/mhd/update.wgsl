@@ -19,7 +19,7 @@
 //   STAGE 2: a full step from the state at the start, with fluxes of the half-step state, and
 //            the new compensations.
 //
-// Gravity (self-gravity, the uniform field, point masses and the frame; docs/mhd-plan.md 7b):
+// Gravity (self-gravity, the uniform field, point masses and the frame; plans/mhd-plan.md 7b):
 // stage 1 adds the whole source over its half step, so the half-step state the stage-2 fluxes
 // come from feels it; stage 2 adds the first half of the step's kick, (dt/2) rho^n g^n, and
 // gravity/correct.wgsl the second, with the potential of the updated state. The kick's energy

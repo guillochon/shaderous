@@ -1,4 +1,4 @@
-// Ideal MHD on the block grid (docs/mhd-plan.md, section 4b): the van Leer + constrained
+// Ideal MHD on the block grid (plans/mhd-plan.md, section 4b): the van Leer + constrained
 // transport step of mhd/mhd.ts, block by block. Per stage:
 //
 //   assemble  every leaf's cells, centered field and faces, ghosts and edge ghosts included
@@ -9,7 +9,7 @@
 //
 // Re-meshing moves the faces with the cells (encodeRegrid()). With time bins, a cycle's first
 // substep steps every leaf (encodeFull()) and the others the leaves of the GPU's lists
-// (encodeSubstep(), docs/mhd-plan.md section 5b).
+// (encodeSubstep(), plans/mhd-plan.md section 5b).
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, type Bindable } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';

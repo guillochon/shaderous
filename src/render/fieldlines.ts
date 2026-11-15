@@ -1,4 +1,4 @@
-// Magnetic field lines over the views of a run with a field (docs/mhd-plan.md, section 10).
+// Magnetic field lines over the views of a run with a field (plans/mhd-plan.md, section 10).
 //
 // Each frame the field and the velocity are resampled onto a small volume (render/bsample.wgsl
 // or amr/bsample.wgsl). Then:

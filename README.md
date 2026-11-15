@@ -109,8 +109,9 @@ command-line runner for single runs and parameter sweeps, or an MCP server.
 | **[Headless runs](docs/headless.md)** | The command-line runner (single runs and parameter sweeps, writing diagnostics, images, slices, movies and `.athdf` files) and the MCP server that gives AI agents the simulator as tools. |
 
 The method paper is in progress in [`paper/`](paper/). Design plans: the original one in
-[plan.md](plan.md), magnetic fields in [docs/mhd-plan.md](docs/mhd-plan.md), and movie export
-in [docs/mp4-export-plan.md](docs/mp4-export-plan.md).
+[plans/original-plan.md](plans/original-plan.md), magnetic fields in [plans/mhd-plan.md](plans/mhd-plan.md), movie export
+in [plans/mp4-export-plan.md](plans/mp4-export-plan.md), and frames, symmetric domains and
+coordinate systems in [plans/coordinate-systems-plan.md](plans/coordinate-systems-plan.md).
 
 ## License
 

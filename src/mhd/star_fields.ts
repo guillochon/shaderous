@@ -1,4 +1,4 @@
-// Magnetic fields inside stars (docs/mhd-plan.md, section 8), as vector potentials for
+// Magnetic fields inside stars (plans/mhd-plan.md, section 8), as vector potentials for
 // MhdSpec.potential: the face field is their discrete curl, with each edge's line integral (the
 // block grid's summed over the finest level's segments), so it is divergence-free to rounding
 // and coarse faces are the mean of the fine ones.

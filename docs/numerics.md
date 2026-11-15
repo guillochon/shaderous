@@ -812,7 +812,7 @@ rotor, Brio-Wu, the field loop and the Alfvén wave; and the polytrope's "Dipole
 It runs on the uniform grid and on the adaptive mesh, which re-meshes with the field (below),
 with per-block timesteps, and draws its field lines (below). Species, burning, viscosity and
 conduction act with a field too: every physics option of the gas alone couples to one (phase 4
-of [the MHD plan](mhd-plan.md)). Units: the magnetic pressure is $`B^2/2`$, so
+of [the MHD plan](../plans/mhd-plan.md)). Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
