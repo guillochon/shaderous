@@ -23,6 +23,7 @@
     "vitest": "^2.1.0"
   },
   "dependencies": {
-    "h5wasm": "^0.10.3"
+    "h5wasm": "^0.10.3",
+    "mediabunny": "1.65.2"
   }
 }

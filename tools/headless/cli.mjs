@@ -4,6 +4,7 @@
 //
 //   node tools/headless/cli.mjs run "problem=sedov&dim=2&n=512" --every 0.01 --png --out runs/sedov
 //   node tools/headless/cli.mjs sweep --problem sedov --dim 2 --vary gamma=1.1,1.4,1.667 --until 0.05
+//   node tools/headless/cli.mjs run "problem=kelvin-helmholtz&dim=2&n=256" --mp4 --frame-every 4
 //   node tools/headless/cli.mjs describe [problem]
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
@@ -39,6 +40,15 @@ Outputs (diag.jsonl and manifest.json are always written)
   --debris             Debris energies and dM/dt at each output, as JSON (problems that track
                        them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py
 
+Movie (--mp4 records the whole run as movie.mp4, with a color bar and axes; not with --every
+or --steps; outputs are written at the start and the end)
+  --mp4                Record the run as an MP4 movie
+  --frame-every N      A frame every N steps (default 1)
+  --frame-dt DT        Or a frame near every DT of simulated time (no step is shortened for it)
+  --fps F              Playback rate (default 30)
+  --width PX --height PX   Movie size (default 1920 x 1080 with --mp4)
+  --no-overlays        Leave out the color bar and the axes
+
 Sweeps
   --vary KEY=V1,V2,..  Values of a setup key, repeatable; every combination is run
 
@@ -59,6 +69,7 @@ const { values: o, positionals } = parseArgs({
     view: { type: 'string', multiple: true },
     slice: { type: 'string', multiple: true }, 'slice-axis': { type: 'string' }, 'slice-pos': { type: 'string' }, 'slice-res': { type: 'string' },
     athdf: { type: 'boolean' }, debris: { type: 'boolean' },
+    mp4: { type: 'boolean' }, 'frame-every': { type: 'string' }, 'frame-dt': { type: 'string' }, fps: { type: 'string' }, 'no-overlays': { type: 'boolean' },
     vary: { type: 'string', multiple: true },
     url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' }, quiet: { type: 'boolean' },
     help: { type: 'boolean', short: 'h' },
@@ -144,6 +155,9 @@ async function runOne(session, q, dir) {
   if (every !== undefined && !(every > 0)) fail('--every must be positive');
   if (every !== undefined && until == null) fail('--every needs --until (or a problem with an end time)');
   const timeoutMs = o.timeout === undefined ? undefined : num(o.timeout, 'timeout') * 1000;
+  if (o.mp4 && (every !== undefined || steps !== undefined)) fail('--mp4 records the whole run: give --until, not --every or --steps');
+  if (!o.mp4 && (o['frame-every'] || o['frame-dt'] || o.fps || o['no-overlays'])) fail('--frame-every, --frame-dt, --fps and --no-overlays go with --mp4');
+  if (o['frame-every'] !== undefined && o['frame-dt'] !== undefined) fail('give --frame-every or --frame-dt, not both');
 
   const d0 = await call('describe');
   const view = viewSettings(d0.fields);
@@ -203,7 +217,29 @@ async function runOne(session, q, dir) {
   let stopped = 'steps';
   let r = { t: 0, steps: 0 };
   await output();
-  if (every !== undefined) {
+  if (o.mp4) {
+    const frameDt = num(o['frame-dt'], 'frame-dt');
+    const noOverlays = !!o['no-overlays'];
+    const m = await call('record', {
+      ...(frameDt !== undefined ? { dt: frameDt } : { every: num(o['frame-every'], 'frame-every') ?? 1 }),
+      until,
+      timeoutMs,
+      fps: num(o.fps, 'fps'),
+      width: num(o.width, 'width') ?? 1920,
+      height: num(o.height, 'height') ?? (o.width !== undefined ? undefined : 1080),
+      overlays: { colorbar: !noOverlays, triad: !noOverlays },
+      download: false,
+      base64: true,
+    });
+    writeFileSync(path.join(dir, 'movie.mp4'), Buffer.from(m.base64, 'base64'));
+    const { base64, ...movie } = m;
+    manifest.movie = { file: 'movie.mp4', ...movie };
+    log(`  movie.mp4: ${m.frames} frames, ${m.seconds.toFixed(1)} s at ${m.width} x ${m.height}, ${(m.bytes / 1e6).toFixed(1)} MB`);
+    const st1 = await call('state');
+    r = { t: st1.t, steps: st1.steps };
+    stopped = m.stopped;
+    await output();
+  } else if (every !== undefined) {
     // Output times are multiples of `every`, so runs line up whatever their timesteps.
     for (let j = 1; ; j++) {
       const target = Math.min(j * every, until);

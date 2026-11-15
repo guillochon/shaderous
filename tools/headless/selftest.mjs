@@ -54,6 +54,8 @@ const check = (ok, what) => {
   const back = json(await tool('load_athdf', { path: saved.saved }));
   check(Math.abs(back.t - r.t) < 1e-6, 'load_athdf continues at the same time');
   check(Array.isArray(back.warnings) && back.warnings.length === 0, 'load_athdf of a file from this build has no warnings');
+  const mov = json(await tool('record', { path: path.join(tmp, 'mcp/'), every: 2, frames: 10, width: 320, height: 180 }));
+  check(mov.frames === 10 && mov.width === 320 && existsSync(mov.saved) && readFileSync(mov.saved).subarray(4, 8).toString() === 'ftyp', 'record: an MP4 of 10 frames');
   const ctl = json(await tool('control', { id: 'riemann', value: 'hll' }));
   check(ctl.query.includes('riemann=hll'), 'control');
   const noDebris = await tool('debris');
@@ -83,6 +85,10 @@ const check = (ok, what) => {
   check(['0000-t0.png', '0002-t0.04.athdf', '0001-t0.02-press.json', 'diag.jsonl', 'manifest.json'].every((f) => files.includes(f)), 'cli outputs');
   const lines = existsSync(path.join(out, 'diag.jsonl')) ? readFileSync(path.join(out, 'diag.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
   check(lines.length === 3 && Math.abs(lines[2].t - 0.04) < 1e-6, 'cli outputs at t = 0, 0.02, 0.04');
+  const mout = path.join(tmp, 'cli-mp4');
+  const mres = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'sedov', '--dim', '2', '--n', '128', '--until', '0.01', '--mp4', '--frame-dt', '0.002', '--width', '320', '--out', mout, '--quiet'], { encoding: 'utf8' });
+  const mman = existsSync(path.join(mout, 'manifest.json')) ? JSON.parse(readFileSync(path.join(mout, 'manifest.json'), 'utf8')) : {};
+  check(mres.status === 0 && existsSync(path.join(mout, 'movie.mp4')) && mman.movie?.frames >= 5 && mman.movie?.stopped === 'time', `cli --mp4 writes movie.mp4${mres.status ? `: ${mres.stderr}` : ''}`);
   const bad = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'nope', '--out', path.join(tmp, 'bad'), '--quiet'], { encoding: 'utf8' });
   check(bad.status === 1 && /unknown problem/.test(bad.stderr) && !existsSync(path.join(tmp, 'bad')), 'cli reports a bad setup and writes nothing');
 }

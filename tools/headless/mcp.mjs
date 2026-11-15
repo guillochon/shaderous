@@ -20,7 +20,7 @@ if (o['low-priority']) lowerPriority();
 const log = (m) => process.stderr.write(`[shaderous-mcp] ${m}\n`);
 
 const INSTRUCTIONS = `Shaderous is a GPU gas dynamics code (compressible Euler equations with gravity, cooling, adaptive mesh refinement). These tools drive one simulation in a headless browser.
-Typical use: describe (pick a problem) -> load (a setup: problem, dim, n, amr and other keys) -> run (to a time, landed on exactly, or a number of steps) -> diagnostics / stats / slice / probe for numbers, screenshot to look at it -> save_athdf to keep the state.
+Typical use: describe (pick a problem) -> load (a setup: problem, dim, n, amr and other keys) -> run (to a time, landed on exactly, or a number of steps) -> diagnostics / stats / slice / probe for numbers, screenshot to look at it -> save_athdf to keep the state, record for a movie.
 All values are in code units; positions are fractions of the box (0 to 1). A run stays paused between calls. load restarts from t = 0; control changes a setting mid-run as a person would.`;
 
 // --- the simulator page, opened on first use -----------------------------------------------
@@ -193,6 +193,40 @@ const TOOLS = [
       mkdirSync(path.dirname(file), { recursive: true });
       writeFileSync(file, Buffer.from(f.base64, 'base64'));
       return text({ saved: file, time: f.time, bytes: f.bytes });
+    },
+  },
+  {
+    name: 'record',
+    description: 'Record the run from where it is as an MP4 movie (H.264), stepping it as it goes: the current view with a color bar and x/y/z axes over it. A frame every `every` steps, or near every `dt` of code time (at the nearest step boundary: no step is shortened, so the run is the one it would have been unrecorded). Stops at `until`, after `frames` frames, or at the end time. Set the view first (view tool). Returns the frame count, movie length and where the file went.',
+    inputSchema: obj({
+      path: { type: 'string', description: 'File or folder to write to (default: the current folder, under the name of the movie)' },
+      every: { type: 'integer', minimum: 1, description: 'A frame every this many steps (default 1)' },
+      dt: { type: 'number', exclusiveMinimum: 0, description: 'Or a frame near every multiple of this much code time' },
+      until: { type: 'number', description: 'Stop when the clock reaches this time (landed on exactly)' },
+      frames: { type: 'integer', minimum: 1, description: 'Stop after this many frames' },
+      fps: { type: 'number', minimum: 1, maximum: 240, description: 'Playback rate (default 30)' },
+      width: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1920' },
+      height: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1080 (9/16 of width when width is given)' },
+      colorbar: { type: 'boolean', description: 'Default true' },
+      axes: { type: 'boolean', description: 'Default true' },
+      timeout_s: { type: 'number', description: 'Give up after this much wall time, keeping what was recorded' },
+    }),
+    async run({ path: p, every, dt, until, frames, fps, width, height, colorbar = true, axes = true, timeout_s }) {
+      if (until === undefined && frames === undefined) throw new Error('give `until` or `frames`, so that the movie ends');
+      const m = await call('record', {
+        ...(dt !== undefined ? { dt } : { every: every ?? 1 }),
+        until, frames, fps, width, height,
+        overlays: { colorbar, triad: axes },
+        timeoutMs: timeout_s === undefined ? undefined : timeout_s * 1000,
+        download: false,
+        base64: true,
+      });
+      let file = resolvePath(p ?? m.name);
+      if (!p || p.endsWith('/') || p.endsWith('\\')) file = path.join(resolvePath(p ?? '.'), m.name);
+      mkdirSync(path.dirname(file), { recursive: true });
+      writeFileSync(file, Buffer.from(m.base64, 'base64'));
+      const { base64, ...rest } = m;
+      return text({ saved: file, ...rest });
     },
   },
   {

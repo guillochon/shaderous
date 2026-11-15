@@ -17,6 +17,8 @@ import { FAMILIES, FIELDS, GRAVITY_MODES } from '../problems';
 import { problemUnits } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
+import { paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
+import { download } from '../io/checkpoints';
 import { BUILD, errorLog } from './errors';
 
 /** What the page lends the API: its state, and the operations its own controls use. */
@@ -56,6 +58,19 @@ export interface AppHooks {
   setColormap(name: string): void;
   setAutoRange(on: boolean): void;
   sync(): void;
+  /** What the color bar and the triad show, for the view as it stands (render/overlays.ts). */
+  overlayInfo(): OverlayInfo;
+  /**
+   * A movie is being recorded at `size` pixels, or with null no longer: while one is, the page's
+   * frame loop draws nothing, and the canvas shows the movie's frames letterboxed.
+   */
+  setRecording(size: [number, number] | null): void;
+  /** A frame of the recording under way has been added. */
+  recordProgress(status: RecordingStatus): void;
+  /** Checkpoints are on (they hold the clock, as a movie's frame times would). */
+  checkpointsOn(): boolean;
+  /** The page's measured step rate when it last played, in steps per second (0 if unknown). */
+  stepRate(): number;
 }
 
 /** Options of run(). */
@@ -75,8 +90,72 @@ export interface RunResult {
   /** steps taken by this call */
   taken: number;
   seconds: number;
-  /** why the call returned */
-  stopped: 'steps' | 'time' | 'end' | 'timeout';
+  /** why the call returned: `frame` only at a movie's soft stop (record() with `dt`) */
+  stopped: 'steps' | 'time' | 'end' | 'timeout' | 'frame';
+  /** the timestep of the last step taken, which a held clock's dt (0) no longer shows */
+  lastDt: number;
+}
+
+/** run()'s options inside the API: a soft stop as well. */
+interface RunInternal extends RunOptions {
+  /**
+   * A movie's frame time (SimConfig.tFrame): the clock holds at the step boundary nearest to it,
+   * and the call returns with `frame`.
+   */
+  frameAt?: number;
+}
+
+/** Options of record(). */
+export interface RecordOptions {
+  /** A frame every this many steps (the default cadence)... */
+  every?: number;
+  /**
+   * ...or a frame near every multiple of this much code time: at the step boundary nearest to
+   * it, so that no step is shortened and the run is the one it would have been unrecorded.
+   */
+  dt?: number;
+  /** Stop after this many frames (the first, at the start, included). */
+  frames?: number;
+  /** Stop when the clock reaches this time (landed on exactly, as run() does). */
+  until?: number;
+  /** Give up after this much wall time, finishing the file with what was recorded. */
+  timeoutMs?: number;
+  /** Playback rate, frames per second (default 30). */
+  fps?: number;
+  /** The movie's size in pixels (default 1920 x 1080), rounded down to even numbers. */
+  width?: number;
+  height?: number;
+  /** Bits per second (default about 0.2 bits per pixel per frame). */
+  bitrate?: number;
+  /** The color bar and the triad, both on by default. */
+  overlays?: OverlayOptions;
+  /** Hand the file to the browser as a download (default true). */
+  download?: boolean;
+  /** Return the file as base64 too (default false). */
+  base64?: boolean;
+}
+
+export interface RecordResult {
+  name: string;
+  frames: number;
+  /** Length of the movie, in seconds. */
+  seconds: number;
+  width: number;
+  height: number;
+  /** The clock at the last frame, and the steps taken while recording. */
+  t: number;
+  steps: number;
+  bytes: number;
+  /** why the recording ended */
+  stopped: 'frames' | 'time' | 'end' | 'stopped' | 'replaced' | 'timeout';
+  base64?: string;
+}
+
+/** A recording under way, as the page's Record button shows it. */
+export interface RecordingStatus {
+  frames: number;
+  seconds: number;
+  t: number;
 }
 
 /** Fractions of the box, 0 to 1 along each axis (z is ignored in 2D). */
@@ -185,23 +264,29 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     };
   }
 
-  async function run(opts: RunOptions = {}): Promise<RunResult> {
+  async function run(opts: RunInternal = {}): Promise<RunResult> {
     const s = current();
     const cfg = app.cfg();
-    const { steps, until, timeoutMs } = opts;
-    if (steps === undefined && until === undefined) throw new Error('run() needs `steps`, `until`, or both');
+    const { steps, until, timeoutMs, frameAt } = opts;
+    if (steps === undefined && until === undefined && frameAt === undefined) throw new Error('run() needs `steps`, `until`, or both');
     if (steps !== undefined && !(steps >= 0)) throw new Error('`steps` must be a number of steps, 0 or more');
     app.setRunning(false);
     app.setDriving(true);
     const t0 = performance.now();
     const stopWas = cfg.tStop;
+    let lastDt = 0;
+    const result = (d: Diagnostics, start: number, stopped: RunResult['stopped']): RunResult => ({
+      t: d.t, dt: d.dt, steps: d.steps, taken: d.steps - start, seconds: (performance.now() - t0) / 1000, stopped, lastDt: d.dt > 0 ? d.dt : lastDt,
+    });
     try {
       let d = await waitPrepared(s, t0, timeoutMs);
       const start = d.steps;
-      if (until !== undefined) {
-        if (!(until > d.t)) return result(d, start, t0, 'time');
-        // Hold the clock at `until`: the step that reaches it is shortened to land on it.
-        cfg.tStop = Math.min(until, stopWas ?? Infinity);
+      if (until !== undefined && !(until > d.t)) return result(d, start, 'time');
+      if (until !== undefined || frameAt !== undefined) {
+        // Hold the clock at `until`: the step that reaches it is shortened to land on it. A frame
+        // time only holds it at the step boundary nearest to it (hydro/clock.wgsl).
+        if (until !== undefined) cfg.tStop = Math.min(until, stopWas ?? Infinity);
+        cfg.tFrame = frameAt;
         s.cfg = cfg;
         s.writeParams();
       }
@@ -210,16 +295,19 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       for (;;) {
         if (app.sim() !== s) throw new Error('the run was replaced while stepping');
         const left = steps === undefined ? Infinity : steps - (d.steps - start);
-        if (left <= 0) return result(d, start, t0, 'steps');
-        if (until !== undefined && d.t >= until * (1 - 1e-6)) return result(d, start, t0, 'time');
+        if (left <= 0) return result(d, start, 'steps');
+        if (until !== undefined && d.t >= until * (1 - 1e-6)) return result(d, start, 'time');
         // Held at the end time (or at `until`, a hair short of it in single precision). The
         // clock's dt is that of the last step, so only a step taken here tells.
         if (d.dt === 0 && rounds > 0) {
-          const reached = until !== undefined && d.t >= until * (1 - 1e-4);
-          if (!reached) app.setFinished(true);
-          return result(d, start, t0, reached ? 'time' : 'end');
+          if (until !== undefined && d.t >= until * (1 - 1e-4)) return result(d, start, 'time');
+          // Short of every hard stop: held at the frame time.
+          const hard = Math.min(Number.isFinite(cfg.tEnd) ? cfg.tEnd : Infinity, cfg.tStop ?? Infinity);
+          if (frameAt !== undefined && d.t < hard * (1 - 1e-4)) return result(d, start, 'frame');
+          app.setFinished(true);
+          return result(d, start, 'end');
         }
-        if (timeoutMs !== undefined && performance.now() - t0 > timeoutMs) return result(d, start, t0, 'timeout');
+        if (timeoutMs !== undefined && performance.now() - t0 > timeoutMs) return result(d, start, 'timeout');
         const gpu = app.gpu();
         const enc = gpu.device.createCommandEncoder();
         const taken = s.encodeSteps(enc, Math.min(batch, left));
@@ -234,6 +322,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         const b0 = performance.now();
         d = await s.diagnostics();
         rounds++;
+        if (d.dt > 0) lastDt = d.dt;
         if (!(d.t === d.t) || !(d.dt === d.dt)) throw new Error(`the clock is NaN after ${d.steps} steps`);
         // Batches of about a tenth of a second of GPU time: few readbacks, prompt returns.
         const ms = performance.now() - b0;
@@ -241,8 +330,10 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         else if (ms > 200) batch = Math.max(1, batch >> 1);
       }
     } finally {
-      if (until !== undefined && app.sim() === s) {
+      if ((until !== undefined || frameAt !== undefined) && app.sim() === s) {
         cfg.tStop = stopWas;
+        cfg.tFrame = undefined;
+        s.cfg = cfg;
         app.rearm((await s.diagnostics()).t);
       }
       app.setDriving(false);
@@ -257,10 +348,6 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     return s.diagnostics();
   }
 
-  function result(d: Diagnostics, start: number, t0: number, stopped: RunResult['stopped']): RunResult {
-    return { t: d.t, dt: d.dt, steps: d.steps, taken: d.steps - start, seconds: (performance.now() - t0) / 1000, stopped };
-  }
-
   /** The state of the gas, read back now, and a sampler over it. */
   async function sampled() {
     const s = current();
@@ -269,7 +356,22 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     return { snap, sampler: new SnapshotSampler(snap), species };
   }
 
-  async function screenshot(opts: { width?: number; height?: number } = {}): Promise<string> {
+  /**
+   * Draw the view with fresh readouts, at `size` (or the canvas's own with null), and hand the
+   * canvas to `read` in the same task as the draw: the canvas holds the frame only until the
+   * task ends.
+   */
+  async function drawFresh<T>(s: Simulation, size: [number, number] | null, read: (c: HTMLCanvasElement) => T): Promise<T> {
+    if (!s.preparing) app.refresh(await s.diagnostics());
+    // Fields ranged by the display pass need one frame drawn before their range is known.
+    app.draw(size);
+    await app.gpu().device.queue.onSubmittedWorkDone();
+    if (!s.preparing) app.refresh(await s.diagnostics());
+    app.draw(size);
+    return read(app.canvas);
+  }
+
+  async function screenshot(opts: { width?: number; height?: number; overlays?: OverlayOptions } = {}): Promise<string> {
     const s = current();
     const c = app.canvas;
     // The canvas's own size, unless asked for another, or the page is not laid out (a hidden tab).
@@ -278,18 +380,119 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     const laidOut = c.clientWidth > 0 && c.clientHeight > 0;
     const size: [number, number] | null =
       opts.width !== undefined || opts.height !== undefined || !laidOut ? [px(opts.width, 1024), px(opts.height, opts.width ?? 1024)] : null;
+    const ov = opts.overlays;
     try {
-      if (!s.preparing) app.refresh(await s.diagnostics());
-      // Fields ranged by the display pass need one frame drawn before their range is known.
-      app.draw(size);
-      await app.gpu().device.queue.onSubmittedWorkDone();
-      if (!s.preparing) app.refresh(await s.diagnostics());
-      // The canvas holds the frame until this task ends: read it in the same task as the draw.
-      app.draw(size);
-      return c.toDataURL('image/png');
+      return await drawFresh(s, size, (canvas) => {
+        if (!ov?.colorbar && !ov?.triad) return canvas.toDataURL('image/png');
+        const out = document.createElement('canvas');
+        out.width = canvas.width;
+        out.height = canvas.height;
+        const g = out.getContext('2d')!;
+        g.drawImage(canvas, 0, 0);
+        paintOverlays(g, out.width, out.height, app.overlayInfo(), ov);
+        return out.toDataURL('image/png');
+      });
     } finally {
       if (size) app.draw(null);
     }
+  }
+
+  // The recording under way, if any.
+  let recording: { status: RecordingStatus; stop: boolean } | null = null;
+
+  async function record(opts: RecordOptions = {}): Promise<RecordResult> {
+    const s = current();
+    const cfg = app.cfg();
+    if (opts.every !== undefined && opts.dt !== undefined) throw new Error('record() takes `every` or `dt`, not both');
+    if (opts.every !== undefined && !(opts.every >= 1)) throw new Error('`every` is a number of steps, 1 or more');
+    if (opts.dt !== undefined && !(opts.dt > 0)) throw new Error('`dt` is a time interval, more than 0');
+    if (opts.frames !== undefined && !(opts.frames >= 1)) throw new Error('`frames` is a number of frames, 1 or more');
+    if (app.checkpointsOn()) throw new Error('turn checkpoints off to record: both stop the clock');
+    // The encoder and muxer load with the first recording.
+    const { MovieWriter, movieSize } = await import('../io/movie');
+    const fps = Math.max(1, Math.min(240, opts.fps ?? 30));
+    const max = Math.min(4096, app.gpu().device.limits.maxTextureDimension2D);
+    const [width, height] = movieSize(opts.width ?? 1920, opts.height ?? (opts.width !== undefined ? Math.round((opts.width * 9) / 16) : 1080), max);
+    const size: [number, number] = [width, height];
+    // A frame per this many steps: by default, about 30 frames for each second the run took
+    // stepping on its own, so that recording costs little.
+    const every = opts.dt !== undefined ? 0 : Math.round(opts.every ?? Math.max(1, Math.round(app.stepRate() / 30)));
+    // Ten minutes of movie at most: the file is held in memory.
+    const maxFrames = Math.min(opts.frames ?? Infinity, fps * 600);
+    const overlays: OverlayOptions = { colorbar: opts.overlays?.colorbar ?? true, triad: opts.overlays?.triad ?? true };
+    const writer = await MovieWriter.open({ width, height, fps, bitrate: opts.bitrate });
+    const t0 = performance.now();
+    const state = { status: { frames: 0, seconds: 0, t: 0 }, stop: false };
+    recording = state;
+    app.setRunning(false);
+    app.setRecording(size);
+    let stopped: RecordResult['stopped'] = 'stopped';
+    let d = await waitPrepared(s, t0, opts.timeoutMs);
+    const startSteps = d.steps;
+    let frameSteps = -1;
+    const frame = async () => {
+      await drawFresh(s, size, (canvas) => {
+        const g = writer.ctx;
+        g.drawImage(canvas, 0, 0, width, height);
+        paintOverlays(g, width, height, app.overlayInfo(), overlays);
+      });
+      await writer.add();
+      d = await s.diagnostics();
+      frameSteps = d.steps;
+      state.status = { frames: writer.frames, seconds: writer.seconds, t: d.t };
+      app.recordProgress(state.status);
+    };
+    try {
+      await frame();
+      // The time cadence's next frame time: the first multiple of dt past the clock.
+      let k = opts.dt !== undefined ? Math.floor(d.t / opts.dt + 1e-6) + 1 : 0;
+      for (;;) {
+        if (writer.frames >= maxFrames) { stopped = 'frames'; break; }
+        if (state.stop) { stopped = 'stopped'; break; }
+        if (opts.until !== undefined && d.t >= opts.until * (1 - 1e-6)) { stopped = 'time'; break; }
+        const left = opts.timeoutMs === undefined ? undefined : opts.timeoutMs - (performance.now() - t0);
+        if (left !== undefined && left <= 0) { stopped = 'timeout'; break; }
+        if (app.sim() !== s) { stopped = 'replaced'; break; }
+        let r: RunResult;
+        try {
+          r = opts.dt !== undefined ? await run({ frameAt: k * opts.dt, until: opts.until, timeoutMs: left }) : await run({ steps: every, until: opts.until, timeoutMs: left });
+        } catch (e) {
+          if (app.sim() !== s) { stopped = 'replaced'; break; }
+          throw e;
+        }
+        if (r.stopped === 'timeout') { stopped = 'timeout'; break; }
+        // A held clock that took no step since the last frame is at that frame's boundary
+        // again: this frame time is nearest to it too, and is skipped, not recorded twice.
+        if (r.steps !== frameSteps) await frame();
+        if (r.stopped === 'end') { stopped = 'end'; break; }
+        if (r.stopped === 'time') { stopped = 'time'; break; }
+        if (opts.dt !== undefined) {
+          // The next frame time that lies more than half a step past the clock (as near as the
+          // last step tells; one that does not is skipped above).
+          const dt = opts.dt;
+          k = Math.max(k + 1, Math.floor((r.t + 0.5 * r.lastDt) / dt + 1e-6) + 1);
+        }
+      }
+    } catch (e) {
+      await writer.cancel();
+      throw e;
+    } finally {
+      recording = null;
+      if (app.sim() === s && cfg.tFrame !== undefined) {
+        cfg.tFrame = undefined;
+        s.cfg = cfg;
+        s.writeParams();
+      }
+      app.setRecording(null);
+      app.draw(null);
+    }
+    const bytes = await writer.finish();
+    const name = `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-t${+d.t.toPrecision(4)}.mp4`;
+    if (opts.download ?? true) download(name, bytes, 'video/mp4');
+    return {
+      name, frames: writer.frames, seconds: writer.seconds, width, height, t: d.t, steps: d.steps - startSteps, bytes: bytes.length, stopped,
+      ...(opts.base64 ? { base64: await toBase64(bytes) } : {}),
+    };
   }
 
   const VIEW_KEYS = ['mode', 'field', 'species', 'log', 'lo', 'hi', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'showBlocks', 'contours', 'nContours', 'fog', 'surfaceOpacity', 'light', 'box', 'fieldLines', 'fieldLineCount'];
@@ -523,7 +726,21 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * The view as a PNG data URL: at the canvas's size on the page, or at `width` x `height`
      * pixels (a square of `width` if only that is given; 1024 x 1024 when the page has no layout).
      */
-    screenshot: (opts?: { width?: number; height?: number }) => serial(() => screenshot(opts)),
+    screenshot: (opts?: { width?: number; height?: number; overlays?: OverlayOptions }) => serial(() => screenshot(opts)),
+
+    /**
+     * Record the run as an MP4 movie: the view with a color bar and a triad over it, a frame
+     * every `every` steps or near every `dt` of code time, until stopped (stopRecording(), the
+     * end time, `until`, `frames`). The run steps as it would have unrecorded.
+     */
+    record: (opts?: RecordOptions) => serial(() => record(opts)),
+    /** End the recording under way: the file is finished with the frames recorded so far. */
+    stopRecording: async () => {
+      if (recording) recording.stop = true;
+      return !!recording;
+    },
+    /** The recording under way, or null. */
+    recordingStatus: async (): Promise<RecordingStatus | null> => (recording ? { ...recording.status } : null),
 
     /** Change what the view shows (ViewState keys, plus colormap and autoRange). The run is untouched. */
     view: (changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean } = {}) => serial(async () => setView(changes)),

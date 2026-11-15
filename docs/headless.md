@@ -87,6 +87,7 @@ Each run writes a folder, `--out DIR`, which defaults to `runs/<problem>-<date>`
 | `NNNN-tT.png` | A screenshot at each output, with `--png`. Set the size with `--width` and `--height`, and what is drawn with `--view KEY=VALUE` |
 | `NNNN-tT-VAR.json` | A slice of variable VAR at each output, with `--slice VAR` (repeatable). Set it with `--slice-axis`, `--slice-pos` and `--slice-res`; the format is that of `slice()` in [api.md](api.md#reference) |
 | `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`. yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them |
+| `movie.mp4` | The whole run as a movie, with `--mp4`: a frame every `--frame-every N` steps (default 1) or near every `--frame-dt DT` of simulated time, played at `--fps` (default 30), at `--width` x `--height` (default 1920 x 1080), with a color bar and axes unless `--no-overlays`. `manifest.json` gets a `movie` entry with its frame count and length. Not with `--every` or `--steps`; outputs are then written at the start and the end only |
 | `NNNN-tT-debris.json` | Debris energies and the return rate dM/dt at each output, with `--debris`, for problems that track them (the tidal disruption). The format is that of `debris()` in [api.md](api.md#reference) |
 
 A `--view` setting is any key of `view()` in [api.md](api.md#reference), such as
@@ -192,6 +193,7 @@ runner.
 | `controls`, `control` | List the panel's controls, or set one mid-run as a person would |
 | `restart` | Starts again from the initial conditions |
 | `save_athdf`, `load_athdf` | Write the state to an `.athdf` file, or start a run from one |
+| `record` | Records the run from where it is as an MP4 movie to `path`, with a color bar and axes: a frame every `every` steps or near every `dt` of code time, until `until` or `frames` |
 | `debris` | Gives debris energies and the return rate dM/dt, for problems that track them: totals, the surviving core, the first return and the peak. `save_path` writes the full report |
 | `errors` | Lists what the page has reported going wrong |
 

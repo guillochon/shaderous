@@ -104,6 +104,12 @@ export interface SimConfig {
    */
   tStop?: number;
   /**
+   * A soft stop: a movie's next frame time with a time cadence (ui/api.ts record()). The clock
+   * holds at the step boundary nearest to it, and never shortens a step to land on it
+   * (hydro/clock.wgsl). Not a setting of the run.
+   */
+  tFrame?: number;
+  /**
    * A block is split where its refinement indicator (a normalized second derivative, between 0
    * and 1: amr/flag.wgsl) exceeds refineHi, merged below refineLo.
    */
@@ -651,7 +657,7 @@ export function packParams(
   );
   f.set(packCooling(c.cooling, c.coolParams), 52);
   f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), Math.max(0, c.dampRadius), Math.max(0, c.dampRate)], 56);
-  f.set([Math.max(0, c.refineRho), Math.max(0, c.refineDense), 0, 0], 60);
+  f.set([Math.max(0, c.refineRho), Math.max(0, c.refineDense), c.tFrame ?? 1e30, 0], 60);
   f.set(eosConstants2(c.eos, c.eosParams), 64);
   return buf;
 }

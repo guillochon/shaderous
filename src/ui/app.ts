@@ -22,7 +22,7 @@ import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, 
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
-import { installApi } from './api';
+import { installApi, type RecordingStatus } from './api';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const opt = (v: string | number, label: string) => `<option value="${v}">${label}</option>`;
@@ -73,7 +73,7 @@ side.innerHTML = `
       ${field('Variant', select('variant', ''), 'row-variant', 'Versions of this problem with different setups')}
       <span id="pparams"></span>
     </div>
-    <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button><button id="load" hidden title="Autoload is off: load the changes that wait (problem, grid, initial conditions), paused. Run loads them and plays">Load</button></div>
+    <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="record" hidden title="Record the run from here as an MP4 movie (settings under Movie); press again to stop and save it">Record</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button><button id="load" hidden title="Autoload is off: load the changes that wait (problem, grid, initial conditions), paused. Run loads them and plays">Load</button></div>
     <div class="io">
       <label class="check" title="Start each problem playing as soon as it loads, and play a finished run again on Reset. Off, a run waits for Play"><input id="autoplay" type="checkbox" />Autoplay</label>
       <label class="check" title="Load the simulation as soon as a setting that needs a new one changes: the problem, the grid, a parameter of the initial conditions. Off, such changes wait until you press Run, so several can be made before a large grid is set up once"><input id="autoload" type="checkbox" />Autoload</label>
@@ -109,6 +109,23 @@ side.innerHTML = `
       ${field('Checkpoint every', number('ckdt', 'min="0"', 2), '', 'Time between checkpoints, in code time units. Each problem starts with an interval of its own')}
     </div>
     <div id="ckpt-note"></div>
+  </details>
+
+  <details id="movie">
+    <summary title="Record the run as an MP4 movie with the Record button">Movie<span class="sum" id="sum-movie"></span></summary>
+    <div class="g3">
+      ${field('Frame', select('rec-cadence', opt('steps', 'Every n steps') + opt('time', 'Every Δt')), '', 'When a frame is taken: after every so many steps, or near every multiple of a time interval. A time interval never shortens a step: each frame is taken at the step nearest its time, so the recorded run is the run it would have been')}
+      ${field('Steps', number('rec-every', 'min="1" step="1" value="1"'), 'row-rec-every', 'A movie frame after every this many steps. 1 records every step')}
+      ${field('Interval', number('rec-dt', 'min="0" value="0.01"', 2), 'row-rec-dt', 'A movie frame near every multiple of this much code time')}
+    </div>
+    <div class="g3">
+      ${field('Playback', select('rec-fps', opt(24, '24 fps') + opt(30, '30 fps') + opt(60, '60 fps')), '', 'Frames per second of the movie when played: sets its length, not which steps are recorded')}
+      ${field('Size', select('rec-size', opt('1280x720', '720p') + opt('1920x1080', '1080p') + opt('2560x1440', '1440p') + opt('3840x2160', '4K') + opt('view', 'As the view')), '', 'Pixels of each frame. As the view keeps the shape of the view on the page')}
+    </div>
+    <div class="io">
+      <label class="check" title="A color bar with the field, its unit and its range over the right edge of each frame. With Auto range on its labels follow the data; a fixed range gives a steadier movie"><input id="rec-colorbar" type="checkbox" checked />Color bar</label>
+      <label class="check" title="The axes x, y and z in the lower left corner of each frame, turning with the camera"><input id="rec-triad" type="checkbox" checked />Axes</label>
+    </div>
   </details>
 
   <details open>
@@ -805,6 +822,10 @@ let running = true;
 const headless = new URLSearchParams(location.search).get('headless') === '1';
 /** The script is stepping the run: the frame loop takes no steps of its own meanwhile. */
 let driving = false;
+/** A movie is recording at this size (ui/api.ts record()): the frame loop draws nothing meanwhile. */
+let recordingSize: [number, number] | null = null;
+/** The recording's progress, for the Record button. */
+let recordProgress: RecordingStatus | null = null;
 /** Whether a run starts playing by itself when it loads or replays (remembered in this browser). */
 let autoplay = true;
 try {
@@ -898,6 +919,69 @@ function syncOpacity() {
 }
 
 const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) < 1e5 ? v.toPrecision(5) : v.toExponential(2));
+
+/** The Record button: Record, or Stop while a movie records. */
+function syncRecordButton() {
+  const b = $('record');
+  // The movie so far is on the status line.
+  const text = recordingSize ? 'Stop' : 'Record';
+  if (b.textContent !== text) b.textContent = text;
+  b.classList.toggle('recording', !!recordingSize);
+}
+
+/** The movie settings, and the Record button that starts and stops a recording with them. */
+function bindRecord() {
+  // Only where the browser can encode video (WebCodecs).
+  const can = typeof VideoEncoder !== 'undefined';
+  $('record').hidden = !can;
+  $('movie').hidden = !can;
+  const cadence = $<HTMLSelectElement>('rec-cadence');
+  const showCadence = () => {
+    $('row-rec-every').hidden = cadence.value !== 'steps';
+    $('row-rec-dt').hidden = cadence.value !== 'time';
+    $('sum-movie').textContent = cadence.value === 'steps' ? (+$<HTMLInputElement>('rec-every').value > 1 ? `every ${$<HTMLInputElement>('rec-every').value} steps` : 'every step') : `every Δt = ${$<HTMLInputElement>('rec-dt').value}`;
+  };
+  for (const id of ['rec-cadence', 'rec-every', 'rec-dt']) $(id).addEventListener('input', showCadence);
+  cadence.addEventListener('change', showCadence);
+  showCadence();
+  $('record').addEventListener('click', () => {
+    if (recordingSize) {
+      api.stopRecording();
+      return;
+    }
+    const sizeSel = $<HTMLSelectElement>('rec-size').value;
+    let width: number, height: number;
+    if (sizeSel === 'view') {
+      const dpr = window.devicePixelRatio || 1;
+      width = canvas.clientWidth * dpr;
+      height = canvas.clientHeight * dpr;
+    } else [width, height] = sizeSel.split('x').map(Number);
+    const every = Math.max(1, Math.round(+$<HTMLInputElement>('rec-every').value || 1));
+    const dt = +$<HTMLInputElement>('rec-dt').value;
+    if (cadence.value === 'time' && !(dt > 0)) {
+      setHud('Movie: the frame interval must be more than 0');
+      return;
+    }
+    const wasRunning = running;
+    recordProgress = null;
+    api
+      .record({
+        ...(cadence.value === 'time' ? { dt } : { every }),
+        fps: +$<HTMLSelectElement>('rec-fps').value,
+        width,
+        height,
+        overlays: { colorbar: $<HTMLInputElement>('rec-colorbar').checked, triad: $<HTMLInputElement>('rec-triad').checked },
+      })
+      .then((r) => {
+        notice(`saved ${r.name}: ${r.frames} frames, ${r.seconds.toFixed(1)} s, ${(r.bytes / 1e6).toFixed(1)} MB`);
+        if (wasRunning && r.stopped === 'stopped' && !finished) {
+          running = true;
+          syncControls();
+        }
+      })
+      .catch((e) => reportError(e));
+  });
+}
 
 /** Reflect cfg and view into the controls. */
 function syncControls() {
@@ -1765,6 +1849,7 @@ function bind() {
   });
   // Load (Autoload off): what waits, paused.
   $('load').addEventListener('click', () => loadPending(false));
+  bindRecord();
   $('step').addEventListener('click', () => {
     // A change waiting for Run: Step and Reset load it too, and leave it paused.
     if (pending) return loadPending(false);
@@ -3411,12 +3496,15 @@ function tick(now: number) {
     stepsSubmitted += taken;
   }
   stepOnce = false;
-  updateGuides();
-  refreshContourHover();
-  renderer.densityCut = densityCut();
-  renderer.slice = sliceLayout();
-  renderer.encode(enc, s, view);
-  drawSources();
+  // While a movie records, its frames are all the canvas shows: the recorder draws them.
+  if (!recordingSize) {
+    updateGuides();
+    refreshContourHover();
+    renderer.densityCut = densityCut();
+    renderer.slice = sliceLayout();
+    renderer.encode(enc, s, view);
+    drawSources();
+  }
   gpu.device.queue.submit([enc.finish()]);
   s.submitted();
   renderer.submitted();
@@ -3480,7 +3568,8 @@ function tick(now: number) {
       ? `  •  point mass at r = ${u.fmt(Math.hypot(...pm[0].pos), 'length')}`
       : pm.length ? `  •  ${pm.length} point masses, separation ${u.fmt(Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])), 'length')}` : '';
     const took = acc > 0 ? `, accreted ${u.fmt(acc, 'mass')}` : '';
-    const state = pending ? 'press Run to load' : finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused';
+    const rec = recordProgress;
+    const state = recordingSize ? `recording: ${rec?.frames ?? 0} frames, ${(rec?.seconds ?? 0).toFixed(1)} s of movie` : pending ? 'press Run to load' : finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused';
     const mesh = s.status();
     setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${where ? took : ''}${mesh ? '  •  ' + mesh : ''}${toolNotice ? '  •  ' + toolNotice : ''}`);
   }
@@ -3514,7 +3603,7 @@ const ready = (async () => {
 })();
 
 // window.shaderous: the page as a script or an agent drives it (ui/api.ts, docs/api.md).
-installApi(
+const api = installApi(
   {
     gpu: () => gpu,
     adapter: () => `${gpu.info.vendor} ${gpu.info.architecture}${gpu.info.description ? ` (${gpu.info.description})` : ''}${gpu.info.fallback ? ' [software fallback]' : ''}`.trim(),
@@ -3576,6 +3665,40 @@ installApi(
       $<HTMLInputElement>('auto').checked = on;
     },
     sync: () => syncControls(),
+    overlayInfo() {
+      const u = units();
+      const m = viewMeasure();
+      const k = u.scale(m);
+      const unit = u.label(m);
+      const name = viewFieldName();
+      const { right, up } = cameraFrame(view, 1);
+      return {
+        colormap: editor.colormap,
+        lo: view.lo * k,
+        hi: view.hi * k,
+        log: view.log && !LINEAR_FIELDS.has(view.field),
+        title: unit ? `${name} (${unit})` : name,
+        mode: cfg.ndim === 3 && view.mode === 'volume' ? 'volume' : 'plane',
+        sliceAxis: cfg.ndim === 2 ? 2 : view.sliceAxis,
+        right,
+        up,
+        twoD: cfg.ndim === 2,
+        light: view.light,
+      };
+    },
+    setRecording(size) {
+      recordingSize = size;
+      // The movie's frames, letterboxed in the canvas's place; the pointer camera waits.
+      canvas.style.objectFit = size ? 'contain' : '';
+      canvas.style.pointerEvents = size ? 'none' : '';
+      syncRecordButton();
+    },
+    recordProgress(p) {
+      recordProgress = p;
+      syncRecordButton();
+    },
+    checkpointsOn: () => ckpt.on,
+    stepRate: () => stepRate,
   },
   ready,
 );

@@ -50,6 +50,7 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .buttons { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 6px; }
 .buttons button[hidden] { display: none; }
 #load.waiting { border-color: var(--accent, #6aa9ff); color: var(--accent, #6aa9ff); }
+#record.recording { border-color: #e5534b; background: #3a1d1f; color: #ffb4ae; }
 .buttons button { height: 26px; padding: 0; }
 .io { display: grid; grid-template-columns: auto 1fr 1fr; gap: 6px 8px; align-items: center; }
 #run { border-color: #3a4a66; background: #223049; }

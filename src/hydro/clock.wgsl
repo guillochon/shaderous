@@ -59,5 +59,12 @@ fn main() {
   } else {
     dt = min(dt, remaining / CYCLE);
   }
+  // A movie's next frame time (P.refine.z, 1e30 for none) is a soft stop: the clock holds at the
+  // step boundary nearest to it, which is this one once less than half of the step (or cycle)
+  // about to be taken lies before it. No step is ever shortened for it, so a recorded run is the
+  // unrecorded one. The recorder sees the hold, takes its frame and moves the stop on.
+  if (P.refine.z - clock.t < 0.5 * CYCLE * dt) {
+    dt = 0.0;
+  }
   clock.dt = dt;
 }

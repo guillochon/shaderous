@@ -123,3 +123,71 @@ test('draws magnetic field lines: contours in 2D, tubes and slices in 3D, on blo
   }
   expect(await call(page, 'errors')).toEqual([]);
 });
+
+/** Bytes from base64. */
+const fromB64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+/** An MP4 box, found by its type anywhere in the file (enough for the few read here). */
+function mp4Box(bytes: Uint8Array, type: string): DataView | null {
+  const t = [...type].map((c) => c.charCodeAt(0));
+  for (let i = 4; i + 4 <= bytes.length; i++) {
+    if (t.every((c, k) => bytes[i + k] === c)) {
+      const size = new DataView(bytes.buffer, i - 4, 4).getUint32(0);
+      return new DataView(bytes.buffer, i - 4, size);
+    }
+  }
+  return null;
+}
+
+test('records a movie: an MP4 with the frames and size asked for, and overlays', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'load', { problem: 'kelvin-helmholtz', dim: 2, n: 128 });
+  // The overlays alone, in a PNG.
+  const png = await call(page, 'screenshot', { width: 640, height: 360, overlays: { colorbar: true, triad: true } });
+  await savePng(page, png, 'overlays-2d');
+  await call(page, 'view', { mode: 'volume' });
+
+  const r = await call(page, 'record', { every: 4, frames: 12, width: 641, height: 361, fps: 24, download: false, base64: true });
+  expect(r).toMatchObject({ frames: 12, width: 640, height: 360, steps: 44, stopped: 'frames' });
+  expect(r.seconds).toBeCloseTo(0.5, 6);
+  expect(r.name).toMatch(/\.mp4$/);
+  const bytes = fromB64(r.base64);
+  expect(bytes.length).toBe(r.bytes);
+  expect(String.fromCharCode(...bytes.subarray(4, 8))).toBe('ftyp');
+  // One sample per frame, and the track's size (16.16 fixed point, at the end of tkhd).
+  const stsz = mp4Box(bytes, 'stsz')!;
+  expect(stsz.getUint32(16)).toBe(12);
+  const tkhd = mp4Box(bytes, 'tkhd')!;
+  expect(tkhd.getUint32(tkhd.byteLength - 8) / 65536).toBe(640);
+  expect(tkhd.getUint32(tkhd.byteLength - 4) / 65536).toBe(360);
+  expect(await call(page, 'recordingStatus')).toBeNull();
+  // The run steps on as before, and the page draws its own view again.
+  expect(await call(page, 'step', 3)).toMatchObject({ taken: 3 });
+});
+
+test('a movie with a time cadence leaves the run exactly as it would have been', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  for (const setup of [{ problem: 'sedov', dim: 2, n: 128 }, { problem: 'sedov', dim: 2, n: 64, amr: 2, tbins: 2 }]) {
+    await call(page, 'load', setup);
+    const r = await call(page, 'record', { dt: 2e-4, frames: 25, width: 320, height: 320, download: false });
+    expect(r.frames).toBe(25);
+    // A frame at the step boundary nearest each multiple of dt: never more frames than steps,
+    // and none sooner than every dt (frame times a step jumps over are skipped, so later ones
+    // can be late).
+    expect(r.steps).toBeGreaterThanOrEqual(24);
+    expect(r.t).toBeGreaterThan(0.9 * 24 * 2e-4);
+    await call(page, 'step', 20);
+    const rec = await call(page, 'slice', { variable: 'press', res: 128 });
+    const recState = await call(page, 'state');
+
+    await call(page, 'load', setup);
+    await call(page, 'step', r.steps + 20);
+    const plain = await call(page, 'slice', { variable: 'press', res: 128 });
+    const plainState = await call(page, 'state');
+    expect(recState.steps).toBe(plainState.steps);
+    expect(recState.t).toBe(plainState.t);
+    expect(rec.values).toEqual(plain.values);
+  }
+});

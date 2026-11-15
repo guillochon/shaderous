@@ -298,12 +298,48 @@ it. In 2D the axis is always 2.
 The state at a list of points `[x, y, z]`. Each point returns `rho`, `press`, `vel` (a 3-vector),
 `r0`, `level`, and `X`, the species' mass fractions by name, when the run has species.
 
-### `screenshot({ width?, height? }) → string`
+### `screenshot({ width?, height?, overlays? }) → string`
 
 The view as a PNG data URL. With no size, it is drawn at the canvas's size on the page. Give
 `width` alone for a square image. The overlays the page draws on top of the canvas (color bar,
-markers, labels) are not included. With the range set to automatic, it is fitted to the current
-data before the image is drawn.
+markers, labels) are not included, but `overlays: { colorbar: true, triad: true }` paints a
+color bar and an axis triad of its own onto the image, as a movie's frames have them. With the
+range set to automatic, it is fitted to the current data before the image is drawn.
+
+### `record(options) → result`
+
+Records the run from where it is as an MP4 movie (H.264, encoded by the browser's WebCodecs as
+each frame is drawn; only the encoded stream is held in memory). The run is stepped as it goes,
+and paused when the recording ends. Options:
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `every` | about 30 frames per second of the page's own step rate, or 1 | A frame every this many steps |
+| `dt` | | Or a frame near every multiple of this much code time. A frame is taken at the step boundary nearest its time: no step is shortened for it, so the recorded run is bit for bit the unrecorded one. A frame is then up to half a step early or late, and when a step is longer than `dt` the frame times it jumps over are skipped |
+| `frames` | | Stop after this many frames, the first (at the start) included |
+| `until` | | Stop when the clock reaches this time, landed on exactly as `run()` does |
+| `timeoutMs` | | Stop after this much wall time |
+| `fps` | 30 | Playback rate. It only sets the frames' timestamps: frame i is shown at i / fps seconds |
+| `width`, `height` | 1920, 1080 | The movie's size in pixels, rounded down to even numbers. `width` alone gives a 16:9 frame |
+| `bitrate` | 0.2 bits per pixel per frame | Bits per second (12 Mbit/s at 1080p30) |
+| `overlays` | both on | `{ colorbar, triad }`: the field's color bar with ticks in the displayed units, and the x, y, z axes, which turn with the camera in the volume view |
+| `download` | true | Hand the file to the browser as a download |
+| `base64` | false | Return the file in the result as `base64` |
+
+It also ends at the run's end time, at ten minutes of movie, when the run is replaced, or on
+`stopRecording()`; the file is finished with the frames recorded so far. The result is
+`{ name, frames, seconds, width, height, t, steps, bytes, stopped, base64? }`, where `stopped` is
+`frames`, `time`, `end`, `stopped`, `replaced` or `timeout`.
+
+While it records, the page's canvas shows the movie's frames, letterboxed, and the camera does
+not follow the pointer; view changes through the panel or `view()` still apply, and are
+recorded. Recording refuses to start with checkpoints on, since both stop the clock. A browser
+without an H.264 encoder fails with a message saying so.
+
+### `stopRecording() → boolean` and `recordingStatus() → { frames, seconds, t } | null`
+
+End the recording under way (it resolves as usual, with `stopped: 'stopped'`), and report its
+progress. Neither waits behind other calls.
 
 ### `view(changes) → view`
 

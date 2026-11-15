@@ -39,8 +39,9 @@ struct Params {
                          //   per unit density), then the damping zone's inner radius and rate
                          //   (hydro/damping.wgsl)
   refine: vec4<f32>,     // block grids: (density below which gas does not ask for refinement, density
-                         //   above which it is always refined to the finest level (0: none), 0,
-                         //   0 always: the zero that opaque() hides from the compiler)
+                         //   above which it is always refined to the finest level (0: none));
+                         //   then a movie's soft stop (hydro/clock.wgsl; 1e30 for none), and
+                         //   0 always: the zero that opaque() hides from the compiler
   eos2: vec4<f32>,       // more equation-of-state constants, per module (eos/degenerate.wgsl,
                          //   eos/ionizing.wgsl); zero for the others
 }
