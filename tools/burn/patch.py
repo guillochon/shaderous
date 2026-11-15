@@ -133,12 +133,19 @@ def main():
 
     def consistency(r, Tl, X0):
         ld = -8.0 + 6.0 * torch.rand(len(r), device=dev)
-        D2 = model(r, Tl, ld + np.log10(2.0), X0)
+        # The long step is the target, held fixed (the data train it at every step length):
+        # with gradients through both sides the term pulled both into a state where they
+        # agree and fit nothing (the general loss from 1.5 to 41 in 300 steps, twice).
+        with torch.no_grad():
+            D2 = model(r, Tl, ld + np.log10(2.0), X0)
         Da = model(r, Tl, ld, X0)
         X1 = (X0 + Da).clamp_min(0.0)
-        T1 = heat(Da, X1, torch.pow(10.0, r), torch.pow(10.0, Tl))
-        # The composition goes in without its gradient, as in train.unrolled: the inputs'
-        # X^(1/4) and log X have infinite slope at a species' zero (every step was skipped).
+        # The second step's state goes in without its gradient: the inputs' X^(1/4) and log X
+        # have infinite slope at a species' zero (every step was skipped), and through the
+        # temperature (heat's Newton iterations) one batch's gradient threw the model into a
+        # state it never left (the general loss from 1.5 to 34 within 1000 steps).
+        with torch.no_grad():
+            T1 = heat(Da, X1, torch.pow(10.0, r), torch.pow(10.0, Tl))
         Db = model(r, torch.log10(T1), ld, X1.detach())
         Dab = (X1 + Db).clamp_min(0.0) - X0
         return log_loss(D2, Dab, (Dab * Q).sum(dim=1))
@@ -174,10 +181,11 @@ def main():
         opt.zero_grad(set_to_none=True)
         loss.backward()
         if all(p.grad is None or torch.isfinite(p.grad).all() for p in params) and torch.isfinite(loss):
-            torch.nn.utils.clip_grad_norm_(params, 100.0)   # as train.py
+            # Tighter than train.py's 100: a patch should move the weights a little at a time.
+            torch.nn.utils.clip_grad_norm_(params, 10.0)
             opt.step()
         sched.step()
-        if (s + 1) % 1000 == 0 or s == 0:
+        if (s + 1) % 1000 == 0 or s == 0 or (s < 1000 and (s + 1) % 100 == 0):
             more = "".join(f"  {k} {v.item():.4g}" for k, v in extra.items())
             print(f"step {s + 1}: general {loss_g.item():.4g}  targeted {loss_t.item():.4g}{more}  {time.time() - t0:.0f} s", flush=True)
     if mode == "lora":

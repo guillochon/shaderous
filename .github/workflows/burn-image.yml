@@ -22,7 +22,7 @@ jobs:
   image:
     runs-on: ubuntu-latest
     steps:
-      # The base image is about 25 GB unpacked; the runner starts with about 14 GB free.
+      # torch's CUDA wheels unpack to several GB; the runner starts with about 14 GB free.
       - name: Free disk space
         run: |
           sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL /usr/local/share/boost
