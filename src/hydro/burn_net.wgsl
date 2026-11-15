@@ -10,16 +10,26 @@
 // into equal network steps, the temperature taken again from the equation of state after
 // each, with the composition as it then is. Cells the shock detector flags do not burn unless
 // the problem allows it (as hydro/burn.wgsl).
+//
+// Burning limiter (Kushnir et al. 2013): energy injected faster than a sound crossing of the
+// cell, t_s = dx / c_s, is numerically unstable on a grid much coarser than the burning, and
+// lights detonations too early. With NB.d.x = f > 0, each network step of length h is scaled
+// down where it would add more than f e h / t_s to the internal energy density e, all of its
+// changes alike (as all rates scaled by one factor, to first order): mass stays conserved and
+// no species goes below zero. It fades as the grid is refined. The cell size comes from the
+// <burn_dx> slot: the grid's, or on the block atlas the cell's block's.
 // Float64 mirror of one network step: netStep() in src/burn/network.ts.
 #include "hydro/common.wgsl"
 #include <eos>
 #include <species_n>
 #include "hydro/burn_net_core.wgsl"
+#include <burn_dx>
 
 struct NetBurn {
   a: vec4<f32>,   // g/cm^3, kelvin, seconds per code unit; code specific energy per erg/g
   b: vec4<f32>,   // coolest T (K), least density (g/cm^3) that burn; longest network step (s); hottest T given (K)
   c: vec4<u32>,   // texels along z from one group of four species to the next, burn in shocks (1), most network steps per hydro step
+  d: vec4<f32>,   // burning limiter f (0: none)
 }
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
@@ -76,12 +86,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       if (COMP) { comp_use(comp_moments(grouped(1.0, Xc))); }
       let T = eos_temperature(rho, e) * NB.a.y;
       if (!(T >= NB.b.x)) { break; }
-      let D = net_step(log_rho, log(min(T, NB.b.w)) / LN10, log_h, Xc);
+      var D = net_step(log_rho, log(min(T, NB.b.w)) / LN10, log_h, Xc);
       var de = 0.0;
       for (var i = 0u; i < 13u; i++) { de += NET_Q[i] * D[i]; }
       // 1e18 erg/g per unit of NET_Q.
-      let dei = rho * de * 1e18 * NB.a.w;
+      var dei = rho * de * 1e18 * NB.a.w;
       if (!(abs(dei) < 3e38)) { break; }
+      if (NB.d.x > 0.0) {
+        // At most f e h / t_s, h and t_s in code time.
+        let cs = eos_sound_speed(rho, eos_pressure(rho, e));
+        let cap = NB.d.x * e * (clock.dt / f32(steps)) * cs / burn_cell_dx(c);
+        if (abs(dei) > cap && cap >= 0.0) {
+          let s = cap / abs(dei);
+          for (var i = 0u; i < 13u; i++) { D[i] *= s; }
+          dei *= s;
+        }
+      }
       for (var i = 0u; i < 13u; i++) { dX[i] += D[i]; }
       e += dei;
       burned = true;

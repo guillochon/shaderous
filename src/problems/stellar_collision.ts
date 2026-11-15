@@ -122,7 +122,7 @@ export const wdCollisionBurning: Problem = {
   blurb:
     'Two carbon-oxygen white dwarfs colliding, with nuclear burning: a trained neural network of the 13-isotope alpha chain (aprox13) burns the shocked gas. Head-on, two 0.64 M☉ dwarfs detonate where they meet. Masses in solar masses; the impact parameter is the pericenter distance over the sum of the radii (0 is head-on).',
   species: NET_SPECIES,
-  burn: (p) => ({ network: 'aprox13', inShocks: p.shockburn > 0.5 }),
+  burn: (p) => ({ network: 'aprox13', inShocks: p.shockburn > 0.5, limiter: p.limiter }),
   // An adaptive mesh: 128 cells across at the finest of 3 levels of refinement.
   grid: { ndim: 3, n: 128, amr: 3 },
   params: [
@@ -130,6 +130,7 @@ export const wdCollisionBurning: Problem = {
     { id: 'm2', label: 'Mass 2 (M☉)', title: 'Mass of the second white dwarf, in solar masses. Changing it starts the run again', value: 0.64, min: 0.5, max: 1.3, step: 0.01 },
     { id: 'b', label: 'Impact parameter', title: 'Pericenter distance of the parabolic orbit over the sum of the two radii: 0 is head-on, 1 just grazes. Changing it starts the run again', value: 0, min: 0, max: 1.5, step: 0.1 },
     { id: 'shockburn', label: 'Burn inside shocks', title: 'Let cells the shock detector flags burn (1) or not (0). Off, as in most supernova codes: a captured shock is a few cells of numerical smearing. Changing it starts the run again', value: 0, min: 0, max: 1, step: 1 },
+    { id: 'limiter', label: 'Burning limiter f', title: 'No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013): on a grid far coarser than the burning, faster heating is numerically unstable and lights detonations too early. They use 0.1, but here anything under about 0.2 stops even resolved detonations, and on cells of hundreds of km it suppresses the collision detonation; 0 switches it off (the default). Changing it starts the run again', value: 0, min: 0, max: 1, step: 0.05 },
   ],
   init: (n, eos, ndim, p) => {
     const at = wdCollision.init(n, eos, ndim, p);

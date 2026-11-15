@@ -780,7 +780,7 @@ export class AmrSim implements Simulation {
       // Every texel of the atlas: the pass is pointwise, and copies what it does not burn.
       this.burn = await createBurnPass(d, burn, { ...this.cfg.problem, units: problemUnits(this.cfg.problem, this.cfg.params) }, {
         dims: [t.width, t.height, t.depthOrArrayLayers], stride: this.speciesDepth, groups: this.speciesGroups, slots: hydroSlots(this.cfg),
-        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], comp: this.comp,
+        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], comp: this.comp, blockTable: this.bt,
       });
     }
   }

@@ -31,7 +31,7 @@ export const coDetonation: Problem = {
   units: CO_DETONATION_UNITS,
   composition: COMP,
   species: NET_SPECIES,
-  burn: (p) => ({ network: 'aprox13', inShocks: p.shockburn > 0.5 }),
+  burn: (p) => ({ network: 'aprox13', inShocks: p.shockburn > 0.5, limiter: p.limiter }),
   // Closed at x = 0, open at the far end; walls across.
   bcLo: [REFLECT, REFLECT, REFLECT],
   bcHi: [OUTFLOW, REFLECT, REFLECT],
@@ -51,6 +51,7 @@ export const coDetonation: Problem = {
     { id: 'tign', label: 'Ignition temperature (10⁹ K)', title: 'Temperature of the layer at the closed end that sets the fuel alight, in 1e9 K. Changing it starts the run again', value: 4, min: 2, max: 8, step: 0.25 },
     { id: 'width', label: 'Ignition layer (km)', title: 'Thickness of the hot layer at the closed end, in km. Changing it starts the run again', value: 30, min: 5, max: 200, step: 5 },
     { id: 'shockburn', label: 'Burn inside shocks', title: 'Let cells the shock detector flags burn (1) or not (0). Off, as in most supernova codes: a captured shock is a few cells of numerical smearing, and burning there lets the scheme set the front. Changing it starts the run again', value: 0, min: 0, max: 1, step: 1 },
+    { id: 'limiter', label: 'Burning limiter f', title: 'No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013): on a grid far coarser than the burning, faster heating is numerically unstable and lights detonations too early. They use 0.1, but here anything under about 0.2 stops even resolved detonations, and on cells of hundreds of km it suppresses the collision detonation; 0 switches it off (the default). Changing it starts the run again', value: 0, min: 0, max: 1, step: 0.05 },
   ],
   init: (_n, eos, _ndim, p) => {
     const rho = toCode(CO_DETONATION_UNITS, 'density', 10 ** p.logrho * 1e3);

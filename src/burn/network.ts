@@ -45,7 +45,25 @@ export interface NetworkBurnSpec {
   tMin?: number;
   /** Least density that burns, g/cm^3 (default 1e4, the least the network was trained on). */
   rhoMin?: number;
+  /**
+   * Burning limiter (Kushnir et al. 2013): no cell takes in more than f e / t_s of energy per
+   * unit time, e its internal energy density and t_s = dx / c_s its sound-crossing time. They
+   * use f = 0.1, and find it leaves the result alone for f up to about 0.4. 0 or none: no limit.
+   */
+  limiter?: number;
 }
+
+/** The <burn_dx> slot on a uniform grid: every cell is P.dx across. */
+export const BURN_DX_UNIFORM = 'fn burn_cell_dx(c: vec3<i32>) -> f32 { return P.dx; }\n';
+/** The <burn_dx> slot on the block atlas: the size of the cells of the block a texel belongs to. */
+export const BURN_DX_ATLAS = `#include "amr/grid.wgsl"
+fn burn_cell_dx(c: vec3<i32>) -> f32 {
+  let a = i32(P.amr.x);
+  var s = vec3<i32>(c.x / PADW, c.y / PADW, c.z / PADW);
+  if (is2d()) { s.z = c.z; }
+  return blk_dx(s.x + a * (s.y + a * s.z));
+}
+`;
 
 /** Longest step one application of the network takes, in seconds: longer steps are split. */
 export const NET_MAX_DT = 0.01;
@@ -348,7 +366,7 @@ ${lines.join('\n')}
 }
 
 /** Bytes of the NetBurn uniform of hydro/burn_net.wgsl. */
-const NET_UNIFORM_BYTES = 48;
+const NET_UNIFORM_BYTES = 64;
 
 /** Conversions between the run's code units and the network's (cgs, kelvin, seconds). */
 export interface NetUnits {
@@ -389,6 +407,8 @@ export interface NetBurnTargets {
   pb: GPUTexture;
   /** the composition moments' texture, where the species set the equation of state */
   comp?: GPUTexture;
+  /** on the block atlas: the block table (binding 30), from which each cell's size is read */
+  blockTable?: GPUBuffer;
 }
 
 /** The species a problem must carry to burn with the network, checked. */
@@ -414,7 +434,10 @@ export class NetBurnPass {
 
   static async create(d: GPUDevice, spec: NetworkBurnSpec, species: readonly string[] | undefined, units: NetUnits, t: NetBurnTargets): Promise<NetBurnPass> {
     checkNetSpecies(species);
-    const code = assemble('hydro/burn_net.wgsl', { eos: t.slots.eos, comp: t.slots.comp, species_n: speciesConst(t.groups), burn_net: netSlot() });
+    const code = assemble('hydro/burn_net.wgsl', {
+      eos: t.slots.eos, comp: t.slots.comp, species_n: speciesConst(t.groups), burn_net: netSlot(),
+      burn_dx: t.blockTable ? BURN_DX_ATLAS : BURN_DX_UNIFORM,
+    });
     const pipe = await computePipeline(d, code, 'burn network');
     const uniform = d.createBuffer({ label: 'burn network', size: NET_UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const buf = new ArrayBuffer(NET_UNIFORM_BYTES);
@@ -423,6 +446,7 @@ export class NetBurnPass {
       spec.tMin ?? 1e8, spec.rhoMin ?? 1e4, NET_MAX_DT, NET_T_MAX,
     ]);
     new Uint32Array(buf, 32, 4).set([t.stride, spec.inShocks ? 1 : 0, NET_MAX_SUBSTEPS, 0]);
+    new Float32Array(buf, 48, 4).set([spec.limiter ?? 0, 0, 0, 0]);
     d.queue.writeBuffer(uniform, 0, buf);
     const w = netWeights();
     const wbuf = d.createBuffer({ label: 'burn network weights', size: w.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -435,6 +459,8 @@ export class NetBurnPass {
           6: v(t.state[1 - s][0]), 7: v(t.state[1 - s][1]), 8: v(t.species[1 - q]), 9: uniform, 10: wbuf,
         };
         if (t.comp) r[26] = v(t.comp);
+        // The limiter reads each cell's size from it (burn_cell_dx), on or off: the code is there either way.
+        if (t.blockTable) r[30] = t.blockTable;
         return bindGroup(d, pipe, r, 'burn network');
       }),
     );

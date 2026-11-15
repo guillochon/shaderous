@@ -138,6 +138,8 @@ export interface BurnTargets {
   pb: GPUTexture;
   /** the composition moments' texture, where the species set the equation of state */
   comp?: GPUTexture;
+  /** on the block atlas: the block table (the network's burning limiter reads cell sizes from it) */
+  blockTable?: GPUBuffer;
 }
 
 /** A burn pass on one grid, of either kind. */
