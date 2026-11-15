@@ -56,6 +56,36 @@ override STAGE: u32 = 1u;
 struct NewState { u1: vec4<f32>, u2: vec4<f32> }
 #include "hydro/cooling.wgsl"
 
+// Viscous heating (hydro/diffusion_core.wgsl), as mhd/update.wgsl has it: the stresses of the
+// cell's faces worked out again from the stage's assembled state (W1, ghosts included), at
+// atlas texels.
+fn load_vel(c: vec3<i32>) -> vec3<f32> {
+  return textureLoad(W1, c, 0).yzw;
+}
+fn load_comp(c: vec3<i32>) -> vec4<f32> {
+  return vec4<f32>(0.0);
+}
+fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
+  return 0;
+}
+#include "hydro/diffusion_core.wgsl"
+fn visc_side(c: vec3<i32>) -> DSide {
+  let w = textureLoad(W1, c, 0);
+  return DSide(w.x, w.yzw, 0.0, false);
+}
+// The heat of the cell at atlas texel x, per unit dt/dx.
+fn visc_heating(x: vec3<i32>) -> f32 {
+  let c = visc_side(x);
+  var heat = 0.0;
+  for (var a = 0; a < naxes(); a++) {
+    var e = vec3<i32>(0);
+    e[a] = 1;
+    heat += visc_heat_d(visc_flux(x - e, e, a, visc_side(x - e), c), c.v);
+    heat -= visc_heat_d(visc_flux(x, e, a, c, visc_side(x + e)), c.v);
+  }
+  return heat;
+}
+
 // For the lookups of amr_common's that this pass uses (map_cell, holder, local_of).
 fn n_at(level: u32) -> vec3<i32> {
   let n = i32(P.amr.y) * BS * (1 << level);
@@ -454,7 +484,9 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
   var mom = u1.yzw + kick + dtdx * net_a.yzw;
   var E = u2.x + ekick + dtdx * (net_b.x + dw);
-  let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w);
+  var heat = 0.0;
+  if (VISCOSITY && !g_deposit) { heat = visc_heating(x); }
+  let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
   let eb = 0.5 * dot(bc, bc);
   if (STAGE == 2u && gravity && !self_gravity && !g_deposit) {

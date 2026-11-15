@@ -71,6 +71,41 @@ struct NewState { u1: vec4<f32>, u2: vec4<f32> }
 #include "mhd/common.wgsl"
 #include "mhd/flux_index.wgsl"
 
+// Viscous heating (hydro/diffusion_core.wgsl): the internal energy, advected on its own, takes
+// the heat the viscous fluxes of mhd/flux.wgsl leave in the cell, from the faces' stresses
+// worked out again here from the same state (the stage's: the start in stage 1, where H holds
+// it, the half step in stage 2).
+fn load_vel(c: vec3<i32>) -> vec3<f32> {
+  let m = bc_map(c);
+  let u = textureLoad(H1, m.c, 0);
+  return bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
+}
+fn load_comp(c: vec3<i32>) -> vec4<f32> {
+  return comp_tex(bc_map(c).c);
+}
+fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
+  return 0;
+}
+#include "hydro/diffusion_core.wgsl"
+fn visc_side(c: vec3<i32>) -> DSide {
+  let m = bc_map(c);
+  let u = textureLoad(H1, m.c, 0);
+  let rho = max(u.x, P.rho_floor);
+  return DSide(rho, bc_velocity(u.yzw / rho, m), 0.0, false);
+}
+// The heat of cell t, per unit dt/dx.
+fn visc_heating(t: vec3<i32>, axes: i32) -> f32 {
+  let c = visc_side(t);
+  var heat = 0.0;
+  for (var a = 0; a < axes; a++) {
+    var e = vec3<i32>(0);
+    e[a] = 1;
+    heat += visc_heat_d(visc_flux(t - e, e, a, visc_side(t - e), c), c.v);
+    heat -= visc_heat_d(visc_flux(t, e, a, c, visc_side(t + e)), c.v);
+  }
+  return heat;
+}
+
 fn impulse(t: vec3<i32>) -> vec3<f32> {
   return EMF[emf_index(t)].xyz;
 }
@@ -248,7 +283,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
   let mom = u1.yzw + kick + dtdx * net_a.yzw;
   let E = u2.x + ekick + dtdx * (net_b.x + dw);
-  let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w);
+  var heat = 0.0;
+  if (VISCOSITY) { heat = visc_heating(t, axes); }
+  let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
   let eb = 0.5 * dot(bc, bc);
   var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);

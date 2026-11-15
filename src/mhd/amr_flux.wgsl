@@ -6,6 +6,11 @@
 // block's assembled storage, ghosts included (mhd/amr_assemble.wgsl).
 //
 // Writes the chunk's flux scratch, and the flux register for the faces on the block's faces.
+//
+// Viscosity and conduction (hydro/diffusion_core.wgsl) are added to the faces the block's own
+// cells use, from the stage's assembled state: its edge ghosts give every such face the
+// transverse neighbors of both its cells. (The ghost rows' faces feed only the edge fields.)
+// Being in the register, they are matched at refinement boundaries as the rest of the flux is.
 #include "hydro/common.wgsl"
 #include <eos>
 #include <limiter>
@@ -30,6 +35,20 @@ override STAGE: u32 = 1u;
 #include "mhd/riemann/common.wgsl"
 #include <mhd_riemann>
 #include "mhd/face_flux.wgsl"
+
+// For the diffusive fluxes, at atlas texel c: the assembled velocity. One composition (MHD on
+// blocks has no mixtures), and every face that takes them has its transverse neighbors.
+fn load_vel(c: vec3<i32>) -> vec3<f32> {
+  return textureLoad(W1, c, 0).yzw;
+}
+fn load_comp(c: vec3<i32>) -> vec4<f32> {
+  return vec4<f32>(0.0);
+}
+fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
+  return 0;
+}
+#include "hydro/diffusion_core.wgsl"
+#include "mhd/diffusion.wgsl"
 
 @compute @workgroup_size(FLAT_WG)
 fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: vec3<u32>) {
@@ -60,7 +79,8 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
       w = max(textureLoad(W3, atl(o, t - e), 0).w, textureLoad(W3, atl(o, t), 0).w);
     }
     let bn = textureLoad(FA, atl(o, t), 0)[a];
-    let F = face_of(qll, ql, qr, qrr, bn, a, STAGE == 2u, w, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+    var F = face_of(qll, ql, qr, qrr, bn, a, STAGE == 2u, w, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+    if (across.x + across.y + across.z == 0) { F.f = mhd_add_diffusion(F.f, atl(o, t - e), e, a, ql, qr); }
     let fa = vec4<f32>(F.f.m, F.f.mom);
     let fb = vec4<f32>(F.f.e, F.f.ei, F.f.s, F.f.vn);
     let i = flux_entry(inv.row, a, t);

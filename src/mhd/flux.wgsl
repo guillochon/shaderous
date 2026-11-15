@@ -13,6 +13,11 @@
 // grid's boundary need the faces of one row of ghost cells beyond it.
 // Ghost cells take their state through the boundary mapping, as everywhere.
 //
+// Viscosity and conduction (hydro/diffusion_core.wgsl) add their fluxes to every face, in both
+// stages, from the stage's own state: the start's in stage 1, the half step's in stage 2, so
+// that they too are integrated to second order in time. The MHD update adds the heat the
+// viscosity leaves to the internal energy (mhd/update.wgsl).
+//
 // Flux buffer of axis a, three vec4 per face (mhd/flux_index.wgsl):
 //   (mass, momentum)   (total energy, internal energy, scalar, face velocity)
 //   (F_a(B_t1), F_a(B_t2), upwind weight, 0)
@@ -41,6 +46,22 @@ override STAGE: u32 = 1u;
 #include <mhd_riemann>
 #include "mhd/face_flux.wgsl"
 
+// For the diffusive fluxes: a cell's velocity and composition, ghosts through the boundary
+// mapping, and every cell has its transverse neighbors.
+fn load_vel(c: vec3<i32>) -> vec3<f32> {
+  let m = bc_map(c);
+  let u = textureLoad(U1, m.c, 0);
+  return bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
+}
+fn load_comp(c: vec3<i32>) -> vec4<f32> {
+  return comp_tex(bc_map(c).c);
+}
+fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
+  return 0;
+}
+#include "hydro/diffusion_core.wgsl"
+#include "mhd/diffusion.wgsl"
+
 // The flux through the lower face along `axis` of cell t.
 fn face(t: vec3<i32>, axis: i32) -> FaceOut {
   var e = vec3<i32>(0);
@@ -57,7 +78,9 @@ fn face(t: vec3<i32>, axis: i32) -> FaceOut {
     w = max(textureLoad(U2, bc_map(t - e).c, 0).w, textureLoad(U2, bc_map(t).c, 0).w);
   }
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
-  return face_of(qll, ql, qr, qrr, bface(axis, t), axis, STAGE == 2u, w, comp_tex(bc_map(t - e).c), comp_tex(bc_map(t).c), dt);
+  var o = face_of(qll, ql, qr, qrr, bface(axis, t), axis, STAGE == 2u, w, comp_tex(bc_map(t - e).c), comp_tex(bc_map(t).c), dt);
+  o.f = mhd_add_diffusion(o.f, t - e, e, axis, ql, qr);
+  return o;
 }
 
 fn put(axis: i32, i: u32, o: FaceOut) {

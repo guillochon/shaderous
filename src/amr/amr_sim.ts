@@ -540,8 +540,7 @@ export class AmrSim implements Simulation {
   }
   /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
   private get binsLive(): boolean {
-    // With a field, not while self-gravity or point masses act (docs/mhd-plan.md 7b).
-    return this.builtBins > 0 && this.binPause === 0 && !(this.mhd && this.fieldOn);
+    return this.builtBins > 0 && this.binPause === 0;
   }
 
   private get slots() {
@@ -632,7 +631,7 @@ export class AmrSim implements Simulation {
       }),
     );
     const K = (this.builtBins = this.timeBins);
-    await this.mhd?.setBins(K > 0);
+    await this.mhd?.setBins(K > 0, this.cfg, slots);
     if (K > 0) await this.buildBins(K);
     // Off, every block is in bin 0, as the display's time-bin field shows it (amr/field.wgsl).
     else d.queue.writeBuffer(this.bins, 0, new Uint32Array(this.cap + 1));
@@ -936,14 +935,23 @@ export class AmrSim implements Simulation {
       if (mhd) {
         // A magnetic field (mhd/amr_mhd.ts): every leaf steps on the first substep, the leaves
         // starting a step and those owed a deposit on the others; then cells and faces back.
+        // Gravity as for the gas alone: each block's own field once the bins are known, the
+        // source of the potential from the cells just committed, and the closing kick below
+        // (which reads the faces in this parity, where the commit has left them, for the
+        // field's energy, and changes none of them).
         if (s === 0) {
-          mhd.encodeFull(pass, p, () => this.flat(pass, this.nLeaf, NG), () => setBins(pass));
+          mhd.encodeFull(pass, p, () => this.flat(pass, this.nLeaf, NG), () => {
+            setBins(pass);
+            if (field) fieldB(pass, this.nAll);
+          });
           run(pass, this.pCommit!, this.gCommit[p]);
           this.interior(pass, this.nLeaf);
+          g?.encodeSource(pass, p, this.nLevel, this.nLeaf);
         } else {
           mhd.encodeSubstep(pass, p);
           run(pass, this.pCommit!, this.gCommitB[p]);
           pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(1));
+          g?.encodeSourceB(pass, p);
         }
       } else if (s === 0) {
         run(pass, this.pAssemble, this.assembleGroup(p));

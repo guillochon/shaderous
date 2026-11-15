@@ -416,6 +416,7 @@ converts it to kelvin and reads the density as atoms per cm³.
 
 ## 11. Viscosity and thermal conduction
 
+`hydro/diffusion_core.wgsl` (shared with MHD, [§21](#21-ideal-mhd-in-development)),
 `hydro/diffusion.wgsl`, `hydro/diff_rate.wgsl`. The stress and heat flux are
 
 ```math
@@ -807,8 +808,9 @@ Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD
 rotor, Brio-Wu, the field loop and the Alfvén wave; and the polytrope's "Dipole field" and
 "Random field" variants) solve ideal MHD, with gravity, point masses, sinks and cooling (below).
 It runs on the uniform grid and on the adaptive mesh, which re-meshes with the field (below),
-with per-block timesteps, and draws its field lines (below). Species and burning move with a
-field too; viscosity and conduction with one are the rest of phase 4 of [the MHD plan](mhd-plan.md). Units: the magnetic pressure is $`B^2/2`$, so
+with per-block timesteps, and draws its field lines (below). Species, burning, viscosity and
+conduction act with a field too: every physics option of the gas alone couples to one (phase 4
+of [the MHD plan](mhd-plan.md)). Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
@@ -886,8 +888,8 @@ $`E`$ includes $`B^2/2`$.
   the correction rebuilds and of what a sink takes: a sink removes a share of the gas's mass,
   momentum and kinetic and internal energy, and leaves the field where it is (flux cannot be
   removed without breaking constrained transport). Cooling acts at the end of stage 2 and
-  changes E by exactly the change of $`e_\text{int}`$. On blocks, time bins pause while
-  self-gravity or point masses act on a field. A star's settling keeps the field's energy. In
+  changes E by exactly the change of $`e_\text{int}`$. On blocks, per-block timesteps carry on
+  with self-gravity and point masses as without a field. A star's settling keeps the field's energy. In
   `mhd-gravity` and `mhd-gravity-blocks`: a polytrope threaded by a uniform field (beta 1000)
   is as balanced as without it, a stratified column with a horizontal field as still, cooling
   follows the analytic decay to $`10^{-5}`$, and a sink keeps the mass budget to $`10^{-7}`$
@@ -901,6 +903,22 @@ $`E`$ includes $`B^2/2`$.
   the box in a field at beta 4, keeps its mass fractions in [0, 1] summing to 1, and returns
   more accurately than the passive scalar the MHD fluxes carry (2.7e-4 against 3.5e-4 at
   $`128^2`$; 1.0e-3 against 1.3e-3 on unrefined blocks at 64).
+- **Viscosity and conduction** (`hydro/diffusion_core.wgsl`, `mhd/diffusion.wgsl`), isotropic as
+  without a field ([§11](#11-viscosity-and-thermal-conduction); no Braginskii anisotropy). The
+  stress and heat flux are added to every MHD face flux in both stages, from that stage's state
+  (the start's, then the half step's), so they are integrated to second order in time where the
+  gas alone takes them from the start of the step. On blocks they come from the assembled state,
+  whose edge ghosts give every face its transverse neighbors (no one-sided rims), and the flux
+  register matches them at refinement boundaries with the rest of the flux. The update adds the
+  viscous heat to the separately evolved internal energy, working the faces' stresses out again
+  from the same state. The diffusive speed limits the timestep as in §3. In `mhd-diffusion`:
+  shear waves across $`B_z`$ decay as $`\exp(-2\nu k^2 t)`$ to 0.08% (2D) and 0.3% (3D), on blocks
+  too; a standing Alfvén wave along $`B_x`$, damped by viscosity alone, follows the damped
+  oscillator $`V'' + \nu k^2 V' + k^2 v_A^2 V = 0`$ in its wave energy to 0.03%; a temperature
+  wave across $`B_y`$ decays at $`\kappa k^2 (\gamma - 1)(1 + B^2)/(\gamma + B^2)`$ (with
+  $`\rho = p = 1`$: the frozen-in field shares the pressure balance and stiffens it) to 0.1%;
+  and a magnetized Kelvin-Helmholtz run on two levels with per-block timesteps conserves
+  energy to $`4\times10^{-8}`$.
 - **Fields inside stars** (`mhd/star_fields.ts`, plan section 8). A dipole along z,
   $`\mathbf{A} = A_0 \max(p - p_\text{cut}, 0)\,(-y, x, 0)`$, normalized by $`B_z = 2A_0(p_c -
   p_\text{cut})`$ at the center to the requested beta; or a random field, a sum of 64 Fourier

@@ -6,6 +6,7 @@
 #include <eos>
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
+#include "hydro/diff_rate.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -27,7 +28,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     comp_use(comp_tex(c));
     let w = prim_from_cons(textureLoad(U1, c, 0), textureLoad(U2, c, 0));
     let cf = fast_max(w.w1.x, w.w2.y, bcell(c));
-    let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * cf;
+    let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * cf + diff_speed(w.w1.x, w.w2.w);
     atomicMax(&wg_max[blk], bitcast<u32>(rate));
     atomicMax(&wg_max[blk + 1u], bitcast<u32>(length(g_load(c))));
   }

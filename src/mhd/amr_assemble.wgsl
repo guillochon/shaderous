@@ -19,6 +19,7 @@
 #include <limiter>
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
+#include "hydro/diff_rate.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
 #include "gravity/ext_bind.wgsl"
@@ -88,7 +89,7 @@ fn main(
       textureStore(FA, c, vec4<f32>(f, 0.0));
       if (RATES_ON && count == 0) {
         let cf = sqrt(w.w2.y * w.w2.y + dot(B, B) / w.w1.x);
-        let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * cf;
+        let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * cf + diff_speed(w.w1.x, w.w2.w);
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
         // The acceleration limits the step too (hydro/clock.wgsl), per cell size.
         var g = P.gext.xyz + ext_accel(blk_pos(slot, l));

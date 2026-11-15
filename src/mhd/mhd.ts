@@ -21,13 +21,13 @@ export const mhdOn = (c: SimConfig): boolean => c.problem.mhd !== undefined;
 export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/riemann/hlle.wgsl' : 'mhd/riemann/hlld.wgsl');
 
 /**
- * Why this configuration cannot run with a magnetic field yet, or null if it can. The field is
- * coupled to the gas dynamics alone so far: gravity, point masses, species, cooling, diffusion,
- * sources and the adaptive mesh come in later phases of docs/mhd-plan.md.
+ * Why this configuration cannot run with a magnetic field, or null if it can. Since phase 4 of
+ * docs/mhd-plan.md every physics option couples to the field; this stays as the one place to
+ * refuse a future option that does not.
  */
 export function mhdUnsupported(c: SimConfig): string | null {
-  // Gravity, point masses, cooling and species act on a field (docs/mhd-plan.md 7b).
-  if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not coupled to the magnetic field yet';
+  // Gravity, point masses, cooling, species, viscosity and conduction all act on a field
+  // (docs/mhd-plan.md 7b).
   return null;
 }
 

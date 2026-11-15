@@ -33,12 +33,20 @@ is rebuilt from the gas's. The refinement checks run with a field. There is a mo
 the new `field-loop-dense` preset. Restarting an adaptive-mesh run with a field from a snapshot
 followed (the leaves' faces in the file's `ShaderousFaces` dataset).
 
-Phase 4 progress (2026-11-14), as section 7b designs it: parts A (gravity, point masses, frames,
-sinks and cooling on the uniform grid), B (the same on blocks; time bins pause while self-gravity
-or point masses act on a field) and C (dipole and random fields inside stars, the polytrope's
-"Dipole field" and "Random field" variants) are done, with the magnetized polytrope staying at
-rest (`mhd-star-fields`), and D (species and burning carried with a field, `mhd-species`).
-Still to do: viscosity and conduction (E), and time bins with self-gravity and a field.
+Phase 4 done (2026-11-14), as section 7b designs it, in five parts: A (gravity, point masses,
+frames, sinks and cooling on the uniform grid), B (the same on blocks, per-block timesteps
+included), C (dipole and random fields inside stars, the polytrope's "Dipole field" and "Random
+field" variants; the magnetized polytrope stays at rest, `mhd-star-fields`), D (species and
+burning carried with a field, `mhd-species`) and E (viscosity and conduction, `mhd-diffusion`).
+`mhdUnsupported` refuses nothing now. numerics.md section 21. Changes from section 7b:
+- Viscosity and conduction are added to the face fluxes in both stages, from each stage's
+  state, not in stage 2 alone: second order in time, and the same stability limit. The viscous
+  heat for the internal energy is worked out again in the update from the same state, since
+  the flux buffers have no room for the viscous part of each face.
+- On blocks the diffusive fluxes use the assembly's edge ghosts, so there are no one-sided rims
+  as in the hydro block update.
+- Per-block timesteps carry on with self-gravity and point masses (they paused at first): the
+  hydro cycle's field, source, solve and closing kick, with the faces left in place.
 
 Phase 5 (field lines) done (2026-11-14), ahead of phase 4: numerics.md section 21, Field lines.
 Changes from section 10:
@@ -481,7 +489,8 @@ state. On blocks the species pass takes the MHD block fluxes likewise.
 **Cooling.** `apply_cooling` after the stage-2 update, in both update shaders.
 
 **Viscosity and conduction.** Their face fluxes added to the MHD face fluxes (`face_flux.wgsl`)
-in stage 2, isotropic (no Braginskii). Last of the phase.
+in stage 2, isotropic (no Braginskii). Last of the phase. (Done in both stages instead: see the
+status at the top.)
 
 **Initial fields on stars.** A dipole or a random (Kolmogorov) vector potential, tapered by the
 star's pressure (section 8). The pressure used is the preset's own profile (Lane-Emden), not the

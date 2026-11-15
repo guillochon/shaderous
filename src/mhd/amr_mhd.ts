@@ -190,12 +190,17 @@ export class AmrMhd {
   }
 
   /**
-   * Build the step's passes with time bins on or off (the run's cfg.timeBins changed). On, they
-   * read each block's bin, and a cycle steps through encodeFull() and encodeSubstep().
+   * Build the step's passes with time bins on or off (the run's cfg.timeBins changed), and with
+   * the run's configuration and hydro slots as they are now (a panel setting such as viscosity
+   * or the Riemann solver may have changed them). On, the passes read each block's bin, and a
+   * cycle steps through encodeFull() and encodeSubstep().
    */
-  async setBins(on: boolean) {
-    if (on === this.binsOn) return;
+  async setBins(on: boolean, cfg: SimConfig, slots: Record<string, string>) {
+    const key = (c: SimConfig, s: Record<string, string>) => JSON.stringify([mhdRiemann(c), { ...s, bins: '', mid: '' }]);
+    if (on === this.binsOn && key(cfg, slots) === key(this.dep.cfg, this.dep.slots)) return;
     this.binsOn = on;
+    this.dep.cfg = cfg;
+    this.dep.slots = slots;
     await this.build();
   }
 

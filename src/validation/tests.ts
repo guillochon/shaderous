@@ -2835,7 +2835,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-gravity-blocks',
     name: 'MHD with gravity, point masses and cooling on the adaptive mesh',
     criterion:
-      'As mhd-gravity, on blocks: the polytrope threaded by a field (128 finest, 1 level, self-gravity, to t = 1) keeps its central density within 5% and to 0.03 of the unmagnetized star, its Mach number bounded at 3; the column with a horizontal field (2D, uniform gravity, block grid at 64, with per-block timesteps) stays as still as without one (Mach at most twice plus 1e-3); cooling with a field follows the analytic decay to 1e-3; a sink keeps gas plus accreted mass to 1e-5 and leaves the field (its energy within 5%). Throughout |div B| dx / max |B| stays below 1e-6 and shared faces agree',
+      'As mhd-gravity, on blocks: the polytrope threaded by a field (128 finest, 1 level, self-gravity, to t = 1) keeps its central density within 5% and to 0.03 of the unmagnetized star, its Mach number bounded at 3; the column with a horizontal field (2D, uniform gravity, block grid at 64, with per-block timesteps) stays as still as without one (Mach at most twice plus 1e-3); cooling with a field follows the analytic decay to 1e-3; a sink keeps gas plus accreted mass to 1e-5 and leaves the field (its energy within 5%). With per-block timesteps (2 bins, kept on), which now carry on while self-gravity and point masses act on a field: the magnetized polytrope as without them (central density within 5% and to 0.03 of the unmagnetized star with bins too), and the sink\'s mass budget to 1e-5, cycles having run in both. Throughout |div B| dx / max |B| stays below 1e-6 and shared faces agree',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -2847,13 +2847,15 @@ export const TESTS: TestDef[] = [
       };
       const bStar = Math.sqrt((2 * POLY_K * POLY.rhoc ** 2) / 1000);
       const magStar: Problem = { ...polytrope, id: 'polytrope-uniform-field', mhd: { face: () => (axis) => (axis === 2 ? bStar : 0) } };
-      const star = async (prob: Problem, tag: string | null) =>
-        withAmr(gpu, prob, 128, { amrLevels: 1, tEnd: 1 }, async (sim) => {
+      const bins = { timeBins: 2, timeBinsAlways: true };
+      const star = async (prob: Problem, tag: string | null, over: Partial<SimConfig> = {}) =>
+        withAmr(gpu, prob, 128, { amrLevels: 1, tEnd: 1, ...over }, async (sim) => {
           const d0 = await sim.diagnostics();
           await sim.runToEnd(64);
           const d = await sim.diagnostics();
           const good = tag ? await ok(sim, d, tag) : true;
-          return { dev: Math.abs(d.ranges[0][1] / d0.ranges[0][1] - 1), mach: d.maxMach, good, eKin: d.eKin };
+          const cycles = (await sim.binWork()).cycles;
+          return { dev: Math.abs(d.ranges[0][1] / d0.ranges[0][1] - 1), mach: d.maxMach, good, eKin: d.eKin, cycles };
         });
       const plain = await star(polytrope, null);
       const mag = await star(magStar, 'star');
@@ -2864,6 +2866,14 @@ export const TESTS: TestDef[] = [
       m.star_kinetic_energy = mag.eKin;
       m.star_kinetic_energy_unmagnetized = plain.eKin;
       pass &&= mag.good && mag.dev < 0.05 && Math.abs(mag.dev - plain.dev) < 0.03 && mag.mach < 3;
+      // The same with per-block timesteps.
+      const plainBins = await star(polytrope, null, bins);
+      const magBins = await star(magStar, 'star_bins', bins);
+      m.star_bins_central_density_change = magBins.dev;
+      m.star_bins_central_density_change_unmagnetized = plainBins.dev;
+      m.star_bins_max_mach = magBins.mach;
+      m.star_bins_cycles = magBins.cycles;
+      pass &&= magBins.good && magBins.dev < 0.05 && Math.abs(magBins.dev - plainBins.dev) < 0.03 && magBins.mach < 3 && magBins.cycles > 0;
       const col = column(8);
       const magCol: Problem = { ...col, id: 'column-field', mhd: { face: () => (axis) => (axis === 0 ? Math.sqrt(2 / 1e4) : 0) } };
       const still = async (prob: Problem, tag: string | null) =>
@@ -2893,16 +2903,22 @@ export const TESTS: TestDef[] = [
         masses: () => [{ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.15 }],
         mhd: { face: () => (axis) => (axis === 0 ? 0.3 : 0) },
       });
-      await withAmr(gpu, sinkBox, 64, { ndim: 2, amrLevels: 1 }, async (sim) => {
-        const d0 = await sim.diagnostics();
-        await sim.runToEnd(64);
-        const d = await sim.diagnostics();
-        const mass = d.masses[0];
-        m.sink_accreted_fraction = mass.accreted / d0.mass;
-        m.sink_mass_error = Math.abs(d.mass + mass.accreted - d0.mass) / d0.mass;
-        m.sink_magnetic_energy_change = Math.abs(d.magnetic!.eMag / d0.magnetic!.eMag - 1);
-        pass &&= mass.accreted > 0.003 * d0.mass && m.sink_mass_error < 1e-5 && m.sink_magnetic_energy_change < 0.05 && (await ok(sim, d, 'sink'));
-      });
+      for (const [tag, over] of [['sink', {}], ['sink_bins', bins]] as const) {
+        await withAmr(gpu, sinkBox, 64, { ndim: 2, amrLevels: 1, ...over }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          const mass = d.masses[0];
+          m[`${tag}_accreted_fraction`] = mass.accreted / d0.mass;
+          m[`${tag}_mass_error`] = Math.abs(d.mass + mass.accreted - d0.mass) / d0.mass;
+          m[`${tag}_magnetic_energy_change`] = Math.abs(d.magnetic!.eMag / d0.magnetic!.eMag - 1);
+          const cycles = (await sim.binWork()).cycles;
+          m[`${tag}_cycles`] = cycles;
+          pass &&=
+            mass.accreted > 0.003 * d0.mass && m[`${tag}_mass_error`] < 1e-5 && m[`${tag}_magnetic_energy_change`] < 0.05 &&
+            (await ok(sim, d, tag)) && (tag === 'sink' || cycles > 0);
+        });
+      }
       return { pass, metrics: m };
     },
   },
@@ -2998,6 +3014,147 @@ export const TESTS: TestDef[] = [
           return { X: await sim.readLeafSpecies(), u1: c.u1, u2: c.u2 };
         }, () => sim.runToEnd(64), () => sim.diagnostics()),
       );
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-diffusion',
+    name: 'Viscosity and conduction with a magnetic field (2D, uniform 64^2 to 128^2 and blocks 128 to 256 finest)',
+    criterion:
+      'Shear waves across a uniform B_z (which they leave alone) lose kinetic energy as exp(-2 nu k^2 t) to 1%, along an axis and along the diagonal, uniform and on blocks, in 2D and 3D, with total energy (the field\'s included) conserved to 1e-6; a standing Alfven wave in B_x, damped by viscosity alone, keeps the wave energy (kinetic and the field\'s perturbation) of the damped oscillator V\'\' + nu k^2 V\' + k^2 v_A^2 V = 0 to 2%; a temperature wave across B_y = 0.5 (frozen into the gas, whose pressure is shared with that of the field) decays at kappa k^2 (gamma - 1) (1 + B^2) / (gamma + B^2) to 1%, uniform and on blocks; Kelvin-Helmholtz threaded by B_z, with viscosity and conduction, on a mesh of two levels and more with per-block timesteps, conserves mass to 1e-6 and energy to 1e-5. Throughout |div B| dx / max |B| below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const nu = 0.01;
+      const A = 0.05;
+      const k0 = 2 * Math.PI;
+      const r = Math.SQRT1_2;
+      const field = (b: number[]) => ({ face: () => (axis: number) => b[axis] });
+      const divOk = (tag: string, d: Diagnostics) => {
+        m[`${tag}_divB`] = d.magnetic!.divB;
+        return m[`${tag}_divB`] < 1e-6;
+      };
+
+      // Shear waves: v perpendicular to k in the plane, B_z out of it, untouched by a flow
+      // without divergence that does not vary along z.
+      const shear = (kx: number, ky: number, dir: number[]) =>
+        stillGas({
+          id: 'shear-wave-field', mhd: field([0, 0, 0.8]),
+          init: () => (x, y) => {
+            const s = A * Math.sin(k0 * (kx * x + ky * y));
+            return { rho: 1, vx: s * dir[0], vy: s * dir[1], vz: s * dir[2], p: 1, s: 0 };
+          },
+        });
+      const decay = async (tag: string, sim: Sim | AmrSim, k2: number) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        const expected = Math.exp(-2 * nu * k2 * sim.cfg.tEnd);
+        m[`${tag}_decay_error`] = Math.abs(d1.eKin / d0.eKin / expected - 1);
+        m[`${tag}_energy_drift`] = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        m[`${tag}_magnetic_energy_change`] = Math.abs(d1.magnetic!.eMag / d0.magnetic!.eMag - 1);
+        pass &&= m[`${tag}_decay_error`] < 0.01 && m[`${tag}_energy_drift`] < 1e-6 && divOk(tag, d1);
+      };
+      const on = { viscosity: nu };
+      await withSim(gpu, shear(1, 0, [0, 1, 0]), 64, { ndim: 2, tEnd: 1.2, ...on }, (sim) => decay('axis', sim, k0 * k0));
+      await withSim(gpu, shear(1, 1, [-r, r, 0]), 64, { ndim: 2, tEnd: 0.6, ...on }, (sim) => decay('diagonal', sim, 2 * k0 * k0));
+      await withAmr(gpu, shear(1, 1, [-r, r, 0]), 128, { ndim: 2, amrLevels: 1, refineHi: 2, tEnd: 0.6, ...on }, (sim) => decay('diagonal_blocks', sim, 2 * k0 * k0));
+      await withSim(gpu, shear(1, 1, [0, 0, 1]), 32, { tEnd: 0.6, ...on }, (sim) => decay('along_field_3d', sim, 2 * k0 * k0));
+      await withAmr(gpu, shear(1, 1, [-r, r, 0]), 64, { amrLevels: 1, refineHi: 2, tEnd: 0.3, ...on }, (sim) => decay('diagonal_blocks_3d', sim, 2 * k0 * k0));
+
+      // A standing Alfven wave, v_y = A sin(k x) along B_x = 1 (v_A = 1), with viscosity on the
+      // velocity alone: V'' + nu k^2 V' + k^2 V = 0 from V = A, V' = -nu k^2 A, and the field's
+      // perturbation b = -(V' + nu k^2 V) / k. The wave energy, (V^2 + b^2) / 4 per volume,
+      // against the kinetic energy plus what the field has gained.
+      const alfven = stillGas({
+        id: 'alfven-standing', mhd: field([1, 0, 0]),
+        init: () => (x) => ({ rho: 1, vx: 0, vy: A * Math.sin(k0 * x), vz: 0, p: 1, s: 0 }),
+      });
+      const g = (nu * k0 * k0) / 2;
+      const om = Math.sqrt(k0 * k0 - g * g);
+      const waveEnergy = (t: number) => {
+        const e = Math.exp(-g * t);
+        const V = A * e * (Math.cos(om * t) - (g / om) * Math.sin(om * t));
+        const dV = A * e * (-2 * g * Math.cos(om * t) - ((om * om - g * g) / om) * Math.sin(om * t));
+        const b = -(dV + nu * k0 * k0 * V) / k0;
+        return (V * V + b * b) / (A * A);
+      };
+      const alfvenRun = (viscosity: number) =>
+        withSim(gpu, alfven, 128, { ndim: 2, tEnd: 1.1, viscosity }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          const d1 = await sim.diagnostics();
+          return { w: (d1.eKin + d1.magnetic!.eMag - d0.magnetic!.eMag) / d0.eKin, drift: Math.abs(d1.eTot - d0.eTot) / d0.eTot, d1 };
+        });
+      const visc = await alfvenRun(nu);
+      m.alfven_wave_energy = visc.w;
+      m.alfven_wave_energy_expected = waveEnergy(1.1);
+      m.alfven_error = Math.abs(visc.w / m.alfven_wave_energy_expected - 1);
+      m.alfven_energy_drift = visc.drift;
+      pass &&= m.alfven_error < 0.02 && m.alfven_energy_drift < 1e-6 && divOk('alfven', visc.d1);
+      // Without viscosity, for scale: what the scheme's own dissipation takes.
+      m.alfven_inviscid_wave_energy = (await alfvenRun(0)).w;
+
+      // Conduction: the temperature wave of the conduction test, across B_y. The field moves
+      // with the gas (B_y = B0 rho) and the gas pressure gives way to its pressure, p + B^2 / 2
+      // constant, so a change of density changes the temperature (1 + B0^2) times as much as
+      // at constant gas pressure: linearizing, the wave decays at
+      // kappa k^2 (gamma - 1) (1 + B0^2) / (gamma + B0^2), with rho = p = 1. It starts with the
+      // flow that decay makes, as in the conduction test.
+      const kappa = 0.02;
+      const gamma = 5 / 3;
+      const a = 0.01;
+      const b0 = 0.5;
+      const rate = (kappa * k0 * k0 * (gamma - 1) * (1 + b0 * b0)) / (gamma + b0 * b0);
+      const rhoW = (x: number) => 1 / (1 + a * Math.cos(k0 * x));
+      const wave = stillGas({
+        id: 'temperature-wave-field', tEnd: 2,
+        mhd: { face: () => (axis: number, x: number) => (axis === 1 ? b0 * rhoW(x) : 0) },
+        init: () => (x) => ({
+          rho: rhoW(x), vx: (-rate * a * Math.sin(k0 * x)) / k0, vy: 0, vz: 0, s: 0,
+          p: 1 + (b0 * b0) / 2 - (b0 * b0 * rhoW(x) ** 2) / 2,
+        }),
+      });
+      const amplitude = (rho: (q: number) => number, x: (q: number) => number, count: number) => {
+        let s = 0;
+        for (let q = 0; q < count; q++) s += (1 / rho(q) - 1) * Math.cos(k0 * x(q));
+        return (2 * s) / count;
+      };
+      const check = async (tag: string, sim: Sim | AmrSim, amp: () => Promise<number>) => {
+        const d0 = await sim.diagnostics();
+        const a0 = await amp();
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        m[`${tag}_decay_error`] = Math.abs((await amp()) / a0 / Math.exp(-rate * sim.cfg.tEnd) - 1);
+        m[`${tag}_energy_drift`] = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        pass &&= m[`${tag}_decay_error`] < 0.01 && m[`${tag}_energy_drift`] < 1e-6 && divOk(tag, d1);
+      };
+      await withSim(gpu, wave, 64, { ndim: 2, conductivity: kappa }, (sim) =>
+        check('conduction', sim, async () => {
+          const { u1 } = await sim.readState();
+          return amplitude((q) => u1[4 * q], (q) => ((q % 64) + 0.5) / 64 - 0.5, 64 * 64);
+        }));
+      await withAmr(gpu, wave, 128, { ndim: 2, amrLevels: 1, refineHi: 2, conductivity: kappa }, (sim) =>
+        check('conduction_blocks', sim, async () => {
+          const c = await sim.readLeaves();
+          return amplitude((q) => c.u1[4 * q], (q) => c.x[q], c.count);
+        }));
+
+      // Conservation where the fluxes are matched between levels and between timesteps. B_z in
+      // 2D is prolonged as a constant, which keeps its energy, and nothing is coarsened (that
+      // would average B_z and lose some), so the mesh, whatever it does, changes no energy.
+      const khField: Problem = { ...kelvinHelmholtz, id: 'kh-field', mhd: field([0, 0, 0.5]) };
+      await withAmr(gpu, khField, 256, { ndim: 2, amrLevels: 2, tEnd: 1.5, viscosity: 2e-4, conductivity: 2e-4, timeBins: 2, timeBinsAlways: true, refineLo: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        m.refined_mass_drift = Math.abs(d1.mass - d0.mass) / d0.mass;
+        m.refined_energy_drift = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        m.refined_regrids = sim.regrids;
+        m.refined_levels = new Set(sim.tree.leaves().map((b) => b.level)).size;
+        m.refined_fraction_of_uniform_cells = sim.tree.stats().cells / 256 ** 2;
+        pass &&= m.refined_mass_drift < 1e-6 && m.refined_energy_drift < 1e-5 && m.refined_levels >= 2 && m.refined_fraction_of_uniform_cells < 1 && divOk('refined', d1);
+      });
       return { pass, metrics: m };
     },
   },
