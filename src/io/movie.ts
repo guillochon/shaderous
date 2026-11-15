@@ -2,7 +2,7 @@
 // painted onto a 2D compositing canvas, encoded as H.264 by WebCodecs as soon as it is added,
 // and muxed into a file held in memory. Only the encoded stream is kept, never the images.
 // Nothing here knows about the simulation.
-import { BufferTarget, CanvasSource, Mp4OutputFormat, Output, canEncodeVideo } from 'mediabunny';
+import { BufferTarget, Mp4OutputFormat, Output, VideoSample, VideoSampleSource, canEncodeVideo } from 'mediabunny';
 
 export interface MovieOptions {
   width: number;
@@ -36,8 +36,10 @@ export class MovieWriter {
   readonly fps: number;
   frames = 0;
   private output: Output<Mp4OutputFormat, BufferTarget>;
-  private source: CanvasSource;
+  private source: VideoSampleSource;
   private done = false;
+  /** The frames handed to the encoder so far, each after the one before it. */
+  private queue: Promise<void> = Promise.resolve();
 
   private constructor(o: MovieOptions) {
     this.fps = o.fps;
@@ -46,7 +48,7 @@ export class MovieWriter {
     this.canvas.height = o.height;
     this.ctx = this.canvas.getContext('2d', { alpha: false })!;
     this.output = new Output({ format: new Mp4OutputFormat({ fastStart: 'in-memory' }), target: new BufferTarget() });
-    this.source = new CanvasSource(this.canvas, {
+    this.source = new VideoSampleSource({
       codec: 'avc',
       bitrate: o.bitrate ?? defaultBitrate(o.width, o.height, o.fps),
       keyFrameInterval: 2,
@@ -69,19 +71,26 @@ export class MovieWriter {
   }
 
   /**
-   * Encode what the compositing canvas holds now as the next frame. Resolves once the encoder
-   * can take another, so frames do not pile up in memory.
+   * Encode what the compositing canvas holds now as the next frame: the canvas is copied at
+   * once and may be painted again. Resolves once the frame before this one has been taken by the
+   * encoder, so this one encodes while the caller goes on and frames do not pile up in memory.
    */
   async add(): Promise<void> {
     if (this.done) throw new Error('the movie is already finished');
     const i = this.frames++;
-    await this.source.add(i / this.fps, 1 / this.fps);
+    const sample = new VideoSample(this.canvas, { timestamp: i / this.fps, duration: 1 / this.fps });
+    const before = this.queue;
+    this.queue = before.then(() => this.source.add(sample)).finally(() => sample.close());
+    // A failure surfaces at the next add() or at finish().
+    this.queue.catch(() => {});
+    await before;
   }
 
   /** Flush the encoder and close the file: its bytes. */
   async finish(): Promise<Uint8Array> {
     if (this.done) throw new Error('the movie is already finished');
     this.done = true;
+    await this.queue;
     this.source.close();
     await this.output.finalize();
     return new Uint8Array(this.output.target.buffer!);

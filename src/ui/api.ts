@@ -347,6 +347,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     let rounds = 0;
     const settle = async () => {
       const b = inFlight.shift()!;
+      const was = d;
       d = await b.read;
       const now = performance.now();
       inFlightSteps -= b.taken;
@@ -356,7 +357,10 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       pace.msPerStep = pace.msPerStep ? 0.7 * pace.msPerStep + 0.3 * m : m;
       pace.grow = Math.min(pace.grow * 2, 256);
       rounds++;
+      // The step about to be taken; held at a stop it reads 0, and the mean step of the batch
+      // stands in, so a frame-by-frame run does not judge every batch by a step long past.
       if (d.dt > 0) lastDt = pace.dt = d.dt;
+      else if (d.steps > was.steps && d.t > was.t) pace.dt = (d.t - was.t) / (d.steps - was.steps);
       if (!(d.t === d.t) || !(d.dt === d.dt)) throw new Error(`the clock is NaN after ${d.steps} steps`);
     };
     const drain = async () => {
@@ -364,7 +368,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     };
     /**
      * Steps until the clock next stops, beyond those in flight, as far as the last timestep tells:
-     * at a frame time the step boundary nearest to it and one held step to show the hold, at
+     * at a frame time the step boundary nearest to it (the step that reaches it already reads the hold), at
      * `until` the step that lands on it, at a checkpoint or the end that step and a held one.
      * Steps past a stop are no-ops that still cost a full pass, so batches go no further.
      */
@@ -373,7 +377,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       if (!(dt > 0)) return Infinity;
       const tp = d.t + inFlightSteps * dt;
       let n = Infinity;
-      if (frameAt !== undefined) n = Math.min(n, Math.round((frameAt - tp) / dt) + 1);
+      // A held clock's next step is taken at dt = 0 (it only sets the step anew): one more.
+      if (frameAt !== undefined) n = Math.min(n, Math.round((frameAt - tp) / dt) + (d.dt > 0 ? 0 : 1));
       if (until !== undefined) n = Math.min(n, Math.ceil((until - tp) / dt - 1e-6));
       const stop = Math.min(checkpoint ?? Infinity, Number.isFinite(cfg.tEnd) ? cfg.tEnd : Infinity);
       if (stop < Infinity) n = Math.min(n, Math.ceil((stop - tp) / dt - 1e-6) + 1);
