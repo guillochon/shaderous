@@ -12,6 +12,8 @@ arguments, the overshoot penalty and the temperature-slope weight):
   b  a + the overshoot penalty (ow 20)
   c  b + the temperature slope (jw 1; needs tpairs.npz)
 Each round writes round_<r>.json: every variant's scores, the choice, and the time it took.
+BURN_VARIANTS (comma-separated letters) keeps only some variants. A round whose DAgger data
+(data/dagger_<r>.npz) already exists skips its burn, so a run can be restarted mid-round.
 """
 import json
 import os
@@ -23,6 +25,9 @@ from pathlib import Path
 HERE = Path(__file__).parent
 PY = sys.executable
 VARIANTS = {"a": ("0", "0"), "b": ("20", "0"), "c": ("20", "1")}
+# BURN_VARIANTS=b (say) trains only those variants each round.
+if os.environ.get("BURN_VARIANTS"):
+    VARIANTS = {k: v for k, v in VARIANTS.items() if k in os.environ["BURN_VARIANTS"].split(",")}
 # The teacher distilled from (train.py's teacher and teach arguments): BURN_TEACHER=- for none,
 # as after a change to the reference burner's physics, which a teacher trained before it lacks.
 TEACHER = os.environ.get("BURN_TEACHER", "aprox13_surrogate.pt")
@@ -61,7 +66,9 @@ def main():
     last = 0.0
     while time.time() + last < deadline:
         t0 = time.time()
-        subprocess.run([PY, "dagger.py", best, str(r)], cwd=HERE, stdout=open(HERE / f"dagger_{r}.log", "w"), stderr=subprocess.STDOUT)
+        # A round whose states are already burned (a run restarted mid-round) reuses them.
+        if not (HERE / "data" / f"dagger_{r}.npz").exists():
+            subprocess.run([PY, "dagger.py", best, str(r)], cwd=HERE, stdout=open(HERE / f"dagger_{r}.log", "w"), stderr=subprocess.STDOUT)
         env = dict(os.environ, BURN_NO_ROLLOUT="1")
         models, cmds = [], []
         for i, (v, (ow, jw)) in enumerate(VARIANTS.items()):
