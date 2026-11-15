@@ -20,6 +20,11 @@
 // its companion's pull, which in a star that is falling freely toward it (or orbiting it) is
 // not there to be held against. A star that moves keeps its velocity: settling only reshapes
 // its density.
+//
+// On an adaptive mesh the rounds run on the GPU (amr/settle.wgsl, AmrSim.settleOnGpu) when each
+// star's gas is one it knows (Barotrope.gpu): only per-block sums come back, where the Settler
+// here reads the whole mesh back, some 100 bytes a cell, more than a page may hold on a mesh of
+// tens of GB. The two agree to a few parts in a million of the peak density.
 
 /** A polytropic star at rest at the box center, to be settled into the grid's hydrostatic balance. */
 export interface StarSpec {
@@ -35,11 +40,13 @@ export interface StarSpec {
 export interface Barotrope {
   pressure(rho: number): number;
   rhoOfH(h: number): number;
+  /** The same gas for the GPU's settling (amr/settle.wgsl), which knows these two kinds. */
+  gpu?: { kind: 'polytrope'; n: number; K: number } | { kind: 'degenerate'; degRho: number; degP: number };
 }
 
 export const polytropeBarotrope = (n: number, K: number): Barotrope => {
   const hk = (n + 1) * K;
-  return { pressure: (rho) => K * Math.pow(rho, 1 + 1 / n), rhoOfH: (h) => (h > 0 ? Math.pow(h / hk, n) : 0) };
+  return { pressure: (rho) => K * Math.pow(rho, 1 + 1 / n), rhoOfH: (h) => (h > 0 ? Math.pow(h / hk, n) : 0), gpu: { kind: 'polytrope', n, K } };
 };
 
 /** One star to settle: its gas, where its center is, how it moves, its size, and the dye it carries. */

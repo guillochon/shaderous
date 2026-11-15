@@ -227,7 +227,8 @@ SwiftShader. What the machine needs:
   bound as two windows of 2 GiB, and the species atlas stacks its groups of four along y as well
   as z once they pass 2048 texels (13 species at 51^3 blocks would fit). Without either, and
   with self-gravity, only the card's memory bounds it: every pass over the blocks is dispatched
-  in slabs. An RTX PRO 6000 (96 GB) holds 32^3 blocks; the MRI disk at
+  in slabs. Stars are settled into hydrostatic balance on the GPU, so their size does not
+  bound the mesh either (on the CPU, a white dwarf at 2048^3 ran out of page memory). An RTX PRO 6000 (96 GB) holds 32^3 blocks; the MRI disk at
   1024^3 with 4 levels ran on an H200 at 35^3 (117 GB, load 23 s, 10 steps in 10 s). At 2048^3
   the blocks run out a level short of the finest. Atlas textures past 4 GiB are made render
   attachments, so WebGPU zero-fills them with a render pass: through a staging buffer, as it

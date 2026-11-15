@@ -138,6 +138,7 @@ export function degenerateBarotrope(s: DegenerateScales): Barotrope {
       const u = (h * s.degRho) / (8 * s.degP);
       return s.degRho * Math.sqrt(u * (2 + u)) ** 3;
     },
+    gpu: { kind: 'degenerate', degRho: s.degRho, degP: s.degP },
   };
 }
 

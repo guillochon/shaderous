@@ -26,12 +26,12 @@ import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { makeEos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
-import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from '../problems/settle';
+import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells, type Settling } from '../problems/settle';
 import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
-import { FLAT_ROWS, interior3d, padded3d } from './dispatch';
+import { FLAT_ROWS, interior3d, padded3d, rows } from './dispatch';
 import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
@@ -49,6 +49,9 @@ const MAX_STEPS_AHEAD = 24;
 const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
+/** The GPU's settling (amr/settle.wgsl): its uniform's size, and the most stars it takes. */
+const SETTLE_BYTES = 496;
+const SETTLE_MAX_STARS = 4;
 /** The first window of the face mass flux records: a binding's largest size, aligned for the second's offset. */
 const massFluxWindowBytes = (d: GPUDevice) => Math.floor(d.limits.maxStorageBufferBindingSize / d.limits.minStorageBufferOffsetAlignment) * d.limits.minStorageBufferOffsetAlignment;
 /** Most bytes of face mass flux records: two windows, in a buffer no larger than a buffer may be. */
@@ -1379,9 +1382,16 @@ export class AmrSim implements Simulation {
     this.settling = true;
     const tree = this.tree;
     const t0 = performance.now();
+    // On the GPU where every star's gas is one the GPU knows; the CPU's settling reads the whole
+    // mesh back, some 100 bytes a cell, which a mesh of tens of GB does not fit in a page.
+    const onGpu = set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
     this.settled = (async () => {
       try {
         setLoadStage(settleStage(0));
+        if (onGpu) {
+          await this.settleOnGpu(set, () => epoch !== this.settleEpoch || tree !== this.tree);
+          return;
+        }
         const leaf = await this.readLeaves();
         if (epoch !== this.settleEpoch) return;
         const cells: SettleCells = {
@@ -1428,6 +1438,191 @@ export class AmrSim implements Simulation {
         }
       }
     })();
+  }
+
+  /**
+   * startSettling() on the GPU (amr/settle.wgsl): the same rounds, with every cell's density
+   * worked out where it lies. Each round finds each star's constant C from per-block sums of its
+   * mass at trial values of C (16 a pass: first spread out from the bottom of the well, then
+   * across the bracket found), which the host adds in double precision; only those sums come
+   * back. `stale`: the run was reset or the mesh changed, and the settling is to be dropped.
+   */
+  private async settleOnGpu(set: Settling, stale: () => boolean) {
+    const d = this.device;
+    const code = assemble('amr/settle.wgsl', this.slots);
+    const [pMeasure0, pMeasure1, pMeasure2, pApply, pFinish, pCopy] = await Promise.all([
+      computePipeline(d, code, 'settle masses', { MODE: 0 }, 'measure'),
+      computePipeline(d, code, 'settle least potential', { MODE: 1 }, 'measure'),
+      computePipeline(d, code, 'settle trial masses', { MODE: 2 }, 'measure'),
+      computePipeline(d, code, 'settle apply', undefined, 'apply'),
+      computePipeline(d, code, 'settle finish', undefined, 'finish'),
+      computePipeline(d, code, 'settle copy back', undefined, 'copy_back'),
+    ]);
+    if (stale()) return;
+    this.flush();
+    const nRows = this.nLeaf;
+    const NC = 16;
+    const bytes = Math.max(1, nRows) * NC * 4;
+    const uni = d.createBuffer({ label: 'settle', size: SETTLE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    const out = d.createBuffer({ label: 'settle sums', size: bytes, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const back = d.createBuffer({ label: 'settle sums readback', size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const v = (t: GPUTexture) => t.createView();
+    const phi = v(this.grav!.phi);
+    const groups = rows(1, nRows);
+    const f = new Float32Array(SETTLE_BYTES / 4);
+    const u = new Uint32Array(f.buffer);
+    const stars = set.stars;
+    const mass = stars.map(() => 0);
+    const C: number[] = stars.map(() => 0);
+    const relax = set.relax ?? 1;
+    // The uniform (amr/settle.wgsl, Settle): star S of the measures, and their trial values of C.
+    const pack = (star: number, cands: number[] = []) => {
+      f.fill(0);
+      u[0] = stars.length;
+      u[1] = star;
+      f.set([set.rhoCut, set.rhoAmb, set.pAmb, relax, set.G], 4);
+      stars.forEach((st, i) => {
+        const o = 12 + 20 * i;
+        const g = st.barotrope.gpu!;
+        f.set([st.center[0], st.center[1], st.center[2] ?? 0, st.R, st.reach ?? 3e38, mass[i], st.scalar, g.kind === 'polytrope' ? 0 : 1], o);
+        f.set(g.kind === 'polytrope' ? [g.n, g.K, (g.n + 1) * g.K, 0] : [g.degRho, g.degP, 0, 0], o + 8);
+        f.set([st.vel[0], st.vel[1], st.vel[2] ?? 0, 0], o + 12);
+        const hi = Math.fround(C[i]);
+        f.set([hi, C[i] - hi], o + 16);
+      });
+      cands.forEach((c, k) => {
+        const hi = Math.fround(c);
+        f.set([hi, c - hi], 92 + 2 * k);
+      });
+      d.queue.writeBuffer(uni, 0, f);
+    };
+    // Bind groups for the current parity: the measures read it; apply and finish write the other.
+    const groupsFor = (p: number) => ({
+      measure: [pMeasure0, pMeasure1, pMeasure2].map((pipe) =>
+        bindGroup(d, pipe, { 0: this.params, 10: uni, 2: v(this.state[p][0]), 4: phi, 11: out, 30: this.bt, 31: this.listLeaf }),
+      ),
+      apply: bindGroup(d, pApply, {
+        0: this.params, 10: uni, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: phi, 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]),
+        11: out, 30: this.bt, 31: this.listLeaf,
+      }),
+      finish: bindGroup(d, pFinish, {
+        0: this.params, 10: uni, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]),
+        30: this.bt, 31: this.listLeaf, ...this.compIn,
+      }),
+      copy: bindGroup(d, pCopy, { 0: this.params, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]), 31: this.listLeaf }),
+    });
+    // The state stays in its parity: what apply and finish write into the other is copied back.
+    const bg = groupsFor(this.cur);
+    const back2 = groupsFor(1 - this.cur).copy;
+    const encode = (pipe: GPUComputePipeline, group: GPUBindGroup) => {
+      const enc = d.createCommandEncoder();
+      const pass = enc.beginComputePass();
+      pass.setPipeline(pipe);
+      pass.setBindGroup(0, group);
+      if (nRows > 0) pass.dispatchWorkgroups(...groups);
+      pass.end();
+      return enc;
+    };
+    // Runs a pass and returns its per-block results, NC floats a block.
+    const measure = async (pipe: GPUComputePipeline, group: GPUBindGroup): Promise<Float32Array> => {
+      const enc = encode(pipe, group);
+      enc.copyBufferToBuffer(out, 0, back, 0, nRows * NC * 4);
+      d.queue.submit([enc.finish()]);
+      await back.mapAsync(GPUMapMode.READ);
+      const r = new Float32Array(back.getMappedRange().slice(0));
+      back.unmap();
+      return r;
+    };
+    const swap = () => d.queue.submit([encode(pCopy, back2).finish()]);
+    try {
+      // The stars' masses as the initial conditions placed them, and the densest cell.
+      pack(0);
+      const m0 = await measure(pMeasure0, bg.measure[0]);
+      let peak = 0;
+      for (let r = 0; r < nRows; r++) {
+        for (let i = 0; i < stars.length; i++) mass[i] += m0[r * NC + i];
+        peak = Math.max(peak, m0[r * NC + 4]);
+      }
+      // Star i's mass at trial values of C.
+      const trial = async (i: number, cands: number[]): Promise<number[]> => {
+        pack(i, cands);
+        const m = await measure(pMeasure2, bg.measure[2]);
+        const sums = cands.map(() => 0);
+        for (let r = 0; r < nRows; r++) for (let k = 0; k < NC; k++) sums[k] += m[r * NC + k];
+        return sums;
+      };
+      const solveC = async (i: number) => {
+        pack(i);
+        const least = await measure(pMeasure1, bg.measure[1]);
+        let phiMin = Infinity;
+        for (let r = 0; r < nRows; r++) phiMin = Math.min(phiMin, least[r * NC]);
+        if (!(phiMin < 1e38)) return;
+        const scale = Math.abs(phiMin) + 1e-6;
+        // Out from the bottom of the well, doubling, until the mass is reached...
+        let lo = phiMin;
+        let mLo = 0;
+        let hi = NaN;
+        let mHi = NaN;
+        for (let start = -12; Number.isNaN(hi) && start < 60; start += NC) {
+          const cands = Array.from({ length: NC }, (_, k) => phiMin + scale * 2 ** (start + k));
+          const m = await trial(i, cands);
+          const k = m.findIndex((x) => x >= mass[i]);
+          if (k < 0) {
+            lo = cands[NC - 1];
+            mLo = m[NC - 1];
+            continue;
+          }
+          if (k > 0) {
+            lo = cands[k - 1];
+            mLo = m[k - 1];
+          }
+          hi = cands[k];
+          mHi = m[k];
+        }
+        if (Number.isNaN(hi)) throw new Error('settling: no constant gives the star its mass');
+        // ...then across the bracket, cut into 17 a pass, and the mass interpolated in the last.
+        for (let pass = 0; pass < 12 && hi - lo > 1e-11 * scale; pass++) {
+          const cands = Array.from({ length: NC }, (_, k) => lo + ((hi - lo) * (k + 1)) / (NC + 1));
+          const m = await trial(i, cands);
+          const k = m.findIndex((x) => x >= mass[i]);
+          if (k < 0) {
+            lo = cands[NC - 1];
+            mLo = m[NC - 1];
+            continue;
+          }
+          hi = cands[k];
+          mHi = m[k];
+          if (k > 0) {
+            lo = cands[k - 1];
+            mLo = m[k - 1];
+          }
+        }
+        C[i] = mHi > mLo ? lo + ((hi - lo) * (mass[i] - mLo)) / (mHi - mLo) : hi;
+      };
+      this.settleLog = [];
+      for (let round = 0; round < SETTLE_ROUNDS; round++) {
+        setLoadStage(settleStage(round));
+        if (stale()) return;
+        for (let i = 0; i < stars.length; i++) await solveC(i);
+        pack(0);
+        const ch = await measure(pApply, bg.apply);
+        let change = 0;
+        for (let r = 0; r < nRows; r++) change = Math.max(change, ch[r * NC]);
+        swap();
+        this.refreshPotential();
+        this.settleLog.push(change / peak);
+        if (change < (set.tol ?? SETTLE_TOL) * peak) break;
+      }
+      if (stale()) return;
+      pack(0);
+      d.queue.submit([encode(pFinish, bg.finish).finish()]);
+      swap();
+      this.refreshPotential();
+    } finally {
+      uni.destroy();
+      out.destroy();
+      back.destroy();
+    }
   }
 
   /** Atlas texel of a slot's first interior cell. */
