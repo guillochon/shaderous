@@ -3,7 +3,7 @@ import { prepareHelmholtz } from './eos/helmholtz';
 import { assemble } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
-import { COMPILE_STAGE, INIT_STAGE, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
+import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
 import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
@@ -924,6 +924,7 @@ export class Sim implements Simulation {
     // timestep's first records, which they bind.
     const v = (t: GPUTexture) => t.createView();
     setLoadStage(COMPILE_STAGE);
+    compileSetup(['uniform', cfg]);
     const hydro = (async () => {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.

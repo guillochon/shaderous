@@ -18,7 +18,7 @@
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
-import { COMPILE_STAGE, INIT_STAGE, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
+import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
@@ -503,6 +503,7 @@ export class AmrSim implements Simulation {
     setLoadStage('Allocating the mesh');
     const sim = new AmrSim(gpu, cfg, slots);
     setLoadStage(COMPILE_STAGE);
+    compileSetup(['adaptive', slots, deferUpdate, cfg]);
     const d = sim.device;
     const v = (t: GPUTexture) => t.createView();
     const depth = cfg.ndim === 2 ? 1 : BS;

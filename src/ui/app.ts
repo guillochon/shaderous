@@ -2,7 +2,7 @@
 import { BUILD, reportError, setAdapterInfo } from './errors';
 import { decodeLink, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_ZOOM, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
-import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
+import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, forgetCompileSetup, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
@@ -1278,6 +1278,7 @@ function enqueue(job: () => Promise<void>): Promise<void> {
     } catch (e) {
       // A build that failed with an error left the page alive: not a crash to learn from.
       allocationSurvived();
+      forgetCompileSetup();
       fail(e);
     } finally {
       building = false;

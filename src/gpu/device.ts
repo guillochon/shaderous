@@ -169,6 +169,7 @@ export function computePipeline(
     // Most recently used last, so the oldest is the first one dropped.
     cache.delete(key);
     cache.set(key, p);
+    countCompile(p); // part of the load's total all the same (gpu/progress.ts)
     return p;
   }
   p = compilePipeline(device, code, label, constants, entryPoint);
