@@ -15,7 +15,7 @@ import { bindGroup, computePipeline, readTexture } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { BS, type Block } from '../amr/tree';
-import { magneticFrom, mhdRiemann, type MagDiagnostics } from './mhd';
+import { MAG_OPS, magneticFrom, mhdRiemann, type MagDiagnostics } from './mhd';
 
 /** Bytes the flux scratch may take, which sets how many leaves a chunk holds. */
 let scratchBytes = 256 * 1024 ** 2;
@@ -253,10 +253,10 @@ export class AmrMhd {
       Reducer.create(
         d,
         [this.dep.cap * BS, BS, this.ndim === 2 ? 1 : BS],
-        [SUM, MAX, MAX, MAX],
+        MAG_OPS,
         'mhd/amr_diagnostics.wgsl',
         still,
-        [0, 1].map((p) => ({ 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 4: v(this.faces[p]), 30: bt })),
+        [0, 1].map((p) => ({ 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 4: v(this.faces[p]), 5: this.dep.bh, 30: bt })),
         'magnetic diagnostics (blocks)',
       ),
       computePipeline(d, assemble('mhd/amr_commit.wgsl'), 'MHD commit faces'),
@@ -519,14 +519,15 @@ export class AmrMhd {
     const pass = enc.beginComputePass();
     this.redMag.encode(pass, parity);
     pass.end();
-    const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-    enc.copyBufferToBuffer(this.redMag.result, 0, buf, 0, 16);
+    const size = 4 * MAG_OPS.length;
+    const buf = d.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    enc.copyBufferToBuffer(this.redMag.result, 0, buf, 0, size);
     d.queue.submit([enc.finish()]);
     await buf.mapAsync(GPUMapMode.READ);
     const r = new Float32Array(buf.getMappedRange().slice(0));
     buf.unmap();
     buf.destroy();
-    return magneticFrom(r);
+    return magneticFrom(r, !!this.dep.cfg.problem.disk);
   }
 
   /** Write a leaf's faces (blockFaces' layout) at the atlas texel `origin` of its cell (0, 0, 0), compensations zeroed. */

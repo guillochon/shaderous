@@ -253,6 +253,8 @@ details[open] > summary .sum { display: none; }
 #diag { display: grid; grid-template-columns: 1fr 1fr; column-gap: 9px; height: 119px; contain: strict; }
 /* With a magnetic field: its rows too (9 a column). */
 #diag.mag { height: 153px; }
+/* And a disk's (11 a column). */
+#diag.mag.disk { height: 187px; }
 #diag dl, #diag-sinks dl {
   display: grid; grid-template-columns: 34px minmax(0, 1fr) 24px; grid-auto-rows: 17px; column-gap: 3px;
   margin: 0; font-variant-numeric: tabular-nums;

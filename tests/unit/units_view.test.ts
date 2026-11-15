@@ -7,7 +7,10 @@ import { displayLabel, kelvinPerCodeT, unitOf } from '../../src/units/units';
 
 describe('unit readouts', () => {
   it('assigns a measure to every view field', () => {
-    expect(FIELDS.length).toBe(28);
+    expect(FIELDS.length).toBe(30);
+    // The MRI quality factors are pure numbers.
+    expect(fieldMeasure(28, 5 / 3)).toBeNull();
+    expect(fieldMeasure(29, 5 / 3)).toBeNull();
     expect(fieldMeasure(21, 5 / 3)).toBeNull();
     expect(fieldMeasure(25, 5 / 3)).toBeNull();
     expect(fieldMeasure(18, 5 / 3)).toBe('time');

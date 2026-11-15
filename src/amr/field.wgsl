@@ -47,10 +47,12 @@ struct View {
 // round-off, whose divergence over its own |B| and whose beta would otherwise set the color range.
 // A placeholder without a field.
 @group(0) @binding(14) var<storage, read> MAG: array<f32, 4>;
+#include "mhd/mri.wgsl"
 
 // The magnetic fields, F_MAGNETIC onward, at the leaf cell at atlas texel c, whose gas pressure
-// is p: from the block's own faces (texel BS holds its upper ones).
-fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
+// is p and density rho, at x (relative to the box center): from the block's own faces (texel BS
+// holds its upper ones). g_dx is the cell's size.
+fn magnetic_value(f: u32, c: vec3<i32>, p: f32, rho: f32, x: vec3<f32>) -> f32 {
   let lo = textureLoad(BF, c, 0).xyz;
   var hi = lo;
   var div = 0.0;
@@ -70,6 +72,7 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
       let floor = 1.0e-4 * MAG[2];
       return 2.0 * p / max(b2, max(floor * floor, 1.0e-30));
     }
+    case 6u, 7u { return mri_quality(B, rho, p, x, g_dx)[f - F_MAGNETIC - 6u]; }
     default { return abs(div) / max(MAG[2], 1.0e-30); }
   }
 }
@@ -131,7 +134,7 @@ fn leaf_value(f: Leaf) -> Cell {
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
   if (V.field == F_TIME_BIN) { x = f32(TBIN[1u + u32(f.slot)]); }
-  if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + 6u) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y)); }
+  if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + N_MAGNETIC) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y), u1.x, xp); }
   return Cell(x, u1.x, u2.w > 0.5);
 }
 

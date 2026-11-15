@@ -41,9 +41,11 @@ fn shown(rho: f32) -> f32 {
 @group(0) @binding(14) var<storage, read> MAG: array<f32, 4>;
 
 #include "mhd/common.wgsl"
+#include "mhd/mri.wgsl"
 
-// The magnetic fields, F_MAGNETIC onward, at cell c whose gas pressure is p.
-fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
+// The magnetic fields, F_MAGNETIC onward, at cell c whose gas pressure is p and density rho, at
+// x (relative to the box center).
+fn magnetic_value(f: u32, c: vec3<i32>, p: f32, rho: f32, x: vec3<f32>) -> f32 {
   let B = bcell(c);
   let b2 = dot(B, B);
   switch (f - F_MAGNETIC) {
@@ -53,6 +55,7 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32) -> f32 {
       let floor = 1.0e-4 * MAG[2];
       return 2.0 * p / max(b2, max(floor * floor, 1.0e-30));
     }
+    case 6u, 7u { return mri_quality(B, rho, p, x, P.dx)[f - F_MAGNETIC - 6u]; }
     default {
       var div = 0.0;
       for (var a = 0; a < 3; a++) {
@@ -102,7 +105,7 @@ fn voxel(c: vec3<i32>) -> Cell {
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
   // (With MHD, PB is the half-step state's second texture, and the flag its fourth channel.)
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0)[select(2, 3, (P.flags & 32u) != 0u)]; }
-  if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + 6u) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y)); }
+  if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + N_MAGNETIC) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y), u1.x, xp); }
   return Cell(x, u1.x, u2.w > 0.5);
 }
 

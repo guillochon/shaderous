@@ -56,8 +56,8 @@ runs and the comparison with GM17's figures.
 
 Beyond the plan (2026-11-14): a magnetized accretion disk preset, `mri-disk` (numerics.md
 section 21, Magnetized accretion disk), with what it needed: the damping zone in both MHD
-updates, and an Alfven speed ceiling. Still to add: the stresses (alpha_Maxwell,
-alpha_Reynolds) and the MRI quality factors Q_z, Q_phi as diagnostics or views.
+updates, and an Alfven speed ceiling. Then its diagnostics: the Maxwell and Reynolds alphas and
+the MRI quality factors Q_z, Q_phi, as diagnostics and (the Qs) as views.
 
 Phase 5 (field lines) done (2026-11-14), ahead of phase 4: numerics.md section 21, Field lines.
 Changes from section 10:

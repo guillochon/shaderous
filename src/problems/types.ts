@@ -47,6 +47,7 @@ export const FIELDS = [
   'Gravitational potential', 'Kinetic energy', 'Jeans length (cells)', 'Timestep limit', 'Mass fraction',
   'Shock', 'Time bin',
   'Magnetic field x', 'Magnetic field y', 'Magnetic field z', 'Magnetic field strength', 'Plasma beta', 'Magnetic divergence',
+  'MRI quality Q_z', 'MRI quality Q_φ',
 ] as const;
 /** The mass fraction field: one menu entry per species the run carries (ViewState.species). */
 export const MASS_FRACTION_FIELD = 19;
@@ -55,7 +56,7 @@ export const SHOCK_FIELD = 20;
 /** Adaptive mesh with per-block timesteps: the time bin of each cell's block (amr/bins_on.wgsl). */
 export const TIME_BIN_FIELD = 21;
 /** The magnetic fields (mhd/mhd.ts): B_x, B_y, B_z, |B|, plasma beta, |div B| dx / |B|. Shown only for a run with a field. */
-export const MAGNETIC_FIELDS: readonly number[] = [22, 23, 24, 25, 26, 27];
+export const MAGNETIC_FIELDS: readonly number[] = [22, 23, 24, 25, 26, 27, 28, 29];
 /**
  * The field menu: FIELDS by index, in groups (the indices themselves are the shaders' order).
  * A run with species also gets a Composition group, one mass fraction per species.
@@ -66,7 +67,7 @@ export const FIELD_MENU: { group: string; fields: number[] }[] = [
   { group: 'Derivatives', fields: [11, 12, 13, 20] },
   { group: 'Gravity', fields: [15, 17] },
   { group: 'Mesh and timestep', fields: [14, 21, 18] },
-  { group: 'Magnetic field', fields: [25, 22, 23, 24, 26, 27] },
+  { group: 'Magnetic field', fields: [25, 22, 23, 24, 26, 27, 28, 29] },
 ];
 /** What each field shows, for its tooltip. */
 export const FIELD_TIPS = [
@@ -98,6 +99,8 @@ export const FIELD_TIPS = [
   'Magnitude of the magnetic field at the cell center (in units where the magnetic pressure is B² / 2)',
   'Gas pressure over magnetic pressure, 2p / B²: below 1 the field dominates. Where the field is weaker than 1e-4 of its strongest (gas it has not reached, holding round-off) B² is taken as that much, so that gas does not set the color range',
   'The discrete divergence of the magnetic field from the cell’s six faces, |∇·B| dx, over the strongest |B| anywhere (as the ∇·B diagnostic): zero up to round-off, since constrained transport keeps it there',
+  'With a point mass: cells across the fastest-growing wavelength of the magnetorotational instability for the field’s vertical part, Q_z = 2π |B_z| / (√ρ Ω dx), Ω the Keplerian angular velocity about the mass. The MRI grows at its proper rate where Q_z is above about 8 (Hawley, Guan & Krolik 2011)',
+  'With a point mass: as Q_z, for the field’s part along the orbit, Q_φ = 2π |B_φ| / (√ρ Ω dx). Above about 20 the turbulence the MRI drives is resolved (Hawley, Guan & Krolik 2011)',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
 export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12, 22, 23, 24]);
@@ -277,6 +280,11 @@ export interface Problem {
    * is B^2 / 2, so plasma beta is 2 p / B^2.
    */
   mhd?: MhdSpec;
+  /**
+   * A disk around the first point mass, in the x-y plane: the magnetic diagnostics report its
+   * stresses and MRI quality factors (MagDiagnostics.disk), and the panel shows them.
+   */
+  disk?: boolean;
   /** Returns the initial primitive state as a function of position. */
   init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>): (x: number, y: number, z: number) => Prim;
 }

@@ -952,6 +952,24 @@ $`E`$ includes $`B^2/2`$.
   section 19 holds the outer disk beyond R = 3.25; with a field it acts on the gas alone and
   leaves B^2 / 2 in E as it was. Field that rises into the corona, and field a sink leaves
   behind, meet the Alfven ceiling below. `mhd-disk` runs it on both grids.
+- **Disk diagnostics** (`mhd/mri.wgsl`; `magnetic.disk` in the API; the panel's α M, α R, Q z,
+  Q φ rows and the views "MRI quality Q_z" and "MRI quality Q_φ"; for presets with
+  `Problem.disk`). About the first point mass, in cylinders about its z axis, with the softened
+  Keplerian Omega_K. The quality factors Q = 2 pi |B_i| / (sqrt(rho) Omega_K dx) of the field's
+  vertical and azimuthal parts count the cells across the MRI's fastest-growing wavelength
+  ([Hawley, Guan & Krolik 2011][Hawley2011]: above about 8 for Q_z and 20 for Q_phi the
+  instability grows, and its turbulence saturates, as at higher resolution). Where beta < 1 the
+  MRI does not grow, and Q is 0 there, in the view and the averages; the panel's are
+  mass-weighted over the rest of the disk's body. The alphas are volume sums over the disk's
+  body, between the sink and the damping zone and within two scale heights c_s / Omega_K of
+  the midplane, over the summed pressure: the Maxwell stress -B_R B_phi, and the Reynolds stress
+  rho dv_R dv_phi with the velocities measured from the mean flow of each of eight annuli
+  (log-spaced), after the Keplerian speed is taken from v_phi. All 41 channels ride on the
+  magnetic diagnostics' one reduction. On the default disk, after three orbits at r = 1: alpha_M
+  0.026, alpha_R 0.003, Q_z 4.2, Q_phi 15; marginal, as expected at 256^3. Before the turbulence
+  (one orbit) alpha_R is negative, -0.015: the inner edge's laminar adjustment, gas flowing in
+  at half the sound speed with its orbital speed swinging about Keplerian, is a real flux of
+  angular momentum, read before the flow turns turbulent.
 - **Alfven ceiling** (`hydro/fluff.wgsl` `alfven_floor`; `Problem.fluff.va`, the panel's "Max
   Alfven speed", link key `fva`). Where |B| / sqrt(rho) would pass the ceiling after a cell's
   update, mass is added at rest until it does not: momentum stays, so the added gas takes kinetic

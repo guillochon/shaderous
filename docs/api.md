@@ -228,7 +228,11 @@ The run's diagnostics, read back now:
 - `magnetic`, for a run with a magnetic field: `eMag` (the magnetic energy, which `eTot`
   includes and `eInt` then does not), `divB` (the largest |div B| dx of any cell over
   the largest |B|), `bMax` and `betaMin` (the least plasma beta, 2p / B^2, of any cell).
-  The panel's Diagnostics show the same four as E mag, |B| max, β min and ∇·B.
+  The panel's Diagnostics show the same four as E mag, |B| max, β min and ∇·B. For a disk
+  preset (the magnetized accretion disk), `magnetic.disk` adds `alphaMaxwell` and
+  `alphaReynolds` (the stresses over the pressure, summed over the disk's body) and `qz`,
+  `qphi` (the mass-weighted MRI quality factors), shown as α M, α R, Q z and Q φ; see
+  numerics.md section 21, Disk diagnostics.
 
 ### `debris() → object`
 

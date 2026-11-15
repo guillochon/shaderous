@@ -145,6 +145,7 @@ export const mriDisk: Problem = {
   refineRho: 1e-6,
   fluff: { rho: 0, u: 0, v: 0, va: MRI.vaMax },
   damping: { wgsl: DAMPING, radius: MRI.rDamp, rate: MRI.damp },
+  disk: true,
   view: { field: 0, log: true, mode: 'slice', axis: 1 },
   params: [
     {

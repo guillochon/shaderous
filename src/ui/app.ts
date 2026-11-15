@@ -3053,19 +3053,33 @@ const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['|B| max', 'Largest field strength at a cell center (code units: B_Gauss = √(4π) B)', 'b_max'],
   ['β min', 'Least plasma beta, 2p / B², of any cell: below 1 the field’s pressure dominates the gas’s', 'beta_min'],
   ['∇·B', 'Largest |div B| dx of any cell, over the largest |B|: constrained transport keeps it at float32 round-off (about 1e-7)', 'div_b'],
+  ['α M', 'Maxwell α: a disk’s Maxwell stress −B_R B_φ summed over the disk between the sink and the damping zone, over its summed pressure: the Shakura-Sunyaev α the field carries. MRI turbulence gives some 0.01 to 0.1', 'alpha_maxwell'],
+  ['α R', 'Reynolds α: as the Maxwell α, for the Reynolds stress ρ v_R δv_φ, with δv_φ the orbital speed less the softened Keplerian one: typically a quarter to a half of the Maxwell stress in MRI turbulence', 'alpha_reynolds'],
+  ['Q z', 'Mass-weighted mean over the disk of the MRI quality factor 2π |B_z| / (√ρ Ω dx): cells across the fastest-growing wavelength. Above about 8 the MRI grows at its proper rate (Hawley, Guan & Krolik 2011)', 'q_z'],
+  ['Q φ', 'As Q z, for the field along the orbit. Above about 20 the turbulence is resolved', 'q_phi'],
 ];
-const MAG_ROWS = 4;
-// Seven a side; a field's four rows two a side (|B| max, beta min left; E mag, div B right).
-const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1];
+/** A disk's rows (Problem.disk), the last of the field's. */
+const DISK_ROWS = 4;
+const MAG_ROWS = 4 + DISK_ROWS;
+// Seven a side; a field's four rows two a side (|B| max, beta min left; E mag, div B right), and
+// a disk's likewise (the alphas left, the Qs right).
+const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1];
 /** What each diagnostic measures, in DIAG_ROWS order (the field's in code units). */
-const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'energy', null, null, null];
+const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'energy', null, null, null, null, null, null, null];
 /** The diagnostics in DIAG_ROWS order. */
-const diagValues = (d: Diagnostics): number[] => [
-  d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot,
-  ...(d.magnetic ? [d.magnetic.eMag, d.magnetic.bMax, d.magnetic.betaMin, d.magnetic.divB] : new Array<number>(MAG_ROWS).fill(NaN)),
-];
+const diagValues = (d: Diagnostics): number[] => {
+  const m = d.magnetic;
+  const k = m?.disk;
+  return [
+    d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot,
+    ...(m ? [m.eMag, m.bMax, m.betaMin, m.divB] : new Array<number>(MAG_ROWS - DISK_ROWS).fill(NaN)),
+    ...(k ? [k.alphaMaxwell, k.alphaReynolds, k.qz, k.qphi] : new Array<number>(DISK_ROWS).fill(NaN)),
+  ];
+};
 /** Whether column c is one of a magnetic field's. */
 const magneticCol = (c: number) => c >= DIAG_ROWS.length - MAG_ROWS && c < DIAG_ROWS.length;
+/** Whether column c is one of a disk's (the last of a field's). */
+const diskCol = (c: number) => c >= DIAG_ROWS.length - DISK_ROWS && c < DIAG_ROWS.length;
 
 /** One column of the diagnostics history. */
 interface DiagCol {
@@ -3174,12 +3188,14 @@ function diagCell(col: number, label: string, into: Element): DiagCell {
   return { col, dt, dd, spark, set: liveText(dd), warn: false };
 }
 const diagCells = DIAG_ROWS.map(([label], i) => diagCell(i, label, diagCols[DIAG_SIDE[i]]));
-/** Show the magnetic field's rows with one, hide them without. */
-function showMagneticRows(on: boolean) {
+/** Show the magnetic field's rows with one, hide them without; a disk's only for a disk. */
+function showMagneticRows(on: boolean, disk = false) {
   $('diag').classList.toggle('mag', on);
+  $('diag').classList.toggle('disk', on && disk);
   for (const c of diagCells) {
     if (!magneticCol(c.col)) continue;
-    for (const el of [c.dt, c.dd, c.spark]) el.style.display = on ? '' : 'none';
+    const show = on && (disk || !diskCol(c.col));
+    for (const el of [c.dt, c.dd, c.spark]) el.style.display = show ? '' : 'none';
   }
 }
 showMagneticRows(false);
@@ -3259,7 +3275,7 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
     diagHistory.clear();
     sinkPrev = [];
     diagOf = of;
-    showMagneticRows(!!of.cfg.problem.mhd);
+    showMagneticRows(!!of.cfg.problem.mhd, !!of.cfg.problem.disk);
     showDiagUnits();
   } else if (last && d.steps < last[2]) sinkPrev = []; // the run went back: its history starts again
   const u = units();
@@ -3290,8 +3306,8 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
 /** Save the diagnostics of the run so far as CSV, with the columns of every sink that was in it. */
 function exportDiagnostics() {
   const width = diagHistory.rows.reduce((w, r) => Math.max(w, r.length), BASE_COLS);
-  // A magnetic field's columns only with one.
-  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) ? [i] : []));
+  // A magnetic field's columns only with one, a disk's only for a disk.
+  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) ? [i] : []));
   const csv = diagHistory.csv(cols, cols.map((i) => DIAG_COLS[i].csv!));
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');

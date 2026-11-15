@@ -31,8 +31,15 @@ export function mhdUnsupported(c: SimConfig): string | null {
   return null;
 }
 
-/** Magnetic diagnostics channels: magnetic energy, max |div B| dx, max |B|. */
-const MAG_OPS = [SUM, MAX, MAX, MAX];
+/** Annuli of a disk's Reynolds stress (mhd/mri.wgsl DISK_BINS). */
+const DISK_BINS = 8;
+/**
+ * Magnetic diagnostics channels: magnetic energy, max |div B| dx, max |B|, max 1 / beta; then,
+ * with a point mass, a disk's sums (mhd/mri.wgsl disk_channels): Maxwell stress, pressure,
+ * rho Q_z, rho Q_phi and rho where beta >= 1, and per annulus rho v_R v_phi, rho v_R, rho v_phi
+ * and rho.
+ */
+export const MAG_OPS = [SUM, MAX, MAX, MAX, ...new Array<number>(5 + 4 * DISK_BINS).fill(SUM)];
 
 export interface MagDiagnostics {
   /** total magnetic energy, sum of B^2 / 2 over the cells */
@@ -43,11 +50,29 @@ export interface MagDiagnostics {
   bMax: number;
   /** least plasma beta, 2p / B^2, of any cell (Infinity where there is no field) */
   betaMin: number;
+  /**
+   * For a disk around a point mass (Problem.disk), between the sink and the damping zone: the
+   * Shakura-Sunyaev alphas, the volume-summed Maxwell stress -B_R B_phi and Reynolds stress
+   * rho dv_R dv_phi over the summed pressure, the velocities measured from the mean flow of each
+   * of eight annuli; and the MRI quality factors Q_z and Q_phi, mass-weighted over the gas where
+   * beta >= 1 (mhd/mri.wgsl).
+   */
+  disk?: { alphaMaxwell: number; alphaReynolds: number; qz: number; qphi: number };
 }
 
-/** The magnetic diagnostics from their reduction (MAG_OPS order). */
-export function magneticFrom(r: Float32Array): MagDiagnostics {
-  return { eMag: r[0], divB: r[2] > 0 ? r[1] / r[2] : 0, bMax: r[2], betaMin: r[3] > 0 ? 1 / r[3] : Infinity };
+/** The magnetic diagnostics from their reduction (MAG_OPS order); a disk's with `disk`. */
+export function magneticFrom(r: Float32Array, disk = false): MagDiagnostics {
+  const m: MagDiagnostics = { eMag: r[0], divB: r[2] > 0 ? r[1] / r[2] : 0, bMax: r[2], betaMin: r[3] > 0 ? 1 / r[3] : Infinity };
+  if (disk && r[5] > 0) {
+    // Each annulus's Reynolds stress about its mean flow: sum rho v_R v_phi - (sum rho v_R)(sum rho v_phi) / sum rho.
+    let reynolds = 0;
+    for (let b = 0; b < DISK_BINS; b++) {
+      const [s, f, g, mass] = r.slice(9 + 4 * b, 13 + 4 * b);
+      if (mass > 0) reynolds += s - (f * g) / mass;
+    }
+    m.disk = { alphaMaxwell: r[4] / r[5], alphaReynolds: reynolds / r[5], qz: r[8] > 0 ? r[6] / r[8] : 0, qphi: r[8] > 0 ? r[7] / r[8] : 0 };
+  }
+  return m;
 }
 
 /**
@@ -260,7 +285,7 @@ export class MhdPasses {
         MAG_OPS,
         'mhd/diagnostics.wgsl',
         slots,
-        [0, 1].map((p) => ({ 0: params, 1: v(this.dep.state[p][0]), 2: v(this.dep.state[p][1]), 4: v(this.faces[p]), ...comp })),
+        [0, 1].map((p) => ({ 0: params, 1: v(this.dep.state[p][0]), 2: v(this.dep.state[p][1]), 4: v(this.faces[p]), 5: this.dep.bh, ...comp })),
         'magnetic diagnostics',
       ),
     ]);
@@ -382,14 +407,15 @@ export class MhdPasses {
     const pass = enc.beginComputePass();
     this.redMag.encode(pass, parity);
     pass.end();
-    const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
-    enc.copyBufferToBuffer(this.redMag.result, 0, buf, 0, 16);
+    const size = 4 * MAG_OPS.length;
+    const buf = d.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    enc.copyBufferToBuffer(this.redMag.result, 0, buf, 0, size);
     d.queue.submit([enc.finish()]);
     await buf.mapAsync(GPUMapMode.READ);
     const r = new Float32Array(buf.getMappedRange().slice(0));
     buf.unmap();
     buf.destroy();
-    return magneticFrom(r);
+    return magneticFrom(r, !!this.dep.cfg.problem.disk);
   }
 
   destroy() {

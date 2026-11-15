@@ -3216,7 +3216,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-disk',
     name: 'Magnetized accretion disk: field loops in a disk around a point mass (uniform 64^3 for half an orbit at r = 1; blocks 64 finest, 1 level, for one orbit)',
     criterion:
-      "The preset's disk (beta = 50 where its loops meet) stays a disk: on both grids the mass in the box stays within 3% of its start and the kinetic energy within 5% (the damping zone holds the outer edge, which the field must not upset), no cell's Alfven speed passes the ceiling (least beta at least 2 cs^2 / v_A,max^2, less 1%), |div B| dx / max |B| stays below 1e-6, and on blocks the shared faces agree",
+      "The preset's disk (beta = 50 where its loops meet) stays a disk: on both grids the mass in the box stays within 3% of its start and the kinetic energy within 5% (the damping zone holds the outer edge, which the field must not upset), no cell's Alfven speed passes the ceiling (least beta at least 2 cs^2 / v_A,max^2, less 1%), |div B| dx / max |B| stays below 1e-6, the disk's Maxwell alpha starts at zero (no B_phi in the loops) and turns positive as shear winds the field, its Reynolds alpha stays small, its Q_z and Q_phi are measured, and on blocks the shared faces agree",
     async run(gpu) {
       const m: Record<string, number> = {};
       const floorBeta = (2 * MRI.cs ** 2) / MRI.vaMax ** 2;
@@ -3226,6 +3226,15 @@ export const TESTS: TestDef[] = [
         m[`${tag}_kinetic`] = d.eKin / d0.eKin;
         m[`${tag}_beta_min_over_ceiling`] = d.magnetic!.betaMin / floorBeta;
         m[`${tag}_divB`] = d.magnetic!.divB;
+        // The disk's measures: the loops start with no B_phi and the gas with no v_R, so both
+        // stresses start at zero; shear then winds B_R into a B_phi of the opposite sign.
+        const k0 = d0.magnetic!.disk!;
+        const k = d.magnetic!.disk!;
+        m[`${tag}_alpha_maxwell_start`] = Math.abs(k0.alphaMaxwell);
+        m[`${tag}_alpha_maxwell`] = k.alphaMaxwell;
+        m[`${tag}_alpha_reynolds`] = k.alphaReynolds;
+        m[`${tag}_qz_start`] = k0.qz;
+        m[`${tag}_qphi`] = k.qphi;
       };
       await withSim(gpu, mriDisk, 64, { tEnd: Math.PI }, async (sim) => {
         const d0 = await sim.diagnostics();
@@ -3239,7 +3248,9 @@ export const TESTS: TestDef[] = [
         m.shared_mismatched = (await sim.faceConsistency()).mismatched;
       });
       const pass = (['uniform', 'blocks'] as const).every(
-        (t) => Math.abs(m[`${t}_mass`] - 1) < 0.03 && Math.abs(m[`${t}_kinetic`] - 1) < 0.05 && m[`${t}_beta_min_over_ceiling`] > 0.99 && m[`${t}_divB`] < 1e-6,
+        (t) =>
+          Math.abs(m[`${t}_mass`] - 1) < 0.03 && Math.abs(m[`${t}_kinetic`] - 1) < 0.05 && m[`${t}_beta_min_over_ceiling`] > 0.99 && m[`${t}_divB`] < 1e-6 &&
+          m[`${t}_alpha_maxwell_start`] < 1e-4 && m[`${t}_alpha_maxwell`] > 0 && Math.abs(m[`${t}_alpha_reynolds`]) < 0.1 && m[`${t}_qz_start`] > 0 && m[`${t}_qphi`] > 0,
       ) && m.shared_mismatched === 0;
       return { pass, metrics: m };
     },
