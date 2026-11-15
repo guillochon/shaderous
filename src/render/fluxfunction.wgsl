@@ -3,8 +3,7 @@
 // crowd where the field is strong, and in ideal MHD A_z moves with the gas: the lines follow it
 // with nothing to choose or carry. A_z comes from the face field (render/aflux.wgsl), at the
 // corners of an M x M grid. This draw pass (`vs`, `fs`) lays the lines over the slice view, as
-// flat tubes colored by |B| (render/tube_shade.wgsl): unlike the view's contour lines, which are
-// thin and flat.
+// thin shaded lines colored by the magnetic pressure (render/tube_shade.wgsl).
 #include "render/camera.wgsl"
 #include "render/tube_shade.wgsl"
 
@@ -19,7 +18,8 @@ struct Draw {
   n: vec4<f32>,    // x: contour levels; y: line width (pixels); z: 1 on a light background; w: M
 }
 @group(0) @binding(7) var<uniform> D: Draw;
-// The largest |B| in the volume (render/bsample.wgsl), as float bits.
+// The largest in-plane |B| (render/bsample.wgsl, amr/bsample.wgsl), as float bits; the sum of
+// log2 |B| in sixteenths (offset by 64) and the count it is over.
 @group(0) @binding(8) var<storage, read> FR: array<u32, 4>;
 
 fn unkey(k: u32) -> f32 {
@@ -61,11 +61,16 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let gl = max(length(g), 1.0e-9);
   let across = (f - k) / gl;
   let r = 0.5 * D.n.y;
-  // Strength: |B| here, over two decades below the largest.
+  // Strength: the magnetic pressure here, in log, from the largest down as far below the mean
+  // of log |B| as the largest is above it (so a field of modest range uses all the colors), but
+  // no more than TUBE_DECADES of B^2 (render/tube_shade.wgsl), and no less than a factor of 2 in |B|.
   let m = textureDimensions(BV).x;
   let cell = min(vec2<u32>(clamp(st, vec2<f32>(0.0), vec2<f32>(1.0)) * f32(m)), vec2<u32>(m - 1u));
   let b = length(textureLoad(BV, vec3<u32>(cell, 0u), 0).xy);
-  let t = clamp(1.0 + 0.5 * log(max(b / max(bitcast<f32>(FR[0]), 1.0e-30), 1.0e-30)) * 0.4342944819, 0.0, 1.0);
+  let bhi = log2(max(bitcast<f32>(FR[0]), 1.0e-30));
+  let bmean = f32(FR[1]) / max(f32(FR[2]), 1.0) / 16.0 - 64.0;
+  let blo = min(max(2.0 * bmean - bhi, bhi - 0.5 * TUBE_DECADES * 3.321928095), bhi - 1.0);
+  let t = clamp((log2(max(b, 1.0e-30)) - blo) / (bhi - blo), 0.0, 1.0);
   var c = flat_tube(across / r, g / gl, tube_color(t), abs(across) - r, D.n.z != 0.0);
   // Faded out where levels crowd closer than about twice the width (no haze of overlapping tubes).
   c.a *= 1.0 - smoothstep(0.1, 0.18, fw);

@@ -38,5 +38,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let b = length(B);
   textureStore(BV, vec3<i32>(gid), vec4<f32>(B, b));
   textureStore(VV, vec3<i32>(gid), vec4<f32>(u.yzw / rho, rho));
-  atomicMax(&FR[0], bitcast<u32>(b));
+  // 2D: the field-line colors' range (render/fluxfunction.wgsl) wants the in-plane |B|'s largest
+  // and its mean log: FR[1] sums log2 |B| in sixteenths (offset by 64), FR[2] counts the cells.
+  // (In 3D the tracer uses FR[1] and FR[2] for the lines' own range.)
+  if (is2d()) {
+    let bp = length(B.xy);
+    atomicMax(&FR[0], bitcast<u32>(bp));
+    if (bp > 0.0) {
+      atomicAdd(&FR[1], u32(clamp((log2(bp) + 64.0) * 16.0, 0.0, 2047.0)));
+      atomicAdd(&FR[2], 1u);
+    }
+  } else {
+    atomicMax(&FR[0], bitcast<u32>(b));
+  }
 }

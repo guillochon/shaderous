@@ -34,10 +34,12 @@ fn segment(s: u32) -> Seg {
   return Seg(a.w >= 0.0 && b.w >= 0.0, a, b);
 }
 
-// |B| as a fraction of the way from the least to the greatest on the lines, in log.
+// |B| as a fraction of the way from the least to the greatest on the lines, in log (the same
+// fraction in log B^2), over at most TUBE_DECADES of B^2 below the greatest
+// (render/tube_shade.wgsl).
 fn strength(b: f32) -> f32 {
-  let lo = log(max(bitcast<f32>(FR[1]), 1.0e-30));
   let hi = log(max(bitcast<f32>(FR[2]), 1.0e-30));
+  let lo = max(log(max(bitcast<f32>(FR[1]), 1.0e-30)), hi - 0.5 * TUBE_DECADES * 2.302585093);
   return clamp((log(max(b, 1.0e-30)) - lo) / max(hi - lo, 1.0e-6), 0.0, 1.0);
 }
 

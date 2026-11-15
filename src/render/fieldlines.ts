@@ -23,10 +23,10 @@ const STEP = { space: 1 / 256, plane: 1 / 512 };
 const VOXELS = { space: 128, plane: 1024 };
 /** 2D: corners of the flux function's grid per side, at most (render/aflux.wgsl). */
 const FLUX_GRID = 2048;
-/** Lines in the plane: width of the tube drawn, in CSS pixels. */
-const LINE_WIDTH = 3;
-/** Tube radius, in units of the box side. */
-const TUBE_RADIUS = 0.0025;
+/** Lines in the plane: width of the line drawn, in CSS pixels. */
+const LINE_WIDTH = 1.5;
+/** Tube radius, in units of the box side: thin, as Guillochon & McCourt (2017) drew theirs. */
+const TUBE_RADIUS = 0.0008;
 
 type Entry = GPUBindGroupLayoutEntry;
 /** GPUShaderStage.COMPUTE (the global is not there outside a browser, as in the unit tests). */
@@ -40,10 +40,13 @@ export class FieldLines {
   private params: GPUBuffer;
   private draw: GPUBuffer;
   private seeds: GPUBuffer;
+  /** The box around the field where new seeds are drawn (render/fieldlines.wgsl, BB). */
+  private bbox: GPUBuffer;
   private pts: GPUBuffer;
   private keep: GPUBuffer;
   private frame: GPUBuffer;
   private sampler: GPUSampler;
+  private pBound!: GPUComputePipeline;
   private pAdvect!: GPUComputePipeline;
   private pStamp!: GPUComputePipeline;
   private pTrace!: GPUComputePipeline;
@@ -91,6 +94,7 @@ export class FieldLines {
     const most = Math.max(POINTS.space, POINTS.plane);
     this.pts = d.createBuffer({ label: 'field-line points', size: MAX_FIELD_LINES * most * 16, usage: GPUBufferUsage.STORAGE });
     this.keep = d.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.bbox = d.createBuffer({ label: 'field-line seed box', size: 32, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.frame = d.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.aGrid = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.aRange = d.createBuffer({ size: 8, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -104,7 +108,7 @@ export class FieldLines {
       label: 'field lines',
       entries: [
         buf(0, 'uniform'), tex(1, 'float'), tex(2, 'float'), { binding: 3, visibility: C, sampler: { type: 'filtering' } },
-        buf(4, 'storage'), buf(5, 'storage'), buf(6, 'read-only-storage'), buf(7, 'storage'), buf(8, 'storage'),
+        buf(4, 'storage'), buf(5, 'storage'), buf(6, 'read-only-storage'), buf(7, 'storage'), buf(8, 'storage'), buf(9, 'storage'),
       ],
     });
     const layout = d.createPipelineLayout({ bindGroupLayouts: [this.traceLayout] });
@@ -125,7 +129,8 @@ export class FieldLines {
         primitive: { topology: 'triangle-list' },
       }),
     ]);
-    [this.pAdvect, this.pStamp, this.pTrace, this.pTube, this.pFlat] = await Promise.all([
+    [this.pBound, this.pAdvect, this.pStamp, this.pTrace, this.pTube, this.pFlat] = await Promise.all([
+      compute('bound'),
       compute('advect'),
       compute('stamp'),
       compute('trace'),
@@ -208,6 +213,7 @@ export class FieldLines {
         { binding: 6, resource: { buffer: sim.clockBuffer } },
         { binding: 7, resource: { buffer: this.keep } },
         { binding: 8, resource: { buffer: this.frame } },
+        { binding: 9, resource: { buffer: this.bbox } },
       ],
     });
     this.run = { sim, pSample, gSample, bv, vv, gTrace };
@@ -272,7 +278,8 @@ export class FieldLines {
       // 2D: the flux function's contours, one per level.
       const af = this.aflux;
       d.queue.writeBuffer(this.aRange, 0, new Uint32Array([0xffffffff, 0]));
-      d.queue.writeBuffer(this.frame, 0, new Uint32Array([0, 0x7f7fffff, 0, 0]));
+      // The largest in-plane |B|, and the sum and count of its log (render/bsample.wgsl).
+      d.queue.writeBuffer(this.frame, 0, new Uint32Array([0, 0, 0, 0]));
       d.queue.writeBuffer(this.drawFlux, 0, new Float32Array([count, LINE_WIDTH * dpr, v.light ? 1 : 0, af.m]));
       const m = run.bv;
       const cp = enc.beginComputePass({ label: 'flux function' });
@@ -305,13 +312,17 @@ export class FieldLines {
       points, plane ? STEP.plane : STEP.space, this.frameNo++, again ? 1 : 0,
       per[0], per[1], per[2], 0,
     ]));
-    // Largest |B| in the volume, and the least and greatest on the lines: from nothing.
+    // Largest |B| in the volume, and the least and greatest on the lines: from nothing. The box
+    // around the field new seeds are drawn in (render/fieldlines.wgsl): empty.
     d.queue.writeBuffer(this.frame, 0, new Uint32Array([0, 0x7f7fffff, 0, 0]));
+    d.queue.writeBuffer(this.bbox, 0, new Uint32Array([0xffffffff, 0xffffffff, 0xffffffff, 0, 0, 0]));
     const cp = enc.beginComputePass({ label: 'field lines' });
     cp.setPipeline(run.pSample);
     cp.setBindGroup(0, run.gSample[sim.cur]);
     cp.dispatchWorkgroups(Math.ceil(m.width / 4), Math.ceil(m.height / 4), Math.ceil(m.depthOrArrayLayers / 4));
     cp.setBindGroup(0, run.gTrace);
+    cp.setPipeline(this.pBound);
+    cp.dispatchWorkgroups(Math.ceil(m.width / 4), Math.ceil(m.height / 4), Math.ceil(m.depthOrArrayLayers / 4));
     cp.setPipeline(this.pAdvect);
     cp.dispatchWorkgroups(Math.ceil(count / 64));
     cp.setPipeline(this.pStamp);
@@ -377,7 +388,7 @@ export class FieldLines {
   destroy() {
     this.run?.bv.destroy();
     this.run?.vv.destroy();
-    for (const b of [this.params, this.draw, this.seeds, this.pts, this.keep, this.frame, this.aRange, this.aGrid, this.drawFlux]) b.destroy();
+    for (const b of [this.params, this.draw, this.seeds, this.pts, this.keep, this.bbox, this.frame, this.aRange, this.aGrid, this.drawFlux]) b.destroy();
     this.aBuf?.destroy();
     const t = this.targets;
     if (t) for (const x of [t.color, t.dist, t.depth]) x.destroy();

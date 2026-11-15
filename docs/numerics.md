@@ -1076,20 +1076,27 @@ $`E`$ includes $`B^2/2`$.
     drifted on its own and the contours came out jagged at 2048^2.) The same flux passes between any two lines, so they
     crowd where the field is strong; and since $`A_z`$ moves with the gas in ideal MHD, so do
     they. The count is the number of levels, evenly spaced across the range of $`A_z`$.
-  - In the plane (2D, and the slice view of a 3D run) the lines are drawn as flat tubes three
-    pixels wide: shaded, outlined, colored by $`|B|`$ (teal weak, white strong) as the volume
-    view's tubes are, so they read apart from the view's contour lines, which are thin and
-    flat. Where flux-function levels come closer than about twice that width they fade out.
+  - Colors, everywhere: the magnetic pressure $`B^2/2`$ on a log scale, over at most six decades
+    below the strongest field shown (3D: from the weakest on the lines; 2D: from as far below the
+    mean of $`\log|B|`$ in the plane as the strongest is above it), in a rainbow from red
+    (weak) through yellow, green, cyan and blue to magenta (strong), as
+    [Guillochon & McCourt (2017)][GM17] drew theirs. The colors set the lines apart from the
+    view's contour lines.
+  - In the plane (2D, and the slice view of a 3D run) the lines are drawn 1.5 pixels wide,
+    gently shaded. Where flux-function levels come closer than about twice that width they fade
+    out.
   - In 3D the lines are traced from seeds (`render/fieldlines.wgsl`): from each seed both ways
     along $`\hat{B}`$ with midpoint steps of 1/256 of the box (1/512 in a plane), up to a box
     length each way, until it leaves the box, closes on itself, or the field fades below 1% of
     its largest value. The seeds move with the gas (the clock's time since the last frame times
     the velocity), so each stays on its line as the field evolves and the picture does not
     flicker. A seed is placed again, where it leaves the box or where its field falls below 2%
-    of the largest, as one of 24 random points drawn with weight $`|B|^2`$ (magnetic energy).
-  - Volume view: each segment is a capsule drawn on a camera-facing quad, found and lit per
-    pixel (ray-capsule intersection), colored by $`\log|B|`$ along the lines (teal weak, white
-    strong). The tubes go into a color and distance target first; the ray-marcher stops at a
+    of the largest, as one of 24 random points drawn with weight $`|B|^2`$ (magnetic energy),
+    within the bounding box of the voxels where the field is at least 2% of the largest (a star
+    a few radii across in a box of sixteen fills a thousandth of it: drawn over the whole box,
+    nearly every seed would miss it).
+  - Volume view: each segment is a capsule 0.0008 of the box in radius drawn on a camera-facing
+    quad, found and lit per pixel (ray-capsule intersection), colored as above. The tubes go into a color and distance target first; the ray-marcher stops at a
     tube's distance and lays the gas in front of it over it, so tubes behind dense gas fade.
   - Slice view of a 3D run: the lines follow the field's components in the slice plane, from
     seeds in the plane weighted by $`|B|`$, drawn as lines over the slice. (The field in a

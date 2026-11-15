@@ -10,8 +10,8 @@
 // In the plane (a 2D run, or the slice view of a 3D one) the lines follow the field's
 // components in the plane, and seeds stay in it.
 //
-// Entry points, dispatched in this order each frame: advect (one invocation per seed), stamp
-// (one), trace (one per seed).
+// Entry points, dispatched in this order each frame: bound (one invocation per voxel), advect
+// (one per seed), stamp (one), trace (one per seed).
 
 struct Lines {
   dims: vec4<f32>,    // xyz: voxels of the volume; w: the box's side in code units
@@ -32,6 +32,11 @@ struct Lines {
 // Per frame: the largest |B| in the volume (from the sampling pass), then the least and greatest
 // |B| on the lines drawn, as float bits.
 @group(0) @binding(8) var<storage, read_write> FR: array<atomic<u32>, 4>;
+// Per frame: the voxels where the field is at least 2% of the largest, as their bounding box
+// (least x, y, z, then greatest), where new seeds are drawn: a star a few radii across in a
+// box of sixteen fills a thousandth of it, and seeds drawn over the whole box would all but
+// miss it.
+@group(0) @binding(9) var<storage, read_write> BB: array<atomic<u32>, 6>;
 
 fn pcg(v: u32) -> u32 {
   let s = v * 747796405u + 2891336453u;
@@ -65,13 +70,24 @@ fn inside(p: vec3<f32>) -> bool {
   return all(p >= vec3<f32>(0.0)) && all(p <= vec3<f32>(1.0));
 }
 
-// A new seed: of 24 random points (in the plane, when tracing in one), one drawn with
-// probability in proportion to |B| in the plane, |B|^2 (the magnetic energy) in 3D.
+// The box new seeds are drawn in: around the field (BB), or the whole box where there is none.
+struct Span { lo: vec3<f32>, size: vec3<f32> }
+fn span() -> Span {
+  let lo = vec3<u32>(atomicLoad(&BB[0]), atomicLoad(&BB[1]), atomicLoad(&BB[2]));
+  let hi = vec3<u32>(atomicLoad(&BB[3]), atomicLoad(&BB[4]), atomicLoad(&BB[5]));
+  if (any(lo > hi)) { return Span(vec3<f32>(0.0), vec3<f32>(1.0)); }
+  let m = F.dims.xyz;
+  return Span(vec3<f32>(lo) / m, vec3<f32>(hi - lo + 1u) / m);
+}
+
+// A new seed: of 24 random points in that box (in the plane, when tracing in one), one drawn
+// with probability in proportion to |B| in the plane, |B|^2 (the magnetic energy) in 3D.
 fn place(st: ptr<function, u32>) -> vec3<f32> {
-  var best = vec3<f32>(rnd(st), rnd(st), rnd(st));
+  let sp = span();
+  var best = sp.lo + sp.size * vec3<f32>(rnd(st), rnd(st), rnd(st));
   var key = -1.0e30;
   for (var k = 0; k < 24; k++) {
-    var q = vec3<f32>(rnd(st), rnd(st), rnd(st));
+    var q = sp.lo + sp.size * vec3<f32>(rnd(st), rnd(st), rnd(st));
     if (in_plane()) { q[axis()] = F.plane.z; }
     let b = length(field(q));
     let w = select(b * b, b, in_plane());
@@ -85,6 +101,17 @@ fn place(st: ptr<function, u32>) -> vec3<f32> {
   }
   if (in_plane()) { best[axis()] = F.plane.z; }
   return best;
+}
+
+@compute @workgroup_size(4, 4, 4)
+fn bound(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let m = vec3<u32>(F.dims.xyz);
+  if (any(gid >= m)) { return; }
+  if (length(textureLoad(BV, gid, 0).xyz) < 0.02 * bmax()) { return; }
+  for (var a = 0; a < 3; a++) {
+    atomicMin(&BB[a], gid[a]);
+    atomicMax(&BB[a + 3], gid[a]);
+  }
 }
 
 @compute @workgroup_size(64)
