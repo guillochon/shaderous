@@ -37,6 +37,9 @@ export const maxBinding = (d: GPUDevice) => Math.min(d.limits.maxBufferSize, d.l
 
 interface Deps {
   device: GPUDevice;
+  /** gravity: the field atlas (acceleration, potential), and the point masses */
+  gfield: GPUTexture;
+  bh: GPUBuffer;
   cfg: SimConfig;
   cap: number;
   /** a new atlas texture the size of the state's */
@@ -270,7 +273,7 @@ export class AmrMhd {
     }
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
-      const out = { 3: v(this.w[0]), 4: v(this.w[1]), 5: v(this.w[2]), 6: v(this.fa), 12: rates, 28: v(idx) };
+      const out = { 3: v(this.w[0]), 4: v(this.w[1]), 5: v(this.w[2]), 6: v(this.fa), 12: rates, 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh };
       // Both stages read the state and the half-step stores; ASM_STAGE weighs them.
       const stores = { 1: v(state[p][0]), 2: v(state[p][1]), 9: v(this.faces[p]), 16: v(this.halfFaces), 17: v(half[0]), 18: v(half[1]) };
       const W = { 2: v(this.w[0]), 3: v(this.w[1]), 4: v(this.w[2]) };
@@ -285,7 +288,7 @@ export class AmrMhd {
             bindGroup(d, pipe, {
               ...c0, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
               6: this.scratch, 7: this.register, 8: v(this.emf), ...outs, 13: v(this.comps[o]), 14: c,
-              15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx),
+              15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
             }),
           );
         return {
@@ -305,6 +308,11 @@ export class AmrMhd {
       this.gFlux.push(all.flux);
       this.gEmf.push(all.emf);
       this.gUpdate.push(all.update);
+      // Faces back from the other parity into this one, over every leaf: a cycle's first substep,
+      // and the step after the second half kick has brought the cells back (amr/correct.wgsl).
+      const commit = (list: GPUBuffer) =>
+        bindGroup(d, cm, { 0: params, 31: list, 1: v(this.faces[o]), 2: v(this.comps[o]), 3: v(this.faces[p]), 4: v(this.comps[p]) });
+      this.gCommitAll.push(commit(listLeaf));
       if (!on) continue;
       // A substep's leaves in the same chunks of rows, with dispatch sizes made on the GPU.
       const sub = groups(B.LL, this.chunkBufs);
@@ -314,10 +322,7 @@ export class AmrMhd {
       this.gUpdateL.push(sub.update);
       // The deposits read no fluxes of their own, only the register and the edge atlas.
       this.gDeposit.push(groups(B.LD, [this.allChunk]).update[1][0]);
-      const commit = (list: GPUBuffer) =>
-        bindGroup(d, cm, { 0: params, 31: list, 1: v(this.faces[o]), 2: v(this.comps[o]), 3: v(this.faces[p]), 4: v(this.comps[p]) });
       this.gCommitU.push(commit(B.LU));
-      this.gCommitAll.push(commit(listLeaf));
     }
   }
 
@@ -328,6 +333,11 @@ export class AmrMhd {
    */
   encodeFull(pass: GPUComputePassEncoder, parity: number, assembleDispatch: () => void, timestep: () => void) {
     this.encode(pass, parity, assembleDispatch, timestep);
+    this.encodeCommitFaces(pass, parity);
+  }
+
+  /** Every leaf's faces (and compensations) from the other parity into `parity`. */
+  encodeCommitFaces(pass: GPUComputePassEncoder, parity: number) {
     pass.setPipeline(this.pCommit!);
     pass.setBindGroup(0, this.gCommitAll[parity]);
     pass.dispatchWorkgroups(this.groups(BS + 1), this.nLeaf);

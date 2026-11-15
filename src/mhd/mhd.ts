@@ -26,13 +26,8 @@ export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/
  * sources and the adaptive mesh come in later phases of docs/mhd-plan.md.
  */
 export function mhdUnsupported(c: SimConfig): string | null {
-  // Gravity, point masses and cooling act on a field on the uniform grid (docs/mhd-plan.md 7b);
-  // on blocks they follow (phase 4, part B).
-  const blocks = c.amrLevels > 0;
-  if (blocks && (c.gravity !== 'off' || c.gext.some((g) => g !== 0))) return 'gravity is not coupled to the magnetic field on the adaptive mesh yet';
-  if (blocks && c.problem.masses) return 'point masses are not coupled to the magnetic field on the adaptive mesh yet';
+  // Gravity, point masses and cooling act on a field (docs/mhd-plan.md 7b).
   if (c.problem.species?.length) return 'species are not carried with a magnetic field yet';
-  if (blocks && c.cooling !== 'off') return 'cooling is not coupled to the magnetic field on the adaptive mesh yet';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not coupled to the magnetic field yet';
   return null;
 }

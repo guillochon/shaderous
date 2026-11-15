@@ -2831,6 +2831,81 @@ export const TESTS: TestDef[] = [
       return { pass, metrics: m };
     },
   },
+  {
+    id: 'mhd-gravity-blocks',
+    name: 'MHD with gravity, point masses and cooling on the adaptive mesh',
+    criterion:
+      'As mhd-gravity, on blocks: the polytrope threaded by a field (128 finest, 1 level, self-gravity, to t = 1) keeps its central density within 5% and to 0.03 of the unmagnetized star, its Mach number bounded at 3; the column with a horizontal field (2D, uniform gravity, block grid at 64, with per-block timesteps) stays as still as without one (Mach at most twice plus 1e-3); cooling with a field follows the analytic decay to 1e-3; a sink keeps gas plus accreted mass to 1e-5 and leaves the field (its energy within 5%). Throughout |div B| dx / max |B| stays below 1e-6 and shared faces agree',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const ok = async (sim: AmrSim, d: Diagnostics, tag: string) => {
+        const faces = await sim.faceConsistency();
+        m[`${tag}_divB`] = d.magnetic!.divB;
+        m[`${tag}_shared_mismatched`] = faces.mismatched;
+        return d.magnetic!.divB < 1e-6 && faces.mismatched === 0;
+      };
+      const bStar = Math.sqrt((2 * POLY_K * POLY.rhoc ** 2) / 1000);
+      const magStar: Problem = { ...polytrope, id: 'polytrope-uniform-field', mhd: { face: () => (axis) => (axis === 2 ? bStar : 0) } };
+      const star = async (prob: Problem, tag: string | null) =>
+        withAmr(gpu, prob, 128, { amrLevels: 1, tEnd: 1 }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          const good = tag ? await ok(sim, d, tag) : true;
+          return { dev: Math.abs(d.ranges[0][1] / d0.ranges[0][1] - 1), mach: d.maxMach, good, eKin: d.eKin };
+        });
+      const plain = await star(polytrope, null);
+      const mag = await star(magStar, 'star');
+      m.star_central_density_change = mag.dev;
+      m.star_central_density_change_unmagnetized = plain.dev;
+      m.star_max_mach = mag.mach;
+      m.star_max_mach_unmagnetized = plain.mach;
+      m.star_kinetic_energy = mag.eKin;
+      m.star_kinetic_energy_unmagnetized = plain.eKin;
+      pass &&= mag.good && mag.dev < 0.05 && Math.abs(mag.dev - plain.dev) < 0.03 && mag.mach < 3;
+      const col = column(8);
+      const magCol: Problem = { ...col, id: 'column-field', mhd: { face: () => (axis) => (axis === 0 ? Math.sqrt(2 / 1e4) : 0) } };
+      const still = async (prob: Problem, tag: string | null) =>
+        withAmr(gpu, prob, 64, { ndim: 2, amrLevels: 0, tEnd: 1, wellBalanced: false, timeBins: 2, timeBinsAlways: true }, async (sim) => {
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          return { mach: d.maxMach, good: tag ? await ok(sim, d, tag) : true };
+        });
+      const colPlain = await still(col, null);
+      const colMag = await still(magCol, 'column');
+      m.column_max_mach = colMag.mach;
+      m.column_max_mach_unmagnetized = colPlain.mach;
+      pass &&= colMag.good && colMag.mach < 2 * colPlain.mach + 1e-3;
+      const cool = stillGas({
+        cooling: 'power', coolParams: { rate: 1, alpha: 0.5, heat: 0, tFloor: 0 },
+        mhd: { face: () => (axis) => (axis === 0 ? 0.5 : 0) },
+      });
+      await withAmr(gpu, cool, 32, { ndim: 2, amrLevels: 1, tEnd: 1.2 }, async (sim) => {
+        await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        const expected = 1.5 * (1 - 1.2 / 3) ** 2;
+        m.cooling_decay_error = Math.abs(d.eInt - expected) / expected;
+        pass &&= m.cooling_decay_error < 1e-3 && (await ok(sim, d, 'cooling'));
+      });
+      const sinkBox = stillGas({
+        bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.5,
+        masses: () => [{ gm: 0.05, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.15 }],
+        mhd: { face: () => (axis) => (axis === 0 ? 0.3 : 0) },
+      });
+      await withAmr(gpu, sinkBox, 64, { ndim: 2, amrLevels: 1 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        const mass = d.masses[0];
+        m.sink_accreted_fraction = mass.accreted / d0.mass;
+        m.sink_mass_error = Math.abs(d.mass + mass.accreted - d0.mass) / d0.mass;
+        m.sink_magnetic_energy_change = Math.abs(d.magnetic!.eMag / d0.magnetic!.eMag - 1);
+        pass &&= mass.accreted > 0.003 * d0.mass && m.sink_mass_error < 1e-5 && m.sink_magnetic_energy_change < 0.05 && (await ok(sim, d, 'sink'));
+      });
+      return { pass, metrics: m };
+    },
+  },
 ];
 
 export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {

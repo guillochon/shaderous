@@ -21,6 +21,7 @@
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
 #include <bins>
+#include <cooling>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;   // state at the start of the step
@@ -39,11 +40,15 @@
 @group(0) @binding(16) var W2: texture_3d<f32>;
 @group(0) @binding(17) var W3: texture_3d<f32>;
 @group(0) @binding(28) var IDX: texture_3d<u32>;
+@group(0) @binding(19) var G: texture_3d<f32>;    // the gravity field atlas: acceleration, potential in w (ghosts included)
 
 override STAGE: u32 = 1u;
 
 #include "mhd/state.wgsl"
 #include "mhd/amr_block.wgsl"
+#include "gravity/ext_bind.wgsl"
+struct NewState { u1: vec4<f32>, u2: vec4<f32> }
+#include "hydro/cooling.wgsl"
 
 // For the lookups of amr_common's that this pass uses (map_cell, holder, local_of).
 fn n_at(level: u32) -> vec3<i32> {
@@ -397,12 +402,52 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (g_deposit) { ph = eos_pressure(max(u1.x, P.rho_floor), u2.y); }
   var flag = 0.0;
   if (STAGE == 1u) { flag = shock_flag(t); }
+  // Gravity, as amr/update.wgsl has it (docs/mhd-plan.md 7b): stage 1 the half step's whole
+  // source, stage 2 the first half kick; the second comes from amr/correct.wgsl with
+  // self-gravity or point masses, or below with the uniform field alone. Flux-form work from
+  // the stage's mass fluxes and the field atlas's potential (ghosts included). A deposit adds
+  // no kick: the step's were added when it started.
+  let self_gravity = P.grav_on != 0u;
+  let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0));
+  var g = P.gext.xyz;
+  if (self_gravity) { g += textureLoad(G, x, 0).xyz; }
+  let gx = ext_accel(blk_pos(g_slot, t));
+  var kick = vec3<f32>(0.0);
+  var ekick = 0.0;
+  var dw = 0.0;
+  if ((gravity || ext_on()) && !g_deposit) {
+    let w = select(0.5 * dt, dt, STAGE == 1u);
+    let kx = w * u1.x * gx;
+    kick = w * u1.x * g + kx;
+    let flux_work = STAGE == 2u && gravity && (P.flags & 1u) != 0u;
+    if (flux_work) {
+      let pc = textureLoad(G, x, 0).w;
+      for (var a = 0; a < naxes(); a++) {
+        var e = vec3<i32>(0);
+        e[a] = 1;
+        let lo = flux_at(inv.row, a, t).a.x;
+        let hi = flux_at(inv.row, a, t + e).a.x;
+        dw += 0.5 * g_dx * P.gext[a] * (hi + lo);
+        if (self_gravity) {
+          dw -= 0.5 * (hi * (textureLoad(G, atl(g_o, t + e), 0).w - pc) - lo * (textureLoad(G, atl(g_o, t - e), 0).w - pc));
+        }
+      }
+    }
+    let ke = select(kick, kx, flux_work);
+    ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
+  }
   let rho = max(u1.x + dtdx * net_a.x, P.rho_floor);
-  let mom = u1.yzw + dtdx * net_a.yzw;
-  let E = u2.x + dtdx * net_b.x;
+  var mom = u1.yzw + kick + dtdx * net_a.yzw;
+  var E = u2.x + ekick + dtdx * (net_b.x + dw);
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w);
   let sc = u2.z + dtdx * net_b.z;
   let eb = 0.5 * dot(bc, bc);
+  if (STAGE == 2u && gravity && !self_gravity && !g_deposit) {
+    // The uniform field alone: the second half kick here, with the updated density.
+    let k2 = 0.5 * dt * rho * g;
+    if ((P.flags & 1u) == 0u) { E += dot(k2, mom + 0.5 * k2) / rho; }
+    mom += k2;
+  }
   var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);
   var mout = mom;
   let tame = tame_fluff(rho, mom, en.y);
@@ -410,6 +455,9 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     mout = tame.mom;
     en = vec2<f32>(0.5 * dot(mout, mout) / rho + eb + tame.eint, tame.eint);
   }
-  textureStore(O1, x, vec4<f32>(rho, mout));
-  textureStore(O2, x, vec4<f32>(en.x, en.y, sc, flag));
+  var st = NewState(vec4<f32>(rho, mout), vec4<f32>(en.x, en.y, sc, flag));
+  // Cooling over the block's step (it changes E by exactly the change of e_int).
+  if (STAGE == 2u && !g_deposit) { st = apply_cooling(st, dt); }
+  textureStore(O1, x, st.u1);
+  textureStore(O2, x, st.u2);
 }

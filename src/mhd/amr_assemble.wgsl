@@ -21,6 +21,7 @@
 #include "hydro/prim.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
+#include "gravity/ext_bind.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -33,6 +34,7 @@
 @group(0) @binding(17) var H1: texture_3d<f32>;
 @group(0) @binding(18) var H2: texture_3d<f32>;
 @group(0) @binding(28) var IDX: texture_3d<u32>;
+@group(0) @binding(19) var G: texture_3d<f32>;   // the gravity field atlas (the timestep's acceleration)
 @group(0) @binding(12) var<storage, read_write> RATES: array<f32>;
 
 override RATES_ON: bool = true;
@@ -88,6 +90,10 @@ fn main(
         let cf = sqrt(w.w2.y * w.w2.y + dot(B, B) / w.w1.x);
         let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * cf;
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
+        // The acceleration limits the step too (hydro/clock.wgsl), per cell size.
+        var g = P.gext.xyz + ext_accel(blk_pos(slot, l));
+        if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
+        atomicMax(&wg_max[1], bitcast<u32>(length(g) / g_dx));
       }
     }
   }
@@ -95,6 +101,6 @@ fn main(
   if (RATES_ON && lix == 0u) {
     let base = (flat_row(wid) * num_wg.x + wid.x) * 2u;
     RATES[base] = bitcast<f32>(atomicLoad(&wg_max[0]));
-    RATES[base + 1u] = 0.0;
+    RATES[base + 1u] = bitcast<f32>(atomicLoad(&wg_max[1]));
   }
 }

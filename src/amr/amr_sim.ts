@@ -504,7 +504,7 @@ export class AmrSim implements Simulation {
         device: d, cfg, cap: sim.cap,
         texture: (label) => tex3d(d, side, 'rgba32float', label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg,
-        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots,
+        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh,
         bins: { A: sim.bins, LL: sim.listEnd, LU: sim.listUpd, LD: sim.listDep, args: sim.binArgs },
       });
     }
@@ -540,7 +540,8 @@ export class AmrSim implements Simulation {
   }
   /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
   private get binsLive(): boolean {
-    return this.builtBins > 0 && this.binPause === 0;
+    // With a field, not while self-gravity or point masses act (docs/mhd-plan.md 7b).
+    return this.builtBins > 0 && this.binPause === 0 && !(this.mhd && this.fieldOn);
   }
 
   private get slots() {
@@ -590,7 +591,8 @@ export class AmrSim implements Simulation {
       hydro ? computePipeline(d, assemble('amr/predict.wgsl', slots), 'amr predict') : null,
       hydro ? computePipeline(d, assemble('amr/update.wgsl', slots), 'amr update', this.tileConstants()) : null,
       computePipeline(d, assemble('amr/regrid.wgsl', slots), 'amr regrid'),
-      computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct'),
+      // With a field the correction keeps its energy out of what it rebuilds (MHD).
+      computePipeline(d, assemble('amr/correct.wgsl', slots), 'amr gravity correct', { MHD: this.cfg.problem.mhd ? 1 : 0 }),
       computePipeline(d, assemble('amr/brush.wgsl', slots), 'amr brush'),
     ] as const;
   }
@@ -666,6 +668,7 @@ export class AmrSim implements Simulation {
         bindGroup(d, this.pCorrect, {
           0: this.params, 1: this.clock, 2: v(this.state[o][0]), 3: v(this.state[o][1]), 4: v(this.gfield),
           5: v(this.state[p][0]), 6: v(this.state[p][1]), 7: this.bh, 30: this.bt, 31: list, ...bin, ...this.compIn,
+          8: v(this.mhd?.faces[o] ?? this.noFaces()),
         });
       if (K > 0) {
         this.gAssembleB.push(assembly(p, this.listAct));
@@ -1633,7 +1636,21 @@ export class AmrSim implements Simulation {
           },
         );
         mp.end();
-        this.cur = 1 - p;
+        if (this.fieldOn) {
+          // Self-gravity or point masses: as for the gas alone below, the second half kick
+          // brings the cells back into this parity, and the faces follow them.
+          if (this.selfGravity) this.grav!.copyPhiToOld(enc);
+          const gp = beginPass(enc);
+          this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
+          this.encodeField(gp);
+          gp.setPipeline(this.pCorrect);
+          gp.setBindGroup(0, this.gCorrect[p]);
+          this.interior(gp, this.nLeaf);
+          this.mhd.encodeCommitFaces(gp, p);
+          gp.end();
+        } else {
+          this.cur = 1 - p;
+        }
         this.stepsSinceFlag++;
         if (this.encodeFlags(enc)) {
           done++;
