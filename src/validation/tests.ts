@@ -205,6 +205,34 @@ async function adaptiveBinary(gpu: Gpu, period: number): Promise<number> {
   });
 }
 
+/**
+ * The faces of every leaf, in the order of readLeaves(): (BS + 1)^3 texels a leaf (2D:
+ * (BS + 1)^2), texel l holding the lower faces of cell l. Read leaf by leaf, not as the atlas
+ * lies: two runs of one setup may get atlases of different sizes (AmrSim.create makes a smaller
+ * one when the GPU refuses the first, as Firefox does for some of the 3D runs, 9^3 blocks
+ * falling to 8^3).
+ */
+async function leafFaces(sim: AmrSim): Promise<Float32Array> {
+  const s = sim as unknown as { slotsPerSide: number; layers: number; origin(slot: number): number[]; tree: { leaves(): { slot: number }[] } };
+  const three = sim.cfg.ndim === 3;
+  const side = s.slotsPerSide * PAD_BLOCK;
+  const atlas = await sim.mhd!.readAtlas(sim.cur, side, three ? side : s.layers);
+  const W = BS + 1;
+  const D = three ? W : 1;
+  const leaves = s.tree.leaves();
+  const out = new Float32Array(leaves.length * W * W * D * 4);
+  let q = 0;
+  for (const blk of leaves) {
+    const [ox, oy, oz] = s.origin(blk.slot);
+    for (let k = 0; k < D; k++)
+      for (let j = 0; j < W; j++, q += W * 4) {
+        const src = (((oz + k) * side + oy + j) * side + ox) * 4;
+        out.set(atlas.subarray(src, src + W * 4), q);
+      }
+  }
+  return out;
+}
+
 export async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: Sim) => Promise<T>) {
   const sim = await Sim.create(gpu, configFor(problem, n, over));
   try {
@@ -2614,8 +2642,7 @@ export const TESTS: TestDef[] = [
             await withAmr(gpu, mhdBlast, n, { ndim: ndim as 2 | 3, amrLevels: 1, ...over }, async (sim) => {
               sim.step(10);
               const c = await sim.readLeaves();
-              const side = (sim as unknown as { slotsPerSide: number }).slotsPerSide * PAD_BLOCK;
-              runs.push([c.u1, c.u2, await sim.mhd!.readAtlas(sim.cur, side, ndim === 2 ? (sim as unknown as { layers: number }).layers : side)]);
+              runs.push([c.u1, c.u2, await leafFaces(sim)]);
             });
           } finally {
             setMhdScratchBytes(null);
