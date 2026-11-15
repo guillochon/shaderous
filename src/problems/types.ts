@@ -175,6 +175,13 @@ export interface Problem {
   tEnd: number;
   /** Time between checkpoints, when the page is asked to save them (problem time units). */
   checkpointDt?: number;
+  /**
+   * The problem's dynamical time: the time over which its flow visibly changes (a star's
+   * sqrt(R^3 / G M), a shear layer's roll-up, a binary's period). A movie takes a frame every
+   * tDyn / 600 of it by default, so one dynamical time plays in 10 s at 60 fps. Without one, the
+   * end time or ten checkpoint intervals stand in for it (dynamicalTime()).
+   */
+  tDyn?: number;
   rhoFloor?: number;
   pFloor?: number;
   /** Enforce the Truelove pressure floor by default. */
@@ -319,3 +326,13 @@ export const all = (b: number): Bc3 => [b, b, b];
 /** A preset's physical units for these values of its parameters, or undefined if it is scale free. */
 export const problemUnits = (p: Problem, params: Record<string, number>): UnitSystem | undefined =>
   typeof p.units === 'function' ? p.units(params) : p.units;
+
+/** A problem's dynamical time (Problem.tDyn), or what stands in for it. */
+export function dynamicalTime(p: Problem): number {
+  if (p.tDyn !== undefined) return p.tDyn;
+  const ten = 10 * (p.checkpointDt ?? 0.1);
+  return Number.isFinite(p.tEnd) ? Math.min(p.tEnd, p.checkpointDt !== undefined ? ten : Infinity) : ten;
+}
+
+/** The default time between a movie's frames: a 600th of the dynamical time, to two figures. */
+export const defaultFrameDt = (p: Problem): number => +(dynamicalTime(p) / 600).toPrecision(2);

@@ -31,6 +31,7 @@ export const whiteDwarfStar: Problem = {
   box: WD_STAR.box,
   tEnd: Infinity,
   checkpointDt: 0.5,
+  tDyn: 0.9, // sqrt(R^3 / G M) of a 0.6 solar-mass dwarf
   rhoFloor: 1e-10,
   pFloor: 1e-14,
   fluff: { rho: 10 * WD_AMBIENT.rhoAmb, u: 3, v: 10 },

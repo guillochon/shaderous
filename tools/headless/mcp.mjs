@@ -200,11 +200,11 @@ const TOOLS = [
     description: 'Record the run from where it is as an MP4 movie (H.264), stepping it as it goes: the current view with a color bar, x/y/z axes and the status line (grid, simulation time) over it. A frame every `every` steps, or near every `dt` of code time (at the nearest step boundary: no step is shortened, so the run is the one it would have been unrecorded). Stops at `until`, after `frames` frames, or at the end time. Set the view first (view tool). Returns the frame count, movie length and where the file went.',
     inputSchema: obj({
       path: { type: 'string', description: 'File or folder to write to (default: the current folder, under the name of the movie)' },
-      every: { type: 'integer', minimum: 1, description: 'A frame every this many steps (default 1)' },
-      dt: { type: 'number', exclusiveMinimum: 0, description: 'Or a frame near every multiple of this much code time' },
+      dt: { type: 'number', exclusiveMinimum: 0, description: 'A frame near every multiple of this much code time (default: a 600th of the dynamical time of the problem, so one dynamical time plays in 10 s at 60 fps)' },
+      every: { type: 'integer', minimum: 1, description: 'Or a frame every this many steps' },
       until: { type: 'number', description: 'Stop when the clock reaches this time (landed on exactly)' },
       frames: { type: 'integer', minimum: 1, description: 'Stop after this many frames' },
-      fps: { type: 'number', minimum: 1, maximum: 240, description: 'Playback rate (default 30)' },
+      fps: { type: 'number', minimum: 1, maximum: 240, description: 'Playback rate (default 60)' },
       width: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1920' },
       height: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1080 (9/16 of width when width is given)' },
       colorbar: { type: 'boolean', description: 'Default true' },
@@ -215,8 +215,8 @@ const TOOLS = [
     async run({ path: p, every, dt, until, frames, fps, width, height, colorbar = true, axes = true, status = true, timeout_s }) {
       if (until === undefined && frames === undefined) throw new Error('give `until` or `frames`, so that the movie ends');
       const m = await call('record', {
-        ...(dt !== undefined ? { dt } : { every: every ?? 1 }),
-        until, frames, fps, width, height,
+        ...(every !== undefined ? { every } : dt !== undefined ? { dt } : {}),
+        until, frames, fps, width: width ?? 1920, height: height ?? (width === undefined ? 1080 : undefined),
         overlays: { colorbar, triad: axes, status },
         timeoutMs: timeout_s === undefined ? undefined : timeout_s * 1000,
         download: false,

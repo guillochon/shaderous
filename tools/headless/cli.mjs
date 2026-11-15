@@ -4,7 +4,7 @@
 //
 //   node tools/headless/cli.mjs run "problem=sedov&dim=2&n=512" --every 0.01 --png --out runs/sedov
 //   node tools/headless/cli.mjs sweep --problem sedov --dim 2 --vary gamma=1.1,1.4,1.667 --until 0.05
-//   node tools/headless/cli.mjs run "problem=kelvin-helmholtz&dim=2&n=256" --mp4 --frame-every 4
+//   node tools/headless/cli.mjs run "problem=kelvin-helmholtz&dim=2&n=256" --until 2 --mp4
 //   node tools/headless/cli.mjs describe [problem]
 import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
@@ -43,9 +43,10 @@ Outputs (diag.jsonl and manifest.json are always written)
 Movie (--mp4 records the whole run as movie.mp4, with a color bar, axes and the status line; not with --every
 or --steps; outputs are written at the start and the end)
   --mp4                Record the run as an MP4 movie
-  --frame-every N      A frame every N steps (default 1)
-  --frame-dt DT        Or a frame near every DT of simulated time (no step is shortened for it)
-  --fps F              Playback rate (default 30)
+  --frame-dt DT        A frame near every DT of simulated time (no step is shortened for it);
+                       default a 600th of the problem's dynamical time
+  --frame-every N      Or a frame every N steps
+  --fps F              Playback rate (default 60)
   --width PX --height PX   Movie size (default 1920 x 1080 with --mp4)
   --no-overlays        Leave out the color bar, the axes and the status line
 
@@ -221,7 +222,7 @@ async function runOne(session, q, dir) {
     const frameDt = num(o['frame-dt'], 'frame-dt');
     const noOverlays = !!o['no-overlays'];
     const m = await call('record', {
-      ...(frameDt !== undefined ? { dt: frameDt } : { every: num(o['frame-every'], 'frame-every') ?? 1 }),
+      ...(o['frame-every'] !== undefined ? { every: num(o['frame-every'], 'frame-every') } : frameDt !== undefined ? { dt: frameDt } : {}),
       until,
       timeoutMs,
       fps: num(o.fps, 'fps'),

@@ -103,6 +103,7 @@ export const binary: Problem = {
   box: BINARY.box,
   tEnd: Infinity,
   checkpointDt: 1,
+  tDyn: 2 * Math.PI, // the binary's period
   rhoFloor: 1e-9,
   viscosity: BINARY.nu,
   refineMasses: true,

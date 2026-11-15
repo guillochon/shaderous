@@ -14,7 +14,7 @@ import type { Diagnostics, SimConfig, Simulation } from '../sim';
 import { EOS_LABELS } from '../eos/eos';
 import { COOLING_LABELS } from '../cooling/cooling';
 import { FAMILIES, FIELDS, GRAVITY_MODES } from '../problems';
-import { problemUnits } from '../problems/types';
+import { defaultFrameDt, problemUnits } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
 import { paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
@@ -53,7 +53,9 @@ export interface AppHooks {
    * Encode and submit one frame of the current view: at `size` pixels, or with null at the
    * canvas's size on the page. A size holds until the next draw.
    */
-  draw(size: [number, number] | null): void;
+  draw(size: [number, number] | null, asPage?: boolean): void;
+  /** The view area's size as the page draws it, in pixels (0 x 0 without a layout). */
+  viewSize(): [number, number];
   athdf(): Promise<{ time: number; bytes: Uint8Array; stem: string }>;
   setColormap(name: string): void;
   setAutoRange(on: boolean): void;
@@ -71,8 +73,6 @@ export interface AppHooks {
   checkpointsOn(): boolean;
   /** Write the checkpoint the clock is held at, and arm the next (as the page does when it plays). */
   writeCheckpoint(): Promise<void>;
-  /** The page's measured step rate when it last played, in steps per second (0 if unknown). */
-  stepRate(): number;
 }
 
 /** Options of run(). */
@@ -109,11 +109,12 @@ interface RunInternal extends RunOptions {
 
 /** Options of record(). */
 export interface RecordOptions {
-  /** A frame every this many steps (the default cadence)... */
+  /** A frame every this many steps... */
   every?: number;
   /**
-   * ...or a frame near every multiple of this much code time: at the step boundary nearest to
-   * it, so that no step is shortened and the run is the one it would have been unrecorded.
+   * ...or a frame near every multiple of this much code time (the default cadence, at a 600th
+   * of the problem's dynamical time): at the step boundary nearest to it, so that no step is
+   * shortened and the run is the one it would have been unrecorded.
    */
   dt?: number;
   /** Stop after this many frames (the first, at the start, included). */
@@ -122,9 +123,12 @@ export interface RecordOptions {
   until?: number;
   /** Give up after this much wall time, finishing the file with what was recorded. */
   timeoutMs?: number;
-  /** Playback rate, frames per second (default 30). */
+  /** Playback rate, frames per second (default 60). */
   fps?: number;
-  /** The movie's size in pixels (default 1920 x 1080), rounded down to even numbers. */
+  /**
+   * The movie's size in pixels, rounded down to even numbers. By default the view area's own,
+   * framed as the page frames it (1920 x 1080 when the page has no layout).
+   */
   width?: number;
   height?: number;
   /** Bits per second (default about 0.2 bits per pixel per frame). */
@@ -379,13 +383,13 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
    * canvas to `read` in the same task as the draw: the canvas holds the frame only until the
    * task ends.
    */
-  async function drawFresh<T>(s: Simulation, size: [number, number] | null, read: (c: HTMLCanvasElement) => T): Promise<T> {
+  async function drawFresh<T>(s: Simulation, size: [number, number] | null, read: (c: HTMLCanvasElement) => T, asPage = false): Promise<T> {
     if (!s.preparing) app.refresh(await s.diagnostics());
     // Fields ranged by the display pass need one frame drawn before their range is known.
-    app.draw(size);
+    app.draw(size, asPage);
     await app.gpu().device.queue.onSubmittedWorkDone();
     if (!s.preparing) app.refresh(await s.diagnostics());
-    app.draw(size);
+    app.draw(size, asPage);
     return read(app.canvas);
   }
 
@@ -427,13 +431,19 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     if (opts.frames !== undefined && !(opts.frames >= 1)) throw new Error('`frames` is a number of frames, 1 or more');
     // The encoder and muxer load with the first recording.
     const { MovieWriter, movieSize } = await import('../io/movie');
-    const fps = Math.max(1, Math.min(240, opts.fps ?? 30));
+    const fps = Math.max(1, Math.min(240, opts.fps ?? 60));
     const max = Math.min(4096, app.gpu().device.limits.maxTextureDimension2D);
-    const [width, height] = movieSize(opts.width ?? 1920, opts.height ?? (opts.width !== undefined ? Math.round((opts.width * 9) / 16) : 1080), max);
+    // No size given: the view area as the page draws it, framed as on the page.
+    const [vw, vh] = app.viewSize();
+    const asPage = opts.width === undefined && opts.height === undefined && vw >= 16 && vh >= 16;
+    const [width, height] = asPage
+      ? movieSize(vw, vh, max)
+      : movieSize(opts.width ?? 1920, opts.height ?? (opts.width !== undefined ? Math.round((opts.width * 9) / 16) : 1080), max);
     const size: [number, number] = [width, height];
-    // A frame per this many steps: by default, about 30 frames for each second the run took
-    // stepping on its own, so that recording costs little.
-    const every = opts.dt !== undefined ? 0 : Math.round(opts.every ?? Math.max(1, Math.round(app.stepRate() / 30)));
+    // By default a frame every 600th of the problem's dynamical time: one dynamical time plays
+    // in 10 s at 60 fps.
+    const frameDt = opts.every === undefined ? (opts.dt ?? defaultFrameDt(cfg.problem)) : undefined;
+    const every = frameDt !== undefined ? 0 : Math.round(opts.every!);
     // Ten minutes of movie at most: the file is held in memory.
     const maxFrames = Math.min(opts.frames ?? Infinity, fps * 600);
     const overlays: OverlayOptions = { colorbar: opts.overlays?.colorbar ?? true, triad: opts.overlays?.triad ?? true, status: opts.overlays?.status ?? true };
@@ -452,7 +462,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         const g = writer.ctx;
         g.drawImage(canvas, 0, 0, width, height);
         paintOverlays(g, width, height, app.overlayInfo(), overlays);
-      });
+      }, asPage);
       await writer.add();
       d = await s.diagnostics();
       frameSteps = d.steps;
@@ -462,7 +472,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     try {
       await frame();
       // The time cadence's next frame time: the first multiple of dt past the clock.
-      let k = opts.dt !== undefined ? Math.floor(d.t / opts.dt + 1e-6) + 1 : 0;
+      let k = frameDt !== undefined ? Math.floor(d.t / frameDt + 1e-6) + 1 : 0;
       for (;;) {
         if (writer.frames >= maxFrames) { stopped = 'frames'; break; }
         if (state.stop) { stopped = 'stopped'; break; }
@@ -472,7 +482,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         if (app.sim() !== s) { stopped = 'replaced'; break; }
         let r: RunResult;
         try {
-          r = opts.dt !== undefined ? await run({ frameAt: k * opts.dt, until: opts.until, timeoutMs: left }) : await run({ steps: every, until: opts.until, timeoutMs: left });
+          r = frameDt !== undefined ? await run({ frameAt: k * frameDt, until: opts.until, timeoutMs: left }) : await run({ steps: every, until: opts.until, timeoutMs: left });
         } catch (e) {
           if (app.sim() !== s) { stopped = 'replaced'; break; }
           throw e;
@@ -483,10 +493,10 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         if (r.steps !== frameSteps) await frame();
         if (r.stopped === 'end') { stopped = 'end'; break; }
         if (r.stopped === 'time') { stopped = 'time'; break; }
-        if (opts.dt !== undefined) {
+        if (frameDt !== undefined) {
           // The next frame time that lies more than half a step past the clock (as near as the
           // last step tells; one that does not is skipped above).
-          const dt = opts.dt;
+          const dt = frameDt;
           k = Math.max(k + 1, Math.floor((r.t + 0.5 * r.lastDt) / dt + 1e-6) + 1);
         }
       }

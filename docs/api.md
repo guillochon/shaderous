@@ -318,14 +318,14 @@ and paused when the recording ends. Options:
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `every` | about 30 frames per second of the page's own step rate, or 1 | A frame every this many steps |
-| `dt` | | Or a frame near every multiple of this much code time. A frame is taken at the step boundary nearest its time: no step is shortened for it, so the recorded run is bit for bit the unrecorded one. A frame is then up to half a step early or late, and when a step is longer than `dt` the frame times it jumps over are skipped |
+| `dt` | a 600th of the problem's dynamical time | A frame near every multiple of this much code time, so that by default one dynamical time (`tDyn` of each preset: a star's sqrt(R³/GM), a binary's period, a shear layer's roll-up) plays in 10 s at 60 fps. A frame is taken at the step boundary nearest its time: no step is shortened for it, so the recorded run is bit for bit the unrecorded one. A frame is then up to half a step early or late, and when a step is longer than `dt` the frame times it jumps over are skipped |
 | `frames` | | Stop after this many frames, the first (at the start) included |
 | `until` | | Stop when the clock reaches this time, landed on exactly as `run()` does |
 | `timeoutMs` | | Stop after this much wall time |
-| `fps` | 30 | Playback rate. It only sets the frames' timestamps: frame i is shown at i / fps seconds |
-| `width`, `height` | 1920, 1080 | The movie's size in pixels, rounded down to even numbers. `width` alone gives a 16:9 frame |
-| `bitrate` | 0.2 bits per pixel per frame | Bits per second (12 Mbit/s at 1080p30) |
+| `every` | | Or a frame every this many steps |
+| `fps` | 60 | Playback rate. It only sets the frames' timestamps: frame i is shown at i / fps seconds |
+| `width`, `height` | the view's | The movie's size in pixels, rounded down to even numbers. Without either, the view area as the page draws it, framed as on the page (1920 x 1080 when the page has no layout). `width` alone gives a 16:9 frame |
+| `bitrate` | 0.2 bits per pixel per frame | Bits per second (25 Mbit/s at 1080p60) |
 | `overlays` | all on | `{ colorbar, triad, status }`: the field's color bar with ticks in the displayed units; the x, y, z axes, which turn with the camera in the volume view; and the page's status line (grid, simulation time, point masses, mesh) in the upper left |
 | `download` | true | Hand the file to the browser as a download |
 | `base64` | false | Return the file in the result as `base64` |

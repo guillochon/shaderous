@@ -54,6 +54,8 @@ function detonation(variant: Variant): Problem {
     box: length,
     // Lab frame: the front crosses half the box at the CJ speed.
     tEnd: shockFrame ? (variant === 'cellular' ? 40 : 60) : Math.ceil((0.5 * length) / D_CJ),
+    // About the period of the lead shock's pulsations, and of the cells' passage.
+    ...(shockFrame ? { tDyn: 10 } : {}),
     supports2d: true,
     view: { field: MASS_FRACTION_FIELD, log: false, mode: 'slice', axis: 2 },
     params: [

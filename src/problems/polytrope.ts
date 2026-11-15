@@ -26,6 +26,7 @@ export const polytrope: Problem = {
   box: 1,
   tEnd: Infinity,
   checkpointDt: 0.25,
+  tDyn: 1,
   rhoFloor: 1e-6,
   pFloor: 1e-10,
   view: { field: 0, log: true, mode: 'volume' },

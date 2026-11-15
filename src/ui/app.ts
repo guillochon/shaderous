@@ -16,6 +16,7 @@ import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
+import { defaultFrameDt } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
@@ -114,13 +115,13 @@ side.innerHTML = `
   <details id="movie">
     <summary title="Record the run as an MP4 movie with the Record button">Movie<span class="sum" id="sum-movie"></span></summary>
     <div class="g3">
-      ${field('Frame', select('rec-cadence', opt('steps', 'Every n steps') + opt('time', 'Every Δt')), '', 'When a frame is taken: after every so many steps, or near every multiple of a time interval. A time interval never shortens a step: each frame is taken at the step nearest its time, so the recorded run is the run it would have been')}
+      ${field('Frame', select('rec-cadence', opt('time', 'Every Δt') + opt('steps', 'Every n steps')), '', 'When a frame is taken: after every so many steps, or near every multiple of a time interval. A time interval never shortens a step: each frame is taken at the step nearest its time, so the recorded run is the run it would have been')}
       ${field('Steps', number('rec-every', 'min="1" step="1" value="1"'), 'row-rec-every', 'A movie frame after every this many steps. 1 records every step')}
-      ${field('Interval', number('rec-dt', 'min="0" value="0.01"', 2), 'row-rec-dt', 'A movie frame near every multiple of this much code time')}
+      ${field('Interval', number('rec-dt', 'min="0" value="0.01"', 2), 'row-rec-dt', 'A movie frame near every multiple of this much code time. Each problem starts with a 600th of its dynamical time, so that one dynamical time plays in 10 s at 60 fps')}
     </div>
     <div class="g3">
-      ${field('Playback', select('rec-fps', opt(24, '24 fps') + opt(30, '30 fps') + opt(60, '60 fps')), '', 'Frames per second of the movie when played: sets its length, not which steps are recorded')}
-      ${field('Size', select('rec-size', opt('1280x720', '720p') + opt('1920x1080', '1080p') + opt('2560x1440', '1440p') + opt('3840x2160', '4K') + opt('view', 'As the view')), '', 'Pixels of each frame. As the view keeps the shape of the view on the page')}
+      ${field('Playback', select('rec-fps', opt(60, '60 fps') + opt(30, '30 fps') + opt(24, '24 fps')), '', 'Frames per second of the movie when played: sets its length, not which steps are recorded')}
+      ${field('Size', select('rec-size', opt('view', 'As the view') + opt('1280x720', '720p') + opt('1920x1080', '1080p') + opt('2560x1440', '1440p') + opt('3840x2160', '4K')), '', 'Pixels of each frame. As the view records the view area exactly as the page draws it, at its size and framing')}
     </div>
     <div class="io">
       <label class="check" title="A color bar with the field, its unit and its range over the right edge of each frame. With Auto range on its labels follow the data; a fixed range gives a steadier movie"><input id="rec-colorbar" type="checkbox" checked />Color bar</label>
@@ -279,6 +280,7 @@ $('colorbar').innerHTML = `
     <label class="check" title="Outline the blocks of an adaptive mesh, in the slice and the volume view"><input id="blocks" type="checkbox" checked />Blocks</label>
     <label class="check" title="Contour lines in the slice and projection views, isosurfaces in the volume view, evenly spaced in log |value| across the displayed range (how many: View, Contours)"><input id="contours" type="checkbox" />Contours</label>
     <label class="check" title="Volume view: draw the gas as a glowing fog. Off, with Contours on, the isosurfaces show alone"><input id="fog" type="checkbox" checked />Fog</label>
+    <label class="check" title="Volume view: outline the box"><input id="box" type="checkbox" checked />Box</label>
     <label class="check" id="flines-check" title="Magnetic field lines: tubes in the volume view, lines in the plane in the slice view and in 2D (how many: View, Field lines)"><input id="flines" type="checkbox" />Field lines</label>
   </div>
   <select id="cmap" title="Color map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
@@ -951,12 +953,8 @@ function bindRecord() {
       return;
     }
     const sizeSel = $<HTMLSelectElement>('rec-size').value;
-    let width: number, height: number;
-    if (sizeSel === 'view') {
-      const dpr = window.devicePixelRatio || 1;
-      width = canvas.clientWidth * dpr;
-      height = canvas.clientHeight * dpr;
-    } else [width, height] = sizeSel.split('x').map(Number);
+    // As the view: no size given, so record() takes the view area's own.
+    const [width, height] = sizeSel === 'view' ? [undefined, undefined] : sizeSel.split('x').map(Number);
     const every = Math.max(1, Math.round(+$<HTMLInputElement>('rec-every').value || 1));
     const dt = +$<HTMLInputElement>('rec-dt').value;
     if (cadence.value === 'time' && !(dt > 0)) {
@@ -1019,6 +1017,8 @@ function syncControls() {
   $<HTMLInputElement>('ncont').disabled = !view.contours;
   $<HTMLInputElement>('fog').checked = view.fog;
   $<HTMLInputElement>('fog').disabled = !marching || !view.contours;
+  $<HTMLInputElement>('box').checked = view.box;
+  $<HTMLInputElement>('box').disabled = !marching;
   $<HTMLInputElement>('isoa').value = String(view.surfaceOpacity);
   $<HTMLInputElement>('isoa').disabled = !marching || !view.contours;
   // Field lines: only with a magnetic field, and not through a projection.
@@ -1370,7 +1370,13 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     // From a file: the same preset, started from the saved state instead of its own.
     if (snap) Object.assign(next, restartFrom(snap, problem, levels > 0, n >> levels));
     // A new problem brings its own checkpoint interval; the clock starts at the snapshot's time, if any.
-    if (cfg?.problem !== problem) ckpt.every = defaultCheckpointDt(problem);
+    if (cfg?.problem !== problem) {
+      ckpt.every = defaultCheckpointDt(problem);
+      // A movie's frame interval: a 600th of the problem's dynamical time.
+      const recDt = $<HTMLInputElement>('rec-dt');
+      recDt.value = String(defaultFrameDt(problem));
+      recDt.dispatchEvent(new Event('input'));
+    }
     next.tStop = ckpt.on ? nextCheckpoint(next.restart?.time ?? 0, ckpt.every) : undefined;
     if (hold) {
       // Its settings are kept (Load takes them as a change of grid that keeps the physics).
@@ -1759,6 +1765,7 @@ function bind() {
     syncControls();
   });
   on('fog', (el) => (view.fog = el.checked));
+  on('box', (el) => (view.box = el.checked));
   on('isoa', (el) => (view.surfaceOpacity = +el.value), 'input');
   // The lines follow the count as it is typed or stepped; leaving the field tidies what it shows.
   const contourCount = (el: HTMLInputElement) => Math.min(MAX_CONTOURS, Math.max(1, Math.round(numOr(el, view.nContours))));
@@ -3626,6 +3633,7 @@ const api = installApi(
     cfg: () => cfg,
     view,
     canvas,
+    viewSize: () => [canvas.width, canvas.height] as [number, number],
     resolutions: () => ({ 2: RES_2D, 3: RES_3D, uniformMax: { 2: uniformMax(2), 3: uniformMax(3) } }),
     async idle() {
       let q: Promise<void>;
@@ -3659,13 +3667,16 @@ const api = installApi(
       updateRange(d);
       showDensityCut();
     },
-    draw(size) {
+    draw(size, asPage) {
       if (!sim) return;
       const enc = gpu.device.createCommandEncoder();
       renderer.fixedSize = size;
       renderer.densityCut = densityCut();
-      // At a size of its own the slice is centered: the panel and rail are not in the picture.
-      renderer.slice = size ? { span: 0.94 * Math.min(...size), shift: 0 } : sliceLayout();
+      // At a size of its own the slice is centered, since the panel and rail are not in the
+      // picture; unless the picture is the view area itself, framed as the page frames it.
+      const k = size ? size[0] / Math.max(1, canvas.clientWidth) : 1;
+      const page = sliceLayout();
+      renderer.slice = !size ? page : asPage ? { span: page.span * k, shift: page.shift * k } : { span: 0.94 * Math.min(...size), shift: 0 };
       renderer.encode(enc, sim, view);
       gpu.device.queue.submit([enc.finish()]);
       sim.submitted();
@@ -3715,7 +3726,6 @@ const api = installApi(
     },
     checkpointsOn: () => ckpt.on,
     writeCheckpoint: () => (sim ? saveCheckpoint(sim) : Promise.resolve()),
-    stepRate: () => stepRate,
   },
   ready,
 );

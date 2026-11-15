@@ -12,8 +12,9 @@ Status: built 2026-11-14 (steps 1 to 6). Decisions made while building:
   layout is unchanged; 1e30 means none. Uniform and adaptive runs (with local timesteps) share
   `hydro/clock.wgsl`, so one rule covers both. The GPU test confirms a `dt` recording leaves
   both bit for bit unchanged.
-- **Default `every`**: about 30 frames per wall-clock second at the page's measured step rate,
-  or 1 when there is none (headless).
+- **Defaults**: the `dt` cadence at a 600th of each problem's dynamical time (`Problem.tDyn`, or
+  its end time or ten checkpoint intervals), played at 60 fps, so a dynamical time lasts 10 s;
+  and the size of the view area as the page draws it.
 
 ## 1. Goal
 
