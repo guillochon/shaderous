@@ -9,6 +9,7 @@ import type { Gpu } from '../gpu/device';
 import type { LinkOverrides } from './link';
 import { decodeLink } from './link';
 import { capture } from '../io/capture';
+import { AmrSim } from '../amr/amr_sim';
 import { SnapshotSampler, VARIABLES, type Snapshot } from '../io/snapshot';
 import type { Diagnostics, SimConfig, Simulation } from '../sim';
 import { EOS_LABELS } from '../eos/eos';
@@ -106,6 +107,9 @@ interface RunInternal extends RunOptions {
    */
   frameAt?: number;
 }
+
+/** The clock as the stepping reads it back. */
+type Clock = Pick<Diagnostics, 't' | 'dt' | 'steps'>;
 
 /** Options of record(). */
 export interface RecordOptions {
@@ -270,6 +274,42 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     };
   }
 
+  // The stepping reads only the clock back, not the full diagnostics: each batch copies it into a
+  // small buffer of its own, so the next batch can be submitted while one is being read.
+  const clockPool: GPUBuffer[] = [];
+  let poolDevice: GPUDevice | null = null;
+  /** Copy the clock out at the end of `enc`; once `enc` is submitted, the returned call reads it. */
+  function clockCopy(enc: GPUCommandEncoder, s: Simulation): () => Promise<Clock> {
+    const device = app.gpu().device;
+    if (poolDevice !== device) {
+      clockPool.length = 0;
+      poolDevice = device;
+    }
+    const buf = clockPool.pop() ?? device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    enc.copyBufferToBuffer(s.clockBuffer, 0, buf, 0, 16);
+    return () => {
+      const read = (async () => {
+        await buf.mapAsync(GPUMapMode.READ);
+        const [dt, t, , steps] = new Float32Array(buf.getMappedRange().slice(0));
+        buf.unmap();
+        if (poolDevice === device) clockPool.push(buf);
+        return { t, dt, steps };
+      })();
+      // A read left behind by a run that was replaced fails quietly.
+      read.catch(() => {});
+      return read;
+    };
+  }
+  async function readClock(s: Simulation): Promise<Clock> {
+    const enc = app.gpu().device.createCommandEncoder();
+    const read = clockCopy(enc, s);
+    app.gpu().device.queue.submit([enc.finish()]);
+    return read();
+  }
+  // How fast each run steps, carried from one run() to the next: a movie calls run() for every
+  // frame, and should not start again from batches of one step each time.
+  const paces = new WeakMap<Simulation, { msPerStep: number; dt: number; grow: number }>();
+
   async function run(opts: RunInternal = {}): Promise<RunResult> {
     const s = current();
     const cfg = app.cfg();
@@ -282,12 +322,62 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     const stopWas = cfg.tStop;
     // The checkpoint the clock is armed to stop at, if any (cfg.tStop is `until` when sooner).
     let checkpoint = stopWas;
-    let lastDt = 0;
-    const result = (d: Diagnostics, start: number, stopped: RunResult['stopped']): RunResult => ({
+    let pace = paces.get(s);
+    if (!pace) paces.set(s, (pace = { msPerStep: 0, dt: 0, grow: 1 }));
+    let lastDt = pace.dt;
+    // A uniform grid keeps two batches in flight, about 50 ms of GPU time each, so the GPU steps
+    // on while the last batch's clock is read back. An adaptive mesh steps one batch at a time:
+    // its refinement checks are read back after a batch and applied at the start of the next, so
+    // a batch encoded before that read would move the re-mesh, and the run would depend on timing.
+    const adaptive = s instanceof AmrSim;
+    const IN_FLIGHT = adaptive ? 1 : 2;
+    const BATCH_MS = adaptive ? 100 : 50;
+    const result = (d: Clock, start: number, stopped: RunResult['stopped']): RunResult => ({
       t: d.t, dt: d.dt, steps: d.steps, taken: d.steps - start, seconds: (performance.now() - t0) / 1000, stopped, lastDt: d.dt > 0 ? d.dt : lastDt,
     });
+    // Batches submitted and not yet read back, oldest first.
+    const inFlight: { read: Promise<Clock>; taken: number; at: number }[] = [];
+    let inFlightSteps = 0;
+    let lastDone = 0;
+    let d: Clock = { t: 0, dt: 0, steps: 0 };
+    let rounds = 0;
+    const settle = async () => {
+      const b = inFlight.shift()!;
+      d = await b.read;
+      const now = performance.now();
+      inFlightSteps -= b.taken;
+      // The batch's GPU time: from when it could start (submitted, and the one before it done).
+      const m = (now - Math.max(b.at, lastDone)) / b.taken;
+      lastDone = now;
+      pace.msPerStep = pace.msPerStep ? 0.7 * pace.msPerStep + 0.3 * m : m;
+      pace.grow = Math.min(pace.grow * 2, 256);
+      rounds++;
+      if (d.dt > 0) lastDt = pace.dt = d.dt;
+      if (!(d.t === d.t) || !(d.dt === d.dt)) throw new Error(`the clock is NaN after ${d.steps} steps`);
+    };
+    const drain = async () => {
+      while (inFlight.length) await settle();
+    };
+    /**
+     * Steps until the clock next stops, beyond those in flight, as far as the last timestep tells:
+     * at a frame time the step boundary nearest to it and one held step to show the hold, at
+     * `until` the step that lands on it, at a checkpoint or the end that step and a held one.
+     * Steps past a stop are no-ops that still cost a full pass, so batches go no further.
+     */
+    const ahead = (): number => {
+      const dt = d.dt > 0 ? d.dt : pace.dt;
+      if (!(dt > 0)) return Infinity;
+      const tp = d.t + inFlightSteps * dt;
+      let n = Infinity;
+      if (frameAt !== undefined) n = Math.min(n, Math.round((frameAt - tp) / dt) + 1);
+      if (until !== undefined) n = Math.min(n, Math.ceil((until - tp) / dt - 1e-6));
+      const stop = Math.min(checkpoint ?? Infinity, Number.isFinite(cfg.tEnd) ? cfg.tEnd : Infinity);
+      if (stop < Infinity) n = Math.min(n, Math.ceil((stop - tp) / dt - 1e-6) + 1);
+      return n;
+    };
     try {
-      let d = await waitPrepared(s, t0, timeoutMs);
+      await untilPrepared(s, t0, timeoutMs);
+      d = await readClock(s);
       const start = d.steps;
       if (until !== undefined && !(until > d.t)) return result(d, start, 'time');
       if (until !== undefined || frameAt !== undefined) {
@@ -298,11 +388,14 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         s.cfg = cfg;
         s.writeParams();
       }
-      let batch = 1;
-      let rounds = 0;
       for (;;) {
         if (app.sim() !== s) throw new Error('the run was replaced while stepping');
-        const left = steps === undefined ? Infinity : steps - (d.steps - start);
+        let left = steps === undefined ? Infinity : steps - (d.steps - start);
+        // About to stop: what is still in flight is read first, so the stop is judged on it.
+        if (inFlight.length && (left <= 0 || (d.dt === 0 && rounds > 0) || (until !== undefined && d.t >= until * (1 - 1e-6)))) {
+          await drain();
+          continue;
+        }
         if (left <= 0) return result(d, start, 'steps');
         if (until !== undefined && d.t >= until * (1 - 1e-6)) return result(d, start, 'time');
         // Held at the end time (or at `until`, a hair short of it in single precision). The
@@ -329,44 +422,62 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
           app.setFinished(true);
           return result(d, start, 'end');
         }
-        if (timeoutMs !== undefined && performance.now() - t0 > timeoutMs) return result(d, start, 'timeout');
-        const gpu = app.gpu();
-        const enc = gpu.device.createCommandEncoder();
-        const taken = s.encodeSteps(enc, Math.min(batch, left));
-        gpu.device.queue.submit([enc.finish()]);
-        s.submitted();
-        if (!taken) {
-          // An adaptive run waiting on a refinement check, or a star still settling.
-          const resume = s.stepsResume();
-          await (resume ?? sleep(5));
-          continue;
+        if (timeoutMs !== undefined && performance.now() - t0 > timeoutMs) {
+          await drain();
+          return result(d, start, 'timeout');
         }
-        const b0 = performance.now();
-        d = await s.diagnostics();
-        rounds++;
-        if (d.dt > 0) lastDt = d.dt;
-        if (!(d.t === d.t) || !(d.dt === d.dt)) throw new Error(`the clock is NaN after ${d.steps} steps`);
-        // Batches of about a tenth of a second of GPU time: few readbacks, prompt returns.
-        const ms = performance.now() - b0;
-        if (ms < 60) batch = Math.min(batch * 2, 256);
-        else if (ms > 200) batch = Math.max(1, batch >> 1);
+        // Keep IN_FLIGHT batches submitted, none past the next stop. Batch sizes double from one
+        // step, carried over between calls, and are held to about BATCH_MS of GPU time: where
+        // batches end is the same from run to run unless steps are slow.
+        let resume: Promise<void> | null | undefined;
+        left -= inFlightSteps;
+        while (inFlight.length < IN_FLIGHT) {
+          const size = Math.min(pace.grow, pace.msPerStep ? Math.max(1, Math.round(BATCH_MS / pace.msPerStep)) : Infinity);
+          let n = Math.min(size, left, ahead());
+          if (n <= 0) {
+            if (inFlight.length) break;
+            // The estimate is short (the step grew): one step at a time from here.
+            n = 1;
+          }
+          const gpu = app.gpu();
+          const enc = gpu.device.createCommandEncoder();
+          const taken = s.encodeSteps(enc, n);
+          const copy = taken ? clockCopy(enc, s) : null;
+          gpu.device.queue.submit([enc.finish()]);
+          s.submitted();
+          if (!copy) {
+            // An adaptive run waiting on a refinement check, or a star still settling.
+            resume = s.stepsResume();
+            break;
+          }
+          inFlight.push({ read: copy(), taken, at: performance.now() });
+          inFlightSteps += taken;
+          left -= taken;
+        }
+        if (inFlight.length) await settle();
+        else if (resume !== undefined) await (resume ?? sleep(5));
       }
     } finally {
       if ((until !== undefined || frameAt !== undefined) && app.sim() === s) {
         cfg.tStop = stopWas;
         cfg.tFrame = undefined;
         s.cfg = cfg;
-        app.rearm((await s.diagnostics()).t);
+        await drain().catch(() => {});
+        app.rearm(d.t);
       }
       app.setDriving(false);
     }
   }
 
-  async function waitPrepared(s: Simulation, t0: number, timeoutMs?: number): Promise<Diagnostics> {
+  async function untilPrepared(s: Simulation, t0: number, timeoutMs?: number): Promise<void> {
     while (s.preparing) {
       if (timeoutMs !== undefined && performance.now() - t0 > timeoutMs) throw new Error('timed out while preparing the run (a star settling, or shaders compiling)');
       await sleep(20);
     }
+  }
+
+  async function waitPrepared(s: Simulation, t0: number, timeoutMs?: number): Promise<Diagnostics> {
+    await untilPrepared(s, t0, timeoutMs);
     return s.diagnostics();
   }
 

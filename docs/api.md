@@ -198,7 +198,15 @@ time.
 With checkpoints on (the panel's Save checkpoints), the clock stops on each checkpoint time
 exactly, as it does when the page plays: `run()` writes the checkpoint there and goes on.
 
-Steps go to the GPU in batches of about a tenth of a second, with one readback per batch.
+Steps go to the GPU in batches, with only the clock read back after each, not the full
+diagnostics. On a uniform grid two batches of about 50 ms of GPU time are kept in flight, so
+the GPU steps on while the last one's clock is read. An adaptive mesh takes one batch at a
+time (about 100 ms), because its refinement checks are applied at the start of the batch after
+the one that read them: a batch encoded earlier would move the re-mesh and make the run depend
+on timing. Batch sizes double from one step and carry over from one call to the next, so a
+movie, which calls `run()` once per frame, doesn't start again from one step each time. A batch
+goes no further than the next stop (the `until` time, a checkpoint, the end, or a movie's frame
+time) as far as the last timestep tells, since steps past a stop still cost a full pass.
 
 ### `step(n = 1)` and `runTo(t, timeoutMs?)`
 
