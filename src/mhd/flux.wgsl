@@ -37,6 +37,11 @@
 @group(0) @binding(6) var<storage, read_write> FY: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read_write> FZ: array<vec4<f32>>;
 @group(0) @binding(14) var<uniform> SLAB: Slab;
+// The state and faces at the start of the step, for stage 2's first-order flux correction
+// (mhd/face_flux.wgsl); stage 1 reads them as U1, U2, BF.
+@group(0) @binding(9) var S1: texture_3d<f32>;
+@group(0) @binding(10) var S2: texture_3d<f32>;
+@group(0) @binding(11) var SF: texture_3d<f32>;
 
 override STAGE: u32 = 1u;
 
@@ -62,10 +67,39 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 #include "hydro/diffusion_core.wgsl"
 #include "mhd/diffusion.wgsl"
 
+// The state of a cell at the start of the step, as mq_load reads the stage's.
+fn mq_start(c: vec3<i32>) -> MQ {
+  let m = bc_map(c);
+  comp_use(comp_tex(m.c));
+  let w = prim_from_cons(textureLoad(S1, m.c, 0), textureLoad(S2, m.c, 0));
+  let n = mhd_dims();
+  let up = m.c + 1;
+  let wrap = vec3<bool>(up.x >= n.x && P.bc_lo[0] == 0u, up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
+  let hi = select(up, vec3<i32>(0), wrap);
+  let lo = textureLoad(SF, m.c, 0);
+  let B = 0.5 * vec3<f32>(
+    lo.x + textureLoad(SF, vec3<i32>(hi.x, m.c.y, m.c.z), 0).x,
+    lo.y + textureLoad(SF, vec3<i32>(m.c.x, hi.y, m.c.z), 0).y,
+    lo.z + textureLoad(SF, vec3<i32>(m.c.x, m.c.y, hi.z), 0).z,
+  );
+  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), B * m.flip);
+}
+
 // The flux through the lower face along `axis` of cell t.
 fn face(t: vec3<i32>, axis: i32) -> FaceOut {
   var e = vec3<i32>(0);
   e[axis] = 1;
+  if (STAGE == 2u) {
+    // First-order flux correction (mhd/face_flux.wgsl).
+    let ml = bc_map(t - e).c;
+    let mr = bc_map(t).c;
+    if (fofc_suspect(textureLoad(S1, ml, 0).x, textureLoad(U1, ml, 0).x) || fofc_suspect(textureLoad(S1, mr, 0).x, textureLoad(U1, mr, 0).x)) {
+      let a = mq_start(t - e);
+      let b = mq_start(t);
+      let bn = textureLoad(SF, face_texel(axis, t), 0)[axis];
+      return face_of(a, a, b, b, bn, axis, false, 1.0, comp_tex(ml), comp_tex(mr), clock.dt);
+    }
+  }
   let ql = mq_load(t - e);
   let qr = mq_load(t);
   var qll = ql;

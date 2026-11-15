@@ -7,6 +7,11 @@
 //
 // Writes the chunk's flux scratch, and the flux register for the faces on the block's faces.
 //
+// Stage 2's first-order flux correction (mhd/face_flux.wgsl) applies to every face computed
+// here, the ghost rows' included: a face both blocks beside it compute must come out the same
+// from both, and the edge fields of either take the ghost rows' faces. The suspect test and the
+// first-order flux read stage 1's assembly, ghosts included, kept apart for it.
+//
 // Viscosity and conduction (hydro/diffusion_core.wgsl) are added to the faces the block's own
 // cells use, from the stage's assembled state: its edge ghosts give every such face the
 // transverse neighbors of both its cells. (The ghost rows' faces feed only the edge fields.)
@@ -27,6 +32,12 @@
 @group(0) @binding(6) var<storage, read_write> FL: array<vec4<f32>>;
 @group(0) @binding(7) var<storage, read_write> REG: array<vec4<f32>>;
 @group(0) @binding(14) var<uniform> CHUNK: Chunk;
+// Stage 1's assembly (the start of the step), for stage 2's first-order flux correction
+// (mhd/face_flux.wgsl); in stage 1 the same textures as W1, W2, W3 and FA.
+@group(0) @binding(8) var S1: texture_3d<f32>;
+@group(0) @binding(9) var S2: texture_3d<f32>;
+@group(0) @binding(10) var S3: texture_3d<f32>;
+@group(0) @binding(11) var SA: texture_3d<f32>;
 
 override STAGE: u32 = 1u;
 
@@ -35,6 +46,13 @@ override STAGE: u32 = 1u;
 #include "mhd/riemann/common.wgsl"
 #include <mhd_riemann>
 #include "mhd/face_flux.wgsl"
+
+// A texel of stage 1's assembly, as mq_block reads the stage's.
+fn mq_start(c: vec3<i32>) -> MQ {
+  let w1 = textureLoad(S1, c, 0);
+  let w2 = textureLoad(S2, c, 0);
+  return MQ(w1, vec4<f32>(w2.x, w2.z, w2.y, w2.w), textureLoad(S3, c, 0).xyz);
+}
 
 // For the diffusive fluxes, at atlas texel c: the assembled velocity. One composition (MHD on
 // blocks has no mixtures), and every face that takes them has its transverse neighbors.
@@ -78,8 +96,17 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
       qrr = mq_block(o, t + e);
       w = max(textureLoad(W3, atl(o, t - e), 0).w, textureLoad(W3, atl(o, t), 0).w);
     }
-    let bn = textureLoad(FA, atl(o, t), 0)[a];
-    var F = face_of(qll, ql, qr, qrr, bn, a, STAGE == 2u, w, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+    var F: FaceOut;
+    let cl = atl(o, t - e);
+    let cr = atl(o, t);
+    if (STAGE == 2u && (fofc_suspect(textureLoad(S1, cl, 0).x, ql.a.x) || fofc_suspect(textureLoad(S1, cr, 0).x, qr.a.x))) {
+      // First-order flux correction: the first-order HLLE flux of the state at the start.
+      let sl = mq_start(cl);
+      let sr = mq_start(cr);
+      F = face_of(sl, sl, sr, sr, textureLoad(SA, cr, 0)[a], a, false, 1.0, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+    } else {
+      F = face_of(qll, ql, qr, qrr, textureLoad(FA, cr, 0)[a], a, STAGE == 2u, w, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+    }
     if (across.x + across.y + across.z == 0) { F.f = mhd_add_diffusion(F.f, atl(o, t - e), e, a, ql, qr); }
     let fa = vec4<f32>(F.f.m, F.f.mom);
     let fb = vec4<f32>(F.f.e, F.f.ei, F.f.s, F.f.vn);

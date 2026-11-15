@@ -930,6 +930,25 @@ $`E`$ includes $`B^2/2`$.
   (beta 1000) keeps its central density to 0.5% (0.1% on blocks) and its magnetic energy to 2%
   for two dynamical times; the random field loses 15% of its energy in one, its small scales
   being a few cells across at $`64^3`$.
+- **First-order flux correction** (`mhd/face_flux.wgsl`). Stage 2 applies the half-step
+  state's fluxes to the state at the start. Next to the edge of a star in near-vacuum, stage 1
+  fills a nearly empty cell (350 times its density in half a step); stage 2 then pushes the
+  half-step cell's gas out through its other faces, more than the start held, and the update
+  empties it while the energy that flowed in stays. The result was floored pressures, speeds
+  of 5 to 8 in the ambient gas that cut the timestep sixfold against the hydro run, and a
+  passive scalar below zero. A cell whose density stage 1 changed by more than a factor of 4
+  either way (more than a strong shock compresses gas) is suspect, and every face of a suspect
+  cell takes the first-order HLLE flux of the state at the start: for that cell, the
+  first-order step over dt, which stays positive. The decision is the face's own, from its two
+  cells, so the cells, slabs or blocks that share a face compute the same flux: mass, momentum
+  and energy stay conserved, and the edge fields, made from these fluxes, keep the divergence.
+  (Athena++ decides cell by cell after the update and redoes it; deciding before needs no
+  second update pass.) On blocks, each stage assembles into its own textures, so stage 1's
+  assembly, ghosts included, is still there for stage 2. The test in the 1D float64 reference
+  shows the scheme itself is right: the failure needs a cell next to a convex edge, which has
+  more faces to empty through than the one that filled it. A settled gamma = 5/3 star on its
+  tidal-disruption grid now steps like the hydro control (no floored cells to t = 2, mass lost
+  only by outflow).
 - **Compile time.** GPU compilers inline every function at every call, so a lookup called at
   several places, or in a loop they unroll, is compiled that many times. The block grid's
   assembly took 4 s to compile in Chrome (far more in Firefox), with the face lookup inlined

@@ -26,8 +26,12 @@ export function setMhdScratchBytes(b: number | null) {
 const FBOX = BS + 2;
 const FLAT_WG = 64;
 
-/** Per atlas texel: the face field and its compensation at both parities, half-step faces, assembled faces and field, edge impulses. */
-export const MHD_BLOCK_TEXTURES = 8;
+/**
+ * Per atlas texel: the face field and its compensation at both parities, half-step faces, the
+ * two stages' assemblies (faces, primitives and centered field: stage 2's first-order flux
+ * correction reads stage 1's), edge impulses.
+ */
+export const MHD_BLOCK_TEXTURES = 12;
 
 /** Bytes of the flux register per slot: six faces of BS^2 cells (BS in 2D), two vec4 each (mhd/amr_block.wgsl, reg_entry). */
 export const registerBytes = (ndim: 2 | 3) => 6 * (ndim === 3 ? BS * BS : BS) * 32;
@@ -86,15 +90,25 @@ export class AmrMhd {
   faces: GPUTexture[] = [];
   comps: GPUTexture[] = [];
   private halfFaces: GPUTexture;
+  /** Stage 2's assembly (the half step): faces, and primitives W1, W2 and the centered field. */
   private fa: GPUTexture;
   private w: GPUTexture[];
-  /** The assembled primitives (rho, v), as the hydro passes' W1 holds them, for the display. */
+  /**
+   * Stage 1's (the start of the step, or the state as it is for encodeAssembly): kept apart, so
+   * stage 2's first-order flux correction can read it (mhd/face_flux.wgsl).
+   */
+  private fas: GPUTexture;
+  private ws: GPUTexture[];
+  /**
+   * The half step's assembled primitives (rho, v), as the hydro passes' W1 holds them: the
+   * species predictor's velocities after the step, and the display's.
+   */
   get prim(): GPUTexture {
     return this.w[0];
   }
-  /** The assembled primitives W1 and W2, for the refinement indicator and the cells' re-meshing. */
+  /** Stage 1's assembled primitives W1 and W2 (encodeAssembly's), for the refinement indicator and the cells' re-meshing. */
   get primitives(): GPUTexture[] {
-    return [this.w[0], this.w[1]];
+    return [this.ws[0], this.ws[1]];
   }
   /** The old tree, copied before a re-mesh replaces it. */
   private btOld: GPUBuffer;
@@ -151,6 +165,8 @@ export class AmrMhd {
     this.halfFaces = t('half-step face field');
     this.fa = t('assembled faces');
     this.w = [t('MHD W1'), t('MHD W2'), t('assembled centered field')];
+    this.fas = t('assembled faces at the start');
+    this.ws = [t('MHD W1 at the start'), t('MHD W2 at the start'), t('assembled centered field at the start')];
     this.emf = t('edge impulses');
     const perBlock = (this.ndim === 3 ? 3 * FBOX ** 3 : 2 * FBOX ** 2) * 48;
     this.perChunk = Math.max(1, Math.min(dep.cap, Math.floor(Math.min(scratchBytes, maxBinding(d)) / perBlock), 65535));
@@ -280,34 +296,43 @@ export class AmrMhd {
     }
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
-      const out = { 3: v(this.w[0]), 4: v(this.w[1]), 5: v(this.w[2]), 6: v(this.fa), 12: rates, 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh };
+      // Each stage assembles into its own textures (stage 1 into ws and fas, stage 2 into w and fa).
+      const shared = { 12: rates, 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh };
+      const out = [
+        { 3: v(this.ws[0]), 4: v(this.ws[1]), 5: v(this.ws[2]), 6: v(this.fas), ...shared },
+        { 3: v(this.w[0]), 4: v(this.w[1]), 5: v(this.w[2]), 6: v(this.fa), ...shared },
+      ];
       // Both stages read the state and the half-step stores; ASM_STAGE weighs them.
       const stores = { 1: v(state[p][0]), 2: v(state[p][1]), 9: v(this.faces[p]), 16: v(this.halfFaces), 17: v(half[0]), 18: v(half[1]) };
-      const W = { 2: v(this.w[0]), 3: v(this.w[1]), 4: v(this.w[2]) };
+      const Wst = [this.ws, this.w];
+      const W = (s: number) => ({ 2: v(Wst[s][0]), 3: v(Wst[s][1]), 4: v(Wst[s][2]) });
+      const FA = [this.fas, this.fa];
+      // Stage 1's assembly again, for stage 2's first-order flux correction (both stages bind it).
+      const start = { 8: v(this.ws[0]), 9: v(this.ws[1]), 10: v(this.ws[2]), 11: v(this.fas) };
       // The step's bind groups over a list of leaves, per stage (and per chunk, but the assembly's).
       const groups = (list: GPUBuffer, chunks: GPUBuffer[]) => {
         const c0 = { ...common, 31: list };
         const perChunk = (fn: (c: GPUBuffer) => GPUBindGroup) => chunks.map(fn);
         // Stage 1 writes the half-step state; its compensation output (13) is unused and takes the
         // other parity's, which stage 2 then overwrites.
-        const upd = (pipe: GPUComputePipeline, outs: Record<number, GPUTextureView>) =>
+        const upd = (pipe: GPUComputePipeline, outs: Record<number, GPUTextureView>, s: number) =>
           perChunk((c) =>
             bindGroup(d, pipe, {
               ...c0, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
               6: this.scratch, 7: this.register, 8: v(this.emf), ...outs, 13: v(this.comps[o]), 14: c,
-              15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
+              15: v(Wst[s][0]), 16: v(Wst[s][1]), 17: v(Wst[s][2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
               12: this.dep.massFlux ?? this.noFlux(),
             }),
           );
         return {
-          assemble: [bindGroup(d, a1, { ...c0, ...out, ...stores }), bindGroup(d, a2, { ...c0, ...out, ...stores })],
-          flux: [f1, f2].map((pipe) =>
-            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), 6: this.scratch, 7: this.register, 14: c })),
+          assemble: [bindGroup(d, a1, { ...c0, ...out[0], ...stores }), bindGroup(d, a2, { ...c0, ...out[1], ...stores })],
+          flux: [f1, f2].map((pipe, s) =>
+            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W(s), 5: v(FA[s]), ...start, 6: this.scratch, 7: this.register, 14: c })),
           ),
-          emf: [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 6: this.scratch, 8: v(this.emf), 14: c }))),
+          emf: [e1, e2].map((pipe, s) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W(s), 6: this.scratch, 8: v(this.emf), 14: c }))),
           update: [
-            upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }),
-            upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }),
+            upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }, 0),
+            upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }, 1),
           ],
         };
       };
@@ -498,7 +523,7 @@ export class AmrMhd {
   }
 
   destroy() {
-    for (const x of [...this.faces, ...this.comps, this.halfFaces, this.fa, ...this.w, this.emf]) x.destroy();
+    for (const x of [...this.faces, ...this.comps, this.halfFaces, this.fa, ...this.w, this.fas, ...this.ws, this.emf]) x.destroy();
     this.scratch.destroy();
     this.btOld.destroy();
     this.idxOld.destroy();

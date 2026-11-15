@@ -53,6 +53,23 @@ fn rq_edge(far_a: vec4<f32>, near_a: vec4<f32>, far_b: vec4<f32>, near_b: vec4<f
 
 struct FaceOut { f: MFlux, w: f32 }
 
+// First-order flux correction, decided face by face (after Athena++'s, which decides it cell by
+// cell after the update). Stage 2 applies fluxes of the half-step state to the state at the
+// start. Where stage 1 has filled a nearly empty cell (next to the edge of a star in
+// near-vacuum: 350 times its density in half a step), the half-step cell pushes out through
+// its other faces far more than the start held, and the update empties it while the energy that
+// flowed in stays: floored pressures, speeds of 5 in the ambient gas that set the timestep, a
+// passive scalar below zero. A cell whose density stage 1 changed by more than a factor of 4
+// either way (more than a strong shock compresses gas) is suspect, and every face of a suspect
+// cell takes the first-order HLLE flux of the state at the start instead: for that cell, the
+// first-order step over dt, which keeps it positive. Both cells of a face (and both slabs or
+// blocks that hold it) decide from the same two cells, so the flux stays shared: mass, momentum
+// and energy are conserved, and the edge fields, from these fluxes, keep the field's divergence.
+const FOFC_RATIO = 4.0;
+fn fofc_suspect(start: f32, half: f32) -> bool {
+  return half > FOFC_RATIO * start || start > FOFC_RATIO * half;
+}
+
 // The flux through the face between cells ql and qr along `axis` (qll and qrr: the next ones
 // out), whose normal field is bn; kl and kr are the two cells' composition moments, dt the
 // stage's step.

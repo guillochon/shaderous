@@ -270,10 +270,12 @@ export class MhdPasses {
       const o = 1 - p;
       const start = { 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]) };
       const mid = { 2: v(half[0]), 3: v(half[1]), 4: v(this.halfFaces) };
+      // The start again, for stage 2's first-order flux correction (mhd/face_flux.wgsl).
+      const startAgain = { 9: v(state[p][0]), 10: v(state[p][1]), 11: v(this.faces[p]) };
       const perSlab = (fn: (slab: GPUBuffer) => GPUBindGroup) => this.slabs.map((s) => fn(s.buf));
       this.gFlux.push([
-        perSlab((sb) => bindGroup(d, f1, { 0: params, 1: clock, ...start, ...fl, 14: sb, ...comp })),
-        perSlab((sb) => bindGroup(d, f2, { 0: params, 1: clock, ...mid, ...fl, 14: sb, ...comp })),
+        perSlab((sb) => bindGroup(d, f1, { 0: params, 1: clock, ...start, ...fl, 14: sb, ...comp, ...startAgain })),
+        perSlab((sb) => bindGroup(d, f2, { 0: params, 1: clock, ...mid, ...fl, 14: sb, ...comp, ...startAgain })),
       ]);
       this.gEmf.push([
         perSlab((sb) => bindGroup(d, e1, { 0: params, 1: clock, ...start, ...fl, 8: this.emf, 14: sb, ...comp })),
