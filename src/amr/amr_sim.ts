@@ -1168,6 +1168,18 @@ export class AmrSim implements Simulation {
     const h = dx / sub;
     const m = (BS + 2) * sub; // one cell of margin on each side
     const mz = three ? m : 1;
+    const at = (i: number, a: number) => b.c[a] * BS * dx + (i - sub + 0.5) * h - half;
+    // Gas dense enough that the preset wants it at the finest level (stars): as amr/flag.wgsl.
+    // Any sample above it decides the block, so with several samples per cell one per cell is
+    // looked at first (the cell-centered ones of the full sampling below): a block inside a
+    // star or disk is then settled at a small fraction of the cost.
+    const dense = this.cfg.refineDense;
+    if (dense > 0 && sub > 1) {
+      const first = sub >> 1;
+      for (let k = three ? first : 0; k < mz; k += sub)
+        for (let j = first; j < m; j += sub)
+          for (let i = first; i < m; i += sub) if (fn(at(i, 0), at(j, 1), three ? at(k, 2) : 0).rho > dense) return Infinity;
+    }
     const rho = new Float64Array(m * m * mz);
     const pr = new Float64Array(m * m * mz);
     // The species' mass fractions, normalized as packSpecies stores them.
@@ -1176,11 +1188,8 @@ export class AmrSim implements Simulation {
     for (let k = 0; k < mz; k++)
       for (let j = 0; j < m; j++)
         for (let i = 0; i < m; i++) {
-          const w = fn(
-            b.c[0] * BS * dx + (i - sub + 0.5) * h - half,
-            b.c[1] * BS * dx + (j - sub + 0.5) * h - half,
-            three ? b.c[2] * BS * dx + (k - sub + 0.5) * h - half : 0,
-          );
+          const w = fn(at(i, 0), at(j, 1), three ? at(k, 2) : 0);
+          if (dense > 0 && w.rho > dense) return Infinity;
           rho[(k * m + j) * m + i] = w.rho;
           pr[(k * m + j) * m + i] = w.p;
           if (ns) {
@@ -1189,17 +1198,18 @@ export class AmrSim implements Simulation {
             for (let s = 0; s < ns; s++) xs[s][(k * m + j) * m + i] = sum > 0 ? Math.max(w.X?.[s] ?? 0, 0) / sum : s === 0 ? 1 : 0;
           }
         }
-    // Gas dense enough that the preset wants it at the finest level (stars): as amr/flag.wgsl.
-    const dense = this.cfg.refineDense;
-    if (dense > 0 && rho.some((r) => r > dense)) return Infinity;
     // The normalized second derivative of amr/flag.wgsl, at the finest spacing sampled.
     let ind = 0;
     const strides = three ? [sub, sub * m, sub * m * m] : [sub, sub * m];
+    const ns2 = strides.length;
     const lohner = (q: Float64Array, a: number) => {
       let num = 0;
       let den = 0;
-      for (const s of strides) {
-        const [qp, q0, qm] = [q[a + s], q[a], q[a - s]];
+      const q0 = q[a];
+      for (let t = 0; t < ns2; t++) {
+        const s = strides[t];
+        const qp = q[a + s];
+        const qm = q[a - s];
         num += (qp - 2 * q0 + qm) ** 2;
         den += (Math.abs(qp - q0) + Math.abs(q0 - qm) + 0.01 * (Math.abs(qp) + 2 * Math.abs(q0) + Math.abs(qm))) ** 2;
       }
@@ -1273,14 +1283,19 @@ export class AmrSim implements Simulation {
     const d = this.device;
     const eos = makeEos(c.eos, c.eosParams);
     const fn = c.problem.init(this.n, eos, c.ndim, c.params);
-    const prim = (x: number, y: number, z: number) => {
-      const w = fn(x, y, z);
-      return eos.hasEnergy ? w : { ...w, p: eos.pressure(w.rho, 0) };
-    };
+    // The pressure of a state from the setup: its own, or the equation of state's from the
+    // density alone where the gas has no energy of its own (barotropic).
+    const pressureOf = (w: { rho: number; p: number }) => (eos.hasEnergy ? w.p : eos.pressure(w.rho, 0));
     // For the mesh, an obstacle counts as a jump in density, so its surface starts refined.
+    // The indicator reads each sample at once and keeps none, so one object is reused for
+    // them all: the mesh takes tens of millions of samples for a large 3D start.
+    const sample = { rho: 0, p: 0, X: undefined as readonly number[] | undefined };
     const surface = (x: number, y: number, z: number) => {
-      const w = prim(x, y, z);
-      return w.solid ? { rho: 4 * w.rho, p: w.p } : w;
+      const w = fn(x, y, z);
+      sample.rho = w.solid ? 4 * w.rho : w.rho;
+      sample.p = pressureOf(w);
+      sample.X = w.solid ? undefined : w.X;
+      return sample;
     };
     // With self-gravity a level that only partly fits the block budget is left out altogether:
     // a refinement boundary that cuts a steep hydrostatic gradient at an arbitrary place
@@ -1334,7 +1349,8 @@ export class AmrSim implements Simulation {
       for (let k = 0; k < depth; k++)
         for (let j = 0; j < BS; j++)
           for (let i = 0; i < BS; i++, o += 4) {
-            const w = prim((b.c[0] * BS + i + 0.5) * dx - half, (b.c[1] * BS + j + 0.5) * dx - half, three ? (b.c[2] * BS + k + 0.5) * dx - half : 0);
+            const w = fn((b.c[0] * BS + i + 0.5) * dx - half, (b.c[1] * BS + j + 0.5) * dx - half, three ? (b.c[2] * BS + k + 0.5) * dx - half : 0);
+            const p = pressureOf(w);
             // Where the species set the equation of state, the cell's own.
             let ce = eos;
             if (km) {
@@ -1342,7 +1358,7 @@ export class AmrSim implements Simulation {
               km.set(m, o);
               ce = makeEos(c.eos, c.eosParams, m, hydrogenParticles(c.problem.composition));
             }
-            const eint = ce.eintFromP(w.rho, w.p);
+            const eint = ce.eintFromP(w.rho, p);
             const mark = cellMark(w);
             if (mark) this.solids = true;
             const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
