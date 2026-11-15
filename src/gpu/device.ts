@@ -45,6 +45,13 @@ The browser supports WebGPU but could not get a GPU to run it on. Things to try:
 6. On a laptop with two GPUs, put the browser on the dedicated one (Windows:
    Settings > System > Display > Graphics > the browser > High performance).`;
 
+const DEVICE_LOST_HELP = `The GPU device was lost.
+
+The browser stopped this page's use of the GPU: a GPU reset (a pass that ran too long, or
+a driver fault), the GPU process crashing, or the driver being updated. Reload the page to
+start again. Firefox turns WebGPU off after such a reset until it is restarted: if the
+reloaded page finds no WebGPU adapter, quit Firefox and open it again.`;
+
 export async function initGpu(): Promise<Gpu> {
   if (!('gpu' in navigator)) throw new Error(NO_API_HELP);
   const adapter = await navigator.gpu.requestAdapter({ powerPreference: 'high-performance' });
@@ -76,6 +83,13 @@ export async function initGpu(): Promise<Gpu> {
     console.error('WebGPU error:', message);
     // The page shows these in its error panel (src/ui/errors.ts).
     globalThis.dispatchEvent?.(new CustomEvent('shaderous-gpu-error', { detail: 'WebGPU error: ' + message }));
+  });
+  // A lost device fails every readback after it ("Context lost"): say once what happened instead.
+  device.lost.then((info) => {
+    if (info.reason === 'destroyed') return; // the page let it go itself
+    const message = `${DEVICE_LOST_HELP}\n\nThe browser says: ${info.message || '(nothing)'}`;
+    console.error(message);
+    globalThis.dispatchEvent?.(new CustomEvent('shaderous-gpu-error', { detail: message }));
   });
   await probeRenderable3d(device);
 

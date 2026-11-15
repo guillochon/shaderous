@@ -102,10 +102,20 @@ function render() {
 /** Everything reported so far, oldest first (the report keeps the first 50). */
 export const errorLog = (): readonly string[] => entries;
 
+let deviceLost = false;
+
 /** Add an error to the report and show it. Repeats of the same message are counted once. */
 export function reportError(e: unknown) {
   const text = e instanceof Error ? e.message + (e.stack && !e.stack.includes(e.message) ? '\n' + e.stack : '') : String(e);
   if (entries.includes(text)) return;
+  // Once the device is lost (gpu/device.ts), every readback fails after it: those say nothing more.
+  const lostAfter = /context lost|device (is |was )?lost/i;
+  if (text.startsWith('The GPU device was lost')) {
+    for (let i = entries.length - 1; i >= 0; i--) if (lostAfter.test(entries[i])) entries.splice(i, 1);
+    deviceLost = true;
+  } else if (deviceLost && lostAfter.test(text)) {
+    return;
+  }
   if (entries.length < 50) entries.push(text);
   console.error(e);
   render();

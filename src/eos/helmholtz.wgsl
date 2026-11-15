@@ -102,16 +102,17 @@ fn helm_hb(t: f32) -> vec4<f32> { return vec4<f32>(2.0*t*t*t - 3.0*t*t + 1.0, t*
 fn helm_hb1(t: f32) -> vec4<f32> { return vec4<f32>(6.0*t*t - 6.0*t, 3.0*t*t - 4.0*t + 1.0, -6.0*t*t + 6.0*t, 3.0*t*t - 2.0*t); }
 fn helm_hb2(t: f32) -> vec4<f32> { return vec4<f32>(12.0*t - 6.0, 6.0*t - 4.0, -12.0*t + 6.0, 6.0*t - 2.0); }
 // sum over the four nodes of A_a(u) B_b(v) (h, h_x, h_y, h_xy): basis entries 0 and 2 weigh the
-// value at nodes 0 and 1, entries 1 and 3 the slope there.
-fn helm_comb(c: array<vec4<f32>, 4>, A: vec4<f32>, B: vec4<f32>) -> f32 {
-  var s = 0.0;
-  for (var a = 0; a < 2; a++) {
-    for (var b = 0; b < 2; b++) {
-      let q = c[a * 2 + b];
-      s += A[2*a] * B[2*b] * q.x + A[2*a+1] * B[2*b] * q.y + A[2*a] * B[2*b+1] * q.z + A[2*a+1] * B[2*b+1] * q.w;
-    }
-  }
-  return s;
+// value at nodes 0 and 1, entries 1 and 3 the slope there. Written out node by node, with no
+// array: arrays in a function live in each thread's local memory, and on Firefox (Direct3D,
+// NVIDIA) the adaptive mesh's update ran out of it (SKEDCHECK05_LOCAL_MEMORY_TOTAL_SIZE) and lost the device.
+fn helm_node(q: vec4<f32>, a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
+  return a0 * b0 * q.x + a1 * b0 * q.y + a0 * b1 * q.z + a1 * b1 * q.w;
+}
+// The nodes (u, v) = (0, 0), (0, 1), (1, 0), (1, 1).
+struct HelmCell { c00: vec4<f32>, c01: vec4<f32>, c10: vec4<f32>, c11: vec4<f32> }
+fn helm_comb(c: HelmCell, A: vec4<f32>, B: vec4<f32>) -> f32 {
+  return helm_node(c.c00, A.x, A.y, B.x, B.y) + helm_node(c.c01, A.x, A.y, B.z, B.w)
+       + helm_node(c.c10, A.z, A.w, B.x, B.y) + helm_node(c.c11, A.z, A.w, B.z, B.w);
 }
 // h and its first and second derivatives per ln n and ln T, at log10(rho Ye) and log10 T.
 fn helm_lookup(lrye: f32, lt: f32) -> HelmH {
@@ -121,11 +122,12 @@ fn helm_lookup(lrye: f32, lt: f32) -> HelmH {
   let j = i32(floor(y));
   let u = x - f32(i);
   let v = y - f32(j);
-  var c: array<vec4<f32>, 4>;
-  c[0] = textureLoad(HELM_TAB, vec2<i32>(j, i), 0);
-  c[1] = textureLoad(HELM_TAB, vec2<i32>(j + 1, i), 0);
-  c[2] = textureLoad(HELM_TAB, vec2<i32>(j, i + 1), 0);
-  c[3] = textureLoad(HELM_TAB, vec2<i32>(j + 1, i + 1), 0);
+  let c = HelmCell(
+    textureLoad(HELM_TAB, vec2<i32>(j, i), 0),
+    textureLoad(HELM_TAB, vec2<i32>(j + 1, i), 0),
+    textureLoad(HELM_TAB, vec2<i32>(j, i + 1), 0),
+    textureLoad(HELM_TAB, vec2<i32>(j + 1, i + 1), 0),
+  );
   let s = 1.0 / (HT_D * HLN10);
   var r: HelmH;
   r.h = helm_comb(c, helm_hb(u), helm_hb(v));
@@ -137,15 +139,31 @@ fn helm_lookup(lrye: f32, lt: f32) -> HelmH {
   return r;
 }
 
-fn helm_cheb(c: ptr<function, array<f32, 17>>, x: f32) -> f32 {
-  var b1 = 0.0;
-  var b2 = 0.0;
-  for (var k = 16; k >= 1; k--) {
-    let b0 = 2.0 * x * b1 - b2 + (*c)[k];
-    b2 = b1;
-    b1 = b0;
-  }
-  return x * b1 - b2 + (*c)[0];
+// The three Chebyshev series of the pair gas (HP_Q, HP_DQ, HP_D2Q) at x, together, by
+// Clenshaw's recurrence. Unrolled, so every coefficient is a constant: a loop indexes the series
+// at run time, which puts them in each thread's local memory (see helm_comb).
+fn helm_clen(b: mat2x3<f32>, x: f32, c: vec3<f32>) -> mat2x3<f32> {
+  return mat2x3<f32>(2.0 * x * b[0] - b[1] + c, b[0]);
+}
+fn helm_cheb(x: f32) -> vec3<f32> {
+  var b = mat2x3<f32>(vec3<f32>(0.0), vec3<f32>(0.0));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[16], HP_DQ[16], HP_D2Q[16]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[15], HP_DQ[15], HP_D2Q[15]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[14], HP_DQ[14], HP_D2Q[14]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[13], HP_DQ[13], HP_D2Q[13]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[12], HP_DQ[12], HP_D2Q[12]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[11], HP_DQ[11], HP_D2Q[11]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[10], HP_DQ[10], HP_D2Q[10]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[9], HP_DQ[9], HP_D2Q[9]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[8], HP_DQ[8], HP_D2Q[8]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[7], HP_DQ[7], HP_D2Q[7]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[6], HP_DQ[6], HP_D2Q[6]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[5], HP_DQ[5], HP_D2Q[5]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[4], HP_DQ[4], HP_D2Q[4]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[3], HP_DQ[3], HP_D2Q[3]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[2], HP_DQ[2], HP_D2Q[2]));
+  b = helm_clen(b, x, vec3<f32>(HP_Q[1], HP_DQ[1], HP_D2Q[1]));
+  return x * b[0] - b[1] + vec3<f32>(HP_Q[0], HP_DQ[0], HP_D2Q[0]);
 }
 // The pair gas at zero charge, per unit mass at density rho: (P_p / rho, dln P_p/dln T,
 // d^2 ln P_p/dln T^2). Below 10^8.5 K, the nonrelativistic Boltzmann pairs, already negligible.
@@ -154,12 +172,10 @@ fn helm_pairs(lt: f32, rho: f32) -> vec3<f32> {
   let T = exp(lnT);
   let beta = HK * T / HMEC2;
   let x = clamp((lt - HP_MID) / HP_HALF, -1.0, 1.0);
-  var c0 = HP_Q;
-  var c1 = HP_DQ;
-  var c2 = HP_D2Q;
+  let q = helm_cheb(x);
   let s = 1.0 / (HP_HALF * HLN10);
-  let lnP = log(4.0 * HK / rho) + lnT + 1.5 * log(HNQ * T) - 1.0 / beta + helm_cheb(&c0, x);
-  return vec3<f32>(exp(lnP), 2.5 + 1.0 / beta + helm_cheb(&c1, x) * s, -1.0 / beta + helm_cheb(&c2, x) * s * s);
+  let lnP = log(4.0 * HK / rho) + lnT + 1.5 * log(HNQ * T) - 1.0 / beta + q.x;
+  return vec3<f32>(exp(lnP), 2.5 + 1.0 / beta + q.y * s, -1.0 / beta + q.z * s * s);
 }
 
 // Everything above the zero-temperature electrons, per unit mass, at density rho (g/cm^3) and
