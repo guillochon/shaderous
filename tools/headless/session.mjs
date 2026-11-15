@@ -63,9 +63,16 @@ export async function openSession(opts = {}) {
   const { chromium } = await import('@playwright/test');
   const args = ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist'];
   if (process.platform === 'win32') args.push('--use-angle=d3d11');
+  // Linux (a GPU server or pod): WebGPU through Vulkan, with no window surface. Without
+  // --disable-vulkan-surface the GPU process crashes headless, and Chrome falls back to
+  // SwiftShader. The container needs the NVIDIA Vulkan driver (NVIDIA_DRIVER_CAPABILITIES=all).
+  if (process.platform === 'linux') args.push('--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface');
+  // PW_CHANNEL=shell: Playwright's own Chromium headless shell (the Playwright Docker images
+  // have it, not Chrome); on a Linux pod it is the one that finds the GPU.
+  const channel = process.env.PW_CHANNEL ?? 'chrome';
   let browser;
   try {
-    browser = await chromium.launch({ channel: process.env.PW_CHANNEL ?? 'chrome', headless: !opts.headed, args });
+    browser = await chromium.launch({ channel: channel === 'shell' ? undefined : channel, headless: !opts.headed, args });
   } catch (e) {
     await server?.close();
     throw new Error(`could not start Chrome (${pageMessage(e)}). Install Chrome, or set PW_CHANNEL=msedge for Edge.`);

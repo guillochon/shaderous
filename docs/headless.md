@@ -211,6 +211,13 @@ so the model can correct its call.
   `--use-angle=d3d11`, which headless Chrome needs there.
 - **"could not start Chrome"**: Chrome isn't installed where Playwright looks. Install it, or
   use Edge with `PW_CHANNEL=msedge`.
+- **A Linux GPU server or cloud pod**: the runner passes `--use-angle=vulkan
+  --enable-features=Vulkan --disable-vulkan-surface` on Linux (without the last, the GPU
+  process crashes headless and Chrome falls back to SwiftShader). The container needs the
+  NVIDIA Vulkan driver: set `NVIDIA_DRIVER_CAPABILITIES=all`. In the Playwright Docker image
+  (`mcr.microsoft.com/playwright:v<version>-noble`), which has no Chrome, set `PW_CHANNEL=shell`
+  to use Playwright's own headless shell. The adapter is then `nvidia <architecture>`. A large 3D
+  load builds its initial data on the CPU first: 90 s for the MRI disk at 512^3 with 3 levels.
 - **It runs but is very slow**: check `adapter` in `state` or `manifest.json`. A software
   fallback adapter is 100 or more times slower than a GPU.
 - **A command line with `&` in the setup misbehaves on Windows**: `cmd` splits commands on `&`.
