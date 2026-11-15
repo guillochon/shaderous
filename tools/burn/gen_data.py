@@ -27,6 +27,22 @@ RHO = (1e4, 1e10)
 T_FUEL = (1e8, 6e9)
 
 
+def workers():
+    """Processes for a pool of burns: the CPUs this process may use, less two. In a container
+    os.cpu_count() is the host's (96 on a Runpod pod with a quota of 16): that many workers,
+    each compiling the burner first (about 35 s of CPU), held the whole quota for minutes."""
+    n = os.cpu_count() or 1
+    if hasattr(os, "sched_getaffinity"):
+        n = min(n, len(os.sched_getaffinity(0)))
+    try:
+        quota, period = open("/sys/fs/cgroup/cpu.max").read().split()
+        if quota != "max":
+            n = min(n, max(1, int(quota) // int(period)))
+    except (OSError, ValueError):
+        pass
+    return max(1, n - 2)
+
+
 def fuel(rng):
     import burner
     kind = rng.choice(["co", "co", "co", "he", "heco", "one"])
@@ -75,7 +91,7 @@ def main():
     seeds = [base + i for i in range(n)]
     t0 = time.time()
     out = []
-    with Pool(max(1, os.cpu_count() - 2)) as pool:
+    with Pool(workers()) as pool:
         for k, r in enumerate(pool.imap_unordered(run, [(kind, s, pool_file) for s in seeds], chunksize=4)):
             if r is not None:
                 out.append(r)

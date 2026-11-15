@@ -11,7 +11,6 @@ the way back from its own mistakes.
 
     tools/burn/.venv/Scripts/python tools/burn/dagger.py <model.pt> <round> [states]
 """
-import os
 import sys
 import time
 from multiprocessing import Pool
@@ -20,7 +19,7 @@ import numpy as np
 import torch
 
 import train
-from gen_data import TIMES
+from gen_data import TIMES, workers
 
 
 def burn_one(args):
@@ -67,7 +66,7 @@ def main():
     jobs = list(zip(r[idx].astype(float), Ts[idx].astype(float), Xs))
     print(f"rolled out in {time.time() - t0:.0f} s; burning {len(jobs)} visited states", flush=True)
     out = []
-    with Pool(max(1, os.cpu_count() - 2)) as pool:
+    with Pool(workers()) as pool:
         for k, res in enumerate(pool.imap_unordered(burn_one, jobs, chunksize=4)):
             if res is not None:
                 out.append(res)

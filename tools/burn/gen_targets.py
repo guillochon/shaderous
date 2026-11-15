@@ -15,7 +15,6 @@ trained model (patch.py):
 Writes tools/burn/data/targets.npz (training) and tools/burn/targets_test.npz (every tenth
 start, held out; not in data/, so no training run reads it).
 """
-import os
 import sys
 import time
 from multiprocessing import Pool
@@ -24,7 +23,7 @@ import numpy as np
 
 import train
 from dagger import burn_one
-from gen_data import TIMES
+from gen_data import TIMES, workers
 
 HE, C, O, NE, MG, SI, S, AR, CA, TI, CR, FE, NI = range(13)
 KINDS = ["oneb", "sis", "hotco", "nse"]
@@ -61,7 +60,7 @@ def main():
     jobs = [start(kind, rng) for _ in range(n) for kind in KINDS]
     t0 = time.time()
     out = [None] * len(jobs)
-    with Pool(max(1, os.cpu_count() - 2)) as pool:
+    with Pool(workers()) as pool:
         for k, res in enumerate(pool.imap(burn_one, jobs, chunksize=4)):
             out[k] = res
             if (k + 1) % 1000 == 0:

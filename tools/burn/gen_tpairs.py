@@ -7,7 +7,6 @@ states along the training trajectories (and the targeted ones, gen_targets.py).
 Writes tools/burn/tpairs.npz (rho, and X and T for the cooler and the hotter start; not in
 data/, where every training run would read each as an ordinary trajectory).
 """
-import os
 import sys
 import time
 from multiprocessing import Pool
@@ -16,7 +15,7 @@ import numpy as np
 
 import train
 from dagger import burn_one
-from gen_data import TIMES
+from gen_data import TIMES, workers
 
 EPS = 0.01
 
@@ -35,7 +34,7 @@ def main():
     jobs = [(r, T * f, x) for r, T, x in starts for f in (1.0, 1.0 + EPS)]
     t0 = time.time()
     out = []
-    with Pool(max(1, os.cpu_count() - 2)) as pool:
+    with Pool(workers()) as pool:
         for k, res in enumerate(pool.imap(burn_one, jobs, chunksize=4)):
             out.append(res)
             if (k + 1) % 2000 == 0:
