@@ -221,12 +221,14 @@ SwiftShader. What the machine needs:
   adapter `nvidia <architecture>`, such as `nvidia lovelace`.
 - `--gpu-memory` set to what the card holds, less a few GB for the browser, or the adaptive
   mesh keeps the desktop default of 2.5 GB.
-- The largest 3D adaptive mesh is 32^3 = 32,768 blocks of 16^3 cells, about 82 GiB with a
-  magnetic field, whatever the card holds: WebGPU zero-fills each atlas texture through one
-  buffer of its size, and a buffer may be at most 4 GiB. With species it is that divided by the
-  species' groups of four; with self-gravity, 31^3 blocks. An RTX PRO 6000 (96 GB) holds the
-  largest. The MRI disk at 1024^3 with 4 levels fills it, and at 2048^3 the blocks run out a
-  level short of the finest.
+- The largest 3D adaptive mesh with a magnetic field is 35^3 = 42,875 blocks of 16^3 cells,
+  about 110 GB in use, set by the field's flux register (one buffer within the 2 GiB a binding
+  may have). With species it is 33^3 blocks (their face fluxes, likewise); with self-gravity,
+  31^3 (its multigrid's dispatches). An RTX PRO 6000 (96 GB) holds 32^3 blocks; the MRI disk at
+  1024^3 with 4 levels ran on an H200 at 35^3 (117 GB, load 23 s, 10 steps in 10 s). At 2048^3
+  the blocks run out a level short of the finest. Atlas textures past 4 GiB are made render
+  attachments, so WebGPU zero-fills them with a render pass: through a staging buffer, as it
+  otherwise does, they would pass the 4 GiB a buffer may be, and they lost the device.
 - Data-center Hopper cards (H100, H200): Chrome's compositor loses the Vulkan device on its first
   frame, and WebGPU with it. Set `SHADEROUS_NO_GPU_COMPOSITING=1` to keep Chrome's own drawing
   off the GPU: runs, diagnostics and slices then work (the MRI disk at 2048^3 ran on an H200),
