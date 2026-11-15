@@ -395,6 +395,7 @@ export class Renderer {
 
   setTransfer(rgba: Uint8Array<ArrayBuffer>) {
     this.device.queue.writeTexture({ texture: this.tf }, rgba, { bytesPerRow: 1024 }, [256, 1]);
+    this.stale = true;
   }
 
   /**
@@ -483,6 +484,7 @@ export class Renderer {
     this.gProject = [0, 1, 2, 3].map((k) => bindGroup(d, this.pProject!, { ...common(k), 8: this.rangeBuf, 11: this.map!.createView() }));
     this.gAtlas = info ? [0, 1, 2, 3].map((k) => bindGroup(d, this.pAtlas!, { ...common(k), 8: this.rangeBuf, 12: this.atlas!.tex.createView(), 31: info.list })) : [];
     this.range = null;
+    this.stale = true;
     await this.fieldLines.attach(sim, this.cam);
   }
 
@@ -645,8 +647,20 @@ export class Renderer {
     }
   }
 
-  encode(enc: GPUCommandEncoder, sim: Simulation, v: ViewState) {
-    if (!this.pField || !this.vol) return;
+  /** What the frame last drawn was drawn from (see encode()). */
+  private drawn: { sim: Simulation; inputs: string } | null = null;
+  /** Something the picture shows changed outside encode()'s sight (the colors, the passes). */
+  private stale = true;
+  /** The frame last drawn could not copy its range for reading back. */
+  private rangeOwed = false;
+
+  /**
+   * Draw a frame. Without `force`, only if it would differ from the one last drawn: the caller
+   * passes `force` whenever the state may have changed, which is not seen from here. Returns
+   * whether a frame was drawn.
+   */
+  encode(enc: GPUCommandEncoder, sim: Simulation, v: ViewState, force = true): boolean {
+    if (!this.pField || !this.vol) return false;
     this.resize();
     const d = this.device;
 
@@ -667,7 +681,6 @@ export class Renderer {
     const { log, lo, hi } = colorScale(v);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
     new Float32Array(vb, 8, 2).set([lo, hi]);
-    d.queue.writeBuffer(this.viewBuf, 0, vb);
 
     const aspect = this.aspect;
     const { eye, fwd, right, up, tan } = cameraFrame(v, aspect);
@@ -675,10 +688,7 @@ export class Renderer {
     const cw = Math.max(1, this.fixedSize ? this.fixedSize[0] : this.canvas.clientWidth);
     const ch = Math.max(1, this.fixedSize ? this.fixedSize[1] : this.canvas.clientHeight);
     const slice = this.slice ?? { span: 0.94 * Math.min(cw, ch), shift: 0 };
-    d.queue.writeBuffer(
-      this.cam,
-      0,
-      new Float32Array([
+    const cam = new Float32Array([
         // The slice view's layout (see camera.wgsl) in the spare fourth components.
         ...eye, slice.shift / slice.span,
         ...right, cw / (2 * slice.span),
@@ -692,15 +702,24 @@ export class Renderer {
         // Without isosurfaces the fog is all there is to see.
         log ? 1 : 0, lo, hi, v.fog || !v.contours ? 1 : 0,
         ...(v.light ? BG_LIGHT : BG_DARK), v.box ? 1 : 0,
-      ]),
-    );
+    ]);
+    const parity = 2 * sim.cur + sim.speciesCur;
+
+    // Everything the picture is drawn from but the state itself. Field lines move from frame to
+    // frame, and a range not yet copied for reading back is owed another frame.
+    const inputs = [new Uint32Array(vb).join(), cam.join(), this.canvas.width, this.canvas.height, parity, this.capture, this.guides?.join()].join('|');
+    const same = this.drawn?.sim === sim && this.drawn.inputs === inputs;
+    if (!force && same && !this.stale && !this.rangeOwed && !this.fieldLines.active(sim, v)) return false;
+    this.drawn = { sim, inputs };
+    this.stale = false;
+    d.queue.writeBuffer(this.viewBuf, 0, vb);
+    d.queue.writeBuffer(this.cam, 0, cam);
 
     // The range starts empty: min and smallest positive at the top, max at the bottom.
     const empty = new Uint32Array(RANGE_WORDS);
     empty.set([0xffffffff, 0, 0xffffffff, 0]);
     d.queue.writeBuffer(this.rangeBuf, 0, empty);
     const cp2 = enc.beginComputePass();
-    const parity = 2 * sim.cur + sim.speciesCur;
     // The plasma beta and the field's divergence read the largest |B| (render/field.wgsl).
     if (v.field === MAGNETIC_FIELDS[4] || v.field === MAGNETIC_FIELDS[5]) sim.encodeMagnetic?.(cp2, sim.cur);
     if (projAxis !== null) {
@@ -732,6 +751,9 @@ export class Renderer {
     if (!this.rangeBusy && this.rangeCopied === null) {
       enc.copyBufferToBuffer(this.rangeBuf, 0, this.rangeStage, 0, RANGE_WORDS * 4);
       this.rangeCopied = this.rangeKey(v);
+      this.rangeOwed = false;
+    } else {
+      this.rangeOwed = true;
     }
 
     // A 2D run has nothing to ray-march: always show the plane.
@@ -750,6 +772,7 @@ export class Renderer {
     if (volume) this.drawLines(rp, sim, v.showBlocks);
     else if (v.mode !== 'projection' || nz === 1) this.fieldLines.drawFlat(rp);
     rp.end();
+    return true;
   }
 
   /**

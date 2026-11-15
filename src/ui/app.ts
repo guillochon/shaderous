@@ -3344,9 +3344,9 @@ let frame = 0;
 let lastReadout = 0;
 let stepRate = 0; // steps per second of wall time
 let stepsSubmitted = 0;
-let rateMark = { time: 0, steps: 0 };
+let rateMark = { time: 0, steps: 0, frames: 0 };
 let fps = 0;
-let lastFrameTime = 0;
+let framesDrawn = 0;
 let refreshMs = 16.7; // display refresh interval, estimated from requestAnimationFrame
 let lastTick = 0;
 const MAX_BATCH = 64;
@@ -3458,6 +3458,13 @@ async function measurePollLatency() {
 
 let lastTiming = 0;
 
+// A paused run with nothing changing draws no frames (see tick()). Whatever the user does to the
+// page may change the state by the time it is done: frames are drawn for a moment after.
+let lastDraw = 0;
+let wakeUntil = 0;
+for (const type of ['pointerdown', 'pointerup', 'keydown', 'keyup', 'input', 'change', 'wheel', 'drop'])
+  addEventListener(type, () => (wakeUntil = performance.now() + 300), { capture: true, passive: true });
+
 /** The GPU memory field and the line under it: the budget in force, and the automatic one. */
 function showMemory() {
   const gb = (b: number) => `${+(b / GB).toFixed(2)}`;
@@ -3520,6 +3527,10 @@ function tick(now: number) {
     s.encodeBrush(enc, pendingBrush);
     pendingBrush = null;
   }
+  // The state may have changed since the last frame drawn: steps, an edit, a load, or whatever
+  // the user just did to the page. Otherwise a frame is drawn only if the view changed, and
+  // twice a second in case the state changed by a path not counted here.
+  const changed = running || queued > 0 || driving || resuming || loading || !!pendingBrush || stepOnce || now < wakeUntil || now - lastDraw >= 500;
   let timed = false;
   if (stepOnce && !running) {
     timed = frameTiming.open();
@@ -3534,16 +3545,16 @@ function tick(now: number) {
     refreshContourHover();
     renderer.densityCut = densityCut();
     renderer.slice = sliceLayout();
-    renderer.encode(enc, s, view);
+    if (renderer.encode(enc, s, view, changed)) {
+      lastDraw = now;
+      framesDrawn++;
+    }
     drawSources();
   }
   gpu.device.queue.submit([enc.finish()]);
   s.submitted();
   renderer.submitted();
   if (timed) frameTiming.submitted();
-
-  if (lastFrameTime) fps = 0.9 * fps + 0.1 * (1000 / Math.max(now - lastFrameTime, 1));
-  lastFrameTime = now;
 
   // The masses move every step: their markers follow from a readback of their own, each frame.
   if (sim) {
@@ -3590,7 +3601,9 @@ function tick(now: number) {
     });
     if (now - rateMark.time > 500) {
       stepRate = ((stepsSubmitted - rateMark.steps) * 1000) / (now - rateMark.time);
-      rateMark = { time: now, steps: stepsSubmitted };
+      // Frames drawn, not refreshes of the page: a paused run with a still view draws few.
+      fps = ((framesDrawn - rateMark.frames) * 1000) / (now - rateMark.time);
+      rateMark = { time: now, steps: stepsSubmitted, frames: framesDrawn };
     }
     setHud(statusLine(s, true));
   }
