@@ -919,6 +919,21 @@ $`E`$ includes $`B^2/2`$.
   $`\rho = p = 1`$: the frozen-in field shares the pressure balance and stiffens it) to 0.1%;
   and a magnetized Kelvin-Helmholtz run on two levels with per-block timesteps conserves
   energy to $`4\times10^{-8}`$.
+- **Magnetized tidal disruptions** (plan section 11). The tidal-disruption family's "Partial,
+  dipole field", "Partial, random field" (beta 0.7) and "Full, random field" (beta 1.5) set the
+  field as Guillochon & McCourt (2017) did in FLASH (their MultiTidalPoly
+  `Simulation_initBlock.F90`, and the notebook that wrote its `mags.dat`): A = sqrt(2 p / beta_M)
+  times a shape inside 0.98 of the radius, p the star's pressure. Their beta_M is 1 / Az, so the
+  plasma beta is about the same through the star (the dipole's is beta_M / 4 at the center),
+  not set at the center as the paper says. The dipole's shape is (-y, x, 0); the random one
+  their lattice, |FFT| of amplitudes k^(-17/6) with Gaussian moduli and random phases on 100^3,
+  scaled to a largest value of 1, stretched across the star's diameter. (Their code also
+  multiplied it by the cell size, which leaves a field 800 times weaker than the paper's figure
+  1; without it the energy is that figure's.) At beta_M = 10^4 the dipole starts with 3.3e44
+  erg (8.65e-5 code units, the exact integral of the formula) and the random field with 8.4e44
+  erg on the presets' grid (6.8e44 from their own lattice at theirs); the least beta, about
+  0.1, is in the edge cells just inside the cut. `mhd-tidal-disruption` checks the dipole's
+  energy and central beta and runs the grazing encounter against its hydro control.
 - **Fields inside stars** (`mhd/star_fields.ts`, plan section 8). A dipole along z,
   $`\mathbf{A} = A_0 \max(p - p_\text{cut}, 0)\,(-y, x, 0)`$, normalized by $`B_z = 2A_0(p_c -
   p_\text{cut})`$ at the center to the requested beta; or a random field, a sum of 64 Fourier

@@ -20,7 +20,7 @@ import { jeans, JEANS } from '../problems/jeans';
 import { POLY, POLY_K, polytrope, polytropeDipole, polytropeRandom } from '../problems/polytrope';
 import { whiteDwarfStar } from '../problems/white_dwarf_star';
 import { evrard } from '../problems/evrard';
-import { tidalDisruption, tdeOrbit, TDE, TDE_STAR } from '../problems/tidal_disruption';
+import { tidalDisruption, tidalDisruptionDipole, tdeOrbit, TDE, TDE_STAR } from '../problems/tidal_disruption';
 /** The tidal disruption in the box its tests were calibrated in (the presets' is twice as wide). */
 const tdeTest: Problem = { ...tidalDisruption, box: TDE.box };
 import { sphere, spherePotential } from '../problems/sphere';
@@ -3155,6 +3155,59 @@ export const TESTS: TestDef[] = [
         m.refined_fraction_of_uniform_cells = sim.tree.stats().cells / 256 ** 2;
         pass &&= m.refined_mass_drift < 1e-6 && m.refined_energy_drift < 1e-5 && m.refined_levels >= 2 && m.refined_fraction_of_uniform_cells < 1 && divOk('refined', d1);
       });
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-tidal-disruption',
+    name: 'Magnetized tidal disruption: the dipole star grazes the black hole (beta = 0.7; uniform 128^3 and blocks 128 finest, 2 levels, box of 8 radii)',
+    criterion:
+      'The gamma = 5/3 star with Guillochon & McCourt\'s dipole, A = sqrt(2 p / beta_M) (-y, x, 0) inside 0.98 of the radius (beta_M = 10^4): on a uniform grid of the preset\'s finest cells (R / 16) its magnetic energy starts within 3% of the formula\'s exact integral, 8.65e-5 (3.3e44 erg for the Sun), and the plasma beta at the center within 5% of beta_M / 4; on the partial disruption\'s orbit to two dynamical times past pericenter, on blocks, the run follows the hydro control (peak density and mass left in the box within 5%, the stripped gas included), with |div B| dx / max |B| below 1e-6 and shared faces agreeing',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const orbit = tdeOrbit({ q: 1e6, beta: 0.7 });
+      const tEnd = orbit.tPeri + 2;
+      const run = async (prob: Problem, tag: string) =>
+        withAmr(gpu, { ...prob, box: TDE.box }, 128, { amrLevels: 2, tEnd, params: { q: 1e6, beta: 0.7, betaM: 1e4 } }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64);
+          const d = await sim.diagnostics();
+          m[`${tag}_peak_density_ratio`] = d.ranges[0][1] / d0.ranges[0][1];
+          m[`${tag}_mass_left`] = d.mass / d0.mass;
+          if (d.magnetic) {
+            m.magnetic_energy_ratio = d.magnetic.eMag / d0.magnetic!.eMag;
+            m.divB = d.magnetic.divB;
+            m.shared_mismatched = (await sim.faceConsistency()).mismatched;
+          }
+        });
+      // The field as set, on the preset's finest cells (the validation page's device is too small
+      // for the preset's own starting mesh, whose blocks would hold it at that resolution).
+      await withSim(gpu, { ...tidalDisruptionDipole, box: TDE.box }, 128, { tEnd: 0, params: { q: 1e6, beta: 0.7, betaM: 1e4 } }, async (sim) => {
+        const d = (await sim.diagnostics()).magnetic!;
+        m.magnetic_energy_initial = d.eMag;
+        m.magnetic_energy_exact = 8.651e-5;
+        m.magnetic_energy_error = Math.abs(d.eMag / m.magnetic_energy_exact - 1);
+        // beta at the center: the center's four cells, from the state and the cell-centered field.
+        const n = 128;
+        const { u2 } = await sim.readState();
+        const faces = await sim.mhd!.readFaces(sim.cur);
+        const c = n / 2;
+        let beta = 0;
+        for (const [i, j, k] of [[c - 1, c - 1, c - 1], [c, c, c], [c - 1, c, c - 1], [c, c - 1, c]]) {
+          const f = (a: number, ii: number, jj: number, kk: number) => faces[4 * ((kk * (n + 1) + jj) * (n + 1) + ii) + a];
+          const B = [0.5 * (f(0, i, j, k) + f(0, i + 1, j, k)), 0.5 * (f(1, i, j, k) + f(1, i, j + 1, k)), 0.5 * (f(2, i, j, k) + f(2, i, j, k + 1))];
+          const p = (2 / 3) * u2[4 * ((k * n + j) * n + i) + 1];
+          beta += (2 * p) / (B[0] ** 2 + B[1] ** 2 + B[2] ** 2) / 4;
+        }
+        m.beta_center = beta;
+      });
+      await run(tidalDisruption, 'hydro');
+      await run(tidalDisruptionDipole, 'mhd');
+      m.peak_density_vs_hydro = Math.abs(m.mhd_peak_density_ratio / m.hydro_peak_density_ratio - 1);
+      m.mass_left_vs_hydro = Math.abs(m.mhd_mass_left / m.hydro_mass_left - 1);
+      const pass =
+        m.magnetic_energy_error < 0.03 && Math.abs(m.beta_center / 2500 - 1) < 0.05 && m.peak_density_vs_hydro < 0.05 && m.mass_left_vs_hydro < 0.05 &&
+        m.divB < 1e-6 && m.shared_mismatched === 0;
       return { pass, metrics: m };
     },
   },

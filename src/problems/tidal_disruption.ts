@@ -1,4 +1,5 @@
-import { all, OUTFLOW_ONLY, type Problem } from './types';
+import { all, OUTFLOW_ONLY, type Problem, type ProblemParam } from './types';
+import { gm17Dipole, gm17Random, type StarProfile } from '../mhd/star_fields';
 import { laneEmden, polytropeScales } from './lane_emden';
 import { ASTRO } from '../units/constants';
 import { COMPOSITIONS } from '../units/composition';
@@ -101,6 +102,34 @@ interface TdeVariant {
    */
   rhoCut?: number;
   rhoAmb?: number;
+  /** a magnetic field inside the star (docs/mhd-plan.md section 11) */
+  field?: 'dipole' | 'random';
+}
+
+// Magnetized variants, as Guillochon & McCourt (2017) set them up in FLASH (their MultiTidalPoly
+// Simulation_initBlock.F90; mhd/star_fields.ts has the details): the gamma = 5/3 star threaded
+// by a dipole along the orbit's angular momentum (+z) or by their random Kolmogorov lattice,
+// both A = sqrt(2 p / beta_M) times a shape inside 0.98 of the radius, with p the star's pressure.
+// beta_M is theirs, 1 / Az: the field follows the square root of the pressure, so the plasma
+// beta (2 p / B^2) is about the same through the star (the dipole's is beta_M / 4 at the center,
+// and lower in the outermost layers, where the pressure falls fastest).
+const betaMParam: ProblemParam = {
+  id: 'betaM', label: 'Field strength β_M', value: 1e4, min: 100, max: 1e7, factor: 10,
+  title: 'Guillochon & McCourt\'s beta_M = 1 / Az: about the ratio of the gas pressure to the magnetic pressure B^2 / 2 through the star (a quarter of it at the dipole\'s center). The larger, the weaker the field. Changing it starts the run again',
+};
+const seedParam: ProblemParam = {
+  id: 'seed', label: 'Random seed', value: 1, min: 1, max: 9999, step: 1, title: 'Which random field: each seed gives another. Changing it starts the run again',
+};
+
+/** The pressure profile of a star of index n, for its field. */
+function starProfile(st: { K: number; rhoc: number; theta: (s: number) => number }, n: number): StarProfile {
+  const g = 1 + 1 / n;
+  return {
+    pressure: (r) => (r >= TDE.R ? 0 : st.K * Math.pow(st.rhoc * Math.pow(Math.max(st.theta(r / TDE.R), 0), n), g)),
+    pc: st.K * Math.pow(st.rhoc, g),
+    pcut: 0,
+    radius: TDE.R,
+  };
 }
 
 /** A tidal disruption of a star of index n, opening with impact parameter beta. */
@@ -136,7 +165,19 @@ function tde(v: TdeVariant): Problem {
     params: [
       { id: 'q', label: 'Perturber : star mass', title: 'Mass of the black hole over the star’s. Sets the orbit: changing it starts the run again', value: 1e6, min: 1, max: 1e6, factor: 2 },
       { id: 'beta', label: 'Impact parameter β', title: 'Tidal radius over pericenter distance: above 1 the star passes inside the tidal radius. Changing it starts the run again', value: v.beta, min: 0.2, max: 8, step: 0.1 },
+      ...(v.field ? [betaMParam] : []),
+      ...(v.field === 'random' ? [seedParam] : []),
     ],
+    ...(v.field
+      ? {
+          mhd: {
+            potential: (p: Record<string, number>) =>
+              v.field === 'dipole'
+                ? gm17Dipole(starProfile(st, n), p.betaM)
+                : gm17Random(starProfile(st, n), p.betaM, Math.round(p.seed)),
+          },
+        }
+      : {}),
     frame: 'gas',
     star: { n, K: st.K, rhoCut: cut, rhoAmb: amb },
     masses: (p, G) => {
@@ -199,6 +240,33 @@ export const tidalDisruptionN3Full = tde({
   n: 3,
   beta: 2.5,
   ...N3_SETUP,
+});
+
+// Magnetized gamma = 5/3 disruptions, as Guillochon & McCourt (2017) ran them: a partial one at
+// beta = 0.7 with a dipole or a random field, and a full one at beta = 1.5 with a random field.
+export const tidalDisruptionDipole = tde({
+  id: 'tidal-disruption-dipole',
+  blurb: 'The Sun-like γ = 5/3 star threaded by a dipole field (β_M = 10^4, as Guillochon & McCourt 2017 set it) grazes a million-solar-mass black hole (β = 0.7): the surviving core winds up its field, and the stripped streams carry theirs out, stretched straight.',
+  n: 1.5,
+  beta: 0.7,
+  field: 'dipole',
+  ...N15_SETUP,
+});
+export const tidalDisruptionRandom = tde({
+  id: 'tidal-disruption-random',
+  blurb: 'The Sun-like γ = 5/3 star threaded by a tangled Kolmogorov field (β_M = 10^4) grazes a million-solar-mass black hole (β = 0.7) and survives, as in Guillochon & McCourt (2017).',
+  n: 1.5,
+  beta: 0.7,
+  field: 'random',
+  ...N15_SETUP,
+});
+export const tidalDisruptionFullRandom = tde({
+  id: 'tidal-disruption-full-random',
+  blurb: 'The Sun-like γ = 5/3 star threaded by a tangled Kolmogorov field (β_M = 10^4) passes deep inside the tidal radius of a million-solar-mass black hole (β = 1.5) and is torn apart: the streams\' field is stretched along them.',
+  n: 1.5,
+  beta: 1.5,
+  field: 'random',
+  ...N15_SETUP,
 });
 
 export const tdeOrbit = orbitFor;

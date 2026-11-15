@@ -10,7 +10,7 @@ import { advection } from './advection';
 import { jeans } from './jeans';
 import { polytrope, polytropeDipole, polytropeRandom } from './polytrope';
 import { evrard } from './evrard';
-import { tidalDisruption, tidalDisruptionFull, tidalDisruptionN3, tidalDisruptionN3Full } from './tidal_disruption';
+import { tidalDisruption, tidalDisruptionDipole, tidalDisruptionFull, tidalDisruptionFullRandom, tidalDisruptionN3, tidalDisruptionN3Full, tidalDisruptionRandom } from './tidal_disruption';
 import { sphere } from './sphere';
 import { binary } from './binary';
 import { thermalInstability } from './thermal_instability';
@@ -110,6 +110,9 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
           { label: 'Full, γ = 5/3', problem: tidalDisruptionFull },
           { label: 'Partial, γ = 4/3', problem: tidalDisruptionN3 },
           { label: 'Full, γ = 4/3', problem: tidalDisruptionN3Full },
+          { label: 'Partial, dipole field', problem: tidalDisruptionDipole },
+          { label: 'Partial, random field', problem: tidalDisruptionRandom },
+          { label: 'Full, random field', problem: tidalDisruptionFullRandom },
         ],
       },
       single(binary),

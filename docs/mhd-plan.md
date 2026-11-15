@@ -48,6 +48,12 @@ burning carried with a field, `mhd-species`) and E (viscosity and conduction, `m
 - Per-block timesteps carry on with self-gravity and point masses (they paused at first): the
   hydro cycle's field, source, solve and closing kick, with the faces left in place.
 
+Phase 6 progress (2026-11-15): the magnetized presets of section 11 exist, with the fields as
+Guillochon & McCourt's FLASH setup made them (numerics.md section 21, Magnetized tidal
+disruptions); section 8's taper by (p - p_cut) and normalization at the center were not theirs.
+The edge of a star in near-vacuum needed a first-order flux correction first. Still to do: the
+runs and the comparison with GM17's figures.
+
 Phase 5 (field lines) done (2026-11-14), ahead of phase 4: numerics.md section 21, Field lines.
 Changes from section 10:
 - In 2D the lines are contours of the flux function A_z, not traced: evenly spaced in flux,
