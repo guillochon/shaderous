@@ -68,7 +68,9 @@ degenerate electrons. It uses the methods of production simulation codes:
   uniform grid and the adaptive mesh alike, keeping div B at round-off through refinement and
   per-block timesteps, with field lines drawn in 2D and 3D;
 - point masses with sinks;
-- equations of state from an ideal gas to degenerate electrons and ionizing hydrogen;
+- equations of state from an ideal gas to degenerate electrons and ionizing hydrogen, and for
+  burning white dwarf matter a tabulated electron-positron gas at any degeneracy and
+  temperature, in the manner of the Helmholtz equation of state;
 - optically thin cooling, viscosity, thermal conduction, and species carried with the gas,
   whose composition (and each species' own gamma) sets the equation of state cell by cell;
 - nuclear burning from fuel to ash by a single-step Arrhenius reaction, with steady (ZND)

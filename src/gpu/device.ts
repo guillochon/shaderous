@@ -1,4 +1,5 @@
 // Device setup, limit checks, and small texture / pipeline helpers.
+import { usedBindings } from './reach';
 import { countCompile } from './progress';
 
 export interface Gpu {
@@ -187,7 +188,9 @@ async function compilePipeline(
 ): Promise<GPUComputePipeline> {
   const module = device.createShaderModule({ label, code });
   try {
-    return await device.createComputePipelineAsync({ label, layout: 'auto', compute: { module, entryPoint, constants } });
+    const pipe = await device.createComputePipelineAsync({ label, layout: 'auto', compute: { module, entryPoint, constants } });
+    registerPipelineCode(pipe, code, [entryPoint]);
+    return pipe;
   } catch (e) {
     // The compiler's messages, with the offending lines, say more than the pipeline's error.
     // Asked for only on failure: waiting for them first holds every compile up by a round trip.
@@ -204,12 +207,37 @@ async function compilePipeline(
 export type Bindable = GPUBuffer | GPUBufferBinding | GPUTextureView | GPUSampler;
 
 /** Bind group from a sparse {binding: resource} map against a pipeline's auto layout. */
+/**
+ * Resources every bind group of a device gets where its pipeline uses their binding (the
+ * equation of state's table, eos/helmholtz.ts): set once, bound wherever a shader reaches them,
+ * with no call site to change. Which bindings a pipeline uses comes from its WGSL (gpu/reach.ts),
+ * recorded as computePipeline builds it, or by registerPipelineCode for pipelines made elsewhere.
+ */
+const sharedBindings = new WeakMap<GPUDevice, Map<number, Bindable>>();
+const pipelineCode = new WeakMap<GPUComputePipeline | GPURenderPipeline, { code: string; entryPoints: string[] }>();
+
+export function setSharedBinding(device: GPUDevice, binding: number, resource: Bindable) {
+  let m = sharedBindings.get(device);
+  if (!m) sharedBindings.set(device, (m = new Map()));
+  m.set(binding, resource);
+}
+
+export function registerPipelineCode(pipeline: GPUComputePipeline | GPURenderPipeline, code: string, entryPoints: string[]) {
+  pipelineCode.set(pipeline, { code, entryPoints });
+}
+
 export function bindGroup(
   device: GPUDevice,
   pipeline: GPUComputePipeline | GPURenderPipeline,
   resources: Record<number, Bindable>,
   label = '',
 ): GPUBindGroup {
+  const shared = sharedBindings.get(device);
+  const known = pipelineCode.get(pipeline);
+  if (shared && known) {
+    const used = usedBindings(known.code, known.entryPoints);
+    for (const [b, r] of shared) if (used.has(b) && !(b in resources)) resources = { ...resources, [b]: r };
+  }
   const entries: GPUBindGroupEntry[] = Object.entries(resources).map(([b, r]) => ({
     binding: Number(b),
     resource: r instanceof GPUBuffer ? { buffer: r } : 'buffer' in r ? r : (r as GPUTextureView | GPUSampler),

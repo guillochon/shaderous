@@ -4,6 +4,7 @@
  * worker) and the rest of the configuration as sent.
  */
 import { makeEos } from '../eos/eos';
+import { loadHelmholtz } from '../eos/helmholtz';
 import { problemById } from '../problems/index';
 import type { SimConfig } from '../sim';
 import { problemCoefficients } from '../species/mixture';
@@ -16,12 +17,15 @@ let setupKey = '';
 
 const post = (m: InitReply, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
 
-self.onmessage = (e: MessageEvent<InitRequest>) => {
+self.onmessage = async (e: MessageEvent<InitRequest>) => {
   const m = e.data;
   try {
     if (m.kind === 'setup') {
       const problem = problemById(m.problemId);
       const cfg = { ...m.cfg, problem } as SimConfig;
+      // Its float64 mirror needs the table here too (eos/helmholtz.ts); the pool sends no work
+      // before this setup answers.
+      if (cfg.eos === 'helmholtz') await loadHelmholtz();
       const eos = makeEos(cfg.eos, cfg.eosParams);
       const fn = problem.init(m.n, eos, cfg.ndim, cfg.params);
       ctx = {

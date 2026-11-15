@@ -2,9 +2,10 @@
 // by the CPU reference solver, and by the tests.
 import { meanMolecularWeight, nuclearAverages, COMPOSITIONS, type Composition } from '../units/composition';
 import { SI } from '../units/constants';
-import { eosConstants, kelvinPerCodeT, toCode, type UnitSystem } from '../units/units';
+import { eosConstants, kelvinPerCodeT, toCode, unitOf, type UnitSystem } from '../units/units';
+import { helmSolve, helmThermo } from './helmholtz';
 
-export type EosKind = 'ideal' | 'barotropic' | 'gas_radiation' | 'degenerate' | 'ionizing';
+export type EosKind = 'ideal' | 'barotropic' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz';
 
 export interface EosParams {
   gamma: number;
@@ -23,6 +24,17 @@ export interface EosParams {
   ionOther: number;
   ionT: number;
   ionRho: number;
+  /**
+   * The tabulated white dwarf equation of state (eos/helmholtz.wgsl), which works in cgs: g/cm^3,
+   * erg/g and kelvin per code unit of density, specific energy and temperature; and the
+   * reference composition's mu, Ye and ions per atomic mass unit (1 / Abar).
+   */
+  helmRho: number;
+  helmE: number;
+  helmT: number;
+  helmMu: number;
+  helmYe: number;
+  helmIons: number;
 }
 
 export interface Eos {
@@ -42,6 +54,7 @@ export const EOS_MODULES: Record<EosKind, string> = {
   gas_radiation: 'eos/gas_radiation.wgsl',
   degenerate: 'eos/degenerate.wgsl',
   ionizing: 'eos/ionizing.wgsl',
+  helmholtz: 'eos/helmholtz.wgsl',
 };
 
 export const EOS_LABELS: Record<EosKind, string> = {
@@ -50,15 +63,24 @@ export const EOS_LABELS: Record<EosKind, string> = {
   gas_radiation: 'Gas + radiation',
   degenerate: 'Gas + radiation + degenerate electrons',
   ionizing: 'Ionizing hydrogen (Saha)',
+  helmholtz: 'White dwarf matter (tabulated electrons, Helmholtz)',
 };
 
 export const defaultEosParams = (): EosParams => ({
   gamma: 5 / 3, K: 1, R: 1, arad: 1, degRho: 1, degP: 1, ...ionParams(COMPOSITIONS.solar), ionT: 1, ionRho: 1,
+  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1, helmYe: 0.5, helmIons: 1 / 14,
 });
+
+/** The first vec4 of equation-of-state constants (Params.eos in hydro/common.wgsl). */
+export function eosConstants1(kind: EosKind, p: EosParams): number[] {
+  if (kind === 'helmholtz') return [p.helmRho, p.helmE, p.helmT, p.helmMu];
+  return [p.gamma, p.K, p.R, p.arad];
+}
 
 /** The second vec4 of equation-of-state constants (Params.eos2 in hydro/common.wgsl). */
 export function eosConstants2(kind: EosKind, p: EosParams): number[] {
   if (kind === 'degenerate') return [p.degRho, p.degP, 0, 0];
+  if (kind === 'helmholtz') return [p.degRho, p.degP, p.helmYe, p.helmIons];
   if (kind === 'ionizing') return [p.ionH, p.ionOther, p.ionT, p.ionRho];
   return [0, 0, 0, 0];
 }
@@ -93,6 +115,12 @@ export function physicalEosParams(units: UnitSystem | undefined, comp: Compositi
   out.degP = toCode(units, 'pressure', (Math.PI * SI.me ** 4 * SI.c ** 5) / (3 * SI.h ** 3));
   out.ionT = SI.chiH / SI.kB / kelvinPerCodeT(units, mu);
   out.ionRho = toCode(units, 'density', mu * SI.mu * ((2 * Math.PI * SI.me * SI.chiH) / SI.h ** 2) ** 1.5);
+  out.helmRho = unitOf(units, 'density') * 1e-3;
+  out.helmE = unitOf(units, 'specificEnergy') * 1e4;
+  out.helmT = kelvinPerCodeT(units, mu);
+  out.helmMu = mu;
+  out.helmYe = ye;
+  out.helmIons = 1 / mu - ye;
   return out;
 }
 
@@ -151,7 +179,11 @@ export function mixtureParams(kind: EosKind, params: EosParams, k: readonly numb
   if (kind === 'barotropic') return out;
   out.gamma = 1 + k[0] / k[3];
   if (kind === 'gas_radiation' || kind === 'degenerate') out.R = params.R * k[0];
-  if (kind === 'degenerate') out.degRho = params.degRho / k[1];
+  if (kind === 'degenerate' || kind === 'helmholtz') out.degRho = params.degRho / k[1];
+  if (kind === 'helmholtz') {
+    out.helmYe = params.helmYe * k[1];
+    out.helmIons = Math.max(k[0] / params.helmMu - out.helmYe, 1e-3);
+  }
   if (kind === 'ionizing') {
     out.ionH = k[2];
     out.ionOther = k[0] - zh1 * k[2];
@@ -256,7 +288,57 @@ export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[],
     }
     case 'ionizing':
       return ionizingEos(params);
+    case 'helmholtz':
+      return helmholtzEos(params);
   }
+}
+
+/**
+ * Float64 mirror of eos/helmholtz.wgsl in code units, with Newton's method run to convergence.
+ * Needs the table loaded (loadHelmholtz in eos/helmholtz.ts).
+ */
+function helmholtzEos(params: EosParams): Eos {
+  const { helmRho: cr, helmE: ce, helmT: cT, helmYe: ye, helmIons: ia } = params;
+  const xOf = (rho: number) => Math.cbrt(rho / params.degRho);
+  const deg = (rho: number): [number, number] => {
+    const [f, gx] = degFG(xOf(rho));
+    return [params.degP * f, params.degP * gx];
+  };
+  const thermoAt = (rho: number, lnT: number) => helmThermo(rho * cr, lnT, ye, ia);
+  const lnTFromE = (rho: number, eint: number) => helmSolve(rho * cr, (Math.max(eint - deg(rho)[1], 0) / rho) * ce, ye, ia, false);
+  const lnTFromP = (rho: number, p: number) => helmSolve(rho * cr, (Math.max(p - deg(rho)[0], 0) / rho) * ce, ye, ia, true);
+  const lo = Math.log(1e4);
+  const eintFromT = (rho: number, T: number) => {
+    if (!(T > 0)) return deg(rho)[1];
+    const lnT = Math.log(T * cT);
+    const e = lnT < lo ? thermoAt(rho, lo).e * Math.exp(lnT - lo) : thermoAt(rho, Math.min(lnT, Math.log(1e11))).e;
+    return deg(rho)[1] + (e * rho) / ce;
+  };
+  return {
+    kind: 'helmholtz',
+    hasEnergy: true,
+    params,
+    pressure: (rho, eint) => {
+      const lnT = lnTFromE(rho, eint);
+      return deg(rho)[0] + (Number.isFinite(lnT) ? (thermoAt(rho, lnT).pr * rho) / ce : 0);
+    },
+    soundSpeed: (rho, p) => {
+      const x = xOf(rho);
+      let c2 = (params.degP * 8 * x ** 5) / (3 * rho * Math.sqrt(1 + x * x));
+      const lnT = lnTFromP(rho, p);
+      if (Number.isFinite(lnT)) {
+        const t = thermoAt(rho, lnT);
+        c2 += (t.dprho + (t.dpr * t.dpr) / t.de) / ce;
+      }
+      return Math.sqrt(c2);
+    },
+    eintFromP: (rho, p) => {
+      const lnT = lnTFromP(rho, p);
+      return deg(rho)[1] + (Number.isFinite(lnT) ? (thermoAt(rho, lnT).e * rho) / ce : 0);
+    },
+    temperature: (rho, eint) => Math.exp(lnTFromE(rho, eint)) / cT,
+    eintFromT,
+  };
 }
 
 /** Float64 mirror of eos/ionizing.wgsl: the same bracketed Newton, run to convergence. */

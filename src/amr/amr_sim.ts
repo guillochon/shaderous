@@ -15,6 +15,7 @@
 //
 // With self-gravity (3D), the potential is solved on every tree level after the update
 // (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
+import { prepareHelmholtz } from '../eos/helmholtz';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
@@ -444,6 +445,8 @@ export class AmrSim implements Simulation {
    *   shown meanwhile; it is `preparing`, and takes no steps, until `compiled` resolves.
    */
   static async create(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<AmrSim> {
+    // The tabulated white dwarf equation of state needs its table on the device (eos/helmholtz.ts).
+    if (cfg.eos === 'helmholtz') await prepareHelmholtz(gpu.device);
     if (cfg.problem.mhd) {
       const why = mhdUnsupported(cfg);
       if (why) throw new Error(`MHD: ${why}`);

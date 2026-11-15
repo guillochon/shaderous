@@ -1,0 +1,281 @@
+// Degenerate electrons at any temperature, ions and radiation: a tabulated equation of state in
+// the manner of Timmes & Swesty's Helmholtz (eos/helmholtz.ts), for white dwarf matter that
+// burns. Pressure and energy are
+//   p = P_deg(rho) + P_e,th(n, T) + n_i k T + a T^4 / 3
+//   e = E_deg(rho) + E_e,th(n, T) + 3/2 n_i k T + a T^4
+// with P_deg, E_deg the zero-temperature electrons (as eos/degenerate.wgsl) and the electron-
+// positron gas's thermal part from its free energy, F_th = -P_pair(T) + n k T h(n, T): h
+// tabulated in log10(rho Ye) and log10 T with its first derivatives (bicubic Hermite between
+// nodes), P_pair the pair gas at zero net charge as a Chebyshev series in log10 T. Electrons
+// are counted once: unlike eos/degenerate.wgsl, whose ideal-gas part gives every electron
+// 3/2 k T and so reads shocked degenerate fuel 2-5 times too cold.
+//
+// The hydro holds the energy (or the pressure), so the temperature comes from Newton's method
+// in ln T, started from a table of the inverse at three Abar (4, 14, 56; within a few percent,
+// so two or three iterations converge it). Inside, everything is in cgs, kelvin and per unit
+// mass, which keeps single precision clear of its 3e38 limit; the code's units are converted
+// on the way in and out.
+//
+// P.eos  = (g/cm^3, erg/g, kelvin per code unit of density, specific energy, temperature; mu
+//           of the reference composition)
+// P.eos2 = (rho_d, A of the zero-temperature electrons in code units (eos/degenerate.wgsl), Ye
+//           and ions per atomic mass unit of the reference composition)
+// Where the composition varies (eos/comp_on), Ye is the reference's times g_comp.y, and the
+// ions per atomic mass unit are g_comp.x / mu - Ye (g_comp.x counts ions and electrons).
+// Float64 mirror: src/eos/helmholtz.ts.
+const EOS_HAS_ENERGY = true;
+// As eos/degenerate.wgsl: E - KE below the zero-temperature energy is no reason to rebuild E.
+const EOS_KEEP_TOTAL = true;
+
+#include "eos/helmholtz_consts.wgsl"
+
+@group(0) @binding(22) var HELM_TAB: texture_2d<f32>;
+
+const HK: f32 = 1.380649e-16;
+const HMU: f32 = 1.6605390666e-24;
+const HMEC2: f32 = 8.1871057769e-7;
+const HARAD: f32 = 7.565723e-15;
+const HLN10: f32 = 2.30258509;
+// 2 pi m_e k / h^2, cgs
+const HNQ: f32 = 1.79988e10;
+const HLNT_MIN: f32 = 9.2103404;     // ln 1e4
+const HLNT_MAX: f32 = 25.328436;     // ln 1e11
+
+// The gas's adiabatic index, for the few uses outside the module (entropy shown in the view).
+fn eos_gamma() -> f32 { return 5.0 / 3.0; }
+fn eos_gm1() -> f32 { return 2.0 / 3.0; }
+
+fn helm_ye() -> f32 {
+  if (COMP) { return P.eos2.z * g_comp.y; }
+  return P.eos2.z;
+}
+// Ions per atomic mass unit, 1 / Abar.
+fn helm_ions() -> f32 {
+  if (COMP) { return max(g_comp.x / P.eos.w - helm_ye(), 1e-3); }
+  return P.eos2.w;
+}
+
+// ---- The zero-temperature electrons (as eos/degenerate.wgsl) ----
+
+fn deg_rho_d() -> f32 {
+  if (COMP) { return P.eos2.x / g_comp.y; }
+  return P.eos2.x;
+}
+fn deg_fg(x: f32) -> vec2<f32> {
+  if (x < 0.5) {
+    let x2 = x * x;
+    var xp = x2 * x2 * x;
+    var c = 1.0;
+    var b = 0.5;
+    var f = 0.0;
+    var g = 0.0;
+    for (var k = 0; k < 12; k++) {
+      let n = f32(5 + 2 * k);
+      f += 8.0 * c * xp / n;
+      g += (8.0 * b - 8.0 * c / n) * xp;
+      let kf = f32(k);
+      c *= -(2.0 * kf + 1.0) / (2.0 * kf + 2.0);
+      b *= (0.5 - (kf + 1.0)) / (kf + 2.0);
+      xp *= x2;
+    }
+    return vec2<f32>(f, g);
+  }
+  let s = sqrt(1.0 + x * x);
+  let f = x * (2.0 * x * x - 3.0) * s + 3.0 * asinh(x);
+  return vec2<f32>(f, 8.0 * x * x * x * (s - 1.0) - f);
+}
+fn deg_x(rho: f32) -> f32 { return pow(rho / deg_rho_d(), 1.0 / 3.0); }
+// (P_deg, E_deg) at density rho, code units.
+fn deg_pe(rho: f32) -> vec2<f32> { return P.eos2.y * deg_fg(deg_x(rho)); }
+// dP_deg/drho, code units.
+fn deg_c2(rho: f32) -> f32 {
+  let x = deg_x(rho);
+  let x2 = x * x;
+  return P.eos2.y * 8.0 * x2 * x2 * x / (3.0 * rho * sqrt(1.0 + x2));
+}
+
+// ---- The table ----
+
+struct HelmH { h: f32, hn: f32, ht: f32, hnn: f32, hnt: f32, htt: f32 }
+
+fn helm_hb(t: f32) -> vec4<f32> { return vec4<f32>(2.0*t*t*t - 3.0*t*t + 1.0, t*t*t - 2.0*t*t + t, -2.0*t*t*t + 3.0*t*t, t*t*t - t*t); }
+fn helm_hb1(t: f32) -> vec4<f32> { return vec4<f32>(6.0*t*t - 6.0*t, 3.0*t*t - 4.0*t + 1.0, -6.0*t*t + 6.0*t, 3.0*t*t - 2.0*t); }
+fn helm_hb2(t: f32) -> vec4<f32> { return vec4<f32>(12.0*t - 6.0, 6.0*t - 4.0, -12.0*t + 6.0, 6.0*t - 2.0); }
+// sum over the four nodes of A_a(u) B_b(v) (h, h_x, h_y, h_xy): basis entries 0 and 2 weigh the
+// value at nodes 0 and 1, entries 1 and 3 the slope there.
+fn helm_comb(c: array<vec4<f32>, 4>, A: vec4<f32>, B: vec4<f32>) -> f32 {
+  var s = 0.0;
+  for (var a = 0; a < 2; a++) {
+    for (var b = 0; b < 2; b++) {
+      let q = c[a * 2 + b];
+      s += A[2*a] * B[2*b] * q.x + A[2*a+1] * B[2*b] * q.y + A[2*a] * B[2*b+1] * q.z + A[2*a+1] * B[2*b+1] * q.w;
+    }
+  }
+  return s;
+}
+// h and its first and second derivatives per ln n and ln T, at log10(rho Ye) and log10 T.
+fn helm_lookup(lrye: f32, lt: f32) -> HelmH {
+  let x = clamp((lrye - HT_R0) / HT_D, 0.0, f32(HT_NR) - 1.0001);
+  let y = clamp((lt - HT_T0) / HT_D, 0.0, f32(HT_NT) - 1.0001);
+  let i = i32(floor(x));
+  let j = i32(floor(y));
+  let u = x - f32(i);
+  let v = y - f32(j);
+  var c: array<vec4<f32>, 4>;
+  c[0] = textureLoad(HELM_TAB, vec2<i32>(j, i), 0);
+  c[1] = textureLoad(HELM_TAB, vec2<i32>(j + 1, i), 0);
+  c[2] = textureLoad(HELM_TAB, vec2<i32>(j, i + 1), 0);
+  c[3] = textureLoad(HELM_TAB, vec2<i32>(j + 1, i + 1), 0);
+  let s = 1.0 / (HT_D * HLN10);
+  var r: HelmH;
+  r.h = helm_comb(c, helm_hb(u), helm_hb(v));
+  r.hn = helm_comb(c, helm_hb1(u), helm_hb(v)) * s;
+  r.ht = helm_comb(c, helm_hb(u), helm_hb1(v)) * s;
+  r.hnn = helm_comb(c, helm_hb2(u), helm_hb(v)) * s * s;
+  r.hnt = helm_comb(c, helm_hb1(u), helm_hb1(v)) * s * s;
+  r.htt = helm_comb(c, helm_hb(u), helm_hb2(v)) * s * s;
+  return r;
+}
+
+fn helm_cheb(c: ptr<function, array<f32, 17>>, x: f32) -> f32 {
+  var b1 = 0.0;
+  var b2 = 0.0;
+  for (var k = 16; k >= 1; k--) {
+    let b0 = 2.0 * x * b1 - b2 + (*c)[k];
+    b2 = b1;
+    b1 = b0;
+  }
+  return x * b1 - b2 + (*c)[0];
+}
+// The pair gas at zero charge, per unit mass at density rho: (P_p / rho, dln P_p/dln T,
+// d^2 ln P_p/dln T^2). Below 10^8.5 K, the nonrelativistic Boltzmann pairs, already negligible.
+fn helm_pairs(lt: f32, rho: f32) -> vec3<f32> {
+  let lnT = lt * HLN10;
+  let T = exp(lnT);
+  let beta = HK * T / HMEC2;
+  let x = clamp((lt - HP_MID) / HP_HALF, -1.0, 1.0);
+  var c0 = HP_Q;
+  var c1 = HP_DQ;
+  var c2 = HP_D2Q;
+  let s = 1.0 / (HP_HALF * HLN10);
+  let lnP = log(4.0 * HK / rho) + lnT + 1.5 * log(HNQ * T) - 1.0 / beta + helm_cheb(&c0, x);
+  return vec3<f32>(exp(lnP), 2.5 + 1.0 / beta + helm_cheb(&c1, x) * s, -1.0 / beta + helm_cheb(&c2, x) * s * s);
+}
+
+// Everything above the zero-temperature electrons, per unit mass, at density rho (g/cm^3) and
+// ln T, with Ye and ions per atomic mass unit ia:
+//   e (erg/g), p / rho, de/dln T, d(p/rho)/dln T at fixed rho, dp/drho at fixed T.
+struct HelmThermo { e: f32, pr: f32, de: f32, dpr: f32, dprho: f32 }
+fn helm_thermo(rho: f32, lnT: f32, ye: f32, ia: f32) -> HelmThermo {
+  let lt = lnT / HLN10;
+  let T = exp(lnT);
+  let hh = helm_lookup(log(rho * ye) / HLN10, lt);
+  let pp = helm_pairs(lt, rho);
+  let sm = ye * HK * T / HMU;           // n k T / rho
+  let im = ia * HK * T / HMU;           // n_i k T / rho
+  let rm = HARAD * T * T * T * T / rho; // a T^4 / rho
+  var r: HelmThermo;
+  r.e = pp.x * (pp.y - 1.0) - sm * hh.ht + 1.5 * im + rm;
+  r.de = pp.x * (pp.y * pp.y - pp.y + pp.z) - sm * (hh.ht + hh.htt) + 1.5 * im + 4.0 * rm;
+  r.pr = pp.x + sm * hh.hn + im + rm / 3.0;
+  r.dpr = pp.x * pp.y + sm * (hh.hn + hh.hnt) + im + 4.0 * rm / 3.0;
+  r.dprho = sm * (hh.hn + hh.hnn) + im;
+  return r;
+}
+
+// Newton's starting point: log10 T from the inverse table (byP: from p / rho, else from e) by
+// bilinear interpolation, and between the three Abar in log Abar.
+fn helm_guess(rho: f32, x: f32, ia: f32, byP: bool) -> f32 {
+  let gx = clamp((log(rho) / HLN10 - HG_RHO0) / HG_DRHO, 0.0, f32(HG_NRHO) - 1.0001);
+  let gy = clamp((log(x) / HLN10 - HG_X0) / HG_DX, 0.0, f32(HG_NX) - 1.0001);
+  let i = i32(floor(gx));
+  let j = i32(floor(gy));
+  let u = gx - f32(i);
+  let v = gy - f32(j);
+  let row = select(HG_ROW_E, HG_ROW_P, byP);
+  let a = mix(mix(textureLoad(HELM_TAB, vec2<i32>(j, row + i), 0), textureLoad(HELM_TAB, vec2<i32>(j + 1, row + i), 0), v),
+              mix(textureLoad(HELM_TAB, vec2<i32>(j, row + i + 1), 0), textureLoad(HELM_TAB, vec2<i32>(j + 1, row + i + 1), 0), v), u);
+  // Abar = 4, 14, 56 in r, g, b.
+  let la = clamp(-log(ia), 1.3862944, 4.0253517);
+  let w = (la - 1.3862944) / (2.6390573 - 1.3862944);
+  let w2 = (la - 2.6390573) / (4.0253517 - 2.6390573);
+  return select(mix(a.x, a.y, w), mix(a.y, a.z, w2), la > 2.6390573);
+}
+
+// ln T at which the thermal energy per gram (byP false) or p_th / rho (byP true) is `goal`.
+// Outside the table: below 1e4 K the gas's thermal energy is nearly that of its ions, linear in
+// T; above 1e11 K, radiation's, as T^4.
+fn helm_solve(rho: f32, goal: f32, ye: f32, ia: f32, byP: bool) -> f32 {
+  if (!(goal > 0.0)) { return -1e30; }
+  var lnT = clamp(helm_guess(rho, goal, ia, byP) * HLN10, HLNT_MIN, HLNT_MAX);
+  for (var it = 0; it < 10; it++) {
+    let t = helm_thermo(rho, lnT, ye, ia);
+    let f = select(t.e, t.pr, byP);
+    if (lnT <= HLNT_MIN && f > goal) { return HLNT_MIN + log(goal / f); }
+    if (lnT >= HLNT_MAX && f < goal) { return HLNT_MAX + 0.25 * log(goal / f); }
+    let step = clamp(-(f - goal) / select(t.de, t.dpr, byP), -1.0, 1.0);
+    lnT = clamp(lnT + step, HLNT_MIN, HLNT_MAX);
+    if (abs(step) < 2e-6) { break; }
+  }
+  return lnT;
+}
+
+// Thermal energy per gram and p_th / rho in cgs, from the code's internal energy density.
+fn helm_eth(rho: f32, eint: f32) -> f32 {
+  return max(eint - deg_pe(rho).y, 0.0) / rho * P.eos.y;
+}
+
+fn eos_temperature(rho: f32, eint: f32) -> f32 {
+  let lnT = helm_solve(rho * P.eos.x, helm_eth(rho, eint), helm_ye(), helm_ions(), false);
+  return exp(lnT) / P.eos.z;
+}
+fn eos_pressure(rho: f32, eint: f32) -> f32 {
+  let rc = rho * P.eos.x;
+  let ye = helm_ye();
+  let ia = helm_ions();
+  let lnT = helm_solve(rc, helm_eth(rho, eint), ye, ia, false);
+  var pth = 0.0;
+  if (lnT > -1e29) { pth = helm_thermo(rc, lnT, ye, ia).pr * rho / P.eos.y; }
+  return deg_pe(rho).x + pth;
+}
+fn eos_sound_speed(rho: f32, p: f32) -> f32 {
+  let rc = rho * P.eos.x;
+  let ye = helm_ye();
+  let ia = helm_ions();
+  let prth = max(p - deg_pe(rho).x, 0.0) / rho * P.eos.y;
+  var c2 = deg_c2(rho);
+  let lnT = helm_solve(rc, prth, ye, ia, true);
+  if (lnT > -1e29) {
+    let t = helm_thermo(rc, lnT, ye, ia);
+    // c^2 = (dp/drho)_T + T (dp/dT)_rho^2 / (rho^2 c_v), all per unit mass.
+    c2 += (t.dprho + t.dpr * (t.dpr / t.de)) / P.eos.y;
+  }
+  return sqrt(c2);
+}
+fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
+  let rc = rho * P.eos.x;
+  let ye = helm_ye();
+  let ia = helm_ions();
+  let d = deg_pe(rho);
+  let lnT = helm_solve(rc, max(p - d.x, 0.0) / rho * P.eos.y, ye, ia, true);
+  var eth = 0.0;
+  if (lnT > -1e29) { eth = helm_thermo(rc, lnT, ye, ia).e * rho / P.eos.y; }
+  return d.y + eth;
+}
+fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
+  let d = deg_pe(rho);
+  if (!(T > 0.0)) { return d.y; }
+  let lnT = log(T * P.eos.z);
+  let rc = rho * P.eos.x;
+  var eth: f32;
+  if (lnT < HLNT_MIN) {
+    eth = helm_thermo(rc, HLNT_MIN, helm_ye(), helm_ions()).e * exp(lnT - HLNT_MIN);
+  } else {
+    eth = helm_thermo(rc, min(lnT, HLNT_MAX), helm_ye(), helm_ions()).e;
+  }
+  return d.y + eth * rho / P.eos.y;
+}
+// As eos/degenerate.wgsl: no floor above the zero-temperature energy.
+fn eos_eint_floor(rho: f32) -> f32 {
+  return 0.0;
+}

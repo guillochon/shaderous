@@ -1,4 +1,5 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
+import { prepareHelmholtz } from './eos/helmholtz';
 import { assemble } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
@@ -7,7 +8,7 @@ import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
-import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
+import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, problemUnits, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
@@ -632,7 +633,7 @@ export function packParams(
   const f = new Float32Array(buf);
   u.set([...c.bcLo, 0], 0);
   u.set([...c.bcHi, 0], 4);
-  f.set([c.eosParams.gamma, c.eosParams.K, c.eosParams.R, c.eosParams.arad], 8);
+  f.set(eosConstants1(c.eos, c.eosParams), 8);
   u.set([...x.dims, 0], 12);
   // 2D quantities are per unit length along z.
   f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, ...(x.refine ?? [0, 0])], 16);
@@ -878,6 +879,8 @@ export class Sim implements Simulation {
   }
 
   static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
+    // The tabulated white dwarf equation of state needs its table on the device (eos/helmholtz.ts).
+    if (cfg.eos === 'helmholtz') await prepareHelmholtz(gpu.device);
     // Every grid, 2D included, lives in 3D textures, whose side WebGPU caps (2048 on most
     // adapters). Past it the textures are invalid and every step would silently do nothing.
     const side = gpu.device.limits.maxTextureDimension3D;

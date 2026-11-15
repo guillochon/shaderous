@@ -6,7 +6,9 @@ import NET_CASES from '../burn/aprox13_net_cases.json';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { configFor, PARAM_BYTES, Sim, type Diagnostics, type RiemannKind, type SimConfig } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
-import { defaultEosParams, EOS_MODULES, eosConstants2, makeEos, type EosKind, type EosParams } from '../eos/eos';
+import { prepareHelmholtz } from '../eos/helmholtz';
+import { WD_UNITS } from '../problems/white_dwarf';
+import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
 import { COMPOSITIONS, composition } from '../units/composition';
 import { bubbleDensity, shockBubble } from '../problems/shock_bubble';
@@ -1980,7 +1982,7 @@ export const TESTS: TestDef[] = [
   {
     id: 'eos',
     name: 'Equations of state on the GPU',
-    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4; gas+radiation reduces to its ideal-gas and pure-radiation limits. The degenerate case puts each pressure on top of the degenerate one; the ionizing case spans neutral to fully ionized gas',
+    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4 (the tabulated white dwarf gas: 5e-5 and 5e-4, single precision’s limit for its Newton solve and its sound speed); gas+radiation reduces to its ideal-gas and pure-radiation limits. The degenerate and tabulated cases put each pressure on top of the degenerate one; the ionizing case spans neutral to fully ionized gas',
     async run(gpu) {
       const d = gpu.device;
       const metrics: Record<string, number> = {};
@@ -1996,7 +1998,10 @@ export const TESTS: TestDef[] = [
         { kind: 'gas_radiation', label: 'gasrad_radiation_only', params: { gamma: 5 / 3, R: 1e-12, arad: 1 } },
         { kind: 'degenerate', label: 'degenerate', params: { gamma: 5 / 3, R: 1, arad: 1e-2, degRho: 1, degP: 1 } },
         { kind: 'ionizing', label: 'ionizing', params: { gamma: 5 / 3 } },
+        // White dwarf units: densities 200 to 2e10 g/cm^3, thermal pressures from about 1e7 to 3e10 K.
+        { kind: 'helmholtz', label: 'helmholtz', params: physicalEosParams(WD_UNITS, COMPOSITIONS.carbonOxygen) },
       ];
+      await prepareHelmholtz(d);
       const inData = new Float32Array(pairs.length * 4);
       const inBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       d.queue.writeBuffer(inBuf, 0, inData);
@@ -2007,11 +2012,11 @@ export const TESTS: TestDef[] = [
         const ep = { ...defaultEosParams(), ...c.params };
         const eos = makeEos(c.kind, ep);
         // Degenerate gas cannot be below its zero-temperature pressure: test the thermal part on top.
-        const cp = c.kind === 'degenerate' ? pairs.map(([rho, p]) => [rho, eos.pressure(rho, 0) + p]) : pairs;
+        const cp = c.kind === 'degenerate' || c.kind === 'helmholtz' ? pairs.map(([rho, p]) => [rho, eos.pressure(rho, 0) + p]) : pairs;
         cp.forEach(([rho, p], i) => inData.set([rho, p, 0, 0], i * 4));
         d.queue.writeBuffer(inBuf, 0, inData);
         const pb = new Float32Array(PARAM_BYTES / 4);
-        pb.set([ep.gamma, ep.K, ep.R, ep.arad], 8);
+        pb.set(eosConstants1(c.kind, ep), 8);
         pb.set(eosConstants2(c.kind, ep), 64);
         d.queue.writeBuffer(params, 0, pb);
         const pipe = await computePipeline(d, assemble('eos/eos_test.wgsl', { eos: EOS_MODULES[c.kind] }), `eos test ${c.label}`);
@@ -2035,6 +2040,10 @@ export const TESTS: TestDef[] = [
           round = Math.max(round, rel(pBack, pIn));
           if (eos.hasEnergy) {
             mirror = Math.max(mirror, rel(eint, eos.eintFromP(rho, p)), rel(cs, eos.soundSpeed(rho, p)));
+            if (c.kind === 'helmholtz') {
+              metrics.helmholtz_eint_vs_float64 = Math.max(metrics.helmholtz_eint_vs_float64 ?? 0, rel(eint, eos.eintFromP(rho, p)));
+              metrics.helmholtz_cs_vs_float64 = Math.max(metrics.helmholtz_cs_vs_float64 ?? 0, rel(cs, eos.soundSpeed(rho, p)));
+            }
           } else {
             mirror = Math.max(mirror, rel(pBack, pIn));
           }
@@ -2044,7 +2053,12 @@ export const TESTS: TestDef[] = [
         metrics[`${c.label}_roundtrip`] = round;
         metrics[`${c.label}_vs_float64`] = mirror;
         if (c.label.startsWith('gasrad_')) metrics[`${c.label}_limit`] = limit;
-        pass &&= round < 1e-5 && mirror < 1e-4 && limit < 1e-4;
+        // The tabulated white dwarf gas solves for ln T (about 25) by Newton's method, which single
+        // precision holds to about 1.5e-6, and p goes as up to T^4: two solves per round trip. Its
+        // sound speed takes second derivatives of the table, which single precision keeps to about
+        // 1e-4 (the Hermite terms cancel); well inside what the hydro needs.
+        const [rt, mt] = c.kind === 'helmholtz' ? [5e-5, 5e-4] : [1e-5, 1e-4];
+        pass &&= round < rt && mirror < mt && limit < 1e-4;
       }
       return { pass, metrics };
     },

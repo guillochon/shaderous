@@ -1097,6 +1097,9 @@ function syncControls() {
       : 'Changed, not loaded yet: press Run to start again with the new parameters.'
     : cfg.restart ? `Loaded from a file, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
   $<HTMLSelectElement>('eos').value = cfg.eos;
+  // The tabulated white dwarf equation of state needs physical units and its table, which a preset that uses it brings.
+  const helmOpt = $<HTMLSelectElement>('eos').querySelector<HTMLOptionElement>('option[value="helmholtz"]');
+  if (helmOpt) helmOpt.disabled = cfg.problem.eos !== 'helmholtz';
   $<HTMLInputElement>('gamma').value = String(+cfg.eosParams.gamma.toFixed(4));
   $<HTMLInputElement>('K').value = String(cfg.eosParams.K);
   $<HTMLInputElement>('arad').value = String(cfg.eosParams.arad);

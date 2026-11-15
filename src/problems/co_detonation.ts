@@ -1,12 +1,11 @@
 import { OUTFLOW, REFLECT, type Problem } from './types';
 import { NET_SPECIES } from '../burn/network';
-import { COMPOSITIONS, meanMolecularWeight } from '../units/composition';
-import { flowUnits, kelvinPerCodeT, toCode } from '../units/units';
-import { coldPressure, scalesOf } from './white_dwarf';
+import { COMPOSITIONS } from '../units/composition';
+import { flowUnits, toCode } from '../units/units';
 
 // A carbon-oxygen detonation, burned by the trained network of the 13-isotope alpha chain
 // (burn/network.ts): white dwarf matter (equal parts C12 and O16 by mass, degenerate electrons,
-// ions and radiation: eos/degenerate.wgsl) at rest in a tube, set alight at its closed end by a
+// ions and radiation: eos/helmholtz.wgsl) at rest in a tube, set alight at its closed end by a
 // layer held hotter than carbon can stand. The layer burns in microseconds, its pressure
 // drives a shock into the fuel, and the shocked fuel burns behind it: a detonation, running
 // down the tube at about 11,000 km/s at 1e7 g/cm^3. Carbon burns right behind the shock,
@@ -26,7 +25,7 @@ export const coDetonation: Problem = {
   label: 'Detonation: carbon–oxygen (network)',
   blurb:
     'A detonation in white dwarf matter, burned by a trained neural network of the 13-isotope alpha chain (aprox13): carbon and oxygen at rest in a 1000 km tube, set alight by a hot layer at its closed end. The shocked fuel burns behind the front through oxygen and silicon toward the iron group; how far it gets depends on the density.',
-  eos: 'degenerate',
+  eos: 'helmholtz',
   eosParams: { gamma: 5 / 3 },
   units: CO_DETONATION_UNITS,
   composition: COMP,
@@ -55,13 +54,8 @@ export const coDetonation: Problem = {
   ],
   init: (_n, eos, _ndim, p) => {
     const rho = toCode(CO_DETONATION_UNITS, 'density', 10 ** p.logrho * 1e3);
-    const tk = kelvinPerCodeT(CO_DETONATION_UNITS, meanMolecularWeight(COMP));
-    const s = scalesOf(eos);
-    const pd = coldPressure(s, rho);
-    const pressure = (TK: number) => {
-      const T = TK / tk;
-      return pd + eos.params.R * rho * T + (eos.params.arad * T ** 4) / 3;
-    };
+    // The fuel's pressure at a temperature in kelvin, by the run's equation of state.
+    const pressure = (TK: number) => eos.pressure(rho, eos.eintFromT(rho, TK / eos.params.helmT));
     const X = fuelX(p.carbon);
     const cold = { rho, vx: 0, vy: 0, vz: 0, p: pressure(p.tfuel * 1e8), s: 0, X };
     const hot = { ...cold, p: pressure(p.tign * 1e9), s: 1 };
