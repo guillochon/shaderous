@@ -3691,10 +3691,11 @@ const api = installApi(
       updateRange(d);
       showDensityCut();
     },
-    draw(size, asPage) {
+    draw(size, asPage, capture = false) {
       if (!sim) return;
       const enc = gpu.device.createCommandEncoder();
       renderer.fixedSize = size;
+      renderer.capture = capture;
       renderer.densityCut = densityCut();
       // At a size of its own the slice is centered, since the panel and rail are not in the
       // picture; unless the picture is the view area itself, framed as the page frames it.
@@ -3702,10 +3703,12 @@ const api = installApi(
       const page = sliceLayout();
       renderer.slice = !size ? page : asPage ? { span: page.span * k, shift: page.shift * k } : { span: 0.94 * Math.min(...size), shift: 0 };
       renderer.encode(enc, sim, view);
+      renderer.capture = false;
       gpu.device.queue.submit([enc.finish()]);
       sim.submitted();
       renderer.submitted();
     },
+    captured: () => renderer.captured(),
     rangeSettled: () => renderer.rangeSettled(),
     rangedByDrawing: (d) => $<HTMLInputElement>('auto').checked && (projecting() || view.field >= d.ranges.length),
     athdf: () => athdfOf(sim!),

@@ -234,8 +234,10 @@ SwiftShader. What the machine needs:
   otherwise does, they would pass the 4 GiB a buffer may be, and they lost the device.
 - Data-center Hopper cards (H100, H200): Chrome's compositor loses the Vulkan device on its first
   frame, and WebGPU with it. Set `SHADEROUS_NO_GPU_COMPOSITING=1` to keep Chrome's own drawing
-  off the GPU: runs, diagnostics and slices then work (the MRI disk at 2048^3 ran on an H200),
-  but screenshots and movies do not.
+  off the GPU: runs, diagnostics and slices then work (the MRI disk at 2048^3 ran on an H200).
+  A WebGPU canvas cannot be read then, so with this switch screenshots and movie frames are
+  drawn into a texture of their own and copied back from the GPU, as slices are (the pixels
+  match the canvas's exactly on an RTX 3080).
 
 ### Largest run so far
 

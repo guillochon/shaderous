@@ -54,7 +54,9 @@ export interface AppHooks {
    * Encode and submit one frame of the current view: at `size` pixels, or with null at the
    * canvas's size on the page. A size holds until the next draw.
    */
-  draw(size: [number, number] | null, asPage?: boolean): void;
+  draw(size: [number, number] | null, asPage?: boolean, capture?: boolean): void;
+  /** The frame last drawn with `capture` set, read back from the GPU (Renderer.captured). */
+  captured(): Promise<HTMLCanvasElement>;
   /** Resolves once the range read back from the last draw, if any, has been taken up. */
   rangeSettled(): Promise<void>;
   /** Whether the displayed range follows from what a draw finds (not from `d`, nor typed in). */
@@ -498,25 +500,30 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     return { snap, sampler: new SnapshotSampler(snap), species };
   }
 
+  // Screenshots and movie frames read back from the GPU rather than from the canvas: set by the
+  // headless runner when the browser composites without the GPU (SHADEROUS_NO_GPU_COMPOSITING,
+  // tools/headless/session.mjs), where a WebGPU canvas cannot be read.
+  const readBack = (globalThis as { shaderousReadBack?: boolean }).shaderousReadBack === true;
+
   /**
    * Draw the view with fresh readouts, at `size` (or the canvas's own with null), and hand the
    * canvas to `read` in the same task as the draw: the canvas holds the frame only until the
-   * task ends.
+   * task ends. With readBack, the frame is drawn off the canvas and handed over as a 2D canvas.
    */
   async function drawFresh<T>(s: Simulation, size: [number, number] | null, read: (c: HTMLCanvasElement) => T, asPage = false, known?: Diagnostics): Promise<T> {
     const d = s.preparing ? null : (known ?? (await s.diagnostics()));
     // A range readback still under way would leave this draw's range unread.
     await app.rangeSettled();
     if (d) app.refresh(d);
-    app.draw(size, asPage);
+    app.draw(size, asPage, readBack);
     // Fields ranged by the display pass need one frame drawn before their range is known: draw
     // again with it. The state is the same, so the readouts are too.
     if (d && app.rangedByDrawing(d)) {
       await app.rangeSettled();
       app.refresh(d);
-      app.draw(size, asPage);
+      app.draw(size, asPage, readBack);
     }
-    return read(app.canvas);
+    return read(readBack ? await app.captured() : app.canvas);
   }
 
   async function screenshot(opts: { width?: number; height?: number; overlays?: OverlayOptions } = {}): Promise<string> {

@@ -573,6 +573,68 @@ export class Renderer {
    */
   fixedSize: [number, number] | null = null;
 
+  /**
+   * Draw into a texture of the renderer's own instead of the canvas, for captured() to read back.
+   * For pages whose browser composites without the GPU (the headless runner's
+   * SHADEROUS_NO_GPU_COMPOSITING, on data-center cards whose Vulkan compositor loses the device):
+   * there a WebGPU canvas cannot be read, but a texture copied back is as any other readback.
+   */
+  capture = false;
+  private captureTex: GPUTexture | null = null;
+
+  /** The capture texture, at the canvas's size in pixels. */
+  private captureTarget(): GPUTexture {
+    const [w, h] = [this.canvas.width, this.canvas.height];
+    const t = this.captureTex;
+    if (t && t.width === w && t.height === h) return t;
+    t?.destroy();
+    this.captureTex = this.device.createTexture({
+      label: 'capture',
+      size: [w, h],
+      format: this.format,
+      usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC,
+    });
+    return this.captureTex;
+  }
+
+  /** The frame last drawn with `capture` set, as a 2D canvas of the same size. */
+  async captured(): Promise<HTMLCanvasElement> {
+    const t = this.captureTex;
+    if (!t) throw new Error('nothing was drawn for capture');
+    const [w, h] = [t.width, t.height];
+    const bytesPerRow = Math.ceil((w * 4) / 256) * 256;
+    const buf = this.device.createBuffer({ label: 'capture readback', size: bytesPerRow * h, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = this.device.createCommandEncoder();
+    enc.copyTextureToBuffer({ texture: t }, { buffer: buf, bytesPerRow }, [w, h]);
+    this.device.queue.submit([enc.finish()]);
+    try {
+      await buf.mapAsync(GPUMapMode.READ);
+      const src = new Uint8Array(buf.getMappedRange());
+      const img = new ImageData(w, h);
+      const px = img.data;
+      // The canvas format is bgra8unorm or rgba8unorm; the frame is opaque.
+      const [r, b] = this.format === 'bgra8unorm' ? [2, 0] : [0, 2];
+      for (let y = 0; y < h; y++) {
+        let i = y * bytesPerRow;
+        let o = y * w * 4;
+        for (let x = 0; x < w; x++, i += 4, o += 4) {
+          px[o] = src[i + r];
+          px[o + 1] = src[i + 1];
+          px[o + 2] = src[i + b];
+          px[o + 3] = 255;
+        }
+      }
+      buf.unmap();
+      const c = document.createElement('canvas');
+      c.width = w;
+      c.height = h;
+      c.getContext('2d')!.putImageData(img, 0, 0);
+      return c;
+    } finally {
+      buf.destroy();
+    }
+  }
+
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const w = this.fixedSize ? this.fixedSize[0] : Math.max(1, Math.floor(this.canvas.clientWidth * dpr));
@@ -679,7 +741,7 @@ export class Renderer {
     this.fieldLines.encode(enc, sim, v, this.canvas.width, this.canvas.height, dpr, volume);
     const rp = enc.beginRenderPass({
       colorAttachments: [
-        { view: this.ctx.getCurrentTexture().createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
+        { view: (this.capture ? this.captureTarget() : this.ctx.getCurrentTexture()).createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
     });
     rp.setPipeline(volume ? (this.atlas ? this.pVolumeAtlas : this.pVolume) : this.pSlice);

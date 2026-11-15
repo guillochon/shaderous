@@ -69,7 +69,9 @@ export async function openSession(opts = {}) {
   if (process.platform === 'linux') args.push('--use-angle=vulkan', '--enable-features=Vulkan', '--disable-vulkan-surface');
   // SHADEROUS_NO_GPU_COMPOSITING=1: Chrome's own drawing off the GPU, for data-center GPUs with
   // little graphics hardware. On an H200 its compositor's first Vulkan submit lost the device,
-  // which took WebGPU down with it. Runs, diagnostics and slices work so; screenshots do not.
+  // which took WebGPU down with it. Runs, diagnostics and slices work so; a WebGPU canvas then
+  // cannot be read, so screenshots and movie frames are drawn off it and read back from the GPU
+  // (shaderousReadBack, src/ui/api.ts).
   if (process.env.SHADEROUS_NO_GPU_COMPOSITING) args.push('--disable-gpu-compositing', '--disable-gpu-rasterization', '--disable-accelerated-2d-canvas');
   // PW_CHANNEL=shell: Playwright's own Chromium headless shell (the Playwright Docker images
   // have it, not Chrome); on a Linux pod it is the one that finds the GPU.
@@ -84,6 +86,7 @@ export async function openSession(opts = {}) {
   const page = await browser.newPage({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 } });
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
+  if (process.env.SHADEROUS_NO_GPU_COMPOSITING) await page.addInitScript(() => (globalThis.shaderousReadBack = true));
   if (opts.gpuMemory !== undefined) {
     const gb = Number(opts.gpuMemory);
     if (!(gb >= 0.25)) throw new Error(`GPU memory must be a number of GB, at least 0.25 (got "${opts.gpuMemory}")`);
