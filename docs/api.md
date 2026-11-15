@@ -305,8 +305,9 @@ The state at a list of points `[x, y, z]`. Each point returns `rho`, `press`, `v
 
 The view as a PNG data URL. With no size, it is drawn at the canvas's size on the page. Give
 `width` alone for a square image. The overlays the page draws on top of the canvas (color bar,
-markers, labels) are not included, but `overlays: { colorbar: true, triad: true }` paints a
-color bar and an axis triad of its own onto the image, as a movie's frames have them. With the
+markers, labels) are not included, but `overlays: { colorbar: true, triad: true, status: true }`
+paints a color bar, an axis triad and the status line onto the image, as a movie's frames have
+them. With the
 range set to automatic, it is fitted to the current data before the image is drawn.
 
 ### `record(options) → result`
@@ -325,7 +326,7 @@ and paused when the recording ends. Options:
 | `fps` | 30 | Playback rate. It only sets the frames' timestamps: frame i is shown at i / fps seconds |
 | `width`, `height` | 1920, 1080 | The movie's size in pixels, rounded down to even numbers. `width` alone gives a 16:9 frame |
 | `bitrate` | 0.2 bits per pixel per frame | Bits per second (12 Mbit/s at 1080p30) |
-| `overlays` | both on | `{ colorbar, triad }`: the field's color bar with ticks in the displayed units, and the x, y, z axes, which turn with the camera in the volume view |
+| `overlays` | all on | `{ colorbar, triad, status }`: the field's color bar with ticks in the displayed units; the x, y, z axes, which turn with the camera in the volume view; and the page's status line (grid, simulation time, point masses, mesh) in the upper left |
 | `download` | true | Hand the file to the browser as a download |
 | `base64` | false | Return the file in the result as `base64` |
 

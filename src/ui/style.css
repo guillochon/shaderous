@@ -229,7 +229,7 @@ details[open] > summary .sum { display: none; }
 #brush line { stroke: #fff; stroke-width: 2; display: none; }
 #brush marker path { fill: #fff; }
 #hud {
-  position: absolute; left: 12px; top: 10px; width: 720px; height: 18px; line-height: 18px;
+  position: absolute; left: 12px; top: 10px; width: min(960px, calc(100% - 110px)); height: 18px; line-height: 18px;
   white-space: nowrap; overflow: hidden; contain: strict;
   color: var(--dim); text-shadow: 0 0 3px #000; pointer-events: none; font-variant-numeric: tabular-nums;
 }

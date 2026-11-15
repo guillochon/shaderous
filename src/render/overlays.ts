@@ -6,6 +6,8 @@ import { sampleColormap } from './transfer';
 export interface OverlayOptions {
   colorbar?: boolean;
   triad?: boolean;
+  /** The page's status line (grid, simulation time, point masses, mesh), upper left. */
+  status?: boolean;
 }
 
 export interface OverlayInfo {
@@ -31,6 +33,8 @@ export interface OverlayInfo {
   twoD: boolean;
   /** The light background: dark text and lines. */
   light: boolean;
+  /** The status line's text. */
+  status?: string;
 }
 
 /** One axis of the triad, in pixels from its origin, y down. */
@@ -154,6 +158,7 @@ export function paintOverlays(g: CanvasRenderingContext2D, w: number, h: number,
   g.lineCap = 'round';
   if (opts.colorbar) paintColorbar(g, w, h, s, info, ink, edge);
   if (opts.triad) paintTriad(g, h, s, info, ink, edge);
+  if (opts.status && info.status) paintStatus(g, w, s, info.status, ink, edge);
   g.restore();
 }
 
@@ -200,6 +205,18 @@ function paintColorbar(g: CanvasRenderingContext2D, w: number, h: number, s: num
   g.textAlign = 'right';
   g.textBaseline = 'bottom';
   label(g, info.title, x1, y0 - px * 0.7, ink, edge, px);
+}
+
+function paintStatus(g: CanvasRenderingContext2D, w: number, s: number, text: string, ink: string, edge: string) {
+  const px = Math.max(10, Math.round(0.024 * s));
+  const m = Math.round(0.03 * s);
+  g.font = `${px}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  g.textAlign = 'left';
+  g.textBaseline = 'top';
+  // Kept clear of the color bar's title on the right.
+  let t = text;
+  while (t.length > 8 && g.measureText(t).width > w - 2 * m - 0.18 * s) t = t.slice(0, t.lastIndexOf('  •  ') > 0 ? t.lastIndexOf('  •  ') : t.length - 2);
+  label(g, t, m, m, ink, edge, px);
 }
 
 function paintTriad(g: CanvasRenderingContext2D, h: number, s: number, info: OverlayInfo, ink: string, edge: string) {

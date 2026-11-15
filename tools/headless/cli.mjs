@@ -40,14 +40,14 @@ Outputs (diag.jsonl and manifest.json are always written)
   --debris             Debris energies and dM/dt at each output, as JSON (problems that track
                        them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py
 
-Movie (--mp4 records the whole run as movie.mp4, with a color bar and axes; not with --every
+Movie (--mp4 records the whole run as movie.mp4, with a color bar, axes and the status line; not with --every
 or --steps; outputs are written at the start and the end)
   --mp4                Record the run as an MP4 movie
   --frame-every N      A frame every N steps (default 1)
   --frame-dt DT        Or a frame near every DT of simulated time (no step is shortened for it)
   --fps F              Playback rate (default 30)
   --width PX --height PX   Movie size (default 1920 x 1080 with --mp4)
-  --no-overlays        Leave out the color bar and the axes
+  --no-overlays        Leave out the color bar, the axes and the status line
 
 Sweeps
   --vary KEY=V1,V2,..  Values of a setup key, repeatable; every combination is run
@@ -227,7 +227,7 @@ async function runOne(session, q, dir) {
       fps: num(o.fps, 'fps'),
       width: num(o.width, 'width') ?? 1920,
       height: num(o.height, 'height') ?? (o.width !== undefined ? undefined : 1080),
-      overlays: { colorbar: !noOverlays, triad: !noOverlays },
+      overlays: { colorbar: !noOverlays, triad: !noOverlays, status: !noOverlays },
       download: false,
       base64: true,
     });

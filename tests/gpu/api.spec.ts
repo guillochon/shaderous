@@ -144,12 +144,14 @@ test('records a movie: an MP4 with the frames and size asked for, and overlays',
   await page.evaluate(() => (window as any).shaderous.ready);
   await call(page, 'load', { problem: 'kelvin-helmholtz', dim: 2, n: 128 });
   // The overlays alone, in a PNG.
-  const png = await call(page, 'screenshot', { width: 640, height: 360, overlays: { colorbar: true, triad: true } });
+  await call(page, 'step', 50);
+  const png = await call(page, 'screenshot', { width: 640, height: 360, overlays: { colorbar: true, triad: true, status: true } });
   await savePng(page, png, 'overlays-2d');
   await call(page, 'view', { mode: 'volume' });
 
   const r = await call(page, 'record', { every: 4, frames: 12, width: 641, height: 361, fps: 24, download: false, base64: true });
   expect(r).toMatchObject({ frames: 12, width: 640, height: 360, steps: 44, stopped: 'frames' });
+  // (from step 50)
   expect(r.seconds).toBeCloseTo(0.5, 6);
   expect(r.name).toMatch(/\.mp4$/);
   const bytes = fromB64(r.base64);

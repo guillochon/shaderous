@@ -129,7 +129,7 @@ export interface RecordOptions {
   height?: number;
   /** Bits per second (default about 0.2 bits per pixel per frame). */
   bitrate?: number;
-  /** The color bar and the triad, both on by default. */
+  /** The color bar, the triad and the status line, all on by default. */
   overlays?: OverlayOptions;
   /** Hand the file to the browser as a download (default true). */
   download?: boolean;
@@ -401,7 +401,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     const ov = opts.overlays;
     try {
       return await drawFresh(s, size, (canvas) => {
-        if (!ov?.colorbar && !ov?.triad) return canvas.toDataURL('image/png');
+        if (!ov?.colorbar && !ov?.triad && !ov?.status) return canvas.toDataURL('image/png');
         const out = document.createElement('canvas');
         out.width = canvas.width;
         out.height = canvas.height;
@@ -436,7 +436,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     const every = opts.dt !== undefined ? 0 : Math.round(opts.every ?? Math.max(1, Math.round(app.stepRate() / 30)));
     // Ten minutes of movie at most: the file is held in memory.
     const maxFrames = Math.min(opts.frames ?? Infinity, fps * 600);
-    const overlays: OverlayOptions = { colorbar: opts.overlays?.colorbar ?? true, triad: opts.overlays?.triad ?? true };
+    const overlays: OverlayOptions = { colorbar: opts.overlays?.colorbar ?? true, triad: opts.overlays?.triad ?? true, status: opts.overlays?.status ?? true };
     const writer = await MovieWriter.open({ width, height, fps, bitrate: opts.bitrate });
     const t0 = performance.now();
     const state = { status: { frames: 0, seconds: 0, t: 0 }, stop: false };

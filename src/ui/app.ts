@@ -125,6 +125,7 @@ side.innerHTML = `
     <div class="io">
       <label class="check" title="A color bar with the field, its unit and its range over the right edge of each frame. With Auto range on its labels follow the data; a fixed range gives a steadier movie"><input id="rec-colorbar" type="checkbox" checked />Color bar</label>
       <label class="check" title="The axes x, y and z in the lower left corner of each frame, turning with the camera"><input id="rec-triad" type="checkbox" checked />Axes</label>
+      <label class="check" title="The status line in the upper left corner of each frame: the grid, the simulation time, point masses and the mesh"><input id="rec-status" type="checkbox" checked />Status</label>
     </div>
   </details>
 
@@ -970,7 +971,7 @@ function bindRecord() {
         fps: +$<HTMLSelectElement>('rec-fps').value,
         width,
         height,
-        overlays: { colorbar: $<HTMLInputElement>('rec-colorbar').checked, triad: $<HTMLInputElement>('rec-triad').checked },
+        overlays: { colorbar: $<HTMLInputElement>('rec-colorbar').checked, triad: $<HTMLInputElement>('rec-triad').checked, status: $<HTMLInputElement>('rec-status').checked },
       })
       .then((r) => {
         notice(`saved ${r.name}: ${r.frames} frames, ${r.seconds.toFixed(1)} s, ${(r.bytes / 1e6).toFixed(1)} MB`);
@@ -3560,19 +3561,33 @@ function tick(now: number) {
       stepRate = ((stepsSubmitted - rateMark.steps) * 1000) / (now - rateMark.time);
       rateMark = { time: now, steps: stepsSubmitted };
     }
-    const pm = lastDiag?.masses ?? [];
-    const acc = pm.reduce((a, m) => a + m.accreted, 0);
-    // In the units the view shows.
-    const u = units();
-    const where = pm.length === 1
-      ? `  •  point mass at r = ${u.fmt(Math.hypot(...pm[0].pos), 'length')}`
-      : pm.length ? `  •  ${pm.length} point masses, separation ${u.fmt(Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])), 'length')}` : '';
-    const took = acc > 0 ? `, accreted ${u.fmt(acc, 'mass')}` : '';
-    const rec = recordProgress;
-    const state = recordingSize ? `recording: ${rec?.frames ?? 0} frames, ${(rec?.seconds ?? 0).toFixed(1)} s of movie` : pending ? 'press Run to load' : finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused';
-    const mesh = s.status();
-    setHud(`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}  •  ${fps.toFixed(0)} fps  •  ${state}${where}${where ? took : ''}${mesh ? '  •  ' + mesh : ''}${toolNotice ? '  •  ' + toolNotice : ''}`);
+    setHud(statusLine(s, true));
   }
+}
+
+/**
+ * The status line: the grid, the simulation time, the point masses and the mesh, in the units
+ * the view shows. `live` adds what only the page has (frame rate, step rate, notices); without
+ * it, the line is the one painted onto a movie's frames.
+ */
+function statusLine(s: Simulation, live: boolean): string {
+  const u = units();
+  const parts = [`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}`];
+  if (live) parts.push(`${fps.toFixed(0)} fps`);
+  if (lastDiag) parts.push(`t = ${u.fmt(lastDiag.t, 'time')}`);
+  if (live) {
+    const rec = recordProgress;
+    parts.push(recordingSize ? `recording: ${rec?.frames ?? 0} frames, ${(rec?.seconds ?? 0).toFixed(1)} s of movie` : pending ? 'press Run to load' : finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused');
+  }
+  const pm = lastDiag?.masses ?? [];
+  const acc = pm.reduce((a, m) => a + m.accreted, 0);
+  const took = acc > 0 ? `, accreted ${u.fmt(acc, 'mass')}` : '';
+  if (pm.length === 1) parts.push(`point mass at r = ${u.fmt(Math.hypot(...pm[0].pos), 'length')}${took}`);
+  else if (pm.length) parts.push(`${pm.length} point masses, separation ${u.fmt(Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])), 'length')}${took}`);
+  const mesh = s.status();
+  if (mesh) parts.push(mesh);
+  if (live && toolNotice) parts.push(toolNotice);
+  return parts.join('  •  ');
 }
 
 /** The page is up: WebGPU found and the first run built (or failed, which window.shaderous reports). */
@@ -3684,6 +3699,7 @@ const api = installApi(
         up,
         twoD: cfg.ndim === 2,
         light: view.light,
+        status: sim ? statusLine(sim, false) : '',
       };
     },
     setRecording(size) {
