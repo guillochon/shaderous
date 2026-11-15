@@ -16,3 +16,5 @@ tools/burn/aprox13.py
 tools/burn/*.pt
 !tools/burn/aprox13_surrogate.pt
 tools/burn/*.npz
+tools/burn/*.json
+tools/burn/pod/
