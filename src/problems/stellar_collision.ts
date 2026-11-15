@@ -123,6 +123,8 @@ export const wdCollisionBurning: Problem = {
     'Two carbon-oxygen white dwarfs colliding, with nuclear burning: a trained neural network of the 13-isotope alpha chain (aprox13) burns the shocked gas. Head-on, two 0.64 M☉ dwarfs detonate where they meet. Masses in solar masses; the impact parameter is the pericenter distance over the sum of the radii (0 is head-on).',
   species: NET_SPECIES,
   burn: (p) => ({ network: 'aprox13', inShocks: p.shockburn > 0.5 }),
+  // An adaptive mesh: 128 cells across at the finest of 3 levels of refinement.
+  grid: { ndim: 3, n: 128, amr: 3 },
   params: [
     { id: 'm1', label: 'Mass 1 (M☉)', title: 'Mass of the first white dwarf, in solar masses (carbon-oxygen white dwarfs are 0.5 to 1.3). Changing it starts the run again', value: 0.64, min: 0.5, max: 1.3, step: 0.01 },
     { id: 'm2', label: 'Mass 2 (M☉)', title: 'Mass of the second white dwarf, in solar masses. Changing it starts the run again', value: 0.64, min: 0.5, max: 1.3, step: 0.01 },
