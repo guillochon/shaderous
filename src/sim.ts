@@ -1092,7 +1092,7 @@ export class Sim implements Simulation {
         this.mhd = await MhdPasses.create(
           {
             device: d, cfg: c, n: this.n, nz: this.nz, params: this.params, clock: this.clock, state: this.state, half: this.pred, slots, comp: k,
-            gfield: this.gfield, bh: this.bh,
+            gfield: this.gfield, bh: this.bh, massFlux: this.massFlux,
           },
           this.redDt.first,
         );
@@ -1451,6 +1451,12 @@ export class Sim implements Simulation {
       if (this.burn) {
         // Burn the step's end state into the other parities (burn/burn.ts).
         this.burn.encode(pass, this.cur, this.speciesCur);
+        if (this.mhd) {
+          // The burnt state is in the other parity; its faces follow it.
+          pass.end();
+          this.mhd.copyFaces(enc, this.cur, 1 - this.cur);
+          pass = beginPass(enc);
+        }
         this.cur = 1 - this.cur;
         this.speciesCur = 1 - this.speciesCur;
       }

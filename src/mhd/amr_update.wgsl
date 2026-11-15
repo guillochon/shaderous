@@ -40,13 +40,19 @@
 @group(0) @binding(16) var W2: texture_3d<f32>;
 @group(0) @binding(17) var W3: texture_3d<f32>;
 @group(0) @binding(28) var IDX: texture_3d<u32>;
-@group(0) @binding(19) var G: texture_3d<f32>;    // the gravity field atlas: acceleration, potential in w (ghosts included)
+@group(0) @binding(19) var G: texture_3d<f32>;
+// With species: stage 2 records the block's own mass flux through each of its faces, before any
+// matching at refinement boundaries (amr/species.wgsl matches the species' itself), in the
+// layout of amr/species_index.wgsl. A placeholder without species.
+@group(0) @binding(12) var<storage, read_write> MF: array<f32>;
+override SPECIES_FLUX: bool = false;    // the gravity field atlas: acceleration, potential in w (ghosts included)
 
 override STAGE: u32 = 1u;
 
 #include "mhd/state.wgsl"
 #include "mhd/amr_block.wgsl"
 #include "gravity/ext_bind.wgsl"
+#include "amr/species_index.wgsl"
 struct NewState { u1: vec4<f32>, u2: vec4<f32> }
 #include "hydro/cooling.wgsl"
 
@@ -362,6 +368,15 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     }
   }
   let x = atl(g_o, t);
+  if (SPECIES_FLUX && STAGE == 2u && !g_deposit) {
+    for (var a = 0; a < naxes(); a++) {
+      var ok = t[a] <= top[a];
+      for (var b = 0; b < 3; b++) {
+        if (b != a && t[b] >= top[b]) { ok = false; }
+      }
+      if (ok) { MF[mf_index(g_slot, t, a)] = FL[flux_entry(inv.row, a, t)].x; }
+    }
+  }
   textureStore(OB, x, vec4<f32>(bout, 0.0));
   if (STAGE == 2u) { textureStore(OC, x, vec4<f32>(cout, 0.0)); }
 

@@ -37,8 +37,8 @@ Phase 4 progress (2026-11-14), as section 7b designs it: parts A (gravity, point
 sinks and cooling on the uniform grid), B (the same on blocks; time bins pause while self-gravity
 or point masses act on a field) and C (dipole and random fields inside stars, the polytrope's
 "Dipole field" and "Random field" variants) are done, with the magnetized polytrope staying at
-rest (`mhd-star-fields`). Still to do: species (D), viscosity and conduction (E), and time bins
-with self-gravity and a field.
+rest (`mhd-star-fields`), and D (species and burning carried with a field, `mhd-species`).
+Still to do: viscosity and conduction (E), and time bins with self-gravity and a field.
 
 Phase 5 (field lines) done (2026-11-14), ahead of phase 4: numerics.md section 21, Field lines.
 Changes from section 10:

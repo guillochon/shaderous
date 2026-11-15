@@ -26,8 +26,7 @@ export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/
  * sources and the adaptive mesh come in later phases of docs/mhd-plan.md.
  */
 export function mhdUnsupported(c: SimConfig): string | null {
-  // Gravity, point masses and cooling act on a field (docs/mhd-plan.md 7b).
-  if (c.problem.species?.length) return 'species are not carried with a magnetic field yet';
+  // Gravity, point masses, cooling and species act on a field (docs/mhd-plan.md 7b).
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not coupled to the magnetic field yet';
   return null;
 }
@@ -135,6 +134,8 @@ interface MhdDeps {
   /** gravity: self-gravity's field texture, and the point masses (mhd/update.wgsl) */
   gfield: GPUTexture;
   bh: GPUBuffer;
+  /** with species: the face mass fluxes the species pass reads (hydro/species.wgsl) */
+  massFlux?: GPUBuffer;
 }
 
 /**
@@ -243,7 +244,7 @@ export class MhdPasses {
       computePipeline(d, assemble('mhd/emf.wgsl', edgeSlots), 'edge impulses 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/emf.wgsl', edgeSlots), 'edge impulses 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 1', { STAGE: 1 }),
-      computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 2', { STAGE: 2 }),
+      computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 2', { STAGE: 2, SPECIES_FLUX: this.dep.massFlux ? 1 : 0 }),
       computePipeline(d, assemble('mhd/rates.wgsl', slots), 'MHD timestep rates'),
       Reducer.create(
         d,
@@ -285,7 +286,7 @@ export class MhdPasses {
         perSlab((sb) =>
           bindGroup(d, pipe, {
             0: params, 1: clock, ...start, ...fl, 8: this.emf, ...out, 12: v(h[0]), 13: v(h[1]), 14: sb, 15: v(this.comps[p]), 16: v(this.comps[o]), ...comp,
-            17: v(this.dep.gfield), 20: this.dep.bh,
+            17: v(this.dep.gfield), 20: this.dep.bh, 18: this.dep.massFlux ?? this.noFlux(),
           }),
         );
       this.gUpdate.push([
@@ -298,6 +299,13 @@ export class MhdPasses {
 
   private dispatch(pass: GPUComputePassEncoder, dims: number[]) {
     pass.dispatchWorkgroups(Math.ceil(dims[0] / 8), Math.ceil(dims[1] / 8), Math.ceil(dims[2] / 4));
+  }
+
+  /** Without species, the update's mass-flux binding: one word that nothing reads. */
+  private placeholderFlux?: GPUBuffer;
+  private noFlux(): GPUBuffer {
+    this.placeholderFlux ??= this.dep.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
+    return this.placeholderFlux;
   }
 
   /**

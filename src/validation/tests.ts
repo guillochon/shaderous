@@ -2945,6 +2945,62 @@ export const TESTS: TestDef[] = [
       return { pass, metrics: m };
     },
   },
+  {
+    id: 'mhd-species',
+    name: 'Species carried with the gas in a magnetic field (2D, uniform 128^2 and blocks 128 finest, 1 level)',
+    criterion:
+      'The species test\'s bump carried twice around the box, in a uniform field along x (beta 4): mass fractions stay in [0, 1] and sum to 1 within 1e-5, each species keeps its mass within 1e-5 of the total, and the smooth species returns at least as accurately as the passive scalar carrying the same profile, which the MHD fluxes carry; on the uniform grid and on blocks. |div B| dx / max |B| below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const prob: Problem = { ...speciesCarry(0), id: 'species-field', mhd: { face: () => (axis) => (axis === 0 ? Math.sqrt(2 / 4) : 0) } };
+      const mass = (X: Float32Array[], u1: Float32Array) => X.map((x) => x.reduce((s, v, q) => s + v * u1[4 * q], 0));
+      const measure = async (tag: string, read: () => Promise<{ X: Float32Array[]; u1: Float32Array; u2: Float32Array }>, go: () => Promise<unknown>, d: () => Promise<Diagnostics>) => {
+        const s0 = await read();
+        const m0 = mass(s0.X, s0.u1);
+        await go();
+        const s1 = await read();
+        const m1 = mass(s1.X, s1.u1);
+        const cells = s1.u1.length / 4;
+        let sumErr = 0;
+        let lo = Infinity;
+        let hi = -Infinity;
+        let l1 = 0;
+        let l1s = 0;
+        for (let q = 0; q < cells; q++) {
+          let s = 0;
+          for (const x of s1.X) {
+            s += x[q];
+            lo = Math.min(lo, x[q]);
+            hi = Math.max(hi, x[q]);
+          }
+          sumErr = Math.max(sumErr, Math.abs(s - 1));
+          l1 += Math.abs(s1.X[0][q] - s0.X[0][q]) / cells;
+          l1s += Math.abs(s1.u2[4 * q + 2] / s1.u1[4 * q] - s0.X[0][q]) / cells;
+        }
+        const massErr = Math.max(...m0.map((v, i) => Math.abs(m1[i] - v))) / m0.reduce((a, b) => a + b, 0);
+        m[`${tag}_sum_error`] = sumErr;
+        m[`${tag}_min_fraction`] = lo;
+        m[`${tag}_max_fraction`] = hi;
+        m[`${tag}_species_mass_drift`] = massErr;
+        m[`${tag}_smooth_species_l1`] = l1;
+        m[`${tag}_passive_scalar_l1`] = l1s;
+        m[`${tag}_divB`] = (await d()).magnetic!.divB;
+        pass &&= sumErr < 1e-5 && lo >= 0 && hi <= 1 + 1e-6 && massErr < 1e-5 && l1 <= l1s * 1.05 && m[`${tag}_divB`] < 1e-6;
+      };
+      await withSim(gpu, prob, 128, { ndim: 2 }, (sim) =>
+        measure('uniform', async () => ({ X: await sim.readSpecies(), ...(await sim.readState()) }), () => sim.runToEnd(64), () => sim.diagnostics()),
+      );
+      // On blocks, the leaves in the tree's order, the same for every read (the mesh may change).
+      await withAmr(gpu, prob, 128, { ndim: 2, amrLevels: 1, refineHi: 2 }, (sim) =>
+        measure('blocks', async () => {
+          const c = await sim.readLeaves();
+          return { X: await sim.readLeafSpecies(), u1: c.u1, u2: c.u2 };
+        }, () => sim.runToEnd(64), () => sim.diagnostics()),
+      );
+      return { pass, metrics: m };
+    },
+  },
 ];
 
 export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {

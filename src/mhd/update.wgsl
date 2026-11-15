@@ -55,6 +55,11 @@
 @group(0) @binding(15) var BC: texture_3d<f32>;   // compensations of the faces at the start
 @group(0) @binding(16) var OC: texture_storage_3d<rgba32float, write>;   // new ones (stage 2)
 @group(0) @binding(17) var G: texture_3d<f32>;   // self-gravity's field: acceleration, potential in w
+// With species: stage 2 records each face's mass flux for the species pass (hydro/species.wgsl;
+// the layout of hydro/species_on.wgsl's MF: face (axis, c) the lower face of cell c along it, c
+// up to dims inclusive). A placeholder without species.
+@group(0) @binding(18) var<storage, read_write> MF: array<f32>;
+override SPECIES_FLUX: bool = false;
 
 override STAGE: u32 = 1u;
 
@@ -176,6 +181,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   textureStore(OB, t, vec4<f32>(bout, 0.0));
   if (STAGE == 2u) { textureStore(OC, t, vec4<f32>(cout, 0.0)); }
+  if (SPECIES_FLUX && STAGE == 2u) {
+    // The mass flux through each face this texel's lower faces are, along the axes in use.
+    let nm = vec3<u32>(P.dims.xyz) + 1u;
+    for (var a = 0; a < axes; a++) {
+      var ok = t[a] <= n[a];
+      for (var b = 0; b < 3; b++) {
+        if (b != a && t[b] >= n[b]) { ok = false; }
+      }
+      if (ok) {
+        let u = vec3<u32>(t);
+        MF[((u.z * nm.y + u.y) * nm.x + u.x) * 3u + u32(a)] = flux_at(a, t).a.x;
+      }
+    }
+  }
 
   if (any(t >= n)) { return; }
   // The cell.

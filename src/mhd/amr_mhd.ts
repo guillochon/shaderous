@@ -40,6 +40,8 @@ interface Deps {
   /** gravity: the field atlas (acceleration, potential), and the point masses */
   gfield: GPUTexture;
   bh: GPUBuffer;
+  /** with species: the leaves' face mass fluxes the species pass reads (amr/species.wgsl) */
+  massFlux?: GPUBuffer;
   cfg: SimConfig;
   cap: number;
   /** a new atlas texture the size of the state's */
@@ -215,7 +217,7 @@ export class AmrMhd {
       computePipeline(d, assemble('mhd/amr_emf.wgsl', slots), 'MHD block edges 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/amr_emf.wgsl', slots), 'MHD block edges 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/amr_update.wgsl', slots), 'MHD block update 1', { STAGE: 1 }),
-      computePipeline(d, assemble('mhd/amr_update.wgsl', slots), 'MHD block update 2', { STAGE: 2 }),
+      computePipeline(d, assemble('mhd/amr_update.wgsl', slots), 'MHD block update 2', { STAGE: 2, SPECIES_FLUX: this.dep.massFlux ? 1 : 0 }),
       Reducer.create(
         d,
         [this.dep.cap * BS, BS, this.ndim === 2 ? 1 : BS],
@@ -289,6 +291,7 @@ export class AmrMhd {
               ...c0, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
               6: this.scratch, 7: this.register, 8: v(this.emf), ...outs, 13: v(this.comps[o]), 14: c,
               15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
+              12: this.dep.massFlux ?? this.noFlux(),
             }),
           );
         return {
@@ -334,6 +337,13 @@ export class AmrMhd {
   encodeFull(pass: GPUComputePassEncoder, parity: number, assembleDispatch: () => void, timestep: () => void) {
     this.encode(pass, parity, assembleDispatch, timestep);
     this.encodeCommitFaces(pass, parity);
+  }
+
+  /** Without species, the update's mass-flux binding: one word that nothing reads. */
+  private placeholderFlux?: GPUBuffer;
+  private noFlux(): GPUBuffer {
+    this.placeholderFlux ??= this.dep.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
+    return this.placeholderFlux;
   }
 
   /** Every leaf's faces (and compensations) from the other parity into `parity`. */

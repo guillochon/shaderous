@@ -504,7 +504,7 @@ export class AmrSim implements Simulation {
         device: d, cfg, cap: sim.cap,
         texture: (label) => tex3d(d, side, 'rgba32float', label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg,
-        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh,
+        state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFlux,
         bins: { A: sim.bins, LL: sim.listEnd, LU: sim.listUpd, LD: sim.listDep, args: sim.binArgs },
       });
     }
@@ -733,7 +733,9 @@ export class AmrSim implements Simulation {
     const per = (f: (p: number, q: number) => GPUBindGroup) => [0, 1].map((p) => [0, 1].map((q) => f(p, q)));
     this.gSpecies = [
       per((_p, q) => bindGroup(d, pA, { 0: this.params, 3: v(this.species[q]), 4: v(this.speciesX!), 30: this.bt, 31: this.listLeaf })),
-      per(() => bindGroup(d, pP, { 0: this.params, 1: this.clock, 2: v(this.prim[0]), 4: sx, 5: v(this.speciesHalf!), 30: this.bt, 31: this.listLeaf })),
+      // The velocities with their ghosts: the hydro assembly's, or with a field the MHD
+      // assembly's (the same layout; as the species pass runs after the step, the half step's).
+      per(() => bindGroup(d, pP, { 0: this.params, 1: this.clock, 2: v(this.mhd?.prim ?? this.prim[0]), 4: sx, 5: v(this.speciesHalf!), 30: this.bt, 31: this.listLeaf })),
       per((p, q) =>
         bindGroup(d, pM, {
           0: this.params, 1: this.clock, 3: v(this.state[p][1]), 4: v(this.state[1 - p][0]), 5: v(this.species[q]), 6: v(this.species[1 - q]),
@@ -762,6 +764,8 @@ export class AmrSim implements Simulation {
     if (!this.burn) return;
     const pass = beginPass(enc);
     this.burn.encode(pass, this.cur, this.speciesCur);
+    // With a field: the burnt state is in the other parity, and the leaves' faces follow it.
+    this.mhd?.encodeCommitFaces(pass, 1 - this.cur);
     pass.end();
     this.cur = 1 - this.cur;
     this.speciesCur = 1 - this.speciesCur;
@@ -1635,6 +1639,8 @@ export class AmrSim implements Simulation {
             mp.dispatchWorkgroups(1);
           },
         );
+        // The species move with the mass fluxes the update recorded (amr/species.wgsl).
+        this.encodeSpecies(mp, p);
         mp.end();
         if (this.fieldOn) {
           // Self-gravity or point masses: as for the gas alone below, the second half kick
@@ -1651,6 +1657,7 @@ export class AmrSim implements Simulation {
         } else {
           this.cur = 1 - p;
         }
+        this.encodeBurn(enc);
         this.stepsSinceFlag++;
         if (this.encodeFlags(enc)) {
           done++;
