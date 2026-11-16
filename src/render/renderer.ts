@@ -74,6 +74,8 @@ export interface ViewState {
 /** The background behind the box: dark, or white with `light`. */
 const BG_DARK = [0.05, 0.058, 0.078];
 const BG_LIGHT = [1, 1, 1];
+/** The view's background as a CSS color, to paint around a picture of it. */
+export const backgroundCss = (light: boolean) => `rgb(${(light ? BG_LIGHT : BG_DARK).map((c) => Math.round(c * 255)).join(',')})`;
 
 /** Floats per line vertex: position (box units, centered), color with alpha. */
 const LINE_FLOATS = 7;

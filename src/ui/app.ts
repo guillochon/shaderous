@@ -20,7 +20,7 @@ import { defaultFrameDt } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
-import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
+import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
 import type { PointMass } from '../problems/types';
@@ -82,8 +82,10 @@ side.innerHTML = `
     <div class="io">
       <label class="check" title="Start each problem playing as soon as it loads, and play a finished run again on Reset. Off, a run waits for Play"><input id="autoplay" type="checkbox" />Autoplay</label>
       <label class="check" title="Load the simulation as soon as a setting that needs a new one changes: the problem, the grid, a parameter of the initial conditions. Off, such changes wait until you press Run, so several can be made before a large grid is set up once"><input id="autoload" type="checkbox" />Autoload</label>
-      <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
+    </div>
+    <div class="io state-io">
       <button id="import" title="Load a state from an .athdf file: one saved here, or another code's with density, velocity and pressure">Import state</button>
+      <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
       <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
     </div>
   </section>
@@ -125,7 +127,8 @@ side.innerHTML = `
     </div>
     <div class="g3">
       ${field('Playback', select('rec-fps', opt(60, '60 fps') + opt(30, '30 fps') + opt(24, '24 fps')), '', 'Frames per second of the movie when played: sets its length, not which steps are recorded')}
-      ${field('Size', select('rec-size', opt('view', 'As the view') + opt('1280x720', '720p') + opt('1920x1080', '1080p') + opt('2560x1440', '1440p') + opt('3840x2160', '4K')), '', 'Pixels of each frame. As the view records the view area exactly as the page draws it, at its size and framing')}
+      ${field('Size', select('rec-size', opt('view', 'As the view') + opt('1280x720', '720p') + opt('1920x1080', '1080p') + opt('2560x1440', '1440p') + opt('3840x2160', '4K')), '', 'Pixels of each frame. As the view records the box as the page draws it, at its size and framing, with a small margin and room beside it for the axes and the color bar: not the empty sides of a wide window')}
+      ${field('Bitrate', select('rec-bitrate', opt('auto', 'Auto') + [4, 8, 16, 32, 64, 100].map((m) => opt(m, `${m} Mbit/s`)).join('')), '', 'Megabits per second of movie: more gives a cleaner picture and a larger file, about 7.5 MB per minute for each Mbit/s. Auto takes 0.2 bits per pixel per frame (25 Mbit/s at 1080p and 60 fps), enough that smooth color gradients do not band')}
     </div>
     <div class="io">
       <label class="check" title="A color bar with the field, its unit and its range over the right edge of each frame. With Auto range on its labels follow the data; a fixed range gives a steadier movie"><input id="rec-colorbar" type="checkbox" checked />Color bar</label>
@@ -1036,6 +1039,8 @@ function bindRecord() {
       setHud('Movie: the frame interval must be more than 0');
       return;
     }
+    // Auto: no bitrate given, so the movie takes its default for the size and the frame rate.
+    const mbit = +$<HTMLSelectElement>('rec-bitrate').value;
     const wasRunning = running;
     recordProgress = null;
     api
@@ -1044,6 +1049,7 @@ function bindRecord() {
         fps: +$<HTMLSelectElement>('rec-fps').value,
         width,
         height,
+        bitrate: mbit > 0 ? mbit * 1e6 : undefined,
         overlays: { colorbar: $<HTMLInputElement>('rec-colorbar').checked, triad: $<HTMLInputElement>('rec-triad').checked, status: $<HTMLInputElement>('rec-status').checked },
       })
       .then((r) => {
@@ -4168,6 +4174,37 @@ const api = installApi(
     view,
     canvas,
     viewSize: () => [canvas.width, canvas.height] as [number, number],
+    viewBounds() {
+      const w = canvas.clientWidth;
+      const h = canvas.clientHeight;
+      if (!(w > 0 && h > 0)) return null;
+      if (flatView()) {
+        // The box is a square, as locate() maps the canvas onto it.
+        const { span, shift } = sliceLayout();
+        const side = span * view.zoom;
+        const x0 = w / 2 - shift - view.cx * side;
+        const y0 = h / 2 - (1 - view.cy) * side;
+        return [x0 / w, y0 / h, (x0 + side) / w, (y0 + side) / h];
+      }
+      // The volume: the box's eight corners, as the camera projects them.
+      const f = cameraFrame(view, w / h);
+      const b: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
+      for (let i = 0; i < 8; i++) {
+        const rel = [0, 1, 2].map((k) => ((i >> k) & 1) - 0.5 - f.eye[k]);
+        const along = (v: number[]) => rel[0] * v[0] + rel[1] * v[1] + rel[2] * v[2];
+        const z = along(f.fwd);
+        // A corner beside or behind the camera has no place on the screen.
+        if (z < 0.05) return null;
+        const x = (along(f.right) / (z * (w / h) * f.tan) + 1) / 2;
+        const y = (1 - along(f.up) / (z * f.tan)) / 2;
+        b[0] = Math.min(b[0], x);
+        b[1] = Math.min(b[1], y);
+        b[2] = Math.max(b[2], x);
+        b[3] = Math.max(b[3], y);
+      }
+      return b;
+    },
+    background: () => backgroundCss(view.light),
     resolutions: () => ({ 2: RES_2D, 3: RES_3D, uniformMax: { 2: uniformMax(2), 3: uniformMax(3) } }),
     async idle() {
       let q: Promise<void>;

@@ -19,6 +19,60 @@ export function movieSize(width: number, height: number, max = 4096): [number, n
   return [side(width), side(height)];
 }
 
+/** Where a drawn frame goes in a movie's frame: the part of it taken, and where that part lands. */
+export interface FrameLayout {
+  width: number;
+  height: number;
+  /** The part of the drawn frame taken, in its pixels. */
+  sx: number;
+  sy: number;
+  sw: number;
+  sh: number;
+  /** Where it lands in the movie's frame. */
+  dx: number;
+  dy: number;
+  dw: number;
+  dh: number;
+}
+
+/**
+ * A movie frame around the picture alone: of a frame drawn `rw` x `rh` pixels, the part within
+ * `bounds` (the picture's left, top, right and bottom as fractions of the drawn frame; they may
+ * lie outside it, where the picture runs off), with a small margin on each side where the picture
+ * ends inside the drawn frame, and at the left and right at least the room `gutters` asks for
+ * given the movie's height (for the axes and the color bar). Scaled down to fit `max` a side.
+ */
+export function frameLayout(
+  rw: number,
+  rh: number,
+  bounds: [number, number, number, number] | null,
+  gutters: (height: number) => { left: number; right: number },
+  max = 4096,
+): FrameLayout {
+  const b = bounds ?? [0, 0, 1, 1];
+  const clamp = (v: number, hi: number) => Math.max(0, Math.min(hi, v));
+  let sx = clamp(Math.floor(b[0] * rw), rw);
+  let sy = clamp(Math.floor(b[1] * rh), rh);
+  let ex = clamp(Math.ceil(b[2] * rw), rw);
+  let ey = clamp(Math.ceil(b[3] * rh), rh);
+  // Nothing of the picture in the frame: the whole frame.
+  if (!(ex - sx >= 16 && ey - sy >= 16)) [sx, sy, ex, ey] = [0, 0, rw, rh];
+  const sw = ex - sx;
+  const sh = ey - sy;
+  const m = Math.max(4, Math.round(0.02 * Math.min(sw, sh)));
+  // No margin on a side the picture is cut at.
+  const top = sy > 0 ? m : 0;
+  const bottom = ey < rh ? m : 0;
+  const g = gutters(sh + top + bottom);
+  const left = Math.max(sx > 0 ? m : 0, Math.ceil(g.left));
+  const right = Math.max(ex < rw ? m : 0, Math.ceil(g.right));
+  const w = left + sw + right;
+  const h = top + sh + bottom;
+  const k = Math.min(1, max / w, max / h);
+  const [width, height] = movieSize(w * k, h * k, max);
+  return { width, height, sx, sy, sw, sh, dx: Math.round(left * k), dy: Math.round(top * k), dw: Math.round(sw * k), dh: Math.round(sh * k) };
+}
+
 /** The default bitrate: smooth color-mapped gradients band at the usual web bitrates. */
 export const defaultBitrate = (width: number, height: number, fps: number) => Math.round(0.2 * width * height * fps);
 

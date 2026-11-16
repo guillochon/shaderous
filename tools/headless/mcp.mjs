@@ -208,16 +208,18 @@ const TOOLS = [
       fps: { type: 'number', minimum: 1, maximum: 240, description: 'Playback rate (default 60)' },
       width: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1920' },
       height: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1080 (9/16 of width when width is given)' },
+      bitrate_mbps: { type: 'number', exclusiveMinimum: 0, description: 'Megabits per second of movie (default 0.2 bits per pixel per frame: 25 at 1080p and 60 fps)' },
       colorbar: { type: 'boolean', description: 'Default true' },
       axes: { type: 'boolean', description: 'Default true' },
       status: { type: 'boolean', description: 'The status line (grid, simulation time, point masses, mesh). Default true' },
       timeout_s: { type: 'number', description: 'Give up after this much wall time, keeping what was recorded' },
     }),
-    async run({ path: p, every, dt, until, frames, fps, width, height, colorbar = true, axes = true, status = true, timeout_s }) {
+    async run({ path: p, every, dt, until, frames, fps, width, height, bitrate_mbps, colorbar = true, axes = true, status = true, timeout_s }) {
       if (until === undefined && frames === undefined) throw new Error('give `until` or `frames`, so that the movie ends');
       const m = await call('record', {
         ...(every !== undefined ? { every } : dt !== undefined ? { dt } : {}),
         until, frames, fps, width: width ?? 1920, height: height ?? (width === undefined ? 1080 : undefined),
+        bitrate: bitrate_mbps === undefined ? undefined : bitrate_mbps * 1e6,
         overlays: { colorbar, triad: axes, status },
         timeoutMs: timeout_s === undefined ? undefined : timeout_s * 1000,
         download: false,

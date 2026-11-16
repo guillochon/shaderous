@@ -147,6 +147,34 @@ export function normalOutOfScreen(sliceAxis: number): boolean {
   return sliceAxis !== 1;
 }
 
+/**
+ * The room the overlays take at the left (the triad) and the right (the color bar) of a frame
+ * whose shorter side is `s` pixels, as paintTriad() and paintColorbar() lay them out: a frame
+ * with this much beside the picture keeps them off it. `measure` gives the width of the color
+ * bar's title at a font size; without it the width is estimated.
+ */
+export function overlayGutters(s: number, info: Pick<OverlayInfo, 'mode' | 'twoD' | 'title'>, opts: OverlayOptions, measure?: (text: string, px: number) => number): { left: number; right: number } {
+  const px = Math.max(10, Math.round(0.024 * s));
+  const edge = Math.round(0.04 * s);
+  let left = 0;
+  let right = 0;
+  if (opts.triad) {
+    const len = Math.round(0.07 * s);
+    const reach = info.mode === 'volume' && !info.twoD ? len + px : px;
+    // The origin, an arrow, and its label.
+    left = edge + reach + len + 1.35 * px + 0.5 * px;
+  }
+  if (opts.colorbar) {
+    const barW = Math.max(6, Math.round(0.022 * s));
+    // The bar, its ticks, and labels as long as "1.23×10⁻⁵".
+    const ticks = edge + barW + Math.round(barW * 0.45) + 0.35 * px + 4.5 * px;
+    // The title, flush with the bar's right edge: a long one may still reach over the picture.
+    const title = edge + (measure ? measure(info.title, px) : 0.55 * px * info.title.length);
+    right = Math.max(ticks, Math.min(title, 0.3 * s)) + 0.5 * px;
+  }
+  return { left: Math.ceil(left), right: Math.ceil(right) };
+}
+
 /** Paint the overlays asked for onto a frame `w` x `h` pixels. */
 export function paintOverlays(g: CanvasRenderingContext2D, w: number, h: number, info: OverlayInfo, opts: OverlayOptions) {
   // Sizes follow the frame's shorter side, so a 4K movie's labels look as large as a 720p one's.

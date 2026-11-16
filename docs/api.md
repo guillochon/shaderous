@@ -337,7 +337,7 @@ and paused when the recording ends. Options:
 | `timeoutMs` | | Stop after this much wall time |
 | `every` | | Or a frame every this many steps |
 | `fps` | 60 | Playback rate. It only sets the frames' timestamps: frame i is shown at i / fps seconds |
-| `width`, `height` | the view's | The movie's size in pixels, rounded down to even numbers. Without either, the view area as the page draws it, framed as on the page (1920 x 1080 when the page has no layout). `width` alone gives a 16:9 frame |
+| `width`, `height` | the view's | The movie's size in pixels, rounded down to even numbers. Without either, the part of the view area the box takes when the recording starts, at the page's pixels, with a small margin and, when the axes or the color bar are on, room for them at the left and the right: the empty sides of a wide window are left out, and where the box runs off the view area the frame ends with it (1920 x 1080 when the page has no layout). `width` alone gives a 16:9 frame |
 | `bitrate` | 0.2 bits per pixel per frame | Bits per second (25 Mbit/s at 1080p60) |
 | `overlays` | all on | `{ colorbar, triad, status }`: the field's color bar with ticks in the displayed units; the x, y, z axes, which turn with the camera in the volume view; and the page's status line (grid, simulation time, point masses, mesh) in the upper left |
 | `download` | true | Hand the file to the browser as a download |

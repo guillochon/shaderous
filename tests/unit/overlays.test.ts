@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { colorbarTicks, formatValue, normalOutOfScreen, PLANE_AXES, triadArrows } from '../../src/render/overlays';
+import { colorbarTicks, formatValue, normalOutOfScreen, overlayGutters, PLANE_AXES, triadArrows } from '../../src/render/overlays';
 import { cameraFrame, defaultView } from '../../src/render/renderer';
-import { defaultBitrate, movieSize } from '../../src/io/movie';
+import { defaultBitrate, frameLayout, movieSize } from '../../src/io/movie';
 
 describe('color bar ticks', () => {
   it('keeps both ends and puts round values between', () => {
@@ -96,5 +96,39 @@ describe('movie size', () => {
     expect(movieSize(1921, 1081)).toEqual([1920, 1080]);
     expect(movieSize(9000, 3, 4096)).toEqual([4096, 16]);
     expect(defaultBitrate(1920, 1080, 30)).toBe(12441600);
+  });
+});
+
+describe('movie frame around the picture', () => {
+  const none = () => ({ left: 0, right: 0 });
+  it('takes the picture with a small margin, not the empty sides of a wide frame', () => {
+    // A square picture in the middle of a wide frame.
+    const l = frameLayout(2000, 1000, [0.265, 0.03, 0.735, 0.97], none);
+    expect([l.sx, l.sy, l.sw, l.sh]).toEqual([530, 30, 940, 940]);
+    expect([l.dx, l.dy, l.dw, l.dh]).toEqual([19, 19, 940, 940]);
+    expect([l.width, l.height]).toEqual([978, 978]);
+  });
+  it('makes room beside the picture for the overlays', () => {
+    const l = frameLayout(2000, 1000, [0.265, 0.03, 0.735, 0.97], (h) => ({ left: 0.2 * h, right: 0.1 * h }));
+    expect(l.dx).toBe(196);
+    expect(l.width).toBe(196 + 940 + 98);
+  });
+  it('leaves no margin where the picture runs off the frame, and takes it all when there are no bounds', () => {
+    const l = frameLayout(1000, 800, [-0.5, -0.2, 1.5, 1.2], none);
+    expect(l).toMatchObject({ width: 1000, height: 800, sx: 0, sy: 0, sw: 1000, sh: 800, dx: 0, dy: 0 });
+    expect(frameLayout(1000, 800, null, none)).toMatchObject({ width: 1000, height: 800, sw: 1000, sh: 800 });
+  });
+  it('scales down to the largest side allowed', () => {
+    const l = frameLayout(8000, 4000, null, none, 4096);
+    expect([l.width, l.height, l.dw, l.dh]).toEqual([4096, 2048, 4096, 2048]);
+  });
+  it('asks for room only for the overlays shown, more for the triad of a volume', () => {
+    const info = { mode: 'plane' as const, twoD: true, title: 'Density' };
+    expect(overlayGutters(1000, info, {})).toEqual({ left: 0, right: 0 });
+    const plane = overlayGutters(1000, info, { triad: true, colorbar: true });
+    expect(plane.left).toBeGreaterThan(150);
+    expect(plane.right).toBeGreaterThan(150);
+    expect(plane.right).toBeLessThan(330);
+    expect(overlayGutters(1000, { ...info, mode: 'volume', twoD: false }, { triad: true }).left).toBeGreaterThan(plane.left);
   });
 });

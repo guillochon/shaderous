@@ -47,6 +47,8 @@ or --steps; outputs are written at the start and the end)
                        default a 600th of the problem's dynamical time
   --frame-every N      Or a frame every N steps
   --fps F              Playback rate (default 60)
+  --bitrate M          Megabits per second of movie (default 0.2 bits per pixel
+                       per frame: 25 at 1080p and 60 fps)
   --width PX --height PX   Movie size (default 1920 x 1080 with --mp4)
   --no-overlays        Leave out the color bar, the axes and the status line
 
@@ -72,7 +74,7 @@ const { values: o, positionals } = parseArgs({
     view: { type: 'string', multiple: true },
     slice: { type: 'string', multiple: true }, 'slice-axis': { type: 'string' }, 'slice-pos': { type: 'string' }, 'slice-res': { type: 'string' },
     athdf: { type: 'boolean' }, debris: { type: 'boolean' },
-    mp4: { type: 'boolean' }, 'frame-every': { type: 'string' }, 'frame-dt': { type: 'string' }, fps: { type: 'string' }, 'no-overlays': { type: 'boolean' },
+    mp4: { type: 'boolean' }, 'frame-every': { type: 'string' }, 'frame-dt': { type: 'string' }, fps: { type: 'string' }, bitrate: { type: 'string' }, 'no-overlays': { type: 'boolean' },
     vary: { type: 'string', multiple: true },
     url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' }, quiet: { type: 'boolean' },
     'gpu-memory': { type: 'string' },
@@ -160,7 +162,7 @@ async function runOne(session, q, dir) {
   if (every !== undefined && until == null) fail('--every needs --until (or a problem with an end time)');
   const timeoutMs = o.timeout === undefined ? undefined : num(o.timeout, 'timeout') * 1000;
   if (o.mp4 && (every !== undefined || steps !== undefined)) fail('--mp4 records the whole run: give --until, not --every or --steps');
-  if (!o.mp4 && (o['frame-every'] || o['frame-dt'] || o.fps || o['no-overlays'])) fail('--frame-every, --frame-dt, --fps and --no-overlays go with --mp4');
+  if (!o.mp4 && (o['frame-every'] || o['frame-dt'] || o.fps || o.bitrate || o['no-overlays'])) fail('--frame-every, --frame-dt, --fps, --bitrate and --no-overlays go with --mp4');
   if (o['frame-every'] !== undefined && o['frame-dt'] !== undefined) fail('give --frame-every or --frame-dt, not both');
 
   const d0 = await call('describe');
@@ -229,6 +231,7 @@ async function runOne(session, q, dir) {
       until,
       timeoutMs,
       fps: num(o.fps, 'fps'),
+      bitrate: o.bitrate === undefined ? undefined : num(o.bitrate, 'bitrate') * 1e6,
       width: num(o.width, 'width') ?? 1920,
       height: num(o.height, 'height') ?? (o.width !== undefined ? undefined : 1080),
       overlays: { colorbar: !noOverlays, triad: !noOverlays, status: !noOverlays },

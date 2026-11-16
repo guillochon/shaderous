@@ -18,7 +18,7 @@ import { FAMILIES, FIELDS, GRAVITY_MODES } from '../problems';
 import { defaultFrameDt, problemUnits } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
-import { paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
+import { overlayGutters, paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
 import { download } from '../io/checkpoints';
 import { BUILD, errorLog } from './errors';
 
@@ -63,6 +63,14 @@ export interface AppHooks {
   rangedByDrawing(d: Diagnostics): boolean;
   /** The view area's size as the page draws it, in pixels (0 x 0 without a layout). */
   viewSize(): [number, number];
+  /**
+   * The simulation box as the page draws it: its left, top, right and bottom as fractions of the
+   * view area, outside 0 to 1 where it runs off. Null when it cannot be told (no layout, or the
+   * camera is inside the box).
+   */
+  viewBounds(): [number, number, number, number] | null;
+  /** The view's background, as a CSS color. */
+  background(): string;
   athdf(): Promise<{ time: number; bytes: Uint8Array; stem: string }>;
   setColormap(name: string): void;
   setAutoRange(on: boolean): void;
@@ -563,23 +571,40 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     if (opts.dt !== undefined && !(opts.dt > 0)) throw new Error('`dt` is a time interval, more than 0');
     if (opts.frames !== undefined && !(opts.frames >= 1)) throw new Error('`frames` is a number of frames, 1 or more');
     // The encoder and muxer load with the first recording.
-    const { MovieWriter, movieSize } = await import('../io/movie');
+    const { MovieWriter, movieSize, frameLayout } = await import('../io/movie');
     const fps = Math.max(1, Math.min(240, opts.fps ?? 60));
     const max = Math.min(4096, app.gpu().device.limits.maxTextureDimension2D);
+    const overlays: OverlayOptions = { colorbar: opts.overlays?.colorbar ?? true, triad: opts.overlays?.triad ?? true, status: opts.overlays?.status ?? true };
     // No size given: the view area as the page draws it, framed as on the page.
     const [vw, vh] = app.viewSize();
     const asPage = opts.width === undefined && opts.height === undefined && vw >= 16 && vh >= 16;
-    const [width, height] = asPage
+    // The size each frame is drawn at.
+    const size: [number, number] = asPage
       ? movieSize(vw, vh, max)
       : movieSize(opts.width ?? 1920, opts.height ?? (opts.width !== undefined ? Math.round((opts.width * 9) / 16) : 1080), max);
-    const size: [number, number] = [width, height];
+    // Of the view area the movie takes the box as it is framed when the recording starts, with a
+    // small margin, and room beside it for the axes and the color bar: not the empty sides of a
+    // wide window. At a size asked for, the frame is the movie.
+    let layout = { width: size[0], height: size[1], sx: 0, sy: 0, sw: size[0], sh: size[1], dx: 0, dy: 0, dw: size[0], dh: size[1] };
+    if (asPage) {
+      const info = app.overlayInfo();
+      const ruler = document.createElement('canvas').getContext('2d');
+      const measure = ruler
+        ? (text: string, px: number) => {
+            ruler.font = `${px}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+            return ruler.measureText(text).width;
+          }
+        : undefined;
+      layout = frameLayout(size[0], size[1], app.viewBounds(), (h) => overlayGutters(h, info, overlays, measure), max);
+    }
+    const { width, height } = layout;
+    const background = app.background();
     // By default a frame every 600th of the problem's dynamical time: one dynamical time plays
     // in 10 s at 60 fps.
     const frameDt = opts.every === undefined ? (opts.dt ?? defaultFrameDt(cfg.problem)) : undefined;
     const every = frameDt !== undefined ? 0 : Math.round(opts.every!);
     // Ten minutes of movie at most: the file is held in memory.
     const maxFrames = Math.min(opts.frames ?? Infinity, fps * 600);
-    const overlays: OverlayOptions = { colorbar: opts.overlays?.colorbar ?? true, triad: opts.overlays?.triad ?? true, status: opts.overlays?.status ?? true };
     const writer = await MovieWriter.open({ width, height, fps, bitrate: opts.bitrate });
     const t0 = performance.now();
     const state = { status: { frames: 0, seconds: 0, t: 0 }, stop: false };
@@ -594,7 +619,12 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       d = await s.diagnostics();
       await drawFresh(s, size, (canvas) => {
         const g = writer.ctx;
-        g.drawImage(canvas, 0, 0, width, height);
+        g.fillStyle = background;
+        g.fillRect(0, 0, width, height);
+        // The drawn frame may be larger or smaller than asked for (a read-back): by its own size.
+        const kx = canvas.width / size[0];
+        const ky = canvas.height / size[1];
+        g.drawImage(canvas, layout.sx * kx, layout.sy * ky, layout.sw * kx, layout.sh * ky, layout.dx, layout.dy, layout.dw, layout.dh);
         paintOverlays(g, width, height, app.overlayInfo(), overlays);
       }, asPage, d);
       await writer.add();
