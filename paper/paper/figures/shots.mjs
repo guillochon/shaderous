@@ -5,13 +5,16 @@
 //
 //   node paper/figures/shots.mjs SPEC.json OUTDIR [NAME...]
 //
-// SPEC.json is a list of shots: { name, setup, until, steps?, view?, width?, height?, page?, images? }
+// SPEC.json is a list of shots: { name, setup, until, steps?, view?, width?, height?, page?, images?, document?, dialog?, fill?, scale? }
 // (with NAMEs after OUTDIR, only those).
 // `setup` is a link's query string; `view` is passed to shaderous.view() (docs/api.md). `images`,
 // a list of { name, view? }, takes several images of the one run, each with its own view on top
 // of the shot's (the shot's own name is then only for the log). With `page`, the page
 // opens as a person sees it, at width x height, and the whole window is captured once the run
-// has reached `until` and drawn a few frames. Run from the code's repository, at low priority.
+// has reached `until` and drawn a few frames. `document` names a setup file beside SPEC.json
+// (docs/setups.md): the run is built from it, and `setup` then says only what differs. With
+// `dialog`, the name of one of its pages, the Setup dialog is opened on that page and the image
+// is of the dialog alone. Run from the code's repository, at low priority.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { lowerPriority, openSession, pngBytes } from '../../../tools/headless/session.mjs';
@@ -31,9 +34,10 @@ for (const shot of shots) {
   const t0 = Date.now();
   const width = shot.width ?? 1000;
   const height = shot.height ?? width;
-  const s = await openSession({ setup: shot.setup, interactive: !!shot.page, width, height, log: () => {} });
+  const s = await openSession({ setup: shot.setup, interactive: !!shot.page, width, height, scale: shot.scale, log: () => {} });
   try {
     if (shot.page) await s.call('pause');
+    if (shot.document) await s.call('load', shot.setup ?? '', JSON.parse(readFileSync(path.join(path.dirname(specFile), shot.document), 'utf8')));
     const st = await s.call('state');
     let r = await s.call('run', { until: shot.until });
     // `steps`: then that many ordinary steps. A run that lands on a time shortens its last step,
@@ -49,7 +53,19 @@ for (const shot of shots) {
       if (shot.page) {
         // Let the page's own loop draw the paused run and refresh its readouts.
         await s.page.waitForTimeout(1500);
-        await s.page.screenshot({ path: file });
+        if (shot.dialog) {
+          // The Setup dialog on one of its pages, as a person opens it.
+          await s.page.click('#setup');
+          await s.page.locator('dialog[open] .sd-tabs').getByRole('tab', { name: shot.dialog, exact: true }).click();
+          // `fill`: values typed into fields of the dialog, by their labels (the preview's time span).
+          for (const [label, value] of Object.entries(shot.fill ?? {})) {
+            const field = s.page.locator('dialog[open]').getByLabel(label, { exact: true }).first();
+            await field.fill(String(value));
+            await field.press('Tab');
+          }
+          await s.page.waitForTimeout(500);
+          await s.page.locator('dialog[open]').screenshot({ path: file });
+        } else await s.page.screenshot({ path: file });
       } else {
         writeFileSync(file, pngBytes(await s.call('screenshot', { width, height })));
       }

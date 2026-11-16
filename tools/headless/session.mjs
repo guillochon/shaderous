@@ -42,6 +42,7 @@ function pageMessage(e) {
  *   it sets how many blocks the adaptive mesh can hold. Set before the page loads, so its first
  *   run is built with it (each session starts from a fresh browser profile, with the guessed
  *   default, 2.5 GB on a desktop).
+ * - scale: device pixels per CSS pixel (default 1): 2 for a sharper screenshot of the page
  * - log: where progress messages go (default stderr)
  */
 export async function openSession(opts = {}) {
@@ -84,7 +85,7 @@ export async function openSession(opts = {}) {
     await server?.close();
     throw new Error(`could not start Chrome (${pageMessage(e)}). Install Chrome, or set PW_CHANNEL=msedge for Edge.`);
   }
-  const page = await browser.newPage({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 } });
+  const page = await browser.newPage({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 }, deviceScaleFactor: opts.scale ?? 1 });
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   if (process.env.SHADEROUS_NO_GPU_COMPOSITING) await page.addInitScript(() => (globalThis.shaderousReadBack = true));

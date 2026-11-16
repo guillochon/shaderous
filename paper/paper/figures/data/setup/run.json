@@ -1,0 +1,21 @@
+{
+ "name": "run",
+ "setup": "problem=custom&setup=jZNPj-M2DMW_ivDOjGE5m-2MrjtFTwWKYm-DHBSLiYWRJUN_sk0H_u4F3WTaosBifbJs6vHxR_IdJzu-XXJq0cG8Y2wVpu_6vteEzMFWf-WvCQal2qxByFO6R_S9Xgmn0PIJBl-_JbWkcKs5LVxUOiurSgo2q9mWQortOKk6ZbaOnTrdlFXVxktgp2Z7iVz9qM6egyOVorJqTCH44lNUY2q5cAeCS7P1UXzaOcPsCadRTpOHed3TnvZHQkgfB7GX_oA5ECLMcPhMiM7P283SliXlWgYHc7ahMKFFX4voBY6XOsmbfILB76VFEK42NIaRsqWofwX8-r-AaGcWbIIA60o4pzxbiS2TdZxTK7vCtS0geAeDsZWaZhBmLlvuzGcf-YVjYSE-_CP6Rdg4Hy8PdH-yU9KgAsJis1Tx-o4NpyiduFoY3fc9oTA7GE2ot0W0so0uzVjvLh5tfvPxccSjWr1h1N2BsCRJsdPdM_Wku-fhSMjW-VY2qx_qHxMhcDjAvGrqadd3T8eVvutw-J7D4Ucd6m5_kIS6O3z6YYs78aiP65GwTLfix63Tv8DcJ4QwpnlJxVef4kePCSwp4R3b8PfpN5vtvF2-2HmWArvP_31-ksEIKeUtaoHRvNPDfcs07562_-183gbisXoDocE8Ea4w-34lXLK9-nqT7GKmshNcuW27Mk48vi3Jx_qyLfdwINSXW9y0ngn1ZwEZWwirEMhlq0oTrp6_icC9S73s1gWm5saEOTmhd02hzYJu8XWcRPLTYV3_Ag&dim=3&n=256&amr=3",
+ "t": 0.019999999552965164,
+ "steps": 26,
+ "view": {
+  "mode": "volume",
+  "showBlocks": true,
+  "fieldLines": true,
+  "yaw": 0.9,
+  "pitch": 0.35,
+  "dist": 1.75
+ },
+ "camera": {
+  "yaw": 0.9,
+  "pitch": 0.35,
+  "dist": 1.75
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}

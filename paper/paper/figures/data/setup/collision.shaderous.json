@@ -1,0 +1,40 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "name": "Colliding magnetized stars",
+  "blurb": "Two polytropes of a solar mass, each threaded by a tangled magnetic field, on a collision course.",
+  "domain": {
+    "ndim": 3,
+    "n": 256,
+    "amr": 3,
+    "box": 5,
+    "supports2d": false,
+    "bc": { "lo": [3, 3, 3], "hi": [3, 3, 3] },
+    "units": { "name": "solar", "length": { "unit": "Rsun", "value": 1 }, "mass": { "unit": "Msun", "value": 1 } }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "isolated",
+    "G": "units",
+    "composition": "solar",
+    "floors": { "rho": 1e-8, "p": 1e-12 },
+    "fluff": { "rho": 0.002, "u": 8, "v": 30 }
+  },
+  "mesh": { "refineDense": 0.2 },
+  "background": { "rho": 1e-6, "cut": 1e-4, "relativeTo": "star1" },
+  "parts": [
+    {
+      "kind": "star", "id": "star1", "type": "polytrope", "n": 1.5, "mass": 1, "radius": 0.2,
+      "pos": [-1.9, 0, 1.92], "vel": [1, 0, -0.8],
+      "field": { "type": "random", "beta": 1000, "seed": 1 }
+    },
+    {
+      "kind": "star", "id": "star2", "type": "polytrope", "n": 1.5, "mass": 1, "radius": 0.2,
+      "pos": [1.35, 0, -1.54], "vel": [-1, 0, 1],
+      "field": { "type": "random", "beta": 1000, "seed": 2 }
+    }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.25, "tDyn": 0.09 },
+  "view": { "field": 0, "log": true, "mode": "volume", "pitch": 0.45 }
+}

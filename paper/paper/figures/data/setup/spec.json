@@ -1,0 +1,47 @@
+[
+ {
+  "name": "dialog",
+  "document": "collision.shaderous.json",
+  "until": 0,
+  "page": true,
+  "dialog": "Objects",
+  "fill": {
+   "Paths for time": 1.6
+  },
+  "width": 1500,
+  "height": 1320,
+  "scale": 2
+ },
+ {
+  "name": "run",
+  "document": "collision.shaderous.json",
+  "until": 0.02,
+  "width": 1400,
+  "height": 1400,
+  "view": {
+   "mode": "volume",
+   "showBlocks": true,
+   "fieldLines": true,
+   "yaw": 0.9,
+   "pitch": 0.35,
+   "dist": 1.75
+  }
+ },
+ {
+  "name": "collision",
+  "document": "collision.shaderous.json",
+  "until": 1.75,
+  "width": 1400,
+  "height": 1400,
+  "view": {
+   "mode": "volume",
+   "showBlocks": false,
+   "fieldLines": true,
+   "yaw": 0.9,
+   "pitch": 0.35,
+   "dist": 0.62,
+   "tz": 0.57,
+   "box": false
+  }
+ }
+]
