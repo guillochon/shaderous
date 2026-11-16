@@ -33,6 +33,8 @@ const dialog = (page: Page) => page.locator('dialog[open]');
 const field = (page: Page, label: string) => dialog(page).getByLabel(label, { exact: true }).first();
 const tab = (page: Page, name: string) => dialog(page).locator('.sd-tabs').getByRole('tab', { name, exact: true });
 const applyButton = (page: Page) => dialog(page).locator('.sd-apply');
+/** Unfold a group of the dialog's preset list (all but the running preset's start folded). */
+const unfold = (page: Page, group: string) => dialog(page).locator('.sd-group', { has: page.locator('summary', { hasText: group }) }).evaluate((d) => ((d as HTMLDetailsElement).open = true));
 
 test('the side bar holds no simulation setting but the preset menus and the featured fields', async ({ page }) => {
   const errors = await open(page, 'problem=binary&dim=2&n=128');
@@ -92,6 +94,7 @@ test('the dialog greys out what cannot be combined and says why', async ({ page 
   const errors = await open(page, 'problem=kelvin-helmholtz&dim=2&n=128');
   await page.click('#setup');
   // Pick the polytrope in the dialog's preset list: a star, with isolated self-gravity.
+  await unfold(page, 'Self-gravity');
   await dialog(page).locator('.sd-entry', { hasText: 'Polytrope (hydrostatic star): Standard' }).click();
   await tab(page, 'Gravity').click();
   const periodic = field(page, 'Gravity').locator('option', { hasText: 'Self, periodic' });
@@ -336,6 +339,8 @@ test('a disk with a density of its own, from formulas, about a star', async ({ p
 test('a preset whose name does not fit shows it whole at once on hover', async ({ page }) => {
   await open(page, 'problem=sedov&dim=2&n=128');
   await page.click('#setup');
+  await unfold(page, 'Point masses');
+  await unfold(page, 'Magnetic fields');
   const long = dialog(page).locator('.sd-entry', { hasText: 'Tidal disruption: Partial, random field' });
   const short = dialog(page).locator('.sd-entry', { hasText: /^MHD rotor$/ });
   // Every entry's tooltip says its name, then what pressing it does.
@@ -349,4 +354,23 @@ test('a preset whose name does not fit shows it whole at once on hover', async (
   await short.hover();
   await expect(dialog(page).locator('.sd-tip')).toHaveCount(0);
   expect(await long.getAttribute('title')).toContain('Tidal disruption: Partial, random field');
+});
+
+test('the preset list opens folded, but for the group of the preset that runs', async ({ page }) => {
+  await open(page, 'problem=binary&dim=2&n=128');
+  await page.click('#setup');
+  const groups = () => dialog(page).locator('.sd-group').evaluateAll((ds) => ds.map((d) => [d.querySelector('summary')!.textContent, (d as HTMLDetailsElement).open]));
+  expect(await groups()).toEqual([['Instabilities', false], ['Shocks and blasts', false], ['Self-gravity', false], ['Point masses', true], ['Magnetic fields', false], ['Tests and sandbox', false]]);
+  await expect(dialog(page).locator('.sd-entry.sd-current')).toHaveText('Binary accretion');
+  await expect(dialog(page).locator('.sd-entry', { hasText: 'Jeans instability' })).toBeHidden();
+  // A group unfolds on a click of its name, and its presets load as before.
+  await dialog(page).locator('.sd-group summary', { hasText: 'Instabilities' }).click();
+  await dialog(page).locator('.sd-entry', { hasText: 'Jeans instability' }).click();
+  await expect(applyButton(page)).toHaveText('Apply and restart');
+  // Opened again on another run, it folds to that run's group.
+  await applyButton(page).click();
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'jeans' && (window as any).shaderousApp.sim);
+  await dialog(page).locator('.sd-close, [aria-label="Close"]').first().click();
+  await page.click('#setup');
+  expect((await groups()).filter((g) => g[1]).map((g) => g[0])).toEqual(['Instabilities']);
 });

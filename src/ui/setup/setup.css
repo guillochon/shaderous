@@ -35,8 +35,13 @@
 .sd-mid { display: flex; flex-direction: column; gap: 10px; }
 
 /* left: presets, library, files */
-.sd-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
-.sd-group h4 { text-transform: none; letter-spacing: 0; font-size: 11px; margin-bottom: 2px; }
+.sd-group { margin-bottom: 4px; }
+.sd-group > summary {
+  cursor: pointer; color: var(--dim); font-size: 11px; font-weight: 600; padding: 2px 0; user-select: none;
+}
+.sd-group > summary:hover, .sd-group[open] > summary { color: var(--text); }
+.sd-group-body { display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px; }
+.sd-entry.sd-current { color: var(--accent); }
 .sd-library { display: flex; flex-direction: column; gap: 2px; }
 .sd-row { display: flex; gap: 3px; min-width: 0; }
 .sd-entry {

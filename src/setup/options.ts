@@ -96,7 +96,7 @@ const flowDef = (p: Part) => (p.kind === 'flow' ? FLOWS[p.name] : undefined);
 /** What rules are about: each a named property of a setup, with how to say it. */
 export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value; say?: (v: Value) => string }> = {
   'domain.ndim': { label: 'Dimensions', of: (s) => s.domain?.ndim ?? 3, say: (v) => `${v}D` },
-  'domain.supports2d': { label: 'A setup that makes sense in 2D', of: (s) => s.domain?.supports2d ?? true },
+  'domain.supports2d': { label: 'A setup that makes sense in 2D', of: (s) => s.domain?.supports2d ?? false },
   'mesh.adaptive': { label: 'An adaptive mesh', of: (s) => (s.domain?.amr ?? 0) > 0 },
   'physics.eos': { label: 'Equation of state', of: (s) => s.physics?.eos ?? 'ideal', say: (v) => EOS_LABELS[v as keyof typeof EOS_LABELS] ?? String(v) },
   'eos.energy': { label: 'An equation of state with an energy', of: (s) => (s.physics?.eos ?? 'ideal') !== 'barotropic' },
@@ -184,7 +184,7 @@ export const OPTIONS: Option[] = [
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level', page: 'domain', control: num(16, 16384, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
   { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, 5, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },
-  { path: 'domain.supports2d', label: 'Makes sense in 2D', tip: 'The setup can also run on a 2D (x, y) grid', page: 'domain', control: check, apply: 'live', default: true },
+  { path: 'domain.supports2d', label: 'Makes sense in 2D', tip: 'The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only', page: 'domain', control: check, apply: 'live', default: false },
   { path: 'domain.units', label: 'Physical units', tip: 'What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units', page: 'domain', apply: 'restart',
     control: { type: 'group', optional: true, fields: [
       { path: 'name', label: 'Name', tip: 'A name for the unit system', page: 'domain', control: { type: 'text' }, apply: 'live', default: 'custom' },

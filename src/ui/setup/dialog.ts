@@ -179,11 +179,15 @@ function build() {
     h('h3', { text: 'Files' }), h('div', { class: 'sd-files' }, newBtn, openBtn, fileInput),
   );
 
-  function drawPresets() {
+  /**
+   * The presets in their groups, each group folded but the one that holds the preset that
+   * runs (`current`), which is marked: the list is long, and one group is what is looked for.
+   */
+  function drawPresets(current?: string) {
     const groups = safe(() => host.presets(), []);
     presetsEl.replaceChildren(...groups.map((g) =>
-      h('div', { class: 'sd-group' }, h('h4', { text: g.group }), ...g.entries.map((p) => {
-        const load = named(h('button', { type: 'button', class: 'sd-entry', text: p.label }), p.label, 'Load this preset into the editor (the run is untouched until Apply)');
+      h('details', { class: 'sd-group', open: g.entries.some((p) => p.id === current) }, h('summary', { text: g.group, title: `${g.entries.length} presets` }), h('div', { class: 'sd-group-body' }, ...g.entries.map((p) => {
+        const load = named(h('button', { type: 'button', class: p.id === current ? 'sd-entry sd-current' : 'sd-entry', text: p.label, 'aria-current': p.id === current ? 'true' : undefined }), p.label, 'Load this preset into the editor (the run is untouched until Apply)');
         load.addEventListener('click', () => {
           const spec = safe(() => host.presetSpec(p.id), null);
           if (!spec) return status(`The preset "${p.label}" could not be loaded`, true);
@@ -199,7 +203,7 @@ function build() {
           }
         });
         return h('div', { class: 'sd-row' }, load, dl);
-      })),
+      }))),
     ));
   }
 
@@ -279,14 +283,14 @@ function build() {
     const out = cloneSetup(spec);
     const run = safe(() => host.running().domain, undefined) ?? {};
     const d = (out.domain ??= {});
-    if (d.ndim === undefined) d.ndim = d.supports2d === false ? 3 : (run.ndim ?? 3);
+    if (d.ndim === undefined) d.ndim = d.supports2d ? (run.ndim ?? 3) : 3;
     if (d.n === undefined) d.n = d.ndim === run.ndim && run.n ? run.n : d.ndim === 2 ? 512 : 128;
     if (d.amr === undefined) d.amr = d.ndim === run.ndim && d.n === run.n ? (run.amr ?? 0) : 0;
     return out;
   }
 
   newBtn.addEventListener('click', () => {
-    const spec = withGrid({ ...emptySetup(), name: 'New setup' });
+    const spec = withGrid({ ...emptySetup(), name: 'New setup', domain: { supports2d: true } });
     setDraft(spec, { kind: 'new', label: '', spec }, []);
     showCol('mid');
   });
@@ -818,7 +822,8 @@ function build() {
     el,
     open(to: SetupHost, opts: { file?: SetupSpec; notes?: string[] } = {}) {
       host = to;
-      drawPresets();
+      // Each time it opens: only the group of the preset that runs is unfolded.
+      drawPresets(safe(() => host.running().id, undefined));
       drawLibrary();
       if (opts.file) setDraft(opts.file, { kind: 'file', label: opts.file.name ?? '', spec: opts.file }, opts.notes ?? []);
       else {
