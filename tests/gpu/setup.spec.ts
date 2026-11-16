@@ -332,3 +332,21 @@ test('a disk with a density of its own, from formulas, about a star', async ({ p
   await expect(page.evaluate((d) => (window as any).shaderous.load({ ...d, parts: [d.parts[0], { ...d.parts[1], radialFn: 'sigma0 * nope(r)' }] }), doc)).rejects.toThrow(/"nope" is not a function/);
   expect(errors).toEqual([]);
 });
+
+test('a preset whose name does not fit shows it whole at once on hover', async ({ page }) => {
+  await open(page, 'problem=sedov&dim=2&n=128');
+  await page.click('#setup');
+  const long = dialog(page).locator('.sd-entry', { hasText: 'Tidal disruption: Partial, random field' });
+  const short = dialog(page).locator('.sd-entry', { hasText: /^MHD rotor$/ });
+  // Every entry's tooltip says its name, then what pressing it does.
+  expect(await short.getAttribute('title')).toBe('MHD rotor\nLoad this preset into the editor (the run is untouched until Apply)');
+  expect(await long.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
+  await long.hover();
+  // No wait: the dialog's own tip, in place of the browser's.
+  await expect(dialog(page).locator('.sd-tip strong')).toHaveText('Tidal disruption: Partial, random field', { timeout: 200 });
+  expect(await long.getAttribute('title')).toBeNull();
+  // One that fits keeps to the browser's tooltip.
+  await short.hover();
+  await expect(dialog(page).locator('.sd-tip')).toHaveCount(0);
+  expect(await long.getAttribute('title')).toContain('Tidal disruption: Partial, random field');
+});

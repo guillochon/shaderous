@@ -183,7 +183,7 @@ function build() {
     const groups = safe(() => host.presets(), []);
     presetsEl.replaceChildren(...groups.map((g) =>
       h('div', { class: 'sd-group' }, h('h4', { text: g.group }), ...g.entries.map((p) => {
-        const load = h('button', { type: 'button', class: 'sd-entry', text: p.label, title: 'Load this preset into the editor (the run is untouched until Apply)' });
+        const load = named(h('button', { type: 'button', class: 'sd-entry', text: p.label }), p.label, 'Load this preset into the editor (the run is untouched until Apply)');
         load.addEventListener('click', () => {
           const spec = safe(() => host.presetSpec(p.id), null);
           if (!spec) return status(`The preset "${p.label}" could not be loaded`, true);
@@ -207,7 +207,7 @@ function build() {
     const names = listSetups();
     if (!names.length) return libraryEl.replaceChildren(h('p', { class: 'sd-hint', text: 'Nothing saved yet: Save to library keeps the setup here under its name.' }));
     libraryEl.replaceChildren(...names.map((name) => {
-      const load = h('button', { type: 'button', class: 'sd-entry', text: name, title: 'Load this setup into the editor' });
+      const load = named(h('button', { type: 'button', class: 'sd-entry', text: name }), name, 'Load this setup into the editor');
       load.addEventListener('click', () => {
         const got = getSetup(name);
         if (!got) return status(`"${name}" could not be read from the library`, true);
@@ -838,6 +838,42 @@ function build() {
       if (el.open) el.close();
     },
   };
+}
+
+/**
+ * An entry of a list that may be too long for its column: its tooltip says its whole name, then
+ * what pressing it does. Where the name is cut off, a tip of the dialog's own shows at once on
+ * hover or focus, since the browser's waits a second; the browser's is then held back so the
+ * two do not both show.
+ */
+function named<T extends HTMLElement>(entry: T, name: string, hint: string): T {
+  const title = `${name}\n${hint}`;
+  entry.title = title;
+  let tip: HTMLElement | null = null;
+  const hide = () => {
+    tip?.remove();
+    tip = null;
+    entry.title = title;
+  };
+  const show = () => {
+    if (tip || entry.scrollWidth <= entry.clientWidth) return;
+    const host = entry.closest('dialog');
+    if (!host) return;
+    tip = h('div', { class: 'sd-tip', role: 'tooltip' }, h('strong', { text: name }), h('span', { text: hint }));
+    host.append(tip);
+    entry.removeAttribute('title');
+    // Under the entry, kept inside the window; above it where there is no room below.
+    const r = entry.getBoundingClientRect();
+    const t = tip.getBoundingClientRect();
+    const left = Math.max(4, Math.min(r.left, window.innerWidth - t.width - 4));
+    const top = r.bottom + 4 + t.height > window.innerHeight ? r.top - t.height - 4 : r.bottom + 4;
+    tip.style.left = `${Math.round(left)}px`;
+    tip.style.top = `${Math.round(top)}px`;
+  };
+  entry.addEventListener('pointerenter', show);
+  entry.addEventListener('focus', show);
+  for (const ev of ['pointerleave', 'blur', 'click', 'pointerdown']) entry.addEventListener(ev, hide);
+  return entry;
 }
 
 let dialog: ReturnType<typeof build> | null = null;

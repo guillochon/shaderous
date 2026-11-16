@@ -171,3 +171,13 @@
   .sd-actions { margin-left: 0; }
   .sp-view { max-width: 420px; }
 }
+
+/* The whole name of a list entry that is cut off, shown at once (dialog.ts named). */
+.sd-tip {
+  position: fixed; z-index: 10; max-width: min(420px, calc(100vw - 8px)); pointer-events: none;
+  display: flex; flex-direction: column; gap: 2px; padding: 5px 8px;
+  background: #0b0d12; color: var(--text); border: 1px solid var(--line); border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.5); font-size: 12px; line-height: 1.35;
+}
+.sd-tip strong { font-weight: 600; }
+.sd-tip span { color: var(--dim); }
