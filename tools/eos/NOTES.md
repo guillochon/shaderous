@@ -50,6 +50,23 @@ The burning presets now use a tabulated electron-positron gas, as every collisio
     capacity, does not have the term. At burning temperatures Gamma is near one and the
     difference is a few percent of the ions' heat capacity.
 
+- Every white dwarf preset uses this equation of state since 2026-11-16 (`white-dwarf` and
+  `wd-collision` were on `eos/degenerate.wgsl`, which remains a choice: link key
+  `eos=degenerate`). Without burning the cost shows in full. The `white-dwarf` preset at 128^3,
+  uniform, 400 steps on an RTX 3080, twice each:
+
+  | Equation of state | ms per step |
+  |---|---|
+  | `degenerate` | 7.3, 7.9 |
+  | tabulated, Coulomb term off | 21.6, 21.6 |
+  | tabulated, Coulomb term on | 26.0, 26.9 |
+
+  So 2.9 times the plain degenerate gas, and 3.5 times with the Coulomb term. The 15% above
+  is with the burning network running, which then dominates. The Coulomb term's share is
+  mostly its extra Newton iterations (3.3 against 2.6): inverse tables made with it would
+  win most of that back. The star sits as still either way (central density within 3.6%
+  over three dynamical times at 64^3, against 3.3%).
+
 Tried and not used:
 - Bicubic tables of h's two first derivatives, with exact second derivatives as slopes.
   Worse: the pair onset near 5e8 K at low density is too sharp for differenced slopes.

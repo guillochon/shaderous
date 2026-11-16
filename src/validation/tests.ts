@@ -2311,7 +2311,7 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'white-dwarf',
-    name: 'Cold white dwarf in hydrostatic equilibrium (degenerate electrons, settled)',
+    name: 'Cold white dwarf in hydrostatic equilibrium (tabulated equation of state with Coulomb term, settled)',
     criterion: 'A 0.6 M_sun C/O white dwarf, settled into the grid’s balance, keeps its central density within 5% over about three dynamical times (t <= 3), with total energy conserved to 1e-3',
     async run(gpu) {
       return withSim(gpu, whiteDwarfStar, 64, { tEnd: 0 }, async (sim) => {

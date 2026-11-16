@@ -6,7 +6,7 @@
   "group": "Self-gravity",
   "blurb": "A cold carbon-oxygen white dwarf held up by degenerate electrons, in equilibrium. Mass in solar masses.",
   "physics": {
-    "eos": "degenerate",
+    "eos": "helmholtz",
     "eosParams": { "gamma": 1.6666666666666667 },
     "gravity": "isolated",
     "G": "units",

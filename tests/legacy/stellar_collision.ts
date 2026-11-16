@@ -10,12 +10,14 @@ import { NET_SPECIES } from '../../src/burn/network';
 // self-gravity, no point masses).
 //
 // White dwarfs. Each star is a cold carbon-oxygen white dwarf, in hydrostatic equilibrium
-// under the pressure of its degenerate electrons (problems/white_dwarf.ts), and the gas obeys
-// the matching equation of state (degenerate electrons plus ideal gas and radiation), so the
-// heat of the collision shows up as the thermal part. No nuclear burning yet.
+// on its equation of state's cold curve (problems/white_dwarf.ts): degenerate electrons and the
+// cold part of the ions' Coulomb energy. The gas obeys the tabulated equation of state of white
+// dwarf matter (eos/helmholtz.ts), so the heat of the collision shows up as the thermal part, at
+// the right temperature. The plain degenerate one (eos/degenerate.wgsl) remains a choice.
+// Burning is the variant below.
 //
 // Units: 10^4 km, one solar mass, and the time that makes G = 1 (2.75 s). A 1 M_sun white
-// dwarf is then 0.54 across in radius, with a central density of 17 (3.4e7 g/cm^3); the speed
+// dwarf is then 0.51 in radius, with a central density of 21 (4.2e7 g/cm^3); the speed
 // unit is 3640 km/s.
 //
 // The orbit lies in the x-y plane with pericenter along +x. The impact parameter b is the
@@ -76,7 +78,7 @@ export const wdCollision: Problem = {
   id: 'wd-collision',
   label: 'White dwarf collision',
   blurb: 'Two cold carbon-oxygen white dwarfs on a parabolic orbit, falling together. Masses in solar masses; the impact parameter is the pericenter distance over the sum of the radii (0 is head-on).',
-  eos: 'degenerate',
+  eos: 'helmholtz',
   eosParams: { gamma: 5 / 3 },
   bcLo: all(OUTFLOW_ONLY),
   bcHi: all(OUTFLOW_ONLY),
@@ -121,9 +123,6 @@ export const wdCollisionBurning: Problem = {
   label: 'White dwarf collision with burning',
   blurb:
     'Two carbon-oxygen white dwarfs colliding, with nuclear burning: a trained neural network of the 13-isotope alpha chain (aprox13) burns the shocked gas. Head-on, two 0.64 M☉ dwarfs detonate where they meet. Masses in solar masses; the impact parameter is the pericenter distance over the sum of the radii (0 is head-on).',
-  // Electrons at any degeneracy and temperature (eos/helmholtz.ts): the shocked fuel's
-  // temperature, which the burning goes by, is 2-5 times too low by the plain degenerate one.
-  eos: 'helmholtz',
   species: NET_SPECIES,
   burn: (p) => ({ network: 'aprox13', inShocks: p.shockburn > 0.5, limiter: p.limiter }),
   // An adaptive mesh: 128 cells across at the finest of 3 levels of refinement.

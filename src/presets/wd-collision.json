@@ -6,7 +6,7 @@
   "group": "Self-gravity",
   "blurb": "Two cold carbon-oxygen white dwarfs on a parabolic orbit, falling together. Masses in solar masses; the impact parameter is the pericenter distance over the sum of the radii (0 is head-on).",
   "physics": {
-    "eos": "degenerate",
+    "eos": "helmholtz",
     "eosParams": { "gamma": 1.6666666666666667 },
     "gravity": "isolated",
     "G": "units",

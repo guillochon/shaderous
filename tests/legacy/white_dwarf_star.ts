@@ -4,11 +4,12 @@ import { codeG } from '../../src/units/units';
 import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf } from '../../src/problems/white_dwarf';
 import type { Eos } from '../../src/eos/eos';
 
-// A single cold carbon-oxygen white dwarf at rest: hydrostatic equilibrium under the pressure of
-// its degenerate electrons (problems/white_dwarf.ts), settled into the grid's own balance
+// A single cold carbon-oxygen white dwarf at rest: hydrostatic equilibrium on the cold curve of
+// the tabulated equation of state (degenerate electrons and the cold part of the ions' Coulomb
+// energy: problems/white_dwarf.ts, eos/helmholtz.ts), settled into the grid's own balance
 // before the run (problems/settle.ts). It should simply sit there; how still it stays measures
 // the scheme's hydrostatic balance with this equation of state. Units as for the white dwarf
-// collision: 10^4 km, one solar mass, G = 1 (a 0.6 M_sun dwarf is 0.87 in radius, with a
+// collision: 10^4 km, one solar mass, G = 1 (a 0.6 M_sun dwarf is 0.81 in radius, with a
 // dynamical time sqrt(R^3 / G M) of 0.9, or 2.5 s).
 export const WD_STAR = { box: 3 };
 
@@ -20,7 +21,7 @@ export const whiteDwarfStar: Problem = {
   id: 'white-dwarf',
   label: 'White dwarf (hydrostatic)',
   blurb: 'A cold carbon-oxygen white dwarf held up by degenerate electrons, in equilibrium. Mass in solar masses.',
-  eos: 'degenerate',
+  eos: 'helmholtz',
   eosParams: { gamma: 5 / 3 },
   bcLo: all(OUTFLOW),
   bcHi: all(OUTFLOW),

@@ -412,7 +412,10 @@ $`\rho_0`$ 64 times that density (1100 g/cm³ for carbon-oxygen). The fade is a 
 density applied to the free energy, so pressure and energy remain consistent. The white dwarf
 builder and its settling use the same cold curve; built on the electrons' pressure alone, a
 star would read the missing pressure as heat (10⁸ K and more). `physics.eosParams.helmCoulomb`
-(link key `coulomb`) multiplies the whole term; 0 switches it off. The burning network was
+(link key `coulomb`) multiplies the whole term; 0 switches it off. Every white dwarf preset
+uses this equation of state. The plain degenerate one remains a choice (`eos=degenerate`) and
+is about 3.5 times cheaper per step where nothing burns (`tools/eos/NOTES.md`), at the price of
+reading shocked gas too cold. The burning network was
 trained with the heat capacity of the gas without it, a difference of a few percent at burning
 temperatures, where $`\Gamma`$ is near one.
 
