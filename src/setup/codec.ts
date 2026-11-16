@@ -37,11 +37,18 @@ type Schema =
   | { nullable: Schema };
 
 const obj = (object: Record<string, Schema>): Schema => ({ object });
+/** The choices of a select in the option table: the one list of what each such key may hold. */
+function choicesOf(o: Option | undefined, name: string): Schema {
+  if (o?.control.type !== 'select') throw new Error(`${name} is not a choice in the option table`);
+  return { enum: o.control.choices.map((c) => c.value as string | number) };
+}
+const choice = (path: string): Schema => choicesOf(OPTION_BY_PATH[path], path);
+const partChoice = (kind: keyof typeof PART_OPTIONS, path: string): Schema => choicesOf(flatten(PART_OPTIONS[kind].fields).find((o) => o.path === path), `${kind}.${path}`);
 const BC: Schema = { array: { enum: [0, 1, 2, 3] }, max: 3 };
 const FACES = obj({ lo: BC, hi: BC });
 const UNIT = obj({ unit: { enum: Object.keys(UNIT_SI) }, value: 'number', per: { any: ['number', 'string'] } });
 const SHAPE: Schema = obj({
-  type: { enum: ['sphere', 'box', 'half'] }, center: 'vec3', radius: 'number', radiusCells: 'number',
+  type: partChoice('region', 'shape.type'), center: 'vec3', radius: 'number', radiusCells: 'number',
   min: { array: { nullable: 'number' }, max: 3 }, max: { array: { nullable: 'number' }, max: 3 }, normal: 'vec3', at: 'number',
 });
 const ID: Schema = 'string';
@@ -50,9 +57,9 @@ const PROFILE: Schema = { array: 'pair', max: 32 };
 
 const PART_SCHEMAS: Record<string, Record<string, Schema>> = {
   mass: { gm: 'number', pos: 'vec3', vel: 'vec3', soft: 'number', sink: 'number', sinkRate: 'number', massless: 'boolean', fixed: 'boolean', onOrbit: 'boolean' },
-  orbit: { of: { array: 'string', max: 2 }, type: { enum: ['binary', 'flyby', 'collision'] }, q: 'number', separation: 'number', ecc: 'number', incl: 'number', retrograde: 'boolean', beta: 'number', start: 'number', impact: 'number', starts: 'number', debris: 'boolean' },
-  star: { type: { enum: ['polytrope', 'white-dwarf'] }, n: 'number', radius: 'number', mass: 'number', rhoc: 'number', pos: 'vec3', vel: 'vec3', dye: 'number', X: 'fractions', field: obj({ type: { enum: ['dipole', 'random', 'gm17-dipole', 'gm17-random'] }, beta: 'number', seed: 'number' }) },
-  disk: { about: { array: 'string', max: 32 }, profile: { enum: ['thin', 'balanced'] }, radial: PROFILE, vertical: PROFILE, radialFn: 'string', verticalFn: 'string', verticalIn: { enum: ['H', 'length'] }, rIn: 'number', rOut: 'number', sigma0: 'number', slope: 'number', cs: 'number', floor: 'number', damp: obj({ from: 'number', rate: 'number' }), loops: obj({ beta: 'number', span: 'number', count: 'int' }), stresses: 'boolean' },
+  orbit: { of: { array: 'string', max: 2 }, type: partChoice('orbit', 'type'), q: 'number', separation: 'number', ecc: 'number', incl: 'number', retrograde: 'boolean', beta: 'number', start: 'number', impact: 'number', starts: 'number', debris: 'boolean' },
+  star: { type: partChoice('star', 'type'), n: 'number', radius: 'number', mass: 'number', rhoc: 'number', pos: 'vec3', vel: 'vec3', dye: 'number', X: 'fractions', field: obj({ type: partChoice('star', 'field.type'), beta: 'number', seed: 'number' }) },
+  disk: { about: { array: 'string', max: 32 }, profile: partChoice('disk', 'profile'), radial: PROFILE, vertical: PROFILE, radialFn: 'string', verticalFn: 'string', verticalIn: partChoice('disk', 'verticalIn'), rIn: 'number', rOut: 'number', sigma0: 'number', slope: 'number', cs: 'number', floor: 'number', damp: obj({ from: 'number', rate: 'number' }), loops: obj({ beta: 'number', span: 'number', count: 'int' }), stresses: 'boolean' },
   region: { shape: SHAPE, rho: 'number', p: 'number', energy: 'number', v: 'vec3', s: 'number', X: 'fractions', supersample: 'int' },
   obstacle: { shape: SHAPE },
   inflow: { shape: SHAPE },
@@ -67,24 +74,24 @@ const FEATURED: Schema = { any: ['string', obj({
 
 const DOCUMENT: Record<string, Schema> = {
   format: 'string', version: 'int', id: 'string', name: 'string', group: 'string', family: 'string', familyName: 'string', variant: 'string', blurb: 'string', extends: 'string',
-  domain: obj({ ndim: { enum: [2, 3] }, n: 'int', amr: 'int', box: 'number', supports2d: 'boolean', bc: FACES, bc2d: FACES, units: obj({ name: 'string', length: UNIT, mass: UNIT, density: UNIT, velocity: UNIT }) }),
+  domain: obj({ ndim: choice('domain.ndim'), n: 'int', amr: 'int', box: 'number', supports2d: 'boolean', bc: FACES, bc2d: FACES, units: obj({ name: 'string', length: UNIT, mass: UNIT, density: UNIT, velocity: UNIT }) }),
   physics: obj({
-    eos: { enum: ['ideal', 'barotropic', 'gas_radiation', 'degenerate', 'ionizing', 'helmholtz'] },
+    eos: choice('physics.eos'),
     eosParams: { object: {}, open: 'number' },
-    gravity: { enum: ['off', 'constant', 'periodic', 'isolated'] }, G: { any: ['number', { enum: ['units'] }] }, gext: { any: ['vec3', obj({ down: 'number' })] },
-    cooling: { enum: ['off', 'power', 'ism'] }, coolParams: { object: {}, open: 'number' }, viscosity: 'number', conductivity: 'number',
-    riemann: { enum: ['hllc', 'hllclm', 'hll'] }, limiter: { enum: ['koren', 'mc', 'vanleer', 'minmod'] }, cfl: 'number',
+    gravity: choice('physics.gravity'), G: { any: ['number', { enum: ['units'] }] }, gext: { any: ['vec3', obj({ down: 'number' })] },
+    cooling: choice('physics.cooling'), coolParams: { object: {}, open: 'number' }, viscosity: 'number', conductivity: 'number',
+    riemann: choice('physics.riemann'), limiter: choice('physics.limiter'), cfl: 'number',
     floors: obj({ rho: 'number', p: 'number' }), fluff: obj({ rho: 'number', u: 'number', v: 'number', va: 'number' }),
-    frame: { enum: ['inertial', 'gas', 'masses'] }, jeansFloor: 'boolean', jeansCells: 'int', vcycles: 'int', gravEnergyFlux: 'boolean',
-    composition: { any: ['string', obj({ name: 'string', X: 'fractions', ionization: { enum: ['full', 'neutral'] } })] },
+    frame: choice('physics.frame'), jeansFloor: 'boolean', jeansCells: 'int', vcycles: 'int', gravEnergyFlux: 'boolean',
+    composition: { any: [choice('physics.composition'), obj({ name: 'string', X: 'fractions', ionization: { enum: ['full', 'neutral'] } })] },
     species: { any: [{ enum: ['aprox13'] }, { array: 'string', max: 64 }] }, speciesGamma: 'fractions',
-    burn: { any: [obj({ network: { enum: ['aprox13'] }, inShocks: 'boolean', limiter: 'number' }), obj({ fuel: 'string', ash: 'string', q: 'number', ea: 'number', k: 'number', inShocks: 'boolean' })] },
+    burn: { any: [obj({ network: choice('physics.burn.network'), inShocks: 'boolean', limiter: 'number' }), obj({ fuel: 'string', ash: 'string', q: 'number', ea: 'number', k: 'number', inShocks: 'boolean' })] },
     toolScale: obj({ rho: 'number', v: 'number' }),
   }),
-  mesh: obj({ refineHi: 'number', refineLo: 'number', refineMasses: 'boolean', refineDense: 'number', refineRho: 'number', timeBins: 'int', jeansRefine: 'number' }),
+  mesh: obj({ refineHi: 'number', refineLo: 'number', refineMasses: 'boolean', refineDense: 'number', refineRho: 'number', timeBins: choice('mesh.timeBins'), jeansRefine: 'number' }),
   background: obj({ rho: 'number', p: 'number', v: 'vec3', s: 'number', X: 'fractions', cut: 'number', relativeTo: 'string' }),
   run: obj({ tEnd: { nullable: 'number' }, checkpointDt: 'number', tDyn: 'number', startPaused: 'boolean' }),
-  view: obj({ field: 'int', log: 'boolean', mode: { enum: ['volume', 'slice', 'projection'] }, axis: { enum: [0, 1, 2] }, pitch: 'number' }),
+  view: obj({ field: 'int', log: 'boolean', mode: choice('view.mode'), axis: choice('view.axis'), pitch: 'number' }),
   featured: { array: FEATURED, max: 32 },
 };
 
