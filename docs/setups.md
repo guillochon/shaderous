@@ -37,6 +37,10 @@ error in the editor, where reading drops it with a note.
 }
 ```
 
+The sections below say what each part of the document is for. Every key, with what it may
+hold, its default and what it does, is listed under [Every key](#every-key), which is written
+from the option table.
+
 Every key but `format` and `version` is optional. What is absent takes the default of the
 option table, so a file lists only what makes it that setup. Positions and sizes are in code
 units of the setup's own box, which is the cube `[-box/2, box/2]³` centered on the origin.
@@ -66,15 +70,14 @@ says the star with id `star` has that many solar radii, whatever its radius in c
 
 ### `physics`
 
-`eos` (`ideal`, `barotropic`, `gas_radiation`, `degenerate`, `ionizing`, `helmholtz`) and
-`eosParams` (`gamma`, `K`, …); `gravity` (`off`, `constant`, `periodic`, `isolated`) and `G` (a
-number, or `"units"` for what the units make it); `gext`, a uniform acceleration as a vector or
-`{ "down": g }` (along -y in 2D, -z in 3D); `cooling` and `coolParams`; `viscosity`,
-`conductivity`; `riemann`, `limiter`, `cfl`; `floors` (`rho`, `p`); `fluff` (`rho`, `u`, `v`,
-`va`: the limits on tenuous gas); `frame` (`inertial`, `gas`, `masses`); `jeansFloor`,
-`jeansCells`, `vcycles`, `gravEnergyFlux`; `composition` (`solar`, `solarNeutral`, `hydrogen`,
-`carbonOxygen`, or `{ "name", "X": { species: fraction }, "ionization" }`); `species` (names,
-or `"aprox13"`), `speciesGamma`; `burn` (`{ "network": "aprox13", "inShocks", "limiter" }`).
+`eos` and `eosParams` (`gamma`, `K`, …); `gravity` and `G` (a number, or `"units"` for what
+the units make it); `gext`, a uniform acceleration as a vector or `{ "down": g }` (along -y in
+2D, -z in 3D); `cooling` and `coolParams`; `viscosity`, `conductivity`; `riemann`, `limiter`,
+`cfl`; `floors` (`rho`, `p`); `fluff` (`rho`, `u`, `v`, `va`: the limits on tenuous gas);
+`frame`; `jeansFloor`, `jeansCells`, `vcycles`, `gravEnergyFlux`; `composition` (a name, or
+`{ "name", "X": { species: fraction }, "ionization" }`); `species` (names, or `"aprox13"`),
+`speciesGamma`; `burn` (`{ "network": "aprox13", "inShocks", "limiter" }`). The choices each
+takes are under [Every key](#every-key).
 
 ### `mesh`, `run`, `view`
 
@@ -156,6 +159,286 @@ About a star, keep the disk's inner radius outside 1.3 of the star's radius: the
 settled within that, and gas there that is not the star's is left as it is. Where a setup names
 a background density (or has stars, with the gas around them), that gas shows wherever the
 disk is thinner than it.
+
+## Every key
+
+These tables are written from the option table by `npm run gen`, so they list what this build
+reads: the key's path in the document, its name in the Setup dialog, what it may hold with its
+default, and what it does. A number out of its range is held to it when the file is read.
+
+### General options
+
+<!-- gen:setup-options -->
+**The document**
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `name` | Name | text | What the setup is called in the preset list and in its file |
+| `blurb` | Description | text | A sentence or two shown under the preset menu |
+
+**`domain`**
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `domain.ndim` | Dimensions | `3`, `2` | Two or three dimensions. A 2D run is one layer of cells in x and y |
+| `domain.n` | Resolution | a whole number, 16 to 16384 | Cells across the box; on an adaptive mesh, at its finest level |
+| `domain.amr` | Refinement | a whole number, 0 to 5 | Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution |
+| `domain.box` | Box size | a number, 1e-12 to 1e+30. Default `1` | Side of the box, in code units: the domain is a cube of this side centered on the origin |
+| `domain.supports2d` | Makes sense in 2D | `true` or `false`. Default `false` | The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only |
+| `domain.units` | Physical units | an object, which may be left out | What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units |
+| `domain.units.name` | Name | text. Default `custom` | A name for the unit system |
+| `domain.units.length.value` | Length | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of length |
+| `domain.units.length.unit` | Length unit | `m`, `cm`, `km`, `Rsun`, `au`, `pc`. Default `Rsun` | The unit of the length |
+| `domain.units.mass.value` | Mass | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of mass |
+| `domain.units.mass.unit` | Mass unit | `kg`, `g`, `Msun`. Default `Msun` | The unit of the mass |
+| `domain.bc` | Faces of the box | `{ "lo": [x, y, z], "hi": [x, y, z] }`, each 0 to 3 | What the gas meets at each face of the box. Periodic faces come in pairs |
+
+**`physics`**
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `physics.eos` | Equation of state | `ideal`, `barotropic`, `gas_radiation`, `degenerate`, `ionizing`, `helmholtz`. Default `ideal` | How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `physics.eosParams.gamma` | gamma | a number, 1 to 100. Default `1.6666666666666667` | Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
+| `physics.eosParams.K` | K (p = K rho^gamma) | a number, at least 0 | Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
+| `physics.eosParams.arad` | Radiation constant a | a number, at least 0 | Radiation pressure a T⁴ / 3 is added to the gas pressure |
+| `physics.eosParams.degRho` | Degeneracy density | a number, at least 1e-30 | Density at which the electrons’ Fermi momentum reaches mₑc. For a setup with physical units it is set from the composition (about 2×10⁶ g/cm³ for C/O); in code units |
+| `physics.eosParams.degP` | Degeneracy pressure scale | a number, at least 1e-30 | The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units |
+| `physics.eosParams.helmCoulomb` | Coulomb corrections | a number, 0 to 1. Default `1` | The ions’ Coulomb energy, as a multiplier: 1 for all of it, 0 for none. It lowers the cold pressure by a percent or two in dense white dwarf matter (more in the envelope) and adds to the heat capacity of cold, strongly coupled ions |
+| `physics.eosParams.ionT` | Ionization temperature | a number, at least 1e-30 | The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Set from physical constants for a setup with physical units |
+| `physics.eosParams.ionRho` | Saha density | a number, at least 1e-30 | Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units |
+| `physics.composition` | Composition | `solar`, `solarNeutral`, `hydrogen`, `carbonOxygen`. Default `solar` | What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen |
+| `physics.species` | Species | a list of names | Species whose mass fractions the gas carries, by name (he4, c12, ...), separated by commas; or aprox13 for the burning network’s thirteen. None by default |
+| `physics.burn` | Burning | an object, which may be left out | Nuclear burning by the trained network of the 13-isotope alpha chain (aprox13), wherever the gas is hot and dense enough |
+| `physics.burn.network` | Network | `aprox13`. Default `aprox13` | The burning network |
+| `physics.burn.inShocks` | Burn inside shocks | `true` or `false`. Default `false` | Let cells the shock detector flags burn. Off, as in most supernova codes: a captured shock is a few cells of numerical smearing |
+| `physics.burn.limiter` | Burning limiter f | a number, 0 to 1. Default `0` | No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013). 0 switches it off |
+| `physics.floors.rho` | Density floor | a number, at least 0. Default `1e-10` | No cell is thinner than this |
+| `physics.floors.p` | Pressure floor | a number, at least 0. Default `1e-14` | No cell has less pressure than this |
+| `physics.fluff.rho` | Tenuous below density | a number, at least 0. Default `0` | Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off |
+| `physics.fluff.u` | Max specific energy | a number, at least 0. Default `0` | Largest internal energy per unit mass tenuous gas may have. 0 is no cap |
+| `physics.fluff.v` | Max speed | a number, at least 0. Default `0` | Largest speed tenuous gas may have. 0 is no cap |
+| `physics.fluff.va` | Max Alfvén speed | a number, at least 0. Default `0` | With a magnetic field: largest Alfvén speed \|B\| / √ρ anywhere. Where the field is stronger than that for the gas it threads, mass is added at rest until it is not. Not conservative. 0 is no cap |
+| `physics.cooling` | Cooling function | `off`, `power`, `ism`. Default `off` | Optically thin radiative cooling (and heating) of the gas |
+| `physics.coolParams.rate` | Coefficient Λ₀ | a number, at least 0. Default `1` | Power law: the cooling rate per unit volume is ρ² Λ₀ T^α |
+| `physics.coolParams.alpha` | Exponent of T | a number, -4 to 4. Default `0.5` | Power law: the exponent α of T in the cooling rate (1/2 is bremsstrahlung) |
+| `physics.coolParams.heat` | Heating rate | a number, at least 0. Default `0` | Heating per unit mass (power law), or the heating rate at unit density (interstellar) |
+| `physics.coolParams.tUnit` | Kelvin per unit T | a number, at least 0.000001. Default `1000` | Interstellar: kelvin per code unit of temperature (code density is atoms per cm³) |
+| `physics.coolParams.tFloor` | Temperature floor | a number, at least 0. Default `0` | Gas at or below this temperature does not cool |
+| `physics.viscosity` | Viscosity ν | a number, 0 to 1e+30. Default `0` | Kinematic viscosity: the stress is ρ ν times the shear. Obstacles hold the gas at their walls. 0 is off |
+| `physics.conductivity` | Conductivity κ | a number, 0 to 1e+30. Default `0` | Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off |
+| `physics.gravity` | Gravity | `off`, `constant`, `periodic`, `isolated`. Default `off` | Off, a uniform field, or the self-gravity of the gas. Point masses pull either way |
+| `physics.G` | G | a number, at least 0. Default `1` | Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them |
+| `physics.gext` | Uniform acceleration | `[x, y, z]`. Default `[0,0,0]` | A uniform acceleration on the gas, besides the Constant field |
+| `physics.vcycles` | V-cycles | a whole number, 1 to 8 | Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step |
+| `physics.jeansFloor` | Jeans floor | `true` or `false`. Default `false` | Pressure floor that keeps the Jeans length resolved (Truelove) |
+| `physics.jeansCells` | Cells per Jeans length | a whole number, 4 to 32. Default `4` | The Jeans floor raises the pressure so the Jeans length spans at least this many cells |
+| `physics.gravEnergyFlux` | Conserve energy | `true` or `false`. Default `true` | Flux-form gravitational work: conserves total energy |
+| `physics.frame` | Frame | `inertial`, `gas`, `masses`. Default `inertial` | An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box |
+| `physics.riemann` | Riemann solver | `hllc`, `hllclm`, `hll`. Default `hllc` | How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust |
+| `physics.limiter` | Limiter | `koren`, `mc`, `vanleer`, `minmod`. Default `koren` | How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
+| `physics.cfl` | CFL number | a number, 0.05 to 1. Default `0.8` | Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
+
+**`mesh`**
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `mesh.refineHi` | Refine above | a number, 0.05 to 1. Default `0.8` | Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more |
+| `mesh.refineLo` | Merge below | a number, 0 to 1. Default `0.2` | Adaptive mesh: four sibling blocks are merged where the indicator is below this in all of them. Kept below the refinement threshold |
+| `mesh.refineRho` | Refine above density | a number, at least 0 | Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off |
+| `mesh.refineDense` | Always refine above density | a number, at least 0. Default `0` | Adaptive mesh: gas denser than this is always at the finest level, as the smooth interior of a star must be. 0 is off |
+| `mesh.refineMasses` | Refine around point masses | `true` or `false`. Default `false` | Adaptive mesh: keep the gas around every point mass at the finest level, so that softening and sinks can be as small as the finest cells allow |
+| `mesh.timeBins` | Local timesteps | `0`, `1`, `2`, `3`. Default `0` | Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work |
+| `mesh.jeansRefine` | Refine the Jeans length | a whole number, 0 to 64. Default `16` | With self-gravity, refine where the Jeans length is under this many cells. 0 is off |
+
+**`background`**
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `background.rho` | Ambient density | a number, at least 1e-300. Default `1` | Density of the gas that fills the box where no part puts anything else. With stars, the gas around them |
+| `background.p` | Ambient pressure | a number, at least 0 | Pressure of that gas. With stars and left empty, the pressure of the stars’ outermost layer |
+| `background.v` | Ambient velocity | `[x, y, z]`. Default `[0,0,0]` | Velocity of that gas |
+| `background.s` | Ambient dye | a number, 0 to 1. Default `0` | Passive scalar of that gas: a dye carried with it |
+| `background.X` | Ambient composition | `{ species: fraction }` | Mass fractions of that gas, by species name |
+| `background.cut` | Stars end at density | a number, at least 0 | With stars: a cell thinner than this is ambient gas, not star. Left empty, a polytrope ends where the ambient gas would be as hot as its center |
+
+**`run`**
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `run.tEnd` | End time | a number, at least 0, or `null` | The run pauses when it reaches this time. Empty runs on without end |
+| `run.checkpointDt` | Checkpoint every | a number, at least 0 | Time between checkpoints, when the page is asked to save them: the value the Time panel starts with |
+| `run.tDyn` | Dynamical time | a number, at least 0 | The time over which the flow visibly changes (a star’s sqrt(R³ / G M), a binary’s period): a movie takes a frame every 600th of it by default |
+| `run.startPaused` | Start paused | `true` or `false`. Default `false` | The run waits, paused, for Run |
+
+**`view`**
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `view.mode` | Opening view | `volume`, `slice`, `projection`. Default `volume` | How the gas is drawn when the setup opens in 3D |
+| `view.field` | Opening field | a whole number, 0 to 29. Default `0` | The quantity shown when the setup opens (the View panel’s Field, by its number) |
+| `view.log` | Logarithmic colors | `true` or `false`. Default `true` | The color scale the setup opens with |
+| `view.axis` | Slice normal | `2`, `1`, `0`. Default `2` | The axis the opening slice is perpendicular to (0 x, 1 y, 2 z) |
+| `view.pitch` | Camera elevation | a number, -1.5 to 1.5. Default `0.45` | Elevation of the volume view’s camera when the setup opens, in radians |
+<!-- /gen:setup-options -->
+
+### Parts
+
+A part's fields are given relative to the part (`soft` is `parts[i].soft`).
+
+<!-- gen:setup-parts -->
+**`mass`** (Point mass). A point mass: softened gravity on the gas, with a sink that takes gas in. Point masses pull on one another and feel the gas. At most 32
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `gm` | G M | a number, at least 0. Default `1` | Its mass times G, in code units |
+| `pos` | Position | `[x, y, z]`. Default `[0,0,0]` | Where it starts, relative to the box center |
+| `vel` | Velocity | `[x, y, z]`. Default `[0,0,0]` | How it moves at the start |
+| `soft` | Softening | a number, at least 0 | Plummer softening length of its gravity: at least two cells, and two cells if left empty. Changes take effect without a restart |
+| `sink` | Sink radius | a number, at least 0 | Radius within which it takes gas in: the softening length if left empty, 0 for none. Changes take effect without a restart |
+| `sinkRate` | Sink rate | a number, at least 0. Default `1` | Removal rate at the sink’s center, in units of sqrt(G M / radius³) |
+| `onOrbit` | Hold on its orbit | `true` or `false`. Default `false` | The other point masses move it; the gas does not: neither the gas’s pull nor what its sink takes changes its motion, and it does not grow. A binary with both masses held keeps the orbit it was given, as in most studies of circumbinary disks. What the sink takes is still counted. Changes take effect without a restart |
+| `massless` | Massless | `true` or `false`. Default `false` | A particle without a mass of its own: it pulls on nothing and moves as the gas and the masses pull it |
+| `fixed` | Held in place | `true` or `false`. Default `false` | Nothing moves it, whatever pulls on it or it takes in |
+
+**`orbit`** (Orbit). Not an object: puts two bodies on a Kepler orbit
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `of` | Bodies | the ids of two of `mass` or `star` parts | The two bodies it places: two point masses (binary), a star and a point mass (flyby), or two stars (collision) |
+| `type` | Kind of orbit | `binary`, `flyby`, `collision`. Default `binary` | Binary: two point masses about their center of mass, at pericenter. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass |
+| `q` | Mass ratio | a number, 0.000001 to 1000000000 | Mass of the second body over the first. It sets their masses: in a binary the total stays, in a flyby the star’s |
+| `separation` | Separation | a number, at least 0.000001. Default `1` | Semi-major axis of the binary’s orbit |
+| `ecc` | Eccentricity | a number, 0 to 0.95. Default `0` | Eccentricity of the binary’s orbit |
+| `incl` | Inclination (°) | a number, 0 to 180. Default `0` | Tilt of the binary’s orbit about the line through pericenter, in degrees (3D): 180 is retrograde |
+| `retrograde` | Retrograde | `true` or `false`. Default `false` | In 2D: the binary orbits clockwise |
+| `beta` | Impact parameter β | a number, 0.05 to 20. Default `1` | Tidal radius over pericenter distance: above 1 the mass passes inside the star’s tidal radius |
+| `start` | Starts at (tidal radii) | a number, 1 to 20. Default `3` | Separation at the start, in tidal radii (never inside 1.5 pericenters) |
+| `debris` | Debris energies | `true` or `false`. Default `false` | Bin the star’s gas by its orbital energy about the mass, for the rate at which bound debris returns |
+| `impact` | Impact parameter | a number, 0 to 5. Default `0` | Pericenter distance over the sum of the two radii: 0 is head-on, 1 just grazes |
+| `starts` | Starts at (sums of radii) | a number, 1.05 to 20. Default `4` | Separation at the start, in sums of the two radii (closer if they would not fit in the box) |
+
+**`star`** (Star). A polytrope or a cold white dwarf, settled into the grid’s own hydrostatic balance before the run. At most 4
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `type` | Kind of star | `polytrope`, `white-dwarf`. Default `polytrope` | A polytrope of index n, or a cold white dwarf held up by degenerate electrons |
+| `n` | Polytropic index n | a number, 0.5 to 4.5. Default `1.5` | The star’s structure, p = K ρ^(1 + 1/n): the larger n, the more centrally concentrated. Stable against convection only if the gas’s adiabatic index is at least 1 + 1/n |
+| `mass` | Mass | a number, at least 1e-12. Default `1` | Its mass, in code units (solar masses for a white dwarf in its usual units) |
+| `radius` | Radius | a number, at least 1e-12. Default `0.2` | A polytrope’s radius, in code units. A white dwarf’s follows from its mass |
+| `rhoc` | Central density | a number, at least 1e-300 | Instead of the mass: a polytrope’s central density |
+| `pos` | Position | `[x, y, z]`. Default `[0,0,0]` | Where it starts, relative to the box center |
+| `vel` | Velocity | `[x, y, z]`. Default `[0,0,0]` | How it moves at the start |
+| `dye` | Dye | a number, 0 to 1 | Passive scalar of its gas, which tells the stars apart: spread over (0, 1] by their order if left empty |
+| `X` | Composition | `{ species: fraction }` | Mass fractions of its gas, by species name (the ambient gas’s if left empty) |
+| `field` | Magnetic field inside | an object, which may be left out | A field confined to the star: a dipole along z or a tangled Kolmogorov field, with plasma beta at the center; or the same as Guillochon & McCourt (2017) set them, by their β_M |
+| `field.type` | Shape | `dipole`, `random`, `gm17-dipole`, `gm17-random`. Default `dipole` | Dipole or random, by the plasma beta at the center; or Guillochon & McCourt’s, by β_M |
+| `field.beta` | Plasma beta | a number, 1 to 1000000000000. Default `1000` | Gas pressure over magnetic pressure B² / 2 at the center (or β_M): the larger, the weaker the field |
+| `field.seed` | Random seed | a whole number, 1 to 9999. Default `1` | Which random field: each seed gives another |
+
+**`disk`** (Disk). A gas disk in the x-y plane about one or more bodies
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `about` | Orbits | ids of `mass` or `star` parts | The point masses or stars it orbits: about several, their total mass. The disk is centered on their center of mass and moves with it. About a star, keep the inner radius outside 1.3 of the star’s radius: the star is settled within that |
+| `profile` | Profile | `thin`, `balanced`. Default `balanced` | Thin: a surface density with a cavity and a Gaussian vertical profile, on circular orbits (the binary’s disk). Balanced: a midplane density in vertical balance with the softened potential, rotating as its pressure gradient asks (the magnetized disk); 3D only |
+| `rIn` | Inner radius | a number, at least 0.000001. Default `0.3` | Where the disk is tapered away toward the center (the cavity’s radius) |
+| `rOut` | Outer radius | a number, at least 0.000001. Default `1` | Where the disk is tapered away outward |
+| `sigma0` | Density scale | a number, at least 1e-300. Default `0.001` | Thin: the surface density. Balanced: the midplane density at r = 1 |
+| `slope` | Density slope | a number, -4 to 2. Default `-1.5` | Balanced: the midplane density goes as r to this power (-3/2 is a flat surface density) |
+| `radialFn` | Radial profile (formula) | text | A density profile of your own in radius, as a formula of r: the surface density (thin) or the midplane density (balanced). It replaces the density scale’s law, the slope and the tapers. Example: sigma0 * (r / rIn)^-1 * exp(-(r / rOut)^2) * step(r - rIn). Names: r, rIn, rOut, sigma0, cs, H (the scale height cs / Ω at r), pi, e. Functions: exp, log, ln, log10, sqrt, abs, sin, cos, tan, atan, sinh, cosh, tanh, step, pow, min, max, clamp; powers as x^y. Where it is not a positive number there is no disk. A file may give a table of points instead (radial) |
+| `verticalFn` | Vertical profile (formula) | text | A density profile of your own in height, as a formula of z, the height above the midplane (the same on both sides), relative to the midplane: it replaces the Gaussian (thin) or the balance with the potential (balanced). Examples: exp(-z^2 / 2), 1 / cosh(z)^2, max(1 - z / 3, 0). Such a disk is in vertical balance only if the profile is, and settles as the run starts. 3D only. A file may give a table of points instead (vertical) |
+| `verticalIn` | Heights in | `H`, `length`. Default `H` | The z of the vertical profile: in scale heights cs / Ω of each radius (the profile then flares with the disk), or in code lengths |
+| `cs` | Sound speed | a number, at least 0.000001. Default `0.1` | Sound speed of the disk’s gas: its scale height is cs / Ω |
+| `floor` | Gas outside the disk | a number, at least 0. Default `1e-8` | Thin: a fraction of the density scale. Balanced: the density of the ambient gas |
+| `damp` | Damping zone | an object, which may be left out | Beyond a radius the gas is relaxed toward the disk as it started, more strongly toward the box’s edge, so the outer disk is a reservoir and the boundaries see only it |
+| `damp.from` | Damping from r | a number, 0 to 1e+30. Default `1` | Radius from the box center where the damping zone starts |
+| `damp.rate` | Damping rate | a number, 0 to 1e+30. Default `3` | How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off |
+| `loops` | Field loops | an object, which may be left out | Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability (balanced profile) |
+| `loops.beta` | Plasma beta at the midplane | a number, 1 to 1000000000. Default `50` | Gas pressure over magnetic pressure where two loops meet: the larger, the weaker the field |
+| `loops.span` | Span of a loop | a number, 1.05 to 4. Default `1.35` | Each loop spans this factor in radius |
+| `loops.count` | Loops | a whole number, 1 to 16. Default `4` | How many loops, outward from the inner radius |
+| `stresses` | Disk diagnostics | `true` or `false`. Default `false` | Report the disk’s stresses and MRI quality factors about the first point mass |
+
+**`region`** (Gas region). A shape with a state (density, pressure, velocity, dye, composition) that replaces what is under it. A value left empty keeps what is there
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `shape.type` | Shape | `sphere`, `box`, `half`. Default `sphere` | A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane |
+| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere |
+| `shape.radius` | Radius | a number, at least 0. Default `0.1` | Radius of the sphere |
+| `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
+| `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
+| `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
+| `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
+| `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
+| `rho` | Density | a number, at least 1e-300 | Density inside the shape |
+| `p` | Pressure | a number, at least 0 | Pressure inside the shape |
+| `energy` | Total energy | a number, at least 0 | Instead of a pressure: this much energy in all, spread evenly over the sphere’s cells (a point explosion; per unit length in 2D) |
+| `v` | Velocity | `[x, y, z]` | Velocity inside the shape |
+| `s` | Dye | a number, 0 to 1 | Passive scalar inside the shape |
+| `X` | Composition | `{ species: fraction }` | Mass fractions inside the shape, by species name |
+| `supersample` | Smooth edge (samples) | a whole number, 2 to 8 | A sphere’s edge cells take the share of their volume inside it, from this many samples a side. Empty: a sharp edge |
+
+**`obstacle`** (Obstacle). A solid body the gas reflects off
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `shape.type` | Shape | `sphere`, `box`, `half`. Default `sphere` | A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane |
+| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere |
+| `shape.radius` | Radius | a number, at least 0. Default `0.1` | Radius of the sphere |
+| `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
+| `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
+| `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
+| `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
+| `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
+
+**`inflow`** (Inflow). Cells held at their initial state for the whole run: an inlet
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `shape.type` | Shape | `sphere`, `box`, `half`. Default `sphere` | A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane |
+| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere |
+| `shape.radius` | Radius | a number, at least 0. Default `0.1` | Radius of the sphere |
+| `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
+| `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
+| `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
+| `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
+| `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
+
+**`field`** (Uniform magnetic field). A uniform field through the whole box, in units where the magnetic pressure is B² / 2
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `b` | Field | `[x, y, z]` | The field’s vector |
+| `up` | Strength, upward | a number | Instead of a vector: a strength along the axis drawn upward (y in 2D, z in 3D) |
+
+**`flow`** (Flow). A named, built-in initial condition with its parameters, for what shapes cannot say
+
+Its fields are its `name` and that flow's parameters, listed below.
+<!-- /gen:setup-parts -->
+
+### Flows
+
+<!-- gen:setup-flows -->
+| `name` | What it is | Parameters, with their defaults |
+| --- | --- | --- |
+| `advection` | Advected Gaussian blob. A Gaussian density blob at the center, carried by a uniform flow at a uniform pressure. The passive scalar follows the blob. On a periodic box it tests conservation. (fills the box) | `rho0` 1.5 (Density around the blob); `amp` 1 (Blob height); `width` 0.1 (Blob width); `vx` 1 (Velocity x); `vy` 0.5 (Velocity y); `vz` 0.25 (Velocity z); `p` 1 (Pressure) |
+| `co-ignition` | Carbon–oxygen fuel with an ignition layer. Carbon and oxygen at rest at one density, with a hot layer at the low-x edge of the box that sets it alight. Needs physical units, an equation of state with a temperature (Helmholtz) and the species of the aprox13 network. (fills the box) | `logrho` 7 (Density (log₁₀ g/cm³)); `carbon` 0.5 (Carbon fraction); `tfuel` 0.5 (Fuel temperature (10⁸ K)); `tign` 4 (Ignition temperature (10⁹ K)); `width` 30 (Ignition layer (km)) |
+| `znd-detonation` | ZND detonation. The steady (ZND) detonation of the single-step Arrhenius model, moving toward +x into fuel of density 1 and pressure 1 (for gamma = 1.2; heat release 50), with its burning. Lengths are half-reaction lengths. Needs the species fuel and ash. (fills the box) | `ea` 25 (Activation temperature Ea); `overdrive` 1 (Overdrive (D / D_CJ)²); `shockburn` true (Burn inside shocks); `frontFrame` false (Frame of the front); `pocket` false (Pocket of unburned gas) |
+| `evrard` | Evrard sphere. A cold gas sphere whose density falls as 1/r, rho = M / (2 pi R^2 r), in thin gas at the same specific internal energy (for gamma = 5/3). With G = M = R = 1 it collapses in about a unit of time. (fills the box) | `mass` 1 (Mass); `radius` 1 (Radius); `u` 0.05 (Specific internal energy); `rhoAmb` 0.0001 (Density outside) |
+| `helium-shell-ignition` | Helium shell with a hot spot. Turns the outermost mass of the first star into helium over a carbon-oxygen core and heats a spot at the base of that shell, on the +z axis. Needs the 13 species of the burning network, the tabulated equation of state and physical units. | `mhe` 0.05 (Helium shell (M☉)); `tign` 3 (Ignition temperature (10⁹ K)); `spot` 300 (Hot spot radius (km)) |
+| `isothermal-collapse` | Turbulent velocity field. Uniform gas in a unit periodic box, stirred by a few long-wavelength velocity modes with random directions and phases. With the preset’s isothermal gas (sound speed 0.1) the default speed is Mach 5. (fills the box) | `rho` 1 (Density); `p` 0.01 (Pressure); `vrms` 0.5 (Rms speed); `modes` 12 (Velocity modes); `seed` 12345 (Random seed) |
+| `jeans` | Jeans-unstable wave. A small adiabatic density wave along x about density 1 and sound speed 1. With one wavelength across a unit box and G = 2 pi it grows at the rate 2 pi; a shorter wave grows more slowly, or oscillates as sound once k^2 passes 4 pi G. (fills the box) | `amp` 0.001 (Amplitude); `modes` 1 (Wavelengths across) |
+| `kelvin-helmholtz` | Kelvin-Helmholtz shear layer. A dense slab across the middle of the box (in y), sliding through lighter gas at one pressure, with one seeded mode at its two edges. With helium, the slab is helium in hydrogen (species he4 and h1, which then set the equation of state), denser by the ratio of their mean molecular weights. (fills the box) | `helium` false (Helium slab in hydrogen); `rhoIn` 2 (Slab density); `rhoOut` 1 (Density outside); `shear` 1 (Shear speed); `p` 2.5 (Pressure); `width` 0.5 (Slab thickness); `amp` 0.1 (Kick amplitude); `modes` 2 (Wavelengths across); `sigma` 0.035 (Kick width); `zmod` 0.2 (Variation along z) |
+| `orszag-tang` | Orszag-Tang vortex. The Orszag-Tang vortex on a periodic unit box (for gamma = 5/3): uniform gas of density 25 / 36 pi and pressure 5 / 12 pi (sound speed 1) with a velocity vortex and a field of twice its wavenumber in x. (fills the box) | `v0` 1 (Velocity amplitude); `b0` 1 (Field amplitude) |
+| `mhd-rotor` | Rotor. A dense disk spinning rigidly in gas of density 1 at rest, at one pressure, with a ring around it where density and speed taper (Balsara & Spicer 1999). The field is a part of its own. (fills the box) | `rho` 10 (Disk density); `v0` 2 (Rim speed); `r0` 0.1 (Disk radius); `r1` 0.115 (Outer radius of the ring); `p` 1 (Pressure) |
+| `brio-wu` | Brio-Wu shock tube. The MHD shock tube of Brio & Wu (1988) along x (for gamma = 2): gas at rest in two states either side of a membrane at the center, a field B_x throughout and B_y reversing across the membrane. (fills the box) | `rhoL` 1 (Density, left); `pL` 1 (Pressure, left); `rhoR` 0.125 (Density, right); `pR` 0.1 (Pressure, right); `bx` 0.75 (Field along the tube); `by` 1 (Field across the tube) |
+| `field-loop` | Field loop advection. A weak loop of magnetic field, A_z = A0 (R - r) inside radius R, in gas of density 1 and pressure 1 carried by a uniform flow: at (2, 1) on a periodic unit box it is back where it started at t = 1 (Gardiner & Stone 2005). (fills the box) | `dense` false (Dense loop); `rhoIn` 2 (Density of a dense loop); `radius` 0.3 (Loop radius); `a0` 0.001 (Field strength); `vx` 2 (Velocity x); `vy` 1 (Velocity y) |
+| `alfven-wave` | Circularly polarized Alfven wave. A circularly polarized Alfven wave along the diagonal of the x-y plane of a periodic unit box: density 1, a field of 1 along the wave, and a perpendicular field and velocity that turn about it (Toth 2000). It returns to its start after each period, 1 / sqrt(2). (fills the box) | `amp` 0.1 (Amplitude); `p` 0.1 (Pressure) |
+| `rayleigh-taylor` | Rayleigh-Taylor layers. Heavy gas over light gas in a unit box, in hydrostatic balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), with one seeded mode that vanishes at the walls. Up is y in 2D and z in 3D. (fills the box) | `rhoTop` 2 (Density above); `rhoBottom` 1 (Density below); `p0` 2.5 (Pressure at the interface); `amp` 0.05 (Kick amplitude); `modes` 2 (Wavelengths across) |
+| `shock-bubble` | Shock hitting a helium bubble. A planar shock in air (density 1, pressure 1, gamma 1.4) running toward +x into a bubble of helium at the same pressure and temperature, after Haas & Sturtevant (1987). Needs the species he4 and air, in that order, each with its own gamma. (fills the box) | `mach` 1.22 (Shock Mach number); `xhe` 0.72 (Helium in the bubble); `radius` 0.15 (Bubble radius) |
+| `thermal-instability` | Gas in unstable thermal balance. Uniform gas at the temperature where interstellar cooling balances heating on the unstable branch, with small random density perturbations at one pressure. Density in atoms per cm^3, temperature in units of 1000 K: needs the interstellar cooling, in those units. (fills the box) | `n0` 2 (Mean density (cm⁻³)); `amp` 0.02 (Perturbation); `kMax` 8 (Smallest wavelength); `seed` 20021 (Random seed) |
+<!-- /gen:setup-flows -->
 
 ## What cannot be combined
 

@@ -16,6 +16,9 @@ const lf = (text: string) => text.replace(/\r\n/g, '\n');
 const FILES: Record<string, (now: string) => string> = {
   'tools/headless/schema.json': () => schemaText(),
   'docs/api.md': fillGenerated,
+  'docs/setups.md': fillGenerated,
+  'docs/headless.md': fillGenerated,
+  '.claude/skills/shaderous-sim/SKILL.md': fillGenerated,
   'public/shaderous-setup.schema.json': () => `${JSON.stringify(setupJsonSchema(), null, 1)}\n`,
 };
 

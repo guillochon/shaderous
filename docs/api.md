@@ -133,7 +133,7 @@ by `npm run gen`.
 | `frho` | Settings | Tenuous below density. Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off |
 | `fu` | Settings | Max specific energy. Largest internal energy per unit mass tenuous gas may have. 0 is no cap |
 | `fv` | Settings | Max speed. Largest speed tenuous gas may have. 0 is no cap |
-| `fva` | Settings | Max Alfvén speed. With a magnetic field: largest Alfvén speed |B| / √ρ anywhere. Where the field is stronger than that for the gas it threads, mass is added at rest until it is not. Not conservative. 0 is no cap |
+| `fva` | Settings | Max Alfvén speed. With a magnetic field: largest Alfvén speed \|B\| / √ρ anywhere. Where the field is stronger than that for the gas it threads, mass is added at rest until it is not. Not conservative. 0 is no cap |
 | `cool` | Settings | Cooling function: off, power, ism. Optically thin radiative cooling (and heating) of the gas |
 | `crate` | Settings | Coefficient Λ₀. Power law: the cooling rate per unit volume is ρ² Λ₀ T^α |
 | `calpha` | Settings | Exponent of T. Power law: the exponent α of T in the cooling rate (1/2 is bremsstrahlung) |

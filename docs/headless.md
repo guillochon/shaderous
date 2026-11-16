@@ -170,13 +170,71 @@ changing. It needs numpy and matplotlib.
 
 ### Options
 
+Every option, as `--help` prints them (this table is written from the runner's own table of
+flags, [flags.mjs](../tools/headless/flags.mjs), by `npm run gen`):
+
+<!-- gen:cli-options -->
+**Setup (the same keys as a shared link; see docs/api.md)**
+
 | Option | Meaning |
 | --- | --- |
-| `--url URL` | Use the page served at URL (for example the live site) instead of serving this checkout |
-| `--headed` | Show the browser window, for when headless Chrome finds no GPU adapter |
-| `--low-priority` | Run at below-normal CPU priority. On Windows the browser inherits it |
-| `--gpu-memory GB` | GPU memory the simulation may take, the panel's "GPU memory" setting: it sets how many blocks the adaptive mesh can hold. Each run starts a fresh browser profile with the guessed default (2.5 GB on a desktop), so a big adaptive run on a large GPU wants it set |
-| `--quiet` | No progress lines on stderr |
+| `--problem ID`, `--dim 2\|3`, `--n CELLS`, `--amr LEVELS` | The preset, and its grid |
+| `--set KEY=VALUE` | Any other setup key, repeatable: --set gamma=1.4 --set p.mach=3 |
+| `--setup FILE` | A setup document (name.shaderous.json, see docs/setups.md) in place of --problem: a preset's file, or one saved from the Setup dialog. The keys above then say the grid and what differs from the file |
+
+**Stopping (default: the problem's end time)**
+
+| Option | Meaning |
+| --- | --- |
+| `--until T` | Run to this time (landed on exactly) |
+| `--steps N` | Run at most this many steps |
+| `--every DT` | Write outputs every DT of simulated time (and at the start) |
+| `--timeout SECONDS` | Give up on a run after this much wall time |
+
+**Outputs (diag.jsonl and manifest.json are always written)**
+
+| Option | Meaning |
+| --- | --- |
+| `--out DIR` | Folder (default: runs/<problem>-<date>) |
+| `--png` | A screenshot at each output |
+| `--width PX`, `--height PX` | Screenshot size (default 1024 square) |
+| `--view KEY=VALUE` | View setting for screenshots, repeatable: --view field=3 --view colormap=viridis |
+| `--slice VAR` | A slice of this variable at each output (repeatable) |
+| `--slice-axis A`, `--slice-pos P`, `--slice-res R` | Its axis (0 to 2), position (0 to 1) and cells per side |
+| `--slice-format F` | json (default): NNNN-tT-VAR.json, the whole slice() result; or npy: NNNN-tT-VAR.npy, float32 of shape [res, res] for numpy's np.load, with the slice's other fields under that output's "slices" in manifest.json |
+| `--athdf` | An .athdf file at each output |
+| `--debris` | Debris energies and dM/dt at each output, as JSON (problems that track them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py |
+
+**Movie (--mp4 records the whole run as movie.mp4, with a color bar, axes and the status line; not with --every or --steps; outputs are written at the start and the end)**
+
+| Option | Meaning |
+| --- | --- |
+| `--mp4` | Record the run as an MP4 movie |
+| `--frame-dt DT` | A frame near every DT of simulated time (no step is shortened for it); default a 600th of the problem's dynamical time |
+| `--frame-every N` | Or a frame every N steps |
+| `--fps F` | Playback rate (default 60) |
+| `--bitrate M` | Megabits per second of movie (default 0.2 bits per pixel per frame: 25 at 1080p and 60 fps) |
+| `--no-overlays` | Leave out the color bar, the axes and the status line |
+
+**Sweeps**
+
+| Option | Meaning |
+| --- | --- |
+| `--vary KEY=V1,V2,..` | Values of a setup key, repeatable; every combination is run |
+
+**Other**
+
+| Option | Meaning |
+| --- | --- |
+| `--url URL` | Use the page served here (default: serve this checkout with Vite) |
+| `--headed` | Show the browser (if headless Chrome finds no GPU adapter) |
+| `--low-priority` | Run at below-normal CPU priority (the browser inherits it on Windows) |
+| `--gpu-memory GB` | GPU memory the simulation may take (the panel's setting; default 2.5 on a desktop): how many blocks the adaptive mesh can hold |
+| `--quiet` | No progress messages |
+<!-- /gen:cli-options -->
+
+Each run starts a fresh browser profile with the guessed default of `--gpu-memory` (2.5 GB on a
+desktop), so a big adaptive run on a large GPU wants it set.
 
 ## MCP server
 
@@ -211,24 +269,29 @@ guessed default.
 
 ### Tools
 
+<!-- gen:mcp-tools -->
 | Tool | What it does |
 | --- | --- |
-| `describe` | Lists problems (id, dimensions, end time, parameters), fields, variables and choices. Give `problem` for one problem's full entry |
-| `load` | Builds a run from a setup (query string or object), paused at t = 0 |
+| `describe` | Lists problems (id, dimensions, end time, parameters), fields, variables and choices. Give `problem` for one problem’s full entry, with its setup document |
+| `check_setup` | Checks a setup document without running it: whether it can be read, what reading left out, and the errors and warnings the Setup dialog would list |
+| `load` | Builds a run from a setup (query string or object) or a setup document, paused at t = 0 |
 | `run` | Advances to a time (`until`, landed on exactly), by a number of `steps`, or whichever comes first, with an optional `timeout_seconds` |
 | `state` | Returns the problem, grid, time, steps, end time, GPU adapter, and `query`, the setup in force |
 | `diagnostics` | Reads back totals and extremes: mass, momentum, energies, Mach number, point masses, field ranges |
-| `stats` | Gives each variable's min, max and volume-weighted mean over the box |
+| `stats` | Gives each variable’s min, max and volume-weighted mean over the box |
 | `slice` | Samples a variable on a plane. Returns min, max and mean, with the values as rows when `res` is at most 64; `save_path` writes the full slice to a file instead: a `.npy` file (float32, shape `[res, res]`) if the name ends in `.npy`, else JSON |
 | `probe` | Gives the gas at given points |
 | `screenshot` | Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path` |
 | `view` | Changes what screenshots show, leaving the run alone |
-| `controls`, `control` | List the panel's controls, or set one mid-run as a person would |
+| `controls` | Lists the panel’s controls and the settings of the option table that can change mid-run |
+| `control` | Sets one of them (or presses a button) mid-run, as a person would |
 | `restart` | Starts again from the initial conditions |
-| `save_athdf`, `load_athdf` | Write the state to an `.athdf` file, or start a run from one |
+| `save_athdf` | Writes the state of the gas to an `.athdf` file |
 | `record` | Records the run from where it is as an MP4 movie to `path`, with a color bar, axes and the status line (with the simulation time): a frame every `every` steps or near every `dt` of code time, until `until` or `frames` |
+| `load_athdf` | Starts a run from an `.athdf` file |
 | `debris` | Gives debris energies and the return rate dM/dt, for problems that track them: totals, the surviving core, the first return and the peak. `save_path` writes the full report |
 | `errors` | Lists what the page has reported going wrong |
+<!-- /gen:mcp-tools -->
 
 File paths are relative to the server's working directory, which for Claude Code is the
 project root. A tool that fails returns its error message as a tool error, with `isError` set,

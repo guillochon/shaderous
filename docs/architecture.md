@@ -469,15 +469,28 @@ that repeats it is made from that place:
   keys from it. The renderer's `ViewState` must match it or the build stops.
 - The scripting API's methods are a table, `src/ui/api_schema.ts`: what each does and its
   arguments as JSON Schema.
+- The MCP server's tools are a table, `src/ui/mcp_schema.ts`: the API method each wraps, the
+  arguments it passes on (described as the API describes them) and what it adds of its own.
+- The command-line runner's flags are a table, `tools/headless/flags.mjs`, which makes its
+  parser's options and its help.
 
 The headless tools cannot import the page's TypeScript, so `npm run gen` writes what they need
-to files that are committed: `tools/headless/schema.json` (link keys, view settings, variables,
-choices, API methods), from which the MCP server takes its tools' input schemas and key lists;
-the two key tables of [api.md](api.md), between `<!-- gen:... -->` markers; and
-`public/shaderous-setup.schema.json`, the format of a setup document as JSON Schema. The
-generator is the unit test `tests/unit/generated.test.ts` run with a flag: run plainly, as
-`npm test` does, it fails when a generated file is out of date. After changing the option
-table, the view's table or the API's table, run `npm run gen` and commit what it changes.
+to files that are committed:
+
+- `tools/headless/schema.json`: link keys, view settings, variables, choices, API methods and
+  the finished definitions of the MCP tools. The server serves those definitions as they are
+  and holds only what each tool does when called.
+- The tables of the docs that restate one of these tables, between `<!-- gen:NAME -->`
+  markers: the link keys and view settings of [api.md](api.md); every key of a setup document,
+  every part's fields and every flow's parameters in [setups.md](setups.md); the runner's
+  options and the MCP tools in [headless.md](headless.md); and the lists of keys, tools and
+  flags in the agent skill (`.claude/skills/shaderous-sim/SKILL.md`).
+- `public/shaderous-setup.schema.json`, the format of a setup document as JSON Schema.
+
+The generator is the unit test `tests/unit/generated.test.ts` run with a flag: run plainly, as
+`npm test` does, it fails when a generated file is out of date. After changing one of the
+tables above, run `npm run gen` and commit what it changes. A new generated block is a
+function in `src/schema/docs.ts` and a pair of markers where it should appear.
 
 The presets were hand-written TypeScript objects until November 2026. Those objects live on in
 `tests/legacy/`, and `tests/unit/presets.test.ts` holds every compiled preset to them: the

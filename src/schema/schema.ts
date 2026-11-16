@@ -8,6 +8,7 @@ import { GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
 import { VIEW_EXTRAS, VIEW_OPTIONS, type ViewOption } from '../render/view_options';
 import { API_METHODS } from '../ui/api_schema';
 import { linkKeys } from '../ui/link';
+import { mcpTools } from '../ui/mcp_schema';
 
 export function buildSchema() {
   return {
@@ -31,6 +32,8 @@ export function buildSchema() {
     ],
     /** the methods of `window.shaderous`: what each does, and its arguments as JSON Schema */
     api: API_METHODS,
+    /** the MCP server's tools as a client is told of them, each with the API method it wraps and a line for the docs */
+    tools: mcpTools(),
   };
 }
 

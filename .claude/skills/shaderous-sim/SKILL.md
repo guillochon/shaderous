@@ -20,10 +20,15 @@ covered here.
 
 ## Setups
 
-A setup is described with the same keys as a share link: `problem`, `dim` (2 or 3), `n` (cells per
-side), `amr` (refinement levels, 0 to 5), plus overrides such as `tend`, `gamma`, `eos`,
-`riemann`, `limiter`, `cfl`, `gravity`, `cool`, `nu`, `kappa`, `bc` and `p.<param>`. View keys
-like `mode`, `field`, `axis` and `cmap` also work. Unknown keys are ignored and out-of-range
+A setup is described with the same keys as a share link (`describe` gives each one's values):
+
+<!-- gen:link-key-list -->
+- The run: `problem`, `setup`, `dim`, `n`, `amr`
+- Settings, each an override of the preset's own: `tend`, `eos`, `gamma`, `K`, `arad`, `degrho`, `degp`, `coulomb`, `iont`, `ionrho`, `frho`, `fu`, `fv`, `fva`, `cool`, `crate`, `calpha`, `cheat`, `ctunit`, `ctfloor`, `nu`, `kappa`, `gravity`, `G`, `vcycles`, `jfloor`, `jcells`, `fluxwork`, `refhi`, `reflo`, `refrho`, `tbins`, `riemann`, `limiter`, `cfl`, `dampr`, `damprate`, `wb`, `bc`, `p.<id>`
+- The view: `mode`, `field`, `species`, `log`, `lo`, `hi`, `axis`, `slice`, `rhocut`, `opacity`, `yaw`, `pitch`, `dist`, `tx`, `ty`, `tz`, `zoom`, `cx`, `cy`, `blocks`, `contours`, `ncont`, `fog`, `isoa`, `light`, `box`, `flines`, `nflines`, `cmap`, `tf`
+<!-- /gen:link-key-list -->
+
+Also `p.<param>` for a preset's own parameters. Unknown keys are ignored and out-of-range
 values clamped, so **read back `state().query`** to see what actually took effect.
 
 - Get problem ids and parameters from `describe` (MCP), `npm run headless -- describe [id]`, or
@@ -169,6 +174,30 @@ npm run headless -- run --setup examples/setups/ms-wd-collision.shaderous.json -
 Typical sequence: `describe` → `load {setup}` → `run {until}` → `diagnostics` →
 `screenshot {width, view: {mode: "slice", field: 0}}`.
 
+<!-- gen:mcp-tools -->
+| Tool | What it does |
+| --- | --- |
+| `describe` | Lists problems (id, dimensions, end time, parameters), fields, variables and choices. Give `problem` for one problem’s full entry, with its setup document |
+| `check_setup` | Checks a setup document without running it: whether it can be read, what reading left out, and the errors and warnings the Setup dialog would list |
+| `load` | Builds a run from a setup (query string or object) or a setup document, paused at t = 0 |
+| `run` | Advances to a time (`until`, landed on exactly), by a number of `steps`, or whichever comes first, with an optional `timeout_seconds` |
+| `state` | Returns the problem, grid, time, steps, end time, GPU adapter, and `query`, the setup in force |
+| `diagnostics` | Reads back totals and extremes: mass, momentum, energies, Mach number, point masses, field ranges |
+| `stats` | Gives each variable’s min, max and volume-weighted mean over the box |
+| `slice` | Samples a variable on a plane. Returns min, max and mean, with the values as rows when `res` is at most 64; `save_path` writes the full slice to a file instead: a `.npy` file (float32, shape `[res, res]`) if the name ends in `.npy`, else JSON |
+| `probe` | Gives the gas at given points |
+| `screenshot` | Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path` |
+| `view` | Changes what screenshots show, leaving the run alone |
+| `controls` | Lists the panel’s controls and the settings of the option table that can change mid-run |
+| `control` | Sets one of them (or presses a button) mid-run, as a person would |
+| `restart` | Starts again from the initial conditions |
+| `save_athdf` | Writes the state of the gas to an `.athdf` file |
+| `record` | Records the run from where it is as an MP4 movie to `path`, with a color bar, axes and the status line (with the simulation time): a frame every `every` steps or near every `dt` of code time, until `until` or `frames` |
+| `load_athdf` | Starts a run from an `.athdf` file |
+| `debris` | Gives debris energies and the return rate dM/dt, for problems that track them: totals, the surviving core, the first return and the peak. `save_path` writes the full report |
+| `errors` | Lists what the page has reported going wrong |
+<!-- /gen:mcp-tools -->
+
 - The page starts on the first call, which takes a few seconds.
 - A run stays paused between calls. `load` always starts from t = 0.
 - `control {id, value}` changes a setting partway through a run, as the panel would: switching
@@ -189,6 +218,17 @@ npm run headless -- run --problem sedov --dim 2 --n 512 --until 0.05 --every 0.0
 ```bash
 npm run headless -- sweep --problem sedov --dim 2 --vary n=128,256,512 --until 0.05 --slice rho --slice-res 256 --out runs/conv
 ```
+
+Every flag (`npm run headless -- --help` says what each takes):
+
+<!-- gen:cli-flag-list -->
+- Setup: `--problem ID`, `--dim 2|3`, `--n CELLS`, `--amr LEVELS`, `--set KEY=VALUE`, `--setup FILE`
+- Stopping: `--until T`, `--steps N`, `--every DT`, `--timeout SECONDS`
+- Outputs: `--out DIR`, `--png`, `--width PX`, `--height PX`, `--view KEY=VALUE`, `--slice VAR`, `--slice-axis A`, `--slice-pos P`, `--slice-res R`, `--slice-format F`, `--athdf`, `--debris`
+- Movie: `--mp4`, `--frame-dt DT`, `--frame-every N`, `--fps F`, `--bitrate M`, `--no-overlays`
+- Sweeps: `--vary KEY=V1,V2,..`
+- Other: `--url URL`, `--headed`, `--low-priority`, `--gpu-memory GB`, `--quiet`
+<!-- /gen:cli-flag-list -->
 
 - Each run writes `manifest.json`, `diag.jsonl` (one line per output), and then whatever was
   asked for: PNGs with `--png`, slice JSON with `--slice VAR` (or `.npy` files for numpy with

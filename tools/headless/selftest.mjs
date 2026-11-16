@@ -42,11 +42,12 @@ const check = (ok, what) => {
 
   // What a tool passes on to the page's API it describes as the API does (schema.json).
   {
-    const api = new Map(JSON.parse(readFileSync(path.join(REPO, 'tools/headless/schema.json'), 'utf8')).api.map((m) => [m.name, m]));
-    const methodOf = { check_setup: 'check', load_athdf: 'loadAthdf', save_athdf: 'athdf' };
+    const schema = JSON.parse(readFileSync(path.join(REPO, 'tools/headless/schema.json'), 'utf8'));
+    const api = new Map(schema.api.map((m) => [m.name, m]));
+    const methodOf = Object.fromEntries(schema.tools.map((t) => [t.name, t.method]));
     const differing = [];
     for (const t of list.result.tools) {
-      const m = api.get(methodOf[t.name] ?? t.name);
+      const m = api.get(methodOf[t.name]);
       if (!m) differing.push(`${t.name}: no such method`);
       for (const [key, schema] of Object.entries(t.inputSchema.properties ?? {})) {
         const found = m?.args.find((a) => a.name === key) ?? m?.args.find((a) => a.name === 'options')?.properties?.[key];

@@ -25,19 +25,6 @@ const log = (m) => process.stderr.write(`[shaderous-mcp] ${m}\n`);
 const SCHEMA = JSON.parse(readFileSync(new URL('./schema.json', import.meta.url), 'utf8'));
 const linkKeysOf = (group) => SCHEMA.link.filter((k) => k.group === group).map((k) => k.key).join(', ');
 const SETUP_KEYS = `${linkKeysOf('run')}, ${linkKeysOf('settings')}, and view keys ${linkKeysOf('view')}. dim is 2 or 3, amr 0 to 5, bc six digits. Unknown keys are ignored, values out of range clamped.`;
-// The page's API by method (src/ui/api_schema.ts): what each does, and its arguments as JSON
-// Schema. A tool that passes an argument on takes its schema from there with arg(); what a tool
-// adds of its own (a file to save to, seconds instead of milliseconds) is written here.
-const API = new Map(SCHEMA.api.map((m) => [m.name, m]));
-const about = (method) => API.get(method).summary;
-function arg(method, name) {
-  const m = API.get(method);
-  const found = m.args.find((a) => a.name === name) ?? m.args.find((a) => a.name === 'options')?.properties?.[name];
-  if (!found) throw new Error(`the API's ${method} has no argument "${name}"`);
-  const { name: _name, optional: _optional, ...schema } = found;
-  return schema;
-}
-const VIEW_KEYS = SCHEMA.view.map((v) => (v.key === 'mode' ? 'mode (volume|slice|projection)' : v.key === 'field' ? 'field (index, see describe)' : v.key)).join(', ');
 
 const INSTRUCTIONS = `Shaderous is a GPU gas dynamics code (compressible Euler equations with gravity, cooling, adaptive mesh refinement). These tools drive one simulation in a headless browser.
 Typical use: describe (pick a problem) -> load (a setup: problem, dim, n, amr and other keys) -> run (to a time, landed on exactly, or a number of steps) -> diagnostics / stats / slice / probe for numbers, screenshot to look at it -> save_athdf to keep the state, record for a movie.
@@ -55,16 +42,16 @@ async function sim() {
 const call = async (name, ...args) => (await sim()).call(name, ...args);
 
 // --- tools ---------------------------------------------------------------------------------
-const obj = (properties, required = []) => ({ type: 'object', properties, required, additionalProperties: false });
 const text = (v) => ({ content: [{ type: 'text', text: typeof v === 'string' ? v : JSON.stringify(v, null, 1) }] });
 const round = (v) => (typeof v === 'number' && Number.isFinite(v) && !Number.isInteger(v) ? +v.toPrecision(7) : v);
 const resolvePath = (p) => path.resolve(process.cwd(), p);
 
+// What each tool does when called. Its name, description and input schema are in schema.json
+// (written by `npm run gen` from src/ui/mcp_schema.ts and the API's own table), so nothing
+// about what a tool accepts is written here.
 const TOOLS = [
   {
     name: 'describe',
-    description: `${about('describe')} Give \`problem\` for one problem in full, with its description.`,
-    inputSchema: obj({ problem: { type: 'string', description: 'A problem id for its full entry' } }),
     async run({ problem }) {
       const d = await call('describe');
       if (problem) {
@@ -90,36 +77,22 @@ const TOOLS = [
   },
   {
     name: 'check_setup',
-    description: about('check'),
-    inputSchema: obj({ document: arg('check', 'document') }, ['document']),
     run: async ({ document }) => text(await call('check', document)),
   },
   {
     name: 'load',
-    description: about('load'),
-    inputSchema: obj({ setup: arg('load', 'setup'), document: arg('load', 'document') }),
     run: async ({ setup, document }) => text(await call('load', setup ?? '', ...(document ? [document] : []))),
   },
   {
     name: 'run',
-    description: about('run'),
-    inputSchema: obj({
-      until: arg('run', 'until'),
-      steps: arg('run', 'steps'),
-      timeout_seconds: { type: 'number', description: 'Give up after this much wall time (default 600)' },
-    }),
     run: async ({ until, steps, timeout_seconds }) => text(await call('run', { until, steps, timeoutMs: 1000 * (timeout_seconds ?? 600) })),
   },
   {
     name: 'state',
-    description: about('state'),
-    inputSchema: obj({}),
     run: async () => text(await call('state')),
   },
   {
     name: 'diagnostics',
-    description: about('diagnostics'),
-    inputSchema: obj({}),
     async run() {
       const d = await call('diagnostics');
       const r = (v) => (Array.isArray(v) ? v.map(r) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).map(([k, x]) => [k, r(x)])) : round(v));
@@ -128,21 +101,10 @@ const TOOLS = [
   },
   {
     name: 'stats',
-    description: about('stats'),
-    inputSchema: obj({}),
     run: async () => text(await call('stats')),
   },
   {
     name: 'slice',
-    description: 'A variable on a res x res grid on a plane through the box (perpendicular to `axis` at fraction `pos`). Returns min, max and mean, and the values (row j, column i: values[j][i]) when res is at most 64 or include_values is set; with save_path the full slice is written there instead: as a .npy file (float32, shape [res, res], for numpy\'s np.load) when the name ends in .npy, else as JSON. Variables: rho, press, vel1, vel2, vel3, r0, level, or a species name.',
-    inputSchema: obj({
-      variable: arg('slice', 'variable'),
-      axis: arg('slice', 'axis'),
-      pos: arg('slice', 'pos'),
-      res: arg('slice', 'res'),
-      include_values: { type: 'boolean' },
-      save_path: { type: 'string', description: 'Write the slice to this file: .npy (float32 for numpy), else JSON' },
-    }),
     async run({ variable, axis, pos, res = 32, include_values, save_path }) {
       // Out of the page as float32 bytes: the same values as a JSON list, many times faster.
       const { head: s, values } = await fetchSlice(call, { variable, axis, pos, res });
@@ -163,19 +125,10 @@ const TOOLS = [
   },
   {
     name: 'probe',
-    description: about('probe'),
-    inputSchema: obj({ points: arg('probe', 'points') }, ['points']),
     run: async ({ points }) => text(await call('probe', points)),
   },
   {
     name: 'screenshot',
-    description: `${about('screenshot')} \`view\` changes what is drawn first: ${VIEW_KEYS}. Settings persist for later screenshots.`,
-    inputSchema: obj({
-      width: arg('screenshot', 'width'),
-      height: arg('screenshot', 'height'),
-      view: { type: 'object', description: 'View settings to apply first' },
-      save_path: { type: 'string', description: 'Also write the PNG to this file' },
-    }),
     async run({ width = 768, height, view, save_path }) {
       if (view && Object.keys(view).length) await call('view', view);
       const png = await call('screenshot', { width, height: height ?? width });
@@ -192,20 +145,14 @@ const TOOLS = [
   },
   {
     name: 'view',
-    description: about('view'),
-    inputSchema: obj({ changes: arg('view', 'changes') }, ['changes']),
     run: async ({ changes }) => text(await call('view', changes)),
   },
   {
     name: 'controls',
-    description: about('controls'),
-    inputSchema: obj({}),
     run: async () => text(await call('controls')),
   },
   {
     name: 'control',
-    description: about('control'),
-    inputSchema: obj({ id: arg('control', 'id'), value: arg('control', 'value') }, ['id']),
     async run({ id, value }) {
       await call('control', id, value);
       return text(await call('state'));
@@ -213,14 +160,10 @@ const TOOLS = [
   },
   {
     name: 'restart',
-    description: about('restart'),
-    inputSchema: obj({}),
     run: async () => text(await call('restart')),
   },
   {
     name: 'save_athdf',
-    description: 'Save the state of the gas to an .athdf file (HDF5 in Athena++\'s layout; yt reads it). The file carries the setup, so load_athdf continues the run exactly.',
-    inputSchema: obj({ path: { type: 'string', description: 'File or folder to write to (default: the current folder, under the file\'s own name)' } }),
     async run({ path: p }) {
       const f = await call('athdf');
       let file = resolvePath(p ?? f.name);
@@ -232,22 +175,6 @@ const TOOLS = [
   },
   {
     name: 'record',
-    description: `${about('record')} Returns the frame count, movie length and where the file went.`,
-    inputSchema: obj({
-      path: { type: 'string', description: 'File or folder to write to (default: the current folder, under the name of the movie)' },
-      dt: arg('record', 'dt'),
-      every: arg('record', 'every'),
-      until: arg('record', 'until'),
-      frames: arg('record', 'frames'),
-      fps: arg('record', 'fps'),
-      width: arg('record', 'width'),
-      height: arg('record', 'height'),
-      bitrate_mbps: { type: 'number', exclusiveMinimum: 0, description: 'Megabits per second of movie (default 0.2 bits per pixel per frame: 25 at 1080p and 60 fps)' },
-      colorbar: { type: 'boolean', description: 'Default true' },
-      axes: { type: 'boolean', description: 'Default true' },
-      status: { type: 'boolean', description: 'The status line (grid, simulation time, point masses, mesh). Default true' },
-      timeout_s: { type: 'number', description: 'Give up after this much wall time, keeping what was recorded' },
-    }),
     async run({ path: p, every, dt, until, frames, fps, width, height, bitrate_mbps, colorbar = true, axes = true, status = true, timeout_s }) {
       if (until === undefined && frames === undefined) throw new Error('give `until` or `frames`, so that the movie ends');
       const m = await call('record', {
@@ -269,14 +196,10 @@ const TOOLS = [
   },
   {
     name: 'load_athdf',
-    description: about('loadAthdf'),
-    inputSchema: obj({ path: { type: 'string' } }, ['path']),
     run: async ({ path: p }) => text(await call('loadAthdf', readFileSync(resolvePath(p)).toString('base64'))),
   },
   {
     name: 'debris',
-    description: `${about('debris')} Returns totals, the core, the first return and the peak of dM/dt (in days and solar masses per year where the problem has units). save_path writes the full report (bins, dmdt.t and dmdt.rate) as JSON.`,
-    inputSchema: obj({ save_path: { type: 'string', description: 'Write the full report as JSON to this file' } }),
     async run({ save_path }) {
       const r = await call('debris');
       const out = debrisSummary(r);
@@ -291,12 +214,16 @@ const TOOLS = [
   },
   {
     name: 'errors',
-    description: about('errors'),
-    inputSchema: obj({}),
     run: async () => text(await call('errors')),
   },
 ];
 const byName = new Map(TOOLS.map((t) => [t.name, t]));
+// Every tool the schema describes is one this file runs, and the other way round.
+{
+  const described = SCHEMA.tools.map((t) => t.name);
+  const odd = [...described.filter((n) => !byName.has(n)), ...TOOLS.map((t) => t.name).filter((n) => !described.includes(n))];
+  if (odd.length) throw new Error(`mcp.mjs and schema.json disagree about these tools: ${odd.join(', ')} (npm run gen?)`);
+}
 
 // --- JSON-RPC over stdio ---------------------------------------------------------------------
 const send = (msg) => process.stdout.write(JSON.stringify({ jsonrpc: '2.0', ...msg }) + '\n');
@@ -316,7 +243,7 @@ async function handle(msg) {
     case 'ping':
       return reply({});
     case 'tools/list':
-      return reply({ tools: TOOLS.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
+      return reply({ tools: SCHEMA.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) });
     case 'tools/call': {
       const tool = byName.get(params?.name);
       if (!tool) return error(-32602, `unknown tool "${params?.name}"`);

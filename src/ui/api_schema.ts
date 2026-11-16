@@ -86,7 +86,7 @@ export const API_METHODS: ApiMethod[] = [
         variable: { type: 'string', description: `One of ${[...VARIABLES, 'level'].join(', ')}, or the name of a species. Default rho` },
         axis: { type: 'integer', minimum: 0, maximum: 2, description: 'Default 2 (z); always 2 in 2D' },
         pos: { type: 'number', minimum: 0, maximum: 1, description: 'Default 0.5' },
-        res: { type: 'integer', minimum: 2, maximum: 2048, description: 'Default 32' },
+        res: { type: 'integer', minimum: 2, maximum: 2048, description: 'Default: the size of the grid, at most 256 (the MCP tool: 32)' },
         encoding: { type: 'string', enum: ['json', 'base64'], description: "json (default): the values as a list; base64: as float32 bytes in `array`, many times faster to bring out of the page at a large res" },
       },
     }],
