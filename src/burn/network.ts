@@ -13,7 +13,7 @@
 //                forward and reverse, screened as the reference screens it: REACLIB fits,
 //                pynucastro's screen5), which rise far more steeply with T than the network
 //                could resolve from log T alone.
-//   network      4 hidden layers of 128 SiLU units, 54 outputs: two stages of 27.
+//   network      4 hidden layers of SiLU units (130 wide: 128 trained, two gated rate units added by tools/burn/weightprog/twounit.py), 54 outputs: two stages of 27.
 //   each stage   D = (1 - exp(-k dt)) (M g - X s): every species loses a share s_i = sigmoid(u_i)
 //                of itself, and what is lost, M = sum X_i s_i, goes to the species by a
 //                softmax g. k = 10^(5 + 5 z_0) per second. Mass is conserved exactly and no

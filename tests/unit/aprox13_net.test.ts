@@ -15,8 +15,9 @@ interface Case {
 const cases = CASES as Case[];
 
 describe('aprox13 network', () => {
-  it('has the weights of 61 -> 4 x 128 -> 54', () => {
-    expect(netWeights().length).toBe(61 * 128 + 128 + 3 * (128 * 128 + 128) + 128 * 54 + 54);
+  it('has the weights of 61 -> 4 x 130 -> 54', () => {
+    const H = 130; // 128 trained units and two gated rate units (tools/burn/weightprog/twounit.py)
+    expect(netWeights().length).toBe(61 * H + H + 3 * (H * H + H) + H * 54 + 54);
     expect(NET_SPECIES.length).toBe(13);
   });
 
