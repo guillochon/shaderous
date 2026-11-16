@@ -318,6 +318,14 @@ const firstLink = decodeLink(new URLSearchParams(location.search));
 showProblem(firstLink.problem);
 $('blurb').textContent = problemById(firstLink.problem).blurb;
 
+// Enter in a field to type in applies the value and lets go of the field: leaving it fires the
+// change the browser has not fired yet, and the page's keys (space runs) work again.
+document.addEventListener('keydown', (e) => {
+  const el = e.target;
+  if (e.key !== 'Enter' || e.isComposing || !(el instanceof HTMLInputElement)) return;
+  if (['text', 'number', 'search', 'url', 'email', 'tel', 'password'].includes(el.type)) el.blur();
+});
+
 // Fields with a factor: a click of the arrows (or an arrow key) multiplies or divides the value
 // by it, rounded to three figures, instead of adding one. The browser takes its own step
 // first; that tells the direction, and the value it started from is noted on the press.
