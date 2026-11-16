@@ -446,6 +446,20 @@ export class AmrGravity {
     this.cells(pass, nLeaf, BS);
   }
 
+  /**
+   * A new run: the potential in these blocks (the root level's, by the corner of each one's
+   * padded cube in the atlas) starts from zero. A cold solve begins each finer level from the
+   * coarser one, but the root level from whatever it holds, and the cycles of a reset do not
+   * take the last run's potential all the way out: what is left pulls the new run's gas toward
+   * where the old run's mass was.
+   */
+  clear(corners: readonly (readonly number[])[]) {
+    const zeros = new Float32Array(PAD ** 3);
+    for (const origin of corners) {
+      this.ctx.device.queue.writeTexture({ texture: this.phi, origin: [origin[0], origin[1], origin[2]] }, zeros, { bytesPerRow: PAD * 4, rowsPerImage: PAD }, [PAD, PAD, PAD]);
+    }
+  }
+
   /** Keep the potential as the "previous" one, for extrapolation to the half step. */
   copyPhiToOld(enc: GPUCommandEncoder) {
     const side = this.ctx.slotsPerSide * PAD;

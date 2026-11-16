@@ -1350,6 +1350,10 @@ export class AmrSim implements Simulation {
     this.debrisBuf?.reset(c.restart?.debris);
     this.writeParams();
     this.uploadTree();
+    if (this.selfGravity) {
+      // The root level's potential from zero, not from the last run's (AmrGravity.clear).
+      this.grav!.clear([...this.tree.lists().byLevel[0]].map((slot) => this.origin(slot).map((o) => o - NG)));
+    }
     if (this.fieldOn) {
       // Cold start: enough cycles per level to converge from zero. The clock's dt is zero, so
       // the point masses' accelerations are only evaluated.
