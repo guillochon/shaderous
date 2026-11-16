@@ -362,6 +362,7 @@ float64 TypeScript mirror for testing (`tests/unit/eos*.test.ts`).
 | **Barotropic** (`barotropic.wgsl`) | $`p = K\rho^{\Gamma}`$ (isothermal for $`\Gamma = 1`$) | The energy equation is not used; $`\rho e`$ follows the density; HLL fluxes |
 | **Gas + radiation** (`gas_radiation.wgsl`) | $`p = \dfrac{\rho k T}{\mu m_u} + \tfrac13 a T^4`$ | $`T`$ is the root of $`\rho e = \dfrac{\rho kT}{(\gamma - 1)\mu m_u} + aT^4`$, from 8 Newton steps started above the root (`quartic.wgsl`) |
 | **Degenerate** (`degenerate.wgsl`) | $`p = p_\text{deg}(\rho) + p_\text{ion} + p_\text{rad}`$ | Zero-temperature electrons at any degree of relativity ([Chandrasekhar 1935][Chandrasekhar1935]), plus ideal ions and radiation |
+| **White dwarf matter** (`helmholtz.wgsl`) | $`p = p_\text{deg}(\rho) + p_{e,\text{th}} + p_\text{ion} + p_\text{rad} + p_\text{C}`$ | The electron-positron gas at any degeneracy and temperature from a table of its free energy, in the manner of Helmholtz ([Timmes & Swesty 2000][TimmesSwesty2000]); ideal ions, radiation, and the ions' Coulomb energy |
 | **Ionizing hydrogen** (`ionizing.wgsl`) | $`p = \dfrac{\rho k T}{m_u}\left[h(1 + x) + o\right]`$ | Ionized fraction $`x`$ of the hydrogen from Saha equilibrium ([Saha 1920][Saha1920]); $`h`$ and $`o`$ are the particles per $`m_u`$ from hydrogen nuclei and from the other species |
 
 **Degenerate electrons.** With $`x = p_F/(m_e c)`$ the dimensionless Fermi momentum and
@@ -377,6 +378,43 @@ composition. Each part is thermodynamically consistent on its own, so the sound 
 $`c_s^2 = dp_\text{deg}/d\rho + \Gamma_1 p_\text{th}/\rho`$. For $`x < \tfrac12`$ the closed forms
 cancel to nothing in single precision, so the pressure and energy are summed as series in
 $`x^2`$ there. The series agree with the closed forms to $`10^{-7}`$ for $`0.3 \le x < 0.5`$.
+
+**White dwarf matter.** The electrons' thermal free energy is tabulated in
+$`\log\rho Y_e`$ and $`\log T`$ with its first derivatives and interpolated by bicubic Hermite
+polynomials, so their pressure and energy, being its derivatives, satisfy the first law
+(`tools/eos/NOTES.md` has the table's construction and accuracy). The temperature comes from
+the energy by Newton's method, started from a table of the inverse.
+
+The ions' Coulomb energy comes from the free energy of the one-component plasma, as Helmholtz
+has it (the fits of Yakovlev & Shalybkov 1989). With the coupling
+$`\Gamma = \bar Z^2 e^2/(a kT)`$ and $`a`$ the ion-sphere radius, the energy per ion is
+$`kT\,u(\Gamma)`$ and the pressure a third of the energy density:
+
+```math
+u = \begin{cases}
+a_1\Gamma + b_1\Gamma^{1/4} + c_1\Gamma^{-1/4} + d_1, & \Gamma \ge 1\\
+-\tfrac{\sqrt3}{2}\Gamma^{3/2} + a_2\Gamma^{b_2}, & \Gamma < 1
+\end{cases}
+\qquad a_1 = -0.898 .
+```
+
+The term $`a_1\Gamma kT`$ does not depend on temperature (it is the ion spheres' electrostatic
+energy) and joins the zero-temperature electrons: it lowers the cold pressure by
+$`0.0046\,\bar Z^{2/3}`$ of the electrons' where they are relativistic (1.5% for carbon) and by
+more where they are not, so a 1 M☉ carbon-oxygen white dwarf is 6% smaller
+([Hamada & Salpeter 1961][Hamada1961]). The rest is thermal, positive, and rises with
+temperature, which the solve for $`T`$ needs; near crystallization it more than doubles the
+ions' heat capacity. In thin matter the cold term alone would make the pressure negative
+(below $`0.18\,\bar Z^2/Y_e`$ g/cm³), and fully ionized ion spheres are the wrong model there in
+any case. Helmholtz drops the Coulomb terms where the total pressure would be negative; here
+the whole Coulomb free energy is faded by $`w = r/(1 + r)`$, $`r = \rho/\rho_0`$, with
+$`\rho_0`$ 64 times that density (1100 g/cm³ for carbon-oxygen). The fade is a function of
+density applied to the free energy, so pressure and energy remain consistent. The white dwarf
+builder and its settling use the same cold curve; built on the electrons' pressure alone, a
+star would read the missing pressure as heat (10⁸ K and more). `physics.eosParams.helmCoulomb`
+(link key `coulomb`) multiplies the whole term; 0 switches it off. The burning network was
+trained with the heat capacity of the gas without it, a difference of a few percent at burning
+temperatures, where $`\Gamma`$ is near one.
 
 **Saha hydrogen.** The ionization fraction solves
 
@@ -1327,6 +1365,8 @@ result.
 [Taylor1950]: https://doi.org/10.1098/rspa.1950.0049
 [Thornber2008]: https://doi.org/10.1016/j.jcp.2008.01.036
 [Timmes2000]: https://doi.org/10.1086/313407
+[TimmesSwesty2000]: https://doi.org/10.1086/313304
+[Hamada1961]: https://doi.org/10.1086/147195
 [Toro1994]: https://doi.org/10.1007/BF01414629
 [Toro2009]: https://doi.org/10.1007/b79761
 [SG09]: https://doi.org/10.1016/j.newast.2008.06.003
@@ -1361,6 +1401,7 @@ result.
 - Gresho, P. M., & Chan, S. T. (1990). On the theory of semi-implicit projection methods for viscous incompressible flow and its implementation via a finite element method that also introduces a nearly consistent mass matrix. II - Implementation. International Journal for Numerical Methods in Fluids 11, 621. [doi:10.1002/fld.1650110510](https://doi.org/10.1002/fld.1650110510)
 - Guillochon, J., et al. (2009). Three-dimensional Simulations of Tidally Disrupted Solar-type Stars and the Observational Signatures of Shock Breakout. ApJ 705, 844. [doi:10.1088/0004-637X/705/1/844](https://doi.org/10.1088/0004-637X/705/1/844)
 - Guillochon, J., & Ramirez-Ruiz, E. (2013). Hydrodynamical Simulations to Determine the Feeding Rate of Black Holes by the Tidal Disruption of Stars: The Importance of the Impact Parameter and Stellar Structure. ApJ 767, 25. [doi:10.1088/0004-637X/767/1/25](https://doi.org/10.1088/0004-637X/767/1/25)
+- Hamada, T., & Salpeter, E. E. (1961). Models for Zero-Temperature Stars. ApJ 134, 683. [doi:10.1086/147195](https://doi.org/10.1086/147195)
 - Harten, A., Lax, P. D., & van Leer, B. (1983). On Upstream Differencing and Godunov-Type Schemes for Hyperbolic Conservation Laws. SIAM Review 25, 35. [doi:10.1137/1025002](https://doi.org/10.1137/1025002)
 - Hawley, J. F. (2000). Global Magnetohydrodynamical Simulations of Accretion Tori. ApJ 528, 462. [doi:10.1086/308180](https://doi.org/10.1086/308180)
 - Hawley, J. F., Guan, X., & Krolik, J. H. (2011). Assessing Quantitative Results in Accretion Simulations: From Local to Global. ApJ 738, 84. [doi:10.1088/0004-637X/738/1/84](https://doi.org/10.1088/0004-637X/738/1/84)
@@ -1384,6 +1425,7 @@ result.
 - Stone, J. M., et al. (2020). The Athena++ Adaptive Mesh Refinement Framework: Design and Magnetohydrodynamic Solvers. ApJS 249, 4. [doi:10.3847/1538-4365/ab929b](https://doi.org/10.3847/1538-4365/ab929b)
 - Taylor, G. (1950). The Formation of a Blast Wave by a Very Intense Explosion. I. Theoretical Discussion. Proceedings of the Royal Society of London Series A 201, 159. [doi:10.1098/rspa.1950.0049](https://doi.org/10.1098/rspa.1950.0049)
 - Thornber, B., et al. (2008). An improved reconstruction method for compressible flows with low Mach number features. Journal of Computational Physics 227, 4873. [doi:10.1016/j.jcp.2008.01.036](https://doi.org/10.1016/j.jcp.2008.01.036)
+- Timmes, F. X., & Swesty, F. D. (2000). The Accuracy, Consistency, and Speed of an Electron-Positron Equation of State Based on Table Interpolation of the Helmholtz Free Energy. ApJS 126, 501. [doi:10.1086/313304](https://doi.org/10.1086/313304)
 - Timmes, F. X., Hoffman, R. D., & Woosley, S. E. (2000). An inexpensive nuclear energy generation network for stellar hydrodynamics. ApJS 129, 377. [doi:10.1086/313407](https://doi.org/10.1086/313407)
 - Toro, E. F., Spruce, M., & Speares, W. (1994). Restoration of the contact surface in the HLL-Riemann solver. Shock Waves 4, 25. [doi:10.1007/BF01414629](https://doi.org/10.1007/BF01414629)
 - Toro, E. F. (2009). Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction, 3rd ed. Springer. [doi:10.1007/b79761](https://doi.org/10.1007/b79761)
@@ -1392,4 +1434,5 @@ result.
 - van Leer, B. (1977). Towards the Ultimate Conservative Difference Scheme. IV. A New Approach to Numerical Convection. Journal of Computational Physics 23, 276. [doi:10.1016/0021-9991(77)90095-X](https://doi.org/10.1016/0021-9991(77)90095-X)
 - van Leer, B. (1979). Towards the Ultimate Conservative Difference Scheme. V. A Second-Order Sequel to Godunov's Method. Journal of Computational Physics 32, 101. [doi:10.1016/0021-9991(79)90145-1](https://doi.org/10.1016/0021-9991(79)90145-1)
 - Vázquez-Semadeni, E., et al. (2007). Molecular Cloud Evolution. II. From Cloud Formation to the Early Stages of Star Formation in Decaying Conditions. ApJ 657, 870. [doi:10.1086/510771](https://doi.org/10.1086/510771)
+- Yakovlev, D. G., & Shalybkov, D. A. (1989). Degenerate cores of white dwarfs and envelopes of neutron stars: thermodynamics and plasma screening in thermonuclear reactions. Astrophysics and Space Physics Reviews 7, 311.
 - Zingale, M., et al. (2002). Mapping Initial Hydrostatic Models in Godunov Codes. ApJS 143, 539. [doi:10.1086/342754](https://doi.org/10.1086/342754)

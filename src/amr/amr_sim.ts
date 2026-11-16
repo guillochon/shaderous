@@ -1608,7 +1608,7 @@ export class AmrSim implements Simulation {
         const o = 12 + 24 * i;
         const g = st.barotrope.gpu!;
         f.set([st.center[0], st.center[1], st.center[2] ?? 0, st.R, st.reach ?? 3e38, mass[i], st.scalar, g.kind === 'polytrope' ? 0 : 1], o);
-        f.set(g.kind === 'polytrope' ? [g.n, g.K, (g.n + 1) * g.K, 0] : [g.degRho, g.degP, 0, 0], o + 8);
+        f.set(g.kind === 'polytrope' ? [g.n, g.K, (g.n + 1) * g.K, 0] : [g.degRho, g.degP, g.c1 ?? 0, g.rho0 ?? 1], o + 8);
         f.set([st.vel[0], st.vel[1], st.vel[2] ?? 0, 0], o + 12);
         const hi = Math.fround(C[i]);
         f.set([hi, C[i] - hi], o + 16);

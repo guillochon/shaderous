@@ -34,6 +34,22 @@ The burning presets now use a tabulated electron-positron gas, as every collisio
   a classical-gas guess. With the burning network running, the C/O tube costs 15% more per step
   than with the old EOS (21.8 against 19.0 ms at 512^2 on an RTX 3080).
 
+- The ions' Coulomb energy (added 2026-11-16; plan in `plans/coulomb-corrections.md`) is
+  analytic and needs no table: the one-component plasma's free energy as Helmholtz has it,
+  split into a part that does not depend on T, which joins the zero-temperature electrons, and
+  a thermal part, and faded out below about 1e3 g/cm^3 (for C/O), where the cold part would
+  otherwise make the pressure negative. `src/eos/helmholtz.ts` has the derivation,
+  `tests/unit/helmholtz.test.ts` checks it against differences of the free energy.
+  - `EosParams.helmCoulomb` (link key `coulomb`) multiplies it; 1 by default.
+  - White dwarfs are built on the same cold curve (`src/problems/white_dwarf.ts`). They are
+    smaller: 8586 to 8127 km at 0.6 M_sun, 5428 to 5094 km at 1 M_sun, 2771 to 2290 km at
+    1.3 M_sun (the term lowers the Chandrasekhar mass by some 3%).
+  - Newton takes 3.3 iterations on average with it (5 at most): the inverse tables were made
+    without the Coulomb heat, which the starting point allows for in one analytic step.
+  - `helm.py`, which the burner's reference burns and training rollouts use for the heat
+    capacity, does not have the term. At burning temperatures Gamma is near one and the
+    difference is a few percent of the ions' heat capacity.
+
 Tried and not used:
 - Bicubic tables of h's two first derivatives, with exact second derivatives as slopes.
   Worse: the pair onset near 5e8 K at low density is too sharp for differenced slopes.

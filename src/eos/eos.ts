@@ -3,7 +3,7 @@
 import { meanMolecularWeight, nuclearAverages, COMPOSITIONS, type Composition } from '../units/composition';
 import { SI } from '../units/constants';
 import { eosConstants, kelvinPerCodeT, toCode, unitOf, type UnitSystem } from '../units/units';
-import { helmSolve, helmThermo } from './helmholtz';
+import { helmCoulombCold, helmSolve, helmThermo } from './helmholtz';
 
 export type EosKind = 'ideal' | 'barotropic' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz';
 
@@ -27,7 +27,9 @@ export interface EosParams {
   /**
    * The tabulated white dwarf equation of state (eos/helmholtz.wgsl), which works in cgs: g/cm^3,
    * erg/g and kelvin per code unit of density, specific energy and temperature; and the
-   * reference composition's mu, Ye and ions per atomic mass unit (1 / Abar).
+   * reference composition's mu, Ye and ions per atomic mass unit (1 / Abar, which is
+   * 1 / mu - Ye: the shader derives it from those two). helmCoulomb multiplies the ions'
+   * Coulomb energy (eos/helmholtz.ts): 1 for all of it, 0 for none.
    */
   helmRho: number;
   helmE: number;
@@ -35,6 +37,7 @@ export interface EosParams {
   helmMu: number;
   helmYe: number;
   helmIons: number;
+  helmCoulomb: number;
 }
 
 export interface Eos {
@@ -68,7 +71,7 @@ export const EOS_LABELS: Record<EosKind, string> = {
 
 export const defaultEosParams = (): EosParams => ({
   gamma: 5 / 3, K: 1, R: 1, arad: 1, degRho: 1, degP: 1, ...ionParams(COMPOSITIONS.solar), ionT: 1, ionRho: 1,
-  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1, helmYe: 0.5, helmIons: 1 / 14,
+  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1.75, helmYe: 0.5, helmIons: 1 / 14, helmCoulomb: 1,
 });
 
 /** The first vec4 of equation-of-state constants (Params.eos in hydro/common.wgsl). */
@@ -80,7 +83,7 @@ export function eosConstants1(kind: EosKind, p: EosParams): number[] {
 /** The second vec4 of equation-of-state constants (Params.eos2 in hydro/common.wgsl). */
 export function eosConstants2(kind: EosKind, p: EosParams): number[] {
   if (kind === 'degenerate') return [p.degRho, p.degP, 0, 0];
-  if (kind === 'helmholtz') return [p.degRho, p.degP, p.helmYe, p.helmIons];
+  if (kind === 'helmholtz') return [p.degRho, p.degP, p.helmYe, p.helmCoulomb];
   if (kind === 'ionizing') return [p.ionH, p.ionOther, p.ionT, p.ionRho];
   return [0, 0, 0, 0];
 }
@@ -298,15 +301,19 @@ export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[],
  * Needs the table loaded (loadHelmholtz in eos/helmholtz.ts).
  */
 function helmholtzEos(params: EosParams): Eos {
-  const { helmRho: cr, helmE: ce, helmT: cT, helmYe: ye, helmIons: ia } = params;
+  const { helmRho: cr, helmE: ce, helmT: cT, helmYe: ye, helmIons: ia, helmCoulomb: cm } = params;
   const xOf = (rho: number) => Math.cbrt(rho / params.degRho);
-  const deg = (rho: number): [number, number] => {
-    const [f, gx] = degFG(xOf(rho));
-    return [params.degP * f, params.degP * gx];
+  // The zero-temperature matter: the electrons, and the cold part of the ions' Coulomb energy.
+  // [pressure, energy density, dp/drho], code units.
+  const deg = (rho: number): [number, number, number] => {
+    const x = xOf(rho);
+    const [f, gx] = degFG(x);
+    const c = helmCoulombCold(rho * cr, ye, ia, cm);
+    return [params.degP * f + (c.pr * rho) / ce, params.degP * gx + (c.e * rho) / ce, (params.degP * 8 * x ** 5) / (3 * rho * Math.sqrt(1 + x * x)) + c.dprho / ce];
   };
-  const thermoAt = (rho: number, lnT: number) => helmThermo(rho * cr, lnT, ye, ia);
-  const lnTFromE = (rho: number, eint: number) => helmSolve(rho * cr, (Math.max(eint - deg(rho)[1], 0) / rho) * ce, ye, ia, false);
-  const lnTFromP = (rho: number, p: number) => helmSolve(rho * cr, (Math.max(p - deg(rho)[0], 0) / rho) * ce, ye, ia, true);
+  const thermoAt = (rho: number, lnT: number) => helmThermo(rho * cr, lnT, ye, ia, cm);
+  const lnTFromE = (rho: number, eint: number) => helmSolve(rho * cr, (Math.max(eint - deg(rho)[1], 0) / rho) * ce, ye, ia, false, cm);
+  const lnTFromP = (rho: number, p: number) => helmSolve(rho * cr, (Math.max(p - deg(rho)[0], 0) / rho) * ce, ye, ia, true, cm);
   const lo = Math.log(1e4);
   const eintFromT = (rho: number, T: number) => {
     if (!(T > 0)) return deg(rho)[1];
@@ -323,8 +330,7 @@ function helmholtzEos(params: EosParams): Eos {
       return deg(rho)[0] + (Number.isFinite(lnT) ? (thermoAt(rho, lnT).pr * rho) / ce : 0);
     },
     soundSpeed: (rho, p) => {
-      const x = xOf(rho);
-      let c2 = (params.degP * 8 * x ** 5) / (3 * rho * Math.sqrt(1 + x * x));
+      let c2 = deg(rho)[2];
       const lnT = lnTFromP(rho, p);
       if (Number.isFinite(lnT)) {
         const t = thermoAt(rho, lnT);

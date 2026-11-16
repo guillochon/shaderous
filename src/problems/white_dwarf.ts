@@ -7,6 +7,7 @@
 // that the star has the mass asked for. Everything is in code units, given the equation of
 // state's two scales: rho_d (where p_F = m_e c, which carries Ye) and the pressure scale A.
 import { degFG, type Eos } from '../eos/eos';
+import { helmCoulombColdScales } from '../eos/helmholtz';
 import { ASTRO } from '../units/constants';
 import { gravityUnits } from '../units/units';
 import type { Barotrope, Settling } from './settle';
@@ -24,17 +25,35 @@ export interface WhiteDwarf {
 export interface DegenerateScales {
   degRho: number;
   degP: number;
+  /**
+   * The cold part of the ions' Coulomb energy, where the equation of state has it
+   * (eos/helmholtz.ts, helmCoulombColdScales): per unit mass it is c1 rho^(1/3) w, with
+   * w = r / (1 + r) and r = rho / rho0. A star built without it would not be cold under that
+   * equation of state: the missing pressure would be read as heat.
+   */
+  coulomb?: { c1: number; rho0: number };
 }
 
-/** Zero-temperature degenerate pressure at density rho. */
-export const coldPressure = (s: DegenerateScales, rho: number): number => s.degP * degFG(Math.cbrt(rho / s.degRho))[0];
+/** The cold Coulomb term at density rho: its pressure, dp/drho, and enthalpy (int dp / rho). */
+function coldCoulomb(s: DegenerateScales, rho: number): { p: number; c2: number; h: number } {
+  if (!s.coulomb || !(rho > 0)) return { p: 0, c2: 0, h: 0 };
+  const { c1, rho0 } = s.coulomb;
+  const w = rho / (rho0 + rho);
+  const e = c1 * Math.cbrt(rho) * w;
+  return { p: rho * e * (4 / 3 - w), c2: e * ((4 / 3) * (4 / 3 - w) + (1 - w) * (4 / 3 - 2 * w)), h: e * (7 / 3 - w) };
+}
+
+/** Zero-temperature pressure at density rho: the degenerate electrons', and the cold Coulomb term. */
+export const coldPressure = (s: DegenerateScales, rho: number): number => s.degP * degFG(Math.cbrt(rho / s.degRho))[0] + coldCoulomb(s, rho).p;
 
 /** rho / c^2 of the cold gas, written so that it stays finite (and goes to zero) as rho does. */
 function rhoOverC2(s: DegenerateScales, rho: number): number {
   if (!(rho > 0)) return 0;
   const x = Math.cbrt(rho / s.degRho);
   // c^2 = A 8 x^5 / (3 rho sqrt(1 + x^2)), with x^3 = rho / rho_d.
-  return (3 * s.degRho * x * Math.sqrt(1 + x * x)) / (8 * s.degP);
+  const electrons = (3 * s.degRho * x * Math.sqrt(1 + x * x)) / (8 * s.degP);
+  // The Coulomb term's c^2 over rho goes to zero with rho (as rho^(1/3)), so this does too.
+  return s.coulomb ? electrons / (1 + (electrons * coldCoulomb(s, rho).c2) / rho) : electrons;
 }
 
 interface Profile {
@@ -93,7 +112,7 @@ const cache = new Map<string, WhiteDwarf>();
  * every cell of the grid asks for it.
  */
 export function whiteDwarf(M: number, s: DegenerateScales, G = 1): WhiteDwarf {
-  const key = `${M}:${s.degRho}:${s.degP}:${G}`;
+  const key = `${M}:${s.degRho}:${s.degP}:${G}:${s.coulomb?.c1 ?? 0}:${s.coulomb?.rho0 ?? 0}`;
   const hit = cache.get(key);
   if (hit) return hit;
   // Mass grows with central density up to the Chandrasekhar limit: bracket, then bisect in log rho_c.
@@ -131,14 +150,31 @@ export function whiteDwarf(M: number, s: DegenerateScales, G = 1): WhiteDwarf {
  * u = h rho_d / (8 A), written so that small h loses nothing.
  */
 export function degenerateBarotrope(s: DegenerateScales): Barotrope {
+  const electrons = (h: number) => {
+    const u = (h * s.degRho) / (8 * s.degP);
+    return s.degRho * Math.sqrt(u * (2 + u)) ** 3;
+  };
+  // With the cold Coulomb term the enthalpy has no closed inverse: Newton's method from the
+  // electrons' answer, with dh/drho = c^2 / rho. The term lowers h, so the root lies above.
+  const enthalpy = (rho: number) => {
+    const x2 = Math.cbrt(rho / s.degRho) ** 2;
+    return ((8 * s.degP) / s.degRho) * (x2 / (Math.sqrt(1 + x2) + 1)) + coldCoulomb(s, rho).h;
+  };
   return {
     pressure: (rho) => coldPressure(s, rho),
     rhoOfH: (h) => {
       if (!(h > 0)) return 0;
-      const u = (h * s.degRho) / (8 * s.degP);
-      return s.degRho * Math.sqrt(u * (2 + u)) ** 3;
+      let rho = electrons(h);
+      if (!s.coulomb) return rho;
+      for (let i = 0; i < 60; i++) {
+        const next = Math.max(rho + (h - enthalpy(rho)) * rhoOverC2(s, rho), 0.25 * rho);
+        const done = Math.abs(next - rho) <= 1e-14 * rho;
+        rho = next;
+        if (done) break;
+      }
+      return rho;
     },
-    gpu: { kind: 'degenerate', degRho: s.degRho, degP: s.degP },
+    gpu: { kind: 'degenerate', degRho: s.degRho, degP: s.degP, ...(s.coulomb ? { c1: s.coulomb.c1, rho0: s.coulomb.rho0 } : {}) },
   };
 }
 
@@ -190,5 +226,13 @@ export function dwarfsSettling(s: DegenerateScales, dwarfs: PlacedDwarf[], G: nu
   };
 }
 
-/** The degenerate scales of an equation of state's parameters. */
-export const scalesOf = (eos: Eos): DegenerateScales => ({ degRho: eos.params.degRho, degP: eos.params.degP });
+/**
+ * The degenerate scales of an equation of state's parameters, with the cold Coulomb term where
+ * the equation of state has it (the tabulated one, eos/helmholtz.ts).
+ */
+export const scalesOf = (eos: Eos): DegenerateScales => {
+  const p = eos.params;
+  const s: DegenerateScales = { degRho: p.degRho, degP: p.degP };
+  if (eos.kind === 'helmholtz' && p.helmCoulomb > 0) s.coulomb = helmCoulombColdScales(p.helmYe, p.helmIons, p.helmCoulomb, p.helmRho, p.helmE);
+  return s;
+};

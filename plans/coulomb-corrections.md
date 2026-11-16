@@ -1,6 +1,33 @@
 # Plan: Coulomb corrections for white dwarf matter
 
-Status: proposed 2026-11-16.
+Status: built 2026-11-16 (steps 1 to 7). What building it found:
+
+- **The white dwarf builder had to change too**, which this plan had missed. It built stars on
+  the electrons' cold pressure alone. Under the corrected equation of state that pressure is
+  above the cold curve, and the difference was read as heat: 2e8 K at 1e7 g/cm^3, 9e8 K at
+  1e9. The builder, its enthalpy inverse and the GPU settling
+  ([src/problems/white_dwarf.ts](../src/problems/white_dwarf.ts),
+  [src/amr/settle.wgsl](../src/amr/settle.wgsl)) now use the same cold curve as the equation
+  of state, and a unit test holds the two equal.
+- **Stars are smaller**: 8586 to 8127 km at 0.6 M_sun, 5428 to 5094 km at 1 M_sun, 2771 to
+  2290 km at 1.3 M_sun (the term lowers the Chandrasekhar mass by some 3%, and a star near it
+  is very sensitive).
+- **Presets**, at their default grids:
+  - `wd-collision-burning`: the same collision, 0.5 time units (8%) earlier because the smaller
+    stars start closer, and about 6% more energy released.
+  - `sub-chandra`: with burning switched off the star sits as still as before (kinetic energy
+    1e-4 of the binding energy either way), although its helium shell is built on the
+    carbon-oxygen cold curve. With burning, a 1e9 K spot lights the denser shell where it did
+    not before; the default 3e9 K spot detonates either way.
+  - `detonation-co`: unchanged but for 3% less internal energy (the cold term).
+- **Newton's starting point** needed the correction section 5 allowed for: one analytic step
+  for the Coulomb heat at the tables' guess. 3.3 iterations on average, 5 at most (8 without
+  the step, against a cap of 10 in the shader).
+- **A star cache** in the setup builder was keyed on the electrons' scales alone and handed a
+  star built without the term to a setup with it; the preset-equivalence tests caught it.
+- The fit is Yakovlev & Shalybkov's as quoted in Helmholtz's source; the coefficients were
+  checked by their continuity at Gamma = 1 and the Debye-Hueckel and ion-sphere limits, not
+  against the paper.
 
 ## 1. Goal
 
@@ -32,7 +59,7 @@ What it changes physically:
 
 The one-component plasma's excess free energy per ion, in units of kT, as a function of the
 coupling Gamma = Zbar^2 e^2 / (a k T), with a the ion-sphere radius (4 pi a^3 n_i / 3 = 1).
-These are the fits Helmholtz uses (Yakovlev & Shaviv 1989), written as the free energy they
+These are the fits Helmholtz uses (Yakovlev & Shalybkov 1989), written as the free energy they
 are the derivatives of:
 
 | Range | f(Gamma) = F / (N_i k T) | u(Gamma) = Gamma f' = E / (N_i k T) |

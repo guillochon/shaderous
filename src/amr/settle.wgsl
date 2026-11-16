@@ -25,7 +25,7 @@
 struct SStar {
   c: vec4<f32>, // center (relative to the box center), radius
   r: vec4<f32>, // reach, mass, passive scalar, barotrope (0 polytrope, 1 cold degenerate gas)
-  b: vec4<f32>, // barotrope: polytrope (n, K, (n + 1) K, 0); degenerate (rho_d, A, 0, 0)
+  b: vec4<f32>, // barotrope: polytrope (n, K, (n + 1) K, 0); degenerate (rho_d, A, and the cold Coulomb term's c1 and rho0: 0 and 1 for none)
   v: vec4<f32>, // velocity
   k: vec4<f32>, // C as two floats (C = k.x + k.y)
   q: vec4<f32>, // center of mass, where its pull on the other stars comes from
@@ -83,7 +83,30 @@ fn rho_of_h(i: u32, h: f32) -> f32 {
   // Cold degenerate gas: h = (8 A / rho_d) (sqrt(1 + x^2) - 1), x^3 = rho / rho_d.
   let u = h * s.b.x / (8.0 * s.b.y);
   let x = sqrt(u * (2.0 + u));
-  return s.b.x * x * x * x;
+  var rho = s.b.x * x * x * x;
+  if (s.b.z == 0.0) { return rho; }
+  // With the cold Coulomb term the enthalpy has no closed inverse: Newton's method from the
+  // electrons' answer, with dh/drho = c^2 / rho (problems/white_dwarf.ts, degenerateBarotrope).
+  for (var it = 0; it < 8; it++) {
+    let x2 = pow(rho / s.b.x, 2.0 / 3.0);
+    let c = settle_coulomb(i, rho);
+    let hr = 8.0 * s.b.y / s.b.x * (x2 / (sqrt(1.0 + x2) + 1.0)) + c.z;
+    let c2 = 8.0 * s.b.y * x2 * x2 * sqrt(x2) / (3.0 * rho * sqrt(1.0 + x2)) + c.y;
+    let next = max(rho + (h - hr) * rho / c2, 0.25 * rho);
+    let done = abs(next - rho) <= 1e-6 * rho;
+    rho = next;
+    if (done) { break; }
+  }
+  return rho;
+}
+
+// The cold part of the ions' Coulomb energy at density rho (eos/helmholtz.ts): its pressure,
+// dp/drho and enthalpy. Per unit mass the energy is c1 rho^(1/3) w, w = rho / (rho0 + rho).
+fn settle_coulomb(i: u32, rho: f32) -> vec3<f32> {
+  let s = S.stars[i];
+  let w = rho / (s.b.w + rho);
+  let e = s.b.z * pow(rho, 1.0 / 3.0) * w;
+  return vec3<f32>(rho * e * (4.0 / 3.0 - w), e * (4.0 / 3.0 * (4.0 / 3.0 - w) + (1.0 - w) * (4.0 / 3.0 - 2.0 * w)), e * (7.0 / 3.0 - w));
 }
 
 // f(x) of the cold degenerate pressure A f(x) (eos/eos.ts, degFG), a series below x = 1/2.
@@ -106,7 +129,9 @@ fn settle_deg_f(x: f32) -> f32 {
 fn baro_pressure(i: u32, rho: f32) -> f32 {
   let s = S.stars[i];
   if (s.r.w == 0.0) { return s.b.y * pow(rho, 1.0 + 1.0 / s.b.x); }
-  return s.b.y * settle_deg_f(pow(rho / s.b.x, 1.0 / 3.0));
+  var p = s.b.y * settle_deg_f(pow(rho / s.b.x, 1.0 / 3.0));
+  if (s.b.z != 0.0 && rho > 0.0) { p += settle_coulomb(i, rho).x; }
+  return p;
 }
 
 fn cells_per_block() -> u32 {

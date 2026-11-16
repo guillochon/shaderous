@@ -103,6 +103,11 @@
    "about": "Degeneracy pressure scale"
   },
   {
+   "key": "coulomb",
+   "group": "settings",
+   "about": "Coulomb corrections"
+  },
+  {
    "key": "iont",
    "group": "settings",
    "about": "Ionization temperature"

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { physicalEosParams, type EosParams } from '../../src/eos/eos';
+import { defaultEosParams, makeEos, physicalEosParams, type EosParams } from '../../src/eos/eos';
 import { COMPOSITIONS } from '../../src/units/composition';
 import { ASTRO } from '../../src/units/constants';
 import { gravityUnits, codeG } from '../../src/units/units';
-import { degenerateBarotrope, whiteDwarf } from '../../src/problems/white_dwarf';
+import { coldPressure, degenerateBarotrope, scalesOf, whiteDwarf } from '../../src/problems/white_dwarf';
 import { collisionOrbit } from '../../src/presets/names';
 
 // Code units of 1e4 km and one solar mass, with G = 1.
@@ -78,6 +78,59 @@ describe('the degenerate barotrope', () => {
         h += (b.pressure(r1) - b.pressure(r0)) / Math.sqrt(r0 * r1);
       }
       expect(rel(b.rhoOfH(h), rho)).toBeLessThan(1e-4);
+    }
+  });
+});
+
+describe('white dwarfs with the ions’ Coulomb energy', () => {
+  // The tabulated equation of state has the term (eos/helmholtz.ts); its cold curve is what the star is built on.
+  const params = { ...defaultEosParams(), ...physicalEosParams(U, COMPOSITIONS.carbonOxygen) };
+  const eos = makeEos('helmholtz', params);
+  const withC = scalesOf(eos);
+  const bare = scalesOf(makeEos('helmholtz', { ...params, helmCoulomb: 0 }));
+
+  it('takes the term from the tabulated equation of state alone', () => {
+    expect(withC.coulomb).toBeDefined();
+    expect(bare.coulomb).toBeUndefined();
+    expect(scalesOf(makeEos('degenerate', params)).coulomb).toBeUndefined();
+  });
+
+  it('builds on the equation of state’s own cold curve, so the star is cold', () => {
+    for (const rho of [1e-4, 1e-2, 1, 30, 500]) {
+      const cold = eos.pressure(rho, eos.eintFromT(rho, 0));
+      expect(rel(coldPressure(withC, rho), cold)).toBeLessThan(1e-12);
+      // Built without the term, the same gas would carry the difference as heat.
+      expect(coldPressure(bare, rho)).toBeGreaterThan(cold);
+    }
+  });
+
+  it('inverts its enthalpy, h = int dp / rho', () => {
+    const b = degenerateBarotrope(withC);
+    for (const rho of [1e-6, 1e-3, 0.1, 1, 30, 1e3]) {
+      let h = 0;
+      const steps = 20000;
+      const lo = Math.log(1e-14);
+      const dl = (Math.log(rho) - lo) / steps;
+      for (let i = 0; i < steps; i++) {
+        const r0 = Math.exp(lo + i * dl), r1 = Math.exp(lo + (i + 1) * dl);
+        h += (b.pressure(r1) - b.pressure(r0)) / Math.sqrt(r0 * r1);
+      }
+      expect(rel(b.rhoOfH(h), rho)).toBeLessThan(1e-4);
+    }
+  });
+
+  it('are a few percent smaller and denser (Hamada & Salpeter 1961)', () => {
+    for (const M of [0.6, 1.0, 1.3]) {
+      const a = whiteDwarf(M, bare, codeG(U));
+      const b = whiteDwarf(M, withC, codeG(U));
+      expect(rel(b.M, M)).toBeLessThan(1e-6);
+      console.log(`M = ${M}: R ${(a.R * 1e4).toFixed(0)} -> ${(b.R * 1e4).toFixed(0)} km, rho_c ${(a.rhoc * params.helmRho).toExponential(3)} -> ${(b.rhoc * params.helmRho).toExponential(3)} g/cm^3`);
+      // About 5% in radius at 0.6 and 1 M_sun. Near the Chandrasekhar mass, which the term
+      // lowers by some 3%, the star is far more sensitive: a sixth smaller at 1.3 M_sun.
+      expect(b.rhoc).toBeGreaterThan(a.rhoc);
+      const shrink = 1 - b.R / a.R;
+      expect(shrink).toBeGreaterThan(M > 1.2 ? 0.1 : 0.03);
+      expect(shrink).toBeLessThan(M > 1.2 ? 0.25 : 0.08);
     }
   });
 });

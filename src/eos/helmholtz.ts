@@ -2,7 +2,8 @@
 // electron-positron gas at any degeneracy and temperature, ideal ions and radiation. Its table
 // (helmholtz_table.bin, layout in helmholtz_meta.ts) is made by tools/eos/make_table.py from
 // the exact gas (tools/eos/electron_gas.py); this file loads it, gives it to the GPU, and holds
-// the float64 mirror the initial conditions and the tests use.
+// the float64 mirror the initial conditions and the tests use. The ions' Coulomb energy is
+// analytic and needs no table: see helmCoulombFns below.
 //
 // Electrons: the dimensionless thermal free energy h(n, T) = F_th / (n k T), less the pair gas
 // at zero net charge, is tabulated in log10(rho Ye) and log10 T with its first derivatives, and
@@ -134,8 +135,117 @@ export function helmPairs(lt: number, rho: number): [number, number, number] {
   return [Math.exp(lnP), 2.5 + 1 / beta + cheb(P.dq, x) * s, -1 / beta + cheb(P.d2q, x) * s * s];
 }
 
-/** Everything above the zero-temperature electrons at density rho (g/cm^3), ln T, Ye and ions per amu ia. */
-export function helmThermo(rho: number, lnT: number, ye: number, ia: number): HelmThermo {
+// ---- The ions' Coulomb energy ----
+//
+// The one-component plasma's excess free energy per ion over k T, f(Gamma), with the coupling
+// Gamma = Zbar^2 e^2 / (a k T) and a the ion-sphere radius: the fits Helmholtz uses (Yakovlev &
+// Shalybkov 1989), written as the free energy they are derivatives of. Gamma goes as
+// rho^(1/3) / T, so the energy per ion is k T u with u = Gamma f', and the pressure a third of
+// the energy density.
+//   Gamma >= 1:  u = a1 G + b1 G^(1/4) + c1 G^(-1/4) + d1
+//   Gamma <  1:  u = -3 c2 G^(3/2) + a2 G^b2          (c2 = 1 / (2 sqrt 3): Debye-Hueckel)
+// a1 Gamma k T does not depend on T (the ion spheres' Madelung energy): that part is cold and
+// joins the zero-temperature electrons. The rest (f_th, g below) is thermal, positive, and
+// rises with T, as the solve for the temperature needs.
+//
+// Fully ionized ion spheres are the wrong model for thin cold matter, and there the cold term
+// alone would make the pressure negative (below rho_z = 0.18 Zbar^2 / Ye g/cm^3). So the whole
+// Coulomb free energy is faded by w = r / (1 + r), r = rho / (64 rho_z): a function of density
+// alone, applied to the free energy, so pressure and energy stay consistent (the pressure
+// gains the term from w's slope).
+const CA1 = -0.898004;
+const CB1 = 0.96786;
+const CC1 = 0.220703;
+const CD1 = -0.86097;
+const CA2 = 0.29561;
+const CB2 = 1.9885;
+const CC2 = 0.288675;
+/** f_th continuous at Gamma = 1 */
+const CK = -CA1 - 2 * CC2 + CA2 / CB2 - 4 * CB1 + 4 * CC1;
+/** e^2, cgs */
+const E2 = 2.30707751e-19;
+/** Gamma T = HELM_GAMMA_T Zbar^2 (rho / Abar)^(1/3), cgs and kelvin */
+export const HELM_GAMMA_T = (E2 / K) * Math.cbrt((4 * Math.PI) / (3 * MU));
+/** The fade's density scale is HELM_FADE Zbar^2 / Ye g/cm^3: 64 times the density at which cold carbon-like matter would reach zero pressure. */
+export const HELM_FADE = (() => {
+  const c = Math.sqrt(MEC2 / M.consts.me);
+  const aDeg = (Math.PI * M.consts.me ** 4 * c ** 5) / (3 * M.consts.h ** 3);
+  const rhoD = ((MU * 8 * Math.PI) / 3) * ((M.consts.me * c) / M.consts.h) ** 3;
+  const cube = ((-CA1 / 3) * E2 * Math.cbrt((4 * Math.PI) / 3) * MU ** (-4 / 3)) / (aDeg * 1.6 * rhoD ** (-5 / 3));
+  return 64 * cube ** 3;
+})();
+
+/** The thermal Coulomb functions at coupling G: [f_th, g = G f_th', G g']. */
+export function helmCoulombFns(G: number): [number, number, number] {
+  if (G >= 1) {
+    const q = Math.sqrt(Math.sqrt(G));
+    return [4 * CB1 * q - (4 * CC1) / q + CD1 * Math.log(G) + CK, CB1 * q + CC1 / q + CD1, 0.25 * (CB1 * q - CC1 / q)];
+  }
+  const s = G * Math.sqrt(G);
+  const y = G ** CB2;
+  return [-CA1 * G - 2 * CC2 * s + (CA2 / CB2) * y, -CA1 * G - 3 * CC2 * s + CA2 * y, -CA1 * G - 4.5 * CC2 * s + CA2 * CB2 * y];
+}
+
+/** The fade w and the cold Coulomb energy per gram before it (negative), at density rho (g/cm^3). */
+function coulombScale(rho: number, ye: number, ia: number): { w: number; e0: number; gT: number } {
+  const z = ye / ia;
+  const r = (rho * ye) / (HELM_FADE * z * z);
+  const gT = HELM_GAMMA_T * z * z * Math.cbrt(rho * ia);
+  return { w: r / (1 + r), e0: ((CA1 * ia * K) / MU) * gT, gT };
+}
+
+/**
+ * The cold part of the Coulomb term per unit mass, cgs, times the multiplier m: energy (erg/g),
+ * p / rho, and dp/drho.
+ */
+export function helmCoulombCold(rho: number, ye: number, ia: number, m: number): { e: number; pr: number; dprho: number } {
+  if (!(m > 0) || !(rho > 0)) return { e: 0, pr: 0, dprho: 0 };
+  const { w, e0 } = coulombScale(rho, ye, ia);
+  const s = m * w * e0;
+  return { e: s, pr: s * (4 / 3 - w), dprho: s * ((4 / 3) * (4 / 3 - w) + (1 - w) * (4 / 3 - 2 * w)) };
+}
+
+/**
+ * The cold Coulomb curve in code units, for what builds stars on it (problems/white_dwarf.ts):
+ * the energy per unit mass is c1 rho^(1/3) w, with w = r / (1 + r) and r = rho / rho0. `cr` and
+ * `ce` are g/cm^3 and erg/g per code unit (EosParams.helmRho, helmE).
+ */
+export function helmCoulombColdScales(ye: number, ia: number, m: number, cr: number, ce: number): { c1: number; rho0: number } {
+  const z = ye / ia;
+  return { c1: (((m * CA1 * ia * K) / MU) * HELM_GAMMA_T * z * z * Math.cbrt(cr * ia)) / ce, rho0: (HELM_FADE * z * z) / ye / cr };
+}
+
+/** The thermal part of the Coulomb term, in the terms of HelmThermo, times the multiplier m. */
+export function helmCoulombThermal(rho: number, lnT: number, ye: number, ia: number, m: number): HelmThermo {
+  if (!(m > 0) || !(rho > 0)) return { e: 0, pr: 0, de: 0, dpr: 0, dprho: 0 };
+  const { w, gT } = coulombScale(rho, ye, ia);
+  const T = Math.exp(lnT);
+  const [f, g, gp] = helmCoulombFns(gT / T);
+  const s = (m * w * ia * K * T) / MU;
+  const pr = s * (g / 3 + (1 - w) * f);
+  return {
+    e: s * g,
+    de: s * (g - gp),
+    pr,
+    dpr: s * ((g - gp) / 3 + (1 - w) * (f - g)),
+    dprho: pr + s * (gp / 9 + (2 / 3) * (1 - w) * g + (1 - w) * (1 - 2 * w) * f),
+  };
+}
+
+/** The Coulomb free energy per gram (erg/g), cold and thermal together, times m: what the pieces above are derivatives of (for the tests). */
+export function helmCoulombFree(rho: number, lnT: number, ye: number, ia: number, m: number): number {
+  const { w, gT } = coulombScale(rho, ye, ia);
+  const T = Math.exp(lnT);
+  const G = gT / T;
+  return ((m * w * ia * K * T) / MU) * (CA1 * G + helmCoulombFns(G)[0]);
+}
+
+/**
+ * Everything above the zero-temperature matter at density rho (g/cm^3), ln T, Ye and ions per
+ * amu ia; with `coulomb` (a multiplier, 0 for none), the thermal part of the ions' Coulomb
+ * energy too.
+ */
+export function helmThermo(rho: number, lnT: number, ye: number, ia: number, coulomb = 0): HelmThermo {
   const lt = lnT / LN10;
   const T = Math.exp(lnT);
   const h = helmLookup(Math.log10(rho * ye), lt);
@@ -143,12 +253,13 @@ export function helmThermo(rho: number, lnT: number, ye: number, ia: number): He
   const sm = (ye * K * T) / MU;
   const im = (ia * K * T) / MU;
   const rm = (ARAD * T ** 4) / rho;
+  const c = helmCoulombThermal(rho, lnT, ye, ia, coulomb);
   return {
-    e: pp * (l1 - 1) - sm * h.ht + 1.5 * im + rm,
-    de: pp * (l1 * l1 - l1 + l2) - sm * (h.ht + h.htt) + 1.5 * im + 4 * rm,
-    pr: pp + sm * h.hn + im + rm / 3,
-    dpr: pp * l1 + sm * (h.hn + h.hnt) + im + (4 * rm) / 3,
-    dprho: sm * (h.hn + h.hnn) + im,
+    e: pp * (l1 - 1) - sm * h.ht + 1.5 * im + rm + c.e,
+    de: pp * (l1 * l1 - l1 + l2) - sm * (h.ht + h.htt) + 1.5 * im + 4 * rm + c.de,
+    pr: pp + sm * h.hn + im + rm / 3 + c.pr,
+    dpr: pp * l1 + sm * (h.hn + h.hnt) + im + (4 * rm) / 3 + c.dpr,
+    dprho: sm * (h.hn + h.hnn) + im + c.dprho,
   };
 }
 
@@ -172,16 +283,32 @@ export function helmGuess(rho: number, x: number, ia: number, byP: boolean): num
 }
 
 /**
- * ln T at which the thermal energy per gram (byP false) or p_th / rho (byP true) is `target`,
- * as helm_solve, but iterated to convergence. -Infinity for no thermal energy.
+ * Newton's starting point, ln T. The inverse tables know nothing of the Coulomb heat, which in
+ * cold, strongly coupled matter is several times the ideal ions': it is allowed for at the
+ * tables' guess, taking both parts as linear in T.
  */
-export function helmSolve(rho: number, target: number, ye: number, ia: number, byP: boolean): number {
-  if (!(target > 0)) return -Infinity;
+function helmStart(rho: number, target: number, ye: number, ia: number, byP: boolean, coulomb: number): number {
   const lo = Math.log(HELM_T_MIN);
   const hi = Math.log(HELM_T_MAX);
   let lnT = Math.min(Math.max(helmGuess(rho, target, ia, byP) * LN10, lo), hi);
+  if (coulomb > 0) {
+    const c = helmCoulombThermal(rho, lnT, ye, ia, coulomb);
+    lnT = Math.max(lnT - Math.log(1 + (byP ? c.pr : c.e) / target), lo);
+  }
+  return lnT;
+}
+
+/**
+ * ln T at which the thermal energy per gram (byP false) or p_th / rho (byP true) is `target`,
+ * as helm_solve, but iterated to convergence. -Infinity for no thermal energy.
+ */
+export function helmSolve(rho: number, target: number, ye: number, ia: number, byP: boolean, coulomb = 0): number {
+  if (!(target > 0)) return -Infinity;
+  const lo = Math.log(HELM_T_MIN);
+  const hi = Math.log(HELM_T_MAX);
+  let lnT = helmStart(rho, target, ye, ia, byP, coulomb);
   for (let it = 0; it < 60; it++) {
-    const t = helmThermo(rho, lnT, ye, ia);
+    const t = helmThermo(rho, lnT, ye, ia, coulomb);
     const f = byP ? t.pr : t.e;
     if (lnT <= lo && f > target) return lo + Math.log(target / f);
     if (lnT >= hi && f < target) return hi + 0.25 * Math.log(target / f);
@@ -193,10 +320,10 @@ export function helmSolve(rho: number, target: number, ye: number, ia: number, b
 }
 
 /** How many Newton iterations helm_solve takes from its starting point to 2e-6 (for the tests). */
-export function helmIterations(rho: number, target: number, ye: number, ia: number, byP: boolean): number {
-  let lnT = Math.min(Math.max(helmGuess(rho, target, ia, byP) * LN10, Math.log(HELM_T_MIN)), Math.log(HELM_T_MAX));
+export function helmIterations(rho: number, target: number, ye: number, ia: number, byP: boolean, coulomb = 0): number {
+  let lnT = helmStart(rho, target, ye, ia, byP, coulomb);
   for (let it = 1; it <= 10; it++) {
-    const t = helmThermo(rho, lnT, ye, ia);
+    const t = helmThermo(rho, lnT, ye, ia, coulomb);
     const step = -((byP ? t.pr : t.e) - target) / (byP ? t.dpr : t.de);
     lnT += Math.min(Math.max(step, -1), 1);
     if (Math.abs(step) < 2e-6) return it;

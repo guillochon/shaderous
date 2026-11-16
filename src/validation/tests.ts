@@ -2173,6 +2173,8 @@ export const TESTS: TestDef[] = [
         { kind: 'ionizing', label: 'ionizing', params: { gamma: 5 / 3 } },
         // White dwarf units: densities 200 to 2e10 g/cm^3, thermal pressures from about 1e7 to 3e10 K.
         { kind: 'helmholtz', label: 'helmholtz', params: physicalEosParams(WD_UNITS, COMPOSITIONS.carbonOxygen) },
+        // And without the ions' Coulomb energy (on by default).
+        { kind: 'helmholtz', label: 'helmholtz_no_coulomb', params: { ...physicalEosParams(WD_UNITS, COMPOSITIONS.carbonOxygen), helmCoulomb: 0 } },
       ];
       await prepareHelmholtz(d);
       const inData = new Float32Array(pairs.length * 4);

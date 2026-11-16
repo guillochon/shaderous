@@ -48,7 +48,7 @@ export interface Barotrope {
   pressure(rho: number): number;
   rhoOfH(h: number): number;
   /** The same gas for the GPU's settling (amr/settle.wgsl), which knows these two kinds. */
-  gpu?: { kind: 'polytrope'; n: number; K: number } | { kind: 'degenerate'; degRho: number; degP: number };
+  gpu?: { kind: 'polytrope'; n: number; K: number } | { kind: 'degenerate'; degRho: number; degP: number; /** the cold Coulomb term (problems/white_dwarf.ts), if any */ c1?: number; rho0?: number };
 }
 
 export const polytropeBarotrope = (n: number, K: number): Barotrope => {

@@ -57,7 +57,8 @@ function polytropeByDensity(n: number, R: number, rhoc: number, G: number) {
 }
 
 function buildStar(part: StarPart, G: number, eos: Eos | undefined) {
-  const key = JSON.stringify([part.type, part.n, part.radius, part.mass, part.rhoc, G, part.type === 'white-dwarf' ? [eos?.params.degRho, eos?.params.degP] : 0]);
+  // A white dwarf is built on its equation of state's cold curve: the electrons' scales, and the Coulomb term if it has one.
+  const key = JSON.stringify([part.type, part.n, part.radius, part.mass, part.rhoc, G, part.type === 'white-dwarf' && eos ? scalesOf(eos) : 0]);
   const hit = starCache.get(key);
   if (hit) return hit;
   let out: Omit<BuiltStar, 'id' | 'part' | 'center' | 'vel' | 'scalar'>;

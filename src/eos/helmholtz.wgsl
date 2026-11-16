@@ -16,12 +16,20 @@
 // mass, which keeps single precision clear of its 3e38 limit; the code's units are converted
 // on the way in and out.
 //
+// The ions' Coulomb energy is added to both, from one free energy (the one-component plasma's,
+// as Helmholtz: Yakovlev & Shalybkov 1989), so the two stay consistent. Its part that does not
+// depend on T joins the zero-temperature electrons (helm_cold); the rest is thermal
+// (helm_coul). Both are faded out in thin matter, where they do not apply. Derivation and
+// tests: eos/helmholtz.ts.
+//
 // P.eos  = (g/cm^3, erg/g, kelvin per code unit of density, specific energy, temperature; mu
 //           of the reference composition)
 // P.eos2 = (rho_d, A of the zero-temperature electrons in code units (eos/degenerate.wgsl), Ye
-//           and ions per atomic mass unit of the reference composition)
-// Where the composition varies (eos/comp_on), Ye is the reference's times g_comp.y, and the
-// ions per atomic mass unit are g_comp.x / mu - Ye (g_comp.x counts ions and electrons).
+//           of the reference composition, and the multiplier of the Coulomb terms: 1, or 0
+//           for none)
+// The ions per atomic mass unit are 1 / mu - Ye. Where the composition varies (eos/comp_on),
+// Ye is the reference's times g_comp.y, and the ions per atomic mass unit are
+// g_comp.x / mu - Ye (g_comp.x counts ions and electrons).
 // Float64 mirror: src/eos/helmholtz.ts.
 const EOS_HAS_ENERGY = true;
 // As eos/degenerate.wgsl: E - KE below the zero-temperature energy is no reason to rebuild E.
@@ -52,7 +60,7 @@ fn helm_ye() -> f32 {
 // Ions per atomic mass unit, 1 / Abar.
 fn helm_ions() -> f32 {
   if (COMP) { return max(g_comp.x / P.eos.w - helm_ye(), 1e-3); }
-  return P.eos2.w;
+  return max(1.0 / P.eos.w - P.eos2.z, 1e-3);
 }
 
 // ---- The zero-temperature electrons (as eos/degenerate.wgsl) ----
@@ -178,10 +186,75 @@ fn helm_pairs(lt: f32, rho: f32) -> vec3<f32> {
   return vec3<f32>(exp(lnP), 2.5 + 1.0 / beta + q.y * s, -1.0 / beta + q.z * s * s);
 }
 
-// Everything above the zero-temperature electrons, per unit mass, at density rho (g/cm^3) and
+struct HelmThermo { e: f32, pr: f32, de: f32, dpr: f32, dprho: f32 }
+
+// ---- The ions' Coulomb energy (eos/helmholtz.ts has the derivation) ----
+
+const HC_A1: f32 = -0.898004;
+const HC_B1: f32 = 0.96786;
+const HC_C1: f32 = 0.220703;
+const HC_D1: f32 = -0.86097;
+const HC_A2: f32 = 0.29561;
+const HC_B2: f32 = 1.9885;
+const HC_C2: f32 = 0.288675;
+// f_th continuous at Gamma = 1.
+const HC_K: f32 = -2.5193142;
+// Gamma T = HC_GT Zbar^2 (rho / Abar)^(1/3), cgs and kelvin: e^2 (4 pi / 3 m_u)^(1/3) / k.
+const HC_GT: f32 = 227470.67;
+// The fade's density scale is HC_FADE Zbar^2 / Ye g/cm^3 (HELM_FADE in eos/helmholtz.ts).
+const HC_FADE: f32 = 11.488235;
+
+// The thermal Coulomb free energy per ion over k T, f_th, at coupling G: (f_th, g = G f_th',
+// G g'). All positive, as are g - G g' and f_th - g.
+fn helm_cfns(G: f32) -> vec3<f32> {
+  if (G >= 1.0) {
+    let q = sqrt(sqrt(G));
+    return vec3<f32>(4.0 * HC_B1 * q - 4.0 * HC_C1 / q + HC_D1 * log(G) + HC_K, HC_B1 * q + HC_C1 / q + HC_D1, 0.25 * (HC_B1 * q - HC_C1 / q));
+  }
+  let s = G * sqrt(G);
+  let y = pow(G, HC_B2);
+  return vec3<f32>(-HC_A1 * G - 2.0 * HC_C2 * s + HC_A2 / HC_B2 * y, -HC_A1 * G - 3.0 * HC_C2 * s + HC_A2 * y, -HC_A1 * G - 4.5 * HC_C2 * s + HC_A2 * HC_B2 * y);
+}
+// At density rho (g/cm^3): the fade w, the cold Coulomb energy per gram before it (erg/g,
+// negative), and Gamma T.
+fn helm_cscale(rho: f32, ye: f32, ia: f32) -> vec3<f32> {
+  let z = ye / ia;
+  let r = rho * ye / (HC_FADE * z * z);
+  let gT = HC_GT * z * z * pow(rho * ia, 1.0 / 3.0);
+  return vec3<f32>(r / (1.0 + r), HC_A1 * ia * HK / HMU * gT, gT);
+}
+// The thermal part, in the terms of HelmThermo.
+fn helm_coul(rho: f32, lnT: f32, ye: f32, ia: f32) -> HelmThermo {
+  let cs = helm_cscale(rho, ye, ia);
+  let w = cs.x;
+  let T = exp(lnT);
+  let f = helm_cfns(cs.z / T);
+  let s = P.eos2.w * w * ia * HK * T / HMU;
+  var r: HelmThermo;
+  r.e = s * f.y;
+  r.de = s * (f.y - f.z);
+  r.pr = s * (f.y / 3.0 + (1.0 - w) * f.x);
+  r.dpr = s * ((f.y - f.z) / 3.0 + (1.0 - w) * (f.x - f.y));
+  r.dprho = r.pr + s * (f.z / 9.0 + 2.0 / 3.0 * (1.0 - w) * f.y + (1.0 - w) * (1.0 - 2.0 * w) * f.x);
+  return r;
+}
+// The zero-temperature matter at density rho, code units: (pressure, energy density, dp/drho)
+// of the electrons and of the cold part of the Coulomb energy.
+fn helm_cold(rho: f32) -> vec3<f32> {
+  let d = deg_pe(rho);
+  var r = vec3<f32>(d.x, d.y, deg_c2(rho));
+  if (P.eos2.w > 0.0) {
+    let cs = helm_cscale(rho * P.eos.x, helm_ye(), helm_ions());
+    let w = cs.x;
+    let s = P.eos2.w * w * cs.y / P.eos.y;
+    r += vec3<f32>(s * rho * (4.0 / 3.0 - w), s * rho, s * (4.0 / 3.0 * (4.0 / 3.0 - w) + (1.0 - w) * (4.0 / 3.0 - 2.0 * w)));
+  }
+  return r;
+}
+
+// Everything above the zero-temperature matter, per unit mass, at density rho (g/cm^3) and
 // ln T, with Ye and ions per atomic mass unit ia:
 //   e (erg/g), p / rho, de/dln T, d(p/rho)/dln T at fixed rho, dp/drho at fixed T.
-struct HelmThermo { e: f32, pr: f32, de: f32, dpr: f32, dprho: f32 }
 fn helm_thermo(rho: f32, lnT: f32, ye: f32, ia: f32) -> HelmThermo {
   let lt = lnT / HLN10;
   let T = exp(lnT);
@@ -196,6 +269,14 @@ fn helm_thermo(rho: f32, lnT: f32, ye: f32, ia: f32) -> HelmThermo {
   r.pr = pp.x + sm * hh.hn + im + rm / 3.0;
   r.dpr = pp.x * pp.y + sm * (hh.hn + hh.hnt) + im + 4.0 * rm / 3.0;
   r.dprho = sm * (hh.hn + hh.hnn) + im;
+  if (P.eos2.w > 0.0) {
+    let c = helm_coul(rho, lnT, ye, ia);
+    r.e += c.e;
+    r.de += c.de;
+    r.pr += c.pr;
+    r.dpr += c.dpr;
+    r.dprho += c.dprho;
+  }
   return r;
 }
 
@@ -224,6 +305,12 @@ fn helm_guess(rho: f32, x: f32, ia: f32, byP: bool) -> f32 {
 fn helm_solve(rho: f32, goal: f32, ye: f32, ia: f32, byP: bool) -> f32 {
   if (!(goal > 0.0)) { return -1e30; }
   var lnT = clamp(helm_guess(rho, goal, ia, byP) * HLN10, HLNT_MIN, HLNT_MAX);
+  // The inverse tables know nothing of the Coulomb heat, several times the ideal ions' in cold,
+  // strongly coupled matter: allow for it at their guess, taking both parts as linear in T.
+  if (P.eos2.w > 0.0) {
+    let c = helm_coul(rho, lnT, ye, ia);
+    lnT = max(lnT - log(1.0 + select(c.e, c.pr, byP) / goal), HLNT_MIN);
+  }
   for (var it = 0; it < 10; it++) {
     let t = helm_thermo(rho, lnT, ye, ia);
     let f = select(t.e, t.pr, byP);
@@ -237,29 +324,31 @@ fn helm_solve(rho: f32, goal: f32, ye: f32, ia: f32, byP: bool) -> f32 {
 }
 
 // Thermal energy per gram and p_th / rho in cgs, from the code's internal energy density.
-fn helm_eth(rho: f32, eint: f32) -> f32 {
-  return max(eint - deg_pe(rho).y, 0.0) / rho * P.eos.y;
+fn helm_eth(rho: f32, eint: f32, ecold: f32) -> f32 {
+  return max(eint - ecold, 0.0) / rho * P.eos.y;
 }
 
 fn eos_temperature(rho: f32, eint: f32) -> f32 {
-  let lnT = helm_solve(rho * P.eos.x, helm_eth(rho, eint), helm_ye(), helm_ions(), false);
+  let lnT = helm_solve(rho * P.eos.x, helm_eth(rho, eint, helm_cold(rho).y), helm_ye(), helm_ions(), false);
   return exp(lnT) / P.eos.z;
 }
 fn eos_pressure(rho: f32, eint: f32) -> f32 {
   let rc = rho * P.eos.x;
   let ye = helm_ye();
   let ia = helm_ions();
-  let lnT = helm_solve(rc, helm_eth(rho, eint), ye, ia, false);
+  let d = helm_cold(rho);
+  let lnT = helm_solve(rc, helm_eth(rho, eint, d.y), ye, ia, false);
   var pth = 0.0;
   if (lnT > -1e29) { pth = helm_thermo(rc, lnT, ye, ia).pr * rho / P.eos.y; }
-  return deg_pe(rho).x + pth;
+  return d.x + pth;
 }
 fn eos_sound_speed(rho: f32, p: f32) -> f32 {
   let rc = rho * P.eos.x;
   let ye = helm_ye();
   let ia = helm_ions();
-  let prth = max(p - deg_pe(rho).x, 0.0) / rho * P.eos.y;
-  var c2 = deg_c2(rho);
+  let d = helm_cold(rho);
+  let prth = max(p - d.x, 0.0) / rho * P.eos.y;
+  var c2 = d.z;
   let lnT = helm_solve(rc, prth, ye, ia, true);
   if (lnT > -1e29) {
     let t = helm_thermo(rc, lnT, ye, ia);
@@ -272,7 +361,7 @@ fn eos_eint_from_p(rho: f32, p: f32) -> f32 {
   let rc = rho * P.eos.x;
   let ye = helm_ye();
   let ia = helm_ions();
-  let d = deg_pe(rho);
+  let d = helm_cold(rho);
   let lnT = helm_solve(rc, max(p - d.x, 0.0) / rho * P.eos.y, ye, ia, true);
   var eth = 0.0;
   if (lnT > -1e29) { eth = helm_thermo(rc, lnT, ye, ia).e * rho / P.eos.y; }
@@ -285,8 +374,8 @@ fn eos_face(rho: f32, p: f32) -> vec2<f32> {
   let rc = rho * P.eos.x;
   let ye = helm_ye();
   let ia = helm_ions();
-  let d = deg_pe(rho);
-  var c2 = deg_c2(rho);
+  let d = helm_cold(rho);
+  var c2 = d.z;
   var eth = 0.0;
   let lnT = helm_solve(rc, max(p - d.x, 0.0) / rho * P.eos.y, ye, ia, true);
   if (lnT > -1e29) {
@@ -297,7 +386,7 @@ fn eos_face(rho: f32, p: f32) -> vec2<f32> {
   return vec2<f32>(sqrt(c2), d.y + eth);
 }
 fn eos_eint_from_T(rho: f32, T: f32) -> f32 {
-  let d = deg_pe(rho);
+  let d = helm_cold(rho);
   if (!(T > 0.0)) { return d.y; }
   let lnT = log(T * P.eos.z);
   let rc = rho * P.eos.x;
