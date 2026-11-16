@@ -1,0 +1,3934 @@
+{
+  "config": {
+    "argv": [
+      "C:\\Program Files\\nodejs\\node.exe",
+      "C:\\Users\\guill\\shaderous\\node_modules\\@playwright\\test\\cli.js",
+      "test",
+      "tests/gpu/validation.spec.ts",
+      "--reporter=json,list"
+    ],
+    "configFile": "C:\\Users\\guill\\shaderous\\playwright.config.ts",
+    "rootDir": "C:/Users/guill/shaderous/tests/gpu",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "C:/Users/guill/shaderous/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "",
+        "name": "",
+        "testDir": "C:/Users/guill/shaderous/tests/gpu",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 300000
+      }
+    ],
+    "filteredProjects": [
+      {
+        "grep": {},
+        "grepInvert": null,
+        "outputDir": "C:\\Users\\guill\\shaderous\\test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "",
+        "testDir": "C:\\Users\\guill\\shaderous\\tests\\gpu",
+        "snapshotDir": "C:\\Users\\guill\\shaderous\\tests\\gpu",
+        "testIgnore": [],
+        "testMatch": "**/*.@(spec|test).?(c|m)[jt]s?(x)",
+        "timeout": 300000,
+        "use": {
+          "baseURL": "http://localhost:5199",
+          "channel": "chrome",
+          "headless": true,
+          "launchOptions": {
+            "args": [
+              "--enable-unsafe-webgpu",
+              "--enable-gpu",
+              "--ignore-gpu-blocklist",
+              "--use-angle=d3d11"
+            ]
+          }
+        },
+        "dependencies": [],
+        "ignoreSnapshots": false,
+        "__projectId": ""
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ],
+      [
+        "list"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "default",
+    "updateSourceMethod": "patch",
+    "version": "1.65.0",
+    "workers": 1,
+    "webServer": {
+      "command": "npx vite --port 5199",
+      "url": "http://localhost:5199",
+      "reuseExistingServer": true
+    }
+  },
+  "suites": [
+    {
+      "title": "validation.spec.ts",
+      "file": "validation.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "the page lists the same tests as this file",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 895,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:05:25.254Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-14233adc9048e050047a",
+          "file": "validation.spec.ts",
+          "line": 12,
+          "column": 1
+        },
+        {
+          "title": "sod-axes",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 3748,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "sod-axes: pass in 3.3 s\n{\n \"l1_x\": 0.007890209337894163,\n \"l1_y\": 0.007890209337894163,\n \"l1_z\": 0.007890209337894163,\n \"permutation_max_diff\": 0,\n \"transverse_spread\": 0,\n \"steps\": 75\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:05:27.144Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-091fd84f8112c6a68885",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "sod-diagonal",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2980,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "sod-diagonal: pass in 2.6 s\n{\n \"l1\": 0.011296893405489674,\n \"steps\": 43\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:05:30.904Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-0574bf858e3de3ed5ea4",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "strong-shock",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4082,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "strong-shock: pass in 3.6 s\n{\n \"l1_relative\": 0.07475431657856085,\n \"floored_cells\": 0,\n \"max_mach\": 1.8488175868988037,\n \"steps\": 232\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:05:33.898Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-ab26eb92984f053be30a",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "sedov",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8753,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "sedov: pass in 8.1 s\n{\n \"shock_radius\": 0.3406573033636116,\n \"similarity_radius\": 0.3352438516564782,\n \"radius_error\": 0.016147803100295316,\n \"anisotropy\": 0.025133586707600093,\n \"anisotropy_cells\": 1.0998075686528495,\n \"radius_along_axes\": 0.34611255392058976,\n \"radius_along_face_diagonals\": 0.34050892022727725,\n \"radius_along_body_diagonals\": 0.3375203103878104,\n \"cell_size\": 0.0078125,\n \"total_energy\": 1.0000254958868027,\n \"steps\": 977\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:05:37.993Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-59e146609f08b88746f5",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "kelvin-helmholtz",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5149,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "kelvin-helmholtz: pass in 4.5 s\n{\n \"transverse_ke_growth\": 11.114048423771827,\n \"max_mach\": 0.49024587869644165,\n \"steps\": 508\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:05:46.757Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-01666b90b493acdc8004",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "low-mach",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22094,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "low-mach: pass in 21.5 s\n{\n \"kinetic_energy_kept_hllc\": 0.8501571979080336,\n \"kinetic_energy_kept_low_mach\": 0.9400124305111704,\n \"sod_l1\": 0.007208884580170838,\n \"steps\": 32200\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:05:51.917Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-56b80d9e25629bfe24cf",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "well-balanced",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6530,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "well-balanced: pass in 6.0 s\n{\n \"max_mach_plain\": 0.34845882654190063,\n \"max_mach_well_balanced\": 0.0000365803534805309,\n \"max_mach_plain_blocks\": 0.34845882654190063,\n \"max_mach_well_balanced_blocks\": 0.00008565080497646704\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:06:14.027Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-0f445d5bd42e2382b69e",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "advection",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 7579,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "advection: pass in 6.9 s\n{\n \"mass_drift\": 2.359413185627776e-7,\n \"momentum_drift\": 3.1458842475037014e-7,\n \"energy_drift\": 5.116702169473192e-8,\n \"steps\": 3728\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:06:20.566Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-3ccb5b92da285cde56c2",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "species",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6041,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "species: pass in 5.4 s\n{\n \"sum_error\": 2.1606683731079102e-7,\n \"min_fraction\": 0,\n \"max_fraction\": 0.5230910181999207,\n \"species_mass_drift\": 5.353296550403768e-7,\n \"constant_species_error\": 0.0000016063451767078796,\n \"smooth_species_l1\": 0.0002520012399145344,\n \"passive_scalar_l1\": 0.0003543060359426809,\n \"smooth_species_l1_beside_sharp_one\": 0.0003734166584763443\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:06:28.153Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-bb79ed63a86f5d304711",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "species-eos",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 27403,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "species-eos: pass in 26.8 s\n{\n \"ideal_static_speed\": 2.0281483865215166e-7,\n \"ideal_static_pressure_error\": 3.9736429857661903e-7,\n \"ideal_static_gpu_temperature_error\": 8.211945843947627e-8,\n \"ideal_temperature_ratio\": 1.3333361148854805,\n \"ideal_moving_speed\": 0.0000010866369457004247,\n \"ideal_moving_pressure_error\": 0.0000014305114748314196,\n \"ideal_moving_gpu_temperature_error\": 7.840576201761865e-8,\n \"ideal_moving_mismatched_faces\": 0,\n \"gas_radiation_static_speed\": 0,\n \"gas_radiation_static_pressure_error\": 1.9078554958085192e-8,\n \"gas_radiation_static_gpu_temperature_error\": 3.45478847494076e-8,\n \"gas_radiation_temperature_ratio\": 1.1837280097088898,\n \"gas_radiation_moving_speed\": 0.015287901207235598,\n \"gas_radiation_moving_pressure_error\": 0.010794962650343076,\n \"gas_radiation_moving_gpu_temperature_error\": 4.598073491159892e-8,\n \"gas_radiation_moving_mismatched_faces\": 0,\n \"degenerate_static_speed\": 2.082477395934407e-7,\n \"degenerate_static_pressure_error\": 9.156163343071455e-7,\n \"degenerate_static_gpu_temperature_error\": 2.839548672288001e-7,\n \"degenerate_temperature_ratio\": 1.331783143224554,\n \"degenerate_moving_speed\": 0.00344128201207403,\n \"degenerate_moving_pressure_error\": 0.00269306372958944,\n \"degenerate_moving_gpu_temperature_error\": 2.176542898859594e-7,\n \"degenerate_moving_mismatched_faces\": 0,\n \"ionizing_static_speed\": 6.157747529123066e-7,\n \"ionizing_static_pressure_error\": 0.0000013182367603059575,\n \"ionizing_static_gpu_temperature_error\": 1.1973312887959368e-7,\n \"ionizing_temperature_ratio\": 1.0417837112869825,\n \"ionizing_moving_speed\": 0.016061426046325235,\n \"ionizing_moving_pressure_error\": 0.012897808908242103,\n \"ionizing_moving_gpu_temperature_error\": 6.573354525632525e-8,\n \"ionizing_moving_mismatched_faces\": 0,\n \"two_gammas_static_speed\": 9.657575446861637e-7,\n \"two_gammas_static_pressure_error\": 6.357828776781815e-7,\n \"two_gammas_static_gpu_temperature_error\": 1.4456006903264595e-7,\n \"two_gammas_temperature_ratio\": 1.0000076401896694,\n \"two_gammas_moving_speed\": 0.0045937325188884935,\n \"two_gammas_moving_pressure_error\": 0.0022317699589280426,\n \"two_gammas_moving_gpu_temperature_error\": 1.2667097915355938e-7,\n \"two_gammas_moving_mismatched_faces\": 0,\n \"two_gammas_hot_static_speed\": 0.00000101401833697182,\n \"two_gammas_hot_static_pressure_error\": 3.9736429857661903e-7,\n \"two_gammas_hot_static_gpu_temperature_error\": 8.01440998239266e-8,\n \"two_gammas_hot_temperature_ratio\": 2.000043989380555,\n \"two_gammas_hot_moving_speed\": 0.019306619030782273,\n \"two_gammas_hot_moving_pressure_error\": 0.028105086466154283,\n \"two_gammas_hot_moving_gpu_temperature_error\": 1.1692474391390203e-7,\n \"two_gammas_hot_moving_mismatched_faces\": 0,\n \"uniform_composition_difference\": 3.3282394012955876e-7\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:06:34.203Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-d0da419b8e4913fd71ea",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "shock-bubble",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11410,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "shock-bubble: pass in 10.5 s\n{\n \"uniform_helium_mass_drift\": 0.000001087533529142072,\n \"uniform_min_fraction\": 0,\n \"uniform_max_fraction\": 1.0000001192092896,\n \"uniform_min_pressure\": 0.9974841475486755,\n \"uniform_max_pressure\": 1.8954241275787354,\n \"uniform_helium_centroid_shift\": 0.25954960443573993,\n \"uniform_mismatched_faces\": 0,\n \"uniform_asymmetry\": 0.000001430511474609375,\n \"amr_helium_at_finest_level\": 0.9932706888479149,\n \"amr_helium_mass_drift\": 0.000001072667806506858,\n \"amr_min_fraction\": 0,\n \"amr_max_fraction\": 1,\n \"amr_min_pressure\": 0.9965360760688782,\n \"amr_max_pressure\": 1.8562120199203491,\n \"amr_helium_centroid_shift\": 0.2598090625406166,\n \"amr_mismatched_faces\": 0,\n \"amr_regrids\": 11,\n \"amr_leaf_blocks\": 88\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:01.616Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-29da22c80296a78588a2",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "detonation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5491,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "detonation: pass in 4.8 s\n{\n \"front_speed\": 6.801416331406596,\n \"cj_speed\": 6.809474629669995,\n \"relative_error\": -0.0011833950049960906,\n \"fuel_left_behind\": 0.000006296766168942567,\n \"peak_pressure\": 41.364556884765626,\n \"znd_spike\": 42.06267702919938,\n \"speed_no_burning_in_shocks\": 6.492883949950441,\n \"relative_error_no_burning_in_shocks\": -0.046492673361336334\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:13.033Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-cddb42f9bd3cb3471a2e",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "advection-accuracy",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5280,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "advection-accuracy: pass in 4.7 s\n{\n \"l1_128\": 0.0006004482565913349,\n \"l1_256\": 0.00014843635290162638,\n \"max_error_128\": 0.010733366012573242,\n \"max_error_256\": 0.0025784969329833984,\n \"peak_height_128\": 0.9965190887451172,\n \"peak_height_256\": 0.999387264251709,\n \"order\": 2.0161954681710728\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:18.532Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-ba21b66feccbaf473466",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "flux-determinism",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5829,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "flux-determinism: pass in 5.1 s\n{\n \"advection_faces\": 98304,\n \"advection_mismatched\": 0,\n \"sedov_faces\": 95232,\n \"sedov_mismatched\": 0,\n \"kelvin-helmholtz_faces\": 98304,\n \"kelvin-helmholtz_mismatched\": 0\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:23.819Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-ed4ecd90ed89fe2840e1",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "reflecting-box",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5357,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "reflecting-box: pass in 4.6 s\n{\n \"mass_drift\": 2.384185791015625e-7,\n \"energy_drift\": 0.0000014193027800632319,\n \"net_momentum\": 5.587935447692871e-9,\n \"steps\": 1403\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:29.655Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-fd36aaceb4a60a1e9a79",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "two-dimensional",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6331,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "two-dimensional: pass in 5.8 s\n{\n \"sod_l1\": 0.002062240455173359,\n \"sod_transverse_spread\": 0,\n \"sod_steps\": 222,\n \"advection_mass_drift\": 2.2883328358752007e-7,\n \"advection_momentum_drift\": 2.2883328358752007e-7,\n \"flux_mismatched_faces\": 0,\n \"advection_steps\": 2357\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:35.018Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-2bcee4966106c18fb174",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "rayleigh-taylor",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5636,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "rayleigh-taylor: pass in 5.1 s\n{\n \"hydrostatic_max_mach\": 0.0000012347081792540848,\n \"hydrostatic_ke\": 3.3692460713746764e-13,\n \"kinetic_energy_growth\": 47.529377534232665,\n \"energy_drift\": 1.41209873950473e-7,\n \"mass_drift\": 0,\n \"linear_growth_rate_theory\": 1.4472025091165353,\n \"steps\": 3812\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:41.357Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-ad51d43f35dcc60b60c2",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-unrefined",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 16318,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-unrefined: pass in 15.7 s\n{\n \"sod-x_2d_max_density_difference\": 0,\n \"sod-x_2d_max_relative_difference\": 0,\n \"sod-x_2d_steps\": 111,\n \"sedov_3d_max_density_difference\": 0,\n \"sedov_3d_max_relative_difference\": 0,\n \"sedov_3d_steps\": 102\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:07:47.000Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-70dfec55d28bc2c7d7ad",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-shock-tube",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5113,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-shock-tube: pass in 4.5 s\n{\n \"l1\": 0.0022352860143856584,\n \"fraction_of_uniform_cells\": 0.34375,\n \"leaf_blocks\": 88,\n \"regrids\": 5,\n \"mass_drift\": 1.0596381293402777e-7,\n \"energy_drift\": 3.251162442294034e-8,\n \"same_level_faces\": 2112,\n \"same_level_mismatched\": 0,\n \"coarse_fine_faces\": 320,\n \"coarse_fine_worst\": 1.4901161193847656e-8,\n \"steps\": 222\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:08:03.324Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-0038084bab7485c6a45c",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-species",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5733,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-species: pass in 5.1 s\n{\n \"sum_error\": 4.470348358154297e-8,\n \"min_fraction\": 0,\n \"max_fraction\": 0.5229628086090088,\n \"species_mass_drift\": 0.0000012697974363535985,\n \"constant_species_error\": 0.0000040799379348865905,\n \"smooth_species_vs_passive_scalar\": 0.0010419675252106237,\n \"beside_sharp_one\": 0.0008963914063034067,\n \"regrids\": 98,\n \"leaf_blocks\": 91\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:08:08.445Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-cc17809e1f49b9ef2482",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-species-eos",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5432,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-species-eos: pass in 4.9 s\n{\n \"static_speed\": 0,\n \"static_pressure_error\": 1.9078554958085192e-8,\n \"static_gpu_temperature_error\": 3.45478847494076e-8,\n \"static_mismatched_faces\": 0,\n \"static_coarse_fine_worst\": 0,\n \"static_leaf_blocks\": 124,\n \"moving_speed\": 0.01639148588089965,\n \"moving_pressure_error\": 0.006978982458763383,\n \"moving_gpu_temperature_error\": 7.511835501874053e-8,\n \"moving_mismatched_faces\": 0,\n \"moving_coarse_fine_worst\": 5.960464477539063e-8,\n \"moving_leaf_blocks\": 139,\n \"regrids\": 70\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:08:14.186Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-341380ea0e2f9481e6b4",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-detonation",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4864,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-detonation: pass in 4.3 s\n{\n \"front_speed\": 6.801485382714192,\n \"cj_speed\": 6.809474629669995,\n \"relative_error\": -0.0011732545299445452,\n \"fuel_left_behind\": 0.00000921496075498851,\n \"regrids\": 18,\n \"leaf_blocks\": 280,\n \"reaction_zone_coarse_t1\": 0,\n \"reaction_zone_coarse_t3\": 0\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:08:19.624Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-2bb1a0beb8d79cb492f4",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-sedov",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 14123,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-sedov: pass in 13.6 s\n{\n \"shock_radius\": 0.34065730481225015,\n \"similarity_radius\": 0.3352438516564782,\n \"radius_error\": 0.01614780742144404,\n \"fraction_of_uniform_cells\": 0.5625,\n \"leaf_blocks\": 288,\n \"regrids\": 1,\n \"mass_drift\": 0,\n \"energy_drift\": 8.940473966710682e-8,\n \"same_level_mismatched\": 0,\n \"coarse_fine_faces\": 12288,\n \"coarse_fine_worst\": 2.5590640717609858e-14,\n \"steps\": 977\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:08:24.494Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-bc384d37482ad625c1b4",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-instabilities",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10280,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-instabilities: pass in 9.7 s\n{\n \"kelvin-helmholtz_mass_drift\": 1.5894571940104166e-7,\n \"kelvin-helmholtz_energy_drift\": 8.332209430148833e-8,\n \"kelvin-helmholtz_regrids\": 24,\n \"kelvin-helmholtz_fraction_of_uniform_cells\": 0.54296875,\n \"kelvin-helmholtz_kinetic_energy_growth\": 0.9555240942831931,\n \"kelvin-helmholtz_coarse_fine_worst\": 5.960464477539063e-8,\n \"kelvin-helmholtz_steps\": 3092,\n \"rayleigh-taylor_mass_drift\": 7.947285970052083e-8,\n \"rayleigh-taylor_energy_drift\": 2.435469689602261e-7,\n \"rayleigh-taylor_regrids\": 13,\n \"rayleigh-taylor_fraction_of_uniform_cells\": 0.2265625,\n \"rayleigh-taylor_kinetic_energy_growth\": 47.81043822946488,\n \"rayleigh-taylor_coarse_fine_worst\": 1.4901161193847656e-8,\n \"rayleigh-taylor_steps\": 7524\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:08:38.625Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-24dd1b39569bd6699e9c",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-gravity-static",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 17345,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-gravity-static: pass in 15.2 s\n{\n \"sphere_64_L0_max_error\": 0.0014935205323101093,\n \"sphere_64_L0_leaf_blocks\": 64,\n \"sphere_128_L2_max_error\": 0.0017330708282158398,\n \"sphere_128_L2_leaf_blocks\": 288,\n \"sphere_256_L3_max_error\": 0.0025593977304242364,\n \"sphere_256_L3_leaf_blocks\": 848,\n \"jeans_growth_rate\": 6.284636073307754,\n \"jeans_error\": 0.00023089660056825772,\n \"jeans_steps\": 121\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:08:48.913Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-d30b4595f50f603d219d",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-gravity-dynamic",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 28752,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-gravity-dynamic: pass in 28.1 s\n{\n \"evrard_max_energy_drift\": 0.0019252941079683167,\n \"evrard_thermal_peak_time\": 1.125,\n \"evrard_thermal_peak\": 1.7531158924102783,\n \"evrard_fraction_of_uniform_cells\": 0.890625,\n \"evrard_regrids\": 1,\n \"evrard_steps\": 314,\n \"polytrope_central_density_max_deviation\": 0.008041758232322919,\n \"polytrope_energy_drift\": 0.013568885986888895,\n \"polytrope_fraction_of_uniform_cells\": 0.5625,\n \"polytrope_steps\": 1575\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:09:06.265Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-0131c477c82ba9a244a3",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-tidal-disruption",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 20326,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-tidal-disruption: pass in 19.7 s\n{\n \"closest_sampled_separation\": 4.660212045738857,\n \"pericenter_expected\": 4.641588833612779,\n \"max_com_offset_while_contained\": 0.000662769647145147,\n \"peak_density_final_ratio\": 0.11183558683013199,\n \"leaf_blocks\": 232,\n \"fraction_of_uniform_cells\": 0.453125,\n \"regrids\": 17,\n \"steps\": 1159\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:09:35.026Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-a55ced0665df5c26fe91",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "amr-time-bins",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 16148,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "amr-time-bins: pass in 15.6 s\n{\n \"sod_l1\": 0.0023015060913853984,\n \"sod_mass_drift\": 1.0596381293402777e-7,\n \"sod_energy_drift\": 0,\n \"sedov_radius_error\": 0.0160102994010922,\n \"sedov_mass_drift\": 0,\n \"sedov_energy_drift\": 7.450394972258901e-8,\n \"sedov_share_of_block_updates\": 0.7799145299145299,\n \"evrard_energy_drift_one_timestep\": 0.0005759332311190766,\n \"evrard_energy_drift_per_block\": 0.0012274532668565274\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:09:55.357Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-bada962e9ade60e944a9",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "snapshot-roundtrip",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 23073,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "snapshot-roundtrip: pass in 22.5 s\n{\n \"uniform_file_bytes\": 6308088,\n \"uniform_time_difference\": 0,\n \"uniform_state_difference\": 0,\n \"uniform_difference_after_continuing\": 5.71886968011339e-7,\n \"uniform_steps_continued\": 140,\n \"adaptive_file_bytes\": 28448279,\n \"adaptive_leaf_blocks\": 288,\n \"adaptive_same_mesh\": 1,\n \"adaptive_cells_without_a_match\": 0,\n \"adaptive_state_difference\": 0,\n \"adaptive_mass_difference\": 0,\n \"uniform_species_difference\": 5.960464477539063e-8,\n \"adaptive_species_difference\": 5.960464477539063e-8,\n \"adaptive_species_cells_without_a_match\": 0,\n \"perturber_difference\": 0\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:10:11.512Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-fef1a693eaf85ee9ef5e",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "cooling",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6712,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "cooling: pass in 6.2 s\n{\n \"decay_steps\": 100,\n \"decay_error\": 0.000010636117722981648,\n \"decay_error_adaptive\": 0.00004065919805428951,\n \"balance_temperature\": 0.25,\n \"balance_lowest_temperature\": 0.25,\n \"floor_temperature\": 0.2999998927116394\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:10:34.591Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-ec4750227fc2d20315d6",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "viscosity",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 22426,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "viscosity: pass in 21.9 s\n{\n \"axis_decay_error\": 0.0005057852193497414,\n \"axis_energy_drift\": 1.5064656596901024e-7,\n \"diagonal_decay_error\": 0.0009886317546601298,\n \"diagonal_energy_drift\": 9.064976496510667e-8,\n \"out_of_plane_3d_decay_error\": 0.0018149613628373196,\n \"out_of_plane_3d_energy_drift\": 3.502641753367217e-8,\n \"diagonal_blocks_decay_error\": 0.0009856621512508434,\n \"diagonal_blocks_energy_drift\": 1.0754235060163009e-8,\n \"diagonal_blocks_3d_decay_error\": 0.002953052752155627,\n \"diagonal_blocks_3d_energy_drift\": 1.6334024831514094e-7,\n \"walls_decay_error\": 0.0005043211826589733,\n \"walls_energy_drift\": 5.400314521729415e-7,\n \"walls_refined_decay_error\": 0.00006216707938078159,\n \"walls_refined_energy_drift\": 8.07973429928235e-7,\n \"walls_refined_fraction_of_uniform_cells\": 0.625,\n \"refined_mass_drift\": 7.947285970052083e-8,\n \"refined_energy_drift\": 2.545952863756522e-8,\n \"refined_momentum_drift\": 1.862645149230957e-9,\n \"refined_regrids\": 4,\n \"refined_fraction_of_uniform_cells\": 0.53125\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:10:41.310Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-42e3e0d6520fa61e689b",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "conduction",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 20220,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "conduction: pass in 19.7 s\n{\n \"uniform_decay_error\": 0.0026851072712348323,\n \"uniform_energy_drift\": 4.870567033306893e-8,\n \"blocks_decay_error\": 0.0026851072712371638,\n \"blocks_energy_drift\": 4.870566085916573e-8,\n \"clouds_conducting_scale_512\": 0.03579518407011694,\n \"clouds_conducting_scale_1024\": 0.03309664493041482,\n \"clouds_conducting_change\": 0.07538832973776921,\n \"clouds_plain_scale_512\": 0.025204822360978624,\n \"clouds_plain_scale_1024\": 0.020071915295122856,\n \"clouds_plain_change\": 0.20364781756218153\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:11:03.742Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-04f3f9d3cf2ca35fdbc8",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "point-mass-sink",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 13653,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "point-mass-sink: pass in 13.1 s\n{\n \"flat_accreted_fraction\": 0.056992302343132906,\n \"flat_mass_error\": 6.954360287636518e-8,\n \"flat_gm_error\": 2.3283069916502086e-10,\n \"flat_offset\": 2.405029256328119e-9,\n \"uniform_accreted_fraction\": 0.006655566687868486,\n \"uniform_mass_error\": 7.1570411819266155e-9,\n \"uniform_gm_error\": 5.8207605402316176e-11,\n \"uniform_offset\": 2.3767127528937344e-9,\n \"adaptive_accreted_fraction\": 0.006655259774163369,\n \"adaptive_mass_error\": 1.627664119041583e-7,\n \"adaptive_gm_error\": 5.8207605402316176e-11,\n \"adaptive_offset\": 1.8192849039213773e-9,\n \"placed_flat_accreted_fraction\": 0.0569923066359479,\n \"placed_flat_mass_error\": 7.38364178687334e-8,\n \"placed_flat_gm_error\": 2.3283069916502086e-10,\n \"placed_flat_offset\": 2.405029294587307e-9,\n \"placed_adaptive_accreted_fraction\": 0.0066552601309410875,\n \"placed_adaptive_mass_error\": 1.6312318962263817e-7,\n \"placed_adaptive_gm_error\": 5.8207605402316176e-11,\n \"placed_adaptive_offset\": 1.8192851239845065e-9,\n \"placed_flat_adaptive_accreted_fraction\": 0.057053480988543015,\n \"placed_flat_adaptive_mass_error\": 3.421882865950465e-8,\n \"placed_flat_adaptive_gm_error\": 2.3283069916502086e-10,\n \"placed_flat_adaptive_offset\": 1.546429944548518e-9,\n \"flat_adaptive_accreted_fraction\": 0.05705347737239208,\n \"flat_adaptive_mass_error\": 3.060267772525549e-8,\n \"flat_adaptive_gm_error\": 2.3283069916502086e-10,\n \"flat_adaptive_offset\": 1.546429765362435e-9,\n \"slow_flat_steps\": 114,\n \"slow_flat_accreted_per_step_over_ulp\": 0.016283962411985715,\n \"slow_flat_gm_growth_error\": 8.152457676169495e-9,\n \"slow_flat_adaptive_steps\": 57,\n \"slow_flat_adaptive_accreted_per_step_over_ulp\": 0.03265120191172811,\n \"slow_flat_adaptive_gm_growth_error\": 3.62797351884081e-8\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:11:23.968Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-473ea9dc4f7c9d7c451e",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "binary-orbit",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 10120,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "binary-orbit: pass in 9.5 s\n{\n \"separation_max_deviation\": 0.00015841277526229547,\n \"return_offset\": 0.0004239813052230657,\n \"binary_momentum\": 3.7148465690995904e-14,\n \"least_accreted\": 3.023455319439705e-7,\n \"softening\": 0.09375,\n \"steps\": 575\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:11:37.630Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-1485666fb1112b7bd1aa",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "point-mass-encounter",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5712,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "point-mass-encounter: pass in 5.1 s\n{\n \"orbit_energy_error\": 0.006651794050492876,\n \"mean_step_over_limit\": 0.7936054339125885,\n \"closest_separation_seen\": 0.1040639576974435,\n \"least_limit\": 0.0012189431514139403,\n \"steps\": 949\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:11:47.756Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-f2a33459ed7423b8d914",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "gpu-vs-cpu",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 12461,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "gpu-vs-cpu: pass in 11.9 s\n{\n \"sod-diag_rho_l1\": 7.818318463504527e-8,\n \"sod-diag_rho_max\": 5.007287244840342e-7,\n \"sod-diag_energy_l1\": 4.974855149631179e-8,\n \"sod-diag_time_diff\": 3.482689994114422e-8,\n \"sedov_rho_l1\": 7.788318703679763e-9,\n \"sedov_rho_max\": 7.693394985519575e-7,\n \"sedov_energy_l1\": 2.2682764020998443e-7,\n \"sedov_time_diff\": 5.161579112888149e-8\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:11:53.475Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-eaafef2cdb46c94c2baf",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "burn-network",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1326,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "burn-network: pass in 0.8 s\n{\n \"inputs_max_abs\": 0.0000025520169237847057,\n \"step_max_rel_l1\": 0.0010460418658846658\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:05.942Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-86a87c485f75573f80fa",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "eos",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 1421,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "eos: pass in 0.8 s\n{\n \"ideal_roundtrip\": 1.4438213204218362e-7,\n \"ideal_vs_float64\": 1.1750359408696817e-7,\n \"isothermal_roundtrip\": 8.285014607136682e-8,\n \"isothermal_vs_float64\": 8.285014607136682e-8,\n \"polytropic_roundtrip\": 8.839015274280058e-7,\n \"polytropic_vs_float64\": 8.839015274280058e-7,\n \"gasrad_roundtrip\": 8.460356357405685e-7,\n \"gasrad_vs_float64\": 7.861838790536273e-7,\n \"gasrad_no_radiation_roundtrip\": 2.1976451168761304e-7,\n \"gasrad_no_radiation_vs_float64\": 2.4661795840684885e-7,\n \"gasrad_no_radiation_limit\": 2.4661795840684885e-7,\n \"gasrad_radiation_only_roundtrip\": 8.478527888176445e-7,\n \"gasrad_radiation_only_vs_float64\": 5.660762867666151e-7,\n \"gasrad_radiation_only_limit\": 0.000006743396322025571,\n \"degenerate_roundtrip\": 8.806509831794897e-7,\n \"degenerate_vs_float64\": 0.0000010867772194001584,\n \"ionizing_roundtrip\": 0.000005431706085753203,\n \"ionizing_vs_float64\": 7.365507268812305e-7,\n \"helmholtz_eint_vs_float64\": 0.000017359136008318456,\n \"helmholtz_cs_vs_float64\": 0.00016607231504982178,\n \"helmholtz_roundtrip\": 0.00002061618160797677,\n \"helmholtz_vs_float64\": 0.00016607231504982178\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:07.278Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-409f425b363d61bfdc77",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "sphere-potential",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4569,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "sphere-potential: pass in 4.0 s\n{\n \"max_relative_error\": 0.0014935205323101093,\n \"max_residual\": 0.0019178390502929688,\n \"source_scale\": 12.566370614359172\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:08.714Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-a8b9bfe8f1c28b35e081",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "jeans",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4888,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "jeans: pass in 4.2 s\n{\n \"growth_rate\": 6.283990172392084,\n \"linear_theory\": 6.283185307179586,\n \"error\": 0.00012809827709171358,\n \"amplitude\": 0.011596601803595433,\n \"steps\": 121\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:13.297Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-85b2d5c432d2eee638d9",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "polytrope",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 9406,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "polytrope: pass in 8.7 s\n{\n \"central_density_initial\": 0.9985875487327576,\n \"central_density_final\": 1.009588599205017,\n \"max_deviation\": 0.024568151920799444,\n \"energy_drift\": 0.019857623006936078,\n \"max_mach\": 0.8570191860198975,\n \"steps\": 1770\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:18.199Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-a1d0c057e9afc62ef687",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "white-dwarf",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6516,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "white-dwarf: pass in 5.9 s\n{\n \"central_density_initial\": 1.6173762083053589,\n \"central_density_final\": 1.654192328453064,\n \"max_deviation\": 0.033126430114239616,\n \"energy_drift\": 0.000011929862214318679,\n \"settle_rounds\": 7,\n \"settle_ms\": 228.89999997615814,\n \"steps\": 198\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:27.617Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-9c90dab77fe3ca0809ee",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "evrard",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5109,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "evrard: pass in 4.5 s\n{\n \"e_total_initial\": -0.6225918307900429,\n \"e_total_final\": -0.627709150314331,\n \"max_energy_drift\": 0.008219381095628116,\n \"thermal_peak_time\": 1.125,\n \"thermal_peak\": 1.7372909784317017,\n \"potential_minimum\": -2.5697360038757324,\n \"mass_change\": 0.0009296353115435761,\n \"steps\": 127,\n \"t:kin/int/grav\": \"0.25:0.026/0.052/-0.701 0.50:0.130/0.073/-0.826 0.75:0.426/0.312/-1.362 1.00:0.452/1.490/-2.570 1.25:0.129/1.302/-2.058 1.50:0.130/0.698/-1.455\"\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:34.139Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-78477b7822b4f8199439",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "tidal-disruption",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8986,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "tidal-disruption: pass in 8.4 s\n{\n \"pericenter\": 4.635172513355223,\n \"pericenter_expected\": 4.641588833612779,\n \"pericenter_error\": 0.001382354294523345,\n \"pericenter_time\": 3.375,\n \"pericenter_time_kepler\": 3.316790634033298,\n \"max_com_offset_while_contained\": 0.0021074117255139293,\n \"debris_starts_leaving_at\": 4.125,\n \"final_com_offset_of_gas_in_box\": 0.5023227913269922,\n \"central_density_initial\": 1.4220517873764038,\n \"central_density_lane_emden\": 1.4301753568736844,\n \"peak_density_final_ratio\": 0.03898441910850291,\n \"mass_left_in_box\": 0.691111027976008,\n \"steps\": 953,\n \"t:r_perturber/rho_max\": \"1:10.73/1.38 2:7.46/1.49 3:4.87/1.32 4:5.55/0.85 5:8.49/0.36 6:11.64/0.16 7:14.62/0.09 8:17.43/0.06\"\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:39.254Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-07ed4f4020b845fc1cb0",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-brio-wu",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4830,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-brio-wu: pass in 4.2 s\n{\n \"hlld_energy_error\": 1.7909374272484513e-7,\n \"hlld_mass_error\": 0,\n \"hlld_momentum_error\": 4.8279762271397075e-8,\n \"hlld_compound_x\": -0.029296875,\n \"hlld_slow_shock_x\": 0.146484375,\n \"hlld_vy_min\": -1.597084463071034,\n \"hlld_divB\": 0,\n \"hlle_energy_error\": 1.007402302688476e-7,\n \"hlle_mass_error\": 0,\n \"hlle_momentum_error\": 1.1026859286777935e-8,\n \"hlle_compound_x\": -0.029296875,\n \"hlle_slow_shock_x\": 0.150390625,\n \"hlle_vy_min\": -1.6010359039331614,\n \"hlle_divB\": 0,\n \"hlld_vs_hlle_mean_density_difference\": 0.0017189782520290464\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:48.246Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-c6cb74bacb0462d4ad95",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-orszag-tang",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4179,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-orszag-tang: pass in 3.6 s\n{\n \"energy_error\": 8.533193707194187e-8,\n \"mass_error\": 2.022337527440854e-7,\n \"divB\": 7.083928973694538e-8,\n \"magnetic_energy\": 0.061714328825473785,\n \"magnetic_energy_initial\": 0.03978373482823372,\n \"peak_pressure\": 0.5111207365989685,\n \"steps\": 751\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:53.083Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-67a3909a49405004df24",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-field-loop",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4266,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-field-loop: pass in 3.7 s\n{\n \"magnetic_energy_kept\": 0.9326567422601351,\n \"peak_field_ratio\": 1.0804850608110428,\n \"centroid_offset_cells\": 0.10413234975836763,\n \"divB\": 1.8686776070928025e-7,\n \"steps\": 894\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:12:57.270Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-d51bdfc491428a3c18d7",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-alfven-wave",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4552,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-alfven-wave: pass in 4.0 s\n{\n \"l1_128\": 0.00007902460972916511,\n \"l1_256\": 0.000019710549755442964,\n \"order\": 2.00333398948343,\n \"divB\": 5.9308772858787235e-8\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:13:01.543Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-0d7ff33f16a8f9fe822a",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-blast-3d",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4419,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-blast-3d: pass in 3.7 s\n{\n \"energy_error\": 9.160971439214904e-7,\n \"mass_error\": 2.384185791015625e-7,\n \"divB\": 9.941402749357117e-8,\n \"elongation\": 2.0168660957772873,\n \"steps\": 159\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:13:06.103Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-035f1aee6a1697902e71",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-slabs",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 4221,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-slabs: pass in 3.7 s\n{\n \"differing_values\": 0,\n \"divB\": 1.089705897096021e-7\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:13:10.529Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-f9b09b40c1a679f1d5ea",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-gpu-vs-cpu",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 16272,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-gpu-vs-cpu: pass in 15.7 s\n{\n \"orszag-tang_rho_l1\": 1.0400963717914209e-7,\n \"orszag-tang_energy_l1\": 9.255633169456912e-8,\n \"orszag-tang_field_l1\": 9.189377223532367e-8,\n \"orszag-tang_time_diff\": 3.0520260954297707e-9,\n \"mhd-blast_rho_l1\": 5.017503147674731e-9,\n \"mhd-blast_energy_l1\": 1.9661605635702185e-8,\n \"mhd-blast_field_l1\": 3.751735009448198e-9,\n \"mhd-blast_time_diff\": 1.0184744348436779e-7\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:13:14.756Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-e9ae92c9f42f5b6bdc90",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-restart",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 18442,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-restart: pass in 17.7 s\n{\n \"mhd-rotor_faces_differing\": 0,\n \"mhd-rotor_divB_restarted\": 7.860007428829879e-8,\n \"mhd-rotor_max_rel_density_difference\": 0.0000036219417229576774,\n \"mhd-blast_faces_differing\": 0,\n \"mhd-blast_divB_restarted\": 1.0516924829763494e-7,\n \"mhd-blast_max_rel_density_difference\": 5.364447126668008e-7,\n \"loop_blocks_leaves\": 160,\n \"loop_blocks_leaves_not_in_file\": 0,\n \"loop_blocks_faces_differing\": 0,\n \"loop_blocks_shared_mismatched\": 0,\n \"loop_blocks_divB_restarted\": 1.967507789363338e-7,\n \"loop_blocks_regrids_meanwhile\": 0,\n \"loop_blocks_max_rel_density_difference\": 3.4150237366916525e-7,\n \"loop_blocks_divB_later\": 2.8065429722143266e-7,\n \"blast_blocks_leaves\": 120,\n \"blast_blocks_leaves_not_in_file\": 0,\n \"blast_blocks_faces_differing\": 0,\n \"blast_blocks_shared_mismatched\": 0,\n \"blast_blocks_divB_restarted\": 1.0376123692691424e-7,\n \"blast_blocks_regrids_meanwhile\": 0,\n \"blast_blocks_max_rel_density_difference\": 3.6858577814232274e-7,\n \"blast_blocks_divB_later\": 1.3800155190463847e-7\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:13:31.036Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-d759f4603d3738add783",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-amr-unrefined",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 8510,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-amr-unrefined: pass in 7.9 s\n{\n \"leaf_levels\": 1,\n \"kinetic\": 0,\n \"internal\": 0,\n \"magnetic\": 0,\n \"time\": 2.5154443883416497e-8,\n \"peak_density\": 9.412914631829846e-8,\n \"shared_faces\": 2048,\n \"shared_mismatched\": 0,\n \"divB\": 6.986885894651176e-8\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:13:49.491Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-5dbb0fc55dd413c148da",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-amr-refined",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 23227,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-amr-refined: pass in 22.6 s\n{\n \"mhd-rotor_levels\": 2,\n \"mhd-rotor_energy_error\": 0.000024729640359266725,\n \"mhd-rotor_mass_error\": 8.981207721969753e-8,\n \"mhd-rotor_divB\": 2.4765786050929095e-7,\n \"mhd-rotor_shared_mismatched\": 0,\n \"mhd-rotor_coarse_fine_faces\": 448,\n \"mhd-rotor_coarse_fine_difference\": 1.0438981076110716e-7,\n \"mhd-rotor_magnetic_vs_uniform\": 0.0001880235237148309,\n \"mhd-rotor_peak_density_vs_uniform\": 0.00039509459888176224,\n \"mhd-blast_levels\": 2,\n \"mhd-blast_energy_error\": 0.0000013631341708730815,\n \"mhd-blast_mass_error\": 0,\n \"mhd-blast_divB\": 1.74618590531039e-7,\n \"mhd-blast_shared_mismatched\": 0,\n \"mhd-blast_coarse_fine_faces\": 5120,\n \"mhd-blast_coarse_fine_difference\": 4.281235868353938e-8,\n \"mhd-blast_magnetic_vs_uniform\": 1.1651216191843616e-7,\n \"mhd-blast_peak_density_vs_uniform\": 0.00010547388035075933\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:13:58.015Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-c3d2cf33b8c04ff36cec",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-amr-chunks",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 15873,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-amr-chunks: pass in 15.3 s\n{\n \"blast_3d_differing_values\": 0,\n \"blast_2d_bins_differing_values\": 0\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:14:21.259Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-a6146bb2a21342fd8b7f",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-amr-moving",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 17259,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-amr-moving: pass in 16.6 s\n{\n \"loop_regrids\": 144,\n \"loop_divB_worst\": 1.4014131041485373e-7,\n \"loop_mass_error\": 3.716698382394412e-7,\n \"loop_magnetic_kept\": 0.9616314546942928,\n \"loop_center_offset\": 0.000012115069582234758,\n \"loop_shared_mismatched\": 0,\n \"loop_coarse_fine\": 5.272815223438591e-10,\n \"blast_regrids\": 5,\n \"blast_divB\": 1.74618590531039e-7,\n \"blast_energy_error\": 0.0000013631341708730815,\n \"blast_mass_error\": 0,\n \"blast_shared_mismatched\": 0,\n \"blast_coarse_fine\": 4.281235868353938e-8\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:14:37.145Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-c5f6566acae9eac1d983",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-amr-bins",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 26572,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "rotor face 0: coarse [2,2,0] bin 0 / fine bins 0,0,0,1: axis 0 at 12,0 off by 2.38e-7\n"
+                    },
+                    {
+                      "text": "rotor face 1: coarse [5,5,0] bin 0 / fine bins 1,0,0,0: axis 0 at 3,0 off by 3.58e-7\n"
+                    },
+                    {
+                      "text": "loop face 0: coarse [0,0,0] bin 0 / fine bins 0,1,0,1: axis 0 at 0,0 off by 1.19e-18\n"
+                    },
+                    {
+                      "text": "loop face 1: coarse [1,2,0] bin 0 / fine bins 0,1,0,0: axis 0 at 0,0 off by 1.92e-15\n"
+                    },
+                    {
+                      "text": "loop face 2: coarse [1,2,0] bin 0 / fine bins 0,1,0,0: axis 0 at 1,0 off by 4.54e-15\n"
+                    },
+                    {
+                      "text": "loop face 3: coarse [1,5,0] bin 0 / fine bins 0,0,0,1: axis 0 at 13,0 off by 3.17e-13\n"
+                    },
+                    {
+                      "text": "blast_3d face 0: coarse [0,0,0] bin 0 / fine bins 0,1,0,1,0,1,0,1: axis 0 at 2,9 off by 7.45e-8\n"
+                    },
+                    {
+                      "text": "mhd-amr-bins: pass in 26.0 s\n{\n \"rotor_divB\": 1.692005269893583e-7,\n \"rotor_mass_error\": 5.388724632071629e-7,\n \"rotor_energy_error\": 0.00003400759910765494,\n \"rotor_energy_error_one_timestep\": 0.000024729640359266725,\n \"rotor_magnetic_vs_one_timestep\": 0.00008490600167299078,\n \"rotor_peak_density_vs_one_timestep\": 0.00048591061548164394,\n \"rotor_magnetic_kept\": 1.1363294731549494,\n \"rotor_shared_mismatched\": 0,\n \"rotor_coarse_fine_difference\": 1.5636523792273993e-7,\n \"rotor_cycles\": 88,\n \"rotor_share_of_block_updates\": 0.9766493699036323,\n \"loop_divB\": 1.4025074589353832e-7,\n \"loop_mass_error\": 9.291745961537146e-8,\n \"loop_energy_error\": 7.597146223226048e-8,\n \"loop_energy_error_one_timestep\": 2.0259056610072435e-7,\n \"loop_magnetic_vs_one_timestep\": 0.00013407146019261962,\n \"loop_peak_density_vs_one_timestep\": 0.000995438776158375,\n \"loop_magnetic_kept\": 0.9687417802844899,\n \"loop_shared_mismatched\": 0,\n \"loop_coarse_fine_difference\": 3.0147445188974557e-10,\n \"loop_cycles\": 226,\n \"loop_share_of_block_updates\": 0.999202113024817,\n \"blast_2d_divB\": 1.0753129859742626e-7,\n \"blast_2d_mass_error\": 5.960464477539063e-8,\n \"blast_2d_energy_error\": 0.0000028376799022789,\n \"blast_2d_energy_error_one_timestep\": 0.0000027041420245232928,\n \"blast_2d_magnetic_vs_one_timestep\": 0.000006684224639341707,\n \"blast_2d_peak_density_vs_one_timestep\": 0.0000715524541861079,\n \"blast_2d_magnetic_kept\": 1.0700725954814312,\n \"blast_2d_shared_mismatched\": 0,\n \"blast_2d_coarse_fine_difference\": 3.063454434546355e-8,\n \"blast_2d_cycles\": 78,\n \"blast_2d_share_of_block_updates\": 0.8490704208512674,\n \"blast_3d_divB\": 1.9346806954456352e-7,\n \"blast_3d_mass_error\": 1.1920928955078125e-7,\n \"blast_3d_energy_error\": 0.0000017595157962846386,\n \"blast_3d_energy_error_one_timestep\": 0.0000013631341708730815,\n \"blast_3d_magnetic_vs_one_timestep\": 0.000002097218668617451,\n \"blast_3d_peak_density_vs_one_timestep\": 0.00025800922460261777,\n \"blast_3d_magnetic_kept\": 1.0231469287363844,\n \"blast_3d_shared_mismatched\": 0,\n \"blast_3d_coarse_fine_difference\": 7.128572298664596e-8,\n \"blast_3d_cycles\": 90,\n \"blast_3d_share_of_block_updates\": 0.9977221867007673\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:14:54.417Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-4eb5964d0025f69528b5",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-gravity",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 11162,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-gravity: pass in 10.6 s\n{\n \"star_central_density_change\": 0.0009798538444371063,\n \"star_central_density_change_unmagnetized\": 0.024585939228648046,\n \"star_max_mach\": 1.2715506553649902,\n \"star_max_mach_unmagnetized\": 0.6258499622344971,\n \"star_kinetic_energy\": 6.403691941159195e-7,\n \"star_kinetic_energy_unmagnetized\": 3.624073769969982e-7,\n \"star_magnetic_energy_change\": 0.2524184456370704,\n \"star_divB\": 1.063622906694819e-7,\n \"column_max_mach\": 0.04762562736868858,\n \"column_max_mach_unmagnetized\": 0.028956584632396698,\n \"column_divB\": 0,\n \"cooling_decay_error\": 0.000008649296230468626,\n \"sink_accreted_fraction\": 0.05621142312156735,\n \"sink_mass_error\": 7.077323971316218e-8,\n \"sink_magnetic_energy_change\": 0.030336520276873502,\n \"sink_divB\": 8.251672944172701e-8\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:15:21.002Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-f4e7a1393d13d5d16560",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-gravity-blocks",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 59013,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-gravity-blocks: pass in 58.5 s\n{\n \"star_divB\": 6.432200860558306e-8,\n \"star_shared_mismatched\": 0,\n \"star_central_density_change\": 0.0011200140621867583,\n \"star_central_density_change_unmagnetized\": 0.00009188360678402674,\n \"star_max_mach\": 0.9935076832771301,\n \"star_max_mach_unmagnetized\": 0.45222434401512146,\n \"star_kinetic_energy\": 3.301659603494045e-7,\n \"star_kinetic_energy_unmagnetized\": 3.586984291814588e-7,\n \"star_bins_divB\": 6.432161142523967e-8,\n \"star_bins_shared_mismatched\": 0,\n \"star_bins_central_density_change\": 0.0011198948102636441,\n \"star_bins_central_density_change_unmagnetized\": 0.00010052937121196592,\n \"star_bins_max_mach\": 0.9940735101699829,\n \"star_bins_cycles\": 178,\n \"column_divB\": 0,\n \"column_shared_mismatched\": 0,\n \"column_max_mach\": 0.04622868821024895,\n \"column_max_mach_unmagnetized\": 0.028771337121725082,\n \"cooling_decay_error\": 0.0000318288803097872,\n \"cooling_divB\": 0,\n \"cooling_shared_mismatched\": 0,\n \"sink_accreted_fraction\": 0.05604329723973933,\n \"sink_mass_error\": 2.9989678296260536e-8,\n \"sink_magnetic_energy_change\": 0.029964901980603864,\n \"sink_cycles\": 0,\n \"sink_divB\": 1.1409752518634021e-7,\n \"sink_shared_mismatched\": 0,\n \"sink_bins_accreted_fraction\": 0.05604361536097713,\n \"sink_bins_mass_error\": 9.516952559351921e-9,\n \"sink_bins_magnetic_energy_change\": 0.029964488059578853,\n \"sink_bins_cycles\": 24,\n \"sink_bins_divB\": 1.2266208145901067e-7,\n \"sink_bins_shared_mismatched\": 0\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:15:32.183Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-ea910bfe04da94f75c7a",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-star-fields",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 37120,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-star-fields: pass in 36.5 s\n{\n \"plain_central_density_change\": 0.024585939228648046,\n \"plain_max_mach\": 0.6258499622344971,\n \"dipole_beta_min_initial\": 962.1297247481587,\n \"dipole_magnetic_energy_change\": 0.02264187274184759,\n \"dipole_divB\": 1.3532283454964075e-7,\n \"dipole_central_density_change\": 0.0053134508636663025,\n \"dipole_max_mach\": 0.3473500907421112,\n \"plain_blocks_central_density_change\": 0.00808373011429464,\n \"plain_blocks_max_mach\": 0.3190591037273407,\n \"dipole_blocks_beta_min_initial\": 922.3818455830834,\n \"dipole_blocks_magnetic_energy_change\": 0.008367118160657938,\n \"dipole_blocks_divB\": 1.4861397978902716e-7,\n \"dipole_blocks_shared_mismatched\": 0,\n \"dipole_blocks_central_density_change\": 0.0010588378256128905,\n \"dipole_blocks_max_mach\": 0.2417713850736618,\n \"random_beta_min_initial\": 172.57174422543224,\n \"random_magnetic_energy_change\": 0.15339147733628766,\n \"random_divB\": 1.4735401162002e-7,\n \"random_central_density_change\": 0.005308974192227867,\n \"random_max_mach\": 0.49221184849739075\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:16:31.210Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-e5919876330d2847a419",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-species",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6964,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-species: pass in 6.4 s\n{\n \"uniform_sum_error\": 1.9371509552001953e-7,\n \"uniform_min_fraction\": 0,\n \"uniform_max_fraction\": 0.5230818390846252,\n \"uniform_species_mass_drift\": 5.905067660999127e-7,\n \"uniform_smooth_species_l1\": 0.00026605262155499076,\n \"uniform_passive_scalar_l1\": 0.00035055463125079506,\n \"uniform_divB\": 8.42936131993683e-8,\n \"blocks_sum_error\": 4.470348358154297e-8,\n \"blocks_min_fraction\": 0,\n \"blocks_max_fraction\": 0.5195150971412659,\n \"blocks_species_mass_drift\": 3.0138935479929397e-7,\n \"blocks_smooth_species_l1\": 0.000982108425887418,\n \"blocks_passive_scalar_l1\": 0.001345163644620071,\n \"blocks_divB\": 8.429364162103079e-8\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:17:08.345Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-6dfb823f36df66b6ae7e",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-diffusion",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 23552,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-diffusion: pass in 23.0 s\n{\n \"axis_decay_error\": 0.0008223184409006379,\n \"axis_energy_drift\": 3.627298780980088e-7,\n \"axis_magnetic_energy_change\": 9.3132250911232e-8,\n \"axis_divB\": 0,\n \"diagonal_decay_error\": 0.00008905518466695295,\n \"diagonal_energy_drift\": 2.4144692076010246e-7,\n \"diagonal_magnetic_energy_change\": 0,\n \"diagonal_divB\": 0,\n \"diagonal_blocks_decay_error\": 0.00008914830861517231,\n \"diagonal_blocks_energy_drift\": 1.7593781844549314e-7,\n \"diagonal_blocks_magnetic_energy_change\": 9.31322508002097e-8,\n \"diagonal_blocks_divB\": 0,\n \"along_field_3d_decay_error\": 0.003103794442777419,\n \"along_field_3d_energy_drift\": 1.8471392808128792e-7,\n \"along_field_3d_magnetic_energy_change\": 2.793970128589507e-7,\n \"along_field_3d_divB\": 0,\n \"diagonal_blocks_3d_decay_error\": 0.0021218197087420343,\n \"diagonal_blocks_3d_energy_drift\": 8.055157798112089e-8,\n \"diagonal_blocks_3d_magnetic_energy_change\": 3.7252931583964255e-7,\n \"diagonal_blocks_3d_divB\": 0,\n \"alfven_wave_energy\": 0.6286924499625934,\n \"alfven_wave_energy_expected\": 0.6288605427729822,\n \"alfven_error\": 0.00026729743552922347,\n \"alfven_energy_drift\": 1.6211588209761524e-7,\n \"alfven_divB\": 0,\n \"alfven_inviscid_wave_energy\": 0.999950174236504,\n \"conduction_decay_error\": 0.0009943612259658563,\n \"conduction_energy_drift\": 4.75928823732379e-7,\n \"conduction_divB\": 0,\n \"conduction_blocks_decay_error\": 0.0008545936583219671,\n \"conduction_blocks_energy_drift\": 3.57330362692814e-8,\n \"conduction_blocks_divB\": 0,\n \"refined_mass_drift\": 0,\n \"refined_energy_drift\": 3.8597162778870575e-8,\n \"refined_regrids\": 0,\n \"refined_levels\": 2,\n \"refined_fraction_of_uniform_cells\": 0.625,\n \"refined_divB\": 0\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:17:15.322Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-2d87a8f7f4ad426e4a2a",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-tidal-disruption",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 32768,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-tidal-disruption: pass in 32.2 s\n{\n \"magnetic_energy_initial\": 0.0000862888409756124,\n \"magnetic_energy_exact\": 0.00008651,\n \"magnetic_energy_error\": 0.0025564561829568566,\n \"beta_center\": 2590.6958637772264,\n \"hydro_peak_density_ratio\": 0.44135025002929834,\n \"hydro_mass_left\": 0.999543870399631,\n \"mhd_peak_density_ratio\": 0.44382946656298444,\n \"mhd_mass_left\": 0.9995369611500041,\n \"magnetic_energy_ratio\": 0.8084395664958437,\n \"divB\": 2.152993014050778e-7,\n \"shared_mismatched\": 0,\n \"peak_density_vs_hydro\": 0.0056173448038638885,\n \"mass_left_vs_hydro\": 0.000006912402578329591\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:17:38.897Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-e99cf4b5855c9b0f326b",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "mhd-disk",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 18099,
+                  "errors": [],
+                  "stdout": [
+                    {
+                      "text": "mhd-disk: pass in 17.5 s\n{\n \"uniform_mass\": 0.9989972650546382,\n \"uniform_kinetic\": 1.0061559618256517,\n \"uniform_beta_min_over_ceiling\": 971.5766526656013,\n \"uniform_divB\": 1.5099414545366693e-7,\n \"uniform_alpha_maxwell_start\": 2.6527584280395376e-13,\n \"uniform_alpha_maxwell\": 0.0011540211677344716,\n \"uniform_alpha_reynolds\": -0.012760876222067745,\n \"uniform_qz_start\": 1.267321542355645,\n \"uniform_qphi\": 0.6591096099971643,\n \"blocks_mass\": 0.9941261934046707,\n \"blocks_kinetic\": 1.0062323617763707,\n \"blocks_beta_min_over_ceiling\": 21.160143636389137,\n \"blocks_divB\": 1.52564394709588e-7,\n \"blocks_alpha_maxwell_start\": 2.656973415794268e-13,\n \"blocks_alpha_maxwell\": 0.0015554255582890869,\n \"blocks_alpha_reynolds\": -0.012834382258312405,\n \"blocks_qz_start\": 1.267321542355645,\n \"blocks_qphi\": 1.1242305636228926,\n \"shared_mismatched\": 0\n}\n"
+                    }
+                  ],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:18:11.683Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-5a6aa15fa4e9204585ef",
+          "file": "validation.spec.ts",
+          "line": 19,
+          "column": 3
+        },
+        {
+          "title": "the simulator page steps and renders",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 5408,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:18:29.805Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-816affaa740a5efbbe42",
+          "file": "validation.spec.ts",
+          "line": 30,
+          "column": 1
+        },
+        {
+          "title": "controls rebuild pipelines and switch physics without errors",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 43644,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:18:35.231Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-b8375cbd553244dd13d2",
+          "file": "validation.spec.ts",
+          "line": 42,
+          "column": 1
+        },
+        {
+          "title": "a state exported from the page can be imported again",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [
+                {
+                  "type": "serial",
+                  "location": {
+                    "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                    "line": 0,
+                    "column": 0
+                  }
+                }
+              ],
+              "expectedStatus": "passed",
+              "projectId": "",
+              "projectName": "",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 6445,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-11-15T23:19:18.889Z",
+                  "annotations": [
+                    {
+                      "type": "serial",
+                      "location": {
+                        "file": "C:\\Users\\guill\\shaderous\\tests\\gpu\\validation.spec.ts",
+                        "line": 0,
+                        "column": 0
+                      }
+                    }
+                  ],
+                  "attachments": []
+                }
+              ],
+              "status": "expected"
+            }
+          ],
+          "id": "1c599a7f4afdfa3cc2e4-d25f66d2482db7b88b5b",
+          "file": "validation.spec.ts",
+          "line": 133,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-11-15T23:05:22.552Z",
+    "duration": 843806.699,
+    "expected": 68,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

@@ -6,6 +6,11 @@
  "view": {
   "showBlocks": false
  },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 1.15,
+  "dist": 2.6
+ },
  "adapter": "nvidia ampere",
  "errors": []
 }

@@ -70,11 +70,6 @@ Runs driven through the in-page console on an NVIDIA Ampere GPU in Chrome, with 
 | Cold white dwarf test (0.6 M_sun, 64^3): central density, energy | within 3.3%; energy to 1.3e-5 | `0fcf59e`, `white-dwarf` in `src/validation/tests.ts` |
 | Number of validation tests | 36 | `src/validation/tests.ts` at `0fcf59e` |
 
-## Not yet measured
-
-- Throughput (cell updates per second) on named GPUs and browsers: needs a benchmark run at normal priority. The manuscript leaves these in `\todo{}`.
-- The measured values (not the criteria) of each validation test: needs a run of `npm run test:gpu` with the JSON report saved here.
-
 ## Added with the update to the code at `1bb702b` (2026-11-15)
 
 Numbers that `edits/code-catchup.py` adds to the manuscript. "numerics" is `docs/numerics.md` in the code's repository; a commit means its message, which records the measurement.
@@ -105,3 +100,21 @@ Numbers that `edits/code-catchup.py` adds to the manuscript. "numerics" is `docs
 | Throughput on the Apple M4 Pro | from `paper/figures/data/performance/throughput_m4pro.json` via `make_performance.py` | commit `34beb4a` |
 | Lines of WGSL and TypeScript in `src/` at `1bb702b` | 12,002 and 26,501 | `find src -name "*.wgsl" | xargs cat | wc -l` (and `*.ts`) |
 | Number of validation tests | 64 | `src/validation/tests.ts` at `1bb702b` |
+
+## Figures and validation run again at `6fbf2cb` (2026-11-15)
+
+Every figure's simulations were run again with its script (`--run`) on the RTX 3080 12GB in Chrome 156, and the validation suite was run and its report saved.
+
+| Quantity | Value | Source |
+|---|---|---|
+| Measured column of the three validation tables | one value per criterion, in the criteria's order | `research/validation-run.json` (Playwright's JSON report of `tests/gpu/validation.spec.ts`; each test's metrics are in its `stdout`), 68 of 68 passed |
+| Largest div B over the MHD tests | 2.8e-7 (`loop_blocks_divB_later` of `mhd-restart`) | same |
+| Tidal disruption, beta = 1.5: peak return rate, time, bound clump at t = 40 | 1.60 M_sun/yr, 61 d after pericenter, 0.117 M_sun (was 5.3, 37 d, 0.09 before the point masses' pull took kick form) | `make_tde.py` output; `figures/data/tde/full/` |
+| Tidal disruption, beta = 0.6: surviving core | 0.947 M_sun | `make_tde.py` output; `figures/data/tde/partial/` |
+| White dwarf of 1 M_sun at 256 with 2 levels: settled, mapped | 0.52%, 30.4% | `make_balance.py` output |
+| Isothermal column: largest Mach number after a sound crossing | 3.8e-5 balanced, 0.35 plain | `make_balance.py`; `figures/data/balance/column.json` |
+| Sedov cells in Figure 1b | 6,455,296 leaf cells, every 33rd plotted | `make_hydro.py` output |
+| Throughput on the RTX 3080 12GB in Chrome 156 and Firefox 160 | from `paper/figures/data/performance/throughput.json` and `throughput_firefox.json` via `make_performance.py` (its printed table gives every point, its range over three passes and the time per step); measured with the GPU otherwise idle | `make_performance.py --run [--firefox]` at `6fbf2cb` with the working tree's `throughput` (timed again with more steps while a timing is under a second) |
+| Shaderous against AthenaK per unit of bandwidth, 256^3 | 1.52e6 per GB/s against 3.01e5 to 3.95e5: 3.9 to 5.1 times (quoted as 4 to 5) | `make_performance.py` output |
+| Firefox against Chrome | largest uniform grids 1.63e9 against 1.85e9 (2048^2) and 1.38e9 against 1.39e9 (256^3); adaptive 1.5 to 7.3 times fewer; ms per step 1.9 to 2.5 (2D) and 4.0 to 4.6 (3D) against 0.33 to 0.77 and 1.9 to 3.7 | same |
+| Nickel from the collision of two 0.64 M_sun dwarfs with the tabulated equation of state | 0.61 M_sun | no record of the run was found in the repository on 2026-11-15; with a network still trained on the first equation of state's heating. Measure again after the retraining |

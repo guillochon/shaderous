@@ -2,7 +2,7 @@
  "name": "partial",
  "setup": "problem=tidal-disruption&dim=3&n=256&amr=3",
  "t": 6,
- "steps": 725,
+ "steps": 672,
  "view": {
   "showBlocks": false,
   "contours": true,

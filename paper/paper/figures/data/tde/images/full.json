@@ -2,7 +2,7 @@
  "name": "full",
  "setup": "problem=tidal-disruption-full&dim=3&n=256&amr=3",
  "t": 6,
- "steps": 1319,
+ "steps": 1212,
  "view": {
   "showBlocks": false,
   "contours": true,

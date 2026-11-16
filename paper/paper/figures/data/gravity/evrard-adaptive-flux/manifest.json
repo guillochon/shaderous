@@ -1,11 +1,11 @@
 {
   "program": "shaderous",
-  "build": "9084436 (2026-11-13)",
+  "build": "6fbf2cb (2026-11-15)",
   "adapter": "nvidia ampere",
   "setup": "problem=evrard&dim=3&n=128&amr=2",
   "view": {},
   "problem": "evrard",
-  "started": "2026-11-13T15:23:54.165Z",
+  "started": "2026-11-15T23:22:12.687Z",
   "command": [
     "run",
     "--problem",
@@ -25,7 +25,7 @@
     "--low-priority",
     "--quiet",
     "--out",
-    "C:\\Users\\guill\\shaderous\\.claude\\worktrees\\shaderous-headless-agent-6e9a1d\\paper\\paper\\figures\\data\\gravity\\evrard-adaptive-flux"
+    "C:\\Users\\guill\\shaderous\\paper\\paper\\figures\\data\\gravity\\evrard-adaptive-flux"
   ],
   "outputs": [
     {
@@ -54,7 +54,7 @@
     },
     {
       "output": 4,
-      "t": 0.19999998807907104,
+      "t": 0.20000000298023224,
       "steps": 8,
       "files": []
     },
@@ -271,131 +271,131 @@
     {
       "output": 40,
       "t": 2,
-      "steps": 560,
+      "steps": 561,
       "files": []
     },
     {
       "output": 41,
       "t": 2.049999952316284,
-      "steps": 580,
+      "steps": 581,
       "files": []
     },
     {
       "output": 42,
       "t": 2.0999999046325684,
-      "steps": 599,
+      "steps": 601,
       "files": []
     },
     {
       "output": 43,
       "t": 2.1500000953674316,
-      "steps": 618,
+      "steps": 620,
       "files": []
     },
     {
       "output": 44,
       "t": 2.200000047683716,
-      "steps": 636,
+      "steps": 639,
       "files": []
     },
     {
       "output": 45,
       "t": 2.25,
-      "steps": 654,
+      "steps": 657,
       "files": []
     },
     {
       "output": 46,
       "t": 2.299999952316284,
-      "steps": 671,
+      "steps": 675,
       "files": []
     },
     {
       "output": 47,
       "t": 2.3499999046325684,
-      "steps": 688,
+      "steps": 692,
       "files": []
     },
     {
       "output": 48,
       "t": 2.4000000953674316,
-      "steps": 705,
+      "steps": 709,
       "files": []
     },
     {
       "output": 49,
       "t": 2.450000047683716,
-      "steps": 722,
+      "steps": 726,
       "files": []
     },
     {
       "output": 50,
       "t": 2.5,
-      "steps": 738,
+      "steps": 742,
       "files": []
     },
     {
       "output": 51,
       "t": 2.549999952316284,
-      "steps": 754,
+      "steps": 758,
       "files": []
     },
     {
       "output": 52,
       "t": 2.5999999046325684,
-      "steps": 770,
+      "steps": 774,
       "files": []
     },
     {
       "output": 53,
       "t": 2.6500000953674316,
-      "steps": 782,
+      "steps": 789,
       "files": []
     },
     {
       "output": 54,
       "t": 2.700000047683716,
-      "steps": 791,
+      "steps": 803,
       "files": []
     },
     {
       "output": 55,
       "t": 2.75,
-      "steps": 800,
+      "steps": 813,
       "files": []
     },
     {
       "output": 56,
       "t": 2.799999952316284,
-      "steps": 809,
+      "steps": 822,
       "files": []
     },
     {
       "output": 57,
       "t": 2.8499999046325684,
-      "steps": 818,
+      "steps": 831,
       "files": []
     },
     {
       "output": 58,
       "t": 2.9000000953674316,
-      "steps": 827,
+      "steps": 840,
       "files": []
     },
     {
       "output": 59,
       "t": 2.950000047683716,
-      "steps": 836,
+      "steps": 849,
       "files": []
     },
     {
       "output": 60,
       "t": 3,
-      "steps": 845,
+      "steps": 858,
       "files": []
     }
   ],
-  "finished": "2026-11-13T15:24:08.779Z",
+  "finished": "2026-11-15T23:22:24.215Z",
   "stopped": "time",
-  "seconds": 14.613
+  "seconds": 11.527
 }

@@ -1,14 +1,19 @@
 {
  "name": "sedov",
  "setup": "problem=sedov&dim=3&n=256&amr=3&tbins=3",
- "t": 0.05027607401825662,
- "steps": 3536,
+ "t": 0.05039694160223007,
+ "steps": 3543,
  "view": {
   "mode": "slice",
   "field": 21,
   "lo": 0,
   "hi": 3,
   "showBlocks": true
+ },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 0.45,
+  "dist": 2.6
  },
  "adapter": "nvidia ampere",
  "errors": []

@@ -233,7 +233,14 @@ Following \citet{Kushnir2013}, a run can limit the rate at which a cell takes in
 \section{Conservation without stored fluxes}
 \label{sec:conservation}
 
-Most finite-volume codes on GPUs evaluate each face flux once, store it, and difference the stored fluxes. The hydrodynamic solver of Shaderous gathers instead: each cell needs the fluxes on its own six faces, and a face that two cells share is evaluated wherever either of them needs it. Conservation then requires that the evaluations agree bit for bit. They do if they read identical inputs and perform identical arithmetic in the same order. Every quantity that enters a face flux, including the potential differences of the well-balanced reconstruction, is formed from the same values whichever cell asks.
+Most finite-volume codes on GPUs evaluate each face flux once, store it, and difference the stored fluxes. The hydrodynamic solver of Shaderous gathers instead: each cell needs the fluxes on its own six faces, and a face that two cells share is evaluated wherever either of them needs it. Conservation then requires that the evaluations agree bit for bit. They do if they read identical inputs and perform identical arithmetic in the same order. Every quantity that enters a face flux, including the potential differences of the well-balanced reconstruction, is formed from the same values whichever cell asks. Figure~\ref{fig:fluxes} shows the three places where a face is shared: within a level, across a refinement boundary (Section~\ref{sec:reflux}), and between blocks on different timesteps (Section~\ref{sec:timebins}).
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fluxes.pdf}
+\caption{How the hydrodynamic solver conserves without storing a face flux. The shared face is orange, and each arrow across it is one evaluation of its flux, colored by the side that makes it. (a)~Two cells of one level each evaluate the flux of the face between them, from the same inputs with the same arithmetic, and get the same bits. (b)~At a refinement boundary, shown in two dimensions, each fine cell evaluates the flux of its own face against a ghost cell that is computed as it is loaded. The coarse cell evaluates the same fine fluxes again and takes their mean. (c)~Between time bins, with time running to the right, the slower block takes the fluxes of the faster block's two substeps, the first when its own step starts and the second at its midpoint. The faster block reads the slower one from its half-step prediction (dashed).}
+\label{fig:fluxes}
+\end{figure*}
 
 Identical source code is not enough. WGSL lets a compiler fuse and reassociate floating-point operations, and the Metal backend of Chrome compiles shaders in a relaxed mode that does so. On an Apple M4 Pro, a cell's lower face and its neighbor's upper face, computed by two calls of the same function, differed in the last bit on thousands of faces. Every face that two cells share is therefore computed at one place in the code and in one compiled pipeline. For the same reason, compensated sums pass their intermediate values through an exclusive-or with a zero that the compiler cannot see, which keeps it from simplifying the compensation away.
 
@@ -265,14 +272,14 @@ Because a pass cannot read and write one \texttt{rgba32float} texture, ghost cel
 \subsection{Matching fluxes across refinement boundaries}
 \label{sec:reflux}
 
-The adaptive solvers of \citet{Berger1984} and \citet{Berger1989}, and the GPU codes that follow them \citep{Schive2010, Wang2010}, store the fluxes that the fine side computes on a coarse face and correct the coarse cell afterward. Shaderous extends the gathering of Section~\ref{sec:conservation} across levels instead. At a refinement boundary the coarse cell recomputes the fluxes of the fine faces that cover its face, from the same fine states, with the same arithmetic as the fine cells. Mass, momentum and energy are therefore conserved to round-off without storing any flux. The validation suite checks that the fluxes agree bit for bit between blocks on the same level and to $10^{-6}$ across refinement boundaries.
+The adaptive solvers of \citet{Berger1984} and \citet{Berger1989}, and the GPU codes that follow them \citep{Schive2010, Wang2010}, store the fluxes that the fine side computes on a coarse face and correct the coarse cell afterward. Shaderous extends the gathering of Section~\ref{sec:conservation} across levels instead. At a refinement boundary the coarse cell recomputes the fluxes of the fine faces that cover its face, from the same fine states, with the same arithmetic as the fine cells (Figure~\ref{fig:fluxes}b). Mass, momentum and energy are therefore conserved to round-off without storing any flux. The validation suite checks that the fluxes agree bit for bit between blocks on the same level and to $10^{-6}$ across refinement boundaries.
 
 \subsection{Local timesteps}
 \label{sec:timebins}
 
 The subcycling of \citet{Berger1984} lets fine levels take more steps than coarse ones. Shaderous assigns timesteps per block rather than per level, using power-of-two time bins in the manner of particle codes such as GADGET-2 \citep{Springel2005}. Time advances in cycles of up to eight substeps of the smallest step. At the start of a cycle each block is put in a bin from its own signal speed, on the GPU: a block in bin $k$ advances $2^k$ substeps at a time. Relaxation sweeps then enforce three rules: face neighbors are at most one bin apart, a block next to a faster one steps as fast as it, and a block is never slower than a coarser neighbor.
 
-Across a face whose other side steps twice as often, a block takes the other side's fluxes, recomputed from stored states: half when its own step starts and half at its midpoint. A faster block reads a slower neighbor that is part way through a step from that neighbor's half-step prediction. As at refinement boundaries, nothing is stored and conservation holds to round-off. With self-gravity the potential is solved on every block at the end of a cycle. In between, it is solved only on the blocks that finish a step and carried forward elsewhere at the rate at which it last changed.
+Across a face whose other side steps twice as often, a block takes the other side's fluxes, recomputed from stored states: half when its own step starts and half at its midpoint (Figure~\ref{fig:fluxes}c). A faster block reads a slower neighbor that is part way through a step from that neighbor's half-step prediction. As at refinement boundaries, nothing is stored and conservation holds to round-off. With self-gravity the potential is solved on every block at the end of a cycle. In between, it is solved only on the blocks that finish a step and carried forward elsewhere at the rate at which it last changed.
 
 The extra passes are not free. In three dimensions each block update costs about 10 percent more without gravity and 50 to 70 percent more with it, where every substep also relaxes the potential. Shaderous therefore reads back, every few cycles, the share of block updates that a cycle actually makes, and falls back to a single timestep while that share is above 80 percent (65 percent with gravity). A three-dimensional Sedov blast at a finest resolution of 256 cells with three levels makes 2.2 times fewer block updates with local timesteps and runs 1.9 times faster. An isothermal collapse at the same resolution makes 2.3 times fewer and runs 1.6 times faster. Figure~\ref{fig:amr}c shows how the bins follow a blast.
 
@@ -327,7 +334,14 @@ The frame is inertial unless a problem asks for another. The tidal disruption pr
 \section{Magnetic fields}
 \label{sec:mhd}
 
-With a magnetic field, Shaderous solves the equations of ideal MHD in units in which the magnetic pressure is $B^2/2$, so that the plasma $\beta = 2p/B^2$, and the total energy includes $B^2/2$. Gravity, point masses, sinks, cooling, viscosity, conduction, species and burning act on magnetized gas as they do without a field. A sink removes mass, momentum and the kinetic and internal energy of the gas that it takes, but leaves the field, which it could not remove without breaking constrained transport. Viscosity and conduction stay isotropic: the code has no transport that follows the direction of the field.
+With a magnetic field, Shaderous solves the equations of ideal MHD in units in which the magnetic pressure is $B^2/2$, so that the plasma $\beta = 2p/B^2$, and the total energy includes $B^2/2$. Gravity, point masses, sinks, cooling, viscosity, conduction, species and burning act on magnetized gas as they do without a field. A sink removes mass, momentum and the kinetic and internal energy of the gas that it takes, but leaves the field, which it could not remove without breaking constrained transport. Viscosity and conduction stay isotropic: the code has no transport that follows the direction of the field. Figure~\ref{fig:fields} shows the field lines of two of the magnetized problems of Section~\ref{sec:problems}, as the code draws them (Section~\ref{sec:interface}).
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=\textwidth]{figures/fields.pdf}
+\caption{Magnetic field lines, drawn by the code's own renderer and colored by the magnetic pressure on a logarithmic scale. (a)~The vortex of \citet{Orszag1979} on $512^2$ cells at $t = 0.5$. The background is the density, and the lines are 28 contours of the flux function, so the same magnetic flux passes between any two neighbors and the lines crowd where the field is strong. (b)~A star threaded by a dipole field at $t = 6$, about two dynamical times after it passed a black hole of $10^6\,\Msun$ at $\beta = 0.7$ ($256^3$ at the finest level, three levels of refinement). The lines are traced in three dimensions from 256 seeds and drawn as tubes. The stripped streams stretch their field straight, and the surviving core winds its field up. The arrows give the orientation of the axes.}
+\label{fig:fields}
+\end{figure*}
 
 \subsection{Constrained transport}
 \label{sec:ct}
@@ -370,7 +384,7 @@ The same page can also run without a person at it. A programming interface in th
 \subsection{Problems}
 \label{sec:problems}
 
-The problems that ship with the code are the shock tubes of \citet{Sod1978} along each axis and the diagonal and a strong shock tube from \citet{Toro2009}, the blast of \citet{Taylor1950} and \citet{Sedov1959}, Kelvin-Helmholtz and Rayleigh-Taylor instabilities, the Mach 3 wind tunnel with a step of \citet{Emery1968} and \citet{Woodward1984}, smooth advection, the Jeans instability \citep{Jeans1902}, a polytrope of index 1 in equilibrium, a cold white dwarf in equilibrium, two white dwarfs that collide on a parabolic orbit \citep{Rosswog2009, Raskin2009}, the collapse of \citet{Evrard1988}, a uniform sphere, an isothermal turbulent collapse, the thermal instability \citep{Field1965} with the cooling function of \citet{Koyama2002}, a tidal disruption of a polytropic star by a point mass, and a binary accreting from a viscous circumbinary disk \citep{Artymowicz1994, MacFadyen2008}. A shock in air hits a bubble of helium \citep{Haas1987, QuirkKarni1996}. Detonations of a single-step Arrhenius reaction start from the exact steady solution. At a higher activation energy the front pulses \citep{Fickett1966}, and a pocket of unburned gas behind it breaks the front into cells. The network of Section~\ref{sec:burning} burns a detonation of carbon and oxygen at $10^7$~g~cm$^{-3}$, lit at the closed end of a tube 1000~km long, and the collision of two white dwarfs. \todo{Measure the speed of the carbon-oxygen detonation front (the code quotes 11,000 and 12,000~km~s$^{-1}$ in different places).} With magnetic fields there are the shock tube of \citet{Brio1988}, the vortex of \citet{Orszag1979}, the rotor of \citet{Balsara1999}, the field loop of \citet{GardinerStone2005}, a circularly polarized Alfv\'en wave \citep{Toth2000}, a blast in a magnetized medium \citep{Stone2008}, polytropes threaded by a dipole or a random field, magnetized tidal disruptions, and a magnetized accretion disk. Figure~\ref{fig:gallery} shows four of these problems.
+The problems that ship with the code are the shock tubes of \citet{Sod1978} along each axis and the diagonal and a strong shock tube from \citet{Toro2009}, the blast of \citet{Taylor1950} and \citet{Sedov1959}, Kelvin-Helmholtz and Rayleigh-Taylor instabilities, the Mach 3 wind tunnel with a step of \citet{Emery1968} and \citet{Woodward1984}, smooth advection, the Jeans instability \citep{Jeans1902}, a polytrope of index 1 in equilibrium, a cold white dwarf in equilibrium, two white dwarfs that collide on a parabolic orbit \citep{Rosswog2009, Raskin2009}, the collapse of \citet{Evrard1988}, a uniform sphere, an isothermal turbulent collapse, the thermal instability \citep{Field1965} with the cooling function of \citet{Koyama2002}, a tidal disruption of a polytropic star by a point mass, and a binary accreting from a viscous circumbinary disk \citep{Artymowicz1994, MacFadyen2008}. A shock in air hits a bubble of helium \citep{Haas1987, QuirkKarni1996}. Detonations of a single-step Arrhenius reaction start from the exact steady solution. At a higher activation energy the front pulses \citep{Fickett1966}, and a pocket of unburned gas behind it breaks the front into cells. The network of Section~\ref{sec:burning} burns a detonation of carbon and oxygen at $10^7$~g~cm$^{-3}$, lit at the closed end of a tube 1000~km long, and the collision of two white dwarfs. With magnetic fields there are the shock tube of \citet{Brio1988}, the vortex of \citet{Orszag1979}, the rotor of \citet{Balsara1999}, the field loop of \citet{GardinerStone2005}, a circularly polarized Alfv\'en wave \citep{Toth2000}, a blast in a magnetized medium \citep{Stone2008}, polytropes threaded by a dipole or a random field, magnetized tidal disruptions, and a magnetized accretion disk. Figure~\ref{fig:gallery} shows four of these problems.
 
 \begin{figure*}[t]
 \centering
@@ -385,7 +399,7 @@ The disk of the binary also has a damping zone at its outer edge, of the kind th
 
 The magnetized accretion disk is a globally isothermal disk around one softened point mass with a sink, in exact vertical and radial balance with the softened potential. Four poloidal loops of field with no net flux thread it, as in \citet{Hawley2000} but laid along the radius, with $\beta = 50$ in the midplane where two loops meet. Its damping zone acts on the gas alone and leaves the field to the induction equation, and a ceiling of 3 on the Alfv\'en speed keeps the nearly empty corona from setting the timestep. The shear winds the loops, and the magnetorotational instability \citep{Balbus1991} grows. The code reports the Maxwell and Reynolds stresses over the body of the disk as $\alpha$ parameters, and the quality factors $Q_z$ and $Q_\phi$ of \citet{Hawley2011}, the number of cells across the fastest-growing wavelength of the instability. On the default mesh ($256^3$ at the finest level, two levels of refinement), after three orbits at unit radius, $\alpha_{\rm M} = 0.026$, $\alpha_{\rm R} = 0.003$, $Q_z = 4.2$ and $Q_\phi = 15$, below the values of about 8 and 20 above which \citet{Hawley2011} found that the turbulence saturates as it does at higher resolution. The largest run so far is this disk at $512^3$ with three levels on an NVIDIA RTX~4090. With room for 5832 blocks, about 24 million cells, it held 16.8~GB of GPU memory, and one orbit at unit radius (6359 steps) took 14 minutes. Over that orbit the magnetic energy grew 5.4 times, and the Maxwell stress reached $\alpha = 0.009$.
 
-For the tidal disruption the code also sorts the debris by its specific orbital energy about the black hole, from which follows the rate at which bound debris returns to pericenter. Gas that has left the box moves almost ballistically in the potential of the black hole, so its energy no longer changes. The update therefore adds the mass that crosses each open face of the box to a histogram of energy as it crosses. A census adds the gas that is still in the box. It sets apart a surviving core, which we find by iteration: gas belongs to the core if it is bound to the core's mean velocity by the gas's own potential, and the core's mean velocity is then recomputed from that gas. The histograms are sums of 64-bit integers, so they are exact and do not depend on the order in which the GPU adds them. In the validation runs, the mass in the box, the mass that has left and the mass that the sink has taken add up to the starting mass to within the rounding of the total. Kepler's third law turns the histogram of the bound debris into a rate of return (\mbox{Figure~\ref{fig:tde}}). When a star of index 3/2 passes a black hole of $10^6\,\Msun$ at $\beta = 1.5$, the rate peaks at $5.3\,\Msun\,\mathrm{yr}^{-1}$ 37~d after pericenter and then falls close to $t^{-5/3}$. At this resolution a clump stays bound, and it still sheds mass 40 dynamical times into the run, when it holds $0.09\,\Msun$. The late part of the rate fills in only as that gas leaves the clump. At $\beta = 0.6$ the star keeps $0.95\,\Msun$, and the rate falls faster than $t^{-5/3}$, as \citet{Guillochon2013} found for encounters that leave a core. \todo{These runs predate the change of the point masses' pull to kick form (Section~\ref{sec:coupling}); run them again and update the numbers and Figure~\ref{fig:tde}.}
+For the tidal disruption the code also sorts the debris by its specific orbital energy about the black hole, from which follows the rate at which bound debris returns to pericenter. Gas that has left the box moves almost ballistically in the potential of the black hole, so its energy no longer changes. The update therefore adds the mass that crosses each open face of the box to a histogram of energy as it crosses. A census adds the gas that is still in the box. It sets apart a surviving core, which we find by iteration: gas belongs to the core if it is bound to the core's mean velocity by the gas's own potential, and the core's mean velocity is then recomputed from that gas. The histograms are sums of 64-bit integers, so they are exact and do not depend on the order in which the GPU adds them. In the validation runs, the mass in the box, the mass that has left and the mass that the sink has taken add up to the starting mass to within the rounding of the total. Kepler's third law turns the histogram of the bound debris into a rate of return (\mbox{Figure~\ref{fig:tde}}). When a star of index 3/2 passes a black hole of $10^6\,\Msun$ at $\beta = 1.5$, the rate peaks at $1.6\,\Msun\,\mathrm{yr}^{-1}$ 61~d after pericenter and then falls close to $t^{-5/3}$. At this resolution a clump stays bound, and it still sheds mass 40 dynamical times into the run, when it holds $0.12\,\Msun$. The late part of the rate fills in only as that gas leaves the clump. At $\beta = 0.6$ the star keeps $0.95\,\Msun$, and the rate falls faster than $t^{-5/3}$, as \citet{Guillochon2013} found for encounters that leave a core.
 
 A polytrope of index 3 is evolved with gas of $\Gamma = 5/3$, as in \citet{Guillochon2013}. In our runs it is destroyed for $\beta$ between 1.8, where its peak density collapses again, and 2, where the peak density keeps falling, against the 1.85 that they found. The magnetized disruptions set the field inside the star as \citet{GuillochonMcCourt2017} did: a dipole, or a random field with a Kolmogorov spectrum, whose strength follows the pressure of the star so that $\beta$ is about the same throughout it.
 
@@ -399,7 +413,7 @@ A polytrope of index 3 is evolved with gas of $\Gamma = 5/3$, as in \citet{Guill
 \section{Educational use}
 \label{sec:education}
 
-Several properties make the code practical in a classroom. It needs no installation, no account and no allocation of computing time. It runs on the laptops that students already own, and the two-dimensional problems run on phones. A link records a whole setup, so an instructor can hand a class a prepared run by posting its address. The brushes, the query tool and the choice of displayed field let students change a flow while it runs and read the state of any cell. An exported file opens in yt, so students who know Python can analyze runs with their own scripts, and a recorded movie can be shown in a lecture. A guide in the repository (\url{https://github.com/guillochon/shaderous/blob/main/docs/teaching.md}) gives each activity below with links that open its setup. \todo{Say whether these activities have been used in a course, and what came of it.}
+Several properties make the code practical in a classroom. It needs no installation, no account and no allocation of computing time. It runs on the laptops that students already own, and the two-dimensional problems run on phones. A link records a whole setup, so an instructor can hand a class a prepared run by posting its address. The brushes, the query tool and the choice of displayed field let students change a flow while it runs and read the state of any cell. An exported file opens in yt, so students who know Python can analyze runs with their own scripts, and a recorded movie can be shown in a lecture. A guide in the repository (\url{https://github.com/guillochon/shaderous/blob/main/docs/teaching.md}) gives each activity below with links that open its setup. The code is too new to have been used in a course. The activities are proposals, and we invite instructors who try them to tell us what worked.
 
 For primary and secondary school, the guide gives seven demonstrations that a teacher shows on a projector, each a few minutes long, in a routine of predicting, watching and explaining. Children see that air and water flow and swirl, that hot gas rises and spreads, and that a star is a ball of hot gas held together by gravity. Each demonstration is paired with something that students can see or do themselves, such as food coloring that curls in a glass of water. Older pupils work in pairs, read numbers with the query tool, and discuss how far a simulation can be trusted.
 
@@ -412,116 +426,23 @@ For graduate students the code is a readable example of a modern Godunov method.
 \section{Validation}
 \label{sec:validation}
 
-Validation runs in the browser on the reader's own GPU, from a page next to the simulator, and from the command line through a browser driven by Playwright. A double-precision CPU implementation of the same scheme, and an exact Riemann solver \citep{Toro2009}, serve as references. Tables~\ref{tab:validation} and~\ref{tab:validation-mhd} list the 64 tests and their pass criteria. A float64 copy of the MHD scheme serves as the reference for the magnetic tests. Figure~\ref{fig:hydro} compares the hydrodynamics with exact solutions and shows how the error falls with resolution. Figure~\ref{fig:gravitytests} shows the energy budget of a gravitational collapse and the accuracy of the potential on the adaptive mesh. \todo{Add a column with the measured value of each test from a saved run of the suite, and the GPU and browser it ran on.}
-
-
-
-
-\begin{table*}
-\centering
-\caption{The validation suite. Criteria are those coded in the suite; L1 errors are means over cells, relative to the mean density.}
-\label{tab:validation}
-\footnotesize
-\begin{tabular}{ll}
-\toprule
-Test & Pass criterion \\
-\midrule
-Sod tube along $x$, $y$, $z$ & \tabpar{11.4cm}{L1 density error $< 0.01$; runs agree under axis permutation to $10^{-6}$} \\
-Sod tube along the diagonal & \tabpar{11.4cm}{L1 density error $< 0.015$} \\
-Strong shock tube (pressure ratio $10^5$) & \tabpar{11.4cm}{No floored cells; relative L1 density error $< 0.1$ at 128 cells} \\
-Sedov-Taylor blast & \tabpar{11.4cm}{Mean shock radius within 2\% of the similarity solution} \\
-Kelvin-Helmholtz & \tabpar{11.4cm}{Transverse kinetic energy grows more than fivefold by $t = 1$} \\
-Low-Mach HLLC & \tabpar{11.4cm}{Gresho vortex loses less than half the energy lost with plain HLLC, and gains none} \\
-Well-balanced column & \tabpar{11.4cm}{Largest Mach number $< 10^{-3}$ after a sound crossing, uniform and block grids; at least 100 times below the plain scheme} \\
-Uniform advection, 10 crossings & \tabpar{11.4cm}{Mass and momentum drift $< 2 \times 10^{-6}$} \\
-Species & \tabpar{11.4cm}{Fractions in $[0, 1]$ summing to 1 within $10^{-5}$; each species' mass to $10^{-5}$; a smooth species as accurate as the passive scalar} \\
-Species in the equation of state & \tabpar{11.4cm}{Helium in hydrogen at rest stays at rest to $10^{-5}$ under four equations of state; carried across, pressure balanced to $10^{-5}$ (ideal gas) or 0.05; helium in air, $\gamma$ of 5/3 and 1.4, to 0.01} \\
-Shock and helium bubble & \tabpar{11.4cm}{Helium mass to $10^{-5}$; bit-identical faces; on the adaptive mesh, over 95\% of the helium at the finest level} \\
-Arrhenius detonation & \tabpar{11.4cm}{Front within 1\% of the Chapman-Jouguet speed; fuel left behind $< 10^{-3}$} \\
-Smooth advection & \tabpar{11.4cm}{Mean error $< 2 \times 10^{-4}$ at $256^2$; second order or better} \\
-Flux determinism & \tabpar{11.4cm}{Bit-identical mass fluxes on every face, three flows} \\
-Blast in a reflecting box & \tabpar{11.4cm}{Mass to $10^{-5}$, total energy to $10^{-3}$} \\
-Two-dimensional grids & \tabpar{11.4cm}{Sod L1 error $< 0.003$ at $256^2$; bit-identical fluxes} \\
-Rayleigh-Taylor & \tabpar{11.4cm}{At rest, Mach $< 10^{-3}$ at $t = 2$; perturbed, energy to $10^{-3}$} \\
-Block grid without refinement & \tabpar{11.4cm}{Density within $10^{-5}$ of the uniform grid in every cell; same number of steps} \\
-Adaptive Sod tube & \tabpar{11.4cm}{L1 error $< 0.003$ on under 60\% of the cells; mass and energy to $10^{-6}$} \\
-Adaptive species & \tabpar{11.4cm}{As for species, with the mesh rebuilt; a smooth species within $1.3 \times 10^{-3}$ of the passive scalar} \\
-Adaptive species in the equation of state & \tabpar{11.4cm}{At rest to $10^{-5}$; carried across, pressure within 0.05; faces match across levels} \\
-Adaptive detonation & \tabpar{11.4cm}{As the detonation, with the whole reaction zone at the finest level} \\
-Adaptive Sedov blast & \tabpar{11.4cm}{Radius within 2\%; mass and energy to $10^{-6}$} \\
-Adaptive instabilities & \tabpar{11.4cm}{Mass to $10^{-6}$, energy to $10^{-5}$ while the mesh follows the flow} \\
-Adaptive Poisson solve & \tabpar{11.4cm}{Sphere potential within 1\% with 0, 2 and 3 levels; Jeans rate within 5\%} \\
-Adaptive Evrard and polytrope & \tabpar{11.4cm}{Energy to 2\% through bounce; central density within 10\%} \\
-Adaptive tidal disruption & \tabpar{11.4cm}{Pericenter within 2\%; frame centered to 0.005 stellar radii} \\
-Local timesteps & \tabpar{11.4cm}{Sod and Sedov as with one timestep; mass and energy to $10^{-6}$} \\
-HDF5 export and import & \tabpar{11.4cm}{Restarted state equal to $10^{-5}$; continued runs agree to $10^{-4}$} \\
-Cooling & \tabpar{11.4cm}{Power-law decay to 0.1\%; thermal balance to 1\% without overshoot} \\
-Viscosity & \tabpar{11.4cm}{Energy of a shear wave decays as $\exp(-2\nu k^2 t)$ to 1\%, and to 3\% between no-slip walls; energy to $10^{-5}$ on the adaptive mesh} \\
-Conduction & \tabpar{11.4cm}{Temperature wave decays at the linear rate to 1\%; cloud scale of the thermal instability changes by $< 12\%$ when the resolution doubles} \\
-Point mass and sink & \tabpar{11.4cm}{Gas plus accreted mass constant to $10^{-5}$} \\
-Binary orbit & \tabpar{11.4cm}{Separation within 0.5\% over one period; both masses accrete} \\
-Close encounter of two masses & \tabpar{11.4cm}{Orbit of eccentricity 0.9 keeps its energy to 1\% over two periods} \\
-GPU against CPU reference & \tabpar{11.4cm}{Density and energy differ by $< 10^{-4}$ of the mean after 20 steps} \\
-Burning network & \tabpar{11.4cm}{One step on 48 held-out states within 2\% (L1) of the float64 network} \\
-Equations of state & \tabpar{11.4cm}{Round trip to $10^{-5}$; WGSL matches float64 mirrors to $10^{-4}$, degenerate electrons and hydrogen ionization included; tabulated electrons to $5\times10^{-5}$, and to $5\times10^{-4}$ in sound speed} \\
-Uniform sphere potential & \tabpar{11.4cm}{Largest error $< 1\%$ (isolated boundaries)} \\
-Jeans instability & \tabpar{11.4cm}{Growth rate within 5\% of linear theory} \\
-Polytrope & \tabpar{11.4cm}{Central density within 10\% over 10 dynamical times} \\
-Cold white dwarf & \tabpar{11.4cm}{Settled $0.6\,M_\odot$ dwarf: central density within 5\% over three dynamical times; energy to $10^{-3}$} \\
-Evrard collapse & \tabpar{11.4cm}{Total energy to 2\%; thermal energy peaks at $0.9 < t < 1.3$} \\
-Tidal disruption & \tabpar{11.4cm}{Pericenter within 2\%; star disrupted} \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\begin{table*}
-\centering
-\caption{The validation tests of MHD. Except where the field is the subject of the test, each also requires $\max|\nabla\cdot\mathbf{B}|\,\Delta x/\max|B| < 10^{-6}$ and that faces shared by two blocks agree.}
-\label{tab:validation-mhd}
-\footnotesize
-\begin{tabular}{ll}
-\toprule
-Test & Pass criterion \\
-\midrule
-Brio-Wu shock tube & \tabpar{11.4cm}{Compound wave, slow shock and least $v_y$ in the ranges of \citet{Brio1988}; mass and energy to $10^{-6}$; HLLD and HLLE agree to 0.01} \\
-Orszag-Tang vortex & \tabpar{11.4cm}{Mass and energy to $10^{-6}$; magnetic energy and peak pressure within regression ranges} \\
-Field loop & \tabpar{11.4cm}{After one crossing, at least 90\% of the magnetic energy kept and the peak within 10\%} \\
-Alfv\'en wave & \tabpar{11.4cm}{Mean error of $v_z$ $< 3 \times 10^{-5}$ at $256^2$; second order or better} \\
-Blast in a field, 3D & \tabpar{11.4cm}{Mass to $10^{-6}$, energy to $3 \times 10^{-6}$; elongated along the field by at least 1.3} \\
-Stepping in slabs & \tabpar{11.4cm}{State and faces bit-identical to one slab} \\
-GPU against CPU reference & \tabpar{11.4cm}{Density, energy and face field within $10^{-5}$ of the mean after 20 steps} \\
-HDF5 restart & \tabpar{11.4cm}{Face field restored bit for bit; continued runs agree to $10^{-5}$} \\
-Blocks without refinement & \tabpar{11.4cm}{Energies equal to the uniform grid's to $10^{-6}$ after 40 steps} \\
-Refined mesh & \tabpar{11.4cm}{Mass to $3 \times 10^{-6}$, energy to $10^{-4}$; coarse face the mean of the fine to $10^{-6}$; magnetic energy within 1\% of the uniform grid} \\
-Leaves in chunks & \tabpar{11.4cm}{Bit-identical to one chunk} \\
-Moving mesh & \tabpar{11.4cm}{Over at least 20 rebuilds, mass to $10^{-6}$; field loop keeps 94\% of its energy} \\
-Per-block timesteps & \tabpar{11.4cm}{Magnetic energy within 0.5\% of one timestep; never more block updates} \\
-Gravity, point masses and cooling & \tabpar{11.4cm}{Magnetized polytrope and column as still as without a field; cooling decay to $10^{-3}$; sink budget to $10^{-5}$} \\
-The same on blocks & \tabpar{11.4cm}{As above, also with per-block timesteps} \\
-Fields inside stars & \tabpar{11.4cm}{Dipole star: central density and magnetic energy within 5\% over two dynamical times} \\
-Species in a field & \tabpar{11.4cm}{As for species, in a field at $\beta = 4$} \\
-Viscosity and conduction in a field & \tabpar{11.4cm}{Shear waves to 1\%; viscously damped Alfv\'en wave to 2\%; temperature wave across the field to 1\%} \\
-Magnetized tidal disruption & \tabpar{11.4cm}{Field energy within 3\% of its integral; disruption follows the hydrodynamic run to 5\%} \\
-Magnetized disk & \tabpar{11.4cm}{Mass within 3\%, kinetic energy within 5\%; Alfv\'en ceiling held; Maxwell stress grows from zero} \\
-\bottomrule
-\end{tabular}
-\end{table*}
+Validation runs in the browser on the reader's own GPU, from a page next to the simulator, and from the command line through a browser driven by Playwright. A double-precision CPU implementation of the same scheme, and an exact Riemann solver \citep{Toro2009}, serve as references. Appendix~\ref{sec:validationtests} lists the 64 tests, their pass criteria and the values measured in one run. A float64 copy of the MHD scheme serves as the reference for the magnetic tests. Figure~\ref{fig:hydro} compares the hydrodynamics with exact solutions and shows how the error falls with resolution. Figure~\ref{fig:gravitytests} shows the energy budget of a gravitational collapse and the accuracy of the potential on the adaptive mesh.
 
 \section{Performance}
 \label{sec:performance}
 
-The flux update is limited by texture fetches rather than arithmetic, which is why the uniform grid stores no primitive variables. In two dimensions a run uses $16 \times 16 \times 1$ workgroups, which more than halves the cost of the flux update against $8 \times 8 \times 4$ workgroups with three idle layers. The number of steps per frame adapts to the GPU, and results agree across browsers to round-off. On the adaptive mesh the passes that cover a block and its ghost layers, 18 or 20 cells across, run as rows of 64 threads per block, because $8 \times 8 \times 4$ tiles left about half of their threads idle there. In two dimensions the four layers of a workgroup take four blocks. These two changes made a step of a two-dimensional Kelvin-Helmholtz problem 2.8 times faster, and a step of a three-dimensional Sedov blast 19 percent faster. The interface can also report the GPU time that each pipeline takes, from timestamp queries. Figure~\ref{fig:performance} shows the throughput in Chrome on a discrete GPU (an NVIDIA RTX~3080 with 12~GB) and an integrated one (that of an Apple M4 Pro, which shares 273~GB\,s$^{-1}$ of memory bandwidth with the CPU). It was measured with the scripting interface at normal priority, with the GPU otherwise idle, and each point is the median of three runs. The RTX~3080 was measured before the tiled update of Section~\ref{sec:conservation}, and the M4 Pro after it. A uniform grid of $2048^2$ cells takes $1.9 \times 10^9$ cell updates per second, and one of $256^3$ cells $1.5 \times 10^9$. On the adaptive mesh a leaf cell costs more than a cell of a uniform grid, because its ghost cells are computed as they are loaded and the refinement boundaries recompute fine fluxes. In two dimensions the mesh still takes $8.2 \times 10^8$ to $1.1 \times 10^9$ updates per second, and in three, $7.3$ to $8.0 \times 10^8$ with two to four levels. The M4 Pro takes $6.7 \times 10^8$ updates per second on $2048^2$ cells and $4.6 \times 10^8$ on $256^3$, and 2.8 to $3.8 \times 10^8$ on the adaptive meshes.
-
-For comparison, AthenaK \citep{Stone2026}, the GPU version of Athena++ written with Kokkos, reports $3.0 \times 10^8$ hydrodynamic cell updates per second on one NVIDIA V100 and $6.1 \times 10^8$ on one A100. Both were measured on a uniform $512 \times 256 \times 256$ grid. Both codes are limited by memory traffic, so Figure~\ref{fig:performance}(b) divides each throughput by the device's peak memory bandwidth from its datasheet: 900~GB\,s$^{-1}$ for the V100, 1555 or 2039~GB\,s$^{-1}$ for the 40 and 80~GB A100, and 912~GB\,s$^{-1}$ for the RTX~3080. Per unit of bandwidth, Shaderous on a $256^3$ grid takes 4 to 6 times as many updates as AthenaK, on either GPU. Two differences account for much of this. Shaderous computes in single precision, which halves the bytes per cell, and it takes one MUSCL-Hancock step per update where a two-stage Runge-Kutta integrator does twice the work. Together these could explain a factor of up to four. \citet{Stone2026} do not state the precision or the integrator of their benchmark. The comparison therefore shows that a browser costs Shaderous no throughput against a native GPU code, not that its scheme is faster. \todo{Measure Firefox.}
-
-The memory of the GPU, rather than the code, limits the size of a run. On a server, where the memory budget is set on the command line, the three-dimensional adaptive mesh holds up to $35^3$ blocks of $16^3$ cells with a magnetic field and $33^3$ with species. These limits come from the largest storage buffer that one binding may hold, 2~GiB, which bounds the flux register of the field and the face mass fluxes of the species. Without a field or species, only the memory of the card bounds the mesh, because every pass over the blocks is dispatched in slabs that keep within the number of workgroups that one dispatch may launch. The magnetized disk at $1024^3$ with four levels ran on an NVIDIA H200 at $35^3$ blocks, about 175 million cells, using 117~GB, and took 10 steps in 10~s.
+The flux update is limited by texture fetches rather than arithmetic, which is why the uniform grid stores no primitive variables. In two dimensions a run uses $16 \times 16 \times 1$ workgroups, which more than halves the cost of the flux update against $8 \times 8 \times 4$ workgroups with three idle layers. The number of steps per frame adapts to the GPU, and results agree across browsers to round-off. On the adaptive mesh the passes that cover a block and its ghost layers, 18 or 20 cells across, run as rows of 64 threads per block, because $8 \times 8 \times 4$ tiles left about half of their threads idle there. In two dimensions the four layers of a workgroup take four blocks. These two changes made a step of a two-dimensional Kelvin-Helmholtz problem 2.8 times faster, and a step of a three-dimensional Sedov blast 19 percent faster. The interface can also report the GPU time that each pipeline takes, from timestamp queries. Figure~\ref{fig:performance} shows the throughput on a discrete GPU (an NVIDIA RTX~3080 with 12~GB) in Chrome 156 and Firefox 160, and in Chrome on an integrated one (that of an Apple M4 Pro, which shares 273~GB\,s$^{-1}$ of memory bandwidth with the CPU). It was measured with the scripting interface at normal priority, with the GPU otherwise idle, and each point is the median of three runs. In Chrome on the RTX~3080, a uniform grid of $2048^2$ cells takes $1.9 \times 10^9$ cell updates per second, and one of $256^3$ cells $1.4 \times 10^9$. On the adaptive mesh a leaf cell costs more than a cell of a uniform grid, because its ghost cells are computed as they are loaded and the refinement boundaries recompute fine fluxes. In two dimensions the mesh still takes $7.7$ to $9.9 \times 10^8$ updates per second, and in three, $6.3$ to $6.8 \times 10^8$ with two to four levels. The M4 Pro takes $6.7 \times 10^8$ updates per second on $2048^2$ cells and $4.6 \times 10^8$ on $256^3$, and 2.8 to $3.8 \times 10^8$ on the adaptive meshes. Firefox on the RTX~3080 is within 12 percent of Chrome on the largest uniform grids, with $1.6 \times 10^9$ updates per second on $2048^2$ cells and $1.4 \times 10^9$ on $256^3$. On the adaptive mesh it takes 1.5 to 7 times fewer: $1.1$ to $2.7 \times 10^8$ in two dimensions and $2.1$ to $4.3 \times 10^8$ in three. A step there takes about 2~ms in two dimensions and 4~ms in three, almost whatever the size of the mesh, against 0.3 to 0.8~ms and 1.9 to 3.7~ms in Chrome. That points to a fixed cost per step in Firefox, which we have not traced.
 
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth,height=\colfigheight,keepaspectratio]{figures/performance.pdf}
-\caption{Throughput on a discrete GPU (NVIDIA RTX~3080, 12~GB) and an integrated one (Apple M4 Pro), in Chrome. (a)~Cell updates per second against the number of cells, for a two-dimensional Kelvin-Helmholtz instability and a three-dimensional Sedov blast, each on uniform grids and on adaptive meshes (two to four levels, local timesteps off). On the adaptive mesh every leaf cell counts as one update per step. Each point is the median of three runs, and the bars span all three. The gray points are the hydrodynamic throughput of AthenaK on one V100 and one A100 \citep{Stone2026}, on a uniform grid of $3.4 \times 10^7$ cells (drawn apart for legibility). (b)~The same throughputs divided by each device's peak memory bandwidth. The A100's bar spans its 40 and 80~GB versions, since the device used is not stated. Shaderous runs in single precision with one stage per step. AthenaK's precision and integrator for this benchmark are not stated. \todo{Add Firefox.}}
+\caption{Throughput on a discrete GPU (NVIDIA RTX~3080, 12~GB) in Chrome and in Firefox, and on an integrated one (Apple M4 Pro) in Chrome. (a)~Cell updates per second against the number of cells, for a two-dimensional Kelvin-Helmholtz instability and a three-dimensional Sedov blast, each on uniform grids and on adaptive meshes (two to four levels, local timesteps off). On the adaptive mesh every leaf cell counts as one update per step. Each point is the median of three runs, and the bars span all three. The gray points are the hydrodynamic throughput of AthenaK on one V100 and one A100 \citep{Stone2026}, on a uniform grid of $3.4 \times 10^7$ cells (drawn apart for legibility). (b)~The same throughputs divided by each device's peak memory bandwidth. The A100's bar spans its 40 and 80~GB versions, since the device used is not stated. Shaderous runs in single precision with one stage per step. AthenaK's precision and integrator for this benchmark are not stated; the hollow gray markers are its values times four, its throughput per byte moved if it ran in double precision with two stages per step.}
 \label{fig:performance}
 \end{figure}
+
+For comparison, AthenaK \citep{Stone2026}, the GPU version of Athena++ written with Kokkos, reports $3.0 \times 10^8$ hydrodynamic cell updates per second on one NVIDIA V100 and $6.1 \times 10^8$ on one A100. Both were measured on a uniform $512 \times 256 \times 256$ grid. Both codes are limited by memory traffic, so Figure~\ref{fig:performance}(b) divides each throughput by the device's peak memory bandwidth from its datasheet: 900~GB\,s$^{-1}$ for the V100, 1555 or 2039~GB\,s$^{-1}$ for the 40 and 80~GB A100, and 912~GB\,s$^{-1}$ for the RTX~3080. Per unit of bandwidth, Shaderous on a $256^3$ grid takes 4 to 5 times as many updates as AthenaK, on either GPU. Two differences account for much of this. Shaderous computes in single precision, which halves the bytes per cell, and it takes one MUSCL-Hancock step per update where a two-stage Runge-Kutta integrator does twice the work. \citet{Stone2026} do not state the precision or the integrator of their benchmark. AthenaK builds in double precision by default, and the linear-wave input in its repository takes two stages per step.\footnote{\url{https://github.com/IAS-Astrophysics/athenak}} If the benchmark ran so, AthenaK moved four times the bytes per update, and its throughput per byte moved is the hollow markers of Figure~\ref{fig:performance}(b). On that measure the two codes are level: Shaderous takes 1.0 to 1.3 times as many updates. The comparison therefore shows that a browser costs Shaderous little or no throughput against a native GPU code. It does not show that its scheme is faster, and a native code in single precision with one stage per step would likely match or exceed it.
+
+The memory of the GPU, rather than the code, limits the size of a run. On a server, where the memory budget is set on the command line, the three-dimensional adaptive mesh holds up to $35^3$ blocks of $16^3$ cells with a magnetic field and $33^3$ with species. These limits come from the largest storage buffer that one binding may hold, 2~GiB, which bounds the flux register of the field and the face mass fluxes of the species. Without a field or species, only the memory of the card bounds the mesh, because every pass over the blocks is dispatched in slabs that keep within the number of workgroups that one dispatch may launch. The magnetized disk at $1024^3$ with four levels ran on an NVIDIA H200 at $35^3$ blocks, about 175 million cells, using 117~GB, and took 10 steps in 10~s.
 
 \section{Discussion}
 \label{sec:discussion}
@@ -530,7 +451,7 @@ Shaderous is not a replacement for production codes. It runs on one GPU, within 
 
 The design choices of Sections~\ref{sec:conservation} to~\ref{sec:amr} came from constraints of WebGPU, but they do not depend on it. Gathering fluxes and recomputing them across refinement and time-bin boundaries trades extra arithmetic for less storage and less memory traffic, which suits any processor whose throughput is limited by memory rather than by arithmetic. Computing ghost cells on load removes a synchronization step from every AMR cycle. The MHD solver does not gather: it stores its face fluxes and edge electric fields, and it keeps a flux register at refinement boundaries.
 
-The burning network is a fit to a reference network. It covers the 13 isotopes of the $\alpha$-chain and the densities and temperatures of its training set, and on held-out burns it matches its float64 copy to 2 percent per step. Its accuracy against the reference network over a whole detonation remains to be measured. \todo{Measure the network against the reference over a whole carbon-oxygen detonation.}
+The burning network is a fit to a reference network. It covers the 13 isotopes of the $\alpha$-chain and the densities and temperatures of its training set, and on held-out burns it matches its float64 copy to 2 percent per step. Its accuracy against the reference network over a whole detonation remains to be measured.
 
 \section{Conclusions}
 \label{sec:conclusions}
@@ -544,6 +465,116 @@ The code, its validation suite, the manuscript source, the bibliography and the 
 \end{acknowledgments}
 
 \software{Shaderous (\url{https://github.com/guillochon/shaderous}), TypeScript, Vite, Vitest, Playwright, h5wasm, Mediabunny, yt \citep{Turk2011}, pynucastro \citep{SmithClark2023}, PyTorch}
+
+\appendix
+
+\section{Validation tests}
+\label{sec:validationtests}
+
+Tables~\ref{tab:validation}, \ref{tab:validation-amr} and~\ref{tab:validation-mhd} list every test of the validation suite (Section~\ref{sec:validation}) with its pass criterion and the value measured in one run of the suite in Chrome 156 on an NVIDIA RTX~3080. The report of that run is in the repository.
+
+\begin{table*}
+\centering
+\caption{The validation suite: hydrodynamics, species and burning on the uniform grid. Criteria are those coded in the suite; L1 errors are means over cells, relative to the mean density. The measured values are in the order of the criteria.}
+\label{tab:validation}
+\footnotesize
+\begin{tabular}{lll}
+\toprule
+Test & Pass criterion & Measured \\
+\midrule
+Sod tube along $x$, $y$, $z$ & \tabpar{7.0cm}{L1 density error $< 0.01$; runs agree under axis permutation to $10^{-6}$} & \tabpar{4.4cm}{0.0079; 0} \\
+Sod tube along the diagonal & \tabpar{7.0cm}{L1 density error $< 0.015$} & \tabpar{4.4cm}{0.011} \\
+Strong shock tube (pressure ratio $10^5$) & \tabpar{7.0cm}{No floored cells; relative L1 density error $< 0.1$ at 128 cells} & \tabpar{4.4cm}{None; 0.075} \\
+Sedov-Taylor blast & \tabpar{7.0cm}{Mean shock radius within 2\% of the similarity solution} & \tabpar{4.4cm}{1.6\%} \\
+Kelvin-Helmholtz & \tabpar{7.0cm}{Transverse kinetic energy grows more than fivefold by $t = 1$} & \tabpar{4.4cm}{11-fold} \\
+Low-Mach HLLC & \tabpar{7.0cm}{Gresho vortex loses less than half the energy lost with plain HLLC, and gains none} & \tabpar{4.4cm}{Loses 6\% against 15\%} \\
+Well-balanced column & \tabpar{7.0cm}{Largest Mach number $< 10^{-3}$ after a sound crossing, uniform and block grids; at least 100 times below the plain scheme} & \tabpar{4.4cm}{$3.7\times10^{-5}$ and $8.6\times10^{-5}$; plain scheme 0.35} \\
+Uniform advection, 10 crossings & \tabpar{7.0cm}{Mass and momentum drift $< 2 \times 10^{-6}$} & \tabpar{4.4cm}{Mass $2.4\times10^{-7}$, momentum $3.2\times10^{-7}$} \\
+Species & \tabpar{7.0cm}{Fractions in $[0, 1]$ summing to 1 within $10^{-5}$; each species' mass to $10^{-5}$; a smooth species as accurate as the passive scalar} & \tabpar{4.4cm}{Sum $2\times10^{-7}$; mass $5\times10^{-7}$; error $2.5\times10^{-4}$ against $3.5\times10^{-4}$} \\
+Species in the equation of state & \tabpar{7.0cm}{Helium in hydrogen at rest stays at rest to $10^{-5}$ under four equations of state; carried across, pressure balanced to $10^{-5}$ (ideal gas) or 0.05; helium in air, $\gamma$ of 5/3 and 1.4, to 0.01} & \tabpar{4.4cm}{At rest $6\times10^{-7}$; carried $1.4\times10^{-6}$ or 0.013; helium in air 0.002} \\
+Shock and helium bubble & \tabpar{7.0cm}{Helium mass to $10^{-5}$; bit-identical faces; on the adaptive mesh, over 95\% of the helium at the finest level} & \tabpar{4.4cm}{$1.1\times10^{-6}$; no face differs; 99.3\%} \\
+Arrhenius detonation & \tabpar{7.0cm}{Front within 1\% of the Chapman-Jouguet speed; fuel left behind $< 10^{-3}$} & \tabpar{4.4cm}{0.12\% slow; $6\times10^{-6}$} \\
+Smooth advection & \tabpar{7.0cm}{Mean error $< 2 \times 10^{-4}$ at $256^2$; second order or better} & \tabpar{4.4cm}{$1.5\times10^{-4}$; order 2.0} \\
+Flux determinism & \tabpar{7.0cm}{Bit-identical mass fluxes on every face, three flows} & \tabpar{4.4cm}{0 of 291,840 faces differ} \\
+Blast in a reflecting box & \tabpar{7.0cm}{Mass to $10^{-5}$, total energy to $10^{-3}$} & \tabpar{4.4cm}{Mass $2.4\times10^{-7}$, energy $1.4\times10^{-6}$} \\
+Two-dimensional grids & \tabpar{7.0cm}{Sod L1 error $< 0.003$ at $256^2$; bit-identical fluxes} & \tabpar{4.4cm}{0.0021; no face differs} \\
+Rayleigh-Taylor & \tabpar{7.0cm}{At rest, Mach $< 10^{-3}$ at $t = 2$; perturbed, energy to $10^{-3}$} & \tabpar{4.4cm}{Mach $1.2\times10^{-6}$; energy $1.4\times10^{-7}$} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{table*}
+\centering
+\caption{The validation suite, continued: the adaptive mesh, diffusion, point masses, equations of state and gravity.}
+\label{tab:validation-amr}
+\footnotesize
+\begin{tabular}{lll}
+\toprule
+Test & Pass criterion & Measured \\
+\midrule
+Block grid without refinement & \tabpar{7.0cm}{Density within $10^{-5}$ of the uniform grid in every cell; same number of steps} & \tabpar{4.4cm}{0; same} \\
+Adaptive Sod tube & \tabpar{7.0cm}{L1 error $< 0.003$ on under 60\% of the cells; mass and energy to $10^{-6}$} & \tabpar{4.4cm}{0.0022 on 34\%; mass $1.1\times10^{-7}$, energy $3\times10^{-8}$} \\
+Adaptive species & \tabpar{7.0cm}{As for species, with the mesh rebuilt; a smooth species within $1.3 \times 10^{-3}$ of the passive scalar} & \tabpar{4.4cm}{Sum $4\times10^{-8}$; mass $1.3\times10^{-6}$; $1.0\times10^{-3}$} \\
+Adaptive species in the equation of state & \tabpar{7.0cm}{At rest to $10^{-5}$; carried across, pressure within 0.05; faces match across levels} & \tabpar{4.4cm}{0; 0.007; faces to $6\times10^{-8}$} \\
+Adaptive detonation & \tabpar{7.0cm}{As the detonation, with the whole reaction zone at the finest level} & \tabpar{4.4cm}{0.12\% slow; no coarse cell in the zone} \\
+Adaptive Sedov blast & \tabpar{7.0cm}{Radius within 2\%; mass and energy to $10^{-6}$} & \tabpar{4.4cm}{1.6\%; mass 0, energy $9\times10^{-8}$} \\
+Adaptive instabilities & \tabpar{7.0cm}{Mass to $10^{-6}$, energy to $10^{-5}$ while the mesh follows the flow} & \tabpar{4.4cm}{Mass $1.6\times10^{-7}$, energy $2.4\times10^{-7}$} \\
+Adaptive Poisson solve & \tabpar{7.0cm}{Sphere potential within 1\% with 0, 2 and 3 levels; Jeans rate within 5\%} & \tabpar{4.4cm}{0.15, 0.17 and 0.26\%; 0.02\%} \\
+Adaptive Evrard and polytrope & \tabpar{7.0cm}{Energy to 2\% through bounce; central density within 10\%} & \tabpar{4.4cm}{0.19\%; 0.8\%} \\
+Adaptive tidal disruption & \tabpar{7.0cm}{Pericenter within 2\%; frame centered to 0.005 stellar radii} & \tabpar{4.4cm}{0.4\%; 0.0007} \\
+Local timesteps & \tabpar{7.0cm}{Sod and Sedov as with one timestep; mass and energy to $10^{-6}$} & \tabpar{4.4cm}{Sod 0.0023, Sedov 1.6\%; mass $1.1\times10^{-7}$, energy $7\times10^{-8}$} \\
+HDF5 export and import & \tabpar{7.0cm}{Restarted state equal to $10^{-5}$; continued runs agree to $10^{-4}$} & \tabpar{4.4cm}{0; $6\times10^{-7}$} \\
+Cooling & \tabpar{7.0cm}{Power-law decay to 0.1\%; thermal balance to 1\% without overshoot} & \tabpar{4.4cm}{0.001\%; balance without overshoot} \\
+Viscosity & \tabpar{7.0cm}{Energy of a shear wave decays as $\exp(-2\nu k^2 t)$ to 1\%, and to 3\% between no-slip walls; energy to $10^{-5}$ on the adaptive mesh} & \tabpar{4.4cm}{0.3\%; 0.05\%; $3\times10^{-8}$} \\
+Conduction & \tabpar{7.0cm}{Temperature wave decays at the linear rate to 1\%; cloud scale of the thermal instability changes by $< 12\%$ when the resolution doubles} & \tabpar{4.4cm}{0.27\%; 7.5\%} \\
+Point mass and sink & \tabpar{7.0cm}{Gas plus accreted mass constant to $10^{-5}$} & \tabpar{4.4cm}{$1.6\times10^{-7}$} \\
+Binary orbit & \tabpar{7.0cm}{Separation within 0.5\% over one period; both masses accrete} & \tabpar{4.4cm}{0.016\%; both accrete} \\
+Close encounter of two masses & \tabpar{7.0cm}{Orbit of eccentricity 0.9 keeps its energy to 1\% over two periods} & \tabpar{4.4cm}{0.67\%} \\
+GPU against CPU reference & \tabpar{7.0cm}{Density and energy differ by $< 10^{-4}$ of the mean after 20 steps} & \tabpar{4.4cm}{Density $8\times10^{-8}$, energy $2\times10^{-7}$} \\
+Burning network & \tabpar{7.0cm}{One step on 48 held-out states within 2\% (L1) of the float64 network} & \tabpar{4.4cm}{0.11\%} \\
+Equations of state & \tabpar{7.0cm}{Round trip to $10^{-5}$; WGSL matches float64 mirrors to $10^{-4}$, degenerate electrons and hydrogen ionization included; tabulated electrons to $5\times10^{-5}$, and to $5\times10^{-4}$ in sound speed} & \tabpar{4.4cm}{Round trip $5\times10^{-6}$; mirrors $1.1\times10^{-6}$; tabulated $1.7\times10^{-5}$ and $1.7\times10^{-4}$} \\
+Uniform sphere potential & \tabpar{7.0cm}{Largest error $< 1\%$ (isolated boundaries)} & \tabpar{4.4cm}{0.15\%} \\
+Jeans instability & \tabpar{7.0cm}{Growth rate within 5\% of linear theory} & \tabpar{4.4cm}{0.013\%} \\
+Polytrope & \tabpar{7.0cm}{Central density within 10\% over 10 dynamical times} & \tabpar{4.4cm}{2.5\%} \\
+Cold white dwarf & \tabpar{7.0cm}{Settled $0.6\,M_\odot$ dwarf: central density within 5\% over three dynamical times; energy to $10^{-3}$} & \tabpar{4.4cm}{3.3\%; $1.2\times10^{-5}$} \\
+Evrard collapse & \tabpar{7.0cm}{Total energy to 2\%; thermal energy peaks at $0.9 < t < 1.3$} & \tabpar{4.4cm}{0.82\%; peak at $t = 1.12$} \\
+Tidal disruption & \tabpar{7.0cm}{Pericenter within 2\%; star disrupted} & \tabpar{4.4cm}{0.14\%; peak density falls to 4\%} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{table*}
+\centering
+\caption{The validation tests of MHD. Except where the field is the subject of the test, each also requires $\max|\nabla\cdot\mathbf{B}|\,\Delta x/\max|B| < 10^{-6}$ and that faces shared by two blocks agree; the largest value measured was $2.8\times10^{-7}$.}
+\label{tab:validation-mhd}
+\footnotesize
+\begin{tabular}{lll}
+\toprule
+Test & Pass criterion & Measured \\
+\midrule
+Brio-Wu shock tube & \tabpar{7.0cm}{Compound wave, slow shock and least $v_y$ in the ranges of \citet{Brio1988}; mass and energy to $10^{-6}$; HLLD and HLLE agree to 0.01} & \tabpar{4.4cm}{Compound wave at $x = -0.029$, slow shock at 0.146, $v_y = -1.6$; energy $1.8\times10^{-7}$; 0.0017} \\
+Orszag-Tang vortex & \tabpar{7.0cm}{Mass and energy to $10^{-6}$; magnetic energy and peak pressure within regression ranges} & \tabpar{4.4cm}{Mass $2\times10^{-7}$, energy $9\times10^{-8}$; 0.0617 and 0.511} \\
+Field loop & \tabpar{7.0cm}{After one crossing, at least 90\% of the magnetic energy kept and the peak within 10\%} & \tabpar{4.4cm}{93.3\%; peak 8\% high} \\
+Alfv\'en wave & \tabpar{7.0cm}{Mean error of $v_z$ $< 3 \times 10^{-5}$ at $256^2$; second order or better} & \tabpar{4.4cm}{$2.0\times10^{-5}$; order 2.0} \\
+Blast in a field, 3D & \tabpar{7.0cm}{Mass to $10^{-6}$, energy to $3 \times 10^{-6}$; elongated along the field by at least 1.3} & \tabpar{4.4cm}{Mass $2.4\times10^{-7}$, energy $9\times10^{-7}$; 2.0} \\
+Stepping in slabs & \tabpar{7.0cm}{State and faces bit-identical to one slab} & \tabpar{4.4cm}{No value differs} \\
+GPU against CPU reference & \tabpar{7.0cm}{Density, energy and face field within $10^{-5}$ of the mean after 20 steps} & \tabpar{4.4cm}{$1.0\times10^{-7}$} \\
+HDF5 restart & \tabpar{7.0cm}{Face field restored bit for bit; continued runs agree to $10^{-5}$} & \tabpar{4.4cm}{No face differs; $3.6\times10^{-6}$} \\
+Blocks without refinement & \tabpar{7.0cm}{Energies equal to the uniform grid's to $10^{-6}$ after 40 steps} & \tabpar{4.4cm}{0} \\
+Refined mesh & \tabpar{7.0cm}{Mass to $3 \times 10^{-6}$, energy to $10^{-4}$; coarse face the mean of the fine to $10^{-6}$; magnetic energy within 1\% of the uniform grid} & \tabpar{4.4cm}{Mass $9\times10^{-8}$, energy $2.5\times10^{-5}$; $1.0\times10^{-7}$; 0.02\%} \\
+Leaves in chunks & \tabpar{7.0cm}{Bit-identical to one chunk} & \tabpar{4.4cm}{No value differs} \\
+Moving mesh & \tabpar{7.0cm}{Over at least 20 rebuilds, mass to $10^{-6}$; field loop keeps 94\% of its energy} & \tabpar{4.4cm}{144 rebuilds, mass $4\times10^{-7}$; 96.2\%} \\
+Per-block timesteps & \tabpar{7.0cm}{Magnetic energy within 0.5\% of one timestep; never more block updates} & \tabpar{4.4cm}{0.013\%; 85 to 100\% of the updates} \\
+Gravity, point masses and cooling & \tabpar{7.0cm}{Magnetized polytrope and column as still as without a field; cooling decay to $10^{-3}$; sink budget to $10^{-5}$} & \tabpar{4.4cm}{Central density of the star 0.1\%; cooling $9\times10^{-6}$; sink $7\times10^{-8}$} \\
+The same on blocks & \tabpar{7.0cm}{As above, also with per-block timesteps} & \tabpar{4.4cm}{0.11\%; $3\times10^{-5}$; $3\times10^{-8}$} \\
+Fields inside stars & \tabpar{7.0cm}{Dipole star: central density and magnetic energy within 5\% over two dynamical times} & \tabpar{4.4cm}{0.5\% and 2.3\%} \\
+Species in a field & \tabpar{7.0cm}{As for species, in a field at $\beta = 4$} & \tabpar{4.4cm}{Sum $2\times10^{-7}$; mass $6\times10^{-7}$} \\
+Viscosity and conduction in a field & \tabpar{7.0cm}{Shear waves to 1\%; viscously damped Alfv\'en wave to 2\%; temperature wave across the field to 1\%} & \tabpar{4.4cm}{0.31\%; 0.03\%; 0.10\%} \\
+Magnetized tidal disruption & \tabpar{7.0cm}{Field energy within 3\% of its integral; disruption follows the hydrodynamic run to 5\%} & \tabpar{4.4cm}{0.26\%; 0.56\%} \\
+Magnetized disk & \tabpar{7.0cm}{Mass within 3\%, kinetic energy within 5\%; Alfv\'en ceiling held; Maxwell stress grows from zero} & \tabpar{4.4cm}{Mass 0.6\%, kinetic energy 1\%; $\alpha_{\rm M}$ from $3\times10^{-13}$ to $1.6\times10^{-3}$} \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
 %% ---- END BODY ----
 

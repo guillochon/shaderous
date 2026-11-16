@@ -57,6 +57,13 @@ Peak memory bandwidth from the vendors' datasheets (sources in `paper/figures/da
 
 Shaderous takes 4 to 5 times as many updates per unit of bandwidth in 3D. Single precision (up to 2) and one stage against two (up to 2) could explain a factor of up to 4.
 
+## Checked again on 2026-11-15: like for like
+
+- The AthenaK values in `reference.json` (298 and 614 x 10^6 cells/s) match Table 1 of the arXiv source line for line.
+- Shaderous's 256^3 value was confirmed apart from the benchmark: `cli.mjs run "problem=sedov&dim=3&n=256" --steps 3000` took 3001 steps in 37.6 s of wall time, 1.34 x 10^9 cells/s with the runner's overhead, against the benchmark's 1.39 x 10^9.
+- What the AthenaK benchmark likely ran, from its repository (https://github.com/IAS-Astrophysics/athenak, read 2026-11-15): `CMakeLists.txt` has `option(Athena_SINGLE_PRECISION "Compile for single precision" OFF)`, so double precision unless asked; `inputs/tests/linear_wave_hydro.athinput` sets `integrator = rk2`, PLM and LLF. The paper states neither for the benchmark.
+- Double precision with two stages moves four times the bytes per update of single precision with one stage. Per byte moved, AthenaK is then 1.20 to 1.58 x 10^6 per GB/s (A100, 80 and 40 GB) and 1.32 x 10^6 (V100), against Shaderous's 1.52 x 10^6: a ratio of 0.96 to 1.26, quoted as 1.0 to 1.3. The codes are level. The raw ratio of 4 to 5 is not a like-for-like speed.
+
 ## Next
 
-1. Measure an integrated GPU, and Firefox.
+1. Measure the M4 Pro again with the longer timing of small grids.

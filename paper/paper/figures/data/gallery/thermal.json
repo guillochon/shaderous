@@ -7,6 +7,11 @@
   "field": 1,
   "showBlocks": false
  },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 0.45,
+  "dist": 2.6
+ },
  "adapter": "nvidia ampere",
  "errors": []
 }

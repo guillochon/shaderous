@@ -1,11 +1,11 @@
 {
   "program": "shaderous",
-  "build": "9084436 (2026-11-13)",
+  "build": "6fbf2cb (2026-11-15)",
   "adapter": "nvidia ampere",
   "setup": "problem=evrard&dim=3&n=64&fluxwork=0",
   "view": {},
   "problem": "evrard",
-  "started": "2026-11-13T15:23:39.682Z",
+  "started": "2026-11-15T23:22:01.765Z",
   "command": [
     "run",
     "--problem",
@@ -23,7 +23,7 @@
     "--low-priority",
     "--quiet",
     "--out",
-    "C:\\Users\\guill\\shaderous\\.claude\\worktrees\\shaderous-headless-agent-6e9a1d\\paper\\paper\\figures\\data\\gravity\\evrard-uniform-kick"
+    "C:\\Users\\guill\\shaderous\\paper\\paper\\figures\\data\\gravity\\evrard-uniform-kick"
   ],
   "outputs": [
     {
@@ -52,7 +52,7 @@
     },
     {
       "output": 4,
-      "t": 0.20000000298023224,
+      "t": 0.19999998807907104,
       "steps": 5,
       "files": []
     },
@@ -393,7 +393,7 @@
       "files": []
     }
   ],
-  "finished": "2026-11-13T15:23:42.632Z",
+  "finished": "2026-11-15T23:22:03.872Z",
   "stopped": "time",
-  "seconds": 2.949
+  "seconds": 2.106
 }

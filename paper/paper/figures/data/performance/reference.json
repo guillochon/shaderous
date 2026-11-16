@@ -3,6 +3,7 @@
   "athenak": {
     "source": "Stone2026, Section 5.1, Table 1: hydrodynamics, linear wave on a uniform 512 x 256 x 256 grid in 128^3 MeshBlocks, one device",
     "cells": 33554432,
+    "like_for_like": {"factor": 4, "note": "Stone2026 does not state the precision or the integrator of the benchmark. AthenaK builds in double precision unless Athena_SINGLE_PRECISION is set (CMakeLists.txt), and its linear-wave input (inputs/tests/linear_wave_hydro.athinput) uses integrator = rk2 with PLM and LLF; https://github.com/IAS-Astrophysics/athenak, read 2026-11-15. Double precision moves twice the bytes per cell of single, and two stages make two passes over them, so per byte moved AthenaK's update counts four times."},
     "points": [
       {"device": "V100", "updates_per_second": 2.98e8, "bandwidth_gb_s": [900, 900]},
       {"device": "A100", "updates_per_second": 6.14e8, "bandwidth_gb_s": [1555, 2039]}
@@ -15,7 +16,8 @@
     "RTX 3080 12GB": {"value": [912, 912], "source": "https://www.gigabyte.com/Graphics-Card/GV-N3080GAMING-OC-12GD/sp", "note": "384-bit GDDR6X at 19 Gbps; the 10 GB card has 760 GB/s. The machine's card reports 12288 MiB (nvidia-smi)"}
   },
   "devices": [
-    {"name": "RTX 3080 12GB", "label": "RTX 3080 (discrete)", "data": "throughput.json"},
-    {"name": "Apple M4 Pro", "label": "M4 Pro (integrated)", "data": "throughput_m4pro.json"}
+    {"name": "RTX 3080 12GB", "label": "RTX 3080, Chrome", "data": "throughput.json"},
+    {"name": "RTX 3080 12GB, Firefox", "gpu": "RTX 3080 12GB", "label": "RTX 3080, Firefox", "data": "throughput_firefox.json"},
+    {"name": "Apple M4 Pro", "label": "M4 Pro, Chrome", "data": "throughput_m4pro.json"}
   ]
 }

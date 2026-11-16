@@ -28,8 +28,7 @@ python util/check_citations.py   # needs ADS_TOKEN (SciX token) in the environme
 
 ## Still to do
 
-- Measure throughput on named GPUs and browsers (`\todo` in the Performance section).
-- Save a run of the validation suite and add the measured values to Table 1.
-- Figures: a shock tube against the exact solution, the Sedov blast on the adaptive mesh, the well-balanced column, the Evrard energy curves, and a diagram of the flux recomputation across refinement and time-bin boundaries. Each needs a `paper/figures/make_<name>.py` script (see `.cursor/rules/figure-design.mdc`).
 - Acknowledgments, ORCID in `paper.toml`, and a Zenodo DOI for the code.
-- After the MHD and burning update (`edits/code-catchup.py`): a figure of magnetic field lines (the magnetized tidal disruption and the Orszag-Tang vortex), and one of the carbon-oxygen detonation or the burning collision; the measured speed of the carbon-oxygen detonation; the tidal disruption runs of `tde.pdf` again, since they predate the point masses' pull in kick form; the network against the reference over a whole detonation; and the RTX 3080 throughput again with the tiled update.
+- Burning, once the network is retrained on the tabulated equation of state: the nickel yield of the collision and the limiter again, the measured speed of the carbon-oxygen detonation, and the network against the reference over a whole detonation.
+- A figure of the carbon-oxygen detonation or the burning collision.
+- The Apple M4 Pro throughput predates the longer timing of small grids (`throughput` in `src/validation/figure_data.ts`); measure it again when that machine is at hand.

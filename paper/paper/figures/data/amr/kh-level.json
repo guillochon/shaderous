@@ -9,6 +9,11 @@
   "lo": 0,
   "hi": 3
  },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 0.45,
+  "dist": 2.6
+ },
  "adapter": "nvidia ampere",
  "errors": []
 }

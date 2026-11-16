@@ -227,7 +227,7 @@ interface ThroughputGrid {
 
 /**
  * Cell updates per second on each grid: after 20 steps of warm-up, enough steps to take about two
- * seconds are timed on the GPU. A uniform grid updates every cell each step, an adaptive mesh
+ * seconds (at least one) are timed on the GPU. A uniform grid updates every cell each step, an adaptive mesh
  * every leaf cell (per-block timesteps are off), counted from the mesh at the start and the end
  * of the timed steps.
  */
@@ -244,9 +244,16 @@ export async function throughput(grids: ThroughputGrid[]) {
         const cells = () => (sim instanceof AmrSim ? sim.tree.stats().cells : n ** grid.ndim);
         await timeSteps(sim, 20);
         const probe = await timeSteps(sim, 10);
-        const steps = Math.max(20, Math.min(2000, Math.round((2 * 10) / Math.max(probe, 1e-4))));
-        const c0 = cells();
-        const seconds = await timeSteps(sim, steps);
+        let steps = Math.max(20, Math.min(2000, Math.round((2 * 10) / Math.max(probe, 1e-4))));
+        let c0 = cells();
+        let seconds = await timeSteps(sim, steps);
+        // Timed again with more steps while the timing is under a second: Firefox reports finished
+        // GPU work only about every 100 ms, which a short timing does not resolve.
+        while (seconds < 1 && steps < 20000) {
+          steps = Math.min(20000, Math.ceil((2 * steps) / Math.max(seconds, 0.05)));
+          c0 = cells();
+          seconds = await timeSteps(sim, steps);
+        }
         const mean = (c0 + cells()) / 2;
         return { n, levels, cells: Math.round(mean), steps, ms_per_step: (1000 * seconds) / steps, updates_per_second: (mean * steps) / seconds };
       };
@@ -255,7 +262,7 @@ export async function throughput(grids: ThroughputGrid[]) {
     out.push({ label: grid.label, problem: grid.problem, ndim: grid.ndim, runs });
   }
   const adapter = `${g.info.vendor} ${g.info.architecture}`.trim() || 'WebGPU adapter';
-  return { adapter: `${adapter}, ${navigator.userAgent.match(/Chrome\/[\d.]+/)?.[0] ?? 'browser'}`, grids: out };
+  return { adapter: `${adapter}, ${navigator.userAgent.match(/(?:Firefox|Chrome)\/[\d.]+/)?.[0] ?? 'browser'}`, grids: out };
 }
 
 // --- gravity ---------------------------------------------------------------------------------

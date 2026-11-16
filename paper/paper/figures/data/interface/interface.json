@@ -9,11 +9,13 @@
   "contours": true,
   "nContours": 5,
   "fog": false,
-  "surfaceOpacity": 0.4,
-  "lo": 0.000001,
-  "hi": 0.003,
+  "surfaceOpacity": 0.5,
+  "lo": 0.000003,
+  "hi": 0.000012,
   "pitch": 0.5,
-  "dist": 1.5
+  "dist": 1.5,
+  "box": false,
+  "colormap": "plasma"
  },
  "camera": {
   "yaw": 0.7,

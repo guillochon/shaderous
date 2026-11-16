@@ -53,7 +53,8 @@ export async function openSession(opts = {}) {
     server = await createServer({
       root: REPO,
       configFile: path.join(REPO, 'vite.config.ts'),
-      server: { port: 0, strictPort: false, host: '127.0.0.1' },
+      // No reload when a source file changes: a run keeps the code it started with.
+      server: { port: 0, strictPort: false, host: '127.0.0.1', hmr: false, watch: null },
       logLevel: 'error',
       clearScreen: false,
     });

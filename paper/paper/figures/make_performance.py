@@ -2,6 +2,7 @@
 
     uv run python paper/figures/make_performance.py                      # plot from data/performance/
     uv run python paper/figures/make_performance.py --run --device NAME  # measure again on this machine's GPU
+    uv run python paper/figures/make_performance.py --run --firefox --device NAME  # the same in Firefox
 
 Each device measured is listed under "devices" in data/performance/reference.json, with its data
 file and its peak memory bandwidth under "bandwidth_gb_s"; --device names which one this machine is.
@@ -12,13 +13,16 @@ the GPU, counting every cell of a uniform grid and every leaf cell of an adaptiv
 update per step (per-block timesteps off). A 2D Kelvin-Helmholtz instability and a 3D Sedov blast,
 each on uniform grids and on adaptive meshes. The adapter and browser are recorded with the data.
 The whole set is measured three times in fresh pages; each point is the median, with the range.
-Every device is drawn in its own color; the figure the paper plans also needs Firefox. --run needs Node, npm install in the code's repository, Chrome
+Every device is drawn in its own color, and Firefox on the same GPU as a device of its own (its
+entry names the GPU under "gpu", for the bandwidth). --run needs Node, npm install in the code's repository, Chrome
 and a GPU.
 
 The published throughput of AthenaK (Stone2026, hydrodynamics on one V100 and one A100) is drawn
 for comparison, from data/performance/reference.json with the devices' peak memory bandwidths
 from the vendors' datasheets. Panel (b) divides every throughput by its device's peak bandwidth,
-since both codes are limited by memory traffic; the A100's bar spans its 40 GB and 80 GB cards.
+since both codes are limited by memory traffic; the A100's bar spans its 40 GB and 80 GB cards. The hollow
+markers in (b) are AthenaK's values times four, what it would take per byte moved if its benchmark
+ran as its repository's defaults do, in double precision with a two-stage integrator.
 """
 
 from __future__ import annotations
@@ -47,13 +51,14 @@ GRIDS = [
 ]
 
 
-def measure(device: str) -> None:
+def measure(device: str, firefox: bool = False) -> None:
     """Run the whole set REPEATS times, each in a fresh page, and keep the median of each point."""
     sets = []
     with tempfile.TemporaryDirectory() as tmp:
         for i in range(REPEATS):
             out = Path(tmp) / f"throughput_{i}.json"
-            subprocess.run(["node", str(HERE / "collect.mjs"), "throughput", str(out), json.dumps([GRIDS]), "--normal"],
+            subprocess.run(["node", str(HERE / "collect.mjs"), "throughput", str(out), json.dumps([GRIDS]), "--normal",
+                            *(["--firefox"] if firefox else [])],
                            check=True, cwd=CODE)
             sets.append(json.loads(out.read_text()))
     merge(sets, device)
@@ -83,17 +88,18 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", action="store_true", help="measure again first")
     ap.add_argument("--merge", nargs="+", type=Path, help="merge sets measured separately (collect.mjs outputs)")
+    ap.add_argument("--firefox", action="store_true", help="measure in the installed Firefox, not in Chrome")
     ap.add_argument("--device", help="the device this machine's measurement is for, as named in reference.json")
     args = ap.parse_args()
     if (args.run or args.merge) and not args.device:
         ap.error("--run and --merge need --device")
     if args.run:
-        measure(args.device)
+        measure(args.device, args.firefox)
     elif args.merge:
         merge([json.loads(p.read_text()) for p in args.merge], args.device)
 
     ref = json.loads((DATA / "reference.json").read_text())
-    devices = [{**d, "bw": ref["bandwidth_gb_s"][d["name"]]["value"][0],
+    devices = [{**d, "bw": ref["bandwidth_gb_s"][d.get("gpu", d["name"])]["value"][0],
                 "data": json.loads((DATA / d["data"]).read_text())} for d in ref["devices"]]
     style.apply()
     fig, axes = plt.subplots(2, 1, figsize=(style.COLUMN, 1.45 * style.COLUMN), sharex=True, layout="constrained")
@@ -120,6 +126,12 @@ def main() -> None:
                 err = [[y - min(ys)], [max(ys) - y]] if max(ys) > min(ys) else None
             ax.errorbar([a["cells"] * (0.85 if k == 0 else 1.18)], [y], yerr=err, marker="*" if k else "P", color=style.MUTED, ms=6, ls="none",
                         capsize=2, elinewidth=0.8, label=f"AthenaK, {p['device']}, 3D uniform")
+            if divide:
+                # The same per byte moved, if the benchmark ran in double precision with two stages
+                # per step (see "like_for_like" in reference.json): hollow.
+                f = a["like_for_like"]["factor"]
+                ax.errorbar([a["cells"] * (0.85 if k == 0 else 1.18)], [f * y], yerr=None if err is None else [[f * e[0]] for e in err],
+                            marker="*" if k else "P", color=style.MUTED, mfc="white", ms=6, ls="none", capsize=2, elinewidth=0.8)
         ax.set_xscale("log")
         ax.set_xlim(2e4, 8e7)
         ax.set_yscale("log")
@@ -144,11 +156,14 @@ def main() -> None:
     handles += [Line2D([], [], color=style.INK, marker=m, ms=3.5, mfc=None if "uniform" in g else "white",
                        ls="-" if "uniform" in g else "--", label=g) for g, m in markers.items()]
     handles += axes[0].get_legend_handles_labels()[0][:len(ref["athenak"]["points"])]
-    axes[0].legend(handles=handles, loc="lower right", **{**style.LEGEND, "fontsize": style.LABEL_SIZE - 1})
-    browsers = sorted({d["data"]["adapter"].split(", ")[-1].split("/")[0] for d in devices})
-    axes[0].text(0.03, 0.97, f"(a) {', '.join(browsers)}", transform=axes[0].transAxes, va="top",
-                 fontsize=style.LABEL_SIZE - 1, bbox=style.LABEL_BOX)
-    bws = "\n".join(f"{d['label']}: {d['bw']} GB/s" for d in devices)
+    handles += [Line2D([], [], color=style.MUTED, marker="*", mfc="white", ms=6, ls="none",
+                       label=f"AthenaK, per byte moved (b)")]
+    # Above the panels, where it covers no point.
+    fig.legend(handles=handles, loc="outside upper center", ncols=2, **{**style.LEGEND, "fontsize": style.LABEL_SIZE - 1})
+    axes[0].text(0.03, 0.97, "(a)", transform=axes[0].transAxes, va="top", fontsize=style.LABEL_SIZE - 1, bbox=style.LABEL_BOX)
+    # One line per GPU: a second browser on the same GPU has the same bandwidth.
+    gpus = {d.get("gpu", d["name"]): d["bw"] for d in devices}
+    bws = "\n".join(f"{name}: {bw} GB/s" for name, bw in gpus.items())
     axes[1].text(0.36, 0.03, f"(b) Divided by peak memory bandwidth\n{bws}",
                  transform=axes[1].transAxes, va="bottom", fontsize=style.LABEL_SIZE - 1, bbox=style.LABEL_BOX)
     style.save(fig, "performance")

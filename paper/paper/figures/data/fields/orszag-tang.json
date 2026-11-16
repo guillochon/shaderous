@@ -1,0 +1,23 @@
+{
+ "name": "orszag-tang",
+ "setup": "problem=orszag-tang&dim=2&n=512",
+ "t": 0.5,
+ "steps": 1506,
+ "view": {
+  "mode": "slice",
+  "field": 0,
+  "log": false,
+  "autoRange": true,
+  "showBlocks": false,
+  "fieldLines": true,
+  "fieldLineCount": 28,
+  "colormap": "inferno"
+ },
+ "camera": {
+  "yaw": 0.7,
+  "pitch": 0.45,
+  "dist": 2.6
+ },
+ "adapter": "nvidia ampere",
+ "errors": []
+}
