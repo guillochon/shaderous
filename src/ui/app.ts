@@ -25,7 +25,7 @@ import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
+import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
@@ -960,7 +960,11 @@ try {
  * built; without one, the present run starts again from its initial conditions (a preset
  * parameter changed). `keepPhysics`: as build() takes it.
  */
-let pending: { pick?: { id: string; n: number; ndim: 2 | 3; levels: number }; keepPhysics: boolean } | null = null;
+let pending: { pick?: { id: string; n: number; ndim: 2 | 3; levels: number; params?: Record<string, number> }; keepPhysics: boolean } | null = null;
+/** The preset that waits for Run, if it is another than the run's: its own controls are the ones shown. */
+const waitingProblem = (): Problem | null => (pending?.pick && cfg && pending.pick.id !== cfg.problem.id ? problemById(pending.pick.id) : null);
+/** That preset's parameters as they will be loaded: its defaults, with what was changed while it waits. */
+const waitingParams = (p: Problem): Record<string, number> => (pending!.pick!.params ??= Object.fromEntries((p.params ?? []).map((q) => [q.id, q.value])));
 let stepOnce = false;
 let building = false;
 let finished = false;
@@ -1320,16 +1324,22 @@ function showLoad() {
 }
 
 /** Factor from a preset parameter's code value to the value its field shows (ProblemParam.unit). */
-const paramUnit = (q: ProblemParam) => (!(units().physical && unitSys !== 'code') ? 1 : q.measure ? units().scale(q.measure) : q.unit ? q.unit.factor(cfg.params) : 1);
+const paramUnit = (q: ProblemParam) => (waitingProblem() || !(units().physical && unitSys !== 'code') ? 1 : q.measure ? units().scale(q.measure) : q.unit ? q.unit.factor(cfg.params) : 1);
 /** The unit that field's value is then in. */
 const paramUnitLabel = (q: ProblemParam) => (q.measure ? units().label(q.measure) : q.unit?.label ?? '');
 
 /** The preset's own controls (for example mass ratio and impact parameter). */
 function syncProblemParams() {
   const box = $('pparams');
-  const defs = cfg.problem.params ?? [];
-  if (box.dataset.problem !== cfg.problem.id) {
-    box.dataset.problem = cfg.problem.id;
+  // A preset picked and not loaded yet (Autoload off) shows its own controls, not the run's.
+  const shown = waitingProblem() ?? cfg.problem;
+  const values = () => {
+    const w = waitingProblem();
+    return w ? waitingParams(w) : cfg.params;
+  };
+  const defs = shown.params ?? [];
+  if (box.dataset.problem !== shown.id) {
+    box.dataset.problem = shown.id;
     const range = (q: ProblemParam) => `min="${q.min}" max="${q.max}"${q.step ? ` step="${q.step}"` : ''}`;
     box.innerHTML = defs
       .map((q) => {
@@ -1351,8 +1361,11 @@ function syncProblemParams() {
         el.dispatchEvent(new Event('change'));
       });
       el.addEventListener('change', () => {
-        const v = q.kind === 'checkbox' ? (el.checked ? 1 : 0) : el.value === '' || Number.isNaN(+el.value) ? cfg.params[q.id] : +el.value / paramUnit(q);
-        cfg.params[q.id] = Math.min(q.max, Math.max(q.min, v));
+        const into = values();
+        const v = q.kind === 'checkbox' ? (el.checked ? 1 : 0) : el.value === '' || Number.isNaN(+el.value) ? into[q.id] : +el.value / paramUnit(q);
+        into[q.id] = Math.min(q.max, Math.max(q.min, v));
+        // A preset that waits for Run takes the value when it loads.
+        if (waitingProblem()) return syncControls();
         // Units that follow the parameters change the physical constants an equation of state
         // other than a barotropic one takes from them: refresh those (the preset's own values
         // still win), and the run must start again.
@@ -1381,7 +1394,7 @@ function syncProblemParams() {
     }
   }
   for (const q of defs) {
-    $(`pp-${q.id}-row`).hidden = !!q.dims && q.dims !== cfg.ndim;
+    $(`pp-${q.id}-row`).hidden = !!q.dims && q.dims !== (pending?.pick?.ndim ?? cfg.ndim);
     const el = $<HTMLInputElement>(`pp-${q.id}`);
     // A field with a unit of its own shows it, and its value and range, in physical units.
     const k = paramUnit(q);
@@ -1391,10 +1404,11 @@ function syncProblemParams() {
       el.max = String(+(q.max * k).toPrecision(6));
       el.step = q.step ? String(+(q.step * k).toPrecision(6)) : 'any';
     }
-    if (q.kind === 'checkbox') el.checked = !!cfg.params[q.id];
-    else if (document.activeElement !== el) el.value = String(+(cfg.params[q.id] * k).toPrecision(6));
+    const now = values();
+    if (q.kind === 'checkbox') el.checked = !!now[q.id];
+    else if (document.activeElement !== el) el.value = String(+(now[q.id] * k).toPrecision(6));
     const slide = q.kind === 'slider' ? $<HTMLInputElement>(`pp-${q.id}-slide`) : null;
-    if (slide && document.activeElement !== slide) slide.value = String(cfg.params[q.id]);
+    if (slide && document.activeElement !== slide) slide.value = String(now[q.id]);
   }
 }
 
@@ -1443,7 +1457,9 @@ function resolveGrid(problem: ReturnType<typeof problemById>, n: number, ndim: 2
 function load(id: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false) {
   if (autoload) return void build(id, n, ndim, levels, keepPhysics);
   // Physics choices carry over only if every change waiting would have kept them.
-  pending = { pick: { id, ...resolveGrid(problemById(id), n, ndim, levels) }, keepPhysics: keepPhysics && (pending?.pick ? pending.keepPhysics : true) };
+  // Parameters set for this preset while it waited stay, through a change of its grid.
+  const params = pending?.pick?.id === id ? pending.pick.params : undefined;
+  pending = { pick: { id, ...resolveGrid(problemById(id), n, ndim, levels), params }, keepPhysics: keepPhysics && (pending?.pick ? pending.keepPhysics : true) };
   running = false;
   if (cfg) syncControls();
 }
@@ -1463,7 +1479,7 @@ function loadPending(play?: boolean) {
   const p = pending;
   if (!p) return;
   pending = null;
-  const job = p.pick ? build(p.pick.id, p.pick.n, p.pick.ndim, p.pick.levels, p.keepPhysics) : restartRun(true);
+  const job = p.pick ? build(p.pick.id, p.pick.n, p.pick.ndim, p.pick.levels, p.keepPhysics, undefined, undefined, false, p.pick.params) : restartRun(true);
   job.then(() => {
     if (play !== undefined && sim) running = play;
     if (cfg) syncControls();
@@ -1475,7 +1491,7 @@ function loadPending(play?: boolean) {
  * view, panel), and leave the simulation itself waiting for Run or Load, as Autoload off has
  * it: the first load of a page with Autoload off.
  */
-function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false) {
+function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false, params?: Record<string, number>) {
   pending = null; // whatever waited for Run is superseded
   return enqueue(async () => {
     const problem = problemById(problemId);
@@ -1494,6 +1510,11 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     } else {
       const dv = viewDefaults(problem, ndim);
       Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5, tx: 0.5, ty: 0.5, tz: 0.5, minRho: 0, fieldLines: dv.fieldLines, fieldLineCount: dv.fieldLineCount });
+    }
+    if (params && !(keepPhysics && cfg && cfg.problem.id === problem.id)) {
+      // Parameters set while the preset waited for Run (Autoload off).
+      Object.assign(next.params, params);
+      if (typeof problem.units === 'function') Object.assign(next.eosParams, physicalEosParams(problemUnits(problem, next.params), problem.composition), problem.eosParams);
     }
     if (link) {
       // Settings carried by a shared link, on top of the preset's defaults.
