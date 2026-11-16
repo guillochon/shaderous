@@ -71,7 +71,7 @@ describe('link keys', () => {
   });
 
   it('every key the API reference lists is one a link reads', () => {
-    const keys = tableKeys(apiDoc, 'The main keys are listed below.').filter((k) => k !== 'p.<id>');
+    const keys = tableKeys(apiDoc, '<!-- gen:link-keys -->').filter((k) => k !== 'p.<id>');
     expect(keys.length).toBeGreaterThan(30);
     const q = new URLSearchParams(keys.map((k) => [k, '1']));
     q.set('problem', 'kelvin-helmholtz');
@@ -96,7 +96,7 @@ describe('the list of link keys', () => {
 
 describe('the view', () => {
   it('the API reference lists each of its settings, and no other', () => {
-    const listed = tableKeys(apiDoc, '### `view(changes)');
+    const listed = tableKeys(apiDoc, '<!-- gen:view -->');
     expect([...listed].sort()).toEqual([...VIEW_OPTIONS, ...VIEW_EXTRAS].map((o) => o.key).sort());
   });
 

@@ -23,7 +23,7 @@ export function buildSchema() {
     /** what stats, slice and probe can read (besides a species' name) */
     variables: [...VARIABLES, 'level'],
     /** every key of a setup given as a query string or a flat object */
-    link: linkKeys(),
+    link: linkKeys().map(({ key, group, about }) => ({ key, group, about })),
     /** every setting of the view, as `view()` names it and as a link does */
     view: [
       ...VIEW_OPTIONS.map((o: ViewOption) => ({ key: o.key, link: o.link, type: o.type, ...(o.min !== undefined ? { min: o.min } : {}), ...(o.max !== undefined ? { max: o.max } : {}), about: o.doc })),

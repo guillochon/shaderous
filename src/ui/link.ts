@@ -84,6 +84,8 @@ export interface LinkKey {
   /** 'run': which preset and grid; 'settings': what differs from the preset's own; 'view': what is drawn */
   group: 'run' | 'settings' | 'view';
   about: string;
+  /** more, for the docs: an option's tooltip */
+  detail?: string;
 }
 
 /**
@@ -95,14 +97,14 @@ export function linkKeys(): LinkKey[] {
   const settings = LINKED.map((o): LinkKey => {
     const c = o.control;
     const range = c.type === 'select' ? `: ${c.choices.map((k) => k.value).join(', ')}` : c.type === 'check' ? ' (0 or 1)' : '';
-    return { key: o.linkKey!, group: 'settings', about: `${o.label}${range}` };
+    return { key: o.linkKey!, group: 'settings', about: `${o.label}${range}`, detail: o.tip };
   });
   return [
     { key: 'problem', group: 'run', about: 'Preset id' },
     { key: 'setup', group: 'run', about: 'A setup document of one’s own, packed (with problem=custom)' },
     { key: 'dim', group: 'run', about: '2 or 3 dimensions' },
     { key: 'n', group: 'run', about: 'Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid' },
-    { key: 'amr', group: 'run', about: 'Levels of refinement, 0 to 5' },
+    { key: 'amr', group: 'run', about: 'Levels of refinement, 0 to 5. With n but no amr, the grid is uniform' },
     { key: 'tend', group: 'settings', about: 'End time (inf for none)' },
     ...settings,
     { key: 'wb', group: 'settings', about: 'Well-balanced reconstruction (0 or 1)' },

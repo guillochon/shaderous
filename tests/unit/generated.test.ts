@@ -1,6 +1,7 @@
 // Files made from the tables in src: the schema the headless tools read, and (between markers)
 // the tables of the docs. `npm run gen` writes them; this test fails when one is out of date.
 import { describe, expect, it } from 'vitest';
+import { fillGenerated } from '../../src/schema/docs';
 import { schemaText } from '../../src/schema/schema';
 
 // Node's own modules, without their type package (the project does not install it).
@@ -13,6 +14,7 @@ const lf = (text: string) => text.replace(/\r\n/g, '\n');
 /** Each generated file, by its path in the checkout: what it should hold, given what it holds now. */
 const FILES: Record<string, (now: string) => string> = {
   'tools/headless/schema.json': () => schemaText(),
+  'docs/api.md': fillGenerated,
 };
 
 describe('generated files', () => {

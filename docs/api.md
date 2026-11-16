@@ -107,24 +107,90 @@ shaderous.load('https://guillochon.github.io/shaderous/?problem=binary&p.q=0.5')
 shaderous.load({ problem: 'sedov', dim: 3, n: 128, amr: 2, gamma: 1.4 })
 ```
 
-The main keys are listed below. [src/ui/link.ts](../src/ui/link.ts) has all of them, with the
-range each value is clamped to.
+Every key is listed below, in the order a link writes them. The settings come from the option
+table ([src/setup/options.ts](../src/setup/options.ts)) and the view's from
+[src/render/view_options.ts](../src/render/view_options.ts); this table is written from them
+by `npm run gen`.
 
-| Key | Meaning |
-| --- | --- |
-| `problem` | Preset id (`describe().problems`) |
-| `dim`, `n`, `amr` | 2 or 3 dimensions, cells per side, levels of refinement (0 to 5). Leave out `n` to get the preset's own grid (`describe().problems[i].grid`), or 3D at the default size. With `n` but no `amr`, the grid is uniform |
-| `tend` | End time (`inf` for none) |
-| `eos`, `gamma`, `K` | Equation of state and its constants |
-| `riemann`, `limiter`, `cfl` | Riemann solver, slope limiter, Courant number |
-| `gravity`, `G`, `vcycles` | Gravity mode, gravitational constant, multigrid V-cycles per step |
-| `cool`, `crate`, `calpha`, ... | Cooling function and its parameters |
-| `nu`, `kappa` | Viscosity and conductivity |
-| `bc` | Six digits: kind of boundary at the lower x, y, z faces and then the upper ones |
-| `refhi`, `reflo`, `refrho`, `tbins` | Refinement thresholds and time bins (adaptive runs) |
-| `frho`, `fu`, `fv`, `fva` | Limits on tenuous gas (density below which they apply, its largest specific internal energy and speed) and, with a magnetic field, the largest Alfvén speed anywhere (mass is added where it would pass) |
-| `p.<id>` | One of the preset's own parameters (`describe().problems[i].params`) |
-| `mode`, `field`, `axis`, `slice`, `log`, `cmap`, `lo`, `hi`, ... | The view |
+<!-- gen:link-keys -->
+| Key | Of | Meaning |
+| --- | --- | --- |
+| `problem` | The run | Preset id |
+| `setup` | The run | A setup document of one’s own, packed (with problem=custom) |
+| `dim` | The run | 2 or 3 dimensions |
+| `n` | The run | Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid |
+| `amr` | The run | Levels of refinement, 0 to 5. With n but no amr, the grid is uniform |
+| `tend` | Settings | End time (inf for none) |
+| `eos` | Settings | Equation of state: ideal, barotropic, gas_radiation, degenerate, ionizing, helmholtz. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `gamma` | Settings | gamma. Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
+| `K` | Settings | K (p = K rho^gamma). Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
+| `arad` | Settings | Radiation constant a. Radiation pressure a T⁴ / 3 is added to the gas pressure |
+| `degrho` | Settings | Degeneracy density. Density at which the electrons’ Fermi momentum reaches mₑc. For a setup with physical units it is set from the composition (about 2×10⁶ g/cm³ for C/O); in code units |
+| `degp` | Settings | Degeneracy pressure scale. The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units |
+| `coulomb` | Settings | Coulomb corrections. The ions’ Coulomb energy, as a multiplier: 1 for all of it, 0 for none. It lowers the cold pressure by a percent or two in dense white dwarf matter (more in the envelope) and adds to the heat capacity of cold, strongly coupled ions |
+| `iont` | Settings | Ionization temperature. The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Set from physical constants for a setup with physical units |
+| `ionrho` | Settings | Saha density. Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units |
+| `frho` | Settings | Tenuous below density. Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off |
+| `fu` | Settings | Max specific energy. Largest internal energy per unit mass tenuous gas may have. 0 is no cap |
+| `fv` | Settings | Max speed. Largest speed tenuous gas may have. 0 is no cap |
+| `fva` | Settings | Max Alfvén speed. With a magnetic field: largest Alfvén speed |B| / √ρ anywhere. Where the field is stronger than that for the gas it threads, mass is added at rest until it is not. Not conservative. 0 is no cap |
+| `cool` | Settings | Cooling function: off, power, ism. Optically thin radiative cooling (and heating) of the gas |
+| `crate` | Settings | Coefficient Λ₀. Power law: the cooling rate per unit volume is ρ² Λ₀ T^α |
+| `calpha` | Settings | Exponent of T. Power law: the exponent α of T in the cooling rate (1/2 is bremsstrahlung) |
+| `cheat` | Settings | Heating rate. Heating per unit mass (power law), or the heating rate at unit density (interstellar) |
+| `ctunit` | Settings | Kelvin per unit T. Interstellar: kelvin per code unit of temperature (code density is atoms per cm³) |
+| `ctfloor` | Settings | Temperature floor. Gas at or below this temperature does not cool |
+| `nu` | Settings | Viscosity ν. Kinematic viscosity: the stress is ρ ν times the shear. Obstacles hold the gas at their walls. 0 is off |
+| `kappa` | Settings | Conductivity κ. Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off |
+| `gravity` | Settings | Gravity: off, constant, periodic, isolated. Off, a uniform field, or the self-gravity of the gas. Point masses pull either way |
+| `G` | Settings | G. Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them |
+| `vcycles` | Settings | V-cycles. Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step |
+| `jfloor` | Settings | Jeans floor (0 or 1). Pressure floor that keeps the Jeans length resolved (Truelove) |
+| `jcells` | Settings | Cells per Jeans length. The Jeans floor raises the pressure so the Jeans length spans at least this many cells |
+| `fluxwork` | Settings | Conserve energy (0 or 1). Flux-form gravitational work: conserves total energy |
+| `refhi` | Settings | Refine above. Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more |
+| `reflo` | Settings | Merge below. Adaptive mesh: four sibling blocks are merged where the indicator is below this in all of them. Kept below the refinement threshold |
+| `refrho` | Settings | Refine above density. Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off |
+| `tbins` | Settings | Local timesteps: 0, 1, 2, 3. Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work |
+| `riemann` | Settings | Riemann solver: hllc, hllclm, hll. How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust |
+| `limiter` | Settings | Limiter: koren, mc, vanleer, minmod. How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
+| `cfl` | Settings | CFL number. Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
+| `dampr` | Settings | Damping from r. Radius from the box center where the damping zone starts |
+| `damprate` | Settings | Damping rate. How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off |
+| `wb` | Settings | Well-balanced reconstruction (0 or 1) |
+| `bc` | Settings | Six digits: the boundary at the lower x, y, z faces and then the upper ones (0 periodic, 1 outflow, 2 reflecting, 3 outflow only) |
+| `p.<id>` | Settings | One of the preset’s own parameters, by its id |
+| `mode` | The view | `volume`, `slice` or `projection` |
+| `field` | The view | Which field is drawn: an index into `describe().fields` |
+| `species` | The view | Which species, for the mass-fraction field |
+| `log` | The view | Logarithmic color scale |
+| `lo` | The view | Lower end of the color range; setting either end turns the automatic range off |
+| `hi` | The view | Upper end of the color range |
+| `axis` | The view | Slice and projection axis (0 x, 1 y, 2 z) |
+| `slice` | The view | Slice position along its axis (0 to 1) |
+| `rhocut` | The view | Volume view: least density drawn, as a fraction of the way from the smallest to the largest on a log scale |
+| `opacity` | The view | Volume view: opacity of the fog |
+| `yaw` | The view | Volume view: camera angle about the vertical, in radians |
+| `pitch` | The view | Volume view: camera angle above the horizontal, in radians |
+| `dist` | The view | Volume view: camera distance, in box lengths |
+| `tx` | The view | Volume view: the point the camera orbits, in fractions of the box (0.5: the center) |
+| `ty` | The view | The same, in y |
+| `tz` | The view | The same, in z |
+| `zoom` | The view | Slice view: magnification (1 fits the box) |
+| `cx` | The view | Slice view: the point at the center of the view, in fractions of the box |
+| `cy` | The view | The same, along the other axis of the slice |
+| `blocks` | The view | Outline the blocks of an adaptive mesh |
+| `contours` | The view | Contour lines (isosurfaces in the volume view) |
+| `ncont` | The view | How many contours |
+| `fog` | The view | Volume view: draw the gas as fog (off leaves the isosurfaces alone) |
+| `isoa` | The view | Volume view: how opaque the isosurfaces are |
+| `light` | The view | A white background instead of the dark one |
+| `box` | The view | Volume view: outline the box (on by default) |
+| `flines` | The view | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
+| `nflines` | The view | How many field lines |
+| `cmap` | The view | Colormap |
+| `tf` | The view | Volume view: the opacity curve, as x:a points separated by commas |
+<!-- /gen:link-keys -->
 
 Keys left out take the preset's defaults. A value that is unknown or out of range is ignored
 or clamped, never trusted. `state().query` gives back the setup actually in force, as a
@@ -412,26 +478,44 @@ progress. Neither waits behind other calls.
 
 ### `view(changes) → view`
 
-Changes what is drawn, leaving the run alone. These keys are accepted:
+Changes what is drawn, leaving the run alone. These keys are accepted (the table is written
+from [src/render/view_options.ts](../src/render/view_options.ts) by `npm run gen`); a link
+carries each under the key in the second column:
 
-| Key | Meaning |
-| --- | --- |
-| `mode` | `'volume'`, `'slice'` or `'projection'` |
-| `field`, `species` | Index into `describe().fields`; which species, for the mass-fraction field |
-| `log` | Logarithmic color scale |
-| `lo`, `hi` | Ends of the color range; setting either turns the automatic range off |
-| `sliceAxis`, `slicePos` | Slice and projection axis, and slice position (0 to 1) |
-| `minRho`, `opacity` | Volume view: least density drawn, and opacity |
-| `yaw`, `pitch`, `dist` | Volume view: camera angles and distance |
-| `tx`, `ty`, `tz` | Volume view: the point the camera orbits, in fractions of the box (0.5 each: the center) |
-| `zoom`, `cx`, `cy` | Slice view: magnification, and the point at the center of the view |
-| `showBlocks`, `contours`, `nContours` | Mesh block outlines, and contour lines (isosurfaces in the volume view) |
-| `fog`, `surfaceOpacity` | Volume view: draw the gas as fog (off leaves the isosurfaces alone), and how opaque the isosurfaces are |
-| `light` | A white background instead of the dark one |
-| `box` | Volume view: outline the box (on by default) |
-| `fieldLines`, `fieldLineCount` | A run with a magnetic field: draw field lines (on by default with a field), and how many (1 to 1024). In 2D they are contours of the flux function, that many levels; in 3D, tubes in the volume view and lines in the plane in the slice view, that many seeds. Link keys `flines`, `nflines` |
-| `colormap` | A name from `describe().colormaps` |
-| `autoRange` | Fit the color range to the data |
+<!-- gen:view -->
+| Key | In a link | Meaning |
+| --- | --- | --- |
+| `mode` | `mode` | `volume`, `slice` or `projection` |
+| `field` | `field` | Which field is drawn: an index into `describe().fields` |
+| `species` | `species` | Which species, for the mass-fraction field |
+| `log` | `log` | Logarithmic color scale |
+| `lo` | `lo` | Lower end of the color range; setting either end turns the automatic range off |
+| `hi` | `hi` | Upper end of the color range |
+| `sliceAxis` | `axis` | Slice and projection axis (0 x, 1 y, 2 z) |
+| `slicePos` | `slice` | Slice position along its axis (0 to 1) |
+| `minRho` | `rhocut` | Volume view: least density drawn, as a fraction of the way from the smallest to the largest on a log scale |
+| `opacity` | `opacity` | Volume view: opacity of the fog |
+| `yaw` | `yaw` | Volume view: camera angle about the vertical, in radians |
+| `pitch` | `pitch` | Volume view: camera angle above the horizontal, in radians |
+| `dist` | `dist` | Volume view: camera distance, in box lengths |
+| `tx` | `tx` | Volume view: the point the camera orbits, in fractions of the box (0.5: the center) |
+| `ty` | `ty` | The same, in y |
+| `tz` | `tz` | The same, in z |
+| `zoom` | `zoom` | Slice view: magnification (1 fits the box) |
+| `cx` | `cx` | Slice view: the point at the center of the view, in fractions of the box |
+| `cy` | `cy` | The same, along the other axis of the slice |
+| `showBlocks` | `blocks` | Outline the blocks of an adaptive mesh |
+| `contours` | `contours` | Contour lines (isosurfaces in the volume view) |
+| `nContours` | `ncont` | How many contours |
+| `fog` | `fog` | Volume view: draw the gas as fog (off leaves the isosurfaces alone) |
+| `surfaceOpacity` | `isoa` | Volume view: how opaque the isosurfaces are |
+| `light` | `light` | A white background instead of the dark one |
+| `box` | `box` | Volume view: outline the box (on by default) |
+| `fieldLines` | `flines` | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
+| `fieldLineCount` | `nflines` | How many field lines |
+| `colormap` | `cmap` | A name from `describe().colormaps` |
+| `autoRange` |  | Fit the color range to the data |
+<!-- /gen:view -->
 
 ### `controls() → array`
 
