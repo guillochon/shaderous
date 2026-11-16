@@ -823,6 +823,14 @@
        "minimum": 2,
        "maximum": 2048,
        "description": "Default 32"
+      },
+      "encoding": {
+       "type": "string",
+       "enum": [
+        "json",
+        "base64"
+       ],
+       "description": "json (default): the values as a list; base64: as float32 bytes in `array`, many times faster to bring out of the page at a large res"
       }
      }
     }

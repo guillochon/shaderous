@@ -1,6 +1,7 @@
 // The scripting API, window.shaderous (src/ui/api.ts, docs/api.md), driven as an agent would:
 // a headless page, every call through page.evaluate.
 import { expect, test, type Page } from '@playwright/test';
+import { decodeArray } from '../../src/io/arrays';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -75,6 +76,29 @@ test('an adaptive 3D star settles, steps, and shows its mesh', async ({ page }) 
   expect(lv.values.every((v: number) => v === 0 || v === 1)).toBe(true);
   await call(page, 'view', { mode: 'slice', showBlocks: true });
   await savePng(page, await call(page, 'screenshot', { width: 640, height: 480 }), 'polytrope-blocks');
+  expect(await call(page, 'errors')).toEqual([]);
+});
+
+test('a slice packed as float32 bytes has the values of the JSON one', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  for (const setup of [{ problem: 'sedov', dim: 2, n: 128 }, { problem: 'sedov', dim: 2, n: 64, amr: 2 }]) {
+    await call(page, 'load', setup);
+    await call(page, 'step', 30);
+    for (const variable of ['rho', 'press', 'level']) {
+      const json = await call(page, 'slice', { variable, res: 96 });
+      const packed = await call(page, 'slice', { variable, res: 96, encoding: 'base64' });
+      expect(packed.values).toBeUndefined();
+      expect(packed.array).toMatchObject({ dtype: 'float32', shape: [96, 96], order: 'C', endian: 'little' });
+      const { values, ...head } = json;
+      const { array, ...packedHead } = packed;
+      expect(packedHead).toEqual(head);
+      const back = Array.from(decodeArray(array));
+      expect(back).toEqual(values.map(Math.fround));
+      expect(back).toEqual(values); // every variable is single precision already
+    }
+  }
+  await expect(call(page, 'slice', { encoding: 'npy' })).rejects.toThrow(/unknown encoding "npy": use json or base64/);
   expect(await call(page, 'errors')).toEqual([]);
 });
 

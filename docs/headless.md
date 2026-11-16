@@ -100,6 +100,7 @@ Each run writes a folder, `--out DIR`, which defaults to `runs/<problem>-<date>`
 | `diag.jsonl` | One line of diagnostics per output: time, steps, wall time, mass, momentum, energies, Mach number, point masses, field ranges |
 | `NNNN-tT.png` | A screenshot at each output, with `--png`. Set the size with `--width` and `--height`, and what is drawn with `--view KEY=VALUE` |
 | `NNNN-tT-VAR.json` | A slice of variable VAR at each output, with `--slice VAR` (repeatable). Set it with `--slice-axis`, `--slice-pos` and `--slice-res`; the format is that of `slice()` in [api.md](api.md#reference) |
+| `NNNN-tT-VAR.npy` | The same slice with `--slice-format npy`, as a file numpy reads: float32 of shape `[res, res]`, row `j` and column `i` as in `slice()`. The slice's other fields (`t`, `variable`, `axis`, `pos`, `res`, `axes`, `min`, `max`) are in `manifest.json`, under that output's `slices` |
 | `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`. yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them |
 | `movie.mp4` | The whole run as a movie, with `--mp4`: a frame near every `--frame-dt DT` of simulated time (default a 600th of the problem's dynamical time) or every `--frame-every N` steps, played at `--fps` (default 60), at `--bitrate` megabits per second (default 0.2 bits per pixel per frame), at `--width` x `--height` (default 1920 x 1080), with a color bar, axes and the status line unless `--no-overlays`. `manifest.json` gets a `movie` entry with its frame count and length. Not with `--every` or `--steps`; outputs are then written at the start and the end only |
 | `NNNN-tT-debris.json` | Debris energies and the return rate dM/dt at each output, with `--debris`, for problems that track them (the tidal disruption). The format is that of `debris()` in [api.md](api.md#reference) |
@@ -124,6 +125,21 @@ A convergence study of the Sedov blast, keeping density slices to compare:
 
 ```bash
 npm run headless -- sweep --problem sedov --dim 2 --vary n=128,256,512,1024 --until 0.05 --slice rho --slice-res 512 --out runs/sedov-convergence
+```
+
+The same slices as `.npy` files, which numpy reads directly:
+
+```bash
+npm run headless -- run --problem sedov --dim 2 --n 1024 --until 0.05 --every 0.01 --slice rho --slice-res 1024 --slice-format npy --out runs/sedov-npy
+```
+
+```python
+import json, numpy as np
+run = 'runs/sedov-npy'
+for out in json.load(open(f'{run}/manifest.json'))['outputs']:
+    for s in out.get('slices', []):
+        rho = np.load(f"{run}/{s['file']}")  # rho[j, i]: i along axes[0], j along axes[1]
+        print(s['t'], s['variable'], rho.shape, rho.max())
 ```
 
 A sweep writes one folder per combination, named after its values (`n=256/`, or
@@ -203,7 +219,7 @@ guessed default.
 | `state` | Returns the problem, grid, time, steps, end time, GPU adapter, and `query`, the setup in force |
 | `diagnostics` | Reads back totals and extremes: mass, momentum, energies, Mach number, point masses, field ranges |
 | `stats` | Gives each variable's min, max and volume-weighted mean over the box |
-| `slice` | Samples a variable on a plane. Returns min, max and mean, with the values as rows when `res` is at most 64; `save_path` writes the full slice to a file instead |
+| `slice` | Samples a variable on a plane. Returns min, max and mean, with the values as rows when `res` is at most 64; `save_path` writes the full slice to a file instead: a `.npy` file (float32, shape `[res, res]`) if the name ends in `.npy`, else JSON |
 | `probe` | Gives the gas at given points |
 | `screenshot` | Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path` |
 | `view` | Changes what screenshots show, leaving the run alone |

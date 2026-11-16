@@ -407,7 +407,7 @@ The least, greatest and volume-weighted mean value of each variable over the who
 `rho`, `press`, `vel1`, `vel2`, `vel3`, `r0` (the passive scalar), and each species' mass
 fraction. The whole state is read back from the GPU, which takes a moment on a large grid.
 
-### `slice({ variable = 'rho', axis = 2, pos = 0.5, res }) → object`
+### `slice({ variable = 'rho', axis = 2, pos = 0.5, res, encoding = 'json' }) → object`
 
 A variable sampled on a `res` × `res` grid, on the plane perpendicular to `axis` at the
 fraction `pos` of the box. `res` defaults to the grid's size, at most 256, and can go up to
@@ -415,6 +415,26 @@ fraction `pos` of the box. `res` defaults to the grid's size, at most 256, and c
 
 The result is `{ t, variable, axis, pos, res, axes, min, max, values }`. `values` is a flat
 array: `values[j * res + i]`, where `i` runs along `axes[0]` and `j` along `axes[1]`.
+
+With `encoding: 'base64'`, `values` is left out and the values come as `array` instead:
+
+```js
+array: { dtype: 'float32', shape: [res, res], order: 'C', endian: 'little', base64 }
+```
+
+`base64` holds the values' bytes as single-precision floats, in the same order as `values`
+(row `j`, column `i`: numpy's C order). They are the same numbers: every variable is single
+precision already. Through `page.evaluate` this is ten to twenty times faster than a list of
+numbers at `res` 1024 or more, where a JSON slice takes seconds. In Node:
+
+```js
+const { array, ...rest } = await S('slice', { variable: 'rho', res: 1024, encoding: 'base64' });
+const b = Buffer.from(array.base64, 'base64');
+const values = new Float32Array(b.buffer, b.byteOffset, b.length / 4); // values[j * res + i]
+```
+
+and in Python, `np.frombuffer(base64.b64decode(a['base64']), '<f4').reshape(a['shape'])`.
+An unknown `encoding` is an error.
 
 A variable can be any of those listed for `stats`, or `level`, the refinement level of the
 block at each point. On an adaptive mesh each sample is taken from the finest block covering
@@ -620,6 +640,9 @@ await S('runTo', 2);
   a usable GPU, Chrome may fall back to a software adapter, which is very slow.
 - **Large grids are slow to read back.** `stats`, `slice`, `probe` and `athdf` read the whole
   state back from the GPU, which takes a while at 512³. Sample sparingly on big runs.
+- **Large results are slow to bring out of the page.** `page.evaluate` copies a list of
+  numbers one by one: a JSON `slice` at `res` 2048 takes about 13 s to cross, against under a
+  second with `encoding: 'base64'`.
 - **There are no brushes or tools yet.** The editing tools (stirring, heating, adding gas,
   stars, sinks, obstacles) are only available by pointer.
 - **`play()` uses the page's own loop.** In headless mode that loop is off, so step with `run`.

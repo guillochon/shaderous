@@ -125,6 +125,32 @@ export async function openSession(opts = {}) {
   return { page, call, close, url: u.toString() };
 }
 
+/**
+ * The values of a slice fetched with encoding 'base64' (an EncodedArray, src/io/arrays.ts), as
+ * a Float32Array of its own (copied out of the Buffer, so aligned).
+ */
+export function sliceArray(result) {
+  const a = result.array;
+  if (a?.dtype !== 'float32' || a.order !== 'C' || a.endian !== 'little') throw new Error('not a float32 array in C order, little-endian');
+  const bytes = Buffer.from(a.base64, 'base64');
+  const n = a.shape.reduce((x, y) => x * y, 1);
+  if (bytes.length !== 4 * n) throw new Error(`array of shape [${a.shape}] came with ${bytes.length} bytes, not ${4 * n}`);
+  const out = new Float32Array(n);
+  new Uint8Array(out.buffer).set(bytes);
+  return out;
+}
+
+/**
+ * A slice brought out of the page as float32 bytes, many times faster than as a list of
+ * numbers: its fields as slice() returns them but `values`, and the values as a Float32Array.
+ * The values are those of slice()'s default JSON result, bit for bit.
+ */
+export async function fetchSlice(call, opts) {
+  const r = await call('slice', { ...opts, encoding: 'base64' });
+  const { array, ...head } = r;
+  return { head, values: sliceArray(r) };
+}
+
 /** A PNG data URL as bytes. */
 export const pngBytes = (dataUrl) => Buffer.from(dataUrl.slice(dataUrl.indexOf(',') + 1), 'base64');
 

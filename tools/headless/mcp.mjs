@@ -11,7 +11,8 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import { debrisSummary, lowerPriority, openSession } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession } from './session.mjs';
+import { npyBytes } from './npy.mjs';
 
 const { values: o } = parseArgs({
   options: { url: { type: 'string' }, headed: { type: 'boolean' }, 'low-priority': { type: 'boolean' }, 'gpu-memory': { type: 'string' } },
@@ -133,27 +134,29 @@ const TOOLS = [
   },
   {
     name: 'slice',
-    description: 'A variable on a res x res grid on a plane through the box (perpendicular to `axis` at fraction `pos`). Returns min, max and mean, and the values (row j, column i: values[j][i]) when res is at most 64 or include_values is set; with save_path the full slice is written there as JSON instead. Variables: rho, press, vel1, vel2, vel3, r0, level, or a species name.',
+    description: 'A variable on a res x res grid on a plane through the box (perpendicular to `axis` at fraction `pos`). Returns min, max and mean, and the values (row j, column i: values[j][i]) when res is at most 64 or include_values is set; with save_path the full slice is written there instead: as a .npy file (float32, shape [res, res], for numpy\'s np.load) when the name ends in .npy, else as JSON. Variables: rho, press, vel1, vel2, vel3, r0, level, or a species name.',
     inputSchema: obj({
       variable: arg('slice', 'variable'),
       axis: arg('slice', 'axis'),
       pos: arg('slice', 'pos'),
       res: arg('slice', 'res'),
       include_values: { type: 'boolean' },
-      save_path: { type: 'string', description: 'Write the slice as JSON to this file' },
+      save_path: { type: 'string', description: 'Write the slice to this file: .npy (float32 for numpy), else JSON' },
     }),
     async run({ variable, axis, pos, res = 32, include_values, save_path }) {
-      const s = await call('slice', { variable, axis, pos, res });
-      const mean = s.values.reduce((a, b) => a + b, 0) / s.values.length;
-      const out = { t: s.t, variable: s.variable, axis: s.axis, pos: s.pos, res: s.res, axes: s.axes, min: s.min, max: s.max, mean };
+      // Out of the page as float32 bytes: the same values as a JSON list, many times faster.
+      const { head: s, values } = await fetchSlice(call, { variable, axis, pos, res });
+      let sum = 0;
+      for (const v of values) sum += v;
+      const out = { t: s.t, variable: s.variable, axis: s.axis, pos: s.pos, res: s.res, axes: s.axes, min: s.min, max: s.max, mean: sum / values.length };
       if (save_path) {
         const file = resolvePath(save_path);
         mkdirSync(path.dirname(file), { recursive: true });
-        writeFileSync(file, JSON.stringify(s) + '\n');
+        writeFileSync(file, /\.npy$/i.test(file) ? npyBytes(values, [s.res, s.res]) : JSON.stringify({ ...s, values: Array.from(values) }) + '\n');
         return text({ ...out, saved: file });
       }
       if (include_values ?? res <= 64) {
-        out.values = Array.from({ length: s.res }, (_, j) => s.values.slice(j * s.res, (j + 1) * s.res).map((v) => +v.toPrecision(5)));
+        out.values = Array.from({ length: s.res }, (_, j) => Array.from(values.subarray(j * s.res, (j + 1) * s.res), (v) => +v.toPrecision(5)));
       }
       return text(out);
     },

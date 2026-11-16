@@ -11,6 +11,7 @@ import { VIEW_EXTRAS, VIEW_OPTIONS } from '../render/view_options';
 /** As much of JSON Schema as the arguments need. */
 export interface ArgSchema {
   type?: string | string[];
+  enum?: string[];
   description?: string;
   minimum?: number;
   maximum?: number;
@@ -86,6 +87,7 @@ export const API_METHODS: ApiMethod[] = [
         axis: { type: 'integer', minimum: 0, maximum: 2, description: 'Default 2 (z); always 2 in 2D' },
         pos: { type: 'number', minimum: 0, maximum: 1, description: 'Default 0.5' },
         res: { type: 'integer', minimum: 2, maximum: 2048, description: 'Default 32' },
+        encoding: { type: 'string', enum: ['json', 'base64'], description: "json (default): the values as a list; base64: as float32 bytes in `array`, many times faster to bring out of the page at a large res" },
       },
     }],
     changesRun: false,

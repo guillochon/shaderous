@@ -11,6 +11,7 @@ import { decodeLink } from './link';
 import { capture } from '../io/capture';
 import { AmrSim } from '../amr/amr_sim';
 import { SnapshotSampler, VARIABLES, type Snapshot } from '../io/snapshot';
+import { encodeArray } from '../io/arrays';
 import type { Diagnostics, SimConfig, Simulation } from '../sim';
 import { EOS_LABELS } from '../eos/eos';
 import { COOLING_LABELS } from '../cooling/cooling';
@@ -1021,9 +1022,14 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     /**
      * A variable on a plane through the box, on a res x res grid: `values[j * res + i]`, with i
      * along the first of the other two axes (x, or y for a slice along x) and j along the second.
+     * With `encoding: 'base64'`, the values come instead as `array`, an EncodedArray
+     * (src/io/arrays.ts) of float32 bytes of shape [res, res]: the same values, many times
+     * faster to bring out of the page at a large `res`.
      */
-    slice: (opts: { variable?: string; axis?: number; pos?: number; res?: number } = {}) =>
+    slice: (opts: { variable?: string; axis?: number; pos?: number; res?: number; encoding?: 'json' | 'base64' } = {}) =>
       serial(async () => {
+        const encoding = opts.encoding ?? 'json';
+        if (encoding !== 'json' && encoding !== 'base64') throw new Error(`unknown encoding "${encoding}": use json or base64`);
         const { snap, sampler, species } = await sampled();
         const variable = opts.variable ?? 'rho';
         const axis = snap.ndim === 2 ? 2 : (opts.axis ?? 2);
@@ -1031,7 +1037,9 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         const res = Math.max(2, Math.min(2048, Math.round(opts.res ?? Math.min(256, app.cfg().n))));
         const value = variableOf(snap, sampler, species, variable);
         const [a, b] = [0, 1, 2].filter((k) => k !== axis);
-        const values = new Array<number>(res * res);
+        // Every variable is read from a float32 array (and level is a small integer), so a
+        // Float32Array holds each value exactly, for either encoding.
+        const values = new Float32Array(res * res);
         const p: Point = [0, 0, 0];
         p[axis] = pos;
         let min = Infinity, max = -Infinity;
@@ -1045,7 +1053,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
             if (v > max) max = v;
           }
         }
-        return { t: snap.time, variable, axis, pos, res, axes: [a, b], min, max, values };
+        const head = { t: snap.time, variable, axis, pos, res, axes: [a, b], min, max };
+        return encoding === 'base64' ? { ...head, array: encodeArray(values, [res, res]) } : { ...head, values: Array.from(values) };
       }),
 
     /** The primitive state (and refinement level) at points given in fractions of the box. */

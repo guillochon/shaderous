@@ -175,7 +175,8 @@ Typical sequence: `describe` → `load {setup}` → `run {until}` → `diagnosti
   the Riemann solver or EOS, gravity, viscosity. `controls` lists the ids. Number fields are in
   the units the panel shows, so call `control {id: "units", value: "code"}` first if needed.
 - `slice` returns its values inline only up to res 64. For more, pass `save_path` and read the
-  file.
+  file: a name ending in `.npy` gives a float32 `[res, res]` array for `np.load`, any other
+  name JSON.
 - If the tools are listed but fail with "could not start Chrome" or a WebGPU error, use the
   runner with `--headed`, or tell the user.
 
@@ -190,7 +191,9 @@ npm run headless -- sweep --problem sedov --dim 2 --vary n=128,256,512 --until 0
 ```
 
 - Each run writes `manifest.json`, `diag.jsonl` (one line per output), and then whatever was
-  asked for: PNGs with `--png`, slice JSON with `--slice VAR`, `.athdf` files with `--athdf`.
+  asked for: PNGs with `--png`, slice JSON with `--slice VAR` (or `.npy` files for numpy with
+  `--slice-format npy`; their fields are under `slices` in the manifest), `.athdf` files with
+  `--athdf`.
 - Exit codes: 0 means success, 1 an error, 2 that the page reported errors (listed in the
   manifest).
 - Run long jobs in the background and at low priority: add `--low-priority`. On Windows you

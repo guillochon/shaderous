@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { REPO } from './session.mjs';
+import { readNpy } from './npy.mjs';
 
 const tmp = mkdtempSync(path.join(os.tmpdir(), 'shaderous-selftest-'));
 let failures = 0;
@@ -65,6 +66,10 @@ const check = (ok, what) => {
   check(Math.abs(d.mass - 1) < 1e-5, 'diagnostics: mass conserved');
   const sl = json(await tool('slice', { variable: 'rho', res: 16 }));
   check(sl.values?.length === 16 && sl.values[0].length === 16 && sl.max > 1, 'slice');
+  const big = json(await tool('slice', { variable: 'rho', res: 512, save_path: path.join(tmp, 'mcp/rho.npy') }));
+  const npy = existsSync(big.saved) ? readNpy(readFileSync(big.saved)) : { shape: [], values: [] };
+  const npyMean = npy.values.reduce((a, b) => a + b, 0) / npy.values.length;
+  check(npy.shape.join() === '512,512' && Math.abs(npyMean - big.mean) < 1e-9 && npy.values.reduce((a, b) => Math.max(a, b), -Infinity) === big.max, 'slice: save_path .npy writes float32 [512, 512]');
   const shot = await tool('screenshot', { width: 256, view: { field: 3 } });
   check(shot.content[0].type === 'image' && shot.content[0].data.length > 5000, 'screenshot');
   const saved = json(await tool('save_athdf', { path: path.join(tmp, 'mcp/') }));
@@ -103,6 +108,13 @@ const check = (ok, what) => {
   check(['0000-t0.png', '0002-t0.04.athdf', '0001-t0.02-press.json', 'diag.jsonl', 'manifest.json'].every((f) => files.includes(f)), 'cli outputs');
   const lines = existsSync(path.join(out, 'diag.jsonl')) ? readFileSync(path.join(out, 'diag.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
   check(lines.length === 3 && Math.abs(lines[2].t - 0.04) < 1e-6, 'cli outputs at t = 0, 0.02, 0.04');
+  const nout = path.join(tmp, 'cli-npy');
+  const nres = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'sedov', '--dim', '2', '--n', '64', '--until', '0.01', '--slice', 'rho', '--slice-res', '16', '--slice-format', 'npy', '--out', nout, '--quiet'], { encoding: 'utf8' });
+  const nman = existsSync(path.join(nout, 'manifest.json')) ? JSON.parse(readFileSync(path.join(nout, 'manifest.json'), 'utf8')) : { outputs: [] };
+  const last = nman.outputs.at(-1)?.slices?.[0];
+  const nfile = last ? readFileSync(path.join(nout, last.file)) : Buffer.alloc(0);
+  check(nres.status === 0 && last?.variable === 'rho' && last.res === 16 && nfile.length === 128 + 4 * 16 * 16 && readNpy(nfile).shape.join() === '16,16' && Math.max(...readNpy(nfile).values) === last.max,
+    `cli --slice-format npy writes a .npy slice and its fields in the manifest${nres.status ? `: ${nres.stderr}` : ''}`);
   const mout = path.join(tmp, 'cli-mp4');
   const mres = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'sedov', '--dim', '2', '--n', '128', '--until', '0.01', '--mp4', '--frame-dt', '0.002', '--width', '320', '--out', mout, '--quiet'], { encoding: 'utf8' });
   const mman = existsSync(path.join(mout, 'manifest.json')) ? JSON.parse(readFileSync(path.join(mout, 'manifest.json'), 'utf8')) : {};

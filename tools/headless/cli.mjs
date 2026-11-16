@@ -9,7 +9,8 @@
 import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { debrisSummary, lowerPriority, openSession, pngBytes, setupQuery } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, setupQuery } from './session.mjs';
+import { npyBytes } from './npy.mjs';
 
 // Every option, written once: this table makes both the parser's options and the help text, so
 // an option cannot be read and not documented, or the other way round. F(flags, help, more): a
@@ -43,8 +44,9 @@ const SECTIONS = [
       F('png', 'A screenshot at each output'),
       F(['width PX', 'height PX'], 'Screenshot size (default 1024 square)'),
       F('view KEY=VALUE', 'View setting for screenshots, repeatable: --view field=3 --view colormap=viridis', { many: true }),
-      F('slice VAR', 'A slice of this variable at each output, as JSON (repeatable)', { many: true }),
+      F('slice VAR', 'A slice of this variable at each output (repeatable)', { many: true }),
       F(['slice-axis A', 'slice-pos P', 'slice-res R']),
+      F('slice-format F', ['json (default): NNNN-tT-VAR.json, the whole slice() result; or npy:', "NNNN-tT-VAR.npy, float32 of shape [res, res] for numpy's np.load,", 'with the slice\'s other fields under that output\'s "slices" in', 'manifest.json']),
       F('athdf', 'An .athdf file at each output'),
       F('debris', ['Debris energies and dM/dt at each output, as JSON (problems that track', 'them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py']),
     ],
@@ -141,6 +143,8 @@ if (o.help || !command) {
 }
 if (!['run', 'sweep', 'describe'].includes(command)) usage(`unknown command "${command}"\n\n${HELP}`);
 if (o['low-priority']) lowerPriority();
+const sliceFormat = o['slice-format'] ?? 'json';
+if (!['json', 'npy'].includes(sliceFormat)) usage(`--slice-format is json or npy, not "${sliceFormat}"`);
 
 /** The setup document of --setup, read once: the page checks it. */
 let setupDocument;
@@ -235,10 +239,17 @@ async function runOne(session, q, dir) {
       writeFileSync(path.join(dir, `${name}.png`), pngBytes(png));
       files.push(`${name}.png`);
     }
+    // Fetched as float32 bytes either way (the values are those of the JSON result, bit for
+    // bit), which is many times faster than a list of numbers through page.evaluate.
+    const slices = [];
     for (const variable of o.slice ?? []) {
-      const sl = await call('slice', { variable, axis: num(o['slice-axis'], 'slice-axis'), pos: num(o['slice-pos'], 'slice-pos'), res: num(o['slice-res'], 'slice-res') });
-      writeFileSync(path.join(dir, `${name}-${variable}.json`), JSON.stringify(sl) + '\n');
-      files.push(`${name}-${variable}.json`);
+      const { head, values } = await fetchSlice(call, { variable, axis: num(o['slice-axis'], 'slice-axis'), pos: num(o['slice-pos'], 'slice-pos'), res: num(o['slice-res'], 'slice-res') });
+      const file = `${name}-${variable}.${sliceFormat}`;
+      if (sliceFormat === 'npy') {
+        writeFileSync(path.join(dir, file), npyBytes(values, [head.res, head.res]));
+        slices.push({ file, ...head });
+      } else writeFileSync(path.join(dir, file), JSON.stringify({ ...head, values: Array.from(values) }) + '\n');
+      files.push(file);
     }
     if (o.debris) {
       const r = await call('debris');
@@ -254,7 +265,7 @@ async function runOne(session, q, dir) {
       writeFileSync(path.join(dir, `${name}.athdf`), Buffer.from(f.base64, 'base64'));
       files.push(`${name}.athdf`);
     }
-    manifest.outputs.push({ output: k, t: d.t, steps: d.steps, files });
+    manifest.outputs.push({ output: k, t: d.t, steps: d.steps, files, ...(slices.length ? { slices } : {}) });
     writeManifest();
     log(`  t = ${tag(d.t)}  steps ${d.steps}  mass ${d.mass.toPrecision(7)}  eTot ${d.eTot.toPrecision(7)}  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     k++;
