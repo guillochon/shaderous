@@ -42,7 +42,7 @@ function mulberry(seed: number) {
   };
 }
 
-const thermalInstability: FlowDef<{ n0: number; amp: number }> = {
+const thermalInstability: FlowDef<{ n0: number; amp: number; kMax: number; seed: number }> = {
   name: 'thermal-instability',
   label: 'Gas in unstable thermal balance',
   tip: 'Uniform gas at the temperature where interstellar cooling balances heating on the unstable branch, with small random density perturbations at one pressure. Density in atoms per cm^3, temperature in units of 1000 K: needs the interstellar cooling, in those units.',
@@ -50,18 +50,21 @@ const thermalInstability: FlowDef<{ n0: number; amp: number }> = {
   fields: {
     n0: { label: 'Mean density (cm⁻³)', tip: 'Mean density of the gas, which starts in thermal balance', default: 2, min: 1, max: 8, step: 0.5 },
     amp: { label: 'Perturbation', tip: 'Amplitude of the initial density perturbations', default: 0.02, min: 0.001, max: 0.3, factor: 1.5 },
+    kMax: { label: 'Smallest wavelength', tip: 'The perturbations are waves of up to this many wavelengths across the box: the larger, the finer the seed', default: TI.kMax, min: 1, max: 64, step: 1 },
+    seed: { label: 'Random seed', tip: 'Which random field of perturbations: each seed gives another', default: 20021, min: 1, max: 4294967295, step: 1 },
   },
   init: (ctx, params) => {
     const ndim = ctx.ndim;
     const T0 = balanceTemperature(params.n0);
     const p0 = params.n0 * T0;
     // A sum of plane waves with random directions and phases, periodic in the box.
-    const rand = mulberry(20021);
+    const rand = mulberry(Math.round(params.seed));
+    const kMax = Math.round(params.kMax);
     const waves: number[][] = [];
     while (waves.length < TI.modes) {
-      const k = [0, 1, 2].map((a) => (a === 2 && ndim === 2 ? 0 : Math.round((2 * rand() - 1) * TI.kMax)));
+      const k = [0, 1, 2].map((a) => (a === 2 && ndim === 2 ? 0 : Math.round((2 * rand() - 1) * kMax)));
       const k2 = k[0] * k[0] + k[1] * k[1] + k[2] * k[2];
-      if (k2 === 0 || k2 > TI.kMax * TI.kMax) continue;
+      if (k2 === 0 || k2 > kMax * kMax) continue;
       waves.push([...k.map((q) => 2 * Math.PI * q), 2 * Math.PI * rand()]);
     }
     const norm = params.amp * Math.sqrt(2 / TI.modes);

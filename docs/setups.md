@@ -97,7 +97,7 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 | `region` | A `shape` with a state that replaces what is under it: `rho`, `p` (or `energy`, a total spread over a sphere's cells), `v`, `s`, `X`; `supersample` for a smooth edge |
 | `obstacle`, `inflow` | A `shape` whose cells are solid, or held at their initial state |
 | `field` | A uniform magnetic field: `b` (a vector) or `up` (a strength along the axis drawn upward) |
-| `flow` | A built-in initial condition by `name`, with its parameters: what shapes cannot say (a shear layer with its seeded modes, a ZND detonation, an Alfvén wave). The flows are in `src/setup/parts/flows/` |
+| `flow` | A built-in initial condition by `name`, with its parameters: what shapes cannot say (a shear layer with its seeded modes, a ZND detonation, an Alfvén wave). Every flow has parameters (densities, speeds, amplitudes, wavelengths, seeds), listed with their ranges in the dialog and by `describe().setup.flows`; left out, each takes the value its preset has always had. The flows are in `src/setup/parts/flows/` |
 
 Shapes: `{ "type": "sphere", "center", "radius" }` (or `radiusCells`, in finest cells; a
 cylinder in 2D), `{ "type": "box", "min", "max" }` (a bound may be `null`: open on that side),

@@ -6,15 +6,23 @@
 // creeps by about 2e-9 per step; away from a power of two the drift is unbiased round-off.
 import type { FlowDef } from '../flow';
 
-const advection: FlowDef<Record<string, never>> = {
+const advection: FlowDef<{ rho0: number; amp: number; width: number; vx: number; vy: number; vz: number; p: number }> = {
   name: 'advection',
   label: 'Advected Gaussian blob',
-  tip: 'A Gaussian density blob (width 0.1, height 1 over a density of 1.5) at the center, carried at velocity (1, 0.5, 0.25) at a uniform pressure of 1. The passive scalar follows the blob.',
+  tip: 'A Gaussian density blob at the center, carried by a uniform flow at a uniform pressure. The passive scalar follows the blob. On a periodic box it tests conservation.',
   wholeBox: true,
-  fields: {},
-  init: () => (x, y, z) => {
-    const g = Math.exp(-(x * x + y * y + z * z) / (2 * 0.1 * 0.1));
-    return { rho: 1.5 + g, vx: 1, vy: 0.5, vz: 0.25, p: 1, s: g };
+  fields: {
+    rho0: { label: 'Density around the blob', default: 1.5, min: 1e-6, max: 1e6, factor: 1.25, tip: 'Density of the gas the blob sits in. Not a power of two by default: at exactly 1 the rounding of float32 in the blob\u2019s faint tail is biased, and the total mass creeps' },
+    amp: { label: 'Blob height', default: 1, min: 0, max: 1e6, factor: 1.25, tip: 'Density of the blob\u2019s peak above the gas around it' },
+    width: { label: 'Blob width', default: 0.1, min: 0.01, max: 1, step: 0.01, tip: 'Standard deviation of the Gaussian, in code lengths' },
+    vx: { label: 'Velocity x', default: 1, min: -100, max: 100, step: 0.25, tip: 'Velocity of the flow along x' },
+    vy: { label: 'Velocity y', default: 0.5, min: -100, max: 100, step: 0.25, tip: 'Velocity of the flow along y' },
+    vz: { label: 'Velocity z', default: 0.25, min: -100, max: 100, step: 0.25, tip: 'Velocity of the flow along z (3D)' },
+    p: { label: 'Pressure', default: 1, min: 1e-6, max: 1e6, factor: 1.25, tip: 'Pressure, the same everywhere' },
+  },
+  init: (_ctx, q) => (x, y, z) => {
+    const g = Math.exp(-(x * x + y * y + z * z) / (2 * q.width * q.width));
+    return { rho: q.rho0 + q.amp * g, vx: q.vx, vy: q.vy, vz: q.vz, p: q.p, s: g };
   },
 };
 

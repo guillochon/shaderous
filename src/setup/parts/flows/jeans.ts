@@ -10,19 +10,23 @@ export const JEANS = {
   growth: 2 * Math.PI,
 };
 
-const jeans: FlowDef<Record<string, never>> = {
+const jeans: FlowDef<{ amp: number; modes: number }> = {
   name: 'jeans',
   label: 'Jeans-unstable wave',
-  tip: 'A small adiabatic density wave along x about density 1 and sound speed 1, one wavelength across a unit box. With G = 2 pi it grows at the rate 2 pi.',
+  tip: 'A small adiabatic density wave along x about density 1 and sound speed 1. With one wavelength across a unit box and G = 2 pi it grows at the rate 2 pi; a shorter wave grows more slowly, or oscillates as sound once k^2 passes 4 pi G.',
   wholeBox: true,
-  fields: {},
-  init: (ctx) => {
+  fields: {
+    amp: { label: 'Amplitude', default: JEANS.amp, min: 1e-6, max: 0.5, factor: 2, tip: 'Relative amplitude of the density wave: small, for linear growth' },
+    modes: { label: 'Wavelengths across', default: 1, min: 1, max: 32, step: 1, tip: 'Wavelengths of the wave along x in a length of 1' },
+  },
+  init: (ctx, q) => {
     const e = ctx.eos;
+    const k = JEANS.k * Math.round(q.modes);
     return (x) => {
       const g = e.params.gamma;
-      const d = JEANS.amp * Math.cos(JEANS.k * x);
+      const d = q.amp * Math.cos(k * x);
       // Adiabatic perturbation about rho0 = 1, p0 = 1 / gamma (c_s = 1).
-      return { rho: 1 + d, vx: 0, vy: 0, vz: 0, p: (1 + g * d) / g, s: 0.5 + 0.5 * Math.cos(JEANS.k * x) };
+      return { rho: 1 + d, vx: 0, vy: 0, vz: 0, p: (1 + g * d) / g, s: 0.5 + 0.5 * Math.cos(k * x) };
     };
   },
 };
