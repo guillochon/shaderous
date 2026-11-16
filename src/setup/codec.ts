@@ -24,6 +24,8 @@ export const MIGRATIONS: Record<number, (doc: Record<string, unknown>) => Record
 
 const MAX_TEXT = 4000;
 const MAX_PARTS = 256;
+/** Where the JSON Schema of a setup document is served (public/shaderous-setup.schema.json): files this build writes name it, so an editor checks them and completes their keys. */
+export const SETUP_SCHEMA_URL = 'https://guillochon.github.io/shaderous/shaderous-setup.schema.json';
 const MAX_DOCUMENT = 2_000_000;
 
 class Bad extends Error {}
@@ -219,6 +221,80 @@ function conformPart(v: unknown, path: string, notes: string[]): unknown {
   return { kind, ...id, ...(conform(rest, obj(schema), path, notes, option) as object) };
 }
 
+// ---- the format as JSON Schema ----
+
+type Json = Record<string, unknown>;
+
+/** What an option of the table adds to its key's schema: its name, its tooltip and its range. */
+function described(o: Option | undefined): Json {
+  if (!o) return {};
+  const c = o.control;
+  return { title: o.label, description: o.tip, ...(c.type === 'number' && c.min !== undefined ? { minimum: c.min } : {}), ...(c.type === 'number' && c.max !== undefined ? { maximum: c.max } : {}) };
+}
+
+function jsonSchema(s: Schema, path: string, option: (path: string) => Option | undefined): Json {
+  const about = described(option(path));
+  const list = (n: number): Json => ({ type: 'array', items: { type: 'number' }, minItems: n, maxItems: n });
+  if (s === 'number') return { type: 'number', ...about };
+  if (s === 'int') return { type: 'integer', ...about };
+  if (s === 'string') return { type: 'string', maxLength: MAX_TEXT, ...about };
+  if (s === 'boolean') return { type: 'boolean', ...about };
+  if (s === 'vec3') return { ...list(3), ...about };
+  if (s === 'pair') return list(2);
+  if (s === 'numbers') return { type: 'array', items: { type: 'number' }, maxItems: 64, ...about };
+  if (s === 'fractions') return { type: 'object', additionalProperties: { type: 'number' }, ...about };
+  const { title, description } = about as { title?: string; description?: string };
+  const named = { ...(title ? { title } : {}), ...(description ? { description } : {}) };
+  if ('enum' in s) return { enum: [...s.enum], ...named };
+  if ('nullable' in s) return { anyOf: [{ type: 'null' }, jsonSchema(s.nullable, path, () => undefined)], ...named };
+  if ('any' in s) return { anyOf: s.any.map((alt) => jsonSchema(alt, path, () => undefined)), ...named };
+  if ('array' in s) return { type: 'array', items: jsonSchema(s.array, `${path}.0`, option), maxItems: s.max, ...named };
+  const properties = Object.fromEntries(Object.entries(s.object).map(([k, sub]) => [k, jsonSchema(sub, path ? `${path}.${k}` : k, option)]));
+  return { type: 'object', properties, additionalProperties: s.open ? jsonSchema(s.open, '', () => undefined) : false, ...named };
+}
+
+/**
+ * The format as JSON Schema (draft 2020-12), made from the same tables this file reads documents
+ * with: an editor that knows it completes a setup file's keys and marks a value that is not a
+ * choice. It is stricter than readSetup in one way: a key this build does not know is an error
+ * there, where reading drops it with a note.
+ */
+export function setupJsonSchema(): Json {
+  const top = jsonSchema(obj(DOCUMENT), '', (path) => OPTION_BY_PATH[path]) as { properties: Record<string, Json> };
+  const part = (kind: string, fields: Json, title: string): Json => ({
+    type: 'object', title,
+    properties: { kind: { const: kind }, id: { type: 'string', description: 'A name other parts refer to it by (an orbit\u2019s `of`, a disk\u2019s `about`)' }, ...fields },
+    required: ['kind'], additionalProperties: false,
+  });
+  const kinds = Object.entries(PART_SCHEMAS).map(([kind, schema]) => {
+    const k = PART_OPTIONS[kind as keyof typeof PART_OPTIONS];
+    const fields = flatten(k.fields);
+    return part(kind, (jsonSchema(obj(schema), '', (path) => fields.find((o) => o.path === path)) as { properties: Json }).properties, k.label);
+  });
+  const flows = Object.values(FLOWS).map((def) => {
+    const fields = Object.fromEntries(Object.entries(def.fields).map(([k, f]) => [k, typeof f.default === 'boolean'
+      ? { type: 'boolean', title: f.label, default: f.default }
+      : { type: 'number', title: f.label, default: f.default, ...(f.min !== undefined ? { minimum: f.min } : {}), ...(f.max !== undefined ? { maximum: f.max } : {}) }]));
+    return { ...part('flow', { name: { const: def.name }, ...fields }, `Flow: ${def.label}`), description: def.tip, required: ['kind', 'name'] };
+  });
+  return {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    $id: SETUP_SCHEMA_URL,
+    title: 'Shaderous setup',
+    description: 'A simulation setup for Shaderous: the domain, the physics, the mesh, the background gas and the parts that make the initial conditions (docs/setups.md). Generated from the option table by `npm run gen`.',
+    type: 'object',
+    required: ['format', 'version'],
+    additionalProperties: false,
+    properties: {
+      $schema: { type: 'string' },
+      ...top.properties,
+      format: { const: SETUP_FORMAT },
+      version: { type: 'integer', minimum: 1, maximum: SETUP_VERSION },
+      parts: { type: 'array', maxItems: MAX_PARTS, items: { oneOf: [...kinds, ...flows] } },
+    },
+  };
+}
+
 /**
  * Read a setup document: text or an already parsed value. `find` returns a preset by id, for a
  * document that `extends` one. The result is whole (no `extends` left) and holds only what this
@@ -248,7 +324,8 @@ export function readSetup(input: unknown, find: (id: string) => SetupSpec | unde
       if (!step) return fail(`no way to read version ${v} of the format`);
       raw = step(raw);
     }
-    const { parts, ...rest } = raw;
+    // `$schema` (what an editor checks the file against) is not part of the setup.
+    const { parts, $schema: _schema, ...rest } = raw;
     const out = conform(rest, obj(DOCUMENT), '', report.notes, (p) => OPTION_BY_PATH[p]) as Record<string, unknown>;
     if (parts !== undefined) {
       if (!Array.isArray(parts)) throw new Bad('parts: expected a list');
@@ -288,7 +365,7 @@ export function formatSetup(spec: SetupSpec): string {
     const entries = Object.entries(v as object).filter(([, x]) => x !== undefined);
     return `{\n${entries.map(([k, x]) => `${inner}${JSON.stringify(k)}: ${write(x, inner, k.length + 4)}`).join(',\n')}\n${indent}}`;
   };
-  return `${write(spec, '', 0)}\n`;
+  return `${write({ $schema: SETUP_SCHEMA_URL, ...spec }, '', 0)}\n`;
 }
 
 // ---- links ----

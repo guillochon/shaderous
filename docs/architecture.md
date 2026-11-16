@@ -456,6 +456,29 @@ least that is needed: a uniform write, a rebuild of the shaders, or a fresh star
 bar keeps what concerns choosing and watching a run, and shows a setup's featured options from
 the same table.
 
+### One table, read everywhere
+
+What a setup, the view or a call of the scripting API accepts is written once, and every place
+that repeats it is made from that place:
+
+- A list of choices (`RIEMANN_KINDS`, `GRAVITY_MODES`, `STAR_TYPES`, ...) is a constant array
+  from which its type is made. The option table's menus must name exactly its list, and the
+  document codec takes its choices from the option table.
+- The view's settings are a table, `src/render/view_options.ts`: key, link key, type, limits
+  and a line of documentation. The link codec loops over it and `shaderous.view()` reads its
+  keys from it. The renderer's `ViewState` must match it or the build stops.
+- The scripting API's methods are a table, `src/ui/api_schema.ts`: what each does and its
+  arguments as JSON Schema.
+
+The headless tools cannot import the page's TypeScript, so `npm run gen` writes what they need
+to files that are committed: `tools/headless/schema.json` (link keys, view settings, variables,
+choices, API methods), from which the MCP server takes its tools' input schemas and key lists;
+the two key tables of [api.md](api.md), between `<!-- gen:... -->` markers; and
+`public/shaderous-setup.schema.json`, the format of a setup document as JSON Schema. The
+generator is the unit test `tests/unit/generated.test.ts` run with a flag: run plainly, as
+`npm test` does, it fails when a generated file is out of date. After changing the option
+table, the view's table or the API's table, run `npm run gen` and commit what it changes.
+
 The presets were hand-written TypeScript objects until November 2026. Those objects live on in
 `tests/legacy/`, and `tests/unit/presets.test.ts` holds every compiled preset to them: the
 configuration field by field, and the initial state, point masses, settling and magnetic

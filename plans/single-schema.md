@@ -1,6 +1,21 @@
 # Plan: one schema, generated everywhere
 
-Status: proposed 2026-11-16, not built. The lists of hand-kept copies below come from reading
+Status: built 2026-11-16, all eight phases, with the proposals of section 6 as written.
+What differs from the plan below:
+
+- Phase 1 found two copies that had drifted: the codec took any text as a composition and any
+  whole number as the local timestep bins. A third showed in phase 4: the MCP server's list of
+  view keys was three short.
+- The Riemann solver and limiter lists live in `src/problems/types.ts`, not `src/sim.ts`, which
+  re-exports them: the option table reads them, and `sim.ts` imports the option table's compiler.
+- The codec does not keep enums of its own to be fed: it reads each from the option table.
+- `npm run gen` is `tools/gen.mjs`, which runs `tests/unit/generated.test.ts` with a flag.
+- Generated doc tables: the link keys and the view settings in `docs/api.md` only. The tables of
+  `docs/setups.md`, `docs/headless.md` and the skill are still written by hand.
+- The MCP tool for a slice keeps its own description, and `docs/headless.md`'s option table is
+  not made from the runner's flag table.
+
+Original status: proposed 2026-11-16, not built. The lists of hand-kept copies below come from reading
 the code, not from comparing every copy value by value; phase 1 does that comparison and will
 say how much has actually drifted.
 

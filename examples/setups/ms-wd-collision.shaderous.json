@@ -1,4 +1,5 @@
 {
+  "$schema": "https://guillochon.github.io/shaderous/shaderous-setup.schema.json",
   "format": "shaderous-setup",
   "version": 1,
   "name": "Main-sequence star hit by a white dwarf",

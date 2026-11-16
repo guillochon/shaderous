@@ -13,6 +13,14 @@ out of range are held to it and listed, and a value of the wrong type is an erro
 The source of truth for what a file may hold is the option table, `src/setup/options.ts`. The
 dialog's forms, the conflict checks, the defaults and the ranges are all read from it.
 
+The format is also published as a JSON Schema, made from the same table:
+[shaderous-setup.schema.json](https://guillochon.github.io/shaderous/shaderous-setup.schema.json)
+(`public/shaderous-setup.schema.json` in the repository). A file that names it in a first key
+`"$schema"` gets its keys completed and its values checked in an editor that reads JSON Schema
+(VS Code does). Files saved from the dialog name it. The key is not part of the setup: reading
+skips it. The schema is stricter than reading in one way: a key this build does not know is an
+error in the editor, where reading drops it with a note.
+
 ## Shape of the document
 
 ```jsonc

@@ -2,7 +2,8 @@
 // settings and the link's keys. These tests fail when a copy of one of them (in the document
 // codec, the docs or the headless tools) says something else.
 import { describe, expect, it } from 'vitest';
-import { readSetup } from '../../src/setup/codec';
+import { PRESET_FILES, PRESET_IDS, presetSpec } from '../../src/presets/index';
+import { formatSetup, readSetup, SETUP_SCHEMA_URL, setupJsonSchema } from '../../src/setup/codec';
 import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../../src/setup/options';
 import { emptySetup, setPath, type SetupSpec } from '../../src/setup/spec';
 import { defaultView } from '../../src/render/renderer';
@@ -117,5 +118,64 @@ describe('the view', () => {
     const held = decodeLink(new URLSearchParams({ problem: 'kelvin-helmholtz', zoom: '1000', axis: '7', field: '99', ncont: '0' }), report).view;
     expect(held).toMatchObject({ zoom: 256, sliceAxis: 2, nContours: 1 });
     expect(report.ignored.length).toBe(4);
+  });
+});
+
+// As much of a JSON Schema validator as the generated schema uses: what is wrong with a value, as paths.
+type Js = Record<string, any>;
+function invalid(v: unknown, s: Js, path = ''): string[] {
+  const out: string[] = [];
+  const kind = v === null ? 'null' : Array.isArray(v) ? 'array' : Number.isInteger(v) ? 'integer' : typeof v;
+  if (s.const !== undefined && v !== s.const) return [`${path}: not ${JSON.stringify(s.const)}`];
+  if (s.enum && !s.enum.includes(v)) return [`${path}: ${JSON.stringify(v)} is not a choice`];
+  for (const key of ['anyOf', 'oneOf'] as const) {
+    if (!s[key]) continue;
+    const fits = s[key].filter((alt: Js) => invalid(v, alt, path).length === 0).length;
+    if (key === 'anyOf' ? fits < 1 : fits !== 1) return [`${path}: fits ${fits} of ${key}`, ...(s[key].length < 40 ? [] : s[key].flatMap((alt: Js) => (alt.properties?.kind?.const === (v as Js)?.kind && (alt.properties?.name?.const ?? (v as Js)?.name) === (v as Js)?.name ? invalid(v, alt, path) : [])))];
+  }
+  if (s.type && !(s.type === kind || (s.type === 'number' && kind === 'integer'))) return [`${path}: ${kind}, not ${s.type}`];
+  if (typeof v === 'number' && ((s.minimum !== undefined && v < s.minimum) || (s.maximum !== undefined && v > s.maximum))) out.push(`${path}: ${v} out of range`);
+  if (Array.isArray(v)) {
+    if ((s.minItems !== undefined && v.length < s.minItems) || (s.maxItems !== undefined && v.length > s.maxItems)) out.push(`${path}: ${v.length} entries`);
+    if (s.items) v.forEach((x, i) => out.push(...invalid(x, s.items, `${path}.${i}`)));
+  } else if (kind === 'object') {
+    for (const k of s.required ?? []) if (!(k in (v as Js))) out.push(`${path}: lacks ${k}`);
+    for (const [k, x] of Object.entries(v as Js)) {
+      const sub = s.properties?.[k] ?? (typeof s.additionalProperties === 'object' ? s.additionalProperties : undefined);
+      if (sub) out.push(...invalid(x, sub, path ? `${path}.${k}` : k));
+      else if (s.additionalProperties === false) out.push(`${path ? `${path}.` : ''}${k}: not a key`);
+    }
+  }
+  return out;
+}
+
+describe('the JSON Schema of a setup document', () => {
+  const schema = setupJsonSchema();
+
+  it.each(PRESET_IDS)('takes the preset %s, as its file and whole', (id) => {
+    expect(invalid(PRESET_FILES[id], schema)).toEqual([]);
+    expect(invalid(JSON.parse(formatSetup(presetSpec(id)!)), schema)).toEqual([]);
+  });
+
+  it('turns down what the codec turns down', () => {
+    const doc = (change: (s: Js) => void) => {
+      const s = JSON.parse(JSON.stringify(presetSpec('binary')));
+      change(s);
+      return s;
+    };
+    for (const change of [(s: Js) => (s.physics.riemann = 'exact'), (s: Js) => (s.parts[0].kind = 'planet'), (s: Js) => (s.domain.ndim = 4), (s: Js) => (s.physics.cfl = 'small'), (s: Js) => delete s.format]) {
+      expect(invalid(doc(change), schema)).not.toEqual([]);
+      expect(readSetup(doc(change)).spec).toBeNull();
+    }
+    // A key this build does not know: dropped with a note when read, an error for an editor.
+    expect(invalid(doc((s) => (s.physics.magic = 1)), schema)).toEqual(['physics.magic: not a key']);
+  });
+
+  it('a written file names it, and reads back without a note', () => {
+    const text = formatSetup(presetSpec('sedov')!);
+    expect(JSON.parse(text).$schema).toBe(SETUP_SCHEMA_URL);
+    const { spec, report } = readSetup(text);
+    expect(report.notes).toEqual([]);
+    expect(spec).toEqual(presetSpec('sedov'));
   });
 });

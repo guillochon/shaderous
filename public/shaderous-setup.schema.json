@@ -1,0 +1,2681 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "https://guillochon.github.io/shaderous/shaderous-setup.schema.json",
+ "title": "Shaderous setup",
+ "description": "A simulation setup for Shaderous: the domain, the physics, the mesh, the background gas and the parts that make the initial conditions (docs/setups.md). Generated from the option table by `npm run gen`.",
+ "type": "object",
+ "required": [
+  "format",
+  "version"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "$schema": {
+   "type": "string"
+  },
+  "format": {
+   "const": "shaderous-setup"
+  },
+  "version": {
+   "type": "integer",
+   "minimum": 1,
+   "maximum": 1
+  },
+  "id": {
+   "type": "string",
+   "maxLength": 4000
+  },
+  "name": {
+   "type": "string",
+   "maxLength": 4000,
+   "title": "Name",
+   "description": "What the setup is called in the preset list and in its file"
+  },
+  "group": {
+   "type": "string",
+   "maxLength": 4000
+  },
+  "family": {
+   "type": "string",
+   "maxLength": 4000
+  },
+  "familyName": {
+   "type": "string",
+   "maxLength": 4000
+  },
+  "variant": {
+   "type": "string",
+   "maxLength": 4000
+  },
+  "blurb": {
+   "type": "string",
+   "maxLength": 4000,
+   "title": "Description",
+   "description": "A sentence or two shown under the preset menu"
+  },
+  "extends": {
+   "type": "string",
+   "maxLength": 4000
+  },
+  "domain": {
+   "type": "object",
+   "properties": {
+    "ndim": {
+     "enum": [
+      3,
+      2
+     ],
+     "title": "Dimensions",
+     "description": "Two or three dimensions. A 2D run is one layer of cells in x and y"
+    },
+    "n": {
+     "type": "integer",
+     "title": "Resolution",
+     "description": "Cells across the box; on an adaptive mesh, at its finest level",
+     "minimum": 16,
+     "maximum": 16384
+    },
+    "amr": {
+     "type": "integer",
+     "title": "Refinement",
+     "description": "Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution",
+     "minimum": 0,
+     "maximum": 5
+    },
+    "box": {
+     "type": "number",
+     "title": "Box size",
+     "description": "Side of the box, in code units: the domain is a cube of this side centered on the origin",
+     "minimum": 1e-12,
+     "maximum": 1e+30
+    },
+    "supports2d": {
+     "type": "boolean",
+     "title": "Makes sense in 2D",
+     "description": "The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only"
+    },
+    "bc": {
+     "type": "object",
+     "properties": {
+      "lo": {
+       "type": "array",
+       "items": {
+        "enum": [
+         0,
+         1,
+         2,
+         3
+        ]
+       },
+       "maxItems": 3
+      },
+      "hi": {
+       "type": "array",
+       "items": {
+        "enum": [
+         0,
+         1,
+         2,
+         3
+        ]
+       },
+       "maxItems": 3
+      }
+     },
+     "additionalProperties": false,
+     "title": "Faces of the box",
+     "description": "What the gas meets at each face of the box. Periodic faces come in pairs"
+    },
+    "bc2d": {
+     "type": "object",
+     "properties": {
+      "lo": {
+       "type": "array",
+       "items": {
+        "enum": [
+         0,
+         1,
+         2,
+         3
+        ]
+       },
+       "maxItems": 3
+      },
+      "hi": {
+       "type": "array",
+       "items": {
+        "enum": [
+         0,
+         1,
+         2,
+         3
+        ]
+       },
+       "maxItems": 3
+      }
+     },
+     "additionalProperties": false
+    },
+    "units": {
+     "type": "object",
+     "properties": {
+      "name": {
+       "type": "string",
+       "maxLength": 4000,
+       "title": "Name",
+       "description": "A name for the unit system"
+      },
+      "length": {
+       "type": "object",
+       "properties": {
+        "unit": {
+         "enum": [
+          "m",
+          "cm",
+          "km",
+          "Rsun",
+          "au",
+          "pc",
+          "kg",
+          "g",
+          "Msun",
+          "kg/m3",
+          "g/cm3",
+          "m/s",
+          "km/s",
+          "cm/s"
+         ],
+         "title": "Length unit",
+         "description": "The unit of the length"
+        },
+        "value": {
+         "type": "number",
+         "title": "Length",
+         "description": "This many of the unit beside it are one code unit of length",
+         "minimum": 1e-300,
+         "maximum": 1e+300
+        },
+        "per": {
+         "anyOf": [
+          {
+           "type": "number"
+          },
+          {
+           "type": "string",
+           "maxLength": 4000
+          }
+         ]
+        }
+       },
+       "additionalProperties": false
+      },
+      "mass": {
+       "type": "object",
+       "properties": {
+        "unit": {
+         "enum": [
+          "m",
+          "cm",
+          "km",
+          "Rsun",
+          "au",
+          "pc",
+          "kg",
+          "g",
+          "Msun",
+          "kg/m3",
+          "g/cm3",
+          "m/s",
+          "km/s",
+          "cm/s"
+         ],
+         "title": "Mass unit",
+         "description": "The unit of the mass"
+        },
+        "value": {
+         "type": "number",
+         "title": "Mass",
+         "description": "This many of the unit beside it are one code unit of mass",
+         "minimum": 1e-300,
+         "maximum": 1e+300
+        },
+        "per": {
+         "anyOf": [
+          {
+           "type": "number"
+          },
+          {
+           "type": "string",
+           "maxLength": 4000
+          }
+         ]
+        }
+       },
+       "additionalProperties": false
+      },
+      "density": {
+       "type": "object",
+       "properties": {
+        "unit": {
+         "enum": [
+          "m",
+          "cm",
+          "km",
+          "Rsun",
+          "au",
+          "pc",
+          "kg",
+          "g",
+          "Msun",
+          "kg/m3",
+          "g/cm3",
+          "m/s",
+          "km/s",
+          "cm/s"
+         ]
+        },
+        "value": {
+         "type": "number"
+        },
+        "per": {
+         "anyOf": [
+          {
+           "type": "number"
+          },
+          {
+           "type": "string",
+           "maxLength": 4000
+          }
+         ]
+        }
+       },
+       "additionalProperties": false
+      },
+      "velocity": {
+       "type": "object",
+       "properties": {
+        "unit": {
+         "enum": [
+          "m",
+          "cm",
+          "km",
+          "Rsun",
+          "au",
+          "pc",
+          "kg",
+          "g",
+          "Msun",
+          "kg/m3",
+          "g/cm3",
+          "m/s",
+          "km/s",
+          "cm/s"
+         ]
+        },
+        "value": {
+         "type": "number"
+        },
+        "per": {
+         "anyOf": [
+          {
+           "type": "number"
+          },
+          {
+           "type": "string",
+           "maxLength": 4000
+          }
+         ]
+        }
+       },
+       "additionalProperties": false
+      }
+     },
+     "additionalProperties": false,
+     "title": "Physical units",
+     "description": "What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units"
+    }
+   },
+   "additionalProperties": false
+  },
+  "physics": {
+   "type": "object",
+   "properties": {
+    "eos": {
+     "enum": [
+      "ideal",
+      "barotropic",
+      "gas_radiation",
+      "degenerate",
+      "ionizing",
+      "helmholtz"
+     ],
+     "title": "Equation of state",
+     "description": "How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues"
+    },
+    "eosParams": {
+     "type": "object",
+     "properties": {},
+     "additionalProperties": {
+      "type": "number"
+     }
+    },
+    "gravity": {
+     "enum": [
+      "off",
+      "constant",
+      "periodic",
+      "isolated"
+     ],
+     "title": "Gravity",
+     "description": "Off, a uniform field, or the self-gravity of the gas. Point masses pull either way"
+    },
+    "G": {
+     "anyOf": [
+      {
+       "type": "number"
+      },
+      {
+       "enum": [
+        "units"
+       ]
+      }
+     ],
+     "title": "G",
+     "description": "Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them"
+    },
+    "gext": {
+     "anyOf": [
+      {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3
+      },
+      {
+       "type": "object",
+       "properties": {
+        "down": {
+         "type": "number"
+        }
+       },
+       "additionalProperties": false
+      }
+     ],
+     "title": "Uniform acceleration",
+     "description": "A uniform acceleration on the gas, besides the Constant field"
+    },
+    "cooling": {
+     "enum": [
+      "off",
+      "power",
+      "ism"
+     ],
+     "title": "Cooling function",
+     "description": "Optically thin radiative cooling (and heating) of the gas"
+    },
+    "coolParams": {
+     "type": "object",
+     "properties": {},
+     "additionalProperties": {
+      "type": "number"
+     }
+    },
+    "viscosity": {
+     "type": "number",
+     "title": "Viscosity ν",
+     "description": "Kinematic viscosity: the stress is ρ ν times the shear. Obstacles hold the gas at their walls. 0 is off",
+     "minimum": 0,
+     "maximum": 1e+30
+    },
+    "conductivity": {
+     "type": "number",
+     "title": "Conductivity κ",
+     "description": "Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off",
+     "minimum": 0,
+     "maximum": 1e+30
+    },
+    "riemann": {
+     "enum": [
+      "hllc",
+      "hllclm",
+      "hll"
+     ],
+     "title": "Riemann solver",
+     "description": "How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust"
+    },
+    "limiter": {
+     "enum": [
+      "koren",
+      "mc",
+      "vanleer",
+      "minmod"
+     ],
+     "title": "Limiter",
+     "description": "How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust"
+    },
+    "cfl": {
+     "type": "number",
+     "title": "CFL number",
+     "description": "Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower",
+     "minimum": 0.05,
+     "maximum": 1
+    },
+    "floors": {
+     "type": "object",
+     "properties": {
+      "rho": {
+       "type": "number",
+       "title": "Density floor",
+       "description": "No cell is thinner than this",
+       "minimum": 0
+      },
+      "p": {
+       "type": "number",
+       "title": "Pressure floor",
+       "description": "No cell has less pressure than this",
+       "minimum": 0
+      }
+     },
+     "additionalProperties": false
+    },
+    "fluff": {
+     "type": "object",
+     "properties": {
+      "rho": {
+       "type": "number",
+       "title": "Tenuous below density",
+       "description": "Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off",
+       "minimum": 0
+      },
+      "u": {
+       "type": "number",
+       "title": "Max specific energy",
+       "description": "Largest internal energy per unit mass tenuous gas may have. 0 is no cap",
+       "minimum": 0
+      },
+      "v": {
+       "type": "number",
+       "title": "Max speed",
+       "description": "Largest speed tenuous gas may have. 0 is no cap",
+       "minimum": 0
+      },
+      "va": {
+       "type": "number",
+       "title": "Max Alfvén speed",
+       "description": "With a magnetic field: largest Alfvén speed |B| / √ρ anywhere. Where the field is stronger than that for the gas it threads, mass is added at rest until it is not. Not conservative. 0 is no cap",
+       "minimum": 0
+      }
+     },
+     "additionalProperties": false
+    },
+    "frame": {
+     "enum": [
+      "inertial",
+      "gas",
+      "masses"
+     ],
+     "title": "Frame",
+     "description": "An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box"
+    },
+    "jeansFloor": {
+     "type": "boolean",
+     "title": "Jeans floor",
+     "description": "Pressure floor that keeps the Jeans length resolved (Truelove)"
+    },
+    "jeansCells": {
+     "type": "integer",
+     "title": "Cells per Jeans length",
+     "description": "The Jeans floor raises the pressure so the Jeans length spans at least this many cells",
+     "minimum": 4,
+     "maximum": 32
+    },
+    "vcycles": {
+     "type": "integer",
+     "title": "V-cycles",
+     "description": "Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step",
+     "minimum": 1,
+     "maximum": 8
+    },
+    "gravEnergyFlux": {
+     "type": "boolean",
+     "title": "Conserve energy",
+     "description": "Flux-form gravitational work: conserves total energy"
+    },
+    "composition": {
+     "anyOf": [
+      {
+       "enum": [
+        "solar",
+        "solarNeutral",
+        "hydrogen",
+        "carbonOxygen"
+       ]
+      },
+      {
+       "type": "object",
+       "properties": {
+        "name": {
+         "type": "string",
+         "maxLength": 4000
+        },
+        "X": {
+         "type": "object",
+         "additionalProperties": {
+          "type": "number"
+         }
+        },
+        "ionization": {
+         "enum": [
+          "full",
+          "neutral"
+         ]
+        }
+       },
+       "additionalProperties": false
+      }
+     ],
+     "title": "Composition",
+     "description": "What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen"
+    },
+    "species": {
+     "anyOf": [
+      {
+       "enum": [
+        "aprox13"
+       ]
+      },
+      {
+       "type": "array",
+       "items": {
+        "type": "string",
+        "maxLength": 4000
+       },
+       "maxItems": 64
+      }
+     ],
+     "title": "Species",
+     "description": "Species whose mass fractions the gas carries, by name (he4, c12, ...), separated by commas; or aprox13 for the burning network’s thirteen. None by default"
+    },
+    "speciesGamma": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "number"
+     }
+    },
+    "burn": {
+     "anyOf": [
+      {
+       "type": "object",
+       "properties": {
+        "network": {
+         "enum": [
+          "aprox13"
+         ]
+        },
+        "inShocks": {
+         "type": "boolean"
+        },
+        "limiter": {
+         "type": "number"
+        }
+       },
+       "additionalProperties": false
+      },
+      {
+       "type": "object",
+       "properties": {
+        "fuel": {
+         "type": "string",
+         "maxLength": 4000
+        },
+        "ash": {
+         "type": "string",
+         "maxLength": 4000
+        },
+        "q": {
+         "type": "number"
+        },
+        "ea": {
+         "type": "number"
+        },
+        "k": {
+         "type": "number"
+        },
+        "inShocks": {
+         "type": "boolean"
+        }
+       },
+       "additionalProperties": false
+      }
+     ],
+     "title": "Burning",
+     "description": "Nuclear burning by the trained network of the 13-isotope alpha chain (aprox13), wherever the gas is hot and dense enough"
+    },
+    "toolScale": {
+     "type": "object",
+     "properties": {
+      "rho": {
+       "type": "number"
+      },
+      "v": {
+       "type": "number"
+      }
+     },
+     "additionalProperties": false
+    }
+   },
+   "additionalProperties": false
+  },
+  "mesh": {
+   "type": "object",
+   "properties": {
+    "refineHi": {
+     "type": "number",
+     "title": "Refine above",
+     "description": "Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more",
+     "minimum": 0.05,
+     "maximum": 1
+    },
+    "refineLo": {
+     "type": "number",
+     "title": "Merge below",
+     "description": "Adaptive mesh: four sibling blocks are merged where the indicator is below this in all of them. Kept below the refinement threshold",
+     "minimum": 0,
+     "maximum": 1
+    },
+    "refineMasses": {
+     "type": "boolean",
+     "title": "Refine around point masses",
+     "description": "Adaptive mesh: keep the gas around every point mass at the finest level, so that softening and sinks can be as small as the finest cells allow"
+    },
+    "refineDense": {
+     "type": "number",
+     "title": "Always refine above density",
+     "description": "Adaptive mesh: gas denser than this is always at the finest level, as the smooth interior of a star must be. 0 is off",
+     "minimum": 0
+    },
+    "refineRho": {
+     "type": "number",
+     "title": "Refine above density",
+     "description": "Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off",
+     "minimum": 0
+    },
+    "timeBins": {
+     "enum": [
+      0,
+      1,
+      2,
+      3
+     ],
+     "title": "Local timesteps",
+     "description": "Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work"
+    },
+    "jeansRefine": {
+     "type": "number",
+     "title": "Refine the Jeans length",
+     "description": "With self-gravity, refine where the Jeans length is under this many cells. 0 is off",
+     "minimum": 0,
+     "maximum": 64
+    }
+   },
+   "additionalProperties": false
+  },
+  "background": {
+   "type": "object",
+   "properties": {
+    "rho": {
+     "type": "number",
+     "title": "Ambient density",
+     "description": "Density of the gas that fills the box where no part puts anything else. With stars, the gas around them",
+     "minimum": 1e-300
+    },
+    "p": {
+     "type": "number",
+     "title": "Ambient pressure",
+     "description": "Pressure of that gas. With stars and left empty, the pressure of the stars’ outermost layer",
+     "minimum": 0
+    },
+    "v": {
+     "type": "array",
+     "items": {
+      "type": "number"
+     },
+     "minItems": 3,
+     "maxItems": 3,
+     "title": "Ambient velocity",
+     "description": "Velocity of that gas"
+    },
+    "s": {
+     "type": "number",
+     "title": "Ambient dye",
+     "description": "Passive scalar of that gas: a dye carried with it",
+     "minimum": 0,
+     "maximum": 1
+    },
+    "X": {
+     "type": "object",
+     "additionalProperties": {
+      "type": "number"
+     },
+     "title": "Ambient composition",
+     "description": "Mass fractions of that gas, by species name"
+    },
+    "cut": {
+     "type": "number",
+     "title": "Stars end at density",
+     "description": "With stars: a cell thinner than this is ambient gas, not star. Left empty, a polytrope ends where the ambient gas would be as hot as its center",
+     "minimum": 0
+    },
+    "relativeTo": {
+     "type": "string",
+     "maxLength": 4000
+    }
+   },
+   "additionalProperties": false
+  },
+  "run": {
+   "type": "object",
+   "properties": {
+    "tEnd": {
+     "anyOf": [
+      {
+       "type": "null"
+      },
+      {
+       "type": "number"
+      }
+     ],
+     "title": "End time",
+     "description": "The run pauses when it reaches this time. Empty runs on without end"
+    },
+    "checkpointDt": {
+     "type": "number",
+     "title": "Checkpoint every",
+     "description": "Time between checkpoints, when the page is asked to save them: the value the Time panel starts with",
+     "minimum": 0
+    },
+    "tDyn": {
+     "type": "number",
+     "title": "Dynamical time",
+     "description": "The time over which the flow visibly changes (a star’s sqrt(R³ / G M), a binary’s period): a movie takes a frame every 600th of it by default",
+     "minimum": 0
+    },
+    "startPaused": {
+     "type": "boolean",
+     "title": "Start paused",
+     "description": "The run waits, paused, for Run"
+    }
+   },
+   "additionalProperties": false
+  },
+  "view": {
+   "type": "object",
+   "properties": {
+    "field": {
+     "type": "integer",
+     "title": "Opening field",
+     "description": "The quantity shown when the setup opens (the View panel’s Field, by its number)",
+     "minimum": 0,
+     "maximum": 29
+    },
+    "log": {
+     "type": "boolean",
+     "title": "Logarithmic colors",
+     "description": "The color scale the setup opens with"
+    },
+    "mode": {
+     "enum": [
+      "volume",
+      "slice",
+      "projection"
+     ],
+     "title": "Opening view",
+     "description": "How the gas is drawn when the setup opens in 3D"
+    },
+    "axis": {
+     "enum": [
+      2,
+      1,
+      0
+     ],
+     "title": "Slice normal",
+     "description": "The axis the opening slice is perpendicular to (0 x, 1 y, 2 z)"
+    },
+    "pitch": {
+     "type": "number",
+     "title": "Camera elevation",
+     "description": "Elevation of the volume view’s camera when the setup opens, in radians",
+     "minimum": -1.5,
+     "maximum": 1.5
+    }
+   },
+   "additionalProperties": false
+  },
+  "featured": {
+   "type": "array",
+   "items": {
+    "anyOf": [
+     {
+      "type": "string",
+      "maxLength": 4000
+     },
+     {
+      "type": "object",
+      "properties": {
+       "path": {
+        "anyOf": [
+         {
+          "type": "string",
+          "maxLength": 4000
+         },
+         {
+          "type": "array",
+          "items": {
+           "type": "string",
+           "maxLength": 4000
+          },
+          "maxItems": 8
+         }
+        ]
+       },
+       "id": {
+        "type": "string",
+        "maxLength": 4000
+       },
+       "label": {
+        "type": "string",
+        "maxLength": 4000
+       },
+       "tip": {
+        "type": "string",
+        "maxLength": 4000
+       },
+       "min": {
+        "type": "number"
+       },
+       "max": {
+        "type": "number"
+       },
+       "step": {
+        "type": "number"
+       },
+       "factor": {
+        "type": "number"
+       },
+       "control": {
+        "enum": [
+         "number",
+         "slider",
+         "checkbox"
+        ]
+       },
+       "dims": {
+        "enum": [
+         2,
+         3
+        ]
+       },
+       "unit": {
+        "type": "object",
+        "properties": {
+         "label": {
+          "type": "string",
+          "maxLength": 4000
+         },
+         "times": {
+          "type": "string",
+          "maxLength": 4000
+         }
+        },
+        "additionalProperties": false
+       },
+       "unitChoices": {
+        "type": "array",
+        "items": {
+         "type": "object",
+         "properties": {
+          "label": {
+           "type": "string",
+           "maxLength": 4000
+          },
+          "value": {
+           "type": "number"
+          }
+         },
+         "additionalProperties": false
+        },
+        "maxItems": 16
+       }
+      },
+      "additionalProperties": false
+     }
+    ]
+   },
+   "maxItems": 32
+  },
+  "parts": {
+   "type": "array",
+   "maxItems": 256,
+   "items": {
+    "oneOf": [
+     {
+      "type": "object",
+      "title": "Point mass",
+      "properties": {
+       "kind": {
+        "const": "mass"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "gm": {
+        "type": "number",
+        "title": "G M",
+        "description": "Its mass times G, in code units",
+        "minimum": 0
+       },
+       "pos": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3,
+        "title": "Position",
+        "description": "Where it starts, relative to the box center"
+       },
+       "vel": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3,
+        "title": "Velocity",
+        "description": "How it moves at the start"
+       },
+       "soft": {
+        "type": "number",
+        "title": "Softening",
+        "description": "Plummer softening length of its gravity: at least two cells, and two cells if left empty. Changes take effect without a restart",
+        "minimum": 0
+       },
+       "sink": {
+        "type": "number",
+        "title": "Sink radius",
+        "description": "Radius within which it takes gas in: the softening length if left empty, 0 for none. Changes take effect without a restart",
+        "minimum": 0
+       },
+       "sinkRate": {
+        "type": "number",
+        "title": "Sink rate",
+        "description": "Removal rate at the sink’s center, in units of sqrt(G M / radius³)",
+        "minimum": 0
+       },
+       "massless": {
+        "type": "boolean",
+        "title": "Massless",
+        "description": "A particle without a mass of its own: it pulls on nothing and moves as the gas and the masses pull it"
+       },
+       "fixed": {
+        "type": "boolean",
+        "title": "Held in place",
+        "description": "Nothing moves it, whatever pulls on it or it takes in"
+       },
+       "onOrbit": {
+        "type": "boolean",
+        "title": "Hold on its orbit",
+        "description": "The other point masses move it; the gas does not: neither the gas’s pull nor what its sink takes changes its motion, and it does not grow. A binary with both masses held keeps the orbit it was given, as in most studies of circumbinary disks. What the sink takes is still counted. Changes take effect without a restart"
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Orbit",
+      "properties": {
+       "kind": {
+        "const": "orbit"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "of": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "maxLength": 4000
+        },
+        "maxItems": 2,
+        "title": "Bodies",
+        "description": "The two bodies it places: two point masses (binary), a star and a point mass (flyby), or two stars (collision)"
+       },
+       "type": {
+        "enum": [
+         "binary",
+         "flyby",
+         "collision"
+        ],
+        "title": "Kind of orbit",
+        "description": "Binary: two point masses about their center of mass, at pericenter. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass"
+       },
+       "q": {
+        "type": "number",
+        "title": "Mass ratio",
+        "description": "Mass of the second body over the first. It sets their masses: in a binary the total stays, in a flyby the star’s",
+        "minimum": 0.000001,
+        "maximum": 1000000000
+       },
+       "separation": {
+        "type": "number",
+        "title": "Separation",
+        "description": "Semi-major axis of the binary’s orbit",
+        "minimum": 0.000001
+       },
+       "ecc": {
+        "type": "number",
+        "title": "Eccentricity",
+        "description": "Eccentricity of the binary’s orbit",
+        "minimum": 0,
+        "maximum": 0.95
+       },
+       "incl": {
+        "type": "number",
+        "title": "Inclination (°)",
+        "description": "Tilt of the binary’s orbit about the line through pericenter, in degrees (3D): 180 is retrograde",
+        "minimum": 0,
+        "maximum": 180
+       },
+       "retrograde": {
+        "type": "boolean",
+        "title": "Retrograde",
+        "description": "In 2D: the binary orbits clockwise"
+       },
+       "beta": {
+        "type": "number",
+        "title": "Impact parameter β",
+        "description": "Tidal radius over pericenter distance: above 1 the mass passes inside the star’s tidal radius",
+        "minimum": 0.05,
+        "maximum": 20
+       },
+       "start": {
+        "type": "number",
+        "title": "Starts at (tidal radii)",
+        "description": "Separation at the start, in tidal radii (never inside 1.5 pericenters)",
+        "minimum": 1,
+        "maximum": 20
+       },
+       "impact": {
+        "type": "number",
+        "title": "Impact parameter",
+        "description": "Pericenter distance over the sum of the two radii: 0 is head-on, 1 just grazes",
+        "minimum": 0,
+        "maximum": 5
+       },
+       "starts": {
+        "type": "number",
+        "title": "Starts at (sums of radii)",
+        "description": "Separation at the start, in sums of the two radii (closer if they would not fit in the box)",
+        "minimum": 1.05,
+        "maximum": 20
+       },
+       "debris": {
+        "type": "boolean",
+        "title": "Debris energies",
+        "description": "Bin the star’s gas by its orbital energy about the mass, for the rate at which bound debris returns"
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Star",
+      "properties": {
+       "kind": {
+        "const": "star"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "type": {
+        "enum": [
+         "polytrope",
+         "white-dwarf"
+        ],
+        "title": "Kind of star",
+        "description": "A polytrope of index n, or a cold white dwarf held up by degenerate electrons"
+       },
+       "n": {
+        "type": "number",
+        "title": "Polytropic index n",
+        "description": "The star’s structure, p = K ρ^(1 + 1/n): the larger n, the more centrally concentrated. Stable against convection only if the gas’s adiabatic index is at least 1 + 1/n",
+        "minimum": 0.5,
+        "maximum": 4.5
+       },
+       "radius": {
+        "type": "number",
+        "title": "Radius",
+        "description": "A polytrope’s radius, in code units. A white dwarf’s follows from its mass",
+        "minimum": 1e-12
+       },
+       "mass": {
+        "type": "number",
+        "title": "Mass",
+        "description": "Its mass, in code units (solar masses for a white dwarf in its usual units)",
+        "minimum": 1e-12
+       },
+       "rhoc": {
+        "type": "number",
+        "title": "Central density",
+        "description": "Instead of the mass: a polytrope’s central density",
+        "minimum": 1e-300
+       },
+       "pos": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3,
+        "title": "Position",
+        "description": "Where it starts, relative to the box center"
+       },
+       "vel": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3,
+        "title": "Velocity",
+        "description": "How it moves at the start"
+       },
+       "dye": {
+        "type": "number",
+        "title": "Dye",
+        "description": "Passive scalar of its gas, which tells the stars apart: spread over (0, 1] by their order if left empty",
+        "minimum": 0,
+        "maximum": 1
+       },
+       "X": {
+        "type": "object",
+        "additionalProperties": {
+         "type": "number"
+        },
+        "title": "Composition",
+        "description": "Mass fractions of its gas, by species name (the ambient gas’s if left empty)"
+       },
+       "field": {
+        "type": "object",
+        "properties": {
+         "type": {
+          "enum": [
+           "dipole",
+           "random",
+           "gm17-dipole",
+           "gm17-random"
+          ],
+          "title": "Shape",
+          "description": "Dipole or random, by the plasma beta at the center; or Guillochon & McCourt’s, by β_M"
+         },
+         "beta": {
+          "type": "number",
+          "title": "Plasma beta",
+          "description": "Gas pressure over magnetic pressure B² / 2 at the center (or β_M): the larger, the weaker the field",
+          "minimum": 1,
+          "maximum": 1000000000000
+         },
+         "seed": {
+          "type": "number",
+          "title": "Random seed",
+          "description": "Which random field: each seed gives another",
+          "minimum": 1,
+          "maximum": 9999
+         }
+        },
+        "additionalProperties": false,
+        "title": "Magnetic field inside",
+        "description": "A field confined to the star: a dipole along z or a tangled Kolmogorov field, with plasma beta at the center; or the same as Guillochon & McCourt (2017) set them, by their β_M"
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Disk",
+      "properties": {
+       "kind": {
+        "const": "disk"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "about": {
+        "type": "array",
+        "items": {
+         "type": "string",
+         "maxLength": 4000
+        },
+        "maxItems": 32,
+        "title": "Orbits",
+        "description": "The point masses or stars it orbits: about several, their total mass. The disk is centered on their center of mass and moves with it. About a star, keep the inner radius outside 1.3 of the star’s radius: the star is settled within that"
+       },
+       "profile": {
+        "enum": [
+         "thin",
+         "balanced"
+        ],
+        "title": "Profile",
+        "description": "Thin: a surface density with a cavity and a Gaussian vertical profile, on circular orbits (the binary’s disk). Balanced: a midplane density in vertical balance with the softened potential, rotating as its pressure gradient asks (the magnetized disk); 3D only"
+       },
+       "radial": {
+        "type": "array",
+        "items": {
+         "type": "array",
+         "items": {
+          "type": "number"
+         },
+         "minItems": 2,
+         "maxItems": 2
+        },
+        "maxItems": 32
+       },
+       "vertical": {
+        "type": "array",
+        "items": {
+         "type": "array",
+         "items": {
+          "type": "number"
+         },
+         "minItems": 2,
+         "maxItems": 2
+        },
+        "maxItems": 32
+       },
+       "radialFn": {
+        "type": "string",
+        "maxLength": 4000,
+        "title": "Radial profile (formula)",
+        "description": "A density profile of your own in radius, as a formula of r: the surface density (thin) or the midplane density (balanced). It replaces the density scale’s law, the slope and the tapers. Example: sigma0 * (r / rIn)^-1 * exp(-(r / rOut)^2) * step(r - rIn). Names: r, rIn, rOut, sigma0, cs, H (the scale height cs / Ω at r), pi, e. Functions: exp, log, ln, log10, sqrt, abs, sin, cos, tan, atan, sinh, cosh, tanh, step, pow, min, max, clamp; powers as x^y. Where it is not a positive number there is no disk. A file may give a table of points instead (radial)"
+       },
+       "verticalFn": {
+        "type": "string",
+        "maxLength": 4000,
+        "title": "Vertical profile (formula)",
+        "description": "A density profile of your own in height, as a formula of z, the height above the midplane (the same on both sides), relative to the midplane: it replaces the Gaussian (thin) or the balance with the potential (balanced). Examples: exp(-z^2 / 2), 1 / cosh(z)^2, max(1 - z / 3, 0). Such a disk is in vertical balance only if the profile is, and settles as the run starts. 3D only. A file may give a table of points instead (vertical)"
+       },
+       "verticalIn": {
+        "enum": [
+         "H",
+         "length"
+        ],
+        "title": "Heights in",
+        "description": "The z of the vertical profile: in scale heights cs / Ω of each radius (the profile then flares with the disk), or in code lengths"
+       },
+       "rIn": {
+        "type": "number",
+        "title": "Inner radius",
+        "description": "Where the disk is tapered away toward the center (the cavity’s radius)",
+        "minimum": 0.000001
+       },
+       "rOut": {
+        "type": "number",
+        "title": "Outer radius",
+        "description": "Where the disk is tapered away outward",
+        "minimum": 0.000001
+       },
+       "sigma0": {
+        "type": "number",
+        "title": "Density scale",
+        "description": "Thin: the surface density. Balanced: the midplane density at r = 1",
+        "minimum": 1e-300
+       },
+       "slope": {
+        "type": "number",
+        "title": "Density slope",
+        "description": "Balanced: the midplane density goes as r to this power (-3/2 is a flat surface density)",
+        "minimum": -4,
+        "maximum": 2
+       },
+       "cs": {
+        "type": "number",
+        "title": "Sound speed",
+        "description": "Sound speed of the disk’s gas: its scale height is cs / Ω",
+        "minimum": 0.000001
+       },
+       "floor": {
+        "type": "number",
+        "title": "Gas outside the disk",
+        "description": "Thin: a fraction of the density scale. Balanced: the density of the ambient gas",
+        "minimum": 0
+       },
+       "damp": {
+        "type": "object",
+        "properties": {
+         "from": {
+          "type": "number",
+          "title": "Damping from r",
+          "description": "Radius from the box center where the damping zone starts",
+          "minimum": 0,
+          "maximum": 1e+30
+         },
+         "rate": {
+          "type": "number",
+          "title": "Damping rate",
+          "description": "How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off",
+          "minimum": 0,
+          "maximum": 1e+30
+         }
+        },
+        "additionalProperties": false,
+        "title": "Damping zone",
+        "description": "Beyond a radius the gas is relaxed toward the disk as it started, more strongly toward the box’s edge, so the outer disk is a reservoir and the boundaries see only it"
+       },
+       "loops": {
+        "type": "object",
+        "properties": {
+         "beta": {
+          "type": "number",
+          "title": "Plasma beta at the midplane",
+          "description": "Gas pressure over magnetic pressure where two loops meet: the larger, the weaker the field",
+          "minimum": 1,
+          "maximum": 1000000000
+         },
+         "span": {
+          "type": "number",
+          "title": "Span of a loop",
+          "description": "Each loop spans this factor in radius",
+          "minimum": 1.05,
+          "maximum": 4
+         },
+         "count": {
+          "type": "integer",
+          "title": "Loops",
+          "description": "How many loops, outward from the inner radius",
+          "minimum": 1,
+          "maximum": 16
+         }
+        },
+        "additionalProperties": false,
+        "title": "Field loops",
+        "description": "Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability (balanced profile)"
+       },
+       "stresses": {
+        "type": "boolean",
+        "title": "Disk diagnostics",
+        "description": "Report the disk’s stresses and MRI quality factors about the first point mass"
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Gas region",
+      "properties": {
+       "kind": {
+        "const": "region"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "shape": {
+        "type": "object",
+        "properties": {
+         "type": {
+          "enum": [
+           "sphere",
+           "box",
+           "half"
+          ],
+          "title": "Shape",
+          "description": "A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane"
+         },
+         "center": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Center",
+          "description": "Center of the sphere"
+         },
+         "radius": {
+          "type": "number",
+          "title": "Radius",
+          "description": "Radius of the sphere",
+          "minimum": 0
+         },
+         "radiusCells": {
+          "type": "number",
+          "title": "Radius in cells",
+          "description": "Instead of the radius: this many finest cells, whatever the resolution (a point explosion)",
+          "minimum": 0.5,
+          "maximum": 64
+         },
+         "min": {
+          "type": "array",
+          "items": {
+           "anyOf": [
+            {
+             "type": "null"
+            },
+            {
+             "type": "number"
+            }
+           ]
+          },
+          "maxItems": 3,
+          "title": "Lower corner",
+          "description": "Corner of the box nearest -x, -y, -z"
+         },
+         "max": {
+          "type": "array",
+          "items": {
+           "anyOf": [
+            {
+             "type": "null"
+            },
+            {
+             "type": "number"
+            }
+           ]
+          },
+          "maxItems": 3,
+          "title": "Upper corner",
+          "description": "Corner of the box nearest +x, +y, +z"
+         },
+         "normal": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Normal",
+          "description": "The plane’s normal: the shape is the side the normal points away from"
+         },
+         "at": {
+          "type": "number",
+          "title": "Plane at",
+          "description": "Distance of the plane from the box center, along its normal"
+         }
+        },
+        "additionalProperties": false
+       },
+       "rho": {
+        "type": "number",
+        "title": "Density",
+        "description": "Density inside the shape",
+        "minimum": 1e-300
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "description": "Pressure inside the shape",
+        "minimum": 0
+       },
+       "energy": {
+        "type": "number",
+        "title": "Total energy",
+        "description": "Instead of a pressure: this much energy in all, spread evenly over the sphere’s cells (a point explosion; per unit length in 2D)",
+        "minimum": 0
+       },
+       "v": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3,
+        "title": "Velocity",
+        "description": "Velocity inside the shape"
+       },
+       "s": {
+        "type": "number",
+        "title": "Dye",
+        "description": "Passive scalar inside the shape",
+        "minimum": 0,
+        "maximum": 1
+       },
+       "X": {
+        "type": "object",
+        "additionalProperties": {
+         "type": "number"
+        },
+        "title": "Composition",
+        "description": "Mass fractions inside the shape, by species name"
+       },
+       "supersample": {
+        "type": "integer",
+        "title": "Smooth edge (samples)",
+        "description": "A sphere’s edge cells take the share of their volume inside it, from this many samples a side. Empty: a sharp edge",
+        "minimum": 2,
+        "maximum": 8
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Obstacle",
+      "properties": {
+       "kind": {
+        "const": "obstacle"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "shape": {
+        "type": "object",
+        "properties": {
+         "type": {
+          "enum": [
+           "sphere",
+           "box",
+           "half"
+          ],
+          "title": "Shape",
+          "description": "A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane"
+         },
+         "center": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Center",
+          "description": "Center of the sphere"
+         },
+         "radius": {
+          "type": "number",
+          "title": "Radius",
+          "description": "Radius of the sphere",
+          "minimum": 0
+         },
+         "radiusCells": {
+          "type": "number",
+          "title": "Radius in cells",
+          "description": "Instead of the radius: this many finest cells, whatever the resolution (a point explosion)",
+          "minimum": 0.5,
+          "maximum": 64
+         },
+         "min": {
+          "type": "array",
+          "items": {
+           "anyOf": [
+            {
+             "type": "null"
+            },
+            {
+             "type": "number"
+            }
+           ]
+          },
+          "maxItems": 3,
+          "title": "Lower corner",
+          "description": "Corner of the box nearest -x, -y, -z"
+         },
+         "max": {
+          "type": "array",
+          "items": {
+           "anyOf": [
+            {
+             "type": "null"
+            },
+            {
+             "type": "number"
+            }
+           ]
+          },
+          "maxItems": 3,
+          "title": "Upper corner",
+          "description": "Corner of the box nearest +x, +y, +z"
+         },
+         "normal": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Normal",
+          "description": "The plane’s normal: the shape is the side the normal points away from"
+         },
+         "at": {
+          "type": "number",
+          "title": "Plane at",
+          "description": "Distance of the plane from the box center, along its normal"
+         }
+        },
+        "additionalProperties": false
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Inflow",
+      "properties": {
+       "kind": {
+        "const": "inflow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "shape": {
+        "type": "object",
+        "properties": {
+         "type": {
+          "enum": [
+           "sphere",
+           "box",
+           "half"
+          ],
+          "title": "Shape",
+          "description": "A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane"
+         },
+         "center": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Center",
+          "description": "Center of the sphere"
+         },
+         "radius": {
+          "type": "number",
+          "title": "Radius",
+          "description": "Radius of the sphere",
+          "minimum": 0
+         },
+         "radiusCells": {
+          "type": "number",
+          "title": "Radius in cells",
+          "description": "Instead of the radius: this many finest cells, whatever the resolution (a point explosion)",
+          "minimum": 0.5,
+          "maximum": 64
+         },
+         "min": {
+          "type": "array",
+          "items": {
+           "anyOf": [
+            {
+             "type": "null"
+            },
+            {
+             "type": "number"
+            }
+           ]
+          },
+          "maxItems": 3,
+          "title": "Lower corner",
+          "description": "Corner of the box nearest -x, -y, -z"
+         },
+         "max": {
+          "type": "array",
+          "items": {
+           "anyOf": [
+            {
+             "type": "null"
+            },
+            {
+             "type": "number"
+            }
+           ]
+          },
+          "maxItems": 3,
+          "title": "Upper corner",
+          "description": "Corner of the box nearest +x, +y, +z"
+         },
+         "normal": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Normal",
+          "description": "The plane’s normal: the shape is the side the normal points away from"
+         },
+         "at": {
+          "type": "number",
+          "title": "Plane at",
+          "description": "Distance of the plane from the box center, along its normal"
+         }
+        },
+        "additionalProperties": false
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Uniform magnetic field",
+      "properties": {
+       "kind": {
+        "const": "field"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "b": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3,
+        "title": "Field",
+        "description": "The field’s vector"
+       },
+       "up": {
+        "type": "number",
+        "title": "Strength, upward",
+        "description": "Instead of a vector: a strength along the axis drawn upward (y in 2D, z in 3D)"
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
+      "title": "Flow: Advected Gaussian blob",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "advection"
+       },
+       "rho0": {
+        "type": "number",
+        "title": "Density around the blob",
+        "default": 1.5,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "amp": {
+        "type": "number",
+        "title": "Blob height",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 1000000
+       },
+       "width": {
+        "type": "number",
+        "title": "Blob width",
+        "default": 0.1,
+        "minimum": 0.01,
+        "maximum": 1
+       },
+       "vx": {
+        "type": "number",
+        "title": "Velocity x",
+        "default": 1,
+        "minimum": -100,
+        "maximum": 100
+       },
+       "vy": {
+        "type": "number",
+        "title": "Velocity y",
+        "default": 0.5,
+        "minimum": -100,
+        "maximum": 100
+       },
+       "vz": {
+        "type": "number",
+        "title": "Velocity z",
+        "default": 0.25,
+        "minimum": -100,
+        "maximum": 100
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A Gaussian density blob at the center, carried by a uniform flow at a uniform pressure. The passive scalar follows the blob. On a periodic box it tests conservation."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Carbon–oxygen fuel with an ignition layer",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "co-ignition"
+       },
+       "logrho": {
+        "type": "number",
+        "title": "Density (log₁₀ g/cm³)",
+        "default": 7,
+        "minimum": 6,
+        "maximum": 9.5
+       },
+       "carbon": {
+        "type": "number",
+        "title": "Carbon fraction",
+        "default": 0.5,
+        "minimum": 0.2,
+        "maximum": 0.8
+       },
+       "tfuel": {
+        "type": "number",
+        "title": "Fuel temperature (10⁸ K)",
+        "default": 0.5,
+        "minimum": 0.1,
+        "maximum": 5
+       },
+       "tign": {
+        "type": "number",
+        "title": "Ignition temperature (10⁹ K)",
+        "default": 4,
+        "minimum": 2,
+        "maximum": 8
+       },
+       "width": {
+        "type": "number",
+        "title": "Ignition layer (km)",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 200
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Carbon and oxygen at rest at one density, with a hot layer at the low-x edge of the box that sets it alight. Needs physical units, an equation of state with a temperature (Helmholtz) and the species of the aprox13 network."
+     },
+     {
+      "type": "object",
+      "title": "Flow: ZND detonation",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "znd-detonation"
+       },
+       "ea": {
+        "type": "number",
+        "title": "Activation temperature Ea",
+        "default": 25,
+        "minimum": 5,
+        "maximum": 50
+       },
+       "overdrive": {
+        "type": "number",
+        "title": "Overdrive (D / D_CJ)²",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 2
+       },
+       "shockburn": {
+        "type": "boolean",
+        "title": "Burn inside shocks",
+        "default": true
+       },
+       "frontFrame": {
+        "type": "boolean",
+        "title": "Frame of the front",
+        "default": false
+       },
+       "pocket": {
+        "type": "boolean",
+        "title": "Pocket of unburned gas",
+        "default": false
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The steady (ZND) detonation of the single-step Arrhenius model, moving toward +x into fuel of density 1 and pressure 1 (for gamma = 1.2; heat release 50), with its burning. Lengths are half-reaction lengths. Needs the species fuel and ash."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Evrard sphere",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "evrard"
+       },
+       "mass": {
+        "type": "number",
+        "title": "Mass",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "radius": {
+        "type": "number",
+        "title": "Radius",
+        "default": 1,
+        "minimum": 0.05,
+        "maximum": 1000
+       },
+       "u": {
+        "type": "number",
+        "title": "Specific internal energy",
+        "default": 0.05,
+        "minimum": 0,
+        "maximum": 100
+       },
+       "rhoAmb": {
+        "type": "number",
+        "title": "Density outside",
+        "default": 0.0001,
+        "minimum": 1e-12,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A cold gas sphere whose density falls as 1/r, rho = M / (2 pi R^2 r), in thin gas at the same specific internal energy (for gamma = 5/3). With G = M = R = 1 it collapses in about a unit of time."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Helium shell with a hot spot",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "helium-shell-ignition"
+       },
+       "mhe": {
+        "type": "number",
+        "title": "Helium shell (M☉)",
+        "default": 0.05,
+        "minimum": 0.005,
+        "maximum": 0.15
+       },
+       "tign": {
+        "type": "number",
+        "title": "Ignition temperature (10⁹ K)",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 6
+       },
+       "spot": {
+        "type": "number",
+        "title": "Hot spot radius (km)",
+        "default": 300,
+        "minimum": 50,
+        "maximum": 1000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Turns the outermost mass of the first star into helium over a carbon-oxygen core and heats a spot at the base of that shell, on the +z axis. Needs the 13 species of the burning network, the tabulated equation of state and physical units."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Turbulent velocity field",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "isothermal-collapse"
+       },
+       "rho": {
+        "type": "number",
+        "title": "Density",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.01,
+        "minimum": 1e-12,
+        "maximum": 1000000
+       },
+       "vrms": {
+        "type": "number",
+        "title": "Rms speed",
+        "default": 0.5,
+        "minimum": 0,
+        "maximum": 100
+       },
+       "modes": {
+        "type": "number",
+        "title": "Velocity modes",
+        "default": 12,
+        "minimum": 1,
+        "maximum": 64
+       },
+       "seed": {
+        "type": "number",
+        "title": "Random seed",
+        "default": 12345,
+        "minimum": 1,
+        "maximum": 4294967295
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Uniform gas in a unit periodic box, stirred by a few long-wavelength velocity modes with random directions and phases. With the preset’s isothermal gas (sound speed 0.1) the default speed is Mach 5."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Jeans-unstable wave",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "jeans"
+       },
+       "amp": {
+        "type": "number",
+        "title": "Amplitude",
+        "default": 0.001,
+        "minimum": 0.000001,
+        "maximum": 0.5
+       },
+       "modes": {
+        "type": "number",
+        "title": "Wavelengths across",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 32
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A small adiabatic density wave along x about density 1 and sound speed 1. With one wavelength across a unit box and G = 2 pi it grows at the rate 2 pi; a shorter wave grows more slowly, or oscillates as sound once k^2 passes 4 pi G."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Kelvin-Helmholtz shear layer",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "kelvin-helmholtz"
+       },
+       "helium": {
+        "type": "boolean",
+        "title": "Helium slab in hydrogen",
+        "default": false
+       },
+       "rhoIn": {
+        "type": "number",
+        "title": "Slab density",
+        "default": 2,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "rhoOut": {
+        "type": "number",
+        "title": "Density outside",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "shear": {
+        "type": "number",
+        "title": "Shear speed",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 100
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 2.5,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "width": {
+        "type": "number",
+        "title": "Slab thickness",
+        "default": 0.5,
+        "minimum": 0.05,
+        "maximum": 0.9
+       },
+       "amp": {
+        "type": "number",
+        "title": "Kick amplitude",
+        "default": 0.1,
+        "minimum": 0,
+        "maximum": 1
+       },
+       "modes": {
+        "type": "number",
+        "title": "Wavelengths across",
+        "default": 2,
+        "minimum": 1,
+        "maximum": 32
+       },
+       "sigma": {
+        "type": "number",
+        "title": "Kick width",
+        "default": 0.035,
+        "minimum": 0.005,
+        "maximum": 0.2
+       },
+       "zmod": {
+        "type": "number",
+        "title": "Variation along z",
+        "default": 0.2,
+        "minimum": 0,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A dense slab across the middle of the box (in y), sliding through lighter gas at one pressure, with one seeded mode at its two edges. With helium, the slab is helium in hydrogen (species he4 and h1, which then set the equation of state), denser by the ratio of their mean molecular weights."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Orszag-Tang vortex",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "orszag-tang"
+       },
+       "v0": {
+        "type": "number",
+        "title": "Velocity amplitude",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 100
+       },
+       "b0": {
+        "type": "number",
+        "title": "Field amplitude",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The Orszag-Tang vortex on a periodic unit box (for gamma = 5/3): uniform gas of density 25 / 36 pi and pressure 5 / 12 pi (sound speed 1) with a velocity vortex and a field of twice its wavenumber in x."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Rotor",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "mhd-rotor"
+       },
+       "rho": {
+        "type": "number",
+        "title": "Disk density",
+        "default": 10,
+        "minimum": 1,
+        "maximum": 10000
+       },
+       "v0": {
+        "type": "number",
+        "title": "Rim speed",
+        "default": 2,
+        "minimum": 0,
+        "maximum": 100
+       },
+       "r0": {
+        "type": "number",
+        "title": "Disk radius",
+        "default": 0.1,
+        "minimum": 0.01,
+        "maximum": 0.45
+       },
+       "r1": {
+        "type": "number",
+        "title": "Outer radius of the ring",
+        "default": 0.115,
+        "minimum": 0.011,
+        "maximum": 0.5
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A dense disk spinning rigidly in gas of density 1 at rest, at one pressure, with a ring around it where density and speed taper (Balsara & Spicer 1999). The field is a part of its own."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Brio-Wu shock tube",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "brio-wu"
+       },
+       "rhoL": {
+        "type": "number",
+        "title": "Density, left",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "pL": {
+        "type": "number",
+        "title": "Pressure, left",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "rhoR": {
+        "type": "number",
+        "title": "Density, right",
+        "default": 0.125,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "pR": {
+        "type": "number",
+        "title": "Pressure, right",
+        "default": 0.1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "bx": {
+        "type": "number",
+        "title": "Field along the tube",
+        "default": 0.75,
+        "minimum": -100,
+        "maximum": 100
+       },
+       "by": {
+        "type": "number",
+        "title": "Field across the tube",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The MHD shock tube of Brio & Wu (1988) along x (for gamma = 2): gas at rest in two states either side of a membrane at the center, a field B_x throughout and B_y reversing across the membrane."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Field loop advection",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "field-loop"
+       },
+       "dense": {
+        "type": "boolean",
+        "title": "Dense loop",
+        "default": false
+       },
+       "rhoIn": {
+        "type": "number",
+        "title": "Density of a dense loop",
+        "default": 2,
+        "minimum": 1,
+        "maximum": 1000
+       },
+       "radius": {
+        "type": "number",
+        "title": "Loop radius",
+        "default": 0.3,
+        "minimum": 0.02,
+        "maximum": 0.5
+       },
+       "a0": {
+        "type": "number",
+        "title": "Field strength",
+        "default": 0.001,
+        "minimum": 0,
+        "maximum": 10
+       },
+       "vx": {
+        "type": "number",
+        "title": "Velocity x",
+        "default": 2,
+        "minimum": -100,
+        "maximum": 100
+       },
+       "vy": {
+        "type": "number",
+        "title": "Velocity y",
+        "default": 1,
+        "minimum": -100,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A weak loop of magnetic field, A_z = A0 (R - r) inside radius R, in gas of density 1 and pressure 1 carried by a uniform flow: at (2, 1) on a periodic unit box it is back where it started at t = 1 (Gardiner & Stone 2005)."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Circularly polarized Alfven wave",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "alfven-wave"
+       },
+       "amp": {
+        "type": "number",
+        "title": "Amplitude",
+        "default": 0.1,
+        "minimum": 0,
+        "maximum": 2
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A circularly polarized Alfven wave along the diagonal of the x-y plane of a periodic unit box: density 1, a field of 1 along the wave, and a perpendicular field and velocity that turn about it (Toth 2000). It returns to its start after each period, 1 / sqrt(2)."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Rayleigh-Taylor layers",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "rayleigh-taylor"
+       },
+       "rhoTop": {
+        "type": "number",
+        "title": "Density above",
+        "default": 2,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "rhoBottom": {
+        "type": "number",
+        "title": "Density below",
+        "default": 1,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "p0": {
+        "type": "number",
+        "title": "Pressure at the interface",
+        "default": 2.5,
+        "minimum": 0.000001,
+        "maximum": 1000000
+       },
+       "amp": {
+        "type": "number",
+        "title": "Kick amplitude",
+        "default": 0.05,
+        "minimum": 0,
+        "maximum": 1
+       },
+       "modes": {
+        "type": "number",
+        "title": "Wavelengths across",
+        "default": 2,
+        "minimum": 1,
+        "maximum": 32
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Heavy gas over light gas in a unit box, in hydrostatic balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), with one seeded mode that vanishes at the walls. Up is y in 2D and z in 3D."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Shock hitting a helium bubble",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "shock-bubble"
+       },
+       "mach": {
+        "type": "number",
+        "title": "Shock Mach number",
+        "default": 1.22,
+        "minimum": 1.01,
+        "maximum": 5
+       },
+       "xhe": {
+        "type": "number",
+        "title": "Helium in the bubble",
+        "default": 0.72,
+        "minimum": 0,
+        "maximum": 1
+       },
+       "radius": {
+        "type": "number",
+        "title": "Bubble radius",
+        "default": 0.15,
+        "minimum": 0.05,
+        "maximum": 0.2
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A planar shock in air (density 1, pressure 1, gamma 1.4) running toward +x into a bubble of helium at the same pressure and temperature, after Haas & Sturtevant (1987). Needs the species he4 and air, in that order, each with its own gamma."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Gas in unstable thermal balance",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "thermal-instability"
+       },
+       "n0": {
+        "type": "number",
+        "title": "Mean density (cm⁻³)",
+        "default": 2,
+        "minimum": 1,
+        "maximum": 8
+       },
+       "amp": {
+        "type": "number",
+        "title": "Perturbation",
+        "default": 0.02,
+        "minimum": 0.001,
+        "maximum": 0.3
+       },
+       "kMax": {
+        "type": "number",
+        "title": "Smallest wavelength",
+        "default": 8,
+        "minimum": 1,
+        "maximum": 64
+       },
+       "seed": {
+        "type": "number",
+        "title": "Random seed",
+        "default": 20021,
+        "minimum": 1,
+        "maximum": 4294967295
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Uniform gas at the temperature where interstellar cooling balances heating on the unstable branch, with small random density perturbations at one pressure. Density in atoms per cm^3, temperature in units of 1000 K: needs the interstellar cooling, in those units."
+     }
+    ]
+   }
+  }
+ }
+}

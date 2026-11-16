@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { fillGenerated } from '../../src/schema/docs';
 import { schemaText } from '../../src/schema/schema';
+import { setupJsonSchema } from '../../src/setup/codec';
 
 // Node's own modules, without their type package (the project does not install it).
 const fs: { readFileSync(u: URL, enc: string): string; writeFileSync(u: URL, text: string): void; existsSync(u: URL): boolean } = await import(/* @vite-ignore */ 'node:fs' as string);
@@ -15,6 +16,7 @@ const lf = (text: string) => text.replace(/\r\n/g, '\n');
 const FILES: Record<string, (now: string) => string> = {
   'tools/headless/schema.json': () => schemaText(),
   'docs/api.md': fillGenerated,
+  'public/shaderous-setup.schema.json': () => `${JSON.stringify(setupJsonSchema(), null, 1)}\n`,
 };
 
 describe('generated files', () => {
