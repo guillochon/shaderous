@@ -31,6 +31,11 @@ Sensitivity (paired, unit B shut at short steps): T cut 4.3e9, Si/S 1.028, hot C
 C/O 0.419 (+0.088 [+0.001, +0.131]), sum -0.66. Unit B at alpha 2.0 (4.5e9): Si/S 0.848, hot
 C/O flat (40% of its trajectories worse), test general p50 at 1 s 7.6e-4. So the cut is what
 keeps hot C/O ash out of the Si/S unit; 4.3-4.5e9 K and alpha 1.5 are the usable range.
+
+Other rollout steps (paired.py with PAIRED_DT, the best edit against 35b): at 3 ms, Si/S p90
+1.210 -> 0.726, general p99 0.468 -> 0.451, hot C/O 0.199 -> 0.221, sum of p90 -0.45 [-0.63,
+-0.27]; at 0.3 ms, Si/S 1.713 -> 1.404 (median 0.343 -> 0.206), hot C/O 0.684 -> 0.535,
+general flat, sum -0.46 [-0.65, -0.29]. The gain holds across the steps the simulator takes.
 """
 import os
 import sys
