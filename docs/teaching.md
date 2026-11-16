@@ -46,7 +46,8 @@ loaded once instead of at every change. A bare visit opens Kelvin-Helmholtz at $
 **Interacting.** Brushes add mass, velocity or heat; the obstacle tool draws walls; the star
 tool drops a polytropic star into a 3D box; the sink tool places point masses, and while one is
 dragged out it draws the orbit the mass would take in the gas as it is. The query tool
-shows the full state of the cell under the pointer. The view can switch between a 3D volume
+shows the full state of the cell under the pointer, and of a source, sink or point mass there; a
+click pins the readout to that one, or to a massless tracer let go at the spot. The view can switch between a 3D volume
 rendering and a slice, and between about twenty fields (density, temperature, Mach number,
 vorticity, entropy, potential, Jeans length, refinement level and more).
 

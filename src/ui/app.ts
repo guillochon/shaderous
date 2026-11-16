@@ -414,22 +414,23 @@ TOOLS.push({
 });
 TOOLS.push({
   kind: 'query', label: 'Query',
-  title: 'Query: hover over the gas to see the cell under the pointer: its state and, on an adaptive mesh, its block. Dragging moves the view',
+  title: 'Query: hover over the gas to see the cell under the pointer (its state and, on an adaptive mesh, its block), or over a source, a sink or a point mass to see that too. Click to pin the readout: on a source or sink it follows that one; anywhere else it follows a massless tracer let go there. Dragging moves the view',
   icon: icon('<circle cx="6.8" cy="6.8" r="4.3" /><path d="M10 10l4.5 4.5" /><path d="M6.8 4.9v.01M6.8 6.6v2.6" />'),
 });
 /**
  * The point masses the tools have placed in this run, in the order they were added: the last
  * of the run's masses (the simulation holds MAX_MASSES in all). A sink is one; a source that
- * moves rides one.
+ * moves rides one; a query pinned to a spot follows one (a massless tracer).
  */
-let placed: ('sink' | 'source')[] = [];
+type Placed = 'sink' | 'source' | 'query';
+let placed: Placed[] = [];
 /** The place among the run's masses of the i-th one the tools placed. */
 const placedIndex = (i: number) => (sim?.massCount ?? 0) - placed.length + i;
 /**
  * Take the placed masses for which `gone` holds out of the run, and with them the sources that
  * rode them; the sources riding the masses that stay follow those to their new places.
  */
-function removePlaced(gone: (kind: 'sink' | 'source', index: number) => boolean) {
+function removePlaced(gone: (kind: Placed, index: number) => boolean) {
   if (!sim) return;
   const out = placed.map((k, i) => (gone(k, placedIndex(i)) ? placedIndex(i) : -1)).filter((i) => i >= 0);
   if (!out.length) return;
@@ -439,6 +440,12 @@ function removePlaced(gone: (kind: 'sink' | 'source', index: number) => boolean)
     .filter((q) => q.carrier === undefined || !out.includes(q.carrier))
     .map((q) => (q.carrier === undefined ? q : { ...q, carrier: q.carrier - out.filter((i) => i < q.carrier!).length }));
   sim.setSources(sources);
+  // A pinned query goes with its mass, or follows it to its new place.
+  if (pin && 'mass' in pin) {
+    const at = pin.mass;
+    if (out.includes(at)) dropPin();
+    else pin.mass = at - out.filter((i) => i < at).length;
+  }
   lastDiag = undefined;
   liveMasses = null;
 }
@@ -798,9 +805,10 @@ $('tool-rest').addEventListener('click', () => {
   syncTools();
 });
 window.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || !tool) return;
-  // Esc first drops a shape that is being drawn, then puts the tool away.
+  if (e.key !== 'Escape' || (!tool && !pin)) return;
+  // Esc first drops a shape that is being drawn, then a pinned readout, then puts the tool away.
   if (draft) draft = null;
+  else if (pin) unpin();
   else tool = null;
   syncTools();
 });
@@ -918,6 +926,9 @@ const ckpt = {
   written: 0,
   error: '',
 };
+
+/** Where the query tool was pressed, until it is let go (a click pins the readout). */
+let queryPress: { x: number; y: number } | null = null;
 
 /** A press of an editing tool, from pointer down until its last edit has been handed to the GPU. */
 interface Stroke {
@@ -2246,9 +2257,13 @@ function bind() {
       endStroke(false);
     }
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    // A press of the query tool that is let go where it began is a click: it pins the readout.
+    queryPress = tool === 'query' && e.button === 0 && pointers.size === 1 ? { x: e.clientX, y: e.clientY } : null;
   });
   const release = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
+    if (queryPress && tool === 'query' && e.type === 'pointerup' && Math.hypot(e.clientX - queryPress.x, e.clientY - queryPress.y) < 5) void pinAt(e.clientX, e.clientY);
+    queryPress = null;
     if (draft && draft.id === e.pointerId) {
       // A rectangle or ellipse is finished by letting go.
       if (e.type === 'pointerup') commitDraft();
@@ -2416,21 +2431,116 @@ function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3
 }
 
 // --- query tool ---------------------------------------------------------------------------
-// While it is in hand, the cell under the pointer is read back and shown beside it. One read is
-// in flight at a time: the latest position is read next, and a running simulation is read again
-// every 150 ms while the pointer rests.
+// While it is in hand, the cell under the pointer is read back and shown beside it, with the
+// source, sink or point mass under the pointer if there is one. One read is in flight at a
+// time: the latest position is read next, and a running simulation is read again every 150 ms
+// while the pointer rests.
+//
+// A click pins the readout. On a source, a sink or a point mass it then follows that one;
+// anywhere else a massless tracer is let go at the spot (a point mass with a token mass, no
+// sink: it goes where gravity takes it) and the readout follows the tracer. A pinned readout
+// stays, whatever tool is in hand, until it is unpinned or what it follows is removed.
 const cellPop = $('cell-pop');
 let queryPoint: { x: number; y: number } | null = null;
 let queryBusy = false;
 
+/** What a query can be about besides the gas: one of the run's point masses, or a source that stays put. */
+type Thing = { mass: number } | { source: SourceSpec };
+/** A pinned query: what it follows, and whether that is a tracer the pin itself let go. */
+let pin: (Thing & { own?: boolean }) | null = null;
+/** The gas where the pinned thing is, as last read, when that was asked for, and whether a read is in flight. */
+let pinCell: CellProbe | null = null;
+let pinAsked = 0;
+let pinBusy = false;
+
 function queryAt(clientX: number, clientY: number) {
+  if (pin) return; // a pinned readout stays where it is
   queryPoint = { x: clientX, y: clientY };
   if (!queryBusy) void runQuery();
 }
 
 function hideCellPop() {
   queryPoint = null;
+  if (!pin) cellPop.hidden = true;
+}
+
+/** Let the pin go, without removing what it followed. */
+function dropPin() {
+  pin = null;
+  pinCell = null;
+  cellPop.classList.remove('pinned');
   cellPop.hidden = true;
+}
+
+/** Unpin the readout: a tracer the pin let go is taken out of the run with it. */
+function unpin() {
+  const was = pin;
+  dropPin();
+  if (was && 'mass' in was && was.own) removePlaced((_, index) => index === was.mass);
+}
+
+/** Whether the pinned thing can be removed: a source, or a mass the tools placed (not the preset's own). */
+const pinRemovable = () => !!pin && ('source' in pin || pin.mass >= (sim?.massCount ?? 0) - placed.length);
+
+/** Remove what the readout is pinned to: the sink, the source (with the particle it rides) or the tracer. */
+function removePinned() {
+  const was = pin;
+  if (!was || !sim || !pinRemovable()) return;
+  dropPin();
+  if ('mass' in was) removePlaced((_, index) => index === was.mass);
+  else {
+    sources = sources.filter((q) => q !== was.source);
+    sim.setSources(sources);
+  }
+  syncTools();
+}
+
+/** Where a thing is now, in fractions of the box; null for a mass not read back yet. */
+function thingPos(t: Thing): number[] | null {
+  if ('source' in t) return t.source.pos;
+  const m = massesNow()[t.mass];
+  return m ? m.pos.map((v) => v / cfg.problem.box + 0.5) : null;
+}
+
+/** The source, sink or point mass drawn within a few pixels of a point of the canvas, nearest first. */
+function thingAt(px: number, py: number): Thing | null {
+  if (!cfg) return null;
+  const at = projector();
+  const things: Thing[] = [...massesNow().map((_, i) => ({ mass: i })), ...sources.filter((q) => q.carrier === undefined).map((q) => ({ source: q }))];
+  let best: Thing | null = null;
+  let least = 10;
+  for (const t of things) {
+    const f = thingPos(t);
+    if (!f) continue;
+    const c = at(f);
+    const d = Math.hypot(c.x - px, c.y - py);
+    if (c.w > 0 && d < least) [best, least] = [t, d];
+  }
+  return best;
+}
+
+/** The point of the box under a point of the canvas (in the volume view, the gas seen there), or null. */
+async function boxPointAt(px: number, py: number): Promise<Vec3 | null> {
+  let depth = view.dist;
+  if (!flatView()) {
+    // Volume view: the gas that is seen under the pointer.
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const [ux, uy] = [(2 * px) / w - 1, 1 - (2 * py) / h];
+    const t = await renderer.pick(ux, uy);
+    if (t === null) return null;
+    const f = cameraFrame(view, w / h);
+    depth = t / Math.hypot(1, ux * (w / h) * f.tan, uy * f.tan);
+  }
+  const f = locate(px, py, depth).pos;
+  if (cfg.ndim === 2) f[2] = 0;
+  return f.some((v) => v < 0 || v >= 1) ? null : f;
+}
+
+/** The cell of the gas at a point of the box (in fractions of it), or null outside the box. */
+async function probeAt(s: Simulation, f: number[]): Promise<CellProbe | null> {
+  const g = [f[0], f[1], cfg.ndim === 2 ? 0 : f[2]] as [number, number, number];
+  return g.some((v) => !(v >= 0 && v < 1)) ? null : s.probe(g);
 }
 
 async function runQuery() {
@@ -2442,32 +2552,15 @@ async function runQuery() {
     const r = canvas.getBoundingClientRect();
     const px = q.x - r.left;
     const py = q.y - r.top;
-    let depth = view.dist;
-    if (!flatView()) {
-      // Volume view: the gas that is seen under the pointer.
-      const w = canvas.clientWidth;
-      const h = canvas.clientHeight;
-      const [ux, uy] = [(2 * px) / w - 1, 1 - (2 * py) / h];
-      const t = await renderer.pick(ux, uy);
-      if (t === null) {
-        cellPop.hidden = true;
-        return;
-      }
-      const f = cameraFrame(view, w / h);
-      depth = t / Math.hypot(1, ux * (w / h) * f.tan, uy * f.tan);
-    }
-    const f = locate(px, py, depth).pos;
-    if (cfg.ndim === 2) f[2] = 0;
-    if (f.some((v) => v < 0 || v >= 1)) {
-      cellPop.hidden = true;
-      return;
-    }
-    const c = await s.probe(f);
-    if (s !== sim || !queryPoint || tool !== 'query') return;
-    if (!c) cellPop.hidden = true;
-    else showCell(c, queryPoint.x, queryPoint.y);
+    // A source, sink or point mass under the pointer is shown with the gas where it is.
+    const thing = thingAt(px, py);
+    const f = thing ? thingPos(thing) : await boxPointAt(px, py);
+    const c = f ? await probeAt(s, f) : null;
+    if (s !== sim || !queryPoint || tool !== 'query' || pin) return;
+    if (!c && !thing) cellPop.hidden = true;
+    else showQuery(thing, c, queryPoint.x, queryPoint.y);
   } catch {
-    cellPop.hidden = true;
+    if (!pin) cellPop.hidden = true;
   } finally {
     queryBusy = false;
     if (queryPoint && queryPoint !== q) void runQuery();
@@ -2479,47 +2572,130 @@ async function runQuery() {
   }
 }
 
-function showCell(c: CellProbe, x: number, y: number) {
+/** A click with the query tool: pin the readout to what is there, or to a tracer let go there. */
+async function pinAt(clientX: number, clientY: number) {
+  const s = sim;
+  if (!s || building) return;
+  const r = canvas.getBoundingClientRect();
+  const [px, py] = [clientX - r.left, clientY - r.top];
+  unpin();
+  let to: (Thing & { own?: boolean }) | null = thingAt(px, py);
+  if (!to) {
+    const f = await boxPointAt(px, py);
+    if (!f || s !== sim) return;
+    // A tracer, at rest: softened over two cells, so that a mass it passes does not fling it.
+    const ok = s.addMass(carrierSpec(f, [0, 0, 0], 2 / cfg.n));
+    notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks, moving sources, tracers and point masses`);
+    if (!ok) return;
+    placed.push('query');
+    to = { mass: s.massCount - 1, own: true };
+    lastDiag = undefined;
+    syncControls();
+  }
+  queryPoint = null;
+  pin = to;
+  pinCell = null;
+  pinAsked = 0;
+  cellPop.classList.add('pinned');
+}
+
+/** Keep a pinned readout with what it follows: beside it on the screen, and read again as the run goes on. Called once per frame. */
+function updatePin(now: number) {
+  const s = sim;
+  if (!pin || !s || !cfg) return;
+  // A source that was pinned may have been cleared away by its tool.
+  if ('source' in pin && !sources.includes(pin.source)) return dropPin();
+  const f = thingPos(pin);
+  if (!f) {
+    // A mass not read back yet (just placed); one that has left the run for good is let go.
+    if ('mass' in pin && lastDiag && pin.mass >= s.massCount) dropPin();
+    return;
+  }
+  if (!pinBusy && now - pinAsked >= 150) {
+    pinBusy = true;
+    pinAsked = now;
+    probeAt(s, f).then(
+      (c) => {
+        pinBusy = false;
+        if (s === sim) pinCell = c;
+      },
+      () => (pinBusy = false),
+    );
+  }
+  const c = projector()(f);
+  const r = canvas.getBoundingClientRect();
+  showQuery(pin, pinCell, r.left + c.x, r.top + c.y);
+}
+
+/** The readout: what is known of a source, sink or point mass, then the cell of the gas there. */
+function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: number) {
   const dims = cfg.ndim;
   const u = units();
   const vec = (v: number[], m: Measure) => {
     const l = u.label(m);
     return `(${v.slice(0, dims).map((a) => fmt3(a * u.scale(m))).join(', ')})${l ? ` ${l}` : ''}`;
   };
-  const eos = makeEos(cfg.eos, cfg.eosParams);
-  const rho = c.u1[0];
-  const vel = [c.u1[1] / rho, c.u1[2] / rho, c.u1[3] / rho];
-  const eint = c.u2[1];
-  const p = eos.pressure(rho, eint);
-  const cs = eos.soundSpeed(rho, p);
-  const speed = Math.hypot(...vel.slice(0, dims));
-  const rows: [string, string, string?][] = [
-    ['Position', vec(c.pos, 'length')],
-    ['Cell size', u.fmt(c.dx, 'length')],
-  ];
-  if (c.block) {
-    const b = c.block;
-    rows.push(['Level', `${b.level} of ${cfg.amrLevels}`]);
-    rows.push(['Block', `(${b.coords.join(', ')}), slot ${b.slot}`]);
-    rows.push(['Indicator', b.indicator === null ? 'not yet read' : `${fmt3(b.indicator)} (split ${cfg.refineHi}, merge ${cfg.refineLo})`]);
+  const rows: [string, string, string?][] = [];
+  let title = c ? `Cell (${c.index.join(', ')})` : 'Outside the box';
+  if (thing) {
+    const box = cfg.problem.box;
+    const m = 'mass' in thing ? massesNow()[thing.mass] : undefined;
+    const source = 'source' in thing ? thing.source : sources.find((q) => q.carrier === thing.mass);
+    const kind = source ? (source.decay > 0 ? 'Sink' : 'Source') : !m ? 'Point mass' : !m.massless ? 'Point mass' : m.sinkRate > 0 && m.sinkRadius > 0 ? 'Sink' : 'Tracer';
+    title = `${kind}${'mass' in thing ? ` ${thing.mass + 1}` : ''}${m?.fixed || (source && !m) ? ', fixed' : ''}${c ? ` in cell (${c.index.join(', ')})` : ''}`;
+    if (m) {
+      rows.push(['Mass', m.massless ? 'none' : cfg.G > 0 ? u.fmt(m.gm / cfg.G, 'mass') : fmt3(m.gm)]);
+      rows.push(['Position', vec(m.pos, 'length')], ['Velocity', vec(m.vel, 'velocity')], ['Speed', u.fmt(Math.hypot(...m.vel.slice(0, dims)), 'velocity')]);
+      rows.push(['Softening', u.fmt(m.soft, 'length')]);
+      if (m.sinkRadius > 0 && m.sinkRate > 0) rows.push(['Sink radius', u.fmt(m.sinkRadius, 'length')], ['Gas taken in', u.fmt(m.accreted, 'mass')]);
+    } else if (source) {
+      rows.push(['Position', vec(source.pos.map((v) => (v - 0.5) * box), 'length')]);
+    }
+    if (source) {
+      rows.push(['Radius', u.fmt(source.radius * box, 'length')]);
+      if (source.decay > 0) rows.push(['Removal rate', u.fmt(source.decay, 'rate')]);
+      else rows.push(['Density fed in', `${u.fmt(source.rate, [1, -3, -1])}`]);
+      if (!m && Math.hypot(...source.vel) > 0) rows.push(['Gas leaves at', vec(source.vel, 'velocity')]);
+    }
+    if (c) rows.push(['Gas there', '', 'head']);
   }
-  if (c.u2[3] > 0.5) rows.push(['Obstacle', 'solid cell; gas held for later', 'solid']);
-  rows.push(
-    ['Density', u.fmt(rho, 'density')],
-    ['Velocity', vec(vel, 'velocity')],
-    ['Speed', u.fmt(speed, 'velocity')],
-    ['Mach number', fmt3(cs > 0 ? speed / cs : 0)],
-    ['Pressure', u.fmt(p, 'pressure')],
-    ['Temperature', u.fmt(eos.temperature(rho, eint), 'temperature')],
-    ['Sound speed', u.fmt(cs, 'velocity')],
-    ['Internal energy', u.label('specificEnergy') ? u.fmt(eint / rho, 'specificEnergy') : `${fmt3(eint / rho)} per mass`],
-    ['Total energy', u.label('pressure') ? u.fmt(c.u2[0], 'pressure') : `${fmt3(c.u2[0])} per volume`],
-    ['Scalar', fmt3(c.u2[2] / rho)],
-  );
-  cellPop.querySelector('.title')!.textContent = `Cell (${c.index.join(', ')})`;
-  cellPop.querySelector('dl')!.innerHTML = rows.map(([k, v, cls]) => `<dt>${k}</dt><dd${cls ? ` class="${cls}"` : ''}>${v}</dd>`).join('');
+  if (c) {
+    const eos = makeEos(cfg.eos, cfg.eosParams);
+    const rho = c.u1[0];
+    const vel = [c.u1[1] / rho, c.u1[2] / rho, c.u1[3] / rho];
+    const eint = c.u2[1];
+    const p = eos.pressure(rho, eint);
+    const cs = eos.soundSpeed(rho, p);
+    const speed = Math.hypot(...vel.slice(0, dims));
+    if (!thing) rows.push(['Position', vec(c.pos, 'length')]);
+    rows.push(['Cell size', u.fmt(c.dx, 'length')]);
+    if (c.block) {
+      const b = c.block;
+      rows.push(['Level', `${b.level} of ${cfg.amrLevels}`]);
+      rows.push(['Block', `(${b.coords.join(', ')}), slot ${b.slot}`]);
+      rows.push(['Indicator', b.indicator === null ? 'not yet read' : `${fmt3(b.indicator)} (split ${cfg.refineHi}, merge ${cfg.refineLo})`]);
+    }
+    if (c.u2[3] > 0.5) rows.push(['Obstacle', 'solid cell; gas held for later', 'solid']);
+    rows.push(
+      ['Density', u.fmt(rho, 'density')],
+      ['Velocity', vec(vel, 'velocity')],
+      ['Speed', u.fmt(speed, 'velocity')],
+      ['Mach number', fmt3(cs > 0 ? speed / cs : 0)],
+      ['Pressure', u.fmt(p, 'pressure')],
+      ['Temperature', u.fmt(eos.temperature(rho, eint), 'temperature')],
+      ['Sound speed', u.fmt(cs, 'velocity')],
+      ['Internal energy', u.label('specificEnergy') ? u.fmt(eint / rho, 'specificEnergy') : `${fmt3(eint / rho)} per mass`],
+      ['Total energy', u.label('pressure') ? u.fmt(c.u2[0], 'pressure') : `${fmt3(c.u2[0])} per volume`],
+      ['Scalar', fmt3(c.u2[2] / rho)],
+    );
+  }
+  cellPop.querySelector('.title')!.textContent = title;
+  const html = rows.map(([k, v, cls]) => `<dt${cls === 'head' ? ' class="head"' : ''}>${k}</dt><dd${cls ? ` class="${cls}"` : ''}>${v}</dd>`).join('');
+  const dl = cellPop.querySelector('dl')!;
+  if (dl.innerHTML !== html) dl.innerHTML = html;
+  $('cell-remove').hidden = !pinRemovable();
   cellPop.hidden = false;
-  // Beside the pointer, kept on screen.
+  // Beside the pointer (or what it is pinned to), kept on screen.
   const pw = cellPop.offsetWidth;
   const ph = cellPop.offsetHeight;
   const left = x + 18 + pw > window.innerWidth - 4 ? x - 18 - pw : x + 18;
@@ -2527,6 +2703,8 @@ function showCell(c: CellProbe, x: number, y: number) {
   cellPop.style.left = `${Math.round(Math.max(4, left))}px`;
   cellPop.style.top = `${Math.round(top)}px`;
 }
+$('cell-remove').addEventListener('click', removePinned);
+$('cell-unpin').addEventListener('click', unpin);
 
 // --- contour labels -----------------------------------------------------------------------
 // While the run is paused, the contour under the pointer (slice and projection views) is drawn
@@ -2706,6 +2884,7 @@ function clearSources() {
   if (sources.length && sim) sim.setSources([]);
   sources = [];
   placed = [];
+  dropPin();
   toolNotice = '';
 }
 
@@ -2796,7 +2975,8 @@ function drawSources() {
       // that takes no gas has no edge to show.
       const r = Math.hypot(e.x - c.x, e.y - c.y);
       const edge = q.sinkRate > 0 ? `<circle cx="${c.x}" cy="${c.y}" r="${r}" />` : '';
-      html += `<g class="sink point">${edge}${arrow}<circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
+      const ring = pin && 'mass' in pin && pin.mass === index ? `<circle class="pinned" cx="${c.x}" cy="${c.y}" r="7" />` : '';
+      html += `<g class="sink point">${ring}${edge}${arrow}<circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
     }
   }
   if (html !== marksDrawn) $('marks').innerHTML = marksDrawn = html;
@@ -3818,6 +3998,7 @@ function tick(now: number) {
   const enc = gpu.device.createCommandEncoder();
   advanceStroke(now);
   updateOrbit(now);
+  updatePin(now);
   if (pendingBrush) {
     s.encodeBrush(enc, pendingBrush);
     pendingBrush = null;

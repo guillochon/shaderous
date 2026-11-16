@@ -299,6 +299,14 @@ details[open] > summary .sum { display: none; }
 #cell-pop dt { color: var(--dim); white-space: nowrap; }
 #cell-pop dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #cell-pop dd.solid { color: #ffb454; }
+#cell-pop dt.head { color: var(--text); margin-top: 4px; }
+/* Pinned (a click with the query tool): it takes clicks, and offers to remove what it follows. */
+#cell-pop .pin-actions { display: none; gap: 6px; justify-content: flex-end; margin-top: 6px; }
+#cell-pop.pinned { pointer-events: auto; }
+#cell-pop.pinned .pin-actions { display: flex; }
+#cell-pop .pin-actions button { height: 20px; padding: 0 8px; font-size: 11px; }
+#cell-pop .pin-actions button[hidden] { display: none; }
+#marks .point circle.pinned { stroke: #fff; stroke-dasharray: none; stroke-width: 1.5; }
 /* The value of the contour under the pointer (slice and projection views, paused). */
 #contour-pop {
   position: fixed; z-index: 20; padding: 3px 7px; pointer-events: none; white-space: nowrap;
