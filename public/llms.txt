@@ -1,0 +1,27 @@
+# Shaderous
+
+> A GPU gas dynamics code that runs in the browser on WebGPU: compressible hydrodynamics and ideal MHD in 2D and 3D, with self-gravity, cooling, nuclear burning, tabulated equations of state and adaptive mesh refinement. Its presets include shock tubes, blasts, instabilities, wind tunnels, detonations, disks, stars, tidal disruptions and white dwarf collisions. Everything runs on the visitor's GPU: there is no server.
+
+An agent can use Shaderous in three ways:
+
+- **With a browser** (this site): open `https://guillochon.github.io/shaderous/?headless=1&problem=sedov&dim=2&n=256` and call the page's scripting API, `window.shaderous`, which returns JSON. `await shaderous.ready`, then `await shaderous.load('problem=sedov&dim=2&n=256')`, `await shaderous.runTo(0.05)`, `await shaderous.diagnostics()`, `await shaderous.screenshot()` (a PNG data URL). `headless=1` stops the page playing and drawing by itself; leave it out to watch the run. The browser needs WebGPU and a GPU.
+- **As MCP tools**: `npx -y shaderous mcp` is an MCP server (stdio) that drives the simulator in headless Chrome on the local GPU, with tools to describe problems, load a setup, run to a time, read diagnostics, slices and probes, take screenshots, record movies and save .athdf files. In Claude Code: `claude plugin marketplace add guillochon/shaderous`, then `claude plugin install shaderous@shaderous`. In the MCP Registry: `io.github.guillochon/shaderous`.
+- **From the command line**: `npx -y shaderous run --problem sedov --dim 2 --n 512 --until 0.05 --every 0.01 --png --out runs/sedov` runs a setup to completion and writes diagnostics, images, slices, movies and .athdf files; `npx -y shaderous sweep ...` runs parameter sweeps; `npx -y shaderous describe` lists the problems.
+
+A setup is a query string of the keys a share link uses (`problem`, `dim`, `n`, `amr`, physics overrides, `p.<param>` for a preset's own parameters), or a setup document (JSON) built from parts: stars, point masses, orbits, disks, gas regions, obstacles, magnetic fields. Values are in code units; positions are fractions of the box. Any setup can be shared as a link to this site.
+
+## Docs
+
+- [Scripting API](https://raw.githubusercontent.com/guillochon/shaderous/main/docs/api.md): `window.shaderous`, every method, setup keys, headless mode, recipes
+- [Headless runs](https://raw.githubusercontent.com/guillochon/shaderous/main/docs/headless.md): the command-line runner and the MCP server, their options and tools
+- [Setup documents](https://raw.githubusercontent.com/guillochon/shaderous/main/docs/setups.md): every key of a setup document, and which options combine
+- [Setup document JSON Schema](https://guillochon.github.io/shaderous/shaderous-setup.schema.json)
+- [Agent skill](https://raw.githubusercontent.com/guillochon/shaderous/main/plugins/shaderous/skills/simulate/SKILL.md): how to run, check and measure simulations, and turn a description in words into a setup
+
+## Optional
+
+- [README](https://raw.githubusercontent.com/guillochon/shaderous/main/README.md): what the code is, its numerics and validation
+- [Numerics](https://raw.githubusercontent.com/guillochon/shaderous/main/docs/numerics.md): the solvers and methods
+- [Example setups](https://github.com/guillochon/shaderous/tree/main/examples/setups)
+- [Validation suite](https://guillochon.github.io/shaderous/validate.html)
+- [Source](https://github.com/guillochon/shaderous)

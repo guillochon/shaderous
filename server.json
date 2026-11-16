@@ -3,7 +3,7 @@
   "name": "io.github.guillochon/shaderous",
   "title": "Shaderous",
   "description": "GPU gas dynamics on WebGPU (hydro, MHD, gravity, AMR): load, run, measure and look at simulations",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "websiteUrl": "https://guillochon.github.io/shaderous/",
   "repository": {
     "url": "https://github.com/guillochon/shaderous",
@@ -14,11 +14,16 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "shaderous",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "runtimeHint": "npx",
-      "transport": { "type": "stdio" },
+      "transport": {
+        "type": "stdio"
+      },
       "packageArguments": [
-        { "type": "positional", "value": "mcp" },
+        {
+          "type": "positional",
+          "value": "mcp"
+        },
         {
           "type": "named",
           "name": "--gpu-memory",

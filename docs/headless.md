@@ -263,6 +263,11 @@ claude mcp add shaderous -- npx -y shaderous mcp
 { "mcpServers": { "shaderous": { "command": "npx", "args": ["-y", "shaderous", "mcp"] } } }
 ```
 
+Releases: `node tools/version.mjs X.Y.Z` sets the version in package.json, server.json and
+the plugin's manifest; commit, then push the tag `vX.Y.Z`. The
+[release workflow](../.github/workflows/npm.yml) checks that the versions agree with the tag,
+publishes the npm package, and updates the MCP Registry listing.
+
 The server is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
 `io.github.guillochon/shaderous` ([server.json](../server.json)); clients that browse the
 registry install it from there.
