@@ -268,6 +268,7 @@ function massOf(p: MassPart, dx: number): PointMass {
   if (p.sinkRate !== undefined) m.sinkRate = p.sinkRate;
   if (p.massless) m.massless = true;
   if (p.fixed) m.fixed = true;
+  if (p.onOrbit) m.onOrbit = true;
   return m;
 }
 

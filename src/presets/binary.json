@@ -29,8 +29,8 @@
   },
   "mesh": { "refineMasses": true },
   "parts": [
-    { "kind": "mass", "id": "a", "gm": 0.5, "soft": 0.06 },
-    { "kind": "mass", "id": "b", "gm": 0.5, "soft": 0.06 },
+    { "kind": "mass", "id": "a", "gm": 0.5, "soft": 0.06, "onOrbit": false },
+    { "kind": "mass", "id": "b", "gm": 0.5, "soft": 0.06, "onOrbit": false },
     {
       "kind": "orbit",
       "id": "orbit",
@@ -114,6 +114,15 @@
       "step": 1,
       "control": "slider",
       "dims": 3
+    },
+    {
+      "path": ["parts.0.onOrbit", "parts.1.onOrbit"],
+      "id": "hold",
+      "label": "Hold the orbit",
+      "tip": "The gas does not move the binary: neither its pull nor what the sinks take changes the orbit, and the masses do not grow, as in most studies of circumbinary disks. Off, the binary feels the gas and what it accretes. Changes take effect without a restart",
+      "min": 0,
+      "max": 1,
+      "control": "checkbox"
     },
     {
       "path": "parts.2.retrograde",

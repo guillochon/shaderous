@@ -274,3 +274,61 @@ test('three stars of a setup of its own settle and step', async ({ page }) => {
   expect(Number.isFinite(d.eTot) && d.eGrav < 0).toBe(true);
   expect(errors).toEqual([]);
 });
+
+test('a binary held on its orbit keeps it, and lets go of it mid-run when asked', async ({ page }) => {
+  const errors = await open(page, 'problem=binary&dim=2&n=256&p.hold=1&p.ecc=0.3');
+  const masses = () => page.evaluate(() => (window as any).shaderous.diagnostics().then((d: any) => d.masses));
+  // The orbit's energy and angular momentum per unit reduced mass, from the two masses alone.
+  const orbit = (m: any[]) => {
+    const [d, v] = [[0, 1, 2].map((a) => m[1].pos[a] - m[0].pos[a]), [0, 1, 2].map((a) => m[1].vel[a] - m[0].vel[a])];
+    return { gm: [m[0].gm, m[1].gm], l: d[0] * v[1] - d[1] * v[0], accreted: m[0].accreted + m[1].accreted };
+  };
+  const m0 = orbit(await masses());
+  await page.evaluate(() => (window as any).shaderous.run({ until: 3 }));
+  const m1 = orbit(await masses());
+  // The sinks took gas, and it changed neither the masses nor the orbit's angular momentum.
+  expect(m1.accreted).toBeGreaterThan(0);
+  expect(m1.gm).toEqual(m0.gm);
+  expect(Math.abs(m1.l / m0.l - 1)).toBeLessThan(2e-5);
+
+  // Let go, as the bar's checkbox does: the run carries on, and the masses now grow by what they take.
+  const t = await app(page).time();
+  await page.uncheck('#pp-hold');
+  await app(page).idle();
+  expect(await app(page).time()).toBe(t);
+  await page.evaluate(() => (window as any).shaderous.run({ until: 4 }));
+  const m2 = orbit(await masses());
+  expect(m2.gm[0] + m2.gm[1]).toBeGreaterThan(m1.gm[0] + m1.gm[1]);
+  expect(errors).toEqual([]);
+});
+
+test('a disk with a density of its own, from formulas, about a star', async ({ page }) => {
+  const errors = await open(page, 'problem=sedov&dim=2&n=128');
+  const doc = {
+    format: 'shaderous-setup', version: 1, name: 'Star with a ring',
+    domain: { ndim: 3, n: 64, amr: 0, box: 8, supports2d: false, bc: { lo: [3, 3, 3], hi: [3, 3, 3] } },
+    physics: { eos: 'ideal', eosParams: { gamma: 5 / 3 }, gravity: 'isolated', G: 1, floors: { rho: 1e-10, p: 1e-14 } },
+    background: { rho: 1e-7, cut: 1e-4, relativeTo: 'star' },
+    parts: [
+      { kind: 'star', id: 'star', type: 'polytrope', n: 1.5, mass: 1, radius: 0.6 },
+      { kind: 'disk', id: 'ring', about: ['star'], profile: 'balanced', rIn: 1.5, rOut: 3, sigma0: 1e-3, cs: 0.15, floor: 0,
+        radialFn: 'sigma0 * exp(-((r - 2.2) / 0.4)^2)', verticalFn: '1 / cosh(z)^2', damp: { from: 3.5, rate: 1 } },
+    ],
+  };
+  const st = await page.evaluate((d) => (window as any).shaderous.load(d), doc);
+  expect([st.problem, st.label]).toEqual(['custom', 'Star with a ring']);
+  // The star settles with the ring left around it, and the run steps with the generated damping zone.
+  await page.evaluate(() => (window as any).shaderous.run({ steps: 10, timeoutMs: 240_000 }));
+  const d = await page.evaluate(() => (window as any).shaderous.diagnostics());
+  expect(d.mass).toBeGreaterThan(0.9);
+  expect(d.mass).toBeLessThan(1.3);
+  // Gas at the ring's radius in the midplane, where the star's ambient medium alone would have next to none.
+  const ring = await page.evaluate(() => (window as any).shaderous.probe([[0.5 + 2.2 / 8, 0.5, 0.5], [0.5, 0.5 + 2.2 / 8, 0.5], [0.5 + 3.6 / 8, 0.5, 0.5]]));
+  const rho = ring.points.map((q: any) => q.rho);
+  expect(rho[0]).toBeGreaterThan(3e-4);
+  expect(rho[1]).toBeGreaterThan(3e-4);
+  expect(rho[2]).toBeLessThan(1e-5);
+  // A formula that is not one is refused before anything runs.
+  await expect(page.evaluate((d) => (window as any).shaderous.load({ ...d, parts: [d.parts[0], { ...d.parts[1], radialFn: 'sigma0 * nope(r)' }] }), doc)).rejects.toThrow(/"nope" is not a function/);
+  expect(errors).toEqual([]);
+});

@@ -118,10 +118,11 @@ export const binary: Problem = {
     { id: 'ecc', label: 'Eccentricity', title: 'Eccentricity of the binary’s orbit. Changing it starts the run again', value: 0, min: 0, max: 0.8, step: 0.05 },
     { id: 'soft', label: 'Softening and sink radius', title: 'Radius within which each mass’s pull is softened and it takes in gas (at least two cells). Changes take effect without a restart', value: 0.06, min: 0.01, max: 0.5, step: 0.01, live: true, unit: { label: 'pc', factor: (p) => p.sep } },
     { id: 'incl', label: 'Binary inclination (°)', title: 'Angle between the binary’s orbit and the disk, in degrees, tilted about the line through pericenter: 0 orbits with the disk, 90 is polar, 180 against it. Changing it starts the run again', value: 0, min: 0, max: 180, step: 1, kind: 'slider', dims: 3 },
+    { id: 'hold', label: 'Hold the orbit', title: 'The gas does not move the binary: neither its pull nor what the sinks take changes the orbit, and the masses do not grow, as in most studies of circumbinary disks. Off, the binary feels the gas and what it accretes. Changes take effect without a restart', value: 0, min: 0, max: 1, kind: 'checkbox', live: true },
     { id: 'retro', label: 'Retrograde', title: 'The binary orbits against the disk’s rotation. Changing it starts the run again', value: 0, min: 0, max: 1, kind: 'checkbox', dims: 2 },
   ],
   // Softening and sink are at least two cells across, or the grid cannot see them.
-  masses: (p, _G, dx, ndim) => binaryMasses(p.q, p.ecc, Math.max(p.soft, 2 * dx), ndim === 3 ? p.incl : p.retro ? 180 : 0),
+  masses: (p, _G, dx, ndim) => binaryMasses(p.q, p.ecc, Math.max(p.soft, 2 * dx), ndim === 3 ? p.incl : p.retro ? 180 : 0).map((m) => (p.hold ? { ...m, onOrbit: true } : m)),
   init: (n, _eos, ndim) => {
     const { cs, sigma0, floor, box } = BINARY;
     const dx = box / n;

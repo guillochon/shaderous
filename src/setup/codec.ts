@@ -29,7 +29,7 @@ const MAX_DOCUMENT = 2_000_000;
 class Bad extends Error {}
 
 type Schema =
-  | 'number' | 'int' | 'string' | 'boolean' | 'vec3' | 'fractions' | 'numbers'
+  | 'number' | 'int' | 'string' | 'boolean' | 'vec3' | 'pair' | 'fractions' | 'numbers'
   | { enum: readonly (string | number)[] }
   | { object: Record<string, Schema>; open?: Schema }
   | { array: Schema; max: number }
@@ -45,12 +45,14 @@ const SHAPE: Schema = obj({
   min: { array: { nullable: 'number' }, max: 3 }, max: { array: { nullable: 'number' }, max: 3 }, normal: 'vec3', at: 'number',
 });
 const ID: Schema = 'string';
+/** A tabulated profile: up to 32 points (x, value). */
+const PROFILE: Schema = { array: 'pair', max: 32 };
 
 const PART_SCHEMAS: Record<string, Record<string, Schema>> = {
-  mass: { gm: 'number', pos: 'vec3', vel: 'vec3', soft: 'number', sink: 'number', sinkRate: 'number', massless: 'boolean', fixed: 'boolean' },
+  mass: { gm: 'number', pos: 'vec3', vel: 'vec3', soft: 'number', sink: 'number', sinkRate: 'number', massless: 'boolean', fixed: 'boolean', onOrbit: 'boolean' },
   orbit: { of: { array: 'string', max: 2 }, type: { enum: ['binary', 'flyby', 'collision'] }, q: 'number', separation: 'number', ecc: 'number', incl: 'number', retrograde: 'boolean', beta: 'number', start: 'number', impact: 'number', starts: 'number', debris: 'boolean' },
   star: { type: { enum: ['polytrope', 'white-dwarf'] }, n: 'number', radius: 'number', mass: 'number', rhoc: 'number', pos: 'vec3', vel: 'vec3', dye: 'number', X: 'fractions', field: obj({ type: { enum: ['dipole', 'random', 'gm17-dipole', 'gm17-random'] }, beta: 'number', seed: 'number' }) },
-  disk: { about: { array: 'string', max: 32 }, profile: { enum: ['thin', 'balanced'] }, rIn: 'number', rOut: 'number', sigma0: 'number', slope: 'number', cs: 'number', floor: 'number', damp: obj({ from: 'number', rate: 'number' }), loops: obj({ beta: 'number', span: 'number', count: 'int' }), stresses: 'boolean' },
+  disk: { about: { array: 'string', max: 32 }, profile: { enum: ['thin', 'balanced'] }, radial: PROFILE, vertical: PROFILE, radialFn: 'string', verticalFn: 'string', verticalIn: { enum: ['H', 'length'] }, rIn: 'number', rOut: 'number', sigma0: 'number', slope: 'number', cs: 'number', floor: 'number', damp: obj({ from: 'number', rate: 'number' }), loops: obj({ beta: 'number', span: 'number', count: 'int' }), stresses: 'boolean' },
   region: { shape: SHAPE, rho: 'number', p: 'number', energy: 'number', v: 'vec3', s: 'number', X: 'fractions', supersample: 'int' },
   obstacle: { shape: SHAPE },
   inflow: { shape: SHAPE },
@@ -117,6 +119,10 @@ function conform(v: unknown, s: Schema, path: string, notes: string[], option: (
   }
   if (s === 'vec3') {
     if (!Array.isArray(v) || v.length !== 3 || v.some((c) => typeof c !== 'number' || !Number.isFinite(c))) throw wrong('three numbers');
+    return [...v];
+  }
+  if (s === 'pair') {
+    if (!Array.isArray(v) || v.length !== 2 || v.some((c) => typeof c !== 'number' || !Number.isFinite(c))) throw wrong('two numbers');
     return [...v];
   }
   if (s === 'numbers') {

@@ -429,13 +429,14 @@ export function completeMass(q: PointMass, dx: number): Required<PointMass> {
   return {
     gm: q.gm, pos: q.pos, vel: q.vel, soft, sinkRadius: q.sinkRadius ?? soft, sinkRate: q.sinkRate ?? 1,
     accreted: q.accreted ?? 0, accretedMomentum: q.accretedMomentum ?? [0, 0, 0], accretedSpin: q.accretedSpin ?? [0, 0, 0],
-    massless: q.massless ?? false, fixed: q.fixed ?? false,
+    massless: q.massless ?? false, fixed: q.fixed ?? false, onOrbit: q.onOrbit ?? false,
   };
 }
 
 /**
- * Write the softening and sink radii of the preset's point masses (from its current parameters)
- * into the Masses block, leaving their positions, velocities and masses as the run has them.
+ * Write the softening and sink radii of the preset's point masses, and their flags (from its
+ * current parameters), into the Masses block, leaving their positions, velocities and masses as
+ * the run has them.
  */
 export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: number, count: number) {
   const base = (c.problem.masses?.(c.params, c.G, dx, c.ndim) ?? []).slice(0, count);
@@ -444,8 +445,13 @@ export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: nu
     const at = 16 + 4 * MASS_STRIDE * i;
     d.queue.writeBuffer(bh, at + 28, new Float32Array([m.soft]));
     d.queue.writeBuffer(bh, at + 44, new Float32Array([m.sinkRadius]));
+    // Whether it is held on its orbit can change mid-run too.
+    d.queue.writeBuffer(bh, at + 60, new Float32Array([massFlags(m)]));
   });
 }
+
+/** A mass's flags as the Masses block holds them (gravity/bh.wgsl). */
+const massFlags = (m: Required<PointMass>): number => (m.massless ? 1 : 0) + (m.fixed ? 2 : 0) + (m.onOrbit ? 4 : 0);
 
 /** Pack the Masses block. The layout must match the struct in gravity/bh.wgsl. */
 export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffer> {
@@ -456,7 +462,7 @@ export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffe
   list.forEach((m, i) =>
     f.set(
       [
-        ...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, (m.massless ? 1 : 0) + (m.fixed ? 2 : 0), ...m.accretedMomentum, 0, ...m.accretedSpin, 0,
+        ...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, massFlags(m), ...m.accretedMomentum, 0, ...m.accretedSpin, 0,
         c(m.gm), c(m.accreted), 0, 0, ...m.vel.map(c), 0, ...m.accretedMomentum.map(c), 0, ...m.accretedSpin.map(c), 0,
       ],
       4 + MASS_STRIDE * i,
@@ -475,7 +481,7 @@ export function unpackMasses(f: Float32Array, count: number): Required<PointMass
     out.push({
       gm: f[o + 3] - f[o + 24], pos: [f[o], f[o + 1], f[o + 2]], vel: v3(o + 4, o + 28), soft: f[o + 7], sinkRadius: f[o + 11], sinkRate: f[o + 12],
       accreted: f[o + 13] - f[o + 25], accretedMomentum: v3(o + 16, o + 32), accretedSpin: v3(o + 20, o + 36),
-      massless: (f[o + 15] & 1) !== 0, fixed: (f[o + 15] & 2) !== 0,
+      massless: (f[o + 15] & 1) !== 0, fixed: (f[o + 15] & 2) !== 0, onOrbit: (f[o + 15] & 4) !== 0,
     });
   }
   return out;

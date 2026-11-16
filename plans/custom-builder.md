@@ -14,7 +14,11 @@ text below:
 - A downloaded preset is the resolved, whole document, not the repository's file with its
   `extends`.
 - No rule ties a magnetic field to a frozen mesh: the field is re-meshed with it.
-- Not done: disks about stars (open decision, "masses first"); controls in the dialog for
+- Added since, on request: a point mass held on its orbit (`onOrbit`, a live toggle); disks
+  about stars; and a disk's density in radius and height as a formula (`radialFn`,
+  `verticalFn`; `src/setup/expr.ts`) or a table of points. Formulas lift the non-goal below in
+  one place: they are parsed into arithmetic over a fixed list of functions and never run.
+- Not done: controls in the dialog for
   `physics.speciesGamma`, `physics.toolScale`, the fuel-and-ash form of burning, units by
   density and velocity, and a unit's `per` (files that have them keep them); the GPU test
   `masses-many` is the existing `point-mass-many`, and `setup-restart` and `setup-triple` are

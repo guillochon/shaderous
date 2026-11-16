@@ -144,6 +144,8 @@ export interface MassPart {
   sinkRate?: number;
   massless?: boolean;
   fixed?: boolean;
+  /** held on its orbit: moved by the other point masses, not by the gas */
+  onOrbit?: boolean;
 }
 
 export interface OrbitPart {
@@ -208,7 +210,7 @@ export interface StarPart {
 export interface DiskPart {
   kind: 'disk';
   id?: string;
-  /** the bodies it orbits, by id */
+  /** the bodies it orbits, by id: point masses, stars, or both. The disk is centered on their center of mass and moves with it. */
   about: string[];
   /**
    * 'thin': a surface density with a cavity inside rIn and an outer taper, a Gaussian vertical
@@ -222,6 +224,32 @@ export interface DiskPart {
   /** surface density ('thin') or midplane density at r = 1 ('balanced'), and its slope in radius */
   sigma0: number;
   slope?: number;
+  /**
+   * A density profile of one's own in radius, as points (radius, density) in order of radius,
+   * instead of sigma0, the slope and the tapers: the surface density ('thin') or the midplane
+   * density ('balanced'). Between points the density is a power law of the radius (a straight
+   * line where a point is zero); inside the first and outside the last there is no disk.
+   */
+  radial?: [number, number][];
+  /**
+   * Or the same as a formula of the radius `r`: "sigma0 * (r / rIn)^-1 * exp(-(r / rOut)^2)".
+   * It may name r, rIn, rOut, sigma0, cs and H (the scale height cs / Omega at r), the numbers
+   * pi and e, and the functions of setup/expr.ts. Where it is not a positive number there is no
+   * disk. It wins over a table.
+   */
+  radialFn?: string;
+  /**
+   * A density profile of one's own in height, as points (height, density relative to the
+   * midplane) in order of height, instead of the Gaussian ('thin') or the balance with the
+   * potential ('balanced'). The same on both sides of the midplane, straight lines between
+   * points, and the last point's value beyond it. Heights are in scale heights cs / Omega of
+   * each radius, or in code lengths with `verticalIn: "length"`. Such a disk is not in vertical
+   * balance unless the profile is: it settles as the run starts.
+   */
+  vertical?: [number, number][];
+  /** Or the same as a formula of the height `z` above the midplane: "exp(-z^2 / 2)", "1 / cosh(z)^2". It wins over a table. */
+  verticalFn?: string;
+  verticalIn?: 'H' | 'length';
   /** sound speed */
   cs: number;
   /** density of the gas outside the disk, as a fraction of sigma0 ('thin') or absolute ('balanced') */

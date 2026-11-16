@@ -8,6 +8,7 @@
 // tooltip from the rule that disables it.
 import { COOLING_LABELS } from '../cooling/cooling';
 import { EOS_LABELS } from '../eos/eos';
+import { FUNCTIONS } from './expr';
 import { FLOWS } from './parts/flow';
 import { getPath, type Part, type PartKind, type SetupSpec } from './spec';
 import { LENGTH_UNITS, MASS_UNITS } from './units';
@@ -298,6 +299,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
       P({ path: 'soft', label: 'Softening', tip: 'Plummer softening length of its gravity: at least two cells, and two cells if left empty. Changes take effect without a restart', control: num(0, undefined, { step: 0.01, quantity: 'length' }), apply: 'live' }),
       P({ path: 'sink', label: 'Sink radius', tip: 'Radius within which it takes gas in: the softening length if left empty, 0 for none. Changes take effect without a restart', control: num(0, undefined, { step: 0.01, quantity: 'length' }), apply: 'live' }),
       P({ path: 'sinkRate', label: 'Sink rate', tip: 'Removal rate at the sink’s center, in units of sqrt(G M / radius³)', control: num(0, undefined, { factor: 2 }), default: 1, apply: 'live' }),
+      P({ path: 'onOrbit', label: 'Hold on its orbit', tip: 'The other point masses move it; the gas does not: neither the gas\u2019s pull nor what its sink takes changes its motion, and it does not grow. A binary with both masses held keeps the orbit it was given, as in most studies of circumbinary disks. What the sink takes is still counted. Changes take effect without a restart', control: check, default: false, apply: 'live' }),
       P({ path: 'massless', label: 'Massless', tip: 'A particle without a mass of its own: it pulls on nothing and moves as the gas and the masses pull it', control: check, default: false }),
       P({ path: 'fixed', label: 'Held in place', tip: 'Nothing moves it, whatever pulls on it or it takes in', control: check, default: false }),
     ],
@@ -345,16 +347,19 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
     ],
   },
   disk: {
-    kind: 'disk', label: 'Disk', tip: 'A gas disk in the x-y plane about one or more bodies', requires: [{ fact: 'parts.mass', reason: 'Needs a point mass to orbit' }],
+    kind: 'disk', label: 'Disk', tip: 'A gas disk in the x-y plane about one or more bodies', requires: [{ fact: 'parts.body', reason: 'Needs a point mass or a star to orbit' }],
     excludes: NOT_PERIODIC,
     make: () => ({ kind: 'disk', about: [], profile: 'balanced', rIn: 0.3, rOut: 1, sigma0: 1e-3, slope: -1.5, cs: 0.1, floor: 1e-8 }),
     fields: [
-      P({ path: 'about', label: 'Orbits', tip: 'The point masses it orbits: about several, their total mass at their center of mass', control: { type: 'ref', kinds: ['mass'], count: 'any' } }),
+      P({ path: 'about', label: 'Orbits', tip: 'The point masses or stars it orbits: about several, their total mass. The disk is centered on their center of mass and moves with it. About a star, keep the inner radius outside 1.3 of the star\u2019s radius: the star is settled within that', control: { type: 'ref', kinds: ['mass', 'star'], count: 'any' } }),
       P({ path: 'profile', label: 'Profile', tip: 'Thin: a surface density with a cavity and a Gaussian vertical profile, on circular orbits (the binary’s disk). Balanced: a midplane density in vertical balance with the softened potential, rotating as its pressure gradient asks (the magnetized disk); 3D only', control: pick(['thin', 'Thin, with a cavity'], { value: 'balanced', label: 'Balanced', requires: IN_3D }), default: 'balanced' }),
       P({ path: 'rIn', label: 'Inner radius', tip: 'Where the disk is tapered away toward the center (the cavity’s radius)', control: num(1e-6, undefined, { factor: 1.25, quantity: 'length' }), default: 0.3 }),
       P({ path: 'rOut', label: 'Outer radius', tip: 'Where the disk is tapered away outward', control: num(1e-6, undefined, { factor: 1.25, quantity: 'length' }), default: 1 }),
       P({ path: 'sigma0', label: 'Density scale', tip: 'Thin: the surface density. Balanced: the midplane density at r = 1', control: num(1e-300, undefined, { factor: 2 }), default: 1e-3 }),
       P({ path: 'slope', label: 'Density slope', tip: 'Balanced: the midplane density goes as r to this power (-3/2 is a flat surface density)', control: num(-4, 2, { step: 0.25 }), default: -1.5, show: { path: 'profile', is: ['balanced'] } }),
+      P({ path: 'radialFn', label: 'Radial profile (formula)', tip: 'A density profile of your own in radius, as a formula of r: the surface density (thin) or the midplane density (balanced). It replaces the density scale\u2019s law, the slope and the tapers. Example: sigma0 * (r / rIn)^-1 * exp(-(r / rOut)^2) * step(r - rIn). Names: r, rIn, rOut, sigma0, cs, H (the scale height cs / \u03a9 at r), pi, e. Functions: ' + Object.keys(FUNCTIONS).join(', ') + '; powers as x^y. Where it is not a positive number there is no disk. A file may give a table of points instead (radial)', control: { type: 'text' } }),
+      P({ path: 'verticalFn', label: 'Vertical profile (formula)', tip: 'A density profile of your own in height, as a formula of z, the height above the midplane (the same on both sides), relative to the midplane: it replaces the Gaussian (thin) or the balance with the potential (balanced). Examples: exp(-z^2 / 2), 1 / cosh(z)^2, max(1 - z / 3, 0). Such a disk is in vertical balance only if the profile is, and settles as the run starts. 3D only. A file may give a table of points instead (vertical)', control: { type: 'text' }, requires: IN_3D }),
+      P({ path: 'verticalIn', label: 'Heights in', tip: 'The z of the vertical profile: in scale heights cs / \u03a9 of each radius (the profile then flares with the disk), or in code lengths', control: pick(['H', 'Scale heights'], ['length', 'Code lengths']), default: 'H' }),
       P({ path: 'cs', label: 'Sound speed', tip: 'Sound speed of the disk’s gas: its scale height is cs / Ω', control: num(1e-6, undefined, { factor: 1.25, quantity: 'velocity' }), default: 0.1 }),
       P({ path: 'floor', label: 'Gas outside the disk', tip: 'Thin: a fraction of the density scale. Balanced: the density of the ambient gas', control: num(0, undefined, { factor: 10 }), default: 1e-8 }),
       P({ path: 'damp', label: 'Damping zone', tip: 'Beyond a radius the gas is relaxed toward the disk as it started, more strongly toward the box’s edge, so the outer disk is a reservoir and the boundaries see only it',

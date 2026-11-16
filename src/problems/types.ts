@@ -357,6 +357,12 @@ export interface PointMass {
   massless?: boolean;
   /** Held where it is: nothing moves it (its velocity is zero), whatever pulls on it or it takes in. */
   fixed?: boolean;
+  /**
+   * Held on its orbit: the other point masses move it, the gas does not. Neither the gas's
+   * pull nor what its sink takes changes its motion, and it does not grow, so a binary keeps the
+   * orbit it was given. What the sink takes is still counted.
+   */
+  onOrbit?: boolean;
   /** gas mass accreted so far */
   accreted?: number;
   /** momentum that gas brought in */

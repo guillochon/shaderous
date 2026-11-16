@@ -22,6 +22,11 @@
 // Nothing here assumes the gas is a point, so an orbit responds to the tides it raises. Once
 // gas leaves the box, "the gas" means what is still inside it.
 //
+// A mass may be held on its orbit (flag 4, PointMass.onOrbit): the gas then neither pulls on it
+// nor changes its mass or momentum through its sink, so it follows the orbit the other point
+// masses give it, as a binary of fixed orbit does in most studies of circumbinary disks. Its
+// sink still takes gas, and what it took is still counted.
+//
 // (Two alternatives to the accelerating frame were tried and dropped. A restoring spring on
 // the center of mass visibly shoves the remaining gas each time debris exits. Following a
 // density-squared-weighted centroid instead keeps the densest gas centered, but lets the true
@@ -59,9 +64,10 @@ fn main() {
         let acc = kahan1(b.sink.y, b.cmass.y, dm);
         var v = kahan3(b.vel.xyz, b.cvel.xyz, dv);
         // A massless particle keeps count of what it takes, and is otherwise unchanged by it.
-        if (mass_massless(b)) { gm = vec2<f32>(b.pos.w, b.cmass.x); }
-        // Nor does it move a massless particle, or a fixed mass.
-        if (mass_massless(b) || mass_fixed(b)) { v = Kahan3(b.vel.xyz, b.cvel.xyz); }
+        // So does a mass held on its orbit: growing would change the orbit.
+        if (mass_massless(b) || mass_on_orbit(b)) { gm = vec2<f32>(b.pos.w, b.cmass.x); }
+        // Nor does it move a massless particle, a fixed mass, or one held on its orbit.
+        if (mass_massless(b) || mass_fixed(b) || mass_on_orbit(b)) { v = Kahan3(b.vel.xyz, b.cvel.xyz); }
         let p = kahan3(b.accp.xyz, b.cp.xyz, dp);
         let l = kahan3(b.accl.xyz, b.cl.xyz, dl);
         BH.list[i].pos = vec4<f32>(b.pos.xyz, gm.x);
@@ -88,7 +94,8 @@ fn main() {
     var gm = 0.0;
     for (var i = 0u; i < n; i++) {
       let o = 1u + 10u * i;
-      abar -= P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]);
+      // The gas does not move a mass held on its orbit, nor the center of mass through it.
+      if (!mass_on_orbit(BH.list[i])) { abar -= P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]); }
       gm += BH.list[i].pos.w;
     }
     abar /= max(gm, 1e-30);
@@ -98,6 +105,8 @@ fn main() {
     let b = BH.list[i];
     let o = 1u + 10u * i;
     var acc = -abar - P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]) / b.pos.w;
+    // Held on its orbit: the frame's acceleration and the other masses' pull, not the gas's.
+    if (mass_on_orbit(b)) { acc = -abar; }
     for (var j = 0u; j < n; j++) {
       if (j == i) { continue; }
       let other = BH.list[j];

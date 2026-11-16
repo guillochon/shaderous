@@ -14,7 +14,7 @@ import type { SimConfig } from '../sim';
 import { COMPOSITIONS, composition, type Composition } from '../units/composition';
 import { codeG, type UnitSystem } from '../units/units';
 import { buildBodies, partIds, partQuantity, starPotential, type Bodies } from './parts/bodies';
-import { buildDisk, sumDisks, type BuiltDisk } from './parts/disk';
+import { buildDisk, checkDiskFormulas, sumDisks, type BuiltDisk } from './parts/disk';
 import { flowValues, type FaceFn, type FlowContext, type FlowDef, type FlowInitContext, type InitFn, type PotentialFn } from './parts/flow';
 import { obstaclePainter, regionPainter, type PaintContext } from './parts/region';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type SetupSpec } from './spec';
@@ -118,11 +118,23 @@ function disksOf(spec: SetupSpec, bodies: Bodies, G: number, n: number, ndim: 2 
     const stars = d.about.flatMap((id) => bodies.stars.filter((s) => s.id === id));
     if (ms.length + stars.length === 0) throw new Error('a disk needs a point mass or a star to orbit');
     const gm = ms.reduce((s, m) => s + m.gm, 0) + stars.reduce((s, st) => s + G * st.M, 0);
+    // The disk is centered on the center of mass of what it orbits, and moves with it. A center
+    // that is the box's to rounding (a binary about the origin) is the box's exactly.
+    const bodies_ = [...ms.map((m) => ({ gm: m.gm, pos: m.pos, vel: m.vel })), ...stars.map((st) => ({ gm: G * st.M, pos: st.center, vel: st.vel }))];
+    const mean = (key: 'pos' | 'vel', tiny: number) => [0, 1, 2].map((a) => {
+      const c = bodies_.reduce((s, q) => s + q.gm * (q[key][a] ?? 0), 0) / gm;
+      return Math.abs(c) <= tiny ? 0 : c;
+    });
+    const center = mean('pos', 1e-12 * box);
+    const drift = mean('vel', 1e-12 * Math.sqrt(gm / box));
     const sep = d.about.length === 2 ? bodies.separations.get(`${d.about[0]}+${d.about[1]}`) ?? bodies.separations.get(`${d.about[1]}+${d.about[0]}`) : undefined;
     const soft = ms[0]?.soft ?? 2 * dx;
-    return [buildDisk(d, { box, n: Math.max(n, 1), ndim, gm, soft: Math.max(soft, 2 * dx), flat: sep !== undefined ? 0.5 * sep : undefined })];
+    return [buildDisk(d, { box, n: Math.max(n, 1), ndim, gm, soft: Math.max(soft, 2 * dx), flat: sep !== undefined ? 0.5 * sep : undefined, center, vel: drift })];
   });
 }
+
+/** How far from its center, in radii, a star's settling may reach where other gas is about (as a star the star tool places). */
+const OWN_REACH = 1.3;
 
 /** The ambient gas around stars: where a star ends, the gas outside, and its pressure. */
 function ambient(spec: SetupSpec, bodies: Bodies) {
@@ -165,9 +177,21 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3): InitFn {
   }
 
   const disks = disksOf(spec, bodies, G, n, ndim);
+  const base = at;
   if (disks.length) {
     const one = disks.length === 1 ? disks[0] : null;
     at = one ? (x, y, z) => one.state(x, y, z) : (x, y, z) => sumDisks(disks.map((d) => d.state(x, y, z)));
+    // A disk brings its own ambient gas. Where the setup names one too (a background density, or
+    // the gas around its stars), that shows wherever the disk is thinner than it: a disk with a
+    // profile of its own may end altogether.
+    if (amb || bg.rho !== undefined) {
+      const [disk, under] = [at, base];
+      const least = amb ? amb.rho : bg.rho!;
+      at = (x, y, z) => {
+        const w = disk(x, y, z);
+        return w.rho > least ? w : under(x, y, z);
+      };
+    }
     if (bgX) {
       const inner = at;
       at = (x, y, z) => ({ ...inner(x, y, z), X: bgX });
@@ -216,8 +240,10 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
   const bodies = buildBodies(spec, { G, dx: 0, ndim: 3, box: boxOf(spec), eos });
   const amb = ambient(spec, bodies);
   const dwarfs = bodies.stars.some((s) => s.part.type === 'white-dwarf');
+  // (A flow that only changes what the stars painted, a hot spot, brings no gas of its own.)
+  const others = (spec.parts ?? []).some((p) => p.kind === 'disk' || p.kind === 'region' || (p.kind === 'flow' && flowValues(p).def.wholeBox));
   return {
-    stars: bodies.stars.map((s) => ({ barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(s.reach !== undefined ? { reach: s.reach } : {}), scalar: s.scalar })),
+    stars: bodies.stars.map((s) => ({ barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(s.reach !== undefined ? { reach: s.reach } : others ? { reach: OWN_REACH * s.R } : {}), scalar: s.scalar })),
     rhoCut: amb.cut,
     rhoAmb: amb.rho,
     pAmb: spec.background?.p ?? bodies.stars[0].barotrope.pressure(amb.cut),
@@ -225,6 +251,10 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
     // A 0.6 M_sun dwarf settled to 1e-3 (12 rounds) stays as still as one settled to 1e-5 (26):
     // its central density swings by about 1% either way, from what the settling cannot reach.
     ...(dwarfs ? { tol: 1e-3, relax: 1.6 } : {}),
+    // Gas that is not the stars' (a disk, a region, a flow) is not theirs to settle: a cell a
+    // star does not take keeps the gas it has, and a star reaches no farther than just past
+    // its own radius.
+    ...(others ? { keep: true } : {}),
   };
 }
 
@@ -298,7 +328,7 @@ function problemParam(spec: SetupSpec, f: Featured): ProblemParam {
   if (f.step !== undefined) p.step = f.step;
   if (f.factor !== undefined) p.factor = f.factor;
   // A point mass's softening and sink are taken up by the run where the masses are now.
-  if (/^parts\.\d+\.(soft|sink|sinkRate)$/.test(path) && (getPath(spec, path.replace(/\.\w+$/, '.kind')) === 'mass')) p.live = true;
+  if (/^parts\.\d+\.(soft|sink|sinkRate|onOrbit)$/.test(path) && (getPath(spec, path.replace(/\.\w+$/, '.kind')) === 'mass')) p.live = true;
   // A value of the units only sets the physical scale.
   if (path.startsWith('domain.units.') && leaf === 'value') p.scale = true;
   if (f.unit) {
@@ -320,6 +350,15 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const parts = spec.parts ?? [];
   const ids = partIds(parts);
   if (new Set(ids).size !== ids.length) throw new Error('two parts have the same id');
+  // A formula that does not parse is found here, not at the first cell.
+  parts.forEach((p, i) => {
+    if (p.kind !== 'disk') return;
+    try {
+      checkDiskFormulas(p);
+    } catch (e) {
+      throw new Error(`${ids[i]}: ${(e as Error).message}`);
+    }
+  });
   const feats = paramFeatures(spec);
   const base = scales(spec);
 

@@ -14,7 +14,9 @@ struct Mass {
                       //    that it does not change when the mass grows in mid-step)
                       // w: flags. 1: a massless particle, whose G M is a token amount that
                       //    pulls on nothing, and which what its sink takes changes neither in
-                      //    mass nor in motion. 2: fixed, held where it is. 3: both
+                      //    mass nor in motion. 2: fixed, held where it is. 3: both.
+                      //    4: on its orbit: the other point masses move it, the gas does
+                      //    not (neither its pull nor what the sink takes), and it does not grow
   accp: vec4<f32>,    // momentum of the gas accreted so far (xyz)
   accl: vec4<f32>,    // angular momentum of that gas about the mass, in its rest frame (xyz)
   // Kahan compensations (gravity/bh_kick.wgsl): what each step's accretion adds is far below
@@ -40,6 +42,9 @@ fn mass_massless(m: Mass) -> bool {
 }
 fn mass_fixed(m: Mass) -> bool {
   return (u32(m.sink.w) & 2u) != 0u;
+}
+fn mass_on_orbit(m: Mass) -> bool {
+  return (u32(m.sink.w) & 4u) != 0u;
 }
 
 // Center of a uniform-grid cell. A 2D run lies in the plane z = 0, where the masses are.

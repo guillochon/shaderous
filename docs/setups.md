@@ -6,8 +6,8 @@ problem of the preset menu is such a file (`src/presets/<id>.json`), and a setup
 the Setup dialog is the same kind of file. Either can be saved, loaded on another machine,
 shared as a link, and passed to the headless runner and the MCP tools.
 
-A file holds numbers and names, never code or formulas, so a file from a stranger is safe to
-open. Reading one never trusts it: keys this build does not know are dropped and listed, values
+A file holds numbers, names and, for a disk's density, formulas of a small fixed language that
+is parsed and never run as code, so a file from a stranger is safe to open. Reading one never trusts it: keys this build does not know are dropped and listed, values
 out of range are held to it and listed, and a value of the wrong type is an error.
 
 The source of truth for what a file may hold is the option table, `src/setup/options.ts`. The
@@ -90,10 +90,10 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 
 | Kind | Fields |
 |---|---|
-| `mass` | A point mass: `gm` (G M), `pos`, `vel`, `soft` (softening, at least two cells), `sink` (radius; absent: the softening, 0: none), `sinkRate`, `massless`, `fixed` |
+| `mass` | A point mass: `gm` (G M), `pos`, `vel`, `soft` (softening, at least two cells), `sink` (radius; absent: the softening, 0: none), `sinkRate`, `massless`, `fixed`, `onOrbit` (held on its orbit: below) |
 | `orbit` | Not an object: places two bodies, `of: [idA, idB]`. `type: "binary"`: two point masses about their center of mass at pericenter (`q`, `separation`, `ecc`, `incl`, `retrograde`). `"flyby"`: a point mass on a parabola about a star that stays at the origin (`q`, `beta` = tidal radius over pericenter, `start` in tidal radii, `debris`). `"collision"`: two stars on a parabola (`impact` in sums of their radii, `starts`) |
 | `star` | `type: "polytrope"` (`n`, `radius`, and `mass` or `rhoc`) or `"white-dwarf"` (`mass`); `pos`, `vel`, `dye`, `X`; `field` (`type`: `dipole`, `random`, `gm17-dipole`, `gm17-random`; `beta`; `seed`). Stars are settled into the grid's own hydrostatic balance before the run |
-| `disk` | `about: [ids]`, `profile` (`thin`: a surface density with a cavity and a Gaussian vertical profile; `balanced`: a midplane density in vertical balance with the softened potential), `rIn`, `rOut`, `sigma0`, `slope`, `cs`, `floor`, `damp` (`from`, `rate`: the damping zone), `loops` (`beta`, `span`, `count`: field loops), `stresses` |
+| `disk` | `about: [ids]` (point masses, stars or both; the disk is centered on their center of mass and moves with it), `profile` (`thin`: a surface density with a cavity and a Gaussian vertical profile; `balanced`: a midplane density in vertical balance with the softened potential), `rIn`, `rOut`, `sigma0`, `slope`, `cs`, `floor`, `radialFn`, `verticalFn`, `verticalIn` (a density profile of your own: below), `damp` (`from`, `rate`: the damping zone), `loops` (`beta`, `span`, `count`: field loops), `stresses` |
 | `region` | A `shape` with a state that replaces what is under it: `rho`, `p` (or `energy`, a total spread over a sphere's cells), `v`, `s`, `X`; `supersample` for a smooth edge |
 | `obstacle`, `inflow` | A `shape` whose cells are solid, or held at their initial state |
 | `field` | A uniform magnetic field: `b` (a vector) or `up` (a strength along the axis drawn upward) |
@@ -102,6 +102,52 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 Shapes: `{ "type": "sphere", "center", "radius" }` (or `radiusCells`, in finest cells; a
 cylinder in 2D), `{ "type": "box", "min", "max" }` (a bound may be `null`: open on that side),
 `{ "type": "half", "normal", "at" }` (the side the normal points away from).
+
+### A point mass held on its orbit
+
+`"onOrbit": true` on a point mass holds it on its orbit: the other point masses move it and the
+gas does not. Neither the gas's pull nor what its sink takes changes its motion, and it does not
+grow, so a binary with both masses held keeps the orbit it was given, as in most studies of
+circumbinary disks. Its sink still takes gas, and what it took is still counted in the
+diagnostics. It can be switched while a run goes on: the Binary accretion preset has it as
+**Hold the orbit** beside its other fields.
+
+### Disk profiles of your own
+
+A disk's density in radius and in height can be a formula in place of the built-in laws:
+
+```json
+{ "kind": "disk", "about": ["star"], "profile": "balanced", "rIn": 1, "rOut": 4, "sigma0": 1e-3, "cs": 0.1,
+  "radialFn": "sigma0 * (r / rIn)^-1 * exp(-(r / rOut)^2) * step(r - rIn)",
+  "verticalFn": "1 / cosh(z)^2" }
+```
+
+- `radialFn` is the surface density (`thin`) or the midplane density (`balanced`) as a function
+  of the radius `r`. It may also name `rIn`, `rOut`, `sigma0`, `cs` and `H` (the scale height
+  cs / Ω at `r`). Where it is not a positive number there is no disk. The rotation of a
+  `balanced` disk follows from it: the pressure term uses its logarithmic slope.
+- `verticalFn` is the density relative to the midplane as a function of the height `z` above
+  it, the same on both sides. `z` is in scale heights of each radius, so the profile flares
+  with the disk, or in code lengths with `"verticalIn": "length"`. A `thin` disk keeps its
+  surface density whatever the shape. A disk with a vertical profile of its own is in vertical
+  balance only if the profile is, and settles as the run starts.
+
+A formula is arithmetic (`+ - * /`, powers as `x^y`, parentheses), numbers, the names above,
+`pi` and `e`, and these functions: `exp`, `log` (or `ln`), `log10`, `sqrt`, `abs`, `sin`, `cos`,
+`tan`, `atan`, `sinh`, `cosh`, `tanh`, `step(x)` (1 where x is positive: a sharp edge),
+`pow(x, y)`, `min(a, b)`, `max(a, b)`, `clamp(x, lo, hi)`. It is parsed, never run as code, so a
+file with formulas is as safe to open as any other; anything else in it is an error that names
+the place. The damping zone's target is generated from the same formula.
+
+A file may give either profile as a table of points instead: `"radial": [[1, 1e-3], [2, 2.5e-4],
+[3, 0]]` (radius, density; a power law between points, no disk outside them) and
+`"vertical": [[0, 1], [2, 0]]` (height, relative density; straight lines between points). A
+formula wins over a table.
+
+About a star, keep the disk's inner radius outside 1.3 of the star's radius: the star is
+settled within that, and gas there that is not the star's is left as it is. Where a setup names
+a background density (or has stars, with the gas around them), that gas shows wherever the
+disk is thinner than it.
 
 ## What cannot be combined
 
@@ -118,7 +164,7 @@ file that breaks a rule still opens; the dialog's issues list says which. The ru
 | White dwarf | the degenerate or Helmholtz equation of state; no polytropic star |
 | Polytropic star | an equation of state with an energy; no white dwarf |
 | Point mass, disk | no periodic face |
-| Disk | a point mass to orbit |
+| Disk | a point mass or a star to orbit |
 | Damping zone | one a run |
 | Frame follows the gas or the masses | a point mass |
 | Cooling, conduction, a region's total energy | an equation of state with an energy |

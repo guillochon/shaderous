@@ -1430,7 +1430,7 @@ export class AmrSim implements Simulation {
     const t0 = performance.now();
     // On the GPU where every star's gas is one the GPU knows; the CPU's settling reads the whole
     // mesh back, some 100 bytes a cell, which a mesh of tens of GB does not fit in a page.
-    const onGpu = set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
+    const onGpu = !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
     this.settled = (async () => {
       try {
         setLoadStage(settleStage(0));
