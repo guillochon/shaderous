@@ -26,10 +26,13 @@ import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { Multipoles } from '../gravity/multipole';
 import { LumpReader } from '../gravity/lumps';
 import { MassSums } from '../gravity/mass_sums';
-import { makeEos } from '../eos/eos';
+import { makeEos, type Eos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
-import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells, type Settling } from '../problems/settle';
+import { placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
+
+/** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
+const SETTLE_CPU_CELLS = 4e7;
 import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
@@ -1411,42 +1414,7 @@ export class AmrSim implements Simulation {
         }
         const leaf = await this.readLeaves();
         if (epoch !== this.settleEpoch) return;
-        const cells: SettleCells = {
-          count: leaf.count,
-          pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]],
-          vol: (q) => leaf.dx[q] ** 3,
-          u1: leaf.u1,
-          u2: leaf.u2,
-        };
-        const { u1, u2 } = cells;
-        let peak = 0;
-        for (let q = 0; q < cells.count; q++) peak = Math.max(peak, u1[q * 4]);
-        const settler = new Settler(set, cells);
-        const per = BS ** 3;
-        // Only the blocks a star may reach are ever rewritten.
-        const leaves = tree.leaves().filter((_, i) => settler.owner.subarray(i * per, (i + 1) * per).some((o) => o >= 0));
-        const index = new Map(tree.leaves().map((b, i) => [b, i]));
-        const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
-        const upload = (tex: GPUTexture, u: Float32Array) =>
-          leaves.forEach((b) => {
-            const i = index.get(b)!;
-            d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
-          });
-        this.settleLog = [];
-        for (let round = 0; round < SETTLE_ROUNDS; round++) {
-          setLoadStage(settleStage(round));
-          const phi = await this.readLeafPotential();
-          if (epoch !== this.settleEpoch || tree !== this.tree) return;
-          const change = settler.round(phi);
-          this.settleLog.push(change / peak);
-          upload(this.state[this.cur][0], u1);
-          this.refreshPotential();
-          if (change < (set.tol ?? SETTLE_TOL) * peak) break;
-        }
-        settler.finish(eos.eintFromP);
-        upload(this.state[this.cur][0], u1);
-        upload(this.state[this.cur][1], u2);
-        this.refreshPotential();
+        await this.settleOnCpu(set, eos, leaf, () => epoch !== this.settleEpoch || tree !== this.tree);
       } finally {
         if (epoch === this.settleEpoch) {
           this.settling = false;
@@ -1455,6 +1423,94 @@ export class AmrSim implements Simulation {
         }
       }
     })();
+  }
+
+  /** The leaves' cells as readLeaves() returned them, for settling. */
+  private static cellsOf(leaf: LeafCells): SettleCells {
+    return { count: leaf.count, pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]], vol: (q) => leaf.dx[q] ** 3, u1: leaf.u1, u2: leaf.u2 };
+  }
+
+  /**
+   * The rounds of a settling on the CPU, on the leaves' cells as read back. `emag`: magnetic
+   * energy to add to a cell's E afterward. `stale`: the run was reset or the mesh changed.
+   */
+  private async settleOnCpu(set: Settling, eos: Eos, leaf: LeafCells, stale: () => boolean, emag?: (s: Settler, q: number) => number) {
+    const d = this.device;
+    const tree = this.tree;
+    const cells = AmrSim.cellsOf(leaf);
+    const { u1, u2 } = cells;
+    let peak = 0;
+    for (let q = 0; q < cells.count; q++) peak = Math.max(peak, u1[q * 4]);
+    const settler = new Settler(set, cells);
+    const per = BS ** 3;
+    // Only the blocks a star may reach are ever rewritten.
+    const leaves = tree.leaves().filter((_, i) => settler.owner.subarray(i * per, (i + 1) * per).some((o) => o >= 0));
+    const index = new Map(tree.leaves().map((b, i) => [b, i]));
+    const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
+    const upload = (tex: GPUTexture, u: Float32Array) =>
+      leaves.forEach((b) => {
+        const i = index.get(b)!;
+        d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
+      });
+    this.settleLog = [];
+    for (let round = 0; round < SETTLE_ROUNDS; round++) {
+      setLoadStage(settleStage(round));
+      const phi = await this.readLeafPotential();
+      if (stale()) return;
+      const change = settler.round(phi);
+      this.settleLog.push(change / peak);
+      upload(this.state[this.cur][0], u1);
+      this.refreshPotential();
+      if (change < (set.tol ?? SETTLE_TOL) * peak) break;
+    }
+    settler.finish(eos.eintFromP);
+    if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
+    upload(this.state[this.cur][0], u1);
+    upload(this.state[this.cur][1], u2);
+    this.refreshPotential();
+  }
+
+  /**
+   * Settle the star `star` just placed with the star tool (placeStar) among the gas that is
+   * there, on the CPU: the whole mesh is read back, so a mesh of more than SETTLE_CPU_CELLS
+   * cells is left as the tool placed it. Returns why not, if it is not settled; '' once it is.
+   */
+  async settleStar(star: PlacedStar): Promise<string> {
+    const c = this.cfg;
+    if (!c.wellBalanced || !this.selfGravity) return 'it needs self-gravity and the well-balanced scheme';
+    if (this.tree.leaves().length * BS ** 3 > SETTLE_CPU_CELLS) return 'the mesh is too large to read back';
+    const epoch = ++this.settleEpoch;
+    const tree = this.tree;
+    const stale = () => epoch !== this.settleEpoch || tree !== this.tree;
+    const leaf = await this.readLeaves();
+    if (stale()) return '';
+    const eos = makeEos(c.eos, c.eosParams);
+    const { u1, u2 } = leaf;
+    const set = placedSettling(star, c.G, AmrSim.cellsOf(leaf), eos.pressure, c.problem.box);
+    if (typeof set === 'string') return set;
+    // With a magnetic field, E holds its energy too: what is left of E in a cell goes back in.
+    const rest = this.mhd ? new Float32Array(leaf.count) : null;
+    if (rest) {
+      for (let q = 0, o = 0; q < rest.length; q++, o += 4) {
+        const ke = (0.5 * (u1[o + 1] ** 2 + u1[o + 2] ** 2 + u1[o + 3] ** 2)) / Math.max(u1[o], 1e-30);
+        rest[q] = Math.max(u2[o] - ke - u2[o + 1], 0);
+      }
+    }
+    this.settling = true;
+    const t0 = performance.now();
+    this.settled = (async () => {
+      try {
+        await this.settleOnCpu(set, eos, leaf, stale, rest ? (st, q) => (st.rewrote[q] ? rest[q] : 0) : undefined);
+      } finally {
+        if (epoch === this.settleEpoch) {
+          this.settling = false;
+          setLoadStage('');
+          this.settleMs = performance.now() - t0;
+        }
+      }
+    })();
+    await this.settled;
+    return '';
   }
 
   /**

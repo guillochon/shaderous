@@ -10,7 +10,12 @@ import { canPickFolder, checkpointIndex, download, downloadSink, nextCheckpoint,
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
-import type { DisplaySystem } from '../units/units';
+import { unitOf, type DisplaySystem } from '../units/units';
+import { ASTRO } from '../units/constants';
+import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
+import { initialFaces } from '../mhd/mhd';
+import { blockFaces } from '../mhd/amr_mhd';
+import type { Block } from '../amr/tree';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
@@ -18,12 +23,13 @@ import { amrFits, createSim, fieldShaderFor, maxAmrLevels, minAmrLevels, support
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
+import { prepareHelmholtz } from '../eos/helmholtz';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
 import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
-import type { PointMass } from '../problems/types';
+import type { MhdSpec, PointMass } from '../problems/types';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 import { installApi, type RecordingStatus } from './api';
 
@@ -412,7 +418,7 @@ TOOLS.push({
 });
 TOOLS.push({
   kind: 'star', label: 'Star',
-  title: 'Star: click to place a polytropic star, or press and drag to set it moving (a longer drag is faster). Size is its radius; it takes over the gas wherever it is denser. Switches self-gravity on',
+  title: 'Star: click to place a polytropic star, or press and drag to set it moving (a longer drag is faster). Size is its radius; it takes over the gas wherever it is denser, and is settled into balance on the grid as a preset’s star is. Switches self-gravity on',
   icon: icon('<path d="M8 2.1L9.6 6.4L14.2 6.6L10.6 9.4L11.8 13.9L8 11.3L4.2 13.9L5.4 9.4L1.8 6.6L6.4 6.4z" />'),
 });
 TOOLS.push({
@@ -494,9 +500,24 @@ const toolMoves = () => (tool === 'sink' && !sinkFixed) || (tool === 'source' &&
 /** The sink tool places a point mass rather than a massless sink. */
 const sinkHasMass = () => toolParams.sink.mass > 0;
 let tool: ToolKind | null = null;
-/** Star tool: polytropic index, and log10 of the central density (1, as in the polytrope preset). */
+/**
+ * Star tool: polytropic index, and log10 of the central density (1, as in the polytrope preset),
+ * which the Mass slider holds: the mass it shows is that of a star of this density and the
+ * tool's Size. Its magnetic field, as the polytrope preset's variants have it: none, a dipole
+ * along z or a random (Kolmogorov) one, with log10 of the plasma beta at its center.
+ */
 let starN = 1.5;
 let starLogRho = 0;
+type StarField = 'none' | 'dipole' | 'random';
+const STAR_FIELDS: { kind: StarField; label: string; title: string }[] = [
+  { kind: 'none', label: 'B=0', title: 'No magnetic field' },
+  { kind: 'dipole', label: 'Dip', title: 'A dipole field along z, confined to the star. The run becomes a magnetized one: it is loaded again from the state it is in, which Reset then returns to' },
+  { kind: 'random', label: 'Rand', title: 'A tangled field with a Kolmogorov spectrum, confined to the star. The run becomes a magnetized one: it is loaded again from the state it is in, which Reset then returns to' },
+];
+let starField: StarField = 'none';
+let starLogBeta = 3;
+/** Mass of the star tool's star in code units, per unit central density. */
+const starMassPerRho = () => polytropeMass(laneEmdenCached(starN), 1, toolParams.star.size * cfg.problem.box);
 /** Mass tool: new gas brings no momentum of its own. */
 let massAtRest = true;
 const slider = (id: string, label: string, title: string, min: number, max: number) =>
@@ -507,8 +528,10 @@ $('tools').innerHTML =
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the center', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
-    <label class="scrub" id="tp-rhoc-row" title="Central density of the star"><input id="tp-rhoc" type="range" min="-3" max="3" step="0.05" aria-label="Central density of the star" /><span>ρc<output id="tp-rhoc-out"></output></span></label>
+    <label class="scrub" id="tp-rhoc-row" title="Mass of the star (in solar masses where the setup has physical units, with Size in solar radii). The slider sets its central density, from a thousandth to a thousand times the code unit: at a given Size the mass follows it"><input id="tp-rhoc" type="range" min="-3" max="3" step="0.05" aria-label="Mass of the star" /><span>Mass<output id="tp-rhoc-out"></output></span></label>
     <div id="tool-index" title="Polytropic index n: p = K ρ^(1 + 1/n). 1.5 is a convective star, 3 a radiative one like the Sun">${STAR_INDICES.map((n) => `<button id="${starId(n)}" aria-pressed="false" title="n = ${n}">n=${n}</button>`).join('')}</div>
+    <div id="tool-field">${STAR_FIELDS.map((f) => `<button id="star-b-${f.kind}" aria-pressed="false" title="${f.title}">${f.label}</button>`).join('')}</div>
+    <label class="scrub" id="tp-beta-row" title="Plasma beta at the star's center: the gas pressure over the magnetic pressure B² / 2 there (a random field's on average). The larger, the weaker the field"><input id="tp-beta" type="range" min="1" max="7" step="0.05" aria-label="Plasma beta at the star's center" /><span>β<output id="tp-beta-out"></output></span></label>
     ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it is a particle without mass: it takes gas away at the Flux rate and moves as gravity takes it, but pulls on nothing and never grows. With a mass it is a point mass with softened gravity: it pulls on the gas and grows by what it takes in', 0, 2)}
     ${slider('soften', 'Soft', 'Softening length of the point mass\u2019s gravity, as a share of the box: within it the pull falls away instead of growing without limit, so gas and other masses can pass close by. Size is the radius of its sink', 0.002, 0.3)}
     <button id="tool-fixed" aria-pressed="false" title="Fixed: it stays where it is placed, whatever pulls on it (and a drag aims a source\u2019s gas). Off: it moves as gravity takes it, and a drag sets it going">Fixed</button>
@@ -572,11 +595,16 @@ function syncTools() {
   // A sink has no soft edge to set: it always fades from the center. A star's edge is its
   // own profile.
   $('tp-softness-row').hidden = tool === 'sink' || tool === 'star';
-  $('tp-rhoc-row').hidden = $('tool-index').hidden = tool !== 'star';
+  $('tp-rhoc-row').hidden = $('tool-index').hidden = $('tool-field').hidden = tool !== 'star';
+  $('tp-beta-row').hidden = tool !== 'star' || starField === 'none';
   for (const n of STAR_INDICES) $(starId(n)).setAttribute('aria-pressed', String(starN === n));
+  for (const f of STAR_FIELDS) $(`star-b-${f.kind}`).setAttribute('aria-pressed', String(starField === f.kind));
   const rc = $<HTMLInputElement>('tp-rhoc');
   rc.value = String(starLogRho);
   rc.style.setProperty('--p', `${(100 * (starLogRho + 3)) / 6}%`);
+  const be = $<HTMLInputElement>('tp-beta');
+  be.value = String(starLogBeta);
+  be.style.setProperty('--p', `${(100 * (starLogBeta - 1)) / 6}%`);
   // The same slider is the amount of a dab of mass and the flux of a source or sink.
   const flux = tool === 'source' || tool === 'sink';
   $('tp-amount-row').title = tool === 'source'
@@ -647,15 +675,19 @@ const massPos = (x: number, r: { lo: number; hi: number }) =>
   x <= 0 ? 0 : Math.min(1, Math.max(0.001, Math.log(x / r.lo) / Math.log(r.hi / r.lo)));
 const massAt = (p: number, r: { lo: number; hi: number }) => (p <= 0 ? 0 : r.lo * (r.hi / r.lo) ** p);
 
-type ToolSlider = 'size' | 'softness' | 'amount' | 'mass' | 'soften' | 'rhoc';
-const TOOL_SLIDERS: ToolSlider[] = ['size', 'softness', 'amount', 'mass', 'soften', 'rhoc'];
+type ToolSlider = 'size' | 'softness' | 'amount' | 'mass' | 'soften' | 'rhoc' | 'beta';
+const TOOL_SLIDERS: ToolSlider[] = ['size', 'softness', 'amount', 'mass', 'soften', 'rhoc', 'beta'];
+/** The star tool's sliders that hold the log10 of what they set. */
+const logSlider = (k: ToolSlider): k is 'rhoc' | 'beta' => k === 'rhoc' || k === 'beta';
 
-/** A tool slider's setting: what the slider holds (the log of the density for a star's). */
-const toolSetting = (k: ToolSlider): number => (k === 'rhoc' ? starLogRho : toolParams[tool!][k]);
+/** A tool slider's setting: what the slider holds (the log of the density, or of beta, for a star's). */
+const toolSetting = (k: ToolSlider): number => (k === 'rhoc' ? starLogRho : k === 'beta' ? starLogBeta : toolParams[tool!][k]);
 
 /**
  * How a tool slider's value is shown: the number is the setting (10 to its power, for a star's
- * density) times `factor`, followed by `unit`. In physical units that is what the tool sets:
+ * density and beta) times `factor`, followed by `unit`. A star's size and mass are shown in
+ * solar radii and masses in physical units, as the polytrope preset's are (in code units: its
+ * radius as a share of the box, and its mass). In physical units that is what the tool sets:
  * the brush radius, the gas a dab adds, a source's or sink's flux and a point mass's mass, at
  * the scales the tools measure against now (so it follows the run). In code units, or for a
  * scale-free problem, it is the share the slider sets: size and amount in percent, mass as a
@@ -668,12 +700,17 @@ function toolReadout(k: ToolSlider): { factor: number; unit: string } {
   const box = cfg.problem.box;
   const { rhoMax, vRef } = toolRefs();
   const phys = (factor: number, m: Measure) => ({ factor: factor * u.scale(m), unit: ` ${u.label(m)}` });
+  // The star tool speaks of its star as the polytrope preset does: in solar radii and masses.
+  const pu = shown && tool === 'star' ? problemUnits(cfg.problem, cfg.params) : undefined;
   switch (k) {
     case 'size':
+      if (pu) return { factor: (box * unitOf(pu, 'length')) / ASTRO.Rsun, unit: ' R☉' };
+      return shown ? phys(box, 'length') : { factor: 100, unit: '%' };
     case 'soften': return shown ? phys(box, 'length') : { factor: 100, unit: '%' };
+    case 'beta': return { factor: 1, unit: '' };
     case 'softness': return { factor: 1, unit: '' };
     case 'mass': return shown ? phys(lastDiag?.mass ?? box ** cfg.ndim, 'mass') : { factor: 1, unit: '\u00d7' };
-    case 'rhoc': return shown ? phys(1, 'density') : { factor: 1, unit: '' };
+    case 'rhoc': return pu ? { factor: (starMassPerRho() * unitOf(pu, 'mass')) / ASTRO.Msun, unit: ' M☉' } : { factor: starMassPerRho(), unit: '' };
     case 'amount': {
       // A point mass's flux is a share of the orbital rate at its edge, in any units.
       if (!shown || (tool === 'sink' && sinkHasMass())) return { factor: 100, unit: '%' };
@@ -686,7 +723,7 @@ function toolReadout(k: ToolSlider): { factor: number; unit: string } {
 }
 
 /** The number a tool slider shows (without its unit). */
-const toolShown = (k: ToolSlider) => (k === 'rhoc' ? 10 ** starLogRho : toolSetting(k)) * toolReadout(k).factor;
+const toolShown = (k: ToolSlider) => (logSlider(k) ? 10 ** toolSetting(k) : toolSetting(k)) * toolReadout(k).factor;
 
 function showToolValues() {
   if (!cfg || tool === null || tool === 'query') return;
@@ -725,12 +762,13 @@ function editToolValue(k: ToolSlider) {
     row.classList.remove('editing');
     if (!apply || !Number.isFinite(v) || tool === null || tool === 'query') return;
     const x = v / toolReadout(k).factor;
-    if (k === 'rhoc' && !(x > 0)) return;
+    if (logSlider(k) && !(x > 0)) return;
     const mr = k === 'mass' ? massRange() : null;
     const setting = mr
       ? (x <= 0 ? 0 : Math.min(mr.hi, Math.max(mr.lo, x)))
-      : Math.min(+range.max, Math.max(+range.min, k === 'rhoc' ? Math.log10(x) : x));
+      : Math.min(+range.max, Math.max(+range.min, logSlider(k) ? Math.log10(x) : x));
     if (k === 'rhoc') starLogRho = setting;
+    else if (k === 'beta') starLogBeta = setting;
     else toolParams[tool][k] = setting;
     syncTools();
   };
@@ -792,6 +830,16 @@ $('tp-rhoc').addEventListener('input', () => {
   starLogRho = +$<HTMLInputElement>('tp-rhoc').value;
   syncTools();
 });
+$('tp-beta').addEventListener('input', () => {
+  starLogBeta = +$<HTMLInputElement>('tp-beta').value;
+  syncTools();
+});
+for (const f of STAR_FIELDS) {
+  $(`star-b-${f.kind}`).addEventListener('click', () => {
+    starField = f.kind;
+    syncTools();
+  });
+}
 for (const n of STAR_INDICES) {
   $(starId(n)).addEventListener('click', () => {
     starN = n;
@@ -1173,11 +1221,11 @@ function syncControls() {
     ? pending.pick
       ? `Not loaded yet: press Run to load ${gProblem.label} at ${g.n}${g2 ? '²' : '³'}${g.levels ? ` with ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''}.`
       : 'Changed, not loaded yet: press Run to start again with the new parameters.'
-    : cfg.restart ? `Loaded from a file, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
+    : cfg.restart ? `${cfg.restart.tool ? 'A star’s magnetic field was added' : 'Loaded from a file'}, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
   $<HTMLSelectElement>('eos').value = cfg.eos;
-  // The tabulated white dwarf equation of state needs physical units and its table, which a preset that uses it brings.
+  // The tabulated white dwarf equation of state works in cgs: only a preset with physical units can use it.
   const helmOpt = $<HTMLSelectElement>('eos').querySelector<HTMLOptionElement>('option[value="helmholtz"]');
-  if (helmOpt) helmOpt.disabled = cfg.problem.eos !== 'helmholtz';
+  if (helmOpt) helmOpt.disabled = cfg.problem.eos !== 'helmholtz' && !cfg.problem.units;
   $<HTMLInputElement>('gamma').value = String(+cfg.eosParams.gamma.toFixed(4));
   $<HTMLInputElement>('K').value = String(cfg.eosParams.K);
   $<HTMLInputElement>('arad').value = String(cfg.eosParams.arad);
@@ -1440,10 +1488,12 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (link) {
       // Settings carried by a shared link, on top of the preset's defaults.
       Object.assign(next, link.cfg);
+      Object.assign(next.params, link.params);
+      // Units that follow the preset's parameters: the equation of state's physical constants are the link's parameters', not the defaults'.
+      if (typeof problem.units === 'function') Object.assign(next.eosParams, physicalEosParams(problemUnits(problem, next.params), problem.composition), problem.eosParams);
       Object.assign(next.eosParams, link.eosParams);
       Object.assign(next.coolParams, link.coolParams);
       next.fluff = { ...next.fluff, ...link.fluff };
-      Object.assign(next.params, link.params);
       if (ndim === 2) {
         if (isSelfGravity(next.gravity)) next.gravity = 'off';
         next.bcLo = [next.bcLo[0], next.bcLo[1], 0];
@@ -1814,6 +1864,8 @@ function switchEos(kind: EosKind) {
         // One pass per submit: the brush block is written through the queue.
         gpu.device.queue.submit([enc.finish()]);
       };
+      // The tabulated equation of state needs its table on the device before its shaders are built.
+      if (kind === 'helmholtz') await prepareHelmholtz(gpu.device);
       convert('eos-out');
       setEos();
       s.cfg = cfg;
@@ -3235,7 +3287,8 @@ function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass
 /**
  * Place a polytropic star of the tool's index, central density and radius at `pos` (in
  * fractions of the box), moving at `vel`. Switches self-gravity on if it is off: isolated, or
- * periodic in a fully periodic box.
+ * periodic in a fully periodic box. The star is then settled into the grid's own balance, as a
+ * preset's is (problems/settle.ts), and given the tool's magnetic field, if it has one.
  */
 function placeStar(pos: Vec3, vel: Vec3) {
   if (!sim || cfg.ndim !== 3) return;
@@ -3269,6 +3322,10 @@ function placeStar(pos: Vec3, vel: Vec3) {
   }
   notice(notes.join('; '));
   const target = sim;
+  const box = cfg.problem.box;
+  const star = { n: starN, K: op.star!.K, rhoc, center: pos.map((x) => (x - 0.5) * box), vel, R: q.size * box };
+  const field = starField;
+  const beta = 10 ** starLogBeta;
   syncControls();
   enqueue(async () => {
     if (target !== sim) return;
@@ -3278,9 +3335,82 @@ function placeStar(pos: Vec3, vel: Vec3) {
     if (target !== sim) return;
     // Self-gravity has to hear about the new mass.
     const d = await target.diagnostics();
-    if (target === sim) target.massChanged(d.mass);
+    if (target !== sim) return;
+    target.massChanged(d.mass);
     lastDiag = undefined;
+    const why = await target.settleStar(star);
+    if (target !== sim) return;
+    if (why) notice([...notes, `the star is as placed, not settled: ${why}`].join('; '));
+    if (field !== 'none') await magnetizeStar(star, field, beta);
   });
+}
+
+/**
+ * Thread the star just placed with a field, as the polytrope preset's variants are: a dipole
+ * along z or a random field, confined to where its pressure is above a hundredth of the
+ * center's, with plasma beta `beta` there (mhd/star_fields.ts). A field is part of how a run is
+ * built, so the run is built again as a magnetized one, from the state it is in: that state is
+ * what Reset then returns to. A field the run already has stays, with the star's added to it.
+ * Called from within a queued job.
+ */
+async function magnetizeStar(star: { n: number; K: number; rhoc: number; center: number[]; R: number }, kind: 'dipole' | 'random', beta: number) {
+  const old = sim;
+  if (!old) return;
+  const le = laneEmdenCached(star.n);
+  const g = 1 + 1 / star.n;
+  const pc = star.K * star.rhoc ** g;
+  const profile: StarProfile = {
+    pressure: (r) => (r >= star.R ? 0 : star.K * Math.pow(star.rhoc * Math.pow(le.theta(r / star.R), star.n), g)),
+    pc,
+    pcut: 0.01 * pc,
+    radius: star.R,
+  };
+  const A = kind === 'dipole' ? dipoleField(profile, beta) : randomField(profile, beta, 1);
+  const [cx, cy, cz] = star.center;
+  const added: MhdSpec = { potential: () => (x, y, z) => A(x - cx, y - cy, z - cz) };
+  setLoadStage('Adding the magnetic field');
+  try {
+    const snap = await capture(old, { program: 'shaderous', build: BUILD, query: linkQuery() });
+    if (old !== sim) return;
+    const root = cfg.n >> cfg.amrLevels;
+    const from = restartFrom(snap, cfg.problem, cfg.amrLevels > 0, root);
+    // The star's field alone, for the grid's faces; what the run had is added face by face.
+    const alone: SimConfig = { ...cfg, problem: { ...cfg.problem, mhd: added } };
+    const sum = (a: Float32Array, b: Float32Array) => a.map((v, i) => v + b[i]);
+    const had = from.problem.mhd;
+    const box = cfg.problem.box;
+    const levels = cfg.amrLevels;
+    const mhd: MhdSpec = had?.faces
+      ? { faces: (n, nz) => sum(had.faces!(n, nz), initialFaces(alone, n, nz, box / n)) }
+      : had?.block
+        ? { block: (level, c) => sum(had.block!(level, c), blockFaces(alone, { level, c } as Block, box / root, levels)) }
+        : added;
+    const next: SimConfig = { ...cfg, problem: { ...from.problem, mhd }, restart: { ...from.restart!, tool: true } };
+    next.tStop = ckpt.on ? nextCheckpoint(next.restart!.time, ckpt.every) : undefined;
+    // Sources and the tools' own masses are part of the saved state now, or gone.
+    sim = undefined;
+    stroke = null;
+    draft = null;
+    pendingBrush = null;
+    sources = [];
+    placed = [];
+    dropPin();
+    old.destroy();
+    await gpu.device.queue.onSubmittedWorkDone();
+    gpu.device.queue.submit([]);
+    await gpu.device.queue.onSubmittedWorkDone();
+    await new Promise((r) => setTimeout(r, 250));
+    cfg = next;
+    renderer.fieldPipelines(fieldShaderFor(cfg), cfg, cfg.amrLevels > 0 && cfg.ndim === 3).catch(() => {});
+    const s = await createSim(gpu, cfg, { deferUpdate: true });
+    await renderer.attach(s);
+    sim = s;
+    finished = false;
+    lastDiag = undefined;
+  } finally {
+    setLoadStage('');
+    if (cfg) syncControls();
+  }
 }
 
 // --- orbit preview --------------------------------------------------------------------------
@@ -4331,4 +4461,15 @@ const api = installApi(
 );
 
 // Handles for the console and for tests.
-Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get batch() { return batch; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; }, timing: { ...frameTiming, set: setTiming } } });
+Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { return cfg; }, view, get diag() { return lastDiag; }, get batch() { return batch; }, get stepRate() { return stepRate; }, get fps() { return fps; }, get pollMs() { return pollMs; }, timing: { ...frameTiming, set: setTiming },
+  /** The star tool, as a click with these settings would use it: resolves once the star is placed, settled and magnetized. */
+  placeStar(pos: Vec3, o: { n?: number; size?: number; logRho?: number; field?: StarField; logBeta?: number; vel?: Vec3 } = {}) {
+    if (o.n !== undefined) starN = o.n;
+    if (o.size !== undefined) toolParams.star.size = o.size;
+    if (o.logRho !== undefined) starLogRho = o.logRho;
+    if (o.field !== undefined) starField = o.field;
+    if (o.logBeta !== undefined) starLogBeta = o.logBeta;
+    placeStar(pos, o.vel ?? [0, 0, 0]);
+    return enqueue(async () => {}).then(() => toolNotice);
+  },
+} });

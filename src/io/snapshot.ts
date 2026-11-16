@@ -182,4 +182,6 @@ export interface Restart {
   levelAt?: (x: number, y: number, z: number) => number;
   /** debris energies: what had left the box by then, per energy bin */
   debris?: DebrisLedger;
+  /** the state is the run's own, taken when the star tool gave a star a magnetic field (ui/app.ts) */
+  tool?: boolean;
 }

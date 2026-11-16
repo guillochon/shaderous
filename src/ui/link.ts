@@ -4,9 +4,9 @@
 // differs from that preset's defaults, so most links stay short. Anything unrecognized or
 // out of range in a link is ignored rather than trusted.
 import { configFor, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
-import { EOS_LABELS, type EosKind, type EosParams } from '../eos/eos';
+import { EOS_LABELS, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { FIELDS, GRAVITY_MODES, PROBLEMS, problemById, type Bc3, type GravityMode, type Problem } from '../problems';
+import { FIELDS, GRAVITY_MODES, PROBLEMS, problemById, problemUnits, type Bc3, type GravityMode, type Problem } from '../problems';
 import { defaultView, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
@@ -79,6 +79,9 @@ export function encodeLink(s: LinkState): URLSearchParams {
   if (cfg.amrLevels) q.set('amr', String(cfg.amrLevels));
 
   const def = configFor(cfg.problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels });
+  // Units that follow the preset's parameters set the equation of state's physical constants: the
+  // defaults to compare with are those of the run's parameters, which the link carries.
+  if (typeof cfg.problem.units === 'function') Object.assign(def.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
   const num = (key: string, a: number, b: number) => {
     if (fmt(a) !== fmt(b)) q.set(key, fmt(a));
   };

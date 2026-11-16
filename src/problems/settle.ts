@@ -81,6 +81,89 @@ export interface Settling {
   tol?: number;
   /** over-relaxation of the rounds' density updates (default 1: none) */
   relax?: number;
+  /**
+   * The stars were placed in gas that is already there (the star tool): a cell they do not
+   * take keeps the gas it has, and only one a star gives up becomes ambient gas.
+   */
+  keep?: boolean;
+  /**
+   * Gas that is not the stars', as softened points: its pull is
+   * undone as the other stars' is, so that a star is balanced in its own potential and not held
+   * against what it falls freely toward. `gm` is G times the mass.
+   */
+  others?: { gm: number; at: number[]; soft: number }[];
+}
+
+/** A polytrope the star tool has just placed: where, how it moves, and its profile's scales. */
+export interface PlacedStar {
+  n: number;
+  K: number;
+  rhoc: number;
+  /** center relative to the box center, velocity, radius */
+  center: number[];
+  vel: number[];
+  R: number;
+}
+
+/** How far from a placed star's center, in radii, its settling may reach. */
+const PLACED_REACH = 1.3;
+/** Parts per side the box is cut into, for the pull of the gas around a placed star. */
+const LUMPS = 6;
+
+/**
+ * The settling of a star placed among the gas of a run. The gas just outside it (between 1.05
+ * and PLACED_REACH radii) says what is around it: the star ends where it is no denser than
+ * the densest of that gas, and a cell it gives up takes that gas's mean density and pressure.
+ * The gas farther out, in LUMPS^3 parts of the box (side `box`), is what the star falls toward:
+ * its pull is left out of the star's balance. (Point masses are not in the grid's potential.)
+ * Returns why not, if the star cannot be settled where it is.
+ */
+export function placedSettling(
+  star: PlacedStar, G: number, cells: SettleCells, pressure: (rho: number, eint: number) => number,
+  box = 1,
+): Settling | string {
+  let peak = 0;
+  let vol = 0;
+  let mass = 0;
+  let pv = 0;
+  const lumps = new Float64Array(LUMPS ** 3 * 4);
+  const part = (x: number) => Math.min(LUMPS - 1, Math.max(0, Math.floor((x / box + 0.5) * LUMPS)));
+  for (let q = 0; q < cells.count; q++) {
+    const [x, y, z] = cells.pos(q);
+    const d = Math.hypot(x - star.center[0], y - star.center[1], z - star.center[2]) / star.R;
+    if (d > PLACED_REACH) {
+      const m = cells.u1[q * 4] * cells.vol(q);
+      const o = 4 * ((part(z) * LUMPS + part(y)) * LUMPS + part(x));
+      lumps[o] += m;
+      lumps[o + 1] += m * x;
+      lumps[o + 2] += m * y;
+      lumps[o + 3] += m * z;
+    }
+    if (d < 1.05 || d > PLACED_REACH) continue;
+    const rho = cells.u1[q * 4];
+    const v = cells.vol(q);
+    peak = Math.max(peak, rho);
+    vol += v;
+    mass += rho * v;
+    pv += pressure(rho, cells.u2[q * 4 + 1]) * v;
+  }
+  if (!(vol > 0)) return 'the box has no room around it';
+  if (peak > 0.1 * star.rhoc) return 'the gas around it is too dense';
+  // A lump is as wide as its part of the box: softened by half of that, it has no sharp center.
+  const others: NonNullable<Settling['others']> = [];
+  for (let o = 0; o < lumps.length; o += 4) {
+    const m = lumps[o];
+    if (m > 0) others.push({ gm: G * m, at: [lumps[o + 1] / m, lumps[o + 2] / m, lumps[o + 3] / m], soft: (0.5 * box) / LUMPS });
+  }
+  return {
+    others,
+    stars: [{ barotrope: polytropeBarotrope(star.n, star.K), center: star.center, vel: star.vel, R: star.R, reach: PLACED_REACH * star.R, scalar: 1 }],
+    rhoCut: peak,
+    rhoAmb: mass / vol,
+    pAmb: pv / vol,
+    G,
+    keep: true,
+  };
 }
 
 /** A single polytrope at rest at the box center (Problem.star). */
@@ -200,11 +283,20 @@ export class Settler {
   private vol: Float64Array;
   /** star each cell can belong to, or -1 for none (ambient for good) */
   readonly owner: Int32Array;
+  /** Settling.keep: the density of each cell that was not a star's at the start (0 for one that was) */
+  private kept: Float32Array | null = null;
+  /** the cells finish() wrote */
+  readonly rewrote: Uint8Array;
 
   constructor(private set: Settling, private grid: SettleCells) {
     const n = grid.count;
     this.owner = new Int32Array(n).fill(-1);
     this.vol = new Float64Array(n);
+    this.rewrote = new Uint8Array(n);
+    if (set.keep) {
+      this.kept = new Float32Array(n);
+      for (let q = 0; q < n; q++) if (!(grid.u1[q * 4] > set.rhoCut)) this.kept[q] = grid.u1[q * 4];
+    }
     const mine: number[][] = set.stars.map(() => []);
     this.mass = set.stars.map(() => 0);
     for (let q = 0; q < n; q++) {
@@ -254,14 +346,16 @@ export class Settler {
     // Each star is balanced in its own potential: the grid's, less the others' pull, which
     // outside a spherical star is that of a point of its mass at its center of mass.
     const at = this.set.stars.length > 1 ? this.centers() : [];
+    const others = this.set.others ?? [];
     this.set.stars.forEach((s, i) => {
       const idx = this.cells[i];
       const ph = new Float64Array(idx.length);
       for (let k = 0; k < idx.length; k++) {
         let p = phi[idx[k]];
-        if (at.length) {
+        if (at.length || others.length) {
           const [x, y, z] = this.grid.pos(idx[k]);
           for (let j = 0; j < at.length; j++) if (j !== i) p += (this.set.G * this.mass[j]) / Math.hypot(x - at[j][0], y - at[j][1], z - at[j][2]);
+          for (const m of others) p += m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
         }
         ph[k] = p;
       }
@@ -269,12 +363,14 @@ export class Settler {
       this.C[i] = C;
       for (let k = 0; k < idx.length; k++) {
         const o = idx[k] * 4;
-        const r = rho[k] > 0 ? rho[k] : rhoAmb;
+        // What the cell holds if the star does not: ambient gas, or the gas it had.
+        const out = this.kept && this.kept[idx[k]] > 0 ? this.kept[idx[k]] : rhoAmb;
+        const r = rho[k] > 0 ? rho[k] : out;
         change = Math.max(change, Math.abs(r - u1[o]));
         // Over-relaxed: the rounds converge geometrically, so going further than asked gets there sooner.
         const w = this.set.relax ?? 1;
         const next = u1[o] + w * (r - u1[o]);
-        u1[o] = next > rhoCut ? next : rhoAmb;
+        u1[o] = next > rhoCut ? next : out;
       }
     });
     return change;
@@ -289,6 +385,9 @@ export class Settler {
       const i = this.owner[q];
       if (i < 0) continue; // never part of a star: as the initial conditions set it
       const r = u1[o];
+      // Gas the star never took stays as it was.
+      if (!(r > rhoCut) && this.kept && this.kept[q] > 0) continue;
+      this.rewrote[q] = 1;
       if (r > rhoCut) {
         const s = this.set.stars[i];
         const eint = eintFromP(r, s.barotrope.pressure(r));

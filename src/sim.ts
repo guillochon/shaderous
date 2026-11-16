@@ -11,12 +11,12 @@ import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
 import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
-import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
+import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, problemUnits, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
-import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells } from './problems/settle';
+import { placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
 import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
@@ -205,6 +205,11 @@ export interface Simulation {
    * nothing may be encoded meanwhile.
    */
   placeStar(op: BrushOp): Promise<void>;
+  /**
+   * Settle a star just placed into the grid's own hydrostatic balance (problems/settle.ts), as
+   * a preset's star is. Resolves with '' once it has, or with why it could not be.
+   */
+  settleStar(star: PlacedStar): Promise<string>;
   /** Call once gas has been added or removed, with the new total mass: self-gravity is re-solved. */
   massChanged(mass: number): void;
   /**
@@ -1261,18 +1266,54 @@ export class Sim implements Simulation {
     const eos = makeEos(c.eos, c.eosParams);
     const set = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
     if (!set) return;
-    this.settling = true;
+    this.settleCells(set, u1, u2, eos, emag ? (_s, q) => emag[q] : undefined, epoch);
+  }
+
+  /**
+   * Settle the star `star` just placed with the star tool (placeStar) among the gas that is
+   * there. Returns why not, if it cannot be settled; '' once it has been.
+   */
+  async settleStar(star: PlacedStar): Promise<string> {
+    const c = this.cfg;
+    if (!c.wellBalanced || !this.selfGravity) return 'it needs self-gravity and the well-balanced scheme';
+    const epoch = ++this.settleEpoch;
+    const { u1, u2 } = await this.readState();
+    if (epoch !== this.settleEpoch) return '';
+    const eos = makeEos(c.eos, c.eosParams);
+    const set = placedSettling(star, c.G, this.cellsOf(u1, u2), eos.pressure, c.problem.box);
+    if (typeof set === 'string') return set;
+    // With a magnetic field, E holds its energy too: what is left of E in a cell goes back in.
+    const rest = this.mhd ? new Float32Array(u1.length / 4) : null;
+    if (rest) {
+      for (let q = 0, o = 0; q < rest.length; q++, o += 4) {
+        const ke = (0.5 * (u1[o + 1] ** 2 + u1[o + 2] ** 2 + u1[o + 3] ** 2)) / Math.max(u1[o], 1e-30);
+        rest[q] = Math.max(u2[o] - ke - u2[o + 1], 0);
+      }
+    }
+    this.settleCells(set, u1, u2, eos, rest ? (st, q) => (st.rewrote[q] ? rest[q] : 0) : undefined, epoch);
+    await this.settled;
+    return '';
+  }
+
+  /** The grid's cells and this state of them, for settling. */
+  private cellsOf(u1: Float32Array, u2: Float32Array): SettleCells {
     const vol = this.dx ** 3;
     const n = this.n;
-    const half = c.problem.box / 2;
+    const half = this.cfg.problem.box / 2;
     const at = (i: number) => (i + 0.5) * this.dx - half;
-    const cells: SettleCells = {
+    return {
       count: u1.length / 4,
       pos: (q) => [at(q % n), at(Math.floor(q / n) % n), at(Math.floor(q / (n * n)))],
       vol: () => vol,
       u1,
       u2,
     };
+  }
+
+  /** The rounds of a settling on the state (u1, u2), which is the grid's. `emag`: magnetic energy to add to a cell's E afterward. */
+  private settleCells(set: Settling, u1: Float32Array, u2: Float32Array, eos: Eos, emag: ((s: Settler, q: number) => number) | undefined, epoch: number) {
+    this.settling = true;
+    const cells = this.cellsOf(u1, u2);
     const t0 = performance.now();
     this.settled = (async () => {
       try {
@@ -1292,7 +1333,7 @@ export class Sim implements Simulation {
         }
         settler.finish(eos.eintFromP);
         // The settled E is the gas's own: a magnetic field's energy goes back in.
-        if (emag) for (let q = 0; q < emag.length; q++) u2[4 * q] += emag[q];
+        if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
         writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
         writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
         this.refreshPotential();
