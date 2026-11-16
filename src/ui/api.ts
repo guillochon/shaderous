@@ -15,7 +15,7 @@ import type { Diagnostics, SimConfig, Simulation } from '../sim';
 import { EOS_LABELS } from '../eos/eos';
 import { COOLING_LABELS } from '../cooling/cooling';
 import { FAMILIES, FIELDS, GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems';
-import { VIEW_MODES } from '../render/view_options';
+import { VIEW_EXTRAS, VIEW_MODES, VIEW_OPTIONS } from '../render/view_options';
 import { defaultFrameDt, problemUnits } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
@@ -728,11 +728,11 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     };
   }
 
-  const VIEW_KEYS = ['mode', 'field', 'species', 'log', 'lo', 'hi', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'tx', 'ty', 'tz', 'zoom', 'cx', 'cy', 'showBlocks', 'contours', 'nContours', 'fog', 'surfaceOpacity', 'light', 'box', 'fieldLines', 'fieldLineCount'];
+  const VIEW_KEYS: string[] = VIEW_OPTIONS.map((o) => o.key);
 
   function setView(changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean }) {
     const { colormap, autoRange, ...v } = changes;
-    for (const k of Object.keys(v)) if (!VIEW_KEYS.includes(k)) throw new Error(`unknown view setting "${k}": use one of ${[...VIEW_KEYS, 'colormap', 'autoRange'].join(', ')}`);
+    for (const k of Object.keys(v)) if (!VIEW_KEYS.includes(k)) throw new Error(`unknown view setting "${k}": use one of ${[...VIEW_KEYS, ...VIEW_EXTRAS.map((o) => o.key)].join(', ')}`);
     if (v.field !== undefined && !(v.field >= 0 && v.field < FIELDS.length)) throw new Error(`field is an index into FIELDS, 0 to ${FIELDS.length - 1}`);
     if (v.mode !== undefined && !VIEW_MODES.includes(v.mode)) throw new Error(`mode is one of ${VIEW_MODES.join(', ')}`);
     if (colormap !== undefined) {

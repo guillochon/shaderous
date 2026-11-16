@@ -6,7 +6,7 @@ import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
 import { FieldLines } from './fieldlines';
-import type { ViewMode } from './view_options';
+import type { ViewFromOptions, ViewMode } from './view_options';
 import { PathTube } from './pathtube';
 import { padded3d } from '../amr/dispatch';
 
@@ -75,6 +75,9 @@ export interface ViewState {
   fieldLines: boolean;
   fieldLineCount: number;
 }
+// The table of the view's settings (view_options.ts) names each of these, with its type, and nothing else.
+const _viewTable: ViewFromOptions extends ViewState ? (ViewState extends ViewFromOptions ? true : never) : never = true;
+void _viewTable;
 
 /** The background behind the box: dark, or white with `light`. */
 const BG_DARK = [0.05, 0.058, 0.078];

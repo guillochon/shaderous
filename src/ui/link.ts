@@ -11,18 +11,11 @@ import { CUSTOM_ID } from '../presets/custom';
 import { hasProblem, problemOf } from '../presets/lookup';
 import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../setup/options';
 import { defaultView, type ViewState } from '../render/renderer';
-import { VIEW_MODES } from '../render/view_options';
-import { MAX_FIELD_LINES } from '../render/fieldlines';
+import { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, VIEW_MODES, VIEW_OPTIONS, type ViewOption } from '../render/view_options';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../io/snapshot';
 
-/** Largest magnification of the slice view. */
-export const MAX_ZOOM = 256;
-/** Volume view: the nearest and farthest the camera comes to the point it orbits, in box lengths. */
-export const MIN_DIST = 0.225;
-export const MAX_DIST = 6;
-/** Most contour lines the slice and projection views draw. */
-export const MAX_CONTOURS = 40;
+export { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST };
 
 /** What a fresh visit shows. */
 export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 512, amr: 3 };
@@ -82,10 +75,9 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'tx', 'ty', 'tz', 'zoom', 'cx', 'cy', 'nContours', 'surfaceOpacity', 'fieldLineCount'] as const;
-const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', tx: 'tx', ty: 'ty', tz: 'tz', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont', surfaceOpacity: 'isoa', fieldLineCount: 'nflines',
-};
+// The view's settings come from one table (render/view_options.ts). The ends of the color
+// range travel as a pair, and only when the range is not automatic.
+const VIEW_LINKED = VIEW_OPTIONS.filter((o) => o.key !== 'lo' && o.key !== 'hi');
 
 export function encodeLink(s: LinkState): URLSearchParams {
   const { cfg, view } = s;
@@ -120,15 +112,10 @@ export function encodeLink(s: LinkState): URLSearchParams {
   for (const p of cfg.problem.params ?? []) num(`p.${p.id}`, cfg.params[p.id], p.value);
 
   const dv = viewDefaults(cfg.problem, cfg.ndim);
-  str('mode', view.mode, dv.mode);
-  for (const k of VIEW_NUMBERS) num(VIEW_KEYS[k], view[k], dv[k]);
-  str('log', flag(view.log), flag(dv.log));
-  str('blocks', flag(view.showBlocks), flag(dv.showBlocks));
-  str('contours', flag(view.contours), flag(dv.contours));
-  str('fog', flag(view.fog), flag(dv.fog));
-  str('light', flag(view.light), flag(dv.light));
-  str('box', flag(view.box), flag(dv.box));
-  str('flines', flag(view.fieldLines), flag(dv.fieldLines));
+  // In the order links have always been written: the mode, the numbers, then the switches.
+  for (const o of VIEW_LINKED) if (o.type === 'mode') str(o.link, view[o.key], dv[o.key]);
+  for (const o of VIEW_LINKED) if (o.type === 'number' || o.type === 'int') num(o.link, view[o.key], dv[o.key]);
+  for (const o of VIEW_LINKED) if (o.type === 'boolean') str(o.link, flag(view[o.key]), flag(dv[o.key]));
   if (!s.auto) {
     q.set('lo', fmt(view.lo));
     q.set('hi', fmt(view.hi));
@@ -291,37 +278,17 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     if (v !== undefined) out.params[p.id] = v;
   }
 
-  put(out.view, 'mode', pick('mode', VIEW_MODES));
-  const field = num('field', 0, FIELDS.length - 1);
-  put(out.view, 'field', field === undefined ? undefined : Math.round(field));
-  const species = num('species', 0, (problemOf(problem).species?.length ?? 1) - 1);
-  put(out.view, 'species', species === undefined ? undefined : Math.round(species));
-  const axis = num('axis', 0, 2);
-  put(out.view, 'sliceAxis', axis === undefined ? undefined : Math.round(axis));
-  put(out.view, 'slicePos', num('slice', 0, 0.999));
-  put(out.view, 'minRho', num('rhocut', 0, 1));
-  put(out.view, 'opacity', num('opacity', 1, 300));
-  put(out.view, 'yaw', num('yaw'));
-  put(out.view, 'pitch', num('pitch', -1.5, 1.5));
-  put(out.view, 'dist', num('dist', MIN_DIST, MAX_DIST));
-  put(out.view, 'tx', num('tx', 0, 1));
-  put(out.view, 'ty', num('ty', 0, 1));
-  put(out.view, 'tz', num('tz', 0, 1));
-  put(out.view, 'zoom', num('zoom', 1, MAX_ZOOM));
-  put(out.view, 'cx', num('cx', 0, 1));
-  put(out.view, 'cy', num('cy', 0, 1));
-  put(out.view, 'log', bool('log'));
-  put(out.view, 'showBlocks', bool('blocks'));
-  put(out.view, 'contours', bool('contours'));
-  put(out.view, 'fog', bool('fog'));
-  put(out.view, 'light', bool('light'));
-  put(out.view, 'box', bool('box'));
-  put(out.view, 'fieldLines', bool('flines'));
-  const nfl = num('nflines', 1, MAX_FIELD_LINES);
-  put(out.view, 'fieldLineCount', nfl === undefined ? undefined : Math.round(nfl));
-  put(out.view, 'surfaceOpacity', num('isoa', 0.01, 1));
-  const ncont = num('ncont', 1, MAX_CONTOURS);
-  put(out.view, 'nContours', ncont === undefined ? undefined : Math.round(ncont));
+  // The run sets the largest index of a field and of a species; the table sets every other limit.
+  const most: Partial<Record<string, number>> = { field: FIELDS.length - 1, species: (problemOf(problem).species?.length ?? 1) - 1 };
+  for (const o of VIEW_LINKED) {
+    if (o.type === 'mode') put(out.view, o.key, pick(o.link, VIEW_MODES));
+    else if (o.type === 'boolean') put(out.view, o.key, bool(o.link));
+    else {
+      const limits: ViewOption = o;
+      const v = num(o.link, limits.min, most[o.key] ?? limits.max);
+      put(out.view, o.key, v === undefined || o.type === 'number' ? v : Math.round(v));
+    }
+  }
   const lo = num('lo');
   const hi = num('hi');
   if (lo !== undefined && hi !== undefined && Number.isFinite(lo) && Number.isFinite(hi)) {

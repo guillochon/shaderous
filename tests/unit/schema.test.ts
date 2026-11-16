@@ -6,6 +6,7 @@ import { readSetup } from '../../src/setup/codec';
 import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../../src/setup/options';
 import { emptySetup, setPath, type SetupSpec } from '../../src/setup/spec';
 import { defaultView } from '../../src/render/renderer';
+import { VIEW_EXTRAS, VIEW_OPTIONS } from '../../src/render/view_options';
 import { decodeLink, type LinkReport } from '../../src/ui/link';
 import apiDoc from '../../docs/api.md?raw';
 
@@ -84,6 +85,25 @@ describe('link keys', () => {
 describe('the view', () => {
   it('the API reference lists each of its settings, and no other', () => {
     const listed = tableKeys(apiDoc, '### `view(changes)');
-    expect([...listed].sort()).toEqual([...Object.keys(defaultView()), 'colormap', 'autoRange'].sort());
+    expect([...listed].sort()).toEqual([...VIEW_OPTIONS, ...VIEW_EXTRAS].map((o) => o.key).sort());
+  });
+
+  it('its table is the state of the renderer, in order, and no two settings share a link key', () => {
+    expect(VIEW_OPTIONS.map((o) => o.key)).toEqual(Object.keys(defaultView()));
+    const links = [...VIEW_OPTIONS, ...VIEW_EXTRAS].map((o) => o.link).filter(Boolean);
+    expect(new Set(links).size).toBe(links.length);
+    const general = [...flatten(OPTIONS), ...Object.values(PART_OPTIONS).flatMap((k) => flatten(k.fields))].flatMap((o) => (o.linkKey ? [o.linkKey] : []));
+    expect(links.filter((k) => general.includes(k))).toEqual([]);
+  });
+
+  it('a link carries every setting there and back', () => {
+    const q = new URLSearchParams({ problem: 'kelvin-helmholtz', mode: 'slice', field: '2', axis: '1', slice: '0.25', rhocut: '0.5', opacity: '80', yaw: '9', pitch: '1', dist: '3', tx: '0.1', ty: '0.2', tz: '0.3', zoom: '4', cx: '0.6', cy: '0.7', ncont: '12', isoa: '0.25', nflines: '300.4', log: '0', blocks: '0', contours: '1', fog: '0', light: '1', box: '0', flines: '1' });
+    const report: LinkReport = { ignored: [] };
+    expect(decodeLink(q, report).view).toEqual({ mode: 'slice', field: 2, sliceAxis: 1, slicePos: 0.25, minRho: 0.5, opacity: 80, yaw: 9, pitch: 1, dist: 3, tx: 0.1, ty: 0.2, tz: 0.3, zoom: 4, cx: 0.6, cy: 0.7, nContours: 12, surfaceOpacity: 0.25, fieldLineCount: 300, log: false, showBlocks: false, contours: true, fog: false, light: true, box: false, fieldLines: true });
+    expect(report.ignored).toEqual([]);
+    // Out of range: held, and said so.
+    const held = decodeLink(new URLSearchParams({ problem: 'kelvin-helmholtz', zoom: '1000', axis: '7', field: '99', ncont: '0' }), report).view;
+    expect(held).toMatchObject({ zoom: 256, sliceAxis: 2, nContours: 1 });
+    expect(report.ignored.length).toBe(4);
   });
 });

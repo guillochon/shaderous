@@ -14,8 +14,8 @@ import { EOS_MODULES } from '../eos/eos';
 import type { Simulation } from '../sim';
 import type { ViewState } from './renderer';
 
-/** Most lines drawn. */
-export const MAX_FIELD_LINES = 1024;
+import { MAX_FIELD_LINES } from './view_options';
+export { MAX_FIELD_LINES };
 /** Points per line, half each way from its seed, and the step between them (a fraction of the box): 3D, and in a plane. */
 const POINTS = { space: 512, plane: 1024 };
 const STEP = { space: 1 / 256, plane: 1 / 512 };
