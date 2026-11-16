@@ -16,7 +16,7 @@ import { binary } from './binary';
 import { mriDisk } from './mri_disk';
 import { thermalInstability } from './thermal_instability';
 import { isothermalCollapse } from './isothermal';
-import { empty } from './empty';
+import { empty, emptyMagnetic } from './empty';
 import { wdCollision, wdCollisionBurning } from './stellar_collision';
 import { coDetonation } from './co_detonation';
 import { whiteDwarfStar } from './white_dwarf_star';
@@ -144,7 +144,17 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
   },
   {
     group: 'Tests and sandbox',
-    families: [single(advection), single(empty)],
+    families: [
+      single(advection),
+      {
+        id: 'empty',
+        label: empty.label,
+        variants: [
+          { label: 'Standard', problem: empty },
+          { label: 'Magnetic field', problem: emptyMagnetic },
+        ],
+      },
+    ],
   },
 ];
 

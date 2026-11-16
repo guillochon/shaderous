@@ -12,7 +12,7 @@ import { LumpReader, lumpGrid } from './gravity/lumps';
 import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
 import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
-import { cellMark, isSelfGravity, problemUnits, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
+import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
@@ -312,7 +312,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     ndim,
     gext: problem.gext?.(ndim) ?? [0, 0, 0],
     params,
-    problem,
+    problem: sizedProblem(problem, params),
     eos: problem.eos,
     eosParams: { ...defaultEosParams(), ...physicalEosParams(problemUnits(problem, params), problem.composition), ...problem.eosParams },
     riemann: 'hllc',

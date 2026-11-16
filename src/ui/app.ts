@@ -21,7 +21,7 @@ import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
-import { defaultFrameDt } from '../problems/types';
+import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
@@ -1320,7 +1320,9 @@ function showLoad() {
 }
 
 /** Factor from a preset parameter's code value to the value its field shows (ProblemParam.unit). */
-const paramUnit = (q: ProblemParam) => (q.unit && units().physical && unitSys !== 'code' ? q.unit.factor(cfg.params) : 1);
+const paramUnit = (q: ProblemParam) => (!(units().physical && unitSys !== 'code') ? 1 : q.measure ? units().scale(q.measure) : q.unit ? q.unit.factor(cfg.params) : 1);
+/** The unit that field's value is then in. */
+const paramUnitLabel = (q: ProblemParam) => (q.measure ? units().label(q.measure) : q.unit?.label ?? '');
 
 /** The preset's own controls (for example mass ratio and impact parameter). */
 function syncProblemParams() {
@@ -1356,7 +1358,15 @@ function syncProblemParams() {
         // still win), and the run must start again.
         const physical = typeof cfg.problem.units === 'function' && cfg.eos !== 'barotropic';
         if (physical) Object.assign(cfg.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
-        if (q.scale && !physical) {
+        if (q.id === cfg.problem.boxParam) {
+          // The side of the box: the grid's cells change size, so the run is built again.
+          const { n, ndim, amrLevels } = cfg;
+          if (autoload) build(cfg.problem.id, n, ndim, amrLevels, true);
+          else {
+            pending = { pick: { id: cfg.problem.id, n, ndim, levels: amrLevels }, keepPhysics: true };
+            running = false;
+          }
+        } else if (q.scale && !physical) {
           // Only the physical units: the run is the same in code units.
         } else if (q.live && sim) {
           // Only the point masses' sizes: the run carries on.
@@ -1375,8 +1385,8 @@ function syncProblemParams() {
     const el = $<HTMLInputElement>(`pp-${q.id}`);
     // A field with a unit of its own shows it, and its value and range, in physical units.
     const k = paramUnit(q);
-    if (q.unit) {
-      $(`pp-${q.id}-row`).querySelector('span')!.textContent = k !== 1 ? `${q.label} (${q.unit.label})` : q.label;
+    if (q.unit || q.measure) {
+      $(`pp-${q.id}-row`).querySelector('span')!.textContent = k !== 1 ? `${q.label} (${paramUnitLabel(q)})` : q.label;
       el.min = String(+(q.min * k).toPrecision(6));
       el.max = String(+(q.max * k).toPrecision(6));
       el.step = q.step ? String(+(q.step * k).toPrecision(6)) : 'any';
@@ -1472,7 +1482,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     ({ n, ndim, levels } = resolveGrid(problem, n, ndim, levels));
     const next = configFor(problem, n, { ndim, amrLevels: levels });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
-    if (keepPhysics && cfg && cfg.problem === problem && cfg.ndim === ndim) {
+    if (keepPhysics && cfg && cfg.problem.id === problem.id && !cfg.restart && cfg.ndim === ndim) {
       // Same preset at a new resolution: keep the user's physics choices.
       const { n: _n, problem: _p, amrLevels: _l, restart: _r, ...rest } = cfg;
       // The most V-cycles a step runs depends on the mesh: left at the old mesh's default, it
@@ -1506,10 +1516,12 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
         pushTransfer();
       }
     }
+    // The box is as wide as the run's parameters make it (a preset with a size of its own).
+    next.problem = sizedProblem(problem, next.params);
     // From a file: the same preset, started from the saved state instead of its own.
-    if (snap) Object.assign(next, restartFrom(snap, problem, levels > 0, n >> levels));
+    if (snap) Object.assign(next, restartFrom(snap, next.problem, levels > 0, n >> levels));
     // A new problem brings its own checkpoint interval; the clock starts at the snapshot's time, if any.
-    if (cfg?.problem !== problem) {
+    if (cfg?.problem.id !== problem.id) {
       ckpt.every = defaultCheckpointDt(problem);
       // A movie's frame interval: a 600th of the problem's dynamical time.
       const recDt = $<HTMLInputElement>('rec-dt');

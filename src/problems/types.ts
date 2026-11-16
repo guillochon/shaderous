@@ -2,7 +2,7 @@ import type { Eos, EosKind, EosParams } from '../eos/eos';
 import type { Settling, StarSpec } from './settle';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { AnyBurnSpec } from '../burn/burn';
-import type { UnitSystem } from '../units/units';
+import type { Quantity, UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
 
 export interface Prim {
@@ -137,6 +137,11 @@ export interface ProblemParam {
    */
   unit?: { label: string; factor: (params: Record<string, number>) => number };
   /**
+   * The value is a quantity of this kind, in code units: with the readouts in physical units
+   * the field shows it in that system's unit (a length in cm or m), named after the label.
+   */
+  measure?: Quantity;
+  /**
    * How the control looks: a number field (the default), a slider with a number field beside
    * it for typing a value, or a checkbox (value 0 or 1).
    */
@@ -175,6 +180,12 @@ export interface Problem {
    */
   speciesGamma?: Partial<Record<string, number>>;
   box: number; // side length; the domain is [-box/2, box/2]^3
+  /**
+   * The parameter (by id) that is the box's side: `box` is then its default, and a run's
+   * problem is this one with `box` set from its parameters (sizedProblem below). Changing it
+   * builds the run again.
+   */
+  boxParam?: string;
   tEnd: number;
   /** Time between checkpoints, when the page is asked to save them (problem time units). */
   checkpointDt?: number;
@@ -344,6 +355,15 @@ export interface PointMass {
 }
 
 export const all = (b: number): Bc3 => [b, b, b];
+
+/**
+ * The preset as a run with these parameters has it: with the box side its `boxParam` asks for.
+ * The preset itself, if it has no such parameter or the side is its default.
+ */
+export function sizedProblem(p: Problem, params: Record<string, number>): Problem {
+  const side = p.boxParam ? params[p.boxParam] : undefined;
+  return side !== undefined && side > 0 && side !== p.box ? { ...p, box: side } : p;
+}
 
 /** A preset's physical units for these values of its parameters, or undefined if it is scale free. */
 export const problemUnits = (p: Problem, params: Record<string, number>): UnitSystem | undefined =>

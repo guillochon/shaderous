@@ -75,3 +75,23 @@ describe('tidal disruption in solar units', () => {
     expect(Tc / virial).toBeCloseTo(0.539, 2);
   });
 });
+
+describe('empty box', () => {
+  it('takes its side from its parameter', async () => {
+    const { empty, emptyMagnetic, EMPTY_UNITS } = await import('../../src/problems/empty');
+    const { sizedProblem } = await import('../../src/problems/types');
+    const { configFor } = await import('../../src/sim');
+    const { codeG } = await import('../../src/units/units');
+    expect(sizedProblem(empty, { box: 1 })).toBe(empty);
+    expect(sizedProblem(empty, { box: 4 }).box).toBe(4);
+    expect(configFor(empty, 32).problem).toBe(empty);
+    expect(codeG(EMPTY_UNITS)).toBeCloseTo(1, 12);
+    // The magnetized variant: a uniform field along the axis drawn upward.
+    const cfg = configFor(emptyMagnetic, 32);
+    expect(cfg.params.b).toBe(0.1);
+    const f3 = emptyMagnetic.mhd!.face!(cfg.params, 3);
+    expect([f3(0, 0, 0, 0), f3(1, 0, 0, 0), f3(2, 0, 0, 0)]).toEqual([0, 0, 0.1]);
+    const f2 = emptyMagnetic.mhd!.face!(cfg.params, 2);
+    expect([f2(0, 0, 0, 0), f2(1, 0, 0, 0), f2(2, 0, 0, 0)]).toEqual([0, 0.1, 0]);
+  });
+});
