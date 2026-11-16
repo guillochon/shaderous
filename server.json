@@ -1,0 +1,32 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.guillochon/shaderous",
+  "title": "Shaderous",
+  "description": "GPU gas dynamics on WebGPU (hydro, MHD, gravity, AMR): load, run, measure and look at simulations",
+  "version": "0.1.1",
+  "websiteUrl": "https://guillochon.github.io/shaderous/",
+  "repository": {
+    "url": "https://github.com/guillochon/shaderous",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "shaderous",
+      "version": "0.1.1",
+      "runtimeHint": "npx",
+      "transport": { "type": "stdio" },
+      "packageArguments": [
+        { "type": "positional", "value": "mcp" },
+        {
+          "type": "named",
+          "name": "--gpu-memory",
+          "description": "GPU memory the simulation may take, in GB (default 2.5 on a desktop); sets how many blocks the adaptive mesh can hold",
+          "format": "number",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

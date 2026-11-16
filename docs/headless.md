@@ -263,6 +263,10 @@ claude mcp add shaderous -- npx -y shaderous mcp
 { "mcpServers": { "shaderous": { "command": "npx", "args": ["-y", "shaderous", "mcp"] } } }
 ```
 
+The server is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
+`io.github.guillochon/shaderous` ([server.json](../server.json)); clients that browse the
+registry install it from there.
+
 In a checkout, [.mcp.json](../.mcp.json) at the repository root registers the server for
 Claude Code in this project. Claude Code asks you to approve it the first time. For another
 client, or from elsewhere, give the command with an absolute path:
