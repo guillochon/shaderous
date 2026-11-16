@@ -653,6 +653,10 @@ velocity. A mass flagged **fixed** (`PointMass.fixed`) is never moved: it still 
 gas and grows. The sink tool places massless particles when its Mass is 0, and fixed ones when
 Fixed is on.
 
+A source of gas (`hydro/sources.wgsl`) may ride a massless particle (`SourceSpec.carrier`): it
+is then wherever the particle is, and the gas it adds arrives with the particle's velocity.
+The source tool places its sources so unless Fixed is on.
+
 **Sinks.** Inside the sink radius $`r_s`$, gas is removed at a rate that falls from the local
 orbital frequency $`\sqrt{GM/r^3}`$ at the center to zero at $`r_s`$. The removed gas takes its
 momentum to the mass. Mass and momentum are conserved between gas and masses to $`10^{-7}`$ in

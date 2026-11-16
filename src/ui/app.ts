@@ -399,7 +399,7 @@ const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = 
 ];
 TOOLS.push({
   kind: 'source', label: 'Source',
-  title: 'Source: click to place one that feeds gas in evenly, or press and drag to aim it (a longer drag is faster)',
+  title: 'Source: click to place one that feeds gas in evenly, or press and drag to set it moving (the path it would take is drawn): it goes where gravity takes it, and its gas leaves with its velocity. Fixed, it stays put and a drag aims its gas (a longer drag is faster)',
   icon: icon('<circle cx="8" cy="8" r="2.3" fill="currentColor" stroke="none" /><path d="M8 1.5v2.3M8 12.2v2.3M1.5 8h2.3M12.2 8h2.3M3.4 3.4l1.6 1.6M11 11l1.6 1.6M12.6 3.4L11 5M5 11l-1.6 1.6" />'),
 });
 TOOLS.push({
@@ -417,8 +417,31 @@ TOOLS.push({
   title: 'Query: hover over the gas to see the cell under the pointer: its state and, on an adaptive mesh, its block. Dragging moves the view',
   icon: icon('<circle cx="6.8" cy="6.8" r="4.3" /><path d="M10 10l4.5 4.5" /><path d="M6.8 4.9v.01M6.8 6.6v2.6" />'),
 });
-/** Point masses the sink tool has placed in this run (the simulation holds MAX_MASSES in all). */
-let placedMasses = 0;
+/**
+ * The point masses the tools have placed in this run, in the order they were added: the last
+ * of the run's masses (the simulation holds MAX_MASSES in all). A sink is one; a source that
+ * moves rides one.
+ */
+let placed: ('sink' | 'source')[] = [];
+/** The place among the run's masses of the i-th one the tools placed. */
+const placedIndex = (i: number) => (sim?.massCount ?? 0) - placed.length + i;
+/**
+ * Take the placed masses for which `gone` holds out of the run, and with them the sources that
+ * rode them; the sources riding the masses that stay follow those to their new places.
+ */
+function removePlaced(gone: (kind: 'sink' | 'source', index: number) => boolean) {
+  if (!sim) return;
+  const out = placed.map((k, i) => (gone(k, placedIndex(i)) ? placedIndex(i) : -1)).filter((i) => i >= 0);
+  if (!out.length) return;
+  placed = placed.filter((k, i) => !out.includes(placedIndex(i)));
+  sim.removeMasses(out);
+  sources = sources
+    .filter((q) => q.carrier === undefined || !out.includes(q.carrier))
+    .map((q) => (q.carrier === undefined ? q : { ...q, carrier: q.carrier - out.filter((i) => i < q.carrier!).length }));
+  sim.setSources(sources);
+  lastDiag = undefined;
+  liveMasses = null;
+}
 /** The point masses as last read back, for their markers: refreshed every frame. */
 let liveMasses: { of: Simulation; list: Diagnostics['masses'] } | null = null;
 /** Why the last tool action did nothing, for the status line. */
@@ -453,8 +476,11 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   star: { size: 0.1, softness: 0, amount: 0, mass: 0, soften: 0.04 },
   query: { size: 0, softness: 0, amount: 0, mass: 0, soften: 0.04 },
 };
-/** The sink tool places sinks that stay where they are put. */
+/** The sink tool, and the source tool, place ones that stay where they are put. */
 let sinkFixed = false;
+let sourceFixed = false;
+/** The tool in hand places something that moves: a sink or a source that is not fixed. */
+const toolMoves = () => (tool === 'sink' && !sinkFixed) || (tool === 'source' && !sourceFixed);
 /** The sink tool places a point mass rather than a massless sink. */
 const sinkHasMass = () => toolParams.sink.mass > 0;
 let tool: ToolKind | null = null;
@@ -475,7 +501,7 @@ $('tools').innerHTML =
     <div id="tool-index" title="Polytropic index n: p = K ρ^(1 + 1/n). 1.5 is a convective star, 3 a radiative one like the Sun">${STAR_INDICES.map((n) => `<button id="${starId(n)}" aria-pressed="false" title="n = ${n}">n=${n}</button>`).join('')}</div>
     ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it is a particle without mass: it takes gas away at the Flux rate and moves as gravity takes it, but pulls on nothing and never grows. With a mass it is a point mass with softened gravity: it pulls on the gas and grows by what it takes in', 0, 2)}
     ${slider('soften', 'Soft', 'Softening length of the point mass\u2019s gravity, as a share of the box: within it the pull falls away instead of growing without limit, so gas and other masses can pass close by. Size is the radius of its sink', 0.002, 0.3)}
-    <button id="tool-fixed" aria-pressed="false" title="Fixed: the sink stays where it is placed, whatever pulls on it or it takes in. Off: it moves, and a drag sets it going">Fixed</button>
+    <button id="tool-fixed" aria-pressed="false" title="Fixed: it stays where it is placed, whatever pulls on it (and a drag aims a source\u2019s gas). Off: it moves as gravity takes it, and a drag sets it going">Fixed</button>
     <button id="tool-rest" aria-pressed="true" title="p = 0 for new mass: added gas arrives at rest and shares the momentum already there, slowing the flow. Off: it arrives with the local velocity">p = 0</button>
     <div id="tool-shapes">${SHAPES.map((q) => `<button id="shape-${q.mode}" aria-pressed="false" aria-label="${q.mode}" title="${q.title}">${q.icon}</button>`).join('')}</div>
     <button id="tool-erase" aria-pressed="false" title="Erase: the shape drawn turns obstacle back into gas, at rest">Erase</button>
@@ -555,13 +581,13 @@ function syncTools() {
   $('tp-softness-row').title = flux
     ? 'Edge: how the rate falls off toward the edge. 0 is the same all the way out, 1 fades all the way from the center'
     : 'Softness of the edge: 0 is hard, 1 fades all the way from the center';
-  const mine = tool === 'sink' ? sources.filter((q) => q.decay > 0).length + placedMasses : sources.filter((q) => q.decay === 0).length;
+  const mine = tool === 'sink' ? sources.filter((q) => q.decay > 0).length + placed.filter((k) => k === 'sink').length : sources.filter((q) => q.decay === 0).length;
   $('tool-clear').hidden = !flux;
   $('tool-clear').title = tool === 'sink' ? 'Remove every sink placed with this tool, with or without a mass' : 'Remove every source';
   $('tool-clear').textContent = mine ? `Clear ${mine}` : 'Clear';
   $<HTMLButtonElement>('tool-clear').disabled = mine === 0;
-  $('tool-fixed').hidden = tool !== 'sink';
-  $('tool-fixed').setAttribute('aria-pressed', String(sinkFixed));
+  $('tool-fixed').hidden = tool !== 'sink' && tool !== 'source';
+  $('tool-fixed').setAttribute('aria-pressed', String(tool === 'source' ? sourceFixed : sinkFixed));
   $('tool-rest').hidden = tool !== 'mass';
   $('tool-rest').setAttribute('aria-pressed', String(massAtRest));
   // An obstacle is drawn as a shape, not painted with a brush.
@@ -729,17 +755,13 @@ for (const sh of SHAPES) {
   });
 }
 $('tool-clear').addEventListener('click', () => {
-  // Each tool clears what it placed.
+  // Each tool clears what it placed: its sources or sinks, and the masses they are or ride.
   const sinks = tool === 'sink';
+  removePlaced((kind) => kind === (sinks ? 'sink' : 'source'));
   const keep = sources.filter((q) => (q.decay > 0) !== sinks);
   if (keep.length !== sources.length) {
     sources = keep;
     sim?.setSources(sources);
-  }
-  if (sinks && placedMasses) {
-    sim?.removeAddedMasses();
-    placedMasses = 0;
-    lastDiag = undefined;
   }
   syncTools();
 });
@@ -767,7 +789,8 @@ for (const n of STAR_INDICES) {
   });
 }
 $('tool-fixed').addEventListener('click', () => {
-  sinkFixed = !sinkFixed;
+  if (tool === 'source') sourceFixed = !sourceFixed;
+  else sinkFixed = !sinkFixed;
   syncTools();
 });
 $('tool-rest').addEventListener('click', () => {
@@ -1084,7 +1107,7 @@ function syncControls() {
   const self = isSelfGravity(cfg.gravity);
   for (const id of ['vcycles', 'jeansfloor']) $<HTMLInputElement>(id).disabled = !self;
   // G is idle without gravity, unless point masses use it.
-  const masses = !!cfg.problem.masses || placedMasses > 0;
+  const masses = !!cfg.problem.masses || placed.length > 0;
   $<HTMLInputElement>('G').disabled = cfg.gravity === 'off' && !masses;
   $<HTMLInputElement>('refhi').value = String(cfg.refineHi);
   $<HTMLInputElement>('refrho').value = String(+cfg.refineRho.toPrecision(4));
@@ -1104,7 +1127,7 @@ function syncControls() {
   // refinement levels on a uniform grid.
   const fieldSel = $<HTMLSelectElement>('field');
   // Nor a potential without gravity, nor a Jeans length without self-gravity.
-  const pulled = cfg.gravity !== 'off' || cfg.gext.some((g) => g !== 0) || !!cfg.problem.masses || placedMasses > 0;
+  const pulled = cfg.gravity !== 'off' || cfg.gext.some((g) => g !== 0) || !!cfg.problem.masses || placed.length > 0;
   // A barotropic gas carries no internal energy of its own, so it has no temperature or entropy
   // to show, and nothing heats or cools without a cooling function: those are left out of the
   // menu altogether.
@@ -2682,7 +2705,7 @@ function draftPath(d: Draft): string {
 function clearSources() {
   if (sources.length && sim) sim.setSources([]);
   sources = [];
-  placedMasses = 0;
+  placed = [];
   toolNotice = '';
 }
 
@@ -2715,12 +2738,40 @@ function drawSources() {
   const masses = massesNow();
   if ((sources.length || masses.length) && cfg) {
     const at = projector();
+    const box = cfg.problem.box;
+    const vFull = 5 * toolRefs().vRef;
+    // An arrow from the marker at `c` (of the point `pos` of the box) along the velocity `vel`:
+    // half as long as the drag that would set a new mass moving that fast, no longer than
+    // VEL_ARROW pixels, and none where it would be shorter than its own head (a mass slower
+    // than a few tenths of the tools' reference speed).
+    const velArrow = (c: { x: number; y: number; w: number }, pos: number[], vel: number[]) => {
+      const speed = Math.hypot(...vel);
+      const long = vFull > 0 ? Math.min(VEL_ARROW, (0.5 * fullDrag() * speed) / vFull) : 0;
+      if (long < 4) return '';
+      // A point that far along the velocity, in the box: foreshortened as the view sees it.
+      const reach = long / locate(c.x, c.y, flatView() ? 1 : c.w).scale;
+      const tip = at(pos.map((v, i) => v + (reach * vel[i]) / speed));
+      const [ux, uy] = [tip.x - c.x, tip.y - c.y];
+      const len = Math.hypot(ux, uy);
+      if (!(tip.w > 0) || len < 4) return '';
+      const [nx, ny] = [ux / len, uy / len];
+      return `<path class="vel" d="M${c.x} ${c.y}L${tip.x} ${tip.y}M${tip.x - 4 * nx - 2.5 * ny} ${tip.y - 4 * ny + 2.5 * nx}L${tip.x} ${tip.y}L${tip.x - 4 * nx + 2.5 * ny} ${tip.y - 4 * ny - 2.5 * nx}" />`;
+    };
+    // The masses that sources ride are drawn as those sources, where the masses are now.
+    const ridden = new Set(sources.map((q) => q.carrier).filter((i) => i !== undefined));
     for (const q of sources) {
-      const c = at(q.pos);
+      const rides = q.carrier !== undefined ? masses[q.carrier] : undefined;
+      // (Between a placement and the next readback the mass is not yet known: where it was put.)
+      const where = rides ? rides.pos.map((v) => v / box + 0.5) : q.pos;
+      const c = at(where);
       if (!(c.w > 0)) continue; // behind the camera
       // Size on screen: from a point one radius away along an axis in the plane of the view.
-      const e = at(q.pos.map((v, i) => v + q.radius * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
+      const e = at(where.map((v, i) => v + q.radius * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
       const r = Math.hypot(e.x - c.x, e.y - c.y);
+      if (q.carrier !== undefined) {
+        html += `<g class="source moving"><circle cx="${c.x}" cy="${c.y}" r="${r}" />${rides ? velArrow(c, where, rides.vel) : ''}</g>`;
+        continue;
+      }
       const speed = Math.hypot(...q.vel);
       let arrow = '';
       if (speed > 0) {
@@ -2733,29 +2784,13 @@ function drawSources() {
       html += `<g class="${q.decay > 0 ? 'sink' : 'source'}"><circle cx="${c.x}" cy="${c.y}" r="${r}" />${arrow}</g>`;
     }
     // The point masses, where the last readback found them: the sink's edge and a dot, and
-    // an arrow along its velocity: half as long as the drag that would set a new mass moving
-    // that fast, no longer than VEL_ARROW pixels, and left out where it would be shorter than
-    // its own head (a mass slower than a few tenths of the tools' reference speed).
-    const box = cfg.problem.box;
-    const vFull = 5 * toolRefs().vRef;
-    for (const q of masses) {
+    // an arrow along its velocity.
+    for (const [index, q] of masses.entries()) {
+      if (ridden.has(index)) continue;
       const pos = q.pos.map((v) => v / box + 0.5);
       const c = at(pos);
       if (!(c.w > 0)) continue;
-      const speed = Math.hypot(...q.vel);
-      const long = vFull > 0 ? Math.min(VEL_ARROW, (0.5 * fullDrag() * speed) / vFull) : 0;
-      let arrow = '';
-      if (long >= 4) {
-        // A point that far along the velocity, in the box: foreshortened as the view sees it.
-        const reach = long / locate(c.x, c.y, flatView() ? 1 : c.w).scale;
-        const tip = at(pos.map((v, i) => v + (reach * q.vel[i]) / speed));
-        const [ux, uy] = [tip.x - c.x, tip.y - c.y];
-        const len = Math.hypot(ux, uy);
-        if (tip.w > 0 && len >= 4) {
-          const [nx, ny] = [ux / len, uy / len];
-          arrow = `<path class="vel" d="M${c.x} ${c.y}L${tip.x} ${tip.y}M${tip.x - 4 * nx - 2.5 * ny} ${tip.y - 4 * ny + 2.5 * nx}L${tip.x} ${tip.y}L${tip.x - 4 * nx + 2.5 * ny} ${tip.y - 4 * ny - 2.5 * nx}" />`;
-        }
-      }
+      const arrow = velArrow(c, pos, q.vel);
       const e = at(pos.map((v, i) => v + (q.sinkRadius / box) * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
       // The sink's edge, at its true radius however small, and a dot at the mass. A mass
       // that takes no gas has no edge to show.
@@ -2857,7 +2892,7 @@ function beginStroke(e: PointerEvent) {
   };
   stroke = s;
   // The orbit preview wants the gas as it is at the press.
-  if (s.kind === 'sink') refreshLumps(s.t0, true);
+  if (s.kind === 'sink' || s.kind === 'source') refreshLumps(s.t0, true);
   if (!s.ready) {
     // Volume view: paint on the gas that is seen under the pointer, or, where the view is
     // empty, on the plane through the middle of the box.
@@ -2913,6 +2948,22 @@ function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass:
   return { ...where, gm: G * q.mass * gas, soft: q.soften * box, sinkRate: 4 * q.amount };
 }
 
+/** The massless particle a moving source rides: placed at `pos` (in fractions of the box), moving at `vel`. */
+function carrierSpec(pos: Vec3, vel: Vec3, size: number): PointMass {
+  const box = cfg.problem.box;
+  const gas = lastDiag?.mass ?? box ** cfg.ndim;
+  const two = cfg.ndim === 2;
+  return {
+    gm: 1e-9 * (cfg.G > 0 ? cfg.G : 1) * gas,
+    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
+    vel: two ? [vel[0], vel[1], 0] : vel,
+    soft: size * box,
+    sinkRadius: 0,
+    sinkRate: 0,
+    massless: true,
+  };
+}
+
 /**
  * Where a stroke that is dragged out began (in the box), and the velocity its drag asks for: a
  * longer drag is faster, and a click (or a drag of a few pixels) leaves it at rest, as `still`
@@ -2943,7 +2994,7 @@ function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass
   sim.cfg = cfg;
   const ok = sim.addMass(spec);
   if (ok) {
-    placedMasses++;
+    placed.push('sink');
     lastDiag = undefined;
     syncControls();
   }
@@ -3002,7 +3053,8 @@ function placeStar(pos: Vec3, vel: Vec3) {
 }
 
 // --- orbit preview --------------------------------------------------------------------------
-// While the sink tool is in hand, the path a sink placed now would take is drawn: a line
+// While the sink tool or the source tool is in hand (and not set to Fixed), the path a sink or
+// source placed now would take is drawn: a line
 // with an arrowhead over a 2D run or a slice, a tube with one in the volume view. Under the
 // pointer it is the path of a mass let go at rest there; pressed and dragged, of one set moving
 // as the drag asks. It is the orbit in the gas as it is now (gravity/preview.ts).
@@ -3035,17 +3087,17 @@ function refreshLumps(now: number, force = false) {
 /** Find the path of the mass being placed, and hand it to whichever view draws it. Called once per frame. */
 function updateOrbit(now: number) {
   const s = stroke;
-  if (sim && tool === 'sink') refreshLumps(now);
+  if (sim && toolMoves()) refreshLumps(now);
   // Pressed: the mass the drag would place. Not pressed: one let go at rest under the pointer,
   // where the brush is drawn (in the volume view, on the plane through the middle of the box).
-  const pressed = !!s && s.kind === 'sink' && s.ready && !s.released;
+  const pressed = !!s && s.kind === tool && s.ready && !s.released;
   const resting = !s && !!hover && $('brush').style.display !== 'none';
-  // (A fixed sink goes nowhere: there is no path to show.)
-  if (!sim || tool !== 'sink' || sinkFixed || !(pressed || resting) || massesNow().length >= MAX_MASSES) {
+  // (A fixed sink or source goes nowhere: there is no path to show.)
+  if (!sim || !toolMoves() || !(pressed || resting) || massesNow().length >= MAX_MASSES) {
     orbit = null;
   } else {
     const { at, vel } = pressed ? strokeAim(s!) : { at: locate(hover!.x, hover!.y, view.dist), vel: [0, 0, 0] as Vec3 };
-    const mine = massSpec(at.pos, vel, toolParams.sink);
+    const mine = tool === 'source' ? carrierSpec(at.pos, vel, toolParams.source.size) : massSpec(at.pos, vel, toolParams.sink);
     const others = massesNow();
     const lumps = gasLumps && gasLumps.of === sim ? gasLumps : null;
     const left = cfg.tEnd - (lastDiag?.t ?? 0);
@@ -3129,9 +3181,26 @@ function advanceStroke(now: number) {
       return;
     }
     // The flux is measured against the densest gas and the time a signal takes to cross the source.
-    const perTime = (q.amount * (s.vRef || 1)) / (q.size * cfg.problem.box);
-    sources.push({ pos: at.pos, radius: q.size, softness: q.softness, vel, rate: perTime * s.rhoMax, decay: 0 });
-    if (sources.length > MAX_SOURCES) sources.shift(); // the oldest makes room
+    const perTime = (q.amount * (s.vRef || toolRefs().vRef || 1)) / (q.size * cfg.problem.box);
+    const source: SourceSpec = { pos: at.pos, radius: q.size, softness: q.softness, vel, rate: perTime * (s.rhoMax || toolRefs().rhoMax), decay: 0 };
+    if (!sourceFixed) {
+      // A source that moves rides a massless particle, which the drag set going: the gas it
+      // adds leaves with the particle's velocity, not along the drag.
+      const ok = sim.addMass(carrierSpec(at.pos, vel, q.size));
+      notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks, moving sources and point masses`);
+      if (!ok) return;
+      placed.push('source');
+      source.vel = [0, 0, 0];
+      source.carrier = sim.massCount - 1;
+      lastDiag = undefined;
+      syncControls();
+    }
+    sources.push(source);
+    // The oldest makes room, with the particle it rode.
+    if (sources.length > MAX_SOURCES) {
+      const oldest = sources.shift()!;
+      if (oldest.carrier !== undefined) removePlaced((_, index) => index === oldest.carrier);
+    }
     sim.setSources(sources);
     syncTools();
     return;

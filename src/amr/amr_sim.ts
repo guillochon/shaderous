@@ -2180,6 +2180,39 @@ export class AmrSim implements Simulation {
     return true;
   }
 
+  get massCount(): number {
+    return this.nMasses;
+  }
+
+  private pRemove?: GPUComputePipeline;
+  removeMasses(indices: number[]) {
+    const gone = new Set(indices.filter((i) => i >= this.nOwnMasses && i < this.nMasses));
+    if (!gone.size) return;
+    let mask = 0;
+    for (let i = 0; i < this.nMasses; i++) if (!gone.has(i)) mask |= 1 << i;
+    const d = this.device;
+    const keep = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(keep, 0, new Uint32Array([mask >>> 0, 0, 0, 0]));
+    // Compiled where it is first needed, at once (a few lines): the masses' places among the
+    // run's change as this returns, and the pass is queued behind whatever steps are in flight.
+    this.pRemove ??= d.createComputePipeline({
+      label: 'point mass removal',
+      layout: 'auto',
+      compute: { module: d.createShaderModule({ code: assemble('gravity/bh_remove.wgsl') }), entryPoint: 'main' },
+    });
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginComputePass({ label: 'point mass removal' });
+    pass.setPipeline(this.pRemove);
+    pass.setBindGroup(0, bindGroup(d, this.pRemove, { 0: this.bh, 1: keep }));
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    d.queue.submit([enc.finish()]);
+    keep.destroy();
+    this.nMasses -= gone.size;
+    this.writeParams();
+    this.refreshPotential();
+  }
+
   removeAddedMasses() {
     if (this.nMasses === this.nOwnMasses) return;
     this.nMasses = this.nOwnMasses;

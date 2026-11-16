@@ -1811,7 +1811,7 @@ export const TESTS: TestDef[] = [
     id: 'point-mass-many',
     name: 'Point masses: more than one group of four (six on a ring)',
     criterion:
-      'Six equal masses with overlapping sinks on a ring in still gas, in a reflecting box (their sums over the gas take two reductions): gas and accreted mass together are conserved to 1e-5, every mass accretes, and masses opposite each other across the center, summed by different reductions, take in the same to 1% and stay opposite to 1e-3 of the box. In 2D and 3D, on uniform and adaptive grids and with per-block timesteps. A massless particle takes gas, keeps its token mass and moves on at about its speed; a fixed mass takes gas, grows, and does not move',
+      'Six equal masses with overlapping sinks on a ring in still gas, in a reflecting box (their sums over the gas take two reductions): gas and accreted mass together are conserved to 1e-5, every mass accretes, and masses opposite each other across the center, summed by different reductions, take in the same to 1% and stay opposite to 1e-3 of the box. In 2D and 3D, on uniform and adaptive grids and with per-block timesteps. A massless particle takes gas, keeps its token mass and moves on at about its speed; a fixed mass takes gas, grows, and does not move. A source riding a massless particle feeds its gas in along the path of the particle, moving with it, after a mass placed before the particle has been removed',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -1885,6 +1885,40 @@ export const TESTS: TestDef[] = [
         pass &&= tracer.massless && !tracer.fixed && held.fixed && !held.massless
           && tracer.accreted > 1e-4 * d0.mass && metrics.massless_gm_change < 1e-5 && metrics.massless_moved > 0.1 && metrics.massless_moved < 0.25
           && held.accreted > 1e-4 * d0.mass && metrics.fixed_moved < 1e-6 && metrics.fixed_gm_error < 1e-4 && metrics.mixed_mass_error < 1e-5;
+      });
+      // A source riding a massless particle, after the mass placed before it has been taken
+      // out (the particle moves up to its place): the gas arrives where the particle goes, with
+      // its velocity. (The particle starts at x = -0.2 at a speed of 0.5, and the gas of the box
+      // pulls it on toward the middle.)
+      await withSim(gpu, stillGas({ bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.3 }), 64, { ndim: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        sim.addMass({ gm: 0.02, pos: [0, 0.3, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.1 });
+        sim.addMass({ gm: 1e-9, pos: [-0.2, -0.1, 0], vel: [0.5, 0, 0], soft: 0.05, sinkRadius: 0, sinkRate: 0, massless: true });
+        sim.removeMasses([0]);
+        sim.setSources([{ pos: [0.9, 0.9, 0.5], radius: 0.06, softness: 0.5, vel: [0, 0, 0], rate: 20, decay: 0, carrier: sim.massCount - 1 }]);
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        // (The pass that reads the gas back as lumps compiles on the first call, which returns null.)
+        let lumps = await sim.readGasLumps();
+        for (let i = 0; i < 200 && !lumps; i++) {
+          await new Promise((r) => setTimeout(r, 20));
+          lumps = await sim.readGasLumps();
+        }
+        lumps ??= [];
+        // Where the gas added lies: the lumps' excess over the still gas they started as.
+        const cell = d0.mass / 64 ** 2;
+        const extra = lumps.map((l) => ({ m: l.m - cell * (l.h * 64) ** 2, pos: l.pos })).filter((l) => l.m > 0);
+        const added = extra.reduce((t, l) => t + l.m, 0);
+        const cx = extra.reduce((t, l) => t + l.m * l.pos[0], 0) / added;
+        const cy = extra.reduce((t, l) => t + l.m * l.pos[1], 0) / added;
+        metrics.source_masses = d.masses.length;
+        metrics.source_added = (d.mass - d0.mass) / d0.mass;
+        metrics.source_particle_x = d.masses[0]?.pos[0] ?? NaN;
+        metrics.source_gas_x = cx;
+        metrics.source_gas_y = cy;
+        metrics.source_momentum_x = d.momentum[0] / (d.mass - d0.mass);
+        pass &&= d.masses.length === 1 && d.masses[0].massless && d.masses[0].pos[0] > -0.1 && d.masses[0].pos[0] < 0.05
+          && metrics.source_added > 0.01 && cx > -0.2 && cx < 0.05 && Math.abs(cy + 0.1) < 0.03 && metrics.source_momentum_x > 0.1;
       });
       return { pass, metrics };
     },

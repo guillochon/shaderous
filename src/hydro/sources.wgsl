@@ -1,6 +1,7 @@
 // Sources and sinks of gas: soft-edged balls (disks in 2D) that add gas, or take it away, at a
 // steady rate for as long as they exist. Applied to a cell's state at the end of its update.
-// Requires P, the equation of state, hydro/dual_energy.wgsl and hydro/advance.wgsl (NewState).
+// Requires P, the equation of state, hydro/dual_energy.wgsl and hydro/advance.wgsl (NewState),
+// and the point masses (gravity/ext_bind.wgsl), which a source may ride.
 // Layout matches packSources() in src/sim.ts.
 struct Source {
   pos: vec4<f32>,    // center in fractions of the box, radius (fraction of the box) in w
@@ -8,6 +9,9 @@ struct Source {
                      //   evenly); softness of the edge in w
   rate: vec4<f32>,   // x: density added per unit time at full weight (a source)
                      // y: fraction of the gas removed per unit time at full weight (a sink)
+                     // z: one more than the point mass it rides (gravity/bh.wgsl), or 0 if it
+                     //    stays where it is: it is then where that mass is, and what it adds
+                     //    moves as that mass does
 }
 struct Sources { count: u32, list: array<Source, 8> }
 @group(0) @binding(11) var<uniform> SRC: Sources;
@@ -31,7 +35,13 @@ fn apply_sources(st: NewState, x: vec3<f32>, dt: f32) -> NewState {
   var sc = st.u2.z;
   var hit = false;
   for (var i = 0u; i < SRC.count; i++) {
-    let s = SRC.list[i];
+    var s = SRC.list[i];
+    let ride = u32(s.rate.z);
+    if (ride > 0u && ride <= mass_count()) {
+      let m = BH.list[ride - 1u];
+      s.pos = vec4<f32>(m.pos.xyz / P.box + 0.5, s.pos.w);
+      s.vel = vec4<f32>(m.vel.xyz, s.vel.w);
+    }
     let w = source_weight(x, s);
     if (w <= 0.0) { continue; }
     hit = true;

@@ -52,6 +52,10 @@ Since then (2026-11-15):
   the sink tool's use of the sources list, so sinks of both kinds share the 32 slots. A
   **Fixed** toggle places sinks that never move (`PointMass.fixed`), with or without a mass.
 - **Thinner tubes**: radius 0.0025 of the box, the other masses' 0.6 of that.
+- **Sources move too**: unless Fixed is on, the source tool's source rides a massless
+  particle (`SourceSpec.carrier`), which a drag sets going and the preview draws; its gas
+  leaves with the particle's velocity. Fixed, it is as it was, and a drag aims its gas. Each
+  tool's Clear removes only what it placed (`Simulation.removeMasses`).
 
 ## 1. Goal
 

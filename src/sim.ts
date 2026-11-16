@@ -219,6 +219,13 @@ export interface Simulation {
   readMasses(): Promise<Required<PointMass>[] | null>;
   /** Remove the point masses added with addMass(), keeping the preset's. */
   removeAddedMasses(): void;
+  /** How many point masses the run holds: one added with addMass() is the last of them. */
+  readonly massCount: number;
+  /**
+   * Remove these point masses, by their place among the run's (only ones added with addMass()):
+   * those after them move up to take their places.
+   */
+  removeMasses(indices: number[]): void;
   /**
    * The gas as it is now, as lumps: each a region's mass at its center of mass, for previews of
    * a point mass's orbit (gravity/preview.ts). Null while the last such read is in flight.
@@ -558,6 +565,11 @@ export interface SourceSpec {
   rate: number;
   /** a sink: fraction of the gas removed per unit time at its center (0 for a source) */
   decay: number;
+  /**
+   * The point mass it rides, by its place among the run's: the source is then where that mass
+   * is, and the gas it adds moves as the mass does (`pos` and `vel` are not used).
+   */
+  carrier?: number;
 }
 
 export const MAX_SOURCES = 8;
@@ -569,7 +581,7 @@ export function packSources(list: SourceSpec[]): ArrayBuffer {
   const f = new Float32Array(buf);
   const use = list.slice(0, MAX_SOURCES);
   new Uint32Array(buf)[0] = use.length;
-  use.forEach((q, i) => f.set([...q.pos, q.radius, ...q.vel, q.softness, q.rate, q.decay, 0, 0], 4 + 12 * i));
+  use.forEach((q, i) => f.set([...q.pos, q.radius, ...q.vel, q.softness, q.rate, q.decay, (q.carrier ?? -1) + 1, 0], 4 + 12 * i));
   return buf;
 }
 
@@ -1550,6 +1562,39 @@ export class Sim implements Simulation {
     this.writeParams();
     this.refreshPotential();
     return true;
+  }
+
+  get massCount(): number {
+    return this.nMasses;
+  }
+
+  private pRemove?: GPUComputePipeline;
+  removeMasses(indices: number[]) {
+    const gone = new Set(indices.filter((i) => i >= this.nOwnMasses && i < this.nMasses));
+    if (!gone.size) return;
+    let mask = 0;
+    for (let i = 0; i < this.nMasses; i++) if (!gone.has(i)) mask |= 1 << i;
+    const d = this.device;
+    const keep = d.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(keep, 0, new Uint32Array([mask >>> 0, 0, 0, 0]));
+    // Compiled where it is first needed, at once (a few lines): the masses' places among the
+    // run's change as this returns, and the pass is queued behind whatever steps are in flight.
+    this.pRemove ??= d.createComputePipeline({
+      label: 'point mass removal',
+      layout: 'auto',
+      compute: { module: d.createShaderModule({ code: assemble('gravity/bh_remove.wgsl') }), entryPoint: 'main' },
+    });
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginComputePass({ label: 'point mass removal' });
+    pass.setPipeline(this.pRemove);
+    pass.setBindGroup(0, bindGroup(d, this.pRemove, { 0: this.bh, 1: keep }));
+    pass.dispatchWorkgroups(1);
+    pass.end();
+    d.queue.submit([enc.finish()]);
+    keep.destroy();
+    this.nMasses -= gone.size;
+    this.writeParams();
+    this.refreshPotential();
   }
 
   removeAddedMasses() {
