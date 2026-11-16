@@ -27,7 +27,12 @@ export default defineConfig({
   optimizeDeps: { entries: ['index.html', 'validate.html'] },
   build: {
     target: 'es2022',
-    rollupOptions: { input: { main: 'index.html', validate: 'validate.html' } },
+    rolldownOptions: { input: { main: 'index.html', validate: 'validate.html' } },
   },
-  test: { include: ['tests/unit/**/*.test.ts'] },
+  test: {
+    include: ['tests/unit/**/*.test.ts'],
+    // A few synchronous tests (a 1024^3 starting mesh, the random tidal-disruption preset) take
+    // 5 to 7 s. Vitest 2 never timed out a synchronous test; from Vitest 4 the default 5 s applies.
+    testTimeout: 30_000,
+  },
 });
