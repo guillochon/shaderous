@@ -40,6 +40,7 @@ Every figure is drawn by a script in `figures/`; the PDFs are committed and the 
 | `make_gravity.py` | `gravity.pdf` | `data/gravity/`: Evrard runs (the command-line runner) and the sphere's potential (`collect.mjs`) |
 | `make_tde.py` | `tde.pdf` | `data/tde/`: two tidal disruptions with debris energies (the command-line runner) |
 | `make_gallery.py` | `gallery.pdf` | `data/gallery/`: images from the renderer and the interface (`shots.mjs`) |
+| `make_setup.py` | `setup.pdf` | `data/setup/`: a setup file (`collision.shaderous.json`), the Setup dialog showing it and two views of its run (`shots.mjs`) |
 | `make_performance.py` | `performance.pdf` | `data/performance/`: throughput on this machine's GPU (`collect.mjs`) |
 
 Each script plots from the data committed beside it, with numpy and matplotlib:
