@@ -1,0 +1,48 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "empty",
+  "name": "Empty box",
+  "group": "Tests and sandbox",
+  "family": "empty",
+  "familyName": "Empty box",
+  "variant": "Standard",
+  "blurb": "Nothing but floor-density gas, at the floor temperature: add gas, heat, sources and obstacles with the tools.",
+  "domain": {
+    "box": 10,
+    "supports2d": true,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] },
+    "units": {
+      "name": "solar",
+      "length": { "unit": "Rsun", "value": 1 },
+      "mass": { "unit": "Msun", "value": 1 }
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": "units",
+    "floors": { "rho": 0.000001, "p": 0.000001 },
+    "toolScale": { "rho": 1, "v": 1 }
+  },
+  "background": { "rho": 0.000001, "p": 0.000001 },
+  "run": { "tEnd": null, "checkpointDt": 0.1, "startPaused": true },
+  "view": { "field": 0, "log": true },
+  "featured": [
+    {
+      "path": "domain.box",
+      "id": "box",
+      "label": "Box size",
+      "min": 0.001,
+      "max": 1000000000,
+      "factor": 2,
+      "tip": "Side of the box: in code units (one is a solar radius) or, with the readouts in physical units, in the unit picked beside it. Changing it builds the run again",
+      "unitChoices": [
+        { "label": "R☉", "value": 1 },
+        { "label": "AU", "value": 215.03215567054764 },
+        { "label": "pc", "value": 44353565.926280975 }
+      ]
+    }
+  ]
+}

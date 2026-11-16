@@ -1,0 +1,10 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "sedov-rad",
+  "extends": "sedov",
+  "name": "Radiation-dominated blast",
+  "variant": "Radiation dominated",
+  "blurb": "The same explosion with the gas + radiation equation of state; the hot bubble is radiation dominated.",
+  "physics": { "eos": "gas_radiation" }
+}

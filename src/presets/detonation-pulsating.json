@@ -1,0 +1,21 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "detonation-pulsating",
+  "extends": "detonation-stable",
+  "name": "Detonation: Pulsating (Ea = 27)",
+  "variant": "Pulsating",
+  "blurb": "The same detonation with Ea = 27, past the neutral stability of Ea = 25.26: the lead shock pulses, its pressure swinging above and below the ZND spike of 42.1. The pulsations need a well-resolved reaction zone, a few tens of cells per half-reaction length, or they damp out (Henrick, Aslam & Powers 2006).",
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "znd-detonation",
+      "ea": 27,
+      "overdrive": 1,
+      "shockburn": true,
+      "frontFrame": true,
+      "pocket": false
+    }
+  ],
+  "run": { "tEnd": 60, "tDyn": 10 }
+}

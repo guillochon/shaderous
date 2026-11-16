@@ -1,0 +1,13 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "field-loop-dense",
+  "extends": "field-loop",
+  "variant": "Dense loop, moving mesh",
+  "blurb": "The field loop in gas twice as dense as its surroundings: on the adaptive mesh, the refinement follows the loop around the box.",
+  "domain": { "amr": 1 },
+  "mesh": { "refineDense": 1.5 },
+  "parts": [
+    { "kind": "flow", "name": "field-loop", "dense": true }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "empty-mhd",
+  "extends": "empty",
+  "name": "Empty box with a magnetic field",
+  "variant": "Magnetic field",
+  "blurb": "Floor-density gas threaded by a uniform magnetic field: what the tools add drags the field with it, and is held by it.",
+  "parts": [
+    { "kind": "field", "id": "field", "up": 0.1 }
+  ],
+  "featured": [
+    {
+      "path": "domain.box",
+      "id": "box",
+      "label": "Box size",
+      "min": 0.001,
+      "max": 1000000000,
+      "factor": 2,
+      "tip": "Side of the box: in code units (one is a solar radius) or, with the readouts in physical units, in the unit picked beside it. Changing it builds the run again",
+      "unitChoices": [
+        { "label": "R☉", "value": 1 },
+        { "label": "AU", "value": 215.03215567054764 },
+        { "label": "pc", "value": 44353565.926280975 }
+      ]
+    },
+    {
+      "path": "parts.0.up",
+      "id": "b",
+      "label": "Field strength B",
+      "min": 0,
+      "max": 100,
+      "factor": 2,
+      "tip": "Strength of the uniform field, in units where the magnetic pressure is B² / 2 (code units): 0.1 has the pressure of gas of unit density at a temperature of 0.005. Changing it starts the run again"
+    }
+  ]
+}

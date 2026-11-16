@@ -1,0 +1,65 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "detonation-stable",
+  "name": "Detonation: Stable (Ea = 25)",
+  "group": "Shocks and blasts",
+  "family": "detonation",
+  "familyName": "Detonation",
+  "variant": "Stable",
+  "blurb": "A steady detonation of the single-step Arrhenius model (gamma 1.2, q = 50, Ea = 25): it should run at the Chapman–Jouguet speed, 6.809, keeping the ZND profile behind its von Neumann spike. Lengths are in half-reaction lengths: n / box cells resolve each.",
+  "domain": {
+    "box": 40,
+    "supports2d": true,
+    "bc": { "lo": [1, 2, 2], "hi": [1, 2, 2] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.2 },
+    "gravity": "off",
+    "G": 0,
+    "species": ["fuel", "ash"]
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "znd-detonation",
+      "ea": 25,
+      "overdrive": 1,
+      "shockburn": true,
+      "frontFrame": false,
+      "pocket": false
+    }
+  ],
+  "run": { "tEnd": 3 },
+  "view": { "field": 19, "log": false, "mode": "slice", "axis": 2 },
+  "featured": [
+    {
+      "path": "parts.0.ea",
+      "id": "ea",
+      "label": "Activation temperature Ea",
+      "tip": "Activation temperature of the reaction, in units of the unburned gas temperature. Above 25.26 a planar detonation is unstable and pulses. Changing it starts the run again",
+      "min": 5,
+      "max": 50,
+      "step": 0.5
+    },
+    {
+      "path": "parts.0.overdrive",
+      "id": "overdrive",
+      "label": "Overdrive (D / D_CJ)²",
+      "tip": "Square of the detonation speed over the Chapman–Jouguet speed: 1 is a self-sustained detonation; above it a piston behind would drive it faster. Changing it starts the run again",
+      "min": 1,
+      "max": 2,
+      "step": 0.05
+    },
+    {
+      "path": "parts.0.shockburn",
+      "id": "shockburn",
+      "label": "Burn inside shocks",
+      "tip": "Let cells the shock detector flags burn (1) or not (0). Suppressing it, as for fronts too thin to resolve, costs a resolved detonation speed: about 5% short of Chapman–Jouguet at 13 cells per half-reaction length, an error that halves with each doubling of resolution. Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "step": 1
+    }
+  ]
+}

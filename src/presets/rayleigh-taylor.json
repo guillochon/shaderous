@@ -1,0 +1,29 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "rayleigh-taylor",
+  "name": "Rayleigh-Taylor",
+  "group": "Instabilities",
+  "family": "rayleigh-taylor",
+  "familyName": "Rayleigh-Taylor",
+  "variant": "Standard",
+  "blurb": "Heavy gas over light gas in a uniform gravitational field; the scalar tags the heavy gas.",
+  "domain": {
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 2], "hi": [0, 0, 2] },
+    "bc2d": { "lo": [0, 2, 0], "hi": [0, 2, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4 },
+    "gravity": "off",
+    "G": 0,
+    "gext": { "down": 0.5 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "rayleigh-taylor" }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.2 },
+  "view": { "field": 0, "log": false, "mode": "slice", "axis": 1 }
+}

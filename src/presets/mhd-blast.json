@@ -1,0 +1,39 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "mhd-blast",
+  "name": "MHD blast wave",
+  "group": "Magnetic fields",
+  "family": "mhd-blast",
+  "familyName": "MHD blast wave",
+  "variant": "Standard",
+  "blurb": "A blast wave in a magnetized gas: the field at 45 degrees stretches it along itself (Gardiner & Stone 2008).",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "rho": 1e-10, "p": 1e-10 }
+  },
+  "background": { "rho": 1, "p": 0.1 },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "blast",
+      "shape": { "type": "sphere", "radius": 0.1 },
+      "p": 10,
+      "s": 1
+    },
+    { "kind": "field", "id": "field", "b": [0.7071067811865476, 0.7071067811865476, 0] }
+  ],
+  "run": { "tEnd": 0.2, "checkpointDt": 0.02 },
+  "view": { "mode": "slice", "field": 3, "log": true }
+}

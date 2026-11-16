@@ -1,0 +1,22 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "detonation-cellular",
+  "extends": "detonation-pulsating",
+  "name": "Detonation: Cellular front (2D, Ea = 27)",
+  "variant": "Cellular (2D)",
+  "blurb": "A planar detonation (Ea = 27) perturbed by a pocket of unburned gas: the front breaks into transverse waves whose triple points ride along it and reflect off the walls, the cellular structure of real detonations.",
+  "domain": { "box": 30 },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "znd-detonation",
+      "ea": 27,
+      "overdrive": 1,
+      "shockburn": true,
+      "frontFrame": true,
+      "pocket": true
+    }
+  ],
+  "run": { "tEnd": 40 }
+}

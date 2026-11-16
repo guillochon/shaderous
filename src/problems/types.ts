@@ -4,6 +4,7 @@ import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { AnyBurnSpec } from '../burn/burn';
 import type { UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
+import type { SetupSpec } from '../setup/spec';
 
 export interface Prim {
   rho: number;
@@ -305,6 +306,8 @@ export interface Problem {
    * stresses and MRI quality factors (MagDiagnostics.disk), and the panel shows them.
    */
   disk?: boolean;
+  /** The setup document this problem was compiled from (setup/compile.ts), if it was. */
+  setup?: SetupSpec;
   /** Returns the initial primitive state as a function of position. */
   init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>): (x: number, y: number, z: number) => Prim;
 }

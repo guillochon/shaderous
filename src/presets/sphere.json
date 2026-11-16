@@ -1,0 +1,35 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "sphere",
+  "name": "Uniform sphere collapse",
+  "group": "Self-gravity",
+  "family": "sphere",
+  "familyName": "Uniform sphere collapse",
+  "variant": "Standard",
+  "blurb": "Cold uniform sphere under its own gravity (isolated boundaries).",
+  "domain": {
+    "box": 1,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "isolated",
+    "G": 1,
+    "floors": { "rho": 1e-8, "p": 1e-12 }
+  },
+  "background": { "rho": 0.000001, "p": 0.0001 },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "sphere",
+      "shape": { "type": "sphere", "radius": 0.25 },
+      "rho": 1,
+      "s": 1,
+      "supersample": 4
+    }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.05 },
+  "view": { "field": 0, "log": true, "mode": "volume" }
+}

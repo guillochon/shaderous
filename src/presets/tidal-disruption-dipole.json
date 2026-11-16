@@ -1,0 +1,59 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "tidal-disruption-dipole",
+  "extends": "tidal-disruption",
+  "variant": "Partial, dipole field",
+  "blurb": "The Sun-like γ = 5/3 star threaded by a dipole field (β_M = 10^4, as Guillochon & McCourt 2017 set it) grazes a million-solar-mass black hole (β = 0.7): the surviving core winds up its field, and the stripped streams carry theirs out, stretched straight.",
+  "parts": [
+    {
+      "kind": "star",
+      "id": "star",
+      "type": "polytrope",
+      "n": 1.5,
+      "mass": 1,
+      "radius": 1,
+      "field": { "type": "gm17-dipole", "beta": 10000 }
+    },
+    { "kind": "mass", "id": "bh", "gm": 1000000 },
+    {
+      "kind": "orbit",
+      "id": "orbit",
+      "of": ["star", "bh"],
+      "type": "flyby",
+      "q": 1000000,
+      "beta": 0.7,
+      "start": 3,
+      "debris": true
+    }
+  ],
+  "featured": [
+    {
+      "path": "parts.2.q",
+      "id": "q",
+      "label": "Perturber : star mass",
+      "tip": "Mass of the black hole over the star’s. Sets the orbit: changing it starts the run again",
+      "min": 1,
+      "max": 1000000,
+      "factor": 2
+    },
+    {
+      "path": "parts.2.beta",
+      "id": "beta",
+      "label": "Impact parameter β",
+      "tip": "Tidal radius over pericenter distance: above 1 the star passes inside the tidal radius. Changing it starts the run again",
+      "min": 0.2,
+      "max": 8,
+      "step": 0.1
+    },
+    {
+      "path": "parts.0.field.beta",
+      "id": "betaM",
+      "label": "Field strength β_M",
+      "tip": "Guillochon & McCourt's beta_M = 1 / Az: about the ratio of the gas pressure to the magnetic pressure B^2 / 2 through the star (a quarter of it at the dipole's center). The larger, the weaker the field. Changing it starts the run again",
+      "min": 100,
+      "max": 10000000,
+      "factor": 10
+    }
+  ]
+}

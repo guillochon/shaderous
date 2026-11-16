@@ -1,0 +1,99 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "sub-chandra",
+  "name": "Sub-Chandrasekhar Type Ia (double detonation)",
+  "group": "Self-gravity",
+  "blurb": "A 1 M☉ carbon-oxygen white dwarf under a thin helium shell, set alight at the base of the shell at its pole. The helium detonation wraps around the star and drives a shock into the core, which converges off center and can ignite carbon: the double-detonation model of Type Ia supernovae. Burned by the trained aprox13 network.",
+  "physics": {
+    "eos": "helmholtz",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "isolated",
+    "G": "units",
+    "composition": "carbonOxygen",
+    "floors": { "rho": 1e-10, "p": 1e-14 },
+    "fluff": { "rho": 0.000009999999999999999, "u": 3, "v": 10 },
+    "species": "aprox13",
+    "burn": { "network": "aprox13", "inShocks": false, "limiter": 0 }
+  },
+  "mesh": { "refineDense": 0.01 },
+  "background": { "rho": 0.000001, "cut": 0.0001 },
+  "view": { "field": 0, "log": true, "mode": "slice", "axis": 0 },
+  "family": "sub-chandra",
+  "familyName": "Sub-Chandrasekhar Type Ia (double detonation)",
+  "variant": "Standard",
+  "domain": {
+    "ndim": 3,
+    "n": 128,
+    "amr": 1,
+    "box": 1.25,
+    "supports2d": false,
+    "bc": { "lo": [3, 3, 3], "hi": [3, 3, 3] },
+    "units": {
+      "name": "white dwarf",
+      "length": { "unit": "m", "value": 10000000 },
+      "mass": { "unit": "Msun", "value": 1 }
+    }
+  },
+  "parts": [
+    { "kind": "star", "id": "star", "type": "white-dwarf", "mass": 1 },
+    { "kind": "flow", "id": "shell", "name": "helium-shell-ignition", "mhe": 0.05, "tign": 3, "spot": 300 }
+  ],
+  "run": { "tEnd": 1, "checkpointDt": 0.1, "tDyn": 0.4 },
+  "featured": [
+    {
+      "path": "parts.0.mass",
+      "id": "m",
+      "label": "Mass (M☉)",
+      "tip": "Mass of the white dwarf, core and shell, in solar masses. Changing it starts the run again",
+      "min": 0.8,
+      "max": 1.2,
+      "step": 0.05
+    },
+    {
+      "path": "parts.1.mhe",
+      "id": "mhe",
+      "label": "Helium shell (M☉)",
+      "tip": "Mass of the helium shell, in solar masses: the outermost mass of the star. Thin shells (0.01-0.05) are what make normal Type Ia supernovae; too thin and the helium does not detonate at this resolution. Changing it starts the run again",
+      "min": 0.005,
+      "max": 0.15,
+      "step": 0.005
+    },
+    {
+      "path": "parts.1.tign",
+      "id": "tign",
+      "label": "Ignition temperature (10⁹ K)",
+      "tip": "Temperature of the hot spot that sets the helium alight, in 1e9 K. Changing it starts the run again",
+      "min": 1,
+      "max": 6,
+      "step": 0.25
+    },
+    {
+      "path": "parts.1.spot",
+      "id": "spot",
+      "label": "Hot spot radius (km)",
+      "tip": "Radius of the hot spot, in km, centered one radius above the base of the shell on the +z axis. Changing it starts the run again",
+      "min": 50,
+      "max": 1000,
+      "step": 25
+    },
+    {
+      "path": "physics.burn.inShocks",
+      "id": "shockburn",
+      "label": "Burn inside shocks",
+      "tip": "Let cells the shock detector flags burn (1) or not (0). Off, as in most supernova codes: a captured shock is a few cells of numerical smearing. Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "step": 1
+    },
+    {
+      "path": "physics.burn.limiter",
+      "id": "limiter",
+      "label": "Burning limiter f",
+      "tip": "No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013); 0 switches it off (the default). Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "step": 0.05
+    }
+  ]
+}

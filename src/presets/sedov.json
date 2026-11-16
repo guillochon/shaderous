@@ -1,0 +1,35 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "sedov",
+  "name": "Sedov-Taylor blast",
+  "group": "Shocks and blasts",
+  "family": "sedov",
+  "familyName": "Sedov-Taylor blast",
+  "variant": "Ideal gas",
+  "blurb": "Point explosion in a cold uniform medium, gamma = 1.4.",
+  "domain": {
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4, "R": 1, "arad": 30 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "p": 1e-12 }
+  },
+  "background": { "rho": 1, "p": 0.00001 },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "blast",
+      "shape": { "type": "sphere", "radiusCells": 3.5 },
+      "energy": 1,
+      "s": 1
+    }
+  ],
+  "run": { "tEnd": 0.06, "checkpointDt": 0.005 },
+  "view": { "field": 0, "log": false, "mode": "slice" }
+}

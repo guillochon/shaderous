@@ -1,0 +1,37 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "sod-diag",
+  "name": "Sod shock tube (diagonal)",
+  "group": "Shocks and blasts",
+  "family": "sod",
+  "familyName": "Sod shock tube",
+  "variant": "Diagonal",
+  "blurb": "Shock tube, gamma = 1.4, normal (1, 1, 1).",
+  "domain": {
+    "box": 1,
+    "supports2d": false,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "p": 1e-12 }
+  },
+  "background": { "rho": 0.125, "p": 0.1 },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "left",
+      "shape": { "type": "half", "normal": [1, 1, 1] },
+      "rho": 1,
+      "p": 1,
+      "v": [0, 0, 0],
+      "s": 1
+    }
+  ],
+  "run": { "tEnd": 0.1, "checkpointDt": 0.01 },
+  "view": { "mode": "slice", "log": false }
+}

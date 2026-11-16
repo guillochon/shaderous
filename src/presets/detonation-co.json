@@ -1,0 +1,104 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "detonation-co",
+  "name": "Detonation: carbon–oxygen (network)",
+  "group": "Shocks and blasts",
+  "family": "detonation",
+  "familyName": "Detonation",
+  "variant": "Carbon–oxygen (network)",
+  "blurb": "A detonation in white dwarf matter, burned by a trained neural network of the 13-isotope alpha chain (aprox13): carbon and oxygen at rest in a 1000 km tube, set alight by a hot layer at its closed end. The shocked fuel burns behind the front through oxygen and silicon toward the iron group; how far it gets depends on the density.",
+  "domain": {
+    "ndim": 2,
+    "n": 512,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [2, 2, 2], "hi": [1, 2, 2] },
+    "units": {
+      "name": "C/O detonation",
+      "length": { "unit": "m", "value": 1000000 },
+      "density": { "unit": "kg/m3", "value": 10000000000 },
+      "velocity": { "unit": "m/s", "value": 1000000 }
+    }
+  },
+  "physics": {
+    "eos": "helmholtz",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": 0,
+    "composition": "carbonOxygen",
+    "species": "aprox13",
+    "burn": { "network": "aprox13", "inShocks": false, "limiter": 0 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "co-ignition", "logrho": 7, "carbon": 0.5, "tfuel": 0.5, "tign": 4, "width": 30 }
+  ],
+  "run": { "tEnd": 0.08, "tDyn": 0.01 },
+  "view": { "field": 1, "log": true, "mode": "slice", "axis": 2 },
+  "featured": [
+    {
+      "path": "parts.0.logrho",
+      "id": "logrho",
+      "label": "Density (log₁₀ g/cm³)",
+      "tip": "Density of the fuel, log10 of g/cm^3: white dwarf matter is 6 to 9.5. Above about 1e8 the ash reaches the iron group; below 1e7 burning stops at silicon or oxygen. Changing it starts the run again",
+      "min": 6,
+      "max": 9.5,
+      "step": 0.25
+    },
+    {
+      "path": "parts.0.carbon",
+      "id": "carbon",
+      "label": "Carbon fraction",
+      "tip": "Mass fraction of carbon in the fuel, the rest oxygen. Changing it starts the run again",
+      "min": 0.2,
+      "max": 0.8,
+      "step": 0.05
+    },
+    {
+      "path": "parts.0.tfuel",
+      "id": "tfuel",
+      "label": "Fuel temperature (10⁸ K)",
+      "tip": "Temperature of the unburned fuel, in 1e8 K. Gas below 1e8 K does not burn. Changing it starts the run again",
+      "min": 0.1,
+      "max": 5,
+      "step": 0.1
+    },
+    {
+      "path": "parts.0.tign",
+      "id": "tign",
+      "label": "Ignition temperature (10⁹ K)",
+      "tip": "Temperature of the layer at the closed end that sets the fuel alight, in 1e9 K. Changing it starts the run again",
+      "min": 2,
+      "max": 8,
+      "step": 0.25
+    },
+    {
+      "path": "parts.0.width",
+      "id": "width",
+      "label": "Ignition layer (km)",
+      "tip": "Thickness of the hot layer at the closed end, in km. Changing it starts the run again",
+      "min": 5,
+      "max": 200,
+      "step": 5
+    },
+    {
+      "path": "physics.burn.inShocks",
+      "id": "shockburn",
+      "label": "Burn inside shocks",
+      "tip": "Let cells the shock detector flags burn (1) or not (0). Off, as in most supernova codes: a captured shock is a few cells of numerical smearing, and burning there lets the scheme set the front. Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "step": 1
+    },
+    {
+      "path": "physics.burn.limiter",
+      "id": "limiter",
+      "label": "Burning limiter f",
+      "tip": "No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013): on a grid far coarser than the burning, faster heating is numerically unstable and lights detonations too early. They use 0.1, but here anything under about 0.2 stops even resolved detonations, and on cells of hundreds of km it suppresses the collision detonation; 0 switches it off (the default). Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "step": 0.05
+    }
+  ]
+}

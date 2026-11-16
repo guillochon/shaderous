@@ -1,0 +1,47 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "tidal-disruption-n3",
+  "extends": "tidal-disruption",
+  "variant": "Partial, γ = 4/3",
+  "blurb": "A centrally concentrated γ = 4/3 star grazes a million-solar-mass black hole (β = 1): it loses its outer layers and survives. In the star’s rest frame.",
+  "domain": { "n": 512, "amr": 4 },
+  "physics": {
+    "fluff": { "rho": 0.0001293511454581385, "u": 2.3797398241327774, "v": 20 }
+  },
+  "background": { "rho": 1e-7, "cut": 0.000002 },
+  "parts": [
+    { "kind": "star", "id": "star", "type": "polytrope", "n": 3, "mass": 1, "radius": 1 },
+    { "kind": "mass", "id": "bh", "gm": 1000000 },
+    {
+      "kind": "orbit",
+      "id": "orbit",
+      "of": ["star", "bh"],
+      "type": "flyby",
+      "q": 1000000,
+      "beta": 1,
+      "start": 3,
+      "debris": true
+    }
+  ],
+  "featured": [
+    {
+      "path": "parts.2.q",
+      "id": "q",
+      "label": "Perturber : star mass",
+      "tip": "Mass of the black hole over the star’s. Sets the orbit: changing it starts the run again",
+      "min": 1,
+      "max": 1000000,
+      "factor": 2
+    },
+    {
+      "path": "parts.2.beta",
+      "id": "beta",
+      "label": "Impact parameter β",
+      "tip": "Tidal radius over pericenter distance: above 1 the star passes inside the tidal radius. Changing it starts the run again",
+      "min": 0.2,
+      "max": 8,
+      "step": 0.1
+    }
+  ]
+}

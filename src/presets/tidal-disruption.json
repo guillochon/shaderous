@@ -1,0 +1,70 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "tidal-disruption",
+  "name": "Tidal disruption",
+  "group": "Point masses",
+  "family": "tidal-disruption",
+  "familyName": "Tidal disruption",
+  "variant": "Partial, γ = 5/3",
+  "blurb": "A Sun-like γ = 5/3 star grazes a million-solar-mass black hole (β = 0.6): it loses its outer layers and survives. In the star’s rest frame.",
+  "domain": {
+    "ndim": 3,
+    "n": 256,
+    "amr": 3,
+    "box": 16,
+    "bc": { "lo": [3, 3, 3], "hi": [3, 3, 3] },
+    "units": {
+      "name": "solar",
+      "length": { "unit": "Rsun", "value": 1 },
+      "mass": { "unit": "Msun", "value": 1 }
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "isolated",
+    "G": "units",
+    "composition": "solar",
+    "floors": { "rho": 1e-10, "p": 1e-14 },
+    "fluff": { "rho": 0.000014301753568736848, "u": 1.5, "v": 20 },
+    "frame": "gas"
+  },
+  "background": { "rho": 0.000001, "cut": 0.0001, "relativeTo": "star" },
+  "parts": [
+    { "kind": "star", "id": "star", "type": "polytrope", "n": 1.5, "mass": 1, "radius": 1 },
+    { "kind": "mass", "id": "bh", "gm": 1000000 },
+    {
+      "kind": "orbit",
+      "id": "orbit",
+      "of": ["star", "bh"],
+      "type": "flyby",
+      "q": 1000000,
+      "beta": 0.6,
+      "start": 3,
+      "debris": true
+    }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.5 },
+  "view": { "field": 0, "log": true, "mode": "volume", "pitch": 1.15 },
+  "featured": [
+    {
+      "path": "parts.2.q",
+      "id": "q",
+      "label": "Perturber : star mass",
+      "tip": "Mass of the black hole over the star’s. Sets the orbit: changing it starts the run again",
+      "min": 1,
+      "max": 1000000,
+      "factor": 2
+    },
+    {
+      "path": "parts.2.beta",
+      "id": "beta",
+      "label": "Impact parameter β",
+      "tip": "Tidal radius over pericenter distance: above 1 the star passes inside the tidal radius. Changing it starts the run again",
+      "min": 0.2,
+      "max": 8,
+      "step": 0.1
+    }
+  ]
+}

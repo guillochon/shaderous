@@ -1,0 +1,18 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "kelvin-helmholtz-he-h",
+  "extends": "kelvin-helmholtz",
+  "name": "Kelvin-Helmholtz: helium in hydrogen",
+  "variant": "Helium in hydrogen",
+  "blurb": "A helium slab sliding through hydrogen at the same pressure and temperature, denser by the ratio of their mean molecular weights (8/3). The species set the equation of state: the temperature is uniform where the gases are unmixed, and the mass fractions show how they mix.",
+  "physics": {
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "composition": "solar",
+    "species": ["he4", "h1"]
+  },
+  "parts": [
+    { "kind": "flow", "name": "kelvin-helmholtz", "helium": true }
+  ],
+  "view": { "field": 19, "log": false, "mode": "slice" }
+}

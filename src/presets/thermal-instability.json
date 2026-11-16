@@ -1,0 +1,50 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "thermal-instability",
+  "name": "Thermal instability",
+  "group": "Instabilities",
+  "family": "thermal-instability",
+  "familyName": "Thermal instability",
+  "variant": "Standard",
+  "blurb": "Interstellar gas with cooling and heating, started in unstable balance: it separates into cold clouds and a warm medium.",
+  "domain": {
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": 0,
+    "cooling": "ism",
+    "coolParams": { "heat": 50, "tUnit": 1000, "tFloor": 0.02 },
+    "conductivity": 0.0003
+  },
+  "parts": [
+    { "kind": "flow", "name": "thermal-instability", "n0": 2, "amp": 0.02 }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.05 },
+  "view": { "field": 0, "log": true, "mode": "slice" },
+  "featured": [
+    {
+      "path": "parts.0.n0",
+      "id": "n0",
+      "label": "Mean density (cm⁻³)",
+      "tip": "Mean density of the gas, which starts in thermal balance. Changing it starts the run again",
+      "min": 1,
+      "max": 8,
+      "step": 0.5
+    },
+    {
+      "path": "parts.0.amp",
+      "id": "amp",
+      "label": "Perturbation",
+      "tip": "Amplitude of the initial density perturbations. Changing it starts the run again",
+      "min": 0.001,
+      "max": 0.3,
+      "factor": 1.5
+    }
+  ]
+}

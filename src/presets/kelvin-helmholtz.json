@@ -1,0 +1,27 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "kelvin-helmholtz",
+  "name": "Kelvin-Helmholtz",
+  "group": "Instabilities",
+  "family": "kelvin-helmholtz",
+  "familyName": "Kelvin-Helmholtz",
+  "variant": "Standard",
+  "blurb": "Dense slab sliding through lighter gas; the passive scalar tags the slab.",
+  "domain": {
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4 },
+    "gravity": "off",
+    "G": 0
+  },
+  "parts": [
+    { "kind": "flow", "name": "kelvin-helmholtz" }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.1 },
+  "view": { "field": 0, "log": false, "mode": "slice" }
+}

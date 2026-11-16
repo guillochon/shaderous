@@ -1,0 +1,42 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "tidal-disruption-full",
+  "extends": "tidal-disruption",
+  "variant": "Full, γ = 5/3",
+  "blurb": "A Sun-like γ = 5/3 star passes deep inside the tidal radius of a million-solar-mass black hole (β = 1.5) and is torn apart. In the star’s rest frame.",
+  "parts": [
+    { "kind": "star", "id": "star", "type": "polytrope", "n": 1.5, "mass": 1, "radius": 1 },
+    { "kind": "mass", "id": "bh", "gm": 1000000 },
+    {
+      "kind": "orbit",
+      "id": "orbit",
+      "of": ["star", "bh"],
+      "type": "flyby",
+      "q": 1000000,
+      "beta": 1.5,
+      "start": 3,
+      "debris": true
+    }
+  ],
+  "featured": [
+    {
+      "path": "parts.2.q",
+      "id": "q",
+      "label": "Perturber : star mass",
+      "tip": "Mass of the black hole over the star’s. Sets the orbit: changing it starts the run again",
+      "min": 1,
+      "max": 1000000,
+      "factor": 2
+    },
+    {
+      "path": "parts.2.beta",
+      "id": "beta",
+      "label": "Impact parameter β",
+      "tip": "Tidal radius over pericenter distance: above 1 the star passes inside the tidal radius. Changing it starts the run again",
+      "min": 0.2,
+      "max": 8,
+      "step": 0.1
+    }
+  ]
+}

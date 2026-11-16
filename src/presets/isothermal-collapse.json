@@ -1,0 +1,29 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "isothermal-collapse",
+  "name": "Isothermal turbulent collapse",
+  "group": "Self-gravity",
+  "family": "isothermal-collapse",
+  "familyName": "Isothermal turbulent collapse",
+  "variant": "Standard",
+  "blurb": "Barotropic (isothermal) gas with self-gravity fragmenting in a periodic box.",
+  "domain": {
+    "box": 1,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "barotropic",
+    "eosParams": { "gamma": 1, "K": 0.01 },
+    "gravity": "periodic",
+    "G": 1,
+    "floors": { "rho": 0.000001 },
+    "jeansFloor": true,
+    "jeansCells": 8
+  },
+  "parts": [
+    { "kind": "flow", "name": "isothermal-collapse" }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.1 },
+  "view": { "field": 0, "log": true, "mode": "volume" }
+}

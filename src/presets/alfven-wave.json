@@ -1,0 +1,31 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "alfven-wave",
+  "name": "Circularly polarized Alfven wave",
+  "group": "Magnetic fields",
+  "family": "alfven-wave",
+  "familyName": "Circularly polarized Alfven wave",
+  "variant": "Standard",
+  "blurb": "A circularly polarized Alfven wave along the diagonal: an exact nonlinear solution that returns to its start after each period.",
+  "domain": {
+    "ndim": 2,
+    "n": 512,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "rho": 1e-10, "p": 1e-10 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "alfven-wave" }
+  ],
+  "run": { "tEnd": 0.7071067811865476, "checkpointDt": 0.07071067811865475 },
+  "view": { "mode": "slice", "field": 7, "log": false }
+}

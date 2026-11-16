@@ -1,0 +1,31 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "brio-wu",
+  "name": "Brio-Wu shock tube",
+  "group": "Magnetic fields",
+  "family": "brio-wu",
+  "familyName": "Brio-Wu shock tube",
+  "variant": "Standard",
+  "blurb": "The MHD shock tube of Brio & Wu (1988) along x: fast rarefactions, a compound wave, a contact and a slow shock.",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 2 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "rho": 1e-10, "p": 1e-10 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "brio-wu" }
+  ],
+  "run": { "tEnd": 0.1, "checkpointDt": 0.01 },
+  "view": { "mode": "slice", "field": 0, "log": false }
+}

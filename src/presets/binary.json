@@ -1,0 +1,129 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "binary",
+  "name": "Binary accretion",
+  "group": "Point masses",
+  "family": "binary",
+  "familyName": "Binary accretion",
+  "variant": "Standard",
+  "blurb": "Two point masses orbiting inside a gas disk: they clear a cavity, draw streams across it and accrete.",
+  "domain": {
+    "box": 12,
+    "supports2d": true,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] },
+    "units": {
+      "name": "binary",
+      "length": { "unit": "pc", "value": 0.01 },
+      "mass": { "unit": "Msun", "value": 100000, "per": "a.mass" }
+    }
+  },
+  "physics": {
+    "eos": "barotropic",
+    "eosParams": { "gamma": 1, "K": 0.010000000000000002 },
+    "gravity": "off",
+    "G": 1,
+    "viscosity": 0.001,
+    "floors": { "rho": 1e-9 },
+    "frame": "masses"
+  },
+  "mesh": { "refineMasses": true },
+  "parts": [
+    { "kind": "mass", "id": "a", "gm": 0.5, "soft": 0.06 },
+    { "kind": "mass", "id": "b", "gm": 0.5, "soft": 0.06 },
+    {
+      "kind": "orbit",
+      "id": "orbit",
+      "of": ["a", "b"],
+      "type": "binary",
+      "q": 1,
+      "separation": 1,
+      "ecc": 0,
+      "incl": 0,
+      "retrograde": false
+    },
+    {
+      "kind": "disk",
+      "id": "disk",
+      "about": ["a", "b"],
+      "profile": "thin",
+      "rIn": 2.5,
+      "rOut": 5.04,
+      "sigma0": 0.0001,
+      "cs": 0.1,
+      "floor": 0.0001,
+      "damp": { "from": 4.5, "rate": 3 }
+    }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 1, "tDyn": 6.283185307179586 },
+  "view": { "field": 0, "log": true, "mode": "slice", "axis": 2, "pitch": 1.15 },
+  "featured": [
+    {
+      "path": "domain.units.mass.value",
+      "id": "m1",
+      "label": "m₁ (M☉)",
+      "tip": "Mass of the heavier body, in solar masses. It sets only the physical units the readouts are shown in (with the separation). A barotropic gas runs on unchanged; another equation of state takes physical constants from them, and starts again",
+      "min": 0.001,
+      "max": 100000000000,
+      "factor": 2
+    },
+    {
+      "path": "domain.units.length.value",
+      "id": "sep",
+      "label": "Separation (pc)",
+      "tip": "Semi-major axis of the binary’s orbit, in parsecs. It sets only the physical units the readouts are shown in (with m₁). A barotropic gas runs on unchanged; another equation of state takes physical constants from them, and starts again",
+      "min": 1e-9,
+      "max": 100,
+      "factor": 2
+    },
+    {
+      "path": "parts.2.q",
+      "id": "q",
+      "label": "Mass ratio",
+      "tip": "Mass of the lighter body over the heavier one. Sets the orbit: changing it starts the run again",
+      "min": 0.01,
+      "max": 1,
+      "factor": 1.25
+    },
+    {
+      "path": "parts.2.ecc",
+      "id": "ecc",
+      "label": "Eccentricity",
+      "tip": "Eccentricity of the binary’s orbit. Changing it starts the run again",
+      "min": 0,
+      "max": 0.8,
+      "step": 0.05
+    },
+    {
+      "path": ["parts.0.soft", "parts.1.soft"],
+      "id": "soft",
+      "label": "Softening and sink radius",
+      "tip": "Radius within which each mass’s pull is softened and it takes in gas (at least two cells). Changes take effect without a restart",
+      "min": 0.01,
+      "max": 0.5,
+      "step": 0.01,
+      "unit": { "label": "pc", "times": "sep" }
+    },
+    {
+      "path": "parts.2.incl",
+      "id": "incl",
+      "label": "Binary inclination (°)",
+      "tip": "Angle between the binary’s orbit and the disk, in degrees, tilted about the line through pericenter: 0 orbits with the disk, 90 is polar, 180 against it. Changing it starts the run again",
+      "min": 0,
+      "max": 180,
+      "step": 1,
+      "control": "slider",
+      "dims": 3
+    },
+    {
+      "path": "parts.2.retrograde",
+      "id": "retro",
+      "label": "Retrograde",
+      "tip": "The binary orbits against the disk’s rotation. Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "control": "checkbox",
+      "dims": 2
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "advection",
+  "name": "Uniform advection",
+  "group": "Tests and sandbox",
+  "family": "advection",
+  "familyName": "Uniform advection",
+  "variant": "Standard",
+  "blurb": "Density blob advected diagonally through a periodic box; tests conservation.",
+  "domain": {
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4 },
+    "gravity": "off",
+    "G": 0
+  },
+  "parts": [
+    { "kind": "flow", "name": "advection" }
+  ],
+  "run": { "tEnd": 10, "checkpointDt": 0.5 },
+  "view": { "field": 0, "log": false, "mode": "slice" }
+}

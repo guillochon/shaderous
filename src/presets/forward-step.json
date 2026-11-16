@@ -1,0 +1,47 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "forward-step",
+  "name": "Mach 3 wind tunnel with a step",
+  "group": "Shocks and blasts",
+  "family": "forward-step",
+  "familyName": "Mach 3 wind tunnel with a step",
+  "variant": "Standard",
+  "blurb": "Mach 3 flow meets a step in a wind tunnel: a bow shock stands ahead of it and reflects off the walls.",
+  "domain": {
+    "box": 3,
+    "supports2d": true,
+    "bc": { "lo": [1, 2, 0], "hi": [1, 2, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4 },
+    "gravity": "off",
+    "G": 0
+  },
+  "background": { "rho": 1.4, "p": 1, "v": [3, 0, 0] },
+  "parts": [
+    {
+      "kind": "obstacle",
+      "id": "floor",
+      "shape": { "type": "box", "min": [null, null, null], "max": [null, -0.5, null] }
+    },
+    {
+      "kind": "obstacle",
+      "id": "ceiling",
+      "shape": { "type": "box", "min": [null, 0.5, null], "max": [null, null, null] }
+    },
+    {
+      "kind": "obstacle",
+      "id": "step",
+      "shape": { "type": "box", "min": [-0.9, null, null], "max": [null, -0.3, null] }
+    },
+    {
+      "kind": "inflow",
+      "id": "inlet",
+      "shape": { "type": "box", "min": [null, null, null], "max": [-1.47, null, null] }
+    }
+  ],
+  "run": { "tEnd": 4, "checkpointDt": 0.2 },
+  "view": { "field": 0, "log": false, "mode": "slice" }
+}
