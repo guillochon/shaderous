@@ -186,9 +186,9 @@ details[open] > summary .sum { display: none; }
   position: absolute; inset: 0; padding: 0 4px; display: flex; justify-content: space-between;
   font-size: 10px; line-height: 18px; color: #aab3c5; pointer-events: none; white-space: nowrap;
 }
-#tools #tool-rest, #tools #tool-erase, #tools #tool-clear { height: 18px; font-size: 10px; color: #aab3c5; }
-#tools #tool-rest[hidden], #tools #tool-erase[hidden], #tools #tool-clear[hidden], #tool-shapes[hidden] { display: none; }
-#tools #tool-rest[aria-pressed='true'], #tools #tool-erase[aria-pressed='true'] { color: #fff; }
+#tools #tool-rest, #tools #tool-fixed, #tools #tool-erase, #tools #tool-clear { height: 18px; font-size: 10px; color: #aab3c5; }
+#tools #tool-rest[hidden], #tools #tool-fixed[hidden], #tools #tool-erase[hidden], #tools #tool-clear[hidden], #tool-shapes[hidden] { display: none; }
+#tools #tool-rest[aria-pressed='true'], #tools #tool-fixed[aria-pressed='true'], #tools #tool-erase[aria-pressed='true'] { color: #fff; }
 #tool-shapes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
 #tools #tool-shapes button { height: 20px; }
 #tools #tool-shapes svg { width: 13px; height: 13px; }
@@ -379,7 +379,7 @@ body.validate .buttons-cell button + button { margin-left: 4px; }
   .cb-checks .check { font-size: 12px; min-height: 22px; }
   #colorbar select { height: 26px; font-size: 12px; }
   #tools button { height: 34px; }
-  .scrub, #tools #tool-rest, #tools #tool-erase, #tools #tool-clear, #tools #tool-shapes button, #tools #tool-index button { height: 26px; }
+  .scrub, #tools #tool-rest, #tools #tool-fixed, #tools #tool-erase, #tools #tool-clear, #tools #tool-shapes button, #tools #tool-index button { height: 26px; }
   .scrub span { line-height: 26px; }
   .scrub input::-webkit-slider-thumb { height: 26px; }
   .scrub input::-moz-range-thumb { height: 26px; }

@@ -40,7 +40,7 @@ fn cover(a: vec3<f32>, b: vec3<f32>, r: f32, v: u32) -> vec3<f32> {
 
 // The radius of the tube through a point: the path's own, or less for another mass's.
 fn tube_radius(w: f32) -> f32 {
-  return select(D.n.y, 0.45 * D.n.y, w >= 2.0);
+  return select(D.n.y, 0.6 * D.n.y, w >= 2.0);
 }
 
 @vertex

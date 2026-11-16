@@ -55,9 +55,13 @@ fn main() {
         let mass = (b.pos.w - b.cmass.x) / P.G;
         // (M v + dp) / (M + dm), as a change to v so that it too can be compensated
         let dv = (dp - dm * b.vel.xyz) / (mass + dm);
-        let gm = kahan1(b.pos.w, b.cmass.x, P.G * dm);
+        var gm = kahan1(b.pos.w, b.cmass.x, P.G * dm);
         let acc = kahan1(b.sink.y, b.cmass.y, dm);
-        let v = kahan3(b.vel.xyz, b.cvel.xyz, dv);
+        var v = kahan3(b.vel.xyz, b.cvel.xyz, dv);
+        // A massless particle keeps count of what it takes, and is otherwise unchanged by it.
+        if (mass_massless(b)) { gm = vec2<f32>(b.pos.w, b.cmass.x); }
+        // Nor does it move a massless particle, or a fixed mass.
+        if (mass_massless(b) || mass_fixed(b)) { v = Kahan3(b.vel.xyz, b.cvel.xyz); }
         let p = kahan3(b.accp.xyz, b.cp.xyz, dp);
         let l = kahan3(b.accl.xyz, b.cl.xyz, dl);
         BH.list[i].pos = vec4<f32>(b.pos.xyz, gm.x);
@@ -103,7 +107,7 @@ fn main() {
       acc -= other.pos.w * d / (r2 * sqrt(r2));
     }
     BH.list[i].acc = vec4<f32>(acc, b.acc.w);
-    if (LIVE) { BH.list[i].vel = vec4<f32>(BH.list[i].vel.xyz + 0.5 * clock.dt * acc, b.vel.w); }
+    if (LIVE && !mass_fixed(b)) { BH.list[i].vel = vec4<f32>(BH.list[i].vel.xyz + 0.5 * clock.dt * acc, b.vel.w); }
   }
   if (LIVE && P.bh.y == 2.0) {
     var p = vec3<f32>(0.0);
@@ -114,6 +118,7 @@ fn main() {
     }
     let vc = p / max(gm, 1e-30);
     for (var i = 0u; i < n; i++) {
+      if (mass_fixed(BH.list[i])) { continue; }
       BH.list[i].vel = vec4<f32>(BH.list[i].vel.xyz - vc, BH.list[i].vel.w);
     }
   }

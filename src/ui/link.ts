@@ -343,7 +343,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   put(out.view, 'fieldLines', bool('flines'));
   const nfl = num('nflines', 1, MAX_FIELD_LINES);
   put(out.view, 'fieldLineCount', nfl === undefined ? undefined : Math.round(nfl));
-  put(out.view, 'surfaceOpacity', num('isoa', 0.05, 1));
+  put(out.view, 'surfaceOpacity', num('isoa', 0.01, 1));
   const ncont = num('ncont', 1, MAX_CONTOURS);
   put(out.view, 'nContours', ncont === undefined ? undefined : Math.round(ncont));
   const lo = num('lo');

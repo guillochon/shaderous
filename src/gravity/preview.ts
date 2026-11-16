@@ -13,6 +13,8 @@ export interface Body {
   pos: number[];
   vel: number[];
   soft: number;
+  /** held where it is */
+  fixed?: boolean;
 }
 
 /** A piece of the gas: its mass, at its center of mass, and the size of the region it sums. */
@@ -82,7 +84,7 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
   bodies.forEach((b, i) => {
     for (let k = 0; k < 3; k++) {
       x[3 * i + k] = b.pos[k] ?? 0;
-      v[3 * i + k] = b.vel[k] ?? 0;
+      v[3 * i + k] = b.fixed ? 0 : (b.vel[k] ?? 0);
     }
   });
   const nl = lumps.length;
@@ -138,7 +140,7 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
     // gas pulls on mass i with gm_i / G times `gas`, so the mass pulls back with minus that);
     // with the masses, at the acceleration of their center, which only the gas gives.
     const abar = [0, 0, 0];
-    if (frame === 1 && gasMass > 0) {
+    if (frame === 1 && gasMass > 0 && G > 0) {
       for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) abar[k] -= (gm[i] * gas[3 * i + k]) / (G * gasMass);
     } else if (frame === 2 && gmAll > 0) {
       for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) abar[k] += (gm[i] * gas[3 * i + k]) / gmAll;
@@ -159,9 +161,11 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
         ay -= w * dy;
         az -= w * dz;
       }
-      a[3 * i] = ax;
-      a[3 * i + 1] = ay;
-      a[3 * i + 2] = az;
+      // A fixed mass is not moved.
+      const held = bodies[i].fixed ? 0 : 1;
+      a[3 * i] = held * ax;
+      a[3 * i + 1] = held * ay;
+      a[3 * i + 2] = held * az;
     }
   };
   // In the masses' frame their center of mass is held at rest after every kick.
@@ -170,7 +174,7 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
     for (let k = 0; k < 3; k++) {
       let p = 0;
       for (let i = 0; i < n; i++) p += gm[i] * v[3 * i + k];
-      for (let i = 0; i < n; i++) v[3 * i + k] -= p / gmAll;
+      for (let i = 0; i < n; i++) if (!bodies[i].fixed) v[3 * i + k] -= p / gmAll;
     }
   };
 

@@ -47,6 +47,11 @@ Since then (2026-11-15):
 - **A Soft slider for point masses**: the softening length of the mass's gravity, apart from
   Size, which is the sink's radius. Shown only when the tool has a mass.
 - **The brush and its guides stay under the pointer** while the view is dragged or zoomed.
+- **A sink without a mass is a massless particle** (`PointMass.massless`), not a fixed drain:
+  it moves, can be dragged out with a velocity, and has a preview like any other. It replaces
+  the sink tool's use of the sources list, so sinks of both kinds share the 32 slots. A
+  **Fixed** toggle places sinks that never move (`PointMass.fixed`), with or without a mass.
+- **Thinner tubes**: radius 0.0025 of the box, the other masses' 0.6 of that.
 
 ## 1. Goal
 

@@ -322,8 +322,19 @@ export interface PointMass {
   soft?: number;
   /** radius within which it takes gas in (default: the softening length; 0 for none) */
   sinkRadius?: number;
-  /** removal rate at the sink's center, in units of sqrt(G M / radius^3) (default 1) */
+  /**
+   * removal rate at the sink's center, in units of sqrt(G M / radius^3) (default 1); per unit
+   * time for a massless particle
+   */
   sinkRate?: number;
+  /**
+   * A particle without a mass of its own: `gm` is then a token amount, far too little to pull
+   * on anything, it never grows, and what its sink takes is kept count of but changes neither
+   * its mass nor its motion. It moves as the gas and the masses pull it.
+   */
+  massless?: boolean;
+  /** Held where it is: nothing moves it (its velocity is zero), whatever pulls on it or it takes in. */
+  fixed?: boolean;
   /** gas mass accreted so far */
   accreted?: number;
   /** momentum that gas brought in */

@@ -10,13 +10,17 @@
 fn main() {
   for (var i = 0u; i < mass_count(); i++) {
     let m = BH.list[i];
-    let v = m.vel.xyz + 0.5 * clock.dt * m.acc.xyz;
+    var v = m.vel.xyz + 0.5 * clock.dt * m.acc.xyz;
+    // A fixed mass stays where it is.
+    if (mass_fixed(m)) { v = vec3<f32>(0.0); }
     BH.list[i].vel = vec4<f32>(v, m.vel.w);
     BH.list[i].pos = vec4<f32>(m.pos.xyz + clock.dt * v, m.pos.w);
     // The sink's rate for this step, from the mass as it is now.
     let rs = m.acc.w;
     var rate = 0.0;
     if (rs > 0.0) { rate = m.sink.x * sqrt(m.pos.w / (rs * rs * rs)); }
-    BH.list[i].sink = vec4<f32>(m.sink.xy, rate, 0.0);
+    // A massless particle has no orbital rate of its own: its rate is given per unit time.
+    if (rs > 0.0 && mass_massless(m)) { rate = m.sink.x; }
+    BH.list[i].sink = vec4<f32>(m.sink.xy, rate, m.sink.w);
   }
 }

@@ -8,10 +8,10 @@ import { bindGroup } from '../gpu/device';
 const MAX_POINTS = 256;
 /** Points in all, with the paths of the run's other masses after it. */
 const ALL_POINTS = 4096;
-/** The tube's radius, in units of the box side; the cone is 6 of them long and 2.5 wide at its base. */
-const RADIUS = 0.005;
-const HEAD_LENGTH = 6;
-const HEAD_RADIUS = 2.5;
+/** The tube's radius, in units of the box side; the cone is 9 of them long and 3 wide at its base. */
+const RADIUS = 0.0025;
+const HEAD_LENGTH = 9;
+const HEAD_RADIUS = 3;
 /** The sink markers' orange (src/ui/style.css). */
 const COLOR = [1, 0.616, 0.36, 1];
 

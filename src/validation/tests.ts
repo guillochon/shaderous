@@ -1811,7 +1811,7 @@ export const TESTS: TestDef[] = [
     id: 'point-mass-many',
     name: 'Point masses: more than one group of four (six on a ring)',
     criterion:
-      'Six equal masses with overlapping sinks on a ring in still gas, in a reflecting box (their sums over the gas take two reductions): gas and accreted mass together are conserved to 1e-5, every mass accretes, and masses opposite each other across the center, summed by different reductions, take in the same to 1% and stay opposite to 1e-3 of the box. In 2D and 3D, on uniform and adaptive grids and with per-block timesteps',
+      'Six equal masses with overlapping sinks on a ring in still gas, in a reflecting box (their sums over the gas take two reductions): gas and accreted mass together are conserved to 1e-5, every mass accretes, and masses opposite each other across the center, summed by different reductions, take in the same to 1% and stay opposite to 1e-3 of the box. In 2D and 3D, on uniform and adaptive grids and with per-block timesteps. A massless particle takes gas, keeps its token mass and moves on at about its speed; a fixed mass takes gas, grows, and does not move',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -1861,6 +1861,30 @@ export const TESTS: TestDef[] = [
         metrics.full_least_accreted = Math.min(...d.masses.map((m) => m.accreted)) / d0.mass;
         metrics.full_mass_error = Math.abs(d.mass + all - d0.mass) / d0.mass;
         pass &&= added === MAX_MASSES && d.masses.length === MAX_MASSES && metrics.full_least_accreted > 0 && metrics.full_mass_error < 1e-5;
+      });
+      // A massless particle and a fixed mass, among moving ones: the particle takes gas at the
+      // rate it is given, keeps its token mass, and goes on its way (0.12 at its own speed, and
+      // the masses pull it on); the fixed mass takes gas and grows, and does not move (to the
+      // rounding of where it was put).
+      await withSim(gpu, stillGas({ bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.3 }), 64, { ndim: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        sim.addMass({ gm: 0.02, pos: [-0.25, 0, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.1 });
+        sim.addMass({ gm: 1e-9, pos: [0.2, 0.2, 0], vel: [0, -0.4, 0], soft: 0.05, sinkRadius: 0.1, sinkRate: 2, massless: true });
+        sim.addMass({ gm: 0.02, pos: [0.25, -0.2, 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.1, fixed: true });
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const [, tracer, held] = d.masses;
+        const all = d.masses.reduce((t, m) => t + m.accreted, 0);
+        metrics.massless_accreted = tracer.accreted / d0.mass;
+        metrics.massless_gm_change = Math.abs(tracer.gm - 1e-9) / 1e-9;
+        metrics.massless_moved = Math.hypot(tracer.pos[0] - 0.2, tracer.pos[1] - 0.2);
+        metrics.fixed_accreted = held.accreted / d0.mass;
+        metrics.fixed_moved = Math.hypot(held.pos[0] - 0.25, held.pos[1] + 0.2) + Math.hypot(...held.vel);
+        metrics.fixed_gm_error = Math.abs(held.gm - 0.02 - held.accreted) / 0.02;
+        metrics.mixed_mass_error = Math.abs(d.mass + all - d0.mass) / d0.mass;
+        pass &&= tracer.massless && !tracer.fixed && held.fixed && !held.massless
+          && tracer.accreted > 1e-4 * d0.mass && metrics.massless_gm_change < 1e-5 && metrics.massless_moved > 0.1 && metrics.massless_moved < 0.25
+          && held.accreted > 1e-4 * d0.mass && metrics.fixed_moved < 1e-6 && metrics.fixed_gm_error < 1e-4 && metrics.mixed_mass_error < 1e-5;
       });
       return { pass, metrics };
     },

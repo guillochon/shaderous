@@ -143,7 +143,7 @@ side.innerHTML = `
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), 'row-axis', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', 'row-slicepos', 'Where the slice cuts the box along its normal')}
       ${field('Contours', number('ncont', `min="1" max="${MAX_CONTOURS}" step="1"`), 'row-ncont', 'How many contour lines the slice and projection views draw, or isosurfaces the volume view draws, when Contours is on (beside the color bar): evenly spaced in log |value| between the ends of the displayed range, the ends themselves left out. A range reaching zero or below is contoured in |value| over the four decades under its largest magnitude')}
-      ${field('Surface opacity', '<input id="isoa" type="range" min="0.05" max="1" step="0.05" />', 'row-isoa', 'Volume view, with Contours on: how opaque each isosurface is. Below 1 the surfaces behind show through')}
+      ${field('Surface opacity', '<input id="isoa" type="range" min="0" max="1" step="0.005" />', 'row-isoa', 'Volume view, with Contours on: how opaque each isosurface is. Below 1 the surfaces behind show through')}
       ${field('Field lines', number('nflines', `min="1" max="${MAX_FIELD_LINES}" step="1"`), 'row-nflines', 'A run with a magnetic field, with Field lines on (beside the color bar): how many lines. In 2D they are contours of the flux function, this many levels: the same magnetic flux passes between any two, so they crowd where the field is strong. In 3D, this many lines traced from seeds that move with the gas, so each stays the same line as the field evolves: thin tubes in the volume view, lines along the field in the plane in the slice view. Colored by the magnetic pressure B^2/2 on a log scale over up to six decades below the strongest, as Guillochon & McCourt (2017) drew theirs: red weak, then yellow, green, cyan, blue, magenta strong')}
     </div>
   </details>
@@ -289,7 +289,7 @@ $('colorbar').innerHTML = `
     <label class="check" id="flines-check" title="Magnetic field lines: tubes in the volume view, lines in the plane in the slice view and in 2D (how many: View, Field lines)"><input id="flines" type="checkbox" />Field lines</label>
   </div>
   <select id="cmap" title="Color map">${Object.keys(COLORMAPS).map((c) => opt(c, c)).join('')}</select>
-  <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="1" max="300" step="1" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
+  <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="0" max="1" step="0.005" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
 `;
 
 /** Show a preset in the problem and variant menus. */
@@ -404,7 +404,7 @@ TOOLS.push({
 });
 TOOLS.push({
   kind: 'sink', label: 'Sink',
-  title: 'Sink: click to place one that takes gas away. Give it a mass and it becomes a point mass: it pulls on the gas, moves, and grows by what it takes in (press and drag to set it moving: the path it would take in the gas as it is now is drawn as you drag)',
+  title: 'Sink: click to place a particle that takes gas away, or press and drag to set it moving (the path it would take in the gas as it is now is drawn). Without a mass it goes where gravity takes it and pulls on nothing; with one it is a point mass: it pulls on the gas and grows by what it takes in',
   icon: icon('<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.2 2.2" /><path d="M2.5 2.5l3 3M5.5 3v2.5H3M13.5 13.5l-3-3M10.5 13v-2.5H13" />'),
 });
 TOOLS.push({
@@ -453,7 +453,9 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   star: { size: 0.1, softness: 0, amount: 0, mass: 0, soften: 0.04 },
   query: { size: 0, softness: 0, amount: 0, mass: 0, soften: 0.04 },
 };
-/** The sink tool places a point mass rather than a plain sink. */
+/** The sink tool places sinks that stay where they are put. */
+let sinkFixed = false;
+/** The sink tool places a point mass rather than a massless sink. */
 const sinkHasMass = () => toolParams.sink.mass > 0;
 let tool: ToolKind | null = null;
 /** Star tool: polytropic index, and log10 of the central density (1, as in the polytrope preset). */
@@ -471,8 +473,9 @@ $('tools').innerHTML =
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
     <label class="scrub" id="tp-rhoc-row" title="Central density of the star"><input id="tp-rhoc" type="range" min="-3" max="3" step="0.05" aria-label="Central density of the star" /><span>ρc<output id="tp-rhoc-out"></output></span></label>
     <div id="tool-index" title="Polytropic index n: p = K ρ^(1 + 1/n). 1.5 is a convective star, 3 a radiative one like the Sun">${STAR_INDICES.map((n) => `<button id="${starId(n)}" aria-pressed="false" title="n = ${n}">n=${n}</button>`).join('')}</div>
-    ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it only takes gas away, where it was placed. With a mass it is a point mass with softened gravity: it pulls on the gas, moves, and grows by what it takes in', 0, 2)}
+    ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it is a particle without mass: it takes gas away at the Flux rate and moves as gravity takes it, but pulls on nothing and never grows. With a mass it is a point mass with softened gravity: it pulls on the gas and grows by what it takes in', 0, 2)}
     ${slider('soften', 'Soft', 'Softening length of the point mass\u2019s gravity, as a share of the box: within it the pull falls away instead of growing without limit, so gas and other masses can pass close by. Size is the radius of its sink', 0.002, 0.3)}
+    <button id="tool-fixed" aria-pressed="false" title="Fixed: the sink stays where it is placed, whatever pulls on it or it takes in. Off: it moves, and a drag sets it going">Fixed</button>
     <button id="tool-rest" aria-pressed="true" title="p = 0 for new mass: added gas arrives at rest and shares the momentum already there, slowing the flow. Off: it arrives with the local velocity">p = 0</button>
     <div id="tool-shapes">${SHAPES.map((q) => `<button id="shape-${q.mode}" aria-pressed="false" aria-label="${q.mode}" title="${q.title}">${q.icon}</button>`).join('')}</div>
     <button id="tool-erase" aria-pressed="false" title="Erase: the shape drawn turns obstacle back into gas, at rest">Erase</button>
@@ -530,9 +533,9 @@ function syncTools() {
   $('tp-mass-row').hidden = tool !== 'sink';
   // Only a point mass has gravity to soften.
   $('tp-soften-row').hidden = !(tool === 'sink' && sinkHasMass());
-  // A point mass has no soft edge to set: its sink always fades from the center. A star's
-  // edge is its own profile.
-  $('tp-softness-row').hidden = (tool === 'sink' && sinkHasMass()) || tool === 'star';
+  // A sink has no soft edge to set: it always fades from the center. A star's edge is its
+  // own profile.
+  $('tp-softness-row').hidden = tool === 'sink' || tool === 'star';
   $('tp-rhoc-row').hidden = $('tool-index').hidden = tool !== 'star';
   for (const n of STAR_INDICES) $(starId(n)).setAttribute('aria-pressed', String(starN === n));
   const rc = $<HTMLInputElement>('tp-rhoc');
@@ -543,20 +546,22 @@ function syncTools() {
   $('tp-amount-row').title = tool === 'source'
     ? 'Flux: how fast the source feeds gas in. At 100% it adds the density of the densest gas in the time the fastest signal takes to cross it'
     : tool === 'sink'
-      ? 'Flux: how fast the sink takes gas away. Without a mass, 100% empties it in the time the fastest signal takes to cross it; with one, 25% is the orbital rate at its edge. At the far left it is exactly 0: a point mass that takes no gas, and only orbits'
+      ? 'Flux: how fast the sink takes gas away. Without a mass, 100% empties its center in the time the fastest signal takes to cross it; with one, 25% is the orbital rate at its edge. At the far left it is exactly 0: a particle that takes no gas, and only moves'
       : 'Gas added per click, as a share of the densest gas';
   $('tp-amount-row').querySelector('span')!.firstChild!.textContent = flux ? 'Flux' : 'Amt';
   // For a source or a sink the softness is how its rate fades toward its edge, and is called
   // that: "Soft" is the softening of a point mass's gravity, a slider of the sink tool's own.
   $('tp-softness-row').querySelector('span')!.firstChild!.textContent = flux ? 'Edge' : 'Soft';
   $('tp-softness-row').title = flux
-    ? 'Edge: how the rate falls off toward the edge. 0 is the same all the way out, 1 fades all the way from the center. (A point mass\u2019s sink always fades from the center; the softening of its gravity is the Soft slider it then has.)'
+    ? 'Edge: how the rate falls off toward the edge. 0 is the same all the way out, 1 fades all the way from the center'
     : 'Softness of the edge: 0 is hard, 1 fades all the way from the center';
   const mine = tool === 'sink' ? sources.filter((q) => q.decay > 0).length + placedMasses : sources.filter((q) => q.decay === 0).length;
   $('tool-clear').hidden = !flux;
-  $('tool-clear').title = tool === 'sink' ? 'Remove every sink and point mass placed with this tool' : 'Remove every source';
+  $('tool-clear').title = tool === 'sink' ? 'Remove every sink placed with this tool, with or without a mass' : 'Remove every source';
   $('tool-clear').textContent = mine ? `Clear ${mine}` : 'Clear';
   $<HTMLButtonElement>('tool-clear').disabled = mine === 0;
+  $('tool-fixed').hidden = tool !== 'sink';
+  $('tool-fixed').setAttribute('aria-pressed', String(sinkFixed));
   $('tool-rest').hidden = tool !== 'mass';
   $('tool-rest').setAttribute('aria-pressed', String(massAtRest));
   // An obstacle is drawn as a shape, not painted with a brush.
@@ -596,7 +601,8 @@ function massRange(): { lo: number; hi: number } | null {
   const d = lastDiag;
   if (!d) return lastMassRange;
   const gas = d.mass > 0 ? d.mass : cfg.problem.box ** cfg.ndim;
-  const ms = cfg.G > 0 ? d.masses.map((m) => m.gm / cfg.G / gas).filter((m) => m > 0) : [];
+  // (A massless particle's token G M is not a mass to measure against.)
+  const ms = cfg.G > 0 ? d.masses.filter((m) => !m.massless).map((m) => m.gm / cfg.G / gas).filter((m) => m > 0) : [];
   lastMassRange = ms.length ? { lo: 1e-3 * Math.min(...ms), hi: 1e3 * Math.max(...ms) } : null;
   return lastMassRange;
 }
@@ -760,6 +766,10 @@ for (const n of STAR_INDICES) {
     syncTools();
   });
 }
+$('tool-fixed').addEventListener('click', () => {
+  sinkFixed = !sinkFixed;
+  syncTools();
+});
 $('tool-rest').addEventListener('click', () => {
   massAtRest = !massAtRest;
   syncTools();
@@ -935,11 +945,21 @@ function pushTransfer() {
   renderer?.setTransfer(bakeTransfer(editor.colormap, editor.points));
 }
 
+/**
+ * The opacity sliders are logarithmic: a slider's position, 0 to 1, runs from the least value
+ * to the greatest in equal ratios, so that the faint end has as much of the slider as the
+ * opaque end. The gas's opacity runs from 1 to 300, an isosurface's from 0.01 to 1.
+ */
+const OPACITY_RANGE = { lo: 1, hi: 300 };
+const SURFACE_RANGE = { lo: 0.01, hi: 1 };
+const logPos = (v: number, r: { lo: number; hi: number }) => Math.min(1, Math.max(0, Math.log(v / r.lo) / Math.log(r.hi / r.lo)));
+const logAt = (p: number, r: { lo: number; hi: number }) => +(r.lo * (r.hi / r.lo) ** p).toPrecision(3);
+
 /** The opacity control: its fill and its value. */
 function syncOpacity() {
   const el = $<HTMLInputElement>('opacity');
-  el.style.setProperty('--p', `${(100 * (+el.value - +el.min)) / (+el.max - +el.min)}%`);
-  $('opacity-out').textContent = el.value;
+  el.style.setProperty('--p', `${100 * +el.value}%`);
+  $('opacity-out').textContent = String(+view.opacity.toPrecision(3));
 }
 
 const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) < 1e5 ? v.toPrecision(5) : v.toExponential(2));
@@ -1040,7 +1060,7 @@ function syncControls() {
   $<HTMLInputElement>('fog').disabled = !marching || !view.contours;
   $<HTMLInputElement>('box').checked = view.box;
   $<HTMLInputElement>('box').disabled = !marching;
-  $<HTMLInputElement>('isoa').value = String(view.surfaceOpacity);
+  $<HTMLInputElement>('isoa').value = String(logPos(view.surfaceOpacity, SURFACE_RANGE));
   $<HTMLInputElement>('isoa').disabled = !marching || !view.contours;
   // Field lines: only with a magnetic field, and not through a projection.
   const magnetic = !!cfg.problem.mhd;
@@ -1178,7 +1198,7 @@ function syncControls() {
     : 'Where the slice cuts the box along its normal';
   showDensityCut();
   $<HTMLInputElement>('log').checked = view.log;
-  $<HTMLInputElement>('opacity').value = String(view.opacity);
+  $<HTMLInputElement>('opacity').value = String(logPos(view.opacity, OPACITY_RANGE));
   // Opacity belongs to the volume view: a slice is drawn solid.
   const solid = two || view.mode !== 'volume';
   $<HTMLInputElement>('opacity').disabled = solid;
@@ -1793,7 +1813,7 @@ function bind() {
   });
   on('fog', (el) => (view.fog = el.checked));
   on('box', (el) => (view.box = el.checked));
-  on('isoa', (el) => (view.surfaceOpacity = +el.value), 'input');
+  on('isoa', (el) => (view.surfaceOpacity = logAt(+el.value, SURFACE_RANGE)), 'input');
   // The lines follow the count as it is typed or stepped; leaving the field tidies what it shows.
   const contourCount = (el: HTMLInputElement) => Math.min(MAX_CONTOURS, Math.max(1, Math.round(numOr(el, view.nContours))));
   on('ncont', (el) => (view.nContours = contourCount(el)), 'input');
@@ -2116,7 +2136,7 @@ function bind() {
   }, 'input');
   on('log', (el) => (view.log = el.checked));
   on('opacity', (el) => {
-    view.opacity = +el.value;
+    view.opacity = logAt(+el.value, OPACITY_RANGE);
     syncOpacity();
   }, 'input');
   on('cmap', (el) => {
@@ -2784,7 +2804,7 @@ function drawBrush(px?: number, py?: number) {
   }
   const kind = stroke?.kind ?? tool;
   // A velocity, or the aim of a source, is dragged out from where the press began.
-  const drag = stroke?.kind === 'velocity' || stroke?.kind === 'source' || stroke?.kind === 'star' || (stroke?.kind === 'sink' && sinkHasMass());
+  const drag = stroke?.kind === 'velocity' || stroke?.kind === 'source' || stroke?.kind === 'star' || (stroke?.kind === 'sink' && !sinkFixed);
   const x = drag ? stroke!.x0 : (px ?? stroke?.x ?? 0);
   const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
   const { scale, pos } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
@@ -2837,7 +2857,7 @@ function beginStroke(e: PointerEvent) {
   };
   stroke = s;
   // The orbit preview wants the gas as it is at the press.
-  if (s.kind === 'sink' && sinkHasMass()) refreshLumps(s.t0, true);
+  if (s.kind === 'sink') refreshLumps(s.t0, true);
   if (!s.ready) {
     // Volume view: paint on the gas that is seen under the pointer, or, where the view is
     // empty, on the plane through the middle of the box.
@@ -2876,15 +2896,21 @@ function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass:
   // The gas in the box sets the scale; with no readback yet, a box of unit density does.
   const gas = lastDiag?.mass ?? box ** cfg.ndim;
   const two = cfg.ndim === 2;
-  return {
-    // A preset without a gravitational constant gets G = 1 when the mass is placed.
-    gm: (cfg.G > 0 ? cfg.G : 1) * q.mass * gas,
+  // A preset without a gravitational constant gets G = 1 when a point mass is placed.
+  const G = cfg.G > 0 ? cfg.G : 1;
+  const where = {
     pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
-    vel: two ? [vel[0], vel[1], 0] : vel,
-    soft: q.soften * box,
+    vel: sinkFixed ? [0, 0, 0] : two ? [vel[0], vel[1], 0] : vel,
     sinkRadius: q.size * box,
-    sinkRate: 4 * q.amount,
+    fixed: sinkFixed,
   };
+  if (!(q.mass > 0)) {
+    // Without a mass: a token one, a billionth of the gas, so that it has an orbit to follow
+    // and pulls on nothing. Its softening is its size, and its flux is measured as a source's
+    // is: against the time the fastest signal takes to cross it.
+    return { ...where, gm: 1e-9 * G * gas, soft: q.size * box, sinkRate: (q.amount * (toolRefs().vRef || 1)) / (q.size * box), massless: true };
+  }
+  return { ...where, gm: G * q.mass * gas, soft: q.soften * box, sinkRate: 4 * q.amount };
 }
 
 /**
@@ -2896,21 +2922,24 @@ function strokeAim(s: Stroke, still = false): { at: ReturnType<typeof locate>; v
   const at = locate(s.x0, s.y0, s.depth);
   const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
   const len = Math.hypot(dx, dy);
-  const speed = still || len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
+  // (A press made before the run's first readout has no reference speed yet: the one there is by now.)
+  const speed = still || len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * (s.vRef || toolRefs().vRef);
   const vel = [0, 1, 2].map((i) => (speed ? (speed * (dx * at.right[i] + dy * at.up[i])) / len : 0)) as Vec3;
   return { at, vel };
 }
 
 /**
- * Place a point mass with the sink tool: at `pos` (in fractions of the box), moving at `vel`.
- * Its mass is the tool's multiple of the gas now in the box, its sink the tool's radius, its
- * softening the tool's, and its sink's rate the tool's flux (25% is the orbital rate at the edge).
+ * Place a sink with the sink tool: at `pos` (in fractions of the box), moving at `vel`. With a
+ * mass, that is the tool's multiple of the gas now in the box, its sink the tool's radius, its
+ * softening the tool's, and its sink's rate the tool's flux (25% is the orbital rate at the
+ * edge). Without one it is a massless particle (massSpec).
  */
 function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number; soften: number }) {
   if (!sim) return;
   const spec = massSpec(pos, vel, q);
   // Gravity needs a constant: a preset without one gets G = 1, shown in the Gravity section.
-  if (!(cfg.G > 0)) cfg.G = 1;
+  // (A massless particle leaves it without: the gas then does not pull on it.)
+  if (!(cfg.G > 0) && !spec.massless) cfg.G = 1;
   sim.cfg = cfg;
   const ok = sim.addMass(spec);
   if (ok) {
@@ -2918,7 +2947,7 @@ function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass
     lastDiag = undefined;
     syncControls();
   }
-  notice(ok ? '' : `A run holds at most ${MAX_MASSES} point masses`);
+  notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks and point masses`);
 }
 
 /**
@@ -2973,7 +3002,7 @@ function placeStar(pos: Vec3, vel: Vec3) {
 }
 
 // --- orbit preview --------------------------------------------------------------------------
-// While the sink tool holds a point mass, the path one placed now would take is drawn: a line
+// While the sink tool is in hand, the path a sink placed now would take is drawn: a line
 // with an arrowhead over a 2D run or a slice, a tube with one in the volume view. Under the
 // pointer it is the path of a mass let go at rest there; pressed and dragged, of one set moving
 // as the drag asks. It is the orbit in the gas as it is now (gravity/preview.ts).
@@ -3006,12 +3035,13 @@ function refreshLumps(now: number, force = false) {
 /** Find the path of the mass being placed, and hand it to whichever view draws it. Called once per frame. */
 function updateOrbit(now: number) {
   const s = stroke;
-  if (sim && tool === 'sink' && sinkHasMass()) refreshLumps(now);
+  if (sim && tool === 'sink') refreshLumps(now);
   // Pressed: the mass the drag would place. Not pressed: one let go at rest under the pointer,
   // where the brush is drawn (in the volume view, on the plane through the middle of the box).
   const pressed = !!s && s.kind === 'sink' && s.ready && !s.released;
   const resting = !s && !!hover && $('brush').style.display !== 'none';
-  if (!sim || tool !== 'sink' || !sinkHasMass() || !(pressed || resting) || massesNow().length >= MAX_MASSES) {
+  // (A fixed sink goes nowhere: there is no path to show.)
+  if (!sim || tool !== 'sink' || sinkFixed || !(pressed || resting) || massesNow().length >= MAX_MASSES) {
     orbit = null;
   } else {
     const { at, vel } = pressed ? strokeAim(s!) : { at: locate(hover!.x, hover!.y, view.dist), vel: [0, 0, 0] as Vec3 };
@@ -3023,7 +3053,9 @@ function updateOrbit(now: number) {
     if (orbit?.key !== key) {
       const frame = cfg.problem.frame === 'gas' ? 1 : cfg.problem.frame === 'masses' ? 2 : 0;
       const path = previewOrbit(
-        { bodies: [...others, { ...mine, soft: mine.soft! }], lumps: lumps?.list ?? [], G: cfg.G > 0 ? cfg.G : 1, frame, box: cfg.problem.box },
+        // (Placing a point mass gives a run without a gravitational constant G = 1; a massless
+        // particle leaves it without, and the gas then does not pull on it.)
+        { bodies: [...others, { ...mine, soft: mine.soft! }], lumps: lumps?.list ?? [], G: cfg.G > 0 ? cfg.G : mine.massless ? 0 : 1, frame, box: cfg.problem.box },
         { time: left > 0 ? left : Infinity },
       );
       orbit = { key, path };
@@ -3088,23 +3120,17 @@ function advanceStroke(now: number) {
     if (!s.released) return;
     stroke = null;
     const sink = s.kind === 'sink';
-    const massive = sink && sinkHasMass();
-    // A drag aims a source, or sets a point mass moving; a click (or a drag of a few pixels)
-    // leaves either at rest. A sink without a mass stays where it is put.
-    const { at, vel } = strokeAim(s, sink && !massive);
-    if (massive) {
+    // A drag aims a source, or sets a sink moving; a click (or a drag of a few pixels) leaves
+    // either at rest, as a fixed sink always is.
+    const { at, vel } = strokeAim(s, sink && sinkFixed);
+    if (sink) {
       placeMass(at.pos, vel, q);
       syncTools();
       return;
     }
-    // A sink with neither a mass nor a flux would do nothing.
-    if (sink && !(q.amount > 0)) {
-      notice('A sink with no flux and no mass takes nothing: give it one or the other');
-      return;
-    }
     // The flux is measured against the densest gas and the time a signal takes to cross the source.
     const perTime = (q.amount * (s.vRef || 1)) / (q.size * cfg.problem.box);
-    sources.push({ pos: at.pos, radius: q.size, softness: q.softness, vel, rate: sink ? 0 : perTime * s.rhoMax, decay: sink ? perTime : 0 });
+    sources.push({ pos: at.pos, radius: q.size, softness: q.softness, vel, rate: perTime * s.rhoMax, decay: 0 });
     if (sources.length > MAX_SOURCES) sources.shift(); // the oldest makes room
     sim.setSources(sources);
     syncTools();
@@ -3360,7 +3386,7 @@ function sinkValues(d: Diagnostics): number[] {
       rates = [(m.accreted - prev.acc) / h, ...p.map((v, k) => (v - prev.p[k]) / h), ...l.map((v, k) => (v - prev.l[k]) / h)];
     } else if (prev && d.t === prev.t) rates = prev.rates; // paused: the readout repeats
     sinkPrev[i] = { t: d.t, acc: m.accreted, p, l, rates };
-    const mass = cfg.G > 0 ? m.gm / cfg.G : NaN;
+    const mass = m.massless ? 0 : cfg.G > 0 ? m.gm / cfg.G : NaN;
     const lShown = cfg.ndim === 2 ? l[2] : norm(l);
     out.push(mass, rates[0], m.accreted, norm(p), lShown, ...p, ...l, ...rates.slice(1), ...m.pos, ...m.vel);
   });

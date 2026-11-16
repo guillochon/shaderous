@@ -42,6 +42,8 @@ fn main() {
       let a = BH.list[i];
       let b = BH.list[j];
       if (min(a.pos.w, b.pos.w) <= 0.0) { continue; }
+      // Two massless particles do not feel one another, however close they pass.
+      if (mass_massless(a) && mass_massless(b)) { continue; }
       let d = a.pos.xyz - b.pos.xyz;
       let eps = max(a.vel.w, b.vel.w);
       let r2 = dot(d, d) + eps * eps;

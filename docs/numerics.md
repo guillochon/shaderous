@@ -646,6 +646,13 @@ softened by the larger of their two softening lengths.
 
 A sink whose rate is set to zero takes nothing: the mass then only orbits.
 
+A mass can be flagged **massless** (`PointMass.massless`): it carries a token $`GM`$, a
+billionth of the gas's, so that it has an orbit to follow and pulls on nothing. Its sink's rate
+is then given per unit time, and what it takes is counted but changes neither its mass nor its
+velocity. A mass flagged **fixed** (`PointMass.fixed`) is never moved: it still pulls, takes
+gas and grows. The sink tool places massless particles when its Mass is 0, and fixed ones when
+Fixed is on.
+
 **Sinks.** Inside the sink radius $`r_s`$, gas is removed at a rate that falls from the local
 orbital frequency $`\sqrt{GM/r^3}`$ at the center to zero at $`r_s`$. The removed gas takes its
 momentum to the mass. Mass and momentum are conserved between gas and masses to $`10^{-7}`$ in

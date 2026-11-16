@@ -414,6 +414,7 @@ export function completeMass(q: PointMass, dx: number): Required<PointMass> {
   return {
     gm: q.gm, pos: q.pos, vel: q.vel, soft, sinkRadius: q.sinkRadius ?? soft, sinkRate: q.sinkRate ?? 1,
     accreted: q.accreted ?? 0, accretedMomentum: q.accretedMomentum ?? [0, 0, 0], accretedSpin: q.accretedSpin ?? [0, 0, 0],
+    massless: q.massless ?? false, fixed: q.fixed ?? false,
   };
 }
 
@@ -440,7 +441,7 @@ export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffe
   list.forEach((m, i) =>
     f.set(
       [
-        ...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, 0, ...m.accretedMomentum, 0, ...m.accretedSpin, 0,
+        ...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, (m.massless ? 1 : 0) + (m.fixed ? 2 : 0), ...m.accretedMomentum, 0, ...m.accretedSpin, 0,
         c(m.gm), c(m.accreted), 0, 0, ...m.vel.map(c), 0, ...m.accretedMomentum.map(c), 0, ...m.accretedSpin.map(c), 0,
       ],
       4 + MASS_STRIDE * i,
@@ -459,6 +460,7 @@ export function unpackMasses(f: Float32Array, count: number): Required<PointMass
     out.push({
       gm: f[o + 3] - f[o + 24], pos: [f[o], f[o + 1], f[o + 2]], vel: v3(o + 4, o + 28), soft: f[o + 7], sinkRadius: f[o + 11], sinkRate: f[o + 12],
       accreted: f[o + 13] - f[o + 25], accretedMomentum: v3(o + 16, o + 32), accretedSpin: v3(o + 20, o + 36),
+      massless: (f[o + 15] & 1) !== 0, fixed: (f[o + 15] & 2) !== 0,
     });
   }
   return out;
