@@ -378,6 +378,7 @@ Changes what is drawn, leaving the run alone. These keys are accepted:
 | `sliceAxis`, `slicePos` | Slice and projection axis, and slice position (0 to 1) |
 | `minRho`, `opacity` | Volume view: least density drawn, and opacity |
 | `yaw`, `pitch`, `dist` | Volume view: camera angles and distance |
+| `tx`, `ty`, `tz` | Volume view: the point the camera orbits, in fractions of the box (0.5 each: the center) |
 | `zoom`, `cx`, `cy` | Slice view: magnification, and the point at the center of the view |
 | `showBlocks`, `contours`, `nContours` | Mesh block outlines, and contour lines (isosurfaces in the volume view) |
 | `fog`, `surfaceOpacity` | Volume view: draw the gas as fog (off leaves the isosurfaces alone), and how opaque the isosurfaces are |

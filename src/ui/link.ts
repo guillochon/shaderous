@@ -13,7 +13,10 @@ import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer
 import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../io/snapshot';
 
 /** Largest magnification of the slice view. */
-export const MAX_ZOOM = 64;
+export const MAX_ZOOM = 256;
+/** Volume view: the nearest and farthest the camera comes to the point it orbits, in box lengths. */
+export const MIN_DIST = 0.225;
+export const MAX_DIST = 6;
 /** Most contour lines the slice and projection views draw. */
 export const MAX_CONTOURS = 40;
 
@@ -62,9 +65,9 @@ export function viewDefaults(problem: Problem, ndim: 2 | 3): ViewState {
 
 const fmt = (v: number) => (Number.isFinite(v) ? String(+v.toPrecision(6)) : 'inf');
 const flag = (b: boolean) => (b ? '1' : '0');
-const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'zoom', 'cx', 'cy', 'nContours', 'surfaceOpacity', 'fieldLineCount'] as const;
+const VIEW_NUMBERS = ['field', 'species', 'sliceAxis', 'slicePos', 'minRho', 'opacity', 'yaw', 'pitch', 'dist', 'tx', 'ty', 'tz', 'zoom', 'cx', 'cy', 'nContours', 'surfaceOpacity', 'fieldLineCount'] as const;
 const VIEW_KEYS: Record<(typeof VIEW_NUMBERS)[number], string> = {
-  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont', surfaceOpacity: 'isoa', fieldLineCount: 'nflines',
+  field: 'field', species: 'species', sliceAxis: 'axis', slicePos: 'slice', minRho: 'rhocut', opacity: 'opacity', yaw: 'yaw', pitch: 'pitch', dist: 'dist', tx: 'tx', ty: 'ty', tz: 'tz', zoom: 'zoom', cx: 'cx', cy: 'cy', nContours: 'ncont', surfaceOpacity: 'isoa', fieldLineCount: 'nflines',
 };
 
 export function encodeLink(s: LinkState): URLSearchParams {
@@ -330,7 +333,10 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   put(out.view, 'opacity', num('opacity', 1, 300));
   put(out.view, 'yaw', num('yaw'));
   put(out.view, 'pitch', num('pitch', -1.5, 1.5));
-  put(out.view, 'dist', num('dist', 0.9, 6));
+  put(out.view, 'dist', num('dist', MIN_DIST, MAX_DIST));
+  put(out.view, 'tx', num('tx', 0, 1));
+  put(out.view, 'ty', num('ty', 0, 1));
+  put(out.view, 'tz', num('tz', 0, 1));
   put(out.view, 'zoom', num('zoom', 1, MAX_ZOOM));
   put(out.view, 'cx', num('cx', 0, 1));
   put(out.view, 'cy', num('cy', 0, 1));

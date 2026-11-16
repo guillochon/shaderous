@@ -1,6 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
-import { decodeLink, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_ZOOM, type LinkOverrides } from './link';
+import { decodeLink, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, forgetCompileSetup, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
@@ -1435,7 +1435,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       if (ndim === 3 && !link) view.mode = problem.view?.mode ?? 'volume';
     } else {
       const dv = viewDefaults(problem, ndim);
-      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5, minRho: 0, fieldLines: dv.fieldLines, fieldLineCount: dv.fieldLineCount });
+      Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5, tx: 0.5, ty: 0.5, tz: 0.5, minRho: 0, fieldLines: dv.fieldLines, fieldLineCount: dv.fieldLineCount });
     }
     if (link) {
       // Settings carried by a shared link, on top of the preset's defaults.
@@ -2292,6 +2292,20 @@ function bind() {
   const release = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
     if (queryPress && tool === 'query' && e.type === 'pointerup' && Math.hypot(e.clientX - queryPress.x, e.clientY - queryPress.y) < 5) void pinAt(e.clientX, e.clientY);
+  /**
+   * Volume view: move the point the camera orbits so that what lies at its depth follows a drag
+   * of (dx, dy) pixels. The point stays inside the box, so the box cannot be panned out of view.
+   */
+  const panBy = (dx: number, dy: number) => {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const f = cameraFrame(view, w / h);
+    const k = (2 * f.tan * view.dist) / h; // box lengths per pixel at the target
+    const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+    view.tx = clamp01(view.tx + (-dx * f.right[0] + dy * f.up[0]) * k);
+    view.ty = clamp01(view.ty + (-dx * f.right[1] + dy * f.up[1]) * k);
+    view.tz = clamp01(view.tz + (-dx * f.right[2] + dy * f.up[2]) * k);
+  };
     queryPress = null;
     if (draft && draft.id === e.pointerId) {
       // A rectangle or ellipse is finished by letting go.
@@ -2299,13 +2313,14 @@ function bind() {
       else draft = null;
       drawBrush();
     }
+    else [view.tx, view.ty, view.tz] = [0.5, 0.5, 0.5];
     if (stroke?.id === e.pointerId && !stroke.released) endStroke(e.type === 'pointerup');
   };
   canvas.addEventListener('pointerup', release);
   canvas.addEventListener('pointercancel', release);
   // With a tool in hand the right button moves the view, so it must not open a menu.
   canvas.addEventListener('contextmenu', (e) => {
-    if (tool) e.preventDefault();
+    if (tool || !flat()) e.preventDefault();
   });
   canvas.addEventListener('pointerleave', () => {
     hideCellPop();
@@ -2356,6 +2371,7 @@ function bind() {
     if (stroke && stroke.id === e.pointerId && !stroke.released) {
       const r = canvas.getBoundingClientRect();
       stroke.x = e.clientX - r.left;
+  // In the volume view it pans, tool or not.
       stroke.y = e.clientY - r.top;
       stroke.shift = e.shiftKey;
       drawBrush();
@@ -2386,10 +2402,16 @@ function bind() {
         zoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, spread() / before);
       } else clampPan();
     } else if (pointers.size === 1) {
-      view.yaw -= (e.clientX - last.x) * 0.006;
-      view.pitch = Math.min(1.5, Math.max(-1.5, view.pitch + (e.clientY - last.y) * 0.006));
+      // Pan with Shift, the middle button, or the right button (which orbits with a tool in hand).
+      if (e.shiftKey || e.buttons & 4 || (!tool && e.buttons & 2)) panBy(e.clientX - last.x, e.clientY - last.y);
+      else {
+        view.yaw -= (e.clientX - last.x) * 0.006;
+        view.pitch = Math.min(1.5, Math.max(-1.5, view.pitch + (e.clientY - last.y) * 0.006));
+      }
     } else if (pointers.size === 2 && before > 0) {
-      view.dist = Math.min(6, Math.max(0.9, (view.dist * before) / Math.max(spread(), 1)));
+      // Two fingers: the middle of the pinch carries the view with it.
+      panBy((e.clientX - last.x) / 2, (e.clientY - last.y) / 2);
+      view.dist = Math.min(MAX_DIST, Math.max(MIN_DIST, (view.dist * before) / Math.max(spread(), 1)));
     }
   });
   canvas.addEventListener(
@@ -2397,7 +2419,7 @@ function bind() {
     (e) => {
       e.preventDefault();
       if (flat()) zoomAt(e.clientX, e.clientY, Math.exp(-e.deltaY * 0.0015));
-      else view.dist = Math.min(6, Math.max(0.9, view.dist * Math.exp(e.deltaY * 0.001)));
+      else view.dist = Math.min(MAX_DIST, Math.max(MIN_DIST, view.dist * Math.exp(e.deltaY * 0.001)));
     },
     { passive: false },
   );

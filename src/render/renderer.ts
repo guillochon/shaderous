@@ -44,6 +44,10 @@ export interface ViewState {
   yaw: number;
   pitch: number;
   dist: number;
+  /** Volume view: the point the camera orbits and looks at, in fractions of the box. */
+  tx: number;
+  ty: number;
+  tz: number;
   /** Slice view: magnification (1 fits the box) and the point of the slice at the view center. */
   zoom: number;
   cx: number;
@@ -164,6 +168,9 @@ export const defaultView = (): ViewState => ({
   yaw: 0.7,
   pitch: 0.45,
   dist: 2.6,
+  tx: 0.5,
+  ty: 0.5,
+  tz: 0.5,
   zoom: 1,
   cx: 0.5,
   cy: 0.5,
@@ -209,11 +216,13 @@ export function contourRange(lo: number, hi: number): [number, number] {
   return [Math.log10(bottom), Math.log10(lo > 0 ? Math.max(lo, hi) : top)];
 }
 
-/** The orbit camera: around the box center (the box is [-0.5, 0.5]^3), z up. */
+/** The orbit camera: around its target, the box center unless panned (the box is [-0.5, 0.5]^3), z up. */
 export function cameraFrame(v: ViewState, aspect: number) {
   const cp = Math.cos(v.pitch);
-  const eye = [v.dist * cp * Math.cos(v.yaw), v.dist * cp * Math.sin(v.yaw), v.dist * Math.sin(v.pitch)];
-  const fwd = eye.map((c) => -c / v.dist);
+  const out = [cp * Math.cos(v.yaw), cp * Math.sin(v.yaw), Math.sin(v.pitch)];
+  const target = [v.tx - 0.5, v.ty - 0.5, v.tz - 0.5];
+  const eye = out.map((c, i) => target[i] + v.dist * c);
+  const fwd = out.map((c) => -c);
   const right = [fwd[1], -fwd[0], 0];
   const rl = Math.hypot(right[0], right[1]) || 1;
   right[0] /= rl;
