@@ -11,7 +11,9 @@ struct Path {
   tip: vec4<f32>,    // the cone's tip: the end of the path
   color: vec4<f32>,
 }
-// xyz in box units ([-0.5, 0.5]^3); w: how far along the whole path, 0 to 1.
+// xyz in box units ([-0.5, 0.5]^3); w: how far along the whole path, 0 to 1. After the path
+// come those of the run's other masses, drawn thinner and dimmer: their points have w = 2, and
+// a point with w = -1 stands between one path and the next (no tube is drawn to or from it).
 @group(0) @binding(4) var<storage, read> PTS: array<vec4<f32>>;
 @group(0) @binding(5) var<uniform> D: Path;
 
@@ -36,11 +38,17 @@ fn cover(a: vec3<f32>, b: vec3<f32>, r: f32, v: u32) -> vec3<f32> {
   return mix(a - along * e, b + along * e, q.x) + side * e * q.y;
 }
 
+// The radius of the tube through a point: the path's own, or less for another mass's.
+fn tube_radius(w: f32) -> f32 {
+  return select(D.n.y, 0.45 * D.n.y, w >= 2.0);
+}
+
 @vertex
 fn seg_vs(@builtin(vertex_index) v: u32, @builtin(instance_index) s: u32) -> TOut {
   let a = PTS[s];
   let b = PTS[s + 1u];
-  let p = cover(a.xyz, b.xyz, D.n.y, v);
+  if (a.w < 0.0 || b.w < 0.0) { return TOut(vec4<f32>(2.0, 2.0, 2.0, 1.0), vec3<f32>(0.0), a, b); }
+  let p = cover(a.xyz, b.xyz, tube_radius(a.w), v);
   return TOut(project(p), p, a, b);
 }
 
@@ -72,12 +80,14 @@ fn shade(ro: vec3<f32>, rd: vec3<f32>, t: f32, nrm: vec3<f32>, along: f32) -> TF
 fn seg_fs(in: TOut) -> TFrag {
   let ro = C.eye.xyz;
   let rd = normalize(in.world - ro);
-  let t = capsule(ro, rd, in.a.xyz, in.b.xyz, D.n.y);
+  let t = capsule(ro, rd, in.a.xyz, in.b.xyz, tube_radius(in.a.w));
   if (t <= 0.0) { discard; }
   let p = ro + rd * t;
   let ba = in.b.xyz - in.a.xyz;
   let y = clamp(dot(p - in.a.xyz, ba) / max(dot(ba, ba), 1.0e-20), 0.0, 1.0);
-  return shade(ro, rd, t, normalize(p - (in.a.xyz + y * ba)), mix(in.a.w, in.b.w, y));
+  // Another mass's path is dimmer than the far end of the path itself.
+  let along = select(mix(in.a.w, in.b.w, y), 1.6, in.a.w >= 2.0);
+  return shade(ro, rd, t, normalize(p - (in.a.xyz + y * ba)), along);
 }
 
 // Where the ray from ro along rd (unit) first meets the cone with its base (radius ra) at pa

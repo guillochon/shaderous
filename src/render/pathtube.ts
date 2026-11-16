@@ -4,8 +4,10 @@
 import { assemble } from '../gpu/shaders';
 import { bindGroup } from '../gpu/device';
 
-/** Points of a path, at most (gravity/preview.ts resamples to fewer). */
+/** Points of the path itself, at most (gravity/preview.ts resamples to fewer). */
 const MAX_POINTS = 256;
+/** Points in all, with the paths of the run's other masses after it. */
+const ALL_POINTS = 4096;
 /** The tube's radius, in units of the box side; the cone is 6 of them long and 2.5 wide at its base. */
 const RADIUS = 0.005;
 const HEAD_LENGTH = 6;
@@ -24,7 +26,7 @@ export class PathTube {
   private loaded = { version: -1, segments: -1 };
 
   constructor(private device: GPUDevice) {
-    this.pts = device.createBuffer({ label: 'orbit path', size: MAX_POINTS * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.pts = device.createBuffer({ label: 'orbit path', size: ALL_POINTS * 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.draw = device.createBuffer({ label: 'orbit path drawing', size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
   }
 
@@ -50,7 +52,7 @@ export class PathTube {
    * cone's length short of the end. Returns the number of stretches of tube, or -1 for a path
    * too short to draw.
    */
-  private load(path: { points: Float32Array; box: number }): number {
+  private load(path: { points: Float32Array; others: Float32Array[]; box: number }): number {
     const n = Math.min(MAX_POINTS, path.points.length / 3);
     if (n < 2) return -1;
     const p = (i: number) => [0, 1, 2].map((c) => path.points[3 * i + c] / path.box);
@@ -64,7 +66,7 @@ export class PathTube {
     // A short path gets a thinner tube and a smaller head, so that it is still mostly path.
     const r = Math.min(RADIUS, total / 12);
     const start = total - HEAD_LENGTH * r;
-    const out = new Float32Array(MAX_POINTS * 4);
+    const out = new Float32Array(ALL_POINTS * 4);
     let k = 0;
     let base = p(0);
     for (let i = 0; i < n; i++) {
@@ -79,6 +81,20 @@ export class PathTube {
       out.set([...base, start / total], 4 * k++);
       break;
     }
+    // The other masses' paths, each after a point that breaks the tube, sharing what room is
+    // left: a path with more points than its share is thinned.
+    const others = path.others.filter((o) => o.length >= 6);
+    const share = others.length ? Math.floor((ALL_POINTS - k) / others.length) - 1 : 0;
+    for (const o of others) {
+      const m = o.length / 3;
+      const take = Math.min(m, share);
+      if (take < 2) break;
+      out.set([0, 0, 0, -1], 4 * k++);
+      for (let i = 0; i < take; i++) {
+        const j = Math.round((i * (m - 1)) / (take - 1));
+        out.set([o[3 * j] / path.box, o[3 * j + 1] / path.box, o[3 * j + 2] / path.box, 2], 4 * k++);
+      }
+    }
     const d = this.device;
     d.queue.writeBuffer(this.pts, 0, out, 0, 4 * k);
     d.queue.writeBuffer(this.draw, 0, new Float32Array([k, r, HEAD_RADIUS * r, 0, ...base, 0, ...p(n - 1), 0, ...COLOR]));
@@ -89,7 +105,7 @@ export class PathTube {
    * Draw the path into the tube targets, which are cleared first if nothing has been drawn into
    * them this frame. Returns whether anything was drawn.
    */
-  encode(enc: GPUCommandEncoder, path: { points: Float32Array; box: number; version: number }, t: { color: GPUTexture; dist: GPUTexture; depth: GPUTexture }, clear: boolean): boolean {
+  encode(enc: GPUCommandEncoder, path: { points: Float32Array; others: Float32Array[]; box: number; version: number }, t: { color: GPUTexture; dist: GPUTexture; depth: GPUTexture }, clear: boolean): boolean {
     if (!this.pSeg || !this.pHead) return false;
     if (this.loaded.version !== path.version) this.loaded = { version: path.version, segments: this.load(path) };
     const segments = this.loaded.segments;

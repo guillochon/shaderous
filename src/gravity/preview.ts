@@ -52,6 +52,11 @@ export interface Orbit {
   points: Float32Array;
   /** time from now at each point */
   times: Float32Array;
+  /**
+   * Where the run's other masses go meanwhile, in the order they were given: xyz per point,
+   * evenly spaced along each one's own path. Empty for a mass that hardly moves.
+   */
+  others: Float32Array[];
   /** why it ends: the caps, leaving the box, the time limit, or a mass that does not move */
   end: 'length' | 'steps' | 'left' | 'time' | 'rest';
 }
@@ -173,6 +178,9 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
   const path: number[] = [x[3 * me], x[3 * me + 1], x[3 * me + 2]];
   const times: number[] = [0];
   const arc: number[] = [0];
+  // The other masses' paths, a point per step.
+  const tracks: number[][] = [];
+  for (let i = 0; i < me; i++) tracks.push([x[3 * i], x[3 * i + 1], x[3 * i + 2]]);
   let t = 0;
   let end: Orbit['end'] = 'steps';
   const edge = (0.5 + lim.outside) * box;
@@ -215,6 +223,7 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
     path.push(...p);
     times.push(t);
     arc.push(s);
+    for (let i = 0; i < me; i++) tracks[i].push(x[3 * i], x[3 * i + 1], x[3 * i + 2]);
     if (last) {
       end = 'time';
       break;
@@ -230,8 +239,21 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
   }
 
   // Evenly spaced along the path, so that what is drawn does not depend on the steps taken.
+  const mine = resample(path, arc, times, lim.points);
+  const others = tracks.map((track) => {
+    const along = [0];
+    for (let k = 3; k < track.length; k += 3) along.push(along[along.length - 1] + Math.hypot(track[k] - track[k - 3], track[k + 1] - track[k - 2], track[k + 2] - track[k - 1]));
+    // A mass that stays within a thousandth of the box has no path worth drawing.
+    if (!(along[along.length - 1] > 1e-3 * box)) return new Float32Array(0);
+    return resample(track, along, null, lim.points).points;
+  });
+  return { points: mine.points, times: mine.times, others, end };
+}
+
+/** `count` points evenly spaced along a path (xyz per point, with the length along it up to each), and the time at each. */
+function resample(path: number[], arc: number[], times: number[] | null, most: number): { points: Float32Array; times: Float32Array } {
   const total = arc[arc.length - 1];
-  const count = total > 0 ? Math.max(2, Math.min(lim.points, arc.length)) : 1;
+  const count = total > 0 ? Math.max(2, Math.min(most, arc.length)) : 1;
   const points = new Float32Array(3 * count);
   const out = new Float32Array(count);
   let j = 0;
@@ -242,9 +264,9 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
     const f = span > 0 ? Math.min(1, Math.max(0, (s - arc[j]) / span)) : 0;
     const k = arc.length > 1 ? j + 1 : j;
     for (let c = 0; c < 3; c++) points[3 * i + c] = path[3 * j + c] + f * (path[3 * k + c] - path[3 * j + c]);
-    out[i] = times[j] + f * (times[k] - times[j]);
+    if (times) out[i] = times[j] + f * (times[k] - times[j]);
   }
-  return { points, times: out, end };
+  return { points, times: out };
 }
 
 /** Most lumps a preview sums over at each of its steps. */

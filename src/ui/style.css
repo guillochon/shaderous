@@ -205,6 +205,7 @@ details[open] > summary .sum { display: none; }
 #marks path { fill: #7fe3a0; }
 #marks .sink circle { stroke: #ff9d5c; stroke-dasharray: 3 3; }
 #marks .point circle.dot { fill: #ff9d5c; stroke: none; }
+#marks .point path.vel { fill: none; stroke: #ff9d5c; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 #brush { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; display: none; }
 /* The brush: a dashed outline at rest; solid, colored and pulsing while it is being applied
    (blue adds or sets, orange takes away). In a 3D run it is drawn as the ball it is. */
@@ -232,6 +233,8 @@ details[open] > summary .sum { display: none; }
 #brush path.orbit { fill: none; stroke: #ff9d5c; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 #brush path.orbit.off { stroke-opacity: 0.6; stroke-dasharray: 2 5; }
 #brush path.orbit-head { fill: #ff9d5c; }
+#brush path.orbit-others { fill: none; stroke: #ff9d5c; stroke-opacity: 0.4; stroke-width: 1.2; stroke-linejoin: round; }
+#brush.outline path.orbit-others { display: none; }
 #brush.aimed line { stroke-width: 1; stroke-opacity: 0.6; }
 #brush.outline path.orbit, #brush.outline path.orbit-head { display: none; }
 #hud {

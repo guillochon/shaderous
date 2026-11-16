@@ -87,6 +87,26 @@ describe('orbit preview', () => {
     expect(Math.abs(Math.hypot(p[0], p[1]) - 0.1)).toBeLessThan(0.02);
   });
 
+  it('returns the paths of the other masses, but not of one that stays put', () => {
+    const o = previewOrbit(
+      {
+        bodies: [
+          { gm: 1, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.01 },
+          { gm: 1e-9, pos: [0.2, 0, 0], vel: [0, Math.sqrt(0.04 / (0.04 + 1e-4) ** 1.5), 0], soft: 0.01 },
+          { gm: 1e-9, pos: [0, 0.3, 0], vel: [-1.8, 0, 0], soft: 0.01 },
+        ],
+        lumps: [], G: 1, frame: 0, box: 1,
+      },
+      { time: 0.5, steps: 100000 },
+    );
+    expect(o.others.length).toBe(2);
+    expect(o.others[0].length).toBe(0); // the heavy one in the middle
+    const n = o.others[1].length / 3;
+    expect(n).toBeGreaterThan(10);
+    // The light one circles at its radius.
+    for (let i = 0; i < n; i++) expect(Math.abs(Math.hypot(o.others[1][3 * i], o.others[1][3 * i + 1]) - 0.2)).toBeLessThan(0.01);
+  });
+
   it('stops once the mass has left the box', () => {
     const o = previewOrbit({ bodies: [{ gm: 1, pos: [0.4, 0, 0], vel: [1, 0, 0], soft: 0.04 }], lumps: [], G: 1, frame: 0, box: 1 });
     expect(o.end).toBe('left');

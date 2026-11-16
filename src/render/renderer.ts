@@ -264,10 +264,11 @@ export class Renderer {
   guides: [number, number, number] | null = null;
   /**
    * Volume view: the path of a point mass being placed (gravity/preview.ts), drawn as a tube
-   * with an arrowhead among the gas. `points`: xyz each, relative to the box center, in a box
-   * of side `box`; `version` changes whenever they do. Null for none.
+   * with an arrowhead among the gas, and where the run's other masses go meanwhile, as
+   * thinner, dimmer tubes. `points`, and each of `others`: xyz each, relative to the box
+   * center, in a box of side `box`; `version` changes whenever they do. Null for none.
    */
-  orbit: { points: Float32Array; box: number; version: number } | null = null;
+  orbit: { points: Float32Array; others: Float32Array[]; box: number; version: number } | null = null;
   private pathTube: PathTube;
   private gVolume!: GPUBindGroup;
   /** The volume view's resources but the field lines' tubes, its pipeline, and its bind group with the tubes as of FieldLines.version. */

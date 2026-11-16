@@ -34,6 +34,13 @@ Since then (2026-11-15):
   the cavity, and a light one prograde, each stay within about 2% of the binary's separation
   of the preview over more than a binary period. The looping paths of slow or retrograde
   masses there are the binary's two members passing by.
+- **The other masses' paths** over the same span are drawn with the preview: a faint line in
+  2D and slices, thinner and dimmer tubes in the volume view (`Orbit.others`).
+- **A velocity arrow on every point mass**: half the length of the drag that would give that
+  speed, at most 48 px, and none below a few tenths of the tools' reference speed.
+- **The sink tool's Soft slider is labeled Edge** (as the source's): it is how a massless
+  sink's rate fades toward its edge, not the softening of a point mass's gravity, which is its
+  Size.
 
 ## 1. Goal
 

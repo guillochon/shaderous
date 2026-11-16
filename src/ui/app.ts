@@ -540,6 +540,13 @@ function syncTools() {
       ? 'Flux: how fast the sink takes gas away. Without a mass, 100% empties it in the time the fastest signal takes to cross it; with one, 25% is the orbital rate at its edge. At the far left it is exactly 0: a point mass that takes no gas, and only orbits'
       : 'Gas added per click, as a share of the densest gas';
   $('tp-amount-row').querySelector('span')!.firstChild!.textContent = flux ? 'Flux' : 'Amt';
+  // For a source or a sink the softness is how its rate fades toward its edge, and is called
+  // that: beside a Mass slider, "Soft" read as the softening of a point mass's gravity, which
+  // is its size.
+  $('tp-softness-row').querySelector('span')!.firstChild!.textContent = flux ? 'Edge' : 'Soft';
+  $('tp-softness-row').title = flux
+    ? 'Edge: how the rate falls off toward the edge. 0 is the same all the way out, 1 fades all the way from the center. (A point mass\u2019s sink always fades from the center, and its gravity is softened over its size.)'
+    : 'Softness of the edge: 0 is hard, 1 fades all the way from the center';
   const mine = tool === 'sink' ? sources.filter((q) => q.decay > 0).length + placedMasses : sources.filter((q) => q.decay === 0).length;
   $('tool-clear').hidden = !flux;
   $('tool-clear').title = tool === 'sink' ? 'Remove every sink and point mass placed with this tool' : 'Remove every source';
@@ -2665,6 +2672,9 @@ function massesNow(): Diagnostics['masses'] {
   return (lastDiag && live ? live : lastDiag?.masses) ?? [];
 }
 
+/** Greatest length in pixels of a point mass's velocity arrow. */
+const VEL_ARROW = 48;
+
 /** Draw the markers of the sources and sinks where they are in the current view. */
 let marksDrawn = '';
 function drawSources() {
@@ -2690,18 +2700,36 @@ function drawSources() {
       }
       html += `<g class="${q.decay > 0 ? 'sink' : 'source'}"><circle cx="${c.x}" cy="${c.y}" r="${r}" />${arrow}</g>`;
     }
-    // The point masses, where the last readback found them: the sink's edge and a dot.
+    // The point masses, where the last readback found them: the sink's edge and a dot, and
+    // an arrow along its velocity: half as long as the drag that would set a new mass moving
+    // that fast, no longer than VEL_ARROW pixels, and left out where it would be shorter than
+    // its own head (a mass slower than a few tenths of the tools' reference speed).
     const box = cfg.problem.box;
+    const vFull = 5 * toolRefs().vRef;
     for (const q of masses) {
       const pos = q.pos.map((v) => v / box + 0.5);
       const c = at(pos);
       if (!(c.w > 0)) continue;
+      const speed = Math.hypot(...q.vel);
+      const long = vFull > 0 ? Math.min(VEL_ARROW, (0.5 * fullDrag() * speed) / vFull) : 0;
+      let arrow = '';
+      if (long >= 4) {
+        // A point that far along the velocity, in the box: foreshortened as the view sees it.
+        const reach = long / locate(c.x, c.y, flatView() ? 1 : c.w).scale;
+        const tip = at(pos.map((v, i) => v + (reach * q.vel[i]) / speed));
+        const [ux, uy] = [tip.x - c.x, tip.y - c.y];
+        const len = Math.hypot(ux, uy);
+        if (tip.w > 0 && len >= 4) {
+          const [nx, ny] = [ux / len, uy / len];
+          arrow = `<path class="vel" d="M${c.x} ${c.y}L${tip.x} ${tip.y}M${tip.x - 4 * nx - 2.5 * ny} ${tip.y - 4 * ny + 2.5 * nx}L${tip.x} ${tip.y}L${tip.x - 4 * nx + 2.5 * ny} ${tip.y - 4 * ny - 2.5 * nx}" />`;
+        }
+      }
       const e = at(pos.map((v, i) => v + (q.sinkRadius / box) * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
       // The sink's edge, at its true radius however small, and a dot at the mass. A mass
       // that takes no gas has no edge to show.
       const r = Math.hypot(e.x - c.x, e.y - c.y);
       const edge = q.sinkRate > 0 ? `<circle cx="${c.x}" cy="${c.y}" r="${r}" />` : '';
-      html += `<g class="sink point">${edge}<circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
+      html += `<g class="sink point">${edge}${arrow}<circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
     }
   }
   if (html !== marksDrawn) $('marks').innerHTML = marksDrawn = html;
@@ -2977,7 +3005,7 @@ function updateOrbit(now: number) {
     }
   }
   const volume = !!cfg && cfg.ndim === 3 && !flatView();
-  renderer.orbit = orbit && volume ? { points: orbit.path.points, box: cfg.problem.box, version: orbitVersion } : null;
+  renderer.orbit = orbit && volume ? { points: orbit.path.points, others: orbit.path.others, box: cfg.problem.box, version: orbitVersion } : null;
   drawOrbit(volume ? null : (orbit?.path ?? null));
 }
 
@@ -2987,18 +3015,24 @@ function drawOrbit(path: Orbit | null) {
   const n = path ? path.points.length / 3 : 0;
   // The drag's own arrow steps back while the path is on show (in the volume view too).
   svg.classList.toggle('aimed', !!orbit && orbit.path.points.length > 3);
-  const d = ['', '', ''];
+  const d = ['', '', '', ''];
   if (path && n > 1) {
     const at = projector();
     const box = cfg.problem.box;
-    const px = Array.from({ length: n }, (_, i) => at([0, 1, 2].map((c) => path.points[3 * i + c] / box + 0.5)));
+    const f = (v: number) => v.toFixed(1);
+    const project = (pts: Float32Array) => Array.from({ length: pts.length / 3 }, (_, i) => at([0, 1, 2].map((c) => pts[3 * i + c] / box + 0.5)));
+    const px = project(path.points);
+    // Where the run's other masses go meanwhile, faintly: what the path is bending around.
+    for (const other of path.others) {
+      const q = project(other);
+      if (q.length > 1) d[3] += `M${q.map((c) => `${f(c.x)} ${f(c.y)}`).join('L')}`;
+    }
     // A slice of a 3D run shows one layer of cells: the path is drawn where it is over that
     // plane, dashed where it has left the layer (by more than the half cell a mass placed in
     // the middle of the layer swings across the plane of a star centered between two layers).
     const slice = cfg.ndim === 3 && view.mode === 'slice';
     const plane = slice ? locate(0, 0, 0).pos[view.sliceAxis] : 0;
     const off = (i: number) => slice && Math.abs(path.points[3 * i + view.sliceAxis] / box + 0.5 - plane) > 1.5 / cfg.n;
-    const f = (v: number) => v.toFixed(1);
     for (let i = 1; i < n; i++) d[off(i) ? 1 : 0] += `M${f(px[i - 1].x)} ${f(px[i - 1].y)}L${f(px[i].x)} ${f(px[i].y)}`;
     // The arrowhead: at the end, along the last stretch long enough to give a direction.
     const tip = px[n - 1];
@@ -3016,6 +3050,7 @@ function drawOrbit(path: Orbit | null) {
   svg.querySelector('path.orbit:not(.off)')!.setAttribute('d', d[0]);
   svg.querySelector('path.orbit.off')!.setAttribute('d', d[1]);
   svg.querySelector('path.orbit-head')!.setAttribute('d', d[2]);
+  svg.querySelector('path.orbit-others')!.setAttribute('d', d[3]);
 }
 
 /** Turn the stroke in progress into this frame's edit. Called once per frame. */
