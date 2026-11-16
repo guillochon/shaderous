@@ -1431,6 +1431,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       // takes the new one's.
       if (rest.vcycles === configFor(problem, cfg.n, { ndim, amrLevels: cfg.amrLevels }).vcycles) rest.vcycles = next.vcycles;
       Object.assign(next, rest);
+      // A 3D load shows the gas as a volume, whatever view the last run was left in.
+      if (ndim === 3 && !link) view.mode = problem.view?.mode ?? 'volume';
     } else {
       const dv = viewDefaults(problem, ndim);
       Object.assign(view, { field: dv.field, log: dv.log, mode: problem.view?.mode ?? 'volume', sliceAxis: dv.sliceAxis, pitch: dv.pitch, zoom: 1, cx: 0.5, cy: 0.5, minRho: 0, fieldLines: dv.fieldLines, fieldLineCount: dv.fieldLineCount });
