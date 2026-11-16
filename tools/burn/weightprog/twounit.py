@@ -40,8 +40,9 @@ general flat, sum -0.46 [-0.65, -0.29]. The gain holds across the steps the simu
 T cut 4.4e9 (two_t4.4e+09_s_a2.0_b1.5.pt), paired at 1 ms: Si/S 1.576 -> 0.868 (-0.71), hot C/O
 flat (0.321), others flat, sum -0.69 [-0.89, -0.46], about -29%; score.py's test set: Si/S
 1.16, hot C/O 0.34, 1e-5 s steps p99 0.61, general p50 at 1 s 6.8e-4 (4.5e-4 with the 4.5e9
-cut). Either cut is a fair choice: 4.4e9 favours Si/S and short steps, 4.5e9 hot C/O and the
-late-time median.
+cut). At other steps the 4.4e9 cut is ahead: 3 ms, Si/S 1.210 -> 0.643, general p99 -0.012,
+hot C/O +0.022, sum -0.52 [-0.70, -0.34]; 0.3 ms, Si/S 1.713 -> 1.292, hot C/O 0.684 -> 0.520,
+sum -0.56 [-0.75, -0.38]. The recommended edit is two_t4.4e+09_s_a2.0_b1.5.pt.
 """
 import os
 import sys
