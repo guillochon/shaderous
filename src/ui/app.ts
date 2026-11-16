@@ -2240,6 +2240,20 @@ function bind() {
     view.zoom = z;
     clampPan();
   };
+  /**
+   * Volume view: move the point the camera orbits so that what lies at its depth follows a drag
+   * of (dx, dy) pixels. The point stays inside the box, so the box cannot be panned out of view.
+   */
+  const panBy = (dx: number, dy: number) => {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const f = cameraFrame(view, w / h);
+    const k = (2 * f.tan * view.dist) / h; // box lengths per pixel at the target
+    const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
+    view.tx = clamp01(view.tx + (-dx * f.right[0] + dy * f.up[0]) * k);
+    view.ty = clamp01(view.ty + (-dx * f.right[1] + dy * f.up[1]) * k);
+    view.tz = clamp01(view.tz + (-dx * f.right[2] + dy * f.up[2]) * k);
+  };
   canvas.addEventListener('dblclick', () => {
     if (tool) {
       // With a tool in hand a double click is two edits, or the end of a polygon.
@@ -2247,6 +2261,7 @@ function bind() {
       return;
     }
     if (flat()) [view.zoom, view.cx, view.cy] = [1, 0.5, 0.5];
+    else [view.tx, view.ty, view.tz] = [0.5, 0.5, 0.5];
   });
   const at = (e: PointerEvent): [number, number] => {
     const r = canvas.getBoundingClientRect();
@@ -2292,20 +2307,6 @@ function bind() {
   const release = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
     if (queryPress && tool === 'query' && e.type === 'pointerup' && Math.hypot(e.clientX - queryPress.x, e.clientY - queryPress.y) < 5) void pinAt(e.clientX, e.clientY);
-  /**
-   * Volume view: move the point the camera orbits so that what lies at its depth follows a drag
-   * of (dx, dy) pixels. The point stays inside the box, so the box cannot be panned out of view.
-   */
-  const panBy = (dx: number, dy: number) => {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
-    const f = cameraFrame(view, w / h);
-    const k = (2 * f.tan * view.dist) / h; // box lengths per pixel at the target
-    const clamp01 = (x: number) => Math.min(1, Math.max(0, x));
-    view.tx = clamp01(view.tx + (-dx * f.right[0] + dy * f.up[0]) * k);
-    view.ty = clamp01(view.ty + (-dx * f.right[1] + dy * f.up[1]) * k);
-    view.tz = clamp01(view.tz + (-dx * f.right[2] + dy * f.up[2]) * k);
-  };
     queryPress = null;
     if (draft && draft.id === e.pointerId) {
       // A rectangle or ellipse is finished by letting go.
@@ -2313,12 +2314,12 @@ function bind() {
       else draft = null;
       drawBrush();
     }
-    else [view.tx, view.ty, view.tz] = [0.5, 0.5, 0.5];
     if (stroke?.id === e.pointerId && !stroke.released) endStroke(e.type === 'pointerup');
   };
   canvas.addEventListener('pointerup', release);
   canvas.addEventListener('pointercancel', release);
   // With a tool in hand the right button moves the view, so it must not open a menu.
+  // In the volume view it pans, tool or not.
   canvas.addEventListener('contextmenu', (e) => {
     if (tool || !flat()) e.preventDefault();
   });
@@ -2371,7 +2372,6 @@ function bind() {
     if (stroke && stroke.id === e.pointerId && !stroke.released) {
       const r = canvas.getBoundingClientRect();
       stroke.x = e.clientX - r.left;
-  // In the volume view it pans, tool or not.
       stroke.y = e.clientY - r.top;
       stroke.shift = e.shiftKey;
       drawBrush();
