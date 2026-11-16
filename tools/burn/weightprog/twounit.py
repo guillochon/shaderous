@@ -25,6 +25,12 @@ two_t4.5e+09_s_a2.0_b1.5.pt). Paired: Si/S p90 1.576 -> 0.958 (-0.62 [-0.83, -0.
 0.331 -> 0.301, oneb 0.199 -> 0.193, NSE and general flat; sum of p90 -0.64 [-0.84, -0.44],
 about -27%. score.py's test set: Si/S 1.53 -> 1.20, hot C/O 0.35, NSE 0.21; 1e-5 s steps p99
 0.60 -> 0.63, general p50 at 1 s 3.8e-4 -> 4.5e-4.
+
+Sensitivity (paired, unit B shut at short steps): T cut 4.3e9, Si/S 1.028, hot C/O 0.300
+(-0.031 [-0.043, -0.017]), sum -0.57 [-0.75, -0.41]; 4.5e9 as above; 4.7e9, Si/S 0.833 but hot
+C/O 0.419 (+0.088 [+0.001, +0.131]), sum -0.66. Unit B at alpha 2.0 (4.5e9): Si/S 0.848, hot
+C/O flat (40% of its trajectories worse), test general p50 at 1 s 7.6e-4. So the cut is what
+keeps hot C/O ash out of the Si/S unit; 4.3-4.5e9 K and alpha 1.5 are the usable range.
 """
 import os
 import sys
