@@ -408,6 +408,15 @@ each large allocation. If a note is still there when the page loads, the page di
 much, and the automatic budget drops below it for good. A run that is replaced is torn down
 before the next one allocates, so memory never spikes during a rebuild.
 
+The adaptive mesh sizes its atlas from the budget and its bytes per block
+(`AmrSim.blockBytesFor`): the state, primitive, predictor and gravity textures, a magnetic
+field's textures and flux register, and species' four atlas textures per group of four, their
+composition moments and face mass fluxes. For the 13 network species those are more than the
+rest of a block together; left out, a white dwarf with burning asked Firefox for twice its
+budget, which Firefox refuses where Chrome lets it spill into shared memory. Resource errors are
+checked once everything is made, before the initial conditions are set up, so an atlas the GPU
+cannot make is retried smaller within seconds.
+
 ## Input, output and links
 
 - **Snapshots** (`io/athdf.ts`) are HDF5 files in the Athena++ `.athdf` layout: primitive

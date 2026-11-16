@@ -344,7 +344,7 @@ export class AmrSim implements Simulation {
     // all of a run's memory. create() falls back to a smaller atlas if the GPU cannot hold that.
     const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
     const explicit = slots || cfg.amrBudget;
-    let fit = Math.floor(memoryBudget() / AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined));
+    let fit = Math.floor(memoryBudget() / AmrSim.blockBytesFor(cfg));
     // A magnetic field's flux register is one buffer of a few kB per block: no more blocks than it may hold.
     if (cfg.problem.mhd) fit = Math.min(fit, Math.floor(maxBinding(d) / registerBytes(cfg.ndim)));
     // With species, the face mass fluxes are one buffer of some 59 kB per block in 3D, bound as
@@ -381,7 +381,7 @@ export class AmrSim implements Simulation {
           : `${roots} root blocks do not fit in an atlas of ${this.cap}`,
       );
     }
-    noteAllocation(this.cap * AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined));
+    noteAllocation(this.cap * AmrSim.blockBytesFor(cfg));
 
     const side = this.slotsPerSide * PAD;
     const t = (label: string) => tex3d(d, side, 'rgba32float', label, this.layers * (cfg.ndim === 2 ? 1 : PAD));
@@ -451,9 +451,20 @@ export class AmrSim implements Simulation {
    * GPU bytes per atlas block: nine rgba32float textures (two state pairs, primitives,
    * predictor, gravity field) and two r32float ones (gravity's previous potential and its rate).
    */
-  static blockBytes(ndim: 2 | 3, mhd = false): number {
+  static blockBytes(ndim: 2 | 3, mhd = false, speciesGroups = 0, comp = false): number {
     // A magnetic field adds its own atlas textures and its flux register (mhd/amr_mhd.ts).
-    return PAD ** ndim * (9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_BYTES : 0)) + (mhd ? registerBytes(ndim) : 0);
+    // Species add four atlas textures of their groups (the fractions at both parities, at the
+    // half step and as fractions), the composition's moments where they set the equation of
+    // state, and their face mass fluxes: for the 13 network species, more than the rest of a
+    // block together.
+    const texel = 9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_BYTES : 0) + speciesGroups * 4 * 16 + (speciesGroups > 0 && comp ? 16 : 0);
+    return PAD ** ndim * texel + (mhd ? registerBytes(ndim) : 0) + (speciesGroups > 0 ? speciesFaceBytes(ndim) : 0);
+  }
+
+  /** Bytes of one block of the atlas for a run's problem (blockBytes with its field and species). */
+  static blockBytesFor(cfg: SimConfig): number {
+    const groups = speciesGroups(cfg.problem);
+    return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null);
   }
 
   /**
@@ -479,15 +490,28 @@ export class AmrSim implements Simulation {
       gpu.device.pushErrorScope('validation');
       let sim: AmrSim | null = null;
       let failure: unknown = null;
+      // The errors of making the resources, asked for once they are all made: an atlas the GPU
+      // could not make is given up then, not after the initial conditions are set up and a star
+      // settled on it (with gravity broken, all 30 rounds), which made each retry take minutes.
+      let early: GPUError | null = null;
+      const allocated = async () => {
+        const inv = await gpu.device.popErrorScope();
+        early = (await gpu.device.popErrorScope()) ?? inv;
+        gpu.device.pushErrorScope('out-of-memory');
+        gpu.device.pushErrorScope('validation');
+        if (early) throw early;
+      };
       try {
-        sim = await AmrSim.build(gpu, cfg, slots, !!opts.deferUpdate);
+        sim = await AmrSim.build(gpu, cfg, slots, !!opts.deferUpdate, (s) => ((sim = s), allocated()));
         await gpu.device.queue.onSubmittedWorkDone();
       } catch (e) {
-        failure = e;
+        if (e !== early) failure = e;
       }
-      const invalid = await gpu.device.popErrorScope();
-      const oom = (await gpu.device.popErrorScope()) ?? invalid;
-      if (!oom && sim) return sim;
+      const later = await gpu.device.popErrorScope();
+      const invalid: GPUError | null = early ?? later;
+      const oom = early ?? (await gpu.device.popErrorScope()) ?? later;
+      if (early) await gpu.device.popErrorScope(); // the out-of-memory scope, still open
+      if (!oom && sim && !failure) return sim;
       const tried = sim?.cap ?? slots;
       sim?.destroy();
       const next = Math.floor(tried * 0.85 ** cfg.ndim);
@@ -504,7 +528,8 @@ export class AmrSim implements Simulation {
     }
   }
 
-  private static async build(gpu: Gpu, cfg: SimConfig, slots: number, deferUpdate: boolean): Promise<AmrSim> {
+  /** `allocated`: called with the simulation once its resources are made, before it is set up; throws if they failed. */
+  private static async build(gpu: Gpu, cfg: SimConfig, slots: number, deferUpdate: boolean, allocated: (sim: AmrSim) => Promise<void>): Promise<AmrSim> {
     setLoadStage('Allocating the mesh');
     const sim = new AmrSim(gpu, cfg, slots);
     setLoadStage(COMPILE_STAGE);
@@ -591,6 +616,7 @@ export class AmrSim implements Simulation {
       });
     }
     await sim.buildHydro(deferUpdate);
+    await allocated(sim);
     await showLoadStage(INIT_STAGE);
     await sim.reset();
     endLoadStage(INIT_STAGE);
