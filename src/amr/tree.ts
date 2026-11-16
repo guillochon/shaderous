@@ -71,6 +71,13 @@ export interface RegridOp {
   children: number[];
 }
 
+/**
+ * A block may be merged to make room for another's refinement only when it is flagged less than
+ * this share of the other's indicator: blocks flagged about equally would otherwise take the
+ * slots from each other on alternate re-meshes, each time losing detail to the restriction.
+ */
+export const EVICT_MARGIN = 0.8;
+
 export class BlockTree {
   readonly nchild: number;
   /** Deepest level refinement may reach; at most maxLevel. Lowered when the slot budget cannot hold more. */
@@ -364,6 +371,61 @@ export class BlockTree {
     this.newLeaves.push(p);
   }
 
+  /** Whether the block is still in the tree. */
+  private live(b: Block): boolean {
+    return this.blocks.get(this.key(b.level, b.c[0], b.c[1], b.c[2] ?? 0)) === b;
+  }
+
+  /**
+   * Parents that could be merged to make room, least flagged first: every child a leaf, scored
+   * by the most strongly flagged child (a negative indicator, which needs no buffer, counts as
+   * least of all).
+   */
+  private evictable(leaves: Block[], ind: Map<Block, number>): { p: Block; score: number }[] {
+    const parents = new Set(leaves.map((b) => b.parent).filter((p): p is Block => !!p));
+    const out: { p: Block; score: number }[] = [];
+    for (const p of parents) {
+      if (!p.children || p.children.some((ch) => ch.children)) continue;
+      out.push({ p, score: Math.max(...p.children.map((ch) => ind.get(ch) ?? 0)) });
+    }
+    return out.sort((a, b) => a.score - b.score);
+  }
+
+  /** Whether two blocks' boxes, the second grown by its own size on every side, overlap. */
+  private near(a: Block, q: Block): boolean {
+    const sa = 1 << (this.maxLevel - a.level);
+    const sq = 1 << (this.maxLevel - q.level);
+    for (let i = 0; i < this.ndim; i++) {
+      const lo = a.c[i] * sa;
+      const qlo = (q.c[i] - 1) * sq;
+      if (lo + sa <= qlo || qlo + 3 * sq <= lo) return false;
+    }
+    return true;
+  }
+
+  /**
+   * Parents to merge so that refining `b` fits: the least flagged first, each flagged less
+   * than EVICT_MARGIN times `level` (b's indicator) and away from b and the blocks its refinement splits (merging
+   * those would only be undone by balance). Null if they cannot free enough; nothing is merged here.
+   */
+  private makeRoom(b: Block, level: number, evictable: { p: Block; score: number }[], touched: Set<Block>): Block[] | null {
+    if (b.children || b.level >= this.levelLimit) return null;
+    const need = new Set<Block>();
+    let short = this.refineCost(b, need) - this.free.length;
+    if (short <= 0) return null;
+    const nearby = [...need];
+    const out: Block[] = [];
+    for (const { p, score } of evictable) {
+      if (score >= EVICT_MARGIN * level) break;
+      if (touched.has(p) || !this.live(p) || !p.children || p.children.some((ch) => ch.children || touched.has(ch))) continue;
+      if (need.has(p) || nearby.some((q) => this.near(p, q)) || !this.canCoarsen(p)) continue;
+      out.push(p);
+      short -= this.nchild;
+      if (short <= 0) return out;
+    }
+    return null;
+  }
+
   /**
    * Re-mesh from a refinement indicator per leaf. Leaves above `hi` are split; a parent whose
    * children are all below `lo`, and have no face neighbor above `hi`, is merged. A negative
@@ -378,10 +440,36 @@ export class BlockTree {
     const ops = new Map<number, RegridOp>();
     const touched = new Set<Block>();
 
-    // Refine, most strongly flagged first so they get the slots if the budget runs out.
+    // Refine, most strongly flagged first so they get the slots if the budget runs out. When it
+    // has, room is made by merging the parents whose children are least flagged (closest to
+    // being merged anyway), as long as they are flagged well below the block that needs it.
     const wanted = before.filter((b) => ind.get(b)! > hi && b.level < this.levelLimit).sort((a, b) => ind.get(b)! - ind.get(a)!);
+    let evictable: { p: Block; score: number }[] | null = null;
+    // Blocks merged to make room hold their data only through this re-mesh's restriction: none
+    // may be split again in it (balance would ask that of a later refinement's neighbor), as its
+    // new children would be filled from the old parent's slot, which holds no data.
+    const evicted = new Set<Block>();
+    const merge = (p: Block) => {
+      const children = p.children!.map((ch) => ch.slot);
+      this.coarsen(p);
+      touched.add(p);
+      ops.set(p.slot, { kind: RG_RESTRICT, src: p.slot, octant: 0, children });
+    };
     for (const b of wanted) {
-      for (const q of this.refine(b)) {
+      if (b.children || !this.live(b)) continue; // split by balance already, or merged to make room
+      let split = this.refine(b, evicted);
+      if (!split.length) {
+        evictable ??= this.evictable(before, ind);
+        const room = this.makeRoom(b, ind.get(b)!, evictable, touched);
+        if (room) {
+          for (const p of room) {
+            merge(p);
+            evicted.add(p);
+          }
+          split = this.refine(b, evicted);
+        }
+      }
+      for (const q of split) {
         touched.add(q);
         q.children!.forEach((ch, o) => {
           touched.add(ch);
@@ -402,12 +490,9 @@ export class BlockTree {
     };
     const parents = [...new Set(before.map((b) => b.parent).filter((p): p is Block => !!p))];
     for (const p of parents) {
-      if (touched.has(p) || !p.children || p.children.some((ch) => touched.has(ch) || ch.children)) continue;
+      if (touched.has(p) || !this.live(p) || !p.children || p.children.some((ch) => touched.has(ch) || ch.children)) continue;
       if (p.children.some(hot) || !this.canCoarsen(p)) continue;
-      const children = p.children.map((ch) => ch.slot);
-      this.coarsen(p);
-      touched.add(p);
-      ops.set(p.slot, { kind: RG_RESTRICT, src: p.slot, octant: 0, children });
+      merge(p);
     }
 
     if (ops.size === 0) return null;

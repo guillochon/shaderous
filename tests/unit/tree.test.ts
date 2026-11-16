@@ -199,6 +199,69 @@ describe('block tree', () => {
     expect(a.children![3].children).not.toBeNull();
   });
 
+  it('makes room in a full budget by merging the least flagged blocks, never more flagged ones', () => {
+    // 16 roots and one refined corner fill the 20 slots.
+    const make = () => {
+      const t = new BlockTree(2, 4, 1, 20, outflow, outflow);
+      const a = t.get(0, [0, 0, 0])!;
+      t.refine(a);
+      expect(t.freeSlots).toBe(0);
+      return { t, a, b: t.get(0, [3, 3, 0])! };
+    };
+    {
+      const { t, a, b } = make();
+      const old = a.children!.map((ch) => ch.slot);
+      // a's children are flagged, but under the threshold to refine and over the one to merge:
+      // without the eviction they would stay, and b could not be refined.
+      const ops = t.adapt((q) => (q === b ? 2 : 0.3), 0.5, 0.1)!;
+      expect(a.children).toBeNull();
+      expect(b.children).not.toBeNull();
+      expect(ops[a.slot]).toMatchObject({ kind: RG_RESTRICT, children: old });
+      // b's children take the slots a's children had, filled from b.
+      expect(b.children!.map((ch) => ch.slot).sort()).toEqual([...old].sort());
+      for (const ch of b.children!) expect(ops[ch.slot]).toMatchObject({ kind: RG_PROLONG, src: b.slot });
+      balanced(t);
+      covers(t);
+    }
+    {
+      // a's children flagged more strongly than b: they keep their slots, and b stays as it is.
+      const { t, a, b } = make();
+      t.adapt((q) => (q === b ? 2 : a.children!.includes(q) ? 3 : 0.3), 0.5, 0.1);
+      expect(a.children).not.toBeNull();
+      expect(b.children).toBeNull();
+    }
+  });
+
+  it('fills every new block from data the old mesh holds, through many re-meshes of a full budget', () => {
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (const [ndim, cap] of [[2, 60], [3, 120]] as const) {
+      const t = new BlockTree(ndim, 4, 3, cap, outflow, outflow);
+      for (let round = 0; round < 60; round++) {
+        const leaves = new Set(t.leaves().map((b) => b.slot));
+        // A moving hot spot and noise: a budget this small fills, and has to make room.
+        const cx = rand() * 4, cy = rand() * 4;
+        const ind = new Map<Block, number>();
+        const ops = t.adapt((b) => {
+          if (!ind.has(b)) {
+            const s = 1 / (1 << b.level);
+            const d = Math.hypot((b.c[0] + 0.5) * s - cx, (b.c[1] + 0.5) * s - cy);
+            ind.set(b, 2 / (0.3 + d) + rand());
+          }
+          return ind.get(b)!;
+        }, 1.5, 0.5);
+        balanced(t);
+        covers(t);
+        if (!ops) continue;
+        for (const b of t.leaves()) {
+          const op = ops[b.slot];
+          if (op.kind === RG_PROLONG || op.kind === RG_COPY) expect(leaves.has(op.src)).toBe(true);
+          if (op.kind === RG_RESTRICT) for (const ch of op.children) expect(leaves.has(ch)).toBe(true);
+        }
+      }
+    }
+  });
+
   it('lists blocks coarsest first and leaves separately', () => {
     const t = new BlockTree(3, 2, 1, 64, periodic, periodic);
     t.refine(t.get(0, [1, 1, 1])!);

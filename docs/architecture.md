@@ -260,9 +260,12 @@ The **data** lives in one 3D **texture atlas** per field. Each block of $`16^3`$
 ghost layers, so $`20^3`$ texels, padded to $`24`$ where a pass needs it) occupies a slot in the
 atlas. Parents keep their slots, because gravity and restriction use them. In 3D the atlas
 holds at most 2197 ($`13^3`$) blocks, about 3 GB with gravity, and shrinks to fit the
-[memory budget](#gpu-memory-budget). If the initial mesh of a self-gravitating run cannot fit a
-whole level, that level is left out (the status line says so) rather than letting a refinement
-boundary cut through a star at an arbitrary place.
+[memory budget](#gpu-memory-budget). When a re-mesh wants more blocks than the budget has,
+the most strongly flagged blocks are refined first, and room for them is made by merging the
+blocks least flagged (those closest to being merged anyway), as long as these are flagged under
+0.8 of the block that needs the room (`EVICT_MARGIN`). If the initial mesh of a
+self-gravitating run cannot fit a whole level, that level is left out (the status line says so)
+rather than letting a refinement boundary cut through a star at an arbitrary place.
 
 ### A step on blocks
 
