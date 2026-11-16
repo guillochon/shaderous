@@ -15,7 +15,10 @@ over dev and test (paired.py, 600 trajectories a regime): Si/S p90 1.576 -> 0.95
 flat; sum of p90 -0.61 [-0.82, -0.42], about -26%. score.py's test set alone: Si/S p90 1.53
 -> 1.20, hot C/O 0.35 -> 0.35, NSE 0.22 -> 0.21; costs 1e-5 s steps p99 0.60 -> 0.65 and
 general p50 at 1 s 3.8e-4 -> 5.5e-4 (general p99 at 1 s 0.44 -> 0.53 on that set, flat on the
-pooled paired set). Without the T cut unit B also slowed hot C/O ash (p90 0.32 -> 0.37-0.43).
+pooled paired set). Without the T cut unit B also slowed hot C/O ash (p90 0.32 -> 0.37-0.43). Unit B alone
+(arguments 4.5e9 0,1.5; one unit, 129 wide) paired: Si/S p90 0.869 (-0.71), sum -0.66
+[-0.87, -0.42], hot C/O and general flat, oneb +0.011 [0.000, +0.037]; on score.py's test set
+hot C/O p90 0.39 and 1e-5 s steps p99 0.70, against 0.35 and 0.65 with unit A as well.
 """
 import sys
 from pathlib import Path
@@ -32,7 +35,7 @@ from tunegate import gate_of  # noqa: E402
 
 dev = train.dev
 TCUT = float(sys.argv[1]) if len(sys.argv) > 1 else 1e12      # unit B also shut above this T
-PAIRS = ((2.0, 1.5), (2.0, 2.0)) if len(sys.argv) > 1 else ((2.0, 1.5), (2.0, 2.0), (2.0, 3.0))
+PAIRS = tuple(tuple(float(v) for v in p.split(",")) for p in sys.argv[2:]) or ((2.0, 1.5), (2.0, 2.0)) if len(sys.argv) > 1 else ((2.0, 1.5), (2.0, 2.0), (2.0, 3.0))
 
 
 def fit_gate(a, t, fit):
