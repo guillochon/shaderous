@@ -30,13 +30,15 @@ export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 
     return { inside, center: c, radius: r };
   }
   if (shape.type === 'box') {
-    const lo = shape.min.map((v) => bound(v, -Infinity));
-    const hi = shape.max.map((v) => bound(v, Infinity));
+    // A side left out is open, as a null bound is.
+    const lo = [0, 1, 2].map((a) => bound(shape.min?.[a], -Infinity));
+    const hi = [0, 1, 2].map((a) => bound(shape.max?.[a], Infinity));
     const inside: Inside = (x, y, z) => x > lo[0] && x < hi[0] && y > lo[1] && y < hi[1] && (ctx.ndim === 2 || (z > lo[2] && z < hi[2]));
     return { inside, center: [0, 0, 0], radius: 0 };
   }
-  const norm = Math.hypot(...shape.normal);
-  const d = shape.normal.map((c) => c / norm);
+  const normal = shape.normal ?? [1, 0, 0];
+  const norm = Math.hypot(...normal) || 1;
+  const d = normal.map((c) => c / norm);
   const at = shape.at ?? 0;
   return { inside: (x, y, z) => x * d[0] + y * d[1] + z * d[2] < at, center: [0, 0, 0], radius: 0 };
 }

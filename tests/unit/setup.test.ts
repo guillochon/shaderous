@@ -6,6 +6,9 @@ import { compileSetup, paramFeatures } from '../../src/setup/compile';
 import { BC_CHOICES, FACTS, flatten, flowOptions, OPTIONS, optionAt, PART_OPTIONS, ruleIssues, type Option, type Rule } from '../../src/setup/options';
 import { FLOWS } from '../../src/setup/parts/flow';
 import { emptySetup, featuredOf, featuredPaths, getPath, setPath, type SetupSpec } from '../../src/setup/spec';
+import { defaultEosParams, makeEos } from '../../src/eos/eos';
+import { initialFaces } from '../../src/mhd/mhd';
+import { configFor } from '../../src/sim';
 
 const find = (id: string) => PRESET_FILES[id];
 
@@ -164,5 +167,65 @@ describe('the setup compiler', () => {
     expect(report.error).toBeUndefined();
     const { problem } = compileSetup(spec!);
     expect(problem.masses!({}, 1, 0.01, 3)).toHaveLength(1);
+  });
+});
+
+describe('setups no preset has', () => {
+  const eos = makeEos('ideal', { ...defaultEosParams(), gamma: 5 / 3 });
+  const read = (doc: object) => {
+    const { spec, report } = readSetup({ ...emptySetup(), ...doc });
+    expect(report.error).toBeUndefined();
+    return compileSetup(spec!).problem;
+  };
+
+  it('adds the densities of two disks about one mass, sharing momentum by mass', () => {
+    const disk = (id: string, rIn: number, rOut: number, sigma0: number) => ({ kind: 'disk', id, about: ['m'], profile: 'balanced', rIn, rOut, sigma0, slope: -1.5, cs: 0.1, floor: 1e-9 });
+    const one = (parts: object[]) => read({ domain: { box: 8 }, physics: { eos: 'barotropic', eosParams: { gamma: 1, K: 0.01 }, G: 1 }, parts: [{ kind: 'mass', id: 'm', gm: 1, soft: 0.1 }, ...parts] }).init(64, eos, 3, {});
+    const [a, b, both] = [one([disk('a', 0.5, 1.5, 1e-3)]), one([disk('b', 2, 3, 2e-3)]), one([disk('a', 0.5, 1.5, 1e-3), disk('b', 2, 3, 2e-3)])];
+    for (const [x, y, z] of [[1, 0.2, 0.05], [2.4, -0.3, 0], [0.1, 3.1, 0.2]]) {
+      const [wa, wb, w] = [a(x, y, z), b(x, y, z), both(x, y, z)];
+      expect(w.rho).toBeCloseTo(wa.rho + wb.rho, 14);
+      expect(w.rho * w.vx).toBeCloseTo(wa.rho * wa.vx + wb.rho * wb.vx, 14);
+    }
+  });
+
+  it('threads a uniform field through a star with a field of its own: a potential and face values', () => {
+    const p = read({ physics: { gravity: 'isolated', G: 1, eosParams: { gamma: 2 } }, background: { rho: 1e-4 }, parts: [
+      { kind: 'star', id: 's', type: 'polytrope', n: 1, radius: 0.3, rhoc: 1, field: { type: 'dipole', beta: 100 } }, { kind: 'field', b: [0, 0, 0.01] }] });
+    expect(p.mhd?.potential && p.mhd?.face).toBeTruthy();
+    const cfg = configFor(p, 16, { ndim: 3 });
+    const faces = initialFaces(cfg, 16, 16, 1 / 16);
+    // Far from the star the field is the uniform one; inside it the dipole adds to it.
+    const at = (i: number, j: number, k: number) => faces[4 * ((k * 17 + j) * 17 + i) + 2];
+    expect(at(1, 1, 1)).toBeCloseTo(0.01, 6);
+    expect(Math.abs(at(8, 8, 8))).toBeGreaterThan(0.02);
+    // Divergence-free to round-off, cell by cell.
+    let worst = 0;
+    const f = (a: number, i: number, j: number, k: number) => faces[4 * ((k * 17 + j) * 17 + i) + a];
+    for (let k = 0; k < 16; k++) for (let j = 0; j < 16; j++) for (let i = 0; i < 16; i++) worst = Math.max(worst, Math.abs(f(0, i + 1, j, k) - f(0, i, j, k) + f(1, i, j + 1, k) - f(1, i, j, k) + f(2, i, j, k + 1) - f(2, i, j, k)));
+    expect(worst).toBeLessThan(1e-6);
+  });
+
+  it('paints regions with species over a background, in the order of the parts', () => {
+    const p = read({ physics: { species: ['he4', 'h1'] }, background: { rho: 1, p: 1, X: { h1: 1 } }, parts: [
+      { kind: 'region', shape: { type: 'sphere', radius: 0.2 }, rho: 4, X: { he4: 1 } },
+      { kind: 'region', shape: { type: 'box', min: [0, null, null], max: [null, null, null] }, p: 2 },
+      { kind: 'obstacle', shape: { type: 'half', normal: [0, 1, 0], at: -0.4 } }] });
+    const at = p.init(32, eos, 3, {});
+    expect(at(-0.1, 0, 0)).toMatchObject({ rho: 4, p: 1, X: [1, 0] });
+    expect(at(0.1, 0, 0)).toMatchObject({ rho: 4, p: 2, X: [1, 0] });
+    expect(at(0.4, 0, 0)).toMatchObject({ rho: 1, p: 2, X: [0, 1] });
+    expect(at(0, -0.45, 0).solid).toBe(true);
+  });
+
+  it('puts a point mass on a flyby past a star, and a third body beside them', () => {
+    const p = read({ domain: { box: 16 }, physics: { gravity: 'isolated', G: 1 }, background: { rho: 1e-6, cut: 1e-4, relativeTo: 'star' }, parts: [
+      { kind: 'star', id: 'star', type: 'polytrope', n: 1.5, mass: 1, radius: 1 }, { kind: 'mass', id: 'bh', gm: 1000 }, { kind: 'mass', id: 'far', gm: 1, pos: [0, 6, 0] },
+      { kind: 'orbit', of: ['star', 'bh'], type: 'flyby', beta: 1, start: 3 }] });
+    const masses = p.masses!({}, 1, 0.1, 3);
+    expect(masses).toHaveLength(2);
+    expect(Math.hypot(...masses[0].pos)).toBeCloseTo(30, 6);
+    expect(masses[1].pos).toEqual([0, 6, 0]);
+    expect(p.settle!({}, eos).stars).toHaveLength(1);
   });
 });

@@ -1,6 +1,24 @@
 # Plan: the setup dialog
 
-Status: draft, 2026-11-16 (third version). Nothing here is built yet.
+Status: built, 2026-11-16 (commits 7596e14, bf702a3 and the one after). What differs from the
+text below:
+
+- Section 7 was already done when this was written: a run holds 32 point masses (5fe9aed).
+- A setup that is no preset runs under the problem id `custom` (`src/presets/custom.ts`), so
+  everything that finds a problem by id finds it as it finds a preset. `SimConfig` did not
+  gain a `setup` field: `Problem.setup` is the document it was compiled from.
+- Preset parameters are the featured options whose paths are in the parts (`featured` entries
+  carry the old id, label and range); the run still holds their values in `SimConfig.params`.
+- The disk part has two profiles, `thin` and `balanced`, one per preset it came from: one
+  formula could not start both bit for bit.
+- A downloaded preset is the resolved, whole document, not the repository's file with its
+  `extends`.
+- No rule ties a magnetic field to a frozen mesh: the field is re-meshed with it.
+- Not done: disks about stars (open decision, "masses first"); controls in the dialog for
+  `physics.speciesGamma`, `physics.toolScale`, the fuel-and-ash form of burning, units by
+  density and velocity, and a unit's `per` (files that have them keep them); the GPU test
+  `masses-many` is the existing `point-mass-many`, and `setup-restart` and `setup-triple` are
+  page tests in `tests/gpu/setup.spec.ts`; the 512³ setup-time measurement of section 12.
 
 ## 1. Goal
 
