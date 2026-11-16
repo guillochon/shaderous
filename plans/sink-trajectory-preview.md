@@ -41,6 +41,12 @@ Since then (2026-11-15):
 - **The sink tool's Soft slider is labeled Edge** (as the source's): it is how a massless
   sink's rate fades toward its edge, not the softening of a point mass's gravity, which is its
   Size.
+- **The preview on hover**: with the sink tool holding a mass and no button down, the path of
+  a mass let go at rest under the pointer is drawn (in the volume view, on the plane through
+  the middle of the box, where the brush is).
+- **A Soft slider for point masses**: the softening length of the mass's gravity, apart from
+  Size, which is the sink's radius. Shown only when the tool has a mass.
+- **The brush and its guides stay under the pointer** while the view is dragged or zoomed.
 
 ## 1. Goal
 
