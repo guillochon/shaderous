@@ -6,8 +6,11 @@ A p90 of 200 trajectories rests on its worst 20; comparing two models trajectory
 trajectory and resampling the trajectories says whether a difference is more than that.
 
     tools/burn/.venv/Scripts/python tools/burn/weightprog/paired.py base.pt candidate.pt ...
+
+PAIRED_DT sets the rollout step (default 1e-3 s, as score.py).
 """
 import copy
+import os
 import sys
 from pathlib import Path
 
@@ -44,7 +47,7 @@ def worst(name, S):
     res = {}
     with torch.no_grad():
         for k, (rho, X, T, t) in S.items():
-            res[k] = score.errs(m, rho, X, T, t)       # (check times, trajectories)
+            res[k] = score.errs(m, rho, X, T, t, dt=float(os.environ.get("PAIRED_DT", "1e-3")))  # (check times, trajectories)
     return res
 
 
