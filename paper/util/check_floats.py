@@ -47,6 +47,9 @@ def main() -> int:
     ok = True
     fig_pages: dict[int, list[int]] = {}
     ref_list = next((i + 1 for i, t in enumerate(pg) if re.search(r"^\s*REFERENCES|^\s*References\s*$", t, re.M)), len(pg))
+    # The appendix, where it comes before the references: its tables follow one another, each a
+    # page on, and are not held to the rule of one page.
+    appendix = next((i + 1 for i, t in enumerate(pg) if re.search(r"^\s*APPENDIX\s*$|^\s*Appendix\s*$", t, re.M)), len(pg) + 1)
     for kind, (cap_word, ref_word) in KINDS.items():
         n = 1
         while True:
@@ -72,7 +75,7 @@ def main() -> int:
             if ref_p is None:
                 flag = "  <-- never referenced in the text"
                 ok = False
-            elif kind == "Table" and cap_p > ref_list:
+            elif kind == "Table" and (cap_p > ref_list or cap_p >= appendix):
                 flag = "  (appendix)"
             elif cap_p > ref_p + 1:
                 flag = f"  <-- {cap_p - ref_p} pages after first reference"

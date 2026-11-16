@@ -484,11 +484,6 @@ The code, its validation suite, the manuscript source, the bibliography and the 
 
 \software{Shaderous (\url{https://github.com/guillochon/shaderous}), TypeScript, Vite, Vitest, Playwright, h5wasm, Mediabunny, yt \citep{Turk2011}, pynucastro \citep{SmithClark2023}, PyTorch}
 
-%% References first, then the appendix: otherwise the appendix's wide tables float in among
-%% the references.
-\bibliographystyle{aasjournalv7}
-\bibliography{references}
-
 \appendix
 
 \section{Validation tests}
@@ -600,6 +595,10 @@ Magnetized disk & \tabpar{7.0cm}{Mass within 3\%, kinetic energy within 5\%; Alf
 \end{table*}
 
 %% ---- END BODY ----
-%% (The bibliography is above, before the appendix.)
+
+%% The appendix's wide tables are floats: every one of them is set before the references start.
+\clearpage
+\bibliographystyle{aasjournalv7}
+\bibliography{references}
 
 \end{document}
