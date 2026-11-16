@@ -1,0 +1,34 @@
+name: Publish to npm
+
+# Push a tag vX.Y.Z (matching package.json's version) to publish the npm package: the built page
+# (dist/) with the headless runner and the MCP server (`npx shaderous`, `npx shaderous mcp`).
+# Built here from a clean checkout, so nothing uncommitted reaches the package. Publishing uses
+# npm's trusted publishing (OIDC, no token): on npmjs.com, the package's settings name this
+# repository and workflow file as a trusted publisher.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME}"
+      # prepack builds dist/.
+      - run: npm publish --access public --provenance

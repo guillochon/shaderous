@@ -1,9 +1,46 @@
 {
   "name": "shaderous",
-  "private": true,
-  "license": "MIT",
   "version": "0.1.0",
+  "description": "GPU gas dynamics in the browser (WebGPU): compressible hydro and MHD with gravity, cooling and adaptive mesh refinement. Includes a headless runner and an MCP server for AI agents.",
+  "license": "MIT",
+  "author": "James Guillochon",
+  "homepage": "https://guillochon.github.io/shaderous/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/guillochon/shaderous.git"
+  },
+  "bugs": {
+    "url": "https://github.com/guillochon/shaderous/issues"
+  },
+  "keywords": [
+    "hydrodynamics",
+    "mhd",
+    "astrophysics",
+    "simulation",
+    "webgpu",
+    "amr",
+    "mcp",
+    "mcp-server",
+    "ai-agents"
+  ],
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "shaderous": "tools/headless/bin.mjs",
+    "shaderous-mcp": "tools/headless/mcp.mjs"
+  },
+  "files": [
+    "dist",
+    "tools/headless/bin.mjs",
+    "tools/headless/cli.mjs",
+    "tools/headless/mcp.mjs",
+    "tools/headless/session.mjs",
+    "tools/headless/flags.mjs",
+    "tools/headless/npy.mjs",
+    "tools/headless/schema.json"
+  ],
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -14,17 +51,19 @@
     "test:gpu": "playwright test",
     "test:headless": "node tools/headless/selftest.mjs",
     "headless": "node tools/headless/cli.mjs",
-    "mcp": "node tools/headless/mcp.mjs"
+    "mcp": "node tools/headless/mcp.mjs",
+    "prepack": "npm run build"
+  },
+  "dependencies": {
+    "playwright-core": "^1.48.0"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
     "@webgpu/types": "^0.1.51",
+    "h5wasm": "^0.10.3",
+    "mediabunny": "1.65.2",
     "typescript": "^5.6.0",
     "vite": "^5.4.0",
     "vitest": "^2.1.0"
-  },
-  "dependencies": {
-    "h5wasm": "^0.10.3",
-    "mediabunny": "1.65.2"
   }
 }

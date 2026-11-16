@@ -23,6 +23,7 @@ const log = (m) => process.stderr.write(`[shaderous-mcp] ${m}\n`);
 // The keys of a setup, the view's settings and the variables, as the page's own tables give
 // them (schema.json, written by `npm run gen`): nothing here restates them.
 const SCHEMA = JSON.parse(readFileSync(new URL('./schema.json', import.meta.url), 'utf8'));
+const PKG = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
 const linkKeysOf = (group) => SCHEMA.link.filter((k) => k.group === group).map((k) => k.key).join(', ');
 const SETUP_KEYS = `${linkKeysOf('run')}, ${linkKeysOf('settings')}, and view keys ${linkKeysOf('view')}. dim is 2 or 3, amr 0 to 5, bc six digits. Unknown keys are ignored, values out of range clamped.`;
 
@@ -237,7 +238,7 @@ async function handle(msg) {
       return reply({
         protocolVersion: params?.protocolVersion ?? '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'shaderous', version: '0.1.0' },
+        serverInfo: { name: 'shaderous', version: PKG.version },
         instructions: INSTRUCTIONS,
       });
     case 'ping':

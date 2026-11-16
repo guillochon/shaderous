@@ -13,7 +13,7 @@ import { helpText, OPTIONS } from './flags.mjs';
 import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, setupQuery } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
-const HELP = `Usage: node tools/headless/cli.mjs <command> [setup] [options]
+const HELP = `Usage: shaderous <command> [setup] [options]   (in a checkout: npm run headless -- <command> ...)
 
 Commands
   run       Run one setup, writing outputs to a folder

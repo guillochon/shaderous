@@ -11,7 +11,8 @@ There are two tools for running Shaderous without anyone watching the page. Both
   as a set of tools. The agent loads a setup, steps it, reads numbers back and looks at
   screenshots, all within one conversation. Use it for exploring.
 
-Both work the same way. They serve this checkout with Vite, or use a URL you give. They open
+Both work the same way. They serve the page themselves (this checkout with Vite, or the built
+page when installed from npm, as `npx shaderous`), or use a URL you give. They open
 the page in Chrome with WebGPU, headless by default, and call `window.shaderous`. Nothing has to
 be running beforehand.
 
@@ -27,7 +28,10 @@ be running beforehand.
 
 ## Requirements
 
-- Node 20 or later, and `npm install` in the checkout.
+- Node 20 or later. Either `npm install` in a checkout, or nothing: `npx -y shaderous ...`
+  fetches the npm package, which carries the built page and runs the same commands
+  (`npx shaderous run ...`, `npx shaderous mcp`). `SHADEROUS_SERVE=dist` makes a checkout serve
+  its `dist/` (after `npm run build`) as the package does.
 - Google Chrome. Set `PW_CHANNEL=msedge` to use Edge. Playwright drives the installed browser,
   so it doesn't need to download one.
 - A GPU that Chrome will use for WebGPU. On a machine without one, Chrome may fall back to a
@@ -244,9 +248,19 @@ tool call and keeps it until the client disconnects.
 
 ### Connecting
 
-[.mcp.json](../.mcp.json) at the repository root registers the server for Claude Code in this
-project. Claude Code asks you to approve it the first time. For another client, or from
-elsewhere, give the command with an absolute path:
+From the npm package, with no checkout, the command is `npx -y shaderous mcp`:
+
+```bash
+claude mcp add shaderous -- npx -y shaderous mcp
+```
+
+```json
+{ "mcpServers": { "shaderous": { "command": "npx", "args": ["-y", "shaderous", "mcp"] } } }
+```
+
+In a checkout, [.mcp.json](../.mcp.json) at the repository root registers the server for
+Claude Code in this project. Claude Code asks you to approve it the first time. For another
+client, or from elsewhere, give the command with an absolute path:
 
 ```json
 {

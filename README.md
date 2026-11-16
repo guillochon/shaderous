@@ -33,6 +33,24 @@ file ([docs/setups.md](docs/setups.md)). Some examples:
 - [A cellular detonation front](https://guillochon.github.io/shaderous/?problem=detonation-cellular)
 - [A sub-Chandrasekhar Type Ia supernova: a white dwarf's helium shell detonates, then its core](https://guillochon.github.io/shaderous/?problem=sub-chandra)
 
+**From an AI agent, or the command line.** The npm package runs the simulator in headless
+Chrome on your GPU (it needs Node 20+ and Chrome). `npx -y shaderous mcp` is an
+[MCP server](docs/headless.md#mcp-server) that gives an agent tools to load a setup, run it, read
+numbers back and look at it. For Claude Code:
+
+```bash
+claude mcp add shaderous -- npx -y shaderous mcp
+```
+
+Other clients (Claude Desktop, Cursor, VS Code, Codex, Gemini CLI) take the same command:
+
+```json
+{ "mcpServers": { "shaderous": { "command": "npx", "args": ["-y", "shaderous", "mcp"] } } }
+```
+
+`npx shaderous run --problem sedov --dim 2 --n 512 --png` runs a setup to the end and writes
+its outputs to a folder ([docs/headless.md](docs/headless.md)).
+
 **Locally.** Running it yourself needs Node 20+.
 
 ```bash

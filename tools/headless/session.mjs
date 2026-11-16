@@ -1,11 +1,50 @@
-// A headless simulator: the page served (by Vite from this checkout, or from a URL given), opened
-// in Chrome with WebGPU, and its scripting API (window.shaderous, docs/api.md) callable from
-// Node. Shared by the command-line runner (cli.mjs) and the MCP server (mcp.mjs).
+// A headless simulator: the page served (by Vite from a checkout, from the built page in dist/
+// when installed from npm, or from a URL given), opened in Chrome with WebGPU, and its scripting
+// API (window.shaderous, docs/api.md) callable from Node. Shared by the command-line runner
+// (cli.mjs) and the MCP server (mcp.mjs).
+import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
+import { createServer as createHttpServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const DIST = path.join(REPO, 'dist');
+
+/**
+ * What serves the page when no URL is given: 'vite' (the source, in a checkout) or 'dist' (the
+ * built page; the npm package ships dist/ and no source). SHADEROUS_SERVE=dist or vite chooses.
+ */
+function serveMode() {
+  const env = process.env.SHADEROUS_SERVE;
+  if (env === 'dist' || env === 'vite') return env;
+  return existsSync(path.join(REPO, 'src')) ? 'vite' : 'dist';
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript',
+  '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm',
+  '.svg': 'image/svg+xml', '.png': 'image/png', '.ico': 'image/x-icon', '.txt': 'text/plain',
+};
+
+/** The built page (dist/) on a free local port; resolves to { url, close }. */
+async function serveDist() {
+  if (!existsSync(path.join(DIST, 'index.html'))) throw new Error(`no built page in ${DIST}: run \`npm run build\`, or pass --url`);
+  const server = createHttpServer(async (req, res) => {
+    const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '') || 'index.html';
+    const file = path.resolve(DIST, rel);
+    if (!file.startsWith(DIST + path.sep)) return res.writeHead(403).end();
+    try {
+      const body = await readFile(file);
+      res.writeHead(200, { 'content-type': MIME[path.extname(file)] ?? 'application/octet-stream' }).end(body);
+    } catch {
+      res.writeHead(404).end();
+    }
+  });
+  await new Promise((ok, fail) => server.once('error', fail).listen(0, '127.0.0.1', ok));
+  return { url: `http://127.0.0.1:${server.address().port}/`, close: () => new Promise((ok) => server.close(() => ok())) };
+}
 
 /** Run this process, and the browser it starts (which inherits it on Windows), at low priority. */
 export function lowerPriority() {
@@ -32,7 +71,8 @@ function pageMessage(e) {
 
 /**
  * Open a simulator page.
- * - url: where the page is served (default: start Vite on a free port, serving this checkout)
+ * - url: where the page is served (default: a free local port, serving this checkout with Vite,
+ *   or the built page in dist/ when there is no source, as in the npm package)
  * - setup: the run to open on (query string, link or object); default the page's own
  * - headed: show the browser window (when headless Chrome finds no GPU adapter)
  * - width, height: the window, which sets a screenshot's default size
@@ -49,7 +89,10 @@ export async function openSession(opts = {}) {
   const log = opts.log ?? ((m) => process.stderr.write(m + '\n'));
   let server = null;
   let base = opts.url;
-  if (!base) {
+  if (!base && serveMode() === 'dist') {
+    server = await serveDist();
+    base = server.url;
+  } else if (!base) {
     const { createServer } = await import('vite');
     server = await createServer({
       root: REPO,
@@ -62,7 +105,7 @@ export async function openSession(opts = {}) {
     await server.listen();
     base = server.resolvedUrls.local[0];
   }
-  const { chromium } = await import('@playwright/test');
+  const { chromium } = await import('playwright-core');
   const args = ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist'];
   if (process.platform === 'win32') args.push('--use-angle=d3d11');
   // Linux (a GPU server or pod): WebGPU through Vulkan, with no window surface. Without
