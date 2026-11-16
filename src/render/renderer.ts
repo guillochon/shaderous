@@ -6,6 +6,7 @@ import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
 import { FieldLines } from './fieldlines';
+import type { ViewMode } from './view_options';
 import { PathTube } from './pathtube';
 import { padded3d } from '../amr/dispatch';
 
@@ -26,7 +27,7 @@ export interface ViewState {
    * Projection: along the slice axis, density summed into a column density and any other field
    * averaged, weighted by mass.
    */
-  mode: 'volume' | 'slice' | 'projection';
+  mode: ViewMode;
   field: number;
   /** Mass fraction field: which species (in the order of Problem.species) */
   species: number;

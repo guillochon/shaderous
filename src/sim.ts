@@ -24,8 +24,8 @@ import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, ty
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
 
-export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
-export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
+import type { LimiterKind, RiemannKind } from './problems/types';
+export { LIMITER_KINDS, RIEMANN_KINDS, type LimiterKind, type RiemannKind } from './problems/types';
 
 export interface SimConfig {
   /** Cells per side. The grid is n x n x n, or n x n x 1 (periodic in z) when ndim is 2. */

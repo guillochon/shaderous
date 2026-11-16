@@ -10,7 +10,10 @@ import { COOLING_LABELS } from '../cooling/cooling';
 import { EOS_LABELS } from '../eos/eos';
 import { FUNCTIONS } from './expr';
 import { FLOWS } from './parts/flow';
-import { getPath, type Part, type PartKind, type SetupSpec } from './spec';
+import { GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
+import { VIEW_MODES } from '../render/view_options';
+import { COMPOSITIONS } from '../units/composition';
+import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
 import { LENGTH_UNITS, MASS_UNITS } from './units';
 
 
@@ -151,6 +154,17 @@ const unavailableIn = unavailable;
 const num = (min?: number, max?: number, extra: Partial<Extract<Control, { type: 'number' }>> = {}): Control => ({ type: 'number', ...(min !== undefined ? { min } : {}), ...(max !== undefined ? { max } : {}), ...extra });
 const check: Control = { type: 'check' };
 const pick = (...choices: (Choice | [Value, string, string?])[]): Control => ({ type: 'select', choices: choices.map((c) => (Array.isArray(c) ? { value: c[0], label: c[1], ...(c[2] ? { tip: c[2] } : {}) } : c)) });
+/**
+ * A select over a list of names kept elsewhere (the solver's Riemann solvers, the kinds of
+ * star): a label, and any rules, for each name of the list and for no other. A name here that
+ * the list lacks does not compile; one the list has and this lacks stops the page as it loads.
+ */
+function pickOf<T extends string>(kinds: readonly T[], ...choices: ((Choice & { value: T }) | [T, string, string?])[]): Control {
+  const named = choices.map((c) => (Array.isArray(c) ? c[0] : c.value));
+  const missing = kinds.filter((k) => !named.includes(k));
+  if (missing.length || named.length !== kinds.length) throw new Error(`a menu of the option table does not match its list: ${missing.join(', ') || named.join(', ')}`);
+  return pick(...choices);
+}
 
 const ENERGY: Rule[] = [{ fact: 'eos.energy' }];
 const SELF: Rule[] = [{ fact: 'gravity.self' }];
@@ -173,7 +187,7 @@ export const OPTIONS: Option[] = [
   { path: 'run.checkpointDt', label: 'Checkpoint every', tip: 'Time between checkpoints, when the page is asked to save them: the value the Time panel starts with', page: 'run', control: num(0, undefined, { factor: 2, quantity: 'time' }), apply: 'live' },
   { path: 'run.tDyn', label: 'Dynamical time', tip: 'The time over which the flow visibly changes (a star’s sqrt(R³ / G M), a binary’s period): a movie takes a frame every 600th of it by default', page: 'run', control: num(0, undefined, { factor: 2, quantity: 'time' }), apply: 'live' },
   { path: 'run.startPaused', label: 'Start paused', tip: 'The run waits, paused, for Run', page: 'run', control: check, apply: 'live', default: false },
-  { path: 'view.mode', label: 'Opening view', tip: 'How the gas is drawn when the setup opens in 3D', page: 'run', control: pick(['volume', 'Volume'], ['slice', 'Slice'], ['projection', 'Projection']), apply: 'live', default: 'volume' },
+  { path: 'view.mode', label: 'Opening view', tip: 'How the gas is drawn when the setup opens in 3D', page: 'run', control: pickOf(VIEW_MODES, ['volume', 'Volume'], ['slice', 'Slice'], ['projection', 'Projection']), apply: 'live', default: 'volume' },
   { path: 'view.field', label: 'Opening field', tip: 'The quantity shown when the setup opens (the View panel’s Field, by its number)', page: 'run', control: num(0, 29, { integer: true, step: 1 }), apply: 'live', default: 0 },
   { path: 'view.log', label: 'Logarithmic colors', tip: 'The color scale the setup opens with', page: 'run', control: check, apply: 'live', default: true },
   { path: 'view.axis', label: 'Slice normal', tip: 'The axis the opening slice is perpendicular to (0 x, 1 y, 2 z)', page: 'run', control: pick([2, 'z'], [1, 'y'], [0, 'x']), apply: 'live', default: 2 },
@@ -207,7 +221,7 @@ export const OPTIONS: Option[] = [
   { path: 'physics.eosParams.degP', label: 'Degeneracy pressure scale', tip: 'The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', linkKey: 'degp', cfg: 'eosParams.degP', show: { path: 'physics.eos', is: ['degenerate'] } },
   { path: 'physics.eosParams.ionT', label: 'Ionization temperature', tip: 'The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Set from physical constants for a setup with physical units', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', linkKey: 'iont', cfg: 'eosParams.ionT', show: { path: 'physics.eos', is: ['ionizing'] } },
   { path: 'physics.eosParams.ionRho', label: 'Saha density', tip: 'Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', linkKey: 'ionrho', cfg: 'eosParams.ionRho', show: { path: 'physics.eos', is: ['ionizing'] } },
-  { path: 'physics.composition', label: 'Composition', tip: 'What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen', page: 'gas', control: pick(['solar', 'Solar, ionized'], ['solarNeutral', 'Solar, neutral'], ['hydrogen', 'Hydrogen'], ['carbonOxygen', 'Carbon and oxygen']), apply: 'restart', default: 'solar' },
+  { path: 'physics.composition', label: 'Composition', tip: 'What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen', page: 'gas', control: pickOf(Object.keys(COMPOSITIONS) as (keyof typeof COMPOSITIONS)[], ['solar', 'Solar, ionized'], ['solarNeutral', 'Solar, neutral'], ['hydrogen', 'Hydrogen'], ['carbonOxygen', 'Carbon and oxygen']), apply: 'restart', default: 'solar' },
   { path: 'physics.species', label: 'Species', tip: 'Species whose mass fractions the gas carries, by name (he4, c12, ...), separated by commas; or aprox13 for the burning network’s thirteen. None by default', page: 'gas', control: { type: 'names' }, apply: 'restart' },
   { path: 'physics.burn', label: 'Burning', tip: 'Nuclear burning by the trained network of the 13-isotope alpha chain (aprox13), wherever the gas is hot and dense enough', page: 'gas', apply: 'restart',
     requires: [{ fact: 'eos.energy' }, { fact: 'species.aprox13' }, { fact: 'units' }],
@@ -234,7 +248,7 @@ export const OPTIONS: Option[] = [
 
   // ---- gravity ----
   { path: 'physics.gravity', label: 'Gravity', tip: 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way', page: 'gravity', apply: 'live', default: 'off', linkKey: 'gravity', cfg: 'gravity',
-    control: pick(
+    control: pickOf(GRAVITY_MODES,
       { value: 'off', label: 'Off', tip: 'No gravity (point masses still pull)' },
       { value: 'constant', label: 'Constant', tip: 'A uniform field of strength G pointing down: -y in 2D, -z in 3D' },
       { value: 'periodic', label: 'Self, periodic', tip: 'Self-gravity of the gas in a periodic box (3D only)', requires: [...IN_3D, { fact: 'bc.allPeriodic' }], excludes: [{ fact: 'parts.star', reason: 'Not available with a star: a star’s gravity is not periodic' }] },
@@ -247,7 +261,7 @@ export const OPTIONS: Option[] = [
   { path: 'physics.jeansCells', label: 'Cells per Jeans length', tip: 'The Jeans floor raises the pressure so the Jeans length spans at least this many cells', page: 'gravity', control: num(4, 32, { integer: true, step: 1 }), apply: 'live', default: 4, linkKey: 'jcells', cfg: 'jeansCells', requires: SELF },
   { path: 'physics.gravEnergyFlux', label: 'Conserve energy', tip: 'Flux-form gravitational work: conserves total energy', page: 'gravity', control: check, apply: 'live', default: true, linkKey: 'fluxwork', cfg: 'gravEnergyFlux', requires: SELF },
   { path: 'physics.frame', label: 'Frame', tip: 'An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box', page: 'gravity', apply: 'restart', default: 'inertial',
-    control: pick(['inertial', 'Inertial'], { value: 'gas', label: 'Follows the gas', requires: [{ fact: 'parts.mass' }] }, { value: 'masses', label: 'Follows the masses', requires: [{ fact: 'parts.mass' }] }) },
+    control: pickOf(FRAMES, ['inertial', 'Inertial'], { value: 'gas', label: 'Follows the gas', requires: [{ fact: 'parts.mass' }] }, { value: 'masses', label: 'Follows the masses', requires: [{ fact: 'parts.mass' }] }) },
 
   // ---- mesh ----
   { path: 'mesh.refineHi', label: 'Refine above', tip: 'Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more', page: 'mesh', control: num(0.05, 1, { step: 0.05 }), apply: 'live', default: 0.8, linkKey: 'refhi', cfg: 'refineHi', requires: ADAPTIVE },
@@ -260,8 +274,8 @@ export const OPTIONS: Option[] = [
   { path: 'mesh.jeansRefine', label: 'Refine the Jeans length', tip: 'With self-gravity, refine where the Jeans length is under this many cells. 0 is off', page: 'mesh', control: num(0, 64, { integer: true, step: 1 }), apply: 'restart', default: 16, requires: [...ADAPTIVE, ...SELF] },
 
   // ---- solver ----
-  { path: 'physics.riemann', label: 'Riemann solver', tip: 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust', page: 'solver', control: pick(['hllc', 'HLLC'], ['hllclm', 'HLLC, low Mach'], ['hll', 'HLL']), apply: 'shaders', default: 'hllc', linkKey: 'riemann', cfg: 'riemann' },
-  { path: 'physics.limiter', label: 'Limiter', tip: 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust', page: 'solver', control: pick(['koren', 'Third order (Koren)'], ['mc', 'Monotonized central'], ['vanleer', 'van Leer'], ['minmod', 'Minmod']), apply: 'shaders', default: 'koren', linkKey: 'limiter', cfg: 'limiter' },
+  { path: 'physics.riemann', label: 'Riemann solver', tip: 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust', page: 'solver', control: pickOf(RIEMANN_KINDS, ['hllc', 'HLLC'], ['hllclm', 'HLLC, low Mach'], ['hll', 'HLL']), apply: 'shaders', default: 'hllc', linkKey: 'riemann', cfg: 'riemann' },
+  { path: 'physics.limiter', label: 'Limiter', tip: 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust', page: 'solver', control: pickOf(LIMITER_KINDS, ['koren', 'Third order (Koren)'], ['mc', 'Monotonized central'], ['vanleer', 'van Leer'], ['minmod', 'Minmod']), apply: 'shaders', default: 'koren', linkKey: 'limiter', cfg: 'limiter' },
   { path: 'physics.cfl', label: 'CFL number', tip: 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower', page: 'solver', control: num(0.05, 1, { step: 0.05 }), apply: 'live', default: 0.8, linkKey: 'cfl', cfg: 'cfl' },
 
   // ---- the background the parts are painted on ----
@@ -278,7 +292,7 @@ const VEL: Option = { path: 'vel', label: 'Velocity', tip: 'How it moves at the 
 const P = <T extends Partial<Option>>(o: T & Pick<Option, 'path' | 'label' | 'tip' | 'control'>): Option => ({ page: 'parts', apply: 'restart', ...o });
 
 const SHAPE: Option[] = [
-  P({ path: 'shape.type', label: 'Shape', tip: 'A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane', control: pick(['sphere', 'Sphere'], ['box', 'Box'], ['half', 'Half-space']), default: 'sphere' }),
+  P({ path: 'shape.type', label: 'Shape', tip: 'A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane', control: pickOf(SHAPE_TYPES, ['sphere', 'Sphere'], ['box', 'Box'], ['half', 'Half-space']), default: 'sphere' }),
   P({ path: 'shape.center', label: 'Center', tip: 'Center of the sphere', control: { type: 'vec3' }, default: [0, 0, 0], show: { path: 'shape.type', is: ['sphere'] } }),
   P({ path: 'shape.radius', label: 'Radius', tip: 'Radius of the sphere', control: num(0, undefined, { factor: 1.25, quantity: 'length' }), default: 0.1, show: { path: 'shape.type', is: ['sphere'] } }),
   P({ path: 'shape.radiusCells', label: 'Radius in cells', tip: 'Instead of the radius: this many finest cells, whatever the resolution (a point explosion)', control: num(0.5, 64, { step: 0.5 }), show: { path: 'shape.type', is: ['sphere'] } }),
@@ -309,7 +323,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
     make: () => ({ kind: 'orbit', of: ['', ''], type: 'binary', separation: 1, ecc: 0 }),
     fields: [
       P({ path: 'of', label: 'Bodies', tip: 'The two bodies it places: two point masses (binary), a star and a point mass (flyby), or two stars (collision)', control: { type: 'ref', kinds: ['mass', 'star'], count: 2 } }),
-      P({ path: 'type', label: 'Kind of orbit', tip: 'Binary: two point masses about their center of mass, at pericenter. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass', control: pick(['binary', 'Binary (two masses)'], ['flyby', 'Flyby (star and mass)'], ['collision', 'Collision (two stars)']), default: 'binary' }),
+      P({ path: 'type', label: 'Kind of orbit', tip: 'Binary: two point masses about their center of mass, at pericenter. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass', control: pickOf(ORBIT_TYPES, ['binary', 'Binary (two masses)'], ['flyby', 'Flyby (star and mass)'], ['collision', 'Collision (two stars)']), default: 'binary' }),
       P({ path: 'q', label: 'Mass ratio', tip: 'Mass of the second body over the first. It sets their masses: in a binary the total stays, in a flyby the star’s', control: num(1e-6, 1e9, { factor: 1.25 }), show: { path: 'type', is: ['binary', 'flyby'] } }),
       P({ path: 'separation', label: 'Separation', tip: 'Semi-major axis of the binary’s orbit', control: num(1e-6, undefined, { factor: 1.25, quantity: 'length' }), default: 1, show: { path: 'type', is: ['binary'] } }),
       P({ path: 'ecc', label: 'Eccentricity', tip: 'Eccentricity of the binary’s orbit', control: num(0, 0.95, { step: 0.05 }), default: 0, show: { path: 'type', is: ['binary'] } }),
@@ -328,7 +342,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
     excludes: NOT_PERIODIC,
     make: () => ({ kind: 'star', type: 'polytrope', n: 1.5, mass: 1, radius: 0.2 }),
     fields: [
-      P({ path: 'type', label: 'Kind of star', tip: 'A polytrope of index n, or a cold white dwarf held up by degenerate electrons', control: pick(
+      P({ path: 'type', label: 'Kind of star', tip: 'A polytrope of index n, or a cold white dwarf held up by degenerate electrons', control: pickOf(STAR_TYPES,
         { value: 'polytrope', label: 'Polytrope', requires: [{ fact: 'eos.energy' }], excludes: [{ fact: 'parts.star.white-dwarf', reason: 'Not available with a white dwarf: the two are settled with different gases' }] },
         { value: 'white-dwarf', label: 'White dwarf', requires: [{ fact: 'eos.degenerate' }], excludes: [{ fact: 'parts.star.polytrope', reason: 'Not available with a polytropic star: the two are settled with different gases' }] }), default: 'polytrope' }),
       P({ path: 'n', label: 'Polytropic index n', tip: 'The star’s structure, p = K ρ^(1 + 1/n): the larger n, the more centrally concentrated. Stable against convection only if the gas’s adiabatic index is at least 1 + 1/n', control: num(0.5, 4.5, { step: 0.5 }), default: 1.5, show: { path: 'type', is: ['polytrope'] } }),
@@ -340,7 +354,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
       P({ path: 'X', label: 'Composition', tip: 'Mass fractions of its gas, by species name (the ambient gas’s if left empty)', control: { type: 'fractions' } }),
       P({ path: 'field', label: 'Magnetic field inside', tip: 'A field confined to the star: a dipole along z or a tangled Kolmogorov field, with plasma beta at the center; or the same as Guillochon & McCourt (2017) set them, by their β_M',
         control: { type: 'group', optional: true, fields: [
-          P({ path: 'type', label: 'Shape', tip: 'Dipole or random, by the plasma beta at the center; or Guillochon & McCourt’s, by β_M', control: pick(['dipole', 'Dipole'], ['random', 'Random'], ['gm17-dipole', 'Dipole (G&M 2017)'], ['gm17-random', 'Random (G&M 2017)']), default: 'dipole' }),
+          P({ path: 'type', label: 'Shape', tip: 'Dipole or random, by the plasma beta at the center; or Guillochon & McCourt’s, by β_M', control: pickOf(STAR_FIELD_TYPES, ['dipole', 'Dipole'], ['random', 'Random'], ['gm17-dipole', 'Dipole (G&M 2017)'], ['gm17-random', 'Random (G&M 2017)']), default: 'dipole' }),
           P({ path: 'beta', label: 'Plasma beta', tip: 'Gas pressure over magnetic pressure B² / 2 at the center (or β_M): the larger, the weaker the field', control: num(1, 1e12, { factor: 10 }), default: 1000 }),
           P({ path: 'seed', label: 'Random seed', tip: 'Which random field: each seed gives another', control: num(1, 9999, { integer: true, step: 1 }), default: 1 }),
         ] } }),
@@ -352,14 +366,14 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
     make: () => ({ kind: 'disk', about: [], profile: 'balanced', rIn: 0.3, rOut: 1, sigma0: 1e-3, slope: -1.5, cs: 0.1, floor: 1e-8 }),
     fields: [
       P({ path: 'about', label: 'Orbits', tip: 'The point masses or stars it orbits: about several, their total mass. The disk is centered on their center of mass and moves with it. About a star, keep the inner radius outside 1.3 of the star\u2019s radius: the star is settled within that', control: { type: 'ref', kinds: ['mass', 'star'], count: 'any' } }),
-      P({ path: 'profile', label: 'Profile', tip: 'Thin: a surface density with a cavity and a Gaussian vertical profile, on circular orbits (the binary’s disk). Balanced: a midplane density in vertical balance with the softened potential, rotating as its pressure gradient asks (the magnetized disk); 3D only', control: pick(['thin', 'Thin, with a cavity'], { value: 'balanced', label: 'Balanced', requires: IN_3D }), default: 'balanced' }),
+      P({ path: 'profile', label: 'Profile', tip: 'Thin: a surface density with a cavity and a Gaussian vertical profile, on circular orbits (the binary’s disk). Balanced: a midplane density in vertical balance with the softened potential, rotating as its pressure gradient asks (the magnetized disk); 3D only', control: pickOf(DISK_PROFILES, ['thin', 'Thin, with a cavity'], { value: 'balanced', label: 'Balanced', requires: IN_3D }), default: 'balanced' }),
       P({ path: 'rIn', label: 'Inner radius', tip: 'Where the disk is tapered away toward the center (the cavity’s radius)', control: num(1e-6, undefined, { factor: 1.25, quantity: 'length' }), default: 0.3 }),
       P({ path: 'rOut', label: 'Outer radius', tip: 'Where the disk is tapered away outward', control: num(1e-6, undefined, { factor: 1.25, quantity: 'length' }), default: 1 }),
       P({ path: 'sigma0', label: 'Density scale', tip: 'Thin: the surface density. Balanced: the midplane density at r = 1', control: num(1e-300, undefined, { factor: 2 }), default: 1e-3 }),
       P({ path: 'slope', label: 'Density slope', tip: 'Balanced: the midplane density goes as r to this power (-3/2 is a flat surface density)', control: num(-4, 2, { step: 0.25 }), default: -1.5, show: { path: 'profile', is: ['balanced'] } }),
       P({ path: 'radialFn', label: 'Radial profile (formula)', tip: 'A density profile of your own in radius, as a formula of r: the surface density (thin) or the midplane density (balanced). It replaces the density scale\u2019s law, the slope and the tapers. Example: sigma0 * (r / rIn)^-1 * exp(-(r / rOut)^2) * step(r - rIn). Names: r, rIn, rOut, sigma0, cs, H (the scale height cs / \u03a9 at r), pi, e. Functions: ' + Object.keys(FUNCTIONS).join(', ') + '; powers as x^y. Where it is not a positive number there is no disk. A file may give a table of points instead (radial)', control: { type: 'text' } }),
       P({ path: 'verticalFn', label: 'Vertical profile (formula)', tip: 'A density profile of your own in height, as a formula of z, the height above the midplane (the same on both sides), relative to the midplane: it replaces the Gaussian (thin) or the balance with the potential (balanced). Examples: exp(-z^2 / 2), 1 / cosh(z)^2, max(1 - z / 3, 0). Such a disk is in vertical balance only if the profile is, and settles as the run starts. 3D only. A file may give a table of points instead (vertical)', control: { type: 'text' }, requires: IN_3D }),
-      P({ path: 'verticalIn', label: 'Heights in', tip: 'The z of the vertical profile: in scale heights cs / \u03a9 of each radius (the profile then flares with the disk), or in code lengths', control: pick(['H', 'Scale heights'], ['length', 'Code lengths']), default: 'H' }),
+      P({ path: 'verticalIn', label: 'Heights in', tip: 'The z of the vertical profile: in scale heights cs / \u03a9 of each radius (the profile then flares with the disk), or in code lengths', control: pickOf(DISK_HEIGHTS, ['H', 'Scale heights'], ['length', 'Code lengths']), default: 'H' }),
       P({ path: 'cs', label: 'Sound speed', tip: 'Sound speed of the disk’s gas: its scale height is cs / Ω', control: num(1e-6, undefined, { factor: 1.25, quantity: 'velocity' }), default: 0.1 }),
       P({ path: 'floor', label: 'Gas outside the disk', tip: 'Thin: a fraction of the density scale. Balanced: the density of the ambient gas', control: num(0, undefined, { factor: 10 }), default: 1e-8 }),
       P({ path: 'damp', label: 'Damping zone', tip: 'Beyond a radius the gas is relaxed toward the disk as it started, more strongly toward the box’s edge, so the outer disk is a reservoir and the boundaries see only it',

@@ -11,6 +11,7 @@ import { CUSTOM_ID } from '../presets/custom';
 import { hasProblem, problemOf } from '../presets/lookup';
 import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../setup/options';
 import { defaultView, type ViewState } from '../render/renderer';
+import { VIEW_MODES } from '../render/view_options';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../io/snapshot';
@@ -290,7 +291,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     if (v !== undefined) out.params[p.id] = v;
   }
 
-  put(out.view, 'mode', pick<ViewState['mode']>('mode', ['volume', 'slice', 'projection']));
+  put(out.view, 'mode', pick('mode', VIEW_MODES));
   const field = num('field', 0, FIELDS.length - 1);
   put(out.view, 'field', field === undefined ? undefined : Math.round(field));
   const species = num('species', 0, (problemOf(problem).species?.length ?? 1) - 1);

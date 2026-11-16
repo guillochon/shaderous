@@ -7,7 +7,18 @@
 // stranger is safe to open.
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { EosKind, EosParams } from '../eos/eos';
-import type { Bc3, GravityMode } from '../problems/types';
+import type { Bc3, GravityMode, LimiterKind, RiemannKind } from '../problems/types';
+import type { ViewMode } from '../render/view_options';
+
+// The names a choice of the document may hold, each written here once: the types below, the
+// option table (and so the Setup dialog and the codec) and the generated schema all read them.
+export const FRAMES = ['inertial', 'gas', 'masses'] as const;
+export const ORBIT_TYPES = ['binary', 'flyby', 'collision'] as const;
+export const STAR_TYPES = ['polytrope', 'white-dwarf'] as const;
+export const STAR_FIELD_TYPES = ['dipole', 'random', 'gm17-dipole', 'gm17-random'] as const;
+export const DISK_PROFILES = ['thin', 'balanced'] as const;
+export const DISK_HEIGHTS = ['H', 'length'] as const;
+export const SHAPE_TYPES = ['sphere', 'box', 'half'] as const;
 
 export const SETUP_FORMAT = 'shaderous-setup';
 /** Counts changes to the document's shape: setup/codec.ts keeps one migration per step. */
@@ -70,12 +81,12 @@ export interface PhysicsSpec {
   coolParams?: Partial<CoolingParams>;
   viscosity?: number;
   conductivity?: number;
-  riemann?: 'hllc' | 'hllclm' | 'hll';
-  limiter?: 'koren' | 'mc' | 'vanleer' | 'minmod';
+  riemann?: RiemannKind;
+  limiter?: LimiterKind;
   cfl?: number;
   floors?: { rho?: number; p?: number };
   fluff?: { rho?: number; u?: number; v?: number; va?: number };
-  frame?: 'inertial' | 'gas' | 'masses';
+  frame?: (typeof FRAMES)[number];
   jeansFloor?: boolean;
   jeansCells?: number;
   vcycles?: number;
@@ -123,7 +134,7 @@ export interface RunSpec {
 export interface ViewSpec {
   field?: number;
   log?: boolean;
-  mode?: 'volume' | 'slice' | 'projection';
+  mode?: ViewMode;
   axis?: number;
   pitch?: number;
 }
@@ -160,7 +171,7 @@ export interface OrbitPart {
    *   tidal disruption in the star's rest frame).
    * 'collision': two stars on a parabola about their center of mass, started a few radii apart.
    */
-  type: 'binary' | 'flyby' | 'collision';
+  type: (typeof ORBIT_TYPES)[number];
   /** mass of the second body over the first: sets their masses ('binary': the total stays; 'flyby': the first stays) */
   q?: number;
   /** binary: semi-major axis and eccentricity */
@@ -182,7 +193,7 @@ export interface OrbitPart {
 }
 
 export interface StarField {
-  type: 'dipole' | 'random' | 'gm17-dipole' | 'gm17-random';
+  type: (typeof STAR_FIELD_TYPES)[number];
   /** plasma beta at the center (dipole, random) or Guillochon & McCourt's beta_M */
   beta: number;
   seed?: number;
@@ -192,7 +203,7 @@ export interface StarPart {
   kind: 'star';
   id?: string;
   /** a polytrope of index n, or a cold white dwarf */
-  type: 'polytrope' | 'white-dwarf';
+  type: (typeof STAR_TYPES)[number];
   /** polytrope: its index and radius, and either its mass or its central density */
   n?: number;
   radius?: number;
@@ -218,7 +229,7 @@ export interface DiskPart {
    * 'balanced': a midplane density with tapers at rIn and rOut, in vertical balance with the
    *   softened potential, rotating as the pressure gradient asks (the magnetized disk).
    */
-  profile: 'thin' | 'balanced';
+  profile: (typeof DISK_PROFILES)[number];
   rIn: number;
   rOut: number;
   /** surface density ('thin') or midplane density at r = 1 ('balanced'), and its slope in radius */
@@ -249,7 +260,7 @@ export interface DiskPart {
   vertical?: [number, number][];
   /** Or the same as a formula of the height `z` above the midplane: "exp(-z^2 / 2)", "1 / cosh(z)^2". It wins over a table. */
   verticalFn?: string;
-  verticalIn?: 'H' | 'length';
+  verticalIn?: (typeof DISK_HEIGHTS)[number];
   /** sound speed */
   cs: number;
   /** density of the gas outside the disk, as a fraction of sigma0 ('thin') or absolute ('balanced') */
@@ -267,6 +278,9 @@ export type Shape =
   | { type: 'box'; min: Vec3; max: Vec3 }
   /** the gas where (x - at) . normal < 0 */
   | { type: 'half'; normal: Vec3; at?: number };
+// SHAPE_TYPES names each shape, and nothing else.
+const _shapes: [Shape['type']] extends [(typeof SHAPE_TYPES)[number]] ? ([(typeof SHAPE_TYPES)[number]] extends [Shape['type']] ? true : never) : never = true;
+void _shapes;
 
 export interface RegionPart {
   kind: 'region';

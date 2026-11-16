@@ -5,6 +5,7 @@ import type { AnyBurnSpec } from '../burn/burn';
 import type { UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
 import type { SetupSpec } from '../setup/spec';
+import type { ViewMode } from '../render/view_options';
 
 export interface Prim {
   rho: number;
@@ -35,8 +36,17 @@ export type Bc3 = [number, number, number];
  * Gravity: none, a constant downward field of strength G (-y in 2D, -z in 3D, the axis drawn
  * upward), or self-gravity with periodic or isolated boundaries.
  */
-export type GravityMode = 'off' | 'constant' | 'periodic' | 'isolated';
-export const GRAVITY_MODES: readonly GravityMode[] = ['off', 'constant', 'periodic', 'isolated'];
+export const GRAVITY_MODES = ['off', 'constant', 'periodic', 'isolated'] as const;
+export type GravityMode = (typeof GRAVITY_MODES)[number];
+/**
+ * How the flux between two cells is worked out, and how steep the reconstruction in a cell may
+ * be. Each list here is the one place its names are written: the types, the Setup dialog's
+ * menus, the document codec and `describe()` all read it.
+ */
+export const RIEMANN_KINDS = ['hllc', 'hllclm', 'hll'] as const;
+export type RiemannKind = (typeof RIEMANN_KINDS)[number];
+export const LIMITER_KINDS = ['koren', 'mc', 'vanleer', 'minmod'] as const;
+export type LimiterKind = (typeof LIMITER_KINDS)[number];
 /** The mode solves for the gas's own potential (3D only). */
 export const isSelfGravity = (m: GravityMode): boolean => m === 'periodic' || m === 'isolated';
 
@@ -295,7 +305,7 @@ export interface Problem {
    */
   toolScale?: { rho: number; v: number };
   /** Default view; `axis` is the slice normal in 3D (0 x, 1 y, 2 z), `pitch` the camera elevation in radians. */
-  view?: { field?: number; log?: boolean; mode?: 'volume' | 'slice' | 'projection'; axis?: number; pitch?: number };
+  view?: { field?: number; log?: boolean; mode?: ViewMode; axis?: number; pitch?: number };
   /**
    * A magnetic field, which makes the run ideal MHD (mhd/mhd.ts). Units: the magnetic pressure
    * is B^2 / 2, so plasma beta is 2 p / B^2.
