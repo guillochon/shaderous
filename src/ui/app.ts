@@ -4578,6 +4578,7 @@ const api = installApi(
     runningSpec: () => runningSpec(cfg),
     applySpec,
     adopt,
+    gridMemory: (spec) => setupHost.memory(spec)!,
     overlayInfo() {
       const u = units();
       const m = viewMeasure();

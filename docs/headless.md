@@ -77,7 +77,8 @@ file:
 npm run headless -- run --setup my-triple.shaderous.json --dim 3 --n 256 --amr 2 --until 10 --every 1 --png --out runs/triple
 ```
 
-The MCP server's `load` tool takes the same thing as `document`, and its `describe` tool with
+The MCP server's `check_setup` tool reads a document without running it and returns what is
+wrong with it or worth a second look (`check` in [api.md](api.md)). The MCP server's `load` tool takes the same thing as `document`, and its `describe` tool with
 a `problem` returns that preset's document to start from.
 
 ### When to stop

@@ -69,6 +69,12 @@ const TOOLS = [
     },
   },
   {
+    name: 'check_setup',
+    description: 'Check a setup document before running it. Returns `ok`, an `error` if it cannot be read at all (with the key at fault), `notes` (keys dropped, values held to their range), and `issues`: each with a level (`error`: a rule broken, such as a star without isolated self-gravity, or a value that cannot work; `warning`: a choice to look at again, such as a softening under two cells, bodies that overlap or leave the box, a grid past the GPU memory), a sentence, and the path of the part or option it is about. Use it after writing or changing a document and before `load`.',
+    inputSchema: obj({ document: { type: 'object', description: 'The setup document (format "shaderous-setup")' } }, ['document']),
+    run: async ({ document }) => text(await call('check', document)),
+  },
+  {
     name: 'load',
     description: 'Build a new run from a setup and leave it paused at t = 0. A setup is a preset with overrides, or a whole setup document (`document`) that assembles a run from parts: point masses, stars, disks, gas regions, obstacles, a magnetic field. The setup uses the keys of a shareable link, as a query string ("problem=sedov&dim=2&n=512&gamma=1.4") or an object ({"problem": "sedov", "dim": 2, "n": 512}). Returns the run\'s state, including `query`, the setup in force.',
     inputSchema: obj({ setup: { type: ['string', 'object'], description: 'Query string, link, or object of setup keys; or a setup document itself' }, document: { type: 'object', description: 'A setup document (format "shaderous-setup", see docs/setups.md and describe().setup): the run is built from it, and `setup` then says the grid and what differs. Start from preset(id) to make one' } }),

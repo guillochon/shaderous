@@ -180,6 +180,19 @@ Everything there is to choose from:
 A preset's whole setup document: the content of `src/presets/<id>.json`, with a variant's
 parent resolved. Change it and hand it to `load`.
 
+### `check(document) → { ok, error?, notes, issues, document? }`
+
+Checks a setup document without running it. `error` is set, and `ok` is false, if the
+document cannot be read at all; the message names the key at fault. Otherwise `notes` lists
+what reading it changed (keys dropped, values held to their range), `document` is the whole
+document as read, and `issues` is what the Setup dialog would list under it, each as
+`{ level, text, path? }`. An `error` is a rule broken (a star without isolated self-gravity,
+two flows that both fill the box) or a value that cannot work, and makes `ok` false; a
+`warning` is a choice to look at again: a softening under two cells of the grid, bodies that
+overlap or start outside the box, a disk heavier than a tenth of what it orbits, a grid that
+needs more GPU memory than the page may take. `load` does not refuse a document over its
+issues, so call `check` first.
+
 ### `load(setup, document?) → state`
 
 Builds a new run from a setup (see [Setups](#setups)) and returns `state()` with the run

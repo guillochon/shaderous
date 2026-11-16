@@ -374,3 +374,26 @@ test('the preset list opens folded, but for the group of the preset that runs', 
   await page.click('#setup');
   expect((await groups()).filter((g) => g[1]).map((g) => g[0])).toEqual(['Instabilities']);
 });
+
+test('a script checks a setup document before running it', async ({ page }) => {
+  await open(page, 'problem=sedov&dim=2&n=128');
+  const check = (d: unknown) => page.evaluate((x) => (window as any).shaderous.check(x), d);
+  // The shipped example: nothing wrong with it.
+  const example = JSON.parse(await readText('examples/setups/ms-wd-collision.shaderous.json'));
+  const good = await check(example);
+  expect([good.ok, good.error, good.notes, good.issues.filter((i: any) => i.level === 'error')]).toEqual([true, undefined, [], []]);
+  expect(good.document.parts).toHaveLength(3);
+  // A star without the self-gravity that holds it, a softening no cell can see, an unknown key.
+  const bad = await check({ ...example, extra: 1, physics: { ...example.physics, gravity: 'off' }, parts: [example.parts[0], { ...example.parts[1], soft: 1e-4 }, example.parts[2]] });
+  expect(bad.ok).toBe(false);
+  expect(bad.notes.join(' ')).toMatch(/extra: dropped/);
+  const text = bad.issues.map((i: any) => `${i.level}: ${i.text}`).join(' | ');
+  expect(text).toMatch(/error: Star: needs isolated self-gravity/i);
+  expect(text).toMatch(/warning: .*softening.*under two cells/);
+  // One that cannot be read says where.
+  const broken = await check({ ...example, parts: [{ kind: 'mass', gm: 'heavy' }] });
+  expect([broken.ok, broken.issues]).toEqual([false, []]);
+  expect(broken.error).toMatch(/parts\.0\.gm/);
+  // Nothing ran: the page still holds its own run.
+  expect((await app(page).cfg()).id).toBe('sedov');
+});

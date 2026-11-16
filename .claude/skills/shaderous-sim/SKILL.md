@@ -120,6 +120,10 @@ their own units.
 
 ### Then check it, and say what you assumed
 
+0. Check the document before it runs: MCP `check_setup {document}`, or
+   `shaderous.check(document)`. Fix every `error` (a rule broken, with the reason) and read every
+   `warning` (a softening under two cells, bodies that overlap or leave the box, a grid past the
+   GPU memory): `load` does not refuse a document over them.
 1. Load it at a coarse grid first (`setup: "n=128&amr=2"`), run a few steps, and look at
    `diagnostics` (the mass should be the stars' total) and a slice through the orbital plane.
 2. Check that the stars hold still before the encounter: `state.preparing` is true while they

@@ -22,6 +22,7 @@ import { overlayGutters, paintOverlays, type OverlayInfo, type OverlayOptions } 
 import { download } from '../io/checkpoints';
 import { BUILD, errorLog } from './errors';
 import { PRESET_FILES, presetSpec } from '../presets/index';
+import { checkSetup } from '../setup/check';
 import { readSetup } from '../setup/codec';
 import { factsOf, factsWithout, flatten, OPTIONS, optionAt, PART_OPTIONS, partFields, unavailable, valueAt, type Option } from '../setup/options';
 import { FLOWS } from '../setup/parts/flow';
@@ -95,6 +96,8 @@ export interface AppHooks {
   applySpec(spec: SetupSpec): Promise<void>;
   /** Make a document runnable: the id it runs under (its preset's if it is that preset, else the custom setup's). */
   adopt(spec: SetupSpec): string;
+  /** GPU memory the grid of a document needs, and what the page may take, in bytes. */
+  gridMemory(spec: SetupSpec): { need: number; budget: number };
   /** Checkpoints are on: the clock is held at each (cfg.tStop) until it is written. */
   checkpointsOn(): boolean;
   /** Write the checkpoint the clock is held at, and arm the next (as the page does when it plays). */
@@ -895,6 +898,20 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
           flows: Object.values(FLOWS).map((f) => ({ name: f.name, label: f.label, title: f.tip, wholeBox: f.wholeBox, fields: f.fields })),
         },
       };
+    },
+
+    /**
+     * Check a setup document without running it: whether it can be read, what reading it left
+     * out, and what the Setup dialog would list under it. An `error` is a rule broken or a
+     * value that cannot work (`load` may still build it, and the run then misbehaves); a
+     * `warning` is a choice to look at again (a softening under two cells, a disk heavy
+     * against what it orbits).
+     */
+    check(document: unknown) {
+      const { spec, report } = readSetup(document, (id) => PRESET_FILES[id]);
+      if (!spec) return { ok: false, error: report.error ?? 'not a setup document', notes: report.notes, issues: [] };
+      const issues = checkSetup(spec, { memory: app.gridMemory(spec) });
+      return { ok: !issues.some((i) => i.level === 'error'), notes: report.notes, issues, document: spec };
     },
 
     /** A preset's whole setup document: a starting point for one of your own. */
