@@ -16,7 +16,7 @@ import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type Gra
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
-import { placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
+import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
 import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
@@ -1266,7 +1266,7 @@ export class Sim implements Simulation {
     const eos = makeEos(c.eos, c.eosParams);
     const set = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
     if (!set) return;
-    this.settleCells(set, u1, u2, eos, emag ? (_s, q) => emag[q] : undefined, epoch);
+    this.settleCells(set, u1, u2, eos, emag ? (_s, q) => emag[q] : undefined, epoch, true);
   }
 
   /**
@@ -1311,7 +1311,7 @@ export class Sim implements Simulation {
   }
 
   /** The rounds of a settling on the state (u1, u2), which is the grid's. `emag`: magnetic energy to add to a cell's E afterward. */
-  private settleCells(set: Settling, u1: Float32Array, u2: Float32Array, eos: Eos, emag: ((s: Settler, q: number) => number) | undefined, epoch: number) {
+  private settleCells(set: Settling, u1: Float32Array, u2: Float32Array, eos: Eos, emag: ((s: Settler, q: number) => number) | undefined, epoch: number, fresh = false) {
     this.settling = true;
     const cells = this.cellsOf(u1, u2);
     const t0 = performance.now();
@@ -1334,6 +1334,7 @@ export class Sim implements Simulation {
         settler.finish(eos.eintFromP);
         // The settled E is the gas's own: a magnetic field's energy goes back in.
         if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
+        if (fresh && this.cfg.problem.heat) heatCells(this.cfg.problem.heat(this.cfg.params, eos), cells);
         writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
         writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
         this.refreshPotential();

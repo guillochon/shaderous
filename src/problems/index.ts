@@ -19,6 +19,7 @@ import { isothermalCollapse } from './isothermal';
 import { empty, emptyMagnetic } from './empty';
 import { wdCollision, wdCollisionBurning } from './stellar_collision';
 import { coDetonation } from './co_detonation';
+import { subChandra } from './sub_chandra';
 import { whiteDwarfStar } from './white_dwarf_star';
 import { alfvenWave, brioWu, fieldLoop, fieldLoopDense, mhdBlast, mhdRotor, orszagTang } from './mhd';
 
@@ -96,6 +97,7 @@ export const MENU: { group: string; families: ProblemFamily[] }[] = [
         ],
       },
       single(whiteDwarfStar),
+      single(subChandra),
       single(evrard),
       single(sphere),
       single(isothermalCollapse),

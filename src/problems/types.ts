@@ -279,6 +279,13 @@ export interface Problem {
   star?: StarSpec;
   /** Stars of any cold equation of state, at rest or moving, to settle likewise (in place of `star`). */
   settle?: (params: Record<string, number>, eos: Eos) => Settling;
+  /**
+   * Heat put in once the stars are settled, which rewrites them as cold gas (a hot spot that
+   * ignites a star): the internal energy density a cell at (x, y, z) of density rho should
+   * have, or undefined to leave the cell as it is. Fresh starts only, not restarts; `init`
+   * should put the same heat in, for runs that are not settled.
+   */
+  heat?: (params: Record<string, number>, eos: Eos) => (x: number, y: number, z: number, rho: number) => number | undefined;
   /** The run waits, paused, for the user to start it. */
   startPaused?: boolean;
   /**

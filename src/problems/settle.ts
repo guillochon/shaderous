@@ -413,3 +413,23 @@ export class Settler {
 /** How many rounds to settle for at most, and the change of density (relative to the largest) that ends them. */
 export const SETTLE_ROUNDS = 30;
 export const SETTLE_TOL = 1e-5;
+
+/**
+ * Put a problem's heat (Problem.heat) into settled cells: each cell it names gets that internal
+ * energy density, and its total energy changes by as much. `touched`, if given, marks the cells
+ * it changed. Returns how many it changed.
+ */
+export function heatCells(heat: (x: number, y: number, z: number, rho: number) => number | undefined, cells: SettleCells, touched?: Uint8Array): number {
+  const { u1, u2 } = cells;
+  let any = 0;
+  for (let q = 0; q < cells.count; q++) {
+    const [x, y, z] = cells.pos(q);
+    const e = heat(x, y, z, u1[4 * q]);
+    if (e === undefined || !(e >= 0)) continue;
+    u2[4 * q] += e - u2[4 * q + 1];
+    u2[4 * q + 1] = e;
+    if (touched) touched[q] = 1;
+    any++;
+  }
+  return any;
+}

@@ -29,7 +29,7 @@ import { MassSums } from '../gravity/mass_sums';
 import { makeEos, type Eos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
-import { placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
+import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
 
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
@@ -1408,13 +1408,14 @@ export class AmrSim implements Simulation {
     this.settled = (async () => {
       try {
         setLoadStage(settleStage(0));
-        if (onGpu) {
-          await this.settleOnGpu(set, () => epoch !== this.settleEpoch || tree !== this.tree);
-          return;
+        const stale = () => epoch !== this.settleEpoch || tree !== this.tree;
+        if (onGpu) await this.settleOnGpu(set, stale);
+        else {
+          const leaf = await this.readLeaves();
+          if (epoch !== this.settleEpoch) return;
+          await this.settleOnCpu(set, eos, leaf, stale);
         }
-        const leaf = await this.readLeaves();
-        if (epoch !== this.settleEpoch) return;
-        await this.settleOnCpu(set, eos, leaf, () => epoch !== this.settleEpoch || tree !== this.tree);
+        if (!stale() && c.problem.heat) await this.heatSettled(c.problem.heat(c.params, eos), stale);
       } finally {
         if (epoch === this.settleEpoch) {
           this.settling = false;
@@ -1423,6 +1424,26 @@ export class AmrSim implements Simulation {
         }
       }
     })();
+  }
+
+  /** Put the problem's heat (Problem.heat) into the settled mesh: every leaf is read, and those it changes written back. */
+  private async heatSettled(heat: (x: number, y: number, z: number, rho: number) => number | undefined, stale: () => boolean) {
+    const leaf = await this.readLeaves();
+    if (stale()) return;
+    const per = BS * BS * (this.cfg.ndim === 3 ? BS : 1);
+    const cells = AmrSim.cellsOf(leaf);
+    const leaves = this.tree.leaves();
+    const touched = new Uint8Array(cells.count);
+    if (!heatCells(heat, cells, touched)) return;
+    const changed = leaves.filter((_, i) => touched.subarray(i * per, (i + 1) * per).some((t) => t > 0));
+    const d = this.device;
+    const depth = this.cfg.ndim === 3 ? BS : 1;
+    const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
+    const index = new Map(leaves.map((b, i) => [b, i]));
+    for (const b of changed) {
+      const i = index.get(b)!;
+      d.queue.writeTexture({ texture: this.state[this.cur][1], origin: this.origin(b.slot) }, leaf.u2.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+    }
   }
 
   /** The leaves' cells as readLeaves() returned them, for settling. */
