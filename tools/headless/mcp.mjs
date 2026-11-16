@@ -24,6 +24,18 @@ const log = (m) => process.stderr.write(`[shaderous-mcp] ${m}\n`);
 const SCHEMA = JSON.parse(readFileSync(new URL('./schema.json', import.meta.url), 'utf8'));
 const linkKeysOf = (group) => SCHEMA.link.filter((k) => k.group === group).map((k) => k.key).join(', ');
 const SETUP_KEYS = `${linkKeysOf('run')}, ${linkKeysOf('settings')}, and view keys ${linkKeysOf('view')}. dim is 2 or 3, amr 0 to 5, bc six digits. Unknown keys are ignored, values out of range clamped.`;
+// The page's API by method (src/ui/api_schema.ts): what each does, and its arguments as JSON
+// Schema. A tool that passes an argument on takes its schema from there with arg(); what a tool
+// adds of its own (a file to save to, seconds instead of milliseconds) is written here.
+const API = new Map(SCHEMA.api.map((m) => [m.name, m]));
+const about = (method) => API.get(method).summary;
+function arg(method, name) {
+  const m = API.get(method);
+  const found = m.args.find((a) => a.name === name) ?? m.args.find((a) => a.name === 'options')?.properties?.[name];
+  if (!found) throw new Error(`the API's ${method} has no argument "${name}"`);
+  const { name: _name, optional: _optional, ...schema } = found;
+  return schema;
+}
 const VIEW_KEYS = SCHEMA.view.map((v) => (v.key === 'mode' ? 'mode (volume|slice|projection)' : v.key === 'field' ? 'field (index, see describe)' : v.key)).join(', ');
 
 const INSTRUCTIONS = `Shaderous is a GPU gas dynamics code (compressible Euler equations with gravity, cooling, adaptive mesh refinement). These tools drive one simulation in a headless browser.
@@ -50,7 +62,7 @@ const resolvePath = (p) => path.resolve(process.cwd(), p);
 const TOOLS = [
   {
     name: 'describe',
-    description: 'List the problems (presets) with their ids, dimensions, end times and parameters, and the fields, variables and choices a setup can make. Give `problem` for one problem in full, with its description.',
+    description: `${about('describe')} Give \`problem\` for one problem in full, with its description.`,
     inputSchema: obj({ problem: { type: 'string', description: 'A problem id for its full entry' } }),
     async run({ problem }) {
       const d = await call('describe');
@@ -77,35 +89,35 @@ const TOOLS = [
   },
   {
     name: 'check_setup',
-    description: 'Check a setup document before running it. Returns `ok`, an `error` if it cannot be read at all (with the key at fault), `notes` (keys dropped, values held to their range), and `issues`: each with a level (`error`: a rule broken, such as a star without isolated self-gravity, or a value that cannot work; `warning`: a choice to look at again, such as a softening under two cells, bodies that overlap or leave the box, a grid past the GPU memory), a sentence, and the path of the part or option it is about. Use it after writing or changing a document and before `load`.',
-    inputSchema: obj({ document: { type: 'object', description: 'The setup document (format "shaderous-setup")' } }, ['document']),
+    description: about('check'),
+    inputSchema: obj({ document: arg('check', 'document') }, ['document']),
     run: async ({ document }) => text(await call('check', document)),
   },
   {
     name: 'load',
-    description: 'Build a new run from a setup and leave it paused at t = 0. A setup is a preset with overrides, or a whole setup document (`document`) that assembles a run from parts: point masses, stars, disks, gas regions, obstacles, a magnetic field. The setup uses the keys of a shareable link, as a query string ("problem=sedov&dim=2&n=512&gamma=1.4") or an object ({"problem": "sedov", "dim": 2, "n": 512}). Returns the run\'s state, including `query`, the setup in force.',
-    inputSchema: obj({ setup: { type: ['string', 'object'], description: 'Query string, link, or object of setup keys; or a setup document itself' }, document: { type: 'object', description: 'A setup document (format "shaderous-setup", see docs/setups.md and describe().setup): the run is built from it, and `setup` then says the grid and what differs. Start from preset(id) to make one' } }),
+    description: about('load'),
+    inputSchema: obj({ setup: arg('load', 'setup'), document: arg('load', 'document') }),
     run: async ({ setup, document }) => text(await call('load', setup ?? '', ...(document ? [document] : []))),
   },
   {
     name: 'run',
-    description: 'Advance the run: to time `until` (the last step is shortened to land on it exactly), by `steps` steps, or whichever comes first. Stops at the problem\'s end time (stopped: "end"); to go further, load with a later `tend`. Returns t, dt, steps, steps taken, wall seconds and why it stopped.',
+    description: about('run'),
     inputSchema: obj({
-      until: { type: 'number', description: 'Run until the clock reads this time' },
-      steps: { type: 'integer', minimum: 0, description: 'Take at most this many steps' },
+      until: arg('run', 'until'),
+      steps: arg('run', 'steps'),
       timeout_seconds: { type: 'number', description: 'Give up after this much wall time (default 600)' },
     }),
     run: async ({ until, steps, timeout_seconds }) => text(await call('run', { until, steps, timeoutMs: 1000 * (timeout_seconds ?? 600) })),
   },
   {
     name: 'state',
-    description: 'The run: problem, dimensions, grid, amr levels, time, timestep, steps, end time, whether it has finished, the GPU adapter, and `query`, the setup that reproduces it.',
+    description: about('state'),
     inputSchema: obj({}),
     run: async () => text(await call('state')),
   },
   {
     name: 'diagnostics',
-    description: 'Totals and extremes read back now: mass, momentum, kinetic/internal/gravitational/total energy, max Mach number, floored cells, Jeans-unresolved cells, center of mass, point masses, and the [min, max] of every field.',
+    description: about('diagnostics'),
     inputSchema: obj({}),
     async run() {
       const d = await call('diagnostics');
@@ -115,7 +127,7 @@ const TOOLS = [
   },
   {
     name: 'stats',
-    description: 'Least, greatest and volume-weighted mean of each variable over the box (rho, press, vel1-3, r0 and species mass fractions).',
+    description: about('stats'),
     inputSchema: obj({}),
     run: async () => text(await call('stats')),
   },
@@ -123,10 +135,10 @@ const TOOLS = [
     name: 'slice',
     description: 'A variable on a res x res grid on a plane through the box (perpendicular to `axis` at fraction `pos`). Returns min, max and mean, and the values (row j, column i: values[j][i]) when res is at most 64 or include_values is set; with save_path the full slice is written there as JSON instead. Variables: rho, press, vel1, vel2, vel3, r0, level, or a species name.',
     inputSchema: obj({
-      variable: { type: 'string', description: `One of ${SCHEMA.variables.join(', ')}, or the name of a species. Default rho` },
-      axis: { type: 'integer', minimum: 0, maximum: 2, description: 'Default 2 (z); always 2 in 2D' },
-      pos: { type: 'number', minimum: 0, maximum: 1, description: 'Default 0.5' },
-      res: { type: 'integer', minimum: 2, maximum: 2048, description: 'Default 32' },
+      variable: arg('slice', 'variable'),
+      axis: arg('slice', 'axis'),
+      pos: arg('slice', 'pos'),
+      res: arg('slice', 'res'),
       include_values: { type: 'boolean' },
       save_path: { type: 'string', description: 'Write the slice as JSON to this file' },
     }),
@@ -148,16 +160,16 @@ const TOOLS = [
   },
   {
     name: 'probe',
-    description: 'The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, refinement level and species mass fractions.',
-    inputSchema: obj({ points: { type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }, minItems: 1 } }, ['points']),
+    description: about('probe'),
+    inputSchema: obj({ points: arg('probe', 'points') }, ['points']),
     run: async ({ points }) => text(await call('probe', points)),
   },
   {
     name: 'screenshot',
-    description: `A picture of the run as a PNG image. \`view\` changes what is drawn first: ${VIEW_KEYS}. Settings persist for later screenshots.`,
+    description: `${about('screenshot')} \`view\` changes what is drawn first: ${VIEW_KEYS}. Settings persist for later screenshots.`,
     inputSchema: obj({
-      width: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 768' },
-      height: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default: width' },
+      width: arg('screenshot', 'width'),
+      height: arg('screenshot', 'height'),
       view: { type: 'object', description: 'View settings to apply first' },
       save_path: { type: 'string', description: 'Also write the PNG to this file' },
     }),
@@ -177,20 +189,20 @@ const TOOLS = [
   },
   {
     name: 'view',
-    description: 'Change what screenshots show without touching the run (same keys as screenshot\'s `view`). Returns the view settings.',
-    inputSchema: obj({ changes: { type: 'object' } }, ['changes']),
+    description: about('view'),
+    inputSchema: obj({ changes: arg('view', 'changes') }, ['changes']),
     run: async ({ changes }) => text(await call('view', changes)),
   },
   {
     name: 'controls',
-    description: 'The control panel as it stands: every control\'s id, kind, label, tooltip, value and options. Use with `control` to change settings mid-run.',
+    description: about('controls'),
     inputSchema: obj({}),
     run: async () => text(await call('controls')),
   },
   {
     name: 'control',
-    description: 'Set a panel control (or press a button, with no value) exactly as a person would, mid-run, and wait for what it starts (a shader rebuild, a restart). Examples: control("riemann", "hll"), control("eos", "gas_radiation"), control("reset"). Number fields take values in the units the panel shows; set control("units", "code") first for code units. The run stays paused.',
-    inputSchema: obj({ id: { type: 'string' }, value: { type: ['string', 'number', 'boolean'] } }, ['id']),
+    description: about('control'),
+    inputSchema: obj({ id: arg('control', 'id'), value: arg('control', 'value') }, ['id']),
     async run({ id, value }) {
       await call('control', id, value);
       return text(await call('state'));
@@ -198,7 +210,7 @@ const TOOLS = [
   },
   {
     name: 'restart',
-    description: 'Start the run again from its initial conditions, paused.',
+    description: about('restart'),
     inputSchema: obj({}),
     run: async () => text(await call('restart')),
   },
@@ -217,16 +229,16 @@ const TOOLS = [
   },
   {
     name: 'record',
-    description: 'Record the run from where it is as an MP4 movie (H.264), stepping it as it goes: the current view with a color bar, x/y/z axes and the status line (grid, simulation time) over it. A frame every `every` steps, or near every `dt` of code time (at the nearest step boundary: no step is shortened, so the run is the one it would have been unrecorded). Stops at `until`, after `frames` frames, or at the end time. Set the view first (view tool). Returns the frame count, movie length and where the file went.',
+    description: `${about('record')} Returns the frame count, movie length and where the file went.`,
     inputSchema: obj({
       path: { type: 'string', description: 'File or folder to write to (default: the current folder, under the name of the movie)' },
-      dt: { type: 'number', exclusiveMinimum: 0, description: 'A frame near every multiple of this much code time (default: a 600th of the dynamical time of the problem, so one dynamical time plays in 10 s at 60 fps)' },
-      every: { type: 'integer', minimum: 1, description: 'Or a frame every this many steps' },
-      until: { type: 'number', description: 'Stop when the clock reaches this time (landed on exactly)' },
-      frames: { type: 'integer', minimum: 1, description: 'Stop after this many frames' },
-      fps: { type: 'number', minimum: 1, maximum: 240, description: 'Playback rate (default 60)' },
-      width: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1920' },
-      height: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 1080 (9/16 of width when width is given)' },
+      dt: arg('record', 'dt'),
+      every: arg('record', 'every'),
+      until: arg('record', 'until'),
+      frames: arg('record', 'frames'),
+      fps: arg('record', 'fps'),
+      width: arg('record', 'width'),
+      height: arg('record', 'height'),
       bitrate_mbps: { type: 'number', exclusiveMinimum: 0, description: 'Megabits per second of movie (default 0.2 bits per pixel per frame: 25 at 1080p and 60 fps)' },
       colorbar: { type: 'boolean', description: 'Default true' },
       axes: { type: 'boolean', description: 'Default true' },
@@ -254,13 +266,13 @@ const TOOLS = [
   },
   {
     name: 'load_athdf',
-    description: 'Start a run from an .athdf file: one Shaderous wrote continues exactly; another code\'s is loaded into the current problem. Paused at the file\'s time.',
+    description: about('loadAthdf'),
     inputSchema: obj({ path: { type: 'string' } }, ['path']),
     run: async ({ path: p }) => text(await call('loadAthdf', readFileSync(resolvePath(p)).toString('base64'))),
   },
   {
     name: 'debris',
-    description: 'Debris energies, for problems that track them (describe: problems[].debris, e.g. tidal-disruption): the gas binned by its specific orbital energy about the point mass, both what has left the box (tallied as it left) and what is in it, a surviving self-bound core set apart, and the return rate of the bound debris to pericenter, dM/dt (Kepler). Returns totals, the core, the first return and the peak of dM/dt (in days and solar masses per year where the problem has units). save_path writes the full report (bins, dmdt.t and dmdt.rate) as JSON.',
+    description: `${about('debris')} Returns totals, the core, the first return and the peak of dM/dt (in days and solar masses per year where the problem has units). save_path writes the full report (bins, dmdt.t and dmdt.rate) as JSON.`,
     inputSchema: obj({ save_path: { type: 'string', description: 'Write the full report as JSON to this file' } }),
     async run({ save_path }) {
       const r = await call('debris');
@@ -276,7 +288,7 @@ const TOOLS = [
   },
   {
     name: 'errors',
-    description: 'Everything the simulator has reported going wrong (exceptions, WebGPU and shader errors), oldest first.',
+    description: about('errors'),
     inputSchema: obj({}),
     run: async () => text(await call('errors')),
   },

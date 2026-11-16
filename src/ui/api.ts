@@ -16,6 +16,7 @@ import { EOS_LABELS } from '../eos/eos';
 import { COOLING_LABELS } from '../cooling/cooling';
 import { FAMILIES, FIELDS, GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems';
 import { VIEW_EXTRAS, VIEW_MODES, VIEW_OPTIONS } from '../render/view_options';
+import { API_METHODS } from './api_schema';
 import { defaultFrameDt, problemUnits } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
@@ -890,6 +891,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         limiter: [...LIMITER_KINDS],
         gravity: [...GRAVITY_MODES],
         colormaps: Object.keys(COLORMAPS),
+        // This API's own methods: what each does, and its arguments as JSON Schema.
+        methods: API_METHODS,
         // What a setup document may hold (docs/setups.md): the general options, the kinds of
         // part with their fields, and the built-in flows with their parameters.
         setup: {

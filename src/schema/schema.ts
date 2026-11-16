@@ -6,6 +6,7 @@ import { EOS_LABELS } from '../eos/eos';
 import { VARIABLES } from '../io/snapshot';
 import { GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
 import { VIEW_EXTRAS, VIEW_OPTIONS, type ViewOption } from '../render/view_options';
+import { API_METHODS } from '../ui/api_schema';
 import { linkKeys } from '../ui/link';
 
 export function buildSchema() {
@@ -28,6 +29,8 @@ export function buildSchema() {
       ...VIEW_OPTIONS.map((o: ViewOption) => ({ key: o.key, link: o.link, type: o.type, ...(o.min !== undefined ? { min: o.min } : {}), ...(o.max !== undefined ? { max: o.max } : {}), about: o.doc })),
       ...VIEW_EXTRAS.map((o) => ({ key: o.key, link: o.link, type: 'extra', about: o.doc })),
     ],
+    /** the methods of `window.shaderous`: what each does, and its arguments as JSON Schema */
+    api: API_METHODS,
   };
 }
 

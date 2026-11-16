@@ -397,3 +397,15 @@ test('a script checks a setup document before running it', async ({ page }) => {
   // Nothing ran: the page still holds its own run.
   expect((await app(page).cfg()).id).toBe('sedov');
 });
+
+test('the table of the API names its methods, and the headless tools read the same table', async ({ page }) => {
+  await open(page, 'problem=sedov&dim=2&n=128');
+  const { keys, methods } = await page.evaluate(async () => {
+    const api = (window as any).shaderous;
+    return { keys: Object.keys(api).filter((k) => typeof api[k] === 'function'), methods: (await api.describe()).methods };
+  });
+  expect([...keys].sort()).toEqual(methods.map((m: any) => m.name).sort());
+  // The committed schema the MCP server reads is this page's (else: npm run gen).
+  const schema = JSON.parse(await readText('tools/headless/schema.json'));
+  expect(schema.api).toEqual(methods);
+});

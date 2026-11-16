@@ -39,6 +39,24 @@ const check = (ok, what) => {
   const list = await rpc('tools/list', {});
   check(list.result.tools.some((t) => t.name === 'run') && list.result.tools.every((t) => t.inputSchema?.type === 'object'), `tools/list (${list.result.tools.length} tools)`);
 
+  // What a tool passes on to the page's API it describes as the API does (schema.json).
+  {
+    const api = new Map(JSON.parse(readFileSync(path.join(REPO, 'tools/headless/schema.json'), 'utf8')).api.map((m) => [m.name, m]));
+    const methodOf = { check_setup: 'check', load_athdf: 'loadAthdf', save_athdf: 'athdf' };
+    const differing = [];
+    for (const t of list.result.tools) {
+      const m = api.get(methodOf[t.name] ?? t.name);
+      if (!m) differing.push(`${t.name}: no such method`);
+      for (const [key, schema] of Object.entries(t.inputSchema.properties ?? {})) {
+        const found = m?.args.find((a) => a.name === key) ?? m?.args.find((a) => a.name === 'options')?.properties?.[key];
+        if (!found) continue; // the tool's own (a file to save to)
+        const { name: _n, optional: _o, ...want } = found;
+        if (JSON.stringify(want) !== JSON.stringify(schema)) differing.push(`${t.name}.${key}`);
+      }
+    }
+    check(differing.length === 0, `tools describe their arguments as the API does${differing.length ? `: ${differing.join(', ')}` : ''}`);
+  }
+
   const st = json(await tool('load', { setup: 'problem=sedov&dim=2&n=256' }));
   check(st.problem === 'sedov' && st.t === 0, 'load');
   const r = json(await tool('run', { until: 0.03 }));
