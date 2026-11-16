@@ -1,0 +1,14 @@
+{
+  "name": "shaderous",
+  "displayName": "Shaderous",
+  "version": "0.1.0",
+  "description": "Run and look at gas dynamics simulations (compressible hydro and MHD with gravity, cooling and adaptive mesh refinement) on your GPU through WebGPU: MCP tools to load a setup, run it, read numbers back and take screenshots, and a skill that turns a description in words into a setup.",
+  "author": {
+    "name": "James Guillochon",
+    "url": "https://github.com/guillochon"
+  },
+  "homepage": "https://guillochon.github.io/shaderous/",
+  "repository": "https://github.com/guillochon/shaderous",
+  "license": "MIT",
+  "keywords": ["simulation", "hydrodynamics", "mhd", "astrophysics", "webgpu", "amr"]
+}

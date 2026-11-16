@@ -36,11 +36,18 @@ file ([docs/setups.md](docs/setups.md)). Some examples:
 **From an AI agent, or the command line.** The npm package runs the simulator in headless
 Chrome on your GPU (it needs Node 20+ and Chrome). `npx -y shaderous mcp` is an
 [MCP server](docs/headless.md#mcp-server) that gives an agent tools to load a setup, run it, read
-numbers back and look at it. For Claude Code:
+numbers back and look at it. For Claude Code, install the plugin, which adds the server and a
+skill that teaches Claude to build setups from a description in words:
 
 ```bash
-claude mcp add shaderous -- npx -y shaderous mcp
+claude plugin marketplace add guillochon/shaderous
 ```
+
+```bash
+claude plugin install shaderous@shaderous
+```
+
+Or add only the server: `claude mcp add shaderous -- npx -y shaderous mcp`.
 
 Other clients (Claude Desktop, Cursor, VS Code, Codex, Gemini CLI) take the same command:
 

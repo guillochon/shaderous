@@ -1,0 +1,15 @@
+{
+  "name": "shaderous",
+  "description": "Shaderous, GPU gas dynamics in the browser, for Claude Code",
+  "owner": {
+    "name": "James Guillochon",
+    "url": "https://github.com/guillochon"
+  },
+  "plugins": [
+    {
+      "name": "shaderous",
+      "source": "./plugins/shaderous",
+      "description": "Run and look at gas dynamics simulations (hydro, MHD, gravity, AMR) on your GPU: MCP tools to load, step, measure and screenshot a run, and a skill for building setups from a description"
+    }
+  ]
+}

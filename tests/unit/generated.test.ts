@@ -19,6 +19,7 @@ const FILES: Record<string, (now: string) => string> = {
   'docs/setups.md': fillGenerated,
   'docs/headless.md': fillGenerated,
   '.claude/skills/shaderous-sim/SKILL.md': fillGenerated,
+  'plugins/shaderous/skills/simulate/SKILL.md': fillGenerated,
   'public/shaderous-setup.schema.json': () => `${JSON.stringify(setupJsonSchema(), null, 1)}\n`,
 };
 

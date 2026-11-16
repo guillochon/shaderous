@@ -248,6 +248,11 @@ tool call and keeps it until the client disconnects.
 
 ### Connecting
 
+For Claude Code, the plugin in [plugins/shaderous](../plugins/shaderous) adds the server
+(through npx) and a skill for running it and building setups:
+`claude plugin marketplace add guillochon/shaderous`, then
+`claude plugin install shaderous@shaderous`.
+
 From the npm package, with no checkout, the command is `npx -y shaderous mcp`:
 
 ```bash

@@ -273,4 +273,4 @@ Playwright.
 - `npm run test:headless` drives the MCP server and the runner end to end.
 - `npx playwright test tests/gpu/api.spec.ts` tests the page API.
 - After changing `src/ui/api.ts`, update docs/api.md. After changing the runner or the MCP
-  server, update docs/headless.md and this skill.
+  server, update docs/headless.md, this skill and the plugin's skill (plugins/shaderous/skills/simulate/SKILL.md), which says the same for people outside a checkout.
