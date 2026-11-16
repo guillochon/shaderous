@@ -4,7 +4,7 @@ import { assemble } from '../gpu/shaders';
 import { netFeatures, netSlot, netStep, netWeights } from '../burn/network';
 import NET_CASES from '../burn/aprox13_net_cases.json';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
-import { configFor, PARAM_BYTES, Sim, type Diagnostics, type RiemannKind, type SimConfig } from '../sim';
+import { configFor, MAX_MASSES, PARAM_BYTES, Sim, type Diagnostics, type RiemannKind, type SimConfig } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { WD_UNITS } from '../problems/white_dwarf';
@@ -1804,6 +1804,64 @@ export const TESTS: TestDef[] = [
       };
       await withSim(gpu, slow, 64, { ndim: 2 }, (sim) => growth('slow_flat', sim));
       await withAmr(gpu, slow, 64, { ndim: 2, amrLevels: 1 }, (sim) => growth('slow_flat_adaptive', sim));
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'point-mass-many',
+    name: 'Point masses: more than one group of four (six on a ring)',
+    criterion:
+      'Six equal masses with overlapping sinks on a ring in still gas, in a reflecting box (their sums over the gas take two reductions): gas and accreted mass together are conserved to 1e-5, every mass accretes, and masses opposite each other across the center, summed by different reductions, take in the same to 1% and stay opposite to 1e-3 of the box. In 2D and 3D, on uniform and adaptive grids and with per-block timesteps',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      const ring = Array.from({ length: 6 }, (_, i) => {
+        const a = (Math.PI * i) / 3;
+        return { gm: 0.02, pos: [0.25 * Math.cos(a), 0.25 * Math.sin(a), 0], vel: [0, 0, 0], soft: 0.08, sinkRadius: 0.15 };
+      });
+      const box = stillGas({ bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.3, masses: () => ring });
+      const check = async (tag: string, sim: Sim | AmrSim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const taken = d.masses.map((m) => m.accreted);
+        const all6 = taken.reduce((t, v) => t + v, 0);
+        metrics[`${tag}_accreted_fraction`] = all6 / d0.mass;
+        metrics[`${tag}_least_accreted`] = Math.min(...taken) / d0.mass;
+        metrics[`${tag}_mass_error`] = Math.abs(d.mass + all6 - d0.mass) / d0.mass;
+        // Mass i and mass i + 3 face each other: 0 and 3 share a reduction, the other pairs do not.
+        let uneven = 0;
+        let apart = 0;
+        for (let i = 0; i < 3; i++) {
+          const [a, b] = [d.masses[i], d.masses[i + 3]];
+          uneven = Math.max(uneven, Math.abs(a.accreted - b.accreted) / a.accreted);
+          apart = Math.max(apart, Math.hypot(...a.pos.map((x, c) => x + b.pos[c])));
+        }
+        metrics[`${tag}_pair_accretion_difference`] = uneven;
+        metrics[`${tag}_pair_offset`] = apart;
+        pass &&= d.masses.length === 6 && Math.min(...taken) > 1e-4 * d0.mass && metrics[`${tag}_mass_error`] < 1e-5 && uneven < 0.01 && apart < 1e-3;
+      };
+      await withSim(gpu, box, 64, { ndim: 2 }, (sim) => check('flat', sim));
+      await withSim(gpu, box, 32, {}, (sim) => check('uniform', sim));
+      await withAmr(gpu, box, 64, { ndim: 2, amrLevels: 1 }, (sim) => check('flat_adaptive', sim));
+      await withAmr(gpu, box, 64, { amrLevels: 1 }, (sim) => check('adaptive', sim));
+      await withAmr(gpu, box, 64, { ndim: 2, amrLevels: 1, timeBins: 2, timeBinsAlways: true }, (sim) => check('flat_bins', sim));
+      // Placed in mid-run, as the sink tool does, until the run is full.
+      await withSim(gpu, stillGas({ bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.05 }), 64, { ndim: 2 }, async (sim) => {
+        let added = 0;
+        for (let i = 0; i < MAX_MASSES + 1; i++) {
+          const a = (2 * Math.PI * i) / MAX_MASSES;
+          if (sim.addMass({ gm: 1e-3, pos: [0.3 * Math.cos(a), 0.3 * Math.sin(a), 0], vel: [0, 0, 0], soft: 0.05, sinkRadius: 0.05 })) added++;
+        }
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const all = d.masses.reduce((t, m) => t + m.accreted, 0);
+        metrics.full_masses = d.masses.length;
+        metrics.full_least_accreted = Math.min(...d.masses.map((m) => m.accreted)) / d0.mass;
+        metrics.full_mass_error = Math.abs(d.mass + all - d0.mass) / d0.mass;
+        pass &&= added === MAX_MASSES && d.masses.length === MAX_MASSES && metrics.full_least_accreted > 0 && metrics.full_mass_error < 1e-5;
+      });
       return { pass, metrics };
     },
   },

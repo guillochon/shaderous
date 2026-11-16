@@ -417,7 +417,7 @@ TOOLS.push({
   title: 'Query: hover over the gas to see the cell under the pointer: its state and, on an adaptive mesh, its block. Dragging moves the view',
   icon: icon('<circle cx="6.8" cy="6.8" r="4.3" /><path d="M10 10l4.5 4.5" /><path d="M6.8 4.9v.01M6.8 6.6v2.6" />'),
 });
-/** Point masses the sink tool has placed in this run (the simulation holds four in all). */
+/** Point masses the sink tool has placed in this run (the simulation holds MAX_MASSES in all). */
 let placedMasses = 0;
 /** The point masses as last read back, for their markers: refreshed every frame. */
 let liveMasses: { of: Simulation; list: Diagnostics['masses'] } | null = null;
@@ -537,7 +537,7 @@ function syncTools() {
   $('tp-amount-row').title = tool === 'source'
     ? 'Flux: how fast the source feeds gas in. At 100% it adds the density of the densest gas in the time the fastest signal takes to cross it'
     : tool === 'sink'
-      ? 'Flux: how fast the sink takes gas away. Without a mass, 100% empties it in the time the fastest signal takes to cross it; with one, 25% is the orbital rate at its edge'
+      ? 'Flux: how fast the sink takes gas away. Without a mass, 100% empties it in the time the fastest signal takes to cross it; with one, 25% is the orbital rate at its edge. At the far left it is exactly 0: a point mass that takes no gas, and only orbits'
       : 'Gas added per click, as a share of the densest gas';
   $('tp-amount-row').querySelector('span')!.firstChild!.textContent = flux ? 'Flux' : 'Amt';
   const mine = tool === 'sink' ? sources.filter((q) => q.decay > 0).length + placedMasses : sources.filter((q) => q.decay === 0).length;
@@ -562,6 +562,8 @@ function syncTools() {
     const el = $<HTMLInputElement>(`tp-${k}`);
     const log = k === 'mass' && mr;
     if (k === 'mass') [el.min, el.max, el.step] = log ? ['0', '1', '0.001'] : ['0', '2', '0.01'];
+    // A sink's flux goes all the way down to none: a point mass that only orbits.
+    if (k === 'amount') el.min = tool === 'sink' ? '0' : '0.01';
     const pos = log ? massPos(q.mass, mr) : q[k];
     el.value = String(pos);
     el.style.setProperty('--p', `${(100 * (pos - +el.min)) / (+el.max - +el.min)}%`);
@@ -2695,9 +2697,11 @@ function drawSources() {
       const c = at(pos);
       if (!(c.w > 0)) continue;
       const e = at(pos.map((v, i) => v + (q.sinkRadius / box) * locate(c.x, c.y, flatView() ? 1 : c.w).right[i]));
-      // The sink's edge, at its true radius however small, and a dot at the mass.
+      // The sink's edge, at its true radius however small, and a dot at the mass. A mass
+      // that takes no gas has no edge to show.
       const r = Math.hypot(e.x - c.x, e.y - c.y);
-      html += `<g class="sink point"><circle cx="${c.x}" cy="${c.y}" r="${r}" /><circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
+      const edge = q.sinkRate > 0 ? `<circle cx="${c.x}" cy="${c.y}" r="${r}" />` : '';
+      html += `<g class="sink point">${edge}<circle class="dot" cx="${c.x}" cy="${c.y}" r="${Math.min(2.5, Math.max(1, r / 2))}" /></g>`;
     }
   }
   if (html !== marksDrawn) $('marks').innerHTML = marksDrawn = html;
@@ -3030,6 +3034,11 @@ function advanceStroke(now: number) {
     if (massive) {
       placeMass(at.pos, vel, q);
       syncTools();
+      return;
+    }
+    // A sink with neither a mass nor a flux would do nothing.
+    if (sink && !(q.amount > 0)) {
+      notice('A sink with no flux and no mass takes nothing: give it one or the other');
       return;
     }
     // The flux is measured against the densest gas and the time a signal takes to cross the source.

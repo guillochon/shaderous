@@ -23,7 +23,7 @@ struct Mass {
 }
 struct Masses {
   frame: vec4<f32>,   // acceleration of the frame (gravity/bh_kick.wgsl), or zero
-  list: array<Mass, 4>,
+  list: array<Mass, 32>,   // MAX_MASSES (src/sim.ts)
 }
 
 // (Kahan summation, kahan1 and kahan3, is in hydro/common.wgsl.)

@@ -1,9 +1,10 @@
 // What one cell contributes to the point masses' reduction. Requires gravity/bh.wgsl, a binding
-// BH: Masses, and Red (gpu/reduce.wgsl) with 41 channels:
+// BH: Masses, and Red (gpu/reduce.wgsl) with 41 channels. A reduction sums a group of four
+// masses, those from BHG.base.x on (gravity/mass_sums.ts runs one per group in use):
 //   0              gas mass
-//   1 + 10 i ...   for mass i: its pull on the gas (m a, 3), then what its sink takes from the
-//                  cell this step: mass (1), momentum (3), and angular momentum about the mass
-//                  in its rest frame (3)
+//   1 + 10 i ...   for the group's mass i: its pull on the gas (m a, 3), then what its sink
+//                  takes from the cell this step: mass (1), momentum (3), and angular momentum
+//                  about the mass in its rest frame (3)
 // `vol` is the cell's volume, `x` its center, u1 its (rho, momentum), `dt` the step.
 // Mass i's share of a cell: its pull on the gas (m a), then what its sink takes: mass and
 // momentum, and angular momentum about the mass in its rest frame. The sink leaves the rest
@@ -25,19 +26,31 @@ fn bh_take(i: u32, x: vec3<f32>, m: f32, vol: f32, dt: f32, rho: ptr<function, f
   return t;
 }
 
-// Written out mass by mass, for the four masses there can be (MAX_MASSES, src/sim.ts): with
-// every index a constant the record stays in registers, where a loop kept it in each thread's
-// local memory (gpu/reduce.ts says why that matters).
+// Written out mass by mass, for the four masses of a group (MASS_GROUP, gravity/mass_sums.ts):
+// with every index into the record a constant it stays in registers, where a loop kept it in
+// each thread's local memory (gpu/reduce.ts says why that matters).
+struct MassGroup { base: vec4<u32> }   // x: the group's first mass
+@group(0) @binding(6) var<uniform> BHG: MassGroup;
+
 fn bh_cell(u1: vec4<f32>, vol: f32, x: vec3<f32>, dt: f32) -> Red {
   var r = red_identity(); // all sums: zeros
   let m = u1.x * vol;
   r[0] = m;
-  // The sinks take their share one after another, as gravity/sink.wgsl removes it.
+  // The sinks take their share one after another, as gravity/sink.wgsl removes it: first those
+  // of the masses before this group, whose takes other reductions sum.
   var rho = u1.x;
   var mom = u1.yzw;
   let n = mass_count();
-  if (0u < n) {
-    let t = bh_take(0u, x, m, vol, dt, &rho, &mom);
+  let b = BHG.base.x;
+  for (var j = 0u; j < min(b, n); j++) {
+    let f = sink_fraction(BH.list[j], x, rho, dt);
+    if (f > 0.0) {
+      rho *= 1.0 - f;
+      mom *= 1.0 - f;
+    }
+  }
+  if (b + 0u < n) {
+    let t = bh_take(b + 0u, x, m, vol, dt, &rho, &mom);
     r[1] = t.pull.x;
     r[2] = t.pull.y;
     r[3] = t.pull.z;
@@ -49,8 +62,8 @@ fn bh_cell(u1: vec4<f32>, vol: f32, x: vec3<f32>, dt: f32) -> Red {
     r[9] = t.l.y;
     r[10] = t.l.z;
   }
-  if (1u < n) {
-    let t = bh_take(1u, x, m, vol, dt, &rho, &mom);
+  if (b + 1u < n) {
+    let t = bh_take(b + 1u, x, m, vol, dt, &rho, &mom);
     r[11] = t.pull.x;
     r[12] = t.pull.y;
     r[13] = t.pull.z;
@@ -62,8 +75,8 @@ fn bh_cell(u1: vec4<f32>, vol: f32, x: vec3<f32>, dt: f32) -> Red {
     r[19] = t.l.y;
     r[20] = t.l.z;
   }
-  if (2u < n) {
-    let t = bh_take(2u, x, m, vol, dt, &rho, &mom);
+  if (b + 2u < n) {
+    let t = bh_take(b + 2u, x, m, vol, dt, &rho, &mom);
     r[21] = t.pull.x;
     r[22] = t.pull.y;
     r[23] = t.pull.z;
@@ -75,8 +88,8 @@ fn bh_cell(u1: vec4<f32>, vol: f32, x: vec3<f32>, dt: f32) -> Red {
     r[29] = t.l.y;
     r[30] = t.l.z;
   }
-  if (3u < n) {
-    let t = bh_take(3u, x, m, vol, dt, &rho, &mom);
+  if (b + 3u < n) {
+    let t = bh_take(b + 3u, x, m, vol, dt, &rho, &mom);
     r[31] = t.pull.x;
     r[32] = t.pull.y;
     r[33] = t.pull.z;

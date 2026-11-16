@@ -625,7 +625,7 @@ The half-step potential $`\Phi^{n+1/2}`$ is extrapolated from the last two solve
 
 ## 15. Point masses and sinks
 
-`gravity/bh*.wgsl`, `gravity/sink.wgsl`. Up to four point masses act on the gas through
+`gravity/bh*.wgsl`, `gravity/sink.wgsl`. Up to 32 point masses act on the gas through
 Plummer-softened gravity ([Plummer 1911][Plummer1911]),
 
 ```math
@@ -637,10 +637,14 @@ potential (the kicks, the predictor, the timestep, the well-balanced reconstruct
 tally) adds it from the masses as they are when it runs (`gravity/ext.wgsl`). Each mass's
 potential step between neighboring cells is formed as
 $`GM(q_1 - q_0)/(r_0 r_1 (r_0 + r_1))`$ with $`q = r^2 + \epsilon^2`$, not as the difference
-of two potentials thousands of times larger. Each step the masses drift. One reduction over the updated gas then gives each mass
-its pull from the gas (the reaction to its pull on the gas) and what its sink takes. The
+of two potentials thousands of times larger. Each step the masses drift. A reduction over the updated gas then gives each mass
+its pull from the gas (the reaction to its pull on the gas) and what its sink takes: one
+reduction for every four masses in the run (`gravity/mass_sums.ts`), since a reduction's
+record has to stay small. The
 second half-kick pass removes exactly that from the cells. The pull between two masses is
 softened by the larger of their two softening lengths.
+
+A sink whose rate is set to zero takes nothing: the mass then only orbits.
 
 **Sinks.** Inside the sink radius $`r_s`$, gas is removed at a rate that falls from the local
 orbital frequency $`\sqrt{GM/r^3}`$ at the center to zero at $`r_s`$. The removed gas takes its

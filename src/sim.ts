@@ -9,6 +9,7 @@ import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
+import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
 import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, problemUnits, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
@@ -386,13 +387,11 @@ export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && c.eos !
 /** Which diffusive fluxes the shaders must be built with: a change here means rebuilding them. */
 export const diffusionKey = (c: SimConfig): string => `${c.viscosity > 0}/${conducts(c)}`;
 
-export const MAX_MASSES = 4;
+export const MAX_MASSES = 32;
 /** Floats per mass in the Masses block (gravity/bh.wgsl). */
 export const MASS_STRIDE = 40;
 /** Floats in the Masses block: the frame's acceleration, then MASS_STRIDE per mass. */
 export const MASS_FLOATS = 4 + MASS_STRIDE * MAX_MASSES;
-/** Channels of the point masses' reduction (gravity/bh_cell.wgsl). */
-export const MASS_RED = 1 + 10 * MAX_MASSES;
 
 /**
  * The point masses a run starts with: the preset's, with what a snapshot recorded laid over
@@ -827,7 +826,7 @@ export class Sim implements Simulation {
   private nMasses = 0;
   /** how many of them the preset (or a snapshot) brought, rather than addMass() */
   private nOwnMasses = 0;
-  private redBh!: Reducer;
+  private redBh!: MassSums;
   /** the point masses (gravity/bh.wgsl) */
   private bh: GPUBuffer;
   private gPredict: RegionGroups[] = [];
@@ -955,10 +954,10 @@ export class Sim implements Simulation {
       computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field'),
       // Point masses: their pull on the gas and what their sinks take are reduced each step, and
       // drive their orbits, their growth and (in the gas's frame) the frame's acceleration.
-      Reducer.create(
+      MassSums.create(
         d,
+        MAX_MASSES,
         [n, n, nz],
-        new Array(MASS_RED).fill(SUM),
         'gravity/bh_moment.wgsl',
         {},
         [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock })),
@@ -1378,7 +1377,7 @@ export class Sim implements Simulation {
    * then finish their step (`live`) or only evaluate their accelerations.
    */
   private encodeMassKick(pass: GPUComputePassEncoder, parity: number, live: boolean) {
-    this.redBh.encode(pass, parity);
+    this.redBh.encode(pass, parity, this.nMasses);
     pass.setPipeline(live ? this.pBhKick : this.pBhEval);
     pass.setBindGroup(0, live ? this.gBhKick : this.gBhEval);
     pass.dispatchWorkgroups(1);

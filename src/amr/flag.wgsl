@@ -42,7 +42,7 @@ const EPS = 0.01;
 fn near_mass(slot: i32, l: vec3<i32>) -> bool {
   if ((P.flags & 16u) == 0u) { return false; }
   let x = blk_pos(slot, l);
-  for (var i = 0u; i < min(mass_count(), 4u); i++) {
+  for (var i = 0u; i < min(mass_count(), 32u); i++) {
     let m = BH.list[i];
     var d = x - m.pos.xyz;
     if (is2d()) { d.z = 0.0; }

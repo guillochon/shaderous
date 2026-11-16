@@ -39,7 +39,7 @@ const GROUPS: { name: string; ids: string[] }[] = [
   { name: 'Hydrodynamics', ids: ['sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'rayleigh-taylor', 'low-mach', 'well-balanced', 'advection', 'advection-accuracy', 'flux-determinism', 'reflecting-box', 'two-dimensional'] },
   { name: 'Species, equations of state and burning', ids: ['species', 'species-eos', 'shock-bubble', 'detonation', 'burn-network', 'eos'] },
   { name: 'Cooling and diffusion', ids: ['cooling', 'viscosity', 'conduction'] },
-  { name: 'Gravity and point masses', ids: ['sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption', 'point-mass-sink', 'orbit-preview', 'binary-orbit', 'point-mass-encounter'] },
+  { name: 'Gravity and point masses', ids: ['sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption', 'point-mass-sink', 'point-mass-many', 'orbit-preview', 'binary-orbit', 'point-mass-encounter'] },
   { name: 'Adaptive mesh', ids: TESTS.map((t) => t.id).filter((id) => id.startsWith('amr-')) },
   { name: 'Magnetic fields', ids: TESTS.map((t) => t.id).filter((id) => id.startsWith('mhd-')) },
   { name: 'Against the reference, and files', ids: ['gpu-vs-cpu', 'snapshot-roundtrip'] },

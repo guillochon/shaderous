@@ -22,6 +22,19 @@ Status: built 2026-11-15. What changed while building:
   `previewOrbit()` itself). The comparison against a run agrees to 0.23% of the box after a
   quarter of an orbit.
 
+Since then (2026-11-15):
+
+- **32 point masses** (`MAX_MASSES`), from 4. The masses' sums over the gas are reduced in
+  groups of four (`gravity/mass_sums.ts`), one reduction per group in use, so a run with up to
+  four masses does what it did. The preview finds the gas's pull on the other masses every
+  n - 1 steps once there are more than five.
+- **A flux of exactly 0** at the left end of the sink tool's slider: a point mass that takes
+  no gas. Its marker is the dot alone.
+- **Checked against runs of the binary preset**: a light and a heavy mass sent retrograde into
+  the cavity, and a light one prograde, each stay within about 2% of the binary's separation
+  of the preview over more than a binary period. The looping paths of slow or retrograde
+  masses there are the binary's two members passing by.
+
 ## 1. Goal
 
 While the sink tool is placing a point mass (a sink with a mass: press, then drag to set its

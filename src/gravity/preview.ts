@@ -56,7 +56,10 @@ export interface Orbit {
   end: 'length' | 'steps' | 'left' | 'time' | 'rest';
 }
 
-/** The gas's pull on other masses than the new one is found again only every so many steps. */
+/**
+ * The gas's pull on other masses than the new one is found again only every so many steps: this
+ * many, and more in a run with many masses, so that their sums do not outweigh the new one's.
+ */
 const GAS_EVERY = 4;
 
 export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {}): Orbit {
@@ -123,8 +126,9 @@ export function previewOrbit(input: OrbitInput, limits: Partial<OrbitLimits> = {
 
   // Accelerations at the current positions (gravity/bh_kick.wgsl).
   let step = 0;
+  const gasEvery = Math.max(GAS_EVERY, n - 1);
   const accel = () => {
-    if (nl) for (let i = 0; i < n; i++) if (i === me || step % GAS_EVERY === 0) gasPull(i);
+    if (nl) for (let i = 0; i < n; i++) if (i === me || step % gasEvery === 0) gasPull(i);
     // The frame: with the gas, it accelerates at the mean of the masses' pull on the gas (the
     // gas pulls on mass i with gm_i / G times `gas`, so the mass pulls back with minus that);
     // with the masses, at the acceleration of their center, which only the gas gives.

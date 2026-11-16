@@ -25,11 +25,12 @@ import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { Multipoles } from '../gravity/multipole';
 import { LumpReader } from '../gravity/lumps';
+import { MassSums } from '../gravity/mass_sums';
 import { makeEos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
 import { Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type SettleCells, type Settling } from '../problems/settle';
-import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_RED, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
+import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -195,7 +196,7 @@ export class AmrSim implements Simulation {
   private grav?: AmrGravity;
   private dummyPhi: GPUTexture;
   private redMp?: Multipoles;
-  private redBh?: Reducer;
+  private redBh?: MassSums;
   private pBhDrift?: GPUComputePipeline;
   private pBhKick?: GPUComputePipeline;
   private pBhEval?: GPUComputePipeline;
@@ -237,7 +238,7 @@ export class AmrSim implements Simulation {
   private gCorrectB: GPUBindGroup[] = [];
   private gCommitL: GPUBindGroup[] = [];
   /** the point masses' reduction, in which a sink takes gas from the blocks finishing a step */
-  private redBhB?: Reducer;
+  private redBhB?: MassSums;
   private gBhKickB?: GPUBindGroup;
   /** 2D: the point masses' field over the blocks starting a step, and over all of them */
   private pMassFieldB?: GPUComputePipeline;
@@ -545,8 +546,8 @@ export class AmrSim implements Simulation {
       computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 }),
       computePipeline(d, assemble('amr/flag.wgsl', flagSlots), 'amr flag'),
       // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
-      Reducer.create(
-        d, [sim.cap * BS, BS, depth], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_off.wgsl' },
+      MassSums.create(
+        d, MAX_MASSES, [sim.cap * BS, BS, depth], 'amr/bh_moment.wgsl', { bins: 'amr/bins_off.wgsl' },
         [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock, 30: sim.bt })), 'amr point masses',
       ),
       computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift'),
@@ -886,8 +887,8 @@ export class AmrSim implements Simulation {
     this.gAdvance = bindGroup(d, this.pAdvance, { 0: this.params, 1: this.clock, 2: A, 3: this.binCnt });
     await this.grav?.setBins();
     const v = (t: GPUTexture) => t.createView();
-    this.redBhB ??= await Reducer.create(
-      d, [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS], new Array(MASS_RED).fill(SUM), 'amr/bh_moment.wgsl', { bins: 'amr/bins_on.wgsl' },
+    this.redBhB ??= await MassSums.create(
+      d, MAX_MASSES, [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS], 'amr/bh_moment.wgsl', { bins: 'amr/bins_on.wgsl' },
       [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: this.bh, 3: v(this.state[p][1]), 4: this.clock, 29: A, 30: this.bt })), 'amr point masses (bins)',
     );
     this.gBhKickB = bindGroup(d, this.pBhKick!, { 0: this.params, 1: this.clock, 2: this.redBhB.result, 3: this.bh });
@@ -967,7 +968,7 @@ export class AmrSim implements Simulation {
     const stepMasses = (pass: GPUComputePassEncoder) => {
       run(pass, this.pBhDrift!, this.gBhDrift!);
       pass.dispatchWorkgroups(1);
-      this.redBhB!.encode(pass, p);
+      this.redBhB!.encode(pass, p, this.nMasses);
       run(pass, this.pBhKick!, this.gBhKickB!);
       pass.dispatchWorkgroups(1);
     };
@@ -1165,7 +1166,7 @@ export class AmrSim implements Simulation {
         pass.setBindGroup(0, this.gBhDrift!);
         pass.dispatchWorkgroups(1);
       }
-      this.redBh!.encode(pass, parity);
+      this.redBh!.encode(pass, parity, this.nMasses);
       pass.setPipeline(live ? this.pBhKick! : this.pBhEval!);
       pass.setBindGroup(0, live ? this.gBhKick! : this.gBhEval!);
       pass.dispatchWorkgroups(1);
