@@ -418,7 +418,7 @@ TOOLS.push({
 });
 TOOLS.push({
   kind: 'star', label: 'Star',
-  title: 'Star: click to place a polytropic star, or press and drag to set it moving (a longer drag is faster). Size is its radius; it takes over the gas wherever it is denser, and is settled into balance on the grid as a preset’s star is. Switches self-gravity on',
+  title: 'Star: click to place a polytropic star, or press and drag to set it moving (a longer drag is faster; the path it would take in the gas as it is now is drawn). Size is its radius; it takes over the gas wherever it is denser, and is settled into balance on the grid as a preset’s star is. Switches self-gravity on',
   icon: icon('<path d="M8 2.1L9.6 6.4L14.2 6.6L10.6 9.4L11.8 13.9L8 11.3L4.2 13.9L5.4 9.4L1.8 6.6L6.4 6.4z" />'),
 });
 TOOLS.push({
@@ -3343,6 +3343,19 @@ function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass:
 }
 
 /** The massless particle a moving source rides: placed at `pos` (in fractions of the box), moving at `vel`. */
+/** The star tool's star as a point mass, for the preview of its path: its mass, softened over its radius. */
+function starSpec(pos: Vec3, vel: Vec3): PointMass {
+  const box = cfg.problem.box;
+  return {
+    gm: (cfg.G > 0 ? cfg.G : 1) * 10 ** starLogRho * starMassPerRho(),
+    pos: pos.map((v) => (v - 0.5) * box),
+    vel,
+    soft: toolParams.star.size * box,
+    sinkRadius: 0,
+    sinkRate: 0,
+  };
+}
+
 function carrierSpec(pos: Vec3, vel: Vec3, size: number): PointMass {
   const box = cfg.problem.box;
   const gas = lastDiag?.mass ?? box ** cfg.ndim;
@@ -3526,8 +3539,9 @@ async function magnetizeStar(star: { n: number; K: number; rhoc: number; center:
 }
 
 // --- orbit preview --------------------------------------------------------------------------
-// While the sink tool or the source tool is in hand (and not set to Fixed), the path a sink or
-// source placed now would take is drawn: a line
+// While the sink tool or the source tool is in hand (and not set to Fixed), or the star tool,
+// the path a sink, source or star placed now would take is drawn (a star's is that of a point
+// of its mass, softened over its radius): a line
 // with an arrowhead over a 2D run or a slice, a tube with one in the volume view. Under the
 // pointer it is the path of a mass let go at rest there; pressed and dragged, of one set moving
 // as the drag asks. It is the orbit in the gas as it is now (gravity/preview.ts).
@@ -3560,17 +3574,20 @@ function refreshLumps(now: number, force = false) {
 /** Find the path of the mass being placed, and hand it to whichever view draws it. Called once per frame. */
 function updateOrbit(now: number) {
   const s = stroke;
-  if (sim && toolMoves()) refreshLumps(now);
+  // A star moves as a whole as a point of its mass would (3D: it needs self-gravity).
+  const star = tool === 'star' && !!cfg && cfg.ndim === 3;
+  const moves = toolMoves() || star;
+  if (sim && moves) refreshLumps(now);
   // Pressed: the mass the drag would place. Not pressed: one let go at rest under the pointer,
   // where the brush is drawn (in the volume view, on the plane through the middle of the box).
   const pressed = !!s && s.kind === tool && s.ready && !s.released;
   const resting = !s && !!hover && $('brush').style.display !== 'none';
   // (A fixed sink or source goes nowhere: there is no path to show.)
-  if (!sim || !toolMoves() || !(pressed || resting) || massesNow().length >= MAX_MASSES) {
+  if (!sim || !moves || !(pressed || resting) || (!star && massesNow().length >= MAX_MASSES)) {
     orbit = null;
   } else {
     const { at, vel } = pressed ? strokeAim(s!) : { at: locate(hover!.x, hover!.y, view.dist), vel: [0, 0, 0] as Vec3 };
-    const mine = tool === 'source' ? carrierSpec(at.pos, vel, toolParams.source.size) : massSpec(at.pos, vel, toolParams.sink);
+    const mine = star ? starSpec(at.pos, vel) : tool === 'source' ? carrierSpec(at.pos, vel, toolParams.source.size) : massSpec(at.pos, vel, toolParams.sink);
     const others = massesNow();
     const lumps = gasLumps && gasLumps.of === sim ? gasLumps : null;
     const left = cfg.tEnd - (lastDiag?.t ?? 0);
