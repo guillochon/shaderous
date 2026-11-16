@@ -93,14 +93,24 @@ _tt = {}
 def _torch_consts(torch, device, dtype):
     key = (str(device), dtype)
     if key not in _tt:
-        _tt[key] = (torch.tensor(TAB, device=device, dtype=dtype), *(torch.tensor(c, device=device, dtype=dtype) for c in (_Q, _DQ, _D2Q)))
+        _tt[key] = (torch.tensor(TAB, device=device, dtype=dtype),
+                    torch.tensor(np.stack([_Q, _DQ, _D2Q], axis=1), device=device, dtype=dtype))
     return _tt[key]
+
+
+def _cheb_t(torch, C, x):
+    """Several Chebyshev series (columns of C) at x at once: T_k(x) by the recurrence, then
+    one matrix product. Fewer kernel launches than three Clenshaw sums."""
+    Tk = [torch.ones_like(x), x]
+    for _ in range(2, C.shape[0]):
+        Tk.append(2 * x * Tk[-1] - Tk[-2])
+    return torch.stack(Tk, dim=-1) @ C
 
 
 def thermo_t(rho, lnT, ia):
     """torch, batched and differentiable: (e, de/dln T) per gram, as thermo."""
     import torch
-    tab, Q, DQ, D2Q = _torch_consts(torch, lnT.device, lnT.dtype)
+    tab, C = _torch_consts(torch, lnT.device, lnT.dtype)
     lt = lnT / L10
     x = ((torch.log10(rho * YE) - _T["r0"]) / _T["d"]).clamp(0, _T["nr"] - 1.0001)
     y = ((lt - _T["t0"]) / _T["d"]).clamp(0, _T["nt"] - 1.0001)
@@ -122,9 +132,10 @@ def thermo_t(rho, lnT, ia):
     beta = K * T / MEC2
     px = ((lt - _P["mid"]) / _P["half"]).clamp(-1, 1)
     ps = 1.0 / (_P["half"] * L10)
-    pp = torch.exp(torch.log(4 * K / rho) + lnT + 1.5 * torch.log(NQ * T) - 1 / beta + _cheb(Q, px))
-    l1 = 2.5 + 1 / beta + _cheb(DQ, px) * ps
-    l2 = -1 / beta + _cheb(D2Q, px) * ps * ps
+    q = _cheb_t(torch, C, px)
+    pp = torch.exp(torch.log(4 * K / rho) + lnT + 1.5 * torch.log(NQ * T) - 1 / beta + q[..., 0])
+    l1 = 2.5 + 1 / beta + q[..., 1] * ps
+    l2 = -1 / beta + q[..., 2] * ps * ps
     sm = YE * K * T / MU
     im = ia * K * T / MU
     rm = ARAD * T**4 / rho

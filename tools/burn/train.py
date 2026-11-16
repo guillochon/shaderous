@@ -220,8 +220,9 @@ def ln_reaclib(name, basis):
     return torch.logsumexp(basis @ _SETS[name].T, dim=1)
 
 
-def full_rate_terms(log_rho, log_T, X):
-    """ln of every term of aprox13's dY/dt (FULL_TERMS), screened."""
+def full_rate_terms_reference(log_rho, log_T, X):
+    """ln of every term of aprox13's dY/dt (FULL_TERMS), screened, one term at a time: the
+    reference that the vectorized full_rate_terms reproduces (check_fast.py)."""
     T = torch.pow(10.0, log_T)
     rho = torch.pow(10.0, log_rho)
     T9 = (T * 1e-9).clamp(0.01, 10.0)
@@ -251,6 +252,143 @@ def full_rate_terms(log_rho, log_T, X):
             ln = ln + n * lnY[:, i]
         out.append(ln[:, None])
     return torch.cat(out, dim=1)
+
+
+class _FastTerms:
+    """full_rate_terms in a few batched operations rather than hundreds of small ones: every
+    REACLIB rate in one matrix product (sets padded, summed by logsumexp), every screening pair
+    at once, and the terms assembled from index arrays. The same arithmetic as the reference,
+    term by term; no constant is copied to the GPU per call, so a step can be captured in a
+    CUDA graph."""
+
+    def __init__(self):
+        names, pairs = [], list(SCREEN_PAIRS)
+
+        def rid(n):
+            if n not in names:
+                names.append(n)
+            return names.index(n)
+
+        none = len(pairs)                         # a screening column of zeros
+        npos, nrate, ns0, ns1 = [], [], [], []
+        apos, arates, asa, asp, afwd = [], [], [], [], []
+        coef, nrho = [], []
+        powers = np.zeros((13, len(FULL_TERMS)))
+        for j, (c, pw, nr, rate) in enumerate(FULL_TERMS):
+            coef.append(math.log(c))
+            nrho.append(nr)
+            for i, n in pw.items():
+                powers[i, j] = n
+            if rate[0] == "approx":
+                _, way, a, b, mid = rate
+                apos.append(j)
+                arates.append([rid(f"{a}_He4_to_{b}_reaclib"), rid(f"{a}_He4_to_p_{mid}_reaclib"),
+                               rid(f"{mid}_p_to_{b}_reaclib"), rid(f"{mid}_p_to_He4_{a}_reaclib"),
+                               rid(f"{b}_to_He4_{a}_reaclib"), rid(f"{b}_to_p_{mid}_reaclib")])
+                asa.append(pairs.index(f"He4_{a}"))
+                asp.append(pairs.index(f"p_{mid}"))
+                afwd.append(way == "fwd")
+            else:
+                name, prs = rate
+                npos.append(j)
+                nrate.append(rid(name))
+                ids = [pairs.index(k) for k in prs] + [none, none]
+                ns0.append(ids[0])
+                ns1.append(ids[1])
+        sets = [reaclib_sets(n) for n in names]
+        smax = max(len(x) for x in sets)
+        S = np.zeros((len(names), smax, 7))
+        mask = np.full((len(names), smax), -np.inf)
+        for r, x in enumerate(sets):
+            S[r, :len(x)] = x
+            mask[r, :len(x)] = 0.0
+
+        def t(a):
+            return torch.tensor(np.asarray(a), dtype=torch.float32, device=dev)
+
+        def L(a):
+            return torch.tensor(a, dtype=torch.long, device=dev)
+
+        self.R, self.smax = len(names), smax
+        self.S = t(S.reshape(-1, 7).T)            # (7, rates * sets)
+        self.mask = t(mask)
+        zp = np.array([SCREEN_PAIRS[k] for k in pairs], dtype=np.float64)
+        z1, a1, z2, a2 = zp.T
+        self.bb = t(z1 * z2)
+        self.zs13 = t(np.cbrt(z1 + z2))
+        self.zhat = t((z1 + z2) ** (5 / 3) - z1 ** (5 / 3) - z2 ** (5 / 3))
+        self.zhat2 = t((z1 + z2) ** (5 / 12) - z1 ** (5 / 12) - z2 ** (5 / 12))
+        self.lzav = t((5 / 3) * np.log(z1 * z2 / (z1 + z2)))
+        self.aznut = t(np.cbrt(z1**2 * z2**2 * a1 * a2 / (a1 + a2)))
+        self.Zt = t(ZS)
+        self.invA = t(1.0 / A)
+        self.npos, self.nrate, self.ns0, self.ns1 = L(npos), L(nrate), L(ns0), L(ns1)
+        self.apos, self.arates, self.asa, self.asp = L(apos), L(arates), L(asa), L(asp)
+        self.afwd = torch.tensor(afwd, device=dev)
+        self.coef, self.nrho = t(coef), t(nrho)
+        self.powers = t(powers)
+
+    def screens(self, T, rho, Y):
+        """ln of every pair's screening factor (B, pairs), as screen5."""
+        Y = Y.clamp_min(1e-30)
+        ytot = Y.sum(dim=1)
+        zbar = (self.Zt * Y).sum(dim=1) / ytot
+        z2bar = (self.Zt**2 * Y).sum(dim=1) / ytot
+        rr = rho * ytot
+        qlam0z = (1.88e8 / T * torch.sqrt(rr / T * (z2bar + zbar)))[:, None]
+        taufac = (CO2 / torch.pow(T, 1 / 3))[:, None]
+        gamp = (AA_FAC / T * torch.pow(rr * zbar, 1 / 3))[:, None]
+        fact = 2 ** (1 / 3)
+        gamef = fact * self.bb / self.zs13 * gamp
+        tau12 = taufac * self.aznut
+        alph12 = gamef / tau12
+        cap = alph12 > 1.6
+        alph12 = torch.where(cap, torch.full_like(alph12, 1.6), alph12)
+        gamef = torch.where(cap, 1.6 * tau12, gamef)
+        gamp = torch.where(cap, gamef * self.zs13 / (fact * self.bb), gamp)
+        h12w = self.bb * qlam0z
+        cc = (0.896434 * gamp * self.zhat - 3.44740 * gamp**0.25 * self.zhat2
+              - 0.5551 * (torch.log(gamp) + self.lzav) - 2.996)
+        a3 = alph12**3
+        ss = tau12 * (5 / 32 - alph12 * (0.014 + 0.0128 * alph12))
+        vv = gamef * alph12 * (0.0055 + alph12 * (-0.0098 + 0.0048 * alph12))
+        h12 = cc - a3 * (ss + vv) + torch.log(torch.clamp_min(1.0 - 0.0562 * a3, 0.77))
+        gx, gs = 0.3, 0.8
+        mix = (h12w * (gs - gamef) + h12 * (gamef - gx)) / (gs - gx)
+        h = torch.where(gamef > gx, torch.where(gamef <= gs, mix, h12), h12w)
+        return h.clamp_min(0.0)
+
+    def __call__(self, log_rho, log_T, X):
+        T = torch.pow(10.0, log_T)
+        rho = torch.pow(10.0, log_rho)
+        T9 = (T * 1e-9).clamp(0.01, 10.0)
+        basis = torch.stack([torch.ones_like(T9), 1 / T9, T9 ** (-1 / 3), T9 ** (1 / 3), T9, T9 ** (5 / 3), torch.log(T9)], dim=1)
+        lam = torch.logsumexp((basis @ self.S).view(-1, self.R, self.smax) + self.mask, dim=2)
+        Y = X.clamp_min(0.0) * self.invA
+        scr = torch.cat([self.screens(T, rho, Y), torch.zeros_like(T)[:, None]], dim=1)
+        lnY = torch.log(Y + 1e-30)
+        out = torch.empty(len(T), len(FULL_TERMS), dtype=lam.dtype, device=lam.device)
+        out[:, self.npos] = lam[:, self.nrate] + scr[:, self.ns0] + scr[:, self.ns1]
+        r = self.arates
+        sa, sp = scr[:, self.asa], scr[:, self.asp]
+        ag, ap = lam[:, r[:, 0]] + sa, lam[:, r[:, 1]] + sa
+        pg, pa = lam[:, r[:, 2]] + sp, lam[:, r[:, 3]] + sp
+        ga, gp = lam[:, r[:, 4]], lam[:, r[:, 5]]
+        both = torch.logaddexp(pg, pa)
+        out[:, self.apos] = torch.where(self.afwd, torch.logaddexp(ag, ap + pg - both),
+                                        torch.logaddexp(ga, pa + gp - both))
+        return out + self.coef + self.nrho * (math.log(10) * log_rho)[:, None] + lnY @ self.powers
+
+
+_FAST = None
+
+
+def full_rate_terms(log_rho, log_T, X):
+    """ln of every term of aprox13's dY/dt (FULL_TERMS), screened (_FastTerms)."""
+    global _FAST
+    if _FAST is None:
+        _FAST = _FastTerms()
+    return _FAST(log_rho, log_T, X)
 
 
 def full_rate_features(log_rho, log_T, X):
@@ -684,13 +822,41 @@ def roll(model, rho, X0, T0, dt, steps, record=0):
     lr, ld = torch.log10(r), torch.log10(torch.as_tensor(dt, dtype=torch.float32, device=dev))
     seen = []
     at = set(np.random.default_rng(2).choice(steps, size=min(record, steps), replace=False).tolist()) if record else set()
-    for s in range(steps):
+
+    def step(X, T):
         D = model(lr, torch.log10(T), ld, X)
-        X = (X + D).clamp_min(0.0)
-        T = heat(D, X, r, T)
+        X1 = (X + D).clamp_min(0.0)
+        return X1, heat(D, X1, r, T)
+
+    graph, done = None, 0
+    if dev.type == "cuda" and steps >= 8 and not os.environ.get("BURN_NO_GRAPH"):
+        # One step is hundreds of small kernels, so launches, not arithmetic, set its cost:
+        # record it once as a CUDA graph and replay that. Warm up on a side stream first, as
+        # capture requires; the warm-up steps count as steps.
+        side = torch.cuda.Stream()
+        side.wait_stream(torch.cuda.current_stream())
+        with torch.cuda.stream(side):
+            for _ in range(2):
+                X, T = step(X, T)
+                if done in at:
+                    seen.append((r.clone(), T.clone(), X.clone()))
+                done += 1
+        torch.cuda.current_stream().wait_stream(side)
+        sX, sT = X.clone(), T.clone()
+        graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(graph):
+            oX, oT = step(sX, sT)
+    for s in range(done, steps):
+        if graph is not None:
+            graph.replay()
+            sX.copy_(oX)
+            sT.copy_(oT)
+            X, T = sX, sT
+        else:
+            X, T = step(X, T)
         if s in at:
             seen.append((r.clone(), T.clone(), X.clone()))
-    return X, T, seen
+    return X.clone(), T.clone(), seen
 
 
 @torch.no_grad()
