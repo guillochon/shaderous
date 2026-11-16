@@ -63,6 +63,13 @@ async function library(h5?: H5): Promise<Library> {
   return loaded;
 }
 
+/**
+ * Load the HDF5 library ahead of the first file. The page does this soon after it starts: a
+ * page left open across a new release can no longer fetch its own build's files, and a state
+ * that could not be saved for that reason is a run lost.
+ */
+export const warm = (): Promise<unknown> => library();
+
 let counter = 0;
 
 /**

@@ -1512,10 +1512,31 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
   });
 }
 
+/**
+ * The .athdf reader and writer, loaded on first use. A failed load is not kept, so the next
+ * try starts over; one that fails because this build's files are gone from the server (a new
+ * release since the page was opened) says so.
+ */
+let athdfLoading: Promise<typeof import('../io/athdf')> | null = null;
+function athdfModule() {
+  athdfLoading ??= import('../io/athdf').then(async (m) => {
+    await m.warm();
+    return m;
+  });
+  athdfLoading.catch(() => (athdfLoading = null));
+  return athdfLoading.catch((e) => {
+    throw new Error(
+      `The file code could not be loaded (${(e as Error)?.message ?? e}). If Shaderous was updated since this page was opened, this build's files are gone: only a reload fetches the new ones, and a reload starts the run again.`,
+    );
+  });
+}
+// Fetched a little after the page starts, while this build's files are sure to be there.
+if (!headless) setTimeout(() => void athdfModule().catch(() => {}), 10_000);
+
 /** The state of the gas as an .athdf file (see io/athdf.ts), and its time. */
 async function athdfOf(s: Simulation) {
   const snap = await capture(s, { program: 'shaderous', build: BUILD, query: linkQuery() });
-  const { writeAthdf } = await import('../io/athdf');
+  const { writeAthdf } = await athdfModule();
   // gzip level 1: nearly all of the saving of higher levels (files are 8% to 86% of the raw
   // size, depending on how smooth the flow is) for the least time.
   const bytes = await writeAthdf(snap, undefined, 1);
@@ -1640,7 +1661,7 @@ async function importState(file: File) {
  */
 async function importAthdf(bytes: Uint8Array): Promise<string[]> {
   {
-    const { readAthdf } = await import('../io/athdf');
+    const { readAthdf } = await athdfModule();
     const snap = await readAthdf(bytes);
     const cubic = snap.rootSize[0] === snap.rootSize[1] && (snap.ndim === 2 || snap.rootSize[2] === snap.rootSize[0]);
     const width = snap.hi.map((h, a) => h - snap.lo[a]);
