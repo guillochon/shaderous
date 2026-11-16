@@ -48,7 +48,9 @@ general flat; sum of p90 -0.26 [-0.39, -0.17], about -11%. On score.py's test se
 p90 1.53 -> 1.45, hotco 0.35 -> 0.30, but 1e-5 s steps p99 0.60 -> 0.66 and general p50 at
 1 s 3.8e-4 -> 7.5e-4. Stronger gates (alpha 2, no offset) reach sis p90 0.84 (-47%) at a
 cost in hot C/O (p90 +0.08). The p90 of a regime's 200 test trajectories rests on 20 of
-them: single-set p90 changes under about 0.1 are noise, hence paired.py.
+them: single-set p90 changes under about 0.1 are noise, hence paired.py. twounit.py goes
+further: a second unit for the Si/S runaway alone (held shut on C/O-rich and on hot states)
+lets each regime have its own strength, sum of p90 -0.61 (about -26%).
 """
 import sys
 import time
