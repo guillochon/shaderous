@@ -10,14 +10,18 @@ fn prim_from_cons(u1: vec4<f32>, u2: vec4<f32>) -> Prims {
   var p: f32;
   var cs: f32;
   if (EOS_HAS_ENERGY) {
-    p = eos_pressure(rho, eint);
+    // Pressure and sound speed together: an equation of state that solves for its temperature
+    // does so once for both.
+    let pc = eos_prim(rho, eint);
+    p = pc.x;
+    cs = pc.y;
     // Pressure floor, optionally raised so the Jeans length stays resolved (Truelove).
     let pmin = pressure_floor(rho);
     if (!(p >= pmin)) {
       p = pmin;
       eint = eos_eint_from_p(rho, p);
+      cs = eos_sound_speed(rho, p);
     }
-    cs = eos_sound_speed(rho, p);
   } else {
     let st = baro_state(rho);
     p = st.x;

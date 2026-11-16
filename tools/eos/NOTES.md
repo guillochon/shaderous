@@ -44,7 +44,8 @@ The burning presets now use a tabulated electron-positron gas, as every collisio
   - White dwarfs are built on the same cold curve (`src/problems/white_dwarf.ts`). They are
     smaller: 8586 to 8127 km at 0.6 M_sun, 5428 to 5094 km at 1 M_sun, 2771 to 2290 km at
     1.3 M_sun (the term lowers the Chandrasekhar mass by some 3%).
-  - Newton takes 3.3 iterations on average with it (5 at most): the inverse tables were made
+  - Newton took 3.3 iterations on average with it (5 at most; 2.7 and 4 since the work
+    below): the inverse tables were made
     without the Coulomb heat, which the starting point allows for in one analytic step.
   - `helm.py`, which the burner's reference burns and training rollouts use for the heat
     capacity, does not have the term. At burning temperatures Gamma is near one and the
@@ -55,17 +56,47 @@ The burning presets now use a tabulated electron-positron gas, as every collisio
   `eos=degenerate`). Without burning the cost shows in full. The `white-dwarf` preset at 128^3,
   uniform, 400 steps on an RTX 3080, twice each:
 
-  | Equation of state | ms per step |
-  |---|---|
-  | `degenerate` | 7.3, 7.9 |
-  | tabulated, Coulomb term off | 21.6, 21.6 |
-  | tabulated, Coulomb term on | 26.0, 26.9 |
+  | Equation of state | ms per step | after the work below |
+  |---|---|---|
+  | `degenerate` | 7.3, 7.9 | 7.3, 8.0 |
+  | tabulated, Coulomb term off | 21.6, 21.6 | 14.1, 13.7 |
+  | tabulated, Coulomb term on | 26.0, 26.9 | 15.3, 15.2 |
 
-  So 2.9 times the plain degenerate gas, and 3.5 times with the Coulomb term. The 15% above
-  is with the burning network running, which then dominates. The Coulomb term's share is
-  mostly its extra Newton iterations (3.3 against 2.6): inverse tables made with it would
-  win most of that back. The star sits as still either way (central density within 3.6%
-  over three dynamical times at 64^3, against 3.3%).
+  So it was 2.9 times the plain degenerate gas, and 3.5 times with the Coulomb term. The 15%
+  above is with the burning network running, which then dominates. The star sits as still
+  either way (central density within 3.6% over three dynamical times at 64^3, against 3.3%).
+
+- Making it cheaper (2026-11-16), with nothing given up in accuracy: twice the plain
+  degenerate gas now, from 3.5 times. Three cases, 300 steps each, twice: the `white-dwarf`
+  preset at 128^3 (cold: most cells lie below the table), the C/O detonation tube at 1024^2
+  with burning off (warm: every cell takes the full iteration), and the same tube at 512^2
+  with burning.
+
+  | Change | Cold star | Warm tube | Burning tube |
+  |---|---|---|---|
+  | Before | 25.1 | 6.9 | 13.0 |
+  | One solve per cell for pressure and sound speed (`eos_prim`; `hydro/prim.wgsl` solved by the energy, then again by the pressure) | 20.7 | 6.1 | 12.5 |
+  | Newton's iterations evaluate only the two table derivatives they need, not five; no pair series below 10^8.3 K; a step under 3e-4 in ln T is taken without another evaluation | 14.6 | 5.6 | 12.6 |
+  | The Coulomb term's density factors computed once per solve | 13.8 | 5.8 | 12.2 |
+  | The table's four texels fetched again only when the temperature's cell changes | 14.0 | 5.3 | 12.3 |
+  | What is returned corrected by one Newton step from the final evaluation (`helm_fix`) | 15.0 | 5.6 | 12.3 |
+  | `degenerate`, for scale | 7.5 | 3.0 | |
+
+  ms per step; run to run they differ by 2 to 5%. The last row above `degenerate` costs a
+  little and is there for accuracy: stopping on trust alone widened the round trip (pressure
+  to energy and back) from 1.6e-5 to 2.6e-5 at worst, since the final point was no longer
+  one whose computed residual had been checked. With the correction it is 1.1e-5, better
+  than before, and the energy against the float64 mirror is 1.5e-5 (1.7e-5 before); the
+  sound speed is unchanged at 2.4e-4.
+
+  Newton now takes 2.7 evaluations on average with the Coulomb term (4 at most).
+
+  What is left is mostly not in this module. On a uniform grid every cell's primitives are
+  converted from its conserved state by each cell whose stencil holds it, some 20 times a
+  step (13 in the update, 7 in the predictor), each a solve for the temperature; the faces
+  add 6 to 12 more. Converting once per cell into a texture of pressure and sound speed
+  would take most of the remaining gap, at the cost of that texture and a pass, and of
+  changing how every grid loads its stencil. Not done.
 
 Tried and not used:
 - Bicubic tables of h's two first derivatives, with exact second derivatives as slopes.

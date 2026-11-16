@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import CASES from './helmholtz_cases.json';
-import { HELM_FADE, HELM_GAMMA_T, helmCoulombCold, helmCoulombFns, helmCoulombFree, helmCoulombThermal, helmIterations, helmSolve, helmThermo, loadHelmholtz } from '../../src/eos/helmholtz';
+import { HELM_FADE, HELM_GAMMA_T, helmCoulombCold, helmCoulombFns, helmCoulombFree, helmCoulombThermal, helmIterations, helmSolve, helmSolveShader, helmThermo, loadHelmholtz } from '../../src/eos/helmholtz';
 import { HELM_META } from '../../src/eos/helmholtz_meta';
 import { defaultEosParams, degFG, makeEos, mixtureParams, physicalEosParams, type EosParams } from '../../src/eos/eos';
 import { COMPOSITIONS } from '../../src/units/composition';
@@ -212,6 +212,35 @@ describe('Coulomb corrections', () => {
     expect(worst).toBeGreaterThan(0.2);
     expect((HELM_FADE * 36) / 0.5).toBeGreaterThan(500);
     expect((HELM_FADE * 36) / 0.5).toBeLessThan(2000);
+  });
+
+  it('loses nothing by taking its last small step on trust', () => {
+    // The shader stops once a step is under 3e-4 in ln T, without evaluating again. Newton's
+    // method leaves the square of that times half the curvature: here, against the iteration
+    // run to convergence, with and without the Coulomb term, by the energy and by the pressure.
+    let worst = 0;
+    let worstOut = 0;
+    for (const k of cases) {
+      const ia = 1 / k.abar;
+      for (const cm of [0, 1]) {
+        const t = helmThermo(k.rho, Math.log(k.T), 0.5, ia, cm);
+        for (const byP of [false, true]) {
+          const goal = byP ? t.pr : t.e;
+          const lnT = helmSolveShader(k.rho, goal, 0.5, ia, byP, cm).lnT;
+          worst = Math.max(worst, Math.abs(lnT - helmSolve(k.rho, goal, 0.5, ia, byP, cm)));
+          // What the shader returns is the other quantity at that temperature, moved by one
+          // more Newton step taken from the same evaluation (helm_fix).
+          const s = helmThermo(k.rho, lnT, 0.5, ia, cm);
+          const fix = (goal - (byP ? s.pr : s.e)) / (byP ? s.dpr : s.de);
+          const out = byP ? s.e + s.de * fix : s.pr + s.dpr * fix;
+          worstOut = Math.max(worstOut, rel(out, byP ? t.e : t.pr));
+        }
+      }
+    }
+    console.log(`last step on trust: worst error in ln T ${worst.toExponential(2)}, in what is returned ${worstOut.toExponential(2)}`);
+    // Single precision holds ln T (about 25) to 1.5e-6, and a value to 6e-8.
+    expect(worst).toBeLessThan(1e-6);
+    expect(worstOut).toBeLessThan(1e-9);
   });
 
   it('still finds the temperature in a few iterations', () => {

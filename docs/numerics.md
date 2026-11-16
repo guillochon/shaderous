@@ -353,6 +353,10 @@ fn eos_eint_from_p(rho: f32, p: f32) -> f32;
 fn eos_temperature(rho: f32, eint: f32) -> f32;
 ```
 
+Two more return pairs, so that an equation of state which solves for its temperature does so
+once for both: `eos_prim(rho, eint)` gives a cell's pressure and sound speed, and
+`eos_face(rho, p)` a face state's sound speed and internal energy.
+
 The equation of state is chosen when the shaders are assembled, and each module has a
 float64 TypeScript mirror for testing (`tests/unit/eos*.test.ts`).
 
@@ -414,7 +418,7 @@ builder and its settling use the same cold curve; built on the electrons' pressu
 star would read the missing pressure as heat (10⁸ K and more). `physics.eosParams.helmCoulomb`
 (link key `coulomb`) multiplies the whole term; 0 switches it off. Every white dwarf preset
 uses this equation of state. The plain degenerate one remains a choice (`eos=degenerate`) and
-is about 3.5 times cheaper per step where nothing burns (`tools/eos/NOTES.md`), at the price of
+is about twice as cheap per step where nothing burns (`tools/eos/NOTES.md`), at the price of
 reading shocked gas too cold. The burning network was
 trained with the heat capacity of the gas without it, a difference of a few percent at burning
 temperatures, where $`\Gamma`$ is near one.

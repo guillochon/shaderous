@@ -39,3 +39,8 @@ fn eos_eint_floor(rho: f32) -> f32 {
 fn eos_face(rho: f32, p: f32) -> vec2<f32> {
   return vec2<f32>(eos_sound_speed(rho, p), eos_eint_from_p(rho, p));
 }
+// A cell's pressure and sound speed from its internal energy density (hydro/prim.wgsl).
+fn eos_prim(rho: f32, eint: f32) -> vec2<f32> {
+  let p = eos_pressure(rho, eint);
+  return vec2<f32>(p, eos_sound_speed(rho, p));
+}

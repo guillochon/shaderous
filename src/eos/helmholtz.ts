@@ -33,6 +33,10 @@ const { k: K, mu: MU, mec2: MEC2, arad: ARAD } = M.consts;
 const NQ = (2 * Math.PI * M.consts.me * K) / M.consts.h ** 2;
 const LN10 = Math.LN10;
 export const HELM_T_MIN = 1e4;
+/** log10 T below which the pair gas is left out (HP_NONE in eos/helmholtz.wgsl). */
+export const HELM_PAIRS_NONE = 8.3;
+/** A Newton step in ln T this small is taken without another evaluation (HELM_LAST_STEP in eos/helmholtz.wgsl). */
+export const HELM_LAST_STEP = 3e-4;
 export const HELM_T_MAX = 1e11;
 
 let table: Float32Array | null = null;
@@ -125,6 +129,8 @@ const cheb = (c: readonly number[], x: number): number => {
 
 /** The pair gas at zero charge per unit mass at density rho: [P_p / rho, dln P_p/dln T, d^2 ln P_p/dln T^2]. */
 export function helmPairs(lt: number, rho: number): [number, number, number] {
+  // Below 10^8.3 K, none, as the shader has it (HP_NONE): under 1e-8 of the radiation there.
+  if (lt < HELM_PAIRS_NONE) return [0, 0, 0];
   const P = M.pair;
   const lnT = lt * LN10;
   const T = Math.exp(lnT);
@@ -319,16 +325,30 @@ export function helmSolve(rho: number, target: number, ye: number, ia: number, b
   return lnT;
 }
 
-/** How many Newton iterations helm_solve takes from its starting point to 2e-6 (for the tests). */
-export function helmIterations(rho: number, target: number, ye: number, ia: number, byP: boolean, coulomb = 0): number {
+/**
+ * helm_solve as the shader runs it (for the tests): at most 10 iterations, and a step under
+ * HELM_LAST_STEP taken on trust, since Newton's method leaves an error of the order of its
+ * square. Returns ln T and the evaluations it took.
+ */
+export function helmSolveShader(rho: number, target: number, ye: number, ia: number, byP: boolean, coulomb = 0): { lnT: number; its: number } {
+  const lo = Math.log(HELM_T_MIN);
+  const hi = Math.log(HELM_T_MAX);
   let lnT = helmStart(rho, target, ye, ia, byP, coulomb);
   for (let it = 1; it <= 10; it++) {
     const t = helmThermo(rho, lnT, ye, ia, coulomb);
-    const step = -((byP ? t.pr : t.e) - target) / (byP ? t.dpr : t.de);
-    lnT += Math.min(Math.max(step, -1), 1);
-    if (Math.abs(step) < 2e-6) return it;
+    const f = byP ? t.pr : t.e;
+    if (lnT <= lo && f > target) return { lnT: lo + Math.log(target / f), its: it };
+    if (lnT >= hi && f < target) return { lnT: hi + 0.25 * Math.log(target / f), its: it };
+    const step = Math.min(Math.max(-(f - target) / (byP ? t.dpr : t.de), -1), 1);
+    lnT = Math.min(Math.max(lnT + step, lo), hi);
+    if (Math.abs(step) < HELM_LAST_STEP && lnT > lo && lnT < hi) return { lnT, its: it };
   }
-  return 10;
+  return { lnT, its: 10 };
+}
+
+/** How many evaluations helm_solve takes from its starting point (for the tests). */
+export function helmIterations(rho: number, target: number, ye: number, ia: number, byP: boolean, coulomb = 0): number {
+  return helmSolveShader(rho, target, ye, ia, byP, coulomb).its;
 }
 
 const deviceTextures = new WeakMap<GPUDevice, GPUTexture>();
