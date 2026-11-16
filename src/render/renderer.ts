@@ -717,11 +717,13 @@ export class Renderer {
     ]);
     const parity = 2 * sim.cur + sim.speciesCur;
 
-    // Everything the picture is drawn from but the state itself. Field lines move from frame to
-    // frame, and a range not yet copied for reading back is owed another frame.
-    const inputs = [new Uint32Array(vb).join(), cam.join(), this.canvas.width, this.canvas.height, parity, this.capture, this.guides?.join(), this.orbit?.version].join('|');
+    // Everything the picture is drawn from but the state itself. Field lines move with the gas,
+    // by the run's clock: while it stands still so do they, and only their number is an input.
+    // A range not yet copied for reading back is owed another frame.
+    const lines = this.fieldLines.active(sim, v) ? v.fieldLineCount : 0;
+    const inputs = [new Uint32Array(vb).join(), cam.join(), this.canvas.width, this.canvas.height, parity, this.capture, this.guides?.join(), this.orbit?.version, lines].join('|');
     const same = this.drawn?.sim === sim && this.drawn.inputs === inputs;
-    if (!force && same && !this.stale && !this.rangeOwed && !this.fieldLines.active(sim, v)) return false;
+    if (!force && same && !this.stale && !this.rangeOwed) return false;
     this.drawn = { sim, inputs };
     this.stale = false;
     d.queue.writeBuffer(this.viewBuf, 0, vb);
