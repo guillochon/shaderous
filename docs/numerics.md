@@ -30,7 +30,7 @@ precision, are pointed out where they occur.
 17. [Adaptive mesh refinement](#17-adaptive-mesh-refinement)
 18. [Local (per-block) timesteps](#18-local-per-block-timesteps)
 19. [Accelerating frames and damping zones](#19-accelerating-frames-and-damping-zones)
-20. [Nuclear burning surrogate (in development)](#20-nuclear-burning-surrogate-in-development)
+20. [Nuclear burning network](#20-nuclear-burning-network)
 21. [Ideal MHD (in development)](#21-ideal-mhd-in-development)
 22. [Validation](#22-validation)
 23. [References](#references)
@@ -691,6 +691,10 @@ of the other stars as point masses), and a moving star keeps its velocity. For w
 each round is over-relaxed by 1.6 and the rounds stop at $`10^{-3}`$: 7 to 12 rounds, taking
 1.6 to 5.5 s.
 
+Settling rewrites a star as cold gas. A problem that lights a star (the sub-Chandrasekhar
+supernova) puts its heat in afterward (`Problem.heat`): the internal energy that each cell of a
+hot spot should have, written into the settled state on the uniform grid and the adaptive mesh.
+
 For an $`n = 1`$ polytrope this relation is exactly the trapezoid rule of
 [§8](#8-well-balanced-reconstruction). Unsettled, a $`1\,M_\odot`$ white dwarf (whose nearly
 relativistic core has $`\Gamma_1`$ close to 4/3 and so little restoring force) swung by 25% in
@@ -737,6 +741,17 @@ disk at the finest level in our tests. Further criteria:
 The mesh is rebuilt every 8 steps from a per-block indicator read back without blocking. New
 leaves are filled by copying, by restriction (averaging the $`2^d`$ children, which conserves),
 or by prolongation with MC-limited linear interpolation, which also conserves.
+
+**A full block budget.** The atlas holds a fixed number of blocks, set by the GPU memory budget
+([architecture.md](architecture.md#gpu-memory-budget)). When a re-mesh wants more than it holds,
+the most strongly flagged blocks are refined first, and room is made for them by merging the
+siblings whose largest indicator is lowest (those closest to merging anyway), provided it is
+below 0.8 of the indicator of the block that needs the room (`EVICT_MARGIN` in
+`amr/tree.ts`); the margin keeps blocks flagged about equally from trading slots back and forth.
+Blocks next to the refinement, or that balance would split for it, are not merged, and a block
+merged to make room is not split again in the same re-mesh: its children would be filled from
+the slot of a parent, which holds no data. Dense-gas blocks are flagged infinitely and never
+make room for one another.
 
 ### Ghost cells and conservation across levels
 
@@ -798,32 +813,52 @@ disk grew until its uneven pull pushed the binary out of the box.
 With a magnetic field (the magnetized accretion disk) the zone acts on the gas alone: B^2 / 2 is
 taken out of E before it and put back after, and the field is left to the induction equation.
 
-## 20. Nuclear burning surrogate (in development)
+## 20. Nuclear burning network
 
-`tools/burn/` holds the offline part of a planned nuclear-burning module for the white dwarf
-problems. It is not yet used by the simulator.
+`src/burn/network.ts`, `hydro/burn_net_core.wgsl`; trained offline in `tools/burn/`. The
+13-isotope α-chain (aprox13, [Timmes et al. 2000][Timmes2000]) is stepped by a small neural
+network rather than an implicit integrator, wherever the gas is hotter than $`10^8`$ K and
+denser than $`10^4`$ g cm$`^{-3}`$ (the range of its training set). A hydrodynamic step longer
+than 10 ms is split into network steps.
 
-- **Reference network.** `burner.py` integrates the 13-isotope α-chain (aprox13,
-  [Timmes et al. 2000][Timmes2000]; the network module is generated with pynucastro,
-  [Smith Clark et al. 2023][Smith2023]) at constant density with self-heating. At constant density
-  the degenerate electrons' energy does not change, so
-
-  ```math
-  \frac{dT}{dt} = \frac{\epsilon_\text{nuc}}{c_v}, \qquad c_v = \frac{3k}{2\mu m_u} + \frac{4aT^3}{\rho}.
-  ```
-
-- **Surrogate.** `train.py` trains a small network that maps
-  $`(\log\rho,\ \log T,\ \log\Delta t,\ X_i^{1/4})`$ to 13 logits. These are added to
-  $`\log(X_i + 10^{-10})`$, and the new fractions are their softmax, so they are always positive
-  and sum to one. The energy released is computed from the change in composition and the
-  nuclear masses, never predicted, so energy and composition always agree.
-- **DAgger.** `dagger.py` collects states that the surrogate itself visits when it is applied
-  step after step, labels them with the reference network, and retrains on them
-  ([Ross, Gordon & Bagnell 2011][Ross2011]). This targets the error that builds up when the
-  surrogate is used in a rollout.
-
-The species machinery of [§12](#12-passive-scalar-and-species) and the composition in
-`src/units/composition.ts` are laid out so that a network can take over their state unchanged.
+- **Reference network.** `burner.py` integrates aprox13 (the network module is generated with
+  pynucastro, [Smith Clark et al. 2023][Smith2023], from REACLIB rates with pynucastro's
+  screening) at constant density with self-heating, the temperature following from the
+  tabulated electron-positron equation of state as in the simulator.
+- **Network.** Inputs: $`\log\rho`$, $`\log T`$, $`\log\Delta t`$, the mass fractions, and the
+  logarithm of every screened rate term of the reference (61 in all). The rate terms are inputs
+  because they rise with temperature far more steeply than a network this size could resolve
+  from $`\log T`$ alone. Four SiLU hidden layers, then two stages of 27 outputs. Each stage moves
+  mass as $`\Delta X = (1 - e^{-k\Delta t})(M g - X s)`$: every species loses a share
+  $`s_i`$ of itself, and what is lost, $`M = \sum_i X_i s_i`$, is shared out by a softmax $`g`$.
+  So mass is conserved exactly and no fraction goes negative, whatever the weights. The energy
+  released is the change in nuclear binding energy, never predicted. Weights are stored in half
+  precision.
+- **DAgger.** `dagger.py` collects the states that the network itself visits when applied step
+  after step, labels them with the reference network, and retrains on them
+  ([Ross, Gordon & Bagnell 2011][Ross2011]). After the equation of state changed, every stored
+  trajectory was burned again and the rounds continued; round 35b is the trained model.
+- **Weight edits.** Further rounds stopped helping, so the trained weights were edited directly
+  (`tools/burn/weightprog/`). The worst failure was a runaway in silicon-sulfur ash near
+  $`4\times10^9`$ K: about 10 times too fast a burn, whose heat carried the gas to $`^{56}`$Ni.
+  Each stage's burn rate is one output ($`\log_{10}k = 5 + 5z`$), so a fix can act on the rate
+  alone. Two units are added to the last hidden layer, so the hidden layers are 130 wide, and
+  no trained weight changes. Each is a gate $`g = \mathrm{relu}(\mathbf w\cdot\mathbf a + b)`$ of
+  that layer's inputs $`\mathbf a`$ (realized as $`\mathrm{silu}(20x)/20`$), which lowers both
+  stages' $`z`$ by $`\alpha g`$. $`\mathbf w`$ and $`b`$ are least-squares fits to the shift of
+  $`z`$ that best fixes each state's step, from exact reference burns of 1 ms, 0.1 ms and
+  10 μs and from the network's own rollout states. One unit ($`\alpha = 2`$) fires on hot
+  carbon-oxygen and slows it mildly. The other ($`\alpha = 1.5`$) is held at zero on gas with
+  $`X_{\rm C} + X_{\rm O} > 0.2`$, above $`4.4\times10^9`$ K and at 10 μs steps, and slows the
+  runaway. Compared trajectory by trajectory with 35b (`weightprog/paired.py`, 600 held-out
+  trajectories in each of four hard regimes), the sum of the four regimes' 90th percentiles of
+  each trajectory's worst error fell by 0.69, or 29%, at 1 ms steps (90% bootstrap interval 0.46-0.89),
+  and by 0.52 and 0.56 (about a quarter) at 3 ms and 0.3 ms steps; the silicon-sulfur regime's
+  fell from 1.58 to 0.87, and the others did not change. Results and the methods that failed
+  are in the docstrings of `weightprog/twounit.py`, `rateedit.py` and `lpedit3.py`.
+- **Limiter.** Optionally, no cell takes in burning energy faster than $`f_b\,e/t_s`$
+  ([Kushnir et al. 2013][Kushnir2013]); each network step is then scaled down as a whole.
+  Off by default.
 
 ## 21. Ideal MHD (in development)
 
@@ -1276,6 +1311,7 @@ result.
 [Koyama2002]: https://doi.org/10.1086/338978
 [Koyama2004]: https://doi.org/10.1086/382478
 [Krumholz2004]: https://doi.org/10.1086/421935
+[Kushnir2013]: https://doi.org/10.1088/2041-8205/778/2/L37
 [Lohner1987]: https://doi.org/10.1016/0045-7825(87)90098-3
 [Plewa1999]: https://arxiv.org/abs/astro-ph/9807241
 [Plummer1911]: https://doi.org/10.1093/mnras/71.5.460

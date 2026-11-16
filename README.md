@@ -28,6 +28,7 @@ and checkpoints (under Time) save one at regular intervals. Some examples:
 - [The Orszag-Tang vortex, a classic of magnetohydrodynamics](https://guillochon.github.io/shaderous/?problem=orszag-tang)
 - [A magnetized star torn apart by a black hole, with its field lines](https://guillochon.github.io/shaderous/?problem=tidal-disruption-dipole)
 - [A cellular detonation front](https://guillochon.github.io/shaderous/?problem=detonation-cellular)
+- [A sub-Chandrasekhar Type Ia supernova: a white dwarf's helium shell detonates, then its core](https://guillochon.github.io/shaderous/?problem=sub-chandra)
 
 **Locally.** Running it yourself needs Node 20+.
 
@@ -76,7 +77,8 @@ degenerate electrons. It uses the methods of production simulation codes:
 - nuclear burning from fuel to ash by a single-step Arrhenius reaction, with steady (ZND)
   detonations as initial conditions and as references, and of the 13-isotope alpha chain
   (aprox13's reactions) by a small neural network trained on the reference network's burns
-  (tools/burn), for carbon-oxygen detonations and burning white dwarf collisions.
+  (tools/burn), for carbon-oxygen detonations, burning white dwarf collisions and the double
+  detonation of a sub-Chandrasekhar white dwarf.
 
 WebGPU is a graphics interface, and fitting a conservative scheme into it shaped the design.
 No face flux is ever stored: the two cells that share a face compute bit-identical fluxes, so
