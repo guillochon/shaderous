@@ -62,6 +62,11 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 /* A slider takes a row of its own, with a field beside it for typing the value. */
 .pslider { grid-column: 1 / -1; }
 .pslider > div { display: grid; grid-template-columns: 1fr 64px; gap: 8px; align-items: center; }
+/* A preset's field with a menu of units beside it. */
+.punit { grid-column: span 2; }
+.punit > div { display: grid; grid-template-columns: minmax(0, 1fr) 64px; gap: 4px; }
+.punit input { min-width: 0; }
+.punit select[hidden] { display: none; }
 .pcheck { align-self: end; height: 24px; }
 /* The variant's name gets a row of its own; the preset's parameters fill the grid below it. */
 #row-variant { grid-column: 1 / -1; }
@@ -139,7 +144,7 @@ details[open] > summary .sum { display: none; }
  */
 .tool-params {
   display: grid; grid-template-rows: 0fr; margin-top: -4px; visibility: hidden;
-  clip-path: inset(0 0 0 -200px);
+  clip-path: inset(0 0 0 -260px);
   transition: grid-template-rows 0.15s ease-out, margin-top 0.15s ease-out, visibility 0s 0.15s;
 }
 .tool-params.open { grid-template-rows: 1fr; margin-top: 0; visibility: visible; transition-delay: 0s; }
@@ -154,10 +159,10 @@ details[open] > summary .sum { display: none; }
 }
 .tool-params .scrub input[type='range'] { position: absolute; top: 0; }
 .tool-params .scrub:hover input[type='range'], .tool-params .scrub:hover span,
-.tool-params .scrub.editing input[type='range'], .tool-params .scrub.editing span { width: 136px; }
+.tool-params .scrub.editing input[type='range'], .tool-params .scrub.editing span { width: 204px; }
 .tool-params .scrub span { overflow: hidden; gap: 6px; }
 .tool-params .scrub output {
-  max-width: 0; opacity: 0; overflow: hidden; pointer-events: auto; cursor: text;
+  max-width: 0; opacity: 0; overflow: hidden; pointer-events: auto; touch-action: none;
   transition: max-width 0.15s ease-out, opacity 0.15s ease-out;
 }
 .tool-params .scrub:hover output { max-width: 120px; opacity: 1; }

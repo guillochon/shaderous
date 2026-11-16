@@ -8,13 +8,18 @@ import { codeG, gravityUnits } from '../units/units';
 // Its code units are solar: one unit of length is a solar radius, one of mass a solar mass, and
 // G = 1 (the time unit is 1593 s), so that what the tools place (a star, say) has a physical
 // size and mass, and an equation of state with physical constants has them. The box's side is
-// a parameter, in those units.
+// a parameter, in those units: ten solar radii unless it is set.
 export const EMPTY = { rho: 1e-6, p: 1e-6 };
 export const EMPTY_UNITS = gravityUnits('solar', ASTRO.Rsun, ASTRO.Msun);
 
 const boxParam: ProblemParam = {
-  id: 'box', label: 'Box size', value: 1, min: 1e-3, max: 1e6, factor: 2, measure: 'length',
-  title: 'Side of the box: in code units (one is a solar radius), or in the units the readouts are shown in. Changing it builds the run again',
+  id: 'box', label: 'Box size', value: 10, min: 1e-3, max: 1e9, factor: 2,
+  title: 'Side of the box: in code units (one is a solar radius) or, with the readouts in physical units, in the unit picked beside it. Changing it builds the run again',
+  unitChoices: [
+    { label: 'R☉', value: 1 },
+    { label: 'AU', value: ASTRO.au / ASTRO.Rsun },
+    { label: 'pc', value: ASTRO.pc / ASTRO.Rsun },
+  ],
 };
 
 export const empty: Problem = {
@@ -28,7 +33,7 @@ export const empty: Problem = {
   gravity: 'off',
   G: codeG(EMPTY_UNITS),
   units: EMPTY_UNITS,
-  box: 1,
+  box: boxParam.value,
   boxParam: 'box',
   params: [boxParam],
   tEnd: Infinity,

@@ -518,6 +518,28 @@ let starField: StarField = 'none';
 let starLogBeta = 3;
 /** Mass of the star tool's star in code units, per unit central density. */
 const starMassPerRho = () => polytropeMass(laneEmdenCached(starN), 1, toolParams.star.size * cfg.problem.box);
+/**
+ * Change the star tool's size or index with `change`, keeping the star's mass: its central
+ * density follows (and may leave the Mass slider's range, which then sits at its end).
+ */
+function keepStarMass(change: () => void) {
+  const mass = 10 ** starLogRho * starMassPerRho();
+  change();
+  starLogRho = Math.log10(mass / starMassPerRho());
+}
+/** The star tool's size or mass has been set by hand: until then they are the defaults below. */
+let starSet = false;
+/**
+ * The star tool's defaults, for the run as it is: where the setup has physical units, a star of
+ * one solar mass and one solar radius (no larger than the Size slider's 30% of the box);
+ * otherwise a tenth of the box in radius, with unit central density.
+ */
+function starDefaults() {
+  if (starSet || !cfg) return;
+  const pu = problemUnits(cfg.problem, cfg.params);
+  toolParams.star.size = pu ? Math.min(0.3, ASTRO.Rsun / (cfg.problem.box * unitOf(pu, 'length'))) : 0.1;
+  starLogRho = pu ? Math.log10(ASTRO.Msun / unitOf(pu, 'mass') / starMassPerRho()) : 0;
+}
 /** Mass tool: new gas brings no momentum of its own. */
 let massAtRest = true;
 const slider = (id: string, label: string, title: string, min: number, max: number) =>
@@ -528,7 +550,7 @@ $('tools').innerHTML =
     ${slider('size', 'Size', 'Brush radius, as a share of the box', 0.01, 0.3)}
     ${slider('softness', 'Soft', 'Softness of the edge: 0 is hard, 1 fades all the way from the center', 0, 1)}
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
-    <label class="scrub" id="tp-rhoc-row" title="Mass of the star (in solar masses where the setup has physical units, with Size in solar radii). The slider sets its central density, from a thousandth to a thousand times the code unit: at a given Size the mass follows it"><input id="tp-rhoc" type="range" min="-3" max="3" step="0.05" aria-label="Mass of the star" /><span>Mass<output id="tp-rhoc-out"></output></span></label>
+    <label class="scrub" id="tp-rhoc-row" title="Mass of the star (in solar masses where the setup has physical units, with Size in solar radii). It stays as set when Size or n changes. The slider spans central densities from a thousandth to a thousand times the code unit at the present Size; a typed mass may lie outside it"><input id="tp-rhoc" type="range" min="-3" max="3" step="0.05" aria-label="Mass of the star" /><span>Mass<output id="tp-rhoc-out"></output></span></label>
     <div id="tool-index" title="Polytropic index n: p = K ρ^(1 + 1/n). 1.5 is a convective star, 3 a radiative one like the Sun">${STAR_INDICES.map((n) => `<button id="${starId(n)}" aria-pressed="false" title="n = ${n}">n=${n}</button>`).join('')}</div>
     <div id="tool-field">${STAR_FIELDS.map((f) => `<button id="star-b-${f.kind}" aria-pressed="false" title="${f.title}">${f.label}</button>`).join('')}</div>
     <label class="scrub" id="tp-beta-row" title="Plasma beta at the star's center: the gas pressure over the magnetic pressure B² / 2 there (a random field's on average). The larger, the weaker the field"><input id="tp-beta" type="range" min="1" max="7" step="0.05" aria-label="Plasma beta at the star's center" /><span>β<output id="tp-beta-out"></output></span></label>
@@ -542,6 +564,7 @@ $('tools').innerHTML =
   </div></div>`;
 
 function syncTools() {
+  starDefaults();
   // A barotropic gas has no temperature of its own to change.
   const noTemp = cfg?.eos === 'barotropic';
   if (noTemp && tool === 'temperature') tool = null;
@@ -601,7 +624,7 @@ function syncTools() {
   for (const f of STAR_FIELDS) $(`star-b-${f.kind}`).setAttribute('aria-pressed', String(starField === f.kind));
   const rc = $<HTMLInputElement>('tp-rhoc');
   rc.value = String(starLogRho);
-  rc.style.setProperty('--p', `${(100 * (starLogRho + 3)) / 6}%`);
+  rc.style.setProperty('--p', `${Math.min(100, Math.max(0, (100 * (starLogRho + 3)) / 6))}%`);
   const be = $<HTMLInputElement>('tp-beta');
   be.value = String(starLogBeta);
   be.style.setProperty('--p', `${(100 * (starLogBeta - 1)) / 6}%`);
@@ -767,8 +790,11 @@ function editToolValue(k: ToolSlider) {
     const setting = mr
       ? (x <= 0 ? 0 : Math.min(mr.hi, Math.max(mr.lo, x)))
       : Math.min(+range.max, Math.max(+range.min, logSlider(k) ? Math.log10(x) : x));
-    if (k === 'rhoc') starLogRho = setting;
+    // A star's mass is whatever is typed, within the slider's range or not.
+    if (tool === 'star' && (k === 'rhoc' || k === 'size')) starSet = true;
+    if (k === 'rhoc') starLogRho = Math.log10(x);
     else if (k === 'beta') starLogBeta = setting;
+    else if (tool === 'star' && k === 'size') keepStarMass(() => (toolParams.star.size = Math.min(0.5, x)));
     else toolParams[tool][k] = setting;
     syncTools();
   };
@@ -780,13 +806,40 @@ function editToolValue(k: ToolSlider) {
   edit.addEventListener('blur', () => finish(true));
 }
 for (const k of TOOL_SLIDERS) {
+  // The number lies over the slider: pressed and dragged it moves the slider, as the bar beside
+  // it does; only a click that does not move starts typing a value.
   const out = $(`tp-${k}-out`);
-  out.title = 'Click to type a value';
-  out.addEventListener('pointerdown', (e) => e.stopPropagation());
-  out.addEventListener('click', (e) => {
-    e.preventDefault(); // not a click on the slider the label holds
-    editToolValue(k);
+  const range = $<HTMLInputElement>(`tp-${k}`);
+  out.title = 'Drag to slide; click to type a value';
+  let press: { x: number; dragging: boolean } | null = null;
+  const slideTo = (x: number) => {
+    const r = range.getBoundingClientRect();
+    const f = Math.min(1, Math.max(0, (x - r.left) / r.width));
+    range.value = String(+range.min + f * (+range.max - +range.min));
+    range.dispatchEvent(new Event('input'));
+  };
+  out.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault(); // the slider does not jump to where the number was pressed
+    e.stopPropagation();
+    out.setPointerCapture(e.pointerId);
+    press = { x: e.clientX, dragging: false };
   });
+  out.addEventListener('pointermove', (e) => {
+    if (!press) return;
+    if (!press.dragging && Math.abs(e.clientX - press.x) < 4) return;
+    press.dragging = true;
+    slideTo(e.clientX);
+  });
+  out.addEventListener('pointerup', (e) => {
+    const p = press;
+    press = null;
+    if (out.hasPointerCapture(e.pointerId)) out.releasePointerCapture(e.pointerId);
+    if (p && !p.dragging) editToolValue(k);
+  });
+  out.addEventListener('pointercancel', () => (press = null));
+  // The press was handled above: the click that follows is not one on the slider the label holds.
+  out.addEventListener('click', (e) => e.preventDefault());
 }
 for (const t of TOOLS) {
   $(`tool-${t.kind}`).addEventListener('click', () => {
@@ -822,11 +875,16 @@ for (const k of ['size', 'softness', 'amount', 'mass', 'soften'] as const) {
     if (!tool) return;
     const v = +$<HTMLInputElement>(`tp-${k}`).value;
     const mr = k === 'mass' ? massRange() : null;
-    toolParams[tool][k] = mr ? massAt(v, mr) : v;
+    // A star keeps its mass as its size changes: the two are set apart.
+    if (tool === 'star' && k === 'size') {
+      starSet = true;
+      keepStarMass(() => (toolParams.star.size = v));
+    } else toolParams[tool][k] = mr ? massAt(v, mr) : v;
     syncTools();
   });
 }
 $('tp-rhoc').addEventListener('input', () => {
+  starSet = true;
   starLogRho = +$<HTMLInputElement>('tp-rhoc').value;
   syncTools();
 });
@@ -842,7 +900,7 @@ for (const f of STAR_FIELDS) {
 }
 for (const n of STAR_INDICES) {
   $(starId(n)).addEventListener('click', () => {
-    starN = n;
+    keepStarMass(() => (starN = n));
     syncTools();
   });
 }
@@ -1324,9 +1382,12 @@ function showLoad() {
 }
 
 /** Factor from a preset parameter's code value to the value its field shows (ProblemParam.unit). */
-const paramUnit = (q: ProblemParam) => (waitingProblem() || !(units().physical && unitSys !== 'code') ? 1 : q.measure ? units().scale(q.measure) : q.unit ? q.unit.factor(cfg.params) : 1);
-/** The unit that field's value is then in. */
-const paramUnitLabel = (q: ProblemParam) => (q.measure ? units().label(q.measure) : q.unit?.label ?? '');
+const paramUnit = (q: ProblemParam) => (!physicalParams() ? 1 : q.unitChoices ? 1 / unitChoice(q).value : q.unit ? q.unit.factor(cfg.params) : 1);
+/** The preset's fields are shown in physical units: the run's readouts are, and it is the run's preset. */
+const physicalParams = () => !waitingProblem() && units().physical && unitSys !== 'code';
+/** The unit picked for each field that has a menu of them (ProblemParam.unitChoices), by its index. */
+const unitPicks: Record<string, number> = {};
+const unitChoice = (q: ProblemParam) => q.unitChoices![unitPicks[q.id] ?? 0] ?? q.unitChoices![0];
 
 /** The preset's own controls (for example mass ratio and impact parameter). */
 function syncProblemParams() {
@@ -1348,6 +1409,10 @@ function syncProblemParams() {
         if (q.kind === 'slider') {
           return `<div class="f pslider" id="pp-${q.id}-row" title="${tip}"><span>${q.label}</span><div><input id="pp-${q.id}-slide" type="range" ${range(q)} aria-label="${q.label}" />${number(`pp-${q.id}`, range(q))}</div></div>`;
         }
+        if (q.unitChoices) {
+          const menu = `<select id="pp-${q.id}-unit" aria-label="Unit of ${q.label}">${q.unitChoices.map((c, i) => `<option value="${i}">${c.label}</option>`).join('')}</select>`;
+          return `<div class="f punit" id="pp-${q.id}-row" title="${tip}"><span>${q.label}</span><div>${number(`pp-${q.id}`, range(q), q.factor)}${menu}</div></div>`;
+        }
         return field(q.label, number(`pp-${q.id}`, range(q), q.factor), `pp-${q.id}-row`, tip);
       })
       .join('');
@@ -1359,6 +1424,12 @@ function syncProblemParams() {
       slide?.addEventListener('change', () => {
         el.value = slide.value;
         el.dispatchEvent(new Event('change'));
+      });
+      // Another unit shows the same value in it: nothing about the run changes.
+      const unitSel = q.unitChoices ? $<HTMLSelectElement>(`pp-${q.id}-unit`) : null;
+      unitSel?.addEventListener('change', () => {
+        unitPicks[q.id] = +unitSel.value;
+        syncControls();
       });
       el.addEventListener('change', () => {
         const into = values();
@@ -1398,8 +1469,15 @@ function syncProblemParams() {
     const el = $<HTMLInputElement>(`pp-${q.id}`);
     // A field with a unit of its own shows it, and its value and range, in physical units.
     const k = paramUnit(q);
-    if (q.unit || q.measure) {
-      $(`pp-${q.id}-row`).querySelector('span')!.textContent = k !== 1 ? `${q.label} (${paramUnitLabel(q)})` : q.label;
+    if (q.unitChoices) {
+      const unitSel = $<HTMLSelectElement>(`pp-${q.id}-unit`);
+      unitSel.hidden = !physicalParams();
+      unitSel.value = String(q.unitChoices.indexOf(unitChoice(q)));
+      el.min = String(+(q.min * k).toPrecision(6));
+      el.max = String(+(q.max * k).toPrecision(6));
+    }
+    if (q.unit) {
+      $(`pp-${q.id}-row`).querySelector('span')!.textContent = k !== 1 ? `${q.label} (${q.unit.label})` : q.label;
       el.min = String(+(q.min * k).toPrecision(6));
       el.max = String(+(q.max * k).toPrecision(6));
       el.step = q.step ? String(+(q.step * k).toPrecision(6)) : 'any';
@@ -3325,6 +3403,7 @@ function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass
  */
 function placeStar(pos: Vec3, vel: Vec3) {
   if (!sim || cfg.ndim !== 3) return;
+  starDefaults();
   const notes: string[] = [];
   if (!isSelfGravity(cfg.gravity)) {
     // A uniform field's strength is not a gravitational constant.
@@ -4498,6 +4577,7 @@ Object.assign(window, { shaderousApp: { get sim() { return sim; }, get cfg() { r
   /** The star tool, as a click with these settings would use it: resolves once the star is placed, settled and magnetized. */
   placeStar(pos: Vec3, o: { n?: number; size?: number; logRho?: number; field?: StarField; logBeta?: number; vel?: Vec3 } = {}) {
     if (o.n !== undefined) starN = o.n;
+    if (o.size !== undefined || o.logRho !== undefined) starSet = true;
     if (o.size !== undefined) toolParams.star.size = o.size;
     if (o.logRho !== undefined) starLogRho = o.logRho;
     if (o.field !== undefined) starField = o.field;

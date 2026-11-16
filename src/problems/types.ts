@@ -2,7 +2,7 @@ import type { Eos, EosKind, EosParams } from '../eos/eos';
 import type { Settling, StarSpec } from './settle';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { AnyBurnSpec } from '../burn/burn';
-import type { Quantity, UnitSystem } from '../units/units';
+import type { UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
 
 export interface Prim {
@@ -137,10 +137,10 @@ export interface ProblemParam {
    */
   unit?: { label: string; factor: (params: Record<string, number>) => number };
   /**
-   * The value is a quantity of this kind, in code units: with the readouts in physical units
-   * the field shows it in that system's unit (a length in cm or m), named after the label.
+   * With the readouts in physical units, a menu beside the field picks the unit the value is
+   * typed and shown in, the first by default: `value` is that unit in code units.
    */
-  measure?: Quantity;
+  unitChoices?: { label: string; value: number }[];
   /**
    * How the control looks: a number field (the default), a slider with a number field beside
    * it for typing a value, or a checkbox (value 0 or 1).

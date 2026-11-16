@@ -82,7 +82,8 @@ describe('empty box', () => {
     const { sizedProblem } = await import('../../src/problems/types');
     const { configFor } = await import('../../src/sim');
     const { codeG } = await import('../../src/units/units');
-    expect(sizedProblem(empty, { box: 1 })).toBe(empty);
+    expect(empty.box).toBe(10);
+    expect(sizedProblem(empty, { box: 10 })).toBe(empty);
     expect(sizedProblem(empty, { box: 4 }).box).toBe(4);
     expect(configFor(empty, 32).problem).toBe(empty);
     expect(codeG(EMPTY_UNITS)).toBeCloseTo(1, 12);
