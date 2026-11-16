@@ -7,7 +7,7 @@ import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../../src/setup/opt
 import { emptySetup, setPath, type SetupSpec } from '../../src/setup/spec';
 import { defaultView } from '../../src/render/renderer';
 import { VIEW_EXTRAS, VIEW_OPTIONS } from '../../src/render/view_options';
-import { decodeLink, type LinkReport } from '../../src/ui/link';
+import { decodeLink, linkKeys, type LinkReport } from '../../src/ui/link';
 import apiDoc from '../../docs/api.md?raw';
 
 const selects = (options: Option[]) => flatten(options).filter((o) => o.control.type === 'select');
@@ -78,6 +78,18 @@ describe('link keys', () => {
     const report: LinkReport = { ignored: [] };
     decodeLink(q, report);
     // A key the link does not know is reported by its name alone; a value it turns down, as key=value.
+    expect(report.ignored.filter((k) => !k.includes('='))).toEqual([]);
+  });
+});
+
+describe('the list of link keys', () => {
+  it('names only keys a link reads, each once', () => {
+    const keys = linkKeys().map((k) => k.key);
+    expect(new Set(keys).size).toBe(keys.length);
+    const q = new URLSearchParams(keys.filter((k) => k !== 'p.<id>').map((k) => [k, '1']));
+    q.set('problem', 'kelvin-helmholtz');
+    const report: LinkReport = { ignored: [] };
+    decodeLink(q, report);
     expect(report.ignored.filter((k) => !k.includes('='))).toEqual([]);
   });
 });

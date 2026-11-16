@@ -79,6 +79,41 @@ const flag = (b: boolean) => (b ? '1' : '0');
 // range travel as a pair, and only when the range is not automatic.
 const VIEW_LINKED = VIEW_OPTIONS.filter((o) => o.key !== 'lo' && o.key !== 'hi');
 
+export interface LinkKey {
+  key: string;
+  /** 'run': which preset and grid; 'settings': what differs from the preset's own; 'view': what is drawn */
+  group: 'run' | 'settings' | 'view';
+  about: string;
+}
+
+/**
+ * Every key a link (or a setup given to the scripting API as a query string or a flat object)
+ * may carry. The docs and the headless tools list these, so a key added to the option table or
+ * to the view's table shows up there without being written again.
+ */
+export function linkKeys(): LinkKey[] {
+  const settings = LINKED.map((o): LinkKey => {
+    const c = o.control;
+    const range = c.type === 'select' ? `: ${c.choices.map((k) => k.value).join(', ')}` : c.type === 'check' ? ' (0 or 1)' : '';
+    return { key: o.linkKey!, group: 'settings', about: `${o.label}${range}` };
+  });
+  return [
+    { key: 'problem', group: 'run', about: 'Preset id' },
+    { key: 'setup', group: 'run', about: 'A setup document of one’s own, packed (with problem=custom)' },
+    { key: 'dim', group: 'run', about: '2 or 3 dimensions' },
+    { key: 'n', group: 'run', about: 'Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid' },
+    { key: 'amr', group: 'run', about: 'Levels of refinement, 0 to 5' },
+    { key: 'tend', group: 'settings', about: 'End time (inf for none)' },
+    ...settings,
+    { key: 'wb', group: 'settings', about: 'Well-balanced reconstruction (0 or 1)' },
+    { key: 'bc', group: 'settings', about: 'Six digits: the boundary at the lower x, y, z faces and then the upper ones (0 periodic, 1 outflow, 2 reflecting, 3 outflow only)' },
+    { key: 'p.<id>', group: 'settings', about: 'One of the preset’s own parameters, by its id' },
+    ...VIEW_OPTIONS.map((o): LinkKey => ({ key: o.link, group: 'view', about: o.doc })),
+    { key: 'cmap', group: 'view', about: 'Colormap' },
+    { key: 'tf', group: 'view', about: 'Volume view: the opacity curve, as x:a points separated by commas' },
+  ];
+}
+
 export function encodeLink(s: LinkState): URLSearchParams {
   const { cfg, view } = s;
   const q = new URLSearchParams();

@@ -19,6 +19,13 @@ const { values: o } = parseArgs({
 if (o['low-priority']) lowerPriority();
 const log = (m) => process.stderr.write(`[shaderous-mcp] ${m}\n`);
 
+// The keys of a setup, the view's settings and the variables, as the page's own tables give
+// them (schema.json, written by `npm run gen`): nothing here restates them.
+const SCHEMA = JSON.parse(readFileSync(new URL('./schema.json', import.meta.url), 'utf8'));
+const linkKeysOf = (group) => SCHEMA.link.filter((k) => k.group === group).map((k) => k.key).join(', ');
+const SETUP_KEYS = `${linkKeysOf('run')}, ${linkKeysOf('settings')}, and view keys ${linkKeysOf('view')}. dim is 2 or 3, amr 0 to 5, bc six digits. Unknown keys are ignored, values out of range clamped.`;
+const VIEW_KEYS = SCHEMA.view.map((v) => (v.key === 'mode' ? 'mode (volume|slice|projection)' : v.key === 'field' ? 'field (index, see describe)' : v.key)).join(', ');
+
 const INSTRUCTIONS = `Shaderous is a GPU gas dynamics code (compressible Euler equations with gravity, cooling, adaptive mesh refinement). These tools drive one simulation in a headless browser.
 Typical use: describe (pick a problem) -> load (a setup: problem, dim, n, amr and other keys) -> run (to a time, landed on exactly, or a number of steps) -> diagnostics / stats / slice / probe for numbers, screenshot to look at it -> save_athdf to keep the state, record for a movie.
 All values are in code units; positions are fractions of the box (0 to 1). A run stays paused between calls. load restarts from t = 0; control changes a setting mid-run as a person would.
@@ -64,7 +71,7 @@ const TOOLS = [
           partKinds: d.setup.parts.map((k) => `${k.kind}: ${k.title}`),
           flows: d.setup.flows.map((f) => `${f.name}: ${f.label}`),
         },
-        setupKeys: 'problem, dim (2|3), n, amr (0-5), tend, eos, gamma, K, riemann, limiter, cfl, gravity, G, cool, nu, kappa, bc (6 digits), p.<param id>, and view keys mode, field, axis, slice, log, cmap. Unknown keys are ignored, values out of range clamped.',
+        setupKeys: SETUP_KEYS,
       });
     },
   },
@@ -116,7 +123,7 @@ const TOOLS = [
     name: 'slice',
     description: 'A variable on a res x res grid on a plane through the box (perpendicular to `axis` at fraction `pos`). Returns min, max and mean, and the values (row j, column i: values[j][i]) when res is at most 64 or include_values is set; with save_path the full slice is written there as JSON instead. Variables: rho, press, vel1, vel2, vel3, r0, level, or a species name.',
     inputSchema: obj({
-      variable: { type: 'string', description: 'Default rho' },
+      variable: { type: 'string', description: `One of ${SCHEMA.variables.join(', ')}, or the name of a species. Default rho` },
       axis: { type: 'integer', minimum: 0, maximum: 2, description: 'Default 2 (z); always 2 in 2D' },
       pos: { type: 'number', minimum: 0, maximum: 1, description: 'Default 0.5' },
       res: { type: 'integer', minimum: 2, maximum: 2048, description: 'Default 32' },
@@ -147,7 +154,7 @@ const TOOLS = [
   },
   {
     name: 'screenshot',
-    description: 'A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), log, lo, hi, sliceAxis, slicePos, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, colormap, autoRange. Settings persist for later screenshots.',
+    description: `A picture of the run as a PNG image. \`view\` changes what is drawn first: ${VIEW_KEYS}. Settings persist for later screenshots.`,
     inputSchema: obj({
       width: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default 768' },
       height: { type: 'integer', minimum: 16, maximum: 4096, description: 'Default: width' },

@@ -9,6 +9,7 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
+    "gen": "node tools/gen.mjs",
     "test": "vitest run",
     "test:gpu": "playwright test",
     "test:headless": "node tools/headless/selftest.mjs",
