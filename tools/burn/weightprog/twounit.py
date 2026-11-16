@@ -19,7 +19,14 @@ pooled paired set). Without the T cut unit B also slowed hot C/O ash (p90 0.32 -
 (arguments 4.5e9 0,1.5; one unit, 129 wide) paired: Si/S p90 0.869 (-0.71), sum -0.66
 [-0.87, -0.42], hot C/O and general flat, oneb +0.011 [0.000, +0.037]; on score.py's test set
 hot C/O p90 0.39 and 1e-5 s steps p99 0.70, against 0.35 and 0.65 with unit A as well.
+
+Best: unit B also held shut at 1e-5 s steps (TWOUNIT_SHUT_SHORT=1, arguments 4.5e9 2,1.5;
+two_t4.5e+09_s_a2.0_b1.5.pt). Paired: Si/S p90 1.576 -> 0.958 (-0.62 [-0.83, -0.43]), hot C/O
+0.331 -> 0.301, oneb 0.199 -> 0.193, NSE and general flat; sum of p90 -0.64 [-0.84, -0.44],
+about -27%. score.py's test set: Si/S 1.53 -> 1.20, hot C/O 0.35, NSE 0.21; 1e-5 s steps p99
+0.60 -> 0.63, general p50 at 1 s 3.8e-4 -> 4.5e-4.
 """
+import os
 import sys
 from pathlib import Path
 
@@ -74,7 +81,12 @@ def main():
     t = torch.cat([(-s).clamp_min(0.0), (-sm).clamp_min(0.0)])
     X = np.concatenate([X0, Xm])
     TT = np.concatenate([T0, Tm])
-    co = torch.as_tensor((X[:, 1] + X[:, 2] > 0.2) | (TT > TCUT), device=dev)
+    short = np.zeros(len(X), dtype=bool)
+    if os.environ.get("TWOUNIT_SHUT_SHORT"):
+        # unit B also held shut at 1e-5 s steps (the third exact set)
+        n0 = sum(len(np.load(L.OUT / fn)["T"]) for fn, _ in files[:2])
+        short[n0:n0 + len(np.load(L.OUT / files[2][0])["T"])] = True
+    co = torch.as_tensor((X[:, 1] + X[:, 2] > 0.2) | (TT > TCUT) | short, device=dev)
     tB = torch.where(co, torch.zeros_like(t), t)
     fit = torch.arange(len(t), device=dev)
     print(f"{len(t)} states, {co.float().mean():.1%} C/O-rich; unit B wants slowing on {(tB > 0.05).float().mean():.1%}", flush=True)
@@ -86,7 +98,7 @@ def main():
         m2 = R.with_unit(m, torch.cat([wB, torch.zeros(1, device=dev)]), bB, alB)
         print(f"A alpha {alA} (offset -0.2), B alpha {alB}: " + L.summary(L.dev_score(m2, devset)), flush=True)
         torch.save({"state": m2.state_dict(), "width": 130, "depth": 4, "arch": m2.arch},
-                   train.HERE / f"two_t{TCUT:g}_a{alA}_b{alB}.pt")
+                   train.HERE / f"two_t{TCUT:g}{'_s' if os.environ.get('TWOUNIT_SHUT_SHORT') else ''}_a{alA}_b{alB}.pt")
 
 
 if __name__ == "__main__":
