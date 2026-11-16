@@ -1,6 +1,6 @@
-import { all, OUTFLOW, type Problem, type ProblemParam } from './types';
-import { ASTRO } from '../units/constants';
-import { codeG, gravityUnits } from '../units/units';
+import { all, OUTFLOW, type Problem, type ProblemParam } from '../../src/problems/types';
+import { ASTRO } from '../../src/units/constants';
+import { codeG, gravityUnits } from '../../src/units/units';
 
 // An empty box: gas at the density and pressure floors everywhere, waiting (paused) for the
 // editing tools to put something in it.

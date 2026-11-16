@@ -22,6 +22,7 @@ import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROU
 import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
 import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
+import { compiledFrom } from './setup/compile';
 
 export type RiemannKind = 'hllc' | 'hllclm' | 'hll';
 export type LimiterKind = 'koren' | 'mc' | 'vanleer' | 'minmod';
@@ -354,6 +355,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     conductivity: problem.conductivity ?? 0,
     dampRadius: problem.damping?.radius ?? 0,
     dampRate: problem.damping?.rate ?? 0,
+    // A problem compiled from a setup document brings the solver's and the mesh's settings too.
+    ...(problem.setup ? compiledFrom(problem.setup).overrides : {}),
     ...over,
   };
 }

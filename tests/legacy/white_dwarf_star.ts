@@ -1,8 +1,8 @@
-import { all, OUTFLOW, type Problem } from './types';
-import { COMPOSITIONS } from '../units/composition';
-import { codeG } from '../units/units';
-import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf } from './white_dwarf';
-import type { Eos } from '../eos/eos';
+import { all, OUTFLOW, type Problem } from '../../src/problems/types';
+import { COMPOSITIONS } from '../../src/units/composition';
+import { codeG } from '../../src/units/units';
+import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf } from '../../src/problems/white_dwarf';
+import type { Eos } from '../../src/eos/eos';
 
 // A single cold carbon-oxygen white dwarf at rest: hydrostatic equilibrium under the pressure of
 // its degenerate electrons (problems/white_dwarf.ts), settled into the grid's own balance

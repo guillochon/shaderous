@@ -1,4 +1,4 @@
-import { all, PERIODIC, type Problem } from './types';
+import { all, PERIODIC, type Problem } from '../../src/problems/types';
 
 // Isothermal, self-gravitating periodic box seeded with a few long-wavelength velocity modes.
 // About six Jeans lengths fit across the box, so the gas gathers into filaments and clumps.

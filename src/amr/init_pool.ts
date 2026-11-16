@@ -5,16 +5,19 @@
  * a minute on one thread.
  *
  * The workers run amr/init_cpu.ts, as the page does without them, so the results are
- * bit-identical either way. They can only rebuild a preset from its id: a problem that is not
- * the preset of that id (one carried in a snapshot, say), or a configuration that cannot be
- * cloned, is built on the page instead. So is everything when the pool fails in any way.
+ * bit-identical either way. Functions do not cross to a worker: it gets the setup document the
+ * run's problem was compiled from (setup/compile.ts) and compiles it again. A problem that is
+ * not its document compiled (one carried in a snapshot, or altered by hand), or a configuration
+ * that cannot be cloned, is built on the page instead. So is everything when the pool fails in
+ * any way.
  */
-import { problemById } from '../problems/index';
+import { compiledFrom } from '../setup/compile';
+import type { SetupSpec } from '../setup/spec';
 import type { SimConfig } from '../sim';
 import type { BlockAt, LeafState } from './init_cpu';
 
 export type InitRequest =
-  | { kind: 'setup'; key: string; job: number; problemId: string; cfg: Omit<SimConfig, 'problem'>; n: number; dx0: number; levels: number }
+  | { kind: 'setup'; key: string; job: number; setup: SetupSpec; box: number; cfg: Omit<SimConfig, 'problem'>; n: number; dx0: number; levels: number }
   | { kind: 'indicators'; key: string; job: number; blocks: (BlockAt & { sub: number })[] }
   | { kind: 'leaves'; key: string; job: number; blocks: (BlockAt & { index: number })[] };
 
@@ -62,12 +65,19 @@ function disable(why: string) {
 }
 
 /** The configuration without what cannot cross to a worker, or null if a worker could not rebuild it. */
-function shareable(cfg: SimConfig): Omit<SimConfig, 'problem'> | null {
+function shareable(cfg: SimConfig): { plain: Omit<SimConfig, 'problem'>; setup: SetupSpec } | null {
   try {
-    if (cfg.restart || problemById(cfg.problem.id) !== cfg.problem) return null;
+    const setup = cfg.problem.setup;
+    if (cfg.restart || !setup) return null;
+    // The problem must be its document compiled, but for the side of the box (a parameter may set it).
+    const base = compiledFrom(setup).problem as unknown as Record<string, unknown>;
+    const mine = cfg.problem as unknown as Record<string, unknown>;
+    const keys = new Set([...Object.keys(base), ...Object.keys(mine)]);
+    for (const k of keys) if (k !== 'box' && base[k] !== mine[k]) return null;
     const plain = Object.fromEntries(Object.entries(cfg).filter(([k, v]) => k !== 'problem' && typeof v !== 'function'));
     structuredClone(plain);
-    return plain as Omit<SimConfig, 'problem'>;
+    structuredClone(setup);
+    return { plain: plain as Omit<SimConfig, 'problem'>, setup };
   } catch {
     return null;
   }
@@ -84,13 +94,13 @@ export class InitRun {
   /** Set the workers up for this run, or null to build on the page. */
   static async start(cfg: SimConfig, n: number, dx0: number, levels: number): Promise<InitRun | null> {
     const ws = workers();
-    const plain = ws && shareable(cfg);
-    if (!ws || !plain) return null;
+    const share = ws && shareable(cfg);
+    if (!ws || !share) return null;
     const key = `run${++runs}`;
     const run = new InitRun(ws, key);
     try {
       await run.all((w, job) => {
-        w.postMessage({ kind: 'setup', key, job, problemId: cfg.problem.id, cfg: plain, n, dx0, levels } satisfies InitRequest);
+        w.postMessage({ kind: 'setup', key, job, setup: share.setup, box: cfg.problem.box, cfg: share.plain, n, dx0, levels } satisfies InitRequest);
         return (m) => m.kind === 'ready';
       }, READY_MS);
       return run;

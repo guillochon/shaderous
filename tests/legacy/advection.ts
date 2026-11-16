@@ -1,4 +1,4 @@
-import { all, PERIODIC, type Problem } from './types';
+import { all, PERIODIC, type Problem } from '../../src/problems/types';
 
 // Gaussian density blob carried by a uniform flow in pressure equilibrium. vx = 1 in a unit
 // box, so t = 10 is ten box crossings along x.

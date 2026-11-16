@@ -634,7 +634,10 @@ export function blockFaces(cfg: SimConfig, b: Block, dx0: number, maxLevel: numb
           out[o + 1] = (dzAx - (Ez[pi] - Ez[p])) / (h * hz);
           out[o + 2] = (Ey[pi] - Ey[p] - (Ex[pj] - Ex[p])) / (h * h);
         }
-  } else if (spec.face) {
+  }
+  if (spec.face) {
+    // With a potential too (a uniform field through a star's or a disk's own), the two add.
+    const both = !!spec.potential;
     const F = spec.face(cfg.params, cfg.ndim);
     const hs = h / sub;
     // Mean of the face's value over sub x sub points of it (sub along a 2D face's one dimension).
@@ -658,9 +661,9 @@ export function blockFaces(cfg: SimConfig, b: Block, dx0: number, maxLevel: numb
         for (let i = 0; i < W; i++) {
           const o = 4 * ((k * W + j) * W + i);
           const p = [at(i, 0), at(j, 1), flat ? 0 : at(k, 2)];
-          for (let a = 0; a < 3; a++) out[o + a] = mean(a, p);
+          for (let a = 0; a < 3; a++) out[o + a] = both ? out[o + a] + mean(a, p) : mean(a, p);
         }
-  } else {
+  } else if (!spec.potential) {
     throw new Error('MHD on the adaptive mesh needs a vector potential or face values');
   }
   return out;

@@ -3,10 +3,13 @@
 // A link names the preset, dimensionality, resolution and refinement, and then only what
 // differs from that preset's defaults, so most links stay short. Anything unrecognized or
 // out of range in a link is ignored rather than trusted.
-import { configFor, type LimiterKind, type RiemannKind, type SimConfig } from '../sim';
-import { EOS_LABELS, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
-import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { FIELDS, GRAVITY_MODES, PROBLEMS, problemById, problemUnits, type Bc3, type GravityMode, type Problem } from '../problems';
+import { configFor, type SimConfig } from '../sim';
+import { physicalEosParams, type EosParams } from '../eos/eos';
+import type { CoolingParams } from '../cooling/cooling';
+import { FIELDS, problemUnits, type Bc3, type Problem } from '../problems';
+import { CUSTOM_ID } from '../presets/custom';
+import { hasProblem, problemOf } from '../presets/lookup';
+import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../setup/options';
 import { defaultView, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
@@ -23,7 +26,20 @@ export const MAX_CONTOURS = 40;
 /** What a fresh visit shows. */
 export const DEFAULT_SETUP = { problem: 'kelvin-helmholtz', ndim: 2 as 2 | 3, n: 512, amr: 3 };
 
+/**
+ * The settings a link carries under keys of the option table (setup/options.ts): each option
+ * with a `linkKey` and the SimConfig field it sets. The grid's keys and the faces' are written
+ * out below; `wb` is a switch of the tests, not an option.
+ */
+const LINKED: Option[] = [...flatten(OPTIONS), ...flatten(PART_OPTIONS.disk.fields)].filter((o) => o.linkKey && o.cfg && !['bc', 'tEnd'].includes(o.cfg));
+/** Options that only mean something on an adaptive mesh, or with a cooling function: left out of a link otherwise. */
+const adaptiveOnly = (o: Option) => !!o.requires?.some((r) => r.fact === 'mesh.adaptive');
+const coolingOnly = (o: Option) => o.cfg!.startsWith('coolParams.');
+const at = (c: object, path: string): unknown => path.split('.').reduce<unknown>((v, k) => (v as Record<string, unknown> | undefined)?.[k], c);
+
 export interface LinkState {
+  /** the custom setup's document, packed for a link (setup/codec.ts encodeSetupParam), when the run is one */
+  setup?: string;
   cfg: SimConfig;
   view: ViewState;
   /** the displayed range follows the data */
@@ -74,6 +90,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   const { cfg, view } = s;
   const q = new URLSearchParams();
   q.set('problem', cfg.problem.id);
+  if (cfg.problem.id === CUSTOM_ID && s.setup) q.set('setup', s.setup);
   q.set('dim', String(cfg.ndim));
   q.set('n', String(cfg.n));
   if (cfg.amrLevels) q.set('amr', String(cfg.amrLevels));
@@ -89,43 +106,13 @@ export function encodeLink(s: LinkState): URLSearchParams {
     if (a !== b) q.set(key, a);
   };
   num('tend', cfg.tEnd, def.tEnd);
-  str('eos', cfg.eos, def.eos);
-  num('gamma', cfg.eosParams.gamma, def.eosParams.gamma);
-  num('K', cfg.eosParams.K, def.eosParams.K);
-  num('arad', cfg.eosParams.arad, def.eosParams.arad);
-  num('degrho', cfg.eosParams.degRho, def.eosParams.degRho);
-  num('degp', cfg.eosParams.degP, def.eosParams.degP);
-  num('iont', cfg.eosParams.ionT, def.eosParams.ionT);
-  num('ionrho', cfg.eosParams.ionRho, def.eosParams.ionRho);
-  str('cool', cfg.cooling, def.cooling);
-  if (cfg.cooling !== 'off') {
-    num('crate', cfg.coolParams.rate, def.coolParams.rate);
-    num('calpha', cfg.coolParams.alpha, def.coolParams.alpha);
-    num('cheat', cfg.coolParams.heat, def.coolParams.heat);
-    num('ctfloor', cfg.coolParams.tFloor, def.coolParams.tFloor);
-    num('ctunit', cfg.coolParams.tUnit, def.coolParams.tUnit);
+  for (const o of LINKED) {
+    if ((adaptiveOnly(o) && !cfg.amrLevels) || (coolingOnly(o) && cfg.cooling === 'off')) continue;
+    const [a, b] = [at(cfg, o.cfg!) ?? 0, at(def, o.cfg!) ?? 0];
+    if (typeof a === 'boolean') str(o.linkKey!, flag(a), flag(!!b));
+    else if (typeof a === 'number' && o.control.type === 'number') num(o.linkKey!, a, b as number);
+    else str(o.linkKey!, String(a), String(b));
   }
-  num('nu', cfg.viscosity, def.viscosity);
-  num('kappa', cfg.conductivity, def.conductivity);
-  num('dampr', cfg.dampRadius, def.dampRadius);
-  num('damprate', cfg.dampRate, def.dampRate);
-  str('riemann', cfg.riemann, def.riemann);
-  str('limiter', cfg.limiter, def.limiter);
-  num('cfl', cfg.cfl, def.cfl);
-  if (cfg.amrLevels) num('tbins', cfg.timeBins, def.timeBins);
-  if (cfg.amrLevels) num('refhi', cfg.refineHi, def.refineHi);
-  if (cfg.amrLevels) num('reflo', cfg.refineLo, def.refineLo);
-  if (cfg.amrLevels) num('refrho', cfg.refineRho, def.refineRho);
-  num('frho', cfg.fluff.rho, def.fluff.rho);
-  num('fu', cfg.fluff.u, def.fluff.u);
-  num('fv', cfg.fluff.v, def.fluff.v);
-  num('fva', cfg.fluff.va ?? 0, def.fluff.va ?? 0);
-  str('gravity', cfg.gravity, def.gravity);
-  num('G', cfg.G, def.G);
-  num('vcycles', cfg.vcycles, def.vcycles);
-  str('jfloor', flag(cfg.jeansFloor), flag(def.jeansFloor));
-  num('jcells', cfg.jeansCells, def.jeansCells);
-  str('fluxwork', flag(cfg.gravEnergyFlux), flag(def.gravEnergyFlux));
   str('wb', flag(cfg.wellBalanced), flag(def.wellBalanced));
   // Boundaries: one digit per face, the lower faces of x, y, z and then the upper ones.
   str('bc', [...cfg.bcLo, ...cfg.bcHi].join(''), [...def.bcLo, ...def.bcHi].join(''));
@@ -222,13 +209,15 @@ export function decodeLink(link: URLSearchParams, report?: LinkReport): LinkOver
 
 function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   const named = q.get('problem');
-  const known = PROBLEMS.some((p) => p.id === named);
+  // A custom setup's document is the page's to unpack, before this is called (ui/app.ts).
+  q.get('setup');
+  const known = hasProblem(named);
   if (!known && report) report.unknownProblem = named ?? '';
   // A bare visit gets the default setup. A link that names a preset but no grid gets the
   // preset's own grid (Problem.grid), or else 3D at the default size, as links always have. A
   // link that gives the cells but no levels is uniform: links leave out amr=0.
   const problem = known ? named! : DEFAULT_SETUP.problem;
-  const grid = known ? problemById(problem).grid : undefined;
+  const grid = known ? problemOf(problem).grid : undefined;
   const dim = q.get('dim');
   const out: LinkOverrides = {
     problem,
@@ -271,27 +260,21 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   };
 
   put(out.cfg, 'tEnd', num('tend', 0));
-  put(out.cfg, 'eos', pick('eos', Object.keys(EOS_LABELS) as EosKind[]));
-  put(out.cfg, 'riemann', pick<RiemannKind>('riemann', ['hllc', 'hllclm', 'hll']));
-  put(out.cfg, 'limiter', pick<LimiterKind>('limiter', ['koren', 'mc', 'vanleer', 'minmod']));
-  put(out.cfg, 'cfl', num('cfl', 0.05, 1));
-  put(out.cfg, 'refineHi', num('refhi', 0.05, 1));
-  put(out.cfg, 'refineLo', num('reflo', 0, 1));
-  put(out.cfg, 'refineRho', num('refrho', 0));
-  put(out.fluff, 'rho', num('frho', 0));
-  put(out.fluff, 'u', num('fu', 0));
-  put(out.fluff, 'v', num('fv', 0));
-  put(out.fluff, 'va', num('fva', 0));
-  const tb = num('tbins', 0, 3);
-  if (tb !== undefined) out.cfg.timeBins = Math.round(tb);
-  put(out.cfg, 'gravity', pick<GravityMode>('gravity', GRAVITY_MODES));
-  put(out.cfg, 'G', num('G'));
-  const vc = num('vcycles', 1, 8);
-  put(out.cfg, 'vcycles', vc === undefined ? undefined : Math.round(vc));
-  put(out.cfg, 'jeansFloor', bool('jfloor'));
-  const jc = num('jcells', 4, 32);
-  put(out.cfg, 'jeansCells', jc === undefined ? undefined : Math.round(jc));
-  put(out.cfg, 'gravEnergyFlux', bool('fluxwork'));
+  for (const o of LINKED) {
+    const c = o.control;
+    let v: unknown;
+    if (c.type === 'number') {
+      const x = num(o.linkKey!, c.min, c.max);
+      v = x === undefined ? undefined : c.integer ? Math.round(x) : x;
+    } else if (c.type === 'select') {
+      const raw = pick(o.linkKey!, c.choices.map((k) => String(k.value)));
+      v = raw === undefined ? undefined : c.choices.find((k) => String(k.value) === raw)!.value;
+    } else if (c.type === 'check') v = bool(o.linkKey!);
+    if (v === undefined) continue;
+    const [head, key] = o.cfg!.split('.');
+    if (key === undefined) (out.cfg as Record<string, unknown>)[head] = v;
+    else (out[head as 'eosParams' | 'coolParams' | 'fluff'] as Record<string, unknown>)[key] = v;
+  }
   put(out.cfg, 'wellBalanced', bool('wb'));
   const bc = q.get('bc');
   if (bc && /^[0-3]{6}$/.test(bc)) {
@@ -302,24 +285,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
       out.cfg.bcHi = d.slice(3) as Bc3;
     } else rejected('bc', bc);
   } else if (bc) rejected('bc', bc);
-  put(out.eosParams, 'gamma', num('gamma', 1, 100));
-  put(out.eosParams, 'K', num('K', 0));
-  put(out.eosParams, 'arad', num('arad', 0));
-  put(out.eosParams, 'degRho', num('degrho', 1e-30));
-  put(out.eosParams, 'degP', num('degp', 1e-30));
-  put(out.eosParams, 'ionT', num('iont', 1e-30));
-  put(out.eosParams, 'ionRho', num('ionrho', 1e-30));
-  put(out.cfg, 'cooling', pick('cool', Object.keys(COOLING_LABELS) as CoolingKind[]));
-  put(out.coolParams, 'rate', num('crate', 0));
-  put(out.coolParams, 'alpha', num('calpha', -4, 4));
-  put(out.coolParams, 'heat', num('cheat', 0));
-  put(out.coolParams, 'tFloor', num('ctfloor', 0));
-  put(out.coolParams, 'tUnit', num('ctunit', 1e-6));
-  put(out.cfg, 'viscosity', num('nu', 0, 1e30));
-  put(out.cfg, 'conductivity', num('kappa', 0, 1e30));
-  put(out.cfg, 'dampRadius', num('dampr', 0, 1e30));
-  put(out.cfg, 'dampRate', num('damprate', 0, 1e30));
-  for (const p of problemById(problem).params ?? []) {
+  for (const p of problemOf(problem).params ?? []) {
     const v = num(`p.${p.id}`, p.min, p.max);
     if (v !== undefined) out.params[p.id] = v;
   }
@@ -327,7 +293,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   put(out.view, 'mode', pick<ViewState['mode']>('mode', ['volume', 'slice', 'projection']));
   const field = num('field', 0, FIELDS.length - 1);
   put(out.view, 'field', field === undefined ? undefined : Math.round(field));
-  const species = num('species', 0, (problemById(problem).species?.length ?? 1) - 1);
+  const species = num('species', 0, (problemOf(problem).species?.length ?? 1) - 1);
   put(out.view, 'species', species === undefined ? undefined : Math.round(species));
   const axis = num('axis', 0, 2);
   put(out.view, 'sliceAxis', axis === undefined ? undefined : Math.round(axis));

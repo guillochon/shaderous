@@ -194,7 +194,7 @@ export const OPTIONS: Option[] = [
     ] } },
 
   // ---- boundaries ----
-  { path: 'domain.bc', label: 'Faces of the box', tip: 'What the gas meets at each face of the box. Periodic faces come in pairs', page: 'boundaries', control: { type: 'faces' }, apply: 'shaders', linkKey: 'bc', cfg: 'bc' },
+  { path: 'domain.bc', label: 'Faces of the box', tip: 'What the gas meets at each face of the box. Periodic faces come in pairs', page: 'boundaries', control: { type: 'faces' }, apply: 'live', linkKey: 'bc', cfg: 'bc' },
 
   // ---- gas ----
   { path: 'physics.eos', label: 'Equation of state', tip: 'How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues', page: 'gas', apply: 'shaders', default: 'ideal', linkKey: 'eos', cfg: 'eos',
@@ -232,7 +232,7 @@ export const OPTIONS: Option[] = [
   { path: 'physics.conductivity', label: 'Conductivity κ', tip: 'Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off', page: 'gas', control: num(0, 1e30, { factor: 1.25 }), apply: 'live', default: 0, linkKey: 'kappa', cfg: 'conductivity', requires: ENERGY },
 
   // ---- gravity ----
-  { path: 'physics.gravity', label: 'Gravity', tip: 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way', page: 'gravity', apply: 'restart', default: 'off', linkKey: 'gravity', cfg: 'gravity',
+  { path: 'physics.gravity', label: 'Gravity', tip: 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way', page: 'gravity', apply: 'live', default: 'off', linkKey: 'gravity', cfg: 'gravity',
     control: pick(
       { value: 'off', label: 'Off', tip: 'No gravity (point masses still pull)' },
       { value: 'constant', label: 'Constant', tip: 'A uniform field of strength G pointing down: -y in 2D, -z in 3D' },
@@ -244,7 +244,7 @@ export const OPTIONS: Option[] = [
   { path: 'physics.vcycles', label: 'V-cycles', tip: 'Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step', page: 'gravity', control: num(1, 8, { integer: true, step: 1 }), apply: 'live', linkKey: 'vcycles', cfg: 'vcycles', requires: SELF },
   { path: 'physics.jeansFloor', label: 'Jeans floor', tip: 'Pressure floor that keeps the Jeans length resolved (Truelove)', page: 'gravity', control: check, apply: 'live', default: false, linkKey: 'jfloor', cfg: 'jeansFloor', requires: SELF },
   { path: 'physics.jeansCells', label: 'Cells per Jeans length', tip: 'The Jeans floor raises the pressure so the Jeans length spans at least this many cells', page: 'gravity', control: num(4, 32, { integer: true, step: 1 }), apply: 'live', default: 4, linkKey: 'jcells', cfg: 'jeansCells', requires: SELF },
-  { path: 'physics.gravEnergyFlux', label: 'Conserve energy', tip: 'Flux-form gravitational work: conserves total energy', page: 'gravity', control: check, apply: 'shaders', default: true, linkKey: 'fluxwork', cfg: 'gravEnergyFlux', requires: SELF },
+  { path: 'physics.gravEnergyFlux', label: 'Conserve energy', tip: 'Flux-form gravitational work: conserves total energy', page: 'gravity', control: check, apply: 'live', default: true, linkKey: 'fluxwork', cfg: 'gravEnergyFlux', requires: SELF },
   { path: 'physics.frame', label: 'Frame', tip: 'An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box', page: 'gravity', apply: 'restart', default: 'inertial',
     control: pick(['inertial', 'Inertial'], { value: 'gas', label: 'Follows the gas', requires: [{ fact: 'parts.mass' }] }, { value: 'masses', label: 'Follows the masses', requires: [{ fact: 'parts.mass' }] }) },
 

@@ -1,11 +1,11 @@
 /**
  * A worker of amr/init_pool.ts: computes refinement indicators and leaves' initial states for
- * AmrSim.reset, with the problem looked up by id from the presets (functions do not cross to a
- * worker) and the rest of the configuration as sent.
+ * AmrSim.reset, with the problem compiled from the run's setup document (functions do not
+ * cross to a worker) and the rest of the configuration as sent.
  */
 import { makeEos } from '../eos/eos';
 import { loadHelmholtz } from '../eos/helmholtz';
-import { problemById } from '../problems/index';
+import { compileSetup } from '../setup/compile';
 import type { SimConfig } from '../sim';
 import { problemCoefficients } from '../species/mixture';
 import { speciesGroups } from '../species/species';
@@ -21,7 +21,7 @@ self.onmessage = async (e: MessageEvent<InitRequest>) => {
   const m = e.data;
   try {
     if (m.kind === 'setup') {
-      const problem = problemById(m.problemId);
+      const problem = { ...compileSetup(m.setup).problem, box: m.box };
       const cfg = { ...m.cfg, problem } as SimConfig;
       // Its float64 mirror needs the table here too (eos/helmholtz.ts); the pool sends no work
       // before this setup answers.

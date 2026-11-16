@@ -1,4 +1,4 @@
-import { all, OUTFLOW, type Problem } from './types';
+import { all, OUTFLOW, type Problem } from '../../src/problems/types';
 
 // Uniform-density sphere. As a static configuration it tests the Poisson solver against the
 // analytic potential; left to run, it is a pressure-poor homologous collapse.

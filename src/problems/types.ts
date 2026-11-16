@@ -313,9 +313,10 @@ export interface Problem {
 }
 
 /**
- * The initial magnetic field. Either a vector potential A, whose discrete curl on the cell faces
- * is divergence-free to round-off, or the field on the faces directly, for a field that is
- * divergence-free by construction (one that varies only along the axis normal to it, say).
+ * The initial magnetic field. A vector potential A, whose discrete curl on the cell faces
+ * is divergence-free to round-off; or the field on the faces directly, for a field that is
+ * divergence-free by construction (one that varies only along the axis normal to it, say); or
+ * both, which add (a uniform field, whose potential is not periodic, through a star's own).
  * Positions are relative to the box center; `axis` is the face normal (0 x, 1 y, 2 z).
  */
 export interface MhdSpec {

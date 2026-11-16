@@ -1,4 +1,4 @@
-import { PERIODIC, REFLECT, type Problem } from './types';
+import { PERIODIC, REFLECT, type Problem } from '../../src/problems/types';
 
 // Rayleigh-Taylor instability: heavy gas (rho = 2) resting on light gas (rho = 1) in a uniform
 // gravitational field, in hydrostatic balance, with a single-mode velocity perturbation that

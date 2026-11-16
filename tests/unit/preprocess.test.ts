@@ -3,7 +3,7 @@ import { COOLING_MODULES } from '../../src/cooling/cooling';
 import { preprocess } from '../../src/gpu/preprocess';
 import { assemble, shaderFiles } from '../../src/gpu/shaders';
 import { EOS_MODULES } from '../../src/eos/eos';
-import { binary } from '../../src/problems/binary';
+import { binary } from '../../src/presets/names';
 
 describe('shader preprocessor', () => {
   const files = {

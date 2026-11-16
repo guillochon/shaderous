@@ -1,4 +1,4 @@
-import { all, OUTFLOW, type Problem } from './types';
+import { all, OUTFLOW, type Problem } from '../../src/problems/types';
 
 export interface TubeState {
   rho: number;

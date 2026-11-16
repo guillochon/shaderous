@@ -1,4 +1,4 @@
-import { all, PERIODIC, type Problem } from './types';
+import { all, PERIODIC, type Problem } from '../../src/problems/types';
 
 // One Jeans-unstable mode along x in a periodic box. With rho0 = 1, c_s = 1 and k = 2 pi,
 // G is chosen so that 4 pi G rho0 = 2 k^2 c_s^2, giving a growth rate of k c_s.

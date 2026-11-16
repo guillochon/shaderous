@@ -1,6 +1,6 @@
 // Standard tests of ideal MHD (mhd/mhd.ts). Units: magnetic pressure B^2 / 2, so the Gaussian
 // fields of the papers are divided by sqrt(4 pi). Coordinates are relative to the box center.
-import { all, OUTFLOW, PERIODIC, type Problem } from './types';
+import { all, OUTFLOW, PERIODIC, type Problem } from '../../src/problems/types';
 
 const SQ4PI = Math.sqrt(4 * Math.PI);
 

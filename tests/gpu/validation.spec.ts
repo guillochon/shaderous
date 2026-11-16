@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'species', 'species-eos', 'shock-bubble', 'detonation', 'advection-accuracy', 'flux-determinism',
-  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-species', 'amr-species-eos', 'amr-detonation', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'point-mass-sink', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'burn-network', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption',
+  'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-species', 'amr-species-eos', 'amr-detonation', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'point-mass-sink', 'point-mass-many', 'orbit-preview', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'burn-network', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption',
   'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-diffusion', 'mhd-tidal-disruption', 'mhd-disk',
 ];
 
@@ -61,38 +61,52 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
     }
   };
 
+  // A setting of the Setup dialog, set as a script sets it (ui/api.ts control): the page does
+  // what the dialog's Apply does. A script's change leaves the run held, so play it again.
+  const set = async (id: string, value: string | number | boolean) => {
+    await page.evaluate(([i, v]) => (window as any).shaderous.control(i, v), [id, value] as const);
+    await page.evaluate(() => (window as any).shaderous.play());
+  };
+  const cfgNow = () => page.evaluate(() => {
+    const c = (window as any).shaderousApp.cfg;
+    return { id: c.problem.id, ndim: c.ndim, n: c.n, amr: c.amrLevels, riemann: c.riemann, limiter: c.limiter, gravity: c.gravity, eos: c.eos, viscosity: c.viscosity, conductivity: c.conductivity };
+  });
+
   await page.goto('/?problem=polytrope&n=32');
-  // The Hydro and Gravity sections start collapsed; open them so their controls can be used.
+  await page.evaluate(() => (window as any).shaderous.ready);
   await page.evaluate(() => document.querySelectorAll('details').forEach((d) => (d.open = true)));
   await page.fill('#tend', '');
   await page.dispatchEvent('#tend', 'change'); // no end time: run until told otherwise
   await advance();
-  await page.selectOption('#riemann', 'hll');
-  await page.selectOption('#limiter', 'minmod');
+  await set('riemann', 'hll');
+  await set('limiter', 'minmod');
+  expect(await cfgNow()).toMatchObject({ riemann: 'hll', limiter: 'minmod' });
   await advance();
-  await page.selectOption('#gravity', 'off');
+  await set('gravity', 'off');
   await advance();
-  await page.selectOption('#gravity', 'isolated');
+  await set('gravity', 'isolated');
   await page.selectOption('#mode', 'slice');
   await page.selectOption('#field', '1');
   await advance();
-  await page.selectOption('#eos', 'gas_radiation');
+  await set('eos', 'gas_radiation');
+  expect((await cfgNow()).eos).toBe('gas_radiation');
   await advance();
   await page.selectOption('#problem', 'isothermal-collapse');
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'isothermal-collapse');
   await advance();
-  await page.selectOption('#res', '64');
+  await set('res', 64);
   await page.waitForFunction(() => (window as any).shaderousApp.sim?.n === 64);
   await advance();
   const d = await page.evaluate(() => (window as any).shaderousApp.diag);
   expect(Number.isFinite(d.eTot)).toBe(true);
   expect(d.mass).toBeCloseTo(1, 3);
 
-  // 2D: only offered where the preset supports it, and switches the grid to one layer.
-  expect(await page.locator('#dim option[value="2"]').isDisabled()).toBe(true);
+  // 2D: only where the setup supports it, and switches the grid to one layer.
+  const dims = await page.evaluate(() => (window as any).shaderous.controls().then((c: any[]) => c.find((x) => x.id === 'dim')));
+  expect(dims.options.map((o: any) => o.value)).toEqual([3, 2]);
   await page.selectOption('#problem', 'rayleigh-taylor');
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'rayleigh-taylor');
-  await page.selectOption('#dim', '2');
+  await set('dim', 2);
   await page.waitForFunction(() => (window as any).shaderousApp.sim?.nz === 1);
   await advance();
   const d2 = await page.evaluate(() => (window as any).shaderousApp.diag);
@@ -101,18 +115,16 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
 
   // Viscosity and conduction: switching them on rebuilds the passes, and the run carries on
   // (onto the adaptive mesh below, too).
-  await page.fill('#visc', '0.001');
-  await page.dispatchEvent('#visc', 'change');
-  await page.fill('#cond', '0.001');
-  await page.dispatchEvent('#cond', 'change');
-  await page.waitForFunction(() => (window as any).shaderousApp.cfg.viscosity === 0.001 && (window as any).shaderousApp.cfg.conductivity === 0.001);
+  await set('visc', 0.001);
+  await set('cond', 0.001);
+  expect(await cfgNow()).toMatchObject({ viscosity: 0.001, conductivity: 0.001 });
   await advance();
-  expect(await page.textContent('#sum-diff')).toBe('viscosity + conduction');
   expect((await page.evaluate(() => (window as any).shaderousApp.diag)).mass).toBeCloseTo(1.5, 3);
 
-  // Adaptive mesh: switches the grid, keeps running, and conserves mass.
-  await page.selectOption('#levels', '2');
+  // Adaptive mesh: switches the grid, keeps the physics chosen, keeps running, and conserves mass.
+  await set('levels', 2);
   await page.waitForFunction(() => (window as any).shaderousApp.sim?.tree !== undefined);
+  expect(await cfgNow()).toMatchObject({ viscosity: 0.001, amr: 2 });
   await advance();
   const d3 = await page.evaluate(() => (window as any).shaderousApp.diag);
   expect(d3.mass).toBeCloseTo(1.5, 5);
@@ -120,8 +132,8 @@ test('controls rebuild pipelines and switch physics without errors', async ({ pa
   // Self-gravity runs adaptively too.
   await page.selectOption('#problem', 'polytrope');
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'polytrope' && (window as any).shaderousApp.sim);
-  await page.selectOption('#res', '64');
-  await page.selectOption('#levels', '1');
+  await set('res', 64);
+  await set('levels', 1);
   await page.waitForFunction(() => (window as any).shaderousApp.sim?.tree !== undefined && (window as any).shaderousApp.cfg.amrLevels === 1, undefined, { timeout: 60_000 });
   await advance();
   const d4 = await page.evaluate(() => (window as any).shaderousApp.diag);

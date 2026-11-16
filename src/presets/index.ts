@@ -1,7 +1,7 @@
 // The presets: one setup document per file in this folder (setup/spec.ts). Each is compiled to
 // the Problem the solvers take; the menu, its families and variants come from the files' own
 // `group`, `family` and `variant`.
-import { compileSetup, type Compiled } from '../setup/compile';
+import { compiledFrom, type Compiled } from '../setup/compile';
 import { resolveExtends } from '../setup/extends';
 import type { SetupSpec } from '../setup/spec';
 import type { Problem } from '../problems/types';
@@ -48,7 +48,7 @@ export function preset(id: string): Compiled {
   if (!c) {
     const spec = presetSpec(id);
     if (!spec) throw new Error(`unknown problem: ${id}`);
-    compiled.set(id, (c = compileSetup(spec)));
+    compiled.set(id, (c = compiledFrom(spec)));
   }
   return c;
 }

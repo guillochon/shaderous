@@ -130,6 +130,25 @@ Keys left out take the preset's defaults. A value that is unknown or out of rang
 or clamped, never trusted. `state().query` gives back the setup actually in force, as a
 minimal query string. Store it next to your results, and `load` will reproduce the run.
 
+### Setup documents
+
+A preset is itself a file: a setup document, described in [setups.md](setups.md). A run can
+be built from any such document, so a script can assemble one from parts (point masses, stars,
+disks, gas regions, obstacles, a magnetic field) rather than choose among the presets:
+
+```js
+const doc = await shaderous.preset('binary');        // a preset's document, to start from
+doc.parts[2].ecc = 0.4;                              // the orbit's eccentricity
+doc.parts.push({ kind: 'mass', id: 'c', gm: 0.01, pos: [3, 0, 0], vel: [0, 0.58, 0], soft: 0.06 });
+await shaderous.load('dim=2&n=512&amr=3', doc);      // the grid, then the document
+await shaderous.load(doc);                           // or the document alone, on its own grid
+```
+
+The document is checked as a file from a stranger is: unknown keys are dropped, values out of
+range are held to it, and a wrong type rejects the call with the reason. `describe().setup`
+lists what a document may hold. A run built from a document that is not a preset has the
+problem id `custom`; `state().setup` is its document, with every setting changed since.
+
 ## Reference
 
 ### `ready: Promise<void>`
@@ -150,11 +169,23 @@ Everything there is to choose from:
 - `resolutions`: the grid sizes on offer for 2 and 3 dimensions, and `uniformMax`. A larger
   grid must be adaptive, with `amr` of 1 or more.
 - `eos`, `cooling`, `riemann`, `limiter`, `gravity`, `colormaps`: the allowed values.
+- `setup`: what a setup document may hold. `options` are the general settings, each with its
+  `path` in the document, `id` (its key in a link, where it has one), `label`, `title`, `kind`,
+  range or `options`, `default`, and `apply`: what changing it costs a running simulation
+  (`live`, `shaders` or `restart`). `parts` are the kinds of part with their fields, and
+  `flows` the built-in initial conditions a `flow` part can name, with their parameters.
 
-### `load(setup) → state`
+### `preset(id) → document`
+
+A preset's whole setup document: the content of `src/presets/<id>.json`, with a variant's
+parent resolved. Change it and hand it to `load`.
+
+### `load(setup, document?) → state`
 
 Builds a new run from a setup (see [Setups](#setups)) and returns `state()` with the run
-paused at t = 0. If the build fails, the call rejects with the page's error.
+paused at t = 0. With a `document`, the run is built from that setup document, and `setup`
+says the grid and what differs from it; a document may also be given alone. If the build
+fails, the call rejects with the page's error.
 
 ### `loadAthdf(base64) → state`
 
@@ -171,8 +202,9 @@ take this build's values. A file of ours whose preset this build does not have i
 ### `state() → object`
 
 Returns `problem`, `label`, `ndim`, `n`, `amr`, `t`, `dt`, `steps`, `tEnd` (null if none),
-`running`, `finished` and `preparing`, plus `query`, the setup as a query string, and
-`adapter`, the GPU adapter the run is on.
+`running`, `finished` and `preparing`, plus `query`, the setup as a query string, `setup`,
+the setup document the run stands for now (its preset or file with every setting changed
+since: `load` it to get the same run), and `adapter`, the GPU adapter the run is on.
 `preparing` is true while a star in the initial conditions is still being settled into
 hydrostatic balance. No steps are taken during that time, and `run` waits for it to finish.
 
@@ -390,14 +422,29 @@ Changes what is drawn, leaving the run alone. These keys are accepted:
 
 ### `controls() → array`
 
-The controls the panel is showing, each as `{ id, kind, label, title, value }`. A select also
-has `options`, and a number field has `min` and `max` where it sets them. It includes controls
-inside collapsed sections.
+Everything that can be set on a running page, in two parts.
+
+First the controls of the side bar, each as `{ id, kind, label, title, value }`: the preset
+menus, the preset's featured fields, run and time control, the view, checkpoints, the movie
+settings, GPU memory. A select also has `options`, and a number field has `min` and `max`
+where it sets them. Controls inside collapsed sections are included.
+
+Then the settings of the run's setup document, which a person changes in the Setup dialog:
+the grid, the gas, gravity, the boundaries, the mesh, the solver, and the fields of each part.
+Each has `id` (its key in a link, such as `gamma` or `riemann`, or its path in the document,
+such as `parts.0.soft`), `path`, `label`, `title`, `page`, `kind`, `value`, its range or
+`options`, `apply` (what changing it costs: `live`, `shaders` or `restart`), and `unavailable`,
+the reasons it cannot be used in this setup, where there are any.
 
 ### `control(id, value?)`
 
 Sets one control, or presses a button when it is given no value, exactly as a person would.
 It then waits for whatever the change starts, such as a rebuild of the shaders or a restart.
+
+An `id` that is not a control of the bar is a setting of the setup document, by its link key,
+its path, or the name it had when it was a control of the bar (`res`, `levels`, `visc`,
+`bc-lo-0`, ...: old scripts keep working). The page then does the least that gets the run
+there, as the dialog's Apply does: a uniform write, new shaders, or a fresh start.
 
 This lets you change a run partway through, the way a user can: switch the Riemann solver,
 the equation of state, gravity, viscosity, or a preset parameter, without starting from t = 0.
@@ -407,9 +454,10 @@ sets it (it decides how many blocks the adaptive mesh can hold, and starts the r
 `control('gpumem', '')` returns to the guessed default. The page keeps it for later visits.
 Changes that a person's edit would restart (initial conditions, resolution) restart here too.
 
-Number fields hold values in the units the panel shows. For a problem with physical units,
-call `control('units', 'code')` first if you mean code units. The run stays paused afterwards,
-unless the control was `run`.
+Number fields of the bar hold values in the units the panel shows. For a problem with physical
+units, call `control('units', 'code')` first if you mean code units. Settings of the setup
+document are always in code units. The run stays paused afterwards, unless the control was
+`run`.
 
 ### `athdf() → { name, time, bytes, base64 }`
 

@@ -1,5 +1,5 @@
-import { all, PERIODIC, type Problem } from './types';
-import { ismLambda } from '../cooling/cooling';
+import { all, PERIODIC, type Problem } from '../../src/problems/types';
+import { ismLambda } from '../../src/cooling/cooling';
 
 // Thermal instability: interstellar gas in thermal balance at a temperature where that
 // balance is unstable. Slightly denser gas cools faster than it is heated, is squeezed by its

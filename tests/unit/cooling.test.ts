@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { defaultEosParams, makeEos } from '../../src/eos/eos';
 import { coolRate, defaultCoolingParams, integrateCooling, ismBalanceDensity, packCooling } from '../../src/cooling/cooling';
-import { balanceTemperature } from '../../src/problems/thermal_instability';
-import { binaryMasses } from '../../src/problems/binary';
+import { balanceTemperature } from '../../src/presets/names';
+import { binaryMasses } from '../../src/presets/names';
 import { configFor, initialMasses, MASS_FLOATS, packMasses, unpackMasses } from '../../src/sim';
-import { tidalDisruption } from '../../src/problems/tidal_disruption';
+import { tidalDisruption } from '../../src/presets/names';
 
 const eos = makeEos('ideal', { ...defaultEosParams(), gamma: 5 / 3 });
 

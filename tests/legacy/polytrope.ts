@@ -1,9 +1,9 @@
-import { all, OUTFLOW, type Problem, type ProblemParam } from './types';
-import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
-import { laneEmdenCached, polytropeK, polytropeMass } from './lane_emden';
-import { settlingOf } from './settle';
-import { ASTRO } from '../units/constants';
-import { gravityUnits, type UnitSystem } from '../units/units';
+import { all, OUTFLOW, type Problem, type ProblemParam } from '../../src/problems/types';
+import { dipoleField, randomField, type StarProfile } from '../../src/mhd/star_fields';
+import { laneEmdenCached, polytropeK, polytropeMass } from '../../src/problems/lane_emden';
+import { settlingOf } from '../../src/problems/settle';
+import { ASTRO } from '../../src/units/constants';
+import { gravityUnits, type UnitSystem } from '../../src/units/units';
 
 // A polytrope of index n at rest: p = K rho^(1 + 1/n). The default is n = 1, whose profile is
 // rho = rho_c sin(xi) / xi with xi = pi r / R and K = 2 G R^2 / pi, evolved with an ideal gas of

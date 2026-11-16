@@ -1,0 +1,173 @@
+/* The setup dialog (ui/setup/dialog.ts), in the page's dark look: its variables are style.css's. */
+.sd {
+  width: min(1240px, 97vw); height: min(900px, 95vh); max-width: none; max-height: none; padding: 0;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6); overflow: hidden;
+}
+.sd[open] { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; }
+.sd::backdrop { background: rgba(5, 7, 10, 0.55); }
+.sd [hidden] { display: none !important; }
+.sd h2, .sd h3, .sd h4 { margin: 0; font-weight: 600; }
+.sd h3, .sd h4 { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); }
+.sd select, .sd input[type='number'], .sd input[type='text'] { width: 100%; height: 24px; padding: 0 6px; min-width: 0; }
+.sd textarea {
+  width: 100%; font: inherit; color: var(--text); background: #1d2330; border: 1px solid var(--line);
+  border-radius: 4px; padding: 4px 6px; resize: vertical;
+}
+.sd :disabled { opacity: 0.45; cursor: default; }
+.sd button:disabled:hover { border-color: var(--line); }
+.sd :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* top: the name of what is being edited */
+.sd-top { display: flex; align-items: baseline; gap: 10px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.sd-top h2 { font-size: 14px; letter-spacing: 0.1em; text-transform: uppercase; }
+.sd-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sd-mod { color: var(--dim); white-space: nowrap; }
+.sd-x { margin-left: auto; width: 26px; height: 24px; padding: 0; font-size: 16px; line-height: 1; }
+.sd-cols { display: none; gap: 4px; margin-left: auto; }
+
+/* the three columns */
+.sd-main { display: grid; grid-template-columns: 228px minmax(0, 1fr) 300px; min-height: 0; }
+.sd-left, .sd-mid, .sd-right { overflow-y: auto; min-height: 0; padding: 10px 12px; scrollbar-width: thin; }
+.sd-left, .sd-right { display: flex; flex-direction: column; gap: 8px; }
+.sd-left { border-right: 1px solid var(--line); }
+.sd-right { border-left: 1px solid var(--line); }
+.sd-mid { display: flex; flex-direction: column; gap: 10px; }
+
+/* left: presets, library, files */
+.sd-group { display: flex; flex-direction: column; gap: 2px; margin-bottom: 6px; }
+.sd-group h4 { text-transform: none; letter-spacing: 0; font-size: 11px; margin-bottom: 2px; }
+.sd-library { display: flex; flex-direction: column; gap: 2px; }
+.sd-row { display: flex; gap: 3px; min-width: 0; }
+.sd-entry {
+  flex: 1; min-width: 0; text-align: left; height: 22px; padding: 0 6px; background: transparent; border-color: transparent;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sd-entry:hover { background: #1d2330; }
+.sd-dl { flex: none; min-width: 22px; height: 22px; padding: 0 4px; color: var(--dim); background: transparent; border-color: transparent; }
+.sd-dl:hover { color: var(--text); }
+.sd-dl.armed { color: var(--bad); border-color: var(--bad); }
+.sd-row input[type='text'] { flex: 1; height: 22px; }
+.sd-all { font-size: 12px; }
+.sd-hint { margin: 0; color: var(--dim); font-size: 11.5px; }
+.sd-files { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+/* middle: notes from reading a file, the featured strip, the pages */
+.sd-notes { border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; font-size: 12px; color: var(--dim); }
+.sd-notes ul { margin: 4px 0 0; padding-left: 18px; max-height: 96px; overflow-y: auto; }
+.sd-strip { border: 1px solid var(--line); border-radius: 4px; padding: 8px; display: flex; flex-direction: column; gap: 6px; background: rgba(108, 182, 255, 0.04); }
+.sd-strip-in { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 12px; }
+.sd-strip-in .sd-fields { display: contents; }
+.sd-tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--line); }
+.sd-tabs button, .sd-cols button {
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--dim); padding: 5px 9px;
+}
+.sd-tabs button:hover, .sd-cols button:hover { color: var(--text); }
+.sd-tabs button[aria-selected='true'], .sd-cols button[aria-selected='true'] { color: var(--text); border-bottom-color: var(--accent); }
+.sd-page { display: flex; flex-direction: column; gap: 10px; }
+.sd-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px 14px; align-items: start; }
+
+/* a field of a generated form (forms.ts) */
+.sf { display: flex; flex-direction: column; gap: 2px; min-width: 0; border-radius: 4px; }
+.sf-head { display: flex; align-items: center; gap: 6px; min-height: 16px; }
+.sf-head > label, .sf-title { color: var(--dim); font-size: 11px; line-height: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.sf-head > label.check { color: var(--text); font-size: 12px; }
+.sf-marks { margin-left: auto; display: flex; align-items: center; gap: 4px; flex: none; }
+.sf-cost { font-size: 9.5px; line-height: 12px; padding: 0 4px; border-radius: 6px; border: 1px solid var(--line); color: var(--dim); cursor: help; }
+.sf-cost.sf-live { color: var(--good); border-color: rgba(95, 208, 138, 0.4); }
+.sf-cost.sf-shaders { color: #ffb454; border-color: rgba(255, 180, 84, 0.4); }
+.sf-star { width: 18px; height: 16px; padding: 0; border: 0; background: transparent; color: var(--dim); font-size: 13px; line-height: 1; }
+.sf-star[aria-pressed='true'] { color: #ffd666; }
+.sf-body { position: relative; display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
+.sf-body > input, .sf-body > select, .sf-body > textarea { flex: 1 1 90px; }
+.sf-body > div { flex: 1 1 100%; min-width: 0; }
+.sf-check .sf-body, .sf-group > .sf-body { display: none; }
+/* A checkbox has no body of its own: switched off, the veil lies over its label, clear of the marks. */
+.sf.off.sf-check .sf-body, .sf.off.sf-group > .sf-body { display: block; position: absolute; inset: 0 60px auto 0; height: 18px; }
+.sf.off { position: relative; }
+.sf.off > .sf-head > label, .sf.off > .sf-body > :not(.sf-veil) { opacity: 0.45; }
+/* Over a control that is switched off: takes the tap a disabled control would swallow. */
+.sf-veil { position: absolute; inset: 0; cursor: help; }
+.sf-why { font-size: 11px; line-height: 14px; color: #ffb454; display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
+.sf-clear { height: 18px; padding: 0 6px; font-size: 11px; }
+.sf-phys { flex: none; font-size: 11px; color: var(--dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.sf-vec { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px; }
+.sf-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.sf-faces { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+.sf-faces, .sf-fractions, .sf-group, .sf-text:has(textarea) { grid-column: 1 / -1; }
+.sf-faces .f > span { color: var(--dim); font-size: 10.5px; }
+.sf-refs { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.sf-none { color: var(--dim); font-size: 11.5px; }
+.sf-rows { display: flex; flex-direction: column; gap: 4px; }
+.sf-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 24px; gap: 4px; max-width: 320px; }
+.sf-x { height: 24px; padding: 0; }
+.sf-add { align-self: flex-start; flex: none; height: 22px; padding: 0 8px; font-size: 12px; }
+/* A group's own fields, set in under its checkbox. */
+.sf-sub {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px 14px;
+  margin: 4px 0 2px 8px; padding-left: 10px; border-left: 2px solid var(--line);
+}
+@keyframes sf-flash { from { box-shadow: 0 0 0 2px var(--accent); } to { box-shadow: 0 0 0 2px transparent; } }
+.sf-flash { animation: sf-flash 1.2s ease-out; }
+
+/* the Objects page: a card per part */
+.sd-parts { display: flex; flex-direction: column; gap: 6px; }
+.sd-part { border: 1px solid var(--line); border-radius: 4px; background: rgba(13, 15, 20, 0.35); }
+.sd-part-head { display: flex; gap: 4px; align-items: center; padding: 4px; }
+.sd-toggle { flex: 1; min-width: 0; display: flex; gap: 8px; align-items: baseline; text-align: left; background: transparent; border-color: transparent; height: 24px; padding: 0 6px; }
+.sd-toggle::before { content: '\25B8'; font-size: 9px; width: 8px; color: var(--dim); }
+.sd-toggle[aria-expanded='true']::before { content: '\25BE'; }
+.sd-kind { font-weight: 600; white-space: nowrap; }
+.sd-id { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sd-part-head > button:not(.sd-toggle) { height: 22px; padding: 0 7px; font-size: 12px; }
+.sd-part-body { padding: 4px 10px 10px; display: flex; flex-direction: column; gap: 10px; }
+.sd-idrow { max-width: 220px; }
+.sd details.sd-add { border-top: 0; padding-top: 0; }
+.sd-add > summary {
+  display: inline-flex; text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text);
+  border: 1px solid var(--line); border-radius: 4px; padding: 3px 10px; background: #1d2330;
+}
+.sd-add > summary:hover { border-color: var(--accent); }
+.sd-add[open] > summary { margin-bottom: 6px; }
+.sd-kinds { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.sd-kinds button[aria-disabled='true'] { opacity: 0.45; cursor: help; }
+
+/* right: the preview (preview.ts) */
+.sp { display: flex; flex-direction: column; gap: 6px; }
+.sp-view { display: block; width: 100%; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 3px; touch-action: none; background: var(--bg); }
+.sp-view.grab { cursor: grab; }
+.sp-view.dragging { cursor: grabbing; }
+.sp-cap { font-size: 11px; color: var(--dim); }
+.sp-note { margin: 0; font-size: 11.5px; color: var(--dim); }
+.sp .f > span { color: var(--dim); font-size: 10.5px; }
+
+/* bottom: what is wrong, the memory, the buttons */
+.sd-bottom { border-top: 1px solid var(--line); padding: 8px 12px; display: flex; flex-direction: column; gap: 6px; }
+.sd-issues { list-style: none; margin: 0; padding: 0; max-height: 92px; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; font-size: 12px; scrollbar-width: thin; }
+.sd-issues li { color: var(--dim); }
+.sd-issues li.error { color: var(--bad); }
+.sd-issues button { all: unset; cursor: pointer; color: inherit; }
+.sd-issues button:hover { text-decoration: underline; }
+.sd-issues button:focus-visible { outline: 2px solid var(--accent); }
+.sd-foot { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.sd-mem { font-size: 12px; color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.sd-mem.bad, .sd-status.bad { color: var(--bad); }
+.sd-status { flex: 1 1 160px; min-width: 0; font-size: 12px; color: var(--dim); }
+.sd-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.sd-actions button { height: 26px; }
+.sd-apply { border-color: #3a4a66; background: #223049; font-weight: 600; }
+
+/* On a phone the three columns are tabs. */
+@media (max-width: 760px) {
+  .sd { width: 100vw; height: 100dvh; border-radius: 0; border: 0; }
+  .sd-top { flex-wrap: wrap; }
+  .sd-top h2 { display: none; }
+  .sd-cols { display: flex; order: 3; width: 100%; margin: 0; }
+  .sd-cols button { flex: 1; }
+  .sd-main { grid-template-columns: minmax(0, 1fr); }
+  .sd-left, .sd-mid, .sd-right { display: none; border: 0; }
+  .sd-main[data-col='left'] .sd-left, .sd-main[data-col='right'] .sd-right, .sd-main[data-col='mid'] .sd-mid { display: flex; }
+  .sd-issues { max-height: 64px; }
+  .sd-actions { margin-left: 0; }
+  .sp-view { max-width: 420px; }
+}

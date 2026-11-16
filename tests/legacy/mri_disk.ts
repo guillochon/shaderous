@@ -1,4 +1,4 @@
-import { all, OUTFLOW, type Problem } from './types';
+import { all, OUTFLOW, type Problem } from '../../src/problems/types';
 
 // A magnetized accretion disk: the magnetorotational instability (MRI) in a global, stratified
 // disk around one point mass, on the Cartesian grid.

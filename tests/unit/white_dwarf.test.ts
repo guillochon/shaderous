@@ -4,7 +4,7 @@ import { COMPOSITIONS } from '../../src/units/composition';
 import { ASTRO } from '../../src/units/constants';
 import { gravityUnits, codeG } from '../../src/units/units';
 import { degenerateBarotrope, whiteDwarf } from '../../src/problems/white_dwarf';
-import { collisionOrbit } from '../../src/problems/stellar_collision';
+import { collisionOrbit } from '../../src/presets/names';
 
 // Code units of 1e4 km and one solar mass, with G = 1.
 const U = gravityUnits('wd', 1e7, ASTRO.Msun);

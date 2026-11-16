@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { cellField, initialFaces } from '../../src/mhd/mhd';
 import type { SimConfig } from '../../src/sim';
-import { orszagTang } from '../../src/problems/mhd';
+import { orszagTang } from '../../src/presets/names';
 import { all, OUTFLOW, PERIODIC, type Problem } from '../../src/problems/types';
 
 const cfgOf = (problem: Problem, ndim: 2 | 3, periodic = true) =>

@@ -28,6 +28,11 @@ export function amrFits(n: number, ndim: 2 | 3, levels: number): boolean {
   return 2 * roots * AmrSim.blockBytes(ndim) <= memoryBudget();
 }
 
+/** GPU memory a grid takes at the least: a uniform grid's cells, or an adaptive one's root blocks with as many again to refine into. */
+export function gridBytes(n: number, ndim: 2 | 3, levels: number): number {
+  return levels > 0 ? 2 * ((n >> levels) / BS) ** ndim * AmrSim.blockBytes(ndim) : n ** ndim * Sim.cellBytes(ndim);
+}
+
 /** The fewest levels of refinement (at least 1) whose root blocks fit, or 0 if none do. */
 export function minAmrLevels(n: number, ndim: 2 | 3): number {
   for (let l = 1; l <= maxAmrLevels(n); l++) if (amrFits(n, ndim, l)) return l;

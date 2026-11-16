@@ -1,6 +1,6 @@
-import { MASS_FRACTION_FIELD, OUTFLOW, REFLECT, type Problem } from './types';
-import { composition } from '../units/composition';
-import { momentCoefficients, mixMoments, speciesNuclides } from '../species/mixture';
+import { MASS_FRACTION_FIELD, OUTFLOW, REFLECT, type Problem } from '../../src/problems/types';
+import { composition } from '../../src/units/composition';
+import { momentCoefficients, mixMoments, speciesNuclides } from '../../src/species/mixture';
 
 // A planar shock in air running into a bubble of helium: the shock-tube experiment of Haas &
 // Sturtevant (1987), as Quirk & Karni (1996) set it up for computation. The bubble is helium

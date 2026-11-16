@@ -1,5 +1,5 @@
-import { MASS_FRACTION_FIELD, OUTFLOW, REFLECT, type Problem } from './types';
-import { cjSpeed, znd } from '../burn/burn';
+import { MASS_FRACTION_FIELD, OUTFLOW, REFLECT, type Problem } from '../../src/problems/types';
+import { cjSpeed, znd } from '../../src/burn/burn';
 
 // Detonations of the single-step Arrhenius model (burn/burn.ts), the standard tests of
 // detonation numerics, in its standard units and parameters: fuel at rest with density and

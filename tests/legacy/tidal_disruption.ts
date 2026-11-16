@@ -1,9 +1,9 @@
-import { all, OUTFLOW_ONLY, type Problem, type ProblemParam } from './types';
-import { gm17Dipole, gm17Random, type StarProfile } from '../mhd/star_fields';
-import { laneEmden, polytropeScales } from './lane_emden';
-import { ASTRO } from '../units/constants';
-import { COMPOSITIONS } from '../units/composition';
-import { codeG, gravityUnits } from '../units/units';
+import { all, OUTFLOW_ONLY, type Problem, type ProblemParam } from '../../src/problems/types';
+import { gm17Dipole, gm17Random, type StarProfile } from '../../src/mhd/star_fields';
+import { laneEmden, polytropeScales } from '../../src/problems/lane_emden';
+import { ASTRO } from '../../src/units/constants';
+import { COMPOSITIONS } from '../../src/units/composition';
+import { codeG, gravityUnits } from '../../src/units/units';
 
 // Tidal disruption: a polytropic star passed by a point mass on a parabolic orbit.
 //

@@ -1,5 +1,5 @@
-import { all, OUTFLOW, type Problem } from './types';
-import type { EosKind } from '../eos/eos';
+import { all, OUTFLOW, type Problem } from '../../src/problems/types';
+import type { EosKind } from '../../src/eos/eos';
 
 // Sedov-Taylor similarity constant: R(t) = xi0 (E t^2 / rho)^(1/5).
 export const SEDOV_XI0: Record<string, number> = { '1.4': 1.033, '1.6667': 1.152 };

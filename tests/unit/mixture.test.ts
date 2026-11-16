@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { defaultEosParams, EOS_MODULES, makeEos, physicalEosParams, type EosKind, type EosParams } from '../../src/eos/eos';
 import { assemble } from '../../src/gpu/shaders';
 import { compSlot, compSrcSlot, hydrogenParticles, mixMoments, momentCoefficients, problemCoefficients, speciesNuclides } from '../../src/species/mixture';
-import { bubbleDensity } from '../../src/problems/shock_bubble';
+import { bubbleDensity } from '../../src/presets/names';
 import { COMPOSITIONS, composition, meanMolecularWeight, nuclearAverages } from '../../src/units/composition';
 import { flowUnits } from '../../src/units/units';
 

@@ -1,10 +1,10 @@
-import { all, OUTFLOW_ONLY, type Problem } from './types';
-import { COMPOSITIONS } from '../units/composition';
-import { codeG } from '../units/units';
-import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf, type WhiteDwarf } from './white_dwarf';
-import { makeEos, type Eos } from '../eos/eos';
-import { NET_SPECIES } from '../burn/network';
-import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
+import { all, OUTFLOW_ONLY, type Problem } from '../../src/problems/types';
+import { COMPOSITIONS } from '../../src/units/composition';
+import { codeG } from '../../src/units/units';
+import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf, type WhiteDwarf } from '../../src/problems/white_dwarf';
+import { makeEos, type Eos } from '../../src/eos/eos';
+import { NET_SPECIES } from '../../src/burn/network';
+import { hydrogenParticles, mixMoments, problemCoefficients } from '../../src/species/mixture';
 
 // A sub-Chandrasekhar Type Ia supernova by double detonation (Livne 1990; Fink et al. 2007,
 // 2010; Shen et al. 2018): a 1 M_sun white dwarf, a carbon-oxygen core under a thin shell of

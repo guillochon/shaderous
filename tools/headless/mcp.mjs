@@ -50,7 +50,8 @@ const TOOLS = [
       if (problem) {
         const p = d.problems.find((x) => x.id === problem);
         if (!p) throw new Error(`no problem "${problem}": call describe without arguments for the list`);
-        return text(p);
+        // With its setup document: what `load` takes as `document`, to change and run.
+        return text({ ...p, document: await call('preset', problem) });
       }
       return text({
         problems: d.problems.map((p) => ({ id: p.id, label: p.label, variant: p.variant, supports2d: p.supports2d, tEnd: p.tEnd, params: p.params.map((q) => `${q.id}=${q.value} [${q.min}, ${q.max}]`) })),
@@ -58,15 +59,20 @@ const TOOLS = [
         variables: d.variables,
         resolutions: d.resolutions,
         eos: d.eos, cooling: d.cooling, riemann: d.riemann, limiter: d.limiter, gravity: d.gravity, colormaps: d.colormaps,
+        setupDocument: {
+          about: 'A run can also be assembled from parts as a setup document (load: document). describe with a problem returns the document of that preset to start from.',
+          partKinds: d.setup.parts.map((k) => `${k.kind}: ${k.title}`),
+          flows: d.setup.flows.map((f) => `${f.name}: ${f.label}`),
+        },
         setupKeys: 'problem, dim (2|3), n, amr (0-5), tend, eos, gamma, K, riemann, limiter, cfl, gravity, G, cool, nu, kappa, bc (6 digits), p.<param id>, and view keys mode, field, axis, slice, log, cmap. Unknown keys are ignored, values out of range clamped.',
       });
     },
   },
   {
     name: 'load',
-    description: 'Build a new run from a setup and leave it paused at t = 0. The setup uses the keys of a shareable link, as a query string ("problem=sedov&dim=2&n=512&gamma=1.4") or an object ({"problem": "sedov", "dim": 2, "n": 512}). Returns the run\'s state, including `query`, the setup in force.',
-    inputSchema: obj({ setup: { type: ['string', 'object'], description: 'Query string, link, or object of setup keys' } }, ['setup']),
-    run: async ({ setup }) => text(await call('load', setup)),
+    description: 'Build a new run from a setup and leave it paused at t = 0. A setup is a preset with overrides, or a whole setup document (`document`) that assembles a run from parts: point masses, stars, disks, gas regions, obstacles, a magnetic field. The setup uses the keys of a shareable link, as a query string ("problem=sedov&dim=2&n=512&gamma=1.4") or an object ({"problem": "sedov", "dim": 2, "n": 512}). Returns the run\'s state, including `query`, the setup in force.',
+    inputSchema: obj({ setup: { type: ['string', 'object'], description: 'Query string, link, or object of setup keys; or a setup document itself' }, document: { type: 'object', description: 'A setup document (format "shaderous-setup", see docs/setups.md and describe().setup): the run is built from it, and `setup` then says the grid and what differs. Start from preset(id) to make one' } }),
+    run: async ({ setup, document }) => text(await call('load', setup ?? '', ...(document ? [document] : []))),
   },
   {
     name: 'run',

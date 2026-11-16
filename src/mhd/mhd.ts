@@ -114,15 +114,17 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
           out[o + 1] = (dzAx - (az(i + 1, j, k) - az(i, j, k))) / dx;
           out[o + 2] = (ay(i + 1, j, k) - ay(i, j, k) - (ax(i, j + 1, k) - ax(i, j, k))) / dx;
         }
-  } else if (spec.face) {
+  }
+  if (spec.face) {
+    // With a potential too (a uniform field through a star's or a disk's own), the two add.
+    const both = !!spec.potential;
     const F = spec.face(c.params, c.ndim);
     for (let k = 0; k < fz; k++)
       for (let j = 0; j < fx; j++)
         for (let i = 0; i < fx; i++) {
           const o = 4 * ((k * fx + j) * fx + i);
-          out[o] = F(0, lo(i), mid(j), zc(k));
-          out[o + 1] = F(1, mid(i), lo(j), zc(k));
-          out[o + 2] = F(2, mid(i), mid(j), zl(k));
+          const f = [F(0, lo(i), mid(j), zc(k)), F(1, mid(i), lo(j), zc(k)), F(2, mid(i), mid(j), zl(k))];
+          for (let a = 0; a < 3; a++) out[o + a] = both ? out[o + a] + f[a] : f[a];
         }
   }
   return out;

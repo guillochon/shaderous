@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { FIELD_MENU, FIELDS, MASS_FRACTION_FIELD } from '../../src/problems/types';
 import { fieldMeasure, readout } from '../../src/ui/units_view';
-import { TDE_UNITS } from '../../src/problems/tidal_disruption';
+import { TDE_UNITS } from '../../src/presets/names';
 import { COMPOSITIONS, meanMolecularWeight } from '../../src/units/composition';
 import { displayLabel, kelvinPerCodeT, unitOf } from '../../src/units/units';
 

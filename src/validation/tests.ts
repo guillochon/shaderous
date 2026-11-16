@@ -11,31 +11,31 @@ import { WD_UNITS } from '../problems/white_dwarf';
 import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
 import { COMPOSITIONS, composition } from '../units/composition';
-import { bubbleDensity, shockBubble } from '../problems/shock_bubble';
-import { detonationStable, DETONATION_CJ_SPEED, zndOf } from '../problems/detonation';
+import { bubbleDensity, shockBubble } from '../presets/names';
+import { detonationStable, DETONATION_CJ_SPEED, zndOf } from '../presets/names';
 import { exactRiemann } from '../reference/riemann_exact';
 import { RefHydro } from '../reference/hydro';
-import { sodX, sodY, sodZ, sodDiag, strongShock, shockTube } from '../problems/shocktube';
-import { sedov, SEDOV_XI0 } from '../problems/sedov';
-import { advection } from '../problems/advection';
-import { kelvinHelmholtz } from '../problems/kelvin_helmholtz';
-import { rayleighTaylor, RT } from '../problems/rayleigh_taylor';
-import { jeans, JEANS } from '../problems/jeans';
-import { POLY, POLY_K, polytrope, polytropeDipole, polytropeRandom } from '../problems/polytrope';
+import { sodX, sodY, sodZ, sodDiag, strongShock, type Tube } from '../presets/names';
+import { sedov, SEDOV_XI0 } from '../presets/names';
+import { advection } from '../presets/names';
+import { kelvinHelmholtz } from '../presets/names';
+import { rayleighTaylor, RT } from '../presets/names';
+import { jeans, JEANS } from '../presets/names';
+import { POLY, POLY_K, polytrope, polytropeDipole, polytropeRandom } from '../presets/names';
 import { fitLumps, previewOrbit } from '../gravity/preview';
-import { whiteDwarfStar } from '../problems/white_dwarf_star';
-import { evrard } from '../problems/evrard';
-import { tidalDisruption, tidalDisruptionDipole, tdeOrbit, TDE, TDE_STAR } from '../problems/tidal_disruption';
+import { whiteDwarfStar } from '../presets/names';
+import { evrard } from '../presets/names';
+import { tidalDisruption, tidalDisruptionDipole, tdeOrbit, TDE, TDE_STAR } from '../presets/names';
 /** The tidal disruption in the box its tests were calibrated in (the presets' is twice as wide). */
 const tdeTest: Problem = { ...tidalDisruption, box: TDE.box };
-import { sphere, spherePotential } from '../problems/sphere';
+import { sphere, spherePotential } from '../presets/names';
 import { all, PERIODIC, REFLECT, type Problem } from '../problems/types';
-import { binary } from '../problems/binary';
-import { MRI, mriDisk } from '../problems/mri_disk';
-import { thermalInstability } from '../problems/thermal_instability';
+import { binary } from '../presets/names';
+import { MRI, mriDisk } from '../presets/names';
+import { thermalInstability } from '../presets/names';
 import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
-import { alfvenWave, brioWu, fieldLoop, fieldLoopDense, mhdBlast, mhdRotor, orszagTang } from '../problems/mhd';
+import { alfvenWave, brioWu, fieldLoop, fieldLoopDense, mhdBlast, mhdRotor, orszagTang } from '../presets/names';
 import { initialFaces, setMhdSlabBytes } from '../mhd/mhd';
 import { RefMhd } from '../reference/mhd';
 import { setMhdScratchBytes } from '../mhd/amr_mhd';
@@ -373,7 +373,7 @@ async function tubeProfile(gpu: Gpu, problem: Problem, n: number, axis: number) 
   });
 }
 
-function l1VsExact(prof: Float64Array, tube: ReturnType<typeof shockTube>, t: number, ds: number, relative = false) {
+function l1VsExact(prof: Float64Array, tube: Tube, t: number, ds: number, relative = false) {
   const exact = exactRiemann(tube.left, tube.right, tube.eosParams.gamma!);
   const n = prof.length;
   let err = 0;

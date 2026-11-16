@@ -1,4 +1,4 @@
-import { OUTFLOW, PERIODIC, REFLECT, type Problem } from './types';
+import { OUTFLOW, PERIODIC, REFLECT, type Problem } from '../../src/problems/types';
 
 // Mach 3 wind tunnel with a forward-facing step (Emery 1968; Woodward & Colella 1984). Gas
 // with rho = 1.4, p = 1 (sound speed 1) flows at speed 3 through a tunnel 3 long and 1 high,

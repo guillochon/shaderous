@@ -6,7 +6,7 @@
 //   node tools/headless/cli.mjs sweep --problem sedov --dim 2 --vary gamma=1.1,1.4,1.667 --until 0.05
 //   node tools/headless/cli.mjs run "problem=kelvin-helmholtz&dim=2&n=256" --until 2 --mp4
 //   node tools/headless/cli.mjs describe [problem]
-import { mkdirSync, writeFileSync, appendFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { debrisSummary, lowerPriority, openSession, pngBytes, setupQuery } from './session.mjs';
@@ -22,6 +22,9 @@ Setup (the same keys as a shared link; see docs/api.md)
   [setup]              A query string or link: "problem=sedov&dim=2&n=512"
   --problem ID         --dim 2|3     --n CELLS     --amr LEVELS
   --set KEY=VALUE      Any other setup key, repeatable: --set gamma=1.4 --set p.mach=3
+  --setup FILE         A setup document (name.shaderous.json, see docs/setups.md) in place of
+                       --problem: a preset's file, or one saved from the Setup dialog. The
+                       keys above then say the grid and what differs from the file
 
 Stopping (default: the problem's end time)
   --until T            Run to this time (landed on exactly)
@@ -68,7 +71,7 @@ const { values: o, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     problem: { type: 'string' }, dim: { type: 'string' }, n: { type: 'string' }, amr: { type: 'string' },
-    set: { type: 'string', multiple: true },
+    set: { type: 'string', multiple: true }, setup: { type: 'string' },
     until: { type: 'string' }, steps: { type: 'string' }, every: { type: 'string' }, timeout: { type: 'string' },
     out: { type: 'string' }, png: { type: 'boolean' }, width: { type: 'string' }, height: { type: 'string' },
     view: { type: 'string', multiple: true },
@@ -112,6 +115,16 @@ if (o.help || !command) {
 if (!['run', 'sweep', 'describe'].includes(command)) usage(`unknown command "${command}"\n\n${HELP}`);
 if (o['low-priority']) lowerPriority();
 
+/** The setup document of --setup, read once: the page checks it. */
+let setupDocument;
+if (o.setup) {
+  try {
+    setupDocument = JSON.parse(readFileSync(o.setup, 'utf8'));
+  } catch (e) {
+    usage(`--setup ${o.setup}: ${e.message}`);
+  }
+}
+
 /** The setup from the positional argument and the flags. */
 function baseSetup() {
   const q = new URLSearchParams(setupQuery(command === 'describe' ? '' : setupArg));
@@ -152,7 +165,7 @@ const tag = (t) => String(+t.toPrecision(6));
 /** One run of a setup, outputs into `dir`. Returns its summary. */
 async function runOne(session, q, dir) {
   const { call } = session;
-  const st = await call('load', q.toString());
+  const st = await call('load', q.toString(), ...(setupDocument ? [setupDocument] : []));
   mkdirSync(dir, { recursive: true });
   const until = num(o.until, 'until') ?? (o.steps === undefined ? st.tEnd : undefined);
   const steps = num(o.steps, 'steps');

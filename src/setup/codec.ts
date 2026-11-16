@@ -307,9 +307,16 @@ async function pipe(bytes: Uint8Array, through: CompressionStream | Decompressio
   return out;
 }
 
+/** A value with the keys of its objects in order, so that one document always makes one link. */
+function sorted(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(sorted);
+  if (v === null || typeof v !== 'object') return v;
+  return Object.fromEntries(Object.keys(v).sort().map((k) => [k, sorted((v as Record<string, unknown>)[k])]));
+}
+
 /** A setup as the value of a link's `setup=`: minified, deflated and base64url-encoded. */
 export async function encodeSetupParam(spec: SetupSpec): Promise<string> {
-  return b64url(await pipe(new TextEncoder().encode(JSON.stringify(spec)), new CompressionStream('deflate-raw')));
+  return b64url(await pipe(new TextEncoder().encode(JSON.stringify(sorted(spec))), new CompressionStream('deflate-raw')));
 }
 
 /** The text of the document in a link's `setup=` (to be read with readSetup). Throws if it is not one. */

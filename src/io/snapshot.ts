@@ -42,7 +42,7 @@ export interface Snapshot {
  * differently in a way the alias tables in ui/link.ts cannot undo, and handle the older number
  * where the file is loaded.
  */
-export const SNAPSHOT_FORMAT = 1;
+export const SNAPSHOT_FORMAT = 2;
 
 export interface SnapshotMeta {
   program: 'shaderous';
@@ -51,6 +51,12 @@ export interface SnapshotMeta {
   build: string;
   /** the settings, as the query string of a shareable link */
   query: string;
+  /**
+   * The setup document the run's problem was compiled from (setup/spec.ts), which the query's
+   * keys are settings on top of: the file then restarts as itself whatever the preset files
+   * have become since. Files of format 1 have none, and are read through `query` alone.
+   */
+  setup?: unknown;
   /** the point masses, if the run has any */
   masses?: PointMass[];
   /** files written before there could be several: position and velocity of the one mass */

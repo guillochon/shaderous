@@ -21,6 +21,11 @@ import { COLORMAPS } from '../render/transfer';
 import { overlayGutters, paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
 import { download } from '../io/checkpoints';
 import { BUILD, errorLog } from './errors';
+import { PRESET_FILES, presetSpec } from '../presets/index';
+import { readSetup } from '../setup/codec';
+import { factsOf, factsWithout, flatten, OPTIONS, optionAt, PART_OPTIONS, partFields, unavailable, valueAt, type Option } from '../setup/options';
+import { FLOWS } from '../setup/parts/flow';
+import { cloneSetup, SETUP_FORMAT, setPath, type SetupSpec } from '../setup/spec';
 
 /** What the page lends the API: its state, and the operations its own controls use. */
 export interface AppHooks {
@@ -84,6 +89,12 @@ export interface AppHooks {
   setRecording(size: [number, number] | null): void;
   /** A frame of the recording under way has been added. */
   recordProgress(status: RecordingStatus): void;
+  /** The setup document the run stands for now: its preset or file, with every setting changed since. */
+  runningSpec(): SetupSpec;
+  /** Take an edited document: the page does the least that gets the run there. */
+  applySpec(spec: SetupSpec): Promise<void>;
+  /** Make a document runnable: the id it runs under (its preset's if it is that preset, else the custom setup's). */
+  adopt(spec: SetupSpec): string;
   /** Checkpoints are on: the clock is held at each (cfg.tStop) until it is written. */
   checkpointsOn(): boolean;
   /** Write the checkpoint the clock is held at, and arm the next (as the page does when it plays). */
@@ -206,6 +217,33 @@ function fromBase64(b64: string): Uint8Array {
 }
 
 /** A setup as a query string: one already, or an object of the same keys. */
+/**
+ * Names the settings went by when they were controls of the side bar: each still sets its
+ * option. Add to these, never remove.
+ */
+export const CONTROL_ALIASES: Record<string, string> = {
+  dim: 'domain.ndim', res: 'domain.n', levels: 'domain.amr', refhi: 'mesh.refineHi', refrho: 'mesh.refineRho', reflo: 'mesh.refineLo', tbins: 'mesh.timeBins',
+  fluffrho: 'physics.fluff.rho', fluffu: 'physics.fluff.u', fluffv: 'physics.fluff.v', fluffva: 'physics.fluff.va', cooling: 'physics.cooling',
+  visc: 'physics.viscosity', cond: 'physics.conductivity', jeansfloor: 'physics.jeansFloor', jeanscells: 'physics.jeansCells',
+};
+
+/** An option as the scripting interface lists it. */
+function optionInfo(o: Option, path: string) {
+  const c = o.control;
+  return {
+    id: o.linkKey ?? path,
+    path,
+    label: o.label,
+    title: o.tip,
+    page: o.page,
+    kind: c.type === 'check' ? 'checkbox' : c.type,
+    apply: o.apply,
+    ...(o.default !== undefined ? { default: o.default } : {}),
+    ...(c.type === 'number' ? { ...(c.min !== undefined ? { min: c.min } : {}), ...(c.max !== undefined ? { max: c.max } : {}), ...(c.integer ? { integer: true } : {}) } : {}),
+    ...(c.type === 'select' ? { options: c.choices.map((k) => ({ value: k.value, label: k.label })) } : {}),
+  };
+}
+
 function setupQuery(setup: string | Record<string, string | number | boolean>): URLSearchParams {
   if (typeof setup === 'string') return new URLSearchParams(setup.replace(/^.*\?/, ''));
   const q = new URLSearchParams();
@@ -284,6 +322,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       finished: app.finished(),
       preparing: s.preparing,
       query: app.query(),
+      setup: app.runningSpec(),
       adapter: app.adapter(),
     };
   }
@@ -723,13 +762,79 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         out.push({ id: el.id, kind: el.type, label, title, value: el.value, ...(el.min ? { min: +el.min } : {}), ...(el.max ? { max: +el.max } : {}) });
       }
     }
+    return [...out, ...settings()];
+  }
+
+  /** The settings of the run's setup document (setup/options.ts), each with its value and whether it is available. */
+  function settings() {
+    const spec = app.runningSpec();
+    const facts = factsOf(spec);
+    const out = [];
+    const listed = (o: Option) => ['number', 'select', 'check', 'text', 'vec3', 'faces'].includes(o.control.type);
+    for (const o of flatten(OPTIONS)) {
+      if (!listed(o)) continue;
+      const why = unavailable(o, facts);
+      out.push({ ...optionInfo(o, o.path), value: valueAt(spec, o.path) ?? null, ...(why.length ? { unavailable: why } : {}) });
+    }
+    (spec.parts ?? []).forEach((part, i) => {
+      const own = factsWithout(spec, i);
+      for (const o of flatten(partFields(part))) {
+        if (!listed(o)) continue;
+        const path = `parts.${i}.${o.path}`;
+        const why = unavailable(o, own);
+        out.push({ ...optionInfo({ ...o, linkKey: undefined }, path), part: part.id ?? part.kind, value: valueAt(spec, path) ?? null, ...(why.length ? { unavailable: why } : {}) });
+      }
+    });
     return out;
+  }
+
+  /** Set a setting of the setup document, by its link key, its path, or the name it had as a control of the bar. */
+  async function setOption(id: string, value: unknown) {
+    const spec = cloneSetup(app.runningSpec());
+    const face = /^bc-(lo|hi)-([012])$/.exec(id);
+    if (face) {
+      // One face of the box; a periodic face takes the opposite one with it.
+      const bc = cloneSetup((valueAt(spec, 'domain.bc') ?? { lo: [1, 1, 1], hi: [1, 1, 1] }) as { lo: number[]; hi: number[] });
+      const a = +face[2];
+      const was = bc[face[1] as 'lo' | 'hi'][a];
+      bc[face[1] as 'lo' | 'hi'][a] = Number(value);
+      if (Number(value) === 0 || was === 0) bc[face[1] === 'lo' ? 'hi' : 'lo'][a] = Number(value);
+      setPath(spec, spec.domain?.ndim === 2 && spec.domain.bc2d ? 'domain.bc2d' : 'domain.bc', bc);
+      return app.applySpec(spec);
+    }
+    const byKey = flatten(OPTIONS).find((o) => o.linkKey === id);
+    const path = CONTROL_ALIASES[id] ?? byKey?.path ?? id;
+    const o = optionAt(spec, path);
+    if (!o) throw new Error(`no control "${id}": controls() lists them`);
+    const c = o.control;
+    let v: unknown = value;
+    if (c.type === 'number') {
+      if (value === '' || value === null || value === undefined) v = c.nullable ? null : undefined;
+      else {
+        const x = Number(value);
+        if (!Number.isFinite(x)) throw new Error(`"${id}" takes a number, not "${value}"`);
+        v = Math.min(c.max ?? Infinity, Math.max(c.min ?? -Infinity, c.integer ? Math.round(x) : x));
+      }
+    } else if (c.type === 'select') {
+      const k = c.choices.find((q) => String(q.value) === String(value));
+      if (!k) throw new Error(`"${id}" has no option "${value}": use one of ${c.choices.map((q) => q.value).join(', ')}`);
+      v = k.value;
+    } else if (c.type === 'check') v = value === true || value === 1 || value === '1' || value === 'true';
+    setPath(spec, path, v);
+    await app.applySpec(spec);
   }
 
   /** Set a control (or press a button) the way a person would, and wait for what it starts. */
   async function control(id: string, value?: string | number | boolean) {
     const el = document.getElementById(id);
-    if (!el || !document.getElementById('side')!.contains(el)) throw new Error(`no control "${id}": controls() lists them`);
+    if (!el || !document.getElementById('side')!.contains(el)) {
+      // Not a control of the bar: a setting of the setup document, applied as the Setup dialog applies it.
+      await setOption(id, value);
+      await sleep(0);
+      await app.idle();
+      app.setRunning(false);
+      return;
+    }
     if (el instanceof HTMLButtonElement) el.click();
     else if (el instanceof HTMLSelectElement) {
       if (![...el.options].some((o) => o.value === String(value))) {
@@ -781,14 +886,37 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         limiter: ['koren', 'mc', 'vanleer', 'minmod'],
         gravity: [...GRAVITY_MODES],
         colormaps: Object.keys(COLORMAPS),
+        // What a setup document may hold (docs/setups.md): the general options, the kinds of
+        // part with their fields, and the built-in flows with their parameters.
+        setup: {
+          format: SETUP_FORMAT,
+          options: flatten(OPTIONS).filter((o) => o.control.type !== 'group').map((o) => optionInfo(o, o.path)),
+          parts: Object.values(PART_OPTIONS).map((k) => ({ kind: k.kind, label: k.label, title: k.tip, fields: flatten(k.fields).filter((o) => o.control.type !== 'group').map((o) => optionInfo({ ...o, linkKey: undefined }, o.path)) })),
+          flows: Object.values(FLOWS).map((f) => ({ name: f.name, label: f.label, title: f.tip, wholeBox: f.wholeBox, fields: f.fields })),
+        },
       };
     },
 
+    /** A preset's whole setup document: a starting point for one of your own. */
+    preset(id: string) {
+      const spec = presetSpec(id);
+      if (!spec) throw new Error(`unknown problem "${id}": describe() lists them`);
+      return cloneSetup(spec);
+    },
+
     /** Load a setup (a query string, a URL, or an object of query keys) as a new run, paused at t = 0. */
-    load: (setup: string | Record<string, string | number | boolean>) =>
+    load: (setup: string | Record<string, unknown>, document?: unknown) =>
       serial(async () => {
-        const q = setupQuery(setup);
-        if (q.get('problem') && !api.describe().problems.some((p) => p.id === q.get('problem'))) throw new Error(`unknown problem "${q.get('problem')}": describe() lists them`);
+        // A setup document alone, or after a query that says the grid and what differs from it.
+        if (typeof setup === 'object' && setup !== null && setup.format === SETUP_FORMAT) [setup, document] = ['', setup];
+        const q = setupQuery(setup as string | Record<string, string | number | boolean>);
+        if (document !== undefined) {
+          const { spec, report } = readSetup(document, (id) => PRESET_FILES[id]);
+          if (!spec) throw new Error(`not a setup document: ${report.error}`);
+          q.set('problem', app.adopt(spec));
+          q.delete('setup');
+        }
+        if (q.get('problem') && q.get('problem') !== app.cfg()?.problem.id && !api.describe().problems.some((p) => p.id === q.get('problem')) && document === undefined) throw new Error(`unknown problem "${q.get('problem')}": describe() lists them`);
         await built(() => app.build(decodeLink(q)));
         return state();
       }),

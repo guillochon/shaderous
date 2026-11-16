@@ -1,4 +1,4 @@
-import { all, OUTFLOW, type Problem } from './types';
+import { all, OUTFLOW, type Problem } from '../../src/problems/types';
 
 // Evrard (1988) collapse: cold gas sphere with rho = M / (2 pi R^2 r), specific internal
 // energy 0.05 G M / R, G = M = R = 1. It collapses, bounces through a strong accretion

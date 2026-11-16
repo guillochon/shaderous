@@ -1,5 +1,5 @@
-import { all, PERIODIC, MASS_FRACTION_FIELD, type Problem } from './types';
-import { COMPOSITIONS, composition, meanMolecularWeight } from '../units/composition';
+import { all, PERIODIC, MASS_FRACTION_FIELD, type Problem } from '../../src/problems/types';
+import { COMPOSITIONS, composition, meanMolecularWeight } from '../../src/units/composition';
 
 /** The slab's sideways kick: a single mode in x, weakly modulated in z so the flow is not exactly two-dimensional. */
 function kick(x: number, y: number, z: number): number {

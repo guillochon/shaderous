@@ -1,7 +1,7 @@
-import { OUTFLOW, REFLECT, type Problem } from './types';
-import { NET_SPECIES } from '../burn/network';
-import { COMPOSITIONS } from '../units/composition';
-import { flowUnits, toCode } from '../units/units';
+import { OUTFLOW, REFLECT, type Problem } from '../../src/problems/types';
+import { NET_SPECIES } from '../../src/burn/network';
+import { COMPOSITIONS } from '../../src/units/composition';
+import { flowUnits, toCode } from '../../src/units/units';
 
 // A carbon-oxygen detonation, burned by the trained network of the 13-isotope alpha chain
 // (burn/network.ts): white dwarf matter (equal parts C12 and O16 by mass, degenerate electrons,

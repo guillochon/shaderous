@@ -1,6 +1,6 @@
-import { all, OUTFLOW, type PointMass, type Problem } from './types';
-import { ASTRO } from '../units/constants';
-import { gravityUnits } from '../units/units';
+import { all, OUTFLOW, type PointMass, type Problem } from '../../src/problems/types';
+import { ASTRO } from '../../src/units/constants';
+import { gravityUnits } from '../../src/units/units';
 
 // Binary accretion: two point masses on a Kepler orbit inside a gas disk that orbits them both.
 //

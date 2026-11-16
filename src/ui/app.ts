@@ -1,6 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
-import { decodeLink, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, type LinkOverrides } from './link';
+import { decodeLink, DEFAULT_SETUP, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, forgetCompileSetup, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
@@ -19,19 +19,30 @@ import type { Block } from '../amr/tree';
 import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
-import { amrFits, createSim, fieldShaderFor, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
+import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type Problem, type ProblemParam, problemUnits } from '../problems';
+import { familyById, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
 import type { MhdSpec, PointMass } from '../problems/types';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 import { installApi, type RecordingStatus } from './api';
+import { PRESET_FILES, presetSpec } from '../presets/index';
+import { CUSTOM_ID, customSetup, customVersion, setCustomSetup } from '../presets/custom';
+import { familyFor, problemOf } from '../presets/lookup';
+import { decodeSetupParam, encodeSetupParam, formatSetup, MAX_LINK, readSetup } from '../setup/codec';
+import { compiledFrom, isParamPath, paramFeatures } from '../setup/compile';
+import { optionAt, valueAt } from '../setup/options';
+import { changeBetween, runningSpec, sameSetup, setSetting, type Setting } from '../setup/running';
+import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type SetupSpec } from '../setup/spec';
+import { openSetupDialog } from './setup/dialog';
+import type { SetupHost } from './setup/host';
+import { getSetup, listSetups } from './setup/library';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const opt = (v: string | number, label: string) => `<option value="${v}">${label}</option>`;
@@ -78,12 +89,14 @@ side.innerHTML = `
   <header class="brand"><h1>SHADEROUS</h1><span id="adapter"></span></header>
 
   <section>
-    ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join(''), 'The problem to simulate: picking one starts it from its initial conditions')}
+    ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join('') + '<optgroup label="Your setups" id="own-setups" hidden></optgroup>', 'The preset to simulate, or a setup of your own: picking one starts it from its initial conditions')}
     <p class="blurb" id="blurb"></p>
     <div class="g3">
       ${field('Variant', select('variant', ''), 'row-variant', 'Versions of this problem with different setups')}
       <span id="pparams"></span>
+      <span id="pfeatured"></span>
     </div>
+    <div class="setup-row"><button id="setup" title="Every setting of the simulation: the grid, the gas, gravity, the boundaries, the solver and the objects in the box. Presets and your own setups are files that fill it in">Setup…</button><span id="setup-sum" title="The grid and the gas of this run"></span></div>
     <div class="buttons"><button id="run" title="Run or pause the simulation (space)">Pause</button><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="record" hidden title="Record the run from here as an MP4 movie (settings under Movie); press again to stop and save it. The run is 2-3 times slower while recording">Record</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button><button id="load" hidden title="Autoload is off: load the changes that wait (problem, grid, initial conditions), paused. Run loads them and plays">Load</button></div>
     <div class="io">
       <label class="check" title="Start each problem playing as soon as it loads, and play a finished run again on Reset. Off, a run waits for Play"><input id="autoplay" type="checkbox" />Autoplay</label>
@@ -96,26 +109,10 @@ side.innerHTML = `
     </div>
   </section>
 
-  <details open>
-    <summary title="Dimensions, resolution and the adaptive mesh">Grid<span class="sum" id="sum-grid"></span></summary>
-    <div class="g3">
-      ${field('Dimensions', select('dim', opt(3, '3D') + opt(2, '2D')), '', 'Two or three dimensions. A 2D run is one layer of cells in x and y')}
-      ${field('Resolution', select('res', ''), '', 'Cells across the box; on an adaptive mesh, at its finest level')}
-      ${field('Refinement', select('levels', opt(0, 'Uniform') + [1, 2, 3, 4, 5].map((l) => opt(l, `${l} level${l > 1 ? 's' : ''}`)).join('')), '', 'Adaptive mesh: levels of refinement below the coarsest grid. Uniform puts every cell at the full resolution')}
-    </div>
-    <div class="g2">
-      ${field('Refine above', number('refhi', 'step="0.05" min="0.05" max="1"'), '', 'Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more. Changes take effect without a restart')}
-      ${field('Refine above density', number('refrho', 'min="0"', 10), '', 'Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off. Changes take effect without a restart')}
-      ${field('Merge below', number('reflo', 'step="0.05" min="0" max="1"'), '', 'Adaptive mesh: four sibling blocks are merged where the indicator is below this in all of them. Kept below the refinement threshold. Changes take effect without a restart')}
-    </div>
-  </details>
-
   <details>
-    <summary title="When the run stops and how long its steps are">Time<span class="sum" id="sum-time"></span></summary>
-    <div class="g3">
+    <summary title="When the run stops, and checkpoints along the way">Time<span class="sum" id="sum-time"></span></summary>
+    <div class="g2">
       ${field('End time', number('tend', 'placeholder="none" min="0"', 1.25), '', 'The run pauses when it reaches this time. Empty runs on without end')}
-      ${field('CFL number', number('cfl', 'step="0.05" min="0.05" max="1"'), '', 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower')}
-      ${field('Local timesteps', select('tbins', opt(0, 'Off') + [1, 2, 3].map((k) => opt(k, `Up to ${1 << k}× longer`)).join('')), '', 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work')}
     </div>
     <div class="g2 ckpt">
       <label class="check" title="Save the state as an .athdf file (as Export state does) every time the clock reaches a multiple of the interval. The run stops on each of those times exactly while the file is written. You pick a folder for them first; a browser that cannot write to a folder downloads each one"><input id="ckpt" type="checkbox" />Save checkpoints</label>
@@ -154,78 +151,6 @@ side.innerHTML = `
       ${field('Contours', number('ncont', `min="1" max="${MAX_CONTOURS}" step="1"`), 'row-ncont', 'How many contour lines the slice and projection views draw, or isosurfaces the volume view draws, when Contours is on (beside the color bar): evenly spaced in log |value| between the ends of the displayed range, the ends themselves left out. A range reaching zero or below is contoured in |value| over the four decades under its largest magnitude')}
       ${field('Surface opacity', '<input id="isoa" type="range" min="0" max="1" step="0.005" />', 'row-isoa', 'Volume view, with Contours on: how opaque each isosurface is. Below 1 the surfaces behind show through')}
       ${field('Field lines', number('nflines', `min="1" max="${MAX_FIELD_LINES}" step="1"`), 'row-nflines', 'A run with a magnetic field, with Field lines on (beside the color bar): how many lines. In 2D they are contours of the flux function, this many levels: the same magnetic flux passes between any two, so they crowd where the field is strong. In 3D, this many lines traced from seeds that move with the gas, so each stays the same line as the field evolves: thin tubes in the volume view, lines along the field in the plane in the slice view. Colored by the magnetic pressure B^2/2 on a log scale over up to six decades below the strongest, as Guillochon & McCourt (2017) drew theirs: red weak, then yellow, green, cyan, blue, magenta strong')}
-    </div>
-  </details>
-
-  <details>
-    <summary title="Equation of state and the hydrodynamics solver">Hydro<span class="sum" id="sum-hydro"></span></summary>
-    <div class="g2">
-      ${field('Equation of state', select('eos', (Object.keys(EOS_LABELS) as EosKind[]).map((k) => opt(k, EOS_LABELS[k])).join('')), '', 'How pressure follows from density and internal energy. Changing it carries each cell\u2019s pressure over, and the run continues')}
-      ${field('gamma', number('gamma', 'step="0.05" min="1"'), '', 'Adiabatic index \u03b3: p = (\u03b3 - 1) \u03c1 e for an ideal gas, p = K \u03c1^\u03b3 for a barotropic one')}
-      ${field('K (p = K rho^gamma)', number('K', 'min="0"', 2), 'row-K', 'Barotropic constant K: p = K \u03c1^\u03b3. With \u03b3 = 1 it is the square of the sound speed')}
-      ${field('Radiation constant a', number('arad', 'min="0"', 2), 'row-arad', 'Radiation pressure a T\u2074 / 3 is added to the gas pressure')}
-      ${field('Degeneracy density', number('degrho', 'min="0"', 2), 'row-degrho', 'Density at which the electrons\u2019 Fermi momentum reaches m\u2091c: well below it their pressure goes as \u03c1^5/3, well above it as \u03c1^4/3. For a problem with physical units it is set from the composition (about 2\u00d710\u2076 g/cm\u00b3 for C/O); in code units')}
-      ${field('Degeneracy pressure scale', number('degp', 'min="0"', 2), 'row-degp', 'The scale \u03c0 m\u2091\u2074 c\u2075 / 3h\u00b3 of the degenerate electron pressure (6\u00d710\u00b2\u00b2 dyn/cm\u00b2). Set from physical constants for a problem with physical units; in code units')}
-      ${field('Ionization temperature', number('iont', 'min="0"', 2), 'row-iont', 'The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Hydrogen is half ionized well below it (around 10\u2074 K at stellar-atmosphere densities). Set from physical constants for a problem with physical units')}
-      ${field('Saha density', number('ionrho', 'min="0"', 2), 'row-ionrho', 'Density scale of the Saha equation, \u03bc m\u1d64 (2\u03c0 m\u2091 k T\u1d62 / h\u00b2)^3/2 in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a problem with physical units')}
-      ${field('Tenuous below density', number('fluffrho', 'min="0"', 10), '', 'Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off. Placing a star with the star tool sets these from the star if they are off')}
-      ${field('Max specific energy', number('fluffu', 'min="0"', 2), 'row-fluffu', 'Largest internal energy per unit mass tenuous gas may have. 0 is no cap')}
-      ${field('Max speed', number('fluffv', 'min="0"', 2), 'row-fluffv', 'Largest speed tenuous gas may have. 0 is no cap')}
-      ${field('Max Alfv\u00e9n speed', number('fluffva', 'min="0"', 2), 'row-fluffva', 'With a magnetic field: largest Alfv\u00e9n speed |B| / \u221a\u03c1 anywhere. Where the field is stronger than that for the gas it threads (a disk\u2019s thin corona, the gas a sink has emptied), mass is added at rest until it is not, so those few cells cannot set the timestep. Not conservative. 0 is no cap')}
-      ${field('Riemann solver', select('riemann', opt('hllc', 'HLLC') + opt('hllclm', 'HLLC, low Mach') + opt('hll', 'HLL')), '', 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust')}
-      ${field('Limiter', select('limiter', opt('koren', 'Third order (Koren)') + opt('mc', 'Monotonized central') + opt('vanleer', 'van Leer') + opt('minmod', 'Minmod')), '', 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust')}
-    </div>
-  </details>
-
-  <details>
-    <summary title="Radiative cooling and heating">Cooling<span class="sum" id="sum-cool"></span></summary>
-    <div class="g2">
-      ${field('Cooling function', select('cooling', (Object.keys(COOLING_LABELS) as CoolingKind[]).map((k) => opt(k, COOLING_LABELS[k])).join('')), '', 'Optically thin radiative cooling (and heating) of the gas')}
-      ${field('Coefficient \u039b\u2080', number('crate', 'min="0"', 2), 'row-crate', 'Power law: the cooling rate per unit volume is \u03c1\u00b2 \u039b\u2080 T^\u03b1')}
-      ${field('Exponent of T', number('calpha', 'step="0.25" min="-4" max="4"'), 'row-calpha', 'Power law: the exponent \u03b1 of T in the cooling rate (1/2 is bremsstrahlung)')}
-      ${field('Heating rate', number('cheat', 'min="0"', 2), 'row-cheat', 'Heating per unit mass (power law), or the heating rate at unit density (interstellar)')}
-      ${field('Kelvin per unit T', number('ctunit', 'min="0"', 2), 'row-ctunit', 'Interstellar: kelvin per code unit of temperature (code density is atoms per cm\u00b3)')}
-      ${field('Temperature floor', number('ctfloor', 'min="0"', 2), 'row-ctfloor', 'Gas at or below this temperature does not cool')}
-    </div>
-  </details>
-
-  <details>
-    <summary title="Viscosity and thermal conduction">Diffusion<span class="sum" id="sum-diff"></span></summary>
-    <div class="g2">
-      ${field('Viscosity \u03bd', number('visc', 'min="0" data-start="0.0001"', 1.25), '', 'Kinematic viscosity: the stress is \u03c1 \u03bd times the shear. Obstacles hold the gas at their walls. 0 is off')}
-      ${field('Conductivity \u03ba', number('cond', 'min="0" data-start="0.0001"', 1.25), '', 'Thermal conduction: the heat flux is -\u03ba \u03c1 grad T, so the temperature of an ideal gas diffuses at (\u03b3 - 1) \u03ba. 0 is off')}
-    </div>
-  </details>
-
-  <details>
-    <summary title="What happens to gas at the faces of the box">Boundaries<span class="sum" id="sum-bc"></span></summary>
-    <div class="g2">
-      ${['x', 'y', 'z'].map((ax, a) => (['lo', 'hi'] as const).map((side) =>
-        field(`${ax} ${side === 'lo' ? 'lower' : 'upper'} face`, select(`bc-${side}-${a}`, BC_KINDS.map((k, i) => `<option value="${i}" title="${k.title}">${k.label}</option>`).join('')), `row-bc-${side}-${a}`,
-          `What the gas meets at the ${side === 'lo' ? 'lower' : 'upper'} ${ax} face of the box`)).join('')).join('')}
-      ${field('Damping from r', number('dampr', 'min="0" step="0.25"'), 'row-dampr', 'Radius from the box center where the damping zone starts. Beyond it the gas is relaxed toward the state it started in, more strongly toward the edge, so waves and gas leave quietly and the boundaries see the initial state')}
-      ${field('Damping rate', number('damprate', 'min="0" step="0.5"'), 'row-damprate', 'How many times per local orbital period the gas at the box edge is relaxed toward its initial state. The rate rises from 0 at the inner radius. 0 is off')}
-    </div>
-  </details>
-
-  <details>
-    <summary title="Uniform gravity and self-gravity">Gravity<span class="sum" id="sum-grav"></span></summary>
-    <div class="g3">
-      ${field('Gravity', select('gravity', [
-        ['off', 'Off', 'No gravity (point masses still pull)'],
-        ['constant', 'Constant', 'A uniform field of strength G pointing down: -y in 2D, -z in 3D'],
-        ['periodic', 'Self, periodic', 'Self-gravity of the gas in a periodic box (3D only)'],
-        ['isolated', 'Self, isolated', 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D only)'],
-      ].map(([v, l, t]) => `<option value="${v}" title="${t}">${l}</option>`).join('')), '', 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way')}
-      ${field('G', number('G', 'min="0"', 1.5), 'row-G', 'Gravitational constant, or the strength of the uniform field')}
-      ${field('V-cycles', number('vcycles', 'step="1" min="1" max="8"'), '', 'Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step: cycles after the first run only while the residual is above 1e-4 of the source and still falling')}
-    </div>
-    <div class="g3 jeans">
-      <label class="check" title="Pressure floor that keeps the Jeans length resolved (Truelove)"><input id="jeansfloor" type="checkbox" />Jeans floor</label>
-      ${field('Cells per Jeans length', number('jeanscells', 'step="1" min="4" max="32"'), '', 'The Jeans floor raises the pressure so the Jeans length spans at least this many cells')}
-    </div>
-    <div class="checks">
-      <label class="check" title="Flux-form gravitational work: conserves total energy"><input id="fluxwork" type="checkbox" />Conserve energy</label>
     </div>
   </details>
 
@@ -301,9 +226,31 @@ $('colorbar').innerHTML = `
   <label class="scrub" title="Opacity of the gas in the volume view"><input id="opacity" type="range" min="0" max="1" step="0.005" aria-label="Opacity" /><span>Opac<output id="opacity-out"></output></span></label>
 `;
 
-/** Show a preset in the problem and variant menus. */
+/** The user's own setups in the problem menu: the custom one the page holds, and the library's. */
+function showOwnSetups() {
+  const own = $('own-setups');
+  const custom = customSetup();
+  const names = listSetups();
+  const key = `${customVersion()}|${names.join('|')}`;
+  if (own.dataset.key !== key) {
+    own.dataset.key = key;
+    own.replaceChildren();
+    const add = (value: string, label: string) => {
+      const o = document.createElement('option');
+      o.value = value;
+      o.textContent = label; // a name from a file: text, never markup
+      own.append(o);
+    };
+    if (custom) add(CUSTOM_ID, custom.problem.label);
+    for (const n of names) add(`lib:${n}`, n);
+  }
+  own.hidden = !custom && names.length === 0;
+}
+
+/** Show a preset (or the custom setup) in the problem and variant menus. */
 function showProblem(id: string) {
-  const fam = familyOf(id);
+  showOwnSetups();
+  const fam = familyFor(id);
   $<HTMLSelectElement>('problem').value = fam.id;
   const variant = $<HTMLSelectElement>('variant');
   if (variant.dataset.family !== fam.id) {
@@ -312,11 +259,13 @@ function showProblem(id: string) {
   }
   variant.value = id;
   variant.disabled = fam.variants.length < 2;
+  // A setup that is not a preset has no variants to show.
+  $('row-variant').hidden = id === CUSTOM_ID;
 }
 // The page opens on the preset it is about to load, not on the first in the menu.
 const firstLink = decodeLink(new URLSearchParams(location.search));
 showProblem(firstLink.problem);
-$('blurb').textContent = problemById(firstLink.problem).blurb;
+$('blurb').textContent = problemOf(firstLink.problem).blurb;
 
 // Enter in a field to type in applies the value and lets go of the field: leaving it fires the
 // change the browser has not fired yet, and the page's keys (space runs) work again.
@@ -1028,7 +977,7 @@ try {
  */
 let pending: { pick?: { id: string; n: number; ndim: 2 | 3; levels: number; params?: Record<string, number> }; keepPhysics: boolean } | null = null;
 /** The preset that waits for Run, if it is another than the run's: its own controls are the ones shown. */
-const waitingProblem = (): Problem | null => (pending?.pick && cfg && pending.pick.id !== cfg.problem.id ? problemById(pending.pick.id) : null);
+const waitingProblem = (): Problem | null => (pending?.pick && cfg && pending.pick.id !== cfg.problem.id ? problemOf(pending.pick.id) : null);
 /** That preset's parameters as they will be loaded: its defaults, with what was changed while it waits. */
 const waitingParams = (p: Problem): Record<string, number> => (pending!.pick!.params ??= Object.fromEntries((p.params ?? []).map((q) => [q.id, q.value])));
 let stepOnce = false;
@@ -1184,30 +1133,12 @@ function bindRecord() {
 /** Reflect cfg and view into the controls. */
 function syncControls() {
   const two = cfg.ndim === 2;
-  // The problem and grid menus show a choice that waits for Run (Autoload off), else the run's own.
+  // The preset menus show a choice that waits for Run (Autoload off), else the run's own.
   const g = pending?.pick ?? { id: cfg.problem.id, n: cfg.n, ndim: cfg.ndim, levels: cfg.amrLevels };
-  const gProblem = problemById(g.id);
+  const gProblem = problemOf(g.id);
   const g2 = g.ndim === 2;
   showProblem(g.id);
   syncProblemParams();
-  const dim = $<HTMLSelectElement>('dim');
-  dim.value = String(g.ndim);
-  dim.options[1].disabled = !gProblem.supports2d;
-  const res = $<HTMLSelectElement>('res');
-  const wanted = (g2 ? RES_2D : RES_3D).map((n) => opt(n, g2 ? `${n}\u00b2` : `${n}\u00b3`)).join('');
-  if (res.dataset.dim !== String(g.ndim)) {
-    res.innerHTML = wanted;
-    res.dataset.dim = String(g.ndim);
-  }
-  res.value = String(g.n);
-  // Past the uniform limit a grid needs refinement levels, and enough of them for its root
-  // blocks to fit in GPU memory (picking it raises the levels to that, see build()).
-  for (const o of res.options) o.disabled = +o.value > uniformMax(g.ndim) && (g.levels === 0 || minAmrLevels(+o.value, g.ndim) === 0);
-  const levels = $<HTMLSelectElement>('levels');
-  levels.value = String(g.levels);
-  const amrOk = supportsAmr(gProblem);
-  levels.disabled = !amrOk;
-  for (const o of levels.options) o.disabled = +o.value > maxAmrLevels(g.n) || (+o.value > 0 && !amrFits(g.n, g.ndim, +o.value));
   $<HTMLInputElement>('blocks').checked = view.showBlocks;
   // Contours: lines in the slice and projection views, isosurfaces in the volume view.
   const marching = !two && view.mode === 'volume';
@@ -1237,26 +1168,10 @@ function syncControls() {
   const axisRow = $('row-axis');
   if (axisRow.querySelector('span')!.textContent !== axisLabel) axisRow.querySelector('span')!.textContent = axisLabel;
   axisRow.title = view.mode === 'projection' && !two ? 'The axis the projection sums along' : 'The axis the slice is perpendicular to';
-  const gravity = $<HTMLSelectElement>('gravity');
-  for (const o of gravity.options) o.disabled = two && isSelfGravity(o.value as GravityMode);
   const self = isSelfGravity(cfg.gravity);
-  for (const id of ['vcycles', 'jeansfloor']) $<HTMLInputElement>(id).disabled = !self;
-  // G is idle without gravity, unless point masses use it.
-  const masses = !!cfg.problem.masses || placed.length > 0;
-  $<HTMLInputElement>('G').disabled = cfg.gravity === 'off' && !masses;
-  $<HTMLInputElement>('refhi').value = String(cfg.refineHi);
-  $<HTMLInputElement>('refrho').value = String(+cfg.refineRho.toPrecision(4));
-  $<HTMLInputElement>('refrho').disabled = cfg.amrLevels === 0;
-  $<HTMLInputElement>('fluffrho').value = String(+cfg.fluff.rho.toPrecision(4));
-  $<HTMLInputElement>('fluffu').value = String(+cfg.fluff.u.toPrecision(4));
-  $<HTMLInputElement>('fluffv').value = String(+cfg.fluff.v.toPrecision(4));
-  $<HTMLInputElement>('fluffva').value = String(+(cfg.fluff.va ?? 0).toPrecision(4));
-  $('row-fluffva').hidden = !cfg.problem.mhd;
-  $<HTMLInputElement>('fluffu').disabled = $<HTMLInputElement>('fluffv').disabled = !(cfg.fluff.rho > 0);
-  $<HTMLInputElement>('reflo').value = String(cfg.refineLo);
-  $<HTMLInputElement>('refhi').disabled = $<HTMLInputElement>('reflo').disabled = cfg.amrLevels === 0;
-  $('sum-grid').textContent = `${g.n}${g2 ? '\u00b2' : '\u00b3'}, ${g.levels ? `${g.levels} level${g.levels > 1 ? 's' : ''}` : 'uniform'}`;
-  $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}, CFL ${cfg.cfl}${ckpt.on ? `, checkpoints every ${+ckpt.every.toPrecision(6)}` : ''}`;
+  $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}${ckpt.on ? `, checkpoints every ${+ckpt.every.toPrecision(6)}` : ''}`;
+  // What the Setup dialog holds, at a glance: the grid and the gas.
+  $('setup-sum').textContent = `${g.n}${g2 ? '²' : '³'}${g.levels ? `, ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''} · ${EOS_LABELS[cfg.eos]}`;
   showCheckpoints();
   // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
   // refinement levels on a uniform grid.
@@ -1283,66 +1198,12 @@ function syncControls() {
   const fieldName = viewFieldName();
   $('sum-view').textContent = unitLabel ? `${fieldName}, ${unitLabel}` : fieldName;
   showRange();
-  $('sum-hydro').textContent = `${EOS_LABELS[cfg.eos]}, ${cfg.riemann.toUpperCase()}`;
-  const uniform = cfg.gext.some((g) => g !== 0);
-  $('sum-grav').textContent = [cfg.gravity === 'off' ? '' : cfg.gravity, uniform ? 'uniform field' : ''].filter(Boolean).join(' + ') || 'off';
   $<HTMLInputElement>('tend').value = Number.isFinite(cfg.tEnd) ? String(cfg.tEnd) : '';
   $('blurb').textContent = pending
     ? pending.pick
       ? `Not loaded yet: press Run to load ${gProblem.label} at ${g.n}${g2 ? '²' : '³'}${g.levels ? ` with ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''}.`
       : 'Changed, not loaded yet: press Run to start again with the new parameters.'
     : cfg.restart ? `${cfg.restart.tool ? 'A star’s magnetic field was added' : 'Loaded from a file'}, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
-  $<HTMLSelectElement>('eos').value = cfg.eos;
-  // The tabulated white dwarf equation of state works in cgs: only a preset with physical units can use it.
-  const helmOpt = $<HTMLSelectElement>('eos').querySelector<HTMLOptionElement>('option[value="helmholtz"]');
-  if (helmOpt) helmOpt.disabled = cfg.problem.eos !== 'helmholtz' && !cfg.problem.units;
-  $<HTMLInputElement>('gamma').value = String(+cfg.eosParams.gamma.toFixed(4));
-  $<HTMLInputElement>('K').value = String(cfg.eosParams.K);
-  $<HTMLInputElement>('arad').value = String(cfg.eosParams.arad);
-  const eosRows: [string, keyof EosParams, boolean][] = [
-    ['degrho', 'degRho', cfg.eos === 'degenerate'],
-    ['degp', 'degP', cfg.eos === 'degenerate'],
-    ['iont', 'ionT', cfg.eos === 'ionizing'],
-    ['ionrho', 'ionRho', cfg.eos === 'ionizing'],
-  ];
-  for (const [id, key, shown] of eosRows) {
-    $<HTMLInputElement>(id).value = String(+cfg.eosParams[key].toPrecision(6));
-    $(`row-${id}`).style.display = shown ? '' : 'none';
-  }
-  $('row-K').style.display = cfg.eos === 'barotropic' ? '' : 'none';
-  $('row-arad').style.display = cfg.eos === 'gas_radiation' || cfg.eos === 'degenerate' ? '' : 'none';
-  // Cooling acts on the internal energy, which a barotropic gas does not have.
-  const canCool = cfg.eos !== 'barotropic';
-  const cool = canCool ? cfg.cooling : 'off';
-  $<HTMLSelectElement>('cooling').value = cool;
-  $<HTMLSelectElement>('cooling').disabled = !canCool;
-  $('sum-cool').textContent = canCool ? COOLING_LABELS[cool].toLowerCase() : 'needs an energy equation';
-  const coolRows: Record<string, [keyof CoolingParams, boolean]> = {
-    crate: ['rate', cool === 'power'], calpha: ['alpha', cool === 'power'], cheat: ['heat', cool !== 'off'],
-    ctunit: ['tUnit', cool === 'ism'], ctfloor: ['tFloor', cool !== 'off'],
-  };
-  for (const [id, [key, shown]] of Object.entries(coolRows)) {
-    $<HTMLInputElement>(id).value = String(cfg.coolParams[key]);
-    $(`row-${id}`).style.display = shown ? '' : 'none';
-  }
-  // Conduction moves heat, which a barotropic gas does not carry.
-  $<HTMLInputElement>('visc').value = String(cfg.viscosity);
-  $<HTMLInputElement>('cond').value = String(cfg.conductivity);
-  $<HTMLInputElement>('cond').disabled = !canCool;
-  $('sum-diff').textContent = [cfg.viscosity > 0 ? 'viscosity' : '', conducts(cfg) ? 'conduction' : ''].filter(Boolean).join(' + ') || 'off';
-  $<HTMLSelectElement>('riemann').value = cfg.riemann;
-  $<HTMLSelectElement>('limiter').value = cfg.limiter;
-  $<HTMLInputElement>('cfl').value = String(cfg.cfl);
-  const tbins = $<HTMLSelectElement>('tbins');
-  tbins.value = String(cfg.timeBins);
-  tbins.disabled = cfg.amrLevels === 0;
-  $<HTMLSelectElement>('gravity').value = cfg.gravity;
-  $<HTMLInputElement>('G').value = String(+cfg.G.toPrecision(6));
-  $<HTMLInputElement>('vcycles').value = String(cfg.vcycles);
-  $<HTMLInputElement>('jeansfloor').checked = cfg.jeansFloor;
-  $<HTMLInputElement>('jeanscells').value = String(cfg.jeansCells);
-  $<HTMLInputElement>('jeanscells').disabled = !self || !cfg.jeansFloor;
-  $<HTMLInputElement>('fluxwork').checked = cfg.gravEnergyFlux;
   $<HTMLSelectElement>('mode').value = two ? 'slice' : view.mode;
   $<HTMLSelectElement>('field').value = view.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${view.species}` : String(view.field);
   $<HTMLSelectElement>('axis').value = String(two ? 2 : view.sliceAxis);
@@ -1362,19 +1223,6 @@ function syncControls() {
   $<HTMLInputElement>('opacity').disabled = solid;
   syncOpacity();
   editor.setEditable(!solid);
-  for (let a = 0; a < 3; a++) {
-    $<HTMLSelectElement>(`bc-lo-${a}`).value = String(cfg.bcLo[a]);
-    $<HTMLSelectElement>(`bc-hi-${a}`).value = String(cfg.bcHi[a]);
-  }
-  // A 2D run has no z faces.
-  $('row-bc-lo-2').style.display = $('row-bc-hi-2').style.display = two ? 'none' : '';
-  const kinds = [...new Set([...cfg.bcLo, ...cfg.bcHi].filter((_, i) => !two || i % 3 !== 2))];
-  // The damping zone belongs to presets that define one.
-  const damps = !!cfg.problem.damping;
-  $('row-dampr').style.display = $('row-damprate').style.display = damps ? '' : 'none';
-  $<HTMLInputElement>('dampr').value = String(cfg.dampRadius);
-  $<HTMLInputElement>('damprate').value = String(cfg.dampRate);
-  $('sum-bc').textContent = (kinds.length === 1 ? BC_KINDS[kinds[0]].label.toLowerCase() : 'mixed') + (damps && cfg.dampRate > 0 ? ' + damping' : '');
   $<HTMLSelectElement>('cmap').value = editor.colormap;
   $('run').textContent = running ? 'Pause' : 'Run';
   showLoad();
@@ -1445,29 +1293,7 @@ function syncProblemParams() {
         into[q.id] = Math.min(q.max, Math.max(q.min, v));
         // A preset that waits for Run takes the value when it loads.
         if (waitingProblem()) return syncControls();
-        // Units that follow the parameters change the physical constants an equation of state
-        // other than a barotropic one takes from them: refresh those (the preset's own values
-        // still win), and the run must start again.
-        const physical = typeof cfg.problem.units === 'function' && cfg.eos !== 'barotropic';
-        if (physical) Object.assign(cfg.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
-        if (q.id === cfg.problem.boxParam) {
-          // The side of the box: the grid's cells change size, so the run is built again.
-          const { n, ndim, amrLevels } = cfg;
-          if (autoload) build(cfg.problem.id, n, ndim, amrLevels, true);
-          else {
-            pending = { pick: { id: cfg.problem.id, n, ndim, levels: amrLevels }, keepPhysics: true };
-            running = false;
-          }
-        } else if (q.scale && !physical) {
-          // Only the physical units: the run is the same in code units.
-        } else if (q.live && sim) {
-          // Only the point masses' sizes: the run carries on.
-          sim.cfg = cfg;
-          sim.retuneMasses();
-        } else {
-          // Part of the initial conditions (an orbit, the gas's starting state): start again.
-          restartOrWait(true);
-        }
+        setParams({ [q.id]: into[q.id] });
         syncControls();
       });
     }
@@ -1496,6 +1322,82 @@ function syncProblemParams() {
     const slide = q.kind === 'slider' ? $<HTMLInputElement>(`pp-${q.id}-slide`) : null;
     if (slide && document.activeElement !== slide) slide.value = String(now[q.id]);
   }
+  syncFeatured();
+}
+
+/**
+ * The setup's featured options that are settings of the run (a viscosity, an equation of
+ * state), beside its parameters above: each the control its option has in the Setup dialog,
+ * from the same table, applied as the dialog applies it.
+ */
+function syncFeatured() {
+  const box = $('pfeatured');
+  // A preset that waits for Run shows its parameters; its settings come with it when it loads.
+  const spec = waitingProblem() ? undefined : cfg.problem.setup;
+  const feats = (spec?.featured ?? []).map(featuredOf).filter((f) => !featuredPaths(f).every(isParamPath));
+  const usable = feats.flatMap((f) => {
+    const path = featuredPaths(f)[0];
+    const o = spec ? optionAt(spec, path) : undefined;
+    return o && (o.control.type === 'number' || o.control.type === 'select' || o.control.type === 'check') ? [{ f, path, o }] : [];
+  });
+  const key = `${cfg.problem.id}|${customVersion()}|${usable.map((u) => u.path).join('|')}`;
+  if (box.dataset.key !== key) {
+    box.dataset.key = key;
+    box.replaceChildren();
+    usable.forEach(({ f, path, o }, i) => {
+      const id = `pf-${i}`;
+      const label = f.label ?? o.label;
+      const tip = f.tip ?? o.tip;
+      const c = o.control;
+      const wrap = document.createElement(c.type === 'check' ? 'label' : 'div');
+      wrap.title = tip;
+      let el: HTMLInputElement | HTMLSelectElement;
+      if (c.type === 'select') {
+        el = document.createElement('select');
+        for (const k of c.choices) el.add(new Option(k.label, String(k.value)));
+      } else {
+        el = document.createElement('input');
+        el.type = c.type === 'check' ? 'checkbox' : 'number';
+        if (c.type === 'number') {
+          el.step = c.step !== undefined ? String(c.step) : 'any';
+          if ((f.min ?? c.min) !== undefined) el.min = String(f.min ?? c.min);
+          if ((f.max ?? c.max) !== undefined) el.max = String(f.max ?? c.max);
+          if (f.factor ?? c.factor) el.dataset.factor = String(f.factor ?? c.factor);
+        }
+      }
+      el.id = id;
+      if (c.type === 'check') {
+        wrap.className = 'check pcheck';
+        wrap.append(el, label);
+      } else {
+        wrap.className = 'f';
+        const span = document.createElement('span');
+        span.textContent = label;
+        wrap.append(span, el);
+      }
+      el.addEventListener('change', () => {
+        const edited = cloneSetup(runningSpec(cfg));
+        let v: unknown;
+        if (c.type === 'check') v = (el as HTMLInputElement).checked;
+        else if (c.type === 'select') v = c.choices.find((k) => String(k.value) === el.value)?.value;
+        else if (c.type !== 'number') return;
+        else if (el.value === '' || Number.isNaN(+el.value)) v = c.nullable ? null : undefined;
+        else v = Math.min(c.max ?? Infinity, Math.max(c.min ?? -Infinity, +el.value));
+        if (v === undefined) return syncControls();
+        for (const q of featuredPaths(f)) setPath(edited, q, v);
+        void applySpec(edited);
+      });
+      box.append(wrap);
+    });
+  }
+  if (!spec || !usable.length) return;
+  const now = runningSpec(cfg);
+  usable.forEach(({ path, o }, i) => {
+    const el = $<HTMLInputElement>(`pf-${i}`);
+    const v = valueAt(now, path);
+    if (o.control.type === 'check') el.checked = !!v;
+    else if (document.activeElement !== el) el.value = v === null || v === undefined ? '' : typeof v === 'number' ? String(+v.toPrecision(6)) : String(v);
+  });
 }
 
 // Rebuilds are asynchronous (shader compilation). They run one at a time, in the order the
@@ -1525,7 +1427,7 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 }
 
 /** The grid a preset gets for the one asked for: what it supports and what fits in GPU memory. */
-function resolveGrid(problem: ReturnType<typeof problemById>, n: number, ndim: 2 | 3, levels: number) {
+function resolveGrid(problem: Problem, n: number, ndim: 2 | 3, levels: number) {
   if (!problem.supports2d) ndim = 3;
   const allowed = ndim === 2 ? RES_2D : RES_3D;
   if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
@@ -1545,7 +1447,7 @@ function load(id: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = 
   // Physics choices carry over only if every change waiting would have kept them.
   // Parameters set for this preset while it waited stay, through a change of its grid.
   const params = pending?.pick?.id === id ? pending.pick.params : undefined;
-  pending = { pick: { id, ...resolveGrid(problemById(id), n, ndim, levels), params }, keepPhysics: keepPhysics && (pending?.pick ? pending.keepPhysics : true) };
+  pending = { pick: { id, ...resolveGrid(problemOf(id), n, ndim, levels), params }, keepPhysics: keepPhysics && (pending?.pick ? pending.keepPhysics : true) };
   running = false;
   if (cfg) syncControls();
 }
@@ -1580,7 +1482,7 @@ function loadPending(play?: boolean) {
 function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false, params?: Record<string, number>) {
   pending = null; // whatever waited for Run is superseded
   return enqueue(async () => {
-    const problem = problemById(problemId);
+    const problem = problemOf(problemId);
     ({ n, ndim, levels } = resolveGrid(problem, n, ndim, levels));
     const next = configFor(problem, n, { ndim, amrLevels: levels });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
@@ -1712,7 +1614,7 @@ if (!headless) setTimeout(() => void athdfModule().catch(() => {}), 10_000);
 
 /** The state of the gas as an .athdf file (see io/athdf.ts), and its time. */
 async function athdfOf(s: Simulation) {
-  const snap = await capture(s, { program: 'shaderous', build: BUILD, query: linkQuery() });
+  const snap = await capture(s, { program: 'shaderous', build: BUILD, query: linkQuery(), setup: cfg.problem.setup });
   const { writeAthdf } = await athdfModule();
   // gzip level 1: nearly all of the saving of higher levels (files are 8% to 86% of the raw
   // size, depending on how smooth the flow is) for the least time.
@@ -1850,10 +1752,21 @@ async function importAthdf(bytes: Uint8Array): Promise<string[]> {
     const own = snap.meta !== undefined;
     let warnings: string[] = [];
     let link: LinkOverrides;
-    if (own) ({ link, warnings } = snapshotSettings(snap.meta!, BUILD));
+    if (own) {
+      let meta = snap.meta!;
+      // A file that carries its setup restarts as itself, whatever the preset files have become
+      // since: as its preset if it still is that preset, else as a custom setup.
+      const { spec } = meta.setup ? readSetup(meta.setup, (id) => PRESET_FILES[id]) : { spec: null };
+      if (spec) {
+        const q = new URLSearchParams(meta.query);
+        q.set('problem', adopt(spec));
+        meta = { ...meta, query: q.toString() };
+      }
+      ({ link, warnings } = snapshotSettings(meta, BUILD));
+    }
     else link = decodeLink(new URLSearchParams(linkQuery()));
     if (!own) {
-      const problem = problemById(link.problem);
+      const problem = problemOf(link.problem);
       if (snap.ndim === 2 && !problem.supports2d) throw new Error(`this file is 2D, and the ${problem.label} preset is 3D only: pick a 2D preset first`);
       const allowed = snap.ndim === 2 ? RES_2D : RES_3D;
       const finest = snap.rootSize[0] << maxLevel(snap);
@@ -1873,7 +1786,7 @@ async function importAthdf(bytes: Uint8Array): Promise<string[]> {
 
 /** The current settings as a query string (see ui/link.ts). */
 function linkQuery(): string {
-  return encodeLink({ cfg, view, auto: $<HTMLInputElement>('auto').checked, colormap: editor.colormap, opacity: editor.points }).toString();
+  return encodeLink({ cfg, view, auto: $<HTMLInputElement>('auto').checked, colormap: editor.colormap, opacity: editor.points, setup: customLink?.text || undefined }).toString();
 }
 
 // The address bar follows the settings, so the page can be shared or reloaded as it stands.
@@ -2001,26 +1914,292 @@ function switchEos(kind: EosKind) {
   });
 }
 
+// --- the setup document -------------------------------------------------------------------
+// Every setting of the simulation is a field of one document (setup/spec.ts). The run stands
+// for one (setup/running.ts runningSpec); the Setup dialog edits a copy and hands it back,
+// and the page does the least that gets the run there.
+
+/** A setup of the library, by name. */
+const getLibrarySetup = (name: string): SetupSpec | null => getSetup(name)?.spec ?? null;
+
+/** The custom setup's document packed for a link, once it has been (packing takes a moment). */
+let customLink: { version: number; text: string } | null = null;
+function packCustom() {
+  const c = customSetup();
+  const v = customVersion();
+  if (!c || customLink?.version === v) return;
+  customLink = { version: v, text: '' };
+  encodeSetupParam(c.spec)
+    .then((text) => {
+      if (customVersion() !== v) return;
+      // Too long for a link: the address then names no setup, and Copy link in the dialog says so.
+      customLink = { version: v, text: text.length <= MAX_LINK ? text : '' };
+      lastQuery = '';
+    })
+    .catch(() => {});
+}
+
+/**
+ * The id a document runs under: its preset's if it is that preset (on any grid), else the
+ * custom setup's, which it becomes.
+ */
+function adopt(spec: SetupSpec): string {
+  const preset = spec.id && spec.id !== CUSTOM_ID ? presetSpec(spec.id) : undefined;
+  if (preset && sameSetup(spec, preset)) return spec.id!;
+  // A preset since changed says so in its name.
+  if (preset && spec.name === preset.name) spec = { ...spec, name: `${spec.name} (modified)` };
+  setCustomSetup(spec);
+  packCustom();
+  return CUSTOM_ID;
+}
+
+/** Open a document as a new run, on its own grid (the present one where it names none). */
+function openSpec(spec: SetupSpec): Promise<void> {
+  const id = adopt(spec);
+  const d = spec.domain ?? {};
+  const g = cfg ? { n: cfg.n, ndim: cfg.ndim, levels: cfg.amrLevels } : { n: DEFAULT_SETUP.n, ndim: DEFAULT_SETUP.ndim, levels: DEFAULT_SETUP.amr };
+  return build(id, d.n ?? g.n, d.ndim ?? g.ndim, d.amr ?? g.levels);
+}
+
+/** Resolves once every queued rebuild has finished. */
+async function idle() {
+  let q: Promise<void>;
+  do {
+    q = queue;
+    await q;
+  } while (q !== queue);
+}
+
+/**
+ * Settings the run holds directly, changed mid-run: written into the configuration, then a
+ * uniform write, or new shaders where one is compiled in, as each one needs.
+ */
+function applySettings(list: { setting: Setting; value: unknown }[]) {
+  if (!list.length) return;
+  let eos: EosKind | undefined;
+  let shaders = false;
+  let gravity = false;
+  let again = false;
+  for (const { setting, value } of list) {
+    const key = setting.cfg;
+    if (key === 'eos') {
+      eos = value as EosKind;
+      continue;
+    }
+    // The diffusive fluxes are compiled in only while they are in use: switching one on or
+    // off rebuilds the passes, a new strength is only a parameter.
+    const diffusion = diffusionKey(cfg);
+    const periodic = [0, 1, 2].map((a) => cfg.bcLo[a] === 0);
+    setSetting(cfg, setting, value);
+    if (key === 'eosParams.gamma') {
+      // An energy equation needs gamma above 1. Where the species set the equation of state,
+      // gamma is part of each one's heat capacity, which the shaders are built with.
+      if (cfg.eos !== 'barotropic') cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
+      if (speciesNuclides(cfg.problem.species)) shaders = true;
+    }
+    // The merge threshold stays below the refinement one.
+    if (key === 'refineHi' || key === 'refineLo') cfg.refineLo = Math.min(cfg.refineLo, cfg.refineHi / 2);
+    if (diffusionKey(cfg) !== diffusion) shaders = true;
+    // On an adaptive mesh a newly periodic axis joins blocks that were never neighbors and
+    // may differ by several levels: build the mesh again from the start.
+    if (key === 'bc' && cfg.amrLevels > 0 && [0, 1, 2].some((a) => cfg.bcLo[a] === 0 && !periodic[a])) again = true;
+    if (key === 'gravity' || key === 'G') gravity = true;
+    if (setting.option.apply === 'shaders') shaders = true;
+  }
+  if (eos && eos !== cfg.eos) switchEos(eos);
+  else if (shaders) rebuildPipelines();
+  else applyParams();
+  if (gravity) queue.then(() => sim?.refreshPotential());
+  if (again) restartRun();
+}
+
+/**
+ * A parameter of the run's setup (a featured option of its parts) takes new values: the run
+ * carries on where the values only size the point masses or set the physical scale, is built
+ * again for a new box, and otherwise starts again from the new initial conditions.
+ */
+function setParams(changed: Record<string, number>) {
+  const defs = (cfg.problem.params ?? []).filter((q) => q.id in changed);
+  if (!defs.length) return;
+  for (const q of defs) cfg.params[q.id] = Math.min(q.max, Math.max(q.min, changed[q.id]));
+  // Units that follow the parameters change the physical constants an equation of state other
+  // than a barotropic one takes from them: refresh those (the setup's own values still win),
+  // and the run must start again.
+  const physical = typeof cfg.problem.units === 'function' && cfg.eos !== 'barotropic';
+  if (physical) Object.assign(cfg.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
+  if (defs.some((q) => q.id === cfg.problem.boxParam)) {
+    // The side of the box: the grid's cells change size, so the run is built again.
+    const { n, ndim, amrLevels } = cfg;
+    if (autoload) build(cfg.problem.id, n, ndim, amrLevels, true);
+    else {
+      pending = { pick: { id: cfg.problem.id, n, ndim, levels: amrLevels }, keepPhysics: true };
+      running = false;
+    }
+  } else if (defs.every((q) => q.scale) && !physical) {
+    // Only the physical units: the run is the same in code units.
+  } else if (defs.every((q) => q.live || (q.scale && !physical)) && sim) {
+    // Only the point masses' sizes: the run carries on.
+    sim.cfg = cfg;
+    sim.retuneMasses();
+  } else {
+    // Part of the initial conditions (an orbit, the gas's starting state): start again.
+    restartOrWait(true);
+  }
+}
+
+/**
+ * If an edited document differs from the run's in its parts only by values of the setup's own
+ * parameters, take those as parameters (the run stays the setup it is, and its link stays
+ * short) and say so.
+ */
+function applyAsParams(edited: SetupSpec): boolean {
+  const base = cfg.problem.setup;
+  if (!base) return false;
+  const changed: Record<string, number> = {};
+  for (const f of paramFeatures(base)) {
+    const v = getPath(edited, featuredPaths(f)[0]);
+    const x = typeof v === 'boolean' ? (v ? 1 : 0) : v;
+    if (typeof x === 'number' && x !== cfg.params[featuredId(f)]) changed[featuredId(f)] = x;
+  }
+  if (!Object.keys(changed).length) return false;
+  if (changeBetween(runningSpec({ ...cfg, params: { ...cfg.params, ...changed } }), edited).structure) return false;
+  setParams(changed);
+  return true;
+}
+
+/**
+ * Take an edited document: nothing, a uniform write, new shaders or a fresh start, whichever is
+ * the least that gets the run there (setup/running.ts changeBetween). Resolves once it has.
+ */
+async function applySpec(edited: SetupSpec): Promise<void> {
+  if (!cfg) return;
+  let change = changeBetween(runningSpec(cfg), edited);
+  if (change.cost === 'none') return;
+  if (change.structure && applyAsParams(edited)) {
+    // Only the setup's own parameters differed in its parts: the run is still that setup.
+    await idle();
+    change = changeBetween(runningSpec(cfg), edited);
+  }
+  if (change.structure) {
+    // The parts, the box, the units or what the gas is made of: a new run from the document.
+    await openSpec(edited);
+  } else {
+    if (change.grid) {
+      // The same setup on another grid keeps the physics chosen (in the same dimensions).
+      const d = edited.domain ?? {};
+      await build(cfg.problem.id, d.n ?? cfg.n, d.ndim ?? cfg.ndim, d.amr ?? cfg.amrLevels, true);
+    }
+    // The grid the run got may not be the one asked for (memory): settings are compared on it.
+    const target = { ...edited, domain: { ...edited.domain, ndim: cfg.ndim, n: cfg.n, amr: cfg.amrLevels } };
+    let now = changeBetween(runningSpec(cfg), target);
+    if (now.described) {
+      // Its name, description or featured options: the run goes on under the edited document.
+      const p = problemOf(adopt(target));
+      const fresh = configFor(p, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels });
+      cfg = { ...cfg, problem: sizedProblem(p, fresh.params), params: fresh.params };
+      if (sim) sim.cfg = cfg;
+      // A point mass's softening or sink: taken up where the masses are now.
+      if (now.retune) sim?.retuneMasses();
+      now = changeBetween(runningSpec(cfg), target);
+    }
+    applySettings(now.settings);
+  }
+  await idle();
+  syncControls();
+}
+
+/** A link that opens the page with a document: its preset and what differs, or the document whole. */
+async function linkFor(spec: SetupSpec): Promise<{ url: string; tooLong: boolean }> {
+  const d = spec.domain ?? {};
+  const [n, ndim, amrLevels] = [d.n ?? cfg.n, d.ndim ?? cfg.ndim, d.amr ?? cfg.amrLevels];
+  const base = spec.id && spec.id !== CUSTOM_ID ? presetSpec(spec.id) : undefined;
+  const fromPreset = base ? changeBetween({ ...base, domain: { ...base.domain, ndim, n, amr: amrLevels } }, spec) : null;
+  let c: SimConfig;
+  let setup: string | undefined;
+  if (fromPreset && !fromPreset.structure) {
+    c = configFor(problemOf(spec.id!), n, { ndim, amrLevels });
+    for (const { setting, value } of fromPreset.settings) setSetting(c, setting, value);
+  } else {
+    c = configFor(compiledFrom({ ...spec, id: CUSTOM_ID }).problem, n, { ndim, amrLevels });
+    setup = await encodeSetupParam(spec);
+  }
+  const q = encodeLink({ cfg: c, view: viewDefaults(c.problem, ndim), auto: true, colormap: 'inferno', opacity: defaultOpacity(), setup });
+  const url = `${location.origin}${location.pathname}?${q}`;
+  return { url, tooLong: url.length > MAX_LINK };
+}
+
+/** What the Setup dialog asks of the page (ui/setup/host.ts). */
+const setupHost: SetupHost = {
+  running: () => runningSpec(cfg),
+  apply: (spec) => applySpec(spec),
+  presets: () =>
+    MENU.map((g) => ({
+      group: g.group,
+      entries: g.families.flatMap((f) => f.variants.map((v) => ({ id: v.problem.id, label: f.variants.length > 1 ? `${f.label}: ${v.label}` : f.label }))),
+    })),
+  presetSpec: (id) => presetSpec(id)!,
+  // A downloaded preset is whole: a variant's file with its parent's content in it.
+  presetFile: (id) => formatSetup(presetSpec(id)!),
+  memory(spec) {
+    const d = spec.domain ?? {};
+    const [n, ndim, levels] = [d.n ?? cfg.n, d.ndim ?? cfg.ndim, d.amr ?? cfg.amrLevels];
+    return { need: gridBytes(n, ndim, levels), budget: memoryBudget() };
+  },
+  grids: () => ({ res2d: RES_2D, res3d: RES_3D, uniformMax2d: uniformMax(2), uniformMax3d: uniformMax(3), maxLevels: maxAmrLevels }),
+  link: linkFor,
+  units(spec) {
+    try {
+      const u = compiledFrom(spec).problem.units;
+      return typeof u === 'function' ? u({}) : u;
+    } catch {
+      return undefined;
+    }
+  },
+  physical: () => units().physical && unitSys !== 'code',
+};
+
+/** A setup file dropped on the page: opened in the dialog, with what reading it left out. */
+async function openSetupFile(file: File) {
+  const { spec, report } = readSetup(await file.text(), (id) => PRESET_FILES[id]);
+  if (!spec) return void alert(`Could not open ${file.name}: ${report.error}`);
+  openSetupDialog(setupHost, { file: spec, notes: report.notes });
+}
+window.addEventListener('dragover', (e) => {
+  if ([...(e.dataTransfer?.items ?? [])].some((i) => i.kind === 'file')) e.preventDefault();
+});
+window.addEventListener('drop', (e) => {
+  const file = [...(e.dataTransfer?.files ?? [])].find((f) => /\.json$/i.test(f.name));
+  if (!file) return;
+  e.preventDefault();
+  void openSetupFile(file);
+});
+
 function bind() {
   const on = (id: string, fn: (el: HTMLInputElement & HTMLSelectElement) => void, ev = 'change') =>
     $(id).addEventListener(ev, () => fn($(id) as HTMLInputElement & HTMLSelectElement));
   const numOr = (el: HTMLInputElement, fallback: number) => (el.value === '' || Number.isNaN(+el.value) ? fallback : +el.value);
 
-  const picked = () => ({
-    id: $<HTMLSelectElement>('variant').value,
-    n: +$<HTMLSelectElement>('res').value,
-    ndim: (+$<HTMLSelectElement>('dim').value === 2 ? 2 : 3) as 2 | 3,
-    levels: +$<HTMLSelectElement>('levels').value,
-  });
+  // The grid is the run's own, or the one that waits for Run: the Setup dialog changes it.
+  const picked = () => {
+    const g = pending?.pick ?? { id: cfg.problem.id, n: cfg.n, ndim: cfg.ndim, levels: cfg.amrLevels };
+    return { id: $<HTMLSelectElement>('variant').value || g.id, n: g.n, ndim: g.ndim, levels: g.levels };
+  };
   // A preset with a grid of its own (Problem.grid) opens on it; another keeps the grid chosen.
   const pickedPreset = () => {
     const p = picked();
-    const g = problemById(p.id).grid;
+    const g = problemOf(p.id).grid;
     return g ? { ...p, ndim: g.ndim ?? p.ndim, n: g.n ?? p.n, levels: g.amr ?? p.levels } : p;
   };
   on('problem', (el) => {
+    // One of the user's own setups, from the library: opened as the custom setup.
+    if (el.value.startsWith('lib:')) {
+      const spec = getLibrarySetup(el.value.slice(4));
+      if (spec) void openSpec(spec);
+      else syncControls();
+      return;
+    }
     // A new problem opens on its first variant.
-    showProblem(familyById(el.value).variants[0].problem.id);
+    showProblem(el.value === CUSTOM_ID ? CUSTOM_ID : familyById(el.value).variants[0].problem.id);
     const { id, n, ndim, levels } = pickedPreset();
     load(id, n, ndim, levels);
   });
@@ -2028,18 +2207,7 @@ function bind() {
     const { id, n, ndim, levels } = pickedPreset();
     load(id, n, ndim, levels);
   });
-  on('dim', () => {
-    const { id, ndim, levels } = picked();
-    load(id, 0, ndim, levels); // 0: use the default resolution for that dimensionality
-  });
-  on('res', () => {
-    const { id, n, ndim, levels } = picked();
-    load(id, n, ndim, levels, true);
-  });
-  on('levels', () => {
-    const { id, n, ndim, levels } = picked();
-    load(id, n, ndim, levels, true);
-  });
+  $('setup').addEventListener('click', () => openSetupDialog(setupHost));
   on('blocks', (el) => (view.showBlocks = el.checked));
   on('contours', (el) => {
     view.contours = el.checked;
@@ -2153,146 +2321,6 @@ function bind() {
     syncControls();
   });
 
-  on('eos', (el) => {
-    switchEos(el.value as EosKind);
-    syncControls();
-  });
-  on('gamma', (el) => {
-    cfg.eosParams.gamma = Math.max(1, numOr(el, cfg.eosParams.gamma));
-    if (cfg.eos !== 'barotropic') cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
-    // Where the species set the equation of state, gamma is part of each species' heat capacity,
-    // which the shaders are built with (species/mixture.ts).
-    if (speciesNuclides(cfg.problem.species)) rebuildPipelines();
-    else applyParams();
-  });
-  on('K', (el) => {
-    cfg.eosParams.K = numOr(el, cfg.eosParams.K);
-    applyParams();
-  });
-  on('arad', (el) => {
-    cfg.eosParams.arad = numOr(el, cfg.eosParams.arad);
-    applyParams();
-  });
-  for (const [id, key] of [['degrho', 'degRho'], ['degp', 'degP'], ['iont', 'ionT'], ['ionrho', 'ionRho']] as const) {
-    on(id, (el) => {
-      // Scales of the equation of state: only positive values mean anything.
-      const v = numOr(el, cfg.eosParams[key]);
-      if (v > 0) cfg.eosParams[key] = v;
-      applyParams();
-    });
-  }
-  on('cooling', (el) => {
-    cfg.cooling = el.value as CoolingKind;
-    // The cooling function is compiled into the update pass; the run carries on.
-    rebuildPipelines().then(syncControls);
-  });
-  const coolInputs: [string, keyof CoolingParams][] = [['crate', 'rate'], ['calpha', 'alpha'], ['cheat', 'heat'], ['ctunit', 'tUnit'], ['ctfloor', 'tFloor']];
-  for (const [id, key] of coolInputs) {
-    on(id, (el) => {
-      cfg.coolParams[key] = numOr(el, cfg.coolParams[key]);
-      applyParams();
-    });
-  }
-  // The diffusive fluxes are compiled in only while they are in use: switching one on or off
-  // rebuilds the passes, a new strength is only a parameter. The run carries on either way.
-  const diffusion = (set: (v: number) => void, el: HTMLInputElement, was: number) => {
-    const before = diffusionKey(cfg);
-    set(Math.max(0, numOr(el, was)));
-    if (diffusionKey(cfg) === before) applyParams();
-    else rebuildPipelines();
-    syncControls();
-  };
-  on('visc', (el) => diffusion((v) => (cfg.viscosity = v), el, cfg.viscosity));
-  on('cond', (el) => diffusion((v) => (cfg.conductivity = v), el, cfg.conductivity));
-  // The damping zone's radius and rate are parameters: the run carries on.
-  on('dampr', (el) => {
-    cfg.dampRadius = Math.max(0, numOr(el, cfg.dampRadius));
-    applyParams();
-    syncControls();
-  });
-  on('damprate', (el) => {
-    cfg.dampRate = Math.max(0, numOr(el, cfg.dampRate));
-    applyParams();
-    syncControls();
-  });
-  on('riemann', (el) => {
-    cfg.riemann = el.value as RiemannKind;
-    rebuildPipelines();
-  });
-  on('limiter', (el) => {
-    cfg.limiter = el.value as LimiterKind;
-    rebuildPipelines();
-  });
-  on('tbins', (el) => {
-    cfg.timeBins = Math.min(3, Math.max(0, Math.round(+el.value) || 0));
-    rebuildPipelines();
-  });
-  on('cfl', (el) => {
-    cfg.cfl = Math.min(1, Math.max(0.05, numOr(el, cfg.cfl)));
-    applyParams();
-    syncControls();
-  });
-  // The refinement thresholds are read at every re-mesh: the run carries on. The merge
-  // threshold stays below the refinement one.
-  on('refhi', (el) => {
-    cfg.refineHi = Math.min(1, Math.max(0.05, numOr(el, cfg.refineHi)));
-    cfg.refineLo = Math.min(cfg.refineLo, cfg.refineHi / 2);
-    applyParams();
-    syncControls();
-  });
-  on('refrho', (el) => {
-    cfg.refineRho = Math.max(0, numOr(el, cfg.refineRho));
-    applyParams();
-    syncControls();
-  });
-  // The tenuous-gas caps are parameters: the run carries on.
-  for (const [id, key] of [['fluffrho', 'rho'], ['fluffu', 'u'], ['fluffv', 'v'], ['fluffva', 'va']] as const) {
-    on(id, (el) => {
-      cfg.fluff = { ...cfg.fluff, [key]: Math.max(0, numOr(el, cfg.fluff[key] ?? 0)) };
-      applyParams();
-      syncControls();
-    });
-  }
-  on('reflo', (el) => {
-    cfg.refineLo = Math.min(cfg.refineHi / 2, Math.max(0, numOr(el, cfg.refineLo)));
-    applyParams();
-    syncControls();
-  });
-  const gravityChanged = () => {
-    applyParams();
-    sim?.refreshPotential();
-  };
-  on('gravity', (el) => {
-    const was = cfg.gravity;
-    cfg.gravity = el.value as GravityMode;
-    // Turning gravity on starts from G = 1; turning it off leaves G as it was.
-    if (was === 'off' && cfg.gravity !== 'off') cfg.G = 1;
-    gravityChanged();
-    syncControls();
-  });
-  on('G', (el) => {
-    cfg.G = numOr(el, cfg.G);
-    gravityChanged();
-  });
-  on('vcycles', (el) => {
-    cfg.vcycles = Math.min(8, Math.max(1, Math.round(numOr(el, cfg.vcycles))));
-    applyParams();
-  });
-  on('jeansfloor', (el) => {
-    cfg.jeansFloor = el.checked;
-    applyParams();
-    syncControls();
-  });
-  on('jeanscells', (el) => {
-    cfg.jeansCells = Math.min(32, Math.max(4, Math.round(numOr(el, cfg.jeansCells))));
-    applyParams();
-    syncControls();
-  });
-  on('fluxwork', (el) => {
-    cfg.gravEnergyFlux = el.checked;
-    applyParams();
-  });
-
   $('export').addEventListener('click', () => exportState());
   $('export-diag').addEventListener('click', () => exportDiagnostics());
   const picker = $<HTMLInputElement>('import-file');
@@ -2320,26 +2348,6 @@ function bind() {
     view.mode = el.value as ViewState['mode'];
     syncControls();
   });
-  for (let a = 0; a < 3; a++) {
-    for (const side of ['lo', 'hi'] as const) {
-      on(`bc-${side}-${a}`, (el) => {
-        const lo = [...cfg.bcLo] as Bc3;
-        const hi = [...cfg.bcHi] as Bc3;
-        const was = lo[a] === 0;
-        (side === 'lo' ? lo : hi)[a] = +el.value;
-        // Periodic faces come in pairs: the opposite face follows into, or out of, periodic.
-        if ((lo[a] === 0) !== (hi[a] === 0)) (side === 'lo' ? hi : lo)[a] = +el.value;
-        cfg.bcLo = lo;
-        cfg.bcHi = hi;
-        if (sim && cfg.amrLevels > 0 && lo[a] === 0 && !was) {
-          // On an adaptive mesh a newly periodic axis joins blocks that were never neighbors
-          // and may differ by several levels: build the mesh again from the start.
-          restartOrWait();
-        } else applyParams();
-        syncControls();
-      });
-    }
-  }
   on('units', (el) => {
     unitSys = el.value as DisplaySystem;
     try {
@@ -4447,7 +4455,22 @@ const ready = (async () => {
     pushTransfer();
     bind();
     // With Autoload off the page opens on the problem's settings, and loads it on Run or Load.
-    await build(firstLink.problem, firstLink.n, firstLink.ndim, firstLink.amr, false, firstLink, undefined, !autoload);
+    // A link with a setup of its own: unpacked and made the custom setup before it is read.
+    let first = firstLink;
+    const packed = new URLSearchParams(location.search).get('setup');
+    if (packed) {
+      try {
+        const { spec, report } = readSetup(await decodeSetupParam(packed), (id) => PRESET_FILES[id]);
+        if (!spec) throw new Error(report.error);
+        for (const n of report.notes) console.warn(`setup: ${n}`);
+        setCustomSetup(spec);
+        packCustom();
+        first = decodeLink(new URLSearchParams(location.search));
+      } catch (e) {
+        console.warn(`the setup in the link could not be read: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    await build(first.problem, first.n, first.ndim, first.amr, false, first, undefined, !autoload);
     requestAnimationFrame(tick);
   } catch (e) {
     fail(e);
@@ -4497,13 +4520,7 @@ const api = installApi(
     },
     background: () => backgroundCss(view.light),
     resolutions: () => ({ 2: RES_2D, 3: RES_3D, uniformMax: { 2: uniformMax(2), 3: uniformMax(3) } }),
-    async idle() {
-      let q: Promise<void>;
-      do {
-        q = queue;
-        await q;
-      } while (q !== queue);
-    },
+    idle,
     build: (link) => build(link.problem, link.n, link.ndim, link.amr, false, link),
     importAthdf,
     restart: () => restartRun(),
@@ -4558,6 +4575,9 @@ const api = installApi(
       $<HTMLInputElement>('auto').checked = on;
     },
     sync: () => syncControls(),
+    runningSpec: () => runningSpec(cfg),
+    applySpec,
+    adopt,
     overlayInfo() {
       const u = units();
       const m = viewMeasure();

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { laneEmden, polytropeK, polytropeMass, polytropeScales } from '../../src/problems/lane_emden';
 import { placedSettling, Settler, type SettleCells } from '../../src/problems/settle';
 import { packBrush, STAR_TABLE, starBrush } from '../../src/sim';
-import { POLY, POLY_K, polyStar, polytrope, polytropeUnits } from '../../src/problems/polytrope';
+import { POLY, POLY_K, polyStar, polytrope, polytropeUnits } from '../../src/presets/names';
 import { defaultEosParams, makeEos, physicalEosParams } from '../../src/eos/eos';
 import { loadHelmholtz } from '../../src/eos/helmholtz';
 import { COMPOSITIONS, meanMolecularWeight } from '../../src/units/composition';

@@ -348,7 +348,11 @@ export function setPath(o: object, path: string, value: unknown): void {
       else at[key] = value;
       return;
     }
-    if (at[key] === null || typeof at[key] !== 'object') at[key] = /^\d+$/.test(keys[i + 1]) ? [] : {};
+    if (at[key] === null || typeof at[key] !== 'object') {
+      // Nothing to remove where the path leads nowhere: no objects are made on the way.
+      if (value === undefined) return;
+      at[key] = /^\d+$/.test(keys[i + 1]) ? [] : {};
+    }
     at = at[key] as Record<string, unknown>;
   }
 }

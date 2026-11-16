@@ -7,11 +7,11 @@ import { configFor, Sim, type LimiterKind } from '../sim';
 import { AmrSim } from '../amr/amr_sim';
 import { column, withAmr, withSim } from './tests';
 import { exactRiemann } from '../reference/riemann_exact';
-import { sodX } from '../problems/shocktube';
-import { advection } from '../problems/advection';
-import { sedov } from '../problems/sedov';
-import { sphere, spherePotential } from '../problems/sphere';
-import { whiteDwarfStar } from '../problems/white_dwarf_star';
+import { sodX } from '../presets/names';
+import { advection } from '../presets/names';
+import { sedov } from '../presets/names';
+import { sphere, spherePotential } from '../presets/names';
+import { whiteDwarfStar } from '../presets/names';
 import type { Problem } from '../problems/types';
 
 let gpuPromise: Promise<Gpu> | null = null;

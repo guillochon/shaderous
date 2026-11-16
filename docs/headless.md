@@ -68,6 +68,18 @@ npm run headless -- run --problem sedov --dim 3 --n 128 --amr 2 --set gamma=1.4 
 `--set KEY=VALUE` takes any setup key and can be repeated. That includes a problem's own
 parameters, as `p.<id>`.
 
+`--setup FILE` builds the run from a setup document instead of a preset: a preset's own file
+(`src/presets/binary.json`), or one saved from the Setup dialog or written by hand
+([setups.md](setups.md)). The other setup flags then say the grid and what differs from the
+file:
+
+```
+npm run headless -- run --setup my-triple.shaderous.json --dim 3 --n 256 --amr 2 --until 10 --every 1 --png --out runs/triple
+```
+
+The MCP server's `load` tool takes the same thing as `document`, and its `describe` tool with
+a `problem` returns that preset's document to start from.
+
 ### When to stop
 
 - `--until T` runs to time T. The last step is shortened so that the run lands on T exactly.

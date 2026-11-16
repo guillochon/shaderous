@@ -85,7 +85,12 @@ src/
   amr/         block tree (tree.ts), atlas passes and the adaptive driver (amr_sim.ts);
                gravity/ for the Poisson solve on blocks
   render/      field extraction, ray-marcher, slice view, picking, transfer functions
-  problems/    one file per preset, plus settle.ts (discrete hydrostatic balance)
+  setup/       the setup document: its types, the option table, reader and writer, and the
+               compiler that turns one into a Problem; parts/ has the stars, orbits, disks,
+               regions and the built-in flows
+  presets/     one JSON setup document per problem of the menu
+  problems/    the Problem type and the libraries the parts use: Lane-Emden polytropes, cold
+               white dwarfs, settle.ts (discrete hydrostatic balance)
   reference/   float64 CPU version of the hydro scheme, exact Riemann solver
   units/       physical constants, unit systems, composition
   validation/  the in-page validation suite (validate.html)
@@ -416,6 +421,45 @@ rest of a block together; left out, a white dwarf with burning asked Firefox for
 budget, which Firefox refuses where Chrome lets it spill into shared memory. Resource errors are
 checked once everything is made, before the initial conditions are set up, so an atlas the GPU
 cannot make is retried smaller within seconds.
+
+## Setups: one document, compiled
+
+Every setting of a simulation is a field of one JSON document, a `SetupSpec`
+(`setup/spec.ts`; [setups.md](setups.md) describes the format). The presets are 47 such files
+in `src/presets/`, and a setup made in the Setup dialog is the same kind of file. A document
+holds numbers and names and no code, so one from a stranger is safe to open; `setup/codec.ts`
+reads it as untrusted input.
+
+`compileSetup` (`setup/compile.ts`) turns a document into what the solvers have always taken:
+a `Problem` (its `init`, `masses`, `settle` and `mhd` functions close over the document) and
+the overrides of a `SimConfig`. Nothing downstream knows about documents: the solvers, the
+mesh, settling, the renderer and the diagnostics see a `Problem`. The compiler is free of the
+DOM and deterministic, so the page, the workers that build an adaptive run's initial state
+(`amr/init_worker.ts`, which gets the document and compiles it again) and Node get the same run
+from the same document. The initial state is painted in layers: a whole-box flow or the
+background, then disks, then stars, then regions, obstacles and inflows in the order of the
+parts. What shapes cannot say is a `flow`: a named function of this build with parameters
+(`setup/parts/flows/`), so a file never carries a formula.
+
+The option table (`setup/options.ts`) lists every option once: its place in the document, its
+control and range, what changing it costs a running simulation (`live`, `shaders` or
+`restart`), its key in a link, and the rules that say what it requires and excludes. The
+dialog's forms, the greying of options that cannot be combined (with the reason as the
+tooltip), the reader's ranges, the link codec and the scripting interface's `controls()` are
+all read from it.
+
+A run stands for a document: `runningSpec` (`setup/running.ts`) is the one its problem was
+compiled from, with its grid, its parameter values and every setting changed since.
+`changeBetween` compares two documents and says what getting from one to the other takes. The
+dialog edits a copy and hands it back; the page (`applySpec` in `ui/app.ts`) then does the
+least that is needed: a uniform write, a rebuild of the shaders, or a fresh start. The side
+bar keeps what concerns choosing and watching a run, and shows a setup's featured options from
+the same table.
+
+The presets were hand-written TypeScript objects until November 2026. Those objects live on in
+`tests/legacy/`, and `tests/unit/presets.test.ts` holds every compiled preset to them: the
+configuration field by field, and the initial state, point masses, settling and magnetic
+potential bit for bit at sampled points in 2D and 3D, also with other parameter values.
 
 ## Input, output and links
 

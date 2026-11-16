@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ASTRO, SI } from '../../src/units/constants';
 import { COMPOSITIONS, composition, meanMolecularWeight, nuclearAverages } from '../../src/units/composition';
 import { codeG, display, displayTemperature, eosConstants, flowUnits, fromCode, gravityUnits, kelvinPerCodeT, toCode } from '../../src/units/units';
-import { TDE, TDE_STAR, TDE_UNITS, tidalDisruption } from '../../src/problems/tidal_disruption';
+import { TDE, TDE_STAR, TDE_UNITS, tidalDisruption } from '../../src/presets/names';
 
 describe('composition', () => {
   it('gives the textbook mean molecular weights', () => {
@@ -78,7 +78,7 @@ describe('tidal disruption in solar units', () => {
 
 describe('empty box', () => {
   it('takes its side from its parameter', async () => {
-    const { empty, emptyMagnetic, EMPTY_UNITS } = await import('../../src/problems/empty');
+    const { empty, emptyMagnetic, EMPTY_UNITS } = await import('../../src/presets/names');
     const { sizedProblem } = await import('../../src/problems/types');
     const { configFor } = await import('../../src/sim');
     const { codeG } = await import('../../src/units/units');

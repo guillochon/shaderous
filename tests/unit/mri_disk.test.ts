@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { diskState, MRI, midplane, mriDisk } from '../../src/problems/mri_disk';
+import { diskState, MRI, midplane, mriDisk } from '../../src/presets/names';
 
 const params = { beta: 50, soft: 0.15 };
 const eps = 0.15;

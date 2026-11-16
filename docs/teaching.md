@@ -80,7 +80,13 @@ energy, and the speed of sound. They can also start to ask how far a simulation 
 to one action at a time: a volunteer comes up to press play, or to make one stroke with a brush,
 while the class watches. Older students can watch the same demonstrations, then work in pairs
 on lab computers or laptops for a lesson. They can change settings, switch views, and use the
-query tool to read numbers off the screen.
+query tool to read numbers off the screen. The panel holds what concerns choosing and watching
+a run: the preset menus with each preset's few main numbers, run and time control, the view
+and the diagnostics. Every other setting (the grid, the equation of state, gravity, the
+boundaries, the solver, the objects in the box) is behind the panel's **Setup…** button, in a
+dialog that greys out what cannot be combined and says why. Older students can build a run of
+their own there, from point masses, stars, disks and gas regions, save it as a file and hand
+it in with a report ([setups.md](setups.md)).
 
 **Tips for teachers.**
 - Prepare each link in advance and open it paused, so nothing happens until the class is ready.

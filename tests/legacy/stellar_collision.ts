@@ -1,9 +1,9 @@
-import { all, OUTFLOW_ONLY, type Problem } from './types';
-import { COMPOSITIONS } from '../units/composition';
-import { codeG } from '../units/units';
-import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf } from './white_dwarf';
-import type { Eos } from '../eos/eos';
-import { NET_SPECIES } from '../burn/network';
+import { all, OUTFLOW_ONLY, type Problem } from '../../src/problems/types';
+import { COMPOSITIONS } from '../../src/units/composition';
+import { codeG } from '../../src/units/units';
+import { dwarfsInit, dwarfsSettling, scalesOf, whiteDwarf, WD_AMBIENT, WD_UNITS, type PlacedDwarf } from '../../src/problems/white_dwarf';
+import type { Eos } from '../../src/eos/eos';
+import { NET_SPECIES } from '../../src/burn/network';
 
 // Stellar collisions: two stars on a parabolic orbit about their common center of mass, set
 // up a little way apart and left to fall together under their own gravity (isolated

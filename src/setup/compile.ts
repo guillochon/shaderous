@@ -466,3 +466,11 @@ export function compileSetup(spec: SetupSpec): Compiled {
   over('jeansRefine', mesh.jeansRefine);
   return { spec, problem, overrides };
 }
+
+const compiledOnce = new WeakMap<SetupSpec, Compiled>();
+/** A setup compiled, once per document: the same object each time it is asked for. */
+export function compiledFrom(spec: SetupSpec): Compiled {
+  let c = compiledOnce.get(spec);
+  if (!c) compiledOnce.set(spec, (c = compileSetup(spec)));
+  return c;
+}
