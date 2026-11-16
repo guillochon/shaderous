@@ -1,6 +1,26 @@
 # Plan: trajectory preview for a point mass being placed
 
-Status: not started.
+Status: built 2026-11-15. What changed while building:
+
+- **Fitting the lumps** (section 3.3). Dropping the lumps that hold next to nothing was wrong:
+  the thin gas around a polytrope, dropped, shifted the pull on a mass beside it by 1%. All of
+  the gas is kept, and `fitLumps()` cuts the box as a tree instead: the piece with the most
+  mass is cut in two along each axis until there are 768 pieces, so a star keeps the
+  resolution it was read at and thin gas is summed coarsely. The uniform grid is read at 32
+  lumps a side in 3D and 64 in 2D. Fitting 65536 lumps takes 9 ms, a path through 768 lumps
+  with three bodies 4 ms.
+- **A lump's softening** is a third of its size, and fades to none two sizes away: softened
+  everywhere by half its size, a star's lumps pulled 1% too weakly from 0.4 of the box away.
+- **The gas's pull on the other masses** is found every fourth step from the start, not as a
+  fallback.
+- **The tube targets** stayed in `render/fieldlines.ts` (`tubeTargets()`), shared with
+  `render/pathtube.ts`; there is no `tube_targets.ts`. The ray-marcher now also draws a tube
+  where the ray misses the box, since a path may leave it.
+- **Step cap** 1200, 160 points, tube radius 0.005 of the box.
+- **Not done**: the fade of the 2D line along the path, ending a closed orbit after one turn,
+  and the `window.shaderous.previewOrbit` hook (the validation test `orbit-preview` calls
+  `previewOrbit()` itself). The comparison against a run agrees to 0.23% of the box after a
+  quarter of an orbit.
 
 ## 1. Goal
 

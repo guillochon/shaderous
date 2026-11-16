@@ -61,11 +61,19 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let thi = max(ta, tb);
   let t0 = max(max(tlo.x, max(tlo.y, tlo.z)), 0.0);
   let t1 = min(thi.x, min(thi.y, thi.z));
-  if (t1 <= t0) { return vec4<f32>(C.bg.rgb, 1.0); }
-
   let tp = min(vec2<i32>(in.pos.xy), vec2<i32>(textureDimensions(TUBE_T)) - 1);
   let tube_t = textureLoad(TUBE_T, tp, 0).r;
   let tube = tube_t > 0.0;
+  if (t1 <= t0) {
+    // The ray misses the box: the background, behind any tube that lies out there (the path of
+    // a mass being placed may leave the box).
+    var bg = C.bg.rgb;
+    if (tube) {
+      let tc = textureLoad(TUBE, tp, 0);
+      bg = mix(bg, tc.rgb, tc.a);
+    }
+    return vec4<f32>(bg, 1.0);
+  }
   let tend = select(t1, min(t1, tube_t), tube);
   let jitter = hash(in.pos.xy);
   var col = vec3<f32>(0.0);

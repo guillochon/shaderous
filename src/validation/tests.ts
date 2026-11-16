@@ -22,6 +22,7 @@ import { kelvinHelmholtz } from '../problems/kelvin_helmholtz';
 import { rayleighTaylor, RT } from '../problems/rayleigh_taylor';
 import { jeans, JEANS } from '../problems/jeans';
 import { POLY, POLY_K, polytrope, polytropeDipole, polytropeRandom } from '../problems/polytrope';
+import { fitLumps, previewOrbit } from '../gravity/preview';
 import { whiteDwarfStar } from '../problems/white_dwarf_star';
 import { evrard } from '../problems/evrard';
 import { tidalDisruption, tidalDisruptionDipole, tdeOrbit, TDE, TDE_STAR } from '../problems/tidal_disruption';
@@ -1803,6 +1804,62 @@ export const TESTS: TestDef[] = [
       };
       await withSim(gpu, slow, 64, { ndim: 2 }, (sim) => growth('slow_flat', sim));
       await withAmr(gpu, slow, 64, { ndim: 2, amrLevels: 1 }, (sim) => growth('slow_flat_adaptive', sim));
+      return { pass, metrics };
+    },
+  },
+  {
+    id: 'orbit-preview',
+    name: 'Point masses: the orbit preview of a mass being placed (64^3)',
+    criterion:
+      'The gas read back as lumps holds the mass of the diagnostics to 1e-4 and its center of mass to 1e-3 of the box, on uniform and adaptive grids in 2D and 3D. A light mass set on an eccentric orbit about a polytrope is, a quarter of an orbit on, within 0.5% of the box of where the preview put it',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      // The gas as lumps: all of it, about the right place.
+      const census = async (tag: string, sim: Sim | AmrSim) => {
+        const d = await sim.diagnostics();
+        // The pass compiles on the first call, which returns null.
+        let lumps = await sim.readGasLumps();
+        for (let i = 0; i < 200 && !lumps; i++) {
+          await new Promise((r) => setTimeout(r, 20));
+          lumps = await sim.readGasLumps();
+        }
+        if (!lumps) {
+          pass = false;
+          return [];
+        }
+        const m = lumps.reduce((t, l) => t + l.m, 0);
+        const com = [0, 1, 2].map((c) => lumps!.reduce((t, l) => t + l.m * l.pos[c], 0) / m);
+        metrics[`${tag}_lumps`] = lumps.length;
+        metrics[`${tag}_mass_error`] = Math.abs(m - d.mass) / d.mass;
+        metrics[`${tag}_center_offset`] = Math.hypot(...com) / sim.cfg.problem.box;
+        pass &&= metrics[`${tag}_mass_error`] < 1e-4 && metrics[`${tag}_center_offset`] < 1e-3;
+        return lumps;
+      };
+      const still = stillGas({ bcLo: all(REFLECT), bcHi: all(REFLECT), tEnd: 0.1 });
+      await withSim(gpu, still, 64, { ndim: 2 }, (sim) => census('flat', sim));
+      await withAmr(gpu, still, 64, { ndim: 2, amrLevels: 1 }, (sim) => census('flat_adaptive', sim));
+      await withAmr(gpu, polytrope, 64, { amrLevels: 1, tEnd: 0 }, (sim) => census('adaptive', sim));
+      // Against the run: a mass too light to move the star, on an orbit of its own.
+      await withSim(gpu, polytrope, 64, { tEnd: 0 }, async (sim) => {
+        const lumps = fitLumps(await census('uniform', sim), 1, 3);
+        const star = (4 / Math.PI) * POLY.rhoc * POLY.R ** 3;
+        const r = 0.4;
+        const mass = { gm: 1e-3 * POLY.G * star, pos: [r, 0, 0], vel: [0, 0.8 * Math.sqrt((POLY.G * star) / r), 0], soft: 0.04, sinkRadius: 0 };
+        const tEnd = 2;
+        const path = previewOrbit({ bodies: [mass], lumps, G: POLY.G, frame: 0, box: 1 }, { time: tEnd, steps: 100000, length: 100 });
+        const n = path.points.length / 3;
+        const predicted = [...path.points.subarray(3 * (n - 1), 3 * n)];
+        pass &&= sim.addMass(mass);
+        sim.cfg.tEnd = tEnd;
+        sim.writeParams();
+        metrics.steps = await sim.runToEnd();
+        const m = (await sim.diagnostics()).masses[0];
+        metrics.moved = Math.hypot(m.pos[0] - r, m.pos[1], m.pos[2]);
+        metrics.preview_offset = Math.hypot(...m.pos.map((x, c) => x - predicted[c]));
+        metrics.preview_lumps = lumps.length;
+        pass &&= path.end === 'time' && metrics.moved > 0.3 && metrics.preview_offset < 0.005;
+      });
       return { pass, metrics };
     },
   },

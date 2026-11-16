@@ -6,6 +6,7 @@ import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
 import { FieldLines } from './fieldlines';
+import { PathTube } from './pathtube';
 import { padded3d } from '../amr/dispatch';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
@@ -261,6 +262,13 @@ export class Renderer {
   hoverLevel = 0;
   /** Where the guides through a tool cross (in fractions of the box), or null for none. */
   guides: [number, number, number] | null = null;
+  /**
+   * Volume view: the path of a point mass being placed (gravity/preview.ts), drawn as a tube
+   * with an arrowhead among the gas. `points`: xyz each, relative to the box center, in a box
+   * of side `box`; `version` changes whenever they do. Null for none.
+   */
+  orbit: { points: Float32Array; box: number; version: number } | null = null;
+  private pathTube: PathTube;
   private gVolume!: GPUBindGroup;
   /** The volume view's resources but the field lines' tubes, its pipeline, and its bind group with the tubes as of FieldLines.version. */
   private volumeRes: Record<number, GPUBuffer | GPUTextureView | GPUSampler> = {};
@@ -323,6 +331,7 @@ export class Renderer {
     this.atlasUni = this.device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.noTube = this.device.createTexture({ label: 'no tubes', size: [1, 1], format: 'rgba16float', usage: GPUTextureUsage.TEXTURE_BINDING });
     this.fieldLines = new FieldLines(this.device, this.format);
+    this.pathTube = new PathTube(this.device);
   }
 
   async init() {
@@ -370,7 +379,7 @@ export class Renderer {
       }),
     ]);
     this.gLines = bindGroup(this.device, this.pLines, { 0: this.cam });
-    await this.fieldLines.init();
+    await Promise.all([this.fieldLines.init(), this.pathTube.init(this.cam)]);
   }
 
   /** Bind the volume view: its pipeline and resources, without tubes (9, 10) and with the field lines' when drawn. */
@@ -707,7 +716,7 @@ export class Renderer {
 
     // Everything the picture is drawn from but the state itself. Field lines move from frame to
     // frame, and a range not yet copied for reading back is owed another frame.
-    const inputs = [new Uint32Array(vb).join(), cam.join(), this.canvas.width, this.canvas.height, parity, this.capture, this.guides?.join()].join('|');
+    const inputs = [new Uint32Array(vb).join(), cam.join(), this.canvas.width, this.canvas.height, parity, this.capture, this.guides?.join(), this.orbit?.version].join('|');
     const same = this.drawn?.sim === sim && this.drawn.inputs === inputs;
     if (!force && same && !this.stale && !this.rangeOwed && !this.fieldLines.active(sim, v)) return false;
     this.drawn = { sim, inputs };
@@ -761,13 +770,15 @@ export class Renderer {
     // Field lines: traced, and in the volume view drawn as tubes the ray-marcher composites.
     const dpr = this.fixedSize ? 1 : this.canvas.width / Math.max(1, this.canvas.clientWidth);
     this.fieldLines.encode(enc, sim, v, this.canvas.width, this.canvas.height, dpr, volume);
+    // The path of a mass being placed: into the same targets, among the field lines' tubes.
+    const tubes = (volume && !!this.orbit && this.pathTube.encode(enc, this.orbit, this.fieldLines.tubeTargets(this.canvas.width, this.canvas.height), !this.fieldLines.tubesDrawn)) || this.fieldLines.tubesDrawn;
     const rp = enc.beginRenderPass({
       colorAttachments: [
         { view: (this.capture ? this.captureTarget() : this.ctx.getCurrentTexture()).createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
     });
     rp.setPipeline(volume ? (this.atlas ? this.pVolumeAtlas : this.pVolume) : this.pSlice);
-    rp.setBindGroup(0, volume ? (this.fieldLines.tubesDrawn ? this.volumeWithTubes() : this.gVolume) : this.gSlice!);
+    rp.setBindGroup(0, volume ? (tubes ? this.volumeWithTubes() : this.gVolume) : this.gSlice!);
     rp.draw(3);
     if (volume) this.drawLines(rp, sim, v.showBlocks);
     else if (v.mode !== 'projection' || nz === 1) this.fieldLines.drawFlat(rp);

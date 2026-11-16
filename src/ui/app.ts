@@ -22,6 +22,8 @@ import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling
 import { familyById, familyOf, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, problemById, type Bc3, type GravityMode, type ProblemParam, problemUnits } from '../problems';
 import { cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
+import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
+import type { PointMass } from '../problems/types';
 import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../render/transfer';
 import { installApi, type RecordingStatus } from './api';
 
@@ -402,7 +404,7 @@ TOOLS.push({
 });
 TOOLS.push({
   kind: 'sink', label: 'Sink',
-  title: 'Sink: click to place one that takes gas away. Give it a mass and it becomes a point mass: it pulls on the gas, moves, and grows by what it takes in (press and drag to set it moving)',
+  title: 'Sink: click to place one that takes gas away. Give it a mass and it becomes a point mass: it pulls on the gas, moves, and grows by what it takes in (press and drag to set it moving: the path it would take in the gas as it is now is drawn as you drag)',
   icon: icon('<circle cx="8" cy="8" r="5.5" stroke-dasharray="2.2 2.2" /><path d="M2.5 2.5l3 3M5.5 3v2.5H3M13.5 13.5l-3-3M10.5 13v-2.5H13" />'),
 });
 TOOLS.push({
@@ -2643,19 +2645,32 @@ function clearSources() {
   toolNotice = '';
 }
 
+/**
+ * Where a point of the box (in fractions of it) is on the canvas in the current view, in CSS
+ * pixels; w is not positive for a point behind the camera.
+ */
+function projector(): (p: number[]) => { x: number; y: number; w: number } {
+  const m = outlineMatrix();
+  return (p) => {
+    const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
+    return { x: (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / w, y: (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / w, w };
+  };
+}
+
+/** The point masses in the run, as last read back (none between a reset and the first readback). */
+function massesNow(): Diagnostics['masses'] {
+  const live = liveMasses && liveMasses.of === sim ? liveMasses.list : null;
+  return (lastDiag && live ? live : lastDiag?.masses) ?? [];
+}
+
 /** Draw the markers of the sources and sinks where they are in the current view. */
 let marksDrawn = '';
 function drawSources() {
   let html = '';
   // Between resets and the first readback there is nothing to draw (lastDiag is cleared then).
-  const live = liveMasses && liveMasses.of === sim ? liveMasses.list : null;
-  const masses = (lastDiag && live ? live : lastDiag?.masses) ?? [];
+  const masses = massesNow();
   if ((sources.length || masses.length) && cfg) {
-    const m = outlineMatrix();
-    const at = (p: number[]) => {
-      const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
-      return { x: (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / w, y: (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / w, w };
-    };
+    const at = projector();
     for (const q of sources) {
       const c = at(q.pos);
       if (!(c.w > 0)) continue; // behind the camera
@@ -2768,6 +2783,8 @@ function beginStroke(e: PointerEvent) {
     ...toolRefs(),
   };
   stroke = s;
+  // The orbit preview wants the gas as it is at the press.
+  if (s.kind === 'sink' && sinkHasMass()) refreshLumps(s.t0, true);
   if (!s.ready) {
     // Volume view: paint on the gas that is seen under the pointer, or, where the view is
     // empty, on the plane through the middle of the box.
@@ -2798,27 +2815,51 @@ function endStroke(apply: boolean) {
 }
 
 /**
+ * The point mass the sink tool places at `pos` (in fractions of the box), moving at `vel`: what
+ * placeMass() adds to the run and what the preview of its orbit is drawn for.
+ */
+function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number }): PointMass {
+  const box = cfg.problem.box;
+  // The gas in the box sets the scale; with no readback yet, a box of unit density does.
+  const gas = lastDiag?.mass ?? box ** cfg.ndim;
+  const two = cfg.ndim === 2;
+  return {
+    // A preset without a gravitational constant gets G = 1 when the mass is placed.
+    gm: (cfg.G > 0 ? cfg.G : 1) * q.mass * gas,
+    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
+    vel: two ? [vel[0], vel[1], 0] : vel,
+    soft: q.size * box,
+    sinkRadius: q.size * box,
+    sinkRate: 4 * q.amount,
+  };
+}
+
+/**
+ * Where a stroke that is dragged out began (in the box), and the velocity its drag asks for: a
+ * longer drag is faster, and a click (or a drag of a few pixels) leaves it at rest, as `still`
+ * always does.
+ */
+function strokeAim(s: Stroke, still = false): { at: ReturnType<typeof locate>; vel: Vec3 } {
+  const at = locate(s.x0, s.y0, s.depth);
+  const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
+  const len = Math.hypot(dx, dy);
+  const speed = still || len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
+  const vel = [0, 1, 2].map((i) => (speed ? (speed * (dx * at.right[i] + dy * at.up[i])) / len : 0)) as Vec3;
+  return { at, vel };
+}
+
+/**
  * Place a point mass with the sink tool: at `pos` (in fractions of the box), moving at `vel`.
  * Its mass is the tool's multiple of the gas now in the box, its sink and its softening the
  * tool's radius, and its sink's rate the tool's flux (25% is the orbital rate at the edge).
  */
 function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number }) {
   if (!sim) return;
-  const box = cfg.problem.box;
-  // The gas in the box sets the scale; with no readback yet, a box of unit density does.
-  const gas = lastDiag?.mass ?? box ** cfg.ndim;
+  const spec = massSpec(pos, vel, q);
   // Gravity needs a constant: a preset without one gets G = 1, shown in the Gravity section.
   if (!(cfg.G > 0)) cfg.G = 1;
   sim.cfg = cfg;
-  const two = cfg.ndim === 2;
-  const ok = sim.addMass({
-    gm: cfg.G * q.mass * gas,
-    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
-    vel: two ? [vel[0], vel[1], 0] : vel,
-    soft: q.size * box,
-    sinkRadius: q.size * box,
-    sinkRate: 4 * q.amount,
-  });
+  const ok = sim.addMass(spec);
   if (ok) {
     placedMasses++;
     lastDiag = undefined;
@@ -2878,6 +2919,101 @@ function placeStar(pos: Vec3, vel: Vec3) {
   });
 }
 
+// --- orbit preview --------------------------------------------------------------------------
+// While the sink tool is placing a point mass (pressed, and dragged to set it moving), the path
+// it would take is drawn: a line with an arrowhead over a 2D run or a slice, a tube with one in
+// the volume view. It is the orbit in the gas as it is now (gravity/preview.ts).
+
+/** The gas as lumps, read back a few times a second while the sink tool holds a mass. */
+let gasLumps: { of: Simulation; list: Lump[]; version: number } | null = null;
+let lumpsAsked = 0;
+let lumpsVersion = 0;
+/** The path on show, and what it was found for. */
+let orbit: { key: string; path: Orbit } | null = null;
+let orbitVersion = 0;
+/** What the SVG path was last drawn for. */
+let orbitDrawn = '';
+
+/** Ask for the gas's lumps again if the last ones are a quarter of a second old (or `force`). */
+function refreshLumps(now: number, force = false) {
+  if (!sim || (!force && now - lumpsAsked < 250)) return;
+  lumpsAsked = now;
+  const of = sim;
+  const { box } = cfg.problem;
+  const ndim = cfg.ndim;
+  of.readGasLumps().then(
+    (list) => {
+      if (list && of === sim) gasLumps = { of, list: fitLumps(list, box, ndim), version: ++lumpsVersion };
+    },
+    () => {},
+  );
+}
+
+/** Find the path of the mass being placed, and hand it to whichever view draws it. Called once per frame. */
+function updateOrbit(now: number) {
+  const s = stroke;
+  if (sim && tool === 'sink' && sinkHasMass()) refreshLumps(now);
+  if (!s || !sim || s.kind !== 'sink' || !sinkHasMass() || !s.ready || s.released || massesNow().length >= MAX_MASSES) {
+    orbit = null;
+  } else {
+    const { at, vel } = strokeAim(s);
+    const mine = massSpec(at.pos, vel, toolParams.sink);
+    const others = massesNow();
+    const lumps = gasLumps && gasLumps.of === sim ? gasLumps : null;
+    const left = cfg.tEnd - (lastDiag?.t ?? 0);
+    const key = JSON.stringify([mine.gm, mine.pos, mine.vel, mine.soft, lumps?.version, others.map((m) => [m.gm, m.pos, m.vel]), left]);
+    if (orbit?.key !== key) {
+      const frame = cfg.problem.frame === 'gas' ? 1 : cfg.problem.frame === 'masses' ? 2 : 0;
+      const path = previewOrbit(
+        { bodies: [...others, { ...mine, soft: mine.soft! }], lumps: lumps?.list ?? [], G: cfg.G > 0 ? cfg.G : 1, frame, box: cfg.problem.box },
+        { time: left > 0 ? left : Infinity },
+      );
+      orbit = { key, path };
+      orbitVersion++;
+    }
+  }
+  const volume = !!cfg && cfg.ndim === 3 && !flatView();
+  renderer.orbit = orbit && volume ? { points: orbit.path.points, box: cfg.problem.box, version: orbitVersion } : null;
+  drawOrbit(volume ? null : (orbit?.path ?? null));
+}
+
+/** The path as a line with an arrowhead, over a 2D run or a slice; the stretches off a slice's plane are dashed. */
+function drawOrbit(path: Orbit | null) {
+  const svg = $('brush');
+  const n = path ? path.points.length / 3 : 0;
+  // The drag's own arrow steps back while the path is on show (in the volume view too).
+  svg.classList.toggle('aimed', !!orbit && orbit.path.points.length > 3);
+  const d = ['', '', ''];
+  if (path && n > 1) {
+    const at = projector();
+    const box = cfg.problem.box;
+    const px = Array.from({ length: n }, (_, i) => at([0, 1, 2].map((c) => path.points[3 * i + c] / box + 0.5)));
+    // A slice of a 3D run shows one layer of cells: the path is drawn where it is over that
+    // plane, dashed where it has left the layer (by more than the half cell a mass placed in
+    // the middle of the layer swings across the plane of a star centered between two layers).
+    const slice = cfg.ndim === 3 && view.mode === 'slice';
+    const plane = slice ? locate(0, 0, 0).pos[view.sliceAxis] : 0;
+    const off = (i: number) => slice && Math.abs(path.points[3 * i + view.sliceAxis] / box + 0.5 - plane) > 1.5 / cfg.n;
+    const f = (v: number) => v.toFixed(1);
+    for (let i = 1; i < n; i++) d[off(i) ? 1 : 0] += `M${f(px[i - 1].x)} ${f(px[i - 1].y)}L${f(px[i].x)} ${f(px[i].y)}`;
+    // The arrowhead: at the end, along the last stretch long enough to give a direction.
+    const tip = px[n - 1];
+    let k = n - 2;
+    while (k > 0 && Math.hypot(tip.x - px[k].x, tip.y - px[k].y) < 4) k--;
+    const len = Math.hypot(tip.x - px[k].x, tip.y - px[k].y);
+    if (len > 0) {
+      const [ux, uy] = [(tip.x - px[k].x) / len, (tip.y - px[k].y) / len];
+      d[2] = `M${f(tip.x + 7 * ux)} ${f(tip.y + 7 * uy)}L${f(tip.x - 2 * ux - 5 * uy)} ${f(tip.y - 2 * uy + 5 * ux)}L${f(tip.x - 2 * ux + 5 * uy)} ${f(tip.y - 2 * uy - 5 * ux)}z`;
+    }
+  }
+  const all = d.join('|');
+  if (all === orbitDrawn) return;
+  orbitDrawn = all;
+  svg.querySelector('path.orbit:not(.off)')!.setAttribute('d', d[0]);
+  svg.querySelector('path.orbit.off')!.setAttribute('d', d[1]);
+  svg.querySelector('path.orbit-head')!.setAttribute('d', d[2]);
+}
+
 /** Turn the stroke in progress into this frame's edit. Called once per frame. */
 function advanceStroke(now: number) {
   const s = stroke;
@@ -2888,13 +3024,9 @@ function advanceStroke(now: number) {
     stroke = null;
     const sink = s.kind === 'sink';
     const massive = sink && sinkHasMass();
-    const at = locate(s.x0, s.y0, s.depth);
-    const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
-    const len = Math.hypot(dx, dy);
     // A drag aims a source, or sets a point mass moving; a click (or a drag of a few pixels)
     // leaves either at rest. A sink without a mass stays where it is put.
-    const speed = (sink && !massive) || len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
-    const vel = [0, 1, 2].map((i) => (speed ? (speed * (dx * at.right[i] + dy * at.up[i])) / len : 0)) as Vec3;
+    const { at, vel } = strokeAim(s, sink && !massive);
     if (massive) {
       placeMass(at.pos, vel, q);
       syncTools();
@@ -2911,12 +3043,8 @@ function advanceStroke(now: number) {
   if (s.kind === 'star') {
     if (!s.released) return;
     stroke = null;
-    const at = locate(s.x0, s.y0, s.depth);
-    const [dx, dy] = [s.x - s.x0, s.y0 - s.y];
-    const len = Math.hypot(dx, dy);
     // As for a point mass: a drag sets the star moving, a click leaves it at rest.
-    const speed = len < 6 ? 0 : Math.min(1, len / fullDrag()) * 5 * s.vRef;
-    const vel = [0, 1, 2].map((i) => (speed ? (speed * (dx * at.right[i] + dy * at.up[i])) / len : 0)) as Vec3;
+    const { at, vel } = strokeAim(s);
     placeStar(at.pos, vel);
     return;
   }
@@ -3524,6 +3652,7 @@ function tick(now: number) {
   pump();
   const enc = gpu.device.createCommandEncoder();
   advanceStroke(now);
+  updateOrbit(now);
   if (pendingBrush) {
     s.encodeBrush(enc, pendingBrush);
     pendingBrush = null;

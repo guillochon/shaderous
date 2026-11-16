@@ -228,6 +228,12 @@ details[open] > summary .sum { display: none; }
 @keyframes brush-pulse { from { fill-opacity: 0.45; } to { fill-opacity: 1; stroke-opacity: 0.7; } }
 #brush line { stroke: #fff; stroke-width: 2; display: none; }
 #brush marker path { fill: #fff; }
+/* The path a point mass being placed would take (the sink tool): the drag's arrow steps back. */
+#brush path.orbit { fill: none; stroke: #ff9d5c; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+#brush path.orbit.off { stroke-opacity: 0.6; stroke-dasharray: 2 5; }
+#brush path.orbit-head { fill: #ff9d5c; }
+#brush.aimed line { stroke-width: 1; stroke-opacity: 0.6; }
+#brush.outline path.orbit, #brush.outline path.orbit-head { display: none; }
 #hud {
   position: absolute; left: 12px; top: 10px; width: min(960px, calc(100% - 110px)); height: 18px; line-height: 18px;
   white-space: nowrap; overflow: hidden; contain: strict;

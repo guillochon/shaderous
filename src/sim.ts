@@ -8,6 +8,8 @@ import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
+import { LumpReader, lumpGrid } from './gravity/lumps';
+import type { Lump } from './gravity/preview';
 import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, problemUnits, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
@@ -216,6 +218,11 @@ export interface Simulation {
   readMasses(): Promise<Required<PointMass>[] | null>;
   /** Remove the point masses added with addMass(), keeping the preset's. */
   removeAddedMasses(): void;
+  /**
+   * The gas as it is now, as lumps: each a region's mass at its center of mass, for previews of
+   * a point mass's orbit (gravity/preview.ts). Null while the last such read is in flight.
+   */
+  readGasLumps(): Promise<Lump[] | null>;
   /**
    * Give the preset's point masses the softening and sink radii its current parameters ask
    * for, leaving them where they are and as they move.
@@ -1522,6 +1529,18 @@ export class Sim implements Simulation {
     return this.massReader.read(this.nMasses);
   }
 
+  private lumpReader?: LumpReader;
+  readGasLumps() {
+    this.lumpReader ??= new LumpReader(this.device, 'gravity/lumps.wgsl');
+    const k = lumpGrid(this.n, this.nz);
+    this.device.queue.writeBuffer((this.lumpGrid ??= this.device.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST })), 0, new Uint32Array([...k, 0]));
+    const [u1, u2] = this.state[this.cur];
+    return this.lumpReader.read(k[0] * k[1] * k[2], { 0: this.params, 1: u1.createView(), 2: u2.createView(), 3: this.lumpGrid }, (pass) =>
+      pass.dispatchWorkgroups(Math.ceil(k[0] / 4), Math.ceil(k[1] / 4), Math.ceil(k[2] / 4)),
+    );
+  }
+  private lumpGrid?: GPUBuffer;
+
   addMass(m: PointMass): boolean {
     if (this.nMasses >= MAX_MASSES) return false;
     // Only its own slot is written: the others are mid-orbit on the GPU.
@@ -1887,6 +1906,8 @@ export class Sim implements Simulation {
 
   destroy() {
     this.destroyed = true;
+    this.lumpReader?.destroy();
+    this.lumpGrid?.destroy();
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     this.burn?.destroy();

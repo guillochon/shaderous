@@ -336,14 +336,15 @@ export class FieldLines {
       return;
     }
     // The volume view: tubes into their own targets, which the ray-marcher then reads.
-    const t = this.ensureTargets(w, h);
+    const t = this.tubeTargets(w, h);
     const rp = enc.beginRenderPass({
       label: 'field-line tubes',
       colorAttachments: [
         { view: t.color.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] },
         { view: t.dist.createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 0] },
       ],
-      depthStencilAttachment: { view: t.depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'discard', depthClearValue: 1 },
+      // The depth is kept: the path of a mass being placed is drawn among these tubes (render/pathtube.ts).
+      depthStencilAttachment: { view: t.depth.createView(), depthLoadOp: 'clear', depthStoreOp: 'store', depthClearValue: 1 },
     });
     rp.setPipeline(this.pTube);
     rp.setBindGroup(0, this.gTube!);
@@ -371,7 +372,8 @@ export class FieldLines {
     return this.targets;
   }
 
-  private ensureTargets(w: number, h: number) {
+  /** The targets tubes are drawn into, at the canvas's size: made (again) when it changes. */
+  tubeTargets(w: number, h: number) {
     const t = this.targets;
     if (t && t.color.width === w && t.color.height === h) return t;
     t?.color.destroy();

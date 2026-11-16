@@ -24,6 +24,7 @@ import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
 import { Multipoles } from '../gravity/multipole';
+import { LumpReader } from '../gravity/lumps';
 import { makeEos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
@@ -2159,6 +2160,16 @@ export class AmrSim implements Simulation {
     return this.massReader.read(this.nMasses);
   }
 
+  private lumpReader?: LumpReader;
+  readGasLumps() {
+    this.lumpReader ??= new LumpReader(this.device, 'amr/lumps.wgsl');
+    const [u1, u2] = this.state[this.cur];
+    const n = this.nLeaf;
+    return this.lumpReader.read(n, { 0: this.params, 1: u1.createView(), 2: u2.createView(), 30: this.bt, 31: this.listLeaf }, (pass) =>
+      pass.dispatchWorkgroups(Math.ceil(n / 64)),
+    );
+  }
+
   addMass(m: Parameters<Simulation['addMass']>[0]): boolean {
     if (this.nMasses >= MAX_MASSES) return false;
     this.device.queue.writeBuffer(this.bh, 16 + 4 * MASS_STRIDE * this.nMasses, packMasses([completeMass(m, this.dx0)]), 4, MASS_STRIDE);
@@ -2764,6 +2775,7 @@ export class AmrSim implements Simulation {
     this.mhd?.destroy();
     this.placeholderFaces?.destroy();
     this.destroyed = true;
+    this.lumpReader?.destroy();
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi, ...this.species]) t.destroy();
