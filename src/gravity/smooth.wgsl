@@ -2,7 +2,6 @@
 // so the read-write texture is race-free. The dispatch covers only cells of this color
 // (half the grid along x), so no invocations are wasted on the other one.
 #include "gravity/mg_common.wgsl"
-#include "gravity/multipole_eval.wgsl"
 
 @group(0) @binding(2) var PHI: texture_storage_3d<r32float, read_write>;
 @group(0) @binding(3) var RHS: texture_3d<f32>;

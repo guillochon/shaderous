@@ -30,6 +30,10 @@ export class Multigrid {
   private pProlong!: GPUComputePipeline;
   private pRhs!: GPUComputePipeline;
   private rhsGroups: GPUBindGroup[] = [];
+  // Isolated boundaries: the finest level's face values, once per solve (gravity/boundary.wgsl).
+  private pBoundary!: GPUComputePipeline;
+  private gBoundary!: GPUBindGroup;
+  private boundary!: GPUBuffer;
 
   get phi(): GPUTexture {
     return this.levels[0].phi;
@@ -55,15 +59,19 @@ export class Multigrid {
       'multipole',
     );
 
-    [mg.pSmooth, mg.pResidual, mg.pRestrict, mg.pProlong, mg.pRhs] = await Promise.all([
+    [mg.pSmooth, mg.pResidual, mg.pRestrict, mg.pProlong, mg.pRhs, mg.pBoundary] = await Promise.all([
       computePipeline(device, assemble('gravity/smooth.wgsl'), 'mg smooth'),
       computePipeline(device, assemble('gravity/residual.wgsl'), 'mg residual'),
       computePipeline(device, assemble('gravity/restrict.wgsl'), 'mg restrict'),
       computePipeline(device, assemble('gravity/prolong.wgsl'), 'mg prolong'),
       computePipeline(device, assemble('gravity/rhs.wgsl'), 'mg rhs'),
+      computePipeline(device, assemble('gravity/boundary.wgsl'), 'mg isolated boundary'),
     ]);
 
     const mp = mg.multipole.result;
+    // Six faces of n x n (gravity/boundary.wgsl), bound to every level's passes; only the
+    // finest level's read it.
+    const bf = (mg.boundary = device.createBuffer({ label: 'mg isolated boundary', size: 6 * n * n * 4, usage: GPUBufferUsage.STORAGE }));
     for (let l = 0, m = n; m >= 2; l++, m >>= 1) {
       const h = box / m;
       const uni = [0, 1].map((color) => {
@@ -83,7 +91,7 @@ export class Multigrid {
         rhs,
         res,
         smooth: uni.map((u) =>
-          bindGroup(device, mg.pSmooth, { 0: params, 1: u, 2: phi.createView(), 3: rhs.createView(), 10: mp }),
+          bindGroup(device, mg.pSmooth, { 0: params, 1: u, 2: phi.createView(), 3: rhs.createView(), 11: bf }),
         ),
         residual: bindGroup(device, mg.pResidual, {
           0: params,
@@ -91,9 +99,10 @@ export class Multigrid {
           2: phi.createView(),
           3: rhs.createView(),
           4: res.createView(),
-          10: mp,
+          11: bf,
         }),
       };
+      if (l === 0) mg.gBoundary = bindGroup(device, mg.pBoundary, { 0: params, 1: uni[0], 10: mp, 11: bf });
       if (l > 0) {
         const fine = mg.levels[l - 1];
         lev.restrict = bindGroup(device, mg.pRestrict, {
@@ -144,7 +153,14 @@ export class Multigrid {
     pass.setPipeline(this.pRhs);
     pass.setBindGroup(0, this.rhsGroups[parity]);
     this.dispatch(pass, this.levels[0].n);
-    if (isolated) this.multipole.encode(pass, parity);
+    if (isolated) {
+      this.multipole.encode(pass, parity);
+      // The boundary of the finest level, from the moments just found, for the whole solve.
+      const n = this.levels[0].n;
+      pass.setPipeline(this.pBoundary);
+      pass.setBindGroup(0, this.gBoundary);
+      pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), 6);
+    }
   }
 
   encodeVCycle(pass: GPUComputePassEncoder) {
@@ -182,5 +198,6 @@ export class Multigrid {
       l.res.destroy();
     }
     this.phiOld.destroy();
+    this.boundary.destroy();
   }
 }

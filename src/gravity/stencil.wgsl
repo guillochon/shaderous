@@ -1,5 +1,8 @@
 // Neighbor sum of the 7-point Laplacian with boundary handling. Requires PHI (a storage
-// texture with read access), P, L and phi_boundary().
+// texture with read access), P and L; binds BF, the isolated boundary's values
+// (gravity/boundary.wgsl).
+#include "gravity/boundary_index.wgsl"
+@group(0) @binding(11) var<storage, read> BF: array<f32>;
 //
 // nb_sum returns (sum, diag) such that  h^2 Lap(phi) = sum - diag * phi_c.
 // Periodic: neighbors wrap. Isolated: Dirichlet data at the face, ghost = 2 phi_face - phi_c,
@@ -17,10 +20,7 @@ fn nb_one(c: vec3<i32>, o: vec3<i32>) -> vec2<f32> {
     return vec2<f32>(textureLoad(PHI, (q + n) % n).x, 0.0);
   }
   var s = 0.0;
-  if (L.level == 0u) {
-    let x = (vec3<f32>(c) + 0.5 + 0.5 * vec3<f32>(o)) * L.h - 0.5 * P.box;
-    s = 2.0 * phi_boundary(x);
-  }
+  if (L.level == 0u) { s = 2.0 * BF[bf_index(c, o, n)]; }
   return vec2<f32>(s, 1.0);
 }
 
