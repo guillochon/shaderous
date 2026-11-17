@@ -540,6 +540,21 @@ export interface BrushOp {
 /** Whether a brush changes the magnetic field (edit/field_brush_core.wgsl) rather than the gas. */
 export const isFieldBrush = (b: BrushOp): boolean => b.kind === 'field' || b.kind === 'pull';
 
+/** Most substeps one pull is cut into: a frame's drag the tool allows needs about 20. */
+const MAX_PULL_SUBSTEPS = 64;
+
+/**
+ * A field brush as the passes apply it, and how many times: a pull is cut into substeps that
+ * move the field by at most half a cell of the finest level (`n` across the box), as the upwind
+ * induction step it is needs (edit/field_brush_core.wgsl); the strength brush is one step.
+ */
+export function fieldBrushSteps(op: BrushOp, n: number): { op: BrushOp; steps: number } {
+  if (op.kind !== 'pull') return { op, steps: 1 };
+  const move = Math.min(Math.max(op.amount, 0), 0.95) * Math.hypot(...op.vel) * n;
+  const steps = Math.min(MAX_PULL_SUBSTEPS, Math.max(1, Math.ceil(move / 0.5)));
+  return { op: { ...op, vel: op.vel.map((v) => v / steps) as [number, number, number] }, steps };
+}
+
 /** A polytrope for the star brush: p = K rho^gamma, and rho / rho_c at evenly spaced r / R from 0 to 1. */
 export interface StarProfile {
   K: number;
@@ -1613,15 +1628,19 @@ export class Sim implements Simulation {
       this.solids = true;
       this.writeParams();
     }
-    this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
     if (isFieldBrush(op)) {
       if (!this.mhd) return;
+      const { op: one, steps } = fieldBrushSteps(op, this.n);
+      this.device.queue.writeBuffer(this.brush, 0, packBrush(one));
       const pass = beginPass(enc);
-      this.mhd.encodeFieldBrush(pass, this.cur);
+      for (let i = 0; i < steps; i++) {
+        this.mhd.encodeFieldBrush(pass, this.cur);
+        this.cur = 1 - this.cur;
+      }
       pass.end();
-      this.cur = 1 - this.cur;
       return;
     }
+    this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
     const pass = beginPass(enc);
     pass.setPipeline(this.pBrush);
     pass.setBindGroup(0, this.gBrush[this.cur]);

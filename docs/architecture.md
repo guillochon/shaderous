@@ -410,8 +410,9 @@ directly. Nothing is copied to the CPU.
   as the ray-marcher.
 - **Brushes** (`edit/brush*.wgsl`, `amr/brush.wgsl`) write mass, velocity, heat, obstacles,
   sources and stars straight into the state textures. The field brushes (`edit/field_brush*.wgsl`,
-  `amr/field_brush.wgsl`) change the face field through a vector potential, then the total
-  energy by the field's change (numerics.md section 21).
+  `amr/field_brush.wgsl`) change the face field through a vector potential (strength) or the
+  induction equation (pull), then the total energy by the field's change (numerics.md section
+  21).
 
 ## Frame loop and pacing
 

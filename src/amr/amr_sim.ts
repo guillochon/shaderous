@@ -34,7 +34,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
-import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush } from '../sim';
+import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -2269,21 +2269,25 @@ export class AmrSim implements Simulation {
       this.solids = true;
       this.writeParams();
     }
+    if (isFieldBrush(op)) {
+      if (!this.mhd) return;
+      const { op: one, steps } = fieldBrushSteps(op, this.n);
+      this.device.queue.writeBuffer(this.brush, 0, packBrush(one));
+      const pass = beginPass(enc);
+      for (let i = 0; i < steps; i++) {
+        this.mhd.encodeFieldBrush(pass, this.cur, (p) => this.interior(p, this.nLeaf));
+        this.cur = 1 - this.cur;
+      }
+      pass.end();
+      return;
+    }
     this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
     const pass = beginPass(enc);
-    if (isFieldBrush(op)) {
-      if (!this.mhd) {
-        pass.end();
-        return;
-      }
-      this.mhd.encodeFieldBrush(pass, this.cur, (p) => this.interior(p, this.nLeaf));
-    } else {
-      pass.setPipeline(this.pBrush);
-      pass.setBindGroup(0, this.gBrush[this.cur]);
-      this.interior(pass, this.nLeaf);
-      // A brush leaves the field as it is: the leaves' faces go along to the brushed state's parity.
-      this.mhd?.encodeCommitFaces(pass, 1 - this.cur);
-    }
+    pass.setPipeline(this.pBrush);
+    pass.setBindGroup(0, this.gBrush[this.cur]);
+    this.interior(pass, this.nLeaf);
+    // A brush leaves the field as it is: the leaves' faces go along to the brushed state's parity.
+    this.mhd?.encodeCommitFaces(pass, 1 - this.cur);
     pass.end();
     this.cur = 1 - this.cur;
   }

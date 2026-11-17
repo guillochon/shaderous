@@ -2,10 +2,10 @@
 // divergence. Shared by the uniform and block grids (edit/field_brush.wgsl,
 // amr/field_brush.wgsl).
 //
-// Every change is the curl of a change dA of the vector potential, taken on the faces as the
-// circulation of dA around each face over its area, so the divergence of every cell stays what
-// it was, to round-off. The potential is the field's own, in the radial (Poincare) gauge about
-// the brush's center x0:
+// Every change is the curl of a field on the edges (a change dA of the vector potential, or the
+// pull's v x B), taken on the faces as its circulation around each face over the face's area, so
+// the divergence of every cell stays what it was, to round-off. The strength brush's potential
+// is the field's own, in the radial (Poincare) gauge about the brush's center x0:
 //
 //   A(x) = integral over t from 0 to 1 of  t B(x0 + t (x - x0)) x (x - x0)  dt,
 //
@@ -13,8 +13,9 @@
 //   strength (kind 7): dA = (f - 1) A with f = exp(amount * w), so the field becomes
 //                      curl(f A) = f B + grad f x A: scaled by f inside, with the flux it
 //                      gains (or loses) closing around the brush's rim;
-//   pull (kind 8):     dA = A(x - g w d) - A(x), d the drag (B.vel.xyz) and g the grip
-//                      (B.amount, below 1): the field near the center is carried by g d, and
+//   pull (kind 8):     the field carried by the displacement g w d, d the drag (B.vel.xyz) and g
+//                      the grip (B.amount, below 1), through the induction equation rather than
+//                      the potential (fb_delta): the field near the center moves by g d, and
 //                      less of it toward the rim. With g = 1 the field swept up ahead of the
 //                      brush would come to rest in it and pile up without bound; with g < 1 it
 //                      slips through, and flux conservation holds it to 1 / (1 - g) times what
@@ -110,26 +111,29 @@ fn fb_potential(d: vec3<f32>) -> vec3<f32> {
   return a;
 }
 
-// Component `b` of dA at the point x (fractions of the box).
+// Component `b` at the point x (fractions of the box) of what the faces take the circulation of:
+// the strength brush's dA, or the pull's v x B (below).
 fn fb_delta(b: i32, x: vec3<f32>) -> f32 {
   let w = brush_weight(x);
   if (w <= 0.0) { return 0.0; }
-  let d = fb_rel(x);
-  // Strength: one potential, scaled. Pull: the potential at the point the drag brings here,
-  // less the one here. One call site, in a loop the compiler keeps (it inlines at every call).
-  let strength = B.kind == 7u;
-  let terms = select(2, 1, strength);
-  var s = 0.0;
-  for (var k = 0; k < loop_count(terms); k++) {
-    let drag = clamp(B.amount, 0.0, 0.95) * select(B.vel.xyz, vec3<f32>(B.vel.xy, 0.0), P.dims.z == 1u);
-    var at = select(d, d - w * drag, !strength && k == 0);
-    for (var e = 0; e < 3; e++) {
-      if (P.bc_lo[e] != 0u) { at[e] = clamp(B.pos[e] + at[e], 0.0, 1.0) - B.pos[e]; }
-    }
-    let c = select(select(-1.0, 1.0, k == 0), exp(B.amount * w) - 1.0, strength);
-    s += c * fb_potential(at)[b];
+  if (B.kind == 7u) {
+    return (exp(B.amount * w) - 1.0) * fb_potential(fb_rel(x))[b];
   }
-  return s;
+  // Pull: one substep of the induction equation, dB = curl(v x B), for the displacement
+  // v = g w d (the drag d, B.vel, already cut into substeps of at most half a finest cell, and
+  // the grip g). B is read upstream of the edge, half the displacement back along v: from the
+  // cell the field comes from, as donor-cell constrained transport takes it, with the cell's
+  // linear profile along v making it better than first order there. (Moving the potential
+  // instead, dA = A(x - v) - A(x), was unstable on adaptive meshes: where a coarse cell's face
+  // meets the finer faces beside it, the potential's curl is not quite the field, and each of
+  // the hundred small pulls of a slow drag added that difference again, shifted, until it grew
+  // a tenfold a few pulls.)
+  let v = clamp(B.amount, 0.0, 0.95) * w * select(B.vel.xyz, vec3<f32>(B.vel.xy, 0.0), P.dims.z == 1u);
+  let len = length(v);
+  if (len <= 0.0) { return 0.0; }
+  let back = max(0.5 * len, 1.0e-3 / fb_cells());
+  let q = fb_in_box(x - back * v / len);
+  return cross(v, fb_b(fb_cell(q), q))[b];
 }
 
 // Whether coordinate v (fractions of the box) of axis a lies on a domain face that is not periodic.

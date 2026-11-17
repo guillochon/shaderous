@@ -3911,7 +3911,8 @@ function advanceStroke(now: number) {
     let d = [0, 1, 2].map((i) => to[i] - from[i]) as Vec3;
     if (cfg.ndim === 2) d[2] = 0;
     const len = Math.hypot(...d);
-    const cap = Math.min((0.15 * soft * q.size) / grip, 0.5 * q.size);
+    // (And to 30 cells of the finest level, which the passes cut into substeps of half a cell.)
+    const cap = Math.min((0.15 * soft * q.size) / grip, 0.5 * q.size, 30 / (cfg.n * grip));
     if (len > cap) d = d.map((v) => (v * cap) / len) as Vec3;
     if (s.released && len <= cap) stroke = null;
     if (len < 1e-6) return;

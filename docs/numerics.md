@@ -1194,10 +1194,10 @@ $`E`$ includes $`B^2/2`$.
   for two dynamical times; the random field loses 15% of its energy in one, its small scales
   being a few cells across at $`64^3`$.
 - **Field brushes** (`edit/field_brush_core.wgsl`; the tools "Field strength" and "Pull
-  field", offered in runs with a field). Both change the field by the curl of a change of its
-  vector potential, taken on each face as the circulation of that change around the face, so
-  every cell's divergence stays as it was, to rounding. The potential is the field's own in the
-  radial gauge about the brush's center $`x_0`$,
+  field", offered in runs with a field). Both change the field by the curl of a field on the
+  edges, taken on each face as its circulation around the face, so every cell's divergence stays
+  as it was, to rounding. For the strength brush that is a change of the vector potential, the
+  field's own in the radial gauge about the brush's center $`x_0`$,
   $`\mathbf{A}(x) = \int_0^1 t\,\mathbf{B}(x_0 + t d) \times d\,dt`$ with $`d = x - x_0`$,
   integrated exactly: the field in a cell is taken as the scheme holds it, each component linear
   along its own axis between the cell's two faces, so $`t\mathbf{B}`$ is quadratic along the ray
@@ -1213,18 +1213,29 @@ $`E`$ includes $`B^2/2`$.
   - Field strength: $`\delta\mathbf{A} = (f - 1)\mathbf{A}`$, $`f = e^{\pm w \ln 1.5}`$ (Shift
     weakens), so the field becomes $`f\mathbf{B} + \nabla f \times \mathbf{A}`$: 1.5 times
     stronger in the brush's hard core, with the flux it gains closing back around its rim.
-  - Pull field: $`\delta\mathbf{A}(x) = \mathbf{A}(x - g\,w\,\delta) - \mathbf{A}(x)`$ for a
-    drag $`\delta`$ and a grip $`g`$ (the tool's Grip, 50% by default): the field lines near the
-    center move by $`g\delta`$ and less of them toward the edge, and the gas stays where it is.
+  - Pull field: the induction equation, $`\delta\mathbf{B} = \nabla\times(\mathbf{v}\times
+    \mathbf{B})`$, for the displacement $`\mathbf{v} = g\,w\,\delta`$ of a drag $`\delta`$ and a
+    grip $`g`$ (the tool's Grip, 50% by default): the field lines near the center move by
+    $`g\delta`$ and less of them toward the edge, and the gas stays where it is. A drag is cut
+    into substeps that move the field at most half a finest cell, and $`\mathbf{B}`$ is read
+    upstream of each edge, half the substep's displacement back, from the cell the field comes
+    from (donor-cell constrained transport, with the cell's linear profile along the motion).
+    Moving the potential instead, $`\delta\mathbf{A} = \mathbf{A}(x - \mathbf{v}) -
+    \mathbf{A}(x)`$, was unstable on an adaptive mesh: where a coarse cell's face meets the finer
+    faces beside it, the potential's curl is not quite the field, and each of the hundred small
+    pulls of a slow drag added that difference again, shifted. Replaying 59 pulls recorded from a
+    slow drag on the 2D turbulence (1024, 5 levels) grew the largest $`|B|`$ from 2.9 to 2100
+    that way; it now stays at 2.9.
     Held fast ($`g = 1`$), the field the brush sweeps up would come to rest in it, its speed
     relative to the brush falling to zero, and pile up without bound: a fast drag across a
     turbulent field made sheets whose magnetic pressure blew the gas apart. With $`g < 1`$ the
     field slips through the brush at $`(1 - g)\delta`$, and conserving flux holds it to
     $`1/(1 - g)`$ times what it was along the drag (in `mhd-field-brush`, a sweep across the
-    box: 2.6 times at 50%, where the lines also bend around the brush; 29 times at 95%).
+    box: 2.6 times at 50%, where the lines also bend around the brush; 20 times at 95%).
     Across the rim the drag squeezes the field ahead by $`1/(1 - g\,|\nabla w|\,\delta)`$ in a
     frame: a frame's drag is kept to 0.15 of the rim's width (at least 0.3 of the radius) over
-    the grip, which holds that to 1.3, and a fast drag catches up over the frames after.
+    the grip, and to 30 finest cells, which holds that to 1.3, and a fast drag catches up over
+    the frames after.
 
   Edges are integrated at the midpoints of their finest-level segments, at positions exact in
   float32 and in a fixed order: the copies of a shared face get the same bits, and a coarse
@@ -1238,7 +1249,8 @@ $`E`$ includes $`B^2/2`$.
   `mhd-field-brush` the brush's hard core on the rotor's uniform field comes out 1.5 times
   stronger to $`4\times10^{-8}`$, and every face in it on Orszag-Tang at $`64^2`$, whose field
   changes from cell to cell, to $`6\times10^{-6}`$; a frame's pull on Orszag-Tang's coarse mesh
-  raises the largest $`|B|`$ by 9%; on both grids $`\nabla\cdot B`$ stays below
+  raises the largest $`|B|`$ by 9%, and sixty small pulls across its refinement boundaries
+  (512 finest, 2 levels) leave it as it was; on both grids $`\nabla\cdot B`$ stays below
   $`1.4\times10^{-7}`$, the
   total energy changes by the magnetic energy's change to $`4\times10^{-4}`$ of it, and shared
   faces agree bit for bit (coarse the mean of fine to $`1.4\times10^{-7}`$). The gas brushes keep

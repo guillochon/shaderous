@@ -2848,7 +2848,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-field-brush',
     name: 'MHD field brushes: strength (stronger, then weaker) and pull, on the rotor (2D, 128) and an outflow blast (3D, 32), and on blocks (rotor 2D, 256 finest; outflow blast 3D, 128 finest; 1 level)',
     criterion:
-      'After each brush: |div B| dx / max |B| below 1e-6; on Orszag-Tang (64^2) every face in the hard core exactly 1.5 times stronger (to 1e-4), and a pull on its coarse mesh making no peak (max |B| up by less than 30%, magnetic energy within 5%); a long sweep at a grip of 0.5 at most 3 times the field it swept up (2 along the drag, more where the lines bend around the brush); the total energy changes by the magnetic energy\'s change (to 1% of it), and the magnetic energy goes up for "stronger", down for "weaker"; on the rotor\'s uniform field the brush\'s hard core is exactly 1.5 times stronger (to 1e-3). On blocks: faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); and a gas brush (mass) leaves the magnetic energy and the faces as they were',
+      'After each brush: |div B| dx / max |B| below 1e-6; on Orszag-Tang (64^2) every face in the hard core exactly 1.5 times stronger (to 1e-4), and a pull on its coarse mesh making no peak (max |B| up by less than 30%, magnetic energy within 5%); 60 small pulls across refinement boundaries growing nothing (max |B| up by less than 50%, magnetic energy within 5%); a long sweep at a grip of 0.5 at most 3 times the field it swept up (2 along the drag, more where the lines bend around the brush); the total energy changes by the magnetic energy\'s change (to 1% of it), and the magnetic energy goes up for "stronger", down for "weaker"; on the rotor\'s uniform field the brush\'s hard core is exactly 1.5 times stronger (to 1e-3). On blocks: faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); and a gas brush (mass) leaves the magnetic energy and the faces as they were',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -2931,6 +2931,24 @@ export const TESTS: TestDef[] = [
         m.orszag_tang_blocks_pull_magnetic_change = d.magnetic!.eMag / d0.magnetic!.eMag - 1;
         m.orszag_tang_blocks_pull_divB = d.magnetic!.divB;
         pass &&= m.orszag_tang_blocks_pull_bmax < 1.3 && Math.abs(m.orszag_tang_blocks_pull_magnetic_change) < 0.05 && d.magnetic!.divB < 1e-6;
+      });
+      // A slow drag across refinement boundaries: 60 pulls of under a finest cell each (as the tool
+      // applies them at a high frame rate), on Orszag-Tang's developed field, 512 finest, 2 levels.
+      // Moving the potential instead grew the field tenfold every five such pulls.
+      await withAmr(gpu, orszagTang, 512, { ndim: 2, amrLevels: 2, tEnd: 0.4 }, async (sim) => {
+        await sim.runToEnd(64);
+        const d0 = await sim.diagnostics();
+        for (let i = 0; i < 60; i++) {
+          apply(sim, { ...base, kind: 'pull', pos: [0.3 + 0.004 * i, 0.4 + 0.002 * i, 0], radius: 0.1, softness: 0.7, amount: 0.5, vel: [0.004, 0.002, 0] });
+        }
+        const d = await sim.diagnostics();
+        const f = await sim.faceConsistency();
+        m.slow_drag_leaves = sim.tree.leaves().length;
+        m.slow_drag_bmax = d.magnetic!.bMax / d0.magnetic!.bMax;
+        m.slow_drag_magnetic_change = d.magnetic!.eMag / d0.magnetic!.eMag - 1;
+        m.slow_drag_divB = d.magnetic!.divB;
+        m.slow_drag_shared_mismatched = f.mismatched;
+        pass &&= m.slow_drag_bmax < 1.5 && Math.abs(m.slow_drag_magnetic_change) < 0.05 && d.magnetic!.divB < 1e-6 && f.mismatched === 0;
       });
       // A long sweep across the field (the rotor's uniform B_x at its start, away from the rotor,
       // dragged along y in the tool's frame-sized steps): at a grip of 0.5 the field swept up ahead
