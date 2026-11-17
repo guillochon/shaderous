@@ -43,6 +43,7 @@ export function setSetting(cfg: SimConfig, s: Setting, value: unknown): void {
     cfg.bcHi = [bc.hi[0], bc.hi[1], cfg.ndim === 2 ? 0 : bc.hi[2]];
   } else if (s.cfg === 'tEnd') cfg.tEnd = value === null || value === undefined ? Infinity : (value as number);
   else if (s.cfg.startsWith('fluff.')) cfg.fluff = { ...cfg.fluff, [s.cfg.slice(6)]: value as number };
+  else if (s.cfg.startsWith('driving.')) cfg.driving = { ...cfg.driving, [s.cfg.slice(8)]: value as number };
   else setPath(cfg, s.cfg, value);
 }
 

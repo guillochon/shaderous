@@ -1,0 +1,16 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "driven-turbulence-mhd",
+  "extends": "driven-turbulence",
+  "name": "Driven MHD turbulence",
+  "variant": "Magnetic field",
+  "blurb": "The stirred isothermal box threaded by a guide field B0 along z (out of the plane in 2D): the turbulence is Alfvenic, its eddies stretched along the field, and near the subsonic, strong-field limit compressible MHD approaches the reduced MHD of the taranis WebGPU page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html), whose driving this follows.",
+  "physics": {
+    "floors": { "rho": 1e-6, "p": 1e-6 }
+  },
+  "parts": [
+    { "kind": "field", "id": "field", "b": [0, 0, 1] }
+  ],
+  "view": { "mode": "slice", "field": 25, "log": false }
+}

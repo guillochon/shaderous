@@ -1,4 +1,5 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
+import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareHelmholtz } from './eos/helmholtz';
 import { assemble } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
@@ -99,6 +100,11 @@ export interface SimConfig {
    * energy flux eta J x B, and the internal energy the Ohmic heat eta J^2 (mhd/ohm.wgsl). 0 is off.
    */
   resistivity: number;
+  /**
+   * Turbulence driving (hydro/drive.ts): a random acceleration in a band of large scales,
+   * correlated over tau. An rms acceleration of 0 is off.
+   */
+  driving: DriveParams;
   /**
    * The preset's damping zone (Problem.damping): where it starts, as a distance from the box
    * center, and how fast it relaxes the gas at the box's edge (the preset defines the unit).
@@ -359,6 +365,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     viscosity: problem.viscosity ?? 0,
     conductivity: problem.conductivity ?? 0,
     resistivity: problem.resistivity ?? 0,
+    driving: { ...defaultDrive(), ...problem.driving },
     dampRadius: problem.damping?.radius ?? 0,
     dampRate: problem.damping?.rate ?? 0,
     // A problem compiled from a setup document brings the solver's and the mesh's settings too.
@@ -911,6 +918,8 @@ export class Sim implements Simulation {
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    // Before any pass is bound: the driving buffer is shared, bound where a pass declares it.
+    writeDrive(d, cfg.driving, cfg.ndim, cfg.problem.box);
     this.clock = d.createBuffer({
       size: 16,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
@@ -1419,6 +1428,7 @@ export class Sim implements Simulation {
     writeTexture(d, this.state[0][1], n, 4, u2, this.nz);
     if (this.cfg.ndim === 3) writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
     d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
+    writeDrive(d, this.cfg.driving, this.cfg.ndim, this.cfg.problem.box);
     this.writeParams();
     this.refreshPotential();
   }

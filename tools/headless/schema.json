@@ -185,6 +185,36 @@
    "about": "Resistivity η"
   },
   {
+   "key": "drive",
+   "group": "settings",
+   "about": "Driving acceleration"
+  },
+  {
+   "key": "dtau",
+   "group": "settings",
+   "about": "Driving correlation time τ"
+  },
+  {
+   "key": "dkmin",
+   "group": "settings",
+   "about": "Driving band, longest"
+  },
+  {
+   "key": "dkmax",
+   "group": "settings",
+   "about": "Driving band, shortest"
+  },
+  {
+   "key": "dzeta",
+   "group": "settings",
+   "about": "Solenoidal share ζ"
+  },
+  {
+   "key": "dseed",
+   "group": "settings",
+   "about": "Driving seed"
+  },
+  {
    "key": "gravity",
    "group": "settings",
    "about": "Gravity: off, constant, periodic, isolated"

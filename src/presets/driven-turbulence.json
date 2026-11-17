@@ -1,0 +1,50 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "driven-turbulence",
+  "name": "Driven turbulence",
+  "group": "Instabilities",
+  "family": "driven-turbulence",
+  "familyName": "Driven turbulence",
+  "variant": "Gas alone",
+  "blurb": "Isothermal gas in a periodic box, stirred by a random force at the largest scales (Ornstein-Uhlenbeck modes, solenoidal): eddies break up into smaller ones down to the grid, and the flow settles into steady turbulence near Mach 1. The driving follows the taranis WebGPU reduced-MHD page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html), with the method of Eswaran & Pope (1988) and Federrath et al. (2010).",
+  "domain": {
+    "ndim": 3,
+    "n": 128,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "barotropic",
+    "eosParams": { "gamma": 1, "K": 1 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "rho": 1e-6, "p": 1e-6 },
+    "driving": { "accel": 2, "tau": 0.5, "kMin": 1, "kMax": 2, "zeta": 1, "seed": 1 }
+  },
+  "background": { "rho": 1, "p": 1 },
+  "run": { "tEnd": null, "checkpointDt": 0.5 },
+  "view": { "mode": "slice", "field": 11, "log": false },
+  "featured": [
+    {
+      "path": "physics.driving.accel",
+      "id": "drive",
+      "label": "Driving strength",
+      "min": 0,
+      "max": 100,
+      "factor": 1.5,
+      "tip": "The rms acceleration of the stirring force: the turbulence's speed goes roughly as its square root. Changing it starts the run again"
+    },
+    {
+      "path": "physics.driving.zeta",
+      "id": "zeta",
+      "label": "Solenoidal share",
+      "min": 0,
+      "max": 1,
+      "step": 0.05,
+      "tip": "1 stirs without compressing, 0 compresses only, 0.5 is the natural mix. Changing it starts the run again"
+    }
+  ]
+}

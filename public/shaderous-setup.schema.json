@@ -443,6 +443,54 @@
      "minimum": 0,
      "maximum": 1e+30
     },
+    "driving": {
+     "type": "object",
+     "properties": {
+      "accel": {
+       "type": "number",
+       "title": "Driving acceleration",
+       "description": "Turbulence driving: the root-mean-square acceleration of a random force that stirs the gas at large scales (a band of wavelengths, correlated over a time τ). The gas reaches speeds of about (accel × box / band)^½ where it balances the dissipation. 0 is off",
+       "minimum": 0,
+       "maximum": 1e+30
+      },
+      "tau": {
+       "type": "number",
+       "title": "Driving correlation time τ",
+       "description": "How long the random force keeps its pattern (its Ornstein-Uhlenbeck correlation time)",
+       "minimum": 0.000001,
+       "maximum": 1e+30
+      },
+      "kMin": {
+       "type": "number",
+       "title": "Driving band, longest",
+       "description": "The longest wavelengths driven, as wavelengths per box side",
+       "minimum": 1,
+       "maximum": 16
+      },
+      "kMax": {
+       "type": "number",
+       "title": "Driving band, shortest",
+       "description": "The shortest wavelengths driven, as wavelengths per box side (at most 64 wavevectors are kept, the longest first)",
+       "minimum": 1,
+       "maximum": 16
+      },
+      "zeta": {
+       "type": "number",
+       "title": "Solenoidal share ζ",
+       "description": "What the force stirs: 1 swirls only (solenoidal, no compression), 0 compresses only, 0.5 the natural mix",
+       "minimum": 0,
+       "maximum": 1
+      },
+      "seed": {
+       "type": "number",
+       "title": "Driving seed",
+       "description": "Which random force: each seed gives another, and the same seed the same run",
+       "minimum": 0,
+       "maximum": 1000000000
+      }
+     },
+     "additionalProperties": false
+    },
     "riemann": {
      "enum": [
       "hllc",

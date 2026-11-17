@@ -16,6 +16,7 @@
 // sides, again without storing fluxes. The bins are such that the faster side is never the
 // coarser one, so at a refinement boundary it is still the fine fluxes that count.
 #include "hydro/common.wgsl"
+#include "hydro/drive.wgsl"
 #include "gravity/ext_bind.wgsl"
 #include <eos>
 #include <limiter>
@@ -400,6 +401,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     kick = 0.5 * g_dt * u1.x * g + kx;
     let ke = select(kx, kick, !flux_work);
     ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
+  }
+
+  // Turbulence driving (hydro/drive.wgsl): a whole step's kick, in kick form.
+  if (drive_on() && !g_deposit) {
+    let kd = drive_kick(kick, ekick, blk_pos(slot, l), g_dt, u1.x, u1.yzw);
+    kick = kd.xyz;
+    ekick = kd.w;
   }
 
   var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);

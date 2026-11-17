@@ -83,6 +83,8 @@ export interface PhysicsSpec {
   conductivity?: number;
   /** magnetic diffusivity eta (with a field): the Ohmic electric field is eta curl B */
   resistivity?: number;
+  /** turbulence driving (hydro/drive.ts): rms acceleration (0 off), correlation time, band, solenoidal weight, seed */
+  driving?: { accel?: number; tau?: number; kMin?: number; kMax?: number; zeta?: number; seed?: number };
   riemann?: RiemannKind;
   limiter?: LimiterKind;
   cfl?: number;

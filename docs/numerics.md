@@ -859,6 +859,42 @@ disk grew until its uneven pull pushed the binary out of the box.
 With a magnetic field (the magnetized accretion disk) the zone acts on the gas alone: B^2 / 2 is
 taken out of E before it and put back after, and the field is left to the induction equation.
 
+**Turbulence driving** (`hydro/drive.ts`, `hydro/drive.wgsl`, `hydro/drive_ou.wgsl`; the
+driven-turbulence presets). A random acceleration stirs the gas at the largest scales: the
+Ornstein-Uhlenbeck forcing of [Eswaran & Pope (1988)][EP88], with the solenoidal and
+compressive projection of [Federrath et al. (2010)][Federrath2010]. The idea and the presets
+follow the WebGPU reduced-MHD page of [Mallet & Abraham (2026)][Mallet2026]. The modes are the
+wavevectors $`\mathbf{k} = 2\pi\mathbf{n}/L`$ with integer $`\mathbf{n}`$ in a band
+$`k_\text{min} \le |\mathbf{n}| \le k_\text{max}`$ (one of each pair $`\pm\mathbf{n}`$, in the
+plane in 2D; at most 64, the longest first: 16 in 3D for the default band of 1 to 2, 61 for 1 to 3).
+The acceleration is
+
+```math
+\mathbf{a}(\mathbf{x}) = \sum_m \mathbf{a}^r_m\cos(\mathbf{k}_m\cdot\mathbf{x}) - \mathbf{a}^i_m\sin(\mathbf{k}_m\cdot\mathbf{x}),
+```
+
+summed directly at each cell's position, so it needs no FFT and works on any grid and any
+level. Over a time $`h`$ each amplitude becomes
+$`f\,\mathbf{a} + \sigma\sqrt{1 - f^2}\,\mathsf{P}\boldsymbol{\xi}`$, with $`f = e^{-h/\tau}`$,
+$`\boldsymbol{\xi}`$ unit normal deviates and
+$`\mathsf{P} = \zeta\mathsf{P}_\perp + (1 - \zeta)\mathsf{P}_\parallel`$ ($`\zeta = 1`$
+solenoidal, 0 compressive). $`\sigma`$ is set so that the box mean of $`|\mathbf{a}|^2`$ is the
+requested rms acceleration squared in the stationary state, and the first amplitudes are drawn
+from that state, so the driving is at full strength from the start. The step is taken on the
+GPU by the clock pass, over the step it has just set (over the whole cycle with per-block
+timesteps, so every block of a cycle sees the same amplitudes); the deviates come from a hash of
+the seed, the step count, the mode and the draw, so a run is the same from the same seed. The
+updates add $`\rho\,\mathbf{a}\,\Delta t`$ to the momentum and its kinetic energy
+$`\mathbf{k}\cdot(\mathbf{m} + \mathbf{k}/2)/\rho`$ to the total energy (in MHD, each stage
+over its own step). The acceleration has zero mean but its force $`\rho\mathbf{a}`$ does not
+where the density varies, and nothing removes it: the box picks up a net momentum, about a tenth
+of its mass times the rms speed after four crossing times at Mach 1. Restarting from a
+snapshot draws the amplitudes afresh. In `driving`: the isothermal preset at $`32^3`$ holds an
+rms speed of 1.0 to 1.2 (the sound speed is 1) from $`t = 3`$; the same seed gives the same kinetic
+energy and another seed one 20% apart; with the force frozen, unrefined blocks follow the uniform
+grid to 0.5% at $`t = 0.05`$; and with a guide field in 2D the field is amplified with $`\nabla\cdot\mathbf{B}`$
+at zero. Not yet compared against the injected power or a measured spectrum (no spectra yet).
+
 ## 20. Nuclear burning network
 
 `src/burn/network.ts`, `hydro/burn_net_core.wgsl`; trained offline in `tools/burn/`. The
@@ -1386,6 +1422,9 @@ result.
 [Kappeli2014]: https://doi.org/10.1016/j.jcp.2013.11.028
 [Koren1993]: https://openalex.org/W2125064741
 [Koyama2002]: https://doi.org/10.1086/338978
+[EP88]: https://doi.org/10.1016/0045-7930(88)90013-8
+[Federrath2010]: https://doi.org/10.1051/0004-6361/200912437
+[Mallet2026]: https://doi.org/10.5281/zenodo.21987739
 [Koyama2004]: https://doi.org/10.1086/382478
 [Krumholz2004]: https://doi.org/10.1086/421935
 [Kushnir2013]: https://doi.org/10.1088/2041-8205/778/2/L37

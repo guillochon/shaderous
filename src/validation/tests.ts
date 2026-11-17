@@ -31,6 +31,7 @@ const tdeTest: Problem = { ...tidalDisruption, box: TDE.box };
 import { sphere, spherePotential } from '../presets/names';
 import { all, PERIODIC, REFLECT, type Problem } from '../problems/types';
 import { binary } from '../presets/names';
+import { problemById } from '../presets/index';
 import { MRI, mriDisk } from '../presets/names';
 import { thermalInstability } from '../presets/names';
 import { capture, restartFrom } from '../io/capture';
@@ -1744,6 +1745,63 @@ export const TESTS: TestDef[] = [
       };
       pass &&= kappaTi > 0 && (await change('conducting', kappaTi)) < 0.12 && (await change('plain', 0)) > 0.15;
       return { pass, metrics };
+    },
+  },
+  {
+    id: 'driving',
+    name: 'Turbulence driving (3D 32^3 uniform and on blocks; 2D 128^2 with a field)',
+    criterion:
+      'Isothermal gas stirred as in the driven-turbulence preset reaches an rms speed between 0.7 and 1.6 by t = 3 and holds it at t = 4 (within 30%); the same seed gives the same kinetic energy to 1e-5, another seed one that differs by more than 1%; with the force frozen, unrefined blocks follow the uniform grid to 1% in kinetic energy at t = 0.05 (later the differences of the two schemes grow); the box gains a net momentum under 20% of its mass times the rms speed; the magnetized preset in 2D runs to t = 2 with |div B| dx / max |B| below 1e-6 and the field amplified',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const hydro = problemById('driven-turbulence');
+      const base = configFor(hydro, 32, { ndim: 3 }).driving;
+      const vrms = (d: Diagnostics) => Math.sqrt((2 * d.eKin) / d.mass);
+      const runTo = async (sim: Sim | AmrSim, t: number) => {
+        sim.cfg.tEnd = t;
+        sim.writeParams();
+        await sim.runToEnd(64);
+        return sim.diagnostics();
+      };
+      const seeded = (seed: number) =>
+        withSim(gpu, hydro, 32, { ndim: 3, tEnd: 4, driving: { ...base, seed } }, async (sim) => {
+          const d3 = await runTo(sim, 3);
+          const d4 = await runTo(sim, 4);
+          return { d3, d4 };
+        });
+      const a = await seeded(1);
+      const b = await seeded(1);
+      const c = await seeded(2);
+      m.vrms_t3 = vrms(a.d3);
+      m.vrms_t4 = vrms(a.d4);
+      m.same_seed_difference = Math.abs(b.d4.eKin / a.d4.eKin - 1);
+      m.other_seed_difference = Math.abs(c.d4.eKin / a.d4.eKin - 1);
+      m.net_momentum = Math.hypot(...a.d4.momentum) / (a.d4.mass * m.vrms_t4);
+      pass &&= m.vrms_t3 > 0.7 && m.vrms_t3 < 1.6 && Math.abs(m.vrms_t4 / m.vrms_t3 - 1) < 0.3;
+      pass &&= m.same_seed_difference < 1e-5 && m.other_seed_difference > 0.01 && m.net_momentum < 0.2;
+
+      // The same force on unrefined blocks: frozen (tau very long), since the random kicks follow
+      // the step count and the two grids take different steps; and early, before the turbulence
+      // amplifies the two schemes' differences (the blocks take steps twice as long, and by t = 0.3
+      // the two differ by 5%).
+      const frozen = { ...base, tau: 1e6 };
+      const uni = await withSim(gpu, hydro, 32, { ndim: 3, tEnd: 0.05, driving: frozen }, async (sim) => (await sim.runToEnd(64), sim.diagnostics()));
+      const blk = await withAmr(gpu, hydro, 32, { ndim: 3, amrLevels: 1, refineHi: 2, tEnd: 0.05, driving: frozen }, async (sim) => (await sim.runToEnd(64), sim.diagnostics()));
+      m.blocks_kinetic_difference = Math.abs(blk.eKin / uni.eKin - 1);
+      pass &&= m.blocks_kinetic_difference < 0.01;
+
+      // With a guide field, in the plane across it.
+      await withSim(gpu, problemById('driven-turbulence-mhd'), 128, { ndim: 2, tEnd: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        m.mhd_vrms = vrms(d1);
+        m.mhd_field_gain = d1.magnetic!.eMag / d0.magnetic!.eMag;
+        m.mhd_divB = d1.magnetic!.divB;
+        pass &&= m.mhd_vrms > 0.5 && m.mhd_field_gain > 1 && m.mhd_divB < 1e-6;
+      });
+      return { pass, metrics: m };
     },
   },
   {

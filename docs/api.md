@@ -143,6 +143,12 @@ by `npm run gen`.
 | `nu` | Settings | Viscosity ν. Kinematic viscosity: the stress is ρ ν times the shear. Obstacles hold the gas at their walls. 0 is off |
 | `kappa` | Settings | Conductivity κ. Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off |
 | `eta` | Settings | Resistivity η. With a magnetic field: magnetic diffusivity, so the field diffuses as η ∇²B (the electric field gains η curl B) and the current it dissipates, η J², heats the gas. 0 is off (ideal MHD, with only the scheme’s own diffusion) |
+| `drive` | Settings | Driving acceleration. Turbulence driving: the root-mean-square acceleration of a random force that stirs the gas at large scales (a band of wavelengths, correlated over a time τ). The gas reaches speeds of about (accel × box / band)^½ where it balances the dissipation. 0 is off |
+| `dtau` | Settings | Driving correlation time τ. How long the random force keeps its pattern (its Ornstein-Uhlenbeck correlation time) |
+| `dkmin` | Settings | Driving band, longest. The longest wavelengths driven, as wavelengths per box side |
+| `dkmax` | Settings | Driving band, shortest. The shortest wavelengths driven, as wavelengths per box side (at most 64 wavevectors are kept, the longest first) |
+| `dzeta` | Settings | Solenoidal share ζ. What the force stirs: 1 swirls only (solenoidal, no compression), 0 compresses only, 0.5 the natural mix |
+| `dseed` | Settings | Driving seed. Which random force: each seed gives another, and the same seed the same run |
 | `gravity` | Settings | Gravity: off, constant, periodic, isolated. Off, a uniform field, or the self-gravity of the gas. Point masses pull either way |
 | `G` | Settings | G. Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them |
 | `vcycles` | Settings | V-cycles. Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step |

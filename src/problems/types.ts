@@ -290,6 +290,8 @@ export interface Problem {
   conductivity?: number;
   /** Magnetic diffusivity eta switched on by default (see SimConfig.resistivity). */
   resistivity?: number;
+  /** Turbulence driving switched on by default (see SimConfig.driving). */
+  driving?: Partial<import('../hydro/drive').DriveParams>;
   /** Uniform external gravitational acceleration, which may depend on the dimensionality. */
   gext?: (ndim: 2 | 3) => [number, number, number];
   /** A polytropic star at rest, settled into the grid's own hydrostatic balance before the run (problems/settle.ts). */

@@ -31,6 +31,7 @@
 // and the faces texel t holds that exist. The internal energy's p div v takes the pressure at
 // the start of the step in stage 1 and at the half step in stage 2.
 #include "hydro/common.wgsl"
+#include "hydro/drive.wgsl"
 #include <eos>
 #include "hydro/dual_energy.wgsl"
 #include "hydro/pfloor.wgsl"
@@ -286,6 +287,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     let ke = select(kick, kx, flux_work);
     ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
+  }
+  // Turbulence driving (hydro/drive.wgsl): the stage's whole kick (dt is the stage's).
+  if (drive_on()) {
+    let kd = drive_kick(kick, ekick, cell_pos(t), dt, u1.x, u1.yzw);
+    kick = kd.xyz;
+    ekick = kd.w;
   }
   let eb = 0.5 * dot(bc, bc);
   let rho_new = max(u1.x + dtdx * net_a.x, P.rho_floor);

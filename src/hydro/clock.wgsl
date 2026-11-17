@@ -1,6 +1,7 @@
 // Turns the timestep reduction into dt and advances the clock, entirely on the GPU.
 #include "hydro/common.wgsl"
 #include "gravity/bh.wgsl"
+#include "hydro/drive_ou.wgsl"
 
 @group(0) @binding(1) var<storage, read> RED: array<f32>;
 @group(0) @binding(2) var<storage, read_write> clock: Clock;
@@ -69,4 +70,6 @@ fn main() {
     dt = 0.0;
   }
   clock.dt = dt;
+  // Turbulence driving: its amplitudes over the step (or cycle) just set.
+  drive_advance(CYCLE * dt);
 }

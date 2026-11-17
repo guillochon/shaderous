@@ -1504,6 +1504,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next.eosParams, link.eosParams);
       Object.assign(next.coolParams, link.coolParams);
       next.fluff = { ...next.fluff, ...link.fluff };
+      next.driving = { ...next.driving, ...link.driving };
       if (ndim === 2) {
         if (isSelfGravity(next.gravity)) next.gravity = 'off';
         next.bcLo = [next.bcLo[0], next.bcLo[1], 0];

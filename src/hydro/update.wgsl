@@ -15,6 +15,7 @@
 // stencil in a shader-local array was 3x slower than repeating the texture loads. The interior
 // pipeline computes each face once per workgroup instead, when it can: see hydro/tile.wgsl.
 #include "hydro/common.wgsl"
+#include "hydro/drive.wgsl"
 #include "gravity/ext_bind.wgsl"
 #include <eos>
 #include <limiter>
@@ -189,6 +190,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
     let ke = select(kx, kick, !flux_work);
     ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
+  }
+
+  // Turbulence driving (hydro/drive.wgsl): a whole step's kick, in kick form.
+  if (drive_on()) {
+    let kd = drive_kick(kick, ekick, cell_pos(c), clock.dt, u1.x, u1.yzw);
+    kick = kd.xyz;
+    ekick = kd.w;
   }
 
   var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);

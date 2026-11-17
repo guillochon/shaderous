@@ -13,6 +13,7 @@
 // Blocks at the same level compute shared faces and edges from identical inputs, so their
 // copies agree.
 #include "hydro/common.wgsl"
+#include "hydro/drive.wgsl"
 #include <eos>
 #include <limiter>
 #include "hydro/dual_energy.wgsl"
@@ -488,6 +489,12 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     }
     let ke = select(kick, kx, flux_work);
     ekick = dot(ke, u1.yzw + 0.5 * kick) / max(u1.x, P.rho_floor);
+  }
+  // Turbulence driving (hydro/drive.wgsl): the stage's whole kick (dt is the stage's).
+  if (drive_on() && !g_deposit) {
+    let kd = drive_kick(kick, ekick, blk_pos(g_slot, t), dt, u1.x, u1.yzw);
+    kick = kd.xyz;
+    ekick = kd.w;
   }
   let eb = 0.5 * dot(bc, bc);
   let rho_new = max(u1.x + dtdx * net_a.x, P.rho_floor);

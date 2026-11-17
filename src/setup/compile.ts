@@ -455,6 +455,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
     viscosity: ph.viscosity,
     conductivity: ph.conductivity,
     resistivity: ph.resistivity,
+    driving: ph.driving ? { ...ph.driving } : undefined,
     gext: gext === undefined ? undefined : Array.isArray(gext) ? () => [...gext] as [number, number, number] : (ndim) => (ndim === 2 ? [0, -gext.down, 0] : [0, 0, -gext.down]),
     settle: hasStars ? (params, eos) => settlingOfSetup(at(params), eos) : undefined,
     heat: heatFlow

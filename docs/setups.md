@@ -227,6 +227,12 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.viscosity` | Viscosity ν | a number, 0 to 1e+30. Default `0` | Kinematic viscosity: the stress is ρ ν times the shear. Obstacles hold the gas at their walls. 0 is off |
 | `physics.conductivity` | Conductivity κ | a number, 0 to 1e+30. Default `0` | Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off |
 | `physics.resistivity` | Resistivity η | a number, 0 to 1e+30. Default `0` | With a magnetic field: magnetic diffusivity, so the field diffuses as η ∇²B (the electric field gains η curl B) and the current it dissipates, η J², heats the gas. 0 is off (ideal MHD, with only the scheme’s own diffusion) |
+| `physics.driving.accel` | Driving acceleration | a number, 0 to 1e+30. Default `0` | Turbulence driving: the root-mean-square acceleration of a random force that stirs the gas at large scales (a band of wavelengths, correlated over a time τ). The gas reaches speeds of about (accel × box / band)^½ where it balances the dissipation. 0 is off |
+| `physics.driving.tau` | Driving correlation time τ | a number, 0.000001 to 1e+30. Default `0.5` | How long the random force keeps its pattern (its Ornstein-Uhlenbeck correlation time) |
+| `physics.driving.kMin` | Driving band, longest | a number, 1 to 16. Default `1` | The longest wavelengths driven, as wavelengths per box side |
+| `physics.driving.kMax` | Driving band, shortest | a number, 1 to 16. Default `2` | The shortest wavelengths driven, as wavelengths per box side (at most 64 wavevectors are kept, the longest first) |
+| `physics.driving.zeta` | Solenoidal share ζ | a number, 0 to 1. Default `1` | What the force stirs: 1 swirls only (solenoidal, no compression), 0 compresses only, 0.5 the natural mix |
+| `physics.driving.seed` | Driving seed | a whole number, 0 to 1000000000. Default `1` | Which random force: each seed gives another, and the same seed the same run |
 | `physics.gravity` | Gravity | `off`, `constant`, `periodic`, `isolated`. Default `off` | Off, a uniform field, or the self-gravity of the gas. Point masses pull either way |
 | `physics.G` | G | a number, at least 0. Default `1` | Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them |
 | `physics.gext` | Uniform acceleration | `[x, y, z]`. Default `[0,0,0]` | A uniform acceleration on the gas, besides the Constant field |
