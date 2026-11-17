@@ -2,7 +2,7 @@
 // what it takes to get from one document to another (a uniform write, new shaders, or a fresh
 // start). Free of the DOM: the page (ui/app.ts), the dialog and the scripting interface share it.
 import { configFor, type SimConfig } from '../sim';
-import { compiledFrom, compileSetup, withParams } from './compile';
+import { compileSetup, withParams } from './compile';
 import { flatten, OPTIONS, PART_OPTIONS, type Apply, type Option } from './options';
 import { cloneSetup, emptySetup, getPath, setPath, type SetupSpec } from './spec';
 
@@ -44,13 +44,6 @@ export function setSetting(cfg: SimConfig, s: Setting, value: unknown): void {
   } else if (s.cfg === 'tEnd') cfg.tEnd = value === null || value === undefined ? Infinity : (value as number);
   else if (s.cfg.startsWith('fluff.')) cfg.fluff = { ...cfg.fluff, [s.cfg.slice(6)]: value as number };
   else setPath(cfg, s.cfg, value);
-}
-
-/** The configuration a document alone gives on a grid: no setting changed since. */
-export function configOf(spec: SetupSpec, n: number, ndim: 2 | 3, amrLevels: number, params?: Record<string, number>): SimConfig {
-  const c = configFor(compiledFrom(spec).problem, n, { ndim, amrLevels });
-  if (params) Object.assign(c.params, params);
-  return c;
 }
 
 /**

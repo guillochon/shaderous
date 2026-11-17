@@ -1737,7 +1737,6 @@ export class Sim implements Simulation {
    */
   async profile(reps = 20): Promise<Record<string, number>> {
     const d = this.device;
-    const n = this.n;
     const p = this.cur;
     const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const time = async (count: number, fn: (pass: GPUComputePassEncoder) => void) => {

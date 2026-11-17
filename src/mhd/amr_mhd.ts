@@ -12,7 +12,7 @@
 // (encodeSubstep(), plans/mhd-plan.md section 5b).
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, type Bindable } from '../gpu/device';
-import { MAX, Reducer, SUM } from '../gpu/reduce';
+import { Reducer } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { BS, type Block } from '../amr/tree';
 import { MAG_OPS, magneticFrom, mhdRiemann, type MagDiagnostics } from './mhd';

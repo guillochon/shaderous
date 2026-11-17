@@ -366,6 +366,3 @@ fn faces_at(level: u32, g: vec3<i32>) -> CellFaces {
   let lo = vec3<f32>(f[0], f[1], f[2]);
   return CellFaces(lo, 0.5 * (lo + vec3<f32>(f[3], f[4], f[5])));
 }
-fn bcell_at(level: u32, g: vec3<i32>) -> vec3<f32> {
-  return faces_at(level, g).B;
-}

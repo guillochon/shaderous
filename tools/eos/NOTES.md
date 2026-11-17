@@ -34,7 +34,7 @@ The burning presets now use a tabulated electron-positron gas, as every collisio
   a classical-gas guess. With the burning network running, the C/O tube costs 15% more per step
   than with the old EOS (21.8 against 19.0 ms at 512^2 on an RTX 3080).
 
-- The ions' Coulomb energy (added 2026-11-16; plan in `plans/coulomb-corrections.md`) is
+- The ions' Coulomb energy (added 2026-11-16) is
   analytic and needs no table: the one-component plasma's free energy as Helmholtz has it,
   split into a part that does not depend on T, which joins the zero-temperature electrons, and
   a thermal part, and faded out below about 1e3 g/cm^3 (for C/O), where the cold part would

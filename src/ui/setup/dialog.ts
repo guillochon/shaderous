@@ -891,8 +891,3 @@ let dialog: ReturnType<typeof build> | null = null;
 export function openSetupDialog(host: SetupHost, opts: { file?: SetupSpec; notes?: string[] } = {}): void {
   (dialog ??= build()).open(host, opts);
 }
-
-/** Close the dialog, discarding what was not applied. */
-export function closeSetupDialog(): void {
-  dialog?.close();
-}

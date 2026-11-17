@@ -28,7 +28,7 @@ export class MassSums {
   private bases: GPUBuffer[] = [];
   private variants = 1;
 
-  private constructor(private device: GPUDevice, private maxMasses: number) {
+  private constructor(device: GPUDevice, private maxMasses: number) {
     this.result = device.createBuffer({ label: 'point mass sums', size: (1 + 10 * maxMasses) * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
   }
 

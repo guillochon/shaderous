@@ -19,7 +19,7 @@ import { prepareHelmholtz } from '../eos/helmholtz';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
-import { MAX, Reducer, SUM } from '../gpu/reduce';
+import { MAX, Reducer } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
@@ -1423,7 +1423,6 @@ export class AmrSim implements Simulation {
   private startSettling() {
     const epoch = ++this.settleEpoch;
     const c = this.cfg;
-    const d = this.device;
     this.settling = false;
     this.settled = Promise.resolve();
     if (c.restart || !c.wellBalanced || !this.selfGravity) return;

@@ -9,6 +9,7 @@ import { FieldLines } from './fieldlines';
 import type { ViewFromOptions, ViewMode } from './view_options';
 import { PathTube } from './pathtube';
 import { padded3d } from '../amr/dispatch';
+import { halfToFloat } from '../io/arrays';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
 const HIST_BINS = 128;
@@ -197,16 +198,6 @@ export function colorScale(v: ViewState): { log: boolean; lo: number; hi: number
   const log = v.log && !LINEAR_FIELDS.has(v.field);
   const tiny = 1e-30;
   return { log, lo: log ? Math.log10(Math.max(v.lo, tiny)) : v.lo, hi: log ? Math.log10(Math.max(v.hi, tiny)) : v.hi };
-}
-
-/** A half-precision float, from its bits. */
-function halfToFloat(h: number): number {
-  const s = h & 0x8000 ? -1 : 1;
-  const e = (h >> 10) & 0x1f;
-  const m = h & 0x3ff;
-  if (e === 0) return s * m * 2 ** -24;
-  if (e === 31) return m ? NaN : s * Infinity;
-  return s * (1 + m / 1024) * 2 ** (e - 15);
 }
 
 /**

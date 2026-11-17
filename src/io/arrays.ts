@@ -66,3 +66,13 @@ export function decodeArray(a: EncodedArray): Float32Array {
   checkShape(a.shape, out.length);
   return out;
 }
+
+/** A half-precision float, from its bits. */
+export function halfToFloat(h: number): number {
+  const s = h & 0x8000 ? -1 : 1;
+  const e = (h >> 10) & 0x1f;
+  const m = h & 0x3ff;
+  if (e === 0) return s * m * 2 ** -24;
+  if (e === 31) return m ? NaN : s * Infinity;
+  return s * (1 + m / 1024) * 2 ** (e - 15);
+}

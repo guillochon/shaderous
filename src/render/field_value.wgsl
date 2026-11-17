@@ -83,7 +83,7 @@ fn field_value(f: u32, u1: vec4<f32>, u2: vec4<f32>, g: Grad, level: f32, phi: f
     }
     case 12u { return g.dvx.x + g.dvy.y + g.dvz.z; }
     case 13u { return length(g.drho) / rho; }
-    case 14u { return level; }
+    case F_LEVEL { return level; }
     case 15u { return phi; }
     case 16u { return 0.5 * rho * dot(v, v); }
     // The Jeans length in cells: Truelove et al. ask for at least four.

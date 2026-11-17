@@ -1,5 +1,5 @@
-// A color bar and an axis triad painted over a frame of the view, for movies and screenshots
-// (plans/mp4-export-plan.md, section 6). Pure 2D canvas drawing: everything the overlays show
+// A color bar and an axis triad painted over a frame of the view, for movies and screenshots.
+// Pure 2D canvas drawing: everything the overlays show
 // comes in as an OverlayInfo, so nothing here looks at the page.
 import { sampleColormap } from './transfer';
 

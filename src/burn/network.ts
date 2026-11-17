@@ -29,6 +29,7 @@ import { assemble } from '../gpu/shaders';
 import { speciesConst } from '../species/species';
 import { COMPOSITIONS, meanMolecularWeight, type Composition } from '../units/composition';
 import { kelvinPerCodeT, unitOf, type UnitSystem } from '../units/units';
+import { halfToFloat } from '../io/arrays';
 
 /** The species of the network, in its order: a problem that burns with it carries exactly these. */
 export const NET_SPECIES: readonly string[] = NET_DATA.names;
@@ -76,15 +77,6 @@ const N = 13;
 const LN10 = Math.LN10;
 
 // ---- The weights ----
-
-function halfToFloat(h: number): number {
-  const s = h & 0x8000 ? -1 : 1;
-  const e = (h >> 10) & 0x1f;
-  const f = h & 0x3ff;
-  if (e === 0) return s * f * 2 ** -24;
-  if (e === 31) return f ? NaN : s * Infinity;
-  return s * (1 + f / 1024) * 2 ** (e - 15);
-}
 
 let weights: Float32Array | null = null;
 

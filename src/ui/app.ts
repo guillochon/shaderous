@@ -16,15 +16,14 @@ import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
 import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
-import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { type CellProbe, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt, sizedProblem } from '../problems/types';
-import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
+import { EOS_LABELS, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
-import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
@@ -57,14 +56,6 @@ const select = (id: string, options: string, tip = '') => `<select id="${id}"${t
  */
 const number = (id: string, attrs = '', factor = 0) =>
   `<input id="${id}" type="number" ${/\bstep=/.test(attrs) ? '' : 'step="any" '}${factor ? `data-factor="${factor}" ` : ''}${attrs} />`;
-
-// What the gas meets at a face of the box, in the order of the codes in problems/types.ts.
-const BC_KINDS = [
-  { label: 'Periodic', title: 'Gas leaving through this face comes back in through the opposite one (both faces of an axis)' },
-  { label: 'Outflow', title: 'Open: the state at the face continues beyond it, so gas may leave or enter' },
-  { label: 'Reflecting', title: 'A solid wall' },
-  { label: 'Outflow only', title: 'Open for gas leaving; nothing comes in' },
-];
 
 // 3D grids past 256^3 are adaptive only (UNIFORM_MAX): the mesh's memory goes by its blocks,
 // not by n, so a finer finest level costs only where the setup refines to it.

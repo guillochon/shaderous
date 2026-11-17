@@ -80,7 +80,6 @@ export class FieldLines {
   /** Changes whenever the tube targets are made again (the ray-marcher's bind group follows). */
   version = 0;
   private count = 0;
-  private plane = false;
   private frameNo = 0;
   /** What the seeds were placed for: when it changes they are placed again. */
   private placedFor = '';
@@ -303,7 +302,6 @@ export class FieldLines {
     const again = key !== this.placedFor;
     this.placedFor = key;
     this.count = count;
-    this.plane = plane;
     const m = run.bv;
     const per = sim.cfg.bcLo.map((b) => (b === 0 ? 1 : 0));
     d.queue.writeBuffer(this.params, 0, new Float32Array([

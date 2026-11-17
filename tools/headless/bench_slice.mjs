@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Times shaderous.slice() and splits the time between the page and the bridge to Node
-// (plans/binary-slice-transport.md, steps 1 and 10). Runs at normal priority: it is a benchmark.
+// Times shaderous.slice() and splits the time between the page and the bridge to Node.
+// Runs at normal priority: it is a benchmark.
 //   node tools/headless/bench_slice.mjs [--url http://127.0.0.1:5190/] [--reps 3]
 // Against a static build (npx vite build --outDir X; npx vite preview --outDir X --port 5190),
 // so that no edit to the checkout reloads the page mid-run.
