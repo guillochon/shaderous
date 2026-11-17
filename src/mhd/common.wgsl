@@ -35,7 +35,7 @@ fn face_texel(a: i32, t: vec3<i32>) -> vec3<i32> {
       if (s[a] >= n[a] && periodic_axis(a)) { s[a] -= n[a]; }
       s[a] = clamp(s[a], 0, n[a]);
     } else {
-      s[b] = bc_axis(s[b], n[b], P.bc_lo[b], P.bc_hi[b]).x;
+      s[b] = bc_axis(s[b], n[b], P.bc_lo[b], P.bc_hi[b]);
     }
   }
   return s;
@@ -54,6 +54,6 @@ fn mq_load(c: vec3<i32>) -> MQ {
   let m = bc_map(c);
   comp_use(comp_tex(m.c));
   let w = prim_from_cons(textureLoad(U1, m.c, 0), textureLoad(U2, m.c, 0));
-  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), bcell(m.c) * m.flip);
+  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), bcell(m.c) * m.bflip);
 }
 

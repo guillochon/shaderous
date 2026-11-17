@@ -49,7 +49,7 @@ fn eref(c: vec3<i32>) -> Ref {
   let m = bc_map(c);
   let u = textureLoad(U1, m.c, 0);
   let v = bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
-  let B = bcell(m.c) * m.flip;
+  let B = bcell(m.c) * m.bflip;
   return Ref(efield(v, B), B);
 }
 
@@ -87,6 +87,14 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (RESISTIVITY) { J = vec3<f32>(edge_current(0, ryz, rz0, r100, r111), edge_current(1, rzx, r010, rz0, r111), edge_current(2, r000, r100, r010, r111)); }
   }
   if (RESISTIVITY) { E += (P.ohm.x / P.dx) * J; }
+  // Line-tied faces (hydro/boundary.wgsl): no field along them, so the flux through them stays.
+  let n = mhd_dims();
+  var tied = vec3<bool>(false);
+  for (var a = 0; a < 3; a++) {
+    if (a == 2 && P.dims.z == 1u) { continue; }
+    tied[a] = (t[a] == 0 && P.bc_lo[a] == BC_LINE_TIED) || (t[a] == n[a] && P.bc_hi[a] == BC_LINE_TIED);
+  }
+  E *= bc_tied_keep(tied);
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
   EMF[emf_index(t)] = vec4<f32>((dt / P.dx) * E, 0.0);
 }

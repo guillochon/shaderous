@@ -56,8 +56,8 @@ fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   seen += ext_dphi(cell_pos(a), vec3<f32>(e * apart) * P.dx, 0.0);
   var face = seen;
   let n = select(i32(P.n), i32(P.dims.z), axis == 2);
-  let at_lo = ia == -1 && P.bc_lo[axis] == 2u;
-  let at_hi = ia == n - 1 && P.bc_hi[axis] == 2u;
+  let at_lo = ia == -1 && bc_wall(P.bc_lo[axis]);
+  let at_hi = ia == n - 1 && bc_wall(P.bc_hi[axis]);
   if (at_lo || at_hi) {
     // Across the wall: the uniform field as it is, the rest from the step next to it inside.
     face = -P.gext[axis] * P.dx;

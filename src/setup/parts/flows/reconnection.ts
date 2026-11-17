@@ -1,13 +1,15 @@
 // Magnetic reconnection with resistivity (mhd/ohm.wgsl): current sheets that tear into islands,
-// and islands that merge through the current sheet their X-point collapses into. The choice of
-// setups follows the taranis WebGPU reduced-MHD page of Mallet & Abraham
+// islands that merge through the current sheet their X-point collapses into, and a stressed
+// X-point that collapses on its own. The choice of setups follows the taranis WebGPU
+// reduced-MHD page of Mallet & Abraham
 // (https://alfredmallet.github.io/taranis/webgpu/rmhd2d.html); the equilibria are the standard
 // ones of the papers named below, not taken from its code.
 //
 // Units: magnetic pressure B^2 / 2, density 1. The fields come from a vector potential A_z(x, y)
 // (B = (dA/dy, -dA/dx)), plus a uniform guide field B_z on the faces. Coordinates are relative
-// to the box center; the box is periodic along x and closed by reflecting walls along y, which
-// the field lines do not cross.
+// to the box center. The sheet and the islands sit in a box periodic along x and closed by
+// reflecting walls along y, which their field lines do not cross; the X-point's cross every wall,
+// which are line-tied.
 import type { FlowDef } from '../flow';
 
 /**
@@ -91,4 +93,30 @@ const islands: FlowDef<{ b0: number; eps: number; islands: number; beta: number;
   },
 };
 
-export const flows = [harris, islands];
+
+/**
+ * X-point collapse: the stressed null A_z = (B0 / 2L) (y^2 - alpha^2 x^2), B = (B0 / L)(y, alpha^2 x),
+ * in gas of uniform density and pressure, inside line-tied walls (problems/boundaries.ts) that
+ * hold the field lines crossing them. For alpha = 1 it is current-free and in equilibrium; for
+ * alpha above 1 it carries a uniform current that its own force cannot hold, and the null
+ * collapses into a current sheet, where the field reconnects at a rate set by the resistivity
+ * (Craig & McClymont 1991; Tsiklauri & Haruki 2007; Thurgood, Pontin & McLaughlin 2018).
+ */
+const xpoint: FlowDef<{ b0: number; alpha: number; p: number }> = {
+  name: 'x-point',
+  label: 'Stressed X-point',
+  tip: 'An X-type magnetic null at the center, A_z = (B0 / 2L) (y² - alpha² x²) with L the box side, so B = (B0 / L) (y, alpha² x), in gas of density 1 and uniform pressure. With alpha above 1 it carries a current its own force cannot hold, and collapses into a current sheet. Needs walls that hold the field lines crossing them: line-tied on all four sides.',
+  wholeBox: true,
+  fields: {
+    b0: { label: 'Field strength', default: 1, min: 0.01, max: 100, factor: 1.25, tip: 'B0: the field is B0 / 2 at the middle of the walls along y, and alpha² B0 / 2 at those along x' },
+    alpha: { label: 'Stress', default: 1.2, min: 0.5, max: 3, step: 0.05, tip: 'alpha, how far the null is squeezed: 1 is current-free (in equilibrium), 1.2 a 20% compression' },
+    p: { label: 'Pressure', default: 0.05, min: 1e-4, max: 100, factor: 1.5, tip: 'Gas pressure, uniform at the start' },
+  },
+  potential: (ctx, q) => {
+    const L = ctx.box;
+    return (x, y) => [0, 0, (q.b0 / (2 * L)) * (y * y - q.alpha * q.alpha * x * x)];
+  },
+  init: (_ctx, q) => (x, y) => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: q.p, s: x * y > 0 ? 1 : 0 }),
+};
+
+export const flows = [harris, islands, xpoint];

@@ -4,6 +4,10 @@
 // mhd/state.wgsl (MQ), MFlux, hydro/diffusion_core.wgsl and load_b(c).
 #include "mhd/ohm.wgsl"
 
+// Set by the flux pass for a face in a line-tied wall of the domain (hydro/boundary.wgsl): no
+// electric field along it, so no Poynting flux through it, resistive or not.
+var<private> g_tied_face: bool = false;
+
 fn dside_mq(q: MQ) -> DSide {
   return DSide(q.a.x, q.a.yzw, q.b.x, false);
 }
@@ -22,6 +26,6 @@ fn mhd_add_diffusion(Fin: MFlux, a: vec3<i32>, e: vec3<i32>, axis: i32, l: MQ, r
     F.e += q;
     F.ei += q;
   }
-  if (RESISTIVITY) { F.e += ohm_eflux(a, e, axis, l.B, r.B); }
+  if (RESISTIVITY && !g_tied_face) { F.e += ohm_eflux(a, e, axis, l.B, r.B); }
   return F;
 }

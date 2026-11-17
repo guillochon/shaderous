@@ -3,6 +3,7 @@
 // A link names the preset, dimensionality, resolution and refinement, and then only what
 // differs from that preset's defaults, so most links stay short. Anything unrecognized or
 // out of range in a link is ignored rather than trusted.
+import { BOUNDARY_CODES, boundaryList } from '../problems/boundaries';
 import { configFor, type SimConfig } from '../sim';
 import { physicalEosParams, type EosParams } from '../eos/eos';
 import type { CoolingParams } from '../cooling/cooling';
@@ -109,7 +110,7 @@ export function linkKeys(): LinkKey[] {
     { key: 'tend', group: 'settings', about: 'End time (inf for none)' },
     ...settings,
     { key: 'wb', group: 'settings', about: 'Well-balanced reconstruction (0 or 1)' },
-    { key: 'bc', group: 'settings', about: 'Six digits: the boundary at the lower x, y, z faces and then the upper ones (0 periodic, 1 outflow, 2 reflecting, 3 outflow only)' },
+    { key: 'bc', group: 'settings', about: `Six digits: the boundary at the lower x, y, z faces and then the upper ones (${boundaryList()})` },
     { key: 'p.<id>', group: 'settings', about: 'One of the preset’s own parameters, by its id' },
     ...VIEW_OPTIONS.map((o): LinkKey => ({ key: o.link, group: 'view', about: o.doc })),
     { key: 'cmap', group: 'view', about: 'Colormap' },
@@ -304,7 +305,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   }
   put(out.cfg, 'wellBalanced', bool('wb'));
   const bc = q.get('bc');
-  if (bc && /^[0-3]{6}$/.test(bc)) {
+  if (bc && bc.length === 6 && [...bc].every((d) => BOUNDARY_CODES.includes(Number(d)) && /\d/.test(d))) {
     const d = [...bc].map(Number);
     // Periodic faces come in pairs.
     if ([0, 1, 2].every((a) => (d[a] === 0) === (d[a + 3] === 0))) {

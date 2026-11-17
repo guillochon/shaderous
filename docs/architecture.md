@@ -220,11 +220,27 @@ to round-off.
 ## Boundaries without ghost cells
 
 The uniform grid stores no ghost cells. Every texture load goes through `bc_map`
-(`hydro/region.wgsl`), which maps an out-of-range cell index to the texel that holds its value,
-and a velocity transform (a sign flip for reflecting walls, clamping for no-inflow outflow).
-Periodic, outflow, outflow-without-inflow and reflecting boundaries are chosen per face.
-Obstacles are solid cells flagged in the state and treated as reflecting (or no-slip, with
-viscosity) walls by the same functions. In the interior variant `bc_map` is compiled out.
+(`hydro/common.wgsl`), which maps an out-of-range cell index to the texel that holds its value,
+with the signs of its velocity and magnetic field components and, at a face that lets nothing
+in, the clamp on its normal velocity. Cells inside the grid return at once, and in the interior
+variant `bc_map` is compiled out. Obstacles are solid cells flagged in the state and treated as
+reflecting (or no-slip, with viscosity) walls by the same functions.
+
+The kinds of box face are chosen per face: periodic, outflow, reflecting, outflow only, and the
+line-tied wall. What each does to a ghost is written once, in `hydro/boundary.wgsl`
+(`bc_ghost_cell`, `bc_vsign`, `bc_bsign`, `bc_side`, `bc_ghost_face`), and every grid's mapping
+calls it: `bc_map` on the uniform grid, `ghost_src` and `row_src` for the gas on blocks (where
+the block table holds a domain face as `-1 - kind`), and `map_cell` and `face_map`
+(`mhd/amr_lookup.wgsl`) for MHD on blocks. The interface, the setup format and links read one
+table, `problems/boundaries.ts`. A new kind is an entry there, its rules in
+`hydro/boundary.wgsl`, and whatever physics is its own: the line-tied wall also zeroes the
+electric field along it (`bc_tied_keep`, in both edge passes) and the resistive Poynting flux
+through it. The CPU reference solvers (`src/reference`) keep their own mappings of the first
+four kinds, as independent checks.
+
+One trap when touching these: `map_cell` must be called inside the per-axis loop of
+`face_map`, as written. Hoisted out of the loop, it is inlined at every call site, and the MHD
+block passes took twice as long per step.
 
 ## Reductions and the GPU-resident timestep
 

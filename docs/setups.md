@@ -52,7 +52,7 @@ units of the setup's own box, which is the cube `[-box/2, box/2]³` centered on 
 | `ndim`, `n`, `amr` | The grid the setup opens on: 2 or 3 dimensions, cells per side (the finest level's on an adaptive mesh), levels of refinement. Absent: the grid already chosen is kept |
 | `box` | Side of the box (default 1) |
 | `supports2d` | The setup also makes sense on a 2D (x, y) grid |
-| `bc` | `{ "lo": [x, y, z], "hi": [x, y, z] }`: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only. Periodic faces come in pairs |
+| `bc` | `{ "lo": [x, y, z], "hi": [x, y, z] }`: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall (no slip, and it holds the magnetic field lines that cross it). Periodic faces come in pairs |
 | `bc2d` | The same for a 2D run, where it differs |
 | `units` | What one code unit is (below). Without it the setup is scale free |
 
@@ -191,7 +191,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `domain.units.length.unit` | Length unit | `m`, `cm`, `km`, `Rsun`, `au`, `pc`. Default `Rsun` | The unit of the length |
 | `domain.units.mass.value` | Mass | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of mass |
 | `domain.units.mass.unit` | Mass unit | `kg`, `g`, `Msun`. Default `Msun` | The unit of the mass |
-| `domain.bc` | Faces of the box | `{ "lo": [x, y, z], "hi": [x, y, z] }`, each 0 to 3 | What the gas meets at each face of the box. Periodic faces come in pairs |
+| `domain.bc` | Faces of the box | `{ "lo": [x, y, z], "hi": [x, y, z] }`, each 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall | What the gas meets at each face of the box. Periodic faces come in pairs |
 
 **`physics`**
 
@@ -447,6 +447,7 @@ Its fields are its `name` and that flow's parameters, listed below.
 | `rayleigh-taylor` | Rayleigh-Taylor layers. Heavy gas over light gas in a unit box, in hydrostatic balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), with one seeded mode that vanishes at the walls. Up is y in 2D and z in 3D. (fills the box) | `rhoTop` 2 (Density above); `rhoBottom` 1 (Density below); `p0` 2.5 (Pressure at the interface); `amp` 0.05 (Kick amplitude); `modes` 2 (Wavelengths across) |
 | `harris-sheet` | Harris current sheet. A current sheet along y = 0: B_x = B0 tanh(y / a), with the gas pressure higher in the sheet so that p + B² / 2 is uniform, density 1, an optional uniform guide field B_z, and a perturbation A_z = psi B0 L cos(k x) cos(pi y / L) that seeds the tearing mode (Harris 1962; Furth, Killeen & Rosenbluth 1963). Periodic along x, walls along y. (fills the box) | `b0` 1 (Field strength); `width` 0.05 (Sheet half-width); `beta` 1 (Plasma beta outside); `guide` 0 (Guide field); `psi` 0.0001 (Perturbation); `modes` 1 (Wavelengths across) |
 | `island-coalescence` | Island coalescence. A chain of magnetic islands along y = 0, the Fadeev equilibrium A_z = -lambda B0 ln(cosh(y / lambda) + eps cos(x / lambda)), with the gas pressure p = p_out + B0² (1 - eps²) / (2 (cosh(y / lambda) + eps cos(x / lambda))²) that holds it, density 1, and a flow along x that pushes pairs of islands together (Fadeev et al. 1965; Finn & Kaw 1977). Periodic along x, walls along y. (fills the box) | `b0` 1 (Field strength); `eps` 0.2 (Island size); `islands` 2 (Islands across); `beta` 0.4 (Plasma beta outside); `kick` 0.1 (Push) |
+| `x-point` | Stressed X-point. An X-type magnetic null at the center, A_z = (B0 / 2L) (y² - alpha² x²) with L the box side, so B = (B0 / L) (y, alpha² x), in gas of density 1 and uniform pressure. With alpha above 1 it carries a current its own force cannot hold, and collapses into a current sheet. Needs walls that hold the field lines crossing them: line-tied on all four sides. (fills the box) | `b0` 1 (Field strength); `alpha` 1.2 (Stress); `p` 0.05 (Pressure) |
 | `shock-bubble` | Shock hitting a helium bubble. A planar shock in air (density 1, pressure 1, gamma 1.4) running toward +x into a bubble of helium at the same pressure and temperature, after Haas & Sturtevant (1987). Needs the species he4 and air, in that order, each with its own gamma. (fills the box) | `mach` 1.22 (Shock Mach number); `xhe` 0.72 (Helium in the bubble); `radius` 0.15 (Bubble radius) |
 | `thermal-instability` | Gas in unstable thermal balance. Uniform gas at the temperature where interstellar cooling balances heating on the unstable branch, with small random density perturbations at one pressure. Density in atoms per cm^3, temperature in units of 1000 K: needs the interstellar cooling, in those units. (fills the box) | `n0` 2 (Mean density (cm⁻³)); `amp` 0.02 (Perturbation); `kMax` 8 (Smallest wavelength); `seed` 20021 (Random seed) |
 <!-- /gen:setup-flows -->

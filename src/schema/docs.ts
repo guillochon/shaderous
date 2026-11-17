@@ -4,6 +4,7 @@
 //   <!-- gen:NAME -->
 //   ...generated, do not edit...
 //   <!-- /gen:NAME -->
+import { boundaryList } from '../problems/boundaries';
 import { SECTIONS } from '../../tools/headless/flags.mjs';
 import { VIEW_EXTRAS, VIEW_OPTIONS } from '../render/view_options';
 import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../setup/options';
@@ -42,7 +43,7 @@ function valuesOf(o: Option): string {
     : c.type === 'check' ? '`true` or `false`'
     : c.type === 'text' ? 'text'
     : c.type === 'vec3' ? '`[x, y, z]`'
-    : c.type === 'faces' ? '`{ "lo": [x, y, z], "hi": [x, y, z] }`, each 0 to 3'
+    : c.type === 'faces' ? `\`{ "lo": [x, y, z], "hi": [x, y, z] }\`, each ${boundaryList()}`
     : c.type === 'ref' ? `${c.count === 1 ? 'the id' : c.count === 2 ? 'the ids of two' : 'ids'} of ${c.kinds.map((k) => `\`${k}\``).join(' or ')} parts`
     : c.type === 'fractions' ? '`{ species: fraction }`'
     : c.type === 'names' ? 'a list of names'

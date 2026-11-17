@@ -1016,7 +1016,25 @@ $`E`$ includes $`B^2/2`$.
 - **Boundaries.** Periodic axes map the upper face to the lower face of cell 0. At an outflow
   face the boundary faces are evolved like any other, with edge fields from ghost cells that
   copy the edge cells. At a reflecting face the ghost's normal field changes sign, as its
-  normal velocity does. The tangential face indices of ghost cells are mapped like cells.
+  normal velocity does: the field lies along the wall. The tangential face indices of ghost
+  cells are mapped like cells.
+
+  A **line-tied wall** (kind 4) holds field lines that cross it, as the closed,
+  flux-conserving boundaries of X-point collapse studies do ([Tsiklauri & Haruki
+  2007][Tsiklauri2007]; [Thurgood et al. 2018][Thurgood2018]). The gas sticks to it: the
+  ghost's whole velocity is reversed (no slip, which also makes it a no-slip wall for viscosity
+  without a field). The ghost's field is the edge cell's, unreversed, so the field normal to
+  the wall is continuous; and the electric field along the wall is zero on its edges, so the
+  faces in the wall never change and the flux through it is fixed to the bit. Nothing crosses
+  it: no mass, and no Poynting flux, ideal or resistive. Because the ghost copies the edge
+  cell's field, a field with a gradient across the wall sees a small spurious current there.
+  In `mhd-line-tied`: a stressed X-point, $`\mathbf{B} = (y, 1.44x)`$ with
+  $`\eta = 10^{-3}`$, keeps every wall face to the bit, conserves mass exactly and total energy
+  to $`7\times10^{-8}`$, uniform and on blocks, and collapses (peak density 3.5 by $`t = 1`$);
+  the current-free null, $`\mathbf{B} = (y, x)`$, picks up kinetic energy of
+  $`8\times10^{-6}`$ of its magnetic energy by $`t = 1`$, from the walls' spurious current; and
+  for the gas alone, a shear flow between two such walls decays as
+  $`\exp(-2\nu\pi^2 t)`$ to $`2\times10^{-5}`$.
 - **Initial fields.** A preset gives a vector potential $`\mathbf{A}`$, sampled at the edge
   centers, and $`b`$ is its discrete curl, so the divergence starts at zero up to rounding. Or
   it gives the face values of a field that is divergence-free by construction.
@@ -1425,6 +1443,8 @@ result.
 [EP88]: https://doi.org/10.1016/0045-7930(88)90013-8
 [Federrath2010]: https://doi.org/10.1051/0004-6361/200912437
 [Mallet2026]: https://doi.org/10.5281/zenodo.21987739
+[Thurgood2018]: https://doi.org/10.1063/1.5035489
+[Tsiklauri2007]: https://doi.org/10.1063/1.2800854
 [Koyama2004]: https://doi.org/10.1086/382478
 [Krumholz2004]: https://doi.org/10.1086/421935
 [Kushnir2013]: https://doi.org/10.1088/2041-8205/778/2/L37

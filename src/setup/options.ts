@@ -6,6 +6,7 @@
 // kind of part) may name what it `requires` and what it `excludes`, as rules over the setup's
 // facts (FACTS below). The dialog greys out an option whose rules do not hold and makes its
 // tooltip from the rule that disables it.
+import { BOUNDARIES } from '../problems/boundaries';
 import { COOLING_LABELS } from '../cooling/cooling';
 import { EOS_LABELS } from '../eos/eos';
 import { FUNCTIONS } from './expr';
@@ -172,12 +173,12 @@ const ADAPTIVE: Rule[] = [{ fact: 'mesh.adaptive' }];
 const IN_3D: Rule[] = [{ fact: 'domain.ndim', is: 3 }];
 const NOT_PERIODIC: Rule[] = [{ fact: 'bc.periodic', reason: 'Not available with a periodic face: its gravity is not periodic' }];
 
-export const BC_CHOICES: Choice[] = [
-  { value: 0, label: 'Periodic', tip: 'Gas leaving through this face comes back in through the opposite one (both faces of an axis)', excludes: [{ fact: 'physics.gravity', is: 'isolated' }, { fact: 'parts.body', reason: 'Not available with a point mass, a star or a disk: their gravity is not periodic' }] },
-  { value: 1, label: 'Outflow', tip: 'Open: the state at the face continues beyond it, so gas may leave or enter' },
-  { value: 2, label: 'Reflecting', tip: 'A solid wall' },
-  { value: 3, label: 'Outflow only', tip: 'Open for gas leaving; nothing comes in' },
-];
+export const BC_CHOICES: Choice[] = BOUNDARIES.map((b) => ({
+  value: b.code,
+  label: b.label,
+  tip: b.tip,
+  ...(b.periodic ? { excludes: [{ fact: 'physics.gravity', is: 'isolated' }, { fact: 'parts.body', reason: 'Not available with a point mass, a star or a disk: their gravity is not periodic' }] } : {}),
+}));
 
 export const OPTIONS: Option[] = [
   // ---- run: what the setup is called, and its clock ----

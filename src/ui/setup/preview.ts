@@ -5,6 +5,7 @@
 // No GPU work: it cannot disturb the run behind the dialog.
 //
 // A body whose position is its own (not placed by an orbit) can be dragged in either view.
+import { BOUNDARIES } from '../../problems/boundaries';
 import { buildSetupBodies, type BuiltSetup } from '../../setup/check';
 import { BC_CHOICES } from '../../setup/options';
 import type { DiskPart, Part, SetupSpec, Shape, Vec3 } from '../../setup/spec';
@@ -209,7 +210,7 @@ export function guessTime(scene: Scene): number {
 
 // ---- drawing ----
 
-const BC_COLORS = ['#6cb6ff', '#8792a8', '#ffb454', '#5fd08a'];
+const BC_COLORS = BOUNDARIES.map((b) => b.color);
 const BODY_COLORS = ['#6cb6ff', '#ff9d5c', '#5fd08a', '#e58fff', '#ffd666', '#7fe3e0', '#ff8fa3', '#b6c2ff'];
 const SHAPE_STYLE: Record<'region' | 'obstacle' | 'inflow', { fill: string; stroke: string }> = {
   region: { fill: 'rgba(108, 182, 255, 0.16)', stroke: 'rgba(108, 182, 255, 0.7)' },

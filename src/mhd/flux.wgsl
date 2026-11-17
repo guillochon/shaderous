@@ -66,7 +66,7 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 }
 fn load_b(c: vec3<i32>) -> vec3<f32> {
   let m = bc_map(c);
-  return bcell(m.c) * m.flip;
+  return bcell(m.c) * m.bflip;
 }
 #include "hydro/diffusion_core.wgsl"
 #include "mhd/diffusion.wgsl"
@@ -86,7 +86,7 @@ fn mq_start(c: vec3<i32>) -> MQ {
     lo.y + textureLoad(SF, vec3<i32>(m.c.x, hi.y, m.c.z), 0).y,
     lo.z + textureLoad(SF, vec3<i32>(m.c.x, m.c.y, hi.z), 0).z,
   );
-  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), B * m.flip);
+  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), B * m.bflip);
 }
 
 // The flux through the lower face along `axis` of cell t.
@@ -117,6 +117,8 @@ fn face(t: vec3<i32>, axis: i32) -> FaceOut {
   }
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
   var o = face_of(qll, ql, qr, qrr, bface(axis, t), axis, STAGE == 2u, w, comp_tex(bc_map(t - e).c), comp_tex(bc_map(t).c), dt);
+  let n = mhd_dims();
+  g_tied_face = (t[axis] == 0 && P.bc_lo[axis] == BC_LINE_TIED) || (t[axis] == n[axis] && P.bc_hi[axis] == BC_LINE_TIED);
   o.f = mhd_add_diffusion(o.f, t - e, e, axis, ql, qr);
   return o;
 }

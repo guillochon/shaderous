@@ -95,48 +95,8 @@ fn visc_heating(x: vec3<i32>) -> f32 {
   return heat;
 }
 
-// For the lookups of amr_common's that this pass uses (map_cell, holder, local_of).
-fn n_at(level: u32) -> vec3<i32> {
-  let n = i32(P.amr.y) * BS * (1 << level);
-  return select(vec3<i32>(n), vec3<i32>(n, n, 1), is2d());
-}
-struct GCell { g: vec3<i32>, flip: vec3<f32>, side: vec3<f32> }
-fn map_cell(level: u32, g0: vec3<i32>) -> GCell {
-  let n = n_at(level);
-  var o = GCell(g0, vec3<f32>(1.0), vec3<f32>(0.0));
-  for (var a = 0; a < 3; a++) {
-    let i = g0[a];
-    if (i >= 0 && i < n[a]) { continue; }
-    let up = i >= n[a];
-    let bc = select(P.bc_lo[a], P.bc_hi[a], up);
-    if (bc == 0u) {
-      o.g[a] = ((i % n[a]) + n[a]) % n[a];
-    } else if (bc == 2u) {
-      o.g[a] = select(-1 - i, 2 * n[a] - 1 - i, up);
-      o.flip[a] = -1.0;
-    } else {
-      o.g[a] = select(0, n[a] - 1, up);
-    }
-  }
-  return o;
-}
-struct Holder { slot: i32, rel: i32 }
-fn holder(level: u32, g: vec3<i32>) -> Holder {
-  let shift = P.amr.z - level;
-  var fb = (g << vec3<u32>(shift)) / BS;
-  if (is2d()) { fb.z = 0; }
-  var s = i32(textureLoad(IDX, fb, 0).x);
-  let ls = u32(bt(s, 0u));
-  if (ls == level) { return Holder(s, 0); }
-  if (ls < level) { return Holder(s, -1); }
-  for (var k = ls; k > level; k--) { s = bt(s, 5u); }
-  return Holder(s, 1);
-}
-fn local_of(slot: i32, g: vec3<i32>) -> vec3<i32> {
-  var l = g - blk_coord(slot) * BS;
-  if (is2d()) { l.z = 0; }
-  return l;
-}
+// The lookups of amr_common that this pass uses (map_cell, holder, local_of).
+#include "mhd/amr_lookup.wgsl"
 
 var<private> g_slot: i32;
 var<private> g_o: vec3<i32>;

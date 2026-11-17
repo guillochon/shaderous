@@ -92,7 +92,7 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 // The Ohmic heat (mhd/ohm.wgsl), from the field at the start of the step in both stages.
 fn load_b(c: vec3<i32>) -> vec3<f32> {
   let m = bc_map(c);
-  return bcell(m.c) * m.flip;
+  return bcell(m.c) * m.bflip;
 }
 #include "mhd/ohm.wgsl"
 fn visc_side(c: vec3<i32>) -> DSide {

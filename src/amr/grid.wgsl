@@ -62,10 +62,10 @@ fn blk_pos(slot: i32, l: vec3<i32>) -> vec3<f32> {
 //           its image in a physical boundary (then flip / side say how to treat the velocity)
 //   kind 1: beyond a face whose neighbor is one level coarser; `slot` is that coarser leaf
 //   kind 2: an edge or corner ghost, which nothing uses
-struct Src { kind: i32, slot: i32, l: vec3<i32>, flip: vec3<f32>, side: vec3<f32> }
+struct Src { kind: i32, slot: i32, l: vec3<i32>, flip: vec3<f32>, side: vec3<f32>, bflip: vec3<f32> }
 
 fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
-  var s = Src(0, slot, l, vec3<f32>(1.0), vec3<f32>(0.0));
+  var s = Src(0, slot, l, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0));
   let lo = l < vec3<i32>(0);
   let hi = l >= vec3<i32>(BS);
   let out = vec3<i32>(lo) + vec3<i32>(hi);
@@ -84,14 +84,13 @@ fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
   } else if (nb == -1) {
     s.kind = 1;
     s.slot = bt(slot, 20u + u32(2 * axis) + u32(upper));
-  } else if (nb == -3) {
-    // Reflecting: mirror image, normal velocity reversed.
-    s.l[axis] = select(-1 - l[axis], 2 * BS - 1 - l[axis], upper);
-    s.flip[axis] = -1.0;
   } else {
-    // Outflow: copy the boundary cell. Outflow-only also clamps the ghost's normal velocity.
-    s.l[axis] = select(0, BS - 1, upper);
-    if (nb == -4) { s.side[axis] = select(-1.0, 1.0, upper); }
+    // A face of the domain, of kind -1 - nb (hydro/boundary.wgsl): mirror image or edge cell.
+    let k = u32(-1 - nb);
+    s.l[axis] = bc_ghost_cell(l[axis], BS, k);
+    s.flip = bc_vsign(k, axis);
+    s.bflip = bc_bsign(k, axis);
+    s.side[axis] = bc_side(k, upper);
   }
   return s;
 }
@@ -104,11 +103,10 @@ fn row_src(slot: i32, axis: i32, i: i32) -> i32 {
   if (i >= 0 && i < BS) { return i; }
   let upper = i >= BS;
   let nb = bt(slot, 6u + u32(2 * axis) + u32(upper));
-  if (nb == -3) { return select(-1 - i, 2 * BS - 1 - i, upper); }
-  if (nb == -2 || nb == -4) { return select(0, BS - 1, upper); }
+  if (nb <= -2) { return bc_ghost_cell(i, BS, u32(-1 - nb)); }
   return i;
 }
 
 fn src_velocity(v: vec3<f32>, s: Src) -> vec3<f32> {
-  return bc_velocity(v, Mapped(vec3<i32>(0), s.flip, s.side));
+  return bc_velocity(v, Mapped(vec3<i32>(0), s.flip, s.side, s.bflip));
 }

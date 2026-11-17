@@ -75,6 +75,15 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (RESISTIVITY) {
     E += select(vec3<f32>(0.0), (P.ohm.x / g_dx) * J, vec3<bool>(t.x < BS, t.y < BS, t.z < BS || is2d()));
   }
+  // Line-tied faces of the domain (hydro/boundary.wgsl): no field along them, so the flux
+  // through them stays. The block table holds a domain face as -1 - its kind.
+  var tied = vec3<bool>(false);
+  for (var a = 0; a < naxes(); a++) {
+    let lo = bt(inv.slot, 6u + u32(2 * a)) == -1 - i32(BC_LINE_TIED);
+    let hi = bt(inv.slot, 7u + u32(2 * a)) == -1 - i32(BC_LINE_TIED);
+    tied[a] = (t[a] == 0 && lo) || (t[a] == BS && hi);
+  }
+  E *= bc_tied_keep(tied);
   let dt = stage_dt(inv.slot, STAGE);
   textureStore(EO, atl(g_o, t), vec4<f32>((dt / g_dx) * E, 0.0));
 }

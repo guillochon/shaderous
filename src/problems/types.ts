@@ -25,11 +25,7 @@ export interface Prim {
 /** How a cell's kind is stored with its state: 1 solid, -1 fixed, 0 ordinary gas. */
 export const cellMark = (w: Prim): number => (w.solid ? 1 : w.fixed ? -1 : 0);
 
-export const PERIODIC = 0;
-export const OUTFLOW = 1;
-export const REFLECT = 2;
-/** Zero-gradient, but the ghost's normal velocity may only point outward: nothing flows in. */
-export const OUTFLOW_ONLY = 3;
+export { LINE_TIED, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT } from './boundaries';
 export type Bc3 = [number, number, number];
 
 /**

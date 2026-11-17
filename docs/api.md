@@ -165,7 +165,7 @@ by `npm run gen`.
 | `dampr` | Settings | Damping from r. Radius from the box center where the damping zone starts |
 | `damprate` | Settings | Damping rate. How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off |
 | `wb` | Settings | Well-balanced reconstruction (0 or 1) |
-| `bc` | Settings | Six digits: the boundary at the lower x, y, z faces and then the upper ones (0 periodic, 1 outflow, 2 reflecting, 3 outflow only) |
+| `bc` | Settings | Six digits: the boundary at the lower x, y, z faces and then the upper ones (0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall) |
 | `p.<id>` | Settings | One of the preset’s own parameters, by its id |
 | `mode` | The view | `volume`, `slice` or `projection` |
 | `field` | The view | Which field is drawn: an index into `describe().fields` |

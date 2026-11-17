@@ -1,12 +1,13 @@
 # Plan: turbulence tools after the taranis WebGPU solver
 
-Status: 2026-11-16. Landed: stage 0's credit (README, preset blurbs, `docs/numerics.md`), stage 3's
+Status: 2026-11-17. Landed: stage 0's credit (README, preset blurbs, `docs/numerics.md`), stage 3's
 driving (without the mean-force removal, the power control or the stir brush), and stage 4's
 problems: driven turbulence with and without a field, Elsasser packets, the Alfvén-wave collision,
 magnetized Kelvin-Helmholtz, and, with the explicit resistivity of open decision 4 (done as part of
-this plan, `mhd/ohm.wgsl`), the tearing mode and island coalescence. Not done: stages 1, 2 and 5;
-a separate X-point collapse preset (the periodic flux-cell array tried for it stayed put, and the
-collapse happens anyway between coalescing islands); validation of the tearing growth rate.
+this plan, `mhd/ohm.wgsl`), the tearing mode, island coalescence, and X-point collapse inside the
+line-tied walls it needs (boundary kind 4, after consolidating the boundary code into
+`hydro/boundary.wgsl` and `problems/boundaries.ts`). Not done: stages 1, 2 and 5; validation of
+the tearing growth rate.
 
 Source: the WebGPU reduced-MHD solver by Alfred Mallet and Esrom Abraham, a browser port of
 their JAX code taranis (<https://alfredmallet.github.io/taranis/webgpu/rmhd2d.html>, with a 3D page

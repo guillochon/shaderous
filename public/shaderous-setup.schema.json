@@ -104,7 +104,8 @@
          0,
          1,
          2,
-         3
+         3,
+         4
         ]
        },
        "maxItems": 3
@@ -116,7 +117,8 @@
          0,
          1,
          2,
-         3
+         3,
+         4
         ]
        },
        "maxItems": 3
@@ -136,7 +138,8 @@
          0,
          1,
          2,
-         3
+         3,
+         4
         ]
        },
        "maxItems": 3
@@ -148,7 +151,8 @@
          0,
          1,
          2,
-         3
+         3,
+         4
         ]
        },
        "maxItems": 3
@@ -2877,6 +2881,49 @@
       ],
       "additionalProperties": false,
       "description": "A chain of magnetic islands along y = 0, the Fadeev equilibrium A_z = -lambda B0 ln(cosh(y / lambda) + eps cos(x / lambda)), with the gas pressure p = p_out + B0² (1 - eps²) / (2 (cosh(y / lambda) + eps cos(x / lambda))²) that holds it, density 1, and a flow along x that pushes pairs of islands together (Fadeev et al. 1965; Finn & Kaw 1977). Periodic along x, walls along y."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Stressed X-point",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "x-point"
+       },
+       "b0": {
+        "type": "number",
+        "title": "Field strength",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       },
+       "alpha": {
+        "type": "number",
+        "title": "Stress",
+        "default": 1.2,
+        "minimum": 0.5,
+        "maximum": 3
+       },
+       "p": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.05,
+        "minimum": 0.0001,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "An X-type magnetic null at the center, A_z = (B0 / 2L) (y² - alpha² x²) with L the box side, so B = (B0 / L) (y, alpha² x), in gas of density 1 and uniform pressure. With alpha above 1 it carries a current its own force cannot hold, and collapses into a current sheet. Needs walls that hold the field lines crossing them: line-tied on all four sides."
      },
      {
       "type": "object",

@@ -86,60 +86,7 @@ fn u_near_m(slot: i32, l: vec3<i32>) -> MaybeCons {
   return MaybeCons(u, true);
 }
 
-// Cells per side of the domain at a level (1 along z in 2D).
-fn n_at(level: u32) -> vec3<i32> {
-  let n = i32(P.amr.y) * BS * (1 << level);
-  return select(vec3<i32>(n), vec3<i32>(n, n, 1), is2d());
-}
-
-// A cell mapped into the domain: its index, the sign each velocity and field component takes
-// (mirrored at a reflecting face), and for outflow-only faces the side (-1 / +1) to clamp the
-// normal velocity toward.
-struct GCell { g: vec3<i32>, flip: vec3<f32>, side: vec3<f32> }
-
-fn map_cell(level: u32, g0: vec3<i32>) -> GCell {
-  let n = n_at(level);
-  var o = GCell(g0, vec3<f32>(1.0), vec3<f32>(0.0));
-  for (var a = 0; a < 3; a++) {
-    let i = g0[a];
-    if (i >= 0 && i < n[a]) { continue; }
-    let up = i >= n[a];
-    let bc = select(P.bc_lo[a], P.bc_hi[a], up);
-    if (bc == 0u) {
-      o.g[a] = ((i % n[a]) + n[a]) % n[a];
-    } else if (bc == 2u) {
-      o.g[a] = select(-1 - i, 2 * n[a] - 1 - i, up);
-      o.flip[a] = -1.0;
-    } else {
-      o.g[a] = select(0, n[a] - 1, up);
-      if (bc == 3u) { o.side[a] = select(-1.0, 1.0, up); }
-    }
-  }
-  return o;
-}
-
-// The block that holds global cell g (in the domain) at `level`: rel 0 a leaf at that level,
-// 1 the same-level parent of finer leaves, -1 a leaf one level coarser.
-struct Holder { slot: i32, rel: i32 }
-
-fn holder(level: u32, g: vec3<i32>) -> Holder {
-  let shift = P.amr.z - level;
-  var fb = (g << vec3<u32>(shift)) / BS;
-  if (is2d()) { fb.z = 0; }
-  var s = i32(textureLoad(IDX, fb, 0).x);
-  let ls = u32(bt(s, 0u));
-  if (ls == level) { return Holder(s, 0); }
-  if (ls < level) { return Holder(s, -1); }
-  for (var k = ls; k > level; k--) { s = bt(s, 5u); }
-  return Holder(s, 1);
-}
-
-// Local index in block `slot` of global cell (or face) index g at the block's level.
-fn local_of(slot: i32, g: vec3<i32>) -> vec3<i32> {
-  var l = g - blk_coord(slot) * BS;
-  if (is2d()) { l.z = 0; }
-  return l;
-}
+#include "mhd/amr_lookup.wgsl"
 
 // Conserved state of global cell g0 (anywhere, ghosts beyond the domain included) at `level`,
 // as a block at that level sees it, with velocity mirrored or clamped as the boundary says.
@@ -157,7 +104,7 @@ fn cons_at(level: u32, g0: vec3<i32>) -> Cons {
   // A plain copy keeps its bits: two blocks then see the same numbers for the same cell, and
   // compute the faces and edges they share identically.
   if (all(m.flip == vec3<f32>(1.0)) && all(m.side == vec3<f32>(0.0))) { return u; }
-  let v = bc_velocity(u.a.yzw / max(u.a.x, P.rho_floor), Mapped(vec3<i32>(0), m.flip, m.side));
+  let v = bc_velocity(u.a.yzw / max(u.a.x, P.rho_floor), Mapped(vec3<i32>(0), m.flip, m.side, m.bflip));
   return Cons(vec4<f32>(u.a.x, v * u.a.x), u.b);
 }
 
@@ -200,27 +147,11 @@ var<private> g_copied_at: vec3<i32>;
 // face repeats the boundary face.
 fn face_lvl(level: u32, a: i32, g0: vec3<i32>) -> vec2<f32> {
   let n = n_at(level);
-  // Across: as cells. (The field normal to a is even under a mirror across another axis.)
-  var g = g0;
-  for (var b = 0; b < 3; b++) {
-    if (b != a) { g[b] = map_cell(level, g0).g[b]; }
-  }
-  var sgn = 1.0;
-  let i = g0[a];
-  if (i < 0 || i > n[a]) {
-    let up = i > n[a];
-    let bc = select(P.bc_lo[a], P.bc_hi[a], up);
-    if (bc == 0u) {
-      g[a] = ((i % n[a]) + n[a]) % n[a];
-    } else if (bc == 2u) {
-      g[a] = select(-i, 2 * n[a] - i, up);
-      sgn = -1.0;
-    } else {
-      g[a] = select(0, n[a], up);
-    }
-  } else if (i == n[a] && P.bc_hi[a] == 0u) {
-    g[a] = 0;
-  }
+  let fm = face_map(level, a, g0);
+  var g = fm.g;
+  let sgn = fm.sgn;
+  // The domain's upper face along a periodic axis is the lower face of cell 0.
+  if (g0[a] == n[a] && P.bc_hi[a] == 0u) { g[a] = 0; }
   // The cell whose lower face it is, or the last cell for the domain's upper face.
   var c = g;
   c[a] = min(g[a], n[a] - 1);
@@ -319,25 +250,9 @@ fn face_at(level: u32, a: i32, g0: vec3<i32>) -> f32 {
   let own = face_lvl(level, a, g0);
   if (own.y > 0.0) { return own.x; }
   // Map into the domain at this level first, as face_lvl does, then go to the coarse indices.
-  let n = n_at(level);
-  var g = g0;
-  for (var b = 0; b < 3; b++) {
-    if (b != a) { g[b] = map_cell(level, g0).g[b]; }
-  }
-  var sgn = 1.0;
-  let i = g0[a];
-  if (i < 0 || i > n[a]) {
-    let up = i > n[a];
-    let bc = select(P.bc_lo[a], P.bc_hi[a], up);
-    if (bc == 0u) {
-      g[a] = ((i % n[a]) + n[a]) % n[a];
-    } else if (bc == 2u) {
-      g[a] = select(-i, 2 * n[a] - i, up);
-      sgn = -1.0;
-    } else {
-      g[a] = select(0, n[a], up);
-    }
-  }
+  let fm = face_map(level, a, g0);
+  let g = fm.g;
+  let sgn = fm.sgn;
   var gc = g >> vec3<u32>(1u);
   if (is2d()) { gc.z = 0; }
   let par = g & vec3<i32>(1);

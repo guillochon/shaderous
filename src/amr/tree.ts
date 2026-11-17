@@ -39,7 +39,7 @@ export interface GridBox {
 //   [5] parent slot (-1 for roots)
 //   [6..11] same-level face neighbor (-x, +x, -y, +y, -z, +z): slot, or
 //           NB_COARSE where the region beyond is one level coarser, or -1 - (boundary type)
-//           at a physical boundary (outflow 1, reflecting 2, outflow-only 3)
+//           at a physical boundary (its kind, problems/boundaries.ts)
 //   [12..19] child slots (octant = x | y << 1 | z << 2), -1 for leaves
 //   [20..25] where [6..11] is NB_COARSE: slot of the coarser leaf beyond that face
 export const NB_COARSE = -1;
@@ -112,7 +112,7 @@ export class BlockTree {
    * @param nr       root blocks per side
    * @param maxLevel deepest level allowed (0 = roots only)
    * @param cap      number of slots in the atlas
-   * @param bcLo     boundary type per axis at the lower faces: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only
+   * @param bcLo     boundary type per axis at the lower faces (problems/boundaries.ts: 0 periodic)
    */
   constructor(
     readonly ndim: number,

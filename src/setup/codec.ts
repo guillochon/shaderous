@@ -5,6 +5,7 @@
 // `version` counts changes to the document's shape. MIGRATIONS keeps one step per version and
 // applies them in order; a file from a newer version loads with a warning. The rule of
 // PROBLEM_ALIASES applies: add, never remove.
+import { BOUNDARY_CODES } from '../problems/boundaries';
 import { resolveExtends } from './extends';
 import { FLOWS } from './parts/flow';
 import { flatten, OPTION_BY_PATH, PART_OPTIONS, type Option } from './options';
@@ -46,7 +47,7 @@ function choicesOf(o: Option | undefined, name: string): Schema {
 }
 const choice = (path: string): Schema => choicesOf(OPTION_BY_PATH[path], path);
 const partChoice = (kind: keyof typeof PART_OPTIONS, path: string): Schema => choicesOf(flatten(PART_OPTIONS[kind].fields).find((o) => o.path === path), `${kind}.${path}`);
-const BC: Schema = { array: { enum: [0, 1, 2, 3] }, max: 3 };
+const BC: Schema = { array: { enum: [...BOUNDARY_CODES] }, max: 3 };
 const FACES = obj({ lo: BC, hi: BC });
 const UNIT = obj({ unit: { enum: Object.keys(UNIT_SI) }, value: 'number', per: { any: ['number', 'string'] } });
 const SHAPE: Schema = obj({

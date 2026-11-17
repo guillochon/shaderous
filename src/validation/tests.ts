@@ -29,7 +29,7 @@ import { tidalDisruption, tidalDisruptionDipole, tdeOrbit, TDE, TDE_STAR } from 
 /** The tidal disruption in the box its tests were calibrated in (the presets' is twice as wide). */
 const tdeTest: Problem = { ...tidalDisruption, box: TDE.box };
 import { sphere, spherePotential } from '../presets/names';
-import { all, PERIODIC, REFLECT, type Problem } from '../problems/types';
+import { all, LINE_TIED, PERIODIC, REFLECT, type Bc3, type Problem } from '../problems/types';
 import { binary } from '../presets/names';
 import { problemById } from '../presets/index';
 import { MRI, mriDisk } from '../presets/names';
@@ -3515,6 +3515,72 @@ export const TESTS: TestDef[] = [
         m.refined_energy_drift = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
         m.refined_levels = new Set(sim.tree.leaves().map((b) => b.level)).size;
         pass &&= m.refined_mass_drift < 1e-6 && m.refined_energy_drift < 1e-5 && m.refined_levels >= 2 && divOk('refined', d1);
+      });
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-line-tied',
+    name: 'Line-tied walls (2D, uniform 128^2 and blocks 128 finest)',
+    criterion:
+      'In line-tied walls on all four sides: the stressed X-point (B = (y, 1.44 x), eta = 1e-3) keeps the field through every wall face bit for bit, conserves mass to 1e-6 and total energy to 1e-6, and collapses (peak density above 1.5 by t = 1), uniform and on blocks; the current-free null (B = (y, x), eta = 0) stays at rest (kinetic energy below 1e-4 of the magnetic energy at t = 1: the ghosts of the field copy the edge cells, so a field with a gradient across the wall sees a small current there); and, for the gas alone, a shear flow v_x = A cos(pi y) between line-tied walls along y (no slip) loses kinetic energy as exp(-2 nu pi^2 t) to 2%. Throughout |div B| dx / max |B| below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const tied = { bcLo: [LINE_TIED, LINE_TIED, PERIODIC] as Bc3, bcHi: [LINE_TIED, LINE_TIED, PERIODIC] as Bc3 };
+      const null2 = (alpha: number) =>
+        stillGas({
+          id: `x-point-${alpha}`, ...tied,
+          mhd: { potential: () => (x: number, y: number) => [0, 0, 0.5 * (y * y - alpha * alpha * x * x)] },
+          init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 0.05, s: 0 }),
+        });
+      // The faces in the walls: b_x at i = 0 and n, b_y at j = 0 and n (initialFaces' layout).
+      const wallFaces = (f: Float32Array, n: number) => {
+        const out: number[] = [];
+        for (let k = 0; k < n; k++) {
+          out.push(f[4 * (k * (n + 1) + 0)], f[4 * (k * (n + 1) + n)]);
+          out.push(f[4 * (0 * (n + 1) + k) + 1], f[4 * (n * (n + 1) + k) + 1]);
+        }
+        return out;
+      };
+      const check = async (tag: string, sim: Sim | AmrSim) => {
+        const d0 = await sim.diagnostics();
+        const before = sim instanceof Sim ? wallFaces(await sim.mhd!.readFaces(sim.cur), 128) : null;
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        if (before && sim instanceof Sim) {
+          const after = wallFaces(await sim.mhd!.readFaces(sim.cur), 128);
+          m[`${tag}_wall_flux_change`] = Math.max(...after.map((v, i) => Math.abs(v - before[i])));
+          pass &&= m[`${tag}_wall_flux_change`] === 0;
+        }
+        m[`${tag}_mass_drift`] = Math.abs(d1.mass / d0.mass - 1);
+        m[`${tag}_energy_drift`] = Math.abs(d1.eTot / d0.eTot - 1);
+        m[`${tag}_peak_density`] = d1.ranges[0][1];
+        m[`${tag}_divB`] = d1.magnetic!.divB;
+        pass &&= m[`${tag}_mass_drift`] < 1e-6 && m[`${tag}_energy_drift`] < 1e-6 && m[`${tag}_peak_density`] > 1.5 && m[`${tag}_divB`] < 1e-6;
+      };
+      const stressed = null2(1.2);
+      await withSim(gpu, stressed, 128, { ndim: 2, tEnd: 1, resistivity: 1e-3 }, (sim) => check('stressed', sim));
+      await withAmr(gpu, stressed, 128, { ndim: 2, amrLevels: 1, refineHi: 2, tEnd: 1, resistivity: 1e-3 }, (sim) => check('stressed_blocks', sim));
+
+      await withSim(gpu, null2(1), 128, { ndim: 2, tEnd: 1 }, async (sim) => {
+        await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        m.potential_kinetic_over_magnetic = d.eKin / d.magnetic!.eMag;
+        pass &&= m.potential_kinetic_over_magnetic < 1e-4;
+      });
+
+      // No slip, for the gas alone.
+      const nu = 0.01;
+      const A = 0.01;
+      const alongY = { bcLo: [PERIODIC, LINE_TIED, PERIODIC] as Bc3, bcHi: [PERIODIC, LINE_TIED, PERIODIC] as Bc3 };
+      const shear = stillGas({ id: 'tied-shear', ...alongY, init: () => (_x, y) => ({ rho: 1, vx: A * Math.cos(Math.PI * y), vy: 0, vz: 0, p: 1, s: 0 }) });
+      await withSim(gpu, shear, 64, { ndim: 2, tEnd: 1, viscosity: nu }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        m.no_slip_decay_error = Math.abs(d1.eKin / d0.eKin / Math.exp(-2 * nu * Math.PI ** 2) - 1);
+        pass &&= m.no_slip_decay_error < 0.02;
       });
       return { pass, metrics: m };
     },

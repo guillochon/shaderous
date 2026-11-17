@@ -127,30 +127,21 @@ var<private> g_dx: f32;
 // the clock's dt, or a multiple of it for a block of an adaptive mesh that steps less often.
 var<private> g_dt: f32;
 
-// Maps an index along one axis into range. Returns (index, 1 if mirrored by a reflecting face,
-// side): side is -1 / +1 for a ghost cell beyond an outflow-only lower / upper face, else 0.
-fn bc_axis(i: i32, n: i32, lo: u32, hi: u32) -> vec3<i32> {
-  if (i < 0) {
-    // The stencil reaches two cells out; the clamp covers a single-layer axis (n = 1) without
-    // an integer modulo, which is slow and would be evaluated on every load.
-    if (lo == 0u) { return vec3<i32>(max(i + n, 0), 0, 0); }
-    if (lo == 1u) { return vec3<i32>(0, 0, 0); }
-    if (lo == 3u) { return vec3<i32>(0, 0, -1); }
-    return vec3<i32>(-1 - i, 1, 0);
-  }
-  if (i >= n) {
-    if (hi == 0u) { return vec3<i32>(min(i - n, n - 1), 0, 0); }
-    if (hi == 1u) { return vec3<i32>(n - 1, 0, 0); }
-    if (hi == 3u) { return vec3<i32>(n - 1, 0, 1); }
-    return vec3<i32>(2 * n - 1 - i, 1, 0);
-  }
-  return vec3<i32>(i, 0, 0);
+#include "hydro/boundary.wgsl"
+
+// Maps an index along one axis into range: the cell (or, across the axis, the face) whose state
+// stands for it (hydro/boundary.wgsl).
+fn bc_axis(i: i32, n: i32, lo: u32, hi: u32) -> i32 {
+  if (i < 0) { return bc_ghost_cell(i, n, lo); }
+  if (i >= n) { return bc_ghost_cell(i, n, hi); }
+  return i;
 }
 
 struct Mapped {
   c: vec3<i32>,       // in-range cell to load
-  flip: vec3<f32>,    // -1 on velocity components mirrored by a reflecting face
+  flip: vec3<f32>,    // signs of the velocity's components (-1 where a wall reverses them)
   side: vec3<f32>,    // -1 / +1 on axes where this is a ghost beyond an outflow-only face
+  bflip: vec3<f32>,   // signs of the magnetic field's components
 }
 
 // Set by a pass for a cell whose whole stencil lies inside the grid: its loads skip the
@@ -166,19 +157,26 @@ fn stencil_inside(c: vec3<i32>, reach: i32) -> bool {
 
 // Every state load goes through this, so there are no ghost cells to fill.
 fn bc_map(c: vec3<i32>) -> Mapped {
-  if (g_inner) { return Mapped(c, vec3<f32>(1.0), vec3<f32>(0.0)); }
-  let n = i32(P.n);
-  let x = bc_axis(c.x, n, P.bc_lo.x, P.bc_hi.x);
-  let y = bc_axis(c.y, n, P.bc_lo.y, P.bc_hi.y);
-  let z = bc_axis(c.z, i32(P.dims.z), P.bc_lo.z, P.bc_hi.z);
-  return Mapped(
-    vec3<i32>(x.x, y.x, z.x),
-    vec3<f32>(1.0 - 2.0 * f32(x.y), 1.0 - 2.0 * f32(y.y), 1.0 - 2.0 * f32(z.y)),
-    vec3<f32>(f32(x.z), f32(y.z), f32(z.z)),
-  );
+  var m = Mapped(c, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0));
+  if (g_inner) { return m; }
+  let n = vec3<i32>(i32(P.n), i32(P.n), i32(P.dims.z));
+  // Most loads are of cells inside the grid: they skip the rest.
+  if (all(c >= vec3<i32>(0)) && all(c < n)) { return m; }
+  for (var a = 0; a < 3; a++) {
+    if (c[a] >= 0 && c[a] < n[a]) { continue; }
+    let up = c[a] >= n[a];
+    let k = select(P.bc_lo[a], P.bc_hi[a], up);
+    m.c[a] = bc_ghost_cell(c[a], n[a], k);
+    if (bc_wall(k)) {
+      m.flip *= bc_vsign(k, a);
+      m.bflip *= bc_bsign(k, a);
+    }
+    m.side[a] = bc_side(k, up);
+  }
+  return m;
 }
 
-// Velocity of a (possibly ghost) cell: mirrored at reflecting faces, and at outflow-only faces
+// Velocity of a (possibly ghost) cell: reversed as the walls say, and at outflow-only faces
 // the ghost's normal velocity is clamped to point outward, so nothing can flow in.
 fn bc_velocity(v: vec3<f32>, m: Mapped) -> vec3<f32> {
   let w = v * m.flip;

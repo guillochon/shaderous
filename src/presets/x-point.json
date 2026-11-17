@@ -1,0 +1,21 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "x-point",
+  "extends": "tearing",
+  "name": "X-point collapse",
+  "variant": "X-point collapse",
+  "blurb": "An X-shaped magnetic null squeezed 20% out of its current-free shape, inside walls that hold the field lines crossing them (line-tied): its field cannot hold the current it carries, so the null collapses into a thin current sheet, where the field reconnects and drives jets out of its ends (Craig & McClymont 1991; Thurgood, Pontin & McLaughlin 2018). The reconnection setups follow the taranis WebGPU reduced-MHD page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html).",
+  "domain": {
+    "n": 512,
+    "supports2d": true,
+    "bc": { "lo": [4, 4, 0], "hi": [4, 4, 0] }
+  },
+  "physics": {
+    "resistivity": 0.0005
+  },
+  "parts": [
+    { "kind": "flow", "name": "x-point" }
+  ],
+  "run": { "tEnd": 4, "checkpointDt": 0.1 }
+}
