@@ -883,7 +883,11 @@ requested rms acceleration squared in the stationary state, and the first amplit
 from that state, so the driving is at full strength from the start. The step is taken on the
 GPU by the clock pass, over the step it has just set (over the whole cycle with per-block
 timesteps, so every block of a cycle sees the same amplitudes); the deviates come from a hash of
-the seed, the step count, the mode and the draw, so a run is the same from the same seed. The
+the seed, the step count, the mode and the draw, so a run is the same from the same seed. (The
+preview of a step not yet taken, the dt the panel shows before the first step, runs the clock
+pass without advancing the amplitudes. It once advanced them, so a run's driving depended on
+how often the page had read its diagnostics before its first step, and a page's first run
+differed from the same setup loaded again.) The
 updates add $`\rho\,\mathbf{a}\,\Delta t`$ to the momentum and its kinetic energy
 $`\mathbf{k}\cdot(\mathbf{m} + \mathbf{k}/2)/\rho`$ to the total energy (in MHD, each stage
 over its own step). The acceleration has zero mean but its force $`\rho\mathbf{a}`$ does not

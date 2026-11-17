@@ -298,6 +298,7 @@ details[open] > summary .sum { display: none; }
 .diag-io button { padding: 0 10px; }
 /* Import and Export state, side by side under the checkboxes. */
 .state-io { grid-template-columns: 1fr 1fr; margin-top: 6px; }
+.log-io { grid-template-columns: 1fr; margin-top: 6px; }
 /* The whole run of one diagnostic, while its number or sparkline is hovered. */
 #diag-pop {
   position: fixed; z-index: 20; width: 240px; padding: 6px 8px 6px; pointer-events: none;

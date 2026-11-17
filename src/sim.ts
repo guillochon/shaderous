@@ -284,6 +284,14 @@ export interface Simulation {
    * numbers, in fractions of the box), and a version that changes whenever they do.
    */
   blockBoxes?(): { version: number; boxes: Float32Array };
+  /** Called after the uniform block is written (writeParams): the session log watches the clock's stop time in it. */
+  onParams?: () => void;
+  /** An adaptive mesh: called as a re-mesh its refinement check decided is applied, with the indicators (AmrSim.onRegrid). */
+  onRegrid?: (indicators: Float32Array) => void;
+  /** An adaptive mesh: whether it makes refinement checks of its own (AmrSim.autoRegrid). */
+  autoRegrid?: boolean;
+  /** An adaptive mesh: re-mesh from these indicators, as a replay does (AmrSim.forceRegrid). */
+  forceRegrid?(indicators: Float32Array): void;
   /**
    * A 3D adaptive mesh: what the volume view needs to ray-march the leaf blocks at their own
    * resolution (render/volume_atlas.wgsl) instead of the resampled display volume.
@@ -842,6 +850,8 @@ export class MassReader {
 }
 
 export class Sim implements Simulation {
+  /** Called after the uniform block is written (Simulation.onParams). */
+  onParams?: () => void;
   readonly device: GPUDevice;
   cfg: SimConfig;
   readonly n: number;
@@ -900,6 +910,8 @@ export class Sim implements Simulation {
   /** The hydro step's passes; null with a magnetic field, whose step is its own (mhd/mhd.ts). */
   private pUpdate: RegionPass | null = null;
   private pClock!: GPUComputePipeline;
+  /** The clock for previewDt: leaves the driving alone (hydro/clock.wgsl ADVANCE_DRIVE). */
+  private pClockPreview!: GPUComputePipeline;
   private pCorrect!: GPUComputePipeline;
   private pPredict: RegionPass | null = null;
   private pField!: GPUComputePipeline;
@@ -1040,8 +1052,9 @@ export class Sim implements Simulation {
       ]);
       await sim.buildHydro();
     })();
-    [sim.pClock, sim.pField, sim.redBh, sim.pBhDrift, sim.pBhKick, sim.pBhEval, sim.pCensus] = await Promise.all([
+    [sim.pClock, sim.pClockPreview, sim.pField, sim.redBh, sim.pBhDrift, sim.pBhKick, sim.pBhEval, sim.pCensus] = await Promise.all([
       computePipeline(d, assemble('hydro/clock.wgsl'), 'clock'),
+      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { ADVANCE_DRIVE: 0 }),
       computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field'),
       // Point masses: their pull on the gas and what their sinks take are reduced each step, and
       // drive their orbits, their growth and (in the gas's frame) the frame's acceleration.
@@ -1062,7 +1075,7 @@ export class Sim implements Simulation {
     ]);
     const phi = sim.mg.phi;
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
-    sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
+    sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield) });
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
@@ -1236,6 +1249,7 @@ export class Sim implements Simulation {
       sources: this.nSources > 0,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
+    this.onParams?.();
   }
 
   /** Load the problem's initial conditions and solve for the initial potential. */
@@ -1907,7 +1921,7 @@ export class Sim implements Simulation {
     const pass = beginPass(enc);
     this.encodeRates(pass, this.cur);
     this.redDt.encode(pass);
-    pass.setPipeline(this.pClock);
+    pass.setPipeline(this.pClockPreview);
     pass.setBindGroup(0, this.gClockPreview);
     pass.dispatchWorkgroups(1);
     pass.end();

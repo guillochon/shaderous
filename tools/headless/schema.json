@@ -1068,6 +1068,236 @@
    "changesRun": true
   },
   {
+   "name": "tool",
+   "summary": "Use one of the editing tools, as a person would with the pointer, applied now between steps and logged: mass (add or remove gas), velocity, temperature, obstacle (a shape in a plane of the box, cut through it along the plane normal), field (make the magnetic field stronger or weaker), pull (drag the field lines from one point to another), source, sink, star (3D), clear (the sources or the sinks), or query (the gas at a point). Positions are fractions of the box ([x, y] or [x, y, z]), velocities code units; the rest as the tool’s sliders take them. Unknown options are an error.",
+   "args": [
+    {
+     "name": "name",
+     "type": "string",
+     "enum": [
+      "mass",
+      "velocity",
+      "temperature",
+      "obstacle",
+      "field",
+      "pull",
+      "source",
+      "sink",
+      "star",
+      "clear",
+      "query"
+     ]
+    },
+    {
+     "name": "options",
+     "optional": true,
+     "type": "object",
+     "properties": {
+      "pos": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 2,
+       "maxItems": 3,
+       "description": "Center, in fractions of the box (z defaults to the middle)"
+      },
+      "radius": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "description": "Brush radius, or the radius of a source, sink or star, as a fraction of the box"
+      },
+      "softness": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1,
+       "description": "Brush edge: 0 hard, 1 fading all the way from the center"
+      },
+      "amount": {
+       "type": "number",
+       "minimum": -1,
+       "maximum": 1,
+       "description": "mass: density added at the center as a share of the densest gas (negative removes; default 0.25)"
+      },
+      "atRest": {
+       "type": "boolean",
+       "description": "mass: new gas arrives at rest, sharing the momentum there (default true)"
+      },
+      "vel": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 2,
+       "maxItems": 3,
+       "description": "velocity: the velocity to set; source, sink, star: its velocity (code units)"
+      },
+      "factor": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "description": "temperature, field: the factor applied at the center (default 1.5; below 1 lowers it)"
+      },
+      "shape": {
+       "type": "string",
+       "enum": [
+        "rect",
+        "ellipse",
+        "polygon"
+       ],
+       "description": "obstacle: its shape"
+      },
+      "center": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 2,
+       "maxItems": 2,
+       "description": "obstacle: rect or ellipse center, in the plane’s two coordinates"
+      },
+      "half": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 2,
+       "maxItems": 2,
+       "description": "obstacle: rect or ellipse half-widths"
+      },
+      "points": {
+       "type": "array",
+       "items": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 2
+       },
+       "minItems": 3,
+       "description": "obstacle: a polygon’s corners"
+      },
+      "axis": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 2,
+       "description": "obstacle: the plane’s normal, along which it is cut through the box (default 2, z; its coordinates are then x and y, for 0 y and z, for 1 x and z)"
+      },
+      "erase": {
+       "type": "boolean",
+       "description": "obstacle: turn obstacle back into gas"
+      },
+      "from": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 2,
+       "maxItems": 3,
+       "description": "pull: where the drag starts"
+      },
+      "to": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 2,
+       "maxItems": 3,
+       "description": "pull: where it ends (taken frame by frame, as the tool would)"
+      },
+      "grip": {
+       "type": "number",
+       "minimum": 0.01,
+       "maximum": 0.9,
+       "description": "pull: the share of the drag the field at the center moves by (default 0.5)"
+      },
+      "rate": {
+       "type": "number",
+       "minimum": 0,
+       "maximum": 1,
+       "description": "source, sink: the tool’s Flux (default 0.25)"
+      },
+      "mass": {
+       "type": "number",
+       "minimum": 0,
+       "description": "sink: its mass as a multiple of the gas in the box (default 0: a massless particle)"
+      },
+      "soften": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "description": "sink: softening length of its gravity, as a fraction of the box"
+      },
+      "fixed": {
+       "type": "boolean",
+       "description": "source, sink: held where it is placed (default false)"
+      },
+      "n": {
+       "type": "number",
+       "description": "star: polytropic index"
+      },
+      "rhoc": {
+       "type": "number",
+       "exclusiveMinimum": 0,
+       "description": "star: central density (code units)"
+      },
+      "field": {
+       "type": "string",
+       "enum": [
+        "none",
+        "dipole",
+        "random"
+       ],
+       "description": "star: its magnetic field"
+      },
+      "beta": {
+       "type": "number",
+       "minimum": 1,
+       "description": "star: plasma beta at its center"
+      },
+      "what": {
+       "type": "string",
+       "enum": [
+        "sources",
+        "sinks"
+       ],
+       "description": "clear: which to remove"
+      }
+     }
+    }
+   ],
+   "changesRun": true
+  },
+  {
+   "name": "actions",
+   "summary": "The session log of the run: the setup it started from, and every edit since (the tools, settings changed, the adaptive mesh’s re-meshes), each with the step it was applied at, with the run’s diagnostics along the way. The page’s Save session log button saves the same.",
+   "args": [],
+   "changesRun": false
+  },
+  {
+   "name": "replay",
+   "summary": "Run a session log again: load the setup it started from, step to each action and apply it, re-meshing where it re-meshed, so the run comes out as it did (to the bit, on the same machine). Returns how many actions it applied, and where it stopped if the run went another way.",
+   "args": [
+    {
+     "name": "log",
+     "type": "object",
+     "description": "A session log, as actions() returns it"
+    },
+    {
+     "name": "options",
+     "optional": true,
+     "type": "object",
+     "properties": {
+      "untilSteps": {
+       "type": "integer",
+       "minimum": 0,
+       "description": "Stop at this many steps (default: after the last action)"
+      }
+     }
+    }
+   ],
+   "changesRun": true
+  },
+  {
    "name": "errors",
    "summary": "What the page has reported going wrong (uncaught errors, failed shader builds, a lost GPU device), oldest first.",
    "args": [],
@@ -1520,6 +1750,252 @@
      }
     },
     "required": [],
+    "additionalProperties": false
+   }
+  },
+  {
+   "name": "edit",
+   "method": "tool",
+   "brief": "Uses an editing tool on the run, as a person would: `name` (mass, velocity, temperature, obstacle, field, pull, source, sink, star, clear, query) and its `options`",
+   "description": "Use one of the editing tools, as a person would with the pointer, applied now between steps and logged: mass (add or remove gas), velocity, temperature, obstacle (a shape in a plane of the box, cut through it along the plane normal), field (make the magnetic field stronger or weaker), pull (drag the field lines from one point to another), source, sink, star (3D), clear (the sources or the sinks), or query (the gas at a point). Positions are fractions of the box ([x, y] or [x, y, z]), velocities code units; the rest as the tool’s sliders take them. Unknown options are an error.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string",
+      "enum": [
+       "mass",
+       "velocity",
+       "temperature",
+       "obstacle",
+       "field",
+       "pull",
+       "source",
+       "sink",
+       "star",
+       "clear",
+       "query"
+      ]
+     },
+     "options": {
+      "type": "object",
+      "properties": {
+       "pos": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 3,
+        "description": "Center, in fractions of the box (z defaults to the middle)"
+       },
+       "radius": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "description": "Brush radius, or the radius of a source, sink or star, as a fraction of the box"
+       },
+       "softness": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "Brush edge: 0 hard, 1 fading all the way from the center"
+       },
+       "amount": {
+        "type": "number",
+        "minimum": -1,
+        "maximum": 1,
+        "description": "mass: density added at the center as a share of the densest gas (negative removes; default 0.25)"
+       },
+       "atRest": {
+        "type": "boolean",
+        "description": "mass: new gas arrives at rest, sharing the momentum there (default true)"
+       },
+       "vel": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 3,
+        "description": "velocity: the velocity to set; source, sink, star: its velocity (code units)"
+       },
+       "factor": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "description": "temperature, field: the factor applied at the center (default 1.5; below 1 lowers it)"
+       },
+       "shape": {
+        "type": "string",
+        "enum": [
+         "rect",
+         "ellipse",
+         "polygon"
+        ],
+        "description": "obstacle: its shape"
+       },
+       "center": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 2,
+        "description": "obstacle: rect or ellipse center, in the plane’s two coordinates"
+       },
+       "half": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 2,
+        "description": "obstacle: rect or ellipse half-widths"
+       },
+       "points": {
+        "type": "array",
+        "items": {
+         "type": "array",
+         "items": {
+          "type": "number"
+         },
+         "minItems": 2,
+         "maxItems": 2
+        },
+        "minItems": 3,
+        "description": "obstacle: a polygon’s corners"
+       },
+       "axis": {
+        "type": "integer",
+        "minimum": 0,
+        "maximum": 2,
+        "description": "obstacle: the plane’s normal, along which it is cut through the box (default 2, z; its coordinates are then x and y, for 0 y and z, for 1 x and z)"
+       },
+       "erase": {
+        "type": "boolean",
+        "description": "obstacle: turn obstacle back into gas"
+       },
+       "from": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 3,
+        "description": "pull: where the drag starts"
+       },
+       "to": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 2,
+        "maxItems": 3,
+        "description": "pull: where it ends (taken frame by frame, as the tool would)"
+       },
+       "grip": {
+        "type": "number",
+        "minimum": 0.01,
+        "maximum": 0.9,
+        "description": "pull: the share of the drag the field at the center moves by (default 0.5)"
+       },
+       "rate": {
+        "type": "number",
+        "minimum": 0,
+        "maximum": 1,
+        "description": "source, sink: the tool’s Flux (default 0.25)"
+       },
+       "mass": {
+        "type": "number",
+        "minimum": 0,
+        "description": "sink: its mass as a multiple of the gas in the box (default 0: a massless particle)"
+       },
+       "soften": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "description": "sink: softening length of its gravity, as a fraction of the box"
+       },
+       "fixed": {
+        "type": "boolean",
+        "description": "source, sink: held where it is placed (default false)"
+       },
+       "n": {
+        "type": "number",
+        "description": "star: polytropic index"
+       },
+       "rhoc": {
+        "type": "number",
+        "exclusiveMinimum": 0,
+        "description": "star: central density (code units)"
+       },
+       "field": {
+        "type": "string",
+        "enum": [
+         "none",
+         "dipole",
+         "random"
+        ],
+        "description": "star: its magnetic field"
+       },
+       "beta": {
+        "type": "number",
+        "minimum": 1,
+        "description": "star: plasma beta at its center"
+       },
+       "what": {
+        "type": "string",
+        "enum": [
+         "sources",
+         "sinks"
+        ],
+        "description": "clear: which to remove"
+       }
+      }
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "additionalProperties": false
+   }
+  },
+  {
+   "name": "session_log",
+   "method": "actions",
+   "brief": "Summarizes what has been done to the run since it started (actions by kind, steps), and writes the full session log to `save_path`",
+   "description": "The session log of the run: the setup it started from, and every edit since (the tools, settings changed, the adaptive mesh’s re-meshes), each with the step it was applied at, with the run’s diagnostics along the way. The page’s Save session log button saves the same. Returns a summary: the setup, whether it can be replayed, the actions by kind and the steps they span. save_path writes the full log as JSON, for replay.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "save_path": {
+      "type": "string",
+      "description": "Write the session log as JSON to this file"
+     }
+    },
+    "required": [],
+    "additionalProperties": false
+   }
+  },
+  {
+   "name": "replay",
+   "method": "replay",
+   "brief": "Runs a saved session log (a file written by session_log or the page’s Save session log button) again, step for step",
+   "description": "Run a session log again: load the setup it started from, step to each action and apply it, re-meshing where it re-meshed, so the run comes out as it did (to the bit, on the same machine). Returns how many actions it applied, and where it stopped if the run went another way.",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "path": {
+      "type": "string",
+      "description": "The session log file"
+     },
+     "untilSteps": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Stop at this many steps (default: after the last action)"
+     }
+    },
+    "required": [
+     "path"
+    ],
     "additionalProperties": false
    }
   },

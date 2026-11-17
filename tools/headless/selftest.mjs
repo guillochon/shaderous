@@ -96,6 +96,18 @@ const check = (ok, what) => {
   const deb = json(await tool('debris', { save_path: path.join(tmp, 'debris.json') }));
   const budget = (tde1.mass + deb.totals.escaped - tde0.mass) / tde0.mass;
   check(tde.problem === 'tidal-disruption' && deb.totals.escaped > 0 && Math.abs(budget) < 1e-5 && existsSync(deb.saved), `debris: mass budget closes (${budget.toExponential(1)})`);
+  // The editing tools, a session log saved to a file, and its replay.
+  json(await tool('load', { setup: 'problem=mhd-rotor&dim=2&n=128' }));
+  await tool('run', { steps: 10 });
+  const pulled = json(await tool('edit', { name: 'pull', options: { from: [0.3, 0.5], to: [0.4, 0.55] } }));
+  await tool('edit', { name: 'mass', options: { pos: [0.7, 0.3], amount: 0.3 } });
+  await tool('run', { steps: 10 });
+  const before = json(await tool('diagnostics'));
+  const sess = json(await tool('session_log', { save_path: path.join(tmp, 'mcp/session.json') }));
+  check(pulled.frames > 1 && sess.replayable && sess.kinds.brush === pulled.frames + 1 && existsSync(sess.saved), `edit and session_log (${sess.actions} actions)`);
+  const rep = json(await tool('replay', { path: sess.saved, untilSteps: before.steps }));
+  const after = json(await tool('diagnostics'));
+  check(!rep.stopped && rep.applied === sess.actions && after.steps === before.steps && after.eTot === before.eTot && after.mass === before.mass, 'replay repeats the run to the bit');
   const bad = await tool('load', { setup: { problem: 'no-such-problem' } });
   check(bad.isError && /unknown problem/.test(bad.content[0].text), 'a bad call is reported as a tool error');
   const unknown = await rpc('tools/call', { name: 'nope', arguments: {} });

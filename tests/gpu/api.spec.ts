@@ -168,10 +168,147 @@ test('the field tools strengthen, weaken and pull the magnetic field, keeping di
   for (const m of [m1, m2, m3]) expect(m.divB).toBeLessThan(1e-6);
   // Paused throughout: the changes are the tools'.
   expect((await call(page, 'diagnostics')).t).toBe(t0);
+  // The page's own tools are logged as they are applied.
+  const log = await call(page, 'actions');
+  const ops = log.entries.filter((e: any) => e.action.kind === 'brush').map((e: any) => e.action.op.kind);
+  expect(ops).toContain('field');
+  expect(ops).toContain('pull');
   // Runs without a field do not offer them.
   await call(page, 'load', { problem: 'sedov', dim: 2, n: 64 });
   await expect(page.locator('#tool-field')).toBeHidden();
   await expect(page.locator('#tool-pull')).toBeHidden();
+});
+
+test('every editing tool works from the API, and is logged', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'load', { problem: 'mhd-rotor', dim: 2, n: 128 });
+  await call(page, 'step', 5);
+  const diag = () => call(page, 'diagnostics');
+  const at = async (pos: number[]) => (await call(page, 'probe', [pos])).points[0];
+  const d0 = await diag();
+
+  await call(page, 'tool', 'mass', { pos: [0.25, 0.25], radius: 0.05, amount: 0.5 });
+  expect((await diag()).mass).toBeGreaterThan(d0.mass);
+
+  await call(page, 'tool', 'velocity', { pos: [0.75, 0.25], radius: 0.05, vel: [0.3, -0.2] });
+  const v = (await at([0.75, 0.25, 0.5])).vel;
+  expect(v[0]).toBeCloseTo(0.3, 3);
+  expect(v[1]).toBeCloseTo(-0.2, 3);
+
+  const p0 = (await at([0.75, 0.75, 0.5])).press;
+  await call(page, 'tool', 'temperature', { pos: [0.75, 0.75], radius: 0.05, factor: 2 });
+  expect((await at([0.75, 0.75, 0.5])).press / p0).toBeCloseTo(2, 2);
+
+  const e0 = (await diag()).magnetic.eMag;
+  await call(page, 'tool', 'field', { pos: [0.25, 0.75], factor: 1.5 });
+  expect((await diag()).magnetic.eMag).toBeGreaterThan(e0);
+  const pull = await call(page, 'tool', 'pull', { from: [0.3, 0.5], to: [0.4, 0.55], grip: 0.5 });
+  expect(pull.frames).toBeGreaterThan(1);
+  expect((await diag()).magnetic.divB).toBeLessThan(1e-6);
+
+  // An obstacle holds its gas at rest.
+  await call(page, 'tool', 'velocity', { pos: [0.1, 0.9], radius: 0.06, vel: [0.5, 0] });
+  await call(page, 'tool', 'obstacle', { shape: 'rect', center: [0.1, 0.9], half: [0.03, 0.03] });
+  expect((await at([0.1, 0.9, 0.5])).vel[0]).toBe(0);
+
+  await call(page, 'tool', 'source', { pos: [0.5, 0.1], fixed: true });
+  const sink = await call(page, 'tool', 'sink', { pos: [0.9, 0.1], fixed: true });
+  expect(sink.index).toBe(0);
+  expect((await diag()).masses.length).toBe(1);
+  await call(page, 'tool', 'clear', { what: 'sinks' });
+  await call(page, 'tool', 'clear', { what: 'sources' });
+  expect((await diag()).masses.length).toBe(0);
+
+  const q = await call(page, 'tool', 'query', { pos: [0.75, 0.25] });
+  expect(q.rho).toBeGreaterThan(0);
+
+  await expect(call(page, 'tool', 'star', { pos: [0.5, 0.5] })).rejects.toThrow(/2D run/);
+  await expect(call(page, 'tool', 'brush', {})).rejects.toThrow(/no tool "brush"/);
+  await expect(call(page, 'tool', 'field', { pos: [0.5, 0.5], strength: 2 })).rejects.toThrow(/no option "strength"/);
+
+  const log = await call(page, 'actions');
+  expect(log.format).toBe('shaderous-session');
+  const brushes = log.entries.filter((e: any) => e.action.kind === 'brush').map((e: any) => e.action.op.kind);
+  for (const k of ['mass', 'velocity', 'temperature', 'field', 'pull', 'obstacle']) expect(brushes).toContain(k);
+  const kinds = log.entries.map((e: any) => e.action.kind);
+  expect(kinds).toEqual(expect.arrayContaining(['sources', 'mass', 'remove']));
+  // Every action has its step, and none is before the five taken first.
+  expect(log.entries.every((e: any) => e.steps >= 5)).toBe(true);
+});
+
+test('a session log replays to the bit: tools, a setting, and the adaptive mesh re-meshing', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'load', { problem: 'mhd-rotor', dim: 2, n: 256, amr: 1 });
+  await call(page, 'step', 20);
+  await call(page, 'tool', 'pull', { from: [0.4, 0.5], to: [0.5, 0.55] });
+  await call(page, 'step', 15);
+  await call(page, 'control', 'cfl', 0.3);
+  await call(page, 'step', 15);
+  await call(page, 'tool', 'mass', { pos: [0.7, 0.3], amount: 0.3 });
+  await call(page, 'tool', 'field', { pos: [0.3, 0.3], factor: 1.3 });
+  await call(page, 'step', 40);
+  const a = await call(page, 'diagnostics');
+  const sa = await call(page, 'slice', { variable: 'rho', res: 128 });
+  const log = await call(page, 'actions');
+  const kinds = log.entries.map((e: any) => e.action.kind);
+  expect(kinds).toContain('regrid');
+  expect(kinds).toContain('set');
+
+  const r = await call(page, 'replay', log, { untilSteps: a.steps });
+  expect(r.stopped).toBeUndefined();
+  expect(r.applied).toBe(log.entries.length);
+  const b = await call(page, 'diagnostics');
+  expect(b.steps).toBe(a.steps);
+  expect(b.t).toBe(a.t);
+  expect(b.mass).toBe(a.mass);
+  expect(b.eTot).toBe(a.eTot);
+  expect(b.magnetic.eMag).toBe(a.magnetic.eMag);
+  const sb = await call(page, 'slice', { variable: 'rho', res: 128 });
+  expect(sb.values).toEqual(sa.values);
+  // The replay logs itself, action for action.
+  const again = await call(page, 'actions');
+  expect(again.entries.map((e: any) => [e.steps, e.action.kind])).toEqual(log.entries.map((e: any) => [e.steps, e.action.kind]));
+});
+
+test('a session the page played, edited with the pointer, replays to the bit', async ({ page }) => {
+  // The page playing on its own, its adaptive mesh re-meshing when its checks come back.
+  await page.goto('/?problem=driven-turbulence-mhd&dim=2&n=256&amr=2');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'runTo', 0.05);
+  await call(page, 'play');
+  const frames = (k: number) => page.evaluate((k) => new Promise((r) => { let i = 0; const f = () => (++i >= k ? r(null) : requestAnimationFrame(f)); requestAnimationFrame(f); }), k);
+  await frames(20);
+  const box = (await page.locator('#view').boundingBox())!;
+  await page.click('#tool-pull');
+  const [cx, cy] = [box.x + box.width * 0.4, box.y + box.height * 0.5];
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 40; i++) {
+    await page.mouse.move(cx + 3 * i, cy + i);
+    await frames(1);
+  }
+  await page.mouse.up();
+  await frames(30);
+  await call(page, 'pause');
+  const a = await call(page, 'diagnostics');
+  const log = await call(page, 'actions');
+  const kinds = log.entries.map((e: any) => e.action.kind);
+  expect(kinds).toContain('regrid');
+  expect(kinds).toContain('brush');
+
+  const r = await call(page, 'replay', log, { untilSteps: a.steps });
+  expect(r.stopped).toBeUndefined();
+  const b = await call(page, 'diagnostics');
+  // Where the replay first went another way, if it did: each action's time, against the log's.
+  const again = await call(page, 'actions');
+  const first = log.entries.findIndex((e: any, i: number) => again.entries[i]?.t !== e.t || again.entries[i]?.steps !== e.steps);
+  if (first >= 0) {
+    const show = (l: any, i: number) => (l.entries[i] ? `${l.entries[i].steps} ${l.entries[i].t} ${l.entries[i].action.kind}${l.entries[i].action.op ? ' ' + l.entries[i].action.op.kind : ''}` : '-');
+    for (let i = Math.max(0, first - 4); i <= first + 1; i++) console.log(i, 'log:', show(log, i), '| replay:', show(again, i));
+  }
+  expect([b.steps, b.t, b.mass, b.eTot, b.magnetic.eMag, b.magnetic.bMax]).toEqual([a.steps, a.t, a.mass, a.eTot, a.magnetic.eMag, a.magnetic.bMax]);
 });
 
 test('draws magnetic field lines: contours in 2D, tubes and slices in 3D, on blocks too', async ({ page }) => {

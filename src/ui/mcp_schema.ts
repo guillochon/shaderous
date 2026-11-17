@@ -100,6 +100,25 @@ export const MCP_TOOLS: McpTool[] = [
     more: 'Returns totals, the core, the first return and the peak of dM/dt (in days and solar masses per year where the problem has units). save_path writes the full report (bins, dmdt.t and dmdt.rate) as JSON.',
     own: { save_path: { type: 'string', description: 'Write the full report as JSON to this file' } },
   },
+  {
+    name: 'edit', method: 'tool',
+    brief: 'Uses an editing tool on the run, as a person would: `name` (mass, velocity, temperature, obstacle, field, pull, source, sink, star, clear, query) and its `options`',
+    pass: ['name', 'options'],
+    required: ['name'],
+  },
+  {
+    name: 'session_log', method: 'actions',
+    brief: 'Summarizes what has been done to the run since it started (actions by kind, steps), and writes the full session log to `save_path`',
+    more: 'Returns a summary: the setup, whether it can be replayed, the actions by kind and the steps they span. save_path writes the full log as JSON, for replay.',
+    own: { save_path: { type: 'string', description: 'Write the session log as JSON to this file' } },
+  },
+  {
+    name: 'replay', method: 'replay',
+    brief: 'Runs a saved session log (a file written by session_log or the page’s Save session log button) again, step for step',
+    own: { path: { type: 'string', description: 'The session log file' } },
+    pass: ['path', 'untilSteps'],
+    required: ['path'],
+  },
   { name: 'errors', method: 'errors', brief: 'Lists what the page has reported going wrong' },
 ];
 

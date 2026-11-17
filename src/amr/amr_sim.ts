@@ -89,6 +89,11 @@ const BIN_PAUSE_MAX = 1536;
 
 interface RegridPlan {
   ops: RegridOp[];
+  /**
+   * For a re-mesh the refinement check decided: the indicator of every leaf it was decided
+   * from, in the order BlockTree.leaves() listed them then (see onRegrid).
+   */
+  indicators?: Float32Array;
 }
 
 export interface LeafCells {
@@ -181,6 +186,8 @@ export class AmrSim implements Simulation {
   /** A copy of the clock, for the timestep of a step not yet taken (previewDt). */
   private clockPreview: GPUBuffer;
   private gClockPreview!: GPUBindGroup;
+  /** The clock for previewDt: leaves the driving alone (hydro/clock.wgsl ADVANCE_DRIVE). */
+  private pClockPreview!: GPUComputePipeline;
   private bt: GPUBuffer;
   private listAll: GPUBuffer;
   private listLeaf: GPUBuffer;
@@ -316,6 +323,19 @@ export class AmrSim implements Simulation {
   private flagInFlight = false;
   private flagWait: Promise<void> | null = null;
   private pending: RegridPlan | null = null;
+  /**
+   * Called as a re-mesh that a refinement check decided is applied (at the start of the batch
+   * of steps it is encoded in), with the indicators it was decided from: a session log keeps
+   * them (ui/session.ts), since the step it lands on depends on when the check was read back.
+   */
+  onRegrid?: (indicators: Float32Array) => void;
+  /** Called after the uniform block is written (Simulation.onParams). */
+  onParams?: () => void;
+  /**
+   * Off, the run makes no refinement checks of its own: a replay re-meshes where the log says
+   * (forceRegrid()).
+   */
+  autoRegrid = true;
   /** total re-meshes applied, for the status line and tests */
   regrids = 0;
   /** the most recent refinement indicators, by slot (inspection only) */
@@ -595,7 +615,8 @@ export class AmrSim implements Simulation {
       cfg.ndim === 3 ? gravity() : undefined,
     ]);
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
-    sim.gClockPreview = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
+    sim.pClockPreview = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { PER_DX: 1, ADVANCE_DRIVE: 0 });
+    sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     if (cfg.problem.mhd) {
       const side = sim.slotsPerSide * PAD;
       sim.mhd = await AmrMhd.create({
@@ -1163,6 +1184,7 @@ export class AmrSim implements Simulation {
       sources: this.nSources > 0,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
+    this.onParams?.();
     // The block table records what lies beyond each face of the domain: follow a change of
     // boundary. (A face may not become periodic this way: the blocks on either side of it
     // would have to be balanced first. The front end restarts the run for that.)
@@ -1860,6 +1882,7 @@ export class AmrSim implements Simulation {
   private applyRegrid(enc: GPUCommandEncoder) {
     const plan = this.pending!;
     this.pending = null;
+    if (plan.indicators) this.onRegrid?.(plan.indicators);
     if (this.mhd) {
       // Before the new tree replaces it: the primitives of the current state with their ghosts
       // (the slopes of prolongation), and a copy of the old block table and leaf index, which
@@ -2053,7 +2076,7 @@ export class AmrSim implements Simulation {
    * queued behind it in the same submission: the flow may only run MAX_STEPS_AHEAD past it.
    */
   private encodeFlags(enc: GPUCommandEncoder): boolean {
-    if (this.levels === 0 || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return false;
+    if (this.levels === 0 || !this.autoRegrid || this.flagInFlight || this.wantMap || this.stepsSinceFlag < REGRID_EVERY) return false;
     enc.clearBuffer(this.flags);
     const fp = beginPass(enc);
     // With a magnetic field: the indicator reads the primitives of the state as it is now.
@@ -2422,14 +2445,40 @@ export class AmrSim implements Simulation {
         this.flagStaging.unmap();
         if (tree !== this.tree || epoch !== this.meshEpoch) return; // the run was reset, or re-meshed by hand, meanwhile
         this.lastIndicators = ind;
-        for (const b of tree.leaves()) this.indicatorOf.set(b, ind[b.slot]);
+        const leaves = tree.leaves();
+        for (const b of leaves) this.indicatorOf.set(b, ind[b.slot]);
+        if (!this.autoRegrid) return; // a check already in flight when a replay took over
         // Exactly 0: no gas in the block, only the inside of an obstacle (see amr/flag.wgsl).
         const ops = tree.adapt((b) => (ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo);
-        if (ops) this.pending = { ops };
+        if (ops) this.pending = { ops, indicators: Float32Array.from(leaves, (b) => ind[b.slot]) };
       })
       .finally(() => {
         this.flagInFlight = false;
       });
+  }
+
+  /**
+   * Re-mesh now, as a refinement check with these indicators (one per leaf, in the order
+   * BlockTree.leaves() lists them) would. For a replay (ui/session.ts), with autoRegrid off: now,
+   * so that it keeps its place among the other edits logged at the same step.
+   */
+  forceRegrid(indicators: Float32Array) {
+    const leaves = this.tree.leaves();
+    if (leaves.length !== indicators.length) throw new Error(`the mesh has ${leaves.length} leaves where the log's re-mesh had ${indicators.length}: the replay has gone another way`);
+    const at = new Map(leaves.map((b, i) => [b, indicators[i]]));
+    for (const b of leaves) this.indicatorOf.set(b, at.get(b)!);
+    const ops = this.tree.adapt((b) => (at.get(b) === 0 ? -1 : at.get(b)!), this.cfg.refineHi, this.cfg.refineLo);
+    if (!ops) return;
+    if (this.pending) {
+      // A re-mesh by hand that waits (a star's, an obstacle's) goes first, as it would have.
+      const first = this.device.createCommandEncoder();
+      this.applyRegrid(first);
+      this.device.queue.submit([first.finish()]);
+    }
+    this.pending = { ops, indicators };
+    const enc = this.device.createCommandEncoder();
+    this.applyRegrid(enc);
+    this.device.queue.submit([enc.finish()]);
   }
 
   stepsResume(): Promise<void> | null {
@@ -2531,7 +2580,7 @@ export class AmrSim implements Simulation {
       this.flat(pass, this.nAll, NG);
     }
     this.redDt.encode(pass);
-    pass.setPipeline(this.pClock);
+    pass.setPipeline(this.pClockPreview);
     pass.setBindGroup(0, this.gClockPreview);
     pass.dispatchWorkgroups(1);
     pass.end();

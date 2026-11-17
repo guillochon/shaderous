@@ -38,6 +38,7 @@ import { decodeSetupParam, encodeSetupParam, formatSetup, MAX_LINK, readSetup } 
 import { compiledFrom, isParamPath, paramFeatures } from '../setup/compile';
 import { optionAt, valueAt } from '../setup/options';
 import { changeBetween, runningSpec, sameSetup, setSetting, type Setting } from '../setup/running';
+import { SessionRecorder, base64ToF32, f32ToBase64, planeOutline, pullOps, pullStep, queryDiff, type Action, type MassRole, type PlaneShape, type SessionLog, type StarAction } from './session';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type SetupSpec } from '../setup/spec';
 import { openSetupDialog } from './setup/dialog';
 import type { SetupHost } from './setup/host';
@@ -97,6 +98,9 @@ side.innerHTML = `
       <button id="import" title="Load a state from an .athdf file: one saved here, or another code's with density, velocity and pressure">Import state</button>
       <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
       <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
+    </div>
+    <div class="io log-io">
+      <button id="save-log" title="Save what was done to this run since it started (the editing tools, the settings changed, the adaptive mesh's re-meshes, each at the step it happened) as a session log, with the run's diagnostics along the way. The API's replay() runs it again step for step">Save session log</button>
     </div>
   </section>
 
@@ -409,10 +413,11 @@ function removePlaced(gone: (kind: Placed, index: number) => boolean) {
   if (!out.length) return;
   placed = placed.filter((k, i) => !out.includes(placedIndex(i)));
   sim.removeMasses(out);
+  logAction({ kind: 'remove', indices: out });
   sources = sources
     .filter((q) => q.carrier === undefined || !out.includes(q.carrier))
     .map((q) => (q.carrier === undefined ? q : { ...q, carrier: q.carrier - out.filter((i) => i < q.carrier!).length }));
-  sim.setSources(sources);
+  pushSources(sources);
   // A pinned query goes with its mass, or follows it to its new place.
   if (pin && 'mass' in pin) {
     const at = pin.mass;
@@ -826,17 +831,17 @@ for (const sh of SHAPES) {
     syncTools();
   });
 }
-$('tool-clear').addEventListener('click', () => {
-  // Each tool clears what it placed: its sources or sinks, and the masses they are or ride.
-  const sinks = tool === 'sink';
+/** Each tool clears what it placed: its sources or sinks, and the masses they are or ride. */
+function clearPlaced(sinks: boolean) {
   removePlaced((kind) => kind === (sinks ? 'sink' : 'source'));
   const keep = sources.filter((q) => (q.decay > 0) !== sinks);
   if (keep.length !== sources.length) {
     sources = keep;
-    sim?.setSources(sources);
+    pushSources(sources);
   }
   syncTools();
-});
+}
+$('tool-clear').addEventListener('click', () => clearPlaced(tool === 'sink'));
 $('tool-erase').addEventListener('click', () => {
   obstacleErase = !obstacleErase;
   syncTools();
@@ -1061,6 +1066,115 @@ let draft: Draft | null = null;
 const mods = { shift: false, alt: false };
 /** The edit the next frame applies. */
 let pendingBrush: BrushOp | null = null;
+
+// --- session log (ui/session.ts) ---------------------------------------------------------------
+// What the tools and the settings do to the run, step by step: the API's actions() and replay(),
+// and the Save log button.
+const session = new SessionRecorder();
+/** The settings as a link without the view, as last logged (noteSettings()). */
+let sessionSettings = '';
+/** A replay is under way (ui/api.ts): the mesh re-meshes where the log says, not on its own checks. */
+let replaying = false;
+const settingsQuery = () =>
+  encodeLink({ cfg, view: viewDefaults(cfg.problem, cfg.ndim), auto: true, colormap: 'inferno', opacity: defaultOpacity(), setup: customLink?.text || undefined }).toString();
+
+/** The steps taken and the time, as diagnostics() has them, once the work submitted so far is done. */
+function stampNow(s: Simulation): Promise<{ steps: number; t: number }> {
+  const d = gpu.device;
+  const buf = d.createBuffer({ label: 'session stamp', size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = d.createCommandEncoder();
+  enc.copyBufferToBuffer(s.clockBuffer, 0, buf, 0, 16);
+  d.queue.submit([enc.finish()]);
+  return buf.mapAsync(GPUMapMode.READ).then(() => {
+    const [dt, t, , banked] = new Float32Array(buf.getMappedRange().slice(0));
+    buf.unmap();
+    buf.destroy();
+    return { steps: banked + (dt > 0 ? 1 : 0), t: t + dt };
+  });
+}
+
+/** Log an action applied to the run now (before any step submitted after this call). */
+function logAction(action: Action) {
+  if (!sim || !session.active) return;
+  session.add(action, stampNow(sim));
+}
+
+/** A run starts (a load, a reset): its log starts over. */
+function beginSession(replayable: boolean, why?: string) {
+  if (!sim || !cfg) return session.stop();
+  session.start(linkQuery(), BUILD, replayable, why);
+  sessionSettings = settingsQuery();
+  watchRegrids(sim);
+}
+
+/** Log the re-meshes the run's own refinement checks decide (in a replay, it makes none), and changes of the clock's stop. */
+function watchRegrids(s: Simulation) {
+  s.onRegrid = (ind) => {
+    if (s === sim) logAction({ kind: 'regrid', indicators: f32ToBase64(ind) });
+  };
+  if (s.autoRegrid !== undefined) s.autoRegrid = !replaying;
+  sessionClock = clockOf();
+  s.onParams = () => {
+    if (s !== sim || !session.active) return;
+    const now = clockOf();
+    if (now.stop === sessionClock.stop && now.frame === sessionClock.frame) return;
+    sessionClock = now;
+    logAction({ kind: 'clock', ...now });
+  };
+}
+
+/** The clock's stop as the uniform block has it (sim.ts packParams), and its frame time. */
+function clockOf(): { stop: number | null; frame: number | null } {
+  const stop = Math.min(Number.isFinite(cfg.tEnd) ? cfg.tEnd : Infinity, cfg.tStop ?? Infinity);
+  return { stop: Number.isFinite(stop) ? stop : null, frame: cfg.tFrame ?? null };
+}
+/** The clock's stop as last logged. */
+let sessionClock: { stop: number | null; frame: number | null } = { stop: null, frame: null };
+
+/** Log the settings if they changed since last logged. */
+function noteSettings() {
+  if (!sim || !cfg || !session.active) return;
+  const q = settingsQuery();
+  if (q === sessionSettings) return;
+  const changes = queryDiff(sessionSettings, q);
+  sessionSettings = q;
+  logAction({ kind: 'set', changes, spec: runningSpec(cfg) });
+}
+
+/** The sources and sinks as set now, to the run and to the log. */
+function pushSources(list: SourceSpec[]) {
+  if (!sim) return;
+  sim.setSources(list);
+  logAction({ kind: 'sources', list });
+}
+
+/** Add a point mass a tool placed, to the run and to the log; false if the run holds no more. */
+function addPlaced(s: Simulation, spec: PointMass, role: MassRole): boolean {
+  const ok = s.addMass(spec);
+  if (ok) {
+    placed.push(role);
+    if (s === sim) logAction({ kind: 'mass', spec, role });
+  }
+  return ok;
+}
+
+/** Apply a brush now (not at the next frame), and log it. */
+function brushNow(op: BrushOp) {
+  if (!sim) return;
+  const enc = gpu.device.createCommandEncoder();
+  // A re-mesh that waits goes first, and logs itself first (see the frame loop).
+  sim.encodeBrush(enc, op);
+  logAction({ kind: 'brush', op });
+  gpu.device.queue.submit([enc.finish()]);
+}
+
+/** Self-gravity hears about the gas a tool added or removed; the log too. */
+async function tellMass(target: Simulation) {
+  const d = await target.diagnostics();
+  if (target !== sim) return;
+  target.massChanged(d.mass);
+  logAction({ kind: 'massChanged', mass: d.mass });
+}
 
 const editor = new OpacityEditor($<HTMLCanvasElement>('tf'), pushTransfer, true);
 
@@ -1648,6 +1762,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     setLoadStage('Preparing the display');
     await renderer.attach(s).finally(() => setLoadStage(''));
     sim = s;
+    beginSession(!snap, snap ? 'the run started from an imported file' : undefined);
     // The page survived the allocation for a few seconds: it is safe (gpu/memory.ts).
     const gen = ++buildGen;
     setTimeout(() => {
@@ -1868,6 +1983,8 @@ let linkFrame = 0;
 function syncAddress(force = false) {
   if (!cfg || !sim || building) return;
   if (!force && ++linkFrame % 30) return;
+  // (A setting that reached the run by a path that does not log it: logged late, but logged.)
+  noteSettings();
   const q = linkQuery();
   if (q === lastQuery) return;
   lastQuery = q;
@@ -1897,6 +2014,7 @@ function restartRun(replay = false) {
       await sim.reset();
       armCheckpoints(cfg.restart?.time ?? 0);
       clearSources();
+      beginSession(!cfg.restart, cfg.restart ? 'the run starts from a saved state' : undefined);
       if (replay) running = autoplay;
       finished = false;
       lastDiag = undefined;
@@ -1913,6 +2031,7 @@ function applyParams() {
   sim.cfg = cfg;
   sim.writeParams();
   finished = false;
+  noteSettings();
 }
 
 /** Changes that need shader reassembly. */
@@ -1930,9 +2049,10 @@ function rebuildPipelines(resetAfter = false) {
         await sim.reset();
         armCheckpoints(cfg.restart?.time ?? 0);
         clearSources();
+        beginSession(!cfg.restart, cfg.restart ? 'the run starts from a saved state' : undefined);
         lastDiag = undefined;
         if (finished) running = autoplay;
-      }
+      } else noteSettings();
       finished = false;
     } finally {
       reloading = null;
@@ -2178,6 +2298,7 @@ async function applySpec(edited: SetupSpec): Promise<void> {
     applySettings(now.settings);
   }
   await idle();
+  noteSettings();
   syncControls();
 }
 
@@ -2449,6 +2570,12 @@ function bind() {
     syncControls();
   });
 
+  $('save-log').addEventListener('click', async () => {
+    const log = await session.snapshot();
+    if (!log || !cfg) return;
+    const t = log.trace.length ? log.trace[log.trace.length - 1].t : 0;
+    downloadBlob(`shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-session-t${+t.toPrecision(4)}.json`, new Blob([JSON.stringify(log)], { type: 'application/json' }));
+  });
   $('export').addEventListener('click', () => exportState());
   $('export-diag').addEventListener('click', () => exportDiagnostics());
   const picker = $<HTMLInputElement>('import-file');
@@ -2883,7 +3010,7 @@ function removePinned() {
   if ('mass' in was) removePlaced((_, index) => index === was.mass);
   else {
     sources = sources.filter((q) => q !== was.source);
-    sim.setSources(sources);
+    pushSources(sources);
   }
   syncTools();
 }
@@ -2977,10 +3104,9 @@ async function pinAt(clientX: number, clientY: number) {
     const f = await boxPointAt(px, py);
     if (!f || s !== sim) return;
     // A tracer, at rest: softened over two cells, so that a mass it passes does not fling it.
-    const ok = s.addMass(carrierSpec(f, [0, 0, 0], 2 / cfg.n));
+    const ok = addPlaced(s, carrierSpec(f, [0, 0, 0], 2 / cfg.n), 'query');
     notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks, moving sources, tracers and point masses`);
     if (!ok) return;
-    placed.push('query');
     to = { mass: s.massCount - 1, own: true };
     lastDiag = undefined;
     syncControls();
@@ -3274,7 +3400,7 @@ function draftPath(d: Draft): string {
 
 /** Remove every source and sink (the simulation drops its own on a reset). */
 function clearSources() {
-  if (sources.length && sim) sim.setSources([]);
+  if (sources.length && sim) pushSources([]);
   sources = [];
   placed = [];
   dropPin();
@@ -3499,7 +3625,7 @@ function endStroke(apply: boolean) {
  * The point mass the sink tool places at `pos` (in fractions of the box), moving at `vel`: what
  * placeMass() adds to the run and what the preview of its orbit is drawn for.
  */
-function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number; soften: number }): PointMass {
+function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number; soften: number }, fixed = sinkFixed): PointMass {
   const box = cfg.problem.box;
   // The gas in the box sets the scale; with no readback yet, a box of unit density does.
   const gas = lastDiag?.mass ?? box ** cfg.ndim;
@@ -3508,9 +3634,9 @@ function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass:
   const G = cfg.G > 0 ? cfg.G : 1;
   const where = {
     pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
-    vel: sinkFixed ? [0, 0, 0] : two ? [vel[0], vel[1], 0] : vel,
+    vel: fixed ? [0, 0, 0] : two ? [vel[0], vel[1], 0] : vel,
     sinkRadius: q.size * box,
-    fixed: sinkFixed,
+    fixed,
   };
   if (!(q.mass > 0)) {
     // Without a mass: a token one, a billionth of the gas, so that it has an orbit to follow
@@ -3571,31 +3697,70 @@ function strokeAim(s: Stroke, still = false): { at: ReturnType<typeof locate>; v
  * softening the tool's, and its sink's rate the tool's flux (25% is the orbital rate at the
  * edge). Without one it is a massless particle (massSpec).
  */
-function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number; soften: number }) {
-  if (!sim) return;
-  const spec = massSpec(pos, vel, q);
+function placeMass(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass: number; soften: number }, fixed = sinkFixed): boolean {
+  if (!sim) return false;
+  const spec = massSpec(pos, vel, q, fixed);
   // Gravity needs a constant: a preset without one gets G = 1, shown in the Gravity section.
   // (A massless particle leaves it without: the gas then does not pull on it.)
   if (!(cfg.G > 0) && !spec.massless) cfg.G = 1;
   sim.cfg = cfg;
-  const ok = sim.addMass(spec);
+  noteSettings();
+  const ok = addPlaced(sim, spec, 'sink');
   if (ok) {
-    placed.push('sink');
     lastDiag = undefined;
     syncControls();
   }
   notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks and point masses`);
+  return ok;
 }
 
 /**
- * Place a polytropic star of the tool's index, central density and radius at `pos` (in
- * fractions of the box), moving at `vel`. Switches self-gravity on if it is off: isolated, or
- * periodic in a fully periodic box. The star is then settled into the grid's own balance, as a
- * preset's is (problems/settle.ts), and given the tool's magnetic field, if it has one.
+ * Place a source with the source tool: at `pos` (in fractions of the box), its gas leaving at
+ * `vel`, or, not fixed, riding a massless particle set moving at `vel`. Its flux is the tool's,
+ * measured against the densest gas and the time a signal takes to cross it (`refs`).
  */
-function placeStar(pos: Vec3, vel: Vec3) {
-  if (!sim || cfg.ndim !== 3) return;
+function placeSource(pos: Vec3, vel: Vec3, q: { size: number; softness: number; amount: number }, fixed: boolean, refs: { rhoMax: number; vRef: number }): boolean {
+  if (!sim) return false;
+  const perTime = (q.amount * (refs.vRef || 1)) / (q.size * cfg.problem.box);
+  const source: SourceSpec = { pos, radius: q.size, softness: q.softness, vel, rate: perTime * refs.rhoMax, decay: 0 };
+  if (!fixed) {
+    // A source that moves rides a massless particle, which the drag set going: the gas it
+    // adds leaves with the particle's velocity, not along the drag.
+    const ok = addPlaced(sim, carrierSpec(pos, vel, q.size), 'source');
+    notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks, moving sources and point masses`);
+    if (!ok) return false;
+    source.vel = [0, 0, 0];
+    source.carrier = sim.massCount - 1;
+    lastDiag = undefined;
+    syncControls();
+  }
+  sources.push(source);
+  // The oldest makes room, with the particle it rode.
+  if (sources.length > MAX_SOURCES) {
+    const oldest = sources.shift()!;
+    if (oldest.carrier !== undefined) removePlaced((_, index) => index === oldest.carrier);
+  }
+  pushSources(sources);
+  syncTools();
+  return true;
+}
+
+/**
+ * Place a polytropic star at `pos` (in fractions of the box), moving at `vel`: of the star
+ * tool's index, central density, radius and magnetic field, or of those given (the API's tool()).
+ * Switches self-gravity on if it is off: isolated, or periodic in a fully periodic box. The star
+ * is then settled into the grid's own balance, as a preset's is (problems/settle.ts), and given
+ * its magnetic field, if it has one. Resolves once all of that is done.
+ */
+function placeStar(pos: Vec3, vel: Vec3, given: Partial<StarAction> = {}): Promise<void> {
+  if (!sim || cfg.ndim !== 3) return Promise.resolve();
   starDefaults();
+  const n = given.n ?? starN;
+  const rhoc = given.rhoc ?? 10 ** starLogRho;
+  const size = given.radius ?? toolParams.star.size;
+  const field = given.field ?? starField;
+  const beta = given.beta ?? 10 ** starLogBeta;
+  logAction({ kind: 'star', star: { pos, vel, n, rhoc, radius: size, field, beta } });
   const notes: string[] = [];
   if (!isSelfGravity(cfg.gravity)) {
     // A uniform field's strength is not a gravitational constant.
@@ -3603,20 +3768,18 @@ function placeStar(pos: Vec3, vel: Vec3) {
     cfg.gravity = [...cfg.bcLo, ...cfg.bcHi].every((b) => b === PERIODIC) ? 'periodic' : 'isolated';
     notes.push(`self-gravity switched on (${cfg.gravity})`);
   }
-  const q = toolParams.star;
-  const cells = q.size * cfg.n;
+  const cells = size * cfg.n;
   if (cells < 8) notes.push(`the star is only ${cells.toFixed(1)} cells in radius`);
-  if (cfg.eos === 'ideal' && cfg.eosParams.gamma < 1 + 1 / starN) notes.push('\u03b3 < 1 + 1/n: the star is convectively unstable');
-  const op = starBrush(starN, 10 ** starLogRho, q.size, cfg.problem.box, cfg.G, pos, vel);
+  if (cfg.eos === 'ideal' && cfg.eosParams.gamma < 1 + 1 / n) notes.push('\u03b3 < 1 + 1/n: the star is convectively unstable');
+  const op = starBrush(n, rhoc, size, cfg.problem.box, cfg.G, pos, vel);
   // Thin gas around a star should neither set the timestep nor ask for refinement: unless the
   // run has its own settings, take them from this star.
-  const rhoc = 10 ** starLogRho;
   if (!(cfg.fluff.rho > 0)) {
-    const radius = q.size * cfg.problem.box;
+    const radius = size * cfg.problem.box;
     const g = cfg.eosParams.gamma;
     // Twice the central specific internal energy, four times the surface escape speed.
-    const uc = (op.star!.K * rhoc ** (1 / starN)) / Math.max(g - 1, 0.05);
-    const vEsc = Math.sqrt((2 * cfg.G * polytropeMass(laneEmdenCached(starN), rhoc, radius)) / radius);
+    const uc = (op.star!.K * rhoc ** (1 / n)) / Math.max(g - 1, 0.05);
+    const vEsc = Math.sqrt((2 * cfg.G * polytropeMass(laneEmdenCached(n), rhoc, radius)) / radius);
     cfg.fluff = { rho: 1e-5 * rhoc, u: 2 * uc, v: 4 * vEsc };
     notes.push('tenuous-gas caps set from the star (Hydro)');
   }
@@ -3627,11 +3790,9 @@ function placeStar(pos: Vec3, vel: Vec3) {
   notice(notes.join('; '));
   const target = sim;
   const box = cfg.problem.box;
-  const star = { n: starN, K: op.star!.K, rhoc, center: pos.map((x) => (x - 0.5) * box), vel, R: q.size * box };
-  const field = starField;
-  const beta = 10 ** starLogBeta;
+  const star = { n, K: op.star!.K, rhoc, center: pos.map((x) => (x - 0.5) * box), vel, R: size * box };
   syncControls();
-  enqueue(async () => {
+  return enqueue(async () => {
     if (target !== sim) return;
     applyParams();
     target.refreshPotential();
@@ -3709,11 +3870,185 @@ async function magnetizeStar(star: { n: number; K: number; rhoc: number; center:
     const s = await createSim(gpu, cfg, { deferUpdate: true });
     await renderer.attach(s);
     sim = s;
+    watchRegrids(s);
     finished = false;
     lastDiag = undefined;
   } finally {
     setLoadStage('');
     if (cfg) syncControls();
+  }
+}
+
+// --- the editing tools from the API (ui/api.ts tool()), and a replay's actions -----------------
+
+/** The tools tool() takes, by name. */
+const TOOL_NAMES = ['mass', 'velocity', 'temperature', 'obstacle', 'field', 'pull', 'source', 'sink', 'star', 'clear'];
+
+/**
+ * Apply an editing tool as a person would with the pointer, from settings given in numbers:
+ * positions in fractions of the box, velocities in code units, the rest as the tool's own
+ * sliders take them (ui/api.ts tool(), docs/api.md). Applied now, and logged.
+ */
+async function toolApi(name: string, o: Record<string, unknown> = {}): Promise<Record<string, unknown>> {
+  const s = sim;
+  if (!s || !cfg) throw new Error('no simulation is loaded');
+  if (s.preparing) throw new Error(`${name}: the run is still being prepared`);
+  const known = (keys: string[]) => {
+    for (const k of Object.keys(o)) if (!keys.includes(k)) throw new Error(`${name}: no option "${k}" (it takes ${keys.join(', ')})`);
+  };
+  const vec = (k: string, zero: number, fallback?: Vec3): Vec3 => {
+    const v = o[k];
+    if (v === undefined && fallback) return fallback;
+    if (!Array.isArray(v) || v.length < 2 || v.length > 3 || !v.every((x) => typeof x === 'number' && Number.isFinite(x))) {
+      throw new Error(`${name}: "${k}" takes [x, y] or [x, y, z]`);
+    }
+    return [v[0], v[1], v.length === 3 ? v[2] : zero];
+  };
+  const point = (k: string) => vec(k, 0.5);
+  const scalar = (k: string, fallback: number, lo = -Infinity, hi = Infinity) => {
+    const v = o[k] ?? fallback;
+    if (typeof v !== 'number' || !Number.isFinite(v)) throw new Error(`${name}: "${k}" takes a number`);
+    if (v < lo || v > hi) throw new Error(`${name}: "${k}" must be from ${lo} to ${hi}`);
+    return v;
+  };
+  const flag = (k: string, fallback: boolean) => (o[k] === undefined ? fallback : !!o[k]);
+  const magnetic = () => {
+    if (!cfg.problem.mhd) throw new Error(`${name}: the run has no magnetic field`);
+  };
+  toolNotice = '';
+  const out: Record<string, unknown> = { tool: name };
+  switch (name) {
+    case 'mass': {
+      known(['pos', 'radius', 'softness', 'amount', 'atRest']);
+      // Density added at the center, as a share of the densest gas (negative removes gas).
+      const amount = scalar('amount', 0.25, -1, 1) * toolRefs().rhoMax;
+      brushNow({ kind: 'mass', pos: point('pos'), radius: scalar('radius', 0.06, 0.001, 1), softness: scalar('softness', 0.5, 0, 1), amount, vel: [0, 0, 0], atRest: flag('atRest', true) });
+      if (isSelfGravity(cfg.gravity) && cfg.ndim === 3) await tellMass(s);
+      break;
+    }
+    case 'velocity':
+      known(['pos', 'radius', 'softness', 'vel']);
+      brushNow({ kind: 'velocity', pos: point('pos'), radius: scalar('radius', 0.08, 0.001, 1), softness: scalar('softness', 0.5, 0, 1), amount: 0, vel: vec('vel', 0) });
+      break;
+    case 'temperature':
+      known(['pos', 'radius', 'softness', 'factor']);
+      if (cfg.eos === 'barotropic') throw new Error('temperature: the barotropic equation of state ties the temperature to the density');
+      brushNow({ kind: 'temperature', pos: point('pos'), radius: scalar('radius', 0.06, 0.001, 1), softness: scalar('softness', 0.5, 0, 1), amount: Math.log(scalar('factor', 1.5, 1e-6, 1e6)), vel: [0, 0, 0] });
+      break;
+    case 'obstacle': {
+      known(['shape', 'center', 'half', 'points', 'axis', 'erase']);
+      const axis = cfg.ndim === 2 ? 2 : scalar('axis', 2, 0, 2);
+      if (!Number.isInteger(axis)) throw new Error('obstacle: "axis" is 0, 1 or 2');
+      const pair = (k: string): [number, number] => {
+        const v = o[k];
+        if (!Array.isArray(v) || v.length !== 2 || !v.every((x) => typeof x === 'number' && Number.isFinite(x))) throw new Error(`obstacle: "${k}" takes [a, b]`);
+        return [v[0], v[1]];
+      };
+      let shape: PlaneShape;
+      if (o.shape === 'rect' || o.shape === 'ellipse') shape = { shape: o.shape, center: pair('center'), half: pair('half') };
+      else if (o.shape === 'polygon') {
+        const pts = o.points;
+        if (!Array.isArray(pts) || pts.length < 3 || pts.length > MAX_OUTLINE_VERTICES) throw new Error(`obstacle: "points" takes 3 to ${MAX_OUTLINE_VERTICES} corners [a, b]`);
+        const corner = (q: unknown): [number, number] => {
+          if (!Array.isArray(q) || q.length !== 2 || !q.every((x) => typeof x === 'number' && Number.isFinite(x))) throw new Error('obstacle: each of "points" is [a, b]');
+          return [q[0], q[1]];
+        };
+        shape = { shape: 'polygon', points: pts.map(corner) };
+      } else throw new Error('obstacle: "shape" is rect, ellipse or polygon');
+      brushNow({ kind: 'obstacle', pos: [0, 0, 0], radius: 1, softness: 0, vel: [0, 0, 0], amount: flag('erase', false) ? -1 : 1, outline: planeOutline(shape, axis as 0 | 1 | 2) });
+      break;
+    }
+    case 'field':
+      known(['pos', 'radius', 'softness', 'factor']);
+      magnetic();
+      brushNow({ kind: 'field', pos: point('pos'), radius: scalar('radius', 0.08, 0.001, 1), softness: scalar('softness', 0.5, 0, 1), amount: Math.log(scalar('factor', 1.5, 1e-3, 1e3)), vel: [0, 0, 0] });
+      break;
+    case 'pull': {
+      known(['from', 'to', 'radius', 'softness', 'grip']);
+      magnetic();
+      const ops = pullOps(point('from'), point('to'), { radius: scalar('radius', 0.1, 0.001, 1), softness: scalar('softness', 0.7, 0, 1), grip: scalar('grip', 0.5, 0.01, 0.9) }, cfg.n, cfg.ndim === 2);
+      for (const op of ops) brushNow(op);
+      out.frames = ops.length;
+      break;
+    }
+    case 'sink': {
+      known(['pos', 'vel', 'radius', 'rate', 'mass', 'soften', 'fixed']);
+      const ok = placeMass(point('pos'), vec('vel', 0, [0, 0, 0]), { size: scalar('radius', 0.04, 0.001, 1), amount: scalar('rate', 0.25, 0, 1), mass: scalar('mass', 0, 0), soften: scalar('soften', 0.04, 0.001, 1) }, flag('fixed', false));
+      if (!ok) throw new Error(`sink: ${toolNotice || 'it could not be placed'}`);
+      out.index = s.massCount - 1;
+      break;
+    }
+    case 'source': {
+      known(['pos', 'vel', 'radius', 'softness', 'rate', 'fixed']);
+      const ok = placeSource(point('pos'), vec('vel', 0, [0, 0, 0]), { size: scalar('radius', 0.04, 0.001, 1), softness: scalar('softness', 0.5, 0, 1), amount: scalar('rate', 0.25, 0, 1) }, flag('fixed', false), toolRefs());
+      if (!ok) throw new Error(`source: ${toolNotice || 'it could not be placed'}`);
+      break;
+    }
+    case 'star': {
+      known(['pos', 'vel', 'n', 'rhoc', 'radius', 'field', 'beta']);
+      if (cfg.ndim !== 3) throw new Error('star: a star needs self-gravity, which a 2D run does not have');
+      if (cfg.eos === 'barotropic') throw new Error('star: the barotropic equation of state fixes the pressure of the gas, so a star\u2019s cannot be chosen');
+      const field = o.field ?? 'none';
+      if (field !== 'none' && field !== 'dipole' && field !== 'random') throw new Error('star: "field" is none, dipole or random');
+      await placeStar(point('pos'), vec('vel', 0, [0, 0, 0]), { n: scalar('n', starN, 0.5, 4.5), rhoc: scalar('rhoc', 10 ** starLogRho, 1e-30), radius: scalar('radius', toolParams.star.size, 0.005, 0.5), field, beta: scalar('beta', 10 ** starLogBeta, 1) });
+      await idle();
+      break;
+    }
+    case 'clear': {
+      known(['what']);
+      if (o.what !== 'sources' && o.what !== 'sinks') throw new Error('clear: "what" is sources or sinks');
+      clearPlaced(o.what === 'sinks');
+      break;
+    }
+    default:
+      throw new Error(`no tool "${name}": the tools are ${TOOL_NAMES.join(', ')}`);
+  }
+  syncTools();
+  if (toolNotice) out.notice = toolNotice;
+  return out;
+}
+
+/** Apply an action of a session log, as a replay does (ui/api.ts replay()). */
+async function replayAction(a: Action) {
+  const s = sim;
+  if (!s) throw new Error('no simulation is loaded');
+  switch (a.kind) {
+    case 'brush':
+      brushNow(a.op);
+      break;
+    case 'mass':
+      if (!addPlaced(s, a.spec, a.role)) throw new Error('the run holds no more point masses than it did');
+      lastDiag = undefined;
+      syncControls();
+      break;
+    case 'remove':
+      removePlaced((_, index) => a.indices.includes(index));
+      break;
+    case 'sources':
+      sources = a.list.map((q) => ({ ...q }));
+      pushSources(sources);
+      break;
+    case 'massChanged':
+      s.massChanged(a.mass);
+      logAction(a);
+      break;
+    case 'star':
+      await placeStar(a.star.pos, a.star.vel, a.star);
+      await idle();
+      break;
+    case 'set':
+      await applySpec(a.spec);
+      break;
+    case 'regrid':
+      s.forceRegrid?.(base64ToF32(a.indicators));
+      break;
+    case 'clock':
+      // The end time is a setting (logged as one): what differs from it is a stop of the clock's own.
+      cfg.tStop = a.stop !== null && !(a.stop >= cfg.tEnd) ? a.stop : undefined;
+      cfg.tFrame = a.frame ?? undefined;
+      s.cfg = cfg;
+      s.writeParams();
+      break;
   }
 }
 
@@ -3850,28 +4185,7 @@ function advanceStroke(now: number) {
       return;
     }
     // The flux is measured against the densest gas and the time a signal takes to cross the source.
-    const perTime = (q.amount * (s.vRef || toolRefs().vRef || 1)) / (q.size * cfg.problem.box);
-    const source: SourceSpec = { pos: at.pos, radius: q.size, softness: q.softness, vel, rate: perTime * (s.rhoMax || toolRefs().rhoMax), decay: 0 };
-    if (!sourceFixed) {
-      // A source that moves rides a massless particle, which the drag set going: the gas it
-      // adds leaves with the particle's velocity, not along the drag.
-      const ok = sim.addMass(carrierSpec(at.pos, vel, q.size));
-      notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks, moving sources and point masses`);
-      if (!ok) return;
-      placed.push('source');
-      source.vel = [0, 0, 0];
-      source.carrier = sim.massCount - 1;
-      lastDiag = undefined;
-      syncControls();
-    }
-    sources.push(source);
-    // The oldest makes room, with the particle it rode.
-    if (sources.length > MAX_SOURCES) {
-      const oldest = sources.shift()!;
-      if (oldest.carrier !== undefined) removePlaced((_, index) => index === oldest.carrier);
-    }
-    sim.setSources(sources);
-    syncTools();
+    placeSource(at.pos, vel, q, sourceFixed, { rhoMax: s.rhoMax || toolRefs().rhoMax, vRef: s.vRef || toolRefs().vRef });
     return;
   }
   if (s.kind === 'star') {
@@ -3897,27 +4211,14 @@ function advanceStroke(now: number) {
     return;
   }
   if (s.kind === 'pull') {
-    // The brush follows the pointer, and carries the field at its center by the grip's share of
-    // the drag (edit/field_brush_core.wgsl). Across the brush's soft rim that share falls to 0, so
-    // a frame's drag d squeezes the field ahead by 1 / (1 - grip |grad w| d) (and stretches it
-    // behind): d is kept to 0.15 of the rim's width over the grip, which holds that to 1.3 at
-    // most (smoothstep's steepest slope is 1.5 over the width). A fast drag catches up over the
-    // frames after, release included. The rim is at least 0.3 of the radius wide: a hard edge
-    // would tear the field.
-    const soft = Math.max(q.softness, 0.3);
-    const grip = Math.min(Math.max(q.amount, 0.01), 0.9);
+    // The field is carried after the pointer, a frame's worth at a time (ui/session.ts pullStep).
     const to = locate(s.x, s.y, s.depth).pos;
     const from = (s.pulled ??= locate(s.x0, s.y0, s.depth).pos);
-    let d = [0, 1, 2].map((i) => to[i] - from[i]) as Vec3;
-    if (cfg.ndim === 2) d[2] = 0;
-    const len = Math.hypot(...d);
-    // (And to 30 cells of the finest level, which the passes cut into substeps of half a cell.)
-    const cap = Math.min((0.15 * soft * q.size) / grip, 0.5 * q.size, 30 / (cfg.n * grip));
-    if (len > cap) d = d.map((v) => (v * cap) / len) as Vec3;
-    if (s.released && len <= cap) stroke = null;
-    if (len < 1e-6) return;
-    pendingBrush = { ...base, softness: soft, amount: grip, pos: [0, 1, 2].map((i) => from[i] + 0.5 * d[i]) as Vec3, vel: d };
-    s.pulled = [0, 1, 2].map((i) => from[i] + d[i]) as Vec3;
+    const step = pullStep(from, to, { radius: q.size, softness: q.softness, grip: q.amount }, cfg.n, cfg.ndim === 2);
+    if (s.released && step.done) stroke = null;
+    if (!step.op) return;
+    pendingBrush = step.op;
+    s.pulled = step.at;
     return;
   }
   // Mass, temperature and field strength: one full application on the press, then, if the press is held for
@@ -3937,7 +4238,7 @@ function advanceStroke(now: number) {
     // Self-gravity has to hear about the new mass.
     const target = sim;
     if (s.kind === 'mass' && isSelfGravity(cfg.gravity) && cfg.ndim === 3) {
-      setTimeout(() => target.diagnostics().then((d) => target === sim && target.massChanged(d.mass), fail), 0);
+      setTimeout(() => tellMass(target).catch(fail), 0);
     }
   }
   if (strength === 0) return;
@@ -4531,7 +4832,11 @@ function tick(now: number) {
   updateOrbit(now);
   updatePin(now);
   if (pendingBrush) {
+    // Logged after it is encoded: a re-mesh that waits goes first (AmrSim.encodeBrush) and logs
+    // itself, and the log keeps that order. The stamps are taken before this frame's work is
+    // submitted, so both read the step they are applied at.
     s.encodeBrush(enc, pendingBrush);
+    logAction({ kind: 'brush', op: pendingBrush });
     pendingBrush = null;
   }
   // The state may have changed since the last frame drawn: steps, an edit, a load, or whatever
@@ -4588,6 +4893,10 @@ function tick(now: number) {
     s.readDiagnostics().then((d) => {
       if (!d || s !== sim) return;
       lastDiag = d;
+      session.trace({
+        steps: d.steps, t: d.t, dt: d.dt, mass: d.mass, eTot: d.eTot, maxMach: d.maxMach, floored: d.floored,
+        ...(d.magnetic ? { bMax: d.magnetic.bMax, betaMin: d.magnetic.betaMin, divB: d.magnetic.divB } : {}),
+      });
       // dt = 0 after some progress means the clock reached the end time.
       if (d.dt === 0 && d.steps > 0 && running && !finished) {
         if (ckpt.on && cfg.tStop !== undefined && d.t >= cfg.tStop * (1 - 1e-5)) {
@@ -4823,6 +5132,13 @@ const api = installApi(
     runningSpec: () => runningSpec(cfg),
     applySpec,
     adopt,
+    tool: (name, opts) => toolApi(name, opts),
+    sessionLog: () => session.snapshot(),
+    replayAction,
+    setReplaying(on) {
+      replaying = on;
+      if (sim?.autoRegrid !== undefined) sim.autoRegrid = !on;
+    },
     gridMemory: (spec) => setupHost.memory(spec)!,
     overlayInfo() {
       const u = units();

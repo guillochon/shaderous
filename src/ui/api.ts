@@ -5,6 +5,7 @@
 // Every call returns a promise, and everything it resolves to is plain JSON (numbers, strings,
 // arrays, objects; binary files as base64), so it crosses page.evaluate() and similar bridges
 // intact. Calls that change the run are served one at a time, in the order they were made.
+import { isSessionLog, type Action, type SessionLog } from './session';
 import type { Gpu } from '../gpu/device';
 import type { LinkOverrides } from './link';
 import { decodeLink } from './link';
@@ -117,6 +118,14 @@ export interface AppHooks {
   checkpointsOn(): boolean;
   /** Write the checkpoint the clock is held at, and arm the next (as the page does when it plays). */
   writeCheckpoint(): Promise<void>;
+  /** Apply an editing tool now, from settings given in numbers (app.ts toolApi). */
+  tool(name: string, opts: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** What was done to the run since it started (ui/session.ts), once every step is read back. */
+  sessionLog(): Promise<SessionLog | null>;
+  /** Apply one action of a session log. */
+  replayAction(a: Action): Promise<void>;
+  /** A replay is under way: the adaptive mesh re-meshes only where the log says. */
+  setReplaying(on: boolean): void;
 }
 
 /** Options of run(). */
@@ -974,6 +983,67 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     if (id !== 'run') app.setRunning(false);
   }
 
+  /** The primitive state, the temperature and the refinement level at points (fractions of the box). */
+  async function probePoints(points: Point[]) {
+    const { snap, sampler, species } = await sampled();
+    const T = temperatureOf(app.cfg());
+    return {
+      t: snap.time,
+      points: points.map((p) => {
+        const w = sampler.prim(p[0], p[1], p[2], species);
+        const temp = T.of(w);
+        return {
+          at: p, rho: w.rho, press: w.p, vel: [w.vx, w.vy, w.vz], r0: w.s, temp, ...(T.kelvin !== null ? { tempK: temp * T.kelvin } : {}),
+          level: sampler.level(p[0], p[1], p[2]), ...(w.X ? { X: Object.fromEntries(species.map((k, i) => [k, w.X![i]])) } : {}),
+        };
+      }),
+    };
+  }
+
+  /** Run a session log again (api.replay). */
+  async function replay(log: unknown, opts: { untilSteps?: number }) {
+    if (!isSessionLog(log)) throw new Error('replay: not a session log (actions() returns one, as the Save session log button saves)');
+    if (!log.replayable) throw new Error(`replay: this log cannot be replayed: ${log.why ?? 'its run did not start from a setup'}`);
+    const until = opts.untilSteps;
+    await built(() => app.build(decodeLink(new URLSearchParams(log.query))));
+    app.setReplaying(true);
+    const stepsNow = async () => (await current().diagnostics()).steps;
+    let applied = 0;
+    let stopped: string | null = null;
+    try {
+      for (const e of log.entries) {
+        if (e.steps < 0) {
+          stopped = 'the log has an action whose step was never read back';
+          break;
+        }
+        if (until !== undefined && e.steps > until) break;
+        const now = await stepsNow();
+        if (e.steps > now) {
+          const r = await run({ steps: e.steps - now });
+          const at = await stepsNow();
+          if (at !== e.steps) {
+            stopped = `the run stopped at step ${at} (${r.stopped}) before the action logged at step ${e.steps}`;
+            break;
+          }
+        } else if (e.steps < now) {
+          stopped = `the run is at step ${now}, past the action logged at step ${e.steps}`;
+          break;
+        }
+        await app.replayAction(e.action);
+        await app.idle();
+        applied++;
+      }
+      if (!stopped && until !== undefined) {
+        const now = await stepsNow();
+        if (until > now) await run({ steps: until - now });
+      }
+    } finally {
+      app.setReplaying(false);
+      app.setRunning(false);
+    }
+    return { applied, actions: log.entries.length, ...(stopped ? { stopped } : {}), ...(await state()) };
+  }
+
   const api = {
     /** Resolves once WebGPU is up and the first run has been built. */
     ready,
@@ -1175,22 +1245,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * The primitive state, the temperature (code units, and kelvin with physical units) and the
      * refinement level at points given in fractions of the box.
      */
-    probe: (points: Point[]) =>
-      serial(async () => {
-        const { snap, sampler, species } = await sampled();
-        const T = temperatureOf(app.cfg());
-        return {
-          t: snap.time,
-          points: points.map((p) => {
-            const w = sampler.prim(p[0], p[1], p[2], species);
-            const temp = T.of(w);
-            return {
-              at: p, rho: w.rho, press: w.p, vel: [w.vx, w.vy, w.vz], r0: w.s, temp, ...(T.kelvin !== null ? { tempK: temp * T.kelvin } : {}),
-              level: sampler.level(p[0], p[1], p[2]), ...(w.X ? { X: Object.fromEntries(species.map((k, i) => [k, w.X![i]])) } : {}),
-            };
-          }),
-        };
-      }),
+    probe: (points: Point[]) => serial(() => probePoints(points)),
 
     /**
      * The view as a PNG data URL: at the canvas's size on the page, or at `width` x `height`
@@ -1229,6 +1284,39 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     controls: () => serial(async () => controls()),
     /** Set one of the panel's controls (or press a button), as a person would, mid-run. */
     control: (id: string, value?: string | number | boolean) => serial(() => control(id, value)),
+
+    /**
+     * Use an editing tool, as a person would with the pointer: mass, velocity, temperature,
+     * obstacle, field, pull, source, sink, star, clear, or query (a probe of one point). Positions
+     * are fractions of the box, velocities code units, and the rest as the tool's sliders take
+     * them (docs/api.md). Applied now, between steps, and logged as the page's tools are.
+     */
+    tool: (name: string, opts: Record<string, unknown> = {}) =>
+      serial(async () => {
+        current();
+        if (name === 'query') {
+          const pos = opts.pos;
+          if (!Array.isArray(pos) || pos.length < 2 || pos.length > 3) throw new Error('query: "pos" takes [x, y] or [x, y, z]');
+          const p = [pos[0], pos[1], pos.length === 3 ? pos[2] : 0.5] as Point;
+          const r = await probePoints([p]);
+          return { tool: 'query', t: r.t, ...r.points[0] };
+        }
+        return app.tool(name, opts);
+      }),
+
+    /**
+     * The session log of the run: how it started, and every edit since (the tools, the settings
+     * changed, the adaptive mesh's re-meshes), each with the step it was applied at, and the
+     * run's diagnostics along the way (ui/session.ts). Null before a run is loaded.
+     */
+    actions: () => serial(async () => app.sessionLog()),
+
+    /**
+     * Run a session log again: load the setup it started from, and step to each of its actions
+     * and apply it, re-meshing where it re-meshed, so that the run comes out as it did (GPU runs
+     * repeat to the bit on the same machine). `untilSteps`: stop there. Leaves the run paused.
+     */
+    replay: (log: unknown, opts: { untilSteps?: number } = {}) => serial(() => replay(log, opts)),
 
     /** Everything the page has reported going wrong, oldest first. */
     errors: () => [...errorLog()],

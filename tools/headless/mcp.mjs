@@ -216,6 +216,36 @@ const TOOLS = [
     },
   },
   {
+    name: 'edit',
+    run: async ({ name, options }) => text(await call('tool', name, options ?? {})),
+  },
+  {
+    name: 'session_log',
+    async run({ save_path }) {
+      const log = await call('actions');
+      if (!log) throw new Error('no run is loaded');
+      const kinds = {};
+      for (const e of log.entries) kinds[e.action.kind] = (kinds[e.action.kind] ?? 0) + 1;
+      const steps = log.entries.map((e) => e.steps);
+      const out = {
+        query: log.query, replayable: log.replayable, ...(log.why ? { why: log.why } : {}), started: log.started,
+        actions: log.entries.length, kinds, ...(steps.length ? { steps: [Math.min(...steps), Math.max(...steps)] } : {}),
+        traced: log.trace.length,
+      };
+      if (save_path) {
+        const file = resolvePath(save_path);
+        mkdirSync(path.dirname(file), { recursive: true });
+        writeFileSync(file, JSON.stringify(log) + '\n');
+        out.saved = file;
+      }
+      return text(out);
+    },
+  },
+  {
+    name: 'replay',
+    run: async ({ path: p, untilSteps }) => text(await call('replay', JSON.parse(readFileSync(resolvePath(p), 'utf8')), { untilSteps })),
+  },
+  {
     name: 'errors',
     run: async () => text(await call('errors')),
   },

@@ -13,6 +13,11 @@ override PER_DX: bool = false;
 // substeps, and the step just taken is banked by amr/bins_tick.wgsl instead.
 override BANK: bool = true;
 override CYCLE: f32 = 1.0;
+// Off for the preview of a step not yet taken (previewDt in sim.ts, amr/amr_sim.ts): it works
+// out a dt for the readout, and must leave the driving's amplitudes, which are shared and not
+// copied as the clock is, where they are. (Advanced by each preview, a run's driving depended on
+// how often the page had read its diagnostics before its first step.)
+override ADVANCE_DRIVE: bool = true;
 
 @compute @workgroup_size(1)
 fn main() {
@@ -71,5 +76,5 @@ fn main() {
   }
   clock.dt = dt;
   // Turbulence driving: its amplitudes over the step (or cycle) just set.
-  drive_advance(CYCLE * dt);
+  if (ADVANCE_DRIVE) { drive_advance(CYCLE * dt); }
 }

@@ -613,6 +613,88 @@ units, call `control('units', 'code')` first if you mean code units. Settings of
 document are always in code units. The run stays paused afterwards, unless the control was
 `run`.
 
+### `tool(name, options?) → { tool, notice?, ... }`
+
+Uses one of the page's editing tools, as a person would with the pointer. The tool is applied
+right away, between steps, and logged as the page's own tools are (`actions()`). Positions are
+fractions of the box, `[x, y]` or `[x, y, z]` (z defaults to the middle, and is ignored in 2D).
+Velocities are in code units. The other settings mean what the tool's sliders mean, and
+default to the tool's defaults. An option the tool does not take is an error.
+
+| Tool | Options | What it does |
+| --- | --- | --- |
+| `mass` | `pos`, `radius` (0.06), `softness` (0.5), `amount` (0.25), `atRest` (true) | Adds `amount` times the densest gas's density at the center (a negative amount removes gas). With `atRest`, the new gas shares the momentum already there. |
+| `velocity` | `pos`, `radius` (0.08), `softness` (0.5), `vel` | Sets the velocity, blending into the flow toward the edge. |
+| `temperature` | `pos`, `radius` (0.06), `softness` (0.5), `factor` (1.5) | Multiplies the temperature by `factor` at the center. |
+| `obstacle` | `shape`, then `center` and `half` (rect, ellipse) or `points` (polygon); `axis` (2); `erase` | A solid body. The shape is drawn in the plane normal to `axis` and cut through the box along it, as the pointer's outline is cut along the line of sight. The plane's coordinates are x and y for axis 2, y and z for axis 0, x and z for axis 1. |
+| `field` | `pos`, `radius` (0.08), `softness` (0.5), `factor` (1.5) | Makes the magnetic field `factor` times stronger in the brush's hard core (below 1, weaker). |
+| `pull` | `from`, `to`, `radius` (0.1), `softness` (0.7), `grip` (0.5) | Drags the field lines from `from` toward `to`, in the steps the tool would take frame by frame. Returns `frames`, how many. |
+| `source` | `pos`, `vel`, `radius` (0.04), `softness` (0.5), `rate` (0.25), `fixed` (false) | Feeds gas in at the tool's Flux `rate`. Not fixed, it rides a massless particle set moving at `vel`. |
+| `sink` | `pos`, `vel`, `radius` (0.04), `rate` (0.25), `mass` (0), `soften` (0.04), `fixed` (false) | Takes gas away. With a `mass` (a multiple of the gas in the box) it is a point mass. Returns `index`, its place among the run's masses. |
+| `star` | `pos`, `vel`, `n`, `rhoc`, `radius`, `field` (none, dipole, random), `beta` | A polytropic star, settled into balance on the grid (3D only), with the tool's defaults for what is not given. Resolves once it has settled. |
+| `clear` | `what` (sources, sinks) | Removes every source, or every sink, placed with the tools. |
+| `query` | `pos` | The gas at a point, as `probe()` gives it. Changes nothing. |
+
+The result may carry a `notice`, the same message the page shows for the tool. Examples are
+"self-gravity switched on" for a star, and a full set of point masses for a sink.
+
+```js
+await shaderous.load({ problem: 'mhd-rotor', dim: 2, n: 256 });
+await shaderous.tool('field', { pos: [0.3, 0.5], factor: 2 });
+await shaderous.tool('pull', { from: [0.3, 0.5], to: [0.45, 0.6], grip: 0.4 });
+await shaderous.run({ until: 0.2 });
+```
+
+### `actions() → log`
+
+The session log of the run: what was done to it since it started, so it can be run again
+(`replay`). The page's Save session log button saves the same, as a `.json` file. The log
+holds:
+
+- `query`: the setup the run started from, as the page's address has it (the view included);
+- `replayable`: false for a run that started from an imported file, with `why`;
+- `entries`: each edit, with `steps` (steps taken when it was applied, as `diagnostics()`
+  counts them), `t`, and `action`. The kinds of action are:
+  - `brush`: a brush's operation (mass, velocity, temperature, obstacle, field, pull);
+  - `mass`: a point mass placed (a sink, a moving source's carrier, a pinned query's tracer);
+  - `remove`: point masses taken away;
+  - `sources`: the sources and sinks as set;
+  - `massChanged`: the gas's mass told to self-gravity after a tool added or took gas;
+  - `star`: a star placed;
+  - `set`: settings changed mid-run, with `changes` (the link keys that changed) and the setup
+    document after them;
+  - `regrid`: a re-mesh of the adaptive mesh, with the refinement indicator of every leaf it
+    was decided from;
+  - `clock`: the clock's stop changed (`stop`, the time the step reaching it is shortened to
+    land on: the end time, a checkpoint, a scripted run's `until`), or a movie's frame time
+    (`frame`);
+- `trace`: the run's diagnostics as the page read them back, about five times a second
+  (steps, t, dt, mass, eTot, maxMach, floored, and for a magnetized run bMax, betaMin, divB).
+
+What is logged is what reached the simulation. For example, a dab of mass is logged as the
+density it added, worked out against the densest gas at the time. The pointer's path is not
+logged. A log starts over when the run does (a load, Reset).
+
+### `replay(log, { untilSteps? }) → { applied, actions, stopped?, ...state }`
+
+Runs a session log again. It loads the setup the log started from, steps to each action, and
+applies it. Then, with `untilSteps`, it runs on to that many steps. The adaptive mesh makes
+none of its own refinement checks meanwhile. Instead it re-meshes where the log says, from the
+indicators the log kept. That is what makes the replay exact: the step a live re-mesh lands
+on depends on when its check was read back from the GPU. GPU runs repeat to the bit on the same
+machine and browser, so the replay reaches the state the logged run reached. `stopped` says why
+it ended early, if the run went another way, for example by reaching its end time before an
+action logged later. The run is left paused, its log the replay's own.
+
+This turns "it broke when I did this" into something that can be looked at. Save the session
+log, replay it up to just before the trouble, and inspect the state with `slice`, `probe` or
+`screenshot`.
+
+Two parts of a live run are not replayed exactly. Per-block timesteps (`tbins`) pause
+themselves for a while after a read-back of their saving, and that pause depends on timing.
+A change to the equation of state mid-run is replayed through the setting, not the conversion
+the page made.
+
 ### `athdf() → { name, time, bytes, base64 }`
 
 The state of the gas as an `.athdf` file, base64-encoded: HDF5 in Athena++'s layout, which yt
@@ -680,8 +762,6 @@ await S('runTo', 2);
 - **Large results are slow to bring out of the page.** `page.evaluate` copies a list of
   numbers one by one: a JSON `slice` at `res` 2048 takes about 13 s to cross, against under a
   second with `encoding: 'base64'`.
-- **There are no brushes or tools yet.** The editing tools (stirring, heating, adding gas,
-  stars, sinks, obstacles) are only available by pointer.
 - **`play()` uses the page's own loop.** In headless mode that loop is off, so step with `run`.
 - **It is one page and one run.** For runs in parallel, open several pages. Each one takes its
   own GPU memory.
