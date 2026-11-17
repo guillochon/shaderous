@@ -509,8 +509,12 @@ export function unpackMasses(f: Float32Array, count: number): Required<PointMass
 
 /** One application of an editing brush (edit/brush_core.wgsl). */
 export interface BrushOp {
-  /** `eos-out` and `eos-in` act on every cell: see convertEos() in ui/app.ts and edit/brush_core.wgsl. */
-  kind: 'mass' | 'velocity' | 'temperature' | 'obstacle' | 'eos-out' | 'eos-in' | 'star';
+  /**
+   * `eos-out` and `eos-in` act on every cell: see convertEos() in ui/app.ts and edit/brush_core.wgsl.
+   * `field` and `pull` change the magnetic field (edit/field_brush_core.wgsl): scale it by
+   * exp(amount) at full weight, or carry it by `vel` (fractions of the box).
+   */
+  kind: 'mass' | 'velocity' | 'temperature' | 'obstacle' | 'eos-out' | 'eos-in' | 'star' | 'field' | 'pull';
   /** center and radius, in fractions of the box */
   pos: [number, number, number];
   radius: number;
@@ -519,10 +523,10 @@ export interface BrushOp {
   /**
    * mass: density added at the center (negative removes); temperature: log of the factor;
    * obstacle: positive makes the cells solid, negative turns them back into gas;
-   * star: central density
+   * star: central density; field: log of the factor on the field
    */
   amount: number;
-  /** velocity tool: the velocity to set; star: its velocity */
+  /** velocity tool: the velocity to set; star: its velocity; pull: the drag, in fractions of the box */
   vel: [number, number, number];
   /** mass tool: new gas brings no momentum (otherwise it arrives with the local velocity) */
   atRest?: boolean;
@@ -531,6 +535,9 @@ export interface BrushOp {
   /** star: see starBrush() */
   star?: StarProfile;
 }
+
+/** Whether a brush changes the magnetic field (edit/field_brush_core.wgsl) rather than the gas. */
+export const isFieldBrush = (b: BrushOp): boolean => b.kind === 'field' || b.kind === 'pull';
 
 /** A polytrope for the star brush: p = K rho^gamma, and rho / rho_c at evenly spaced r / R from 0 to 1. */
 export interface StarProfile {
@@ -628,7 +635,7 @@ export function packBrush(b: BrushOp): ArrayBuffer {
   const f = new Float32Array(buf);
   f.set([...b.pos, b.radius, ...b.vel, b.softness], 0);
   const u = new Uint32Array(buf);
-  u[8] = ['mass', 'velocity', 'temperature', 'obstacle', 'eos-out', 'eos-in', 'star'].indexOf(b.kind);
+  u[8] = ['mass', 'velocity', 'temperature', 'obstacle', 'eos-out', 'eos-in', 'star', 'field', 'pull'].indexOf(b.kind);
   f[9] = b.amount;
   u[10] = b.atRest ? 1 : 0;
   if (b.outline) {
@@ -1183,7 +1190,7 @@ export class Sim implements Simulation {
         this.mhd = await MhdPasses.create(
           {
             device: d, cfg: c, n: this.n, nz: this.nz, params: this.params, clock: this.clock, state: this.state, half: this.pred, slots, comp: k,
-            gfield: this.gfield, bh: this.bh, massFlux: this.massFlux,
+            gfield: this.gfield, bh: this.bh, massFlux: this.massFlux, brush: this.brush,
           },
           this.redDt.first,
         );
@@ -1606,6 +1613,14 @@ export class Sim implements Simulation {
       this.writeParams();
     }
     this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
+    if (isFieldBrush(op)) {
+      if (!this.mhd) return;
+      const pass = beginPass(enc);
+      this.mhd.encodeFieldBrush(pass, this.cur);
+      pass.end();
+      this.cur = 1 - this.cur;
+      return;
+    }
     const pass = beginPass(enc);
     pass.setPipeline(this.pBrush);
     pass.setBindGroup(0, this.gBrush[this.cur]);

@@ -4,7 +4,7 @@ import { assemble } from '../gpu/shaders';
 import { netFeatures, netSlot, netStep, netWeights } from '../burn/network';
 import NET_CASES from '../burn/aprox13_net_cases.json';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
-import { configFor, MAX_MASSES, PARAM_BYTES, Sim, type Diagnostics, type RiemannKind, type SimConfig } from '../sim';
+import { configFor, MAX_MASSES, PARAM_BYTES, Sim, type BrushOp, type Diagnostics, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { WD_UNITS } from '../problems/white_dwarf';
@@ -2842,6 +2842,93 @@ export const TESTS: TestDef[] = [
         });
       }
       return { pass, metrics };
+    },
+  },
+  {
+    id: 'mhd-field-brush',
+    name: 'MHD field brushes: strength (stronger, then weaker) and pull, on the rotor (2D, 128) and an outflow blast (3D, 32), and on blocks (rotor 2D, 256 finest; outflow blast 3D, 128 finest; 1 level)',
+    criterion:
+      'After each brush: |div B| dx / max |B| below 1e-6; the total energy changes by the magnetic energy\'s change (to 1% of it), and the magnetic energy goes up for "stronger", down for "weaker"; on the rotor\'s uniform field the brush\'s hard core is exactly 1.5 times stronger (to 1e-3). On blocks: faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); and a gas brush (mass) leaves the magnetic energy and the faces as they were',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const apply = (sim: Simulation, op: BrushOp) => {
+        const enc = gpu.device.createCommandEncoder();
+        sim.encodeBrush(enc, op);
+        gpu.device.queue.submit([enc.finish()]);
+      };
+      const base = { softness: 0.5, vel: [0, 0, 0] as [number, number, number] };
+      // Each brush, its energy books and the divergence after it.
+      const brushes = async (sim: Simulation, k: string, pos: [number, number, number], radius: number, check?: () => Promise<boolean>) => {
+        const ops: [string, BrushOp][] = [
+          ['stronger', { ...base, kind: 'field', pos, radius, amount: Math.log(1.5) }],
+          ['weaker', { ...base, kind: 'field', pos, radius, amount: -Math.log(1.5) }],
+          ['pull', { ...base, kind: 'pull', pos, radius, amount: 0, vel: [0.25 * radius, 0.1 * radius, 0] }],
+        ];
+        for (const [name, op] of ops) {
+          const d0 = await sim.diagnostics();
+          apply(sim, op);
+          const d = await sim.diagnostics();
+          const dMag = d.magnetic!.eMag - d0.magnetic!.eMag;
+          const dTot = d.eTot - d0.eTot;
+          m[`${k}_${name}_divB`] = d.magnetic!.divB;
+          m[`${k}_${name}_magnetic_change`] = dMag / d0.magnetic!.eMag;
+          m[`${k}_${name}_energy_books`] = Math.abs(dTot - dMag) / Math.abs(dMag);
+          pass &&= d.magnetic!.divB < 1e-6 && m[`${k}_${name}_energy_books`] < 0.01 && Math.abs(d.mass / d0.mass - 1) < 1e-7;
+          if (name === 'stronger') pass &&= dMag > 0;
+          if (name === 'weaker') pass &&= dMag < 0;
+          if (check) pass &&= await check();
+        }
+      };
+      // The rotor's field is uniform at the start: inside the brush's hard core it is scaled exactly.
+      await withSim(gpu, mhdRotor, 128, { ndim: 2, tEnd: Infinity }, async (sim) => {
+        const n = 128;
+        const center = async () => {
+          const f = await sim.mhd!.readFaces(sim.cur);
+          const at = (i: number, j: number) => 4 * (j * (n + 1) + i);
+          return f[at(n / 2, n / 2)];
+        };
+        const b0 = await center();
+        const d0 = await sim.diagnostics();
+        apply(sim, { ...base, kind: 'field', pos: [0.5, 0.5, 0], radius: 0.2, amount: Math.log(1.5) });
+        m.rotor_core_ratio = (await center()) / b0;
+        pass &&= Math.abs(m.rotor_core_ratio - 1.5) < 1e-3;
+        // Back to where it was, for the three below.
+        apply(sim, { ...base, kind: 'field', pos: [0.5, 0.5, 0], radius: 0.2, amount: -Math.log(1.5) });
+        m.rotor_round_trip = Math.abs((await sim.diagnostics()).magnetic!.eMag / d0.magnetic!.eMag - 1);
+        pass &&= m.rotor_round_trip < 0.05;
+        await brushes(sim, 'rotor', [0.55, 0.45, 0], 0.2);
+      });
+      // Outflow walls: the field through them stays as it was, and a brush that reaches one keeps div B.
+      await withSim(gpu, { ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, { ndim: 3, tEnd: Infinity }, async (sim) => {
+        sim.step(5);
+        await brushes(sim, 'blast', [0.5, 0.5, 0.15], 0.25);
+      });
+      // Blocks: the brush crosses refinement boundaries.
+      const faces = (sim: AmrSim, k: string) => async () => {
+        const f = await sim.faceConsistency();
+        m[`${k}_shared_mismatched`] = Math.max(m[`${k}_shared_mismatched`] ?? 0, f.mismatched);
+        m[`${k}_coarse_fine`] = Math.max(m[`${k}_coarse_fine`] ?? 0, f.coarseFine);
+        return f.mismatched === 0 && f.coarseFine < 1e-6;
+      };
+      // (The rotor: the field loop's is too weak for its energy to show in the total's float32 sum.)
+      await withAmr(gpu, mhdRotor, 256, { ndim: 2, amrLevels: 1, tEnd: Infinity }, async (sim) => {
+        sim.step(5);
+        m.rotor_blocks_leaves = sim.tree.leaves().length;
+        await brushes(sim, 'rotor_blocks', [0.6, 0.5, 0], 0.2, faces(sim, 'rotor_blocks'));
+        // A gas brush moves the cells to the other parity, and the faces with them.
+        const d0 = await sim.diagnostics();
+        apply(sim, { ...base, kind: 'mass', pos: [0.5, 0.5, 0], radius: 0.2, amount: 0.5, atRest: true });
+        const d = await sim.diagnostics();
+        m.rotor_blocks_mass_brush_magnetic_change = Math.abs(d.magnetic!.eMag / d0.magnetic!.eMag - 1);
+        pass &&= m.rotor_blocks_mass_brush_magnetic_change < 1e-6 && d.magnetic!.divB < 1e-6 && (await faces(sim, 'rotor_blocks')());
+      });
+      await withAmr(gpu, { ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 128, { ndim: 3, amrLevels: 1, tEnd: Infinity }, async (sim) => {
+        sim.step(5);
+        m.blast_blocks_leaves = sim.tree.leaves().length;
+        await brushes(sim, 'blast_blocks', [0.5, 0.6, 0.5], 0.2, faces(sim, 'blast_blocks'));
+      });
+      return { pass, metrics: m };
     },
   },
   {

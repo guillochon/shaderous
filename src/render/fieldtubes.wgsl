@@ -14,7 +14,7 @@
 
 struct Draw {
   n: vec4<f32>,    // x: points per line; y: tube radius (box units); z: line width (pixels); w: plane's normal axis
-  px: vec4<f32>,   // canvas size in pixels; z: 1 on a light background
+  px: vec4<f32>,   // canvas size in pixels; z: 1 on a light background; w: device pixels per CSS pixel
 }
 @group(0) @binding(4) var<storage, read> PTS: array<vec4<f32>>;
 @group(0) @binding(5) var<storage, read> FR: array<u32, 4>;
@@ -49,14 +49,23 @@ struct TOut {
   @location(0) world: vec3<f32>,
   @location(1) @interpolate(flat) a: vec4<f32>,
   @location(2) @interpolate(flat) b: vec4<f32>,
+  @location(3) @interpolate(flat) r: f32,
+}
+
+// Least tube radius: 0.6 of a CSS pixel at the segment's distance, so a far or thin tube stays
+// a continuous line rather than breaking into the pixels whose centers it happens to cover.
+fn tube_radius(mid: vec3<f32>) -> f32 {
+  let w = max(dot(mid - C.eye.xyz, C.fwd.xyz), 1.0e-6);
+  let pixel = 2.0 * w * C.p.x / max(D.px.y, 1.0);
+  return max(D.n.y, 0.6 * max(D.px.w, 1.0) * pixel);
 }
 
 @vertex
 fn tube_vs(@builtin(vertex_index) v: u32, @builtin(instance_index) s: u32) -> TOut {
   let g = segment(s);
-  if (!g.ok) { return TOut(vec4<f32>(2.0, 2.0, 2.0, 1.0), vec3<f32>(0.0), g.a, g.b); }
-  let r = D.n.y;
+  if (!g.ok) { return TOut(vec4<f32>(2.0, 2.0, 2.0, 1.0), vec3<f32>(0.0), g.a, g.b, 0.0); }
   let mid = 0.5 * (g.a.xyz + g.b.xyz);
+  let r = tube_radius(mid);
   let view = normalize(mid - C.eye.xyz);
   // The segment's direction, in the plane facing the camera; the quad spans it plus a radius
   // (with a margin for perspective) on every side.
@@ -68,7 +77,7 @@ fn tube_vs(@builtin(vertex_index) v: u32, @builtin(instance_index) s: u32) -> TO
   let q = QUAD[v];
   let e = 1.3 * r;
   let p = mix(g.a.xyz - along * e, g.b.xyz + along * e, q.x) + side * e * q.y;
-  return TOut(project(p), p, g.a, g.b);
+  return TOut(project(p), p, g.a, g.b, r);
 }
 
 struct TFrag {
@@ -81,8 +90,7 @@ struct TFrag {
 fn tube_fs(in: TOut) -> TFrag {
   let ro = C.eye.xyz;
   let rd = normalize(in.world - ro);
-  let r = D.n.y;
-  let t = capsule(ro, rd, in.a.xyz, in.b.xyz, r);
+  let t = capsule(ro, rd, in.a.xyz, in.b.xyz, in.r);
   if (t <= 0.0) { discard; }
   let p = ro + rd * t;
   let ba = in.b.xyz - in.a.xyz;

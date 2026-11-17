@@ -357,7 +357,19 @@ const TOOLS: { kind: ToolKind; label: string; title: string; icon: string }[] = 
     title: 'Obstacle: draw a solid body for the gas to flow around. In 3D it is cut through the box along the line of sight',
     icon: icon('<path d="M2 13.5h12v-7H8.5v-4H2z" fill="currentColor" stroke="none" />'),
   },
+  {
+    kind: 'field', label: 'Field strength',
+    title: 'Field strength: click to make the magnetic field 1.5\u00d7 stronger, or hold; Shift weakens it. The flux it gains or loses closes around the brush\u2019s edge, so the field stays divergence-free',
+    icon: icon('<path d="M1.5 3c3.5 0 4 3.5 6.5 3.5S11 3 14.5 3M1.5 13c3.5 0 4-3.5 6.5-3.5s3 3.5 6.5 3.5" /><path d="M8 7v2.5" />'),
+  },
+  {
+    kind: 'pull', label: 'Pull field',
+    title: 'Pull field: drag to carry the magnetic field lines along with the pointer, most at the brush\u2019s center and less toward its edge. The gas stays where it is',
+    icon: icon('<path d="M1.5 4h3.5c2 0 2 6 3 6s1-6 3-6h3.5M1.5 13h13" /><path d="M8 13.5v-3.5M6.3 11.7L8 10l1.7 1.7" />'),
+  },
 ];
+/** The tools that change the magnetic field, offered in runs that have one. */
+const FIELD_TOOLS: ToolKind[] = ['field', 'pull'];
 TOOLS.push({
   kind: 'source', label: 'Source',
   title: 'Source: click to place one that feeds gas in evenly, or press and drag to set it moving (the path it would take is drawn): it goes where gravity takes it, and its gas leaves with its velocity. Fixed, it stays put and a drag aims its gas (a longer drag is faster)',
@@ -439,6 +451,8 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   velocity: { size: 0.08, softness: 0.5, amount: 0, mass: 0, soften: 0.04 },
   temperature: { size: 0.06, softness: 0.5, amount: 0, mass: 0, soften: 0.04 },
   obstacle: { size: 0, softness: 0, amount: 0, mass: 0, soften: 0.04 },
+  field: { size: 0.08, softness: 0.5, amount: 0, mass: 0, soften: 0.04 },
+  pull: { size: 0.1, softness: 0.7, amount: 0, mass: 0, soften: 0.04 },
   source: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0, soften: 0.04 },
   sink: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0, soften: 0.04 },
   star: { size: 0.1, softness: 0, amount: 0, mass: 0, soften: 0.04 },
@@ -504,7 +518,7 @@ $('tools').innerHTML =
     ${slider('amount', 'Amt', 'Gas added per click, as a share of the densest gas', 0.01, 1)}
     <label class="scrub" id="tp-rhoc-row" title="Mass of the star (in solar masses where the setup has physical units, with Size in solar radii). It stays as set when Size or n changes. The slider spans central densities from a thousandth to a thousand times the code unit at the present Size; a typed mass may lie outside it"><input id="tp-rhoc" type="range" min="-3" max="3" step="0.05" aria-label="Mass of the star" /><span>Mass<output id="tp-rhoc-out"></output></span></label>
     <div id="tool-index" title="Polytropic index n: p = K ρ^(1 + 1/n). 1.5 is a convective star, 3 a radiative one like the Sun">${STAR_INDICES.map((n) => `<button id="${starId(n)}" aria-pressed="false" title="n = ${n}">n=${n}</button>`).join('')}</div>
-    <div id="tool-field">${STAR_FIELDS.map((f) => `<button id="star-b-${f.kind}" aria-pressed="false" title="${f.title}">${f.label}</button>`).join('')}</div>
+    <div id="tool-star-field">${STAR_FIELDS.map((f) => `<button id="star-b-${f.kind}" aria-pressed="false" title="${f.title}">${f.label}</button>`).join('')}</div>
     <label class="scrub" id="tp-beta-row" title="Plasma beta at the star's center: the gas pressure over the magnetic pressure B² / 2 there (a random field's on average). The larger, the weaker the field"><input id="tp-beta" type="range" min="1" max="7" step="0.05" aria-label="Plasma beta at the star's center" /><span>β<output id="tp-beta-out"></output></span></label>
     ${slider('mass', 'Mass', 'Mass of the sink, as a multiple of the gas in the box. At 0 it is a particle without mass: it takes gas away at the Flux rate and moves as gravity takes it, but pulls on nothing and never grows. With a mass it is a point mass with softened gravity: it pulls on the gas and grows by what it takes in', 0, 2)}
     ${slider('soften', 'Soft', 'Softening length of the point mass\u2019s gravity, as a share of the box: within it the pull falls away instead of growing without limit, so gas and other masses can pass close by. Size is the radius of its sink', 0.002, 0.3)}
@@ -525,8 +539,11 @@ function syncTools() {
     ? 'A star needs self-gravity, which a 2D run does not have'
     : noTemp ? 'The barotropic equation of state fixes the pressure of the gas, so a star’s cannot be chosen' : '';
   if (noStar && tool === 'star') tool = null;
+  const noField = !cfg?.problem.mhd;
+  if (noField && tool !== null && FIELD_TOOLS.includes(tool)) tool = null;
   for (const t of TOOLS) {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
+    b.hidden = noField && FIELD_TOOLS.includes(t.kind);
     b.setAttribute('aria-pressed', String(tool === t.kind));
     b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar);
     b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : 'The barotropic equation of state ties the temperature to the density';
@@ -570,7 +587,7 @@ function syncTools() {
   // A sink has no soft edge to set: it always fades from the center. A star's edge is its
   // own profile.
   $('tp-softness-row').hidden = tool === 'sink' || tool === 'star';
-  $('tp-rhoc-row').hidden = $('tool-index').hidden = $('tool-field').hidden = tool !== 'star';
+  $('tp-rhoc-row').hidden = $('tool-index').hidden = $('tool-star-field').hidden = tool !== 'star';
   $('tp-beta-row').hidden = tool !== 'star' || starField === 'none';
   for (const n of STAR_INDICES) $(starId(n)).setAttribute('aria-pressed', String(starN === n));
   for (const f of STAR_FIELDS) $(`star-b-${f.kind}`).setAttribute('aria-pressed', String(starField === f.kind));
@@ -1020,6 +1037,8 @@ interface Stroke {
   /** the densest gas and the reference speed when the stroke began */
   rhoMax: number;
   vRef: number;
+  /** pull: where the field under the pointer has been carried to so far (fractions of the box) */
+  pulled?: Vec3;
 }
 let stroke: Stroke | null = null;
 /** The sources and sinks in the run, oldest first. A reset removes them. */
@@ -3875,7 +3894,24 @@ function advanceStroke(now: number) {
     pendingBrush = { ...base, pos: at.pos, vel };
     return;
   }
-  // Mass and temperature: one full application on the press, then, if the press is held for
+  if (s.kind === 'pull') {
+    // The field is carried after the pointer, at most a quarter of the brush's radius a frame
+    // (a longer step would fold the field over itself at the brush's edge); a fast drag catches
+    // up over the frames after, release included.
+    const to = locate(s.x, s.y, s.depth).pos;
+    const from = (s.pulled ??= locate(s.x0, s.y0, s.depth).pos);
+    let d = [0, 1, 2].map((i) => to[i] - from[i]) as Vec3;
+    if (cfg.ndim === 2) d[2] = 0;
+    const len = Math.hypot(...d);
+    const cap = 0.25 * q.size;
+    if (len > cap) d = d.map((v) => (v * cap) / len) as Vec3;
+    if (s.released && len <= cap) stroke = null;
+    if (len < 1e-6) return;
+    pendingBrush = { ...base, pos: [0, 1, 2].map((i) => from[i] + 0.5 * d[i]) as Vec3, vel: d };
+    s.pulled = [0, 1, 2].map((i) => from[i] + d[i]) as Vec3;
+    return;
+  }
+  // Mass, temperature and field strength: one full application on the press, then, if the press is held for
   // a quarter of a second, a steady flow of four applications a second.
   let strength = 0;
   if (!s.dabbed) {

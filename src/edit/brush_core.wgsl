@@ -6,7 +6,8 @@ struct Brush {
   pos: vec4<f32>,   // center in fractions of the box, radius (fraction of the box) in w
   vel: vec4<f32>,   // velocity tool: the velocity to set; softness in w (0 hard edge, 1 soft to the center)
   kind: u32,        // 0 mass, 1 velocity, 2 temperature, 3 obstacle,
-                    // 4 and 5 a change of equation of state (every cell, see brush_apply), 6 star
+                    // 4 and 5 a change of equation of state (every cell, see brush_apply), 6 star,
+                    // 7 field strength and 8 field pull (edit/field_brush_core.wgsl, not brush_apply)
   amount: f32,      // mass: density added at full weight (negative removes);
                     // temperature: log of the factor applied at full weight;
                     // obstacle: positive makes cells solid, negative turns them back into gas;

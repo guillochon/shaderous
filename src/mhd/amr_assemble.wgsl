@@ -1,4 +1,4 @@
-// MHD on the block grid: assembly of one stage's state (plans/mhd-plan.md, section 4b). For
+// MHD on the block grid: assembly of one stage's state (docs/numerics.md section 21, Block grid). For
 // every leaf, its cells, face ghosts and edge ghosts get their primitives (W1, W2), cell-centered
 // field (W3) and faces (FA), from wherever they live: the block itself, a neighbor at the same
 // level, the restriction of a finer one, or the prolongation of a coarser one, all found

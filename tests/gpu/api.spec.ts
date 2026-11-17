@@ -125,6 +125,55 @@ test('drives the panel controls and reports bad calls', async ({ page }) => {
   expect((await call(page, 'step', 1)).taken).toBe(1);
 });
 
+test('the field tools strengthen, weaken and pull the magnetic field, keeping div B', async ({ page }) => {
+  // A page someone is watching (the tools paint in its frame loop), paused.
+  await page.goto('/?problem=mhd-rotor&dim=2&n=256');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'runTo', 0.02);
+  await call(page, 'pause');
+  const t0 = (await call(page, 'diagnostics')).t;
+  const mag = async () => (await call(page, 'diagnostics')).magnetic as { eMag: number; divB: number };
+  const box = (await page.locator('#view').boundingBox())!;
+  const [cx, cy] = [box.x + box.width / 2, box.y + box.height / 2];
+  // A stroke is applied by the frame loop: wait for a few frames after it.
+  const frames = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => requestAnimationFrame(r)))));
+  const click = async (shift = false) => {
+    if (shift) await page.keyboard.down('Shift');
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await frames();
+    await page.mouse.up();
+    await frames();
+    if (shift) await page.keyboard.up('Shift');
+  };
+  const m0 = await mag();
+  await page.click('#tool-field');
+  await click();
+  const m1 = await mag();
+  await click(true);
+  const m2 = await mag();
+  expect(m1.eMag).toBeGreaterThan(m0.eMag * 1.002);
+  expect(m2.eMag).toBeLessThan(m1.eMag);
+  await page.click('#tool-pull');
+  await page.mouse.move(cx, cy);
+  await page.mouse.down();
+  for (let i = 1; i <= 10; i++) {
+    await page.mouse.move(cx + 8 * i, cy + 3 * i);
+    await frames();
+  }
+  await page.mouse.up();
+  await frames();
+  const m3 = await mag();
+  expect(m3.eMag).not.toBe(m2.eMag);
+  for (const m of [m1, m2, m3]) expect(m.divB).toBeLessThan(1e-6);
+  // Paused throughout: the changes are the tools'.
+  expect((await call(page, 'diagnostics')).t).toBe(t0);
+  // Runs without a field do not offer them.
+  await call(page, 'load', { problem: 'sedov', dim: 2, n: 64 });
+  await expect(page.locator('#tool-field')).toBeHidden();
+  await expect(page.locator('#tool-pull')).toBeHidden();
+});
+
 test('draws magnetic field lines: contours in 2D, tubes and slices in 3D, on blocks too', async ({ page }) => {
   await page.goto('/?headless=1');
   await page.evaluate(() => (window as any).shaderous.ready);

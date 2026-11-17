@@ -142,6 +142,7 @@ details[open] > summary .sum { display: none; }
 #tools button:hover { color: var(--text); }
 #tools button[aria-pressed='true'] { border-color: var(--accent); background: #223049; color: #fff; }
 #tools button:disabled { opacity: 0.4; cursor: default; border-color: var(--line); }
+#tools button[hidden] { display: none; }
 /*
  * The tool's settings, under its button. Shut, the panel takes no room (its row is 0fr, and the
  * margin takes back the column's gap); open, it slides to its height. While it slides it is
@@ -202,10 +203,10 @@ details[open] > summary .sum { display: none; }
 #tool-shapes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
 #tools #tool-shapes button { height: 20px; }
 #tools #tool-shapes svg { width: 13px; height: 13px; }
-#tool-index, #tool-field { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
-#tool-index[hidden], #tool-field[hidden] { display: none; }
-#tools #tool-index button, #tools #tool-field button { height: 18px; padding: 0; font-size: 9px; color: #aab3c5; }
-#tools #tool-index button[aria-pressed='true'], #tools #tool-field button[aria-pressed='true'] { color: #fff; }
+#tool-index, #tool-star-field { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px; }
+#tool-index[hidden], #tool-star-field[hidden] { display: none; }
+#tools #tool-index button, #tools #tool-star-field button { height: 18px; padding: 0; font-size: 9px; color: #aab3c5; }
+#tools #tool-index button[aria-pressed='true'], #tools #tool-star-field button[aria-pressed='true'] { color: #fff; }
 .scrub output { color: var(--text); font-variant-numeric: tabular-nums; }
 #view.tool { cursor: crosshair; }
 /* Markers of the sources (green) and sinks (orange) in the run. */
@@ -405,7 +406,7 @@ body.validate .buttons-cell button + button { margin-left: 4px; }
   .cb-checks .check { font-size: 12px; min-height: 22px; }
   #colorbar select { height: 26px; font-size: 12px; }
   #tools button { height: 34px; }
-  .scrub, #tools #tool-rest, #tools #tool-fixed, #tools #tool-erase, #tools #tool-clear, #tools #tool-shapes button, #tools #tool-index button, #tools #tool-field button { height: 26px; }
+  .scrub, #tools #tool-rest, #tools #tool-fixed, #tools #tool-erase, #tools #tool-clear, #tools #tool-shapes button, #tools #tool-index button, #tools #tool-star-field button { height: 26px; }
   .scrub span { line-height: 26px; }
   .scrub input::-webkit-slider-thumb { height: 26px; }
   .scrub input::-moz-range-thumb { height: 26px; }

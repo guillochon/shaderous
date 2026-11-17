@@ -8,7 +8,7 @@ import type { Problem } from './problems/types';
 
 /**
  * Whether a preset can run on the adaptive grid: all can. (With a magnetic field the mesh stays as
- * the initial conditions refined it, until regridding carries the field: plans/mhd-plan.md.)
+ * the initial conditions refined it, until regridding carries the field: docs/numerics.md section 21.)
  */
 export const supportsAmr = (_p: Problem) => true;
 

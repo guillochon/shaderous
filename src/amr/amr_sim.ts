@@ -34,7 +34,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
-import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat } from '../sim';
+import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -602,7 +602,7 @@ export class AmrSim implements Simulation {
         device: d, cfg, cap: sim.cap,
         texture: (label, format = 'rgba32float') => tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
         prim: sim.prim,
-        params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg,
+        params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg, brush: sim.brush,
         state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFluxWindows ?? undefined,
         bins: { A: sim.bins, LL: sim.listEnd, LU: sim.listUpd, LD: sim.listDep, args: sim.binArgs },
       });
@@ -2271,9 +2271,19 @@ export class AmrSim implements Simulation {
     }
     this.device.queue.writeBuffer(this.brush, 0, packBrush(op));
     const pass = beginPass(enc);
-    pass.setPipeline(this.pBrush);
-    pass.setBindGroup(0, this.gBrush[this.cur]);
-    this.interior(pass, this.nLeaf);
+    if (isFieldBrush(op)) {
+      if (!this.mhd) {
+        pass.end();
+        return;
+      }
+      this.mhd.encodeFieldBrush(pass, this.cur, (p) => this.interior(p, this.nLeaf));
+    } else {
+      pass.setPipeline(this.pBrush);
+      pass.setBindGroup(0, this.gBrush[this.cur]);
+      this.interior(pass, this.nLeaf);
+      // A brush leaves the field as it is: the leaves' faces go along to the brushed state's parity.
+      this.mhd?.encodeCommitFaces(pass, 1 - this.cur);
+    }
     pass.end();
     this.cur = 1 - this.cur;
   }

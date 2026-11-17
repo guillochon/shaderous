@@ -6,7 +6,8 @@
 // nothing (coarse data next to a fine region is restricted on the fly from the children).
 // Face neighbors never differ by more than one level (2:1 balance). With `edgeBalance`, the
 // same holds for blocks that share only an edge (3D) or a vertex (2D): constrained transport
-// for magnetic fields defines each edge's field from the blocks around it (plans/mhd-plan.md).
+// for magnetic fields defines each edge's field from the blocks around it (docs/numerics.md
+// section 21, Block grid).
 
 export const BS = 16; // cells per block side
 export const NG = 2; // ghost layers

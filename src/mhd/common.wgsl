@@ -1,5 +1,5 @@
 // Ideal MHD on the uniform grid: face-centered magnetic fields, their boundary mapping, and the
-// primitive state of a cell with its cell-centered field (plans/mhd-plan.md).
+// primitive state of a cell with its cell-centered field (docs/numerics.md section 21).
 //
 // Units: B is in units where the magnetic pressure is B^2 / 2 (Heaviside-Lorentz with
 // mu_0 = 1, as Athena uses): B_gauss = sqrt(4 pi) B. Plasma beta is 2 p / B^2.

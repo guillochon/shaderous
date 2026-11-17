@@ -43,7 +43,8 @@ loaded once instead of at every change. A bare visit opens Kelvin-Helmholtz at $
 | Sedov-Taylor blast, 3D | [`?problem=sedov&dim=3&n=128`](https://guillochon.github.io/shaderous/?problem=sedov&dim=3&n=128) |
 | Tidal disruption, 3D with refinement | [`?problem=tidal-disruption-full`](https://guillochon.github.io/shaderous/?problem=tidal-disruption-full) |
 
-**Interacting.** Brushes add mass, velocity or heat; the obstacle tool draws walls; the star
+**Interacting.** Brushes add mass, velocity or heat, and in a magnetized run strengthen,
+weaken or drag the field lines; the obstacle tool draws walls; the star
 tool drops a polytropic star into a 3D box; the sink tool places point masses, and while one is
 dragged out it draws the orbit the mass would take in the gas as it is. The query tool
 shows the full state of the cell under the pointer, and of a source, sink or point mass there; a

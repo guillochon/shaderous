@@ -259,8 +259,11 @@ export class Renderer {
   private gPlane: GPUBindGroup[] = [];
   private pProject?: GPUComputePipeline;
   private gProject: GPUBindGroup[] = [];
+  /** Volume view's lines: the block outline, behind the tubes in front of it; the guides, over everything. */
   private pLines!: GPURenderPipeline;
   private gLines!: GPUBindGroup;
+  private pGuides!: GPURenderPipeline;
+  private gGuides!: GPUBindGroup;
   private lineBuf: GPUBuffer | null = null;
   /** Block outline last uploaded: the simulation and the version of its mesh. */
   private blocksOf: { sim: Simulation; version: number; count: number } | null = null;
@@ -343,7 +346,10 @@ export class Renderer {
 
   async init() {
     const atlas = { volume: 'render/volume_atlas.wgsl' };
-    const make = async (file: string, slots = {}) => {
+    // The volume view's pass has the tubes' depth (render/fieldlines.ts): the ray-marcher leaves it
+    // as it is, the block outline is tested against it, the guides are drawn over it.
+    const depth = (compare: GPUCompareFunction): GPUDepthStencilState => ({ format: 'depth32float', depthWriteEnabled: false, depthCompare: compare });
+    const make = async (file: string, slots = {}, withDepth = false) => {
       const module = this.device.createShaderModule({ code: assemble(file, slots), label: file });
       return this.device.createRenderPipelineAsync({
         label: file,
@@ -351,18 +357,15 @@ export class Renderer {
         vertex: { module, entryPoint: 'vs' },
         fragment: { module, entryPoint: 'fs', targets: [{ format: this.format }] },
         primitive: { topology: 'triangle-list' },
+        ...(withDepth ? { depthStencil: depth('always') } : {}),
       });
     };
     const lines = this.device.createShaderModule({ code: assemble('render/lines.wgsl'), label: 'lines' });
-    [this.pVolume, this.pVolumeAtlas, this.pSlice, this.pPick, this.pPickAtlas, this.pLines] = await Promise.all([
-      make('render/raymarch.wgsl'),
-      make('render/raymarch.wgsl', atlas),
-      make('render/slice.wgsl'),
-      computePipeline(this.device, assemble('render/pick.wgsl'), 'pick'),
-      computePipeline(this.device, assemble('render/pick.wgsl', atlas), 'pick (adaptive mesh)'),
+    const linePipe = (label: string, compare: GPUCompareFunction) =>
       this.device.createRenderPipelineAsync({
-        label: 'lines',
+        label,
         layout: 'auto',
+        depthStencil: depth(compare),
         vertex: {
           module: lines,
           entryPoint: 'line_vs',
@@ -383,9 +386,18 @@ export class Renderer {
           }],
         },
         primitive: { topology: 'line-list' },
-      }),
+      });
+    [this.pVolume, this.pVolumeAtlas, this.pSlice, this.pPick, this.pPickAtlas, this.pLines, this.pGuides] = await Promise.all([
+      make('render/raymarch.wgsl', {}, true),
+      make('render/raymarch.wgsl', atlas, true),
+      make('render/slice.wgsl'),
+      computePipeline(this.device, assemble('render/pick.wgsl'), 'pick'),
+      computePipeline(this.device, assemble('render/pick.wgsl', atlas), 'pick (adaptive mesh)'),
+      linePipe('block outline', 'less-equal'),
+      linePipe('tool guides', 'always'),
     ]);
     this.gLines = bindGroup(this.device, this.pLines, { 0: this.cam });
+    this.gGuides = bindGroup(this.device, this.pGuides, { 0: this.cam });
     await Promise.all([this.fieldLines.init(), this.pathTube.init(this.cam)]);
   }
 
@@ -796,6 +808,15 @@ export class Renderer {
       colorAttachments: [
         { view: (this.capture ? this.captureTarget() : this.ctx.getCurrentTexture()).createView(), loadOp: 'clear', storeOp: 'store', clearValue: [0, 0, 0, 1] },
       ],
+      // The volume view: the tubes' depth, for the lines drawn after the gas (cleared where none were drawn).
+      ...(volume
+        ? {
+          depthStencilAttachment: {
+            view: this.fieldLines.tubeTargets(this.canvas.width, this.canvas.height).depth.createView(),
+            depthLoadOp: tubes ? ('load' as const) : ('clear' as const), depthStoreOp: 'store' as const, depthClearValue: 1,
+          },
+        }
+        : {}),
     });
     rp.setPipeline(volume ? (this.atlas ? this.pVolumeAtlas : this.pVolume) : this.pSlice);
     rp.setBindGroup(0, volume ? (tubes ? this.volumeWithTubes() : this.gVolume) : this.gSlice!);
@@ -900,11 +921,17 @@ export class Renderer {
       this.device.queue.writeBuffer(this.lineBuf!, base * LINE_FLOATS * 4, guides);
     }
     if (!(mesh && base) && !guides) return;
-    rp.setPipeline(this.pLines);
-    rp.setBindGroup(0, this.gLines);
     rp.setVertexBuffer(0, this.lineBuf!);
-    if (mesh && base) rp.draw(base);
-    if (guides) rp.draw(guides.length / LINE_FLOATS, 1, base);
+    if (mesh && base) {
+      rp.setPipeline(this.pLines);
+      rp.setBindGroup(0, this.gLines);
+      rp.draw(base);
+    }
+    if (guides) {
+      rp.setPipeline(this.pGuides);
+      rp.setBindGroup(0, this.gGuides);
+      rp.draw(guides.length / LINE_FLOATS, 1, base);
+    }
   }
 
   /** Room for `floats` floats of line vertices, keeping what the buffer holds. */

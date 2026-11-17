@@ -409,7 +409,9 @@ directly. Nothing is copied to the CPU.
   indicator) through a tiny readback. Its depth pick marches a ray through the same volume slot
   as the ray-marcher.
 - **Brushes** (`edit/brush*.wgsl`, `amr/brush.wgsl`) write mass, velocity, heat, obstacles,
-  sources and stars straight into the state textures.
+  sources and stars straight into the state textures. The field brushes (`edit/field_brush*.wgsl`,
+  `amr/field_brush.wgsl`) change the face field through a vector potential, then the total
+  energy by the field's change (numerics.md section 21).
 
 ## Frame loop and pacing
 

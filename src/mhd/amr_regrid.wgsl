@@ -1,4 +1,4 @@
-// Re-meshing the magnetic field (plans/mhd-plan.md, section 6): every face of every leaf of the
+// Re-meshing the magnetic field (docs/numerics.md section 21, Re-meshing): every face of every leaf of the
 // new tree, from the old tree's faces, divergence-free. Runs beside amr/regrid.wgsl, which does
 // the cells, with the same regrid table (RG); BT and IDX here are the OLD tree's block table and
 // leaf index (copied before the new tree was uploaded), and LIST the new leaves.

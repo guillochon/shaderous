@@ -1,4 +1,4 @@
-// Ideal MHD on the block grid (plans/mhd-plan.md, section 4b): the van Leer + constrained
+// Ideal MHD on the block grid (docs/numerics.md section 21, Block grid): the van Leer + constrained
 // transport step of mhd/mhd.ts, block by block. Per stage:
 //
 //   assemble  every leaf's cells, centered field and faces, ghosts and edge ghosts included
@@ -9,7 +9,7 @@
 //
 // Re-meshing moves the faces with the cells (encodeRegrid()). With time bins, a cycle's first
 // substep steps every leaf (encodeFull()) and the others the leaves of the GPU's lists
-// (encodeSubstep(), plans/mhd-plan.md section 5b).
+// (encodeSubstep(), docs/numerics.md section 21, Time bins).
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, type Bindable } from '../gpu/device';
 import { Reducer } from '../gpu/reduce';
@@ -59,6 +59,8 @@ interface Deps {
   bt: GPUBuffer;
   listLeaf: GPUBuffer;
   idx: GPUTexture;
+  /** the editing brush's uniform (edit/brush_core.wgsl), which the field brushes read */
+  brush: GPUBuffer;
   /** the regrid table (amr/tree.ts RG_*) */
   rg: GPUBuffer;
   /** state[parity] = [U1, U2] */
@@ -166,6 +168,9 @@ export class AmrMhd {
   /** [parity] stage 1's assembly kept for stage 2 (mhd/amr_keep.wgsl): over every leaf, and over a substep's list */
   private pKeep?: GPUComputePipeline;
   private gKeep: GPUBindGroup[] = [];
+  /** The field brushes (amr/field_brush.wgsl): faces, then energy; [parity] bind groups. */
+  private pBrush: GPUComputePipeline[] = [];
+  private gBrush: GPUBindGroup[][] = [];
   private gKeepL: GPUBindGroup[] = [];
 
   private constructor(private dep: Deps) {
@@ -239,7 +244,7 @@ export class AmrMhd {
     const still = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
     const slots = { ...still, bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl' };
     const v = (x: GPUTexture) => x.createView();
-    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp] = await Promise.all([
+    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be] = await Promise.all([
       computePipeline(d, assemble('mhd/amr_regrid.wgsl', still), 'MHD re-mesh faces'),
       computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', still), 'MHD re-mesh energy'),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1, ASM_STAGE: 1 }),
@@ -264,7 +269,19 @@ export class AmrMhd {
         PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length, X_FLUX: this.groups(FBOX), X_BOX: this.groups(BS + 1),
       }),
       computePipeline(d, assemble('mhd/amr_keep.wgsl', still), 'MHD keep the start'),
+      computePipeline(d, assemble('amr/field_brush.wgsl', still), 'field brush faces (blocks)', undefined, 'faces'),
+      computePipeline(d, assemble('amr/field_brush.wgsl', still), 'field brush energy (blocks)', undefined, 'energy'),
     ]);
+    this.pBrush = [bf, be];
+    this.gBrush = [0, 1].map((p) => {
+      const o = 1 - p;
+      return [
+        bindGroup(d, bf, { 0: params, 1: this.dep.brush, 30: bt, 31: listLeaf, 11: v(idx), 2: v(this.faces[p]), 3: v(this.comps[p]), 4: v(this.faces[o]), 5: v(this.comps[o]) }),
+        bindGroup(d, be, {
+          0: params, 31: listLeaf, 2: v(this.faces[p]), 6: v(this.faces[o]), 7: v(state[p][0]), 8: v(state[p][1]), 9: v(state[o][0]), 10: v(state[o][1]),
+        }),
+      ];
+    });
     this.pCommit = cm;
     this.pKeep = kp;
     this.pChunkArgs = ca;
@@ -388,6 +405,20 @@ export class AmrMhd {
   private noFlux(): GPUBuffer {
     this.placeholderFlux ??= this.dep.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
     return this.placeholderFlux;
+  }
+
+  /**
+   * A field brush (amr/field_brush.wgsl, the Brush uniform already written): every leaf's faces
+   * from `parity` into the other, changed inside the brush, then the leaves' cells, their energy
+   * changed with the field's. `interior` dispatches a pass over the leaves' interior cells.
+   */
+  encodeFieldBrush(pass: GPUComputePassEncoder, parity: number, interior: (pass: GPUComputePassEncoder) => void) {
+    pass.setPipeline(this.pBrush[0]);
+    pass.setBindGroup(0, this.gBrush[parity][0]);
+    pass.dispatchWorkgroups(this.groups(BS + 1), this.nLeaf);
+    pass.setPipeline(this.pBrush[1]);
+    pass.setBindGroup(0, this.gBrush[parity][1]);
+    interior(pass);
   }
 
   /** Every leaf's faces (and compensations) from the other parity into `parity`. */

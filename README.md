@@ -14,7 +14,7 @@ It starts with a 2D Kelvin-Helmholtz instability. Choose another problem from th
 panel: shock tubes, blasts, instabilities, a supersonic wind tunnel, detonations, magnetized
 flows, and astrophysical flows such as stars, white dwarf collisions, tidal disruptions and
 accreting binaries. Drag in the view to rotate it, and use the brushes to stir, heat or add
-gas. The address bar always describes the current setup, so copying it (or pressing
+gas, or, in a magnetized run, to strengthen or drag the field. The address bar always describes the current setup, so copying it (or pressing
 **Share**) gives someone else the same run. **Record** saves the run as an MP4 movie with a
 color bar, axes and the simulation time drawn on it, **Screenshot** (under Movie and
 screenshot) saves a slice, a projection or a 2D run as a PNG at the grid's own resolution, one
@@ -141,8 +141,8 @@ command-line runner for single runs and parameter sweeps, or an MCP server.
 | **[Headless runs](docs/headless.md)** | The command-line runner (single runs and parameter sweeps, writing diagnostics, images, slices, movies and `.athdf` files) and the MCP server that gives AI agents the simulator as tools. |
 
 The method paper is in progress in [`paper/`](paper/). Design plans for work in progress or
-proposed are in [`plans/`](plans/): magnetic fields in [plans/mhd-plan.md](plans/mhd-plan.md), and frames,
-symmetric domains and coordinate systems in [plans/coordinate-systems-plan.md](plans/coordinate-systems-plan.md).
+proposed are in [`plans/`](plans/): frames, symmetric domains and coordinate systems in
+[plans/coordinate-systems-plan.md](plans/coordinate-systems-plan.md).
 
 ## Acknowledgments
 

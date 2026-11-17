@@ -31,7 +31,7 @@ precision, are pointed out where they occur.
 18. [Local (per-block) timesteps](#18-local-per-block-timesteps)
 19. [Accelerating frames and damping zones](#19-accelerating-frames-and-damping-zones)
 20. [Nuclear burning network](#20-nuclear-burning-network)
-21. [Ideal MHD (in development)](#21-ideal-mhd-in-development)
+21. [Ideal MHD](#21-ideal-mhd)
 22. [Validation](#22-validation)
 23. [References](#references)
 
@@ -461,7 +461,7 @@ converts it to kelvin and reads the density as atoms per cm³.
 
 ## 11. Viscosity and thermal conduction
 
-`hydro/diffusion_core.wgsl` (shared with MHD, [§21](#21-ideal-mhd-in-development)),
+`hydro/diffusion_core.wgsl` (shared with MHD, [§21](#21-ideal-mhd)),
 `hydro/diffusion.wgsl`, `hydro/diff_rate.wgsl`. The stress and heat flux are
 
 ```math
@@ -953,7 +953,7 @@ than 10 ms is split into network steps.
   cooling of a merger remnant), and electron captures, not thermal neutrinos, matter in
   nuclear statistical equilibrium above about $`10^9`$ g cm$`^{-3}`$.
 
-## 21. Ideal MHD (in development)
+## 21. Ideal MHD
 
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
 rotor, Brio-Wu, the field loop, the Alfvén wave, the Alfvén-wave collision and the Elsasser
@@ -962,8 +962,7 @@ packets, and the tearing mode and island coalescence (with resistivity); Kelvin-
 "Random field" variants) solve ideal MHD, with gravity, point masses, sinks and cooling (below).
 It runs on the uniform grid and on the adaptive mesh, which re-meshes with the field (below),
 with per-block timesteps, and draws its field lines (below). Species, burning, viscosity and
-conduction act with a field too: every physics option of the gas alone couples to one (phase 4
-of [the MHD plan](../plans/mhd-plan.md)). Units: the magnetic pressure is $`B^2/2`$, so
+conduction act with a field too: every physics option of the gas alone couples to one. Units: the magnetic pressure is $`B^2/2`$, so
 $`B_\text{Gauss} = \sqrt{4\pi}\,B`$ and plasma $`\beta = 2p/B^2`$. The total energy
 $`E`$ includes $`B^2/2`$.
 
@@ -1194,6 +1193,34 @@ $`E`$ includes $`B^2/2`$.
   (beta 1000) keeps its central density to 0.5% (0.1% on blocks) and its magnetic energy to 2%
   for two dynamical times; the random field loses 15% of its energy in one, its small scales
   being a few cells across at $`64^3`$.
+- **Field brushes** (`edit/field_brush_core.wgsl`; the tools "Field strength" and "Pull
+  field", offered in runs with a field). Both change the field by the curl of a change of its
+  vector potential, taken on each face as the circulation of that change around the face, so
+  every cell's divergence stays as it was, to rounding. The potential is the field's own in the
+  radial gauge about the brush's center $`x_0`$,
+  $`\mathbf{A}(x) = \int_0^1 t\,\mathbf{B}(x_0 + t d) \times d\,dt`$ with $`d = x - x_0`$, from
+  the cell-centered field of the cells along the way in steps of a finest cell. (In 2D the
+  in-plane field's $`A_z = \int_0^1 (\mathbf{B} \times d)_z\,dt`$, without the $`t`$: the plane
+  has no $`\partial A_y / \partial z`$ to give the other half of $`B_x`$.) With $`w`$ the
+  brush's weight:
+  - Field strength: $`\delta\mathbf{A} = (f - 1)\mathbf{A}`$, $`f = e^{\pm w \ln 1.5}`$ (Shift
+    weakens), so the field becomes $`f\mathbf{B} + \nabla f \times \mathbf{A}`$: 1.5 times
+    stronger in the brush's hard core, with the flux it gains closing back around its rim.
+  - Pull field: $`\delta\mathbf{A}(x) = \mathbf{A}(x - w\,\delta) - \mathbf{A}(x)`$ for a drag
+    $`\delta`$ of at most a quarter of the brush's radius per frame, so the field lines near the
+    center move with the pointer and less of them toward the edge. The gas stays where it is.
+
+  Edges are integrated at the midpoints of their finest-level segments, at positions exact in
+  float32 and in a fixed order: the copies of a shared face get the same bits, and a coarse
+  face changes by the mean of its fine faces' changes. An edge on a boundary face that is not
+  periodic does not change, so neither does the flux through the boundary. The total energy of
+  each cell then changes by that of its $`B^2/2`$; kinetic and internal energy stay. In
+  `mhd-field-brush` the brush's hard core on the rotor's uniform field comes out 1.5 times
+  stronger to $`4\times10^{-8}`$; on both grids $`\nabla\cdot B`$ stays below $`10^{-6}`$, the
+  total energy changes by the magnetic energy's change to $`4\times10^{-4}`$ of it, and shared
+  faces agree bit for bit (coarse the mean of fine to $`1.4\times10^{-7}`$). The gas brushes keep
+  the field as it was; on blocks they had left the leaves' faces behind in the other parity,
+  which a commit pass now carries along.
 - **First-order flux correction** (`mhd/face_flux.wgsl`). Stage 2 applies the half-step
   state's fluxes to the state at the start. Next to the edge of a star in near-vacuum, stage 1
   fills a nearly empty cell (350 times its density in half a step); stage 2 then pushes the
@@ -1344,9 +1371,13 @@ $`E`$ includes $`B^2/2`$.
     within the bounding box of the voxels where the field is at least 2% of the largest (a star
     a few radii across in a box of sixteen fills a thousandth of it: drawn over the whole box,
     nearly every seed would miss it).
-  - Volume view: each segment is a capsule 0.0008 of the box in radius drawn on a camera-facing
-    quad, found and lit per pixel (ray-capsule intersection), colored as above. The tubes go into a color and distance target first; the ray-marcher stops at a
-    tube's distance and lays the gas in front of it over it, so tubes behind dense gas fade.
+  - Volume view: each segment is a capsule 0.0008 of the box in radius (at least 0.6 of a pixel
+    at its distance, so a far tube stays a continuous line rather than breaking into dashes)
+    drawn on a camera-facing quad, found and lit per pixel (ray-capsule intersection), colored as
+    above. The tubes go into color, distance and depth targets first; the ray-marcher stops at a
+    tube's distance and lays the gas in front of it over it, so tubes behind dense gas fade. The
+    block outline drawn after the gas is tested against the tubes' depth, so it passes behind
+    the tubes in front of it; the tools' guides stay on top.
   - Slice view of a 3D run: the lines follow the field's components in the slice plane, from
     seeds in the plane weighted by $`|B|`$, drawn as lines over the slice. (The field in a
     plane of a 3D run is not divergence-free, so it has no flux function.)

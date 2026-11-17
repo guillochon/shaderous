@@ -1,5 +1,5 @@
 // MHD on the block grid: values of cells and faces anywhere, at a given level, whatever leaf
-// holds them (plans/mhd-plan.md, section 4b).
+// holds them (docs/numerics.md section 21, Block grid).
 //
 // A ghost of a block is found from its global position: each axis is mapped through the
 // domain's boundary (wrapped, mirrored or clamped), and the leaf index IDX (the leaf slot per
@@ -17,7 +17,7 @@
 // U2 (conserved state), BF (faces), H1, H2, HF (the half-step stores) and IDX (texture_3d<u32>).
 
 // Time: which state a block's stores stand for, as a block in bin g_recv_bin sees them at stage
-// ASM_STAGE of its step (plans/mhd-plan.md, section 5b). A neighbor's value is the blend
+// ASM_STAGE of its step (docs/numerics.md section 21, Time bins). A neighbor's value is the blend
 // w.x S + w.y H of its state texture S (U1, U2, BF) and its half-step stores H (H1, H2, HF):
 //   stage 1 (the receiver's start): an active block's start (S), a mid-step one's midpoint (H)
 //   stage 2 (the receiver's midpoint): an active block in the same bin at its midpoint (H); one

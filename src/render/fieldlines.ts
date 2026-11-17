@@ -1,4 +1,4 @@
-// Magnetic field lines over the views of a run with a field (plans/mhd-plan.md, section 10).
+// Magnetic field lines over the views of a run with a field (docs/numerics.md section 21, Field lines).
 //
 // Each frame the field and the velocity are resampled onto a small volume (render/bsample.wgsl
 // or amr/bsample.wgsl). Then:
@@ -328,7 +328,7 @@ export class FieldLines {
     cp.setPipeline(this.pTrace);
     cp.dispatchWorkgroups(Math.ceil(count / 64));
     cp.end();
-    d.queue.writeBuffer(this.draw, 0, new Float32Array([points, TUBE_RADIUS, LINE_WIDTH * dpr, axis, w, h, v.light ? 1 : 0, 0]));
+    d.queue.writeBuffer(this.draw, 0, new Float32Array([points, TUBE_RADIUS, LINE_WIDTH * dpr, axis, w, h, v.light ? 1 : 0, dpr]));
     if (plane) {
       this.flatKind = 'lines';
       return;

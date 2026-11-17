@@ -1,4 +1,4 @@
-// Ideal MHD on the uniform grid (plans/mhd-plan.md): the van Leer predictor-corrector with
+// Ideal MHD on the uniform grid (docs/numerics.md section 21): the van Leer predictor-corrector with
 // constrained transport (Stone & Gardiner 2009), the Gardiner & Stone (2005) edge electric
 // fields, and HLLE or HLLD fluxes. A step is, after the timestep:
 //
@@ -21,13 +21,13 @@ export const mhdOn = (c: SimConfig): boolean => c.problem.mhd !== undefined;
 export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/riemann/hlle.wgsl' : 'mhd/riemann/hlld.wgsl');
 
 /**
- * Why this configuration cannot run with a magnetic field, or null if it can. Since phase 4 of
- * plans/mhd-plan.md every physics option couples to the field; this stays as the one place to
+ * Why this configuration cannot run with a magnetic field, or null if it can. Every physics option
+ * couples to the field (docs/numerics.md section 21); this stays as the one place to
  * refuse a future option that does not.
  */
 export function mhdUnsupported(c: SimConfig): string | null {
   // Gravity, point masses, cooling, species, viscosity and conduction all act on a field
-  // (plans/mhd-plan.md 7b).
+  // (docs/numerics.md section 21).
   return null;
 }
 
@@ -163,6 +163,8 @@ interface MhdDeps {
   bh: GPUBuffer;
   /** with species: the face mass fluxes the species pass reads (hydro/species.wgsl) */
   massFlux?: GPUBuffer;
+  /** the editing brush's uniform (edit/brush_core.wgsl), which the field brushes read */
+  brush: GPUBuffer;
 }
 
 /** Bytes the flux and edge buffers of one slab may take, which sets how many layers it has. */
@@ -199,6 +201,9 @@ export class MhdPasses {
   private gEmf: GPUBindGroup[][][] = [];
   private gUpdate: GPUBindGroup[][][] = [];
   gRates: GPUBindGroup[] = [];
+  /** The field brushes (edit/field_brush.wgsl): faces, then energy; [parity] bind groups. */
+  private pBrush: GPUComputePipeline[] = [];
+  private gBrush: GPUBindGroup[][] = [];
   private redMag!: Reducer;
   /** The magnetic diagnostics' reduction result (MAG_OPS order), for the display's magnetic fields. */
   get magResult(): GPUBuffer {
@@ -253,7 +258,7 @@ export class MhdPasses {
     const { device: d, cfg, params, clock, state, half, comp } = this.dep;
     const slots = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg) };
     const v = (t: GPUTexture) => t.createView();
-    const [f1, f2, e1, e2, u1, u2, prates, red] = await Promise.all([
+    const [f1, f2, e1, e2, u1, u2, prates, red, bf, be] = await Promise.all([
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 1', { STAGE: 1 }),
@@ -270,7 +275,17 @@ export class MhdPasses {
         [0, 1].map((p) => ({ 0: params, 1: v(this.dep.state[p][0]), 2: v(this.dep.state[p][1]), 4: v(this.faces[p]), 5: this.dep.bh, ...comp })),
         'magnetic diagnostics',
       ),
+      computePipeline(d, assemble('edit/field_brush.wgsl', slots), 'field brush faces', undefined, 'faces'),
+      computePipeline(d, assemble('edit/field_brush.wgsl', slots), 'field brush energy', undefined, 'energy'),
     ]);
+    this.pBrush = [bf, be];
+    this.gBrush = [0, 1].map((p) => {
+      const o = 1 - p;
+      return [
+        bindGroup(d, bf, { 0: params, 1: this.dep.brush, 2: v(this.faces[p]), 3: v(this.comps[p]), 4: v(this.faces[o]), 5: v(this.comps[o]) }),
+        bindGroup(d, be, { 0: params, 2: v(this.faces[p]), 6: v(this.faces[o]), 7: v(state[p][0]), 8: v(state[p][1]), 9: v(state[o][0]), 10: v(state[o][1]) }),
+      ];
+    });
     this.pFlux = [f1, f2];
     this.pEmf = [e1, e2];
     this.pUpdate = [u1, u2];
@@ -325,6 +340,21 @@ export class MhdPasses {
   private noFlux(): GPUBuffer {
     this.placeholderFlux ??= this.dep.device.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE });
     return this.placeholderFlux;
+  }
+
+  /**
+   * A field brush (edit/field_brush.wgsl, the Brush uniform already written): the faces from
+   * `parity` into the other, changed inside the brush, then the cells, their energy changed
+   * with the field's.
+   */
+  encodeFieldBrush(pass: GPUComputePassEncoder, parity: number) {
+    const { n, nz } = this.dep;
+    pass.setPipeline(this.pBrush[0]);
+    pass.setBindGroup(0, this.gBrush[parity][0]);
+    this.dispatch(pass, [n + 1, n + 1, nz === 1 ? 1 : nz + 1]);
+    pass.setPipeline(this.pBrush[1]);
+    pass.setBindGroup(0, this.gBrush[parity][1]);
+    this.dispatch(pass, [n, n, nz]);
   }
 
   /**
