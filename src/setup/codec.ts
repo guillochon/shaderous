@@ -81,7 +81,7 @@ const DOCUMENT: Record<string, Schema> = {
     eos: choice('physics.eos'),
     eosParams: { object: {}, open: 'number' },
     gravity: choice('physics.gravity'), G: { any: ['number', { enum: ['units'] }] }, gext: { any: ['vec3', obj({ down: 'number' })] },
-    cooling: choice('physics.cooling'), coolParams: { object: {}, open: 'number' }, viscosity: 'number', conductivity: 'number',
+    cooling: choice('physics.cooling'), coolParams: { object: {}, open: 'number' }, viscosity: 'number', conductivity: 'number', resistivity: 'number',
     riemann: choice('physics.riemann'), limiter: choice('physics.limiter'), cfl: 'number',
     floors: obj({ rho: 'number', p: 'number' }), fluff: obj({ rho: 'number', u: 'number', v: 'number', va: 'number' }),
     frame: choice('physics.frame'), jeansFloor: 'boolean', jeansCells: 'int', vcycles: 'int', gravEnergyFlux: 'boolean',

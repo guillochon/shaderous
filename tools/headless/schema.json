@@ -180,6 +180,11 @@
    "about": "Conductivity κ"
   },
   {
+   "key": "eta",
+   "group": "settings",
+   "about": "Resistivity η"
+  },
+  {
    "key": "gravity",
    "group": "settings",
    "about": "Gravity: off, constant, periodic, isolated"

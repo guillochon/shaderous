@@ -921,7 +921,8 @@ than 10 ms is split into network steps.
 
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
 rotor, Brio-Wu, the field loop, the Alfvén wave, the Alfvén-wave collision and the Elsasser
-packets; Kelvin-Helmholtz's "Magnetic field" variant; and the polytrope's "Dipole field" and
+packets, and the tearing mode and island coalescence (with resistivity); Kelvin-Helmholtz's
+"Magnetic field" variant; and the polytrope's "Dipole field" and
 "Random field" variants) solve ideal MHD, with gravity, point masses, sinks and cooling (below).
 It runs on the uniform grid and on the adaptive mesh, which re-meshes with the field (below),
 with per-block timesteps, and draws its field lines (below). Species, burning, viscosity and
@@ -1035,6 +1036,28 @@ $`E`$ includes $`B^2/2`$.
   $`\rho = p = 1`$: the frozen-in field shares the pressure balance and stiffens it) to 0.1%;
   and a magnetized Kelvin-Helmholtz run on two levels with per-block timesteps conserves
   energy to $`4\times10^{-8}`$.
+- **Resistivity** (`mhd/ohm.wgsl`, `mhd/corner.wgsl`): a constant magnetic diffusivity
+  $`\eta`$ (`physics.resistivity`, link key `eta`; Athena++'s `eta_ohm`), so that the induction
+  equation gains $`\eta\nabla^2\mathbf{B}`$. Each edge field gains $`\eta\mathbf{J}`$,
+  $`\mathbf{J} = \nabla\times\mathbf{B}`$, before it becomes an impulse, so constrained transport
+  keeps the divergence where it was. The total energy takes the matching Poynting flux
+  $`\eta(\mathbf{J}\times\mathbf{B})\cdot\hat{\mathbf{n}}`$ through every face, added to the face
+  flux like the viscous stress (and so matched at refinement boundaries), and is conserved to
+  round-off; the separately evolved internal energy takes the Ohmic heat $`\eta J^2`$ of each
+  cell. $`\mathbf{J}`$ comes from the cell-centered field everywhere: at an edge from the four
+  cells around it, at a face from its two cells and their transverse neighbors, at a cell from
+  its six neighbors. The face fields' grid-scale checkerboard, which those differences do not
+  see, is left to the scheme's own dissipation. The field's diffusivity limits the timestep as
+  viscosity does ([§3](#3-the-timestep)). In `mhd-resistivity`: a field wave at rest, held by the
+  gas pressure, loses magnetic energy as $`\exp(-2\eta k^2 t)`$ to 0.08% along an axis, 0.3%
+  along the diagonal and 0.6% in 3D, on blocks too, with the field out of the plane (through the
+  in-plane edge fields of 2D) as well; total energy holds to $`4\times10^{-7}`$, and a magnetized
+  Kelvin-Helmholtz run on two levels with per-block timesteps conserves it to
+  $`4\times10^{-7}`$. A Harris sheet of half-width $`a = 0.05`$ at $`S = a v_A/\eta = 500`$
+  (512², the `tearing` preset seeded at $`10^{-7}`$) tears at about $`0.3`$ to $`0.4`$ per unit
+  time while the sheet is still thin, falling as it diffuses wider; constant-$`\psi`$ theory
+  ([Furth, Killeen & Rosenbluth 1963][FKR63]) gives about $`0.7`$ for the initial sheet. This is
+  not yet a validation of the growth rate.
 - **Magnetized tidal disruptions** (plan section 11). The tidal-disruption family's "Partial,
   dipole field", "Partial, random field" (beta 0.7) and "Full, random field" (beta 1.5) set the
   field as Guillochon & McCourt (2017) did in FLASH (their MultiTidalPoly
@@ -1390,6 +1413,7 @@ result.
 [LD09]: https://doi.org/10.1016/j.jcp.2008.08.026
 [TR02]: https://doi.org/10.1006/jcph.2002.7120
 [GS05]: https://doi.org/10.1016/j.jcp.2004.11.016
+[FKR63]: https://doi.org/10.1063/1.1706761
 [MK05]: https://doi.org/10.1016/j.jcp.2005.02.017
 [Truelove1997]: https://doi.org/10.1086/310975
 [vanLeer1974]: https://doi.org/10.1016/0021-9991(74)90019-9

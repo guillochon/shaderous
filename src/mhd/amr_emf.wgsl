@@ -9,6 +9,7 @@
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
 #include <bins>
+#include <diffusion>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var W1: texture_3d<f32>;
@@ -35,7 +36,7 @@ var<private> g_o: vec3<i32>;
 
 fn eref(l: vec3<i32>) -> Ref {
   let q = mq_block(g_o, l);
-  return Ref(efield(q.a.yzw, q.B));
+  return Ref(efield(q.a.yzw, q.B), q.B);
 }
 
 @compute @workgroup_size(FLAT_WG)
@@ -50,16 +51,29 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   let ey = vec3<i32>(0, 1, 0);
   let ez = vec3<i32>(0, 0, 1);
   var E = vec3<f32>(0.0);
+  // Resistivity (mhd/ohm.wgsl): eta J, as dx J.
+  var J = vec3<f32>(0.0);
+  let r111 = eref(t);
+  let r100 = eref(t - ey);
+  let r010 = eref(t - ex);
+  let r000 = eref(t - ex - ey);
   if (is2d()) {
     // E_z at the vertices; E_x on the y faces (-F_y(B_z)), E_y on the x faces (F_x(B_z)).
-    E.z = corner(2, t, eref(t - ex - ey), eref(t - ey), eref(t - ex), eref(t));
+    E.z = corner(2, t, r000, r100, r010, r111);
     if (t.x < BS) { E.x = -fc(1, t).x; }
     if (t.y < BS) { E.y = fc(0, t).y; }
+    if (RESISTIVITY) { J = vec3<f32>(r111.b.z - r100.b.z, r010.b.z - r111.b.z, edge_current(2, r000, r100, r010, r111)); }
   } else {
-    let r111 = eref(t);
-    if (t.z < BS) { E.z = corner(2, t, eref(t - ex - ey), eref(t - ey), eref(t - ex), r111); }
-    if (t.x < BS) { E.x = corner(0, t, eref(t - ey - ez), eref(t - ez), eref(t - ey), r111); }
-    if (t.y < BS) { E.y = corner(1, t, eref(t - ez - ex), eref(t - ex), eref(t - ez), r111); }
+    let rz0 = eref(t - ez);
+    let ryz = eref(t - ey - ez);
+    let rzx = eref(t - ez - ex);
+    if (t.z < BS) { E.z = corner(2, t, r000, r100, r010, r111); }
+    if (t.x < BS) { E.x = corner(0, t, ryz, rz0, r100, r111); }
+    if (t.y < BS) { E.y = corner(1, t, rzx, r010, rz0, r111); }
+    if (RESISTIVITY) { J = vec3<f32>(edge_current(0, ryz, rz0, r100, r111), edge_current(1, rzx, r010, rz0, r111), edge_current(2, r000, r100, r010, r111)); }
+  }
+  if (RESISTIVITY) {
+    E += select(vec3<f32>(0.0), (P.ohm.x / g_dx) * J, vec3<bool>(t.x < BS, t.y < BS, t.z < BS || is2d()));
   }
   let dt = stage_dt(inv.slot, STAGE);
   textureStore(EO, atl(g_o, t), vec4<f32>((dt / g_dx) * E, 0.0));

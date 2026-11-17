@@ -16,6 +16,7 @@
 #include <eos>
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
+#include <diffusion>
 
 @group(0) @binding(2) var U1: texture_3d<f32>;
 // Declared for mhd/common.wgsl's mq_load, which this pass does not call: not bound (mhd/mhd.ts).
@@ -48,7 +49,8 @@ fn eref(c: vec3<i32>) -> Ref {
   let m = bc_map(c);
   let u = textureLoad(U1, m.c, 0);
   let v = bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
-  return Ref(efield(v, bcell(m.c) * m.flip));
+  let B = bcell(m.c) * m.flip;
+  return Ref(efield(v, B), B);
 }
 
 @compute @workgroup_size(8, 8, 4)
@@ -67,17 +69,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // E_z: a = x, b = y.
   let Ez = corner(2, t, r000, r100, r010, r111);
   var E: vec3<f32>;
+  // Resistivity (mhd/ohm.wgsl): eta J, as dx J.
+  var J = vec3<f32>(0.0);
   if (P.dims.z == 1u) {
     // 2D: E_x on the y faces (-F_y(B_z)), E_y on the x faces (F_x(B_z)).
     E = vec3<f32>(-fc(1, t).x, fc(0, t).y, Ez);
+    if (RESISTIVITY) { J = vec3<f32>(r111.b.z - r100.b.z, r010.b.z - r111.b.z, edge_current(2, r000, r100, r010, r111)); }
   } else {
     let rz0 = eref(t - ez);
+    let ryz = eref(t - ey - ez);
+    let rzx = eref(t - ez - ex);
     // E_x: a = y, b = z, cells t - ey - ez, t - ez, t - ey, t.
-    let Ex = corner(0, t, eref(t - ey - ez), rz0, r100, r111);
+    let Ex = corner(0, t, ryz, rz0, r100, r111);
     // E_y: a = z, b = x, cells t - ez - ex, t - ex, t - ez, t.
-    let Ey = corner(1, t, eref(t - ez - ex), r010, rz0, r111);
+    let Ey = corner(1, t, rzx, r010, rz0, r111);
     E = vec3<f32>(Ex, Ey, Ez);
+    if (RESISTIVITY) { J = vec3<f32>(edge_current(0, ryz, rz0, r100, r111), edge_current(1, rzx, r010, rz0, r111), edge_current(2, r000, r100, r010, r111)); }
   }
+  if (RESISTIVITY) { E += (P.ohm.x / P.dx) * J; }
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
   EMF[emf_index(t)] = vec4<f32>((dt / P.dx) * E, 0.0);
 }

@@ -3399,6 +3399,69 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'mhd-resistivity',
+    name: 'Resistivity (2D and 3D, uniform 32^3 to 64^2 and blocks 128 to 256 finest)',
+    criterion:
+      'A field wave at rest, B perpendicular to k with the gas pressure balancing its pressure, loses magnetic energy as exp(-2 eta k^2 t) to 1%: in the plane along an axis and along the diagonal, out of the plane (B_z, through the in-plane edge fields of 2D), uniform and on blocks, and in 3D; the total energy is conserved to 1e-6 and the internal energy takes what the field loses to 2%. Kelvin-Helmholtz threaded by B_z with resistivity, on a mesh of two levels and more with per-block timesteps, conserves mass to 1e-6 and energy to 1e-5. Throughout |div B| dx / max |B| below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const eta = 0.01;
+      const A = 0.05;
+      const k0 = 2 * Math.PI;
+      const r = Math.SQRT1_2;
+      const divOk = (tag: string, d: Diagnostics) => {
+        m[`${tag}_divB`] = d.magnetic!.divB;
+        return m[`${tag}_divB`] < 1e-6;
+      };
+      // B = A sin(k . x) dir, dir perpendicular to k, in gas at rest whose pressure makes up the
+      // field's: p + B^2 / 2 = 1. Divergence-free face by face (each face's component varies
+      // only with k . x, and dir . k = 0).
+      const wave = (kx: number, ky: number, dir: number[]) => {
+        const s = (x: number, y: number) => A * Math.sin(k0 * (kx * x + ky * y));
+        return stillGas({
+          id: 'resistive-wave',
+          mhd: { face: () => (axis: number, x: number, y: number) => dir[axis] * s(x, y) },
+          init: () => (x, y) => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 1 - 0.5 * s(x, y) ** 2, s: 0 }),
+        });
+      };
+      const decay = async (tag: string, sim: Sim | AmrSim, k2: number) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        const expected = Math.exp(-2 * eta * k2 * sim.cfg.tEnd);
+        const lost = d0.magnetic!.eMag - d1.magnetic!.eMag;
+        m[`${tag}_decay_error`] = Math.abs(d1.magnetic!.eMag / d0.magnetic!.eMag / expected - 1);
+        m[`${tag}_energy_drift`] = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        m[`${tag}_heat_error`] = Math.abs((d1.eInt - d0.eInt) / lost - 1);
+        pass &&= m[`${tag}_decay_error`] < 0.01 && m[`${tag}_energy_drift`] < 1e-6 && m[`${tag}_heat_error`] < 0.02 && divOk(tag, d1);
+      };
+      const on = { resistivity: eta };
+      await withSim(gpu, wave(1, 0, [0, 1, 0]), 64, { ndim: 2, tEnd: 1, ...on }, (sim) => decay('axis', sim, k0 * k0));
+      await withSim(gpu, wave(1, 1, [-r, r, 0]), 64, { ndim: 2, tEnd: 0.5, ...on }, (sim) => decay('diagonal', sim, 2 * k0 * k0));
+      await withSim(gpu, wave(1, 1, [0, 0, 1]), 64, { ndim: 2, tEnd: 0.5, ...on }, (sim) => decay('out_of_plane', sim, 2 * k0 * k0));
+      await withAmr(gpu, wave(1, 1, [-r, r, 0]), 128, { ndim: 2, amrLevels: 1, refineHi: 2, tEnd: 0.5, ...on }, (sim) => decay('diagonal_blocks', sim, 2 * k0 * k0));
+      await withAmr(gpu, wave(1, 1, [0, 0, 1]), 128, { ndim: 2, amrLevels: 1, refineHi: 2, tEnd: 0.5, ...on }, (sim) => decay('out_of_plane_blocks', sim, 2 * k0 * k0));
+      await withSim(gpu, wave(1, 1, [0, 0, 1]), 32, { tEnd: 0.3, ...on }, (sim) => decay('along_z_3d', sim, 2 * k0 * k0));
+      await withSim(gpu, wave(1, 1, [-r, r, 0]), 32, { tEnd: 0.3, ...on }, (sim) => decay('diagonal_3d', sim, 2 * k0 * k0));
+      await withAmr(gpu, wave(1, 1, [-r, r, 0]), 64, { amrLevels: 1, refineHi: 2, tEnd: 0.3, ...on }, (sim) => decay('diagonal_blocks_3d', sim, 2 * k0 * k0));
+
+      // Conservation where the fluxes and edge fields are matched between levels and between
+      // timesteps (B_z, as in mhd-diffusion: prolonged as a constant, and nothing coarsened).
+      const khField: Problem = { ...kelvinHelmholtz, id: 'kh-field', mhd: { face: () => (axis: number) => (axis === 2 ? 0.5 : 0) } };
+      await withAmr(gpu, khField, 256, { ndim: 2, amrLevels: 2, tEnd: 1.5, resistivity: 2e-4, timeBins: 2, timeBinsAlways: true, refineLo: 0 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64);
+        const d1 = await sim.diagnostics();
+        m.refined_mass_drift = Math.abs(d1.mass - d0.mass) / d0.mass;
+        m.refined_energy_drift = Math.abs(d1.eTot - d0.eTot) / d0.eTot;
+        m.refined_levels = new Set(sim.tree.leaves().map((b) => b.level)).size;
+        pass &&= m.refined_mass_drift < 1e-6 && m.refined_energy_drift < 1e-5 && m.refined_levels >= 2 && divOk('refined', d1);
+      });
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'mhd-tidal-disruption',
     name: 'Magnetized tidal disruption: the dipole star grazes the black hole (beta = 0.7; uniform 128^3 and blocks 128 finest, 2 levels, box of 8 radii)',
     criterion:

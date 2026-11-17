@@ -2,8 +2,20 @@
 // cells around it, shared by both grids (mhd/emf.wgsl, mhd/amr_emf.wgsl). Requires fc(a, t), the
 // (F_a(B_t1), F_a(B_t2), upwind weight) of the lower face along a of cell t.
 
-// What the edges need of a cell: its reference field -v x B.
-struct Ref { e: vec3<f32> }
+// What the edges need of a cell: its reference field -v x B, and its field B (for the
+// resistive part, mhd/ohm.wgsl).
+struct Ref { e: vec3<f32>, b: vec3<f32> }
+
+// dx times the current J_c along axis c at the same edge, from the fields of the four cells
+// around it (the arguments of corner()): J_c = d_a B_b - d_b B_a, each derivative the mean of
+// the differences across the edge on its two sides.
+fn edge_current(c: i32, r00: Ref, r10: Ref, r01: Ref, r11: Ref) -> f32 {
+  let a = (c + 1) % 3;
+  let b = (c + 2) % 3;
+  let da = 0.5 * ((r10.b[b] + r11.b[b]) - (r00.b[b] + r01.b[b]));
+  let db = 0.5 * ((r01.b[a] + r11.b[a]) - (r00.b[a] + r10.b[a]));
+  return da - db;
+}
 
 // E along axis c at the edge on the lower a and b faces of cell t (a = c + 1, b = c + 2),
 // given the four cells around it: r00 at t - ea - eb, r10 at t - eb, r01 at t - ea, r11 at t.

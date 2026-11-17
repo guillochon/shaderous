@@ -144,8 +144,8 @@ symmetric domains and coordinate systems in [plans/coordinate-systems-plan.md](p
 
 ## Acknowledgments
 
-The Alfvén-wave collision, the Elsasser packets and the magnetized Kelvin-Helmholtz setup
-follow the WebGPU reduced-MHD solver of Alfred Mallet and Esrom Abraham
+The Alfvén-wave collision, the Elsasser packets, the magnetized Kelvin-Helmholtz setup and the
+reconnection setups (the tearing mode and island coalescence, with resistivity) follow the WebGPU reduced-MHD solver of Alfred Mallet and Esrom Abraham
 ([taranis](https://alfredmallet.github.io/taranis/webgpu/rmhd2d.html)).
 
 ## License

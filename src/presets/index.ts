@@ -23,7 +23,7 @@ export const PRESET_ORDER: readonly string[] = [
   'wd-collision', 'wd-collision-burning',
   'tidal-disruption', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',
   'binary', 'mri-disk',
-  'orszag-tang', 'mhd-blast', 'mhd-rotor', 'brio-wu', 'field-loop', 'field-loop-dense', 'alfven-wave', 'alfven-collision', 'alfven-packets',
+  'orszag-tang', 'mhd-blast', 'mhd-rotor', 'brio-wu', 'field-loop', 'field-loop-dense', 'alfven-wave', 'alfven-collision', 'alfven-packets', 'tearing', 'island-coalescence',
   'advection', 'empty', 'empty-mhd',
 ];
 

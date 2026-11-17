@@ -95,6 +95,11 @@ export interface SimConfig {
    */
   conductivity: number;
   /**
+   * Magnetic diffusivity eta, with a field: the edge electric fields gain eta J, J = curl B, the
+   * energy flux eta J x B, and the internal energy the Ohmic heat eta J^2 (mhd/ohm.wgsl). 0 is off.
+   */
+  resistivity: number;
+  /**
    * The preset's damping zone (Problem.damping): where it starts, as a distance from the box
    * center, and how fast it relaxes the gas at the box's edge (the preset defines the unit).
    * A rate of 0 switches it off.
@@ -353,6 +358,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
     viscosity: problem.viscosity ?? 0,
     conductivity: problem.conductivity ?? 0,
+    resistivity: problem.resistivity ?? 0,
     dampRadius: problem.damping?.radius ?? 0,
     dampRate: problem.damping?.rate ?? 0,
     // A problem compiled from a setup document brings the solver's and the mesh's settings too.
@@ -382,7 +388,7 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     limiter: `hydro/limiters/${c.limiter}.wgsl`,
     cooling: COOLING_MODULES[c.cooling],
     // Which diffusive fluxes are compiled in (hydro/diffusion.wgsl); their strengths are in P.diff.
-    diffusion: `const VISCOSITY = ${c.viscosity > 0};\nconst CONDUCTION = ${conducts(c)};\n`,
+    diffusion: `const VISCOSITY = ${c.viscosity > 0};\nconst CONDUCTION = ${conducts(c)};\nconst RESISTIVITY = ${resists(c)};\n`,
     // The preset's damping zone (hydro/damping.wgsl), or none.
     damping: c.problem.damping?.wgsl ?? NO_DAMPING,
     // Whether the update records face mass fluxes for the species pass (species/species.ts).
@@ -400,7 +406,10 @@ const NO_DAMPING = 'const DAMPING = false;\nfn damping_target(x: vec3<f32>) -> D
 export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && c.eos !== 'barotropic';
 
 /** Which diffusive fluxes the shaders must be built with: a change here means rebuilding them. */
-export const diffusionKey = (c: SimConfig): string => `${c.viscosity > 0}/${conducts(c)}`;
+export const diffusionKey = (c: SimConfig): string => `${c.viscosity > 0}/${conducts(c)}/${resists(c)}`;
+
+/** Resistivity is on: it needs a coefficient and a magnetic field. */
+export const resists = (c: SimConfig): boolean => c.resistivity > 0 && !!c.problem.mhd;
 
 export const MAX_MASSES = 32;
 /** Floats per mass in the Masses block (gravity/bh.wgsl). */
@@ -663,7 +672,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 272;
+export const PARAM_BYTES = 288;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -710,6 +719,7 @@ export function packParams(
   f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), Math.max(0, c.dampRadius), Math.max(0, c.dampRate)], 56);
   f.set([Math.max(0, c.refineRho), Math.max(0, c.refineDense), c.tFrame ?? 1e30, 0], 60);
   f.set(eosConstants2(c.eos, c.eosParams), 64);
+  f.set([resists(c) ? c.resistivity : 0, 0, 0, 0], 68);
   return buf;
 }
 

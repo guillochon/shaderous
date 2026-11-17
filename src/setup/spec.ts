@@ -81,6 +81,8 @@ export interface PhysicsSpec {
   coolParams?: Partial<CoolingParams>;
   viscosity?: number;
   conductivity?: number;
+  /** magnetic diffusivity eta (with a field): the Ohmic electric field is eta curl B */
+  resistivity?: number;
   riemann?: RiemannKind;
   limiter?: LimiterKind;
   cfl?: number;

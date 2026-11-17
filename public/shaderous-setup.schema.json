@@ -436,6 +436,13 @@
      "minimum": 0,
      "maximum": 1e+30
     },
+    "resistivity": {
+     "type": "number",
+     "title": "Resistivity η",
+     "description": "With a magnetic field: magnetic diffusivity, so the field diffuses as η ∇²B (the electric field gains η curl B) and the current it dissipates, η J², heats the gas. 0 is off (ideal MHD, with only the scheme’s own diffusion)",
+     "minimum": 0,
+     "maximum": 1e+30
+    },
     "riemann": {
      "enum": [
       "hllc",
@@ -2701,6 +2708,127 @@
       ],
       "additionalProperties": false,
       "description": "Heavy gas over light gas in a unit box, in hydrostatic balance with the uniform downward acceleration of the setup (Gravity: Uniform acceleration), with one seeded mode that vanishes at the walls. Up is y in 2D and z in 3D."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Harris current sheet",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "harris-sheet"
+       },
+       "b0": {
+        "type": "number",
+        "title": "Field strength",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       },
+       "width": {
+        "type": "number",
+        "title": "Sheet half-width",
+        "default": 0.05,
+        "minimum": 0.005,
+        "maximum": 0.2
+       },
+       "beta": {
+        "type": "number",
+        "title": "Plasma beta outside",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       },
+       "guide": {
+        "type": "number",
+        "title": "Guide field",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 100
+       },
+       "psi": {
+        "type": "number",
+        "title": "Perturbation",
+        "default": 0.0001,
+        "minimum": 0,
+        "maximum": 0.1
+       },
+       "modes": {
+        "type": "number",
+        "title": "Wavelengths across",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 16
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A current sheet along y = 0: B_x = B0 tanh(y / a), with the gas pressure higher in the sheet so that p + B² / 2 is uniform, density 1, an optional uniform guide field B_z, and a perturbation A_z = psi B0 L cos(k x) cos(pi y / L) that seeds the tearing mode (Harris 1962; Furth, Killeen & Rosenbluth 1963). Periodic along x, walls along y."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Island coalescence",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "island-coalescence"
+       },
+       "b0": {
+        "type": "number",
+        "title": "Field strength",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       },
+       "eps": {
+        "type": "number",
+        "title": "Island size",
+        "default": 0.2,
+        "minimum": 0.01,
+        "maximum": 0.9
+       },
+       "islands": {
+        "type": "number",
+        "title": "Islands across",
+        "default": 2,
+        "minimum": 2,
+        "maximum": 16
+       },
+       "beta": {
+        "type": "number",
+        "title": "Plasma beta outside",
+        "default": 0.4,
+        "minimum": 0.01,
+        "maximum": 100
+       },
+       "kick": {
+        "type": "number",
+        "title": "Push",
+        "default": 0.1,
+        "minimum": 0,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A chain of magnetic islands along y = 0, the Fadeev equilibrium A_z = -lambda B0 ln(cosh(y / lambda) + eps cos(x / lambda)), with the gas pressure p = p_out + B0² (1 - eps²) / (2 (cosh(y / lambda) + eps cos(x / lambda))²) that holds it, density 1, and a flow along x that pushes pairs of islands together (Fadeev et al. 1965; Finn & Kaw 1977). Periodic along x, walls along y."
      },
      {
       "type": "object",

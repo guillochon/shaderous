@@ -72,6 +72,11 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
   return 0;
 }
 #include "hydro/diffusion_core.wgsl"
+// The Ohmic heat (mhd/ohm.wgsl), from the stage's assembled field.
+fn load_b(c: vec3<i32>) -> vec3<f32> {
+  return textureLoad(W3, c, 0).xyz;
+}
+#include "mhd/ohm.wgsl"
 fn visc_side(c: vec3<i32>) -> DSide {
   let w = textureLoad(W1, c, 0);
   return DSide(w.x, w.yzw, 0.0, false);
@@ -492,6 +497,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   var E = u2.x + ekick + dtdx * (net_b.x + dw) - 0.5 * dot(mom, mom) * (1.0 / rho_new - 1.0 / rho);
   var heat = 0.0;
   if (VISCOSITY && !g_deposit) { heat = visc_heating(x); }
+  if (RESISTIVITY && !g_deposit) { heat += ohm_heat(x); }
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
   if (STAGE == 2u && gravity && !self_gravity && !g_deposit) {

@@ -1,0 +1,22 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "island-coalescence",
+  "extends": "tearing",
+  "name": "Island coalescence",
+  "variant": "Island coalescence",
+  "blurb": "Two magnetic islands in a current sheet (the Fadeev equilibrium), pushed together: like parallel currents they attract, squeeze a current sheet between them, and merge through it into one island at a rate the resistivity sets (Finn & Kaw 1977). The reconnection setups follow the taranis WebGPU reduced-MHD page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html).",
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "island-coalescence"
+    }
+  ],
+  "run": {
+    "tEnd": 8,
+    "checkpointDt": 0.25
+  },
+  "domain": {
+    "n": 512
+  }
+}

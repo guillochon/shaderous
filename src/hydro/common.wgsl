@@ -45,6 +45,7 @@ struct Params {
                          //   0 always: the zero that opaque() hides from the compiler
   eos2: vec4<f32>,       // more equation-of-state constants, per module (eos/degenerate.wgsl,
                          //   eos/ionizing.wgsl); zero for the others
+  ohm: vec4<f32>,        // (magnetic diffusivity eta, 0, 0, 0): mhd/ohm.wgsl
 }
 
 struct Clock {

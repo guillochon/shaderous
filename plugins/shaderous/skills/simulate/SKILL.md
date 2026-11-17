@@ -29,7 +29,7 @@ A setup is described with the same keys as a share link (`describe` gives each o
 
 <!-- gen:link-key-list -->
 - The run: `problem`, `setup`, `dim`, `n`, `amr`
-- Settings, each an override of the preset's own: `tend`, `eos`, `gamma`, `K`, `arad`, `degrho`, `degp`, `coulomb`, `iont`, `ionrho`, `frho`, `fu`, `fv`, `fva`, `cool`, `crate`, `calpha`, `cheat`, `ctunit`, `ctfloor`, `nu`, `kappa`, `gravity`, `G`, `vcycles`, `jfloor`, `jcells`, `fluxwork`, `refhi`, `reflo`, `refrho`, `tbins`, `riemann`, `limiter`, `cfl`, `dampr`, `damprate`, `wb`, `bc`, `p.<id>`
+- Settings, each an override of the preset's own: `tend`, `eos`, `gamma`, `K`, `arad`, `degrho`, `degp`, `coulomb`, `iont`, `ionrho`, `frho`, `fu`, `fv`, `fva`, `cool`, `crate`, `calpha`, `cheat`, `ctunit`, `ctfloor`, `nu`, `kappa`, `eta`, `gravity`, `G`, `vcycles`, `jfloor`, `jcells`, `fluxwork`, `refhi`, `reflo`, `refrho`, `tbins`, `riemann`, `limiter`, `cfl`, `dampr`, `damprate`, `wb`, `bc`, `p.<id>`
 - The view: `mode`, `field`, `species`, `log`, `lo`, `hi`, `axis`, `slice`, `rhocut`, `opacity`, `yaw`, `pitch`, `dist`, `tx`, `ty`, `tz`, `zoom`, `cx`, `cy`, `blocks`, `contours`, `ncont`, `fog`, `isoa`, `light`, `box`, `flines`, `nflines`, `cmap`, `tf`
 <!-- /gen:link-key-list -->
 

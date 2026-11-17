@@ -1,6 +1,8 @@
 // Viscosity and conduction with a magnetic field (plans/mhd-plan.md 7b): hydro/diffusion_core.wgsl's
 // isotropic fluxes added to an MHD face flux, on either grid. The field carries no solid cells,
-// so there are no walls. Requires mhd/state.wgsl (MQ), MFlux, and hydro/diffusion_core.wgsl.
+// so there are no walls. Resistivity adds its Poynting flux (mhd/ohm.wgsl). Requires
+// mhd/state.wgsl (MQ), MFlux, hydro/diffusion_core.wgsl and load_b(c).
+#include "mhd/ohm.wgsl"
 
 fn dside_mq(q: MQ) -> DSide {
   return DSide(q.a.x, q.a.yzw, q.b.x, false);
@@ -20,5 +22,6 @@ fn mhd_add_diffusion(Fin: MFlux, a: vec3<i32>, e: vec3<i32>, axis: i32, l: MQ, r
     F.e += q;
     F.ei += q;
   }
+  if (RESISTIVITY) { F.e += ohm_eflux(a, e, axis, l.B, r.B); }
   return F;
 }

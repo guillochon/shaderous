@@ -288,6 +288,8 @@ export interface Problem {
   /** Kinematic viscosity and thermal conduction switched on by default (see SimConfig). */
   viscosity?: number;
   conductivity?: number;
+  /** Magnetic diffusivity eta switched on by default (see SimConfig.resistivity). */
+  resistivity?: number;
   /** Uniform external gravitational acceleration, which may depend on the dimensionality. */
   gext?: (ndim: 2 | 3) => [number, number, number];
   /** A polytropic star at rest, settled into the grid's own hydrostatic balance before the run (problems/settle.ts). */

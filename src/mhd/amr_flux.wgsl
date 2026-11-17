@@ -69,6 +69,9 @@ fn load_comp(c: vec3<i32>) -> vec4<f32> {
 fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
   return 0;
 }
+fn load_b(c: vec3<i32>) -> vec3<f32> {
+  return textureLoad(W3, c, 0).xyz;
+}
 #include "hydro/diffusion_core.wgsl"
 #include "mhd/diffusion.wgsl"
 

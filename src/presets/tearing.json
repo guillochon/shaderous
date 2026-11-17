@@ -1,0 +1,58 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "tearing",
+  "name": "Tearing mode",
+  "group": "Magnetic fields",
+  "family": "reconnection",
+  "familyName": "Magnetic reconnection",
+  "variant": "Tearing mode",
+  "blurb": "A Harris current sheet with resistivity: the field reconnects across it and the sheet tears into a chain of magnetic islands (Furth, Killeen & Rosenbluth 1963). The growth rate depends on the Lundquist number a v_A / eta, here 500: the islands grow for a few time units, then saturate and merge slowly, while the sheet itself diffuses wider. The reconnection setups follow the taranis WebGPU reduced-MHD page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html).",
+  "domain": {
+    "ndim": 2,
+    "n": 512,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [
+        0,
+        2,
+        0
+      ],
+      "hi": [
+        0,
+        2,
+        0
+      ]
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": {
+      "gamma": 1.6666666666666667
+    },
+    "gravity": "off",
+    "G": 0,
+    "floors": {
+      "rho": 1e-10,
+      "p": 1e-10
+    },
+    "resistivity": 0.0001
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "harris-sheet"
+    }
+  ],
+  "run": {
+    "tEnd": 30,
+    "checkpointDt": 1
+  },
+  "view": {
+    "mode": "slice",
+    "field": 3,
+    "log": false
+  }
+}

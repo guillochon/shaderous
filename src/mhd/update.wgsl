@@ -88,6 +88,12 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
   return 0;
 }
 #include "hydro/diffusion_core.wgsl"
+// The Ohmic heat (mhd/ohm.wgsl), from the field at the start of the step in both stages.
+fn load_b(c: vec3<i32>) -> vec3<f32> {
+  let m = bc_map(c);
+  return bcell(m.c) * m.flip;
+}
+#include "mhd/ohm.wgsl"
 fn visc_side(c: vec3<i32>) -> DSide {
   let m = bc_map(c);
   let u = textureLoad(H1, m.c, 0);
@@ -289,6 +295,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let E = u2.x + ekick + dtdx * (net_b.x + dw) - 0.5 * dot(mom, mom) * (1.0 / rho_new - 1.0 / rho);
   var heat = 0.0;
   if (VISCOSITY) { heat = visc_heating(t, axes); }
+  if (RESISTIVITY) { heat += ohm_heat(t); }
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
   var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);
