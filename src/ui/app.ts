@@ -452,7 +452,7 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   temperature: { size: 0.06, softness: 0.5, amount: 0, mass: 0, soften: 0.04 },
   obstacle: { size: 0, softness: 0, amount: 0, mass: 0, soften: 0.04 },
   field: { size: 0.08, softness: 0.5, amount: 0, mass: 0, soften: 0.04 },
-  pull: { size: 0.1, softness: 0.7, amount: 0, mass: 0, soften: 0.04 },
+  pull: { size: 0.1, softness: 0.7, amount: 0.5, mass: 0, soften: 0.04 },
   source: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0, soften: 0.04 },
   sink: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0, soften: 0.04 },
   star: { size: 0.1, softness: 0, amount: 0, mass: 0, soften: 0.04 },
@@ -580,7 +580,7 @@ function syncTools() {
     return;
   }
   const q = toolParams[tool];
-  $('tp-amount-row').hidden = tool !== 'mass' && tool !== 'source' && tool !== 'sink';
+  $('tp-amount-row').hidden = tool !== 'mass' && tool !== 'source' && tool !== 'sink' && tool !== 'pull';
   $('tp-mass-row').hidden = tool !== 'sink';
   // Only a point mass has gravity to soften.
   $('tp-soften-row').hidden = !(tool === 'sink' && sinkHasMass());
@@ -603,8 +603,10 @@ function syncTools() {
     ? 'Flux: how fast the source feeds gas in. At 100% it adds the density of the densest gas in the time the fastest signal takes to cross it'
     : tool === 'sink'
       ? 'Flux: how fast the sink takes gas away. Without a mass, 100% empties its center in the time the fastest signal takes to cross it; with one, 25% is the orbital rate at its edge. At the far left it is exactly 0: a particle that takes no gas, and only moves'
-      : 'Gas added per click, as a share of the densest gas';
-  $('tp-amount-row').querySelector('span')!.firstChild!.textContent = flux ? 'Flux' : 'Amt';
+      : tool === 'pull'
+        ? 'Grip: how much of the drag the field at the brush\u2019s center moves by. The rest slips through the brush, so the field it sweeps up ahead of it can at most grow by 1 / (1 \u2212 grip): twice as strong at 50%, ten times at 90%'
+        : 'Gas added per click, as a share of the densest gas';
+  $('tp-amount-row').querySelector('span')!.firstChild!.textContent = flux ? 'Flux' : tool === 'pull' ? 'Grip' : 'Amt';
   // For a source or a sink the softness is how its rate fades toward its edge, and is called
   // that: "Soft" is the softening of a point mass's gravity, a slider of the sink tool's own.
   $('tp-softness-row').querySelector('span')!.firstChild!.textContent = flux ? 'Edge' : 'Soft';
@@ -637,7 +639,7 @@ function syncTools() {
     const log = k === 'mass' && mr;
     if (k === 'mass') [el.min, el.max, el.step] = log ? ['0', '1', '0.001'] : ['0', '2', '0.01'];
     // A sink's flux goes all the way down to none: a point mass that only orbits.
-    if (k === 'amount') el.min = tool === 'sink' ? '0' : '0.01';
+    if (k === 'amount') [el.min, el.max] = [tool === 'sink' ? '0' : '0.01', tool === 'pull' ? '0.9' : '1'];
     const pos = log ? massPos(q.mass, mr) : q[k];
     el.value = String(pos);
     el.style.setProperty('--p', `${(100 * (pos - +el.min)) / (+el.max - +el.min)}%`);
@@ -705,7 +707,7 @@ function toolReadout(k: ToolSlider): { factor: number; unit: string } {
     case 'rhoc': return pu ? { factor: (starMassPerRho() * unitOf(pu, 'mass')) / ASTRO.Msun, unit: ' M☉' } : { factor: starMassPerRho(), unit: '' };
     case 'amount': {
       // A point mass's flux is a share of the orbital rate at its edge, in any units.
-      if (!shown || (tool === 'sink' && sinkHasMass())) return { factor: 100, unit: '%' };
+      if (!shown || tool === 'pull' || (tool === 'sink' && sinkHasMass())) return { factor: 100, unit: '%' };
       // As the source code below measures it: against the densest gas and the time a signal
       // takes to cross the source.
       const perAmount = (vRef || 1) / (q.size * box);
@@ -3895,23 +3897,25 @@ function advanceStroke(now: number) {
     return;
   }
   if (s.kind === 'pull') {
-    // The field is carried after the pointer. Across the brush's soft rim its weight w falls from
-    // 1 to 0, so a drag d squeezes the field ahead of the brush by 1 / (1 - |grad w| d) (and
-    // stretches it behind): a frame's drag is kept to 0.15 of the rim's width, which holds that to
-    // 1.3 at most (smoothstep's steepest slope is 1.5 over the width). A fast drag catches up over
-    // the frames after, release included. The rim is at least 0.3 of the radius wide: a hard edge
+    // The brush follows the pointer, and carries the field at its center by the grip's share of
+    // the drag (edit/field_brush_core.wgsl). Across the brush's soft rim that share falls to 0, so
+    // a frame's drag d squeezes the field ahead by 1 / (1 - grip |grad w| d) (and stretches it
+    // behind): d is kept to 0.15 of the rim's width over the grip, which holds that to 1.3 at
+    // most (smoothstep's steepest slope is 1.5 over the width). A fast drag catches up over the
+    // frames after, release included. The rim is at least 0.3 of the radius wide: a hard edge
     // would tear the field.
     const soft = Math.max(q.softness, 0.3);
+    const grip = Math.min(Math.max(q.amount, 0.01), 0.9);
     const to = locate(s.x, s.y, s.depth).pos;
     const from = (s.pulled ??= locate(s.x0, s.y0, s.depth).pos);
     let d = [0, 1, 2].map((i) => to[i] - from[i]) as Vec3;
     if (cfg.ndim === 2) d[2] = 0;
     const len = Math.hypot(...d);
-    const cap = 0.15 * soft * q.size;
+    const cap = Math.min((0.15 * soft * q.size) / grip, 0.5 * q.size);
     if (len > cap) d = d.map((v) => (v * cap) / len) as Vec3;
     if (s.released && len <= cap) stroke = null;
     if (len < 1e-6) return;
-    pendingBrush = { ...base, softness: soft, pos: [0, 1, 2].map((i) => from[i] + 0.5 * d[i]) as Vec3, vel: d };
+    pendingBrush = { ...base, softness: soft, amount: grip, pos: [0, 1, 2].map((i) => from[i] + 0.5 * d[i]) as Vec3, vel: d };
     s.pulled = [0, 1, 2].map((i) => from[i] + d[i]) as Vec3;
     return;
   }

@@ -13,8 +13,12 @@
 //   strength (kind 7): dA = (f - 1) A with f = exp(amount * w), so the field becomes
 //                      curl(f A) = f B + grad f x A: scaled by f inside, with the flux it
 //                      gains (or loses) closing around the brush's rim;
-//   pull (kind 8):     dA = A(x - w d) - A(x), d the drag (B.vel.xyz): the field near the
-//                      center is carried by d, and less of it toward the rim.
+//   pull (kind 8):     dA = A(x - g w d) - A(x), d the drag (B.vel.xyz) and g the grip
+//                      (B.amount, below 1): the field near the center is carried by g d, and
+//                      less of it toward the rim. With g = 1 the field swept up ahead of the
+//                      brush would come to rest in it and pile up without bound; with g < 1 it
+//                      slips through, and flux conservation holds it to 1 / (1 - g) times what
+//                      it was.
 // w is the brush's weight (edit/brush_core.wgsl).
 //
 // Edges are integrated at the midpoints of their segments on the finest level of the mesh, at
@@ -117,7 +121,7 @@ fn fb_delta(b: i32, x: vec3<f32>) -> f32 {
   let terms = select(2, 1, strength);
   var s = 0.0;
   for (var k = 0; k < loop_count(terms); k++) {
-    let drag = select(B.vel.xyz, vec3<f32>(B.vel.xy, 0.0), P.dims.z == 1u);
+    let drag = clamp(B.amount, 0.0, 0.95) * select(B.vel.xyz, vec3<f32>(B.vel.xy, 0.0), P.dims.z == 1u);
     var at = select(d, d - w * drag, !strength && k == 0);
     for (var e = 0; e < 3; e++) {
       if (P.bc_lo[e] != 0u) { at[e] = clamp(B.pos[e] + at[e], 0.0, 1.0) - B.pos[e]; }

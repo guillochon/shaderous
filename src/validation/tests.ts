@@ -2848,7 +2848,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-field-brush',
     name: 'MHD field brushes: strength (stronger, then weaker) and pull, on the rotor (2D, 128) and an outflow blast (3D, 32), and on blocks (rotor 2D, 256 finest; outflow blast 3D, 128 finest; 1 level)',
     criterion:
-      'After each brush: |div B| dx / max |B| below 1e-6; on Orszag-Tang (64^2) every face in the hard core exactly 1.5 times stronger (to 1e-4), and a pull on its coarse mesh making no peak (max |B| up by less than 30%, magnetic energy within 5%); the total energy changes by the magnetic energy\'s change (to 1% of it), and the magnetic energy goes up for "stronger", down for "weaker"; on the rotor\'s uniform field the brush\'s hard core is exactly 1.5 times stronger (to 1e-3). On blocks: faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); and a gas brush (mass) leaves the magnetic energy and the faces as they were',
+      'After each brush: |div B| dx / max |B| below 1e-6; on Orszag-Tang (64^2) every face in the hard core exactly 1.5 times stronger (to 1e-4), and a pull on its coarse mesh making no peak (max |B| up by less than 30%, magnetic energy within 5%); a long sweep at a grip of 0.5 at most 3 times the field it swept up (2 along the drag, more where the lines bend around the brush); the total energy changes by the magnetic energy\'s change (to 1% of it), and the magnetic energy goes up for "stronger", down for "weaker"; on the rotor\'s uniform field the brush\'s hard core is exactly 1.5 times stronger (to 1e-3). On blocks: faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); and a gas brush (mass) leaves the magnetic energy and the faces as they were',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -2863,7 +2863,7 @@ export const TESTS: TestDef[] = [
         const ops: [string, BrushOp][] = [
           ['stronger', { ...base, kind: 'field', pos, radius, amount: Math.log(1.5) }],
           ['weaker', { ...base, kind: 'field', pos, radius, amount: -Math.log(1.5) }],
-          ['pull', { ...base, kind: 'pull', pos, radius, amount: 0, vel: [0.25 * radius, 0.1 * radius, 0] }],
+          ['pull', { ...base, kind: 'pull', pos, radius, amount: 0.9, vel: [0.25 * radius, 0.1 * radius, 0] }],
         ];
         for (const [name, op] of ops) {
           const d0 = await sim.diagnostics();
@@ -2923,14 +2923,35 @@ export const TESTS: TestDef[] = [
       // A frame's pull on a coarse mesh (Orszag-Tang, 256 finest, 2 levels) moves the field without peaks.
       await withAmr(gpu, orszagTang, 256, { ndim: 2, amrLevels: 2, tEnd: Infinity }, async (sim) => {
         const d0 = await sim.diagnostics();
-        // As the tool takes a frame's drag: 0.15 of the rim's width (here 0.7 of the radius).
-        apply(sim, { ...base, kind: 'pull', pos: [0.4, 0.55, 0], radius: 0.2, softness: 0.7, amount: 0, vel: [0.0195, 0.0078, 0] });
+        // As the tool takes a frame's drag at a grip of 0.5: 0.15 of the rim's width (here 0.7 of
+        // the radius) over the grip.
+        apply(sim, { ...base, kind: 'pull', pos: [0.4, 0.55, 0], radius: 0.2, softness: 0.7, amount: 0.5, vel: [0.039, 0.0156, 0] });
         const d = await sim.diagnostics();
         m.orszag_tang_blocks_pull_bmax = d.magnetic!.bMax / d0.magnetic!.bMax;
         m.orszag_tang_blocks_pull_magnetic_change = d.magnetic!.eMag / d0.magnetic!.eMag - 1;
         m.orszag_tang_blocks_pull_divB = d.magnetic!.divB;
         pass &&= m.orszag_tang_blocks_pull_bmax < 1.3 && Math.abs(m.orszag_tang_blocks_pull_magnetic_change) < 0.05 && d.magnetic!.divB < 1e-6;
       });
+      // A long sweep across the field (the rotor's uniform B_x at its start, away from the rotor,
+      // dragged along y in the tool's frame-sized steps): at a grip of 0.5 the field swept up ahead
+      // of the brush slips through it, and at most doubles along the drag (a little more where the
+      // lines bend around the brush's sides); held fast (a grip near 1) it piles up
+      // as a snowplow's, the sheet that blew the gas apart.
+      for (const grip of [0.5, 0.95]) {
+        await withSim(gpu, mhdRotor, 128, { ndim: 2, tEnd: Infinity }, async (sim) => {
+          const b0 = (await sim.diagnostics()).magnetic!.bMax;
+          const step = Math.min((0.15 * 0.7 * 0.1) / grip, 0.05);
+          for (let y = 0.15; y < 0.85; y += step) {
+            apply(sim, { ...base, kind: 'pull', pos: [0.2, y + 0.5 * step, 0], radius: 0.1, softness: 0.7, amount: grip, vel: [0, step, 0] });
+          }
+          const d = (await sim.diagnostics()).magnetic!;
+          const k = `sweep_grip_${grip}`;
+          m[`${k}_bmax`] = d.bMax / b0;
+          m[`${k}_divB`] = d.divB;
+          pass &&= d.divB < 1e-6;
+          if (grip === 0.5) pass &&= m[`${k}_bmax`] < 3;
+        });
+      }
       // Outflow walls: the field through them stays as it was, and a brush that reaches one keeps div B.
       await withSim(gpu, { ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, { ndim: 3, tEnd: Infinity }, async (sim) => {
         sim.step(5);

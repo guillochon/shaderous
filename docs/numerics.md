@@ -1213,13 +1213,18 @@ $`E`$ includes $`B^2/2`$.
   - Field strength: $`\delta\mathbf{A} = (f - 1)\mathbf{A}`$, $`f = e^{\pm w \ln 1.5}`$ (Shift
     weakens), so the field becomes $`f\mathbf{B} + \nabla f \times \mathbf{A}`$: 1.5 times
     stronger in the brush's hard core, with the flux it gains closing back around its rim.
-  - Pull field: $`\delta\mathbf{A}(x) = \mathbf{A}(x - w\,\delta) - \mathbf{A}(x)`$ for a drag
-    $`\delta`$, so the field lines near the center move with the pointer and less of them toward
-    the edge. The gas stays where it is. Across the brush's rim the drag squeezes the field ahead
-    by $`1/(1 - |\nabla w|\,\delta)`$ and stretches it behind: a frame's drag is kept to 0.15 of
-    the rim's width (at least 0.3 of the radius), which holds that to 1.3, and a fast drag
-    catches up over the frames after. Over a long drag the field carried along still gathers
-    ahead of the brush, as frozen-in flux pushed through other field does.
+  - Pull field: $`\delta\mathbf{A}(x) = \mathbf{A}(x - g\,w\,\delta) - \mathbf{A}(x)`$ for a
+    drag $`\delta`$ and a grip $`g`$ (the tool's Grip, 50% by default): the field lines near the
+    center move by $`g\delta`$ and less of them toward the edge, and the gas stays where it is.
+    Held fast ($`g = 1`$), the field the brush sweeps up would come to rest in it, its speed
+    relative to the brush falling to zero, and pile up without bound: a fast drag across a
+    turbulent field made sheets whose magnetic pressure blew the gas apart. With $`g < 1`$ the
+    field slips through the brush at $`(1 - g)\delta`$, and conserving flux holds it to
+    $`1/(1 - g)`$ times what it was along the drag (in `mhd-field-brush`, a sweep across the
+    box: 2.6 times at 50%, where the lines also bend around the brush; 29 times at 95%).
+    Across the rim the drag squeezes the field ahead by $`1/(1 - g\,|\nabla w|\,\delta)`$ in a
+    frame: a frame's drag is kept to 0.15 of the rim's width (at least 0.3 of the radius) over
+    the grip, which holds that to 1.3, and a fast drag catches up over the frames after.
 
   Edges are integrated at the midpoints of their finest-level segments, at positions exact in
   float32 and in a fixed order: the copies of a shared face get the same bits, and a coarse

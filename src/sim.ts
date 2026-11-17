@@ -523,7 +523,8 @@ export interface BrushOp {
   /**
    * mass: density added at the center (negative removes); temperature: log of the factor;
    * obstacle: positive makes the cells solid, negative turns them back into gas;
-   * star: central density; field: log of the factor on the field
+   * star: central density; field: log of the factor on the field; pull: the grip, the share of
+   * the drag the field at the brush's center moves by (below 1)
    */
   amount: number;
   /** velocity tool: the velocity to set; star: its velocity; pull: the drag, in fractions of the box */
