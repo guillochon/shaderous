@@ -81,14 +81,17 @@ side.innerHTML = `
   <header class="brand"><h1>SHADEROUS</h1><span id="adapter"></span></header>
 
   <section>
+    <div class="f"><span>Preset</span>
     ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join('') + '<optgroup label="Your setups" id="own-setups" hidden></optgroup>', 'The preset to simulate, or a setup of your own: picking one starts it from its initial conditions')}
-    <p class="blurb" id="blurb"></p>
+    </div>
     <div class="g3">
       ${field('Variant', select('variant', ''), 'row-variant', 'Versions of this problem with different setups')}
       <span id="pparams"></span>
       <span id="pfeatured"></span>
     </div>
-    <div class="setup-row"><button id="setup" title="Every setting of the simulation: the grid, the gas, gravity, the boundaries, the solver and the objects in the box. Presets and your own setups are files that fill it in">Setup…</button><button id="run" title="Run or pause the simulation (space)">Pause</button><span id="setup-sum" title="The grid and the gas of this run"></span></div>
+    <p class="blurb" id="blurb"></p>
+    <div id="setup-sum" title="The grid and the gas of this run"></div>
+    <div class="setup-row"><button id="setup" title="Every setting of the simulation: the grid, the gas, gravity, the boundaries, the solver and the objects in the box. Presets and your own setups are files that fill it in">Setup…</button><button id="run" title="Run or pause the simulation (space)">Pause</button></div>
     <div class="buttons"><button id="step" title="Pause and take a single step">Step</button><button id="reset" title="Start the run again from its initial conditions">Reset</button><button id="record" hidden title="Record the run from here as an MP4 movie (settings under Movie); press again to stop and save it. The run is 2-3 times slower while recording">Record</button><button id="share" title="Copy a link that opens the simulator with these settings">Share</button><button id="load" hidden title="Autoload is off: load the changes that wait (problem, grid, initial conditions), paused. Run loads them and plays">Load</button></div>
     <div class="io">
       <label class="check" title="Start each problem playing as soon as it loads, and play a finished run again on Reset. Off, a run waits for Play"><input id="autoplay" type="checkbox" />Autoplay</label>
@@ -1354,7 +1357,7 @@ function syncControls() {
   const self = isSelfGravity(cfg.gravity);
   $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}${ckpt.on ? `, checkpoints every ${+ckpt.every.toPrecision(6)}` : ''}`;
   // What the Setup dialog holds, at a glance: the grid and the gas.
-  $('setup-sum').textContent = `${g.n}${g2 ? '²' : '³'}${g.levels ? `, ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''} · ${EOS_LABELS[cfg.eos]}`;
+  $('setup-sum').textContent = `${g.n}${g2 ? '²' : '³'}${g.levels ? `, ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''} · ${gProblem.mhd ? 'MHD' : 'Gas'} · ${EOS_LABELS[pending?.pick ? gProblem.eos : cfg.eos]}`;
   showCheckpoints();
   // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
   // refinement levels on a uniform grid.
@@ -1384,7 +1387,7 @@ function syncControls() {
   $<HTMLInputElement>('tend').value = Number.isFinite(cfg.tEnd) ? String(cfg.tEnd) : '';
   $('blurb').textContent = pending
     ? pending.pick
-      ? `Not loaded yet: press Run to load ${gProblem.label} at ${g.n}${g2 ? '²' : '³'}${g.levels ? ` with ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''}.`
+      ? `Not loaded yet: press Run to load ${gProblem.label}.`
       : 'Changed, not loaded yet: press Run to start again with the new parameters.'
     : cfg.restart ? `${cfg.restart.tool ? 'A star’s magnetic field was added' : 'Loaded from a file'}, at t = ${num(cfg.restart.time)}. Reset returns to that state.` : cfg.problem.blurb;
   $<HTMLSelectElement>('mode').value = two ? 'slice' : view.mode;
