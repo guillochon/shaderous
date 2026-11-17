@@ -186,12 +186,16 @@ default, and what it does. A number out of its range is held to it when the file
 | `domain.amr` | Refinement | a whole number, 0 to 5 | Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution |
 | `domain.box` | Box size | a number, 1e-12 to 1e+30. Default `1` | Side of the box, in code units: the domain is a cube of this side centered on the origin |
 | `domain.supports2d` | Makes sense in 2D | `true` or `false`. Default `false` | The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only |
-| `domain.units` | Physical units | an object, which may be left out | What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units |
+| `domain.units` | Physical units | an object, which may be left out, in one of 2 shapes: length and mass (`mass`); or length, density and velocity (`density`, `velocity`) | What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units |
 | `domain.units.name` | Name | text. Default `custom` | A name for the unit system |
 | `domain.units.length.value` | Length | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of length |
 | `domain.units.length.unit` | Length unit | `m`, `cm`, `km`, `Rsun`, `au`, `pc`. Default `Rsun` | The unit of the length |
 | `domain.units.mass.value` | Mass | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of mass |
 | `domain.units.mass.unit` | Mass unit | `kg`, `g`, `Msun`. Default `Msun` | The unit of the mass |
+| `domain.units.density.value` | Density | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of density |
+| `domain.units.density.unit` | Density unit | `kg/m3`, `g/cm3`. Default `g/cm3` | The unit of the density |
+| `domain.units.velocity.value` | Velocity | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of velocity |
+| `domain.units.velocity.unit` | Velocity unit | `m/s`, `km/s`, `cm/s`. Default `km/s` | The unit of the velocity |
 | `domain.bc` | Faces of the box | `{ "lo": [x, y, z], "hi": [x, y, z] }`, each 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall, 5 moving wall | What the gas meets at each face of the box. Periodic faces come in pairs |
 | `domain.wallVelocity.xlo` | Wall velocity, lower x face | `[x, y, z]`. Default `[0,0,0]` | Where the lower x face is a moving wall: its velocity along itself (the part normal to it is ignored) |
 | `domain.wallVelocity.xhi` | Wall velocity, upper x face | `[x, y, z]`. Default `[0,0,0]` | Where the upper x face is a moving wall: its velocity along itself (the part normal to it is ignored) |
@@ -204,6 +208,9 @@ default, and what it does. A number out of its range is held to it when the file
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
+| `physics.toolScale` | Scale of the editing tools | an object, which may be left out | Least density and speed the editing tools (paint, push) measure their amounts against. They take the densest and fastest gas of the run, which leaves them nothing to go by in a box that holds next to nothing |
+| `physics.toolScale.rho` | Density | a number, at least 0. Default `1` | The tools’ density scale is at least this |
+| `physics.toolScale.v` | Speed | a number, at least 0. Default `1` | The tools’ speed scale is at least this |
 | `physics.eos` | Equation of state | `ideal`, `barotropic`, `gas_radiation`, `degenerate`, `ionizing`, `helmholtz`. Default `ideal` | How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
 | `physics.eosParams.gamma` | gamma | a number, 1 to 100. Default `1.6666666666666667` | Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
 | `physics.eosParams.K` | K (p = K rho^gamma) | a number, at least 0 | Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
@@ -215,9 +222,15 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.eosParams.ionRho` | Saha density | a number, at least 1e-30 | Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units |
 | `physics.composition` | Composition | `solar`, `solarNeutral`, `hydrogen`, `carbonOxygen`. Default `solar` | What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen |
 | `physics.species` | Species | a list of names | Species whose mass fractions the gas carries, by name (he4, c12, ...), separated by commas; or aprox13 for the burning network’s thirteen. None by default |
-| `physics.burn` | Burning | an object, which may be left out | Nuclear burning by the trained network of the 13-isotope alpha chain (aprox13), wherever the gas is hot and dense enough |
+| `physics.speciesGamma` | Gamma by species | `{ species: gamma }` | Adiabatic index of each species the gas carries, by name, where the species set the equation of state (a mixture of ideal gases): a species not listed takes the gas’s gamma |
+| `physics.burn` | Burning | an object, which may be left out, in one of 2 shapes: network (aprox13) (`network`, `limiter`); or fuel to ash (arrhenius) (`fuel`, `ash`, `q`, `ea`, `k`) | Burning of the gas, wherever it is hot and dense enough: nuclear, by the trained network of the 13-isotope alpha chain, or a single fuel to ash reaction at an Arrhenius rate |
 | `physics.burn.network` | Network | `aprox13`. Default `aprox13` | The burning network |
-| `physics.burn.inShocks` | Burn inside shocks | `true` or `false`. Default `false` | Let cells the shock detector flags burn. Off, as in most supernova codes: a captured shock is a few cells of numerical smearing |
+| `physics.burn.fuel` | Fuel | text. Default `fuel` | The species that burns: one the gas carries (Species) |
+| `physics.burn.ash` | Ash | text. Default `ash` | The species it burns to: one the gas carries (Species) |
+| `physics.burn.q` | Heat release q | a number, at least 0. Default `50` | Energy released per unit mass of fuel burned, in code units |
+| `physics.burn.ea` | Activation temperature Ea | a number, at least 0. Default `25` | The rate goes as exp(-Ea / T), T the code temperature p / ρ |
+| `physics.burn.k` | Rate constant k | a number, at least 0. Default `1` | The rate per unit time of fuel far above its activation temperature: df/dt = -k f exp(-Ea / T) |
+| `physics.burn.inShocks` | Burn inside shocks | `true` or `false`. Default `false` | Let cells the shock detector flags burn. Off, as in most supernova codes: a captured shock is a few cells of numerical smearing. Fuel to ash burning burns in them unless told not to |
 | `physics.burn.limiter` | Burning limiter f | a number, 0 to 1. Default `0` | No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013). 0 switches it off |
 | `physics.floors.rho` | Density floor | a number, at least 0. Default `1e-10` | No cell is thinner than this |
 | `physics.floors.p` | Pressure floor | a number, at least 0. Default `1e-14` | No cell has less pressure than this |

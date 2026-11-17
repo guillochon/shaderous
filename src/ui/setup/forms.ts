@@ -5,7 +5,7 @@
 //
 // An option whose rules do not hold keeps its place: greyed, its reasons as its tooltip and,
 // where there is no hover, as a line under it when tapped.
-import { BC_CHOICES, flatten, PART_OPTIONS, unavailable, type Choice, type Control, type Option, type Value } from '../../setup/options';
+import { BC_CHOICES, flatten, formOf, otherForm, PART_OPTIONS, unavailable, type Choice, type Control, type Option, type Value } from '../../setup/options';
 import { partIds } from '../../setup/parts/bodies';
 import { setPath, type SetupSpec } from '../../setup/spec';
 import { displayLabel, displayScale, type UnitSystem } from '../../units/units';
@@ -165,7 +165,7 @@ function buildField(o: Option, prefix: string, b: Build, inGroup: boolean): Fiel
   const put = (value: unknown) => ctx.write(path, value === undefined && inGroup && o.default !== undefined && o.default !== null ? clone(o.default) : value);
   clear.addEventListener('click', () => ctx.write(path, undefined));
 
-  const body = makeControl(o, control, path, id, b, put);
+  const body = makeControl(o, control, path, id, b, put, inGroup);
   const body_ = h('div', { class: 'sf-body' }, ...body.nodes, veil);
   if (body.ownLabel) wrap.append(h('div', { class: 'sf-head' }, body.ownLabel, marks), body_, why);
   else wrap.append(h('div', { class: 'sf-head' }, h('label', { for: id, text: o.label }), marks), body_, why);
@@ -222,6 +222,14 @@ function numberInput(c: Extract<Control, { type: 'number' }> | undefined, attrs:
   return input;
 }
 
+/** What a unit's `per` says, as a note beside its value: '' for none. */
+function perText(per: unknown): string {
+  if (typeof per === 'number') return per === 1 ? '' : `per ${shown(per)} code units`;
+  if (typeof per !== 'string') return '';
+  const [id, what] = per.split('.');
+  return `per the ${what ?? per} of “${id}”`;
+}
+
 /** Put a number in a field, unless the field is being typed in and already says it. */
 function setNumber(input: HTMLInputElement, v: unknown): void {
   const text = typeof v === 'number' && Number.isFinite(v) ? shown(v) : '';
@@ -241,7 +249,7 @@ function readNumber(input: HTMLInputElement, c?: Extract<Control, { type: 'numbe
   return v;
 }
 
-function makeControl(o: Option, control: Control, path: string, id: string, b: Build, put: (v: unknown) => void): Made {
+function makeControl(o: Option, control: Control, path: string, id: string, b: Build, put: (v: unknown) => void, inGroup = false): Made {
   const { ctx } = b;
   const described = { 'aria-describedby': `${id}-why` };
 
@@ -266,10 +274,13 @@ function makeControl(o: Option, control: Control, path: string, id: string, b: B
           setNumber(input, value);
           const v = typeof value === 'number' ? value : typeof o.default === 'number' ? o.default : undefined;
           const q = control.quantity;
-          const text = q && pass.units && v !== undefined ? `${sig(v * displayScale(pass.units, q, 'cgs'))} ${displayLabel(pass.units, q, 'cgs')}` : '';
+          let text = q && pass.units && v !== undefined ? `${sig(v * displayScale(pass.units, q, 'cgs'))} ${displayLabel(pass.units, q, 'cgs')}` : '';
+          // A unit's value may stand for more than one code unit, or for a part's quantity (in the
+          // units group: a featured unit has a label of its own that says so).
+          if (!text && inGroup && path.startsWith('domain.units.') && path.endsWith('.value')) text = perText(ctx.read(`${path.slice(0, -'value'.length)}per`));
           phys.textContent = text;
           phys.hidden = !text;
-          if (text) phys.title = `${o.label} in physical units`;
+          if (text) phys.title = text.startsWith('per ') ? `${o.label} is this many units for each of these, not for one code unit: the units follow it` : `${o.label} in physical units`;
         },
       };
     }
@@ -479,9 +490,11 @@ function makeControl(o: Option, control: Control, path: string, id: string, b: B
     case 'fractions': {
       // Rows being typed are the control's own until they have a name: the document holds only whole ones.
       let rows: { name: string; value: number | undefined }[] = [];
+      const range = control.range ?? { min: 0, max: 1, step: 0.05 };
+      const of = control.of ?? 'mass fraction';
       const asObject = () => Object.fromEntries(rows.filter((r) => r.name && r.value !== undefined).map((r) => [r.name, r.value]));
       const list = h('div', { class: 'sf-rows' });
-      const add = h('button', { type: 'button', class: 'sf-add', text: 'Add a species', title: 'Add a row: a species name and its mass fraction' });
+      const add = h('button', { type: 'button', class: 'sf-add', text: 'Add a species', title: `Add a row: a species name and its ${of}` });
       let disabled = false;
       const commit = () => {
         const obj = asObject();
@@ -491,7 +504,7 @@ function makeControl(o: Option, control: Control, path: string, id: string, b: B
         list.replaceChildren(...rows.map((r, i) => {
           const name = h('input', { type: 'text', 'aria-label': `${o.label}: species ${i + 1}`, placeholder: 'he4', maxlength: 24, spellcheck: 'false' });
           name.value = r.name;
-          const value = numberInput({ type: 'number', min: 0, max: 1, step: 0.05 }, { 'aria-label': `${o.label}: mass fraction of species ${i + 1}`, placeholder: '0' });
+          const value = numberInput({ type: 'number', ...range }, { 'aria-label': `${o.label}: ${of} of species ${i + 1}`, placeholder: shown(range.min) });
           if (r.value !== undefined) value.value = shown(r.value);
           const remove = h('button', { type: 'button', class: 'sf-x', text: '×', title: 'Remove this row', 'aria-label': `Remove species ${i + 1}` });
           name.disabled = value.disabled = remove.disabled = disabled;
@@ -500,7 +513,7 @@ function makeControl(o: Option, control: Control, path: string, id: string, b: B
             commit();
           });
           value.addEventListener('change', () => {
-            const v = readNumber(value, { type: 'number', min: 0, max: 1 });
+            const v = readNumber(value, { type: 'number', ...range });
             r.value = v === null ? undefined : v;
             commit();
           });
@@ -552,35 +565,82 @@ function makeControl(o: Option, control: Control, path: string, id: string, b: B
 
     case 'group': {
       const sub = h('div', { class: 'sf-sub' });
-      const fields = control.fields.map((f) => buildField(f, `${path}.`, b, true));
-      sub.append(...fields.map((f) => f.el));
-      const defaults = () => {
-        const obj = {};
-        for (const f of flatten(control.fields)) if (f.control.type !== 'group' && f.default !== undefined && f.default !== null) setPath(obj, f.path, clone(f.default));
+      const forms = control.forms;
+      // Its shapes: a menu at the head of the group, and only the fields of the shape it has.
+      let formSelect: HTMLSelectElement | null = null;
+      if (forms) {
+        formSelect = h('select', { 'aria-label': `${o.label}: ${forms.label}`, title: forms.tip });
+        formSelect.append(...forms.choices.map((c) => h('option', { value: c.value, text: c.label, title: c.tip ?? '' })));
+        formSelect.addEventListener('change', () => {
+          const to = forms.choices.find((c) => c.value === formSelect!.value);
+          const cur = ctx.read(path);
+          if (!to || !cur || typeof cur !== 'object') return;
+          // What the other shapes hold goes; what this one needs comes with its defaults.
+          const obj = clone(cur) as Record<string, unknown>;
+          for (const c of forms.choices) if (c !== to) for (const k of c.keys) delete obj[k];
+          const add = defaults(to);
+          for (const k of to.keys) if (add[k] !== undefined) obj[k] = add[k];
+          Object.assign(obj, clone(to.set ?? {}));
+          ctx.write(path, obj);
+        });
+        sub.append(h('div', { class: 'sf' }, h('div', { class: 'sf-head' }, h('label', { text: forms.label })), h('div', { class: 'sf-body' }, formSelect)));
+      }
+      const fields = control.fields.map((f) => ({ option: f, field: buildField(f, `${path}.`, b, true) }));
+      sub.append(...fields.map((f) => f.field.el));
+      /** The fields' defaults, for the shape the object takes (the first, without shapes). */
+      const defaults = (form = forms?.choices[0]) => {
+        const obj: Record<string, unknown> = {};
+        for (const f of flatten(control.fields)) {
+          if (f.control.type === 'group' || f.default === undefined || f.default === null) continue;
+          if (forms && form && otherForm(forms, form, f.path)) continue;
+          setPath(obj, f.path, clone(f.default));
+        }
+        if (form?.set) Object.assign(obj, clone(form.set));
         return obj;
+      };
+      let facts: Record<string, Value> = {};
+      const syncFields = (value: unknown, off: boolean, pass: Pass) => {
+        facts = pass.facts;
+        const form = forms ? formOf(forms, value) : undefined;
+        if (formSelect && form) {
+          formSelect.value = form.value;
+          formSelect.disabled = off;
+          for (const opt of formSelect.options) {
+            const c = forms!.choices.find((k) => k.value === opt.value)!;
+            const why = unavailable(c, pass.facts).join('. ');
+            opt.disabled = !!why && c !== form;
+            opt.title = why || (c.tip ?? '');
+          }
+        }
+        for (const f of fields) {
+          f.field.update(pass);
+          if (forms && form && otherForm(forms, form, f.option.path)) f.field.el.hidden = true;
+        }
       };
       if (!control.optional) {
         return {
           nodes: [],
           ownLabel: h('span', { class: 'sf-title', text: o.label }),
           below: sub,
-          sync(_value, _off, pass) {
-            for (const f of fields) f.update(pass);
+          sync(value, _off, pass) {
+            syncFields(value, false, pass);
           },
         };
       }
       const input = h('input', { type: 'checkbox', id, ...described });
-      input.addEventListener('change', () => ctx.write(path, input.checked ? defaults() : undefined));
+      // Turned on, it takes the first shape the setup allows.
+      input.addEventListener('change', () => ctx.write(path, input.checked ? defaults(forms?.choices.find((c) => !unavailable(c, facts).length)) : undefined));
       return {
         nodes: [],
         ownLabel: h('label', { class: 'check', for: id }, input, o.label),
         below: sub,
         sync(value, off, pass) {
+          facts = pass.facts;
           const on = value !== undefined && value !== null;
           input.checked = on;
           input.disabled = off;
           sub.hidden = !on;
-          if (on) for (const f of fields) f.update(pass);
+          if (on) syncFields(value, off, pass);
         },
       };
     }

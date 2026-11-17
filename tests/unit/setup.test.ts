@@ -90,6 +90,14 @@ describe('the setup codec', () => {
     }
   });
 
+  it('reads a value of several shapes as the one it fits whole', () => {
+    const burn = { fuel: 'fuel', ash: 'ash', q: 50, ea: 25, k: 1, inShocks: false };
+    const { spec, report } = readSetup({ ...emptySetup(), physics: { species: ['fuel', 'ash'], burn } });
+    expect(report.notes).toEqual([]);
+    expect(spec!.physics!.burn).toEqual(burn);
+    expect(readSetup({ ...emptySetup(), physics: { burn: { network: 'aprox13', limiter: 0.1 } } }).spec!.physics!.burn).toEqual({ network: 'aprox13', limiter: 0.1 });
+  });
+
   it('resolves extends, the child over the parent, lists replaced whole', () => {
     const child = presetSpec('polytrope-dipole')!;
     expect(child.extends).toBeUndefined();

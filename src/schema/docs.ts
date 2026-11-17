@@ -45,9 +45,9 @@ function valuesOf(o: Option): string {
     : c.type === 'vec3' ? '`[x, y, z]`'
     : c.type === 'faces' ? `\`{ "lo": [x, y, z], "hi": [x, y, z] }\`, each ${boundaryList()}`
     : c.type === 'ref' ? `${c.count === 1 ? 'the id' : c.count === 2 ? 'the ids of two' : 'ids'} of ${c.kinds.map((k) => `\`${k}\``).join(' or ')} parts`
-    : c.type === 'fractions' ? '`{ species: fraction }`'
+    : c.type === 'fractions' ? `\`{ species: ${c.of ?? 'fraction'} }\``
     : c.type === 'names' ? 'a list of names'
-    : c.optional ? 'an object, which may be left out' : 'an object';
+    : [c.optional ? 'an object, which may be left out' : 'an object', c.forms ? `in one of ${c.forms.choices.length} shapes: ${c.forms.choices.map((f) => `${f.label.toLowerCase()} (${f.keys.map((k) => `\`${k}\``).join(', ')})`).join('; or ')}` : ''].filter(Boolean).join(', ');
   const def = o.default === undefined || o.default === null || c.type === 'group' ? '' : `. Default ${code(o.default)}`;
   return what + def;
 }

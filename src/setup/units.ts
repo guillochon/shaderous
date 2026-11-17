@@ -13,6 +13,8 @@ export const UNIT_SI: Record<string, number> = {
 
 export const LENGTH_UNITS = ['m', 'cm', 'km', 'Rsun', 'au', 'pc'] as const;
 export const MASS_UNITS = ['kg', 'g', 'Msun'] as const;
+export const DENSITY_UNITS = ['kg/m3', 'g/cm3'] as const;
+export const VELOCITY_UNITS = ['m/s', 'km/s', 'cm/s'] as const;
 
 /** SI value of one code unit, from a UnitValue; `ref` resolves a part's quantity ("star.mass"). */
 function si(v: UnitValue, ref: (name: string) => number): number {

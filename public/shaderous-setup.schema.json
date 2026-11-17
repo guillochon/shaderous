@@ -346,10 +346,16 @@
           "m/s",
           "km/s",
           "cm/s"
-         ]
+         ],
+         "title": "Density unit",
+         "description": "The unit of the density"
         },
         "value": {
-         "type": "number"
+         "type": "number",
+         "title": "Density",
+         "description": "This many of the unit beside it are one code unit of density",
+         "minimum": 1e-300,
+         "maximum": 1e+300
         },
         "per": {
          "anyOf": [
@@ -384,10 +390,16 @@
           "m/s",
           "km/s",
           "cm/s"
-         ]
+         ],
+         "title": "Velocity unit",
+         "description": "The unit of the velocity"
         },
         "value": {
-         "type": "number"
+         "type": "number",
+         "title": "Velocity",
+         "description": "This many of the unit beside it are one code unit of velocity",
+         "minimum": 1e-300,
+         "maximum": 1e+300
         },
         "per": {
          "anyOf": [
@@ -731,7 +743,9 @@
      "type": "object",
      "additionalProperties": {
       "type": "number"
-     }
+     },
+     "title": "Gamma by species",
+     "description": "Adiabatic index of each species the gas carries, by name, where the species set the equation of state (a mixture of ideal gases): a species not listed takes the gas’s gamma"
     },
     "burn": {
      "anyOf": [
@@ -780,19 +794,27 @@
       }
      ],
      "title": "Burning",
-     "description": "Nuclear burning by the trained network of the 13-isotope alpha chain (aprox13), wherever the gas is hot and dense enough"
+     "description": "Burning of the gas, wherever it is hot and dense enough: nuclear, by the trained network of the 13-isotope alpha chain, or a single fuel to ash reaction at an Arrhenius rate"
     },
     "toolScale": {
      "type": "object",
      "properties": {
       "rho": {
-       "type": "number"
+       "type": "number",
+       "title": "Density",
+       "description": "The tools’ density scale is at least this",
+       "minimum": 0
       },
       "v": {
-       "type": "number"
+       "type": "number",
+       "title": "Speed",
+       "description": "The tools’ speed scale is at least this",
+       "minimum": 0
       }
      },
-     "additionalProperties": false
+     "additionalProperties": false,
+     "title": "Scale of the editing tools",
+     "description": "Least density and speed the editing tools (paint, push) measure their amounts against. They take the densest and fastest gas of the run, which leaves them nothing to go by in a box that holds next to nothing"
     }
    },
    "additionalProperties": false

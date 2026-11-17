@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { PRESET_IDS, presetSpec } from '../../src/presets/index';
 import { buildSetupBodies, checkSetup, diskMass } from '../../src/setup/check';
+import { formOf, OPTION_BY_PATH } from '../../src/setup/options';
 import { FLOWS } from '../../src/setup/parts/flow';
 import { emptySetup, type DiskPart, type Part, type SetupSpec } from '../../src/setup/spec';
 import { getSetup, LIBRARY_KEY, listSetups, removeSetup, renameSetup, saveSetup, type SetupStore } from '../../src/ui/setup/library';
@@ -265,5 +266,38 @@ describe('the library of setups', () => {
     expect(removeSetup('a', refuses)).toBe(false);
     // No browser here at all: the default store is none.
     expect(listSetups()).toEqual([]);
+  });
+});
+
+describe('shapes of a group', () => {
+  const forms = (path: string) => {
+    const c = OPTION_BY_PATH[path].control;
+    if (c.type !== 'group' || !c.forms) throw new Error(`${path} has no shapes`);
+    return c.forms;
+  };
+
+  it('tells units by mass from units by density and velocity', () => {
+    expect(formOf(forms('domain.units'), presetSpec('detonation-co')!.domain!.units).value).toBe('flow');
+    expect(formOf(forms('domain.units'), presetSpec('polytrope')!.domain!.units).value).toBe('mass');
+    expect(formOf(forms('domain.units'), undefined).value).toBe('mass');
+  });
+
+  it('asks the network, not fuel to ash burning, for its 13 species and physical units', () => {
+    const arrhenius = setup({ physics: { eos: 'ideal', species: ['fuel', 'ash'], burn: { fuel: 'fuel', ash: 'ash', q: 50, ea: 25, k: 1 } } });
+    expect(texts(arrhenius, 'error')).toEqual([]);
+    const network = setup({ physics: { eos: 'ideal', species: ['fuel', 'ash'], burn: { network: 'aprox13' } } });
+    expect(has(texts(network, 'error'), /Network \(aprox13\): needs The 13 species/)).toBe(true);
+  });
+
+  it('refuses fuel to ash burning where the species are nuclides that set the equation of state', () => {
+    const spec = setup({ physics: { eos: 'ideal', species: ['he4', 'c12'], burn: { fuel: 'he4', ash: 'c12', q: 50, ea: 25, k: 1 } } });
+    expect(has(texts(spec, 'error'), /Fuel to ash \(Arrhenius\): not available where every species is a nuclide/)).toBe(true);
+  });
+
+  it('wants fuel to ash burning to name species the gas carries', () => {
+    const spec = setup({ physics: { eos: 'ideal', species: ['he4'], burn: { fuel: 'fuel', ash: 'ash', q: 50, ea: 25, k: 1 } } });
+    const errors = texts(spec, 'error');
+    expect(has(errors, /its fuel, "fuel", is not a species/)).toBe(true);
+    expect(has(errors, /its ash, "ash", is not a species/)).toBe(true);
   });
 });

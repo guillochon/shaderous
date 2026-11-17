@@ -256,6 +256,19 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
   };
   guard(() => out.push(...ruleIssues(spec)));
 
+  // Fuel to ash burning: both are species the gas carries, and a flow with its own burning wins.
+  guard(() => {
+    const burn = spec.physics?.burn;
+    if (!burn || 'network' in burn) return;
+    const species = spec.physics?.species;
+    const carried = Array.isArray(species) ? species : [];
+    for (const [what, name] of [['fuel', burn.fuel], ['ash', burn.ash]] as const)
+      if (!carried.includes(name)) out.push({ level: 'error', path: `physics.burn.${what}`, text: `Burning: its ${what}, "${name}", is not a species the gas carries. Add it to Species` });
+    if (burn.fuel === burn.ash) out.push({ level: 'error', path: 'physics.burn.ash', text: 'Burning: its fuel and its ash are the same species' });
+    const flow = partsOf(spec).find((p) => p.kind === 'flow' && FLOWS[p.name]?.burn);
+    if (flow) out.push({ level: 'warning', path: 'physics.burn', text: `Burning: the flow "${(flow as { name: string }).name}" brings its own, which is used instead` });
+  });
+
   guard(() => {
     const parts = partsOf(spec);
     const ids = partIds(parts);

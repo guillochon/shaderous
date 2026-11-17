@@ -157,17 +157,24 @@ function conform(v: unknown, s: Schema, path: string, notes: string[], option: (
   }
   if ('nullable' in s) return v === null ? null : conform(v, s.nullable, path, notes, option, depth + 1);
   if ('any' in s) {
+    // The alternative that reads the value with the fewest notes: an object that fits one shape
+    // whole is not read as another that would drop half its keys.
     let first: Bad | undefined;
+    let best: { out: unknown; trial: string[] } | undefined;
     for (const alt of s.any) {
       const trial: string[] = [];
       try {
         const out = conform(v, alt, path, trial, option, depth + 1);
-        notes.push(...trial);
-        return out;
+        if (!best || trial.length < best.trial.length) best = { out, trial };
+        if (!trial.length) break;
       } catch (e) {
         if (!(e instanceof Bad)) throw e;
         first ??= e;
       }
+    }
+    if (best) {
+      notes.push(...best.trial);
+      return best.out;
     }
     throw first ?? wrong('another kind of value');
   }

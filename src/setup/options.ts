@@ -14,8 +14,9 @@ import { FLOWS } from './parts/flow';
 import { GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
 import { VIEW_MODES } from '../render/view_options';
 import { COMPOSITIONS } from '../units/composition';
+import { speciesNuclides } from '../species/mixture';
 import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
-import { LENGTH_UNITS, MASS_UNITS } from './units';
+import { DENSITY_UNITS, LENGTH_UNITS, MASS_UNITS, VELOCITY_UNITS } from './units';
 
 
 export type Value = string | number | boolean;
@@ -49,12 +50,47 @@ export type Control =
   | { type: 'faces' }
   /** one or several other parts, by id, of these kinds */
   | { type: 'ref'; kinds: PartKind[]; count: 1 | 2 | 'any' }
-  /** mass fractions by species name */
-  | { type: 'fractions' }
+  /** a number for each species, by name: mass fractions, unless `range` says otherwise */
+  | { type: 'fractions'; range?: { min: number; max?: number; step?: number }; /** what each number is ('mass fraction') */ of?: string }
   /** names, comma separated */
   | { type: 'names' }
-  /** fields of their own, present or not as a whole */
-  | { type: 'group'; optional: boolean; fields: Option[] };
+  /** fields of their own, present or not as a whole; `forms` where the object comes in more than one shape */
+  | { type: 'group'; optional: boolean; fields: Option[]; forms?: GroupForms };
+
+/**
+ * The shapes a group's object may take, told apart by which of its keys it has: units by a
+ * length and a mass, or by a length, a density and a velocity. The dialog offers them as a
+ * menu at the head of the group and shows only the fields of the shape it has.
+ */
+export interface GroupForms {
+  label: string;
+  tip: string;
+  choices: GroupForm[];
+}
+
+export interface GroupForm {
+  value: string;
+  label: string;
+  tip?: string;
+  /** keys of the object only this shape has (the first field of each path) */
+  keys: string[];
+  /** values written, over the fields' defaults, when the object takes this shape */
+  set?: Record<string, unknown>;
+  requires?: Rule[];
+  excludes?: Rule[];
+}
+
+/** The shape a group's object has: the first whose keys it holds, else the first. */
+export function formOf(forms: GroupForms, value: unknown): GroupForm {
+  const obj = value !== null && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  return forms.choices.find((c) => c.keys.some((k) => obj[k] !== undefined)) ?? forms.choices[0];
+}
+
+/** Whether a field of a group (its path within the group) belongs to a shape other than this one. */
+export function otherForm(forms: GroupForms, form: GroupForm, fieldPath: string): boolean {
+  const key = fieldPath.split('.')[0];
+  return !form.keys.includes(key) && forms.choices.some((c) => c.keys.includes(key));
+}
 
 export interface Option {
   /** where it sits in the document ('physics.gravity'); for a part's field, relative to the part ('soft', 'damp.rate') */
@@ -110,6 +146,7 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'bc.periodic': { label: 'A periodic face', of: (s) => faces(s).some((b) => b === 0) },
   'bc.allPeriodic': { label: 'Every face periodic', of: (s) => faces(s).every((b) => b === 0) },
   'units': { label: 'Physical units', of: (s) => !!s.domain?.units },
+  'species.nuclides': { label: 'Species that are all nuclides (they set the equation of state)', of: (s) => { const sp = s.physics?.species; return speciesNuclides(sp === 'aprox13' ? ['he4'] : sp) !== null; } },
   'species.aprox13': { label: 'The 13 species of the burning network', of: (s) => s.physics?.species === 'aprox13' },
   'burn.network': { label: 'Network burning', of: (s) => !!s.physics?.burn && 'network' in s.physics.burn },
   'magnetic': { label: 'A magnetic field', of: (s) => parts(s).some((p) => p.kind === 'field' || (p.kind === 'star' && !!p.field) || (p.kind === 'disk' && !!p.loops) || !!flowDef(p)?.potential || !!flowDef(p)?.face) },
@@ -188,6 +225,11 @@ export const OPTIONS: Option[] = [
   { path: 'run.checkpointDt', label: 'Checkpoint every', tip: 'Time between checkpoints, when the page is asked to save them: the value the Time panel starts with', page: 'run', control: num(0, undefined, { factor: 2, quantity: 'time' }), apply: 'live' },
   { path: 'run.tDyn', label: 'Dynamical time', tip: 'The time over which the flow visibly changes (a star’s sqrt(R³ / G M), a binary’s period): a movie takes a frame every 600th of it by default', page: 'run', control: num(0, undefined, { factor: 2, quantity: 'time' }), apply: 'live' },
   { path: 'run.startPaused', label: 'Start paused', tip: 'The run waits, paused, for Run', page: 'run', control: check, apply: 'live', default: false },
+  { path: 'physics.toolScale', label: 'Scale of the editing tools', tip: 'Least density and speed the editing tools (paint, push) measure their amounts against. They take the densest and fastest gas of the run, which leaves them nothing to go by in a box that holds next to nothing', page: 'run', apply: 'restart',
+    control: { type: 'group', optional: true, fields: [
+      { path: 'rho', label: 'Density', tip: 'The tools’ density scale is at least this', page: 'run', control: num(0, undefined, { factor: 2, quantity: 'density' }), apply: 'restart', default: 1 },
+      { path: 'v', label: 'Speed', tip: 'The tools’ speed scale is at least this', page: 'run', control: num(0, undefined, { factor: 2, quantity: 'velocity' }), apply: 'restart', default: 1 },
+    ] } },
   { path: 'view.mode', label: 'Opening view', tip: 'How the gas is drawn when the setup opens in 3D', page: 'run', control: pickOf(VIEW_MODES, ['volume', 'Volume'], ['slice', 'Slice'], ['projection', 'Projection']), apply: 'live', default: 'volume' },
   { path: 'view.field', label: 'Opening field', tip: 'The quantity shown when the setup opens (the View panel’s Field, by its number)', page: 'run', control: num(0, 29, { integer: true, step: 1 }), apply: 'live', default: 0 },
   { path: 'view.log', label: 'Logarithmic colors', tip: 'The color scale the setup opens with', page: 'run', control: check, apply: 'live', default: true },
@@ -201,12 +243,21 @@ export const OPTIONS: Option[] = [
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },
   { path: 'domain.supports2d', label: 'Makes sense in 2D', tip: 'The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only', page: 'domain', control: check, apply: 'live', default: false },
   { path: 'domain.units', label: 'Physical units', tip: 'What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units', page: 'domain', apply: 'restart',
-    control: { type: 'group', optional: true, fields: [
+    control: { type: 'group', optional: true,
+      forms: { label: 'Defined by', tip: 'What fixes the unit system besides its length', choices: [
+        { value: 'mass', label: 'Length and mass', tip: 'A length and a mass: the time unit is the one that makes G = 1, for gravity', keys: ['mass'] },
+        { value: 'flow', label: 'Length, density and velocity', tip: 'A length, a density and a velocity: the time unit is the length over the velocity, for gas with no gravity to set the clock', keys: ['density', 'velocity'] },
+      ] },
+      fields: [
       { path: 'name', label: 'Name', tip: 'A name for the unit system', page: 'domain', control: { type: 'text' }, apply: 'live', default: 'custom' },
       { path: 'length.value', label: 'Length', tip: 'This many of the unit beside it are one code unit of length', page: 'domain', control: num(1e-300, 1e300, { factor: 2 }), apply: 'restart', default: 1 },
       { path: 'length.unit', label: 'Length unit', tip: 'The unit of the length', page: 'domain', control: pick(...LENGTH_UNITS.map((u): [Value, string] => [u, u])), apply: 'restart', default: 'Rsun' },
       { path: 'mass.value', label: 'Mass', tip: 'This many of the unit beside it are one code unit of mass', page: 'domain', control: num(1e-300, 1e300, { factor: 2 }), apply: 'restart', default: 1 },
       { path: 'mass.unit', label: 'Mass unit', tip: 'The unit of the mass', page: 'domain', control: pick(...MASS_UNITS.map((u): [Value, string] => [u, u])), apply: 'restart', default: 'Msun' },
+      { path: 'density.value', label: 'Density', tip: 'This many of the unit beside it are one code unit of density', page: 'domain', control: num(1e-300, 1e300, { factor: 2 }), apply: 'restart', default: 1 },
+      { path: 'density.unit', label: 'Density unit', tip: 'The unit of the density', page: 'domain', control: pick(...DENSITY_UNITS.map((u): [Value, string] => [u, u])), apply: 'restart', default: 'g/cm3' },
+      { path: 'velocity.value', label: 'Velocity', tip: 'This many of the unit beside it are one code unit of velocity', page: 'domain', control: num(1e-300, 1e300, { factor: 2 }), apply: 'restart', default: 1 },
+      { path: 'velocity.unit', label: 'Velocity unit', tip: 'The unit of the velocity', page: 'domain', control: pick(...VELOCITY_UNITS.map((u): [Value, string] => [u, u])), apply: 'restart', default: 'km/s' },
     ] } },
 
   // ---- boundaries ----
@@ -231,11 +282,22 @@ export const OPTIONS: Option[] = [
   { path: 'physics.eosParams.ionRho', label: 'Saha density', tip: 'Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', linkKey: 'ionrho', cfg: 'eosParams.ionRho', show: { path: 'physics.eos', is: ['ionizing'] } },
   { path: 'physics.composition', label: 'Composition', tip: 'What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen', page: 'gas', control: pickOf(Object.keys(COMPOSITIONS) as (keyof typeof COMPOSITIONS)[], ['solar', 'Solar, ionized'], ['solarNeutral', 'Solar, neutral'], ['hydrogen', 'Hydrogen'], ['carbonOxygen', 'Carbon and oxygen']), apply: 'restart', default: 'solar' },
   { path: 'physics.species', label: 'Species', tip: 'Species whose mass fractions the gas carries, by name (he4, c12, ...), separated by commas; or aprox13 for the burning network’s thirteen. None by default', page: 'gas', control: { type: 'names' }, apply: 'restart' },
-  { path: 'physics.burn', label: 'Burning', tip: 'Nuclear burning by the trained network of the 13-isotope alpha chain (aprox13), wherever the gas is hot and dense enough', page: 'gas', apply: 'restart',
-    requires: [{ fact: 'eos.energy' }, { fact: 'species.aprox13' }, { fact: 'units' }],
-    control: { type: 'group', optional: true, fields: [
+  { path: 'physics.speciesGamma', label: 'Gamma by species', tip: 'Adiabatic index of each species the gas carries, by name, where the species set the equation of state (a mixture of ideal gases): a species not listed takes the gas’s gamma', page: 'gas', control: { type: 'fractions', range: { min: 1, max: 100, step: 0.05 }, of: 'gamma' }, apply: 'restart' },
+  { path: 'physics.burn', label: 'Burning', tip: 'Burning of the gas, wherever it is hot and dense enough: nuclear, by the trained network of the 13-isotope alpha chain, or a single fuel to ash reaction at an Arrhenius rate', page: 'gas', apply: 'restart',
+    requires: [{ fact: 'eos.energy' }],
+    control: { type: 'group', optional: true,
+      forms: { label: 'Reaction', tip: 'What burns, and at what rate', choices: [
+        { value: 'network', label: 'Network (aprox13)', tip: 'Nuclear burning of the 13-isotope alpha chain, by its trained network', keys: ['network', 'limiter'], requires: [{ fact: 'species.aprox13' }, { fact: 'units' }] },
+        { value: 'arrhenius', label: 'Fuel to ash (Arrhenius)', tip: 'One reaction, fuel to ash: the fuel fraction f falls as df/dt = -k f exp(-Ea / T), and each unit of mass burned releases q', keys: ['fuel', 'ash', 'q', 'ea', 'k'], set: { inShocks: true }, excludes: [{ fact: 'species.nuclides', reason: 'Not available where every species is a nuclide (he4, c12, ...): those set the equation of state, which one reaction from fuel to ash cannot. Name the fuel and ash species otherwise' }] },
+      ] },
+      fields: [
       { path: 'network', label: 'Network', tip: 'The burning network', page: 'gas', control: pick(['aprox13', 'aprox13 (13 isotopes)']), apply: 'restart', default: 'aprox13' },
-      { path: 'inShocks', label: 'Burn inside shocks', tip: 'Let cells the shock detector flags burn. Off, as in most supernova codes: a captured shock is a few cells of numerical smearing', page: 'gas', control: check, apply: 'restart', default: false },
+      { path: 'fuel', label: 'Fuel', tip: 'The species that burns: one the gas carries (Species)', page: 'gas', control: { type: 'text' }, apply: 'restart', default: 'fuel' },
+      { path: 'ash', label: 'Ash', tip: 'The species it burns to: one the gas carries (Species)', page: 'gas', control: { type: 'text' }, apply: 'restart', default: 'ash' },
+      { path: 'q', label: 'Heat release q', tip: 'Energy released per unit mass of fuel burned, in code units', page: 'gas', control: num(0, undefined, { factor: 1.25 }), apply: 'restart', default: 50 },
+      { path: 'ea', label: 'Activation temperature Ea', tip: 'The rate goes as exp(-Ea / T), T the code temperature p / ρ', page: 'gas', control: num(0, undefined, { factor: 1.25 }), apply: 'restart', default: 25 },
+      { path: 'k', label: 'Rate constant k', tip: 'The rate per unit time of fuel far above its activation temperature: df/dt = -k f exp(-Ea / T)', page: 'gas', control: num(0, undefined, { factor: 2 }), apply: 'restart', default: 1 },
+      { path: 'inShocks', label: 'Burn inside shocks', tip: 'Let cells the shock detector flags burn. Off, as in most supernova codes: a captured shock is a few cells of numerical smearing. Fuel to ash burning burns in them unless told not to', page: 'gas', control: check, apply: 'restart', default: false },
       { path: 'limiter', label: 'Burning limiter f', tip: 'No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013). 0 switches it off', page: 'gas', control: num(0, 1, { step: 0.05 }), apply: 'restart', default: 0 },
     ] } },
   { path: 'physics.floors.rho', label: 'Density floor', tip: 'No cell is thinner than this', page: 'gas', control: num(0, undefined, { factor: 10, quantity: 'density' }), apply: 'restart', default: 1e-10 },
@@ -512,7 +574,13 @@ export function ruleIssues(spec: SetupSpec): Issue[] {
         const c = o.control.choices.find((k) => k.value === v);
         if (c) add(`${name}${o.label}: ${c.label}`, prefix + o.path, unavailable(c, facts));
       }
-      if (o.control.type === 'group') visit(o.control.fields, v, `${prefix}${o.path}.`, name, facts);
+      if (o.control.type === 'group') {
+        if (o.control.forms) {
+          const f = formOf(o.control.forms, v);
+          add(`${name}${o.label}: ${f.label}`, prefix + o.path, unavailable(f, facts));
+        }
+        visit(o.control.fields, v, `${prefix}${o.path}.`, name, facts);
+      }
     }
   };
   visit(OPTIONS, spec, '', '', factsOf(spec));
