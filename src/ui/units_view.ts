@@ -15,7 +15,7 @@ export function fieldMeasure(field: number, gamma: number): Measure {
     case 3: return 'pressure';
     case 4: case 5: case 6: case 7: return 'velocity';
     case 9: return [1 - gamma, 3 * gamma - 1, -2];
-    case 10: return 'powerDensity';
+    case 10: case 30: return 'powerDensity';
     case 11: case 12: return 'rate';
     case 13: return [1, -4, 0];
     case 15: return 'specificEnergy';

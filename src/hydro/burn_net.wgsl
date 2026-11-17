@@ -18,6 +18,9 @@
 // changes alike (as all rates scaled by one factor, to first order): mass stays conserved and
 // no species goes below zero. It fades as the grid is refined. The cell size comes from the
 // <burn_dx> slot: the grid's, or on the block atlas the cell's block's.
+//
+// HO gets every texel's heating rate over the step, the energy released per unit volume and
+// time (0 where nothing burned), for the view's nuclear heating and the diagnostics' total.
 // Float64 mirror of one network step: netStep() in src/burn/network.ts.
 #include "hydro/common.wgsl"
 #include <eos>
@@ -41,6 +44,8 @@ struct NetBurn {
 @group(0) @binding(7) var O2: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(8) var SO: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(9) var<uniform> NB: NetBurn;
+// store_heat(c, rate): to HO (binding 11), or nowhere where the device has no storage texture to spare.
+#include <burn_heat>
 
 // rho X in groups of four, from rho and mass fractions.
 fn grouped(rho: f32, X: array<f32, 13>) -> array<vec4<f32>, NG> {
@@ -68,6 +73,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // Solid and fixed cells keep what they hold.
   let held = abs(u2.w) > 0.5;
   let rho_cgs = rho * NB.a.x;
+  var heat = 0.0;
   if (rho > 0.0 && sum > 0.0 && rho_cgs >= NB.b.y && !shocked && !held && EOS_HAS_ENERGY) {
     var X: array<f32, 13>;
     for (var i = 0u; i < 13u; i++) { X[i] = max(x[i / 4u][i % 4u], 0.0) / sum; }
@@ -112,9 +118,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         let j = i % 4u;
         x[g][j] = max(x[g][j] + rho * dX[i], 0.0);
       }
+      if (clock.dt > 0.0) { heat = (e - e0) / clock.dt; }
       u2 = vec4<f32>(u2.x + (e - e0), e, u2.zw);
     }
   }
+  store_heat(c, heat);
   textureStore(O1, c, u1);
   textureStore(O2, c, u2);
   for (var g = 0u; g < NG; g++) { textureStore(SO, c + species_group(i32(g), stride), x[g]); }

@@ -5,6 +5,7 @@
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
 @group(0) @binding(3) var PHI: texture_3d<f32>;
+@group(0) @binding(4) var HEAT: texture_3d<f32>;   // burning's heating rate over the last step (one texel of 0 without)
 
 fn red_cell(c: vec3<i32>) -> Red {
   let u1 = textureLoad(U1, c, 0);
@@ -63,5 +64,6 @@ fn red_cell(c: vec3<i32>) -> Red {
   r0[20] = rho * dv * x.x;
   r0[21] = rho * dv * x.y;
   r0[22] = rho * dv * x.z;
+  r0[23] = textureLoad(HEAT, c, 0).x * dv;
   return r0;
 }

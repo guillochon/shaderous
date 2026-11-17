@@ -16,6 +16,9 @@
 // passes through states no real gas visits: burning there sets the front's speed by the
 // scheme, not the reaction (Colella, Majda & Roytburd 1986). With B.a.w zero, cells the
 // predictor flags as shocks (hydro/predictor.wgsl) do not burn, as FLASH's default.
+//
+// HO gets every texel's heating rate over the step, the energy released per unit volume and
+// time (0 where nothing burned), for the view's nuclear heating and the diagnostics' total.
 // Float64 mirror: burnCell() in src/burn/burn.ts.
 #include "hydro/common.wgsl"
 #include <eos>
@@ -35,6 +38,8 @@ struct Burn {
 @group(0) @binding(7) var O2: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(8) var SO: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(9) var<uniform> B: Burn;
+// store_heat(c, rate): to HO (binding 11), or nowhere where the device has no storage texture to spare.
+#include <burn_heat>
 
 const BURN_SUBSTEPS = 8;
 
@@ -62,6 +67,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let shocked = B.a.w < 0.5 && textureLoad(PB, c, 0).z > 0.5;
   // Solid and fixed cells keep what they hold.
   let held = abs(u2.w) > 0.5;
+  var heat = 0.0;
   if (rho > 0.0 && fuel > 0.0 && !shocked && !held && EOS_HAS_ENERGY) {
     let q = B.a.x;
     let ea = B.a.y;
@@ -92,9 +98,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (burned > 0.0) {
       x[fi / 4u][fi % 4u] = max(fuel - burned, 0.0);
       x[ai / 4u][ai % 4u] += burned;
+      if (clock.dt > 0.0) { heat = (e - u2.y) / clock.dt; }
       u2 = vec4<f32>(u2.x + (e - u2.y), e, u2.zw);
     }
   }
+  store_heat(c, heat);
   textureStore(O1, c, u1);
   textureStore(O2, c, u2);
   for (var g = 0u; g < NG; g++) { textureStore(SO, c + species_group(i32(g), stride), x[g]); }

@@ -16,7 +16,7 @@ import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
 import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
-import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { type CellProbe, conducts, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type LimiterKind, type Outline, type RiemannKind, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -25,7 +25,7 @@ import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { COOLING_LABELS, type CoolingKind, type CoolingParams } from '../cooling/cooling';
-import { familyById, FIELD_MENU, MAGNETIC_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
+import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
@@ -3770,6 +3770,11 @@ function syncSpeciesFields(sel: HTMLSelectElement) {
   const mag = [...sel.querySelectorAll('optgroup')].find((g) => g.label === 'Magnetic field');
   if (mag) mag.hidden = !mhd;
   if (!mhd && MAGNETIC_FIELDS.includes(view.field)) view.field = 0;
+  // The nuclear heating, only for a run that burns.
+  const burns = !!burnSpec(cfg);
+  const heat = sel.querySelector<HTMLOptionElement>(`option[value="${NUCLEAR_HEATING_FIELD}"]`);
+  if (heat) heat.hidden = !burns;
+  if (!burns && view.field === NUCLEAR_HEATING_FIELD) view.field = 0;
   const species = cfg.problem.species ?? [];
   const key = species.join(',');
   let group = sel.querySelector<HTMLOptGroupElement>('optgroup[data-species]');
@@ -3847,13 +3852,15 @@ function liveText(parent: HTMLElement): (v: string) => void {
 }
 
 // [label, tooltip, CSV column, a count]; DIAG_SIDE puts each in the left (0) or right column.
-// The last MAG_ROWS are a magnetic field's, shown only with one.
+// BURN_COL is burning's, shown only for a run that burns; the last MAG_ROWS are a magnetic
+// field's, shown only with one.
 const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['t', 'Time', 't'], ['dt', 'Timestep', 'dt'], ['steps', 'Steps taken', 'steps', true], ['mass', 'Total mass', 'mass'],
   ['Mach', 'Maximum Mach number', 'max_mach'], ['floor', 'Cells at the density or pressure floor (emptied voids, usually)', 'floored_cells', true],
   ['Jeans', 'Cells whose thermal Jeans length is under 4 cells. With the Jeans floor on these are the cells it is holding up', 'jeans_unresolved_cells', true],
   ['p x', 'Total x momentum', 'p_x'], ['p y', 'Total y momentum', 'p_y'], ['p z', 'Total z momentum', 'p_z'],
   ['E kin', 'Kinetic energy', 'e_kin'], ['E int', 'Internal energy', 'e_int'], ['E grav', 'Gravitational energy', 'e_grav'], ['E tot', 'Total energy (with a magnetic field, its energy included)', 'e_tot'],
+  ['L nuc', 'Nuclear heating: the energy burning released per unit time over the last step, summed over the gas', 'l_nuc'],
   ['E mag', 'Magnetic energy, the sum of B² / 2 over the cells (code units: B_Gauss = √(4π) B)', 'e_mag'],
   ['|B| max', 'Largest field strength at a cell center (code units: B_Gauss = √(4π) B)', 'b_max'],
   ['β min', 'Least plasma beta, 2p / B², of any cell: below 1 the field’s pressure dominates the gas’s', 'beta_min'],
@@ -3866,17 +3873,19 @@ const DIAG_ROWS: [string, string, string, boolean?][] = [
 /** A disk's rows (Problem.disk), the last of the field's. */
 const DISK_ROWS = 4;
 const MAG_ROWS = 4 + DISK_ROWS;
-// Seven a side; a field's four rows two a side (|B| max, beta min left; E mag, div B right), and
-// a disk's likewise (the alphas left, the Qs right).
-const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 1];
+/** Burning's row (nuclear heating). */
+const BURN_COL = 14;
+// Seven a side; burning's row left; a field's four rows two a side (|B| max, beta min left;
+// E mag, div B right), and a disk's likewise (the alphas left, the Qs right).
+const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1];
 /** What each diagnostic measures, in DIAG_ROWS order (the field's in code units). */
-const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'energy', null, null, null, null, null, null, null];
+const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'power', 'energy', null, null, null, null, null, null, null];
 /** The diagnostics in DIAG_ROWS order. */
 const diagValues = (d: Diagnostics): number[] => {
   const m = d.magnetic;
   const k = m?.disk;
   return [
-    d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot,
+    d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot, d.nuclearHeating,
     ...(m ? [m.eMag, m.bMax, m.betaMin, m.divB] : new Array<number>(MAG_ROWS - DISK_ROWS).fill(NaN)),
     ...(k ? [k.alphaMaxwell, k.alphaReynolds, k.qz, k.qphi] : new Array<number>(DISK_ROWS).fill(NaN)),
   ];
@@ -3994,12 +4003,16 @@ function diagCell(col: number, label: string, into: Element): DiagCell {
 }
 const diagCells = DIAG_ROWS.map(([label], i) => diagCell(i, label, diagCols[DIAG_SIDE[i]]));
 /** Show the magnetic field's rows with one, hide them without; a disk's only for a disk. */
-function showMagneticRows(on: boolean, disk = false) {
+/** Show a magnetic field's rows (and a disk's), and burning's. */
+function showMagneticRows(on: boolean, disk = false, burn = false) {
   $('diag').classList.toggle('mag', on);
   $('diag').classList.toggle('disk', on && disk);
+  $('diag').classList.toggle('burn', burn);
   for (const c of diagCells) {
-    if (!magneticCol(c.col)) continue;
-    const show = on && (disk || !diskCol(c.col));
+    let show: boolean;
+    if (c.col === BURN_COL) show = burn;
+    else if (magneticCol(c.col)) show = on && (disk || !diskCol(c.col));
+    else continue;
     for (const el of [c.dt, c.dd, c.spark]) el.style.display = show ? '' : 'none';
   }
 }
@@ -4076,11 +4089,15 @@ function drawDiagPlot() {
 function showDiagnostics(d: Diagnostics, of: Simulation) {
   showToolValues();
   const last = diagHistory.rows[diagHistory.rows.length - 1];
+  // A clock held short of the end (a movie's frame time, a checkpoint) reads dt = 0, the step it
+  // is about to take: show the last step's instead. With burning the steps shrink to about the
+  // frame interval, and every other readout would otherwise be 0.
+  if (d.dt === 0 && d.steps > 0 && last && of === diagOf && d.t < cfg.tEnd * (1 - 1e-5)) d = { ...d, dt: last[1] };
   if (of !== diagOf) {
     diagHistory.clear();
     sinkPrev = [];
     diagOf = of;
-    showMagneticRows(!!of.cfg.problem.mhd, !!of.cfg.problem.disk);
+    showMagneticRows(!!of.cfg.problem.mhd, !!of.cfg.problem.disk, !!burnSpec(of.cfg));
     showDiagUnits();
   } else if (last && d.steps < last[2]) sinkPrev = []; // the run went back: its history starts again
   const u = units();
@@ -4111,8 +4128,9 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
 /** Save the diagnostics of the run so far as CSV, with the columns of every sink that was in it. */
 function exportDiagnostics() {
   const width = diagHistory.rows.reduce((w, r) => Math.max(w, r.length), BASE_COLS);
-  // A magnetic field's columns only with one, a disk's only for a disk.
-  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) ? [i] : []));
+  // A magnetic field's columns only with one, a disk's only for a disk, burning's only for a run that burns.
+  const burns = !!burnSpec(cfg);
+  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) && (i !== BURN_COL || burns) ? [i] : []));
   const csv = diagHistory.csv(cols, cols.map((i) => DIAG_COLS[i].csv!));
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');

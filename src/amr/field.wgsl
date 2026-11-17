@@ -47,6 +47,8 @@ struct View {
 // round-off, whose divergence over its own |B| and whose beta would otherwise set the color range.
 // A placeholder without a field.
 @group(0) @binding(14) var<storage, read> MAG: array<f32, 4>;
+// Burning's heating rate over the last step, per unit volume (burn/burn.ts); one texel of 0 without.
+@group(0) @binding(15) var HEAT: texture_3d<f32>;
 #include "mhd/mri.wgsl"
 
 // The magnetic fields, F_MAGNETIC onward, at the leaf cell at atlas texel c, whose gas pressure
@@ -132,6 +134,7 @@ fn leaf_value(f: Leaf) -> Cell {
   comp_use(comp_tex(c));
   var x = field_value(V.field, u1, u2, g, f32(f.level), phi);
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
+  if (V.field == F_NUCLEAR_HEATING) { x = textureLoad(HEAT, c, 0).x; }
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
   if (V.field == F_TIME_BIN) { x = f32(TBIN[1u + u32(f.slot)]); }
   if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + N_MAGNETIC) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y), u1.x, xp); }

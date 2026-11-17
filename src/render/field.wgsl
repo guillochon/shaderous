@@ -39,6 +39,8 @@ fn shown(rho: f32) -> f32 {
 // round-off, whose divergence over its own |B| and whose beta would otherwise set the color range.
 // A placeholder without a field.
 @group(0) @binding(14) var<storage, read> MAG: array<f32, 4>;
+// Burning's heating rate over the last step, per unit volume (burn/burn.ts); one texel of 0 without.
+@group(0) @binding(15) var HEAT: texture_3d<f32>;
 
 #include "mhd/common.wgsl"
 #include "mhd/mri.wgsl"
@@ -103,6 +105,7 @@ fn voxel(c: vec3<i32>) -> Cell {
   comp_use(comp_tex(c));
   var x = field_value(V.field, u1, u2, g, 0.0, phi);
   if (V.field == F_MASS_FRACTION) { x = mass_fraction(c); }
+  if (V.field == F_NUCLEAR_HEATING) { x = textureLoad(HEAT, c, 0).x; }
   // (With MHD, PB is the half-step state's second texture, and the flag its fourth channel.)
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0)[select(2, 3, (P.flags & 32u) != 0u)]; }
   if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + N_MAGNETIC) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y), u1.x, xp); }

@@ -9,7 +9,7 @@ import { bindGroup, computePipeline, type Bindable } from '../gpu/device';
 import { assemble } from '../gpu/shaders';
 import { speciesConst } from '../species/species';
 import type { Eos } from '../eos/eos';
-import { NetBurnPass, netUnits, type NetworkBurnSpec } from './network';
+import { burnHeatSlot, NetBurnPass, netUnits, type NetworkBurnSpec } from './network';
 import type { Composition } from '../units/composition';
 import type { UnitSystem } from '../units/units';
 
@@ -136,6 +136,8 @@ export interface BurnTargets {
   species: GPUTexture[];
   /** the predictor's second texture: (p, scalar, shock flag, first order) */
   pb: GPUTexture;
+  /** r32float, laid out as the state: each texel's heating rate over the last step (written) */
+  heat: GPUTexture;
   /** the composition moments' texture, where the species set the equation of state */
   comp?: GPUTexture;
   /** on the block atlas: the block table (the network's burning limiter reads cell sizes from it) */
@@ -184,7 +186,8 @@ export class BurnPass {
 
   static async create(d: GPUDevice, spec: BurnSpec, species: readonly string[] | undefined, t: BurnTargets): Promise<BurnPass> {
     const [fi, ai] = burnIndices(spec, species);
-    const code = assemble('hydro/burn.wgsl', { eos: t.slots.eos, comp: t.slots.comp, species_n: speciesConst(t.groups) });
+    const heat = burnHeatSlot(d, 3);
+    const code = assemble('hydro/burn.wgsl', { eos: t.slots.eos, comp: t.slots.comp, species_n: speciesConst(t.groups), burn_heat: heat.slot });
     const pipe = await computePipeline(d, code, 'burn');
     const uniform = d.createBuffer({ label: 'burn', size: BURN_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     const buf = new ArrayBuffer(BURN_BYTES);
@@ -198,6 +201,7 @@ export class BurnPass {
           0: t.params, 1: t.clock, 2: v(t.state[s][0]), 3: v(t.state[s][1]), 4: v(t.pb), 5: v(t.species[q]),
           6: v(t.state[1 - s][0]), 7: v(t.state[1 - s][1]), 8: v(t.species[1 - q]), 9: uniform,
         };
+        if (heat.bound) r[11] = v(t.heat);
         return bindGroup(d, pipe, r, 'burn');
       }),
     );

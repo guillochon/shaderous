@@ -59,6 +59,7 @@ export const FIELDS = [
   'Shock', 'Time bin',
   'Magnetic field x', 'Magnetic field y', 'Magnetic field z', 'Magnetic field strength', 'Plasma beta', 'Magnetic divergence',
   'MRI quality Q_z', 'MRI quality Q_φ',
+  'Nuclear heating',
 ] as const;
 /** The mass fraction field: one menu entry per species the run carries (ViewState.species). */
 export const MASS_FRACTION_FIELD = 19;
@@ -68,12 +69,14 @@ export const SHOCK_FIELD = 20;
 export const TIME_BIN_FIELD = 21;
 /** The magnetic fields (mhd/mhd.ts): B_x, B_y, B_z, |B|, plasma beta, |div B| dx / |B|. Shown only for a run with a field. */
 export const MAGNETIC_FIELDS: readonly number[] = [22, 23, 24, 25, 26, 27, 28, 29];
+/** Burning's heating rate over the last step (burn/burn.ts). Shown only for a run that burns. */
+export const NUCLEAR_HEATING_FIELD = 30;
 /**
  * The field menu: FIELDS by index, in groups (the indices themselves are the shaders' order).
  * A run with species also gets a Composition group, one mass fraction per species.
  */
 export const FIELD_MENU: { group: string; fields: number[] }[] = [
-  { group: 'Gas', fields: [0, 3, 1, 9, 10, 2] },
+  { group: 'Gas', fields: [0, 3, 1, 9, 10, 30, 2] },
   { group: 'Flow', fields: [4, 5, 6, 7, 8, 16] },
   { group: 'Derivatives', fields: [11, 12, 13, 20] },
   { group: 'Gravity', fields: [15, 17] },
@@ -112,6 +115,7 @@ export const FIELD_TIPS = [
   'The discrete divergence of the magnetic field from the cell’s six faces, |∇·B| dx, over the strongest |B| anywhere (as the ∇·B diagnostic): zero up to round-off, since constrained transport keeps it there',
   'With a point mass: cells across the fastest-growing wavelength of the magnetorotational instability for the field’s vertical part, Q_z = 2π |B_z| / (√ρ Ω dx), Ω the Keplerian angular velocity about the mass. The MRI grows at its proper rate where Q_z is above about 8 (Hawley, Guan & Krolik 2011)',
   'With a point mass: as Q_z, for the field’s part along the orbit, Q_φ = 2π |B_φ| / (√ρ Ω dx). Above about 20 the turbulence the MRI drives is resolved (Hawley, Guan & Krolik 2011)',
+  'Energy nuclear burning released per unit volume and time over the last step: where the fuel is burning, and how fast',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
 export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12, 22, 23, 24]);

@@ -405,10 +405,28 @@ export interface NetBurnTargets {
   state: GPUTexture[][];
   species: GPUTexture[];
   pb: GPUTexture;
+  /** each texel's heating rate over the last step, written (r32float) */
+  heat: GPUTexture;
   /** the composition moments' texture, where the species set the equation of state */
   comp?: GPUTexture;
   /** on the block atlas: the block table (binding 30), from which each cell's size is read */
   blockTable?: GPUBuffer;
+}
+
+/**
+ * The <burn_heat> slot of the burn passes: each texel's heating rate to the heat texture
+ * (binding 11), if the device allows one more storage texture than the pass's `writes` others;
+ * otherwise nowhere, and the heating reads 0. WebGPU guarantees 4, the network's pass with the
+ * composition's moments writes 4 without it, and most adapters allow 8 (gpu/device.ts asks).
+ */
+export function burnHeatSlot(d: GPUDevice, writes: number): { slot: string; bound: boolean } {
+  if (d.limits.maxStorageTexturesPerShaderStage > writes) {
+    return {
+      slot: '@group(0) @binding(11) var HO: texture_storage_3d<r32float, write>;\nfn store_heat(c: vec3<i32>, h: f32) { textureStore(HO, c, vec4<f32>(h, 0.0, 0.0, 0.0)); }\n',
+      bound: true,
+    };
+  }
+  return { slot: 'fn store_heat(c: vec3<i32>, h: f32) {}\n', bound: false };
 }
 
 /** The species a problem must carry to burn with the network, checked. */
@@ -434,8 +452,10 @@ export class NetBurnPass {
 
   static async create(d: GPUDevice, spec: NetworkBurnSpec, species: readonly string[] | undefined, units: NetUnits, t: NetBurnTargets): Promise<NetBurnPass> {
     checkNetSpecies(species);
+    // Writes O1, O2, the species and, where the species set the equation of state, their moments.
+    const heat = burnHeatSlot(d, t.comp ? 4 : 3);
     const code = assemble('hydro/burn_net.wgsl', {
-      eos: t.slots.eos, comp: t.slots.comp, species_n: speciesConst(t.groups), burn_net: netSlot(),
+      eos: t.slots.eos, comp: t.slots.comp, species_n: speciesConst(t.groups), burn_net: netSlot(), burn_heat: heat.slot,
       burn_dx: t.blockTable ? BURN_DX_ATLAS : BURN_DX_UNIFORM,
     });
     const pipe = await computePipeline(d, code, 'burn network');
@@ -459,6 +479,7 @@ export class NetBurnPass {
           6: v(t.state[1 - s][0]), 7: v(t.state[1 - s][1]), 8: v(t.species[1 - q]), 9: uniform, 10: wbuf,
         };
         if (t.comp) r[26] = v(t.comp);
+        if (heat.bound) r[11] = v(t.heat);
         // The limiter reads each cell's size from it (burn_cell_dx), on or off: the code is there either way.
         if (t.blockTable) r[30] = t.blockTable;
         return bindGroup(d, pipe, r, 'burn network');

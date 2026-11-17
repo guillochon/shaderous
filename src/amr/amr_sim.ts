@@ -33,7 +33,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
-import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec } from '../sim';
+import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -124,6 +124,8 @@ export class AmrSim implements Simulation {
   state: GPUTexture[][] = [];
   private prim: GPUTexture[] = [];
   private pred: GPUTexture[] = [];
+  /** Burning: each texel's heating rate over the last step (r32float; one texel without burning). */
+  private heat!: GPUTexture;
   /**
    * Species (species/species.ts), in atlases laid out like the state's with the groups of four
    * stacked along z, `speciesDepth` texels apart: rho X ping-pong with its own parity
@@ -409,6 +411,8 @@ export class AmrSim implements Simulation {
           : { lo: { buffer: this.massFlux, offset: 0, size: window }, hi: { buffer: this.massFlux, offset: window, size: bytes - window }, split: window / 4 };
       if (this.compCoeffs) this.comp = t('composition');
     }
+    // Burning: each texel's heating rate over the last step (burn/burn.ts); else one texel of nothing.
+    this.heat = burnSpec(cfg) ? tex3d(d, side, 'r32float', 'nuclear heating', this.layers * (cfg.ndim === 2 ? 1 : PAD)) : noHeat(d);
     const m = nr << this.levels;
     this.idx = d.createTexture({
       label: 'leaf index',
@@ -457,7 +461,8 @@ export class AmrSim implements Simulation {
     // half step and as fractions), the composition's moments where they set the equation of
     // state, and their face mass fluxes: for the 13 network species, more than the rest of a
     // block together.
-    const texel = 9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_BYTES : 0) + speciesGroups * 4 * 16 + (speciesGroups > 0 && comp ? 16 : 0);
+    // (Burning, which needs species, adds its heating rate: 4 bytes a texel, counted with them.)
+    const texel = 9 * 16 + 2 * 4 + (mhd ? MHD_BLOCK_BYTES : 0) + speciesGroups * 4 * 16 + (speciesGroups > 0 ? 4 : 0) + (speciesGroups > 0 && comp ? 16 : 0);
     return PAD ** ndim * texel + (mhd ? registerBytes(ndim) : 0) + (speciesGroups > 0 ? speciesFaceBytes(ndim) : 0);
   }
 
@@ -705,7 +710,7 @@ export class AmrSim implements Simulation {
       DIAG_OPS,
       'amr/diagnostics.wgsl',
       slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 30: this.bt, ...this.compIn })),
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 4: v(this.heat), 30: this.bt, ...this.compIn })),
       'amr diagnostics',
     );
     diag.catch(() => {}); // a failure is reported where it is awaited, below
@@ -845,7 +850,7 @@ export class AmrSim implements Simulation {
       // Every texel of the atlas: the pass is pointwise, and copies what it does not burn.
       this.burn = await createBurnPass(d, burn, { ...this.cfg.problem, units: problemUnits(this.cfg.problem, this.cfg.params) }, {
         dims: [t.width, t.height, t.depthOrArrayLayers], stride: this.speciesDepth, groups: this.speciesGroups, slots: hydroSlots(this.cfg),
-        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], comp: this.comp, blockTable: this.bt,
+        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], heat: this.heat, comp: this.comp, blockTable: this.bt,
       });
     }
   }
@@ -2566,7 +2571,7 @@ export class AmrSim implements Simulation {
       2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(),
       6: (this.mhd?.prim ?? this.prim[0]).createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(),
       13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(), 29: this.bins, 30: this.bt, 20: this.bh,
-      14: this.mhd?.magResult ?? this.noMag(),
+      14: this.mhd?.magResult ?? this.noMag(), 15: this.heat.createView(),
     };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
@@ -2920,6 +2925,7 @@ export class AmrSim implements Simulation {
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     for (const t of [...this.prim, ...this.pred, this.idx, this.gfield, this.dummyPhi, ...this.species]) t.destroy();
+    this.heat?.destroy();
     this.comp?.destroy();
     this.speciesX?.destroy();
     this.speciesHalf?.destroy();

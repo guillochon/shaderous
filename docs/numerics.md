@@ -904,6 +904,17 @@ than 10 ms is split into network steps.
 - **Limiter.** Optionally, no cell takes in burning energy faster than $`f_b\,e/t_s`$
   ([Kushnir et al. 2013][Kushnir2013]); each network step is then scaled down as a whole.
   Off by default.
+- **Heating rate.** The burn pass writes each cell's energy released over the step, divided by
+  the step, to a texture of its own: the view "Nuclear heating" (per unit volume) and the
+  diagnostic L nuc (summed over the gas) read it.
+- **No neutrino losses.** Neither the reference network nor the simulator takes energy out as
+  thermal neutrinos (pair, photo-, plasma and bremsstrahlung). In a detonation they are
+  negligible: some $`10^{13}`$-$`10^{15}`$ erg g$`^{-1}`$ s$`^{-1}`$ at $`5\times10^9`$ K and
+  $`10^7`$-$`10^8`$ g cm$`^{-3}`$, against a few $`10^{17}`$ erg g$`^{-1}`$ released within
+  the burning time, under a percent over the second or so the hot ash takes to expand. They
+  matter over longer times (carbon simmering before a Chandrasekhar-mass explosion, the
+  cooling of a merger remnant), and electron captures, not thermal neutrinos, matter in
+  nuclear statistical equilibrium above about $`10^9`$ g cm$`^{-3}`$.
 
 ## 21. Ideal MHD (in development)
 

@@ -625,13 +625,20 @@ export function packBrush(b: BrushOp): ArrayBuffer {
   return buf;
 }
 
+/** Channels of the diagnostics reduction (DIAG_OPS). */
+const DIAG_CHANNELS = 24;
 /** Number of floats the diagnostics readback holds: clock (4), reduction, the Masses block. */
-export const DIAG_FLOATS = 4 + 23 + MASS_FLOATS;
+export const DIAG_FLOATS = 4 + DIAG_CHANNELS + MASS_FLOATS;
+
+/** Burning's heating rate texture where a run does not burn: one texel of nothing. */
+export function noHeat(d: GPUDevice): GPUTexture {
+  return d.createTexture({ label: 'no nuclear heating', size: [1, 1, 1], dimension: '3d', format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
+}
 
 /** Decode a diagnostics readback: [clock (4), reduction channels, the Masses block]. */
 export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
   const r = a.subarray(4);
-  const masses = unpackMasses(a.subarray(4 + 23), nMasses);
+  const masses = unpackMasses(a.subarray(4 + DIAG_CHANNELS), nMasses);
   const ranges: [number, number][] = [];
   for (let i = 0; i < 5; i++) ranges.push([r[10 + 2 * i], r[11 + 2 * i]]);
   return {
@@ -647,6 +654,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
     maxMach: r[7],
     floored: r[8],
     jeansUnresolved: r[9],
+    nuclearHeating: r[23],
     com: [r[20] / r[0], r[21] / r[0], r[22] / r[0]],
     perturber: masses.length ? (masses[0].pos as [number, number, number]) : null,
     masses,
@@ -706,7 +714,7 @@ export function packParams(
 }
 
 // Channel layout of the diagnostics reduction (hydro/diagnostics.wgsl).
-export const DIAG_OPS = [SUM, SUM, SUM, SUM, SUM, SUM, SUM, MAX, SUM, SUM, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, SUM, SUM, SUM];
+export const DIAG_OPS = [SUM, SUM, SUM, SUM, SUM, SUM, SUM, MAX, SUM, SUM, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, MIN, MAX, SUM, SUM, SUM, SUM];
 
 export interface Diagnostics {
   t: number;
@@ -721,6 +729,8 @@ export interface Diagnostics {
   maxMach: number;
   floored: number;
   jeansUnresolved: number;
+  /** burning: the energy it released per unit time over the last step, summed over the gas (0 without) */
+  nuclearHeating: number;
   /** center of mass of the gas, relative to the box center */
   com: [number, number, number];
   /** position of the first point mass relative to the box center, if there is one */
@@ -796,6 +806,8 @@ export class Sim implements Simulation {
   state: GPUTexture[][] = [];
   /** half-step predicted primitives and per-cell flags (hydro/predict.wgsl) */
   pred: GPUTexture[] = [];
+  /** Burning: each cell's heating rate over the last step (r32float; one texel without burning). */
+  heat!: GPUTexture;
   /** gravitational acceleration and half-step potential (gravity/field.wgsl) */
   gfield!: GPUTexture;
   cur = 0;
@@ -949,6 +961,8 @@ export class Sim implements Simulation {
       sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (n + 1) ** 2 * (nz + 1), usage: GPUBufferUsage.STORAGE });
       if (sim.compCoeffs) sim.comp = t('composition');
     }
+    // Burning: each cell's heating rate over the last step (burn/burn.ts); else one texel of nothing.
+    sim.heat = burnSpec(cfg) && G > 0 ? tex3d(d, n, 'r32float', 'nuclear heating', nz) : noHeat(d);
     const spec = debrisSpec(cfg);
     if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     sim.writeParams();
@@ -1033,7 +1047,7 @@ export class Sim implements Simulation {
       DIAG_OPS,
       'hydro/diagnostics.wgsl',
       slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(phi), ...k })),
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(phi), 4: v(this.heat), ...k })),
       'diagnostics',
     );
     diag.catch(() => {}); // a failure is reported where it is awaited, below
@@ -1132,7 +1146,7 @@ export class Sim implements Simulation {
     if (burn && this.speciesGroups > 0) {
       this.burn = await createBurnPass(d, burn, { ...c.problem, units: problemUnits(c.problem, c.params) }, {
         dims: [this.n, this.n, this.nz], stride: this.nz, groups: this.speciesGroups, slots,
-        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], comp: this.comp,
+        params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], heat: this.heat, comp: this.comp,
       });
     }
     this.redDiag = await diag;
@@ -1690,7 +1704,7 @@ export class Sim implements Simulation {
     const r: Record<number, GPUBuffer | GPUTextureView> = {
       2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 20: this.bh,
       13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(),
-      14: this.mhd?.magResult ?? this.noMag(),
+      14: this.mhd?.magResult ?? this.noMag(), 15: this.heat.createView(),
     };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
@@ -2009,6 +2023,7 @@ export class Sim implements Simulation {
     for (const s of this.state) for (const t of s) t.destroy();
     this.burn?.destroy();
     for (const t of [...this.pred, this.gfield, ...this.species]) t.destroy();
+    this.heat?.destroy();
     this.comp?.destroy();
     this.speciesHalf?.destroy();
     this.massFlux?.destroy();

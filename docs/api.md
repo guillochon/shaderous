@@ -341,6 +341,9 @@ The run's diagnostics, read back now:
 - `maxMach`;
 - `floored`: cells held at the density or pressure floor;
 - `jeansUnresolved`: cells where the Jeans length is under-resolved;
+- `nuclearHeating`: for a run that burns, the energy burning released per unit time over the
+  last step, summed over the gas (0 otherwise; the panel's L nuc, and the view "Nuclear heating"
+  per unit volume);
 - `com`: the gas's center of mass relative to the box center;
 - `masses`: the point masses, with position, velocity, mass and accreted mass;
 - `ranges`: the least and greatest value of each field, keyed by field name;

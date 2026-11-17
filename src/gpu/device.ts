@@ -76,6 +76,8 @@ export async function initGpu(): Promise<Gpu> {
       maxStorageBufferBindingSize: adapter.limits.maxStorageBufferBindingSize,
       // For the flux update's stencil tile (hydro/tile.wgsl).
       maxComputeWorkgroupStorageSize: adapter.limits.maxComputeWorkgroupStorageSize,
+      // Up to 8 (most adapters): the network's burn pass writes a fifth, its heating rate (burn/network.ts).
+      maxStorageTexturesPerShaderStage: Math.min(8, adapter.limits.maxStorageTexturesPerShaderStage),
     },
   });
   device.addEventListener('uncapturederror', (e) => {
