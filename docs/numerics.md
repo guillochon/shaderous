@@ -920,7 +920,8 @@ than 10 ms is split into network steps.
 ## 21. Ideal MHD (in development)
 
 Presets with a magnetic field (the "Magnetic fields" group: Orszag-Tang, the MHD blast, the
-rotor, Brio-Wu, the field loop and the Alfvén wave; and the polytrope's "Dipole field" and
+rotor, Brio-Wu, the field loop, the Alfvén wave, the Alfvén-wave collision and the Elsasser
+packets; Kelvin-Helmholtz's "Magnetic field" variant; and the polytrope's "Dipole field" and
 "Random field" variants) solve ideal MHD, with gravity, point masses, sinks and cooling (below).
 It runs on the uniform grid and on the adaptive mesh, which re-meshes with the field (below),
 with per-block timesteps, and draws its field lines (below). Species, burning, viscosity and

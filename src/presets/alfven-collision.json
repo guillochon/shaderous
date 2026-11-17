@@ -1,0 +1,31 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "alfven-collision",
+  "name": "Alfven-wave collision",
+  "group": "Magnetic fields",
+  "family": "alfven-collision",
+  "familyName": "Alfven-wave collision",
+  "variant": "Periodic waves",
+  "blurb": "Two Alfven waves travelling in opposite directions along a guide field, polarized across each other: their collision is the building block of MHD turbulence (Howes & Nielson 2013). It passes energy to waves of shorter wavelength across the field, but not along it. The setup follows the taranis WebGPU reduced-MHD page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html).",
+  "domain": {
+    "ndim": 3,
+    "n": 128,
+    "amr": 0,
+    "box": 1,
+    "supports2d": false,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "rho": 1e-10, "p": 1e-10 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "alfven-collision" }
+  ],
+  "run": { "tEnd": 2, "checkpointDt": 0.1 },
+  "view": { "mode": "slice", "field": 11, "log": false }
+}

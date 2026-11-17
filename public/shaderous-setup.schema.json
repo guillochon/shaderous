@@ -1887,6 +1887,127 @@
      },
      {
       "type": "object",
+      "title": "Flow: Alfven-wave collision",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "alfven-collision"
+       },
+       "b0": {
+        "type": "number",
+        "title": "Guide field",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       },
+       "amp": {
+        "type": "number",
+        "title": "Wave amplitude",
+        "default": 0.25,
+        "minimum": 0,
+        "maximum": 2
+       },
+       "beta": {
+        "type": "number",
+        "title": "Plasma beta",
+        "default": 10,
+        "minimum": 0.01,
+        "maximum": 1000
+       },
+       "kperp": {
+        "type": "number",
+        "title": "Waves across the field",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 16
+       },
+       "kpar": {
+        "type": "number",
+        "title": "Waves along the field",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 16
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Two plane Alfven waves travelling in opposite directions along a guide field B0 (along z), in uniform gas of density 1: one varies along x and is polarized along y, the other varies along y and is polarized along x (Howes & Nielson 2013). Needs a 3D periodic box."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Elsasser packets",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "alfven-packets"
+       },
+       "b0": {
+        "type": "number",
+        "title": "Guide field",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       },
+       "amp": {
+        "type": "number",
+        "title": "Wave amplitude",
+        "default": 0.25,
+        "minimum": 0,
+        "maximum": 2
+       },
+       "beta": {
+        "type": "number",
+        "title": "Plasma beta",
+        "default": 10,
+        "minimum": 0.01,
+        "maximum": 1000
+       },
+       "kperp": {
+        "type": "number",
+        "title": "Waves across the field",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 16
+       },
+       "kpar": {
+        "type": "number",
+        "title": "Wavelengths in a packet",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 8
+       },
+       "width": {
+        "type": "number",
+        "title": "Packet width",
+        "default": 0.08,
+        "minimum": 0.02,
+        "maximum": 0.25
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Two Alfven-wave packets on a guide field B0 (along z), each with a Gaussian profile along the field: a z+ packet above the center heading down and a z- packet below it heading up, in uniform gas of density 1 (Verniero et al. 2018). They meet at the center at t = box / (4 B0). Needs a 3D periodic box."
+     },
+     {
+      "type": "object",
       "title": "Flow: Carbon–oxygen fuel with an ignition layer",
       "properties": {
        "kind": {

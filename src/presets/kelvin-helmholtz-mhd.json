@@ -1,0 +1,35 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "kelvin-helmholtz-mhd",
+  "extends": "kelvin-helmholtz",
+  "name": "Kelvin-Helmholtz with a magnetic field",
+  "variant": "Magnetic field",
+  "blurb": "The shear layer threaded by a uniform field along the flow. The eddies stretch and wind up the field, and its tension resists them. In incompressible linear theory, a field above shear / sqrt(2 (1/rho_in + 1/rho_out)), 0.58 here, keeps the layer stable. The setup follows the shear-layer preset of the taranis WebGPU reduced-MHD page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html).",
+  "physics": {
+    "floors": {
+      "rho": 1e-10,
+      "p": 1e-10
+    }
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "kelvin-helmholtz"
+    },
+    {
+      "kind": "field",
+      "id": "field",
+      "b": [
+        0.1,
+        0,
+        0
+      ]
+    }
+  ],
+  "view": {
+    "field": 25,
+    "log": false,
+    "mode": "slice"
+  }
+}

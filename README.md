@@ -142,6 +142,12 @@ The method paper is in progress in [`paper/`](paper/). Design plans for work in 
 proposed are in [`plans/`](plans/): magnetic fields in [plans/mhd-plan.md](plans/mhd-plan.md), and frames,
 symmetric domains and coordinate systems in [plans/coordinate-systems-plan.md](plans/coordinate-systems-plan.md).
 
+## Acknowledgments
+
+The Alfvén-wave collision, the Elsasser packets and the magnetized Kelvin-Helmholtz setup
+follow the WebGPU reduced-MHD solver of Alfred Mallet and Esrom Abraham
+([taranis](https://alfredmallet.github.io/taranis/webgpu/rmhd2d.html)).
+
 ## License
 
 MIT; see [LICENSE](LICENSE).

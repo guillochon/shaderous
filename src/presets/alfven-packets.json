@@ -1,0 +1,14 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "alfven-packets",
+  "extends": "alfven-collision",
+  "name": "Elsasser packets",
+  "variant": "Colliding packets",
+  "blurb": "Two Alfven-wave packets heading for each other along a guide field, one of each Elsasser sign (z+ and z-): they interact only while they overlap, then separate, carrying the finer structure the collision gave them (Verniero et al. 2018). They meet at the center at t = 0.25 and again at the box's edge at t = 0.75. The setup follows the taranis WebGPU reduced-MHD page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html).",
+  "parts": [
+    { "kind": "flow", "name": "alfven-packets" }
+  ],
+  "run": { "tEnd": 1, "checkpointDt": 0.05 },
+  "view": { "mode": "slice", "field": 25, "log": false }
+}
