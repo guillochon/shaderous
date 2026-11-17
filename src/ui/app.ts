@@ -966,7 +966,10 @@ try {
  * built; without one, the present run starts again from its initial conditions (a preset
  * parameter changed). `keepPhysics`: as build() takes it.
  */
-let pending: { pick?: { id: string; n: number; ndim: 2 | 3; levels: number; params?: Record<string, number> }; keepPhysics: boolean } | null = null;
+let pending: {
+  pick?: { id: string; n: number; ndim: 2 | 3; levels: number; params?: Record<string, number>; settings?: { setting: Setting; value: unknown }[] };
+  keepPhysics: boolean;
+} | null = null;
 /** The preset that waits for Run, if it is another than the run's: its own controls are the ones shown. */
 const waitingProblem = (): Problem | null => (pending?.pick && cfg && pending.pick.id !== cfg.problem.id ? problemOf(pending.pick.id) : null);
 /** That preset's parameters as they will be loaded: its defaults, with what was changed while it waits. */
@@ -1437,8 +1440,9 @@ function load(id: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = 
   if (autoload) return void build(id, n, ndim, levels, keepPhysics);
   // Physics choices carry over only if every change waiting would have kept them.
   // Parameters set for this preset while it waited stay, through a change of its grid.
-  const params = pending?.pick?.id === id ? pending.pick.params : undefined;
-  pending = { pick: { id, ...resolveGrid(problemOf(id), n, ndim, levels), params }, keepPhysics: keepPhysics && (pending?.pick ? pending.keepPhysics : true) };
+  // So do settings changed for it in the Setup dialog.
+  const prev = pending?.pick?.id === id ? pending.pick : undefined;
+  pending = { pick: { id, ...resolveGrid(problemOf(id), n, ndim, levels), params: prev?.params, settings: prev?.settings }, keepPhysics: keepPhysics && (pending?.pick ? pending.keepPhysics : true) };
   running = false;
   if (cfg) syncControls();
 }
@@ -1458,7 +1462,7 @@ function loadPending(play?: boolean) {
   const p = pending;
   if (!p) return;
   pending = null;
-  const job = p.pick ? build(p.pick.id, p.pick.n, p.pick.ndim, p.pick.levels, p.keepPhysics, undefined, undefined, false, p.pick.params) : restartRun(true);
+  const job = p.pick ? build(p.pick.id, p.pick.n, p.pick.ndim, p.pick.levels, p.keepPhysics, undefined, undefined, false, p.pick.params, p.pick.settings) : restartRun(true);
   job.then(() => {
     if (play !== undefined && sim) running = play;
     if (cfg) syncControls();
@@ -1470,7 +1474,7 @@ function loadPending(play?: boolean) {
  * view, panel), and leave the simulation itself waiting for Run or Load, as Autoload off has
  * it: the first load of a page with Autoload off.
  */
-function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false, params?: Record<string, number>) {
+function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false, params?: Record<string, number>, settings?: { setting: Setting; value: unknown }[]) {
   pending = null; // whatever waited for Run is superseded
   return enqueue(async () => {
     const problem = problemOf(problemId);
@@ -1495,6 +1499,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       Object.assign(next.params, params);
       if (typeof problem.units === 'function') Object.assign(next.eosParams, physicalEosParams(problemUnits(problem, next.params), problem.composition), problem.eosParams);
     }
+    // Settings changed in the Setup dialog while it waited.
+    if (settings && !(keepPhysics && cfg && cfg.problem.id === problem.id)) for (const s of settings) setSetting(next, s.setting, s.value);
     if (link) {
       // Settings carried by a shared link, on top of the preset's defaults.
       Object.assign(next, link.cfg);
@@ -2120,10 +2126,65 @@ async function linkFor(spec: SetupSpec): Promise<{ url: string; tooLong: boolean
   return { url, tooLong: url.length > MAX_LINK };
 }
 
+/**
+ * With Autoload off, a preset picked and not loaded yet (or the run's own preset picked again,
+ * fresh): the configuration it will load with, as build() makes it. The Setup dialog shows this,
+ * not the run's.
+ */
+function waitingConfig(): SimConfig | null {
+  const pick = pending?.pick;
+  if (!pick || !cfg || (pick.id === cfg.problem.id && pending!.keepPhysics)) return null;
+  const c = freshConfig(problemOf(pick.id), pick, pick.params);
+  for (const s of pick.settings ?? []) setSetting(c, s.setting, s.value);
+  return c;
+}
+
+/** A preset's configuration on a grid, with parameters set over its defaults (as build() has them). */
+function freshConfig(problem: Problem, g: { n: number; ndim: 2 | 3; levels: number }, params?: Record<string, number>): SimConfig {
+  const c = configFor(problem, g.n, { ndim: g.ndim, amrLevels: g.levels });
+  if (params) {
+    Object.assign(c.params, params);
+    if (typeof problem.units === 'function') Object.assign(c.eosParams, physicalEosParams(problemUnits(problem, c.params), problem.composition), problem.eosParams);
+  }
+  return c;
+}
+
+/**
+ * An edited document for a preset that waits for Run: it keeps waiting, as that preset with new
+ * parameters and settings where only those differ, else as the custom setup it has become.
+ */
+function waitWith(edited: SetupSpec) {
+  const pick = pending!.pick!;
+  const d = edited.domain ?? {};
+  const g = { n: d.n ?? pick.n, ndim: d.ndim ?? pick.ndim, levels: d.amr ?? pick.levels };
+  const problem = problemOf(pick.id);
+  const params: Record<string, number> = { ...pick.params };
+  for (const f of problem.setup ? paramFeatures(problem.setup) : []) {
+    const v = getPath(edited, featuredPaths(f)[0]);
+    const x = typeof v === 'boolean' ? (v ? 1 : 0) : v;
+    if (typeof x === 'number') params[featuredId(f)] = x;
+  }
+  // Measured from the preset's defaults on the new grid, the settings that differ are all of them.
+  let change: ReturnType<typeof changeBetween> | null = null;
+  try {
+    const base = runningSpec(freshConfig(problem, g, params));
+    change = changeBetween(base, { ...edited, domain: { ...edited.domain, ...base.domain } });
+  } catch {}
+  const same = !!change && !change.structure && !change.described;
+  const id = same ? pick.id : adopt(edited);
+  pick.params = same ? params : undefined;
+  pick.settings = same && change!.settings.length ? change!.settings : undefined;
+  load(id, g.n, g.ndim, g.levels);
+}
+
 /** What the Setup dialog asks of the page (ui/setup/host.ts). */
 const setupHost: SetupHost = {
-  running: () => runningSpec(cfg),
-  apply: (spec) => applySpec(spec),
+  running: () => runningSpec(waitingConfig() ?? cfg),
+  async apply(spec) {
+    // A preset that waits for Run (Autoload off) takes the edit and goes on waiting.
+    if (waitingConfig()) waitWith(spec);
+    else await applySpec(spec);
+  },
   presets: () =>
     MENU.map((g) => ({
       group: g.group,
