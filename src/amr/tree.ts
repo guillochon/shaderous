@@ -73,6 +73,19 @@ export interface RegridOp {
 }
 
 /**
+ * One step of a re-mesh as adapt() took it, for replaying it (replayAdapt()): [what, level,
+ * coordinates...] of the block it acted on, `what` one of the ADAPT_ constants. Made again in
+ * order on the same tree, the steps give the same tree, slot for slot, and the same table.
+ */
+export type AdaptStep = number[];
+/** refine(b) (with whatever balance asks for) */
+export const ADAPT_REFINE = 0;
+/** a parent merged to make room for a refinement */
+export const ADAPT_EVICT = 1;
+/** a parent merged because its children were no longer flagged */
+export const ADAPT_MERGE = 2;
+
+/**
  * A block may be merged to make room for another's refinement only when it is flagged less than
  * this share of the other's indicator: blocks flagged about equally would otherwise take the
  * slots from each other on alternate re-meshes, each time losing detail to the restriction.
@@ -235,6 +248,9 @@ export class BlockTree {
   leaves(): Block[] {
     return this.all().filter((b) => !b.children);
   }
+
+  /** The steps the last adapt() took (replayAdapt() takes them again). */
+  lastSteps: AdaptStep[] = [];
 
   get(level: number, c: number[]): Block | undefined {
     return this.blocks.get(this.key(level, c[0], c[1], c[2] ?? 0));
@@ -446,8 +462,8 @@ export class BlockTree {
     const before = this.leaves();
     const ind = new Map<Block, number>();
     for (const b of before) ind.set(b, indicator(b));
-    const ops = new Map<number, RegridOp>();
     const touched = new Set<Block>();
+    const run = this.adaptRun(touched);
 
     // Refine, most strongly flagged first so they get the slots if the budget runs out. When it
     // has, room is made by merging the parents whose children are least flagged (closest to
@@ -457,33 +473,15 @@ export class BlockTree {
     // Blocks merged to make room hold their data only through this re-mesh's restriction: none
     // may be split again in it (balance would ask that of a later refinement's neighbor), as its
     // new children would be filled from the old parent's slot, which holds no data.
-    const evicted = new Set<Block>();
-    const merge = (p: Block) => {
-      const children = p.children!.map((ch) => ch.slot);
-      this.coarsen(p);
-      touched.add(p);
-      ops.set(p.slot, { kind: RG_RESTRICT, src: p.slot, octant: 0, children });
-    };
     for (const b of wanted) {
       if (b.children || !this.live(b)) continue; // split by balance already, or merged to make room
-      let split = this.refine(b, evicted);
-      if (!split.length) {
+      if (!run.step(ADAPT_REFINE, b)) {
         evictable ??= this.evictable(before, ind);
         const room = this.makeRoom(b, ind.get(b)!, evictable, touched);
         if (room) {
-          for (const p of room) {
-            merge(p);
-            evicted.add(p);
-          }
-          split = this.refine(b, evicted);
+          for (const p of room) run.step(ADAPT_EVICT, p);
+          run.step(ADAPT_REFINE, b);
         }
-      }
-      for (const q of split) {
-        touched.add(q);
-        q.children!.forEach((ch, o) => {
-          touched.add(ch);
-          ops.set(ch.slot, { kind: RG_PROLONG, src: q.slot, octant: o, children: [] });
-        });
       }
     }
 
@@ -501,13 +499,71 @@ export class BlockTree {
     for (const p of parents) {
       if (touched.has(p) || !this.live(p) || !p.children || p.children.some((ch) => touched.has(ch) || ch.children)) continue;
       if (p.children.some(hot) || !this.canCoarsen(p)) continue;
-      merge(p);
+      run.step(ADAPT_MERGE, p);
     }
+    this.lastSteps = run.steps;
+    return run.table();
+  }
 
-    if (ops.size === 0) return null;
-    const out: RegridOp[] = new Array(this.cap);
-    for (const b of this.leaves()) out[b.slot] = ops.get(b.slot) ?? { kind: RG_COPY, src: b.slot, octant: 0, children: [] };
-    return out;
+  /**
+   * Take the steps of an earlier adapt() again (its lastSteps), on the tree as it was then: the
+   * same re-mesh, decided without its indicators. For replaying a run (ui/session.ts).
+   */
+  replayAdapt(steps: AdaptStep[]): RegridOp[] | null {
+    const run = this.adaptRun(new Set());
+    for (const [what, level, ...c] of steps) {
+      const b = this.get(level, c);
+      if (!b) throw new Error(`a re-mesh to replay acts on a block at level ${level}, [${c.join(', ')}] that the mesh does not have`);
+      run.step(what, b);
+    }
+    this.lastSteps = run.steps;
+    return run.table();
+  }
+
+  /**
+   * The bookkeeping of a re-mesh: each step taken, recorded, and the way each slot of the new
+   * tree is filled from the old one. step() returns whether it changed the tree (a refinement
+   * may find no room).
+   */
+  private adaptRun(touched: Set<Block>) {
+    const ops = new Map<number, RegridOp>();
+    const steps: AdaptStep[] = [];
+    // Blocks merged to make room hold their data only through this re-mesh's restriction: none
+    // may be split again in it (balance would ask that of a later refinement's neighbor), as its
+    // new children would be filled from the old parent's slot, which holds no data.
+    const evicted = new Set<Block>();
+    const merge = (p: Block) => {
+      const children = p.children!.map((ch) => ch.slot);
+      this.coarsen(p);
+      touched.add(p);
+      ops.set(p.slot, { kind: RG_RESTRICT, src: p.slot, octant: 0, children });
+    };
+    return {
+      steps,
+      step: (what: number, b: Block): boolean => {
+        steps.push([what, b.level, ...b.c.slice(0, this.ndim)]);
+        if (what === ADAPT_REFINE) {
+          const split = this.refine(b, evicted);
+          for (const q of split) {
+            touched.add(q);
+            q.children!.forEach((ch, o) => {
+              touched.add(ch);
+              ops.set(ch.slot, { kind: RG_PROLONG, src: q.slot, octant: o, children: [] });
+            });
+          }
+          return split.length > 0;
+        }
+        merge(b);
+        if (what === ADAPT_EVICT) evicted.add(b);
+        return true;
+      },
+      table: (): RegridOp[] | null => {
+        if (ops.size === 0) return null;
+        const out: RegridOp[] = new Array(this.cap);
+        for (const leaf of this.leaves()) out[leaf.slot] = ops.get(leaf.slot) ?? { kind: RG_COPY, src: leaf.slot, octant: 0, children: [] };
+        return out;
+      },
+    };
   }
 
   /**

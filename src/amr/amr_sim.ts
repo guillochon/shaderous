@@ -35,7 +35,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
-import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
+import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
 import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS } from './dispatch';
@@ -89,11 +89,8 @@ const BIN_PAUSE_MAX = 1536;
 
 interface RegridPlan {
   ops: RegridOp[];
-  /**
-   * For a re-mesh the refinement check decided: the indicator of every leaf it was decided
-   * from, in the order BlockTree.leaves() listed them then (see onRegrid).
-   */
-  indicators?: Float32Array;
+  /** For a re-mesh the refinement check decided: the steps the tree took (BlockTree.adapt, see onRegrid). */
+  steps?: AdaptStep[];
 }
 
 export interface LeafCells {
@@ -325,15 +322,15 @@ export class AmrSim implements Simulation {
   private pending: RegridPlan | null = null;
   /**
    * Called as a re-mesh that a refinement check decided is applied (at the start of the batch
-   * of steps it is encoded in), with the indicators it was decided from: a session log keeps
-   * them (ui/session.ts), since the step it lands on depends on when the check was read back.
+   * of steps it is encoded in), with the steps the tree took: a session log keeps them
+   * (ui/session.ts), since the step it lands on depends on when the check was read back.
    */
-  onRegrid?: (indicators: Float32Array) => void;
+  onRegrid?: (steps: AdaptStep[]) => void;
   /** Called after the uniform block is written (Simulation.onParams). */
   onParams?: () => void;
   /**
    * Off, the run makes no refinement checks of its own: a replay re-meshes where the log says
-   * (forceRegrid()).
+   * (replayRegrid()).
    */
   autoRegrid = true;
   /** total re-meshes applied, for the status line and tests */
@@ -1882,7 +1879,7 @@ export class AmrSim implements Simulation {
   private applyRegrid(enc: GPUCommandEncoder) {
     const plan = this.pending!;
     this.pending = null;
-    if (plan.indicators) this.onRegrid?.(plan.indicators);
+    if (plan.steps) this.onRegrid?.(plan.steps);
     if (this.mhd) {
       // Before the new tree replaces it: the primitives of the current state with their ghosts
       // (the slopes of prolongation), and a copy of the old block table and leaf index, which
@@ -2450,7 +2447,7 @@ export class AmrSim implements Simulation {
         if (!this.autoRegrid) return; // a check already in flight when a replay took over
         // Exactly 0: no gas in the block, only the inside of an obstacle (see amr/flag.wgsl).
         const ops = tree.adapt((b) => (ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo);
-        if (ops) this.pending = { ops, indicators: Float32Array.from(leaves, (b) => ind[b.slot]) };
+        if (ops) this.pending = { ops, steps: tree.lastSteps };
       })
       .finally(() => {
         this.flagInFlight = false;
@@ -2458,16 +2455,29 @@ export class AmrSim implements Simulation {
   }
 
   /**
+   * Re-mesh now, taking the steps a refinement check's re-mesh took (BlockTree.lastSteps). For a
+   * replay (ui/session.ts), with autoRegrid off: now, so that it keeps its place among the other
+   * edits logged at the same step.
+   */
+  replayRegrid(steps: AdaptStep[]) {
+    this.applyNow(this.tree.replayAdapt(steps));
+  }
+
+  /**
    * Re-mesh now, as a refinement check with these indicators (one per leaf, in the order
-   * BlockTree.leaves() lists them) would. For a replay (ui/session.ts), with autoRegrid off: now,
-   * so that it keeps its place among the other edits logged at the same step.
+   * BlockTree.leaves() lists them) would: a replay of a log of the first version, which kept the
+   * indicators rather than the steps.
    */
   forceRegrid(indicators: Float32Array) {
     const leaves = this.tree.leaves();
     if (leaves.length !== indicators.length) throw new Error(`the mesh has ${leaves.length} leaves where the log's re-mesh had ${indicators.length}: the replay has gone another way`);
     const at = new Map(leaves.map((b, i) => [b, indicators[i]]));
     for (const b of leaves) this.indicatorOf.set(b, at.get(b)!);
-    const ops = this.tree.adapt((b) => (at.get(b) === 0 ? -1 : at.get(b)!), this.cfg.refineHi, this.cfg.refineLo);
+    this.applyNow(this.tree.adapt((b) => (at.get(b) === 0 ? -1 : at.get(b)!), this.cfg.refineHi, this.cfg.refineLo));
+  }
+
+  /** Apply a re-mesh the tree has just taken, now (after any re-mesh by hand that waits). */
+  private applyNow(ops: RegridOp[] | null) {
     if (!ops) return;
     if (this.pending) {
       // A re-mesh by hand that waits (a star's, an obstacle's) goes first, as it would have.
@@ -2475,7 +2485,7 @@ export class AmrSim implements Simulation {
       this.applyRegrid(first);
       this.device.queue.submit([first.finish()]);
     }
-    this.pending = { ops, indicators };
+    this.pending = { ops, steps: this.tree.lastSteps };
     const enc = this.device.createCommandEncoder();
     this.applyRegrid(enc);
     this.device.queue.submit([enc.finish()]);

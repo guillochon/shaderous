@@ -536,13 +536,14 @@ held bit for bit to the object it replaced before those objects were retired.
 - **Snapshots in memory** (`io/capture.ts`) save a running simulation and start runs from it; Reset returns to the loaded state.
 - **Session logs** (`ui/session.ts`) record what was done to a run as it ran: what the tools
   and settings changed (as it reached the simulation, not the pointer's path), the changes of
-  the clock's stop, and the adaptive mesh's re-meshes with the indicators they were decided
-  from. Each entry is stamped with the step it was applied at, from a copy of the GPU clock
+  the clock's stop, and the adaptive mesh's re-meshes as the steps the tree took (each block
+  refined or merged, in order: `BlockTree.lastSteps`, about a hundred bytes a re-mesh). Each entry is stamped with the step it was applied at, from a copy of the GPU clock
   submitted at the moment it is applied. `replay()` (ui/api.ts) loads the setup, steps to each
   entry and applies it, with the mesh's own refinement checks off. A re-mesh is the one thing a
   live run decides by timing: its check is read back while the run goes on, so the step it
-  lands on varies. The replay takes the indicators from the log instead, which makes it repeat
-  to the bit. The page saves the log (Save session log), and the API and the MCP server read and
+  lands on varies. The replay takes the same steps on the same tree instead
+  (`BlockTree.replayAdapt`), which gives the same mesh slot for slot and makes it repeat to the
+  bit. The page saves the log (Save session log), and the API and the MCP server read and
   replay it.
 
 ## Testing

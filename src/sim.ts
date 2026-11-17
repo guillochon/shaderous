@@ -286,11 +286,13 @@ export interface Simulation {
   blockBoxes?(): { version: number; boxes: Float32Array };
   /** Called after the uniform block is written (writeParams): the session log watches the clock's stop time in it. */
   onParams?: () => void;
-  /** An adaptive mesh: called as a re-mesh its refinement check decided is applied, with the indicators (AmrSim.onRegrid). */
-  onRegrid?: (indicators: Float32Array) => void;
+  /** An adaptive mesh: called as a re-mesh its refinement check decided is applied, with the steps the tree took (AmrSim.onRegrid). */
+  onRegrid?: (steps: number[][]) => void;
   /** An adaptive mesh: whether it makes refinement checks of its own (AmrSim.autoRegrid). */
   autoRegrid?: boolean;
-  /** An adaptive mesh: re-mesh from these indicators, as a replay does (AmrSim.forceRegrid). */
+  /** An adaptive mesh: re-mesh by these steps, as a replay does (AmrSim.replayRegrid). */
+  replayRegrid?(steps: number[][]): void;
+  /** An adaptive mesh: re-mesh from these indicators, as a replay of a first-version log does (AmrSim.forceRegrid). */
   forceRegrid?(indicators: Float32Array): void;
   /**
    * A 3D adaptive mesh: what the volume view needs to ray-march the leaf blocks at their own

@@ -38,7 +38,7 @@ import { decodeSetupParam, encodeSetupParam, formatSetup, MAX_LINK, readSetup } 
 import { compiledFrom, isParamPath, paramFeatures } from '../setup/compile';
 import { optionAt, valueAt } from '../setup/options';
 import { changeBetween, runningSpec, sameSetup, setSetting, type Setting } from '../setup/running';
-import { SessionRecorder, base64ToF32, f32ToBase64, planeOutline, pullOps, pullStep, queryDiff, type Action, type MassRole, type PlaneShape, type SessionLog, type StarAction } from './session';
+import { SessionRecorder, base64ToF32, planeOutline, pullOps, pullStep, queryDiff, type Action, type MassRole, type PlaneShape, type SessionLog, type StarAction } from './session';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type SetupSpec } from '../setup/spec';
 import { openSetupDialog } from './setup/dialog';
 import type { SetupHost } from './setup/host';
@@ -1112,8 +1112,8 @@ function beginSession(replayable: boolean, why?: string) {
 
 /** Log the re-meshes the run's own refinement checks decide (in a replay, it makes none), and changes of the clock's stop. */
 function watchRegrids(s: Simulation) {
-  s.onRegrid = (ind) => {
-    if (s === sim) logAction({ kind: 'regrid', indicators: f32ToBase64(ind) });
+  s.onRegrid = (steps) => {
+    if (s === sim) logAction({ kind: 'regrid', steps });
   };
   if (s.autoRegrid !== undefined) s.autoRegrid = !replaying;
   sessionClock = clockOf();
@@ -4043,7 +4043,8 @@ async function replayAction(a: Action) {
       await applySpec(a.spec);
       break;
     case 'regrid':
-      s.forceRegrid?.(base64ToF32(a.indicators));
+      if (a.steps) s.replayRegrid?.(a.steps);
+      else if (a.indicators) s.forceRegrid?.(base64ToF32(a.indicators));
       break;
     case 'clock':
       // The end time is a setting (logged as one): what differs from it is a stop of the clock's own.

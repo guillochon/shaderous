@@ -663,8 +663,8 @@ holds:
   - `star`: a star placed;
   - `set`: settings changed mid-run, with `changes` (the link keys that changed) and the setup
     document after them;
-  - `regrid`: a re-mesh of the adaptive mesh, with the refinement indicator of every leaf it
-    was decided from;
+  - `regrid`: a re-mesh of the adaptive mesh, as the steps the mesh took (`steps`: each block
+    it refined or merged, in order, as `[what, level, coordinates...]`), a few dozen bytes;
   - `clock`: the clock's stop changed (`stop`, the time the step reaching it is shortened to
     land on: the end time, a checkpoint, a scripted run's `until`), or a movie's frame time
     (`frame`);
@@ -679,9 +679,10 @@ logged. A log starts over when the run does (a load, Reset).
 
 Runs a session log again. It loads the setup the log started from, steps to each action, and
 applies it. Then, with `untilSteps`, it runs on to that many steps. The adaptive mesh makes
-none of its own refinement checks meanwhile. Instead it re-meshes where the log says, from the
-indicators the log kept. That is what makes the replay exact: the step a live re-mesh lands
-on depends on when its check was read back from the GPU. GPU runs repeat to the bit on the same
+none of its own refinement checks meanwhile. Instead it re-meshes where the log says, taking
+the steps the log kept. That is what makes the replay exact: the step a live re-mesh lands
+on depends on when its check was read back from the GPU. (Logs of the first version kept every
+leaf's refinement indicator for each re-mesh instead, about 30 kB each; they still replay.) GPU runs repeat to the bit on the same
 machine and browser, so the replay reaches the state the logged run reached. `stopped` says why
 it ended early, if the run went another way, for example by reaching its end time before an
 action logged later. The run is left paused, its log the replay's own.

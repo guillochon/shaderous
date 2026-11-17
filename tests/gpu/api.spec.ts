@@ -297,6 +297,11 @@ test('a session the page played, edited with the pointer, replays to the bit', a
   const kinds = log.entries.map((e: any) => e.action.kind);
   expect(kinds).toContain('regrid');
   expect(kinds).toContain('brush');
+  // A re-mesh is logged as the steps the mesh took, a few blocks each: not every leaf's indicator.
+  const regrids = log.entries.filter((e: any) => e.action.kind === 'regrid');
+  const perRegrid = JSON.stringify(regrids).length / regrids.length;
+  console.log(`log: ${log.entries.length} actions, ${regrids.length} re-meshes of ${perRegrid.toFixed(0)} bytes each, ${(JSON.stringify(log).length / 1e3).toFixed(0)} kB in all`);
+  expect(perRegrid).toBeLessThan(2000);
 
   const r = await call(page, 'replay', log, { untilSteps: a.steps });
   expect(r.stopped).toBeUndefined();

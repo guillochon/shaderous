@@ -11,7 +11,8 @@ import type { PointMass } from '../problems/types';
 import type { SetupSpec } from '../setup/spec';
 
 export const SESSION_FORMAT = 'shaderous-session';
-export const SESSION_VERSION = 1;
+/** 2: re-meshes as the steps the tree took, not the indicators (a hundred times smaller). */
+export const SESSION_VERSION = 2;
 
 type Vec3 = [number, number, number];
 
@@ -52,12 +53,14 @@ export type Action =
    */
   | { kind: 'set'; changes: Record<string, string | null>; spec: SetupSpec }
   /**
-   * A re-mesh of the adaptive mesh: the refinement indicator of every leaf (in the order
-   * BlockTree.leaves() lists them) that it was decided from, as base64 float32. The decision
-   * is read back from the GPU while the run goes on, so the step it lands on depends on timing;
-   * a replay makes it again from these values at the step logged.
+   * A re-mesh of the adaptive mesh, as the steps the tree took: [what, level, coordinates...] of
+   * each block it refined or merged, in order (amr/tree.ts AdaptStep). The decision is read back
+   * from the GPU while the run goes on, so the step it lands on depends on timing; a replay
+   * takes the same steps at the step logged, which gives the same mesh. (A log of the first
+   * version kept `indicators` instead: every leaf's refinement indicator, base64 float32, in the
+   * order BlockTree.leaves() lists them; a replay still takes those.)
    */
-  | { kind: 'regrid'; indicators: string }
+  | { kind: 'regrid'; steps?: number[][]; indicators?: string }
   /**
    * The clock's stop changed: the time the step that reaches it is shortened to land on (the
    * end time, a checkpoint, a scripted run's `until`; null for none) and the frame time it is

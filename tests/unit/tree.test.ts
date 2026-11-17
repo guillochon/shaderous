@@ -24,6 +24,44 @@ function covers(t: BlockTree) {
 }
 
 describe('block tree', () => {
+  it('replays a re-mesh from its steps alone, slot for slot (session logs)', () => {
+    // One tree re-meshes from indicators; its twin only from the steps the first recorded. A small
+    // budget (cap) makes some refinements evict, and edge balance (MHD) cascades.
+    for (const [ndim, cap, edge] of [[2, 100, false], [2, 400, true], [3, 300, true]] as const) {
+      const make = () => new BlockTree(ndim, 2, ndim === 2 ? 4 : 3, cap, [...periodic], [...periodic], edge);
+      const a = make();
+      const b = make();
+      let seed = 12345;
+      const rand = () => ((seed = (seed * 1103515245 + 12345) >>> 0) / 2 ** 32);
+      let evictions = 0;
+      for (let round = 0; round < 25; round++) {
+        // Flagged near a point that moves, and noise.
+        const p = [0.3 + 0.02 * round, 0.5, 0.5];
+        const ind = (blk: { level: number; c: number[] }) => {
+          const size = 1 / (2 << blk.level);
+          let d2 = 0;
+          for (let i = 0; i < ndim; i++) {
+            const lo = blk.c[i] * size;
+            d2 += Math.max(0, lo - p[i], p[i] - lo - size) ** 2;
+          }
+          return Math.exp(-d2 / 0.003) + 0.3 * rand();
+        };
+        const opsA = a.adapt(ind, 0.6, 0.2);
+        evictions += a.lastSteps.filter((st) => st[0] === 1).length;
+        const opsB = b.replayAdapt(a.lastSteps);
+        expect(opsB).toEqual(opsA);
+        expect(b.lastSteps).toEqual(a.lastSteps);
+        expect(Array.from(b.table())).toEqual(Array.from(a.table()));
+      }
+      expect(a.count).toBeGreaterThan(ndim === 2 ? 40 : 60); // it did refine
+      if (cap === 100) expect(evictions).toBeGreaterThan(0);
+      balanced(b);
+    }
+    // A step on a block the tree does not have is an error, not a silent other mesh.
+    const t = new BlockTree(2, 2, 3, 100, periodic, periodic);
+    expect(() => t.replayAdapt([[0, 3, 5, 5]])).toThrow(/does not have/);
+  });
+
   it('keeps its block table and index grid up to date across re-meshes', () => {
     // Two trees take the same re-meshes: one is read after every one (updated in place), the
     // other only at the end (built whole).
