@@ -112,7 +112,8 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 | `flow` | A built-in initial condition by `name`, with its parameters: what shapes cannot say (a shear layer with its seeded modes, a ZND detonation, an Alfvén wave). Every flow has parameters (densities, speeds, amplitudes, wavelengths, seeds), listed with their ranges in the dialog and by `describe().setup.flows`; left out, each takes the value its preset has always had. The flows are in `src/setup/parts/flows/` |
 
 Shapes: `{ "type": "sphere", "center", "radius" }` (or `radiusCells`, in finest cells; a
-cylinder in 2D), `{ "type": "box", "min", "max" }` (a bound may be `null`: open on that side),
+cylinder in 2D), `{ "type": "box", "min", "max" }` (a bound may be `null`: open on that side;
+`rotate`, degrees about its center about x, then y, then z),
 `{ "type": "half", "normal", "at" }` (the side the normal points away from).
 
 ### A point mass held on its orbit
@@ -396,6 +397,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
 | `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
 | `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
+| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
 | `rho` | Density | a number, at least 1e-300 | Density inside the shape |
@@ -416,6 +418,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
 | `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
 | `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
+| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
 
@@ -429,6 +432,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
 | `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
 | `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
+| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
 

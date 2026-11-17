@@ -366,8 +366,9 @@ function build() {
 
   // ---- right: the preview ----
   const preview: Preview = createPreview({
-    onMove(part: number, pos: Vec3) {
-      setPath(draft, `parts.${part}.pos`, pos);
+    onSelect: (path) => goTo(path),
+    onEdit(path: string, value: unknown) {
+      setPath(draft, path, value);
       // The picture follows the pointer; the forms and the checks catch up once a frame.
       preview.update(draft);
       if (!frame) frame = requestAnimationFrame(() => {

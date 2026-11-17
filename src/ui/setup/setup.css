@@ -141,6 +141,7 @@
 .sp { display: flex; flex-direction: column; gap: 6px; }
 .sp-view { display: block; width: 100%; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 3px; touch-action: none; background: var(--bg); }
 .sp-view.grab { cursor: grab; }
+.sp-view.point { cursor: pointer; }
 .sp-view.dragging { cursor: grabbing; }
 .sp-cap { font-size: 11px; color: var(--dim); }
 .sp-note { margin: 0; font-size: 11.5px; color: var(--dim); }

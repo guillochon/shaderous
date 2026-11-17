@@ -52,7 +52,7 @@ const FACES = obj({ lo: BC, hi: BC });
 const UNIT = obj({ unit: { enum: Object.keys(UNIT_SI) }, value: 'number', per: { any: ['number', 'string'] } });
 const SHAPE: Schema = obj({
   type: partChoice('region', 'shape.type'), center: 'vec3', radius: 'number', radiusCells: 'number',
-  min: { array: { nullable: 'number' }, max: 3 }, max: { array: { nullable: 'number' }, max: 3 }, normal: 'vec3', at: 'number',
+  min: { array: { nullable: 'number' }, max: 3 }, max: { array: { nullable: 'number' }, max: 3 }, normal: 'vec3', at: 'number', rotate: 'vec3',
 });
 const ID: Schema = 'string';
 /** A tabulated profile: up to 32 points (x, value). */

@@ -393,7 +393,7 @@ function makeControl(o: Option, control: Control, path: string, id: string, b: B
         for (const side of ['lo', 'hi'] as const) {
           const sid = nextId();
           const select = h('select', { id: sid });
-          const row = h('label', { class: 'f', for: sid }, h('span', { text: `${ax} ${side === 'lo' ? 'lower' : 'upper'} face` }), select);
+          const row = h('label', { class: 'f', for: sid, 'data-path': `${path}.${side}.${axis}` }, h('span', { text: `${ax} ${side === 'lo' ? 'lower' : 'upper'} face` }), select);
           select.addEventListener('change', () => {
             const f = faces();
             const v = +select.value;

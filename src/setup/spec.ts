@@ -281,7 +281,8 @@ export interface DiskPart {
 
 export type Shape =
   | { type: 'sphere'; center?: Vec3; radius?: number; /** radius in finest cells, instead */ radiusCells?: number }
-  | { type: 'box'; min: Vec3; max: Vec3 }
+  /** `rotate`: degrees about its center, about x, then y, then z (in 2D, only z turns it) */
+  | { type: 'box'; min: Vec3; max: Vec3; rotate?: Vec3 }
   /** the gas where (x - at) . normal < 0 */
   | { type: 'half'; normal: Vec3; at?: number };
 // SHAPE_TYPES names each shape, and nothing else.

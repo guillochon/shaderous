@@ -1669,6 +1669,16 @@
           "type": "number",
           "title": "Plane at",
           "description": "Distance of the plane from the box center, along its normal"
+         },
+         "rotate": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Rotation",
+          "description": "Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts"
          }
         },
         "additionalProperties": false
@@ -1821,6 +1831,16 @@
           "type": "number",
           "title": "Plane at",
           "description": "Distance of the plane from the box center, along its normal"
+         },
+         "rotate": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Rotation",
+          "description": "Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts"
          }
         },
         "additionalProperties": false
@@ -1923,6 +1943,16 @@
           "type": "number",
           "title": "Plane at",
           "description": "Distance of the plane from the box center, along its normal"
+         },
+         "rotate": {
+          "type": "array",
+          "items": {
+           "type": "number"
+          },
+          "minItems": 3,
+          "maxItems": 3,
+          "title": "Rotation",
+          "description": "Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts"
          }
         },
         "additionalProperties": false

@@ -17,6 +17,51 @@ type Inside = (x: number, y: number, z: number) => boolean;
 /** Bounds of a box shape may be null: open on that side. */
 const bound = (v: number | null | undefined, open: number) => (v === null || v === undefined ? open : v);
 
+/** The rotation by these degrees about x, then y, then z: R = Rz Ry Rx, as rows. */
+export function rotationMatrix(deg: readonly number[]): number[][] {
+  const [cx, cy, cz] = [0, 1, 2].map((a) => Math.cos(((deg[a] ?? 0) * Math.PI) / 180));
+  const [sx, sy, sz] = [0, 1, 2].map((a) => Math.sin(((deg[a] ?? 0) * Math.PI) / 180));
+  return [
+    [cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx],
+    [sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx],
+    [-sy, cy * sx, cy * cx],
+  ];
+}
+
+/** The degrees about x, then y, then z of a rotation matrix (the inverse of rotationMatrix). */
+export function eulerOf(R: number[][]): Vec3 {
+  const d = (r: number) => (r * 180) / Math.PI;
+  const sy = Math.max(-1, Math.min(1, -R[2][0]));
+  if (Math.abs(sy) > 1 - 1e-12) return [d(Math.atan2(-R[1][2], R[1][1])), d(Math.asin(sy)), 0];
+  return [d(Math.atan2(R[2][1], R[2][2])), d(Math.asin(sy)), d(Math.atan2(R[1][0], R[0][0]))];
+}
+
+/** The point a box turns about: its center; on an axis open on one side its one bound, open on both 0. */
+export function boxPivot(shape: Extract<Shape, { type: 'box' }>): Vec3 {
+  return [0, 1, 2].map((a) => {
+    const [l, h] = [shape.min?.[a], shape.max?.[a]];
+    const fl = typeof l === 'number' && Number.isFinite(l);
+    const fh = typeof h === 'number' && Number.isFinite(h);
+    return fl && fh ? (l + h) / 2 : fl ? l : fh ? h : 0;
+  }) as Vec3;
+}
+
+/**
+ * The frame of a turned box: the point it turns about (its center; on an open axis its one bound,
+ * or 0) and the rotation, about x, then y, then z, as `world` (box to world) and `local` (back).
+ * Null for a box that is not turned. In 2D only the turn about z counts.
+ */
+export function boxFrame(shape: Extract<Shape, { type: 'box' }>, flat = false): { pivot: Vec3; world(v: number[]): Vec3; local(v: number[]): Vec3 } | null {
+  const deg = [0, 1, 2].map((a) => (flat && a < 2 ? 0 : Number(shape.rotate?.[a]) || 0));
+  if (deg.every((d) => d % 360 === 0)) return null;
+  const R = rotationMatrix(deg);
+  return {
+    pivot: boxPivot(shape),
+    world: (v) => [0, 1, 2].map((i) => R[i][0] * v[0] + R[i][1] * v[1] + R[i][2] * v[2]) as Vec3,
+    local: (v) => [0, 1, 2].map((i) => R[0][i] * v[0] + R[1][i] * v[1] + R[2][i] * v[2]) as Vec3,
+  };
+}
+
 export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 3 }): { inside: Inside; center: Vec3; radius: number } {
   if (shape.type === 'sphere') {
     const c = shape.center ?? [0, 0, 0];
@@ -33,7 +78,16 @@ export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 
     // A side left out is open, as a null bound is.
     const lo = [0, 1, 2].map((a) => bound(shape.min?.[a], -Infinity));
     const hi = [0, 1, 2].map((a) => bound(shape.max?.[a], Infinity));
-    const inside: Inside = (x, y, z) => x > lo[0] && x < hi[0] && y > lo[1] && y < hi[1] && (ctx.ndim === 2 || (z > lo[2] && z < hi[2]));
+    const flat = ctx.ndim === 2;
+    const within = (x: number, y: number, z: number) => x > lo[0] && x < hi[0] && y > lo[1] && y < hi[1] && (flat || (z > lo[2] && z < hi[2]));
+    const frame = boxFrame(shape, flat);
+    if (!frame) return { inside: within, center: [0, 0, 0], radius: 0 };
+    // A turned box: the point taken into the box's own frame, about its center.
+    const { pivot: c, local } = frame;
+    const inside: Inside = (x, y, z) => {
+      const q = local([x - c[0], y - c[1], flat ? 0 : z - c[2]]);
+      return within(q[0] + c[0], q[1] + c[1], q[2] + c[2]);
+    };
     return { inside, center: [0, 0, 0], radius: 0 };
   }
   const normal = shape.normal ?? [1, 0, 0];

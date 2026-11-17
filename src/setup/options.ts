@@ -375,6 +375,7 @@ const SHAPE: Option[] = [
   P({ path: 'shape.radiusCells', label: 'Radius in cells', tip: 'Instead of the radius: this many finest cells, whatever the resolution (a point explosion)', control: num(0.5, 64, { step: 0.5 }), show: { path: 'shape.type', is: ['sphere'] } }),
   P({ path: 'shape.min', label: 'Lower corner', tip: 'Corner of the box nearest -x, -y, -z', control: { type: 'vec3' }, default: [-0.1, -0.1, -0.1], show: { path: 'shape.type', is: ['box'] } }),
   P({ path: 'shape.max', label: 'Upper corner', tip: 'Corner of the box nearest +x, +y, +z', control: { type: 'vec3' }, default: [0.1, 0.1, 0.1], show: { path: 'shape.type', is: ['box'] } }),
+  P({ path: 'shape.rotate', label: 'Rotation', tip: 'Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts', control: { type: 'vec3' }, default: [0, 0, 0], show: { path: 'shape.type', is: ['box'] } }),
   P({ path: 'shape.normal', label: 'Normal', tip: 'The plane’s normal: the shape is the side the normal points away from', control: { type: 'vec3' }, default: [1, 0, 0], show: { path: 'shape.type', is: ['half'] } }),
   P({ path: 'shape.at', label: 'Plane at', tip: 'Distance of the plane from the box center, along its normal', control: num(undefined, undefined, { step: 0.05, quantity: 'length' }), default: 0, show: { path: 'shape.type', is: ['half'] } }),
 ];
