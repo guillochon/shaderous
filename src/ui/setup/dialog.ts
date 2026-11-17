@@ -784,6 +784,15 @@ function build() {
   closeX.addEventListener('click', () => el.close());
   cancel.addEventListener('click', () => el.close());
   el.addEventListener('close', () => clearTimeout(liveTimer));
+  // A click on the backdrop closes it, as Cancel does. Both the press and the release must land
+  // outside the box, so a selection dragged out of a field does not dismiss the dialog.
+  const outside = (e: MouseEvent) => {
+    const r = el.getBoundingClientRect();
+    return e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom;
+  };
+  let pressedOutside = false;
+  el.addEventListener('pointerdown', (e) => { pressedOutside = e.target === el && outside(e); });
+  el.addEventListener('click', (e) => { if (pressedOutside && e.target === el && outside(e)) el.close(); pressedOutside = false; });
   apply.addEventListener('click', () => void send(true));
   saveFile.addEventListener('click', () => {
     try {
