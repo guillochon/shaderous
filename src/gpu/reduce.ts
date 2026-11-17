@@ -50,6 +50,8 @@ export class Reducer {
   /** records of the first stage (written externally if the reducer was created that way) */
   first!: GPUBuffer;
   private stages: Stage[] = [];
+  /** each stage's grid sizes (reduce.wgsl's RD) */
+  private grids: GPUBuffer[] = [];
 
   private constructor(k: number, result: GPUBuffer) {
     this.k = k;
@@ -108,16 +110,19 @@ export class Reducer {
       const gz = Math.ceil(oz / 4);
       const slabs = Math.ceil(gx / device.limits.maxComputeWorkgroupsPerDimension);
       const xg = Math.ceil(gx / slabs);
-      const constants = { NINX: ix, NINY: iy, NINZ: iz, NOUTX: ox, NOUTY: oy, NOUTZ: oz, RED_F, RED_XG: xg, RED_ZG: gz };
-      const pipeline = computePipeline(device, s === 1 ? first : later, `${label} reduce ${s}`, constants);
-      stages.push({ s, pipeline, dispatch: [xg, Math.ceil(oy / 4), gz * slabs] as [number, number, number] });
+      // The grid goes in a uniform (reduce.wgsl), so the pipeline is the same at every size.
+      const dims = device.createBuffer({ label: `${label} stage ${s} grid`, size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      device.queue.writeBuffer(dims, 0, new Uint32Array([ix, iy, iz, xg, ox, oy, oz, gz]));
+      red.grids.push(dims);
+      const pipeline = computePipeline(device, s === 1 ? first : later, `${label} reduce ${s === 1 ? 'first' : 'later'}`, { RED_F });
+      stages.push({ s, pipeline, dims, dispatch: [xg, Math.ceil(oy / 4), gz * slabs] as [number, number, number] });
     }
-    for (const { s, pipeline: pending, dispatch } of stages) {
+    for (const { s, pipeline: pending, dims, dispatch } of stages) {
       const pipeline = await pending;
       const groups =
         s === 1
-          ? variants.map((v) => bindGroup(device, pipeline, { ...v, 20: buffers[0] }))
-          : [bindGroup(device, pipeline, { 0: buffers[s - 2], 20: buffers[s - 1] })];
+          ? variants.map((v) => bindGroup(device, pipeline, { ...v, 20: buffers[0], 40: dims }))
+          : [bindGroup(device, pipeline, { 0: buffers[s - 2], 20: buffers[s - 1], 40: dims })];
       red.stages.push({ pipeline, groups, dispatch });
     }
     return red;
