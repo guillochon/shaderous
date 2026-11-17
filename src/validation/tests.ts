@@ -2848,7 +2848,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-field-brush',
     name: 'MHD field brushes: strength (stronger, then weaker) and pull, on the rotor (2D, 128) and an outflow blast (3D, 32), and on blocks (rotor 2D, 256 finest; outflow blast 3D, 128 finest; 1 level)',
     criterion:
-      'After each brush: |div B| dx / max |B| below 1e-6; the total energy changes by the magnetic energy\'s change (to 1% of it), and the magnetic energy goes up for "stronger", down for "weaker"; on the rotor\'s uniform field the brush\'s hard core is exactly 1.5 times stronger (to 1e-3). On blocks: faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); and a gas brush (mass) leaves the magnetic energy and the faces as they were',
+      'After each brush: |div B| dx / max |B| below 1e-6; on Orszag-Tang (64^2) every face in the hard core exactly 1.5 times stronger (to 1e-4), and a pull on its coarse mesh making no peak (max |B| up by less than 30%, magnetic energy within 5%); the total energy changes by the magnetic energy\'s change (to 1% of it), and the magnetic energy goes up for "stronger", down for "weaker"; on the rotor\'s uniform field the brush\'s hard core is exactly 1.5 times stronger (to 1e-3). On blocks: faces two leaves share agree bit for bit (coarse the mean of fine to 1e-6); and a gas brush (mass) leaves the magnetic energy and the faces as they were',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -2898,6 +2898,38 @@ export const TESTS: TestDef[] = [
         m.rotor_round_trip = Math.abs((await sim.diagnostics()).magnetic!.eMag / d0.magnetic!.eMag - 1);
         pass &&= m.rotor_round_trip < 0.05;
         await brushes(sim, 'rotor', [0.55, 0.45, 0], 0.2);
+      });
+      // A field that varies from cell to cell (Orszag-Tang on a coarse grid): inside the hard core
+      // every face is scaled by exactly 1.5. A potential taken from fields constant in each cell
+      // missed by the jump between cells, on coarse cells as much as the field itself.
+      await withSim(gpu, orszagTang, 64, { ndim: 2, tEnd: Infinity }, async (sim) => {
+        const n = 64;
+        const f0 = await sim.mhd!.readFaces(sim.cur);
+        apply(sim, { ...base, kind: 'field', pos: [0.5, 0.5, 0], radius: 0.3, amount: Math.log(1.5) });
+        const f1 = await sim.mhd!.readFaces(sim.cur);
+        let big = 0;
+        for (let i = 0; i < f0.length; i++) if (i % 4 < 2) big = Math.max(big, Math.abs(f0[i]));
+        let worst = 0;
+        for (let j = 0; j < n; j++)
+          for (let i = 0; i < n; i++)
+            for (let a = 0; a < 2; a++) {
+              const [x, y] = a === 0 ? [i / n, (j + 0.5) / n] : [(i + 0.5) / n, j / n];
+              const o = 4 * (j * (n + 1) + i) + a;
+              if (Math.hypot(x - 0.5, y - 0.5) < 0.12 && Math.abs(f0[o]) > 0.05 * big) worst = Math.max(worst, Math.abs(f1[o] / f0[o] - 1.5));
+            }
+        m.orszag_tang_core_worst = worst;
+        pass &&= worst < 1e-4;
+      });
+      // A frame's pull on a coarse mesh (Orszag-Tang, 256 finest, 2 levels) moves the field without peaks.
+      await withAmr(gpu, orszagTang, 256, { ndim: 2, amrLevels: 2, tEnd: Infinity }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        // As the tool takes a frame's drag: 0.15 of the rim's width (here 0.7 of the radius).
+        apply(sim, { ...base, kind: 'pull', pos: [0.4, 0.55, 0], radius: 0.2, softness: 0.7, amount: 0, vel: [0.0195, 0.0078, 0] });
+        const d = await sim.diagnostics();
+        m.orszag_tang_blocks_pull_bmax = d.magnetic!.bMax / d0.magnetic!.bMax;
+        m.orszag_tang_blocks_pull_magnetic_change = d.magnetic!.eMag / d0.magnetic!.eMag - 1;
+        m.orszag_tang_blocks_pull_divB = d.magnetic!.divB;
+        pass &&= m.orszag_tang_blocks_pull_bmax < 1.3 && Math.abs(m.orszag_tang_blocks_pull_magnetic_change) < 0.05 && d.magnetic!.divB < 1e-6;
       });
       // Outflow walls: the field through them stays as it was, and a brush that reaches one keeps div B.
       await withSim(gpu, { ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 32, { ndim: 3, tEnd: Infinity }, async (sim) => {

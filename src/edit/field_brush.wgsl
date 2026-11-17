@@ -1,7 +1,6 @@
 // The field brushes on the uniform grid (edit/field_brush_core.wgsl), in two passes from the
 // current parity into the other:
-//   faces   every face texel: the field plus the brush's change, and the compensations as
-//           they were;
+//   faces   every face texel: the field and its compensation plus the brush's change;
 //   energy  every cell: the state as it was, its total energy changed by that of the field.
 #include "hydro/common.wgsl"
 #include <eos>
@@ -18,17 +17,25 @@
 @group(0) @binding(9) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(10) var O2: texture_storage_3d<rgba32float, write>;
 
-#include "mhd/bcell.wgsl"
-
 fn loop_count(n: i32) -> i32 {
   return select(n, 0, P.dims.x == 0u);
 }
 fn fb_cells() -> f32 {
   return f32(P.dims.x);
 }
-fn fb_field(x: vec3<f32>) -> vec3<f32> {
+// The cell under x and its faces (the grid's upper face along a periodic axis is cell 0's lower
+// one, as bcell() reads it; in 2D the one z face).
+fn fb_cell(x: vec3<f32>) -> FbCell {
   let n = vec3<i32>(P.dims.xyz);
-  return bcell(clamp(vec3<i32>(floor(x * vec3<f32>(n))), vec3<i32>(0), n - 1));
+  let c = clamp(vec3<i32>(floor(x * vec3<f32>(n))), vec3<i32>(0), n - 1);
+  let up = c + 1;
+  let wrap = vec3<bool>(up.x >= n.x && P.bc_lo[0] == 0u, up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
+  let hi = select(up, vec3<i32>(0), wrap);
+  let lo = textureLoad(BF, c, 0).xyz;
+  let z = select(textureLoad(BF, vec3<i32>(c.x, c.y, hi.z), 0).z, lo.z, n.z == 1);
+  let bhi = vec3<f32>(textureLoad(BF, vec3<i32>(hi.x, c.y, c.z), 0).x, textureLoad(BF, vec3<i32>(c.x, hi.y, c.z), 0).y, z);
+  let h = 1.0 / f32(n.x);
+  return FbCell(vec3<f32>(c) * h, h, lo, bhi);
 }
 
 #include "edit/field_brush_core.wgsl"
@@ -39,11 +46,14 @@ fn faces(@builtin(global_invocation_id) gid: vec3<u32>) {
   let t = vec3<i32>(gid);
   let h = 1.0 / f32(P.dims.x);
   var b = textureLoad(BF, t, 0);
+  var c = textureLoad(CF, t, 0);
   for (var a = 0; a < loop_count(3); a++) {
-    b[a] += fb_face(a, vec3<f32>(t) * h, h, 1);
+    let r = fb_face(a, vec3<f32>(t) * h, h, 1, b[a], c[a]);
+    b[a] = r.x;
+    c[a] = r.y;
   }
   textureStore(BO, t, b);
-  textureStore(CO, t, textureLoad(CF, t, 0));
+  textureStore(CO, t, c);
 }
 
 // The cell-centered field from a face texture, as bcell() takes it (in 2D the one z face).

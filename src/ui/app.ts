@@ -3895,19 +3895,23 @@ function advanceStroke(now: number) {
     return;
   }
   if (s.kind === 'pull') {
-    // The field is carried after the pointer, at most a quarter of the brush's radius a frame
-    // (a longer step would fold the field over itself at the brush's edge); a fast drag catches
-    // up over the frames after, release included.
+    // The field is carried after the pointer. Across the brush's soft rim its weight w falls from
+    // 1 to 0, so a drag d squeezes the field ahead of the brush by 1 / (1 - |grad w| d) (and
+    // stretches it behind): a frame's drag is kept to 0.15 of the rim's width, which holds that to
+    // 1.3 at most (smoothstep's steepest slope is 1.5 over the width). A fast drag catches up over
+    // the frames after, release included. The rim is at least 0.3 of the radius wide: a hard edge
+    // would tear the field.
+    const soft = Math.max(q.softness, 0.3);
     const to = locate(s.x, s.y, s.depth).pos;
     const from = (s.pulled ??= locate(s.x0, s.y0, s.depth).pos);
     let d = [0, 1, 2].map((i) => to[i] - from[i]) as Vec3;
     if (cfg.ndim === 2) d[2] = 0;
     const len = Math.hypot(...d);
-    const cap = 0.25 * q.size;
+    const cap = 0.15 * soft * q.size;
     if (len > cap) d = d.map((v) => (v * cap) / len) as Vec3;
     if (s.released && len <= cap) stroke = null;
     if (len < 1e-6) return;
-    pendingBrush = { ...base, pos: [0, 1, 2].map((i) => from[i] + 0.5 * d[i]) as Vec3, vel: d };
+    pendingBrush = { ...base, softness: soft, pos: [0, 1, 2].map((i) => from[i] + 0.5 * d[i]) as Vec3, vel: d };
     s.pulled = [0, 1, 2].map((i) => from[i] + d[i]) as Vec3;
     return;
   }

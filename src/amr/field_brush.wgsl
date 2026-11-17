@@ -1,7 +1,7 @@
 // The field brushes on the block grid (edit/field_brush_core.wgsl), in two passes over the
 // leaves from the current parity into the other:
-//   faces   texels [0, BS] of every leaf: the field plus the brush's change, and the
-//           compensations as they were;
+//   faces   texels [0, BS] of every leaf: the field and its compensation plus the brush's
+//           change;
 //   energy  every leaf cell: the state as it was, its total energy changed by that of the field.
 // A face is changed from its global position alone, so the copies two leaves hold of a shared
 // face get the same bits, and a coarse face the mean of the fine changes on it.
@@ -41,14 +41,29 @@ fn centered(F: texture_3d<f32>, c: vec3<i32>) -> vec3<f32> {
   return 0.5 * (lo + hi);
 }
 
-// The field of the leaf cell under x, as amr/bsample.wgsl finds it.
-fn fb_field(x: vec3<f32>) -> vec3<f32> {
+// The leaf cell under x, as amr/bsample.wgsl finds it, and its faces (texel BS holds a leaf's
+// upper ones; in 2D the one z face).
+fn fb_cell(x: vec3<f32>) -> FbCell {
   let roots = i32(P.amr.y << P.amr.z);
-  let slot = i32(textureLoad(IDX, min(vec3<i32>(x * f32(roots)), vec3<i32>(roots - 1)), 0).x);
+  var r = min(vec3<i32>(x * f32(roots)), vec3<i32>(roots - 1));
+  if (is2d()) { r.z = 0; }
+  let slot = i32(textureLoad(IDX, r, 0).x);
   let ncell = i32(P.amr.y) * (1 << u32(bt(slot, 0u))) * BS;
   var l = clamp(vec3<i32>(x * f32(ncell)) - blk_coord(slot) * BS, vec3<i32>(0), vec3<i32>(BS - 1));
   if (is2d()) { l.z = 0; }
-  return centered(BF, atl(blk_origin(slot), l));
+  let t = atl(blk_origin(slot), l);
+  let lo = textureLoad(BF, t, 0).xyz;
+  var hi = lo;
+  for (var a = 0; a < 3; a++) {
+    if (a == 2 && is2d()) { break; }
+    var e = vec3<i32>(0);
+    e[a] = 1;
+    hi[a] = textureLoad(BF, t + e, 0)[a];
+  }
+  let h = 1.0 / f32(ncell);
+  var corner = vec3<f32>(blk_coord(slot) * BS + l) * h;
+  if (is2d()) { corner.z = 0.0; }
+  return FbCell(corner, h, lo, hi);
 }
 
 #include "edit/field_brush_core.wgsl"
@@ -70,11 +85,14 @@ fn faces(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: 
   if (is2d()) { o.z = 0.0; }
   let m = 1 << (P.amr.z - level);
   var b = textureLoad(BF, x, 0);
+  var c = textureLoad(CF, x, 0);
   for (var a = 0; a < loop_count(3); a++) {
-    b[a] += fb_face(a, o, h, m);
+    let r = fb_face(a, o, h, m, b[a], c[a]);
+    b[a] = r.x;
+    c[a] = r.y;
   }
   textureStore(BO, x, b);
-  textureStore(CO, x, textureLoad(CF, x, 0));
+  textureStore(CO, x, c);
 }
 
 @compute @workgroup_size(8, 8, 4)

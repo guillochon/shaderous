@@ -1198,8 +1198,15 @@ $`E`$ includes $`B^2/2`$.
   vector potential, taken on each face as the circulation of that change around the face, so
   every cell's divergence stays as it was, to rounding. The potential is the field's own in the
   radial gauge about the brush's center $`x_0`$,
-  $`\mathbf{A}(x) = \int_0^1 t\,\mathbf{B}(x_0 + t d) \times d\,dt`$ with $`d = x - x_0`$, from
-  the cell-centered field of the cells along the way in steps of a finest cell. (In 2D the
+  $`\mathbf{A}(x) = \int_0^1 t\,\mathbf{B}(x_0 + t d) \times d\,dt`$ with $`d = x - x_0`$,
+  integrated exactly: the field in a cell is taken as the scheme holds it, each component linear
+  along its own axis between the cell's two faces, so $`t\mathbf{B}`$ is quadratic along the ray
+  within a cell, and Simpson's rule cell by cell is exact. That field is divergence-free, with
+  its normal component continuous across faces, so the curl of its potential is the field. (A
+  field constant in each cell is neither: its potential's curl missed the field by the jump
+  between neighboring cells, which between the coarse cells of a turbulent 2D run at 1024 with 5
+  levels was as large as the field, and a pull left cell-sized patches of strong and vanishing
+  field.) (In 2D the
   in-plane field's $`A_z = \int_0^1 (\mathbf{B} \times d)_z\,dt`$, without the $`t`$: the plane
   has no $`\partial A_y / \partial z`$ to give the other half of $`B_x`$.) With $`w`$ the
   brush's weight:
@@ -1207,16 +1214,27 @@ $`E`$ includes $`B^2/2`$.
     weakens), so the field becomes $`f\mathbf{B} + \nabla f \times \mathbf{A}`$: 1.5 times
     stronger in the brush's hard core, with the flux it gains closing back around its rim.
   - Pull field: $`\delta\mathbf{A}(x) = \mathbf{A}(x - w\,\delta) - \mathbf{A}(x)`$ for a drag
-    $`\delta`$ of at most a quarter of the brush's radius per frame, so the field lines near the
-    center move with the pointer and less of them toward the edge. The gas stays where it is.
+    $`\delta`$, so the field lines near the center move with the pointer and less of them toward
+    the edge. The gas stays where it is. Across the brush's rim the drag squeezes the field ahead
+    by $`1/(1 - |\nabla w|\,\delta)`$ and stretches it behind: a frame's drag is kept to 0.15 of
+    the rim's width (at least 0.3 of the radius), which holds that to 1.3, and a fast drag
+    catches up over the frames after. Over a long drag the field carried along still gathers
+    ahead of the brush, as frozen-in flux pushed through other field does.
 
   Edges are integrated at the midpoints of their finest-level segments, at positions exact in
   float32 and in a fixed order: the copies of a shared face get the same bits, and a coarse
-  face changes by the mean of its fine faces' changes. An edge on a boundary face that is not
+  face changes by the mean of its fine faces' changes. Each face adds its four edges' terms to
+  its field and compensation with error-free sums, as the update adds its impulses: the
+  potential grows with the distance from the brush's center while a face's change is a
+  difference of it across a cell, and a plain sum left $`\nabla\cdot B`$ at that distance
+  over the cell's side times float32's rounding. An edge on a boundary face that is not
   periodic does not change, so neither does the flux through the boundary. The total energy of
   each cell then changes by that of its $`B^2/2`$; kinetic and internal energy stay. In
   `mhd-field-brush` the brush's hard core on the rotor's uniform field comes out 1.5 times
-  stronger to $`4\times10^{-8}`$; on both grids $`\nabla\cdot B`$ stays below $`10^{-6}`$, the
+  stronger to $`4\times10^{-8}`$, and every face in it on Orszag-Tang at $`64^2`$, whose field
+  changes from cell to cell, to $`6\times10^{-6}`$; a frame's pull on Orszag-Tang's coarse mesh
+  raises the largest $`|B|`$ by 9%; on both grids $`\nabla\cdot B`$ stays below
+  $`1.4\times10^{-7}`$, the
   total energy changes by the magnetic energy's change to $`4\times10^{-4}`$ of it, and shared
   faces agree bit for bit (coarse the mean of fine to $`1.4\times10^{-7}`$). The gas brushes keep
   the field as it was; on blocks they had left the leaves' faces behind in the other parity,
