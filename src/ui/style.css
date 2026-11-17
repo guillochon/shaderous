@@ -53,20 +53,20 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 #record.recording { border-color: #e5534b; background: #3a1d1f; color: #ffb4ae; }
 .buttons button { height: 26px; padding: 0; }
 .io { display: grid; grid-template-columns: auto 1fr 1fr; gap: 6px 8px; align-items: center; }
-#run { border-color: #3a4a66; background: #223049; }
 .io button { height: 24px; padding: 0; font-size: 12px; }
 .io.shot { grid-template-columns: 1fr 1fr; margin-top: 6px; }
 .io.shot select[hidden] { display: none; }
 .jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }
 .jeans .check { height: 24px; }
 #pparams, #pfeatured { display: contents; }
-.setup-row { display: grid; grid-template-columns: 1fr; gap: 4px; align-items: center; }
-/* The one button that opens everything else: wider than the rest and in a color nothing else uses. */
-.setup-row button {
-  height: 30px; width: 100%; font-weight: 600; letter-spacing: 0.02em; color: #fff;
-  background: linear-gradient(180deg, #b36bff, #8a3dff); border: 1px solid #c79bff;
-}
-.setup-row button:hover { background: linear-gradient(180deg, #c184ff, #9a55ff); border-color: #dcbcff; }
+.setup-row { display: grid; grid-template-columns: 1.6fr 1fr; gap: 6px 6px; align-items: center; }
+#setup-sum { grid-column: 1 / -1; }
+/* The two buttons that matter most, each in a color nothing else uses: Setup opens everything else, Run plays and pauses. */
+.setup-row button { height: 30px; width: 100%; font-weight: 600; letter-spacing: 0.02em; color: #eef; }
+#setup { background: linear-gradient(180deg, #6d4fa8, #553a8a); border: 1px solid #8a72c4; }
+#setup:hover { background: linear-gradient(180deg, #7b5cbb, #62449d); border-color: #a38ad8; }
+.setup-row #run { background: linear-gradient(180deg, #2f8f6b, #226b50); border: 1px solid #4fb58c; }
+.setup-row #run:hover { background: linear-gradient(180deg, #38a47b, #297b5c); border-color: #6fcaa4; }
 #setup-sum { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #pparams [hidden] { display: none; }
 /* A slider takes a row of its own, with a field beside it for typing the value. */
@@ -386,7 +386,7 @@ body.validate .buttons-cell button + button { margin-left: 4px; }
   #side select, #side input[type='number'] { height: 36px; font-size: 16px; }
   #problem { height: 40px !important; }
   #side input[type='range'] { height: 36px; }
-  .buttons button { height: 40px; font-size: 15px; }
+  .buttons button, .setup-row button { height: 40px; font-size: 15px; }
   .io button { height: 36px; font-size: 14px; }
   .check { font-size: 14px; min-height: 32px; }
   summary { font-size: 12px; min-height: 28px; align-items: center; }
