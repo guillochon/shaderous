@@ -749,6 +749,7 @@ function build() {
         // What runs is the page's to say: the grid it settled on, the values it held.
         if (JSON.stringify(draft) === text) setDraft(host.running(), origin, notes, true, true);
       }
+        if (el.open) el.close();
     } catch (e) {
       status(`Could not apply: ${message(e)}`, true);
     } finally {
