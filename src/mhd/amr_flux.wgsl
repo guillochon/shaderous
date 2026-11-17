@@ -115,7 +115,9 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
       F = face_of(qll, ql, qr, qrr, textureLoad(FA, cr, 0)[a], a, STAGE == 2u, w, vec4<f32>(0.0), vec4<f32>(0.0), dt);
     }
     // A face in a line-tied wall of the domain (the block table holds it as -1 - its kind).
-    g_tied_face = (t[a] == 0 && bt(slot, 6u + u32(2 * a)) == -1 - i32(BC_LINE_TIED)) || (t[a] == BS && bt(slot, 7u + u32(2 * a)) == -1 - i32(BC_LINE_TIED));
+    let blo = bt(slot, 6u + u32(2 * a));
+    let bhi = bt(slot, 7u + u32(2 * a));
+    g_tied_face = (t[a] == 0 && blo <= -2 && bc_tied(u32(-1 - blo))) || (t[a] == BS && bhi <= -2 && bc_tied(u32(-1 - bhi)));
     if (across.x + across.y + across.z == 0) { F.f = mhd_add_diffusion(F.f, atl(o, t - e), e, a, ql, qr); }
     let fa = vec4<f32>(F.f.m, F.f.mom);
     let fb = vec4<f32>(F.f.e, F.f.ei, F.f.s, F.f.vn);

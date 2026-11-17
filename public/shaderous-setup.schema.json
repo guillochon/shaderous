@@ -105,7 +105,8 @@
          1,
          2,
          3,
-         4
+         4,
+         5
         ]
        },
        "maxItems": 3
@@ -118,7 +119,8 @@
          1,
          2,
          3,
-         4
+         4,
+         5
         ]
        },
        "maxItems": 3
@@ -139,7 +141,8 @@
          1,
          2,
          3,
-         4
+         4,
+         5
         ]
        },
        "maxItems": 3
@@ -152,10 +155,77 @@
          1,
          2,
          3,
-         4
+         4,
+         5
         ]
        },
        "maxItems": 3
+      }
+     },
+     "additionalProperties": false
+    },
+    "wallVelocity": {
+     "type": "object",
+     "properties": {
+      "xlo": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Wall velocity, lower x face",
+       "description": "Where the lower x face is a moving wall: its velocity along itself (the part normal to it is ignored)"
+      },
+      "xhi": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Wall velocity, upper x face",
+       "description": "Where the upper x face is a moving wall: its velocity along itself (the part normal to it is ignored)"
+      },
+      "ylo": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Wall velocity, lower y face",
+       "description": "Where the lower y face is a moving wall: its velocity along itself (the part normal to it is ignored)"
+      },
+      "yhi": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Wall velocity, upper y face",
+       "description": "Where the upper y face is a moving wall: its velocity along itself (the part normal to it is ignored)"
+      },
+      "zlo": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Wall velocity, lower z face",
+       "description": "Where the lower z face is a moving wall: its velocity along itself (the part normal to it is ignored)"
+      },
+      "zhi": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Wall velocity, upper z face",
+       "description": "Where the upper z face is a moving wall: its velocity along itself (the part normal to it is ignored)"
       }
      },
      "additionalProperties": false

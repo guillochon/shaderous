@@ -25,7 +25,7 @@ export interface Prim {
 /** How a cell's kind is stored with its state: 1 solid, -1 fixed, 0 ordinary gas. */
 export const cellMark = (w: Prim): number => (w.solid ? 1 : w.fixed ? -1 : 0);
 
-export { LINE_TIED, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT } from './boundaries';
+export { LINE_TIED, MOVING_WALL, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT } from './boundaries';
 export type Bc3 = [number, number, number];
 
 /**
@@ -286,6 +286,8 @@ export interface Problem {
   conductivity?: number;
   /** Magnetic diffusivity eta switched on by default (see SimConfig.resistivity). */
   resistivity?: number;
+  /** Velocities of the faces that are moving walls (SimConfig.wallVelocity). */
+  wallVelocity?: Partial<import('./boundaries').WallVelocity>;
   /** Turbulence driving switched on by default (see SimConfig.driving). */
   driving?: Partial<import('../hydro/drive').DriveParams>;
   /** Uniform external gravitational acceleration, which may depend on the dimensionality. */

@@ -4,8 +4,9 @@
 // mhd/state.wgsl (MQ), MFlux, hydro/diffusion_core.wgsl and load_b(c).
 #include "mhd/ohm.wgsl"
 
-// Set by the flux pass for a face in a line-tied wall of the domain (hydro/boundary.wgsl): no
-// electric field along it, so no Poynting flux through it, resistive or not.
+// Set by the flux pass for a face in a line-tied or moving wall of the domain
+// (hydro/boundary.wgsl): the electric field along it is set, with no resistive part, so no
+// resistive Poynting flux crosses it.
 var<private> g_tied_face: bool = false;
 
 fn dside_mq(q: MQ) -> DSide {

@@ -297,7 +297,7 @@
   {
    "key": "bc",
    "group": "settings",
-   "about": "Six digits: the boundary at the lower x, y, z faces and then the upper ones (0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall)"
+   "about": "Six digits: the boundary at the lower x, y, z faces and then the upper ones (0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall, 5 moving wall)"
   },
   {
    "key": "p.<id>",

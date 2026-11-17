@@ -211,6 +211,12 @@ export const OPTIONS: Option[] = [
 
   // ---- boundaries ----
   { path: 'domain.bc', label: 'Faces of the box', tip: 'What the gas meets at each face of the box. Periodic faces come in pairs', page: 'boundaries', control: { type: 'faces' }, apply: 'live', linkKey: 'bc', cfg: 'bc' },
+  { path: 'domain.wallVelocity.xlo', label: 'Wall velocity, lower x face', tip: 'Where the lower x face is a moving wall: its velocity along itself (the part normal to it is ignored)', page: 'boundaries', control: { type: 'vec3' }, apply: 'live', default: [0, 0, 0], cfg: 'wallVelocity.xlo' },
+  { path: 'domain.wallVelocity.xhi', label: 'Wall velocity, upper x face', tip: 'Where the upper x face is a moving wall: its velocity along itself (the part normal to it is ignored)', page: 'boundaries', control: { type: 'vec3' }, apply: 'live', default: [0, 0, 0], cfg: 'wallVelocity.xhi' },
+  { path: 'domain.wallVelocity.ylo', label: 'Wall velocity, lower y face', tip: 'Where the lower y face is a moving wall: its velocity along itself (the part normal to it is ignored)', page: 'boundaries', control: { type: 'vec3' }, apply: 'live', default: [0, 0, 0], cfg: 'wallVelocity.ylo' },
+  { path: 'domain.wallVelocity.yhi', label: 'Wall velocity, upper y face', tip: 'Where the upper y face is a moving wall: its velocity along itself (the part normal to it is ignored)', page: 'boundaries', control: { type: 'vec3' }, apply: 'live', default: [0, 0, 0], cfg: 'wallVelocity.yhi' },
+  { path: 'domain.wallVelocity.zlo', label: 'Wall velocity, lower z face', tip: 'Where the lower z face is a moving wall: its velocity along itself (the part normal to it is ignored)', page: 'boundaries', control: { type: 'vec3' }, apply: 'live', default: [0, 0, 0], cfg: 'wallVelocity.zlo' },
+  { path: 'domain.wallVelocity.zhi', label: 'Wall velocity, upper z face', tip: 'Where the upper z face is a moving wall: its velocity along itself (the part normal to it is ignored)', page: 'boundaries', control: { type: 'vec3' }, apply: 'live', default: [0, 0, 0], cfg: 'wallVelocity.zhi' },
 
   // ---- gas ----
   { path: 'physics.eos', label: 'Equation of state', tip: 'How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues', page: 'gas', apply: 'shaders', default: 'ideal', linkKey: 'eos', cfg: 'eos',

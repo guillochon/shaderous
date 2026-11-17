@@ -35,6 +35,11 @@ override STAGE: u32 = 1u;
 #include "mhd/flux_index.wgsl"
 #include "mhd/corner.wgsl"
 
+// The face field the moving walls carry (mhd/corner.wgsl).
+fn wall_bn(a: i32, t: vec3<i32>) -> f32 {
+  return bface(a, t);
+}
+
 // (F_a(B_t1), F_a(B_t2), upwind weight) of the lower face along a of cell t.
 fn fc(a: i32, t: vec3<i32>) -> vec3<f32> {
   let i = 3u * flux_index(t) + 2u;
@@ -87,14 +92,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (RESISTIVITY) { J = vec3<f32>(edge_current(0, ryz, rz0, r100, r111), edge_current(1, rzx, r010, rz0, r111), edge_current(2, r000, r100, r010, r111)); }
   }
   if (RESISTIVITY) { E += (P.ohm.x / P.dx) * J; }
-  // Line-tied faces (hydro/boundary.wgsl): no field along them, so the flux through them stays.
+  // Line-tied and moving walls (hydro/boundary.wgsl): no field along a wall at rest, so the flux
+  // through it stays; -v_wall x B_n along a moving one.
   let n = mhd_dims();
-  var tied = vec3<bool>(false);
+  var on = vec3<bool>(false);
+  var kinds = vec3<u32>(0u);
+  var upper = vec3<bool>(false);
   for (var a = 0; a < 3; a++) {
     if (a == 2 && P.dims.z == 1u) { continue; }
-    tied[a] = (t[a] == 0 && P.bc_lo[a] == BC_LINE_TIED) || (t[a] == n[a] && P.bc_hi[a] == BC_LINE_TIED);
+    if (t[a] == 0 && bc_tied(P.bc_lo[a])) {
+      on[a] = true;
+      kinds[a] = P.bc_lo[a];
+    } else if (t[a] == n[a] && bc_tied(P.bc_hi[a])) {
+      on[a] = true;
+      kinds[a] = P.bc_hi[a];
+      upper[a] = true;
+    }
   }
-  E *= bc_tied_keep(tied);
+  E = E * bc_tied_keep(on) + moving_wall_e(t, on, kinds, upper);
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
   EMF[emf_index(t)] = vec4<f32>((dt / P.dx) * E, 0.0);
 }

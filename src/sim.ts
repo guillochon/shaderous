@@ -1,4 +1,5 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
+import { FACE_KEYS, noWallVelocity, type WallVelocity } from './problems/boundaries';
 import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareHelmholtz } from './eos/helmholtz';
 import { assemble } from './gpu/shaders';
@@ -100,6 +101,8 @@ export interface SimConfig {
    * energy flux eta J x B, and the internal energy the Ohmic heat eta J^2 (mhd/ohm.wgsl). 0 is off.
    */
   resistivity: number;
+  /** Velocity of each face that is a moving wall (hydro/boundary.wgsl), along the wall. */
+  wallVelocity: WallVelocity;
   /**
    * Turbulence driving (hydro/drive.ts): a random acceleration in a band of large scales,
    * correlated over tau. An rms acceleration of 0 is off.
@@ -366,6 +369,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     conductivity: problem.conductivity ?? 0,
     resistivity: problem.resistivity ?? 0,
     driving: { ...defaultDrive(), ...problem.driving },
+    wallVelocity: { ...noWallVelocity(), ...problem.wallVelocity },
     dampRadius: problem.damping?.radius ?? 0,
     dampRate: problem.damping?.rate ?? 0,
     // A problem compiled from a setup document brings the solver's and the mesh's settings too.
@@ -679,7 +683,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 288;
+export const PARAM_BYTES = 384;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -727,6 +731,7 @@ export function packParams(
   f.set([Math.max(0, c.refineRho), Math.max(0, c.refineDense), c.tFrame ?? 1e30, 0], 60);
   f.set(eosConstants2(c.eos, c.eosParams), 64);
   f.set([resists(c) ? c.resistivity : 0, 0, 0, 0], 68);
+  FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
   return buf;
 }
 

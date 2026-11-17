@@ -15,6 +15,7 @@
 @group(0) @binding(2) var W1: texture_3d<f32>;
 @group(0) @binding(3) var W2: texture_3d<f32>;
 @group(0) @binding(4) var W3: texture_3d<f32>;
+@group(0) @binding(5) var FA: texture_3d<f32>;   // the stage's assembled faces (mhd/amr_assemble.wgsl)
 @group(0) @binding(6) var<storage, read> FL: array<vec4<f32>>;
 @group(0) @binding(8) var EO: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(14) var<uniform> CHUNK: Chunk;
@@ -33,6 +34,11 @@ fn fc(a: i32, t: vec3<i32>) -> vec3<f32> {
 #include "mhd/corner.wgsl"
 
 var<private> g_o: vec3<i32>;
+
+// The face field the moving walls carry (mhd/corner.wgsl).
+fn wall_bn(a: i32, l: vec3<i32>) -> f32 {
+  return textureLoad(FA, atl(g_o, l), 0)[a];
+}
 
 fn eref(l: vec3<i32>) -> Ref {
   let q = mq_block(g_o, l);
@@ -75,15 +81,25 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (RESISTIVITY) {
     E += select(vec3<f32>(0.0), (P.ohm.x / g_dx) * J, vec3<bool>(t.x < BS, t.y < BS, t.z < BS || is2d()));
   }
-  // Line-tied faces of the domain (hydro/boundary.wgsl): no field along them, so the flux
-  // through them stays. The block table holds a domain face as -1 - its kind.
-  var tied = vec3<bool>(false);
+  // Line-tied and moving walls of the domain (hydro/boundary.wgsl): no field along a wall at
+  // rest, so the flux through it stays; -v_wall x B_n along a moving one. The block table holds
+  // a domain face as -1 - its kind.
+  var on = vec3<bool>(false);
+  var kinds = vec3<u32>(0u);
+  var upper = vec3<bool>(false);
   for (var a = 0; a < naxes(); a++) {
-    let lo = bt(inv.slot, 6u + u32(2 * a)) == -1 - i32(BC_LINE_TIED);
-    let hi = bt(inv.slot, 7u + u32(2 * a)) == -1 - i32(BC_LINE_TIED);
-    tied[a] = (t[a] == 0 && lo) || (t[a] == BS && hi);
+    let lo = bt(inv.slot, 6u + u32(2 * a));
+    let hi = bt(inv.slot, 7u + u32(2 * a));
+    if (t[a] == 0 && lo <= -2 && bc_tied(u32(-1 - lo))) {
+      on[a] = true;
+      kinds[a] = u32(-1 - lo);
+    } else if (t[a] == BS && hi <= -2 && bc_tied(u32(-1 - hi))) {
+      on[a] = true;
+      kinds[a] = u32(-1 - hi);
+      upper[a] = true;
+    }
   }
-  E *= bc_tied_keep(tied);
+  E = E * bc_tied_keep(on) + moving_wall_e(t, on, kinds, upper);
   let dt = stage_dt(inv.slot, STAGE);
   textureStore(EO, atl(g_o, t), vec4<f32>((dt / g_dx) * E, 0.0));
 }

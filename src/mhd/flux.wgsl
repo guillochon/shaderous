@@ -118,7 +118,7 @@ fn face(t: vec3<i32>, axis: i32) -> FaceOut {
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
   var o = face_of(qll, ql, qr, qrr, bface(axis, t), axis, STAGE == 2u, w, comp_tex(bc_map(t - e).c), comp_tex(bc_map(t).c), dt);
   let n = mhd_dims();
-  g_tied_face = (t[axis] == 0 && P.bc_lo[axis] == BC_LINE_TIED) || (t[axis] == n[axis] && P.bc_hi[axis] == BC_LINE_TIED);
+  g_tied_face = (t[axis] == 0 && bc_tied(P.bc_lo[axis])) || (t[axis] == n[axis] && bc_tied(P.bc_hi[axis]));
   o.f = mhd_add_diffusion(o.f, t - e, e, axis, ql, qr);
   return o;
 }

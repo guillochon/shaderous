@@ -226,16 +226,19 @@ in, the clamp on its normal velocity. Cells inside the grid return at once, and 
 variant `bc_map` is compiled out. Obstacles are solid cells flagged in the state and treated as
 reflecting (or no-slip, with viscosity) walls by the same functions.
 
-The kinds of box face are chosen per face: periodic, outflow, reflecting, outflow only, and the
-line-tied wall. What each does to a ghost is written once, in `hydro/boundary.wgsl`
-(`bc_ghost_cell`, `bc_vsign`, `bc_bsign`, `bc_side`, `bc_ghost_face`), and every grid's mapping
+The kinds of box face are chosen per face: periodic, outflow, reflecting, outflow only, the
+line-tied wall, and the moving wall (whose velocities are in the parameter block, `P.wallv`). What each does to a ghost is written once, in `hydro/boundary.wgsl`
+(`bc_ghost_cell`, `bc_vsign`, `bc_bsign`, `bc_side`, `bc_ghost_face`, `bc_wall_velocity`), and
+every grid's mapping
 calls it: `bc_map` on the uniform grid, `ghost_src` and `row_src` for the gas on blocks (where
 the block table holds a domain face as `-1 - kind`), and `map_cell` and `face_map`
 (`mhd/amr_lookup.wgsl`) for MHD on blocks. The interface, the setup format and links read one
 table, `problems/boundaries.ts`. A new kind is an entry there, its rules in
 `hydro/boundary.wgsl`, and whatever physics is its own: the line-tied wall also zeroes the
 electric field along it (`bc_tied_keep`, in both edge passes) and the resistive Poynting flux
-through it. The CPU reference solvers (`src/reference`) keep their own mappings of the first
+through it, and the moving wall sets it to $`-\mathbf{v}_\text{wall}\times\mathbf{B}_n`$
+(`moving_wall_e` in `mhd/corner.wgsl`, from the wall faces: `bface` on the uniform grid, the
+assembled faces on blocks). The CPU reference solvers (`src/reference`) keep their own mappings of the first
 four kinds, as independent checks.
 
 One trap when touching these: `map_cell` must be called inside the per-axis loop of

@@ -82,7 +82,7 @@ fn u_near_m(slot: i32, l: vec3<i32>) -> MaybeCons {
   let s = ghost_src(slot, l);
   if (s.kind != 0) { return MaybeCons(Cons(vec4<f32>(0.0), vec4<f32>(0.0)), false); }
   var u = u_at_m(s.slot, s.l);
-  u.a = vec4<f32>(u.a.x, u.a.yzw * s.flip);
+  u.a = vec4<f32>(u.a.x, u.a.yzw * s.flip + u.a.x * s.vadd);
   return MaybeCons(u, true);
 }
 
@@ -103,8 +103,8 @@ fn cons_at(level: u32, g0: vec3<i32>) -> Cons {
   }
   // A plain copy keeps its bits: two blocks then see the same numbers for the same cell, and
   // compute the faces and edges they share identically.
-  if (all(m.flip == vec3<f32>(1.0)) && all(m.side == vec3<f32>(0.0))) { return u; }
-  let v = bc_velocity(u.a.yzw / max(u.a.x, P.rho_floor), Mapped(vec3<i32>(0), m.flip, m.side, m.bflip));
+  if (all(m.flip == vec3<f32>(1.0)) && all(m.side == vec3<f32>(0.0)) && all(m.vadd == vec3<f32>(0.0))) { return u; }
+  let v = bc_velocity(u.a.yzw / max(u.a.x, P.rho_floor), Mapped(vec3<i32>(0), m.flip, m.side, m.bflip, m.vadd));
   return Cons(vec4<f32>(u.a.x, v * u.a.x), u.b);
 }
 

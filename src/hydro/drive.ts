@@ -18,7 +18,7 @@
 import { setSharedBinding } from '../gpu/device';
 
 /** Binding of the driving buffer in every pass that reads it (hydro/drive.wgsl, drive_ou.wgsl). */
-export const DRIVE_BINDING = 32;
+export const DRIVE_BINDING = 33;
 /** Most modes the shaders hold (hydro/drive_common.wgsl DRIVE_MODES). */
 export const DRIVE_MODES = 64;
 /** Size of the buffer: two vec4 of header, three vec4 per mode. */

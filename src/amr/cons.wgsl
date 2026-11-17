@@ -42,7 +42,7 @@ fn u_near(slot: i32, l: vec3<i32>) -> MaybeCons {
   let s = ghost_src(slot, l);
   if (s.kind != 0) { return MaybeCons(Cons(vec4<f32>(0.0), vec4<f32>(0.0)), false); }
   var u = u_at(s.slot, s.l);
-  u.a = vec4<f32>(u.a.x, u.a.yzw * s.flip);
+  u.a = vec4<f32>(u.a.x, u.a.yzw * s.flip + u.a.x * s.vadd);
   return MaybeCons(u, true);
 }
 

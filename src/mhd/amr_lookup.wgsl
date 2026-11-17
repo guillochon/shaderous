@@ -12,11 +12,11 @@ fn n_at(level: u32) -> vec3<i32> {
 // A cell mapped into the domain: its index, the signs of its velocity and field components
 // (reversed by walls as hydro/boundary.wgsl says), and for outflow-only faces the side
 // (-1 / +1) to clamp the normal velocity toward.
-struct GCell { g: vec3<i32>, flip: vec3<f32>, side: vec3<f32>, bflip: vec3<f32> }
+struct GCell { g: vec3<i32>, flip: vec3<f32>, side: vec3<f32>, bflip: vec3<f32>, vadd: vec3<f32> }
 
 fn map_cell(level: u32, g0: vec3<i32>) -> GCell {
   let n = n_at(level);
-  var o = GCell(g0, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0));
+  var o = GCell(g0, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
   for (var a = 0; a < 3; a++) {
     let i = g0[a];
     if (i >= 0 && i < n[a]) { continue; }
@@ -31,6 +31,7 @@ fn map_cell(level: u32, g0: vec3<i32>) -> GCell {
     if (bc_wall(bc)) {
       o.flip *= bc_vsign(bc, a);
       o.bflip *= bc_bsign(bc, a);
+      o.vadd += 2.0 * bc_wall_velocity(bc, a, up);
     }
     o.side[a] = bc_side(bc, up);
   }

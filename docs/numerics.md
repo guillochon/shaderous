@@ -891,9 +891,9 @@ where the density varies, and nothing removes it: the box picks up a net momentu
 of its mass times the rms speed after four crossing times at Mach 1. Restarting from a
 snapshot draws the amplitudes afresh. In `driving`: the isothermal preset at $`32^3`$ holds an
 rms speed of 1.0 to 1.2 (the sound speed is 1) from $`t = 3`$; the same seed gives the same kinetic
-energy and another seed one 20% apart; with the force frozen, unrefined blocks follow the uniform
-grid to 0.5% at $`t = 0.05`$; and with a guide field in 2D the field is amplified with $`\nabla\cdot\mathbf{B}`$
-at zero. Not yet compared against the injected power or a measured spectrum (no spectra yet).
+energy and another seed one 20% apart; with the force frozen, unrefined blocks whose root grid is
+the uniform one follow it to $`10^{-7}`$ in kinetic energy at $`t = 0.3`$; and with a guide field
+in 2D the field is amplified with $`\nabla\cdot\mathbf{B}`$ at zero. Not yet compared against the injected power or a measured spectrum (no spectra yet).
 
 ## 20. Nuclear burning network
 
@@ -1035,6 +1035,22 @@ $`E`$ includes $`B^2/2`$.
   $`8\times10^{-6}`$ of its magnetic energy by $`t = 1`$, from the walls' spurious current; and
   for the gas alone, a shear flow between two such walls decays as
   $`\exp(-2\nu\pi^2 t)`$ to $`2\times10^{-5}`$.
+
+  A **moving wall** (kind 5) is a line-tied wall that slides along itself at the velocity set
+  for its face (`domain.wallVelocity`; the part normal to the wall is dropped). The ghost's
+  velocity is $`2\mathbf{v}_\text{wall} - \mathbf{v}`$, so the gas at the wall moves with it (no
+  slip), and the electric field along the wall is $`-\mathbf{v}_\text{wall}\times\mathbf{B}_n`$,
+  with $`B_n`$ the mean of the two wall faces beside each edge, so the footpoints of the field
+  lines move with the wall and the flux through it is carried along it exactly. The wall does
+  work on the gas and the field, so the total energy is not conserved. In `moving-wall`: the
+  lid-driven cavity (the preset, Reynolds number 100, Mach 0.08, $`128^2`$) settles by
+  $`t = 12`$ to a vertical-centerline velocity within $`0.0065`$ of the lid speed of the table of
+  [Ghia, Ghia & Shin (1982)][Ghia1982] at every height, its vortex core at $`u = -0.214`$ against
+  their $`-0.211`$; a field $`B_y = 1 + 0.2\sin 2\pi x`$ through a wall moving at 0.5 is carried
+  along it to $`2.5\times10^{-3}`$ of its amplitude by $`t = 0.5`$, while the faces of the wall
+  at rest opposite stay to the bit and the flux through the moving one holds to
+  $`5\times10^{-9}`$; and on unrefined blocks the magnetic energy follows the uniform grid to
+  $`10^{-5}`$ after some 1700 steps.
 - **Initial fields.** A preset gives a vector potential $`\mathbf{A}`$, sampled at the edge
   centers, and $`b`$ is its discrete curl, so the divergence starts at zero up to rounding. Or
   it gives the face values of a field that is divergence-free by construction.
@@ -1445,6 +1461,7 @@ result.
 [Mallet2026]: https://doi.org/10.5281/zenodo.21987739
 [Thurgood2018]: https://doi.org/10.1063/1.5035489
 [Tsiklauri2007]: https://doi.org/10.1063/1.2800854
+[Ghia1982]: https://doi.org/10.1016/0021-9991(82)90058-4
 [Koyama2004]: https://doi.org/10.1086/382478
 [Krumholz2004]: https://doi.org/10.1086/421935
 [Kushnir2013]: https://doi.org/10.1088/2041-8205/778/2/L37

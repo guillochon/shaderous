@@ -46,6 +46,8 @@ struct Params {
   eos2: vec4<f32>,       // more equation-of-state constants, per module (eos/degenerate.wgsl,
                          //   eos/ionizing.wgsl); zero for the others
   ohm: vec4<f32>,        // (magnetic diffusivity eta, 0, 0, 0): mhd/ohm.wgsl
+  wallv: array<vec4<f32>, 6>, // each face's wall velocity (moving walls, hydro/boundary.wgsl):
+                         //   (x lo, x hi, y lo, y hi, z lo, z hi)
 }
 
 struct Clock {
@@ -142,6 +144,7 @@ struct Mapped {
   flip: vec3<f32>,    // signs of the velocity's components (-1 where a wall reverses them)
   side: vec3<f32>,    // -1 / +1 on axes where this is a ghost beyond an outflow-only face
   bflip: vec3<f32>,   // signs of the magnetic field's components
+  vadd: vec3<f32>,    // added to the velocity after its signs: twice a moving wall's velocity
 }
 
 // Set by a pass for a cell whose whole stencil lies inside the grid: its loads skip the
@@ -157,7 +160,7 @@ fn stencil_inside(c: vec3<i32>, reach: i32) -> bool {
 
 // Every state load goes through this, so there are no ghost cells to fill.
 fn bc_map(c: vec3<i32>) -> Mapped {
-  var m = Mapped(c, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0));
+  var m = Mapped(c, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
   if (g_inner) { return m; }
   let n = vec3<i32>(i32(P.n), i32(P.n), i32(P.dims.z));
   // Most loads are of cells inside the grid: they skip the rest.
@@ -170,15 +173,17 @@ fn bc_map(c: vec3<i32>) -> Mapped {
     if (bc_wall(k)) {
       m.flip *= bc_vsign(k, a);
       m.bflip *= bc_bsign(k, a);
+      m.vadd += 2.0 * bc_wall_velocity(k, a, up);
     }
     m.side[a] = bc_side(k, up);
   }
   return m;
 }
 
-// Velocity of a (possibly ghost) cell: reversed as the walls say, and at outflow-only faces
+// Velocity of a (possibly ghost) cell: reversed as the walls say (and, beyond a moving wall,
+// reflected about the wall's velocity: 2 v_wall - v), and at outflow-only faces
 // the ghost's normal velocity is clamped to point outward, so nothing can flow in.
 fn bc_velocity(v: vec3<f32>, m: Mapped) -> vec3<f32> {
-  let w = v * m.flip;
+  let w = v * m.flip + m.vadd;
   return select(w, max(w * m.side, vec3<f32>(0.0)) * m.side, m.side != vec3<f32>(0.0));
 }

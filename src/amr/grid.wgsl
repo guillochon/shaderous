@@ -62,10 +62,10 @@ fn blk_pos(slot: i32, l: vec3<i32>) -> vec3<f32> {
 //           its image in a physical boundary (then flip / side say how to treat the velocity)
 //   kind 1: beyond a face whose neighbor is one level coarser; `slot` is that coarser leaf
 //   kind 2: an edge or corner ghost, which nothing uses
-struct Src { kind: i32, slot: i32, l: vec3<i32>, flip: vec3<f32>, side: vec3<f32>, bflip: vec3<f32> }
+struct Src { kind: i32, slot: i32, l: vec3<i32>, flip: vec3<f32>, side: vec3<f32>, bflip: vec3<f32>, vadd: vec3<f32> }
 
 fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
-  var s = Src(0, slot, l, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0));
+  var s = Src(0, slot, l, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
   let lo = l < vec3<i32>(0);
   let hi = l >= vec3<i32>(BS);
   let out = vec3<i32>(lo) + vec3<i32>(hi);
@@ -91,6 +91,7 @@ fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
     s.flip = bc_vsign(k, axis);
     s.bflip = bc_bsign(k, axis);
     s.side[axis] = bc_side(k, upper);
+    s.vadd = 2.0 * bc_wall_velocity(k, axis, upper);
   }
   return s;
 }
@@ -108,5 +109,5 @@ fn row_src(slot: i32, axis: i32, i: i32) -> i32 {
 }
 
 fn src_velocity(v: vec3<f32>, s: Src) -> vec3<f32> {
-  return bc_velocity(v, Mapped(vec3<i32>(0), s.flip, s.side, s.bflip));
+  return bc_velocity(v, Mapped(vec3<i32>(0), s.flip, s.side, s.bflip, s.vadd));
 }

@@ -29,7 +29,7 @@ import { tidalDisruption, tidalDisruptionDipole, tdeOrbit, TDE, TDE_STAR } from 
 /** The tidal disruption in the box its tests were calibrated in (the presets' is twice as wide). */
 const tdeTest: Problem = { ...tidalDisruption, box: TDE.box };
 import { sphere, spherePotential } from '../presets/names';
-import { all, LINE_TIED, PERIODIC, REFLECT, type Bc3, type Problem } from '../problems/types';
+import { all, LINE_TIED, MOVING_WALL, PERIODIC, REFLECT, type Bc3, type Problem } from '../problems/types';
 import { binary } from '../presets/names';
 import { problemById } from '../presets/index';
 import { MRI, mriDisk } from '../presets/names';
@@ -1751,7 +1751,7 @@ export const TESTS: TestDef[] = [
     id: 'driving',
     name: 'Turbulence driving (3D 32^3 uniform and on blocks; 2D 128^2 with a field)',
     criterion:
-      'Isothermal gas stirred as in the driven-turbulence preset reaches an rms speed between 0.7 and 1.6 by t = 3 and holds it at t = 4 (within 30%); the same seed gives the same kinetic energy to 1e-5, another seed one that differs by more than 1%; with the force frozen, unrefined blocks follow the uniform grid to 1% in kinetic energy at t = 0.05 (later the differences of the two schemes grow); the box gains a net momentum under 20% of its mass times the rms speed; the magnetized preset in 2D runs to t = 2 with |div B| dx / max |B| below 1e-6 and the field amplified',
+      'Isothermal gas stirred as in the driven-turbulence preset reaches an rms speed between 0.7 and 1.6 by t = 3 and holds it at t = 4 (within 30%); the same seed gives the same kinetic energy to 1e-5, another seed one that differs by more than 1%; with the force frozen, unrefined blocks of 32 root cells follow the uniform grid to 1e-4 in kinetic energy at t = 0.3; the box gains a net momentum under 20% of its mass times the rms speed; the magnetized preset in 2D runs to t = 2 with |div B| dx / max |B| below 1e-6 and the field amplified',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -1781,15 +1781,14 @@ export const TESTS: TestDef[] = [
       pass &&= m.vrms_t3 > 0.7 && m.vrms_t3 < 1.6 && Math.abs(m.vrms_t4 / m.vrms_t3 - 1) < 0.3;
       pass &&= m.same_seed_difference < 1e-5 && m.other_seed_difference > 0.01 && m.net_momentum < 0.2;
 
-      // The same force on unrefined blocks: frozen (tau very long), since the random kicks follow
-      // the step count and the two grids take different steps; and early, before the turbulence
-      // amplifies the two schemes' differences (the blocks take steps twice as long, and by t = 0.3
-      // the two differ by 5%).
+      // The same force on unrefined blocks whose root grid is the uniform one (one level: the
+      // finest is twice the root), frozen (tau very long) so that the two need not draw the same
+      // random kicks.
       const frozen = { ...base, tau: 1e6 };
-      const uni = await withSim(gpu, hydro, 32, { ndim: 3, tEnd: 0.05, driving: frozen }, async (sim) => (await sim.runToEnd(64), sim.diagnostics()));
-      const blk = await withAmr(gpu, hydro, 32, { ndim: 3, amrLevels: 1, refineHi: 2, tEnd: 0.05, driving: frozen }, async (sim) => (await sim.runToEnd(64), sim.diagnostics()));
+      const uni = await withSim(gpu, hydro, 32, { ndim: 3, tEnd: 0.3, driving: frozen }, async (sim) => (await sim.runToEnd(64), sim.diagnostics()));
+      const blk = await withAmr(gpu, hydro, 64, { ndim: 3, amrLevels: 1, refineHi: 2, tEnd: 0.3, driving: frozen }, async (sim) => (await sim.runToEnd(64), sim.diagnostics()));
       m.blocks_kinetic_difference = Math.abs(blk.eKin / uni.eKin - 1);
-      pass &&= m.blocks_kinetic_difference < 0.01;
+      pass &&= m.blocks_kinetic_difference < 1e-4;
 
       // With a guide field, in the plane across it.
       await withSim(gpu, problemById('driven-turbulence-mhd'), 128, { ndim: 2, tEnd: 2 }, async (sim) => {
@@ -3581,6 +3580,82 @@ export const TESTS: TestDef[] = [
         const d1 = await sim.diagnostics();
         m.no_slip_decay_error = Math.abs(d1.eKin / d0.eKin / Math.exp(-2 * nu * Math.PI ** 2) - 1);
         pass &&= m.no_slip_decay_error < 0.02;
+      });
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'moving-wall',
+    name: 'Moving walls: the lid-driven cavity (2D 128^2) and moving footpoints (2D 64^2, uniform and blocks of 64 root cells)',
+    criterion:
+      'The lid-driven cavity at Reynolds number 100 (the preset, Mach 0.08) settles by t = 12 to a vertical-centerline u within 0.015 of the lid speed of Ghia, Ghia & Shin (1982) at every tabulated height; a field B_y = 1 + 0.2 sin(2 pi x) through a wall moving at 0.5 along x is carried along it, the wall faces matching the pattern shifted by 0.5 t to 1% of its amplitude at t = 0.5, while the faces of the wall at rest opposite stay bit for bit and the flux through the moving one is unchanged to 1e-6; on unrefined blocks (root grid 64^2) the magnetic energy follows the uniform grid to 1e-4 after some 1700 steps. Throughout |div B| dx / max |B| below 1e-6',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      // Ghia, Ghia & Shin (1982), Table I, Re = 100: u along the vertical line through the center.
+      const GHIA: [number, number][] = [
+        [0.9766, 0.84123], [0.9688, 0.78871], [0.9609, 0.73722], [0.9531, 0.68717], [0.8516, 0.23151], [0.7344, 0.00332], [0.6172, -0.13641],
+        [0.5, -0.20581], [0.4531, -0.2109], [0.2813, -0.15662], [0.1719, -0.1015], [0.1016, -0.06434], [0.0703, -0.04775], [0.0625, -0.04192], [0.0547, -0.03717],
+      ];
+      const n = 128;
+      await withSim(gpu, problemById('lid-driven-cavity'), n, { ndim: 2, tEnd: 12 }, async (sim) => {
+        await sim.runToEnd(64);
+        const { u1 } = await sim.readState();
+        // u on x = 0.5, between columns n/2 - 1 and n/2, with the walls' values at the ends.
+        const ys = [0];
+        const us = [0];
+        for (let j = 0; j < n; j++) {
+          const at = (i: number) => u1[4 * (j * n + i) + 1] / u1[4 * (j * n + i)];
+          ys.push((j + 0.5) / n);
+          us.push(0.5 * (at(n / 2 - 1) + at(n / 2)));
+        }
+        ys.push(1);
+        us.push(1);
+        const interp = (y: number) => {
+          const k = ys.findIndex((v) => v >= y);
+          return us[k - 1] + ((us[k] - us[k - 1]) * (y - ys[k - 1])) / (ys[k] - ys[k - 1]);
+        };
+        m.cavity_max_error = Math.max(...GHIA.map(([y, u]) => Math.abs(interp(y) - u)));
+        m.cavity_min_u = Math.min(...us);
+        pass &&= m.cavity_max_error < 0.015;
+      });
+
+      // Moving footpoints: a field through the lower y face (at rest) and the upper one (moving).
+      const U = 0.5;
+      const A = 0.2;
+      const by = (x: number) => 1 + A * Math.sin(2 * Math.PI * x);
+      const feet = stillGas({
+        id: 'moving-footpoints',
+        bcLo: [PERIODIC, LINE_TIED, PERIODIC], bcHi: [PERIODIC, MOVING_WALL, PERIODIC],
+        wallVelocity: { yhi: [U, 0, 0] },
+        mhd: { face: () => (axis: number, x: number) => (axis === 1 ? by(x) : 0) },
+        init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 10, s: 0 }),
+      });
+      const nf = 64;
+      const row = (f: Float32Array, j: number) => Array.from({ length: nf }, (_, i) => f[4 * (j * (nf + 1) + i) + 1]);
+      const T = 0.5;
+      const uni = await withSim(gpu, feet, nf, { ndim: 2, tEnd: T }, async (sim) => {
+        const f0 = await sim.mhd!.readFaces(sim.cur);
+        await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        const f1 = await sim.mhd!.readFaces(sim.cur);
+        const top = row(f1, nf);
+        const want = top.map((_, i) => by((i + 0.5) / nf - 0.5 - U * T));
+        m.footpoint_error = Math.max(...top.map((v, i) => Math.abs(v - want[i]))) / A;
+        m.still_wall_change = Math.max(...row(f1, 0).map((v, i) => Math.abs(v - row(f0, 0)[i])));
+        const sum = (r: number[]) => r.reduce((s, v) => s + v, 0);
+        m.moving_wall_flux_change = Math.abs(sum(top) / sum(row(f0, nf)) - 1);
+        m.footpoint_divB = d.magnetic!.divB;
+        pass &&= m.footpoint_error < 0.01 && m.still_wall_change === 0 && m.moving_wall_flux_change < 1e-6 && m.footpoint_divB < 1e-6;
+        return d;
+      });
+      // One level: the finest is twice the root, which is the uniform grid's.
+      await withAmr(gpu, feet, 2 * nf, { ndim: 2, amrLevels: 1, refineHi: 2, tEnd: T }, async (sim) => {
+        await sim.runToEnd(64);
+        const d = await sim.diagnostics();
+        m.blocks_magnetic_energy_difference = Math.abs(d.magnetic!.eMag / uni.magnetic!.eMag - 1);
+        m.blocks_divB = d.magnetic!.divB;
+        pass &&= m.blocks_magnetic_energy_difference < 1e-4 && m.blocks_divB < 1e-6;
       });
       return { pass, metrics: m };
     },

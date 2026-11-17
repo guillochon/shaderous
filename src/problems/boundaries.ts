@@ -1,8 +1,8 @@
 // The kinds of box face: the one table the interface, the setup format and links read. What each
 // does to the gas is in hydro/boundary.wgsl, under the same codes (P.bc_lo, P.bc_hi). To add a
 // kind: an entry here, its rules there (bc_ghost_cell, bc_vsign, bc_bsign, bc_side,
-// bc_ghost_face), and any physics of its own (the line-tied wall's electric field,
-// mhd/emf.wgsl and mhd/amr_emf.wgsl). The CPU reference solvers (src/reference) know the first
+// bc_ghost_face, bc_wall_velocity), and any physics of its own (the line-tied and moving walls'
+// electric field, mhd/corner.wgsl, mhd/emf.wgsl and mhd/amr_emf.wgsl). The CPU reference solvers (src/reference) know the first
 // four only.
 
 export interface BoundaryKind {
@@ -24,6 +24,8 @@ export const REFLECT = 2;
 export const OUTFLOW_ONLY = 3;
 /** A no-slip wall that, with a magnetic field, holds the field lines crossing it: the flux through it never changes. */
 export const LINE_TIED = 4;
+/** A line-tied wall that moves along itself (SimConfig.wallVelocity): it drags the gas, and the footpoints of the field lines. */
+export const MOVING_WALL = 5;
 
 export const BOUNDARIES: readonly BoundaryKind[] = [
   { code: PERIODIC, label: 'Periodic', tip: 'Gas leaving through this face comes back in through the opposite one (both faces of an axis)', periodic: true, wall: false, color: '#6cb6ff' },
@@ -38,7 +40,21 @@ export const BOUNDARIES: readonly BoundaryKind[] = [
     wall: true,
     color: '#e58fff',
   },
+  {
+    code: MOVING_WALL,
+    label: 'Moving wall',
+    tip: 'A line-tied wall that slides along itself at the velocity set for this face: it drags the gas next to it (no slip), and the footpoints of the field lines crossing it move with it',
+    periodic: false,
+    wall: true,
+    color: '#ff8fa3',
+  },
 ];
+
+/** The faces in the order of the wall velocities (SimConfig.wallVelocity, Params.wallv). */
+export const FACE_KEYS = ['xlo', 'xhi', 'ylo', 'yhi', 'zlo', 'zhi'] as const;
+export type FaceKey = (typeof FACE_KEYS)[number];
+export type WallVelocity = Record<FaceKey, [number, number, number]>;
+export const noWallVelocity = (): WallVelocity => ({ xlo: [0, 0, 0], xhi: [0, 0, 0], ylo: [0, 0, 0], yhi: [0, 0, 0], zlo: [0, 0, 0], zhi: [0, 0, 0] });
 
 /** Every face kind's code, in order. */
 export const BOUNDARY_CODES: readonly number[] = BOUNDARIES.map((b) => b.code);

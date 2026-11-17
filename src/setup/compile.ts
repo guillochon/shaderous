@@ -422,6 +422,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
     jeansCells: ph.jeansCells,
     supports2d: d.supports2d,
     bc2d: d.bc2d,
+    wallVelocity: d.wallVelocity ? { ...d.wallVelocity } : undefined,
     fluff: fl ? { rho: fl.rho ?? 0, u: fl.u ?? 0, v: fl.v ?? 0, ...(fl.va !== undefined ? { va: fl.va } : {}) } : undefined,
     params: feats.length ? feats.map((f) => problemParam(spec, f)) : undefined,
     masses: hasMasses

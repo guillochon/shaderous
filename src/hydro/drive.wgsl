@@ -4,7 +4,7 @@
 // pass declares it.
 #include "hydro/drive_common.wgsl"
 
-@group(0) @binding(32) var<uniform> DRIVE: Drive;
+@group(0) @binding(33) var<uniform> DRIVE: Drive;
 
 fn drive_on() -> bool {
   return DRIVE.n.x > 0u;

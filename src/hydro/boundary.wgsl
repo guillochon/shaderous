@@ -12,15 +12,33 @@
 //                   gas sticks to (no slip) and the field lines stay anchored in. With a field,
 //                   the electric field along it is zero (mhd/emf.wgsl, mhd/amr_emf.wgsl), so the
 //                   flux through it never changes.
+//   5 moving wall   a line-tied wall moving along itself at the face's velocity (P.wallv): the
+//                   ghost's velocity is 2 v_wall - v, and the electric field along it is
+//                   -v_wall x B_n (mhd/corner.wgsl), so the field lines' footpoints move with it.
 const BC_PERIODIC = 0u;
 const BC_OUTFLOW = 1u;
 const BC_REFLECT = 2u;
 const BC_OUTFLOW_ONLY = 3u;
 const BC_LINE_TIED = 4u;
+const BC_MOVING_WALL = 5u;
 
 // A wall: its ghosts are mirror images of the cells inside.
 fn bc_wall(k: u32) -> bool {
-  return k == BC_REFLECT || k == BC_LINE_TIED;
+  return k == BC_REFLECT || bc_tied(k);
+}
+
+// A wall the gas sticks to and the field lines are anchored in, at rest or moving.
+fn bc_tied(k: u32) -> bool {
+  return k == BC_LINE_TIED || k == BC_MOVING_WALL;
+}
+
+// The velocity of the face of kind k normal to `axis` (its lower or upper one): a moving wall's,
+// along the wall (its normal part dropped), and zero for every other kind.
+fn bc_wall_velocity(k: u32, axis: i32, up: bool) -> vec3<f32> {
+  if (k != BC_MOVING_WALL) { return vec3<f32>(0.0); }
+  var v = P.wallv[2 * axis + select(0, 1, up)].xyz;
+  v[axis] = 0.0;
+  return v;
 }
 
 // Cell index i (outside [0, n), at most n beyond it) along an axis whose face on that side is
@@ -35,7 +53,7 @@ fn bc_ghost_cell(i: i32, n: i32, k: u32) -> i32 {
 
 // Signs of the ghost's velocity components beyond a face of kind k normal to `axis`.
 fn bc_vsign(k: u32, axis: i32) -> vec3<f32> {
-  if (k == BC_LINE_TIED) { return vec3<f32>(-1.0); }
+  if (bc_tied(k)) { return vec3<f32>(-1.0); }
   var s = vec3<f32>(1.0);
   if (k == BC_REFLECT) { s[axis] = -1.0; }
   return s;

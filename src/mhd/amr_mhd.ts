@@ -339,7 +339,7 @@ export class AmrMhd {
           flux: [f1, f2].map((pipe) =>
             perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c })),
           ),
-          emf: [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 6: this.scratch, 8: v(this.emf), 14: c }))),
+          emf: [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), 6: this.scratch, 8: v(this.emf), 14: c }))),
           update: [
             upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }),
             upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }),

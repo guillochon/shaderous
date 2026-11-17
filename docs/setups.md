@@ -52,7 +52,8 @@ units of the setup's own box, which is the cube `[-box/2, box/2]³` centered on 
 | `ndim`, `n`, `amr` | The grid the setup opens on: 2 or 3 dimensions, cells per side (the finest level's on an adaptive mesh), levels of refinement. Absent: the grid already chosen is kept |
 | `box` | Side of the box (default 1) |
 | `supports2d` | The setup also makes sense on a 2D (x, y) grid |
-| `bc` | `{ "lo": [x, y, z], "hi": [x, y, z] }`: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall (no slip, and it holds the magnetic field lines that cross it). Periodic faces come in pairs |
+| `bc` | `{ "lo": [x, y, z], "hi": [x, y, z] }`: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall (no slip, and it holds the magnetic field lines that cross it), 5 moving wall (a line-tied wall sliding along itself at the velocity `wallVelocity` gives its face). Periodic faces come in pairs |
+| `wallVelocity` | `{ "xlo": [vx, vy, vz], "xhi": ..., "ylo": ..., "yhi": ..., "zlo": ..., "zhi": ... }`: the velocity of each face that is a moving wall, along it |
 | `bc2d` | The same for a 2D run, where it differs |
 | `units` | What one code unit is (below). Without it the setup is scale free |
 
@@ -191,7 +192,13 @@ default, and what it does. A number out of its range is held to it when the file
 | `domain.units.length.unit` | Length unit | `m`, `cm`, `km`, `Rsun`, `au`, `pc`. Default `Rsun` | The unit of the length |
 | `domain.units.mass.value` | Mass | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of mass |
 | `domain.units.mass.unit` | Mass unit | `kg`, `g`, `Msun`. Default `Msun` | The unit of the mass |
-| `domain.bc` | Faces of the box | `{ "lo": [x, y, z], "hi": [x, y, z] }`, each 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall | What the gas meets at each face of the box. Periodic faces come in pairs |
+| `domain.bc` | Faces of the box | `{ "lo": [x, y, z], "hi": [x, y, z] }`, each 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall, 5 moving wall | What the gas meets at each face of the box. Periodic faces come in pairs |
+| `domain.wallVelocity.xlo` | Wall velocity, lower x face | `[x, y, z]`. Default `[0,0,0]` | Where the lower x face is a moving wall: its velocity along itself (the part normal to it is ignored) |
+| `domain.wallVelocity.xhi` | Wall velocity, upper x face | `[x, y, z]`. Default `[0,0,0]` | Where the upper x face is a moving wall: its velocity along itself (the part normal to it is ignored) |
+| `domain.wallVelocity.ylo` | Wall velocity, lower y face | `[x, y, z]`. Default `[0,0,0]` | Where the lower y face is a moving wall: its velocity along itself (the part normal to it is ignored) |
+| `domain.wallVelocity.yhi` | Wall velocity, upper y face | `[x, y, z]`. Default `[0,0,0]` | Where the upper y face is a moving wall: its velocity along itself (the part normal to it is ignored) |
+| `domain.wallVelocity.zlo` | Wall velocity, lower z face | `[x, y, z]`. Default `[0,0,0]` | Where the lower z face is a moving wall: its velocity along itself (the part normal to it is ignored) |
+| `domain.wallVelocity.zhi` | Wall velocity, upper z face | `[x, y, z]`. Default `[0,0,0]` | Where the upper z face is a moving wall: its velocity along itself (the part normal to it is ignored) |
 
 **`physics`**
 

@@ -44,6 +44,7 @@ export function setSetting(cfg: SimConfig, s: Setting, value: unknown): void {
   } else if (s.cfg === 'tEnd') cfg.tEnd = value === null || value === undefined ? Infinity : (value as number);
   else if (s.cfg.startsWith('fluff.')) cfg.fluff = { ...cfg.fluff, [s.cfg.slice(6)]: value as number };
   else if (s.cfg.startsWith('driving.')) cfg.driving = { ...cfg.driving, [s.cfg.slice(8)]: value as number };
+  else if (s.cfg.startsWith('wallVelocity.')) cfg.wallVelocity = { ...cfg.wallVelocity, [s.cfg.slice(13)]: value as [number, number, number] };
   else setPath(cfg, s.cfg, value);
 }
 

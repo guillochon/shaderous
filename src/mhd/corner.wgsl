@@ -54,3 +54,27 @@ fn corner(c: i32, t: vec3<i32>, r00: Ref, r10: Ref, r01: Ref, r11: Ref) -> f32 {
   let right = eb1 + ((1.0 - fb1.z) * (ea1 - e11) + fb1.z * (ea0 - e10));
   return 0.25 * ((left + right) + (below + above));
 }
+
+// The electric field along the walls an edge texel t lies on that move (hydro/boundary.wgsl):
+// E = -v_wall x B_n, the field normal to the wall carried along it, so the footpoints of the
+// field lines move with the wall. on, kinds and upper say, per axis, whether t lies on a
+// line-tied or moving face of the domain normal to it, which kind, and which side. B_n is the
+// mean of the two wall faces either side of the edge, so the flux through the wall is carried
+// along it exactly (centered), whatever the field inside does. Requires wall_bn(a, t), the face
+// field normal to a on the lower face along a of cell t, and hydro/boundary.wgsl.
+fn moving_wall_e(t: vec3<i32>, on: vec3<bool>, kinds: vec3<u32>, upper: vec3<bool>) -> vec3<f32> {
+  var E = vec3<f32>(0.0);
+  for (var a = 0; a < 3; a++) {
+    if (!on[a] || kinds[a] != BC_MOVING_WALL) { continue; }
+    let vw = bc_wall_velocity(kinds[a], a, upper[a]);
+    for (var c = 0; c < 3; c++) {
+      if (c == a) { continue; }
+      var eb = vec3<i32>(0);
+      eb[3 - a - c] = 1;
+      var bn = vec3<f32>(0.0);
+      bn[a] = 0.5 * (wall_bn(a, t) + wall_bn(a, t - eb));
+      E[c] -= cross(vw, bn)[c];
+    }
+  }
+  return E;
+}

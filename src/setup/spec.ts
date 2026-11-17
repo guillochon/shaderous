@@ -58,6 +58,8 @@ export interface DomainSpec {
   bc?: { lo: Bc3; hi: Bc3 };
   /** boundaries in 2D, where they differ */
   bc2d?: { lo: Bc3; hi: Bc3 };
+  /** velocity of each face that is a moving wall (problems/boundaries.ts), along the wall */
+  wallVelocity?: Partial<Record<'xlo' | 'xhi' | 'ylo' | 'yhi' | 'zlo' | 'zhi', [number, number, number]>>;
   units?: UnitsSpec;
 }
 

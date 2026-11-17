@@ -10,7 +10,7 @@
 // so a run is the same from the same seed.
 #include "hydro/drive_common.wgsl"
 
-@group(0) @binding(32) var<storage, read_write> DRIVE: Drive;
+@group(0) @binding(33) var<storage, read_write> DRIVE: Drive;
 
 fn drive_hash(x: u32) -> u32 {
   // PCG output permutation (Jarzynski & Olano 2020).
