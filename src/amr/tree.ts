@@ -190,6 +190,7 @@ export class BlockTree {
 
   private create(level: number, c: number[], parent: Block | null): Block {
     const slot = this.free.pop()!;
+    if (slot > this.highSlot) this.highSlot = slot;
     const b: Block = { slot, level, c, parent, children: null };
     this.slots[slot] = b;
     this.blocks.set(this.key(level, c[0], c[1], c[2] ?? 0), b);
@@ -206,6 +207,13 @@ export class BlockTree {
     this.slots[b.slot] = undefined;
     this.free.push(b.slot);
   }
+
+  /**
+   * The highest slot any block of this tree has held. Free slots are taken lowest first (the
+   * stack starts with slot 0 on top, and a freed slot goes back on top), so the slots in use stay
+   * packed low, and everything above this one has never been touched.
+   */
+  highSlot = -1;
 
   get freeSlots(): number {
     return this.free.length;

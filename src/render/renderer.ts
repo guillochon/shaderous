@@ -737,6 +737,11 @@ export class Renderer {
     const empty = new Uint32Array(RANGE_WORDS);
     empty.set([0xffffffff, 0, 0xffffffff, 0]);
     d.queue.writeBuffer(this.rangeBuf, 0, empty);
+    // Whether this frame's range can be read back: not while the last one is still on its way.
+    const copyRange = !this.rangeBusy && this.rangeCopied === null;
+    // The plane (a slice, or a 2D run) is drawn by the plane pass alone. The pass over the whole
+    // box then only finds the range, so it runs on the frames that read the range back.
+    const plane = v.mode !== 'volume' || nz === 1;
     const cp2 = enc.beginComputePass();
     // The plasma beta and the field's divergence read the largest |B| (render/field.wgsl).
     if (v.field === MAGNETIC_FIELDS[4] || v.field === MAGNETIC_FIELDS[5]) sim.encodeMagnetic?.(cp2, sim.cur);
@@ -745,7 +750,8 @@ export class Renderer {
       cp2.setBindGroup(0, this.gProject[parity]);
       cp2.dispatchWorkgroups(Math.ceil(side / 16), Math.ceil(side / 8));
     } else {
-      if (this.atlas?.sim === sim) {
+      const boxPass = !plane || copyRange;
+      if (boxPass && this.atlas?.sim === sim) {
         // Every leaf cell and its border, as the padded passes are dispatched (amr/list.wgsl).
         const leaves = sim.displayAtlas!()!.leaves;
         cp2.setPipeline(this.pAtlas!);
@@ -754,19 +760,19 @@ export class Renderer {
           const [x, y, z] = sim.cfg.ndim === 3 ? padded3d(leaves) : [leaves * 3, 3, 5];
           cp2.dispatchWorkgroups(x, y, z);
         }
-      } else {
+      } else if (boxPass) {
         cp2.setPipeline(this.pField);
         cp2.setBindGroup(0, this.gField[parity]);
         cp2.dispatchWorkgroups(Math.ceil(nx / 8), Math.ceil(ny / 8), Math.ceil(nz / 4));
       }
-      if (v.mode !== 'volume' || nz === 1) {
+      if (plane) {
         cp2.setPipeline(this.pPlane!);
         cp2.setBindGroup(0, this.gPlane[parity]);
         cp2.dispatchWorkgroups(Math.ceil(side / 16), Math.ceil(side / 8));
       }
     }
     cp2.end();
-    if (!this.rangeBusy && this.rangeCopied === null) {
+    if (copyRange) {
       enc.copyBufferToBuffer(this.rangeBuf, 0, this.rangeStage, 0, RANGE_WORDS * 4);
       this.rangeCopied = this.rangeKey(v);
       this.rangeOwed = false;

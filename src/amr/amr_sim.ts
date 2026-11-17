@@ -1215,7 +1215,7 @@ export class AmrSim implements Simulation {
     this.encodeSolve(pass, this.cur, cycles, perturber, !newBlocks);
     pass.end();
     // No history on this mesh: the half-step extrapolation starts from the potential itself.
-    if (this.selfGravity) this.grav!.copyPhiToOld(enc);
+    if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
     pass = beginPass(enc);
     if (this.selfGravity) this.grav!.encodeForget(pass, this.nAll);
     this.encodeField(pass);
@@ -1928,7 +1928,7 @@ export class AmrSim implements Simulation {
         if (this.fieldOn) {
           // Self-gravity or point masses: as for the gas alone below, the second half kick
           // brings the cells back into this parity, and the faces follow them.
-          if (this.selfGravity) this.grav!.copyPhiToOld(enc);
+          if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
           const gp = beginPass(enc);
           this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
           this.encodeField(gp);
@@ -1968,7 +1968,7 @@ export class AmrSim implements Simulation {
         // Keep the old potential, solve for that of the updated state (warm-started), move
         // the point masses, rebuild the field, and apply the second half kick (and the
         // masses' sinks) back into this parity.
-        if (this.selfGravity) this.grav!.copyPhiToOld(enc);
+        if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
         const gp = beginPass(enc);
         this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
         this.encodeField(gp);

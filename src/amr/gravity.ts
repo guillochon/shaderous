@@ -460,10 +460,20 @@ export class AmrGravity {
     }
   }
 
-  /** Keep the potential as the "previous" one, for extrapolation to the half step. */
-  copyPhiToOld(enc: GPUCommandEncoder) {
-    const side = this.ctx.slotsPerSide * PAD;
-    enc.copyTextureToTexture({ texture: this.phi }, { texture: this.phiOld }, [side, side, side]);
+  /** Layers of slots (along z) that any block has held while this solver has run. */
+  private layersUsed = 0;
+
+  /**
+   * Keep the potential as the "previous" one, for extrapolation to the half step. Only the
+   * layers of slots any block has held: `highSlot` is the highest slot of the tree's blocks
+   * (BlockTree.highSlot), and slots are taken lowest first. Above them neither texture has ever
+   * been written, so both hold their zeros, as a whole copy would leave them.
+   */
+  copyPhiToOld(enc: GPUCommandEncoder, highSlot: number) {
+    const a = this.ctx.slotsPerSide;
+    this.layersUsed = Math.min(a, Math.max(this.layersUsed, Math.floor(highSlot / (a * a)) + 1));
+    const side = a * PAD;
+    enc.copyTextureToTexture({ texture: this.phi }, { texture: this.phiOld }, [side, side, this.layersUsed * PAD]);
   }
 
   destroy() {
