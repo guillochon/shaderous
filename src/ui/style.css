@@ -60,8 +60,13 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .jeans { grid-template-columns: 1fr 1.4fr; align-items: end; margin-top: 6px; }
 .jeans .check { height: 24px; }
 #pparams, #pfeatured { display: contents; }
-.setup-row { display: grid; grid-template-columns: auto 1fr; gap: 8px; align-items: center; }
-.setup-row button { height: 26px; }
+.setup-row { display: grid; grid-template-columns: 1fr; gap: 4px; align-items: center; }
+/* The one button that opens everything else: wider than the rest and in a color nothing else uses. */
+.setup-row button {
+  height: 30px; width: 100%; font-weight: 600; letter-spacing: 0.02em; color: #fff;
+  background: linear-gradient(180deg, #b36bff, #8a3dff); border: 1px solid #c79bff;
+}
+.setup-row button:hover { background: linear-gradient(180deg, #c184ff, #9a55ff); border-color: #dcbcff; }
 #setup-sum { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #pparams [hidden] { display: none; }
 /* A slider takes a row of its own, with a field beside it for typing the value. */
