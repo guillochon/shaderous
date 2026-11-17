@@ -142,11 +142,17 @@ export interface BurnTargets {
   comp?: GPUTexture;
   /** on the block atlas: the block table (the network's burning limiter reads cell sizes from it) */
   blockTable?: GPUBuffer;
+  /** on the block atlas: the list of leaf blocks, the cells the network's pass visits */
+  leaves?: GPUBuffer;
 }
 
 /** A burn pass on one grid, of either kind. */
 export interface Burner {
-  encode(pass: GPUComputePassEncoder, s: number, q: number): void;
+  /**
+   * `dispatch`: on the block atlas, the cells the network's pass covers (NetBurnPass.encode).
+   * The one-reaction pass covers every texel whatever it is given.
+   */
+  encode(pass: GPUComputePassEncoder, s: number, q: number, dispatch?: (pass: GPUComputePassEncoder) => void): void;
   destroy(): void;
 }
 

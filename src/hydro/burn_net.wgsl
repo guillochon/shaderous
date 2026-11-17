@@ -1,9 +1,10 @@
 // Nuclear burning by the trained network of the 13-isotope alpha chain (burn/network.ts): a
 // pass of its own after the species pass, on the uniform grid and on the block atlas alike,
-// in place of hydro/burn.wgsl. Pointwise: every texel of the state is read, burned if it is
-// hot and dense enough, and written to the other parity with its species (and, where the
-// species set the equation of state, their moments), so a texel the pass leaves alone is
-// copied.
+// in place of hydro/burn.wgsl. Pointwise: each cell is read, burned if it is hot and dense
+// enough, and written to the other parity with its species (and, where the species set the
+// equation of state, their moments), so a cell the pass does not burn is copied. On a uniform
+// grid that is every texel; on the block atlas the interior cells of the leaves, the only cells
+// read after it, as after the hydro update (<burn_grid>, burn/network.ts).
 //
 // The network works in cgs, kelvin and seconds; the cell's state is converted on the way in
 // and the energy released on the way out (NB.a). A hydro step longer than NET_MAX_DT is split
@@ -17,7 +18,7 @@
 // down where it would add more than f e h / t_s to the internal energy density e, all of its
 // changes alike (as all rates scaled by one factor, to first order): mass stays conserved and
 // no species goes below zero. It fades as the grid is refined. The cell size comes from the
-// <burn_dx> slot: the grid's, or on the block atlas the cell's block's.
+// <burn_grid> slot: the grid's, or on the block atlas the cell's block's.
 //
 // HO gets every texel's heating rate over the step, the energy released per unit volume and
 // time (0 where nothing burned), for the view's nuclear heating and the diagnostics' total.
@@ -26,7 +27,7 @@
 #include <eos>
 #include <species_n>
 #include "hydro/burn_net_core.wgsl"
-#include <burn_dx>
+#include <burn_grid>
 
 struct NetBurn {
   a: vec4<f32>,   // g/cm^3, kelvin, seconds per code unit; code specific energy per erg/g
@@ -56,9 +57,9 @@ fn grouped(rho: f32, X: array<f32, 13>) -> array<vec4<f32>, NG> {
 
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  let dims = textureDimensions(U1);
-  if (any(gid >= dims)) { return; }
-  let c = vec3<i32>(gid);
+  let at = burn_texel(gid);
+  if (!at.ok) { return; }
+  let c = at.c;
   let stride = i32(NB.c.x);
   var u1 = textureLoad(U1, c, 0);
   var u2 = textureLoad(U2, c, 0);

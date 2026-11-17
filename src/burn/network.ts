@@ -54,10 +54,27 @@ export interface NetworkBurnSpec {
   limiter?: number;
 }
 
-/** The <burn_dx> slot on a uniform grid: every cell is P.dx across. */
-export const BURN_DX_UNIFORM = 'fn burn_cell_dx(c: vec3<i32>) -> f32 { return P.dx; }\n';
-/** The <burn_dx> slot on the block atlas: the size of the cells of the block a texel belongs to. */
-export const BURN_DX_ATLAS = `#include "amr/grid.wgsl"
+/**
+ * The <burn_grid> slot on a uniform grid: invocation gid is texel gid, and every cell is P.dx
+ * across.
+ */
+export const BURN_GRID_UNIFORM = `struct BurnTexel { ok: bool, c: vec3<i32> }
+fn burn_texel(gid: vec3<u32>) -> BurnTexel { return BurnTexel(all(gid < textureDimensions(U1)), vec3<i32>(gid)); }
+fn burn_cell_dx(c: vec3<i32>) -> f32 { return P.dx; }
+`;
+/**
+ * The <burn_grid> slot on the block atlas: the invocations cover the interior cells of the leaf
+ * blocks (amr/list.wgsl's inv_interior, dispatched as NetBurnPass.encode does), the only cells
+ * anything reads after the pass, as after the hydro update; and the size of the cells of the
+ * block a texel belongs to.
+ */
+export const BURN_GRID_ATLAS = `#include "amr/grid.wgsl"
+#include "amr/list.wgsl"
+struct BurnTexel { ok: bool, c: vec3<i32> }
+fn burn_texel(gid: vec3<u32>) -> BurnTexel {
+  let i = inv_interior(gid);
+  return BurnTexel(i.ok, atl(blk_origin(i.slot), i.l));
+}
 fn burn_cell_dx(c: vec3<i32>) -> f32 {
   let a = i32(P.amr.x);
   var s = vec3<i32>(c.x / PADW, c.y / PADW, c.z / PADW);
@@ -403,6 +420,8 @@ export interface NetBurnTargets {
   comp?: GPUTexture;
   /** on the block atlas: the block table (binding 30), from which each cell's size is read */
   blockTable?: GPUBuffer;
+  /** on the block atlas: the list of leaf blocks (binding 31), the only cells the pass visits */
+  leaves?: GPUBuffer;
 }
 
 /**
@@ -448,7 +467,7 @@ export class NetBurnPass {
     const heat = burnHeatSlot(d, t.comp ? 4 : 3);
     const code = assemble('hydro/burn_net.wgsl', {
       eos: t.slots.eos, comp: t.slots.comp, species_n: speciesConst(t.groups), burn_net: netSlot(), burn_heat: heat.slot,
-      burn_dx: t.blockTable ? BURN_DX_ATLAS : BURN_DX_UNIFORM,
+      burn_grid: t.leaves ? BURN_GRID_ATLAS : BURN_GRID_UNIFORM,
     });
     const pipe = await computePipeline(d, code, 'burn network');
     const uniform = d.createBuffer({ label: 'burn network', size: NET_UNIFORM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -474,16 +493,22 @@ export class NetBurnPass {
         if (heat.bound) r[11] = v(t.heat);
         // The limiter reads each cell's size from it (burn_cell_dx), on or off: the code is there either way.
         if (t.blockTable) r[30] = t.blockTable;
+        if (t.leaves) r[31] = t.leaves;
         return bindGroup(d, pipe, r, 'burn network');
       }),
     );
     return new NetBurnPass(d, pipe, groupsBy, t.dims, [uniform, wbuf]);
   }
 
-  /** Burn the state of parity s with the species of parity q, into the other parities. */
-  encode(pass: GPUComputePassEncoder, s: number, q: number) {
+  /**
+   * Burn the state of parity s with the species of parity q, into the other parities. On the
+   * block atlas `dispatch` covers the leaves' interior cells in workgroups of 4 x 4 x 4
+   * (AmrSim's burnDispatch); on a uniform grid the pass covers every texel.
+   */
+  encode(pass: GPUComputePassEncoder, s: number, q: number, dispatch?: (pass: GPUComputePassEncoder) => void) {
     pass.setPipeline(this.pipe);
     pass.setBindGroup(0, this.groupsBy[s][q]);
+    if (dispatch) return dispatch(pass);
     const [x, y, z] = this.dims;
     pass.dispatchWorkgroups(Math.ceil(x / 4), Math.ceil(y / 4), Math.ceil(z / 4));
   }

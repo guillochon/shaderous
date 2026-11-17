@@ -37,7 +37,7 @@ import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
-import { FLAT_ROWS, interior3d, padded3d, rows } from './dispatch';
+import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS } from './dispatch';
 import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
@@ -847,10 +847,12 @@ export class AmrSim implements Simulation {
     const burn = burnSpec(this.cfg);
     if (burn) {
       const t = this.state[0][0];
-      // Every texel of the atlas: the pass is pointwise, and copies what it does not burn.
+      // Pointwise, copying what it does not burn: the network's pass over the leaves' interior
+      // cells (burnDispatch), the one-reaction pass over every texel of the atlas.
       this.burn = await createBurnPass(d, burn, { ...this.cfg.problem, units: problemUnits(this.cfg.problem, this.cfg.params) }, {
         dims: [t.width, t.height, t.depthOrArrayLayers], stride: this.speciesDepth, groups: this.speciesGroups, slots: hydroSlots(this.cfg),
         params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], heat: this.heat, comp: this.comp, blockTable: this.bt,
+        leaves: this.listLeaf,
       });
     }
   }
@@ -859,12 +861,24 @@ export class AmrSim implements Simulation {
   private encodeBurn(enc: GPUCommandEncoder) {
     if (!this.burn) return;
     const pass = beginPass(enc);
-    this.burn.encode(pass, this.cur, this.speciesCur);
+    this.burn.encode(pass, this.cur, this.speciesCur, (p) => this.burnDispatch(p, this.nLeaf));
     // With a field: the burnt state is in the other parity, and the leaves' faces follow it.
     this.mhd?.encodeCommitFaces(pass, 1 - this.cur);
     pass.end();
     this.cur = 1 - this.cur;
     this.speciesCur = 1 - this.speciesCur;
+  }
+
+  /**
+   * The interior cells of the first `count` blocks of the leaf list, in workgroups of 4 x 4 x 4
+   * (hydro/burn_net.wgsl), laid out as interior() lays them out (amr/list.wgsl inv_interior).
+   */
+  private burnDispatch(pass: GPUComputePassEncoder, count: number) {
+    const w = BS / 4;
+    if (this.cfg.ndim === 2) {
+      const q = Math.ceil(count / 4);
+      pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * w, w, Math.ceil(q / SLAB_QUADS));
+    } else pass.dispatchWorkgroups(Math.min(count, SLAB_BLOCKS) * w, w, w * Math.ceil(count / SLAB_BLOCKS));
   }
 
   /** Move the species through the step just updated from parity p (after the update's dispatch). */
