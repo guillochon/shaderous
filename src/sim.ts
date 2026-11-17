@@ -786,7 +786,9 @@ export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer,
   const f = new Float32Array(buf.getMappedRange().slice(0));
   buf.unmap();
   buf.destroy();
-  return { time: f[1], steps: f[3], masses: nMasses ? unpackMasses(f.subarray(4), nMasses) : undefined };
+  // The clock holds the start of the step last taken and its dt, banked as the next step
+  // begins: the state is at their sum, as diagnosticsFrom has it.
+  return { time: f[1] + f[0], steps: f[3] + (f[0] > 0 ? 1 : 0), masses: nMasses ? unpackMasses(f.subarray(4), nMasses) : undefined };
 }
 
 /**

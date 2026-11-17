@@ -1,7 +1,7 @@
 # Plan: the setup dialog
 
-Status: built, 2026-11-16 (commits 7596e14, bf702a3 and the one after). What differs from the
-text below:
+Status: done, 2026-11-17 (built 2026-11-16 in commits 7596e14, bf702a3 and the one after).
+What differs from the text below:
 
 - Section 7 was already done when this was written: a run holds 32 point masses (5fe9aed).
 - A setup that is no preset runs under the problem id `custom` (`src/presets/custom.ts`), so
@@ -18,11 +18,27 @@ text below:
   about stars; and a disk's density in radius and height as a formula (`radialFn`,
   `verticalFn`; `src/setup/expr.ts`) or a table of points. Formulas lift the non-goal below in
   one place: they are parsed into arithmetic over a fixed list of functions and never run.
-- Not done: controls in the dialog for
-  `physics.speciesGamma`, `physics.toolScale`, the fuel-and-ash form of burning, units by
-  density and velocity, and a unit's `per` (files that have them keep them); the GPU test
-  `masses-many` is the existing `point-mass-many`, and `setup-restart` and `setup-triple` are
-  page tests in `tests/gpu/setup.spec.ts`; the 512³ setup-time measurement of section 12.
+- Finished 2026-11-17: the dialog has controls for `physics.speciesGamma`,
+  `physics.toolScale`, both forms of burning and units by density and velocity. A group of
+  the option table may come in several shapes (`GroupForms`), told apart by its keys; the
+  dialog offers them as a menu. A unit's `per` is shown beside its value, not edited. Fuel to
+  ash burning is refused where the species are nuclides that set the equation of state.
+- Tests: `masses-many` is the existing `point-mass-many`. `setup-restart` and `setup-triple`
+  are page tests in `tests/gpu/setup.spec.ts`: a restarted custom run matches the
+  uninterrupted one (gas bit for bit, masses to 1e-8), and three stars at 21 cells across hold
+  their peak density to 5% and binding energy to 2% for a dynamical time. Writing the restart
+  test found that a saved file's time and step count were one step behind its gas, and that
+  `run()` took one step too many after a load or a restart; both are fixed.
+- Setup time (section 12), 512³ with 3 levels of refinement, from `load()` to a run that can
+  step, two runs each, in seconds: the hand-written problems (cdc4a29, the parent of 7596e14)
+  against the compiled documents (this commit). The compiled setup is no slower; the runs
+  differ by up to half from one to the next on either build.
+
+  | Preset | Hand-written | Compiled |
+  |---|---|---|
+  | `sedov` | 4.9, 8.7 | 5.5, 8.3 |
+  | `mri-disk` | 16.1, 14.2 | 15.9, 13.4 |
+  | `tidal-disruption-full` (settling 1.3 to 1.7 s of it) | 11.9, 10.1 | 10.2, 10.7 |
 
 ## 1. Goal
 

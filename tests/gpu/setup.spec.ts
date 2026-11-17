@@ -243,38 +243,68 @@ test('a script loads a setup document, and a state file carries it', async ({ pa
   // A wrong document is refused with the reason.
   await expect(page.evaluate(() => (window as any).shaderous.load({ format: 'shaderous-setup', version: 1, parts: [{ kind: 'mass', gm: 'heavy' }] }))).rejects.toThrow(/parts\.0\.gm/);
 
-  // Export, then import on a page that has no such setup: it restarts as itself.
+  // Export, then import on a page that has no such setup: it restarts as itself, at the time
+  // and step it was saved at, and goes on as the run it was saved from does.
   const file = await page.evaluate(() => (window as any).shaderous.athdf());
+  const saved = await app(page).idle();
+  expect(file.time).toBe(saved.t);
+  const outcome = () =>
+    page.evaluate(async () => {
+      const d = await (window as any).shaderous.diagnostics();
+      return { t: d.t as number, steps: d.steps as number, mass: d.mass as number, eTot: d.eTot as number, bodies: d.masses.flatMap((m: any) => [...m.pos, ...m.vel]) as number[] };
+    });
+  await app(page).run(10);
+  const straight = await outcome();
   await page.goto('/?problem=sedov&dim=2&n=128&headless=1');
   await page.evaluate(() => (window as any).shaderous.ready);
   const back = await page.evaluate((b) => (window as any).shaderous.loadAthdf(b), file.base64);
   expect([back.problem, back.label, back.setup.parts.length]).toEqual(['custom', 'Three bodies', 4]);
-  expect(back.t).toBeCloseTo(file.time, 6);
-  expect(back.t).toBeGreaterThan(0);
+  // The file keeps the time in float32, as the clock has it.
+  expect(back.steps).toBe(saved.steps);
+  expect(Math.abs(back.t - saved.t)).toBeLessThan(1e-7 * saved.t);
   expect(back.warnings).toEqual([]);
-  await app(page).run(5);
-  expect((await page.evaluate(() => (window as any).shaderous.diagnostics())).masses).toHaveLength(3);
+  expect((await app(page).run(10)).taken).toBe(10);
+  const resumed = await outcome();
+  // The file holds pressure, not internal energy, and the masses in float32: the same run to
+  // rounding (in practice the gas comes back bit for bit, the masses to 1e-8).
+  expect(resumed.steps).toBe(straight.steps);
+  expect(Math.abs(resumed.t - straight.t)).toBeLessThan(1e-7 * straight.t);
+  expect(Math.abs(resumed.mass - straight.mass)).toBeLessThan(1e-6 * straight.mass);
+  expect(Math.abs(resumed.eTot - straight.eTot)).toBeLessThan(1e-6 * Math.abs(straight.eTot));
+  resumed.bodies.forEach((x, i) => expect(Math.abs(x - straight.bodies[i]), `point mass value ${i}`).toBeLessThan(1e-6));
   expect(errors).toEqual([]);
 });
 
-test('three stars of a setup of its own settle and step', async ({ page }) => {
+test('three stars of a setup of its own settle and hold for a dynamical time', async ({ page }) => {
   const errors = await open(page, 'problem=sedov&dim=2&n=128');
   const star = (id: string, pos: number[], vel: number[]) => ({ kind: 'star', id, type: 'polytrope', n: 1.5, mass: 1, radius: 0.5, pos, vel });
+  // Each star 21 cells across: at 4 cells of radius they puff up, and lose 15% of their
+  // binding energy in a dynamical time.
   const doc = {
     format: 'shaderous-setup', version: 1, name: 'Triple',
-    domain: { ndim: 3, n: 64, amr: 0, box: 8, supports2d: false, bc: { lo: [3, 3, 3], hi: [3, 3, 3] } },
+    domain: { ndim: 3, n: 128, amr: 0, box: 6, supports2d: false, bc: { lo: [3, 3, 3], hi: [3, 3, 3] } },
     physics: { eos: 'ideal', eosParams: { gamma: 5 / 3 }, gravity: 'isolated', G: 1, floors: { rho: 1e-10, p: 1e-14 } },
     background: { rho: 1e-6, cut: 1e-4, relativeTo: 'a' },
     parts: [star('a', [-1.5, 0, 0], [0, -0.3, 0]), star('b', [1.5, 0, 0], [0, 0.3, 0]), star('c', [0, 2.2, 0], [0.3, 0, 0])],
   };
   const st = await page.evaluate((d) => (window as any).shaderous.load(d), doc);
-  expect([st.problem, st.ndim, st.n]).toEqual(['custom', 3, 64]);
-  await page.evaluate(() => (window as any).shaderous.run({ steps: 10, timeoutMs: 240_000 }));
-  const d = await page.evaluate(() => (window as any).shaderous.diagnostics());
+  expect([st.problem, st.ndim, st.n]).toEqual(['custom', 3, 128]);
+  const diag = () => page.evaluate(() => (window as any).shaderous.diagnostics());
+  const d0 = await diag();
   // Three stars of unit mass, less what the grid's cut leaves out.
-  expect(d.mass).toBeGreaterThan(2.5);
-  expect(d.mass).toBeLessThan(3.3);
-  expect(Number.isFinite(d.eTot) && d.eGrav < 0).toBe(true);
+  expect(d0.mass).toBeGreaterThan(2.5);
+  expect(d0.mass).toBeLessThan(3.3);
+  // One dynamical time, sqrt(R^3 / G M), of each star.
+  const tDyn = Math.sqrt(0.5 ** 3);
+  await page.evaluate((t) => (window as any).shaderous.run({ until: t, timeoutMs: 300_000 }), tDyn);
+  const d1 = await diag();
+  expect(d1.t).toBeCloseTo(tDyn, 6);
+  const rel = (a: number, b: number) => Math.abs(a - b) / Math.abs(a);
+  // Settled stars hold: their peak density and binding energy barely move (1.4% and 0.3%).
+  expect(rel(d0.ranges.Density[1], d1.ranges.Density[1])).toBeLessThan(0.05);
+  expect(rel(d0.eGrav, d1.eGrav)).toBeLessThan(0.02);
+  expect(rel(d0.eTot, d1.eTot)).toBeLessThan(0.01);
+  expect(rel(d0.mass, d1.mass)).toBeLessThan(1e-5);
   expect(errors).toEqual([]);
 });
 

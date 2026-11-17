@@ -428,10 +428,14 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     return () => {
       const read = (async () => {
         await buf.mapAsync(GPUMapMode.READ);
-        const [dt, t, , steps] = new Float32Array(buf.getMappedRange().slice(0));
+        const [dt, t, , banked] = new Float32Array(buf.getMappedRange().slice(0));
         buf.unmap();
         if (poolDevice === device) clockPool.push(buf);
-        return { t, dt, steps };
+        // The step last taken is banked as the next begins (hydro/clock.wgsl): it counts once
+        // its dt is set, as diagnosticsFrom has it. Counted from the bank alone, the first step
+        // of a run (or of a restart, whose clock starts at dt = 0) went uncounted and was taken
+        // twice. `t` stays the start of that step: the stops below are judged on it.
+        return { t, dt, steps: banked + (dt > 0 ? 1 : 0) };
       })();
       // A read left behind by a run that was replaced fails quietly.
       read.catch(() => {});
