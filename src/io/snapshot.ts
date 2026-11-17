@@ -42,6 +42,12 @@ export interface Snapshot {
   faces?: Float32Array;
   /** written by this program: enough to set the run up again exactly */
   meta?: SnapshotMeta;
+  /**
+   * A snapshot captured only to be sampled at points (capture()'s lazyPressure): `press` holds
+   * NaN until SnapshotSampler.prim() works a cell's out with this and keeps it. Never written
+   * to a file.
+   */
+  pressureAt?: (cell: number) => number;
 }
 
 /**
@@ -89,11 +95,8 @@ export const maxLevel = (s: Snapshot) => s.levels.reduce((m, l) => Math.max(m, l
  * state, each cell's pressure is its own composition's, as the shaders have it and as a run
  * started from these primitives turns it back into an energy (Sim's initial state).
  */
-export function primitivesFrom(cfg: SimConfig, u1: Float32Array, u2: Float32Array, X: readonly Float32Array[] = []): Record<Variable, Float32Array> {
-  const eos = makeEos(cfg.eos, cfg.eosParams);
-  const coeffs = X.length ? problemCoefficients(cfg.problem, cfg.eosParams.gamma) : null;
-  const zh1 = hydrogenParticles(cfg.problem.composition);
-  const x = new Array<number>(X.length);
+export function primitivesFrom(cfg: SimConfig, u1: Float32Array, u2: Float32Array, X: readonly Float32Array[] = [], lazyPressure = false): Record<Variable, Float32Array> {
+  const pressure = pressureOf(cfg, u1, u2, X);
   const count = u1.length / 4;
   const out = Object.fromEntries(VARIABLES.map((v) => [v, new Float32Array(count)])) as Record<Variable, Float32Array>;
   for (let i = 0; i < count; i++) {
@@ -102,15 +105,32 @@ export function primitivesFrom(cfg: SimConfig, u1: Float32Array, u2: Float32Arra
     out.vel1[i] = u1[4 * i + 1] / rho;
     out.vel2[i] = u1[4 * i + 2] / rho;
     out.vel3[i] = u1[4 * i + 3] / rho;
+    out.press[i] = lazyPressure ? NaN : pressure(i);
+    out.r0[i] = u2[4 * i + 2] / rho;
+  }
+  return out;
+}
+
+/**
+ * The pressure of cell i of interleaved conserved state, as primitivesFrom() gives it: from
+ * the equation of state, which takes microseconds a cell with a tabulated one (Helmholtz), so
+ * a snapshot that is only sampled at some points can leave it to be worked out there
+ * (Snapshot.pressureAt).
+ */
+export function pressureOf(cfg: SimConfig, u1: Float32Array, u2: Float32Array, X: readonly Float32Array[] = []): (i: number) => number {
+  const eos = makeEos(cfg.eos, cfg.eosParams);
+  const coeffs = X.length ? problemCoefficients(cfg.problem, cfg.eosParams.gamma) : null;
+  const zh1 = hydrogenParticles(cfg.problem.composition);
+  const x = new Array<number>(X.length);
+  return (i) => {
+    const rho = u1[4 * i];
     let ce = eos;
     if (coeffs) {
       for (let s = 0; s < X.length; s++) x[s] = X[s][i];
       ce = makeEos(cfg.eos, cfg.eosParams, mixMoments(coeffs, x), zh1);
     }
-    out.press[i] = ce.hasEnergy ? ce.pressure(rho, u2[4 * i + 1]) : ce.pressure(rho, 0);
-    out.r0[i] = u2[4 * i + 2] / rho;
-  }
-  return out;
+    return ce.hasEnergy ? ce.pressure(rho, u2[4 * i + 1]) : ce.pressure(rho, 0);
+  };
 }
 
 /**
@@ -187,7 +207,13 @@ export class SnapshotSampler {
     const { block, cell } = this.where(fx, fy, fz);
     const o = block * this.cells + cell;
     const d = this.snap.data;
-    const w: Prim = { rho: d.rho![o], vx: d.vel1![o], vy: d.vel2![o], vz: d.vel3![o], p: d.press![o], s: d.r0 ? d.r0[o] : 0 };
+    let p = d.press![o];
+    if (p !== p && this.snap.pressureAt) {
+      // Read back from the array: rounded to float32, as when it was filled up front.
+      d.press![o] = this.snap.pressureAt(o);
+      p = d.press![o];
+    }
+    const w: Prim = { rho: d.rho![o], vx: d.vel1![o], vy: d.vel2![o], vz: d.vel3![o], p, s: d.r0 ? d.r0[o] : 0 };
     if (species?.length && species.every((k) => d[k])) w.X = species.map((k) => d[k]![o]);
     return w;
   }

@@ -3,10 +3,15 @@ import { AmrSim } from '../amr/amr_sim';
 import { BS } from '../amr/tree';
 import type { Problem } from '../problems';
 import { Sim, type SimConfig, type Simulation } from '../sim';
-import { primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Restart, type Snapshot, type SnapshotMeta } from './snapshot';
+import { pressureOf, primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Restart, type Snapshot, type SnapshotMeta } from './snapshot';
 
-/** Read the state back from the GPU as blocks of primitive variables. */
-export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses' | 'perturber'>): Promise<Snapshot> {
+/**
+ * Read the state back from the GPU as blocks of primitive variables. With `lazyPressure`, for
+ * a snapshot that is only to be sampled at points (the scripting API's slice and probe), the
+ * pressure is worked out cell by cell as it is sampled (Snapshot.pressureAt) instead of
+ * everywhere at once, which with a tabulated equation of state takes seconds on a large mesh.
+ */
+export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses' | 'perturber'>, opts: { lazyPressure?: boolean } = {}): Promise<Snapshot> {
   const cfg = sim.cfg;
   const half = cfg.problem.box / 2;
   const flat = cfg.ndim === 2;
@@ -114,8 +119,9 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     steps: Math.round(restart.steps),
     levels,
     locations,
-    data: { ...primitivesFrom(cfg, u1, u2, X), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag },
+    data: { ...primitivesFrom(cfg, u1, u2, X, opts.lazyPressure), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag },
     ...(faces ? { faces } : {}),
+    ...(opts.lazyPressure ? { pressureAt: pressureOf(cfg, u1, u2, X) } : {}),
     meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
   };
 }

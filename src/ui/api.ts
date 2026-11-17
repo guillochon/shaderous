@@ -579,10 +579,14 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     return s.diagnostics();
   }
 
-  /** The state of the gas, read back now, and a sampler over it. */
-  async function sampled() {
+  /**
+   * The state of the gas, read back now, and a sampler over it. `points`: only to be sampled at
+   * points (slice, probe), so the pressure is worked out only where it is (capture()'s
+   * lazyPressure); stats reads every cell.
+   */
+  async function sampled(points = true) {
     const s = current();
-    const snap = await capture(s);
+    const snap = await capture(s, undefined, { lazyPressure: points });
     const species = app.cfg().problem.species ?? [];
     return { snap, sampler: new SnapshotSampler(snap), species };
   }
@@ -1032,7 +1036,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     /** Each variable's least, greatest and volume-weighted mean value over the box. */
     stats: () =>
       serial(async () => {
-        const { snap } = await sampled();
+        const { snap } = await sampled(false);
         const per = snap.blockSize[0] * snap.blockSize[1] * snap.blockSize[2];
         const out: Record<string, { min: number; max: number; mean: number }> = {};
         for (const [name, data] of Object.entries(snap.data)) {
