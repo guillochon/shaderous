@@ -33,8 +33,10 @@ fn red_cell(c: vec3<i32>) -> Red {
     let lj = cs * sqrt(3.14159265 / (P.G * rho));
     jeans = select(0.0, 1.0, lj < 4.0 * P.dx);
   }
-  // Potential energy in the uniform external field, measured from the box center.
-  let x = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+  // Potential energy in the uniform external field, measured from the box center. A 2D run
+  // lies in the plane z = 0 (as gravity/bh.wgsl's cell_pos).
+  let xb = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+  let x = select(xb, vec3<f32>(xb.xy, 0.0), P.dims.z == 1u);
   egrav -= rho * dot(P.gext.xyz, x) * dv;
   let floored = select(0.0, 1.0, u1.x <= P.rho_floor * 1.0001 || p <= P.p_floor * 1.0001);
 
