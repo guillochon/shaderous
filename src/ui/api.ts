@@ -24,7 +24,7 @@ import { API_METHODS } from './api_schema';
 import { defaultFrameDt, problemUnits, type Prim } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
-import { overlayGutters, paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
+import { bigCanvas, composeBeside, overlayGutters, paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
 import { download } from '../io/checkpoints';
 import { BUILD, errorLog } from './errors';
 import { PRESET_FILES, presetSpec } from '../presets/index';
@@ -67,6 +67,15 @@ export interface AppHooks {
    * canvas's size on the page. A size holds until the next draw.
    */
   draw(size: [number, number] | null, asPage?: boolean, capture?: boolean): void;
+  /**
+   * Draw the plane on view (a 2D run, a slice or a projection) with one pixel per texel of its
+   * map, which has one texel per cell of the finest level up to the largest texture: the whole
+   * box, or the part of it in view rounded out to whole cells. The page's view is not changed;
+   * draw(null) puts the canvas back. Throws in the volume view.
+   */
+  drawNative(region: 'box' | 'view', capture?: boolean): NativeFrame;
+  /** The view shows a plane: a 2D run, a slice or a projection. */
+  flatView(): boolean;
   /** The frame last drawn with `capture` set, read back from the GPU (Renderer.captured). */
   captured(): Promise<HTMLCanvasElement>;
   /** Resolves once the range read back from the last draw, if any, has been taken up. */
@@ -204,6 +213,42 @@ export interface RecordingStatus {
 
 /** Fractions of the box, 0 to 1 along each axis (z is ignored in 2D). */
 export type Point = [number, number, number];
+
+/** A frame drawn with one pixel per texel of the plane's map (AppHooks.drawNative). */
+export interface NativeFrame {
+  /** The frame, in pixels: cells of the finest level when side is n. */
+  width: number;
+  height: number;
+  /** Texels a side of the map, and the grid's finest cells a side: less than n when the map is capped. */
+  side: number;
+  n: number;
+}
+
+export interface ScreenshotOptions {
+  /** A size in pixels; the canvas's own without. Not with `native`. */
+  width?: number;
+  height?: number;
+  /**
+   * One pixel per cell of the finest level (of the map, when the grid is larger than a texture
+   * can be): the whole box (true or 'box') or the part of it in view ('view'). A plane only: a
+   * 2D run, a slice or a projection.
+   */
+  native?: boolean | 'box' | 'view';
+  overlays?: OverlayOptions;
+  /** The overlays over the picture's edges, as a movie frame, or in margins beside it. Default 'beside' with `native`, else 'over'. */
+  layout?: 'over' | 'beside';
+}
+
+/** A screenshot before it is encoded: the picture, and what it shows. */
+export interface Shot {
+  canvas: HTMLCanvasElement;
+  width: number;
+  height: number;
+  /** With `native`: the map's side and the grid's, as in NativeFrame. */
+  native: { width: number; height: number; side: number; n: number } | null;
+  /** The simulation time shown. */
+  t: number;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -597,50 +642,77 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
   const readBack = (globalThis as { shaderousReadBack?: boolean }).shaderousReadBack === true;
 
   /**
-   * Draw the view with fresh readouts, at `size` (or the canvas's own with null), and hand the
-   * canvas to `read` in the same task as the draw: the canvas holds the frame only until the
-   * task ends. With readBack, the frame is drawn off the canvas and handed over as a 2D canvas.
+   * Draw the view with fresh readouts (`draw` draws it: app.draw() at a size, or drawNative())
+   * and hand the canvas to `read` in the same task as the draw: the canvas holds the frame only
+   * until the task ends. With readBack, the frame is drawn off the canvas and handed over as a
+   * 2D canvas.
    */
-  async function drawFresh<T>(s: Simulation, size: [number, number] | null, read: (c: HTMLCanvasElement) => T, asPage = false, known?: Diagnostics): Promise<T> {
+  async function drawFresh<T>(s: Simulation, draw: (capture: boolean) => void, read: (c: HTMLCanvasElement) => T, known?: Diagnostics): Promise<T> {
     const d = s.preparing ? null : (known ?? (await s.diagnostics()));
     // A range readback still under way would leave this draw's range unread.
     await app.rangeSettled();
     if (d) app.refresh(d);
-    app.draw(size, asPage, readBack);
+    draw(readBack);
     // Fields ranged by the display pass need one frame drawn before their range is known: draw
     // again with it. The state is the same, so the readouts are too.
     if (d && app.rangedByDrawing(d)) {
       await app.rangeSettled();
       app.refresh(d);
-      app.draw(size, asPage, readBack);
+      draw(readBack);
     }
     return read(readBack ? await app.captured() : app.canvas);
   }
 
-  async function screenshot(opts: { width?: number; height?: number; overlays?: OverlayOptions } = {}): Promise<string> {
+  /** A copy of a canvas (a WebGPU canvas holds its frame only until the task ends). */
+  function copyOf(c: HTMLCanvasElement, w = c.width, h = c.height): HTMLCanvasElement {
+    const { canvas, g } = bigCanvas(w, h);
+    g.drawImage(c, 0, 0);
+    return canvas;
+  }
+
+  /**
+   * A screenshot as a canvas, before it is encoded: the API hands it out as a data URL, the
+   * page's Screenshot button saves it as a file.
+   */
+  async function shoot(opts: ScreenshotOptions = {}): Promise<Shot> {
     const s = current();
     const c = app.canvas;
+    const native = opts.native === true ? 'box' : opts.native || null;
+    if (native && native !== 'box' && native !== 'view') throw new Error("`native` is true, 'box' or 'view'");
+    if (native && (opts.width !== undefined || opts.height !== undefined)) throw new Error('`native` sets the size: give it without `width` or `height`');
+    if (native && !app.flatView()) throw new Error('the volume view has no pixel per cell: use slice or projection');
+    const layout = opts.layout ?? (native ? 'beside' : 'over');
+    if (layout !== 'over' && layout !== 'beside') throw new Error("`layout` is 'over' or 'beside'");
     // The canvas's own size, unless asked for another, or the page is not laid out (a hidden tab).
     const max = app.gpu().device.limits.maxTextureDimension2D;
     const px = (v: number | undefined, fallback: number) => Math.max(16, Math.min(max, Math.round(v ?? fallback)));
     const laidOut = c.clientWidth > 0 && c.clientHeight > 0;
     const size: [number, number] | null =
       opts.width !== undefined || opts.height !== undefined || !laidOut ? [px(opts.width, 1024), px(opts.height, opts.width ?? 1024)] : null;
-    const ov = opts.overlays;
+    const ov = opts.overlays ?? {};
+    const any = !!(ov.colorbar || ov.triad || ov.status);
+    let frame: NativeFrame | null = null;
+    const draw = native ? (capture: boolean) => void (frame = app.drawNative(native, capture)) : (capture: boolean) => app.draw(size, false, capture);
+    const d = s.preparing ? undefined : await s.diagnostics();
     try {
-      return await drawFresh(s, size, (canvas) => {
-        if (!ov?.colorbar && !ov?.triad && !ov?.status) return canvas.toDataURL('image/png');
-        const out = document.createElement('canvas');
-        out.width = canvas.width;
-        out.height = canvas.height;
-        const g = out.getContext('2d')!;
-        g.drawImage(canvas, 0, 0);
-        paintOverlays(g, out.width, out.height, app.overlayInfo(), ov);
-        return out.toDataURL('image/png');
-      });
+      const canvas = await drawFresh(s, draw, (canvas) => {
+        // The frame's own size: a native one is its map's, whatever the canvas grew to.
+        const w = frame ? frame.width : canvas.width;
+        const h = frame ? frame.height : canvas.height;
+        if (layout === 'beside') return composeBeside(canvas, w, h, app.overlayInfo(), ov, app.background()).canvas;
+        const out = copyOf(canvas, w, h);
+        if (any) paintOverlays(out.getContext('2d')!, w, h, app.overlayInfo(), ov);
+        return out;
+      }, d);
+      const f = frame as NativeFrame | null;
+      return { canvas, width: canvas.width, height: canvas.height, native: f ? { ...f } : null, t: d?.t ?? 0 };
     } finally {
-      if (size) app.draw(null);
+      if (size || native) app.draw(null);
     }
+  }
+
+  async function screenshot(opts: ScreenshotOptions = {}): Promise<string> {
+    return (await shoot(opts)).canvas.toDataURL('image/png');
   }
 
   // The recording under way, if any.
@@ -700,7 +772,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     let frameSteps = -1;
     const frame = async () => {
       d = await s.diagnostics();
-      await drawFresh(s, size, (canvas) => {
+      await drawFresh(s, (capture) => app.draw(size, asPage, capture), (canvas) => {
         const g = writer.ctx;
         g.fillStyle = background;
         g.fillRect(0, 0, width, height);
@@ -709,7 +781,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         const ky = canvas.height / size[1];
         g.drawImage(canvas, layout.sx * kx, layout.sy * ky, layout.sw * kx, layout.sh * ky, layout.dx, layout.dy, layout.dw, layout.dh);
         paintOverlays(g, width, height, app.overlayInfo(), overlays);
-      }, asPage, d);
+      }, d);
       await writer.add();
       frameSteps = d.steps;
       state.status = { frames: writer.frames, seconds: writer.seconds, t: d.t };
@@ -1120,7 +1192,9 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * The view as a PNG data URL: at the canvas's size on the page, or at `width` x `height`
      * pixels (a square of `width` if only that is given; 1024 x 1024 when the page has no layout).
      */
-    screenshot: (opts?: { width?: number; height?: number; overlays?: OverlayOptions }) => serial(() => screenshot(opts)),
+    screenshot: (opts?: ScreenshotOptions) => serial(() => screenshot(opts)),
+    /** The page's Screenshot button: the picture as a canvas, with what it shows. */
+    shoot: (opts?: ScreenshotOptions) => serial(() => shoot(opts)),
 
     /**
      * Record the run as an MP4 movie: the view with a color bar and a triad over it, a frame

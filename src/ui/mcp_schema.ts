@@ -59,9 +59,15 @@ export const MCP_TOOLS: McpTool[] = [
   {
     name: 'screenshot', method: 'screenshot',
     brief: 'Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path`',
-    more: `\`view\` changes what is drawn first: ${VIEW_KEYS}. Settings persist for later screenshots.`,
-    pass: ['width', 'height'],
-    own: { view: { type: 'object', description: 'View settings to apply first' }, save_path: { type: 'string', description: 'Also write the PNG to this file' } },
+    more: `\`view\` changes what is drawn first: ${VIEW_KEYS}. Settings persist for later screenshots. \`native\` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.`,
+    pass: ['width', 'height', 'native', 'layout'],
+    own: {
+      view: { type: 'object', description: 'View settings to apply first' },
+      save_path: { type: 'string', description: 'Also write the PNG to this file' },
+      colorbar: { type: 'boolean', description: 'The color bar (default false)' },
+      axes: { type: 'boolean', description: 'The axes (default false)' },
+      status: { type: 'boolean', description: 'The status line: grid, simulation time, point masses, mesh (default false)' },
+    },
   },
   { name: 'view', method: 'view', brief: 'Changes what screenshots show, leaving the run alone', pass: ['changes'], required: ['changes'] },
   { name: 'controls', method: 'controls', brief: 'Lists the panel’s controls and the settings of the option table that can change mid-run' },

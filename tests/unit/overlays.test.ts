@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { colorbarTicks, formatValue, normalOutOfScreen, overlayGutters, PLANE_AXES, triadArrows } from '../../src/render/overlays';
+import { besideLayout, colorbarTicks, formatValue, normalOutOfScreen, overlayGutters, PLANE_AXES, triadArrows } from '../../src/render/overlays';
 import { cameraFrame, defaultView } from '../../src/render/renderer';
 import { defaultBitrate, frameLayout, movieSize } from '../../src/io/movie';
 
@@ -130,5 +130,80 @@ describe('movie frame around the picture', () => {
     expect(plane.right).toBeGreaterThan(150);
     expect(plane.right).toBeLessThan(330);
     expect(overlayGutters(1000, { ...info, mode: 'volume', twoD: false }, { triad: true }).left).toBeGreaterThan(plane.left);
+  });
+});
+
+describe('overlays beside a map', () => {
+  const widths = { ticks: 60, title: 140, status: 900 };
+  const all = { colorbar: true, triad: true, status: true };
+  const overlaps = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  const check = (L: ReturnType<typeof besideLayout>, mapW: number, mapH: number) => {
+    const map = { x: L.map.x, y: L.map.y, w: mapW, h: mapH };
+    expect(Number.isInteger(L.map.x) && Number.isInteger(L.map.y)).toBe(true);
+    expect(map.x + map.w).toBeLessThanOrEqual(L.width);
+    expect(map.y + map.h).toBeLessThanOrEqual(L.height);
+    for (const r of L.regions) {
+      expect(overlaps(r, map), r.name).toBe(false);
+      expect(r.x).toBeGreaterThanOrEqual(0);
+      expect(r.y).toBeGreaterThanOrEqual(0);
+      expect(r.x + r.w, r.name).toBeLessThanOrEqual(L.width + 0.5);
+      expect(r.y + r.h, r.name).toBeLessThanOrEqual(L.height + 0.5);
+    }
+  };
+
+  it('puts the status line above and the color bar and axes to the right of a large map', () => {
+    const L = besideLayout(2048, 2048, widths, all);
+    check(L, 2048, 2048);
+    expect(L.status!.y + L.px).toBeLessThan(L.map.y);
+    expect(L.bar!.x).toBeGreaterThan(L.map.x + 2048);
+    expect(L.bar!.y).toBe(L.map.y);
+    expect(L.triad!.x).toBeGreaterThan(L.map.x + 2048);
+    // The axes at the map's lower edge, below the bar: the picture is no taller than the map needs.
+    expect(L.triad!.y).toBeGreaterThan(L.bar!.y + L.bar!.h);
+    expect(L.height).toBe(L.map.y + 2048 + L.map.x);
+    expect(L.px).toBe(Math.round(0.024 * 2048));
+  });
+
+  it('grows past a small map to fit the color bar and the axes, the map at the top', () => {
+    const L = besideLayout(64, 64, widths, all);
+    check(L, 64, 64);
+    expect(L.s).toBe(600);
+    expect(L.height).toBeGreaterThan(L.bar!.y + L.bar!.h);
+    expect(L.height).toBeGreaterThan(400);
+  });
+
+  it('takes room only for the overlays asked for', () => {
+    const bar = besideLayout(512, 512, widths, { colorbar: true });
+    check(bar, 512, 512);
+    expect(bar.triad).toBeNull();
+    expect(bar.status).toBeNull();
+    const triad = besideLayout(512, 512, widths, { triad: true });
+    check(triad, 512, 512);
+    expect(triad.bar).toBeNull();
+    // No strip above without the status line or the bar's title.
+    expect(triad.map.y).toBe(triad.map.x);
+    const status = besideLayout(512, 512, widths, { status: true });
+    check(status, 512, 512);
+    // No gutter: as wide as the map and its margins, the status line cut to fit.
+    expect(status.width).toBe(512 + 2 * status.map.x);
+    expect(status.status!.maxWidth).toBe(512);
+  });
+
+  it('has no margins with every overlay off', () => {
+    const L = besideLayout(300, 200, widths, {});
+    expect(L).toMatchObject({ width: 300, height: 200, map: { x: 0, y: 0 }, bar: null, triad: null, status: null, regions: [] });
+  });
+
+  it('makes the gutter as wide as a long title', () => {
+    const narrow = besideLayout(1024, 1024, { ...widths, title: 50 }, { colorbar: true });
+    const wide = besideLayout(1024, 1024, { ...widths, title: 600 }, { colorbar: true });
+    expect(wide.width - narrow.width).toBeGreaterThan(400);
+    check(wide, 1024, 1024);
+  });
+
+  it('keeps a volume triad, which may point any way, off the map', () => {
+    const L = besideLayout(256, 256, widths, all, { mode: 'volume', twoD: false });
+    check(L, 256, 256);
   });
 });

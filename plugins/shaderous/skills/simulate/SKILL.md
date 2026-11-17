@@ -238,7 +238,7 @@ Every flag (`npx -y shaderous --help` says what each takes):
 <!-- gen:cli-flag-list -->
 - Setup: `--problem ID`, `--dim 2|3`, `--n CELLS`, `--amr LEVELS`, `--set KEY=VALUE`, `--setup FILE`
 - Stopping: `--until T`, `--steps N`, `--every DT`, `--timeout SECONDS`
-- Outputs: `--out DIR`, `--png`, `--width PX`, `--height PX`, `--view KEY=VALUE`, `--slice VAR`, `--slice-axis A`, `--slice-pos P`, `--slice-res R`, `--slice-format F`, `--athdf`, `--debris`
+- Outputs: `--out DIR`, `--png`, `--width PX`, `--height PX`, `--native`, `--view KEY=VALUE`, `--slice VAR`, `--slice-axis A`, `--slice-pos P`, `--slice-res R`, `--slice-format F`, `--athdf`, `--debris`
 - Movie: `--mp4`, `--frame-dt DT`, `--frame-every N`, `--fps F`, `--bitrate M`, `--no-overlays`
 - Sweeps: `--vary KEY=V1,V2,..`
 - Other: `--url URL`, `--headed`, `--low-priority`, `--gpu-memory GB`, `--quiet`

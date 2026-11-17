@@ -130,9 +130,11 @@ const TOOLS = [
   },
   {
     name: 'screenshot',
-    async run({ width = 768, height, view, save_path }) {
+    async run({ width, height, native, layout, colorbar, axes, status, view, save_path }) {
       if (view && Object.keys(view).length) await call('view', view);
-      const png = await call('screenshot', { width, height: height ?? width });
+      const overlays = { colorbar: !!colorbar, triad: !!axes, status: !!status };
+      const size = native ? {} : { width: width ?? 768, height: height ?? width ?? 768 };
+      const png = await call('screenshot', { ...size, native, layout, overlays });
       const data = png.slice(png.indexOf(',') + 1);
       const content = [{ type: 'image', data, mimeType: 'image/png' }];
       if (save_path) {

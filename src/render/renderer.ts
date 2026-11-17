@@ -591,6 +591,11 @@ export class Renderer {
    */
   fixedSize: [number, number] | null = null;
 
+  /** Texels a side of the slice's and the projection's map: the grid's finest cells, capped at the largest texture. */
+  get mapSide(): number {
+    return this.map?.width ?? 0;
+  }
+
   /**
    * Draw into a texture of the renderer's own instead of the canvas, for captured() to read back.
    * For pages whose browser composites without the GPU (the headless runner's

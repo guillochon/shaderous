@@ -16,7 +16,9 @@ flows, and astrophysical flows such as stars, white dwarf collisions, tidal disr
 accreting binaries. Drag in the view to rotate it, and use the brushes to stir, heat or add
 gas. The address bar always describes the current setup, so copying it (or pressing
 **Share**) gives someone else the same run. **Record** saves the run as an MP4 movie with a
-color bar, axes and the simulation time drawn on it, **Export state** saves an `.athdf` file,
+color bar, axes and the simulation time drawn on it, **Screenshot** (under Movie and
+screenshot) saves a slice, a projection or a 2D run as a PNG at the grid's own resolution, one
+pixel per cell, **Export state** saves an `.athdf` file,
 and checkpoints (under Time) save one at regular intervals. **Setup…** opens every setting of
 the simulation in one dialog, where a run can be assembled from parts (point masses, stars,
 disks, gas regions, obstacles, a magnetic field) and saved as a file: each preset is such a

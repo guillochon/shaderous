@@ -23,7 +23,12 @@ export interface CheckpointSink {
 
 /** Hand a file to the browser as a download. */
 export function download(name: string, bytes: Uint8Array, type = 'application/x-hdf5') {
-  const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type }));
+  downloadBlob(name, new Blob([bytes as Uint8Array<ArrayBuffer>], { type }));
+}
+
+/** A file to the browser's downloads. */
+export function downloadBlob(name: string, blob: Blob) {
+  const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
   a.download = name;

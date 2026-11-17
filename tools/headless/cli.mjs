@@ -118,6 +118,8 @@ async function runOne(session, q, dir) {
   if (o.mp4 && (every !== undefined || steps !== undefined)) fail('--mp4 records the whole run: give --until, not --every or --steps');
   if (!o.mp4 && (o['frame-every'] || o['frame-dt'] || o.fps || o.bitrate || o['no-overlays'])) fail('--frame-every, --frame-dt, --fps, --bitrate and --no-overlays go with --mp4');
   if (o['frame-every'] !== undefined && o['frame-dt'] !== undefined) fail('give --frame-every or --frame-dt, not both');
+  if (o.native && !o.png) fail('--native goes with --png');
+  if (o.native && (o.width !== undefined || o.height !== undefined) && !o.mp4) fail('--native sets the screenshot size: give it without --width or --height');
 
   const d0 = await call('describe');
   const view = viewSettings(d0.fields);
@@ -145,7 +147,12 @@ async function runOne(session, q, dir) {
     const files = [];
     appendFileSync(path.join(dir, 'diag.jsonl'), JSON.stringify({ output: k, wall: (Date.now() - t0) / 1000, ...d }) + '\n');
     if (o.png) {
-      const png = await call('screenshot', { width: num(o.width, 'width') ?? 1024, height: num(o.height, 'height') ?? num(o.width, 'width') ?? 1024 });
+      const png = await call(
+        'screenshot',
+        o.native
+          ? { native: true, overlays: { colorbar: true, triad: true, status: true } }
+          : { width: num(o.width, 'width') ?? 1024, height: num(o.height, 'height') ?? num(o.width, 'width') ?? 1024 },
+      );
       writeFileSync(path.join(dir, `${name}.png`), pngBytes(png));
       files.push(`${name}.png`);
     }

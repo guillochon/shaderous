@@ -2,6 +2,7 @@
 // a headless page, every call through page.evaluate.
 import { expect, test, type Page } from '@playwright/test';
 import { decodeArray } from '../../src/io/arrays';
+import { besideLayout } from '../../src/render/overlays';
 
 test.describe.configure({ mode: 'serial' });
 
@@ -162,6 +163,109 @@ function mp4Box(bytes: Uint8Array, type: string): DataView | null {
   }
   return null;
 }
+
+/** Pixels of PNG data URLs, decoded in the page: [width, height, red channel as numbers]. */
+const reds = (page: Page, urls: string[]) =>
+  page.evaluate(async (us) => {
+    const out: [number, number, number[]][] = [];
+    for (const u of us) {
+      const img = new Image();
+      img.src = u;
+      await img.decode();
+      const c = document.createElement('canvas');
+      c.width = img.width;
+      c.height = img.height;
+      const g = c.getContext('2d')!;
+      g.drawImage(img, 0, 0);
+      const d = g.getImageData(0, 0, c.width, c.height).data;
+      out.push([c.width, c.height, Array.from({ length: c.width * c.height }, (_, k) => d[4 * k])]);
+    }
+    return out;
+  }, urls);
+
+test('a native screenshot has one pixel per cell, the overlays beside it', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'load', { problem: 'kelvin-helmholtz', dim: 2, n: 128 });
+  await call(page, 'step', 40);
+  // A linear gray scale over a fixed range: a pixel's gray is its cell's density.
+  const [lo, hi] = [0.9, 2.1];
+  await call(page, 'view', { colormap: 'gray', autoRange: false, lo, hi, log: false, contours: false, showBlocks: false });
+  const n = 128;
+  const sl = await call(page, 'slice', { variable: 'rho', res: n });
+  const bare = await call(page, 'screenshot', { native: true });
+  const all = { colorbar: true, triad: true, status: true };
+  const dressed = await call(page, 'screenshot', { native: true, overlays: all });
+  await savePng(page, dressed, 'native-2d');
+  const [[w, h, px], [W, H, big]] = await reds(page, [bare, dressed]);
+  expect([w, h]).toEqual([n, n]);
+  // Row 0 of the picture is the top of the box; slice() counts rows from the bottom.
+  let worst = 0;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) worst = Math.max(worst, Math.abs(px[j * n + i] - (255 * (sl.values[(n - 1 - j) * n + i] - lo)) / (hi - lo)));
+  expect(worst).toBeLessThan(1.5);
+  // With the overlays: a larger picture, the map in it untouched.
+  expect(W).toBeGreaterThan(n);
+  expect(H).toBeGreaterThan(n);
+  const at = besideLayout(n, n, { ticks: 0, title: 0, status: 0 }, all).map;
+  let differ = 0;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) if (big[(j + at.y) * W + i + at.x] !== px[j * n + i]) differ++;
+  expect(differ).toBe(0);
+
+  // The part in view, zoomed about an off-center point: a crop of the whole box, in whole cells.
+  await call(page, 'view', { zoom: 4, cx: 0.3, cy: 0.62 });
+  const [[vw, vh, part]] = await reds(page, [await call(page, 'screenshot', { native: 'view' })]);
+  expect(vw).toBeLessThan(n);
+  expect(vh).toBeLessThan(n);
+  let found = false;
+  for (let j0 = 0; j0 + vh <= n && !found; j0++) {
+    for (let i0 = 0; i0 + vw <= n && !found; i0++) {
+      let same = true;
+      for (let j = 0; j < vh && same; j++) for (let i = 0; i < vw && same; i++) same = part[j * vw + i] === px[(j + j0) * n + i + i0];
+      found = same;
+    }
+  }
+  expect(found).toBe(true);
+  await call(page, 'view', { zoom: 1, cx: 0.5, cy: 0.5 });
+
+  // Not with a size; a sized picture may have its overlays beside it too.
+  await expect(call(page, 'screenshot', { native: true, width: 64 })).rejects.toThrow(/without `width`/);
+  const [[sw, sh]] = await reds(page, [await call(page, 'screenshot', { width: 300, height: 200, layout: 'beside', overlays: { colorbar: true } })]);
+  expect(sw).toBeGreaterThan(300);
+  expect(sh).toBeGreaterThan(200);
+});
+
+test('a native screenshot of an adaptive mesh shows a coarse cell as a square of equal pixels', async ({ page }) => {
+  await page.goto('/?headless=1');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'load', { problem: 'kelvin-helmholtz', dim: 2, n: 256, amr: 2 });
+  await call(page, 'step', 20);
+  await call(page, 'view', { colormap: 'gray', autoRange: true, log: false, contours: false, showBlocks: false });
+  const [[w, h, px]] = await reds(page, [await call(page, 'screenshot', { native: true })]);
+  expect([w, h]).toEqual([256, 256]);
+  // Far from the shear layers, in the smooth band along the top, the mesh is coarse: every
+  // aligned 4 x 4 square of pixels there is one cell.
+  const squares = (y0: number, y1: number) => {
+    let equal = 0;
+    let total = 0;
+    for (let j = y0; j < y1; j += 4) {
+      for (let i = 0; i < w; i += 4) {
+        total++;
+        let same = true;
+        for (let b = 0; b < 4; b++) for (let a = 0; a < 4; a++) same &&= px[(j + b) * w + i + a] === px[j * w + i];
+        if (same) equal++;
+      }
+    }
+    return equal / total;
+  };
+  expect(squares(0, 16)).toBe(1);
+  // In the 3D volume view there is no pixel per cell.
+  await call(page, 'load', { problem: 'sedov', dim: 3, n: 32 });
+  await call(page, 'view', { mode: 'volume' });
+  await expect(call(page, 'screenshot', { native: true })).rejects.toThrow(/volume view/);
+  await call(page, 'view', { mode: 'slice' });
+  const [[sw, sh]] = await reds(page, [await call(page, 'screenshot', { native: true })]);
+  expect([sw, sh]).toEqual([32, 32]);
+});
 
 test('records a movie: an MP4 with the frames and size asked for, and overlays', async ({ page }) => {
   await page.goto('/?headless=1');

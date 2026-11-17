@@ -6,7 +6,7 @@ import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, forgetCompile
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
-import { canPickFolder, checkpointIndex, download, downloadSink, nextCheckpoint, pickFolder, type CheckpointSink } from '../io/checkpoints';
+import { canPickFolder, checkpointIndex, download, downloadBlob, downloadSink, nextCheckpoint, pickFolder, type CheckpointSink } from '../io/checkpoints';
 import { maxLevel, type Snapshot } from '../io/snapshot';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
@@ -113,7 +113,7 @@ side.innerHTML = `
   </details>
 
   <details id="movie">
-    <summary title="Record the run as an MP4 movie with the Record button">Movie<span class="sum" id="sum-movie"></span></summary>
+    <summary title="Record the run as an MP4 movie with the Record button, or save the view as a PNG with Screenshot">Movie and screenshot<span class="sum" id="sum-movie"></span></summary>
     <div class="g3">
       ${field('Frame', select('rec-cadence', opt('time', 'Every Δt') + opt('steps', 'Every n steps')), '', 'When a frame is taken: after every so many steps, or near every multiple of a time interval. A time interval never shortens a step: each frame is taken at the step nearest its time, so the recorded run is the run it would have been')}
       ${field('Steps', number('rec-every', 'min="1" step="1" value="1"'), 'row-rec-every', 'A movie frame after every this many steps. 1 records every step')}
@@ -128,6 +128,10 @@ side.innerHTML = `
       <label class="check" title="A color bar with the field, its unit and its range over the right edge of each frame. With Auto range on its labels follow the data; a fixed range gives a steadier movie"><input id="rec-colorbar" type="checkbox" checked />Color bar</label>
       <label class="check" title="The axes x, y and z in the lower left corner of each frame, turning with the camera"><input id="rec-triad" type="checkbox" checked />Axes</label>
       <label class="check" title="The status line in the upper left corner of each frame: the grid, the simulation time, point masses and the mesh"><input id="rec-status" type="checkbox" checked />Status</label>
+    </div>
+    <div class="io shot">
+      <button id="shot" title="Save the view as a PNG. A slice, a projection or a 2D run is saved at the grid's own resolution: one pixel per cell of the finest level, with the color bar and axes beside it. The volume view is saved at its size on the page, with them over it">Screenshot</button>
+      ${select('shot-region', opt('box', 'Whole box') + opt('view', 'As the view'), 'Which part of the plane the screenshot takes: the whole box, or the part of it in view (zoom and pan), rounded out to whole cells')}
     </div>
   </details>
 
@@ -1062,6 +1066,9 @@ function syncOpacity() {
 
 const num = (v: number) => (v === 0 ? '0' : Math.abs(v) >= 1e-3 && Math.abs(v) < 1e5 ? v.toPrecision(5) : v.toExponential(2));
 
+/** A screenshot is being taken or saved. */
+let shooting = false;
+
 /** The Record button: Record, or Stop while a movie records. */
 function syncRecordButton() {
   const b = $('record');
@@ -1069,6 +1076,49 @@ function syncRecordButton() {
   const text = recordingSize ? 'Stop' : 'Record';
   if (b.textContent !== text) b.textContent = text;
   b.classList.toggle('recording', !!recordingSize);
+  $<HTMLButtonElement>('shot').disabled = !!recordingSize || shooting;
+}
+
+
+/** The Screenshot button: the view as a PNG, a plane at the grid's own resolution (api.shoot()). */
+async function takeScreenshot() {
+  if (recordingSize || shooting || !sim) return;
+  const flat = flatView();
+  const region = $<HTMLSelectElement>('shot-region').value === 'view' ? 'view' : 'box';
+  const overlays = { colorbar: $<HTMLInputElement>('rec-colorbar').checked, triad: $<HTMLInputElement>('rec-triad').checked, status: $<HTMLInputElement>('rec-status').checked };
+  const wasRunning = running;
+  shooting = true;
+  syncRecordButton();
+  // The picture is of one state: the run waits for it.
+  if (running) {
+    running = false;
+    syncControls();
+  }
+  const b = $('shot');
+  b.textContent = 'Saving…';
+  try {
+    const shot = await api.shoot(flat ? { native: region, overlays } : { overlays });
+    const blob = await new Promise<Blob | null>((res) => shot.canvas.toBlob(res, 'image/png'));
+    if (!blob) throw new Error(`the browser could not encode a PNG of ${shot.width} × ${shot.height} pixels`);
+    downloadBlob(`shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-t${+shot.t.toPrecision(4)}.png`, blob);
+    const f = shot.native;
+    const size = `${shot.width} × ${shot.height} px, ${blob.size >= 1e6 ? `${(blob.size / 1e6).toFixed(1)} MB` : `${Math.ceil(blob.size / 1e3)} kB`}`;
+    if (!f) notice(`saved a screenshot: ${size}`);
+    else {
+      const capped = f.side < f.n ? `; the map is capped at ${f.side}: ${+(f.n / f.side).toPrecision(3)} cells per pixel` : '';
+      notice(`saved ${f.width} × ${f.height} ${f.side < f.n ? 'pixels' : 'cells'} (${size})${capped}`);
+    }
+  } catch (e) {
+    notice(`Screenshot: ${e instanceof Error ? e.message : String(e)}${flat && region === 'box' ? '; As the view takes less' : ''}`);
+  } finally {
+    shooting = false;
+    b.textContent = 'Screenshot';
+    syncRecordButton();
+    if (wasRunning && !finished && !recordingSize) {
+      running = true;
+      syncControls();
+    }
+  }
 }
 
 /** The movie settings, and the Record button that starts and stops a recording with them. */
@@ -1076,7 +1126,9 @@ function bindRecord() {
   // Only where the browser can encode video (WebCodecs).
   const can = typeof VideoEncoder !== 'undefined';
   $('record').hidden = !can;
-  $('movie').hidden = !can;
+  // Without video encoding the section keeps only the screenshot and what it shows.
+  for (const el of $('movie').querySelectorAll<HTMLElement>('.g3')) el.hidden = !can;
+  $('shot').addEventListener('click', () => void takeScreenshot());
   const cadence = $<HTMLSelectElement>('rec-cadence');
   const showCadence = () => {
     $('row-rec-every').hidden = cadence.value !== 'steps';
@@ -1127,6 +1179,8 @@ function bindRecord() {
 /** Reflect cfg and view into the controls. */
 function syncControls() {
   const two = cfg.ndim === 2;
+  // A screenshot of the volume is of the view as it is: no region to choose.
+  $('shot-region').hidden = !flatView();
   // The preset menus show a choice that waits for Run (Autoload off), else the run's own.
   const g = pending?.pick ?? { id: cfg.problem.id, n: cfg.n, ndim: cfg.ndim, levels: cfg.amrLevels };
   const gProblem = problemOf(g.id);
@@ -2683,6 +2737,41 @@ function sliceLayout(): { span: number; shift: number } {
 const sliceSpan = () => sliceLayout().span;
 /** Screen pixels the slice's middle sits left of the canvas's middle. */
 const sliceShift = () => sliceLayout().shift;
+
+/**
+ * The texels of the slice's map (`side` a side) a native screenshot takes: all of them, or those
+ * of the part of the box in view (left of the rail), rounded out to whole texels. Rows count up
+ * from the box's bottom edge, as the map's do.
+ */
+function nativeRegion(region: 'box' | 'view', side: number): { i0: number; i1: number; j0: number; j1: number } {
+  const all = { i0: 0, i1: side, j0: 0, j1: side };
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  if (region === 'box' || !(w > 0 && h > 0)) return all;
+  const { span, shift } = sliceLayout();
+  const k = span * view.zoom;
+  // The rail lies over the canvas's right edge (but on a phone, where it can be put away).
+  const room = phone.matches ? w : $('rail').getBoundingClientRect().left - canvas.getBoundingClientRect().left;
+  const right = room > 0 ? Math.min(w, room) : w;
+  // As render/slice.wgsl maps a pixel to the slice: x from the left, y from the bottom.
+  const x0 = (-w / 2 + shift) / k + view.cx;
+  const x1 = (right - w / 2 + shift) / k + view.cx;
+  const y0 = -h / (2 * k) + view.cy;
+  const y1 = h / (2 * k) + view.cy;
+  // Outward to whole texels; an edge within a millionth of a texel of one stays on it.
+  const lo = (v: number) => Math.max(0, Math.min(side, Math.floor(v * side + 1e-6)));
+  const hi = (v: number) => Math.max(0, Math.min(side, Math.ceil(v * side - 1e-6)));
+  return { i0: lo(x0), i1: hi(x1), j0: lo(y0), j1: hi(y1) };
+}
+
+/** A native screenshot has drawn into the canvas and not yet given it back (draw(null)). */
+let nativeShot = false;
+
+/** The canvas shows a frame of another size than its own (a movie's, a native screenshot's): fitted, the pointer camera waiting. */
+function setRecordingStyle(size: [number, number] | null) {
+  canvas.style.objectFit = size ? 'contain' : '';
+  canvas.style.pointerEvents = size ? 'none' : '';
+}
 /** Drag length, in pixels, at which the velocity tool reaches its top speed. */
 const fullDrag = () => 0.25 * Math.min(canvas.clientWidth, canvas.clientHeight);
 
@@ -4412,8 +4501,9 @@ function tick(now: number) {
     stepsSubmitted += taken;
   }
   stepOnce = false;
-  // While a movie records, its frames are all the canvas shows: the recorder draws them.
-  if (!recordingSize) {
+  // While a movie records, its frames are all the canvas shows: the recorder draws them. A
+  // native screenshot holds the canvas from its draw until draw(null).
+  if (!recordingSize && !nativeShot) {
     updateGuides();
     refreshContourHover();
     renderer.densityCut = densityCut();
@@ -4633,7 +4723,46 @@ const api = installApi(
       gpu.device.queue.submit([enc.finish()]);
       sim.submitted();
       renderer.submitted();
+      // Back from a native draw: the canvas is the page's again (or the movie's).
+      if (!size && nativeShot) {
+        nativeShot = false;
+        setRecordingStyle(recordingSize);
+      }
     },
+    drawNative(region, capture = false) {
+      if (!sim) throw new Error('no run is loaded');
+      if (!flatView()) throw new Error('the volume view has no pixel per cell: use slice or projection');
+      const side = renderer.mapSide;
+      const r = nativeRegion(region, side);
+      const w = r.i1 - r.i0;
+      const h = r.j1 - r.j0;
+      if (!(w >= 1 && h >= 1)) throw new Error('the box is not in view');
+      const max = gpu.device.limits.maxTextureDimension2D;
+      if (w > max || h > max) throw new Error(`a picture of ${w} × ${h} pixels is larger than the GPU draws (${max} a side)`);
+      const enc = gpu.device.createCommandEncoder();
+      // One pixel per texel: the slice spans `side` pixels at zoom 1, centered so that pixel
+      // centers fall on texel centers (render/slice.wgsl), on a copy of the view.
+      renderer.fixedSize = [w, h];
+      renderer.capture = capture;
+      renderer.densityCut = densityCut();
+      renderer.slice = { span: side, shift: 0 };
+      const hover = renderer.hoverLevel;
+      renderer.hoverLevel = 0;
+      // The canvas grows to the picture's size until draw(null): shown fitted, the pointer waiting.
+      setRecordingStyle([w, h]);
+      nativeShot = true;
+      try {
+        renderer.encode(enc, sim, { ...view, zoom: 1, cx: (r.i0 + r.i1) / (2 * side), cy: (r.j0 + r.j1) / (2 * side) });
+      } finally {
+        renderer.hoverLevel = hover;
+        renderer.capture = false;
+      }
+      gpu.device.queue.submit([enc.finish()]);
+      sim.submitted();
+      renderer.submitted();
+      return { width: w, height: h, side, n: sim.n };
+    },
+    flatView: () => flatView(),
     captured: () => renderer.captured(),
     rangeSettled: () => renderer.rangeSettled(),
     rangedByDrawing: (d) => $<HTMLInputElement>('auto').checked && (projecting() || view.field >= d.ranges.length),
@@ -4674,9 +4803,7 @@ const api = installApi(
     },
     setRecording(size) {
       recordingSize = size;
-      // The movie's frames, letterboxed in the canvas's place; the pointer camera waits.
-      canvas.style.objectFit = size ? 'contain' : '';
-      canvas.style.pointerEvents = size ? 'none' : '';
+      setRecordingStyle(size);
       syncRecordButton();
     },
     recordProgress(p) {

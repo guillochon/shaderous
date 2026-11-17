@@ -73,6 +73,11 @@ const check = (ok, what) => {
   check(npy.shape.join() === '512,512' && Math.abs(npyMean - big.mean) < 1e-9 && npy.values.reduce((a, b) => Math.max(a, b), -Infinity) === big.max, 'slice: save_path .npy writes float32 [512, 512]');
   const shot = await tool('screenshot', { width: 256, view: { field: 3 } });
   check(shot.content[0].type === 'image' && shot.content[0].data.length > 5000, 'screenshot');
+  // The PNG's size from its header: the grid's own (256 a side), and larger with overlays beside it.
+  const pngSize = (r) => { const b = Buffer.from(r.content[0].data, 'base64'); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+  const native = pngSize(await tool('screenshot', { native: true }));
+  const beside = pngSize(await tool('screenshot', { native: true, colorbar: true, axes: true, status: true }));
+  check(native.join() === '256,256' && beside[0] > 256 && beside[1] > 256, `screenshot: native is one pixel per cell (${native.join(' x ')}; ${beside.join(' x ')} with overlays)`);
   const saved = json(await tool('save_athdf', { path: path.join(tmp, 'mcp/') }));
   check(existsSync(saved.saved), 'save_athdf');
   const back = json(await tool('load_athdf', { path: saved.saved }));

@@ -106,7 +106,9 @@ export const API_METHODS: ApiMethod[] = [
       properties: {
         width: size('Default 768'),
         height: size('Default: width'),
-        overlays: { type: 'object', description: '{ colorbar, triad, status }: draw the color bar, the axes and the status line over the picture (all off by default)' },
+        native: { type: ['boolean', 'string'], description: "One pixel per cell of the finest level (the grid's own resolution, up to the largest texture): true or 'box' for the whole box, 'view' for the part in view. A plane only (a 2D run, a slice or a projection); not with width or height" },
+        overlays: { type: 'object', description: '{ colorbar, triad, status }: draw the color bar, the axes and the status line (all off by default)' },
+        layout: { type: 'string', enum: ['over', 'beside'], description: "'over': the overlays over the picture's edges, as in a movie; 'beside': in margins around it, covering nothing. Default 'beside' with native, else 'over'" },
       },
     }],
     changesRun: false,

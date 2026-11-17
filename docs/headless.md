@@ -102,7 +102,7 @@ Each run writes a folder, `--out DIR`, which defaults to `runs/<problem>-<date>`
 | --- | --- |
 | `manifest.json` | The setup in force (`setup`, a query string that reproduces the run), view settings, build, GPU adapter, the command line, start and end time, why the run stopped, the files of each output, and any errors the page reported |
 | `diag.jsonl` | One line of diagnostics per output: time, steps, wall time, mass, momentum, energies, Mach number, point masses, field ranges |
-| `NNNN-tT.png` | A screenshot at each output, with `--png`. Set the size with `--width` and `--height`, and what is drawn with `--view KEY=VALUE` |
+| `NNNN-tT.png` | A screenshot at each output, with `--png`. Set the size with `--width` and `--height`, and what is drawn with `--view KEY=VALUE`. With `--native` instead of a size, a plane (a 2D run, a slice or a projection) at the grid's own resolution, one pixel per cell of the finest level, with the color bar, axes and status line beside it (`screenshot({ native })` in [api.md](api.md#reference)) |
 | `NNNN-tT-VAR.json` | A slice of variable VAR at each output, with `--slice VAR` (repeatable). Set it with `--slice-axis`, `--slice-pos` and `--slice-res`; the format is that of `slice()` in [api.md](api.md#reference) |
 | `NNNN-tT-VAR.npy` | The same slice with `--slice-format npy`, as a file numpy reads: float32 of shape `[res, res]`, row `j` and column `i` as in `slice()`. The slice's other fields (`t`, `variable`, `axis`, `pos`, `res`, `axes`, `min`, `max`) are in `manifest.json`, under that output's `slices` |
 | `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`. yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them |
@@ -202,6 +202,7 @@ flags, [flags.mjs](../tools/headless/flags.mjs), by `npm run gen`):
 | `--out DIR` | Folder (default: runs/<problem>-<date>) |
 | `--png` | A screenshot at each output |
 | `--width PX`, `--height PX` | Screenshot size (default 1024 square) |
+| `--native` | Screenshots at the grid's own resolution (a plane: a 2D run, a slice or a projection): one pixel per cell of the finest level, with the color bar, axes and status line beside it. Not with --width or --height |
 | `--view KEY=VALUE` | View setting for screenshots, repeatable: --view field=3 --view colormap=viridis |
 | `--slice VAR` | A slice of this variable at each output (repeatable) |
 | `--slice-axis A`, `--slice-pos P`, `--slice-res R` | Its axis (0 to 2), position (0 to 1) and cells per side |

@@ -915,9 +915,24 @@
        "maximum": 4096,
        "description": "Default: width"
       },
+      "native": {
+       "type": [
+        "boolean",
+        "string"
+       ],
+       "description": "One pixel per cell of the finest level (the grid's own resolution, up to the largest texture): true or 'box' for the whole box, 'view' for the part in view. A plane only (a 2D run, a slice or a projection); not with width or height"
+      },
       "overlays": {
        "type": "object",
-       "description": "{ colorbar, triad, status }: draw the color bar, the axes and the status line over the picture (all off by default)"
+       "description": "{ colorbar, triad, status }: draw the color bar, the axes and the status line (all off by default)"
+      },
+      "layout": {
+       "type": "string",
+       "enum": [
+        "over",
+        "beside"
+       ],
+       "description": "'over': the overlays over the picture's edges, as in a movie; 'beside': in margins around it, covering nothing. Default 'beside' with native, else 'over'"
       }
      }
     }
@@ -1256,7 +1271,7 @@
    "name": "screenshot",
    "method": "screenshot",
    "brief": "Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path`",
-   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, colormap, autoRange. Settings persist for later screenshots.",
+   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, colormap, autoRange. Settings persist for later screenshots. `native` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1272,6 +1287,21 @@
       "maximum": 4096,
       "description": "Default: width"
      },
+     "native": {
+      "type": [
+       "boolean",
+       "string"
+      ],
+      "description": "One pixel per cell of the finest level (the grid's own resolution, up to the largest texture): true or 'box' for the whole box, 'view' for the part in view. A plane only (a 2D run, a slice or a projection); not with width or height"
+     },
+     "layout": {
+      "type": "string",
+      "enum": [
+       "over",
+       "beside"
+      ],
+      "description": "'over': the overlays over the picture's edges, as in a movie; 'beside': in margins around it, covering nothing. Default 'beside' with native, else 'over'"
+     },
      "view": {
       "type": "object",
       "description": "View settings to apply first"
@@ -1279,6 +1309,18 @@
      "save_path": {
       "type": "string",
       "description": "Also write the PNG to this file"
+     },
+     "colorbar": {
+      "type": "boolean",
+      "description": "The color bar (default false)"
+     },
+     "axes": {
+      "type": "boolean",
+      "description": "The axes (default false)"
+     },
+     "status": {
+      "type": "boolean",
+      "description": "The status line: grid, simulation time, point masses, mesh (default false)"
      }
     },
     "required": [],

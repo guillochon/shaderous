@@ -464,7 +464,7 @@ The state at a list of points `[x, y, z]`. Each point returns `rho`, `press`, `v
 `r0`, `temp` (and `tempK` with physical units, as for `slice`), `level`, and `X`, the species'
 mass fractions by name, when the run has species.
 
-### `screenshot({ width?, height?, overlays? }) → string`
+### `screenshot({ width?, height?, native?, overlays?, layout? }) → string`
 
 The view as a PNG data URL. With no size, it is drawn at the canvas's size on the page. Give
 `width` alone for a square image. The overlays the page draws on top of the canvas (color bar,
@@ -472,6 +472,24 @@ markers, labels) are not included, but `overlays: { colorbar: true, triad: true,
 paints a color bar, an axis triad and the status line onto the image, as a movie's frames have
 them. With the
 range set to automatic, it is fitted to the current data before the image is drawn.
+
+`native` takes a plane (a 2D run, or the slice or projection view of a 3D run) at the grid's
+own resolution: one pixel per cell of the finest level, drawn as the page draws it (contours,
+block outlines, flat field lines) but without interpolation. `true` or `'box'` takes the whole
+box; `'view'` the part of it in view (zoom and pan, left of the panel on the right), rounded out
+to whole cells. A coarse cell of an adaptive mesh is a square of equal pixels. The map is capped
+at the GPU's largest texture (`maxTextureDimension2D`, typically 8192 or 16384 a side), so a
+larger grid comes out coarser than its cells. Row 0 of the image is the top of the box, so row
+`j` holds `slice()`'s row `res - 1 - j`. `native` is not given with `width` or `height`, and is
+an error in the volume view, which has no pixel per cell.
+
+`layout` says where the overlays go: `'over'` paints them over the picture's edges, as in a
+movie; `'beside'` puts them in margins around it, so no cell is covered (the status line in a
+strip above, the color bar and the axes in a column to the right; their sizes follow the
+picture's height, or 600 pixels for a smaller one). The default is `'beside'` with `native`,
+`'over'` otherwise. Without overlays a native picture is the map alone. A picture larger than a
+canvas can be (16384 a side, or 2^28 pixels) is an error that names its size: `'view'` takes
+less.
 
 ### `record(options) → result`
 

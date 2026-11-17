@@ -1,6 +1,9 @@
 # Plan: a screenshot at the grid's own resolution
 
-Status: proposed 2026-11-15. Nothing built.
+Status: built 2026-11-17, sections 1 to 8 as written. The open questions of section 11 went the
+proposed way: margins outside the map, the button in the Movie section (now "Movie and
+screenshot"), the axes under the color bar in the right gutter. "As the view" takes the part of
+the box left of the rail. Tried at 8192² (KH, 5 levels): a 9917 × 9078 PNG, 7.7 s to encode.
 
 ## 1. Goal
 
