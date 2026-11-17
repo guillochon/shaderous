@@ -10,15 +10,18 @@ import type { LinkOverrides } from './link';
 import { decodeLink } from './link';
 import { capture } from '../io/capture';
 import { AmrSim } from '../amr/amr_sim';
-import { SnapshotSampler, VARIABLES, type Snapshot } from '../io/snapshot';
+import { DERIVED_VARIABLES, SnapshotSampler, VARIABLES, type Snapshot } from '../io/snapshot';
+import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
+import { COMPOSITIONS, meanMolecularWeight } from '../units/composition';
+import { kelvinPerCodeT } from '../units/units';
 import { encodeArray } from '../io/arrays';
 import type { Diagnostics, SimConfig, Simulation } from '../sim';
-import { EOS_LABELS } from '../eos/eos';
+import { EOS_LABELS, makeEos } from '../eos/eos';
 import { COOLING_LABELS } from '../cooling/cooling';
 import { FAMILIES, FIELDS, GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems';
 import { VIEW_EXTRAS, VIEW_MODES, VIEW_OPTIONS } from '../render/view_options';
 import { API_METHODS } from './api_schema';
-import { defaultFrameDt, problemUnits } from '../problems/types';
+import { defaultFrameDt, problemUnits, type Prim } from '../problems/types';
 import type { ViewState } from '../render/renderer';
 import { COLORMAPS } from '../render/transfer';
 import { overlayGutters, paintOverlays, type OverlayInfo, type OverlayOptions } from '../render/overlays';
@@ -263,8 +266,29 @@ function diagJson(d: Diagnostics) {
   return { ...rest, ranges: Object.fromEntries(ranges.map((r, i) => [FIELDS[i], r])) };
 }
 
-/** The variables a snapshot can be sampled for: the primitives, each species, and `level`. */
-function variableOf(snap: Snapshot, sampler: SnapshotSampler, species: readonly string[], name: string): (p: Point) => number {
+/**
+ * The temperature of a sampled state, in code units, from the run's equation of state: with
+ * each cell's own composition where the species set it (as the shaders' <comp> slot does), from
+ * the density and the pressure. The shaders take it from the energy instead, so the two agree
+ * to within the float32 rounding of the pressure. `kelvin`: kelvin per code unit, as the view's
+ * readout has it, or null for a setup without physical units.
+ */
+function temperatureOf(cfg: SimConfig): { of: (w: Prim) => number; kelvin: number | null } {
+  const p = cfg.problem;
+  const comp = p.composition ?? COMPOSITIONS.solar;
+  const coeffs = problemCoefficients(p, cfg.eosParams.gamma);
+  const zh1 = hydrogenParticles(comp);
+  const uniform = makeEos(cfg.eos, cfg.eosParams);
+  const of = (w: Prim) => {
+    const eos = coeffs ? makeEos(cfg.eos, cfg.eosParams, mixMoments(coeffs, w.X), zh1) : uniform;
+    return eos.temperature(w.rho, eos.eintFromP(w.rho, w.p));
+  };
+  const u = problemUnits(p, cfg.params);
+  return { of, kelvin: u ? kelvinPerCodeT(u, meanMolecularWeight(comp)) : null };
+}
+
+/** The variables a snapshot can be sampled for: the primitives, each species, and DERIVED_VARIABLES. */
+function variableOf(snap: Snapshot, sampler: SnapshotSampler, species: readonly string[], name: string, cfg: SimConfig): (p: Point) => number {
   const prim = (p: Point) => sampler.prim(p[0], p[1], p[2], species);
   switch (name) {
     case 'rho': return (p) => prim(p).rho;
@@ -274,10 +298,20 @@ function variableOf(snap: Snapshot, sampler: SnapshotSampler, species: readonly 
     case 'vel3': return (p) => prim(p).vz;
     case 'r0': return (p) => prim(p).s;
     case 'level': return (p) => sampler.level(p[0], p[1], p[2]);
+    case 'temp': {
+      const T = temperatureOf(cfg);
+      return (p) => T.of(prim(p));
+    }
+    case 'tempK': {
+      const T = temperatureOf(cfg);
+      if (T.kelvin === null) throw new Error('tempK needs a setup with physical units: use temp, in code units');
+      const k = T.kelvin;
+      return (p) => T.of(prim(p)) * k;
+    }
   }
   const k = species.indexOf(name);
   if (k >= 0 && snap.data[name]) return (p) => prim(p).X![k];
-  throw new Error(`unknown variable "${name}": use one of ${[...VARIABLES, 'level', ...species].join(', ')}`);
+  throw new Error(`unknown variable "${name}": use one of ${[...VARIABLES, ...DERIVED_VARIABLES, ...species].join(', ')}`);
 }
 
 export function installApi(app: AppHooks, ready: Promise<void>) {
@@ -884,7 +918,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
           })),
         ),
         fields: FIELDS.map((name, index) => ({ index, name })),
-        variables: [...VARIABLES, 'level'],
+        variables: [...VARIABLES, ...DERIVED_VARIABLES],
         resolutions: app.resolutions(),
         eos: Object.keys(EOS_LABELS),
         cooling: Object.keys(COOLING_LABELS),
@@ -1035,7 +1069,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         const axis = snap.ndim === 2 ? 2 : (opts.axis ?? 2);
         const pos = opts.pos ?? 0.5;
         const res = Math.max(2, Math.min(2048, Math.round(opts.res ?? Math.min(256, app.cfg().n))));
-        const value = variableOf(snap, sampler, species, variable);
+        const value = variableOf(snap, sampler, species, variable, app.cfg());
         const [a, b] = [0, 1, 2].filter((k) => k !== axis);
         // Every variable is read from a float32 array (and level is a small integer), so a
         // Float32Array holds each value exactly, for either encoding.
@@ -1057,15 +1091,23 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         return encoding === 'base64' ? { ...head, array: encodeArray(values, [res, res]) } : { ...head, values: Array.from(values) };
       }),
 
-    /** The primitive state (and refinement level) at points given in fractions of the box. */
+    /**
+     * The primitive state, the temperature (code units, and kelvin with physical units) and the
+     * refinement level at points given in fractions of the box.
+     */
     probe: (points: Point[]) =>
       serial(async () => {
         const { snap, sampler, species } = await sampled();
+        const T = temperatureOf(app.cfg());
         return {
           t: snap.time,
           points: points.map((p) => {
             const w = sampler.prim(p[0], p[1], p[2], species);
-            return { at: p, rho: w.rho, press: w.p, vel: [w.vx, w.vy, w.vz], r0: w.s, level: sampler.level(p[0], p[1], p[2]), ...(w.X ? { X: Object.fromEntries(species.map((k, i) => [k, w.X![i]])) } : {}) };
+            const temp = T.of(w);
+            return {
+              at: p, rho: w.rho, press: w.p, vel: [w.vx, w.vy, w.vz], r0: w.s, temp, ...(T.kelvin !== null ? { tempK: temp * T.kelvin } : {}),
+              level: sampler.level(p[0], p[1], p[2]), ...(w.X ? { X: Object.fromEntries(species.map((k, i) => [k, w.X![i]])) } : {}),
+            };
           }),
         };
       }),

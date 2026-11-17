@@ -39,7 +39,9 @@
   "vel2",
   "vel3",
   "r0",
-  "level"
+  "level",
+  "temp",
+  "tempK"
  ],
  "link": [
   {
@@ -804,7 +806,7 @@
      "properties": {
       "variable": {
        "type": "string",
-       "description": "One of rho, press, vel1, vel2, vel3, r0, level, or the name of a species. Default rho"
+       "description": "One of rho, press, vel1, vel2, vel3, r0, level, temp, tempK, or the name of a species. temp is the temperature in code units, tempK in kelvin (a setup with physical units). Default rho"
       },
       "axis": {
        "type": "integer",
@@ -839,7 +841,7 @@
   },
   {
    "name": "probe",
-   "summary": "The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, refinement level and species mass fractions.",
+   "summary": "The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, temperature (temp in code units; tempK in kelvin, with physical units), refinement level and species mass fractions.",
    "args": [
     {
      "name": "points",
@@ -1155,7 +1157,7 @@
     "properties": {
      "variable": {
       "type": "string",
-      "description": "One of rho, press, vel1, vel2, vel3, r0, level, or the name of a species. Default rho"
+      "description": "One of rho, press, vel1, vel2, vel3, r0, level, temp, tempK, or the name of a species. temp is the temperature in code units, tempK in kelvin (a setup with physical units). Default rho"
      },
      "axis": {
       "type": "integer",
@@ -1192,7 +1194,7 @@
    "name": "probe",
    "method": "probe",
    "brief": "Gives the gas at given points",
-   "description": "The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, refinement level and species mass fractions.",
+   "description": "The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, temperature (temp in code units; tempK in kelvin, with physical units), refinement level and species mass fractions.",
    "inputSchema": {
     "type": "object",
     "properties": {

@@ -231,7 +231,7 @@ Everything there is to choose from:
   null), `tEnd`, `species`, and `params`. Each parameter has `id`, `label`, `value`
   (the default), `min`, `max`, `title`, `live` and `kind`.
 - `fields`: the fields the view can show, as `{ index, name }`.
-- `variables`: what `slice` and `stats` can read.
+- `variables`: what `slice` can read. `stats` reads the first six.
 - `resolutions`: the grid sizes on offer for 2 and 3 dimensions, and `uniformMax`. A larger
   grid must be adaptive, with `amr` of 1 or more.
 - `eos`, `cooling`, `riemann`, `limiter`, `gravity`, `colormaps`: the allowed values.
@@ -439,14 +439,23 @@ const values = new Float32Array(b.buffer, b.byteOffset, b.length / 4); // values
 and in Python, `np.frombuffer(base64.b64decode(a['base64']), '<f4').reshape(a['shape'])`.
 An unknown `encoding` is an error.
 
-A variable can be any of those listed for `stats`, or `level`, the refinement level of the
-block at each point. On an adaptive mesh each sample is taken from the finest block covering
-it. In 2D the axis is always 2.
+A variable can be any of those listed for `stats`, or:
+
+- `level`, the refinement level of the block at each point;
+- `temp`, the temperature in code units, from the run's equation of state (with each cell's
+  composition where the species set it), the density and the pressure. The view computes it
+  from the energy instead; the two agree to within the single-precision rounding of the
+  pressure;
+- `tempK`, the same in kelvin, for a setup with physical units (an error otherwise).
+
+On an adaptive mesh each sample is taken from the finest block covering it. In 2D the axis is
+always 2.
 
 ### `probe(points) → { t, points }`
 
 The state at a list of points `[x, y, z]`. Each point returns `rho`, `press`, `vel` (a 3-vector),
-`r0`, `level`, and `X`, the species' mass fractions by name, when the run has species.
+`r0`, `temp` (and `tempK` with physical units, as for `slice`), `level`, and `X`, the species'
+mass fractions by name, when the run has species.
 
 ### `screenshot({ width?, height?, overlays? }) → string`
 

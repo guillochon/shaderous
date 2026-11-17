@@ -3,7 +3,7 @@
 // tools/headless/schema.json, which `npm run gen` writes and a unit test keeps up to date.
 import { COOLING_LABELS } from '../cooling/cooling';
 import { EOS_LABELS } from '../eos/eos';
-import { VARIABLES } from '../io/snapshot';
+import { DERIVED_VARIABLES, VARIABLES } from '../io/snapshot';
 import { GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
 import { VIEW_EXTRAS, VIEW_OPTIONS, type ViewOption } from '../render/view_options';
 import { API_METHODS } from '../ui/api_schema';
@@ -21,8 +21,8 @@ export function buildSchema() {
       limiter: [...LIMITER_KINDS],
       gravity: [...GRAVITY_MODES],
     },
-    /** what stats, slice and probe can read (besides a species' name) */
-    variables: [...VARIABLES, 'level'],
+    /** what slice and probe can read (besides a species' name); stats reads the first six */
+    variables: [...VARIABLES, ...DERIVED_VARIABLES],
     /** every key of a setup given as a query string or a flat object */
     link: linkKeys().map(({ key, group, about }) => ({ key, group, about })),
     /** every setting of the view, as `view()` names it and as a link does */

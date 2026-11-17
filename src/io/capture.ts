@@ -114,7 +114,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     steps: Math.round(restart.steps),
     levels,
     locations,
-    data: { ...primitivesFrom(cfg, u1, u2), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag },
+    data: { ...primitivesFrom(cfg, u1, u2, X), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag },
     ...(faces ? { faces } : {}),
     meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
   };

@@ -3,6 +3,9 @@ import { defaultEosParams, EOS_MODULES, makeEos, physicalEosParams, type EosKind
 import { assemble } from '../../src/gpu/shaders';
 import { compSlot, compSrcSlot, hydrogenParticles, mixMoments, momentCoefficients, problemCoefficients, speciesNuclides } from '../../src/species/mixture';
 import { bubbleDensity } from '../../src/presets/names';
+import { preset } from '../../src/presets/index';
+import { configFor } from '../../src/sim';
+import { primitivesFrom } from '../../src/io/snapshot';
 import { COMPOSITIONS, composition, meanMolecularWeight, nuclearAverages } from '../../src/units/composition';
 import { flowUnits } from '../../src/units/units';
 
@@ -99,6 +102,25 @@ describe('species that set the equation of state', () => {
       const eint = f * (1 / (5 / 3 - 1)) + (1 - f) * (1 / 0.4); // p = 1 in both
       const eos = makeEos('ideal', params, mixMoments(c, [(f * rhoHe) / rho, (1 - f) / rho]));
       expect(eos.pressure(rho, eint)).toBeCloseTo(1, 12);
+    }
+  });
+
+  it("give a snapshot each cell's own pressure, which a run started from it turns back into its energy", () => {
+    // Quirk & Karni's bubble: helium (gamma 5/3) in air (the reference, 1.4). Two cells at one
+    // internal energy, one of each gas.
+    const cfg = configFor(preset('shock-bubble').problem, 64, { ndim: 2 });
+    const coeffs = problemCoefficients(cfg.problem, cfg.eosParams.gamma)!;
+    const zh1 = hydrogenParticles(cfg.problem.composition);
+    const u1 = new Float32Array([0.2, 0, 0, 0, 1, 0, 0, 0]);
+    const u2 = new Float32Array([2.5, 2.5, 0, 0, 2.5, 2.5, 0, 0]);
+    const X = [new Float32Array([1, 0]), new Float32Array([0, 1])];
+    const w = primitivesFrom(cfg, u1, u2, X);
+    expect(w.press[0]).toBeCloseTo((5 / 3 - 1) * 2.5, 5);
+    expect(w.press[1]).toBeCloseTo((1.4 - 1) * 2.5, 5);
+    for (let i = 0; i < 2; i++) {
+      // As Sim's initial state takes the pressure of a cell back to its energy.
+      const eos = makeEos(cfg.eos, cfg.eosParams, mixMoments(coeffs, [X[0][i], X[1][i]]), zh1);
+      expect(rel(eos.eintFromP(u1[4 * i], w.press[i]), u2[4 * i + 1])).toBeLessThan(1e-6);
     }
   });
 

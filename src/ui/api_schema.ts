@@ -5,7 +5,7 @@
 // in docs/api.md.
 //
 // A page test checks that this names exactly the methods `window.shaderous` has.
-import { VARIABLES } from '../io/snapshot';
+import { DERIVED_VARIABLES, VARIABLES } from '../io/snapshot';
 import { VIEW_EXTRAS, VIEW_OPTIONS } from '../render/view_options';
 
 /** As much of JSON Schema as the arguments need. */
@@ -83,7 +83,7 @@ export const API_METHODS: ApiMethod[] = [
     args: [{
       name: 'options', optional: true, type: 'object',
       properties: {
-        variable: { type: 'string', description: `One of ${[...VARIABLES, 'level'].join(', ')}, or the name of a species. Default rho` },
+        variable: { type: 'string', description: `One of ${[...VARIABLES, ...DERIVED_VARIABLES].join(', ')}, or the name of a species. temp is the temperature in code units, tempK in kelvin (a setup with physical units). Default rho` },
         axis: { type: 'integer', minimum: 0, maximum: 2, description: 'Default 2 (z); always 2 in 2D' },
         pos: { type: 'number', minimum: 0, maximum: 1, description: 'Default 0.5' },
         res: { type: 'integer', minimum: 2, maximum: 2048, description: 'Default: the size of the grid, at most 256 (the MCP tool: 32)' },
@@ -94,7 +94,7 @@ export const API_METHODS: ApiMethod[] = [
   },
   {
     name: 'probe',
-    summary: 'The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, refinement level and species mass fractions.',
+    summary: 'The gas at points given as fractions of the box ([x, y, z], z ignored in 2D): density, pressure, velocity, passive scalar, temperature (temp in code units; tempK in kelvin, with physical units), refinement level and species mass fractions.',
     args: [{ name: 'points', type: 'array', items: { type: 'array', items: { type: 'number' }, minItems: 3, maxItems: 3 }, minItems: 1 }],
     changesRun: false,
   },

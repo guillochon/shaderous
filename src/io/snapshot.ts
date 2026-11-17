@@ -1,12 +1,19 @@
 // The state of the gas as a set of blocks of primitive variables, independent of how a run
 // stores it: what gets written to a file and read back, and how a run is started from one.
 import { makeEos } from '../eos/eos';
+import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
 import type { PointMass, Prim } from '../problems';
 import type { SimConfig } from '../sim';
 import type { DebrisLedger } from '../debris/debris';
 
 export const VARIABLES = ['rho', 'press', 'vel1', 'vel2', 'vel3', 'r0'] as const;
 export type Variable = (typeof VARIABLES)[number];
+/**
+ * What slice() and probe() read besides the stored variables and the species: the refinement
+ * level, and the temperature from the run's equation of state, in code units (temp) and in
+ * kelvin (tempK, for a setup with physical units).
+ */
+export const DERIVED_VARIABLES = ['level', 'temp', 'tempK'] as const;
 
 export interface Snapshot {
   ndim: 2 | 3;
@@ -76,9 +83,17 @@ export const blockCells = (s: Snapshot) => s.blockSize[0] * s.blockSize[1] * s.b
 export const blockCount = (s: Snapshot) => s.levels.length;
 export const maxLevel = (s: Snapshot) => s.levels.reduce((m, l) => Math.max(m, l), 0);
 
-/** Primitive variables from interleaved conserved state (rho, m) and (E, e_int, rho s, 0). */
-export function primitivesFrom(cfg: SimConfig, u1: Float32Array, u2: Float32Array): Record<Variable, Float32Array> {
+/**
+ * Primitive variables from interleaved conserved state (rho, m) and (E, e_int, rho s, 0), and
+ * the species' mass fractions, one array per species. Where the species set the equation of
+ * state, each cell's pressure is its own composition's, as the shaders have it and as a run
+ * started from these primitives turns it back into an energy (Sim's initial state).
+ */
+export function primitivesFrom(cfg: SimConfig, u1: Float32Array, u2: Float32Array, X: readonly Float32Array[] = []): Record<Variable, Float32Array> {
   const eos = makeEos(cfg.eos, cfg.eosParams);
+  const coeffs = X.length ? problemCoefficients(cfg.problem, cfg.eosParams.gamma) : null;
+  const zh1 = hydrogenParticles(cfg.problem.composition);
+  const x = new Array<number>(X.length);
   const count = u1.length / 4;
   const out = Object.fromEntries(VARIABLES.map((v) => [v, new Float32Array(count)])) as Record<Variable, Float32Array>;
   for (let i = 0; i < count; i++) {
@@ -87,7 +102,12 @@ export function primitivesFrom(cfg: SimConfig, u1: Float32Array, u2: Float32Arra
     out.vel1[i] = u1[4 * i + 1] / rho;
     out.vel2[i] = u1[4 * i + 2] / rho;
     out.vel3[i] = u1[4 * i + 3] / rho;
-    out.press[i] = eos.hasEnergy ? eos.pressure(rho, u2[4 * i + 1]) : eos.pressure(rho, 0);
+    let ce = eos;
+    if (coeffs) {
+      for (let s = 0; s < X.length; s++) x[s] = X[s][i];
+      ce = makeEos(cfg.eos, cfg.eosParams, mixMoments(coeffs, x), zh1);
+    }
+    out.press[i] = ce.hasEnergy ? ce.pressure(rho, u2[4 * i + 1]) : ce.pressure(rho, 0);
     out.r0[i] = u2[4 * i + 2] / rho;
   }
   return out;
