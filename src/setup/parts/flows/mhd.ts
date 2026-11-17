@@ -155,4 +155,53 @@ const alfvenWave: FlowDef<{ amp: number; p: number }> = {
   },
 };
 
-export const flows = [orszagTang, rotor, brioWu, fieldLoop, alfvenWave];
+/**
+ * A weak tangled field in the x-y plane, for the turbulence to wind up: A_z a sum of the box's
+ * periodic modes with wavenumbers from 1 to kMax (in box units), each with its own phase from the
+ * seed, sized so the rms in-plane field is amp. A guide field along z alone stays out of the plane
+ * in 2D (the induction equation makes no B_x or B_y from B_z there), so a 2D run with only that
+ * field has no field lines to draw; this gives it some. Only in 2D unless asked: in 3D the gas
+ * bends the guide field itself.
+ */
+const seedField: FlowDef<{ amp: number; kMax: number; seed: number; in3d: boolean }> = {
+  name: 'seed-field',
+  label: 'Weak in-plane field',
+  tip: 'A weak tangled magnetic field in the x-y plane (random modes of the periodic box, from a vector potential A_z), for the flow to stretch and wind up. It adds to the other parts’ fields and leaves the gas as they paint it.',
+  wholeBox: false,
+  fields: {
+    amp: { label: 'Field strength', default: 0.01, min: 0, max: 10, factor: 2, tip: 'The rms of the in-plane field (magnetic pressure is B² / 2)' },
+    kMax: { label: 'Largest wavenumber', default: 3, min: 1, max: 8, step: 1, tip: 'Modes from 1 to this many wavelengths across the box' },
+    seed: { label: 'Seed', default: 1, min: 0, max: 1e6, step: 1, tip: 'Picks the modes’ phases' },
+    in3d: { label: 'Also in 3D', default: false, tip: 'Off, the field is there only in a 2D run' },
+  },
+  potential: (ctx, q) => {
+    if (ctx.ndim === 3 && !q.in3d) return () => [0, 0, 0];
+    // Modes (kx, ky) of the half plane, each once, with a phase from a small hash of the seed.
+    const kMax = Math.max(1, Math.round(q.kMax));
+    const modes: { kx: number; ky: number; ph: number }[] = [];
+    let h = (Math.round(q.seed) * 2654435761) >>> 0 || 1;
+    const rand = () => {
+      h ^= h << 13;
+      h ^= h >>> 17;
+      h ^= h << 5;
+      return (h >>> 0) / 4294967296;
+    };
+    for (let kx = 0; kx <= kMax; kx++)
+      for (let ky = -kMax; ky <= kMax; ky++) {
+        const k2 = kx * kx + ky * ky;
+        if (k2 === 0 || k2 > kMax * kMax || (kx === 0 && ky < 0)) continue;
+        modes.push({ kx, ky, ph: 2 * Math.PI * rand() });
+      }
+    // Each mode's field has amplitude amp sqrt(2 / N): its rms is amp / sqrt(N), and the sum's amp.
+    const b = q.amp * Math.sqrt(2 / modes.length);
+    const w = (2 * Math.PI) / ctx.box;
+    const terms = modes.map((m) => ({ ...m, a: b / (w * Math.hypot(m.kx, m.ky)) }));
+    return (x, y) => {
+      let a = 0;
+      for (const t of terms) a += t.a * Math.cos(w * (t.kx * x + t.ky * y) + t.ph);
+      return [0, 0, a];
+    };
+  },
+};
+
+export const flows = [orszagTang, rotor, brioWu, fieldLoop, alfvenWave, seedField];

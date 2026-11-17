@@ -2776,6 +2776,54 @@
      },
      {
       "type": "object",
+      "title": "Flow: Weak in-plane field",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "seed-field"
+       },
+       "amp": {
+        "type": "number",
+        "title": "Field strength",
+        "default": 0.01,
+        "minimum": 0,
+        "maximum": 10
+       },
+       "kMax": {
+        "type": "number",
+        "title": "Largest wavenumber",
+        "default": 3,
+        "minimum": 1,
+        "maximum": 8
+       },
+       "seed": {
+        "type": "number",
+        "title": "Seed",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 1000000
+       },
+       "in3d": {
+        "type": "boolean",
+        "title": "Also in 3D",
+        "default": false
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A weak tangled magnetic field in the x-y plane (random modes of the periodic box, from a vector potential A_z), for the flow to stretch and wind up. It adds to the other parts’ fields and leaves the gas as they paint it."
+     },
+     {
+      "type": "object",
       "title": "Flow: Rayleigh-Taylor layers",
       "properties": {
        "kind": {

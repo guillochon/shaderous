@@ -5,12 +5,13 @@
   "extends": "driven-turbulence",
   "name": "Driven MHD turbulence",
   "variant": "Magnetic field",
-  "blurb": "The stirred isothermal box threaded by a guide field B0 along z (out of the plane in 2D): the turbulence is Alfvenic, its eddies stretched along the field, and near the subsonic, strong-field limit compressible MHD approaches the reduced MHD of the taranis WebGPU page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html), whose driving this follows.",
+  "blurb": "The stirred isothermal box threaded by a guide field B0 along z (out of the plane in 2D, where a weak tangled field in the plane is added for the eddies to wind up): the turbulence is Alfvenic, its eddies stretched along the field, and near the subsonic, strong-field limit compressible MHD approaches the reduced MHD of the taranis WebGPU page of Mallet & Abraham (alfredmallet.github.io/taranis/webgpu/rmhd2d.html), whose driving this follows.",
   "physics": {
     "floors": { "rho": 1e-6, "p": 1e-6 }
   },
   "parts": [
-    { "kind": "field", "id": "field", "b": [0, 0, 1] }
+    { "kind": "field", "id": "field", "b": [0, 0, 1] },
+    { "kind": "flow", "id": "seed", "name": "seed-field", "amp": 0.1 }
   ],
   "view": { "mode": "slice", "field": 25, "log": false }
 }
