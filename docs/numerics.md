@@ -96,15 +96,15 @@ the smallest of
 
 ```math
 \Delta t = \min\left[
-C\,\frac{\Delta x}{\max\left(|v_d| + c_s + s_\text{diff}\right)},\quad
+C\,\frac{\Delta x}{\max\left[\sum_d\left(|v_d| + c_s\right) + s_\text{diff}\right]},\quad
 C\sqrt{\frac{\Delta x}{\max|\mathbf{g}|}},\quad
 \Delta t_\text{pair},\quad
 \Delta t_\text{max}
 \right],
 ```
 
-where $`C = 0.8`$ is the CFL number, $`c_s`$ the sound speed, and the maximum is over cells and
-axes. Each term is:
+where $`C = 0.8`$ is the CFL number, $`c_s`$ the sound speed, the sum is over the axes (the update is unsplit, so their fluxes add in one
+step), and the maximum is over cells. Each term is:
 
 - **Diffusion** adds a signal speed $`s_\text{diff} = 2.5\,d\,D/\Delta x`$, where $`d`$ is the number of
   dimensions and $`D`$ the larger of $`\tfrac43\nu`$ and the thermal diffusivity ([§11](#11-viscosity-and-thermal-conduction)).
@@ -649,8 +649,9 @@ hydrostatic balance, which slowly cools a star.
    \Delta E_i = -\frac{\Delta t}{2\Delta x}\sum_d\left[F_{i+1/2}\left(\Phi_{i+1} - \Phi_i\right) + F_{i-1/2}\left(\Phi_i - \Phi_{i-1}\right)\right]^{n+1/2}.
    ```
 
-   The same work leaves one cell and enters its neighbor, so total energy (gas plus field) is
-   conserved. It can overheat low-density cells next to a sharp density contrast.
+   Summed over the cells, this work is the negative of the change in $`\sum\rho\Phi`$ that the
+   same mass fluxes cause, so gas plus gravitational energy is conserved to round-off in a fixed
+   potential, and to the accuracy of the solve and of $`\Phi^{n+1/2}`$ with self-gravity. It can overheat low-density cells next to a sharp density contrast.
 2. **Kick form.** Each kick $`\mathbf{k}`$ adds exactly the kinetic energy it creates,
    $`\mathbf{k}\cdot(\mathbf{m} + \mathbf{k}/2)/\rho`$. Gravity then never changes the internal
    energy, but total energy is not conserved where the flow is under-resolved.
@@ -819,9 +820,9 @@ as GADGET-2 ([Springel 2005][Springel2005]).
 - Time advances in **cycles** of up to 8 substeps of the smallest step $`\Delta t_\text{min}`$.
 - At the start of a cycle each block gets a bin $`k`$ from its own signal speed, on the GPU.
   A block in bin $`k`$ advances $`2^k\Delta t_\text{min}`$ at a time.
-- Relaxation sweeps enforce three rules: face neighbors are at most one bin apart, a block
-  next to a faster block steps as fast as it, and a block is never slower than a coarser
-  neighbor.
+- A first sweep lowers every block to the bin of its fastest face neighbor (once, so each fast
+  region widens by one block). Further sweeps enforce two rules: face neighbors are at most
+  one bin apart, and a block is never slower than a coarser neighbor.
 - Across a face whose other side steps twice as often, the slower block takes the faster side's
   fluxes, recomputed from stored states: half when its own step starts and half at its
   midpoint. A faster block reads a slower neighbor that is part way through its step from that
@@ -1282,9 +1283,8 @@ exactly to the Godunov flux. So this is a property of the scheme, not a bug.
 
 **Lee's upwind averaging, tried.** [Lee (2013)][Lee13] argues that for flow mostly along one
 axis the edge estimates from faces downstream of the edge carry no information about it, and
-keeps only the upwind ones (upwind-MEC). The edge pass has that selection as an option
-(`EDGE_UPWIND`, `setMhdEdge('upwind')` in `mhd/mhd.ts`), applied to Gardiner & Stone's four
-estimates. Against the mean, at $`t = 1`$:
+keeps only the upwind ones (upwind-MEC). That selection was built as an option of the edge
+pass, applied to Gardiner & Stone's four estimates. Against the mean, at $`t = 1`$:
 
 | Field loop | Mean | Upwind |
 | --- | --- | --- |
@@ -1300,11 +1300,8 @@ worse, and the mean shows no small-angle trouble here.
 [Lee & Deane (2009)][LD09], not Gardiner & Stone's. Each face's field is carried to the edge by
 a Taylor series, $`E + \tfrac{\Delta}{2}E' + \tfrac{\Delta^2}{8}E''`$, with central differences
 of the face values along their line (their eqs. 54 to 59). That is the parabola through three
-faces in a row, $`(6E_j + 3E_{
-m toward} - E_{
-m away})/8`$. Both are options on the uniform
-grid (`setMhdEdge('mec')` and `'upwind-mec'`). They need the faces two along each line, so the
-flux buffers hold a second ghost row. The four constructions at $`t = 1`$:
+faces in a row, $`(6E_j + 3E_{\rm toward} - E_{\rm away})/8`$. Both were built as options on
+the uniform grid; they need the faces two along each line. The four constructions at $`t = 1`$:
 
 | Field loop | GS05 mean | GS05 upwind | LD09 MEC | Lee upwind-MEC |
 | --- | --- | --- | --- | --- |
@@ -1317,9 +1314,9 @@ flux buffers hold a second ghost row. The four constructions at $`t = 1`$:
 Orszag-Tang and the Alfvén wave move by under 0.2% in every column. Lee's full upwind-MEC is
 the least dissipative. In the small-angle case it was designed for, it also keeps the loop's
 shape best, with the least stray field and the smallest interior error. But it raises the peak
-overshoot, and at 45° the plain mean is cleaner on every shape measure. The default stays the
-mean (Gardiner & Stone, as Athena++). The block grid has the mean and the upwind selection only
-(its flux box holds one ghost row).
+overshoot, and at 45° the plain mean is cleaner on every shape measure. The code keeps only the
+mean (Gardiner & Stone, as Athena++); the other three were removed in November 2026 and are in
+the history (commit 9513236).
 
 ## 22. Validation
 

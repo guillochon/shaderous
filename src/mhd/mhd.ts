@@ -165,24 +165,6 @@ interface MhdDeps {
   massFlux?: GPUBuffer;
 }
 
-/**
- * How the edge fields are formed (mhd/corner.wgsl), from estimates carried to the edge from the
- * four faces around it:
- *   'mean'        Gardiner & Stone (2005), as Athena++ does it: the mean of their estimates
- *   'upwind'      Lee (2013)'s upwind selection of those same estimates
- *   'mec'         Lee & Deane (2009): the mean of Taylor estimates with central derivatives
- *                 along each line of faces
- *   'upwind-mec'  Lee (2013): the upwind selection of Lee & Deane's estimates
- * The last two are on the uniform grid only.
- */
-export type EdgeScheme = 'mean' | 'upwind' | 'mec' | 'upwind-mec';
-const EDGE_MODES: Record<EdgeScheme, number> = { mean: 0, upwind: 1, mec: 2, 'upwind-mec': 3 };
-let edgeScheme: EdgeScheme = 'mean';
-/** Change it for runs built from now on (comparisons and tests). */
-export function setMhdEdge(e: EdgeScheme) {
-  edgeScheme = e;
-}
-
 /** Bytes the flux and edge buffers of one slab may take, which sets how many layers it has. */
 let slabBytes = 192 * 1024 ** 2;
 /** Change it for runs built from now on (validation: many thin slabs on a small grid); null restores the default. */
@@ -270,14 +252,12 @@ export class MhdPasses {
   private async build(rates: GPUBuffer) {
     const { device: d, cfg, params, clock, state, half, comp } = this.dep;
     const slots = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg) };
-    // The edge scheme is compiled in (mhd/corner.wgsl), so the others are not compiled at all.
-    const edgeSlots = { ...slots, edge_mode: `const EDGE_MODE: u32 = ${EDGE_MODES[edgeScheme]}u;\n` };
     const v = (t: GPUTexture) => t.createView();
     const [f1, f2, e1, e2, u1, u2, prates, red] = await Promise.all([
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 2', { STAGE: 2 }),
-      computePipeline(d, assemble('mhd/emf.wgsl', edgeSlots), 'edge impulses 1', { STAGE: 1 }),
-      computePipeline(d, assemble('mhd/emf.wgsl', edgeSlots), 'edge impulses 2', { STAGE: 2 }),
+      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 1', { STAGE: 1 }),
+      computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD update 2', { STAGE: 2, SPECIES_FLUX: this.dep.massFlux ? 1 : 0 }),
       computePipeline(d, assemble('mhd/rates.wgsl', slots), 'MHD timestep rates'),
@@ -312,9 +292,11 @@ export class MhdPasses {
         perSlab((sb) => bindGroup(d, f1, { 0: params, 1: clock, ...start, ...fl, 14: sb, ...comp, ...startAgain })),
         perSlab((sb) => bindGroup(d, f2, { 0: params, 1: clock, ...mid, ...fl, 14: sb, ...comp, ...startAgain })),
       ]);
+      // The edges read the density, momentum and faces alone (mhd/emf.wgsl): not the energy (3)
+      // nor, as they run no equation of state, the composition.
       this.gEmf.push([
-        perSlab((sb) => bindGroup(d, e1, { 0: params, 1: clock, ...start, ...fl, 8: this.emf, 14: sb, ...comp })),
-        perSlab((sb) => bindGroup(d, e2, { 0: params, 1: clock, ...mid, ...fl, 8: this.emf, 14: sb, ...comp })),
+        perSlab((sb) => bindGroup(d, e1, { 0: params, 1: clock, 2: start[2], 4: start[4], ...fl, 8: this.emf, 14: sb })),
+        perSlab((sb) => bindGroup(d, e2, { 0: params, 1: clock, 2: mid[2], 4: mid[4], ...fl, 8: this.emf, 14: sb })),
       ]);
       // Stage 1 writes the half-step state, so its unused half-step inputs (12, 13) take the
       // start's, and its unused compensation output (16) the other parity's, which stage 2

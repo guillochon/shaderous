@@ -8,9 +8,9 @@
 struct Slab { z0: i32, nz: i32, last: u32, unused: u32 }
 
 // The flux grid: cells t in [-2, n + 1] along x and y, and in [z0 - 2, z0 + nz + 1] along z
-// (the single layer in 2D), three vec4 per entry (mhd/flux.wgsl). Two rows beyond the grid: the
-// edge fields need the faces of one, and Lee & Deane's estimates (mhd/corner.wgsl) one more
-// along each line of faces.
+// (the single layer in 2D), three vec4 per entry (mhd/flux.wgsl). The edge fields need the faces
+// of one row beyond the grid; the second row held the faces Lee & Deane's edge estimates read,
+// which were removed (docs/numerics.md section 21), and nothing reads it now.
 fn flux_dims() -> vec3<i32> {
   let n = vec3<i32>(P.dims.xyz);
   return vec3<i32>(n.xy + 4, select(SLAB.nz + 4, 1, n.z == 1));

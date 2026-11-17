@@ -18,6 +18,7 @@
 #include "hydro/prim.wgsl"
 
 @group(0) @binding(2) var U1: texture_3d<f32>;
+// Declared for mhd/common.wgsl's mq_load, which this pass does not call: not bound (mhd/mhd.ts).
 @group(0) @binding(3) var U2: texture_3d<f32>;
 @group(0) @binding(4) var BF: texture_3d<f32>;
 @group(0) @binding(5) var<storage, read> FX: array<vec4<f32>>;
@@ -41,18 +42,13 @@ fn fc(a: i32, t: vec3<i32>) -> vec3<f32> {
   return FZ[i].xyz;
 }
 
-// The mean of the estimates (EDGE_MODE 0 and 2) needs only -v x B of the cells; the upwind
-// selections their sound speed too, which takes the equation of state (mq_load). The velocity
-// is the same either way (hydro/prim.wgsl), and so is the result, bit for bit.
+// The edges need only -v x B of the cells, not the equation of state that mq_load runs. The
+// velocity is the same either way (hydro/prim.wgsl).
 fn eref(c: vec3<i32>) -> Ref {
-  if (EDGE_MODE == 0u || EDGE_MODE == 2u) {
-    let m = bc_map(c);
-    let u = textureLoad(U1, m.c, 0);
-    let v = bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
-    return Ref(efield(v, bcell(m.c) * m.flip), v, 0.0);
-  }
-  let q = mq_load(c);
-  return Ref(efield(q.a.yzw, q.B), q.a.yzw, q.b.z);
+  let m = bc_map(c);
+  let u = textureLoad(U1, m.c, 0);
+  let v = bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
+  return Ref(efield(v, bcell(m.c) * m.flip));
 }
 
 @compute @workgroup_size(8, 8, 4)

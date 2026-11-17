@@ -52,7 +52,6 @@ export const strongShock = tube('strong-shock');
 /** Sedov-Taylor similarity constant: R(t) = xi0 (E t^2 / rho)^(1/5). */
 export const SEDOV_XI0: Record<string, number> = { '1.4': 1.033, '1.6667': 1.152 };
 export const sedov = problem('sedov');
-export const sedovRad = problem('sedov-rad');
 
 const sphereRegion = spec('sphere').parts![0] as RegionPart;
 /** The uniform sphere: its radius and density, G, and the density around it. */

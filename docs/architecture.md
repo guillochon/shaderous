@@ -491,10 +491,8 @@ The generator is the unit test `tests/unit/generated.test.ts` run with a flag: r
 tables above, run `npm run gen` and commit what it changes. A new generated block is a
 function in `src/schema/docs.ts` and a pair of markers where it should appear.
 
-The presets were hand-written TypeScript objects until November 2026. Those objects live on in
-`tests/legacy/`, and `tests/unit/presets.test.ts` holds every compiled preset to them: the
-configuration field by field, and the initial state, point masses, settling and magnetic
-potential bit for bit at sampled points in 2D and 3D, also with other parameter values.
+The presets were hand-written TypeScript objects until November 2026. Every preset file was
+held bit for bit to the object it replaced before those objects were retired.
 
 ## Input, output and links
 

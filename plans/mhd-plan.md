@@ -7,8 +7,8 @@ one slab of z layers at a time (80 bytes per cell more than hydro), a float64 CP
 snapshots that restart a magnetized run exactly, display fields and diagnostics, eight
 validation tests. Known: the field loop's |B| overshoots on its leading edge (8% at 128^2),
 a property of the GS05 edge fields as Athena++ implements them. Lee's upwind selection and
-Lee & Deane's (2009) Taylor estimates were tried, both alone and as Lee's full upwind-MEC. These
-are options, off by default. Upwind-MEC dissipates least and keeps the small-angle loop best, but
+Lee & Deane's (2009) Taylor estimates were tried, both alone and as Lee's full upwind-MEC, then
+removed (November 2026); the mean stays. Upwind-MEC dissipates least and keeps the small-angle loop best, but
 it raises the |B| overshoot (numerics.md section 21). Gravity, point masses, species, cooling and diffusion
 are refused with a field until phase 4.
 

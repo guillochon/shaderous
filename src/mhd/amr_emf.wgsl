@@ -35,7 +35,7 @@ var<private> g_o: vec3<i32>;
 
 fn eref(l: vec3<i32>) -> Ref {
   let q = mq_block(g_o, l);
-  return Ref(efield(q.a.yzw, q.B), q.a.yzw, q.b.z);
+  return Ref(efield(q.a.yzw, q.B));
 }
 
 @compute @workgroup_size(FLAT_WG)
