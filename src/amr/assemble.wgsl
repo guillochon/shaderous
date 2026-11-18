@@ -63,7 +63,11 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
     // An interior cell is its own source (u_near of the center is u_at's value exactly).
     if (mid) { v[k] = MaybeCons(mid_cons(cs, at), true); } else { v[k] = u_near(cs, at); }
   }
-  return prolong(v[0].u, v[1], v[2], v[3], v[4], v[5], v[6], gf & vec3<i32>(1));
+  if (cylindrical()) { g_cyl_ic = f32(gc.x) + 0.5; }
+  if (spherical()) { g_sph_pro = sph_centroid(bt(cs, 0u), gc.xy); }
+  let u = prolong(v[0].u, v[1], v[2], v[3], v[4], v[5], v[6], gf & vec3<i32>(1));
+  g_cyl_ic = 0.0;
+  return u;
 }
 
 @compute @workgroup_size(FLAT_WG)
@@ -100,12 +104,25 @@ fn main(
       let depth = select(BS, 1, is2d());
       if (all(inv.l >= vec3<i32>(0)) && all(inv.l < vec3<i32>(BS, BS, depth)) && blk_leaf(inv.slot) && !solid) {
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
-        let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
+        var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
+        // A spherical run: per axis over its own cell length (hydro/rates.wgsl).
+        var geo = 0.0;
+        if (cylindrical()) {
+          let t = cyl_dt_terms(w.w1.yzw, w.w2.y, blk_pos(inv.slot, inv.l).x / g_dx, g_dx);
+          rate += t.x;
+          geo = t.y;
+        }
+        if (spherical()) {
+          let sg = blk_sph(inv.slot, inv.l);
+          let h = sph_rate_h(sg);
+          rate = (abs(w.w1.y) + w.w2.y) * h.x + (abs(w.w1.z) + w.w2.y) * h.y;
+          geo = sph_accel(sg, w.w1.yzw, g_dx);
+        }
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
         g += ext_accel(blk_pos(inv.slot, inv.l));
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
-        atomicMax(&wg_max[1], bitcast<u32>(length(g) / g_dx));
+        atomicMax(&wg_max[1], bitcast<u32>((length(g) + geo) / g_dx));
       }
     }
   }

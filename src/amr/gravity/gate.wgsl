@@ -25,6 +25,8 @@ override TOL: f32 = 1e-4;
 override PROGRESS: f32 = 0.5;
 // Only record the residual (measured before the first cycle, which always runs).
 override RECORD: bool = false;
+// A 2D mesh: four blocks to a quad along z (amr/gravity/common.wgsl, g_inv2d).
+override FLAT: bool = false;
 
 fn put(i: u32, x: u32, y: u32, z: u32) {
   ARGS[3u * i] = x;
@@ -51,6 +53,20 @@ fn main() {
   let run = measured && rel > TOL && rel < PROGRESS * prev;
   let n = select(0u, LIST[0], run);
   if (run) { STATS[0] += 1u; }
+  if (FLAT) {
+    // Quads in slabs of SLAB_QUADS along z (amr/dispatch.ts, gravityCells2d and gravityColor2d).
+    let q = (n + 3u) / 4u;
+    let mq = min(q, SLAB_QUADS);
+    let sq = select(0u, (q + SLAB_QUADS - 1u) / SLAB_QUADS, run);
+    for (var k = 0u; k < 5u; k++) {
+      let b = 16u >> k;
+      let gy = select(0u, (b + 7u) / 8u, run);
+      put(k, mq * (max(b, 8u) / 8u), gy, sq);
+      put(5u + k, (mq * max(b / 2u, 1u) + 7u) / 8u, gy, sq);
+    }
+    put(10u, select(0u, 2u, run), min(n, FLAT_ROWS), (n + FLAT_ROWS - 1u) / FLAT_ROWS);
+    return;
+  }
   // In slabs of SLAB_BLOCKS stacked along z, as AmrGravity sizes them (amr/dispatch.ts).
   let m = min(n, SLAB_BLOCKS);
   let slabs = (n + SLAB_BLOCKS - 1u) / SLAB_BLOCKS;

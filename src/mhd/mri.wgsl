@@ -7,6 +7,7 @@
 // above some 20. Where the field dominates the gas (beta below 1, a magnetized corona) the MRI
 // does not grow and Q means nothing: it is 0 there. Requires P, gravity/bh.wgsl and a binding
 // BH: Masses.
+#include "gravity/rot.wgsl"
 struct Cyl {
   er: vec3<f32>,     // unit vector away from the mass's axis
   ephi: vec3<f32>,   // unit vector along the orbit
@@ -14,8 +15,10 @@ struct Cyl {
   omega: f32,        // softened Keplerian angular velocity there
 }
 
-// The cylinder about the first mass at x (relative to the box center).
+// The cylinder about the first mass at x (relative to the box center). In a shearing box
+// (P.shear) the local frame instead: x radial, y along the orbit, its angular velocity Omega.
 fn disk_cyl(x: vec3<f32>) -> Cyl {
+  if (P.shear.w != 0.0) { return Cyl(vec3<f32>(1.0, 0.0, 0.0), vec3<f32>(0.0, 1.0, 0.0), 1.0, P.shear.x); }
   let m = BH.list[0];
   let d = x - m.pos.xyz;
   let R = max(length(d.xy), 1.0e-6);
@@ -27,7 +30,7 @@ fn disk_cyl(x: vec3<f32>) -> Cyl {
 // (Q_z, Q_phi) of a cell of size dx at x with field B, density rho and pressure p; zero without
 // a mass, and where beta = 2p / B^2 is below 1.
 fn mri_quality(B: vec3<f32>, rho: f32, p: f32, x: vec3<f32>, dx: f32) -> vec2<f32> {
-  if (mass_count() == 0u || 2.0 * p < dot(B, B)) { return vec2<f32>(0.0); }
+  if ((mass_count() == 0u && P.shear.w == 0.0) || 2.0 * p < dot(B, B)) { return vec2<f32>(0.0); }
   let c = disk_cyl(x);
   let s = 6.28318531 / (sqrt(max(rho, P.rho_floor)) * c.omega * dx);
   return vec2<f32>(abs(B.z), abs(dot(B, c.ephi))) * s;
@@ -60,6 +63,26 @@ const DISK_CHANNELS = 5 + 4 * DISK_BINS;
 fn disk_channels(B: vec3<f32>, rho: f32, mom: vec3<f32>, p: f32, x: vec3<f32>, dx: f32, dv: f32) -> array<f32, DISK_CHANNELS> {
   var r: array<f32, DISK_CHANNELS>;
   for (var i = 0; i < DISK_CHANNELS; i++) { r[i] = 0.0; }
+  // A shearing box: every cell (within two scale heights of the midplane if stratified), its
+  // velocity measured from the background flow v_y = -q Omega x, in one annulus.
+  if (P.shear.w != 0.0) {
+    if (P.shear.z != 0.0 && abs(x.z) > 2.0 * eos_sound_speed(max(rho, P.rho_floor), p) / P.shear.x) { return r; }
+    r[0] = -B.x * B.y * dv;
+    r[1] = p * dv;
+    if (2.0 * p >= dot(B, B)) {
+      let q = mri_quality(B, rho, p, x, dx);
+      r[2] = rho * q.x * dv;
+      r[3] = rho * q.y * dv;
+      r[4] = rho * dv;
+    }
+    let v = mom / max(rho, P.rho_floor);
+    let w = v.y + P.shear.y * P.shear.x * x.x;
+    r[5] = rho * v.x * w * dv;
+    r[6] = rho * v.x * dv;
+    r[7] = rho * w * dv;
+    r[8] = rho * dv;
+    return r;
+  }
   if (mass_count() == 0u) { return r; }
   let c = disk_cyl(x);
   let span = disk_span();
@@ -74,7 +97,10 @@ fn disk_channels(B: vec3<f32>, rho: f32, mom: vec3<f32>, p: f32, x: vec3<f32>, d
     r[3] = rho * q.y * dv;
     r[4] = rho * dv;
   }
-  let v = mom / max(rho, P.rho_floor) - BH.list[0].vel.xyz;
+  var v = mom / max(rho, P.rho_floor) - BH.list[0].vel.xyz;
+  // In a rotating frame (gravity/rot.wgsl), the velocity about the mass as an inertial
+  // observer sees it.
+  if (rot_on()) { v += cross(P.rot.xyz, x - BH.list[0].pos.xyz); }
   let vr = dot(v, c.er);
   let vphi = dot(v, c.ephi) - c.R * c.omega;
   let b = min(i32(f32(DISK_BINS) * log(c.R / span.x) / log(span.y / span.x)), DISK_BINS - 1);

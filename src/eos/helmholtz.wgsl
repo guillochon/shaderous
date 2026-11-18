@@ -42,7 +42,6 @@ const EOS_KEEP_TOTAL = true;
 const HK: f32 = 1.380649e-16;
 const HMU: f32 = 1.6605390666e-24;
 const HMEC2: f32 = 8.1871057769e-7;
-const HARAD: f32 = 7.565723e-15;
 const HLN10: f32 = 2.30258509;
 // 2 pi m_e k / h^2, cgs
 const HNQ: f32 = 1.79988e10;
@@ -278,6 +277,22 @@ fn helm_cold(rho: f32) -> vec3<f32> {
   return r;
 }
 
+// a T^4 / rho (erg/g), in factors that stay inside single precision in any order: T^4 itself
+// passes its 3.4e38 limit above 4.3e9 K, and a compiler allowed to reassociate (Metal's fast
+// math, on Apple GPUs) forms it first from a T T T T, which turned all hot gas into NaN.
+const HARAD36: f32 = 7.565723e21;   // a = 7.565723e-15 erg/cm^3/K^4, times 1e36
+fn helm_rad(T: f32, rho: f32) -> f32 {
+  let t9 = T * 1e-9;
+  return HARAD36 / rho * (t9 * t9) * (t9 * t9);
+}
+// The thermal part of c^2 = (dp/drho)_T + T (dp/dT)_rho^2 / (rho^2 c_v), per unit mass, in
+// code units. Converted before squaring: (dp/dlnT) / rho reaches 1e28 erg/g in hot thin gas,
+// and its square would overflow wherever the compiler multiplies before it divides.
+fn helm_c2(t: HelmThermo) -> f32 {
+  let dq = t.dpr / P.eos.y;
+  return t.dprho / P.eos.y + dq * (dq / (t.de / P.eos.y));
+}
+
 // Everything above the zero-temperature matter, per unit mass, at density rho (g/cm^3) and
 // ln T, with Ye and ions per atomic mass unit ia:
 //   e (erg/g), p / rho, de/dln T, d(p/rho)/dln T at fixed rho, dp/drho at fixed T.
@@ -288,7 +303,7 @@ fn helm_thermo(rho: f32, lnT: f32, ye: f32, ia: f32) -> HelmThermo {
   let pp = helm_pairs(lt, rho);
   let sm = ye * HK * T / HMU;           // n k T / rho
   let im = ia * HK * T / HMU;           // n_i k T / rho
-  let rm = HARAD * T * T * T * T / rho; // a T^4 / rho
+  let rm = helm_rad(T, rho);            // a T^4 / rho
   var r: HelmThermo;
   r.e = pp.x * (pp.y - 1.0) - sm * hh.ht + 1.5 * im + rm;
   r.de = pp.x * (pp.y * pp.y - pp.y + pp.z) - sm * (hh.ht + hh.htt) + 1.5 * im + 4.0 * rm;
@@ -334,7 +349,7 @@ fn helm_fd(rho: f32, at: HelmAt, lnT: f32, ye: f32, ia: f32, byP: bool, cs: vec3
   let pp = helm_pairs(lt, rho);
   let sm = ye * HK * T / HMU;
   let im = ia * HK * T / HMU;
-  let rm = HARAD * T * T * T * T / rho;
+  let rm = helm_rad(T, rho);
   var r: vec2<f32>;
   if (byP) {
     r = vec2<f32>(pp.x + sm * h.x + im + rm / 3.0, pp.x * pp.y + sm * (h.x + h.y) + im + 4.0 * rm / 3.0);
@@ -437,7 +452,7 @@ fn eos_sound_speed(rho: f32, p: f32) -> f32 {
   if (lnT > -1e29) {
     let t = helm_thermo(rc, lnT, ye, ia);
     // c^2 = (dp/drho)_T + T (dp/dT)_rho^2 / (rho^2 c_v), all per unit mass.
-    c2 += (t.dprho + t.dpr * (t.dpr / t.de)) / P.eos.y;
+    c2 += helm_c2(t);
   }
   return sqrt(c2);
 }
@@ -469,7 +484,7 @@ fn eos_face(rho: f32, p: f32) -> vec2<f32> {
   let lnT = helm_solve(rc, goal, ye, ia, true);
   if (lnT > -1e29) {
     let t = helm_thermo(rc, lnT, ye, ia);
-    c2 += (t.dprho + t.dpr * (t.dpr / t.de)) / P.eos.y;
+    c2 += helm_c2(t);
     eth = (t.e + t.de * helm_fix(t, goal, true, lnT)) * rho / P.eos.y;
   }
   return vec2<f32>(sqrt(c2), d.y + eth);
@@ -488,7 +503,7 @@ fn eos_prim(rho: f32, eint: f32) -> vec2<f32> {
   let lnT = helm_solve(rc, goal, ye, ia, false);
   if (lnT > -1e29) {
     let t = helm_thermo(rc, lnT, ye, ia);
-    c2 += (t.dprho + t.dpr * (t.dpr / t.de)) / P.eos.y;
+    c2 += helm_c2(t);
     pth = (t.pr + t.dpr * helm_fix(t, goal, false, lnT)) * rho / P.eos.y;
   }
   return vec2<f32>(d.x + pth, sqrt(c2));

@@ -12,8 +12,15 @@
 // cooling.
 const COOL_SUBSTEPS = 12;
 
+// Comoving coordinates (src/cosmo.ts): the state's densities are comoving, a^3 times the proper
+// ones (cosmo_a3, hydro/common.wgsl), and a cooling function's rate is per unit proper volume at
+// the proper density: the comoving rate is a^3 times it. The temperature comes from the
+// equation of state, whose comoving wrappers (src/eos/eos.ts) convert likewise.
 fn cool_edot(rho: f32, eint: f32) -> f32 {
-  return cool_rate(rho, eos_temperature(rho, eint));
+  let T = eos_temperature(rho, eint);
+  let s = cosmo_a3();
+  if (s == 1.0) { return cool_rate(rho, T); }
+  return s * cool_rate(rho / s, T);
 }
 
 fn apply_cooling(st: NewState, dt: f32) -> NewState {

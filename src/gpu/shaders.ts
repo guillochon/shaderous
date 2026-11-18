@@ -14,8 +14,13 @@ for (const [k, v] of Object.entries(raw)) shaderFiles[k.replace(/^\.\.\//, '').r
 // species say otherwise.
 const DEFAULT_SLOTS: Slots = {
   comp: 'eos/comp_off.wgsl',
+  // A spherical run's geometry is compiled in only where it is one (hydroSlots), so that every
+  // other run's shaders are what they were before it, bit for bit (hydro/common.wgsl).
+  geometry: 'const SPHERICAL = false;\n',
   comp_src: 'amr/comp_src_off.wgsl',
   debris: 'debris/debris_off.wgsl',
+  // An inertial frame (gravity/frame_off.wgsl) unless hydroSlots says otherwise.
+  frame: 'gravity/frame_off.wgsl',
   volume: 'render/volume_uniform.wgsl',
   flag_species: 'fn species_indicator(c: vec3<i32>) -> f32 { return 0.0; }\n',
   flag_burn: 'fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 { return 0.0; }\n',

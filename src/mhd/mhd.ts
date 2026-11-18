@@ -8,6 +8,7 @@
 // The magnetic field lives on the faces of the cells (mhd/common.wgsl); the conserved state
 // keeps its layout, with the magnetic energy B^2 / 2 in the total energy. The half-step state
 // uses the hydro predictor's two textures and a face texture of its own.
+import { domainLo } from '../domain';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
@@ -27,7 +28,10 @@ export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/
  */
 export function mhdUnsupported(c: SimConfig): string | null {
   // Gravity, point masses, cooling, species, viscosity and conduction all act on a field
-  // (docs/numerics.md section 21).
+  // (docs/numerics.md section 21). Obstacles and inflows do not: the MHD fluxes know no solid or
+  // fixed cell (mhd/flux.wgsl), and gas flowed into an obstacle (a random setup gained 0.14% of
+  // its mass in 200 steps between walls).
+  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'obstacle' || p.kind === 'inflow')) return 'obstacles and inflows are not available with a magnetic field yet';
   return null;
 }
 
@@ -84,7 +88,7 @@ export function magneticFrom(r: Float32Array, disk = false): MagDiagnostics {
  */
 export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): Float32Array {
   const spec = c.problem.mhd!;
-  const half = c.problem.box / 2;
+  const dlo = domainLo(c);
   const fx = n + 1;
   const fz = nz === 1 ? 1 : nz + 1;
   const out = new Float32Array(fx * fx * fz * 4);
@@ -95,15 +99,16 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
     return f;
   }
   // Face (lower) and center positions along an axis.
-  const lo = (i: number) => i * dx - half;
-  const mid = (i: number) => (i + 0.5) * dx - half;
-  const zc = (k: number) => (flat ? 0 : mid(k));
-  const zl = (k: number) => (flat ? 0 : lo(k));
+  const lo = (i: number, a: number) => i * dx + dlo[a];
+  const mid = (i: number, a: number) => (i + 0.5) * dx + dlo[a];
+  const zc = (k: number) => (flat ? 0 : mid(k, 2));
+  const zl = (k: number) => (flat ? 0 : lo(k, 2));
   if (spec.potential) {
+    const cyl = c.problem.geometry === 'cylindrical';
     const A = spec.potential(c.params, c.ndim);
-    const ax = (i: number, j: number, k: number) => A(mid(i), lo(j), zl(k))[0];
-    const ay = (i: number, j: number, k: number) => A(lo(i), mid(j), zl(k))[1];
-    const az = (i: number, j: number, k: number) => A(lo(i), lo(j), zc(k))[2];
+    const ax = (i: number, j: number, k: number) => A(mid(i, 0), lo(j, 1), zl(k))[0];
+    const ay = (i: number, j: number, k: number) => A(lo(i, 0), mid(j, 1), zl(k))[1];
+    const az = (i: number, j: number, k: number) => A(lo(i, 0), lo(j, 1), zc(k))[2];
     for (let k = 0; k < fz; k++)
       for (let j = 0; j < fx; j++)
         for (let i = 0; i < fx; i++) {
@@ -111,7 +116,10 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
           const dzAy = flat ? 0 : ay(i, j, k + 1) - ay(i, j, k);
           const dzAx = flat ? 0 : ax(i, j, k + 1) - ax(i, j, k);
           out[o] = (az(i, j + 1, k) - az(i, j, k) - dzAy) / dx;
-          out[o + 1] = (dzAx - (az(i + 1, j, k) - az(i, j, k))) / dx;
+          // An axisymmetric run's B_z = (1/R) d(R A_phi) / dR, its edges weighed by their radii
+          // over the face's (as mhd/update.wgsl evolves it), so that the cylindrical divergence
+          // starts at round-off.
+          out[o + 1] = cyl ? (dzAx - ((i + 1) * az(i + 1, j, k) - i * az(i, j, k)) / (i + 0.5)) / dx : (dzAx - (az(i + 1, j, k) - az(i, j, k))) / dx;
           out[o + 2] = (ay(i + 1, j, k) - ay(i, j, k) - (ax(i, j + 1, k) - ax(i, j, k))) / dx;
         }
   }
@@ -123,7 +131,7 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
       for (let j = 0; j < fx; j++)
         for (let i = 0; i < fx; i++) {
           const o = 4 * ((k * fx + j) * fx + i);
-          const f = [F(0, lo(i), mid(j), zc(k)), F(1, mid(i), lo(j), zc(k)), F(2, mid(i), mid(j), zl(k))];
+          const f = [F(0, lo(i, 0), mid(j, 1), zc(k)), F(1, mid(i, 0), lo(j, 1), zc(k)), F(2, mid(i, 0), mid(j, 1), zl(k))];
           for (let a = 0; a < 3; a++) out[o + a] = both ? out[o + a] + f[a] : f[a];
         }
   }
@@ -195,6 +203,10 @@ export class MhdPasses {
   private pFlux: GPUComputePipeline[] = [];
   private pEmf: GPUComputePipeline[] = [];
   private pUpdate: GPUComputePipeline[] = [];
+  /** A shearing box (mhd/shear.wgsl): [stage][mode] pipelines, [parity][stage][mode][slab] bind groups. */
+  private shearScratch?: GPUBuffer;
+  private pShear: GPUComputePipeline[][] = [];
+  private gShear: GPUBindGroup[][][][] = [];
   pRates!: GPUComputePipeline;
   /** [parity][stage][slab] bind groups of each pass */
   private gFlux: GPUBindGroup[][][] = [];
@@ -237,6 +249,9 @@ export class MhdPasses {
     const flux = (n + 4) * (n + 4) * (nz === 1 ? 1 : S + 4) * 3 * 16;
     for (let a = 0; a < 3; a++) m.flux.push(d.createBuffer({ label: `MHD fluxes ${'xyz'[a]}`, size: flux, usage: GPUBufferUsage.STORAGE }));
     m.emf = d.createBuffer({ label: 'edge impulses', size: (n + 1) * (n + 1) * (nz === 1 ? 1 : S + 1) * 16, usage: GPUBufferUsage.STORAGE });
+    // A shearing box: the means of the two x planes' faces and edges (mhd/shear.wgsl), two vec4
+    // per (side, layer, row).
+    if (dep.cfg.problem.shear) m.shearScratch = d.createBuffer({ label: 'shearing box planes', size: 2 * (n + 1) * (nz === 1 ? 1 : S + 1) * 2 * 16, usage: GPUBufferUsage.STORAGE });
     for (let z0 = 0; z0 < nz; z0 += S) {
       const k = Math.min(S, nz - z0);
       const buf = d.createBuffer({ label: `MHD slab ${z0}`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -286,6 +301,9 @@ export class MhdPasses {
         bindGroup(d, be, { 0: params, 2: v(this.faces[p]), 6: v(this.faces[o]), 7: v(state[p][0]), 8: v(state[p][1]), 9: v(state[o][0]), 10: v(state[o][1]) }),
       ];
     });
+    if (this.shearScratch) {
+      this.pShear = await Promise.all([1, 2].map((st) => Promise.all([0, 1, 2, 3].map((mode) => computePipeline(d, assemble('mhd/shear.wgsl', slots), `shearing box planes ${st}/${mode}`, { STAGE: st, MODE: mode })))));
+    }
     this.pFlux = [f1, f2];
     this.pEmf = [e1, e2];
     this.pUpdate = [u1, u2];
@@ -293,6 +311,7 @@ export class MhdPasses {
     this.redMag = red;
     const fl = { 5: this.flux[0], 6: this.flux[1], 7: this.flux[2] };
     this.gFlux = [];
+    this.gShear = [];
     this.gEmf = [];
     this.gUpdate = [];
     this.gRates = [];
@@ -323,6 +342,12 @@ export class MhdPasses {
             17: v(this.dep.gfield), 20: this.dep.bh, 18: this.dep.massFlux ?? this.noFlux(),
           }),
         );
+      // The shearing box's passes read the stage's faces (for B_x) and rewrite the x fluxes and
+      // the edges.
+      if (this.shearScratch) {
+        const sh = this.shearScratch;
+        this.gShear.push([start, mid].map((st, s) => this.pShear[s].map((pipe) => perSlab((sb) => bindGroup(d, pipe, { 0: params, 1: clock, 4: st[4], 5: this.flux[0], 8: this.emf, 14: sb, 19: sh })))));
+      }
       this.gUpdate.push([
         upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }, state[p]),
         upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }, half),
@@ -382,13 +407,25 @@ export class MhdPasses {
         pass.setPipeline(this.pFlux[s]);
         pass.setBindGroup(0, this.gFlux[parity][s][i]);
         this.dispatch(pass, [n + 4, n + 4, flat ? 1 : sl.nz + 4]);
+        this.encodeShear(pass, parity, s, i, [0, 1], flat ? 1 : sl.nz);
         pass.setPipeline(this.pEmf[s]);
         pass.setBindGroup(0, this.gEmf[parity][s][i]);
         this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + 1]);
+        this.encodeShear(pass, parity, s, i, [2, 3], flat ? 1 : sl.nz + 1);
         pass.setPipeline(this.pUpdate[s]);
         pass.setBindGroup(0, this.gUpdate[parity][s][i]);
         this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + (last ? 1 : 0)]);
       });
+    }
+  }
+
+  /** A shearing box: the given modes of mhd/shear.wgsl for stage s on slab i, over `layers` layers. */
+  private encodeShear(pass: GPUComputePassEncoder, parity: number, s: number, i: number, modes: number[], layers: number) {
+    if (!this.shearScratch) return;
+    for (const mode of modes) {
+      pass.setPipeline(this.pShear[s][mode]);
+      pass.setBindGroup(0, this.gShear[parity][s][mode][i]);
+      pass.dispatchWorkgroups(Math.ceil((this.dep.n + 1) / 8), Math.ceil(layers / 8), 2);
     }
   }
 
@@ -429,7 +466,8 @@ export class MhdPasses {
     const r = new Float32Array(buf.getMappedRange().slice(0));
     buf.unmap();
     buf.destroy();
-    return magneticFrom(r, !!this.dep.cfg.problem.disk);
+    // (A shearing box's in its local frame: mhd/mri.wgsl.)
+    return magneticFrom(r, !!this.dep.cfg.problem.disk || !!this.dep.cfg.problem.shear);
   }
 
   destroy() {

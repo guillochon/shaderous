@@ -58,6 +58,31 @@ export interface DomainSpec {
   bc?: { lo: Bc3; hi: Bc3 };
   /** boundaries in 2D, where they differ */
   bc2d?: { lo: Bc3; hi: Bc3 };
+  /**
+   * The mirrors the setup is symmetric under, as the axes normal to them ('x', 'xy', 'xyz', ...):
+   * a run may then compute only the part above those planes through the origin. `symmetricField`:
+   * its magnetic field is symmetric too.
+   */
+  symmetric?: string;
+  symmetricField?: boolean;
+  /**
+   * 'cylindrical': a 2D run that is a body of revolution about the y axis, in (R, z): x is R
+   * from the axis (the lower x face) to the box side, y is z, the third velocity v_phi.
+   */
+  geometry?: 'cartesian' | 'cylindrical' | 'spherical';
+  /**
+   * 'spherical' (2D, in (r, theta)): the inner radius, above zero, and whether the cells are
+   * spaced evenly in ln r (`logR`) rather than in r. The box side is the outer radius; x is r,
+   * y is theta from 0 to pi, the third velocity v_phi. Parts are placed in (R, z) = (x, y) as
+   * in an axisymmetric run, and their velocities given in (v_R, v_z, v_phi).
+   */
+  rMin?: number;
+  logR?: boolean;
+  /**
+   * The mirrors this run uses (some of `symmetric`): each mirrored axis's domain is then
+   * [0, box] and its lower face a plane of symmetry.
+   */
+  mirror?: string;
   /** velocity of each face that is a moving wall (problems/boundaries.ts), along the wall */
   wallVelocity?: Partial<Record<'xlo' | 'xhi' | 'ylo' | 'yhi' | 'zlo' | 'zhi', [number, number, number]>>;
   units?: UnitsSpec;
@@ -93,6 +118,28 @@ export interface PhysicsSpec {
   floors?: { rho?: number; p?: number };
   fluff?: { rho?: number; u?: number; v?: number; va?: number };
   frame?: (typeof FRAMES)[number];
+  /**
+   * A frame turning at the angular velocity `omega` about an axis through the origin: the
+   * Coriolis force, and the centrifugal force unless `centrifugal` is false. Velocities in the
+   * document are those in the turning frame. In 2D only omega's z part is used.
+   */
+  rotation?: { omega?: Vec3; centrifugal?: boolean };
+  /**
+   * Comoving coordinates (src/cosmo.ts): an expanding background of matter density omegaM and
+   * cosmological constant omegaL (today, in units of the critical density), from redshift
+   * zStart (t = 0) to zEnd, which then sets the end time. Times are in 1/H0, the mean comoving
+   * density is 1, and G follows from omegaM. Positions are comoving, velocities peculiar.
+   * `boxMpc`: the box's comoving side in Mpc/h, with `h` (H0 / 100 km/s/Mpc, default 0.7),
+   * gives the run physical units, in which the display shows proper densities and lengths.
+   */
+  cosmology?: { omegaM?: number; omegaL?: number; zStart?: number; zEnd?: number; h?: number; boxMpc?: number };
+  /**
+   * A shearing box: the local model of a disk turning at omega (about z) with shear parameter
+   * q = -dln Omega / dln R (1.5 for Keplerian), x radial, y along the orbit, z vertical. Its x
+   * faces are periodic with the shift the background flow v_y = -q omega x gives them, which
+   * the initial state should hold. `stratified`: the vertical tidal pull, -omega^2 z.
+   */
+  shear?: { omega?: number; q?: number; stratified?: boolean };
   jeansFloor?: boolean;
   jeansCells?: number;
   vcycles?: number;

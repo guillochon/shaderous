@@ -49,7 +49,7 @@ fn mass_on_orbit(m: Mass) -> bool {
 
 // Center of a uniform-grid cell. A 2D run lies in the plane z = 0, where the masses are.
 fn cell_pos(c: vec3<i32>) -> vec3<f32> {
-  let x = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+  let x = (vec3<f32>(c) + 0.5) * P.dx + P.org.xyz;
   return vec3<f32>(x.xy, select(x.z, 0.0, P.dims.z == 1u));
 }
 

@@ -23,6 +23,7 @@
 #include "amr/list.wgsl"
 #include <bins>
 #include <cooling>
+#include <frame>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;   // state at the start of the step
@@ -403,8 +404,8 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     // (2D: B_z's face is the cell's only one along z.)
     if (a < naxes()) { bc[a] = 0.5 * (bout[a] + bup[a]); } else { bc[a] = bout[a]; }
   }
-  let u1 = textureLoad(U1, x, 0);
-  let u2 = textureLoad(U2, x, 0);
+  var u1 = textureLoad(U1, x, 0);
+  var u2 = textureLoad(U2, x, 0);
   // A deposit that touches neither the cell's fluxes nor its faces leaves it as it is.
   if (g_deposit && !g_touched) {
     textureStore(O1, x, u1);
@@ -417,6 +418,14 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (g_deposit) { ph = eos_pressure(max(u1.x, P.rho_floor), u2.y); }
   var flag = 0.0;
   if (STAGE == 1u) { flag = shock_flag(t); }
+  // A non-inertial frame's velocity-dependent forces (gravity/frame_off.wgsl), as in
+  // mhd/update.wgsl: stage 1 its half step's whole share, stage 2 the first half of the
+  // block's step; the second half below, or in amr/correct.wgsl after its kick.
+  if (FRAME_ON && !g_deposit) {
+    let fs = frame_open(u1, u2, select(0.5 * dt, dt, STAGE == 1u));
+    u1 = fs.u1;
+    u2 = fs.u2;
+  }
   // Gravity, as amr/update.wgsl has it (docs/numerics.md section 21): stage 1 the half step's whole
   // source, stage 2 the first half kick; the second comes from amr/correct.wgsl with
   // self-gravity or point masses, or below with the uniform field alone. Flux-form work from
@@ -427,6 +436,8 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   var g = P.gext.xyz;
   if (self_gravity) { g += textureLoad(G, x, 0).xyz; }
   let gx = ext_accel(blk_pos(g_slot, t));
+  // A rotating frame's centrifugal force alone (no self-gravity, no masses) also closes here.
+  let late_ext = !self_gravity && ext_on();
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
   var dw = 0.0;
@@ -468,11 +479,20 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (RESISTIVITY && !g_deposit) { heat += ohm_heat(x); }
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
-  if (STAGE == 2u && gravity && !self_gravity && !g_deposit) {
+  if (STAGE == 2u && (gravity || late_ext) && !self_gravity && !g_deposit) {
     // The uniform field alone: the second half kick here, with the updated density.
-    let k2 = 0.5 * dt * rho * g;
-    if ((P.flags & 1u) == 0u) { E += dot(k2, mom + 0.5 * k2) / rho; }
+    var k2 = 0.5 * dt * rho * g;
+    if (late_ext) {
+      // and the centrifugal force, its energy in kick form
+      let kx2 = 0.5 * dt * rho * gx;
+      k2 += kx2;
+      if ((P.flags & 1u) != 0u && gravity) { E += dot(kx2, mom + 0.5 * k2) / rho; }
+    }
+    if ((P.flags & 1u) == 0u || !gravity) { E += dot(k2, mom + 0.5 * k2) / rho; }
     mom += k2;
+  }
+  if (STAGE == 2u && FRAME_ON && !self_gravity && !g_deposit) {
+    mom = frame_close(vec4<f32>(rho, mom), vec4<f32>(E, 0.0, 0.0, 0.0), 0.5 * dt).u1.yzw;
   }
   var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);
   var mout = mom;
@@ -484,7 +504,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   var st = NewState(vec4<f32>(rho, mout), vec4<f32>(en.x, en.y, sc, flag));
   // The damping zone over the block's step, on the gas alone: B^2 / 2 stays out of it.
   if (STAGE == 2u && DAMPING && !g_deposit) {
-    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), blk_pos(inv.slot, t) / P.box + 0.5, dt);
+    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), box_frac(blk_pos(inv.slot, t)), dt);
     st = NewState(d.u1, vec4<f32>(d.u2.x + eb, d.u2.yz, flag));
   }
   // Cooling over the block's step (it changes E by exactly the change of e_int).

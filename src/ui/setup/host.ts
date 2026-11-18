@@ -24,6 +24,8 @@ export interface SetupHost {
   presetFile(id: string): string;
   /** GPU memory the grid of a document needs, and what the page may take, in bytes; null where it cannot say. */
   memory(spec: SetupSpec): { need: number; budget: number } | null;
+  /** What the simulators would refuse in a document as the page would load it (sim.ts refusal), or null. */
+  refusal(spec: SetupSpec): string | null;
   /** The grids on offer: cells per side in 2D and 3D, the largest uniform ones, and the most levels of refinement for a resolution. */
   grids(): { res2d: number[]; res3d: number[]; uniformMax2d: number; uniformMax3d: number; maxLevels(n: number): number };
   /** A link that opens the page with a document, and whether it is short enough to share. */

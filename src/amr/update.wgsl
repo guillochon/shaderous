@@ -27,6 +27,7 @@
 #include "amr/list.wgsl"
 #include <bins>
 #include "amr/blk_dt.wgsl"
+#include <frame>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -99,7 +100,8 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   e[axis] = g_dx;
   seen += ext_dphi(blk_pos(slot, a), e * f32(ib - ia), 0.0);
   var face = seen;
-  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
+  // (A plane of mirror symmetry is no wall: the cell beyond it is the image, as for the state.)
+  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3 && !sym_lo(axis)) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
   if (wall) {
     a[axis] = ra;
     b[axis] = ra + 1;
@@ -170,6 +172,31 @@ fn share(nb: i32) -> f32 {
   if (!BINS_ON) { return 1.0; }
   if (blk_bin(nb) < g_bin) { return 0.5; }
   return select(1.0, 0.0, g_deposit);
+}
+
+// A spherical run: a refined neighbor's fine face (cell `a` of block `src` below or above it)
+// against the mean of the two that cover cell l's face along `axis`: its area over theirs, so
+// that the coarse face's flux is their area-weighted mean. A radial face's area goes as its
+// dcos(theta), a polar face's as the integral of r dr over it (r_c dr, or r_c^2 sinh D).
+fn sph_fine_face(slot: i32, l: vec3<i32>, axis: i32, src: i32, a: vec3<i32>) -> f32 {
+  let q = blk_sph_grid(src);
+  let fg = blk_coord(src) * BS + a;
+  let cg = 2 * (blk_coord(slot) * BS + l);
+  var w0 = 0.0;
+  var w1 = 0.0;
+  var hi = false;
+  if (axis == 0) {
+    w0 = sph_dcos(cg.y, q);
+    w1 = sph_dcos(cg.y + 1, q);
+    hi = fg.y == cg.y + 1;
+  } else {
+    let r0 = sph_cell_g(cg.x, 0, q).r;
+    let r1 = sph_cell_g(cg.x + 1, 0, q).r;
+    w0 = select(r0, r0 * r0, q.d != 0.0);
+    w1 = select(r1, r1 * r1, q.d != 0.0);
+    hi = fg.x == cg.x + 1;
+  }
+  return 2.0 * select(w0, w1, hi) / (w0 + w1);
 }
 
 // Replace the fluxes `own` through the cell's faces on its block's faces with its neighbors':
@@ -246,7 +273,17 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
         a[t2] += j;
         g_fb_slot = src;
         g_fb_l = a;
-        sum = flux_add(sum, flux_between(atl(o, a), e, axis));
+        var fl = flux_between(atl(o, a), e, axis);
+        // An axisymmetric run: a refined neighbor's faces across z lie at their own radii, and
+        // their areas go as those (the coarse face's flux is their area-weighted mean).
+        if (cylindrical() && axis == 1 && !blk_leaf(np)) {
+          fl = flux_scale(fl, cyl_child_weight(blk_coord(slot).x * BS + l.x, blk_coord(src).x * BS + a.x));
+        }
+        // A spherical run: the fine faces' areas differ along both axes.
+        if (spherical() && !blk_leaf(np)) {
+          fl = flux_scale(fl, sph_fine_face(slot, l, axis, src, a));
+        }
+        sum = flux_add(sum, fl);
       }
     }
     g_dx = dx_own;
@@ -298,7 +335,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (!inv.ok) { return; }
   let slot = inv.slot;
   let l = inv.l;
-  g_dx = blk_dx(slot);
+  g_dx = cell_dx(blk_dx(slot), clock.ah);
+  // Comoving coordinates: cooling's rate at the proper density (hydro/cooling.wgsl).
+  if (cosmo_on()) { g_a3 = clock.ah * clock.ah * clock.ah; }
   g_dt = blk_dt(slot);
   g_bin = blk_bin(slot);
   g_deposit = BINS_ON && !blk_active(slot);
@@ -340,14 +379,62 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
       oy = axis_fluxes(c, ey, 1, w0, p0);
       if (!is2d()) { oz = axis_fluxes(c, ez, 2, w0, p0); }
     }
+    // Planes of mirror symmetry: nothing crosses them (hydro/flux.wgsl mirror_flux).
+    let gm = blk_coord(slot) * BS + l;
+    if (gm.x == 0 && sym_lo(0)) { ox.lo = mirror_flux(ox.lo, 0); }
+    if (gm.y == 0 && sym_lo(1)) { oy.lo = mirror_flux(oy.lo, 1); }
+    if (gm.z == 0 && sym_lo(2) && !is2d()) { oz.lo = mirror_flux(oz.lo, 2); }
     // With species, their pass needs the mass fluxes as this cell computed them.
     store_mass_flux(slot, l, c, ox, oy, oz);
     own = array<Faces, 3>(ox, oy, oz);
   }
   let matched = match_faces(own, slot, l);
-  let fx = matched[0];
-  let fy = matched[1];
-  let fz = matched[2];
+  var fx = matched[0];
+  var fy = matched[1];
+  var fz = matched[2];
+  // Planes of mirror symmetry: nothing crosses them (hydro/flux.wgsl mirror_flux).
+  let gl = blk_coord(slot) * BS + l;
+  if (gl.x == 0 && sym_lo(0)) { fx.lo = mirror_flux(fx.lo, 0); }
+  if (gl.y == 0 && sym_lo(1)) { fy.lo = mirror_flux(fy.lo, 1); }
+  if (gl.z == 0 && sym_lo(2) && !is2d()) { fz.lo = mirror_flux(fz.lo, 2); }
+  // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
+  // geometric source (hydro/update.wgsl), at the cell's global radial index on its level, before the
+  // flux-form gravitational work reads the mass fluxes.
+  var src_r = 0.0;
+  if (cylindrical() && !g_deposit && !DEBUG_FLUX) {
+    let w = cyl_weights(gl.x);
+    let ps = 0.5 * (face_pressure(fx.lo, 0) + face_pressure(fx.hi, 0));
+    src_r = (ps + p0.a.x * p0.a.w * p0.a.w) / (f32(gl.x) + 0.5);
+    fx.lo = cyl_face(fx.lo, w.x);
+    fx.hi = cyl_face(fx.hi, w.y);
+  }
+  // A spherical run: the faces weighed by their areas and lever arms, and the r and theta
+  // momenta's geometric sources (hydro/update.wgsl), at the cell's global indices on its level.
+  // The sources take the pressures of the cell's own faces: with per-block timesteps a face
+  // shared with a faster neighbor carries only half of the step's flux now, the rest in the
+  // deposit pass (which weighs its fluxes but adds no source).
+  var src_t = 0.0;
+  if (spherical() && !DEBUG_FLUX) {
+    let g = blk_sph(slot, l);
+    if (!g_deposit) {
+      let v = p0.a.yzw;
+      let rho = p0.a.x;
+      var sx = fx;
+      var sy = fy;
+      if (BINS_ON) {
+        sx = own[0];
+        sy = own[1];
+      }
+      let pr = vec2<f32>(face_pressure(sx.lo, 0), face_pressure(sx.hi, 0));
+      let pt = vec2<f32>(face_pressure(sy.lo, 1), face_pressure(sy.hi, 1));
+      src_r = (g.h.x - g.wr.x) * pr.x + (g.wr.y - g.h.x) * pr.y + rho * (v.y * v.y + v.z * v.z) * g.ir;
+      src_t = (g.h.y - g.wt.x) * pt.x + (g.wt.y - g.h.y) * pt.y + rho * v.z * v.z * (g.wt.y - g.wt.x);
+    }
+    fx.lo = sph_face(fx.lo, g.wr.x, vec3<f32>(1.0, g.lr.x, g.lr.x));
+    fx.hi = sph_face(fx.hi, g.wr.y, vec3<f32>(1.0, g.lr.y, g.lr.y));
+    fy.lo = sph_face(fy.lo, g.wt.x, vec3<f32>(1.0, 1.0, g.lt.x));
+    fy.hi = sph_face(fy.hi, g.wt.y, vec3<f32>(1.0, 1.0, g.lt.y));
+  }
   if (g_deposit) {
     // A cell on no face shared with a faster neighbor is copied as it is.
     if (!g_touched) {
@@ -374,7 +461,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   // The point masses' pull and the frame's: kicked with the rest, its energy always in kick
   // form (gravity/ext.wgsl).
   let gx = ext_accel(blk_pos(slot, l));
-  let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0));
+  // (A rotating frame's centrifugal force is part of gx, with or without point masses.)
+  let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0)) || ext_on();
   let flux_work = gravity && (P.flags & 1u) != 0u;
   var dw = 0.0;
   if (flux_work) {
@@ -390,8 +478,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     }
   }
 
-  let u1 = textureLoad(U1, c, 0);
-  let u2 = textureLoad(U2, c, 0);
+  var u1 = textureLoad(U1, c, 0);
+  var u2 = textureLoad(U2, c, 0);
+  // A non-inertial frame's velocity-dependent forces, the first half of the block's step of
+  // them (gravity/frame_off.wgsl). A deposit applies none, as it applies no kick.
+  if (FRAME_ON && !g_deposit) {
+    let fs = frame_open(u1, u2, 0.5 * g_dt);
+    u1 = fs.u1;
+    u2 = fs.u2;
+  }
   // From here on the equation of state is this cell's.
   comp_use(comp_tex(c));
   var kick = vec3<f32>(0.0);
@@ -410,7 +505,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     ekick = kd.w;
   }
 
-  var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);
+  var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
+  net.mom.x += src_r;
+  if (spherical()) { net.mom.y += src_t; }
+  var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);
   if (g_deposit) {
     // The kicks, sources and cooling of this step were applied when it started.
     textureStore(O1, c, nw.u1);
@@ -421,11 +519,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (gravity && !self_gravity) {
     // Second half kick, with the updated density.
     let rho = nw.u1.x;
-    let k2 = 0.5 * g_dt * rho * g;
-    let mom = nw.u1.yzw + k2;
+    var k2 = 0.5 * g_dt * rho * g;
     var E = nw.u2.x;
+    // A rotating frame's centrifugal force (without self-gravity or point masses, which would
+    // close the step in amr/correct.wgsl): its energy in kick form.
+    if (ext_on()) {
+      let kx2 = 0.5 * g_dt * rho * gx;
+      k2 += kx2;
+      if (flux_work) { E += dot(kx2, nw.u1.yzw + 0.5 * k2) / rho; }
+    }
+    let mom = nw.u1.yzw + k2;
     var eint = nw.u2.y;
     if (flux_work) {
+      g_kphi = swirl_ke(rho, mom);
       let en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
       E = en.x;
       eint = en.y;
@@ -434,9 +540,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     }
     nw = NewState(vec4<f32>(rho, mom), vec4<f32>(E, eint, nw.u2.z, 0.0));
   }
-  if (has_sources()) { nw = apply_sources(nw, blk_pos(slot, l) / P.box + 0.5, g_dt); }
-  nw = apply_damping(nw, blk_pos(slot, l) / P.box + 0.5, g_dt);
+  if (has_sources()) { nw = apply_sources(nw, box_frac(blk_pos(slot, l)), g_dt); }
+  nw = apply_damping(nw, box_frac(blk_pos(slot, l)), g_dt);
   nw = apply_cooling(nw, g_dt);
+  // The second half of the frame's forces, where no correction pass follows: last, as the
+  // correction pass applies it after all of the update on the uniform grid.
+  if (FRAME_ON && !self_gravity) {
+    let fs = frame_close(nw.u1, nw.u2, 0.5 * g_dt);
+    nw = NewState(fs.u1, fs.u2);
+  }
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);
 }

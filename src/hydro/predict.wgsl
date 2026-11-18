@@ -26,9 +26,20 @@
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rc = region_cell(gid);
   if (!rc.mine) { return; }
-  g_dx = P.dx;
+  g_dx = cell_dx(P.dx, clock.ah);
+  if (cosmo_on()) { g_a3 = clock.a * clock.a * clock.a; }
   g_dt = clock.dt;
+  // A shearing box: the offset of its x faces, for the ghosts beyond them.
+  if (shear_on()) { g_shear = clock.shear / P.dx; }
   let c = rc.c;
+  // An axisymmetric run: the cell's radius, for the predictor's geometric terms.
+  if (cylindrical()) { g_cyl_r = f32(c.x) + 0.5; }
+  // A spherical run: the cell's lengths and its geometric terms.
+  if (spherical()) {
+    let sg = sph_cell(c.x, c.y);
+    g_hr = vec3<f32>(sg.h, 1.0);
+    g_sph_geo = vec2<f32>(sg.ir, sg.cot);
+  }
   g_inner = stencil_inside(c, 1);
   let q = load_q(c);
   // In 2D the layer is its own neighbor along z.

@@ -269,25 +269,26 @@ export async function readTexture(
   n: number,
   channels: 1 | 4,
   nz = n,
+  ny = n,
 ): Promise<Float32Array> {
   const bytesPerRow = n * 4 * channels;
   const padded = Math.ceil(bytesPerRow / 256) * 256;
-  const size = padded * n * nz;
+  const size = padded * ny * nz;
   const buf = device.createBuffer({ size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = device.createCommandEncoder();
-  enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: padded, rowsPerImage: n }, [n, n, nz]);
+  enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: padded, rowsPerImage: ny }, [n, ny, nz]);
   device.queue.submit([enc.finish()]);
   await buf.mapAsync(GPUMapMode.READ);
   const src = new Float32Array(buf.getMappedRange());
-  const out = new Float32Array(n * n * nz * channels);
+  const out = new Float32Array(n * ny * nz * channels);
   const rowF = n * channels;
   const padF = padded / 4;
-  for (let r = 0; r < n * nz; r++) out.set(src.subarray(r * padF, r * padF + rowF), r * rowF);
+  for (let r = 0; r < ny * nz; r++) out.set(src.subarray(r * padF, r * padF + rowF), r * rowF);
   buf.unmap();
   buf.destroy();
   return out;
 }
 
-export function writeTexture(device: GPUDevice, tex: GPUTexture, n: number, channels: 1 | 4, data: Float32Array, nz = n) {
-  device.queue.writeTexture({ texture: tex }, data as Float32Array<ArrayBuffer>, { bytesPerRow: n * 4 * channels, rowsPerImage: n }, [n, n, nz]);
+export function writeTexture(device: GPUDevice, tex: GPUTexture, n: number, channels: 1 | 4, data: Float32Array, nz = n, ny = n) {
+  device.queue.writeTexture({ texture: tex }, data as Float32Array<ArrayBuffer>, { bytesPerRow: n * 4 * channels, rowsPerImage: ny }, [n, ny, nz]);
 }

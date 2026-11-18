@@ -10,6 +10,7 @@
 #include <eos>
 #include "hydro/dual_energy.wgsl"
 #include "hydro/fluff.wgsl"
+#include <frame>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var N1: texture_3d<f32>;       // state after the hydro update
@@ -30,7 +31,8 @@ override MHD: bool = false;
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  g_dx = P.dx;
+  g_dx = cell_dx(P.dx, clock.a1);
+  if (cosmo_on()) { g_a3 = clock.a1 * clock.a1 * clock.a1; }
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   comp_use(comp_tex(c));
@@ -67,9 +69,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // masses' and the frame's part of the kick adds its own (gravity/ext.wgsl). Then re-derive
     // e_int.
     E += dot(kx, u1.yzw + 0.5 * kick) / u1.x;
+    g_kphi = swirl_ke(u1.x, mom);
     let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x + emag, E, eint);
     E = en.x;
     eint = en.y;
+  }
+
+  // The second half step of a non-inertial frame's velocity-dependent forces.
+  if (FRAME_ON) {
+    let fs = frame_close(vec4<f32>(u1.x, mom), vec4<f32>(E, eint, u2.zw), 0.5 * clock.dt);
+    mom = fs.u1.yzw;
+    E = fs.u2.x;
+    eint = fs.u2.y;
   }
 
   let tame = tame_fluff(u1.x, mom, eint);

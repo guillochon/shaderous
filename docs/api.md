@@ -121,6 +121,7 @@ by `npm run gen`.
 | `n` | The run | Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid |
 | `amr` | The run | Levels of refinement, 0 to 5. With n but no amr, the grid is uniform |
 | `tend` | Settings | End time (inf for none) |
+| `sym` | Settings | Mirror symmetry: none, x, y, z, xy, xz, yz, xyz. Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost |
 | `eos` | Settings | Equation of state: ideal, barotropic, gas_radiation, degenerate, ionizing, helmholtz. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
 | `gamma` | Settings | gamma. Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
 | `K` | Settings | K (p = K rho^gamma). Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
@@ -195,6 +196,7 @@ by `npm run gen`.
 | `box` | The view | Volume view: outline the box (on by default) |
 | `flines` | The view | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
 | `nflines` | The view | How many field lines |
+| `mirror` | The view | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
 | `cmap` | The view | Colormap |
 | `tf` | The view | Volume view: the opacity curve, as x:a points separated by commas |
 <!-- /gen:link-keys -->
@@ -570,6 +572,7 @@ carries each under the key in the second column:
 | `box` | `box` | Volume view: outline the box (on by default) |
 | `fieldLines` | `flines` | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
 | `fieldLineCount` | `nflines` | How many field lines |
+| `mirrorImages` | `mirror` | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
 | `colormap` | `cmap` | A name from `describe().colormaps` |
 | `autoRange` |  | Fit the color range to the data |
 <!-- /gen:view -->
@@ -763,6 +766,9 @@ await S('runTo', 2);
 - **Large results are slow to bring out of the page.** `page.evaluate` copies a list of
   numbers one by one: a JSON `slice` at `res` 2048 takes about 13 s to cross, against under a
   second with `encoding: 'base64'`.
+- **A rotating frame's velocities are the frame's.** With `physics.rotation` set, every
+  velocity the API returns (diagnostics, momenta, slices, probes) and every velocity in an
+  `.athdf` file is relative to the turning frame, and `eTot` is the Jacobi integral.
 - **`play()` uses the page's own loop.** In headless mode that loop is off, so step with `run`.
 - **It is one page and one run.** For runs in parallel, open several pages. Each one takes its
   own GPU memory.

@@ -5,6 +5,8 @@
 // The compiled initial state paints in layers: a whole-box flow or the background, then disks,
 // then stars (also left to settling), then regions, obstacles and inflows in the order of the
 // parts, and last the flows that only change what is there.
+import { mirrorAxes } from '../domain';
+import { cosmoG, timeAtRedshift, type Cosmology } from '../cosmo';
 import { NET_SPECIES } from '../burn/network';
 import type { AnyBurnSpec } from '../burn/burn';
 import { defaultEosParams, makeEos, physicalEosParams, type Eos } from '../eos/eos';
@@ -70,10 +72,22 @@ const speciesOf = (spec: SetupSpec): readonly string[] | undefined => {
 
 const boxOf = (spec: SetupSpec): number => spec.domain?.box ?? 1;
 
+/** A setup's expanding background (physics.cosmology), with its defaults: Einstein-de Sitter from z = 99. */
+export function cosmologyOfSetup(spec: SetupSpec): Cosmology | null {
+  const c = spec.physics?.cosmology;
+  if (!c) return null;
+  const k: Cosmology = { omegaM: c.omegaM ?? 1, omegaL: c.omegaL ?? 0, aStart: 1 / (1 + (c.zStart ?? 99)) };
+  if (c.boxMpc !== undefined) Object.assign(k, { boxMpc: c.boxMpc, h: c.h ?? 0.7 });
+  return k;
+}
+
 /** The setup's units and G. Units that follow a part's quantity need the bodies, which need G. */
 function scales(spec: SetupSpec): { units?: UnitSystem; G: number } {
   const u = spec.domain?.units;
   const g = spec.physics?.G;
+  // Comoving coordinates: G is what makes the mean comoving density 1 that of omegaM.
+  const k = cosmologyOfSetup(spec);
+  if (k) return { G: cosmoG(k) };
   if (!u) return { G: typeof g === 'number' ? g : 1 };
   if (g === 'units') {
     const units = unitSystem(u, () => {
@@ -271,7 +285,10 @@ function fieldOf(spec: SetupSpec, ndim: 2 | 3): { potential: PotentialFn | null;
     const A = starPotential(st);
     if (A) pots.push(A);
   }
-  for (const d of disksOf(spec, bodies, G, 0, ndim)) {
+  // The finest grid the document names: a thin disk's loops follow its gas, whose height is
+  // floored at two of its cells.
+  const nGrid = (spec.domain?.n ?? 0) * 2 ** (spec.domain?.amr ?? 0);
+  for (const d of disksOf(spec, bodies, G, nGrid, ndim)) {
     const loop = d.loop;
     if (loop)
       pots.push((x, y, z) => {
@@ -408,6 +425,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const burn = ph.burn;
   const fl = ph.fluff;
 
+  const cosmology = cosmologyOfSetup(spec);
   const optional: Partial<Problem> = {
     units: base.units === undefined ? undefined : unitsFollow ? (params: Record<string, number>) => scales(at(params)).units! : base.units,
     composition: namedComposition(ph.composition),
@@ -421,6 +439,9 @@ export function compileSetup(spec: SetupSpec): Compiled {
     jeansFloor: ph.jeansFloor,
     jeansCells: ph.jeansCells,
     supports2d: d.supports2d,
+    symmetry: d.symmetric ? { axes: mirrorAxes(d.symmetric), mhd: d.symmetricField ?? false } : undefined,
+    geometry: d.geometry === 'cylindrical' || d.geometry === 'spherical' ? d.geometry : undefined,
+    sphere: d.geometry === 'spherical' ? { rMin: d.rMin ?? 0.01, log: d.logR ?? false } : undefined,
     bc2d: d.bc2d,
     wallVelocity: d.wallVelocity ? { ...d.wallVelocity } : undefined,
     fluff: fl ? { rho: fl.rho ?? 0, u: fl.u ?? 0, v: fl.v ?? 0, ...(fl.va !== undefined ? { va: fl.va } : {}) } : undefined,
@@ -440,6 +461,11 @@ export function compileSetup(spec: SetupSpec): Compiled {
       : undefined,
     refineMasses: mesh.refineMasses,
     frame: ph.frame === 'gas' || ph.frame === 'masses' ? ph.frame : undefined,
+    cosmology: cosmology ?? undefined,
+    shear: ph.shear ? { omega: ph.shear.omega ?? 1, q: ph.shear.q ?? 1.5, stratified: ph.shear.stratified ?? false } : undefined,
+    rotation: ph.rotation?.omega && ph.rotation.omega.some((w) => w !== 0)
+      ? () => ({ omega: [...ph.rotation!.omega!] as [number, number, number], centrifugal: ph.rotation!.centrifugal ?? true })
+      : undefined,
     refineRho: mesh.refineRho,
     refineDense: mesh.refineDense,
     cooling: ph.cooling,
@@ -485,9 +511,20 @@ export function compileSetup(spec: SetupSpec): Compiled {
     bcHi: d.bc?.hi ?? all(OUTFLOW),
     gravity: ph.gravity ?? 'off',
     G: base.G,
-    box: boxOf(spec),
-    tEnd: run.tEnd ?? Infinity,
-    init: (n, eos, ndim, params) => initOf(at(params), n, eos, ndim),
+    // (A spherical run's box is its radial extent: from the inner radius to the box side.)
+    box: d.geometry === 'spherical' ? boxOf(spec) - (d.rMin ?? 0.01) : boxOf(spec),
+    tEnd: cosmology && ph.cosmology?.zEnd !== undefined ? timeAtRedshift(cosmology, ph.cosmology.zEnd) : (run.tEnd ?? Infinity),
+    init: (n, eos, ndim, params) => {
+      const f = initOf(at(params), n, eos, ndim);
+      if (d.geometry !== 'spherical') return f;
+      // A spherical run's cells are at (r, theta): the setup's (R, z) and velocities in (v_R, v_z, v_phi).
+      return (r, th) => {
+        const sn = Math.sin(th);
+        const cs = Math.cos(th);
+        const w = f(r * sn, r * cs, 0);
+        return { ...w, vx: w.vx * sn + w.vy * cs, vy: w.vx * cs - w.vy * sn };
+      };
+    },
     setup: spec,
   };
   // Only what the setup gives: an absent key is the Problem's own default (sim.ts configFor).
@@ -506,6 +543,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   over('refineLo', mesh.refineLo);
   over('timeBins', mesh.timeBins);
   over('jeansRefine', mesh.jeansRefine);
+  over('symmetry', d.mirror ? mirrorAxes(d.mirror) : undefined);
   return { spec, problem, overrides };
 }
 

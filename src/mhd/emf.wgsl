@@ -53,8 +53,16 @@ fn fc(a: i32, t: vec3<i32>) -> vec3<f32> {
 fn eref(c: vec3<i32>) -> Ref {
   let m = bc_map(c);
   let u = textureLoad(U1, m.c, 0);
-  let v = bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
-  let B = bcell(m.c) * m.bflip;
+  var v = bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
+  var B = bcell(m.c) * m.bflip;
+  // A shearing box's ghost beyond an x face: between the two sheared cells.
+  if (shear_ghost(c)) {
+    let c1 = shear_next(m.c);
+    let u1 = textureLoad(U1, c1, 0);
+    let f = shear_frac(c);
+    v = mix(v, bc_velocity(u1.yzw / max(u1.x, P.rho_floor), m), f);
+    B = mix(B, bcell(c1) * m.bflip, f);
+  }
   return Ref(efield(v, B), B);
 }
 
@@ -63,6 +71,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let ed = emf_dims();
   if (any(vec3<i32>(gid) >= ed)) { return; }
   g_dx = P.dx;
+  if (shear_on()) { g_shear = select(clock.shear, shear_half(clock.shear, clock.dt), STAGE == 2u) / P.dx; }
   let t = vec3<i32>(gid) + vec3<i32>(0, 0, emf_first());
   let ex = vec3<i32>(1, 0, 0);
   let ey = vec3<i32>(0, 1, 0);
@@ -110,6 +119,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
   E = E * bc_tied_keep(on) + moving_wall_e(t, on, kinds, upper);
+  // The axis of an axisymmetric run: E_phi (code z) vanishes on it, and no B_phi crosses it
+  // (2D: E_z, code y, on the x faces is the flux of B_phi through them).
+  if (cylindrical() && t.x == 0) { E = vec3<f32>(E.x, 0.0, 0.0); }
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
   EMF[emf_index(t)] = vec4<f32>((dt / P.dx) * E, 0.0);
 }

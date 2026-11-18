@@ -6,6 +6,7 @@ import type { UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
 import type { SetupSpec } from '../setup/spec';
 import type { ViewMode } from '../render/view_options';
+import { cosmoUnits } from '../cosmo';
 
 export interface Prim {
   rho: number;
@@ -259,6 +260,45 @@ export interface Problem {
    * or the point masses' ('masses') instead of an inertial one (gravity/bh_kick.wgsl).
    */
   frame?: 'gas' | 'masses';
+  /**
+   * A frame turning at the constant angular velocity `omega` about an axis through the origin
+   * (gravity/rot.wgsl): the Coriolis force, and the centrifugal force unless `centrifugal` is
+   * false (an f-plane). In 2D only omega's z part is used. Velocities, in `init` and everywhere
+   * after, are those relative to the turning frame (toRotating converts an inertial setup).
+   */
+  rotation?: (params: Record<string, number>, ndim: 2 | 3) => { omega: [number, number, number]; centrifugal?: boolean };
+  /**
+   * The mirrors the setup is symmetric under, each a plane through the origin normal to an axis:
+   * a run may then compute only the part above them (SimConfig.symmetry). `mhd`: its magnetic
+   * field is symmetric too (mhd/common.wgsl gives the planes the field's parity).
+   */
+  symmetry?: { axes: [boolean, boolean, boolean]; mhd?: boolean };
+  /**
+   * Comoving coordinates (src/cosmo.ts): positions comoving, densities and pressures comoving
+   * (a^3 times the proper ones), velocities peculiar and proper, specific energies proper. Time
+   * is in 1/H0 from t = 0 at a = aStart, and the mean comoving density should be 1.
+   */
+  cosmology?: import('../cosmo').Cosmology;
+  /**
+   * A shearing box (Part D): the frame corotates at `omega` (about z), the background flow is
+   * v_y = -q omega x, and the x faces are periodic with the shift that flow gives.
+   */
+  shear?: { omega: number; q: number; stratified?: boolean };
+  /**
+   * 'cylindrical': a 2D run that is a body of revolution about the y axis, in (R, z): code x is
+   * R from the axis (0 to box), y is z, and the third velocity component is v_phi (the layer is
+   * the azimuth). Cells are rings, of volume 2 pi R dx^2: masses and energies are true ones.
+   */
+  geometry?: 'cartesian' | 'cylindrical' | 'spherical';
+  /**
+   * 'spherical' geometry (docs/numerics.md section 22): a 2D run in (r, theta), a body of
+   * revolution about the z axis. Code x is r from `rMin` to rMin + box (uniform spacing, or
+   * logarithmic with `log`), y is theta from 0 to pi (both poles axes), and the third velocity
+   * component is v_phi. `init` is called with (r, theta, 0) at each cell's center and gives
+   * (v_r, v_theta, v_phi) as (vx, vy, vz). Point masses must sit at the origin, at rest: their
+   * pull joins the gas's own monopole field.
+   */
+  sphere?: { rMin: number; log?: boolean };
   /** Density below which gas does not ask for refinement (default: the fluff density, else ten times a star's ambient density, else 0, off). */
   refineRho?: number;
   /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */
@@ -400,7 +440,7 @@ export function sizedProblem(p: Problem, params: Record<string, number>): Proble
 
 /** A preset's physical units for these values of its parameters, or undefined if it is scale free. */
 export const problemUnits = (p: Problem, params: Record<string, number>): UnitSystem | undefined =>
-  typeof p.units === 'function' ? p.units(params) : p.units;
+  (typeof p.units === 'function' ? p.units(params) : p.units) ?? (p.cosmology ? cosmoUnits(p.cosmology, p.box) : undefined);
 
 /** A problem's dynamical time (Problem.tDyn), or what stands in for it. */
 export function dynamicalTime(p: Problem): number {

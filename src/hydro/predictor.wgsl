@@ -8,6 +8,7 @@
 // cell to the upper neighbor, for the well-balanced pressure slopes (hydro/q.wgsl): zero
 // when that is off.
 // Requires P, hydro/q.wgsl, and g_dx and g_dt set.
+#include <frame>
 
 // The half-step state `pr` of cell q moved toward first order by weight w: at w = 1 the cell as
 // it is with no slopes, as the positivity check below makes it.
@@ -47,6 +48,10 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
     }
     s[a] = Q(sa.a * mask[a], sa.b * mask[a]);
   }
+  // A spherical run: per unit dx, its cells being g_hr[a] times shorter along each axis.
+  if (spherical()) {
+    for (var a = 0; a < 3; a++) { s[a] = Q(s[a].a * g_hr[a], s[a].b * g_hr[a]); }
+  }
   let xm = m[0];
   let xp = p[0];
   let ym = m[1];
@@ -81,12 +86,42 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   let da = v.x * sx.a + v.y * sy.a + v.z * sz.a;
   let db = v.x * sx.b + v.y * sy.b + v.z * sz.b;
   let gradp = vec3<f32>(sx.b.x, sy.b.x, sz.b.x);
+  // A non-inertial frame's velocity-dependent forces join the half kick (and, with comoving
+  // coordinates, the expansion's cooling the half step's pressure).
+  var gf = g;
+  var dp = 0.0;
+  if (FRAME_ON) {
+    let fr = frame_predict(v, rho, q.b.x);
+    gf += fr.xyz;
+    dp = fr.w;
+  }
 
   var a = vec4<f32>(
     rho - h * (da.x + rho * dv),
-    v - h * (da.yzw + gradp / rho) + 0.5 * g_dt * g,
+    v - h * (da.yzw + gradp / rho) + 0.5 * g_dt * gf,
   );
   var b = vec2<f32>(q.b.x - h * (db.x + rho * cs * cs * dv), q.b.y - h * db.y);
+  if (FRAME_ON) { b.x += 0.5 * g_dt * dp; }
+  // An axisymmetric run: the geometric terms of the half step, at the cell's radius.
+  if (g_cyl_r > 0.0) {
+    let k = 0.5 * g_dt / (g_cyl_r * g_dx);
+    a.x -= k * rho * v.x;
+    a.y += k * v.z * v.z;
+    a.w -= k * v.x * v.z;
+    b.x -= k * rho * cs * cs * v.x;
+  }
+
+  // A spherical run: the geometric terms of the half step, at the cell's r and theta.
+  if (spherical()) {
+    let k = 0.5 * g_dt / g_dx * g_sph_geo.x;
+    let ct = g_sph_geo.y;
+    let dg = 2.0 * v.x + ct * v.y;
+    a.x -= k * rho * dg;
+    a.y += k * (v.y * v.y + v.z * v.z);
+    a.z += k * (ct * v.z * v.z - v.x * v.y);
+    a.w -= k * (v.x * v.z + ct * v.y * v.z);
+    b.x -= k * rho * cs * cs * dg;
+  }
 
   // Positivity: if any face state would be non-positive, this cell is first order this step
   // (unpredicted state, and the update zeroes its slopes).

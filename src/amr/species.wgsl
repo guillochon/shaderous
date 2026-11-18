@@ -118,7 +118,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (nhi >= 0 && !blk_leaf(nhi)) { hi = fine_flux(nhi, a, false, l); } else { hi = own_flux(slot, l, a, 1); }
     for (var g = 0u; g < NG; g++) { acc[g] += lo[g] - hi[g]; }
   }
-  let dtdx = clock.dt / blk_dx(slot);
+  let dtdx = clock.dt / cell_dx(blk_dx(slot), clock.ah);
   var out: array<vec4<f32>, NG>;
   var sum = 0.0;
   for (var g = 0u; g < NG; g++) {

@@ -19,13 +19,17 @@
 fn red_cell(c: vec3<i32>) -> Red {
   let B = bcell(c);
   var div = 0.0;
+  // (An axisymmetric run: its radial faces weighed by their areas, and its ring cells' volumes.)
+  let w = select(vec2<f32>(1.0), cyl_weights(c.x), cylindrical());
   for (var a = 0; a < 3; a++) {
     var e = vec3<i32>(0);
     e[a] = 1;
-    div += bface(a, c + e) - bface(a, c);
+    if (a == 0) { div += w.y * bface(a, c + e) - w.x * bface(a, c); }
+    else { div += bface(a, c + e) - bface(a, c); }
   }
+  let dv = select(P.geom.x, 6.2831853 * (f32(c.x) + 0.5) * P.dx * P.dx * P.dx, cylindrical());
   var r: Red;
-  r[0] = 0.5 * dot(B, B) * P.geom.x;
+  r[0] = 0.5 * dot(B, B) * dv;
   r[1] = abs(div);
   r[2] = length(B);
   let u1 = textureLoad(U1, c, 0);

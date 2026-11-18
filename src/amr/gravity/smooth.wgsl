@@ -20,8 +20,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let B = GL.bsize;
   let half = u32(max(B / 2, 1));
   let zs = g_zspan(B);
-  let b = gid.x / half + (gid.z / zs) * SLAB_BLOCKS;
-  let z = i32(gid.z % zs);
+  var b = gid.x / half + (gid.z / zs) * SLAB_BLOCKS;
+  var z = i32(gid.z % zs);
+  if (is2d()) {
+    // Four blocks to a quad along z (amr/gravity/common.wgsl, g_inv2d).
+    b = 4u * (gid.x / half + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u;
+    z = 0;
+  }
   if (b >= LIST[0] || i32(gid.y) >= B || z >= B) { return; }
   let slot = i32(LIST[1u + b]);
   var l = vec3<i32>(0, i32(gid.y), z);

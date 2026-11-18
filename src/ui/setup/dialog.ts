@@ -719,7 +719,7 @@ function build() {
     if (draw) preview.update(draft);
 
     const memory = safe(() => host.memory(draft), null);
-    issues = checkSetup(draft, { memory });
+    issues = checkSetup(draft, { memory, refusal: safe(() => host.refusal(draft), null) });
     drawIssues();
     memEl.textContent = memory ? `Grid: ${bytes(memory.need)} of ${bytes(memory.budget)} GPU memory` : '';
     memEl.classList.toggle('bad', !!memory && memory.need > memory.budget);
@@ -749,8 +749,8 @@ function build() {
         status('Applied');
         // What runs is the page's to say: the grid it settled on, the values it held.
         if (JSON.stringify(draft) === text) setDraft(host.running(), origin, notes, true, true);
-      }
         if (el.open) el.close();
+      }
     } catch (e) {
       status(`Could not apply: ${message(e)}`, true);
     } finally {

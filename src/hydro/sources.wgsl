@@ -39,7 +39,7 @@ fn apply_sources(st: NewState, x: vec3<f32>, dt: f32) -> NewState {
     let ride = u32(s.rate.z);
     if (ride > 0u && ride <= mass_count()) {
       let m = BH.list[ride - 1u];
-      s.pos = vec4<f32>(m.pos.xyz / P.box + 0.5, s.pos.w);
+      s.pos = vec4<f32>(box_frac(m.pos.xyz), s.pos.w);
       s.vel = vec4<f32>(m.vel.xyz, s.vel.w);
     }
     let w = source_weight(x, s);

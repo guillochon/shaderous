@@ -1,7 +1,8 @@
 // A run and its setup document, both ways: the document a run's configuration stands for, and
 // what it takes to get from one document to another (a uniform write, new shaders, or a fresh
 // start). Free of the DOM: the page (ui/app.ts), the dialog and the scripting interface share it.
-import { configFor, type SimConfig } from '../sim';
+import { configFor, withSymmetry, type SimConfig } from '../sim';
+import { mirrorAxes, mirrorName } from '../domain';
 import { compileSetup, withParams } from './compile';
 import { flatten, OPTIONS, PART_OPTIONS, type Apply, type Option } from './options';
 import { cloneSetup, emptySetup, getPath, setPath, type SetupSpec } from './spec';
@@ -30,6 +31,7 @@ const same = (a: unknown, b: unknown): boolean => {
 /** A setting's value in a configuration, as a document holds it. */
 export function settingValue(cfg: SimConfig, s: Setting): unknown {
   if (s.cfg === 'bc') return { lo: [...cfg.bcLo], hi: [...cfg.bcHi] };
+  if (s.cfg === 'symmetry') return mirrorName(cfg.symmetry);
   const v = getPath(cfg, s.cfg);
   if (s.cfg === 'tEnd') return Number.isFinite(v as number) ? v : null;
   return v;
@@ -41,6 +43,9 @@ export function setSetting(cfg: SimConfig, s: Setting, value: unknown): void {
     const bc = value as { lo: number[]; hi: number[] };
     cfg.bcLo = [bc.lo[0], bc.lo[1], cfg.ndim === 2 ? 0 : bc.lo[2]];
     cfg.bcHi = [bc.hi[0], bc.hi[1], cfg.ndim === 2 ? 0 : bc.hi[2]];
+  } else if (s.cfg === 'symmetry') {
+    // The mirrors the problem allows, their planes' faces reflecting.
+    Object.assign(cfg, withSymmetry(cfg, mirrorAxes(value as string)));
   } else if (s.cfg === 'tEnd') cfg.tEnd = value === null || value === undefined ? Infinity : (value as number);
   else if (s.cfg.startsWith('fluff.')) cfg.fluff = { ...cfg.fluff, [s.cfg.slice(6)]: value as number };
   else if (s.cfg.startsWith('driving.')) cfg.driving = { ...cfg.driving, [s.cfg.slice(8)]: value as number };
@@ -61,11 +66,14 @@ export function runningSpec(cfg: SimConfig): SetupSpec {
   // of the density refinement starts at): again, until the document gives the run's values.
   for (let pass = 0; pass < 4; pass++) {
     // Compiled from a copy: a document is not changed once something has been compiled from it.
-    const def = configFor(compileSetup(cloneSetup(spec)).problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels });
+    // (With the run's mirrors, whose planes' faces are then not settings of their own.)
+    const problem = compileSetup(cloneSetup(spec)).problem;
+    const def = configFor(problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels, symmetry: cfg.symmetry });
+    const plain = configFor(problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels });
     let changed = false;
     for (const s of settingsOf(spec)) {
       const now = settingValue(cfg, s);
-      if (same(now, settingValue(def, s))) continue;
+      if (same(now, settingValue(s.cfg === 'symmetry' ? plain : def, s))) continue;
       changed = true;
       // The faces of a 2D run are the document's 2D faces, where it keeps them apart.
       if (s.cfg === 'bc' && cfg.ndim === 2) spec.domain = { ...spec.domain, bc2d: now as { lo: [number, number, number]; hi: [number, number, number] } };

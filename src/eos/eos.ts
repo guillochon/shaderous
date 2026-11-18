@@ -16,6 +16,12 @@ export interface EosParams {
   degRho: number;
   degP: number;
   /**
+   * Comoving coordinates: a^3 at which the CPU's conversions (initial conditions) take the
+   * state's comoving densities, set by configFor to the starting scale factor's. The shaders
+   * take theirs from the clock (comovingEosSlot).
+   */
+  comovingA3?: number;
+  /**
    * Hydrogen ionization (eos/ionizing.wgsl): particles per atomic mass unit from hydrogen nuclei
    * and from the other species, both times the composition's mu; 13.6 eV / k in code
    * temperature; and the Saha density.
@@ -40,6 +46,18 @@ export interface EosParams {
   helmCoulomb: number;
 }
 
+/** The equation of state `e` (of proper quantities) for a state of comoving ones, a^3 = `s` times them. */
+export function comovingEos(e: Eos, s: number): Eos {
+  return {
+    ...e,
+    pressure: (rho, eint) => s * e.pressure(rho / s, eint / s),
+    soundSpeed: (rho, p) => e.soundSpeed(rho / s, p / s),
+    eintFromP: (rho, p) => s * e.eintFromP(rho / s, p / s),
+    temperature: (rho, eint) => e.temperature(rho / s, eint / s),
+    eintFromT: (rho, T) => s * e.eintFromT(rho / s, T),
+  };
+}
+
 export interface Eos {
   kind: EosKind;
   hasEnergy: boolean;
@@ -59,6 +77,46 @@ export const EOS_MODULES: Record<EosKind, string> = {
   ionizing: 'eos/ionizing.wgsl',
   helmholtz: 'eos/helmholtz.wgsl',
 };
+
+/** The functions of the equation-of-state interface that take densities (docs/numerics.md section 9). */
+const EOS_SCALED = ['pressure', 'sound_speed', 'eint_from_p', 'temperature', 'eint_from_T', 'eint_floor', 'face', 'prim'];
+
+/**
+ * The equation-of-state slot of a run in comoving coordinates (plans/coordinate-systems-plan.md,
+ * C6). The state's densities and pressures are comoving, a^3 times the proper ones, while
+ * specific energies and temperatures are proper; an equation of state relates proper
+ * quantities. So the module's functions are renamed eosp_* and called through wrappers that
+ * divide by a^3 on the way in and multiply on the way out, a^3 being cosmo_a3()
+ * (hydro/common.wgsl). Every caller, the predictor's and the display's included, then goes
+ * through them. An ideal gas's p = (gamma - 1) rho e is the same in both, so its module is used
+ * as it stands. EOS_SCALES tells the expansion drag (gravity/frame_cosmo.wgsl) which it has, and
+ * eos_pressure_a3 gives the comoving pressure at another scale factor.
+ */
+export function comovingEosSlot(kind: EosKind, files: Record<string, string>): string {
+  const path = EOS_MODULES[kind];
+  if (kind === 'ideal') {
+    return `#include "${path}"
+const EOS_SCALES = false;
+fn eos_pressure_a3(rho: f32, eint: f32, a3: f32) -> f32 { return eos_pressure(rho, eint); }
+`;
+  }
+  const re = new RegExp(`\\beos_(${EOS_SCALED.join('|')})\\b`, 'g');
+  const src = files[path].replace(re, 'eosp_$1');
+  return `// ---- ${path}, renamed to eosp_* (src/eos/eos.ts comovingEosSlot)
+${src}
+// ---- comoving wrappers
+const EOS_SCALES = true;
+fn eos_pressure_a3(rho: f32, eint: f32, a3: f32) -> f32 { return a3 * eosp_pressure(rho / a3, eint / a3); }
+fn eos_pressure(rho: f32, eint: f32) -> f32 { return eos_pressure_a3(rho, eint, cosmo_a3()); }
+fn eos_sound_speed(rho: f32, p: f32) -> f32 { let s = cosmo_a3(); return eosp_sound_speed(rho / s, p / s); }
+fn eos_eint_from_p(rho: f32, p: f32) -> f32 { let s = cosmo_a3(); return s * eosp_eint_from_p(rho / s, p / s); }
+fn eos_temperature(rho: f32, eint: f32) -> f32 { let s = cosmo_a3(); return eosp_temperature(rho / s, eint / s); }
+fn eos_eint_from_T(rho: f32, T: f32) -> f32 { let s = cosmo_a3(); return s * eosp_eint_from_T(rho / s, T); }
+fn eos_eint_floor(rho: f32) -> f32 { let s = cosmo_a3(); return s * eosp_eint_floor(rho / s); }
+fn eos_face(rho: f32, p: f32) -> vec2<f32> { let s = cosmo_a3(); let r = eosp_face(rho / s, p / s); return vec2<f32>(r.x, s * r.y); }
+fn eos_prim(rho: f32, eint: f32) -> vec2<f32> { let s = cosmo_a3(); let r = eosp_prim(rho / s, eint / s); return vec2<f32>(s * r.x, r.y); }
+`;
+}
 
 export const EOS_LABELS: Record<EosKind, string> = {
   ideal: 'Ideal gas',
@@ -200,6 +258,10 @@ export function mixtureParams(kind: EosKind, params: EosParams, k: readonly numb
  * `params`.
  */
 export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[], zh1 = 2): Eos {
+  // Comoving coordinates: densities and pressures in, and energy densities out, are comoving,
+  // a^3 times the proper ones the equation of state relates (comovingEosSlot).
+  const s = params.comovingA3;
+  if (s !== undefined && s !== 1 && kind !== 'ideal') return comovingEos(makeEos(kind, { ...params, comovingA3: undefined }, k, zh1), s);
   if (k) {
     const eos = makeEos(kind, mixtureParams(kind, params, k, zh1));
     if (kind !== 'ideal') return eos;

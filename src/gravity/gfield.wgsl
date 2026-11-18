@@ -22,13 +22,15 @@ fn g_self(c: vec3<i32>) -> vec3<f32> {
 
 // Self-gravity potential at the half step, at a cell that may lie one cell outside the grid:
 // periodic potentials wrap, isolated ones are extrapolated linearly (consistent with the
-// one-sided gradient).
-fn phi_self(q: vec3<i32>) -> f32 {
-  let n = i32(P.n);
+// one-sided gradient), and beyond a plane of mirror symmetry the cell's image is taken.
+fn phi_self(q0: vec3<i32>) -> f32 {
+  let n = select(vec3<i32>(i32(P.n)), grid_n(), P.dims.w == 1u);
   if (P.grav_bc == 0u) {
-    return textureLoad(G, (q + n) % n, 0).w;
+    return textureLoad(G, (q0 + n) % n, 0).w;
   }
-  let cl = clamp(q, vec3<i32>(0), vec3<i32>(n - 1));
+  let mirror = (q0 < vec3<i32>(0)) & vec3<bool>(sym_lo(0), sym_lo(1), sym_lo(2));
+  let q = select(q0, -1 - q0, mirror);
+  let cl = clamp(q, vec3<i32>(0), n - 1);
   let d = cl - q;
   return 2.0 * textureLoad(G, cl, 0).w - textureLoad(G, cl + d, 0).w;
 }
@@ -55,8 +57,9 @@ fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   if (P.grav_on != 0u) { seen += textureLoad(G, b, 0).w - textureLoad(G, a, 0).w; }
   seen += ext_dphi(cell_pos(a), vec3<f32>(e * apart) * P.dx, 0.0);
   var face = seen;
-  let n = select(i32(P.n), i32(P.dims.z), axis == 2);
-  let at_lo = ia == -1 && bc_wall(P.bc_lo[axis]);
+  let n = grid_n()[axis];
+  // (A plane of mirror symmetry is no wall: beyond it is the image, the potential even.)
+  let at_lo = ia == -1 && bc_wall(P.bc_lo[axis]) && !sym_lo(axis);
   let at_hi = ia == n - 1 && bc_wall(P.bc_hi[axis]);
   if (at_lo || at_hi) {
     // Across the wall: the uniform field as it is, the rest from the step next to it inside.
@@ -79,7 +82,7 @@ fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
 fn wall_step(a: vec3<i32>, axis: i32, across: f32) -> vec3<f32> {
   if (!well_balanced()) { return vec3<f32>(across, 1.0, 1.0); }
   let t = dphi_step(a, axis, 0).y;
-  let n = select(i32(P.n), i32(P.dims.z), axis == 2);
+  let n = grid_n()[axis];
   let image = select(1.0, -1.0, across != t);
   return vec3<f32>(t, select(1.0, image, a[axis] < 0), select(1.0, image, a[axis] + 1 >= n));
 }

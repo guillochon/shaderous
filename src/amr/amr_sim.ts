@@ -13,8 +13,9 @@
 // block; the result is read back without blocking, the tree is adapted, and one pass refills
 // the new leaves (copy, prolong or restrict) into the other state texture.
 //
-// With self-gravity (3D), the potential is solved on every tree level after the update
+// With self-gravity (3D, or 2D in (R, z)), the potential is solved on every tree level after the update
 // (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
+import { domainLo } from '../domain';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
@@ -34,11 +35,13 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
-import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { gridDims } from '../domain';
+import { sphSetup, spherical } from '../spherical';
+import { refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
-import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS } from './dispatch';
+import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS, SLAB_QUADS } from './dispatch';
 import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
@@ -68,8 +71,6 @@ const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
-/** Slabs of a long 2D block list (amr/list.wgsl): must match SLAB_QUADS there (FLAT_ROWS: amr/dispatch.ts). */
-const SLAB_QUADS = 16384;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
 const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
 const BIN_TOTALS = 60;
@@ -204,6 +205,19 @@ export class AmrSim implements Simulation {
   private nMasses = 0;
   private nOwnMasses = 0;
   private grav?: AmrGravity;
+  /**
+   * A spherical run's gravity (amr/sph_monopole.wgsl): the monopole of its gas and its point
+   * masses at the origin, which are not particles. Its passes, their bind groups by parity (and
+   * the field's over all blocks or, with per-block timesteps, those starting a step), its buffer
+   * and its potential atlas.
+   */
+  private sphMono?: {
+    rows: GPUComputePipeline; shells: GPUComputePipeline; enclose: GPUComputePipeline; field: GPUComputePipeline; fieldNow: GPUComputePipeline;
+    gRows: GPUBindGroup[]; gShells: GPUBindGroup; gEnclose: GPUBindGroup; gField: GPUBindGroup; gFieldNow: GPUBindGroup[];
+    buf: GPUBuffer; phi: GPUTexture;
+  };
+  /** a spherical run: the G M of its point masses, all at the origin */
+  private centralGM = 0;
   private dummyPhi: GPUTexture;
   private redMp?: Multipoles;
   private redBh?: MassSums;
@@ -444,8 +458,8 @@ export class AmrSim implements Simulation {
     });
     const storage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.clock = d.createBuffer({ size: 16, usage: storage });
-    this.clockPreview = d.createBuffer({ size: 16, usage: storage });
+    this.clock = d.createBuffer({ size: CLOCK_BYTES, usage: storage });
+    this.clockPreview = d.createBuffer({ size: CLOCK_BYTES, usage: storage });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bt = d.createBuffer({ size: this.cap * BT_STRIDE * 4, usage: storage });
@@ -501,10 +515,8 @@ export class AmrSim implements Simulation {
   static async create(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<AmrSim> {
     // The tabulated white dwarf equation of state needs its table on the device (eos/helmholtz.ts).
     if (cfg.eos === 'helmholtz') await prepareHelmholtz(gpu.device);
-    if (cfg.problem.mhd) {
-      const why = mhdUnsupported(cfg);
-      if (why) throw new Error(`MHD: ${why}`);
-    }
+    const why = refusal(cfg);
+    if (why) throw new Error(why);
     let lastTried: number | null = null;
     for (let slots = 0; ; ) {
       // A resource the GPU cannot make (out of memory, or larger than it allows one to be, which
@@ -575,11 +587,13 @@ export class AmrSim implements Simulation {
     const spec = debrisSpec(cfg);
     if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     // 3D: self-gravity machinery is built for every run, so gravity can be switched on later.
+    // 2D: for an axisymmetric (R, z) run with self-gravity (its solver's passes in their 2D form).
+    const flatGravity = cylindrical(cfg) && isSelfGravity(cfg.gravity);
     const gravity = async () => {
       const u1 = [0, 1].map((p) => v(sim.state[p][0]));
-      sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, BS], 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole');
+      sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, depth], flatGravity ? 'amr/multipole_cyl.wgsl' : 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole', cfg.symmetry);
       sim.grav = await AmrGravity.create({
-        device: d, slotsPerSide: sim.slotsPerSide, levels: sim.levels, params: sim.params, bt: sim.bt,
+        device: d, slotsPerSide: sim.slotsPerSide, flat: cfg.ndim === 2, layers: sim.layers, levels: sim.levels, params: sim.params, bt: sim.bt,
         listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
         multipole: sim.redMp.result, stateU1: [sim.state[0][0], sim.state[1][0]], gfield: sim.gfield,
         bins: sim.bins, listAct: sim.listAct, listUpd: sim.listUpd, binArgs: sim.binArgs,
@@ -606,10 +620,10 @@ export class AmrSim implements Simulation {
       computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift'),
       computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick'),
       computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 }),
-      // No self-gravity in 2D, so no solver: the field atlas holds the point masses alone.
-      cfg.ndim === 2 ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
+      // 2D without self-gravity, so no solver: the field atlas holds the point masses alone.
+      cfg.ndim === 2 && !flatGravity ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
       spec ? computePipeline(d, assemble('debris/census_amr.wgsl'), 'amr debris census') : undefined,
-      cfg.ndim === 3 ? gravity() : undefined,
+      cfg.ndim === 3 || flatGravity ? gravity() : undefined,
     ]);
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.pClockPreview = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { PER_DX: 1, ADVANCE_DRIVE: 0 });
@@ -635,10 +649,11 @@ export class AmrSim implements Simulation {
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
+    if (spherical(cfg) && (isSelfGravity(cfg.gravity) || (cfg.problem.masses?.(cfg.params, cfg.G, cfg.problem.box / cfg.n, cfg.ndim).length ?? 0) > 0)) await sim.buildMonopole();
     if (sim.pMassField) {
       // The potential bindings are never read (there is none), but the pass declares them.
       sim.gMassField = bindGroup(d, sim.pMassField, {
-        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 30: sim.bt, 31: sim.listAll,
+        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 5: sim.clock, 30: sim.bt, 31: sim.listAll,
       });
     }
     await sim.buildHydro(deferUpdate);
@@ -731,7 +746,7 @@ export class AmrSim implements Simulation {
       DIAG_OPS,
       'amr/diagnostics.wgsl',
       slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 4: v(this.heat), 30: this.bt, ...this.compIn })),
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.sphMono?.phi ?? this.dummyPhi), 4: v(this.heat), 30: this.bt, ...this.compIn })),
       'amr diagnostics',
     );
     diag.catch(() => {}); // a failure is reported where it is awaited, below
@@ -805,7 +820,7 @@ export class AmrSim implements Simulation {
         bindGroup(d, this.pRegrid, {
           0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]),
           3: v((this.mhd?.primitives ?? this.prim)[0]), 4: v((this.mhd?.primitives ?? this.prim)[1]),
-          5: v(this.state[o][0]), 6: v(this.state[o][1]), 7: this.rg, 31: this.listLeaf,
+          5: v(this.state[o][0]), 6: v(this.state[o][1]), 7: this.rg, 30: this.bt, 31: this.listLeaf,
         }),
       );
     }
@@ -1029,6 +1044,15 @@ export class AmrSim implements Simulation {
     // The field atlas for every block (count >= 0) or for the blocks starting a step (-1).
     const fieldB = (pass: GPUComputePassEncoder, count: number) => {
       if (this.grav) return this.grav.encodeFieldB(pass, count);
+      if (this.sphMono) {
+        // A spherical run: the monopole of the leaves as they stand, the potential now (the
+        // blocks' half steps differ).
+        this.encodeMonopole(pass, p);
+        run(pass, this.sphMono.fieldNow, this.sphMono.gFieldNow[count < 0 ? 0 : 1]);
+        if (count < 0) pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
+        else this.padded(pass, count);
+        return;
+      }
       run(pass, this.pMassFieldB!, this.gMassFieldB[count < 0 ? 0 : 1]);
       if (count < 0) pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
       else this.padded(pass, count);
@@ -1167,13 +1191,19 @@ export class AmrSim implements Simulation {
     return { cycles: this.binCycles, updates: this.binFirstWork + later, single: this.binFullWork };
   }
 
+  /** Comoving coordinates: the scale factor the diagnostics last read from the clock. */
+  private lastScale: number | undefined;
+
   writeParams() {
     const c = this.cfg;
     const buf = packParams(c, {
       dims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0],
       dx: this.dx0,
       rhoMean: this.rhoMean,
-      selfGravity: this.selfGravity,
+      // Comoving coordinates: the state's scale factor as last read (syncScale keeps it current).
+      scale: this.lastScale,
+      // (A spherical run's monopole is the potential the diagnostics read.)
+      selfGravity: this.selfGravity || !!this.sphMono,
       masses: this.hasMasses ? this.nMasses : 0,
       amr: [this.slotsPerSide, this.n0 / BS, this.levels, this.layers],
       refine: [c.refineHi, c.jeansRefine],
@@ -1197,13 +1227,60 @@ export class AmrSim implements Simulation {
   private get selfGravity(): boolean {
     return isSelfGravity(this.cfg.gravity) && !!this.grav;
   }
+
+  /** A spherical run's monopole gravity (amr/sph_monopole.wgsl): its passes and buffers. */
+  private async buildMonopole() {
+    const d = this.device;
+    const code = assemble('amr/sph_monopole.wgsl');
+    const [rows, shells, enclose, field, fieldNow] = await Promise.all([
+      computePipeline(d, code, 'spherical monopole rows', undefined, 'rows'),
+      computePipeline(d, code, 'spherical monopole shells', undefined, 'shells'),
+      computePipeline(d, code, 'spherical monopole enclose', undefined, 'enclose'),
+      computePipeline(d, code, 'spherical monopole field', undefined, 'field'),
+      computePipeline(d, code, 'spherical monopole field (now)', { HALF: 0 }, 'field'),
+    ]);
+    const n = this.n;
+    const buf = d.createBuffer({ label: 'spherical monopole', size: 4 * (4 + 9 * n + 4 + this.cap * BS), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const phi = tex3d(d, this.slotsPerSide * PAD, 'r32float', 'spherical potential', this.layers);
+    const v = (t: GPUTexture) => t.createView();
+    this.sphMono = {
+      rows, shells, enclose, field, fieldNow, buf, phi,
+      gRows: [0, 1].map((p) => bindGroup(d, rows, { 0: this.params, 1: v(this.state[p][0]), 2: buf, 30: this.bt, 31: this.listLeaf })),
+      gShells: bindGroup(d, shells, { 0: this.params, 2: buf, 30: this.bt, 31: this.listLeaf }),
+      gEnclose: bindGroup(d, enclose, { 0: this.params, 2: buf }),
+      gField: bindGroup(d, field, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 30: this.bt, 31: this.listAll }),
+      gFieldNow: [this.listAct, this.listAll].map((list) => bindGroup(d, fieldNow, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 30: this.bt, 31: list })),
+    };
+  }
+
+  /**
+   * A spherical run's shells from the state at `parity`: the leaves' rows, the finest shells'
+   * masses and the sums inside and outside each (the last ones kept: encoding it twice leaves
+   * no history).
+   */
+  private encodeMonopole(pass: GPUComputePassEncoder, parity: number) {
+    const m = this.sphMono!;
+    pass.setPipeline(m.rows);
+    pass.setBindGroup(0, m.gRows[parity]);
+    pass.dispatchWorkgroups(Math.ceil((this.nLeaf * BS) / 64));
+    pass.setPipeline(m.shells);
+    pass.setBindGroup(0, m.gShells);
+    pass.dispatchWorkgroups(Math.ceil(this.n / 64));
+    pass.setPipeline(m.enclose);
+    pass.setBindGroup(0, m.gEnclose);
+    pass.dispatchWorkgroups(1);
+  }
   private get hasMasses(): boolean {
     return this.nMasses > 0;
   }
 
   /** Acceleration and half-step potential for every block, into the field atlas. */
   private encodeField(pass: GPUComputePassEncoder) {
-    if (this.grav) {
+    if (this.sphMono) {
+      pass.setPipeline(this.sphMono.field);
+      pass.setBindGroup(0, this.sphMono.gField);
+      this.padded(pass, this.nAll);
+    } else if (this.grav) {
       this.grav.encodeField(pass, this.nAll);
     } else {
       pass.setPipeline(this.pMassField!);
@@ -1213,7 +1290,7 @@ export class AmrSim implements Simulation {
   }
   /** The gravity field atlas is in use: by self-gravity, point masses or both. */
   private get fieldOn(): boolean {
-    return this.selfGravity || this.hasMasses;
+    return this.selfGravity || this.hasMasses || !!this.sphMono;
   }
 
   /**
@@ -1229,6 +1306,7 @@ export class AmrSim implements Simulation {
       if (this.cfg.gravity === 'isolated') this.redMp!.encode(pass, parity);
       g.encodeSolve(pass, this.nLevel, this.nAll, cycles, cold, together);
     }
+    if (this.sphMono) this.encodeMonopole(pass, parity);
     if (this.hasMasses && perturber !== 'none') {
       const live = perturber === 'step';
       if (live) {
@@ -1249,6 +1327,8 @@ export class AmrSim implements Simulation {
     if (newBlocks && this.selfGravity) this.grav!.encodeNewBlocks(pass, this.nLeaf);
     // Without new blocks to seed this is a cold start: each level begins from the coarser one.
     this.encodeSolve(pass, this.cur, cycles, perturber, !newBlocks);
+    // (A spherical run's monopole twice: no history either.)
+    if (this.sphMono) this.encodeMonopole(pass, this.cur);
     pass.end();
     // No history on this mesh: the half-step extrapolation starts from the potential itself.
     if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
@@ -1271,9 +1351,9 @@ export class AmrSim implements Simulation {
   private finerInSnapshot(b: Block, levelAt: (x: number, y: number, z: number) => number): boolean {
     const three = this.cfg.ndim === 3;
     const size = (BS * this.dx0) / (1 << b.level);
-    const half = this.cfg.problem.box / 2;
+    const lo = domainLo(this.cfg);
     for (let o = 0; o < (three ? 8 : 4); o++) {
-      const at = (a: number) => (b.c[a] + (((o >> a) & 1) + 0.5) / 2) * size - half;
+      const at = (a: number) => (b.c[a] + (((o >> a) & 1) + 0.5) / 2) * size + lo[a];
       if (levelAt(at(0), at(1), three ? at(2) : 0) > b.level) return true;
     }
     return false;
@@ -1326,7 +1406,8 @@ export class AmrSim implements Simulation {
     const c = this.cfg;
     const d = this.device;
     const eos = makeEos(c.eos, c.eosParams);
-    const fn = c.problem.init(this.n, eos, c.ndim, c.params);
+    // (A spherical run's setup takes (r, theta): src/spherical.ts sphSetup.)
+    const fn = sphSetup(c, c.problem.init(this.n, eos, c.ndim, c.params));
     const surface = surfaceOf(fn, eos);
     let run = await InitRun.start(c, this.n, this.dx0, this.levels);
     // With self-gravity a level that only partly fits the block budget is left out altogether:
@@ -1336,7 +1417,10 @@ export class AmrSim implements Simulation {
     const levelAt = c.restart?.levelAt;
     const sampled = new Map<Block, { sub: number; ind: number }>();
     for (let limit = this.levels; ; limit--) {
-      this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi, c.problem.mhd !== undefined);
+      // A rectangular grid (src/domain.ts gridDims): half the root blocks along a halved axis.
+      const gd = gridDims(c);
+      const lim = [0, 1, 2].map((a) => (gd[a] * 2 === c.n ? this.n0 / BS / 2 : this.n0 / BS));
+      this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi, c.problem.mhd !== undefined, lim);
       this.tree.levelLimit = limit;
       for (let pass = 0; pass < limit; pass++) {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
@@ -1412,9 +1496,14 @@ export class AmrSim implements Simulation {
     this.binShare = null;
     d.queue.writeBuffer(this.binArgs, 0, new Uint32Array(BIN_ARGS_BYTES / 4));
     this.rhoMean = mass / c.problem.box ** c.ndim;
-    // The clock is (dt, t, Kahan compensation, steps).
-    d.queue.writeBuffer(this.clock, 0, new Float32Array(c.restart ? [0, c.restart.time, 0, c.restart.steps] : [0, 0, 0, 0]));
-    const masses = initialMasses(c, this.massDx);
+    // The clock (clockState), at the snapshot's time for a restart.
+    d.queue.writeBuffer(this.clock, 0, clockState(c, c.restart?.time ?? 0, c.restart?.steps ?? 0));
+    // A spherical run's point masses sit at the origin: their pull joins the monopole field
+    // (amr/sph_monopole.wgsl), and they are not kept as particles.
+    const sph = spherical(c);
+    const masses = sph ? [] : initialMasses(c, this.massDx);
+    this.centralGM = sph ? initialMasses(c, this.massDx).reduce((a, m) => a + m.gm, 0) : 0;
+    if (this.sphMono) d.queue.writeBuffer(this.sphMono.buf, 0, new Float32Array([this.centralGM, isSelfGravity(c.gravity) ? 1 : 0, 0, 0]));
     this.nMasses = this.nOwnMasses = masses.length;
     d.queue.writeBuffer(this.bh, 0, packMasses(masses));
     this.debrisBuf?.reset(c.restart?.debris);
@@ -1423,7 +1512,9 @@ export class AmrSim implements Simulation {
     this.uploadTree();
     if (this.selfGravity) {
       // The root level's potential from zero, not from the last run's (AmrGravity.clear).
-      this.grav!.clear([...this.tree.lists().byLevel[0]].map((slot) => this.origin(slot).map((o) => o - NG)));
+      // (In 2D the corner's z is the slot's layer, which has no ghosts.)
+      const flat = this.cfg.ndim === 2;
+      this.grav!.clear([...this.tree.lists().byLevel[0]].map((slot) => this.origin(slot).map((o, a) => (flat && a === 2 ? o : o - NG))));
     }
     if (this.fieldOn) {
       // Cold start: enough cycles per level to converge from zero. The clock's dt is zero, so
@@ -1471,7 +1562,8 @@ export class AmrSim implements Simulation {
     const t0 = performance.now();
     // On the GPU where every star's gas is one the GPU knows; the CPU's settling reads the whole
     // mesh back, some 100 bytes a cell, which a mesh of tens of GB does not fit in a page.
-    const onGpu = !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
+    // (The GPU's sums are of cubes: an axisymmetric run's rings settle on the CPU.)
+    const onGpu = c.problem.geometry !== 'cylindrical' && !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
     this.settled = (async () => {
       try {
         setLoadStage(settleStage(0));
@@ -1498,7 +1590,7 @@ export class AmrSim implements Simulation {
     const leaf = await this.readLeaves();
     if (stale()) return;
     const per = BS * BS * (this.cfg.ndim === 3 ? BS : 1);
-    const cells = AmrSim.cellsOf(leaf);
+    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical');
     const leaves = this.tree.leaves();
     const touched = new Uint8Array(cells.count);
     if (!heatCells(heat, cells, touched)) return;
@@ -1514,8 +1606,10 @@ export class AmrSim implements Simulation {
   }
 
   /** The leaves' cells as readLeaves() returned them, for settling. */
-  private static cellsOf(leaf: LeafCells): SettleCells {
-    return { count: leaf.count, pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]], vol: (q) => leaf.dx[q] ** 3, u1: leaf.u1, u2: leaf.u2 };
+  private static cellsOf(leaf: LeafCells, cyl = false): SettleCells {
+    // In (R, z) a cell is a ring, 2 pi R dx^2: the settling's sums are of its volume.
+    const vol = cyl ? (q: number) => 2 * Math.PI * leaf.x[q] * leaf.dx[q] ** 2 : (q: number) => leaf.dx[q] ** 3;
+    return { count: leaf.count, pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]], vol, u1: leaf.u1, u2: leaf.u2 };
   }
 
   /**
@@ -1525,12 +1619,14 @@ export class AmrSim implements Simulation {
   private async settleOnCpu(set: Settling, eos: Eos, leaf: LeafCells, stale: () => boolean, emag?: (s: Settler, q: number) => number) {
     const d = this.device;
     const tree = this.tree;
-    const cells = AmrSim.cellsOf(leaf);
+    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical');
     const { u1, u2 } = cells;
     let peak = 0;
     for (let q = 0; q < cells.count; q++) peak = Math.max(peak, u1[q * 4]);
     const settler = new Settler(set, cells);
-    const per = BS ** 3;
+    // A block's cells: one layer of them in 2D (an axisymmetric run's).
+    const depth = this.cfg.ndim === 3 ? BS : 1;
+    const per = BS * BS * depth;
     // Only the blocks a star may reach are ever rewritten.
     const leaves = tree.leaves().filter((_, i) => settler.owner.subarray(i * per, (i + 1) * per).some((o) => o >= 0));
     const index = new Map(tree.leaves().map((b, i) => [b, i]));
@@ -1538,7 +1634,7 @@ export class AmrSim implements Simulation {
     const upload = (tex: GPUTexture, u: Float32Array) =>
       leaves.forEach((b) => {
         const i = index.get(b)!;
-        d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
+        d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
       });
     this.settleLog = [];
     for (let round = 0; round < SETTLE_ROUNDS; round++) {
@@ -1574,7 +1670,7 @@ export class AmrSim implements Simulation {
     if (stale()) return '';
     const eos = makeEos(c.eos, c.eosParams);
     const { u1, u2 } = leaf;
-    const set = placedSettling(star, c.G, AmrSim.cellsOf(leaf), eos.pressure, c.problem.box);
+    const set = placedSettling(star, c.G, AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical'), eos.pressure, c.problem.box);
     if (typeof set === 'string') return set;
     // With a magnetic field, E holds its energy too: what is left of E in a cell goes back in.
     const rest = this.mhd ? new Float32Array(leaf.count) : null;
@@ -1929,6 +2025,7 @@ export class AmrSim implements Simulation {
       this.dtStale = false;
     }
     this.primeBins(enc);
+    syncScale(enc, this.cfg, this.clock, this.params);
     const cycle = this.binsLive ? 1 << this.builtBins : 0;
     let done = 0;
     for (; done < count; done += cycle || 1) {
@@ -2017,6 +2114,7 @@ export class AmrSim implements Simulation {
       } else {
         this.cur = 1 - p;
       }
+      syncScale(enc, this.cfg, this.clock, this.params);
       this.encodeBurn(enc);
       this.stepsSinceFlag++;
       if (this.encodeFlags(enc)) {
@@ -2397,16 +2495,20 @@ export class AmrSim implements Simulation {
     const three = this.cfg.ndim === 3;
     const axes = three ? 3 : 2;
     for (const b of this.tree.leaves()) {
-      const across = this.n0 << b.level; // cells across the box at this level
-      const index = f.slice(0, axes).map((x) => Math.min(across - 1, Math.max(0, Math.floor(x * across))));
+      // Cells across the computed box at this level (half along a halved axis: f is a fraction of it).
+      const h = this.halvedAxes();
+      const index = f.slice(0, axes).map((x, a) => {
+        const across = (this.n0 << b.level) >> (h[a] ? 1 : 0);
+        return Math.min(across - 1, Math.max(0, Math.floor(x * across)));
+      });
       if (!index.every((i, a) => Math.floor(i / BS) === b.c[a])) continue;
       const o = this.origin(b.slot);
       const at = [o[0] + index[0] - b.c[0] * BS, o[1] + index[1] - b.c[1] * BS, three ? o[2] + index[2] - b.c[2] * BS : o[2]] as [number, number, number];
       const tree = this.tree;
       const [u1, u2] = await readTexels(this.device, this.state[this.cur], at);
       const dx = this.dx0 / (1 << b.level);
-      const half = this.cfg.problem.box / 2;
-      const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx - half : 0)) as [number, number, number];
+      const lo = domainLo(this.cfg);
+      const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx + lo[a] : 0)) as [number, number, number];
       return {
         pos, index, dx, u1: [...u1], u2: [...u2],
         // A block that has been split or merged since the read would show another's state.
@@ -2534,15 +2636,16 @@ export class AmrSim implements Simulation {
     const pass = beginPass(enc);
     this.redDiag.encode(pass, this.cur);
     pass.end();
-    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
-    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
-    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, MASS_FLOATS * 4);
+    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, CLOCK_BYTES);
+    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, CLOCK_BYTES, DIAG_OPS.length * 4);
+    enc.copyBufferToBuffer(this.bh, 0, this.staging, CLOCK_BYTES + DIAG_OPS.length * 4, MASS_FLOATS * 4);
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0);
+      if (cosmologyOf(this.cfg)) this.lastScale = withScale(diag, a).scale;
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
       // energy (E - KE there includes B^2 / 2).
@@ -2550,7 +2653,7 @@ export class AmrSim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
-      return diag;
+      return unfoldDiagnostics(diag, this.cfg.symmetry);
     } finally {
       this.stagingBusy = false;
     }
@@ -2579,7 +2682,7 @@ export class AmrSim implements Simulation {
       enc.clearBuffer(this.redDt.first);
       this.dtStale = false;
     }
-    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
+    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, CLOCK_BYTES);
     const pass = beginPass(enc);
     if (this.mhd) {
       // A magnetic field: its own assembly measures the rates, with the fast magnetosonic speed.
@@ -2615,12 +2718,12 @@ export class AmrSim implements Simulation {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
     await this.compiled;
     await this.settled;
-    const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const buf = this.device.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     try {
       for (;;) {
         const enc = this.device.createCommandEncoder();
         this.encodeSteps(enc, this.levels > 0 ? REGRID_EVERY : 16);
-        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, CLOCK_BYTES);
         this.device.queue.submit([enc.finish()]);
         this.submitted();
         await buf.mapAsync(GPUMapMode.READ);
@@ -2643,7 +2746,14 @@ export class AmrSim implements Simulation {
   /** Display volume: the finest resolution, capped so it stays a reasonable texture. */
   get displayDims(): [number, number, number] {
     const nd = Math.min(this.n, this.cfg.ndim === 2 ? 2048 : 256);
-    return [nd, nd, this.cfg.ndim === 2 ? 1 : nd];
+    // Half along a halved axis of a rectangular grid (src/domain.ts gridDims).
+    const h = this.halvedAxes();
+    return [h[0] ? nd / 2 : nd, h[1] ? nd / 2 : nd, this.cfg.ndim === 2 ? 1 : h[2] ? nd / 2 : nd];
+  }
+  /** The mirrored axes halved on a rectangular grid (src/domain.ts gridDims). */
+  halvedAxes(): boolean[] {
+    const gd = gridDims(this.cfg);
+    return [0, 1, 2].map((a) => gd[a] * 2 === this.cfg.n);
   }
   static readonly fieldShader = 'amr/field.wgsl';
   readonly fieldShader = AmrSim.fieldShader;
@@ -2652,7 +2762,7 @@ export class AmrSim implements Simulation {
   }
   displayAtlas(): DisplayAtlas | null {
     if (this.cfg.ndim !== 3) return null;
-    return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
+    return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, halved: this.halvedAxes().reduce((m, h, a) => m | (h ? 1 << a : 0), 0), levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
   }
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
     // With a magnetic field the primitives come from its own assembly (the same layout), and the
@@ -2752,20 +2862,39 @@ export class AmrSim implements Simulation {
       x: new Float32Array(count), y: new Float32Array(count), z: new Float32Array(count), dx: new Float32Array(count),
       u1, u2, count,
     };
-    const half = this.cfg.problem.box / 2;
+    const lo = domainLo(this.cfg);
     let q = 0;
     for (const blk of leaves) {
       const dx = this.dx0 / (1 << blk.level);
       for (let k = 0; k < depth; k++)
         for (let j = 0; j < BS; j++)
           for (let i = 0; i < BS; i++, q++) {
-            out.x[q] = (blk.c[0] * BS + i + 0.5) * dx - half;
-            out.y[q] = (blk.c[1] * BS + j + 0.5) * dx - half;
-            out.z[q] = three ? (blk.c[2] * BS + k + 0.5) * dx - half : 0;
+            out.x[q] = (blk.c[0] * BS + i + 0.5) * dx + lo[0];
+            out.y[q] = (blk.c[1] * BS + j + 0.5) * dx + lo[1];
+            out.z[q] = three ? (blk.c[2] * BS + k + 0.5) * dx + lo[2] : 0;
             out.dx[q] = dx;
           }
     }
     return out;
+  }
+
+  /**
+   * Write every leaf's conserved state back, in the order of readLeaves(), on the mesh it was read
+   * from, and start the clock again from 0 with the potential of that state, as Sim.setState does
+   * (validation: a test that stops the gas to settle it).
+   */
+  setLeaves(u1: Float32Array, u2: Float32Array) {
+    this.flush();
+    const depth = this.cfg.ndim === 3 ? BS : 1;
+    const per = BS * BS * depth * 4;
+    const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
+    this.tree.leaves().forEach((b, i) => {
+      const origin = this.origin(b.slot);
+      this.device.queue.writeTexture({ texture: this.state[this.cur][0], origin }, u1.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+      this.device.queue.writeTexture({ texture: this.state[this.cur][1], origin }, u2.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+    });
+    this.device.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
+    this.refreshPotential();
   }
 
   /**

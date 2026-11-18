@@ -5,6 +5,7 @@
 // out of range in a link is ignored rather than trusted.
 import { BOUNDARY_CODES, boundaryList } from '../problems/boundaries';
 import { configFor, type SimConfig } from '../sim';
+import { mirrorAxes, mirrorName } from '../domain';
 import { physicalEosParams, type EosParams } from '../eos/eos';
 import type { CoolingParams } from '../cooling/cooling';
 import { FIELDS, problemUnits, type Bc3, type Problem } from '../problems';
@@ -48,7 +49,7 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'resistivity' | 'dampRadius' | 'dampRate'>>;
+  cfg: Partial<Pick<SimConfig, 'symmetry' | 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'resistivity' | 'dampRadius' | 'dampRate'>>;
   eosParams: Partial<EosParams>;
   coolParams: Partial<CoolingParams>;
   fluff: Partial<SimConfig['fluff']>;
@@ -127,7 +128,8 @@ export function encodeLink(s: LinkState): URLSearchParams {
   q.set('n', String(cfg.n));
   if (cfg.amrLevels) q.set('amr', String(cfg.amrLevels));
 
-  const def = configFor(cfg.problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels });
+  // (With the run's mirrors: their planes' reflecting faces are theirs, not the link's to say.)
+  const def = configFor(cfg.problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels, symmetry: cfg.symmetry });
   // Units that follow the preset's parameters set the equation of state's physical constants: the
   // defaults to compare with are those of the run's parameters, which the link carries.
   if (typeof cfg.problem.units === 'function') Object.assign(def.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
@@ -141,7 +143,8 @@ export function encodeLink(s: LinkState): URLSearchParams {
   for (const o of LINKED) {
     if ((adaptiveOnly(o) && !cfg.amrLevels) || (coolingOnly(o) && cfg.cooling === 'off')) continue;
     const [a, b] = [at(cfg, o.cfg!) ?? 0, at(def, o.cfg!) ?? 0];
-    if (typeof a === 'boolean') str(o.linkKey!, flag(a), flag(!!b));
+    if (o.cfg === 'symmetry') str(o.linkKey!, mirrorName(cfg.symmetry), mirrorName(configFor(cfg.problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels }).symmetry));
+    else if (typeof a === 'boolean') str(o.linkKey!, flag(a), flag(!!b));
     else if (typeof a === 'number' && o.control.type === 'number') num(o.linkKey!, a, b as number);
     else str(o.linkKey!, String(a), String(b));
   }
@@ -299,6 +302,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
       v = raw === undefined ? undefined : c.choices.find((k) => String(k.value) === raw)!.value;
     } else if (c.type === 'check') v = bool(o.linkKey!);
     if (v === undefined) continue;
+    if (o.cfg === 'symmetry') v = mirrorAxes(v as string);
     const [head, key] = o.cfg!.split('.');
     if (key === undefined) (out.cfg as Record<string, unknown>)[head] = v;
     else (out[head as 'eosParams' | 'coolParams' | 'fluff' | 'driving'] as Record<string, unknown>)[key] = v;

@@ -7,7 +7,9 @@ struct Look {
 
 // At p, in the box [-0.5, 0.5]^3.
 fn vol_look(p: vec3<f32>) -> Look {
-  return Look(textureSampleLevel(VOL, S, p + 0.5, 0.0), 1.0 / C.q.z);
+  // (Mirror images shown: the view's box is the whole configuration, its cells half as wide.)
+  let q = mirror_fold(p);
+  return Look(textureSampleLevel(VOL, S, q + 0.5, 0.0), select(1.0, 0.5, C.mir.x != 0.0) / C.q.z);
 }
 
 // How far the ray moves past a sample: C.p.w samples across the box.

@@ -63,6 +63,7 @@ export const VIEW_OPTIONS = [
   { key: 'box', link: 'box', type: 'boolean', doc: 'Volume view: outline the box (on by default)' },
   { key: 'fieldLines', link: 'flines', type: 'boolean', doc: 'A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function' },
   { key: 'fieldLineCount', link: 'nflines', type: 'int', min: 1, max: MAX_FIELD_LINES, doc: 'How many field lines' },
+  { key: 'mirrorImages', link: 'mirror', type: 'boolean', doc: 'An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default)' },
 ] as const satisfies readonly ViewOption[];
 
 /** What `shaderous.view()` takes besides: settings that are not part of the view's own state. */

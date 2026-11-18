@@ -41,6 +41,7 @@ import { initialFaces, setMhdSlabBytes } from '../mhd/mhd';
 import { RefMhd } from '../reference/mhd';
 import { setMhdScratchBytes } from '../mhd/amr_mhd';
 import { BS, PAD as PAD_BLOCK } from '../amr/tree';
+import { FRAME_TESTS } from './frames';
 
 export interface TestResult {
   id: string;
@@ -51,7 +52,7 @@ export interface TestResult {
   seconds: number;
 }
 
-interface TestDef {
+export interface TestDef {
   id: string;
   name: string;
   criterion: string;
@@ -3914,6 +3915,8 @@ export const TESTS: TestDef[] = [
       return { pass, metrics: m };
     },
   },
+  // Non-inertial frames and coordinate systems (validation/frames.ts).
+  ...FRAME_TESTS,
 ];
 
 export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {

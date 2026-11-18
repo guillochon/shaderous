@@ -7,7 +7,7 @@ import type { PointMass } from '../problems/types';
 import { COMPOSITIONS, composition, type Composition } from '../units/composition';
 import { codeG, type UnitSystem } from '../units/units';
 import { compileSetup } from './compile';
-import { PART_OPTIONS, ruleIssues, type Issue } from './options';
+import { FACTS, PART_OPTIONS, ruleIssues, type Issue } from './options';
 import { buildBodies, partIds, type Bodies, type BuiltStar } from './parts/bodies';
 import { FLOWS } from './parts/flow';
 import type { DiskPart, OrbitPart, Part, SetupSpec } from './spec';
@@ -16,6 +16,8 @@ import { unitSystem } from './units';
 export interface CheckEnv {
   /** GPU memory the document's grid needs and what the page may take, in bytes (SetupHost.memory) */
   memory?: { need: number; budget: number } | null;
+  /** What the simulators would refuse in it as the page loads it (sim.ts refusal): an error, since it would not load */
+  refusal?: string | null;
 }
 
 /** A setup's bodies as far as they can be built from the document alone. */
@@ -255,6 +257,23 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     }
   };
   guard(() => out.push(...ruleIssues(spec)));
+  if (env.refusal) out.push({ level: 'error', text: env.refusal });
+  // A shearing box's equilibrium is the background flow v_y = -q Omega x: gas started at rest
+  // is flung about by the tidal and Coriolis forces (densities 0.4 to 6 in a box of uniform gas).
+  guard(() => {
+    if (!spec.physics?.shear) return;
+    const flows = partsOf(spec).filter((p) => p.kind === 'flow').map((p) => (p as { name: string }).name);
+    if (!flows.some((n) => n === 'shearing-wave' || n === 'shearing-noise'))
+      out.push({ level: 'warning', path: 'physics.shear', text: 'Shearing box: the initial state should hold the background flow v_y = -q Omega x (the shearing-noise or shearing-wave flow), or the gas starts far from equilibrium' });
+  });
+  // A sink empties its neighborhood to the density floor, where a field's Alfven speed sets the
+  // step: without a cap on it (Hydro: tenuous-gas caps, va) the run crawls (a disk with B = 1e-3
+  // around a sink advanced 50 times slower than without the field).
+  guard(() => {
+    const sink = partsOf(spec).some((p) => p.kind === 'mass' && ((p as { sink?: number }).sink ?? 0) > 0);
+    if (sink && FACTS['magnetic'].of(spec) && !((spec.physics?.fluff?.va ?? 0) > 0))
+      out.push({ level: 'warning', path: 'physics.fluff.va', text: 'A magnetic field around a sink: the gas the sink empties sets the timestep by its Alfven speed. Set an Alfven speed cap (Hydro, tenuous-gas caps), as the magnetized disk does' });
+  });
 
   // Fuel to ash burning: both are species the gas carries, and a flow with its own burning wins.
   guard(() => {

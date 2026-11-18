@@ -61,8 +61,20 @@ describe('the option table', () => {
   it('says why an option is not available', () => {
     const spec: SetupSpec = { ...emptySetup(), domain: { ndim: 2 }, physics: { gravity: 'isolated', eos: 'barotropic', cooling: 'ism' } };
     const text = ruleIssues(spec).map((i) => i.text).join('\n');
-    expect(text).toMatch(/Gravity: Self, isolated: needs Dimensions: 3D/);
+    expect(text).toMatch(/Gravity: Self, isolated: needs 3D, or an axisymmetric \(R, z\) or spherical \(r, theta\) run/);
     expect(text).toMatch(/Cooling function.*needs An equation of state with an energy/);
+  });
+
+  it('takes a star with isolated self-gravity in an axisymmetric (R, z) run', () => {
+    const spec: SetupSpec = {
+      ...emptySetup(),
+      domain: { ndim: 2, supports2d: true, geometry: 'cylindrical', bc: { lo: [2, 1, 0], hi: [1, 1, 0] } },
+      physics: { gravity: 'isolated', G: 1 },
+      parts: [{ kind: 'star', type: 'polytrope', n: 1, rhoc: 1, radius: 0.2 }],
+    };
+    expect(ruleIssues(spec).filter((i) => i.level === 'error')).toEqual([]);
+    // The same in a flat 2D run is refused.
+    expect(ruleIssues({ ...spec, domain: { ...spec.domain, geometry: 'cartesian' } }).some((i) => i.level === 'error')).toBe(true);
   });
 
   it('finds the option a featured path leads to, in every preset', () => {

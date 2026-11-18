@@ -130,13 +130,26 @@ export interface PartOption {
 
 const parts = (s: SetupSpec) => s.parts ?? [];
 const count = (s: SetupSpec, f: (p: Part) => boolean) => parts(s).filter(f).length;
-const faces = (s: SetupSpec): number[] => [...(s.domain?.bc?.lo ?? [1, 1, 1]), ...(s.domain?.bc?.hi ?? [1, 1, 1])];
+// A 2D run has no z faces: what its document says of them does not count.
+const faces = (s: SetupSpec): number[] => {
+  const k = (s.domain?.ndim ?? 3) === 2 ? 2 : 3;
+  return [...(s.domain?.bc?.lo ?? [1, 1, 1]).slice(0, k), ...(s.domain?.bc?.hi ?? [1, 1, 1]).slice(0, k)];
+};
 const flowDef = (p: Part) => (p.kind === 'flow' ? FLOWS[p.name] : undefined);
 
 /** What rules are about: each a named property of a setup, with how to say it. */
 export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value; say?: (v: Value) => string }> = {
   'domain.ndim': { label: 'Dimensions', of: (s) => s.domain?.ndim ?? 3, say: (v) => `${v}D` },
   'domain.supports2d': { label: 'A setup that makes sense in 2D', of: (s) => s.domain?.supports2d ?? false },
+  // Space in three dimensions: a 3D grid, or a 2D one in (R, z), whose cells are rings.
+  'domain.space3': { label: '3D, or an axisymmetric (R, z) or spherical (r, theta) run', of: (s) => (s.domain?.ndim ?? 3) === 3 || ['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
+  'gravity.selfFlat': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') && !['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
+  'parts.starFlat': { label: 'A star', of: (s) => count(s, (p) => p.kind === 'star') > 0 && s.domain?.geometry !== 'cylindrical' },
+  'domain.geometry': { label: 'Geometry', of: (s) => s.domain?.geometry ?? 'cartesian', say: (v) => (v === 'cylindrical' ? 'axisymmetric (R, z)' : String(v)) },
+  'symmetric.x': { label: 'A setup symmetric under the x mirror', of: (s) => !!s.domain?.symmetric?.includes('x') },
+  'symmetric.y': { label: 'A setup symmetric under the y mirror', of: (s) => !!s.domain?.symmetric?.includes('y') },
+  'symmetric.z': { label: 'A setup symmetric under the z mirror', of: (s) => !!s.domain?.symmetric?.includes('z') },
+  'symmetric.field': { label: 'A magnetic field symmetric under the mirrors, or none', of: (s) => !!s.domain?.symmetricField || !FACTS.magnetic.of(s) },
   'mesh.adaptive': { label: 'An adaptive mesh', of: (s) => (s.domain?.amr ?? 0) > 0 },
   'physics.eos': { label: 'Equation of state', of: (s) => s.physics?.eos ?? 'ideal', say: (v) => EOS_LABELS[v as keyof typeof EOS_LABELS] ?? String(v) },
   'eos.energy': { label: 'An equation of state with an energy', of: (s) => (s.physics?.eos ?? 'ideal') !== 'barotropic' },
@@ -208,6 +221,10 @@ const ENERGY: Rule[] = [{ fact: 'eos.energy' }];
 const SELF: Rule[] = [{ fact: 'gravity.self' }];
 const ADAPTIVE: Rule[] = [{ fact: 'mesh.adaptive' }];
 const IN_3D: Rule[] = [{ fact: 'domain.ndim', is: 3 }];
+/** 3D, or 2D in (R, z): bodies of revolution about the axis. */
+const IN_SPACE: Rule[] = [{ fact: 'domain.space3' }];
+/** The mirror sets a domain may name (src/domain.ts mirrorAxes). */
+const MIRRORS = ['none', 'x', 'y', 'z', 'xy', 'xz', 'yz', 'xyz'];
 const NOT_PERIODIC: Rule[] = [{ fact: 'bc.periodic', reason: 'Not available with a periodic face: its gravity is not periodic' }];
 
 export const BC_CHOICES: Choice[] = BOUNDARIES.map((b) => ({
@@ -237,10 +254,27 @@ export const OPTIONS: Option[] = [
   { path: 'view.pitch', label: 'Camera elevation', tip: 'Elevation of the volume view’s camera when the setup opens, in radians', page: 'run', control: num(-1.5, 1.5, { step: 0.05 }), apply: 'live', default: 0.45 },
 
   // ---- domain and grid ----
-  { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D' }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.self' }, { fact: 'parts.star' }] }), apply: 'restart', linkKey: 'dim' },
+  { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: ['cylindrical', 'spherical'] }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) or spherical run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }), apply: 'restart', linkKey: 'dim' },
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level', page: 'domain', control: num(16, 16384, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
   { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, 5, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },
+  { path: 'domain.geometry', label: 'Geometry', tip: 'Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings; or in (r, theta): x is then r from the inner radius to the box side, y theta from pole to pole', page: 'domain', apply: 'restart', default: 'cartesian',
+    control: pick({ value: 'cartesian', label: 'Cartesian' }, { value: 'cylindrical', label: 'Axisymmetric (R, z)', requires: [{ fact: 'domain.ndim', is: 2, reason: 'An axisymmetric run is two-dimensional' }] }, { value: 'spherical', label: 'Spherical (r, theta)', requires: [{ fact: 'domain.ndim', is: 2, reason: 'A spherical run is two-dimensional' }] }) },
+  { path: 'domain.rMin', label: 'Inner radius', tip: 'A spherical (r, theta) run: the radius of its inner face (above zero); the box side is then its outer radius', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 0.01 },
+  { path: 'domain.logR', label: 'Logarithmic in r', tip: 'A spherical (r, theta) run: cells spaced evenly in ln r, so that they stay about as long as they are wide, rather than evenly in r', page: 'domain', control: check, apply: 'restart', default: false },
+  { path: 'domain.symmetric', label: 'Symmetric under', tip: 'The mirrors (planes through the origin, named by the axis normal to each) the setup is symmetric under: a run may then compute only the part above them', page: 'domain', apply: 'live', default: 'none',
+    control: pick(...MIRRORS.map((m): [Value, string] => [m, m === 'none' ? 'No mirror' : m.split('').join(', ')])) },
+  { path: 'domain.symmetricField', label: 'Field symmetric too', tip: 'The magnetic field is symmetric under those mirrors as well (a vector potential odd in its normal component and even in the others)', page: 'domain', control: check, apply: 'live', default: false },
+  { path: 'domain.mirror', label: 'Mirror symmetry', tip: 'Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost', page: 'domain', apply: 'restart', default: 'none', linkKey: 'sym', cfg: 'symmetry',
+    control: pick(...MIRRORS.map((m): Choice => ({
+      value: m,
+      label: m === 'none' ? 'Whole box' : m === 'xyz' ? 'Octant (x, y, z)' : m === 'xy' ? 'Quadrant (x, y)' : `Mirrored in ${m.split('').join(', ')}`,
+      requires: m === 'none' ? [] : [
+        ...m.split('').map((a): Rule => ({ fact: `symmetric.${a}`, reason: `The setup is not symmetric under the ${a} mirror` })),
+        ...(m.includes('z') ? IN_3D : []),
+        { fact: 'symmetric.field', reason: 'The magnetic field is not symmetric under the mirrors' },
+      ],
+    }))) },
   { path: 'domain.supports2d', label: 'Makes sense in 2D', tip: 'The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only', page: 'domain', control: check, apply: 'live', default: false },
   { path: 'domain.units', label: 'Physical units', tip: 'What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units', page: 'domain', apply: 'restart',
     control: { type: 'group', optional: true,
@@ -327,16 +361,33 @@ export const OPTIONS: Option[] = [
   { path: 'physics.gravity', label: 'Gravity', tip: 'Off, a uniform field, or the self-gravity of the gas. Point masses pull either way', page: 'gravity', apply: 'live', default: 'off', linkKey: 'gravity', cfg: 'gravity',
     control: pickOf(GRAVITY_MODES,
       { value: 'off', label: 'Off', tip: 'No gravity (point masses still pull)' },
-      { value: 'constant', label: 'Constant', tip: 'A uniform field of strength G pointing down: -y in 2D, -z in 3D' },
+      { value: 'constant', label: 'Constant', tip: 'A uniform field of strength G pointing down: -y in 2D, -z in 3D', excludes: [{ fact: 'domain.geometry', is: 'spherical', reason: 'Not available in a spherical (r, theta) run: a uniform field has no place on its shells' }] },
       { value: 'periodic', label: 'Self, periodic', tip: 'Self-gravity of the gas in a periodic box (3D only)', requires: [...IN_3D, { fact: 'bc.allPeriodic' }], excludes: [{ fact: 'parts.star', reason: 'Not available with a star: a star’s gravity is not periodic' }] },
-      { value: 'isolated', label: 'Self, isolated', tip: 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D only)', requires: IN_3D, excludes: [{ fact: 'bc.periodic' }] },
+      { value: 'isolated', label: 'Self, isolated', tip: 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D, or an axisymmetric (R, z) or spherical run)', requires: IN_SPACE, excludes: [{ fact: 'bc.periodic' }] },
     ) },
   { path: 'physics.G', label: 'G', tip: 'Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them', page: 'gravity', control: num(0, undefined, { factor: 1.5 }), apply: 'live', default: 1, linkKey: 'G', cfg: 'G' },
-  { path: 'physics.gext', label: 'Uniform acceleration', tip: 'A uniform acceleration on the gas, besides the Constant field', page: 'gravity', control: { type: 'vec3' }, apply: 'restart', default: [0, 0, 0] },
+  { path: 'physics.gext', label: 'Uniform acceleration', tip: 'A uniform acceleration on the gas, besides the Constant field', page: 'gravity', control: { type: 'vec3' }, apply: 'restart', default: [0, 0, 0], excludes: [{ fact: 'domain.geometry', is: 'spherical', reason: 'Not available in a spherical (r, theta) run: a uniform field has no place on its shells' }] },
   { path: 'physics.vcycles', label: 'V-cycles', tip: 'Multigrid V-cycles per step for self-gravity. More converge the potential further, at more cost. On the adaptive mesh this is the most per step', page: 'gravity', control: num(1, 8, { integer: true, step: 1 }), apply: 'live', linkKey: 'vcycles', cfg: 'vcycles', requires: SELF },
   { path: 'physics.jeansFloor', label: 'Jeans floor', tip: 'Pressure floor that keeps the Jeans length resolved (Truelove)', page: 'gravity', control: check, apply: 'live', default: false, linkKey: 'jfloor', cfg: 'jeansFloor', requires: SELF },
   { path: 'physics.jeansCells', label: 'Cells per Jeans length', tip: 'The Jeans floor raises the pressure so the Jeans length spans at least this many cells', page: 'gravity', control: num(4, 32, { integer: true, step: 1 }), apply: 'live', default: 4, linkKey: 'jcells', cfg: 'jeansCells', requires: SELF },
   { path: 'physics.gravEnergyFlux', label: 'Conserve energy', tip: 'Flux-form gravitational work: conserves total energy', page: 'gravity', control: check, apply: 'live', default: true, linkKey: 'fluxwork', cfg: 'gravEnergyFlux', requires: SELF },
+  { path: 'physics.rotation.omega', label: 'Rotating frame Ω', tip: 'Angular velocity of a frame turning about an axis through the box center: the gas feels the Coriolis force (and the centrifugal force, below). Velocities are those in the turning frame. In 2D only the z part turns the plane. Zero: an inertial frame', page: 'gravity', control: { type: 'vec3' }, apply: 'restart', default: [0, 0, 0] },
+  { path: 'physics.rotation.centrifugal', label: 'Centrifugal force', tip: 'With a rotating frame: the centrifugal force as well as the Coriolis force. Off, the Coriolis force alone (an f-plane, as in a shearing box)', page: 'gravity', control: check, apply: 'restart', default: true },
+  { path: 'physics.shear', label: 'Shearing box', tip: 'The local model of a disk: a frame turning at Ω about z with the tidal pull of the shear, x radial, y along the orbit. Its x faces are periodic with the shift of the background flow v_y = -q Ω x, which the initial state should hold. Hydrodynamics on a uniform grid, periodic in y (and z unless stratified)', page: 'gravity', apply: 'restart',
+    control: { type: 'group', optional: true, fields: [
+      { path: 'omega', label: 'Ω', tip: 'Angular velocity of the frame', page: 'gravity', control: num(0, 1e6, { factor: 1.5 }), apply: 'restart', default: 1 },
+      { path: 'q', label: 'Shear q', tip: '-d ln Ω / d ln R: 1.5 for a Keplerian disk, 1 for a flat rotation curve', page: 'gravity', control: num(0, 2, { step: 0.1 }), apply: 'restart', default: 1.5 },
+      { path: 'stratified', label: 'Stratified', tip: 'The vertical tidal pull, -Ω² z, toward the midplane', page: 'gravity', control: check, apply: 'restart', default: false },
+    ] } },
+  { path: 'physics.cosmology', label: 'Comoving coordinates', tip: 'An expanding universe: positions comoving, densities comoving (mean 1), velocities peculiar, times in 1/H0 from the starting redshift. G follows from the matter density. A periodic box of gas, with or without self-gravity', page: 'gravity', apply: 'restart',
+    control: { type: 'group', optional: true, fields: [
+      { path: 'omegaM', label: 'Matter density Ω_m', tip: 'Matter density today, in units of the critical density', page: 'gravity', control: num(0, 10, { step: 0.05 }), apply: 'restart', default: 1 },
+      { path: 'omegaL', label: 'Cosmological constant Ω_Λ', tip: 'Its density today, in units of the critical density (the curvature makes up the rest)', page: 'gravity', control: num(0, 10, { step: 0.05 }), apply: 'restart', default: 0 },
+      { path: 'zStart', label: 'Starting redshift', tip: 'Redshift at t = 0', page: 'gravity', control: num(0, 1e4, { factor: 2 }), apply: 'restart', default: 99 },
+      { path: 'zEnd', label: 'Ending redshift', tip: 'Redshift the run stops at (it sets the end time)', page: 'gravity', control: num(0, 1e4, { factor: 2 }), apply: 'restart', default: 0 },
+      { path: 'boxMpc', label: 'Box size (Mpc/h)', tip: 'The box’s comoving side in Mpc/h. With it the run has physical units, and the readouts show proper densities, pressures and lengths at the current scale factor. Left out, the run is scale free', page: 'gravity', control: num(0, 1e5, { factor: 2 }), apply: 'restart' },
+      { path: 'h', label: 'Hubble constant h', tip: 'H0 in units of 100 km/s/Mpc, for the physical units a box size gives', page: 'gravity', control: num(0.1, 2, { step: 0.01 }), apply: 'restart', default: 0.7 },
+    ] } },
   { path: 'physics.frame', label: 'Frame', tip: 'An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box', page: 'gravity', apply: 'restart', default: 'inertial',
     control: pickOf(FRAMES, ['inertial', 'Inertial'], { value: 'gas', label: 'Follows the gas', requires: [{ fact: 'parts.mass' }] }, { value: 'masses', label: 'Follows the masses', requires: [{ fact: 'parts.mass' }] }) },
 
@@ -416,7 +467,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
   },
   star: {
     kind: 'star', label: 'Star', tip: 'A polytrope or a cold white dwarf, settled into the grid’s own hydrostatic balance before the run', max: 4,
-    requires: [...IN_3D, { fact: 'physics.gravity', is: 'isolated', reason: 'Needs isolated self-gravity: it is what holds a star together' }],
+    requires: [...IN_SPACE, { fact: 'physics.gravity', is: 'isolated', reason: 'Needs isolated self-gravity: it is what holds a star together' }],
     excludes: NOT_PERIODIC,
     make: () => ({ kind: 'star', type: 'polytrope', n: 1.5, mass: 1, radius: 0.2 }),
     fields: [
@@ -460,7 +511,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
           P({ path: 'from', label: 'Damping from r', tip: 'Radius from the box center where the damping zone starts', control: num(0, 1e30, { step: 0.25, quantity: 'length' }), default: 1, apply: 'live', linkKey: 'dampr', cfg: 'dampRadius' }),
           P({ path: 'rate', label: 'Damping rate', tip: 'How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off', control: num(0, 1e30, { step: 0.5 }), default: 3, apply: 'live', linkKey: 'damprate', cfg: 'dampRate' }),
         ] } }),
-      P({ path: 'loops', label: 'Field loops', tip: 'Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability (balanced profile)',
+      P({ path: 'loops', label: 'Field loops', tip: 'Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability',
         control: { type: 'group', optional: true, fields: [
           P({ path: 'beta', label: 'Plasma beta at the midplane', tip: 'Gas pressure over magnetic pressure where two loops meet: the larger, the weaker the field', control: num(1, 1e9, { factor: 2 }), default: 50 }),
           P({ path: 'span', label: 'Span of a loop', tip: 'Each loop spans this factor in radius', control: num(1.05, 4, { step: 0.05 }), default: 1.35 }),

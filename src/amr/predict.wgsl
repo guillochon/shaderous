@@ -10,6 +10,8 @@
 // with its own step, its ghosts included (per-block timesteps, amr/bins_on.wgsl).
 #include "hydro/common.wgsl"
 #include "gravity/ext_bind.wgsl"
+// (The expansion drag of comoving coordinates, gravity/frame_cosmo.wgsl, asks the equation of state.)
+#include <eos>
 #include <limiter>
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
@@ -71,7 +73,8 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   e[axis] = g_dx;
   seen += ext_dphi(blk_pos(slot, a), e * f32(ib - ia), 0.0);
   var face = seen;
-  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
+  // (A plane of mirror symmetry is no wall: the cell beyond it is the image, as for the state.)
+  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3 && !sym_lo(axis)) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
   if (wall) {
     a[axis] = ra;
     b[axis] = ra + 1;
@@ -85,6 +88,15 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
 // Cell l of block `slot` (a ghost, when predicted in place), half a step on.
 fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
   let c = atl(blk_origin(slot), l);
+  // An axisymmetric run: the cell's radius for the geometric terms (a ghost across the axis
+  // has none: the predictor skips them there).
+  if (cylindrical()) { g_cyl_r = f32(blk_coord(slot).x * BS + l.x) + 0.5; }
+  // A spherical run: the cell's lengths and geometric terms, at its global indices on its level.
+  if (spherical()) {
+    let sg = blk_sph(slot, l);
+    g_hr = vec3<f32>(sg.h, 1.0);
+    g_sph_geo = vec2<f32>(sg.ir, sg.cot);
+  }
   let q = load_q(c);
   var zm = q;
   var zp = q;
@@ -135,7 +147,8 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
   let inv = inv_flat(wid, lix, 1);
   if (!inv.ok) { return; }
-  g_dx = blk_dx(inv.slot);
+  g_dx = cell_dx(blk_dx(inv.slot), clock.ah);
+  if (cosmo_on()) { g_a3 = clock.a * clock.a * clock.a; }
   g_dt = blk_dt(inv.slot);
   let s = ghost_src(inv.slot, inv.l);
   if (s.kind == 2) { return; }

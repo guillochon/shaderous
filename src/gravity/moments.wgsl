@@ -5,6 +5,32 @@
 // Written out term by term, to order 4 (MP_ORDER; MP_COUNT terms): with every index a constant
 // the record stays in registers, where a loop over the terms kept it in each thread's local
 // memory (gpu/reduce.ts says why that matters). Powers multiply up from x as mp_pow() does.
+// An axisymmetric (R, z) run's cell is a ring of mass m and radius R about the y axis, at
+// height y: its moments are the ring's, x^a z^c averaged around it (nonzero for a and c even:
+// <cos^2> = <sin^2> = 1/2, <cos^4> = <sin^4> = 3/8, <cos^2 sin^2> = 1/8). The center of mass is
+// then on the axis, and gravity/multipole_eval.wgsl's expansion is the ring's as it stands.
+fn mp_ring_moments(m: f32, R: f32, y: f32) -> Red {
+  let r2 = R * R;
+  let r4 = r2 * r2;
+  let y2 = y * y;
+  var r: Red;   // zero-initialized: the moments odd in x or z stay 0
+  r[0] = m;
+  r[2] = m * y;
+  r[4] = 0.5 * m * r2;
+  r[7] = m * y2;
+  r[9] = 0.5 * m * r2;
+  r[11] = 0.5 * m * r2 * y;
+  r[16] = m * y2 * y;
+  r[18] = 0.5 * m * r2 * y;
+  r[20] = 0.375 * m * r4;
+  r[23] = 0.5 * m * r2 * y2;
+  r[25] = 0.125 * m * r4;
+  r[30] = m * y2 * y2;
+  r[32] = 0.5 * m * r2 * y2;
+  r[34] = 0.375 * m * r4;
+  return r;
+}
+
 fn mp_moments(m: f32, x: vec3<f32>) -> Red {
   let x1 = x.x;
   let x2 = x1 * x1;

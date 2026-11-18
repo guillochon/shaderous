@@ -1,8 +1,8 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
-import { FACE_KEYS, noWallVelocity, type WallVelocity } from './problems/boundaries';
+import { FACE_KEYS, noWallVelocity, PERIODIC, REFLECT, type WallVelocity } from './problems/boundaries';
 import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareHelmholtz } from './eos/helmholtz';
-import { assemble } from './gpu/shaders';
+import { assemble, shaderFiles } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
@@ -13,7 +13,7 @@ import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
 import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
-import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
+import { comovingEosSlot, defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
@@ -25,6 +25,10 @@ import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisRe
 import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
+import { domainLo, gridDims, rectangular } from './domain';
+export { gridDims, rectangular } from './domain';
+import { spherical, sphGrid, sphParams } from './spherical';
+import { hubble, omegaK, scaleFactor, type Cosmology } from './cosmo';
 
 import type { LimiterKind, RiemannKind } from './problems/types';
 export { LIMITER_KINDS, RIEMANN_KINDS, type LimiterKind, type RiemannKind } from './problems/types';
@@ -146,6 +150,14 @@ export interface SimConfig {
   fluff: { rho: number; u: number; v: number; va?: number };
   /** With self-gravity, refine where the Jeans length is under this many cells (0 = off). */
   jeansRefine: number;
+  /**
+   * Mirror symmetry (Problem.symmetry): per axis, whether only the half above the plane through
+   * the origin is computed. That axis's domain is then [0, box] (src/domain.ts), its lower face
+   * is a plane of symmetry (reflecting for the gas, and marked in Params.sym so that gravity and
+   * the well-balanced reconstruction treat it as one), and the totals are reported for the whole
+   * configuration. configFor keeps only the axes the problem allows (none along z in 2D).
+   */
+  symmetry: [boolean, boolean, boolean];
 }
 
 /** One cell of the grid as the query tool reads it (Simulation.probe). */
@@ -317,6 +329,8 @@ export interface DisplayAtlas {
   slotsPerSide: number;
   /** root blocks per side, and the finest level */
   roots: number;
+  /** mask of the mirrored axes halved on a rectangular grid (src/domain.ts gridDims) */
+  halved?: number;
   levels: number;
   /** leaf slot per block of the finest level, and the list of leaf slots with how many there are */
   idx: GPUTexture;
@@ -332,17 +346,23 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     hi: [problem.bcHi[0], problem.bcHi[1], 0] as Bc3,
   };
   const params = Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value]));
-  return {
+  const cfg: Omit<SimConfig, 'symmetry'> & { symmetry?: [boolean, boolean, boolean] } = {
     n,
     ndim,
     gext: problem.gext?.(ndim) ?? [0, 0, 0],
     params,
     problem: sizedProblem(problem, params),
     eos: problem.eos,
-    eosParams: { ...defaultEosParams(), ...physicalEosParams(problemUnits(problem, params), problem.composition), ...problem.eosParams },
+    eosParams: {
+      ...defaultEosParams(),
+      ...physicalEosParams(problemUnits(problem, params), problem.composition),
+      ...problem.eosParams,
+      ...(problem.cosmology ? { comovingA3: problem.cosmology.aStart ** 3 } : {}),
+    },
     riemann: 'hllc',
     limiter: 'koren',
-    gravity: ndim === 2 && isSelfGravity(problem.gravity) ? 'off' : problem.gravity,
+    // (An axisymmetric run keeps it: it solves for its potential in (R, z).)
+    gravity: ndim === 2 && isSelfGravity(problem.gravity) && problem.geometry !== 'cylindrical' && problem.geometry !== 'spherical' ? 'off' : problem.gravity,
     G: problem.G,
     bcLo: ndim === 2 ? bc2.lo : problem.bcLo,
     bcHi: ndim === 2 ? bc2.hi : problem.bcHi,
@@ -360,7 +380,10 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // still cut the residual (amr/gravity/gate.wgsl), and three help where the potential
     // changes fast, as at the bounce of a stellar collision.
     vcycles: (over.amrLevels ?? 0) > 0 ? 3 : 2,
-    gravEnergyFlux: true,
+    // (A spherical run's energy takes gravity's work in kick form: with the flux form and the
+    // well-balanced reconstruction a settled polytrope's fundamental mode grew, 8% in 16 time
+    // units; docs/numerics.md section 22.)
+    gravEnergyFlux: problem.geometry !== 'spherical',
     wellBalanced: true,
     amrLevels: 0,
     amrBudget: 0,
@@ -386,6 +409,185 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     ...(problem.setup ? compiledFrom(problem.setup).overrides : {}),
     ...over,
   };
+  const want = cfg.symmetry;
+  return withSymmetry({ ...cfg, symmetry: [false, false, false] }, want);
+}
+
+/**
+ * The configuration with the mirrors `want` asks for, as far as the problem allows them: the
+ * mirrored axes' lower faces become reflecting (their planes of symmetry).
+ */
+export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefined): SimConfig {
+  // (A magnetic field must be declared symmetric too, or no mirror is offered: the whole box
+  // runs, as for a problem with no mirrors, rather than a link's mirror stopping the page.)
+  const fieldOk = !cfg.problem.mhd || !!cfg.problem.symmetry?.mhd;
+  const allowed = fieldOk ? (cfg.problem.symmetry?.axes ?? [false, false, false]) : [false, false, false];
+  const sym = [0, 1, 2].map((a) => !!want?.[a] && allowed[a] && (a < 2 || cfg.ndim === 3)) as [boolean, boolean, boolean];
+  // (An axisymmetric run's lower x face is its axis, which reflects as such a plane does.)
+  const bcLo = cfg.bcLo.map((b, a) => (sym[a] || (a === 0 && cylindrical(cfg)) || (a === 1 && spherical(cfg)) ? REFLECT : b)) as Bc3;
+  // (A spherical run's theta faces are both its axis: they reflect, v_phi odd across them.)
+  const bcHi = cfg.bcHi.map((b, a) => (a === 1 && spherical(cfg) ? REFLECT : b)) as Bc3;
+  return { ...cfg, symmetry: sym, bcLo, bcHi };
+}
+
+/** The run is axisymmetric, in (R, z) (Problem.geometry). */
+export const cylindrical = (c: SimConfig): boolean => c.problem.geometry === 'cylindrical' && c.ndim === 2;
+
+/**
+ * Why an axisymmetric run cannot go as configured, or null. The first version: hydrodynamics on
+ * a uniform 2D grid, with a uniform field along z (docs/numerics.md section 22).
+ */
+export function cylindricalUnsupported(c: SimConfig): string | null {
+  if (c.problem.geometry !== 'cylindrical') return null;
+  if (c.ndim !== 2) return 'an axisymmetric run is two-dimensional, in (R, z)';
+  if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available for axisymmetric runs yet';
+  if (c.problem.mhd && c.amrLevels > 0) return 'magnetic fields are not available for axisymmetric runs on blocks yet';
+  if (c.problem.mhd && c.resistivity > 0) return 'resistivity is not available in axisymmetric runs yet';
+  if (c.viscosity > 0) return 'viscosity is not available in axisymmetric runs yet (it needs the curvilinear stress)';
+  for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
+    if ((m.pos[0] ?? 0) !== 0 || (m.pos[2] ?? 0) !== 0 || (m.vel[0] ?? 0) !== 0 || (m.vel[2] ?? 0) !== 0) return 'a point mass must sit on the axis (R = 0) and move along it';
+  for (const p of c.problem.setup?.parts ?? []) {
+    if (p.kind === 'orbit') return 'an orbit puts its bodies off the axis: an axisymmetric run takes bodies only on it';
+    if (p.kind === 'star' && ((p.pos?.[0] ?? 0) !== 0 || (p.pos?.[2] ?? 0) !== 0 || (p.vel?.[0] ?? 0) !== 0 || (p.vel?.[2] ?? 0) !== 0)) return 'a star must sit on the axis (R = 0) and move along it';
+  }
+  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in axisymmetric runs yet';
+  if (c.problem.rotation || c.problem.shear || c.problem.cosmology) return 'an axisymmetric run has no rotating frame, shear or expansion';
+  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in axisymmetric runs yet';
+  if (uniformField(c)[0] !== 0) return 'a uniform field must lie along the axis';
+  if (c.driving.accel > 0) return 'turbulence driving is not available in axisymmetric runs';
+  if (c.gravity === 'periodic') return 'an axisymmetric run’s self-gravity is isolated (its axis is no periodic face)';
+  return null;
+}
+
+/**
+ * Why a run cannot go as configured, or null: what either simulator refuses before it builds
+ * anything (src/ui/api.ts check() and the Setup dialog ask the same, so a setup they pass loads).
+ */
+export function refusal(c: SimConfig): string | null {
+  const why: [string, string | null][] = [
+    ['MHD', mhdOn(c) ? mhdUnsupported(c) : null],
+    ['Mirror symmetry', symmetryUnsupported(c)],
+    ['Comoving coordinates', cosmologyUnsupported(c)],
+    ['Shearing box', shearUnsupported(c)],
+    ['Axisymmetric run', cylindricalUnsupported(c)],
+    ['Spherical run', sphericalUnsupported(c)],
+  ];
+  const hit = why.find(([, w]) => w);
+  return hit ? `${hit[0]}: ${hit[1]}` : null;
+}
+
+export { spherical } from './spherical';
+
+/**
+ * Why a spherical (r, theta) run cannot go as configured, or null: hydrodynamics in 2D, on the
+ * uniform grid or on blocks (per-block timesteps included), with the monopole of its own gravity
+ * and point masses at the origin (docs/numerics.md section 22).
+ */
+export function sphericalUnsupported(c: SimConfig): string | null {
+  if (c.problem.geometry !== 'spherical') return null;
+  if (c.ndim !== 2) return 'a spherical run is two-dimensional, in (r, theta)';
+  const s = c.problem.sphere;
+  if (!s || !(s.rMin > 0)) return 'a spherical run needs an inner radius above zero';
+  if (c.problem.mhd) return 'magnetic fields are not available in spherical runs yet';
+  if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in spherical runs yet';
+  for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
+    if (m.pos.some((x) => (x ?? 0) !== 0) || m.vel.some((v) => (v ?? 0) !== 0)) return 'a point mass must sit at the origin, at rest';
+  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in spherical runs yet';
+  if (c.problem.rotation || c.problem.shear || c.problem.cosmology || c.problem.frame) return 'a spherical run has no rotating or accelerating frame, shear or expansion';
+  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in spherical runs (both poles are in the grid)';
+  if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in spherical runs';
+  if (c.driving.accel > 0 || c.problem.damping) return 'driving and damping zones are not available in spherical runs';
+  if (c.gravity === 'periodic') return 'a spherical run\u2019s self-gravity is its monopole (isolated), not periodic';
+  if (c.problem.debris) return 'debris tallies are not available in spherical runs';
+  if (c.problem.burn) return 'burning is not available in spherical runs';
+  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'star')) return 'stars are not settled in spherical runs yet';
+  if (c.bcLo[0] === PERIODIC || c.bcHi[0] === PERIODIC) return 'the radial faces of a spherical run cannot be periodic';
+  if (c.problem.sphere?.log && c.n & (c.n - 1)) return 'a spherical run needs a power-of-two grid';
+  return null;
+}
+
+/** The run's background expansion (Problem.cosmology), or null. */
+export function cosmologyOf(c: SimConfig): Cosmology | null {
+  return c.problem.cosmology ?? null;
+}
+
+/**
+ * Why a run in comoving coordinates cannot go as configured, or null. The first version is a
+ * periodic box of ideal gas, with or without self-gravity, on a uniform grid or on blocks that
+ * share one timestep (docs/numerics.md section 22).
+ */
+export function cosmologyUnsupported(c: SimConfig): string | null {
+  if (!cosmologyOf(c)) return null;
+  if (c.problem.masses) return 'point masses and sinks are not available in comoving coordinates';
+  if (![...c.bcLo, ...c.bcHi].every((b) => b === PERIODIC)) return 'comoving coordinates need a periodic box';
+  if (c.gravity !== 'off' && c.gravity !== 'periodic') return 'comoving coordinates take periodic self-gravity or none';
+  if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in comoving coordinates';
+  if (c.eos === 'helmholtz') return 'the tabulated stellar equation of state is not available in comoving coordinates';
+  if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in comoving coordinates';
+  if (c.problem.mhd) return 'magnetic fields are not available in comoving coordinates yet';
+  if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available in comoving coordinates (each block would expand by its own a)';
+  if (c.amrLevels > 0 && isSelfGravity(c.gravity) && c.jeansRefine > 0) return 'refining on the Jeans length is not available in comoving coordinates (set it to 0)';
+  if (c.jeansFloor) return 'the Jeans pressure floor is not available in comoving coordinates';
+  if (rotating(c) || c.problem.shear) return 'a rotating frame is not available in comoving coordinates';
+  if (c.driving.accel > 0 || c.problem.damping) return 'driving and damping zones are not available in comoving coordinates';
+  return null;
+}
+
+/**
+ * Why a shearing box cannot go as configured, or null. The first version: hydrodynamics on a
+ * uniform grid, periodic along y (and z), without self-gravity (docs/numerics.md section 22).
+ */
+export function shearUnsupported(c: SimConfig): string | null {
+  const s = c.problem.shear;
+  if (!s) return null;
+  if (c.amrLevels > 0) return 'the adaptive mesh is not available for a shearing box (a block\u2019s neighbors across the boundary change with time)';
+  if (c.problem.mhd && (c.resistivity > 0 || c.viscosity > 0)) return 'resistivity and viscosity are not available in a magnetized shearing box yet';
+  if (c.bcLo[0] !== PERIODIC || c.bcHi[0] !== PERIODIC || c.bcLo[1] !== PERIODIC || c.bcHi[1] !== PERIODIC) return 'a shearing box is periodic along x (with the shear) and y';
+  if (c.ndim === 3 && !s.stratified && (c.bcLo[2] !== PERIODIC || c.bcHi[2] !== PERIODIC)) return 'an unstratified shearing box is periodic along z';
+  if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available in a shearing box';
+  if (c.problem.rotation || cosmologyOf(c)) return 'a shearing box has its own rotation and no expansion';
+  if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in a shearing box yet';
+  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in a shearing box';
+  return null;
+}
+
+/** The shearing box's offset of its x faces along y at `time` (Part D), or 0. */
+export function shearOffset(c: SimConfig, time: number): number {
+  const s = c.problem.shear;
+  if (!s) return 0;
+  const L = c.problem.box;
+  const d = (s.q * s.omega * L * time) % L;
+  return d < 0 ? d + L : d;
+}
+
+/** How many axes are mirrored: the computed part is 2^-k of the whole configuration. */
+export const mirrors = (c: SimConfig): number => (c.symmetry ?? []).filter(Boolean).length;
+
+/**
+ * Why a run with mirror symmetry cannot go as configured, or null. What the mirrors would get
+ * wrong is refused rather than run: anything that is not itself symmetric under them.
+ */
+export function symmetryUnsupported(c: SimConfig): string | null {
+  const sym = c.symmetry ?? [false, false, false];
+  if (!sym.some(Boolean)) return null;
+  const axes = [0, 1, 2].filter((a) => sym[a]);
+  const name = (a: number) => 'xyz'[a];
+  for (const a of axes) {
+    if (c.bcHi[a] === PERIODIC) return `the upper ${name(a)} face is periodic, which a plane of symmetry at the lower one cannot be`;
+    if (uniformField(c)[a] !== 0) return `the uniform field has a part along ${name(a)}, across a plane of symmetry`;
+  }
+  if (c.gravity === 'periodic') return 'periodic self-gravity needs a periodic box';
+  if (c.problem.mhd && !c.problem.symmetry?.mhd) return 'the magnetic field is not symmetric under the mirrors';
+  if (c.driving.accel > 0) return 'turbulence driving is not symmetric under the mirrors';
+  const w = rotationOf(c);
+  for (const a of axes)
+    for (let b = 0; b < 3; b++) if (b !== a && w[b] !== 0) return `a frame turning about an axis other than ${name(a)} is not symmetric under the ${name(a)} mirror`;
+  for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
+    for (const a of axes) if ((m.pos[a] ?? 0) !== 0 || (m.vel[a] ?? 0) !== 0) return `a point mass lies or moves off the ${name(a)} plane of symmetry`;
+  const stars = (c.problem.setup?.parts ?? []).filter((p) => p.kind === 'star');
+  if (stars.length > 1) return 'more than one star: settling handles one, on the planes';
+  for (const s of stars) for (const a of axes) if (((s as { pos?: number[] }).pos?.[a] ?? 0) !== 0) return `a star lies off the ${name(a)} plane of symmetry`;
+  return null;
 }
 
 /**
@@ -404,7 +606,8 @@ export const burnSpec = (c: SimConfig): AnyBurnSpec | null => c.problem.burn?.(c
 /** The modules the hydro shaders are assembled with. */
 export function hydroSlots(c: SimConfig): Record<string, string> {
   return {
-    eos: EOS_MODULES[c.eos],
+    // Comoving coordinates: the module behind wrappers that convert to proper densities.
+    eos: cosmologyOf(c) ? comovingEosSlot(c.eos, shaderFiles) : EOS_MODULES[c.eos],
     riemann: `hydro/riemann/${c.riemann}.wgsl`,
     limiter: `hydro/limiters/${c.limiter}.wgsl`,
     cooling: COOLING_MODULES[c.cooling],
@@ -418,8 +621,31 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     comp: problemCompSlot(c.problem, c.eosParams.gamma, speciesGroups(c.problem)),
     // Whether the update tallies the gas leaving the box by its orbital energy (debris/debris.ts).
     debris: debrisSlot(c),
+    // Forces of a non-inertial frame that depend on the velocity (gravity/frame_off.wgsl): a
+    // rotating frame's Coriolis force, or the expansion drag of comoving coordinates.
+    frame: cosmologyOf(c) ? 'gravity/frame_cosmo.wgsl' : rotating(c) ? 'gravity/frame_rot.wgsl' : 'gravity/frame_off.wgsl',
+    // A spherical run (hydro/common.wgsl spherical()).
+    geometry: `const SPHERICAL = ${spherical(c)};\n`,
   };
 }
+
+/**
+ * A rotating frame (Problem.rotation) as Params.rot holds it: the angular velocity, and 1 for
+ * the centrifugal force. In 2D only the part along z can turn the plane into itself.
+ */
+export function rotationOf(c: SimConfig): [number, number, number, number] {
+  // A shearing box turns about z: the Coriolis force alone, its tidal force taking the place of
+  // the centrifugal one (gravity/rot.wgsl).
+  if (c.problem.shear) return [0, 0, c.problem.shear.omega, 0];
+  const r = c.problem.rotation?.(c.params, c.ndim);
+  if (!r) return [0, 0, 0, 0];
+  const w: [number, number, number] = c.ndim === 2 ? [0, 0, r.omega[2]] : [...r.omega];
+  if (w.every((x) => x === 0)) return [0, 0, 0, 0];
+  return [...w, r.centrifugal === false ? 0 : 1];
+}
+
+/** The run is in a rotating frame. */
+export const rotating = (c: SimConfig): boolean => rotationOf(c).some((x) => x !== 0);
 
 const NO_DAMPING = 'const DAMPING = false;\nfn damping_target(x: vec3<f32>) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n';
 
@@ -681,17 +907,52 @@ export function packBrush(b: BrushOp): ArrayBuffer {
 /** Channels of the diagnostics reduction (DIAG_OPS). */
 const DIAG_CHANNELS = 24;
 /** Number of floats the diagnostics readback holds: clock (4), reduction, the Masses block. */
-export const DIAG_FLOATS = 4 + DIAG_CHANNELS + MASS_FLOATS;
+/** Floats and bytes of the clock (hydro/common.wgsl Clock). */
+export const CLOCK_FLOATS = 10;
+export const CLOCK_BYTES = 4 * CLOCK_FLOATS;
+
+/**
+ * The clock as a run starts it, at `time` after `steps` steps: (dt, t, Kahan compensation,
+ * steps), then the scale factor at t three times and the expansion rate (Part C; 1, 1, 1, 0
+ * without comoving coordinates), then the shearing box's offset and its compensation.
+ */
+export function clockState(c: SimConfig, time = 0, steps = 0): Float32Array<ArrayBuffer> {
+  const k = cosmologyOf(c);
+  const a = k ? scaleFactor(k, time) : 1;
+  const shear = shearOffset(c, time);
+  return new Float32Array([0, time, 0, steps, a, a, a, k ? hubble(k, a) : 0, shear, 0]);
+}
+
+export const DIAG_FLOATS = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS;
 
 /** Burning's heating rate texture where a run does not burn: one texel of nothing. */
 export function noHeat(d: GPUDevice): GPUTexture {
   return d.createTexture({ label: 'no nuclear heating', size: [1, 1, 1], dimension: '3d', format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
 }
 
-/** Decode a diagnostics readback: [clock (4), reduction channels, the Masses block]. */
+/** Where Params.cosmo.w (the state's scale factor, read by cosmo_a3 in hydro/common.wgsl) lies. */
+export const PARAM_SCALE_BYTE = (108 + 3) * 4;
+
+/**
+ * Comoving coordinates: copy the scale factor at the end of the last step (clock.a1) into
+ * Params.cosmo.w, so that passes without the clock (the timestep's rates, the diagnostics, the
+ * display) convert the equation of state at the state's own a. Encoded between passes.
+ */
+export function syncScale(enc: GPUCommandEncoder, c: SimConfig, clock: GPUBuffer, params: GPUBuffer): void {
+  if (cosmologyOf(c)) enc.copyBufferToBuffer(clock, 6 * 4, params, PARAM_SCALE_BYTE, 4);
+}
+
+/** Comoving coordinates: the state's scale factor from the clock (where the last step ended, a1). */
+export function withScale(d: Diagnostics, clock: Float32Array): Diagnostics {
+  d.scale = clock[6];
+  d.redshift = 1 / clock[6] - 1;
+  return d;
+}
+
+/** Decode a diagnostics readback: [clock (CLOCK_FLOATS), reduction channels, the Masses block]. */
 export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
-  const r = a.subarray(4);
-  const masses = unpackMasses(a.subarray(4 + DIAG_CHANNELS), nMasses);
+  const r = a.subarray(CLOCK_FLOATS);
+  const masses = unpackMasses(a.subarray(CLOCK_FLOATS + DIAG_CHANNELS), nMasses);
   const ranges: [number, number][] = [];
   for (let i = 0; i < 5; i++) ranges.push([r[10 + 2 * i], r[11 + 2 * i]]);
   return {
@@ -715,13 +976,42 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
   };
 }
 
+/**
+ * Diagnostics of a run with mirror symmetry, for the whole configuration: the grid holds one
+ * 2^k-th of it. Extensive totals (mass, energies, burning's heating, the field's energy) are
+ * times 2^k; momentum and the center of mass are zero along the mirrored axes and times 2^k
+ * (momentum) or unchanged (center) along the others. Cell counts stay the grid's.
+ */
+export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] | undefined, axisymmetric = false): Diagnostics {
+  // An axisymmetric run's rings have no net radial or azimuthal momentum, and their center of
+  // mass is on the axis: what is left is along z (code y).
+  if (axisymmetric) {
+    d.momentum = [0, d.momentum[1], 0];
+    d.com = [0, d.com[1], 0];
+  }
+  d.symmetry = [0, 1, 2].map((a) => !!symmetry?.[a]) as [boolean, boolean, boolean];
+  const k = d.symmetry.filter(Boolean).length;
+  if (!k) return d;
+  const f = 2 ** k;
+  d.mass *= f;
+  d.eKin *= f;
+  d.eInt *= f;
+  d.eGrav *= f;
+  d.eTot *= f;
+  d.nuclearHeating *= f;
+  d.momentum = d.momentum.map((p, a) => (d.symmetry![a] ? 0 : p * f)) as [number, number, number];
+  d.com = d.com.map((x, a) => (d.symmetry![a] ? 0 : x)) as [number, number, number];
+  if (d.magnetic) d.magnetic.eMag *= f;
+  return d;
+}
+
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 384;
+export const PARAM_BYTES = 496;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean },
+  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -729,7 +1019,8 @@ export function packParams(
   u.set([...c.bcLo, 0], 0);
   u.set([...c.bcHi, 0], 4);
   f.set(eosConstants1(c.eos, c.eosParams), 8);
-  u.set([...x.dims, 0], 12);
+  // The fourth: 1 on a rectangular uniform grid (gridDims; hydro/common.wgsl grid_n).
+  u.set([...x.dims, x.rect ? 1 : 0], 12);
   // 2D quantities are per unit length along z.
   f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, ...(x.refine ?? [0, 0])], 16);
   f.set([...uniformField(c), 0], 20);
@@ -741,7 +1032,11 @@ export function packParams(
   f[31] = c.problem.mhd && (fl.va ?? 0) > 0 ? fl.va! : 0;
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
+  // (Flux-form gravitational work, bit 0, is off in comoving coordinates: it charges the energy
+  // with the potential's differences, while the kick takes the proper field grad(phi) / a, so
+  // there the two disagreed by a factor a, and in cold gas E - KE was that disagreement. The kick
+  // form adds the kinetic energy the kick adds, exactly.)
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -765,6 +1060,20 @@ export function packParams(
   f.set(eosConstants2(c.eos, c.eosParams), 64);
   f.set([resists(c) ? c.resistivity : 0, 0, 0, 0], 68);
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
+  f.set([...domainLo(c), 0], 96);
+  f.set(rotationOf(c), 100);
+  // The fourth: a mask of the mirrored axes halved on a rectangular grid (src/domain.ts
+  // gridDims), for the block grid's fractions (amr/grid.wgsl cube_frac).
+  const gd = gridDims(c);
+  const halved = [0, 1, 2].reduce((m, a) => m | (gd[a] * 2 === c.n ? 1 << a : 0), 0);
+  u.set([...[0, 1, 2].map((a) => (a === 0 && cylindrical(c) ? 2 : c.symmetry?.[a] ? 1 : 0)), halved], 104);
+  const k = cosmologyOf(c);
+  // The fourth is the scale factor of the state (cosmo_a3, hydro/common.wgsl): the CPU's latest
+  // here, and the clock's own copied in by syncScale after every step.
+  f.set(k ? [k.omegaM, omegaK(k), k.omegaL, x.scale ?? k.aStart] : [0, 0, 0, 0], 108);
+  const sh = c.problem.shear;
+  f.set(sh ? [sh.omega, sh.q, sh.stratified ? 1 : 0, 1] : [0, 0, 0, 0], 112);
+  f.set(sphParams(c), 116);
   return buf;
 }
 
@@ -792,6 +1101,14 @@ export interface Diagnostics {
   perturber: [number, number, number] | null;
   /** the point masses as they are now */
   masses: Required<PointMass>[];
+  /**
+   * The mirrored axes (SimConfig.symmetry): the totals above are then those of the whole
+   * configuration, of which the grid holds one 2^k-th (unfoldDiagnostics).
+   */
+  symmetry?: [boolean, boolean, boolean];
+  /** Comoving coordinates: the scale factor of the state, and its redshift 1 / a - 1. */
+  scale?: number;
+  redshift?: number;
   /** [min, max] per renderable field, in FIELDS order */
   ranges: [number, number][];
   /**
@@ -810,10 +1127,10 @@ export interface RestartState {
 
 /** Read the clock and the point masses back, for a snapshot. */
 export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer, nMasses: number): Promise<RestartState> {
-  const buf = d.createBuffer({ size: 16 + MASS_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const buf = d.createBuffer({ size: CLOCK_BYTES + MASS_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = d.createCommandEncoder();
-  enc.copyBufferToBuffer(clock, 0, buf, 0, 16);
-  enc.copyBufferToBuffer(bh, 0, buf, 16, MASS_FLOATS * 4);
+  enc.copyBufferToBuffer(clock, 0, buf, 0, CLOCK_BYTES);
+  enc.copyBufferToBuffer(bh, 0, buf, CLOCK_BYTES, MASS_FLOATS * 4);
   d.queue.submit([enc.finish()]);
   await buf.mapAsync(GPUMapMode.READ);
   const f = new Float32Array(buf.getMappedRange().slice(0));
@@ -821,7 +1138,7 @@ export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer,
   buf.destroy();
   // The clock holds the start of the step last taken and its dt, banked as the next step
   // begins: the state is at their sum, as diagnosticsFrom has it.
-  return { time: f[1] + f[0], steps: f[3] + (f[0] > 0 ? 1 : 0), masses: nMasses ? unpackMasses(f.subarray(4), nMasses) : undefined };
+  return { time: f[1] + f[0], steps: f[3] + (f[0] > 0 ? 1 : 0), masses: nMasses ? unpackMasses(f.subarray(CLOCK_FLOATS), nMasses) : undefined };
 }
 
 /**
@@ -856,8 +1173,12 @@ export class Sim implements Simulation {
   onParams?: () => void;
   readonly device: GPUDevice;
   cfg: SimConfig;
+  /** cells along the longest axis: dx = box / n */
   readonly n: number;
-  /** cells along z: n, or 1 in 2D */
+  /** cells along x and y: n, or n / 2 along a halved mirrored axis (gridDims) */
+  readonly nx: number;
+  readonly ny: number;
+  /** cells along z: n (or n / 2), or 1 in 2D */
   readonly nz: number;
   readonly dx: number;
 
@@ -927,6 +1248,10 @@ export class Sim implements Simulation {
   private nMasses = 0;
   /** how many of them the preset (or a snapshot) brought, rather than addMass() */
   private nOwnMasses = 0;
+  /** a spherical run: the G M of its point masses, all at the origin (gravity/sph_monopole.wgsl) */
+  private centralGM = 0;
+  /** a spherical run's monopole gravity: its passes, their bind groups by parity, and its buffer */
+  private sphMono: { shells: GPUComputePipeline; enclose: GPUComputePipeline; field: GPUComputePipeline; g: GPUBindGroup[][]; buf: GPUBuffer } | null = null;
   private redBh!: MassSums;
   /** the point masses (gravity/bh.wgsl) */
   private bh: GPUBuffer;
@@ -957,7 +1282,7 @@ export class Sim implements Simulation {
     this.device = gpu.device;
     this.cfg = cfg;
     this.n = cfg.n;
-    this.nz = cfg.ndim === 2 ? 1 : cfg.n;
+    [this.nx, this.ny, this.nz] = gridDims(cfg);
     this.speciesGroups = speciesGroups(cfg.problem);
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
@@ -965,10 +1290,10 @@ export class Sim implements Simulation {
     // Before any pass is bound: the driving buffer is shared, bound where a pass declares it.
     writeDrive(d, cfg.driving, cfg.ndim, cfg.problem.box);
     this.clock = d.createBuffer({
-      size: 16,
+      size: CLOCK_BYTES,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
-    this.clockPreview = d.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.clockPreview = d.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.bh = d.createBuffer({ size: MASS_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -996,17 +1321,16 @@ export class Sim implements Simulation {
     if (cfg.n > side) {
       throw new Error(`a uniform grid of ${cfg.n} cells per side is larger than this GPU's 3D textures allow (${side}); use the adaptive mesh`);
     }
-    if (mhdOn(cfg)) {
-      const why = mhdUnsupported(cfg);
-      if (why) throw new Error(`MHD: ${why}`);
-    }
-    noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
+    const why = refusal(cfg);
+    if (why) throw new Error(why);
+    const cells = gridDims(cfg).reduce((a, b) => a * b, 1);
+    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
     const n = cfg.n;
-    const nz = sim.nz;
-    const t = (label: string) => tex3d(d, n, 'rgba32float', label, nz);
+    const { nx, ny, nz } = sim;
+    const t = (label: string) => tex3d(d, nx, 'rgba32float', label, nz, ny);
     d.pushErrorScope('out-of-memory');
     for (let p = 0; p < 2; p++) sim.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
     sim.pred = [t('PA'), t('PB')];
@@ -1014,18 +1338,18 @@ export class Sim implements Simulation {
     const oom = await d.popErrorScope();
     if (oom) {
       sim.destroy();
-      const gb = (cfg.n ** cfg.ndim * Sim.cellBytes(cfg.ndim)) / 1024 ** 3;
+      const gb = (cells * Sim.cellBytes(cfg.ndim)) / 1024 ** 3;
       throw new Error(`out of GPU memory for a uniform grid of ${cfg.n}^${cfg.ndim} cells (about ${gb.toFixed(1)} GB): ${oom.message}`);
     }
     const G = sim.speciesGroups;
     if (G > 0) {
-      for (let p = 0; p < 2; p++) sim.species.push(tex3d(d, n, 'rgba32float', `species ${p}`, nz * G));
-      sim.speciesHalf = tex3d(d, n, 'rgba32float', 'species half step', nz * G);
-      sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (n + 1) ** 2 * (nz + 1), usage: GPUBufferUsage.STORAGE });
+      for (let p = 0; p < 2; p++) sim.species.push(tex3d(d, nx, 'rgba32float', `species ${p}`, nz * G, ny));
+      sim.speciesHalf = tex3d(d, nx, 'rgba32float', 'species half step', nz * G, ny);
+      sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (nx + 1) * (ny + 1) * (nz + 1), usage: GPUBufferUsage.STORAGE });
       if (sim.compCoeffs) sim.comp = t('composition');
     }
     // Burning: each cell's heating rate over the last step (burn/burn.ts); else one texel of nothing.
-    sim.heat = burnSpec(cfg) && G > 0 ? tex3d(d, n, 'r32float', 'nuclear heating', nz) : noHeat(d);
+    sim.heat = burnSpec(cfg) && G > 0 ? tex3d(d, nx, 'r32float', 'nuclear heating', nz, ny) : noHeat(d);
     const spec = debrisSpec(cfg);
     if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     sim.writeParams();
@@ -1040,16 +1364,17 @@ export class Sim implements Simulation {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
-        Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]),
+        // (A spherical run's monopole writes the solver's potential textures in its place.)
+        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg)),
         Reducer.create(
           d,
-          [n, n, nz],
+          [nx, ny, nz],
           [MAX, MAX],
           '',
           {},
           [],
           'timestep',
-          [n, n, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
+          [nx, ny, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
         ),
       ]);
       await sim.buildHydro();
@@ -1063,7 +1388,7 @@ export class Sim implements Simulation {
       MassSums.create(
         d,
         MAX_MASSES,
-        [n, n, nz],
+        [nx, ny, nz],
         'gravity/bh_moment.wgsl',
         {},
         [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock })),
@@ -1078,7 +1403,18 @@ export class Sim implements Simulation {
     const phi = sim.mg.phi;
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
-    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield) });
+    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.clock });
+    if (spherical(cfg)) {
+      const code = assemble('gravity/sph_monopole.wgsl');
+      const [shells, enclose, field] = await Promise.all(['shells', 'enclose', 'field'].map((e) => computePipeline(d, code, `spherical monopole ${e}`, undefined, e)));
+      const buf = d.createBuffer({ label: 'spherical monopole', size: 4 * (4 + 4 * n), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      const g = [0, 1].map((p) => [
+        bindGroup(d, shells, { 0: sim.params, 1: v(sim.state[p][0]), 2: buf }),
+        bindGroup(d, enclose, { 0: sim.params, 2: buf }),
+        bindGroup(d, field, { 0: sim.params, 2: buf, 3: v(phi), 4: v(sim.gfield) }),
+      ]);
+      sim.sphMono = { shells, enclose, field, g, buf };
+    }
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
@@ -1103,11 +1439,11 @@ export class Sim implements Simulation {
     const v = (t: GPUTexture) => t.createView();
     const k = this.compIn;
     const phi = this.mg.phi;
-    const dims = [this.n, this.n, this.nz];
+    const dims = [this.nx, this.ny, this.nz];
     // The diagnostics' reduction compiles alongside the hydro passes.
     const diag = Reducer.create(
       d,
-      [this.n, this.n, this.nz],
+      [this.nx, this.ny, this.nz],
       DIAG_OPS,
       'hydro/diagnostics.wgsl',
       slots,
@@ -1209,7 +1545,7 @@ export class Sim implements Simulation {
     const burn = burnSpec(c);
     if (burn && this.speciesGroups > 0) {
       this.burn = await createBurnPass(d, burn, { ...c.problem, units: problemUnits(c.problem, c.params) }, {
-        dims: [this.n, this.n, this.nz], stride: this.nz, groups: this.speciesGroups, slots,
+        dims: [this.nx, this.ny, this.nz], stride: this.nz, groups: this.speciesGroups, slots,
         params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], heat: this.heat, comp: this.comp,
       });
     }
@@ -1239,12 +1575,18 @@ export class Sim implements Simulation {
   }
 
   /** Push the current configuration to the GPU parameter block. */
+  /** Comoving coordinates: the scale factor the diagnostics last read from the clock. */
+  private lastScale: number | undefined;
+
   writeParams() {
     const c = this.cfg;
     const buf = packParams(c, {
-      dims: [c.n, c.n, this.nz],
+      dims: [this.nx, this.ny, this.nz],
+      rect: rectangular(c),
       dx: this.dx,
       rhoMean: this.rhoMean,
+      // Comoving coordinates: the state's scale factor as last read (syncScale keeps it current).
+      scale: this.lastScale,
       selfGravity: this.selfGravity,
       masses: this.nMasses,
       solids: this.solids,
@@ -1258,35 +1600,41 @@ export class Sim implements Simulation {
   reset() {
     const c = this.cfg;
     const n = this.n;
-    const nz = this.nz;
+    const { nx, ny, nz } = this;
+    const cells = nx * ny * nz;
     const eos = makeEos(c.eos, c.eosParams);
     const fn = c.problem.init(n, eos, c.ndim, c.params);
-    const masses = initialMasses(c, this.dx);
+    const sph = spherical(c) ? sphGrid(c) : null;
+    // A spherical run's point masses sit at the origin: their pull joins the monopole field
+    // (gravity/sph_monopole.wgsl), and they are not kept as particles.
+    const masses = sph ? [] : initialMasses(c, this.dx);
+    this.centralGM = sph ? initialMasses(c, this.dx).reduce((a, m) => a + m.gm, 0) : 0;
     this.nMasses = this.nOwnMasses = masses.length;
     this.device.queue.writeBuffer(this.bh, 0, packMasses(masses));
     this.debrisBuf?.reset(c.restart?.debris);
-    const u1 = new Float32Array(n * n * nz * 4);
-    const u2 = new Float32Array(n * n * nz * 4);
+    const u1 = new Float32Array(cells * 4);
+    const u2 = new Float32Array(cells * 4);
     const G = this.speciesGroups;
-    const sp = new Float32Array(n * n * nz * 4 * G);
+    const sp = new Float32Array(cells * 4 * G);
     const kc = this.compCoeffs;
-    const km = kc ? new Float32Array(n * n * nz * 4) : undefined;
-    const half = c.problem.box / 2;
+    const km = kc ? new Float32Array(cells * 4) : undefined;
+    const lo = domainLo(c);
     // The magnetic field on the faces, and its energy in each cell's total.
     const faces = mhdOn(c) ? initialFaces(c, n, nz, this.dx) : null;
     // Each cell's B^2 / 2, which a star's settling (it rebuilds E) adds back.
-    const emag = faces ? new Float32Array(n * n * nz) : null;
+    const emag = faces ? new Float32Array(cells) : null;
     let mass = 0;
     let o = 0;
     this.solids = false;
     this.nSources = 0;
     this.device.queue.writeBuffer(this.sources, 0, packSources([]));
     for (let k = 0; k < nz; k++) {
-      const z = nz === 1 ? 0 : (k + 0.5) * this.dx - half;
-      for (let j = 0; j < n; j++) {
-        const y = (j + 0.5) * this.dx - half;
-        for (let i = 0; i < n; i++, o += 4) {
-          const x = (i + 0.5) * this.dx - half;
+      const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
+      for (let j = 0; j < ny; j++) {
+        // (A spherical run's init takes (r, theta).)
+        const y = sph ? sph.theta(j) : (j + 0.5) * this.dx + lo[1];
+        for (let i = 0; i < nx; i++, o += 4) {
+          const x = sph ? sph.r(i) : (i + 0.5) * this.dx + lo[0];
           const w = fn(x, y, z);
           // Where the species set the equation of state, the cell's own.
           let ce = eos;
@@ -1313,20 +1661,20 @@ export class Sim implements Simulation {
           u2[o + 1] = eint;
           u2[o + 2] = w.rho * w.s;
           u2[o + 3] = mark;
-          if (G) packSpecies(sp, o, n * n * nz * 4, G, w.rho, w.X);
+          if (G) packSpecies(sp, o, cells * 4, G, w.rho, w.X);
           mass += w.rho;
         }
       }
     }
-    this.setState(u1, u2, mass / (n * n * nz));
+    this.setState(u1, u2, mass / cells);
     if (faces) this.mhd!.setFaces(faces);
     if (G) {
       this.speciesCur = 0;
-      writeTexture(this.device, this.species[0], n, 4, sp, nz * G);
-      if (km) writeTexture(this.device, this.comp!, n, 4, km, nz);
+      writeTexture(this.device, this.species[0], nx, 4, sp, nz * G, ny);
+      if (km) writeTexture(this.device, this.comp!, nx, 4, km, nz, ny);
     }
-    // The clock is (dt, t, Kahan compensation, steps).
-    if (c.restart) this.device.queue.writeBuffer(this.clock, 0, new Float32Array([0, c.restart.time, 0, c.restart.steps]));
+    // The clock (clockState), at the snapshot's time for a restart.
+    this.device.queue.writeBuffer(this.clock, 0, clockState(c, c.restart?.time ?? 0, c.restart?.steps ?? 0));
     this.startSettling(u1, u2, emag);
   }
 
@@ -1386,12 +1734,18 @@ export class Sim implements Simulation {
   /** The grid's cells and this state of them, for settling. */
   private cellsOf(u1: Float32Array, u2: Float32Array): SettleCells {
     const vol = this.dx ** 3;
-    const n = this.n;
-    const half = this.cfg.problem.box / 2;
-    const at = (i: number) => (i + 0.5) * this.dx - half;
+    const { nx, ny } = this;
+    const lo = domainLo(this.cfg);
+    const at = (i: number, a: number) => (i + 0.5) * this.dx + lo[a];
+    // In (R, z), (R, z, 0), and a cell is a ring of 2 pi R dx^2: the settling's sums are of
+    // volumes, so a star on the axis settles as a body of revolution (plan E5).
+    if (this.cfg.problem.geometry === 'cylindrical') {
+      const area = 2 * Math.PI * this.dx * this.dx;
+      return { count: u1.length / 4, pos: (q) => [at(q % nx, 0), at(Math.floor(q / nx) % ny, 1), 0], vol: (q) => area * at(q % nx, 0), u1, u2 };
+    }
     return {
       count: u1.length / 4,
-      pos: (q) => [at(q % n), at(Math.floor(q / n) % n), at(Math.floor(q / (n * n)))],
+      pos: (q) => [at(q % nx, 0), at(Math.floor(q / nx) % ny, 1), at(Math.floor(q / (nx * ny)), 2)],
       vol: () => vol,
       u1,
       u2,
@@ -1415,7 +1769,7 @@ export class Sim implements Simulation {
           if (epoch !== this.settleEpoch) return;
           const change = settler.round(phi);
           this.settleLog.push(change / peak);
-          writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
+          writeTexture(this.device, this.state[this.cur][0], this.nx, 4, u1, this.nz, this.ny);
           this.refreshPotential();
           if (change < (set.tol ?? SETTLE_TOL) * peak) break;
         }
@@ -1423,8 +1777,8 @@ export class Sim implements Simulation {
         // The settled E is the gas's own: a magnetic field's energy goes back in.
         if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
         if (fresh && this.cfg.problem.heat) heatCells(this.cfg.problem.heat(this.cfg.params, eos), cells);
-        writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
-        writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
+        writeTexture(this.device, this.state[this.cur][0], this.nx, 4, u1, this.nz, this.ny);
+        writeTexture(this.device, this.state[this.cur][1], this.nx, 4, u2, this.nz, this.ny);
         this.refreshPotential();
       } finally {
         if (epoch === this.settleEpoch) {
@@ -1457,7 +1811,7 @@ export class Sim implements Simulation {
       const pass = beginPass(enc);
       pass.setPipeline(this.pCensus!);
       pass.setBindGroup(0, group);
-      pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+      pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
       pass.end();
     }, this.selfGravity, v0, d.ranges[0][1]);
     const r = await this.readRestart();
@@ -1467,13 +1821,13 @@ export class Sim implements Simulation {
   /** Replace the state with raw conserved arrays (rho, m), (E, e_int, rho s, 0). */
   setState(u1: Float32Array, u2: Float32Array, rhoMean: number) {
     const d = this.device;
-    const n = this.n;
+    const { nx, ny, nz } = this;
     this.cur = 0;
     this.rhoMean = rhoMean;
-    writeTexture(d, this.state[0][0], n, 4, u1, this.nz);
-    writeTexture(d, this.state[0][1], n, 4, u2, this.nz);
-    if (this.cfg.ndim === 3) writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
-    d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
+    writeTexture(d, this.state[0][0], nx, 4, u1, nz, ny);
+    writeTexture(d, this.state[0][1], nx, 4, u2, nz, ny);
+    if (this.selfGravity) writeTexture(d, this.mg.phi, nx, 1, new Float32Array(nx * ny * nz), nz, ny);
+    d.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
     writeDrive(d, this.cfg.driving, this.cfg.ndim, this.cfg.problem.box);
     this.writeParams();
     this.refreshPotential();
@@ -1484,6 +1838,14 @@ export class Sim implements Simulation {
     if (!this.selfGravity) return;
     const enc = this.device.createCommandEncoder();
     const pass = beginPass(enc);
+    if (this.sphMono) {
+      this.device.queue.writeBuffer(this.sphMono.buf, 0, new Float32Array([this.centralGM, isSelfGravity(this.cfg.gravity) ? 1 : 0, 0, 0]));
+      this.encodeMonopole(pass, this.cur);
+      this.encodeMonopole(pass, this.cur);
+      pass.end();
+      this.device.queue.submit([enc.finish()]);
+      return;
+    }
     this.mg.encodeSource(pass, this.cur, this.cfg.gravity === 'isolated');
     for (let i = 0; i < cycles; i++) this.mg.encodeVCycle(pass);
     pass.end();
@@ -1495,17 +1857,40 @@ export class Sim implements Simulation {
     if (!this.fieldOn) return;
     this.solvePotential(16);
     const enc = this.device.createCommandEncoder();
-    if (this.selfGravity) this.copyPhiToOld(enc);
+    if (this.selfGravity && !this.sphMono) this.copyPhiToOld(enc);
     const pass = beginPass(enc);
     // No step is being taken: the masses' accelerations are evaluated, nothing more.
     if (this.hasMasses) this.encodeMassKick(pass, this.cur, false);
-    this.encodeField(pass);
+    // (A spherical run's monopole has written the field already.)
+    if (!this.sphMono) this.encodeField(pass);
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }
 
   private get selfGravity(): boolean {
-    return isSelfGravity(this.cfg.gravity) && this.cfg.ndim === 3;
+    // (A spherical run's monopole holds its point masses' pull too.)
+    if (spherical(this.cfg)) return isSelfGravity(this.cfg.gravity) || this.centralGM !== 0;
+    // (An axisymmetric run solves for its potential in (R, z): gravity/stencil.wgsl.)
+    return isSelfGravity(this.cfg.gravity) && (this.cfg.ndim === 3 || cylindrical(this.cfg));
+  }
+
+  /**
+   * A spherical run's gravity from the state at `parity`: the shells' masses, their prefix sum,
+   * the field and potential textures (gravity/sph_monopole.wgsl). The previous potential moves
+   * to its place first: encoding it twice leaves the two the same.
+   */
+  private encodeMonopole(pass: GPUComputePassEncoder, parity: number) {
+    const m = this.sphMono!;
+    const n = this.n;
+    pass.setPipeline(m.shells);
+    pass.setBindGroup(0, m.g[parity][0]);
+    pass.dispatchWorkgroups(Math.ceil(n / 64));
+    pass.setPipeline(m.enclose);
+    pass.setBindGroup(0, m.g[parity][1]);
+    pass.dispatchWorkgroups(1);
+    pass.setPipeline(m.field);
+    pass.setBindGroup(0, m.g[parity][2]);
+    pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), 1);
   }
 
   private get hasMasses(): boolean {
@@ -1540,7 +1925,7 @@ export class Sim implements Simulation {
   }
 
   private dispatch(pass: GPUComputePassEncoder) {
-    pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+    pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
   }
 
   /** Acceleration and half-step potential from the current and previous potentials. */
@@ -1551,15 +1936,17 @@ export class Sim implements Simulation {
   }
 
   private copyPhiToOld(enc: GPUCommandEncoder) {
-    const n = this.n;
-    enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [n, n, n]);
+    enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [this.nx, this.ny, this.nz]);
   }
 
   /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
     if (this.settling) return 0; // a star is still being settled
     const selfGravity = this.selfGravity;
-    const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0);
+    // (A rotating frame needs the correction pass for its centrifugal kick and closing turn, and
+    // comoving coordinates for the second half of the expansion drag.)
+    const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0) || rotating(this.cfg) || !!cosmologyOf(this.cfg);
+    syncScale(enc, this.cfg, this.clock, this.params);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = beginPass(enc);
@@ -1581,11 +1968,13 @@ export class Sim implements Simulation {
         for (const [pipe, g] of [[this.pSpeciesPredict!, this.gSpeciesPredict], [this.pSpecies, this.gSpecies]] as const) {
           pass.setPipeline(pipe);
           pass.setBindGroup(0, g[p][q]);
-          pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+          pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
         }
         this.speciesCur = 1 - q;
       }
-      if (selfGravity) {
+      if (selfGravity && this.sphMono) {
+        this.encodeMonopole(pass, 1 - p);
+      } else if (selfGravity) {
         // Keep the old potential and solve for that of the updated density (warm-started).
         pass.end();
         this.copyPhiToOld(enc);
@@ -1601,7 +1990,7 @@ export class Sim implements Simulation {
         pass.dispatchWorkgroups(1);
         this.encodeMassKick(pass, 1 - p, true);
       }
-      if (this.fieldOn) this.encodeField(pass);
+      if (this.fieldOn && !this.sphMono) this.encodeField(pass);
       if (anyGravity) {
         // Second half kick, with the acceleration of the updated state.
         pass.setPipeline(this.pCorrect);
@@ -1629,6 +2018,7 @@ export class Sim implements Simulation {
         this.speciesCur = 1 - this.speciesCur;
       }
       pass.end();
+      syncScale(enc, this.cfg, this.clock, this.params);
     }
     return count;
   }
@@ -1749,11 +2139,14 @@ export class Sim implements Simulation {
   }
 
   async probe(f: [number, number, number]): Promise<CellProbe | null> {
-    const cell = (x: number, n: number) => Math.min(n - 1, Math.max(0, Math.floor(x * n)));
-    const index = [cell(f[0], this.n), cell(f[1], this.n), cell(f[2], this.nz)];
+    // Fractions of the computed box along each axis (domain.ts boxFrac): of half the box along
+    // a halved mirrored axis (gridDims).
+    const dims = this.displayDims;
+    const cell = (x: number, a: number) => Math.min(dims[a] - 1, Math.max(0, Math.floor(x * dims[a])));
+    const index = [cell(f[0], 0), cell(f[1], 1), cell(f[2], 2)];
     const [u1, u2] = await readTexels(this.device, this.state[this.cur], index as [number, number, number]);
-    const half = this.cfg.problem.box / 2;
-    const pos = index.map((i) => (i + 0.5) * this.dx - half) as [number, number, number];
+    const lo = domainLo(this.cfg);
+    const pos = index.map((i, a) => (i + 0.5) * this.dx + lo[a]) as [number, number, number];
     if (this.nz === 1) pos[2] = 0;
     return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2] };
   }
@@ -1771,7 +2164,7 @@ export class Sim implements Simulation {
   }
 
   get displayDims(): [number, number, number] {
-    return [this.n, this.n, this.nz];
+    return [this.nx, this.ny, this.nz];
   }
   static readonly fieldShader = 'render/field.wgsl';
   readonly fieldShader = Sim.fieldShader;
@@ -1816,14 +2209,14 @@ export class Sim implements Simulation {
   async profile(reps = 20): Promise<Record<string, number>> {
     const d = this.device;
     const p = this.cur;
-    const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const buf = d.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const time = async (count: number, fn: (pass: GPUComputePassEncoder) => void) => {
       const run = async (k: number) => {
         const enc = d.createCommandEncoder();
         const pass = beginPass(enc);
         for (let i = 0; i < k; i++) fn(pass);
         pass.end();
-        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, CLOCK_BYTES);
         d.queue.submit([enc.finish()]);
         const t0 = performance.now();
         await buf.mapAsync(GPUMapMode.READ);
@@ -1881,15 +2274,16 @@ export class Sim implements Simulation {
     const pass = beginPass(enc);
     this.redDiag.encode(pass, this.cur);
     pass.end();
-    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
-    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
-    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, MASS_FLOATS * 4);
+    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, CLOCK_BYTES);
+    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, CLOCK_BYTES, DIAG_OPS.length * 4);
+    enc.copyBufferToBuffer(this.bh, 0, this.staging, CLOCK_BYTES + DIAG_OPS.length * 4, MASS_FLOATS * 4);
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.nMasses);
+      if (cosmologyOf(this.cfg)) this.lastScale = withScale(diag, a).scale;
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
       // energy (E - KE there includes B^2 / 2).
@@ -1897,7 +2291,7 @@ export class Sim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
-      return diag;
+      return unfoldDiagnostics(diag, this.cfg.symmetry, cylindrical(this.cfg) || spherical(this.cfg));
     } finally {
       this.stagingBusy = false;
     }
@@ -1919,7 +2313,7 @@ export class Sim implements Simulation {
     if (this.destroyed) return 0;
     if (this.settling) return 0;
     const enc = this.device.createCommandEncoder();
-    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
+    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, CLOCK_BYTES);
     const pass = beginPass(enc);
     this.encodeRates(pass, this.cur);
     this.redDt.encode(pass);
@@ -1955,14 +2349,14 @@ export class Sim implements Simulation {
   async runToEnd(batch = 16, maxSteps = 1e6): Promise<number> {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
     await this.settled;
-    const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const buf = this.device.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     let steps = 0;
     let size = batch;
     try {
       for (;;) {
         const enc = this.device.createCommandEncoder();
         this.encodeSteps(enc, size);
-        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, CLOCK_BYTES);
         this.device.queue.submit([enc.finish()]);
         const t0 = performance.now();
         await buf.mapAsync(GPUMapMode.READ);
@@ -1987,13 +2381,13 @@ export class Sim implements Simulation {
    * Flux determinism check: evaluates one step's face mass fluxes and counts the
    * faces where the two cells sharing the face disagree in any bit. The state is not advanced.
    */
-  async fluxMismatch(): Promise<{ faces: number; mismatched: number; maxDiff: number }> {
+  async fluxMismatch(): Promise<{ faces: number; mismatched: number; maxDiff: number; mirror: number }> {
     const d = this.device;
-    const n = this.n;
+    const { nx, ny } = this;
     const c = this.cfg;
     const slots = hydroSlots(c);
     // Split by region like the real pass, so faces between the two variants are checked too.
-    const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [n, n, this.nz], { DEBUG_FLUX: 1 }, true);
+    const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [nx, ny, this.nz], { DEBUG_FLUX: 1 }, true);
     const p = this.cur;
     const o = 1 - p;
     const v = (t: GPUTexture) => t.createView();
@@ -2015,19 +2409,25 @@ export class Sim implements Simulation {
     pipe.encode(pass, group);
     pass.end();
     d.queue.submit([enc.finish()]);
-    const f1 = await readTexture(d, this.state[o][0], n, 4, this.nz);
-    const f2 = await readTexture(d, this.state[o][1], n, 4, this.nz);
+    const f1 = await readTexture(d, this.state[o][0], nx, 4, this.nz, ny);
+    const f2 = await readTexture(d, this.state[o][1], nx, 4, this.nz, ny);
     const flux = (i: number, j: number, k: number, f: number) => {
-      const cell = ((k * n + j) * n + i) * 4;
+      const cell = ((k * ny + j) * nx + i) * 4;
       return f < 4 ? f1[cell + f] : f2[cell + f - 4];
     };
     let faces = 0;
     let mismatched = 0;
     let maxDiff = 0;
-    const dims = [n, n, this.nz];
+    // The largest mass flux through a plane of mirror symmetry (SimConfig.symmetry): zero.
+    let mirror = 0;
     for (let k = 0; k < this.nz; k++)
-      for (let j = 0; j < n; j++)
-        for (let i = 0; i < n; i++)
+      for (let j = 0; j < ny; j++)
+        for (let i = 0; i < nx; i++)
+          for (let a = 0; a < 3; a++) if (c.symmetry[a] && [i, j, k][a] === 0) mirror = Math.max(mirror, Math.abs(flux(i, j, k, 2 * a)));
+    const dims = [nx, ny, this.nz];
+    for (let k = 0; k < this.nz; k++)
+      for (let j = 0; j < ny; j++)
+        for (let i = 0; i < nx; i++)
           for (let a = 0; a < 3; a++) {
             const q = [i, j, k];
             q[a]++;
@@ -2043,15 +2443,15 @@ export class Sim implements Simulation {
               maxDiff = Math.max(maxDiff, Math.abs(mine - theirs));
             }
           }
-    return { faces, mismatched, maxDiff };
+    return { faces, mismatched, maxDiff, mirror };
   }
 
   /** Current conserved state as float arrays (validation only). */
   async readState(): Promise<{ u1: Float32Array; u2: Float32Array }> {
     const [a, b] = this.state[this.cur];
     return {
-      u1: await readTexture(this.device, a, this.n, 4, this.nz),
-      u2: await readTexture(this.device, b, this.n, 4, this.nz),
+      u1: await readTexture(this.device, a, this.nx, 4, this.nz, this.ny),
+      u2: await readTexture(this.device, b, this.nx, 4, this.nz, this.ny),
     };
   }
 
@@ -2062,9 +2462,9 @@ export class Sim implements Simulation {
   async readSpecies(): Promise<Float32Array[]> {
     const G = this.speciesGroups;
     if (!G) return [];
-    const raw = await readTexture(this.device, this.species[this.speciesCur], this.n, 4, this.nz * G);
+    const raw = await readTexture(this.device, this.species[this.speciesCur], this.nx, 4, this.nz * G, this.ny);
     const { u1 } = await this.readState();
-    const cells = this.n * this.n * this.nz;
+    const cells = this.nx * this.ny * this.nz;
     const ns = this.cfg.problem.species!.length;
     const X = Array.from({ length: ns }, () => new Float32Array(cells));
     for (let i = 0; i < ns; i++) {
@@ -2076,7 +2476,7 @@ export class Sim implements Simulation {
   }
 
   async readPotential(): Promise<Float32Array> {
-    return readTexture(this.device, this.mg.phi, this.n, 1);
+    return readTexture(this.device, this.mg.phi, this.nx, 1, this.nz, this.ny);
   }
 
   /** Max |residual| of the Poisson solve on the finest level. */
@@ -2086,7 +2486,7 @@ export class Sim implements Simulation {
     this.mg.encodeResidual(pass);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    const r = await readTexture(this.device, this.mg.levels[0].res, this.n, 1);
+    const r = await readTexture(this.device, this.mg.levels[0].res, this.nx, 1, this.nz, this.ny);
     let m = 0;
     for (let i = 0; i < r.length; i++) m = Math.max(m, Math.abs(r[i]));
     return m;

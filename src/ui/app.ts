@@ -16,7 +16,8 @@ import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
 import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
-import { type CellProbe, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { boxFrac, fracPos } from '../domain';
+import { type CellProbe, configFor, refusal, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -25,7 +26,8 @@ import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
-import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
+import { sphFromView, sphToView, spherical } from '../spherical';
+import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
 import type { MhdSpec, PointMass } from '../problems/types';
@@ -549,12 +551,15 @@ function syncTools() {
   if (noStar && tool === 'star') tool = null;
   const noField = !cfg?.problem.mhd;
   if (noField && tool !== null && FIELD_TOOLS.includes(tool)) tool = null;
+  // The MHD fluxes know no solid cell (mhd/mhd.ts mhdUnsupported).
+  const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : '';
+  if (noObstacle && tool === 'obstacle') tool = null;
   for (const t of TOOLS) {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
     b.hidden = noField && FIELD_TOOLS.includes(t.kind);
     b.setAttribute('aria-pressed', String(tool === t.kind));
-    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar);
-    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : 'The barotropic equation of state ties the temperature to the density';
+    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle);
+    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : 'The barotropic equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
   // The tool's settings slide out under its own button, pushing the buttons below it down.
@@ -920,7 +925,9 @@ let unitSys: DisplaySystem = (() => {
   }
 })();
 /** How the current run's values are shown. */
-const units = (): Readout => readout(problemUnits(cfg.problem, cfg.params), cfg.problem.composition, unitSys);
+// (Comoving coordinates: physical values are proper ones at the scale factor last read.)
+const units = (): Readout =>
+  readout(problemUnits(cfg.problem, cfg.params), cfg.problem.composition, unitSys, cfg.problem.cosmology ? (lastDiag?.scale ?? cfg.problem.cosmology.aStart) : undefined);
 /** The name of the field on view. */
 const viewFieldName = () =>
   view.field === MASS_FRACTION_FIELD ? `X(${speciesLabel(cfg.problem.species![view.species])})` : projecting() && view.field === 0 ? 'Column density' : FIELDS[view.field];
@@ -1615,6 +1622,8 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 /** The grid a preset gets for the one asked for: what it supports and what fits in GPU memory. */
 function resolveGrid(problem: Problem, n: number, ndim: 2 | 3, levels: number) {
   if (!problem.supports2d) ndim = 3;
+  // An axisymmetric (R, z) or spherical (r, theta) problem is two-dimensional, whatever was asked.
+  if (problem.geometry === 'cylindrical' || problem.geometry === 'spherical') ndim = 2;
   const allowed = ndim === 2 ? RES_2D : RES_3D;
   if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
   // Refinement: only where the preset allows it, and no deeper than the resolution permits.
@@ -1694,8 +1703,10 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     // Settings changed in the Setup dialog while it waited.
     if (settings && !(keepPhysics && cfg && cfg.problem.id === problem.id)) for (const s of settings) setSetting(next, s.setting, s.value);
     if (link) {
-      // Settings carried by a shared link, on top of the preset's defaults.
+      // Settings carried by a shared link, on top of the preset's defaults; its mirrors, as far
+      // as the preset allows them, with their planes' faces.
       Object.assign(next, link.cfg);
+      if (link.cfg.symmetry) Object.assign(next, withSymmetry(next, link.cfg.symmetry));
       Object.assign(next.params, link.params);
       // Units that follow the preset's parameters: the equation of state's physical constants are the link's parameters', not the defaults'.
       if (typeof problem.units === 'function') Object.assign(next.eosParams, physicalEosParams(problemUnits(problem, next.params), problem.composition), problem.eosParams);
@@ -1704,7 +1715,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       next.fluff = { ...next.fluff, ...link.fluff };
       next.driving = { ...next.driving, ...link.driving };
       if (ndim === 2) {
-        if (isSelfGravity(next.gravity)) next.gravity = 'off';
+        // (An axisymmetric or spherical run has the self-gravity of its rings or shells.)
+        if (isSelfGravity(next.gravity) && problem.geometry !== 'cylindrical' && problem.geometry !== 'spherical') next.gravity = 'off';
         next.bcLo = [next.bcLo[0], next.bcLo[1], 0];
         next.bcHi = [next.bcHi[0], next.bcHi[1], 0];
       }
@@ -2397,6 +2409,17 @@ const setupHost: SetupHost = {
     const [n, ndim, levels] = [d.n ?? cfg.n, d.ndim ?? cfg.ndim, d.amr ?? cfg.amrLevels];
     return { need: gridBytes(n, ndim, levels), budget: memoryBudget() };
   },
+  refusal(spec) {
+    try {
+      const d = spec.domain ?? {};
+      const [n, ndim, levels] = [d.n ?? cfg.n, d.ndim ?? cfg.ndim, d.amr ?? cfg.amrLevels];
+      const problem = compiledFrom(spec).problem;
+      // As build() loads it: a run that cannot refine takes the uniform grid.
+      return refusal(configFor(problem, n, { ndim, amrLevels: supportsAmr(problem) ? levels : 0 }));
+    } catch {
+      return null;
+    }
+  },
   grids: () => ({ res2d: RES_2D, res3d: RES_3D, uniformMax2d: uniformMax(2), uniformMax3d: uniformMax(3), maxLevels: maxAmrLevels }),
   link: linkFor,
   units(spec) {
@@ -2932,6 +2955,29 @@ const fullDrag = () => 0.25 * Math.min(canvas.clientWidth, canvas.clientHeight);
  * In the volume view the point lies on the plane facing the camera at the given distance.
  */
 function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3; up: Vec3; scale: number } {
+  const l = locateInView(px, py, depth);
+  // A spherical run's slice is the (R, z) half-plane: the point is the cell of its (r, theta),
+  // outside the box off the grid; screen-right and screen-up as the cell fractions move there.
+  if (flatView() && spherical(cfg)) {
+    const at = (x: number, y: number) => {
+      const v = locateInView(x, y, depth).pos;
+      return sphFromView(cfg, v[0], v[1]) ?? [-1, -1];
+    };
+    const p = at(px, py);
+    const [dr, du] = [at(px + 1, py), at(px, py - 1)];
+    const d = (q: number[]): Vec3 => (q[0] < 0 || p[0] < 0 ? [0, 0, 0] : [(q[0] - p[0]) * l.scale, (q[1] - p[1]) * l.scale, 0]);
+    return { pos: [p[0], p[1], l.pos[2]], right: d(dr), up: d(du), scale: l.scale };
+  }
+  // With mirror images shown the view's box is the whole configuration: the point is folded
+  // back into the computed part, whose fractions everything else takes, and lengths double.
+  const mir = mirrorShown(cfg, view);
+  if (!mir.some(Boolean)) return l;
+  const k = (v: Vec3) => v.map((c, a) => (mir[a] ? 2 * c : c)) as Vec3;
+  return { pos: l.pos.map((d, a) => mirrorComputed(d, mir[a])) as Vec3, right: k(l.right), up: k(l.up), scale: l.scale / 2 };
+}
+
+/** locate() in the view's own box (the whole configuration, when mirror images are shown). */
+function locateInView(px: number, py: number, depth: number): { pos: Vec3; right: Vec3; up: Vec3; scale: number } {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (flatView()) {
@@ -3022,7 +3068,7 @@ function removePinned() {
 function thingPos(t: Thing): number[] | null {
   if ('source' in t) return t.source.pos;
   const m = massesNow()[t.mass];
-  return m ? m.pos.map((v) => v / cfg.problem.box + 0.5) : null;
+  return m ? m.pos.map((v, a) => boxFrac(cfg, v, a)) : null;
 }
 
 /** The source, sink or point mass drawn within a few pixels of a point of the canvas, nearest first. */
@@ -3171,7 +3217,7 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
       rows.push(['Softening', u.fmt(m.soft, 'length')]);
       if (m.sinkRadius > 0 && m.sinkRate > 0) rows.push(['Sink radius', u.fmt(m.sinkRadius, 'length')], ['Gas taken in', u.fmt(m.accreted, 'mass')]);
     } else if (source) {
-      rows.push(['Position', vec(source.pos.map((v) => (v - 0.5) * box), 'length')]);
+      rows.push(['Position', vec(source.pos.map((v, a) => fracPos(cfg, v, a)), 'length')]);
     }
     if (source) {
       rows.push(['Radius', u.fmt(source.radius * box, 'length')]);
@@ -3279,8 +3325,10 @@ async function runContourHover() {
   try {
     const r = canvas.getBoundingClientRect();
     const span = sliceSpan() * view.zoom;
-    const a = view.cx + (q.x - r.left - canvas.clientWidth / 2 + sliceShift()) / span;
-    const b = view.cy - (q.y - r.top - canvas.clientHeight / 2) / span;
+    let a = view.cx + (q.x - r.left - canvas.clientWidth / 2 + sliceShift()) / span;
+    let b = view.cy - (q.y - r.top - canvas.clientHeight / 2) / span;
+    // A spherical run's slice: the point of the (r, theta) map under the (R, z) one.
+    if (spherical(cfg)) [a, b] = sphFromView(cfg, a, b) ?? [-1, -1];
     const hit = a >= 0 && a < 1 && b >= 0 && b < 1 ? await renderer.contourAt(a, b, view, span) : null;
     if (contourPoint !== q || !contoursHoverable()) return;
     contourKey = key;
@@ -3363,6 +3411,15 @@ function outlineMatrix(): number[] {
     rx = rw.map((d, i) => (w / 2) * d + kx * right[i]);
     ry = rw.map((d, i) => (h / 2) * d - ky * up[i]);
   }
+  // With mirror images shown, a fraction f of the computed box is at 0.5 + f / 2 of the view's.
+  const mir = mirrorShown(cfg, view);
+  for (let a = 0; a < 3; a++) {
+    if (!mir[a]) continue;
+    for (const row of [rx, ry, rw]) {
+      row[3] += 0.5 * row[a];
+      row[a] *= 0.5;
+    }
+  }
   return [0, 1, 2, 3].flatMap((c) => [rx[c], ry[c], 0, rw[c]]);
 }
 
@@ -3416,7 +3473,10 @@ function clearSources() {
  */
 function projector(): (p: number[]) => { x: number; y: number; w: number } {
   const m = outlineMatrix();
-  return (p) => {
+  // A spherical run's slice draws (r, theta) at (R, z) (sphToView).
+  const sph = flatView() && spherical(cfg);
+  return (q) => {
+    const p = sph ? [...sphToView(cfg, q[0], q[1]), q[2]] : q;
     const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
     return { x: (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / w, y: (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / w, w };
   };
@@ -3463,7 +3523,7 @@ function drawSources() {
     for (const q of sources) {
       const rides = q.carrier !== undefined ? masses[q.carrier] : undefined;
       // (Between a placement and the next readback the mass is not yet known: where it was put.)
-      const where = rides ? rides.pos.map((v) => v / box + 0.5) : q.pos;
+      const where = rides ? rides.pos.map((v, a) => boxFrac(cfg, v, a)) : q.pos;
       const c = at(where);
       if (!(c.w > 0)) continue; // behind the camera
       // Size on screen: from a point one radius away along an axis in the plane of the view.
@@ -3488,7 +3548,7 @@ function drawSources() {
     // an arrow along its velocity.
     for (const [index, q] of masses.entries()) {
       if (ridden.has(index)) continue;
-      const pos = q.pos.map((v) => v / box + 0.5);
+      const pos = q.pos.map((v, a) => boxFrac(cfg, v, a));
       const c = at(pos);
       if (!(c.w > 0)) continue;
       const arrow = velArrow(c, pos, q.vel);
@@ -3636,7 +3696,7 @@ function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass:
   // A preset without a gravitational constant gets G = 1 when a point mass is placed.
   const G = cfg.G > 0 ? cfg.G : 1;
   const where = {
-    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
+    pos: pos.map((v, i) => (two && i === 2 ? 0 : fracPos(cfg, v, i))),
     vel: fixed ? [0, 0, 0] : two ? [vel[0], vel[1], 0] : vel,
     sinkRadius: q.size * box,
     fixed,
@@ -3656,7 +3716,7 @@ function starSpec(pos: Vec3, vel: Vec3): PointMass {
   const box = cfg.problem.box;
   return {
     gm: (cfg.G > 0 ? cfg.G : 1) * 10 ** starLogRho * starMassPerRho(),
-    pos: pos.map((v) => (v - 0.5) * box),
+    pos: pos.map((v, a) => fracPos(cfg, v, a)),
     vel,
     soft: toolParams.star.size * box,
     sinkRadius: 0,
@@ -3670,7 +3730,7 @@ function carrierSpec(pos: Vec3, vel: Vec3, size: number): PointMass {
   const two = cfg.ndim === 2;
   return {
     gm: 1e-9 * (cfg.G > 0 ? cfg.G : 1) * gas,
-    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
+    pos: pos.map((v, i) => (two && i === 2 ? 0 : fracPos(cfg, v, i))),
     vel: two ? [vel[0], vel[1], 0] : vel,
     soft: size * box,
     sinkRadius: 0,
@@ -3793,7 +3853,7 @@ function placeStar(pos: Vec3, vel: Vec3, given: Partial<StarAction> = {}): Promi
   notice(notes.join('; '));
   const target = sim;
   const box = cfg.problem.box;
-  const star = { n, K: op.star!.K, rhoc, center: pos.map((x) => (x - 0.5) * box), vel, R: size * box };
+  const star = { n, K: op.star!.K, rhoc, center: pos.map((x, a) => fracPos(cfg, x, a)), vel, R: size * box };
   syncControls();
   return enqueue(async () => {
     if (target !== sim) return;
@@ -3940,6 +4000,7 @@ async function toolApi(name: string, o: Record<string, unknown> = {}): Promise<R
       break;
     case 'obstacle': {
       known(['shape', 'center', 'half', 'points', 'axis', 'erase']);
+      if (cfg.problem.mhd) throw new Error('obstacle: obstacles are not available with a magnetic field yet');
       const axis = cfg.ndim === 2 ? 2 : scalar('axis', 2, 0, 2);
       if (!Number.isInteger(axis)) throw new Error('obstacle: "axis" is 0, 1 or 2');
       const pair = (k: string): [number, number] => {
@@ -4138,7 +4199,7 @@ function drawOrbit(path: Orbit | null) {
     const at = projector();
     const box = cfg.problem.box;
     const f = (v: number) => v.toFixed(1);
-    const project = (pts: Float32Array) => Array.from({ length: pts.length / 3 }, (_, i) => at([0, 1, 2].map((c) => pts[3 * i + c] / box + 0.5)));
+    const project = (pts: Float32Array) => Array.from({ length: pts.length / 3 }, (_, i) => at([0, 1, 2].map((c) => boxFrac(cfg, pts[3 * i + c], c))));
     const px = project(path.points);
     // Where the run's other masses go meanwhile, faintly: what the path is bending around.
     for (const other of path.others) {
@@ -4150,7 +4211,7 @@ function drawOrbit(path: Orbit | null) {
     // the middle of the layer swings across the plane of a star centered between two layers).
     const slice = cfg.ndim === 3 && view.mode === 'slice';
     const plane = slice ? locate(0, 0, 0).pos[view.sliceAxis] : 0;
-    const off = (i: number) => slice && Math.abs(path.points[3 * i + view.sliceAxis] / box + 0.5 - plane) > 1.5 / cfg.n;
+    const off = (i: number) => slice && Math.abs(boxFrac(cfg, path.points[3 * i + view.sliceAxis], view.sliceAxis) - plane) > 1.5 / cfg.n;
     for (let i = 1; i < n; i++) d[off(i) ? 1 : 0] += `M${f(px[i - 1].x)} ${f(px[i - 1].y)}L${f(px[i].x)} ${f(px[i].y)}`;
     // The arrowhead: at the end, along the last stretch long enough to give a direction.
     const tip = px[n - 1];
@@ -4940,6 +5001,8 @@ function statusLine(s: Simulation, live: boolean): string {
   const parts = [`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}`];
   if (live) parts.push(`${fps.toFixed(0)} fps`);
   if (lastDiag) parts.push(`t = ${u.fmt(lastDiag.t, 'time')}`);
+  // Comoving coordinates: where the expansion is.
+  if (lastDiag?.scale !== undefined) parts.push(`a = ${lastDiag.scale.toPrecision(4)}, z = ${lastDiag.redshift!.toPrecision(4)}`);
   if (live) {
     const rec = recordProgress;
     parts.push(recordingSize ? `recording: ${rec?.frames ?? 0} frames, ${(rec?.seconds ?? 0).toFixed(1)} s of movie` : pending ? 'press Run to load' : finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused');
@@ -5144,6 +5207,7 @@ const api = installApi(
       if (sim?.autoRegrid !== undefined) sim.autoRegrid = !on;
     },
     gridMemory: (spec) => setupHost.memory(spec)!,
+    refusal: (spec) => setupHost.refusal(spec),
     overlayInfo() {
       const u = units();
       const m = viewMeasure();

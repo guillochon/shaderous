@@ -44,11 +44,13 @@ fn deb_slot(e: f32) -> u32 {
 }
 
 // Specific orbital energy about the chosen mass of gas moving at v where the true potential
-// (self-gravity and the point masses) is phi. Velocities are relative to the frame, so their
-// difference is the inertial one.
-fn deb_energy(v: vec3<f32>, phi: f32) -> f32 {
+// (self-gravity and the point masses) is phi, at x. Velocities are relative to the frame, so
+// their difference is the inertial one; in a rotating frame (gravity/rot.wgsl) each gains
+// Omega x its position first, so the difference gains Omega x (x - the mass's position).
+fn deb_energy(x: vec3<f32>, v: vec3<f32>, phi: f32) -> f32 {
   let m = BH.list[DEB.head.sel.x];
-  let dv = v - m.vel.xyz;
+  var dv = v - m.vel.xyz;
+  if (rot_on()) { dv += cross(P.rot.xyz, x - m.pos.xyz); }
   return 0.5 * dot(dv, dv) + phi;
 }
 
@@ -60,11 +62,11 @@ fn deb_weight(dm: f32, ds: f32) -> f32 {
 
 // Mass dm of gas (ds of it marked by the scalar) moving at v in the true potential phi: into
 // its energy bin, and what is not binned into the slot for the rest.
-fn deb_bin(v: vec3<f32>, phi: f32, dm: f32, ds: f32) {
+fn deb_bin(x: vec3<f32>, v: vec3<f32>, phi: f32, dm: f32, ds: f32) {
   let w = deb_weight(dm, ds);
   if (w != dm) { deb_add(DEB.head.sel.y + 2u, (dm - w) * DEB.head.bins.z); }
   if (w == 0.0) { return; }
-  deb_add(deb_slot(deb_energy(v, phi)), w * DEB.head.bins.z);
+  deb_add(deb_slot(deb_energy(x, v, phi)), w * DEB.head.bins.z);
 }
 
 // The update's tally: as deb_bin, with `phi` the potential the hydro passes use (the gravity
@@ -73,7 +75,7 @@ fn deb_bin(v: vec3<f32>, phi: f32, dm: f32, ds: f32) {
 // `phi_self` is the gas's own potential at the half step; the masses' is added here, moved on by
 // `ahead` (half the step), as the potential about them.
 fn deb_tally(x: vec3<f32>, v: vec3<f32>, phi_self: f32, ahead: f32, dm: f32, ds: f32) {
-  deb_bin(v, phi_self + ext_phi_masses(x, ahead), dm, ds);
+  deb_bin(x, v, phi_self + ext_phi_masses(x, ahead), dm, ds);
 }
 
 // Census of one cell (conserved state u1, u2, the gas's own potential phi_self, volume dv):
@@ -111,5 +113,5 @@ fn deb_census(x: vec3<f32>, u1: vec4<f32>, u2: vec4<f32>, phi_self: f32, dv: f32
   }
   var phi = phi_self;
   for (var i = 0u; i < mass_count(); i++) { phi += bh_phi(x, BH.list[i], 0.0); }
-  deb_bin(v, phi, dm, ds);
+  deb_bin(x, v, phi, dm, ds);
 }

@@ -1,0 +1,32 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "blast-axisymmetric",
+  "name": "Axisymmetric blast",
+  "group": "Shocks and blasts",
+  "family": "blast-axisymmetric",
+  "familyName": "Axisymmetric blast",
+  "variant": "Ideal gas",
+  "blurb": "A point explosion of about unit energy on the axis of a 2D axisymmetric (R, z) run: a spherical blast wave computed on a plane.",
+  "domain": {
+    "ndim": 2,
+    "n": 512,
+    "box": 1,
+    "supports2d": true,
+    "geometry": "cylindrical",
+    "bc": { "lo": [2, 1, 0], "hi": [1, 1, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "p": 1e-12 }
+  },
+  "background": { "rho": 1, "p": 0.00001 },
+  "parts": [
+    { "kind": "region", "id": "blast", "shape": { "type": "sphere", "radius": 0.02 }, "p": 11937, "s": 1 }
+  ],
+  "run": { "tEnd": 0.1, "checkpointDt": 0.005 },
+  "view": { "field": 0, "log": false, "mode": "slice" }
+}

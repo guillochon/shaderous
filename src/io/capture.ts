@@ -1,8 +1,10 @@
 // Snapshots of a running simulation, and runs started from snapshots.
+import { domainHi, domainLo } from '../domain';
 import { AmrSim } from '../amr/amr_sim';
 import { BS } from '../amr/tree';
 import type { Problem } from '../problems';
 import { Sim, type SimConfig, type Simulation } from '../sim';
+import { spherical, sphGrid } from '../spherical';
 import { pressureOf, primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Restart, type Snapshot, type SnapshotMeta } from './snapshot';
 
 /**
@@ -13,7 +15,8 @@ import { pressureOf, primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Rest
  */
 export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses' | 'perturber'>, opts: { lazyPressure?: boolean } = {}): Promise<Snapshot> {
   const cfg = sim.cfg;
-  const half = cfg.problem.box / 2;
+  const lo = domainLo(cfg);
+  const hi = domainHi(cfg);
   const flat = cfg.ndim === 2;
   let rootSize: number[];
   let blockSize: number[];
@@ -38,7 +41,8 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     restart = await sim.readRestart();
   } else if (sim instanceof Sim) {
     // A uniform grid is a single block.
-    rootSize = [sim.n, sim.n, sim.nz];
+    // (Rectangular along a halved mirrored axis: gridDims.)
+    rootSize = [sim.nx, sim.ny, sim.nz];
     blockSize = rootSize.slice();
     levels = new Int32Array(1);
     locations = new Int32Array(3);
@@ -113,8 +117,8 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     ndim: cfg.ndim,
     rootSize,
     blockSize,
-    lo: [-half, -half, -half],
-    hi: [half, half, half],
+    lo,
+    hi,
     time: restart.time,
     steps: Math.round(restart.steps),
     levels,
@@ -123,19 +127,32 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     ...(faces ? { faces } : {}),
     ...(opts.lazyPressure ? { pressureAt: pressureOf(cfg, u1, u2, X) } : {}),
     meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
+    ...(cfg.problem.geometry === 'cylindrical' && cfg.ndim === 2 ? { geometry: 'cylindrical' as const } : {}),
+    ...(spherical(cfg) ? sphericalAxes(cfg) : {}),
   };
+}
+
+/** A spherical run's axes as the file has them: (r, theta, phi) (Snapshot.x1rat). */
+function sphericalAxes(cfg: SimConfig): Pick<Snapshot, 'geometry' | 'lo' | 'hi' | 'x1rat'> {
+  const g = sphGrid(cfg);
+  return { geometry: 'spherical', lo: [g.rMin, 0, 0], hi: [g.rMax, Math.PI, 2 * Math.PI], x1rat: g.dlog > 0 ? Math.exp(g.dlog) : 1 };
 }
 
 /** What to change in a configuration so the run starts from a snapshot. */
 export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean, rootCells: number): Pick<SimConfig, 'problem' | 'restart'> {
   const sampler = new SnapshotSampler(snap);
   const box = problem.box;
-  const frac = (x: number) => x / box + 0.5;
+  // Fractions of the file's own box, from its lower corner (an octant's starts at the origin).
+  const flo = snap.lo ?? [-box / 2, -box / 2, -box / 2];
+  // A rectangular grid's file (a half or quadrant run, gridDims) is half the box along its
+  // halved axes: fractions are of its own extent there.
+  const side = [0, 1, 2].map((a) => (snap.hi ? snap.hi[a] - flo[a] : box));
+  const frac = (x: number, a: number) => (Math.abs(side[a] - box) < 1e-9 * box ? x / box - flo[a] / box : (x - flo[a]) / side[a]);
   const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined), debris: snap.meta?.debris };
   if (adaptive) {
     // Levels count from the root grid, and the file's root may not be the run's.
     const shift = Math.round(Math.log2(snap.rootSize[0] / rootCells));
-    restart.levelAt = (x, y, z) => Math.max(0, sampler.level(frac(x), frac(y), frac(z)) + shift);
+    restart.levelAt = (x, y, z) => Math.max(0, sampler.level(frac(x, 0), frac(y, 1), frac(z, 2)) + shift);
   }
   // A magnetic field comes back face by face, which needs the grid it was saved on.
   let mhd = problem.mhd;
@@ -202,7 +219,7 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
         return (x, y, z) => {
           const { solid, fixed, X } = preset(x, y, z);
           // Species the file lacks start as the preset has them.
-          const w = sampler.prim(frac(x), frac(y), frac(z), problem.species);
+          const w = sampler.prim(frac(x, 0), frac(y, 1), frac(z, 2), problem.species);
           return { ...w, X: w.X ?? X, solid, fixed };
         };
       },

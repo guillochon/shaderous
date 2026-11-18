@@ -17,7 +17,8 @@ struct Look {
 }
 
 struct Atlas {
-  a: vec4<u32>,    // (atlas slots per side, root blocks per side, finest level, 0)
+  a: vec4<u32>,    // (atlas slots per side, root blocks per side, finest level, the mask of
+                   //   halved axes of a rectangular grid: src/domain.ts gridDims)
   size: vec4<f32>, // atlas texels along x, y, z
 }
 @group(0) @binding(7) var IDX: texture_3d<u32>;   // leaf slot per block of the finest level
@@ -31,8 +32,13 @@ const ANG = 2;
 const ABT_STRIDE = 32u;
 
 // At p, in the box [-0.5, 0.5]^3.
-fn vol_look(p: vec3<f32>) -> Look {
-  let frac = clamp(p + 0.5, vec3<f32>(0.0), vec3<f32>(0.9999999));
+fn vol_look(p0: vec3<f32>) -> Look {
+  // (Mirror images shown: the view's box is the whole configuration, its cells half as wide.)
+  let p = mirror_fold(p0);
+  var frac = clamp(p + 0.5, vec3<f32>(0.0), vec3<f32>(0.9999999));
+  // A rectangular grid's computed box is half the tree's cube along its halved axes.
+  let hm = A.a.w;
+  frac *= select(vec3<f32>(1.0), vec3<f32>(0.5), vec3<bool>((hm & 1u) != 0u, (hm & 2u) != 0u, (hm & 4u) != 0u));
   let m = f32(A.a.y << A.a.z);
   let slot = i32(textureLoad(IDX, vec3<i32>(frac * m), 0).x);
   let b = u32(slot) * ABT_STRIDE;
@@ -43,7 +49,7 @@ fn vol_look(p: vec3<f32>) -> Look {
   let local = frac * ncell - coord * f32(ABS);
   let n = i32(A.a.x);
   let origin = vec3<f32>(vec3<i32>(slot % n, (slot / n) % n, slot / (n * n)) * APAD + ANG);
-  return Look(textureSampleLevel(VOL, S, (origin + local) / A.size.xyz, 0.0), 1.0 / ncell);
+  return Look(textureSampleLevel(VOL, S, (origin + local) / A.size.xyz, 0.0), select(1.0, 0.5, C.mir.x != 0.0) / ncell);
 }
 
 // How far the ray moves past a sample: two thirds of the cell it is in (as the uniform view

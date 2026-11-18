@@ -1,7 +1,7 @@
 // Volume, slice and projection rendering on the simulation's own device.
+import { rectangular, type GridShape } from '../domain';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
-import { EOS_MODULES } from '../eos/eos';
 import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
@@ -10,6 +10,7 @@ import type { ViewFromOptions, ViewMode } from './view_options';
 import { PathTube } from './pathtube';
 import { padded3d } from '../amr/dispatch';
 import { halfToFloat } from '../io/arrays';
+import { sphViewParam } from '../spherical';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
 const HIST_BINS = 128;
@@ -75,6 +76,11 @@ export interface ViewState {
    */
   fieldLines: boolean;
   fieldLineCount: number;
+  /**
+   * A run computing an octant (or a 2D quadrant) of a mirror-symmetric configuration: draw the
+   * whole of it, the computed part and its images (mirrorShown()).
+   */
+  mirrorImages: boolean;
 }
 // The table of the view's settings (view_options.ts) names each of these, with its type, and nothing else.
 const _viewTable: ViewFromOptions extends ViewState ? (ViewState extends ViewFromOptions ? true : never) : never = true;
@@ -188,7 +194,28 @@ export const defaultView = (): ViewState => ({
   box: true,
   fieldLines: false,
   fieldLineCount: 160,
+  mirrorImages: true,
 });
+
+/**
+ * The mirrored axes the view shows images across: with mirrorImages, when every axis the run
+ * uses is mirrored (an octant, or a 2D quadrant), so the whole configuration is a cube again;
+ * and always on a rectangular grid (a half or quadrant run, src/domain.ts gridDims), whose
+ * computed part is half the box along its mirrored axes, so that with the images the view is
+ * the cube of the box (without them the part would be drawn stretched to a cube).
+ * The view's box is then the whole configuration, and a fraction f of the computed box is at
+ * 0.5 + f / 2 of it (mirrorDisplay); the shaders fold the view's positions back, |2 d - 1|.
+ */
+export function mirrorShown(cfg: { ndim: 2 | 3; symmetry?: readonly boolean[]; n?: number; problem?: { mhd?: unknown } }, v: { mirrorImages: boolean }): [boolean, boolean, boolean] {
+  const s = cfg.symmetry ?? [];
+  const axes = cfg.ndim === 2 ? [0, 1] : [0, 1, 2];
+  const all = v.mirrorImages && axes.every((a) => s[a]);
+  const rect = cfg.n !== undefined && cfg.problem !== undefined && rectangular(cfg as GridShape);
+  return [0, 1, 2].map((a) => (all || rect) && !!s[a]) as [boolean, boolean, boolean];
+}
+/** A fraction of the computed box as a fraction of the view's box (mirrorShown), and back. */
+export const mirrorDisplay = (f: number, shown: boolean): number => (shown ? 0.5 + 0.5 * f : f);
+export const mirrorComputed = (d: number, shown: boolean): number => (shown ? Math.abs(2 * d - 1) : d);
 
 /**
  * The color scale as the shaders take it: logarithmic or not (a field of either sign is always
@@ -326,7 +353,7 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 176, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
@@ -433,7 +460,7 @@ export class Renderer {
    */
   fieldPipelines(fieldShader: string, cfg: SimConfig, atlas: boolean) {
     const d = this.device;
-    const code = assemble(fieldShader, { eos: EOS_MODULES[cfg.eos], cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp });
+    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp });
     return Promise.all([
       computePipeline(d, code, 'field'),
       computePipeline(d, code, 'slice', undefined, 'slice'),
@@ -475,7 +502,7 @@ export class Renderer {
       }
       this.atlas = { ...this.atlas, sim, info };
       const a = new ArrayBuffer(32);
-      new Uint32Array(a, 0, 4).set([info.slotsPerSide, info.roots, info.levels, 0]);
+      new Uint32Array(a, 0, 4).set([info.slotsPerSide, info.roots, info.levels, info.halved ?? 0]);
       new Float32Array(a, 16, 4).set([info.side, info.side, info.side, 0]);
       d.queue.writeBuffer(this.atlasUni, 0, a);
       const bt = sim.fieldResources(0, 0)[30] as GPUBuffer;
@@ -710,7 +737,11 @@ export class Renderer {
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
     // With isosurfaces on, the block grid's pass smooths log10 |field| across coarse cells.
-    new Float32Array(vb, 32, 4).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, nz > 1 ? v.slicePos : 0, marched && v.contours ? 1 : 0]);
+    // With mirror images shown, the slice's position along a mirrored axis is a fraction of the
+    // whole configuration: the plane of the computed part it shows is its fold.
+    const mir = mirrorShown(sim.cfg, v);
+    const slicePos = nz > 1 ? mirrorComputed(v.slicePos, mir[axis]) : 0;
+    new Float32Array(vb, 32, 4).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, Math.min(slicePos, 0.999999), marched && v.contours ? 1 : 0]);
     const { log, lo, hi } = colorScale(v);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
     new Float32Array(vb, 8, 2).set([lo, hi]);
@@ -735,6 +766,9 @@ export class Renderer {
         // Without isosurfaces the fog is all there is to see.
         log ? 1 : 0, lo, hi, v.fog || !v.contours ? 1 : 0,
         ...(v.light ? BG_LIGHT : BG_DARK), v.box ? 1 : 0,
+        // The axes shown with their mirror images (mirrorShown); a spherical run's r_min / r_max,
+        // negative if r is logarithmic (the slice draws the (R, z) half-plane, src/spherical.ts).
+        ...mir.map((m) => (m ? 1 : 0)), sphViewParam(sim.cfg),
     ]);
     const parity = 2 * sim.cur + sim.speciesCur;
 

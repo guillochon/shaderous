@@ -94,6 +94,60 @@
      "title": "Makes sense in 2D",
      "description": "The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only"
     },
+    "symmetric": {
+     "enum": [
+      "none",
+      "x",
+      "y",
+      "z",
+      "xy",
+      "xz",
+      "yz",
+      "xyz"
+     ],
+     "title": "Symmetric under",
+     "description": "The mirrors (planes through the origin, named by the axis normal to each) the setup is symmetric under: a run may then compute only the part above them"
+    },
+    "symmetricField": {
+     "type": "boolean",
+     "title": "Field symmetric too",
+     "description": "The magnetic field is symmetric under those mirrors as well (a vector potential odd in its normal component and even in the others)"
+    },
+    "mirror": {
+     "enum": [
+      "none",
+      "x",
+      "y",
+      "z",
+      "xy",
+      "xz",
+      "yz",
+      "xyz"
+     ],
+     "title": "Mirror symmetry",
+     "description": "Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost"
+    },
+    "geometry": {
+     "enum": [
+      "cartesian",
+      "cylindrical",
+      "spherical"
+     ],
+     "title": "Geometry",
+     "description": "Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings; or in (r, theta): x is then r from the inner radius to the box side, y theta from pole to pole"
+    },
+    "rMin": {
+     "type": "number",
+     "title": "Inner radius",
+     "description": "A spherical (r, theta) run: the radius of its inner face (above zero); the box side is then its outer radius",
+     "minimum": 1e-12,
+     "maximum": 1e+30
+    },
+    "logR": {
+     "type": "boolean",
+     "title": "Logarithmic in r",
+     "description": "A spherical (r, theta) run: cells spaced evenly in ln r, so that they stay about as long as they are wide, rather than evenly in r"
+    },
     "bc": {
      "type": "object",
      "properties": {
@@ -659,6 +713,104 @@
      ],
      "title": "Frame",
      "description": "An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box"
+    },
+    "rotation": {
+     "type": "object",
+     "properties": {
+      "omega": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Rotating frame Ω",
+       "description": "Angular velocity of a frame turning about an axis through the box center: the gas feels the Coriolis force (and the centrifugal force, below). Velocities are those in the turning frame. In 2D only the z part turns the plane. Zero: an inertial frame"
+      },
+      "centrifugal": {
+       "type": "boolean",
+       "title": "Centrifugal force",
+       "description": "With a rotating frame: the centrifugal force as well as the Coriolis force. Off, the Coriolis force alone (an f-plane, as in a shearing box)"
+      }
+     },
+     "additionalProperties": false
+    },
+    "cosmology": {
+     "type": "object",
+     "properties": {
+      "omegaM": {
+       "type": "number",
+       "title": "Matter density Ω_m",
+       "description": "Matter density today, in units of the critical density",
+       "minimum": 0,
+       "maximum": 10
+      },
+      "omegaL": {
+       "type": "number",
+       "title": "Cosmological constant Ω_Λ",
+       "description": "Its density today, in units of the critical density (the curvature makes up the rest)",
+       "minimum": 0,
+       "maximum": 10
+      },
+      "zStart": {
+       "type": "number",
+       "title": "Starting redshift",
+       "description": "Redshift at t = 0",
+       "minimum": 0,
+       "maximum": 10000
+      },
+      "zEnd": {
+       "type": "number",
+       "title": "Ending redshift",
+       "description": "Redshift the run stops at (it sets the end time)",
+       "minimum": 0,
+       "maximum": 10000
+      },
+      "h": {
+       "type": "number",
+       "title": "Hubble constant h",
+       "description": "H0 in units of 100 km/s/Mpc, for the physical units a box size gives",
+       "minimum": 0.1,
+       "maximum": 2
+      },
+      "boxMpc": {
+       "type": "number",
+       "title": "Box size (Mpc/h)",
+       "description": "The box’s comoving side in Mpc/h. With it the run has physical units, and the readouts show proper densities, pressures and lengths at the current scale factor. Left out, the run is scale free",
+       "minimum": 0,
+       "maximum": 100000
+      }
+     },
+     "additionalProperties": false,
+     "title": "Comoving coordinates",
+     "description": "An expanding universe: positions comoving, densities comoving (mean 1), velocities peculiar, times in 1/H0 from the starting redshift. G follows from the matter density. A periodic box of gas, with or without self-gravity"
+    },
+    "shear": {
+     "type": "object",
+     "properties": {
+      "omega": {
+       "type": "number",
+       "title": "Ω",
+       "description": "Angular velocity of the frame",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "q": {
+       "type": "number",
+       "title": "Shear q",
+       "description": "-d ln Ω / d ln R: 1.5 for a Keplerian disk, 1 for a flat rotation curve",
+       "minimum": 0,
+       "maximum": 2
+      },
+      "stratified": {
+       "type": "boolean",
+       "title": "Stratified",
+       "description": "The vertical tidal pull, -Ω² z, toward the midplane"
+      }
+     },
+     "additionalProperties": false,
+     "title": "Shearing box",
+     "description": "The local model of a disk: a frame turning at Ω about z with the tidal pull of the shear, x radial, y along the orbit. Its x faces are periodic with the shift of the background flow v_y = -q Ω x, which the initial state should hold. Hydrodynamics on a uniform grid, periodic in y (and z unless stratified)"
     },
     "jeansFloor": {
      "type": "boolean",
@@ -1564,7 +1716,7 @@
         },
         "additionalProperties": false,
         "title": "Field loops",
-        "description": "Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability (balanced profile)"
+        "description": "Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability"
        },
        "stresses": {
         "type": "boolean",
@@ -3097,6 +3249,92 @@
      },
      {
       "type": "object",
+      "title": "Flow: Shearing wave",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "shearing-wave"
+       },
+       "amplitude": {
+        "type": "number",
+        "title": "Amplitude",
+        "default": 0.01,
+        "minimum": 0,
+        "maximum": 0.5
+       },
+       "kx": {
+        "type": "number",
+        "title": "Wavenumber along x",
+        "default": -2,
+        "minimum": -32,
+        "maximum": 32
+       },
+       "ky": {
+        "type": "number",
+        "title": "Wavenumber along y",
+        "default": 1,
+        "minimum": -32,
+        "maximum": 32
+       },
+       "pressure": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.01,
+        "minimum": 1e-8,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The background flow of a shearing sheet, v_y = -q Omega x, with a small density wave cos(kx x + ky y) on it (kx and ky in wavelengths across the box). A leading wave (kx < 0) is swung to trailing by the shear and amplified on the way. Needs physics.shear."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Shearing box",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "shearing-noise"
+       },
+       "noise": {
+        "type": "number",
+        "title": "Velocity noise",
+        "default": 0.001,
+        "minimum": 0,
+        "maximum": 0.5
+       },
+       "pressure": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.6,
+        "minimum": 1e-8,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The background flow of a shearing box, v_y = -q Omega x, in gas of uniform density 1 and pressure, with small random velocities on it (a fraction of the sound speed) to seed instabilities such as the magnetorotational. Needs physics.shear."
+     },
+     {
+      "type": "object",
       "title": "Flow: Shock hitting a helium bubble",
       "properties": {
        "kind": {
@@ -3187,6 +3425,42 @@
       ],
       "additionalProperties": false,
       "description": "Uniform gas at the temperature where interstellar cooling balances heating on the unstable branch, with small random density perturbations at one pressure. Density in atoms per cm^3, temperature in units of 1000 K: needs the interstellar cooling, in those units."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Zel’dovich pancake",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "zeldovich"
+       },
+       "zCaustic": {
+        "type": "number",
+        "title": "Caustic redshift",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 1000
+       },
+       "temperature": {
+        "type": "number",
+        "title": "Specific internal energy",
+        "default": 1e-10,
+        "minimum": 0,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "One plane wave along x on its growing mode in an Einstein-de Sitter universe (physics.cosmology with Omega_m = 1): the gas converges into a sheet, a caustic, at the given redshift, and then shocks. Cold gas: its specific internal energy at the start is given."
      }
     ]
    }

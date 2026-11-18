@@ -9,7 +9,7 @@
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= vec3<u32>(L.n))) { return; }
+  if (any(gid >= lvl_dims())) { return; }
   let c = vec3<i32>(gid);
   let s = nb_sum(c);
   let lap = (s.x - s.y * textureLoad(PHI, c).x) / (L.h * L.h);

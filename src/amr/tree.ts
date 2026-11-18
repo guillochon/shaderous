@@ -118,6 +118,8 @@ export class BlockTree {
   private newLeaves: Block[] = [];
   private lo: number[];
   private hi: number[];
+  /** Root blocks along each axis (the constructor's `lim`). */
+  readonly lim: number[];
   /** Offsets to the blocks sharing only an edge (3D) or a vertex (2D), when edgeBalance is on. */
   private readonly diagonals: number[][];
 
@@ -136,9 +138,16 @@ export class BlockTree {
     bcLo: number[],
     bcHi: number[],
     readonly edgeBalance = false,
+    /**
+     * Root blocks along each axis, if fewer than nr along some (a rectangular grid: half along
+     * a halved mirrored axis, src/domain.ts gridDims). Coordinates keep the cube of nr; the
+     * blocks stop at the limit, past which lies the domain's upper boundary (bcHi).
+     */
+    lim?: readonly number[],
   ) {
     this.lo = bcLo;
     this.hi = bcHi;
+    this.lim = [0, 1, 2].map((a) => lim?.[a] ?? nr);
     this.diagonals = [];
     if (edgeBalance) {
       // Two of the axes in use offset by one: the 4 vertex neighbors in 2D, the 12 edge neighbors in 3D.
@@ -158,10 +167,11 @@ export class BlockTree {
     this.span = nr << maxLevel;
     this.slots = new Array(cap);
     for (let s = cap - 1; s >= 0; s--) this.free.push(s);
-    const nroot = nr ** ndim;
+    const L = this.lim;
+    const nroot = L[0] * L[1] * (ndim === 3 ? L[2] : 1);
     if (nroot > cap) throw new Error(`block budget ${cap} is smaller than the ${nroot} root blocks`);
-    for (let k = 0; k < (ndim === 3 ? nr : 1); k++)
-      for (let j = 0; j < nr; j++) for (let i = 0; i < nr; i++) this.create(0, [i, j, k], null);
+    for (let k = 0; k < (ndim === 3 ? L[2] : 1); k++)
+      for (let j = 0; j < L[1]; j++) for (let i = 0; i < L[0]; i++) this.create(0, [i, j, k], null);
   }
 
   // A number rather than a string: the tables are rebuilt from neighbor lookups on every re-mesh.
@@ -259,7 +269,7 @@ export class BlockTree {
   /** The block of the same level beyond face f, if there is one (none at a closed boundary). */
   private sameLevel(b: Block, f: number): Block | undefined {
     const axis = f >> 1;
-    const n = this.nr << b.level;
+    const n = this.lim[axis] << b.level;
     let v = b.c[axis] + (f & 1 ? 1 : -1);
     if (v < 0 || v >= n) {
       if ((f & 1 ? this.hi[axis] : this.lo[axis]) !== 0) return undefined;
@@ -275,7 +285,7 @@ export class BlockTree {
     let c1 = b.c[1];
     let c2 = b.c[2] ?? 0;
     const step = f & 1 ? 1 : -1;
-    const n = this.nr << b.level;
+    const n = this.lim[axis] << b.level;
     let v = (axis === 0 ? c0 : axis === 1 ? c1 : c2) + step;
     if (v < 0 || v >= n) {
       const type = f & 1 ? this.bcHi[axis] : this.bcLo[axis];
@@ -299,9 +309,9 @@ export class BlockTree {
    */
   atOffset(b: Block, d: number[]): Block | null {
     const c = [b.c[0], b.c[1], b.c[2] ?? 0];
-    const n = this.nr << b.level;
     for (let a = 0; a < 3; a++) {
       if (!d[a]) continue;
+      const n = this.lim[a] << b.level;
       let v = c[a] + d[a];
       if (v < 0 || v >= n) {
         if ((d[a] > 0 ? this.hi[a] : this.lo[a]) !== 0) return null;

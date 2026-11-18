@@ -35,12 +35,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var g = vec3<f32>(0.0);
   let self_gravity = has_potential();
   if (nout == 0 && self_gravity) {
-    let h = blk_dx(inv.slot);
-    g = -vec3<f32>(
-      phi(c + vec3<i32>(1, 0, 0)) - phi(c - vec3<i32>(1, 0, 0)),
-      phi(c + vec3<i32>(0, 1, 0)) - phi(c - vec3<i32>(0, 1, 0)),
-      phi(c + vec3<i32>(0, 0, 1)) - phi(c - vec3<i32>(0, 0, 1)),
-    ) * (0.5 / h);
+    // (With comoving coordinates, the proper cell size: the field is the proper acceleration.)
+    let h = cell_dx(blk_dx(inv.slot), clock.a1);
+    if (is2d()) {
+      // (The texel along z is another block's.)
+      g = -vec3<f32>(
+        phi(c + vec3<i32>(1, 0, 0)) - phi(c - vec3<i32>(1, 0, 0)),
+        phi(c + vec3<i32>(0, 1, 0)) - phi(c - vec3<i32>(0, 1, 0)),
+        0.0,
+      ) * (0.5 / h);
+    } else {
+      g = -vec3<f32>(
+        phi(c + vec3<i32>(1, 0, 0)) - phi(c - vec3<i32>(1, 0, 0)),
+        phi(c + vec3<i32>(0, 1, 0)) - phi(c - vec3<i32>(0, 1, 0)),
+        phi(c + vec3<i32>(0, 0, 1)) - phi(c - vec3<i32>(0, 0, 1)),
+      ) * (0.5 / h);
+    }
   }
   var ph = 0.0;
   if (self_gravity) { ph = phi_half(c, inv.slot); }

@@ -1,0 +1,31 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "mri-box",
+  "name": "MRI shearing box",
+  "group": "Disks",
+  "family": "mri-box",
+  "familyName": "MRI shearing box",
+  "variant": "Vertical field",
+  "blurb": "A patch of a Keplerian disk (a shearing box) threaded by a weak vertical field (plasma beta 400), its gas stirred by a little noise: the magnetorotational instability grows channel flows at up to three quarters of the orbital frequency, which break up after a few orbits. One orbit is t = 2π.",
+  "domain": {
+    "ndim": 3,
+    "n": 64,
+    "box": 1,
+    "supports2d": false,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": 0,
+    "shear": { "omega": 1, "q": 1.5 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "shearing-noise", "noise": 0.001, "pressure": 0.6 },
+    { "kind": "field", "id": "field", "b": [0, 0, 0.0548] }
+  ],
+  "run": { "tEnd": 50, "checkpointDt": 0.5 },
+  "view": { "field": 0, "log": false, "mode": "slice", "axis": 1 }
+}

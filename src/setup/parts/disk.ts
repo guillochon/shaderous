@@ -293,7 +293,13 @@ ${tables}fn damping_target(x: vec3<f32>) -> DampTarget {
   return DampTarget(rate, rho, vec3<f32>(-v * x.y / r, v * x.x / r, 0.0), ${f32(cs * cs)} * rho);
 }
 `;
-  return { part: d, state, loop: null, damping: d.damp ? { wgsl, radius: d.damp.from, rate: d.damp.rate } : null };
+  // Field loops on the thin profile's scale height and midplane density as its state has them:
+  // floored at two cells of the grid the document names (compile.ts fieldOf), so that a disk
+  // thinner than that holds loops as thick as its gas, not sub-cell ones whose radial field
+  // overwhelms it. Without a grid (n = 1), the physical height.
+  const height = (r: number) => Math.max((cs * r) / speed(r), ctx.n > 1 ? 2 * dx : 0);
+  const loop = d.loops ? diskLoops(d.loops, rIn, cs, (r) => (ndim === 3 ? surface(r) / (Math.sqrt(2 * Math.PI) * height(r)) : surface(r)), height) : null;
+  return { part: d, state, loop, damping: d.damp ? { wgsl, radius: d.damp.from, rate: d.damp.rate } : null };
 }
 
 function balancedDisk(d: DiskPart, ctx: DiskContext): BuiltDisk {
@@ -324,25 +330,10 @@ function balancedDisk(d: DiskPart, ctx: DiskContext): BuiltDisk {
     const v = Math.sqrt(Math.max(v2, 0));
     return { rho, vx: (-v * y) / R, vy: (v * x) / R, vz: 0, p: cs ** 2 * rho, s: disk > 10 * amb ? 1 : 0 };
   };
-  let loop: BuiltDisk['loop'] = null;
-  if (d.loops) {
-    const { beta, span, count } = d.loops;
-    const sgm = gm === 1 ? 1 : Math.sqrt(gm);
-    /** The scale height cs / Omega_K at R. */
-    const scaleHeight = (R: number) => (sgm === 1 ? cs * R ** 1.5 : (cs * R ** 1.5) / sgm);
-    // Loops with no net flux: A_phi = a(R) f(z) sin(pi ln(R / rIn) / ln(span)) between rIn and
-    // rIn span^count, where f = max(exp(-z^2 / 2H^2) - e^-2, 0) closes them at |z| = 2H.
-    loop = (R, z) => {
-      if (R <= rIn || R >= rIn * span ** count) return 0;
-      const H = scaleHeight(R);
-      const f = Math.exp((-z * z) / (2 * H * H)) - Math.exp(-2);
-      if (f <= 0) return 0;
-      // B_z ~ (1 / R) d(R A_phi) / dR ~ a f pi / (R ln span) where two loops meet, at the midplane.
-      const b0 = Math.sqrt((2 * cs * cs * midplane(R)) / beta);
-      const a = (b0 * R * Math.log(span)) / (Math.PI * (1 - Math.exp(-2)));
-      return a * f * Math.sin((Math.PI * Math.log(R / rIn)) / Math.log(span));
-    };
-  }
+  const sgm = gm === 1 ? 1 : Math.sqrt(gm);
+  /** The scale height cs / Omega_K at R. */
+  const scaleHeight = (R: number) => (sgm === 1 ? cs * R ** 1.5 : (cs * R ** 1.5) / sgm);
+  const loop = d.loops ? diskLoops(d.loops, rIn, cs, midplane, scaleHeight) : null;
   // The same disk as the damping zone's target. The softening there is far below R, so it is
   // left out.
   const g = gm === 1 ? '1.0' : f32(gm);
@@ -388,4 +379,24 @@ export function sumDisks(states: Prim[]): Prim {
     s = Math.max(s, w.s);
   }
   return { rho, vx: px / rho, vy: py / rho, vz: pz / rho, p, s };
+}
+
+/**
+ * The field loops of a disk (DiskPart.loops) with midplane density rho_mid(R) and scale height
+ * H(R): loops with no net flux, A_phi = a(R) f(z) sin(pi ln(R / rIn) / ln(span)) between rIn and
+ * rIn span^count, where f = max(exp(-z^2 / 2H^2) - e^-2, 0) closes them at |z| = 2H, and a sets
+ * the plasma beta where two loops meet at the midplane.
+ */
+function diskLoops(loops: NonNullable<DiskPart['loops']>, rIn: number, cs: number, rhoMid: (R: number) => number, H: (R: number) => number): (R: number, z: number) => number {
+  const { beta, span, count } = loops;
+  return (R, z) => {
+    if (R <= rIn || R >= rIn * span ** count) return 0;
+    const h = H(R);
+    const f = Math.exp((-z * z) / (2 * h * h)) - Math.exp(-2);
+    if (f <= 0) return 0;
+    // B_z ~ (1 / R) d(R A_phi) / dR ~ a f pi / (R ln span) where two loops meet, at the midplane.
+    const b0 = Math.sqrt((2 * cs * cs * rhoMid(R)) / beta);
+    const a = (b0 * R * Math.log(span)) / (Math.PI * (1 - Math.exp(-2)));
+    return a * f * Math.sin((Math.PI * Math.log(R / rIn)) / Math.log(span));
+  };
 }

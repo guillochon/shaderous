@@ -53,6 +53,7 @@
     "test:headless": "node tools/headless/selftest.mjs",
     "headless": "node tools/headless/cli.mjs",
     "mcp": "node tools/headless/mcp.mjs",
+    "random-test": "node tools/random-test/run.mjs",
     "prepack": "npm run build"
   },
   "dependencies": {

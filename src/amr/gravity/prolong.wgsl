@@ -1,4 +1,4 @@
-// Trilinear prolongation of the coarse error, added to the finer sublevel in place. GL
+// Trilinear (2D: bilinear) prolongation of the coarse error, added to the finer sublevel in place. GL
 // describes the fine sublevel; its "other" fields describe the coarse one. Coarse cells beyond
 // the block are found through its neighbors; off the level the error is taken as zero.
 #include "hydro/common.wgsl"
@@ -28,12 +28,20 @@ fn main(
 ) {
   let span = u32(max(GL.bsize, 8));
   let zs = g_zspan(GL.bsize);
-  let b = (wid.x * 8u) / span + ((wid.z * 4u) / zs) * SLAB_BLOCKS;
+  var b = (wid.x * 8u) / span + ((wid.z * 4u) / zs) * SLAB_BLOCKS;
   let l0 = vec3<i32>(i32((wid.x * 8u) % span), i32(wid.y * 8u), i32((wid.z * 4u) % zs));
-  let cb = l0 / 2 - vec3<i32>(1);   // coarse cell at tile index (0, 0, 0)
+  var cb = l0 / 2 - vec3<i32>(1);   // coarse cell at tile index (0, 0, 0)
+  var tq = vec3<i32>(i32(lix % 6u), i32((lix / 6u) % 6u), i32(lix / 36u));
+  if (is2d()) {
+    // Four blocks to the workgroup, one per layer along z (g_inv2d): a 6 x 6 patch of each,
+    // the tile's four layers.
+    b = 4u * ((wid.x * 8u) / span + wid.z * SLAB_QUADS) + lix / 36u;
+    cb.z = 0;
+    tq.z = 0;
+  }
   if (b < LIST[0] && lix < 144u) {
     let slot = i32(LIST[1u + b]);
-    let q = cb + vec3<i32>(i32(lix % 6u), i32((lix / 6u) % 6u), i32(lix / 36u));
+    let q = cb + tq;
     var v: f32;
     if (all(q >= vec3<i32>(0)) && all(q < vec3<i32>(GL.obsize))) {
       v = textureLoad(PHIC, g_origin_other(slot) + q, 0).x;
@@ -49,6 +57,19 @@ fn main(
   let cc = inv.l / 2;
   let d = 2 * (inv.l % 2) - 1;   // toward the second-nearest coarse cell along each axis
   var sum = 0.0;
+  if (is2d()) {
+    // Bilinear, from this block's layer of the tile.
+    let lz = 36 * i32(gid.z % 4u);
+    for (var i = 0; i < 4; i++) {
+      let s = vec3<i32>(i & 1, (i >> 1u) & 1, 0);
+      let w = mix(vec2<f32>(0.75), vec2<f32>(0.25), vec2<f32>(s.xy));
+      let t = cc + s * d - cb;
+      sum += w.x * w.y * tile[t.x + 6 * t.y + lz];
+    }
+    let c = g_origin(inv.slot) + inv.l;
+    textureStore(PHI, c, vec4<f32>(textureLoad(PHI, c).x + sum, 0.0, 0.0, 0.0));
+    return;
+  }
   for (var i = 0; i < 8; i++) {
     let s = vec3<i32>(i & 1, (i >> 1u) & 1, (i >> 2u) & 1);
     let w = mix(vec3<f32>(0.75), vec3<f32>(0.25), vec3<f32>(s));

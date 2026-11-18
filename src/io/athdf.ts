@@ -73,10 +73,38 @@ export const warm = (): Promise<unknown> => library();
 let counter = 0;
 
 /**
+ * An axisymmetric snapshot (x = R, y = z, v_z = v_phi) relabeled into Athena++'s cylindrical
+ * order (R, phi, z), one cell in phi spanning 2 pi, and back: the cells keep their memory order
+ * (a block's [1][nz][nR] is its [nz][1][nR]), and only the axes' names, the second and third
+ * velocity and field components and the block tables move.
+ */
+function swapAxes23(s: Snapshot, toFile: boolean): Snapshot {
+  const at = (v: number[], phi: number) => (toFile ? [v[0], phi, v[1]] : [v[0], v[2], phi]);
+  const loc = new Int32Array(s.locations.length);
+  for (let b = 0; b < s.locations.length / 3; b++) {
+    const l = [s.locations[3 * b], s.locations[3 * b + 1], s.locations[3 * b + 2]];
+    loc.set(toFile ? [l[0], 0, l[1]] : [l[0], l[2], 0], 3 * b);
+  }
+  const data = { ...s.data };
+  [data.vel2, data.vel3] = [s.data.vel3, s.data.vel2];
+  return {
+    ...s,
+    rootSize: at(s.rootSize, 1),
+    blockSize: at(s.blockSize, 1),
+    lo: at(s.lo, 0),
+    hi: at(s.hi, toFile ? 2 * Math.PI : 0),
+    locations: loc,
+    data,
+  };
+}
+
+/**
  * @param gzip compression level for the cell data, 1 (fastest) to 9; 0 writes it uncompressed.
  *             gzip is HDF5's standard filter, so every reader handles it.
  */
-export async function writeAthdf(s: Snapshot, h5?: H5, gzip = 0): Promise<Uint8Array> {
+export async function writeAthdf(s0: Snapshot, h5?: H5, gzip = 0): Promise<Uint8Array> {
+  const cyl = s0.geometry === 'cylindrical';
+  const s = cyl ? swapAxes23(s0, true) : s0;
   const lib = await library(h5);
   const name = `write-${counter++}.athdf`;
   const f = new lib.File(name, 'w');
@@ -88,8 +116,11 @@ export async function writeAthdf(s: Snapshot, h5?: H5, gzip = 0): Promise<Uint8A
   f.create_attribute('NumCycles', s.steps, null, '<i4');
   f.create_attribute('Time', s.time, null, '<f4');
   // Strings are fixed-length byte strings, as Athena++ writes them: yt decodes them as bytes.
-  f.create_attribute('Coordinates', 'cartesian', null, 'S9');
-  for (let a = 0; a < 3; a++) f.create_attribute(`RootGridX${a + 1}`, new Float32Array([s.lo[a], s.hi[a], 1]), [3], '<f4');
+  // (A spherical run's axes are Athena++'s spherical_polar order (r, theta, phi) as they are.)
+  const sph = s0.geometry === 'spherical';
+  const coords = sph ? 'spherical_polar' : cyl ? 'cylindrical' : 'cartesian';
+  f.create_attribute('Coordinates', coords, null, `S${coords.length}`);
+  for (let a = 0; a < 3; a++) f.create_attribute(`RootGridX${a + 1}`, new Float32Array([s.lo[a], s.hi[a], a === 0 && sph ? (s.x1rat ?? 1) : 1]), [3], '<f4');
   f.create_attribute('RootGridSize', new Int32Array(s.rootSize), [3], '<i4');
   f.create_attribute('NumMeshBlocks', nb, null, '<i4');
   f.create_attribute('MeshBlockSize', new Int32Array(s.blockSize), [3], '<i4');
@@ -110,6 +141,17 @@ export async function writeAthdf(s: Snapshot, h5?: H5, gzip = 0): Promise<Uint8A
       const x0 = s.lo[a] + s.locations[3 * b + a] * n * dx;
       for (let i = 0; i <= n; i++) faces[b * (n + 1) + i] = x0 + i * dx;
       for (let i = 0; i < n; i++) centers[b * n + i] = x0 + (i + 0.5) * dx;
+      if (sph && a < 2) {
+        // Spherical: r's faces from x1rat (a uniform grid: every block at level 0), and the volume-weighted
+        // centers Athena++ writes for r and theta.
+        const rat = s.x1rat ?? 1;
+        const ff = (i: number) => (a === 1 || rat === 1 ? x0 + i * dx : s.lo[0] * rat ** (s.locations[3 * b] * n + i));
+        for (let i = 0; i <= n; i++) faces[b * (n + 1) + i] = ff(i);
+        for (let i = 0; i < n; i++) {
+          const [l, h] = [ff(i), ff(i + 1)];
+          centers[b * n + i] = a === 0 ? (0.75 * (h ** 4 - l ** 4)) / (h ** 3 - l ** 3) : (Math.sin(h) - h * Math.cos(h) - Math.sin(l) + l * Math.cos(l)) / (Math.cos(l) - Math.cos(h));
+        }
+      }
     }
     f.create_dataset({ name: `x${a + 1}f`, data: faces, shape: [nb, n + 1], dtype: '<f4' });
     f.create_dataset({ name: `x${a + 1}v`, data: centers, shape: [nb, n], dtype: '<f4' });
@@ -177,7 +219,10 @@ export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
       return d;
     };
 
-    if (strings('Coordinates')[0].toLowerCase() !== 'cartesian') throw new Error(`only Cartesian grids can be read (this file is ${strings('Coordinates')[0]})`);
+    const coords = strings('Coordinates')[0].toLowerCase();
+    // Cylindrical files are read when they are axisymmetric: one cell in phi.
+    const cyl = coords === 'cylindrical' && numbers('RootGridSize')[1] === 1;
+    if (coords !== 'cartesian' && !cyl) throw new Error(`only Cartesian grids, and axisymmetric cylindrical ones, can be read (this file is ${strings('Coordinates')[0]})`);
     const rootSize = numbers('RootGridSize');
     const blockSize = numbers('MeshBlockSize');
     const nb = numbers('NumMeshBlocks')[0];
@@ -232,6 +277,7 @@ export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
         // Not ours after all; read it as any other file.
       }
     }
+    if (cyl) return { ...swapAxes23(snap, false), ndim: 2, geometry: 'cylindrical' };
     return snap;
   } finally {
     f.close();

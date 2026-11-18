@@ -16,6 +16,7 @@ fn advance(u1: vec4<f32>, u2: vec4<f32>, net: Net, dw: f32, p_half: f32, kick: v
   let eint = u2.y + dtdx * (net.ei + max(p_half, P.p_floor) * net.vn);
   let sc = u2.z + dtdx * net.s;
 
+  g_kphi = swirl_ke(rho, mom);
   var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
   var mout = mom;
   let tame = tame_fluff(rho, mom, en.y);

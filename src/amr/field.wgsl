@@ -143,22 +143,25 @@ fn leaf_value(f: Leaf) -> Cell {
 
 // The leaf cell under the center of display voxel v.
 fn leaf(v: vec3<i32>) -> Leaf {
-  return leaf_at((vec3<f32>(v) + 0.5) / vec3<f32>(V.nd.xyz));
+  return leaf_at((vec3<f32>(v) + 0.5) / vec3<f32>(V.nd.xyz) * cube_scale());
 }
 
 // Slice: the leaf cell under the center of texel `ij` of the map, in the middle of the layer of
 // finest cells V.cut.z of the way along `axis`, and 1 on the lower edges of its block, one texel
 // wide.
 fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
-  let finest = f32(i32(P.amr.y << P.amr.z) * BS);
+  // (In fractions of the computed box, then of the tree's cube: cube_scale.)
+  let s = cube_scale();
+  let finest = f32(i32(P.amr.y << P.amr.z) * BS) * s[axis];
   let side = f32(V.nd.w);
   var p = vec3<f32>(0.0);
   p[ab.x] = (f32(ij.x) + 0.5) / side;
   p[ab.y] = (f32(ij.y) + 0.5) / side;
   p[axis] = (clamp(floor(V.cut.z * finest), 0.0, finest - 1.0) + 0.5) / finest;
+  p *= s;
   let f = leaf_at(p);
   // Position within the block, in texels of the map.
-  let within = (p * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * side / f32(f.nblk);
+  let within = (p * f32(f.nblk) - vec3<f32>(blk_coord(f.slot))) * side / (f32(f.nblk) * s);
   let edge = select(0.0, 1.0, within[ab.x] < 1.0 || within[ab.y] < 1.0);
   return Plane(leaf_value(f), edge, side / f32(f.nblk * BS));
 }
@@ -169,11 +172,12 @@ fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
 fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
   var s = Column(0.0, 0.0, 0.0, false);
   let finest = f32(i32(P.amr.y << P.amr.z) * BS);
+  let cs = cube_scale();
   var p = vec3<f32>(0.0);
-  p[ab.x] = (f32(ij.x) + 0.5) / f32(V.nd.w);
-  p[ab.y] = (f32(ij.y) + 0.5) / f32(V.nd.w);
-  var at = 0.0;   // the boundary reached, in fractions of the box
-  for (var i = 0; i < i32(finest) && at < 1.0; i++) {
+  p[ab.x] = (f32(ij.x) + 0.5) / f32(V.nd.w) * cs[ab.x];
+  p[ab.y] = (f32(ij.y) + 0.5) / f32(V.nd.w) * cs[ab.y];
+  var at = 0.0;   // the boundary reached, in fractions of the tree's cube (the box ends at cs)
+  for (var i = 0; i < i32(finest) && at < cs[axis]; i++) {
     p[axis] = at + 0.25 / finest;
     let f = leaf_at(p);
     let ncell = f32(f.nblk * BS);
@@ -197,7 +201,7 @@ fn smooth_log(f: Leaf, own: f32) -> f32 {
   for (var c = 0u; c < 8u; c++) {
     let o = vec3<f32>(f32(c & 1u), f32((c >> 1u) & 1u), f32((c >> 2u) & 1u));
     // Cell centers past the box are taken from the edge cells, as the boundary does.
-    let at = clamp((i0 + o + 0.5) / ncell, vec3<f32>(0.5 / ncell), vec3<f32>(1.0 - 0.5 / ncell));
+    let at = clamp((i0 + o + 0.5) / ncell, vec3<f32>(0.5 / ncell), cube_scale() - 0.5 / ncell);
     let q = leaf_value(leaf_at(at));
     let w = mix(1.0 - fr, fr, o);
     acc += w.x * w.y * w.z * select(log10_abs(q.x), own, q.solid);
@@ -245,7 +249,7 @@ fn atlas(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocatio
       g_dx = blk_dx(slot);
       f = Leaf(slot, level, nblk, l, atl(blk_origin(slot), l), at);
     } else {
-      f = leaf_at(clamp(at, vec3<f32>(0.5 / ncell), vec3<f32>(1.0 - 0.5 / ncell)));
+      f = leaf_at(clamp(at, vec3<f32>(0.5 / ncell), cube_scale() - 0.5 / ncell));
     }
     let q = leaf_value(f);
     if (inside && !q.solid) { range_add_w(q.x, 1u << (3u * (P.amr.z - u32(level)))); }

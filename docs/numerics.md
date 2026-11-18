@@ -32,8 +32,9 @@ precision, are pointed out where they occur.
 19. [Accelerating frames and damping zones](#19-accelerating-frames-and-damping-zones)
 20. [Nuclear burning network](#20-nuclear-burning-network)
 21. [Ideal MHD](#21-ideal-mhd)
-22. [Validation](#22-validation)
-23. [References](#references)
+22. [Rotating frames, symmetry and coordinates](#22-rotating-frames-symmetry-and-coordinates)
+23. [Validation](#23-validation)
+24. [References](#references)
 
 ---
 
@@ -110,7 +111,10 @@ step), and the maximum is over cells. Each term is:
   dimensions and $`D`$ the larger of $`\tfrac43\nu`$ and the thermal diffusivity ([§11](#11-viscosity-and-thermal-conduction)).
   Where diffusion dominates, the step falls as $`\Delta x^2`$, as an explicit scheme requires.
 - **Gravity** limits the step so that no cell is accelerated across more than a fraction of
-  itself in one step.
+  itself in one step: self-gravity, point masses, a rotating frame's forces and a uniform field
+  alike (until 2026-11-18 a uniform field alone did not, and cold gas under it fell two cells
+  in one step through the walls of a closed box). Curved grids add their geometric
+  (centrifugal) accelerations, over each axis's own length ([§22](#22-rotating-frames-symmetry-and-coordinates)).
 - **Point-mass pairs** ([§15](#15-point-masses-and-sinks)): each pair limits the step to
   $`\tfrac{C}{16}\min\left(r/v,\ \sqrt{r^3/GM}\right)`$, where $`r`$ is the softened separation, $`v`$ the
   relative speed and $`M`$ the pair's total mass. That is about 125 steps per circular orbit.
@@ -1085,6 +1089,9 @@ $`E`$ includes $`B^2/2`$.
   follows the analytic decay to $`10^{-5}`$, and a sink keeps the mass budget to $`10^{-7}`$
   with the field's energy left. (MHD's reconstruction has no well-balanced pressure: the column
   is compared with the hydro column without it.)
+- **Obstacles and inflows** are refused with a field: the MHD fluxes know no solid or fixed
+  cell, and gas flowed into an obstacle (a random setup between walls gained 0.14% of its mass
+  in 200 steps). The obstacle tool is off in an MHD run.
 - **Species** move by the same pass as without a field (§16), from the face mass fluxes that
   the MHD update's stage 2 records (on blocks, each block's own fluxes before the matching at
   refinement boundaries, which the species pass does itself); the block grid's species
@@ -1482,7 +1489,628 @@ overshoot, and at 45° the plain mean is cleaner on every shape measure. The cod
 mean (Gardiner & Stone, as Athena++); the other three were removed in November 2026 and are in
 the history (commit 9513236).
 
-## 22. Validation
+## 22. Rotating frames, symmetry and coordinates
+
+### Rotating frame
+
+A setup may run in a frame turning at a constant angular velocity $`\boldsymbol\Omega`$ about
+an axis through the box center (`physics.rotation`; `gravity/rot.wgsl`). The gas then feels
+
+```math
+\mathbf{a} = -2\,\boldsymbol\Omega\times\mathbf{v} - \nabla\Phi_c,
+\qquad \Phi_c = -\tfrac12\,|\boldsymbol\Omega\times\mathbf{x}|^2 ,
+```
+
+and all velocities, in the initial state, the outputs and the files, are those relative to the
+turning frame (`problems/rotating.ts` converts an inertial setup). The centrifugal force can be
+switched off, leaving the Coriolis force alone (an f-plane). In 2D only the part of
+$`\boldsymbol\Omega`$ along $`z`$ is used.
+
+**Centrifugal force.** $`\Phi_c`$ is added to the external potential of the point masses and
+the accelerating frame (`gravity/ext.wgsl`), so every pass that sees that potential sees it: the
+half kicks (with the energy in kick form, as for the masses), the gravity limit of the
+timestep, the well-balanced reconstruction, which then holds gas at rest in the rotating frame,
+and the potential view, which shows the effective potential. Its difference across a face is
+formed directly,
+$`-(\boldsymbol\Omega\times\mathbf{x})\cdot(\boldsymbol\Omega\times\mathbf{d}) - \tfrac12|\boldsymbol\Omega\times\mathbf{d}|^2`$,
+not as the difference of two potentials. The diagnostics add $`\rho\Phi_c`$ to the potential
+energy, so the total energy reported is the Jacobi integral, which is what the frame conserves.
+
+**Coriolis force.** Over a time $`\tau`$ it turns the momentum by $`-2|\boldsymbol\Omega|\tau`$
+about $`\boldsymbol\Omega`$, which Rodrigues' formula does exactly (with $`1 - \cos\theta`$
+formed as $`2\sin^2(\theta/2)`$). A turn keeps $`|\mathbf{m}|`$, so the force does no work and
+the total energy needs no source term. The turn is split around the step,
+
+```
+turn(dt/2)  kick(dt/2)  fluxes  kick(dt/2)  turn(dt/2)
+```
+
+which is symmetric in time; the predictor adds $`-2\boldsymbol\Omega\times\mathbf{v}`$ to its
+half kick. The turns live in a shader slot of their own, the frame slot
+(`gravity/frame_off.wgsl`, `frame_rot.wgsl`), applied by every update (uniform grid, blocks
+with or without per-block timesteps, and both MHD stages, where stage 1 takes its half step's
+whole share) and after the second kick, so a run without a rotation compiles without it and is
+unchanged bit for bit. The induction equation is the same in a rotating frame, so the field
+needs nothing. Point masses turn their velocities in their drift and kick passes and feel the
+centrifugal force. The step is limited to a tenth of a radian of frame rotation, about 63
+steps a turn; the turn is exact, so this bounds the splitting error, not stability.
+
+Debris energies and the disk stresses add $`\boldsymbol\Omega\times\mathbf{x}`$ back to the
+velocities, which they need in the inertial frame.
+
+Tests (`validation/frames.ts`): uniform flow on an f-plane turns at $`2\Omega`$ with its phase
+right to $`3\times10^{-7}`$ rad and its kinetic energy to $`10^{-6}`$; isothermal gas held by
+the centrifugal force stays below Mach $`10^{-5}`$ for more than a sound crossing (Mach 0.02
+without the well-balanced reconstruction); a blob carried by gas moving straight in the
+inertial frame lands within a sixth of a cell of where it should after a quarter turn; a binary
+at rest in its corotating frame keeps its separation to $`10^{-10}`$ for two orbits; and a
+uniform field along the axis is left exactly as it was.
+
+### Mirror symmetry
+
+A setup symmetric under mirrors through the origin (`domain.symmetric`) can be run on the part
+above its planes of symmetry (`domain.mirror`, link key `sym`): an octant in 3D or a quadrant in
+2D, and on any one or two axes. Cells stay cubic. Where every axis in use is mirrored, each
+mirrored axis's domain is $`[0, L]`$ instead of $`[-L/2, L/2]`$, with $`L`$ the box side, so an
+octant at $`n^3`$ has the cell size of the whole box at $`(2n)^3`$, for an eighth of the cells.
+Where only some are (a half, or a quadrant in 3D), the grid is **rectangular**: a mirrored axis
+has $`n/2`$ cells over $`[0, L/2]`$ and the others $`n`$ over $`[-L/2, L/2]`$, the same cube as
+without mirrors at the same cell size, for half or a quarter of the cells (`gridDims`,
+`src/domain.ts`). The uniform grid's textures, passes and readbacks take three counts; the
+multigrid's levels halve each axis until the shortest has two cells (a coarsest level of $`2\times2\times4`$ and the like), with each face's boundary values
+only as wide as that face. On blocks the tree keeps its cube of coordinates and creates only
+the root blocks of the computed part, its upper face along a halved axis then the domain's
+boundary, so the atlas holds half or a quarter of the blocks; a halved axis needs an even
+number of root blocks, or the grid stays a cube. Fractions of the box (what the probe, the
+brushes, the API and the display hand over) are of the computed extent along each axis: of
+half the box along a halved one. Magnetic runs keep the cube for now. Against the whole box at
+$`64^3`$, a Sedov blast mirrored about $`z`$ alone ($`64\times64\times32`$) or about $`x`$ and
+$`y`$ ($`32\times32\times64`$) agrees in density to $`3\times10^{-6}`$ with the same unfolded
+mass, and a uniform sphere's potential to $`2\times10^{-6}`$; on two levels of blocks the half
+has half the leaves and the whole's totals.
+
+**Gas.** The lower face of a mirrored axis is reflecting, so every reflecting path applies.
+Two things differ from a wall. The Riemann problem between a state and its image has zero mass
+flux in exact arithmetic but not in float32, so the flux through the plane is set to what it
+must be, the normal momentum flux alone, and the mass on the grid is conserved to the bit. And
+the well-balanced reconstruction treats the plane as an interior face between a cell and its
+image (the potential is even across it), not as a wall the potential continues through.
+
+**Gravity.** A plane of symmetry is a zero-gradient face for the potential, on every multigrid
+level of both grids: the ghost is the cell's own image in the stencils, the prolongation, the
+field's differences and the ghost layers of the blocks, where a block next to the plane finds
+its coarse neighbors' images too. The other faces stay isolated. The multipole boundary
+unfolds the grid's moments to the whole configuration's: the moment
+$`\sum m\,x^i y^j z^k`$ of the whole is the grid's times 2 for each mirrored axis whose power is
+even, and zero if any is odd. So the mass doubles per mirror, the center of mass lies on the
+planes, and the quadrupole (and every term to $`l = 4`$) is that of the whole.
+
+**Point masses** must lie and move on every plane, where each is its own image and its pull on
+the gas is unchanged. Their reduction is unfolded where it is read: masses and scalar totals
+times $`2^k`$, a vector's mirrored components zero and the others doubled per mirror, and an
+angular momentum's component kept only along the one axis every mirror is normal to.
+**Settling** needs nothing: the star's mass is measured on the grid, which holds its part.
+
+**Magnetic fields.** A field is a pseudovector: across a mirror its normal component is kept
+and its tangential ones change sign, the opposite of the conducting wall a reflecting face
+otherwise is. Every place the field is mirrored (the cell-centered ghosts on both grids, a
+tangential face beyond the plane, a block's ghost faces) takes that parity at a plane of
+symmetry, and the normal face on the plane is a real face, updated from the edge fields on it.
+A setup says its field qualifies (`domain.symmetricField`): its vector potential, an ordinary
+vector, must be odd in its normal component and even in the others across each plane. A field
+of $`\mathbf{A} = (x y^2 f(r), 0, 0)`$ pushing gas about gives, in an octant, the whole box's
+density to $`4\times10^{-7}`$ and $`\nabla\cdot\mathbf{B}`$ at round-off; with a wall's parity
+instead the density is off by $`5\times10^{-3}`$.
+
+**Diagnostics** report the whole configuration: extensive totals times $`2^k`$, momentum and
+the center of mass zero along mirrored axes. Snapshots hold the computed part with its true
+bounds, so yt reads an octant as an octant, and carry the mirrors in their settings.
+
+**The view** shows the whole configuration of an octant (or a 2D quadrant): the volume and
+slice views fold their sample positions back across the planes (`|2d - 1|` in fractions of
+the view's box), the overlays and the pointer's tools map between the computed box and the
+view's (a fraction $`f`$ of the one is $`\tfrac12 + \tfrac f2`$ of the other), and the
+`mirror` view setting turns it off. A rectangular grid always shows its images, which make the
+cube of the box again (without them its part would be drawn stretched); its slice map stays
+square, two texels to a cell along a halved axis. Field lines are drawn in the computed part
+only.
+
+What the mirrors would get wrong is refused with a message: a uniform field or a frame
+rotation that breaks the symmetry, a periodic upper face, periodic self-gravity, turbulence
+driving, a field not declared symmetric, a point mass or star off a plane, and more than one
+star.
+
+Tests: the mass flux through each plane is zero to the bit; a Sedov blast in an octant and in a
+2D quadrant matches the whole box at the same cell size to $`3\times10^{-6}`$ in density; the
+potentials of a uniform sphere and of a triaxial ellipsoid in an octant match the whole box's
+to $`2\times10^{-6}`$; a settled polytrope's central density and the Evrard collapse's energy
+behave as in the whole box (on blocks with per-block timesteps too); and a sink at the origin
+takes in the same mass to $`10^{-7}`$.
+
+### Comoving coordinates
+
+A setup with `physics.cosmology` runs gas in an expanding background, in the form Enzo uses
+([Bryan et al. 1995](https://doi.org/10.1016/0010-4655(94)00191-4)): positions are comoving, so
+the grid does not change; densities and pressures are comoving ($`a^3`$ times the proper ones),
+so the mass on the grid is constant; velocities are proper peculiar velocities and specific
+energies proper ones, so temperatures and sound speeds are physical as they stand. With scale
+factor $`a(t)`$,
+
+```math
+\begin{aligned}
+\partial_t\rho + \tfrac1a\nabla\cdot(\rho\mathbf{v}) &= 0,\\
+\partial_t(\rho\mathbf{v}) + \tfrac1a\nabla\cdot(\rho\mathbf{v}\mathbf{v} + p\,\mathsf{I}) &= -\tfrac{\dot a}{a}\rho\mathbf{v} - \tfrac{\rho}{a}\nabla\Phi,\\
+\partial_t(\rho e) + \tfrac1a\nabla\cdot(\rho e\,\mathbf{v}) &= -\tfrac{p}{a}\nabla\cdot\mathbf{v} - 3\tfrac{\dot a}{a}p,\\
+\nabla^2\Phi &= \tfrac{4\pi G}{a}\left(\rho - \bar\rho\right).
+\end{aligned}
+```
+
+Time is in units of $`1/H_0`$ and the mean comoving density is 1, so $`G = 3\Omega_m/8\pi`$.
+The clock starts at zero at the starting redshift; the end time follows from the ending one.
+
+**The scale factor** is advanced on the GPU, since the timestep never visits the CPU: the
+clock pass takes one RK4 step of $`\dot a = aH(a)`$,
+$`H = \sqrt{\Omega_m a^{-3} + \Omega_k a^{-2} + \Omega_\Lambda}`$, each step and keeps $`a`$ at
+its start, middle and end with $`H`$ at the middle. A step changes $`a`$ by at most 1%. Over
+$`a = 0.01`$ to 1 (466 steps) the float32 value stays within $`3\times10^{-7}`$ of float64.
+
+**Every gradient carries $`1/a`$.** The passes work with the proper cell size $`a\,\Delta x`$
+(the middle of the step's for the fluxes), so one scalar covers the flux update, the
+predictor, the species and the timestep's CFL and gravity limits. Both cells of a face use
+the same $`a`$, so their fluxes still agree to the bit. Positions keep the comoving size.
+
+**The expansion drag** is solved exactly and split around the step, through the frame slot
+(`gravity/frame_cosmo.wgsl`): before the fluxes from $`a`$ to the middle of the step, after the
+second kick on to its end. The momentum scales as $`1/a`$, an ideal gas's $`\rho e`$ as
+$`a^{-3(\gamma-1)}`$ (formed from series in $`a_1/a_0 - 1`$: GPU `pow` was biased enough to move
+the pressure by $`10^{-4}`$ over a few hundred steps), and $`E`$ changes by exactly what the
+two did. The predictor adds the drag's rates to its half step.
+
+**Gravity.** The Poisson source is divided by $`a`$ at the end of the step it is solved for,
+and the field stored is the proper acceleration $`-\nabla\Phi/a`$, so the kicks, the predictor
+and the timestep use it unchanged. The energy takes the kick form (what the kick adds to the
+kinetic energy) rather than the flux-form work: the flux form charged the energy with the
+potential's differences while the kick took the field, and in the cold gas of the pancake
+preset (temperature $`10^{-10}`$) $`E - KE`$ was then that disagreement, which the dual-energy
+switch took for heat: the temperature rose $`10^5`$-fold in the first step. With the kick
+form it falls as $`a^{-2}`$, as adiabatic expansion has it, to 0.4% after 47 steps.
+
+The well-balanced reconstruction is off in comoving runs. It measures pressure deviations
+from hydrostatic balance, and for cold gas falling far from balance those deviations, as large
+as $`\rho\,\Delta\Phi`$, act as spurious pressure: a 0.2% density wave grew 32% faster than
+linear theory with it and within 1% without. (Without expansion, a cold wave in a static
+periodic box grows 13% further with it than without; that case is not one it was built for.)
+
+**Equations of state** relate proper quantities, while the state holds comoving densities and
+pressures. An ideal gas's $`p = (\gamma-1)\rho e`$ is the same in both, so it is used as it
+stands. Any other is compiled behind wrappers (`comovingEosSlot`, `src/eos/eos.ts`): its
+functions are renamed and called at $`\rho/a^3`$ and $`p/a^3`$ or $`\rho e/a^3`$, with
+pressures and energy densities multiplied by $`a^3`$ on the way out, so every caller (the
+update, the predictor, the floors, the diagnostics, the display) goes through them. A pass that
+holds the clock sets $`a^3`$ for the states it works on (the middle of the step in the update);
+the others read the scale factor the step encoder copies from the clock into the parameters
+after every step. The expansion drag on $`\rho e`$ uses the gas's own $`g = p/\rho e`$: over a
+step $`\rho e`$ goes as $`a^{-3g}`$ with $`g`$ taken half way through (second order). Uniform gas
+plus radiation, their pressures equal at $`a = 0.1`$, expanding to $`a = 0.3`$ ends within
+$`2\times10^{-7}`$ in temperature of a float64 integration of $`de = -p\,d(1/\rho)`$, where an
+ideal gas would be off by a factor 2.6. The tabulated stellar equation of state is refused.
+
+**Cooling** works on proper quantities: the state's densities are comoving, so the cooling
+function is called at the proper density $`\rho/a^3`$ (at the middle of the step) and its rate,
+per unit proper volume, multiplied by $`a^3`$; the temperature comes through the wrappers. Uniform
+gas cooling by $`\Lambda\propto T^{1/2}`$ while it expands from $`a = 0.1`$ to 0.3 ends within
+$`10^{-5}`$ of a float64 integration.
+
+**Units.** A run is scale free unless `physics.cosmology.boxMpc` gives the box's comoving side
+in Mpc/h (with `h`, default 0.7): then lengths are in that side over the box, times in
+$`1/H_0`$, and a density of 1 is the mean matter density $`\Omega_m\rho_\text{crit}`$, which is
+what $`G = 3\Omega_m/8\pi`$ says in code units. Readouts in physical units show proper
+densities, pressures and energy densities ($`a^{-3}`$ times the state's) and proper lengths
+($`a`$ times), at the scale factor last read; velocities and temperatures are physical as they
+stand. Code units show the state's comoving values.
+
+The first version takes a periodic box of gas, with periodic self-gravity or none, on a uniform
+grid or on blocks with one timestep for all; anything else is refused with a message.
+The `zeldovich-pancake` preset (Cosmology group) runs the pancake of
+[Zel'dovich (1970)](https://ui.adsabs.harvard.edu/abs/1970A%26A.....5...84Z) through its
+caustic at $`z = 1`$.
+
+Tests: the scale factor on the GPU against float64 (Einstein-de Sitter and flat
+$`\Lambda`$CDM, $`3\times10^{-7}`$); uniform gas whose velocity falls as $`1/a`$ and comoving
+pressure as $`a^{3 - 3\gamma}`$ ($`5\times10^{-7}`$, uniform grid and blocks); a 0.2% wave that
+grows as $`a`$ (0.8%); a traveling sound wave whose phase, over 25 radians from $`a = 0.1`$ to
+0.3, follows $`\int k c_s/a\,dt`$ with the proper sound speed falling as $`1/a`$ (0.07%, its
+comoving wavelength fixed); gas and radiation expanding (above); and the pancake against its
+exact solution at half its caustic time (density 0.6%, velocity 0.25%; on blocks 6.5% in
+density, at the pancake's center, which is not understood: the uniform grid at the blocks'
+finest cell size gets 0.6%).
+
+### Shearing box
+
+`physics.shear` sets up the local model of a differentially rotating disk: a Cartesian box
+corotating at $`\Omega`$ about $`z`$ with shear parameter $`q = -d\ln\Omega/d\ln R`$ (3/2 for
+Keplerian), $`x`$ radial, $`y`$ along the orbit and $`z`$ vertical. The gas feels
+
+```math
+\mathbf{a} = -2\,\boldsymbol\Omega\times\mathbf{v} - \nabla\Phi_t,
+\qquad \Phi_t = -q\,\Omega^2x^2 \;\left(+\tfrac12\Omega^2z^2 \text{ if stratified}\right),
+```
+
+the rotating frame's exact Coriolis turn with the tidal potential in place of the centrifugal
+one. The background flow $`v_y = -q\Omega x`$ is steady. The well-balanced reconstruction sees
+only the vertical part of $`\Phi_t`$: the radial tidal pull is balanced by the Coriolis force on
+the background flow, not by pressure.
+
+**The shearing boundary.** Along $`x`$ the box is periodic with a shift that grows in time,
+
+```math
+f(x + L, y, z) = f(x,\ y + q\Omega L\,t,\ z), \qquad v_y \to v_y - q\Omega L ,
+```
+
+which is what a pattern carried by the background flow, $`f_0(x,\ y + q\Omega x\,t)`$, satisfies
+([Hawley et al. 1995](https://doi.org/10.1086/175311)). (The first version shifted the ghosts the
+other way, which a uniform state, a mass count and epicycles cannot see; the shearing wave below
+found it, its amplitude 54% off and its phase right.) The clock carries the offset
+$`\Delta y = q\Omega L\,t \bmod L`$, summed step by step with
+Kahan compensation (formed from $`t`$ it would lose its digits over a long run). A ghost beyond
+an $`x`$ face lies between two cells sheared along $`y`$ and is blended linearly from both, its
+$`v_y`$ shifted by the jump of the background flow; the half-step state takes the offset half a
+step on.
+
+**Conservation.** The two cells that share a shearing face compute its flux from different
+ghosts, so they disagree and mass would not be conserved. Each takes instead the mean of its own
+flux and the one the other side computes, remapped and boosted into its frame (as the mesh
+recomputes its neighbors' fluxes at refinement boundaries):
+$`F_\text{lo}(j) = \tfrac12\left[F_\text{own}(j) + (1 - \epsilon)F_\text{other}(j + s) + \epsilon F_\text{other}(j + s + 1)\right]`$,
+with $`s`$ and $`\epsilon`$ the whole and fractional cells of the offset. Summed over $`j`$ both
+faces give the same total, so mass and the $`x`$ and $`z`$ momenta are conserved to rounding
+(the total, not each face). A dense blob carried across the boundary for two orbits keeps its
+mass to $`10^{-8}`$.
+
+**Rounding.** In float32 the background flow is not held exactly: each step adds the Coriolis
+and tidal increments to velocities of the order of the shear speed, and in a steady state the
+rounding of those additions is the same every step, so it adds up, to about $`10^{-4}`$ of the
+shear speed an orbit. Orbital advection (evolving the departure from the background) would
+remove it and the shear speed's limit on the timestep; it is not implemented yet. The Coriolis
+turn takes its sines from their series for small angles: the GPU's `sin` is accurate in absolute
+terms only, and its error over the small angle of one step was biased enough to shift the phase
+of the rotating-frame test by $`7\times10^{-6}`$ (now $`3\times10^{-7}`$).
+
+**Magnetic fields.** The face field keeps both $`x`$ planes of $`b_x`$ (texels 0 and $`n`$),
+sheared images of each other, instead of one shared face. Ghost cells are blended as above, and
+a ghost's tangential faces likewise from the two sheared faces. After each stage's flux pass and
+after its edge pass, a small pass (`mhd/shear.wgsl`) replaces what each $`x`$ plane computed by
+the mean of its own and the other plane's, remapped and boosted: the face fluxes as in the
+hydrodynamic update, and the edge impulses $`E_y`$ and $`E_z`$ on the two planes (Athena's
+remap of the electric field), $`E_z`$ with the frame change $`u\,B_x`$ of $`-\mathbf v\times\mathbf B`$
+when $`v_y`$ is boosted by $`u = \pm q\Omega L`$. Every face around such an edge then changes by the
+same number, so the divergence stays at round-off and the two planes' $`b_x`$ stay in step; and
+the sums of the remapped impulses over a plane agree, so the net vertical and radial fluxes
+through the box are conserved. Resistivity and viscosity are refused with a field. The
+MRI's disk diagnostics (`mhd/mri.wgsl`) take the local frame there: Maxwell stress
+$`-B_xB_y`$, Reynolds stress from the velocity less the background flow, and the quality factors
+with $`\Omega`$ the box's.
+
+The first version runs on a uniform grid, periodic along $`y`$ (and $`z`$ unless stratified);
+blocks (whose neighbors across the boundary change with time), self-gravity and diffusion are
+refused. The `shearing-wave` preset swings a leading density wave round to trailing; `mri-box`
+grows the magnetorotational instability from noise in a vertical field. Tests: the background
+over ten orbits (within $`10^{-3}`$ of the shear speed), the blob, epicycles at
+$`\kappa = \sqrt{2(2 - q)}\,\Omega`$ (back to $`5\times10^{-5}`$ after one, epicyclic energy to
+$`5\times10^{-5}`$); the compressive shearing wave of
+[Johnson & Gammie (2005)](https://doi.org/10.1086/426637) at $`128^2`$, projected on the sheared
+wave and against a float64 integration of the linear equations through its swing (amplitude
+0.3%, phase $`2\times10^{-5}`$ rad, where it grows 1.9 times); a magnetized box with net
+vertical field and a field crossing the $`x`$ faces, whose net vertical and radial fluxes keep to
+$`5\times10^{-10}`$ over two orbits with $`\nabla\cdot B`$ at $`10^{-7}`$; and the MRI's fastest
+channel mode growing at $`0.762\,\Omega`$ against $`0.75`$ ($`32^3`$, $`\beta = 50`$).
+
+### Axisymmetric (R, z) runs
+
+`domain.geometry: "cylindrical"` makes a 2D run a body of revolution about the $`y`$ axis. The
+2D grid is one periodic layer of the 3D scheme and already carries the third velocity
+component, so the layer becomes the azimuth:
+
+| Code axis | Meaning |
+|---|---|
+| x | $`R`$, from the axis (the lower $`x`$ face) to the box side |
+| y | $`z`$ |
+| z (the layer) | $`\phi`$: `v_z` is $`v_\phi`$ |
+
+Swirl comes at no extra storage, and the constant field of 2D runs already points along
+$`-y`$, which is $`-z`$ here. The scheme solves
+
+```math
+\partial_t\mathbf{U} + \frac{1}{R}\partial_R\left(R\,\mathbf{F}_R\right) + \partial_z\mathbf{F}_z = \mathbf{S}:
+```
+
+- **Fluxes.** Each radial face's flux is weighed by its area over the cell's volume per
+  $`\Delta`$, $`R_-/R_c = i/(i + \tfrac12)`$ and $`R_+/R_c = (i + 1)/(i + \tfrac12)`$: pure index
+  ratios, with no cancellation in float32. The axis face weighs exactly 0, so nothing crosses
+  it. The face's flux itself is the same bits from both cells, so $`\sum R_c\,U`$ is conserved
+  to rounding. The $`p\,\nabla\cdot\mathbf{v}`$ term takes the same weights on the face normal
+  velocities, which gives the cylindrical divergence.
+- **Angular momentum.** The $`\phi`$ momentum flux through radial faces is weighed by
+  $`(R_\pm/R_c)^2`$, with no source: $`R\rho v_\phi`$ is then conserved to rounding.
+- **Radial source,** $`(p + \rho v_\phi^2)/R`$, with $`p`$ the mean of the cell's two radial
+  face pressures (each face's normal momentum flux less what its mass flux carries). With it
+  the cylindrical balance reduces exactly to the Cartesian one: uniform pressure is in balance
+  to rounding, and the well-balanced reconstruction holds a stratified column, and a star
+  held up radially by its pressure, as it does in Cartesian coordinates.
+- **Energy where the gas swirls.** The radial faces carry the total energy weighed by $`R`$ and
+  the angular momentum by $`R^2`$, so the kinetic energy of the swirl that the updated angular
+  momentum gives and the one the energy update holds differ, by a few percent of it at a steep
+  edge. In cold gas carried round by its rotation, the swirl's energy a hundred times the heat,
+  $`E - \tfrac12\rho v^2`$ is then mostly that difference. At a torus's inner edge it drained
+  the pressure within a few hundredths of an orbit, the edge lost its support, and the gas
+  spilling inward, flung back out by its angular momentum, piled up in the edge cell: the peak
+  density of a torus around a point mass rose 2.8 times in an orbit at $`64^2`$ with the shock
+  detector's HLL fallback off, 2.3 times with the minmod limiter, 1.5 times with the
+  well-balanced reconstruction (each taking away some of the dissipation that had held it
+  down), while the same torus in 3D, whose momentum and energy share their faces, stayed
+  within 7%. So the dual-energy switch (hydro/dual_energy.wgsl) takes $`E - KE`$ for the
+  internal energy only where that is also at least a tenth of the swirl's kinetic energy
+  $`\tfrac12\rho v_\phi^2`$, and keeps the advected internal energy elsewhere. The same torus
+  then holds to 1% in an orbit with any of the three; at $`256^2`$, with the well-balanced
+  reconstruction on, a torus of constant angular momentum keeps its peak density within 0.3% for
+  five orbits (with the old switch, and the radial balance off, it wobbled by 3 to 4%). (Measuring the radial balance against the effective
+  potential, gravity's plus the centrifugal, was tried as well, the step between two cells
+  density weighted and each cell's own swirl for its half step: it brought the first orbit to
+  0.5% but was not needed, and is not used.)
+- **Predictor:** the half step's geometric terms, $`-\rho v_R/R`$ in the density,
+  $`-\rho c_s^2 v_R/R`$ in the pressure, $`+v_\phi^2/R`$ in $`v_R`$ and $`-v_Rv_\phi/R`$ in
+  $`v_\phi`$.
+- **The axis** reflects as a plane of symmetry does, with $`v_\phi`$ odd as well as $`v_R`$.
+
+Cells are rings of volume $`2\pi R_c\Delta^2`$, so the diagnostics' masses and energies are true
+ones, and the momentum they report is along $`z`$ alone. Snapshots are written in Athena++'s
+cylindrical order $`(R, \phi, z)`$, one cell in $`\phi`$ spanning $`2\pi`$, which yt reads as
+such; the reader takes such files back.
+
+**Blocks.** On an adaptive mesh the same weights are formed from each cell's global radial
+index on its level. Restriction and prolongation are volume weighted: a parent is the mean of
+its children weighted by $`(i + \tfrac12)/(2I + 1)`$, and the prolonged children are laid about
+the coarse ring's centroid rather than its middle, so that $`\sum R\,U`$ over them is the
+parent's. Where a coarse cell takes a refined neighbor's fluxes across $`z`$, each fine face
+weighs by its own radius. Per-block timesteps are refused for now. On two levels a swirling
+ring keeps mass, energy and angular momentum to $`5\times10^{-7}`$ through its re-meshing.
+
+**Self-gravity** (isolated) is solved in $`(R, z)`$ on the uniform grid by the same
+multigrid, its levels one cell deep: the stencil drops $`z`$ and weighs the radial neighbors
+by $`R_\pm/R_c`$, with the diagonal their sum, so cells stay square and red-black smoothing
+is unchanged; the residual is restricted with the rings' volumes. The multipole boundary
+needs no new evaluator: each ring's moments are filled in by symmetry about the axis
+($`\sum x^2 = \sum z^2 = \tfrac12 m R^2`$ and so on to fourth order, the center of mass on
+the axis), and the boundary is evaluated in the plane of the run. The flux-form
+gravitational work takes the weighted mass fluxes. A uniform sphere's potential comes out
+within $`7\times10^{-4}`$ of the analytic one (the 3D solve: $`1.5\times10^{-3}`$), and the
+Evrard collapse in $`(R, z)`$ keeps its energy to 0.2% through bounce.
+
+On blocks the per-level solver of §13 runs in 2D. Its blocks are one cell deep, laid out in
+each sublevel's atlas as the hydro atlas is in 2D, and a dispatch's four invocations along
+$`z`$ take four blocks of the list. The stencil is the uniform grid's (five points, the radial
+neighbors weighed by $`R_\pm/R_c`$ from the cell's radial index at that sublevel); the residual
+and the source are restricted with the rings' volumes, so a parent holds its children's mass;
+the coarse error is prolonged, and the ghosts across a coarse-fine face interpolated,
+bilinearly. The axis is a plane of mirror symmetry for the potential, as in a mirrored run,
+and the multipole boundary takes the rings' moments as on the uniform grid. On three levels
+($`128^2`$ finest) the uniform sphere's potential is within $`1.2\times10^{-3}`$ of the analytic
+one in every leaf, and the Evrard collapse keeps its energy to 0.24% through bounce, its
+thermal energy peaking at $`t = 1.125`$ as on the uniform grid. Per-block timesteps stay
+refused.
+
+**Stars** of a setup document may sit on the axis and move along it (an orbit, which puts its
+bodies off it, is refused). They are settled as in 3D (section on settling above), on the
+uniform grid and on blocks: the settling's sums are of volumes, and a ring's is
+$`2\pi R\,\Delta x^2`$, with positions $`(R, z, 0)`$, so the star's mass and its balance are a
+body of revolution's. On blocks they settle on the CPU (the GPU's sums are of cubes). An
+$`n = 1`$ polytrope of 25 cells' radius ($`128^2`$) settles in 8 rounds and keeps its central
+density to 1.2% over three sound crossings (`cyl-star`), as the 3D polytrope does.
+
+**The timestep** of an $`(R, z)`$ run weighs a cell's radial signal rate by its outer face's
+weight, $`(R_c + \Delta x/2)/R_c`$ (twice next to the axis, where the face is twice as large
+as the cell is wide), and holds the centrifugal acceleration $`v_\phi^2/R_c`$ over that same
+weighted length to the acceleration limit, as for gravity. Without them a fast swirl reaching
+the axis (a random setup, $`v_\phi = 0.66`$ in gas of sound speed 0.01) emptied the axis cells
+in its first step and went to NaN; with them it keeps its mass to round-off.
+
+**Point masses** may sit on the axis and move along it. Their pull on the gas needs nothing,
+since the distance from a mass on the axis to any point of a ring is that to the ring's cell
+center; the gas's pull on them, and what their sinks take, are summed over rings (their true
+volumes), with the parts across the axis dropped where the reduction is read, as each ring's
+cancel. A sink on the axis takes in within 1% of what the same sink takes in 3D.
+
+**Magnetic fields** (uniform grid). The face field keeps its layout: $`b_R`$ on the radial
+faces, $`b_z`$ on the $`z`$ faces, $`B_\phi`$ in the layer. With $`E_\phi`$ on the edges,
+$`\partial_t b_R = -\partial_z E_\phi`$ is the Cartesian update; $`\partial_t b_z =
+\tfrac1R\partial_R(R E_\phi)`$ weighs each edge by its radius over the face's,
+$`R_\pm/R_c`$; and $`B_\phi`$'s flux form, $`\partial_t B_\phi = \partial_z E_R - \partial_R
+E_z`$, has no radii in it. The cylindrical divergence,
+$`(R_+b_{R+} - R_-b_{R-})/(R_c\Delta) + \Delta_z b_z/\Delta`$, is then unchanged by every edge,
+as the Cartesian one is. The cell's $`B_R`$ is its faces' mean weighed by their areas. The
+radial faces' fluxes take the same weights as the gas's ($`R B_\phi`$'s stress with angular
+momentum, by the square), and the radial source becomes
+$`(p + B^2/2 + \rho v_\phi^2 - B_\phi^2)/R`$, its total pressure the mean of the two radial
+faces' (the flux pass leaves each face's $`B_R`$ beside its flux for this), so that a uniform
+field along the axis is in balance to rounding. On the axis $`E_\phi`$ and the flux of
+$`B_\phi`$ vanish, and beyond it $`B_\phi`$ changes sign, as $`v_\phi`$ does. A vector
+potential's $`b_z`$ is formed with the same radial weights. Resistivity, viscosity and blocks
+are refused with a field.
+
+The first version is hydrodynamics and ideal MHD (conduction works through the face weights);
+viscosity (which needs the curvilinear stress), point masses off the axis, species and
+per-block timesteps are refused. The `blast-axisymmetric` preset is a point explosion on the axis.
+Tests: uniform gas at rest stays below Mach $`10^{-6}`$; a swirling ring carried along $`z`$
+keeps mass, energy, $`z`$ momentum and angular momentum to $`10^{-7}`$; a point blast is
+spherical, its radius along $`R`$ and $`z`$ within 1.5% of the 3D similarity solution; a
+stratified column under gravity stays below Mach $`10^{-4}`$; the spherical Noh implosion at
+$`512^2`$ (R to 2, so that no gas measured came in through a boundary) has its post-shock
+density within 2.7% of 64 and the pre-shock within 0.1%, alike along the axis, the diagonal and
+$`R`$; Bondi accretion onto a point mass on the axis within 3.5% of Bondi's rate; and a poloidal
+field loop carried along $`z`$ keeps $`\nabla\cdot B`$ at $`3\times10^{-7}`$ and 96.2% of its
+magnetic energy (the same loop in Cartesian coordinates: 96.0%), with a uniform axial field at
+rest to Mach $`3\times10^{-7}`$; and a pressure-supported torus of constant angular momentum
+around a point mass on the axis keeps its mass and the radius of its center of mass to 1% and
+its peak density to 0.3% for five orbits. Its faces are open for outflow only: open both ways, they let the mass pull gas in
+from outside the box, which then piled up at the mass without bound.
+
+
+### Spherical (r, θ) runs
+
+`domain.geometry: "spherical"` (with `domain.rMin`, the inner radius, and `domain.logR`) makes
+a 2D run a body of revolution about the $`z`$ axis on a grid of shells:
+
+| Code axis | Meaning |
+|---|---|
+| x | $`r`$, from $`r_\text{min} > 0`$ to the box side, evenly spaced in $`r`$ or in $`\ln r`$ |
+| y | $`\theta`$, from 0 to $`\pi`$: both poles are in the grid |
+| z (the layer) | $`\phi`$: `v_z` is $`v_\phi`$ |
+
+The cells are not the same size along the two axes, and on a logarithmic grid not from one
+shell to the next, so the grid's $`\Delta x`$ (the radial extent over the cell count) is only
+a reference length. Every pass that divides by it takes the cell's own lengths as ratios to
+it instead: $`h_r/\Delta x`$ and $`r_c\Delta\theta/\Delta x`$ scale the predictor's slopes and
+the timestep's signal rates, and the update's face weights are areas over volumes times
+$`\Delta x`$, so the update itself is the Cartesian one.
+
+The timestep takes, per axis, the larger of the cell's length and its volume over its larger
+face's area: a cell on a pole has half the volume per area of its polar face that
+$`r_c\Delta\theta`$ says, and the innermost shell over a small $`r_\text{min}`$ a radial face
+up to twice as large as $`h_r`$ suggests. It is also held to $`\text{CFL}\sqrt{L/a}`$ per
+axis for the geometric acceleration, $`(v_\theta^2 + v_\phi^2)/r`$ along $`r`$ and
+$`v_\phi^2\cot\theta/r`$ along $`\theta`$, as for gravity. Without both, a swirling blob
+around the origin (a random setup, $`v_\phi = 0.06`$) emptied the pole cells next to $`r_\text{min}`$
+in its first step and went to NaN; with them it keeps its mass and the axis drains smoothly.
+
+- **Areas and volumes in closed forms.** $`V \propto \tfrac13\Delta(r^3)\,\Delta\cos\theta`$
+  and the face areas are differences that cancel in float32 on a fine grid (at
+  $`\Delta\ln r = 10^{-3}`$, $`r^3`$ changes by 0.3% across a cell). They are never formed as
+  such: $`\tfrac13\Delta(r^3)`$ is $`r_c^2\Delta r + \Delta r^3/12`$ on a uniform grid and
+  $`\tfrac23 r_c^3\sinh(\tfrac32\Delta)`$ on a logarithmic one, $`\Delta\cos\theta =
+  2\sin\theta_c\sin(\Delta\theta/2)`$, and the constants of the logarithmic grid
+  ($`e^{\Delta/2}`$, $`3/(2\sinh\tfrac32\Delta)`$, $`\sinh\Delta`$, $`2\sinh(\Delta/2)`$) are
+  computed in double precision on the CPU. A radial face's weight is then
+  $`(\Delta x/r_c)\,e^{\pm\Delta}\cdot3/(2\sinh\tfrac32\Delta)`$ (logarithmic) or
+  $`\rho_\pm^2/(\rho_c^2 + \tfrac1{12})`$ with $`\rho = r/\Delta x`$ (uniform); a polar
+  face's is $`\langle 1/r\rangle\Delta x\,\sin\theta_\pm/\Delta\cos\theta`$, with
+  $`\sin\theta_\pm`$ formed from the nearer pole, so that both poles' faces weigh exactly 0.
+- **Sources.** Radially $`(2p + \rho(v_\theta^2 + v_\phi^2))/r`$, in $`\theta`$
+  $`\cot\theta\,(p + \rho v_\phi^2)/r`$. The $`-\rho v_rv_\theta/r`$ of the $`\theta`$ momentum
+  and the whole source of $`v_\phi`$ are taken up by lever arms instead: the $`\theta`$ and
+  $`\phi`$ momentum fluxes through a radial face are weighed by $`r_\pm/r_c`$ besides the
+  area, and the $`\phi`$ momentum through a polar face by $`\sin\theta_\pm/\sin\theta_c`$, so
+  that $`r\rho v_\theta`$ and $`r\sin\theta\,\rho v_\phi`$ are carried in conservation form.
+  The pressure's share of each source is $`(h - w_-)\,p_- + (w_+ - h)\,p_+`$ from the two faces'
+  own pressures, $`w_\pm`$ their weights and $`h`$ the cell's $`\Delta x`$ over its length along
+  that axis. With equal face pressures it is $`(w_+ - w_-)\,p`$, the cell's exact average of
+  $`2p/r`$ (or $`p\cot\theta/r`$), which the faces' own difference cancels to rounding; with
+  them apart, the net force is $`h\,(p_- - p_+)`$, the Cartesian one. (The mean of the two face
+  pressures, which made $`(R, z)`$ well balanced, is not enough here: its net force is
+  $`\tfrac12(w_- + w_+)(p_- - p_+)`$, and $`\tfrac12(w_- + w_+)`$ is not $`h`$ in
+  $`(r, \theta)`$, by $`1/(6\rho_c^2)`$ on a uniform grid.) The rest of each source is the
+  half step's $`\rho v^2`$ times the same averages of $`1/r`$ and $`\cot\theta/r`$.
+- **Predictor:** the half step's geometric terms, $`-\rho(2v_r + \cot\theta\,v_\theta)/r`$ in
+  the density (and $`\rho c_s^2`$ times it in the pressure), $`+(v_\theta^2 + v_\phi^2)/r`$ in
+  $`v_r`$, $`(\cot\theta\,v_\phi^2 - v_rv_\theta)/r`$ in $`v_\theta`$ and
+  $`-(v_r + \cot\theta\,v_\theta)v_\phi/r`$ in $`v_\phi`$.
+- **The poles** reflect, with $`v_\theta`$ and $`v_\phi`$ odd, as the $`(R, z)`$ axis does; the
+  inner sphere is an ordinary face (reflecting, or open: outflow only for accretion).
+- **Energy.** The dual-energy switch's guard against the swirl (above) applies as in
+  $`(R, z)`$. Gravity's work goes into the energy in kick form: with the flux form and the
+  well-balanced reconstruction together, a settled $`n = 1`$ polytrope's fundamental mode grew,
+  its central density off by 3% after 18 time units from the analytic start and by 7.6% after
+  16 from a settled one (either alone held it to 0.7%); in kick form it holds to 0.04%. Why the
+  two together drive it was not found.
+- **Gravity** is the monopole: each radial index's shell mass is summed over $`\theta`$ (one
+  invocation per shell, Kahan-summed), a single invocation takes the prefix sum, and the field
+  at each cell is $`-G\,M(<r_c)/r_c^2`$, the shell's own share inside $`r_c`$ included, with the
+  potential $`-\sum G\,m/\max(r, r_\text{shell})`$ for the well-balanced reconstruction and the
+  diagnostics. Point masses must sit at the origin, at rest: their $`GM`$ joins the enclosed
+  mass and they are not kept as particles (no sinks; gas leaves through the inner face).
+  Self-gravity beyond the monopole, MHD, viscosity, species, frames, shear, expansion,
+  mirrors, driving and burning are refused.
+
+The diagnostics' masses and energies are true ones (each cell's volume in its closed form), and
+their momentum and center of mass are in $`(R, z)`$, along $`z`$ alone. Snapshots are written
+with `Coordinates = spherical_polar`, which is already the grid's order $`(r, \theta, \phi)`$,
+the radial faces from `RootGridX1`'s ratio and the centers volume weighted as Athena++ writes
+them (a unit test checks the layout); such files are not read back. The slice view (and a 2D run's projection, the
+same plane) draws the meridional half-plane, $`(R, z) = (r\sin\theta, r\cos\theta)`$: a
+square of $`R`$ from 0 to $`2r_\text{max}`$ and $`z`$ from $`-r_\text{max}`$ to $`r_\text{max}`$,
+the axis its left edge as in an $`(R, z)`$ run, so the grid's half-disk fills its left half. The
+map stays the native $`(r, \theta)`$ grid; the slice shader takes each pixel to the
+$`(r, \theta)`$ of its position (the cell fraction along $`r`$ logarithmic on a logarithmic
+grid) and draws background inside $`r_\text{min}`$ and beyond $`r_\text{max}`$. The page's
+pointer (probes, tools, contour labels) and its markers use the same mapping
+(`src/spherical.ts` `sphFromView`, `sphToView`); obstacles drawn by hand do not (their outline
+is a linear map of the screen). A native screenshot is the same picture at the map's size. The `blast-spherical` preset is a
+point explosion at the origin.
+
+**On blocks** (spherical-plan S1's mesh refinement and S5), a level is the uniform grid at its
+own resolution: each cell's geometry (areas, volumes, lever arms, sources, the predictor's
+$`h_r/\Delta x`$ and $`h_\theta/\Delta x`$, the timestep's per-axis rates, both poles and the
+inner sphere) comes from its global indices on its level, with that level's
+$`r_\text{min}/\Delta x`$, $`\Delta\ln r`$ and $`\Delta\theta`$ (the finest level's, halved
+or doubled per level). A coarser level's logarithmic constants come from the finest's
+$`s = \sinh(\Delta/2)`$ by doubling, $`s' = 2s\sqrt{1 + s^2}`$, and then
+$`e^{\Delta/2} = c + s`$, $`\sinh\Delta = 2sc`$, $`\sinh\tfrac32\Delta = s(3 + 4s^2)`$ with
+$`c = \sqrt{1 + s^2}`$: no step cancels, and the finest level uses the CPU's constants as the
+uniform grid does. Across levels:
+
+- **Restriction** (on the fly and on merging) is the volume-weighted mean of the four children,
+  each weighing its $`\tfrac13\Delta(r^3)\,\Delta\cos\theta`$ over their mean, so that the sum
+  of $`V U`$ is kept; **prolongation** shifts the children's limited-slope offsets along $`r`$
+  and $`\theta`$ by $`\tfrac14(v_+ - v_-)/(v_+ + v_-)`$ of the parent, $`v_\pm`$ the radial
+  pair's volumes or the polar pair's $`\Delta\cos\theta`$, which centers them on the parent's
+  centroid, so their volume-weighted mean is the parent (the $`(R, z)`$ prolongation's shift is
+  this rule's radial one there).
+- **Flux matching**: a coarse face's flux is the area-weighted mean of the two fine fluxes,
+  along both axes: a radial face's fine faces weigh their $`\Delta\cos\theta`$, a polar face's
+  their $`\int r\,dr`$ ($`r_c\Delta r`$, or $`r_c^2\sinh\Delta`$ on a logarithmic grid). The
+  lever arms are the faces' own, the same on both sides.
+- **Per-block timesteps** work with the geometry: a deposit (the second half of a faster
+  neighbor's fluxes) weighs its fluxes by the cell's areas and lever arms but adds no source,
+  and the sources take the pressures of the cell's own faces (with the bins a face shared with a
+  faster neighbor carries half of the step's flux at first). The timestep is set by the
+  smallest cells, at $`r_\text{min}`$ beside the poles ($`r_\text{min}\Delta\theta`$); the
+  bins let the outer blocks step two or four times as long.
+- **Gravity** is the monopole of the leaves, summed into the finest level's shells: each leaf's
+  row of cells at one radial index (its mass Kahan-summed over $`\theta`$) hands each finest
+  shell it covers that shell's share of its volume, and the shells are summed in leaf order. A
+  cell's center at any level lies on a finest face, or at the finest level on a finest center,
+  so the mass inside it (and the sum of $`m/r`$ over the shells outside, for the potential) is
+  read at a half index of the finest shells, kept for the faces and centers of all of them.
+  The field atlas, its two ghost layers included, is filled from that; with per-block
+  timesteps the monopole is summed over the leaves as they stand at every substep and the
+  potential written is the current one, not extrapolated half a step (the blocks' halves differ).
+
+`sph-blocks`: on two levels, the Sedov blast (256² finest) has its shock 0.74% from the
+similarity solution along every one of 64 rays (0.72% with two time bins), and the swirling blob
+(128² finest, logarithmic) keeps mass, energy and angular momentum about the axis to
+$`3\times10^{-7}`$, $`1.3\times10^{-7}`$ and $`1.0\times10^{-6}`$ through ten re-meshes (with two
+bins $`2\times10^{-8}`$, $`1.2\times10^{-7}`$ and $`1.1\times10^{-6}`$, for 76% of a single
+timestep's block updates). `sph-polytrope-blocks`: the polytrope on two levels (128² finest,
+all three levels in use), settled as on the uniform grid, keeps the density of its innermost
+cells to 0.08% over 10 dynamical times (0.09% with two bins). On one level of blocks at 128²
+it holds to 0.040%, as on the uniform grid (0.039%); at the coarsest level alone (32²), 1.2%.
+
+Tests (`sph-*`): uniform gas at rest between reflecting spheres at $`r = 0.1`$ and 1, both poles
+in the grid, stays below Mach $`6\times10^{-6}`$ on uniform and logarithmic grids (64²), its
+mass within $`3\times10^{-7}`$ of $`\tfrac43\pi(1 - 10^{-3})`$; a dense swirling blob thrown
+across the grid keeps mass, energy and angular momentum about the axis to
+$`5\times10^{-7}`$; a Sedov blast at the origin (256², $`r`$ from 0.005 to 0.5) has its shock
+radius 0.74% from the similarity solution, the same along every ray to $`10^{-7}`$; an
+$`n = 1`$ polytrope (128², logarithmic, $`r`$ from 0.05 to 2, the mass inside a point mass),
+settled by stopping it every 0.2 for 6, keeps its central density to 0.04% over 10 dynamical
+times; and isothermal Bondi accretion through an open inner sphere at $`r = 0.1`$ (128²,
+logarithmic to 16, the outer two shells held at the isothermal atmosphere's state as a
+reservoir) is within 1.5% of Bondi's rate in every shell inside the Bondi radius, averaged over
+$`t = 40`$ to 80 (instantaneously within 3%: the flow inside the reservoir still breathes). With
+the outer face merely open, the infall from the uniform start drew gas in through it without
+bound, and the rate grew with it.
+
+
+## 23. Validation
 
 The validation suite (`src/validation/tests.ts`) has 55 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with

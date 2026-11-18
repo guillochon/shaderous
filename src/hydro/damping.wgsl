@@ -19,7 +19,7 @@ struct DampTarget {
 // The state of the cell at `x` (in fractions of the box) after relaxing for a step of length dt.
 fn apply_damping(st: NewState, x: vec3<f32>, dt: f32) -> NewState {
   if (!DAMPING || st.u2.w > 0.5) { return st; }   // solid cells keep their gas as it is
-  var pos = (x - 0.5) * P.box;
+  var pos = frac_pos(x);
   if (P.dims.z == 1u) { pos.z = 0.0; }
   let t = damping_target(pos);
   if (!(t.rate > 0.0)) { return st; }

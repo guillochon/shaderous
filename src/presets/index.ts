@@ -17,12 +17,12 @@ export const PRESET_FILES: Record<string, SetupSpec> = Object.fromEntries(Object
  */
 export const PRESET_ORDER: readonly string[] = [
   'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'driven-turbulence', 'jeans',
-  'sedov', 'sedov-rad', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
+  'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',
-  'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse',
+  'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'zeldovich-pancake',
   'wd-collision', 'wd-collision-burning',
   'tidal-disruption', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',
-  'binary', 'mri-disk',
+  'binary', 'mri-disk', 'shearing-wave', 'mri-box',
   'orszag-tang', 'mhd-blast', 'mhd-rotor', 'brio-wu', 'field-loop', 'field-loop-dense', 'alfven-wave', 'alfven-collision', 'alfven-packets', 'tearing', 'island-coalescence', 'x-point', 'driven-turbulence-mhd',
   'advection', 'lid-driven-cavity', 'empty', 'empty-mhd',
 ];

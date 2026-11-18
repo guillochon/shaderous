@@ -42,12 +42,13 @@ fn bspline(t: f32) -> vec4<f32> {
 }
 
 fn contour(st: vec2<f32>) -> Line {
-  let side = i32(textureDimensions(MAP).x);
-  let top = vec2<i32>(side - 1);
+  // (Texels along each of the map's axes: a rectangular grid's map is not square, gridDims.)
+  let side = vec2<i32>(textureDimensions(MAP));
+  let top = side - 1;
   // The side of the cell under the pixel, in texels.
-  let cell = max(textureLoad(MAP, clamp(vec2<i32>(floor(st * f32(side))), vec2<i32>(0), top), 0).a, 1.0);
+  let cell = max(textureLoad(MAP, clamp(vec2<i32>(floor(st * vec2<f32>(side))), vec2<i32>(0), top), 0).a, 1.0);
   // Position in cells of that size, from the first cell's center.
-  let g = st * f32(side) / cell - 0.5;
+  let g = st * vec2<f32>(side) / cell - 0.5;
   let i0 = floor(g);
   let fr = g - i0;
   let wx = bspline(fr.x);
@@ -82,15 +83,47 @@ fn contour(st: vec2<f32>) -> Line {
   return Line(select(alpha, alpha / 0.85, hot), select(ink(k, neg), HOVER_INK, hot));
 }
 
+// The map's two axes: the grid axes in the plane of the slice (a 2D run's x and y).
+fn map_axes() -> vec2<i32> {
+  let axis = i32(C.q.x);
+  if (C.q.w <= 1.0 || axis == 2) { return vec2<i32>(0, 1); }
+  return select(vec2<i32>(1, 2), vec2<i32>(0, 2), axis == 1);
+}
+
+// A spherical run (C.mir.w: r_min / r_max, negative on a logarithmic grid): the point sd of the
+// view's square as (R, z) = (r sin theta, r cos theta), R from 0 to 2 r_max and z from -r_max to
+// r_max, and so the map's fractions (r's cell fraction, theta / pi) under it; z: 1 on the grid,
+// 0 off it (inside r_min, beyond r_max, or R < 0). src/spherical.ts sphFromView() on the CPU.
+fn sph_code(sd: vec2<f32>) -> vec3<f32> {
+  let p = vec2<f32>(2.0 * sd.x, 2.0 * sd.y - 1.0);
+  let rho = length(p);
+  let f = abs(C.mir.w);
+  let fx = select((rho - f) / (1.0 - f), log(max(rho, 1.0e-30) / f) / log(1.0 / f), C.mir.w < 0.0);
+  let fy = atan2(p.x, p.y) / 3.14159265358979;
+  let on = p.x >= 0.0 && rho >= f && rho < 1.0;
+  return vec3<f32>(clamp(vec2<f32>(fx, fy), vec2<f32>(0.0), vec2<f32>(0.9999999)), select(0.0, 1.0, on));
+}
+
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
   // The square laid out by the app (sliceLayout), in units of its width from its middle.
   let st0 = vec2<f32>(in.uv.x * C.right.w + C.eye.w, in.uv.y * C.up.w);
   // Zoom and pan: C.r.zw is the point of the slice at the middle of that square.
-  let st = st0 / C.r.y + C.r.zw;
+  let sd = st0 / C.r.y + C.r.zw;
+  // With mirror images shown the square is the whole configuration: folded back onto the map.
+  let ax = map_axes();
+  let fold = vec2<bool>(C.mir[ax.x] != 0.0, C.mir[ax.y] != 0.0);
+  var st = select(sd, abs(2.0 * sd - 1.0), fold);
+  var off = any(sd < vec2<f32>(0.0)) || any(sd >= vec2<f32>(1.0));
+  // A spherical run: the square is the meridional half-plane, the map its (r, theta) grid.
+  if (C.mir.w != 0.0) {
+    let s = sph_code(sd);
+    st = s.xy;
+    off = s.z == 0.0;
+  }
   let line = contour(st);
-  if (any(st < vec2<f32>(0.0)) || any(st >= vec2<f32>(1.0))) { return vec4<f32>(C.bg.rgb, 1.0); }
-  let m = textureLoad(MAP, vec2<i32>(floor(st * f32(textureDimensions(MAP).x))), 0);
+  if (off) { return vec4<f32>(C.bg.rgb, 1.0); }
+  let m = textureLoad(MAP, vec2<i32>(floor(st * vec2<f32>(textureDimensions(MAP)))), 0);
   var col = textureSampleLevel(TF, S, vec2<f32>(m.r, 0.5), 0.0).rgb;
   if (m.r < -0.5) { col = SOLID; }
   // Block outlines of an adaptive mesh.

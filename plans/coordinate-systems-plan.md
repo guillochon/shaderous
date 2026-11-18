@@ -1,7 +1,30 @@
 # Frames, symmetric domains and coordinate systems: implementation plan
 
-Status: plan only, nothing here is implemented. Written 2026-11-15 from a read of the code at
-commit `efc14ac`. File and line references are to that commit.
+Status: mostly built (2026-11-17, C and D finished 2026-11-17); see the table below. Written 2026-11-15 from a read of the
+code at commit `efc14ac`. File and line references are to that commit. What was built is
+described in [docs/numerics.md §22](../docs/numerics.md#22-rotating-frames-symmetry-and-coordinates)
+and tested in `src/validation/{frames,symmetry,cosmo,shear,cyl}.ts`.
+
+| Step | State |
+|---|---|
+| G1 domain origin | done |
+| G2 frame slot, A rotating frame (A1-A5, A7) | done; A6 (rotating polytropes) not done |
+| B1-B4, B7, B8 mirror symmetry | done (view shows the images; field lines stay in the computed part) |
+| B5 mirror parity for fields | done |
+| B6 rectangular grids | done: half and 3D-quadrant runs compute their part of the cube on the uniform grid (rectangular multigrid) and on blocks (`sym-half`); magnetic runs keep the cube |
+| G3 clock, C1-C5 comoving coordinates | done (well-balanced reconstruction off in comoving runs: see §22) |
+| C6 | done: every equation of state but the tabulated stellar one, through comoving wrappers; cooling (`cosmo-eos`) |
+| C7 refusals | done |
+| C8 | done: `physics.cosmology` with `boxMpc`/`h` units (proper values in the readouts), the pancake preset, a and z on the status line, `cosmo-wave`; the Layzer-Irvine check (optional) not done |
+| D1-D3 shearing box (hydro, uniform grid) | done; the boundary's shift had the wrong sign until `shear-wave` found it (fixed). The background drifts by float32 rounding, ~1e-4 of the shear speed an orbit (orbital advection, D5, would remove it) |
+| D4 MHD shearing box, D6 `shear-wave`/`shear-flux`/`shear-mri` | done (`mhd/shear.wgsl`), with the `mri-box` preset; resistivity and viscosity with a field refused; the MRI disk diagnostics in the local frame |
+| E1-E3, E7 (R, z) hydro, diagnostics, files | done (display by revolution not done) |
+| E4 (R, z) on blocks | done, without per-block timesteps |
+| E5 step 1 masses on the axis, step 2 self-gravity on the uniform grid | done |
+| E5 step 3 self-gravity on blocks, settling in (R, z) | done: self-gravity on blocks (`cyl-sphere-blocks`, `cyl-evrard-blocks`), without per-block timesteps; stars of a setup document settled on the axis with ring volumes, uniform grid and blocks (`cyl-star`) |
+| E6 MHD and viscosity in (R, z) | MHD done on the uniform grid (`cyl-mhd`); viscosity, resistivity and blocks with a field refused |
+| E8 tests | rest, conserve, sedov, sink, blocks, sphere, evrard, sphere-blocks, evrard-blocks, column, noh, bondi, torus, mhd, star |
+| E9 spherical | uniform grid done ([spherical-plan.md](spherical-plan.md) S1-S4, S6 files): uniform or logarithmic in $`r`$, both poles, monopole gravity with point masses at the origin, `.athdf` as `spherical_polar`, the `blast-spherical` preset; tests rest, conserve, sedov, polytrope, bondi. On blocks too (S1's refinement, S5): per-level geometry from global indices, volume-weighted restriction and prolongation, area-weighted flux matching on both axes, per-block timesteps, the monopole summed over the leaves into the finest shells; tests sph-blocks, sph-polytrope-blocks. The slice view draws the meridional $`(R, z)`$ half-plane. Not done: a 2D Poisson solve, reading `spherical_polar` files, the Mignone slope weights on the logarithmic grid |
 
 This plan covers five additions, in the order they should be built:
 
