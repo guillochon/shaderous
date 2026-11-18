@@ -496,7 +496,7 @@ For graduate students the code is a readable example of a modern Godunov method.
 \section{Validation}
 \label{sec:validation}
 
-Validation runs in the browser on the reader's own GPU, from a page next to the simulator, and from the command line through a browser driven by Playwright. A double-precision CPU implementation of the same scheme, and an exact Riemann solver \citep{Toro2009}, serve as references. Appendix~\ref{sec:validationtests} lists the 70 tests, their pass criteria and the values measured in one run. A float64 copy of the MHD scheme serves as the reference for the magnetic tests. Figure~\ref{fig:hydro} compares the hydrodynamics with exact solutions and shows how the error falls with resolution. Figure~\ref{fig:gravitytests} shows the energy budget of a gravitational collapse and the accuracy of the potential on the adaptive mesh.
+Validation runs in the browser on the reader's own GPU, from a page next to the simulator, and from the command line through a browser driven by Playwright. A double-precision CPU implementation of the same scheme, and an exact Riemann solver \citep{Toro2009}, serve as references. Appendix~\ref{sec:validationtests} lists the 123 tests, their pass criteria and the values measured in one run. A float64 copy of the MHD scheme serves as the reference for the magnetic tests. Figure~\ref{fig:hydro} compares the hydrodynamics with exact solutions and shows how the error falls with resolution. Figure~\ref{fig:gravitytests} shows the energy budget of a gravitational collapse and the accuracy of the potential on the adaptive mesh.
 
 Each test checks one thing that we expected to break. To find failures that we did not expect, we also ran the code on setups chosen at random. A script draws either a problem of Section~\ref{sec:problems} with a random resolution, refinement, Riemann solver, limiter and mirror symmetry, or a setup assembled from random parts: blasts, dense blobs, jets, obstacles, stars, point masses, disks, magnetic fields, rotating frames, comoving coordinates, shearing boxes and local timesteps, in Cartesian, $(R, z)$ or $(r, \theta)$ coordinates. Each setup runs for 400 or 1000 steps. The script flags a run whose values become non-finite, whose page reports an error, or that changes its mass in a box with no open face and no sink. It also lists runs that floor more than 1 percent of their cells or exceed a Mach number of 100, which in vacuum and in cold gas are expected. We ran about 2,500 setups over one night on an Apple M4 Pro, each within 4~GB of GPU memory, and looked at screenshots of them as they ran. They found ten bugs that the validation suite had missed, and we fixed each one. The tabulated equation of state for white dwarf matter returned NaN in hot gas on Apple GPUs, because the Metal compiler reordered a product of four temperatures until it overflowed single precision. A swirl reaching the axis of an $(R, z)$ or $(r, \theta)$ run emptied the cells next to the axis in one step. Cold gas under a uniform gravitational field fell through the walls of a closed box, because that field alone did not limit the timestep. Magnetized gas flowed into obstacles, which the MHD solver now refuses. A thin disk with field loops stopped the page. The remaining bugs were setups that the page's own check accepted and the solver then refused. After the last of these fixes, about 1,150 further setups ran. Three of them failed, each in a combination of features that we have not yet resolved: MHD next to near-vacuum gas, local timesteps with a massive point mass at the origin of an $(r, \theta)$ run, and local timesteps with viscosity in very thin gas. The rest finished with finite values. The script is in the repository, so the same tests can be repeated after any change.
 
@@ -543,7 +543,7 @@ The code, its validation suite, the manuscript source, the bibliography and the 
 \section{Validation tests}
 \label{sec:validationtests}
 
-Tables~\ref{tab:validation}, \ref{tab:validation-amr}, \ref{tab:validation-gravity} and~\ref{tab:validation-mhd} list every test of the validation suite (Section~\ref{sec:validation}) with its pass criterion and the value measured in one run of the suite in Chrome 156 on an NVIDIA RTX~3080. The report of that run is in the repository.
+Tables~\ref{tab:validation}, \ref{tab:validation-amr}, \ref{tab:validation-gravity} and~\ref{tab:validation-mhd} list every test of the validation suite (Section~\ref{sec:validation}) with its pass criterion and the value measured in one run of the suite in Chrome 156 on an NVIDIA RTX~3080. The report of that run is in the repository. Tables~\ref{tab:validation-frames} and~\ref{tab:validation-curvilinear} list the tests of the frames and coordinate systems of Section~\ref{sec:coordinates}, with the values measured in one run of the suite in Chrome on an Apple M4 Pro.
 
 \begin{table*}
 \centering
@@ -663,6 +663,84 @@ Resistivity & \tabpar{7.0cm}{A field wave at rest decays as $\exp(-2\eta k^2 t)$
 Line-tied walls & \tabpar{7.0cm}{Stressed X-point: every wall face bit-identical, mass and energy to $10^{-6}$, collapse; current-free null at rest to $10^{-4}$ of its magnetic energy; shear flow between no-slip walls decays at the viscous rate to 2\%} & \tabpar{4.4cm}{No face differs, energy $7\times10^{-8}$, peak density 3.5; $8\times10^{-6}$; 0.002\%} \\
 Magnetized tidal disruption & \tabpar{7.0cm}{Field energy within 3\% of its integral; disruption follows the hydrodynamic run to 5\%} & \tabpar{4.4cm}{0.26\%; 0.56\%} \\
 Magnetized disk & \tabpar{7.0cm}{Mass within 3\%, kinetic energy within 5\%; Alfv\'en ceiling held; Maxwell stress grows from zero} & \tabpar{4.4cm}{Mass 0.6\%, kinetic energy 1\%; $\alpha_{\rm M}$ from $3\times10^{-13}$ to $1.6\times10^{-3}$} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{table*}
+\centering
+\caption{The validation tests of rotating frames, mirror symmetry, comoving coordinates and the shearing box (Section~\ref{sec:coordinates}), measured on an Apple M4 Pro. The steady shear flow fails on this GPU by its mass, and passes elsewhere.}
+\label{tab:validation-frames}
+\footnotesize
+\begin{tabular}{lll}
+\toprule
+Test & Pass criterion & Measured \\
+\midrule
+Rotation of zero & \tabpar{7.0cm}{A frame that does not turn ends a Kelvin-Helmholtz run in the same bits as no frame} & \tabpar{4.4cm}{No value differs} \\
+Coriolis force & \tabpar{7.0cm}{Uniform flow turns by $-2\Omega t$ to $10^{-4}$~rad; kinetic energy to $10^{-5}$; uniform and blocks} & \tabpar{4.4cm}{$2.7\times10^{-7}$~rad; $5.6\times10^{-7}$} \\
+Centrifugal balance & \tabpar{7.0cm}{Isothermal gas held by the centrifugal force: Mach $< 10^{-4}$, and 100 times below the plain scheme} & \tabpar{4.4cm}{$8.3\times10^{-6}$, against 0.023} \\
+Blob in the inertial frame & \tabpar{7.0cm}{After a quarter turn, centered on its inertial path to half a cell} & \tabpar{4.4cm}{0.085 of a cell} \\
+Corotating binary & \tabpar{7.0cm}{Over two orbits, separation to $10^{-3}$ and each mass within 0.01 of its start} & \tabpar{4.4cm}{$6.9\times10^{-11}$; $5.9\times10^{-6}$} \\
+Rotating frame with a field & \tabpar{7.0cm}{As the Coriolis test, with a field along $\boldsymbol\Omega$; magnetic energy to $10^{-6}$} & \tabpar{4.4cm}{$4.1\times10^{-7}$~rad; $1.9\times10^{-6}$; 0} \\
+Flux through a mirror & \tabpar{7.0cm}{No mass crosses a plane of symmetry; both cells of every face agree} & \tabpar{4.4cm}{0; 0 of 95,200 faces} \\
+Sedov blast on an octant & \tabpar{7.0cm}{Octant and 2D quadrant match the whole box in density to $10^{-5}$} & \tabpar{4.4cm}{$2.6\times10^{-6}$; $1.7\times10^{-6}$} \\
+Half and quadrant grids & \tabpar{7.0cm}{Rectangular grids match the whole box: density to $10^{-5}$, potential to $10^{-4}$, blocks' mass and energy} & \tabpar{4.4cm}{$2.5\times10^{-6}$; $1.8\times10^{-6}$; 0 and $6\times10^{-8}$} \\
+Sphere potential on an octant & \tabpar{7.0cm}{Within 1\% of the analytic potential and $10^{-4}$ of the whole box} & \tabpar{4.4cm}{0.15\%; $1.7\times10^{-6}$} \\
+Ellipsoid on an octant & \tabpar{7.0cm}{Triaxial ellipsoid's potential within $10^{-4}$ of the whole box} & \tabpar{4.4cm}{$2.0\times10^{-6}$} \\
+Polytrope on an octant & \tabpar{7.0cm}{Central density within 5\% over 3 dynamical times, as the whole box to 1\%} & \tabpar{4.4cm}{2.47\%, against 2.46\%} \\
+Evrard collapse on an octant & \tabpar{7.0cm}{Energy to 2\%, thermal peak at $0.9 < t < 1.3$; also on blocks with local timesteps} & \tabpar{4.4cm}{0.69\%; blocks 0.20\%} \\
+Field on an octant & \tabpar{7.0cm}{Density to $10^{-4}$ and magnetic energy to $10^{-5}$ of the whole box; div B at round-off} & \tabpar{4.4cm}{$3.6\times10^{-7}$; $1.1\times10^{-7}$; $1.3\times10^{-7}$} \\
+Sink on an octant & \tabpar{7.0cm}{Mass accreted equals the whole box's to $10^{-5}$} & \tabpar{4.4cm}{$5.5\times10^{-8}$} \\
+Scale factor & \tabpar{7.0cm}{$a$ from 0.01 to 1 in float32 within $10^{-5}$ of float64, matter only and with $\Lambda$} & \tabpar{4.4cm}{$3.4\times10^{-7}$; $2.9\times10^{-7}$} \\
+Expansion drag & \tabpar{7.0cm}{Velocity as $1/a$ and pressure as $a^{3-3\gamma}$ to $10^{-5}$; uniform and blocks} & \tabpar{4.4cm}{$3.0\times10^{-7}$; $1.1\times10^{-8}$} \\
+Cooling while expanding & \tabpar{7.0cm}{Internal energy within $10^{-3}$ of a float64 integration} & \tabpar{4.4cm}{$8.5\times10^{-6}$} \\
+Gas and radiation expanding & \tabpar{7.0cm}{Temperature within $10^{-4}$ of a float64 integration} & \tabpar{4.4cm}{$2.2\times10^{-7}$} \\
+Sound wave while expanding & \tabpar{7.0cm}{Phase within 1\% of $\int k c_s/a\,dt$ over 25~rad; one mode} & \tabpar{4.4cm}{0.07\%; 99.97\%} \\
+Linear growth & \tabpar{7.0cm}{Amplitude grows as $a$ within 1\% from $a = 0.01$ to 0.1} & \tabpar{4.4cm}{0.8\%} \\
+Zel'dovich pancake & \tabpar{7.0cm}{At $a = 0.05$ density and velocity within 2\%; on blocks 8\% and 2\%} & \tabpar{4.4cm}{0.59\%, 0.25\%; blocks 6.5\%, 1.0\%} \\
+Steady shear flow & \tabpar{7.0cm}{Over 10 orbits, velocity within $2\times10^{-3}$, density $10^{-3}$, mass $10^{-6}$} & \tabpar{4.4cm}{$9.5\times10^{-4}$; $3.9\times10^{-4}$; fails on the M4 Pro at $-2.3\times10^{-6}$} \\
+Blob across the shearing boundary & \tabpar{7.0cm}{Mass and $x$ momentum to $10^{-6}$ over two orbits; density in $[0.9, 2.1]$} & \tabpar{4.4cm}{$2.2\times10^{-7}$; $3.1\times10^{-7}$; 0.97 to 2.07} \\
+Shearing wave & \tabpar{7.0cm}{Amplitude within 3\% of the linear solution at eight times to $t = 4$; phase to 0.05~rad} & \tabpar{4.4cm}{0.33\%; $2\times10^{-5}$~rad} \\
+Magnetized shearing box & \tabpar{7.0cm}{Net $b_z$ and $b_x$ to $10^{-6}$ of the field over two orbits; div B $< 10^{-5}$} & \tabpar{4.4cm}{$1.6\times10^{-9}$, $8\times10^{-10}$; $8.8\times10^{-8}$} \\
+Magnetorotational instability & \tabpar{7.0cm}{Channel mode grows at $0.75\Omega$ within 5\%; $Q_z$ within 2\%; Maxwell stress positive} & \tabpar{4.4cm}{1.6\%; 0\%; $3.8\times10^{-6}$} \\
+Epicycles & \tabpar{7.0cm}{After one epicycle the kick returns to $10^{-3}$; epicyclic energy to $10^{-4}$} & \tabpar{4.4cm}{$5.4\times10^{-5}$; $5.2\times10^{-5}$} \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\begin{table*}
+\centering
+\caption{The validation tests of axisymmetric $(R, z)$ and spherical $(r, \theta)$ runs (Section~\ref{sec:curvilinear}), measured on an Apple M4 Pro.}
+\label{tab:validation-curvilinear}
+\footnotesize
+\begin{tabular}{lll}
+\toprule
+Test & Pass criterion & Measured \\
+\midrule
+Gas at rest in $(R, z)$ & \tabpar{7.0cm}{Mach $< 10^{-5}$ after a sound crossing} & \tabpar{4.4cm}{$5.9\times10^{-7}$} \\
+Swirling ring & \tabpar{7.0cm}{Mass, energy, $z$ momentum and angular momentum to $10^{-5}$ over a crossing} & \tabpar{4.4cm}{$1.0\times10^{-7}$ to $1.1\times10^{-7}$} \\
+Sedov blast on the axis & \tabpar{7.0cm}{Radius along $R$ and $z$ within 2\% of the similarity solution} & \tabpar{4.4cm}{1.5\% along both} \\
+Sink on the axis & \tabpar{7.0cm}{Accretion within 5\% of the same sink in 3D} & \tabpar{4.4cm}{0.31\%} \\
+Ring and blast on blocks & \tabpar{7.0cm}{As the ring and the blast, through re-meshing} & \tabpar{4.4cm}{$\le 8.7\times10^{-7}$; 1.5\%} \\
+Sphere potential in $(R, z)$ & \tabpar{7.0cm}{Within 1\% of the analytic potential} & \tabpar{4.4cm}{0.073\%} \\
+Evrard collapse in $(R, z)$ & \tabpar{7.0cm}{Energy to 2\%, thermal peak at $0.9 < t < 1.3$} & \tabpar{4.4cm}{0.11\%; $t = 1.125$} \\
+Sphere potential on blocks & \tabpar{7.0cm}{Within 1\% in every leaf, three levels} & \tabpar{4.4cm}{0.12\%} \\
+Evrard collapse on blocks & \tabpar{7.0cm}{As in $(R, z)$, with self-gravity on blocks} & \tabpar{4.4cm}{0.12\%; $t = 1.125$} \\
+Noh implosion & \tabpar{7.0cm}{Post-shock density within 5\% of 64; pre-shock within 5\% of 9} & \tabpar{4.4cm}{62.2; 9.01} \\
+Bondi accretion on the axis & \tabpar{7.0cm}{Rate within 5\% of Bondi's} & \tabpar{4.4cm}{3.5\%} \\
+Torus around a point mass & \tabpar{7.0cm}{Over five orbits, peak density, mass and center within 1\%} & \tabpar{4.4cm}{$2.4\times10^{-4}$; $1.6\times10^{-4}$; $2.8\times10^{-5}$} \\
+Field in $(R, z)$ & \tabpar{7.0cm}{Field loop: div B $< 10^{-5}$, mass and energy to $10^{-5}$, energy kept within 1\% of Cartesian; field at rest, Mach $< 10^{-5}$} & \tabpar{4.4cm}{$2.9\times10^{-7}$; $\le 2.3\times10^{-7}$; 0.25\%; $2.9\times10^{-7}$} \\
+Column under gravity & \tabpar{7.0cm}{Mach $< 10^{-4}$ after a sound crossing} & \tabpar{4.4cm}{$8.6\times10^{-5}$} \\
+Star on the axis & \tabpar{7.0cm}{Settled polytrope: central density within 3\%, mass $10^{-4}$, to $t = 2$; uniform and blocks} & \tabpar{4.4cm}{1.3\%; $1.7\times10^{-5}$; blocks the same} \\
+Swirl reaching the axis & \tabpar{7.0cm}{300 steps finite, none floored, mass to $10^{-5}$; uniform and blocks} & \tabpar{4.4cm}{Finite; 0; $7.5\times10^{-8}$} \\
+Gas at rest in $(r, \theta)$ & \tabpar{7.0cm}{Mach $< 10^{-5}$, uniform and logarithmic in $r$} & \tabpar{4.4cm}{$3.6\times10^{-6}$; $5.7\times10^{-6}$} \\
+Blob across the poles & \tabpar{7.0cm}{Mass, energy and angular momentum to $10^{-5}$ over a crossing} & \tabpar{4.4cm}{$\le 4.7\times10^{-7}$} \\
+Sedov blast at the origin & \tabpar{7.0cm}{Radius within 1\% on every ray; spread over $\theta$ below 0.5\%} & \tabpar{4.4cm}{0.74\%; $1.3\times10^{-7}$} \\
+Polytrope in its monopole & \tabpar{7.0cm}{Innermost density within 1\% over 10 dynamical times} & \tabpar{4.4cm}{0.020\%} \\
+Bondi accretion through the inner sphere & \tabpar{7.0cm}{Rate through every shell within 2\% of Bondi's} & \tabpar{4.4cm}{1.9\%} \\
+Blast and blob on blocks & \tabpar{7.0cm}{Radius within 2\% on 64 rays; blob to $10^{-5}$; one and two time bins} & \tabpar{4.4cm}{0.74\%; $\le 1.2\times10^{-6}$} \\
+Polytrope on blocks & \tabpar{7.0cm}{Innermost density within 1\%; one and two time bins} & \tabpar{4.4cm}{0.053\%; 0.056\%} \\
+Swirl around the origin & \tabpar{7.0cm}{As the swirl in $(R, z)$, reaching both poles} & \tabpar{4.4cm}{Finite; 0; 0} \\
 \bottomrule
 \end{tabular}
 \end{table*}
