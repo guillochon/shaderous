@@ -33,6 +33,15 @@ fn ap_beta(slot: i32, l: vec3<i32>, a: i32, up: bool) -> f32 {
   if (blk_leaf(slot)) {
     var e = vec3<i32>(0);
     e[a] = select(-1, 1, up);
+    // Toward a coarser cell: the ghost's density as the face values take it
+    // (amr/pressure/faces_gas.wgsl g_ghost_rho).
+    if (l[a] == select(0, BS - 1, up) && bt(slot, 6u + u32(2 * a) + u32(up)) == -1) {
+      let n = ap_nb(slot, l, a, up);
+      if (n.kind == 1) {
+        let rc = ap_k(n.slot, n.l).x;
+        return 2.0 / (own + max((4.0 * rc - own) / 3.0, 0.25 * min(own, rc)));
+      }
+    }
     return 2.0 / (own + abs(textureLoad(W1, atl(blk_origin(slot), l + e), 0).x));
   }
   let n = ap_nb(slot, l, a, up);

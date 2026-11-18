@@ -5,13 +5,18 @@
 // where the neighbor is refined, and where it is coarser a value on the line from the
 // block's own cell through the coarse cell's center. (The predictor takes this field's
 // gradient, which is all the ghosts beyond a coarser face are for; the solve forms its own
-// values across levels, amr/pressure/faces_gas.wgsl.)
+// values across levels, amr/pressure/faces_gas.wgsl.) In a uniform field the field's part of
+// the difference to the coarse cell, rho g times the offset of its center, is taken out before
+// the line is drawn and the field's part to the ghost's own place put back (common.wgsl
+// ap_lift has why), with the density of the coarse cell (U1, the state the pressure is of), as
+// the face values take it (amr/pressure/faces_gas.wgsl).
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
 
 @group(0) @binding(25) var PF: texture_storage_3d<r32float, write>;
 @group(0) @binding(29) var PN: texture_3d<f32>;
+@group(0) @binding(14) var U1: texture_3d<f32>;
 
 fn pn(slot: i32, l: vec3<i32>) -> f32 {
   return textureLoad(PN, atl(blk_origin(slot), l), 0).x;
@@ -37,8 +42,15 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     let li = clamp(inv.l, vec3<i32>(0), vec3<i32>(BS - 1));
     let out = max(max(-inv.l, inv.l - (BS - 1)), vec3<i32>(0));
     let depth = max(out.x, max(out.y, out.z));
-    let pi = pn(inv.slot, select(li, vec3<i32>(li.xy, 0), is2d()));
-    p = pi + f32(depth) * 0.6666667 * (pn(s.slot, lc) - pi);
+    let lq = select(li, vec3<i32>(li.xy, 0), is2d());
+    let pi = pn(inv.slot, lq);
+    // In fine cells: from the block's cell to the coarse cell's center, and to the ghost.
+    let gi = blk_coord(inv.slot) * BS + li;
+    let to_coarse = vec3<f32>(2 * ((blk_coord(inv.slot) * BS + inv.l) >> vec3<u32>(1u)) - gi) + 0.5;
+    let to_ghost = vec3<f32>(inv.l - li);
+    var gh = P.gext.xyz * blk_dx(inv.slot) * textureLoad(U1, atl(blk_origin(s.slot), lc), 0).x;
+    if (is2d()) { gh.z = 0.0; }
+    p = pi + f32(depth) * 0.6666667 * (pn(s.slot, lc) - pi - dot(gh, to_coarse)) + dot(gh, to_ghost);
   } else if (blk_leaf(s.slot)) {
     p = pn(s.slot, s.l);
   } else {

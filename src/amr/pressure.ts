@@ -62,7 +62,7 @@ export class AmrPressure {
   private pLagInit?: GPUComputePipeline;
   private gLagInit: GPUBindGroup[] = [];
   private pLagFill?: GPUComputePipeline;
-  private gLagFill?: GPUBindGroup;
+  private gLagFill: GPUBindGroup[] = []; // [p]
   private pCoef?: GPUComputePipeline;
   private gCoef: GPUBindGroup[] = []; // [level]
   // Per parity p of the step (the passes read the cells' marks from the other one's state).
@@ -112,7 +112,7 @@ export class AmrPressure {
       [s.pKeep, s.pLagInit, s.pLagFill] = await Promise.all([pipe('keep', 'advect the old pressure'), pipe('lag_init', 'start the carried pressure'), pipe('lag_fill', 'carry the pressure')]);
       s.gKeep = bindGroup(d, s.pKeep, { 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: ctx.listLeaf, 15: v0(ctx.prim), 22: v0(ctx.prim2), 24: v0(pd) });
       s.gLagInit = [0, 1].map((p) => bindGroup(d, s.pLagInit!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 14: v0(ctx.state[p][0]), 16: v0(ctx.state[p][1]), 29: v0(pn), 2: v0(s.tex[0]) }));
-      s.gLagFill = bindGroup(d, s.pLagFill, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 25: v0(gas.lag), 29: v0(pn) });
+      s.gLagFill = [0, 1].map((p) => bindGroup(d, s.pLagFill!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 25: v0(gas.lag), 29: v0(pn), 14: v0(ctx.state[p][0]) }));
     }
     const v = (t: GPUTexture) => t.createView();
     const r0 = s.root.levels[0];
@@ -196,11 +196,11 @@ export class AmrPressure {
     this.ctx.flat(pass, nLeaf, 0);
   }
 
-  /** A gas with an energy: the carried pressure and its ghosts, from the leaves' new pressure. */
-  private encodeFill(pass: GPUComputePassEncoder, nLeaf: number) {
+  /** A gas with an energy: the carried pressure and its ghosts, from the leaves' new pressure (of the state of parity `p`). */
+  private encodeFill(pass: GPUComputePassEncoder, nLeaf: number, p: number) {
     if (!this.pLagFill || nLeaf <= 0) return;
     pass.setPipeline(this.pLagFill);
-    pass.setBindGroup(0, this.gLagFill!);
+    pass.setBindGroup(0, this.gLagFill[p]);
     this.ctx.flat(pass, nLeaf, 2);
   }
 
@@ -211,7 +211,7 @@ export class AmrPressure {
   encodeInit(pass: GPUComputePassEncoder, p: number, nLeaf: number) {
     if (!this.pLagInit) return;
     this.run(pass, this.pLagInit, this.gLagInit[p], nLeaf);
-    this.encodeFill(pass, nLeaf);
+    this.encodeFill(pass, nLeaf, p);
   }
 
   /**
@@ -229,7 +229,7 @@ export class AmrPressure {
     pass.setBindGroup(0, this.gTally);
     pass.dispatchWorkgroups(1);
     this.run(pass, this.pCorrect, this.gCorrect[p], nLeaf);
-    this.encodeFill(pass, nLeaf);
+    this.encodeFill(pass, nLeaf, p);
   }
 
   /** Since the solver was made: solves, the last one's relative residual, and how many ended above the tolerance. */

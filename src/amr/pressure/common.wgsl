@@ -112,3 +112,24 @@ fn ap_fine(n: ANb, a: i32, up: bool, t: i32) -> ANb {
   let oct = (fb.x & 1) | ((fb.y & 1) << 1u) | ((fb.z & 1) << 2u);
   return ANb(0, bt(n.slot, 12u + u32(oct)), g - fb * BS, false, false);
 }
+
+// A uniform field at a refinement face of normal a. The coarse cell's center is not straight
+// across the face from a fine cell's: it lies half a fine cell to one side along each other
+// axis, and along the field that is a difference of pressure, rho g times the offset, that has
+// nothing to do with the face. Taken as a gradient across it, two fine cells one above the
+// other would both have to match the coarse cell's pressure to be at rest, and a column in a
+// field never is: it flowed at a Mach number of 0.01 along such a boundary. So the fine
+// cell's ghost is p_g = p_i + (2/3) (p_c - p_i - T), T = rho_i h_f ap_lift(): the field's
+// part of the difference taken out with the fine cell's own density, which makes the fine
+// cells' balance with the coarse one agree with their balance with each other. This returns
+// the field along the offset, in fine cells: the sum over the other axes b of
+// g_b (1/2 - parity_b) for fine cell l of block `slot`.
+fn ap_lift(slot: i32, l: vec3<i32>, a: i32) -> f32 {
+  let par = (blk_coord(slot) * BS + l) & vec3<i32>(1);
+  var s = 0.0;
+  let axes = ap_axes();
+  for (var b = 0; b < axes; b++) {
+    if (b != a) { s += P.gext[b] * (0.5 - f32(par[b])); }
+  }
+  return s;
+}

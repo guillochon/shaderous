@@ -44,13 +44,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var mom = u1.yzw;
   var de = 0.0;
   var dvh = 0.0;
+  // The field's work, in flux form: its kick times the mass the cell's two faces carry, halved
+  // (pressure/correct_gas.wgsl has why).
+  var ek = 0.0;
   var c1 = vec4<f32>(0.0);
   var c2 = vec3<f32>(0.0);
   let axes = ap_axes();
   for (var a = 0; a < axes; a++) {
     let fh = ap_gface(inv.slot, inv.l, a, true, dc, dtdx, true);
     let fl = ap_gface(inv.slot, inv.l, a, false, dc, dtdx, true);
-    mom[a] -= dtdx * (fh.pv.x - fl.pv.x);
+    let kc = clock.dt * P.gext[a];
+    mom[a] += kc * u1.x - dtdx * (fh.pv.x - fl.pv.x);
+    ek += 0.5 * kc * (fh.m + fl.m);
     de += (P.ohm.w + fh.pv.x) * fh.pv.y - (P.ohm.w + fl.pv.x) * fl.pv.y;
     dvh += fh.pv.y - fl.pv.y;
     c1 += fh.c1 - fl.c1;
@@ -58,7 +63,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   let rho = max(u1.x - dtdx * c1.x, P.rho_floor);
   mom -= dtdx * c1.yzw;
-  let E = u2.x - dtdx * (de + c2.x);
+  let E = u2.x + ek - dtdx * (de + c2.x);
   let eint = u2.y - dtdx * (pc * dvh + c2.y);
   g_kphi = 0.0;
   let en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);

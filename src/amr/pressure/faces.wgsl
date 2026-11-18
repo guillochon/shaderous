@@ -66,16 +66,29 @@ fn ap_face(slot: i32, l: vec3<i32>, a: i32, up: bool, pc: f32, rc: f32, dtdx: f3
       let pg = ap_ghost(pi, pc);
       let mi = ap_mom(f.slot, f.l, a);
       let mg = ap_mom(f.slot, f.l - e, a);
-      if (up) { acc += vec3<f32>(0.5 * (pg + pi), ap_mass_flux(mg, mi, w * pg, w * pi, 2.0 * dtdx, kg, rc, ri), 0.5 * (rc + ri)); }
-      else { acc += vec3<f32>(0.5 * (pi + pg), ap_mass_flux(mi, mg, w * pi, w * pg, 2.0 * dtdx, kg, ri, rc), 0.5 * (ri + rc)); }
+      // The field along the offset to this cell's center (common.wgsl ap_lift): out of the
+      // face's pressure, and into its flux (the fine cell's ghost is on its side toward here).
+      let lift = AP_TWO_THIRDS * ri * ap_lift(f.slot, f.l, a);
+      let pt = pg - 0.5 * blk_dx(slot) * lift;
+      let ft = select(1.0, -1.0, up) * clock.dt * lift;
+      if (up) { acc += vec3<f32>(0.5 * (pt + pi), ft + ap_mass_flux(mg, mi, w * pg, w * pi, 2.0 * dtdx, kg, rc, ri), 0.5 * (rc + ri)); }
+      else { acc += vec3<f32>(0.5 * (pi + pt), ft + ap_mass_flux(mi, mg, w * pi, w * pg, 2.0 * dtdx, kg, ri, rc), 0.5 * (ri + rc)); }
     }
     return acc / f32(nf);
   }
   // The same level, or coarser: the far momentum is this block's own cell or ghost.
   var pq = prs(n.slot, n.l);
-  if (n.kind == 1) { pq = ap_ghost(pc, pq); }
+  // Toward a coarser cell: the ghost, and the field along the offset to that cell's center.
+  var pt = pq;
+  var ft = 0.0;
+  if (n.kind == 1) {
+    pq = ap_ghost(pc, pq);
+    let lift = AP_TWO_THIRDS * rc * ap_lift(slot, l, a);
+    pt = pq - blk_dx(slot) * lift;
+    ft = select(-1.0, 1.0, up) * clock.dt * lift;
+  }
   let rq = rho_old(n.slot, n.l);
   let mq = ap_mom(slot, l + e, a);
-  if (up) { return vec3<f32>(0.5 * (pc + pq), ap_mass_flux(mc, mq, w * pc, w * pq, dtdx, kg, rc, rq), 0.5 * (rc + rq)); }
-  return vec3<f32>(0.5 * (pq + pc), ap_mass_flux(mq, mc, w * pq, w * pc, dtdx, kg, rq, rc), 0.5 * (rq + rc));
+  if (up) { return vec3<f32>(0.5 * (pc + pt), ft + ap_mass_flux(mc, mq, w * pc, w * pq, dtdx, kg, rc, rq), 0.5 * (rc + rq)); }
+  return vec3<f32>(0.5 * (pt + pc), ft + ap_mass_flux(mq, mc, w * pq, w * pc, dtdx, kg, rq, rc), 0.5 * (rq + rc));
 }

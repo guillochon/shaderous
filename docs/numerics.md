@@ -712,6 +712,37 @@ at 16 cells across: 1.43), with 0.2% of its steps' solves ending above the toler
 (`psplit-amr-wake`); a liquid column with a refinement boundary across it holds at a Mach
 number of $`2\times10^{-6}`$ (`psplit-amr-balance`).
 
+*A uniform field at refinement boundaries* (`psplit-amr-field`). Three things make a column
+at rest stay at rest where the mesh changes level.
+
+- The coarse cell's center is not straight across a refinement face from a fine cell's: it
+  lies half a fine cell to one side, and along the field that is a pressure difference,
+  $`\rho g`$ times the offset, that has nothing to do with the face. So the fine cell's ghost
+  is $`p_g = p_i + \tfrac23(p_c - p_i - T)`$ with $`T`$ that difference (`ap_lift`). Without
+  it, two fine cells one above the other would both have to match the coarse cell's pressure,
+  and a liquid column flowed at Mach 0.01 along every boundary that runs along the field; with
+  it, $`8\times10^{-6}`$. This was wrong for the liquid from the first version of the block
+  solver; its test had only a boundary across the field.
+- For the gas, the two cells share the face's pressure, so the fine cell's pressure carried
+  half a fine cell along the field and the coarse cell's carried half a coarse cell back must
+  meet there. With the face's weights as between cells of one level that fixes the ghost's
+  density, $`\rho_g = (4\rho_c - \rho_i)/3`$: the face's density is then the mean along the
+  line between the centers. The mesh's own interpolated ghost density left the coarse cell
+  feeling 0.3% of the field.
+- For the gas, $`T`$ takes the coarse cell's density, so that the fine cells' offsets cancel
+  in the coarse cell's face pressure, and the carried pressure's ghosts (which the predictor
+  differences) are filled the same way.
+
+An isothermal gas column whose density falls by $`e`$ over the box then stays at Mach
+$`3\times10^{-6}`$ with a boundary across the field, $`6\times10^{-5}`$ with a refined strip
+from wall to wall and $`8\times10^{-4}`$ with a refined patch (the explicit scheme on the same
+meshes: $`6\times10^{-4}`$, $`8\times10^{-3}`$, $`1.8\times10^{-3}`$). What the patch leaves
+is at its corners, where the conditions for rest around a fine corner cell and its three coarse
+neighbors disagree at first order in the cell size: there is no state of rest there. And where
+a boundary meets a wall the liquid is left with Mach $`1.6\times10^{-3}`$: the mesh's
+interpolation of ghost cells has no slope along the wall's normal there, and the predictor
+reads those ghosts.
+
 Measured (`psplit-amr-*`): a Gresho vortex on a three-level mesh whose refinement boundaries
 run through it (512 cells across at the finest, refined on its velocity at a threshold of
 0.6) takes 273 steps to $`t = 1`$ at Mach 0.1, 0.01 and 0.001 alike, against the explicit
@@ -732,7 +763,7 @@ energy. In 3D it runs and conserves; it has not been measured beyond that.
 
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
 or frames (and the liquid without self-gravity); on the adaptive mesh also
-without gravity for the ideal gas and without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
+without self-gravity for the ideal gas and without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2422,7 +2453,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 151 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 152 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

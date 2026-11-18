@@ -644,6 +644,50 @@ export const PSPLIT_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'psplit-amr-field',
+    name: 'Implicit pressure on the adaptive mesh: columns at rest in a uniform field with refinement boundaries along the field (2D, 128 finest, 2 levels)',
+    criterion:
+      'A species marker refines a patch or a strip of the box, so that refinement boundaries run along the field as well as across it. To t = 2 the largest Mach number stays below: 1e-4 for the liquid column of psplit-amr-balance with a patch in its middle (it was 1e-2 before the fine cells\' ghosts took the field into account); for an isothermal ideal gas whose density falls by e over the box, 1e-4 with the lower part refined (a boundary across the field), 5e-4 with a strip from wall to wall, and 2e-3 with a patch, whose corners admit no state of rest (the explicit scheme on the same meshes: 6e-4, 8e-3 and 2e-3). The gas\'s total energy changes by less than 1e-6',
+    async run(gpu) {
+      const patch = (x: number, y: number) => Math.abs(x) < 0.1 && Math.abs(y) < 0.1;
+      const strip = (x: number) => Math.abs(x) < 0.1;
+      const base = { label: '', blurb: '', bcLo: [0, 2, 0], bcHi: [0, 2, 0], gravity: 'off', G: 1, box: 1, tEnd: 2, supports2d: true, gext: () => [0, -1, 0] } as const;
+      const mark = (on: boolean) => (on ? [1, 0] : [0, 1]);
+      const liquid = (inside: (x: number, y: number) => boolean): Problem => ({
+        ...base, id: 'liquid-column', eos: 'liquid', eosParams: { liqRho: 1, liqC: 4 }, species: ['a', 'b'],
+        init: () => (x: number, y: number) => ({ rho: Math.exp((0.5 - y) / 16), vx: 0, vy: 0, vz: 0, p: 0, s: 0, X: mark(inside(x, y)) }),
+      } as unknown as Problem);
+      const gas = (inside: ((x: number, y: number) => boolean) | null): Problem => ({
+        ...base, id: 'gas-column', eos: 'ideal', eosParams: { gamma: 1.4 }, species: inside ? ['a', 'b'] : undefined,
+        init: () => (x: number, y: number) => ({ rho: Math.exp(-(y + 0.5)), vx: 0, vy: 0, vz: 0, p: Math.exp(-(y + 0.5)), s: 0, X: inside ? mark(inside(x, y)) : undefined }),
+      } as unknown as Problem);
+      const m: Record<string, number> = {};
+      let pass = true;
+      const cases: [string, Problem, Partial<SimConfig>, number][] = [
+        ['liquid_patch', liquid(patch), {}, 1e-4],
+        ['gas_across', gas(null), { refineDense: 0.62, refineHi: 1e9 }, 1e-4],
+        ['gas_strip', gas(strip), {}, 5e-4],
+        ['gas_patch', gas(patch), {}, 2e-3],
+      ];
+      for (const [tag, problem, over, limit] of cases) {
+        await withAmr(gpu, problem, 128, { ndim: 2, tEnd: 2, amrLevels: 1, refineLo: 0, pressure: 'implicit', acousticCfl: 50, ...over }, async (sim) => {
+          const levels = new Set(sim.tree.leaves().map((b) => b.level)).size;
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd(64, 1e6);
+          const d = await sim.diagnostics();
+          m[`${tag}_max_mach`] = d.maxMach;
+          m[`${tag}_levels`] = levels;
+          pass &&= levels === 2 && d.maxMach < limit && Math.abs(d.mass / d0.mass - 1) < 2e-6;
+          if (problem.eos === 'ideal') {
+            m[`${tag}_energy_drift`] = Math.abs(d.eTot / d0.eTot - 1);
+            pass &&= m[`${tag}_energy_drift`] < 1e-6;
+          }
+        });
+      }
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'psplit-species',
     name: 'Implicit pressure with species carried by the gas (2D 64^2): a liquid vortex, and an ideal gas carrying a density bump across a periodic box',
     criterion:

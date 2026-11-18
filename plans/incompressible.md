@@ -4,9 +4,9 @@ Status (2026-11-18): stages 0 (2.4), 1 (3.8), 2 (4.2.1, 4.12) and 3 (5.10) are d
 liquid. Implicit pressure for an
 ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Self-gravity
 for the ideal gas is done on the uniform grid (5.11). Obstacles and
-inlets work with it on the adaptive mesh (5.11), and so does the ideal gas, without gravity
-(5.11). Not done: point masses with implicit pressure; gravity for the ideal gas on blocks;
-second order in time. Figures quoted from the code in
+inlets work with it on the adaptive mesh (5.11), and so does the ideal gas, with a uniform
+field (5.11). Not done: point masses with implicit pressure; self-gravity for the ideal gas
+on blocks; second order in time. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -917,7 +917,16 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   coefficients (`coef_restrict.wgsl`): 0.04 a cycle. `psplit-amr-gas`. The block timestep
   takes the carried pressure's acceleration as a limit, and the root solver a gas's open faces
   as zero-gradient (it had them at fixed pressure, against the block operator: a shock tube
-  lost 0.1% of its mass). `psplit-amr-sod`. Not built: gravity.
+  lost 0.1% of its mass). `psplit-amr-sod`.
+- **A uniform field for the gas on blocks, and the field at refinement faces.** The face kick,
+  wall pressure and flux-form work of 4.12 in `amr/pressure/faces_gas.wgsl`. Getting a column
+  to rest across levels took three corrections (docs/numerics.md section 9 has them): the
+  field's part of the pressure difference to an offset coarse center (`ap_lift`; missing for
+  the liquid since 5.10, where it cost Mach 0.01 along any boundary parallel to the field), a
+  ghost density fixed by the shared face pressure, and the coarse density in the offset term.
+  `psplit-amr-field`. Left: the corners of a refined patch (gas, Mach $`8\times10^{-4}`$, no
+  state of rest exists there) and boundaries that meet a wall (liquid, $`1.6\times10^{-3}`$).
+  Not built: the gas's own gravity on blocks.
 - **The starting mesh reads the velocity** and measures a liquid's pressure against
   $`\rho c_0^2`$, as the GPU indicator does. The Gresho tests' three-level meshes had come from
   the old starting indicator dividing by a pressure near zero; they are now made by the
