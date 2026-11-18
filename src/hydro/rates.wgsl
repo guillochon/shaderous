@@ -34,14 +34,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
     var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(w.w1.x, w.w2.w);
     // A spherical run: per axis over its own cell length (none along the azimuth).
+    var acc = length(g_load(c));
     if (spherical()) {
-      let h = sph_cell(c.x, c.y).h;
+      let sg = sph_cell(c.x, c.y);
+      let h = sph_rate_h(sg);
       rate = (abs(w.w1.y) + w.w2.y) * h.x + (abs(w.w1.z) + w.w2.y) * h.y;
+      acc += sph_accel(sg, w.w1.yzw, g_dx);
     }
     // Solid cells hold no gas to keep stable.
     if (u2.w <= 0.5) {
       atomicMax(&wg_max[blk], bitcast<u32>(rate));
-      atomicMax(&wg_max[blk + 1u], bitcast<u32>(length(g_load(c))));
+      atomicMax(&wg_max[blk + 1u], bitcast<u32>(acc));
     }
   }
   workgroupBarrier();

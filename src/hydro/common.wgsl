@@ -247,6 +247,24 @@ fn sph_cell_g(i: i32, j: i32, q: SphGrid) -> SphCell {
 fn sph_cell(i: i32, j: i32) -> SphCell {
   return sph_cell_g(i, j, sph_grid());
 }
+// dx over the length the timestep takes along r and along theta: the cell's own (h), or less
+// where a face drains it faster than its length says (the face weight, area * dx / volume). A
+// cell on a pole has half the volume per area of its polar face that its length suggests, and
+// the innermost shell over a small r_min a radial weight up to twice h.x: with h alone, gas
+// leaving such a cell emptied it in one step (a swirl near the origin went to vacuum and NaN).
+fn sph_rate_h(g: SphCell) -> vec2<f32> {
+  return max(g.h, vec2<f32>(max(g.wr.x, g.wr.y), max(g.wt.x, g.wt.y)));
+}
+// The geometric (centrifugal) acceleration of velocity v = (v_r, v_theta, v_phi), as the
+// timestep's acceleration limit takes it (dt <= cfl sqrt(dx / a), hydro/clock.wgsl): along each
+// axis over that axis's length, (v_theta^2 + v_phi^2) / r along r and v_phi^2 cot(theta) / r
+// along theta, so that dt <= cfl sqrt(L / a) on each. Near a pole cot(theta) / r is large: a
+// swirl there starts the gas off the pole within one step, faster than its signal speeds say.
+fn sph_accel(g: SphCell, v: vec3<f32>, dx: f32) -> f32 {
+  let h = sph_rate_h(g);
+  let ir = g.ir / dx;
+  return max((v.y * v.y + v.z * v.z) * ir * h.x, v.z * v.z * abs(g.cot) * ir * h.y);
+}
 // (r_+^3 - r_-^3) / 3 over dx^3 of radial index i, and cos(theta_-) - cos(theta_+) of polar index j.
 fn sph_v3(i: i32, q: SphGrid) -> f32 {
   let fi = f32(i) + 0.5;

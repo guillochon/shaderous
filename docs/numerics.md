@@ -1960,6 +1960,15 @@ it instead: $`h_r/\Delta x`$ and $`r_c\Delta\theta/\Delta x`$ scale the predicto
 the timestep's signal rates, and the update's face weights are areas over volumes times
 $`\Delta x`$, so the update itself is the Cartesian one.
 
+The timestep takes, per axis, the larger of the cell's length and its volume over its larger
+face's area: a cell on a pole has half the volume per area of its polar face that
+$`r_c\Delta\theta`$ says, and the innermost shell over a small $`r_\text{min}`$ a radial face
+up to twice as large as $`h_r`$ suggests. It is also held to $`\text{CFL}\sqrt{L/a}`$ per
+axis for the geometric acceleration, $`(v_\theta^2 + v_\phi^2)/r`$ along $`r`$ and
+$`v_\phi^2\cot\theta/r`$ along $`\theta`$, as for gravity. Without both, a swirling blob
+around the origin (a random setup, $`v_\phi = 0.06`$) emptied the pole cells next to $`r_\text{min}`$
+in its first step and went to NaN; with them it keeps its mass and the axis drains smoothly.
+
 - **Areas and volumes in closed forms.** $`V \propto \tfrac13\Delta(r^3)\,\Delta\cos\theta`$
   and the face areas are differences that cancel in float32 on a fine grid (at
   $`\Delta\ln r = 10^{-3}`$, $`r^3`$ changes by 0.3% across a cell). They are never formed as

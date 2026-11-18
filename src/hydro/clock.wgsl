@@ -58,7 +58,9 @@ fn main() {
   // With comoving coordinates the stable step is set by the proper cell size, a dx.
   let dx = select(P.dx, 1.0, PER_DX) * select(1.0, clock.a, cosmo_on());
   var dt = P.cfl * dx / max(RED[0], 1.0e-30);
-  if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0) && RED[1] > 0.0) {
+  // (A spherical run's geometric acceleration is in RED[1] too: hydro/common.wgsl sph_accel. This
+  // pass is built without the geometry slot: P.sph's theta step says the run is spherical.)
+  if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0 || P.sph.z > 0.0) && RED[1] > 0.0) {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
   }
   // Comoving coordinates: the scale factor changes by at most 1% a step.

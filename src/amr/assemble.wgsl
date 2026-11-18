@@ -106,15 +106,18 @@ fn main(
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
         var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
         // A spherical run: per axis over its own cell length (hydro/rates.wgsl).
+        var geo = 0.0;
         if (spherical()) {
-          let h = blk_sph(inv.slot, inv.l).h;
+          let sg = blk_sph(inv.slot, inv.l);
+          let h = sph_rate_h(sg);
           rate = (abs(w.w1.y) + w.w2.y) * h.x + (abs(w.w1.z) + w.w2.y) * h.y;
+          geo = sph_accel(sg, w.w1.yzw, g_dx);
         }
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
         g += ext_accel(blk_pos(inv.slot, inv.l));
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
-        atomicMax(&wg_max[1], bitcast<u32>(length(g) / g_dx));
+        atomicMax(&wg_max[1], bitcast<u32>((length(g) + geo) / g_dx));
       }
     }
   }
