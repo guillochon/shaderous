@@ -10,7 +10,7 @@ const TESTS = [
   'cosmo-a', 'cosmo-drift', 'cosmo-cool', 'cosmo-eos', 'cosmo-wave', 'cosmo-growth', 'cosmo-pancake',
   'shear-steady', 'shear-mass', 'shear-wave', 'shear-flux', 'shear-mri', 'shear-epicycle',
   'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-blocks', 'cyl-sphere', 'cyl-evrard', 'cyl-sphere-blocks', 'cyl-evrard-blocks', 'cyl-noh', 'cyl-bondi', 'cyl-torus', 'cyl-mhd', 'cyl-column',
-  'sph-rest', 'sph-conserve', 'sph-sedov', 'sph-polytrope', 'sph-bondi', 'sph-blocks',
+  'sph-rest', 'sph-conserve', 'sph-sedov', 'sph-polytrope', 'sph-bondi', 'sph-blocks', 'sph-polytrope-blocks',
 ];
 
 // One worker (playwright.config.ts), in order; a failure does not skip the tests after it.

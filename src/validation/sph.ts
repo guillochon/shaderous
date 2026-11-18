@@ -2,7 +2,8 @@
 // Registered through validation/frames.ts.
 import { OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
 import { SEDOV_XI0 } from '../presets/names';
-import type { Sim } from '../sim';
+import type { Sim, SimConfig } from '../sim';
+import type { Gpu } from '../gpu/device';
 import { sphGrid } from '../spherical';
 import { withAmr, withSim, type TestDef } from './tests';
 import type { AmrSim } from '../amr/amr_sim';
@@ -93,6 +94,27 @@ function sedov(n: number): Problem {
   return shell(0.005, 0.5, false, (r) => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: r < r0 ? pIn : 1e-5, s: 0 }), { bcHi: [OUTFLOW, REFLECT, PERIODIC], tEnd: 0.05 });
 }
 
+/** The n = 1 polytrope of sph-polytrope: radius 1, central density 1, G = 1. */
+const LANE = (r: number) => (r < 1 ? Math.sin(Math.PI * r) / (Math.PI * r) : 0);
+/** Its mass inside r: 4 pi alpha^3 (sin x - x cos x), x = r / alpha, alpha = 1 / pi. */
+const polyMass = (r: number) => (4 / Math.PI ** 2) * (Math.sin(Math.PI * r) - Math.PI * r * Math.cos(Math.PI * r));
+
+/**
+ * sph-polytrope's star, on a logarithmic grid from r = 0.05 to 2: the mass inside r = 0.05 a
+ * point mass at the origin, the gas's own gravity its monopole.
+ */
+function polytrope(): Problem {
+  const rMin = 0.05;
+  const K = 2 / Math.PI;
+  return shell(rMin, 2, true, (r) => {
+    const rho = Math.max(1e-6, LANE(r));
+    return { rho, vx: 0, vy: 0, vz: 0, p: K * rho * rho, s: r < 1 ? 1 : 0 };
+  }, {
+    eosParams: { gamma: 2 }, G: 1, gravity: 'isolated', bcHi: [OUTFLOW_ONLY, REFLECT, PERIODIC], tEnd: 18, rhoFloor: 1e-9, pFloor: 1e-14,
+    masses: () => [{ gm: polyMass(rMin), pos: [0, 0, 0], vel: [0, 0, 0] }],
+  });
+}
+
 /**
  * The leaves of a spherical run on blocks, each cell with its level's grid (sphGrid at the
  * level's cells per side) and its indices on that level.
@@ -125,6 +147,55 @@ async function leafTotals(sim: AmrSim) {
     e += c.u2[4 * q] * dv;
   }
   return { m, l, e, levels: new Set(cells.map((x) => x.g.n)).size };
+}
+
+/** sph-polytrope's star on blocks, settled as there: how far its innermost cells' density moves over t = 18. */
+async function polytropeOnBlocks(gpu: Gpu, n: number, over: Partial<SimConfig>) {
+  return withAmr(gpu, polytrope(), n, { ndim: 2, ...over }, async (sim) => {
+    // The volume-weighted density of the cells at r_min, at whatever level.
+    const central = async () => {
+      const { c, cells } = await leafCells(sim);
+      let m = 0;
+      let v = 0;
+      for (const { g, i, j, q } of cells) {
+        if (i !== 0) continue;
+        m += c.u1[4 * q] * g.volume(i, j);
+        v += g.volume(i, j);
+      }
+      return m / v;
+    };
+    for (let k = 0; k < 30; k++) {
+      sim.cfg.tEnd = 0.2;
+      sim.writeParams();
+      await sim.runToEnd();
+      const { u1, u2 } = await sim.readLeaves();
+      for (let q = 0; q < u1.length; q += 4) {
+        u1[q + 1] = u1[q + 2] = u1[q + 3] = 0;
+        u2[q] = u2[q + 1];
+      }
+      sim.setLeaves(u1, u2);
+    }
+    const a = await central();
+    let worst = 0;
+    let tWorst = 0;
+    for (let k = 1; k <= 18; k++) {
+      sim.cfg.tEnd = k;
+      sim.writeParams();
+      await sim.runToEnd();
+      const e = Math.abs((await central()) / a - 1);
+      if (e > worst) {
+        worst = e;
+        tWorst = k;
+      }
+    }
+    const d = await sim.diagnostics();
+    const levels = new Set((await leafCells(sim)).cells.map((x) => x.g.n)).size;
+    const work = over.timeBins ? await sim.binWork() : null;
+    return {
+      central_density_settled: a, worst_change: worst, at_time: tWorst, mass: d.mass, mass_expected: polyMass(1) - polyMass(0.05), levels, steps: d.steps,
+      block_updates_over_single: work ? work.updates / work.single : 1,
+    };
+  });
 }
 
 export const SPH_TESTS: TestDef[] = [
@@ -188,21 +259,7 @@ export const SPH_TESTS: TestDef[] = [
     criterion: 'An n = 1 polytrope (gamma 2, radius 1, central density 1, G = 1) on a 128^2 logarithmic grid from r = 0.05 to 2, the mass inside r = 0.05 a point mass at the origin and the gas’s own gravity the monopole of its shells, settled (stopped every 0.2 for 6): over 10 dynamical times after (t = 18) the density of the innermost shell stays within 1% of the settled one',
     async run(gpu) {
       const n = 128;
-      const rMin = 0.05;
-      const rMax = 2;
-      const alpha = 1 / Math.PI;
-      const K = 2 * Math.PI * alpha * alpha;
-      const rhoAmb = 1e-6;
-      const lane = (r: number) => (r < 1 ? Math.sin(Math.PI * r) / (Math.PI * r) : 0);
-      // The mass inside r: 4 pi alpha^3 (sin x - x cos x), x = r / alpha.
-      const mIn = (r: number) => 4 * Math.PI * alpha ** 3 * (Math.sin(r / alpha) - (r / alpha) * Math.cos(r / alpha));
-      const p = shell(rMin, rMax, true, (r) => {
-        const rho = Math.max(rhoAmb, lane(r));
-        return { rho, vx: 0, vy: 0, vz: 0, p: K * rho * rho, s: r < 1 ? 1 : 0 };
-      }, {
-        eosParams: { gamma: 2 }, G: 1, gravity: 'isolated', bcHi: [OUTFLOW_ONLY, REFLECT, PERIODIC], tEnd: 18, rhoFloor: 1e-9, pFloor: 1e-14,
-        masses: () => [{ gm: mIn(rMin), pos: [0, 0, 0], vel: [0, 0, 0] }],
-      });
+      const p = polytrope();
       return withSim(gpu, p, n, { ndim: 2 }, async (sim) => {
         // Settle it into the grid's own balance: run, and stop the gas, every 0.2 for 6 (about
         // three dynamical times), keeping its internal energy.
@@ -231,7 +288,7 @@ export const SPH_TESTS: TestDef[] = [
           }
         }
         const d = await sim.diagnostics();
-        const m = { central_density_analytic: lane(sphGrid(sim.cfg).r(0)), central_density_settled: a[0], worst_change: worst, at_time: tWorst, mass: d.mass, mass_expected: mIn(1) - mIn(rMin), steps: d.steps };
+        const m = { central_density_analytic: LANE(sphGrid(sim.cfg).r(0)), central_density_settled: a[0], worst_change: worst, at_time: tWorst, mass: d.mass, mass_expected: polyMass(1) - polyMass(0.05), steps: d.steps };
         return { pass: m.worst_change < 0.01, metrics: m };
       });
     },
@@ -349,6 +406,17 @@ export const SPH_TESTS: TestDef[] = [
       };
       const kept = (x: { mass: number; energy: number; angular_momentum: number; levels: number }) => x.mass < 1e-5 && x.energy < 1e-5 && x.angular_momentum < 1e-5 && x.levels > 1;
       return { pass: m.worst_error < 0.02 && binsWorst < 0.02 && kept(cons) && kept(binned), metrics: m };
+    },
+  },
+  {
+    id: 'sph-polytrope-blocks',
+    name: 'Spherical: the polytrope on blocks, in the monopole of its leaves',
+    criterion: 'sph-polytrope’s star on an adaptive mesh of two levels (128^2 finest, logarithmic in r), its monopole summed over the leaves into the finest shells: settled as there (stopped every 0.2 for 6), over 10 dynamical times after (t = 18) the volume-weighted density of the innermost cells stays within 1% of the settled one, with a single timestep and with per-block timesteps (two bins)',
+    async run(gpu) {
+      const one = await polytropeOnBlocks(gpu, 128, { amrLevels: 2 });
+      const bins = await polytropeOnBlocks(gpu, 128, { amrLevels: 2, timeBins: 2, timeBinsAlways: true });
+      const m = { ...one, bins_worst_change: bins.worst_change, bins_at_time: bins.at_time, bins_block_updates_over_single: bins.block_updates_over_single };
+      return { pass: one.worst_change < 0.01 && bins.worst_change < 0.01 && one.levels > 1, metrics: m };
     },
   },
 ];
