@@ -5,10 +5,10 @@ the grid's dx (the predictor's slopes, the timestep) with the update's face weig
 rest, compiled in only for spherical runs so every other run is the same bits; S2 and S3 with
 uniform or logarithmic spacing in r, both poles, an inner sphere reflecting or open; S4 the
 monopole and point masses at the origin; S6 diagnostics with true volumes and `.athdf` written
-as `spherical_polar`. Tests `sph-rest`, `sph-conserve`, `sph-sedov`, `sph-polytrope`, `sph-bondi`
+as `spherical_polar`, and the display: the slice view draws the meridional (R, z) half-plane,
+sampling the (r, θ) map per pixel (src/spherical.ts sphFromView, render/slice.wgsl sph_code). Tests `sph-rest`, `sph-conserve`, `sph-sedov`, `sph-polytrope`, `sph-bondi`
 pass (docs/numerics.md section 22, "Spherical (r, θ) runs"). Not done: blocks (S1's mesh
-refinement, S5), the Mignone slope weights (second order without them), the display mapped to
-(R, z) (it draws the native (r, θ) plane), reading such files back, and gravity's work in flux
+refinement, S5), the Mignone slope weights (second order without them), reading such files back, and gravity's work in flux
 form (kick form is used: the flux form with the well-balanced reconstruction grew a polytrope's
 fundamental mode). Plan as written 2026-11-17 follows; file references are to the commit that
 added this file.

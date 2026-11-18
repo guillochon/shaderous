@@ -26,6 +26,7 @@ import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
+import { sphFromView, sphToView, spherical } from '../spherical';
 import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
@@ -2940,6 +2941,18 @@ const fullDrag = () => 0.25 * Math.min(canvas.clientWidth, canvas.clientHeight);
  */
 function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3; up: Vec3; scale: number } {
   const l = locateInView(px, py, depth);
+  // A spherical run's slice is the (R, z) half-plane: the point is the cell of its (r, theta),
+  // outside the box off the grid; screen-right and screen-up as the cell fractions move there.
+  if (flatView() && spherical(cfg)) {
+    const at = (x: number, y: number) => {
+      const v = locateInView(x, y, depth).pos;
+      return sphFromView(cfg, v[0], v[1]) ?? [-1, -1];
+    };
+    const p = at(px, py);
+    const [dr, du] = [at(px + 1, py), at(px, py - 1)];
+    const d = (q: number[]): Vec3 => (q[0] < 0 || p[0] < 0 ? [0, 0, 0] : [(q[0] - p[0]) * l.scale, (q[1] - p[1]) * l.scale, 0]);
+    return { pos: [p[0], p[1], l.pos[2]], right: d(dr), up: d(du), scale: l.scale };
+  }
   // With mirror images shown the view's box is the whole configuration: the point is folded
   // back into the computed part, whose fractions everything else takes, and lengths double.
   const mir = mirrorShown(cfg, view);
@@ -3297,8 +3310,10 @@ async function runContourHover() {
   try {
     const r = canvas.getBoundingClientRect();
     const span = sliceSpan() * view.zoom;
-    const a = view.cx + (q.x - r.left - canvas.clientWidth / 2 + sliceShift()) / span;
-    const b = view.cy - (q.y - r.top - canvas.clientHeight / 2) / span;
+    let a = view.cx + (q.x - r.left - canvas.clientWidth / 2 + sliceShift()) / span;
+    let b = view.cy - (q.y - r.top - canvas.clientHeight / 2) / span;
+    // A spherical run's slice: the point of the (r, theta) map under the (R, z) one.
+    if (spherical(cfg)) [a, b] = sphFromView(cfg, a, b) ?? [-1, -1];
     const hit = a >= 0 && a < 1 && b >= 0 && b < 1 ? await renderer.contourAt(a, b, view, span) : null;
     if (contourPoint !== q || !contoursHoverable()) return;
     contourKey = key;
@@ -3443,7 +3458,10 @@ function clearSources() {
  */
 function projector(): (p: number[]) => { x: number; y: number; w: number } {
   const m = outlineMatrix();
-  return (p) => {
+  // A spherical run's slice draws (r, theta) at (R, z) (sphToView).
+  const sph = flatView() && spherical(cfg);
+  return (q) => {
+    const p = sph ? [...sphToView(cfg, q[0], q[1]), q[2]] : q;
     const w = m[3] * p[0] + m[7] * p[1] + m[11] * p[2] + m[15];
     return { x: (m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12]) / w, y: (m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13]) / w, w };
   };

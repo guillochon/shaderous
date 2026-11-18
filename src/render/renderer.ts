@@ -10,6 +10,7 @@ import type { ViewFromOptions, ViewMode } from './view_options';
 import { PathTube } from './pathtube';
 import { padded3d } from '../amr/dispatch';
 import { halfToFloat } from '../io/arrays';
+import { sphViewParam } from '../spherical';
 
 /** The display pass's range record (render/field_value.wgsl): four words, then a histogram. */
 const HIST_BINS = 128;
@@ -765,8 +766,9 @@ export class Renderer {
         // Without isosurfaces the fog is all there is to see.
         log ? 1 : 0, lo, hi, v.fog || !v.contours ? 1 : 0,
         ...(v.light ? BG_LIGHT : BG_DARK), v.box ? 1 : 0,
-        // The axes shown with their mirror images (mirrorShown).
-        ...mir.map((m) => (m ? 1 : 0)), 0,
+        // The axes shown with their mirror images (mirrorShown); a spherical run's r_min / r_max,
+        // negative if r is logarithmic (the slice draws the (R, z) half-plane, src/spherical.ts).
+        ...mir.map((m) => (m ? 1 : 0)), sphViewParam(sim.cfg),
     ]);
     const parity = 2 * sim.cur + sim.speciesCur;
 
