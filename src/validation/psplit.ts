@@ -588,7 +588,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-species',
     name: 'Implicit pressure with species carried by the gas (2D 64^2): a liquid vortex, and an ideal gas carrying a density bump across a periodic box',
     criterion:
-      'Three species (a disc, a uniform 0.2, the rest) are moved after the pressure correction and scaled to its density. In both runs, at the end: the mass fractions of every cell sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]; the uniform species is still 0.2 to 1e-4 everywhere; and each species\' total mass is kept to 5e-3 (the scaling is by the density\'s correction, of order the Mach number squared, so it is not round-off: 2e-3 in the liquid, 1e-7 in the gas). A species\' sharp edge can overshoot by a percent of its jump'),
+      'Three species (a disc, a uniform 0.2, the rest) are moved after the pressure correction and scaled to its density. In both runs, at the end: the mass fractions of every cell sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]; the uniform species is still 0.2 to 1e-4 everywhere; and each species\' total mass is kept to 5e-3 (the scaling is by the density\'s correction, of order the Mach number squared, so it is not round-off: 2e-3 in the liquid, 1e-7 in the gas). A species\' sharp edge can overshoot by a percent of its jump',
     async run(gpu) {
       const n = 64;
       const X = (r: number) => (r < 0.2 ? [0.7, 0.2, 0.1] : [0.1, 0.2, 0.7]);
