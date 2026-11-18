@@ -12,6 +12,13 @@ struct Cam {
   k: vec4<f32>,   // contours (isosurfaces in the volume view): how many (0 for none), log10 of the range they divide, the one highlighted (0 for none)
   sc: vec4<f32>,  // the color scale: 1 if logarithmic, its ends (in log10 when logarithmic); w: volume view, 1 to draw the gas as fog
   bg: vec4<f32>,  // the background color; w: volume view, 1 to outline the box
+  mir: vec4<f32>, // 1 along the axes drawn with their mirror images (renderer.ts mirrorShown)
+}
+
+// A point of the view's box [-0.5, 0.5]^3 as a point of the computed box: folded back across the
+// planes of symmetry where the mirror images are shown (the view's box is then the whole).
+fn mirror_fold(p: vec3<f32>) -> vec3<f32> {
+  return select(p, 2.0 * abs(p) - 0.5, C.mir.xyz != vec3<f32>(0.0));
 }
 @group(0) @binding(0) var<uniform> C: Cam;
 @group(0) @binding(1) var VOL: texture_3d<f32>;

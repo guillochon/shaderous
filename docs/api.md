@@ -196,6 +196,7 @@ by `npm run gen`.
 | `box` | The view | Volume view: outline the box (on by default) |
 | `flines` | The view | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
 | `nflines` | The view | How many field lines |
+| `mirror` | The view | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
 | `cmap` | The view | Colormap |
 | `tf` | The view | Volume view: the opacity curve, as x:a points separated by commas |
 <!-- /gen:link-keys -->
@@ -571,6 +572,7 @@ carries each under the key in the second column:
 | `box` | `box` | Volume view: outline the box (on by default) |
 | `fieldLines` | `flines` | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
 | `fieldLineCount` | `nflines` | How many field lines |
+| `mirrorImages` | `mirror` | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
 | `colormap` | `cmap` | A name from `describe().colormaps` |
 | `autoRange` |  | Fit the color range to the data |
 <!-- /gen:view -->

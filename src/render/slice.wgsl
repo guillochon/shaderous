@@ -82,14 +82,25 @@ fn contour(st: vec2<f32>) -> Line {
   return Line(select(alpha, alpha / 0.85, hot), select(ink(k, neg), HOVER_INK, hot));
 }
 
+// The map's two axes: the grid axes in the plane of the slice (a 2D run's x and y).
+fn map_axes() -> vec2<i32> {
+  let axis = i32(C.q.x);
+  if (C.q.w <= 1.0 || axis == 2) { return vec2<i32>(0, 1); }
+  return select(vec2<i32>(1, 2), vec2<i32>(0, 2), axis == 1);
+}
+
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
   // The square laid out by the app (sliceLayout), in units of its width from its middle.
   let st0 = vec2<f32>(in.uv.x * C.right.w + C.eye.w, in.uv.y * C.up.w);
   // Zoom and pan: C.r.zw is the point of the slice at the middle of that square.
-  let st = st0 / C.r.y + C.r.zw;
+  let sd = st0 / C.r.y + C.r.zw;
+  // With mirror images shown the square is the whole configuration: folded back onto the map.
+  let ax = map_axes();
+  let fold = vec2<bool>(C.mir[ax.x] != 0.0, C.mir[ax.y] != 0.0);
+  let st = select(sd, abs(2.0 * sd - 1.0), fold);
   let line = contour(st);
-  if (any(st < vec2<f32>(0.0)) || any(st >= vec2<f32>(1.0))) { return vec4<f32>(C.bg.rgb, 1.0); }
+  if (any(sd < vec2<f32>(0.0)) || any(sd >= vec2<f32>(1.0))) { return vec4<f32>(C.bg.rgb, 1.0); }
   let m = textureLoad(MAP, vec2<i32>(floor(st * f32(textureDimensions(MAP).x))), 0);
   var col = textureSampleLevel(TF, S, vec2<f32>(m.r, 0.5), 0.0).rgb;
   if (m.r < -0.5) { col = SOLID; }

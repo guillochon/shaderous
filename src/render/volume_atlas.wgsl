@@ -31,7 +31,9 @@ const ANG = 2;
 const ABT_STRIDE = 32u;
 
 // At p, in the box [-0.5, 0.5]^3.
-fn vol_look(p: vec3<f32>) -> Look {
+fn vol_look(p0: vec3<f32>) -> Look {
+  // (Mirror images shown: the view's box is the whole configuration, its cells half as wide.)
+  let p = mirror_fold(p0);
   let frac = clamp(p + 0.5, vec3<f32>(0.0), vec3<f32>(0.9999999));
   let m = f32(A.a.y << A.a.z);
   let slot = i32(textureLoad(IDX, vec3<i32>(frac * m), 0).x);
@@ -43,7 +45,7 @@ fn vol_look(p: vec3<f32>) -> Look {
   let local = frac * ncell - coord * f32(ABS);
   let n = i32(A.a.x);
   let origin = vec3<f32>(vec3<i32>(slot % n, (slot / n) % n, slot / (n * n)) * APAD + ANG);
-  return Look(textureSampleLevel(VOL, S, (origin + local) / A.size.xyz, 0.0), 1.0 / ncell);
+  return Look(textureSampleLevel(VOL, S, (origin + local) / A.size.xyz, 0.0), select(1.0, 0.5, C.mir.x != 0.0) / ncell);
 }
 
 // How far the ray moves past a sample: two thirds of the cell it is in (as the uniform view

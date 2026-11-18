@@ -75,6 +75,11 @@ export interface ViewState {
    */
   fieldLines: boolean;
   fieldLineCount: number;
+  /**
+   * A run computing an octant (or a 2D quadrant) of a mirror-symmetric configuration: draw the
+   * whole of it, the computed part and its images (mirrorShown()).
+   */
+  mirrorImages: boolean;
 }
 // The table of the view's settings (view_options.ts) names each of these, with its type, and nothing else.
 const _viewTable: ViewFromOptions extends ViewState ? (ViewState extends ViewFromOptions ? true : never) : never = true;
@@ -188,7 +193,24 @@ export const defaultView = (): ViewState => ({
   box: true,
   fieldLines: false,
   fieldLineCount: 160,
+  mirrorImages: true,
 });
+
+/**
+ * The mirrored axes the view shows images across: with mirrorImages, when every axis the run
+ * uses is mirrored (an octant, or a 2D quadrant), so the whole configuration is a cube again.
+ * The view's box is then the whole configuration, and a fraction f of the computed box is at
+ * 0.5 + f / 2 of it (mirrorDisplay); the shaders fold the view's positions back, |2 d - 1|.
+ */
+export function mirrorShown(cfg: { ndim: 2 | 3; symmetry?: readonly boolean[] }, v: { mirrorImages: boolean }): [boolean, boolean, boolean] {
+  const s = cfg.symmetry ?? [];
+  const axes = cfg.ndim === 2 ? [0, 1] : [0, 1, 2];
+  const all = v.mirrorImages && axes.every((a) => s[a]);
+  return [0, 1, 2].map((a) => all && !!s[a]) as [boolean, boolean, boolean];
+}
+/** A fraction of the computed box as a fraction of the view's box (mirrorShown), and back. */
+export const mirrorDisplay = (f: number, shown: boolean): number => (shown ? 0.5 + 0.5 * f : f);
+export const mirrorComputed = (d: number, shown: boolean): number => (shown ? Math.abs(2 * d - 1) : d);
 
 /**
  * The color scale as the shaders take it: logarithmic or not (a field of either sign is always
@@ -326,7 +348,7 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 160, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 176, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
@@ -710,7 +732,11 @@ export class Renderer {
     // Volume view: gas thinner than densityCut is not drawn, whatever the field (0: all of it).
     const marched = v.mode === 'volume' && nz > 1;
     // With isosurfaces on, the block grid's pass smooths log10 |field| across coarse cells.
-    new Float32Array(vb, 32, 4).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, nz > 1 ? v.slicePos : 0, marched && v.contours ? 1 : 0]);
+    // With mirror images shown, the slice's position along a mirrored axis is a fraction of the
+    // whole configuration: the plane of the computed part it shows is its fold.
+    const mir = mirrorShown(sim.cfg, v);
+    const slicePos = nz > 1 ? mirrorComputed(v.slicePos, mir[axis]) : 0;
+    new Float32Array(vb, 32, 4).set([this.densityCut > 0 ? Math.log10(this.densityCut) : -1e30, marched ? 1 : 0, Math.min(slicePos, 0.999999), marched && v.contours ? 1 : 0]);
     const { log, lo, hi } = colorScale(v);
     new Uint32Array(vb, 0, 2).set([v.field, log ? 1 : 0]);
     new Float32Array(vb, 8, 2).set([lo, hi]);
@@ -735,6 +761,8 @@ export class Renderer {
         // Without isosurfaces the fog is all there is to see.
         log ? 1 : 0, lo, hi, v.fog || !v.contours ? 1 : 0,
         ...(v.light ? BG_LIGHT : BG_DARK), v.box ? 1 : 0,
+        // The axes shown with their mirror images (mirrorShown).
+        ...mir.map((m) => (m ? 1 : 0)), 0,
     ]);
     const parity = 2 * sim.cur + sim.speciesCur;
 

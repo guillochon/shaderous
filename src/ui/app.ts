@@ -26,7 +26,7 @@ import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
-import { backgroundCss, cameraFrame, defaultView, Renderer, type ViewState } from '../render/renderer';
+import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
 import type { MhdSpec, PointMass } from '../problems/types';
@@ -2935,6 +2935,17 @@ const fullDrag = () => 0.25 * Math.min(canvas.clientWidth, canvas.clientHeight);
  * In the volume view the point lies on the plane facing the camera at the given distance.
  */
 function locate(px: number, py: number, depth: number): { pos: Vec3; right: Vec3; up: Vec3; scale: number } {
+  const l = locateInView(px, py, depth);
+  // With mirror images shown the view's box is the whole configuration: the point is folded
+  // back into the computed part, whose fractions everything else takes, and lengths double.
+  const mir = mirrorShown(cfg, view);
+  if (!mir.some(Boolean)) return l;
+  const k = (v: Vec3) => v.map((c, a) => (mir[a] ? 2 * c : c)) as Vec3;
+  return { pos: l.pos.map((d, a) => mirrorComputed(d, mir[a])) as Vec3, right: k(l.right), up: k(l.up), scale: l.scale / 2 };
+}
+
+/** locate() in the view's own box (the whole configuration, when mirror images are shown). */
+function locateInView(px: number, py: number, depth: number): { pos: Vec3; right: Vec3; up: Vec3; scale: number } {
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
   if (flatView()) {
@@ -3365,6 +3376,15 @@ function outlineMatrix(): number[] {
     const ky = h / 2 / f.tan;
     rx = rw.map((d, i) => (w / 2) * d + kx * right[i]);
     ry = rw.map((d, i) => (h / 2) * d - ky * up[i]);
+  }
+  // With mirror images shown, a fraction f of the computed box is at 0.5 + f / 2 of the view's.
+  const mir = mirrorShown(cfg, view);
+  for (let a = 0; a < 3; a++) {
+    if (!mir[a]) continue;
+    for (const row of [rx, ry, rw]) {
+      row[3] += 0.5 * row[a];
+      row[a] *= 0.5;
+    }
   }
   return [0, 1, 2, 3].flatMap((c) => [rx[c], ry[c], 0, rw[c]]);
 }
