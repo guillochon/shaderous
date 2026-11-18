@@ -1533,7 +1533,7 @@ Debris energies and the disk stresses add $`\boldsymbol\Omega\times\mathbf{x}`$ 
 velocities, which they need in the inertial frame.
 
 Tests (`validation/frames.ts`): uniform flow on an f-plane turns at $`2\Omega`$ with its phase
-right to $`7\times10^{-6}`$ rad and its kinetic energy to $`10^{-7}`$; isothermal gas held by
+right to $`3\times10^{-7}`$ rad and its kinetic energy to $`10^{-6}`$; isothermal gas held by
 the centrifugal force stays below Mach $`10^{-5}`$ for more than a sound crossing (Mach 0.02
 without the well-balanced reconstruction); a blob carried by gas moving straight in the
 inertial frame lands within a sixth of a cell of where it should after a quarter turn; a binary
@@ -1658,6 +1658,60 @@ $`\Lambda`$CDM, $`3\times10^{-7}`$); uniform gas whose velocity falls as $`1/a`$
 pressure as $`a^{3 - 3\gamma}`$ ($`5\times10^{-7}`$, uniform grid and blocks); a 0.2% wave that
 grows as $`a`$ (0.8%); and the pancake against its exact solution at half its caustic time
 (density 1%, velocity 0.3%; 3.6% in density on blocks, whose coarse cells are twice as large).
+
+### Shearing box
+
+`physics.shear` sets up the local model of a differentially rotating disk: a Cartesian box
+corotating at $`\Omega`$ about $`z`$ with shear parameter $`q = -d\ln\Omega/d\ln R`$ (3/2 for
+Keplerian), $`x`$ radial, $`y`$ along the orbit and $`z`$ vertical. The gas feels
+
+```math
+\mathbf{a} = -2\,\boldsymbol\Omega\times\mathbf{v} - \nabla\Phi_t,
+\qquad \Phi_t = -q\,\Omega^2x^2 \;\left(+\tfrac12\Omega^2z^2 \text{ if stratified}\right),
+```
+
+the rotating frame's exact Coriolis turn with the tidal potential in place of the centrifugal
+one. The background flow $`v_y = -q\Omega x`$ is steady. The well-balanced reconstruction sees
+only the vertical part of $`\Phi_t`$: the radial tidal pull is balanced by the Coriolis force on
+the background flow, not by pressure.
+
+**The shearing boundary.** Along $`x`$ the box is periodic with a shift that grows in time,
+
+```math
+f(x + L, y, z) = f(x,\ y - q\Omega L\,t,\ z), \qquad v_y \to v_y - q\Omega L .
+```
+
+The clock carries the offset $`\Delta y = q\Omega L\,t \bmod L`$, summed step by step with
+Kahan compensation (formed from $`t`$ it would lose its digits over a long run). A ghost beyond
+an $`x`$ face lies between two cells sheared along $`y`$ and is blended linearly from both, its
+$`v_y`$ shifted by the jump of the background flow; the half-step state takes the offset half a
+step on.
+
+**Conservation.** The two cells that share a shearing face compute its flux from different
+ghosts, so they disagree and mass would not be conserved. Each takes instead the mean of its own
+flux and the one the other side computes, remapped and boosted into its frame (as the mesh
+recomputes its neighbors' fluxes at refinement boundaries):
+$`F_\text{lo}(j) = \tfrac12\left[F_\text{own}(j) + (1 - \epsilon)F_\text{other}(j + s) + \epsilon F_\text{other}(j + s + 1)\right]`$,
+with $`s`$ and $`\epsilon`$ the whole and fractional cells of the offset. Summed over $`j`$ both
+faces give the same total, so mass and the $`x`$ and $`z`$ momenta are conserved to rounding
+(the total, not each face). A dense blob carried across the boundary for two orbits keeps its
+mass to $`10^{-8}`$.
+
+**Rounding.** In float32 the background flow is not held exactly: each step adds the Coriolis
+and tidal increments to velocities of the order of the shear speed, and in a steady state the
+rounding of those additions is the same every step, so it adds up, to about $`10^{-4}`$ of the
+shear speed an orbit. Orbital advection (evolving the departure from the background) would
+remove it and the shear speed's limit on the timestep; it is not implemented yet. The Coriolis
+turn takes its sines from their series for small angles: the GPU's `sin` is accurate in absolute
+terms only, and its error over the small angle of one step was biased enough to shift the phase
+of the rotating-frame test by $`7\times10^{-6}`$ (now $`3\times10^{-7}`$).
+
+The first version is hydrodynamics on a uniform grid, periodic along $`y`$ (and $`z`$ unless
+stratified); blocks (whose neighbors across the boundary change with time), magnetic fields,
+self-gravity and diffusion are refused. The `shearing-wave` preset swings a leading density wave
+round to trailing. Tests: the background over ten orbits (within $`10^{-3}`$ of the shear speed),
+the blob, and epicycles at $`\kappa = \sqrt{2(2 - q)}\,\Omega`$ (back to $`5\times10^{-5}`$ after
+one, epicyclic energy to $`5\times10^{-5}`$).
 
 ## 23. Validation
 
