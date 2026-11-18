@@ -137,6 +137,7 @@ const flowDef = (p: Part) => (p.kind === 'flow' ? FLOWS[p.name] : undefined);
 export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value; say?: (v: Value) => string }> = {
   'domain.ndim': { label: 'Dimensions', of: (s) => s.domain?.ndim ?? 3, say: (v) => `${v}D` },
   'domain.supports2d': { label: 'A setup that makes sense in 2D', of: (s) => s.domain?.supports2d ?? false },
+  'domain.geometry': { label: 'Geometry', of: (s) => s.domain?.geometry ?? 'cartesian', say: (v) => (v === 'cylindrical' ? 'axisymmetric (R, z)' : String(v)) },
   'symmetric.x': { label: 'A setup symmetric under the x mirror', of: (s) => !!s.domain?.symmetric?.includes('x') },
   'symmetric.y': { label: 'A setup symmetric under the y mirror', of: (s) => !!s.domain?.symmetric?.includes('y') },
   'symmetric.z': { label: 'A setup symmetric under the z mirror', of: (s) => !!s.domain?.symmetric?.includes('z') },
@@ -243,7 +244,7 @@ export const OPTIONS: Option[] = [
   { path: 'view.pitch', label: 'Camera elevation', tip: 'Elevation of the volume view’s camera when the setup opens, in radians', page: 'run', control: num(-1.5, 1.5, { step: 0.05 }), apply: 'live', default: 0.45 },
 
   // ---- domain and grid ----
-  { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D' }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.self' }, { fact: 'parts.star' }] }), apply: 'restart', linkKey: 'dim' },
+  { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: 'cylindrical' }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.self' }, { fact: 'parts.star' }] }), apply: 'restart', linkKey: 'dim' },
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level', page: 'domain', control: num(16, 16384, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
   { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, 5, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },

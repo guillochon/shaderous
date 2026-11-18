@@ -1618,6 +1618,8 @@ function enqueue(job: () => Promise<void>): Promise<void> {
 /** The grid a preset gets for the one asked for: what it supports and what fits in GPU memory. */
 function resolveGrid(problem: Problem, n: number, ndim: 2 | 3, levels: number) {
   if (!problem.supports2d) ndim = 3;
+  // An axisymmetric (R, z) problem is two-dimensional, whatever was asked.
+  if (problem.geometry === 'cylindrical') ndim = 2;
   const allowed = ndim === 2 ? RES_2D : RES_3D;
   if (!allowed.includes(n)) n = ndim === 2 ? 512 : 128;
   // Refinement: only where the preset allows it, and no deeper than the resolution permits.
