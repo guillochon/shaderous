@@ -1,6 +1,6 @@
 // Validation tests for axisymmetric (R, z) runs (plans/coordinate-systems-plan.md, Part E).
 // Registered through validation/frames.ts.
-import { all, OUTFLOW, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
+import { all, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
 import { SEDOV_XI0, SPHERE, spherePotential } from '../presets/names';
 import type { Sim } from '../sim';
 import { withAmr, withSim, type TestDef } from './tests';
@@ -339,7 +339,7 @@ export const CYL_TESTS: TestDef[] = [
   {
     id: 'cyl-torus',
     name: 'Axisymmetric: a pressure-supported torus around a point mass',
-    criterion: 'A polytropic torus of constant specific angular momentum (gamma = 5/3, pressure maximum at R = 1, inner edge 0.7) in equilibrium around a softened point mass on the axis, in (R, z) at 256^2 (R to 2.5; at 128^2 its steep inner edge is too coarse, and gas piles up there): over five orbits at its center (t = 10 pi) its mass and the radius of its center of mass stay within 1%, and its peak density, which oscillates by a few percent as the 3D torus’s does, within 5%',
+    criterion: 'A polytropic torus of constant specific angular momentum (gamma = 5/3, pressure maximum at R = 1, inner edge 0.7) in equilibrium around a softened point mass on the axis, in (R, z) at 256^2 (R to 2.5, faces open for outflow only, so that gas the mass pulls in from outside the box cannot feed it): over five orbits at its center (t = 10 pi) its mass and the radius of its center of mass stay within 1%, and its peak density, which oscillates by a few percent as the 3D torus’s does, within 5%',
     async run(gpu) {
       const n = 256;
       const box = 2.5;
@@ -357,7 +357,7 @@ export const CYL_TESTS: TestDef[] = [
         const rho = Math.max(rhoAmb, ((hh * (gamma - 1)) / (gamma * K)) ** (1 / (gamma - 1)));
         return { rho, vx: 0, vy: 0, vz: Math.sqrt(l2) / R, p: K * rho ** gamma, s: 1 };
       }, {
-        box, eosParams: { gamma }, G: 1, bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], tEnd: 10 * Math.PI,
+        box, eosParams: { gamma }, G: 1, bcLo: [REFLECT, OUTFLOW_ONLY, PERIODIC], bcHi: [OUTFLOW_ONLY, OUTFLOW_ONLY, PERIODIC], tEnd: 10 * Math.PI,
         rhoFloor: 1e-8, pFloor: 1e-12,
         masses: () => [{ gm: 1, pos: [0, 0, 0], vel: [0, 0, 0], soft: eps, sinkRadius: 0.15, fixed: true }],
       });
@@ -389,8 +389,7 @@ export const CYL_TESTS: TestDef[] = [
           const x = await torus(sim);
           track[`peak_t${t.toFixed(1)}`] = x.peak;
           track[`mass_t${t.toFixed(1)}`] = x.mass;
-          // Gas gathering on the axis at the point mass has been seen to grow without bound
-          // (mass made there, sink or no sink): stop rather than take ever shorter steps.
+          // A torus gone wrong (gas piling up at the mass takes ever shorter steps): stop.
           if (!(Math.abs(x.mass / a.mass - 1) < 0.1)) break;
         }
         const b = await torus(sim);

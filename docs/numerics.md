@@ -1803,12 +1803,24 @@ $`-y`$, which is $`-z`$ here. The scheme solves
 - **Radial source,** $`(p + \rho v_\phi^2)/R`$, with $`p`$ the mean of the cell's two radial
   face pressures (each face's normal momentum flux less what its mass flux carries). With it
   the cylindrical balance reduces exactly to the Cartesian one: uniform pressure is in balance
-  to rounding. The well-balanced reconstruction acts along $`z`$ alone: radially, gas is
-  mostly held by its rotation, and measuring its pressure against hydrostatic balance there let
-  a torus in equilibrium around a point mass drift inward and pile up at its inner edge (its
-  peak up 75% in two thirds of an orbit at $`128^2`$; 5% along $`z`$ alone, about what a
-  slightly coarser 3D run shows). It still holds a stratified column along the axis as it does
-  in Cartesian coordinates.
+  to rounding. The well-balanced reconstruction acts along $`z`$ alone, on the uniform grid
+  and on blocks. Radially it made a torus held up by its rotation around a point mass pile up
+  at its inner edge: at $`256^2`$ a torus with $`\ell\propto R^{1/4}`$ (stable to axisymmetric
+  displacements) reached 2.2 times its peak density in two orbits, while the same torus in 3D
+  at the same cell size, well balanced along $`x`$ and $`y`$, stayed within 2.5%, and with the
+  radial balance off the axisymmetric one stayed within 1%. What it gets wrong is partly
+  understood. The balance the deviations are measured against is hydrostatic, so for gas held
+  up by its rotation the deviation is the centrifugal term $`\rho v_\phi^2\Delta R/R`$, ten
+  times the pressure or more near a torus's edges; there the limiter clips it, and the
+  unlimited hydrostatic step that goes back in gives the faces a pressure slope that rotation
+  does not hold up. (In 3D the same rotation is carried by the advection of the swirl, which the
+  reconstruction does not see.) Measuring the balance against the effective potential,
+  $`\Phi - \int v_\phi^2/R\,dR`$ with the step density weighted so that it is the trapezoid
+  rule on $`\rho v_\phi^2/R`$, removes that: it held the torus for an orbit (peak +3%, from
+  +48%), but by the second the inner edge piled up again (+29%), the thin gas there moving
+  outward where without the radial balance it falls in. That remainder is not explained, so
+  the radial balance is off rather than half right. It still holds a stratified column along
+  the axis as it does in Cartesian coordinates.
 - **Predictor:** the half step's geometric terms, $`-\rho v_R/R`$ in the density,
   $`-\rho c_s^2 v_R/R`$ in the pressure, $`+v_\phi^2/R`$ in $`v_R`$ and $`-v_Rv_\phi/R`$ in
   $`v_\phi`$.
@@ -1874,12 +1886,13 @@ density within 2.7% of 64 and the pre-shock within 0.1%, alike along the axis, t
 $`R`$; Bondi accretion onto a point mass on the axis within 3.5% of Bondi's rate; and a poloidal
 field loop carried along $`z`$ keeps $`\nabla\cdot B`$ at $`3\times10^{-7}`$ and 96.2% of its
 magnetic energy (the same loop in Cartesian coordinates: 96.0%), with a uniform axial field at
-rest to Mach $`3\times10^{-7}`$.
+rest to Mach $`3\times10^{-7}`$; and a pressure-supported torus of constant angular momentum
+around a point mass on the axis keeps its mass and the radius of its center of mass to 1% and
+its peak density to 5% (it oscillates by a few percent, as the 3D torus's does) for five
+orbits. Its faces are open for outflow only: open both ways, they let the mass pull gas in
+from outside the box, which then piled up at the mass without bound.
 
-**Known problem.** A pressure-supported torus around a point mass on the axis (`cyl-torus`)
-holds for about one and a half orbits at $`256^2`$, and then gas reaching the mass on the axis
-gathers there and the gas's mass grows without bound, with the sink or without it: mass is
-made where flow converges on the axis at a point mass. The test fails until that is found.
+
 
 ## 23. Validation
 

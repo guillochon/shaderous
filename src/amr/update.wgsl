@@ -86,6 +86,8 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 // to its face: the same, except across a reflecting face of the domain, where it is the true
 // difference (the atlas's ghost cells there continue the potential in a straight line).
 fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
+  // Axisymmetric: well balanced along z alone, as gravity/gfield.wgsl dphi_step.
+  if (cylindrical() && axis == 0) { return vec2<f32>(0.0); }
   let ra = l[axis] + k;
   let ia = row_src(slot, axis, ra);
   let ib = row_src(slot, axis, ra + 1);
@@ -135,6 +137,7 @@ var<private> g_fb_slot: i32 = 0;
 var<private> g_fb_l: vec3<i32> = vec3<i32>(0);
 
 fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
+  if (cylindrical() && axis == 0) { return 0.0; }
   if (g_face_wall) { return dphi_blk(g_face_slot, g_face_l, axis, k - 1).x; }
   var e = vec3<i32>(0);
   e[axis] = 1;
