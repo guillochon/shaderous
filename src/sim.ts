@@ -440,7 +440,6 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   if (uniformField(c)[0] !== 0) return 'a uniform field must lie along the axis';
   if (c.driving.accel > 0) return 'turbulence driving is not available in axisymmetric runs';
   if (c.gravity === 'periodic') return 'an axisymmetric run’s self-gravity is isolated (its axis is no periodic face)';
-  if (isSelfGravity(c.gravity) && c.amrLevels > 0) return 'self-gravity on blocks is not available for axisymmetric runs yet';
   if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'star')) return 'stars are not settled in axisymmetric runs yet';
   return null;
 }

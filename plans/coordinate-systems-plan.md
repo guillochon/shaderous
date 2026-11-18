@@ -21,9 +21,9 @@ and tested in `src/validation/{frames,symmetry,cosmo,shear,cyl}.ts`.
 | E1-E3, E7 (R, z) hydro, diagnostics, files | done (display by revolution not done) |
 | E4 (R, z) on blocks | done, without per-block timesteps |
 | E5 step 1 masses on the axis, step 2 self-gravity on the uniform grid | done |
-| E5 step 3 self-gravity on blocks, settling in (R, z) | **not done** |
+| E5 step 3 self-gravity on blocks, settling in (R, z) | self-gravity on blocks done (`cyl-sphere-blocks`, `cyl-evrard-blocks`), without per-block timesteps; settling **not done** |
 | E6 MHD and viscosity in (R, z) | MHD done on the uniform grid (`cyl-mhd`); viscosity, resistivity and blocks with a field refused |
-| E8 tests | rest, conserve, sedov, sink, blocks, sphere, evrard, column, noh, bondi, torus, mhd |
+| E8 tests | rest, conserve, sedov, sink, blocks, sphere, evrard, sphere-blocks, evrard-blocks, column, noh, bondi, torus, mhd |
 | E9 spherical | its own plan: [spherical-plan.md](spherical-plan.md) |
 
 This plan covers five additions, in the order they should be built:

@@ -27,6 +27,29 @@ export const gravityCells = (count: number, bsize: number): [number, number, num
 export const gravityColor = (count: number, bsize: number): [number, number, number] =>
   [Math.ceil((Math.min(count, SLAB_BLOCKS) * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4) * slabs(count)];
 
+/** Slabs of a long 2D block list (amr/list.wgsl): must match SLAB_QUADS there and in amr/bins_args.wgsl. */
+export const SLAB_QUADS = 16384;
+
+/**
+ * The same on a 2D mesh, whose blocks are one cell deep: four blocks to a quad along z (a
+ * workgroup's four layers), the quads laid end to end along x, in slabs of SLAB_QUADS along z
+ * (amr/gravity/common.wgsl, g_inv2d). At 16 cells per side this is the 2D interior pass's
+ * layout (amr/list.wgsl, inv_interior).
+ */
+export const gravityCells2d = (count: number, bsize: number): [number, number, number] => {
+  const q = Math.ceil(count / 4);
+  return [Math.min(q, SLAB_QUADS) * (Math.max(bsize, 8) / 8), Math.ceil(bsize / 8), Math.ceil(q / SLAB_QUADS)];
+};
+export const gravityColor2d = (count: number, bsize: number): [number, number, number] => {
+  const q = Math.ceil(count / 4);
+  return [Math.ceil((Math.min(q, SLAB_QUADS) * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(q / SLAB_QUADS)];
+};
+/** A padded pass over `count` blocks of a 2D mesh (amr/list.wgsl, inv_padded): 24 x 24 cells each. */
+export const padded2d = (count: number): [number, number, number] => {
+  const q = Math.ceil(count / 4);
+  return [Math.min(q, SLAB_QUADS) * 3, 3, Math.ceil(q / SLAB_QUADS)];
+};
+
 /** Rows of a pass with a workgroup row per block (amr/list.wgsl, flat_row): FLAT_ROWS rows to a slab along z. */
 export const FLAT_ROWS = 32768; // must match amr/list.wgsl
 export const rows = (x: number, count: number): [number, number, number] => [x, Math.min(count, FLAT_ROWS), Math.ceil(count / FLAT_ROWS)];

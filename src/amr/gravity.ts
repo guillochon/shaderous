@@ -1,9 +1,10 @@
 // Self-gravity on the block grid: a Poisson solve per tree level, coarsest first, each
-// accelerated by multigrid within the blocks. See amr/gravity/common.wgsl for the scheme.
+// accelerated by multigrid within the blocks. See amr/gravity/common.wgsl for the scheme. In 3D,
+// and in 2D for axisymmetric (R, z) runs.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, tex3d } from '../gpu/device';
 import { BS, PAD } from './tree';
-import { gravityCells, gravityColor, padded3d, rows } from './dispatch';
+import { gravityCells, gravityCells2d, gravityColor, gravityColor2d, padded2d, padded3d, rows } from './dispatch';
 
 const PRE = 2; // smoothing sweeps before restriction
 const POST = 2; // and after prolongation
@@ -26,6 +27,12 @@ export interface GravityContext {
   device: GPUDevice;
   /** atlas slots per side */
   slotsPerSide: number;
+  /**
+   * A 2D mesh (an axisymmetric run): blocks one cell deep, in `layers` layers of slots along z
+   * (amr/gravity/common.wgsl).
+   */
+  flat?: boolean;
+  layers?: number;
   /** deepest tree level */
   levels: number;
   params: GPUBuffer;
@@ -122,6 +129,8 @@ export class AmrGravity {
     const d = ctx.device;
     const A = ctx.slotsPerSide;
     const v = (t: GPUTexture) => t.createView();
+    // An atlas of `side` texels across: a cube, or in 2D one texel deep per layer of slots.
+    const atlas = (side: number, label: string) => (ctx.flat ? tex3d(d, side, 'r32float', label, ctx.layers!) : tex3d(d, side, 'r32float', label));
     [g.pSmooth, g.pRestrict, g.pProlong, g.pRhs, g.pRhsRestrict, g.pGhostCoarse, g.pGhostRest, g.pField, g.pNew, g.pInit] = await Promise.all([
       computePipeline(d, assemble('amr/gravity/smooth.wgsl'), 'amr mg smooth'),
       computePipeline(d, assemble('amr/gravity/restrict.wgsl'), 'amr mg residual + restrict'),
@@ -148,13 +157,13 @@ export class AmrGravity {
       return buf;
     };
 
-    g.phiOld = tex3d(d, A * PAD, 'r32float', 'amr phi old');
+    g.phiOld = atlas(A * PAD, 'amr phi old');
     for (let k = 0; k < NSUB; k++) {
       const side = A * geom[k].stride;
       g.sub.push({
         bsize: geom[k].bsize,
-        phi: tex3d(d, side, 'r32float', `amr phi k${k}`),
-        rhs: tex3d(d, side, 'r32float', `amr rhs k${k}`),
+        phi: atlas(side, `amr phi k${k}`),
+        rhs: atlas(side, `amr rhs k${k}`),
         smooth: [],
       });
     }
@@ -200,7 +209,7 @@ export class AmrGravity {
 
     [g.pResidual, g.pGate, g.pGateRecord] = await Promise.all([
       computePipeline(d, assemble('amr/gravity/residual.wgsl'), 'amr mg residual check'),
-      computePipeline(d, assemble('amr/gravity/gate.wgsl'), 'amr mg cycle gate', { TOL: VCYCLE_TOL }),
+      computePipeline(d, assemble('amr/gravity/gate.wgsl'), 'amr mg cycle gate', { TOL: VCYCLE_TOL, ...(ctx.flat ? { FLAT: 1 } : {}) }),
       computePipeline(d, assemble('amr/gravity/gate.wgsl'), 'amr mg cycle gate', { RECORD: 1 }),
     ]);
     g.res = d.createBuffer({ label: 'amr mg residual', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
@@ -221,23 +230,23 @@ export class AmrGravity {
   private cells(pass: GPUComputePassEncoder, count: number, bsize: number) {
     if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(Math.log2(BS / bsize)));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(3 + Math.log2(BS / bsize)));
-    pass.dispatchWorkgroups(...gravityCells(count, bsize));
+    pass.dispatchWorkgroups(...(this.ctx.flat ? gravityCells2d : gravityCells)(count, bsize));
   }
   /** Dispatch over the cells of one color (see smooth.wgsl). */
   private color(pass: GPUComputePassEncoder, count: number, bsize: number) {
     if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(5 + Math.log2(BS / bsize)));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(8 + Math.log2(BS / bsize)));
-    pass.dispatchWorkgroups(...gravityColor(count, bsize));
+    pass.dispatchWorkgroups(...(this.ctx.flat ? gravityColor2d : gravityColor)(count, bsize));
   }
-  /** Dispatch over the face ghosts of `count` blocks (ghost.wgsl): 6 x 2 x 16 x 16 cells, in rows of 64. */
+  /** Dispatch over the face ghosts of `count` blocks (ghost.wgsl): 6 x 2 x 16 x 16 cells (2D: 4 x 2 x 16), in rows of 64. */
   private faces(pass: GPUComputePassEncoder, count: number) {
     if (count === GATED) return pass.dispatchWorkgroupsIndirect(this.gateArgs, ARG(10));
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(15));
-    if (count > 0) pass.dispatchWorkgroups(...rows((6 * 2 * BS * BS) / 64, count));
+    if (count > 0) pass.dispatchWorkgroups(...rows((this.ctx.flat ? 4 * 2 * BS : 6 * 2 * BS * BS) / 64, count));
   }
   private padded(pass: GPUComputePassEncoder, count: number) {
     if (count < 0) return pass.dispatchWorkgroupsIndirect(this.ctx.binArgs, ARG(0));
-    pass.dispatchWorkgroups(...padded3d(count));
+    pass.dispatchWorkgroups(...(this.ctx.flat ? padded2d : padded3d)(count));
   }
 
   private smooth(pass: GPUComputePassEncoder, k: number, level: number, count: number, sweeps: number) {
@@ -364,7 +373,7 @@ export class AmrGravity {
     const ctx = this.ctx;
     const d = ctx.device;
     const v = (t: GPUTexture) => t.createView();
-    this.dphi = tex3d(d, ctx.slotsPerSide * PAD, 'r32float', 'amr phi rate');
+    this.dphi = ctx.flat ? tex3d(d, ctx.slotsPerSide * PAD, 'r32float', 'amr phi rate', ctx.layers!) : tex3d(d, ctx.slotsPerSide * PAD, 'r32float', 'amr phi rate');
     const half = FIELD_SLOTS_BINS.half;
     [this.pFieldB, this.pExtrap, this.pSync, this.pForget] = await Promise.all([
       computePipeline(d, assemble('amr/gravity/field.wgsl', { ...FIELD_SLOTS_BINS, half }), 'amr gravity field (bins)'),
@@ -454,9 +463,10 @@ export class AmrGravity {
    * where the old run's mass was.
    */
   clear(corners: readonly (readonly number[])[]) {
-    const zeros = new Float32Array(PAD ** 3);
+    const depth = this.ctx.flat ? 1 : PAD;
+    const zeros = new Float32Array(PAD * PAD * depth);
     for (const origin of corners) {
-      this.ctx.device.queue.writeTexture({ texture: this.phi, origin: [origin[0], origin[1], origin[2]] }, zeros, { bytesPerRow: PAD * 4, rowsPerImage: PAD }, [PAD, PAD, PAD]);
+      this.ctx.device.queue.writeTexture({ texture: this.phi, origin: [origin[0], origin[1], origin[2]] }, zeros, { bytesPerRow: PAD * 4, rowsPerImage: PAD }, [PAD, PAD, depth]);
     }
   }
 
@@ -471,8 +481,14 @@ export class AmrGravity {
    */
   copyPhiToOld(enc: GPUCommandEncoder, highSlot: number) {
     const a = this.ctx.slotsPerSide;
-    this.layersUsed = Math.min(a, Math.max(this.layersUsed, Math.floor(highSlot / (a * a)) + 1));
     const side = a * PAD;
+    if (this.ctx.flat) {
+      // 2D: a layer of slots is one texel deep.
+      this.layersUsed = Math.min(this.ctx.layers!, Math.max(this.layersUsed, Math.floor(highSlot / (a * a)) + 1));
+      enc.copyTextureToTexture({ texture: this.phi }, { texture: this.phiOld }, [side, side, this.layersUsed]);
+      return;
+    }
+    this.layersUsed = Math.min(a, Math.max(this.layersUsed, Math.floor(highSlot / (a * a)) + 1));
     enc.copyTextureToTexture({ texture: this.phi }, { texture: this.phiOld }, [side, side, this.layersUsed * PAD]);
   }
 
