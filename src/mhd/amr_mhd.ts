@@ -12,7 +12,7 @@
 // (encodeSubstep(), docs/numerics.md section 21, Time bins).
 import { domainLo } from '../domain';
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, readTexture, type Bindable } from '../gpu/device';
+import { bindGroup, bindGroupUsed, computePipeline, readTexture, type Bindable } from '../gpu/device';
 import { Reducer } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { BS, type Block } from '../amr/tree';
@@ -173,6 +173,25 @@ export class AmrMhd {
   private pBrush: GPUComputePipeline[] = [];
   private gBrush: GPUBindGroup[][] = [];
   private gKeepL: GPUBindGroup[] = [];
+  /**
+   * The first-order flux correction after the update (mhd/amr_fofc.wgsl): the list of leaves to
+   * correct (count, then slots), its chunks' dispatch sizes, the scan that fills it ([parity], over
+   * every leaf and over a substep's), the empty, and stage 2's fluxes and update again over it
+   * ([parity][chunk]).
+   */
+  private redoList: GPUBuffer;
+  private redoArgs: GPUBuffer;
+  /** the substep's stamp per slot of the leaves listed (mhd/amr_fofc_scan.wgsl) */
+  private redoSeen: GPUBuffer;
+  private pScan?: GPUComputePipeline;
+  private pScanReset?: GPUComputePipeline;
+  private pFluxRedo?: GPUComputePipeline;
+  private pUpdateRedo?: GPUComputePipeline;
+  private gScan: GPUBindGroup[] = [];
+  private gScanL: GPUBindGroup[] = [];
+  private gScanReset?: GPUBindGroup;
+  private gFluxRedo: GPUBindGroup[][] = [];
+  private gUpdateRedo: GPUBindGroup[][] = [];
 
   private constructor(private dep: Deps) {
     const d = dep.device;
@@ -200,6 +219,14 @@ export class AmrMhd {
       this.chunkBufs.push(d.createBuffer({ label: `MHD chunk ${i}`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
     }
     this.chunkArgs = d.createBuffer({ label: 'MHD chunk dispatch sizes', size: 24 * this.chunkBufs.length, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
+    this.redoList = d.createBuffer({ label: 'MHD flux correction list', size: 4 * (dep.cap + 1), usage: GPUBufferUsage.STORAGE });
+    this.redoSeen = d.createBuffer({ label: 'MHD flux correction leaves listed', size: 4 * dep.cap, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    this.redoArgs = d.createBuffer({ label: 'MHD flux correction dispatch sizes', size: 24 * this.chunkBufs.length, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST });
+    // Per chunk, (boxes of the fluxes, rows, 1) and (boxes of the update, rows, 1); the scan sets
+    // the rows (mhd/amr_fofc_scan.wgsl).
+    const template = new Uint32Array(6 * this.chunkBufs.length);
+    for (let i = 0; i < this.chunkBufs.length; i++) template.set([this.groups(FBOX), 0, 1, this.groups(BS + 1), 0, 1], 6 * i);
+    d.queue.writeBuffer(this.redoArgs, 0, template);
   }
 
   /** The W textures are the hydro primitives' (W1, W2) when given, so the display can share them. */
@@ -245,7 +272,7 @@ export class AmrMhd {
     const still = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
     const slots = { ...still, bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl' };
     const v = (x: GPUTexture) => x.createView();
-    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be] = await Promise.all([
+    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be, f2r, u2r, scan, scanReset] = await Promise.all([
       computePipeline(d, assemble('mhd/amr_regrid.wgsl', still), 'MHD re-mesh faces'),
       computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', still), 'MHD re-mesh energy'),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1, ASM_STAGE: 1 }),
@@ -272,7 +299,16 @@ export class AmrMhd {
       computePipeline(d, assemble('mhd/amr_keep.wgsl', still), 'MHD keep the start'),
       computePipeline(d, assemble('amr/field_brush.wgsl', still), 'field brush faces (blocks)', undefined, 'faces'),
       computePipeline(d, assemble('amr/field_brush.wgsl', still), 'field brush energy (blocks)', undefined, 'energy'),
+      computePipeline(d, assemble('mhd/amr_flux.wgsl', slots), 'MHD block fluxes, correction', { STAGE: 2, REDO: 1 }),
+      computePipeline(d, assemble('mhd/amr_update.wgsl', slots), 'MHD block update, correction', { STAGE: 2, SPECIES_FLUX: this.dep.massFlux ? 1 : 0, REDO: 1 }),
+      computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction scan', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length }),
+      computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction list reset', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length }, 'reset_main'),
     ]);
+    this.pFluxRedo = f2r;
+    this.pUpdateRedo = u2r;
+    this.pScan = scan;
+    this.pScanReset = scanReset;
+    this.gScanReset = bindGroupUsed(d, scanReset, { 36: this.redoList, 37: this.redoArgs }, 'MHD flux correction list reset');
     this.pBrush = [bf, be];
     this.gBrush = [0, 1].map((p) => {
       const o = 1 - p;
@@ -311,6 +347,10 @@ export class AmrMhd {
     this.gDeposit = [];
     this.gCommitU = [];
     this.gCommitAll = [];
+    this.gScan = [];
+    this.gScanL = [];
+    this.gFluxRedo = [];
+    this.gUpdateRedo = [];
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       // Re-meshing from parity p: faces into o (with the old tree), then energy and all back into p.
@@ -341,7 +381,9 @@ export class AmrMhd {
         const perChunk = (fn: (c: GPUBuffer) => GPUBindGroup) => chunks.map(fn);
         // Stage 1 writes the half-step state; its compensation output (13) is unused and takes the
         // other parity's, which stage 2 then overwrites.
-        const upd = (pipe: GPUComputePipeline, outs: Record<number, GPUTextureView>) =>
+        // The flux correction's marks (35, mhd/amr_fofc.wgsl), which only its redo reads, take the
+        // new faces where the pass does not write them, and otherwise a texture it leaves alone.
+        const upd = (pipe: GPUComputePipeline, outs: Record<number, GPUTextureView>, marks: GPUTexture) =>
           perChunk((c) =>
             bindGroup(d, pipe, {
               ...c0, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
@@ -349,22 +391,36 @@ export class AmrMhd {
               15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
               12: this.dep.massFlux?.lo ?? this.noFlux(),
               ...((this.dep.massFlux?.hi ? { 32: this.dep.massFlux.hi } : {}) as Record<number, Bindable>),
+              35: v(marks),
             }),
           );
         return {
           assemble: [bindGroup(d, a1, { ...c0, ...out, ...stores }), bindGroup(d, a2, { ...c0, ...out, ...stores })],
           keep: bindGroup(d, kp, { 0: params, 31: list, 2: v(this.w[0]), 3: v(this.w[1]), 4: v(this.fa), 5: v(this.kept[0]), 6: v(this.kept[1]), 7: v(this.kept[2]), 8: v(this.w[2]) }),
           flux: [f1, f2].map((pipe) =>
-            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c })),
+            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]) })),
           ),
           emf: [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), 6: this.scratch, 8: v(this.emf), 14: c }))),
           update: [
-            upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }),
-            upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }),
+            upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }, this.faces[o]),
+            upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }, this.halfFaces),
           ],
+          // The flux correction's passes over its list (mhd/amr_fofc.wgsl): stage 2's fluxes, and
+          // its update writing the cells alone (its faces output (11) a texture it leaves alone),
+          // both reading the marks in the new faces.
+          fluxRedo: perChunk((c) =>
+            bindGroup(d, f2r, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]) }),
+          ),
+          updateRedo: upd(u2r, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.halfFaces) }, this.faces[o]),
+          // (Not over its own list, which it fills.)
+          scan: list === this.redoList ? undefined : bindGroupUsed(d, scan, { 0: params, 1: clock, 30: bt, 31: list, 28: v(idx), 35: v(this.faces[o]), 36: this.redoList, 37: this.redoArgs, 38: this.redoSeen, ...bin }, 'MHD flux correction scan'),
         };
       };
       const all = groups(listLeaf, this.chunkBufs);
+      const redo = groups(this.redoList, this.chunkBufs);
+      this.gFluxRedo.push(redo.fluxRedo);
+      this.gUpdateRedo.push(redo.updateRedo);
+      this.gScan.push(all.scan!);
       this.gAssemble.push(all.assemble);
       this.gKeep.push(all.keep);
       this.gFlux.push(all.flux);
@@ -383,6 +439,7 @@ export class AmrMhd {
       this.gFluxL.push(sub.flux);
       this.gEmfL.push(sub.emf);
       this.gUpdateL.push(sub.update);
+      this.gScanL.push(sub.scan!);
       // The deposits read no fluxes of their own, only the register and the edge atlas.
       this.gDeposit.push(groups(B.LD, [this.allChunk]).update[1][0]);
       this.gCommitU.push(commit(B.LU));
@@ -469,6 +526,9 @@ export class AmrMhd {
         pass.dispatchWorkgroupsIndirect(ca, 24 * i + 12);
       }
     }
+    // Before the deposits, which then take the corrected register.
+    this.encodeCorrection(pass, parity, this.gScanL[parity]);
+    pass.setPipeline(this.pUpdate[1]);
     pass.setBindGroup(0, this.gDeposit[parity]);
     pass.dispatchWorkgroupsIndirect(args, ARG(ARG_DEPOSIT));
     pass.setPipeline(this.pCommit!);
@@ -519,6 +579,46 @@ export class AmrMhd {
         pass.dispatchWorkgroups(this.groups(BS + 1), sizeOf(i));
       }
     }
+    this.encodeCorrection(pass, parity, this.gScan[parity]);
+  }
+
+  /**
+   * The first-order flux correction after stage 2's update (mhd/amr_fofc.wgsl): list the leaves
+   * of the step (`scan`'s list) with a cell the update all but emptied or a neighbor with one,
+   * then stage 2's fluxes and update again over that list, chunk by chunk, and empty it. When
+   * nothing is listed the fluxes and update dispatch no workgroups.
+   */
+  private encodeCorrection(pass: GPUComputePassEncoder, parity: number, scan: GPUBindGroup) {
+    pass.setPipeline(this.pScan!);
+    pass.setBindGroup(0, scan);
+    pass.dispatchWorkgroups(Math.max(1, Math.ceil(this.nLeaf / 64)));
+    const n = this.chunks();
+    const fluxes = (i: number) => {
+      pass.setPipeline(this.pFluxRedo!);
+      pass.setBindGroup(0, this.gFluxRedo[parity][i]);
+      pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i);
+    };
+    // As the step does: with several chunks, every chunk's fluxes first (they correct the
+    // register, which a coarser or slower neighbor in another chunk reads), then each chunk's
+    // again before its update (the scratch holds one chunk).
+    if (n > 1) for (let i = 0; i < n; i++) fluxes(i);
+    for (let i = 0; i < n; i++) {
+      fluxes(i);
+      pass.setPipeline(this.pUpdateRedo!);
+      pass.setBindGroup(0, this.gUpdateRedo[parity][i]);
+      pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i + 12);
+    }
+    pass.setPipeline(this.pScanReset!);
+    pass.setBindGroup(0, this.gScanReset!);
+    pass.dispatchWorkgroups(1);
+  }
+
+  /**
+   * The run starts again (its step count with it): forget which leaves the flux correction listed
+   * at which step (mhd/amr_fofc_scan.wgsl), or a leaf of the new run could pass for listed.
+   */
+  forgetCorrection() {
+    this.dep.device.queue.writeBuffer(this.redoSeen, 0, new Uint32Array(this.redoSeen.size / 4));
   }
 
   /** Copy the block table and leaf index, before a re-mesh uploads the new ones. */
@@ -588,6 +688,9 @@ export class AmrMhd {
     this.idxOld.destroy();
     this.register.destroy();
     this.chunkArgs.destroy();
+    this.redoList.destroy();
+    this.redoSeen.destroy();
+    this.redoArgs.destroy();
     this.allChunk.destroy();
     for (const b of this.chunkBufs) b.destroy();
   }

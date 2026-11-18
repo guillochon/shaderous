@@ -1503,6 +1503,7 @@ export class AmrSim implements Simulation {
     this.binPause = BIN_START_STEPS;
     this.binPauseNext = BIN_PAUSE_STEPS;
     this.binShare = null;
+    this.mhd?.forgetCorrection();
     d.queue.writeBuffer(this.binArgs, 0, new Uint32Array(BIN_ARGS_BYTES / 4));
     this.rhoMean = mass / c.problem.box ** c.ndim;
     // The clock (clockState), at the snapshot's time for a restart.

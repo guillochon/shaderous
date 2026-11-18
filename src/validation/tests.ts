@@ -2874,9 +2874,9 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'mhd-near-vacuum',
-    name: 'MHD: the first-order flux correction after the update (thin disk with field loops in 1e-5 gas, 3D at 64, one slab and 16, outflow and periodic along z)',
+    name: 'MHD: the first-order flux correction after the update (thin disk with field loops in 1e-5 gas, 3D at 128, uniform in one slab and many, outflow and periodic along z; blocks of 1 level in one chunk and many, and with per-block timesteps)',
     criterion:
-      'The disk of issue #3 (midplane density 25, ambient 1e-5, loops of beta 100, a point mass with a sink), 100 steps: every value finite, no gas above 1e-6 faster than 100 (without the correction the first step sent cells to 1e6), |div B| dx / max |B| below 1e-6; and the same run in 16 slabs of 4 layers agrees bit for bit (mhd/fofc.wgsl corrects faces between slabs in both), also with z periodic, across whose boundary the first and last slabs meet',
+      'The disk of issue #3 (midplane density 25, ambient 1e-5, loops of beta 100, a point mass with a sink), 100 steps at 128^3 (without the correction NaN by step 10 on either grid): every value finite, no gas above 1e-6 faster than 100, |div B| dx / max |B| below 1e-6. On the uniform grid the same run in slabs of 4 layers agrees bit for bit (mhd/fofc.wgsl corrects faces between slabs in both), also with z periodic, across whose boundary the first and last slabs meet; on blocks (mhd/amr_fofc.wgsl) every leaf in a chunk of its own agrees with one chunk bit for bit, and the run with 2 bins of per-block timesteps stays finite',
     async run(gpu) {
       const doc = {
         format: 'shaderous-setup', version: 1, name: 'near vacuum',
@@ -2892,11 +2892,11 @@ export const TESTS: TestDef[] = [
       const periodic = compileSetup({ ...doc, domain: { ...doc.domain, bc: { lo: [1, 1, 0], hi: [1, 1, 0] } } } as SetupSpec).problem;
       const m: Record<string, number> = {};
       const runs: { u1: Float32Array; u2: Float32Array; f: Float32Array }[] = [];
-      const tags = ['one_slab', 'slabs', 'one_slab_periodic', 'slabs_periodic'];
+      const tags: string[] = ['one_slab', 'slabs', 'one_slab_periodic', 'slabs_periodic'];
       for (const [tag, bytes, p] of [['one_slab', null, outflow], ['slabs', 1, outflow], ['one_slab_periodic', null, periodic], ['slabs_periodic', 1, periodic]] as const) {
         setMhdSlabBytes(bytes);
         try {
-          await withSim(gpu, p, 64, { ndim: 3, tEnd: Infinity }, async (sim) => {
+          await withSim(gpu, p, 128, { ndim: 3, tEnd: Infinity }, async (sim) => {
             sim.step(100);
             const d = await sim.diagnostics();
             const { u1, u2 } = await sim.readState();
@@ -2926,7 +2926,39 @@ export const TESTS: TestDef[] = [
       };
       m.slabs_differing_values = differ(0, 1);
       m.slabs_periodic_differing_values = differ(2, 3);
-      const pass = tags.every((t) => m[`${t}_finite`] === 1 && m[`${t}_max_speed`] < 100 && m[`${t}_divB`] < 1e-6) && m.slabs_differing_values === 0 && m.slabs_periodic_differing_values === 0;
+      // Blocks: the leaves' cells and faces.
+      // (Per-block timesteps from the document, as a setup asks for them.)
+      const binned = compileSetup({ ...doc, mesh: { timeBins: 2 } } as SetupSpec).problem;
+      const blocks: [string, number | null, Problem, Partial<SimConfig>][] = [['blocks', null, outflow, {}], ['blocks_chunks', 1, outflow, {}], ['blocks_bins', null, binned, { timeBinsAlways: true }]];
+      const leaves: Float32Array[][] = [];
+      for (const [tag, bytes, prob, over] of blocks) {
+        tags.push(tag);
+        setMhdScratchBytes(bytes);
+        try {
+          await withAmr(gpu, prob, 128, { ndim: 3, amrLevels: 1, tEnd: Infinity, ...over }, async (sim) => {
+            sim.step(100);
+            const d = await sim.diagnostics();
+            const c = await sim.readLeaves();
+            let vmax = 0;
+            let finite = Number.isFinite(d.eTot) && Number.isFinite(d.mass);
+            for (let i = 0; i < c.u1.length; i += 4) {
+              if (!Number.isFinite(c.u1[i]) || !Number.isFinite(c.u2[i])) finite = false;
+              if (c.u1[i] > 1e-6) vmax = Math.max(vmax, Math.hypot(c.u1[i + 1], c.u1[i + 2], c.u1[i + 3]) / c.u1[i]);
+            }
+            m[`${tag}_finite`] = finite ? 1 : 0;
+            m[`${tag}_max_speed`] = vmax;
+            m[`${tag}_divB`] = d.magnetic!.divB;
+            m[`${tag}_t`] = d.t;
+            if (tag !== 'blocks_bins') leaves.push([c.u1, c.u2, await leafFaces(sim)]);
+          });
+        } finally {
+          setMhdScratchBytes(null);
+        }
+      }
+      let bdiff = 0;
+      for (let j = 0; j < 3; j++) for (let i = 0; i < leaves[0][j].length; i++) if (leaves[0][j][i] !== leaves[1][j][i]) bdiff++;
+      m.blocks_chunks_differing_values = bdiff;
+      const pass = tags.every((t) => m[`${t}_finite`] === 1 && m[`${t}_max_speed`] < 100 && m[`${t}_divB`] < 1e-6) && m.slabs_differing_values === 0 && m.slabs_periodic_differing_values === 0 && bdiff === 0;
       return { pass, metrics: m };
     },
   },

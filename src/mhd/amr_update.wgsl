@@ -50,8 +50,13 @@
 // mf_store(i, v): into MF, or MF and MF_HI where the records are split (as amr/species.wgsl).
 #include <mf_store>
 override SPECIES_FLUX: bool = false;    // the gravity field atlas: acceleration, potential in w (ghosts included)
+// The first-order flux correction after the update (mhd/amr_fofc.wgsl): stage 2 marks the cells
+// it has all but emptied in the new faces' fourth channel; REDO is the update again over the
+// blocks the scan listed, which reads the marks (NF, the new faces) and writes cells alone.
+@group(0) @binding(35) var NF: texture_3d<f32>;
 
 override STAGE: u32 = 1u;
+override REDO: bool = false;
 
 #include "mhd/state.wgsl"
 #include "mhd/amr_block.wgsl"
@@ -98,6 +103,7 @@ fn visc_heating(x: vec3<i32>) -> f32 {
 
 // The lookups of amr_common that this pass uses (map_cell, holder, local_of).
 #include "mhd/amr_lookup.wgsl"
+#include "mhd/amr_fofc.wgsl"
 
 var<private> g_slot: i32;
 var<private> g_o: vec3<i32>;
@@ -378,8 +384,10 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
       if (ok) { mf_store(mf_index(g_slot, t, a), FL[flux_entry(inv.row, a, t)].x); }
     }
   }
-  textureStore(OB, x, vec4<f32>(bout, 0.0));
-  if (STAGE == 2u) { textureStore(OC, x, vec4<f32>(cout, 0.0)); }
+  if (!REDO) {
+    textureStore(OB, x, vec4<f32>(bout, 0.0));
+    if (STAGE == 2u) { textureStore(OC, x, vec4<f32>(cout, 0.0)); }
+  }
 
   if (!inside) { return; }
   var net_a = vec4<f32>(0.0);
@@ -494,7 +502,20 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (STAGE == 2u && FRAME_ON && !self_gravity && !g_deposit) {
     mom = frame_close(vec4<f32>(rho, mom), vec4<f32>(E, 0.0, 0.0, 0.0), 0.5 * dt).u1.yzw;
   }
-  var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);
+  // A cell beside a face the redo made first order (mhd/amr_fofc.wgsl) keeps its advected internal
+  // energy, and E is rebuilt from it: E - KE - B^2 / 2 would take as heat the difference between
+  // first-order energy fluxes and the field's second-order transport (mhd/fofc.wgsl).
+  var near = false;
+  if (REDO) {
+    near = fofc_local_marked(g_slot, t);
+    for (var a = 0; a < naxes(); a++) {
+      var e = vec3<i32>(0);
+      e[a] = 1;
+      near = near || fofc_local_marked(g_slot, t - e) || fofc_local_marked(g_slot, t + e);
+    }
+  }
+  let ke = 0.5 * dot(mom, mom) / rho + eb;
+  var en = dual_energy(rho, ke, select(E, ke, near), eint);
   var mout = mom;
   let tame = tame_fluff(rho, mom, en.y);
   if (tame.changed) {
@@ -511,4 +532,13 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   if (STAGE == 2u && !g_deposit) { st = apply_cooling(st, dt); }
   textureStore(O1, x, st.u1);
   textureStore(O2, x, st.u2);
+  // Stage 2 has all but emptied the cell: mark it and its block (mhd/amr_fofc.wgsl). A deposit,
+  // which adds only a neighbor's second half, is left as it is.
+  if (STAGE == 2u && !REDO && !g_deposit) {
+    let lost = !(u1.x + dtdx * net_a.x >= FOFC_KEEP * u1.x) || (EOS_HAS_ENERGY && !(eint > 0.0));
+    if (lost) {
+      textureStore(OB, x, vec4<f32>(bout, fofc_stamp()));
+      textureStore(OB, fofc_corner(g_slot), vec4<f32>(0.0, 0.0, 0.0, fofc_stamp()));
+    }
+  }
 }

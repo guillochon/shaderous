@@ -47,6 +47,8 @@
 @group(0) @binding(34) var<storage, read_write> FOFC: Fofc;
 
 override STAGE: u32 = 1u;
+// The fix's round (mhd/fofc.wgsl): round 1 takes every level of the list, round 0 level 0.
+override FOFC_ALL_LEVELS: bool = false;
 
 #include "mhd/common.wgsl"
 #include "mhd/flux_index.wgsl"
@@ -209,8 +211,10 @@ fn fix_main(@builtin(local_invocation_index) li: u32, @builtin(workgroup_id) wg:
   g_dx = P.dx;
   g_dt = clock.dt;
   if (shear_on()) { g_shear = shear_half(clock.shear, clock.dt) / P.dx; }
-  let faces = 6u * fofc_count();
-  for (var j = wg.x * 256u + li; j < faces; j += FOFC_THREADS) { fix(j); }
+  let count = fofc_count();
+  for (var j = wg.x * 256u + li; j < 6u * count; j += FOFC_THREADS) {
+    if (fofc_in_round(j / 6u, FOFC_ALL_LEVELS)) { fix(j); }
+  }
 }
 
 @compute @workgroup_size(8, 8, 4)

@@ -62,6 +62,9 @@
 // up to dims inclusive). A placeholder without species.
 @group(0) @binding(18) var<storage, read_write> MF: array<f32>;
 override SPECIES_FLUX: bool = false;
+// The redo's round (mhd/fofc.wgsl): round 0 redoes level 0 and lists the neighbors it leaves all but
+// emptied; round 1 redoes every level and lists nothing.
+override FOFC_LIST_MORE: bool = false;
 // The first-order flux correction (mhd/fofc.wgsl): stage 2 lists the cells it has all but emptied
 // (main); redo_main updates them and their neighbors again, with the faces of the field as main
 // wrote them (NF, the new parity's).
@@ -402,7 +405,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   textureStore(O1, t, cs.st.u1);
   textureStore(O2, t, cs.st.u2);
   // Stage 2: a cell the second-order fluxes have all but emptied (mhd/fofc.wgsl).
-  if (STAGE == 2u && fofc_bad(cs)) { fofc_add(t); }
+  if (STAGE == 2u && fofc_bad(cs)) { fofc_add(t, false); }
 }
 
 // The redo of mhd/fofc.wgsl: entry j / 7 of the list is a listed cell; k = j % 7 picks it (0) or a
@@ -413,7 +416,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 @compute @workgroup_size(256)
 fn redo_main(@builtin(local_invocation_index) li: u32, @builtin(workgroup_id) wg: vec3<u32>) {
   let cells = 7u * fofc_count();
-  for (var j = wg.x * 256u + li; j < cells; j += FOFC_THREADS) { redo(j); }
+  for (var j = wg.x * 256u + li; j < cells; j += FOFC_THREADS) {
+    if (fofc_in_round(j / 7u, !FOFC_LIST_MORE)) { redo(j); }
+  }
 }
 
 fn redo(j: u32) {
@@ -443,7 +448,7 @@ fn redo(j: u32) {
     let z1 = SLAB.z0 + SLAB.nz;
     let top = select(z1 - 1, z1, SLAB.last != 0u);
     if (t.z >= top) { return; }
-    if (t.z < z0 - 1) {
+    if (t.z < z0 - 2) {
       if (!periodic_axis(2) || t.z + n.z > z1) { return; }
       tf.z = t.z + n.z;
     }
@@ -459,6 +464,8 @@ fn redo(j: u32) {
   let cs = cell_step(t, tf, bc, axes, dt, dtdx);
   textureStore(O1, t, cs.st.u1);
   textureStore(O2, t, cs.st.u2);
+  // A neighbor this has all but emptied: listed for the next round (none after the last).
+  if (FOFC_LIST_MORE && k > 0 && fofc_bad(cs)) { fofc_add(t, true); }
   if (SPECIES_FLUX) {
     // The mass fluxes of the cell's lower faces, and of its upper ones on the grid's boundary.
     let nm = vec3<u32>(P.dims.xyz) + 1u;
