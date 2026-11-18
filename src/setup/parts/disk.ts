@@ -293,11 +293,11 @@ ${tables}fn damping_target(x: vec3<f32>) -> DampTarget {
   return DampTarget(rate, rho, vec3<f32>(-v * x.y / r, v * x.x / r, 0.0), ${f32(cs * cs)} * rho);
 }
 `;
-  // Field loops on the thin profile's physical scale height cs / Omega and its midplane density
-  // there, not the state's height floored at two cells: the field is built without the grid
-  // (compile.ts fieldOf, n = 1), where that floor would spread the loops over the whole box. On a
-  // grid too coarse for the disk they sit inside its (thicker) gas.
-  const height = (r: number) => (cs * r) / speed(r);
+  // Field loops on the thin profile's scale height and midplane density as its state has them:
+  // floored at two cells of the grid the document names (compile.ts fieldOf), so that a disk
+  // thinner than that holds loops as thick as its gas, not sub-cell ones whose radial field
+  // overwhelms it. Without a grid (n = 1), the physical height.
+  const height = (r: number) => Math.max((cs * r) / speed(r), ctx.n > 1 ? 2 * dx : 0);
   const loop = d.loops ? diskLoops(d.loops, rIn, cs, (r) => (ndim === 3 ? surface(r) / (Math.sqrt(2 * Math.PI) * height(r)) : surface(r)), height) : null;
   return { part: d, state, loop, damping: d.damp ? { wgsl, radius: d.damp.from, rate: d.damp.rate } : null };
 }

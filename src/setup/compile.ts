@@ -285,7 +285,10 @@ function fieldOf(spec: SetupSpec, ndim: 2 | 3): { potential: PotentialFn | null;
     const A = starPotential(st);
     if (A) pots.push(A);
   }
-  for (const d of disksOf(spec, bodies, G, 0, ndim)) {
+  // The finest grid the document names: a thin disk's loops follow its gas, whose height is
+  // floored at two of its cells.
+  const nGrid = (spec.domain?.n ?? 0) * 2 ** (spec.domain?.amr ?? 0);
+  for (const d of disksOf(spec, bodies, G, nGrid, ndim)) {
     const loop = d.loop;
     if (loop)
       pots.push((x, y, z) => {
