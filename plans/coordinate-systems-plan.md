@@ -1,7 +1,30 @@
 # Frames, symmetric domains and coordinate systems: implementation plan
 
-Status: plan only, nothing here is implemented. Written 2026-11-15 from a read of the code at
-commit `efc14ac`. File and line references are to that commit.
+Status: mostly built (2026-11-17); see the table below. Written 2026-11-15 from a read of the
+code at commit `efc14ac`. File and line references are to that commit. What was built is
+described in [docs/numerics.md §22](../docs/numerics.md#22-rotating-frames-symmetry-and-coordinates)
+and tested in `src/validation/{frames,symmetry,cosmo,shear,cyl}.ts`.
+
+| Step | State |
+|---|---|
+| G1 domain origin | done |
+| G2 frame slot, A rotating frame (A1-A5, A7) | done; A6 (rotating polytropes) not done |
+| B1-B4, B7, B8 mirror symmetry | done (view shows the images; field lines stay in the computed part) |
+| B5 mirror parity for fields | done |
+| B6 rectangular grids | **not done**: half and 3D-quadrant runs work but gain nothing on a cubic grid |
+| G3 clock, C1-C5 comoving coordinates | done (well-balanced reconstruction off in comoving runs: see §22) |
+| C6 | cooling done for the ideal gas; other equations of state still refused |
+| C7 refusals | done |
+| C8 | `physics.cosmology`, the pancake preset, a and z on the status line; the cosmological display units, the Layzer-Irvine check and `cosmo-wave` not done |
+| D1-D3 shearing box (hydro, uniform grid) | done; the background drifts by float32 rounding, ~1e-4 of the shear speed an orbit (orbital advection, D5, would remove it) |
+| D4 MHD shearing box, D6 `shear-wave`/`shear-flux`/`shear-mri` | **not done** (MHD shearing boxes are refused) |
+| E1-E3, E7 (R, z) hydro, diagnostics, files | done (display by revolution not done) |
+| E4 (R, z) on blocks | done, without per-block timesteps |
+| E5 step 1 masses on the axis, step 2 self-gravity on the uniform grid | done |
+| E5 step 3 self-gravity on blocks, settling in (R, z) | **not done** |
+| E6 MHD and viscosity in (R, z) | **not done** (refused) |
+| E8 tests | rest, conserve, sedov, sink (against 3D), blocks, sphere, evrard, column; noh, bondi, torus and mhd not done |
+| E9 spherical | its own plan: [spherical-plan.md](spherical-plan.md) |
 
 This plan covers five additions, in the order they should be built:
 
