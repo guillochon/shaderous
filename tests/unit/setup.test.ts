@@ -61,7 +61,7 @@ describe('the option table', () => {
   it('says why an option is not available', () => {
     const spec: SetupSpec = { ...emptySetup(), domain: { ndim: 2 }, physics: { gravity: 'isolated', eos: 'barotropic', cooling: 'ism' } };
     const text = ruleIssues(spec).map((i) => i.text).join('\n');
-    expect(text).toMatch(/Gravity: Self, isolated: needs 3D, or an axisymmetric \(R, z\) run/);
+    expect(text).toMatch(/Gravity: Self, isolated: needs 3D, or an axisymmetric \(R, z\) or spherical \(r, theta\) run/);
     expect(text).toMatch(/Cooling function.*needs An equation of state with an energy/);
   });
 

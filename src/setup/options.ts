@@ -142,8 +142,8 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'domain.ndim': { label: 'Dimensions', of: (s) => s.domain?.ndim ?? 3, say: (v) => `${v}D` },
   'domain.supports2d': { label: 'A setup that makes sense in 2D', of: (s) => s.domain?.supports2d ?? false },
   // Space in three dimensions: a 3D grid, or a 2D one in (R, z), whose cells are rings.
-  'domain.space3': { label: '3D, or an axisymmetric (R, z) run', of: (s) => (s.domain?.ndim ?? 3) === 3 || s.domain?.geometry === 'cylindrical' },
-  'gravity.selfFlat': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') && s.domain?.geometry !== 'cylindrical' },
+  'domain.space3': { label: '3D, or an axisymmetric (R, z) or spherical (r, theta) run', of: (s) => (s.domain?.ndim ?? 3) === 3 || ['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
+  'gravity.selfFlat': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') && !['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
   'parts.starFlat': { label: 'A star', of: (s) => count(s, (p) => p.kind === 'star') > 0 && s.domain?.geometry !== 'cylindrical' },
   'domain.geometry': { label: 'Geometry', of: (s) => s.domain?.geometry ?? 'cartesian', say: (v) => (v === 'cylindrical' ? 'axisymmetric (R, z)' : String(v)) },
   'symmetric.x': { label: 'A setup symmetric under the x mirror', of: (s) => !!s.domain?.symmetric?.includes('x') },
@@ -254,7 +254,7 @@ export const OPTIONS: Option[] = [
   { path: 'view.pitch', label: 'Camera elevation', tip: 'Elevation of the volume view’s camera when the setup opens, in radians', page: 'run', control: num(-1.5, 1.5, { step: 0.05 }), apply: 'live', default: 0.45 },
 
   // ---- domain and grid ----
-  { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: 'cylindrical' }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }), apply: 'restart', linkKey: 'dim' },
+  { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: ['cylindrical', 'spherical'] }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) or spherical run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }), apply: 'restart', linkKey: 'dim' },
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level', page: 'domain', control: num(16, 16384, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
   { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, 5, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },
@@ -363,7 +363,7 @@ export const OPTIONS: Option[] = [
       { value: 'off', label: 'Off', tip: 'No gravity (point masses still pull)' },
       { value: 'constant', label: 'Constant', tip: 'A uniform field of strength G pointing down: -y in 2D, -z in 3D', excludes: [{ fact: 'domain.geometry', is: 'spherical', reason: 'Not available in a spherical (r, theta) run: a uniform field has no place on its shells' }] },
       { value: 'periodic', label: 'Self, periodic', tip: 'Self-gravity of the gas in a periodic box (3D only)', requires: [...IN_3D, { fact: 'bc.allPeriodic' }], excludes: [{ fact: 'parts.star', reason: 'Not available with a star: a star’s gravity is not periodic' }] },
-      { value: 'isolated', label: 'Self, isolated', tip: 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D, or an axisymmetric (R, z) run)', requires: IN_SPACE, excludes: [{ fact: 'bc.periodic' }] },
+      { value: 'isolated', label: 'Self, isolated', tip: 'Self-gravity of the gas, isolated: the potential falls off outside the box (3D, or an axisymmetric (R, z) or spherical run)', requires: IN_SPACE, excludes: [{ fact: 'bc.periodic' }] },
     ) },
   { path: 'physics.G', label: 'G', tip: 'Gravitational constant in code units, or the strength of the uniform field. A setup with physical units may leave it to them', page: 'gravity', control: num(0, undefined, { factor: 1.5 }), apply: 'live', default: 1, linkKey: 'G', cfg: 'G' },
   { path: 'physics.gext', label: 'Uniform acceleration', tip: 'A uniform acceleration on the gas, besides the Constant field', page: 'gravity', control: { type: 'vec3' }, apply: 'restart', default: [0, 0, 0], excludes: [{ fact: 'domain.geometry', is: 'spherical', reason: 'Not available in a spherical (r, theta) run: a uniform field has no place on its shells' }] },
