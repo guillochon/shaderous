@@ -676,4 +676,36 @@ export const PSPLIT_TESTS: TestDef[] = [
       return { pass: Math.abs(implicit.rhoc - 1) < 0.02 && implicit.mass < 5e-3 && implicit.etot < 0.02 && implicit.steps < 0.2 * explicit.steps, metrics: m };
     },
   },
+  {
+    id: 'psplit-amr-wake',
+    name: 'Implicit pressure on the adaptive mesh with an obstacle and an inlet: the cylinder wake (2D, 512 finest, 2 levels, liquid, Reynolds number 100)',
+    criterion:
+      'The cylinder wake preset on blocks (the cylinder\'s surface is always at the finest level, 32 cells across it) to t = 16: the mesh has more than one level, the run stays finite with the density within 5% of the reference, and the wake sheds, the transverse velocity two diameters behind the cylinder swinging past 0.2 of the stream on both sides with a period within 10% of the uniform grid\'s 1.43',
+    async run(gpu) {
+      return withAmr(gpu, problemById('cylinder-wake'), 512, { ndim: 2, tEnd: 16, amrLevels: 2, ...IMPLICIT }, async (sim) => {
+        const ts: number[] = [];
+        const vy: number[] = [];
+        for (let t = 0.1; t < 16.05; t += 0.1) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          await sim.runToEnd(64, 1e7);
+          const cell = await sim.probe([(-0.5 + 2) / 4, 0.5, 0.5]);
+          ts.push(t);
+          vy.push(cell ? cell.u1[2] / cell.u1[0] : NaN);
+        }
+        const d = await sim.diagnostics();
+        const cross: number[] = [];
+        for (let i = 1; i < vy.length; i++) if (ts[i] > 9 && vy[i - 1] < 0 && vy[i] >= 0) cross.push(ts[i - 1] + ((0 - vy[i - 1]) / (vy[i] - vy[i - 1])) * (ts[i] - ts[i - 1]));
+        const period = cross.length > 1 ? (cross[cross.length - 1] - cross[0]) / (cross.length - 1) : NaN;
+        const late = vy.slice(90);
+        const solve = await sim.prs!.stats();
+        const m = {
+          period, strouhal: 0.25 / period, vy_min: Math.min(...late), vy_max: Math.max(...late), steps: d.steps, floored: d.floored,
+          levels: new Set(sim.tree.leaves().map((b) => b.level)).size, leaves: sim.tree.leaves().length,
+          density_deviation: Math.max(Math.abs(d.ranges[0][0] - 1), Math.abs(d.ranges[0][1] - 1)), unconverged_fraction: solve.unconverged / Math.max(solve.solves, 1),
+        };
+        return { pass: Math.abs(period / 1.43 - 1) < 0.1 && m.vy_min < -0.2 && m.vy_max > 0.2 && m.levels > 1 && m.density_deviation < 0.05, metrics: m };
+      });
+    },
+  },
 ];

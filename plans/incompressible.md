@@ -3,8 +3,9 @@
 Status (2026-11-18): stages 0 (2.4), 1 (3.8), 2 (4.2.1, 4.12) and 3 (5.10) are done for the
 liquid. Implicit pressure for an
 ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Self-gravity
-for the ideal gas is done on the uniform grid (5.11). Not done: point masses with implicit
-pressure; the ideal gas, species and obstacles with it on the adaptive mesh. Figures quoted from the code in
+for the ideal gas is done on the uniform grid (5.11). Obstacles and
+inlets work with it on the adaptive mesh (5.11). Not done: point masses with implicit
+pressure; the ideal gas and species with it on the adaptive mesh. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -903,6 +904,10 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   after the correction. `psplit-gas-polytrope`: central density to 0.01% over two dynamical
   times in 22 steps (explicit: 2.5% in 436), energy drift 1% (explicit 0.2%). Only a star at
   rest is tested: no collapse, no point masses.
+
+- **Obstacles and inlets on blocks** (liquid): the block passes read the cells' marks
+  (`ap_mark`), close faces on obstacles and send an inlet's momentum through, fine faces
+  included. `psplit-amr-wake` (5.8): three levels, period 1.40 against the uniform grid's 1.43.
 
 ## 6. Not covered
 

@@ -23,7 +23,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (TO_ROOT) {
     textureStore(UP, g, vec4<f32>(textureLoad(PRS, c).x, 0.0, 0.0, 0.0));
     textureStore(UB, g, vec4<f32>(textureLoad(RHS, c, 0).x + textureLoad(TAU, c, 0).x, 0.0, 0.0, 0.0));
-    textureStore(UK, g, vec4<f32>(1.0, 1.0, 1.0, ap_alpha()));
+    // Coefficients: a root leaf's face on an obstacle or an inlet takes no pressure flux, and a
+    // cell inside one is no part of the solve.
+    var k = vec4<f32>(1.0, 1.0, 1.0, ap_alpha());
+    if (ap_held(inv.slot, inv.l)) {
+      k = vec4<f32>(0.0);
+    } else {
+      let axes = ap_axes();
+      for (var a = 0; a < axes; a++) {
+        let kind = ap_nb(inv.slot, inv.l, a, true).kind;
+        if (kind == 2 || kind == 4) { k[a] = 0.0; }
+      }
+    }
+    textureStore(UK, g, k);
   } else {
     textureStore(PRS, c, vec4<f32>(textureLoad(UP, g).x, 0.0, 0.0, 0.0));
   }

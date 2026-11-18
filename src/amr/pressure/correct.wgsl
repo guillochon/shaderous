@@ -31,6 +31,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let c = atl(blk_origin(inv.slot), inv.l);
   let u1 = textureLoad(N1, c, 0);
   let u2 = textureLoad(N2, c, 0);
+  // Solid and held cells keep their state.
+  if (abs(u2.w) > 0.5) {
+    textureStore(O1, c, u1);
+    textureStore(O2, c, u2);
+    return;
+  }
   let dtdx = clock.dt / blk_dx(inv.slot);
   let pc = textureLoad(PRS, c).x;
   let rc = textureLoad(RHO0, c, 0).x;

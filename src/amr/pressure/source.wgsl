@@ -33,7 +33,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   textureStore(PRS, c, vec4<f32>(textureLoad(U2N, c, 0).y, 0.0, 0.0, 0.0));
   textureStore(TAU, c, vec4<f32>(0.0));
   let dt = clock.dt;
-  if (!(dt > 0.0)) {
+  if (!(dt > 0.0) || ap_held(inv.slot, inv.l)) {
     textureStore(RHS, c, vec4<f32>(0.0));
     return;
   }

@@ -48,11 +48,12 @@ export class AmrPressure {
   private pTally!: GPUComputePipeline;
   private pSource!: GPUComputePipeline;
   private pCorrect!: GPUComputePipeline;
-  private gSmooth: GPUBindGroup[][] = []; // [level][color]
-  private gRestrict: GPUBindGroup[][] = []; // [level][stage]
-  private gProlong: GPUBindGroup[] = [];
-  private gRoot: GPUBindGroup[] = [];
-  private gMeasure!: GPUBindGroup;
+  // Per parity p of the step (the passes read the cells' marks from the other one's state).
+  private gSmooth: GPUBindGroup[][][] = []; // [p][level][color]
+  private gRestrict: GPUBindGroup[][][] = []; // [p][level][stage]
+  private gProlong: GPUBindGroup[][] = []; // [p][level]
+  private gRoot: GPUBindGroup[][] = []; // [p][to, from]
+  private gMeasure: GPUBindGroup[] = [];
   private gTally!: GPUBindGroup;
   private gSource: GPUBindGroup[] = [];
   private gCorrect: GPUBindGroup[] = [];
@@ -82,21 +83,21 @@ export class AmrPressure {
       pipe('correct', 'correct'),
     ]);
     const v = (t: GPUTexture) => t.createView();
-    const base = (list: GPUBuffer): Record<number, Bindable> => ({ 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: list });
-    ctx.listLevel.forEach((list, l) => {
-      s.gSmooth[l] = s.pSmooth.map((p) => bindGroup(d, p, { ...base(list), 2: v(prs), 3: v(rhs), 4: v(tau) }));
-      s.gRestrict[l] = s.pRestrict.map((p) => bindGroup(d, p, { ...base(list), 2: v(prs), 3: v(rhs), 4: v(tau), 5: v(auxr), 6: v(auxp) }));
-      s.gProlong[l] = bindGroup(d, s.pProlong, { ...base(list), 2: v(prs), 6: v(auxp) });
-    });
     const r0 = s.root.levels[0];
-    s.gRoot = s.pRoot.map((p) => bindGroup(d, p, { ...base(ctx.listLevel[0]), 2: v(prs), 3: v(rhs), 4: v(tau), 10: v(r0.p), 11: v(r0.rhs), 12: v(r0.coef) }));
     s.res = d.createBuffer({ label: 'amr pressure residual', size: 8, usage: GPUBufferUsage.STORAGE });
     s.tallies = d.createBuffer({ label: 'amr pressure solver tallies', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     s.setTolerance(1e-4);
-    s.gMeasure = bindGroup(d, s.pMeasure, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 9: s.res });
     s.gTally = bindGroup(d, s.pTally, { 0: s.res, 1: s.tallies });
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
+      // The marks: of the advected state's parity, which no pass of the step writes.
+      const base = (list: GPUBuffer): Record<number, Bindable> => ({ 0: ctx.params, 1: ctx.clock, 21: v(ctx.state[o][1]), 30: ctx.bt, 31: list });
+      s.gSmooth[p] = ctx.listLevel.map((list) => s.pSmooth.map((pl) => bindGroup(d, pl, { ...base(list), 2: v(prs), 3: v(rhs), 4: v(tau) })));
+      s.gRestrict[p] = ctx.listLevel.map((list) => s.pRestrict.map((pl) => bindGroup(d, pl, { ...base(list), 2: v(prs), 3: v(rhs), 4: v(tau), 5: v(auxr), 6: v(auxp) })));
+      // (Prolongation asks about no neighbor, and so binds no marks.)
+      s.gProlong[p] = ctx.listLevel.map((list) => bindGroup(d, s.pProlong, { 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: list, 2: v(prs), 6: v(auxp) }));
+      s.gRoot[p] = s.pRoot.map((pl) => bindGroup(d, pl, { ...base(ctx.listLevel[0]), 2: v(prs), 3: v(rhs), 4: v(tau), 10: v(r0.p), 11: v(r0.rhs), 12: v(r0.coef) }));
+      s.gMeasure[p] = bindGroup(d, s.pMeasure, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 9: s.res });
       s.gSource.push(bindGroup(d, s.pSource, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 4: v(tau), 13: v(rho0), 14: v(ctx.state[p][0]), 15: v(ctx.prim), 16: v(ctx.state[p][1]) }));
       s.gCorrect.push(
         bindGroup(d, s.pCorrect, {
@@ -119,24 +120,24 @@ export class AmrPressure {
     this.ctx.interior(pass, count);
   }
 
-  private smooth(pass: GPUComputePassEncoder, l: number, count: number, sweeps: number) {
-    for (let i = 0; i < sweeps; i++) for (let color = 0; color < 2; color++) this.run(pass, this.pSmooth[color], this.gSmooth[l][color], count);
+  private smooth(pass: GPUComputePassEncoder, p: number, l: number, count: number, sweeps: number) {
+    for (let i = 0; i < sweeps; i++) for (let color = 0; color < 2; color++) this.run(pass, this.pSmooth[color], this.gSmooth[p][l][color], count);
   }
 
   /** One cycle over the tree's levels, finest to root and back. `nLevel` is the number of blocks at each level. */
-  private encodeCycle(pass: GPUComputePassEncoder, nLevel: readonly number[]) {
+  private encodeCycle(pass: GPUComputePassEncoder, p: number, nLevel: readonly number[]) {
     const L = this.ctx.levels;
     for (let l = L; l >= 1; l--) {
-      this.smooth(pass, l, nLevel[l], PRE);
-      for (let stage = 0; stage < 2; stage++) this.run(pass, this.pRestrict[stage], this.gRestrict[l - 1][stage], nLevel[l - 1]);
+      this.smooth(pass, p, l, nLevel[l], PRE);
+      for (let stage = 0; stage < 2; stage++) this.run(pass, this.pRestrict[stage], this.gRestrict[p][l - 1][stage], nLevel[l - 1]);
     }
-    this.run(pass, this.pRoot[0], this.gRoot[0], nLevel[0]);
+    this.run(pass, this.pRoot[0], this.gRoot[p][0], nLevel[0]);
     this.root.encodeCoarsen(pass);
     for (let c = 0; c < ROOT_CYCLES; c++) this.root.encodeVCycle(pass);
-    this.run(pass, this.pRoot[1], this.gRoot[1], nLevel[0]);
+    this.run(pass, this.pRoot[1], this.gRoot[p][1], nLevel[0]);
     for (let l = 1; l <= L; l++) {
-      this.run(pass, this.pProlong, this.gProlong[l], nLevel[l]);
-      this.smooth(pass, l, nLevel[l], POST);
+      this.run(pass, this.pProlong, this.gProlong[p][l], nLevel[l]);
+      this.smooth(pass, p, l, nLevel[l], POST);
     }
   }
 
@@ -148,8 +149,8 @@ export class AmrPressure {
    */
   encode(pass: GPUComputePassEncoder, p: number, nLevel: readonly number[], nLeaf: number, cycles: number) {
     this.run(pass, this.pSource, this.gSource[p], nLeaf);
-    for (let c = 0; c < cycles; c++) this.encodeCycle(pass, nLevel);
-    this.run(pass, this.pMeasure, this.gMeasure, nLeaf);
+    for (let c = 0; c < cycles; c++) this.encodeCycle(pass, p, nLevel);
+    this.run(pass, this.pMeasure, this.gMeasure[p], nLeaf);
     pass.setPipeline(this.pTally);
     pass.setBindGroup(0, this.gTally);
     pass.dispatchWorkgroups(1);

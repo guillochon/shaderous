@@ -21,6 +21,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!inv.ok || !(clock.dt > 0.0)) { return; }
   let l = inv.l;
   if (u32(l.x + l.y + l.z) % 2u != COLOR) { return; }
+  if (ap_held(inv.slot, l)) { return; }
   let c = atl(blk_origin(inv.slot), l);
   let h = blk_dx(inv.slot);
   let s = ap_plain(inv.slot, l);

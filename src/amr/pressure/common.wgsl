@@ -29,6 +29,20 @@
 #include "amr/list.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
+// The cells' marks (the fourth component of the state's second texture, of the parity the
+// correction is not writing): 1 in an obstacle, -1 in a cell held at its state (an inlet).
+@group(0) @binding(21) var MK: texture_3d<f32>;
+
+// The mark of a leaf's cell. (A parent holds none: its cells count as gas in the plain operator,
+// which changes how fast the coarse levels help near an obstacle, not what they converge to.)
+fn ap_mark(slot: i32, l: vec3<i32>) -> f32 {
+  if (!has_solids() || !blk_leaf(slot)) { return 0.0; }
+  return textureLoad(MK, atl(blk_origin(slot), l), 0).w;
+}
+// A leaf's cell that is not gas: it is no part of the solve.
+fn ap_held(slot: i32, l: vec3<i32>) -> bool {
+  return abs(ap_mark(slot, l)) > 0.5;
+}
 
 const AP_TWO_THIRDS = 0.6666667;
 
@@ -45,29 +59,39 @@ fn ap_axes() -> i32 {
 //   kind 0: cell `l` of block `slot`, at the same level; `fine` if that block is refined (and is
 //           not this one)
 //   kind 1: cell `l` of the coarser leaf `slot`
-//   kind 2: a wall      kind 3: an open face (`only`: it lets nothing in)
+//   kind 2: a wall, or the surface of an obstacle      kind 3: an open face (`only`: it lets
+//           nothing in)      kind 4: cell `l` of block `slot` is held at its state (an inlet): the
+//           mass flux through the face is that cell's, whatever the pressure
 struct ANb { kind: i32, slot: i32, l: vec3<i32>, fine: bool, only: bool }
 
 fn ap_nb(slot: i32, l: vec3<i32>, a: i32, up: bool) -> ANb {
   var q = l;
   q[a] += select(-1, 1, up);
-  if (q[a] >= 0 && q[a] < BS) { return ANb(0, slot, q, false, false); }
+  if (q[a] >= 0 && q[a] < BS) { return ap_marked(ANb(0, slot, q, false, false)); }
   let f = u32(2 * a) + u32(up);
   let nb = bt(slot, 6u + f);
   if (nb >= 0) {
     q[a] += select(BS, -BS, up);
-    return ANb(0, nb, q, !blk_leaf(nb), false);
+    return ap_marked(ANb(0, nb, q, !blk_leaf(nb), false));
   }
   if (nb == -1) {
     let cs = bt(slot, 20u + f);
     var lc = ((blk_coord(slot) * BS + q) >> vec3<u32>(1u)) - blk_coord(cs) * BS;
     lc[a] = select(BS - 1, 0, up);
     if (is2d()) { lc.z = 0; }
-    return ANb(1, cs, lc, false, false);
+    return ap_marked(ANb(1, cs, lc, false, false));
   }
   let k = u32(-1 - nb);
   if (bc_wall(k)) { return ANb(2, slot, l, false, false); }
   return ANb(3, slot, l, false, k == BC_OUTFLOW_ONLY);
+}
+
+// A neighboring cell as found, or what its mark makes of it: a wall, or an inlet.
+fn ap_marked(n: ANb) -> ANb {
+  let m = ap_mark(n.slot, n.l);
+  if (m > 0.5) { return ANb(2, n.slot, n.l, false, false); }
+  if (m < -0.5) { return ANb(4, n.slot, n.l, false, false); }
+  return n;
 }
 
 // Fine faces that tile a coarse one: 4, or 2 in 2D.

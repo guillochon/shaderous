@@ -12,7 +12,8 @@
 // Momentum along axis a at cell l (which may be a ghost) of a block.
 fn ap_mom(slot: i32, l: vec3<i32>, a: i32) -> f32 {
   let w = textureLoad(W1, atl(blk_origin(slot), l), 0);
-  return w.x * w[a + 1];
+  // (The assembly marks a solid cell by a negative density.)
+  return abs(w.x) * w[a + 1];
 }
 
 // The mass flux through the face between a lower and an upper cell: one expression,
@@ -41,7 +42,10 @@ fn ap_face(slot: i32, l: vec3<i32>, a: i32, up: bool, pc: f32, rc: f32, dtdx: f3
   let mc = ap_mom(slot, l, a);
   let w = select(0.0, 1.0, solved);
   let kg = clock.dt * P.gext[a];
-  if (n.kind == 2) { return vec3<f32>(pc + select(-0.5, 0.5, up) * blk_dx(slot) * P.gext[a] * rc, 0.0, rc); }
+  let wall = vec3<f32>(pc + select(-0.5, 0.5, up) * blk_dx(slot) * P.gext[a] * rc, 0.0, rc);
+  if (n.kind == 2) { return wall; }
+  // An inlet: its own momentum goes through, and it pushes back as a wall does.
+  if (n.kind == 4) { return vec3<f32>(wall.x, ap_mom(slot, l + e, a), rc); }
   if (n.kind == 3) {
     var m = mc + kg * rc;
     if (n.only) { m = select(min(m, 0.0), max(m, 0.0), up); }
@@ -53,6 +57,10 @@ fn ap_face(slot: i32, l: vec3<i32>, a: i32, up: bool, pc: f32, rc: f32, dtdx: f3
     let nf = ap_nfine();
     for (var t = 0; t < nf; t++) {
       let f = ap_fine(n, a, up, t);
+      // A fine cell in an obstacle closes its face; one held at its state sends its momentum.
+      let fm = ap_mark(f.slot, f.l);
+      if (fm > 0.5) { acc += wall; continue; }
+      if (fm < -0.5) { acc += vec3<f32>(wall.x, ap_mom(f.slot, f.l, a), rc); continue; }
       let pi = prs(f.slot, f.l);
       let ri = rho_old(f.slot, f.l);
       let pg = ap_ghost(pi, pc);

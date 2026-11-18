@@ -16,15 +16,16 @@ fn ap_plain(slot: i32, l: vec3<i32>) -> vec2<f32> {
   return s;
 }
 
-// The mean of the fine cells along a refined face.
-fn ap_fine_mean(n: ANb, a: i32, up: bool) -> f32 {
-  var m = 0.0;
+// (sum, diag) of the fine cells along a refined face that are gas, each a share 1 / (faces that
+// tile it): a fine face on an obstacle or an inlet takes no pressure flux.
+fn ap_fine_sum(n: ANb, a: i32, up: bool) -> vec2<f32> {
+  var s = vec2<f32>(0.0);
   let nf = ap_nfine();
   for (var t = 0; t < nf; t++) {
     let f = ap_fine(n, a, up, t);
-    m += prs(f.slot, f.l);
+    if (!ap_held(f.slot, f.l)) { s += vec2<f32>(prs(f.slot, f.l), 1.0); }
   }
-  return m / f32(nf);
+  return s / f32(nf);
 }
 
 // (composite, plain) as two (sum, diag) pairs: they differ at refined faces only.
@@ -37,7 +38,7 @@ fn ap_both(slot: i32, l: vec3<i32>) -> vec4<f32> {
       if (n.kind == 0) {
         let own = vec2<f32>(prs(n.slot, n.l), 1.0);
         var comp = own;
-        if (n.fine) { comp = 2.0 * AP_TWO_THIRDS * vec2<f32>(ap_fine_mean(n, a, u == 1), 1.0); }
+        if (n.fine) { comp = 2.0 * AP_TWO_THIRDS * ap_fine_sum(n, a, u == 1); }
         s += vec4<f32>(comp, own);
       }
       if (n.kind == 1) { s += AP_TWO_THIRDS * vec4<f32>(prs(n.slot, n.l), 1.0, prs(n.slot, n.l), 1.0); }

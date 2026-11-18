@@ -541,14 +541,12 @@ export function implicitUnsupported(c: SimConfig): string | null {
 
 /**
  * Why a run on the block grid cannot take implicit pressure as configured, or null: what the
- * uniform grid's takes (implicitUnsupported), less obstacles, inflows, a uniform field and
- * per-block timesteps (one solve couples every cell at one time: plans/incompressible.md 5.5).
+ * uniform grid's takes (implicitUnsupported), less the ideal gas, species and per-block timesteps (one solve couples every cell at one time: plans/incompressible.md 5.5).
  */
 export function implicitBlocksUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid') return 'on the adaptive mesh it is built for the liquid only, so far';
   if ((c.problem.species?.length ?? 0) > 0) return 'species are not available with it on the adaptive mesh yet';
   if (c.timeBins > 0) return 'per-block timesteps are not available with it: one solve couples every cell at one time';
-  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'obstacle' || p.kind === 'inflow')) return 'obstacles and inflows are not available with it on the adaptive mesh yet';
   return null;
 }
 

@@ -16,7 +16,7 @@ var<workgroup> wg: array<atomic<u32>, 2>;
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) li: u32) {
   let inv = inv_interior(gid);
-  if (inv.ok && clock.dt > 0.0) {
+  if (inv.ok && clock.dt > 0.0 && !ap_held(inv.slot, inv.l)) {
     let c = atl(blk_origin(inv.slot), inv.l);
     let h = blk_dx(inv.slot);
     let s = ap_both(inv.slot, inv.l);

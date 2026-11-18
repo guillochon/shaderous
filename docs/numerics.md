@@ -675,6 +675,18 @@ of a root cell thick is refined from one level to three within 0.3 time units
 (`psplit-amr-shear`). A layer three cells thick reads 0.3, under the default threshold of 0.8.
 The mesh a run starts on is still chosen from density and pressure alone.
 
+*Obstacles, inlets and a uniform field on blocks.* A face on an obstacle, in this block or the
+next, on the coarser side or among the fine faces of a refined one, takes no pressure flux and
+no mass; a cell held at its state sends its own momentum through. Parents hold no marks, so
+the plain operator the coarse levels relax treats their cells as gas: that changes how much
+the coarse levels help near an obstacle, not what the solve converges to (the leaves'
+equations fix that). A uniform field's kick is formed on the faces as on the uniform grid,
+with the fine faces' own densities at a refinement boundary. The cylinder wake preset on a
+three-level mesh, 32 cells across the cylinder, sheds with a period of 1.40 (the uniform grid
+at 16 cells across: 1.43), with 0.2% of its steps' solves ending above the tolerance
+(`psplit-amr-wake`); a liquid column with a refinement boundary across it holds at a Mach
+number of $`2\times10^{-6}`$ (`psplit-amr-balance`).
+
 Measured (`psplit-amr-*`): a Gresho vortex on a three-level mesh whose refinement boundaries
 run through it (256 cells across at the finest) takes 400 steps to $`t = 1`$ at Mach 0.1,
 0.01 and 0.001 alike, against the explicit scheme's 6 800 at Mach 0.1, and keeps 0.9992 of its
@@ -687,8 +699,7 @@ energy. In 3D it runs and conserves; it has not been measured beyond that.
 
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
 or frames (and the liquid without self-gravity); the ideal gas on the uniform grid only; on the adaptive mesh also
-without species, obstacles, inflows or per-block timesteps (one solve couples every cell at
-one time). Each is refused with the reason. First order in time. And on
+without species or per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2378,7 +2389,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 148 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 149 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

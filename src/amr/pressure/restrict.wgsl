@@ -46,8 +46,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       let lf = f0 + vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1);
       let cf = atl(blk_origin(child), lf);
       let pf = textureLoad(PRS, cf).x;
-      let s = ap_plain(child, lf);
       p += pf;
+      // (A child in an obstacle has no equation, and no residual.)
+      if (ap_held(child, lf)) { continue; }
+      let s = ap_plain(child, lf);
       r += textureLoad(RHS, cf).x + textureLoad(TAU, cf).x - ((s.y + 0.25 * ah2) * pf - s.x) / (hf * hf);
     }
     p /= f32(nk);
@@ -59,6 +61,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let p = textureLoad(PRS, c).x;
   let s = ap_both(slot, l);
   if (leaf) {
+    if (ap_held(slot, l)) {
+      textureStore(TAU, c, vec4<f32>(0.0));
+      return;
+    }
     // h^2 (plain - composite): the alpha terms cancel.
     textureStore(TAU, c, vec4<f32>(((s.w * p - s.z) - (s.y * p - s.x)) / (h * h), 0.0, 0.0, 0.0));
     return;
