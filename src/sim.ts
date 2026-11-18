@@ -414,7 +414,10 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
  * mirrored axes' lower faces become reflecting (their planes of symmetry).
  */
 export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefined): SimConfig {
-  const allowed = cfg.problem.symmetry?.axes ?? [false, false, false];
+  // (A magnetic field must be declared symmetric too, or no mirror is offered: the whole box
+  // runs, as for a problem with no mirrors, rather than a link's mirror stopping the page.)
+  const fieldOk = !cfg.problem.mhd || !!cfg.problem.symmetry?.mhd;
+  const allowed = fieldOk ? (cfg.problem.symmetry?.axes ?? [false, false, false]) : [false, false, false];
   const sym = [0, 1, 2].map((a) => !!want?.[a] && allowed[a] && (a < 2 || cfg.ndim === 3)) as [boolean, boolean, boolean];
   // (An axisymmetric run's lower x face is its axis, which reflects as such a plane does.)
   const bcLo = cfg.bcLo.map((b, a) => (sym[a] || (a === 0 && cylindrical(cfg)) ? REFLECT : b)) as Bc3;
