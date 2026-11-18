@@ -21,6 +21,13 @@ export interface Prim {
   solid?: boolean;
   /** The cell is held at this state for the whole run (an inflow, say). */
   fixed?: boolean;
+  /**
+   * With radiation (SimConfig.radiation): the radiation energy density and flux, in the gas's
+   * frame. Without them E = a T^4 at the gas's temperature, and F its diffusion value
+   * -c / (3 kappa_R rho) grad E from the grid's own differences (radiation/init.ts).
+   */
+  erad?: number;
+  frad?: readonly [number, number, number];
 }
 
 /** How a cell's kind is stored with its state: 1 solid, -1 fixed, 0 ordinary gas. */
@@ -57,6 +64,7 @@ export const FIELDS = [
   'Magnetic field x', 'Magnetic field y', 'Magnetic field z', 'Magnetic field strength', 'Plasma beta', 'Magnetic divergence',
   'MRI quality Q_z', 'MRI quality Q_φ',
   'Nuclear heating',
+  'Radiation energy', 'Radiation temperature', 'Radiation flux', 'Reduced flux', 'Cell optical depth', 'Speed of light factor r',
 ] as const;
 /** The mass fraction field: one menu entry per species the run carries (ViewState.species). */
 export const MASS_FRACTION_FIELD = 19;
@@ -68,6 +76,8 @@ export const TIME_BIN_FIELD = 21;
 export const MAGNETIC_FIELDS: readonly number[] = [22, 23, 24, 25, 26, 27, 28, 29];
 /** Burning's heating rate over the last step (burn/burn.ts). Shown only for a run that burns. */
 export const NUCLEAR_HEATING_FIELD = 30;
+/** Radiation transport (radiation/radiation.ts): E, (E / a)^(1/4), |F|, |F| / (c E), kappa_R rho dx, r. Shown only with radiation. */
+export const RADIATION_FIELDS: readonly number[] = [31, 32, 33, 34, 35, 36];
 /**
  * The field menu: FIELDS by index, in groups (the indices themselves are the shaders' order).
  * A run with species also gets a Composition group, one mass fraction per species.
@@ -79,6 +89,7 @@ export const FIELD_MENU: { group: string; fields: number[] }[] = [
   { group: 'Gravity', fields: [15, 17] },
   { group: 'Mesh and timestep', fields: [14, 21, 18] },
   { group: 'Magnetic field', fields: [25, 22, 23, 24, 26, 27, 28, 29] },
+  { group: 'Radiation', fields: [31, 32, 33, 34, 35, 36] },
 ];
 /** What each field shows, for its tooltip. */
 export const FIELD_TIPS = [
@@ -113,11 +124,17 @@ export const FIELD_TIPS = [
   'With a point mass: cells across the fastest-growing wavelength of the magnetorotational instability for the field’s vertical part, Q_z = 2π |B_z| / (√ρ Ω dx), Ω the Keplerian angular velocity about the mass. The MRI grows at its proper rate where Q_z is above about 8 (Hawley, Guan & Krolik 2011)',
   'With a point mass: as Q_z, for the field’s part along the orbit, Q_φ = 2π |B_φ| / (√ρ Ω dx). Above about 20 the turbulence the MRI drives is resolved (Hawley, Guan & Krolik 2011)',
   'Energy nuclear burning released per unit volume and time over the last step: where the fuel is burning, and how fast',
+  'Radiation energy per unit volume, E, in the gas’s frame',
+  'Radiation temperature (E / a)^¼: where it differs from the gas’s, the two are out of equilibrium',
+  'Magnitude of the radiation flux |F|, in the gas’s frame',
+  'The reduced flux |F| / (c E): near 0 where the radiation is trapped and diffuses, 1 where it streams freely',
+  'Optical depth of one cell, κ_R ρ dx: above 1 the radiation diffuses through the cell, below it streams',
+  'The factor r on the speed of light in each cell: 1 where the true speed is used (opaque gas), chat / c where it is reduced',
 ] as const;
 /** Fields that take both signs: shown on a linear scale, centered on zero. */
 export const SIGNED_FIELDS: ReadonlySet<number> = new Set([5, 6, 7, 10, 11, 12, 22, 23, 24]);
 /** Fields always shown on a linear scale: the signed ones, refinement levels, the potential and the shock flag. */
-export const LINEAR_FIELDS: ReadonlySet<number> = new Set([...SIGNED_FIELDS, 14, 15, 20, 21]);
+export const LINEAR_FIELDS: ReadonlySet<number> = new Set([...SIGNED_FIELDS, 14, 15, 20, 21, 34, 36]);
 
 export interface ProblemParam {
   id: string;
@@ -321,6 +338,16 @@ export interface Problem {
    * dampRate).
    */
   damping?: { wgsl: string; radius: number; rate: number };
+  /**
+   * Radiation transport switched on by default (SimConfig.radiation), its opacity law and
+   * constants (code units, over those the problem's units give), the speed of light (code
+   * units; from the units without), and the reduced speed chat (default: c).
+   */
+  radiation?: import('../radiation/radiation').RadiationKind;
+  opacity?: import('../opacity/opacity').OpacityKind;
+  opacityParams?: Partial<import('../opacity/opacity').OpacityParams>;
+  radC?: number;
+  radChat?: number;
   /** Kinematic viscosity and thermal conduction switched on by default (see SimConfig). */
   viscosity?: number;
   conductivity?: number;

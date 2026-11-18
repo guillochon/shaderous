@@ -64,6 +64,11 @@ struct Params {
                          //   all zero otherwise
   sph2: vec4<f32>,       // its logarithmic grid's constants, in double precision on the CPU:
                          //   (e^(D/2), 3 / (2 sinh(3D/2)), sinh D, 2 sinh(D/2)), D the step in ln r
+  rad: vec4<f32>,        // radiation (radiation/radiation.ts): (c, reduced speed chat, radiation
+                         //   constant a, flags: 1 on, 2 chat per cell, 4 global Lax-Friedrichs);
+                         //   all zero without
+  rad2: vec4<f32>,       // (sweeps per hydro step, the sweep's Courant number, tau_0, 0)
+  kap: vec4<f32>,        // the opacity law's constants (opacity/opacity.ts packOpacity)
 }
 
 // The state as the frame slot (gravity/frame_off.wgsl) hands it back.

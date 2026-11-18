@@ -4,7 +4,7 @@ import { PRESET_IDS, preset, presetSpec } from '../../src/presets/index';
 import { compileSetup } from '../../src/setup/compile';
 import { changeBetween, runningSpec, sameSetup, settingsOf, setSetting } from '../../src/setup/running';
 import { cloneSetup, setPath } from '../../src/setup/spec';
-import { configFor, type SimConfig } from '../../src/sim';
+import { configFor, unitConstants, type SimConfig } from '../../src/sim';
 import { physicalEosParams } from '../../src/eos/eos';
 import { problemUnits } from '../../src/problems/types';
 
@@ -32,7 +32,7 @@ describe('the running document', () => {
       const cfg = config(id);
       for (const q of cfg.problem.params ?? []) if (q.step && q.value + q.step <= q.max) cfg.params[q.id] = q.value + q.step;
       // Units that follow the parameters set the equation of state's physical constants, as the page keeps them.
-      if (typeof cfg.problem.units === 'function') Object.assign(cfg.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
+      if (typeof cfg.problem.units === 'function') unitConstants(cfg);
       cfg.eosParams.gamma = 1.3;
       cfg.cfl = 0.4;
       cfg.viscosity = 2e-3;

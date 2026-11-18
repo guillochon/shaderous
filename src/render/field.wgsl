@@ -45,6 +45,27 @@ fn shown(rho: f32) -> f32 {
 #include "mhd/common.wgsl"
 #include "mhd/mri.wgsl"
 
+// Radiation (radiation/radiation.ts): (E, F) as of the frame; a placeholder texel without.
+@group(0) @binding(16) var RAD: texture_3d<f32>;
+#include <opacity>
+#include "radiation/common.wgsl"
+
+// The radiation fields, F_RADIATION onward, at cell c of density rho and internal energy eint.
+fn radiation_value(f: u32, c: vec3<i32>, rho: f32, eint: f32) -> f32 {
+  if (P.rad.w == 0.0) { return 0.0; }
+  let R = textureLoad(RAD, c, 0);
+  let E = max(R.x, 0.0);
+  let tau = kappa_rosseland(rho, eos_temperature(rho, eint)) * rho * P.dx;
+  switch (f - F_RADIATION) {
+    case 0u { return E; }
+    case 1u { return sqrt(sqrt(E / rad_a())); }
+    case 2u { return length(R.yzw); }
+    case 3u { return select(0.0, length(R.yzw) / (rad_c() * E), E > 0.0); }
+    case 4u { return tau; }
+    default { return rad_reduction(tau); }
+  }
+}
+
 // The magnetic fields, F_MAGNETIC onward, at cell c whose gas pressure is p and density rho, at
 // x (relative to the box center).
 fn magnetic_value(f: u32, c: vec3<i32>, p: f32, rho: f32, x: vec3<f32>) -> f32 {
@@ -108,6 +129,7 @@ fn voxel(c: vec3<i32>) -> Cell {
   if (V.field == F_NUCLEAR_HEATING) { x = textureLoad(HEAT, c, 0).x; }
   // (With MHD, PB is the half-step state's second texture, and the flag its fourth channel.)
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0)[select(2, 3, (P.flags & 32u) != 0u)]; }
+  if (V.field >= F_RADIATION && V.field < F_RADIATION + N_RADIATION) { x = radiation_value(V.field, c, max(u1.x, P.rho_floor), u2.y); }
   if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + N_MAGNETIC) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y), u1.x, xp); }
   return Cell(x, u1.x, u2.w > 0.5);
 }

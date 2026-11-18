@@ -4,7 +4,7 @@
 // differs from that preset's defaults, so most links stay short. Anything unrecognized or
 // out of range in a link is ignored rather than trusted.
 import { BOUNDARY_CODES, boundaryList } from '../problems/boundaries';
-import { configFor, type SimConfig } from '../sim';
+import { configFor, unitConstants, type SimConfig } from '../sim';
 import { mirrorAxes, mirrorName } from '../domain';
 import { physicalEosParams, type EosParams } from '../eos/eos';
 import type { CoolingParams } from '../cooling/cooling';
@@ -132,7 +132,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   const def = configFor(cfg.problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels, symmetry: cfg.symmetry });
   // Units that follow the preset's parameters set the equation of state's physical constants: the
   // defaults to compare with are those of the run's parameters, which the link carries.
-  if (typeof cfg.problem.units === 'function') Object.assign(def.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
+  if (typeof cfg.problem.units === 'function') unitConstants(def);
   const num = (key: string, a: number, b: number) => {
     if (fmt(a) !== fmt(b)) q.set(key, fmt(a));
   };

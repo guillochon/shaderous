@@ -44,6 +44,7 @@ import { RefMhd } from '../reference/mhd';
 import { setMhdScratchBytes } from '../mhd/amr_mhd';
 import { BS, PAD as PAD_BLOCK } from '../amr/tree';
 import { FRAME_TESTS } from './frames';
+import { RAD_TESTS } from './radiation';
 
 export interface TestResult {
   id: string;
@@ -4034,6 +4035,8 @@ export const TESTS: TestDef[] = [
   },
   // Non-inertial frames and coordinate systems (validation/frames.ts).
   ...FRAME_TESTS,
+  // Radiation transport (validation/radiation.ts).
+  ...RAD_TESTS,
 ];
 
 export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {

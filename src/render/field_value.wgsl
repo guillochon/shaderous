@@ -30,6 +30,8 @@ const F_TIME_BIN = 21u;   // set by the block grid's display pass (amr/field.wgs
 const F_MAGNETIC = 22u;   // B_x, B_y, B_z, |B|, plasma beta, |div B| dx / |B|, MRI Q_z, Q_phi: render/field.wgsl, with a field
 const N_MAGNETIC = 8u;
 const F_NUCLEAR_HEATING = 30u;   // burning's heating rate: read by the display passes
+const F_RADIATION = 31u;   // E, T_rad, |F|, |F| / (c E), kappa_R rho dx, r: render/field.wgsl, with radiation
+const N_RADIATION = 6u;
 
 // Mass fraction of species V.sp.x at texel c of the state: its rho X over the sum of all of
 // them (species/species.ts), read from S, the groups of four V.sp.y texels apart along z.

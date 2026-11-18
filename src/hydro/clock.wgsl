@@ -65,6 +65,9 @@ fn main() {
   if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0 || P.sph.z > 0.0 || cylindrical() || any(P.gext.xyz != vec3<f32>(0.0))) && RED[1] > 0.0) {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
   }
+  // Radiation (radiation/radiation.ts): at most P.rad2.x sweeps of the sweep's own step,
+  // P.rad2.y dx / (d chat), per hydro step.
+  if (P.rad.w != 0.0) { dt = min(dt, P.rad2.x * P.rad2.y * dx / (P.geom.y * P.rad.y)); }
   // Comoving coordinates: the scale factor changes by at most 1% a step.
   if (cosmo_on()) { dt = min(dt, 0.01 / cosmo_hubble(clock.a)); }
   // A rotating frame: at most a tenth of a radian of frame turn a step (63 steps a turn). The
