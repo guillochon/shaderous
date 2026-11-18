@@ -258,6 +258,14 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
   };
   guard(() => out.push(...ruleIssues(spec)));
   if (env.refusal) out.push({ level: 'error', text: env.refusal });
+  // A shearing box's equilibrium is the background flow v_y = -q Omega x: gas started at rest
+  // is flung about by the tidal and Coriolis forces (densities 0.4 to 6 in a box of uniform gas).
+  guard(() => {
+    if (!spec.physics?.shear) return;
+    const flows = partsOf(spec).filter((p) => p.kind === 'flow').map((p) => (p as { name: string }).name);
+    if (!flows.some((n) => n === 'shearing-wave' || n === 'shearing-noise'))
+      out.push({ level: 'warning', path: 'physics.shear', text: 'Shearing box: the initial state should hold the background flow v_y = -q Omega x (the shearing-noise or shearing-wave flow), or the gas starts far from equilibrium' });
+  });
   // A sink empties its neighborhood to the density floor, where a field's Alfven speed sets the
   // step: without a cap on it (Hydro: tenuous-gas caps, va) the run crawls (a disk with B = 1e-3
   // around a sink advanced 50 times slower than without the field).
