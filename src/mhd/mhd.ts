@@ -28,7 +28,10 @@ export const mhdRiemann = (c: SimConfig): string => (c.riemann === 'hll' ? 'mhd/
  */
 export function mhdUnsupported(c: SimConfig): string | null {
   // Gravity, point masses, cooling, species, viscosity and conduction all act on a field
-  // (docs/numerics.md section 21).
+  // (docs/numerics.md section 21). Obstacles and inflows do not: the MHD fluxes know no solid or
+  // fixed cell (mhd/flux.wgsl), and gas flowed into an obstacle (a random setup gained 0.14% of
+  // its mass in 200 steps between walls).
+  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'obstacle' || p.kind === 'inflow')) return 'obstacles and inflows are not available with a magnetic field yet';
   return null;
 }
 

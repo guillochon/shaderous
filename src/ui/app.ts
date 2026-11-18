@@ -551,12 +551,15 @@ function syncTools() {
   if (noStar && tool === 'star') tool = null;
   const noField = !cfg?.problem.mhd;
   if (noField && tool !== null && FIELD_TOOLS.includes(tool)) tool = null;
+  // The MHD fluxes know no solid cell (mhd/mhd.ts mhdUnsupported).
+  const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : '';
+  if (noObstacle && tool === 'obstacle') tool = null;
   for (const t of TOOLS) {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
     b.hidden = noField && FIELD_TOOLS.includes(t.kind);
     b.setAttribute('aria-pressed', String(tool === t.kind));
-    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar);
-    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : 'The barotropic equation of state ties the temperature to the density';
+    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle);
+    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : 'The barotropic equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
   // The tool's settings slide out under its own button, pushing the buttons below it down.
@@ -3997,6 +4000,7 @@ async function toolApi(name: string, o: Record<string, unknown> = {}): Promise<R
       break;
     case 'obstacle': {
       known(['shape', 'center', 'half', 'points', 'axis', 'erase']);
+      if (cfg.problem.mhd) throw new Error('obstacle: obstacles are not available with a magnetic field yet');
       const axis = cfg.ndim === 2 ? 2 : scalar('axis', 2, 0, 2);
       if (!Number.isInteger(axis)) throw new Error('obstacle: "axis" is 0, 1 or 2');
       const pair = (k: string): [number, number] => {
