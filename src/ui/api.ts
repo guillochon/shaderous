@@ -114,6 +114,8 @@ export interface AppHooks {
   adopt(spec: SetupSpec): string;
   /** GPU memory the grid of a document needs, and what the page may take, in bytes. */
   gridMemory(spec: SetupSpec): { need: number; budget: number };
+  /** What the simulators would refuse in a document (sim.ts refusal), or null. */
+  refusal(spec: SetupSpec): string | null;
   /** Checkpoints are on: the clock is held at each (cfg.tStop) until it is written. */
   checkpointsOn(): boolean;
   /** Write the checkpoint the clock is held at, and arm the next (as the page does when it plays). */
@@ -1099,7 +1101,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     check(document: unknown) {
       const { spec, report } = readSetup(document, (id) => PRESET_FILES[id]);
       if (!spec) return { ok: false, error: report.error ?? 'not a setup document', notes: report.notes, issues: [] };
-      const issues = checkSetup(spec, { memory: app.gridMemory(spec) });
+      const issues = checkSetup(spec, { memory: app.gridMemory(spec), refusal: app.refusal(spec) });
       return { ok: !issues.some((i) => i.level === 'error'), notes: report.notes, issues, document: spec };
     },
 

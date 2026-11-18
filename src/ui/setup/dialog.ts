@@ -719,7 +719,7 @@ function build() {
     if (draw) preview.update(draft);
 
     const memory = safe(() => host.memory(draft), null);
-    issues = checkSetup(draft, { memory });
+    issues = checkSetup(draft, { memory, refusal: safe(() => host.refusal(draft), null) });
     drawIssues();
     memEl.textContent = memory ? `Grid: ${bytes(memory.need)} of ${bytes(memory.budget)} GPU memory` : '';
     memEl.classList.toggle('bad', !!memory && memory.need > memory.budget);

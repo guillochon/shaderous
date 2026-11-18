@@ -459,6 +459,23 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   return null;
 }
 
+/**
+ * Why a run cannot go as configured, or null: what either simulator refuses before it builds
+ * anything (src/ui/api.ts check() and the Setup dialog ask the same, so a setup they pass loads).
+ */
+export function refusal(c: SimConfig): string | null {
+  const why: [string, string | null][] = [
+    ['MHD', mhdOn(c) ? mhdUnsupported(c) : null],
+    ['Mirror symmetry', symmetryUnsupported(c)],
+    ['Comoving coordinates', cosmologyUnsupported(c)],
+    ['Shearing box', shearUnsupported(c)],
+    ['Axisymmetric run', cylindricalUnsupported(c)],
+    ['Spherical run', sphericalUnsupported(c)],
+  ];
+  const hit = why.find(([, w]) => w);
+  return hit ? `${hit[0]}: ${hit[1]}` : null;
+}
+
 export { spherical } from './spherical';
 
 /**
@@ -1304,20 +1321,8 @@ export class Sim implements Simulation {
     if (cfg.n > side) {
       throw new Error(`a uniform grid of ${cfg.n} cells per side is larger than this GPU's 3D textures allow (${side}); use the adaptive mesh`);
     }
-    if (mhdOn(cfg)) {
-      const why = mhdUnsupported(cfg);
-      if (why) throw new Error(`MHD: ${why}`);
-    }
-    const asym = symmetryUnsupported(cfg);
-    if (asym) throw new Error(`Mirror symmetry: ${asym}`);
-    const acos = cosmologyUnsupported(cfg);
-    if (acos) throw new Error(`Comoving coordinates: ${acos}`);
-    const ashear = shearUnsupported(cfg);
-    if (ashear) throw new Error(`Shearing box: ${ashear}`);
-    const acyl = cylindricalUnsupported(cfg);
-    if (acyl) throw new Error(`Axisymmetric run: ${acyl}`);
-    const asph = sphericalUnsupported(cfg);
-    if (asph) throw new Error(`Spherical run: ${asph}`);
+    const why = refusal(cfg);
+    if (why) throw new Error(why);
     const cells = gridDims(cfg).reduce((a, b) => a * b, 1);
     noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');

@@ -16,6 +16,8 @@ import { unitSystem } from './units';
 export interface CheckEnv {
   /** GPU memory the document's grid needs and what the page may take, in bytes (SetupHost.memory) */
   memory?: { need: number; budget: number } | null;
+  /** What the simulators would refuse in it as the page loads it (sim.ts refusal): an error, since it would not load */
+  refusal?: string | null;
 }
 
 /** A setup's bodies as far as they can be built from the document alone. */
@@ -255,6 +257,7 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     }
   };
   guard(() => out.push(...ruleIssues(spec)));
+  if (env.refusal) out.push({ level: 'error', text: env.refusal });
 
   // Fuel to ash burning: both are species the gas carries, and a flow with its own burning wins.
   guard(() => {

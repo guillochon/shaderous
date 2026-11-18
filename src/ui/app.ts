@@ -17,7 +17,7 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
-import { type CellProbe, configFor, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { type CellProbe, configFor, refusal, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -2405,6 +2405,17 @@ const setupHost: SetupHost = {
     const d = spec.domain ?? {};
     const [n, ndim, levels] = [d.n ?? cfg.n, d.ndim ?? cfg.ndim, d.amr ?? cfg.amrLevels];
     return { need: gridBytes(n, ndim, levels), budget: memoryBudget() };
+  },
+  refusal(spec) {
+    try {
+      const d = spec.domain ?? {};
+      const [n, ndim, levels] = [d.n ?? cfg.n, d.ndim ?? cfg.ndim, d.amr ?? cfg.amrLevels];
+      const problem = compiledFrom(spec).problem;
+      // As build() loads it: a run that cannot refine takes the uniform grid.
+      return refusal(configFor(problem, n, { ndim, amrLevels: supportsAmr(problem) ? levels : 0 }));
+    } catch {
+      return null;
+    }
   },
   grids: () => ({ res2d: RES_2D, res3d: RES_3D, uniformMax2d: uniformMax(2), uniformMax3d: uniformMax(3), maxLevels: maxAmrLevels }),
   link: linkFor,
@@ -5192,6 +5203,7 @@ const api = installApi(
       if (sim?.autoRegrid !== undefined) sim.autoRegrid = !on;
     },
     gridMemory: (spec) => setupHost.memory(spec)!,
+    refusal: (spec) => setupHost.refusal(spec),
     overlayInfo() {
       const u = units();
       const m = viewMeasure();
