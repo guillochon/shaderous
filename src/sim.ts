@@ -459,9 +459,9 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
 export { spherical } from './spherical';
 
 /**
- * Why a spherical (r, theta) run cannot go as configured, or null. The first version:
- * hydrodynamics on a uniform 2D grid, with the monopole of its own gravity and point masses at
- * the origin (docs/numerics.md section 22).
+ * Why a spherical (r, theta) run cannot go as configured, or null: hydrodynamics in 2D, on the
+ * uniform grid or on blocks (per-block timesteps included), with the monopole of its own gravity
+ * and point masses at the origin (docs/numerics.md section 22).
  */
 export function sphericalUnsupported(c: SimConfig): string | null {
   if (c.problem.geometry !== 'spherical') return null;
