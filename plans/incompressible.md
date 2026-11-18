@@ -673,9 +673,19 @@ face, obstacles, inflows, viscosity and driving: `SimConfig.pressure`, the optio
   (`PSPLIT`, with the lagged gradient), update (advective flux), source, coefficient
   coarsening, V-cycles, correct. No merged gravity kick (gravity is refused).
 - 4.6 as built: coefficient textures per level, walls as $`\beta = 0`$, 2D levels one cell
-  deep with one-cell-deep workgroups, the mean fixed on the coarsest level where no face is
-  open. Open faces hold $`p = 0`$. **No convergence gate**: a fixed number of cycles (4),
-  warm-started. The memory budget (`gpu/memory.ts`) does not count the solver's textures yet.
+  deep with one-cell-deep workgroups, the coarsest level (at most 16 cells) solved in one
+  invocation with its mean fixed where no face is open. Open faces hold $`p = 0`$. The cycles
+  are a fixed number (3), warm-started, and the residual after them is tallied against the
+  tolerance (`PressureSolver.stats()`). **The gate of 4.6 was built and taken out:** indirect
+  dispatches sized on the GPU cost as much turned down as taken (each is validated
+  separately), so a cap of 8 cycles made every step cost 8; and a V-cycle's cost on these
+  grids is its passes, not its cells. The memory budget (`gpu/memory.ts`) does not count the
+  solver's textures yet.
+- **A uniform field (the liquid's part of 2b)** is in: the kick is formed on the faces in the
+  source and correction passes, a wall's face pressure is carried half a cell down the field,
+  the predictor's lagged gradient likewise, and the solved pressure starts from $`p(\rho)`$.
+  `psplit-balance`: a balanced column holds at Mach $`1.2\times10^{-6}`$; one started at uniform
+  density settles to $`6\times10^{-5}`$ with the expected density drop to $`7\times10^{-5}`$.
 - The timestep's ceiling is a division of the sound speed by `acousticCfl` (default 1000),
   not a separate limit, and there is no pressure-acceleration limit.
 
@@ -696,11 +706,11 @@ directly), `psplit-conservation` as its own test (it is inside `psplit-gresho`),
 
 **Open, in the order I would take them:**
 
-1. A convergence gate and a residual diagnostic (4.6). Four cycles were enough for every test
-   here, but nothing reports when they are not.
-2. Wall-clock cost on small grids: the V-cycle's many small passes dominate below about
-   $`256^2`$. Fewer levels in 2D, or one pass for the coarse levels, would help.
-3. Gravity (a uniform field first), then species with the corrected mass flux.
+1. The residual tally is read only by tests: show it in the status line.
+2. Wall-clock cost on small grids: a V-cycle is about 56 passes at $`128^2`$ (it was 99 before
+   the coarsest level became one invocation). Merging the residual and restriction passes
+   would take another tenth off.
+3. Species with the corrected mass flux; point masses.
 4. The ideal gas, if item 3 of 4.2.1 is resolved.
 5. Second order in time.
 

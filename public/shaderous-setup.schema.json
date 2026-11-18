@@ -669,9 +669,16 @@
     "pressureCycles": {
      "type": "integer",
      "title": "Pressure V-cycles",
-     "description": "Implicit pressure: multigrid V-cycles per step. More converge the pressure further, at more cost",
+     "description": "Implicit pressure: multigrid V-cycles per step (warm-started). More converge the pressure further, at more cost",
      "minimum": 1,
      "maximum": 16
+    },
+    "pressureTol": {
+     "type": "number",
+     "title": "Pressure tolerance",
+     "description": "Implicit pressure: the residual of the pressure equation after a step’s V-cycles, relative to its largest right-hand side, above which the step is counted as unconverged",
+     "minimum": 1e-8,
+     "maximum": 1
     },
     "acousticCfl": {
      "type": "number",

@@ -3,14 +3,16 @@
 // (pressure/common.wgsl). V-cycles with red-black Gauss-Seidel smoothing, restriction by the
 // average of the children and trilinear prolongation, in 3D or, with one-layer levels, 2D.
 // Beside gravity/multigrid.ts, from which it differs by its coefficients (walls and obstacles
-// are faces with beta = 0, carried to every level by coarsening), its 2D form, and the mean it
-// fixes on the coarsest level where no face of the box is open.
+// are faces with beta = 0, carried to every level by coarsening), its 2D form, and its coarsest
+// level: a few cells, solved in one invocation, with the mean fixed where no face of the box is
+// open.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, tex3d } from '../gpu/device';
 
 const PRE = 2; // smoothing sweeps before restriction
 const POST = 2; // and after prolongation
-const COARSE = 16; // sweeps on the coarsest level
+/** The coarsest level has at most this many cells: one invocation solves it (pressure/coarse_solve.wgsl). */
+const COARSEST_CELLS = 16;
 
 /** How the solve sees a face of the box (pressure/common.wgsl). */
 export const PF_PERIODIC = 0;
@@ -42,9 +44,16 @@ export class PressureSolver {
   private pRestrict!: GPUComputePipeline;
   private pCoarsen!: GPUComputePipeline;
   private pProlong!: GPUComputePipeline;
-  private pFix!: GPUComputePipeline;
-  private gFix!: GPUBindGroup;
+  private pCoarsest!: GPUComputePipeline;
+  private gCoarsest!: GPUBindGroup;
   private uniforms: GPUBuffer[] = [];
+  // Where each solve ended (pressure/measure.wgsl, pressure/tally.wgsl).
+  private pMeasure!: GPUComputePipeline;
+  private gMeasure!: GPUBindGroup;
+  private pTally!: GPUComputePipeline;
+  private gTally!: GPUBindGroup;
+  private res!: GPUBuffer;
+  private tallies!: GPUBuffer;
 
   /** The solved pressure on the grid. */
   get p(): GPUTexture {
@@ -63,13 +72,15 @@ export class PressureSolver {
     const flat = dims[2] === 1;
     s.wz = flat ? 1 : 4;
     const k = { PWZ: s.wz };
-    [s.pSmooth, s.pResidual, s.pRestrict, s.pCoarsen, s.pProlong, s.pFix] = await Promise.all([
+    [s.pSmooth, s.pResidual, s.pRestrict, s.pCoarsen, s.pProlong, s.pCoarsest, s.pMeasure, s.pTally] = await Promise.all([
       computePipeline(device, assemble('pressure/smooth.wgsl'), 'pressure smooth', k),
       computePipeline(device, assemble('pressure/residual.wgsl'), 'pressure residual', k),
       computePipeline(device, assemble('pressure/restrict.wgsl'), 'pressure restrict', k),
       computePipeline(device, assemble('pressure/coarsen.wgsl'), 'pressure coarsen', k),
       computePipeline(device, assemble('pressure/prolong.wgsl'), 'pressure prolong', k),
-      computePipeline(device, assemble('pressure/coarse_fix.wgsl'), 'pressure mean'),
+      computePipeline(device, assemble('pressure/coarse_solve.wgsl'), 'pressure coarsest level'),
+      computePipeline(device, assemble('pressure/measure.wgsl'), 'pressure residual measure', k),
+      computePipeline(device, assemble('pressure/tally.wgsl'), 'pressure solve tally'),
     ]);
     const fixMean = [...lo, ...hi].every((f, i) => f !== PF_OPEN || (flat && i % 3 === 2)) ? 1 : 0;
     const uniform = (d: readonly number[], color: number, level: number, hl: number) => {
@@ -84,8 +95,10 @@ export class PressureSolver {
     };
     s.rho0 = tex3d(device, dims[0], 'r32float', 'pressure rho0', dims[2], dims[1]);
     const shortest = (d: readonly number[]) => Math.min(d[0], d[1], flat ? Infinity : d[2]);
+    const cells = (d: readonly number[]) => d[0] * d[1] * d[2];
     const v = (t: GPUTexture) => t.createView();
-    for (let l = 0, d: [number, number, number] = [dims[0], dims[1], dims[2]], hl = h; shortest(d) >= 2; l++, d = [d[0] >> 1, d[1] >> 1, flat ? 1 : d[2] >> 1], hl *= 2) {
+    // Levels halve until one has at most COARSEST_CELLS cells (or two along its shortest axis).
+    for (let l = 0, d: [number, number, number] = [dims[0], dims[1], dims[2]], hl = h; l === 0 || (shortest(d) >= 2 && cells(s.levels[l - 1].dims) > COARSEST_CELLS); l++, d = [d[0] >> 1, d[1] >> 1, flat ? 1 : d[2] >> 1], hl *= 2) {
       const uni = [0, 1].map((color) => uniform(d, color, l, hl));
       const mk = (name: string, format: GPUTextureFormat = 'r32float') => tex3d(device, d[0], format, `pressure ${name} L${l}`, d[2], d[1]);
       const lev: Level = { dims: [...d], h: hl, p: mk('p'), rhs: mk('rhs'), res: mk('res'), coef: mk('coef', 'rgba32float'), smooth: [], residual: null as unknown as GPUBindGroup };
@@ -99,8 +112,15 @@ export class PressureSolver {
         fine.prolong = bindGroup(device, s.pProlong, { 0: uniform(fine.dims, 0, l - 1, fine.h), 1: v(lev.p), 2: v(fine.p), 3: v(fine.coef) });
       }
       s.levels.push(lev);
-      s.gFix = bindGroup(device, s.pFix, { 0: uni[0], 1: v(lev.p), 2: v(lev.rhs), 3: v(lev.coef) });
+      s.gCoarsest = bindGroup(device, s.pCoarsest, { 0: uni[0], 1: v(lev.p), 2: v(lev.rhs), 3: v(lev.coef) });
     }
+    const buffer = (n: number, usage: number, label: string) => device.createBuffer({ label, size: 4 * n, usage });
+    s.res = buffer(2, GPUBufferUsage.STORAGE, 'pressure residual');
+    s.tallies = buffer(4, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST, 'pressure solver tallies');
+    s.setTolerance(1e-4);
+    const l0 = s.levels[0];
+    s.gMeasure = bindGroup(device, s.pMeasure, { 0: s.uniforms[0], 1: v(l0.p), 2: v(l0.rhs), 3: v(l0.coef), 4: s.res });
+    s.gTally = bindGroup(device, s.pTally, { 0: s.res, 1: s.tallies });
     return s;
   }
 
@@ -115,6 +135,11 @@ export class PressureSolver {
         pass.setBindGroup(0, g);
         this.dispatch(pass, lev.dims, true);
       }
+  }
+
+  /** The relative residual above which a solve counts as unconverged (stats). */
+  setTolerance(tol: number) {
+    this.device.queue.writeBuffer(this.tallies, 0, new Float32Array([tol]));
   }
 
   /** The coarse levels' coefficients from the finest level's, which the source pass has just written. */
@@ -138,9 +163,8 @@ export class PressureSolver {
       pass.setBindGroup(0, L[l + 1].restrict!);
       this.dispatch(pass, L[l + 1].dims);
     }
-    this.smooth(pass, L[last], COARSE);
-    pass.setPipeline(this.pFix);
-    pass.setBindGroup(0, this.gFix);
+    pass.setPipeline(this.pCoarsest);
+    pass.setBindGroup(0, this.gCoarsest);
     pass.dispatchWorkgroups(1);
     for (let l = last - 1; l >= 0; l--) {
       pass.setPipeline(this.pProlong);
@@ -148,6 +172,29 @@ export class PressureSolver {
       this.dispatch(pass, L[l].dims);
       this.smooth(pass, L[l], POST);
     }
+  }
+
+  /** A solve: `cycles` V-cycles, then a measurement of where it ended (pressure/tally.wgsl). */
+  encodeSolve(pass: GPUComputePassEncoder, cycles: number) {
+    for (let c = 0; c < cycles; c++) this.encodeVCycle(pass);
+    pass.setPipeline(this.pMeasure);
+    pass.setBindGroup(0, this.gMeasure);
+    this.dispatch(pass, this.levels[0].dims);
+    pass.setPipeline(this.pTally);
+    pass.setBindGroup(0, this.gTally);
+    pass.dispatchWorkgroups(1);
+  }
+
+  /** Since the solver was made: solves, the last one's relative residual, and how many ended above the tolerance. */
+  async stats(): Promise<{ solves: number; residual: number; unconverged: number }> {
+    const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = this.device.createCommandEncoder();
+    enc.copyBufferToBuffer(this.tallies, 0, buf, 0, 16);
+    this.device.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const u = new Uint32Array(buf.getMappedRange().slice(0));
+    buf.destroy();
+    return { solves: u[2], residual: new Float32Array(u.buffer)[1], unconverged: u[3] };
   }
 
   /** Residual of the current pressure on the finest level, left in levels[0].res. */
@@ -177,6 +224,6 @@ export class PressureSolver {
   destroy() {
     for (const l of this.levels) for (const t of [l.p, l.rhs, l.res, l.coef]) t.destroy();
     this.rho0.destroy();
-    for (const b of this.uniforms) b.destroy();
+    for (const b of [...this.uniforms, this.res, this.tallies]) b.destroy();
   }
 }

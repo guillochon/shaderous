@@ -166,7 +166,8 @@ by `npm run gen`.
 | `limiter` | Settings | Limiter: koren, mc, vanleer, minmod. How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
 | `cfl` | Settings | CFL number. Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
 | `psplit` | Settings | Pressure: explicit, implicit. How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid |
-| `pcycles` | Settings | Pressure V-cycles. Implicit pressure: multigrid V-cycles per step. More converge the pressure further, at more cost |
+| `pcycles` | Settings | Pressure V-cycles. Implicit pressure: multigrid V-cycles per step (warm-started). More converge the pressure further, at more cost |
+| `ptol` | Settings | Pressure tolerance. Implicit pressure: the residual of the pressure equation after a step’s V-cycles, relative to its largest right-hand side, above which the step is counted as unconverged |
 | `acfl` | Settings | Acoustic steps per step. Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped |
 | `dampr` | Settings | Damping from r. Radius from the box center where the damping zone starts |
 | `damprate` | Settings | Damping rate. How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off |

@@ -51,12 +51,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let lo = pface(c, a, false);
     var fh = 0.0;
     var fl = 0.0;
-    if (hi.kind == FK_GAS) { fh = 0.5 * (ms[a] + textureLoad(U1S, hi.q, 0)[a + 1]); }
+    // A uniform field's kick is the faces': dt g times the mean of the two cells' densities,
+    // which is what the pressure difference across the face balances (pressure/correct.wgsl).
+    let kg = dt * P.gext[a];
+    if (hi.kind == FK_GAS) { fh = 0.5 * (ms[a] + textureLoad(U1S, hi.q, 0)[a + 1]) + kg * 0.5 * (rho + textureLoad(U1N, hi.q, 0).x); }
     if (hi.kind == FK_INLET) { fh = textureLoad(U1S, hi.q, 0)[a + 1]; }
-    if (hi.kind == FK_OPEN) { fh = open_mom(ms[a], true, hi.only); }
-    if (lo.kind == FK_GAS) { fl = 0.5 * (textureLoad(U1S, lo.q, 0)[a + 1] + ms[a]); }
+    if (hi.kind == FK_OPEN) { fh = open_mom(ms[a] + kg * rho, true, hi.only); }
+    if (lo.kind == FK_GAS) { fl = 0.5 * (textureLoad(U1S, lo.q, 0)[a + 1] + ms[a]) + kg * 0.5 * (textureLoad(U1N, lo.q, 0).x + rho); }
     if (lo.kind == FK_INLET) { fl = textureLoad(U1S, lo.q, 0)[a + 1]; }
-    if (lo.kind == FK_OPEN) { fl = open_mom(ms[a], false, lo.only); }
+    if (lo.kind == FK_OPEN) { fl = open_mom(ms[a] + kg * rho, false, lo.only); }
     div += fh - fl;
     beta[a] = select(0.0, 1.0, hi.kind == FK_GAS || hi.kind == FK_OPEN);
   }

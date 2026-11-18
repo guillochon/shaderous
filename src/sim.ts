@@ -166,8 +166,13 @@ export interface SimConfig {
    * equation of state on a uniform grid (implicitUnsupported).
    */
   pressure: 'explicit' | 'implicit';
-  /** Implicit pressure: multigrid V-cycles per step (warm-started). */
+  /**
+   * Implicit pressure: the multigrid V-cycles a step takes (warm-started), and the residual,
+   * relative to the largest right-hand side, above which a step's solve is counted as
+   * unconverged (pressure/tally.wgsl).
+   */
   pressureCycles: number;
+  pressureTol: number;
   /**
    * Implicit pressure: the most acoustic steps one step may span. The sound speed enters the
    * timestep divided by this, which is what bounds the step of a liquid at rest.
@@ -401,7 +406,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     gravEnergyFlux: problem.geometry !== 'spherical',
     wellBalanced: true,
     pressure: 'explicit',
-    pressureCycles: 4,
+    pressureCycles: 3,
+    pressureTol: 1e-4,
     acousticCfl: 1000,
     amrLevels: 0,
     amrBudget: 0,
@@ -521,7 +527,8 @@ export function implicitUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid') return 'it is built for the liquid equation of state only, so far';
   if (c.amrLevels > 0) return 'it is not available on the adaptive mesh yet';
   if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'it is not available in axisymmetric or spherical runs';
-  if (c.gravity !== 'off' || uniformField(c).some((g) => g !== 0) || c.problem.masses) return 'gravity is not available with it yet';
+  // (A uniform field is the pressure passes' own: pressure/correct.wgsl.)
+  if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available with it yet';
   if (c.problem.rotation || c.problem.shear || c.problem.frame) return 'rotating frames and shearing boxes are not available with it';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
   if ((c.problem.species?.length ?? 0) > 0) return 'species are not available with it yet (the correction changes the density they ride on)';
@@ -1301,6 +1308,10 @@ export class Sim implements Simulation {
   private pPsCorrect?: GPUComputePipeline;
   private gPsSource: GPUBindGroup[] = [];
   private gPsCorrect: GPUBindGroup[] = [];
+  /** The solved pressure is still to be started from the state's (pressure/init.wgsl): after a reset. */
+  private prsFresh = true;
+  private pPsInit?: GPUComputePipeline;
+  private gPsInit: GPUBindGroup[] = [];
   private pPredict: RegionPass | null = null;
   private pField!: GPUComputePipeline;
   private pBhDrift!: GPUComputePipeline;
@@ -1522,11 +1533,14 @@ export class Sim implements Simulation {
     if (implicitPressure(c)) {
       const kind = (b: number) => (b === PERIODIC ? PF_PERIODIC : b === OUTFLOW || b === OUTFLOW_ONLY ? PF_OPEN : PF_CLOSED);
       this.prs ??= await PressureSolver.create(d, [this.nx, this.ny, this.nz], this.dx, c.bcLo.map(kind), c.bcHi.map(kind));
-      [this.pPsSource, this.pPsCorrect] = await Promise.all([
+      [this.pPsSource, this.pPsCorrect, this.pPsInit] = await Promise.all([
         computePipeline(d, assemble('pressure/source.wgsl', slots), 'pressure source'),
         computePipeline(d, assemble('pressure/correct.wgsl', slots), 'pressure correct'),
+        computePipeline(d, assemble('pressure/init.wgsl', slots), 'pressure start'),
       ]);
       const prs = this.prs;
+      this.gPsInit = [0, 1].map((p) => bindGroup(d, this.pPsInit!, { 0: this.params, 1: v(this.state[p][0]), 2: v(prs.p), ...k }));
+      prs.setTolerance(c.pressureTol);
       this.gPsSource = [0, 1].map((p) =>
         bindGroup(d, this.pPsSource!, {
           0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[1 - p][0]), 4: v(this.state[1 - p][1]),
@@ -1684,11 +1698,13 @@ export class Sim implements Simulation {
       sources: this.nSources > 0,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
+    this.prs?.setTolerance(c.pressureTol);
     this.onParams?.();
   }
 
   /** Load the problem's initial conditions and solve for the initial potential. */
   reset() {
+    this.prsFresh = true;
     const c = this.cfg;
     const n = this.n;
     const { nx, ny, nz } = this;
@@ -2041,6 +2057,12 @@ export class Sim implements Simulation {
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = beginPass(enc);
+      if (this.prs && this.prsFresh) {
+        pass.setPipeline(this.pPsInit!);
+        pass.setBindGroup(0, this.gPsInit[p]);
+        this.dispatch(pass);
+        this.prsFresh = false;
+      }
       this.encodeRates(pass, p);
       this.redDt.encode(pass);
       pass.setPipeline(this.pClock);
@@ -2089,7 +2111,7 @@ export class Sim implements Simulation {
         pass.setBindGroup(0, this.gPsSource[p]);
         this.dispatch(pass);
         this.prs.encodeCoarsen(pass);
-        for (let v = 0; v < this.cfg.pressureCycles; v++) this.prs.encodeVCycle(pass);
+        this.prs.encodeSolve(pass, this.cfg.pressureCycles);
         pass.setPipeline(this.pPsCorrect!);
         pass.setBindGroup(0, this.gPsCorrect[p]);
         this.dispatch(pass);

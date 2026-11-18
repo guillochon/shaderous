@@ -75,7 +75,9 @@ async function measure(sim: Sim) {
   scale *= sim.cfg.ndim === 2 ? (sim.cfg.problem.box / sim.n) ** 2 : (sim.cfg.problem.box / sim.n) ** 3;
   const steps = await sim.runToEnd(64, 1e7);
   const d1 = await sim.diagnostics();
+  const solve = (await sim.prs?.stats()) ?? { solves: 0, residual: 0, unconverged: 0 };
   return {
+    unconverged: solve.unconverged / Math.max(solve.solves, 1),
     kept: d1.eKin / d0.eKin, steps,
     dev: Math.max(Math.abs(d1.ranges[0][0] - 1), Math.abs(d1.ranges[0][1] - 1)),
     mass: Math.abs(d1.mass / d0.mass - 1),
@@ -176,7 +178,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-gresho',
     name: 'Implicit pressure: liquid Gresho vortex at Mach 0.1, 0.01 and 0.001 (2D 64^2)',
     criterion:
-      'To t = 2 the three runs take the same number of steps (to 2%), under a tenth of the explicit scheme\'s at Mach 0.1; each keeps at least the kinetic energy the explicit scheme keeps at Mach 0.1 and gains none, and the same as the others to 0.002; the density stays within 2 M^2 of the reference; mass is conserved to 2e-6 and each momentum component to 1e-6 of the sum of |momentum|',
+      'To t = 2 the three runs take the same number of steps (to 2%), under a tenth of the explicit scheme\'s at Mach 0.1; each keeps at least the kinetic energy the explicit scheme keeps at Mach 0.1 and gains none, and the same as the others to 0.002; the density stays within 2 M^2 of the reference; mass is conserved to 2e-6 and each momentum component to 1e-6 of the sum of |momentum|; fewer than 2% of the steps\' solves (3 V-cycles each) end above the tolerance of 1e-4',
     async run(gpu) {
       const gresho = problemById('gresho');
       const m: Record<string, number> = {};
@@ -193,8 +195,9 @@ export const PSPLIT_TESTS: TestDef[] = [
         m[`mach_${mach}_density_deviation_over_mach2`] = r.dev / (mach * mach);
         m[`mach_${mach}_mass_drift`] = r.mass;
         m[`mach_${mach}_momentum_drift`] = r.mom;
+        m[`mach_${mach}_unconverged_fraction`] = r.unconverged;
         pass &&= r.kept < 1 && r.kept >= explicit.kept && Math.abs(r.kept - runs[0].kept) < 0.002 && Math.abs(r.steps - runs[0].steps) <= 0.02 * runs[0].steps;
-        pass &&= r.dev < 2 * mach * mach && r.mass < 2e-6 && r.mom < 1e-6;
+        pass &&= r.dev < 2 * mach * mach && r.mass < 2e-6 && r.mom < 1e-6 && r.unconverged < 0.02;
       }
       pass &&= runs[0].steps < 0.1 * explicit.steps;
       return { pass, metrics: m };
@@ -284,6 +287,42 @@ export const PSPLIT_TESTS: TestDef[] = [
         };
         return { pass: Math.abs(period / 1.43 - 1) < 0.1 && m.vy_min < -0.2 && m.vy_max > 0.2 && m.floored === 0 && m.density_deviation < 0.05, metrics: m };
       });
+    },
+  },
+  {
+    id: 'psplit-balance',
+    name: 'Implicit pressure: a liquid column in a uniform field, between walls (2D 64^2)',
+    criterion:
+      'A column whose pressure differences obey the trapezoid rule p[j+1] - p[j] = -g dx (rho[j] + rho[j+1]) / 2 (g = 1, sound speed 4, so the density falls by 6% up the box) stays at rest: after t = 2, 60 sound crossings in a handful of steps, its largest Mach number is below 1e-5. A column that starts at uniform density instead settles into balance: by t = 20 its largest Mach number is below 1e-3 and the density difference between its bottom and top rows is within 2% of g box / c^2. Mass is conserved to 2e-6 in both',
+    async run(gpu) {
+      const n = 64;
+      const c0 = 4;
+      const column = (balanced: boolean): Problem => ({
+        id: 'liquid-column', label: 'Liquid column', blurb: '', eos: 'liquid', eosParams: { liqRho: 1, liqC: c0 },
+        bcLo: [0, 2, 0], bcHi: [0, 2, 0], gravity: 'off', G: 1, box: 1, tEnd: 2, supports2d: true,
+        gext: () => [0, -1, 0],
+        init: (cells) => {
+          const a = 1 / cells / (2 * c0 * c0); // g dx / 2 c^2
+          const q = (1 - a) / (1 + a);
+          return (_x, y) => ({ rho: balanced ? Math.pow(q, Math.round((y + 0.5) * cells - 0.5)) : 1, vx: 0, vy: 0, vz: 0, p: 0, s: 0 });
+        },
+      });
+      const run = (balanced: boolean, tEnd: number) =>
+        withSim(gpu, column(balanced), n, { ndim: 2, tEnd, pressure: 'implicit', acousticCfl: 50 }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd(64, 1e6);
+          const d = await sim.diagnostics();
+          const { u1 } = await sim.readState();
+          return { mach: d.maxMach, steps, mass: Math.abs(d.mass / d0.mass - 1), drop: u1[0] - u1[4 * n * (n - 1)] };
+        });
+      const still = await run(true, 2);
+      const settled = await run(false, 20);
+      const want = (1 - 1 / n) / (c0 * c0);
+      const m = {
+        balanced_max_mach: still.mach, balanced_steps: still.steps, balanced_mass_drift: still.mass,
+        settled_max_mach: settled.mach, settled_steps: settled.steps, settled_mass_drift: settled.mass, settled_density_drop_over_expected: settled.drop / want,
+      };
+      return { pass: still.mach < 1e-5 && settled.mach < 1e-3 && Math.abs(m.settled_density_drop_over_expected - 1) < 0.02 && still.mass < 2e-6 && settled.mass < 2e-6, metrics: m };
     },
   },
   {

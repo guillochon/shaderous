@@ -539,6 +539,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   over('cfl', ph.cfl);
   over('pressure', ph.pressure);
   over('pressureCycles', ph.pressureCycles);
+  over('pressureTol', ph.pressureTol);
   over('acousticCfl', ph.acousticCfl);
   over('vcycles', ph.vcycles);
   over('gravEnergyFlux', ph.gravEnergyFlux);

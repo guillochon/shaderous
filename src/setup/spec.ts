@@ -118,6 +118,7 @@ export interface PhysicsSpec {
   /** how the pressure acts: in the explicit fluxes, or solved for each step (SimConfig.pressure) */
   pressure?: 'explicit' | 'implicit';
   pressureCycles?: number;
+  pressureTol?: number;
   acousticCfl?: number;
   floors?: { rho?: number; p?: number };
   fluff?: { rho?: number; u?: number; v?: number; va?: number };

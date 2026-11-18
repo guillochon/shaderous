@@ -306,6 +306,11 @@
    "about": "Pressure V-cycles"
   },
   {
+   "key": "ptol",
+   "group": "settings",
+   "about": "Pressure tolerance"
+  },
+  {
    "key": "acfl",
    "group": "settings",
    "about": "Acoustic steps per step"

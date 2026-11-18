@@ -517,15 +517,20 @@ step is then:
 4. *Source* (`pressure/source.wgsl`): the right-hand side, from the old density and the
    divergence of face momenta (each the mean of its two cells'), and the finest level's
    coefficients.
-5. *Solve* (`pressure/multigrid.ts`): V-cycles, 4 by default, warm-started. Red-black
+5. *Solve* (`pressure/multigrid.ts`): V-cycles, 3 by default, warm-started. Red-black
    Gauss-Seidel, restriction by averaging, trilinear prolongation, as for gravity (§13), with
    three differences. The operator is $`\alpha p - \nabla\cdot(\beta\nabla p)`$ with a texel
    of coefficients per cell on every level: a face nothing crosses (a wall of the box, the
    surface of an obstacle, the face of an inlet) has $`\beta = 0`$, and a coarse face takes the
    mean of the fine faces that tile it, so obstacles reach every level with no mask. The
-   levels are one cell deep in 2D. And where no face of the box is open, the coarsest level
-   sets the mean of the pressure from the sum of the equation, which Gauss-Seidel would only
-   creep toward when $`\alpha h^2`$ is small. An open (outflow) face holds $`p = 0`$.
+   levels are one cell deep in 2D. And the coarsest level (at most 16 cells) is solved in one
+   invocation, which also, where no face of the box is open, sets the mean of the pressure from
+   the sum of the equation: Gauss-Seidel would only creep toward it when $`\alpha h^2`$ is
+   small. An open (outflow) face holds $`p = 0`$. After the cycles the residual is measured
+   and tallied against a tolerance ($`10^{-4}`$ of the largest right-hand side), to be read on
+   request; the number of cycles is fixed, because sizing later cycles from the residual by
+   indirect dispatch (as the block gravity solver does) cost more in passes than it saved in
+   cells on every grid tried.
 6. *Correct* (`pressure/correct.wgsl`): the momentum takes the difference of face pressures
    and the density the difference of face mass fluxes $`\bar m^*_f - \Delta t\,\partial_n p'`$,
    so mass and momentum are conserved to round-off. The density the explicit update advected is
@@ -548,13 +553,23 @@ damped to 0.12. The solver on its own reaches a manufactured solution to $`10^{-
 cycles from zero, with an obstacle and variable coefficients, cutting the residual 5 times a
 cycle in 2D.
 
-Limits. The liquid only, on a uniform Cartesian grid, without gravity, species, cooling or
-frames (each is refused with the reason). First order in time. The number of V-cycles is
-fixed: there is no convergence gate yet. And on small grids the step costs more than it
-saves: the $`128^2`$ cavity at Reynolds number 100 takes a third of the explicit scheme's steps
-(viscosity sets its step, not the flow) and four times its wall-clock time, because a
-V-cycle's many small passes cost more than its cells. It pays where the Mach number is low or
-the grid large.
+*A uniform field.* Its kick is not the update's but the correction's, formed on the faces:
+a face's mass flux takes $`\Delta t\,g`$ times the mean of its two cells' densities, the cell's
+momentum the mean of its two faces' kicks, and a wall's face pressure is the cell's carried
+half a cell down the field. A column whose pressure differences obey the trapezoid rule
+$`p_{j+1} - p_j = g\,\Delta x\,(\rho_j + \rho_{j+1})/2`$ then has no mass flux and no change of
+momentum, to round-off: it holds at a Mach number of $`10^{-6}`$ through 60 sound crossings,
+and a column started at uniform density settles to that balance (`psplit-balance`). The
+solved pressure starts from the state's, $`p(\rho)`$, so the first step is balanced too.
+
+Limits. The liquid only, on a uniform Cartesian grid, without self-gravity, point masses,
+species, cooling or frames (each is refused with the reason). First order in time. And on
+small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
+takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
+times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
+step costs about 11 explicit steps at $`512^2`$ and 4 at $`128^3`$ (three cycles; timed in
+batches of 20 steps, so roughly), against the $`1 + 1/M`$ it replaces: it pays below a Mach
+number of about 0.1 in 2D and 0.3 in 3D.
 
 ## 10. Optically thin cooling and heating
 
@@ -2238,7 +2253,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 136 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 137 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

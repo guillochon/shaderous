@@ -287,7 +287,8 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.limiter` | Limiter | `koren`, `mc`, `vanleer`, `minmod`. Default `koren` | How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
 | `physics.cfl` | CFL number | a number, 0.05 to 1. Default `0.8` | Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
 | `physics.pressure` | Pressure | `explicit`, `implicit`. Default `explicit` | How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid |
-| `physics.pressureCycles` | Pressure V-cycles | a whole number, 1 to 16. Default `4` | Implicit pressure: multigrid V-cycles per step. More converge the pressure further, at more cost |
+| `physics.pressureCycles` | Pressure V-cycles | a whole number, 1 to 16. Default `3` | Implicit pressure: multigrid V-cycles per step (warm-started). More converge the pressure further, at more cost |
+| `physics.pressureTol` | Pressure tolerance | a number, 1e-8 to 1. Default `0.0001` | Implicit pressure: the residual of the pressure equation after a step’s V-cycles, relative to its largest right-hand side, above which the step is counted as unconverged |
 | `physics.acousticCfl` | Acoustic steps per step | a number, 1 to 1000000. Default `1000` | Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped |
 
 **`mesh`**

@@ -24,6 +24,7 @@
 #include "hydro/prim.wgsl"
 #include "hydro/fluff.wgsl"
 #include <frame>
+#include <psplit>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -297,7 +298,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   // always adds its energy in kick form (gravity/ext.wgsl).
   var kick = vec3<f32>(0.0);
   var ekick = 0.0;
-  if (has_gravity() || ext_on()) {
+  // (With implicit pressure the uniform field's kick is the pressure passes': it has to be
+  // formed on the faces, where the pressure difference that balances it is. pressure/correct.wgsl.)
+  if (!PSPLIT && (has_gravity() || ext_on())) {
     let kx = 0.5 * clock.dt * u1.x * ext_accel(cell_pos(c));
     kick = 0.5 * clock.dt * u1.x * g_self(c) + kx;
     let ke = select(kx, kick, !flux_work);
