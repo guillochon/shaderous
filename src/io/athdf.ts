@@ -116,8 +116,11 @@ export async function writeAthdf(s0: Snapshot, h5?: H5, gzip = 0): Promise<Uint8
   f.create_attribute('NumCycles', s.steps, null, '<i4');
   f.create_attribute('Time', s.time, null, '<f4');
   // Strings are fixed-length byte strings, as Athena++ writes them: yt decodes them as bytes.
-  f.create_attribute('Coordinates', cyl ? 'cylindrical' : 'cartesian', null, cyl ? 'S11' : 'S9');
-  for (let a = 0; a < 3; a++) f.create_attribute(`RootGridX${a + 1}`, new Float32Array([s.lo[a], s.hi[a], 1]), [3], '<f4');
+  // (A spherical run's axes are Athena++'s spherical_polar order (r, theta, phi) as they are.)
+  const sph = s0.geometry === 'spherical';
+  const coords = sph ? 'spherical_polar' : cyl ? 'cylindrical' : 'cartesian';
+  f.create_attribute('Coordinates', coords, null, `S${coords.length}`);
+  for (let a = 0; a < 3; a++) f.create_attribute(`RootGridX${a + 1}`, new Float32Array([s.lo[a], s.hi[a], a === 0 && sph ? (s.x1rat ?? 1) : 1]), [3], '<f4');
   f.create_attribute('RootGridSize', new Int32Array(s.rootSize), [3], '<i4');
   f.create_attribute('NumMeshBlocks', nb, null, '<i4');
   f.create_attribute('MeshBlockSize', new Int32Array(s.blockSize), [3], '<i4');
@@ -138,6 +141,17 @@ export async function writeAthdf(s0: Snapshot, h5?: H5, gzip = 0): Promise<Uint8
       const x0 = s.lo[a] + s.locations[3 * b + a] * n * dx;
       for (let i = 0; i <= n; i++) faces[b * (n + 1) + i] = x0 + i * dx;
       for (let i = 0; i < n; i++) centers[b * n + i] = x0 + (i + 0.5) * dx;
+      if (sph && a < 2) {
+        // Spherical: r's faces from x1rat (a uniform grid: every block at level 0), and the volume-weighted
+        // centers Athena++ writes for r and theta.
+        const rat = s.x1rat ?? 1;
+        const ff = (i: number) => (a === 1 || rat === 1 ? x0 + i * dx : s.lo[0] * rat ** (s.locations[3 * b] * n + i));
+        for (let i = 0; i <= n; i++) faces[b * (n + 1) + i] = ff(i);
+        for (let i = 0; i < n; i++) {
+          const [l, h] = [ff(i), ff(i + 1)];
+          centers[b * n + i] = a === 0 ? (0.75 * (h ** 4 - l ** 4)) / (h ** 3 - l ** 3) : (Math.sin(h) - h * Math.cos(h) - Math.sin(l) + l * Math.cos(l)) / (Math.cos(l) - Math.cos(h));
+        }
+      }
     }
     f.create_dataset({ name: `x${a + 1}f`, data: faces, shape: [nb, n + 1], dtype: '<f4' });
     f.create_dataset({ name: `x${a + 1}v`, data: centers, shape: [nb, n], dtype: '<f4' });

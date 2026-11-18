@@ -46,7 +46,14 @@ export interface Snapshot {
    * An axisymmetric run (Problem.geometry): its x is R and its y is z, with the third velocity
    * component v_phi. Files hold it in Athena++'s cylindrical order (R, phi, z) (io/athdf.ts).
    */
-  geometry?: 'cylindrical';
+  geometry?: 'cylindrical' | 'spherical';
+  /**
+   * A spherical run (geometry 'spherical'): x is r, y is theta, the third velocity v_phi, which
+   * is Athena++'s spherical_polar order already. `lo` and `hi` are then (r_min, 0, 0) and
+   * (r_max, pi, 2 pi), and x1rat the ratio of neighboring radial cells (1 for uniform spacing).
+   * Written only: such a file is not read back.
+   */
+  x1rat?: number;
   /**
    * A snapshot captured only to be sampled at points (capture()'s lazyPressure): `press` holds
    * NaN until SnapshotSampler.prim() works a cell's out with this and keeps it. Never written

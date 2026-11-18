@@ -34,6 +34,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let c = rc.c;
   // An axisymmetric run: the cell's radius, for the predictor's geometric terms.
   if (cylindrical()) { g_cyl_r = f32(c.x) + 0.5; }
+  // A spherical run: the cell's lengths and its geometric terms.
+  if (spherical()) {
+    let sg = sph_cell(c.x, c.y);
+    g_hr = vec3<f32>(sg.h, 1.0);
+    g_sph_geo = vec2<f32>(sg.ir, sg.cot);
+  }
   g_inner = stencil_inside(c, 1);
   let q = load_q(c);
   // In 2D the layer is its own neighbor along z.

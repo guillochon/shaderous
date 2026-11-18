@@ -1,8 +1,17 @@
 # Spherical (r, θ) grids: implementation plan
 
-Status: plan only, written 2026-11-17 once axisymmetric (R, z) runs were in (coordinate plan,
-Part E). This is the "own plan" that plan's step E9 asks for. File references are to the commit
-that added this file.
+Status: built on the uniform grid (2026-11-18): S1 as per-cell ratios of the cell's lengths to
+the grid's dx (the predictor's slopes, the timestep) with the update's face weights carrying the
+rest, compiled in only for spherical runs so every other run is the same bits; S2 and S3 with
+uniform or logarithmic spacing in r, both poles, an inner sphere reflecting or open; S4 the
+monopole and point masses at the origin; S6 diagnostics with true volumes and `.athdf` written
+as `spherical_polar`. Tests `sph-rest`, `sph-conserve`, `sph-sedov`, `sph-polytrope`, `sph-bondi`
+pass (docs/numerics.md section 22, "Spherical (r, θ) runs"). Not done: blocks (S1's mesh
+refinement, S5), the Mignone slope weights (second order without them), the display mapped to
+(R, z) (it draws the native (r, θ) plane), reading such files back, and gravity's work in flux
+form (kick form is used: the flux form with the well-balanced reconstruction grew a polytrope's
+fundamental mode). Plan as written 2026-11-17 follows; file references are to the commit that
+added this file.
 
 ## What (R, z) settled, and what carries over
 

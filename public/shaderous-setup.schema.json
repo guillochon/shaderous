@@ -130,10 +130,23 @@
     "geometry": {
      "enum": [
       "cartesian",
-      "cylindrical"
+      "cylindrical",
+      "spherical"
      ],
      "title": "Geometry",
-     "description": "Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings"
+     "description": "Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings; or in (r, theta): x is then r from the inner radius to the box side, y theta from pole to pole"
+    },
+    "rMin": {
+     "type": "number",
+     "title": "Inner radius",
+     "description": "A spherical (r, theta) run: the radius of its inner face (above zero); the box side is then its outer radius",
+     "minimum": 1e-12,
+     "maximum": 1e+30
+    },
+    "logR": {
+     "type": "boolean",
+     "title": "Logarithmic in r",
+     "description": "A spherical (r, theta) run: cells spaced evenly in ln r, so that they stay about as long as they are wide, rather than evenly in r"
     },
     "bc": {
      "type": "object",

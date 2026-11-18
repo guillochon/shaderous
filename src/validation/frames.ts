@@ -11,6 +11,7 @@ import { SYM_TESTS } from './symmetry';
 import { COSMO_TESTS } from './cosmo';
 import { SHEAR_TESTS } from './shear';
 import { CYL_TESTS } from './cyl';
+import { SPH_TESTS } from './sph';
 
 const gas = (over: Partial<Problem>): Problem => ({
   id: 'frame-test', label: 'Frame test', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
@@ -237,4 +238,5 @@ export const FRAME_TESTS: TestDef[] = [
   ...COSMO_TESTS,
   ...SHEAR_TESTS,
   ...CYL_TESTS,
+  ...SPH_TESTS,
 ];

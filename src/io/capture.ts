@@ -4,6 +4,7 @@ import { AmrSim } from '../amr/amr_sim';
 import { BS } from '../amr/tree';
 import type { Problem } from '../problems';
 import { Sim, type SimConfig, type Simulation } from '../sim';
+import { spherical, sphGrid } from '../spherical';
 import { pressureOf, primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Restart, type Snapshot, type SnapshotMeta } from './snapshot';
 
 /**
@@ -127,7 +128,14 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     ...(opts.lazyPressure ? { pressureAt: pressureOf(cfg, u1, u2, X) } : {}),
     meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
     ...(cfg.problem.geometry === 'cylindrical' && cfg.ndim === 2 ? { geometry: 'cylindrical' as const } : {}),
+    ...(spherical(cfg) ? sphericalAxes(cfg) : {}),
   };
+}
+
+/** A spherical run's axes as the file has them: (r, theta, phi) (Snapshot.x1rat). */
+function sphericalAxes(cfg: SimConfig): Pick<Snapshot, 'geometry' | 'lo' | 'hi' | 'x1rat'> {
+  const g = sphGrid(cfg);
+  return { geometry: 'spherical', lo: [g.rMin, 0, 0], hi: [g.rMax, Math.PI, 2 * Math.PI], x1rat: g.dlog > 0 ? Math.exp(g.dlog) : 1 };
 }
 
 /** What to change in a configuration so the run starts from a snapshot. */

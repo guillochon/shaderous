@@ -437,7 +437,8 @@ export function compileSetup(spec: SetupSpec): Compiled {
     jeansCells: ph.jeansCells,
     supports2d: d.supports2d,
     symmetry: d.symmetric ? { axes: mirrorAxes(d.symmetric), mhd: d.symmetricField ?? false } : undefined,
-    geometry: d.geometry === 'cylindrical' ? 'cylindrical' : undefined,
+    geometry: d.geometry === 'cylindrical' || d.geometry === 'spherical' ? d.geometry : undefined,
+    sphere: d.geometry === 'spherical' ? { rMin: d.rMin ?? 0.01, log: d.logR ?? false } : undefined,
     bc2d: d.bc2d,
     wallVelocity: d.wallVelocity ? { ...d.wallVelocity } : undefined,
     fluff: fl ? { rho: fl.rho ?? 0, u: fl.u ?? 0, v: fl.v ?? 0, ...(fl.va !== undefined ? { va: fl.va } : {}) } : undefined,
@@ -507,9 +508,20 @@ export function compileSetup(spec: SetupSpec): Compiled {
     bcHi: d.bc?.hi ?? all(OUTFLOW),
     gravity: ph.gravity ?? 'off',
     G: base.G,
-    box: boxOf(spec),
+    // (A spherical run's box is its radial extent: from the inner radius to the box side.)
+    box: d.geometry === 'spherical' ? boxOf(spec) - (d.rMin ?? 0.01) : boxOf(spec),
     tEnd: cosmology && ph.cosmology?.zEnd !== undefined ? timeAtRedshift(cosmology, ph.cosmology.zEnd) : (run.tEnd ?? Infinity),
-    init: (n, eos, ndim, params) => initOf(at(params), n, eos, ndim),
+    init: (n, eos, ndim, params) => {
+      const f = initOf(at(params), n, eos, ndim);
+      if (d.geometry !== 'spherical') return f;
+      // A spherical run's cells are at (r, theta): the setup's (R, z) and velocities in (v_R, v_z, v_phi).
+      return (r, th) => {
+        const sn = Math.sin(th);
+        const cs = Math.cos(th);
+        const w = f(r * sn, r * cs, 0);
+        return { ...w, vx: w.vx * sn + w.vy * cs, vy: w.vx * cs - w.vy * sn };
+      };
+    },
     setup: spec,
   };
   // Only what the setup gives: an absent key is the Problem's own default (sim.ts configFor).

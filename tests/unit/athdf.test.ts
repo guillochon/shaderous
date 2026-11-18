@@ -92,6 +92,28 @@ describe('Athena++ HDF5 snapshots', () => {
     (await h5.ready).FS.unlink('check.athdf');
   });
 
+  it('writes a spherical run as spherical_polar, its radial faces logarithmic', async () => {
+    const cells = 4 * 4;
+    const data = Object.fromEntries(VARIABLES.map((v) => [v, new Float32Array(2 * cells).fill(1)]));
+    const rat = Math.exp(Math.log(8) / 8);
+    const s: Snapshot = {
+      ndim: 2, rootSize: [8, 4, 1], blockSize: [4, 4, 1], lo: [1, 0, 0], hi: [8, Math.PI, 2 * Math.PI], time: 0, steps: 0,
+      levels: new Int32Array(2), locations: Int32Array.from([0, 0, 0, 1, 0, 0]), data, geometry: 'spherical', x1rat: rat,
+    };
+    (await h5.ready).FS.writeFile('sph.athdf', await writeAthdf(s, h5));
+    const f = new h5wasm.File('sph.athdf', 'r');
+    expect(f.attrs.Coordinates.value).toBe('spherical_polar');
+    expect(Array.from(f.attrs.RootGridX1.value as Float32Array)).toEqual(Array.from(Float32Array.from([1, 8, rat])));
+    const x1f = (f.get('x1f') as { value: Float32Array }).value;
+    // The second block's faces go on from the first's: r = rat^4 to rat^8 = 8.
+    expect(x1f[5]).toBeCloseTo(rat ** 4, 5);
+    expect(x1f[9]).toBeCloseTo(8, 5);
+    const x2f = (f.get('x2f') as { value: Float32Array }).value;
+    expect(x2f[4]).toBeCloseTo(Math.PI, 6);
+    f.close();
+    (await h5.ready).FS.unlink('sph.athdf');
+  });
+
   it('samples the finest block that covers a point', async () => {
     const s = new SnapshotSampler(sample());
     expect(s.level(0.1, 0.5, 0.5)).toBe(0);
