@@ -25,7 +25,7 @@ Every number quoted in `paper/main.tex` comes from one of the sources below. All
 | AMR block budget in 3D | 2197 blocks, about 3 GB with gravity | same |
 | Viscosity: cost of the flux update; diffusive signal speed | 1.6 times in 2D, 1.8 times in 3D, conduction alone unmeasurable; 2.5 d D / dx | "Viscosity and conduction" |
 | Point-mass pair limit: fraction, steps per circular orbit; eccentricity-0.9 orbit over two periods | CFL / 16, about 125 steps; energy to 0.7% with the limit, 94% lost without | "Point masses" |
-| Thermal instability at t = 0.6, scale of the structure from 512^2 to 1024^2 cells | changes by 8% with conduction (kappa = 3e-4), falls by 20% without | "Cooling"; `clouds_*` metrics of the conduction test |
+| Thermal instability at t = 0.6, scale of the structure from 512^2 to 1024^2 cells | changes by 6% with conduction (kappa = 3e-4; 8% before faces took the smaller density), falls by 20% without | "Cooling"; `clouds_*` metrics of the conduction test |
 | Preset coefficients | binary nu = 1e-3; thermal instability kappa = 3e-4 | `src/problems/binary.ts`, `src/problems/thermal_instability.ts` |
 | Jeans refinement default | 16 cells | same |
 | Mesh rebuild interval | every 8 steps | "Adaptive mesh" |

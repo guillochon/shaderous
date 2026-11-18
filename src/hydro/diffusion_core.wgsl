@@ -41,11 +41,17 @@ fn visc_across(a: vec3<i32>, e: vec3<i32>, axis: i32, t: i32, vl: vec3<f32>, vr:
   return 0.25 * ((load_vel(a + tv) - load_vel(a - tv)) + (load_vel(b + tv) - load_vel(b - tv)));
 }
 
-// Density on the face between l and r; at a wall, that of the gas.
+// Density on the face between l and r: the smaller of the two; at a wall, that of the gas.
+// With the mean, a thin cell beside a dense one took the stress and heat of the dense gas: next
+// to gas 1e7 times denser its velocity and temperature diffused 5e6 times faster than nu or
+// kappa, which no timestep of hydro/diff_rate.wgsl allows for (found by tools/random-test, a
+// dense blob in 1e-6 gas). With the smaller density neither cell diffuses faster than at its
+// own density, the bound that timestep assumes. Where the density is smooth the two differ by
+// half the difference between the cells.
 fn diff_rho(l: DSide, r: DSide) -> f32 {
   if (l.solid) { return r.rho; }
   if (r.solid) { return l.rho; }
-  return 0.5 * (l.rho + r.rho);
+  return min(l.rho, r.rho);
 }
 
 // The viscous flux through the face between cell a (l) and cell a + e (r), along +axis:

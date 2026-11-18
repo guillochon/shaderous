@@ -483,7 +483,11 @@ Both are explicit fluxes from the state at the start of the step, added to each 
 Riemann flux: $`-\boldsymbol{\tau}\cdot\hat{\mathbf{n}}`$ to the momentum and
 $`-(\boldsymbol{\tau}\cdot\hat{\mathbf{n}})\cdot\mathbf{v} + \mathbf{q}\cdot\hat{\mathbf{n}}`$ to the energy. Derivatives
 along the face normal are differences of the face's two cells. Derivatives across the face
-are the mean of the centered differences in the two cells. Because they are part of the face
+are the mean of the centered differences in the two cells. The density in $`\rho\nu`$ and
+$`\kappa\rho`$ on a face is the smaller of its two cells'. With their mean, a cell of thin gas
+beside dense gas diffused as fast as the ratio of the densities times $`\nu`$ or $`\kappa`$,
+past any timestep the diffusion limit allows, and blew up. With the smaller density no cell
+diffuses faster than at its own density. Because they are part of the face
 flux, they inherit its properties: both cells of a face compute the same bits, and they are
 matched across refinement and time-bin boundaries like the hydro flux, so momentum and
 energy are conserved to round-off. On the rim of a block face on the adaptive mesh, where the
@@ -505,7 +509,7 @@ pressure decays at $`\kappa k^2(\gamma - 1)/\gamma`$ to 0.3%.
 
 In the thermal-instability problem conduction ($`\kappa = 3\times10^{-4}`$) sets the size of the
 clouds, as [Koyama & Inutsuka (2004)][Koyama2004] showed it must: the scale of the structure
-at $`t = 0.6`$ changes by 8% between $`512^2`$ and $`1024^2`$ cells, against a 20% fall without
+at $`t = 0.6`$ changes by 6% between $`512^2`$ and $`1024^2`$ cells, against a 20% fall without
 conduction.
 
 ## 12. Passive scalar and species
