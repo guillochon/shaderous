@@ -518,7 +518,9 @@ export class AmrSim implements Simulation {
   /** Bytes of one block of the atlas for a run's problem (blockBytes with its field and species). */
   static blockBytesFor(cfg: SimConfig): number {
     const groups = speciesGroups(cfg.problem);
-    return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null);
+    // Implicit pressure (amr/pressure.ts): six one-channel atlases.
+    const implicit = implicitPressure(cfg) ? 6 * 4 * PAD ** cfg.ndim : 0;
+    return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit;
   }
 
   /**

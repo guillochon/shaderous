@@ -695,8 +695,8 @@ face, obstacles, inflows, viscosity and driving: `SimConfig.pressure`, the optio
   tolerance (`PressureSolver.stats()`). **The gate of 4.6 was built and taken out:** indirect
   dispatches sized on the GPU cost as much turned down as taken (each is validated
   separately), so a cap of 8 cycles made every step cost 8; and a V-cycle's cost on these
-  grids is its passes, not its cells. The memory budget (`gpu/memory.ts`) does not count the
-  solver's textures yet.
+  grids is its passes, not its cells. The solver's textures are counted in the memory
+  estimates (`Sim.implicitBytes`, `AmrSim.blockBytesFor`).
 - **A uniform field (the liquid's part of 2b)** is in: the kick is formed on the faces in the
   source and correction passes, a wall's face pressure is carried half a cell down the field,
   the predictor's lagged gradient likewise, and the solved pressure starts from $`p(\rho)`$.

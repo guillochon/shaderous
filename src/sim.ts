@@ -1409,6 +1409,16 @@ export class Sim implements Simulation {
     return 7 * 16 + (ndim === 3 ? 4 + 3 * 4 * (8 / 7) : 0);
   }
 
+  /**
+   * GPU bytes per cell that implicit pressure adds (src/pressure): the solver's pressure,
+   * right-hand side, residual (4 each) and coefficients (16) on every multigrid level, the old
+   * density (4), and for a gas with an energy the face velocities (16).
+   */
+  static implicitBytes(cfg: SimConfig): number {
+    if (!implicitPressure(cfg)) return 0;
+    return 28 * (cfg.ndim === 3 ? 8 / 7 : 4 / 3) + 4 + (eosHasEnergy(cfg.eos) ? 16 : 0);
+  }
+
   static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
     // The tabulated white dwarf equation of state needs its table on the device (eos/helmholtz.ts).
     if (cfg.eos === 'helmholtz') await prepareHelmholtz(gpu.device);
@@ -1421,7 +1431,7 @@ export class Sim implements Simulation {
     const why = refusal(cfg);
     if (why) throw new Error(why);
     const cells = gridDims(cfg).reduce((a, b) => a * b, 1);
-    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
+    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0) + Sim.implicitBytes(cfg)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
