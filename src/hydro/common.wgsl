@@ -161,8 +161,11 @@ var<private> g_cyl_r: f32 = 0.0;
 // A spherical (r, theta) run (Problem.geometry 'spherical'): code x is r from r_min (uniform or
 // logarithmic spacing), y is theta from 0 to pi, the layer is the azimuth (v_z is v_phi). Both
 // poles are axes. The grid's dx is a reference length: every weight below is a length over it.
+// A constant (the slot <geometry>, src/sim.ts hydroSlots): elsewhere every branch on it is
+// compiled out, and Cartesian and (R, z) runs are the same bits as without it.
+#include <geometry>
 fn spherical() -> bool {
-  return P.sph.w != 0.0;
+  return SPHERICAL;
 }
 // The geometry of cell (i, j), as the update needs it, every entry a closed form of the indices
 // (docs/numerics.md section 22): face areas over (cell volume / dx), which are differences of

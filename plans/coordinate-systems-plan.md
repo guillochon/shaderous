@@ -24,7 +24,7 @@ and tested in `src/validation/{frames,symmetry,cosmo,shear,cyl}.ts`.
 | E5 step 3 self-gravity on blocks, settling in (R, z) | **not done** |
 | E6 MHD and viscosity in (R, z) | MHD done on the uniform grid (`cyl-mhd`); viscosity, resistivity and blocks with a field refused |
 | E8 tests | rest, conserve, sedov, sink, blocks, sphere, evrard, column, noh, bondi, torus, mhd |
-| E9 spherical | its own plan: [spherical-plan.md](spherical-plan.md) |
+| E9 spherical | uniform grid done ([spherical-plan.md](spherical-plan.md) S1-S4, S6 files): uniform or logarithmic in $`r`$, both poles, monopole gravity with point masses at the origin, `.athdf` as `spherical_polar`, the `blast-spherical` preset; tests rest, conserve, sedov, polytrope, bondi. Not done: blocks, a 2D Poisson solve, the display mapped to $`(R, z)`$, reading `spherical_polar` files, the Mignone slope weights on the logarithmic grid |
 
 This plan covers five additions, in the order they should be built:
 

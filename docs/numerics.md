@@ -1896,6 +1896,95 @@ its peak density to 0.3% for five orbits. Its faces are open for outflow only: o
 from outside the box, which then piled up at the mass without bound.
 
 
+### Spherical (r, θ) runs
+
+`domain.geometry: "spherical"` (with `domain.rMin`, the inner radius, and `domain.logR`) makes
+a 2D run a body of revolution about the $`z`$ axis on a grid of shells:
+
+| Code axis | Meaning |
+|---|---|
+| x | $`r`$, from $`r_\text{min} > 0`$ to the box side, evenly spaced in $`r`$ or in $`\ln r`$ |
+| y | $`\theta`$, from 0 to $`\pi`$: both poles are in the grid |
+| z (the layer) | $`\phi`$: `v_z` is $`v_\phi`$ |
+
+The cells are not the same size along the two axes, and on a logarithmic grid not from one
+shell to the next, so the grid's $`\Delta x`$ (the radial extent over the cell count) is only
+a reference length. Every pass that divides by it takes the cell's own lengths as ratios to
+it instead: $`h_r/\Delta x`$ and $`r_c\Delta\theta/\Delta x`$ scale the predictor's slopes and
+the timestep's signal rates, and the update's face weights are areas over volumes times
+$`\Delta x`$, so the update itself is the Cartesian one.
+
+- **Areas and volumes in closed forms.** $`V \propto \tfrac13\Delta(r^3)\,\Delta\cos\theta`$
+  and the face areas are differences that cancel in float32 on a fine grid (at
+  $`\Delta\ln r = 10^{-3}`$, $`r^3`$ changes by 0.3% across a cell). They are never formed as
+  such: $`\tfrac13\Delta(r^3)`$ is $`r_c^2\Delta r + \Delta r^3/12`$ on a uniform grid and
+  $`\tfrac23 r_c^3\sinh(\tfrac32\Delta)`$ on a logarithmic one, $`\Delta\cos\theta =
+  2\sin\theta_c\sin(\Delta\theta/2)`$, and the constants of the logarithmic grid
+  ($`e^{\Delta/2}`$, $`3/(2\sinh\tfrac32\Delta)`$, $`\sinh\Delta`$, $`2\sinh(\Delta/2)`$) are
+  computed in double precision on the CPU. A radial face's weight is then
+  $`(\Delta x/r_c)\,e^{\pm\Delta}\cdot3/(2\sinh\tfrac32\Delta)`$ (logarithmic) or
+  $`\rho_\pm^2/(\rho_c^2 + \tfrac1{12})`$ with $`\rho = r/\Delta x`$ (uniform); a polar
+  face's is $`\langle 1/r\rangle\Delta x\,\sin\theta_\pm/\Delta\cos\theta`$, with
+  $`\sin\theta_\pm`$ formed from the nearer pole, so that both poles' faces weigh exactly 0.
+- **Sources.** Radially $`(2p + \rho(v_\theta^2 + v_\phi^2))/r`$, in $`\theta`$
+  $`\cot\theta\,(p + \rho v_\phi^2)/r`$. The $`-\rho v_rv_\theta/r`$ of the $`\theta`$ momentum
+  and the whole source of $`v_\phi`$ are taken up by lever arms instead: the $`\theta`$ and
+  $`\phi`$ momentum fluxes through a radial face are weighed by $`r_\pm/r_c`$ besides the
+  area, and the $`\phi`$ momentum through a polar face by $`\sin\theta_\pm/\sin\theta_c`$, so
+  that $`r\rho v_\theta`$ and $`r\sin\theta\,\rho v_\phi`$ are carried in conservation form.
+  The pressure's share of each source is $`(h - w_-)\,p_- + (w_+ - h)\,p_+`$ from the two faces'
+  own pressures, $`w_\pm`$ their weights and $`h`$ the cell's $`\Delta x`$ over its length along
+  that axis. With equal face pressures it is $`(w_+ - w_-)\,p`$, the cell's exact average of
+  $`2p/r`$ (or $`p\cot\theta/r`$), which the faces' own difference cancels to rounding; with
+  them apart, the net force is $`h\,(p_- - p_+)`$, the Cartesian one. (The mean of the two face
+  pressures, which made $`(R, z)`$ well balanced, is not enough here: its net force is
+  $`\tfrac12(w_- + w_+)(p_- - p_+)`$, and $`\tfrac12(w_- + w_+)`$ is not $`h`$ in
+  $`(r, \theta)`$, by $`1/(6\rho_c^2)`$ on a uniform grid.) The rest of each source is the
+  half step's $`\rho v^2`$ times the same averages of $`1/r`$ and $`\cot\theta/r`$.
+- **Predictor:** the half step's geometric terms, $`-\rho(2v_r + \cot\theta\,v_\theta)/r`$ in
+  the density (and $`\rho c_s^2`$ times it in the pressure), $`+(v_\theta^2 + v_\phi^2)/r`$ in
+  $`v_r`$, $`(\cot\theta\,v_\phi^2 - v_rv_\theta)/r`$ in $`v_\theta`$ and
+  $`-(v_r + \cot\theta\,v_\theta)v_\phi/r`$ in $`v_\phi`$.
+- **The poles** reflect, with $`v_\theta`$ and $`v_\phi`$ odd, as the $`(R, z)`$ axis does; the
+  inner sphere is an ordinary face (reflecting, or open: outflow only for accretion).
+- **Energy.** The dual-energy switch's guard against the swirl (above) applies as in
+  $`(R, z)`$. Gravity's work goes into the energy in kick form: with the flux form and the
+  well-balanced reconstruction together, a settled $`n = 1`$ polytrope's fundamental mode grew,
+  its central density off by 3% after 18 time units from the analytic start and by 7.6% after
+  16 from a settled one (either alone held it to 0.7%); in kick form it holds to 0.04%. Why the
+  two together drive it was not found.
+- **Gravity** is the monopole: each radial index's shell mass is summed over $`\theta`$ (one
+  invocation per shell, Kahan-summed), a single invocation takes the prefix sum, and the field
+  at each cell is $`-G\,M(<r_c)/r_c^2`$, the shell's own share inside $`r_c`$ included, with the
+  potential $`-\sum G\,m/\max(r, r_\text{shell})`$ for the well-balanced reconstruction and the
+  diagnostics. Point masses must sit at the origin, at rest: their $`GM`$ joins the enclosed
+  mass and they are not kept as particles (no sinks; gas leaves through the inner face).
+  Self-gravity beyond the monopole, blocks, MHD, viscosity, species, frames, shear, expansion,
+  mirrors, driving and burning are refused.
+
+The diagnostics' masses and energies are true ones (each cell's volume in its closed form), and
+their momentum and center of mass are in $`(R, z)`$, along $`z`$ alone. Snapshots are written
+with `Coordinates = spherical_polar`, which is already the grid's order $`(r, \theta, \phi)`$,
+the radial faces from `RootGridX1`'s ratio and the centers volume weighted as Athena++ writes
+them; such files are not read back. The display draws the native $`(r, \theta)`$ plane (radius
+across, $`\theta = 0`$ at the bottom), not the meridional plane. The `blast-spherical` preset is a
+point explosion at the origin.
+
+Tests (`sph-*`): uniform gas at rest between reflecting spheres at $`r = 0.1`$ and 1, both poles
+in the grid, stays below Mach $`6\times10^{-6}`$ on uniform and logarithmic grids (64²), its
+mass within $`3\times10^{-7}`$ of $`\tfrac43\pi(1 - 10^{-3})`$; a dense swirling blob thrown
+across the grid keeps mass, energy and angular momentum about the axis to
+$`5\times10^{-7}`$; a Sedov blast at the origin (256², $`r`$ from 0.005 to 0.5) has its shock
+radius 0.74% from the similarity solution, the same along every ray to $`10^{-7}`$; an
+$`n = 1`$ polytrope (128², logarithmic, $`r`$ from 0.05 to 2, the mass inside a point mass),
+settled by stopping it every 0.2 for 6, keeps its central density to 0.04% over 10 dynamical
+times; and isothermal Bondi accretion through an open inner sphere at $`r = 0.1`$ (128²,
+logarithmic to 16, the outer two shells held at the isothermal atmosphere's state as a
+reservoir) is within 1.5% of Bondi's rate in every shell inside the Bondi radius, averaged over
+$`t = 40`$ to 80 (instantaneously within 3%: the flow inside the reservoir still breathes). With
+the outer face merely open, the infall from the uniform start drew gas in through it without
+bound, and the rate grew with it.
+
 
 ## 23. Validation
 

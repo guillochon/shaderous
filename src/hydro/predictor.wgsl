@@ -46,9 +46,11 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
       sa = Q(0.5 * (u.a + d.a), 0.5 * (u.b + d.b));
       big = max(big, vec2<f32>(abs(d.a.x), abs(d.b.x)));
     }
-    // (Per unit dx: a spherical run's cells are g_hr[a] times shorter along each axis.)
-    let ma = mask[a] * g_hr[a];
-    s[a] = Q(sa.a * ma, sa.b * ma);
+    s[a] = Q(sa.a * mask[a], sa.b * mask[a]);
+  }
+  // A spherical run: per unit dx, its cells being g_hr[a] times shorter along each axis.
+  if (spherical()) {
+    for (var a = 0; a < 3; a++) { s[a] = Q(s[a].a * g_hr[a], s[a].b * g_hr[a]); }
   }
   let xm = m[0];
   let xp = p[0];
@@ -110,7 +112,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   }
 
   // A spherical run: the geometric terms of the half step, at the cell's r and theta.
-  if (g_sph_geo.x > 0.0) {
+  if (spherical()) {
     let k = 0.5 * g_dt / g_dx * g_sph_geo.x;
     let ct = g_sph_geo.y;
     let dg = 2.0 * v.x + ct * v.y;
