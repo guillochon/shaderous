@@ -27,6 +27,8 @@ const DEFAULT_SLOTS: Slots = {
   psplit_store: 'pressure/store_off.wgsl',
   ap_store: 'amr/pressure/store_off.wgsl',
   ap_lag: 'amr/pressure/lag_liquid.wgsl',
+  // No limit on the block grid's step from the solved pressure, unless AmrSim says a gas has one.
+  ap_acc: 'const AP_ACC = false;\nfn ap_pressure_accel(c: vec3<i32>, rho: f32, dx: f32) -> vec3<f32> { return vec3<f32>(0.0); }\n',
   volume: 'render/volume_uniform.wgsl',
   flag_species: 'fn species_indicator(c: vec3<i32>) -> f32 { return 0.0; }\n',
   flag_burn: 'fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 { return 0.0; }\n',

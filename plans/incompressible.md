@@ -914,9 +914,10 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   block whose children are refined were read from that block's primitives, which are a
   placeholder there (`amr/cons.wgsl` `u_at`), so every mesh of three levels solved the wrong
   coarse equation (0.65 a cycle; Mach 0.01 blew up). The solver now restricts its own
-  coefficients (`coef_restrict.wgsl`): 0.04 a cycle. `psplit-amr-gas`. Not built: a
-  pressure-acceleration limit on the block timestep (a shock tube on blocks needs
-  `acousticCfl` near 4), and gravity.
+  coefficients (`coef_restrict.wgsl`): 0.04 a cycle. `psplit-amr-gas`. The block timestep
+  takes the carried pressure's acceleration as a limit, and the root solver a gas's open faces
+  as zero-gradient (it had them at fixed pressure, against the block operator: a shock tube
+  lost 0.1% of its mass). `psplit-amr-sod`. Not built: gravity.
 - **The starting mesh reads the velocity** and measures a liquid's pressure against
   $`\rho c_0^2`$, as the GPU indicator does. The Gresho tests' three-level meshes had come from
   the old starting indicator dividing by a pressure near zero; they are now made by the

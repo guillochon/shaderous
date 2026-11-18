@@ -693,7 +693,12 @@ level once a step (`coef_restrict.wgsl`). The primitives of a parent would not d
 whose children are refined themselves holds a placeholder state, and the levels below such a
 block would solve another equation. With them the cycle reduced the residual by 0.65 a cycle
 on a three-level mesh and a run at Mach 0.01 blew up within 25 steps; with restricted
-coefficients it is 0.04 a cycle, as on a two-level mesh and as for the liquid.
+coefficients it is 0.04 a cycle, as on a two-level mesh and as for the liquid. Two things
+follow the uniform grid: an open face carries no pressure gradient, on the root level's solver
+too, and the carried pressure's acceleration limits the step (`amr/pressure/acc_gas.wgsl`,
+in the primitives pass), without which a shock tube starts with one step far too long. The
+Sod tube on a two-level mesh that follows its waves takes 62 steps (the uniform grid at the
+same finest cell: 61) and conserves mass and energy to $`10^{-8}`$ (`psplit-amr-sod`).
 
 *Obstacles, inlets and a uniform field on blocks.* A face on an obstacle, in this block or the
 next, on the coarser side or among the fine faces of a refined one, takes no pressure flux and
@@ -727,7 +732,7 @@ energy. In 3D it runs and conserves; it has not been measured beyond that.
 
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
 or frames (and the liquid without self-gravity); on the adaptive mesh also
-without gravity for the ideal gas and without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. The block grid's timestep has no limit from the pressure's acceleration, which the uniform grid has: a shock tube on blocks needs `acousticCfl` of about 4, where the uniform grid needs nothing. First order in time. And on
+without gravity for the ideal gas and without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2417,7 +2422,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 150 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 151 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

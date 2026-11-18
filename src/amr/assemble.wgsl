@@ -39,6 +39,7 @@ var<workgroup> wg_max: array<atomic<u32>, 2>;
 #include <bins>
 #include <mid>
 #include <comp_src>
+#include <ap_acc>
 
 // Fine ghost cell l of block `slot`, interpolated from the coarser leaf `cs` beyond the face.
 fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
@@ -123,8 +124,12 @@ fn main(
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
         g += ext_accel(blk_pos(inv.slot, inv.l));
+        var acc = length(g);
+        // Implicit pressure for a gas: the solved pressure's own acceleration, less the field's
+        // that balances it in gas at rest, limits the step too (hydro/rates.wgsl has why).
+        if (AP_ACC) { acc = max(acc, length(ap_pressure_accel(c, abs(w.w1.x), g_dx) + g)); }
         atomicMax(&wg_max[0], bitcast<u32>(rate / g_dx));
-        atomicMax(&wg_max[1], bitcast<u32>((length(g) + geo) / g_dx));
+        atomicMax(&wg_max[1], bitcast<u32>((acc + geo) / g_dx));
       }
     }
   }

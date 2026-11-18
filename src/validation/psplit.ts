@@ -588,6 +588,37 @@ export const PSPLIT_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'psplit-amr-sod',
+    name: 'Implicit pressure for an ideal gas on the adaptive mesh: Sod shock tube (256 cells along x at the finest, 2 levels)',
+    criterion:
+      'With the default refinement and timestep settings (open faces along x, the mesh following the waves): at t = 0.2 mass and total energy are conserved to 1e-6, the run takes within 10% of the uniform grid\'s steps at 256 cells (the solved pressure\'s acceleration limits the first steps on blocks as there), the volume-weighted L1 density error against the exact solution is under 0.012, and no step\'s solve ends above the tolerance',
+    async run(gpu) {
+      const exact = exactRiemann({ rho: 1, u: 0, p: 1 }, { rho: 0.125, u: 0, p: 0.1 }, 1.4);
+      const sod = problemById('sod-x');
+      const uniform = await withSim(gpu, sod, 256, { ndim: 2, pressure: 'implicit' }, (sim) => sim.runToEnd(64, 1e6));
+      return withAmr(gpu, sod, 256, { ndim: 2, amrLevels: 1, pressure: 'implicit' }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(64, 1e6);
+        const d = await sim.diagnostics();
+        const solve = await sim.prs!.stats();
+        const cells = await sim.readLeaves();
+        let l1 = 0;
+        let area = 0;
+        for (let q = 0; q < cells.count; q++) {
+          const a = cells.dx[q] ** 2;
+          l1 += a * Math.abs(cells.u1[q * 4] - exact(cells.x[q] / d.t).rho);
+          area += a;
+        }
+        const m = {
+          l1: l1 / area, steps, steps_uniform: uniform, mass_drift: Math.abs(d.mass / d0.mass - 1), energy_drift: Math.abs(d.eTot / d0.eTot - 1),
+          unconverged: solve.unconverged, leaf_levels: new Set(sim.tree.leaves().map((b) => b.level)).size,
+        };
+        const pass = m.l1 < 0.012 && Math.abs(steps - uniform) <= 0.1 * uniform && m.mass_drift < 1e-6 && m.energy_drift < 1e-6 && m.unconverged === 0 && m.leaf_levels === 2;
+        return { pass, metrics: m };
+      });
+    },
+  },
+  {
     id: 'psplit-amr-balance',
     name: 'Implicit pressure on the adaptive mesh: a liquid column in a uniform field, with a refinement boundary across it (2D, 128 finest, 2 levels)',
     criterion:

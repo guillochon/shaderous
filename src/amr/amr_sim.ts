@@ -709,6 +709,7 @@ export class AmrSim implements Simulation {
       // Implicit pressure for a gas with an energy: the update keeps its face velocities.
       ap_store: implicitPressure(this.cfg) && this.cfg.eos !== 'liquid' ? 'amr/pressure/store_on.wgsl' : 'amr/pressure/store_off.wgsl',
       ap_lag: implicitPressure(this.cfg) && this.cfg.eos !== 'liquid' ? 'amr/pressure/lag_gas.wgsl' : 'amr/pressure/lag_liquid.wgsl',
+      ...(implicitPressure(this.cfg) && this.cfg.eos !== 'liquid' ? { ap_acc: 'const AP_ACC = true;\n#include "amr/pressure/acc_gas.wgsl"\n' } : {}),
       bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl',
       mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl',
       species: this.speciesGroups > 0 ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
@@ -794,7 +795,8 @@ export class AmrSim implements Simulation {
         this.faceVel = [0, 1].map((i) => tex3d(d, at.width, 'rgba32float', `amr face velocities ${i}`, at.depthOrArrayLayers, at.height));
         this.lagP = tex3d(d, at.width, 'r32float', 'amr carried pressure', at.depthOrArrayLayers, at.height);
       }
-      const kind = (b: number) => (b === PERIODIC ? PF_PERIODIC : b === 1 || b === 3 ? PF_OPEN : PF_CLOSED);
+      // (A gas's open face carries no pressure gradient, as on the uniform grid: amr/pressure/coef_gas.wgsl.)
+      const kind = (b: number) => (b === PERIODIC ? PF_PERIODIC : (b === 1 || b === 3) && this.cfg.eos === 'liquid' ? PF_OPEN : PF_CLOSED);
       this.prs ??= await AmrPressure.create({
         device: d, params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, listLevel: this.listLevel, levels: this.levels,
         state: this.state, prim: this.prim[0], prim2: this.prim[1], slots,
@@ -835,6 +837,7 @@ export class AmrSim implements Simulation {
       bindGroup(d, this.pAssemble, {
         0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.prim[0]), 4: v(this.prim[1]),
         5: v(this.gfield), 6: this.redDt.first, 20: this.bh, 30: this.bt, 31: list, ...bin, ...mid,
+        ...((this.lagP && implicitPressure(this.cfg) ? { 47: v(this.lagP) } : {}) as Record<number, GPUTextureView>),
         ...((q >= 0 ? { 25: v(this.species[q]), 26: v(this.comp!) } : {}) as Record<number, GPUTextureView>),
       });
     if (pPredict) this.gPredict = predict(this.listLeaf);
