@@ -1,0 +1,19 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "sedov-rad-transport",
+  "extends": "sedov-rad",
+  "name": "Radiating blast",
+  "group": "Radiation",
+  "family": "radiating-sphere",
+  "variant": "Blast with radiation transport",
+  "blurb": "The radiation-dominated explosion with its radiation carried, diffused and streamed out of the bubble instead of held in the gas: the blast's light leaks ahead of it.",
+  "physics": {
+    "radiation": "m1",
+    "opacity": "constant",
+    "opacityParams": { "absorption": 10, "scattering": 0 },
+    "radC": 1000,
+    "radChat": 200
+  },
+  "view": { "field": 32, "log": true, "mode": "slice" }
+}

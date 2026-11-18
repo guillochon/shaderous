@@ -1,0 +1,43 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "radiating-sphere",
+  "name": "Hot sphere cooling into vacuum",
+  "group": "Radiation",
+  "family": "radiating-sphere",
+  "familyName": "Hot sphere cooling into vacuum",
+  "variant": "Absorbing",
+  "blurb": "A hot, optically thick sphere of gas and radiation in equilibrium, in thin cold gas: its radiation diffuses out through its surface and streams away, and the sphere cools as it expands (gray M1 radiation transport, docs/numerics.md section 24).",
+  "domain": {
+    "box": 1,
+    "symmetric": "xyz",
+    "supports2d": true,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667, "R": 1, "arad": 1 },
+    "gravity": "off",
+    "G": 0,
+    "floors": { "rho": 1e-8, "p": 1e-12 },
+    "radiation": "m1",
+    "opacity": "constant",
+    "opacityParams": { "absorption": 50, "scattering": 0 },
+    "radC": 100,
+    "radChat": 20
+  },
+  "background": { "rho": 0.001, "p": 0.000001 },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "sphere",
+      "shape": { "type": "sphere", "radius": 0.2 },
+      "rho": 1,
+      "p": 1,
+      "s": 1,
+      "supersample": 4
+    }
+  ],
+  "run": { "tEnd": 0.3, "checkpointDt": 0.01 },
+  "view": { "field": 31, "log": true, "mode": "slice" }
+}

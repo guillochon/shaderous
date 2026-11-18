@@ -13,7 +13,7 @@ import { MAX_RAD_SWEEPS, RADIATION_LABELS } from '../radiation/radiation';
 import { EOS_LABELS } from '../eos/eos';
 import { FUNCTIONS } from './expr';
 import { FLOWS } from './parts/flow';
-import { GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
+import { FIELDS, GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
 import { VIEW_MODES } from '../render/view_options';
 import { COMPOSITIONS } from '../units/composition';
 import { speciesNuclides } from '../species/mixture';
@@ -252,7 +252,7 @@ export const OPTIONS: Option[] = [
       { path: 'v', label: 'Speed', tip: 'The tools’ speed scale is at least this', page: 'run', control: num(0, undefined, { factor: 2, quantity: 'velocity' }), apply: 'restart', default: 1 },
     ] } },
   { path: 'view.mode', label: 'Opening view', tip: 'How the gas is drawn when the setup opens in 3D', page: 'run', control: pickOf(VIEW_MODES, ['volume', 'Volume'], ['slice', 'Slice'], ['projection', 'Projection']), apply: 'live', default: 'volume' },
-  { path: 'view.field', label: 'Opening field', tip: 'The quantity shown when the setup opens (the View panel’s Field, by its number)', page: 'run', control: num(0, 29, { integer: true, step: 1 }), apply: 'live', default: 0 },
+  { path: 'view.field', label: 'Opening field', tip: 'The quantity shown when the setup opens (the View panel’s Field, by its number)', page: 'run', control: num(0, FIELDS.length - 1, { integer: true, step: 1 }), apply: 'live', default: 0 },
   { path: 'view.log', label: 'Logarithmic colors', tip: 'The color scale the setup opens with', page: 'run', control: check, apply: 'live', default: true },
   { path: 'view.axis', label: 'Slice normal', tip: 'The axis the opening slice is perpendicular to (0 x, 1 y, 2 z)', page: 'run', control: pick([2, 'z'], [1, 'y'], [0, 'x']), apply: 'live', default: 2 },
   { path: 'view.pitch', label: 'Camera elevation', tip: 'Elevation of the volume view’s camera when the setup opens, in radians', page: 'run', control: num(-1.5, 1.5, { step: 0.05 }), apply: 'live', default: 0.45 },

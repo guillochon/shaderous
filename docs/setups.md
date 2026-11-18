@@ -333,7 +333,7 @@ default, and what it does. A number out of its range is held to it when the file
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
 | `view.mode` | Opening view | `volume`, `slice`, `projection`. Default `volume` | How the gas is drawn when the setup opens in 3D |
-| `view.field` | Opening field | a whole number, 0 to 29. Default `0` | The quantity shown when the setup opens (the View panel’s Field, by its number) |
+| `view.field` | Opening field | a whole number, 0 to 36. Default `0` | The quantity shown when the setup opens (the View panel’s Field, by its number) |
 | `view.log` | Logarithmic colors | `true` or `false`. Default `true` | The color scale the setup opens with |
 | `view.axis` | Slice normal | `2`, `1`, `0`. Default `2` | The axis the opening slice is perpendicular to (0 x, 1 y, 2 z) |
 | `view.pitch` | Camera elevation | a number, -1.5 to 1.5. Default `0.45` | Elevation of the volume view’s camera when the setup opens, in radians |

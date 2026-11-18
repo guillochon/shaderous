@@ -1177,7 +1177,7 @@
      "title": "Opening field",
      "description": "The quantity shown when the setup opens (the View panel’s Field, by its number)",
      "minimum": 0,
-     "maximum": 29
+     "maximum": 36
     },
     "log": {
      "type": "boolean",
