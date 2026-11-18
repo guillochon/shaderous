@@ -14,7 +14,9 @@ export default defineConfig({
     channel: process.env.PW_CHANNEL ?? 'chrome',
     headless: !process.env.PW_HEADED,
     launchOptions: {
-      args: ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist', '--use-angle=d3d11'],
+      // Direct3D on Windows only (tools/headless/session.mjs does the same): elsewhere it leaves
+      // Chrome without a WebGPU adapter.
+      args: ['--enable-unsafe-webgpu', '--enable-gpu', '--ignore-gpu-blocklist', ...(process.platform === 'win32' ? ['--use-angle=d3d11'] : [])],
     },
   },
   webServer: {
