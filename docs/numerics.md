@@ -1872,8 +1872,20 @@ needs no new evaluator: each ring's moments are filled in by symmetry about the 
 the axis), and the boundary is evaluated in the plane of the run. The flux-form
 gravitational work takes the weighted mass fluxes. A uniform sphere's potential comes out
 within $`7\times10^{-4}`$ of the analytic one (the 3D solve: $`1.5\times10^{-3}`$), and the
-Evrard collapse in $`(R, z)`$ keeps its energy to 0.2% through bounce. Self-gravity on blocks
-and settled stars are not done yet.
+Evrard collapse in $`(R, z)`$ keeps its energy to 0.2% through bounce.
+
+On blocks the per-level solver of §13 runs in 2D. Its blocks are one cell deep, laid out in
+each sublevel's atlas as the hydro atlas is in 2D, and a dispatch's four invocations along
+$`z`$ take four blocks of the list. The stencil is the uniform grid's (five points, the radial
+neighbors weighed by $`R_\pm/R_c`$ from the cell's radial index at that sublevel); the residual
+and the source are restricted with the rings' volumes, so a parent holds its children's mass;
+the coarse error is prolonged, and the ghosts across a coarse-fine face interpolated,
+bilinearly. The axis is a plane of mirror symmetry for the potential, as in a mirrored run,
+and the multipole boundary takes the rings' moments as on the uniform grid. On three levels
+($`128^2`$ finest) the uniform sphere's potential is within $`1.2\times10^{-3}`$ of the analytic
+one in every leaf, and the Evrard collapse keeps its energy to 0.24% through bounce, its
+thermal energy peaking at $`t = 1.125`$ as on the uniform grid. Per-block timesteps stay
+refused. Settled stars are not done yet.
 
 **Point masses** may sit on the axis and move along it. Their pull on the gas needs nothing,
 since the distance from a mass on the axis to any point of a ring is that to the ring's cell

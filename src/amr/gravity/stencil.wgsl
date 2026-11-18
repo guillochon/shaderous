@@ -1,4 +1,6 @@
-// The 7-point Laplacian on one tree level of the block grid. Requires amr/gravity/common.wgsl,
+// The 7-point Laplacian on one tree level of the block grid (5-point in 2D, and in an
+// axisymmetric run the radial neighbors weighed by R_-/R_c and R_+/R_c, as the uniform grid's
+// gravity/stencil.wgsl). Requires amr/gravity/common.wgsl,
 // gravity/multipole_eval.wgsl, and PHI: a storage texture with read access.
 //
 // g_nb returns (value, diag): the neighbor's contribution to the sum, and 1 if it added the
@@ -29,13 +31,23 @@ fn g_nb(slot: i32, o: vec3<i32>, l: vec3<i32>, axis: i32, upper: bool) -> vec2<f
   if (GL.k == 0u) {
     var e = vec3<f32>(0.0);
     e[axis] = select(-0.5, 0.5, upper);
-    let x = (vec3<f32>(blk_coord(slot) * B + l) + 0.5 + e) * g_h(slot) + P.org.xyz;
+    var x = (vec3<f32>(blk_coord(slot) * B + l) + 0.5 + e) * g_h(slot) + P.org.xyz;
+    // (A 2D run lies in the plane z = 0, as its moments are taken.)
+    if (is2d()) { x.z = 0.0; }
     v = 2.0 * phi_boundary(x);
   }
   return vec2<f32>(v, 1.0);
 }
 
 fn g_sum(slot: i32, o: vec3<i32>, l: vec3<i32>) -> vec2<f32> {
+  if (is2d()) {
+    // (R, z): (1/R) d/dR (R dphi/dR) + d2phi/dz2 (cyl_weights; the axis face's weight is 0).
+    var w = vec2<f32>(1.0);
+    if (cylindrical()) { w = cyl_weights(blk_coord(slot).x * GL.bsize + l.x); }
+    let r = w.x * g_nb(slot, o, l, 0, false) + w.y * g_nb(slot, o, l, 0, true)
+          + g_nb(slot, o, l, 1, false) + g_nb(slot, o, l, 1, true);
+    return vec2<f32>(r.x, w.x + w.y + 2.0 + r.y);
+  }
   let r = g_nb(slot, o, l, 0, false) + g_nb(slot, o, l, 0, true)
         + g_nb(slot, o, l, 1, false) + g_nb(slot, o, l, 1, true)
         + g_nb(slot, o, l, 2, false) + g_nb(slot, o, l, 2, true);

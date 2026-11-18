@@ -12,7 +12,14 @@
 // block side (16, 8, 4, 2, 1), with the same block connectivity. Sublevel 0 uses the hydro
 // atlas layout (two ghost layers); the others have one.
 //
-// Requires P and amr/grid.wgsl. 3D only.
+// A 2D grid (an axisymmetric (R, z) run) has blocks one cell deep: each sublevel's atlas is
+// laid out as the hydro one is in 2D (amr/grid.wgsl, blk_origin), layers of slots one texel
+// deep, and a dispatch's four invocations along z take four blocks of the list, as
+// amr/list.wgsl's 2D passes do. The stencil then has four neighbors, the radial ones weighed by
+// R_-/R_c and R_+/R_c (amr/gravity/stencil.wgsl), and transfers between sublevels are by ring
+// volume (amr/gravity/restrict.wgsl).
+//
+// Requires P and amr/grid.wgsl.
 struct GLvl {
   bsize: i32,     // cells per block side at this sublevel
   pad: i32,       // ghost layers stored around each block
@@ -28,10 +35,12 @@ struct GLvl {
 // Atlas texel of a block's cell (0, 0, 0) at this sublevel, and at the other one.
 fn g_origin(slot: i32) -> vec3<i32> {
   let a = i32(P.amr.x);
+  if (is2d()) { return vec3<i32>((slot % a) * GL.stride + GL.pad, ((slot / a) % a) * GL.stride + GL.pad, slot / (a * a)); }
   return vec3<i32>(slot % a, (slot / a) % a, slot / (a * a)) * GL.stride + GL.pad;
 }
 fn g_origin_other(slot: i32) -> vec3<i32> {
   let a = i32(P.amr.x);
+  if (is2d()) { return vec3<i32>((slot % a) * GL.ostride + GL.opad, ((slot / a) % a) * GL.ostride + GL.opad, slot / (a * a)); }
   return vec3<i32>(slot % a, (slot / a) % a, slot / (a * a)) * GL.ostride + GL.opad;
 }
 
@@ -50,7 +59,18 @@ fn g_zspan(bsize: i32) -> u32 {
   return 4u * u32((bsize + 3) / 4);
 }
 
+// 2D: a block of `bsize` cells per side at invocation gid, four blocks to a quad along z, the
+// quads laid end to end along x in slabs of SLAB_QUADS (amr/dispatch.ts, gravityCells2d).
+fn g_inv2d(gid: vec3<u32>, bsize: i32) -> GInv {
+  let span = u32(max(bsize, 8));
+  let b = 4u * (gid.x / span + (gid.z / 4u) * SLAB_QUADS) + gid.z % 4u;
+  let l = vec3<i32>(i32(gid.x % span), i32(gid.y), 0);
+  if (b >= LIST[0] || l.x >= bsize || l.y >= bsize) { return GInv(false, 0, l); }
+  return GInv(true, i32(LIST[1u + b]), l);
+}
+
 fn g_inv(gid: vec3<u32>) -> GInv {
+  if (is2d()) { return g_inv2d(gid, GL.bsize); }
   let span = u32(max(GL.bsize, 8));
   let zs = g_zspan(GL.bsize);
   let b = gid.x / span + (gid.z / zs) * SLAB_BLOCKS;

@@ -13,7 +13,7 @@
 // block; the result is read back without blocking, the tree is adapted, and one pass refills
 // the new leaves (copy, prolong or restrict) into the other state texture.
 //
-// With self-gravity (3D), the potential is solved on every tree level after the update
+// With self-gravity (3D, or 2D in (R, z)), the potential is solved on every tree level after the update
 // (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
 import { domainLo } from '../domain';
 import { prepareHelmholtz } from '../eos/helmholtz';
@@ -36,11 +36,11 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
-import { CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindricalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
-import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS } from './dispatch';
+import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS, SLAB_QUADS } from './dispatch';
 import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
@@ -70,8 +70,6 @@ const MAX_TIME_BINS = 3;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
-/** Slabs of a long 2D block list (amr/list.wgsl): must match SLAB_QUADS there (FLAT_ROWS: amr/dispatch.ts). */
-const SLAB_QUADS = 16384;
 /** Workgroups per block of a flat dispatch (amr/list.wgsl, inv_flat) out to `reach` ghost layers. */
 const flatGroups = (ndim: number, reach: number) => Math.ceil((BS + 2 * reach) ** ndim / 64);
 const BIN_TOTALS = 60;
@@ -585,11 +583,13 @@ export class AmrSim implements Simulation {
     const spec = debrisSpec(cfg);
     if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     // 3D: self-gravity machinery is built for every run, so gravity can be switched on later.
+    // 2D: for an axisymmetric (R, z) run with self-gravity (its solver's passes in their 2D form).
+    const flatGravity = cylindrical(cfg) && isSelfGravity(cfg.gravity);
     const gravity = async () => {
       const u1 = [0, 1].map((p) => v(sim.state[p][0]));
-      sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, BS], 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole', cfg.symmetry);
+      sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, depth], flatGravity ? 'amr/multipole_cyl.wgsl' : 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole', cfg.symmetry);
       sim.grav = await AmrGravity.create({
-        device: d, slotsPerSide: sim.slotsPerSide, levels: sim.levels, params: sim.params, bt: sim.bt,
+        device: d, slotsPerSide: sim.slotsPerSide, flat: cfg.ndim === 2, layers: sim.layers, levels: sim.levels, params: sim.params, bt: sim.bt,
         listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
         multipole: sim.redMp.result, stateU1: [sim.state[0][0], sim.state[1][0]], gfield: sim.gfield,
         bins: sim.bins, listAct: sim.listAct, listUpd: sim.listUpd, binArgs: sim.binArgs,
@@ -616,10 +616,10 @@ export class AmrSim implements Simulation {
       computePipeline(d, assemble('gravity/bh_drift.wgsl'), 'point mass drift'),
       computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass kick'),
       computePipeline(d, assemble('gravity/bh_kick.wgsl'), 'point mass accelerations', { LIVE: 0 }),
-      // No self-gravity in 2D, so no solver: the field atlas holds the point masses alone.
-      cfg.ndim === 2 ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
+      // 2D without self-gravity, so no solver: the field atlas holds the point masses alone.
+      cfg.ndim === 2 && !flatGravity ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
       spec ? computePipeline(d, assemble('debris/census_amr.wgsl'), 'amr debris census') : undefined,
-      cfg.ndim === 3 ? gravity() : undefined,
+      cfg.ndim === 3 || flatGravity ? gravity() : undefined,
     ]);
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.pClockPreview = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { PER_DX: 1, ADVANCE_DRIVE: 0 });
@@ -1441,7 +1441,9 @@ export class AmrSim implements Simulation {
     this.uploadTree();
     if (this.selfGravity) {
       // The root level's potential from zero, not from the last run's (AmrGravity.clear).
-      this.grav!.clear([...this.tree.lists().byLevel[0]].map((slot) => this.origin(slot).map((o) => o - NG)));
+      // (In 2D the corner's z is the slot's layer, which has no ghosts.)
+      const flat = this.cfg.ndim === 2;
+      this.grav!.clear([...this.tree.lists().byLevel[0]].map((slot) => this.origin(slot).map((o, a) => (flat && a === 2 ? o : o - NG))));
     }
     if (this.fieldOn) {
       // Cold start: enough cycles per level to converge from zero. The clock's dt is zero, so

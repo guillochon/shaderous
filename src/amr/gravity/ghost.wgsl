@@ -1,7 +1,7 @@
 // Fills the two ghost layers of the potential, in place (r32float can be read and written in
 // one pass). MODE selects which faces:
-//   0  faces whose neighbor is one level coarser: trilinear interpolation of the coarser
-//      level's potential to the ghost-cell center. Run on a level before it is solved; these
+//   0  faces whose neighbor is one level coarser: trilinear (2D: bilinear) interpolation of
+//      the coarser level's potential to the ghost-cell center. Run on a level before it is solved; these
 //      values are its boundary condition there.
 //   1  every other face, after all levels are solved: copies from same-level neighbors, and
 //      linear extrapolation at isolated domain boundaries (matching a one-sided gradient), or
@@ -23,25 +23,37 @@ fn coarse_phi(cs: i32, q: vec3<i32>, fallback: f32) -> f32 {
   return textureLoad(PHI, blk_origin(r.slot) + r.l).x;
 }
 
-// Only the face ghosts get an invocation: per block, 6 faces x 2 layers x BS x BS cells, in
-// rows of 64 (workgroup x), one block of the list per workgroup row (y), the rows in slabs of
-// FLAT_ROWS along z as a flat pass's (amr/list.wgsl). Edge and corner ghosts are never used.
+// Only the face ghosts get an invocation: per block, 6 faces x 2 layers x BS x BS cells (in 2D
+// 4 x 2 x BS), in rows of 64 (workgroup x), one block of the list per workgroup row (y), the
+// rows in slabs of FLAT_ROWS along z as a flat pass's (amr/list.wgsl). Edge and corner ghosts
+// are never used.
 const FACE_GHOSTS = 6 * 2 * BS * BS;
+const FACE_GHOSTS_2D = 4 * 2 * BS;
 
 @compute @workgroup_size(64)
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
   let i = i32(wid.x * 64u + lix);
   let row = flat_row(wid);
-  if (row >= LIST[0] || i >= FACE_GHOSTS) { return; }
+  let flat = is2d();
+  if (row >= LIST[0] || i >= select(FACE_GHOSTS, FACE_GHOSTS_2D, flat)) { return; }
   let slot = i32(LIST[1u + row]);
-  let face = i / (2 * BS * BS);          // -x, +x, -y, +y, -z, +z
-  let r = i % (2 * BS * BS);
-  let layer = r / (BS * BS);             // 0 next to the block, 1 beyond
+  var face = i / (2 * BS * BS);          // -x, +x, -y, +y, -z, +z
+  var r = i % (2 * BS * BS);
+  var layer = r / (BS * BS);             // 0 next to the block, 1 beyond
+  if (flat) {
+    face = i / (2 * BS);
+    r = i % (2 * BS);
+    layer = r / BS;
+  }
   let axis = face / 2;
   let upper = (face & 1) == 1;
   var l = vec3<i32>(0);
-  l[(axis + 1) % 3] = r % BS;
-  l[(axis + 2) % 3] = (r / BS) % BS;
+  if (flat) {
+    l[1 - axis] = r % BS;
+  } else {
+    l[(axis + 1) % 3] = r % BS;
+    l[(axis + 2) % 3] = (r / BS) % BS;
+  }
   l[axis] = select(-1 - layer, BS + layer, upper);
   let inv = Inv(true, slot, l);
   let nb = bt(inv.slot, 6u + u32(2 * axis) + u32(upper));
@@ -60,6 +72,16 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     let d = 2 * (gf & vec3<i32>(1)) - 1;
     let base = textureLoad(PHI, blk_origin(cs) + lc).x;
     var sum = 0.0;
+    if (flat) {
+      // Bilinear in the plane.
+      for (var i = 0; i < 4; i++) {
+        let s = vec3<i32>(i & 1, (i >> 1u) & 1, 0);
+        let w = mix(vec2<f32>(0.75), vec2<f32>(0.25), vec2<f32>(s.xy));
+        sum += w.x * w.y * coarse_phi(cs, lc + s * d, base);
+      }
+      textureStore(PHI, c, vec4<f32>(sum, 0.0, 0.0, 0.0));
+      return;
+    }
     for (var i = 0; i < 8; i++) {
       let s = vec3<i32>(i & 1, (i >> 1u) & 1, (i >> 2u) & 1);
       let w = mix(vec3<f32>(0.75), vec3<f32>(0.25), vec3<f32>(s));

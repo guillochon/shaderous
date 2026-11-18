@@ -264,6 +264,82 @@ export const CYL_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'cyl-sphere-blocks',
+    name: 'Axisymmetric: the potential of a uniform sphere on blocks',
+    criterion: 'The uniform sphere of cyl-sphere on an adaptive mesh of three levels (128^2 finest, its surface refined): the potential in every leaf cell is within 1% of the analytic one, as on the uniform grid',
+    async run(gpu) {
+      const n = 128;
+      const dx = 1 / n;
+      // The sphere's share of each ring cell, from 8 x 8 samples of a finest cell weighed by
+      // their radii (cyl-sphere); its surface is refined to the finest level.
+      const share = (R: number, z: number) => {
+        let inside = 0;
+        let all = 0;
+        for (let b = 0; b < 8; b++)
+          for (let a = 0; a < 8; a++) {
+            const r = R + ((a + 0.5) / 8 - 0.5) * dx;
+            const zz = z + ((b + 0.5) / 8 - 0.5) * dx;
+            all += r;
+            if (Math.hypot(r, zz) < SPHERE.R) inside += r;
+          }
+        return inside / all;
+      };
+      const p = ring((R, z) => ({ rho: 1e-6 + SPHERE.rho * share(R, z), vx: 0, vy: 0, vz: 0, p: 1e-4, s: 0 }), {
+        bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], gravity: 'isolated', G: SPHERE.G, tEnd: Infinity,
+      });
+      return withAmr(gpu, p, n, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        const c = await sim.readLeaves();
+        const phi = await sim.readLeafPotential();
+        let err = 0;
+        let mass = 0;
+        for (let q = 0; q < c.count; q++) {
+          const e = spherePotential(Math.hypot(c.x[q], c.y[q]));
+          err = Math.max(err, Math.abs(phi[q] - e) / Math.abs(e));
+          mass += c.u1[4 * q] * 2 * Math.PI * c.x[q] * c.dx[q] ** 2;
+        }
+        const st = sim.tree.stats();
+        const m = { max_relative_error: err, mass, mass_expected: (4 / 3) * Math.PI * SPHERE.R ** 3 * SPHERE.rho, leaf_blocks: st.leaves, deepest_level: st.deepest };
+        return { pass: err < 0.01 && st.deepest === 2, metrics: m };
+      });
+    },
+  },
+  {
+    id: 'cyl-evrard-blocks',
+    name: 'Axisymmetric: the Evrard collapse on blocks',
+    criterion: 'The Evrard sphere of cyl-evrard on an adaptive mesh of three levels (128^2 finest, R to 4 and z across 4), self-gravity solved on the blocks: through collapse and bounce (t <= 1.5) the total energy keeps to 2% and the thermal energy peaks between t = 0.9 and 1.3',
+    async run(gpu) {
+      const n = 128;
+      const box = 4;
+      const dx = box / n;
+      const p = ring((R, z) => {
+        const r = Math.max(Math.hypot(R, z), 0.5 * dx);
+        const rho = r < 1 ? 1 / (2 * Math.PI * r) : 1e-4;
+        return { rho, vx: 0, vy: 0, vz: 0, p: (2 / 3) * rho * 0.05, s: r < 1 ? 1 : 0 };
+      }, {
+        box, eosParams: { gamma: 5 / 3 }, bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC],
+        gravity: 'isolated', G: 1, tEnd: 0, rhoFloor: 1e-7, pFloor: 1e-12,
+      });
+      return withAmr(gpu, p, n, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        let worst = 0;
+        let peakT = 0;
+        let peakU = 0;
+        let steps = 0;
+        for (let i = 1; i <= 12; i++) {
+          sim.cfg.tEnd = 0.125 * i;
+          sim.writeParams();
+          steps = await sim.runToEnd();
+          const d = await sim.diagnostics();
+          worst = Math.max(worst, Math.abs(d.eTot - d0.eTot) / Math.abs(d0.eTot));
+          if (d.eInt > peakU) [peakU, peakT] = [d.eInt, d.t];
+        }
+        const st = sim.tree.stats();
+        const m = { energy_drift: worst, thermal_peak_time: peakT, e_total_initial: d0.eTot, mass: d0.mass, leaf_blocks: st.leaves, deepest_level: st.deepest, steps };
+        return { pass: worst < 0.02 && peakT >= 0.9 && peakT <= 1.3, metrics: m };
+      });
+    },
+  },
+  {
     id: 'cyl-noh',
     name: 'Axisymmetric: the spherical Noh implosion',
     criterion: 'Cold gas (gamma = 5/3) falling at unit speed toward the origin from every direction, in (R, z) at 512^2 (R to 2, so that no gas measured came in through a boundary): at t = 0.6 the shock is at r = 0.2 and the post-shock density, 64 in the exact solution, averages within 5% of it over 0.06 < r < 0.17 away from the axis (R > 4 cells; the origin keeps the wall heating every code has there), and the pre-shock density at r = 0.3 is within 5% of (1 + t / r)^2 = 9',
