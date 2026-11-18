@@ -1,5 +1,5 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
-import { FACE_KEYS, noWallVelocity, type WallVelocity } from './problems/boundaries';
+import { FACE_KEYS, noWallVelocity, PERIODIC, REFLECT, type WallVelocity } from './problems/boundaries';
 import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareHelmholtz } from './eos/helmholtz';
 import { assemble } from './gpu/shaders';
@@ -147,6 +147,14 @@ export interface SimConfig {
   fluff: { rho: number; u: number; v: number; va?: number };
   /** With self-gravity, refine where the Jeans length is under this many cells (0 = off). */
   jeansRefine: number;
+  /**
+   * Mirror symmetry (Problem.symmetry): per axis, whether only the half above the plane through
+   * the origin is computed. That axis's domain is then [0, box] (src/domain.ts), its lower face
+   * is a plane of symmetry (reflecting for the gas, and marked in Params.sym so that gravity and
+   * the well-balanced reconstruction treat it as one), and the totals are reported for the whole
+   * configuration. configFor keeps only the axes the problem allows (none along z in 2D).
+   */
+  symmetry: [boolean, boolean, boolean];
 }
 
 /** One cell of the grid as the query tool reads it (Simulation.probe). */
@@ -333,7 +341,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     hi: [problem.bcHi[0], problem.bcHi[1], 0] as Bc3,
   };
   const params = Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value]));
-  return {
+  const cfg: SimConfig = {
     n,
     ndim,
     gext: problem.gext?.(ndim) ?? [0, 0, 0],
@@ -386,7 +394,50 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // A problem compiled from a setup document brings the solver's and the mesh's settings too.
     ...(problem.setup ? compiledFrom(problem.setup).overrides : {}),
     ...over,
+    symmetry: [false, false, false],
   };
+  return withSymmetry(cfg, over.symmetry);
+}
+
+/**
+ * The configuration with the mirrors `want` asks for, as far as the problem allows them: the
+ * mirrored axes' lower faces become reflecting (their planes of symmetry).
+ */
+export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefined): SimConfig {
+  const allowed = cfg.problem.symmetry?.axes ?? [false, false, false];
+  const sym = [0, 1, 2].map((a) => !!want?.[a] && allowed[a] && (a < 2 || cfg.ndim === 3)) as [boolean, boolean, boolean];
+  const bcLo = cfg.bcLo.map((b, a) => (sym[a] ? REFLECT : b)) as Bc3;
+  return { ...cfg, symmetry: sym, bcLo };
+}
+
+/** How many axes are mirrored: the computed part is 2^-k of the whole configuration. */
+export const mirrors = (c: SimConfig): number => (c.symmetry ?? []).filter(Boolean).length;
+
+/**
+ * Why a run with mirror symmetry cannot go as configured, or null. What the mirrors would get
+ * wrong is refused rather than run: anything that is not itself symmetric under them.
+ */
+export function symmetryUnsupported(c: SimConfig): string | null {
+  const sym = c.symmetry ?? [false, false, false];
+  if (!sym.some(Boolean)) return null;
+  const axes = [0, 1, 2].filter((a) => sym[a]);
+  const name = (a: number) => 'xyz'[a];
+  for (const a of axes) {
+    if (c.bcHi[a] === PERIODIC) return `the upper ${name(a)} face is periodic, which a plane of symmetry at the lower one cannot be`;
+    if (uniformField(c)[a] !== 0) return `the uniform field has a part along ${name(a)}, across a plane of symmetry`;
+  }
+  if (c.gravity === 'periodic') return 'periodic self-gravity needs a periodic box';
+  if (c.problem.mhd && !c.problem.symmetry?.mhd) return 'the magnetic field is not symmetric under the mirrors';
+  if (c.driving.accel > 0) return 'turbulence driving is not symmetric under the mirrors';
+  const w = rotationOf(c);
+  for (const a of axes)
+    for (let b = 0; b < 3; b++) if (b !== a && w[b] !== 0) return `a frame turning about an axis other than ${name(a)} is not symmetric under the ${name(a)} mirror`;
+  for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
+    for (const a of axes) if ((m.pos[a] ?? 0) !== 0 || (m.vel[a] ?? 0) !== 0) return `a point mass lies or moves off the ${name(a)} plane of symmetry`;
+  const stars = (c.problem.setup?.parts ?? []).filter((p) => p.kind === 'star');
+  if (stars.length > 1) return 'more than one star: settling handles one, on the planes';
+  for (const s of stars) for (const a of axes) if (((s as { pos?: number[] }).pos?.[a] ?? 0) !== 0) return `a star lies off the ${name(a)} plane of symmetry`;
+  return null;
 }
 
 /**
@@ -733,8 +784,31 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
   };
 }
 
+/**
+ * Diagnostics of a run with mirror symmetry, for the whole configuration: the grid holds one
+ * 2^k-th of it. Extensive totals (mass, energies, burning's heating, the field's energy) are
+ * times 2^k; momentum and the center of mass are zero along the mirrored axes and times 2^k
+ * (momentum) or unchanged (center) along the others. Cell counts stay the grid's.
+ */
+export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] | undefined): Diagnostics {
+  d.symmetry = [0, 1, 2].map((a) => !!symmetry?.[a]) as [boolean, boolean, boolean];
+  const k = d.symmetry.filter(Boolean).length;
+  if (!k) return d;
+  const f = 2 ** k;
+  d.mass *= f;
+  d.eKin *= f;
+  d.eInt *= f;
+  d.eGrav *= f;
+  d.eTot *= f;
+  d.nuclearHeating *= f;
+  d.momentum = d.momentum.map((p, a) => (d.symmetry![a] ? 0 : p * f)) as [number, number, number];
+  d.com = d.com.map((x, a) => (d.symmetry![a] ? 0 : x)) as [number, number, number];
+  if (d.magnetic) d.magnetic.eMag *= f;
+  return d;
+}
+
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 416;
+export const PARAM_BYTES = 432;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -785,6 +859,7 @@ export function packParams(
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
   f.set([...domainLo(c), 0], 96);
   f.set(rotationOf(c), 100);
+  u.set([0, 1, 2].map((a) => (c.symmetry?.[a] ? 1 : 0)).concat(0), 104);
   return buf;
 }
 
@@ -812,6 +887,11 @@ export interface Diagnostics {
   perturber: [number, number, number] | null;
   /** the point masses as they are now */
   masses: Required<PointMass>[];
+  /**
+   * The mirrored axes (SimConfig.symmetry): the totals above are then those of the whole
+   * configuration, of which the grid holds one 2^k-th (unfoldDiagnostics).
+   */
+  symmetry?: [boolean, boolean, boolean];
   /** [min, max] per renderable field, in FIELDS order */
   ranges: [number, number][];
   /**
@@ -1020,6 +1100,8 @@ export class Sim implements Simulation {
       const why = mhdUnsupported(cfg);
       if (why) throw new Error(`MHD: ${why}`);
     }
+    const asym = symmetryUnsupported(cfg);
+    if (asym) throw new Error(`Mirror symmetry: ${asym}`);
     noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
@@ -1060,7 +1142,7 @@ export class Sim implements Simulation {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
-        Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]]),
+        Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry),
         Reducer.create(
           d,
           [n, n, nz],
@@ -1918,7 +2000,7 @@ export class Sim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
-      return diag;
+      return unfoldDiagnostics(diag, this.cfg.symmetry);
     } finally {
       this.stagingBusy = false;
     }
@@ -2008,7 +2090,7 @@ export class Sim implements Simulation {
    * Flux determinism check: evaluates one step's face mass fluxes and counts the
    * faces where the two cells sharing the face disagree in any bit. The state is not advanced.
    */
-  async fluxMismatch(): Promise<{ faces: number; mismatched: number; maxDiff: number }> {
+  async fluxMismatch(): Promise<{ faces: number; mismatched: number; maxDiff: number; mirror: number }> {
     const d = this.device;
     const n = this.n;
     const c = this.cfg;
@@ -2045,6 +2127,12 @@ export class Sim implements Simulation {
     let faces = 0;
     let mismatched = 0;
     let maxDiff = 0;
+    // The largest mass flux through a plane of mirror symmetry (SimConfig.symmetry): zero.
+    let mirror = 0;
+    for (let k = 0; k < this.nz; k++)
+      for (let j = 0; j < n; j++)
+        for (let i = 0; i < n; i++)
+          for (let a = 0; a < 3; a++) if (c.symmetry[a] && [i, j, k][a] === 0) mirror = Math.max(mirror, Math.abs(flux(i, j, k, 2 * a)));
     const dims = [n, n, this.nz];
     for (let k = 0; k < this.nz; k++)
       for (let j = 0; j < n; j++)
@@ -2064,7 +2152,7 @@ export class Sim implements Simulation {
               maxDiff = Math.max(maxDiff, Math.abs(mine - theirs));
             }
           }
-    return { faces, mismatched, maxDiff };
+    return { faces, mismatched, maxDiff, mirror };
   }
 
   /** Current conserved state as float arrays (validation only). */

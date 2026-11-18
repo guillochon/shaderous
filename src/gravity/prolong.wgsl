@@ -6,14 +6,15 @@
 @group(0) @binding(3) var PHI: texture_storage_3d<r32float, read_write>;
 
 // Coarse error with boundaries: periodic wraps; isolated has zero error at the face, so a
-// ghost is minus its mirror image.
+// ghost is minus its mirror image; across a plane of mirror symmetry it is the image itself.
 fn coarse(q: vec3<i32>) -> f32 {
   let nc = i32(L.n) / 2;
   if (P.grav_bc == 0u) {
     return textureLoad(PHIC, (q + nc) % nc, 0).x;
   }
   let cl = clamp(q, vec3<i32>(0), vec3<i32>(nc - 1));
-  let outside = vec3<i32>(q != cl);
+  let mirror = (q < vec3<i32>(0)) & vec3<bool>(sym_lo(0), sym_lo(1), sym_lo(2));
+  let outside = select(vec3<i32>(q != cl), vec3<i32>(0), mirror);
   let sgn = 1.0 - 2.0 * f32((outside.x + outside.y + outside.z) & 1);
   return sgn * textureLoad(PHIC, cl, 0).x;
 }

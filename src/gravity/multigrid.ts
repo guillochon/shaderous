@@ -46,6 +46,7 @@ export class Multigrid {
     box: number,
     params: GPUBuffer,
     stateU1: GPUTexture[],
+    symmetry?: readonly boolean[],
   ): Promise<Multigrid> {
     if (n & (n - 1)) throw new Error('multigrid needs a power-of-two grid');
     const mg = new Multigrid();
@@ -57,6 +58,7 @@ export class Multigrid {
       'gravity/multipole.wgsl',
       stateU1.map((t) => ({ 0: params, 1: t.createView() })),
       'multipole',
+      symmetry,
     );
 
     [mg.pSmooth, mg.pResidual, mg.pRestrict, mg.pProlong, mg.pRhs, mg.pBoundary] = await Promise.all([

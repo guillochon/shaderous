@@ -52,6 +52,8 @@ struct Params {
                          //   at (c + 0.5) dx + org
   rot: vec4<f32>,        // a rotating frame (gravity/rot.wgsl): its angular velocity, and 1 in w
                          //   for the centrifugal force; all zero for an inertial frame
+  sym: vec4<u32>,        // per axis: 0, or 1 where the lower face is a plane of mirror symmetry
+                         //   (SimConfig.symmetry; the gas sees it as reflecting)
 }
 
 // The state as the frame slot (gravity/frame_off.wgsl) hands it back.
@@ -76,6 +78,12 @@ fn opaque(x: f32) -> f32 {
 }
 fn opaque3(x: vec3<f32>) -> vec3<f32> {
   return bitcast<vec3<f32>>(bitcast<vec3<u32>>(x) ^ vec3<u32>(bitcast<u32>(P.refine.w)));
+}
+
+// The lower face along `axis` is a plane of mirror symmetry, not a wall: what lies beyond it is
+// the mirror image of what lies inside (the potential is even across it).
+fn sym_lo(axis: i32) -> bool {
+  return P.sym[axis] == 1u;
 }
 
 // A position as a fraction of the box from the domain's lower corner (0 to 1 inside it), and

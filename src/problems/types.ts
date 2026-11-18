@@ -266,6 +266,12 @@ export interface Problem {
    * after, are those relative to the turning frame (toRotating converts an inertial setup).
    */
   rotation?: (params: Record<string, number>, ndim: 2 | 3) => { omega: [number, number, number]; centrifugal?: boolean };
+  /**
+   * The mirrors the setup is symmetric under, each a plane through the origin normal to an axis:
+   * a run may then compute only the part above them (SimConfig.symmetry). `mhd`: its magnetic
+   * field is symmetric too (mhd/common.wgsl gives the planes the field's parity).
+   */
+  symmetry?: { axes: [boolean, boolean, boolean]; mhd?: boolean };
   /** Density below which gas does not ask for refinement (default: the fluff density, else ten times a star's ambient density, else 0, off). */
   refineRho?: number;
   /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */

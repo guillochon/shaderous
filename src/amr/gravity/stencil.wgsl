@@ -22,6 +22,8 @@ fn g_nb(slot: i32, o: vec3<i32>, l: vec3<i32>, axis: i32, upper: bool) -> vec2<f
     if (GL.k == 0u) { return vec2<f32>(textureLoad(PHI, o + q).x, 0.0); }
     return vec2<f32>(0.0, 0.0);
   }
+  // A plane of mirror symmetry: the ghost is the cell's image, phi_c, on every sublevel.
+  if (!upper && sym_lo(axis)) { return vec2<f32>(textureLoad(PHI, o + l).x, 0.0); }
   // Domain boundary (isolated): Dirichlet data at the face, ghost = 2 phi_face - phi_c.
   var v = 0.0;
   if (GL.k == 0u) {

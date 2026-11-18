@@ -4,7 +4,8 @@
 //      level's potential to the ghost-cell center. Run on a level before it is solved; these
 //      values are its boundary condition there.
 //   1  every other face, after all levels are solved: copies from same-level neighbors, and
-//      linear extrapolation at isolated domain boundaries (matching a one-sided gradient).
+//      linear extrapolation at isolated domain boundaries (matching a one-sided gradient), or
+//      the mirror image at a plane of mirror symmetry.
 // The hydro passes then difference the potential without knowing about block boundaries.
 #include "hydro/common.wgsl"
 #include "amr/grid.wgsl"
@@ -81,7 +82,9 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     let depth = select(-l[axis], l[axis] - BS + 1, upper);
     let p0 = textureLoad(PHI, c + depth * e).x;
     let p1 = textureLoad(PHI, c + (depth + 1) * e).x;
-    if (depth == 1) { v = 2.0 * p0 - p1; } else { v = 3.0 * p0 - 2.0 * p1; }
+    if (!upper && sym_lo(axis)) {
+      v = select(p1, p0, depth == 1);
+    } else if (depth == 1) { v = 2.0 * p0 - p1; } else { v = 3.0 * p0 - 2.0 * p1; }
   }
   textureStore(PHI, c, vec4<f32>(v, 0.0, 0.0, 0.0));
 }

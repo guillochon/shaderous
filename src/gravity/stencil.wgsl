@@ -7,7 +7,8 @@
 // nb_sum returns (sum, diag) such that  h^2 Lap(phi) = sum - diag * phi_c.
 // Periodic: neighbors wrap. Isolated: Dirichlet data at the face, ghost = 2 phi_face - phi_c,
 // which moves one phi_c per boundary face onto the diagonal. Coarse levels solve for the
-// error, whose boundary value is zero.
+// error, whose boundary value is zero. A plane of mirror symmetry (sym_lo) is a zero-gradient
+// face on every level: the ghost is the cell's own image, phi_c.
 
 // Contribution of one neighbor: (value added to the sum, 1 if it added to the diagonal).
 fn nb_one(c: vec3<i32>, o: vec3<i32>) -> vec2<f32> {
@@ -18,6 +19,10 @@ fn nb_one(c: vec3<i32>, o: vec3<i32>) -> vec2<f32> {
   }
   if (P.grav_bc == 0u) {
     return vec2<f32>(textureLoad(PHI, (q + n) % n).x, 0.0);
+  }
+  if (any(q < vec3<i32>(0))) {
+    let a = select(select(2, 1, q.y < 0), 0, q.x < 0);
+    if (sym_lo(a)) { return vec2<f32>(textureLoad(PHI, c).x, 0.0); }
   }
   var s = 0.0;
   if (L.level == 0u) { s = 2.0 * BF[bf_index(c, o, n)]; }

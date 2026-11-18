@@ -61,11 +61,16 @@ fn g_inv(gid: vec3<u32>) -> GInv {
 
 // Follow same-level neighbors to the block that holds cell l, which may lie outside `slot`
 // along any axes. ok is false if that walks off the level (a coarser region or the domain edge).
+// A cell beyond a plane of mirror symmetry is its image, the potential being even across it.
 struct GRes { ok: bool, slot: i32, l: vec3<i32> }
 
 fn g_resolve(slot0: i32, l0: vec3<i32>, bsize: i32) -> GRes {
   var slot = slot0;
   var l = l0;
+  let bc = blk_coord(slot0);
+  for (var axis = 0; axis < 3; axis++) {
+    if (l[axis] < 0 && bc[axis] == 0 && sym_lo(axis)) { l[axis] = -1 - l[axis]; }
+  }
   for (var axis = 0; axis < 3; axis++) {
     if (l[axis] < 0) {
       let nb = bt(slot, 6u + u32(2 * axis));

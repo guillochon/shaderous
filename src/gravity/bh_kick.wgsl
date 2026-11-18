@@ -39,6 +39,52 @@
 @group(0) @binding(2) var<storage, read> RED: array<f32>;
 @group(0) @binding(3) var<storage, read_write> BH: Masses;
 
+// Mirror symmetry (Params.sym): the reduction summed one 2^k-th of the configuration, and the
+// masses lie on the planes. The whole's totals are the grid's unfolded: a scalar times 2^k; a
+// vector's component along a mirrored axis cancels against its images and the rest doubles per
+// mirror; an angular momentum's (a pseudovector's) component survives only where every mirror
+// is normal to it.
+fn k_mirrors() -> f32 {
+  return f32((P.sym.x & 1u) + (P.sym.y & 1u) + (P.sym.z & 1u));
+}
+fn unfold_s(s: f32) -> f32 {
+  return s * exp2(k_mirrors());
+}
+fn unfold_v(v: vec3<f32>) -> vec3<f32> {
+  var f = vec3<f32>(1.0);
+  for (var a = 0; a < 3; a++) {
+    if (P.sym[a] != 1u) { continue; }
+    var g = vec3<f32>(2.0);
+    g[a] = 0.0;
+    f *= g;
+  }
+  return v * f;
+}
+fn unfold_l(l: vec3<f32>) -> vec3<f32> {
+  var f = vec3<f32>(1.0);
+  for (var a = 0; a < 3; a++) {
+    if (P.sym[a] != 1u) { continue; }
+    var g = vec3<f32>(0.0);
+    g[a] = 2.0;
+    f *= g;
+  }
+  return l * f;
+}
+fn red_s(i: u32) -> f32 {
+  if (all(P.sym.xyz == vec3<u32>(0u))) { return RED[i]; }
+  return unfold_s(RED[i]);
+}
+fn red_v(i: u32) -> vec3<f32> {
+  let v = vec3<f32>(RED[i], RED[i + 1u], RED[i + 2u]);
+  if (all(P.sym.xyz == vec3<u32>(0u))) { return v; }
+  return unfold_v(v);
+}
+fn red_l(i: u32) -> vec3<f32> {
+  let v = vec3<f32>(RED[i], RED[i + 1u], RED[i + 2u]);
+  if (all(P.sym.xyz == vec3<u32>(0u))) { return v; }
+  return unfold_l(v);
+}
+
 // Cleared for a pipeline that only evaluates the accelerations (a fresh start, or a potential
 // solved again in mid-run): no step has been taken, so nothing is accreted and nothing kicked.
 override LIVE: bool = true;
@@ -53,11 +99,11 @@ fn main() {
   if (LIVE && P.G > 0.0) {
     for (var i = 0u; i < n; i++) {
       let o = 1u + 10u * i;
-      let dm = RED[o + 3u];
+      let dm = red_s(o + 3u);
       if (dm > 0.0) {
         let b = BH.list[i];
-        let dp = vec3<f32>(RED[o + 4u], RED[o + 5u], RED[o + 6u]);
-        let dl = vec3<f32>(RED[o + 7u], RED[o + 8u], RED[o + 9u]);
+        let dp = red_v(o + 4u);
+        let dl = red_l(o + 7u);
         let mass = (b.pos.w - b.cmass.x) / P.G;
         // (M v + dp) / (M + dm), as a change to v so that it too can be compensated
         let dv = (dp - dm * b.vel.xyz) / (mass + dm);
@@ -84,19 +130,19 @@ fn main() {
     }
   }
 
-  let m = RED[0];
+  let m = red_s(0u);
   var abar = vec3<f32>(0.0);
   if (P.bh.y == 1.0 && m > 0.0) {
     for (var i = 0u; i < n; i++) {
       let o = 1u + 10u * i;
-      abar += vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]) / m;
+      abar += red_v(o) / m;
     }
   } else if (P.bh.y == 2.0) {
     var gm = 0.0;
     for (var i = 0u; i < n; i++) {
       let o = 1u + 10u * i;
       // The gas does not move a mass held on its orbit, nor the center of mass through it.
-      if (!mass_on_orbit(BH.list[i])) { abar -= P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]); }
+      if (!mass_on_orbit(BH.list[i])) { abar -= P.G * red_v(o); }
       gm += BH.list[i].pos.w;
     }
     abar /= max(gm, 1e-30);
@@ -105,7 +151,7 @@ fn main() {
   for (var i = 0u; i < n; i++) {
     let b = BH.list[i];
     let o = 1u + 10u * i;
-    var acc = -abar - P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]) / b.pos.w;
+    var acc = -abar - P.G * red_v(o) / b.pos.w;
     // Held on its orbit: the frame's acceleration and the other masses' pull, not the gas's.
     if (mass_on_orbit(b)) { acc = -abar; }
     // A rotating frame's centrifugal force.

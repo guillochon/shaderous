@@ -35,7 +35,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
-import { type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -506,6 +506,8 @@ export class AmrSim implements Simulation {
       const why = mhdUnsupported(cfg);
       if (why) throw new Error(`MHD: ${why}`);
     }
+    const asym = symmetryUnsupported(cfg);
+    if (asym) throw new Error(`Mirror symmetry: ${asym}`);
     let lastTried: number | null = null;
     for (let slots = 0; ; ) {
       // A resource the GPU cannot make (out of memory, or larger than it allows one to be, which
@@ -578,7 +580,7 @@ export class AmrSim implements Simulation {
     // 3D: self-gravity machinery is built for every run, so gravity can be switched on later.
     const gravity = async () => {
       const u1 = [0, 1].map((p) => v(sim.state[p][0]));
-      sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, BS], 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole');
+      sim.redMp = await Multipoles.create(d, [sim.cap * BS, BS, BS], 'amr/multipole.wgsl', u1.map((t) => ({ 0: sim.params, 1: t, 30: sim.bt })), 'amr multipole', cfg.symmetry);
       sim.grav = await AmrGravity.create({
         device: d, slotsPerSide: sim.slotsPerSide, levels: sim.levels, params: sim.params, bt: sim.bt,
         listAll: sim.listAll, listLeaf: sim.listLeaf, listLevel: sim.listLevel, rg: sim.rg, clock: sim.clock, bh: sim.bh,
@@ -2551,7 +2553,7 @@ export class AmrSim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
-      return diag;
+      return unfoldDiagnostics(diag, this.cfg.symmetry);
     } finally {
       this.stagingBusy = false;
     }

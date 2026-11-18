@@ -100,7 +100,8 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   e[axis] = g_dx;
   seen += ext_dphi(blk_pos(slot, a), e * f32(ib - ia), 0.0);
   var face = seen;
-  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
+  // (A plane of mirror symmetry is no wall: the cell beyond it is the image, as for the state.)
+  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3 && !sym_lo(axis)) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
   if (wall) {
     a[axis] = ra;
     b[axis] = ra + 1;
@@ -341,14 +342,24 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
       oy = axis_fluxes(c, ey, 1, w0, p0);
       if (!is2d()) { oz = axis_fluxes(c, ez, 2, w0, p0); }
     }
+    // Planes of mirror symmetry: nothing crosses them (hydro/flux.wgsl mirror_flux).
+    let gm = blk_coord(slot) * BS + l;
+    if (gm.x == 0 && sym_lo(0)) { ox.lo = mirror_flux(ox.lo, 0); }
+    if (gm.y == 0 && sym_lo(1)) { oy.lo = mirror_flux(oy.lo, 1); }
+    if (gm.z == 0 && sym_lo(2) && !is2d()) { oz.lo = mirror_flux(oz.lo, 2); }
     // With species, their pass needs the mass fluxes as this cell computed them.
     store_mass_flux(slot, l, c, ox, oy, oz);
     own = array<Faces, 3>(ox, oy, oz);
   }
   let matched = match_faces(own, slot, l);
-  let fx = matched[0];
-  let fy = matched[1];
-  let fz = matched[2];
+  var fx = matched[0];
+  var fy = matched[1];
+  var fz = matched[2];
+  // Planes of mirror symmetry: nothing crosses them (hydro/flux.wgsl mirror_flux).
+  let gl = blk_coord(slot) * BS + l;
+  if (gl.x == 0 && sym_lo(0)) { fx.lo = mirror_flux(fx.lo, 0); }
+  if (gl.y == 0 && sym_lo(1)) { fy.lo = mirror_flux(fy.lo, 1); }
+  if (gl.z == 0 && sym_lo(2) && !is2d()) { fz.lo = mirror_flux(fz.lo, 2); }
   if (g_deposit) {
     // A cell on no face shared with a faster neighbor is copied as it is.
     if (!g_touched) {

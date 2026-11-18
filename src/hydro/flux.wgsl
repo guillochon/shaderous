@@ -200,6 +200,17 @@ fn flux_zero() -> Flux {
   return Flux(0.0, vec3<f32>(0.0), 0.0, 0.0, 0.0, 0.0, vec4<f32>(0.0));
 }
 
+// The flux through a plane of mirror symmetry (sym_lo): nothing crosses it, so only the normal
+// momentum flux (the pressure, and viscosity's normal stress) is kept. The Riemann problem
+// between a state and its image gives this up to rounding; it is set exactly, so that the
+// mass on the grid is conserved to the bit.
+fn mirror_flux(f: Flux, axis: i32) -> Flux {
+  var o = flux_zero();
+  o.mom[axis] = f.mom[axis];
+  o.d[axis] = f.d[axis];
+  return o;
+}
+
 // Net inflow through a cell's faces, per unit dt/dx.
 struct Net { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32 }
 

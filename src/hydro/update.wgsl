@@ -151,6 +151,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if (!flat) { fz = axis_fluxes(c, ez, 2, w0, p0); }
   }
 
+  // Planes of mirror symmetry: nothing crosses them.
+  if (c.x == 0 && sym_lo(0)) { fx.lo = mirror_flux(fx.lo, 0); }
+  if (c.y == 0 && sym_lo(1)) { fy.lo = mirror_flux(fy.lo, 1); }
+  if (c.z == 0 && sym_lo(2) && !flat) { fz.lo = mirror_flux(fz.lo, 2); }
+
   if (DEBUG_FLUX) {
     textureStore(O1, c, vec4<f32>(fx.lo.m, fx.hi.m, fy.lo.m, fy.hi.m));
     textureStore(O2, c, vec4<f32>(fz.lo.m, fz.hi.m, 0.0, 0.0));

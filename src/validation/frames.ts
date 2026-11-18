@@ -1,5 +1,5 @@
 // Validation tests for the non-inertial frames and coordinate systems (plans/coordinate-systems-plan.md):
-// the rotating frame (Part A). Registered in tests.ts after the others.
+// the rotating frame (Part A) and mirror symmetry (Part B). Registered in tests.ts after the others.
 import type { Gpu } from '../gpu/device';
 import { all, OUTFLOW, PERIODIC, REFLECT, type Problem } from '../problems/types';
 import { toRotating } from '../problems/rotating';
@@ -7,6 +7,7 @@ import { domainLo } from '../domain';
 import type { Sim } from '../sim';
 import type { AmrSim } from '../amr/amr_sim';
 import { withAmr, withSim, type TestDef } from './tests';
+import { SYM_TESTS } from './symmetry';
 
 const gas = (over: Partial<Problem>): Problem => ({
   id: 'frame-test', label: 'Frame test', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
@@ -229,4 +230,5 @@ export const FRAME_TESTS: TestDef[] = [
       return { pass, metrics: m };
     },
   },
+  ...SYM_TESTS,
 ];

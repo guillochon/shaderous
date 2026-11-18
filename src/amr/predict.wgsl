@@ -71,7 +71,8 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   e[axis] = g_dx;
   seen += ext_dphi(blk_pos(slot, a), e * f32(ib - ia), 0.0);
   var face = seen;
-  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
+  // (A plane of mirror symmetry is no wall: the cell beyond it is the image, as for the state.)
+  let wall = (ra == -1 && bt(slot, 6u + u32(2 * axis)) == -3 && !sym_lo(axis)) || (ra == BS - 1 && bt(slot, 7u + u32(2 * axis)) == -3);
   if (wall) {
     a[axis] = ra;
     b[axis] = ra + 1;

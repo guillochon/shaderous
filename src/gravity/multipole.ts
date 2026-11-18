@@ -21,11 +21,15 @@ export class Multipoles {
     this.result = result;
   }
 
-  /** `source`: the reduction's red_cell() module; `variants`: its bindings, one map per state parity. */
-  static async create(device: GPUDevice, dims: number[], source: string, variants: Record<number, Bindable>[], label: string): Promise<Multipoles> {
+  /**
+   * `source`: the reduction's red_cell() module; `variants`: its bindings, one map per state
+   * parity; `symmetry`: the mirrored axes, whose images the moments are unfolded to include.
+   */
+  static async create(device: GPUDevice, dims: number[], source: string, variants: Record<number, Bindable>[], label: string, symmetry?: readonly boolean[]): Promise<Multipoles> {
+    const mask = (symmetry ?? []).reduce((m, s, a) => m | (s ? 1 << a : 0), 0);
     const [reducer, pipeline] = await Promise.all([
       Reducer.create(device, dims, new Array(MP_COUNT).fill(SUM), source, {}, variants, label),
-      computePipeline(device, assemble('gravity/multipole_com.wgsl'), `${label} about the center of mass`),
+      computePipeline(device, assemble('gravity/multipole_com.wgsl'), `${label} about the center of mass`, mask ? { SYM_MASK: mask } : undefined),
     ]);
     const result = device.createBuffer({ label: `${label} about the center of mass`, size: MP_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
     const group = bindGroup(device, pipeline, { 0: reducer.result, 1: result });

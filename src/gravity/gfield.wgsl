@@ -22,12 +22,14 @@ fn g_self(c: vec3<i32>) -> vec3<f32> {
 
 // Self-gravity potential at the half step, at a cell that may lie one cell outside the grid:
 // periodic potentials wrap, isolated ones are extrapolated linearly (consistent with the
-// one-sided gradient).
-fn phi_self(q: vec3<i32>) -> f32 {
+// one-sided gradient), and beyond a plane of mirror symmetry the cell's image is taken.
+fn phi_self(q0: vec3<i32>) -> f32 {
   let n = i32(P.n);
   if (P.grav_bc == 0u) {
-    return textureLoad(G, (q + n) % n, 0).w;
+    return textureLoad(G, (q0 + n) % n, 0).w;
   }
+  let mirror = (q0 < vec3<i32>(0)) & vec3<bool>(sym_lo(0), sym_lo(1), sym_lo(2));
+  let q = select(q0, -1 - q0, mirror);
   let cl = clamp(q, vec3<i32>(0), vec3<i32>(n - 1));
   let d = cl - q;
   return 2.0 * textureLoad(G, cl, 0).w - textureLoad(G, cl + d, 0).w;
@@ -56,7 +58,8 @@ fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
   seen += ext_dphi(cell_pos(a), vec3<f32>(e * apart) * P.dx, 0.0);
   var face = seen;
   let n = select(i32(P.n), i32(P.dims.z), axis == 2);
-  let at_lo = ia == -1 && bc_wall(P.bc_lo[axis]);
+  // (A plane of mirror symmetry is no wall: beyond it is the image, the potential even.)
+  let at_lo = ia == -1 && bc_wall(P.bc_lo[axis]) && !sym_lo(axis);
   let at_hi = ia == n - 1 && bc_wall(P.bc_hi[axis]);
   if (at_lo || at_hi) {
     // Across the wall: the uniform field as it is, the rest from the step next to it inside.
