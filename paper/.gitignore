@@ -21,3 +21,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 *.swp
+
+# uv
+uv.lock
