@@ -346,6 +346,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (RESISTIVITY) { heat += ohm_heat(t); }
   let eint = u2.y + dtdx * (net_b.y + max(ph, P.p_floor) * net_b.w + heat);
   let sc = u2.z + dtdx * net_b.z;
+  g_kphi = swirl_ke(rho, mom);
   var en = dual_energy(rho, 0.5 * dot(mom, mom) / rho + eb, E, eint);
   var mout = mom;
   let tame = tame_fluff(rho, mom, en.y);

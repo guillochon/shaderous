@@ -76,6 +76,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // The point masses' and the frame's part of the kick adds its own energy (gravity/ext.wgsl);
     // self-gravity's work for the whole step is already in E.
     E += dot(kx, u1.yzw + 0.5 * kick) / u1.x;
+    g_kphi = swirl_ke(u1.x, mom);
     let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x + emag, E, eint);
     E = en.x;
     eint = en.y;

@@ -339,7 +339,7 @@ export const CYL_TESTS: TestDef[] = [
   {
     id: 'cyl-torus',
     name: 'Axisymmetric: a pressure-supported torus around a point mass',
-    criterion: 'A polytropic torus of constant specific angular momentum (gamma = 5/3, pressure maximum at R = 1, inner edge 0.7) in equilibrium around a softened point mass on the axis, in (R, z) at 256^2 (R to 2.5, faces open for outflow only, so that gas the mass pulls in from outside the box cannot feed it): over five orbits at its center (t = 10 pi) its mass and the radius of its center of mass stay within 1%, and its peak density, which oscillates by a few percent as the 3D torus’s does, within 5%',
+    criterion: 'A polytropic torus of constant specific angular momentum (gamma = 5/3, pressure maximum at R = 1, inner edge 0.7) in equilibrium around a softened point mass on the axis, in (R, z) at 256^2 (R to 2.5, faces open for outflow only, so that gas the mass pulls in from outside the box cannot feed it): over five orbits at its center (t = 10 pi) its peak density, its mass and the radius of its center of mass stay within 1%',
     async run(gpu) {
       const n = 256;
       const box = 2.5;
@@ -399,7 +399,7 @@ export const CYL_TESTS: TestDef[] = [
           center_change: Math.abs(b.R / a.R - 1),
           peak_initial: a.peak, center_initial: a.R, mass_initial: a.mass, steps: (await sim.diagnostics()).steps, ...track,
         };
-        return { pass: m.peak_change < 0.05 && m.mass_change < 0.01 && m.center_change < 0.01, metrics: m };
+        return { pass: m.peak_change < 0.01 && m.mass_change < 0.01 && m.center_change < 0.01, metrics: m };
       });
     },
   },

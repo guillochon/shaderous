@@ -69,6 +69,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // masses' and the frame's part of the kick adds its own (gravity/ext.wgsl). Then re-derive
     // e_int.
     E += dot(kx, u1.yzw + 0.5 * kick) / u1.x;
+    g_kphi = swirl_ke(u1.x, mom);
     let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x + emag, E, eint);
     E = en.x;
     eint = en.y;

@@ -1803,39 +1803,28 @@ $`-y`$, which is $`-z`$ here. The scheme solves
 - **Radial source,** $`(p + \rho v_\phi^2)/R`$, with $`p`$ the mean of the cell's two radial
   face pressures (each face's normal momentum flux less what its mass flux carries). With it
   the cylindrical balance reduces exactly to the Cartesian one: uniform pressure is in balance
-  to rounding. The well-balanced reconstruction acts along $`z`$ alone, on the uniform grid
-  and on blocks. Radially it made a torus held up by its rotation around a point mass pile up
-  at its inner edge: at $`256^2`$ a torus with $`\ell\propto R^{1/4}`$ (stable to axisymmetric
-  displacements) reached 2.2 times its peak density in two orbits, while the same torus in 3D
-  at the same cell size, well balanced along $`x`$ and $`y`$, stayed within 2.5%, and with the
-  radial balance off the axisymmetric one stayed within 1%. What was found:
-  - The balance ignores rotation. For gas held up by its rotation the deviation from
-    hydrostatic balance is the centrifugal term $`\rho v_\phi^2\Delta R/R`$, ten times the
-    pressure or more near a torus's edges, where the limiter clips it and the unlimited
-    hydrostatic step that goes back in gives the faces a pressure slope rotation does not hold
-    up. (In 3D the rotation is carried by the advection of the swirl, which the reconstruction
-    does not see.) Measuring against the effective potential $`\Phi - \int v_\phi^2/R\,dR`$
-    needs it at two orders: between two cells, a step density weighted so that
-    $`\tfrac12(\rho_a + \rho_b)`$ times it is the trapezoid rule on $`\rho v_\phi^2/R`$; and
-    from a cell's center to its own face, its own $`v_\phi^2/R`$, so that its two faces differ by
-    exactly what its kick and its geometric source cancel (with the pair's step there instead,
-    they differ at first order where the density changes). With both, a torus with
-    $`\ell\propto R^{1/4}`$ held for an orbit at $`256^2`$ (peak +0.3%, from +48%).
-  - That is not all of it, and the rest is not the reconstruction's. With the radial balance
-    off, the same torus piles up at its inner edge too whenever the scheme is less dissipative:
-    with the minmod limiter (peak +129% in one orbit at $`64^2`$, against +1% with Koren's), or
-    with the shock detector's HLL fallback switched off (+183%). The same torus in 3D at the same
-    cell size, with the detector off, stays within 7%. So $`(R, z)`$ has an instability of its
-    own at a rotating torus's inner edge, which dissipation holds down and the radial balance,
-    taking dissipation away, lets through: the thin gas spilled inside the edge, carrying the
-    torus's angular momentum, is flung outward (correctly) and gathers in the edge cell. It is
-    not the predictor's geometric terms (without them it is worse). The next suspects are the
-    geometric source's use of the cell's half-step $`v_\phi`$ where the face fluxes carry the
-    angular momentum, and the cell-center values standing for ring averages.
-  - So the radial balance stays off. With it on and both parts of the effective potential, the
-    constant-$`\ell`$ torus of the tests rose 17% in three orbits; along $`z`$ alone it keeps
-    within 2.6% for five. It still holds a stratified column along
-  the axis as it does in Cartesian coordinates.
+  to rounding, and the well-balanced reconstruction holds a stratified column, and a star
+  held up radially by its pressure, as it does in Cartesian coordinates.
+- **Energy where the gas swirls.** The radial faces carry the total energy weighed by $`R`$ and
+  the angular momentum by $`R^2`$, so the kinetic energy of the swirl that the updated angular
+  momentum gives and the one the energy update holds differ, by a few percent of it at a steep
+  edge. In cold gas carried round by its rotation, the swirl's energy a hundred times the heat,
+  $`E - \tfrac12\rho v^2`$ is then mostly that difference. At a torus's inner edge it drained
+  the pressure within a few hundredths of an orbit, the edge lost its support, and the gas
+  spilling inward, flung back out by its angular momentum, piled up in the edge cell: the peak
+  density of a torus around a point mass rose 2.8 times in an orbit at $`64^2`$ with the shock
+  detector's HLL fallback off, 2.3 times with the minmod limiter, 1.5 times with the
+  well-balanced reconstruction (each taking away some of the dissipation that had held it
+  down), while the same torus in 3D, whose momentum and energy share their faces, stayed
+  within 7%. So the dual-energy switch (hydro/dual_energy.wgsl) takes $`E - KE`$ for the
+  internal energy only where that is also at least a tenth of the swirl's kinetic energy
+  $`\tfrac12\rho v_\phi^2`$, and keeps the advected internal energy elsewhere. The same torus
+  then holds to 1% in an orbit with any of the three; at $`256^2`$, with the well-balanced
+  reconstruction on, a torus of constant angular momentum keeps its peak density within 0.3% for
+  five orbits (with the old switch, and the radial balance off, it wobbled by 3 to 4%). (Measuring the radial balance against the effective
+  potential, gravity's plus the centrifugal, was tried as well, the step between two cells
+  density weighted and each cell's own swirl for its half step: it brought the first orbit to
+  0.5% but was not needed, and is not used.)
 - **Predictor:** the half step's geometric terms, $`-\rho v_R/R`$ in the density,
   $`-\rho c_s^2 v_R/R`$ in the pressure, $`+v_\phi^2/R`$ in $`v_R`$ and $`-v_Rv_\phi/R`$ in
   $`v_\phi`$.
@@ -1903,8 +1892,7 @@ field loop carried along $`z`$ keeps $`\nabla\cdot B`$ at $`3\times10^{-7}`$ and
 magnetic energy (the same loop in Cartesian coordinates: 96.0%), with a uniform axial field at
 rest to Mach $`3\times10^{-7}`$; and a pressure-supported torus of constant angular momentum
 around a point mass on the axis keeps its mass and the radius of its center of mass to 1% and
-its peak density to 5% (it oscillates by a few percent, as the 3D torus's does) for five
-orbits. Its faces are open for outflow only: open both ways, they let the mass pull gas in
+its peak density to 0.3% for five orbits. Its faces are open for outflow only: open both ways, they let the mass pull gas in
 from outside the box, which then piled up at the mass without bound.
 
 

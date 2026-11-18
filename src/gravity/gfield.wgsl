@@ -44,9 +44,6 @@ fn phi_self(q0: vec3<i32>) -> f32 {
 // where it is the true difference (the potential continued in a straight line), so that the
 // pressure on the wall is the hydrostatic one. The external part is exact, as in dphi_half.
 fn dphi_step(c: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
-  // An axisymmetric run is well balanced along z alone (docs/numerics.md section 22): radially,
-  // a torus held up by its rotation around a point mass piled up at its inner edge with it.
-  if (cylindrical() && axis == 0) { return vec2<f32>(0.0); }
   var e = vec3<i32>(0);
   e[axis] = 1;
   let ia = c[axis] + k;
