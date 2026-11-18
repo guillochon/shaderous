@@ -525,7 +525,6 @@ export const implicitPressure = (c: SimConfig): boolean => c.pressure === 'impli
  */
 export function implicitUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid') return 'it is built for the liquid equation of state only, so far';
-  if (c.amrLevels > 0) return 'it is not available on the adaptive mesh yet';
   if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'it is not available in axisymmetric or spherical runs';
   // (A uniform field is the pressure passes' own: pressure/correct.wgsl.)
   if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available with it yet';
@@ -533,6 +532,18 @@ export function implicitUnsupported(c: SimConfig): string | null {
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
   if ((c.problem.species?.length ?? 0) > 0) return 'species are not available with it yet (the correction changes the density they ride on)';
   if (c.cooling !== 'off' || c.problem.damping) return 'cooling and damping zones are not available with it';
+  return null;
+}
+
+/**
+ * Why a run on the block grid cannot take implicit pressure as configured, or null: what the
+ * uniform grid's takes (implicitUnsupported), less obstacles, inflows, a uniform field and
+ * per-block timesteps (one solve couples every cell at one time: plans/incompressible.md 5.5).
+ */
+export function implicitBlocksUnsupported(c: SimConfig): string | null {
+  if (c.timeBins > 0) return 'per-block timesteps are not available with it: one solve couples every cell at one time';
+  if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available with it on the adaptive mesh yet';
+  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'obstacle' || p.kind === 'inflow')) return 'obstacles and inflows are not available with it on the adaptive mesh yet';
   return null;
 }
 
@@ -671,7 +682,7 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     // With implicit pressure the flux is advection's alone (hydro/riemann/advect.wgsl), and the
     // predictor takes the last solve's pressure gradient (hydro/predictor.wgsl).
     riemann: implicitPressure(c) ? 'hydro/riemann/advect.wgsl' : `hydro/riemann/${c.riemann}.wgsl`,
-    psplit: `const PSPLIT = ${implicitPressure(c)};\n`,
+    psplit: `const PSPLIT = ${implicitPressure(c)};\nconst PSPLIT_LAG = ${implicitPressure(c)};\n`,
     psplit_grad: implicitPressure(c) ? 'pressure/predict_on.wgsl' : 'pressure/predict_off.wgsl',
     limiter: `hydro/limiters/${c.limiter}.wgsl`,
     cooling: COOLING_MODULES[c.cooling],

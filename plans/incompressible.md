@@ -1,8 +1,8 @@
 # Plan: nearly incompressible flow
 
-Status: in progress (2026-11-18). Stage 0 is done (2.4). Stage 1 is done (3.8). Stage 2 is
-done for the liquid on the uniform grid, 2D and 3D (4.2.1, 4.12); the ideal gas, gravity and
-the convergence gate are not. Stage 3 is not started. Figures quoted from the code in
+Status (2026-11-18): stages 0 (2.4), 1 (3.8), 2 (4.2.1, 4.12) and 3 (5.10) are done for the
+liquid. Not done: implicit pressure for a gas with an energy (4.2.1 item 3 says why it was
+left), self-gravity and species with it, obstacles and a uniform field on the adaptive mesh. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -811,6 +811,44 @@ indicator for this mode.
 4. Regridding and warm start.
 5. 2D blocks.
 6. Self-gravity and stars with 2b, if 2b is done.
+
+### 5.10 As built (2026-11-18)
+
+Done for the liquid, 2D and 3D, with periodic, wall and open faces and viscosity; without a
+uniform field, obstacles or inflows on blocks (refused).
+
+- **5.2, composite operator: built.** The fine ghost is $`p_i + \tfrac23(p_c - p_i)`$ (on the
+  line between the centers, not the limited interpolation of the gravity solver), and a coarse
+  cell beside a refined block takes the mean of the fine faces' fluxes. The correction pass
+  uses the same face values (`amr/pressure/faces.wgsl`).
+- **5.3, two-way coupling: option 1, in full-approximation form.** Every level relaxes the
+  plain operator with a right-hand-side term that makes it reproduce the composite one (TAU),
+  the root level is solved by the uniform multigrid, prolongation is piecewise constant. The
+  in-block sublevels of the gravity solver are not used. Convergence did not degrade with
+  depth in the one test of it (three levels: residual $`1`$ to $`4\times10^{-5}`$ after three
+  cycles, where the uniform grid's is the same). Option 2 was not needed. The residual tallied
+  is the composite one, over the leaves.
+- **5.4, correction on blocks:** its own pass (`amr/pressure/correct.wgsl`), not an addition to
+  `amr/correct.wgsl`.
+- **5.5:** per-block timesteps refused, as planned.
+- **5.6, regridding: no separate handling.** The solved pressure is stored in the liquid's
+  unused internal-energy slot, so the regrid pass moves it with the state, the assembly fills
+  its ghosts, and it is both the predictor's lagged pressure and the solve's start. The first
+  version started each solve from the pressure of the state's density instead and blew up at
+  Mach 0.001 (single-precision noise in that pressure is $`6\times10^{-8}/M^2`$).
+- **5.7:** 2D blocks from the start. **No vorticity indicator yet:** the mesh in the tests is
+  what the density and pressure indicators happen to give for the Gresho vortex.
+
+| Test | Result (Apple GPU, Chrome) |
+|---|---|
+| `psplit-amr-unrefined` | block grid against uniform: kinetic energy to $`1\times10^{-7}`$, same 107 steps |
+| `psplit-amr-gresho` | 3 levels: 400 steps at Mach 0.1, 0.01, 0.001 (explicit 6 800); 0.9992 kept; mass to $`4\times10^{-7}`$, momentum to $`3\times10^{-8}`$; residual 1 to $`4\times10^{-5}`$ |
+| `psplit-amr-regrid` | 3 levels merging to 1: density within $`0.78\,M^2`$, 0.9955 kept, mass to $`1\times10^{-7}`$ |
+| `psplit-amr-3d` | 3D column: mass to $`2\times10^{-7}`$, $`v_z < 3\times10^{-7}`$; Taylor-Green on blocks: 1.0054 of the exact rate |
+
+Not built, of 5.8's list: `psplit-amr-poisson` (the solver is tested through the flow, not
+against a manufactured solution; its order of convergence is unmeasured), `psplit-amr-wake`
+(obstacles are refused on blocks), `psplit-amr-divergence` as its own test.
 
 ## 6. Not covered
 

@@ -24,6 +24,8 @@ import { MAX, Reducer } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
+import { AmrPressure } from './pressure';
+import { PF_CLOSED, PF_OPEN, PF_PERIODIC } from '../pressure/multigrid';
 import { Multipoles } from '../gravity/multipole';
 import { LumpReader } from '../gravity/lumps';
 import { MassSums } from '../gravity/mass_sums';
@@ -37,7 +39,7 @@ const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
-import { refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -240,6 +242,8 @@ export class AmrSim implements Simulation {
   private pMassField?: GPUComputePipeline;
   private gMassField?: GPUBindGroup;
   private pCorrect!: GPUComputePipeline;
+  /** Implicit pressure (SimConfig.pressure): the solve and its passes on the leaves (amr/pressure.ts). */
+  prs?: AmrPressure;
   private gCorrect: GPUBindGroup[] = [];
   private brush: GPUBuffer;
   private pBrush!: GPUComputePipeline;
@@ -524,7 +528,7 @@ export class AmrSim implements Simulation {
   static async create(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<AmrSim> {
     // The tabulated white dwarf equation of state needs its table on the device (eos/helmholtz.ts).
     if (cfg.eos === 'helmholtz') await prepareHelmholtz(gpu.device);
-    const why = refusal(cfg);
+    const why = refusal(cfg) ?? (implicitPressure(cfg) && implicitBlocksUnsupported(cfg) ? `Implicit pressure: ${implicitBlocksUnsupported(cfg)}` : null);
     if (why) throw new Error(why);
     let lastTried: number | null = null;
     for (let slots = 0; ; ) {
@@ -767,6 +771,20 @@ export class AmrSim implements Simulation {
       assembleP, predictP, regridP, correctP, brushP, deferUpdate ? undefined : updateP,
     ]);
     if (pPredict) this.pPredict = pPredict;
+    if (implicitPressure(this.cfg)) {
+      const c = this.cfg;
+      const kind = (b: number) => (b === PERIODIC ? PF_PERIODIC : b === 1 || b === 3 ? PF_OPEN : PF_CLOSED);
+      this.prs ??= await AmrPressure.create({
+        device: d, params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, listLevel: this.listLevel, levels: this.levels,
+        state: this.state, prim: this.prim[0], slots,
+        rootDims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),
+        interior: (pass, count) => this.interior(pass, count),
+      });
+      this.prs.setTolerance(c.pressureTol);
+    } else {
+      this.prs?.destroy();
+      this.prs = undefined;
+    }
     this.gBrush = [0, 1].map((p) =>
       bindGroup(d, this.pBrush, {
         0: this.params, 1: this.brush, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]),
@@ -2107,8 +2125,18 @@ export class AmrSim implements Simulation {
       pass.setBindGroup(0, this.gUpdate[p]);
       this.interior(pass, this.nLeaf);
       this.encodeSpecies(pass, p);
+      if (this.prs) {
+        // Implicit pressure: the advected state's primitives, ghosts and all, then the equation,
+        // the solve and the correction back into this parity (amr/pressure.ts).
+        pass.setPipeline(this.pAssemble);
+        pass.setBindGroup(0, this.assembleGroup(1 - p));
+        this.flat(pass, this.nAll, NG);
+        this.prs.encode(pass, p, this.nLevel, this.nLeaf, this.cfg.pressureCycles);
+      }
       pass.end();
-      if (this.fieldOn) {
+      if (this.prs) {
+        // (The state is back in parity p.)
+      } else if (this.fieldOn) {
         // Keep the old potential, solve for that of the updated state (warm-started), move
         // the point masses, rebuild the field, and apply the second half kick (and the
         // masses' sinks) back into this parity.
@@ -3148,6 +3176,7 @@ export class AmrSim implements Simulation {
 
   destroy() {
     this.mhd?.destroy();
+    this.prs?.destroy();
     this.placeholderFaces?.destroy();
     this.destroyed = true;
     this.lumpReader?.destroy();

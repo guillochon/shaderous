@@ -100,7 +100,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   var gradp = vec3<f32>(sx.b.x, sy.b.x, sz.b.x);
   var acoustic = 1.0;
   if (PSPLIT) {
-    gradp = g_pgrad;
+    if (PSPLIT_LAG) { gradp = g_pgrad; }
     acoustic = 0.0;
   }
   // A non-inertial frame's velocity-dependent forces join the half kick (and, with comoving

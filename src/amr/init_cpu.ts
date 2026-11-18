@@ -229,7 +229,9 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
           const bz = three ? 0.5 * (f(2, i, j, k) + f(2, i, j, k + 1)) : f(2, i, j, k);
           u2[o] += 0.5 * (bx * bx + by * by + bz * bz);
         }
-        u2[o + 1] = eint;
+        // With implicit pressure on blocks a liquid's unused internal-energy slot carries the
+        // solved pressure from step to step (amr/pressure/correct.wgsl): it starts as p(rho).
+        u2[o + 1] = c.pressure === 'implicit' && !eos.hasEnergy ? p : eint;
         u2[o + 2] = w.rho * w.s;
         u2[o + 3] = mark;
         if (sp) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);

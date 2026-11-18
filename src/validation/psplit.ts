@@ -3,6 +3,7 @@
 // Registered in tests.ts after the others.
 import type { Gpu } from '../gpu/device';
 import { configFor, Sim, type SimConfig } from '../sim';
+import { AmrSim } from '../amr/amr_sim';
 import { defaultEosParams } from '../eos/eos';
 import { problemById } from '../presets/index';
 import { all, PERIODIC, type Problem } from '../problems/types';
@@ -17,6 +18,43 @@ async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<S
   } finally {
     sim.destroy();
   }
+}
+
+async function withAmr<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: AmrSim) => Promise<T>) {
+  const sim = await AmrSim.create(gpu, configFor(problem, n, over));
+  try {
+    return await fn(sim);
+  } finally {
+    sim.destroy();
+  }
+}
+
+/** A run on blocks from start to end: what the tests below read of it. */
+async function measureBlocks(sim: AmrSim) {
+  const levels = () => new Set(sim.tree.leaves().map((b) => b.level)).size;
+  const d0 = await sim.diagnostics();
+  const before = levels();
+  const cells = await sim.readLeaves();
+  const dim = sim.cfg.ndim;
+  let scale = 0;
+  for (let q = 0; q < cells.count; q++) scale += Math.hypot(cells.u1[q * 4 + 1], cells.u1[q * 4 + 2], cells.u1[q * 4 + 3]) * cells.dx[q] ** dim;
+  // The residual part way through: the run's last steps, of no length, solve nothing.
+  sim.step(10);
+  await sim.diagnostics();
+  const residual = (await sim.prs!.stats()).residual;
+  const steps = await sim.runToEnd(64, 1e6);
+  const d1 = await sim.diagnostics();
+  const solve = await sim.prs!.stats();
+  const leaves = await sim.readLeaves();
+  let vz = 0;
+  for (let q = 0; q < leaves.count; q++) vz = Math.max(vz, Math.abs(leaves.u1[q * 4 + 3] / leaves.u1[q * 4]));
+  return {
+    kept: d1.eKin / d0.eKin, steps, residual, vz, levels: [before, levels()],
+    unconverged: solve.unconverged / Math.max(solve.solves, 1),
+    dev: Math.max(Math.abs(d1.ranges[0][0] - 1), Math.abs(d1.ranges[0][1] - 1)),
+    mass: Math.abs(d1.mass / d0.mass - 1),
+    mom: Math.max(...[0, 1, 2].map((a) => Math.abs(d1.momentum[a] - d0.momentum[a]))) / scale,
+  };
 }
 
 const IMPLICIT: Partial<SimConfig> = { pressure: 'implicit', acousticCfl: 1e6 };
@@ -366,6 +404,70 @@ export const PSPLIT_TESTS: TestDef[] = [
       const coarse = await wave(10);
       const m = { resolved_shift: fine.shift, resolved_amplitude: fine.amp, resolved_steps: fine.steps, coarse_amplitude: coarse.amp, coarse_peak: coarse.peak, coarse_steps: coarse.steps };
       return { pass: Math.abs(fine.shift) < 0.01 && fine.amp > 0.7 && fine.amp < 1.001 && coarse.amp < 0.2 && coarse.peak < 1.001, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-amr-unrefined',
+    name: 'Implicit pressure on blocks without refinement against the uniform grid (Gresho, 2D 64^2)',
+    criterion: 'The block grid (16 root blocks, its pressure solved through the root-level multigrid) keeps the uniform grid\'s kinetic energy to 1e-3 by t = 1, in the same number of steps to one, conserving mass to 2e-6',
+    async run(gpu) {
+      const gresho = problemById('gresho');
+      const uni = await withSim(gpu, gresho, 64, { ndim: 2, tEnd: 1, ...IMPLICIT }, measure);
+      const blk = await withAmr(gpu, gresho, 64, { ndim: 2, tEnd: 1, amrLevels: 0, ...IMPLICIT }, measureBlocks);
+      const m = { kept_uniform: uni.kept, kept_blocks: blk.kept, steps_uniform: uni.steps, steps_blocks: blk.steps, blocks_mass_drift: blk.mass, blocks_residual: blk.residual };
+      return { pass: Math.abs(blk.kept - uni.kept) < 1e-3 && Math.abs(blk.steps - uni.steps) <= 1 && blk.mass < 2e-6, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-amr-gresho',
+    name: 'Implicit pressure on the adaptive mesh: a Gresho vortex across refinement boundaries at Mach 0.1, 0.01 and 0.001 (2D, 256 finest, 3 levels)',
+    criterion:
+      'The mesh of liquid-amr (three levels, their boundaries through the vortex, no block merged). To t = 1 the three runs take the same number of steps (to 2%), under a tenth of the explicit scheme\'s 6800; each keeps more than 99.8% of its kinetic energy and gains none, the same as the others to 0.002; the density stays within 2 M^2 of the reference; mass is conserved to 2e-6 and each momentum component to 1e-6 of the sum of |momentum|, across the levels; the composite residual after a step\'s three cycles is under 1e-4, and fewer than 2% of the steps end above that',
+    async run(gpu) {
+      const gresho = problemById('gresho');
+      const m: Record<string, number> = {};
+      let pass = true;
+      const runs = [];
+      for (const mach of [0.1, 0.01, 0.001]) {
+        const r = await withAmr(gpu, gresho, 256, { ndim: 2, tEnd: 1, amrLevels: 2, refineLo: 0, ...IMPLICIT, ...withC0(1 / mach) }, measureBlocks);
+        runs.push(r);
+        m[`mach_${mach}_kept`] = r.kept;
+        m[`mach_${mach}_steps`] = r.steps;
+        m[`mach_${mach}_density_deviation_over_mach2`] = r.dev / (mach * mach);
+        m[`mach_${mach}_mass_drift`] = r.mass;
+        m[`mach_${mach}_momentum_drift`] = r.mom;
+        m[`mach_${mach}_residual`] = r.residual;
+        m[`mach_${mach}_unconverged_fraction`] = r.unconverged;
+        pass &&= r.levels[0] === 3 && r.levels[1] === 3 && r.kept < 1 && r.kept > 0.998 && Math.abs(r.kept - runs[0].kept) < 0.002 && Math.abs(r.steps - runs[0].steps) <= 0.02 * runs[0].steps;
+        pass &&= r.steps < 680 && r.dev < 2 * mach * mach && r.mass < 2e-6 && r.mom < 1e-6 && r.residual < 1e-4 && r.unconverged < 0.02;
+      }
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-amr-regrid',
+    name: 'Implicit pressure on the adaptive mesh while it regrids (Gresho, 2D, 256 finest, 3 levels at the start)',
+    criterion:
+      'With the default refinement criteria the mesh merges its fine blocks as the run goes (three levels at the start, fewer at t = 1). No pressure pulse comes of it: the density stays within 2 M^2 of the reference at the end, mass is conserved to 2e-6, and the vortex keeps more than 99% of its kinetic energy and gains none',
+    async run(gpu) {
+      const r = await withAmr(gpu, problemById('gresho'), 256, { ndim: 2, tEnd: 1, amrLevels: 2, ...IMPLICIT }, measureBlocks);
+      const m = { levels_at_start: r.levels[0], levels_at_end: r.levels[1], kept: r.kept, steps: r.steps, density_deviation_over_mach2: r.dev / 0.01, mass_drift: r.mass, unconverged_fraction: r.unconverged };
+      return { pass: r.levels[0] === 3 && r.levels[1] < 3 && r.kept > 0.99 && r.kept < 1 && r.dev < 0.02 && r.mass < 2e-6, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-amr-3d',
+    name: 'Implicit pressure on blocks in 3D (a Gresho column, 64^3 finest, one level of refinement allowed) and with viscosity (Taylor-Green, 2D blocks)',
+    criterion:
+      'The column to t = 0.25: mass conserved to 2e-6, no motion along z above 1e-5 of the flow speed, more than 98% of the kinetic energy kept and none gained, fewer than 2% of the steps unconverged. The viscous Taylor-Green vortex on a block grid (128^2, one level allowed) decays at a rate within 1% of 4 nu k^2 over 0 < t < 0.5',
+    async run(gpu) {
+      const col = await withAmr(gpu, problemById('gresho'), 64, { ndim: 3, tEnd: 0.25, amrLevels: 1, ...IMPLICIT }, measureBlocks);
+      const tg = problemById('taylor-green');
+      const k = 2 * Math.PI;
+      const decay = await withAmr(gpu, tg, 128, { ndim: 2, tEnd: 0.5, amrLevels: 1, ...IMPLICIT }, measureBlocks);
+      const ratio = -Math.log(decay.kept) / (4 * (tg.viscosity ?? 0) * k * k * 0.5);
+      const m = { column_kept: col.kept, column_steps: col.steps, column_mass_drift: col.mass, column_max_vz: col.vz, column_unconverged_fraction: col.unconverged, taylor_green_decay_rate_over_exact: ratio, taylor_green_steps: decay.steps };
+      return { pass: col.mass < 2e-6 && col.vz < 1e-5 && col.kept > 0.98 && col.kept < 1 && col.unconverged < 0.02 && Math.abs(ratio - 1) < 0.01, metrics: m };
     },
   },
 ];

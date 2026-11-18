@@ -104,7 +104,7 @@ degenerate electrons. It uses the methods of production simulation codes:
   temperature, in the manner of the Helmholtz equation of state;
 - nearly incompressible flow: a weakly compressible liquid on the same explicit scheme, and for
   it an implicit pressure solve (multigrid) that takes the timestep from the flow speed instead
-  of the sound speed, on the uniform grid;
+  of the sound speed, on the uniform grid and the adaptive mesh;
 - optically thin cooling, viscosity, thermal conduction, and species carried with the gas,
   whose composition (and each species' own gamma) sets the equation of state cell by cell;
 - nuclear burning from fuel to ash by a single-step Arrhenius reaction, with steady (ZND)

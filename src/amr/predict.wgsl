@@ -119,6 +119,18 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
       hi.face[axis] = above.y;
     }
   }
+  if (PSPLIT && PSPLIT_LAG) {
+    // Implicit pressure: the gradient of the last solve's pressure, which a liquid's state
+    // carries in its internal-energy slot (amr/pressure/correct.wgsl; the assembly fills its
+    // ghosts like any other primitive's). Not the pressure of the state's density: at Mach
+    // 0.001 that is single-precision noise as large as the flow's own pressure.
+    g_pgrad = 0.5 * mask * vec3<f32>(
+      textureLoad(W2, c + vec3<i32>(1, 0, 0), 0).w - textureLoad(W2, c - vec3<i32>(1, 0, 0), 0).w,
+      textureLoad(W2, c + vec3<i32>(0, 1, 0), 0).w - textureLoad(W2, c - vec3<i32>(0, 1, 0), 0).w,
+      0.0,
+    );
+    if (!is2d()) { g_pgrad.z = 0.5 * mask.z * (textureLoad(W2, c + vec3<i32>(0, 0, 1), 0).w - textureLoad(W2, c - vec3<i32>(0, 0, 1), 0).w); }
+  }
   let pr = predictor(
     q,
     load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),

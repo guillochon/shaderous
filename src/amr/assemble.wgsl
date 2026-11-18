@@ -104,7 +104,9 @@ fn main(
       let depth = select(BS, 1, is2d());
       if (all(inv.l >= vec3<i32>(0)) && all(inv.l < vec3<i32>(BS, BS, depth)) && blk_leaf(inv.slot) && !solid) {
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
-        var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
+        // (With implicit pressure the sound speed only sets a ceiling: hydro/rates.wgsl.)
+        let snd = select(1.0, P.ohm.y, P.ohm.y > 0.0);
+        var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y * snd + diff_speed(abs(w.w1.x), w.w2.w);
         // A spherical run: per axis over its own cell length (hydro/rates.wgsl).
         var geo = 0.0;
         if (cylindrical()) {

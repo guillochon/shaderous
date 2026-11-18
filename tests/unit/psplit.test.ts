@@ -126,14 +126,14 @@ describe('implicit pressure, as a setting', () => {
     expect(implicitUnsupported(liquid)).toBeNull();
     expect(refusal(liquid)).toBeNull();
     // Its flux is advection's alone, and its predictor takes the last solve's gradient.
-    expect(hydroSlots(liquid)).toMatchObject({ riemann: 'hydro/riemann/advect.wgsl', psplit: 'const PSPLIT = true;\n', psplit_grad: 'pressure/predict_on.wgsl' });
-    expect(hydroSlots({ ...liquid, pressure: 'explicit' })).toMatchObject({ riemann: 'hydro/riemann/hllclm.wgsl', psplit: 'const PSPLIT = false;\n' });
+    expect(hydroSlots(liquid)).toMatchObject({ riemann: 'hydro/riemann/advect.wgsl', psplit: 'const PSPLIT = true;\nconst PSPLIT_LAG = true;\n', psplit_grad: 'pressure/predict_on.wgsl' });
+    expect(hydroSlots({ ...liquid, pressure: 'explicit' })).toMatchObject({ riemann: 'hydro/riemann/hllclm.wgsl', psplit: 'const PSPLIT = false;\nconst PSPLIT_LAG = false;\n' });
     // The sound speed's weight in the timestep: one over the acoustic steps a step may span.
     const weight = (c: typeof liquid) => new Float32Array(packParams(c, { dims: [64, 64, 1], dx: 1 / 64, rhoMean: 1, selfGravity: false, masses: 0 }))[69];
     expect(weight({ ...liquid, acousticCfl: 50 })).toBeCloseTo(0.02, 8);
     expect(weight({ ...liquid, pressure: 'explicit' })).toBe(0);
     expect(refusal(configFor(problemById('kelvin-helmholtz'), 64, { ndim: 2, pressure: 'implicit' }))).toMatch(/Implicit pressure: .*liquid/);
-    expect(refusal({ ...liquid, amrLevels: 1 })).toMatch(/Implicit pressure: .*adaptive mesh/);
+    expect(refusal({ ...liquid, amrLevels: 1 })).toBeNull();
     expect(refusal({ ...liquid, gext: [0, -1, 0] })).toBeNull();
     // A liquid's own refusals come first.
     expect(refusal({ ...liquid, gravity: 'isolated' })).toMatch(/Liquid: .*self-gravity/);

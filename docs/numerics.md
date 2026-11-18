@@ -562,8 +562,47 @@ momentum, to round-off: it holds at a Mach number of $`10^{-6}`$ through 60 soun
 and a column started at uniform density settles to that balance (`psplit-balance`). The
 solved pressure starts from the state's, $`p(\rho)`$, so the first step is balanced too.
 
-Limits. The liquid only, on a uniform Cartesian grid, without self-gravity, point masses,
-species, cooling or frames (each is refused with the reason). First order in time. And on
+*On the adaptive mesh* (`src/amr/pressure.ts`, `amr/pressure/*.wgsl`). The same step on the
+leaves of the tree. The equation is solved by multigrid over the tree's levels, with three
+things particular to it.
+
+- *The operator is conservative across levels.* Where the region beyond a fine cell's face is
+  coarser, the fine cell's ghost lies on the line between the two centers,
+  $`p_g = p_i + \tfrac23(p_c - p_i)`$. A coarse cell beside a refined block takes through that
+  face the mean of the fine faces' fluxes, read from the fine cells: the same numbers. The
+  correction then moves mass and momentum with those same face values, so both are conserved
+  across levels to round-off. Using a merely consistent flux on the coarse side instead would
+  leave a density error at every refinement boundary each step, and a liquid turns a density
+  error into a pressure $`1/M^2`$ times as large.
+- *Full approximation.* The pressure lives on every block, parents holding the mean of their
+  children. Each level relaxes the plain operator (the parent's value across a refined face),
+  with the difference between the plain and the conservative operator, frozen when the finer
+  level was last restricted, added to its right-hand side. A cycle goes from the finest level
+  down (two red-black sweeps, then restriction of the pressure and the residual) to the root
+  level, which is a uniform grid and is solved by the uniform grid's multigrid (two V-cycles),
+  and back up (the parent's change added to its children, piecewise constant, then two
+  sweeps). At convergence the leaves satisfy the conservative equation. Three cycles a step.
+- *The solved pressure rides in the state.* A liquid does not use its internal-energy slot, so
+  the correction stores the solved pressure there. It is then regridded and its ghosts filled
+  with the rest of the state, the predictor takes its gradient, and the next solve starts from
+  it. (The pressure of the state's own density would not do: at Mach 0.001 its single-precision
+  noise is as large as the flow's pressure, and the run blows up within ten steps.)
+
+Measured (`psplit-amr-*`): a Gresho vortex on a three-level mesh whose refinement boundaries
+run through it (256 cells across at the finest) takes 400 steps to $`t = 1`$ at Mach 0.1,
+0.01 and 0.001 alike, against the explicit scheme's 6 800 at Mach 0.1, and keeps 0.9992 of its
+kinetic energy at each (explicit: 0.9968); mass is conserved to $`4\times10^{-7}`$ and momentum
+to $`3\times10^{-8}`$ of the sum of its magnitudes; the composite residual after three cycles is
+1 to $`4\times10^{-5}`$ of the right-hand side, and no step ended above $`10^{-4}`$. A mesh that
+merges its fine blocks as it runs leaves the density within $`0.78\,M^2`$: no pressure pulse.
+Without refinement the block grid reproduces the uniform grid's run to $`10^{-7}`$ in kinetic
+energy. In 3D it runs and conserves; it has not been measured beyond that.
+
+Limits. The liquid only, on a Cartesian grid, without self-gravity, point masses, species,
+cooling or frames; on the adaptive mesh also without a uniform field, obstacles, inflows or
+per-block timesteps (one solve couples every cell at one time). Each is refused with the
+reason. The refinement criteria are still density's and pressure's, which see little in a
+liquid: a vorticity indicator is wanted. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2253,7 +2292,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 137 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 141 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
