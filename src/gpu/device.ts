@@ -262,6 +262,22 @@ export function bindGroup(
   return device.createBindGroup({ label, layout: pipeline.getBindGroupLayout(0), entries });
 }
 
+/**
+ * bindGroup with only the resources the pipeline's entry point reaches: for a second entry point of
+ * a module (mhd/update.wgsl's redo_main) that uses fewer of its bindings than the first.
+ */
+export function bindGroupUsed(
+  device: GPUDevice,
+  pipeline: GPUComputePipeline | GPURenderPipeline,
+  resources: Record<number, Bindable>,
+  label = '',
+): GPUBindGroup {
+  const known = pipelineCode.get(pipeline);
+  if (!known) throw new Error(`bindGroupUsed: no code recorded for pipeline ${label}`);
+  const used = usedBindings(known.code, known.entryPoints);
+  return bindGroup(device, pipeline, Object.fromEntries(Object.entries(resources).filter(([b]) => used.has(Number(b)))), label);
+}
+
 /** Read a whole 3D texture back as floats (validation only; this is slow). */
 export async function readTexture(
   device: GPUDevice,

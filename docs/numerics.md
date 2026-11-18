@@ -1294,6 +1294,32 @@ $`E`$ includes $`B^2/2`$.
   more faces to empty through than the one that filled it. A settled gamma = 5/3 star on its
   tidal-disruption grid now steps like the hydro control (no floored cells to t = 2, mass lost
   only by outflow).
+- **First-order flux correction after the update** (`mhd/fofc.wgsl`, uniform grid). The test
+  above misses a cell that stage 2 empties without stage 1 having moved its density much: in
+  the thin corona over a magnetized disk (issue #3: midplane density 25, ambient $`10^{-5}`$,
+  loops of $`\beta = 100`$), the half-step fluxes of the neighbors carried out more mass than
+  the cell held, at speeds of $`10^6`$ after the first step, and the run went non-finite by the
+  second. So stage 2 also checks every cell after its update, as Athena++ does: one left with
+  less than 1/8 of its density, or with no internal energy, is listed. After the slab's update
+  a fix pass rewrites the mass, momentum and energy fluxes of every face of a listed cell with
+  the first-order HLLE flux of the start, and a redo pass updates the listed cells and their
+  face neighbors again. The field's fluxes and the edge fields stay those of the second-order
+  step, so the field and $`\nabla\cdot B`$ are untouched; a redone cell keeps its advected
+  internal energy and rebuilds $`E`$ from it, because with first-order energy fluxes beside a
+  second-order field $`E - KE - B^2/2`$ took the difference in the field's energy as heat (in
+  $`\beta \ll 1`$ gas near a sink, $`10^7`$ times the cell's temperature). The list runs through
+  all slabs of a step: each slab fixes the faces its buffers hold and redoes the cells whose
+  faces and field are at hand (its own but the top layer, and the layer below), so every cell
+  is checked on the second-order fluxes alone, and 16 slabs agree with one bit for bit, with
+  outflow faces and with $`z`$ periodic (the last slab then holds $`z`$ face $`n + 1`$, the twin of
+  face 1). The two passes run 16 workgroups that step through the list and end at once when it
+  is empty; there is no indirect dispatch, because the update has no storage buffer to spare
+  under WebGPU's limit of 8. Measured on an RTX 3080 against the step without it, paired runs:
+  Orszag-Tang at $`1024^2`$ 8% faster (the update's cell code, now one function, compiles
+  better), an MHD blast at $`128^3`$ and $`256^3`$ 3% slower, the MRI box at $`128^3`$ the same
+  within 2%. Issue #3's disk at $`128^3`$ now runs 1000 steps with $`\nabla\cdot B`$ at
+  $`10^{-7}`$; the gas around its sink drains to the floor, and the step falls with it, as the
+  setup check warns. Blocks keep only the test before the fluxes.
 - **Compile time.** GPU compilers inline every function at every call, so a lookup called at
   several places, or in a loop they unroll, is compiled that many times. The block grid's
   assembly took 4 s to compile in Chrome (far more in Firefox), with the face lookup inlined

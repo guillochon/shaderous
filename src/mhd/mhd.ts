@@ -10,7 +10,7 @@
 // uses the hydro predictor's two textures and a face texture of its own.
 import { domainLo } from '../domain';
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, readTexture, tex3d, writeTexture } from '../gpu/device';
+import { bindGroup, bindGroupUsed, computePipeline, readTexture, tex3d, writeTexture } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { PERIODIC } from '../problems/types';
@@ -182,6 +182,10 @@ export function setMhdSlabBytes(b: number | null) {
   slabBytes = b ?? 192 * 1024 ** 2;
 }
 
+/** Cells the list of the flux correction (mhd/fofc.wgsl) holds in one step, and its workgroups. */
+const FOFC_LIST = 1 << 18;
+const FOFC_GROUPS = 16;
+
 /** Layers of cells per slab of a 3D grid of side n (the whole grid if it fits). */
 export function slabLayers(n: number, nz: number): number {
   if (nz === 1) return 1;
@@ -200,6 +204,13 @@ export class MhdPasses {
   private emf!: GPUBuffer;
   /** per slab: its first layer, its layers, and its (first layer, layers, last) uniform */
   private slabs: { z0: number; nz: number; buf: GPUBuffer }[] = [];
+  /** The first-order flux correction after the update (mhd/fofc.wgsl): the list of cells it corrects. */
+  private fofc!: GPUBuffer;
+  private pFix!: GPUComputePipeline;
+  private pRedo!: GPUComputePipeline;
+  /** [parity][slab]: the fix and the redo */
+  private gFix: GPUBindGroup[][] = [];
+  private gRedo: GPUBindGroup[][] = [];
   private pFlux: GPUComputePipeline[] = [];
   private pEmf: GPUComputePipeline[] = [];
   private pUpdate: GPUComputePipeline[] = [];
@@ -258,6 +269,8 @@ export class MhdPasses {
       d.queue.writeBuffer(buf, 0, new Int32Array([z0, k, z0 + k >= nz ? 1 : 0, 0]));
       m.slabs.push({ z0, nz: k, buf });
     }
+    // The list holds up to FOFC_LIST cells a step; past that a cell is left as the step made it.
+    m.fofc = d.createBuffer({ label: 'flux correction', size: 16 + 4 * Math.min(n * n * nz, FOFC_LIST), usage: GPUBufferUsage.STORAGE });
     await m.build(rates);
     return m;
   }
@@ -273,7 +286,7 @@ export class MhdPasses {
     const { device: d, cfg, params, clock, state, half, comp } = this.dep;
     const slots = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg) };
     const v = (t: GPUTexture) => t.createView();
-    const [f1, f2, e1, e2, u1, u2, prates, red, bf, be] = await Promise.all([
+    const [f1, f2, e1, e2, u1, u2, prates, red, bf, be, fix, redo] = await Promise.all([
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 1', { STAGE: 1 }),
       computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD fluxes 2', { STAGE: 2 }),
       computePipeline(d, assemble('mhd/emf.wgsl', slots), 'edge impulses 1', { STAGE: 1 }),
@@ -292,7 +305,11 @@ export class MhdPasses {
       ),
       computePipeline(d, assemble('edit/field_brush.wgsl', slots), 'field brush faces', undefined, 'faces'),
       computePipeline(d, assemble('edit/field_brush.wgsl', slots), 'field brush energy', undefined, 'energy'),
+      computePipeline(d, assemble('mhd/flux.wgsl', slots), 'MHD flux correction fix', { STAGE: 2 }, 'fix_main'),
+      computePipeline(d, assemble('mhd/update.wgsl', slots), 'MHD flux correction redo', { STAGE: 2, SPECIES_FLUX: this.dep.massFlux ? 1 : 0 }, 'redo_main'),
     ]);
+    this.pFix = fix;
+    this.pRedo = redo;
     this.pBrush = [bf, be];
     this.gBrush = [0, 1].map((p) => {
       const o = 1 - p;
@@ -315,6 +332,9 @@ export class MhdPasses {
     this.gEmf = [];
     this.gUpdate = [];
     this.gRates = [];
+    this.gFix = [];
+    this.gRedo = [];
+    const fofc = { 34: this.fofc };
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
       const start = { 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]) };
@@ -323,9 +343,11 @@ export class MhdPasses {
       const startAgain = { 9: v(state[p][0]), 10: v(state[p][1]), 11: v(this.faces[p]) };
       const perSlab = (fn: (slab: GPUBuffer) => GPUBindGroup) => this.slabs.map((s) => fn(s.buf));
       this.gFlux.push([
-        perSlab((sb) => bindGroup(d, f1, { 0: params, 1: clock, ...start, ...fl, 14: sb, ...comp, ...startAgain })),
-        perSlab((sb) => bindGroup(d, f2, { 0: params, 1: clock, ...mid, ...fl, 14: sb, ...comp, ...startAgain })),
+        perSlab((sb) => bindGroup(d, f1, { 0: params, 1: clock, ...start, ...fl, 14: sb, ...comp, ...startAgain, ...fofc })),
+        perSlab((sb) => bindGroup(d, f2, { 0: params, 1: clock, ...mid, ...fl, 14: sb, ...comp, ...startAgain, ...fofc })),
       ]);
+      // The fix reads the start of the step and writes the slab's fluxes.
+      this.gFix.push(this.slabs.map((sl) => bindGroupUsed(d, fix, { 0: params, 1: clock, ...mid, ...fl, 14: sl.buf, ...comp, ...startAgain, ...fofc }, 'MHD flux correction fix')));
       // The edges read the density, momentum and faces alone (mhd/emf.wgsl): not the energy (3)
       // nor, as they run no equation of state, the composition.
       this.gEmf.push([
@@ -339,7 +361,7 @@ export class MhdPasses {
         perSlab((sb) =>
           bindGroup(d, pipe, {
             0: params, 1: clock, ...start, ...fl, 8: this.emf, ...out, 12: v(h[0]), 13: v(h[1]), 14: sb, 15: v(this.comps[p]), 16: v(this.comps[o]), ...comp,
-            17: v(this.dep.gfield), 20: this.dep.bh, 18: this.dep.massFlux ?? this.noFlux(),
+            17: v(this.dep.gfield), 20: this.dep.bh, 18: this.dep.massFlux ?? this.noFlux(), ...fofc,
           }),
         );
       // The shearing box's passes read the stage's faces (for B_x) and rewrite the x fluxes and
@@ -352,6 +374,15 @@ export class MhdPasses {
         upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }, state[p]),
         upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }, half),
       ]);
+      // The redo reads the new faces the update wrote (37), and writes cells alone.
+      this.gRedo.push(
+        this.slabs.map((sl) =>
+          bindGroupUsed(d, redo, {
+            0: params, 1: clock, ...start, ...fl, 8: this.emf, 9: v(state[o][0]), 10: v(state[o][1]), 12: v(half[0]), 13: v(half[1]), 14: sl.buf, 15: v(this.comps[p]), ...comp,
+            17: v(this.dep.gfield), 20: this.dep.bh, 18: this.dep.massFlux ?? this.noFlux(), ...fofc, 37: v(this.faces[o]),
+          }, 'MHD flux correction redo'),
+        ),
+      );
       this.gRates.push(bindGroup(d, prates, { 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.dep.gfield), 6: rates, 20: this.dep.bh, ...comp }));
     }
   }
@@ -415,6 +446,15 @@ export class MhdPasses {
         pass.setPipeline(this.pUpdate[s]);
         pass.setBindGroup(0, this.gUpdate[parity][s][i]);
         this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + (last ? 1 : 0)]);
+        if (s === 1) {
+          // The first-order flux correction (mhd/fofc.wgsl), which ends at once if no cell was flagged.
+          pass.setPipeline(this.pFix);
+          pass.setBindGroup(0, this.gFix[parity][i]);
+          pass.dispatchWorkgroups(FOFC_GROUPS);
+          pass.setPipeline(this.pRedo);
+          pass.setBindGroup(0, this.gRedo[parity][i]);
+          pass.dispatchWorkgroups(FOFC_GROUPS);
+        }
       });
     }
   }
@@ -474,6 +514,7 @@ export class MhdPasses {
     for (const t of [...this.faces, ...this.comps]) t.destroy();
     this.halfFaces?.destroy();
     for (const sl of this.slabs) sl.buf.destroy();
+    this.fofc?.destroy();
     for (const b of this.flux) b.destroy();
     this.emf?.destroy();
   }
