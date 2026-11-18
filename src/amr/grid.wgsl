@@ -137,9 +137,13 @@ fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
     let k = u32(-1 - nb);
     s.l[axis] = bc_ghost_cell(l[axis], BS, k);
     s.flip = bc_vsign(k, axis);
-    // (Both poles of a spherical run are axes: v_phi changes sign across them, hydro/common.wgsl bc_map.)
-    if (spherical() && axis == 1 && bc_wall(k)) { s.flip.z = -s.flip.z; }
     s.bflip = bc_bsign_at(k, axis, upper);
+    // Across the axis of an axisymmetric run v_phi and B_phi change sign, as in hydro/common.wgsl
+    // bc_map. (Both poles of a spherical run are such axes.)
+    if (bc_wall(k) && ((!upper && P.sym[axis] == 2u) || (spherical() && axis == 1))) {
+      s.flip.z = -s.flip.z;
+      s.bflip.z = -s.bflip.z;
+    }
     s.side[axis] = bc_side(k, upper);
     s.vadd = 2.0 * bc_wall_velocity(k, axis, upper);
   }
