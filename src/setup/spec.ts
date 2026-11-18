@@ -118,6 +118,13 @@ export interface PhysicsSpec {
    * density is 1, and G follows from omegaM. Positions are comoving, velocities peculiar.
    */
   cosmology?: { omegaM?: number; omegaL?: number; zStart?: number; zEnd?: number };
+  /**
+   * A shearing box: the local model of a disk turning at omega (about z) with shear parameter
+   * q = -dln Omega / dln R (1.5 for Keplerian), x radial, y along the orbit, z vertical. Its x
+   * faces are periodic with the shift the background flow v_y = -q omega x gives them, which
+   * the initial state should hold. `stratified`: the vertical tidal pull, -omega^2 z.
+   */
+  shear?: { omega?: number; q?: number; stratified?: boolean };
   jeansFloor?: boolean;
   jeansCells?: number;
   vcycles?: number;

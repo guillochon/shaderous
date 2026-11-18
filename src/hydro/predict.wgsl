@@ -28,6 +28,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!rc.mine) { return; }
   g_dx = cell_dx(P.dx, clock.ah);
   g_dt = clock.dt;
+  // A shearing box: the offset of its x faces, for the ghosts beyond them.
+  if (shear_on()) { g_shear = clock.shear / P.dx; }
   let c = rc.c;
   g_inner = stencil_inside(c, 1);
   let q = load_q(c);

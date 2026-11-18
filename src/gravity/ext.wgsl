@@ -12,7 +12,7 @@
 #include "gravity/rot.wgsl"
 
 fn ext_on() -> bool {
-  return P.bh.z != 0.0 || P.rot.w != 0.0;
+  return P.bh.z != 0.0 || P.rot.w != 0.0 || P.shear.w != 0.0;
 }
 
 // Acceleration at x: the masses' pull less the frame's own acceleration, and the centrifugal
@@ -21,6 +21,7 @@ fn ext_accel(x: vec3<f32>) -> vec3<f32> {
   if (!ext_on()) { return vec3<f32>(0.0); }
   var g = -BH.frame.xyz;
   if (P.rot.w != 0.0) { g += rot_accel(x); }
+  if (P.shear.w != 0.0) { g += tidal_accel(x); }
   for (var i = 0u; i < mass_count(); i++) { g += bh_accel(x, BH.list[i]); }
   return g;
 }
@@ -33,6 +34,7 @@ fn ext_dphi(x: vec3<f32>, d: vec3<f32>, ahead: f32) -> f32 {
   if (!ext_on()) { return 0.0; }
   var s = dot(BH.frame.xyz, d);
   if (P.rot.w != 0.0) { s += rot_dphi(x, d); }
+  if (P.shear.w != 0.0) { s += tidal_dphi_vertical(x, d); }
   for (var i = 0u; i < mass_count(); i++) {
     let m = BH.list[i];
     let r = x - (m.pos.xyz + ahead * m.vel.xyz);
@@ -57,5 +59,7 @@ fn ext_phi_masses(x: vec3<f32>, ahead: f32) -> f32 {
 // the effective potential), at x: what the display adds to self-gravity's.
 fn ext_phi(x: vec3<f32>) -> f32 {
   if (!ext_on()) { return 0.0; }
-  return dot(BH.frame.xyz, x) + rot_phi(x) + ext_phi_masses(x, 0.0);
+  var t = 0.0;
+  if (P.shear.w != 0.0) { t = tidal_phi(x); }
+  return dot(BH.frame.xyz, x) + rot_phi(x) + t + ext_phi_masses(x, 0.0);
 }

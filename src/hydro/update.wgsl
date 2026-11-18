@@ -42,9 +42,20 @@
 // (mirrored if reflecting).
 fn load_pred(c: vec3<i32>) -> Q {
   if (INTERIOR) { return Q(textureLoad(PA, c, 0), textureLoad(PB, c, 0)); }
+  // (The half-step state: a shearing box's offset half a step on.)
+  let g0 = g_shear;
+  g_shear = g_shear_h;
   let m = bc_map(c);
   let a = textureLoad(PA, m.c, 0);
-  return Q(vec4<f32>(a.x, bc_velocity(a.yzw, m)), textureLoad(PB, m.c, 0));
+  var q = Q(vec4<f32>(a.x, bc_velocity(a.yzw, m)), textureLoad(PB, m.c, 0));
+  if (shear_ghost(c)) {
+    let c1 = shear_next(m.c);
+    let a1 = textureLoad(PA, c1, 0);
+    let f = shear_frac(c);
+    q = Q(mix(q.a, vec4<f32>(a1.x, bc_velocity(a1.yzw, m)), f), mix(q.b, textureLoad(PB, c1, 0), f));
+  }
+  g_shear = g0;
+  return q;
 }
 
 // For viscosity (hydro/diffusion.wgsl): the velocity alone, which costs one load and no
@@ -58,7 +69,12 @@ fn load_vel(c: vec3<i32>) -> vec3<f32> {
   let m = bc_map(c);
   if (has_solids() && textureLoad(U2, m.c, 0).w > 0.5) { return vec3<f32>(0.0); }
   let u = textureLoad(U1, m.c, 0);
-  return bc_velocity(u.yzw / max(u.x, P.rho_floor), m);
+  var v = u.yzw / max(u.x, P.rho_floor);
+  if (shear_ghost(c)) {
+    let u1 = textureLoad(U1, shear_next(m.c), 0);
+    v = mix(v, u1.yzw / max(u1.x, P.rho_floor), shear_frac(c));
+  }
+  return bc_velocity(v, m);
 }
 // Also for viscosity: every cell has all its neighbors here (amr/update.wgsl is where not).
 fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
@@ -67,6 +83,44 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 
 #include "hydro/flux.wgsl"
 #include "hydro/tile.wgsl"
+
+// A shearing box: the flux through one of its x faces, averaged with what the cells across the
+// boundary compute for the same face (sheared along y, their velocity boosted by the jump of
+// the background flow). Each side's own flux is a different evaluation, from different ghosts;
+// the average makes the two sides' totals over the face agree, so that mass, x and z momentum
+// are conserved to rounding (the total, not each face: the weights differ).
+fn shear_boost(f: Flux, u: f32) -> Flux {
+  var o = f;
+  o.mom.y = f.mom.y + u * f.m;
+  o.e = f.e + u * f.mom.y + 0.5 * u * u * f.m;
+  return o;
+}
+fn shear_face(c: vec3<i32>, own: Flux, upper: bool) -> Flux {
+  let ny = i32(P.dims.y);
+  // Where this face lies on the other side, in cells along y, half a step on.
+  let J = f32(c.y) + select(g_shear_h, -g_shear_h, upper);
+  let s = floor(J);
+  let e = J - s;
+  let j0 = ((i32(s) % ny) + ny) % ny;
+  let j1 = (j0 + 1) % ny;
+  // The other side's face: the upper face of its last cell, or the lower face of its first.
+  let x = select(i32(P.dims.x) - 1, -1, upper);
+  let ex = vec3<i32>(1, 0, 0);
+  let u = select(1.0, -1.0, upper) * shear_jump();
+  let f0 = shear_boost(flux_between(vec3<i32>(x, j0, c.z), ex, 0), u);
+  let f1 = shear_boost(flux_between(vec3<i32>(x, j1, c.z), ex, 0), u);
+  let w0 = 0.5 * (1.0 - e);
+  let w1 = 0.5 * e;
+  return Flux(
+    0.5 * own.m + w0 * f0.m + w1 * f1.m,
+    0.5 * own.mom + w0 * f0.mom + w1 * f1.mom,
+    0.5 * own.e + w0 * f0.e + w1 * f1.e,
+    0.5 * own.ei + w0 * f0.ei + w1 * f1.ei,
+    0.5 * own.s + w0 * f0.s + w1 * f1.s,
+    0.5 * own.vn + w0 * f0.vn + w1 * f1.vn,
+    0.5 * own.d + w0 * f0.d + w1 * f1.d,
+  );
+}
 #include <species>
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
@@ -114,6 +168,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
         @builtin(local_invocation_index) li: u32) {
   g_dx = cell_dx(P.dx, clock.ah);
   g_dt = clock.dt;
+  if (shear_on()) {
+    g_shear = clock.shear / P.dx;
+    g_shear_h = shear_half(clock.shear, clock.dt) / P.dx;
+  }
   // The whole workgroup computes the faces of its box, before any invocation can leave.
   if (tiled()) { tile_fluxes(vec3<i32>(wid * vec3<u32>(WGX, WGY, WGZ) + REGION.origin), li); }
   let rc = region_cell(gid);
@@ -151,6 +209,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if (!flat) { fz = axis_fluxes(c, ez, 2, w0, p0); }
   }
 
+  // A shearing box's x faces: the two sides' fluxes, averaged.
+  if (shear_on()) {
+    if (c.x == 0) { fx.lo = shear_face(c, fx.lo, false); }
+    if (c.x == i32(P.dims.x) - 1) { fx.hi = shear_face(c, fx.hi, true); }
+  }
   // Planes of mirror symmetry: nothing crosses them.
   if (c.x == 0 && sym_lo(0)) { fx.lo = mirror_flux(fx.lo, 0); }
   if (c.y == 0 && sym_lo(1)) { fy.lo = mirror_flux(fy.lo, 1); }

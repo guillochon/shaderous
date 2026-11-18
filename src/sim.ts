@@ -439,6 +439,24 @@ export function cosmologyUnsupported(c: SimConfig): string | null {
   return null;
 }
 
+/**
+ * Why a shearing box cannot go as configured, or null. The first version: hydrodynamics on a
+ * uniform grid, periodic along y (and z), without self-gravity (docs/numerics.md section 22).
+ */
+export function shearUnsupported(c: SimConfig): string | null {
+  const s = c.problem.shear;
+  if (!s) return null;
+  if (c.amrLevels > 0) return 'the adaptive mesh is not available for a shearing box (a block\u2019s neighbors across the boundary change with time)';
+  if (c.problem.mhd) return 'magnetic fields are not available in a shearing box yet';
+  if (c.bcLo[0] !== PERIODIC || c.bcHi[0] !== PERIODIC || c.bcLo[1] !== PERIODIC || c.bcHi[1] !== PERIODIC) return 'a shearing box is periodic along x (with the shear) and y';
+  if (c.ndim === 3 && !s.stratified && (c.bcLo[2] !== PERIODIC || c.bcHi[2] !== PERIODIC)) return 'an unstratified shearing box is periodic along z';
+  if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available in a shearing box';
+  if (c.problem.rotation || cosmologyOf(c)) return 'a shearing box has its own rotation and no expansion';
+  if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in a shearing box yet';
+  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in a shearing box';
+  return null;
+}
+
 /** The shearing box's offset of its x faces along y at `time` (Part D), or 0. */
 export function shearOffset(c: SimConfig, time: number): number {
   const s = c.problem.shear;
@@ -519,6 +537,9 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
  * the centrifugal force. In 2D only the part along z can turn the plane into itself.
  */
 export function rotationOf(c: SimConfig): [number, number, number, number] {
+  // A shearing box turns about z: the Coriolis force alone, its tidal force taking the place of
+  // the centrifugal one (gravity/rot.wgsl).
+  if (c.problem.shear) return [0, 0, c.problem.shear.omega, 0];
   const r = c.problem.rotation?.(c.params, c.ndim);
   if (!r) return [0, 0, 0, 0];
   const w: [number, number, number] = c.ndim === 2 ? [0, 0, r.omega[2]] : [...r.omega];
@@ -870,7 +891,7 @@ export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] |
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 448;
+export const PARAM_BYTES = 464;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -924,6 +945,8 @@ export function packParams(
   u.set([0, 1, 2].map((a) => (c.symmetry?.[a] ? 1 : 0)).concat(0), 104);
   const k = cosmologyOf(c);
   f.set(k ? [k.omegaM, omegaK(k), k.omegaL, 1] : [0, 0, 0, 0], 108);
+  const sh = c.problem.shear;
+  f.set(sh ? [sh.omega, sh.q, sh.stratified ? 1 : 0, 1] : [0, 0, 0, 0], 112);
   return buf;
 }
 
@@ -1171,6 +1194,8 @@ export class Sim implements Simulation {
     if (asym) throw new Error(`Mirror symmetry: ${asym}`);
     const acos = cosmologyUnsupported(cfg);
     if (acos) throw new Error(`Comoving coordinates: ${acos}`);
+    const ashear = shearUnsupported(cfg);
+    if (ashear) throw new Error(`Shearing box: ${ashear}`);
     noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);

@@ -56,6 +56,8 @@ struct Params {
                          //   (SimConfig.symmetry; the gas sees it as reflecting)
   cosmo: vec4<f32>,      // comoving coordinates (src/cosmo.ts): (Omega_m, Omega_k, Omega_Lambda, 1);
                          //   all zero otherwise
+  shear: vec4<f32>,      // shearing box (Problem.shear): (Omega, q, 1 if stratified, 1); all zero
+                         //   otherwise
 }
 
 // The state as the frame slot (gravity/frame_off.wgsl) hands it back.
@@ -204,12 +206,23 @@ fn stencil_inside(c: vec3<i32>, reach: i32) -> bool {
 }
 
 // Every state load goes through this, so there are no ghost cells to fill.
-fn bc_map(c: vec3<i32>) -> Mapped {
-  var m = Mapped(c, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
+fn bc_map(c0: vec3<i32>) -> Mapped {
+  var m = Mapped(c0, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
   if (g_inner) { return m; }
   let n = vec3<i32>(i32(P.n), i32(P.n), i32(P.dims.z));
   // Most loads are of cells inside the grid: they skip the rest.
-  if (all(c >= vec3<i32>(0)) && all(c < n)) { return m; }
+  if (all(c0 >= vec3<i32>(0)) && all(c0 < n)) { return m; }
+  var c = c0;
+  // A shearing box's x faces: periodic, with the cells beyond sheared along y by the boundary's
+  // offset (the lower of the two cells a ghost lies between; the loaders blend in the other,
+  // shear_frac) and their velocity offset by the jump of the background flow.
+  if (shear_on() && (c.x < 0 || c.x >= n.x)) {
+    let up = c.x >= n.x;
+    let s = i32(floor(f32(c.y) + select(g_shear, -g_shear, up)));
+    c.y = ((s % n.y) + n.y) % n.y;
+    m.c.y = c.y;
+    m.vadd.y += select(1.0, -1.0, up) * shear_jump();
+  }
   for (var a = 0; a < 3; a++) {
     if (c[a] >= 0 && c[a] < n[a]) { continue; }
     let up = c[a] >= n[a];
@@ -223,6 +236,38 @@ fn bc_map(c: vec3<i32>) -> Mapped {
     m.side[a] = bc_side(k, up);
   }
   return m;
+}
+
+// Shearing box (P.shear, Problem.shear): the offset of its x faces along y, in cells, at the time
+// a pass's loads are of: set at entry by the passes that load beyond those faces (0 otherwise).
+// g_shear is for the state at the start of the step; load_pred uses g_shear_h, half a step on.
+var<private> g_shear: f32 = 0.0;
+var<private> g_shear_h: f32 = 0.0;
+fn shear_on() -> bool {
+  return P.shear.w != 0.0;
+}
+// The jump of the background flow v_y = -q Omega x across the box, q Omega L.
+fn shear_jump() -> f32 {
+  return P.shear.y * P.shear.x * P.box;
+}
+// The ghost c lies beyond an x face of a shearing box, between two sheared cells.
+fn shear_ghost(c: vec3<i32>) -> bool {
+  return shear_on() && (c.x < 0 || c.x >= i32(P.dims.x));
+}
+// For such a ghost, the weight of the second of those cells (the one above bc_map's along y).
+fn shear_frac(c: vec3<i32>) -> f32 {
+  let up = c.x >= i32(P.dims.x);
+  let j = f32(c.y) + select(g_shear, -g_shear, up);
+  return j - floor(j);
+}
+// The offset `s` (a length along y, in [0, L)) moved on by the shear over a time dt.
+fn shear_half(s: f32, dt: f32) -> f32 {
+  let d = s + 0.5 * dt * shear_jump();
+  return d - P.box * floor(d / P.box);
+}
+// That second cell.
+fn shear_next(m: vec3<i32>) -> vec3<i32> {
+  return vec3<i32>(m.x, (m.y + 1) % i32(P.dims.y), m.z);
 }
 
 // Velocity of a (possibly ghost) cell: reversed as the walls say (and, beyond a moving wall,

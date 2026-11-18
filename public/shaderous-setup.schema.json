@@ -750,6 +750,33 @@
      "title": "Comoving coordinates",
      "description": "An expanding universe: positions comoving, densities comoving (mean 1), velocities peculiar, times in 1/H0 from the starting redshift. G follows from the matter density. A periodic box of ideal gas, with or without self-gravity"
     },
+    "shear": {
+     "type": "object",
+     "properties": {
+      "omega": {
+       "type": "number",
+       "title": "Ω",
+       "description": "Angular velocity of the frame",
+       "minimum": 0,
+       "maximum": 1000000
+      },
+      "q": {
+       "type": "number",
+       "title": "Shear q",
+       "description": "-d ln Ω / d ln R: 1.5 for a Keplerian disk, 1 for a flat rotation curve",
+       "minimum": 0,
+       "maximum": 2
+      },
+      "stratified": {
+       "type": "boolean",
+       "title": "Stratified",
+       "description": "The vertical tidal pull, -Ω² z, toward the midplane"
+      }
+     },
+     "additionalProperties": false,
+     "title": "Shearing box",
+     "description": "The local model of a disk: a frame turning at Ω about z with the tidal pull of the shear, x radial, y along the orbit. Its x faces are periodic with the shift of the background flow v_y = -q Ω x, which the initial state should hold. Hydrodynamics on a uniform grid, periodic in y (and z unless stratified)"
+    },
     "jeansFloor": {
      "type": "boolean",
      "title": "Jeans floor",
@@ -3184,6 +3211,56 @@
       ],
       "additionalProperties": false,
       "description": "An X-type magnetic null at the center, A_z = (B0 / 2L) (y² - alpha² x²) with L the box side, so B = (B0 / L) (y, alpha² x), in gas of density 1 and uniform pressure. With alpha above 1 it carries a current its own force cannot hold, and collapses into a current sheet. Needs walls that hold the field lines crossing them: line-tied on all four sides."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Shearing wave",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "shearing-wave"
+       },
+       "amplitude": {
+        "type": "number",
+        "title": "Amplitude",
+        "default": 0.01,
+        "minimum": 0,
+        "maximum": 0.5
+       },
+       "kx": {
+        "type": "number",
+        "title": "Wavenumber along x",
+        "default": -2,
+        "minimum": -32,
+        "maximum": 32
+       },
+       "ky": {
+        "type": "number",
+        "title": "Wavenumber along y",
+        "default": 1,
+        "minimum": -32,
+        "maximum": 32
+       },
+       "pressure": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.01,
+        "minimum": 1e-8,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The background flow of a shearing sheet, v_y = -q Omega x, with a small density wave cos(kx x + ky y) on it (kx and ky in wavelengths across the box). A leading wave (kx < 0) is swung to trailing by the shear and amplified on the way. Needs physics.shear."
      },
      {
       "type": "object",

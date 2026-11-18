@@ -8,6 +8,7 @@ const TESTS = [
   'rot-off', 'rot-inertial', 'rot-balance', 'rot-blob', 'rot-binary', 'rot-mhd',
   'sym-flux', 'sym-sedov', 'sym-sphere', 'sym-ellipsoid', 'sym-polytrope', 'sym-evrard', 'sym-mhd', 'sym-mass',
   'cosmo-a', 'cosmo-drift', 'cosmo-growth', 'cosmo-pancake',
+  'shear-steady', 'shear-mass', 'shear-epicycle',
 ];
 
 test.describe.configure({ mode: 'serial' });

@@ -43,6 +43,16 @@ fn main() {
     if (prev > 0.0) { clock.steps += 1.0; }
     // The scale factor where that step ended.
     if (cosmo_on()) { clock.a = clock.a1; }
+    // A shearing box: its x faces' offset along y moves on by q Omega L dt (Kahan summation, as
+    // for t), kept in [0, L).
+    if (shear_on() && prev > 0.0) {
+      let ks = kahan1(clock.shear, clock.shear_c, prev * shear_jump());
+      var s = ks.x;
+      var sc = ks.y;
+      if (s >= P.box) { s -= P.box; }
+      clock.shear = s;
+      clock.shear_c = sc;
+    }
   }
 
   // With comoving coordinates the stable step is set by the proper cell size, a dx.

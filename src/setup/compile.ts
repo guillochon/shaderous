@@ -455,6 +455,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
     refineMasses: mesh.refineMasses,
     frame: ph.frame === 'gas' || ph.frame === 'masses' ? ph.frame : undefined,
     cosmology: cosmology ?? undefined,
+    shear: ph.shear ? { omega: ph.shear.omega ?? 1, q: ph.shear.q ?? 1.5, stratified: ph.shear.stratified ?? false } : undefined,
     rotation: ph.rotation?.omega && ph.rotation.omega.some((w) => w !== 0)
       ? () => ({ omega: [...ph.rotation!.omega!] as [number, number, number], centrifugal: ph.rotation!.centrifugal ?? true })
       : undefined,

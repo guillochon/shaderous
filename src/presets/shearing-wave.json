@@ -1,0 +1,30 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "shearing-wave",
+  "name": "Shearing wave",
+  "group": "Disks",
+  "family": "shearing-wave",
+  "familyName": "Shearing wave",
+  "variant": "Keplerian",
+  "blurb": "The local model of a Keplerian disk (a shearing box): a leading density wave is swung round by the shear and amplified as it turns trailing.",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "off",
+    "G": 0,
+    "shear": { "omega": 1, "q": 1.5 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "shearing-wave", "amplitude": 0.01, "kx": -4, "ky": 1, "pressure": 0.01 }
+  ],
+  "run": { "tEnd": 20, "checkpointDt": 0.25 },
+  "view": { "field": 0, "log": false, "mode": "slice" }
+}
