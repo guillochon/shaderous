@@ -1346,7 +1346,9 @@ $`E`$ includes $`B^2/2`$.
   Measured on an RTX 3080, paired runs against the step without the correction: on the uniform
   grid Orszag-Tang at $`1024^2`$ 8% faster (the update's cell code, now one function, compiles
   better), an MHD blast at $`128^3`$ and $`256^3`$ 3% slower, the MRI box at $`128^3`$ within 2%; on
-  blocks an MHD blast at $`128^3`$ with one level and a field loop at $`1024^2`$ with two within 2%.
+  blocks an MHD blast at $`128^3`$ with one level within 1%, and a field loop at $`1024^2`$ with two
+  levels, whose step takes 1.1 ms, 13% slower (7.6% with the first round alone): the two rounds
+  add nine small passes a step, about 0.14 ms in Chrome on Windows however little they do.
   Issue #3's disk at $`128^3`$ now runs 400 steps on the uniform grid with at most 5 floored cells,
   and on blocks with one and two levels and with time bins with at most 58 (from tens of
   thousands before the second round and the narrower energy rule), all with $`\nabla\cdot B`$ at
