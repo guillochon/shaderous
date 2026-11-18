@@ -835,6 +835,10 @@ as GADGET-2 ([Springel 2005][Springel2005]).
   fluxes, recomputed from stored states: half when its own step starts and half at its
   midpoint. A faster block reads a slower neighbor that is part way through its step from that
   neighbor's half-step prediction. Nothing is stored, and conservation holds to round-off.
+- A cycle keeps the smallest step it starts with, so a run begins with 16 single steps.
+  Initial conditions out of balance can shrink the step 30-fold within two steps (gas at rest
+  falling onto a point mass at the inner radius of an $`(r, \theta)`$ run), and a cycle begun
+  at $`t = 0`$ took all its substeps at the step of the gas at rest and went non-finite.
 - With self-gravity the potential is solved on every block at the end of a cycle. In between it
   is solved only on blocks finishing a step, and carried forward elsewhere at the rate at which
   it last changed. Point masses move every substep.

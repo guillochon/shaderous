@@ -86,6 +86,15 @@ const firstLine = (s: string) => s.split(/\r?\n/)[0];
 const BIN_POLL_CYCLES = 4;
 const BIN_SHARE_MAX = { hydro: 0.8, field: 0.65 };
 const BIN_PAUSE_STEPS = 192;
+/**
+ * A run starts with this many single steps before its first cycle. Initial conditions are
+ * often out of balance (gas at rest in a deep potential falls at once), and the timestep can
+ * fall 30-fold within the first few steps; a cycle commits 2^K substeps to the timestep of its
+ * start, and one begun at t = 0 took them all at the step the gas at rest allowed (an (r,
+ * theta) run with a heavy point mass, found by tools/random-test). Single steps measure the
+ * timestep every step.
+ */
+const BIN_START_STEPS = 16;
 const BIN_PAUSE_MAX = 1536;
 
 interface RegridPlan {
@@ -302,7 +311,7 @@ export class AmrSim implements Simulation {
   private binEpoch = 0;
   private cyclesSincePoll = 0;
   /** single steps left before cycles are tried again, and how many the next pause will be */
-  private binPause = 0;
+  private binPause = BIN_START_STEPS;
   private binPauseNext = BIN_PAUSE_STEPS;
   /** share of block updates made in the last cycles measured (1 = no saving), or null */
   binShare: number | null = null;
@@ -997,7 +1006,7 @@ export class AmrSim implements Simulation {
     this.gBinsArgs = bindGroup(d, this.pBinsArgs, { 0: this.params, 1: this.listAct, 2: this.listUpd, 3: this.binCnt, 4: this.binArgs, 5: this.listEnd, 6: this.listDep });
     this.binsPrimed = null;
     // What was measured with other bins says nothing about these.
-    this.binPause = 0;
+    this.binPause = BIN_START_STEPS;
     this.binPauseNext = BIN_PAUSE_STEPS;
     this.binShare = null;
   }
@@ -1491,7 +1500,7 @@ export class AmrSim implements Simulation {
     this.binSeen = { updates: 0, single: 0 };
     this.wantBinPoll = null;
     this.cyclesSincePoll = 0;
-    this.binPause = 0;
+    this.binPause = BIN_START_STEPS;
     this.binPauseNext = BIN_PAUSE_STEPS;
     this.binShare = null;
     d.queue.writeBuffer(this.binArgs, 0, new Uint32Array(BIN_ARGS_BYTES / 4));
