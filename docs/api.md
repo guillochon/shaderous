@@ -763,6 +763,9 @@ await S('runTo', 2);
 - **Large results are slow to bring out of the page.** `page.evaluate` copies a list of
   numbers one by one: a JSON `slice` at `res` 2048 takes about 13 s to cross, against under a
   second with `encoding: 'base64'`.
+- **A rotating frame's velocities are the frame's.** With `physics.rotation` set, every
+  velocity the API returns (diagnostics, momenta, slices, probes) and every velocity in an
+  `.athdf` file is relative to the turning frame, and `eTot` is the Jacobi integral.
 - **`play()` uses the page's own loop.** In headless mode that loop is off, so step with `run`.
 - **It is one page and one run.** For runs in parallel, open several pages. Each one takes its
   own GPU memory.

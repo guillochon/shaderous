@@ -32,8 +32,9 @@ precision, are pointed out where they occur.
 19. [Accelerating frames and damping zones](#19-accelerating-frames-and-damping-zones)
 20. [Nuclear burning network](#20-nuclear-burning-network)
 21. [Ideal MHD](#21-ideal-mhd)
-22. [Validation](#22-validation)
-23. [References](#references)
+22. [Rotating frames, symmetry and coordinates](#22-rotating-frames-symmetry-and-coordinates)
+23. [Validation](#23-validation)
+24. [References](#references)
 
 ---
 
@@ -1482,7 +1483,64 @@ overshoot, and at 45° the plain mean is cleaner on every shape measure. The cod
 mean (Gardiner & Stone, as Athena++); the other three were removed in November 2026 and are in
 the history (commit 9513236).
 
-## 22. Validation
+## 22. Rotating frames, symmetry and coordinates
+
+### Rotating frame
+
+A setup may run in a frame turning at a constant angular velocity $`\boldsymbol\Omega`$ about
+an axis through the box center (`physics.rotation`; `gravity/rot.wgsl`). The gas then feels
+
+```math
+\mathbf{a} = -2\,\boldsymbol\Omega\times\mathbf{v} - \nabla\Phi_c,
+\qquad \Phi_c = -\tfrac12\,|\boldsymbol\Omega\times\mathbf{x}|^2 ,
+```
+
+and all velocities, in the initial state, the outputs and the files, are those relative to the
+turning frame (`problems/rotating.ts` converts an inertial setup). The centrifugal force can be
+switched off, leaving the Coriolis force alone (an f-plane). In 2D only the part of
+$`\boldsymbol\Omega`$ along $`z`$ is used.
+
+**Centrifugal force.** $`\Phi_c`$ is added to the external potential of the point masses and
+the accelerating frame (`gravity/ext.wgsl`), so every pass that sees that potential sees it: the
+half kicks (with the energy in kick form, as for the masses), the gravity limit of the
+timestep, the well-balanced reconstruction, which then holds gas at rest in the rotating frame,
+and the potential view, which shows the effective potential. Its difference across a face is
+formed directly,
+$`-(\boldsymbol\Omega\times\mathbf{x})\cdot(\boldsymbol\Omega\times\mathbf{d}) - \tfrac12|\boldsymbol\Omega\times\mathbf{d}|^2`$,
+not as the difference of two potentials. The diagnostics add $`\rho\Phi_c`$ to the potential
+energy, so the total energy reported is the Jacobi integral, which is what the frame conserves.
+
+**Coriolis force.** Over a time $`\tau`$ it turns the momentum by $`-2|\boldsymbol\Omega|\tau`$
+about $`\boldsymbol\Omega`$, which Rodrigues' formula does exactly (with $`1 - \cos\theta`$
+formed as $`2\sin^2(\theta/2)`$). A turn keeps $`|\mathbf{m}|`$, so the force does no work and
+the total energy needs no source term. The turn is split around the step,
+
+```
+turn(dt/2)  kick(dt/2)  fluxes  kick(dt/2)  turn(dt/2)
+```
+
+which is symmetric in time; the predictor adds $`-2\boldsymbol\Omega\times\mathbf{v}`$ to its
+half kick. The turns live in a shader slot of their own, the frame slot
+(`gravity/frame_off.wgsl`, `frame_rot.wgsl`), applied by every update (uniform grid, blocks
+with or without per-block timesteps, and both MHD stages, where stage 1 takes its half step's
+whole share) and after the second kick, so a run without a rotation compiles without it and is
+unchanged bit for bit. The induction equation is the same in a rotating frame, so the field
+needs nothing. Point masses turn their velocities in their drift and kick passes and feel the
+centrifugal force. The step is limited to a tenth of a radian of frame rotation, about 63
+steps a turn; the turn is exact, so this bounds the splitting error, not stability.
+
+Debris energies and the disk stresses add $`\boldsymbol\Omega\times\mathbf{x}`$ back to the
+velocities, which they need in the inertial frame.
+
+Tests (`validation/frames.ts`): uniform flow on an f-plane turns at $`2\Omega`$ with its phase
+right to $`7\times10^{-6}`$ rad and its kinetic energy to $`10^{-7}`$; isothermal gas held by
+the centrifugal force stays below Mach $`10^{-5}`$ for more than a sound crossing (Mach 0.02
+without the well-balanced reconstruction); a blob carried by gas moving straight in the
+inertial frame lands within a sixth of a cell of where it should after a quarter turn; a binary
+at rest in its corotating frame keeps its separation to $`10^{-10}`$ for two orbits; and a
+uniform field along the axis is left exactly as it was.
+
+## 23. Validation
 
 The validation suite (`src/validation/tests.ts`) has 55 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
