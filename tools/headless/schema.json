@@ -75,6 +75,11 @@
    "about": "End time (inf for none)"
   },
   {
+   "key": "sym",
+   "group": "settings",
+   "about": "Mirror symmetry: none, x, y, z, xy, xz, yz, xyz"
+  },
+  {
    "key": "eos",
    "group": "settings",
    "about": "Equation of state: ideal, barotropic, gas_radiation, degenerate, ionizing, helmholtz"

@@ -10,6 +10,7 @@
   "blurb": "Self-gravitating polytrope in equilibrium (n = 1 with a γ = 2 gas by default). One dynamical time is t = 1. Its mass and radius set the physical units, for an equation of state that needs them.",
   "domain": {
     "box": 1,
+    "symmetric": "xyz",
     "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] },
     "units": {
       "name": "star",

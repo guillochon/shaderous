@@ -5,6 +5,7 @@
 // The compiled initial state paints in layers: a whole-box flow or the background, then disks,
 // then stars (also left to settling), then regions, obstacles and inflows in the order of the
 // parts, and last the flows that only change what is there.
+import { mirrorAxes } from '../domain';
 import { NET_SPECIES } from '../burn/network';
 import type { AnyBurnSpec } from '../burn/burn';
 import { defaultEosParams, makeEos, physicalEosParams, type Eos } from '../eos/eos';
@@ -421,6 +422,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
     jeansFloor: ph.jeansFloor,
     jeansCells: ph.jeansCells,
     supports2d: d.supports2d,
+    symmetry: d.symmetric ? { axes: mirrorAxes(d.symmetric), mhd: d.symmetricField ?? false } : undefined,
     bc2d: d.bc2d,
     wallVelocity: d.wallVelocity ? { ...d.wallVelocity } : undefined,
     fluff: fl ? { rho: fl.rho ?? 0, u: fl.u ?? 0, v: fl.v ?? 0, ...(fl.va !== undefined ? { va: fl.va } : {}) } : undefined,
@@ -509,6 +511,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   over('refineLo', mesh.refineLo);
   over('timeBins', mesh.timeBins);
   over('jeansRefine', mesh.jeansRefine);
+  over('symmetry', d.mirror ? mirrorAxes(d.mirror) : undefined);
   return { spec, problem, overrides };
 }
 

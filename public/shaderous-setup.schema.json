@@ -94,6 +94,39 @@
      "title": "Makes sense in 2D",
      "description": "The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only"
     },
+    "symmetric": {
+     "enum": [
+      "none",
+      "x",
+      "y",
+      "z",
+      "xy",
+      "xz",
+      "yz",
+      "xyz"
+     ],
+     "title": "Symmetric under",
+     "description": "The mirrors (planes through the origin, named by the axis normal to each) the setup is symmetric under: a run may then compute only the part above them"
+    },
+    "symmetricField": {
+     "type": "boolean",
+     "title": "Field symmetric too",
+     "description": "The magnetic field is symmetric under those mirrors as well (a vector potential odd in its normal component and even in the others)"
+    },
+    "mirror": {
+     "enum": [
+      "none",
+      "x",
+      "y",
+      "z",
+      "xy",
+      "xz",
+      "yz",
+      "xyz"
+     ],
+     "title": "Mirror symmetry",
+     "description": "Compute only the part of a symmetric setup above its planes of symmetry: each mirrored axis runs from 0 to the box side, its lower face a plane of symmetry, and the totals are those of the whole. An octant in 3D (or a quadrant in 2D) gives twice the resolution for the same cells"
+    },
     "bc": {
      "type": "object",
      "properties": {

@@ -22,6 +22,7 @@
   "variant": "Standard",
   "domain": {
     "box": 3,
+    "symmetric": "xyz",
     "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] },
     "units": {
       "name": "white dwarf",

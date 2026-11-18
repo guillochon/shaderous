@@ -121,6 +121,7 @@ by `npm run gen`.
 | `n` | The run | Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid |
 | `amr` | The run | Levels of refinement, 0 to 5. With n but no amr, the grid is uniform |
 | `tend` | Settings | End time (inf for none) |
+| `sym` | Settings | Mirror symmetry: none, x, y, z, xy, xz, yz, xyz. Compute only the part of a symmetric setup above its planes of symmetry: each mirrored axis runs from 0 to the box side, its lower face a plane of symmetry, and the totals are those of the whole. An octant in 3D (or a quadrant in 2D) gives twice the resolution for the same cells |
 | `eos` | Settings | Equation of state: ideal, barotropic, gas_radiation, degenerate, ionizing, helmholtz. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
 | `gamma` | Settings | gamma. Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
 | `K` | Settings | K (p = K rho^gamma). Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |

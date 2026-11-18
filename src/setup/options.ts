@@ -137,6 +137,10 @@ const flowDef = (p: Part) => (p.kind === 'flow' ? FLOWS[p.name] : undefined);
 export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value; say?: (v: Value) => string }> = {
   'domain.ndim': { label: 'Dimensions', of: (s) => s.domain?.ndim ?? 3, say: (v) => `${v}D` },
   'domain.supports2d': { label: 'A setup that makes sense in 2D', of: (s) => s.domain?.supports2d ?? false },
+  'symmetric.x': { label: 'A setup symmetric under the x mirror', of: (s) => !!s.domain?.symmetric?.includes('x') },
+  'symmetric.y': { label: 'A setup symmetric under the y mirror', of: (s) => !!s.domain?.symmetric?.includes('y') },
+  'symmetric.z': { label: 'A setup symmetric under the z mirror', of: (s) => !!s.domain?.symmetric?.includes('z') },
+  'symmetric.field': { label: 'A magnetic field symmetric under the mirrors, or none', of: (s) => !!s.domain?.symmetricField || !FACTS.magnetic.of(s) },
   'mesh.adaptive': { label: 'An adaptive mesh', of: (s) => (s.domain?.amr ?? 0) > 0 },
   'physics.eos': { label: 'Equation of state', of: (s) => s.physics?.eos ?? 'ideal', say: (v) => EOS_LABELS[v as keyof typeof EOS_LABELS] ?? String(v) },
   'eos.energy': { label: 'An equation of state with an energy', of: (s) => (s.physics?.eos ?? 'ideal') !== 'barotropic' },
@@ -208,6 +212,8 @@ const ENERGY: Rule[] = [{ fact: 'eos.energy' }];
 const SELF: Rule[] = [{ fact: 'gravity.self' }];
 const ADAPTIVE: Rule[] = [{ fact: 'mesh.adaptive' }];
 const IN_3D: Rule[] = [{ fact: 'domain.ndim', is: 3 }];
+/** The mirror sets a domain may name (src/domain.ts mirrorAxes). */
+const MIRRORS = ['none', 'x', 'y', 'z', 'xy', 'xz', 'yz', 'xyz'];
 const NOT_PERIODIC: Rule[] = [{ fact: 'bc.periodic', reason: 'Not available with a periodic face: its gravity is not periodic' }];
 
 export const BC_CHOICES: Choice[] = BOUNDARIES.map((b) => ({
@@ -241,6 +247,19 @@ export const OPTIONS: Option[] = [
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level', page: 'domain', control: num(16, 16384, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
   { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, 5, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },
+  { path: 'domain.symmetric', label: 'Symmetric under', tip: 'The mirrors (planes through the origin, named by the axis normal to each) the setup is symmetric under: a run may then compute only the part above them', page: 'domain', apply: 'live', default: 'none',
+    control: pick(...MIRRORS.map((m): [Value, string] => [m, m === 'none' ? 'No mirror' : m.split('').join(', ')])) },
+  { path: 'domain.symmetricField', label: 'Field symmetric too', tip: 'The magnetic field is symmetric under those mirrors as well (a vector potential odd in its normal component and even in the others)', page: 'domain', control: check, apply: 'live', default: false },
+  { path: 'domain.mirror', label: 'Mirror symmetry', tip: 'Compute only the part of a symmetric setup above its planes of symmetry: each mirrored axis runs from 0 to the box side, its lower face a plane of symmetry, and the totals are those of the whole. An octant in 3D (or a quadrant in 2D) gives twice the resolution for the same cells', page: 'domain', apply: 'restart', default: 'none', linkKey: 'sym', cfg: 'symmetry',
+    control: pick(...MIRRORS.map((m): Choice => ({
+      value: m,
+      label: m === 'none' ? 'Whole box' : m === 'xyz' ? 'Octant (x, y, z)' : m === 'xy' ? 'Quadrant (x, y)' : `Mirrored in ${m.split('').join(', ')}`,
+      requires: m === 'none' ? [] : [
+        ...m.split('').map((a): Rule => ({ fact: `symmetric.${a}`, reason: `The setup is not symmetric under the ${a} mirror` })),
+        ...(m.includes('z') ? IN_3D : []),
+        { fact: 'symmetric.field', reason: 'The magnetic field is not symmetric under the mirrors' },
+      ],
+    }))) },
   { path: 'domain.supports2d', label: 'Makes sense in 2D', tip: 'The setup can also run on a 2D (x, y) grid. Without it the setup is three-dimensional only', page: 'domain', control: check, apply: 'live', default: false },
   { path: 'domain.units', label: 'Physical units', tip: 'What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units', page: 'domain', apply: 'restart',
     control: { type: 'group', optional: true,

@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { fromRotating, rotTurn, toRotating } from '../../src/problems/rotating';
 import { domainHi, domainLo } from '../../src/domain';
-import { configFor, rotationOf, rotating } from '../../src/sim';
+import { configFor, rotationOf, rotating, symmetryUnsupported, unfoldDiagnostics, withSymmetry, type Diagnostics } from '../../src/sim';
+import { problemById } from '../../src/problems';
+import { decodeLink, encodeLink, viewDefaults } from '../../src/ui/link';
+import { defaultOpacity } from '../../src/render/transfer';
+import { runningSpec } from '../../src/setup/running';
+import { mirrorAxes, mirrorName } from '../../src/domain';
 import { all, PERIODIC, type Problem } from '../../src/problems/types';
 
 /** Rotation by angle th about the unit axis n, as a matrix. */
@@ -73,5 +78,59 @@ describe('domain', () => {
     expect(domainHi({ problem: { box: 4 } })).toEqual([2, 2, 2]);
     expect(domainLo({ problem: { box: 4 }, symmetry: [true, false, true] })).toEqual([0, -2, 0]);
     expect(domainHi({ problem: { box: 4 }, symmetry: [true, false, true] })).toEqual([4, 2, 4]);
+  });
+});
+
+describe('mirror symmetry', () => {
+  it('mirrors only the axes the preset allows, never z in 2D, and makes their planes reflect', () => {
+    const sedov = problemById('sedov');
+    const c = configFor(sedov, 32, { symmetry: [true, true, true] });
+    expect(c.symmetry).toEqual([true, true, true]);
+    expect(c.bcLo).toEqual([2, 2, 2]);
+    expect(c.bcHi).toEqual([1, 1, 1]);
+    expect(configFor(sedov, 32, { ndim: 2, symmetry: [true, true, true] }).symmetry).toEqual([true, true, false]);
+    const kh = problemById('kelvin-helmholtz');
+    expect(configFor(kh, 32, { ndim: 2, symmetry: [true, true, false] }).symmetry).toEqual([false, false, false]);
+    expect(withSymmetry(configFor(sedov, 32, {}), [false, true, false]).bcLo).toEqual([1, 2, 1]);
+  });
+
+  it('refuses what is not symmetric under the mirrors', () => {
+    const sedov = problemById('sedov');
+    expect(symmetryUnsupported(configFor(sedov, 32, { symmetry: [true, true, true] }))).toBeNull();
+    const pm: typeof sedov = { ...sedov, masses: () => [{ gm: 1, pos: [0.1, 0, 0], vel: [0, 0, 0] }] };
+    expect(symmetryUnsupported(configFor(pm, 32, { symmetry: [true, false, false] }))).toMatch(/off the x plane/);
+    const spun: typeof sedov = { ...sedov, rotation: () => ({ omega: [0, 0, 1] }) };
+    expect(symmetryUnsupported(configFor(spun, 32, { symmetry: [false, false, true] }))).toBeNull();
+    expect(symmetryUnsupported(configFor(spun, 32, { symmetry: [true, false, false] }))).toMatch(/turning/);
+  });
+
+  it('reports the whole configuration', () => {
+    const d = { mass: 1, eKin: 2, eInt: 3, eGrav: -1, eTot: 4, nuclearHeating: 0.5, momentum: [1, 2, 3], com: [0.1, 0.2, 0.3] } as unknown as Diagnostics;
+    const u = unfoldDiagnostics(d, [true, false, true]);
+    expect([u.mass, u.eKin, u.eInt, u.eGrav, u.eTot, u.nuclearHeating]).toEqual([4, 8, 12, -4, 16, 2]);
+    expect(u.momentum).toEqual([0, 8, 0]);
+    expect(u.com).toEqual([0, 0.2, 0]);
+  });
+
+  it('names mirror sets both ways', () => {
+    expect(mirrorAxes('xz')).toEqual([true, false, true]);
+    expect(mirrorName([true, false, true])).toBe('xz');
+    expect(mirrorName([false, false, false])).toBe('none');
+  });
+
+  it('travels in links as sym, without the faces of its planes', () => {
+    const problem = problemById('sedov');
+    const cfg = configFor(problem, 64, { symmetry: [true, true, true] });
+    const q = encodeLink({ cfg, view: viewDefaults(problem, 3), auto: true, colormap: 'inferno', opacity: defaultOpacity() });
+    expect(q.get('sym')).toBe('xyz');
+    expect(q.has('bc')).toBe(false);
+    expect(decodeLink(q).cfg.symmetry).toEqual([true, true, true]);
+  });
+
+  it('is written into the document a run stands for', () => {
+    const cfg = configFor(problemById('evrard'), 32, { symmetry: [true, true, true] });
+    const spec = runningSpec(cfg);
+    expect(spec.domain?.mirror).toBe('xyz');
+    expect(spec.domain?.bc).toEqual({ lo: [1, 1, 1], hi: [1, 1, 1] });
   });
 });

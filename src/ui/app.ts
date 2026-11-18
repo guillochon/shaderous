@@ -16,7 +16,8 @@ import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
 import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
-import { type CellProbe, configFor, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { boxFrac, fracPos } from '../domain';
+import { type CellProbe, configFor, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -1694,8 +1695,10 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     // Settings changed in the Setup dialog while it waited.
     if (settings && !(keepPhysics && cfg && cfg.problem.id === problem.id)) for (const s of settings) setSetting(next, s.setting, s.value);
     if (link) {
-      // Settings carried by a shared link, on top of the preset's defaults.
+      // Settings carried by a shared link, on top of the preset's defaults; its mirrors, as far
+      // as the preset allows them, with their planes' faces.
       Object.assign(next, link.cfg);
+      if (link.cfg.symmetry) Object.assign(next, withSymmetry(next, link.cfg.symmetry));
       Object.assign(next.params, link.params);
       // Units that follow the preset's parameters: the equation of state's physical constants are the link's parameters', not the defaults'.
       if (typeof problem.units === 'function') Object.assign(next.eosParams, physicalEosParams(problemUnits(problem, next.params), problem.composition), problem.eosParams);
@@ -3022,7 +3025,7 @@ function removePinned() {
 function thingPos(t: Thing): number[] | null {
   if ('source' in t) return t.source.pos;
   const m = massesNow()[t.mass];
-  return m ? m.pos.map((v) => v / cfg.problem.box + 0.5) : null;
+  return m ? m.pos.map((v, a) => boxFrac(cfg, v, a)) : null;
 }
 
 /** The source, sink or point mass drawn within a few pixels of a point of the canvas, nearest first. */
@@ -3171,7 +3174,7 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
       rows.push(['Softening', u.fmt(m.soft, 'length')]);
       if (m.sinkRadius > 0 && m.sinkRate > 0) rows.push(['Sink radius', u.fmt(m.sinkRadius, 'length')], ['Gas taken in', u.fmt(m.accreted, 'mass')]);
     } else if (source) {
-      rows.push(['Position', vec(source.pos.map((v) => (v - 0.5) * box), 'length')]);
+      rows.push(['Position', vec(source.pos.map((v, a) => fracPos(cfg, v, a)), 'length')]);
     }
     if (source) {
       rows.push(['Radius', u.fmt(source.radius * box, 'length')]);
@@ -3463,7 +3466,7 @@ function drawSources() {
     for (const q of sources) {
       const rides = q.carrier !== undefined ? masses[q.carrier] : undefined;
       // (Between a placement and the next readback the mass is not yet known: where it was put.)
-      const where = rides ? rides.pos.map((v) => v / box + 0.5) : q.pos;
+      const where = rides ? rides.pos.map((v, a) => boxFrac(cfg, v, a)) : q.pos;
       const c = at(where);
       if (!(c.w > 0)) continue; // behind the camera
       // Size on screen: from a point one radius away along an axis in the plane of the view.
@@ -3488,7 +3491,7 @@ function drawSources() {
     // an arrow along its velocity.
     for (const [index, q] of masses.entries()) {
       if (ridden.has(index)) continue;
-      const pos = q.pos.map((v) => v / box + 0.5);
+      const pos = q.pos.map((v, a) => boxFrac(cfg, v, a));
       const c = at(pos);
       if (!(c.w > 0)) continue;
       const arrow = velArrow(c, pos, q.vel);
@@ -3636,7 +3639,7 @@ function massSpec(pos: Vec3, vel: Vec3, q: { size: number; amount: number; mass:
   // A preset without a gravitational constant gets G = 1 when a point mass is placed.
   const G = cfg.G > 0 ? cfg.G : 1;
   const where = {
-    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
+    pos: pos.map((v, i) => (two && i === 2 ? 0 : fracPos(cfg, v, i))),
     vel: fixed ? [0, 0, 0] : two ? [vel[0], vel[1], 0] : vel,
     sinkRadius: q.size * box,
     fixed,
@@ -3656,7 +3659,7 @@ function starSpec(pos: Vec3, vel: Vec3): PointMass {
   const box = cfg.problem.box;
   return {
     gm: (cfg.G > 0 ? cfg.G : 1) * 10 ** starLogRho * starMassPerRho(),
-    pos: pos.map((v) => (v - 0.5) * box),
+    pos: pos.map((v, a) => fracPos(cfg, v, a)),
     vel,
     soft: toolParams.star.size * box,
     sinkRadius: 0,
@@ -3670,7 +3673,7 @@ function carrierSpec(pos: Vec3, vel: Vec3, size: number): PointMass {
   const two = cfg.ndim === 2;
   return {
     gm: 1e-9 * (cfg.G > 0 ? cfg.G : 1) * gas,
-    pos: pos.map((v, i) => (two && i === 2 ? 0 : (v - 0.5) * box)),
+    pos: pos.map((v, i) => (two && i === 2 ? 0 : fracPos(cfg, v, i))),
     vel: two ? [vel[0], vel[1], 0] : vel,
     soft: size * box,
     sinkRadius: 0,
@@ -3793,7 +3796,7 @@ function placeStar(pos: Vec3, vel: Vec3, given: Partial<StarAction> = {}): Promi
   notice(notes.join('; '));
   const target = sim;
   const box = cfg.problem.box;
-  const star = { n, K: op.star!.K, rhoc, center: pos.map((x) => (x - 0.5) * box), vel, R: size * box };
+  const star = { n, K: op.star!.K, rhoc, center: pos.map((x, a) => fracPos(cfg, x, a)), vel, R: size * box };
   syncControls();
   return enqueue(async () => {
     if (target !== sim) return;
@@ -4138,7 +4141,7 @@ function drawOrbit(path: Orbit | null) {
     const at = projector();
     const box = cfg.problem.box;
     const f = (v: number) => v.toFixed(1);
-    const project = (pts: Float32Array) => Array.from({ length: pts.length / 3 }, (_, i) => at([0, 1, 2].map((c) => pts[3 * i + c] / box + 0.5)));
+    const project = (pts: Float32Array) => Array.from({ length: pts.length / 3 }, (_, i) => at([0, 1, 2].map((c) => boxFrac(cfg, pts[3 * i + c], c))));
     const px = project(path.points);
     // Where the run's other masses go meanwhile, faintly: what the path is bending around.
     for (const other of path.others) {
@@ -4150,7 +4153,7 @@ function drawOrbit(path: Orbit | null) {
     // the middle of the layer swings across the plane of a star centered between two layers).
     const slice = cfg.ndim === 3 && view.mode === 'slice';
     const plane = slice ? locate(0, 0, 0).pos[view.sliceAxis] : 0;
-    const off = (i: number) => slice && Math.abs(path.points[3 * i + view.sliceAxis] / box + 0.5 - plane) > 1.5 / cfg.n;
+    const off = (i: number) => slice && Math.abs(boxFrac(cfg, path.points[3 * i + view.sliceAxis], view.sliceAxis) - plane) > 1.5 / cfg.n;
     for (let i = 1; i < n; i++) d[off(i) ? 1 : 0] += `M${f(px[i - 1].x)} ${f(px[i - 1].y)}L${f(px[i].x)} ${f(px[i].y)}`;
     // The arrowhead: at the end, along the last stretch long enough to give a direction.
     const tip = px[n - 1];

@@ -341,7 +341,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     hi: [problem.bcHi[0], problem.bcHi[1], 0] as Bc3,
   };
   const params = Object.fromEntries((problem.params ?? []).map((q) => [q.id, q.value]));
-  const cfg: SimConfig = {
+  const cfg: Omit<SimConfig, 'symmetry'> & { symmetry?: [boolean, boolean, boolean] } = {
     n,
     ndim,
     gext: problem.gext?.(ndim) ?? [0, 0, 0],
@@ -394,9 +394,9 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // A problem compiled from a setup document brings the solver's and the mesh's settings too.
     ...(problem.setup ? compiledFrom(problem.setup).overrides : {}),
     ...over,
-    symmetry: [false, false, false],
   };
-  return withSymmetry(cfg, over.symmetry);
+  const want = cfg.symmetry;
+  return withSymmetry({ ...cfg, symmetry: [false, false, false] }, want);
 }
 
 /**

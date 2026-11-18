@@ -10,6 +10,7 @@
   "blurb": "Cold uniform sphere under its own gravity (isolated boundaries).",
   "domain": {
     "box": 1,
+    "symmetric": "xyz",
     "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
   },
   "physics": {

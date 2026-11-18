@@ -10,6 +10,7 @@
   "blurb": "Adiabatic collapse of a cold 1/r gas sphere: self-gravity plus strong shocks.",
   "domain": {
     "box": 4,
+    "symmetric": "xyz",
     "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
   },
   "physics": {

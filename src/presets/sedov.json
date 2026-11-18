@@ -10,6 +10,7 @@
   "blurb": "Point explosion in a cold uniform medium, gamma = 1.4.",
   "domain": {
     "box": 1,
+    "symmetric": "xyz",
     "supports2d": true,
     "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
   },

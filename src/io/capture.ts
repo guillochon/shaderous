@@ -132,12 +132,14 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
 export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean, rootCells: number): Pick<SimConfig, 'problem' | 'restart'> {
   const sampler = new SnapshotSampler(snap);
   const box = problem.box;
-  const frac = (x: number) => x / box + 0.5;
+  // Fractions of the file's own box, from its lower corner (an octant's starts at the origin).
+  const flo = snap.lo ?? [-box / 2, -box / 2, -box / 2];
+  const frac = (x: number, a: number) => x / box - flo[a] / box;
   const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined), debris: snap.meta?.debris };
   if (adaptive) {
     // Levels count from the root grid, and the file's root may not be the run's.
     const shift = Math.round(Math.log2(snap.rootSize[0] / rootCells));
-    restart.levelAt = (x, y, z) => Math.max(0, sampler.level(frac(x), frac(y), frac(z)) + shift);
+    restart.levelAt = (x, y, z) => Math.max(0, sampler.level(frac(x, 0), frac(y, 1), frac(z, 2)) + shift);
   }
   // A magnetic field comes back face by face, which needs the grid it was saved on.
   let mhd = problem.mhd;
@@ -204,7 +206,7 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
         return (x, y, z) => {
           const { solid, fixed, X } = preset(x, y, z);
           // Species the file lacks start as the preset has them.
-          const w = sampler.prim(frac(x), frac(y), frac(z), problem.species);
+          const w = sampler.prim(frac(x, 0), frac(y, 1), frac(z, 2), problem.species);
           return { ...w, X: w.X ?? X, solid, fixed };
         };
       },

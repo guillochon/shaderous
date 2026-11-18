@@ -77,7 +77,7 @@ const FEATURED: Schema = { any: ['string', obj({
 
 const DOCUMENT: Record<string, Schema> = {
   format: 'string', version: 'int', id: 'string', name: 'string', group: 'string', family: 'string', familyName: 'string', variant: 'string', blurb: 'string', extends: 'string',
-  domain: obj({ ndim: choice('domain.ndim'), n: 'int', amr: 'int', box: 'number', supports2d: 'boolean', bc: FACES, bc2d: FACES, wallVelocity: obj({ xlo: 'vec3', xhi: 'vec3', ylo: 'vec3', yhi: 'vec3', zlo: 'vec3', zhi: 'vec3' }), units: obj({ name: 'string', length: UNIT, mass: UNIT, density: UNIT, velocity: UNIT }) }),
+  domain: obj({ ndim: choice('domain.ndim'), n: 'int', amr: 'int', box: 'number', supports2d: 'boolean', symmetric: choice('domain.symmetric'), symmetricField: 'boolean', mirror: choice('domain.mirror'), bc: FACES, bc2d: FACES, wallVelocity: obj({ xlo: 'vec3', xhi: 'vec3', ylo: 'vec3', yhi: 'vec3', zlo: 'vec3', zhi: 'vec3' }), units: obj({ name: 'string', length: UNIT, mass: UNIT, density: UNIT, velocity: UNIT }) }),
   physics: obj({
     eos: choice('physics.eos'),
     eosParams: { object: {}, open: 'number' },

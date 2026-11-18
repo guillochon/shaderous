@@ -18,6 +18,26 @@ export function domainLo(c: DomainShape): [number, number, number] {
   return [0, 1, 2].map((a) => (s?.[a] ? 0 : -half)) as [number, number, number];
 }
 
+/** A position as a fraction of the box from the domain's lower corner (x / box + 0.5 for a centered one), along `axis`. */
+export function boxFrac(c: DomainShape, x: number, axis: number): number {
+  return x / c.problem.box - domainLo(c)[axis] / c.problem.box;
+}
+/** The position at a fraction of the box along `axis` ((f - 0.5) box for a centered domain). */
+export function fracPos(c: DomainShape, f: number, axis: number): number {
+  return (f + domainLo(c)[axis] / c.problem.box) * c.problem.box;
+}
+
+/** The axes a mirror string ('xz') names. */
+export function mirrorAxes(s: string | undefined): [boolean, boolean, boolean] {
+  return [0, 1, 2].map((a) => !!s?.includes('xyz'[a])) as [boolean, boolean, boolean];
+}
+
+/** The mirror string of a set of axes: 'none' for none. */
+export function mirrorName(axes: readonly boolean[] | undefined): string {
+  const s = [0, 1, 2].filter((a) => axes?.[a]).map((a) => 'xyz'[a]).join('');
+  return s || 'none';
+}
+
 /** The domain's upper corner, per axis. */
 export function domainHi(c: DomainShape): [number, number, number] {
   const lo = domainLo(c);

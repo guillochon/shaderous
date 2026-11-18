@@ -58,6 +58,18 @@ export interface DomainSpec {
   bc?: { lo: Bc3; hi: Bc3 };
   /** boundaries in 2D, where they differ */
   bc2d?: { lo: Bc3; hi: Bc3 };
+  /**
+   * The mirrors the setup is symmetric under, as the axes normal to them ('x', 'xy', 'xyz', ...):
+   * a run may then compute only the part above those planes through the origin. `symmetricField`:
+   * its magnetic field is symmetric too.
+   */
+  symmetric?: string;
+  symmetricField?: boolean;
+  /**
+   * The mirrors this run uses (some of `symmetric`): each mirrored axis's domain is then
+   * [0, box] and its lower face a plane of symmetry.
+   */
+  mirror?: string;
   /** velocity of each face that is a moving wall (problems/boundaries.ts), along the wall */
   wallVelocity?: Partial<Record<'xlo' | 'xhi' | 'ylo' | 'yhi' | 'zlo' | 'zhi', [number, number, number]>>;
   units?: UnitsSpec;
