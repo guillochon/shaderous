@@ -358,6 +358,13 @@ export const OPTIONS: Option[] = [
   { path: 'physics.gravEnergyFlux', label: 'Conserve energy', tip: 'Flux-form gravitational work: conserves total energy', page: 'gravity', control: check, apply: 'live', default: true, linkKey: 'fluxwork', cfg: 'gravEnergyFlux', requires: SELF },
   { path: 'physics.rotation.omega', label: 'Rotating frame Ω', tip: 'Angular velocity of a frame turning about an axis through the box center: the gas feels the Coriolis force (and the centrifugal force, below). Velocities are those in the turning frame. In 2D only the z part turns the plane. Zero: an inertial frame', page: 'gravity', control: { type: 'vec3' }, apply: 'restart', default: [0, 0, 0] },
   { path: 'physics.rotation.centrifugal', label: 'Centrifugal force', tip: 'With a rotating frame: the centrifugal force as well as the Coriolis force. Off, the Coriolis force alone (an f-plane, as in a shearing box)', page: 'gravity', control: check, apply: 'restart', default: true },
+  { path: 'physics.cosmology', label: 'Comoving coordinates', tip: 'An expanding universe: positions comoving, densities comoving (mean 1), velocities peculiar, times in 1/H0 from the starting redshift. G follows from the matter density. A periodic box of ideal gas, with or without self-gravity', page: 'gravity', apply: 'restart',
+    control: { type: 'group', optional: true, fields: [
+      { path: 'omegaM', label: 'Matter density Ω_m', tip: 'Matter density today, in units of the critical density', page: 'gravity', control: num(0, 10, { step: 0.05 }), apply: 'restart', default: 1 },
+      { path: 'omegaL', label: 'Cosmological constant Ω_Λ', tip: 'Its density today, in units of the critical density (the curvature makes up the rest)', page: 'gravity', control: num(0, 10, { step: 0.05 }), apply: 'restart', default: 0 },
+      { path: 'zStart', label: 'Starting redshift', tip: 'Redshift at t = 0', page: 'gravity', control: num(0, 1e4, { factor: 2 }), apply: 'restart', default: 99 },
+      { path: 'zEnd', label: 'Ending redshift', tip: 'Redshift the run stops at (it sets the end time)', page: 'gravity', control: num(0, 1e4, { factor: 2 }), apply: 'restart', default: 0 },
+    ] } },
   { path: 'physics.frame', label: 'Frame', tip: 'An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box', page: 'gravity', apply: 'restart', default: 'inertial',
     control: pickOf(FRAMES, ['inertial', 'Inertial'], { value: 'gas', label: 'Follows the gas', requires: [{ fact: 'parts.mass' }] }, { value: 'masses', label: 'Follows the masses', requires: [{ fact: 'parts.mass' }] }) },
 

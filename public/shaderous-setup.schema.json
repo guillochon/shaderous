@@ -714,6 +714,42 @@
      },
      "additionalProperties": false
     },
+    "cosmology": {
+     "type": "object",
+     "properties": {
+      "omegaM": {
+       "type": "number",
+       "title": "Matter density Ω_m",
+       "description": "Matter density today, in units of the critical density",
+       "minimum": 0,
+       "maximum": 10
+      },
+      "omegaL": {
+       "type": "number",
+       "title": "Cosmological constant Ω_Λ",
+       "description": "Its density today, in units of the critical density (the curvature makes up the rest)",
+       "minimum": 0,
+       "maximum": 10
+      },
+      "zStart": {
+       "type": "number",
+       "title": "Starting redshift",
+       "description": "Redshift at t = 0",
+       "minimum": 0,
+       "maximum": 10000
+      },
+      "zEnd": {
+       "type": "number",
+       "title": "Ending redshift",
+       "description": "Redshift the run stops at (it sets the end time)",
+       "minimum": 0,
+       "maximum": 10000
+      }
+     },
+     "additionalProperties": false,
+     "title": "Comoving coordinates",
+     "description": "An expanding universe: positions comoving, densities comoving (mean 1), velocities peculiar, times in 1/H0 from the starting redshift. G follows from the matter density. A periodic box of ideal gas, with or without self-gravity"
+    },
     "jeansFloor": {
      "type": "boolean",
      "title": "Jeans floor",
@@ -3241,6 +3277,42 @@
       ],
       "additionalProperties": false,
       "description": "Uniform gas at the temperature where interstellar cooling balances heating on the unstable branch, with small random density perturbations at one pressure. Density in atoms per cm^3, temperature in units of 1000 K: needs the interstellar cooling, in those units."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Zel’dovich pancake",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "zeldovich"
+       },
+       "zCaustic": {
+        "type": "number",
+        "title": "Caustic redshift",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 1000
+       },
+       "temperature": {
+        "type": "number",
+        "title": "Specific internal energy",
+        "default": 1e-10,
+        "minimum": 0,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "One plane wave along x on its growing mode in an Einstein-de Sitter universe (physics.cosmology with Omega_m = 1): the gas converges into a sheet, a caustic, at the given redshift, and then shocks. Cold gas: its specific internal energy at the start is given."
      }
     ]
    }

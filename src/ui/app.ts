@@ -4943,6 +4943,8 @@ function statusLine(s: Simulation, live: boolean): string {
   const parts = [`${cfg.n}${cfg.ndim === 2 ? '²' : '³'}`];
   if (live) parts.push(`${fps.toFixed(0)} fps`);
   if (lastDiag) parts.push(`t = ${u.fmt(lastDiag.t, 'time')}`);
+  // Comoving coordinates: where the expansion is.
+  if (lastDiag?.scale !== undefined) parts.push(`a = ${lastDiag.scale.toPrecision(4)}, z = ${lastDiag.redshift!.toPrecision(4)}`);
   if (live) {
     const rec = recordProgress;
     parts.push(recordingSize ? `recording: ${rec?.frames ?? 0} frames, ${(rec?.seconds ?? 0).toFixed(1)} s of movie` : pending ? 'press Run to load' : finished ? 'finished' : running ? `${batch} step${batch > 1 ? 's' : ''}/batch, ${stepRate.toFixed(0)} steps/s` : 'paused');

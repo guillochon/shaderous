@@ -111,6 +111,13 @@ export interface PhysicsSpec {
    * document are those in the turning frame. In 2D only omega's z part is used.
    */
   rotation?: { omega?: Vec3; centrifugal?: boolean };
+  /**
+   * Comoving coordinates (src/cosmo.ts): an expanding background of matter density omegaM and
+   * cosmological constant omegaL (today, in units of the critical density), from redshift
+   * zStart (t = 0) to zEnd, which then sets the end time. Times are in 1/H0, the mean comoving
+   * density is 1, and G follows from omegaM. Positions are comoving, velocities peculiar.
+   */
+  cosmology?: { omegaM?: number; omegaL?: number; zStart?: number; zEnd?: number };
   jeansFloor?: boolean;
   jeansCells?: number;
   vcycles?: number;

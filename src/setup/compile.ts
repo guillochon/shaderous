@@ -6,6 +6,7 @@
 // then stars (also left to settling), then regions, obstacles and inflows in the order of the
 // parts, and last the flows that only change what is there.
 import { mirrorAxes } from '../domain';
+import { cosmoG, timeAtRedshift, type Cosmology } from '../cosmo';
 import { NET_SPECIES } from '../burn/network';
 import type { AnyBurnSpec } from '../burn/burn';
 import { defaultEosParams, makeEos, physicalEosParams, type Eos } from '../eos/eos';
@@ -71,10 +72,20 @@ const speciesOf = (spec: SetupSpec): readonly string[] | undefined => {
 
 const boxOf = (spec: SetupSpec): number => spec.domain?.box ?? 1;
 
+/** A setup's expanding background (physics.cosmology), with its defaults: Einstein-de Sitter from z = 99. */
+export function cosmologyOfSetup(spec: SetupSpec): Cosmology | null {
+  const c = spec.physics?.cosmology;
+  if (!c) return null;
+  return { omegaM: c.omegaM ?? 1, omegaL: c.omegaL ?? 0, aStart: 1 / (1 + (c.zStart ?? 99)) };
+}
+
 /** The setup's units and G. Units that follow a part's quantity need the bodies, which need G. */
 function scales(spec: SetupSpec): { units?: UnitSystem; G: number } {
   const u = spec.domain?.units;
   const g = spec.physics?.G;
+  // Comoving coordinates: G is what makes the mean comoving density 1 that of omegaM.
+  const k = cosmologyOfSetup(spec);
+  if (k) return { G: cosmoG(k) };
   if (!u) return { G: typeof g === 'number' ? g : 1 };
   if (g === 'units') {
     const units = unitSystem(u, () => {
@@ -409,6 +420,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const burn = ph.burn;
   const fl = ph.fluff;
 
+  const cosmology = cosmologyOfSetup(spec);
   const optional: Partial<Problem> = {
     units: base.units === undefined ? undefined : unitsFollow ? (params: Record<string, number>) => scales(at(params)).units! : base.units,
     composition: namedComposition(ph.composition),
@@ -442,6 +454,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
       : undefined,
     refineMasses: mesh.refineMasses,
     frame: ph.frame === 'gas' || ph.frame === 'masses' ? ph.frame : undefined,
+    cosmology: cosmology ?? undefined,
     rotation: ph.rotation?.omega && ph.rotation.omega.some((w) => w !== 0)
       ? () => ({ omega: [...ph.rotation!.omega!] as [number, number, number], centrifugal: ph.rotation!.centrifugal ?? true })
       : undefined,
@@ -491,7 +504,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
     gravity: ph.gravity ?? 'off',
     G: base.G,
     box: boxOf(spec),
-    tEnd: run.tEnd ?? Infinity,
+    tEnd: cosmology && ph.cosmology?.zEnd !== undefined ? timeAtRedshift(cosmology, ph.cosmology.zEnd) : (run.tEnd ?? Infinity),
     init: (n, eos, ndim, params) => initOf(at(params), n, eos, ndim),
     setup: spec,
   };
