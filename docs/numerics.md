@@ -1544,10 +1544,24 @@ uniform field along the axis is left exactly as it was.
 
 A setup symmetric under mirrors through the origin (`domain.symmetric`) can be run on the part
 above its planes of symmetry (`domain.mirror`, link key `sym`): an octant in 3D or a quadrant in
-2D, and on any one or two axes. A mirrored axis's domain is $`[0, L]`$ instead of
-$`[-L/2, L/2]`$, with $`L`$ the box side, so cells stay cubic and an octant at $`n^3`$ has the
-cell size of the whole box at $`(2n)^3`$, for an eighth of the cells. (Mirroring some axes but
-not others gains nothing on a cubic grid: the unmirrored axes still span the whole object.)
+2D, and on any one or two axes. Cells stay cubic. Where every axis in use is mirrored, each
+mirrored axis's domain is $`[0, L]`$ instead of $`[-L/2, L/2]`$, with $`L`$ the box side, so an
+octant at $`n^3`$ has the cell size of the whole box at $`(2n)^3`$, for an eighth of the cells.
+Where only some are (a half, or a quadrant in 3D), the grid is **rectangular**: a mirrored axis
+has $`n/2`$ cells over $`[0, L/2]`$ and the others $`n`$ over $`[-L/2, L/2]`$, the same cube as
+without mirrors at the same cell size, for half or a quarter of the cells (`gridDims`,
+`src/domain.ts`). The uniform grid's textures, passes and readbacks take three counts; the
+multigrid's levels halve each axis until the shortest has two cells (a coarsest level of $`2\times2\times4`$ and the like), with each face's boundary values
+only as wide as that face. On blocks the tree keeps its cube of coordinates and creates only
+the root blocks of the computed part, its upper face along a halved axis then the domain's
+boundary, so the atlas holds half or a quarter of the blocks; a halved axis needs an even
+number of root blocks, or the grid stays a cube. Fractions of the box (what the probe, the
+brushes, the API and the display hand over) are of the computed extent along each axis: of
+half the box along a halved one. Magnetic runs keep the cube for now. Against the whole box at
+$`64^3`$, a Sedov blast mirrored about $`z`$ alone ($`64\times64\times32`$) or about $`x`$ and
+$`y`$ ($`32\times32\times64`$) agrees in density to $`3\times10^{-6}`$ with the same unfolded
+mass, and a uniform sphere's potential to $`2\times10^{-6}`$; on two levels of blocks the half
+has half the leaves and the whole's totals.
 
 **Gas.** The lower face of a mirrored axis is reflecting, so every reflecting path applies.
 Two things differ from a wall. The Riemann problem between a state and its image has zero mass
@@ -1590,7 +1604,10 @@ bounds, so yt reads an octant as an octant, and carry the mirrors in their setti
 slice views fold their sample positions back across the planes (`|2d - 1|` in fractions of
 the view's box), the overlays and the pointer's tools map between the computed box and the
 view's (a fraction $`f`$ of the one is $`\tfrac12 + \tfrac f2`$ of the other), and the
-`mirror` view setting turns it off. Field lines are drawn in the computed part only.
+`mirror` view setting turns it off. A rectangular grid always shows its images, which make the
+cube of the box again (without them its part would be drawn stretched); its slice map stays
+square, two texels to a cell along a halved axis. Field lines are drawn in the computed part
+only.
 
 What the mirrors would get wrong is refused with a message: a uniform field or a frame
 rotation that breaks the symmetry, a periodic upper face, periodic self-gravity, turbulence
@@ -1757,7 +1774,10 @@ remap of the electric field), $`E_z`$ with the frame change $`u\,B_x`$ of $`-\ma
 when $`v_y`$ is boosted by $`u = \pm q\Omega L`$. Every face around such an edge then changes by the
 same number, so the divergence stays at round-off and the two planes' $`b_x`$ stay in step; and
 the sums of the remapped impulses over a plane agree, so the net vertical and radial fluxes
-through the box are conserved. Resistivity and viscosity are refused with a field.
+through the box are conserved. Resistivity and viscosity are refused with a field. The
+MRI's disk diagnostics (`mhd/mri.wgsl`) take the local frame there: Maxwell stress
+$`-B_xB_y`$, Reynolds stress from the velocity less the background flow, and the quality factors
+with $`\Omega`$ the box's.
 
 The first version runs on a uniform grid, periodic along $`y`$ (and $`z`$ unless stratified);
 blocks (whose neighbors across the boundary change with time), self-gravity and diffusion are

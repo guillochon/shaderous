@@ -11,13 +11,13 @@ and tested in `src/validation/{frames,symmetry,cosmo,shear,cyl}.ts`.
 | G2 frame slot, A rotating frame (A1-A5, A7) | done; A6 (rotating polytropes) not done |
 | B1-B4, B7, B8 mirror symmetry | done (view shows the images; field lines stay in the computed part) |
 | B5 mirror parity for fields | done |
-| B6 rectangular grids | **not done**: half and 3D-quadrant runs work but gain nothing on a cubic grid |
+| B6 rectangular grids | done: half and 3D-quadrant runs compute their part of the cube on the uniform grid (rectangular multigrid) and on blocks (`sym-half`); magnetic runs keep the cube |
 | G3 clock, C1-C5 comoving coordinates | done (well-balanced reconstruction off in comoving runs: see §22) |
 | C6 | done: every equation of state but the tabulated stellar one, through comoving wrappers; cooling (`cosmo-eos`) |
 | C7 refusals | done |
 | C8 | done: `physics.cosmology` with `boxMpc`/`h` units (proper values in the readouts), the pancake preset, a and z on the status line, `cosmo-wave`; the Layzer-Irvine check (optional) not done |
 | D1-D3 shearing box (hydro, uniform grid) | done; the boundary's shift had the wrong sign until `shear-wave` found it (fixed). The background drifts by float32 rounding, ~1e-4 of the shear speed an orbit (orbital advection, D5, would remove it) |
-| D4 MHD shearing box, D6 `shear-wave`/`shear-flux`/`shear-mri` | done (`mhd/shear.wgsl`), with the `mri-box` preset; resistivity and viscosity with a field refused; `mri-box` does not yet have mri.wgsl's disk diagnostics in the local frame |
+| D4 MHD shearing box, D6 `shear-wave`/`shear-flux`/`shear-mri` | done (`mhd/shear.wgsl`), with the `mri-box` preset; resistivity and viscosity with a field refused; the MRI disk diagnostics in the local frame |
 | E1-E3, E7 (R, z) hydro, diagnostics, files | done (display by revolution not done) |
 | E4 (R, z) on blocks | done, without per-block timesteps |
 | E5 step 1 masses on the axis, step 2 self-gravity on the uniform grid | done |

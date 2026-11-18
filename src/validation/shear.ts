@@ -235,7 +235,7 @@ export const SHEAR_TESTS: TestDef[] = [
   {
     id: 'shear-mri',
     name: 'Magnetized shearing box: the magnetorotational instability',
-    criterion: 'A Keplerian box (3D, 32^3, beta = 50) threaded by the vertical field whose channel mode of one wavelength across the box is the fastest (k v_A = sqrt(15/16) Omega), seeded with v_x = 1e-4 c_s sin(kz): the mode B_x(k) grows at 0.75 Omega within 5%, fitted from t = 3 to t = 6',
+    criterion: 'A Keplerian box (3D, 32^3, beta = 50) threaded by the vertical field whose channel mode of one wavelength across the box is the fastest (k v_A = sqrt(15/16) Omega), seeded with v_x = 1e-4 c_s sin(kz): the mode B_x(k) grows at 0.75 Omega within 5%, fitted from t = 3 to t = 6; and the disk diagnostics in the local frame give the vertical quality factor 2 pi v_A / (Omega dx) within 2% and a positive Maxwell stress',
     async run(gpu) {
       const k = 2 * Math.PI;
       const vA = Math.sqrt(15 / 16) / k;
@@ -279,8 +279,15 @@ export const SHEAR_TESTS: TestDef[] = [
           den += (t - tm) ** 2;
         });
         const rate = num / den / OMEGA;
-        const m = { growth_rate: rate, expected: 0.75, error: Math.abs(rate / 0.75 - 1), amplitude_end: Math.exp(ls[ls.length - 1]), steps: (await sim.diagnostics()).steps };
-        return { pass: m.error < 0.05, metrics: m };
+        const d = await sim.diagnostics();
+        // The disk diagnostics in the local frame (mhd/mri.wgsl): Q_z = 2 pi v_A / (Omega dx),
+        // the vertical field being unchanged by the channel mode, and a positive Maxwell stress.
+        const qz = (2 * Math.PI * vA) / (OMEGA / n);
+        const m = {
+          growth_rate: rate, expected: 0.75, error: Math.abs(rate / 0.75 - 1), amplitude_end: Math.exp(ls[ls.length - 1]), steps: d.steps,
+          q_z: d.magnetic?.disk?.qz ?? 0, q_z_expected: qz, alpha_maxwell: d.magnetic?.disk?.alphaMaxwell ?? 0,
+        };
+        return { pass: m.error < 0.05 && Math.abs(m.q_z / qz - 1) < 0.02 && m.alpha_maxwell > 0, metrics: m };
       });
     },
   },

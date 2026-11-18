@@ -463,7 +463,8 @@ export class MhdPasses {
     const r = new Float32Array(buf.getMappedRange().slice(0));
     buf.unmap();
     buf.destroy();
-    return magneticFrom(r, !!this.dep.cfg.problem.disk);
+    // (A shearing box's in its local frame: mhd/mri.wgsl.)
+    return magneticFrom(r, !!this.dep.cfg.problem.disk || !!this.dep.cfg.problem.shear);
   }
 
   destroy() {

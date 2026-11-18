@@ -12,7 +12,7 @@
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // x runs over every other cell; the offset makes (x + y + z) & 1 equal the color.
   let x = 2u * gid.x + ((gid.y + gid.z + L.color) & 1u);
-  if (x >= L.n || gid.y >= L.n || gid.z >= lvl_nz()) { return; }
+  if (x >= L.nx || gid.y >= L.ny || gid.z >= lvl_nz()) { return; }
   let c = vec3<i32>(i32(x), i32(gid.y), i32(gid.z));
   let s = nb_sum(c);
   let f = textureLoad(RHS, c, 0).x;

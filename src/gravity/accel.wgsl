@@ -5,7 +5,7 @@
 // reads the result from the field texture (gravity/gfield.wgsl).
 
 fn grav_axis(phi: texture_3d<f32>, c: vec3<i32>, e: vec3<i32>, i: i32, axis: i32) -> f32 {
-  let n = i32(P.n);
+  let n = grid_n()[axis];
   var lo = c - e;
   var hi = c + e;
   var w = 0.5;

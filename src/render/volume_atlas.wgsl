@@ -17,7 +17,8 @@ struct Look {
 }
 
 struct Atlas {
-  a: vec4<u32>,    // (atlas slots per side, root blocks per side, finest level, 0)
+  a: vec4<u32>,    // (atlas slots per side, root blocks per side, finest level, the mask of
+                   //   halved axes of a rectangular grid: src/domain.ts gridDims)
   size: vec4<f32>, // atlas texels along x, y, z
 }
 @group(0) @binding(7) var IDX: texture_3d<u32>;   // leaf slot per block of the finest level
@@ -34,7 +35,10 @@ const ABT_STRIDE = 32u;
 fn vol_look(p0: vec3<f32>) -> Look {
   // (Mirror images shown: the view's box is the whole configuration, its cells half as wide.)
   let p = mirror_fold(p0);
-  let frac = clamp(p + 0.5, vec3<f32>(0.0), vec3<f32>(0.9999999));
+  var frac = clamp(p + 0.5, vec3<f32>(0.0), vec3<f32>(0.9999999));
+  // A rectangular grid's computed box is half the tree's cube along its halved axes.
+  let hm = A.a.w;
+  frac *= select(vec3<f32>(1.0), vec3<f32>(0.5), vec3<bool>((hm & 1u) != 0u, (hm & 2u) != 0u, (hm & 4u) != 0u));
   let m = f32(A.a.y << A.a.z);
   let slot = i32(textureLoad(IDX, vec3<i32>(frac * m), 0).x);
   let b = u32(slot) * ABT_STRIDE;

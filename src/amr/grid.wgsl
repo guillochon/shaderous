@@ -11,6 +11,14 @@ const BT_STRIDE = 32u;
 
 @group(0) @binding(30) var<storage, read> BT: array<i32>;
 
+// A rectangular grid (src/domain.ts gridDims): the mirrored axes halved, whose root blocks stop
+// half way along the tree's cube of coordinates (P.sym.w, a mask). Fractions of the computed box
+// (what the display and the probe hand over) become fractions of that cube by cube_scale().
+fn cube_scale() -> vec3<f32> {
+  let m = P.sym.w;
+  return select(vec3<f32>(1.0), vec3<f32>(0.5), vec3<bool>((m & 1u) != 0u, (m & 2u) != 0u, (m & 4u) != 0u));
+}
+
 fn bt(slot: i32, k: u32) -> i32 {
   return BT[u32(slot) * BT_STRIDE + k];
 }

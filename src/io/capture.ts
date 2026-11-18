@@ -40,7 +40,8 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     restart = await sim.readRestart();
   } else if (sim instanceof Sim) {
     // A uniform grid is a single block.
-    rootSize = [sim.n, sim.n, sim.nz];
+    // (Rectangular along a halved mirrored axis: gridDims.)
+    rootSize = [sim.nx, sim.ny, sim.nz];
     blockSize = rootSize.slice();
     levels = new Int32Array(1);
     locations = new Int32Array(3);
@@ -135,7 +136,10 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
   const box = problem.box;
   // Fractions of the file's own box, from its lower corner (an octant's starts at the origin).
   const flo = snap.lo ?? [-box / 2, -box / 2, -box / 2];
-  const frac = (x: number, a: number) => x / box - flo[a] / box;
+  // A rectangular grid's file (a half or quadrant run, gridDims) is half the box along its
+  // halved axes: fractions are of its own extent there.
+  const side = [0, 1, 2].map((a) => (snap.hi ? snap.hi[a] - flo[a] : box));
+  const frac = (x: number, a: number) => (Math.abs(side[a] - box) < 1e-9 * box ? x / box - flo[a] / box : (x - flo[a]) / side[a]);
   const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined), debris: snap.meta?.debris };
   if (adaptive) {
     // Levels count from the root grid, and the file's root may not be the run's.

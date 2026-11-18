@@ -125,7 +125,7 @@
       "xyz"
      ],
      "title": "Mirror symmetry",
-     "description": "Compute only the part of a symmetric setup above its planes of symmetry: each mirrored axis runs from 0 to the box side, its lower face a plane of symmetry, and the totals are those of the whole. An octant in 3D (or a quadrant in 2D) gives twice the resolution for the same cells"
+     "description": "Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost"
     },
     "geometry": {
      "enum": [

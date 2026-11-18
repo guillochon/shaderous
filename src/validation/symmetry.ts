@@ -142,6 +142,70 @@ export const SYM_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'sym-half',
+    name: 'Mirror symmetry: half and quadrant runs on rectangular grids',
+    criterion: 'At the same box and cell size as the whole (64^3), a run mirrored about z alone computes 64 x 64 x 32 cells and one mirrored about x and y 32 x 32 x 64 (plans/coordinate-systems-plan.md B6): a Sedov blast agrees with the whole box in density to 1e-5 at every computed cell, with the same mass unfolded; and a uniform sphere’s potential (isolated boundaries, the rectangular multigrid) within 1e-4 of the whole box’s; and on blocks (two levels), the half has half the leaves and the same unfolded mass (1e-5), total energy (1e-4) and kinetic energy (1e-3) as the whole',
+    async run(gpu) {
+      const N = 64;
+      const sedovAt = (sym: [boolean, boolean, boolean]) => ({ ...(sedov.setup ? compileSetup(sedov.setup).problem : sedov), symmetry: { axes: sym } });
+      const compare = (part: Float32Array, whole: Float32Array, sym: boolean[], stride: number) => {
+        const d = sym.map((m) => (m ? N / 2 : N));
+        let worst = 0;
+        for (let k = 0; k < d[2]; k++)
+          for (let j = 0; j < d[1]; j++)
+            for (let i = 0; i < d[0]; i++) {
+              const a = part[((k * d[1] + j) * d[0] + i) * stride];
+              const q = [i, j, k].map((c, x) => c + (sym[x] ? N / 2 : 0));
+              const b = whole[((q[2] * N + q[1]) * N + q[0]) * stride];
+              worst = Math.max(worst, Math.abs(a - b) / Math.max(Math.abs(b), 1e-30));
+            }
+        return worst;
+      };
+      const m: Record<string, number> = {};
+      const blast = (sym: [boolean, boolean, boolean]) =>
+        withSim(gpu, sedovAt(sym), N, sym.some(Boolean) ? { symmetry: sym } : {}, async (sim) => {
+          await sim.runToEnd();
+          return { u1: (await sim.readState()).u1, mass: (await sim.diagnostics()).mass, dims: sim.displayDims };
+        });
+      const whole = await blast([false, false, false]);
+      for (const [name, sym] of [['half', [false, false, true]], ['quadrant', [true, true, false]]] as const) {
+        const r = await blast([...sym] as [boolean, boolean, boolean]);
+        m[`${name}_cells`] = r.dims[0] * r.dims[1] * r.dims[2];
+        m[`${name}_density_difference`] = compare(r.u1, whole.u1, [...sym], 4);
+        m[`${name}_mass_difference`] = Math.abs(r.mass / whole.mass - 1);
+      }
+      const solve = async (sim: Sim) => {
+        sim.solvePotential(10);
+        return sim.readPotential();
+      };
+      const wp = await withSim(gpu, sphere, N, {}, solve);
+      for (const [name, sym] of [['half', [false, false, true]], ['quadrant', [true, true, false]]] as const) {
+        const ax = [...sym] as [boolean, boolean, boolean];
+        const pp = await withSim(gpu, { ...sphere, symmetry: { axes: ax } }, N, { symmetry: ax }, solve);
+        m[`${name}_potential_difference`] = compare(pp, wp, [...sym], 1);
+      }
+      // On blocks (two levels, 2^3 root blocks of the whole): the half has half the root blocks
+      // along z; its unfolded totals match the whole's.
+      const onBlocks = (sym: [boolean, boolean, boolean]) =>
+        withAmr(gpu, sedovAt(sym), N, { amrLevels: 1, ...(sym.some(Boolean) ? { symmetry: sym } : {}) }, async (sim) => {
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          return { mass: d.mass, e: d.eTot, ek: d.eKin, leaves: sim.tree.leaves().length };
+        });
+      const bw = await onBlocks([false, false, false]);
+      const bh = await onBlocks([false, false, true]);
+      m.blocks_mass_difference = Math.abs(bh.mass / bw.mass - 1);
+      m.blocks_energy_difference = Math.abs(bh.e / bw.e - 1);
+      m.blocks_kinetic_difference = Math.abs(bh.ek / bw.ek - 1);
+      m.blocks_leaves_whole = bw.leaves;
+      m.blocks_leaves_half = bh.leaves;
+      const pass = ['half', 'quadrant'].every((k) => m[`${k}_density_difference`] < 1e-5 && m[`${k}_mass_difference`] < 1e-5 && m[`${k}_potential_difference`] < 1e-4)
+        && m.half_cells === N * N * N / 2 && m.quadrant_cells === N * N * N / 4
+        && m.blocks_mass_difference < 1e-5 && m.blocks_energy_difference < 1e-4 && m.blocks_kinetic_difference < 1e-3 && 2 * bh.leaves === bw.leaves;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'sym-sphere',
     name: 'Mirror symmetry: potential of a uniform sphere in an octant',
     criterion: 'Isolated boundaries, the octant at 32^3 against the whole box at 64^3: the octant potential is within 1% of the analytic one everywhere (as the whole box is) and within 1e-4 of the whole box',

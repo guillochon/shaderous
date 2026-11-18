@@ -112,12 +112,20 @@ fn voxel(c: vec3<i32>) -> Cell {
   return Cell(x, u1.x, u2.w > 0.5);
 }
 
+// The cell of the map's texel `ij` along the map's axes: one texel per cell, or two along a
+// mirrored axis halved on a rectangular grid (src/domain.ts gridDims), whose map is still square.
+fn map_cell(ij: vec2<i32>, ab: vec2<i32>) -> vec2<i32> {
+  let side = i32(V.nd.w);
+  return vec2<i32>((ij.x * i32(P.dims[ab.x])) / side, (ij.y * i32(P.dims[ab.y])) / side);
+}
+
 // Slice: the cell under texel `ij` of the map (one texel per cell), no outlines.
 fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
   let depth = f32(P.dims[axis]);
   var c = vec3<i32>(0);
-  c[ab.x] = ij.x;
-  c[ab.y] = ij.y;
+  let mc = map_cell(ij, ab);
+  c[ab.x] = mc.x;
+  c[ab.y] = mc.y;
   c[axis] = i32(clamp(floor(V.cut.z * depth), 0.0, depth - 1.0));
   return Plane(voxel(c), 0.0, 1.0);
 }
@@ -126,8 +134,9 @@ fn plane(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Plane {
 fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
   var s = Column(0.0, 0.0, 0.0, false);
   var c = vec3<i32>(0);
-  c[ab.x] = ij.x;
-  c[ab.y] = ij.y;
+  let mc = map_cell(ij, ab);
+  c[ab.x] = mc.x;
+  c[ab.y] = mc.y;
   for (var k = 0; k < i32(P.dims[axis]); k++) {
     c[axis] = k;
     column_add(&s, voxel(c), P.dx, 1.0);

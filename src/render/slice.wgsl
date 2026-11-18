@@ -42,12 +42,13 @@ fn bspline(t: f32) -> vec4<f32> {
 }
 
 fn contour(st: vec2<f32>) -> Line {
-  let side = i32(textureDimensions(MAP).x);
-  let top = vec2<i32>(side - 1);
+  // (Texels along each of the map's axes: a rectangular grid's map is not square, gridDims.)
+  let side = vec2<i32>(textureDimensions(MAP));
+  let top = side - 1;
   // The side of the cell under the pixel, in texels.
-  let cell = max(textureLoad(MAP, clamp(vec2<i32>(floor(st * f32(side))), vec2<i32>(0), top), 0).a, 1.0);
+  let cell = max(textureLoad(MAP, clamp(vec2<i32>(floor(st * vec2<f32>(side))), vec2<i32>(0), top), 0).a, 1.0);
   // Position in cells of that size, from the first cell's center.
-  let g = st * f32(side) / cell - 0.5;
+  let g = st * vec2<f32>(side) / cell - 0.5;
   let i0 = floor(g);
   let fr = g - i0;
   let wx = bspline(fr.x);
@@ -101,7 +102,7 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   let st = select(sd, abs(2.0 * sd - 1.0), fold);
   let line = contour(st);
   if (any(sd < vec2<f32>(0.0)) || any(sd >= vec2<f32>(1.0))) { return vec4<f32>(C.bg.rgb, 1.0); }
-  let m = textureLoad(MAP, vec2<i32>(floor(st * f32(textureDimensions(MAP).x))), 0);
+  let m = textureLoad(MAP, vec2<i32>(floor(st * vec2<f32>(textureDimensions(MAP)))), 0);
   var col = textureSampleLevel(TF, S, vec2<f32>(m.r, 0.5), 0.0).rgb;
   if (m.r < -0.5) { col = SOLID; }
   // Block outlines of an adaptive mesh.

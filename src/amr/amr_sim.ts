@@ -35,6 +35,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
+import { gridDims } from '../domain';
 import { CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindricalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
@@ -1350,7 +1351,10 @@ export class AmrSim implements Simulation {
     const levelAt = c.restart?.levelAt;
     const sampled = new Map<Block, { sub: number; ind: number }>();
     for (let limit = this.levels; ; limit--) {
-      this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi, c.problem.mhd !== undefined);
+      // A rectangular grid (src/domain.ts gridDims): half the root blocks along a halved axis.
+      const gd = gridDims(c);
+      const lim = [0, 1, 2].map((a) => (gd[a] * 2 === c.n ? this.n0 / BS / 2 : this.n0 / BS));
+      this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi, c.problem.mhd !== undefined, lim);
       this.tree.levelLimit = limit;
       for (let pass = 0; pass < limit; pass++) {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
@@ -2413,8 +2417,12 @@ export class AmrSim implements Simulation {
     const three = this.cfg.ndim === 3;
     const axes = three ? 3 : 2;
     for (const b of this.tree.leaves()) {
-      const across = this.n0 << b.level; // cells across the box at this level
-      const index = f.slice(0, axes).map((x) => Math.min(across - 1, Math.max(0, Math.floor(x * across))));
+      // Cells across the computed box at this level (half along a halved axis: f is a fraction of it).
+      const h = this.halvedAxes();
+      const index = f.slice(0, axes).map((x, a) => {
+        const across = (this.n0 << b.level) >> (h[a] ? 1 : 0);
+        return Math.min(across - 1, Math.max(0, Math.floor(x * across)));
+      });
       if (!index.every((i, a) => Math.floor(i / BS) === b.c[a])) continue;
       const o = this.origin(b.slot);
       const at = [o[0] + index[0] - b.c[0] * BS, o[1] + index[1] - b.c[1] * BS, three ? o[2] + index[2] - b.c[2] * BS : o[2]] as [number, number, number];
@@ -2660,7 +2668,14 @@ export class AmrSim implements Simulation {
   /** Display volume: the finest resolution, capped so it stays a reasonable texture. */
   get displayDims(): [number, number, number] {
     const nd = Math.min(this.n, this.cfg.ndim === 2 ? 2048 : 256);
-    return [nd, nd, this.cfg.ndim === 2 ? 1 : nd];
+    // Half along a halved axis of a rectangular grid (src/domain.ts gridDims).
+    const h = this.halvedAxes();
+    return [h[0] ? nd / 2 : nd, h[1] ? nd / 2 : nd, this.cfg.ndim === 2 ? 1 : h[2] ? nd / 2 : nd];
+  }
+  /** The mirrored axes halved on a rectangular grid (src/domain.ts gridDims). */
+  halvedAxes(): boolean[] {
+    const gd = gridDims(this.cfg);
+    return [0, 1, 2].map((a) => gd[a] * 2 === this.cfg.n);
   }
   static readonly fieldShader = 'amr/field.wgsl';
   readonly fieldShader = AmrSim.fieldShader;
@@ -2669,7 +2684,7 @@ export class AmrSim implements Simulation {
   }
   displayAtlas(): DisplayAtlas | null {
     if (this.cfg.ndim !== 3) return null;
-    return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
+    return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, halved: this.halvedAxes().reduce((m, h, a) => m | (h ? 1 << a : 0), 0), levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
   }
   fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
     // With a magnetic field the primitives come from its own assembly (the same layout), and the

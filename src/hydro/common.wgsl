@@ -5,7 +5,7 @@ struct Params {
   bc_lo: vec4<u32>,      // per-axis lower-face boundary: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only
   bc_hi: vec4<u32>,      // per-axis upper-face boundary
   eos: vec4<f32>,        // (gamma, K, gas constant R, radiation constant a)
-  dims: vec4<u32>,       // cells along x, y, z; z is 1 in 2D runs (one periodic layer)
+  dims: vec4<u32>,       // cells along x, y, z; z is 1 in 2D runs (one periodic layer); w: 1 on a rectangular uniform grid (src/domain.ts gridDims)
   geom: vec4<f32>,       // (cell volume, number of dimensions, refinement threshold, cells per
                          //   Jeans length below which a block is refined); 2D is per unit length in z
   gext: vec4<f32>,       // uniform external gravitational acceleration
@@ -155,11 +155,27 @@ var<private> g_cyl_r: f32 = 0.0;
 
 // A position as a fraction of the box from the domain's lower corner (0 to 1 inside it), and
 // back. With the corner at -box/2 these are x / box + 0.5 and (f - 0.5) box, bit for bit.
+// The uniform grid's cells along each axis: n, or n / 2 along a mirrored axis halved on a
+// rectangular grid (src/domain.ts gridDims, P.dims.w). (On blocks, P.n is the finest level's
+// count and the boundary mapping takes it along x and y, as it always did.)
+fn grid_n() -> vec3<i32> {
+  if (P.dims.w == 1u) { return vec3<i32>(P.dims.xyz); }
+  return vec3<i32>(i32(P.n), i32(P.n), i32(P.dims.z));
+}
+// Along such a halved axis the computed domain is half the box, and a fraction is of that half.
+fn box_side() -> vec3<f32> {
+  let half = vec3<bool>(P.dims.w == 1u) & (vec3<u32>(2u) * P.dims.xyz == vec3<u32>(P.n));
+  return select(vec3<f32>(P.box), vec3<f32>(0.5 * P.box), half);
+}
 fn box_frac(x: vec3<f32>) -> vec3<f32> {
-  return x / P.box - P.org.xyz / P.box;
+  let s = box_side();
+  if (all(s == vec3<f32>(P.box))) { return x / P.box - P.org.xyz / P.box; }
+  return (x - P.org.xyz) / s;
 }
 fn frac_pos(f: vec3<f32>) -> vec3<f32> {
-  return (f + P.org.xyz / P.box) * P.box;
+  let s = box_side();
+  if (all(s == vec3<f32>(P.box))) { return (f + P.org.xyz / P.box) * P.box; }
+  return P.org.xyz + f * s;
 }
 
 // Kahan summation: add x to s, whose rounding so far is c. Returns the new (s, c). Each rounded
@@ -253,7 +269,7 @@ fn stencil_inside(c: vec3<i32>, reach: i32) -> bool {
 fn bc_map(c0: vec3<i32>) -> Mapped {
   var m = Mapped(c0, vec3<f32>(1.0), vec3<f32>(0.0), vec3<f32>(1.0), vec3<f32>(0.0));
   if (g_inner) { return m; }
-  let n = vec3<i32>(i32(P.n), i32(P.n), i32(P.dims.z));
+  let n = grid_n();
   // Most loads are of cells inside the grid: they skip the rest.
   if (all(c0 >= vec3<i32>(0)) && all(c0 < n)) { return m; }
   var c = c0;

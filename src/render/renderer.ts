@@ -1,4 +1,5 @@
 // Volume, slice and projection rendering on the simulation's own device.
+import { rectangular, type GridShape } from '../domain';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { COOLING_MODULES } from '../cooling/cooling';
@@ -197,15 +198,19 @@ export const defaultView = (): ViewState => ({
 
 /**
  * The mirrored axes the view shows images across: with mirrorImages, when every axis the run
- * uses is mirrored (an octant, or a 2D quadrant), so the whole configuration is a cube again.
+ * uses is mirrored (an octant, or a 2D quadrant), so the whole configuration is a cube again;
+ * and always on a rectangular grid (a half or quadrant run, src/domain.ts gridDims), whose
+ * computed part is half the box along its mirrored axes, so that with the images the view is
+ * the cube of the box (without them the part would be drawn stretched to a cube).
  * The view's box is then the whole configuration, and a fraction f of the computed box is at
  * 0.5 + f / 2 of it (mirrorDisplay); the shaders fold the view's positions back, |2 d - 1|.
  */
-export function mirrorShown(cfg: { ndim: 2 | 3; symmetry?: readonly boolean[] }, v: { mirrorImages: boolean }): [boolean, boolean, boolean] {
+export function mirrorShown(cfg: { ndim: 2 | 3; symmetry?: readonly boolean[]; n?: number; problem?: { mhd?: unknown } }, v: { mirrorImages: boolean }): [boolean, boolean, boolean] {
   const s = cfg.symmetry ?? [];
   const axes = cfg.ndim === 2 ? [0, 1] : [0, 1, 2];
   const all = v.mirrorImages && axes.every((a) => s[a]);
-  return [0, 1, 2].map((a) => all && !!s[a]) as [boolean, boolean, boolean];
+  const rect = cfg.n !== undefined && cfg.problem !== undefined && rectangular(cfg as GridShape);
+  return [0, 1, 2].map((a) => (all || rect) && !!s[a]) as [boolean, boolean, boolean];
 }
 /** A fraction of the computed box as a fraction of the view's box (mirrorShown), and back. */
 export const mirrorDisplay = (f: number, shown: boolean): number => (shown ? 0.5 + 0.5 * f : f);
@@ -496,7 +501,7 @@ export class Renderer {
       }
       this.atlas = { ...this.atlas, sim, info };
       const a = new ArrayBuffer(32);
-      new Uint32Array(a, 0, 4).set([info.slotsPerSide, info.roots, info.levels, 0]);
+      new Uint32Array(a, 0, 4).set([info.slotsPerSide, info.roots, info.levels, info.halved ?? 0]);
       new Float32Array(a, 16, 4).set([info.side, info.side, info.side, 0]);
       d.queue.writeBuffer(this.atlasUni, 0, a);
       const bt = sim.fieldResources(0, 0)[30] as GPUBuffer;

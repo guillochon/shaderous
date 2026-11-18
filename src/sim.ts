@@ -25,7 +25,8 @@ import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisRe
 import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
-import { domainLo } from './domain';
+import { domainLo, gridDims, rectangular } from './domain';
+export { gridDims, rectangular } from './domain';
 import { hubble, omegaK, scaleFactor, type Cosmology } from './cosmo';
 
 import type { LimiterKind, RiemannKind } from './problems/types';
@@ -327,6 +328,8 @@ export interface DisplayAtlas {
   slotsPerSide: number;
   /** root blocks per side, and the finest level */
   roots: number;
+  /** mask of the mirrored axes halved on a rectangular grid (src/domain.ts gridDims) */
+  halved?: number;
   levels: number;
   /** leaf slot per block of the finest level, and the list of leaf slots with how many there are */
   idx: GPUTexture;
@@ -948,7 +951,7 @@ export const PARAM_BYTES = 464;
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number },
+  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -956,7 +959,8 @@ export function packParams(
   u.set([...c.bcLo, 0], 0);
   u.set([...c.bcHi, 0], 4);
   f.set(eosConstants1(c.eos, c.eosParams), 8);
-  u.set([...x.dims, 0], 12);
+  // The fourth: 1 on a rectangular uniform grid (gridDims; hydro/common.wgsl grid_n).
+  u.set([...x.dims, x.rect ? 1 : 0], 12);
   // 2D quantities are per unit length along z.
   f.set([c.ndim === 2 ? x.dx ** 2 : x.dx ** 3, c.ndim, ...(x.refine ?? [0, 0])], 16);
   f.set([...uniformField(c), 0], 20);
@@ -994,7 +998,11 @@ export function packParams(
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
   f.set([...domainLo(c), 0], 96);
   f.set(rotationOf(c), 100);
-  u.set([0, 1, 2].map((a) => (a === 0 && cylindrical(c) ? 2 : c.symmetry?.[a] ? 1 : 0)).concat(0), 104);
+  // The fourth: a mask of the mirrored axes halved on a rectangular grid (src/domain.ts
+  // gridDims), for the block grid's fractions (amr/grid.wgsl cube_frac).
+  const gd = gridDims(c);
+  const halved = [0, 1, 2].reduce((m, a) => m | (gd[a] * 2 === c.n ? 1 << a : 0), 0);
+  u.set([...[0, 1, 2].map((a) => (a === 0 && cylindrical(c) ? 2 : c.symmetry?.[a] ? 1 : 0)), halved], 104);
   const k = cosmologyOf(c);
   // The fourth is the scale factor of the state (cosmo_a3, hydro/common.wgsl): the CPU's latest
   // here, and the clock's own copied in by syncScale after every step.
@@ -1100,8 +1108,12 @@ export class Sim implements Simulation {
   onParams?: () => void;
   readonly device: GPUDevice;
   cfg: SimConfig;
+  /** cells along the longest axis: dx = box / n */
   readonly n: number;
-  /** cells along z: n, or 1 in 2D */
+  /** cells along x and y: n, or n / 2 along a halved mirrored axis (gridDims) */
+  readonly nx: number;
+  readonly ny: number;
+  /** cells along z: n (or n / 2), or 1 in 2D */
   readonly nz: number;
   readonly dx: number;
 
@@ -1201,7 +1213,7 @@ export class Sim implements Simulation {
     this.device = gpu.device;
     this.cfg = cfg;
     this.n = cfg.n;
-    this.nz = cfg.ndim === 2 ? 1 : cfg.n;
+    [this.nx, this.ny, this.nz] = gridDims(cfg);
     this.speciesGroups = speciesGroups(cfg.problem);
     this.dx = cfg.problem.box / cfg.n;
     const d = this.device;
@@ -1252,13 +1264,14 @@ export class Sim implements Simulation {
     if (ashear) throw new Error(`Shearing box: ${ashear}`);
     const acyl = cylindricalUnsupported(cfg);
     if (acyl) throw new Error(`Axisymmetric run: ${acyl}`);
-    noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
+    const cells = gridDims(cfg).reduce((a, b) => a * b, 1);
+    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
     const n = cfg.n;
-    const nz = sim.nz;
-    const t = (label: string) => tex3d(d, n, 'rgba32float', label, nz);
+    const { nx, ny, nz } = sim;
+    const t = (label: string) => tex3d(d, nx, 'rgba32float', label, nz, ny);
     d.pushErrorScope('out-of-memory');
     for (let p = 0; p < 2; p++) sim.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
     sim.pred = [t('PA'), t('PB')];
@@ -1266,18 +1279,18 @@ export class Sim implements Simulation {
     const oom = await d.popErrorScope();
     if (oom) {
       sim.destroy();
-      const gb = (cfg.n ** cfg.ndim * Sim.cellBytes(cfg.ndim)) / 1024 ** 3;
+      const gb = (cells * Sim.cellBytes(cfg.ndim)) / 1024 ** 3;
       throw new Error(`out of GPU memory for a uniform grid of ${cfg.n}^${cfg.ndim} cells (about ${gb.toFixed(1)} GB): ${oom.message}`);
     }
     const G = sim.speciesGroups;
     if (G > 0) {
-      for (let p = 0; p < 2; p++) sim.species.push(tex3d(d, n, 'rgba32float', `species ${p}`, nz * G));
-      sim.speciesHalf = tex3d(d, n, 'rgba32float', 'species half step', nz * G);
-      sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (n + 1) ** 2 * (nz + 1), usage: GPUBufferUsage.STORAGE });
+      for (let p = 0; p < 2; p++) sim.species.push(tex3d(d, nx, 'rgba32float', `species ${p}`, nz * G, ny));
+      sim.speciesHalf = tex3d(d, nx, 'rgba32float', 'species half step', nz * G, ny);
+      sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (nx + 1) * (ny + 1) * (nz + 1), usage: GPUBufferUsage.STORAGE });
       if (sim.compCoeffs) sim.comp = t('composition');
     }
     // Burning: each cell's heating rate over the last step (burn/burn.ts); else one texel of nothing.
-    sim.heat = burnSpec(cfg) && G > 0 ? tex3d(d, n, 'r32float', 'nuclear heating', nz) : noHeat(d);
+    sim.heat = burnSpec(cfg) && G > 0 ? tex3d(d, nx, 'r32float', 'nuclear heating', nz, ny) : noHeat(d);
     const spec = debrisSpec(cfg);
     if (spec) sim.debrisBuf = new DebrisBuffers(d, spec);
     sim.writeParams();
@@ -1292,16 +1305,16 @@ export class Sim implements Simulation {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
-        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg)),
+        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg)),
         Reducer.create(
           d,
-          [n, n, nz],
+          [nx, ny, nz],
           [MAX, MAX],
           '',
           {},
           [],
           'timestep',
-          [n, n, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
+          [nx, ny, nz].map((m) => Math.ceil(m / 4)), // the primitives pass does the first stage
         ),
       ]);
       await sim.buildHydro();
@@ -1315,7 +1328,7 @@ export class Sim implements Simulation {
       MassSums.create(
         d,
         MAX_MASSES,
-        [n, n, nz],
+        [nx, ny, nz],
         'gravity/bh_moment.wgsl',
         {},
         [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 4: sim.clock })),
@@ -1355,11 +1368,11 @@ export class Sim implements Simulation {
     const v = (t: GPUTexture) => t.createView();
     const k = this.compIn;
     const phi = this.mg.phi;
-    const dims = [this.n, this.n, this.nz];
+    const dims = [this.nx, this.ny, this.nz];
     // The diagnostics' reduction compiles alongside the hydro passes.
     const diag = Reducer.create(
       d,
-      [this.n, this.n, this.nz],
+      [this.nx, this.ny, this.nz],
       DIAG_OPS,
       'hydro/diagnostics.wgsl',
       slots,
@@ -1461,7 +1474,7 @@ export class Sim implements Simulation {
     const burn = burnSpec(c);
     if (burn && this.speciesGroups > 0) {
       this.burn = await createBurnPass(d, burn, { ...c.problem, units: problemUnits(c.problem, c.params) }, {
-        dims: [this.n, this.n, this.nz], stride: this.nz, groups: this.speciesGroups, slots,
+        dims: [this.nx, this.ny, this.nz], stride: this.nz, groups: this.speciesGroups, slots,
         params: this.params, clock: this.clock, state: this.state, species: this.species, pb: this.pred[1], heat: this.heat, comp: this.comp,
       });
     }
@@ -1497,7 +1510,8 @@ export class Sim implements Simulation {
   writeParams() {
     const c = this.cfg;
     const buf = packParams(c, {
-      dims: [c.n, c.n, this.nz],
+      dims: [this.nx, this.ny, this.nz],
+      rect: rectangular(c),
       dx: this.dx,
       rhoMean: this.rhoMean,
       // Comoving coordinates: the state's scale factor as last read (syncScale keeps it current).
@@ -1515,24 +1529,25 @@ export class Sim implements Simulation {
   reset() {
     const c = this.cfg;
     const n = this.n;
-    const nz = this.nz;
+    const { nx, ny, nz } = this;
+    const cells = nx * ny * nz;
     const eos = makeEos(c.eos, c.eosParams);
     const fn = c.problem.init(n, eos, c.ndim, c.params);
     const masses = initialMasses(c, this.dx);
     this.nMasses = this.nOwnMasses = masses.length;
     this.device.queue.writeBuffer(this.bh, 0, packMasses(masses));
     this.debrisBuf?.reset(c.restart?.debris);
-    const u1 = new Float32Array(n * n * nz * 4);
-    const u2 = new Float32Array(n * n * nz * 4);
+    const u1 = new Float32Array(cells * 4);
+    const u2 = new Float32Array(cells * 4);
     const G = this.speciesGroups;
-    const sp = new Float32Array(n * n * nz * 4 * G);
+    const sp = new Float32Array(cells * 4 * G);
     const kc = this.compCoeffs;
-    const km = kc ? new Float32Array(n * n * nz * 4) : undefined;
+    const km = kc ? new Float32Array(cells * 4) : undefined;
     const lo = domainLo(c);
     // The magnetic field on the faces, and its energy in each cell's total.
     const faces = mhdOn(c) ? initialFaces(c, n, nz, this.dx) : null;
     // Each cell's B^2 / 2, which a star's settling (it rebuilds E) adds back.
-    const emag = faces ? new Float32Array(n * n * nz) : null;
+    const emag = faces ? new Float32Array(cells) : null;
     let mass = 0;
     let o = 0;
     this.solids = false;
@@ -1540,9 +1555,9 @@ export class Sim implements Simulation {
     this.device.queue.writeBuffer(this.sources, 0, packSources([]));
     for (let k = 0; k < nz; k++) {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
-      for (let j = 0; j < n; j++) {
+      for (let j = 0; j < ny; j++) {
         const y = (j + 0.5) * this.dx + lo[1];
-        for (let i = 0; i < n; i++, o += 4) {
+        for (let i = 0; i < nx; i++, o += 4) {
           const x = (i + 0.5) * this.dx + lo[0];
           const w = fn(x, y, z);
           // Where the species set the equation of state, the cell's own.
@@ -1570,17 +1585,17 @@ export class Sim implements Simulation {
           u2[o + 1] = eint;
           u2[o + 2] = w.rho * w.s;
           u2[o + 3] = mark;
-          if (G) packSpecies(sp, o, n * n * nz * 4, G, w.rho, w.X);
+          if (G) packSpecies(sp, o, cells * 4, G, w.rho, w.X);
           mass += w.rho;
         }
       }
     }
-    this.setState(u1, u2, mass / (n * n * nz));
+    this.setState(u1, u2, mass / cells);
     if (faces) this.mhd!.setFaces(faces);
     if (G) {
       this.speciesCur = 0;
-      writeTexture(this.device, this.species[0], n, 4, sp, nz * G);
-      if (km) writeTexture(this.device, this.comp!, n, 4, km, nz);
+      writeTexture(this.device, this.species[0], nx, 4, sp, nz * G, ny);
+      if (km) writeTexture(this.device, this.comp!, nx, 4, km, nz, ny);
     }
     // The clock (clockState), at the snapshot's time for a restart.
     this.device.queue.writeBuffer(this.clock, 0, clockState(c, c.restart?.time ?? 0, c.restart?.steps ?? 0));
@@ -1643,12 +1658,12 @@ export class Sim implements Simulation {
   /** The grid's cells and this state of them, for settling. */
   private cellsOf(u1: Float32Array, u2: Float32Array): SettleCells {
     const vol = this.dx ** 3;
-    const n = this.n;
+    const { nx, ny } = this;
     const lo = domainLo(this.cfg);
     const at = (i: number, a: number) => (i + 0.5) * this.dx + lo[a];
     return {
       count: u1.length / 4,
-      pos: (q) => [at(q % n, 0), at(Math.floor(q / n) % n, 1), at(Math.floor(q / (n * n)), 2)],
+      pos: (q) => [at(q % nx, 0), at(Math.floor(q / nx) % ny, 1), at(Math.floor(q / (nx * ny)), 2)],
       vol: () => vol,
       u1,
       u2,
@@ -1672,7 +1687,7 @@ export class Sim implements Simulation {
           if (epoch !== this.settleEpoch) return;
           const change = settler.round(phi);
           this.settleLog.push(change / peak);
-          writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
+          writeTexture(this.device, this.state[this.cur][0], this.nx, 4, u1, this.nz, this.ny);
           this.refreshPotential();
           if (change < (set.tol ?? SETTLE_TOL) * peak) break;
         }
@@ -1680,8 +1695,8 @@ export class Sim implements Simulation {
         // The settled E is the gas's own: a magnetic field's energy goes back in.
         if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
         if (fresh && this.cfg.problem.heat) heatCells(this.cfg.problem.heat(this.cfg.params, eos), cells);
-        writeTexture(this.device, this.state[this.cur][0], this.n, 4, u1, this.nz);
-        writeTexture(this.device, this.state[this.cur][1], this.n, 4, u2, this.nz);
+        writeTexture(this.device, this.state[this.cur][0], this.nx, 4, u1, this.nz, this.ny);
+        writeTexture(this.device, this.state[this.cur][1], this.nx, 4, u2, this.nz, this.ny);
         this.refreshPotential();
       } finally {
         if (epoch === this.settleEpoch) {
@@ -1714,7 +1729,7 @@ export class Sim implements Simulation {
       const pass = beginPass(enc);
       pass.setPipeline(this.pCensus!);
       pass.setBindGroup(0, group);
-      pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+      pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
       pass.end();
     }, this.selfGravity, v0, d.ranges[0][1]);
     const r = await this.readRestart();
@@ -1724,12 +1739,12 @@ export class Sim implements Simulation {
   /** Replace the state with raw conserved arrays (rho, m), (E, e_int, rho s, 0). */
   setState(u1: Float32Array, u2: Float32Array, rhoMean: number) {
     const d = this.device;
-    const n = this.n;
+    const { nx, ny, nz } = this;
     this.cur = 0;
     this.rhoMean = rhoMean;
-    writeTexture(d, this.state[0][0], n, 4, u1, this.nz);
-    writeTexture(d, this.state[0][1], n, 4, u2, this.nz);
-    if (this.selfGravity) writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * this.nz), this.nz);
+    writeTexture(d, this.state[0][0], nx, 4, u1, nz, ny);
+    writeTexture(d, this.state[0][1], nx, 4, u2, nz, ny);
+    if (this.selfGravity) writeTexture(d, this.mg.phi, nx, 1, new Float32Array(nx * ny * nz), nz, ny);
     d.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
     writeDrive(d, this.cfg.driving, this.cfg.ndim, this.cfg.problem.box);
     this.writeParams();
@@ -1798,7 +1813,7 @@ export class Sim implements Simulation {
   }
 
   private dispatch(pass: GPUComputePassEncoder) {
-    pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+    pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
   }
 
   /** Acceleration and half-step potential from the current and previous potentials. */
@@ -1809,8 +1824,7 @@ export class Sim implements Simulation {
   }
 
   private copyPhiToOld(enc: GPUCommandEncoder) {
-    const n = this.n;
-    enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [n, n, this.nz]);
+    enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [this.nx, this.ny, this.nz]);
   }
 
   /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
@@ -1842,7 +1856,7 @@ export class Sim implements Simulation {
         for (const [pipe, g] of [[this.pSpeciesPredict!, this.gSpeciesPredict], [this.pSpecies, this.gSpecies]] as const) {
           pass.setPipeline(pipe);
           pass.setBindGroup(0, g[p][q]);
-          pass.dispatchWorkgroups(Math.ceil(this.n / 8), Math.ceil(this.n / 8), Math.ceil(this.nz / 4));
+          pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
         }
         this.speciesCur = 1 - q;
       }
@@ -2011,8 +2025,11 @@ export class Sim implements Simulation {
   }
 
   async probe(f: [number, number, number]): Promise<CellProbe | null> {
-    const cell = (x: number, n: number) => Math.min(n - 1, Math.max(0, Math.floor(x * n)));
-    const index = [cell(f[0], this.n), cell(f[1], this.n), cell(f[2], this.nz)];
+    // Fractions of the computed box along each axis (domain.ts boxFrac): of half the box along
+    // a halved mirrored axis (gridDims).
+    const dims = this.displayDims;
+    const cell = (x: number, a: number) => Math.min(dims[a] - 1, Math.max(0, Math.floor(x * dims[a])));
+    const index = [cell(f[0], 0), cell(f[1], 1), cell(f[2], 2)];
     const [u1, u2] = await readTexels(this.device, this.state[this.cur], index as [number, number, number]);
     const lo = domainLo(this.cfg);
     const pos = index.map((i, a) => (i + 0.5) * this.dx + lo[a]) as [number, number, number];
@@ -2033,7 +2050,7 @@ export class Sim implements Simulation {
   }
 
   get displayDims(): [number, number, number] {
-    return [this.n, this.n, this.nz];
+    return [this.nx, this.ny, this.nz];
   }
   static readonly fieldShader = 'render/field.wgsl';
   readonly fieldShader = Sim.fieldShader;
@@ -2252,11 +2269,11 @@ export class Sim implements Simulation {
    */
   async fluxMismatch(): Promise<{ faces: number; mismatched: number; maxDiff: number; mirror: number }> {
     const d = this.device;
-    const n = this.n;
+    const { nx, ny } = this;
     const c = this.cfg;
     const slots = hydroSlots(c);
     // Split by region like the real pass, so faces between the two variants are checked too.
-    const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [n, n, this.nz], { DEBUG_FLUX: 1 }, true);
+    const pipe = await RegionPass.create(d, assemble('hydro/update.wgsl', slots), 'update (flux debug)', [nx, ny, this.nz], { DEBUG_FLUX: 1 }, true);
     const p = this.cur;
     const o = 1 - p;
     const v = (t: GPUTexture) => t.createView();
@@ -2278,10 +2295,10 @@ export class Sim implements Simulation {
     pipe.encode(pass, group);
     pass.end();
     d.queue.submit([enc.finish()]);
-    const f1 = await readTexture(d, this.state[o][0], n, 4, this.nz);
-    const f2 = await readTexture(d, this.state[o][1], n, 4, this.nz);
+    const f1 = await readTexture(d, this.state[o][0], nx, 4, this.nz, ny);
+    const f2 = await readTexture(d, this.state[o][1], nx, 4, this.nz, ny);
     const flux = (i: number, j: number, k: number, f: number) => {
-      const cell = ((k * n + j) * n + i) * 4;
+      const cell = ((k * ny + j) * nx + i) * 4;
       return f < 4 ? f1[cell + f] : f2[cell + f - 4];
     };
     let faces = 0;
@@ -2290,13 +2307,13 @@ export class Sim implements Simulation {
     // The largest mass flux through a plane of mirror symmetry (SimConfig.symmetry): zero.
     let mirror = 0;
     for (let k = 0; k < this.nz; k++)
-      for (let j = 0; j < n; j++)
-        for (let i = 0; i < n; i++)
+      for (let j = 0; j < ny; j++)
+        for (let i = 0; i < nx; i++)
           for (let a = 0; a < 3; a++) if (c.symmetry[a] && [i, j, k][a] === 0) mirror = Math.max(mirror, Math.abs(flux(i, j, k, 2 * a)));
-    const dims = [n, n, this.nz];
+    const dims = [nx, ny, this.nz];
     for (let k = 0; k < this.nz; k++)
-      for (let j = 0; j < n; j++)
-        for (let i = 0; i < n; i++)
+      for (let j = 0; j < ny; j++)
+        for (let i = 0; i < nx; i++)
           for (let a = 0; a < 3; a++) {
             const q = [i, j, k];
             q[a]++;
@@ -2319,8 +2336,8 @@ export class Sim implements Simulation {
   async readState(): Promise<{ u1: Float32Array; u2: Float32Array }> {
     const [a, b] = this.state[this.cur];
     return {
-      u1: await readTexture(this.device, a, this.n, 4, this.nz),
-      u2: await readTexture(this.device, b, this.n, 4, this.nz),
+      u1: await readTexture(this.device, a, this.nx, 4, this.nz, this.ny),
+      u2: await readTexture(this.device, b, this.nx, 4, this.nz, this.ny),
     };
   }
 
@@ -2331,9 +2348,9 @@ export class Sim implements Simulation {
   async readSpecies(): Promise<Float32Array[]> {
     const G = this.speciesGroups;
     if (!G) return [];
-    const raw = await readTexture(this.device, this.species[this.speciesCur], this.n, 4, this.nz * G);
+    const raw = await readTexture(this.device, this.species[this.speciesCur], this.nx, 4, this.nz * G, this.ny);
     const { u1 } = await this.readState();
-    const cells = this.n * this.n * this.nz;
+    const cells = this.nx * this.ny * this.nz;
     const ns = this.cfg.problem.species!.length;
     const X = Array.from({ length: ns }, () => new Float32Array(cells));
     for (let i = 0; i < ns; i++) {
@@ -2345,7 +2362,7 @@ export class Sim implements Simulation {
   }
 
   async readPotential(): Promise<Float32Array> {
-    return readTexture(this.device, this.mg.phi, this.n, 1, this.nz);
+    return readTexture(this.device, this.mg.phi, this.nx, 1, this.nz, this.ny);
   }
 
   /** Max |residual| of the Poisson solve on the finest level. */
@@ -2355,7 +2372,7 @@ export class Sim implements Simulation {
     this.mg.encodeResidual(pass);
     pass.end();
     this.device.queue.submit([enc.finish()]);
-    const r = await readTexture(this.device, this.mg.levels[0].res, this.n, 1);
+    const r = await readTexture(this.device, this.mg.levels[0].res, this.nx, 1, this.nz, this.ny);
     let m = 0;
     for (let i = 0; i < r.length; i++) m = Math.max(m, Math.abs(r[i]));
     return m;

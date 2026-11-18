@@ -6,13 +6,14 @@ const TESTS = [
   'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-species', 'amr-species-eos', 'amr-detonation', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'driving', 'point-mass-sink', 'point-mass-many', 'orbit-preview', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'burn-network', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption',
   'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-field-brush', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-diffusion', 'mhd-resistivity', 'mhd-line-tied', 'moving-wall', 'mhd-tidal-disruption', 'mhd-disk',
   'rot-off', 'rot-inertial', 'rot-balance', 'rot-blob', 'rot-binary', 'rot-mhd',
-  'sym-flux', 'sym-sedov', 'sym-sphere', 'sym-ellipsoid', 'sym-polytrope', 'sym-evrard', 'sym-mhd', 'sym-mass',
+  'sym-flux', 'sym-sedov', 'sym-half', 'sym-sphere', 'sym-ellipsoid', 'sym-polytrope', 'sym-evrard', 'sym-mhd', 'sym-mass',
   'cosmo-a', 'cosmo-drift', 'cosmo-cool', 'cosmo-eos', 'cosmo-wave', 'cosmo-growth', 'cosmo-pancake',
   'shear-steady', 'shear-mass', 'shear-wave', 'shear-flux', 'shear-mri', 'shear-epicycle',
   'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-blocks', 'cyl-sphere', 'cyl-evrard', 'cyl-noh', 'cyl-bondi', 'cyl-torus', 'cyl-mhd', 'cyl-column',
 ];
 
-test.describe.configure({ mode: 'serial' });
+// One worker (playwright.config.ts), in order; a failure does not skip the tests after it.
+test.describe.configure({ mode: 'default' });
 
 test('the page lists the same tests as this file', async ({ page }) => {
   await page.goto('/validate.html');
