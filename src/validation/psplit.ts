@@ -651,4 +651,29 @@ export const PSPLIT_TESTS: TestDef[] = [
       return { pass, metrics: m };
     },
   },
+  {
+    id: 'psplit-gas-polytrope',
+    name: 'Implicit pressure with self-gravity: a polytropic star at rest (3D 64^3)',
+    criterion:
+      'The polytrope preset, settled as usual, over two dynamical times with implicit pressure: the central density stays within 2% of its start (it does with explicit pressure to 3%), mass within 0.5% and total energy within 2%, in under a fifth of the explicit scheme\'s steps. (Gravity kicks the face velocities by the potential\'s difference across each face, and the potential is solved after the pressure correction.)',
+    async run(gpu) {
+      const star = problemById('polytrope');
+      const T = 2 * (star.tDyn ?? 1);
+      const hold = (over: Partial<SimConfig>) =>
+        withSim(gpu, star, 64, { ndim: 3, tEnd: T, ...over }, async (sim) => {
+          await sim.settled;
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd(16, 1e5);
+          const d = await sim.diagnostics();
+          return { steps, rhoc: d.ranges[0][1] / d0.ranges[0][1], mass: Math.abs(d.mass / d0.mass - 1), etot: Math.abs(d.eTot / d0.eTot - 1) };
+        });
+      const explicit = await hold({});
+      const implicit = await hold({ pressure: 'implicit' });
+      const m = {
+        central_density: implicit.rhoc, central_density_explicit: explicit.rhoc, steps: implicit.steps, steps_explicit: explicit.steps,
+        mass_drift: implicit.mass, energy_drift: implicit.etot, energy_drift_explicit: explicit.etot,
+      };
+      return { pass: Math.abs(implicit.rhoc - 1) < 0.02 && implicit.mass < 5e-3 && implicit.etot < 0.02 && implicit.steps < 0.2 * explicit.steps, metrics: m };
+    },
+  },
 ];

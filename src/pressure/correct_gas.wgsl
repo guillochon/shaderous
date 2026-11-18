@@ -28,6 +28,10 @@
 @group(0) @binding(11) var PFO: texture_storage_3d<r32float, write>;
 
 // The new pressure of cell c, less the reference.
+@group(0) @binding(12) var G: texture_3d<f32>;   // the gravity field: (acceleration, half-step potential)
+
+#include "pressure/kick.wgsl"
+
 fn p_new(c: vec3<i32>) -> f32 {
   return textureLoad(PN, c, 0).x + textureLoad(PRS, c, 0).x;
 }
@@ -37,7 +41,8 @@ fn p_new(c: vec3<i32>) -> f32 {
 // What a face between a lower and an upper gas cell does: (its pressure, its corrected velocity)
 // and, in `carry`, what the corrected velocity carries beyond the advective flux: (mass,
 // momentum) and (energy, internal energy, scalar). One piece of code, whichever cell asks.
-struct GFace { pv: vec2<f32>, c1: vec4<f32>, c2: vec3<f32>, m: f32 }
+// `m` is the mass the face carries and `k` its kick (pressure/kick.wgsl).
+struct GFace { pv: vec2<f32>, c1: vec4<f32>, c2: vec3<f32>, m: f32, k: f32 }
 
 fn gas_face(lo: vec3<i32>, hi: vec3<i32>, a: i32, dtdx: f32) -> GFace {
   let ul = textureLoad(U1S, lo, 0);
@@ -48,7 +53,7 @@ fn gas_face(lo: vec3<i32>, hi: vec3<i32>, a: i32, dtdx: f32) -> GFace {
   let pf = P.ohm.w + (ur.x * pl + ul.x * pr) / sum;
   // (With a uniform field's kick, dt g: the face is at rest when p_R - p_L = g dx (rho_L +
   // rho_R) / 2, the balance the explicit scheme's well-balanced reconstruction holds too.)
-  let vh = (ul[a + 1] + ur[a + 1]) / sum + clock.dt * P.gext[a] - dtdx * (2.0 / sum) * (pr - pl);
+  let vh = (ul[a + 1] + ur[a + 1]) / sum + face_kick(lo, hi, a, clock.dt) - dtdx * (2.0 / sum) * (pr - pl);
   let du = vh - textureLoad(FU, lo, 0)[a];
   var d1 = ul;
   var d2 = textureLoad(U2S, lo, 0).xyz;
@@ -56,7 +61,7 @@ fn gas_face(lo: vec3<i32>, hi: vec3<i32>, a: i32, dtdx: f32) -> GFace {
     d1 = ur;
     d2 = textureLoad(U2S, hi, 0).xyz;
   }
-  return GFace(vec2<f32>(pf, vh), du * d1, du * d2, 0.5 * sum * vh);
+  return GFace(vec2<f32>(pf, vh), du * d1, du * d2, 0.5 * sum * vh, face_kick(lo, hi, a, clock.dt));
 }
 
 @compute @workgroup_size(8, 8, 4)
@@ -84,39 +89,45 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var a = 0; a < axes; a++) {
     let hi = pface(c, a, true);
     let lo = pface(c, a, false);
-    // A wall: nothing through it, and the cell's pressure carried half a cell down the uniform
-    // field. With the density-weighted face pressures a cell of a column in balance then has
-    // p_hi - p_lo = rho g dx exactly, which the kick below cancels to round-off.
-    let kg = clock.dt * P.gext[a];
-    let half = 0.5 * P.dx * P.gext[a] * u1.x;
-    // The mass the cell's two faces carry along this axis, for the field's work.
-    var mf = 0.0;
+    // A wall: nothing through it, and the cell's pressure carried half a cell down the field.
+    // With the density-weighted face pressures a cell of a column in balance then has
+    // p_hi - p_lo = rho times the mean of its two faces' kicks over dt, exactly, which the
+    // cell's kick below cancels to round-off.
+    let kc = clock.dt * cell_accel(c)[a];
+    let half = 0.5 * P.dx * cell_accel(c)[a] * u1.x;
     var fh = vec2<f32>(pc + half, 0.0);
     var fl = vec2<f32>(pc - half, 0.0);
+    // Each face's kick and the mass it carries: the cell's kick is rho times the mean of the
+    // two, and the field's work on it half the sum of kick times mass (flux form: at rest in
+    // balance no face carries any, and the energy does not change; the kinetic energy of the
+    // kick alone would heat such a column by rho (g dt)^2 / 2 a step).
+    var kh = kc;
+    var kl = kc;
+    var mh = 0.0;
+    var ml = 0.0;
     if (hi.kind == FK_GAS) {
       let f = gas_face(c, hi.q, a, dtdx);
       fh = f.pv;
-      mf += f.m;
+      mh = f.m;
+      kh = f.k;
       c1 += f.c1;
       c2 += f.c2;
     }
     if (hi.kind == FK_INLET) { let q = textureLoad(U1S, hi.q, 0); fh.y = q[a + 1] / q.x; }
     // An open face: the cell's own pressure and advected velocity (pressure/source_gas.wgsl).
-    if (hi.kind == FK_OPEN) { fh = vec2<f32>(pc, open_mom(u1[a + 1] + kg * u1.x, true, hi.only) / u1.x); mf += u1.x * fh.y; }
+    if (hi.kind == FK_OPEN) { fh = vec2<f32>(pc, open_mom(u1[a + 1] + kc * u1.x, true, hi.only) / u1.x); mh = u1.x * fh.y; }
     if (lo.kind == FK_GAS) {
       let f = gas_face(lo.q, c, a, dtdx);
       fl = f.pv;
-      mf += f.m;
+      ml = f.m;
+      kl = f.k;
       c1 -= f.c1;
       c2 -= f.c2;
     }
     if (lo.kind == FK_INLET) { let q = textureLoad(U1S, lo.q, 0); fl.y = q[a + 1] / q.x; }
-    if (lo.kind == FK_OPEN) { fl = vec2<f32>(pc, open_mom(u1[a + 1] + kg * u1.x, false, lo.only) / u1.x); mf += u1.x * fl.y; }
-    // The field's kick, and its work in flux form: g times the mass its two faces carry, halved.
-    // (At rest in balance no face carries any, and the energy does not change. The kinetic
-    // energy of the kick alone would heat such a column by rho (g dt)^2 / 2 a step.)
-    ek += 0.5 * kg * mf;
-    mom[a] += kg * u1.x - dtdx * (fh.x - fl.x);
+    if (lo.kind == FK_OPEN) { fl = vec2<f32>(pc, open_mom(u1[a + 1] + kc * u1.x, false, lo.only) / u1.x); ml = u1.x * fl.y; }
+    ek += 0.5 * (kh * mh + kl * ml);
+    mom[a] += 0.5 * (kh + kl) * u1.x - dtdx * (fh.x - fl.x);
     de += fh.x * fh.y - fl.x * fl.y;
     dvh += fh.y - fl.y;
   }

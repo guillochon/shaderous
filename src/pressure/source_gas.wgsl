@@ -30,6 +30,9 @@
 @group(0) @binding(8) var PRS: texture_storage_3d<r32float, write>;
 @group(0) @binding(10) var PNO: texture_storage_3d<r32float, write>;
 @group(0) @binding(11) var PF: texture_3d<f32>;
+@group(0) @binding(12) var G: texture_3d<f32>;   // the gravity field: (acceleration, half-step potential)
+
+#include "pressure/kick.wgsl"
 @group(0) @binding(9) var U2N: texture_3d<f32>;
 
 #include "pressure/faces.wgsl"
@@ -83,12 +86,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     adv += max(v[a], 0.0) * (p - pl) + min(v[a], 0.0) * (ph - p);
     var fh = 0.0;
     var fl = 0.0;
-    // A uniform field kicks the face velocities (pressure/correct_gas.wgsl): dt g on every face
-    // gas crosses.
-    let kg = dt * P.gext[a];
+    // Gravity kicks the face velocities (pressure/kick.wgsl).
+    let kg = dt * cell_accel(c)[a];
     if (hi.kind == FK_GAS) {
       let q = textureLoad(U1S, hi.q, 0);
-      fh = (us[a + 1] + q[a + 1]) / (us.x + q.x) + kg;
+      fh = (us[a + 1] + q[a + 1]) / (us.x + q.x) + face_kick(c, hi.q, a, dt);
       beta[a] = 2.0 / (us.x + q.x);
       lap += beta[a] * (textureLoad(PF, hi.q, 0).x - pf);
     }
@@ -98,7 +100,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (hi.kind == FK_OPEN) { fh = open_mom(us[a + 1] + kg * us.x, true, hi.only) / us.x; }
     if (lo.kind == FK_GAS) {
       let q = textureLoad(U1S, lo.q, 0);
-      fl = (q[a + 1] + us[a + 1]) / (q.x + us.x) + kg;
+      fl = (q[a + 1] + us[a + 1]) / (q.x + us.x) + face_kick(lo.q, c, a, dt);
       lap += 2.0 / (q.x + us.x) * (textureLoad(PF, lo.q, 0).x - pf);
     }
     if (lo.kind == FK_INLET) { let q = textureLoad(U1S, lo.q, 0); fl = q[a + 1] / q.x; }

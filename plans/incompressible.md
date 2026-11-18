@@ -2,9 +2,9 @@
 
 Status (2026-11-18): stages 0 (2.4), 1 (3.8), 2 (4.2.1, 4.12) and 3 (5.10) are done for the
 liquid. Implicit pressure for an
-ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Not
-done: self-gravity and stars with implicit pressure; the ideal gas, species and obstacles
-with it on the adaptive mesh. Figures quoted from the code in
+ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Self-gravity
+for the ideal gas is done on the uniform grid (5.11). Not done: point masses with implicit
+pressure; the ideal gas, species and obstacles with it on the adaptive mesh. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -898,8 +898,11 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   kicks the face velocities, which with the scheme's own density-weighted face pressures
   balances to round-off; and the predictor's pressure force is formed face by face.
   `psplit-gas-balance`: both columns of the `well-balanced` test at Mach $`1.2\times10^{-6}`$.
-  Self-gravity is the same construction with the potential's difference across each face in
-  place of $`g\,\Delta x`$; it is not built.
+- **Self-gravity for the ideal gas** (4.11 step 6, uniform grid): the same construction with
+  the potential's difference across each face (`pressure/kick.wgsl`), the potential solved
+  after the correction. `psplit-gas-polytrope`: central density to 0.01% over two dynamical
+  times in 22 steps (explicit: 2.5% in 436), energy drift 1% (explicit 0.2%). Only a star at
+  rest is tested: no collapse, no point masses.
 
 ## 6. Not covered
 

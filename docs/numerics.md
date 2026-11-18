@@ -591,6 +591,19 @@ density falls by $`e`$ every 16 cells and every 4 (a factor of $`9\times10^6`$ i
 hold at a Mach number of $`1.2\times10^{-6}`$ through a sound crossing, with the energy to
 $`2\times10^{-7}`$ (`psplit-gas-balance`); the explicit scheme holds them to $`10^{-4}`$.
 
+*Self-gravity, for the gas.* The same construction with the potential in place of
+$`g\,\Delta x`$: a face is kicked by $`-\Delta t\,(\phi_R - \phi_L)/\Delta x`$, with the
+half-step potential the explicit scheme's reconstruction also differences (§14), the cell's
+kick is its density times the mean of its two faces', and the work is each face's kick times
+the mass it carries, halved between its two cells. The potential is solved after the pressure
+correction, for the final density. The timestep keeps gravity's limit,
+$`C\sqrt{\Delta x/|\mathbf g|}`$: without it the columns above took five steps a sound crossing
+and lost their balance. A settled polytrope on $`64^3`$ cells holds its central density to
+0.01% over two dynamical times in 22 steps, where the explicit scheme takes 436 and drifts
+2.5%; its total energy drifts 1% against the explicit 0.2%, the price of steps that long with
+a first-order split (`psplit-gas-polytrope`). Collapse and other dynamic self-gravity have not
+been tested with it.
+
 *Species* that ride with the gas are moved after the correction, with the advective mass
 fluxes, and scaled to the corrected density: mass fractions sum to one and a uniform species
 stays uniform to round-off, and each species' total mass is kept to the order of the density's
@@ -672,8 +685,8 @@ merges its fine blocks as it runs leaves the density within $`0.78\,M^2`$: no pr
 Without refinement the block grid reproduces the uniform grid's run to $`10^{-7}`$ in kinetic
 energy. In 3D it runs and conserves; it has not been measured beyond that.
 
-Limits. The liquid and the ideal gas only, on a Cartesian grid, without self-gravity, point
-masses, cooling or frames; the ideal gas on the uniform grid only; on the adaptive mesh also
+Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
+or frames (and the liquid without self-gravity); the ideal gas on the uniform grid only; on the adaptive mesh also
 without species, obstacles, inflows or per-block timesteps (one solve couples every cell at
 one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
@@ -2365,7 +2378,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 147 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 148 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

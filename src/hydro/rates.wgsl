@@ -44,7 +44,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     // With implicit pressure the sound speed does not limit the step, and gas at rest with a
     // pressure jump (a shock tube's start) would have no limit at all: the pressure's own
     // acceleration, less the field's that balances it in a column at rest, is one.
-    acc = max(acc, length(pp_gradient(c) / (P.dx * w.w1.x) - P.gext.xyz * select(0.0, 1.0, P.ohm.y > 0.0)) * select(0.0, 1.0, P.ohm.y > 0.0));
+    acc = max(acc, length(pp_gradient(c) / (P.dx * w.w1.x) - g_load(c) * select(0.0, 1.0, P.ohm.y > 0.0)) * select(0.0, 1.0, P.ohm.y > 0.0));
     if (cylindrical()) {
       let t = cyl_dt_terms(w.w1.yzw, w.w2.y, f32(c.x) + 0.5, g_dx);
       rate += t.x;

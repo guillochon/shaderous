@@ -527,7 +527,7 @@ export function implicitUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid' && c.eos !== 'ideal') return 'it is built for the liquid and the ideal gas only, so far';
   if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'it is not available in axisymmetric or spherical runs';
   // (A uniform field is the pressure passes' own: pressure/correct.wgsl.)
-  if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available with it yet';
+  if (c.problem.masses) return 'point masses are not available with it yet';
   if (c.problem.rotation || c.problem.shear || c.problem.frame) return 'rotating frames and shearing boxes are not available with it';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
   // (Species that only ride with the gas are moved after the correction, and scaled to its
@@ -1594,14 +1594,14 @@ export class Sim implements Simulation {
         bindGroup(d, this.pPsSource!, {
           0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[1 - p][0]), 4: v(this.state[1 - p][1]),
           5: v(prs.levels[0].rhs), 6: v(prs.levels[0].coef), 8: v(prs.p),
-          ...((gas ? { 9: v(this.state[p][1]), 10: v(this.pOld!), 11: v(this.pFull!) } : { 7: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
+          ...((gas ? { 9: v(this.state[p][1]), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield) } : { 7: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
         }),
       );
       this.gPsCorrect = [0, 1].map((p) =>
         bindGroup(d, this.pPsCorrect!, {
           0: this.params, 1: this.clock, 2: v(this.state[1 - p][0]), 3: v(this.state[1 - p][1]), 4: v(prs.p),
           6: v(this.state[p][0]), 7: v(this.state[p][1]),
-          ...((gas ? { 9: v(this.faceVel!), 10: v(this.pOld!), 11: v(this.pFull!) } : { 5: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
+          ...((gas ? { 9: v(this.faceVel!), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield) } : { 5: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
         }),
       );
     } else {
@@ -2168,25 +2168,6 @@ export class Sim implements Simulation {
           this.speciesCur = 1 - q;
         }
       }
-      if (selfGravity && this.sphMono) {
-        this.encodeMonopole(pass, 1 - p);
-      } else if (selfGravity) {
-        // Keep the old potential and solve for that of the updated density (warm-started).
-        pass.end();
-        this.copyPhiToOld(enc);
-        pass = beginPass(enc);
-        this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
-        for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
-      }
-      if (this.hasMasses) {
-        // Move the masses to the new time, then their pull on the updated gas and what their
-        // sinks take from it (removed in the correction pass below).
-        pass.setPipeline(this.pBhDrift);
-        pass.setBindGroup(0, this.gBhDrift);
-        pass.dispatchWorkgroups(1);
-        this.encodeMassKick(pass, 1 - p, true);
-      }
-      if (this.fieldOn && !this.sphMono) this.encodeField(pass);
       if (this.prs) {
         // Implicit pressure: the equation from the old state (parity p) and the advected one
         // (parity 1 - p), the solve, and the correction back into parity p.
@@ -2202,6 +2183,30 @@ export class Sim implements Simulation {
           speciesPass(this.pSpecies, this.gSpeciesFinal[p][this.speciesCur]);
           this.speciesCur = 1 - this.speciesCur;
         }
+      }
+      // (With implicit pressure the final state is in parity p already, and the potential is its.)
+      const gp = this.prs ? p : 1 - p;
+      if (selfGravity && this.sphMono) {
+        this.encodeMonopole(pass, 1 - p);
+      } else if (selfGravity) {
+        // Keep the old potential and solve for that of the updated density (warm-started).
+        pass.end();
+        this.copyPhiToOld(enc);
+        pass = beginPass(enc);
+        this.mg.encodeSource(pass, gp, this.cfg.gravity === 'isolated');
+        for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
+      }
+      if (this.hasMasses) {
+        // Move the masses to the new time, then their pull on the updated gas and what their
+        // sinks take from it (removed in the correction pass below).
+        pass.setPipeline(this.pBhDrift);
+        pass.setBindGroup(0, this.gBhDrift);
+        pass.dispatchWorkgroups(1);
+        this.encodeMassKick(pass, 1 - p, true);
+      }
+      if (this.fieldOn && !this.sphMono) this.encodeField(pass);
+      if (this.prs) {
+        // (The state is back in parity p: the pressure passes ran before the potential's solve, above.)
       } else if (anyGravity) {
         // Second half kick, with the acceleration of the updated state.
         pass.setPipeline(this.pCorrect);
