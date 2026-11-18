@@ -1966,7 +1966,7 @@ The diagnostics' masses and energies are true ones (each cell's volume in its cl
 their momentum and center of mass are in $`(R, z)`$, along $`z`$ alone. Snapshots are written
 with `Coordinates = spherical_polar`, which is already the grid's order $`(r, \theta, \phi)`$,
 the radial faces from `RootGridX1`'s ratio and the centers volume weighted as Athena++ writes
-them; such files are not read back. The display draws the native $`(r, \theta)`$ plane (radius
+them (a unit test checks the layout); such files are not read back. The display draws the native $`(r, \theta)`$ plane (radius
 across, $`\theta = 0`$ at the bottom), not the meridional plane. The `blast-spherical` preset is a
 point explosion at the origin.
 
