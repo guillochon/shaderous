@@ -69,7 +69,15 @@ export interface DomainSpec {
    * 'cylindrical': a 2D run that is a body of revolution about the y axis, in (R, z): x is R
    * from the axis (the lower x face) to the box side, y is z, the third velocity v_phi.
    */
-  geometry?: 'cartesian' | 'cylindrical';
+  geometry?: 'cartesian' | 'cylindrical' | 'spherical';
+  /**
+   * 'spherical' (2D, in (r, theta)): the inner radius, above zero, and whether the cells are
+   * spaced evenly in ln r (`logR`) rather than in r. The box side is the outer radius; x is r,
+   * y is theta from 0 to pi, the third velocity v_phi. Parts are placed in (R, z) = (x, y) as
+   * in an axisymmetric run, and their velocities given in (v_R, v_z, v_phi).
+   */
+  rMin?: number;
+  logR?: boolean;
   /**
    * The mirrors this run uses (some of `symmetric`): each mirrored axis's domain is then
    * [0, box] and its lower face a plane of symmetry.
