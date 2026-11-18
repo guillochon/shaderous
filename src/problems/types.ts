@@ -348,6 +348,12 @@ export interface Problem {
   opacityParams?: Partial<import('../opacity/opacity').OpacityParams>;
   radC?: number;
   radChat?: number;
+  /**
+   * With radiation on, the equation of state keeps its own radiation term all the same: a
+   * material whose heat capacity goes as T^3, as Su & Olson's (the Marshak wave test). Off by
+   * default, when that term is the radiation's and E carries it.
+   */
+  radKeepEos?: boolean;
   /** Kinematic viscosity and thermal conduction switched on by default (see SimConfig). */
   viscosity?: number;
   conductivity?: number;

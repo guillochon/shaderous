@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { eddington, eddingtonTensor, exchange, reduction, solveTemperature, TAU_0 } from '../../src/radiation/radiation';
-import { RefRad1D, type RefRadOptions } from '../../src/reference/radiation';
+import { marshakDiffusion, RefRad1D, type RefRadOptions } from '../../src/reference/radiation';
 import { codeLightSpeed, opacity, physicalOpacity } from '../../src/opacity/opacity';
 import { COMPOSITIONS } from '../../src/units/composition';
 import { gravityUnits } from '../../src/units/units';
@@ -213,5 +213,65 @@ describe('1D reference scheme', () => {
     expect(Math.abs(peak(gas) - 0.5)).toBeLessThan(0.01);
     // The lab frame's pulse has moved about (chat / c) (4/3) of the gas's way.
     expect(Math.abs(peak(lab) - 0.3)).toBeLessThan(0.02);
+  });
+});
+
+/** Linear interpolation of ys(xs) at x. */
+const interp = (xs: Float64Array, ys: Float64Array, x: number) => {
+  for (let i = 1; i < xs.length; i++)
+    if (xs[i] >= x) {
+      const w = (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+      return ys[i - 1] * (1 - w) + ys[i] * w;
+    }
+  return ys[ys.length - 1];
+};
+
+describe('Su & Olson Marshak wave', () => {
+  it('has a converged float64 diffusion solution', () => {
+    const a = marshakDiffusion({ c: 1, k: 1, u0: 1, length: 30, cells: 1500, t: 10, steps: 2000, marshak: true });
+    const b = marshakDiffusion({ c: 1, k: 1, u0: 1, length: 30, cells: 3000, t: 10, steps: 4000, marshak: true });
+    for (const x of [0.5, 1, 2, 4]) expect(Math.abs(interp(a.x, a.u, x) - interp(b.x, b.u, x))).toBeLessThan(2e-4);
+  });
+
+  it('M1 approaches the diffusion solution as the wave becomes diffusive (Marshak boundary on both)', () => {
+    const n = 128;
+    const L = 16;
+    const dx = L / n;
+    const R = 1e-12;
+    const rho = 1e6;
+    // Material energy a T^4 (heat capacity 4 a T^3, epsilon = 1), with a trace of ideal gas.
+    const eint = (r: number, T: number) => 1.5 * R * r * T + T ** 4;
+    const temperature = (r: number, e: number) => {
+      let lo = 0;
+      let hi = Math.max(1, e) * 10;
+      for (let i = 0; i < 100; i++) {
+        const m = 0.5 * (lo + hi);
+        if (eint(r, m) > e) hi = m;
+        else lo = m;
+      }
+      return lo;
+    };
+    const s = new RefRad1D({ n, dx, c: 1, chat: 1, a: 1, gamma: 5 / 3, bc: 'outflow', localC: true, dims: 2, holdFirst: true, eos: { eintFromT: eint, temperature }, opacity: () => ({ planck: 1 / rho, rosseland: 1 / rho }) });
+    s.rho.fill(rho);
+    for (let i = 0; i < n; i++) {
+      s.eint[i] = eint(rho, i === 0 ? 1 : 1e-3);
+      s.E[i] = i === 0 ? 0.5 : 1e-12;
+    }
+    // Half-range isotropic radiation falling in: E = E_inc / 2, F = c E_inc / 4.
+    s.F[0] = 0.25;
+    let t = 0;
+    for (const [T, xs, tol] of [[3.1623, [0.5, 1, 2], 0.03], [10, [0.5, 1, 2, 3, 5], 0.03]] as const) {
+      const k = Math.ceil((T - t) / s.sweepDt);
+      for (let q = 0; q < k; q++) s.sweep((T - t) / k);
+      t = T;
+      const ref = marshakDiffusion({ c: 1, k: 1, u0: 1, length: 30, cells: 1500, t: T, steps: 2000, marshak: true });
+      for (const x of xs) {
+        // Cell i's center is (i - 1/2) dx from the face where the radiation falls in.
+        const i = Math.round(x / dx + 0.5);
+        const xc = (i - 0.5) * dx;
+        expect(Math.abs(s.E[i] - interp(ref.x, ref.u, xc)), `u at x ${xc}, tau ${T}`).toBeLessThan(tol);
+        expect(Math.abs(s.temperature(i) ** 4 - interp(ref.x, ref.v, xc)), `v at x ${xc}, tau ${T}`).toBeLessThan(tol);
+      }
+    }
   });
 });

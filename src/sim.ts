@@ -1888,12 +1888,15 @@ export class Sim implements Simulation {
           this.refreshPotential();
           if (change < (set.tol ?? SETTLE_TOL) * peak) break;
         }
-        settler.finish(eos.eintFromP);
+        // (With radiation, the settled pressure is the gas's and the radiation's: split as the
+        // initial conditions split it, radiation/init.ts.)
+        settler.finish(this.rad ? (rho, p) => splitPressure(this.cfg, eos, rho, p).eint : eos.eintFromP);
         // The settled E is the gas's own: a magnetic field's energy goes back in.
         if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
         if (fresh && this.cfg.problem.heat) heatCells(this.cfg.problem.heat(this.cfg.params, eos), cells);
         writeTexture(this.device, this.state[this.cur][0], this.nx, 4, u1, this.nz, this.ny);
         writeTexture(this.device, this.state[this.cur][1], this.nx, 4, u2, this.nz, this.ny);
+        if (this.rad) await this.settledRadiation(u1, u2, eos, fresh ? null : settler.rewrote);
         this.refreshPotential();
       } finally {
         if (epoch === this.settleEpoch) {
@@ -1903,6 +1906,28 @@ export class Sim implements Simulation {
         }
       }
     })();
+  }
+
+  /**
+   * With radiation, after a settling: E = a T^4 at the settled gas's temperature and F its
+   * diffusion value (radiation/init.ts), in every cell, or only in those the settling rewrote.
+   */
+  private async settledRadiation(u1: Float32Array, u2: Float32Array, eos: Eos, rewrote: ArrayLike<boolean | number> | null) {
+    const rad = this.rad!;
+    const c = this.cfg;
+    const cells = u1.length / 4;
+    const R = rewrote ? await rad.read() : new Float32Array(cells * 4);
+    const rho = new Float32Array(cells);
+    const T = new Float32Array(cells);
+    const given = new Uint8Array(cells);
+    for (let q = 0; q < cells; q++) {
+      rho[q] = u1[4 * q];
+      T[q] = eos.temperature(Math.max(rho[q], c.rhoFloor), u2[4 * q + 1]);
+      if (rewrote && !rewrote[q]) given[q] = 1;
+      else R[4 * q] = c.radA * T[q] ** 4;
+    }
+    diffusionFlux(c, [this.nx, this.ny, this.nz], this.dx, R, rho, T, given);
+    rad.set(R);
   }
 
   /** Time, step count and point masses, for a snapshot (see io/snapshot.ts). */

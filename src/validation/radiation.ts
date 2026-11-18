@@ -1,11 +1,38 @@
 // Validation of radiation transport (radiation/radiation.ts; plans/radiation-m1.md section 9).
 // Registered in tests.ts after the others. All on the uniform grid in 2D, small enough to share
 // the GPU.
-import { all, OUTFLOW, PERIODIC, type Prim, type Problem } from '../problems/types';
+import { all, OUTFLOW, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
 import type { Sim, SimConfig } from '../sim';
 import { withSim, type TestDef } from './tests';
 import { capture, restartFrom } from '../io/capture';
 import { configFor, Sim as SimClass } from '../sim';
+import { marshakDiffusion, RefRad1D } from '../reference/radiation';
+import { presetSpec } from '../presets/index';
+import { compileSetup } from '../setup/compile';
+import { cloneSetup } from '../setup/spec';
+import { laneEmdenCached, polytropeK } from '../problems/lane_emden';
+import type { StarPart } from '../setup/spec';
+
+/**
+ * An n = 3 polytrope (the polytrope preset's, radius 0.3, central density 1, G = 1) whose pressure
+ * is a tenth radiation everywhere: Eddington's standard model, with the gas and radiation
+ * equation of state's a = 3 (1 - beta) / (beta^4 K^3), beta = 0.9. With `transport`, the
+ * radiation is carried by E (opacity kappa per unit mass, chat), else by the equation of state.
+ */
+function radStar(transport: boolean, kappa: number, chat: number, vx = 0) {
+  const spec = cloneSetup(presetSpec('polytrope')!);
+  const star = spec.parts![0] as StarPart;
+  star.n = 3;
+  if (vx) star.vel = [vx, 0, 0];
+  const beta = 0.9;
+  const K = polytropeK(laneEmdenCached(3), star.rhoc!, star.radius!, 1);
+  const a = (3 * (1 - beta)) / (beta ** 4 * K ** 3);
+  spec.physics = {
+    ...spec.physics, eos: 'gas_radiation', eosParams: { gamma: 5 / 3, R: 1, arad: a },
+    ...(transport ? { radiation: 'm1', opacity: 'constant', opacityParams: { absorption: kappa, scattering: 0 }, radChat: chat } : {}),
+  };
+  return compileSetup(spec).problem;
+}
 
 /** Gas at rest in a periodic unit box with radiation on: c = 100 and a = 1 unless changed. */
 const radGas = (over: Partial<Problem>): Problem => ({
@@ -59,6 +86,63 @@ function moments(R: Float32Array, nx: number, ny: number, dx: number, floor: num
     }
   const mean = m1 / m0;
   return { total: m0, mean, variance: m2 / m0 - mean * mean };
+}
+
+/** Linear interpolation of ys(xs) at x. */
+function interp(xs: Float64Array, ys: Float64Array, x: number): number {
+  for (let i = 1; i < xs.length; i++)
+    if (xs[i] >= x) {
+      const w = (x - xs[i - 1]) / (xs[i] - xs[i - 1]);
+      return ys[i - 1] * (1 - w) + ys[i] * w;
+    }
+  return ys[ys.length - 1];
+}
+
+
+/**
+ * The jump of a shock made by gas of density rho1 and temperature T1 driven at u0 into a wall,
+ * with radiation in equilibrium on both sides (P = rho T + a T^4 / 3, e = 1.5 rho T + a T^4 for
+ * gamma 5/3): the gas behind it at rest, and the shock's speed D away from the wall. Rankine and
+ * Hugoniot's conditions in the shock's frame, solved by Newton's method.
+ */
+function radiativeJump(rho1: number, T1: number, u0: number, a: number): { rho2: number; T2: number; D: number } {
+  const P = (r: number, T: number) => r * T + (a * T ** 4) / 3;
+  const e = (r: number, T: number) => 1.5 * r * T + a * T ** 4;
+  const fluxes = (r: number, T: number, w: number) => [r * w, r * w * w + P(r, T), w * (0.5 * r * w * w + e(r, T) + P(r, T))];
+  const residual = (x: number[]) => {
+    const [rho2, T2, D] = x;
+    const up = fluxes(rho1, T1, u0 + D);
+    const down = fluxes(rho2, T2, D);
+    return up.map((f, i) => (f - down[i]) / Math.max(Math.abs(f), 1));
+  };
+  // Start from the strong hydrodynamic shock.
+  let x = [4 * rho1, (u0 * u0) / 3 + T1, u0 / 3];
+  for (let it = 0; it < 100; it++) {
+    const f = residual(x);
+    const J = [0, 1, 2].map((j) => {
+      const h = 1e-7 * Math.max(Math.abs(x[j]), 1e-3);
+      const y = [...x];
+      y[j] += h;
+      const g = residual(y);
+      return g.map((v, i) => (v - f[i]) / h);
+    });
+    // Solve J^T-column system: J[j][i] = d f_i / d x_j.
+    const A = [0, 1, 2].map((i) => [J[0][i], J[1][i], J[2][i], -f[i]]);
+    for (let k = 0; k < 3; k++) {
+      let p = k;
+      for (let i = k + 1; i < 3; i++) if (Math.abs(A[i][k]) > Math.abs(A[p][k])) p = i;
+      [A[k], A[p]] = [A[p], A[k]];
+      for (let i = k + 1; i < 3; i++) {
+        const w = A[i][k] / A[k][k];
+        for (let j = k; j < 4; j++) A[i][j] -= w * A[k][j];
+      }
+    }
+    const dx = [0, 0, 0];
+    for (let i = 2; i >= 0; i--) dx[i] = (A[i][3] - A[i][2] * (i < 2 ? dx[2] : 0) - A[i][1] * (i < 1 ? dx[1] : 0)) / A[i][i];
+    x = x.map((v, i) => Math.max(v + dx[i], 1e-6));
+    if (Math.max(...f.map(Math.abs)) < 1e-13) break;
+  }
+  return { rho2: x[0], T2: x[1], D: x[2] };
 }
 
 export const RAD_TESTS: TestDef[] = [
@@ -352,9 +436,199 @@ export const RAD_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'rad-marshak',
+    name: 'Radiation: Su & Olson non-equilibrium Marshak wave (2D, 128 cells across 16 mean free paths)',
+    criterion: 'Radiation falls in through a held column (Marshak boundary) on a cold material of heat capacity 4 a T^3. The GPU matches the float64 reference of the same scheme to 2e-3 in E and a T^4 at tau = 1, 3.16 and 10; and both match the float64 non-equilibrium diffusion solution with the Marshak condition to 0.03 at tau = 3.16 (x <= 2) and 0.015 at tau = 10 (x <= 5), in units of the incident energy',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const n = 128;
+      const L = 16;
+      const dx = L / n;
+      const R = 1e-12;
+      const rho = 1e6;
+      const eint = (r: number, T: number) => 1.5 * R * r * T + T ** 4;
+      const temperature = (r: number, e: number) => {
+        let lo = 0;
+        let hi = Math.max(1, e) * 10;
+        for (let i = 0; i < 100; i++) {
+          const mid = 0.5 * (lo + hi);
+          if (eint(r, mid) > e) hi = mid;
+          else lo = mid;
+        }
+        return lo;
+      };
+      // Gas and radiation equation of state with its a T^4 kept: the material's own energy.
+      const p = radGas({
+        eos: 'gas_radiation', eosParams: { gamma: 5 / 3, R, arad: 1 }, radKeepEos: true, radC: 1, radChat: 1,
+        box: L, bcLo: [OUTFLOW, PERIODIC, PERIODIC], bcHi: [OUTFLOW, PERIODIC, PERIODIC],
+        opacityParams: { absorption: 1 / rho, scattering: 0 },
+        init: () => (x): Prim => {
+          const held = x < -L / 2 + dx;
+          const T = held ? 1 : 1e-3;
+          return { rho, vx: 0, vy: 0, vz: 0, p: R * rho * T + T ** 4 / 3, s: 0, fixed: held, erad: held ? 0.5 : 1e-12, frad: held ? [0.25, 0, 0] : [0, 0, 0] };
+        },
+      });
+      const ref = new RefRad1D({ n, dx, c: 1, chat: 1, a: 1, gamma: 5 / 3, bc: 'outflow', localC: true, dims: 2, holdFirst: true, eos: { eintFromT: eint, temperature }, opacity: () => ({ planck: 1 / rho, rosseland: 1 / rho }) });
+      ref.rho.fill(rho);
+      for (let i = 0; i < n; i++) {
+        ref.eint[i] = eint(rho, i === 0 ? 1 : 1e-3);
+        ref.E[i] = i === 0 ? 0.5 : 1e-12;
+      }
+      ref.F[0] = 0.25;
+      let pass = true;
+      await withSim(gpu, p, n, D2, async (sim) => {
+        const sweeps = sim.cfg.radSweeps;
+        let t = 0;
+        for (const T of [1, 3.1623, 10]) {
+          await runTo(sim, T);
+          // The reference takes the GPU's steps: whole steps of sweeps at the sweep's longest, then
+          // one shorter step to land on T.
+          const step = sweeps * ref.sweepDt;
+          while (T - t > step * (1 + 1e-6)) {
+            for (let q = 0; q < sweeps; q++) ref.sweep(ref.sweepDt);
+            t += step;
+          }
+          for (let q = 0; q < sweeps; q++) ref.sweep((T - t) / sweeps);
+          t = T;
+          const c = await cells(sim);
+          const diff = marshakDiffusion({ c: 1, k: 1, u0: 1, length: 30, cells: 1500, t: T, steps: 2000, marshak: true });
+          let dRef = 0;
+          let dDiff = 0;
+          const xmax = T > 5 ? 5 : 2;
+          for (let i = 1; i < n; i++) {
+            const u = c.R[4 * i];
+            const v = temperature(rho, c.u2[4 * i + 1]) ** 4;
+            dRef = Math.max(dRef, Math.abs(u - ref.E[i]), Math.abs(v - ref.temperature(i) ** 4));
+            const x = (i - 0.5) * dx;
+            // (Within half a mean free path of the boundary M1 and diffusion part ways, as they should.)
+            if (x >= 0.5 && x <= xmax) dDiff = Math.max(dDiff, Math.abs(u - interp(diff.x, diff.u, x)), Math.abs(v - interp(diff.x, diff.v, x)));
+          }
+          const tag = `tau${T > 5 ? 10 : T > 2 ? 3 : 1}`;
+          m[`${tag}_vs_reference`] = dRef;
+          pass &&= dRef < 2e-3;
+          if (T > 2) {
+            m[`${tag}_vs_diffusion`] = dDiff;
+            pass &&= dDiff < 0.03;
+          }
+          m[`${tag}_u_at_1`] = c.R[4 * Math.round(1 / dx + 0.5)];
+        }
+      });
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'rad-star',
+    name: 'Radiation: an n = 3 polytrope with a tenth of its pressure in radiation stays at rest (64^3, octant)',
+    criterion: 'Against the same star with its radiation in the equation of state: at rest for one dynamical time, its central density within 10% of the start and its mass-weighted rms and largest speeds inside 1% of the central density under twice the baseline’s, total energy (gas and E / r) kept to 3%; moving at ten times its sound speed for half the box, its central density within 2% of the baseline’s, its rms speed about its own motion under 1.5 times the baseline’s, energy kept to 1%',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      for (const [tag, transport, vx] of [['eos', false, 0], ['transport', true, 0], ['moving_eos', false, 6], ['moving_transport', true, 6]] as const) {
+        // Moving: along x at about ten times the central sound speed, for half the box.
+        const times = vx ? [0.025, 0.05] : [0.25, 0.5, 1];
+        await withSim(gpu, radStar(transport, 1e6, 50, vx), 64, { symmetry: [!vx, true, true], radSweeps: 16, tEnd: 0 }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const rho0 = d0.ranges[0][1];
+          for (const t of times) {
+            await runTo(sim, t);
+            const d = await sim.diagnostics();
+            m[`${tag}_rhoc_t${t}`] = d.ranges[0][1] / rho0;
+            const e0 = d0.eTot + (d0.radiation?.eRadReduced ?? 0);
+            m[`${tag}_drift_t${t}`] = (d.eTot + (d.radiation?.eRadReduced ?? 0) - e0) / Math.abs(e0);
+            if (d.radiation) {
+              m[`${tag}_too_fast_t${t}`] = d.radiation.tooFast;
+              m[`${tag}_lum_t${t}`] = d.radiation.luminosity;
+            }
+          }
+          // Inside the star (density above 1% of the central): mass-weighted rms and largest speed.
+          const { u1 } = await sim.readState();
+          let mv2 = 0;
+          let mass = 0;
+          let vmax = 0;
+          for (let q = 0; q < u1.length / 4; q++) {
+            const r = u1[4 * q];
+            if (r < 0.01 * rho0) continue;
+            const v2 = ((u1[4 * q + 1] - vx * r) ** 2 + u1[4 * q + 2] ** 2 + u1[4 * q + 3] ** 2) / (r * r);
+            mv2 += r * v2;
+            mass += r;
+            vmax = Math.max(vmax, Math.sqrt(v2));
+          }
+          m[`${tag}_vrms`] = Math.sqrt(mv2 / mass);
+          m[`${tag}_vmax`] = vmax;
+          m[`${tag}_steps`] = (await sim.diagnostics()).steps;
+          m[`${tag}_settle_ms`] = sim.settleMs;
+        });
+      }
+      const pass =
+        Math.abs(m.transport_rhoc_t1 - 1) < 0.1 && m.transport_vrms < 2 * m.eos_vrms && m.transport_vmax < 2 * m.eos_vmax && Math.abs(m.transport_drift_t1) < 0.03 &&
+        Math.abs(m['moving_transport_rhoc_t0.05'] - m['moving_eos_rhoc_t0.05']) < 0.02 && m.moving_transport_vrms < 1.5 * m.moving_eos_vrms && Math.abs(m['moving_transport_drift_t0.05']) < 0.01;
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'rad-shock',
+    name: 'Radiation: radiative shocks against a wall, subcritical and supercritical (2D, 256 cells)',
+    criterion: 'Gas at T = 1 driven into a wall at 1.5 (subcritical) and 5 (supercritical), against the jump with gas and radiation in equilibrium on both sides (Rankine-Hugoniot with radiation pressure and energy). Subcritical, chat = c/5: density and temperature behind to 1%, the shock where its speed puts it to 1%, a temperature spike at the front, the gas ahead heated by under 5%. Supercritical at the true c: the same to 1%, and the gas two cells ahead heated to over 3 times its temperature by the precursor. Supercritical at chat = c/5 and c/2.5: within 5% and 2%, the error shrinking as chat grows (a moving structure in cells whose speed of light is reduced: docs/numerics.md section 24)',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const n = 256;
+      const dx = 1 / n;
+      const a = 1.2e-4;
+      for (const [tag, u0, chat, reach] of [['sub', 1.5, 200, 0.4], ['super', 5, 200, 0.4], ['super_400', 5, 400, 0.4], ['super_c', 5, 1000, 0.4]] as const) {
+        const jump = radiativeJump(1, 1, u0, a);
+        m[`${tag}_rho2_exact`] = jump.rho2;
+        m[`${tag}_T2_exact`] = jump.T2;
+        m[`${tag}_D_exact`] = jump.D;
+        const p = radGas({
+          eosParams: { gamma: 5 / 3, R: 1, arad: a }, radC: 1000, radChat: chat, opacityParams: { absorption: 240, scattering: 0 },
+          bcLo: [REFLECT, PERIODIC, PERIODIC], bcHi: [OUTFLOW, PERIODIC, PERIODIC],
+          init: () => () => ({ rho: 1, vx: -u0, vy: 0, vz: 0, p: 1, s: 0 }),
+        });
+        const t = reach / jump.D;
+        await withSim(gpu, p, n, D2, async (sim) => {
+          await runTo(sim, t);
+          const c = await cells(sim);
+          const row = (i: number) => 4 * (Math.floor(n / 2) * n + i);
+          const rho = (i: number) => c.u1[row(i)];
+          const T = (i: number) => (c.u2[row(i) + 1] * (2 / 3)) / rho(i);
+          // The shock: where the density first falls through the mean of the two sides.
+          let s = 0;
+          while (s < n - 1 && rho(s) > 0.5 * (1 + jump.rho2)) s++;
+          m[`${tag}_shock_position`] = (s * dx) / (jump.D * t);
+          let rs = 0;
+          let ts = 0;
+          let k = 0;
+          // The gas behind the shock, away from the wall (shocked first) and the front.
+          for (let i = Math.round((reach > 0.5 ? 0.6 : 0.3) * s); i < Math.round(0.85 * s); i++, k++) {
+            rs += rho(i);
+            ts += T(i);
+          }
+          m[`${tag}_rho2`] = rs / k / jump.rho2;
+          m[`${tag}_T2`] = ts / k / jump.T2;
+          // The gas two cells ahead of the front, over the upstream temperature: the precursor.
+          m[`${tag}_preheat`] = T(Math.min(n - 1, s + 2));
+          let tmax = 0;
+          for (let i = 0; i < n; i++) tmax = Math.max(tmax, T(i));
+          m[`${tag}_Tmax`] = tmax / jump.T2;
+          m[`${tag}_steps`] = (await sim.diagnostics()).steps;
+          m[`${tag}_too_fast`] = (await sim.diagnostics()).radiation!.tooFast;
+        });
+      }
+      const err = (t: string) => Math.max(Math.abs(m[`${t}_rho2`] - 1), Math.abs(m[`${t}_T2`] - 1), Math.abs(m[`${t}_shock_position`] - 1));
+      m.sub_error = err('sub');
+      m.super_c_error = err('super_c');
+      m.super_error = err('super');
+      m.super_400_error = err('super_400');
+      const pass =
+        m.sub_error < 0.01 && m.sub_Tmax > 1 && m.sub_preheat < 1.05 &&
+        m.super_c_error < 0.01 && m.super_c_preheat > 3 &&
+        m.super_error < 0.05 && m.super_400_error < 0.02 && m.super_400_error < m.super_error;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'rad-cooling-sphere',
     name: 'Radiation: a hot core shining through an opaque shell gives the same luminosity at chat and 2 chat',
-    criterion: 'A core held at E = 1 inside a scattering shell (cell optical depth 5, so its speed of light is reduced by the per-cell rule) in transparent gas reaches a steady luminosity through the box faces that differs by under 5% between chat = c/20 and c/10; the shell is reduced (r < 1) in both',
+    criterion: 'A core held at E = 1 inside a scattering shell (cell optical depth 5, so its speed of light is reduced by the per-cell rule) in transparent gas reaches a steady luminosity through the box faces (its mean over 30 steps) that differs by under 5% between chat = c/20 and c/10; the shell is reduced (r < 1) in both',
     async run(gpu) {
       const m: Record<string, number> = {};
       const lum: number[] = [];
@@ -371,12 +645,22 @@ export const RAD_TESTS: TestDef[] = [
             return { rho, vx: 0, vy: 0, vz: 0, p: rho * 1e-6, s: 0, fixed: core, erad: core ? 1 : 1e-8, frad: [0, 0, 0] };
           },
         });
-        // The shell's diffusion time is 0.1; ten of them.
+        // The shell's diffusion time is 0.1, and its reduced cells (r about 0.3 at chat = c/20)
+        // settle r times slower: thirty of them.
         await withSim(gpu, p, n, D2, async (sim) => {
-          await runTo(sim, 1);
+          // The light at the faces flickers with a period of about five steps (as much with one
+          // reduced speed everywhere): its mean over 30 steps.
+          await runTo(sim, 3);
+          sim.cfg.tEnd = 100;
+          sim.writeParams();
+          let sum = 0;
+          for (let k = 0; k < 30; k++) {
+            sim.step(1);
+            sum += (await sim.diagnostics()).radiation!.luminosity;
+          }
           const d = await sim.diagnostics();
-          lum.push(d.radiation!.luminosity);
-          m[`chat${chat}_luminosity`] = d.radiation!.luminosity;
+          lum.push(sum / 30);
+          m[`chat${chat}_luminosity`] = sum / 30;
           m[`chat${chat}_reduced_share`] = d.radiation!.reducedShare;
           m[`chat${chat}_steps`] = d.steps;
         });

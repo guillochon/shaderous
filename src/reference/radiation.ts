@@ -1,6 +1,7 @@
 // Float64 reference of the radiation sweep in 1D (radiation/sweep.wgsl), for the unit tests and
 // as a check on the GPU: the same face flux, reconstruction, reduced speed of light per cell and
-// local implicit exchange, on a line of cells of ideal gas (R = 1, so T = (gamma - 1) e / rho).
+// local implicit exchange, on a line of cells of ideal gas (R = 1, so T = (gamma - 1) e / rho) or
+// of a gas whose energy the caller gives (RefRadOptions.eos).
 //
 // The gas may move at one uniform velocity: the radiation is then carried with it as the hydro
 // step carries it (radiation/advect.wgsl), upwind, before the sweeps. In `labFrame` mode the moments
@@ -35,6 +36,10 @@ export interface RefRadOptions {
   labFrame?: boolean;
   /** second-order reconstruction (default) or first order */
   order?: 1 | 2;
+  /** the gas's internal energy density at (rho, T) and its inverse; ideal gas of `gamma` without */
+  eos?: { eintFromT: (rho: number, T: number) => number; temperature: (rho: number, eint: number) => number };
+  /** the first cell is held as it is: a boundary fixed at its state (a fixed cell on the GPU) */
+  holdFirst?: boolean;
 }
 
 /** Monotonized-central slope, as mc() in radiation/sweep.wgsl. */
@@ -45,7 +50,8 @@ export function mcSlope(a: number, b: number): number {
 }
 
 export class RefRad1D {
-  readonly o: Required<Omit<RefRadOptions, 'v' | 'labFrame'>> & { v: number; labFrame: boolean };
+  readonly o: Required<Omit<RefRadOptions, 'v' | 'labFrame' | 'eos' | 'holdFirst'>> & { v: number; labFrame: boolean; holdFirst: boolean };
+  private readonly eos: NonNullable<RefRadOptions['eos']>;
   rho: Float64Array;
   eint: Float64Array;
   E: Float64Array;
@@ -57,7 +63,9 @@ export class RefRad1D {
   t = 0;
 
   constructor(opts: RefRadOptions) {
-    this.o = { solver: 'hll', cfl: RAD_CFL, dims: 1, order: 2, v: 0, labFrame: false, ...opts };
+    this.o = { solver: 'hll', cfl: RAD_CFL, dims: 1, order: 2, v: 0, labFrame: false, holdFirst: false, ...opts };
+    const g = opts.gamma;
+    this.eos = opts.eos ?? { eintFromT: (rho, T) => (rho * T) / (g - 1), temperature: (rho, e) => ((g - 1) * e) / rho };
     const n = opts.n;
     this.rho = new Float64Array(n).fill(1);
     this.eint = new Float64Array(n).fill(1);
@@ -67,7 +75,7 @@ export class RefRad1D {
   }
 
   temperature(i: number, eint = this.eint[i]): number {
-    return ((this.o.gamma - 1) * eint) / this.rho[i];
+    return this.eos.temperature(this.rho[i], eint);
   }
 
   /** The longest sweep the scheme takes: cfl dx / (d chat). */
@@ -140,15 +148,20 @@ export class RefRad1D {
 
   /** One sweep of length dt: explicit transport, then the local implicit exchange. */
   sweep(dt: number) {
-    const { n, dx, c, a, gamma } = this.o;
+    const { n, dx, c, a } = this.o;
     const flux: [number, number][] = [];
     for (let i = -1; i < n; i++) flux.push(this.faceFlux(i));
     const E1 = new Float64Array(n);
     const F1 = new Float64Array(n);
     const eint1 = new Float64Array(n);
-    const eFromT = (rho: number, T: number) => (rho * T) / (gamma - 1);
-    const tOf = (rho: number, e: number) => ((gamma - 1) * e) / rho;
+    const { eintFromT: eFromT, temperature: tOf } = this.eos;
     for (let i = 0; i < n; i++) {
+      if (i === 0 && this.o.holdFirst) {
+        E1[0] = this.E[0];
+        F1[0] = this.F[0];
+        eint1[0] = this.eint[0];
+        continue;
+      }
       const r = this.r(i);
       const [lo, hi] = [flux[i], flux[i + 1]];
       const Es = this.E[i] - (r * dt * (hi[0] - lo[0])) / dx;
@@ -193,7 +206,8 @@ export class RefRad1D {
     const carry = (q: Float64Array, extra?: (i: number) => number) => {
       const f: number[] = [];
       for (let i = -1; i < n; i++) f.push(v * up(q, i) + (extra?.(i) ?? 0));
-      return q.map((x, i) => x - (dt / dx) * (f[i + 1] - f[i]));
+      // (Each cell's change times its own r, as radiation/advect.wgsl.)
+      return q.map((x, i) => x - (this.r(i) * dt / dx) * (f[i + 1] - f[i]));
     };
     // The work term's flux v . P through the face, from the arithmetic means of the two cells.
     // (It is P : grad v that vanishes for a uniform velocity; div(v . P) does not, and the
@@ -206,8 +220,10 @@ export class RefRad1D {
     };
     this.E = carry(this.E, vP);
     this.F = carry(this.F);
-    // The gas's own heat moves with it too (the hydro step's job on the GPU).
-    this.eint = carry(this.eint);
+    // The gas's own heat moves with it too (the hydro step's job on the GPU), at its own speed.
+    const fe: number[] = [];
+    for (let i = -1; i < n; i++) fe.push(v * up(this.eint, i));
+    this.eint = this.eint.map((x, i) => x - (dt / dx) * (fe[i + 1] - fe[i]));
   }
 
   /**
@@ -253,4 +269,58 @@ export class RefRad1D {
     }
     return { erad, egas, conserved };
   }
+}
+
+/**
+ * The non-equilibrium diffusion of Su & Olson's Marshak wave, in float64: radiation energy u and
+ * material energy v = a T^4 (a heat capacity going as T^3, which makes the equations linear),
+ *   du/dt = (c / (3 k)) d2u/dx2 + c k (v - u),   dv/dt = c k (u - v) / eps,
+ * with u held at `u0` at x = 0 (or, `marshak`, Marshak's condition u - (2 / (3 k)) du/dx = u0 there:
+ * radiation of energy density u0 falling in, F(0) = (c / 2)(u0 - u(0))) and both zero to start. Backward Euler on `cells` cells over
+ * [0, length] (u's gradient zero at the far end), `steps` steps to time t. Returns u and v at the
+ * cell centers x = (i + 1/2) length / cells, and at x = 0 the boundary itself.
+ */
+export function marshakDiffusion(opts: { c: number; k: number; eps?: number; u0: number; length: number; cells: number; t: number; steps: number; marshak?: boolean }): { x: Float64Array; u: Float64Array; v: Float64Array } {
+  const { c, k, u0, length, cells: n, t, steps } = opts;
+  const eps = opts.eps ?? 1;
+  const dx = length / n;
+  const dt = t / steps;
+  const D = c / (3 * k);
+  const x = Float64Array.from({ length: n }, (_, i) => (i + 0.5) * dx);
+  let u = new Float64Array(n);
+  let v = new Float64Array(n);
+  // Each step: eliminate v' = (v + b u') / (1 + b), b = c k dt / eps, then solve the tridiagonal
+  // system for u'. The boundary value sits half a cell before the first center.
+  const b = (c * k * dt) / eps;
+  const g = c * k * dt;
+  const s = (D * dt) / (dx * dx);
+  // The boundary face's conductance over dt / dx: half a cell of diffusion, in series with
+  // Marshak's c / 2 where it applies.
+  const half = (2 * D) / dx;
+  const edge = ((opts.marshak ? (0.5 * c * half) / (0.5 * c + half) : half) * dt) / dx;
+  const lo = new Float64Array(n);
+  const di = new Float64Array(n);
+  const up = new Float64Array(n);
+  const rhs = new Float64Array(n);
+  for (let m = 0; m < steps; m++) {
+    for (let i = 0; i < n; i++) {
+      const coup = g * (1 - b / (1 + b));
+      lo[i] = i > 0 ? -s : 0;
+      up[i] = i < n - 1 ? -s : 0;
+      di[i] = 1 + coup + (i > 0 ? s : edge) + (i < n - 1 ? s : 0);
+      rhs[i] = u[i] + (g * v[i]) / (1 + b) + (i === 0 ? edge * u0 : 0);
+    }
+    // Thomas algorithm.
+    for (let i = 1; i < n; i++) {
+      const w = lo[i] / di[i - 1];
+      di[i] -= w * up[i - 1];
+      rhs[i] -= w * rhs[i - 1];
+    }
+    const un = new Float64Array(n);
+    un[n - 1] = rhs[n - 1] / di[n - 1];
+    for (let i = n - 2; i >= 0; i--) un[i] = (rhs[i] - up[i] * un[i + 1]) / di[i];
+    v = v.map((vv, i) => (vv + b * un[i]) / (1 + b));
+    u = un;
+  }
+  return { x, u, v };
 }

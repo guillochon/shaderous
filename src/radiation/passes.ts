@@ -111,7 +111,7 @@ export class RadPasses {
     this.gAdvect = [0, 1].map((p) =>
       [0, 1].map((q) =>
         bindGroup(d, this.pAdvect, {
-          0: params, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 5: v(this.R[q]), 6: v(this.R[1 - q]), 7: massFlux,
+          0: params, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 5: v(this.R[q]), 6: v(this.R[1 - q]), 7: massFlux, ...comp,
         }),
       ),
     );

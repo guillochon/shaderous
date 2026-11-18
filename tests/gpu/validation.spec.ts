@@ -11,7 +11,7 @@ const TESTS = [
   'shear-steady', 'shear-mass', 'shear-wave', 'shear-flux', 'shear-mri', 'shear-epicycle',
   'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-blocks', 'cyl-sphere', 'cyl-evrard', 'cyl-sphere-blocks', 'cyl-evrard-blocks', 'cyl-noh', 'cyl-bondi', 'cyl-torus', 'cyl-mhd', 'cyl-column', 'cyl-star', 'cyl-swirl',
   'sph-rest', 'sph-conserve', 'sph-sedov', 'sph-polytrope', 'sph-bondi', 'sph-blocks', 'sph-polytrope-blocks', 'sph-swirl',
-  'rad-restart', 'rad-off', 'rad-equilibrium', 'rad-f32', 'rad-streaming', 'rad-diffusion', 'rad-shadow', 'rad-advect', 'rad-cooling-sphere',
+  'rad-restart', 'rad-off', 'rad-equilibrium', 'rad-f32', 'rad-streaming', 'rad-diffusion', 'rad-shadow', 'rad-advect', 'rad-marshak', 'rad-star', 'rad-shock', 'rad-cooling-sphere',
 ];
 
 // One worker (playwright.config.ts), in order; a failure does not skip the tests after it.

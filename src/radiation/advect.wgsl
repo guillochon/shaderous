@@ -9,7 +9,15 @@
 // does. The work flux v . P uses the arithmetic means of the two cells' velocities and pressure
 // tensors, so both cells compute the same bits; with the sweep's - v . g it makes the
 // compression work P : grad v. Solid and fixed cells keep their radiation.
+//
+// Each cell takes its change times its own reduction factor r, as the sweep does with the rest:
+// every term but the time derivative carries r, so a steady state is the true one whatever r is,
+// in moving gas too, and what is conserved is E_gas + E / r. Where r = 1 (opaque cells, where
+// radiation is trapped) the radiation moves exactly with the gas. (Without r here, a radiative
+// shock whose precursor's cells were reduced came out 6% too cool: docs/numerics.md section 24.)
 #include "hydro/common.wgsl"
+#include <eos>
+#include <opacity>
 #include "radiation/common.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
@@ -83,7 +91,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     acc += face_carry(a, MF[mf_index(c, a)], dtdx, m2, m1, q, p1);
     acc -= face_carry(a, MF[mf_index(c + e, a)], dtdx, m1, q, p1, p2);
   }
-  var out = R + dtdx * acc;
+  let u = textureLoad(U1, c, 0);
+  let rho = max(u.x, P.rho_floor);
+  comp_use(comp_tex(c));
+  let r = rad_reduction(kappa_rosseland(rho, eos_temperature(rho, textureLoad(U2, c, 0).y)) * rho * P.dx);
+  var out = R + (r * dtdx) * acc;
   out.x = max(out.x, 0.0);
   let fm = length(out.yzw);
   if (fm > rad_c() * out.x) { out = vec4<f32>(out.x, out.yzw * (rad_c() * out.x / fm)); }

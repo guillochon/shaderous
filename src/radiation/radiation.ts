@@ -195,7 +195,7 @@ export function radiationUnsupported(c: SimConfig): string | null {
  */
 export function syncRadiationEos<C extends SimConfig>(c: C): C {
   const a = c.eosParams.arad > 0 ? c.eosParams.arad : c.radA;
-  if (radiationOn(c)) return { ...c, radA: a, eosParams: { ...c.eosParams, arad: 0 } };
+  if (radiationOn(c) && !c.problem.radKeepEos) return { ...c, radA: a, eosParams: { ...c.eosParams, arad: 0 } };
   return { ...c, radA: a, eosParams: { ...c.eosParams, arad: a } };
 }
 
