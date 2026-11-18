@@ -1653,16 +1653,36 @@ as $`\rho\,\Delta\Phi`$, act as spurious pressure: a 0.2% density wave grew 32% 
 linear theory with it and within 1% without. (Without expansion, a cold wave in a static
 periodic box grows 13% further with it than without; that case is not one it was built for.)
 
+**Equations of state** relate proper quantities, while the state holds comoving densities and
+pressures. An ideal gas's $`p = (\gamma-1)\rho e`$ is the same in both, so it is used as it
+stands. Any other is compiled behind wrappers (`comovingEosSlot`, `src/eos/eos.ts`): its
+functions are renamed and called at $`\rho/a^3`$ and $`p/a^3`$ or $`\rho e/a^3`$, with
+pressures and energy densities multiplied by $`a^3`$ on the way out, so every caller (the
+update, the predictor, the floors, the diagnostics, the display) goes through them. A pass that
+holds the clock sets $`a^3`$ for the states it works on (the middle of the step in the update);
+the others read the scale factor the step encoder copies from the clock into the parameters
+after every step. The expansion drag on $`\rho e`$ uses the gas's own $`g = p/\rho e`$: over a
+step $`\rho e`$ goes as $`a^{-3g}`$ with $`g`$ taken half way through (second order). Uniform gas
+plus radiation, their pressures equal at $`a = 0.1`$, expanding to $`a = 0.3`$ ends within
+$`2\times10^{-7}`$ in temperature of a float64 integration of $`de = -p\,d(1/\rho)`$, where an
+ideal gas would be off by a factor 2.6. The tabulated stellar equation of state is refused.
+
 **Cooling** works on proper quantities: the state's densities are comoving, so the cooling
 function is called at the proper density $`\rho/a^3`$ (at the middle of the step) and its rate,
-per unit proper volume, multiplied by $`a^3`$. An ideal gas's temperature needs no scaling, since
-it follows from $`\rho e/\rho`$. Uniform gas cooling by $`\Lambda\propto T^{1/2}`$ while it
-expands from $`a = 0.1`$ to 0.3 ends within $`10^{-5}`$ of a float64 integration.
+per unit proper volume, multiplied by $`a^3`$; the temperature comes through the wrappers. Uniform
+gas cooling by $`\Lambda\propto T^{1/2}`$ while it expands from $`a = 0.1`$ to 0.3 ends within
+$`10^{-5}`$ of a float64 integration.
 
-The first version takes a periodic box of ideal gas, with periodic self-gravity or none, on a
-uniform grid or on blocks with one timestep for all; anything else is refused with a message.
-Other equations of state need their four functions called through wrappers that divide and
-multiply by $`a^3`$ wherever they are used; that is not done yet.
+**Units.** A run is scale free unless `physics.cosmology.boxMpc` gives the box's comoving side
+in Mpc/h (with `h`, default 0.7): then lengths are in that side over the box, times in
+$`1/H_0`$, and a density of 1 is the mean matter density $`\Omega_m\rho_\text{crit}`$, which is
+what $`G = 3\Omega_m/8\pi`$ says in code units. Readouts in physical units show proper
+densities, pressures and energy densities ($`a^{-3}`$ times the state's) and proper lengths
+($`a`$ times), at the scale factor last read; velocities and temperatures are physical as they
+stand. Code units show the state's comoving values.
+
+The first version takes a periodic box of gas, with periodic self-gravity or none, on a uniform
+grid or on blocks with one timestep for all; anything else is refused with a message.
 The `zeldovich-pancake` preset (Cosmology group) runs the pancake of
 [Zel'dovich (1970)](https://ui.adsabs.harvard.edu/abs/1970A%26A.....5...84Z) through its
 caustic at $`z = 1`$.
@@ -1670,8 +1690,11 @@ caustic at $`z = 1`$.
 Tests: the scale factor on the GPU against float64 (Einstein-de Sitter and flat
 $`\Lambda`$CDM, $`3\times10^{-7}`$); uniform gas whose velocity falls as $`1/a`$ and comoving
 pressure as $`a^{3 - 3\gamma}`$ ($`5\times10^{-7}`$, uniform grid and blocks); a 0.2% wave that
-grows as $`a`$ (0.8%); and the pancake against its exact solution at half its caustic time
-(density 1%, velocity 0.3%; 3.6% in density on blocks, whose coarse cells are twice as large).
+grows as $`a`$ (0.8%); a traveling sound wave whose phase, over 25 radians from $`a = 0.1`$ to
+0.3, follows $`\int k c_s/a\,dt`$ with the proper sound speed falling as $`1/a`$ (0.07%, its
+comoving wavelength fixed); gas and radiation expanding (above); and the pancake against its
+exact solution at half its caustic time (density 1%, velocity 0.3%; 3.6% in density on blocks,
+whose coarse cells are twice as large).
 
 ### Shearing box
 
@@ -1692,10 +1715,14 @@ the background flow, not by pressure.
 **The shearing boundary.** Along $`x`$ the box is periodic with a shift that grows in time,
 
 ```math
-f(x + L, y, z) = f(x,\ y - q\Omega L\,t,\ z), \qquad v_y \to v_y - q\Omega L .
+f(x + L, y, z) = f(x,\ y + q\Omega L\,t,\ z), \qquad v_y \to v_y - q\Omega L ,
 ```
 
-The clock carries the offset $`\Delta y = q\Omega L\,t \bmod L`$, summed step by step with
+which is what a pattern carried by the background flow, $`f_0(x,\ y + q\Omega x\,t)`$, satisfies
+([Hawley et al. 1995](https://doi.org/10.1086/175311)). (The first version shifted the ghosts the
+other way, which a uniform state, a mass count and epicycles cannot see; the shearing wave below
+found it, its amplitude 54% off and its phase right.) The clock carries the offset
+$`\Delta y = q\Omega L\,t \bmod L`$, summed step by step with
 Kahan compensation (formed from $`t`$ it would lose its digits over a long run). A ghost beyond
 an $`x`$ face lies between two cells sheared along $`y`$ and is blended linearly from both, its
 $`v_y`$ shifted by the jump of the background flow; the half-step state takes the offset half a
@@ -1720,12 +1747,31 @@ turn takes its sines from their series for small angles: the GPU's `sin` is accu
 terms only, and its error over the small angle of one step was biased enough to shift the phase
 of the rotating-frame test by $`7\times10^{-6}`$ (now $`3\times10^{-7}`$).
 
-The first version is hydrodynamics on a uniform grid, periodic along $`y`$ (and $`z`$ unless
-stratified); blocks (whose neighbors across the boundary change with time), magnetic fields,
-self-gravity and diffusion are refused. The `shearing-wave` preset swings a leading density wave
-round to trailing. Tests: the background over ten orbits (within $`10^{-3}`$ of the shear speed),
-the blob, and epicycles at $`\kappa = \sqrt{2(2 - q)}\,\Omega`$ (back to $`5\times10^{-5}`$ after
-one, epicyclic energy to $`5\times10^{-5}`$).
+**Magnetic fields.** The face field keeps both $`x`$ planes of $`b_x`$ (texels 0 and $`n`$),
+sheared images of each other, instead of one shared face. Ghost cells are blended as above, and
+a ghost's tangential faces likewise from the two sheared faces. After each stage's flux pass and
+after its edge pass, a small pass (`mhd/shear.wgsl`) replaces what each $`x`$ plane computed by
+the mean of its own and the other plane's, remapped and boosted: the face fluxes as in the
+hydrodynamic update, and the edge impulses $`E_y`$ and $`E_z`$ on the two planes (Athena's
+remap of the electric field), $`E_z`$ with the frame change $`u\,B_x`$ of $`-\mathbf v\times\mathbf B`$
+when $`v_y`$ is boosted by $`u = \pm q\Omega L`$. Every face around such an edge then changes by the
+same number, so the divergence stays at round-off and the two planes' $`b_x`$ stay in step; and
+the sums of the remapped impulses over a plane agree, so the net vertical and radial fluxes
+through the box are conserved. Resistivity and viscosity are refused with a field.
+
+The first version runs on a uniform grid, periodic along $`y`$ (and $`z`$ unless stratified);
+blocks (whose neighbors across the boundary change with time), self-gravity and diffusion are
+refused. The `shearing-wave` preset swings a leading density wave round to trailing; `mri-box`
+grows the magnetorotational instability from noise in a vertical field. Tests: the background
+over ten orbits (within $`10^{-3}`$ of the shear speed), the blob, epicycles at
+$`\kappa = \sqrt{2(2 - q)}\,\Omega`$ (back to $`5\times10^{-5}`$ after one, epicyclic energy to
+$`5\times10^{-5}`$); the compressive shearing wave of
+[Johnson & Gammie (2005)](https://doi.org/10.1086/426637) at $`128^2`$, projected on the sheared
+wave and against a float64 integration of the linear equations through its swing (amplitude
+0.3%, phase $`2\times10^{-5}`$ rad, where it grows 1.9 times); a magnetized box with net
+vertical field and a field crossing the $`x`$ faces, whose net vertical and radial fluxes keep to
+$`5\times10^{-10}`$ over two orbits with $`\nabla\cdot B`$ at $`10^{-7}`$; and the MRI's fastest
+channel mode growing at $`0.762\,\Omega`$ against $`0.75`$ ($`32^3`$, $`\beta = 50`$).
 
 ### Axisymmetric (R, z) runs
 

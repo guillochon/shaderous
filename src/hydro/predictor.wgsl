@@ -87,7 +87,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   var gf = g;
   var dp = 0.0;
   if (FRAME_ON) {
-    let fr = frame_predict(v, q.b.x);
+    let fr = frame_predict(v, rho, q.b.x);
     gf += fr.xyz;
     dp = fr.w;
   }

@@ -103,6 +103,19 @@ fn cell_dx(dx: f32, a: f32) -> f32 {
 fn cosmo_hubble(a: f32) -> f32 {
   return sqrt(P.cosmo.x / (a * a * a) + P.cosmo.y / (a * a) + P.cosmo.z);
 }
+// a^3, the ratio of the state's comoving densities and pressures to the proper ones that the
+// equation of state and cooling take. A pass that holds the clock sets g_a3 to the scale
+// factor of the states it works on (the middle of the step for the update); elsewhere (the
+// timestep's rates, the diagnostics, the display) it is P.cosmo.w, the scale factor the step
+// encoder last copied from the clock (src/sim.ts), at most one batch of steps behind. 1 without
+// expansion.
+var<private> g_a3: f32 = 0.0;
+fn cosmo_a3() -> f32 {
+  if (g_a3 != 0.0) { return g_a3; }
+  if (!cosmo_on()) { return 1.0; }
+  let a = P.cosmo.w;
+  return a * a * a;
+}
 
 // The lower face along `axis` is a plane of mirror symmetry, or the axis of an axisymmetric
 // run, not a wall: what lies beyond it is the image of what lies inside (the potential is even
@@ -243,7 +256,7 @@ fn bc_map(c0: vec3<i32>) -> Mapped {
   // shear_frac) and their velocity offset by the jump of the background flow.
   if (shear_on() && (c.x < 0 || c.x >= n.x)) {
     let up = c.x >= n.x;
-    let s = i32(floor(f32(c.y) + select(g_shear, -g_shear, up)));
+    let s = i32(floor(f32(c.y) + select(-g_shear, g_shear, up)));
     c.y = ((s % n.y) + n.y) % n.y;
     m.c.y = c.y;
     m.vadd.y += select(1.0, -1.0, up) * shear_jump();
@@ -284,7 +297,7 @@ fn shear_ghost(c: vec3<i32>) -> bool {
 // For such a ghost, the weight of the second of those cells (the one above bc_map's along y).
 fn shear_frac(c: vec3<i32>) -> f32 {
   let up = c.x >= i32(P.dims.x);
-  let j = f32(c.y) + select(g_shear, -g_shear, up);
+  let j = f32(c.y) + select(-g_shear, g_shear, up);
   return j - floor(j);
 }
 // The offset `s` (a length along y, in [0, L)) moved on by the shear over a time dt.

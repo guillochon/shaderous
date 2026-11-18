@@ -11,7 +11,8 @@
 fn bcell(c: vec3<i32>) -> vec3<f32> {
   let n = vec3<i32>(P.dims.xyz);
   let up = c + 1;
-  let wrap = vec3<bool>(up.x >= n.x && P.bc_lo[0] == 0u, up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
+  // (A shearing box keeps both x planes of faces: mhd/common.wgsl periodic_axis.)
+  let wrap = vec3<bool>(up.x >= n.x && P.bc_lo[0] == 0u && !shear_on(), up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
   let hi = select(up, vec3<i32>(0), wrap);
   let lo = textureLoad(BF, c, 0);
   return 0.5 * vec3<f32>(

@@ -121,8 +121,10 @@ export interface PhysicsSpec {
    * cosmological constant omegaL (today, in units of the critical density), from redshift
    * zStart (t = 0) to zEnd, which then sets the end time. Times are in 1/H0, the mean comoving
    * density is 1, and G follows from omegaM. Positions are comoving, velocities peculiar.
+   * `boxMpc`: the box's comoving side in Mpc/h, with `h` (H0 / 100 km/s/Mpc, default 0.7),
+   * gives the run physical units, in which the display shows proper densities and lengths.
    */
-  cosmology?: { omegaM?: number; omegaL?: number; zStart?: number; zEnd?: number };
+  cosmology?: { omegaM?: number; omegaL?: number; zStart?: number; zEnd?: number; h?: number; boxMpc?: number };
   /**
    * A shearing box: the local model of a disk turning at omega (about z) with shear parameter
    * q = -dln Omega / dln R (1.5 for Keplerian), x radial, y along the orbit, z vertical. Its x

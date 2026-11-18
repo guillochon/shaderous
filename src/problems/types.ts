@@ -6,6 +6,7 @@ import type { UnitSystem } from '../units/units';
 import type { Composition } from '../units/composition';
 import type { SetupSpec } from '../setup/spec';
 import type { ViewMode } from '../render/view_options';
+import { cosmoUnits } from '../cosmo';
 
 export interface Prim {
   rho: number;
@@ -430,7 +431,7 @@ export function sizedProblem(p: Problem, params: Record<string, number>): Proble
 
 /** A preset's physical units for these values of its parameters, or undefined if it is scale free. */
 export const problemUnits = (p: Problem, params: Record<string, number>): UnitSystem | undefined =>
-  typeof p.units === 'function' ? p.units(params) : p.units;
+  (typeof p.units === 'function' ? p.units(params) : p.units) ?? (p.cosmology ? cosmoUnits(p.cosmology, p.box) : undefined);
 
 /** A problem's dynamical time (Problem.tDyn), or what stands in for it. */
 export function dynamicalTime(p: Problem): number {

@@ -196,6 +196,10 @@ export class MhdPasses {
   private pFlux: GPUComputePipeline[] = [];
   private pEmf: GPUComputePipeline[] = [];
   private pUpdate: GPUComputePipeline[] = [];
+  /** A shearing box (mhd/shear.wgsl): [stage][mode] pipelines, [parity][stage][mode][slab] bind groups. */
+  private shearScratch?: GPUBuffer;
+  private pShear: GPUComputePipeline[][] = [];
+  private gShear: GPUBindGroup[][][][] = [];
   pRates!: GPUComputePipeline;
   /** [parity][stage][slab] bind groups of each pass */
   private gFlux: GPUBindGroup[][][] = [];
@@ -238,6 +242,9 @@ export class MhdPasses {
     const flux = (n + 4) * (n + 4) * (nz === 1 ? 1 : S + 4) * 3 * 16;
     for (let a = 0; a < 3; a++) m.flux.push(d.createBuffer({ label: `MHD fluxes ${'xyz'[a]}`, size: flux, usage: GPUBufferUsage.STORAGE }));
     m.emf = d.createBuffer({ label: 'edge impulses', size: (n + 1) * (n + 1) * (nz === 1 ? 1 : S + 1) * 16, usage: GPUBufferUsage.STORAGE });
+    // A shearing box: the means of the two x planes' faces and edges (mhd/shear.wgsl), two vec4
+    // per (side, layer, row).
+    if (dep.cfg.problem.shear) m.shearScratch = d.createBuffer({ label: 'shearing box planes', size: 2 * (n + 1) * (nz === 1 ? 1 : S + 1) * 2 * 16, usage: GPUBufferUsage.STORAGE });
     for (let z0 = 0; z0 < nz; z0 += S) {
       const k = Math.min(S, nz - z0);
       const buf = d.createBuffer({ label: `MHD slab ${z0}`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -287,6 +294,9 @@ export class MhdPasses {
         bindGroup(d, be, { 0: params, 2: v(this.faces[p]), 6: v(this.faces[o]), 7: v(state[p][0]), 8: v(state[p][1]), 9: v(state[o][0]), 10: v(state[o][1]) }),
       ];
     });
+    if (this.shearScratch) {
+      this.pShear = await Promise.all([1, 2].map((st) => Promise.all([0, 1, 2, 3].map((mode) => computePipeline(d, assemble('mhd/shear.wgsl', slots), `shearing box planes ${st}/${mode}`, { STAGE: st, MODE: mode })))));
+    }
     this.pFlux = [f1, f2];
     this.pEmf = [e1, e2];
     this.pUpdate = [u1, u2];
@@ -294,6 +304,7 @@ export class MhdPasses {
     this.redMag = red;
     const fl = { 5: this.flux[0], 6: this.flux[1], 7: this.flux[2] };
     this.gFlux = [];
+    this.gShear = [];
     this.gEmf = [];
     this.gUpdate = [];
     this.gRates = [];
@@ -324,6 +335,12 @@ export class MhdPasses {
             17: v(this.dep.gfield), 20: this.dep.bh, 18: this.dep.massFlux ?? this.noFlux(),
           }),
         );
+      // The shearing box's passes read the stage's faces (for B_x) and rewrite the x fluxes and
+      // the edges.
+      if (this.shearScratch) {
+        const sh = this.shearScratch;
+        this.gShear.push([start, mid].map((st, s) => this.pShear[s].map((pipe) => perSlab((sb) => bindGroup(d, pipe, { 0: params, 1: clock, 4: st[4], 5: this.flux[0], 8: this.emf, 14: sb, 19: sh })))));
+      }
       this.gUpdate.push([
         upd(u1, { 9: v(half[0]), 10: v(half[1]), 11: v(this.halfFaces) }, state[p]),
         upd(u2, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.faces[o]) }, half),
@@ -383,13 +400,25 @@ export class MhdPasses {
         pass.setPipeline(this.pFlux[s]);
         pass.setBindGroup(0, this.gFlux[parity][s][i]);
         this.dispatch(pass, [n + 4, n + 4, flat ? 1 : sl.nz + 4]);
+        this.encodeShear(pass, parity, s, i, [0, 1], flat ? 1 : sl.nz);
         pass.setPipeline(this.pEmf[s]);
         pass.setBindGroup(0, this.gEmf[parity][s][i]);
         this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + 1]);
+        this.encodeShear(pass, parity, s, i, [2, 3], flat ? 1 : sl.nz + 1);
         pass.setPipeline(this.pUpdate[s]);
         pass.setBindGroup(0, this.gUpdate[parity][s][i]);
         this.dispatch(pass, [n + 1, n + 1, flat ? 1 : sl.nz + (last ? 1 : 0)]);
       });
+    }
+  }
+
+  /** A shearing box: the given modes of mhd/shear.wgsl for stage s on slab i, over `layers` layers. */
+  private encodeShear(pass: GPUComputePassEncoder, parity: number, s: number, i: number, modes: number[], layers: number) {
+    if (!this.shearScratch) return;
+    for (const mode of modes) {
+      pass.setPipeline(this.pShear[s][mode]);
+      pass.setBindGroup(0, this.gShear[parity][s][mode][i]);
+      pass.dispatchWorkgroups(Math.ceil((this.dep.n + 1) / 8), Math.ceil(layers / 8), 2);
     }
   }
 

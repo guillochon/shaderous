@@ -18,8 +18,12 @@ fn mhd_dims() -> vec3<i32> {
   return vec3<i32>(P.dims.xyz);
 }
 
+// Periodic for the face field: the upper face is the lower face of cell 0 and texel n is never
+// read. A shearing box's x axis is not, for its faces: its two x planes are sheared images of
+// each other, so each keeps its own b_x, which the averaged edge fields (mhd/shear.wgsl) keep in
+// step.
 fn periodic_axis(a: i32) -> bool {
-  return P.bc_lo[a] == 0u;
+  return P.bc_lo[a] == 0u && !(a == 0 && shear_on());
 }
 
 // Component `a` of the face field on the lower face along `a` of cell t. The face index along
@@ -46,6 +50,18 @@ fn bface(a: i32, t: vec3<i32>) -> f32 {
   for (var b = 0; b < 3; b++) {
     if (b != a && t[b] < 0 && sym_lo(b)) { s = -s; }
   }
+  // A shearing box: a face of a ghost beyond an x face lies between two sheared faces along y
+  // (as hydro/common.wgsl's bc_map and shear_frac place the ghost's cell), linearly.
+  if (a != 0 && shear_ghost(t)) {
+    let ny = i32(P.dims.y);
+    let J = f32(t.y) + select(-g_shear, g_shear, t.x >= i32(P.dims.x));
+    let j0 = floor(J);
+    var t0 = t;
+    t0.y = ((i32(j0) % ny) + ny) % ny;
+    var t1 = t0;
+    t1.y = (t0.y + 1) % ny;
+    return s * mix(textureLoad(BF, face_texel(a, t0), 0)[a], textureLoad(BF, face_texel(a, t1), 0)[a], J - j0);
+  }
   return s * textureLoad(BF, face_texel(a, t), 0)[a];
 }
 
@@ -55,10 +71,19 @@ fn bface(a: i32, t: vec3<i32>) -> f32 {
 
 // The state of a cell, or of the cell a ghost maps to (velocity and field mirrored at a
 // reflecting face: the normal components change sign).
+fn mq_at(m: Mapped, c: vec3<i32>) -> MQ {
+  let w = prim_from_cons(textureLoad(U1, c, 0), textureLoad(U2, c, 0));
+  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), bcell(c) * m.bflip);
+}
+// A shearing box's ghost beyond an x face: between the two sheared cells, linearly.
+fn mq_mix(a: MQ, b: MQ, f: f32) -> MQ {
+  return MQ(mix(a.a, b.a, f), mix(a.b, b.b, f), mix(a.B, b.B, f));
+}
 fn mq_load(c: vec3<i32>) -> MQ {
   let m = bc_map(c);
   comp_use(comp_tex(m.c));
-  let w = prim_from_cons(textureLoad(U1, m.c, 0), textureLoad(U2, m.c, 0));
-  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), bcell(m.c) * m.bflip);
+  let q = mq_at(m, m.c);
+  if (shear_ghost(c)) { return mq_mix(q, mq_at(m, shear_next(m.c)), shear_frac(c)); }
+  return q;
 }
 

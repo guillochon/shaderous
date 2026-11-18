@@ -35,7 +35,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
-import { CLOCK_BYTES, clockState, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindricalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindricalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -1176,12 +1176,17 @@ export class AmrSim implements Simulation {
     return { cycles: this.binCycles, updates: this.binFirstWork + later, single: this.binFullWork };
   }
 
+  /** Comoving coordinates: the scale factor the diagnostics last read from the clock. */
+  private lastScale: number | undefined;
+
   writeParams() {
     const c = this.cfg;
     const buf = packParams(c, {
       dims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0],
       dx: this.dx0,
       rhoMean: this.rhoMean,
+      // Comoving coordinates: the state's scale factor as last read (syncScale keeps it current).
+      scale: this.lastScale,
       selfGravity: this.selfGravity,
       masses: this.hasMasses ? this.nMasses : 0,
       amr: [this.slotsPerSide, this.n0 / BS, this.levels, this.layers],
@@ -1938,6 +1943,7 @@ export class AmrSim implements Simulation {
       this.dtStale = false;
     }
     this.primeBins(enc);
+    syncScale(enc, this.cfg, this.clock, this.params);
     const cycle = this.binsLive ? 1 << this.builtBins : 0;
     let done = 0;
     for (; done < count; done += cycle || 1) {
@@ -2026,6 +2032,7 @@ export class AmrSim implements Simulation {
       } else {
         this.cur = 1 - p;
       }
+      syncScale(enc, this.cfg, this.clock, this.params);
       this.encodeBurn(enc);
       this.stepsSinceFlag++;
       if (this.encodeFlags(enc)) {
@@ -2552,7 +2559,7 @@ export class AmrSim implements Simulation {
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0);
-      if (cosmologyOf(this.cfg)) withScale(diag, a);
+      if (cosmologyOf(this.cfg)) this.lastScale = withScale(diag, a).scale;
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
       // energy (E - KE there includes B^2 / 2).

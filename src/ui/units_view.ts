@@ -2,7 +2,8 @@
 
 import { fmt3 } from './diag_plot';
 import { meanMolecularWeight, COMPOSITIONS, type Composition } from '../units/composition';
-import { displayLabel, displayScale, kelvinPerCodeT, type Dim, type DisplaySystem, type Quantity, type UnitSystem } from '../units/units';
+import { comovingFactor } from '../cosmo';
+import { DIMS, displayLabel, displayScale, kelvinPerCodeT, type Dim, type DisplaySystem, type Quantity, type UnitSystem } from '../units/units';
 
 /** What a value measures: a quantity, a bare dimension, a temperature, or nothing (a pure number). */
 export type Measure = Quantity | Dim | 'temperature' | null;
@@ -38,19 +39,24 @@ export interface Readout {
   fmt(v: number, m: Measure): string;
 }
 
-export function readout(units: UnitSystem | undefined, composition: Composition | undefined, sys: DisplaySystem): Readout {
+/**
+ * `scale`: comoving coordinates, the scale factor of the state shown. Code values stay comoving;
+ * a physical system shows proper ones (src/cosmo.ts comovingFactor).
+ */
+export function readout(units: UnitSystem | undefined, composition: Composition | undefined, sys: DisplaySystem, scale?: number): Readout {
   const physical = !!units;
   const shown = physical && sys !== 'code';
   const mu = meanMolecularWeight(composition ?? COMPOSITIONS.solar);
-  const scale = (m: Measure) => (!shown || m === null ? 1 : m === 'temperature' ? kelvinPerCodeT(units!, mu) : displayScale(units, m, sys));
+  const proper = (m: Quantity | Dim) => (scale === undefined ? 1 : comovingFactor(typeof m === 'string' ? DIMS[m] : m, scale));
+  const factor = (m: Measure) => (!shown || m === null ? 1 : m === 'temperature' ? kelvinPerCodeT(units!, mu) : displayScale(units, m, sys) * proper(m));
   const label = (m: Measure) => (!shown || m === null ? '' : m === 'temperature' ? 'K' : displayLabel(units, m, sys));
   return {
     physical,
-    scale,
+    scale: factor,
     label,
     fmt: (v, m) => {
       const l = label(m);
-      return l ? `${fmt3(v * scale(m))} ${l}` : fmt3(v * scale(m));
+      return l ? `${fmt3(v * factor(m))} ${l}` : fmt3(v * factor(m));
     },
   };
 }

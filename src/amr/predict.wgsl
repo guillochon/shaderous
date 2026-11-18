@@ -10,6 +10,8 @@
 // with its own step, its ghosts included (per-block timesteps, amr/bins_on.wgsl).
 #include "hydro/common.wgsl"
 #include "gravity/ext_bind.wgsl"
+// (The expansion drag of comoving coordinates, gravity/frame_cosmo.wgsl, asks the equation of state.)
+#include <eos>
 #include <limiter>
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
@@ -140,6 +142,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
   let inv = inv_flat(wid, lix, 1);
   if (!inv.ok) { return; }
   g_dx = cell_dx(blk_dx(inv.slot), clock.ah);
+  if (cosmo_on()) { g_a3 = clock.a * clock.a * clock.a; }
   g_dt = blk_dt(inv.slot);
   let s = ghost_src(inv.slot, inv.l);
   if (s.kind == 2) { return; }

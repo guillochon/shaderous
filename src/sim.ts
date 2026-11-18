@@ -2,7 +2,7 @@
 import { FACE_KEYS, noWallVelocity, PERIODIC, REFLECT, type WallVelocity } from './problems/boundaries';
 import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareHelmholtz } from './eos/helmholtz';
-import { assemble } from './gpu/shaders';
+import { assemble, shaderFiles } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
@@ -13,7 +13,7 @@ import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
 import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
-import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
+import { comovingEosSlot, defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
 import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
@@ -349,7 +349,12 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     params,
     problem: sizedProblem(problem, params),
     eos: problem.eos,
-    eosParams: { ...defaultEosParams(), ...physicalEosParams(problemUnits(problem, params), problem.composition), ...problem.eosParams },
+    eosParams: {
+      ...defaultEosParams(),
+      ...physicalEosParams(problemUnits(problem, params), problem.composition),
+      ...problem.eosParams,
+      ...(problem.cosmology ? { comovingA3: problem.cosmology.aStart ** 3 } : {}),
+    },
     riemann: 'hllc',
     limiter: 'koren',
     // (An axisymmetric run keeps it: it solves for its potential in (R, z).)
@@ -455,7 +460,7 @@ export function cosmologyUnsupported(c: SimConfig): string | null {
   if (![...c.bcLo, ...c.bcHi].every((b) => b === PERIODIC)) return 'comoving coordinates need a periodic box';
   if (c.gravity !== 'off' && c.gravity !== 'periodic') return 'comoving coordinates take periodic self-gravity or none';
   if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in comoving coordinates';
-  if (c.eos !== 'ideal') return 'comoving coordinates take an ideal gas so far';
+  if (c.eos === 'helmholtz') return 'the tabulated stellar equation of state is not available in comoving coordinates';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in comoving coordinates';
   if (c.problem.mhd) return 'magnetic fields are not available in comoving coordinates yet';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available in comoving coordinates (each block would expand by its own a)';
@@ -474,7 +479,7 @@ export function shearUnsupported(c: SimConfig): string | null {
   const s = c.problem.shear;
   if (!s) return null;
   if (c.amrLevels > 0) return 'the adaptive mesh is not available for a shearing box (a block\u2019s neighbors across the boundary change with time)';
-  if (c.problem.mhd) return 'magnetic fields are not available in a shearing box yet';
+  if (c.problem.mhd && (c.resistivity > 0 || c.viscosity > 0)) return 'resistivity and viscosity are not available in a magnetized shearing box yet';
   if (c.bcLo[0] !== PERIODIC || c.bcHi[0] !== PERIODIC || c.bcLo[1] !== PERIODIC || c.bcHi[1] !== PERIODIC) return 'a shearing box is periodic along x (with the shear) and y';
   if (c.ndim === 3 && !s.stratified && (c.bcLo[2] !== PERIODIC || c.bcHi[2] !== PERIODIC)) return 'an unstratified shearing box is periodic along z';
   if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available in a shearing box';
@@ -539,7 +544,8 @@ export const burnSpec = (c: SimConfig): AnyBurnSpec | null => c.problem.burn?.(c
 /** The modules the hydro shaders are assembled with. */
 export function hydroSlots(c: SimConfig): Record<string, string> {
   return {
-    eos: EOS_MODULES[c.eos],
+    // Comoving coordinates: the module behind wrappers that convert to proper densities.
+    eos: cosmologyOf(c) ? comovingEosSlot(c.eos, shaderFiles) : EOS_MODULES[c.eos],
     riemann: `hydro/riemann/${c.riemann}.wgsl`,
     limiter: `hydro/limiters/${c.limiter}.wgsl`,
     cooling: COOLING_MODULES[c.cooling],
@@ -860,6 +866,18 @@ export function noHeat(d: GPUDevice): GPUTexture {
   return d.createTexture({ label: 'no nuclear heating', size: [1, 1, 1], dimension: '3d', format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
 }
 
+/** Where Params.cosmo.w (the state's scale factor, read by cosmo_a3 in hydro/common.wgsl) lies. */
+export const PARAM_SCALE_BYTE = (108 + 3) * 4;
+
+/**
+ * Comoving coordinates: copy the scale factor at the end of the last step (clock.a1) into
+ * Params.cosmo.w, so that passes without the clock (the timestep's rates, the diagnostics, the
+ * display) convert the equation of state at the state's own a. Encoded between passes.
+ */
+export function syncScale(enc: GPUCommandEncoder, c: SimConfig, clock: GPUBuffer, params: GPUBuffer): void {
+  if (cosmologyOf(c)) enc.copyBufferToBuffer(clock, 6 * 4, params, PARAM_SCALE_BYTE, 4);
+}
+
 /** Comoving coordinates: the state's scale factor from the clock (where the last step ended, a1). */
 export function withScale(d: Diagnostics, clock: Float32Array): Diagnostics {
   d.scale = clock[6];
@@ -929,7 +947,7 @@ export const PARAM_BYTES = 464;
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean },
+  x: { dims: number[]; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -977,7 +995,9 @@ export function packParams(
   f.set(rotationOf(c), 100);
   u.set([0, 1, 2].map((a) => (a === 0 && cylindrical(c) ? 2 : c.symmetry?.[a] ? 1 : 0)).concat(0), 104);
   const k = cosmologyOf(c);
-  f.set(k ? [k.omegaM, omegaK(k), k.omegaL, 1] : [0, 0, 0, 0], 108);
+  // The fourth is the scale factor of the state (cosmo_a3, hydro/common.wgsl): the CPU's latest
+  // here, and the clock's own copied in by syncScale after every step.
+  f.set(k ? [k.omegaM, omegaK(k), k.omegaL, x.scale ?? k.aStart] : [0, 0, 0, 0], 108);
   const sh = c.problem.shear;
   f.set(sh ? [sh.omega, sh.q, sh.stratified ? 1 : 0, 1] : [0, 0, 0, 0], 112);
   return buf;
@@ -1470,12 +1490,17 @@ export class Sim implements Simulation {
   }
 
   /** Push the current configuration to the GPU parameter block. */
+  /** Comoving coordinates: the scale factor the diagnostics last read from the clock. */
+  private lastScale: number | undefined;
+
   writeParams() {
     const c = this.cfg;
     const buf = packParams(c, {
       dims: [c.n, c.n, this.nz],
       dx: this.dx,
       rhoMean: this.rhoMean,
+      // Comoving coordinates: the state's scale factor as last read (syncScale keeps it current).
+      scale: this.lastScale,
       selfGravity: this.selfGravity,
       masses: this.nMasses,
       solids: this.solids,
@@ -1794,6 +1819,7 @@ export class Sim implements Simulation {
     // (A rotating frame needs the correction pass for its centrifugal kick and closing turn, and
     // comoving coordinates for the second half of the expansion drag.)
     const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0) || rotating(this.cfg) || !!cosmologyOf(this.cfg);
+    syncScale(enc, this.cfg, this.clock, this.params);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = beginPass(enc);
@@ -1863,6 +1889,7 @@ export class Sim implements Simulation {
         this.speciesCur = 1 - this.speciesCur;
       }
       pass.end();
+      syncScale(enc, this.cfg, this.clock, this.params);
     }
     return count;
   }
@@ -2124,7 +2151,7 @@ export class Sim implements Simulation {
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.nMasses);
-      if (cosmologyOf(this.cfg)) withScale(diag, a);
+      if (cosmologyOf(this.cfg)) this.lastScale = withScale(diag, a).scale;
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
       // energy (E - KE there includes B^2 / 2).

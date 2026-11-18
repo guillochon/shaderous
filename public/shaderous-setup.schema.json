@@ -752,11 +752,25 @@
        "description": "Redshift the run stops at (it sets the end time)",
        "minimum": 0,
        "maximum": 10000
+      },
+      "h": {
+       "type": "number",
+       "title": "Hubble constant h",
+       "description": "H0 in units of 100 km/s/Mpc, for the physical units a box size gives",
+       "minimum": 0.1,
+       "maximum": 2
+      },
+      "boxMpc": {
+       "type": "number",
+       "title": "Box size (Mpc/h)",
+       "description": "The box’s comoving side in Mpc/h. With it the run has physical units, and the readouts show proper densities, pressures and lengths at the current scale factor. Left out, the run is scale free",
+       "minimum": 0,
+       "maximum": 100000
       }
      },
      "additionalProperties": false,
      "title": "Comoving coordinates",
-     "description": "An expanding universe: positions comoving, densities comoving (mean 1), velocities peculiar, times in 1/H0 from the starting redshift. G follows from the matter density. A periodic box of ideal gas, with or without self-gravity"
+     "description": "An expanding universe: positions comoving, densities comoving (mean 1), velocities peculiar, times in 1/H0 from the starting redshift. G follows from the matter density. A periodic box of gas, with or without self-gravity"
     },
     "shear": {
      "type": "object",
@@ -3269,6 +3283,42 @@
       ],
       "additionalProperties": false,
       "description": "The background flow of a shearing sheet, v_y = -q Omega x, with a small density wave cos(kx x + ky y) on it (kx and ky in wavelengths across the box). A leading wave (kx < 0) is swung to trailing by the shear and amplified on the way. Needs physics.shear."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Shearing box",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "shearing-noise"
+       },
+       "noise": {
+        "type": "number",
+        "title": "Velocity noise",
+        "default": 0.001,
+        "minimum": 0,
+        "maximum": 0.5
+       },
+       "pressure": {
+        "type": "number",
+        "title": "Pressure",
+        "default": 0.6,
+        "minimum": 1e-8,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "The background flow of a shearing box, v_y = -q Omega x, in gas of uniform density 1 and pressure, with small random velocities on it (a fraction of the sound speed) to seed instabilities such as the magnetorotational. Needs physics.shear."
      },
      {
       "type": "object",

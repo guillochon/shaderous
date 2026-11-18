@@ -1,7 +1,6 @@
 // Volume, slice and projection rendering on the simulation's own device.
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
-import { EOS_MODULES } from '../eos/eos';
 import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
@@ -455,7 +454,7 @@ export class Renderer {
    */
   fieldPipelines(fieldShader: string, cfg: SimConfig, atlas: boolean) {
     const d = this.device;
-    const code = assemble(fieldShader, { eos: EOS_MODULES[cfg.eos], cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp });
+    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp });
     return Promise.all([
       computePipeline(d, code, 'field'),
       computePipeline(d, code, 'slice', undefined, 'slice'),

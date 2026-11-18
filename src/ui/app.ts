@@ -921,7 +921,9 @@ let unitSys: DisplaySystem = (() => {
   }
 })();
 /** How the current run's values are shown. */
-const units = (): Readout => readout(problemUnits(cfg.problem, cfg.params), cfg.problem.composition, unitSys);
+// (Comoving coordinates: physical values are proper ones at the scale factor last read.)
+const units = (): Readout =>
+  readout(problemUnits(cfg.problem, cfg.params), cfg.problem.composition, unitSys, cfg.problem.cosmology ? (lastDiag?.scale ?? cfg.problem.cosmology.aStart) : undefined);
 /** The name of the field on view. */
 const viewFieldName = () =>
   view.field === MASS_FRACTION_FIELD ? `X(${speciesLabel(cfg.problem.species![view.species])})` : projecting() && view.field === 0 ? 'Column density' : FIELDS[view.field];

@@ -11,6 +11,6 @@ fn frame_close(u1: vec4<f32>, u2: vec4<f32>, tau: f32) -> FrameState {
   return FrameState(vec4<f32>(u1.x, rot_turn(u1.yzw, tau)), u2);
 }
 // -2 Omega x v: first order is enough in the predictor. The pressure is untouched.
-fn frame_predict(v: vec3<f32>, p: f32) -> vec4<f32> {
+fn frame_predict(v: vec3<f32>, rho: f32, p: f32) -> vec4<f32> {
   return vec4<f32>(-2.0 * cross(P.rot.xyz, v), 0.0);
 }

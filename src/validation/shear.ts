@@ -2,19 +2,64 @@
 // through validation/frames.ts.
 import { all, PERIODIC, type Prim, type Problem } from '../problems/types';
 import type { Sim } from '../sim';
+import type { MhdPasses } from '../mhd/mhd';
 import { withSim, type TestDef } from './tests';
 
 const OMEGA = 1;
 const Q = 1.5;
 
 /** A 2D shearing sheet (Keplerian, Omega = 1, box 1) whose state is the background flow v_y = -q Omega x plus `extra`. */
-function sheet(tEnd: number, extra: (x: number, y: number) => Partial<Prim> = () => ({})): Problem {
+function sheet(tEnd: number, extra: (x: number, y: number, z: number) => Partial<Prim> = () => ({}), over: Partial<Problem> = {}): Problem {
   return {
     id: 'shearing-sheet', label: 'Shearing sheet', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
     bcLo: all(PERIODIC), bcHi: all(PERIODIC), gravity: 'off', G: 0, box: 1, tEnd, supports2d: true,
     shear: { omega: OMEGA, q: Q },
-    init: () => (x, y) => ({ rho: 1, vx: 0, vy: -Q * OMEGA * x, vz: 0, p: 1, s: 0, ...extra(x, y) }),
+    init: () => (x, y, z) => ({ rho: 1, vx: 0, vy: -Q * OMEGA * x, vz: 0, p: 1, s: 0, ...extra(x, y, z) }),
+    ...over,
   };
+}
+
+/** The face field of a run (mhd/mhd.ts initialFaces' layout: (n + 1)^2 (nz + 1) texels of (b_x, b_y, b_z, 0)). */
+async function faces(sim: Sim): Promise<Float32Array> {
+  return (sim as unknown as { mhd: MhdPasses }).mhd.readFaces(sim.cur);
+}
+
+/**
+ * The linear compressive shearing wave (Johnson & Gammie 2005) in float64: the amplitudes of
+ * delta = drho / rho, u_x and u_y of a wave exp(i (k_x(t) x + k_y y)), k_x(t) = k_x0 + q Omega k_y t,
+ * at times `ts`, from delta = A and u = 0 at t = 0. Adiabatic, sound speed c.
+ */
+function shearingWave(kx0: number, ky: number, c: number, A: number, ts: number[]): { re: number; im: number }[] {
+  type C = [number, number];
+  // State: [delta, ux, uy] complex.
+  const f = (t: number, y: C[]): C[] => {
+    const kx = kx0 + Q * OMEGA * ky * t;
+    const [d, ux, uy] = y;
+    // -i z = (z.im, -z.re)
+    const mi = (z: C, s: number): C => [s * z[1], -s * z[0]];
+    const div = mi([kx * ux[0] + ky * uy[0], kx * ux[1] + ky * uy[1]], 1);
+    const px = mi(d, kx * c * c);
+    const py = mi(d, ky * c * c);
+    return [div, [2 * OMEGA * uy[0] + px[0], 2 * OMEGA * uy[1] + px[1]], [-(2 - Q) * OMEGA * ux[0] + py[0], -(2 - Q) * OMEGA * ux[1] + py[1]]];
+  };
+  const add = (y: C[], k: C[], h: number): C[] => y.map((z, i) => [z[0] + h * k[i][0], z[1] + h * k[i][1]] as C);
+  let y: C[] = [[A, 0], [0, 0], [0, 0]];
+  let t = 0;
+  const out: { re: number; im: number }[] = [];
+  for (const te of ts) {
+    const n = Math.max(1, Math.ceil((te - t) / 1e-4));
+    const h = (te - t) / n;
+    for (let i = 0; i < n; i++) {
+      const k1 = f(t, y);
+      const k2 = f(t + h / 2, add(y, k1, h / 2));
+      const k3 = f(t + h / 2, add(y, k2, h / 2));
+      const k4 = f(t + h, add(y, k3, h));
+      y = y.map((z, j) => [z[0] + (h / 6) * (k1[j][0] + 2 * k2[j][0] + 2 * k3[j][0] + k4[j][0]), z[1] + (h / 6) * (k1[j][1] + 2 * k2[j][1] + 2 * k3[j][1] + k4[j][1])] as C);
+      t += h;
+    }
+    out.push({ re: y[0][0], im: y[0][1] });
+  }
+  return out;
 }
 
 /** Largest departure of the velocity from the background flow, over the grid. */
@@ -87,6 +132,155 @@ export const SHEAR_TESTS: TestDef[] = [
           density_min: lo, density_max: hi,
         };
         return { pass: m.mass_change < 1e-6 && m.blob_change < 1e-6 && m.x_momentum < 1e-6 && lo > 0.9 && hi < 2.1, metrics: m };
+      });
+    },
+  },
+  {
+    id: 'shear-wave',
+    name: 'Shearing box: a compressive shearing wave',
+    criterion: 'A leading density wave of 1% (k_x = -2, k_y = 1 wavelengths across the box, c_s = 0.13, Keplerian sheet, 2D, 128^2) swung to trailing by the shear (Johnson & Gammie 2005): its amplitude, projected on the sheared wave exp(i (k_x(t) x + k_y y)), within 3% of the float64 linear solution at eight times to t = 4 (swing at t = 1.33, k_x = 4 at the end), and its phase within 0.05 rad',
+    async run(gpu) {
+      const A = 0.01;
+      const kx0 = -2 * 2 * Math.PI;
+      const ky = 2 * Math.PI;
+      const gamma = 5 / 3;
+      const p0 = 0.01;
+      const c = Math.sqrt(gamma * p0);
+      const ts = [0.5, 1, 1.5, 2, 2.5, 3, 3.5, 4];
+      const want = shearingWave(kx0, ky, c, A, ts);
+      // Adiabatic: the pressure follows the density, p = p0 (1 + gamma delta). (Uniform pressure
+      // would be an entropy wave, which the shear only carries.)
+      const problem = sheet(0, (x, y) => ({ rho: 1 + A * Math.cos(kx0 * x + ky * y), p: p0 * (1 + gamma * A * Math.cos(kx0 * x + ky * y)) }));
+      return withSim(gpu, problem, 128, { ndim: 2 }, async (sim) => {
+        const n = sim.cfg.n;
+        let amp = 0;
+        let phase = 0;
+        const m: Record<string, number> = {};
+        for (let s = 0; s < ts.length; s++) {
+          sim.cfg.tEnd = ts[s];
+          sim.writeParams();
+          await sim.runToEnd();
+          const t = (await sim.diagnostics()).t;
+          const kx = kx0 + Q * OMEGA * ky * t;
+          const { u1 } = await sim.readState();
+          // delta-hat = (2 / N) sum delta exp(-i (kx x + ky y)): the cos wave is half this mode.
+          let re = 0;
+          let im = 0;
+          for (let j = 0; j < n; j++)
+            for (let i = 0; i < n; i++) {
+              const x = (i + 0.5) / n - 0.5;
+              const y = (j + 0.5) / n - 0.5;
+              const d = u1[4 * (j * n + i)] - 1;
+              const ph = kx * x + ky * y;
+              re += d * Math.cos(ph);
+              im -= d * Math.sin(ph);
+            }
+          re *= 2 / (n * n);
+          im *= 2 / (n * n);
+          const w = want[s];
+          const ampErr = Math.abs(Math.hypot(re, im) / Math.hypot(w.re, w.im) - 1);
+          let dph = Math.atan2(im, re) - Math.atan2(w.im, w.re);
+          while (dph > Math.PI) dph -= 2 * Math.PI;
+          while (dph < -Math.PI) dph += 2 * Math.PI;
+          amp = Math.max(amp, ampErr);
+          phase = Math.max(phase, Math.abs(dph));
+          m[`amplitude_t${ts[s]}`] = Math.hypot(re, im) / A;
+          m[`expected_t${ts[s]}`] = Math.hypot(w.re, w.im) / A;
+        }
+        m.amplitude_error = amp;
+        m.phase_error = phase;
+        return { pass: amp < 0.03 && phase < 0.05, metrics: m };
+      });
+    },
+  },
+  {
+    id: 'shear-flux',
+    name: 'Magnetized shearing box: net flux and divergence',
+    criterion: 'A Keplerian box (3D, 16^3) with a net vertical field of 0.1, a periodic field from A_y = 0.02 cos(2 pi x) sin(2 pi z) / 2 pi crossing the x faces, and a velocity kick: over two orbits the net vertical flux (the mean b_z) and the net radial flux (the mean b_x) keep to 1e-6 of the vertical field, div B stays at round-off (below 1e-5), and the mass keeps to 1e-6',
+    async run(gpu) {
+      const k = 2 * Math.PI;
+      const problem = sheet(4 * Math.PI, (x, y, z) => ({ vx: 0.05 * Math.sin(k * y) * Math.sin(k * z), vz: 0.05 * Math.sin(k * x) }), {
+        mhd: {
+          potential: () => (x, _y, z) => [0, (0.02 * Math.cos(k * x) * Math.sin(k * z)) / k, 0],
+          face: () => (axis) => (axis === 2 ? 0.1 : 0),
+        },
+      });
+      return withSim(gpu, problem, 16, {}, async (sim) => {
+        const n = sim.cfg.n;
+        const net = (f: Float32Array, a: number) => {
+          let s = 0;
+          for (let kk = 0; kk < n; kk++)
+            for (let j = 0; j < n; j++)
+              for (let i = 0; i < n; i++) s += f[4 * ((kk * (n + 1) + j) * (n + 1) + i) + a];
+          return s / n ** 3;
+        };
+        const f0 = await faces(sim);
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const f1 = await faces(sim);
+        const d1 = await sim.diagnostics();
+        const m = {
+          bz_drift: Math.abs(net(f1, 2) - net(f0, 2)) / 0.1,
+          bx_drift: Math.abs(net(f1, 0) - net(f0, 0)) / 0.1,
+          net_bz: net(f1, 2),
+          net_by: net(f1, 1),
+          div_b: d1.magnetic!.divB,
+          mass_change: Math.abs(d1.mass / d0.mass - 1),
+          steps: d1.steps,
+        };
+        return { pass: m.bz_drift < 1e-6 && m.bx_drift < 1e-6 && m.div_b < 1e-5 && m.mass_change < 1e-6, metrics: m };
+      });
+    },
+  },
+  {
+    id: 'shear-mri',
+    name: 'Magnetized shearing box: the magnetorotational instability',
+    criterion: 'A Keplerian box (3D, 32^3, beta = 50) threaded by the vertical field whose channel mode of one wavelength across the box is the fastest (k v_A = sqrt(15/16) Omega), seeded with v_x = 1e-4 c_s sin(kz): the mode B_x(k) grows at 0.75 Omega within 5%, fitted from t = 3 to t = 6',
+    async run(gpu) {
+      const k = 2 * Math.PI;
+      const vA = Math.sqrt(15 / 16) / k;
+      const p0 = 0.6;
+      const cs = Math.sqrt((5 / 3) * p0);
+      const problem = sheet(0, (_x, _y, z) => ({ p: p0, vx: 1e-4 * cs * Math.sin(k * z) }), {
+        mhd: { face: () => (axis) => (axis === 2 ? vA : 0) },
+      });
+      return withSim(gpu, problem, 32, {}, async (sim) => {
+        const n = sim.cfg.n;
+        const mode = async () => {
+          const f = await faces(sim);
+          let sn = 0;
+          let cn = 0;
+          for (let kk = 0; kk < n; kk++) {
+            let bx = 0;
+            for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) bx += f[4 * ((kk * (n + 1) + j) * (n + 1) + i)];
+            bx /= n * n;
+            const z = (kk + 0.5) / n - 0.5;
+            sn += bx * Math.sin(k * z);
+            cn += bx * Math.cos(k * z);
+          }
+          return Math.hypot(sn, cn) * (2 / n);
+        };
+        const ts: number[] = [];
+        const ls: number[] = [];
+        for (let i = 0; i <= 6; i++) {
+          sim.cfg.tEnd = 3 + 0.5 * i;
+          sim.writeParams();
+          await sim.runToEnd();
+          ts.push((await sim.diagnostics()).t);
+          ls.push(Math.log(await mode()));
+        }
+        // Least-squares slope of ln |B_x(k)| against t.
+        const tm = ts.reduce((a, b) => a + b) / ts.length;
+        const lm = ls.reduce((a, b) => a + b) / ls.length;
+        let num = 0;
+        let den = 0;
+        ts.forEach((t, i) => {
+          num += (t - tm) * (ls[i] - lm);
+          den += (t - tm) ** 2;
+        });
+        const rate = num / den / OMEGA;
+        const m = { growth_rate: rate, expected: 0.75, error: Math.abs(rate / 0.75 - 1), amplitude_end: Math.exp(ls[ls.length - 1]), steps: (await sim.diagnostics()).steps };
+        return { pass: m.error < 0.05, metrics: m };
       });
     },
   },

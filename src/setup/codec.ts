@@ -85,7 +85,7 @@ const DOCUMENT: Record<string, Schema> = {
     cooling: choice('physics.cooling'), coolParams: { object: {}, open: 'number' }, viscosity: 'number', conductivity: 'number', resistivity: 'number', driving: obj({ accel: 'number', tau: 'number', kMin: 'number', kMax: 'number', zeta: 'number', seed: 'number' }),
     riemann: choice('physics.riemann'), limiter: choice('physics.limiter'), cfl: 'number',
     floors: obj({ rho: 'number', p: 'number' }), fluff: obj({ rho: 'number', u: 'number', v: 'number', va: 'number' }),
-    frame: choice('physics.frame'), rotation: obj({ omega: 'vec3', centrifugal: 'boolean' }), cosmology: obj({ omegaM: 'number', omegaL: 'number', zStart: 'number', zEnd: 'number' }), shear: obj({ omega: 'number', q: 'number', stratified: 'boolean' }), jeansFloor: 'boolean', jeansCells: 'int', vcycles: 'int', gravEnergyFlux: 'boolean',
+    frame: choice('physics.frame'), rotation: obj({ omega: 'vec3', centrifugal: 'boolean' }), cosmology: obj({ omegaM: 'number', omegaL: 'number', zStart: 'number', zEnd: 'number', h: 'number', boxMpc: 'number' }), shear: obj({ omega: 'number', q: 'number', stratified: 'boolean' }), jeansFloor: 'boolean', jeansCells: 'int', vcycles: 'int', gravEnergyFlux: 'boolean',
     composition: { any: [choice('physics.composition'), obj({ name: 'string', X: 'fractions', ionization: { enum: ['full', 'neutral'] } })] },
     species: { any: [{ enum: ['aprox13'] }, { array: 'string', max: 64 }] }, speciesGamma: 'fractions',
     burn: { any: [obj({ network: choice('physics.burn.network'), inShocks: 'boolean', limiter: 'number' }), obj({ fuel: 'string', ash: 'string', q: 'number', ea: 'number', k: 'number', inShocks: 'boolean' })] },

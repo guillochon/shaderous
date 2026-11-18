@@ -7,6 +7,9 @@
  * equation's G is 3 Omega_m / (8 pi). The clock starts at t = 0 at a = aStart.
  */
 
+import { ASTRO, SI } from './units/constants';
+import type { UnitSystem } from './units/units';
+
 export interface Cosmology {
   /** matter density today, in units of the critical density */
   omegaM: number;
@@ -14,6 +17,41 @@ export interface Cosmology {
   omegaL: number;
   /** scale factor at t = 0 */
   aStart: number;
+  /** the Hubble constant in units of 100 km/s/Mpc (physical units only) */
+  h?: number;
+  /** the box's comoving side in Mpc/h, which gives the run physical units (cosmoUnits) */
+  boxMpc?: number;
+}
+
+/**
+ * The physical units of a run in comoving coordinates whose box has a size (Cosmology.boxMpc):
+ * comoving length in box / boxMpc Mpc/h, time in 1/H0, and mass such that a code density of 1
+ * is the mean matter density (omegaM times the critical density today), which is what makes
+ * G = 3 omegaM / (8 pi) in code units. Velocities (proper, peculiar) are then in units of
+ * H0 times the length unit. Densities and pressures in the state are comoving; the display
+ * shows proper ones (comovingFactor).
+ */
+export function cosmoUnits(c: Cosmology, box: number): UnitSystem | undefined {
+  if (!c.boxMpc) return undefined;
+  const h = c.h ?? 0.7;
+  const H0 = (100 * h * 1e3) / (1e6 * ASTRO.pc); // 1/s
+  const length = (c.boxMpc * 1e6 * ASTRO.pc) / h / box;
+  const rhoCrit = (3 * H0 * H0) / (8 * Math.PI * SI.G);
+  return { name: `${c.boxMpc} Mpc/h box`, length, mass: c.omegaM * rhoCrit * length ** 3, time: 1 / H0 };
+}
+
+/**
+ * The factor from a comoving code value of the given dimensions to the proper one at scale
+ * factor a, as the state holds them (docs/numerics.md section 22): lengths are comoving (times
+ * a), densities, pressures and energy densities comoving (a^-3 times: those with a mass and a
+ * length to the -1 or -3, that is, per unit volume); velocities, specific energies,
+ * temperatures, masses and times are as they are.
+ */
+export function comovingFactor(dim: readonly number[], a: number): number {
+  const [m, l, t] = dim;
+  if (m === 0 && l === 1 && t === 0) return a; // length
+  if (m === 1 && (l === -3 || l === -1)) return a ** -3; // per unit volume: density, pressure, energy density
+  return 1;
 }
 
 /** Curvature: what makes the densities sum to 1. */

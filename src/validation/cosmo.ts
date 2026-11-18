@@ -151,6 +151,134 @@ export const COSMO_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'cosmo-eos',
+    name: 'Comoving coordinates: gas and radiation expanding',
+    criterion: 'Uniform gas + radiation at rest (Einstein-de Sitter, a from 0.1 to 0.3, radiation pressure equal to the gas pressure at the start): its temperature at the end is within 1e-4 of a float64 integration of de = -p d(1/rho) at the proper density, on the uniform grid and on blocks',
+    async run(gpu) {
+      const k: Cosmology = { omegaM: 1, omegaL: 0, aStart: 0.1 };
+      const gamma = 5 / 3;
+      const R = 1;
+      const arad = 3000;
+      const T0 = 1;
+      // Proper quantities at the start: density 1 / a^3 (the mean comoving density is 1).
+      const eos = makeEos('gas_radiation', { ...defaultEosParams(), gamma, R, arad });
+      const p0 = k.aStart ** 3 * (R * T0 / k.aStart ** 3 + (arad * T0 ** 4) / 3);
+      const p = universe(k, 0.3, () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: p0, s: 0 }), { eos: 'gas_radiation', eosParams: { gamma, R, arad } });
+      // The float64 reference: dT/da from de/da = -3 a^2 p with e = R T / (gamma - 1) + arad T^4 a^3
+      // (per unit mass, at proper density 1 / a^3) and p = R T / a^3 + arad T^4 / 3.
+      const dTda = (a: number, T: number) => {
+        const pr = (R * T) / a ** 3 + (arad * T ** 4) / 3;
+        return (-3 * a * a * pr - 3 * a * a * arad * T ** 4) / (R / (gamma - 1) + 4 * arad * T ** 3 * a ** 3);
+      };
+      const reference = (aEnd: number) => {
+        let a = k.aStart;
+        let T = T0;
+        const n = 20000;
+        const h = (aEnd - a) / n;
+        for (let i = 0; i < n; i++) {
+          const k1 = dTda(a, T);
+          const k2 = dTda(a + h / 2, T + (h / 2) * k1);
+          const k3 = dTda(a + h / 2, T + (h / 2) * k2);
+          const k4 = dTda(a + h, T + h * k3);
+          T += (h / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+          a += h;
+        }
+        return T;
+      };
+      const m: Record<string, number> = {};
+      const check = async (sim: Sim | AmrSim, tag: string) => {
+        await sim.runToEnd();
+        const a = (await sim.diagnostics()).scale!;
+        const u2 = tag === 'uniform' ? (await (sim as Sim).readState()).u2 : (await (sim as AmrSim).readLeaves()).u2;
+        let s = 0;
+        for (let q = 0; q < u2.length; q += 4) s += u2[q + 1];
+        const eint = s / (u2.length / 4);
+        const T = eos.temperature(1 / a ** 3, eint / a ** 3);
+        const want = reference(a);
+        m[`${tag}_a`] = a;
+        m[`${tag}_T`] = T;
+        m[`${tag}_reference`] = want;
+        m[`${tag}_error`] = Math.abs(T / want - 1);
+      };
+      await withSim(gpu, p, 16, { ndim: 2 }, (sim) => check(sim, 'uniform'));
+      await withAmr(gpu, p, 32, { ndim: 2, amrLevels: 0 }, (sim) => check(sim, 'blocks'));
+      // How far an ideal gas's scaling alone would be off: the test's power to tell them apart.
+      m.gas_only_T = T0 * (k.aStart / m.uniform_a) ** 2;
+      return { pass: m.uniform_error < 1e-4 && m.blocks_error < 1e-4, metrics: m };
+    },
+  },
+  {
+    id: 'cosmo-wave',
+    name: 'Comoving coordinates: a sound wave in an expanding box',
+    criterion: 'A traveling sound wave of 0.1% (gamma = 5/3, no gravity, Einstein-de Sitter, a from 0.1 to 0.3, 64 cells a wavelength): its comoving wavelength stays that of the box (99.9% of the density variance in the one mode) while its phase advances by the integral of k c_s / a dt, with the proper sound speed falling as 1/a, within 1% (it turns some 25 radians, so a gradient missing its 1/a would be off by tens of percent)',
+    async run(gpu) {
+      const k: Cosmology = { omegaM: 1, omegaL: 0, aStart: 0.1 };
+      const gamma = 5 / 3;
+      const c0 = 15;
+      const A = 1e-3;
+      const kw = 2 * Math.PI;
+      const p0 = (c0 * c0) / gamma;
+      // A wave moving toward +x: delta = A sin(kx - phi), v = c_s delta (proper, peculiar).
+      const p = universe(k, 0.3, () => (x) => {
+        const d = A * Math.sin(kw * x);
+        return { rho: 1 + d, vx: c0 * d, vy: 0, vz: 0, p: p0 * (1 + gamma * d), s: 0 };
+      }, { eosParams: { gamma } });
+      // The phase the wave should have turned through by scale factor a: dphi/da = k c_s / (a^2 H).
+      const phaseAt = (a1: number) => {
+        const n = 20000;
+        const h = (a1 - k.aStart) / n;
+        const f = (a: number) => (kw * c0 * k.aStart) / a / (a * a * hubble(k, a));
+        let s = 0;
+        for (let i = 0; i < n; i++) {
+          const a = k.aStart + i * h;
+          s += (h / 6) * (f(a) + 4 * f(a + h / 2) + f(a + h));
+        }
+        return s;
+      };
+      const m: Record<string, number> = {};
+      await withSim(gpu, p, 64, { ndim: 2 }, async (sim) => {
+        const n = sim.cfg.n;
+        let phase = 0;
+        let last = 0;
+        let fraction = 1;
+        const stops: number[] = [];
+        for (let i = 1; i <= 40; i++) stops.push(k.aStart + (0.3 - k.aStart) * (i / 40));
+        await through(sim, k, stops, async () => {
+          const u1 = (await sim.readState()).u1;
+          // The density along x (row j = 0) and its one Fourier mode.
+          let c = 0;
+          let s = 0;
+          let mean = 0;
+          for (let i = 0; i < n; i++) mean += u1[4 * i] / n;
+          let variance = 0;
+          for (let i = 0; i < n; i++) {
+            const d = u1[4 * i] - mean;
+            const x = (i + 0.5) / n - 0.5; // the box is centered on the origin
+            c += (d * Math.cos(kw * x) * 2) / n;
+            s += (d * Math.sin(kw * x) * 2) / n;
+            variance += (d * d) / n;
+          }
+          // delta = A sin(kx - phi) = A (sin kx cos phi - cos kx sin phi).
+          const ph = Math.atan2(-c, s);
+          let step = ph - last;
+          while (step < -Math.PI) step += 2 * Math.PI;
+          while (step > Math.PI) step -= 2 * Math.PI;
+          phase += step;
+          last = ph;
+          fraction = Math.min(fraction, (0.5 * (c * c + s * s)) / variance);
+        });
+        const d = await sim.diagnostics();
+        m.a = d.scale!;
+        m.steps = d.steps;
+        m.phase = phase;
+        m.phase_expected = phaseAt(d.scale!);
+        m.phase_error = Math.abs(phase / m.phase_expected - 1);
+        m.one_mode_fraction = fraction;
+      });
+      return { pass: m.phase_error < 0.01 && m.one_mode_fraction > 0.999, metrics: m };
+    },
+  },
+  {
     id: 'cosmo-growth',
     name: 'Comoving coordinates: linear growth of a density wave',
     criterion: 'A cold plane wave of 0.2% in density, on its growing mode (Einstein-de Sitter, self-gravity, 32^3): from a = 0.01 to 0.1 its amplitude grows as a, within 1%',

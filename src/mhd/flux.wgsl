@@ -72,21 +72,26 @@ fn load_b(c: vec3<i32>) -> vec3<f32> {
 #include "mhd/diffusion.wgsl"
 
 // The state of a cell at the start of the step, as mq_load reads the stage's.
+fn mq_start_at(m: Mapped, c: vec3<i32>) -> MQ {
+  let w = prim_from_cons(textureLoad(S1, c, 0), textureLoad(S2, c, 0));
+  let n = mhd_dims();
+  let up = c + 1;
+  let wrap = vec3<bool>(up.x >= n.x && periodic_axis(0), up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
+  let hi = select(up, vec3<i32>(0), wrap);
+  let lo = textureLoad(SF, c, 0);
+  let B = 0.5 * vec3<f32>(
+    lo.x + textureLoad(SF, vec3<i32>(hi.x, c.y, c.z), 0).x,
+    lo.y + textureLoad(SF, vec3<i32>(c.x, hi.y, c.z), 0).y,
+    lo.z + textureLoad(SF, vec3<i32>(c.x, c.y, hi.z), 0).z,
+  );
+  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), B * m.bflip);
+}
 fn mq_start(c: vec3<i32>) -> MQ {
   let m = bc_map(c);
   comp_use(comp_tex(m.c));
-  let w = prim_from_cons(textureLoad(S1, m.c, 0), textureLoad(S2, m.c, 0));
-  let n = mhd_dims();
-  let up = m.c + 1;
-  let wrap = vec3<bool>(up.x >= n.x && P.bc_lo[0] == 0u, up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
-  let hi = select(up, vec3<i32>(0), wrap);
-  let lo = textureLoad(SF, m.c, 0);
-  let B = 0.5 * vec3<f32>(
-    lo.x + textureLoad(SF, vec3<i32>(hi.x, m.c.y, m.c.z), 0).x,
-    lo.y + textureLoad(SF, vec3<i32>(m.c.x, hi.y, m.c.z), 0).y,
-    lo.z + textureLoad(SF, vec3<i32>(m.c.x, m.c.y, hi.z), 0).z,
-  );
-  return MQ(vec4<f32>(w.w1.x, bc_velocity(w.w1.yzw, m)), vec4<f32>(w.w2.x, w.w2.z, w.w2.y, w.w2.w), B * m.bflip);
+  let q = mq_start_at(m, m.c);
+  if (shear_ghost(c)) { return mq_mix(q, mq_start_at(m, shear_next(m.c)), shear_frac(c)); }
+  return q;
 }
 
 // The flux through the lower face along `axis` of cell t.
@@ -138,6 +143,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(vec3<i32>(gid) >= fd)) { return; }
   g_dx = P.dx;
   g_dt = clock.dt;
+  // A shearing box: the offset of the x faces for the stage's state (the start's, or the half
+  // step's in stage 2).
+  if (shear_on()) { g_shear = select(clock.shear, shear_half(clock.shear, clock.dt), STAGE == 2u) / P.dx; }
   let t = vec3<i32>(gid) + flux_first();
   let n = mhd_dims();
   let axes = select(3, 2, P.dims.z == 1u);

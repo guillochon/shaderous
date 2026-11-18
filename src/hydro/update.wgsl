@@ -98,7 +98,7 @@ fn shear_boost(f: Flux, u: f32) -> Flux {
 fn shear_face(c: vec3<i32>, own: Flux, upper: bool) -> Flux {
   let ny = i32(P.dims.y);
   // Where this face lies on the other side, in cells along y, half a step on.
-  let J = f32(c.y) + select(g_shear_h, -g_shear_h, upper);
+  let J = f32(c.y) + select(-g_shear_h, g_shear_h, upper);
   let s = floor(J);
   let e = J - s;
   let j0 = ((i32(s) % ny) + ny) % ny;

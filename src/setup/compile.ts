@@ -76,7 +76,9 @@ const boxOf = (spec: SetupSpec): number => spec.domain?.box ?? 1;
 export function cosmologyOfSetup(spec: SetupSpec): Cosmology | null {
   const c = spec.physics?.cosmology;
   if (!c) return null;
-  return { omegaM: c.omegaM ?? 1, omegaL: c.omegaL ?? 0, aStart: 1 / (1 + (c.zStart ?? 99)) };
+  const k: Cosmology = { omegaM: c.omegaM ?? 1, omegaL: c.omegaL ?? 0, aStart: 1 / (1 + (c.zStart ?? 99)) };
+  if (c.boxMpc !== undefined) Object.assign(k, { boxMpc: c.boxMpc, h: c.h ?? 0.7 });
+  return k;
 }
 
 /** The setup's units and G. Units that follow a part's quantity need the bodies, which need G. */

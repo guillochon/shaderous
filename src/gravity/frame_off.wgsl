@@ -13,6 +13,6 @@ fn frame_close(u1: vec4<f32>, u2: vec4<f32>, tau: f32) -> FrameState {
   return FrameState(u1, u2);
 }
 // For the predictor's half step: the frame's rates of change of the velocity and the pressure.
-fn frame_predict(v: vec3<f32>, p: f32) -> vec4<f32> {
+fn frame_predict(v: vec3<f32>, rho: f32, p: f32) -> vec4<f32> {
   return vec4<f32>(0.0);
 }
