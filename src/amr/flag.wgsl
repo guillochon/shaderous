@@ -100,7 +100,31 @@ fn lohner(c: vec3<i32>) -> f32 {
     den += vec2<f32>(s.y * s.y, s.w * s.w);
   }
   let chi = sqrt(num / max(den, vec2<f32>(1e-30)));
-  return max(chi.x, chi.y);
+  var ind = max(chi.x, chi.y);
+  // A liquid's density and pressure are nearly uniform whatever it does: there the same
+  // indicator on the velocity's components finds its shear layers and the edges of its
+  // vortices (plans/incompressible.md 5.7). Ripples are measured against the largest speed the
+  // run started with (P.ohm.z), so that gas at rest, whose velocity is round-off, asks for nothing.
+  if (p_signed() && P.ohm.z > 0.0) {
+    let v0 = textureLoad(W1, c, 0).yzw;
+    var nv = 0.0;
+    var dv = 0.0;
+    for (var a = 0; a < axes; a++) {
+      var e = vec3<i32>(0);
+      e[a] = 1;
+      let wp = textureLoad(W1, c + e, 0);
+      let wm = textureLoad(W1, c - e, 0);
+      if (wp.x < 0.0 || wm.x < 0.0) { continue; }
+      let s2 = wp.yzw - 2.0 * v0 + wm.yzw;
+      // (A velocity has no magnitude of its own to measure a ripple against, as a density has:
+      // the floor is the run's speed alone.)
+      let d1 = abs(wp.yzw - v0) + abs(v0 - wm.yzw) + EPS * 4.0 * P.ohm.z;
+      nv += dot(s2, s2);
+      dv += dot(d1, d1);
+    }
+    ind = max(ind, sqrt(nv / max(dv, 1e-30)));
+  }
+  return ind;
 }
 
 @compute @workgroup_size(8, 8, 4)

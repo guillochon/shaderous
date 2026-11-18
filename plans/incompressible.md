@@ -836,8 +836,13 @@ uniform field, obstacles or inflows on blocks (refused).
   its ghosts, and it is both the predictor's lagged pressure and the solve's start. The first
   version started each solve from the pressure of the state's density instead and blew up at
   Mach 0.001 (single-precision noise in that pressure is $`6\times10^{-8}/M^2`$).
-- **5.7:** 2D blocks from the start. **No vorticity indicator yet:** the mesh in the tests is
-  what the density and pressure indicators happen to give for the Gresho vortex.
+- **5.7:** 2D blocks from the start. The velocity indicator is in (`amr/flag.wgsl`, for a
+  liquid): the Löhner indicator on each velocity component, its ripple floor the largest speed
+  of the initial conditions (`P.ohm.z`); `psplit-amr-shear`. The starting mesh is still chosen
+  on the CPU from density and pressure (`amr/init_cpu.ts indicator`), without the velocity and
+  without the liquid's $`\rho c^2`$ pressure scale: for the Gresho vortex it refines the core,
+  where the pressure crosses zero, which is what gives the tests their three-level mesh. That
+  wants making consistent with the GPU's indicator, and the tests a mesh of their own.
 
 | Test | Result (Apple GPU, Chrome) |
 |---|---|

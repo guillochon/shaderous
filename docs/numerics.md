@@ -588,6 +588,15 @@ things particular to it.
   it. (The pressure of the state's own density would not do: at Mach 0.001 its single-precision
   noise is as large as the flow's pressure, and the run blows up within ten steps.)
 
+*Refinement in a liquid.* Density and pressure are nearly uniform in a liquid whatever it
+does, so for one the refinement indicator (§17) also takes the same normalized second
+derivative of each velocity component, with ripples measured against the largest speed of the
+initial conditions (so that liquid at rest, whose velocity is round-off, asks for nothing).
+It finds under-resolved shear layers and the edges of vortices: a double shear layer a fifth
+of a root cell thick is refined from one level to three within 0.3 time units
+(`psplit-amr-shear`). A layer three cells thick reads 0.3, under the default threshold of 0.8.
+The mesh a run starts on is still chosen from density and pressure alone.
+
 Measured (`psplit-amr-*`): a Gresho vortex on a three-level mesh whose refinement boundaries
 run through it (256 cells across at the finest) takes 400 steps to $`t = 1`$ at Mach 0.1,
 0.01 and 0.001 alike, against the explicit scheme's 6 800 at Mach 0.1, and keeps 0.9992 of its
@@ -601,8 +610,7 @@ energy. In 3D it runs and conserves; it has not been measured beyond that.
 Limits. The liquid only, on a Cartesian grid, without self-gravity, point masses, species,
 cooling or frames; on the adaptive mesh also without a uniform field, obstacles, inflows or
 per-block timesteps (one solve couples every cell at one time). Each is refused with the
-reason. The refinement criteria are still density's and pressure's, which see little in a
-liquid: a vorticity indicator is wanted. First order in time. And on
+reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2292,7 +2300,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 141 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 142 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

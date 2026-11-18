@@ -242,6 +242,8 @@ export class AmrSim implements Simulation {
   private pMassField?: GPUComputePipeline;
   private gMassField?: GPUBindGroup;
   private pCorrect!: GPUComputePipeline;
+  /** The largest speed of the initial conditions: the scale of the liquid's velocity refinement indicator (amr/flag.wgsl). */
+  private vRef = 0;
   /** Implicit pressure (SimConfig.pressure): the solve and its passes on the leaves (amr/pressure.ts). */
   prs?: AmrPressure;
   private gCorrect: GPUBindGroup[] = [];
@@ -1235,6 +1237,7 @@ export class AmrSim implements Simulation {
       amr: [this.slotsPerSide, this.n0 / BS, this.levels, this.layers],
       refine: [c.refineHi, c.jeansRefine],
       solids: this.solids,
+      vref: this.vRef,
       sources: this.nSources > 0,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
@@ -1483,6 +1486,7 @@ export class AmrSim implements Simulation {
     // Each leaf's mass, summed in leaf order at the end, so the total is the same whoever made them.
     const leafMass = new Float64Array(leaves.length);
     this.solids = false;
+    this.vRef = 0;
     this.nSources = 0;
     d.queue.writeBuffer(this.sources, 0, packSources([]));
     const write = (i: number, s: LeafState) => {
@@ -1498,6 +1502,7 @@ export class AmrSim implements Simulation {
       }
       leafMass[i] = s.mass;
       if (s.solids) this.solids = true;
+      this.vRef = Math.max(this.vRef, s.vmax ?? 0);
     };
     let filled = false;
     if (run && leaves.length > 1) filled = await run.leaves(leaves, write).then(() => true, () => false);

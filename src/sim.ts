@@ -1086,7 +1086,7 @@ export const PARAM_BYTES = 496;
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number },
+  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number; vref?: number },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -1135,7 +1135,8 @@ export function packParams(
   f.set([Math.max(0, c.refineRho), Math.max(0, c.refineDense), c.tFrame ?? 1e30, 0], 60);
   f.set(eosConstants2(c.eos, c.eosParams), 64);
   // (The second: one over the acoustic steps a step may span with implicit pressure, hydro/rates.wgsl.)
-  f.set([resists(c) ? c.resistivity : 0, implicitPressure(c) ? 1 / Math.max(c.acousticCfl, 1) : 0, 0, 0], 68);
+  // (The third: the speed a liquid's velocity refinement indicator measures ripples against, amr/flag.wgsl.)
+  f.set([resists(c) ? c.resistivity : 0, implicitPressure(c) ? 1 / Math.max(c.acousticCfl, 1) : 0, x.vref ?? 0, 0], 68);
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
   f.set([...domainLo(c), 0], 96);
   f.set(rotationOf(c), 100);

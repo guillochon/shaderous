@@ -165,6 +165,8 @@ export interface LeafState {
   mass: number;
   /** a cell of the leaf is inside an obstacle */
   solids: boolean;
+  /** the largest speed among the block's cells */
+  vmax: number;
 }
 
 /** What the fill needs beyond the configuration, made once per reset. */
@@ -200,6 +202,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   const f = (a: number, ii: number, jj: number, kk: number) => faces![4 * ((kk * W + jj) * W + ii) + a];
   let mass = 0;
   let solids = false;
+  let vmax = 0;
   let o = 0;
   for (let k = 0; k < depth; k++)
     for (let j = 0; j < BS; j++)
@@ -216,6 +219,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
         const eint = ce.eintFromP(w.rho, p);
         const mark = cellMark(w);
         if (mark) solids = true;
+        else vmax = Math.max(vmax, Math.hypot(w.vx, w.vy, w.vz));
         const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
         mass += w.rho * vol;
         u1[o] = w.rho;
@@ -236,5 +240,5 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
         u2[o + 3] = mark;
         if (sp) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);
       }
-  return { u1, u2, faces, km, sp, mass, solids };
+  return { u1, u2, faces, km, sp, mass, solids, vmax };
 }

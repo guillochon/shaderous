@@ -470,4 +470,22 @@ export const PSPLIT_TESTS: TestDef[] = [
       return { pass: col.mass < 2e-6 && col.vz < 1e-5 && col.kept > 0.98 && col.kept < 1 && col.unconverged < 0.02 && Math.abs(ratio - 1) < 0.01, metrics: m };
     },
   },
+  {
+    id: 'psplit-amr-shear',
+    name: 'Adaptive mesh in a liquid: the velocity indicator refines a sharp double shear layer (2D, 512 finest, 2 levels allowed, implicit pressure)',
+    criterion:
+      'Layers a fifth of a root cell thick, in a liquid whose density and pressure are uniform: the mesh, one level at the start, is refined to three levels along the layers by t = 0.3 by the velocity indicator alone; through those regrids mass is conserved to 2e-6, the density stays within 5% of the reference, and fewer than 2% of the steps\' solves end above the tolerance',
+    async run(gpu) {
+      const cfg = configFor(problemById('shear-layers'), 512, { ndim: 2, tEnd: 0.3, amrLevels: 2, ...IMPLICIT });
+      cfg.params.sharp = 400;
+      const sim = await AmrSim.create(gpu, cfg);
+      try {
+        const r = await measureBlocks(sim);
+        const m = { levels_at_start: r.levels[0], levels_at_end: r.levels[1], leaves_at_end: sim.tree.leaves().length, steps: r.steps, mass_drift: r.mass, density_deviation: r.dev, unconverged_fraction: r.unconverged };
+        return { pass: r.levels[0] === 1 && r.levels[1] === 3 && r.mass < 2e-6 && r.dev < 0.05 && r.unconverged < 0.02, metrics: m };
+      } finally {
+        sim.destroy();
+      }
+    },
+  },
 ];
