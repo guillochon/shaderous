@@ -111,7 +111,10 @@ step), and the maximum is over cells. Each term is:
   dimensions and $`D`$ the larger of $`\tfrac43\nu`$ and the thermal diffusivity ([§11](#11-viscosity-and-thermal-conduction)).
   Where diffusion dominates, the step falls as $`\Delta x^2`$, as an explicit scheme requires.
 - **Gravity** limits the step so that no cell is accelerated across more than a fraction of
-  itself in one step.
+  itself in one step: self-gravity, point masses, a rotating frame's forces and a uniform field
+  alike (until 2026-11-18 a uniform field alone did not, and cold gas under it fell two cells
+  in one step through the walls of a closed box). Curved grids add their geometric
+  (centrifugal) accelerations, over each axis's own length ([§22](#22-rotating-frames-symmetry-and-coordinates)).
 - **Point-mass pairs** ([§15](#15-point-masses-and-sinks)): each pair limits the step to
   $`\tfrac{C}{16}\min\left(r/v,\ \sqrt{r^3/GM}\right)`$, where $`r`$ is the softened separation, $`v`$ the
   relative speed and $`M`$ the pair's total mass. That is about 125 steps per circular orbit.
