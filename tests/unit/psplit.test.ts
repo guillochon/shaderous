@@ -118,6 +118,56 @@ describe('implicit-pressure prototype', () => {
   });
 });
 
+describe('implicit-pressure prototype, a gas with an energy', () => {
+  // A Gresho vortex in an ideal gas at Mach `mach`, 32 x 32 cells, to t = 1.
+  const run = (mach: number, over: Partial<SplitConfig>) => {
+    const s = new RefSplit(cfg({ nx: 32, ny: 32, dx: 1 / 32, tol: 1e-4, pa: 'upwind', ...over }));
+    const p0 = 1 / (1.4 * mach * mach);
+    s.init((x, y) => {
+      const r = Math.hypot(x, y);
+      const { u, dp } = greshoProfile(r);
+      const c = r > 0 ? [-y / r, x / r] : [0, 0];
+      return { rho: 1, vx: u * c[0], vy: u * c[1], vz: 0, p: p0 + dp, s: 0 };
+    });
+    const [e0, m0, en0] = [s.kinetic(), sum(s.U[0]), sum(s.U[4])];
+    s.run(1, 3000);
+    let dev = 0;
+    for (let o = 0; o < s.ncell; o++) dev = Math.max(dev, Math.abs(s.U[0][o] - 1));
+    return { kept: s.kinetic() / e0, steps: s.steps, done: s.t > 0.999, dev, mass: Math.abs(sum(s.U[0]) / m0 - 1), energy: Math.abs(sum(s.U[4]) / en0 - 1) };
+  };
+
+  it('holds the vortex alike at Mach 0.1, 0.01 and 0.001 once mass and energy ride on the corrected face velocities', () => {
+    const runs = [0.1, 0.01, 0.001].map((m) => ({ m, ...run(m, { gas: 'carried' }) }));
+    for (const r of runs) {
+      expect(r.done, `Mach ${r.m}`).toBe(true);
+      expect(r.kept, `Mach ${r.m}`).toBeGreaterThan(0.96);
+      expect(r.kept, `Mach ${r.m}`).toBeLessThan(1);
+      expect(Math.abs(r.kept - runs[1].kept), `Mach ${r.m}`).toBeLessThan(0.005);
+      expect(Math.abs(r.steps - runs[0].steps), `Mach ${r.m}`).toBeLessThanOrEqual(0.15 * runs[0].steps);
+      // The density should stay at 1: what moves it is the divergence the solve leaves.
+      expect(r.dev, `Mach ${r.m}`).toBeLessThan(2e-3);
+      expect(r.mass, `Mach ${r.m}`).toBeLessThan(1e-11);
+      expect(r.energy, `Mach ${r.m}`).toBeLessThan(1e-11);
+    }
+  });
+
+  it('drifts in density, and needs a ceiling on the step, as published', () => {
+    // Under 20 acoustic steps a step it is stable, but the density is off by percents...
+    const capped = run(0.01, { gas: 'kwatra', acousticCfl: 20 });
+    expect(capped.done).toBe(true);
+    expect(capped.dev).toBeGreaterThan(0.02);
+    // ... and takes several times the steps, the ceiling binding.
+    expect(capped.steps).toBeGreaterThan(4 * run(0.01, { gas: 'carried' }).steps);
+  });
+
+  it('is as good with the state in single precision at Mach 0.001', () => {
+    const double = run(0.001, { gas: 'carried' });
+    const single = run(0.001, { gas: 'carried', single: true });
+    expect(Math.abs(single.kept - double.kept)).toBeLessThan(2e-3);
+    expect(single.dev).toBeLessThan(2e-3);
+  });
+});
+
 describe('implicit pressure, as a setting', () => {
   it('is taken for the liquid on a uniform grid and refused elsewhere, with the reason', async () => {
     const { configFor, hydroSlots, implicitUnsupported, packParams, refusal } = await import('../../src/sim');

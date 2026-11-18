@@ -32,8 +32,13 @@ export interface SplitConfig {
   limiter: keyof typeof LIMITERS;
   /** the advective flux: local Lax-Friedrichs, or upwinded on the mean face velocity */
   flux: 'llf' | 'upwind';
-  /** p^a from the pressure equation, or from the advected internal energy */
-  pa: 'pressure' | 'energy';
+  /**
+   * p^a from the pressure equation (in flux form, with the reconstructed face pressures), from
+   * the advected internal energy, or from the pressure equation by first-order upwind
+   * differences of the cells' own pressures and velocities (what the shaders do: it needs
+   * nothing from the flux pass).
+   */
+  pa: 'pressure' | 'energy' | 'upwind';
   /**
    * The pressure gradient in the predictor's velocity: none, that of the state at the start of
    * the step, or that of the last solve (lagged, as projection methods take it).
@@ -45,6 +50,13 @@ export interface SplitConfig {
    * as the sound speed grows); 'kwatra' leaves the density as advection left it.
    */
   baro: 'consistent' | 'kwatra';
+  /**
+   * A gas with an energy: 'kwatra' leaves the mass, momentum and energy that advection carried
+   * on the uncorrected face velocities; 'carried' moves them on to the corrected ones (the
+   * difference of the two face velocities times the upwind state), so that the density and the
+   * energy see the divergence the solve left, not the predictor's.
+   */
+  gas: 'kwatra' | 'carried';
   /** relative residual the solve stops at, and its cap on iterations */
   tol: number;
   maxIter: number;
@@ -54,7 +66,7 @@ export interface SplitConfig {
 
 export const splitDefaults = {
   cfl: 0.4, acousticCfl: 20, rhoFloor: 1e-10, limiter: 'koren' as const, flux: 'llf' as const, pa: 'pressure' as const,
-  predGradP: 'none' as const, baro: 'consistent' as const, tol: 1e-10, maxIter: 2000, single: false,
+  predGradP: 'none' as const, baro: 'consistent' as const, gas: 'kwatra' as const, tol: 1e-10, maxIter: 2000, single: false,
 };
 
 const NQ = 6; // rho, vx, vy, vz, p, s
@@ -286,6 +298,8 @@ export class RefSplit {
     const pa = new Float64Array(N);
     /** the mass flux through each cell's upper faces, for the mass correction */
     const FM = [new Float64Array(N), new Float64Array(N), new Float64Array(N)];
+    /** and the face velocity that carried it */
+    const FU = [new Float64Array(N), new Float64Array(N), new Float64Array(N)];
     for (let o = 0; o < N; o++) {
       const d = new Float64Array(NU);
       let dvn = 0;
@@ -295,11 +309,24 @@ export class RefSplit {
           const sg = hi ? -1 : 1;
           for (let n = 0; n < NU; n++) d[n] += sg * F[n];
           dvn += sg * u;
-          if (hi) FM[a][o] = F[0];
+          if (hi) {
+            FM[a][o] = F[0];
+            FU[a][o] = u;
+          }
         }
       for (let n = 0; n < 7; n++) next[n][o] += dtdx * d[n];
       next[0][o] = Math.max(next[0][o], c.rhoFloor);
       pa[o] = W[o * 7 + 4] + dtdx * (d[7] - W[o * 7 + 4] * dvn);
+      if (c.pa === 'upwind') {
+        let adv = 0;
+        for (let a = 0; a < 3; a++) {
+          const [l, hh] = [this.nbr[a][0][o], this.nbr[a][1][o]];
+          const u = W[o * 7 + 1 + a];
+          const pc = W[o * 7 + 4];
+          adv += Math.max(u, 0) * (pc - (l >= 0 ? W[l * 7 + 4] : pc)) + Math.min(u, 0) * ((hh >= 0 ? W[hh * 7 + 4] : pc) - pc);
+        }
+        pa[o] = W[o * 7 + 4] - dtdx * adv;
+      }
     }
 
     // ---- the pressure equation: alpha p - div(beta grad p) = b ----
@@ -435,6 +462,9 @@ export class RefSplit {
 
     // ---- correct, with differences of face values ----
     const P = this.p;
+    const carried = eos.hasEnergy && c.gas === 'carried';
+    const S = carried ? [R, MX, MY, MZ, E].map((a) => Float64Array.from(a)) : [];
+    const DQ = carried ? S.map(() => new Float64Array(N)) : [];
     for (let o = 0; o < N; o++) {
       let de = 0;
       let dvh = 0;
@@ -451,6 +481,11 @@ export class RefSplit {
             const g = (P[rr] - P[l]) / dx;
             fp[hi] = consistent ? 0.5 * (P[l] + P[rr]) : (R[rr] * P[l] + R[l] * P[rr]) / (R[l] + R[rr]);
             fv[hi] = vs[a][l] - dt * beta[a][l] * g;
+            if (carried) {
+              const du = fv[hi] - FU[a][l];
+              const donor = du > 0 ? l : rr;
+              for (let n = 0; n < 5; n++) DQ[n][o] += (hi ? 1 : -1) * du * S[n][donor];
+            }
           } else if (nb === -2) {
             fp[hi] = P[o];
           } else {
@@ -470,6 +505,10 @@ export class RefSplit {
         E[o] -= dtdx * de;
         EI[o] -= dtdx * P[o] * dvh;
       }
+    }
+    if (carried) {
+      const T = [R, MX, MY, MZ, E];
+      for (let o = 0; o < N; o++) for (let n = 0; n < 5; n++) T[n][o] -= dtdx * DQ[n][o];
     }
     for (let o = 0; o < N; o++) {
       const ke = (0.5 * (MX[o] ** 2 + MY[o] ** 2 + MZ[o] ** 2)) / R[o];

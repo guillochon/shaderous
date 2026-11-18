@@ -452,6 +452,21 @@ at 20). So for an ideal gas this scheme is a tenfold saving in steps at moderate
 not a low-Mach method. A fix would carry the mass and energy on the corrected face velocities
 too (the liquid's correction, generalized); not prototyped.
 
+**3a. That fix was prototyped later the same day, and it works** (`gas: 'carried'` in
+`RefSplit`). After the solve, each face moves the difference between its corrected velocity
+and the velocity that carried the advective flux, times the upwind advected state: mass,
+momentum and energy. The density and the energy then see the divergence the solve left, not
+the predictor's. On the same vortex ($`32^2`$, to $`t = 2`$, lagged gradient, no ceiling on the
+step): 201, 202 and 219 steps at Mach 0.1, 0.01 and 0.001, 0.950 to 0.952 of the kinetic energy
+kept, and the density within $`7\times10^{-4}`$ of 1 where the published form leaves it off by
+$`7\times10^{-2}`$. It needs no acoustic ceiling. Sod: L1 $`1.2\times10^{-2}`$ in 64 steps, mass
+and energy to $`10^{-11}`$. With the state rounded to single precision at Mach 0.001 the result
+is the same to three digits, although the pressure then comes from $`E`$ minus the kinetic
+energy with four bits to spare (section 1): the solve's pressure is what moves the gas. And
+$`p^a`$ by first-order upwind differences of the cells' own pressures and velocities gives
+the same numbers as the flux form, so the shaders need nothing more from the flux pass than
+the face velocities. So the ideal gas is worth building after all.
+
 **4. $`p^a`$ from the advected internal energy** costs accuracy (0.825 kept against 0.936 at
 Mach 0.1 on $`48^2`$) and is unstable at Mach 0.01: keep the pressure equation.
 
