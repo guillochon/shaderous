@@ -1589,7 +1589,7 @@ bounds, so yt reads an octant as an octant, and carry the mirrors in their setti
 **The view** shows the whole configuration of an octant (or a 2D quadrant): the volume and
 slice views fold their sample positions back across the planes (`|2d - 1|` in fractions of
 the view's box), the overlays and the pointer's tools map between the computed box and the
-view's (a fraction $`f`$ of the one is $`	frac12 + 	frac f2`$ of the other), and the
+view's (a fraction $`f`$ of the one is $`\tfrac12 + \tfrac f2`$ of the other), and the
 `mirror` view setting turns it off. Field lines are drawn in the computed part only.
 
 What the mirrors would get wrong is refused with a message: a uniform field or a frame
