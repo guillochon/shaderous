@@ -1587,6 +1587,67 @@ to $`2\times10^{-6}`$; a settled polytrope's central density and the Evrard coll
 behave as in the whole box (on blocks with per-block timesteps too); and a sink at the origin
 takes in the same mass to $`10^{-7}`$.
 
+### Comoving coordinates
+
+A setup with `physics.cosmology` runs gas in an expanding background, in the form Enzo uses
+([Bryan et al. 1995](https://doi.org/10.1016/0010-4655(94)00191-4)): positions are comoving, so
+the grid does not change; densities and pressures are comoving ($`a^3`$ times the proper ones),
+so the mass on the grid is constant; velocities are proper peculiar velocities and specific
+energies proper ones, so temperatures and sound speeds are physical as they stand. With scale
+factor $`a(t)`$,
+
+```math
+\begin{aligned}
+\partial_t\rho + \tfrac1a\nabla\cdot(\rho\mathbf{v}) &= 0,\\
+\partial_t(\rho\mathbf{v}) + \tfrac1a\nabla\cdot(\rho\mathbf{v}\mathbf{v} + p\,\mathsf{I}) &= -\tfrac{\dot a}{a}\rho\mathbf{v} - \tfrac{\rho}{a}\nabla\Phi,\\
+\partial_t(\rho e) + \tfrac1a\nabla\cdot(\rho e\,\mathbf{v}) &= -\tfrac{p}{a}\nabla\cdot\mathbf{v} - 3\tfrac{\dot a}{a}p,\\
+\nabla^2\Phi &= \tfrac{4\pi G}{a}\left(\rho - \bar\rho\right).
+\end{aligned}
+```
+
+Time is in units of $`1/H_0`$ and the mean comoving density is 1, so $`G = 3\Omega_m/8\pi`$.
+The clock starts at zero at the starting redshift; the end time follows from the ending one.
+
+**The scale factor** is advanced on the GPU, since the timestep never visits the CPU: the
+clock pass takes one RK4 step of $`\dot a = aH(a)`$,
+$`H = \sqrt{\Omega_m a^{-3} + \Omega_k a^{-2} + \Omega_\Lambda}`$, each step and keeps $`a`$ at
+its start, middle and end with $`H`$ at the middle. A step changes $`a`$ by at most 1%. Over
+$`a = 0.01`$ to 1 (466 steps) the float32 value stays within $`3\times10^{-7}`$ of float64.
+
+**Every gradient carries $`1/a`$.** The passes work with the proper cell size $`a\,\Delta x`$
+(the middle of the step's for the fluxes), so one scalar covers the flux update, the
+predictor, the species and the timestep's CFL and gravity limits. Both cells of a face use
+the same $`a`$, so their fluxes still agree to the bit. Positions keep the comoving size.
+
+**The expansion drag** is solved exactly and split around the step, through the frame slot
+(`gravity/frame_cosmo.wgsl`): before the fluxes from $`a`$ to the middle of the step, after the
+second kick on to its end. The momentum scales as $`1/a`$, an ideal gas's $`\rho e`$ as
+$`a^{-3(\gamma-1)}`$ (formed from series in $`a_1/a_0 - 1`$: GPU `pow` was biased enough to move
+the pressure by $`10^{-4}`$ over a few hundred steps), and $`E`$ changes by exactly what the
+two did. The predictor adds the drag's rates to its half step.
+
+**Gravity.** The Poisson source is divided by $`a`$ at the end of the step it is solved for,
+and the field stored is the proper acceleration $`-\nabla\Phi/a`$, so the kicks, the predictor
+and the timestep use it unchanged.
+
+The well-balanced reconstruction is off in comoving runs. It measures pressure deviations
+from hydrostatic balance, and for cold gas falling far from balance those deviations, as large
+as $`\rho\,\Delta\Phi`$, act as spurious pressure: a 0.2% density wave grew 32% faster than
+linear theory with it and within 1% without. (Without expansion, a cold wave in a static
+periodic box grows 13% further with it than without; that case is not one it was built for.)
+
+The first version takes a periodic box of ideal gas, with periodic self-gravity or none, on a
+uniform grid or on blocks with one timestep for all; anything else is refused with a message.
+The `zeldovich-pancake` preset (Cosmology group) runs the pancake of
+[Zel'dovich (1970)](https://ui.adsabs.harvard.edu/abs/1970A%26A.....5...84Z) through its
+caustic at $`z = 1`$.
+
+Tests: the scale factor on the GPU against float64 (Einstein-de Sitter and flat
+$`\Lambda`$CDM, $`3\times10^{-7}`$); uniform gas whose velocity falls as $`1/a`$ and comoving
+pressure as $`a^{3 - 3\gamma}`$ ($`5\times10^{-7}`$, uniform grid and blocks); a 0.2% wave that
+grows as $`a`$ (0.8%); and the pancake against its exact solution at half its caustic time
+(density 1%, velocity 0.3%; 3.6% in density on blocks, whose coarse cells are twice as large).
+
 ## 23. Validation
 
 The validation suite (`src/validation/tests.ts`) has 55 tests. It runs on your own GPU at
