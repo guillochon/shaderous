@@ -20,6 +20,20 @@
         "--strictPort"
       ],
       "port": 5193
+    },
+    {
+      "name": "shaderous-frozen",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "vite",
+        "preview",
+        "--outDir",
+        "/private/tmp/claude-502/-Users-jam11491--claude-spares-spare-XxJNa8/db94ae65-dd53-4bd1-9a42-89f1da0d2efd/scratchpad/dist-rand",
+        "--port",
+        "5197",
+        "--strictPort"
+      ],
+      "port": 5197
     }
   ]
 }

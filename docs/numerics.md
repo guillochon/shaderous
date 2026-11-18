@@ -1086,6 +1086,9 @@ $`E`$ includes $`B^2/2`$.
   follows the analytic decay to $`10^{-5}`$, and a sink keeps the mass budget to $`10^{-7}`$
   with the field's energy left. (MHD's reconstruction has no well-balanced pressure: the column
   is compared with the hydro column without it.)
+- **Obstacles and inflows** are refused with a field: the MHD fluxes know no solid or fixed
+  cell, and gas flowed into an obstacle (a random setup between walls gained 0.14% of its mass
+  in 200 steps). The obstacle tool is off in an MHD run.
 - **Species** move by the same pass as without a field (§16), from the face mass fluxes that
   the MHD update's stage 2 records (on blocks, each block's own fluxes before the matching at
   refinement boundaries, which the species pass does itself); the block grid's species
