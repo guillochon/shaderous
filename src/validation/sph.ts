@@ -7,6 +7,8 @@ import type { Gpu } from '../gpu/device';
 import { sphGrid } from '../spherical';
 import { withAmr, withSim, type TestDef } from './tests';
 import type { AmrSim } from '../amr/amr_sim';
+import { compileSetup } from '../setup/compile';
+import type { SetupSpec } from '../setup/spec';
 
 /**
  * A spherical run from `rMin` to `rMax` (logarithmic in r with `log`), ideal gas, from
@@ -417,6 +419,36 @@ export const SPH_TESTS: TestDef[] = [
       const bins = await polytropeOnBlocks(gpu, 128, { amrLevels: 2, timeBins: 2, timeBinsAlways: true });
       const m = { ...one, bins_worst_change: bins.worst_change, bins_at_time: bins.at_time, bins_block_updates_over_single: bins.block_updates_over_single };
       return { pass: one.worst_change < 0.01 && bins.worst_change < 0.01 && one.levels > 1, metrics: m };
+    },
+  },
+  {
+    id: 'sph-swirl',
+    name: 'Spherical: a fast swirl around the origin, reaching both poles',
+    criterion: 'A dense cold blob (rho 28, sound speed 0.01 around it) swirling at v_phi = 0.65 right to the axis, on the uniform grid and on blocks: for 300 steps the values stay finite, no cell is floored, and the mass holds to 1e-5 (walls on every face). The timestep weighs the cells next to the axis by their outer faces and holds the centrifugal acceleration; without that the axis cells emptied in the first step',
+    async run(gpu) {
+      const doc = {
+        format: 'shaderous-setup', version: 1, name: 'sph-swirl',
+        domain: { ndim: 2, n: 128, box: 0.5, geometry: 'spherical', supports2d: true, rMin: 0.005, bc: { lo: [REFLECT, REFLECT, PERIODIC], hi: [REFLECT, REFLECT, PERIODIC] } },
+        physics: { eos: 'ideal', eosParams: { gamma: 5 / 3 }, gravity: 'off', G: 0 },
+        background: { rho: 1, p: 1e-4 },
+        parts: [{ kind: 'region', shape: { type: 'sphere', center: [0, 0, 0], radius: 0.06 }, rho: 28, v: [0, 0, 0.65], s: 1 }],
+        run: { tEnd: 10 },
+      } as SetupSpec;
+      const p = compileSetup(doc).problem;
+      const m: Record<string, number> = {};
+      const check = async (sim: Sim | AmrSim, tag: string) => {
+        const d0 = await sim.diagnostics();
+        for (let k = 0; k < 300; k++) sim.step();
+        const d = await sim.diagnostics();
+        m[`${tag}_mass_change`] = Math.abs(d.mass / d0.mass - 1);
+        m[`${tag}_floored`] = d.floored;
+        m[`${tag}_finite`] = Number.isFinite(d.eTot) && Number.isFinite(d.mass) ? 1 : 0;
+        m[`${tag}_t`] = d.t;
+      };
+      await withSim(gpu, p, 128, { ndim: 2 }, (sim) => check(sim, 'uniform'));
+      await withAmr(gpu, p, 128, { ndim: 2, amrLevels: 1 }, (sim) => check(sim, 'blocks'));
+      const pass = ['uniform', 'blocks'].every((t) => m[`${t}_finite`] === 1 && m[`${t}_floored`] === 0 && m[`${t}_mass_change`] < 1e-5);
+      return { pass, metrics: m };
     },
   },
 ];
