@@ -26,6 +26,7 @@ import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, ty
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
 import { domainLo } from './domain';
+import { spherical, sphGrid, sphParams } from './spherical';
 import { hubble, omegaK, scaleFactor, type Cosmology } from './cosmo';
 
 import type { LimiterKind, RiemannKind } from './problems/types';
@@ -358,7 +359,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     riemann: 'hllc',
     limiter: 'koren',
     // (An axisymmetric run keeps it: it solves for its potential in (R, z).)
-    gravity: ndim === 2 && isSelfGravity(problem.gravity) && problem.geometry !== 'cylindrical' ? 'off' : problem.gravity,
+    gravity: ndim === 2 && isSelfGravity(problem.gravity) && problem.geometry !== 'cylindrical' && problem.geometry !== 'spherical' ? 'off' : problem.gravity,
     G: problem.G,
     bcLo: ndim === 2 ? bc2.lo : problem.bcLo,
     bcHi: ndim === 2 ? bc2.hi : problem.bcHi,
@@ -414,8 +415,10 @@ export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefine
   const allowed = cfg.problem.symmetry?.axes ?? [false, false, false];
   const sym = [0, 1, 2].map((a) => !!want?.[a] && allowed[a] && (a < 2 || cfg.ndim === 3)) as [boolean, boolean, boolean];
   // (An axisymmetric run's lower x face is its axis, which reflects as such a plane does.)
-  const bcLo = cfg.bcLo.map((b, a) => (sym[a] || (a === 0 && cylindrical(cfg)) ? REFLECT : b)) as Bc3;
-  return { ...cfg, symmetry: sym, bcLo };
+  const bcLo = cfg.bcLo.map((b, a) => (sym[a] || (a === 0 && cylindrical(cfg)) || (a === 1 && spherical(cfg)) ? REFLECT : b)) as Bc3;
+  // (A spherical run's theta faces are both its axis: they reflect, v_phi odd across them.)
+  const bcHi = cfg.bcHi.map((b, a) => (a === 1 && spherical(cfg) ? REFLECT : b)) as Bc3;
+  return { ...cfg, symmetry: sym, bcLo, bcHi };
 }
 
 /** The run is axisymmetric, in (R, z) (Problem.geometry). */
@@ -442,6 +445,37 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   if (c.gravity === 'periodic') return 'an axisymmetric run’s self-gravity is isolated (its axis is no periodic face)';
   if (isSelfGravity(c.gravity) && c.amrLevels > 0) return 'self-gravity on blocks is not available for axisymmetric runs yet';
   if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'star')) return 'stars are not settled in axisymmetric runs yet';
+  return null;
+}
+
+export { spherical } from './spherical';
+
+/**
+ * Why a spherical (r, theta) run cannot go as configured, or null. The first version:
+ * hydrodynamics on a uniform 2D grid, with the monopole of its own gravity and point masses at
+ * the origin (docs/numerics.md section 22).
+ */
+export function sphericalUnsupported(c: SimConfig): string | null {
+  if (c.problem.geometry !== 'spherical') return null;
+  if (c.ndim !== 2) return 'a spherical run is two-dimensional, in (r, theta)';
+  const s = c.problem.sphere;
+  if (!s || !(s.rMin > 0)) return 'a spherical run needs an inner radius above zero';
+  if (c.amrLevels > 0) return 'spherical runs are on the uniform grid only (not on blocks) yet';
+  if (c.problem.mhd) return 'magnetic fields are not available in spherical runs yet';
+  if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in spherical runs yet';
+  for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
+    if (m.pos.some((x) => (x ?? 0) !== 0) || m.vel.some((v) => (v ?? 0) !== 0)) return 'a point mass must sit at the origin, at rest';
+  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in spherical runs yet';
+  if (c.problem.rotation || c.problem.shear || c.problem.cosmology || c.problem.frame) return 'a spherical run has no rotating or accelerating frame, shear or expansion';
+  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in spherical runs (both poles are in the grid)';
+  if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in spherical runs';
+  if (c.driving.accel > 0 || c.problem.damping) return 'driving and damping zones are not available in spherical runs';
+  if (c.gravity === 'periodic') return 'a spherical run\u2019s self-gravity is its monopole (isolated), not periodic';
+  if (c.problem.debris) return 'debris tallies are not available in spherical runs';
+  if (c.problem.burn) return 'burning is not available in spherical runs';
+  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'star')) return 'stars are not settled in spherical runs yet';
+  if (c.bcLo[0] === PERIODIC || c.bcHi[0] === PERIODIC) return 'the radial faces of a spherical run cannot be periodic';
+  if (c.problem.sphere?.log && c.n & (c.n - 1)) return 'a spherical run needs a power-of-two grid';
   return null;
 }
 
@@ -943,7 +977,7 @@ export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] |
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 464;
+export const PARAM_BYTES = 496;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -968,7 +1002,7 @@ export function packParams(
   f[31] = c.problem.mhd && (fl.va ?? 0) > 0 ? fl.va! : 0;
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -1001,6 +1035,7 @@ export function packParams(
   f.set(k ? [k.omegaM, omegaK(k), k.omegaL, x.scale ?? k.aStart] : [0, 0, 0, 0], 108);
   const sh = c.problem.shear;
   f.set(sh ? [sh.omega, sh.q, sh.stratified ? 1 : 0, 1] : [0, 0, 0, 0], 112);
+  f.set(sphParams(c), 116);
   return buf;
 }
 
@@ -1171,6 +1206,10 @@ export class Sim implements Simulation {
   private nMasses = 0;
   /** how many of them the preset (or a snapshot) brought, rather than addMass() */
   private nOwnMasses = 0;
+  /** a spherical run: the G M of its point masses, all at the origin (gravity/sph_monopole.wgsl) */
+  private centralGM = 0;
+  /** a spherical run's monopole gravity: its passes, their bind groups by parity, and its buffer */
+  private sphMono: { shells: GPUComputePipeline; enclose: GPUComputePipeline; field: GPUComputePipeline; g: GPUBindGroup[][]; buf: GPUBuffer } | null = null;
   private redBh!: MassSums;
   /** the point masses (gravity/bh.wgsl) */
   private bh: GPUBuffer;
@@ -1252,6 +1291,8 @@ export class Sim implements Simulation {
     if (ashear) throw new Error(`Shearing box: ${ashear}`);
     const acyl = cylindricalUnsupported(cfg);
     if (acyl) throw new Error(`Axisymmetric run: ${acyl}`);
+    const asph = sphericalUnsupported(cfg);
+    if (asph) throw new Error(`Spherical run: ${asph}`);
     noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
@@ -1292,7 +1333,8 @@ export class Sim implements Simulation {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
-        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg)),
+        // (A spherical run's monopole writes the solver's potential textures in its place.)
+        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg) ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg)),
         Reducer.create(
           d,
           [n, n, nz],
@@ -1331,6 +1373,17 @@ export class Sim implements Simulation {
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.clock });
+    if (spherical(cfg)) {
+      const code = assemble('gravity/sph_monopole.wgsl');
+      const [shells, enclose, field] = await Promise.all(['shells', 'enclose', 'field'].map((e) => computePipeline(d, code, `spherical monopole ${e}`, undefined, e)));
+      const buf = d.createBuffer({ label: 'spherical monopole', size: 4 * (4 + 4 * n), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+      const g = [0, 1].map((p) => [
+        bindGroup(d, shells, { 0: sim.params, 1: v(sim.state[p][0]), 2: buf }),
+        bindGroup(d, enclose, { 0: sim.params, 2: buf }),
+        bindGroup(d, field, { 0: sim.params, 2: buf, 3: v(phi), 4: v(sim.gfield) }),
+      ]);
+      sim.sphMono = { shells, enclose, field, g, buf };
+    }
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
@@ -1518,7 +1571,11 @@ export class Sim implements Simulation {
     const nz = this.nz;
     const eos = makeEos(c.eos, c.eosParams);
     const fn = c.problem.init(n, eos, c.ndim, c.params);
-    const masses = initialMasses(c, this.dx);
+    const sph = spherical(c) ? sphGrid(c) : null;
+    // A spherical run's point masses sit at the origin: their pull joins the monopole field
+    // (gravity/sph_monopole.wgsl), and they are not kept as particles.
+    const masses = sph ? [] : initialMasses(c, this.dx);
+    this.centralGM = sph ? initialMasses(c, this.dx).reduce((a, m) => a + m.gm, 0) : 0;
     this.nMasses = this.nOwnMasses = masses.length;
     this.device.queue.writeBuffer(this.bh, 0, packMasses(masses));
     this.debrisBuf?.reset(c.restart?.debris);
@@ -1541,9 +1598,10 @@ export class Sim implements Simulation {
     for (let k = 0; k < nz; k++) {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
       for (let j = 0; j < n; j++) {
-        const y = (j + 0.5) * this.dx + lo[1];
+        // (A spherical run's init takes (r, theta).)
+        const y = sph ? sph.theta(j) : (j + 0.5) * this.dx + lo[1];
         for (let i = 0; i < n; i++, o += 4) {
-          const x = (i + 0.5) * this.dx + lo[0];
+          const x = sph ? sph.r(i) : (i + 0.5) * this.dx + lo[0];
           const w = fn(x, y, z);
           // Where the species set the equation of state, the cell's own.
           let ce = eos;
@@ -1741,6 +1799,14 @@ export class Sim implements Simulation {
     if (!this.selfGravity) return;
     const enc = this.device.createCommandEncoder();
     const pass = beginPass(enc);
+    if (this.sphMono) {
+      this.device.queue.writeBuffer(this.sphMono.buf, 0, new Float32Array([this.centralGM, isSelfGravity(this.cfg.gravity) ? 1 : 0, 0, 0]));
+      this.encodeMonopole(pass, this.cur);
+      this.encodeMonopole(pass, this.cur);
+      pass.end();
+      this.device.queue.submit([enc.finish()]);
+      return;
+    }
     this.mg.encodeSource(pass, this.cur, this.cfg.gravity === 'isolated');
     for (let i = 0; i < cycles; i++) this.mg.encodeVCycle(pass);
     pass.end();
@@ -1752,18 +1818,40 @@ export class Sim implements Simulation {
     if (!this.fieldOn) return;
     this.solvePotential(16);
     const enc = this.device.createCommandEncoder();
-    if (this.selfGravity) this.copyPhiToOld(enc);
+    if (this.selfGravity && !this.sphMono) this.copyPhiToOld(enc);
     const pass = beginPass(enc);
     // No step is being taken: the masses' accelerations are evaluated, nothing more.
     if (this.hasMasses) this.encodeMassKick(pass, this.cur, false);
-    this.encodeField(pass);
+    // (A spherical run's monopole has written the field already.)
+    if (!this.sphMono) this.encodeField(pass);
     pass.end();
     this.device.queue.submit([enc.finish()]);
   }
 
   private get selfGravity(): boolean {
+    // (A spherical run's monopole holds its point masses' pull too.)
+    if (spherical(this.cfg)) return isSelfGravity(this.cfg.gravity) || this.centralGM !== 0;
     // (An axisymmetric run solves for its potential in (R, z): gravity/stencil.wgsl.)
     return isSelfGravity(this.cfg.gravity) && (this.cfg.ndim === 3 || cylindrical(this.cfg));
+  }
+
+  /**
+   * A spherical run's gravity from the state at `parity`: the shells' masses, their prefix sum,
+   * the field and potential textures (gravity/sph_monopole.wgsl). The previous potential moves
+   * to its place first: encoding it twice leaves the two the same.
+   */
+  private encodeMonopole(pass: GPUComputePassEncoder, parity: number) {
+    const m = this.sphMono!;
+    const n = this.n;
+    pass.setPipeline(m.shells);
+    pass.setBindGroup(0, m.g[parity][0]);
+    pass.dispatchWorkgroups(Math.ceil(n / 64));
+    pass.setPipeline(m.enclose);
+    pass.setBindGroup(0, m.g[parity][1]);
+    pass.dispatchWorkgroups(1);
+    pass.setPipeline(m.field);
+    pass.setBindGroup(0, m.g[parity][2]);
+    pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), 1);
   }
 
   private get hasMasses(): boolean {
@@ -1846,7 +1934,9 @@ export class Sim implements Simulation {
         }
         this.speciesCur = 1 - q;
       }
-      if (selfGravity) {
+      if (selfGravity && this.sphMono) {
+        this.encodeMonopole(pass, 1 - p);
+      } else if (selfGravity) {
         // Keep the old potential and solve for that of the updated density (warm-started).
         pass.end();
         this.copyPhiToOld(enc);
@@ -1862,7 +1952,7 @@ export class Sim implements Simulation {
         pass.dispatchWorkgroups(1);
         this.encodeMassKick(pass, 1 - p, true);
       }
-      if (this.fieldOn) this.encodeField(pass);
+      if (this.fieldOn && !this.sphMono) this.encodeField(pass);
       if (anyGravity) {
         // Second half kick, with the acceleration of the updated state.
         pass.setPipeline(this.pCorrect);
@@ -2160,7 +2250,7 @@ export class Sim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
-      return unfoldDiagnostics(diag, this.cfg.symmetry, cylindrical(this.cfg));
+      return unfoldDiagnostics(diag, this.cfg.symmetry, cylindrical(this.cfg) || spherical(this.cfg));
     } finally {
       this.stagingBusy = false;
     }

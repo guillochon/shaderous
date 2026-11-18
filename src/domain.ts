@@ -6,7 +6,7 @@
 
 /** What decides the domain's placement: the box side, and the mirrored axes if any. */
 export interface DomainShape {
-  problem: { box: number; geometry?: 'cartesian' | 'cylindrical' };
+  problem: { box: number; geometry?: 'cartesian' | 'cylindrical' | 'spherical'; sphere?: { rMin: number } };
   /** Axes mirrored about the origin (Part B): their domain is [0, box], not [-box/2, box/2]. */
   symmetry?: readonly boolean[];
 }
@@ -17,6 +17,9 @@ export function domainLo(c: DomainShape): [number, number, number] {
   const s = c.symmetry;
   // An axisymmetric run's R starts at the axis.
   const cyl = c.problem.geometry === 'cylindrical';
+  // A spherical run's r starts at its inner radius, its theta at the pole (code positions:
+  // theta is (j + 1/2) pi / n, not this).
+  if (c.problem.geometry === 'spherical') return [c.problem.sphere?.rMin ?? 0, 0, -half];
   return [0, 1, 2].map((a) => (s?.[a] || (a === 0 && cyl) ? 0 : -half)) as [number, number, number];
 }
 

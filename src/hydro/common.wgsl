@@ -59,6 +59,11 @@ struct Params {
                          //   all zero otherwise
   shear: vec4<f32>,      // shearing box (Problem.shear): (Omega, q, 1 if stratified, 1); all zero
                          //   otherwise
+  sph: vec4<f32>,        // a spherical (r, theta) run (Problem.geometry): (r_min / dx, the step in
+                         //   ln r on a logarithmic grid or 0 on a uniform one, the step in theta, 1);
+                         //   all zero otherwise
+  sph2: vec4<f32>,       // its logarithmic grid's constants, in double precision on the CPU:
+                         //   (e^(D/2), 3 / (2 sinh(3D/2)), sinh D, 2 sinh(D/2)), D the step in ln r
 }
 
 // The state as the frame slot (gravity/frame_off.wgsl) hands it back.
@@ -152,6 +157,88 @@ fn cyl_child_weight(parent_i: i32, child_i: i32) -> f32 {
 // For the predictor (hydro/predictor.wgsl): the cell's radius in cells (i + 1/2) in an
 // axisymmetric run, 0 otherwise.
 var<private> g_cyl_r: f32 = 0.0;
+
+// A spherical (r, theta) run (Problem.geometry 'spherical'): code x is r from r_min (uniform or
+// logarithmic spacing), y is theta from 0 to pi, the layer is the azimuth (v_z is v_phi). Both
+// poles are axes. The grid's dx is a reference length: every weight below is a length over it.
+fn spherical() -> bool {
+  return P.sph.w != 0.0;
+}
+// The geometry of cell (i, j), as the update needs it, every entry a closed form of the indices
+// (docs/numerics.md section 22): face areas over (cell volume / dx), which are differences of
+// r^3 and cos(theta) that cancel in float32, are never formed as such.
+struct SphCell {
+  wr: vec2<f32>,  // the radial faces' weights, area * dx / volume, lower and upper
+  wt: vec2<f32>,  // the polar faces' weights (exactly 0 on a pole)
+  lr: vec2<f32>,  // lever arms of the radial faces over the cell's: r_-/r_c, r_+/r_c
+  lt: vec2<f32>,  // and of the polar faces about the axis: sin(theta_-)/sin(theta_c), ...
+  h: vec2<f32>,   // dx over the cell's length along r and along theta
+  ir: f32,        // dx times the volume average of 1/r
+  cot: f32,       // cot(theta_c)
+  r: f32,         // r_c / dx
+  st: f32,        // sin(theta_c)
+}
+// sin(theta) of the polar face j (0 to n), formed from the nearer pole so that both are exactly 0.
+fn sph_sin_face(j: i32) -> f32 {
+  return sin(f32(min(j, i32(P.dims.y) - j)) * P.sph.z);
+}
+fn sph_cell(i: i32, j: i32) -> SphCell {
+  var g: SphCell;
+  let fi = f32(i) + 0.5;
+  if (P.sph.y == 0.0) {
+    // Uniform in r: r_c / dx = r_min / dx + i + 1/2, volume / (dx^3 dcos) = r_c^2 + 1/12.
+    let rc = P.sph.x + fi;
+    let d3 = rc * rc + 1.0 / 12.0;
+    let rm = rc - 0.5;
+    let rp = rc + 0.5;
+    g.r = rc;
+    g.wr = vec2<f32>(rm * rm, rp * rp) / d3;
+    g.lr = vec2<f32>(rm, rp) / rc;
+    g.ir = rc / d3;
+    g.h.x = 1.0;
+  } else {
+    // Logarithmic: r_c = r_min e^((i + 1/2) D); r_+- = r_c e^(+-D/2).
+    let rc = P.sph.x * exp(fi * P.sph.y);
+    let e = P.sph2.x;
+    let k = P.sph2.y / rc;
+    g.r = rc;
+    g.wr = k * vec2<f32>(1.0 / (e * e), e * e);
+    g.lr = vec2<f32>(1.0 / e, e);
+    g.ir = k * P.sph2.z;
+    g.h.x = 1.0 / (rc * P.sph2.w);
+  }
+  let jm = min(j, i32(P.dims.y) - 1 - j);
+  let tc = (f32(j) + 0.5) * P.sph.z;
+  g.st = sin((f32(jm) + 0.5) * P.sph.z);
+  g.cot = cos(tc) / g.st;
+  let s = vec2<f32>(sph_sin_face(j), sph_sin_face(j + 1));
+  g.lt = s / g.st;
+  // dcos(theta) = 2 sin(theta_c) sin(dtheta / 2).
+  g.wt = g.ir * s / (2.0 * g.st * sin(0.5 * P.sph.z));
+  g.h.y = g.ir / P.sph.z;
+  return g;
+}
+// The volume of cell (i, j), the azimuth's 2 pi included.
+fn sph_volume(i: i32, j: i32) -> f32 {
+  let fi = f32(i) + 0.5;
+  var v3 = 0.0;   // (r_+^3 - r_-^3) / 3 over dx^3
+  if (P.sph.y == 0.0) {
+    let rc = P.sph.x + fi;
+    v3 = rc * rc + 1.0 / 12.0;
+  } else {
+    let rc = P.sph.x * exp(fi * P.sph.y);
+    v3 = rc * rc * rc / P.sph2.y;
+  }
+  let jm = min(j, i32(P.dims.y) - 1 - j);
+  let dcos = 2.0 * sin((f32(jm) + 0.5) * P.sph.z) * sin(0.5 * P.sph.z);
+  return 6.2831853 * v3 * dcos * P.dx * P.dx * P.dx;
+}
+// For the predictor and the timestep: dx over the cell's own length along each axis (1 on every
+// axis of a Cartesian grid, where the cells are cubes of side dx; set per cell in a spherical run).
+var<private> g_hr: vec3<f32> = vec3<f32>(1.0);
+// For the predictor in a spherical run: (dx times the average of 1/r, cot(theta)) of the cell;
+// zero otherwise.
+var<private> g_sph_geo: vec2<f32> = vec2<f32>(0.0);
 
 // A position as a fraction of the box from the domain's lower corner (0 to 1 inside it), and
 // back. With the corner at -box/2 these are x / box + 0.5 and (f - 0.5) box, bit for bit.
@@ -276,7 +363,8 @@ fn bc_map(c0: vec3<i32>) -> Mapped {
       m.flip *= bc_vsign(k, a);
       // Across the axis of an axisymmetric run the swirl v_phi changes sign too, and so does
       // the azimuthal field B_phi.
-      if (!up && P.sym[a] == 2u) {
+      // (Both poles of a spherical run are such axes.)
+      if ((!up && P.sym[a] == 2u) || (a == 1 && spherical())) {
         m.flip.z = -m.flip.z;
         m.bflip.z = -m.bflip.z;
       }

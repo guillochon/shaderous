@@ -205,6 +205,13 @@ fn flux_zero() -> Flux {
 fn cyl_face(f: Flux, w: f32) -> Flux {
   return Flux(f.m * w, vec3<f32>(f.mom.xy * w, f.mom.z * w * w), f.e * w, f.ei * w, f.s * w, f.vn * w, vec4<f32>(f.d.xy * w, f.d.z * w * w, f.d.w * w));
 }
+// Spherical runs: a face's flux weighed by its area over the cell's (sph_cell), the momentum's
+// components each by `w` times their own lever arm (1 for v_r, so that r rho v_theta and
+// r sin(theta) rho v_phi are carried in conservation form).
+fn sph_face(f: Flux, w: f32, lever: vec3<f32>) -> Flux {
+  let wm = w * lever;
+  return Flux(f.m * w, f.mom * wm, f.e * w, f.ei * w, f.s * w, f.vn * w, vec4<f32>(f.d.xyz * wm, f.d.w * w));
+}
 // The pressure at a face, as its flux has it: the normal momentum flux less what the mass flux
 // carries at the face's normal velocity.
 fn face_pressure(f: Flux, axis: i32) -> f32 {

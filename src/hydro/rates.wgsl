@@ -32,7 +32,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     comp_use(comp_tex(c));
     let w = prim_from_cons(textureLoad(U1, c, 0), u2);
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
-    let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(w.w1.x, w.w2.w);
+    var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(w.w1.x, w.w2.w);
+    // A spherical run: per axis over its own cell length (none along the azimuth).
+    if (spherical()) {
+      let h = sph_cell(c.x, c.y).h;
+      rate = (abs(w.w1.y) + w.w2.y) * h.x + (abs(w.w1.z) + w.w2.y) * h.y;
+    }
     // Solid cells hold no gas to keep stable.
     if (u2.w <= 0.5) {
       atomicMax(&wg_max[blk], bitcast<u32>(rate));

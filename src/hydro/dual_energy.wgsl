@@ -4,7 +4,7 @@
 // rebuilt from it. Barotropic equations of state slave e_int to the density. The least e_int
 // accepted is the equation of state's own (eos_eint_floor).
 //
-// An axisymmetric run (cylindrical()) asks more of E - KE where the gas swirls. Its radial faces
+// An axisymmetric run (cylindrical(), and a spherical one likewise) asks more of E - KE where the gas swirls. Its radial faces
 // carry the total energy weighed by R and the angular momentum by R^2 (hydro/flux.wgsl
 // cyl_face), so the kinetic energy of the swirl that the new angular momentum gives and the one
 // the energy update holds differ, by a few percent of it at a steep edge; in cold gas carried
@@ -16,7 +16,7 @@
 const SWIRL_ETA = 0.1;
 var<private> g_kphi: f32 = 0.0;
 fn swirl_ke(rho: f32, mom: vec3<f32>) -> f32 {
-  return select(0.0, 0.5 * mom.z * mom.z / max(rho, P.rho_floor), cylindrical());
+  return select(0.0, 0.5 * mom.z * mom.z / max(rho, P.rho_floor), cylindrical() || spherical());
 }
 fn dual_energy(rho: f32, ke: f32, E: f32, eint: f32) -> vec2<f32> {
   if (EOS_HAS_ENERGY) {

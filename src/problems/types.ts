@@ -289,7 +289,16 @@ export interface Problem {
    * R from the axis (0 to box), y is z, and the third velocity component is v_phi (the layer is
    * the azimuth). Cells are rings, of volume 2 pi R dx^2: masses and energies are true ones.
    */
-  geometry?: 'cartesian' | 'cylindrical';
+  geometry?: 'cartesian' | 'cylindrical' | 'spherical';
+  /**
+   * 'spherical' geometry (docs/numerics.md section 22): a 2D run in (r, theta), a body of
+   * revolution about the z axis. Code x is r from `rMin` to rMin + box (uniform spacing, or
+   * logarithmic with `log`), y is theta from 0 to pi (both poles axes), and the third velocity
+   * component is v_phi. `init` is called with (r, theta, 0) at each cell's center and gives
+   * (v_r, v_theta, v_phi) as (vx, vy, vz). Point masses must sit at the origin, at rest: their
+   * pull joins the gas's own monopole field.
+   */
+  sphere?: { rMin: number; log?: boolean };
   /** Density below which gas does not ask for refinement (default: the fluff density, else ten times a star's ambient density, else 0, off). */
   refineRho?: number;
   /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */

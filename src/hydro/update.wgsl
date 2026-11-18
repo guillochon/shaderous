@@ -234,6 +234,27 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     fx.lo = cyl_face(fx.lo, w.x);
     fx.hi = cyl_face(fx.hi, w.y);
   }
+  // A spherical run: the faces weighed by their areas, and the geometric sources of the r and
+  // theta momenta. The pressure's share of each is (h - w_-) p_- + (w_+ - h) p_+ from the two
+  // faces' own pressures: with uniform pressure it is (w_+ - w_-) p, the cell's exact average
+  // of 2 p / r (or p cot(theta) / r), which the faces' difference cancels to rounding; and
+  // with the faces' pressures apart it leaves the net force h (p_- - p_+), the Cartesian one,
+  // so a hydrostatic atmosphere is held as the Cartesian reconstruction holds it. The angular
+  // momenta need no source: the lever arms carry them (sph_face).
+  var src_t = 0.0;
+  if (spherical() && !DEBUG_FLUX) {
+    let g = sph_cell(c.x, c.y);
+    let v = p0.a.yzw;
+    let rho = p0.a.x;
+    let pr = vec2<f32>(face_pressure(fx.lo, 0), face_pressure(fx.hi, 0));
+    let pt = vec2<f32>(face_pressure(fy.lo, 1), face_pressure(fy.hi, 1));
+    src_r = (g.h.x - g.wr.x) * pr.x + (g.wr.y - g.h.x) * pr.y + rho * (v.y * v.y + v.z * v.z) * g.ir;
+    src_t = (g.h.y - g.wt.x) * pt.x + (g.wt.y - g.h.y) * pt.y + rho * v.z * v.z * (g.wt.y - g.wt.x);
+    fx.lo = sph_face(fx.lo, g.wr.x, vec3<f32>(1.0, g.lr.x, g.lr.x));
+    fx.hi = sph_face(fx.hi, g.wr.y, vec3<f32>(1.0, g.lr.y, g.lr.y));
+    fy.lo = sph_face(fy.lo, g.wt.x, vec3<f32>(1.0, 1.0, g.lt.x));
+    fy.hi = sph_face(fy.hi, g.wt.y, vec3<f32>(1.0, 1.0, g.lt.y));
+  }
   if (DEBUG_FLUX) {
     textureStore(O1, c, vec4<f32>(fx.lo.m, fx.hi.m, fy.lo.m, fy.hi.m));
     textureStore(O2, c, vec4<f32>(fz.lo.m, fz.hi.m, 0.0, 0.0));
@@ -292,6 +313,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
 
   var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
   net.mom.x += src_r;
+  if (spherical()) { net.mom.y += src_t; }
   var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);
   if (has_sources()) { nw = apply_sources(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt); }
   nw = apply_damping(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt);
