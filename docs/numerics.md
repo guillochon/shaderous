@@ -2005,7 +2005,7 @@ $`\Delta x`$, so the update itself is the Cartesian one.
   potential $`-\sum G\,m/\max(r, r_\text{shell})`$ for the well-balanced reconstruction and the
   diagnostics. Point masses must sit at the origin, at rest: their $`GM`$ joins the enclosed
   mass and they are not kept as particles (no sinks; gas leaves through the inner face).
-  Self-gravity beyond the monopole, blocks, MHD, viscosity, species, frames, shear, expansion,
+  Self-gravity beyond the monopole, MHD, viscosity, species, frames, shear, expansion,
   mirrors, driving and burning are refused.
 
 The diagnostics' masses and energies are true ones (each cell's volume in its closed form), and
@@ -2023,6 +2023,54 @@ pointer (probes, tools, contour labels) and its markers use the same mapping
 (`src/spherical.ts` `sphFromView`, `sphToView`); obstacles drawn by hand do not (their outline
 is a linear map of the screen). A native screenshot is the same picture at the map's size. The `blast-spherical` preset is a
 point explosion at the origin.
+
+**On blocks** (spherical-plan S1's mesh refinement and S5), a level is the uniform grid at its
+own resolution: each cell's geometry (areas, volumes, lever arms, sources, the predictor's
+$`h_r/\Delta x`$ and $`h_\theta/\Delta x`$, the timestep's per-axis rates, both poles and the
+inner sphere) comes from its global indices on its level, with that level's
+$`r_\text{min}/\Delta x`$, $`\Delta\ln r`$ and $`\Delta\theta`$ (the finest level's, halved
+or doubled per level). A coarser level's logarithmic constants come from the finest's
+$`s = \sinh(\Delta/2)`$ by doubling, $`s' = 2s\sqrt{1 + s^2}`$, and then
+$`e^{\Delta/2} = c + s`$, $`\sinh\Delta = 2sc`$, $`\sinh\tfrac32\Delta = s(3 + 4s^2)`$ with
+$`c = \sqrt{1 + s^2}`$: no step cancels, and the finest level uses the CPU's constants as the
+uniform grid does. Across levels:
+
+- **Restriction** (on the fly and on merging) is the volume-weighted mean of the four children,
+  each weighing its $`\tfrac13\Delta(r^3)\,\Delta\cos\theta`$ over their mean, so that the sum
+  of $`V U`$ is kept; **prolongation** shifts the children's limited-slope offsets along $`r`$
+  and $`\theta`$ by $`\tfrac14(v_+ - v_-)/(v_+ + v_-)`$ of the parent, $`v_\pm`$ the radial
+  pair's volumes or the polar pair's $`\Delta\cos\theta`$, which centers them on the parent's
+  centroid, so their volume-weighted mean is the parent (the $`(R, z)`$ prolongation's shift is
+  this rule's radial one there).
+- **Flux matching**: a coarse face's flux is the area-weighted mean of the two fine fluxes,
+  along both axes: a radial face's fine faces weigh their $`\Delta\cos\theta`$, a polar face's
+  their $`\int r\,dr`$ ($`r_c\Delta r`$, or $`r_c^2\sinh\Delta`$ on a logarithmic grid). The
+  lever arms are the faces' own, the same on both sides.
+- **Per-block timesteps** work with the geometry: a deposit (the second half of a faster
+  neighbor's fluxes) weighs its fluxes by the cell's areas and lever arms but adds no source,
+  and the sources take the pressures of the cell's own faces (with the bins a face shared with a
+  faster neighbor carries half of the step's flux at first). The timestep is set by the
+  smallest cells, at $`r_\text{min}`$ beside the poles ($`r_\text{min}\Delta\theta`$); the
+  bins let the outer blocks step two or four times as long.
+- **Gravity** is the monopole of the leaves, summed into the finest level's shells: each leaf's
+  row of cells at one radial index (its mass Kahan-summed over $`\theta`$) hands each finest
+  shell it covers that shell's share of its volume, and the shells are summed in leaf order. A
+  cell's center at any level lies on a finest face, or at the finest level on a finest center,
+  so the mass inside it (and the sum of $`m/r`$ over the shells outside, for the potential) is
+  read at a half index of the finest shells, kept for the faces and centers of all of them.
+  The field atlas, its two ghost layers included, is filled from that; with per-block
+  timesteps the monopole is summed over the leaves as they stand at every substep and the
+  potential written is the current one, not extrapolated half a step (the blocks' halves differ).
+
+`sph-blocks`: on two levels, the Sedov blast (256² finest) has its shock 0.74% from the
+similarity solution along every one of 64 rays (0.72% with two time bins), and the swirling blob
+(128² finest, logarithmic) keeps mass, energy and angular momentum about the axis to
+$`3\times10^{-7}`$, $`1.3\times10^{-7}`$ and $`1.0\times10^{-6}`$ through ten re-meshes (with two
+bins $`2\times10^{-8}`$, $`1.2\times10^{-7}`$ and $`1.1\times10^{-6}`$, for 76% of a single
+timestep's block updates). `sph-polytrope-blocks`: the polytrope on two levels (128² finest,
+all three levels in use), settled as on the uniform grid, keeps the density of its innermost
+cells to 0.08% over 10 dynamical times (0.09% with two bins). On one level of blocks at 128²
+it holds to 0.040%, as on the uniform grid (0.039%); at the coarsest level alone (32²), 1.2%.
 
 Tests (`sph-*`): uniform gas at rest between reflecting spheres at $`r = 0.1`$ and 1, both poles
 in the grid, stays below Mach $`6\times10^{-6}`$ on uniform and logarithmic grids (64²), its

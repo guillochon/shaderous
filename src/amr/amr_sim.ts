@@ -36,6 +36,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
+import { sphSetup, spherical } from '../spherical';
 import { CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
@@ -204,6 +205,19 @@ export class AmrSim implements Simulation {
   private nMasses = 0;
   private nOwnMasses = 0;
   private grav?: AmrGravity;
+  /**
+   * A spherical run's gravity (amr/sph_monopole.wgsl): the monopole of its gas and its point
+   * masses at the origin, which are not particles. Its passes, their bind groups by parity (and
+   * the field's over all blocks or, with per-block timesteps, those starting a step), its buffer
+   * and its potential atlas.
+   */
+  private sphMono?: {
+    rows: GPUComputePipeline; shells: GPUComputePipeline; enclose: GPUComputePipeline; field: GPUComputePipeline; fieldNow: GPUComputePipeline;
+    gRows: GPUBindGroup[]; gShells: GPUBindGroup; gEnclose: GPUBindGroup; gField: GPUBindGroup; gFieldNow: GPUBindGroup[];
+    buf: GPUBuffer; phi: GPUTexture;
+  };
+  /** a spherical run: the G M of its point masses, all at the origin */
+  private centralGM = 0;
   private dummyPhi: GPUTexture;
   private redMp?: Multipoles;
   private redBh?: MassSums;
@@ -647,6 +661,7 @@ export class AmrSim implements Simulation {
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
+    if (spherical(cfg) && (isSelfGravity(cfg.gravity) || (cfg.problem.masses?.(cfg.params, cfg.G, cfg.problem.box / cfg.n, cfg.ndim).length ?? 0) > 0)) await sim.buildMonopole();
     if (sim.pMassField) {
       // The potential bindings are never read (there is none), but the pass declares them.
       sim.gMassField = bindGroup(d, sim.pMassField, {
@@ -743,7 +758,7 @@ export class AmrSim implements Simulation {
       DIAG_OPS,
       'amr/diagnostics.wgsl',
       slots,
-      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.dummyPhi), 4: v(this.heat), 30: this.bt, ...this.compIn })),
+      [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]), 3: v(this.grav?.phi ?? this.sphMono?.phi ?? this.dummyPhi), 4: v(this.heat), 30: this.bt, ...this.compIn })),
       'amr diagnostics',
     );
     diag.catch(() => {}); // a failure is reported where it is awaited, below
@@ -1041,6 +1056,15 @@ export class AmrSim implements Simulation {
     // The field atlas for every block (count >= 0) or for the blocks starting a step (-1).
     const fieldB = (pass: GPUComputePassEncoder, count: number) => {
       if (this.grav) return this.grav.encodeFieldB(pass, count);
+      if (this.sphMono) {
+        // A spherical run: the monopole of the leaves as they stand, the potential now (the
+        // blocks' half steps differ).
+        this.encodeMonopole(pass, p);
+        run(pass, this.sphMono.fieldNow, this.sphMono.gFieldNow[count < 0 ? 0 : 1]);
+        if (count < 0) pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
+        else this.padded(pass, count);
+        return;
+      }
       run(pass, this.pMassFieldB!, this.gMassFieldB[count < 0 ? 0 : 1]);
       if (count < 0) pass.dispatchWorkgroupsIndirect(this.binArgs, ARG(0));
       else this.padded(pass, count);
@@ -1190,7 +1214,8 @@ export class AmrSim implements Simulation {
       rhoMean: this.rhoMean,
       // Comoving coordinates: the state's scale factor as last read (syncScale keeps it current).
       scale: this.lastScale,
-      selfGravity: this.selfGravity,
+      // (A spherical run's monopole is the potential the diagnostics read.)
+      selfGravity: this.selfGravity || !!this.sphMono,
       masses: this.hasMasses ? this.nMasses : 0,
       amr: [this.slotsPerSide, this.n0 / BS, this.levels, this.layers],
       refine: [c.refineHi, c.jeansRefine],
@@ -1214,13 +1239,60 @@ export class AmrSim implements Simulation {
   private get selfGravity(): boolean {
     return isSelfGravity(this.cfg.gravity) && !!this.grav;
   }
+
+  /** A spherical run's monopole gravity (amr/sph_monopole.wgsl): its passes and buffers. */
+  private async buildMonopole() {
+    const d = this.device;
+    const code = assemble('amr/sph_monopole.wgsl');
+    const [rows, shells, enclose, field, fieldNow] = await Promise.all([
+      computePipeline(d, code, 'spherical monopole rows', undefined, 'rows'),
+      computePipeline(d, code, 'spherical monopole shells', undefined, 'shells'),
+      computePipeline(d, code, 'spherical monopole enclose', undefined, 'enclose'),
+      computePipeline(d, code, 'spherical monopole field', undefined, 'field'),
+      computePipeline(d, code, 'spherical monopole field (now)', { HALF: 0 }, 'field'),
+    ]);
+    const n = this.n;
+    const buf = d.createBuffer({ label: 'spherical monopole', size: 4 * (4 + 9 * n + 4 + this.cap * BS), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const phi = tex3d(d, this.slotsPerSide * PAD, 'r32float', 'spherical potential', this.layers);
+    const v = (t: GPUTexture) => t.createView();
+    this.sphMono = {
+      rows, shells, enclose, field, fieldNow, buf, phi,
+      gRows: [0, 1].map((p) => bindGroup(d, rows, { 0: this.params, 1: v(this.state[p][0]), 2: buf, 30: this.bt, 31: this.listLeaf })),
+      gShells: bindGroup(d, shells, { 0: this.params, 2: buf, 30: this.bt, 31: this.listLeaf }),
+      gEnclose: bindGroup(d, enclose, { 0: this.params, 2: buf }),
+      gField: bindGroup(d, field, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 30: this.bt, 31: this.listAll }),
+      gFieldNow: [this.listAct, this.listAll].map((list) => bindGroup(d, fieldNow, { 0: this.params, 2: buf, 3: v(phi), 4: v(this.gfield), 30: this.bt, 31: list })),
+    };
+  }
+
+  /**
+   * A spherical run's shells from the state at `parity`: the leaves' rows, the finest shells'
+   * masses and the sums inside and outside each (the last ones kept: encoding it twice leaves
+   * no history).
+   */
+  private encodeMonopole(pass: GPUComputePassEncoder, parity: number) {
+    const m = this.sphMono!;
+    pass.setPipeline(m.rows);
+    pass.setBindGroup(0, m.gRows[parity]);
+    pass.dispatchWorkgroups(Math.ceil((this.nLeaf * BS) / 64));
+    pass.setPipeline(m.shells);
+    pass.setBindGroup(0, m.gShells);
+    pass.dispatchWorkgroups(Math.ceil(this.n / 64));
+    pass.setPipeline(m.enclose);
+    pass.setBindGroup(0, m.gEnclose);
+    pass.dispatchWorkgroups(1);
+  }
   private get hasMasses(): boolean {
     return this.nMasses > 0;
   }
 
   /** Acceleration and half-step potential for every block, into the field atlas. */
   private encodeField(pass: GPUComputePassEncoder) {
-    if (this.grav) {
+    if (this.sphMono) {
+      pass.setPipeline(this.sphMono.field);
+      pass.setBindGroup(0, this.sphMono.gField);
+      this.padded(pass, this.nAll);
+    } else if (this.grav) {
       this.grav.encodeField(pass, this.nAll);
     } else {
       pass.setPipeline(this.pMassField!);
@@ -1230,7 +1302,7 @@ export class AmrSim implements Simulation {
   }
   /** The gravity field atlas is in use: by self-gravity, point masses or both. */
   private get fieldOn(): boolean {
-    return this.selfGravity || this.hasMasses;
+    return this.selfGravity || this.hasMasses || !!this.sphMono;
   }
 
   /**
@@ -1246,6 +1318,7 @@ export class AmrSim implements Simulation {
       if (this.cfg.gravity === 'isolated') this.redMp!.encode(pass, parity);
       g.encodeSolve(pass, this.nLevel, this.nAll, cycles, cold, together);
     }
+    if (this.sphMono) this.encodeMonopole(pass, parity);
     if (this.hasMasses && perturber !== 'none') {
       const live = perturber === 'step';
       if (live) {
@@ -1266,6 +1339,8 @@ export class AmrSim implements Simulation {
     if (newBlocks && this.selfGravity) this.grav!.encodeNewBlocks(pass, this.nLeaf);
     // Without new blocks to seed this is a cold start: each level begins from the coarser one.
     this.encodeSolve(pass, this.cur, cycles, perturber, !newBlocks);
+    // (A spherical run's monopole twice: no history either.)
+    if (this.sphMono) this.encodeMonopole(pass, this.cur);
     pass.end();
     // No history on this mesh: the half-step extrapolation starts from the potential itself.
     if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
@@ -1343,7 +1418,8 @@ export class AmrSim implements Simulation {
     const c = this.cfg;
     const d = this.device;
     const eos = makeEos(c.eos, c.eosParams);
-    const fn = c.problem.init(this.n, eos, c.ndim, c.params);
+    // (A spherical run's setup takes (r, theta): src/spherical.ts sphSetup.)
+    const fn = sphSetup(c, c.problem.init(this.n, eos, c.ndim, c.params));
     const surface = surfaceOf(fn, eos);
     let run = await InitRun.start(c, this.n, this.dx0, this.levels);
     // With self-gravity a level that only partly fits the block budget is left out altogether:
@@ -1434,7 +1510,12 @@ export class AmrSim implements Simulation {
     this.rhoMean = mass / c.problem.box ** c.ndim;
     // The clock (clockState), at the snapshot's time for a restart.
     d.queue.writeBuffer(this.clock, 0, clockState(c, c.restart?.time ?? 0, c.restart?.steps ?? 0));
-    const masses = initialMasses(c, this.massDx);
+    // A spherical run's point masses sit at the origin: their pull joins the monopole field
+    // (amr/sph_monopole.wgsl), and they are not kept as particles.
+    const sph = spherical(c);
+    const masses = sph ? [] : initialMasses(c, this.massDx);
+    this.centralGM = sph ? initialMasses(c, this.massDx).reduce((a, m) => a + m.gm, 0) : 0;
+    if (this.sphMono) d.queue.writeBuffer(this.sphMono.buf, 0, new Float32Array([this.centralGM, isSelfGravity(c.gravity) ? 1 : 0, 0, 0]));
     this.nMasses = this.nOwnMasses = masses.length;
     d.queue.writeBuffer(this.bh, 0, packMasses(masses));
     this.debrisBuf?.reset(c.restart?.debris);
@@ -2807,6 +2888,25 @@ export class AmrSim implements Simulation {
           }
     }
     return out;
+  }
+
+  /**
+   * Write every leaf's conserved state back, in the order of readLeaves(), on the mesh it was read
+   * from, and start the clock again from 0 with the potential of that state, as Sim.setState does
+   * (validation: a test that stops the gas to settle it).
+   */
+  setLeaves(u1: Float32Array, u2: Float32Array) {
+    this.flush();
+    const depth = this.cfg.ndim === 3 ? BS : 1;
+    const per = BS * BS * depth * 4;
+    const layout = { bytesPerRow: BS * 16, rowsPerImage: BS };
+    this.tree.leaves().forEach((b, i) => {
+      const origin = this.origin(b.slot);
+      this.device.queue.writeTexture({ texture: this.state[this.cur][0], origin }, u1.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+      this.device.queue.writeTexture({ texture: this.state[this.cur][1], origin }, u2.subarray(i * per, (i + 1) * per) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
+    });
+    this.device.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
+    this.refreshPotential();
   }
 
   /**

@@ -7,6 +7,7 @@ import { makeEos } from '../eos/eos';
 import { loadHelmholtz } from '../eos/helmholtz';
 import { compileSetup } from '../setup/compile';
 import type { SimConfig } from '../sim';
+import { sphSetup } from '../spherical';
 import { problemCoefficients } from '../species/mixture';
 import { speciesGroups } from '../species/species';
 import { indicator, leafState, surfaceOf, type FillContext, type Sample } from './init_cpu';
@@ -27,7 +28,7 @@ self.onmessage = async (e: MessageEvent<InitRequest>) => {
       // before this setup answers.
       if (cfg.eos === 'helmholtz') await loadHelmholtz();
       const eos = makeEos(cfg.eos, cfg.eosParams);
-      const fn = problem.init(m.n, eos, cfg.ndim, cfg.params);
+      const fn = sphSetup(cfg, problem.init(m.n, eos, cfg.ndim, cfg.params));
       ctx = {
         cfg, dx0: m.dx0, levels: m.levels, fn, eos,
         kc: problemCoefficients(problem, cfg.eosParams.gamma),

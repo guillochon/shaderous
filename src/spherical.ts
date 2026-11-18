@@ -106,3 +106,19 @@ export function sphToView(c: SphereShape, fx: number, fy: number): [number, numb
   const rho = Math.max(0, r) / g.rMax;
   return [(rho * Math.sin(th)) / 2, (1 + rho * Math.cos(th)) / 2];
 }
+
+/**
+ * A spherical run's setup at code positions, as the block grid places its cells (amr/init_cpu.ts):
+ * code x runs from r_min over the box, uniform in the fraction u = (x - r_min) / box, which is r
+ * itself on a uniform grid and r_min (r_max / r_min)^u on a logarithmic one; code y runs over the
+ * box from 0, theta = pi y / box. At a cell's center these are sphGrid's r(i) and theta(j). Any
+ * other run's setup is returned as it is.
+ */
+export function sphSetup<T>(c: SphereShape, fn: (x: number, y: number, z: number) => T): (x: number, y: number, z: number) => T {
+  if (!spherical(c)) return fn;
+  const g = sphGrid(c);
+  const box = c.problem.box;
+  const span = Math.log(g.rMax / g.rMin);
+  const r = (x: number) => (g.dlog > 0 ? g.rMin * Math.exp(((x - g.rMin) / box) * span) : x);
+  return (x, y, z) => fn(r(x), (Math.PI * y) / box, z);
+}

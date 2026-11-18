@@ -55,6 +55,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       zp = cons_from_w(c + vec3<i32>(0, 0, 1));
     }
     if (cylindrical()) { g_cyl_ic = f32(blk_coord(src).x * BS + lc.x) + 0.5; }
+    if (spherical()) { g_sph_pro = sph_centroid(bt(src, 0u), (blk_coord(src) * BS + lc).xy); }
     u = prolong(uc, cons_from_w(c - ex), cons_from_w(c + ex), cons_from_w(c - ey), cons_from_w(c + ey), zm, zp, l & vec3<i32>(1));
   } else if (kind == 3) {
     let ch = RG[r + 4u + u32(h.x | (h.y << 1u) | (h.z << 2u))];
@@ -63,13 +64,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var a = vec4<f32>(0.0);
     var b = vec4<f32>(0.0);
     let nz = select(2, 1, is2d());
-    // (An axisymmetric run: volume-weighted, amr/cons.wgsl cyl_child_weight.)
-    let pi = blk_coord(inv.slot).x * BS + l.x;
+    // (An axisymmetric or spherical run: volume-weighted, amr/grid.wgsl child_weight.)
     for (var k = 0; k < nz; k++) {
       for (var j = 0; j < 2; j++) {
         for (var i = 0; i < 2; i++) {
           let c = atl(o, f + vec3<i32>(i, j, k));
-          let wr = cyl_child_weight(pi, 2 * pi + i);
+          let wr = child_weight(inv.slot, l, i, j);
           a += wr * textureLoad(U1, c, 0);
           b += wr * textureLoad(U2, c, 0);
         }

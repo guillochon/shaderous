@@ -181,16 +181,39 @@ struct SphCell {
   r: f32,         // r_c / dx
   st: f32,        // sin(theta_c)
 }
-// sin(theta) of the polar face j (0 to n), formed from the nearer pole so that both are exactly 0.
-fn sph_sin_face(j: i32) -> f32 {
-  return sin(f32(min(j, i32(P.dims.y) - j)) * P.sph.z);
+// The grid a spherical cell's geometry is taken on: (r_min / dx, the step in ln r or 0, the step
+// in theta) of its level, its cells along theta, and its logarithmic constants (P.sph2's). The
+// uniform grid's is Params' own (sph_grid); a block's level is sph_level's.
+struct SphGrid { r0: f32, d: f32, dt: f32, nt: i32, k: vec4<f32> }
+fn sph_grid() -> SphGrid {
+  return SphGrid(P.sph.x, P.sph.y, P.sph.z, i32(P.dims.y), P.sph2);
 }
-fn sph_cell(i: i32, j: i32) -> SphCell {
+// The grid `c` levels coarser than P.sph's (the finest of a block grid, P.n cells per side):
+// r_min / dx halved, the steps doubled per level. The logarithmic constants come from
+// s = sinh(D/2) by doubling, s' = 2 s sqrt(1 + s^2), which cancels nothing: e^(D/2) = c + s,
+// sinh D = 2 s c, sinh(3D/2) = s (3 + 4 s^2), with c = sqrt(1 + s^2). At c = 0, Params' own.
+fn sph_level(c: i32) -> SphGrid {
+  if (c <= 0) { return SphGrid(P.sph.x, P.sph.y, P.sph.z, i32(P.n), P.sph2); }
+  let f = f32(1 << u32(c));
+  var s = 0.5 * P.sph2.w;
+  for (var m = 0; m < c; m++) { s = 2.0 * s * sqrt(1.0 + s * s); }
+  let ch = sqrt(1.0 + s * s);
+  let k = vec4<f32>(ch + s, 1.5 / max(s * (3.0 + 4.0 * s * s), 1.0e-30), 2.0 * s * ch, 2.0 * s);
+  return SphGrid(P.sph.x / f, P.sph.y * f, P.sph.z * f, i32(P.n) >> u32(c), k);
+}
+// sin(theta) of the polar face j (0 to n), formed from the nearer pole so that both are exactly 0.
+fn sph_sin_face_g(j: i32, q: SphGrid) -> f32 {
+  return sin(f32(min(j, q.nt - j)) * q.dt);
+}
+fn sph_sin_face(j: i32) -> f32 {
+  return sph_sin_face_g(j, sph_grid());
+}
+fn sph_cell_g(i: i32, j: i32, q: SphGrid) -> SphCell {
   var g: SphCell;
   let fi = f32(i) + 0.5;
-  if (P.sph.y == 0.0) {
+  if (q.d == 0.0) {
     // Uniform in r: r_c / dx = r_min / dx + i + 1/2, volume / (dx^3 dcos) = r_c^2 + 1/12.
-    let rc = P.sph.x + fi;
+    let rc = q.r0 + fi;
     let d3 = rc * rc + 1.0 / 12.0;
     let rm = rc - 0.5;
     let rp = rc + 0.5;
@@ -201,40 +224,49 @@ fn sph_cell(i: i32, j: i32) -> SphCell {
     g.h.x = 1.0;
   } else {
     // Logarithmic: r_c = r_min e^((i + 1/2) D); r_+- = r_c e^(+-D/2).
-    let rc = P.sph.x * exp(fi * P.sph.y);
-    let e = P.sph2.x;
-    let k = P.sph2.y / rc;
+    let rc = q.r0 * exp(fi * q.d);
+    let e = q.k.x;
+    let k = q.k.y / rc;
     g.r = rc;
     g.wr = k * vec2<f32>(1.0 / (e * e), e * e);
     g.lr = vec2<f32>(1.0 / e, e);
-    g.ir = k * P.sph2.z;
-    g.h.x = 1.0 / (rc * P.sph2.w);
+    g.ir = k * q.k.z;
+    g.h.x = 1.0 / (rc * q.k.w);
   }
-  let jm = min(j, i32(P.dims.y) - 1 - j);
-  let tc = (f32(j) + 0.5) * P.sph.z;
-  g.st = sin((f32(jm) + 0.5) * P.sph.z);
+  let jm = min(j, q.nt - 1 - j);
+  let tc = (f32(j) + 0.5) * q.dt;
+  g.st = sin((f32(jm) + 0.5) * q.dt);
   g.cot = cos(tc) / g.st;
-  let s = vec2<f32>(sph_sin_face(j), sph_sin_face(j + 1));
+  let s = vec2<f32>(sph_sin_face_g(j, q), sph_sin_face_g(j + 1, q));
   g.lt = s / g.st;
   // dcos(theta) = 2 sin(theta_c) sin(dtheta / 2).
-  g.wt = g.ir * s / (2.0 * g.st * sin(0.5 * P.sph.z));
-  g.h.y = g.ir / P.sph.z;
+  g.wt = g.ir * s / (2.0 * g.st * sin(0.5 * q.dt));
+  g.h.y = g.ir / q.dt;
   return g;
 }
-// The volume of cell (i, j), the azimuth's 2 pi included.
-fn sph_volume(i: i32, j: i32) -> f32 {
+fn sph_cell(i: i32, j: i32) -> SphCell {
+  return sph_cell_g(i, j, sph_grid());
+}
+// (r_+^3 - r_-^3) / 3 over dx^3 of radial index i, and cos(theta_-) - cos(theta_+) of polar index j.
+fn sph_v3(i: i32, q: SphGrid) -> f32 {
   let fi = f32(i) + 0.5;
-  var v3 = 0.0;   // (r_+^3 - r_-^3) / 3 over dx^3
-  if (P.sph.y == 0.0) {
-    let rc = P.sph.x + fi;
-    v3 = rc * rc + 1.0 / 12.0;
-  } else {
-    let rc = P.sph.x * exp(fi * P.sph.y);
-    v3 = rc * rc * rc / P.sph2.y;
+  if (q.d == 0.0) {
+    let rc = q.r0 + fi;
+    return rc * rc + 1.0 / 12.0;
   }
-  let jm = min(j, i32(P.dims.y) - 1 - j);
-  let dcos = 2.0 * sin((f32(jm) + 0.5) * P.sph.z) * sin(0.5 * P.sph.z);
-  return 6.2831853 * v3 * dcos * P.dx * P.dx * P.dx;
+  let rc = q.r0 * exp(fi * q.d);
+  return rc * rc * rc / q.k.y;
+}
+fn sph_dcos(j: i32, q: SphGrid) -> f32 {
+  let jm = min(j, q.nt - 1 - j);
+  return 2.0 * sin((f32(jm) + 0.5) * q.dt) * sin(0.5 * q.dt);
+}
+// The volume of cell (i, j) of cell size dx, the azimuth's 2 pi included.
+fn sph_volume_g(i: i32, j: i32, q: SphGrid, dx: f32) -> f32 {
+  return 6.2831853 * sph_v3(i, q) * sph_dcos(j, q) * dx * dx * dx;
+}
+fn sph_volume(i: i32, j: i32) -> f32 {
+  return sph_volume_g(i, j, sph_grid(), P.dx);
 }
 // For the predictor and the timestep: dx over the cell's own length along each axis (1 on every
 // axis of a Cartesian grid, where the cells are cubes of side dx; set per cell in a spherical run).

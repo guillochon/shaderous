@@ -64,6 +64,7 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
     if (mid) { v[k] = MaybeCons(mid_cons(cs, at), true); } else { v[k] = u_near(cs, at); }
   }
   if (cylindrical()) { g_cyl_ic = f32(gc.x) + 0.5; }
+  if (spherical()) { g_sph_pro = sph_centroid(bt(cs, 0u), gc.xy); }
   let u = prolong(v[0].u, v[1], v[2], v[3], v[4], v[5], v[6], gf & vec3<i32>(1));
   g_cyl_ic = 0.0;
   return u;
@@ -103,7 +104,12 @@ fn main(
       let depth = select(BS, 1, is2d());
       if (all(inv.l >= vec3<i32>(0)) && all(inv.l < vec3<i32>(BS, BS, depth)) && blk_leaf(inv.slot) && !solid) {
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
-        let rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
+        var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
+        // A spherical run: per axis over its own cell length (hydro/rates.wgsl).
+        if (spherical()) {
+          let h = blk_sph(inv.slot, inv.l).h;
+          rate = (abs(w.w1.y) + w.w2.y) * h.x + (abs(w.w1.z) + w.w2.y) * h.y;
+        }
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
         g += ext_accel(blk_pos(inv.slot, inv.l));

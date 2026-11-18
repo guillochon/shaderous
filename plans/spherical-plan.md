@@ -7,8 +7,11 @@ uniform or logarithmic spacing in r, both poles, an inner sphere reflecting or o
 monopole and point masses at the origin; S6 diagnostics with true volumes and `.athdf` written
 as `spherical_polar`, and the display: the slice view draws the meridional (R, z) half-plane,
 sampling the (r, θ) map per pixel (src/spherical.ts sphFromView, render/slice.wgsl sph_code). Tests `sph-rest`, `sph-conserve`, `sph-sedov`, `sph-polytrope`, `sph-bondi`
-pass (docs/numerics.md section 22, "Spherical (r, θ) runs"). Not done: blocks (S1's mesh
-refinement, S5), the Mignone slope weights (second order without them), reading such files back, and gravity's work in flux
+pass (docs/numerics.md section 22, "Spherical (r, θ) runs"). On blocks (2026-11-18, order step
+4): S1's mesh refinement with each cell's geometry from its global indices on its level,
+volume-weighted restriction and prolongation, area-weighted flux matching; S5 per-block
+timesteps; S4's monopole summed over the leaves into the finest shells (tests `sph-blocks`,
+`sph-polytrope-blocks`). Not done: the Mignone slope weights (second order without them), reading such files back, and gravity's work in flux
 form (kick form is used: the flux form with the well-balanced reconstruction grew a polytrope's
 fundamental mode). Plan as written 2026-11-17 follows; file references are to the commit that
 added this file.

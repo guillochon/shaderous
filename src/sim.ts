@@ -462,16 +462,15 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
 export { spherical } from './spherical';
 
 /**
- * Why a spherical (r, theta) run cannot go as configured, or null. The first version:
- * hydrodynamics on a uniform 2D grid, with the monopole of its own gravity and point masses at
- * the origin (docs/numerics.md section 22).
+ * Why a spherical (r, theta) run cannot go as configured, or null: hydrodynamics in 2D, on the
+ * uniform grid or on blocks (per-block timesteps included), with the monopole of its own gravity
+ * and point masses at the origin (docs/numerics.md section 22).
  */
 export function sphericalUnsupported(c: SimConfig): string | null {
   if (c.problem.geometry !== 'spherical') return null;
   if (c.ndim !== 2) return 'a spherical run is two-dimensional, in (r, theta)';
   const s = c.problem.sphere;
   if (!s || !(s.rMin > 0)) return 'a spherical run needs an inner radius above zero';
-  if (c.amrLevels > 0) return 'spherical runs are on the uniform grid only (not on blocks) yet';
   if (c.problem.mhd) return 'magnetic fields are not available in spherical runs yet';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in spherical runs yet';
   for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
