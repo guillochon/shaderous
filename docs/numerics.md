@@ -1662,7 +1662,12 @@ two did. The predictor adds the drag's rates to its half step.
 
 **Gravity.** The Poisson source is divided by $`a`$ at the end of the step it is solved for,
 and the field stored is the proper acceleration $`-\nabla\Phi/a`$, so the kicks, the predictor
-and the timestep use it unchanged.
+and the timestep use it unchanged. The energy takes the kick form (what the kick adds to the
+kinetic energy) rather than the flux-form work: the flux form charged the energy with the
+potential's differences while the kick took the field, and in the cold gas of the pancake
+preset (temperature $`10^{-10}`$) $`E - KE`$ was then that disagreement, which the dual-energy
+switch took for heat: the temperature rose $`10^5`$-fold in the first step. With the kick
+form it falls as $`a^{-2}`$, as adiabatic expansion has it, to 0.4% after 47 steps.
 
 The well-balanced reconstruction is off in comoving runs. It measures pressure deviations
 from hydrostatic balance, and for cold gas falling far from balance those deviations, as large
@@ -1710,8 +1715,9 @@ pressure as $`a^{3 - 3\gamma}`$ ($`5\times10^{-7}`$, uniform grid and blocks); a
 grows as $`a`$ (0.8%); a traveling sound wave whose phase, over 25 radians from $`a = 0.1`$ to
 0.3, follows $`\int k c_s/a\,dt`$ with the proper sound speed falling as $`1/a`$ (0.07%, its
 comoving wavelength fixed); gas and radiation expanding (above); and the pancake against its
-exact solution at half its caustic time (density 1%, velocity 0.3%; 3.6% in density on blocks,
-whose coarse cells are twice as large).
+exact solution at half its caustic time (density 0.6%, velocity 0.25%; on blocks 6.5% in
+density, at the pancake's center, which is not understood: the uniform grid at the blocks'
+finest cell size gets 0.6%).
 
 ### Shearing box
 

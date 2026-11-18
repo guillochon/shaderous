@@ -974,7 +974,11 @@ export function packParams(
   f[31] = c.problem.mhd && (fl.va ?? 0) > 0 ? fl.va! : 0;
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
+  // (Flux-form gravitational work, bit 0, is off in comoving coordinates: it charges the energy
+  // with the potential's differences, while the kick takes the proper field grad(phi) / a, so
+  // there the two disagreed by a factor a, and in cold gas E - KE was that disagreement. The kick
+  // form adds the kinetic energy the kick adds, exactly.)
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
   f.set(
     [
       x.dx,
