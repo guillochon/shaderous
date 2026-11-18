@@ -2287,7 +2287,7 @@ export class Sim implements Simulation {
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
       // energy (E - KE there includes B^2 / 2).
-      if (this.mhd) {
+      if (this.mhd && !this.destroyed) {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
@@ -2305,7 +2305,8 @@ export class Sim implements Simulation {
    */
   /**
    * Set by destroy(). A readback that was waiting when the run was replaced must not then
-   * encode work on its destroyed textures (previewDt, after readDiagnostics' map).
+   * encode work on its destroyed textures (previewDt and the magnetic diagnostics, after
+   * readDiagnostics' map).
    */
   private destroyed = false;
 

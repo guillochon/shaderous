@@ -2846,6 +2846,31 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'mhd-replaced',
+    name: 'MHD: a run replaced while its diagnostics are being read (rotor 2D at 64; on blocks, the blast 3D at 64, 1 level)',
+    criterion:
+      'diagnostics() started just before destroy() (as when a load replaces a run whose readouts are being read) submits nothing after it: no WebGPU validation error (its magnetic part used to be encoded on the destroyed face field, found by tools/random-test)',
+    async run(gpu) {
+      const metrics: Record<string, number> = {};
+      const d = gpu.device;
+      const check = async (k: string, sim: Sim | AmrSim) => {
+        sim.step(5);
+        await d.queue.onSubmittedWorkDone();
+        d.pushErrorScope('validation');
+        const reading = sim.diagnostics().catch(() => null);
+        sim.destroy();
+        await reading;
+        await d.queue.onSubmittedWorkDone();
+        const err = await d.popErrorScope();
+        if (err) console.log(`${k}: ${err.message}`);
+        metrics[`${k}_validation_errors`] = err ? 1 : 0;
+      };
+      await check('rotor', await Sim.create(gpu, configFor(mhdRotor, 64, { ndim: 2, tEnd: Infinity })));
+      await check('blast_blocks', await AmrSim.create(gpu, configFor({ ...mhdBlast, bcLo: all(1), bcHi: all(1) }, 64, { ndim: 3, amrLevels: 1, tEnd: Infinity })));
+      return { pass: Object.values(metrics).every((v) => v === 0), metrics };
+    },
+  },
+  {
     id: 'mhd-field-brush',
     name: 'MHD field brushes: strength (stronger, then weaker) and pull, on the rotor (2D, 128) and an outflow blast (3D, 32), and on blocks (rotor 2D, 256 finest; outflow blast 3D, 128 finest; 1 level)',
     criterion:
