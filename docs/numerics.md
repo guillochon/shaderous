@@ -671,10 +671,29 @@ things particular to it.
 does, so for one the refinement indicator (§17) also takes the same normalized second
 derivative of each velocity component, with ripples measured against the largest speed of the
 initial conditions (so that liquid at rest, whose velocity is round-off, asks for nothing).
+A gas with implicit pressure, which is there for low Mach numbers, takes it too.
 It finds under-resolved shear layers and the edges of vortices: a double shear layer a fifth
-of a root cell thick is refined from one level to three within 0.3 time units
-(`psplit-amr-shear`). A layer three cells thick reads 0.3, under the default threshold of 0.8.
-The mesh a run starts on is still chosen from density and pressure alone.
+of a root cell thick is refined to three levels, at the start and as it moves
+(`psplit-amr-shear`). A layer three cells thick reads 0.3, under the default threshold of 0.8,
+and the kinks of the Gresho vortex's velocity read 0.6 to 0.7.
+The mesh a run starts on is chosen the same way (`amr/init_cpu.ts`), with the velocity's
+ripples measured against the largest speed sampled in each block, and a liquid's pressure
+against $`\rho c_0^2`$ as on the GPU. (Before that the starting mesh measured a liquid's
+pressure against its own magnitude, which is near zero: it refined wherever the pressure
+curved at all, and the first regrid merged those blocks again.)
+
+*An ideal gas on blocks* (`amr/pressure/*_gas.wgsl`). The uniform grid's gas step, level by
+level: the solve is for the change from the carried solved pressure, which has its own atlas
+with ghosts (`lag_fill.wgsl`) because the gas's internal-energy slot is in use; the face
+velocities the update keeps go to the source; and the carried fluxes of the correction are
+matched at refinement faces like the liquid's. Its coefficients vary from cell to cell:
+$`\alpha = 1/(\rho c^2 \Delta t^2)`$ and $`1/\rho`$ on faces. A leaf takes them from the
+advected state's primitives. A parent takes the means of its children's, restricted level by
+level once a step (`coef_restrict.wgsl`). The primitives of a parent would not do: a block
+whose children are refined themselves holds a placeholder state, and the levels below such a
+block would solve another equation. With them the cycle reduced the residual by 0.65 a cycle
+on a three-level mesh and a run at Mach 0.01 blew up within 25 steps; with restricted
+coefficients it is 0.04 a cycle, as on a two-level mesh and as for the liquid.
 
 *Obstacles, inlets and a uniform field on blocks.* A face on an obstacle, in this block or the
 next, on the coarser side or among the fine faces of a refined one, takes no pressure flux and
@@ -689,18 +708,26 @@ at 16 cells across: 1.43), with 0.2% of its steps' solves ending above the toler
 number of $`2\times10^{-6}`$ (`psplit-amr-balance`).
 
 Measured (`psplit-amr-*`): a Gresho vortex on a three-level mesh whose refinement boundaries
-run through it (256 cells across at the finest) takes 400 steps to $`t = 1`$ at Mach 0.1,
-0.01 and 0.001 alike, against the explicit scheme's 6 800 at Mach 0.1, and keeps 0.9992 of its
-kinetic energy at each (explicit: 0.9968); mass is conserved to $`4\times10^{-7}`$ and momentum
-to $`3\times10^{-8}`$ of the sum of its magnitudes; the composite residual after three cycles is
-1 to $`4\times10^{-5}`$ of the right-hand side, and no step ended above $`10^{-4}`$. A mesh that
+run through it (512 cells across at the finest, refined on its velocity at a threshold of
+0.6) takes 273 steps to $`t = 1`$ at Mach 0.1, 0.01 and 0.001 alike, against the explicit
+scheme's 12 900 at Mach 0.1, and keeps 0.9993 of its kinetic energy at each (explicit, to
+$`t = 0.5`$: 0.9994); mass is conserved to $`2\times10^{-7}`$ and momentum to
+$`4\times10^{-8}`$ of the sum of its magnitudes. The liquid's composite residual after three
+cycles is 4 to $`10\times10^{-4}`$ of the right-hand side. That is single-precision round-off
+of the operator at this cell size, not the solver: at Mach 0.1 it is $`3\times10^{-4}`$ after
+2, 4 and 8 cycles alike ($`1.2\times10^{-4}`$ at 256 cells). The ideal gas on the same mesh
+(`psplit-amr-gas`, Mach 0.1 and 0.01) keeps 0.9992, conserves mass to $`6\times10^{-8}`$ and
+total energy to $`5\times10^{-8}`$, and its residual, of a solve for the change alone, is 1 to
+$`3\times10^{-5}`$ early in the run and under $`10^{-3}`$ throughout; its density moves by
+0.35% in the first steps, a sound wave the setup's pressure sheds at the refinement
+boundaries. A mesh that
 merges its fine blocks as it runs leaves the density within $`0.78\,M^2`$: no pressure pulse.
 Without refinement the block grid reproduces the uniform grid's run to $`10^{-7}`$ in kinetic
 energy. In 3D it runs and conserves; it has not been measured beyond that.
 
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
-or frames (and the liquid without self-gravity); the ideal gas on the uniform grid only; on the adaptive mesh also
-without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
+or frames (and the liquid without self-gravity); on the adaptive mesh also
+without gravity for the ideal gas and without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. The block grid's timestep has no limit from the pressure's acceleration, which the uniform grid has: a shock tube on blocks needs `acousticCfl` of about 4, where the uniform grid needs nothing. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2390,7 +2417,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 149 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 150 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

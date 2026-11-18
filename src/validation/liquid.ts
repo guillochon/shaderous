@@ -206,11 +206,11 @@ export const LIQUID_TESTS: TestDef[] = [
   },
   {
     id: 'liquid-amr',
-    name: 'Liquid on the adaptive mesh: a Gresho vortex across a refinement boundary (2D, 256 finest, 2 levels)',
+    name: 'Liquid on the adaptive mesh: a Gresho vortex across refinement boundaries (2D, 512 finest, 3 levels)',
     criterion:
-      'The mesh starts with three levels, the boundaries between them running through the vortex, and no block is merged (the refinement may only grow). After t = 1 (6800 steps): mass conserved to 2e-6, each momentum component to 1e-6 of the sum of |momentum|, and the vortex keeps more than 99% of its kinetic energy and gains none',
+      'The velocity indicator, at a threshold of 0.6, starts the mesh with three levels, the boundaries between them running through the vortex, and no block is merged (the refinement may only grow). After t = 0.5 (6400 steps): mass conserved to 2e-6, each momentum component to 1e-6 of the sum of |momentum|, and the vortex keeps more than 99% of its kinetic energy and gains none',
     async run(gpu) {
-      return withAmr(gpu, gresho, 256, { ndim: 2, tEnd: 1, amrLevels: 2, refineLo: 0 }, async (sim) => {
+      return withAmr(gpu, gresho, 512, { ndim: 2, tEnd: 0.5, amrLevels: 2, refineHi: 0.6, refineLo: 0 }, async (sim) => {
         const d0 = await sim.diagnostics();
         const levels = new Set(sim.tree.leaves().map((b) => b.level));
         const cells = await sim.readLeaves();

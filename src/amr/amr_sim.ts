@@ -244,7 +244,15 @@ export class AmrSim implements Simulation {
   private pCorrect!: GPUComputePipeline;
   /** The largest speed of the initial conditions: the scale of the liquid's velocity refinement indicator (amr/flag.wgsl). */
   private vRef = 0;
+  /** The initial conditions' gas pressures: sum, count, least, greatest (the implicit solve's reference pressure). */
+  private pStat: [number, number, number, number] = [0, 0, Infinity, 0];
   private gSpeciesFinal: GPUBindGroup[][] = [];
+  /** Implicit pressure for a gas with an energy: the face velocities the update keeps (lower, upper). */
+  private faceVel?: GPUTexture[];
+  /** And its solved pressure, carried from step to step with ghosts (amr/pressure/lag_fill.wgsl). */
+  private lagP?: GPUTexture;
+  /** That pressure is to be started from the state's: at the start, and after a regrid. */
+  private lagFresh = true;
   /** Implicit pressure (SimConfig.pressure): the solve and its passes on the leaves (amr/pressure.ts). */
   prs?: AmrPressure;
   private gCorrect: GPUBindGroup[] = [];
@@ -698,6 +706,9 @@ export class AmrSim implements Simulation {
     const on = this.timeBins > 0;
     return {
       ...hydroSlots(this.cfg),
+      // Implicit pressure for a gas with an energy: the update keeps its face velocities.
+      ap_store: implicitPressure(this.cfg) && this.cfg.eos !== 'liquid' ? 'amr/pressure/store_on.wgsl' : 'amr/pressure/store_off.wgsl',
+      ap_lag: implicitPressure(this.cfg) && this.cfg.eos !== 'liquid' ? 'amr/pressure/lag_gas.wgsl' : 'amr/pressure/lag_liquid.wgsl',
       bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl',
       mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl',
       species: this.speciesGroups > 0 ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
@@ -778,16 +789,25 @@ export class AmrSim implements Simulation {
     if (pPredict) this.pPredict = pPredict;
     if (implicitPressure(this.cfg)) {
       const c = this.cfg;
+      if (c.eos !== 'liquid' && !this.faceVel) {
+        const at = this.state[0][0];
+        this.faceVel = [0, 1].map((i) => tex3d(d, at.width, 'rgba32float', `amr face velocities ${i}`, at.depthOrArrayLayers, at.height));
+        this.lagP = tex3d(d, at.width, 'r32float', 'amr carried pressure', at.depthOrArrayLayers, at.height);
+      }
       const kind = (b: number) => (b === PERIODIC ? PF_PERIODIC : b === 1 || b === 3 ? PF_OPEN : PF_CLOSED);
       this.prs ??= await AmrPressure.create({
         device: d, params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, listLevel: this.listLevel, levels: this.levels,
-        state: this.state, prim: this.prim[0], slots,
+        state: this.state, prim: this.prim[0], prim2: this.prim[1], slots,
+        gas: this.faceVel ? { faceLo: this.faceVel[0], faceHi: this.faceVel[1], lag: this.lagP! } : undefined,
+        flat: (pass, count, reach) => this.flat(pass, count, reach),
         rootDims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),
         interior: (pass, count) => this.interior(pass, count),
       });
       this.prs.setTolerance(c.pressureTol);
     } else {
       this.prs?.destroy();
+    for (const t of this.faceVel ?? []) t.destroy();
+    this.lagP?.destroy();
       this.prs = undefined;
     }
     this.gBrush = [0, 1].map((p) =>
@@ -808,6 +828,7 @@ export class AmrSim implements Simulation {
     const predict = (list: GPUBuffer) =>
       bindGroup(d, this.pPredict, {
         0: this.params, 1: this.clock, 2: v(this.prim[0]), 3: v(this.prim[1]), 4: v(this.gfield), 5: v(this.pred[0]), 6: v(this.pred[1]), 20: this.bh, 30: this.bt, 31: list, ...bin,
+        ...((this.lagP && implicitPressure(this.cfg) ? { 47: v(this.lagP) } : {}) as Record<number, GPUTextureView>),
         ...this.compIn,
       });
     const assembly = (p: number, list: GPUBuffer, q = -1) =>
@@ -993,6 +1014,7 @@ export class AmrSim implements Simulation {
     return bindGroup(this.device, pipe, {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 20: this.bh, 30: this.bt, 31: list,
+      ...((this.faceVel && implicitPressure(this.cfg) ? { 45: v(this.faceVel[0]), 46: v(this.faceVel[1]) } : {}) as Record<number, GPUTextureView>),
       ...bin,
       ...this.compIn,
       ...((this.massFluxWindows ? { 12: this.massFluxWindows.lo, ...(this.massFluxWindows.hi ? { 32: this.massFluxWindows.hi } : {}) } : {}) as Record<number, Bindable>),
@@ -1261,6 +1283,9 @@ export class AmrSim implements Simulation {
       refine: [c.refineHi, c.jeansRefine],
       solids: this.solids,
       vref: this.vRef,
+      // A gas's reference pressure for the implicit solve: its mean at the start, where the
+      // pressure does not span decades (Sim.setState has the uniform grid's).
+      pref: implicitPressure(this.cfg) && this.cfg.eos !== 'liquid' && this.pStat[1] > 0 && this.pStat[3] < 4 * this.pStat[2] ? this.pStat[0] / this.pStat[1] : 0,
       sources: this.nSources > 0,
     });
     this.device.queue.writeBuffer(this.params, 0, buf);
@@ -1447,6 +1472,7 @@ export class AmrSim implements Simulation {
    * (amr/init_pool.ts), and done on the page otherwise, with the same result.
    */
   async reset() {
+    this.lagFresh = true;
     this.resetting = true;
     try {
       await this.resetState();
@@ -1510,6 +1536,7 @@ export class AmrSim implements Simulation {
     const leafMass = new Float64Array(leaves.length);
     this.solids = false;
     this.vRef = 0;
+    this.pStat = [0, 0, Infinity, 0];
     this.nSources = 0;
     d.queue.writeBuffer(this.sources, 0, packSources([]));
     const write = (i: number, s: LeafState) => {
@@ -1526,6 +1553,12 @@ export class AmrSim implements Simulation {
       leafMass[i] = s.mass;
       if (s.solids) this.solids = true;
       this.vRef = Math.max(this.vRef, s.vmax ?? 0);
+      if (s.pstat) {
+        this.pStat[0] += s.pstat[0];
+        this.pStat[1] += s.pstat[1];
+        this.pStat[2] = Math.min(this.pStat[2], s.pstat[2]);
+        this.pStat[3] = Math.max(this.pStat[3], s.pstat[3]);
+      }
     };
     let filled = false;
     if (run && leaves.length > 1) filled = await run.leaves(leaves, write).then(() => true, () => false);
@@ -2030,6 +2063,7 @@ export class AmrSim implements Simulation {
   private applyRegrid(enc: GPUCommandEncoder) {
     const plan = this.pending!;
     this.pending = null;
+    this.lagFresh = true;
     if (plan.steps) this.onRegrid?.(plan.steps);
     if (this.mhd) {
       // Before the new tree replaces it: the primitives of the current state with their ghosts
@@ -2139,6 +2173,11 @@ export class AmrSim implements Simulation {
         continue;
       }
       const pass = beginPass(enc);
+      if (this.prs && this.lagFresh) {
+        // A gas's carried pressure, from the state's: at the start and after a regrid.
+        this.prs.encodeInit(pass, p, this.nLeaf);
+        this.lagFresh = false;
+      }
       pass.setPipeline(this.pAssemble);
       pass.setBindGroup(0, this.assembleGroup(p));
       this.flat(pass, this.nAll, NG);
@@ -2156,6 +2195,7 @@ export class AmrSim implements Simulation {
       if (this.prs) {
         // Implicit pressure: the advected state's primitives, ghosts and all, then the equation,
         // the solve and the correction back into this parity (amr/pressure.ts).
+        this.prs.encodeKeep(pass, this.nLeaf);
         pass.setPipeline(this.pAssemble);
         pass.setBindGroup(0, this.assembleGroup(1 - p));
         this.flat(pass, this.nAll, NG);

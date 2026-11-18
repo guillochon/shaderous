@@ -105,7 +105,8 @@ fn lohner(c: vec3<i32>) -> f32 {
   // indicator on the velocity's components finds its shear layers and the edges of its
   // vortices (plans/incompressible.md 5.7). Ripples are measured against the largest speed the
   // run started with (P.ohm.z), so that gas at rest, whose velocity is round-off, asks for nothing.
-  if (p_signed() && P.ohm.z > 0.0) {
+  // The same holds of a gas with implicit pressure (P.ohm.y), which is there for low Mach numbers.
+  if ((p_signed() || P.ohm.y > 0.0) && P.ohm.z > 0.0) {
     let v0 = textureLoad(W1, c, 0).yzw;
     var nv = 0.0;
     var dv = 0.0;

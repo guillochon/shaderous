@@ -1,6 +1,7 @@
 // The residual of the composite equation over the leaves, for the tally (pressure/tally.wgsl):
 // the largest |b - A p| and the largest |b|, as float bits.
 #include "amr/pressure/common.wgsl"
+#include <ap_coef>
 
 @group(0) @binding(2) var PRS: texture_storage_3d<r32float, read>;
 @group(0) @binding(3) var RHS: texture_3d<f32>;
@@ -21,7 +22,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let h = blk_dx(inv.slot);
     let s = ap_both(inv.slot, inv.l);
     let b = textureLoad(RHS, c, 0).x;
-    let r = b - ((s.y + ap_alpha() * h * h) * textureLoad(PRS, c).x - s.x) / (h * h);
+    let r = b - ((s.y + ap_alpha_at(inv.slot, inv.l) * h * h) * textureLoad(PRS, c).x - s.x) / (h * h);
     atomicMax(&wg[0], bitcast<u32>(abs(r)));
     atomicMax(&wg[1], bitcast<u32>(abs(b)));
   }

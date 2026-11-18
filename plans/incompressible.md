@@ -4,8 +4,9 @@ Status (2026-11-18): stages 0 (2.4), 1 (3.8), 2 (4.2.1, 4.12) and 3 (5.10) are d
 liquid. Implicit pressure for an
 ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Self-gravity
 for the ideal gas is done on the uniform grid (5.11). Obstacles and
-inlets work with it on the adaptive mesh (5.11). Not done: point masses with implicit
-pressure; the ideal gas with it on the adaptive mesh. Figures quoted from the code in
+inlets work with it on the adaptive mesh (5.11), and so does the ideal gas, without gravity
+(5.11). Not done: point masses with implicit pressure; gravity for the ideal gas on blocks;
+second order in time. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -908,6 +909,20 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
 - **Obstacles and inlets on blocks** (liquid): the block passes read the cells' marks
   (`ap_mark`), close faces on obstacles and send an inlet's momentum through, fine faces
   included. `psplit-amr-wake` (5.8): three levels, period 1.40 against the uniform grid's 1.43.
+- **The ideal gas on blocks** (no gravity): the gas step of 4.12 with a carried-pressure atlas,
+  the kept face velocities and matched carried fluxes. What held it up: its coefficients on a
+  block whose children are refined were read from that block's primitives, which are a
+  placeholder there (`amr/cons.wgsl` `u_at`), so every mesh of three levels solved the wrong
+  coarse equation (0.65 a cycle; Mach 0.01 blew up). The solver now restricts its own
+  coefficients (`coef_restrict.wgsl`): 0.04 a cycle. `psplit-amr-gas`. Not built: a
+  pressure-acceleration limit on the block timestep (a shock tube on blocks needs
+  `acousticCfl` near 4), and gravity.
+- **The starting mesh reads the velocity** and measures a liquid's pressure against
+  $`\rho c_0^2`$, as the GPU indicator does. The Gresho tests' three-level meshes had come from
+  the old starting indicator dividing by a pressure near zero; they are now made by the
+  velocity indicator at a threshold of 0.6, at 512 cells. At that size the liquid's residual
+  is at single-precision round-off ($`3\times10^{-4}`$, the same after 2 to 8 cycles), so those
+  tests' tolerance is $`3\times10^{-3}`$. A solve for the change, as the gas has, would lower it.
 
 ## 6. Not covered
 

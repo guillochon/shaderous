@@ -3,6 +3,7 @@
 // coefficients (beta = 1, alpha) to the uniform textures. Otherwise: they take the solved
 // pressure back.
 #include "amr/pressure/common.wgsl"
+#include <ap_coef>
 
 override TO_ROOT: bool = true;
 
@@ -25,7 +26,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(UB, g, vec4<f32>(textureLoad(RHS, c, 0).x + textureLoad(TAU, c, 0).x, 0.0, 0.0, 0.0));
     // Coefficients: a root leaf's face on an obstacle or an inlet takes no pressure flux, and a
     // cell inside one is no part of the solve.
-    var k = vec4<f32>(1.0, 1.0, 1.0, ap_alpha());
+    var k = vec4<f32>(ap_beta(inv.slot, inv.l, 0, true), ap_beta(inv.slot, inv.l, 1, true), 1.0, ap_alpha_at(inv.slot, inv.l));
+    if (!is2d()) { k.z = ap_beta(inv.slot, inv.l, 2, true); }
     if (ap_held(inv.slot, inv.l)) {
       k = vec4<f32>(0.0);
     } else {

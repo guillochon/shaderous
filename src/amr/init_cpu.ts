@@ -10,7 +10,7 @@ import type { Eos } from '../eos/eos';
 import { makeEos } from '../eos/eos';
 import { burnIndicator, burnIndices, isNetworkBurn } from '../burn/burn';
 import { cellMark, type Prim } from '../problems/types';
-import { burnSpec, type SimConfig } from '../sim';
+import { burnSpec, implicitPressure, type SimConfig } from '../sim';
 import { packSpecies, SPECIES_JUMP_SCALE } from '../species/species';
 import { hydrogenParticles, mixMoments, type Moments } from '../species/mixture';
 import { blockFaces } from '../mhd/amr_mhd';
@@ -26,7 +26,7 @@ export interface BlockAt {
 }
 
 /** One sample of the setup, as the indicator reads it. */
-export type Sample = { rho: number; p: number; X?: readonly number[] };
+export type Sample = { rho: number; p: number; vx: number; vy: number; vz: number; X?: readonly number[] };
 export type Setup = (x: number, y: number, z: number) => Prim;
 
 /**
@@ -41,11 +41,14 @@ export const pressureOf = (eos: Eos, w: { rho: number; p: number }): number => (
  * for them all: the mesh takes tens of millions of samples for a large 3D start.
  */
 export function surfaceOf(fn: Setup, eos: Eos): (x: number, y: number, z: number) => Sample {
-  const sample = { rho: 0, p: 0, X: undefined as readonly number[] | undefined };
+  const sample = { rho: 0, p: 0, vx: 0, vy: 0, vz: 0, X: undefined as readonly number[] | undefined };
   return (x, y, z) => {
     const w = fn(x, y, z);
     sample.rho = w.solid ? 4 * w.rho : w.rho;
     sample.p = pressureOf(eos, w);
+    sample.vx = w.solid ? 0 : w.vx;
+    sample.vy = w.solid ? 0 : w.vy;
+    sample.vz = w.solid ? 0 : w.vz;
     sample.X = w.solid ? undefined : w.X;
     return sample;
   };
@@ -95,6 +98,12 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
   }
   const rho = new Float64Array(m * m * mz);
   const pr = new Float64Array(m * m * mz);
+  // A liquid, or any gas with implicit pressure: its velocity too, and a liquid's pressure
+  // against rho c^2 (amr/flag.wgsl has the reasons).
+  const liquid = cfg.eos === 'liquid';
+  const vel = liquid || implicitPressure(cfg) ? [0, 1, 2].map(() => new Float64Array(m * m * mz)) : null;
+  const pScale = liquid ? 0.04 * cfg.eosParams.liqC ** 2 : 0;
+  let vmax = 0;
   // The species' mass fractions, normalized as packSpecies stores them.
   const ns = cfg.problem.species?.length ?? 0;
   const xs = Array.from({ length: ns }, () => new Float64Array(m * m * mz));
@@ -105,6 +114,12 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
         if (dense > 0 && w.rho > dense) return Infinity;
         rho[(k * m + j) * m + i] = w.rho;
         pr[(k * m + j) * m + i] = w.p;
+        if (vel) {
+          vel[0][(k * m + j) * m + i] = w.vx;
+          vel[1][(k * m + j) * m + i] = w.vy;
+          vel[2][(k * m + j) * m + i] = w.vz;
+          vmax = Math.max(vmax, Math.hypot(w.vx, w.vy, w.vz));
+        }
         if (ns) {
           let sum = 0;
           for (let s = 0; s < ns; s++) sum += Math.max(w.X?.[s] ?? 0, 0);
@@ -115,7 +130,8 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
   let ind = 0;
   const strides = three ? [sub, sub * m, sub * m * m] : [sub, sub * m];
   const ns2 = strides.length;
-  const lohner = (q: Float64Array, a: number) => {
+  // `floor`: what a ripple is measured against where the quantity has no magnitude of its own.
+  const lohner = (q: Float64Array, a: number, floor = 0) => {
     let num = 0;
     let den = 0;
     const q0 = q[a];
@@ -124,7 +140,22 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
       const qp = q[a + s];
       const qm = q[a - s];
       num += (qp - 2 * q0 + qm) ** 2;
-      den += (Math.abs(qp - q0) + Math.abs(q0 - qm) + 0.01 * (Math.abs(qp) + 2 * Math.abs(q0) + Math.abs(qm))) ** 2;
+      den += (Math.abs(qp - q0) + Math.abs(q0 - qm) + (floor > 0 ? floor : 0.01 * (Math.abs(qp) + 2 * Math.abs(q0) + Math.abs(qm)))) ** 2;
+    }
+    return den > 0 ? Math.sqrt(num / den) : 0;
+  };
+  // The velocity's components together, against the largest speed sampled in the block. (The
+  // GPU pass has the largest speed of the whole start; a setup's velocity, unlike a run's, is
+  // exactly zero where the gas is at rest.)
+  const shear = (a: number) => {
+    let num = 0;
+    let den = 0;
+    for (let t = 0; t < ns2; t++) {
+      const s = strides[t];
+      for (const q of vel!) {
+        num += (q[a + s] - 2 * q[a] + q[a - s]) ** 2;
+        den += (Math.abs(q[a + s] - q[a]) + Math.abs(q[a] - q[a - s]) + 0.04 * vmax) ** 2;
+      }
     }
     return den > 0 ? Math.sqrt(num / den) : 0;
   };
@@ -143,7 +174,8 @@ export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: numbe
     for (let j = sub; j < m - sub; j++)
       for (let i = sub; i < m - sub; i++) {
         const a = (k * m + j) * m + i;
-        ind = Math.max(ind, lohner(rho, a), lohner(pr, a));
+        ind = Math.max(ind, lohner(rho, a), lohner(pr, a, pScale * rho[a]));
+        if (vel && vmax > 0) ind = Math.max(ind, shear(a));
         for (const x of xs) ind = Math.max(ind, jump(x, a));
         if (fuel) ind = Math.max(ind, burnIndicator(burn!, eos!, rho[a], pr[a], fuel[a], dx));
       }
@@ -167,6 +199,8 @@ export interface LeafState {
   solids: boolean;
   /** the largest speed among the block's cells */
   vmax: number;
+  /** the gas cells' pressures: their sum, count, least and greatest */
+  pstat: [number, number, number, number];
 }
 
 /** What the fill needs beyond the configuration, made once per reset. */
@@ -203,6 +237,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   let mass = 0;
   let solids = false;
   let vmax = 0;
+  const pstat: [number, number, number, number] = [0, 0, Infinity, 0];
   let o = 0;
   for (let k = 0; k < depth; k++)
     for (let j = 0; j < BS; j++)
@@ -219,7 +254,13 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
         const eint = ce.eintFromP(w.rho, p);
         const mark = cellMark(w);
         if (mark) solids = true;
-        else vmax = Math.max(vmax, Math.hypot(w.vx, w.vy, w.vz));
+        else {
+          vmax = Math.max(vmax, Math.hypot(w.vx, w.vy, w.vz));
+          pstat[0] += p;
+          pstat[1]++;
+          pstat[2] = Math.min(pstat[2], p);
+          pstat[3] = Math.max(pstat[3], p);
+        }
         const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
         mass += w.rho * vol;
         u1[o] = w.rho;
@@ -240,5 +281,5 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
         u2[o + 3] = mark;
         if (sp) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);
       }
-  return { u1, u2, faces, km, sp, mass, solids, vmax };
+  return { u1, u2, faces, km, sp, mass, solids, vmax, pstat };
 }

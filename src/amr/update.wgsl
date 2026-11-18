@@ -29,6 +29,7 @@
 #include "amr/blk_dt.wgsl"
 #include <frame>
 #include <psplit>
+#include <ap_store>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -387,6 +388,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if (gm.z == 0 && sym_lo(2) && !is2d()) { oz.lo = mirror_flux(oz.lo, 2); }
     // With species, their pass needs the mass fluxes as this cell computed them.
     store_mass_flux(slot, l, c, ox, oy, oz);
+    store_face_velocities(c, vec3<f32>(ox.lo.vn, oy.lo.vn, oz.lo.vn), vec3<f32>(ox.hi.vn, oy.hi.vn, oz.hi.vn));
     own = array<Faces, 3>(ox, oy, oz);
   }
   let matched = match_faces(own, slot, l);

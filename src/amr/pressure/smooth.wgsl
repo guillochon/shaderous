@@ -3,6 +3,7 @@
 // per side), so a cell reads only the other color, here and in neighboring blocks, and the
 // coarser level, which this pass does not write.
 #include "amr/pressure/common.wgsl"
+#include <ap_coef>
 
 @group(0) @binding(2) var PRS: texture_storage_3d<r32float, read_write>;
 @group(0) @binding(3) var RHS: texture_3d<f32>;
@@ -26,5 +27,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let h = blk_dx(inv.slot);
   let s = ap_plain(inv.slot, l);
   let b = textureLoad(RHS, c, 0).x + textureLoad(TAU, c, 0).x;
-  textureStore(PRS, c, vec4<f32>((s.x + h * h * b) / (s.y + ap_alpha() * h * h), 0.0, 0.0, 0.0));
+  textureStore(PRS, c, vec4<f32>((s.x + h * h * b) / (s.y + ap_alpha_at(inv.slot, l) * h * h), 0.0, 0.0, 0.0));
 }

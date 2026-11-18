@@ -35,6 +35,7 @@ fn load_q(c: vec3<i32>) -> Q {
 }
 
 #include "hydro/predictor.wgsl"
+#include <ap_lag>
 
 // Composition moments of a cell, ghosts included (amr/assemble.wgsl stores them).
 fn load_comp(c: vec3<i32>) -> vec4<f32> {
@@ -126,7 +127,9 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
     // 0.001 that is single-precision noise as large as the flow's own pressure. In the face
     // form of pressure/predict_on.wgsl: rho times the mean of the two faces'
     // (p_far - p) / rho_f, a wall's face being in balance with the uniform field.
-    let p0 = textureLoad(W2, c, 0).w;
+    // (A gas with an energy has no spare slot: its solved pressure is carried beside the state,
+    // amr/pressure/lag_fill.wgsl. <ap_lag> reads whichever it is.)
+    let p0 = ap_lagp(c);
     g_pgrad = vec3<f32>(0.0);
     let nax = select(3, 2, is2d());
     for (var axis = 0; axis < nax; axis++) {
@@ -140,7 +143,7 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
           f[u] = sg * g_dx * P.gext[axis];
         } else {
           let cq = c + select(-e, e, u == 1);
-          f[u] = (textureLoad(W2, cq, 0).w - p0) / (0.5 * (q.a.x + abs(textureLoad(W1, cq, 0).x)));
+          f[u] = (ap_lagp(cq) - p0) / (0.5 * (q.a.x + abs(textureLoad(W1, cq, 0).x)));
         }
       }
       g_pgrad[axis] = 0.5 * mask[axis] * q.a.x * (f.y - f.x);

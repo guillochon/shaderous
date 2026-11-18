@@ -8,6 +8,7 @@
 // cell is refined (zero elsewhere): with it the plain operator, which the level relaxes,
 // reproduces the composite one for the fine pressures as they are now.
 #include "amr/pressure/common.wgsl"
+#include <ap_coef>
 
 override STAGE: u32 = 0u;
 
@@ -30,7 +31,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let l = inv.l;
   let c = atl(blk_origin(slot), l);
   let h = blk_dx(slot);
-  let ah2 = ap_alpha() * h * h;
+  let ah2 = ap_alpha_at(slot, l) * h * h;
   let leaf = blk_leaf(slot);
   if (STAGE == 0u) {
     if (leaf) { return; }
@@ -50,7 +51,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       // (A child in an obstacle has no equation, and no residual.)
       if (ap_held(child, lf)) { continue; }
       let s = ap_plain(child, lf);
-      r += textureLoad(RHS, cf).x + textureLoad(TAU, cf).x - ((s.y + 0.25 * ah2) * pf - s.x) / (hf * hf);
+      r += textureLoad(RHS, cf).x + textureLoad(TAU, cf).x - ((s.y + ap_alpha_at(child, lf) * hf * hf) * pf - s.x) / (hf * hf);
     }
     p /= f32(nk);
     textureStore(PRS, c, vec4<f32>(p, 0.0, 0.0, 0.0));
