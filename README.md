@@ -120,8 +120,8 @@ the grid's own potential still hold stars and atmospheres in hydrostatic balance
 
 Shaderous is meant for teaching, for exploring a problem before committing to a production
 run, and for sharing a reproducible setup as a link. It is not a replacement for codes such as
-Athena++, FLASH or RAMSES: it runs on one GPU, within the memory the browser allows, and has
-no radiation transport. On a 24 GB card that memory goes a long way: the largest run so far,
+Athena++, FLASH or RAMSES: it runs on one GPU, within the memory the browser allows, and its
+radiation transport (gray, M1) runs on the uniform grid only so far. On a 24 GB card that memory goes a long way: the largest run so far,
 a magnetized accretion disk at 512^3 with three levels of refinement, held 16.8 GB of GPU
 memory (about 24 million cells) on an RTX 4090 and ran an orbit in 14 minutes
 ([details](docs/headless.md#largest-run-so-far)). The state can be exported as Athena++-style HDF5 that

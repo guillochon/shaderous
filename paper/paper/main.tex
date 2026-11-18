@@ -520,7 +520,7 @@ The memory of the GPU, rather than the code, limits the size of a run. On a serv
 \section{Discussion}
 \label{sec:discussion}
 
-Shaderous is not a replacement for production codes. It runs on one GPU, within the memory that the browser will allocate, and it has no radiation transport. Its resistivity, viscosity and conduction are explicit, isotropic and have constant coefficients. Single precision is adequate for the problems that ship with the code, but round-off is biased when a uniform background sits exactly on a power of two, and long integrations accumulate errors that double precision would not.
+Shaderous is not a replacement for production codes. It runs on one GPU, within the memory that the browser will allocate, and its radiation transport (gray, with the M1 closure) runs on the uniform grid only. Its resistivity, viscosity and conduction are explicit, isotropic and have constant coefficients. Single precision is adequate for the problems that ship with the code, but round-off is biased when a uniform background sits exactly on a power of two, and long integrations accumulate errors that double precision would not.
 
 The design choices of Sections~\ref{sec:conservation} to~\ref{sec:amr} came from constraints of WebGPU, but they do not depend on it. Gathering fluxes and recomputing them across refinement and time-bin boundaries trades extra arithmetic for less storage and less memory traffic, which suits any processor whose throughput is limited by memory rather than by arithmetic. Computing ghost cells on load removes a synchronization step from every AMR cycle. The MHD solver does not gather: it stores its face fluxes and edge electric fields, and it keeps a flux register at refinement boundaries.
 
