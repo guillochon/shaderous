@@ -400,7 +400,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `damp` | Damping zone | an object, which may be left out | Beyond a radius the gas is relaxed toward the disk as it started, more strongly toward the box’s edge, so the outer disk is a reservoir and the boundaries see only it |
 | `damp.from` | Damping from r | a number, 0 to 1e+30. Default `1` | Radius from the box center where the damping zone starts |
 | `damp.rate` | Damping rate | a number, 0 to 1e+30. Default `3` | How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off |
-| `loops` | Field loops | an object, which may be left out | Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability (balanced profile) |
+| `loops` | Field loops | an object, which may be left out | Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability |
 | `loops.beta` | Plasma beta at the midplane | a number, 1 to 1000000000. Default `50` | Gas pressure over magnetic pressure where two loops meet: the larger, the weaker the field |
 | `loops.span` | Span of a loop | a number, 1.05 to 4. Default `1.35` | Each loop spans this factor in radius |
 | `loops.count` | Loops | a whole number, 1 to 16. Default `4` | How many loops, outward from the inner radius |

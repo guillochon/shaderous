@@ -1716,7 +1716,7 @@
         },
         "additionalProperties": false,
         "title": "Field loops",
-        "description": "Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability (balanced profile)"
+        "description": "Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability"
        },
        "stresses": {
         "type": "boolean",
