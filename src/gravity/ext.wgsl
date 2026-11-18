@@ -5,17 +5,22 @@
 // form), while self-gravity's work stays in flux form: the tidal field changes the kinetic
 // energy of cold, fast debris by hundreds of times its internal energy each step, and the flux
 // form's truncation-level mismatch with the kick would land in E - KE.
+// A rotating frame's centrifugal force (gravity/rot.wgsl) is a potential too, and is added here
+// with the same rules, so every pass that sees the masses sees it.
 // Requires P, a binding `BH: Masses` (gravity/ext_bind.wgsl declares one) and gravity/bh.wgsl.
 #include "gravity/bh.wgsl"
+#include "gravity/rot.wgsl"
 
 fn ext_on() -> bool {
-  return P.bh.z != 0.0;
+  return P.bh.z != 0.0 || P.rot.w != 0.0;
 }
 
-// Acceleration at x: the masses' pull less the frame's own acceleration.
+// Acceleration at x: the masses' pull less the frame's own acceleration, and the centrifugal
+// force of a rotating frame.
 fn ext_accel(x: vec3<f32>) -> vec3<f32> {
   if (!ext_on()) { return vec3<f32>(0.0); }
   var g = -BH.frame.xyz;
+  if (P.rot.w != 0.0) { g += rot_accel(x); }
   for (var i = 0u; i < mass_count(); i++) { g += bh_accel(x, BH.list[i]); }
   return g;
 }
@@ -27,6 +32,7 @@ fn ext_accel(x: vec3<f32>) -> vec3<f32> {
 fn ext_dphi(x: vec3<f32>, d: vec3<f32>, ahead: f32) -> f32 {
   if (!ext_on()) { return 0.0; }
   var s = dot(BH.frame.xyz, d);
+  if (P.rot.w != 0.0) { s += rot_dphi(x, d); }
   for (var i = 0u; i < mass_count(); i++) {
     let m = BH.list[i];
     let r = x - (m.pos.xyz + ahead * m.vel.xyz);
@@ -47,8 +53,9 @@ fn ext_phi_masses(x: vec3<f32>, ahead: f32) -> f32 {
   return phi;
 }
 
-// The masses' potential and the frame's, a . x, at x: what the display adds to self-gravity's.
+// The masses' potential and the frame's, a . x (and a rotating frame's centrifugal potential:
+// the effective potential), at x: what the display adds to self-gravity's.
 fn ext_phi(x: vec3<f32>) -> f32 {
   if (!ext_on()) { return 0.0; }
-  return dot(BH.frame.xyz, x) + ext_phi_masses(x, 0.0);
+  return dot(BH.frame.xyz, x) + rot_phi(x) + ext_phi_masses(x, 0.0);
 }

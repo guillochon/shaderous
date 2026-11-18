@@ -8,6 +8,7 @@
 // cell to the upper neighbor, for the well-balanced pressure slopes (hydro/q.wgsl): zero
 // when that is off.
 // Requires P, hydro/q.wgsl, and g_dx and g_dt set.
+#include <frame>
 
 // The half-step state `pr` of cell q moved toward first order by weight w: at w = 1 the cell as
 // it is with no slopes, as the positivity check below makes it.
@@ -81,10 +82,13 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   let da = v.x * sx.a + v.y * sy.a + v.z * sz.a;
   let db = v.x * sx.b + v.y * sy.b + v.z * sz.b;
   let gradp = vec3<f32>(sx.b.x, sy.b.x, sz.b.x);
+  // A non-inertial frame's velocity-dependent forces join the half kick.
+  var gf = g;
+  if (FRAME_ON) { gf += frame_vaccel(v); }
 
   var a = vec4<f32>(
     rho - h * (da.x + rho * dv),
-    v - h * (da.yzw + gradp / rho) + 0.5 * g_dt * g,
+    v - h * (da.yzw + gradp / rho) + 0.5 * g_dt * gf,
   );
   var b = vec2<f32>(q.b.x - h * (db.x + rho * cs * cs * dv), q.b.y - h * db.y);
 

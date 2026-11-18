@@ -50,7 +50,12 @@ struct Params {
                          //   (x lo, x hi, y lo, y hi, z lo, z hi)
   org: vec4<f32>,        // the domain's lower corner (src/domain.ts domainLo): cell c is centered
                          //   at (c + 0.5) dx + org
+  rot: vec4<f32>,        // a rotating frame (gravity/rot.wgsl): its angular velocity, and 1 in w
+                         //   for the centrifugal force; all zero for an inertial frame
 }
+
+// The state as the frame slot (gravity/frame_off.wgsl) hands it back.
+struct FrameState { u1: vec4<f32>, u2: vec4<f32> }
 
 struct Clock {
   dt: f32,     // timestep of the step being taken

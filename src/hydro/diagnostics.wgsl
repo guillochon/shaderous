@@ -1,6 +1,7 @@
 // Diagnostics reduction source. Channel order must match DIAG in src/sim.ts.
 #include "hydro/common.wgsl"
 #include <eos>
+#include "gravity/rot.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -38,6 +39,9 @@ fn red_cell(c: vec3<i32>) -> Red {
   let xb = (vec3<f32>(c) + 0.5) * P.dx + P.org.xyz;
   let x = select(xb, vec3<f32>(xb.xy, 0.0), P.dims.z == 1u);
   egrav -= rho * dot(P.gext.xyz, x) * dv;
+  // A rotating frame's centrifugal potential: the total energy is then the Jacobi integral,
+  // which is what the frame conserves.
+  if (P.rot.w != 0.0) { egrav += rho * rot_phi(x) * dv; }
   let floored = select(0.0, 1.0, u1.x <= P.rho_floor * 1.0001 || p <= P.p_floor * 1.0001);
 
   var r0: Red;

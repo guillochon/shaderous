@@ -3,6 +3,7 @@
 #include "hydro/common.wgsl"
 #include <eos>
 #include "amr/grid.wgsl"
+#include "gravity/rot.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -59,6 +60,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   let x = blk_pos(slot, l);
   // Potential energy in the uniform external field, measured from the box center.
   var egrav = -rho * dot(P.gext.xyz, x) * dv;
+  // A rotating frame's centrifugal potential (hydro/diagnostics.wgsl).
+  if (P.rot.w != 0.0) { egrav += rho * rot_phi(x) * dv; }
   var jeans = 0.0;
   if (has_potential()) {
     // Periodic potentials are defined up to a constant; weighting by (rho - mean) removes it.

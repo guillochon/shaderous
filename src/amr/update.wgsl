@@ -27,6 +27,7 @@
 #include "amr/list.wgsl"
 #include <bins>
 #include "amr/blk_dt.wgsl"
+#include <frame>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -374,7 +375,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   // The point masses' pull and the frame's: kicked with the rest, its energy always in kick
   // form (gravity/ext.wgsl).
   let gx = ext_accel(blk_pos(slot, l));
-  let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0));
+  // (A rotating frame's centrifugal force is part of gx, with or without point masses.)
+  let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0)) || ext_on();
   let flux_work = gravity && (P.flags & 1u) != 0u;
   var dw = 0.0;
   if (flux_work) {
@@ -390,8 +392,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     }
   }
 
-  let u1 = textureLoad(U1, c, 0);
-  let u2 = textureLoad(U2, c, 0);
+  var u1 = textureLoad(U1, c, 0);
+  var u2 = textureLoad(U2, c, 0);
+  // A non-inertial frame's velocity-dependent forces, the first half of the block's step of
+  // them (gravity/frame_off.wgsl). A deposit applies none, as it applies no kick.
+  if (FRAME_ON && !g_deposit) {
+    let fs = frame_open(u1, u2, 0.5 * g_dt);
+    u1 = fs.u1;
+    u2 = fs.u2;
+  }
   // From here on the equation of state is this cell's.
   comp_use(comp_tex(c));
   var kick = vec3<f32>(0.0);
@@ -421,9 +430,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (gravity && !self_gravity) {
     // Second half kick, with the updated density.
     let rho = nw.u1.x;
-    let k2 = 0.5 * g_dt * rho * g;
-    let mom = nw.u1.yzw + k2;
+    var k2 = 0.5 * g_dt * rho * g;
     var E = nw.u2.x;
+    // A rotating frame's centrifugal force (without self-gravity or point masses, which would
+    // close the step in amr/correct.wgsl): its energy in kick form.
+    if (ext_on()) {
+      let kx2 = 0.5 * g_dt * rho * gx;
+      k2 += kx2;
+      if (flux_work) { E += dot(kx2, nw.u1.yzw + 0.5 * k2) / rho; }
+    }
+    let mom = nw.u1.yzw + k2;
     var eint = nw.u2.y;
     if (flux_work) {
       let en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
@@ -433,6 +449,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
       E += dot(k2, nw.u1.yzw + 0.5 * k2) / rho;
     }
     nw = NewState(vec4<f32>(rho, mom), vec4<f32>(E, eint, nw.u2.z, 0.0));
+  }
+  // The second half of the frame's forces, where no correction pass follows.
+  if (FRAME_ON && !self_gravity) {
+    let fs = frame_close(nw.u1, nw.u2, 0.5 * g_dt);
+    nw = NewState(fs.u1, fs.u2);
   }
   if (has_sources()) { nw = apply_sources(nw, box_frac(blk_pos(slot, l)), g_dt); }
   nw = apply_damping(nw, box_frac(blk_pos(slot, l)), g_dt);

@@ -23,6 +23,7 @@
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
 #include "hydro/fluff.wgsl"
+#include <frame>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -170,8 +171,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
                + fz.hi.m * dphi_half(c, ez) - fz.lo.m * dphi_half(c, -ez));
   }
 
-  let u1 = textureLoad(U1, c, 0);
-  let u2 = textureLoad(U2, c, 0);
+  var u1 = textureLoad(U1, c, 0);
+  var u2 = textureLoad(U2, c, 0);
+  // A non-inertial frame's velocity-dependent forces, the first half step of them
+  // (gravity/frame_off.wgsl); the second is applied after the second kick.
+  if (FRAME_ON) {
+    let fs = frame_open(u1, u2, 0.5 * clock.dt);
+    u1 = fs.u1;
+    u2 = fs.u2;
+  }
   // From here on the equation of state is this cell's.
   comp_use(comp_tex(c));
 

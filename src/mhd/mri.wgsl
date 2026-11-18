@@ -7,6 +7,7 @@
 // above some 20. Where the field dominates the gas (beta below 1, a magnetized corona) the MRI
 // does not grow and Q means nothing: it is 0 there. Requires P, gravity/bh.wgsl and a binding
 // BH: Masses.
+#include "gravity/rot.wgsl"
 struct Cyl {
   er: vec3<f32>,     // unit vector away from the mass's axis
   ephi: vec3<f32>,   // unit vector along the orbit
@@ -74,7 +75,10 @@ fn disk_channels(B: vec3<f32>, rho: f32, mom: vec3<f32>, p: f32, x: vec3<f32>, d
     r[3] = rho * q.y * dv;
     r[4] = rho * dv;
   }
-  let v = mom / max(rho, P.rho_floor) - BH.list[0].vel.xyz;
+  var v = mom / max(rho, P.rho_floor) - BH.list[0].vel.xyz;
+  // In a rotating frame (gravity/rot.wgsl), the velocity about the mass as an inertial
+  // observer sees it.
+  if (rot_on()) { v += cross(P.rot.xyz, x - BH.list[0].pos.xyz); }
   let vr = dot(v, c.er);
   let vphi = dot(v, c.ephi) - c.R * c.omega;
   let b = min(i32(f32(DISK_BINS) * log(c.R / span.x) / log(span.y / span.x)), DISK_BINS - 1);

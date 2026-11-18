@@ -9,6 +9,7 @@
 #include "amr/list.wgsl"
 #include <bins>
 #include "amr/blk_dt.wgsl"
+#include <frame>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var N1: texture_3d<f32>;       // state after the hydro update
@@ -77,6 +78,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x + emag, E, eint);
     E = en.x;
     eint = en.y;
+  }
+  // The second half step of a non-inertial frame's velocity-dependent forces.
+  if (FRAME_ON) {
+    let fs = frame_close(vec4<f32>(u1.x, mom), vec4<f32>(E, eint, u2.zw), 0.5 * g_dt);
+    mom = fs.u1.yzw;
+    E = fs.u2.x;
+    eint = fs.u2.y;
   }
   let tame = tame_fluff(u1.x, mom, eint);
   if (tame.changed) {

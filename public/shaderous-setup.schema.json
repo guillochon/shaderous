@@ -660,6 +660,27 @@
      "title": "Frame",
      "description": "An inertial frame, or one that accelerates with the gas’s center of mass or the point masses’, so that what the run follows stays in the box"
     },
+    "rotation": {
+     "type": "object",
+     "properties": {
+      "omega": {
+       "type": "array",
+       "items": {
+        "type": "number"
+       },
+       "minItems": 3,
+       "maxItems": 3,
+       "title": "Rotating frame Ω",
+       "description": "Angular velocity of a frame turning about an axis through the box center: the gas feels the Coriolis force (and the centrifugal force, below). Velocities are those in the turning frame. In 2D only the z part turns the plane. Zero: an inertial frame"
+      },
+      "centrifugal": {
+       "type": "boolean",
+       "title": "Centrifugal force",
+       "description": "With a rotating frame: the centrifugal force as well as the Coriolis force. Off, the Coriolis force alone (an f-plane, as in a shearing box)"
+      }
+     },
+     "additionalProperties": false
+    },
     "jeansFloor": {
      "type": "boolean",
      "title": "Jeans floor",

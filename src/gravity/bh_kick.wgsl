@@ -33,6 +33,7 @@
 // center of mass wander by several percent of the stellar radius during a disruption.)
 #include "hydro/common.wgsl"
 #include "gravity/bh.wgsl"
+#include "gravity/rot.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var<storage, read> RED: array<f32>;
@@ -107,6 +108,8 @@ fn main() {
     var acc = -abar - P.G * vec3<f32>(RED[o], RED[o + 1u], RED[o + 2u]) / b.pos.w;
     // Held on its orbit: the frame's acceleration and the other masses' pull, not the gas's.
     if (mass_on_orbit(b)) { acc = -abar; }
+    // A rotating frame's centrifugal force.
+    if (P.rot.w != 0.0) { acc += rot_accel(b.pos.xyz); }
     for (var j = 0u; j < n; j++) {
       if (j == i) { continue; }
       let other = BH.list[j];
@@ -116,7 +119,13 @@ fn main() {
       acc -= other.pos.w * d / (r2 * sqrt(r2));
     }
     BH.list[i].acc = vec4<f32>(acc, b.acc.w);
-    if (LIVE && !mass_fixed(b)) { BH.list[i].vel = vec4<f32>(BH.list[i].vel.xyz + 0.5 * clock.dt * acc, b.vel.w); }
+    if (LIVE && !mass_fixed(b)) {
+      // The second half of the step's Coriolis turn (gravity/bh_drift.wgsl has the first), then
+      // the closing half kick.
+      var v = BH.list[i].vel.xyz;
+      if (rot_on()) { v = rot_turn(v, 0.5 * clock.dt); }
+      BH.list[i].vel = vec4<f32>(v + 0.5 * clock.dt * acc, b.vel.w);
+    }
   }
   if (LIVE && P.bh.y == 2.0) {
     var p = vec3<f32>(0.0);

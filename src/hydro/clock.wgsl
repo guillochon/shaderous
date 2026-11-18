@@ -1,6 +1,7 @@
 // Turns the timestep reduction into dt and advances the clock, entirely on the GPU.
 #include "hydro/common.wgsl"
 #include "gravity/bh.wgsl"
+#include "gravity/rot.wgsl"
 #include "hydro/drive_ou.wgsl"
 
 @group(0) @binding(1) var<storage, read> RED: array<f32>;
@@ -32,9 +33,12 @@ fn main() {
 
   let dx = select(P.dx, 1.0, PER_DX);
   var dt = P.cfl * dx / max(RED[0], 1.0e-30);
-  if ((P.grav_on != 0u || PER_DX) && RED[1] > 0.0) {
+  if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0) && RED[1] > 0.0) {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
   }
+  // A rotating frame: at most a tenth of a radian of frame turn a step (63 steps a turn). The
+  // Coriolis turn is exact, so this bounds the splitting error, not stability.
+  if (rot_on()) { dt = min(dt, 0.1 / length(P.rot.xyz)); }
   // Point masses: the gas knows nothing of two masses passing close to one another. Each pair
   // limits the step to a fraction of the time in which it turns about its common center,
   // sqrt(r^3 / G M), and of the time it takes to cross its own separation, r / v, with r

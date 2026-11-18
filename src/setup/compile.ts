@@ -440,6 +440,9 @@ export function compileSetup(spec: SetupSpec): Compiled {
       : undefined,
     refineMasses: mesh.refineMasses,
     frame: ph.frame === 'gas' || ph.frame === 'masses' ? ph.frame : undefined,
+    rotation: ph.rotation?.omega && ph.rotation.omega.some((w) => w !== 0)
+      ? () => ({ omega: [...ph.rotation!.omega!] as [number, number, number], centrifugal: ph.rotation!.centrifugal ?? true })
+      : undefined,
     refineRho: mesh.refineRho,
     refineDense: mesh.refineDense,
     cooling: ph.cooling,

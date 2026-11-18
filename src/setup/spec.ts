@@ -93,6 +93,12 @@ export interface PhysicsSpec {
   floors?: { rho?: number; p?: number };
   fluff?: { rho?: number; u?: number; v?: number; va?: number };
   frame?: (typeof FRAMES)[number];
+  /**
+   * A frame turning at the angular velocity `omega` about an axis through the origin: the
+   * Coriolis force, and the centrifugal force unless `centrifugal` is false. Velocities in the
+   * document are those in the turning frame. In 2D only omega's z part is used.
+   */
+  rotation?: { omega?: Vec3; centrifugal?: boolean };
   jeansFloor?: boolean;
   jeansCells?: number;
   vcycles?: number;

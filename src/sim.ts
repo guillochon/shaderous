@@ -419,8 +419,25 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     comp: problemCompSlot(c.problem, c.eosParams.gamma, speciesGroups(c.problem)),
     // Whether the update tallies the gas leaving the box by its orbital energy (debris/debris.ts).
     debris: debrisSlot(c),
+    // Forces of a non-inertial frame that depend on the velocity (gravity/frame_off.wgsl).
+    frame: rotating(c) ? 'gravity/frame_rot.wgsl' : 'gravity/frame_off.wgsl',
   };
 }
+
+/**
+ * A rotating frame (Problem.rotation) as Params.rot holds it: the angular velocity, and 1 for
+ * the centrifugal force. In 2D only the part along z can turn the plane into itself.
+ */
+export function rotationOf(c: SimConfig): [number, number, number, number] {
+  const r = c.problem.rotation?.(c.params, c.ndim);
+  if (!r) return [0, 0, 0, 0];
+  const w: [number, number, number] = c.ndim === 2 ? [0, 0, r.omega[2]] : [...r.omega];
+  if (w.every((x) => x === 0)) return [0, 0, 0, 0];
+  return [...w, r.centrifugal === false ? 0 : 1];
+}
+
+/** The run is in a rotating frame. */
+export const rotating = (c: SimConfig): boolean => rotationOf(c).some((x) => x !== 0);
 
 const NO_DAMPING = 'const DAMPING = false;\nfn damping_target(x: vec3<f32>) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n';
 
@@ -717,7 +734,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 400;
+export const PARAM_BYTES = 416;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -767,6 +784,7 @@ export function packParams(
   f.set([resists(c) ? c.resistivity : 0, 0, 0, 0], 68);
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
   f.set([...domainLo(c), 0], 96);
+  f.set(rotationOf(c), 100);
   return buf;
 }
 
@@ -1561,7 +1579,8 @@ export class Sim implements Simulation {
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
     if (this.settling) return 0; // a star is still being settled
     const selfGravity = this.selfGravity;
-    const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0);
+    // (A rotating frame needs the correction pass for its centrifugal kick and closing turn.)
+    const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0) || rotating(this.cfg);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = beginPass(enc);

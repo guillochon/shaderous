@@ -38,6 +38,7 @@
 #include "hydro/prim.wgsl"
 #include "hydro/fluff.wgsl"
 #include <cooling>
+#include <frame>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;   // state at the start of the step
@@ -255,8 +256,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     bc[a] = 0.5 * (bout[a] + new_face(a, t + e).x);
   }
-  let u1 = textureLoad(U1, t, 0);
-  let u2 = textureLoad(U2, t, 0);
+  var u1 = textureLoad(U1, t, 0);
+  var u2 = textureLoad(U2, t, 0);
+  // A non-inertial frame's velocity-dependent forces (gravity/frame_off.wgsl): stage 1 the
+  // half step's whole share, stage 2 the first half of the step's; gravity/correct.wgsl adds
+  // the second after the second kick.
+  if (FRAME_ON) {
+    let fs = frame_open(u1, u2, select(0.5 * dt, dt, STAGE == 1u));
+    u1 = fs.u1;
+    u2 = fs.u2;
+  }
   comp_use(comp_tex(t));
   // Pressure for p div v.
   var ph: f32;

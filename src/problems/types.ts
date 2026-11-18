@@ -259,6 +259,13 @@ export interface Problem {
    * or the point masses' ('masses') instead of an inertial one (gravity/bh_kick.wgsl).
    */
   frame?: 'gas' | 'masses';
+  /**
+   * A frame turning at the constant angular velocity `omega` about an axis through the origin
+   * (gravity/rot.wgsl): the Coriolis force, and the centrifugal force unless `centrifugal` is
+   * false (an f-plane). In 2D only omega's z part is used. Velocities, in `init` and everywhere
+   * after, are those relative to the turning frame (toRotating converts an inertial setup).
+   */
+  rotation?: (params: Record<string, number>, ndim: 2 | 3) => { omega: [number, number, number]; centrifugal?: boolean };
   /** Density below which gas does not ask for refinement (default: the fluff density, else ten times a star's ambient density, else 0, off). */
   refineRho?: number;
   /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */
