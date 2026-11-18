@@ -5,6 +5,8 @@ import { SEDOV_XI0, SPHERE, spherePotential } from '../presets/names';
 import type { Sim } from '../sim';
 import { withAmr, withSim, type TestDef } from './tests';
 import type { AmrSim } from '../amr/amr_sim';
+import { compileSetup } from '../setup/compile';
+import type { SetupSpec } from '../setup/spec';
 
 /** An axisymmetric box of side `box` (R from 0 to box, z across it), ideal gas, from `init`. */
 function ring(init: (R: number, z: number) => Prim, over: Partial<Problem> = {}): Problem {
@@ -544,6 +546,36 @@ export const CYL_TESTS: TestDef[] = [
         const d = await sim.diagnostics();
         return { pass: d.maxMach < 1e-4, metrics: { max_mach: d.maxMach } };
       });
+    },
+  },
+  {
+    id: 'cyl-star',
+    name: 'Axisymmetric: a star from a setup document, settled in (R, z)',
+    criterion: 'An n = 1 polytrope (radius 0.2, gamma = 2) on the axis of a setup document, settled into the grid\u2019s balance with ring volumes (128^2, 25 cells in radius, and on blocks over a 128^2 root with one level of refinement): the settling converges, and to t = 2 (about three sound crossings) the central density stays within 3% (the 3D polytrope test allows 2.5%) and the mass within 1e-4 (the thin gas around it leaves through the outflow faces)',
+    async run(gpu) {
+      const doc: SetupSpec = {
+        format: 'shaderous-setup', version: 1, name: 'cyl star',
+        domain: { ndim: 2, n: 128, box: 1, geometry: 'cylindrical', supports2d: true, bc: { lo: [REFLECT, OUTFLOW, PERIODIC], hi: [OUTFLOW, OUTFLOW, PERIODIC] } },
+        physics: { eos: 'ideal', eosParams: { gamma: 2 }, gravity: 'isolated', G: 1 },
+        background: { rho: 1e-6, p: 1e-9 },
+        parts: [{ kind: 'star', type: 'polytrope', n: 1, rhoc: 1, radius: 0.2 }],
+        run: { tEnd: 2 },
+      } as SetupSpec;
+      const p = compileSetup(doc).problem;
+      const m: Record<string, number> = {};
+      const check = async (sim: Sim | AmrSim, tag: string) => {
+        await sim.settled;
+        m[`${tag}_settle_rounds`] = sim.settleLog.length;
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        m[`${tag}_central_density_change`] = Math.abs(d.ranges[0][1] / d0.ranges[0][1] - 1);
+        m[`${tag}_mass_change`] = Math.abs(d.mass / d0.mass - 1);
+      };
+      await withSim(gpu, p, 128, { ndim: 2 }, (sim) => check(sim, 'uniform'));
+      await withAmr(gpu, p, 128, { ndim: 2, amrLevels: 1 }, (sim) => check(sim, 'blocks'));
+      const pass = ['uniform', 'blocks'].every((t) => m[`${t}_settle_rounds`] < 30 && m[`${t}_central_density_change`] < 0.03 && m[`${t}_mass_change`] < 1e-4);
+      return { pass, metrics: m };
     },
   },
 ];

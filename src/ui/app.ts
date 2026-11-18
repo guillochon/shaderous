@@ -1712,7 +1712,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       next.fluff = { ...next.fluff, ...link.fluff };
       next.driving = { ...next.driving, ...link.driving };
       if (ndim === 2) {
-        if (isSelfGravity(next.gravity)) next.gravity = 'off';
+        // (An axisymmetric or spherical run has the self-gravity of its rings or shells.)
+        if (isSelfGravity(next.gravity) && problem.geometry !== 'cylindrical' && problem.geometry !== 'spherical') next.gravity = 'off';
         next.bcLo = [next.bcLo[0], next.bcLo[1], 0];
         next.bcHi = [next.bcHi[0], next.bcHi[1], 0];
       }

@@ -1493,7 +1493,8 @@ export class AmrSim implements Simulation {
     const t0 = performance.now();
     // On the GPU where every star's gas is one the GPU knows; the CPU's settling reads the whole
     // mesh back, some 100 bytes a cell, which a mesh of tens of GB does not fit in a page.
-    const onGpu = !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
+    // (The GPU's sums are of cubes: an axisymmetric run's rings settle on the CPU.)
+    const onGpu = c.problem.geometry !== 'cylindrical' && !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
     this.settled = (async () => {
       try {
         setLoadStage(settleStage(0));
@@ -1520,7 +1521,7 @@ export class AmrSim implements Simulation {
     const leaf = await this.readLeaves();
     if (stale()) return;
     const per = BS * BS * (this.cfg.ndim === 3 ? BS : 1);
-    const cells = AmrSim.cellsOf(leaf);
+    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical');
     const leaves = this.tree.leaves();
     const touched = new Uint8Array(cells.count);
     if (!heatCells(heat, cells, touched)) return;
@@ -1536,8 +1537,10 @@ export class AmrSim implements Simulation {
   }
 
   /** The leaves' cells as readLeaves() returned them, for settling. */
-  private static cellsOf(leaf: LeafCells): SettleCells {
-    return { count: leaf.count, pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]], vol: (q) => leaf.dx[q] ** 3, u1: leaf.u1, u2: leaf.u2 };
+  private static cellsOf(leaf: LeafCells, cyl = false): SettleCells {
+    // In (R, z) a cell is a ring, 2 pi R dx^2: the settling's sums are of its volume.
+    const vol = cyl ? (q: number) => 2 * Math.PI * leaf.x[q] * leaf.dx[q] ** 2 : (q: number) => leaf.dx[q] ** 3;
+    return { count: leaf.count, pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]], vol, u1: leaf.u1, u2: leaf.u2 };
   }
 
   /**
@@ -1547,12 +1550,14 @@ export class AmrSim implements Simulation {
   private async settleOnCpu(set: Settling, eos: Eos, leaf: LeafCells, stale: () => boolean, emag?: (s: Settler, q: number) => number) {
     const d = this.device;
     const tree = this.tree;
-    const cells = AmrSim.cellsOf(leaf);
+    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical');
     const { u1, u2 } = cells;
     let peak = 0;
     for (let q = 0; q < cells.count; q++) peak = Math.max(peak, u1[q * 4]);
     const settler = new Settler(set, cells);
-    const per = BS ** 3;
+    // A block's cells: one layer of them in 2D (an axisymmetric run's).
+    const depth = this.cfg.ndim === 3 ? BS : 1;
+    const per = BS * BS * depth;
     // Only the blocks a star may reach are ever rewritten.
     const leaves = tree.leaves().filter((_, i) => settler.owner.subarray(i * per, (i + 1) * per).some((o) => o >= 0));
     const index = new Map(tree.leaves().map((b, i) => [b, i]));
@@ -1560,7 +1565,7 @@ export class AmrSim implements Simulation {
     const upload = (tex: GPUTexture, u: Float32Array) =>
       leaves.forEach((b) => {
         const i = index.get(b)!;
-        d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, BS]);
+        d.queue.writeTexture({ texture: tex, origin: this.origin(b.slot) }, u.subarray(i * per * 4, (i + 1) * per * 4) as Float32Array<ArrayBuffer>, layout, [BS, BS, depth]);
       });
     this.settleLog = [];
     for (let round = 0; round < SETTLE_ROUNDS; round++) {
@@ -1596,7 +1601,7 @@ export class AmrSim implements Simulation {
     if (stale()) return '';
     const eos = makeEos(c.eos, c.eosParams);
     const { u1, u2 } = leaf;
-    const set = placedSettling(star, c.G, AmrSim.cellsOf(leaf), eos.pressure, c.problem.box);
+    const set = placedSettling(star, c.G, AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical'), eos.pressure, c.problem.box);
     if (typeof set === 'string') return set;
     // With a magnetic field, E holds its energy too: what is left of E in a cell goes back in.
     const rest = this.mhd ? new Float32Array(leaf.count) : null;

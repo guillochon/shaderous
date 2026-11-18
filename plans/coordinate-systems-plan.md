@@ -21,9 +21,9 @@ and tested in `src/validation/{frames,symmetry,cosmo,shear,cyl}.ts`.
 | E1-E3, E7 (R, z) hydro, diagnostics, files | done (display by revolution not done) |
 | E4 (R, z) on blocks | done, without per-block timesteps |
 | E5 step 1 masses on the axis, step 2 self-gravity on the uniform grid | done |
-| E5 step 3 self-gravity on blocks, settling in (R, z) | self-gravity on blocks done (`cyl-sphere-blocks`, `cyl-evrard-blocks`), without per-block timesteps; settling **not done** |
+| E5 step 3 self-gravity on blocks, settling in (R, z) | done: self-gravity on blocks (`cyl-sphere-blocks`, `cyl-evrard-blocks`), without per-block timesteps; stars of a setup document settled on the axis with ring volumes, uniform grid and blocks (`cyl-star`) |
 | E6 MHD and viscosity in (R, z) | MHD done on the uniform grid (`cyl-mhd`); viscosity, resistivity and blocks with a field refused |
-| E8 tests | rest, conserve, sedov, sink, blocks, sphere, evrard, sphere-blocks, evrard-blocks, column, noh, bondi, torus, mhd |
+| E8 tests | rest, conserve, sedov, sink, blocks, sphere, evrard, sphere-blocks, evrard-blocks, column, noh, bondi, torus, mhd, star |
 | E9 spherical | uniform grid done ([spherical-plan.md](spherical-plan.md) S1-S4, S6 files): uniform or logarithmic in $`r`$, both poles, monopole gravity with point masses at the origin, `.athdf` as `spherical_polar`, the `blast-spherical` preset; tests rest, conserve, sedov, polytrope, bondi. Not done: blocks, a 2D Poisson solve, the display mapped to $`(R, z)`$, reading `spherical_polar` files, the Mignone slope weights on the logarithmic grid |
 
 This plan covers five additions, in the order they should be built:

@@ -1891,7 +1891,15 @@ and the multipole boundary takes the rings' moments as on the uniform grid. On t
 ($`128^2`$ finest) the uniform sphere's potential is within $`1.2\times10^{-3}`$ of the analytic
 one in every leaf, and the Evrard collapse keeps its energy to 0.24% through bounce, its
 thermal energy peaking at $`t = 1.125`$ as on the uniform grid. Per-block timesteps stay
-refused. Settled stars are not done yet.
+refused.
+
+**Stars** of a setup document may sit on the axis and move along it (an orbit, which puts its
+bodies off it, is refused). They are settled as in 3D (section on settling above), on the
+uniform grid and on blocks: the settling's sums are of volumes, and a ring's is
+$`2\pi R\,\Delta x^2`$, with positions $`(R, z, 0)`$, so the star's mass and its balance are a
+body of revolution's. On blocks they settle on the CPU (the GPU's sums are of cubes). An
+$`n = 1`$ polytrope of 25 cells' radius ($`128^2`$) settles in 8 rounds and keeps its central
+density to 1.2% over three sound crossings (`cyl-star`), as the 3D polytrope does.
 
 **Point masses** may sit on the axis and move along it. Their pull on the gas needs nothing,
 since the distance from a mass on the axis to any point of a ring is that to the ring's cell

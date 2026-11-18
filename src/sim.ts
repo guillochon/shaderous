@@ -446,13 +446,16 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   if (c.viscosity > 0) return 'viscosity is not available in axisymmetric runs yet (it needs the curvilinear stress)';
   for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
     if ((m.pos[0] ?? 0) !== 0 || (m.pos[2] ?? 0) !== 0 || (m.vel[0] ?? 0) !== 0 || (m.vel[2] ?? 0) !== 0) return 'a point mass must sit on the axis (R = 0) and move along it';
+  for (const p of c.problem.setup?.parts ?? []) {
+    if (p.kind === 'orbit') return 'an orbit puts its bodies off the axis: an axisymmetric run takes bodies only on it';
+    if (p.kind === 'star' && ((p.pos?.[0] ?? 0) !== 0 || (p.pos?.[2] ?? 0) !== 0 || (p.vel?.[0] ?? 0) !== 0 || (p.vel?.[2] ?? 0) !== 0)) return 'a star must sit on the axis (R = 0) and move along it';
+  }
   if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in axisymmetric runs yet';
   if (c.problem.rotation || c.problem.shear || c.problem.cosmology) return 'an axisymmetric run has no rotating frame, shear or expansion';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in axisymmetric runs yet';
   if (uniformField(c)[0] !== 0) return 'a uniform field must lie along the axis';
   if (c.driving.accel > 0) return 'turbulence driving is not available in axisymmetric runs';
   if (c.gravity === 'periodic') return 'an axisymmetric run’s self-gravity is isolated (its axis is no periodic face)';
-  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'star')) return 'stars are not settled in axisymmetric runs yet';
   return null;
 }
 
@@ -1730,6 +1733,12 @@ export class Sim implements Simulation {
     const { nx, ny } = this;
     const lo = domainLo(this.cfg);
     const at = (i: number, a: number) => (i + 0.5) * this.dx + lo[a];
+    // In (R, z), (R, z, 0), and a cell is a ring of 2 pi R dx^2: the settling's sums are of
+    // volumes, so a star on the axis settles as a body of revolution (plan E5).
+    if (this.cfg.problem.geometry === 'cylindrical') {
+      const area = 2 * Math.PI * this.dx * this.dx;
+      return { count: u1.length / 4, pos: (q) => [at(q % nx, 0), at(Math.floor(q / nx) % ny, 1), 0], vol: (q) => area * at(q % nx, 0), u1, u2 };
+    }
     return {
       count: u1.length / 4,
       pos: (q) => [at(q % nx, 0), at(Math.floor(q / nx) % ny, 1), at(Math.floor(q / (nx * ny)), 2)],
