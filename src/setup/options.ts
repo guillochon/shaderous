@@ -511,7 +511,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
           P({ path: 'from', label: 'Damping from r', tip: 'Radius from the box center where the damping zone starts', control: num(0, 1e30, { step: 0.25, quantity: 'length' }), default: 1, apply: 'live', linkKey: 'dampr', cfg: 'dampRadius' }),
           P({ path: 'rate', label: 'Damping rate', tip: 'How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off', control: num(0, 1e30, { step: 0.5 }), default: 3, apply: 'live', linkKey: 'damprate', cfg: 'dampRate' }),
         ] } }),
-      P({ path: 'loops', label: 'Field loops', tip: 'Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability (balanced profile)',
+      P({ path: 'loops', label: 'Field loops', tip: 'Poloidal loops of magnetic field inside the disk, with no net flux: the seed of the magnetorotational instability',
         control: { type: 'group', optional: true, fields: [
           P({ path: 'beta', label: 'Plasma beta at the midplane', tip: 'Gas pressure over magnetic pressure where two loops meet: the larger, the weaker the field', control: num(1, 1e9, { factor: 2 }), default: 50 }),
           P({ path: 'span', label: 'Span of a loop', tip: 'Each loop spans this factor in radius', control: num(1.05, 4, { step: 0.05 }), default: 1.35 }),
