@@ -91,6 +91,12 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
   // An axisymmetric run: the cell's radius for the geometric terms (a ghost across the axis
   // has none: the predictor skips them there).
   if (cylindrical()) { g_cyl_r = f32(blk_coord(slot).x * BS + l.x) + 0.5; }
+  // A spherical run: the cell's lengths and geometric terms, at its global indices on its level.
+  if (spherical()) {
+    let sg = blk_sph(slot, l);
+    g_hr = vec3<f32>(sg.h, 1.0);
+    g_sph_geo = vec2<f32>(sg.ir, sg.cot);
+  }
   let q = load_q(c);
   var zm = q;
   var zp = q;

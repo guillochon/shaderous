@@ -174,6 +174,31 @@ fn share(nb: i32) -> f32 {
   return select(1.0, 0.0, g_deposit);
 }
 
+// A spherical run: a refined neighbor's fine face (cell `a` of block `src` below or above it)
+// against the mean of the two that cover cell l's face along `axis`: its area over theirs, so
+// that the coarse face's flux is their area-weighted mean. A radial face's area goes as its
+// dcos(theta), a polar face's as the integral of r dr over it (r_c dr, or r_c^2 sinh D).
+fn sph_fine_face(slot: i32, l: vec3<i32>, axis: i32, src: i32, a: vec3<i32>) -> f32 {
+  let q = blk_sph_grid(src);
+  let fg = blk_coord(src) * BS + a;
+  let cg = 2 * (blk_coord(slot) * BS + l);
+  var w0 = 0.0;
+  var w1 = 0.0;
+  var hi = false;
+  if (axis == 0) {
+    w0 = sph_dcos(cg.y, q);
+    w1 = sph_dcos(cg.y + 1, q);
+    hi = fg.y == cg.y + 1;
+  } else {
+    let r0 = sph_cell_g(cg.x, 0, q).r;
+    let r1 = sph_cell_g(cg.x + 1, 0, q).r;
+    w0 = select(r0, r0 * r0, q.d != 0.0);
+    w1 = select(r1, r1 * r1, q.d != 0.0);
+    hi = fg.x == cg.x + 1;
+  }
+  return 2.0 * select(w0, w1, hi) / (w0 + w1);
+}
+
 // Replace the fluxes `own` through the cell's faces on its block's faces with its neighbors':
 //  - a refined neighbor's: the average of the fine fluxes through the face, as the fine cells
 //    computed them with their own cell size;
@@ -253,6 +278,10 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
         // their areas go as those (the coarse face's flux is their area-weighted mean).
         if (cylindrical() && axis == 1 && !blk_leaf(np)) {
           fl = flux_scale(fl, cyl_child_weight(blk_coord(slot).x * BS + l.x, blk_coord(src).x * BS + a.x));
+        }
+        // A spherical run: the fine faces' areas differ along both axes.
+        if (spherical() && !blk_leaf(np)) {
+          fl = flux_scale(fl, sph_fine_face(slot, l, axis, src, a));
         }
         sum = flux_add(sum, fl);
       }
@@ -379,6 +408,33 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     fx.lo = cyl_face(fx.lo, w.x);
     fx.hi = cyl_face(fx.hi, w.y);
   }
+  // A spherical run: the faces weighed by their areas and lever arms, and the r and theta
+  // momenta's geometric sources (hydro/update.wgsl), at the cell's global indices on its level.
+  // The sources take the pressures of the cell's own faces: with per-block timesteps a face
+  // shared with a faster neighbor carries only half of the step's flux now, the rest in the
+  // deposit pass (which weighs its fluxes but adds no source).
+  var src_t = 0.0;
+  if (spherical() && !DEBUG_FLUX) {
+    let g = blk_sph(slot, l);
+    if (!g_deposit) {
+      let v = p0.a.yzw;
+      let rho = p0.a.x;
+      var sx = fx;
+      var sy = fy;
+      if (BINS_ON) {
+        sx = own[0];
+        sy = own[1];
+      }
+      let pr = vec2<f32>(face_pressure(sx.lo, 0), face_pressure(sx.hi, 0));
+      let pt = vec2<f32>(face_pressure(sy.lo, 1), face_pressure(sy.hi, 1));
+      src_r = (g.h.x - g.wr.x) * pr.x + (g.wr.y - g.h.x) * pr.y + rho * (v.y * v.y + v.z * v.z) * g.ir;
+      src_t = (g.h.y - g.wt.x) * pt.x + (g.wt.y - g.h.y) * pt.y + rho * v.z * v.z * (g.wt.y - g.wt.x);
+    }
+    fx.lo = sph_face(fx.lo, g.wr.x, vec3<f32>(1.0, g.lr.x, g.lr.x));
+    fx.hi = sph_face(fx.hi, g.wr.y, vec3<f32>(1.0, g.lr.y, g.lr.y));
+    fy.lo = sph_face(fy.lo, g.wt.x, vec3<f32>(1.0, 1.0, g.lt.x));
+    fy.hi = sph_face(fy.hi, g.wt.y, vec3<f32>(1.0, 1.0, g.lt.y));
+  }
   if (g_deposit) {
     // A cell on no face shared with a faster neighbor is copied as it is.
     if (!g_touched) {
@@ -451,6 +507,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
 
   var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
   net.mom.x += src_r;
+  if (spherical()) { net.mom.y += src_t; }
   var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);
   if (g_deposit) {
     // The kicks, sources and cooling of this step were applied when it started.

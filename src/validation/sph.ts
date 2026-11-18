@@ -4,7 +4,8 @@ import { OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT, type Prim, type Problem } fro
 import { SEDOV_XI0 } from '../presets/names';
 import type { Sim } from '../sim';
 import { sphGrid } from '../spherical';
-import { withSim, type TestDef } from './tests';
+import { withAmr, withSim, type TestDef } from './tests';
+import type { AmrSim } from '../amr/amr_sim';
 
 /**
  * A spherical run from `rMin` to `rMax` (logarithmic in r with `log`), ideal gas, from
@@ -71,6 +72,61 @@ function edge(sim: Sim, u1: Float32Array, j: number, amb: number): number {
   return g.r(n - 1);
 }
 
+/** sph-conserve's dense swirling blob, moving along -z: v_r = -cos(theta), v_theta = sin(theta). */
+function blob(r: number, th: number): Prim {
+  const R = r * Math.sin(th);
+  const z = r * Math.cos(th);
+  const d = Math.hypot(R - 0.3, z - 0.3);
+  const inside = d < 0.2;
+  const vz = -1;
+  return { rho: inside ? 3 : 1, vx: vz * Math.cos(th), vy: -vz * Math.sin(th), vz: inside ? 2 * R * (1 - d / 0.2) : 0, p: 1, s: inside ? 1 : 0 };
+}
+
+/** The Sedov blast of sph-sedov: n^2 from a reflecting sphere at r = 0.005 to 0.5, uniform in r, E = 1 within r = 0.03 (on the finest grid of n). */
+function sedov(n: number): Problem {
+  const r0 = 0.03;
+  const pr = shell(0.005, 0.5, false, () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 1e-5, s: 0 }));
+  const g = sphGrid({ problem: pr, n, ndim: 2 });
+  let vol = 0;
+  for (let i = 0; g.r(i) < r0; i++) vol += g.shell(i);
+  const pIn = 0.4 / vol;
+  return shell(0.005, 0.5, false, (r) => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: r < r0 ? pIn : 1e-5, s: 0 }), { bcHi: [OUTFLOW, REFLECT, PERIODIC], tEnd: 0.05 });
+}
+
+/**
+ * The leaves of a spherical run on blocks, each cell with its level's grid (sphGrid at the
+ * level's cells per side) and its indices on that level.
+ */
+async function leafCells(sim: AmrSim) {
+  const c = await sim.readLeaves();
+  const box = sim.cfg.problem.box;
+  const rMin = sim.cfg.problem.sphere!.rMin;
+  const grids = new Map<number, ReturnType<typeof sphGrid>>();
+  const cells: { g: ReturnType<typeof sphGrid>; i: number; j: number; q: number }[] = [];
+  for (let q = 0; q < c.count; q++) {
+    const n = Math.round(box / c.dx[q]);
+    let g = grids.get(n);
+    if (!g) grids.set(n, (g = sphGrid({ problem: sim.cfg.problem, n, ndim: 2 })));
+    cells.push({ g, i: Math.round((c.x[q] - rMin) / c.dx[q] - 0.5), j: Math.round(c.y[q] / c.dx[q] - 0.5), q });
+  }
+  return { c, cells };
+}
+
+/** Totals over a spherical run's leaves: mass, angular momentum about the axis, total energy. */
+async function leafTotals(sim: AmrSim) {
+  const { c, cells } = await leafCells(sim);
+  let m = 0;
+  let l = 0;
+  let e = 0;
+  for (const { g, i, j, q } of cells) {
+    const dv = g.volume(i, j);
+    m += c.u1[4 * q] * dv;
+    l += g.r(i) * Math.sin(g.theta(j)) * c.u1[4 * q + 3] * dv;
+    e += c.u2[4 * q] * dv;
+  }
+  return { m, l, e, levels: new Set(cells.map((x) => x.g.n)).size };
+}
+
 export const SPH_TESTS: TestDef[] = [
   {
     id: 'sph-rest',
@@ -96,15 +152,7 @@ export const SPH_TESTS: TestDef[] = [
     name: 'Spherical: a swirling blob thrown across the poles',
     criterion: 'A dense swirling blob moving across the grid between reflecting spheres at r = 0.1 and 1 (64^2, logarithmic in r): mass, total energy and angular momentum about the axis are kept to 1e-5 over a crossing',
     async run(gpu) {
-      const p = shell(0.1, 1, true, (r, th) => {
-        const R = r * Math.sin(th);
-        const z = r * Math.cos(th);
-        const d = Math.hypot(R - 0.3, z - 0.3);
-        const inside = d < 0.2;
-        // Moving along -z: v_r = -cos(theta), v_theta = sin(theta).
-        const vz = -1;
-        return { rho: inside ? 3 : 1, vx: vz * Math.cos(th), vy: -vz * Math.sin(th), vz: inside ? 2 * R * (1 - d / 0.2) : 0, p: 1, s: inside ? 1 : 0 };
-      }, { tEnd: 0.6 });
+      const p = shell(0.1, 1, true, blob, { tEnd: 0.6 });
       return withSim(gpu, p, 64, { ndim: 2 }, async (sim) => {
         const a = await totals(sim);
         await sim.runToEnd();
@@ -120,16 +168,7 @@ export const SPH_TESTS: TestDef[] = [
     criterion: 'A Sedov blast (gamma 1.4, E = 1 in the cells within r = 0.03) in (r, theta) at 256^2 from a reflecting sphere at r = 0.005 out to 0.5, uniform in r: at t = 0.05 the shock radius (where the density falls half way from its peak to the ambient) along every ray is within 1% of the similarity solution, and its spread over theta is below 0.5%',
     async run(gpu) {
       const n = 256;
-      const rMin = 0.005;
-      const rMax = 0.5;
-      const r0 = 0.03;
-      const pr = shell(rMin, rMax, false, () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 1e-5, s: 0 }));
-      const g = sphGrid({ problem: pr, n, ndim: 2 });
-      let vol = 0;
-      for (let i = 0; g.r(i) < r0; i++) vol += g.shell(i);
-      const pIn = 0.4 / vol;
-      const p = shell(rMin, rMax, false, (r) => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: r < r0 ? pIn : 1e-5, s: 0 }), { bcHi: [OUTFLOW, REFLECT, PERIODIC], tEnd: 0.05 });
-      return withSim(gpu, p, n, { ndim: 2 }, async (sim) => {
+      return withSim(gpu, sedov(n), n, { ndim: 2 }, async (sim) => {
         await sim.runToEnd();
         const { u1 } = await sim.readState();
         const want = SEDOV_XI0['1.4'] * Math.pow(0.05 * 0.05, 0.2);
@@ -246,6 +285,58 @@ export const SPH_TESTS: TestDef[] = [
         const m = { bondi, mean_rate_innermost: sum[0], worst_relative_difference: worst, instantaneous_min: lo / bondi, instantaneous_max: hi / bondi, steps: d.steps };
         return { pass: m.worst_relative_difference < 0.02, metrics: m };
       });
+    },
+  },
+  {
+    id: 'sph-blocks',
+    name: 'Spherical: the blast and the swirling blob on blocks',
+    criterion: 'On an adaptive mesh of two levels: sph-sedov’s blast (256^2 finest) has its shock radius within 2% of the similarity solution along every one of 64 rays, and sph-conserve’s swirling blob (128^2 finest, logarithmic in r) keeps mass, energy and angular momentum about the axis to 1e-5 through its re-meshing',
+    async run(gpu) {
+      const n = 256;
+      const blast = await withAmr(gpu, sedov(n), n, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        await sim.runToEnd();
+        const { c, cells } = await leafCells(sim);
+        // Along 64 rays (the centers of the coarsest level's theta cells, nudged off the finer
+        // levels' faces), the leaves the ray crosses, outward: where the density falls half way
+        // from its peak to the ambient, outside the peak.
+        const rays = 64;
+        const radii: number[] = [];
+        let finest = 0;
+        for (let k = 0; k < rays; k++) {
+          const th = ((k + 0.5) / rays) * Math.PI + 1e-7;
+          const ray = cells.filter(({ g, j }) => g.thetaFace(j) <= th && th < g.thetaFace(j + 1)).sort((a, b) => a.g.r(a.i) - b.g.r(b.i));
+          const rho = ray.map(({ q }) => c.u1[4 * q]);
+          const r = ray.map(({ g, i }) => g.r(i));
+          let ip = 0;
+          for (let i = 0; i < rho.length; i++) if (rho[i] > rho[ip]) ip = i;
+          const half = 0.5 * (rho[ip] + 1);
+          let at = r[r.length - 1];
+          for (let i = ip; i < rho.length - 1; i++) {
+            if (rho[i + 1] < half) {
+              at = r[i] + ((rho[i] - half) / (rho[i] - rho[i + 1])) * (r[i + 1] - r[i]);
+              finest = Math.max(finest, ray[i].g.n);
+              break;
+            }
+          }
+          radii.push(at);
+        }
+        return { radii, finest, levels: new Set(cells.map((x) => x.g.n)).size };
+      });
+      const want = SEDOV_XI0['1.4'] * Math.pow(0.05 * 0.05, 0.2);
+      const lo = Math.min(...blast.radii);
+      const hi = Math.max(...blast.radii);
+      const p = shell(0.1, 1, true, blob, { tEnd: 0.6 });
+      const cons = await withAmr(gpu, p, 128, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        const a = await leafTotals(sim);
+        await sim.runToEnd();
+        const b = await leafTotals(sim);
+        return { mass: Math.abs(b.m / a.m - 1), energy: Math.abs(b.e / a.e - 1), angular_momentum: Math.abs(b.l / a.l - 1), levels_start: a.levels, levels_end: b.levels, regrids: sim.regrids };
+      });
+      const m = {
+        similarity: want, radius_min: lo, radius_max: hi, worst_error: Math.max(Math.abs(lo / want - 1), Math.abs(hi / want - 1)), spread: (hi - lo) / want,
+        blast_levels: blast.levels, shock_cells_per_side: blast.finest, ...cons,
+      };
+      return { pass: m.worst_error < 0.02 && m.mass < 1e-5 && m.energy < 1e-5 && m.angular_momentum < 1e-5 && m.levels_end > 1, metrics: m };
     },
   },
 ];

@@ -7,10 +7,11 @@ import { memoryBudget } from './gpu/memory';
 import type { Problem } from './problems/types';
 
 /**
- * Whether a preset can run on the adaptive grid: all can. (With a magnetic field the mesh stays as
- * the initial conditions refined it, until regridding carries the field: docs/numerics.md section 21.)
+ * Whether a preset can run on the adaptive grid: all but a shearing box. (With a magnetic field the
+ * mesh stays as the initial conditions refined it, until regridding carries the field:
+ * docs/numerics.md section 21.)
  */
-export const supportsAmr = (_p: Problem) => true;
+export const supportsAmr = (p: Problem) => !p.shear;
 
 /** The deepest refinement that leaves at least one whole block per side at the coarsest level. */
 export function maxAmrLevels(n: number): number {

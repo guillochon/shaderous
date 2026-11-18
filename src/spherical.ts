@@ -64,3 +64,19 @@ export function sphParams(c: SphereShape): number[] {
   // r_min / dx: the uniform grid's r_c / dx is this + i + 1/2, the logarithmic one's this e^((i + 1/2) D).
   return [g.rMin / g.dx, D, g.dtheta, 1, ...consts];
 }
+
+/**
+ * A spherical run's setup at code positions, as the block grid places its cells (amr/init_cpu.ts):
+ * code x runs from r_min over the box, uniform in the fraction u = (x - r_min) / box, which is r
+ * itself on a uniform grid and r_min (r_max / r_min)^u on a logarithmic one; code y runs over the
+ * box from 0, theta = pi y / box. At a cell's center these are sphGrid's r(i) and theta(j). Any
+ * other run's setup is returned as it is.
+ */
+export function sphSetup<T>(c: SphereShape, fn: (x: number, y: number, z: number) => T): (x: number, y: number, z: number) => T {
+  if (!spherical(c)) return fn;
+  const g = sphGrid(c);
+  const box = c.problem.box;
+  const span = Math.log(g.rMax / g.rMin);
+  const r = (x: number) => (g.dlog > 0 ? g.rMin * Math.exp(((x - g.rMin) / box) * span) : x);
+  return (x, y, z) => fn(r(x), (Math.PI * y) / box, z);
+}

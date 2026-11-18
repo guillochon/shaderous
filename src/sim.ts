@@ -468,7 +468,8 @@ export function sphericalUnsupported(c: SimConfig): string | null {
   if (c.ndim !== 2) return 'a spherical run is two-dimensional, in (r, theta)';
   const s = c.problem.sphere;
   if (!s || !(s.rMin > 0)) return 'a spherical run needs an inner radius above zero';
-  if (c.amrLevels > 0) return 'spherical runs are on the uniform grid only (not on blocks) yet';
+  if (c.amrLevels > 0 && (isSelfGravity(c.gravity) || (c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim).length ?? 0) > 0))
+    return 'gravity in spherical runs is on the uniform grid only (not on blocks) yet';
   if (c.problem.mhd) return 'magnetic fields are not available in spherical runs yet';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in spherical runs yet';
   for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])

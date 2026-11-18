@@ -51,6 +51,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   // (An axisymmetric run's cell is a ring of volume 2 pi R dx^2.)
   var dv = select(dx * dx * dx, dx * dx, is2d());
   if (cylindrical()) { dv = 6.2831853 * (f32(blk_coord(slot).x * BS + l.x) + 0.5) * dx * dx * dx; }
+  // (A spherical run's cell is a ring of volume 2 pi dr^3/3 dcos(theta): amr/grid.wgsl blk_sph_volume.)
+  if (spherical()) { dv = blk_sph_volume(slot, l); }
   let rho = max(u1.x, P.rho_floor);
   let v = u1.yzw / rho;
   let eint = u2.y;
@@ -59,7 +61,16 @@ fn red_cell(c: vec3<i32>) -> Red {
   let speed = length(v);
   let T = eos_temperature(rho, eint);
   let s = u2.z / rho;
-  let x = blk_pos(slot, l);
+  var x = blk_pos(slot, l);
+  // A spherical run: positions and momenta in (R, z, phi), as hydro/diagnostics.wgsl has them.
+  var mom = u1.yzw;
+  if (spherical()) {
+    let g = blk_sph(slot, l);
+    let q = blk_sph_grid(slot);
+    let ct = cos((f32(blk_coord(slot).y * BS + l.y) + 0.5) * q.dt);
+    x = g.r * dx * vec3<f32>(g.st, ct, 0.0);
+    mom = vec3<f32>(u1.y * g.st + u1.z * ct, u1.y * ct - u1.z * g.st, u1.w);
+  }
   // Potential energy in the uniform external field, measured from the box center.
   var egrav = -rho * dot(P.gext.xyz, x) * dv;
   // A rotating frame's centrifugal potential (hydro/diagnostics.wgsl).
@@ -76,9 +87,9 @@ fn red_cell(c: vec3<i32>) -> Red {
 
   var r1: Red;
   r1[0] = rho * dv;
-  r1[1] = u1.y * dv;
-  r1[2] = u1.z * dv;
-  r1[3] = u1.w * dv;
+  r1[1] = mom.x * dv;
+  r1[2] = mom.y * dv;
+  r1[3] = mom.z * dv;
   r1[4] = 0.5 * rho * dot(v, v) * dv;
   // Internal energy as the total holds it, E - KE (the same as e_int wherever the two are
   // synchronized; where an equation of state keeps E apart from e_int, the total is E).

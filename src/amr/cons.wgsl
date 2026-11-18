@@ -5,6 +5,9 @@ struct Cons { a: vec4<f32>, b: vec4<f32> }
 // For prolong(): the coarse cell's radius in its own cells (I + 1/2) in an axisymmetric run, 0
 // otherwise. Its callers set it.
 var<private> g_cyl_ic: f32 = 0.0;
+// For prolong() in a spherical run: the coarse cell's centroid shift (amr/grid.wgsl
+// sph_centroid). Its callers set it.
+var<private> g_sph_pro: vec2<f32> = vec2<f32>(0.0);
 
 fn u_leaf(slot: i32, l: vec3<i32>) -> Cons {
   let c = atl(blk_origin(slot), l);
@@ -25,12 +28,11 @@ fn u_at(slot: i32, l: vec3<i32>) -> Cons {
   var a = vec4<f32>(0.0);
   var b = vec4<f32>(0.0);
   let nz = select(2, 1, is2d());
-  let pi = blk_coord(slot).x * BS + l.x;
   for (var k = 0; k < nz; k++) {
     for (var j = 0; j < 2; j++) {
       for (var i = 0; i < 2; i++) {
         let u = u_leaf(ch, f + vec3<i32>(i, j, k));
-        let wr = cyl_child_weight(pi, 2 * pi + i);
+        let wr = child_weight(slot, l, i, j);
         a += wr * u.a;
         b += wr * u.b;
       }
@@ -98,6 +100,8 @@ fn prolong(uc: Cons, xm: MaybeCons, xp: MaybeCons, ym: MaybeCons, yp: MaybeCons,
   // An axisymmetric run: about the coarse ring's centroid, not its middle, so that the fine
   // rings' volume-weighted mean is the coarse one (their weights 1 -+ 1 / (4 (I + 1/2))).
   if (g_cyl_ic > 0.0) { off.x -= f / (16.0 * g_cyl_ic); }
+  // A spherical run: likewise along r and theta, by the children's volumes.
+  if (spherical()) { off.x -= f * g_sph_pro.x; off.y -= f * g_sph_pro.y; }
   return Cons(
     uc.a + off.x * sx.a + off.y * sy.a + off.z * sz.a,
     uc.b + off.x * sx.b + off.y * sy.b + off.z * sz.b,
