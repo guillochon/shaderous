@@ -1713,6 +1713,56 @@ round to trailing. Tests: the background over ten orbits (within $`10^{-3}`$ of 
 the blob, and epicycles at $`\kappa = \sqrt{2(2 - q)}\,\Omega`$ (back to $`5\times10^{-5}`$ after
 one, epicyclic energy to $`5\times10^{-5}`$).
 
+### Axisymmetric (R, z) runs
+
+`domain.geometry: "cylindrical"` makes a 2D run a body of revolution about the $`y`$ axis. The
+2D grid is one periodic layer of the 3D scheme and already carries the third velocity
+component, so the layer becomes the azimuth:
+
+| Code axis | Meaning |
+|---|---|
+| x | $`R`$, from the axis (the lower $`x`$ face) to the box side |
+| y | $`z`$ |
+| z (the layer) | $`\phi`$: `v_z` is $`v_\phi`$ |
+
+Swirl comes at no extra storage, and the constant field of 2D runs already points along
+$`-y`$, which is $`-z`$ here. The scheme solves
+
+```math
+\partial_t\mathbf{U} + \frac{1}{R}\partial_R\left(R\,\mathbf{F}_R\right) + \partial_z\mathbf{F}_z = \mathbf{S}:
+```
+
+- **Fluxes.** Each radial face's flux is weighed by its area over the cell's volume per
+  $`\Delta`$, $`R_-/R_c = i/(i + \tfrac12)`$ and $`R_+/R_c = (i + 1)/(i + \tfrac12)`$: pure index
+  ratios, with no cancellation in float32. The axis face weighs exactly 0, so nothing crosses
+  it. The face's flux itself is the same bits from both cells, so $`\sum R_c\,U`$ is conserved
+  to rounding. The $`p\,\nabla\cdot\mathbf{v}`$ term takes the same weights on the face normal
+  velocities, which gives the cylindrical divergence.
+- **Angular momentum.** The $`\phi`$ momentum flux through radial faces is weighed by
+  $`(R_\pm/R_c)^2`$, with no source: $`R\rho v_\phi`$ is then conserved to rounding.
+- **Radial source,** $`(p + \rho v_\phi^2)/R`$, with $`p`$ the mean of the cell's two radial
+  face pressures (each face's normal momentum flux less what its mass flux carries). With it
+  the cylindrical balance reduces exactly to the Cartesian one: uniform pressure is in balance
+  to rounding, and the well-balanced reconstruction holds a stratified column as it does in
+  Cartesian coordinates.
+- **Predictor:** the half step's geometric terms, $`-\rho v_R/R`$ in the density,
+  $`-\rho c_s^2 v_R/R`$ in the pressure, $`+v_\phi^2/R`$ in $`v_R`$ and $`-v_Rv_\phi/R`$ in
+  $`v_\phi`$.
+- **The axis** reflects as a plane of symmetry does, with $`v_\phi`$ odd as well as $`v_R`$.
+
+Cells are rings of volume $`2\pi R_c\Delta^2`$, so the diagnostics' masses and energies are true
+ones, and the momentum they report is along $`z`$ alone. Snapshots are written in Athena++'s
+cylindrical order $`(R, \phi, z)`$, one cell in $`\phi`$ spanning $`2\pi`$, which yt reads as
+such; the reader takes such files back.
+
+The first version is hydrodynamics on a uniform grid (conduction works through the face
+weights); blocks, magnetic fields, viscosity (which needs the curvilinear stress), point masses
+and species are refused. The `blast-axisymmetric` preset is a point explosion on the axis.
+Tests: uniform gas at rest stays below Mach $`10^{-6}`$; a swirling ring carried along $`z`$
+keeps mass, energy, $`z`$ momentum and angular momentum to $`10^{-7}`$; a point blast is
+spherical, its radius along $`R`$ and $`z`$ within 1.5% of the 3D similarity solution; a
+stratified column under gravity stays below Mach $`10^{-4}`$.
+
 ## 23. Validation
 
 The validation suite (`src/validation/tests.ts`) has 55 tests. It runs on your own GPU at
