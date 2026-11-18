@@ -17,6 +17,7 @@
 @group(0) @binding(25) var PF: texture_storage_3d<r32float, write>;
 @group(0) @binding(29) var PN: texture_3d<f32>;
 @group(0) @binding(14) var U1: texture_3d<f32>;
+@group(0) @binding(20) var G: texture_3d<f32>;   // the gravity field: (acceleration, potential)
 
 fn pn(slot: i32, l: vec3<i32>) -> f32 {
   return textureLoad(PN, atl(blk_origin(slot), l), 0).x;
@@ -48,7 +49,9 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     let gi = blk_coord(inv.slot) * BS + li;
     let to_coarse = vec3<f32>(2 * ((blk_coord(inv.slot) * BS + inv.l) >> vec3<u32>(1u)) - gi) + 0.5;
     let to_ghost = vec3<f32>(inv.l - li);
-    var gh = P.gext.xyz * blk_dx(inv.slot) * textureLoad(U1, atl(blk_origin(s.slot), lc), 0).x;
+    var gf = P.gext.xyz;
+    if (P.grav_on != 0u) { gf += textureLoad(G, atl(blk_origin(inv.slot), lq), 0).xyz; }
+    var gh = gf * blk_dx(inv.slot) * textureLoad(U1, atl(blk_origin(s.slot), lc), 0).x;
     if (is2d()) { gh.z = 0.0; }
     p = pi + f32(depth) * 0.6666667 * (pn(s.slot, lc) - pi - dot(gh, to_coarse)) + dot(gh, to_ghost);
   } else if (blk_leaf(s.slot)) {

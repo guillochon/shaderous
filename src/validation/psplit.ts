@@ -798,6 +798,33 @@ export const PSPLIT_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'psplit-amr-polytrope',
+    name: 'Implicit pressure with self-gravity on the adaptive mesh: a polytropic star at rest (3D, 128^3 finest, 2 levels)',
+    criterion:
+      'The polytrope preset on a mesh with the star at the finer level and the box around it at the coarser, settled as usual, over two dynamical times: the central density stays within 2% of its start, mass within 0.5% and total energy within 2%, in under a fifth of the explicit scheme\'s steps, with two levels throughout. (The potential\'s difference across each face kicks the face velocities, fine faces\' own at a refinement boundary, and the potential is solved after the pressure correction.)',
+    async run(gpu) {
+      const star = problemById('polytrope');
+      const T = 2 * (star.tDyn ?? 1);
+      const hold = (over: Partial<SimConfig>) =>
+        withAmr(gpu, star, 128, { ndim: 3, tEnd: T, amrLevels: 1, timeBins: 0, ...over }, async (sim) => {
+          await sim.settled;
+          const levels = () => new Set(sim.tree.leaves().map((b) => b.level)).size;
+          const before = levels();
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd(16, 1e5);
+          const d = await sim.diagnostics();
+          return { steps, levels: Math.min(before, levels()), rhoc: d.ranges[0][1] / d0.ranges[0][1], mass: Math.abs(d.mass / d0.mass - 1), etot: Math.abs(d.eTot / d0.eTot - 1) };
+        });
+      const explicit = await hold({});
+      const implicit = await hold({ pressure: 'implicit' });
+      const m = {
+        central_density: implicit.rhoc, central_density_explicit: explicit.rhoc, steps: implicit.steps, steps_explicit: explicit.steps,
+        mass_drift: implicit.mass, energy_drift: implicit.etot, energy_drift_explicit: explicit.etot, leaf_levels: implicit.levels,
+      };
+      return { pass: implicit.levels === 2 && Math.abs(implicit.rhoc - 1) < 0.02 && implicit.mass < 5e-3 && implicit.etot < 0.02 && implicit.steps < 0.2 * explicit.steps, metrics: m };
+    },
+  },
+  {
     id: 'psplit-amr-wake',
     name: 'Implicit pressure on the adaptive mesh with an obstacle and an inlet: the cylinder wake (2D, 512 finest, 2 levels, liquid, Reynolds number 100)',
     criterion:

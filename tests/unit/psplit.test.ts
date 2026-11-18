@@ -197,11 +197,12 @@ describe('implicit pressure, as a setting', () => {
     expect(pressureNote({ solves: 0, residual: 0, unconverged: 0 })).toBe('');
     expect(pressureNote({ solves: 40, residual: 2.34e-5, unconverged: 0 })).toBe('pressure solve 2.3e-5');
     expect(pressureNote({ solves: 40, residual: 3e-3, unconverged: 7 })).toBe('pressure solve 3.0e-3, 7 of 40 above tolerance');
-    // On blocks a gas's own gravity is refused, and nothing else of the gas is.
+    // On blocks per-block timesteps are refused, and nothing of the gas is.
     const gas = configFor(problemById('kelvin-helmholtz'), 64, { ndim: 2, pressure: 'implicit', amrLevels: 1 });
     expect(refusal(gas)).toBeNull();
     expect(implicitBlocksUnsupported(gas)).toBeNull();
     expect(implicitBlocksUnsupported({ ...gas, gext: [0, -1, 0] })).toBeNull();
-    expect(implicitBlocksUnsupported({ ...gas, gravity: 'periodic' })).toMatch(/self-gravity is not available with it for a gas/);
+    expect(implicitBlocksUnsupported({ ...gas, gravity: 'periodic' })).toBeNull();
+    expect(implicitBlocksUnsupported({ ...gas, timeBins: 2 })).toMatch(/per-block timesteps/);
   });
 });

@@ -743,6 +743,17 @@ a boundary meets a wall the liquid is left with Mach $`1.6\times10^{-3}`$: the m
 interpolation of ghost cells has no slope along the wall's normal there, and the predictor
 reads those ghosts.
 
+*The gas's own gravity on blocks* (`psplit-amr-polytrope`). As on the uniform grid: the
+potential's difference across each face kicks the face velocities (the block's own ghost of
+the potential beyond a block face, the fine faces' own at a refinement boundary), a wall or an
+open face takes the cell's acceleration, the offset term above takes the field of the gravity
+atlas, and the potential is solved for the corrected state after the pressure passes. The
+polytrope preset with the star one level finer than the box around it (128 cells across at the
+finest) holds its central density to 0.2% over two dynamical times in 58 steps and 3 s; the
+explicit scheme takes 737 steps and 11 s and holds it to 0.8%. Mass changes by 0.23% (0.22%
+explicit: the thin gas around the star leaving) and total energy by 0.6% (0.3%). Only a star
+at rest is tested, as on the uniform grid.
+
 Measured (`psplit-amr-*`): a Gresho vortex on a three-level mesh whose refinement boundaries
 run through it (512 cells across at the finest, refined on its velocity at a threshold of
 0.6) takes 273 steps to $`t = 1`$ at Mach 0.1, 0.01 and 0.001 alike, against the explicit
@@ -763,7 +774,7 @@ energy. In 3D it runs and conserves; it has not been measured beyond that.
 
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
 or frames (and the liquid without self-gravity); on the adaptive mesh also
-without self-gravity for the ideal gas and without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
+without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2453,7 +2464,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 152 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 153 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

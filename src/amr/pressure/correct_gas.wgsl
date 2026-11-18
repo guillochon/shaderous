@@ -53,9 +53,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var a = 0; a < axes; a++) {
     let fh = ap_gface(inv.slot, inv.l, a, true, dc, dtdx, true);
     let fl = ap_gface(inv.slot, inv.l, a, false, dc, dtdx, true);
-    let kc = clock.dt * P.gext[a];
-    mom[a] += kc * u1.x - dtdx * (fh.pv.x - fl.pv.x);
-    ek += 0.5 * kc * (fh.m + fl.m);
+    // (The cell's kick is the mean of its two faces'.)
+    mom[a] += 0.5 * (fh.k + fl.k) * u1.x - dtdx * (fh.pv.x - fl.pv.x);
+    ek += 0.5 * (fh.k * fh.m + fl.k * fl.m);
     de += (P.ohm.w + fh.pv.x) * fh.pv.y - (P.ohm.w + fl.pv.x) * fl.pv.y;
     dvh += fh.pv.y - fl.pv.y;
     c1 += fh.c1 - fl.c1;

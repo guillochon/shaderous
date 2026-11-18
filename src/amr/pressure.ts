@@ -30,7 +30,7 @@ export interface AmrPressureContext {
    * update keeps (lower and upper faces), and of the carried solved pressure, which the block
    * predictor also reads. Absent for the liquid.
    */
-  gas?: { faceLo: GPUTexture; faceHi: GPUTexture; lag: GPUTexture };
+  gas?: { faceLo: GPUTexture; faceHi: GPUTexture; lag: GPUTexture; gfield: GPUTexture };
   /** dispatch over the cells and `reach` ghost layers of `count` blocks of the bound list (amr/list.wgsl inv_flat) */
   flat(pass: GPUComputePassEncoder, count: number, reach: number): void;
   /** the modules the hydro shaders are assembled with (the equation of state) */
@@ -112,7 +112,7 @@ export class AmrPressure {
       [s.pKeep, s.pLagInit, s.pLagFill] = await Promise.all([pipe('keep', 'advect the old pressure'), pipe('lag_init', 'start the carried pressure'), pipe('lag_fill', 'carry the pressure')]);
       s.gKeep = bindGroup(d, s.pKeep, { 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: ctx.listLeaf, 15: v0(ctx.prim), 22: v0(ctx.prim2), 24: v0(pd) });
       s.gLagInit = [0, 1].map((p) => bindGroup(d, s.pLagInit!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 14: v0(ctx.state[p][0]), 16: v0(ctx.state[p][1]), 29: v0(pn), 2: v0(s.tex[0]) }));
-      s.gLagFill = [0, 1].map((p) => bindGroup(d, s.pLagFill!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 25: v0(gas.lag), 29: v0(pn), 14: v0(ctx.state[p][0]) }));
+      s.gLagFill = [0, 1].map((p) => bindGroup(d, s.pLagFill!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 25: v0(gas.lag), 29: v0(pn), 14: v0(ctx.state[p][0]), 20: v0(gas.gfield) }));
     }
     const v = (t: GPUTexture) => t.createView();
     const r0 = s.root.levels[0];
@@ -135,7 +135,7 @@ export class AmrPressure {
       s.gRoot[p] = s.pRoot.map((pl) => bindGroup(d, pl, { ...base(ctx.listLevel[0]), 2: v(prs), 3: v(rhs), 4: v(tau), 10: v(r0.p), 11: v(r0.rhs), 12: v(r0.coef) }));
       s.gMeasure[p] = bindGroup(d, s.pMeasure, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 9: s.res });
       if (gas) {
-        const faces = { 25: v(gas.lag), 27: v(gas.faceLo), 28: v(gas.faceHi) };
+        const faces = { 25: v(gas.lag), 27: v(gas.faceLo), 28: v(gas.faceHi), 20: v(gas.gfield) };
         s.gSource.push(bindGroup(d, s.pSource, { ...base(ctx.listLeaf), 3: v(rhs), 4: v(tau), 26: v(pd), 14: v(ctx.state[p][0]), 16: v(ctx.state[p][1]), ...faces }));
         s.gCorrect.push(bindGroup(d, s.pCorrect, { ...bare(ctx.listLeaf), ...prims, 2: v(prs), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 29: v(pn), ...faces }));
         continue;
