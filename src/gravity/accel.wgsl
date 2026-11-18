@@ -20,9 +20,10 @@ fn grav_axis(phi: texture_3d<f32>, c: vec3<i32>, e: vec3<i32>, i: i32, axis: i32
 }
 
 fn gravity(phi: texture_3d<f32>, c: vec3<i32>) -> vec3<f32> {
+  // (A 2D run's potential, an axisymmetric one's, has no z.)
   return vec3<f32>(
     grav_axis(phi, c, vec3<i32>(1, 0, 0), c.x, 0),
     grav_axis(phi, c, vec3<i32>(0, 1, 0), c.y, 1),
-    grav_axis(phi, c, vec3<i32>(0, 0, 1), c.z, 2),
+    select(grav_axis(phi, c, vec3<i32>(0, 0, 1), c.z, 2), 0.0, P.dims.z == 1u),
   );
 }

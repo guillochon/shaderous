@@ -352,7 +352,8 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     eosParams: { ...defaultEosParams(), ...physicalEosParams(problemUnits(problem, params), problem.composition), ...problem.eosParams },
     riemann: 'hllc',
     limiter: 'koren',
-    gravity: ndim === 2 && isSelfGravity(problem.gravity) ? 'off' : problem.gravity,
+    // (An axisymmetric run keeps it: it solves for its potential in (R, z).)
+    gravity: ndim === 2 && isSelfGravity(problem.gravity) && problem.geometry !== 'cylindrical' ? 'off' : problem.gravity,
     G: problem.G,
     bcLo: ndim === 2 ? bc2.lo : problem.bcLo,
     bcHi: ndim === 2 ? bc2.hi : problem.bcHi,
@@ -432,6 +433,9 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in axisymmetric runs yet';
   if (uniformField(c)[0] !== 0) return 'a uniform field must lie along the axis';
   if (c.driving.accel > 0) return 'turbulence driving is not available in axisymmetric runs';
+  if (c.gravity === 'periodic') return 'an axisymmetric run’s self-gravity is isolated (its axis is no periodic face)';
+  if (isSelfGravity(c.gravity) && c.amrLevels > 0) return 'self-gravity on blocks is not available for axisymmetric runs yet';
+  if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'star')) return 'stars are not settled in axisymmetric runs yet';
   return null;
 }
 
@@ -1267,7 +1271,7 @@ export class Sim implements Simulation {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
-        Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock),
+        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg)),
         Reducer.create(
           d,
           [n, n, nz],
@@ -1699,7 +1703,7 @@ export class Sim implements Simulation {
     this.rhoMean = rhoMean;
     writeTexture(d, this.state[0][0], n, 4, u1, this.nz);
     writeTexture(d, this.state[0][1], n, 4, u2, this.nz);
-    if (this.cfg.ndim === 3) writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
+    if (this.selfGravity) writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * this.nz), this.nz);
     d.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
     writeDrive(d, this.cfg.driving, this.cfg.ndim, this.cfg.problem.box);
     this.writeParams();
@@ -1732,7 +1736,8 @@ export class Sim implements Simulation {
   }
 
   private get selfGravity(): boolean {
-    return isSelfGravity(this.cfg.gravity) && this.cfg.ndim === 3;
+    // (An axisymmetric run solves for its potential in (R, z): gravity/stencil.wgsl.)
+    return isSelfGravity(this.cfg.gravity) && (this.cfg.ndim === 3 || cylindrical(this.cfg));
   }
 
   private get hasMasses(): boolean {
@@ -1779,7 +1784,7 @@ export class Sim implements Simulation {
 
   private copyPhiToOld(enc: GPUCommandEncoder) {
     const n = this.n;
-    enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [n, n, n]);
+    enc.copyTextureToTexture({ texture: this.mg.phi }, { texture: this.mg.phiOld }, [n, n, this.nz]);
   }
 
   /** Encode `count` full steps: primitives, timestep, predictor, update, then gravity if enabled. */
@@ -2312,7 +2317,7 @@ export class Sim implements Simulation {
   }
 
   async readPotential(): Promise<Float32Array> {
-    return readTexture(this.device, this.mg.phi, this.n, 1);
+    return readTexture(this.device, this.mg.phi, this.n, 1, this.nz);
   }
 
   /** Max |residual| of the Poisson solve on the finest level. */

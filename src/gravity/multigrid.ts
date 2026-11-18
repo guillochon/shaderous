@@ -48,14 +48,18 @@ export class Multigrid {
     stateU1: GPUTexture[],
     symmetry: readonly boolean[] | undefined,
     clock: GPUBuffer,
+    flat = false,
   ): Promise<Multigrid> {
     if (n & (n - 1)) throw new Error('multigrid needs a power-of-two grid');
     const mg = new Multigrid();
-    mg.phiOld = tex3d(device, n, 'r32float', 'phi old');
+    // An axisymmetric (R, z) run's levels are one cell deep (gravity/stencil.wgsl).
+    mg.flat = flat;
+    const depth = (m: number) => (flat ? 1 : m);
+    mg.phiOld = tex3d(device, n, 'r32float', 'phi old', depth(n));
 
     mg.multipole = await Multipoles.create(
       device,
-      [n, n, n],
+      [n, n, depth(n)],
       'gravity/multipole.wgsl',
       stateU1.map((t) => ({ 0: params, 1: t.createView() })),
       'multipole',
@@ -80,14 +84,14 @@ export class Multigrid {
       const uni = [0, 1].map((color) => {
         const buf = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
         const data = new ArrayBuffer(32);
-        new Uint32Array(data, 0, 4).set([m, color, l, 0]);
+        new Uint32Array(data, 0, 4).set([m, color, l, flat ? 1 : 0]);
         new Float32Array(data, 16, 4).set([h, 0, 0, 0]);
         device.queue.writeBuffer(buf, 0, data);
         return buf;
       });
-      const phi = tex3d(device, m, 'r32float', `phi L${l}`);
-      const rhs = tex3d(device, m, 'r32float', `rhs L${l}`);
-      const res = tex3d(device, m, 'r32float', `res L${l}`);
+      const phi = tex3d(device, m, 'r32float', `phi L${l}`, depth(m));
+      const rhs = tex3d(device, m, 'r32float', `rhs L${l}`, depth(m));
+      const res = tex3d(device, m, 'r32float', `res L${l}`, depth(m));
       const lev: Level = {
         n: m,
         phi,
@@ -109,6 +113,7 @@ export class Multigrid {
       if (l > 0) {
         const fine = mg.levels[l - 1];
         lev.restrict = bindGroup(device, mg.pRestrict, {
+          0: params,
           1: uni[0],
           2: fine.res.createView(),
           3: rhs.createView(),
@@ -117,7 +122,7 @@ export class Multigrid {
         // Prolongation into the finer level uses that level's parameters; find them again.
         const fineUni = device.createBuffer({ size: 32, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
         const d = new ArrayBuffer(32);
-        new Uint32Array(d, 0, 4).set([fine.n, 0, l - 1, 0]);
+        new Uint32Array(d, 0, 4).set([fine.n, 0, l - 1, flat ? 1 : 0]);
         new Float32Array(d, 16, 4).set([box / fine.n, 0, 0, 0]);
         device.queue.writeBuffer(fineUni, 0, d);
         fine.prolong = bindGroup(device, mg.pProlong, {
@@ -136,8 +141,11 @@ export class Multigrid {
     return mg;
   }
 
+  /** The levels are one cell deep (an axisymmetric run). */
+  flat = false;
+
   private dispatch(pass: GPUComputePassEncoder, n: number) {
-    pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), Math.ceil(n / 4));
+    pass.dispatchWorkgroups(Math.ceil(n / 8), Math.ceil(n / 8), this.flat ? 1 : Math.ceil(n / 4));
   }
 
   private smooth(pass: GPUComputePassEncoder, lev: Level, sweeps: number) {
@@ -146,7 +154,7 @@ export class Multigrid {
       for (const g of lev.smooth) {
         pass.setBindGroup(0, g);
         // Each color is half the cells; the shader spreads the dispatch over every other x.
-        pass.dispatchWorkgroups(Math.ceil(lev.n / 16), Math.ceil(lev.n / 8), Math.ceil(lev.n / 4));
+        pass.dispatchWorkgroups(Math.ceil(lev.n / 16), Math.ceil(lev.n / 8), this.flat ? 1 : Math.ceil(lev.n / 4));
       }
     }
   }

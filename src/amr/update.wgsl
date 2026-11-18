@@ -368,6 +368,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (gl.x == 0 && sym_lo(0)) { fx.lo = mirror_flux(fx.lo, 0); }
   if (gl.y == 0 && sym_lo(1)) { fy.lo = mirror_flux(fy.lo, 1); }
   if (gl.z == 0 && sym_lo(2) && !is2d()) { fz.lo = mirror_flux(fz.lo, 2); }
+  // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
+  // geometric source (hydro/update.wgsl), at the cell's global radial index on its level, before the
+  // flux-form gravitational work reads the mass fluxes.
+  var src_r = 0.0;
+  if (cylindrical() && !g_deposit && !DEBUG_FLUX) {
+    let w = cyl_weights(gl.x);
+    let ps = 0.5 * (face_pressure(fx.lo, 0) + face_pressure(fx.hi, 0));
+    src_r = (ps + p0.a.x * p0.a.w * p0.a.w) / (f32(gl.x) + 0.5);
+    fx.lo = cyl_face(fx.lo, w.x);
+    fx.hi = cyl_face(fx.hi, w.y);
+  }
   if (g_deposit) {
     // A cell on no face shared with a faster neighbor is copied as it is.
     if (!g_touched) {
@@ -438,16 +449,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     ekick = kd.w;
   }
 
-  // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
-  // geometric source (hydro/update.wgsl), at the cell's global radial index on its level.
-  var src_r = 0.0;
-  if (cylindrical() && !g_deposit) {
-    let w = cyl_weights(gl.x);
-    let ps = 0.5 * (face_pressure(fx.lo, 0) + face_pressure(fx.hi, 0));
-    src_r = (ps + p0.a.x * p0.a.w * p0.a.w) / (f32(gl.x) + 0.5);
-    fx.lo = cyl_face(fx.lo, w.x);
-    fx.hi = cyl_face(fx.hi, w.y);
-  }
   var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
   net.mom.x += src_r;
   var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);

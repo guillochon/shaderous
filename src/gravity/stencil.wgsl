@@ -30,6 +30,14 @@ fn nb_one(c: vec3<i32>, o: vec3<i32>) -> vec2<f32> {
 }
 
 fn nb_sum(c: vec3<i32>) -> vec2<f32> {
+  if (L.flat != 0u) {
+    // An axisymmetric (R, z) run: (1/R) d/dR (R dphi/dR) + d2phi/dz2, the radial neighbors
+    // weighed by R_-/R_c and R_+/R_c (cyl_weights; the axis face's weight is 0), and no z.
+    let w = cyl_weights(c.x);
+    let r = w.x * nb_one(c, vec3<i32>(-1, 0, 0)) + w.y * nb_one(c, vec3<i32>(1, 0, 0))
+          + nb_one(c, vec3<i32>(0, -1, 0)) + nb_one(c, vec3<i32>(0, 1, 0));
+    return vec2<f32>(r.x, w.x + w.y + 2.0 + r.y);
+  }
   let r = nb_one(c, vec3<i32>(-1, 0, 0)) + nb_one(c, vec3<i32>(1, 0, 0))
         + nb_one(c, vec3<i32>(0, -1, 0)) + nb_one(c, vec3<i32>(0, 1, 0))
         + nb_one(c, vec3<i32>(0, 0, -1)) + nb_one(c, vec3<i32>(0, 0, 1));

@@ -221,6 +221,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (c.y == 0 && sym_lo(1)) { fy.lo = mirror_flux(fy.lo, 1); }
   if (c.z == 0 && sym_lo(2) && !flat) { fz.lo = mirror_flux(fz.lo, 2); }
 
+  // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
+  // geometric source (p + rho v_phi^2) / R, with p the mean of the two radial faces' pressures:
+  // with it, uniform pressure is in balance to rounding, and a balanced state stays as the
+  // Cartesian one does. (The velocities are the half step's.) Before anything reads the fluxes:
+  // the flux-form gravitational work takes the weighted mass fluxes.
+  var src_r = 0.0;
+  if (cylindrical() && !DEBUG_FLUX) {
+    let w = cyl_weights(c.x);
+    let ps = 0.5 * (face_pressure(fx.lo, 0) + face_pressure(fx.hi, 0));
+    src_r = (ps + p0.a.x * p0.a.w * p0.a.w) / (f32(c.x) + 0.5);
+    fx.lo = cyl_face(fx.lo, w.x);
+    fx.hi = cyl_face(fx.hi, w.y);
+  }
   if (DEBUG_FLUX) {
     textureStore(O1, c, vec4<f32>(fx.lo.m, fx.hi.m, fy.lo.m, fy.hi.m));
     textureStore(O2, c, vec4<f32>(fz.lo.m, fz.hi.m, 0.0, 0.0));
@@ -277,18 +290,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     ekick = kd.w;
   }
 
-  // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
-  // geometric source (p + rho v_phi^2) / R, with p the mean of the two radial faces' pressures:
-  // with it, uniform pressure is in balance to rounding, and a balanced state stays as the
-  // Cartesian one does. (The velocities are the half step's.)
-  var src_r = 0.0;
-  if (cylindrical()) {
-    let w = cyl_weights(c.x);
-    let ps = 0.5 * (face_pressure(fx.lo, 0) + face_pressure(fx.hi, 0));
-    src_r = (ps + p0.a.x * p0.a.w * p0.a.w) / (f32(c.x) + 0.5);
-    fx.lo = cyl_face(fx.lo, w.x);
-    fx.hi = cyl_face(fx.hi, w.y);
-  }
   var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
   net.mom.x += src_r;
   var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);

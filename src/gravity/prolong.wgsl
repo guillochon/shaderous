@@ -21,15 +21,18 @@ fn coarse(q: vec3<i32>) -> f32 {
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  if (any(gid >= vec3<u32>(L.n))) { return; }
+  if (any(gid >= lvl_dims())) { return; }
   let c = vec3<i32>(gid);
   let cc = c / 2;
   let d = 2 * (c % 2) - 1;   // direction of the second-nearest coarse cell along each axis
   var sum = 0.0;
-  for (var k = 0; k < 8; k++) {
+  // (An axisymmetric run's levels are one cell deep: bilinear in the plane.)
+  let nk = select(8, 4, L.flat != 0u);
+  for (var k = 0; k < nk; k++) {
     let o = vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1);
-    let w = mix(vec3<f32>(0.75), vec3<f32>(0.25), vec3<f32>(o));
-    sum += w.x * w.y * w.z * coarse(cc + o * d);
+    var w = mix(vec3<f32>(0.75), vec3<f32>(0.25), vec3<f32>(o));
+    if (L.flat != 0u) { w.z = 1.0; }
+    sum += w.x * w.y * w.z * coarse(vec3<i32>((cc + o * d).xy, select(cc.z + o.z * d.z, 0, L.flat != 0u)));
   }
   textureStore(PHI, c, vec4<f32>(textureLoad(PHI, c).x + sum, 0.0, 0.0, 0.0));
 }

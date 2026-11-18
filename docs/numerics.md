@@ -1777,6 +1777,18 @@ parent's. Where a coarse cell takes a refined neighbor's fluxes across $`z`$, ea
 weighs by its own radius. Per-block timesteps are refused for now. On two levels a swirling
 ring keeps mass, energy and angular momentum to $`5\times10^{-7}`$ through its re-meshing.
 
+**Self-gravity** (isolated) is solved in $`(R, z)`$ on the uniform grid by the same
+multigrid, its levels one cell deep: the stencil drops $`z`$ and weighs the radial neighbors
+by $`R_\pm/R_c`$, with the diagonal their sum, so cells stay square and red-black smoothing
+is unchanged; the residual is restricted with the rings' volumes. The multipole boundary
+needs no new evaluator: each ring's moments are filled in by symmetry about the axis
+($`\sum x^2 = \sum z^2 = \tfrac12 m R^2`$ and so on to fourth order, the center of mass on
+the axis), and the boundary is evaluated in the plane of the run. The flux-form
+gravitational work takes the weighted mass fluxes. A uniform sphere's potential comes out
+within $`7\times10^{-4}`$ of the analytic one (the 3D solve: $`1.5\times10^{-3}`$), and the
+Evrard collapse in $`(R, z)`$ keeps its energy to 0.2% through bounce. Self-gravity on blocks
+and settled stars are not done yet.
+
 **Point masses** may sit on the axis and move along it. Their pull on the gas needs nothing,
 since the distance from a mass on the axis to any point of a ring is that to the ring's cell
 center; the gas's pull on them, and what their sinks take, are summed over rings (their true

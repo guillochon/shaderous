@@ -1,7 +1,7 @@
 // Validation tests for axisymmetric (R, z) runs (plans/coordinate-systems-plan.md, Part E).
 // Registered through validation/frames.ts.
 import { all, OUTFLOW, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
-import { SEDOV_XI0 } from '../presets/names';
+import { SEDOV_XI0, SPHERE, spherePotential } from '../presets/names';
 import type { Sim } from '../sim';
 import { withAmr, withSim, type TestDef } from './tests';
 import type { AmrSim } from '../amr/amr_sim';
@@ -189,6 +189,78 @@ export const CYL_TESTS: TestDef[] = [
       const want = SEDOV_XI0['1.4'] * Math.pow(0.05 * 0.05, 0.2);
       const m = { ...cons, radius_R: radii.rR, radius_z: radii.rz, similarity: want, error_R: Math.abs(radii.rR / want - 1), error_z: Math.abs(radii.rz / want - 1) };
       return { pass: m.mass < 1e-5 && m.energy < 1e-5 && m.angular_momentum < 1e-5 && m.error_R < 0.02 && m.error_z < 0.02, metrics: m };
+    },
+  },
+  {
+    id: 'cyl-sphere',
+    name: 'Axisymmetric: the potential of a uniform sphere (self-gravity in (R, z))',
+    criterion: 'A uniform sphere on the axis, solved for in (R, z) with isolated boundaries (64^2, the 2D multigrid weighing its radial neighbors by R): the potential is within 1% of the analytic one everywhere, as the 3D solve is',
+    async run(gpu) {
+      const n = 64;
+      // The sphere's share of each ring cell, from 8 x 8 samples weighed by their radii (as the
+      // 3D test's sphere is supersampled), so that its mass is the sphere's.
+      const dx = 1 / n;
+      const share = (R: number, z: number) => {
+        let inside = 0;
+        let all = 0;
+        for (let b = 0; b < 8; b++)
+          for (let a = 0; a < 8; a++) {
+            const r = R + ((a + 0.5) / 8 - 0.5) * dx;
+            const zz = z + ((b + 0.5) / 8 - 0.5) * dx;
+            all += r;
+            if (Math.hypot(r, zz) < SPHERE.R) inside += r;
+          }
+        return inside / all;
+      };
+      const p = ring((R, z) => ({ rho: 1e-6 + SPHERE.rho * share(R, z), vx: 0, vy: 0, vz: 0, p: 1e-4, s: 0 }), {
+        bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], gravity: 'isolated', G: SPHERE.G, tEnd: 0,
+      });
+      return withSim(gpu, p, n, { ndim: 2 }, async (sim) => {
+        sim.solvePotential(10);
+        const phi = await sim.readPotential();
+        let err = 0;
+        for (let j = 0; j < n; j++)
+          for (let i = 0; i < n; i++) {
+            const e = spherePotential(Math.hypot((i + 0.5) / n, (j + 0.5) / n - 0.5));
+            err = Math.max(err, Math.abs(phi[j * n + i] - e) / Math.abs(e));
+          }
+        const d = await sim.diagnostics();
+        return { pass: err < 0.01, metrics: { max_relative_error: err, mass: d.mass, mass_expected: (4 / 3) * Math.PI * SPHERE.R ** 3 * SPHERE.rho } };
+      });
+    },
+  },
+  {
+    id: 'cyl-evrard',
+    name: 'Axisymmetric: the Evrard collapse with self-gravity in (R, z)',
+    criterion: 'The Evrard sphere (G = M = R = 1, u = 0.05) in (R, z) at 128^2 (R to 4, z across 4): through collapse and bounce (t <= 1.5) the total energy keeps to 2% and the thermal energy peaks between t = 0.9 and 1.3, as in 3D',
+    async run(gpu) {
+      const n = 128;
+      // R to 4 and z across +-2, as the 3D test's box: the sphere and its bounce well inside.
+      const box = 4;
+      const dx = box / n;
+      const p = ring((R, z) => {
+        const r = Math.max(Math.hypot(R, z), 0.5 * dx);
+        const rho = r < 1 ? 1 / (2 * Math.PI * r) : 1e-4;
+        return { rho, vx: 0, vy: 0, vz: 0, p: (2 / 3) * rho * 0.05, s: r < 1 ? 1 : 0 };
+      }, {
+        box, eosParams: { gamma: 5 / 3 }, bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC],
+        gravity: 'isolated', G: 1, tEnd: 0, rhoFloor: 1e-7, pFloor: 1e-12,
+      });
+      return withSim(gpu, p, n, { ndim: 2 }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        let worst = 0;
+        let peakT = 0;
+        let peakU = 0;
+        for (let i = 1; i <= 12; i++) {
+          sim.cfg.tEnd = 0.125 * i;
+          sim.writeParams();
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          worst = Math.max(worst, Math.abs(d.eTot - d0.eTot) / Math.abs(d0.eTot));
+          if (d.eInt > peakU) [peakU, peakT] = [d.eInt, d.t];
+        }
+        return { pass: worst < 0.02 && peakT >= 0.9 && peakT <= 1.3, metrics: { energy_drift: worst, thermal_peak_time: peakT, e_total_initial: d0.eTot, mass: d0.mass } };
+      });
     },
   },
   {
