@@ -7,7 +7,7 @@ const TESTS = [
   'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-field-brush', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-diffusion', 'mhd-resistivity', 'mhd-line-tied', 'moving-wall', 'mhd-tidal-disruption', 'mhd-disk',
   'rot-off', 'rot-inertial', 'rot-balance', 'rot-blob', 'rot-binary', 'rot-mhd',
   'sym-flux', 'sym-sedov', 'sym-sphere', 'sym-ellipsoid', 'sym-polytrope', 'sym-evrard', 'sym-mhd', 'sym-mass',
-  'cosmo-a', 'cosmo-drift', 'cosmo-growth', 'cosmo-pancake',
+  'cosmo-a', 'cosmo-drift', 'cosmo-cool', 'cosmo-growth', 'cosmo-pancake',
   'shear-steady', 'shear-mass', 'shear-epicycle',
   'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-column',
 ];

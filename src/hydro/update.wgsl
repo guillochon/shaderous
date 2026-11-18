@@ -168,6 +168,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
         @builtin(local_invocation_index) li: u32) {
   g_dx = cell_dx(P.dx, clock.ah);
   g_dt = clock.dt;
+  // Comoving coordinates: cooling's rate at the proper density (hydro/cooling.wgsl).
+  if (cosmo_on()) { g_a3 = clock.ah * clock.ah * clock.ah; }
   if (shear_on()) {
     g_shear = clock.shear / P.dx;
     g_shear_h = shear_half(clock.shear, clock.dt) / P.dx;

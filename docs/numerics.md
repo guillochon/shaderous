@@ -1647,8 +1647,16 @@ as $`\rho\,\Delta\Phi`$, act as spurious pressure: a 0.2% density wave grew 32% 
 linear theory with it and within 1% without. (Without expansion, a cold wave in a static
 periodic box grows 13% further with it than without; that case is not one it was built for.)
 
+**Cooling** works on proper quantities: the state's densities are comoving, so the cooling
+function is called at the proper density $`\rho/a^3`$ (at the middle of the step) and its rate,
+per unit proper volume, multiplied by $`a^3`$. An ideal gas's temperature needs no scaling, since
+it follows from $`\rho e/\rho`$. Uniform gas cooling by $`\Lambda\propto T^{1/2}`$ while it
+expands from $`a = 0.1`$ to 0.3 ends within $`10^{-5}`$ of a float64 integration.
+
 The first version takes a periodic box of ideal gas, with periodic self-gravity or none, on a
 uniform grid or on blocks with one timestep for all; anything else is refused with a message.
+Other equations of state need their four functions called through wrappers that divide and
+multiply by $`a^3`$ wherever they are used; that is not done yet.
 The `zeldovich-pancake` preset (Cosmology group) runs the pancake of
 [Zel'dovich (1970)](https://ui.adsabs.harvard.edu/abs/1970A%26A.....5...84Z) through its
 caustic at $`z = 1`$.

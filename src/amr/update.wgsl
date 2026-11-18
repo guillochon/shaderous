@@ -301,6 +301,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   let slot = inv.slot;
   let l = inv.l;
   g_dx = cell_dx(blk_dx(slot), clock.ah);
+  // Comoving coordinates: cooling's rate at the proper density (hydro/cooling.wgsl).
+  if (cosmo_on()) { g_a3 = clock.ah * clock.ah * clock.ah; }
   g_dt = blk_dt(slot);
   g_bin = blk_bin(slot);
   g_deposit = BINS_ON && !blk_active(slot);
@@ -461,14 +463,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     }
     nw = NewState(vec4<f32>(rho, mom), vec4<f32>(E, eint, nw.u2.z, 0.0));
   }
-  // The second half of the frame's forces, where no correction pass follows.
+  if (has_sources()) { nw = apply_sources(nw, box_frac(blk_pos(slot, l)), g_dt); }
+  nw = apply_damping(nw, box_frac(blk_pos(slot, l)), g_dt);
+  nw = apply_cooling(nw, g_dt);
+  // The second half of the frame's forces, where no correction pass follows: last, as the
+  // correction pass applies it after all of the update on the uniform grid.
   if (FRAME_ON && !self_gravity) {
     let fs = frame_close(nw.u1, nw.u2, 0.5 * g_dt);
     nw = NewState(fs.u1, fs.u2);
   }
-  if (has_sources()) { nw = apply_sources(nw, box_frac(blk_pos(slot, l)), g_dt); }
-  nw = apply_damping(nw, box_frac(blk_pos(slot, l)), g_dt);
-  nw = apply_cooling(nw, g_dt);
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);
 }

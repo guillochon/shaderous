@@ -452,7 +452,6 @@ export function cosmologyUnsupported(c: SimConfig): string | null {
   if (c.gravity !== 'off' && c.gravity !== 'periodic') return 'comoving coordinates take periodic self-gravity or none';
   if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in comoving coordinates';
   if (c.eos !== 'ideal') return 'comoving coordinates take an ideal gas so far';
-  if (c.cooling !== 'off') return 'cooling is not available in comoving coordinates yet';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in comoving coordinates';
   if (c.problem.mhd) return 'magnetic fields are not available in comoving coordinates yet';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available in comoving coordinates (each block would expand by its own a)';

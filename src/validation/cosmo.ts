@@ -1,7 +1,9 @@
 // Validation tests for comoving coordinates (plans/coordinate-systems-plan.md, Part C).
 // Registered through validation/frames.ts.
 import { all, PERIODIC, type Problem } from '../problems/types';
-import { cosmoG, edsScaleFactor, scaleFactor, timeOf, type Cosmology } from '../cosmo';
+import { cosmoG, edsScaleFactor, hubble, rk4, scaleFactor, timeOf, type Cosmology } from '../cosmo';
+import { coolRate, defaultCoolingParams } from '../cooling/cooling';
+import { defaultEosParams, makeEos } from '../eos/eos';
 import type { Sim, SimConfig } from '../sim';
 import type { AmrSim } from '../amr/amr_sim';
 import { withAmr, withSim, type TestDef } from './tests';
@@ -103,6 +105,49 @@ export const COSMO_TESTS: TestDef[] = [
       await withAmr(gpu, p, 32, { ndim: 2, amrLevels: 0 }, (sim) => check(sim, 'blocks'));
       const pass = ['uniform', 'blocks'].every((t) => m[`${t}_velocity_error`] < 1e-5 && m[`${t}_pressure_error`] < 1e-5);
       return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'cosmo-cool',
+    name: 'Comoving coordinates: uniform gas cooling as it expands',
+    criterion: 'Uniform gas at rest (Einstein-de Sitter, a from 0.1 to 0.3) with power-law cooling at the proper density (Lambda T^0.5) and the expansion’s adiabatic cooling: its internal energy at the end is within 1e-3 of a float64 integration of d(rho e)/dt = -3 (gamma - 1) H rho e + a^3 Lambda(rho / a^3, T), on the uniform grid and on blocks',
+    async run(gpu) {
+      const k: Cosmology = { omegaM: 1, omegaL: 0, aStart: 0.1 };
+      const coolParams = { ...defaultCoolingParams(), rate: 5e-4, alpha: 0.5, heat: 0, tFloor: 0 };
+      const gamma = 5 / 3;
+      const p0 = 1e-3;
+      const p = universe(k, 0.3, () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: p0, s: 0 }), { cooling: 'power', coolParams, eosParams: { gamma } });
+      // The float64 reference, in steps of a 1e-4 change in a.
+      const eos = makeEos('ideal', { ...defaultEosParams(), gamma });
+      let a = k.aStart;
+      let e = p0 / (gamma - 1);
+      let t = 0;
+      const tEnd = timeOf(k, 0.3);
+      const rate = (aa: number, ee: number) => -3 * (gamma - 1) * hubble(k, aa) * ee + aa ** 3 * coolRate('power', coolParams, 1 / aa ** 3, eos.temperature(1, ee));
+      while (t < tEnd) {
+        const h = Math.min(tEnd - t, 1e-4 / hubble(k, a));
+        const ah = rk4(k, a, 0.5 * h);
+        const a1 = rk4(k, a, h);
+        const k1 = rate(a, e);
+        const k2 = rate(ah, e + 0.5 * h * k1);
+        const k3 = rate(ah, e + 0.5 * h * k2);
+        const k4 = rate(a1, e + h * k3);
+        e += (h / 6) * (k1 + 2 * k2 + 2 * k3 + k4);
+        a = a1;
+        t += h;
+      }
+      const m: Record<string, number> = { reference: e, adiabatic_only: (p0 / (gamma - 1)) * (k.aStart / 0.3) ** 2 };
+      const check = async (sim: Sim | AmrSim, tag: string) => {
+        await sim.runToEnd();
+        const u2 = tag === 'uniform' ? (await (sim as Sim).readState()).u2 : (await (sim as AmrSim).readLeaves()).u2;
+        let s = 0;
+        for (let q = 0; q < u2.length; q += 4) s += u2[q + 1];
+        m[tag] = s / (u2.length / 4);
+        m[`${tag}_error`] = Math.abs(m[tag] / e - 1);
+      };
+      await withSim(gpu, p, 16, { ndim: 2 }, (sim) => check(sim, 'uniform'));
+      await withAmr(gpu, p, 32, { ndim: 2, amrLevels: 0 }, (sim) => check(sim, 'blocks'));
+      return { pass: m.uniform_error < 1e-3 && m.blocks_error < 1e-3, metrics: m };
     },
   },
   {

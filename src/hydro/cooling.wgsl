@@ -12,8 +12,17 @@
 // cooling.
 const COOL_SUBSTEPS = 12;
 
+// Comoving coordinates (src/cosmo.ts): a^3 at the middle of the step, which the passes that
+// cool set (1 otherwise). The state's densities are comoving, a^3 times the proper ones, and a
+// cooling function's rate is per unit proper volume at the proper density: the comoving rate is
+// a^3 times it. (The temperature needs no scaling for an ideal gas, the only kind comoving runs
+// take: it follows from rho e / rho.)
+var<private> g_a3: f32 = 1.0;
+
 fn cool_edot(rho: f32, eint: f32) -> f32 {
-  return cool_rate(rho, eos_temperature(rho, eint));
+  let T = eos_temperature(rho, eint);
+  if (g_a3 == 1.0) { return cool_rate(rho, T); }
+  return g_a3 * cool_rate(rho / g_a3, T);
 }
 
 fn apply_cooling(st: NewState, dt: f32) -> NewState {
