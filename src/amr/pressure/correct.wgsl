@@ -18,6 +18,10 @@
 fn prs(slot: i32, l: vec3<i32>) -> f32 {
   return textureLoad(PRS, atl(blk_origin(slot), l)).x;
 }
+// The density at the start of the step, of a leaf's cell (the source pass kept it).
+fn rho_old(slot: i32, l: vec3<i32>) -> f32 {
+  return textureLoad(RHO0, atl(blk_origin(slot), l), 0).x;
+}
 #include "amr/pressure/faces.wgsl"
 
 @compute @workgroup_size(8, 8, 4)
@@ -29,16 +33,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let u2 = textureLoad(N2, c, 0);
   let dtdx = clock.dt / blk_dx(inv.slot);
   let pc = textureLoad(PRS, c).x;
+  let rc = textureLoad(RHO0, c, 0).x;
   var mom = u1.yzw;
   var dm = 0.0;
   let axes = ap_axes();
   for (var a = 0; a < axes; a++) {
-    let fh = ap_face(inv.slot, inv.l, a, true, pc, dtdx, true);
-    let fl = ap_face(inv.slot, inv.l, a, false, pc, dtdx, true);
-    mom[a] -= dtdx * (fh.x - fl.x);
+    let fh = ap_face(inv.slot, inv.l, a, true, pc, rc, dtdx, true);
+    let fl = ap_face(inv.slot, inv.l, a, false, pc, rc, dtdx, true);
+    // (The field's kick on the cell: the mean of its two faces'.)
+    mom[a] += clock.dt * P.gext[a] * 0.5 * (fh.z + fl.z) - dtdx * (fh.x - fl.x);
     dm += fh.y - fl.y;
   }
-  let rho = max(textureLoad(RHO0, c, 0).x - dtdx * dm, P.rho_floor);
+  let rho = max(rc - dtdx * dm, P.rho_floor);
   let eint = eos_eint_from_p(rho, eos_pressure(rho, 0.0));
   // The passive scalar rode on the advective mass flux: it keeps its value per unit mass.
   let sc = u2.z * rho / max(u1.x, P.rho_floor);

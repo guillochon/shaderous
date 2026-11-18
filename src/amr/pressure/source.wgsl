@@ -16,6 +16,10 @@
 fn prs(slot: i32, l: vec3<i32>) -> f32 {
   return 0.0;
 }
+// The density at the start of the step, of a leaf's cell.
+fn rho_old(slot: i32, l: vec3<i32>) -> f32 {
+  return textureLoad(U1N, atl(blk_origin(slot), l), 0).x;
+}
 #include "amr/pressure/faces.wgsl"
 
 @compute @workgroup_size(8, 8, 4)
@@ -36,7 +40,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var div = 0.0;
   let axes = ap_axes();
   for (var a = 0; a < axes; a++) {
-    div += ap_face(inv.slot, inv.l, a, true, 0.0, 0.0, false).y - ap_face(inv.slot, inv.l, a, false, 0.0, 0.0, false).y;
+    div += ap_face(inv.slot, inv.l, a, true, 0.0, rho, 0.0, false).y - ap_face(inv.slot, inv.l, a, false, 0.0, rho, 0.0, false).y;
   }
   textureStore(RHS, c, vec4<f32>(ap_alpha() * p - div / (blk_dx(inv.slot) * dt), 0.0, 0.0, 0.0));
 }

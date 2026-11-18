@@ -559,4 +559,73 @@ export const PSPLIT_TESTS: TestDef[] = [
       return { pass, metrics: m };
     },
   },
+  {
+    id: 'psplit-amr-balance',
+    name: 'Implicit pressure on the adaptive mesh: a liquid column in a uniform field, with a refinement boundary across it (2D, 128 finest, 2 levels)',
+    criterion:
+      'The column of psplit-balance (g = 1, sound speed 4), started in the uniform grid\'s discrete balance at each block\'s own cell size, with the lower half of the box refined (density above 1.03): the mesh has two levels throughout; after t = 2 the largest Mach number is below 1e-3 (the balance across the refinement boundary holds to the order of the density\'s change over a cell, not to round-off), and mass is conserved to 2e-6',
+    async run(gpu) {
+      const c0 = 4;
+      const column: Problem = {
+        id: 'liquid-column', label: 'Liquid column', blurb: '', eos: 'liquid', eosParams: { liqRho: 1, liqC: c0 },
+        bcLo: [0, 2, 0], bcHi: [0, 2, 0], gravity: 'off', G: 1, box: 1, tEnd: 2, supports2d: true,
+        gext: () => [0, -1, 0],
+        // Hydrostatic for p = c^2 (rho - 1): rho = exp(-g (y - y0) / c^2), 1 at the top.
+        init: () => (_x, y) => ({ rho: Math.exp((0.5 - y) / (c0 * c0)), vx: 0, vy: 0, vz: 0, p: 0, s: 0 }),
+      };
+      return withAmr(gpu, column, 128, { ndim: 2, tEnd: 2, amrLevels: 1, refineDense: 1.03, refineLo: 0, pressure: 'implicit', acousticCfl: 50 }, async (sim) => {
+        const levels = () => new Set(sim.tree.leaves().map((b) => b.level)).size;
+        const before = levels();
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(64, 1e6);
+        const d = await sim.diagnostics();
+        const m = { levels_at_start: before, levels_at_end: levels(), max_mach: d.maxMach, steps, mass_drift: Math.abs(d.mass / d0.mass - 1) };
+        return { pass: before === 2 && m.levels_at_end === 2 && d.maxMach < 1e-3 && m.mass_drift < 2e-6, metrics: m };
+      });
+    },
+  },
+  {
+    id: 'psplit-species',
+    name: 'Implicit pressure with species carried by the gas (2D 64^2): a liquid vortex, and an ideal gas carrying a density bump across a periodic box',
+    criterion:
+      'Three species (a disc, a uniform 0.2, the rest) are moved after the pressure correction and scaled to its density. In both runs, at the end: the mass fractions of every cell sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]; the uniform species is still 0.2 to 1e-4 everywhere; and each species\' total mass is kept to 5e-3 (the scaling is by the density\'s correction, of order the Mach number squared, so it is not round-off: 2e-3 in the liquid, 1e-7 in the gas). A species\' sharp edge can overshoot by a percent of its jump'),
+    async run(gpu) {
+      const n = 64;
+      const X = (r: number) => (r < 0.2 ? [0.7, 0.2, 0.1] : [0.1, 0.2, 0.7]);
+      const base = problemById('gresho');
+      const liquid: Problem = { ...base, id: 'liquid-species', setup: undefined, species: ['a', 'b', 'c'], init: (cells, eos, ndim, params) => { const f = base.init(cells, eos, ndim, params); return (x, y, z) => ({ ...f(x, y, z), X: X(Math.hypot(x, y)) }); } };
+      const gas: Problem = {
+        id: 'gas-species', label: '', blurb: '', eos: 'ideal', eosParams: { gamma: 1.4 }, bcLo: all(PERIODIC), bcHi: all(PERIODIC), gravity: 'off', G: 1, box: 1, tEnd: 1, supports2d: true,
+        species: ['a', 'b', 'c'],
+        init: () => (x, y) => ({ rho: 1 + 0.5 * Math.exp(-(x * x + y * y) / 0.02), vx: 1, vy: 0.5, vz: 0, p: 20, s: 0, X: X(Math.hypot(x, y)) }),
+      };
+      const m: Record<string, number> = {};
+      let pass = true;
+      for (const [tag, problem] of [['liquid', liquid], ['gas', gas]] as const) {
+        await withSim(gpu, problem, n, { ndim: 2, tEnd: 1, riemann: 'hllclm', ...IMPLICIT }, async (sim) => {
+          const mass = (Xs: Float32Array[], u1: Float32Array) => Xs.map((x) => x.reduce((t, v, q) => t + v * u1[4 * q], 0));
+          const m0 = mass(await sim.readSpecies(), (await sim.readState()).u1);
+          const steps = await sim.runToEnd(64, 1e6);
+          const Xs = await sim.readSpecies();
+          const m1 = mass(Xs, (await sim.readState()).u1);
+          let sum = 0;
+          let lo = Infinity;
+          let hi = -Infinity;
+          let flat = 0;
+          for (let q = 0; q < n * n; q++) {
+            sum = Math.max(sum, Math.abs(Xs[0][q] + Xs[1][q] + Xs[2][q] - 1));
+            for (const x of Xs) {
+              lo = Math.min(lo, x[q]);
+              hi = Math.max(hi, x[q]);
+            }
+            flat = Math.max(flat, Math.abs(Xs[1][q] - 0.2));
+          }
+          const drift = Math.max(...m1.map((v, i) => Math.abs(v / m0[i] - 1)));
+          Object.assign(m, { [`${tag}_sum_error`]: sum, [`${tag}_min`]: lo, [`${tag}_max`]: hi, [`${tag}_uniform_species_error`]: flat, [`${tag}_species_mass_drift`]: drift, [`${tag}_steps`]: steps });
+          pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4 && drift < 5e-3;
+        });
+      }
+      return { pass, metrics: m };
+    },
+  },
 ];

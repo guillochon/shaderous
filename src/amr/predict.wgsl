@@ -130,6 +130,21 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
       0.0,
     );
     if (!is2d()) { g_pgrad.z = 0.5 * mask.z * (textureLoad(W2, c + vec3<i32>(0, 0, 1), 0).w - textureLoad(W2, c - vec3<i32>(0, 0, 1), 0).w); }
+    // Beside a wall of the box the ghost is the cell's own image, which has its pressure: in a
+    // uniform field the wall side is the cell's pressure carried a cell down the field, so that
+    // a column at rest has the gradient that holds it (pressure/predict_on.wgsl).
+    let nax = select(3, 2, is2d());
+    for (var axis = 0; axis < nax; axis++) {
+      for (var u = 0; u < 2; u++) {
+        if (l[axis] != select(0, BS - 1, u == 1)) { continue; }
+        let nb = bt(slot, 6u + u32(2 * axis + u));
+        if (nb <= -2 && bc_wall(u32(-1 - nb))) {
+          var e = vec3<i32>(0);
+          e[axis] = select(1, -1, u == 1);
+          g_pgrad[axis] = 0.5 * mask[axis] * (select(-1.0, 1.0, u == 1) * (textureLoad(W2, c, 0).w - textureLoad(W2, c + e, 0).w) + g_dx * P.gext[axis] * q.a.x);
+        }
+      }
+    }
   }
   let pr = predictor(
     q,

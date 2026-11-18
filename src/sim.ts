@@ -531,7 +531,11 @@ export function implicitUnsupported(c: SimConfig): string | null {
   if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available with it yet';
   if (c.problem.rotation || c.problem.shear || c.problem.frame) return 'rotating frames and shearing boxes are not available with it';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
-  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available with it yet (the correction changes the density they ride on)';
+  // (Species that only ride with the gas are moved after the correction, and scaled to its
+  // density. Where they set the equation of state, or burn, the pressure passes would have to
+  // know each cell's composition.)
+  if (problemCoefficients(c.problem, c.eosParams.gamma) !== null) return 'species that set the equation of state are not available with it yet';
+  if (c.problem.burn) return 'burning is not available with it';
   if (c.cooling !== 'off' || c.problem.damping) return 'cooling and damping zones are not available with it';
   return null;
 }
@@ -543,8 +547,8 @@ export function implicitUnsupported(c: SimConfig): string | null {
  */
 export function implicitBlocksUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid') return 'on the adaptive mesh it is built for the liquid only, so far';
+  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available with it on the adaptive mesh yet';
   if (c.timeBins > 0) return 'per-block timesteps are not available with it: one solve couples every cell at one time';
-  if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available with it on the adaptive mesh yet';
   if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'obstacle' || p.kind === 'inflow')) return 'obstacles and inflows are not available with it on the adaptive mesh yet';
   return null;
 }
@@ -1298,6 +1302,8 @@ export class Sim implements Simulation {
   private pSpecies?: GPUComputePipeline;
   /** gSpecies[state parity][species parity], and the same for the predictor */
   private gSpecies: GPUBindGroup[][] = [];
+  /** With implicit pressure: the species pass scaling to the corrected state's density (parity p). */
+  private gSpeciesFinal: GPUBindGroup[][] = [];
   private gSpeciesPredict: GPUBindGroup[][] = [];
   /** Nuclear burning (burn/burn.ts, burn/network.ts), after the species pass; none without. */
   private burn?: Burner;
@@ -1682,6 +1688,9 @@ export class Sim implements Simulation {
         8: v(this.speciesHalf!),
         ...((this.comp ? { 26: v(this.comp), 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>),
       }));
+      // With implicit pressure the density is final only after the correction, which writes it
+      // back into parity p: the species are moved then, and scaled to that density.
+      this.gSpeciesFinal = both(this.pSpecies, (p, q) => ({ 4: v(this.state[p][0]), 6: v(this.species[1 - q]), 7: this.massFlux!, 8: v(this.speciesHalf!) }));
     }
     this.burn?.destroy();
     this.burn = undefined;
@@ -2129,14 +2138,19 @@ export class Sim implements Simulation {
         this.pPredict!.encode(pass, this.gPredict[p]);
         this.pUpdate!.encode(pass, this.gUpdate[p]);
       }
+      // (With implicit pressure the second of the two species passes waits for the correction.)
+      const speciesPass = (pipe: GPUComputePipeline, g: GPUBindGroup) => {
+        pass.setPipeline(pipe);
+        pass.setBindGroup(0, g);
+        pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
+      };
       if (this.pSpecies) {
         const q = this.speciesCur;
-        for (const [pipe, g] of [[this.pSpeciesPredict!, this.gSpeciesPredict], [this.pSpecies, this.gSpecies]] as const) {
-          pass.setPipeline(pipe);
-          pass.setBindGroup(0, g[p][q]);
-          pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
+        speciesPass(this.pSpeciesPredict!, this.gSpeciesPredict[p][q]);
+        if (!this.prs) {
+          speciesPass(this.pSpecies, this.gSpecies[p][q]);
+          this.speciesCur = 1 - q;
         }
-        this.speciesCur = 1 - q;
       }
       if (selfGravity && this.sphMono) {
         this.encodeMonopole(pass, 1 - p);
@@ -2168,6 +2182,10 @@ export class Sim implements Simulation {
         pass.setPipeline(this.pPsCorrect!);
         pass.setBindGroup(0, this.gPsCorrect[p]);
         this.dispatch(pass);
+        if (this.pSpecies) {
+          speciesPass(this.pSpecies, this.gSpeciesFinal[p][this.speciesCur]);
+          this.speciesCur = 1 - this.speciesCur;
+        }
       } else if (anyGravity) {
         // Second half kick, with the acceleration of the updated state.
         pass.setPipeline(this.pCorrect);

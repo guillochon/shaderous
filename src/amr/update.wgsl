@@ -463,7 +463,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   // form (gravity/ext.wgsl).
   let gx = ext_accel(blk_pos(slot, l));
   // (A rotating frame's centrifugal force is part of gx, with or without point masses.)
-  let gravity = self_gravity || any(P.gext.xyz != vec3<f32>(0.0)) || ext_on();
+  // (With implicit pressure a uniform field's kick is the pressure passes': amr/pressure/faces.wgsl.)
+  let gravity = !PSPLIT && (self_gravity || any(P.gext.xyz != vec3<f32>(0.0)) || ext_on());
   let flux_work = gravity && (P.flags & 1u) != 0u;
   var dw = 0.0;
   if (flux_work) {
