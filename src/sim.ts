@@ -25,6 +25,7 @@ import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisRe
 import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
+import { domainLo } from './domain';
 
 import type { LimiterKind, RiemannKind } from './problems/types';
 export { LIMITER_KINDS, RIEMANN_KINDS, type LimiterKind, type RiemannKind } from './problems/types';
@@ -716,7 +717,7 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 384;
+export const PARAM_BYTES = 400;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -765,6 +766,7 @@ export function packParams(
   f.set(eosConstants2(c.eos, c.eosParams), 64);
   f.set([resists(c) ? c.resistivity : 0, 0, 0, 0], 68);
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
+  f.set([...domainLo(c), 0], 96);
   return buf;
 }
 
@@ -1271,7 +1273,7 @@ export class Sim implements Simulation {
     const sp = new Float32Array(n * n * nz * 4 * G);
     const kc = this.compCoeffs;
     const km = kc ? new Float32Array(n * n * nz * 4) : undefined;
-    const half = c.problem.box / 2;
+    const lo = domainLo(c);
     // The magnetic field on the faces, and its energy in each cell's total.
     const faces = mhdOn(c) ? initialFaces(c, n, nz, this.dx) : null;
     // Each cell's B^2 / 2, which a star's settling (it rebuilds E) adds back.
@@ -1282,11 +1284,11 @@ export class Sim implements Simulation {
     this.nSources = 0;
     this.device.queue.writeBuffer(this.sources, 0, packSources([]));
     for (let k = 0; k < nz; k++) {
-      const z = nz === 1 ? 0 : (k + 0.5) * this.dx - half;
+      const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
       for (let j = 0; j < n; j++) {
-        const y = (j + 0.5) * this.dx - half;
+        const y = (j + 0.5) * this.dx + lo[1];
         for (let i = 0; i < n; i++, o += 4) {
-          const x = (i + 0.5) * this.dx - half;
+          const x = (i + 0.5) * this.dx + lo[0];
           const w = fn(x, y, z);
           // Where the species set the equation of state, the cell's own.
           let ce = eos;
@@ -1387,11 +1389,11 @@ export class Sim implements Simulation {
   private cellsOf(u1: Float32Array, u2: Float32Array): SettleCells {
     const vol = this.dx ** 3;
     const n = this.n;
-    const half = this.cfg.problem.box / 2;
-    const at = (i: number) => (i + 0.5) * this.dx - half;
+    const lo = domainLo(this.cfg);
+    const at = (i: number, a: number) => (i + 0.5) * this.dx + lo[a];
     return {
       count: u1.length / 4,
-      pos: (q) => [at(q % n), at(Math.floor(q / n) % n), at(Math.floor(q / (n * n)))],
+      pos: (q) => [at(q % n, 0), at(Math.floor(q / n) % n, 1), at(Math.floor(q / (n * n)), 2)],
       vol: () => vol,
       u1,
       u2,
@@ -1752,8 +1754,8 @@ export class Sim implements Simulation {
     const cell = (x: number, n: number) => Math.min(n - 1, Math.max(0, Math.floor(x * n)));
     const index = [cell(f[0], this.n), cell(f[1], this.n), cell(f[2], this.nz)];
     const [u1, u2] = await readTexels(this.device, this.state[this.cur], index as [number, number, number]);
-    const half = this.cfg.problem.box / 2;
-    const pos = index.map((i) => (i + 0.5) * this.dx - half) as [number, number, number];
+    const lo = domainLo(this.cfg);
+    const pos = index.map((i, a) => (i + 0.5) * this.dx + lo[a]) as [number, number, number];
     if (this.nz === 1) pos[2] = 0;
     return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2] };
   }

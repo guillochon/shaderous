@@ -4,6 +4,7 @@
  * from the problem's setup. Pure functions of the configuration, so the page and the workers of
  * amr/init_pool.ts run the very same code and get bit-identical results.
  */
+import { domainLo } from '../domain';
 import { BS } from './tree';
 import type { Eos } from '../eos/eos';
 import { makeEos } from '../eos/eos';
@@ -76,11 +77,11 @@ export function samplesPerCell(cfg: SimConfig, levels: number, level: number, le
 export function indicator(cfg: SimConfig, dx0: number, b: BlockAt, fn: (x: number, y: number, z: number) => Sample, sub: number): number {
   const three = cfg.ndim === 3;
   const dx = dx0 / (1 << b.level);
-  const half = cfg.problem.box / 2;
+  const lo = domainLo(cfg);
   const h = dx / sub;
   const m = (BS + 2) * sub; // one cell of margin on each side
   const mz = three ? m : 1;
-  const at = (i: number, a: number) => b.c[a] * BS * dx + (i - sub + 0.5) * h - half;
+  const at = (i: number, a: number) => b.c[a] * BS * dx + (i - sub + 0.5) * h + lo[a];
   // Gas dense enough that the preset wants it at the finest level (stars): as amr/flag.wgsl.
   // Any sample above it decides the block, so with several samples per cell one per cell is
   // looked at first (the cell-centered ones of the full sampling below): a block inside a star
@@ -185,7 +186,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   const { cfg: c, fn, eos, kc, groups: G } = x;
   const three = c.ndim === 3;
   const depth = three ? BS : 1;
-  const half = c.problem.box / 2;
+  const lo = domainLo(c);
   const blockCells = BS * BS * depth;
   const u1 = new Float32Array(blockCells * 4);
   const u2 = new Float32Array(blockCells * 4);
@@ -203,7 +204,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   for (let k = 0; k < depth; k++)
     for (let j = 0; j < BS; j++)
       for (let i = 0; i < BS; i++, o += 4) {
-        const w = fn((b.c[0] * BS + i + 0.5) * dx - half, (b.c[1] * BS + j + 0.5) * dx - half, three ? (b.c[2] * BS + k + 0.5) * dx - half : 0);
+        const w = fn((b.c[0] * BS + i + 0.5) * dx + lo[0], (b.c[1] * BS + j + 0.5) * dx + lo[1], three ? (b.c[2] * BS + k + 0.5) * dx + lo[2] : 0);
         const p = pressureOf(eos, w);
         // Where the species set the equation of state, the cell's own.
         let ce = eos;

@@ -25,6 +25,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var o = vec3<i32>(0);
   o[a] = select(-1, 1, upper);
   // As gravity/stencil.wgsl places the face: the same expression, so the same bits.
-  let x = (vec3<f32>(c) + 0.5 + 0.5 * vec3<f32>(o)) * L.h - 0.5 * P.box;
+  let x = (vec3<f32>(c) + 0.5 + 0.5 * vec3<f32>(o)) * L.h + P.org.xyz;
   BF[bf_index(c, o, n)] = phi_boundary(x);
 }

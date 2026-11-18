@@ -97,7 +97,7 @@ fn voxel(c: vec3<i32>) -> Cell {
   var g: Grad;
   if (field_needs_grad(V.field)) { g = gradients(c); }
   // The uniform field's potential, measured from the box center, is not in the texture.
-  let pos = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+  let pos = (vec3<f32>(c) + 0.5) * P.dx + P.org.xyz;
   let xp = select(pos, vec3<f32>(pos.xy, 0.0), P.dims.z == 1u);
   let phi = textureLoad(GF, c, 0).w + ext_phi(xp) - dot(P.gext.xyz, xp);
   g_acc = P.gext.xyz;

@@ -434,8 +434,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     }
     nw = NewState(vec4<f32>(rho, mom), vec4<f32>(E, eint, nw.u2.z, 0.0));
   }
-  if (has_sources()) { nw = apply_sources(nw, blk_pos(slot, l) / P.box + 0.5, g_dt); }
-  nw = apply_damping(nw, blk_pos(slot, l) / P.box + 0.5, g_dt);
+  if (has_sources()) { nw = apply_sources(nw, box_frac(blk_pos(slot, l)), g_dt); }
+  nw = apply_damping(nw, box_frac(blk_pos(slot, l)), g_dt);
   nw = apply_cooling(nw, g_dt);
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);

@@ -8,6 +8,7 @@
 // The magnetic field lives on the faces of the cells (mhd/common.wgsl); the conserved state
 // keeps its layout, with the magnetic energy B^2 / 2 in the total energy. The half-step state
 // uses the hydro predictor's two textures and a face texture of its own.
+import { domainLo } from '../domain';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture } from '../gpu/device';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
@@ -84,7 +85,7 @@ export function magneticFrom(r: Float32Array, disk = false): MagDiagnostics {
  */
 export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): Float32Array {
   const spec = c.problem.mhd!;
-  const half = c.problem.box / 2;
+  const dlo = domainLo(c);
   const fx = n + 1;
   const fz = nz === 1 ? 1 : nz + 1;
   const out = new Float32Array(fx * fx * fz * 4);
@@ -95,15 +96,15 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
     return f;
   }
   // Face (lower) and center positions along an axis.
-  const lo = (i: number) => i * dx - half;
-  const mid = (i: number) => (i + 0.5) * dx - half;
-  const zc = (k: number) => (flat ? 0 : mid(k));
-  const zl = (k: number) => (flat ? 0 : lo(k));
+  const lo = (i: number, a: number) => i * dx + dlo[a];
+  const mid = (i: number, a: number) => (i + 0.5) * dx + dlo[a];
+  const zc = (k: number) => (flat ? 0 : mid(k, 2));
+  const zl = (k: number) => (flat ? 0 : lo(k, 2));
   if (spec.potential) {
     const A = spec.potential(c.params, c.ndim);
-    const ax = (i: number, j: number, k: number) => A(mid(i), lo(j), zl(k))[0];
-    const ay = (i: number, j: number, k: number) => A(lo(i), mid(j), zl(k))[1];
-    const az = (i: number, j: number, k: number) => A(lo(i), lo(j), zc(k))[2];
+    const ax = (i: number, j: number, k: number) => A(mid(i, 0), lo(j, 1), zl(k))[0];
+    const ay = (i: number, j: number, k: number) => A(lo(i, 0), mid(j, 1), zl(k))[1];
+    const az = (i: number, j: number, k: number) => A(lo(i, 0), lo(j, 1), zc(k))[2];
     for (let k = 0; k < fz; k++)
       for (let j = 0; j < fx; j++)
         for (let i = 0; i < fx; i++) {
@@ -123,7 +124,7 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
       for (let j = 0; j < fx; j++)
         for (let i = 0; i < fx; i++) {
           const o = 4 * ((k * fx + j) * fx + i);
-          const f = [F(0, lo(i), mid(j), zc(k)), F(1, mid(i), lo(j), zc(k)), F(2, mid(i), mid(j), zl(k))];
+          const f = [F(0, lo(i, 0), mid(j, 1), zc(k)), F(1, mid(i, 0), lo(j, 1), zc(k)), F(2, mid(i, 0), mid(j, 1), zl(k))];
           for (let a = 0; a < 3; a++) out[o + a] = both ? out[o + a] + f[a] : f[a];
         }
   }

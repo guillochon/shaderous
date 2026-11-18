@@ -31,11 +31,11 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         var rho = textureLoad(U1, c, 0).x;
         if (solids && abs(textureLoad(U2, c, 0).w) > 0.5) { rho = 0.0; }
         m += rho;
-        mx += rho * ((vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box);
+        mx += rho * ((vec3<f32>(c) + 0.5) * P.dx + P.org.xyz);
       }
     }
   }
-  var pos = (vec3<f32>(lo + hi) * 0.5) * P.dx - 0.5 * P.box;
+  var pos = (vec3<f32>(lo + hi) * 0.5) * P.dx + P.org.xyz;
   if (m > 0.0) { pos = mx / m; }
   // A 2D run lies in the plane z = 0, where the masses are.
   if (P.dims.z == 1u) { pos.z = 0.0; }

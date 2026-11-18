@@ -52,7 +52,7 @@ fn atl(o: vec3<i32>, l: vec3<i32>) -> vec3<i32> {
 
 // Center of local cell l, relative to the box center.
 fn blk_pos(slot: i32, l: vec3<i32>) -> vec3<f32> {
-  var x = (vec3<f32>(blk_coord(slot) * BS + l) + 0.5) * blk_dx(slot) - 0.5 * P.box;
+  var x = (vec3<f32>(blk_coord(slot) * BS + l) + 0.5) * blk_dx(slot) + P.org.xyz;
   if (is2d()) { x.z = 0.0; }
   return x;
 }

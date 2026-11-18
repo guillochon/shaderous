@@ -48,6 +48,8 @@ struct Params {
   ohm: vec4<f32>,        // (magnetic diffusivity eta, 0, 0, 0): mhd/ohm.wgsl
   wallv: array<vec4<f32>, 6>, // each face's wall velocity (moving walls, hydro/boundary.wgsl):
                          //   (x lo, x hi, y lo, y hi, z lo, z hi)
+  org: vec4<f32>,        // the domain's lower corner (src/domain.ts domainLo): cell c is centered
+                         //   at (c + 0.5) dx + org
 }
 
 struct Clock {
@@ -69,6 +71,15 @@ fn opaque(x: f32) -> f32 {
 }
 fn opaque3(x: vec3<f32>) -> vec3<f32> {
   return bitcast<vec3<f32>>(bitcast<vec3<u32>>(x) ^ vec3<u32>(bitcast<u32>(P.refine.w)));
+}
+
+// A position as a fraction of the box from the domain's lower corner (0 to 1 inside it), and
+// back. With the corner at -box/2 these are x / box + 0.5 and (f - 0.5) box, bit for bit.
+fn box_frac(x: vec3<f32>) -> vec3<f32> {
+  return x / P.box - P.org.xyz / P.box;
+}
+fn frac_pos(f: vec3<f32>) -> vec3<f32> {
+  return (f + P.org.xyz / P.box) * P.box;
 }
 
 // Kahan summation: add x to s, whose rounding so far is c. Returns the new (s, c). Each rounded

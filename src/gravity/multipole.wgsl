@@ -7,6 +7,6 @@
 
 fn red_cell(c: vec3<i32>) -> Red {
   let m = textureLoad(U1, c, 0).x * P.dx * P.dx * P.dx;
-  let x = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+  let x = (vec3<f32>(c) + 0.5) * P.dx + P.org.xyz;
   return mp_moments(m, x);
 }

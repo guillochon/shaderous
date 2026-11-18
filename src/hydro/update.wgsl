@@ -84,7 +84,7 @@ fn escape(c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Faces, fz: Faces, flat: boo
   // The passive scalar's flux, for problems that bin only the gas it marks.
   let los = vec3<f32>(fx.lo.s, fy.lo.s, fz.lo.s);
   let his = vec3<f32>(fx.hi.s, fy.hi.s, fz.hi.s);
-  var xc = (vec3<f32>(c) + 0.5) * P.dx - 0.5 * P.box;
+  var xc = (vec3<f32>(c) + 0.5) * P.dx + P.org.xyz;
   if (flat) { xc.z = 0.0; }
   // Face area times dt (P.geom.x is the cell volume, per unit length in z in 2D).
   let adt = P.geom.x / P.dx * clock.dt;

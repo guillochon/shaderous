@@ -10,6 +10,7 @@
 // Re-meshing moves the faces with the cells (encodeRegrid()). With time bins, a cycle's first
 // substep steps every leaf (encodeFull()) and the others the leaves of the GPU's lists
 // (encodeSubstep(), docs/numerics.md section 21, Time bins).
+import { domainLo } from '../domain';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, type Bindable } from '../gpu/device';
 import { Reducer } from '../gpu/reduce';
@@ -609,8 +610,8 @@ export function blockFaces(cfg: SimConfig, b: Block, dx0: number, maxLevel: numb
   const out = new Float32Array(W * W * D * 4);
   const h = dx0 / (1 << b.level);
   const sub = 1 << (maxLevel - b.level);
-  const half = cfg.problem.box / 2;
-  const at = (i: number, a: number) => (b.c[a] * BS + i) * h - half;
+  const dlo = domainLo(cfg);
+  const at = (i: number, a: number) => (b.c[a] * BS + i) * h + dlo[a];
   if (spec.potential) {
     const A = spec.potential(cfg.params, cfg.ndim);
     // Line integrals of A_c along every edge of the block, each computed once: E[c] at point

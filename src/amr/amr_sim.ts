@@ -15,6 +15,7 @@
 //
 // With self-gravity (3D), the potential is solved on every tree level after the update
 // (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
+import { domainLo } from '../domain';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
@@ -1271,9 +1272,9 @@ export class AmrSim implements Simulation {
   private finerInSnapshot(b: Block, levelAt: (x: number, y: number, z: number) => number): boolean {
     const three = this.cfg.ndim === 3;
     const size = (BS * this.dx0) / (1 << b.level);
-    const half = this.cfg.problem.box / 2;
+    const lo = domainLo(this.cfg);
     for (let o = 0; o < (three ? 8 : 4); o++) {
-      const at = (a: number) => (b.c[a] + (((o >> a) & 1) + 0.5) / 2) * size - half;
+      const at = (a: number) => (b.c[a] + (((o >> a) & 1) + 0.5) / 2) * size + lo[a];
       if (levelAt(at(0), at(1), three ? at(2) : 0) > b.level) return true;
     }
     return false;
@@ -2405,8 +2406,8 @@ export class AmrSim implements Simulation {
       const tree = this.tree;
       const [u1, u2] = await readTexels(this.device, this.state[this.cur], at);
       const dx = this.dx0 / (1 << b.level);
-      const half = this.cfg.problem.box / 2;
-      const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx - half : 0)) as [number, number, number];
+      const lo = domainLo(this.cfg);
+      const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx + lo[a] : 0)) as [number, number, number];
       return {
         pos, index, dx, u1: [...u1], u2: [...u2],
         // A block that has been split or merged since the read would show another's state.
@@ -2752,16 +2753,16 @@ export class AmrSim implements Simulation {
       x: new Float32Array(count), y: new Float32Array(count), z: new Float32Array(count), dx: new Float32Array(count),
       u1, u2, count,
     };
-    const half = this.cfg.problem.box / 2;
+    const lo = domainLo(this.cfg);
     let q = 0;
     for (const blk of leaves) {
       const dx = this.dx0 / (1 << blk.level);
       for (let k = 0; k < depth; k++)
         for (let j = 0; j < BS; j++)
           for (let i = 0; i < BS; i++, q++) {
-            out.x[q] = (blk.c[0] * BS + i + 0.5) * dx - half;
-            out.y[q] = (blk.c[1] * BS + j + 0.5) * dx - half;
-            out.z[q] = three ? (blk.c[2] * BS + k + 0.5) * dx - half : 0;
+            out.x[q] = (blk.c[0] * BS + i + 0.5) * dx + lo[0];
+            out.y[q] = (blk.c[1] * BS + j + 0.5) * dx + lo[1];
+            out.z[q] = three ? (blk.c[2] * BS + k + 0.5) * dx + lo[2] : 0;
             out.dx[q] = dx;
           }
     }

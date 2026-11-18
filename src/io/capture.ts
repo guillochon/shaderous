@@ -1,4 +1,5 @@
 // Snapshots of a running simulation, and runs started from snapshots.
+import { domainHi, domainLo } from '../domain';
 import { AmrSim } from '../amr/amr_sim';
 import { BS } from '../amr/tree';
 import type { Problem } from '../problems';
@@ -13,7 +14,8 @@ import { pressureOf, primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Rest
  */
 export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses' | 'perturber'>, opts: { lazyPressure?: boolean } = {}): Promise<Snapshot> {
   const cfg = sim.cfg;
-  const half = cfg.problem.box / 2;
+  const lo = domainLo(cfg);
+  const hi = domainHi(cfg);
   const flat = cfg.ndim === 2;
   let rootSize: number[];
   let blockSize: number[];
@@ -113,8 +115,8 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     ndim: cfg.ndim,
     rootSize,
     blockSize,
-    lo: [-half, -half, -half],
-    hi: [half, half, half],
+    lo,
+    hi,
     time: restart.time,
     steps: Math.round(restart.steps),
     levels,

@@ -27,7 +27,7 @@ fn g_nb(slot: i32, o: vec3<i32>, l: vec3<i32>, axis: i32, upper: bool) -> vec2<f
   if (GL.k == 0u) {
     var e = vec3<f32>(0.0);
     e[axis] = select(-0.5, 0.5, upper);
-    let x = (vec3<f32>(blk_coord(slot) * B + l) + 0.5 + e) * g_h(slot) - 0.5 * P.box;
+    let x = (vec3<f32>(blk_coord(slot) * B + l) + 0.5 + e) * g_h(slot) + P.org.xyz;
     v = 2.0 * phi_boundary(x);
   }
   return vec2<f32>(v, 1.0);
