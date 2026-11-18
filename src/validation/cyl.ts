@@ -110,6 +110,28 @@ export const CYL_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'cyl-sink',
+    name: 'Axisymmetric: a sink on the axis against the same sink in 3D',
+    criterion: 'A point mass with a sink in uniform gas at rest: what it takes in by t = 0.1 in (R, z) (32^2, R to 0.5) is within 5% of what it takes in a 3D Cartesian box of the same cell size (64^3), and the mass stays on the axis',
+    async run(gpu) {
+      const base: Problem = {
+        id: 'sink', label: 'Sink', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
+        bcLo: [OUTFLOW, OUTFLOW, OUTFLOW], bcHi: [OUTFLOW, OUTFLOW, OUTFLOW], gravity: 'off', G: 1, box: 1, tEnd: 0.1,
+        init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 0.1, s: 0 }),
+        masses: () => [{ gm: 1, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.05, sinkRadius: 0.06 }],
+      };
+      const take = async (sim: Sim) => {
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        return { acc: d.masses[0].accreted, x: d.masses[0].pos[0], z: d.masses[0].pos[2] };
+      };
+      const cart = await withSim(gpu, base, 64, {}, take);
+      const cyl = await withSim(gpu, { ...base, box: 0.5, geometry: 'cylindrical', bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC] }, 32, { ndim: 2 }, take);
+      const m = { accreted_3d: cart.acc, accreted_axisymmetric: cyl.acc, relative_difference: Math.abs(cyl.acc / cart.acc - 1), off_axis: Math.hypot(cyl.x, cyl.z) };
+      return { pass: m.relative_difference < 0.05 && m.off_axis === 0 && cart.acc > 0, metrics: m };
+    },
+  },
+  {
     id: 'cyl-column',
     name: 'Axisymmetric: a stratified column at rest under gravity along the axis',
     criterion: 'An isothermal column in discrete balance under a uniform field along z (64^2 in (R, z), walls all round): after a sound crossing the largest Mach number stays below 1e-4, as the Cartesian column does',

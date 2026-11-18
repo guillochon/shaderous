@@ -9,7 +9,7 @@ const TESTS = [
   'sym-flux', 'sym-sedov', 'sym-sphere', 'sym-ellipsoid', 'sym-polytrope', 'sym-evrard', 'sym-mhd', 'sym-mass',
   'cosmo-a', 'cosmo-drift', 'cosmo-growth', 'cosmo-pancake',
   'shear-steady', 'shear-mass', 'shear-epicycle',
-  'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-column',
+  'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-column',
 ];
 
 test.describe.configure({ mode: 'serial' });

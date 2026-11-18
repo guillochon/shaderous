@@ -425,7 +425,8 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   if (c.amrLevels > 0) return 'the adaptive mesh is not available for axisymmetric runs yet';
   if (c.problem.mhd) return 'magnetic fields are not available in axisymmetric runs yet';
   if (c.viscosity > 0) return 'viscosity is not available in axisymmetric runs yet (it needs the curvilinear stress)';
-  if (c.problem.masses) return 'point masses are not available in axisymmetric runs yet';
+  for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
+    if ((m.pos[0] ?? 0) !== 0 || (m.pos[2] ?? 0) !== 0 || (m.vel[0] ?? 0) !== 0 || (m.vel[2] ?? 0) !== 0) return 'a point mass must sit on the axis (R = 0) and move along it';
   if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in axisymmetric runs yet';
   if (c.problem.rotation || c.problem.shear || c.problem.cosmology) return 'an axisymmetric run has no rotating frame, shear or expansion';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in axisymmetric runs yet';

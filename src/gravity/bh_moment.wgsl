@@ -14,5 +14,7 @@ fn red_cell(c: vec3<i32>) -> Red {
   var u1 = textureLoad(U1, c, 0);
   // Solid and fixed cells are not gas the masses can pull on or take.
   if (abs(textureLoad(U2, c, 0).w) > 0.5) { u1 = vec4<f32>(0.0); }
-  return bh_cell(u1, P.geom.x, cell_pos(c), clock.dt);
+  // (An axisymmetric run's cell is a ring of volume 2 pi R dx^2.)
+  let vol = select(P.geom.x, 6.2831853 * (f32(c.x) + 0.5) * P.dx * P.dx * P.dx, cylindrical());
+  return bh_cell(u1, vol, cell_pos(c), clock.dt);
 }

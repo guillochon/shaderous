@@ -71,16 +71,20 @@ fn unfold_l(l: vec3<f32>) -> vec3<f32> {
   return l * f;
 }
 fn red_s(i: u32) -> f32 {
-  if (all(P.sym.xyz == vec3<u32>(0u))) { return RED[i]; }
+  if (all(P.sym.xyz == vec3<u32>(0u)) || cylindrical()) { return RED[i]; }
   return unfold_s(RED[i]);
 }
+// An axisymmetric run (masses on its axis): each cell is a ring, whose pull, momentum and
+// angular momentum about the axis have no part across it. What is left is along the axis (y).
 fn red_v(i: u32) -> vec3<f32> {
   let v = vec3<f32>(RED[i], RED[i + 1u], RED[i + 2u]);
+  if (cylindrical()) { return vec3<f32>(0.0, v.y, 0.0); }
   if (all(P.sym.xyz == vec3<u32>(0u))) { return v; }
   return unfold_v(v);
 }
 fn red_l(i: u32) -> vec3<f32> {
   let v = vec3<f32>(RED[i], RED[i + 1u], RED[i + 2u]);
+  if (cylindrical()) { return vec3<f32>(0.0, v.y, 0.0); }
   if (all(P.sym.xyz == vec3<u32>(0u))) { return v; }
   return unfold_l(v);
 }
