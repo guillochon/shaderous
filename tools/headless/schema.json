@@ -175,6 +175,61 @@
    "about": "Temperature floor"
   },
   {
+   "key": "rad",
+   "group": "settings",
+   "about": "Radiation transport: off, m1"
+  },
+  {
+   "key": "kap",
+   "group": "settings",
+   "about": "Opacity: constant, electron, kramers"
+  },
+  {
+   "key": "kapa",
+   "group": "settings",
+   "about": "Absorption κ_a"
+  },
+  {
+   "key": "kaps",
+   "group": "settings",
+   "about": "Scattering κ_s"
+  },
+  {
+   "key": "kapk",
+   "group": "settings",
+   "about": "Kramers K₀"
+  },
+  {
+   "key": "kapt",
+   "group": "settings",
+   "about": "Kramers least T"
+  },
+  {
+   "key": "clight",
+   "group": "settings",
+   "about": "Speed of light c"
+  },
+  {
+   "key": "chat",
+   "group": "settings",
+   "about": "Reduced speed of light"
+  },
+  {
+   "key": "clocal",
+   "group": "settings",
+   "about": "Speed of light per cell (0 or 1)"
+  },
+  {
+   "key": "radflux",
+   "group": "settings",
+   "about": "Radiation flux: hll, glf"
+  },
+  {
+   "key": "rsweeps",
+   "group": "settings",
+   "about": "Radiation sweeps per step"
+  },
+  {
    "key": "nu",
    "group": "settings",
    "about": "Viscosity ν"

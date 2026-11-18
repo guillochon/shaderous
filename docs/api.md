@@ -141,6 +141,17 @@ by `npm run gen`.
 | `cheat` | Settings | Heating rate. Heating per unit mass (power law), or the heating rate at unit density (interstellar) |
 | `ctunit` | Settings | Kelvin per unit T. Interstellar: kelvin per code unit of temperature (code density is atoms per cm³) |
 | `ctfloor` | Settings | Temperature floor. Gas at or below this temperature does not cool |
+| `rad` | Settings | Radiation transport: off, m1. Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Uniform Cartesian grids, without a magnetic field, for now |
+| `kap` | Settings | Opacity: constant, electron, kramers. How opaque the gas is to the radiation, per unit mass: a constant, electron scattering, or Kramers’ free-free absorption with electron scattering. With physical units the scattering and Kramers constants come from the composition |
+| `kapa` | Settings | Absorption κ_a. Absorption opacity per unit mass (the Planck mean), which exchanges heat between gas and radiation. With electron scattering, a small true absorption |
+| `kaps` | Settings | Scattering κ_s. Scattering opacity per unit mass: it drags on the radiation’s flux without heating the gas (electron scattering is 0.2 (1 + X) cm²/g) |
+| `kapk` | Settings | Kramers K₀. Kramers: the free-free absorption is K₀ ρ T^-3.5 per unit mass, in code units |
+| `kapt` | Settings | Kramers least T. Kramers: the opacity is taken at no lower temperature than this (it grows without bound as T falls) |
+| `clight` | Settings | Speed of light c. The speed of light in code units. With physical units it is theirs; a scale-free setup sets its own |
+| `chat` | Settings | Reduced speed of light. The speed light crosses transparent gas at in the run (at most c): its step is about dx / chat. Ten times the fastest gas is enough; opaque cells take the true speed whatever this is |
+| `clocal` | Settings | Speed of light per cell (0 or 1). Opaque cells take the true speed of light and only transparent ones the reduced one, so the radiation in a star has its true heat capacity. Off, one reduced speed everywhere |
+| `radflux` | Settings | Radiation flux: hll, glf. The flux between cells: HLL with the M1 closure’s wave speeds, or global Lax-Friedrichs (the speed of light: more diffusive, more isotropic around sources) |
+| `rsweeps` | Settings | Radiation sweeps per step. Radiation sweeps per hydro step (1 to 16). The hydro step is at most this many of the sweep’s own steps, so more sweeps let it be longer |
 | `nu` | Settings | Viscosity ν. Kinematic viscosity: the stress is ρ ν times the shear. Obstacles hold the gas at their walls. 0 is off |
 | `kappa` | Settings | Conductivity κ. Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off |
 | `eta` | Settings | Resistivity η. With a magnetic field: magnetic diffusivity, so the field diffuses as η ∇²B (the electric field gains η curl B) and the current it dissipates, η J², heats the gas. 0 is off (ideal MHD, with only the scheme’s own diffusion) |

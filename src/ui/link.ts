@@ -31,6 +31,8 @@ const LINKED: Option[] = [...flatten(OPTIONS), ...flatten(PART_OPTIONS.disk.fiel
 /** Options that only mean something on an adaptive mesh, or with a cooling function: left out of a link otherwise. */
 const adaptiveOnly = (o: Option) => !!o.requires?.some((r) => r.fact === 'mesh.adaptive');
 const coolingOnly = (o: Option) => o.cfg!.startsWith('coolParams.');
+/** Options that only mean something with radiation transport: left out of a link without it. */
+const radiationOnly = (o: Option) => o.cfg!.startsWith('opacityParams.') || ['opacity', 'radC', 'radChat', 'radLocalC', 'radSolver', 'radSweeps'].includes(o.cfg!);
 const at = (c: object, path: string): unknown => path.split('.').reduce<unknown>((v, k) => (v as Record<string, unknown> | undefined)?.[k], c);
 
 export interface LinkState {
@@ -49,9 +51,10 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'symmetry' | 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'resistivity' | 'dampRadius' | 'dampRate'>>;
+  cfg: Partial<Pick<SimConfig, 'symmetry' | 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'resistivity' | 'dampRadius' | 'dampRate' | 'radiation' | 'opacity' | 'radC' | 'radChat' | 'radLocalC' | 'radSolver' | 'radSweeps'>>;
   eosParams: Partial<EosParams>;
   coolParams: Partial<CoolingParams>;
+  opacityParams: Partial<SimConfig['opacityParams']>;
   fluff: Partial<SimConfig['fluff']>;
   driving: Partial<SimConfig['driving']>;
   params: Record<string, number>;
@@ -141,7 +144,7 @@ export function encodeLink(s: LinkState): URLSearchParams {
   };
   num('tend', cfg.tEnd, def.tEnd);
   for (const o of LINKED) {
-    if ((adaptiveOnly(o) && !cfg.amrLevels) || (coolingOnly(o) && cfg.cooling === 'off')) continue;
+    if ((adaptiveOnly(o) && !cfg.amrLevels) || (coolingOnly(o) && cfg.cooling === 'off') || (radiationOnly(o) && cfg.radiation === 'off')) continue;
     const [a, b] = [at(cfg, o.cfg!) ?? 0, at(def, o.cfg!) ?? 0];
     if (o.cfg === 'symmetry') str(o.linkKey!, mirrorName(cfg.symmetry), mirrorName(configFor(cfg.problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels }).symmetry));
     else if (typeof a === 'boolean') str(o.linkKey!, flag(a), flag(!!b));
@@ -257,6 +260,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     cfg: {},
     eosParams: {},
     coolParams: {},
+    opacityParams: {},
     driving: {},
     fluff: {},
     params: {},
@@ -305,7 +309,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     if (o.cfg === 'symmetry') v = mirrorAxes(v as string);
     const [head, key] = o.cfg!.split('.');
     if (key === undefined) (out.cfg as Record<string, unknown>)[head] = v;
-    else (out[head as 'eosParams' | 'coolParams' | 'fluff' | 'driving'] as Record<string, unknown>)[key] = v;
+    else (out[head as 'eosParams' | 'coolParams' | 'opacityParams' | 'fluff' | 'driving'] as Record<string, unknown>)[key] = v;
   }
   put(out.cfg, 'wellBalanced', bool('wb'));
   const bc = q.get('bc');

@@ -1745,7 +1745,8 @@ export class Sim implements Simulation {
             // The problem's pressure is the gas's and the radiation's: split where the equation
             // of state had a radiation term of its own; E = a T^4 unless given.
             const q = o / 4;
-            const sp = splitPressure(c, ce, w.rho, p, km ? [...km.subarray(o, o + 4)] : undefined, km ? hydrogenParticles(c.problem.composition) : undefined);
+            // (A cell that gives its radiation, as a snapshot's do, gives the gas's pressure alone.)
+            const sp = w.erad === undefined ? splitPressure(c, ce, w.rho, p, km ? [...km.subarray(o, o + 4)] : undefined, km ? hydrogenParticles(c.problem.composition) : undefined) : { eint, T: ce.temperature(w.rho, eint) };
             eint = sp.eint;
             radRho![q] = w.rho;
             radT![q] = sp.T;

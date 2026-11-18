@@ -17,6 +17,7 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
+import { syncRadiationEos } from '../radiation/radiation';
 import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
@@ -1712,6 +1713,9 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       if (typeof problem.units === 'function') unitConstants(next);
       Object.assign(next.eosParams, link.eosParams);
       Object.assign(next.coolParams, link.coolParams);
+      next.opacityParams = { ...next.opacityParams, ...link.opacityParams };
+      // Radiation switched on or off by the link: the equation of state's radiation term follows.
+      Object.assign(next, syncRadiationEos(next));
       next.fluff = { ...next.fluff, ...link.fluff };
       next.driving = { ...next.driving, ...link.driving };
       if (ndim === 2) {

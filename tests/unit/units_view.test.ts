@@ -7,7 +7,7 @@ import { displayLabel, kelvinPerCodeT, unitOf } from '../../src/units/units';
 
 describe('unit readouts', () => {
   it('assigns a measure to every view field', () => {
-    expect(FIELDS.length).toBe(31);
+    expect(FIELDS.length).toBe(37);
     // Burning's heating rate, per unit volume as the cooling's.
     expect(fieldMeasure(30, 5 / 3)).toBe('powerDensity');
     // The MRI quality factors are pure numbers.

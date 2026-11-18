@@ -227,6 +227,11 @@ export class SnapshotSampler {
     }
     const w: Prim = { rho: d.rho![o], vx: d.vel1![o], vy: d.vel2![o], vz: d.vel3![o], p, s: d.r0 ? d.r0[o] : 0 };
     if (species?.length && species.every((k) => d[k])) w.X = species.map((k) => d[k]![o]);
+    // Radiation (radiation/radiation.ts): the pressure is then the gas's alone.
+    if (d.Er && d.Fr1 && d.Fr2 && d.Fr3) {
+      w.erad = d.Er[o];
+      w.frad = [d.Fr1[o], d.Fr2[o], d.Fr3[o]];
+    }
     return w;
   }
 

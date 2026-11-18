@@ -112,6 +112,19 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     });
     mhdMeta = { n, nz, upper };
   }
+  // Radiation (radiation/passes.ts): its energy and flux, in the gas's frame, as Er and Fr1-3.
+  const rad: Record<string, Float32Array> = {};
+  if (sim instanceof Sim && sim.rad) {
+    const R = await sim.rad.read();
+    const count = R.length / 4;
+    for (const k of ['Er', 'Fr1', 'Fr2', 'Fr3']) rad[k] = new Float32Array(count);
+    for (let i = 0; i < count; i++) {
+      rad.Er[i] = R[4 * i];
+      rad.Fr1[i] = R[4 * i + 1];
+      rad.Fr2[i] = R[4 * i + 2];
+      rad.Fr3[i] = R[4 * i + 3];
+    }
+  }
   const debris = await sim.debrisLedger();
   return {
     ndim: cfg.ndim,
@@ -123,7 +136,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     steps: Math.round(restart.steps),
     levels,
     locations,
-    data: { ...primitivesFrom(cfg, u1, u2, X, opts.lazyPressure), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag },
+    data: { ...primitivesFrom(cfg, u1, u2, X, opts.lazyPressure), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag, ...rad },
     ...(faces ? { faces } : {}),
     ...(opts.lazyPressure ? { pressureAt: pressureOf(cfg, u1, u2, X) } : {}),
     meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,

@@ -4,6 +4,8 @@
 import { all, OUTFLOW, PERIODIC, type Prim, type Problem } from '../problems/types';
 import type { Sim, SimConfig } from '../sim';
 import { withSim, type TestDef } from './tests';
+import { capture, restartFrom } from '../io/capture';
+import { configFor, Sim as SimClass } from '../sim';
 
 /** Gas at rest in a periodic unit box with radiation on: c = 100 and a = 1 unless changed. */
 const radGas = (over: Partial<Problem>): Problem => ({
@@ -60,6 +62,50 @@ function moments(R: Float32Array, nx: number, ny: number, dx: number, floor: num
 }
 
 export const RAD_TESTS: TestDef[] = [
+  {
+    id: 'rad-restart',
+    name: 'Radiation: a snapshot restarts the run exactly',
+    criterion: 'A run with radiation (the advected pulse, part way) saved to a snapshot and restarted from it holds the same radiation bit for bit, and after ten more steps the two runs agree to 1e-5 in E and in the gas’s energy',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const p = radGas({
+        radC: 100, radChat: 1, opacityParams: { absorption: 1e6, scattering: 0 },
+        init: () => (x) => {
+          const T = 1 + 0.3 * Math.exp(-((x / 0.08) ** 2));
+          const rho = (2 - T ** 4 / 3) / T;
+          return { rho, vx: 1, vy: 0, vz: 0, p: rho * T, s: 0 };
+        },
+      });
+      await withSim(gpu, p, 64, D2, async (sim) => {
+        await runTo(sim, 0.05);
+        const snap = await capture(sim);
+        const R0 = await sim.rad!.read();
+        const r = restartFrom(snap, sim.cfg.problem, false, sim.n);
+        const again = await SimClass.create(gpu, configFor(r.problem, 64, { ...D2, restart: r.restart }));
+        try {
+          const R1 = await again.rad!.read();
+          let same = 0;
+          for (let i = 0; i < R0.length; i++) if (R0[i] === R1[i]) same++;
+          m.identical_share = same / R0.length;
+          await runTo(sim, 0.08);
+          await runTo(again, 0.08);
+          const a = await cells(sim);
+          const b = await cells(again);
+          let dE = 0;
+          let dG = 0;
+          for (let q = 0; q < a.n; q++) {
+            dE = Math.max(dE, Math.abs(a.R[4 * q] - b.R[4 * q]) / Math.abs(a.R[4 * q]));
+            dG = Math.max(dG, Math.abs(a.u2[4 * q] - b.u2[4 * q]) / Math.abs(a.u2[4 * q]));
+          }
+          m.radiation_difference = dE;
+          m.gas_energy_difference = dG;
+        } finally {
+          again.destroy();
+        }
+      });
+      return { pass: m.identical_share === 1 && m.radiation_difference < 1e-5 && m.gas_energy_difference < 1e-5, metrics: m };
+    },
+  },
   {
     id: 'rad-off',
     name: 'Radiation: off adds nothing to a run',

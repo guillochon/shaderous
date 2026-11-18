@@ -22,8 +22,13 @@ export function fieldMeasure(field: number, gamma: number): Measure {
     case 15: return 'specificEnergy';
     case 16: return 'pressure';
     case 18: return 'time';
-    // Passive scalar, Mach number, refinement level, Jeans length in cells, time bin; and the
-    // magnetic fields, shown in code units until a magnetized preset has physical ones.
+    // Radiation: its energy density, temperature and flux (energy per area and time).
+    case 31: return 'pressure';
+    case 32: return 'temperature';
+    case 33: return [1, 0, -3];
+    // Passive scalar, Mach number, refinement level, Jeans length in cells, time bin; the
+    // magnetic fields, shown in code units until a magnetized preset has physical ones; the
+    // reduced flux, a cell's optical depth and r, pure numbers.
     default: return null;
   }
 }
