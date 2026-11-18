@@ -64,3 +64,45 @@ export function sphParams(c: SphereShape): number[] {
   // r_min / dx: the uniform grid's r_c / dx is this + i + 1/2, the logarithmic one's this e^((i + 1/2) D).
   return [g.rMin / g.dx, D, g.dtheta, 1, ...consts];
 }
+
+/*
+ * The slice view of a spherical run draws the meridional half-plane, (R, z) = (r sin theta,
+ * r cos theta): the view's square is R from 0 to 2 r_max and z from -r_max to r_max, so the
+ * grid's half-disk (R up to r_max) fills its left half (the axis its left
+ * edge, as R starts there in an (R, z) run). Positions in the square are fractions (a, b) of its
+ * side from its lower left corner; the grid's are fractions of its cells (index fractions, so
+ * logarithmic in r on a logarithmic grid). render/slice.wgsl sph_code() is sphFromView().
+ */
+
+/** Camera mir.w (render/camera.wgsl): 0, or r_min / r_max of a spherical run, negative if r is logarithmic. */
+export function sphViewParam(c: SphereShape): number {
+  if (!spherical(c)) return 0;
+  const g = sphGrid(c);
+  return (g.dlog > 0 ? -1 : 1) * (g.rMin / g.rMax);
+}
+
+/** The cell fractions (along r, along theta) under a point of the view's square, or null off the grid. */
+export function sphFromView(c: SphereShape, a: number, b: number): [number, number] | null {
+  const g = sphGrid(c);
+  const R = 2 * a;
+  const z = 2 * b - 1;
+  const rho = Math.hypot(R, z);
+  const f = g.rMin / g.rMax;
+  if (R < 0 || rho < f || rho >= 1) return null;
+  const fx = g.dlog > 0 ? Math.log(rho / f) / Math.log(1 / f) : (rho - f) / (1 - f);
+  const fy = Math.atan2(R, z) / Math.PI;
+  return [Math.min(fx, 1 - 1e-9), Math.min(fy, 1 - 1e-9)];
+}
+
+/**
+ * The point of the view's square at cell fractions (along r, along theta): sphFromView's
+ * inverse. Short of the grid (a point mass at the origin) r follows the box's fractions
+ * linearly, as src/domain.ts boxFrac has them.
+ */
+export function sphToView(c: SphereShape, fx: number, fy: number): [number, number] {
+  const g = sphGrid(c);
+  const r = g.dlog > 0 && fx >= 0 ? g.rMin * Math.exp(fx * g.dlog * g.n) : g.rMin + fx * (g.rMax - g.rMin);
+  const th = fy * Math.PI;
+  const rho = Math.max(0, r) / g.rMax;
+  return [(rho * Math.sin(th)) / 2, (1 + rho * Math.cos(th)) / 2];
+}

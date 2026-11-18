@@ -90,6 +90,20 @@ fn map_axes() -> vec2<i32> {
   return select(vec2<i32>(1, 2), vec2<i32>(0, 2), axis == 1);
 }
 
+// A spherical run (C.mir.w: r_min / r_max, negative on a logarithmic grid): the point sd of the
+// view's square as (R, z) = (r sin theta, r cos theta), R from 0 to 2 r_max and z from -r_max to
+// r_max, and so the map's fractions (r's cell fraction, theta / pi) under it; z: 1 on the grid,
+// 0 off it (inside r_min, beyond r_max, or R < 0). src/spherical.ts sphFromView() on the CPU.
+fn sph_code(sd: vec2<f32>) -> vec3<f32> {
+  let p = vec2<f32>(2.0 * sd.x, 2.0 * sd.y - 1.0);
+  let rho = length(p);
+  let f = abs(C.mir.w);
+  let fx = select((rho - f) / (1.0 - f), log(max(rho, 1.0e-30) / f) / log(1.0 / f), C.mir.w < 0.0);
+  let fy = atan2(p.x, p.y) / 3.14159265358979;
+  let on = p.x >= 0.0 && rho >= f && rho < 1.0;
+  return vec3<f32>(clamp(vec2<f32>(fx, fy), vec2<f32>(0.0), vec2<f32>(0.9999999)), select(0.0, 1.0, on));
+}
+
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
   // The square laid out by the app (sliceLayout), in units of its width from its middle.
@@ -99,9 +113,16 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   // With mirror images shown the square is the whole configuration: folded back onto the map.
   let ax = map_axes();
   let fold = vec2<bool>(C.mir[ax.x] != 0.0, C.mir[ax.y] != 0.0);
-  let st = select(sd, abs(2.0 * sd - 1.0), fold);
+  var st = select(sd, abs(2.0 * sd - 1.0), fold);
+  var off = any(sd < vec2<f32>(0.0)) || any(sd >= vec2<f32>(1.0));
+  // A spherical run: the square is the meridional half-plane, the map its (r, theta) grid.
+  if (C.mir.w != 0.0) {
+    let s = sph_code(sd);
+    st = s.xy;
+    off = s.z == 0.0;
+  }
   let line = contour(st);
-  if (any(sd < vec2<f32>(0.0)) || any(sd >= vec2<f32>(1.0))) { return vec4<f32>(C.bg.rgb, 1.0); }
+  if (off) { return vec4<f32>(C.bg.rgb, 1.0); }
   let m = textureLoad(MAP, vec2<i32>(floor(st * vec2<f32>(textureDimensions(MAP)))), 0);
   var col = textureSampleLevel(TF, S, vec2<f32>(m.r, 0.5), 0.0).rgb;
   if (m.r < -0.5) { col = SOLID; }

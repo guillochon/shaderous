@@ -2004,8 +2004,16 @@ The diagnostics' masses and energies are true ones (each cell's volume in its cl
 their momentum and center of mass are in $`(R, z)`$, along $`z`$ alone. Snapshots are written
 with `Coordinates = spherical_polar`, which is already the grid's order $`(r, \theta, \phi)`$,
 the radial faces from `RootGridX1`'s ratio and the centers volume weighted as Athena++ writes
-them (a unit test checks the layout); such files are not read back. The display draws the native $`(r, \theta)`$ plane (radius
-across, $`\theta = 0`$ at the bottom), not the meridional plane. The `blast-spherical` preset is a
+them (a unit test checks the layout); such files are not read back. The slice view (and a 2D run's projection, the
+same plane) draws the meridional half-plane, $`(R, z) = (r\sin\theta, r\cos\theta)`$: a
+square of $`R`$ from 0 to $`2r_\text{max}`$ and $`z`$ from $`-r_\text{max}`$ to $`r_\text{max}`$,
+the axis its left edge as in an $`(R, z)`$ run, so the grid's half-disk fills its left half. The
+map stays the native $`(r, \theta)`$ grid; the slice shader takes each pixel to the
+$`(r, \theta)`$ of its position (the cell fraction along $`r`$ logarithmic on a logarithmic
+grid) and draws background inside $`r_\text{min}`$ and beyond $`r_\text{max}`$. The page's
+pointer (probes, tools, contour labels) and its markers use the same mapping
+(`src/spherical.ts` `sphFromView`, `sphToView`); obstacles drawn by hand do not (their outline
+is a linear map of the screen). A native screenshot is the same picture at the map's size. The `blast-spherical` preset is a
 point explosion at the origin.
 
 Tests (`sph-*`): uniform gas at rest between reflecting spheres at $`r = 0.1`$ and 1, both poles
