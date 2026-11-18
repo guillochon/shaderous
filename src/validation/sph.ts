@@ -290,10 +290,10 @@ export const SPH_TESTS: TestDef[] = [
   {
     id: 'sph-blocks',
     name: 'Spherical: the blast and the swirling blob on blocks',
-    criterion: 'On an adaptive mesh of two levels: sph-sedov’s blast (256^2 finest) has its shock radius within 2% of the similarity solution along every one of 64 rays, and sph-conserve’s swirling blob (128^2 finest, logarithmic in r) keeps mass, energy and angular momentum about the axis to 1e-5 through its re-meshing',
+    criterion: 'On an adaptive mesh of two levels: sph-sedov’s blast (256^2 finest) has its shock radius within 2% of the similarity solution along every one of 64 rays, and sph-conserve’s swirling blob (128^2 finest, logarithmic in r) keeps mass, energy and angular momentum about the axis to 1e-5 through its re-meshing; both with a single timestep and with per-block timesteps (two bins)',
     async run(gpu) {
       const n = 256;
-      const blast = await withAmr(gpu, sedov(n), n, { ndim: 2, amrLevels: 2 }, async (sim) => {
+      const blastOn = (bins: boolean) => withAmr(gpu, sedov(n), n, { ndim: 2, amrLevels: 2, ...(bins ? { timeBins: 2, timeBinsAlways: true } : {}) }, async (sim) => {
         await sim.runToEnd();
         const { c, cells } = await leafCells(sim);
         // Along 64 rays (the centers of the coarsest level's theta cells, nudged off the finer
@@ -322,21 +322,33 @@ export const SPH_TESTS: TestDef[] = [
         }
         return { radii, finest, levels: new Set(cells.map((x) => x.g.n)).size };
       });
+      const blast = await blastOn(false);
+      const blastBins = await blastOn(true);
       const want = SEDOV_XI0['1.4'] * Math.pow(0.05 * 0.05, 0.2);
       const lo = Math.min(...blast.radii);
       const hi = Math.max(...blast.radii);
+      const binsWorst = Math.max(...blastBins.radii.map((r) => Math.abs(r / want - 1)));
       const p = shell(0.1, 1, true, blob, { tEnd: 0.6 });
-      const cons = await withAmr(gpu, p, 128, { ndim: 2, amrLevels: 2 }, async (sim) => {
-        const a = await leafTotals(sim);
-        await sim.runToEnd();
-        const b = await leafTotals(sim);
-        return { mass: Math.abs(b.m / a.m - 1), energy: Math.abs(b.e / a.e - 1), angular_momentum: Math.abs(b.l / a.l - 1), levels_start: a.levels, levels_end: b.levels, regrids: sim.regrids };
-      });
+      const conserve = (bins: boolean) =>
+        withAmr(gpu, p, 128, { ndim: 2, amrLevels: 2, ...(bins ? { timeBins: 2, timeBinsAlways: true } : {}) }, async (sim) => {
+          const a = await leafTotals(sim);
+          await sim.runToEnd();
+          const b = await leafTotals(sim);
+          const work = bins ? await sim.binWork() : null;
+          return {
+            mass: Math.abs(b.m / a.m - 1), energy: Math.abs(b.e / a.e - 1), angular_momentum: Math.abs(b.l / a.l - 1), levels: b.levels, regrids: sim.regrids,
+            ...(work ? { block_updates_over_single: work.updates / work.single } : {}),
+          };
+        });
+      const cons = await conserve(false);
+      const binned = await conserve(true);
       const m = {
         similarity: want, radius_min: lo, radius_max: hi, worst_error: Math.max(Math.abs(lo / want - 1), Math.abs(hi / want - 1)), spread: (hi - lo) / want,
         blast_levels: blast.levels, shock_cells_per_side: blast.finest, ...cons,
+        bins_mass: binned.mass, bins_energy: binned.energy, bins_angular_momentum: binned.angular_momentum, bins_work: binned.block_updates_over_single ?? 1, bins_blast_worst_error: binsWorst,
       };
-      return { pass: m.worst_error < 0.02 && m.mass < 1e-5 && m.energy < 1e-5 && m.angular_momentum < 1e-5 && m.levels_end > 1, metrics: m };
+      const kept = (x: { mass: number; energy: number; angular_momentum: number; levels: number }) => x.mass < 1e-5 && x.energy < 1e-5 && x.angular_momentum < 1e-5 && x.levels > 1;
+      return { pass: m.worst_error < 0.02 && binsWorst < 0.02 && kept(cons) && kept(binned), metrics: m };
     },
   },
 ];
