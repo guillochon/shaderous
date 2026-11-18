@@ -212,9 +212,25 @@ export async function readTexels(d: GPUDevice, textures: GPUTexture[], at: [numb
 }
 
 /** What the front end, renderer and tests need from a simulation, uniform or adaptive. */
+/** Implicit pressure's solves since a run was built: how many, the last one's relative residual, and how many ended above the tolerance. */
+export interface SolveStats {
+  solves: number;
+  residual: number;
+  unconverged: number;
+}
+
+/** The status line's note on the implicit pressure solves: the last residual, and the solves that ended above the tolerance, if any. */
+export function pressureNote(s: SolveStats): string {
+  if (s.solves === 0) return '';
+  const late = s.unconverged > 0 ? `, ${s.unconverged} of ${s.solves} above tolerance` : '';
+  return `pressure solve ${s.residual.toExponential(1)}${late}`;
+}
+
 export interface Simulation {
   readonly device: GPUDevice;
   cfg: SimConfig;
+  /** With implicit pressure: its solver, for the tally of its solves (pressureNote). */
+  prs?: { stats(): Promise<SolveStats> };
   /** finest cells per side, and along z (1 in 2D) */
   readonly n: number;
   readonly nz: number;

@@ -17,7 +17,7 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
-import { type CellProbe, configFor, refusal, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SourceSpec } from '../sim';
+import { type CellProbe, configFor, refusal, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -4727,6 +4727,9 @@ let lastReadout = 0;
 let stepRate = 0; // steps per second of wall time
 let stepsSubmitted = 0;
 let rateMark = { time: 0, steps: 0, frames: 0 };
+// Implicit pressure: the tally of the solves of the run it was read from, and whether a read is out.
+let solveTally: { of: Simulation; stats: SolveStats } | null = null;
+let solveAsked = false;
 let fps = 0;
 let framesDrawn = 0;
 let refreshMs = 16.7; // display refresh interval, estimated from requestAnimationFrame
@@ -4997,6 +5000,11 @@ function tick(now: number) {
       // Frames drawn, not refreshes of the page: a paused run with a still view draws few.
       fps = ((framesDrawn - rateMark.frames) * 1000) / (now - rateMark.time);
       rateMark = { time: now, steps: stepsSubmitted, frames: framesDrawn };
+      if (s.prs && !solveAsked) {
+        solveAsked = true;
+        // (A run torn down meanwhile fails the read: its tally is of no use anyway.)
+        s.prs.stats().then((stats) => (solveTally = { of: s, stats }), () => {}).finally(() => (solveAsked = false));
+      }
     }
     setHud(statusLine(s, true));
   }
@@ -5023,6 +5031,7 @@ function statusLine(s: Simulation, live: boolean): string {
   const took = acc > 0 ? `, accreted ${u.fmt(acc, 'mass')}` : '';
   if (pm.length === 1) parts.push(`point mass at r = ${u.fmt(Math.hypot(...pm[0].pos), 'length')}${took}`);
   else if (pm.length) parts.push(`${pm.length} point masses, separation ${u.fmt(Math.hypot(...pm[0].pos.map((x, i) => x - pm[1].pos[i])), 'length')}${took}`);
+  if (solveTally?.of === s && pressureNote(solveTally.stats)) parts.push(pressureNote(solveTally.stats));
   const mesh = s.status();
   if (mesh) parts.push(mesh);
   if (live && toolNotice) parts.push(toolNotice);

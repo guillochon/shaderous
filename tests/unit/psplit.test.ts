@@ -190,4 +190,17 @@ describe('implicit pressure, as a setting', () => {
     // A liquid's own refusals come first.
     expect(refusal({ ...liquid, gravity: 'isolated' })).toMatch(/Liquid: .*self-gravity/);
   });
+
+  it('notes its solves in the status line', async () => {
+    const { pressureNote, configFor, refusal, implicitBlocksUnsupported } = await import('../../src/sim');
+    const { problemById } = await import('../../src/presets/index');
+    expect(pressureNote({ solves: 0, residual: 0, unconverged: 0 })).toBe('');
+    expect(pressureNote({ solves: 40, residual: 2.34e-5, unconverged: 0 })).toBe('pressure solve 2.3e-5');
+    expect(pressureNote({ solves: 40, residual: 3e-3, unconverged: 7 })).toBe('pressure solve 3.0e-3, 7 of 40 above tolerance');
+    // On blocks a gas with a field is refused, and nothing else of the gas is.
+    const gas = configFor(problemById('kelvin-helmholtz'), 64, { ndim: 2, pressure: 'implicit', amrLevels: 1 });
+    expect(refusal(gas)).toBeNull();
+    expect(implicitBlocksUnsupported(gas)).toBeNull();
+    expect(implicitBlocksUnsupported({ ...gas, gext: [0, -1, 0] })).toMatch(/gravity is not available with it for a gas/);
+  });
 });

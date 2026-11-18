@@ -924,6 +924,9 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   velocity indicator at a threshold of 0.6, at 512 cells. At that size the liquid's residual
   is at single-precision round-off ($`3\times10^{-4}`$, the same after 2 to 8 cycles), so those
   tests' tolerance is $`3\times10^{-3}`$. A solve for the change, as the gas has, would lower it.
+- **The status line** shows the last solve's residual and how many solves ended above the
+  tolerance (`pressureNote`). Checked by a unit test of its text only: the page's own line was
+  not looked at.
 
 ## 6. Not covered
 
