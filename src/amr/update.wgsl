@@ -248,7 +248,13 @@ fn match_faces(own: array<Faces, 3>, slot: i32, l: vec3<i32>) -> array<Faces, 3>
         a[t2] += j;
         g_fb_slot = src;
         g_fb_l = a;
-        sum = flux_add(sum, flux_between(atl(o, a), e, axis));
+        var fl = flux_between(atl(o, a), e, axis);
+        // An axisymmetric run: a refined neighbor's faces across z lie at their own radii, and
+        // their areas go as those (the coarse face's flux is their area-weighted mean).
+        if (cylindrical() && axis == 1 && !blk_leaf(np)) {
+          fl = flux_scale(fl, cyl_child_weight(blk_coord(slot).x * BS + l.x, blk_coord(src).x * BS + a.x));
+        }
+        sum = flux_add(sum, fl);
       }
     }
     g_dx = dx_own;
@@ -432,7 +438,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     ekick = kd.w;
   }
 
-  var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);
+  // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
+  // geometric source (hydro/update.wgsl), at the cell's global radial index on its level.
+  var src_r = 0.0;
+  if (cylindrical() && !g_deposit) {
+    let w = cyl_weights(gl.x);
+    let ps = 0.5 * (face_pressure(fx.lo, 0) + face_pressure(fx.hi, 0));
+    src_r = (ps + p0.a.x * p0.a.w * p0.a.w) / (f32(gl.x) + 0.5);
+    fx.lo = cyl_face(fx.lo, w.x);
+    fx.hi = cyl_face(fx.hi, w.y);
+  }
+  var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
+  net.mom.x += src_r;
+  var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);
   if (g_deposit) {
     // The kicks, sources and cooling of this step were applied when it started.
     textureStore(O1, c, nw.u1);

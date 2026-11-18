@@ -86,6 +86,9 @@ fn dphi_blk(slot: i32, l: vec3<i32>, axis: i32, k: i32) -> vec2<f32> {
 // Cell l of block `slot` (a ghost, when predicted in place), half a step on.
 fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
   let c = atl(blk_origin(slot), l);
+  // An axisymmetric run: the cell's radius for the geometric terms (a ghost across the axis
+  // has none: the predictor skips them there).
+  if (cylindrical()) { g_cyl_r = f32(blk_coord(slot).x * BS + l.x) + 0.5; }
   let q = load_q(c);
   var zm = q;
   var zp = q;

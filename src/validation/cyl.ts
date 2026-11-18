@@ -3,7 +3,8 @@
 import { all, OUTFLOW, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
 import { SEDOV_XI0 } from '../presets/names';
 import type { Sim } from '../sim';
-import { withSim, type TestDef } from './tests';
+import { withAmr, withSim, type TestDef } from './tests';
+import type { AmrSim } from '../amr/amr_sim';
 
 /** An axisymmetric box of side `box` (R from 0 to box, z across it), ideal gas, from `init`. */
 function ring(init: (R: number, z: number) => Prim, over: Partial<Problem> = {}): Problem {
@@ -129,6 +130,65 @@ export const CYL_TESTS: TestDef[] = [
       const cyl = await withSim(gpu, { ...base, box: 0.5, geometry: 'cylindrical', bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC] }, 32, { ndim: 2 }, take);
       const m = { accreted_3d: cart.acc, accreted_axisymmetric: cyl.acc, relative_difference: Math.abs(cyl.acc / cart.acc - 1), off_axis: Math.hypot(cyl.x, cyl.z) };
       return { pass: m.relative_difference < 0.05 && m.off_axis === 0 && cart.acc > 0, metrics: m };
+    },
+  },
+  {
+    id: 'cyl-blocks',
+    name: 'Axisymmetric: the swirling ring and the blast on blocks',
+    criterion: 'On an adaptive mesh of two levels (128^2 finest), the swirling ring carried along z keeps mass, energy and angular momentum to 1e-5 through its re-meshing, and the point blast’s radius along R and along z are within 2% of the similarity solution',
+    async run(gpu) {
+      const ringTotals = async (sim: AmrSim) => {
+        const c = await sim.readLeaves();
+        let m = 0;
+        let l = 0;
+        let e = 0;
+        for (let q = 0; q < c.count; q++) {
+          const dv = 2 * Math.PI * c.x[q] * c.dx[q] * c.dx[q];
+          m += c.u1[4 * q] * dv;
+          l += c.x[q] * c.u1[4 * q + 3] * dv;
+          e += c.u2[4 * q] * dv;
+        }
+        return { m, l, e };
+      };
+      const swirl = ring((R, z) => {
+        const r = Math.hypot(R - 0.5, z);
+        const inside = r < 0.2;
+        return { rho: inside ? 3 : 1, vx: 0, vy: 1, vz: inside ? 0.5 * (1 - r / 0.2) : 0, p: 1, s: inside ? 1 : 0 };
+      }, { bcHi: [REFLECT, PERIODIC, PERIODIC], tEnd: 0.5 });
+      const cons = await withAmr(gpu, swirl, 128, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        const a = await ringTotals(sim);
+        await sim.runToEnd();
+        const b = await ringTotals(sim);
+        return { mass: Math.abs(b.m / a.m - 1), energy: Math.abs(b.e / a.e - 1), angular_momentum: Math.abs(b.l / a.l - 1) };
+      });
+      const n = 128;
+      const dx = 1 / n;
+      const r0 = 3 * dx;
+      let vol = 0;
+      for (let j = 0; j < n; j++)
+        for (let i = 0; i < n; i++) {
+          const R = (i + 0.5) * dx;
+          const z = (j + 0.5) * dx - 0.5;
+          if (Math.hypot(R, z) < r0) vol += 2 * Math.PI * R * dx * dx;
+        }
+      const blast = ring((R, z) => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: Math.hypot(R, z) < r0 ? 0.4 / vol : 1e-5, s: 0 }), {
+        bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], tEnd: 0.05,
+      });
+      const radii = await withAmr(gpu, blast, n, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        await sim.runToEnd();
+        const c = await sim.readLeaves();
+        let rR = 0;
+        let rz = 0;
+        for (let q = 0; q < c.count; q++) {
+          if (!(c.u1[4 * q] > 2)) continue;
+          if (Math.abs(c.y[q]) < c.dx[q]) rR = Math.max(rR, c.x[q]);
+          if (c.x[q] < c.dx[q]) rz = Math.max(rz, c.y[q]);
+        }
+        return { rR, rz };
+      });
+      const want = SEDOV_XI0['1.4'] * Math.pow(0.05 * 0.05, 0.2);
+      const m = { ...cons, radius_R: radii.rR, radius_z: radii.rz, similarity: want, error_R: Math.abs(radii.rR / want - 1), error_z: Math.abs(radii.rz / want - 1) };
+      return { pass: m.mass < 1e-5 && m.energy < 1e-5 && m.angular_momentum < 1e-5 && m.error_R < 0.02 && m.error_z < 0.02, metrics: m };
     },
   },
   {

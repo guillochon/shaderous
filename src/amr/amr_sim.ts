@@ -814,7 +814,7 @@ export class AmrSim implements Simulation {
         bindGroup(d, this.pRegrid, {
           0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]),
           3: v((this.mhd?.primitives ?? this.prim)[0]), 4: v((this.mhd?.primitives ?? this.prim)[1]),
-          5: v(this.state[o][0]), 6: v(this.state[o][1]), 7: this.rg, 31: this.listLeaf,
+          5: v(this.state[o][0]), 6: v(this.state[o][1]), 7: this.rg, 30: this.bt, 31: this.listLeaf,
         }),
       );
     }

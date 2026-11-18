@@ -48,7 +48,9 @@ fn red_cell(c: vec3<i32>) -> Red {
   if (u2.w > 0.5) { return red_identity(); }   // solid: no gas
   comp_use(comp_tex(a));
   let dx = blk_dx(slot);
-  let dv = select(dx * dx * dx, dx * dx, is2d());
+  // (An axisymmetric run's cell is a ring of volume 2 pi R dx^2.)
+  var dv = select(dx * dx * dx, dx * dx, is2d());
+  if (cylindrical()) { dv = 6.2831853 * (f32(blk_coord(slot).x * BS + l.x) + 0.5) * dx * dx * dx; }
   let rho = max(u1.x, P.rho_floor);
   let v = u1.yzw / rho;
   let eint = u2.y;

@@ -122,6 +122,14 @@ fn cyl_weights(i: i32) -> vec2<f32> {
   let c = f32(i) + 0.5;
   return vec2<f32>(f32(i) / c, f32(i + 1) / c);
 }
+// An axisymmetric run on blocks: its cells are rings, whose volumes go
+// as their radii. A parent's value is the volume-weighted mean of its children's, the child at
+// fine radial index i weighing (i + 1/2) / (2 I + 1) against the plain mean, I the parent's
+// index: so that the sum of R U over the children is the parent's.
+fn cyl_child_weight(parent_i: i32, child_i: i32) -> f32 {
+  if (!cylindrical()) { return 1.0; }
+  return (f32(child_i) + 0.5) / (2.0 * f32(parent_i) + 1.0);
+}
 // For the predictor (hydro/predictor.wgsl): the cell's radius in cells (i + 1/2) in an
 // axisymmetric run, 0 otherwise.
 var<private> g_cyl_r: f32 = 0.0;

@@ -24,5 +24,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   // With per-block timesteps the sinks take gas from a block as it finishes a step, over the
   // length of that step (amr/correct.wgsl); the pull on the gas is summed over every cell.
   let dt = select(0.0, blk_dt(slot), blk_active(slot));
-  return bh_cell(u1, select(dx * dx * dx, dx * dx, is2d()), blk_pos(slot, l), dt);
+  // (An axisymmetric run's cell is a ring of volume 2 pi R dx^2.)
+  var vol = select(dx * dx * dx, dx * dx, is2d());
+  if (cylindrical()) { vol = 6.2831853 * (f32(blk_coord(slot).x * BS + l.x) + 0.5) * dx * dx * dx; }
+  return bh_cell(u1, vol, blk_pos(slot, l), dt);
 }

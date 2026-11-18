@@ -1769,15 +1769,23 @@ ones, and the momentum they report is along $`z`$ alone. Snapshots are written i
 cylindrical order $`(R, \phi, z)`$, one cell in $`\phi`$ spanning $`2\pi`$, which yt reads as
 such; the reader takes such files back.
 
+**Blocks.** On an adaptive mesh the same weights are formed from each cell's global radial
+index on its level. Restriction and prolongation are volume weighted: a parent is the mean of
+its children weighted by $`(i + \tfrac12)/(2I + 1)`$, and the prolonged children are laid about
+the coarse ring's centroid rather than its middle, so that $`\sum R\,U`$ over them is the
+parent's. Where a coarse cell takes a refined neighbor's fluxes across $`z`$, each fine face
+weighs by its own radius. Per-block timesteps are refused for now. On two levels a swirling
+ring keeps mass, energy and angular momentum to $`5\times10^{-7}`$ through its re-meshing.
+
 **Point masses** may sit on the axis and move along it. Their pull on the gas needs nothing,
 since the distance from a mass on the axis to any point of a ring is that to the ring's cell
 center; the gas's pull on them, and what their sinks take, are summed over rings (their true
 volumes), with the parts across the axis dropped where the reduction is read, as each ring's
 cancel. A sink on the axis takes in within 1% of what the same sink takes in 3D.
 
-The first version is hydrodynamics on a uniform grid (conduction works through the face
-weights); blocks, magnetic fields, viscosity (which needs the curvilinear stress), point masses
-off the axis and species are refused. The `blast-axisymmetric` preset is a point explosion on the axis.
+The first version is hydrodynamics (conduction works through the face weights); magnetic
+fields, viscosity (which needs the curvilinear stress), point masses off the axis, species and
+per-block timesteps are refused. The `blast-axisymmetric` preset is a point explosion on the axis.
 Tests: uniform gas at rest stays below Mach $`10^{-6}`$; a swirling ring carried along $`z`$
 keeps mass, energy, $`z`$ momentum and angular momentum to $`10^{-7}`$; a point blast is
 spherical, its radius along $`R`$ and $`z`$ within 1.5% of the 3D similarity solution; a

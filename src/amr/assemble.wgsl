@@ -63,7 +63,10 @@ fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
     // An interior cell is its own source (u_near of the center is u_at's value exactly).
     if (mid) { v[k] = MaybeCons(mid_cons(cs, at), true); } else { v[k] = u_near(cs, at); }
   }
-  return prolong(v[0].u, v[1], v[2], v[3], v[4], v[5], v[6], gf & vec3<i32>(1));
+  if (cylindrical()) { g_cyl_ic = f32(gc.x) + 0.5; }
+  let u = prolong(v[0].u, v[1], v[2], v[3], v[4], v[5], v[6], gf & vec3<i32>(1));
+  g_cyl_ic = 0.0;
+  return u;
 }
 
 @compute @workgroup_size(FLAT_WG)

@@ -2,6 +2,10 @@
 //   a = (rho, mx, my, mz)    b = (E, e_int, rho * scalar, 0)
 struct Cons { a: vec4<f32>, b: vec4<f32> }
 
+// For prolong(): the coarse cell's radius in its own cells (I + 1/2) in an axisymmetric run, 0
+// otherwise. Its callers set it.
+var<private> g_cyl_ic: f32 = 0.0;
+
 fn u_leaf(slot: i32, l: vec3<i32>) -> Cons {
   let c = atl(blk_origin(slot), l);
   return Cons(textureLoad(U1, c, 0), textureLoad(U2, c, 0));
@@ -21,12 +25,14 @@ fn u_at(slot: i32, l: vec3<i32>) -> Cons {
   var a = vec4<f32>(0.0);
   var b = vec4<f32>(0.0);
   let nz = select(2, 1, is2d());
+  let pi = blk_coord(slot).x * BS + l.x;
   for (var k = 0; k < nz; k++) {
     for (var j = 0; j < 2; j++) {
       for (var i = 0; i < 2; i++) {
         let u = u_leaf(ch, f + vec3<i32>(i, j, k));
-        a += u.a;
-        b += u.b;
+        let wr = cyl_child_weight(pi, 2 * pi + i);
+        a += wr * u.a;
+        b += wr * u.b;
       }
     }
   }
@@ -88,7 +94,10 @@ fn prolong(uc: Cons, xm: MaybeCons, xp: MaybeCons, ym: MaybeCons, yp: MaybeCons,
   let room = 0.5 * max(vec3<f32>(uc.a.x, uc.b.x, uc.b.y), vec3<f32>(0.0));
   let fit = min(vec3<f32>(1.0), room / max(drop, vec3<f32>(1.0e-37)));
   let f = min(fit.x, min(fit.y, fit.z));
-  let off = f * (vec3<f32>(par) - 0.5) * 0.5;   // -1/4 or +1/4 of a coarse cell, scaled back
+  var off = f * (vec3<f32>(par) - 0.5) * 0.5;   // -1/4 or +1/4 of a coarse cell, scaled back
+  // An axisymmetric run: about the coarse ring's centroid, not its middle, so that the fine
+  // rings' volume-weighted mean is the coarse one (their weights 1 -+ 1 / (4 (I + 1/2))).
+  if (g_cyl_ic > 0.0) { off.x -= f / (16.0 * g_cyl_ic); }
   return Cons(
     uc.a + off.x * sx.a + off.y * sy.a + off.z * sz.a,
     uc.b + off.x * sx.b + off.y * sy.b + off.z * sz.b,
