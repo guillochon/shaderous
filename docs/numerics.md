@@ -1540,6 +1540,53 @@ inertial frame lands within a sixth of a cell of where it should after a quarter
 at rest in its corotating frame keeps its separation to $`10^{-10}`$ for two orbits; and a
 uniform field along the axis is left exactly as it was.
 
+### Mirror symmetry
+
+A setup symmetric under mirrors through the origin (`domain.symmetric`) can be run on the part
+above its planes of symmetry (`domain.mirror`, link key `sym`): an octant in 3D or a quadrant in
+2D, and on any one or two axes. A mirrored axis's domain is $`[0, L]`$ instead of
+$`[-L/2, L/2]`$, with $`L`$ the box side, so cells stay cubic and an octant at $`n^3`$ has the
+cell size of the whole box at $`(2n)^3`$, for an eighth of the cells. (Mirroring some axes but
+not others gains nothing on a cubic grid: the unmirrored axes still span the whole object.)
+
+**Gas.** The lower face of a mirrored axis is reflecting, so every reflecting path applies.
+Two things differ from a wall. The Riemann problem between a state and its image has zero mass
+flux in exact arithmetic but not in float32, so the flux through the plane is set to what it
+must be, the normal momentum flux alone, and the mass on the grid is conserved to the bit. And
+the well-balanced reconstruction treats the plane as an interior face between a cell and its
+image (the potential is even across it), not as a wall the potential continues through.
+
+**Gravity.** A plane of symmetry is a zero-gradient face for the potential, on every multigrid
+level of both grids: the ghost is the cell's own image in the stencils, the prolongation, the
+field's differences and the ghost layers of the blocks, where a block next to the plane finds
+its coarse neighbors' images too. The other faces stay isolated. The multipole boundary
+unfolds the grid's moments to the whole configuration's: the moment
+$`\sum m\,x^i y^j z^k`$ of the whole is the grid's times 2 for each mirrored axis whose power is
+even, and zero if any is odd. So the mass doubles per mirror, the center of mass lies on the
+planes, and the quadrupole (and every term to $`l = 4`$) is that of the whole.
+
+**Point masses** must lie and move on every plane, where each is its own image and its pull on
+the gas is unchanged. Their reduction is unfolded where it is read: masses and scalar totals
+times $`2^k`$, a vector's mirrored components zero and the others doubled per mirror, and an
+angular momentum's component kept only along the one axis every mirror is normal to.
+**Settling** needs nothing: the star's mass is measured on the grid, which holds its part.
+
+**Diagnostics** report the whole configuration: extensive totals times $`2^k`$, momentum and
+the center of mass zero along mirrored axes. Snapshots hold the computed part with its true
+bounds, so yt reads an octant as an octant, and carry the mirrors in their settings.
+
+What the mirrors would get wrong is refused with a message: a uniform field or a frame
+rotation that breaks the symmetry, a periodic upper face, periodic self-gravity, turbulence
+driving, a field not declared symmetric, a point mass or star off a plane, and more than one
+star.
+
+Tests: the mass flux through each plane is zero to the bit; a Sedov blast in an octant and in a
+2D quadrant matches the whole box at the same cell size to $`3\times10^{-6}`$ in density; the
+potentials of a uniform sphere and of a triaxial ellipsoid in an octant match the whole box's
+to $`2\times10^{-6}`$; a settled polytrope's central density and the Evrard collapse's energy
+behave as in the whole box (on blocks with per-block timesteps too); and a sink at the origin
+takes in the same mass to $`10^{-7}`$.
+
 ## 23. Validation
 
 The validation suite (`src/validation/tests.ts`) has 55 tests. It runs on your own GPU at
