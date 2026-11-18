@@ -525,7 +525,6 @@ export const implicitPressure = (c: SimConfig): boolean => c.pressure === 'impli
  */
 export function implicitUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid' && c.eos !== 'ideal') return 'it is built for the liquid and the ideal gas only, so far';
-  if (c.eos === 'ideal' && uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available with it for a gas with an energy yet';
   if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'it is not available in axisymmetric or spherical runs';
   // (A uniform field is the pressure passes' own: pressure/correct.wgsl.)
   if (isSelfGravity(c.gravity) || c.problem.masses) return 'self-gravity and point masses are not available with it yet';
@@ -1339,6 +1338,10 @@ export class Sim implements Simulation {
   private pRef = 0;
   /** The face velocities the update kept, for a gas's correction (pressure/store_on.wgsl). */
   private faceVel?: GPUTexture;
+  /** A gas's implicit solve is for the pressure's change: the pressure at the start of the step, and the new one (for the predictor), both less the reference. */
+  private pLag?: GPUTexture;
+  private pOld?: GPUTexture;
+  private pFull?: GPUTexture;
   private pPredict: RegionPass | null = null;
   private pField!: GPUComputePipeline;
   private pBhDrift!: GPUComputePipeline;
@@ -1422,7 +1425,7 @@ export class Sim implements Simulation {
    */
   static implicitBytes(cfg: SimConfig): number {
     if (!implicitPressure(cfg)) return 0;
-    return 28 * (cfg.ndim === 3 ? 8 / 7 : 4 / 3) + 4 + (eosHasEnergy(cfg.eos) ? 16 : 0);
+    return 28 * (cfg.ndim === 3 ? 8 / 7 : 4 / 3) + 4 + (eosHasEnergy(cfg.eos) ? 24 : 0);
   }
 
   static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
@@ -1579,20 +1582,26 @@ export class Sim implements Simulation {
       ]);
       const prs = this.prs;
       prs.setTolerance(c.pressureTol);
-      if (gas) this.faceVel ??= tex3d(d, this.nx, 'rgba32float', 'face velocities', this.nz, this.ny);
-      this.gPsInit = [0, 1].map((p) => bindGroup(d, this.pPsInit!, { 0: this.params, 1: v(this.state[p][0]), 2: v(prs.p), 3: v(this.state[p][1]), ...k }));
+      if (gas) {
+        this.faceVel ??= tex3d(d, this.nx, 'rgba32float', 'face velocities', this.nz, this.ny);
+        this.pOld ??= tex3d(d, this.nx, 'r32float', 'pressure at the start of the step', this.nz, this.ny);
+        this.pFull ??= tex3d(d, this.nx, 'r32float', 'pressure', this.nz, this.ny);
+      }
+      // The pressure the predictor and the timestep take the gradient of.
+      this.pLag = gas ? this.pFull! : prs.p;
+      this.gPsInit = [0, 1].map((p) => bindGroup(d, this.pPsInit!, { 0: this.params, 1: v(this.state[p][0]), 2: v(this.pLag!), 3: v(this.state[p][1]), ...k }));
       this.gPsSource = [0, 1].map((p) =>
         bindGroup(d, this.pPsSource!, {
           0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[1 - p][0]), 4: v(this.state[1 - p][1]),
           5: v(prs.levels[0].rhs), 6: v(prs.levels[0].coef), 8: v(prs.p),
-          ...((gas ? { 9: v(this.state[p][1]) } : { 7: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
+          ...((gas ? { 9: v(this.state[p][1]), 10: v(this.pOld!), 11: v(this.pFull!) } : { 7: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
         }),
       );
       this.gPsCorrect = [0, 1].map((p) =>
         bindGroup(d, this.pPsCorrect!, {
           0: this.params, 1: this.clock, 2: v(this.state[1 - p][0]), 3: v(this.state[1 - p][1]), 4: v(prs.p),
           6: v(this.state[p][0]), 7: v(this.state[p][1]),
-          ...((gas ? { 9: v(this.faceVel!) } : { 5: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
+          ...((gas ? { 9: v(this.faceVel!), 10: v(this.pOld!), 11: v(this.pFull!) } : { 5: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
         }),
       );
     } else {
@@ -1629,7 +1638,7 @@ export class Sim implements Simulation {
           2: v(this.state[p][1]),
           5: v(this.gfield),
           6: this.redDt.first,
-          ...((this.prs ? { 30: v(this.prs.p) } : {}) as Record<number, GPUTextureView>),
+          ...((this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
           ...k,
         }),
       );
@@ -1644,7 +1653,7 @@ export class Sim implements Simulation {
           4: v(this.gfield),
           5: v(this.pred[0]),
           6: v(this.pred[1]),
-          ...((this.prs ? { 30: v(this.prs.p) } : {}) as Record<number, GPUTextureView>),
+          ...((this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
           ...k,
         }),
       );
@@ -1986,12 +1995,19 @@ export class Sim implements Simulation {
       const eos = makeEos(this.cfg.eos, this.cfg.eosParams);
       let sum = 0;
       let count = 0;
+      let lo = Infinity;
+      let hi = 0;
       for (let o = 0; o < u1.length; o += 4) {
         if (u2[o + 3] !== 0) continue;
-        sum += eos.pressure(u1[o], u2[o + 1]);
+        const p = eos.pressure(u1[o], u2[o + 1]);
+        sum += p;
+        lo = Math.min(lo, p);
+        hi = Math.max(hi, p);
         count++;
       }
-      this.pRef = count ? sum / count : 0;
+      // Where the pressure spans decades (a stratified gas) no one reference serves, and none
+      // is taken: single precision then holds each cell's pressure to its own size.
+      this.pRef = count && hi < 4 * lo ? sum / count : 0;
     }
     writeTexture(d, this.state[0][0], nx, 4, u1, nz, ny);
     writeTexture(d, this.state[0][1], nx, 4, u2, nz, ny);
@@ -2702,6 +2718,8 @@ export class Sim implements Simulation {
     this.massFlux?.destroy();
     this.prs?.destroy();
     this.faceVel?.destroy();
+    this.pOld?.destroy();
+    this.pFull?.destroy();
     this.debrisBuf?.destroy();
     this.mg?.destroy();
     this.mhd?.destroy();

@@ -9,6 +9,7 @@ import { problemById } from '../presets/index';
 import { all, PERIODIC, type Problem } from '../problems/types';
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from '../pressure/multigrid';
 import { cavityError, GHIA_RE100, greshoGas } from './liquid';
+import { column } from './tests';
 import { exactRiemann } from '../reference/riemann_exact';
 import type { TestDef } from './tests';
 
@@ -623,6 +624,28 @@ export const PSPLIT_TESTS: TestDef[] = [
           const drift = Math.max(...m1.map((v, i) => Math.abs(v / m0[i] - 1)));
           Object.assign(m, { [`${tag}_sum_error`]: sum, [`${tag}_min`]: lo, [`${tag}_max`]: hi, [`${tag}_uniform_species_error`]: flat, [`${tag}_species_mass_drift`]: drift, [`${tag}_steps`]: steps });
           pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4 && drift < 5e-3;
+        });
+      }
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-gas-balance',
+    name: 'Implicit pressure for an ideal gas in a uniform field: the stratified columns of the well-balanced test (2D 64^2)',
+    criterion:
+      'Isothermal columns at rest between walls, in the discrete balance p[j+1] - p[j] = -g dx (rho[j] + rho[j+1]) / 2, the density falling by e every 16 cells (a factor of 55 in all) and every 4 (9e6): after one sound crossing the largest Mach number is below 1e-3 in both, as the explicit scheme\'s well-balanced reconstruction holds them, and total energy has changed by less than 1e-5',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      for (const cells of [16, 4]) {
+        await withSim(gpu, column(cells), 64, { ndim: 2, tEnd: 1, pressure: 'implicit', acousticCfl: 50 }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd(64, 1e6);
+          const d = await sim.diagnostics();
+          m[`e_fold_${cells}_cells_max_mach`] = d.maxMach;
+          m[`e_fold_${cells}_cells_steps`] = steps;
+          m[`e_fold_${cells}_cells_energy_drift`] = Math.abs(d.eTot / d0.eTot - 1);
+          pass &&= d.maxMach < 1e-3 && Math.abs(d.eTot / d0.eTot - 1) < 1e-5;
         });
       }
       return { pass, metrics: m };

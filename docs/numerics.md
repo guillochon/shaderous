@@ -570,6 +570,33 @@ gradient (the gas leaves at its own pressure and velocity). The timestep is also
 the pressure's own acceleration, $`C\sqrt{\Delta x\,\rho/|\nabla p'|}`$, which is what bounds
 the first step of a shock tube at rest.
 
+*The solve is for the change of the pressure*, $`d = p - q`$, from the last step's solved
+pressure $`q`$, which the correction keeps: the right-hand side gains
+$`\nabla\cdot(\tfrac1\rho\nabla q)`$ and the solve starts from zero. Its terms are then
+differences of neighboring values, each good to single precision of its own size. Not from the
+state's own pressure: at Mach 0.001 that is noise as large as the flow's pressure, and its
+Laplacian blows the run up. The reference pressure is taken only where the pressure varies by
+less than a factor of 4 over the grid; a stratified gas has none.
+
+*A uniform field, for the gas.* Each face's velocity is kicked by $`\Delta t\,g`$, so a face is
+at rest where $`p_R - p_L = g\,\Delta x\,(\rho_L + \rho_R)/2`$: the trapezoid balance of the
+explicit scheme's well-balanced reconstruction (§8). With the density-weighted face pressures
+a cell of a column in that balance has $`p_\text{hi} - p_\text{lo} = \rho g\,\Delta x`$ exactly,
+which the cell's kick cancels; a wall's face pressure is the cell's carried half a cell down
+the field; the field's work is $`g`$ times the mass the cell's two faces carry, halved (none at
+rest). The predictor's lagged pressure force is formed the same way, face by face (a centered
+difference over the cell's own density is off by the density's curvature, 1.6% where it falls
+by $`e`$ in four cells, and that alone drove the steep column to Mach 0.1). Columns whose
+density falls by $`e`$ every 16 cells and every 4 (a factor of $`9\times10^6`$ in all) then
+hold at a Mach number of $`1.2\times10^{-6}`$ through a sound crossing, with the energy to
+$`2\times10^{-7}`$ (`psplit-gas-balance`); the explicit scheme holds them to $`10^{-4}`$.
+
+*Species* that ride with the gas are moved after the correction, with the advective mass
+fluxes, and scaled to the corrected density: mass fractions sum to one and a uniform species
+stays uniform to round-off, and each species' total mass is kept to the order of the density's
+correction ($`2\times10^{-3}`$ in a liquid at Mach 0.1, $`10^{-7}`$ in the gas test;
+`psplit-species`). Species that set the equation of state, and burning, are refused.
+
 Measured (`psplit-gas-gresho`, `psplit-sod`): the Gresho vortex on $`64^2`$ cells to $`t = 2`$
 takes 212 steps at Mach 0.1 and 0.01 (explicit low-Mach HLLC: 3 422 at Mach 0.1) and keeps
 0.9907 of its kinetic energy (explicit: 0.9896), with the density within $`8\times10^{-4}`$ of
@@ -646,9 +673,9 @@ Without refinement the block grid reproduces the uniform grid's run to $`10^{-7}
 energy. In 3D it runs and conserves; it has not been measured beyond that.
 
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without self-gravity, point
-masses, species, cooling or frames; the ideal gas without a uniform field, and on the uniform
-grid only; on the adaptive mesh also without a uniform field, obstacles, inflows or per-block
-timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
+masses, cooling or frames; the ideal gas on the uniform grid only; on the adaptive mesh also
+without species, obstacles, inflows or per-block timesteps (one solve couples every cell at
+one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2338,7 +2365,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 144 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 147 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

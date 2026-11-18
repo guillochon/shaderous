@@ -120,30 +120,30 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
     }
   }
   if (PSPLIT && PSPLIT_LAG) {
-    // Implicit pressure: the gradient of the last solve's pressure, which a liquid's state
-    // carries in its internal-energy slot (amr/pressure/correct.wgsl; the assembly fills its
-    // ghosts like any other primitive's). Not the pressure of the state's density: at Mach
-    // 0.001 that is single-precision noise as large as the flow's own pressure.
-    g_pgrad = 0.5 * mask * vec3<f32>(
-      textureLoad(W2, c + vec3<i32>(1, 0, 0), 0).w - textureLoad(W2, c - vec3<i32>(1, 0, 0), 0).w,
-      textureLoad(W2, c + vec3<i32>(0, 1, 0), 0).w - textureLoad(W2, c - vec3<i32>(0, 1, 0), 0).w,
-      0.0,
-    );
-    if (!is2d()) { g_pgrad.z = 0.5 * mask.z * (textureLoad(W2, c + vec3<i32>(0, 0, 1), 0).w - textureLoad(W2, c - vec3<i32>(0, 0, 1), 0).w); }
-    // Beside a wall of the box the ghost is the cell's own image, which has its pressure: in a
-    // uniform field the wall side is the cell's pressure carried a cell down the field, so that
-    // a column at rest has the gradient that holds it (pressure/predict_on.wgsl).
+    // Implicit pressure: the pressure force of the last solve's pressure, which a liquid's
+    // state carries in its internal-energy slot (amr/pressure/correct.wgsl; the assembly fills
+    // its ghosts like any other primitive's). Not the pressure of the state's density: at Mach
+    // 0.001 that is single-precision noise as large as the flow's own pressure. In the face
+    // form of pressure/predict_on.wgsl: rho times the mean of the two faces'
+    // (p_far - p) / rho_f, a wall's face being in balance with the uniform field.
+    let p0 = textureLoad(W2, c, 0).w;
+    g_pgrad = vec3<f32>(0.0);
     let nax = select(3, 2, is2d());
     for (var axis = 0; axis < nax; axis++) {
+      var e = vec3<i32>(0);
+      e[axis] = 1;
+      var f = vec2<f32>(0.0);
       for (var u = 0; u < 2; u++) {
-        if (l[axis] != select(0, BS - 1, u == 1)) { continue; }
+        let sg = select(-1.0, 1.0, u == 1);
         let nb = bt(slot, 6u + u32(2 * axis + u));
-        if (nb <= -2 && bc_wall(u32(-1 - nb))) {
-          var e = vec3<i32>(0);
-          e[axis] = select(1, -1, u == 1);
-          g_pgrad[axis] = 0.5 * mask[axis] * (select(-1.0, 1.0, u == 1) * (textureLoad(W2, c, 0).w - textureLoad(W2, c + e, 0).w) + g_dx * P.gext[axis] * q.a.x);
+        if (l[axis] == select(0, BS - 1, u == 1) && nb <= -2 && bc_wall(u32(-1 - nb))) {
+          f[u] = sg * g_dx * P.gext[axis];
+        } else {
+          let cq = c + select(-e, e, u == 1);
+          f[u] = (textureLoad(W2, cq, 0).w - p0) / (0.5 * (q.a.x + abs(textureLoad(W1, cq, 0).x)));
         }
       }
+      g_pgrad[axis] = 0.5 * mask[axis] * q.a.x * (f.y - f.x);
     }
   }
   let pr = predictor(

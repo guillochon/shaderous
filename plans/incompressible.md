@@ -2,8 +2,9 @@
 
 Status (2026-11-18): stages 0 (2.4), 1 (3.8), 2 (4.2.1, 4.12) and 3 (5.10) are done for the
 liquid. Implicit pressure for an
-ideal gas is done on the uniform grid (4.12). Not done: self-gravity, stars and species with
-implicit pressure; the ideal gas, obstacles and a uniform field with it on the adaptive mesh. Figures quoted from the code in
+ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Not
+done: self-gravity and stars with implicit pressure; the ideal gas, species and obstacles
+with it on the adaptive mesh. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -883,6 +884,22 @@ uniform field, obstacles or inflows on blocks (refused).
 Not built, of 5.8's list: `psplit-amr-poisson` (the solver is tested through the flow, not
 against a manufactured solution; its order of convergence is unmeasured), `psplit-amr-wake`
 (obstacles are refused on blocks), `psplit-amr-divergence` as its own test.
+
+### 5.11 Later additions (2026-11-18)
+
+- **A uniform field on blocks** (liquid): the face kick of 4.12 across levels too
+  (`amr/pressure/faces.wgsl`). `psplit-amr-balance`: a column with a refinement boundary across
+  it holds at Mach $`2\times10^{-6}`$.
+- **Species on the uniform grid**: moved after the correction and scaled to its density
+  (`psplit-species`). Not on blocks.
+- **2b for the ideal gas, the uniform-field part** (4.7): built, but not as 4.7 proposed (a
+  hydrostatic $`p_h`$ per cell). Three things did it: the solve is for the change from the
+  carried solved pressure, so a balanced column's right-hand side is exactly zero; the field
+  kicks the face velocities, which with the scheme's own density-weighted face pressures
+  balances to round-off; and the predictor's pressure force is formed face by face.
+  `psplit-gas-balance`: both columns of the `well-balanced` test at Mach $`1.2\times10^{-6}`$.
+  Self-gravity is the same construction with the potential's difference across each face in
+  place of $`g\,\Delta x`$; it is not built.
 
 ## 6. Not covered
 
