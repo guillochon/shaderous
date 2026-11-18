@@ -539,8 +539,46 @@ step is then:
 For a gas whose pressure is a function of its density the mass flux has to be corrected like
 this: the published form of the method ([Kwatra et al. 2009][Kwatra2009]), which leaves the
 density as advection made it, is explicit in such a gas's pressure and unstable for it
-(`tests/unit/psplit.test.ts`). An ideal gas would take the published form; it is not built
-(`plans/incompressible.md` 4.2.1 has the prototype's findings on it).
+(`tests/unit/psplit.test.ts`).
+
+*An ideal gas* (uniform grid; `pressure/source_gas.wgsl`, `pressure/correct_gas.wgsl`) takes
+the published scheme with one addition. The equation is for $`p' = p - p_\text{ref}`$, the
+mean pressure the run started with, so that single precision holds the part that varies:
+
+```math
+\frac{p'}{\rho c^2\,\Delta t^2} - \nabla\cdot\left(\frac{1}{\rho}\nabla p'\right)
+= \frac{p^a - p_\text{ref}}{\rho c^2\,\Delta t^2} - \frac{\nabla\cdot\mathbf{v}^*}{\Delta t},
+```
+
+with $`p^a`$ the pressure advected over the step (first-order upwind), $`\rho c^2`$ from the
+state at the start of the step, a face's velocity the density-weighted mean of its two
+cells' and its $`1/\rho`$ from the mean of their densities. The correction takes
+$`-\Delta t\,\nabla p`$ from face pressures
+$`p_f = (\rho_R p_L + \rho_L p_R)/(\rho_L + \rho_R)`$, puts
+$`-\Delta t\,\nabla\cdot(p\,\hat{\mathbf v})`$ into $`E`$ and
+$`-\Delta t\,p\,\nabla\cdot\hat{\mathbf v}`$ into the internal energy, with
+$`\hat v_f = v^*_f - \Delta t\,(p_R - p_L)/(\rho_f\Delta x)`$: all differences of face values.
+
+The addition: advection carried the mass, momentum and energy on the predictor's face
+velocities $`u_f`$, which are divergence-free only to first order in the step, and unlike a
+liquid a gas has nothing that pushes a density error back (it is an entropy error). So each
+face also moves $`(\hat v_f - u_f)`$ times the upwind advected state. The density and the
+energy then see the divergence the solve left. In the float64 prototype that takes the density
+error of a Gresho vortex from 7% to 0.07%, and removes the ceiling of some 20 acoustic steps
+that the published form needs to stay stable below Mach 0.01. An open face carries no pressure
+gradient (the gas leaves at its own pressure and velocity). The timestep is also limited by
+the pressure's own acceleration, $`C\sqrt{\Delta x\,\rho/|\nabla p'|}`$, which is what bounds
+the first step of a shock tube at rest.
+
+Measured (`psplit-gas-gresho`, `psplit-sod`): the Gresho vortex on $`64^2`$ cells to $`t = 2`$
+takes 212 steps at Mach 0.1 and 0.01 (explicit low-Mach HLLC: 3 422 at Mach 0.1) and keeps
+0.9907 of its kinetic energy (explicit: 0.9896), with the density within $`8\times10^{-4}`$ of
+1 and mass and energy conserved to $`3\times10^{-7}`$. At Mach 0.001 single precision shows:
+0.973 kept, the density off by up to 2% (the pressure there is the difference of an energy of
+$`10^6`$ and a kinetic energy of order 1). The Sod tube on 128 cells conserves mass and energy
+to $`10^{-7}`$ and puts the shock within 0.9 of a cell in 32 steps (explicit: 111), with an L1
+density error of 0.017 against the explicit scheme's 0.004 (0.012 at half the Courant number):
+the split is first order in time, and a shock is not what it is for.
 
 Measured (`src/validation/psplit.ts`, an Apple GPU): a Gresho vortex on $`64^2`$ cells to
 $`t = 2`$ takes 212 steps at Mach 0.1, 0.01 and 0.001 alike, where the explicit scheme takes
@@ -607,10 +645,10 @@ merges its fine blocks as it runs leaves the density within $`0.78\,M^2`$: no pr
 Without refinement the block grid reproduces the uniform grid's run to $`10^{-7}`$ in kinetic
 energy. In 3D it runs and conserves; it has not been measured beyond that.
 
-Limits. The liquid only, on a Cartesian grid, without self-gravity, point masses, species,
-cooling or frames; on the adaptive mesh also without a uniform field, obstacles, inflows or
-per-block timesteps (one solve couples every cell at one time). Each is refused with the
-reason. First order in time. And on
+Limits. The liquid and the ideal gas only, on a Cartesian grid, without self-gravity, point
+masses, species, cooling or frames; the ideal gas without a uniform field, and on the uniform
+grid only; on the adaptive mesh also without a uniform field, obstacles, inflows or per-block
+timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2300,7 +2338,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 142 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 144 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

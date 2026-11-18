@@ -1,8 +1,9 @@
 # Plan: nearly incompressible flow
 
 Status (2026-11-18): stages 0 (2.4), 1 (3.8), 2 (4.2.1, 4.12) and 3 (5.10) are done for the
-liquid. Not done: implicit pressure for a gas with an energy (4.2.1 item 3 says why it was
-left), self-gravity and species with it, obstacles and a uniform field on the adaptive mesh. Figures quoted from the code in
+liquid. Implicit pressure for an
+ideal gas is done on the uniform grid (4.12). Not done: self-gravity, stars and species with
+implicit pressure; the ideal gas, obstacles and a uniform field with it on the adaptive mesh. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -714,7 +715,18 @@ face, obstacles, inflows, viscosity and driving: `SimConfig.pressure`, the optio
 | `psplit-obstacle` | cylinder wake sheds at period 1.428 (explicit 1.433), 4 689 steps to $`t = 20`$ |
 | `psplit-acoustic` | Courant 0.5: back within 0.24% of a wavelength at 0.858 amplitude; Courant 10: 0.12 |
 
-Not built, of 4.10's list: `psplit-sod` and the ideal gas at all (4.2.1, item 3),
+**The ideal gas was built after all** (later the same day), in the form of 4.2.1 item 3a:
+`pressure/source_gas.wgsl`, `pressure/correct_gas.wgsl`, the update keeping its face
+velocities (`pressure/store_on.wgsl`), a reference pressure (`P.ohm.w`), zero-gradient open
+faces, and the pressure-acceleration limit of 4.4 on the timestep (`hydro/rates.wgsl`,
+`hydro/clock.wgsl`). Uniform grid only; no gravity with it (2b for a gas is not done).
+
+| Test | Result |
+|---|---|
+| `psplit-gas-gresho` | 212 steps at Mach 0.1 and 0.01 (explicit 3 422); 0.9907 kept (explicit 0.9896); density within $`8\times10^{-4}`$; mass and energy to $`3\times10^{-7}`$. Mach 0.001: 0.973 kept, density off by 2% (single precision) |
+| `psplit-sod` | shock within 0.9 of a cell in 32 steps (explicit 111); L1 0.017 (explicit 0.004; 0.012 at half the Courant number); mass and energy to $`10^{-7}`$ |
+
+Not built, of 4.10's list:
 `psplit-faces` (bit-identical faces are implied by the conservation numbers, not tested
 directly), `psplit-conservation` as its own test (it is inside `psplit-gresho`),
 `psplit-balance` and all of 2b.
@@ -726,8 +738,10 @@ directly), `psplit-conservation` as its own test (it is inside `psplit-gresho`),
    the coarsest level became one invocation). Merging the residual and restriction passes
    would take another tenth off.
 3. Species with the corrected mass flux; point masses.
-4. The ideal gas, if item 3 of 4.2.1 is resolved.
-5. Second order in time.
+4. The ideal gas on the adaptive mesh, and with gravity (2b: the well-balanced pressure for a
+   gas with an energy, then self-gravity and stars). Other equations of state with an energy
+   should need only testing: the passes ask the equation of state for $`p`$ and $`c`$.
+5. Second order in time (the Sod error is the measure of it).
 
 ## 5. Stage 3: implicit pressure on the adaptive mesh
 

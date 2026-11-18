@@ -13,7 +13,9 @@ fn advance(u1: vec4<f32>, u2: vec4<f32>, net: Net, dw: f32, p_half: f32, kick: v
   let mom = u1.yzw + kick + dtdx * net.mom;
   let E = u2.x + ekick + dtdx * (net.e + dw);
   // Internal energy: advection plus -p div(v), with the half-step pressure and face velocities.
-  let eint = u2.y + dtdx * (net.ei + max(p_half, P.p_floor) * net.vn);
+  // (With implicit pressure the work is the correction's: pressure/correct_gas.wgsl.)
+  let pdv = select(max(p_half, P.p_floor) * net.vn, 0.0, PSPLIT);
+  let eint = u2.y + dtdx * (net.ei + pdv);
   let sc = u2.z + dtdx * net.s;
 
   g_kphi = swirl_ke(rho, mom);

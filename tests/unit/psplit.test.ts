@@ -182,7 +182,9 @@ describe('implicit pressure, as a setting', () => {
     const weight = (c: typeof liquid) => new Float32Array(packParams(c, { dims: [64, 64, 1], dx: 1 / 64, rhoMean: 1, selfGravity: false, masses: 0 }))[69];
     expect(weight({ ...liquid, acousticCfl: 50 })).toBeCloseTo(0.02, 8);
     expect(weight({ ...liquid, pressure: 'explicit' })).toBe(0);
-    expect(refusal(configFor(problemById('kelvin-helmholtz'), 64, { ndim: 2, pressure: 'implicit' }))).toMatch(/Implicit pressure: .*liquid/);
+    expect(refusal(configFor(problemById('kelvin-helmholtz'), 64, { ndim: 2, pressure: 'implicit' }))).toBeNull();
+    expect(refusal(configFor(problemById('kelvin-helmholtz'), 64, { ndim: 2, pressure: 'implicit', eos: 'barotropic' }))).toMatch(/Implicit pressure: .*liquid and the ideal gas/);
+    expect(hydroSlots(configFor(problemById('kelvin-helmholtz'), 64, { ndim: 2, pressure: 'implicit' })).psplit_store).toBe('pressure/store_on.wgsl');
     expect(refusal({ ...liquid, amrLevels: 1 })).toBeNull();
     expect(refusal({ ...liquid, gext: [0, -1, 0] })).toBeNull();
     // A liquid's own refusals come first.

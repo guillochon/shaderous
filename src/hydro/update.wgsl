@@ -25,6 +25,7 @@
 #include "hydro/fluff.wgsl"
 #include <frame>
 #include <psplit>
+#include <psplit_store>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -262,6 +263,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     return;
   }
   store_mass_flux(c, fx, fy, fz, flat);
+  store_face_velocity(c, vec3<f32>(fx.hi.vn, fy.hi.vn, fz.hi.vn));
   if (DEBRIS) { escape(c, w0.a.yzw, fx, fy, fz, flat); }
 
   // Flux-form gravitational work (P.flags bit 0): each face hands half of F_mass * dphi to the

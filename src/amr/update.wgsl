@@ -28,6 +28,7 @@
 #include <bins>
 #include "amr/blk_dt.wgsl"
 #include <frame>
+#include <psplit>
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;

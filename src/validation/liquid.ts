@@ -60,7 +60,7 @@ export function cavityError(u1: Float32Array, n: number, table: [number, number]
 
 const gresho = problemById('gresho');
 /** The Gresho preset's flow in an ideal gas at Mach `mach` (the flow sets the pressure). */
-const greshoGas = (mach: number): Problem =>
+export const greshoGas = (mach: number): Problem =>
   compiledFrom({
     ...gresho.setup!,
     id: 'gresho-gas',

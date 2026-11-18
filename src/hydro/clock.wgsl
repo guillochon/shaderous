@@ -62,7 +62,8 @@ fn main() {
   // pass is built without the geometry slot: P.sph's theta step says the run is spherical.)
   // (A uniform field alone, gravity 'constant', counts too: in cold gas nothing else held the
   // step, and the gas fell two cells in one and through the walls.)
-  if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0 || P.sph.z > 0.0 || cylindrical() || any(P.gext.xyz != vec3<f32>(0.0))) && RED[1] > 0.0) {
+  // (And with implicit pressure, P.ohm.y, the pressure's own acceleration: hydro/rates.wgsl.)
+  if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0 || P.sph.z > 0.0 || cylindrical() || any(P.gext.xyz != vec3<f32>(0.0)) || P.ohm.y > 0.0) && RED[1] > 0.0) {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
   }
   // Comoving coordinates: the scale factor changes by at most 1% a step.

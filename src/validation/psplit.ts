@@ -8,7 +8,8 @@ import { defaultEosParams } from '../eos/eos';
 import { problemById } from '../presets/index';
 import { all, PERIODIC, type Problem } from '../problems/types';
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from '../pressure/multigrid';
-import { cavityError, GHIA_RE100 } from './liquid';
+import { cavityError, GHIA_RE100, greshoGas } from './liquid';
+import { exactRiemann } from '../reference/riemann_exact';
 import type { TestDef } from './tests';
 
 async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: Sim) => Promise<T>) {
@@ -486,6 +487,76 @@ export const PSPLIT_TESTS: TestDef[] = [
       } finally {
         sim.destroy();
       }
+    },
+  },
+  {
+    id: 'psplit-gas-gresho',
+    name: 'Implicit pressure for an ideal gas: Gresho vortex at Mach 0.1, 0.01 and 0.001 (2D 64^2)',
+    criterion:
+      'To t = 2, at Mach 0.1 and 0.01: the same number of steps (to 2%), under a tenth of the explicit low-Mach HLLC\'s at Mach 0.1; at least its kinetic energy kept, less 0.002, and none gained; the density, which should not change, within 2e-3 of 1; mass conserved to 2e-6 and total energy to 2e-6. At Mach 0.001, where the pressure is the difference of an energy of 1e6 and a kinetic energy of order 1 in single precision: the same steps to 5%, more than 95% of the kinetic energy kept, the density within 5%',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const energy = async (sim: Sim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(64, 1e7);
+        const d1 = await sim.diagnostics();
+        return { kept: d1.eKin / d0.eKin, steps, dev: Math.max(Math.abs(d1.ranges[0][0] - 1), Math.abs(d1.ranges[0][1] - 1)), mass: Math.abs(d1.mass / d0.mass - 1), etot: Math.abs(d1.eTot / d0.eTot - 1) };
+      };
+      const explicit = await withSim(gpu, greshoGas(0.1), 64, { ndim: 2, tEnd: 2, riemann: 'hllclm' }, energy);
+      m.explicit_kept = explicit.kept;
+      m.explicit_steps = explicit.steps;
+      const runs = [];
+      for (const mach of [0.1, 0.01, 0.001]) {
+        const r = await withSim(gpu, greshoGas(mach), 64, { ndim: 2, tEnd: 2, ...IMPLICIT }, energy);
+        runs.push(r);
+        m[`mach_${mach}_kept`] = r.kept;
+        m[`mach_${mach}_steps`] = r.steps;
+        m[`mach_${mach}_density_deviation`] = r.dev;
+        m[`mach_${mach}_mass_drift`] = r.mass;
+        m[`mach_${mach}_energy_drift`] = r.etot;
+        if (mach > 0.005) pass &&= r.kept < 1 && r.kept > explicit.kept - 0.002 && Math.abs(r.steps - runs[0].steps) <= 0.02 * runs[0].steps && r.dev < 2e-3 && r.mass < 2e-6 && r.etot < 2e-6;
+        else pass &&= r.kept < 1 && r.kept > 0.95 && Math.abs(r.steps - runs[0].steps) <= 0.05 * runs[0].steps && r.dev < 0.05 && r.mass < 2e-6;
+      }
+      pass &&= runs[0].steps < 0.1 * explicit.steps;
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-sod',
+    name: 'Implicit pressure for an ideal gas: Sod shock tube (128 cells along x)',
+    criterion:
+      'At t = 0.2 the shock is within one cell of its exact position, mass and total energy are conserved to 1e-6, and the run takes under a third of the explicit scheme\'s steps; the L1 density error against the exact solution is under 0.02 at the default Courant number and under 0.013 at half of it (the explicit scheme: 0.004; the split is first order in time)',
+    async run(gpu) {
+      const n = 128;
+      const exact = exactRiemann({ rho: 1, u: 0, p: 1 }, { rho: 0.125, u: 0, p: 0.1 }, 1.4);
+      const tube = (over: Partial<SimConfig>) =>
+        withSim(gpu, problemById('sod-x'), n, { ndim: 2, ...over }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd(64, 1e6);
+          const d = await sim.diagnostics();
+          const { u1 } = await sim.readState();
+          const row = (i: number) => u1[4 * ((n / 2) * n + i)];
+          let l1 = 0;
+          for (let i = 0; i < n; i++) l1 += Math.abs(row(i) - exact(((i + 0.5) / n - 0.5) / d.t).rho) / n;
+          // The shock: where the density falls through the middle of its jump.
+          let shock = NaN;
+          for (let i = n - 2; i > 0; i--)
+            if (row(i) > 0.195 && row(i + 1) <= 0.195) {
+              shock = (i + 0.5 + (row(i) - 0.195) / (row(i) - row(i + 1))) / n - 0.5;
+              break;
+            }
+          return { l1, steps, shock: Math.abs(shock - 1.75216 * d.t), mass: Math.abs(d.mass / d0.mass - 1), etot: Math.abs(d.eTot / d0.eTot - 1) };
+        });
+      const explicit = await tube({});
+      const implicit = await tube({ pressure: 'implicit' });
+      const half = await tube({ pressure: 'implicit', cfl: 0.4 });
+      const m = {
+        l1: implicit.l1, l1_half_courant: half.l1, l1_explicit: explicit.l1, steps: implicit.steps, steps_half_courant: half.steps, steps_explicit: explicit.steps,
+        shock_error_cells: implicit.shock * n, shock_error_cells_half_courant: half.shock * n, mass_drift: implicit.mass, energy_drift: implicit.etot,
+      };
+      const pass = implicit.shock < 1 / n && half.shock < 1 / n && implicit.mass < 1e-6 && implicit.etot < 1e-6 && half.etot < 1e-6 && implicit.steps < explicit.steps / 3 && implicit.l1 < 0.02 && half.l1 < 0.013;
+      return { pass, metrics: m };
     },
   },
 ];
