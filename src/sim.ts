@@ -545,7 +545,6 @@ export function implicitUnsupported(c: SimConfig): string | null {
  */
 export function implicitBlocksUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid') return 'on the adaptive mesh it is built for the liquid only, so far';
-  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available with it on the adaptive mesh yet';
   if (c.timeBins > 0) return 'per-block timesteps are not available with it: one solve couples every cell at one time';
   return null;
 }

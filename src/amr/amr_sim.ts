@@ -244,6 +244,7 @@ export class AmrSim implements Simulation {
   private pCorrect!: GPUComputePipeline;
   /** The largest speed of the initial conditions: the scale of the liquid's velocity refinement indicator (amr/flag.wgsl). */
   private vRef = 0;
+  private gSpeciesFinal: GPUBindGroup[][] = [];
   /** Implicit pressure (SimConfig.pressure): the solve and its passes on the leaves (amr/pressure.ts). */
   prs?: AmrPressure;
   private gCorrect: GPUBindGroup[] = [];
@@ -909,6 +910,14 @@ export class AmrSim implements Simulation {
       // Re-meshing goes from the state of parity p to the other.
       per((p, q) => bindGroup(d, pR, { 0: this.params, 2: v(this.species[q]), 4: v(this.state[1 - p][0]), 6: v(this.species[1 - q]), 7: this.rg, 31: this.listLeaf, ...kout })),
     ];
+    // With implicit pressure the density is final only after the correction, back in parity p:
+    // the species are moved then, and scaled to that density (as on the uniform grid).
+    this.gSpeciesFinal = per((p, q) =>
+      bindGroup(d, pM, {
+        0: this.params, 1: this.clock, 3: v(this.state[p][1]), 4: v(this.state[p][0]), 5: v(this.species[q]), 6: v(this.species[1 - q]),
+        7: this.massFluxWindows!.lo, ...((this.massFluxWindows!.hi ? { 32: this.massFluxWindows!.hi } : {}) as Record<number, Bindable>), 8: sx, 9: sh, 30: this.bt, 31: this.listLeaf, ...kout, ...kflag,
+      }),
+    );
     this.burn?.destroy();
     this.burn = undefined;
     const burn = burnSpec(this.cfg);
@@ -959,8 +968,20 @@ export class AmrSim implements Simulation {
     pass.setPipeline(pP);
     pass.setBindGroup(0, this.gSpecies[1][p][q]);
     this.flat(pass, this.nLeaf, 1);
+    // (With implicit pressure the move waits for the correction: encodeSpeciesMove.)
+    if (this.prs) return;
     pass.setPipeline(pM);
     pass.setBindGroup(0, this.gSpecies[2][p][q]);
+    this.interior(pass, this.nLeaf);
+    this.speciesCur = 1 - q;
+  }
+
+  /** Implicit pressure: the species' move, after the correction has put the final state in parity p. */
+  private encodeSpeciesMove(pass: GPUComputePassEncoder, p: number) {
+    if (!this.speciesGroups) return;
+    const q = this.speciesCur;
+    pass.setPipeline(this.pSpecies[2]);
+    pass.setBindGroup(0, this.gSpeciesFinal[p][q]);
     this.interior(pass, this.nLeaf);
     this.speciesCur = 1 - q;
   }
@@ -2139,6 +2160,7 @@ export class AmrSim implements Simulation {
         pass.setBindGroup(0, this.assembleGroup(1 - p));
         this.flat(pass, this.nAll, NG);
         this.prs.encode(pass, p, this.nLevel, this.nLeaf, this.cfg.pressureCycles);
+        this.encodeSpeciesMove(pass, p);
       }
       pass.end();
       if (this.prs) {

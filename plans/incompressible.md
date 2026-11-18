@@ -5,7 +5,7 @@ liquid. Implicit pressure for an
 ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Self-gravity
 for the ideal gas is done on the uniform grid (5.11). Obstacles and
 inlets work with it on the adaptive mesh (5.11). Not done: point masses with implicit
-pressure; the ideal gas and species with it on the adaptive mesh. Figures quoted from the code in
+pressure; the ideal gas with it on the adaptive mesh. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -892,7 +892,7 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   (`amr/pressure/faces.wgsl`). `psplit-amr-balance`: a column with a refinement boundary across
   it holds at Mach $`2\times10^{-6}`$.
 - **Species on the uniform grid**: moved after the correction and scaled to its density
-  (`psplit-species`). Not on blocks.
+  (`psplit-species`), on blocks too.
 - **2b for the ideal gas, the uniform-field part** (4.7): built, but not as 4.7 proposed (a
   hydrostatic $`p_h`$ per cell). Three things did it: the solve is for the change from the
   carried solved pressure, so a balanced column's right-hand side is exactly zero; the field

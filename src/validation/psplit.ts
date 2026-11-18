@@ -589,7 +589,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-species',
     name: 'Implicit pressure with species carried by the gas (2D 64^2): a liquid vortex, and an ideal gas carrying a density bump across a periodic box',
     criterion:
-      'Three species (a disc, a uniform 0.2, the rest) are moved after the pressure correction and scaled to its density. In both runs, at the end: the mass fractions of every cell sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]; the uniform species is still 0.2 to 1e-4 everywhere; and each species\' total mass is kept to 5e-3 (the scaling is by the density\'s correction, of order the Mach number squared, so it is not round-off: 2e-3 in the liquid, 1e-7 in the gas). A species\' sharp edge can overshoot by a percent of its jump',
+      'Three species (a disc, a uniform 0.2, the rest) are moved after the pressure correction and scaled to its density. In both runs, at the end: the mass fractions of every cell sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]; the uniform species is still 0.2 to 1e-4 everywhere; and each species\' total mass is kept to 5e-3 (the scaling is by the density\'s correction, of order the Mach number squared, so it is not round-off: 2e-3 in the liquid, 1e-7 in the gas). A species\' sharp edge can overshoot by a percent of its jump. The liquid run again on a block grid: the same sums, bounds and uniform species',
     async run(gpu) {
       const n = 64;
       const X = (r: number) => (r < 0.2 ? [0.7, 0.2, 0.1] : [0.1, 0.2, 0.7]);
@@ -626,6 +626,25 @@ export const PSPLIT_TESTS: TestDef[] = [
           pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4 && drift < 5e-3;
         });
       }
+      // And on blocks (the liquid, 128 finest, one level of refinement allowed).
+      await withAmr(gpu, liquid, 128, { ndim: 2, tEnd: 1, amrLevels: 1, ...IMPLICIT }, async (sim) => {
+        const steps = await sim.runToEnd(64, 1e6);
+        const X = await sim.readLeafSpecies();
+        let sum = 0;
+        let lo = Infinity;
+        let hi = -Infinity;
+        let flat = 0;
+        for (let q = 0; q < X[0].length; q++) {
+          sum = Math.max(sum, Math.abs(X[0][q] + X[1][q] + X[2][q] - 1));
+          for (const x of X) {
+            lo = Math.min(lo, x[q]);
+            hi = Math.max(hi, x[q]);
+          }
+          flat = Math.max(flat, Math.abs(X[1][q] - 0.2));
+        }
+        Object.assign(m, { blocks_sum_error: sum, blocks_min: lo, blocks_max: hi, blocks_uniform_species_error: flat, blocks_steps: steps });
+        pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4;
+      });
       return { pass, metrics: m };
     },
   },

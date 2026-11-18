@@ -608,7 +608,8 @@ been tested with it.
 fluxes, and scaled to the corrected density: mass fractions sum to one and a uniform species
 stays uniform to round-off, and each species' total mass is kept to the order of the density's
 correction ($`2\times10^{-3}`$ in a liquid at Mach 0.1, $`10^{-7}`$ in the gas test;
-`psplit-species`). Species that set the equation of state, and burning, are refused.
+`psplit-species`), on the uniform grid and on blocks. Species that set the equation of state,
+and burning, are refused.
 
 Measured (`psplit-gas-gresho`, `psplit-sod`): the Gresho vortex on $`64^2`$ cells to $`t = 2`$
 takes 212 steps at Mach 0.1 and 0.01 (explicit low-Mach HLLC: 3 422 at Mach 0.1) and keeps
@@ -699,7 +700,7 @@ energy. In 3D it runs and conserves; it has not been measured beyond that.
 
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
 or frames (and the liquid without self-gravity); the ideal gas on the uniform grid only; on the adaptive mesh also
-without species or per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
+without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
