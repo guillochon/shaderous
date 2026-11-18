@@ -10,6 +10,8 @@
 @group(0) @binding(1) var PHI: texture_3d<f32>;
 @group(0) @binding(2) var PHI_OLD: texture_3d<f32>;
 @group(0) @binding(3) var GOUT: texture_storage_3d<rgba32float, write>;
+// With comoving coordinates the field stored is the proper acceleration, -grad phi / a.
+@group(0) @binding(4) var<storage, read> clock: Clock;
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -18,7 +20,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var g = vec3<f32>(0.0);
   var ph = 0.0;
   if (has_potential()) {
-    g = gravity(PHI, c);
+    g = gravity(PHI, c) / select(1.0, clock.a1, cosmo_on());
     ph = 1.5 * textureLoad(PHI, c, 0).x - 0.5 * textureLoad(PHI_OLD, c, 0).x;
   }
   textureStore(GOUT, c, vec4<f32>(g, ph));

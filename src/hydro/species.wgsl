@@ -70,7 +70,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     for (var k = 0; k < 5; k++) { cells[k] = load_x(c + (k - 2) * e); }
     axis_inflow(c, a, cells, &acc);
   }
-  let dtdx = clock.dt / P.dx;
+  let dtdx = clock.dt / cell_dx(P.dx, clock.ah);
   var out: array<vec4<f32>, NG>;
   var sum = 0.0;
   for (var g = 0u; g < NG; g++) {

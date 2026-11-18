@@ -54,6 +54,8 @@ struct Params {
                          //   for the centrifugal force; all zero for an inertial frame
   sym: vec4<u32>,        // per axis: 0, or 1 where the lower face is a plane of mirror symmetry
                          //   (SimConfig.symmetry; the gas sees it as reflecting)
+  cosmo: vec4<f32>,      // comoving coordinates (src/cosmo.ts): (Omega_m, Omega_k, Omega_Lambda, 1);
+                         //   all zero otherwise
 }
 
 // The state as the frame slot (gravity/frame_off.wgsl) hands it back.
@@ -64,6 +66,12 @@ struct Clock {
   t: f32,      // time at the start of that step
   tc: f32,     // Kahan compensation for t
   steps: f32,
+  a: f32,      // comoving coordinates (src/cosmo.ts): the scale factor at t, at t + dt/2 and at
+  ah: f32,     //   t + dt, and the expansion rate at t + dt/2 (hydro/clock.wgsl); 1, 1, 1 and
+  a1: f32,     //   0 otherwise
+  hub: f32,
+  shear: f32,  // shearing box: the offset of the x faces along y, and its Kahan compensation
+  shear_c: f32,
 }
 
 @group(0) @binding(0) var<uniform> P: Params;
@@ -78,6 +86,19 @@ fn opaque(x: f32) -> f32 {
 }
 fn opaque3(x: vec3<f32>) -> vec3<f32> {
   return bitcast<vec3<f32>>(bitcast<vec3<u32>>(x) ^ vec3<u32>(bitcast<u32>(P.refine.w)));
+}
+
+// Comoving coordinates (src/cosmo.ts): every gradient carries 1/a, which the passes take up by
+// working with the proper cell size a dx; positions keep the comoving one.
+fn cosmo_on() -> bool {
+  return P.cosmo.w != 0.0;
+}
+fn cell_dx(dx: f32, a: f32) -> f32 {
+  return select(dx, dx * a, cosmo_on());
+}
+// The expansion rate H(a) = da/dt / a, in units of H0.
+fn cosmo_hubble(a: f32) -> f32 {
+  return sqrt(P.cosmo.x / (a * a * a) + P.cosmo.y / (a * a) + P.cosmo.z);
 }
 
 // The lower face along `axis` is a plane of mirror symmetry, not a wall: what lies beyond it is

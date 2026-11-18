@@ -20,6 +20,18 @@ override CYCLE: f32 = 1.0;
 // how often the page had read its diagnostics before its first step.)
 override ADVANCE_DRIVE: bool = true;
 
+// Comoving coordinates: one RK4 step of da/dt = a H(a) (src/cosmo.ts rk4).
+fn cosmo_rk4(a: f32, dt: f32) -> f32 {
+  let k1 = a * cosmo_hubble(a);
+  let a2 = a + 0.5 * dt * k1;
+  let k2 = a2 * cosmo_hubble(a2);
+  let a3 = a + 0.5 * dt * k2;
+  let k3 = a3 * cosmo_hubble(a3);
+  let a4 = a + dt * k3;
+  let k4 = a4 * cosmo_hubble(a4);
+  return a + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4);
+}
+
 @compute @workgroup_size(1)
 fn main() {
   // Bank the step that has just been taken (Kahan summation keeps t accurate in float32).
@@ -29,13 +41,18 @@ fn main() {
     clock.t = k.x;
     clock.tc = k.y;
     if (prev > 0.0) { clock.steps += 1.0; }
+    // The scale factor where that step ended.
+    if (cosmo_on()) { clock.a = clock.a1; }
   }
 
-  let dx = select(P.dx, 1.0, PER_DX);
+  // With comoving coordinates the stable step is set by the proper cell size, a dx.
+  let dx = select(P.dx, 1.0, PER_DX) * select(1.0, clock.a, cosmo_on());
   var dt = P.cfl * dx / max(RED[0], 1.0e-30);
   if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0) && RED[1] > 0.0) {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
   }
+  // Comoving coordinates: the scale factor changes by at most 1% a step.
+  if (cosmo_on()) { dt = min(dt, 0.01 / cosmo_hubble(clock.a)); }
   // A rotating frame: at most a tenth of a radian of frame turn a step (63 steps a turn). The
   // Coriolis turn is exact, so this bounds the splitting error, not stability.
   if (rot_on()) { dt = min(dt, 0.1 / length(P.rot.xyz)); }
@@ -79,6 +96,12 @@ fn main() {
     dt = 0.0;
   }
   clock.dt = dt;
+  // The scale factor half way through the step and at its end, and the expansion rate half way.
+  if (cosmo_on()) {
+    clock.ah = cosmo_rk4(clock.a, 0.5 * dt);
+    clock.a1 = cosmo_rk4(clock.a, dt);
+    clock.hub = cosmo_hubble(clock.ah);
+  }
   // Turbulence driving: its amplitudes over the step (or cycle) just set.
   if (ADVANCE_DRIVE) { drive_advance(CYCLE * dt); }
 }

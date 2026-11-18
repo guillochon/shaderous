@@ -23,7 +23,7 @@ fn predict_x(slot: i32, l: vec3<i32>, mask: vec3<f32>) -> array<vec4<f32>, NG> {
   var xh = x;
   let w = textureLoad(W1, c, 0);
   if (w.x < 0.0) { return x; }
-  let h = 0.5 * clock.dt / blk_dx(slot);
+  let h = 0.5 * clock.dt / cell_dx(blk_dx(slot), clock.ah);
   let nax = select(3, 2, is2d());
   for (var a = 0; a < nax; a++) {
     if (mask[a] == 0.0) { continue; }

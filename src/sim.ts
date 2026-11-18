@@ -26,6 +26,7 @@ import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, ty
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
 import { domainLo } from './domain';
+import { hubble, omegaK, scaleFactor, type Cosmology } from './cosmo';
 
 import type { LimiterKind, RiemannKind } from './problems/types';
 export { LIMITER_KINDS, RIEMANN_KINDS, type LimiterKind, type RiemannKind } from './problems/types';
@@ -410,6 +411,43 @@ export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefine
   return { ...cfg, symmetry: sym, bcLo };
 }
 
+/** The run's background expansion (Problem.cosmology), or null. */
+export function cosmologyOf(c: SimConfig): Cosmology | null {
+  return c.problem.cosmology ?? null;
+}
+
+/**
+ * Why a run in comoving coordinates cannot go as configured, or null. The first version is a
+ * periodic box of ideal gas, with or without self-gravity, on a uniform grid or on blocks that
+ * share one timestep (docs/numerics.md section 22).
+ */
+export function cosmologyUnsupported(c: SimConfig): string | null {
+  if (!cosmologyOf(c)) return null;
+  if (c.problem.masses) return 'point masses and sinks are not available in comoving coordinates';
+  if (![...c.bcLo, ...c.bcHi].every((b) => b === PERIODIC)) return 'comoving coordinates need a periodic box';
+  if (c.gravity !== 'off' && c.gravity !== 'periodic') return 'comoving coordinates take periodic self-gravity or none';
+  if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in comoving coordinates';
+  if (c.eos !== 'ideal') return 'comoving coordinates take an ideal gas so far';
+  if (c.cooling !== 'off') return 'cooling is not available in comoving coordinates yet';
+  if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in comoving coordinates';
+  if (c.problem.mhd) return 'magnetic fields are not available in comoving coordinates yet';
+  if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available in comoving coordinates (each block would expand by its own a)';
+  if (c.amrLevels > 0 && isSelfGravity(c.gravity) && c.jeansRefine > 0) return 'refining on the Jeans length is not available in comoving coordinates (set it to 0)';
+  if (c.jeansFloor) return 'the Jeans pressure floor is not available in comoving coordinates';
+  if (rotating(c) || c.problem.shear) return 'a rotating frame is not available in comoving coordinates';
+  if (c.driving.accel > 0 || c.problem.damping) return 'driving and damping zones are not available in comoving coordinates';
+  return null;
+}
+
+/** The shearing box's offset of its x faces along y at `time` (Part D), or 0. */
+export function shearOffset(c: SimConfig, time: number): number {
+  const s = c.problem.shear;
+  if (!s) return 0;
+  const L = c.problem.box;
+  const d = (s.q * s.omega * L * time) % L;
+  return d < 0 ? d + L : d;
+}
+
 /** How many axes are mirrored: the computed part is 2^-k of the whole configuration. */
 export const mirrors = (c: SimConfig): number => (c.symmetry ?? []).filter(Boolean).length;
 
@@ -470,8 +508,9 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     comp: problemCompSlot(c.problem, c.eosParams.gamma, speciesGroups(c.problem)),
     // Whether the update tallies the gas leaving the box by its orbital energy (debris/debris.ts).
     debris: debrisSlot(c),
-    // Forces of a non-inertial frame that depend on the velocity (gravity/frame_off.wgsl).
-    frame: rotating(c) ? 'gravity/frame_rot.wgsl' : 'gravity/frame_off.wgsl',
+    // Forces of a non-inertial frame that depend on the velocity (gravity/frame_off.wgsl): a
+    // rotating frame's Coriolis force, or the expansion drag of comoving coordinates.
+    frame: cosmologyOf(c) ? 'gravity/frame_cosmo.wgsl' : rotating(c) ? 'gravity/frame_rot.wgsl' : 'gravity/frame_off.wgsl',
   };
 }
 
@@ -750,17 +789,40 @@ export function packBrush(b: BrushOp): ArrayBuffer {
 /** Channels of the diagnostics reduction (DIAG_OPS). */
 const DIAG_CHANNELS = 24;
 /** Number of floats the diagnostics readback holds: clock (4), reduction, the Masses block. */
-export const DIAG_FLOATS = 4 + DIAG_CHANNELS + MASS_FLOATS;
+/** Floats and bytes of the clock (hydro/common.wgsl Clock). */
+export const CLOCK_FLOATS = 10;
+export const CLOCK_BYTES = 4 * CLOCK_FLOATS;
+
+/**
+ * The clock as a run starts it, at `time` after `steps` steps: (dt, t, Kahan compensation,
+ * steps), then the scale factor at t three times and the expansion rate (Part C; 1, 1, 1, 0
+ * without comoving coordinates), then the shearing box's offset and its compensation.
+ */
+export function clockState(c: SimConfig, time = 0, steps = 0): Float32Array<ArrayBuffer> {
+  const k = cosmologyOf(c);
+  const a = k ? scaleFactor(k, time) : 1;
+  const shear = shearOffset(c, time);
+  return new Float32Array([0, time, 0, steps, a, a, a, k ? hubble(k, a) : 0, shear, 0]);
+}
+
+export const DIAG_FLOATS = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS;
 
 /** Burning's heating rate texture where a run does not burn: one texel of nothing. */
 export function noHeat(d: GPUDevice): GPUTexture {
   return d.createTexture({ label: 'no nuclear heating', size: [1, 1, 1], dimension: '3d', format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
 }
 
-/** Decode a diagnostics readback: [clock (4), reduction channels, the Masses block]. */
+/** Comoving coordinates: the state's scale factor from the clock (where the last step ended, a1). */
+export function withScale(d: Diagnostics, clock: Float32Array): Diagnostics {
+  d.scale = clock[6];
+  d.redshift = 1 / clock[6] - 1;
+  return d;
+}
+
+/** Decode a diagnostics readback: [clock (CLOCK_FLOATS), reduction channels, the Masses block]. */
 export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
-  const r = a.subarray(4);
-  const masses = unpackMasses(a.subarray(4 + DIAG_CHANNELS), nMasses);
+  const r = a.subarray(CLOCK_FLOATS);
+  const masses = unpackMasses(a.subarray(CLOCK_FLOATS + DIAG_CHANNELS), nMasses);
   const ranges: [number, number][] = [];
   for (let i = 0; i < 5; i++) ranges.push([r[10 + 2 * i], r[11 + 2 * i]]);
   return {
@@ -808,7 +870,7 @@ export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] |
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 432;
+export const PARAM_BYTES = 448;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -833,7 +895,7 @@ export function packParams(
   f[31] = c.problem.mhd && (fl.va ?? 0) > 0 ? fl.va! : 0;
   u.set(x.amr ?? [0, 0, 0, 0], 32);
   // The potential of point masses alone is not periodic: its ghosts are extrapolated.
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity ? 1 : 0, (c.gravEnergyFlux ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -860,6 +922,8 @@ export function packParams(
   f.set([...domainLo(c), 0], 96);
   f.set(rotationOf(c), 100);
   u.set([0, 1, 2].map((a) => (c.symmetry?.[a] ? 1 : 0)).concat(0), 104);
+  const k = cosmologyOf(c);
+  f.set(k ? [k.omegaM, omegaK(k), k.omegaL, 1] : [0, 0, 0, 0], 108);
   return buf;
 }
 
@@ -892,6 +956,9 @@ export interface Diagnostics {
    * configuration, of which the grid holds one 2^k-th (unfoldDiagnostics).
    */
   symmetry?: [boolean, boolean, boolean];
+  /** Comoving coordinates: the scale factor of the state, and its redshift 1 / a - 1. */
+  scale?: number;
+  redshift?: number;
   /** [min, max] per renderable field, in FIELDS order */
   ranges: [number, number][];
   /**
@@ -910,10 +977,10 @@ export interface RestartState {
 
 /** Read the clock and the point masses back, for a snapshot. */
 export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer, nMasses: number): Promise<RestartState> {
-  const buf = d.createBuffer({ size: 16 + MASS_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const buf = d.createBuffer({ size: CLOCK_BYTES + MASS_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = d.createCommandEncoder();
-  enc.copyBufferToBuffer(clock, 0, buf, 0, 16);
-  enc.copyBufferToBuffer(bh, 0, buf, 16, MASS_FLOATS * 4);
+  enc.copyBufferToBuffer(clock, 0, buf, 0, CLOCK_BYTES);
+  enc.copyBufferToBuffer(bh, 0, buf, CLOCK_BYTES, MASS_FLOATS * 4);
   d.queue.submit([enc.finish()]);
   await buf.mapAsync(GPUMapMode.READ);
   const f = new Float32Array(buf.getMappedRange().slice(0));
@@ -921,7 +988,7 @@ export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer,
   buf.destroy();
   // The clock holds the start of the step last taken and its dt, banked as the next step
   // begins: the state is at their sum, as diagnosticsFrom has it.
-  return { time: f[1] + f[0], steps: f[3] + (f[0] > 0 ? 1 : 0), masses: nMasses ? unpackMasses(f.subarray(4), nMasses) : undefined };
+  return { time: f[1] + f[0], steps: f[3] + (f[0] > 0 ? 1 : 0), masses: nMasses ? unpackMasses(f.subarray(CLOCK_FLOATS), nMasses) : undefined };
 }
 
 /**
@@ -1065,10 +1132,10 @@ export class Sim implements Simulation {
     // Before any pass is bound: the driving buffer is shared, bound where a pass declares it.
     writeDrive(d, cfg.driving, cfg.ndim, cfg.problem.box);
     this.clock = d.createBuffer({
-      size: 16,
+      size: CLOCK_BYTES,
       usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
-    this.clockPreview = d.createBuffer({ size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    this.clockPreview = d.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.bh = d.createBuffer({ size: MASS_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
@@ -1102,6 +1169,8 @@ export class Sim implements Simulation {
     }
     const asym = symmetryUnsupported(cfg);
     if (asym) throw new Error(`Mirror symmetry: ${asym}`);
+    const acos = cosmologyUnsupported(cfg);
+    if (acos) throw new Error(`Comoving coordinates: ${acos}`);
     noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
@@ -1142,7 +1211,7 @@ export class Sim implements Simulation {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
-        Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry),
+        Multigrid.create(d, cfg.ndim === 2 ? 2 : n, cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock),
         Reducer.create(
           d,
           [n, n, nz],
@@ -1180,7 +1249,7 @@ export class Sim implements Simulation {
     const phi = sim.mg.phi;
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
-    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield) });
+    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.clock });
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
     const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
@@ -1427,8 +1496,8 @@ export class Sim implements Simulation {
       writeTexture(this.device, this.species[0], n, 4, sp, nz * G);
       if (km) writeTexture(this.device, this.comp!, n, 4, km, nz);
     }
-    // The clock is (dt, t, Kahan compensation, steps).
-    if (c.restart) this.device.queue.writeBuffer(this.clock, 0, new Float32Array([0, c.restart.time, 0, c.restart.steps]));
+    // The clock (clockState), at the snapshot's time for a restart.
+    this.device.queue.writeBuffer(this.clock, 0, clockState(c, c.restart?.time ?? 0, c.restart?.steps ?? 0));
     this.startSettling(u1, u2, emag);
   }
 
@@ -1575,7 +1644,7 @@ export class Sim implements Simulation {
     writeTexture(d, this.state[0][0], n, 4, u1, this.nz);
     writeTexture(d, this.state[0][1], n, 4, u2, this.nz);
     if (this.cfg.ndim === 3) writeTexture(d, this.mg.phi, n, 1, new Float32Array(n * n * n));
-    d.queue.writeBuffer(this.clock, 0, new Float32Array(4));
+    d.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
     writeDrive(d, this.cfg.driving, this.cfg.ndim, this.cfg.problem.box);
     this.writeParams();
     this.refreshPotential();
@@ -1661,8 +1730,9 @@ export class Sim implements Simulation {
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
     if (this.settling) return 0; // a star is still being settled
     const selfGravity = this.selfGravity;
-    // (A rotating frame needs the correction pass for its centrifugal kick and closing turn.)
-    const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0) || rotating(this.cfg);
+    // (A rotating frame needs the correction pass for its centrifugal kick and closing turn, and
+    // comoving coordinates for the second half of the expansion drag.)
+    const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0) || rotating(this.cfg) || !!cosmologyOf(this.cfg);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = beginPass(enc);
@@ -1919,14 +1989,14 @@ export class Sim implements Simulation {
   async profile(reps = 20): Promise<Record<string, number>> {
     const d = this.device;
     const p = this.cur;
-    const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const buf = d.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const time = async (count: number, fn: (pass: GPUComputePassEncoder) => void) => {
       const run = async (k: number) => {
         const enc = d.createCommandEncoder();
         const pass = beginPass(enc);
         for (let i = 0; i < k; i++) fn(pass);
         pass.end();
-        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, CLOCK_BYTES);
         d.queue.submit([enc.finish()]);
         const t0 = performance.now();
         await buf.mapAsync(GPUMapMode.READ);
@@ -1984,15 +2054,16 @@ export class Sim implements Simulation {
     const pass = beginPass(enc);
     this.redDiag.encode(pass, this.cur);
     pass.end();
-    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
-    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
-    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, MASS_FLOATS * 4);
+    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, CLOCK_BYTES);
+    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, CLOCK_BYTES, DIAG_OPS.length * 4);
+    enc.copyBufferToBuffer(this.bh, 0, this.staging, CLOCK_BYTES + DIAG_OPS.length * 4, MASS_FLOATS * 4);
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.nMasses);
+      if (cosmologyOf(this.cfg)) withScale(diag, a);
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
       // energy (E - KE there includes B^2 / 2).
@@ -2022,7 +2093,7 @@ export class Sim implements Simulation {
     if (this.destroyed) return 0;
     if (this.settling) return 0;
     const enc = this.device.createCommandEncoder();
-    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
+    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, CLOCK_BYTES);
     const pass = beginPass(enc);
     this.encodeRates(pass, this.cur);
     this.redDt.encode(pass);
@@ -2058,14 +2129,14 @@ export class Sim implements Simulation {
   async runToEnd(batch = 16, maxSteps = 1e6): Promise<number> {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
     await this.settled;
-    const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const buf = this.device.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     let steps = 0;
     let size = batch;
     try {
       for (;;) {
         const enc = this.device.createCommandEncoder();
         this.encodeSteps(enc, size);
-        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, CLOCK_BYTES);
         this.device.queue.submit([enc.finish()]);
         const t0 = performance.now();
         await buf.mapAsync(GPUMapMode.READ);

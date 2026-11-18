@@ -272,6 +272,17 @@ export interface Problem {
    * field is symmetric too (mhd/common.wgsl gives the planes the field's parity).
    */
   symmetry?: { axes: [boolean, boolean, boolean]; mhd?: boolean };
+  /**
+   * Comoving coordinates (src/cosmo.ts): positions comoving, densities and pressures comoving
+   * (a^3 times the proper ones), velocities peculiar and proper, specific energies proper. Time
+   * is in 1/H0 from t = 0 at a = aStart, and the mean comoving density should be 1.
+   */
+  cosmology?: import('../cosmo').Cosmology;
+  /**
+   * A shearing box (Part D): the frame corotates at `omega` (about z), the background flow is
+   * v_y = -q omega x, and the x faces are periodic with the shift that flow gives.
+   */
+  shear?: { omega: number; q: number; stratified?: boolean };
   /** Density below which gas does not ask for refinement (default: the fluff density, else ten times a star's ambient density, else 0, off). */
   refineRho?: number;
   /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */

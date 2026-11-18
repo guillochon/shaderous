@@ -35,7 +35,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var g = vec3<f32>(0.0);
   let self_gravity = has_potential();
   if (nout == 0 && self_gravity) {
-    let h = blk_dx(inv.slot);
+    // (With comoving coordinates, the proper cell size: the field is the proper acceleration.)
+    let h = cell_dx(blk_dx(inv.slot), clock.a1);
     g = -vec3<f32>(
       phi(c + vec3<i32>(1, 0, 0)) - phi(c - vec3<i32>(1, 0, 0)),
       phi(c + vec3<i32>(0, 1, 0)) - phi(c - vec3<i32>(0, 1, 0)),

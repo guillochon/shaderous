@@ -300,7 +300,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (!inv.ok) { return; }
   let slot = inv.slot;
   let l = inv.l;
-  g_dx = blk_dx(slot);
+  g_dx = cell_dx(blk_dx(slot), clock.ah);
   g_dt = blk_dt(slot);
   g_bin = blk_bin(slot);
   g_deposit = BINS_ON && !blk_active(slot);

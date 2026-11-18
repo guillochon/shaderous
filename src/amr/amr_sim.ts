@@ -35,7 +35,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
-import { symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { CLOCK_BYTES, clockState, cosmologyOf, withScale, cosmologyUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -445,8 +445,8 @@ export class AmrSim implements Simulation {
     });
     const storage = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC;
     this.params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-    this.clock = d.createBuffer({ size: 16, usage: storage });
-    this.clockPreview = d.createBuffer({ size: 16, usage: storage });
+    this.clock = d.createBuffer({ size: CLOCK_BYTES, usage: storage });
+    this.clockPreview = d.createBuffer({ size: CLOCK_BYTES, usage: storage });
     this.brush = d.createBuffer({ size: BRUSH_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.sources = d.createBuffer({ size: SOURCE_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.bt = d.createBuffer({ size: this.cap * BT_STRIDE * 4, usage: storage });
@@ -508,6 +508,8 @@ export class AmrSim implements Simulation {
     }
     const asym = symmetryUnsupported(cfg);
     if (asym) throw new Error(`Mirror symmetry: ${asym}`);
+    const acos = cosmologyUnsupported(cfg);
+    if (acos) throw new Error(`Comoving coordinates: ${acos}`);
     let lastTried: number | null = null;
     for (let slots = 0; ; ) {
       // A resource the GPU cannot make (out of memory, or larger than it allows one to be, which
@@ -641,7 +643,7 @@ export class AmrSim implements Simulation {
     if (sim.pMassField) {
       // The potential bindings are never read (there is none), but the pass declares them.
       sim.gMassField = bindGroup(d, sim.pMassField, {
-        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 30: sim.bt, 31: sim.listAll,
+        0: sim.params, 1: v(sim.dummyPhi), 2: v(sim.dummyPhi), 3: v(sim.gfield), 5: sim.clock, 30: sim.bt, 31: sim.listAll,
       });
     }
     await sim.buildHydro(deferUpdate);
@@ -1415,8 +1417,8 @@ export class AmrSim implements Simulation {
     this.binShare = null;
     d.queue.writeBuffer(this.binArgs, 0, new Uint32Array(BIN_ARGS_BYTES / 4));
     this.rhoMean = mass / c.problem.box ** c.ndim;
-    // The clock is (dt, t, Kahan compensation, steps).
-    d.queue.writeBuffer(this.clock, 0, new Float32Array(c.restart ? [0, c.restart.time, 0, c.restart.steps] : [0, 0, 0, 0]));
+    // The clock (clockState), at the snapshot's time for a restart.
+    d.queue.writeBuffer(this.clock, 0, clockState(c, c.restart?.time ?? 0, c.restart?.steps ?? 0));
     const masses = initialMasses(c, this.massDx);
     this.nMasses = this.nOwnMasses = masses.length;
     d.queue.writeBuffer(this.bh, 0, packMasses(masses));
@@ -2537,15 +2539,16 @@ export class AmrSim implements Simulation {
     const pass = beginPass(enc);
     this.redDiag.encode(pass, this.cur);
     pass.end();
-    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, 16);
-    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, 16, DIAG_OPS.length * 4);
-    enc.copyBufferToBuffer(this.bh, 0, this.staging, 16 + DIAG_OPS.length * 4, MASS_FLOATS * 4);
+    enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, CLOCK_BYTES);
+    enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, CLOCK_BYTES, DIAG_OPS.length * 4);
+    enc.copyBufferToBuffer(this.bh, 0, this.staging, CLOCK_BYTES + DIAG_OPS.length * 4, MASS_FLOATS * 4);
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
       const diag = diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0);
+      if (cosmologyOf(this.cfg)) withScale(diag, a);
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
       // energy (E - KE there includes B^2 / 2).
@@ -2582,7 +2585,7 @@ export class AmrSim implements Simulation {
       enc.clearBuffer(this.redDt.first);
       this.dtStale = false;
     }
-    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, 16);
+    enc.copyBufferToBuffer(this.clock, 0, this.clockPreview, 0, CLOCK_BYTES);
     const pass = beginPass(enc);
     if (this.mhd) {
       // A magnetic field: its own assembly measures the rates, with the fast magnetosonic speed.
@@ -2618,12 +2621,12 @@ export class AmrSim implements Simulation {
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
     await this.compiled;
     await this.settled;
-    const buf = this.device.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const buf = this.device.createBuffer({ size: CLOCK_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     try {
       for (;;) {
         const enc = this.device.createCommandEncoder();
         this.encodeSteps(enc, this.levels > 0 ? REGRID_EVERY : 16);
-        enc.copyBufferToBuffer(this.clock, 0, buf, 0, 16);
+        enc.copyBufferToBuffer(this.clock, 0, buf, 0, CLOCK_BYTES);
         this.device.queue.submit([enc.finish()]);
         this.submitted();
         await buf.mapAsync(GPUMapMode.READ);

@@ -16,7 +16,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!held(c)) {
     let u = textureLoad(U1, c, 0);
     let v = u.yzw / max(u.x, P.rho_floor);
-    let h = 0.5 * clock.dt / P.dx;
+    let h = 0.5 * clock.dt / cell_dx(P.dx, clock.ah);
     let flat = P.dims.z == 1u;
     for (var a = 0; a < 3; a++) {
       if (a == 2 && flat) { break; }

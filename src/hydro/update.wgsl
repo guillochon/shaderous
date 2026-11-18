@@ -112,7 +112,7 @@ override DEBUG_FLUX: bool = false;
 @compute @workgroup_size(WGX, WGY, WGZ)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>,
         @builtin(local_invocation_index) li: u32) {
-  g_dx = P.dx;
+  g_dx = cell_dx(P.dx, clock.ah);
   g_dt = clock.dt;
   // The whole workgroup computes the faces of its box, before any invocation can leave.
   if (tiled()) { tile_fluxes(vec3<i32>(wid * vec3<u32>(WGX, WGY, WGZ) + REGION.origin), li); }

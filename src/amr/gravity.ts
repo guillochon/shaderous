@@ -183,7 +183,7 @@ export class AmrGravity {
 
     const phi0 = v(g.sub[0].phi);
     const rhs0 = v(g.sub[0].rhs);
-    g.gRhs = ctx.stateU1.map((t) => bindGroup(d, g.pRhs, { 0: ctx.params, 1: v(t), 2: rhs0, 31: ctx.listLeaf }));
+    g.gRhs = ctx.stateU1.map((t) => bindGroup(d, g.pRhs, { 0: ctx.params, 1: v(t), 2: rhs0, 5: ctx.clock, 31: ctx.listLeaf }));
     g.gGhostCoarseAll = bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAll });
     for (let l = 0; l <= ctx.levels; l++) {
       g.gRhsRestrict.push(bindGroup(d, g.pRhsRestrict, { 0: ctx.params, 2: rhs0, 30: ctx.bt, 31: ctx.listLevel[l] }));
@@ -191,11 +191,11 @@ export class AmrGravity {
       g.gInit.push(bindGroup(d, g.pInit, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLevel[l] }));
     }
     g.gGhostRest = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAll });
-    g.gRhsB = ctx.stateU1.map((t) => bindGroup(d, g.pRhs, { 0: ctx.params, 1: v(t), 2: rhs0, 31: ctx.listUpd }));
+    g.gRhsB = ctx.stateU1.map((t) => bindGroup(d, g.pRhs, { 0: ctx.params, 1: v(t), 2: rhs0, 5: ctx.clock, 31: ctx.listUpd }));
     g.gRhsRestrictB = bindGroup(d, g.pRhsRestrict, { 0: ctx.params, 2: rhs0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostCoarseB = bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostRestB = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
-    g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 30: ctx.bt, 31: ctx.listAll });
+    g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 5: ctx.clock, 30: ctx.bt, 31: ctx.listAll });
     g.gNew = bindGroup(d, g.pNew, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLeaf });
 
     [g.pResidual, g.pGate, g.pGateRecord] = await Promise.all([

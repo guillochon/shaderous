@@ -82,15 +82,22 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   let da = v.x * sx.a + v.y * sy.a + v.z * sz.a;
   let db = v.x * sx.b + v.y * sy.b + v.z * sz.b;
   let gradp = vec3<f32>(sx.b.x, sy.b.x, sz.b.x);
-  // A non-inertial frame's velocity-dependent forces join the half kick.
+  // A non-inertial frame's velocity-dependent forces join the half kick (and, with comoving
+  // coordinates, the expansion's cooling the half step's pressure).
   var gf = g;
-  if (FRAME_ON) { gf += frame_vaccel(v); }
+  var dp = 0.0;
+  if (FRAME_ON) {
+    let fr = frame_predict(v, q.b.x);
+    gf += fr.xyz;
+    dp = fr.w;
+  }
 
   var a = vec4<f32>(
     rho - h * (da.x + rho * dv),
     v - h * (da.yzw + gradp / rho) + 0.5 * g_dt * gf,
   );
   var b = vec2<f32>(q.b.x - h * (db.x + rho * cs * cs * dv), q.b.y - h * db.y);
+  if (FRAME_ON) { b.x += 0.5 * g_dt * dp; }
 
   // Positivity: if any face state would be non-positive, this cell is first order this step
   // (unpredicted state, and the update zeroes its slopes).

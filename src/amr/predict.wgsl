@@ -136,7 +136,7 @@ fn predict_cell(slot: i32, l: vec3<i32>, mask: vec3<f32>, g: vec3<f32>) -> Q {
 fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
   let inv = inv_flat(wid, lix, 1);
   if (!inv.ok) { return; }
-  g_dx = blk_dx(inv.slot);
+  g_dx = cell_dx(blk_dx(inv.slot), clock.ah);
   g_dt = blk_dt(inv.slot);
   let s = ghost_src(inv.slot, inv.l);
   if (s.kind == 2) { return; }

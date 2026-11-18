@@ -8,6 +8,7 @@ import type { Sim } from '../sim';
 import type { AmrSim } from '../amr/amr_sim';
 import { withAmr, withSim, type TestDef } from './tests';
 import { SYM_TESTS } from './symmetry';
+import { COSMO_TESTS } from './cosmo';
 
 const gas = (over: Partial<Problem>): Problem => ({
   id: 'frame-test', label: 'Frame test', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
@@ -231,4 +232,5 @@ export const FRAME_TESTS: TestDef[] = [
     },
   },
   ...SYM_TESTS,
+  ...COSMO_TESTS,
 ];

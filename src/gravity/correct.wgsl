@@ -31,7 +31,7 @@ override MHD: bool = false;
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  g_dx = P.dx;
+  g_dx = cell_dx(P.dx, clock.a1);
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   comp_use(comp_tex(c));

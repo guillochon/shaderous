@@ -46,7 +46,8 @@ export class Multigrid {
     box: number,
     params: GPUBuffer,
     stateU1: GPUTexture[],
-    symmetry?: readonly boolean[],
+    symmetry: readonly boolean[] | undefined,
+    clock: GPUBuffer,
   ): Promise<Multigrid> {
     if (n & (n - 1)) throw new Error('multigrid needs a power-of-two grid');
     const mg = new Multigrid();
@@ -130,7 +131,7 @@ export class Multigrid {
     }
 
     mg.rhsGroups = stateU1.map((t) =>
-      bindGroup(device, mg.pRhs, { 0: params, 1: t.createView(), 2: mg.levels[0].rhs.createView() }),
+      bindGroup(device, mg.pRhs, { 0: params, 1: t.createView(), 2: mg.levels[0].rhs.createView(), 3: clock }),
     );
     return mg;
   }

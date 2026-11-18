@@ -31,7 +31,7 @@ override MHD: bool = false;
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let inv = inv_interior(gid);
   if (!inv.ok) { return; }
-  g_dx = blk_dx(inv.slot);
+  g_dx = cell_dx(blk_dx(inv.slot), clock.a1);
   g_dt = blk_dt(inv.slot);
   let c = atl(blk_origin(inv.slot), inv.l);
   comp_use(comp_tex(c));
