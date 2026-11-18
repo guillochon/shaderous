@@ -35,6 +35,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(w.w1.x, w.w2.w);
     // A spherical run: per axis over its own cell length (none along the azimuth).
     var acc = length(g_load(c));
+    if (cylindrical()) {
+      let t = cyl_dt_terms(w.w1.yzw, w.w2.y, f32(c.x) + 0.5, g_dx);
+      rate += t.x;
+      acc += t.y;
+    }
     if (spherical()) {
       let sg = sph_cell(c.x, c.y);
       let h = sph_rate_h(sg);

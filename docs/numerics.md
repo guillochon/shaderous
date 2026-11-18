@@ -1904,6 +1904,13 @@ body of revolution's. On blocks they settle on the CPU (the GPU's sums are of cu
 $`n = 1`$ polytrope of 25 cells' radius ($`128^2`$) settles in 8 rounds and keeps its central
 density to 1.2% over three sound crossings (`cyl-star`), as the 3D polytrope does.
 
+**The timestep** of an $`(R, z)`$ run weighs a cell's radial signal rate by its outer face's
+weight, $`(R_c + \Delta x/2)/R_c`$ (twice next to the axis, where the face is twice as large
+as the cell is wide), and holds the centrifugal acceleration $`v_\phi^2/R_c`$ over that same
+weighted length to the acceleration limit, as for gravity. Without them a fast swirl reaching
+the axis (a random setup, $`v_\phi = 0.66`$ in gas of sound speed 0.01) emptied the axis cells
+in its first step and went to NaN; with them it keeps its mass to round-off.
+
 **Point masses** may sit on the axis and move along it. Their pull on the gas needs nothing,
 since the distance from a mass on the axis to any point of a ring is that to the ring's cell
 center; the gas's pull on them, and what their sinks take, are summed over rings (their true

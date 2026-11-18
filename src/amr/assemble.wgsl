@@ -107,6 +107,11 @@ fn main(
         var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(abs(w.w1.x), w.w2.w);
         // A spherical run: per axis over its own cell length (hydro/rates.wgsl).
         var geo = 0.0;
+        if (cylindrical()) {
+          let t = cyl_dt_terms(w.w1.yzw, w.w2.y, blk_pos(inv.slot, inv.l).x / g_dx, g_dx);
+          rate += t.x;
+          geo = t.y;
+        }
         if (spherical()) {
           let sg = blk_sph(inv.slot, inv.l);
           let h = sph_rate_h(sg);

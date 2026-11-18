@@ -60,7 +60,7 @@ fn main() {
   var dt = P.cfl * dx / max(RED[0], 1.0e-30);
   // (A spherical run's geometric acceleration is in RED[1] too: hydro/common.wgsl sph_accel. This
   // pass is built without the geometry slot: P.sph's theta step says the run is spherical.)
-  if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0 || P.sph.z > 0.0) && RED[1] > 0.0) {
+  if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0 || P.sph.z > 0.0 || cylindrical()) && RED[1] > 0.0) {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
   }
   // Comoving coordinates: the scale factor changes by at most 1% a step.

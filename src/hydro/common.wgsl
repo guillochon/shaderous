@@ -134,6 +134,17 @@ fn sym_lo(axis: i32) -> bool {
 fn cylindrical() -> bool {
   return P.sym.x == 2u;
 }
+// For the timestep of an (R, z) run, at a cell whose center is rc = R_c / dx from the axis: what
+// the radial rate gains (its outer face drains it at (R_c + dx/2) / R_c times what its width
+// says: twice next to the axis) and the centrifugal acceleration v_phi^2 / R_c, for the
+// acceleration limit (hydro/clock.wgsl). Without them a fast swirl reaching the axis emptied
+// the axis cells in one step and went to NaN.
+fn cyl_dt_terms(v: vec3<f32>, cs: f32, rc: f32, dx: f32) -> vec2<f32> {
+  // (The acceleration over the same weighted length: the gas it starts moving drains the cell
+  // through that face, so at most cfl^2 of the cell goes in a step.)
+  let wr = 1.0 + 0.5 / rc;
+  return vec2<f32>((abs(v.x) + cs) * (wr - 1.0), v.z * v.z / (rc * dx) * wr);
+}
 // The weights of cell i's radial faces, area over (cell volume / dx): R_- / R_c and R_+ / R_c,
 // as pure ratios of indices (no cancellation in float32). The axis face weighs exactly 0.
 fn cyl_weights(i: i32) -> vec2<f32> {
