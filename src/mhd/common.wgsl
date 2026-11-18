@@ -50,6 +50,8 @@ fn bface(a: i32, t: vec3<i32>) -> f32 {
   for (var b = 0; b < 3; b++) {
     if (b != a && t[b] < 0 && sym_lo(b)) { s = -s; }
   }
+  // Beyond the axis of an axisymmetric run B_phi (the third component) changes sign.
+  if (a == 2 && t.x < 0 && cylindrical()) { s = -s; }
   // A shearing box: a face of a ghost beyond an x face lies between two sheared faces along y
   // (as hydro/common.wgsl's bc_map and shear_frac place the ghost's cell), linearly.
   if (a != 0 && shear_ghost(t)) {

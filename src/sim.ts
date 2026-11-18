@@ -429,7 +429,8 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   if (c.problem.geometry !== 'cylindrical') return null;
   if (c.ndim !== 2) return 'an axisymmetric run is two-dimensional, in (R, z)';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available for axisymmetric runs yet';
-  if (c.problem.mhd) return 'magnetic fields are not available in axisymmetric runs yet';
+  if (c.problem.mhd && c.amrLevels > 0) return 'magnetic fields are not available for axisymmetric runs on blocks yet';
+  if (c.problem.mhd && c.resistivity > 0) return 'resistivity is not available in axisymmetric runs yet';
   if (c.viscosity > 0) return 'viscosity is not available in axisymmetric runs yet (it needs the curvilinear stress)';
   for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
     if ((m.pos[0] ?? 0) !== 0 || (m.pos[2] ?? 0) !== 0 || (m.vel[0] ?? 0) !== 0 || (m.vel[2] ?? 0) !== 0) return 'a point mass must sit on the axis (R = 0) and move along it';

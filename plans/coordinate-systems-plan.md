@@ -22,8 +22,8 @@ and tested in `src/validation/{frames,symmetry,cosmo,shear,cyl}.ts`.
 | E4 (R, z) on blocks | done, without per-block timesteps |
 | E5 step 1 masses on the axis, step 2 self-gravity on the uniform grid | done |
 | E5 step 3 self-gravity on blocks, settling in (R, z) | **not done** |
-| E6 MHD and viscosity in (R, z) | **not done** (refused) |
-| E8 tests | rest, conserve, sedov, sink (against 3D), blocks, sphere, evrard, column; noh, bondi, torus and mhd not done |
+| E6 MHD and viscosity in (R, z) | MHD done on the uniform grid (`cyl-mhd`); viscosity, resistivity and blocks with a field refused |
+| E8 tests | rest, conserve, sedov, sink, blocks, sphere, evrard, column, noh, bondi, mhd pass; **torus fails**: mass is made where gas converges on a point mass on the axis (docs §22, known problem) |
 | E9 spherical | its own plan: [spherical-plan.md](spherical-plan.md) |
 
 This plan covers five additions, in the order they should be built:

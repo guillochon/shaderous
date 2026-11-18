@@ -119,6 +119,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
   E = E * bc_tied_keep(on) + moving_wall_e(t, on, kinds, upper);
+  // The axis of an axisymmetric run: E_phi (code z) vanishes on it, and no B_phi crosses it
+  // (2D: E_z, code y, on the x faces is the flux of B_phi through them).
+  if (cylindrical() && t.x == 0) { E = vec3<f32>(E.x, 0.0, 0.0); }
   let dt = select(clock.dt, 0.5 * clock.dt, STAGE == 1u);
   EMF[emf_index(t)] = vec4<f32>((dt / P.dx) * E, 0.0);
 }

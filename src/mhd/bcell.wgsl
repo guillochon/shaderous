@@ -15,9 +15,13 @@ fn bcell(c: vec3<i32>) -> vec3<f32> {
   let wrap = vec3<bool>(up.x >= n.x && P.bc_lo[0] == 0u && !shear_on(), up.y >= n.y && P.bc_lo[1] == 0u, up.z >= n.z && P.bc_lo[2] == 0u);
   let hi = select(up, vec3<i32>(0), wrap);
   let lo = textureLoad(BF, c, 0);
-  return 0.5 * vec3<f32>(
-    lo.x + textureLoad(BF, vec3<i32>(hi.x, c.y, c.z), 0).x,
-    lo.y + textureLoad(BF, vec3<i32>(c.x, hi.y, c.z), 0).y,
-    lo.z + textureLoad(BF, vec3<i32>(c.x, c.y, hi.z), 0).z,
+  let bxhi = textureLoad(BF, vec3<i32>(hi.x, c.y, c.z), 0).x;
+  // An axisymmetric run's B_R is the mean of its radial faces weighed by their areas
+  // (cyl_bcell_r), so that the flux through the cell is what its faces carry.
+  let bx = select(0.5 * (lo.x + bxhi), cyl_bcell_r(c.x, lo.x, bxhi), cylindrical());
+  return vec3<f32>(
+    bx,
+    0.5 * (lo.y + textureLoad(BF, vec3<i32>(c.x, hi.y, c.z), 0).y),
+    0.5 * (lo.z + textureLoad(BF, vec3<i32>(c.x, c.y, hi.z), 0).z),
   );
 }

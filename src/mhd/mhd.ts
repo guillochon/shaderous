@@ -101,6 +101,7 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
   const zc = (k: number) => (flat ? 0 : mid(k, 2));
   const zl = (k: number) => (flat ? 0 : lo(k, 2));
   if (spec.potential) {
+    const cyl = c.problem.geometry === 'cylindrical';
     const A = spec.potential(c.params, c.ndim);
     const ax = (i: number, j: number, k: number) => A(mid(i, 0), lo(j, 1), zl(k))[0];
     const ay = (i: number, j: number, k: number) => A(lo(i, 0), mid(j, 1), zl(k))[1];
@@ -112,7 +113,10 @@ export function initialFaces(c: SimConfig, n: number, nz: number, dx: number): F
           const dzAy = flat ? 0 : ay(i, j, k + 1) - ay(i, j, k);
           const dzAx = flat ? 0 : ax(i, j, k + 1) - ax(i, j, k);
           out[o] = (az(i, j + 1, k) - az(i, j, k) - dzAy) / dx;
-          out[o + 1] = (dzAx - (az(i + 1, j, k) - az(i, j, k))) / dx;
+          // An axisymmetric run's B_z = (1/R) d(R A_phi) / dR, its edges weighed by their radii
+          // over the face's (as mhd/update.wgsl evolves it), so that the cylindrical divergence
+          // starts at round-off.
+          out[o + 1] = cyl ? (dzAx - ((i + 1) * az(i + 1, j, k) - i * az(i, j, k)) / (i + 0.5)) / dx : (dzAx - (az(i + 1, j, k) - az(i, j, k))) / dx;
           out[o + 2] = (ay(i + 1, j, k) - ay(i, j, k) - (ax(i, j + 1, k) - ax(i, j, k))) / dx;
         }
   }

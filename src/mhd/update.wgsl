@@ -155,10 +155,21 @@ fn new_face(a: i32, t: vec3<i32>) -> vec2<f32> {
     comp += r.y;
   }
   if (!(flat && c == 2)) {
-    r = two_sum(s, impulse(t + ec)[b]);
+    // An axisymmetric run's B_z faces (code y) lie at the cell's radius, and the E_phi edges
+    // beside them at the radii of its radial faces: d b_z / dt = (1/R) d(R E_phi) / dR, each
+    // edge weighed by its radius over the face's. With these the divergence weighed likewise
+    // (mhd/diagnostics.wgsl) is still unchanged by every edge.
+    var wl = 1.0;
+    var wh = 1.0;
+    if (a == 1 && cylindrical()) {
+      let w = cyl_weights(t.x);
+      wl = w.x;
+      wh = w.y;
+    }
+    r = two_sum(s, wh * impulse(t + ec)[b]);
     s = r.x;
     comp += r.y;
-    r = two_sum(s, -i0[b]);
+    r = two_sum(s, -wl * i0[b]);
     s = r.x;
     comp += r.y;
   }
@@ -245,17 +256,38 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var net_a = vec4<f32>(0.0);   // (mass, momentum)
   var net_b = vec4<f32>(0.0);   // (energy, internal energy, scalar, face velocity)
   var bc = vec3<f32>(0.0);
+  // An axisymmetric run: the radial faces weighed by their areas (angular momentum, R rho v_phi,
+  // by the square: hydro/flux.wgsl cyl_face), and the radial momentum's geometric source,
+  //   (p + B^2 / 2 + rho v_phi^2 - B_phi^2) / R,
+  // with the total pressure the mean of the two radial faces' (their normal momentum flux less
+  // what the mass carries, plus B_R^2: the flux pass leaves each face's B_R beside it), so that
+  // uniform total pressure is in balance to rounding, as in hydro/update.wgsl.
+  let cyl = cylindrical();
+  let wc = select(vec2<f32>(1.0), cyl_weights(t.x), cyl);
+  var src_r = 0.0;
   for (var a = 0; a < 3; a++) {
     var e = vec3<i32>(0);
     e[a] = 1;
     if (a < axes) {
-      let lo = flux_at(a, t);
-      let hi = flux_at(a, t + e);
+      var lo = flux_at(a, t);
+      var hi = flux_at(a, t + e);
+      if (cyl && a == 0) {
+        let blo = FX[3u * flux_index(t) + 2u].w;
+        let bhi = FX[3u * flux_index(t + e) + 2u].w;
+        let pt = 0.5 * (lo.a.y - lo.a.x * lo.b.w + blo * blo + hi.a.y - hi.a.x * hi.b.w + bhi * bhi);
+        let hs = select(textureLoad(H1, t, 0), textureLoad(U1, t, 0), STAGE == 1u);
+        let bphi = FY[3u * flux_index(t) + 2u].w;
+        src_r = (pt + hs.w * hs.w / max(hs.x, P.rho_floor) - bphi * bphi) / (f32(t.x) + 0.5);
+        lo = Fl(vec4<f32>(lo.a.xyz * wc.x, lo.a.w * wc.x * wc.x), lo.b * wc.x);
+        hi = Fl(vec4<f32>(hi.a.xyz * wc.y, hi.a.w * wc.y * wc.y), hi.b * wc.y);
+      }
       net_a += lo.a - hi.a;
       net_b += lo.b - hi.b;
     }
-    bc[a] = 0.5 * (bout[a] + new_face(a, t + e).x);
+    let bh = new_face(a, t + e).x;
+    bc[a] = select(0.5 * (bout[a] + bh), cyl_bcell_r(t.x, bout[a], bh), cyl && a == 0);
   }
+  net_a.y += src_r;
   var u1 = textureLoad(U1, t, 0);
   var u2 = textureLoad(U2, t, 0);
   // A non-inertial frame's velocity-dependent forces (gravity/frame_off.wgsl): stage 1 the

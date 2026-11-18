@@ -1803,8 +1803,12 @@ $`-y`$, which is $`-z`$ here. The scheme solves
 - **Radial source,** $`(p + \rho v_\phi^2)/R`$, with $`p`$ the mean of the cell's two radial
   face pressures (each face's normal momentum flux less what its mass flux carries). With it
   the cylindrical balance reduces exactly to the Cartesian one: uniform pressure is in balance
-  to rounding, and the well-balanced reconstruction holds a stratified column as it does in
-  Cartesian coordinates.
+  to rounding. The well-balanced reconstruction acts along $`z`$ alone: radially, gas is
+  mostly held by its rotation, and measuring its pressure against hydrostatic balance there let
+  a torus in equilibrium around a point mass drift inward and pile up at its inner edge (its
+  peak up 75% in two thirds of an orbit at $`128^2`$; 5% along $`z`$ alone, about what a
+  slightly coarser 3D run shows). It still holds a stratified column along the axis as it does
+  in Cartesian coordinates.
 - **Predictor:** the half step's geometric terms, $`-\rho v_R/R`$ in the density,
   $`-\rho c_s^2 v_R/R`$ in the pressure, $`+v_\phi^2/R`$ in $`v_R`$ and $`-v_Rv_\phi/R`$ in
   $`v_\phi`$.
@@ -1841,13 +1845,41 @@ center; the gas's pull on them, and what their sinks take, are summed over rings
 volumes), with the parts across the axis dropped where the reduction is read, as each ring's
 cancel. A sink on the axis takes in within 1% of what the same sink takes in 3D.
 
-The first version is hydrodynamics (conduction works through the face weights); magnetic
-fields, viscosity (which needs the curvilinear stress), point masses off the axis, species and
+**Magnetic fields** (uniform grid). The face field keeps its layout: $`b_R`$ on the radial
+faces, $`b_z`$ on the $`z`$ faces, $`B_\phi`$ in the layer. With $`E_\phi`$ on the edges,
+$`\partial_t b_R = -\partial_z E_\phi`$ is the Cartesian update; $`\partial_t b_z =
+\tfrac1R\partial_R(R E_\phi)`$ weighs each edge by its radius over the face's,
+$`R_\pm/R_c`$; and $`B_\phi`$'s flux form, $`\partial_t B_\phi = \partial_z E_R - \partial_R
+E_z`$, has no radii in it. The cylindrical divergence,
+$`(R_+b_{R+} - R_-b_{R-})/(R_c\Delta) + \Delta_z b_z/\Delta`$, is then unchanged by every edge,
+as the Cartesian one is. The cell's $`B_R`$ is its faces' mean weighed by their areas. The
+radial faces' fluxes take the same weights as the gas's ($`R B_\phi`$'s stress with angular
+momentum, by the square), and the radial source becomes
+$`(p + B^2/2 + \rho v_\phi^2 - B_\phi^2)/R`$, its total pressure the mean of the two radial
+faces' (the flux pass leaves each face's $`B_R`$ beside its flux for this), so that a uniform
+field along the axis is in balance to rounding. On the axis $`E_\phi`$ and the flux of
+$`B_\phi`$ vanish, and beyond it $`B_\phi`$ changes sign, as $`v_\phi`$ does. A vector
+potential's $`b_z`$ is formed with the same radial weights. Resistivity, viscosity and blocks
+are refused with a field.
+
+The first version is hydrodynamics and ideal MHD (conduction works through the face weights);
+viscosity (which needs the curvilinear stress), point masses off the axis, species and
 per-block timesteps are refused. The `blast-axisymmetric` preset is a point explosion on the axis.
 Tests: uniform gas at rest stays below Mach $`10^{-6}`$; a swirling ring carried along $`z`$
 keeps mass, energy, $`z`$ momentum and angular momentum to $`10^{-7}`$; a point blast is
 spherical, its radius along $`R`$ and $`z`$ within 1.5% of the 3D similarity solution; a
-stratified column under gravity stays below Mach $`10^{-4}`$.
+stratified column under gravity stays below Mach $`10^{-4}`$; the spherical Noh implosion at
+$`512^2`$ (R to 2, so that no gas measured came in through a boundary) has its post-shock
+density within 2.7% of 64 and the pre-shock within 0.1%, alike along the axis, the diagonal and
+$`R`$; Bondi accretion onto a point mass on the axis within 3.5% of Bondi's rate; and a poloidal
+field loop carried along $`z`$ keeps $`\nabla\cdot B`$ at $`3\times10^{-7}`$ and 96.2% of its
+magnetic energy (the same loop in Cartesian coordinates: 96.0%), with a uniform axial field at
+rest to Mach $`3\times10^{-7}`$.
+
+**Known problem.** A pressure-supported torus around a point mass on the axis (`cyl-torus`)
+holds for about one and a half orbits at $`256^2`$, and then gas reaching the mass on the axis
+gathers there and the gas's mass grows without bound, with the sink or without it: mass is
+made where flow converges on the axis at a point mass. The test fails until that is found.
 
 ## 23. Validation
 

@@ -135,6 +135,12 @@ fn cyl_weights(i: i32) -> vec2<f32> {
   let c = f32(i) + 0.5;
   return vec2<f32>(f32(i) / c, f32(i + 1) / c);
 }
+// The cell-centered B_R of cell i from its radial faces' fields: their mean weighed by their
+// areas, (R_- b_- + R_+ b_+) / (R_- + R_+).
+fn cyl_bcell_r(i: i32, lo: f32, hi: f32) -> f32 {
+  let w = cyl_weights(i);
+  return 0.5 * (w.x * lo + w.y * hi);
+}
 // An axisymmetric run on blocks: its cells are rings, whose volumes go
 // as their radii. A parent's value is the volume-weighted mean of its children's, the child at
 // fine radial index i weighing (i + 1/2) / (2 I + 1) against the plain mean, I the parent's
@@ -268,8 +274,12 @@ fn bc_map(c0: vec3<i32>) -> Mapped {
     m.c[a] = bc_ghost_cell(c[a], n[a], k);
     if (bc_wall(k)) {
       m.flip *= bc_vsign(k, a);
-      // Across the axis of an axisymmetric run the swirl v_phi changes sign too.
-      if (!up && P.sym[a] == 2u) { m.flip.z = -m.flip.z; }
+      // Across the axis of an axisymmetric run the swirl v_phi changes sign too, and so does
+      // the azimuthal field B_phi.
+      if (!up && P.sym[a] == 2u) {
+        m.flip.z = -m.flip.z;
+        m.bflip.z = -m.bflip.z;
+      }
       m.bflip *= bc_bsign_at(k, a, up);
       m.vadd += 2.0 * bc_wall_velocity(k, a, up);
     }
