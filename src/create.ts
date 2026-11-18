@@ -10,7 +10,12 @@ import type { Problem } from './problems/types';
  * Whether a preset can run on the adaptive grid: all can. (With a magnetic field the mesh stays as
  * the initial conditions refined it, until regridding carries the field: docs/numerics.md section 21.)
  */
-export const supportsAmr = (_p: Problem) => true;
+/**
+ * The preset can run on the adaptive mesh. A shearing box cannot (a block's neighbors across its
+ * shearing boundary change with time), nor can a spherical (r, theta) run yet: a link or a
+ * script asking for refinement then gets the uniform grid, not a refusal.
+ */
+export const supportsAmr = (p: Problem) => !p.shear && p.geometry !== 'spherical';
 
 /** The deepest refinement that leaves at least one whole block per side at the coarsest level. */
 export function maxAmrLevels(n: number): number {
