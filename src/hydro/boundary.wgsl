@@ -66,6 +66,14 @@ fn bc_bsign(k: u32, axis: i32) -> vec3<f32> {
   return s;
 }
 
+// The same where the face may be a plane of mirror symmetry (sym_lo): there B, a pseudovector,
+// keeps its normal component and changes the sign of the tangential ones, the opposite of a
+// conducting wall.
+fn bc_bsign_at(k: u32, axis: i32, up: bool) -> vec3<f32> {
+  let s = bc_bsign(k, axis);
+  return select(s, -s, !up && sym_lo(axis));
+}
+
 // Beyond an outflow-only face: -1 below, +1 above (the side the ghost's normal velocity is
 // clamped toward), else 0.
 fn bc_side(k: u32, up: bool) -> f32 {

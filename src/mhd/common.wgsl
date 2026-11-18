@@ -40,8 +40,13 @@ fn face_texel(a: i32, t: vec3<i32>) -> vec3<i32> {
   }
   return s;
 }
+// Beyond a plane of mirror symmetry a tangential face's field changes sign (B is a pseudovector).
 fn bface(a: i32, t: vec3<i32>) -> f32 {
-  return textureLoad(BF, face_texel(a, t), 0)[a];
+  var s = 1.0;
+  for (var b = 0; b < 3; b++) {
+    if (b != a && t[b] < 0 && sym_lo(b)) { s = -s; }
+  }
+  return s * textureLoad(BF, face_texel(a, t), 0)[a];
 }
 
 #include "mhd/bcell.wgsl"

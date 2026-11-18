@@ -1571,6 +1571,17 @@ times $`2^k`$, a vector's mirrored components zero and the others doubled per mi
 angular momentum's component kept only along the one axis every mirror is normal to.
 **Settling** needs nothing: the star's mass is measured on the grid, which holds its part.
 
+**Magnetic fields.** A field is a pseudovector: across a mirror its normal component is kept
+and its tangential ones change sign, the opposite of the conducting wall a reflecting face
+otherwise is. Every place the field is mirrored (the cell-centered ghosts on both grids, a
+tangential face beyond the plane, a block's ghost faces) takes that parity at a plane of
+symmetry, and the normal face on the plane is a real face, updated from the edge fields on it.
+A setup says its field qualifies (`domain.symmetricField`): its vector potential, an ordinary
+vector, must be odd in its normal component and even in the others across each plane. A field
+of $`\mathbf{A} = (x y^2 f(r), 0, 0)`$ pushing gas about gives, in an octant, the whole box's
+density to $`4\times10^{-7}`$ and $`\nabla\cdot\mathbf{B}`$ at round-off; with a wall's parity
+instead the density is off by $`5\times10^{-3}`$.
+
 **Diagnostics** report the whole configuration: extensive totals times $`2^k`$, momentum and
 the center of mass zero along mirrored axes. Snapshots hold the computed part with its true
 bounds, so yt reads an octant as an octant, and carry the mirrors in their settings.

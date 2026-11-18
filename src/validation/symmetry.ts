@@ -93,6 +93,18 @@ async function energyDrift(sim: Sim | AmrSim, tEnd: number, chunks: number) {
   return { worst, peakT, e0: d0.eTot, mass: d0.mass };
 }
 
+/**
+ * A magnetized blob symmetric under all three mirrors: the field of the vector potential
+ * A = (x y^2 f(r), 0, 0), f a Gaussian, which is odd in its normal component and even in the
+ * others across every plane (a vector's parity, so that B = curl A has a pseudovector's).
+ */
+const magBlob: Problem = {
+  id: 'mag-blob', label: 'Magnetized blob', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
+  bcLo: all(OUTFLOW), bcHi: all(OUTFLOW), gravity: 'off', G: 0, box: 1, tEnd: 0.05,
+  init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 0.1, s: 0 }),
+  mhd: { potential: () => (x, y, z) => [x * y * y * 40 * Math.exp(-(x * x + y * y + z * z) / 0.02), 0, 0] },
+};
+
 export const SYM_TESTS: TestDef[] = [
   {
     id: 'sym-flux',
@@ -187,6 +199,37 @@ export const SYM_TESTS: TestDef[] = [
           whole_drift: w.worst, octant_drift: o.worst, blocks_drift: b.worst, whole_peak: w.peakT, octant_peak: o.peakT, blocks_peak: b.peakT,
           whole_energy: w.e0, octant_energy_unfolded: o.e0, octant_mass_unfolded: o.mass, whole_mass: w.mass,
         },
+      };
+    },
+  },
+  {
+    id: 'sym-mhd',
+    name: 'Mirror symmetry: a magnetic field symmetric under the mirrors',
+    criterion: 'The field of A = (x y^2 f(r), 0, 0) pushing gas about: the octant (32^3, box 0.5) against the whole box (64^3) at t = 0.05, density within 1e-4 at every cell of the octant, magnetic energy within 1e-5 (1e-4 for the octant on unrefined blocks), and div B at round-off in all three',
+    async run(gpu) {
+      const run = (p: Problem, n: number, over: Partial<SimConfig>) =>
+        withSim(gpu, p, n, over, async (sim) => {
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          return { u1: (await sim.readState()).u1, eMag: d.magnetic!.eMag, divB: d.magnetic!.divB };
+        });
+      const w = await run(magBlob, 64, {});
+      const o = await run({ ...mirrored(magBlob, 0.5), symmetry: { axes: MIRRORS, mhd: true } }, 32, { symmetry: MIRRORS });
+      // The octant on blocks too (unrefined, so its cells are the uniform octant's).
+      const b = await withAmr(gpu, { ...mirrored(magBlob, 0.5), symmetry: { axes: MIRRORS, mhd: true } }, 32, { symmetry: MIRRORS, amrLevels: 0 }, async (sim) => {
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        return { eMag: d.magnetic!.eMag, divB: d.magnetic!.divB };
+      });
+      const m = {
+        density_difference: compareCells(o.u1, w.u1, 32, 3, 4, 0),
+        magnetic_energy_difference: Math.abs(o.eMag / w.eMag - 1),
+        blocks_magnetic_energy_difference: Math.abs(b.eMag / w.eMag - 1),
+        div_b_octant: o.divB, div_b_whole: w.divB, div_b_blocks: b.divB, magnetic_energy: w.eMag,
+      };
+      return {
+        pass: m.density_difference < 1e-4 && m.magnetic_energy_difference < 1e-5 && m.blocks_magnetic_energy_difference < 1e-4 && o.divB < 1e-5 && w.divB < 1e-5 && b.divB < 1e-5,
+        metrics: m,
       };
     },
   },

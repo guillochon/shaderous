@@ -217,7 +217,7 @@ fn bc_map(c: vec3<i32>) -> Mapped {
     m.c[a] = bc_ghost_cell(c[a], n[a], k);
     if (bc_wall(k)) {
       m.flip *= bc_vsign(k, a);
-      m.bflip *= bc_bsign(k, a);
+      m.bflip *= bc_bsign_at(k, a, up);
       m.vadd += 2.0 * bc_wall_velocity(k, a, up);
     }
     m.side[a] = bc_side(k, up);

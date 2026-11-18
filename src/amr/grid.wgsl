@@ -89,7 +89,7 @@ fn ghost_src(slot: i32, l: vec3<i32>) -> Src {
     let k = u32(-1 - nb);
     s.l[axis] = bc_ghost_cell(l[axis], BS, k);
     s.flip = bc_vsign(k, axis);
-    s.bflip = bc_bsign(k, axis);
+    s.bflip = bc_bsign_at(k, axis, upper);
     s.side[axis] = bc_side(k, upper);
     s.vadd = 2.0 * bc_wall_velocity(k, axis, upper);
   }

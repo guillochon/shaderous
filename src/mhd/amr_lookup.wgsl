@@ -30,7 +30,7 @@ fn map_cell(level: u32, g0: vec3<i32>) -> GCell {
     o.g[a] = bc_ghost_cell(i, n[a], bc);
     if (bc_wall(bc)) {
       o.flip *= bc_vsign(bc, a);
-      o.bflip *= bc_bsign(bc, a);
+      o.bflip *= bc_bsign_at(bc, a, up);
       o.vadd += 2.0 * bc_wall_velocity(bc, a, up);
     }
     o.side[a] = bc_side(bc, up);
@@ -76,11 +76,16 @@ fn face_map(level: u32, a: i32, g0: vec3<i32>) -> FaceMap {
     if (b != a) { g[b] = map_cell(level, g0).g[b]; }
   }
   var sgn = 1.0;
+  // Beyond a plane of mirror symmetry a tangential face is odd (bc_bsign_at)...
+  for (var b = 0; b < 3; b++) {
+    if (b != a && g0[b] < 0 && sym_lo(b)) { sgn = -sgn; }
+  }
   let i = g0[a];
   if (i < 0 || i > n[a]) {
     let f = bc_ghost_face(i, n[a], select(P.bc_lo[a], P.bc_hi[a], i > n[a]));
     g[a] = f.x;
-    sgn = f32(f.y);
+    // ...and a normal one even.
+    sgn *= select(f32(f.y), 1.0, i < 0 && sym_lo(a));
   }
   return FaceMap(g, sgn);
 }
