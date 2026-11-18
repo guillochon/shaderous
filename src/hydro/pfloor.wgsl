@@ -18,7 +18,8 @@ fn pressure_floor(rho: f32) -> f32 {
 fn baro_state(rho: f32) -> vec2<f32> {
   let pe = eos_pressure(rho, 0.0);
   let pj = jeans_pressure(rho);
-  if (pj > pe && pj >= P.p_floor) {
+  // (Without the Jeans floor pj is zero, which a liquid's negative pressure is below.)
+  if (pj > pe && pj >= P.p_floor && P.jeans_floor > 0.0) {
     return vec2<f32>(pj, sqrt(2.0 * pj / rho));
   }
   let p = max(pe, P.p_floor);

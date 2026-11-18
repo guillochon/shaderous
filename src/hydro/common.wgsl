@@ -84,6 +84,12 @@ struct Clock {
 
 @group(0) @binding(0) var<uniform> P: Params;
 
+// The equation of state's pressure may be zero or negative (eos/liquid.wgsl): then no pass may
+// floor a pressure, divide by one or measure a jump against one. Marked by a negative floor.
+fn p_signed() -> bool {
+  return P.p_floor < 0.0;
+}
+
 // x itself, bit for bit, in a form the compiler cannot see through: XOR with a zero it does not
 // know is zero (P.refine.w). WGSL lets a compiler reassociate floating-point arithmetic (WGSL
 // 15.7.5), and Dawn compiles Metal shaders in relaxed math mode, which does. An expression whose

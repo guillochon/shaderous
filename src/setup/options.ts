@@ -8,7 +8,7 @@
 // tooltip from the rule that disables it.
 import { BOUNDARIES } from '../problems/boundaries';
 import { COOLING_LABELS } from '../cooling/cooling';
-import { EOS_LABELS } from '../eos/eos';
+import { EOS_LABELS, eosHasEnergy } from '../eos/eos';
 import { FUNCTIONS } from './expr';
 import { FLOWS } from './parts/flow';
 import { GRAVITY_MODES, LIMITER_KINDS, RIEMANN_KINDS } from '../problems/types';
@@ -152,7 +152,7 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'symmetric.field': { label: 'A magnetic field symmetric under the mirrors, or none', of: (s) => !!s.domain?.symmetricField || !FACTS.magnetic.of(s) },
   'mesh.adaptive': { label: 'An adaptive mesh', of: (s) => (s.domain?.amr ?? 0) > 0 },
   'physics.eos': { label: 'Equation of state', of: (s) => s.physics?.eos ?? 'ideal', say: (v) => EOS_LABELS[v as keyof typeof EOS_LABELS] ?? String(v) },
-  'eos.energy': { label: 'An equation of state with an energy', of: (s) => (s.physics?.eos ?? 'ideal') !== 'barotropic' },
+  'eos.energy': { label: 'An equation of state with an energy', of: (s) => eosHasEnergy(s.physics?.eos ?? 'ideal') },
   'eos.degenerate': { label: 'The degenerate or tabulated (Helmholtz) equation of state', of: (s) => ['degenerate', 'helmholtz'].includes(s.physics?.eos ?? 'ideal') },
   'physics.gravity': { label: 'Gravity', of: (s) => s.physics?.gravity ?? 'off', say: (v) => ({ off: 'Off', constant: 'Constant', periodic: 'Self, periodic', isolated: 'Self, isolated' })[String(v)] ?? String(v) },
   'gravity.self': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') },
@@ -305,9 +305,11 @@ export const OPTIONS: Option[] = [
 
   // ---- gas ----
   { path: 'physics.eos', label: 'Equation of state', tip: 'How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues', page: 'gas', apply: 'shaders', default: 'ideal', linkKey: 'eos', cfg: 'eos',
-    control: pick(...(Object.keys(EOS_LABELS) as (keyof typeof EOS_LABELS)[]).map((k): Choice => ({ value: k, label: EOS_LABELS[k], ...(k === 'barotropic' ? { excludes: [{ fact: 'parts.star.polytrope', reason: 'Not available with a polytropic star: it needs an equation of state with an energy' }] } : {}) }))) },
+    control: pick(...(Object.keys(EOS_LABELS) as (keyof typeof EOS_LABELS)[]).map((k): Choice => ({ value: k, label: EOS_LABELS[k], ...(!eosHasEnergy(k) ? { excludes: [{ fact: 'parts.star.polytrope', reason: 'Not available with a polytropic star: it needs an equation of state with an energy' }] } : {}) }))) },
   { path: 'physics.eosParams.gamma', label: 'gamma', tip: 'Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one', page: 'gas', control: num(1, 100, { step: 0.05 }), apply: 'live', default: 5 / 3, linkKey: 'gamma', cfg: 'eosParams.gamma' },
   { path: 'physics.eosParams.K', label: 'K (p = K rho^gamma)', tip: 'Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed', page: 'gas', control: num(0, undefined, { factor: 2 }), apply: 'live', linkKey: 'K', cfg: 'eosParams.K', show: { path: 'physics.eos', is: ['barotropic'] } },
+  { path: 'physics.eosParams.liqC', label: 'Sound speed', tip: 'The liquid’s sound speed c₀, a constant: p = c₀² (ρ - ρ₀). It is chosen, not physical: ten times the fastest flow keeps the density within 1% of ρ₀ (a Mach number of 0.1), and the step shrinks in proportion as it grows', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', default: 10, linkKey: 'lc', cfg: 'eosParams.liqC', show: { path: 'physics.eos', is: ['liquid'] } },
+  { path: 'physics.eosParams.liqRho', label: 'Reference density', tip: 'The density ρ₀ at which the liquid’s pressure is zero: p = c₀² (ρ - ρ₀). The liquid should start near it', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', default: 1, linkKey: 'lrho', cfg: 'eosParams.liqRho', show: { path: 'physics.eos', is: ['liquid'] } },
   { path: 'physics.eosParams.arad', label: 'Radiation constant a', tip: 'Radiation pressure a T⁴ / 3 is added to the gas pressure', page: 'gas', control: num(0, undefined, { factor: 2 }), apply: 'live', linkKey: 'arad', cfg: 'eosParams.arad', show: { path: 'physics.eos', is: ['gas_radiation', 'degenerate', 'ionizing'] } },
   { path: 'physics.eosParams.degRho', label: 'Degeneracy density', tip: 'Density at which the electrons’ Fermi momentum reaches mₑc. For a setup with physical units it is set from the composition (about 2×10⁶ g/cm³ for C/O); in code units', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', linkKey: 'degrho', cfg: 'eosParams.degRho', show: { path: 'physics.eos', is: ['degenerate'] } },
   { path: 'physics.eosParams.degP', label: 'Degeneracy pressure scale', tip: 'The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units', page: 'gas', control: num(1e-30, undefined, { factor: 2 }), apply: 'live', linkKey: 'degp', cfg: 'eosParams.degP', show: { path: 'physics.eos', is: ['degenerate'] } },
@@ -405,6 +407,9 @@ export const OPTIONS: Option[] = [
   { path: 'physics.riemann', label: 'Riemann solver', tip: 'How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust', page: 'solver', control: pickOf(RIEMANN_KINDS, ['hllc', 'HLLC'], ['hllclm', 'HLLC, low Mach'], ['hll', 'HLL']), apply: 'shaders', default: 'hllc', linkKey: 'riemann', cfg: 'riemann' },
   { path: 'physics.limiter', label: 'Limiter', tip: 'How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust', page: 'solver', control: pickOf(LIMITER_KINDS, ['koren', 'Third order (Koren)'], ['mc', 'Monotonized central'], ['vanleer', 'van Leer'], ['minmod', 'Minmod']), apply: 'shaders', default: 'koren', linkKey: 'limiter', cfg: 'limiter' },
   { path: 'physics.cfl', label: 'CFL number', tip: 'Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower', page: 'solver', control: num(0.05, 1, { step: 0.05 }), apply: 'live', default: 0.8, linkKey: 'cfl', cfg: 'cfl' },
+  { path: 'physics.pressure', label: 'Pressure', tip: 'How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid', page: 'solver', control: pick({ value: 'explicit', label: 'Explicit' }, { value: 'implicit', label: 'Implicit (solved each step)' }), apply: 'restart', default: 'explicit', linkKey: 'psplit', cfg: 'pressure' },
+  { path: 'physics.pressureCycles', label: 'Pressure V-cycles', tip: 'Implicit pressure: multigrid V-cycles per step. More converge the pressure further, at more cost', page: 'solver', control: num(1, 16, { integer: true, step: 1 }), apply: 'live', default: 4, linkKey: 'pcycles', cfg: 'pressureCycles', show: { path: 'physics.pressure', is: ['implicit'] } },
+  { path: 'physics.acousticCfl', label: 'Acoustic steps per step', tip: 'Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped', page: 'solver', control: num(1, 1e6, { factor: 2 }), apply: 'live', default: 1000, linkKey: 'acfl', cfg: 'acousticCfl', show: { path: 'physics.pressure', is: ['implicit'] } },
 
   // ---- the background the parts are painted on ----
   { path: 'background.rho', label: 'Ambient density', tip: 'Density of the gas that fills the box where no part puts anything else. With stars, the gas around them', page: 'parts', control: num(1e-300, undefined, { factor: 10, quantity: 'density' }), apply: 'restart', default: 1, excludes: [{ fact: 'parts.flow.whole', reason: 'Not used with a flow that fills the box' }] },

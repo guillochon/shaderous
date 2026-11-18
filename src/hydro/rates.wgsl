@@ -32,7 +32,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     comp_use(comp_tex(c));
     let w = prim_from_cons(textureLoad(U1, c, 0), u2);
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
-    var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y + diff_speed(w.w1.x, w.w2.w);
+    // (With implicit pressure the sound speed only sets a ceiling: P.ohm.y is one over the
+    // acoustic steps a step may span, 0 for the explicit scheme. src/sim.ts packParams.)
+    let snd = select(1.0, P.ohm.y, P.ohm.y > 0.0);
+    var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y * snd + diff_speed(w.w1.x, w.w2.w);
     // A spherical run: per axis over its own cell length (none along the azimuth).
     var acc = length(g_load(c));
     if (cylindrical()) {

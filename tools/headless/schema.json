@@ -4,6 +4,7 @@
   "eos": [
    "ideal",
    "barotropic",
+   "liquid",
    "gas_radiation",
    "degenerate",
    "ionizing",
@@ -82,7 +83,7 @@
   {
    "key": "eos",
    "group": "settings",
-   "about": "Equation of state: ideal, barotropic, gas_radiation, degenerate, ionizing, helmholtz"
+   "about": "Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz"
   },
   {
    "key": "gamma",
@@ -93,6 +94,16 @@
    "key": "K",
    "group": "settings",
    "about": "K (p = K rho^gamma)"
+  },
+  {
+   "key": "lc",
+   "group": "settings",
+   "about": "Sound speed"
+  },
+  {
+   "key": "lrho",
+   "group": "settings",
+   "about": "Reference density"
   },
   {
    "key": "arad",
@@ -283,6 +294,21 @@
    "key": "cfl",
    "group": "settings",
    "about": "CFL number"
+  },
+  {
+   "key": "psplit",
+   "group": "settings",
+   "about": "Pressure: explicit, implicit"
+  },
+  {
+   "key": "pcycles",
+   "group": "settings",
+   "about": "Pressure V-cycles"
+  },
+  {
+   "key": "acfl",
+   "group": "settings",
+   "about": "Acoustic steps per step"
   },
   {
    "key": "dampr",

@@ -102,6 +102,9 @@ degenerate electrons. It uses the methods of production simulation codes:
 - equations of state from an ideal gas to degenerate electrons and ionizing hydrogen, and for
   burning white dwarf matter a tabulated electron-positron gas at any degeneracy and
   temperature, in the manner of the Helmholtz equation of state;
+- nearly incompressible flow: a weakly compressible liquid on the same explicit scheme, and for
+  it an implicit pressure solve (multigrid) that takes the timestep from the flow speed instead
+  of the sound speed, on the uniform grid;
 - optically thin cooling, viscosity, thermal conduction, and species carried with the gas,
   whose composition (and each species' own gamma) sets the equation of state cell by cell;
 - nuclear burning from fuel to ash by a single-step Arrhenius reaction, with steady (ZND)

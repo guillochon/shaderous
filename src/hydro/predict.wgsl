@@ -20,6 +20,7 @@
 #include "hydro/region.wgsl"
 #include "hydro/recon.wgsl"
 #include "hydro/predictor.wgsl"
+#include <psplit_grad>
 #include "gravity/gfield.wgsl"
 
 @compute @workgroup_size(WGX, WGY, WGZ)
@@ -42,6 +43,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   g_inner = stencil_inside(c, 1);
   let q = load_q(c);
+  if (PSPLIT) { g_pgrad = pp_gradient(c); }
   // In 2D the layer is its own neighbor along z.
   var zm = q;
   var zp = q;

@@ -368,6 +368,7 @@ float64 TypeScript mirror for testing (`tests/unit/eos*.test.ts`).
 |---|---|---|
 | **Ideal gas** (`ideal.wgsl`) | $`p = (\gamma - 1)\rho e`$ | $`c_s^2 = \gamma p/\rho`$ |
 | **Barotropic** (`barotropic.wgsl`) | $`p = K\rho^{\Gamma}`$ (isothermal for $`\Gamma = 1`$) | The energy equation is not used; $`\rho e`$ follows the density; HLL fluxes |
+| **Liquid** (`liquid.wgsl`) | $`p = c_0^2(\rho - \rho_0)`$ | Weakly compressible: a constant, chosen sound speed; the pressure takes both signs; no energy equation; HLLC fluxes (below) |
 | **Gas + radiation** (`gas_radiation.wgsl`) | $`p = \dfrac{\rho k T}{\mu m_u} + \tfrac13 a T^4`$ | $`T`$ is the root of $`\rho e = \dfrac{\rho kT}{(\gamma - 1)\mu m_u} + aT^4`$, from 8 Newton steps started above the root (`quartic.wgsl`) |
 | **Degenerate** (`degenerate.wgsl`) | $`p = p_\text{deg}(\rho) + p_\text{ion} + p_\text{rad}`$ | Zero-temperature electrons at any degree of relativity ([Chandrasekhar 1935][Chandrasekhar1935]), plus ideal ions and radiation |
 | **White dwarf matter** (`helmholtz.wgsl`) | $`p = p_\text{deg}(\rho) + p_{e,\text{th}} + p_\text{ion} + p_\text{rad} + p_\text{C}`$ | The electron-positron gas at any degeneracy and temperature from a table of its free energy, in the manner of Helmholtz ([Timmes & Swesty 2000][TimmesSwesty2000]); ideal ions, radiation, and the ions' Coulomb energy |
@@ -437,6 +438,123 @@ temperatures, where $`\Gamma`$ is near one.
 where $`X`$ is the hydrogen mass fraction, and the internal energy includes $`\chi`$ per ionization. $`T`$ comes from Newton's method kept
 inside a bracket. The adiabatic index $`\Gamma_1`$ is computed exactly and dips below 1.3 in the
 ionization zone.
+
+**Weakly compressible liquid.** For flow that should be incompressible, the explicit scheme is
+kept and the fluid is given an artificial sound speed $`c_0`$, about ten times its fastest flow
+(the approach of smoothed-particle and lattice-Boltzmann codes):
+
+```math
+p = c_0^2\,(\rho - \rho_0), \qquad c_s = c_0 .
+```
+
+The density then departs from $`\rho_0`$ by about $`M^2`$ ($`0.78\,M^2`$ in the Gresho vortex,
+at Mach numbers from 0.1 to 0.01), which is the error of calling the flow incompressible; the
+diagnostics panel shows the largest departure. The cost is the timestep, which follows $`c_0`$:
+$`1 + 1/M`$ times the steps the flow alone would need.
+
+- *Why not an isothermal gas with a large sound speed.* Its pressure is $`c_0^2\rho`$, a hundred
+  times the differences of order $`\rho v^2`$ that drive the flow at Mach 0.1. The linear form
+  stores only the departure, as one exact subtraction of two nearby single-precision
+  densities.
+- *The pressure takes both signs.* A run with this equation of state has a negative pressure
+  floor, which the shared passes read as "do not floor a pressure, divide by one, or judge a
+  jump against one" (`p_signed`, `hydro/common.wgsl`): the shock detector and the limiter's
+  smoothness scale take $`\rho c_0^2`$ in its place, the predictor's positivity check tests the
+  density alone, and the refinement indicator measures pressure ripples against
+  $`\rho c_0^2`$. Magnetic fields, self-gravity and comoving coordinates are refused with it.
+- *HLLC, not HLL.* A barotropic gas has no contact wave, and takes HLL. But HLL also has no
+  shear wave: it damps a jump in the transverse velocity at the sound speed, which in slow
+  flow is most of the dissipation. A Gresho vortex at Mach 0.1 on $`64^2`$ cells loses 8.4% of
+  its kinetic energy in four turns with HLL on scaled velocity jumps and 2.2% with the
+  low-Mach HLLC. The liquid therefore keeps HLLC (blended toward HLL beside flagged shocks, as
+  for a gas with an energy), and then loses what an ideal gas at the same Mach number loses, to
+  four digits: 1.0%, 2.5% and 6.0% by $`t = 2`$ at Mach 0.1, 0.03 and 0.01.
+- The "internal energy" carried is the elastic energy of compression,
+  $`\rho_0 c_0^2\,[(1+x)\ln(1+x) - x]`$ with $`x = p/\rho_0 c_0^2`$, to third order in $`x`$, so
+  that the total energy is conserved as far as the scheme conserves it. The temperature is
+  shown as $`c_0^2`$.
+
+Measured (`src/validation/liquid.ts`, an Apple GPU): the viscous Taylor-Green vortex decays at
+1.0035 times $`4\nu k^2`$ on 64 cells per wavelength; the lid-driven cavity at Reynolds number
+100 on $`128^2`$ cells is within 0.005 of the lid speed of [Ghia, Ghia & Shin (1982)][Ghia1982]
+on the vertical centerline; on a three-level mesh a vortex keeps its mass to $`10^{-6}`$ and its
+momentum to $`10^{-7}`$ of the sum of its magnitudes; the cylinder wake preset at Reynolds number
+100 sheds at a Strouhal number of 0.174 with 16 cells across the cylinder (0.165 in an
+unbounded stream; the box's periodic sides are 16 diameters apart). Presets: Taylor-Green
+vortex, double shear layer, cylinder wake, lid-driven cavity (liquid), Gresho vortex.
+
+**Implicit pressure for the liquid.** With the pressure explicit, a liquid at Mach number
+$`M`$ takes $`1 + 1/M`$ times the steps its flow needs. The implicit step (`src/pressure/`,
+the setting *Pressure: implicit*, `psplit=implicit` in a link) takes the flow's own: advection,
+viscosity and driving are explicit as before, and the sound is taken by backward Euler,
+
+```math
+\rho' = \rho - \Delta t\,\nabla\cdot\mathbf{m}', \qquad
+\mathbf{m}' = \mathbf{m}^* - \Delta t\,\nabla p', \qquad
+p' = p(\rho) + c_0^2\,(\rho' - \rho),
+```
+
+with $`\mathbf{m}^*`$ the momentum the explicit update left. Eliminating $`\rho'`$ and
+$`\mathbf{m}'`$ gives one equation for the new pressure,
+
+```math
+\frac{p'}{c_0^2\,\Delta t^2} - \nabla^2 p' = \frac{p(\rho)}{c_0^2\,\Delta t^2} - \frac{\nabla\cdot\mathbf{m}^*}{\Delta t},
+```
+
+which becomes the pressure Poisson equation of a projection method as $`c_0 \to \infty`$. A
+step is then:
+
+1. *Rates and clock.* The sound speed enters the timestep divided by the acoustic steps a step
+   may span (a setting, 1000 by default), so it only bounds the step of a liquid at rest.
+2. *Predictor.* The half step of advection alone: the acoustic terms are dropped, and the
+   velocity takes the gradient of the last step's solved pressure in their place. Without that
+   gradient the face velocities are off by half a step of the pressure force, and a Gresho
+   vortex on $`32^2`$ cells keeps 0.78 of its kinetic energy by $`t = 2`$ where it keeps 0.97
+   with it (float64 prototype, `src/reference/psplit.ts`).
+3. *Update,* with the advective flux (`hydro/riemann/advect.wgsl`): the mean of the two
+   sides' $`(\rho, \rho\mathbf{v}, E)\,v_n`$ less a local Lax-Friedrichs term of speed
+   $`|v_n|`$. Between a state and its image in a wall it is zero.
+4. *Source* (`pressure/source.wgsl`): the right-hand side, from the old density and the
+   divergence of face momenta (each the mean of its two cells'), and the finest level's
+   coefficients.
+5. *Solve* (`pressure/multigrid.ts`): V-cycles, 4 by default, warm-started. Red-black
+   Gauss-Seidel, restriction by averaging, trilinear prolongation, as for gravity (§13), with
+   three differences. The operator is $`\alpha p - \nabla\cdot(\beta\nabla p)`$ with a texel
+   of coefficients per cell on every level: a face nothing crosses (a wall of the box, the
+   surface of an obstacle, the face of an inlet) has $`\beta = 0`$, and a coarse face takes the
+   mean of the fine faces that tile it, so obstacles reach every level with no mask. The
+   levels are one cell deep in 2D. And where no face of the box is open, the coarsest level
+   sets the mean of the pressure from the sum of the equation, which Gauss-Seidel would only
+   creep toward when $`\alpha h^2`$ is small. An open (outflow) face holds $`p = 0`$.
+6. *Correct* (`pressure/correct.wgsl`): the momentum takes the difference of face pressures
+   and the density the difference of face mass fluxes $`\bar m^*_f - \Delta t\,\partial_n p'`$,
+   so mass and momentum are conserved to round-off. The density the explicit update advected is
+   not used.
+
+For a gas whose pressure is a function of its density the mass flux has to be corrected like
+this: the published form of the method ([Kwatra et al. 2009][Kwatra2009]), which leaves the
+density as advection made it, is explicit in such a gas's pressure and unstable for it
+(`tests/unit/psplit.test.ts`). An ideal gas would take the published form; it is not built
+(`plans/incompressible.md` 4.2.1 has the prototype's findings on it).
+
+Measured (`src/validation/psplit.ts`, an Apple GPU): a Gresho vortex on $`64^2`$ cells to
+$`t = 2`$ takes 212 steps at Mach 0.1, 0.01 and 0.001 alike, where the explicit scheme takes
+3 411 and 32 198 at the first two (and by its timestep's scaling ten times that again at the third), and keeps 0.9922 of its kinetic energy at each (explicit, Mach 0.1:
+0.9896), with the density within $`0.8\,M^2`$ of the reference. The Taylor-Green vortex decays
+at 1.0026 times the exact rate in 237 steps (explicit: 1.0035 in 1 837). A sound wave resolved
+at an acoustic Courant number of 0.5 returns after a period within 0.24% of a wavelength at
+0.858 of its amplitude, which is backward Euler's damping; at a Courant number of 10 it is
+damped to 0.12. The solver on its own reaches a manufactured solution to $`10^{-5}`$ in eight
+cycles from zero, with an obstacle and variable coefficients, cutting the residual 5 times a
+cycle in 2D.
+
+Limits. The liquid only, on a uniform Cartesian grid, without gravity, species, cooling or
+frames (each is refused with the reason). First order in time. The number of V-cycles is
+fixed: there is no convergence gate yet. And on small grids the step costs more than it
+saves: the $`128^2`$ cavity at Reynolds number 100 takes a third of the explicit scheme's steps
+(viscosity sets its step, not the flow) and four times its wall-clock time, because a
+V-cycle's many small passes cost more than its cells. It pays where the Mach number is low or
+the grid large.
 
 ## 10. Optically thin cooling and heating
 
@@ -2120,7 +2238,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 55 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 136 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -2131,7 +2249,7 @@ vortex, the well-balanced column, AMR versions of the shock problems, flux match
 levels and time bins, the sphere potential, the Jeans instability ([Jeans 1902][Jeans1902]), a
 polytrope, a cold white dwarf, the Evrard collapse ([Evrard 1988][Evrard1988]), tidal
 disruption, cooling, viscosity, conduction, sinks, binary orbits, the equations of state, HDF5
-round trips, GPU against CPU reference, and the MHD tests of §21. Each test's pass criterion is printed next to its
+round trips, GPU against CPU reference, the weakly compressible liquid and its implicit pressure (§9), and the MHD tests of §21. Each test's pass criterion is printed next to its
 result.
 
 ---
@@ -2161,6 +2279,7 @@ result.
 [Jeans1902]: https://doi.org/10.1098/rsta.1902.0012
 [Kappeli2014]: https://doi.org/10.1016/j.jcp.2013.11.028
 [Koren1993]: https://openalex.org/W2125064741
+[Kwatra2009]: https://doi.org/10.1016/j.jcp.2009.02.027
 [Koyama2002]: https://doi.org/10.1086/338978
 [EP88]: https://doi.org/10.1016/0045-7930(88)90013-8
 [Federrath2010]: https://doi.org/10.1051/0004-6361/200912437
@@ -2233,6 +2352,7 @@ result.
 - Koyama, H., & Inutsuka, S. (2002). An Origin of Supersonic Motions in Interstellar Clouds. ApJL 564, L97. [doi:10.1086/338978](https://doi.org/10.1086/338978)
 - Koyama, H., & Inutsuka, S. (2004). The Field Condition: A New Constraint on Spatial Resolution in Simulations of the Nonlinear Development of Thermal Instability. ApJL 602, L25. [doi:10.1086/382478](https://doi.org/10.1086/382478)
 - Krumholz, M. R., McKee, C. F., & Klein, R. I. (2004). Embedding Lagrangian Sink Particles in Eulerian Grids. ApJ 611, 399. [doi:10.1086/421935](https://doi.org/10.1086/421935)
+- Kwatra, N., Su, J., Grétarsson, J. T., & Fedkiw, R. (2009). A method for avoiding the acoustic time step restriction in compressible flow. Journal of Computational Physics 228, 4146. [doi:10.1016/j.jcp.2009.02.027](https://doi.org/10.1016/j.jcp.2009.02.027)
 - Löhner, R. (1987). An adaptive finite element scheme for transient problems in CFD. Computer Methods in Applied Mechanics and Engineering 61, 323. [doi:10.1016/0045-7825(87)90098-3](https://doi.org/10.1016/0045-7825(87)90098-3)
 - Plewa, T., & Müller, E. (1999). The consistent multi-fluid advection method. A&A 342, 179. [arXiv:astro-ph/9807241](https://arxiv.org/abs/astro-ph/9807241)
 - Plummer, H. C. (1911). On the problem of distribution in globular star clusters. MNRAS 71, 460. [doi:10.1093/mnras/71.5.460](https://doi.org/10.1093/mnras/71.5.460)

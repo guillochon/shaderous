@@ -42,6 +42,8 @@ import { RefMhd } from '../reference/mhd';
 import { setMhdScratchBytes } from '../mhd/amr_mhd';
 import { BS, PAD as PAD_BLOCK } from '../amr/tree';
 import { FRAME_TESTS } from './frames';
+import { cavityError, GHIA_RE100, LIQUID_TESTS } from './liquid';
+import { PSPLIT_TESTS } from './psplit';
 
 export interface TestResult {
   id: string;
@@ -3776,31 +3778,12 @@ export const TESTS: TestDef[] = [
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
-      // Ghia, Ghia & Shin (1982), Table I, Re = 100: u along the vertical line through the center.
-      const GHIA: [number, number][] = [
-        [0.9766, 0.84123], [0.9688, 0.78871], [0.9609, 0.73722], [0.9531, 0.68717], [0.8516, 0.23151], [0.7344, 0.00332], [0.6172, -0.13641],
-        [0.5, -0.20581], [0.4531, -0.2109], [0.2813, -0.15662], [0.1719, -0.1015], [0.1016, -0.06434], [0.0703, -0.04775], [0.0625, -0.04192], [0.0547, -0.03717],
-      ];
       const n = 128;
       await withSim(gpu, problemById('lid-driven-cavity'), n, { ndim: 2, tEnd: 12 }, async (sim) => {
         await sim.runToEnd(64);
-        const { u1 } = await sim.readState();
-        // u on x = 0.5, between columns n/2 - 1 and n/2, with the walls' values at the ends.
-        const ys = [0];
-        const us = [0];
-        for (let j = 0; j < n; j++) {
-          const at = (i: number) => u1[4 * (j * n + i) + 1] / u1[4 * (j * n + i)];
-          ys.push((j + 0.5) / n);
-          us.push(0.5 * (at(n / 2 - 1) + at(n / 2)));
-        }
-        ys.push(1);
-        us.push(1);
-        const interp = (y: number) => {
-          const k = ys.findIndex((v) => v >= y);
-          return us[k - 1] + ((us[k] - us[k - 1]) * (y - ys[k - 1])) / (ys[k] - ys[k - 1]);
-        };
-        m.cavity_max_error = Math.max(...GHIA.map(([y, u]) => Math.abs(interp(y) - u)));
-        m.cavity_min_u = Math.min(...us);
+        const c = cavityError((await sim.readState()).u1, n, GHIA_RE100);
+        m.cavity_max_error = c.error;
+        m.cavity_min_u = c.minU;
         pass &&= m.cavity_max_error < 0.015;
       });
 
@@ -3942,6 +3925,10 @@ export const TESTS: TestDef[] = [
   },
   // Non-inertial frames and coordinate systems (validation/frames.ts).
   ...FRAME_TESTS,
+  // The weakly compressible liquid (validation/liquid.ts).
+  ...LIQUID_TESTS,
+  // Implicit pressure (validation/psplit.ts).
+  ...PSPLIT_TESTS,
 ];
 
 export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {

@@ -20,6 +20,11 @@ for (const id of PRESET_IDS) {
 
 /** Parameters that only act with another switched on: what to switch on to try them. */
 const WITH: Record<string, Record<string, boolean>> = { 'field-loop.rhoIn': { dense: true } };
+/**
+ * Parameters that only act with a gas that carries an energy, where their preset's does not: the
+ * slow flows' Mach number sets an ideal gas's pressure, and a liquid has its own sound speed.
+ */
+const WITH_GAS = new Set(['gresho.mach', 'taylor-green.mach', 'shear-layers.mach']);
 
 /** Everything a setup's flow decides, at sample points: the gas, the field, the burning and the heat. */
 function fingerprint(spec: SetupSpec): string {
@@ -90,13 +95,17 @@ describe('the built-in flows', () => {
         }
         const doc = cloneSetup(spec);
         const before = cloneSetup(spec);
-        for (const d of [doc, before]) Object.assign(d.parts![index], WITH[`${def.name}.${key}`] ?? {});
+        const gas = WITH_GAS.has(`${def.name}.${key}`);
+        for (const d of [doc, before]) {
+          Object.assign(d.parts![index], WITH[`${def.name}.${key}`] ?? {});
+          if (gas) d.physics = { ...d.physics, eos: 'ideal' };
+        }
         (doc.parts![index] as FlowPart)[key] = next;
         // The edited document is still one the reader takes as written.
         const read = readSetup(doc);
         expect(read.report.error, `${def.name}.${key}`).toBeUndefined();
         expect(read.report.notes, `${def.name}.${key}`).toEqual([]);
-        expect(fingerprint(read.spec!) !== (WITH[`${def.name}.${key}`] ? fingerprint(before) : base), `${def.name}.${key} = ${next} changes something`).toBe(true);
+        expect(fingerprint(read.spec!) !== (WITH[`${def.name}.${key}`] || gas ? fingerprint(before) : base), `${def.name}.${key} = ${next} changes something`).toBe(true);
       }
     });
   }

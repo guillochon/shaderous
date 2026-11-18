@@ -21,6 +21,9 @@ const DEFAULT_SLOTS: Slots = {
   debris: 'debris/debris_off.wgsl',
   // An inertial frame (gravity/frame_off.wgsl) unless hydroSlots says otherwise.
   frame: 'gravity/frame_off.wgsl',
+  // The pressure in the explicit fluxes unless hydroSlots says implicit (hydro/predictor.wgsl).
+  psplit: 'const PSPLIT = false;\n',
+  psplit_grad: 'pressure/predict_off.wgsl',
   volume: 'render/volume_uniform.wgsl',
   flag_species: 'fn species_indicator(c: vec3<i32>) -> f32 { return 0.0; }\n',
   flag_burn: 'fn burn_indicator(c: vec3<i32>, dx: f32) -> f32 { return 0.0; }\n',

@@ -115,6 +115,10 @@ export interface PhysicsSpec {
   riemann?: RiemannKind;
   limiter?: LimiterKind;
   cfl?: number;
+  /** how the pressure acts: in the explicit fluxes, or solved for each step (SimConfig.pressure) */
+  pressure?: 'explicit' | 'implicit';
+  pressureCycles?: number;
+  acousticCfl?: number;
   floors?: { rho?: number; p?: number };
   fluff?: { rho?: number; u?: number; v?: number; va?: number };
   frame?: (typeof FRAMES)[number];

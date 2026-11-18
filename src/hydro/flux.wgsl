@@ -72,7 +72,12 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
 // and kr are the two cells' composition moments.
 fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>) -> Flux {
   var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
-  if (!EOS_HAS_ENERGY) { w = 1.0; }   // no contact wave to resolve (HLLC was tried: no different)
+  // A barotropic gas takes HLL: it has no contact wave to resolve (HLLC was tried on its
+  // collapse problems: no different). A liquid keeps HLLC, for the shear wave: HLL damps a jump
+  // in the transverse velocity at the sound speed, and a Gresho vortex at Mach 0.1 on 64 x 64
+  // cells then loses 8.4% of its kinetic energy in four turns where HLLC loses 2.2%
+  // (plans/incompressible.md, 2.4 and 3.3).
+  if (!EOS_HAS_ENERGY && !p_signed()) { w = 1.0; }
   // Neither face state may fall below half the smaller of the two cells' own values.
   let lo = 0.5 * min(vec2<f32>(l.a.x, l.b.x), vec2<f32>(r.a.x, r.b.x));
   comp_use(kl);

@@ -1,0 +1,24 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "lid-driven-cavity-liquid",
+  "extends": "lid-driven-cavity",
+  "variant": "Liquid, Reynolds number 1000",
+  "blurb": "A liquid in a square box with no-slip walls, its lid sliding to the right at speed 1, at Reynolds number 1000 (viscosity 0.001): a primary vortex fills the box and smaller ones sit in the lower corners, the steady state that Ghia, Ghia & Shin (1982) tabulated. The liquid's sound speed is 10 (Mach 0.1), so its density stays within a percent.",
+  "physics": {
+    "eos": "liquid",
+    "eosParams": {
+      "liqRho": 1,
+      "liqC": 10
+    },
+    "viscosity": 0.001
+  },
+  "background": {
+    "rho": 1,
+    "p": 0
+  },
+  "run": {
+    "tEnd": 60,
+    "checkpointDt": 2
+  }
+}

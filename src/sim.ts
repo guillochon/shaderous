@@ -1,5 +1,5 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
-import { FACE_KEYS, noWallVelocity, PERIODIC, REFLECT, type WallVelocity } from './problems/boundaries';
+import { FACE_KEYS, noWallVelocity, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT, type WallVelocity } from './problems/boundaries';
 import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareHelmholtz } from './eos/helmholtz';
 import { assemble, shaderFiles } from './gpu/shaders';
@@ -13,7 +13,8 @@ import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
 import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
-import { comovingEosSlot, defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
+import { comovingEosSlot, defaultEosParams, eosHasEnergy, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
+import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from './pressure/multigrid';
 import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
@@ -158,6 +159,20 @@ export interface SimConfig {
    * configuration. configFor keeps only the axes the problem allows (none along z in 2D).
    */
   symmetry: [boolean, boolean, boolean];
+  /**
+   * How the pressure acts (plans/incompressible.md, stage 2). 'explicit': in the fluxes, the
+   * timestep following the sound speed. 'implicit': advection is explicit and the pressure is
+   * solved for each step (src/pressure), so the timestep follows the flow; for the liquid
+   * equation of state on a uniform grid (implicitUnsupported).
+   */
+  pressure: 'explicit' | 'implicit';
+  /** Implicit pressure: multigrid V-cycles per step (warm-started). */
+  pressureCycles: number;
+  /**
+   * Implicit pressure: the most acoustic steps one step may span. The sound speed enters the
+   * timestep divided by this, which is what bounds the step of a liquid at rest.
+   */
+  acousticCfl: number;
 }
 
 /** One cell of the grid as the query tool reads it (Simulation.probe). */
@@ -385,6 +400,9 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     // units; docs/numerics.md section 22.)
     gravEnergyFlux: problem.geometry !== 'spherical',
     wellBalanced: true,
+    pressure: 'explicit',
+    pressureCycles: 4,
+    acousticCfl: 1000,
     amrLevels: 0,
     amrBudget: 0,
     timeBins: 0,
@@ -466,6 +484,8 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
 export function refusal(c: SimConfig): string | null {
   const why: [string, string | null][] = [
     ['MHD', mhdOn(c) ? mhdUnsupported(c) : null],
+    ['Liquid', c.eos === 'liquid' ? liquidUnsupported(c) : null],
+    ['Implicit pressure', implicitPressure(c) ? implicitUnsupported(c) : null],
     ['Mirror symmetry', symmetryUnsupported(c)],
     ['Comoving coordinates', cosmologyUnsupported(c)],
     ['Shearing box', shearUnsupported(c)],
@@ -474,6 +494,39 @@ export function refusal(c: SimConfig): string | null {
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
+}
+
+/**
+ * Why a run of the weakly compressible liquid (eos/liquid.wgsl) cannot go as configured, or
+ * null. Its pressure takes both signs, which the hydro passes allow for (p_signed) and the MHD
+ * passes, the self-gravity closures and comoving coordinates do not.
+ */
+export function liquidUnsupported(c: SimConfig): string | null {
+  if (c.problem.mhd) return 'a magnetic field is not available with the liquid equation of state';
+  if (isSelfGravity(c.gravity)) return 'self-gravity is not available with the liquid equation of state';
+  if (c.problem.cosmology) return 'comoving coordinates are not available with the liquid equation of state';
+  if (!(c.eosParams.liqRho > 0 && c.eosParams.liqC > 0)) return 'the liquid needs a reference density and a sound speed above zero';
+  return null;
+}
+
+/** The run solves for its pressure each step (SimConfig.pressure). */
+export const implicitPressure = (c: SimConfig): boolean => c.pressure === 'implicit';
+
+/**
+ * Why a run cannot take implicit pressure as configured, or null. What is built is the liquid's
+ * form (plans/incompressible.md 4.2.1) on a uniform Cartesian grid, with any of the box faces,
+ * obstacles, inflows, viscosity and driving.
+ */
+export function implicitUnsupported(c: SimConfig): string | null {
+  if (c.eos !== 'liquid') return 'it is built for the liquid equation of state only, so far';
+  if (c.amrLevels > 0) return 'it is not available on the adaptive mesh yet';
+  if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'it is not available in axisymmetric or spherical runs';
+  if (c.gravity !== 'off' || uniformField(c).some((g) => g !== 0) || c.problem.masses) return 'gravity is not available with it yet';
+  if (c.problem.rotation || c.problem.shear || c.problem.frame) return 'rotating frames and shearing boxes are not available with it';
+  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
+  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available with it yet (the correction changes the density they ride on)';
+  if (c.cooling !== 'off' || c.problem.damping) return 'cooling and damping zones are not available with it';
+  return null;
 }
 
 export { spherical } from './spherical';
@@ -608,7 +661,11 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
   return {
     // Comoving coordinates: the module behind wrappers that convert to proper densities.
     eos: cosmologyOf(c) ? comovingEosSlot(c.eos, shaderFiles) : EOS_MODULES[c.eos],
-    riemann: `hydro/riemann/${c.riemann}.wgsl`,
+    // With implicit pressure the flux is advection's alone (hydro/riemann/advect.wgsl), and the
+    // predictor takes the last solve's pressure gradient (hydro/predictor.wgsl).
+    riemann: implicitPressure(c) ? 'hydro/riemann/advect.wgsl' : `hydro/riemann/${c.riemann}.wgsl`,
+    psplit: `const PSPLIT = ${implicitPressure(c)};\n`,
+    psplit_grad: implicitPressure(c) ? 'pressure/predict_on.wgsl' : 'pressure/predict_off.wgsl',
     limiter: `hydro/limiters/${c.limiter}.wgsl`,
     cooling: COOLING_MODULES[c.cooling],
     // Which diffusive fluxes are compiled in (hydro/diffusion.wgsl); their strengths are in P.diff.
@@ -650,7 +707,7 @@ export const rotating = (c: SimConfig): boolean => rotationOf(c).some((x) => x !
 const NO_DAMPING = 'const DAMPING = false;\nfn damping_target(x: vec3<f32>) -> DampTarget { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }\n';
 
 /** Thermal conduction is on: it needs a coefficient and an equation of state with an energy. */
-export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && c.eos !== 'barotropic';
+export const conducts = (c: SimConfig): boolean => c.conductivity > 0 && eosHasEnergy(c.eos);
 
 /** Which diffusive fluxes the shaders must be built with: a change here means rebuilding them. */
 export const diffusionKey = (c: SimConfig): string => `${c.viscosity > 0}/${conducts(c)}/${resists(c)}`;
@@ -1036,7 +1093,7 @@ export function packParams(
   // with the potential's differences, while the kick takes the proper field grad(phi) / a, so
   // there the two disagreed by a factor a, and in cold gas E - KE was that disagreement. The kick
   // form adds the kinetic energy the kick adds, exactly.)
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && c.eos !== 'barotropic' && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && eosHasEnergy(c.eos) && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -1044,7 +1101,8 @@ export function packParams(
       c.G,
       x.rhoMean,
       c.rhoFloor,
-      c.pFloor,
+      // A liquid's pressure takes both signs: a negative floor says so (hydro/common.wgsl p_signed).
+      c.eos === 'liquid' ? -1e30 : c.pFloor,
       c.etaDual,
       Math.min(Number.isFinite(c.tEnd) ? c.tEnd : 1e30, c.tStop ?? 1e30),
       1e30,
@@ -1058,7 +1116,8 @@ export function packParams(
   f.set([Math.max(0, c.viscosity), Math.max(0, c.conductivity), Math.max(0, c.dampRadius), Math.max(0, c.dampRate)], 56);
   f.set([Math.max(0, c.refineRho), Math.max(0, c.refineDense), c.tFrame ?? 1e30, 0], 60);
   f.set(eosConstants2(c.eos, c.eosParams), 64);
-  f.set([resists(c) ? c.resistivity : 0, 0, 0, 0], 68);
+  // (The second: one over the acoustic steps a step may span with implicit pressure, hydro/rates.wgsl.)
+  f.set([resists(c) ? c.resistivity : 0, implicitPressure(c) ? 1 / Math.max(c.acousticCfl, 1) : 0, 0, 0], 68);
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
   f.set([...domainLo(c), 0], 96);
   f.set(rotationOf(c), 100);
@@ -1236,6 +1295,12 @@ export class Sim implements Simulation {
   /** The clock for previewDt: leaves the driving alone (hydro/clock.wgsl ADVANCE_DRIVE). */
   private pClockPreview!: GPUComputePipeline;
   private pCorrect!: GPUComputePipeline;
+  /** Implicit pressure (SimConfig.pressure): its solver, and the source and correction passes. */
+  prs?: PressureSolver;
+  private pPsSource?: GPUComputePipeline;
+  private pPsCorrect?: GPUComputePipeline;
+  private gPsSource: GPUBindGroup[] = [];
+  private gPsCorrect: GPUBindGroup[] = [];
   private pPredict: RegionPass | null = null;
   private pField!: GPUComputePipeline;
   private pBhDrift!: GPUComputePipeline;
@@ -1453,6 +1518,31 @@ export class Sim implements Simulation {
     diag.catch(() => {}); // a failure is reported where it is awaited, below
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
+    // Implicit pressure: the solver (kept across rebuilds, with its warm start) and its passes.
+    if (implicitPressure(c)) {
+      const kind = (b: number) => (b === PERIODIC ? PF_PERIODIC : b === OUTFLOW || b === OUTFLOW_ONLY ? PF_OPEN : PF_CLOSED);
+      this.prs ??= await PressureSolver.create(d, [this.nx, this.ny, this.nz], this.dx, c.bcLo.map(kind), c.bcHi.map(kind));
+      [this.pPsSource, this.pPsCorrect] = await Promise.all([
+        computePipeline(d, assemble('pressure/source.wgsl', slots), 'pressure source'),
+        computePipeline(d, assemble('pressure/correct.wgsl', slots), 'pressure correct'),
+      ]);
+      const prs = this.prs;
+      this.gPsSource = [0, 1].map((p) =>
+        bindGroup(d, this.pPsSource!, {
+          0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[1 - p][0]), 4: v(this.state[1 - p][1]),
+          5: v(prs.levels[0].rhs), 6: v(prs.levels[0].coef), 7: v(prs.rho0), 8: v(prs.p), ...k,
+        }),
+      );
+      this.gPsCorrect = [0, 1].map((p) =>
+        bindGroup(d, this.pPsCorrect!, {
+          0: this.params, 1: this.clock, 2: v(this.state[1 - p][0]), 3: v(this.state[1 - p][1]), 4: v(prs.p), 5: v(prs.rho0),
+          6: v(this.state[p][0]), 7: v(this.state[p][1]), ...k,
+        }),
+      );
+    } else {
+      this.prs?.destroy();
+      this.prs = undefined;
+    }
     // A magnetized run steps with the MHD passes alone: the hydro update (the slowest pass of all
     // to compile) and prediction are not built for it.
     const hydro = !c.problem.mhd;
@@ -1497,6 +1587,7 @@ export class Sim implements Simulation {
           4: v(this.gfield),
           5: v(this.pred[0]),
           6: v(this.pred[1]),
+          ...((this.prs ? { 30: v(this.prs.p) } : {}) as Record<number, GPUTextureView>),
           ...k,
         }),
       );
@@ -1991,7 +2082,18 @@ export class Sim implements Simulation {
         this.encodeMassKick(pass, 1 - p, true);
       }
       if (this.fieldOn && !this.sphMono) this.encodeField(pass);
-      if (anyGravity) {
+      if (this.prs) {
+        // Implicit pressure: the equation from the old state (parity p) and the advected one
+        // (parity 1 - p), the solve, and the correction back into parity p.
+        pass.setPipeline(this.pPsSource!);
+        pass.setBindGroup(0, this.gPsSource[p]);
+        this.dispatch(pass);
+        this.prs.encodeCoarsen(pass);
+        for (let v = 0; v < this.cfg.pressureCycles; v++) this.prs.encodeVCycle(pass);
+        pass.setPipeline(this.pPsCorrect!);
+        pass.setBindGroup(0, this.gPsCorrect[p]);
+        this.dispatch(pass);
+      } else if (anyGravity) {
         // Second half kick, with the acceleration of the updated state.
         pass.setPipeline(this.pCorrect);
         pass.setBindGroup(0, this.gCorrect[p]);
@@ -2505,6 +2607,7 @@ export class Sim implements Simulation {
     this.comp?.destroy();
     this.speciesHalf?.destroy();
     this.massFlux?.destroy();
+    this.prs?.destroy();
     this.debrisBuf?.destroy();
     this.mg?.destroy();
     this.mhd?.destroy();

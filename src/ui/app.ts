@@ -23,7 +23,7 @@ import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt, sizedProblem } from '../problems/types';
-import { EOS_LABELS, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
+import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { sphFromView, sphToView, spherical } from '../spherical';
@@ -541,13 +541,13 @@ $('tools').innerHTML =
 
 function syncTools() {
   starDefaults();
-  // A barotropic gas has no temperature of its own to change.
-  const noTemp = cfg?.eos === 'barotropic';
+  // A gas without an energy of its own (barotropic, liquid) has no temperature to change.
+  const noTemp = !!cfg && !eosHasEnergy(cfg.eos);
   if (noTemp && tool === 'temperature') tool = null;
   // A star needs self-gravity (3D only), and an equation of state that leaves K free.
   const noStar = cfg?.ndim === 2
     ? 'A star needs self-gravity, which a 2D run does not have'
-    : noTemp ? 'The barotropic equation of state fixes the pressure of the gas, so a star’s cannot be chosen' : '';
+    : noTemp ? 'This equation of state fixes the pressure of the gas, so a star’s cannot be chosen' : '';
   if (noStar && tool === 'star') tool = null;
   const noField = !cfg?.problem.mhd;
   if (noField && tool !== null && FIELD_TOOLS.includes(tool)) tool = null;
@@ -559,7 +559,7 @@ function syncTools() {
     b.hidden = noField && FIELD_TOOLS.includes(t.kind);
     b.setAttribute('aria-pressed', String(tool === t.kind));
     b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle);
-    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : 'The barotropic equation of state ties the temperature to the density';
+    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : 'This equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
   // The tool's settings slide out under its own button, pushing the buttons below it down.
@@ -1374,7 +1374,7 @@ function syncControls() {
   // A barotropic gas carries no internal energy of its own, so it has no temperature or entropy
   // to show, and nothing heats or cools without a cooling function: those are left out of the
   // menu altogether.
-  const noHeat = (i: number) => ((i === 1 || i === 9) && cfg.eos === 'barotropic') || (i === 10 && (cfg.cooling === 'off' || cfg.eos === 'barotropic'));
+  const noHeat = (i: number) => ((i === 1 || i === 9) && !eosHasEnergy(cfg.eos)) || (i === 10 && (cfg.cooling === 'off' || !eosHasEnergy(cfg.eos)));
   const noField = (i: number) => (i === 7 && two) || (i === 14 && cfg.amrLevels === 0) || (i === 21 && (cfg.amrLevels === 0 || !(cfg.timeBins > 0)))
     || (i === 15 && !pulled) || (i === 17 && !self) || noHeat(i);
   for (const o of fieldSel.options) {
@@ -2085,7 +2085,7 @@ function switchEos(kind: EosKind) {
   const setEos = () => {
     cfg.eos = kind;
     // An energy equation needs gamma above 1 (as the gamma field enforces).
-    if (kind !== 'barotropic') cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
+    if (eosHasEnergy(kind)) cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
   };
   return enqueue(async () => {
     if (!sim || sim.preparing) {
@@ -2202,7 +2202,7 @@ function applySettings(list: { setting: Setting; value: unknown }[]) {
     if (key === 'eosParams.gamma') {
       // An energy equation needs gamma above 1. Where the species set the equation of state,
       // gamma is part of each one's heat capacity, which the shaders are built with.
-      if (cfg.eos !== 'barotropic') cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
+      if (eosHasEnergy(cfg.eos)) cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
       if (speciesNuclides(cfg.problem.species)) shaders = true;
     }
     // The merge threshold stays below the refinement one.
@@ -2233,7 +2233,7 @@ function setParams(changed: Record<string, number>) {
   // Units that follow the parameters change the physical constants an equation of state other
   // than a barotropic one takes from them: refresh those (the setup's own values still win),
   // and the run must start again.
-  const physical = typeof cfg.problem.units === 'function' && cfg.eos !== 'barotropic';
+  const physical = typeof cfg.problem.units === 'function' && eosHasEnergy(cfg.eos);
   if (physical) Object.assign(cfg.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
   if (defs.some((q) => q.id === cfg.problem.boxParam)) {
     // The side of the box: the grid's cells change size, so the run is built again.
@@ -3995,7 +3995,7 @@ async function toolApi(name: string, o: Record<string, unknown> = {}): Promise<R
       break;
     case 'temperature':
       known(['pos', 'radius', 'softness', 'factor']);
-      if (cfg.eos === 'barotropic') throw new Error('temperature: the barotropic equation of state ties the temperature to the density');
+      if (!eosHasEnergy(cfg.eos)) throw new Error('temperature: this equation of state ties the temperature to the density');
       brushNow({ kind: 'temperature', pos: point('pos'), radius: scalar('radius', 0.06, 0.001, 1), softness: scalar('softness', 0.5, 0, 1), amount: Math.log(scalar('factor', 1.5, 1e-6, 1e6)), vel: [0, 0, 0] });
       break;
     case 'obstacle': {
@@ -4051,7 +4051,7 @@ async function toolApi(name: string, o: Record<string, unknown> = {}): Promise<R
     case 'star': {
       known(['pos', 'vel', 'n', 'rhoc', 'radius', 'field', 'beta']);
       if (cfg.ndim !== 3) throw new Error('star: a star needs self-gravity, which a 2D run does not have');
-      if (cfg.eos === 'barotropic') throw new Error('star: the barotropic equation of state fixes the pressure of the gas, so a star\u2019s cannot be chosen');
+      if (!eosHasEnergy(cfg.eos)) throw new Error('star: this equation of state fixes the pressure of the gas, so a star\u2019s cannot be chosen');
       const field = o.field ?? 'none';
       if (field !== 'none' && field !== 'dipole' && field !== 'random') throw new Error('star: "field" is none, dipole or random');
       await placeStar(point('pos'), vec('vel', 0, [0, 0, 0]), { n: scalar('n', starN, 0.5, 4.5), rhoc: scalar('rhoc', 10 ** starLogRho, 1e-30), radius: scalar('radius', toolParams.star.size, 0.005, 0.5), field, beta: scalar('beta', 10 ** starLogBeta, 1) });
@@ -4405,7 +4405,8 @@ function liveText(parent: HTMLElement): (v: string) => void {
 }
 
 // [label, tooltip, CSV column, a count]; DIAG_SIDE puts each in the left (0) or right column.
-// BURN_COL is burning's, shown only for a run that burns; the last MAG_ROWS are a magnetic
+// BURN_COL is burning's, shown only for a run that burns; LIQUID_COL a liquid's, shown only for
+// one (eos/liquid.wgsl); the last MAG_ROWS are a magnetic
 // field's, shown only with one.
 const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['t', 'Time', 't'], ['dt', 'Timestep', 'dt'], ['steps', 'Steps taken', 'steps', true], ['mass', 'Total mass', 'mass'],
@@ -4414,6 +4415,7 @@ const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['p x', 'Total x momentum', 'p_x'], ['p y', 'Total y momentum', 'p_y'], ['p z', 'Total z momentum', 'p_z'],
   ['E kin', 'Kinetic energy', 'e_kin'], ['E int', 'Internal energy', 'e_int'], ['E grav', 'Gravitational energy', 'e_grav'], ['E tot', 'Total energy (with a magnetic field, its energy included)', 'e_tot'],
   ['L nuc', 'Nuclear heating: the energy burning released per unit time over the last step, summed over the gas', 'l_nuc'],
+  ['δρ max', 'A liquid: the largest departure of its density from the reference, |ρ / ρ₀ − 1|. It is about the Mach number squared, and is the error of treating the flow as incompressible: raise the sound speed to lower it', 'rho_deviation'],
   ['E mag', 'Magnetic energy, the sum of B² / 2 over the cells (code units: B_Gauss = √(4π) B)', 'e_mag'],
   ['|B| max', 'Largest field strength at a cell center (code units: B_Gauss = √(4π) B)', 'b_max'],
   ['β min', 'Least plasma beta, 2p / B², of any cell: below 1 the field’s pressure dominates the gas’s', 'beta_min'],
@@ -4428,17 +4430,25 @@ const DISK_ROWS = 4;
 const MAG_ROWS = 4 + DISK_ROWS;
 /** Burning's row (nuclear heating). */
 const BURN_COL = 14;
+/** A liquid's row (its largest density departure). */
+const LIQUID_COL = 15;
 // Seven a side; burning's row left; a field's four rows two a side (|B| max, beta min left;
 // E mag, div B right), and a disk's likewise (the alphas left, the Qs right).
-const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 1, 0, 0, 1, 0, 0, 1, 1];
+const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1];
 /** What each diagnostic measures, in DIAG_ROWS order (the field's in code units). */
-const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'power', 'energy', null, null, null, null, null, null, null];
+const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'power', null, 'energy', null, null, null, null, null, null, null];
+/** A liquid's largest |rho / rho0 - 1|, from the density's range (NaN for any other gas). */
+const liquidDeviation = (d: Diagnostics): number => {
+  if (cfg?.eos !== 'liquid') return NaN;
+  const r0 = cfg.eosParams.liqRho;
+  return Math.max(Math.abs(d.ranges[0][0] / r0 - 1), Math.abs(d.ranges[0][1] / r0 - 1));
+};
 /** The diagnostics in DIAG_ROWS order. */
 const diagValues = (d: Diagnostics): number[] => {
   const m = d.magnetic;
   const k = m?.disk;
   return [
-    d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot, d.nuclearHeating,
+    d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot, d.nuclearHeating, liquidDeviation(d),
     ...(m ? [m.eMag, m.bMax, m.betaMin, m.divB] : new Array<number>(MAG_ROWS - DISK_ROWS).fill(NaN)),
     ...(k ? [k.alphaMaxwell, k.alphaReynolds, k.qz, k.qphi] : new Array<number>(DISK_ROWS).fill(NaN)),
   ];
@@ -4564,6 +4574,7 @@ function showMagneticRows(on: boolean, disk = false, burn = false) {
   for (const c of diagCells) {
     let show: boolean;
     if (c.col === BURN_COL) show = burn;
+    else if (c.col === LIQUID_COL) show = cfg?.eos === 'liquid';
     else if (magneticCol(c.col)) show = on && (disk || !diskCol(c.col));
     else continue;
     for (const el of [c.dt, c.dd, c.spark]) el.style.display = show ? '' : 'none';
@@ -4683,7 +4694,7 @@ function exportDiagnostics() {
   const width = diagHistory.rows.reduce((w, r) => Math.max(w, r.length), BASE_COLS);
   // A magnetic field's columns only with one, a disk's only for a disk, burning's only for a run that burns.
   const burns = !!burnSpec(cfg);
-  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) && (i !== BURN_COL || burns) ? [i] : []));
+  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) && (i !== BURN_COL || burns) && (i !== LIQUID_COL || cfg.eos === 'liquid') ? [i] : []));
   const csv = diagHistory.csv(cols, cols.map((i) => DIAG_COLS[i].csv!));
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');

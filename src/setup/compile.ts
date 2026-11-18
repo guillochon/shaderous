@@ -537,6 +537,9 @@ export function compileSetup(spec: SetupSpec): Compiled {
   over('riemann', ph.riemann);
   over('limiter', ph.limiter);
   over('cfl', ph.cfl);
+  over('pressure', ph.pressure);
+  over('pressureCycles', ph.pressureCycles);
+  over('acousticCfl', ph.acousticCfl);
   over('vcycles', ph.vcycles);
   over('gravEnergyFlux', ph.gravEnergyFlux);
   over('refineHi', mesh.refineHi);

@@ -9,6 +9,14 @@
 // when that is off.
 // Requires P, hydro/q.wgsl, and g_dx and g_dt set.
 #include <frame>
+// The implicit-pressure step (plans/incompressible.md 4.3): <psplit> sets PSPLIT. With it the
+// half step is that of advection alone, the acoustic terms (the pressure gradient in the
+// velocity, rho c^2 div v in the pressure) left to the solve, and the velocity takes the
+// gradient of the last solve's pressure in their place: g_pgrad, the difference across the cell
+// along each axis, set by the pass (hydro/predict.wgsl). Without that gradient the faces'
+// velocities are off by half a step of the pressure force, first order in time (4.2.1).
+#include <psplit>
+var<private> g_pgrad: vec3<f32>;
 
 // The half-step state `pr` of cell q moved toward first order by weight w: at w = 1 the cell as
 // it is with no slopes, as the positivity check below makes it.
@@ -71,10 +79,14 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
     (ym.a.x + q.a.x) * dl.y + (q.a.x + yp.a.x) * dr.y,
     (zm.a.x + q.a.x) * dl.z + (q.a.x + zp.a.x) * dr.z,
   );
-  let jump = max(
+  var jump = max(
     abs(xp.b.x - xm.b.x + hs.x) / min(xp.b.x, xm.b.x),
     max(abs(yp.b.x - ym.b.x + hs.y) / min(yp.b.x, ym.b.x), abs(zp.b.x - zm.b.x + hs.z) / min(zp.b.x, zm.b.x)),
   );
+  // A pressure that takes both signs is no scale for its own jump: rho c^2 is.
+  if (p_signed()) {
+    jump = max(abs(xp.b.x - xm.b.x), max(abs(yp.b.x - ym.b.x), abs(zp.b.x - zm.b.x))) / (q.a.x * q.b.z * q.b.z);
+  }
   let shock = select(0.0, 1.0, conv < 0.0 && jump > P.shock_thresh);
 
   // Predictor in primitive form, plus half a gravity kick.
@@ -85,7 +97,12 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   let dv = sx.a.y + sy.a.z + sz.a.w;
   let da = v.x * sx.a + v.y * sy.a + v.z * sz.a;
   let db = v.x * sx.b + v.y * sy.b + v.z * sz.b;
-  let gradp = vec3<f32>(sx.b.x, sy.b.x, sz.b.x);
+  var gradp = vec3<f32>(sx.b.x, sy.b.x, sz.b.x);
+  var acoustic = 1.0;
+  if (PSPLIT) {
+    gradp = g_pgrad;
+    acoustic = 0.0;
+  }
   // A non-inertial frame's velocity-dependent forces join the half kick (and, with comoving
   // coordinates, the expansion's cooling the half step's pressure).
   var gf = g;
@@ -100,7 +117,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
     rho - h * (da.x + rho * dv),
     v - h * (da.yzw + gradp / rho) + 0.5 * g_dt * gf,
   );
-  var b = vec2<f32>(q.b.x - h * (db.x + rho * cs * cs * dv), q.b.y - h * db.y);
+  var b = vec2<f32>(q.b.x - h * (db.x + acoustic * rho * cs * cs * dv), q.b.y - h * db.y);
   if (FRAME_ON) { b.x += 0.5 * g_dt * dp; }
   // An axisymmetric run: the geometric terms of the half step, at the cell's radius.
   if (g_cyl_r > 0.0) {
@@ -128,7 +145,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   let rmin = a.x - 0.5 * big.x;
   let pmin = b.x - 0.5 * big.y;
   var first_order = 0.0;
-  if (!(rmin > 0.0 && pmin > 0.0)) {
+  if (!(rmin > 0.0 && (pmin > 0.0 || p_signed()))) {
     a = q.a;
     b = q.b.xy;
     first_order = 1.0;

@@ -48,6 +48,12 @@ fn pred_mirror(p: Q, axis: i32) -> Q {
 // potential, so there is no deviation across the wall (dl or dr is zero), but the wall face
 // still lies half a cell down the true potential: df is the true difference there, and its
 // negative for the image, so that both arrive at the same pressure on the wall.
+// The scale a pressure difference is judged smooth against: the pressure itself, or rho c^2
+// where the pressure takes both signs (a liquid's, eos/liquid.wgsl).
+fn p_scale(c: Q) -> f32 {
+  if (p_signed()) { return c.a.x * c.b.z * c.b.z; }
+  return c.b.x;
+}
 fn wb_below(l: Q, c: Q, dl: f32) -> vec4<f32> {
   var d = c.b - l.b;
   d.x += 0.5 * (l.a.x + c.a.x) * dl;
@@ -59,16 +65,16 @@ fn wb_above(c: Q, r: Q, dr: f32) -> vec4<f32> {
   return d;
 }
 fn edge_up(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
-  var b = edge4(wb_below(l, c, dl), wb_above(c, r, dr), vec4<f32>(c.b.x, 0.0, c.b.z, 0.0));
+  var b = edge4(wb_below(l, c, dl), wb_above(c, r, dr), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   b.x -= c.a.x * df;
   return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x, c.b.zzz)), b);
 }
 fn edge_dn(l: Q, c: Q, r: Q, dl: f32, dr: f32, df: f32) -> Q {
   var b: vec4<f32>;
   if (LIMITER_SYMMETRIC) {
-    b = edge4(wb_below(l, c, dl), wb_above(c, r, dr), vec4<f32>(c.b.x, 0.0, c.b.z, 0.0));
+    b = edge4(wb_below(l, c, dl), wb_above(c, r, dr), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   } else {
-    b = edge4(wb_above(c, r, dr), wb_below(l, c, dl), vec4<f32>(c.b.x, 0.0, c.b.z, 0.0));
+    b = edge4(wb_above(c, r, dr), wb_below(l, c, dl), vec4<f32>(p_scale(c), 0.0, c.b.z, 0.0));
   }
   b.x -= c.a.x * df;
   if (LIMITER_SYMMETRIC) { return Q(edge4(c.a - l.a, r.a - c.a, vec4<f32>(c.a.x, c.b.zzz)), b); }

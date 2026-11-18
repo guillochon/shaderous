@@ -1,8 +1,9 @@
 # Plan: nearly incompressible flow
 
-Status: draft, 2026-11-15. Nothing here is implemented. Figures quoted from the current code
-come from `docs/numerics.md` and the source comments; no new measurement has been made yet
-(stage 0 makes them).
+Status: in progress (2026-11-18). Stage 0 is done (2.4). Stage 1 is done (3.8). Stage 2 is
+done for the liquid on the uniform grid, 2D and 3D (4.2.1, 4.12); the ideal gas, gravity and
+the convergence gate are not. Stage 3 is not started. Figures quoted from the code in
+section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
 streamline, in three stages:
@@ -101,6 +102,89 @@ state), not for speed, and that should be known before building it.
 
 A table of these numbers in this file, and a short "what stage 1 must beat" list. No commit to
 `numerics.md` yet.
+
+### 2.4 Results (2026-11-18)
+
+Measured on an Apple M-series GPU (Metal), Chrome, uniform 2D grids, CFL 0.8, third-order
+reconstruction, from `validate.html` with the simulator's own classes. "iso" is the barotropic
+gas with $`\gamma = 1`$ and $`K = 1/M^2`$, its density set so that the vortex is in balance.
+
+**Gresho vortex: kinetic energy kept after 1 turn / 4 turns** ($`t = 1.2566`$ and $`5.0265`$).
+
+| $`M`$ | cells | ideal, `hllc` | ideal, `hllclm` | iso, `hll` | iso, `hllclm` | steps for 4 turns |
+|---|---|---|---|---|---|---|
+| 0.1 | 64 | 0.981 / 0.942 | 0.993 / 0.978 | 0.927 / 0.798 | 0.973 / 0.916 | 8 590 |
+| 0.1 | 128 | 0.996 / 0.989 | 0.999 / 0.996 | 0.987 / 0.958 | 0.995 / 0.984 | 17 200 |
+| 0.1 | 256 | 0.999 / 0.998 | 1.000 / 0.999 | 0.997 / 0.992 | 0.999 / 0.997 | 34 500 |
+| 0.03 | 64 | 0.954 / 0.864 | 0.983 / 0.946 | 0.822 / 0.600 | 0.927 / 0.798 | 27 300 |
+| 0.03 | 128 | 0.991 / 0.974 | 0.997 / 0.990 | 0.964 / 0.892 | 0.987 / 0.958 | 54 700 |
+| 0.03 | 256 | 0.998 / 0.995 | 0.999 / 0.998 | 0.993 / 0.980 | 0.997 / 0.992 | 109 400 |
+| 0.01 | 64 | 0.895 / 0.713 | 0.959 / 0.877 | 0.657 / 0.370 | 0.835 / 0.618 | 80 900 |
+| 0.01 | 128 | 0.980 / 0.937 | 0.992 / 0.976 | 0.913 / 0.765 | 0.967 / 0.899 | 161 900 |
+| 0.01 | 256 | 0.996 / 0.987 | 0.998 / 0.995 | 0.984 / 0.951 | 0.994 / 0.980 | 323 900 |
+| 0.003 | 64 | 0.767 / 0.470 | 0.886 / 0.725 | 0.420 / 0.101 | 0.653 / 0.396 | 268 500 |
+| 0.003 | 128 | 0.937 / 0.834 | 0.976 / 0.942 | 0.803 / 0.581 | 0.912 / 0.764 | 537 100 |
+
+(0.003 at $`256^2`$ was not run: a million steps.) Nothing gained energy. The steps go as
+$`n\,(1 + 1.2/M)`$, as section 1 says.
+
+- **The low-Mach fix does reach barotropic gas** (the question of section 1): `hllclm` loses
+  about a third of what `hll` loses, at every Mach number and resolution.
+- **A barotropic gas still loses about four times what the ideal gas loses with the same
+  solver** (0.916 against 0.978 at $`M = 0.1`$, 64 cells, 4 turns). That is the density-jump
+  term of HLL, which HLLC does not have: the experiment of 3.3, step 3, is worth making.
+- The loss falls about fivefold for each doubling of the grid, and grows about 2.4 times for
+  each threefold drop in Mach number.
+
+**Taylor-Green vortex, $`\nu = 0.005`$, one wavelength in the box: decay rate of the kinetic
+energy over $`0 < t < 1`$, as a fraction of $`4\nu k^2`$.**
+
+| $`M`$ | cells | ideal, `hllc` | ideal, `hllclm` | iso, `hll` | iso, `hllclm` |
+|---|---|---|---|---|---|
+| 0.1 | 64 | 1.0102 | 1.0012 | 1.0247 | 1.0072 |
+| 0.1 | 128 | 0.9991 | 0.9980 | 1.0030 | 1.0008 |
+| 0.1 | 256 | 0.9978 | 0.9977 | 1.0004 | 1.0001 |
+| 0.03 | 64 | 1.0416 | 1.0121 | 1.0831 | 1.0246 |
+| 0.03 | 128 | 1.0049 | 1.0012 | 1.0104 | 1.0030 |
+| 0.03 | 256 | 1.0004 | 1.0000 | 1.0010 | 1.0003 |
+
+The ideal gas at $`M = 0.1`$ converges to 0.998, not 1 (not looked into; effects of order
+$`M^2`$ are expected, viscous heating among them). The barotropic gas converges to 1.
+
+**Kelvin-Helmholtz, 2D: growth of the transverse kinetic energy by $`t = 1`$.**
+
+| Pressure | cells | `hllc` | `hllclm` | steps |
+|---|---|---|---|---|
+| 2.5 (as shipped, Mach 0.3 to 0.5) | 128 | 17.0 | 18.3 | 740 |
+| 2.5 | 256 | 29.7 | 25.5 | 1 510 |
+| 71.4 (Mach 0.1 in the light gas) | 128 | 24.9 | 25.6 | 3 350 |
+| 71.4 | 256 | 33.8 | 36.3 | 6 730 |
+
+Not converged in the grid at either pressure (the layer is a jump, so the fastest-growing mode
+is the grid's), so this row is a regression number, not a measure of accuracy.
+
+**Cost of a V-cycle against a hydro step** (`sim.profile()`, polytrope preset, self-gravity on,
+median of three, milliseconds):
+
+| Grid | rates + predictor + update ($`C_h`$) | V-cycle ($`C_v`$) | gravity's second kick (a state read and write) |
+|---|---|---|---|
+| $`128^3`$ | 0.40 + 1.45 + 6.25 = 8.1 | 1.50 | 0.69 |
+| $`256^3`$ | 3.1 + 10.3 + 50.2 = 63.6 | 12.5 | 5.3 |
+
+A V-cycle is a fifth of a hydro step. Taking a variable-coefficient cycle at 1.5 times the
+constant-coefficient one and $`C_\text{extra}`$ at two state passes, $`M^* \approx 0.75`$ with
+four cycles a step and 0.4 with eight: **the implicit step pays for speed at any Mach number
+below a few tenths**, well above the 0.05 at which 2.2 would have called it an accuracy-only
+feature.
+
+**What stage 1 must beat** (uniform grid, `hllclm`):
+
+1. Gresho at $`M = 0.1`$, $`64^2`$: the ideal gas keeps 0.993 after one turn and 0.978 after
+   four. The liquid has to keep at least what the barotropic gas keeps now (0.973 and 0.916),
+   and should reach the ideal gas's numbers if the density-jump experiment works.
+2. Taylor-Green at 64 cells per wavelength: decay rate within 1% at $`M = 0.1`$ (the barotropic
+   gas is at 0.7% now).
+3. Largest density deviation below $`2M^2`$.
 
 ## 3. Stage 1: weakly compressible mode
 
@@ -208,6 +292,50 @@ The five tests pass on the uniform grid and the block grid, the presets are in t
 links, and `numerics.md` has a section "Weakly compressible liquid" with the measured
 numbers.
 
+### 3.8 As built (2026-11-18)
+
+Done, with these departures from the sections above.
+
+- **3.1.** `eos/liquid.wgsl`, kind `'liquid'`, parameters `liqRho` and `liqC` (links `lrho`,
+  `lc`). The audit did not need a constant in every module: a liquid run packs a negative
+  pressure floor, and the shared passes ask `p_signed()` (`hydro/common.wgsl`). Changed for it:
+  `baro_state` (the Jeans branch), the shock flag and the positivity check of the predictor,
+  the limiter's pressure scale (`hydro/q.wgsl`), the refinement indicator's ripple scale
+  (`amr/flag.wgsl`). Every `max(p, P.p_floor)` elsewhere passes a negative pressure through as
+  it is. MHD, self-gravity and comoving coordinates are refused (`liquidUnsupported`).
+- **3.2.** No Mach-number parameter: the liquid presets feature the sound speed itself (the
+  flows have speed 1, so the Mach number is its inverse). The flows' `mach` field sets the
+  pressure of a gas with an energy and is not used by a liquid. The density departure needed no
+  new diagnostics channel: it is read from the density range the reduction already has, and
+  shown as a row of the diagnostics panel (not yet looked at in the visible page: the browser
+  pane was hidden during this work, and the headless page does not draw the panel).
+- **3.3.** The remaining damping was not the density-jump term. It was HLL's missing shear
+  wave: HLL damps a transverse velocity jump at the sound speed. With HLLC the liquid loses
+  what the ideal gas loses, to four digits, at Mach 0.1, 0.03 and 0.01. So the liquid keeps
+  HLLC, and the density-jump experiment was not needed. The barotropic gas was left on HLL: it
+  would gain the same from HLLC in shear flow, but its presets are collapse problems tuned on
+  HLL, and that change wants its own tests.
+- **3.4.** Already there when this plan was written: no-slip and moving box faces are boundary
+  kinds 4 and 5 (`problems/boundaries.ts`), and the `lid-driven-cavity` preset uses them.
+  Moving obstacle cells were not added.
+- **3.5.** Presets `taylor-green`, `shear-layers`, `cylinder-wake`, `gresho` and
+  `lid-driven-cavity-liquid` (Reynolds number 1000), in a menu group "Slow flows". The cylinder
+  wake has no damping zone at its outlet (damping zones belong to disks in the setup format):
+  at Reynolds number 100 it sheds at a Strouhal number of 0.174 with 16 cells across the
+  cylinder, the periodic sides 16 diameters apart.
+- **3.6.** The tests are in `src/validation/liquid.ts`. `liquid-cavity` is at Reynolds number
+  100, not 1000: the Reynolds-100 table of Ghia et al. is the one already in the suite, and the
+  run settles in 12 time units. The Reynolds-1000 preset has not been checked against the
+  paper's table. `liquid-gresho` compares with the ideal gas at three Mach numbers.
+
+| Test | Result (Apple GPU, Chrome) |
+|---|---|
+| `liquid-eos` | pressure to $`5\times10^{-8}`$, elastic energy to $`3\times10^{-7}`$, sound speed exact |
+| `liquid-gresho` | kept by $`t = 2`$ on $`64^2`$: 0.98958 (gas 0.98955), 0.97479 (0.97478), 0.94000 (0.94006) at Mach 0.1, 0.03, 0.01; density departure 0.78, 0.78, 0.83 $`M^2`$; blocks agree to $`3\times10^{-7}`$ |
+| `liquid-taylor-green` | decay rate 1.0035 of exact, uniform and blocks |
+| `liquid-cavity` | centerline error 0.0045; density within 3.6% (the lid's corners) |
+| `liquid-amr` | three levels: mass to $`8\times10^{-7}`$, momentum to $`3\times10^{-8}`$, 0.9968 of the kinetic energy kept at $`t = 1`$ |
+
 ## 4. Stage 2: implicit pressure on the uniform grid
 
 The method of [Kwatra et al. (2009)][Kwatra2009]: split the flux into advection and pressure,
@@ -273,6 +401,83 @@ answers, cheaply, the questions the design depends on:
 
 Deliverable: the reference passes Sod (shock position and plateau to the present tolerance)
 and holds a Gresho vortex at $`M = 10^{-3}`$, with the choices above recorded here.
+
+#### 4.2.1 What the prototype found (2026-11-18)
+
+`src/reference/psplit.ts` (`RefSplit`): the step of 4.1 in float64, any of the three boundary
+kinds per axis, conjugate gradients for the solve. Numbers below are 2D Gresho vortices on
+$`32^2`$ cells to $`t = 2`$, third-order reconstruction, flow Courant number 0.4, unless said.
+
+**1. A gas without an energy needs its mass flux corrected.** Section 4.1 leaves
+$`\rho^{n+1}`$ as advection made it. For an ideal gas that is harmless (the pressure lives in
+$`E`$, which the correction updates implicitly). For a barotropic gas or the liquid the pressure
+lives in the density, and the scheme of 4.1 is then explicit in it: it blows up (kinetic energy
+up 20-fold at Mach 0.1, more below). The form that works redoes the mass flux with the
+corrected face momentum:
+
+```math
+\frac{p'}{c^2\Delta t^2} - \nabla^2 p' = \frac{p(\rho^*)}{c^2\Delta t^2}
+  - \frac{\nabla\cdot(\bar m^*_f - F^\rho_f)}{\Delta t},
+\qquad
+\rho^{n+1} = \rho^* - \Delta t\,\nabla\cdot\left(\bar m^*_f - F^\rho_f - \Delta t\,\partial_n p'\right),
+```
+
+with $`\bar m^*_f`$ the mean of the two cells' starred momenta, $`F^\rho_f`$ the advective mass
+flux the density already took, and $`\beta = 1`$ (not $`1/\rho`$). It is backward Euler for
+sound, the new pressure is the pressure of the new density to first order, and as
+$`c \to \infty`$ it leaves no divergence. With it: 188 to 203 steps at Mach 0.1, 0.01 and
+0.001 alike (the explicit scheme would take 3 000, 26 000 and 260 000), the same kinetic energy
+kept at each, and a density departure of $`0.77\,M^2`$. **Consequence for 4.5:** the correction
+pass changes the density of such a gas, so the species cannot ride on the recorded mass fluxes
+unchanged; the mode refuses species with a gas without an energy until that is done.
+
+**2. The predictor wants the lagged pressure gradient.** With no pressure gradient in the
+half-step velocity (4.3), the face velocities that carry the mass are off by
+$`\tfrac12\Delta t\,\nabla p/\rho`$: first order in time, and the vortex keeps 0.777 of its
+kinetic energy. With the gradient of the *last solve's* pressure (smooth, as projection methods
+lag it) it keeps 0.966. The gradient of the state's own pressure (the question 4.3 left open)
+is unstable below Mach 0.01. Advective flux: local Lax-Friedrichs and plain upwind are the
+same to three digits; keep Lax-Friedrichs.
+
+**3. An ideal gas works only under the acoustic ceiling.** With the ceiling of 4.4 at 20
+acoustic steps the ideal gas is stable at every Mach number tried and keeps 0.968 (with the
+lagged gradient), in a tenth of the explicit steps. Without a ceiling it blows up at Mach 0.01
+and below. And at any ceiling its density drifts by 6 to 7% over two time units where it
+should stay at 1: the mass and energy are carried by face velocities that are divergence-free
+only to first order, and unlike the liquid an ideal gas has nothing that pushes a density
+error back (it is an entropy error). The pressure of the state picks up the same error times
+$`1/M^2`$, which the pressure-acceleration limit of the timestep then sees: the step count
+grows as the Mach number falls (200, 1 600, 16 000 steps at 0.1, 0.01, 0.001 with the ceiling
+at 20). So for an ideal gas this scheme is a tenfold saving in steps at moderate Mach number,
+not a low-Mach method. A fix would carry the mass and energy on the corrected face velocities
+too (the liquid's correction, generalized); not prototyped.
+
+**4. $`p^a`$ from the advected internal energy** costs accuracy (0.825 kept against 0.936 at
+Mach 0.1 on $`48^2`$) and is unstable at Mach 0.01: keep the pressure equation.
+
+**5. Solver tolerance.** $`10^{-4}`$ relative to the largest source gives the same kinetic
+energy to four digits as $`10^{-10}`$ for the liquid, in 15 to 35 conjugate-gradient
+iterations a step.
+
+**6. Sod** (128 cells, ideal gas, to $`t = 0.2`$): mass and energy conserved to round-off, the
+shock within 0.005 (0.6 of a cell) of its exact position, in 72 steps against 151. The L1
+density error is $`1.0\times10^{-2}`$ against the explicit scheme's $`4.0\times10^{-3}`$: 2.5
+times, not the 20% that 4.10 asks of `psplit-sod`. The split is first order in time; that
+criterion has to be loosened or the scheme made second order.
+
+**7. Single precision** (the state rounded with `Math.fround` after every step; the solve
+stays in float64): the liquid gives the same kinetic energy to four digits at Mach 0.1, 0.01
+and 0.001. At 0.001 the density departure, $`10^{-6}`$, is eight units of single precision's
+spacing, and the run does not care, because the pressure that moves the gas is the solve's and
+not the state's. The ideal gas was not run this way. A flow Courant number of 0.8 also works
+(100 steps, 0.962 kept).
+
+**Not done:** the acoustic-wave test, walls and open faces beyond Sod's, the solve itself in
+single precision.
+
+**What this means for the order of work (4.11):** the liquid first, as planned, in the
+mass-flux form of item 1 with the lagged gradient of item 2. The ideal gas (step 4) is a
+smaller prize than the plan assumed and should wait for a decision on item 3.
 
 ### 4.3 Advective flux and predictor
 
@@ -446,6 +651,58 @@ on equations of state with an energy.
 5. Viscosity, species, point masses.
 6. 2b: well-balanced pressure, then self-gravity and stars.
 7. `numerics.md` section, and timings against 2.2's prediction.
+
+### 4.12 As built (2026-11-18)
+
+Steps 1 to 3 of 4.11 are done, with 3D; steps 4 to 7 are not.
+
+**Built.** The liquid's implicit step on the uniform grid, 2D and 3D, with every kind of box
+face, obstacles, inflows, viscosity and driving: `SimConfig.pressure`, the option
+*Pressure: implicit* (`psplit=implicit`, `pcycles`, `acfl` in a link).
+
+- The scheme is 4.2.1's, which for a liquid reduces to something simpler than 4.1: backward
+  Euler on the old density and the starred momentum,
+  $`p'/(c^2\Delta t^2) - \nabla^2 p' = p(\rho^n)/(c^2\Delta t^2) - \nabla\cdot\bar m^*/\Delta t`$,
+  then $`\rho' = \rho^n - \Delta t\,\nabla\cdot(\bar m^* - \Delta t\,\partial_n p')`$. The
+  density the explicit update advected is not used, and neither is a recorded mass flux.
+- Files: `src/pressure/` (`multigrid.ts`; `common`, `stencil`, `smooth`, `residual`,
+  `restrict`, `coarsen`, `prolong`, `coarse_fix`; `faces`, `source`, `correct`;
+  `predict_on`, `predict_off`), `hydro/riemann/advect.wgsl`, the `PSPLIT` branch of
+  `hydro/predictor.wgsl`, the sound-speed weight in `hydro/rates.wgsl` (`P.ohm.y`).
+- 4.5's table as built: rates and clock (sound speed divided by `acousticCfl`), predictor
+  (`PSPLIT`, with the lagged gradient), update (advective flux), source, coefficient
+  coarsening, V-cycles, correct. No merged gravity kick (gravity is refused).
+- 4.6 as built: coefficient textures per level, walls as $`\beta = 0`$, 2D levels one cell
+  deep with one-cell-deep workgroups, the mean fixed on the coarsest level where no face is
+  open. Open faces hold $`p = 0`$. **No convergence gate**: a fixed number of cycles (4),
+  warm-started. The memory budget (`gpu/memory.ts`) does not count the solver's textures yet.
+- The timestep's ceiling is a division of the sound speed by `acousticCfl` (default 1000),
+  not a separate limit, and there is no pressure-acceleration limit.
+
+| Test (`src/validation/psplit.ts`) | Result (Apple GPU, Chrome) |
+|---|---|
+| `psplit-solver` | manufactured solution to $`1\times10^{-5}`$ (2D) and $`2\times10^{-6}`$ (3D) in 8 cycles; 5 to 6 times a cycle in 2D |
+| `psplit-gresho` | 212 steps at Mach 0.1, 0.01, 0.001 (explicit: 3 411 at 0.1); 0.9922 kept at each (explicit 0.9896); density within 0.78 to 0.83 $`M^2`$; mass to $`2\times10^{-7}`$, momentum to $`4\times10^{-8}`$ |
+| `psplit-2d-3d` | kinetic energy agrees to $`1\times10^{-7}`$, same steps, $`v_z < 3\times10^{-7}`$ |
+| `psplit-taylor-green` | 1.0026 of the exact rate in 237 steps (explicit: 1.0035 in 1 837) |
+| `psplit-cavity` | centerline error 0.0047, 18 253 steps (explicit: 0.0045, 56 653 steps), but 32 s against 8 s |
+| `psplit-obstacle` | cylinder wake sheds at period 1.428 (explicit 1.433), 4 689 steps to $`t = 20`$ |
+| `psplit-acoustic` | Courant 0.5: back within 0.24% of a wavelength at 0.858 amplitude; Courant 10: 0.12 |
+
+Not built, of 4.10's list: `psplit-sod` and the ideal gas at all (4.2.1, item 3),
+`psplit-faces` (bit-identical faces are implied by the conservation numbers, not tested
+directly), `psplit-conservation` as its own test (it is inside `psplit-gresho`),
+`psplit-balance` and all of 2b.
+
+**Open, in the order I would take them:**
+
+1. A convergence gate and a residual diagnostic (4.6). Four cycles were enough for every test
+   here, but nothing reports when they are not.
+2. Wall-clock cost on small grids: the V-cycle's many small passes dominate below about
+   $`256^2`$. Fewer levels in 2D, or one pass for the coarse levels, would help.
+3. Gravity (a uniform field first), then species with the corrected mass flux.
+4. The ideal gas, if item 3 of 4.2.1 is resolved.
+5. Second order in time.
 
 ## 5. Stage 3: implicit pressure on the adaptive mesh
 

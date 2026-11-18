@@ -484,6 +484,7 @@
      "enum": [
       "ideal",
       "barotropic",
+      "liquid",
       "gas_radiation",
       "degenerate",
       "ionizing",
@@ -656,6 +657,28 @@
      "description": "Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower",
      "minimum": 0.05,
      "maximum": 1
+    },
+    "pressure": {
+     "enum": [
+      "explicit",
+      "implicit"
+     ],
+     "title": "Pressure",
+     "description": "How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid"
+    },
+    "pressureCycles": {
+     "type": "integer",
+     "title": "Pressure V-cycles",
+     "description": "Implicit pressure: multigrid V-cycles per step. More converge the pressure further, at more cost",
+     "minimum": 1,
+     "maximum": 16
+    },
+    "acousticCfl": {
+     "type": "number",
+     "title": "Acoustic steps per step",
+     "description": "Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped",
+     "minimum": 1,
+     "maximum": 1000000
     },
     "floors": {
      "type": "object",
@@ -2722,6 +2745,114 @@
       ],
       "additionalProperties": false,
       "description": "A dense slab across the middle of the box (in y), sliding through lighter gas at one pressure, with one seeded mode at its two edges. With helium, the slab is helium in hydrogen (species he4 and h1, which then set the equation of state), denser by the ratio of their mean molecular weights."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Gresho vortex",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "gresho"
+       },
+       "mach": {
+        "type": "number",
+        "title": "Mach number",
+        "default": 0.1,
+        "minimum": 0.0001,
+        "maximum": 1
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A steady vortex (Gresho & Chan 1990): the gas turns rigidly out to a fifth of the box, slows to rest by two fifths, and the pressure balances the centrifugal force. Nothing should change; what does is the solver’s own dissipation. In 3D it is a column along z."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Taylor-Green vortex",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "taylor-green"
+       },
+       "mach": {
+        "type": "number",
+        "title": "Mach number",
+        "default": 0.1,
+        "minimum": 0.0001,
+        "maximum": 1
+       },
+       "modes": {
+        "type": "number",
+        "title": "Wavelengths across",
+        "default": 1,
+        "minimum": 1,
+        "maximum": 16
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "An array of counter-rotating vortices. In 2D with viscosity it keeps its shape and decays as exp(-2 ν k² t), an exact solution of the incompressible equations; in 3D the same start, varying along z, breaks down into turbulence."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Double shear layer",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "shear-layers"
+       },
+       "mach": {
+        "type": "number",
+        "title": "Mach number",
+        "default": 0.1,
+        "minimum": 0.0001,
+        "maximum": 1
+       },
+       "sharp": {
+        "type": "number",
+        "title": "Layer sharpness",
+        "default": 30,
+        "minimum": 5,
+        "maximum": 400
+       },
+       "kick": {
+        "type": "number",
+        "title": "Kick amplitude",
+        "default": 0.05,
+        "minimum": 0,
+        "maximum": 0.5
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "Two shear layers in a doubly periodic box, the band between them moving at +1 and the rest at -1, with a small sideways kick (Bell, Colella & Glaz 1989): each layer rolls up into one vortex. Under-resolved, a scheme grows spurious vortices along the thin braids between them."
      },
      {
       "type": "object",

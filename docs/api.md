@@ -122,9 +122,11 @@ by `npm run gen`.
 | `amr` | The run | Levels of refinement, 0 to 5. With n but no amr, the grid is uniform |
 | `tend` | Settings | End time (inf for none) |
 | `sym` | Settings | Mirror symmetry: none, x, y, z, xy, xz, yz, xyz. Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost |
-| `eos` | Settings | Equation of state: ideal, barotropic, gas_radiation, degenerate, ionizing, helmholtz. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `eos` | Settings | Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
 | `gamma` | Settings | gamma. Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
 | `K` | Settings | K (p = K rho^gamma). Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
+| `lc` | Settings | Sound speed. The liquid’s sound speed c₀, a constant: p = c₀² (ρ - ρ₀). It is chosen, not physical: ten times the fastest flow keeps the density within 1% of ρ₀ (a Mach number of 0.1), and the step shrinks in proportion as it grows |
+| `lrho` | Settings | Reference density. The density ρ₀ at which the liquid’s pressure is zero: p = c₀² (ρ - ρ₀). The liquid should start near it |
 | `arad` | Settings | Radiation constant a. Radiation pressure a T⁴ / 3 is added to the gas pressure |
 | `degrho` | Settings | Degeneracy density. Density at which the electrons’ Fermi momentum reaches mₑc. For a setup with physical units it is set from the composition (about 2×10⁶ g/cm³ for C/O); in code units |
 | `degp` | Settings | Degeneracy pressure scale. The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units |
@@ -163,6 +165,9 @@ by `npm run gen`.
 | `riemann` | Settings | Riemann solver: hllc, hllclm, hll. How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust |
 | `limiter` | Settings | Limiter: koren, mc, vanleer, minmod. How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
 | `cfl` | Settings | CFL number. Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
+| `psplit` | Settings | Pressure: explicit, implicit. How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid |
+| `pcycles` | Settings | Pressure V-cycles. Implicit pressure: multigrid V-cycles per step. More converge the pressure further, at more cost |
+| `acfl` | Settings | Acoustic steps per step. Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped |
 | `dampr` | Settings | Damping from r. Radius from the box center where the damping zone starts |
 | `damprate` | Settings | Damping rate. How many times per local orbital period the gas at the box edge is relaxed toward its initial state. 0 is off |
 | `wb` | Settings | Well-balanced reconstruction (0 or 1) |

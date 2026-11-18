@@ -5,7 +5,10 @@ import { SI } from '../units/constants';
 import { eosConstants, kelvinPerCodeT, toCode, unitOf, type UnitSystem } from '../units/units';
 import { helmCoulombCold, helmSolve, helmThermo } from './helmholtz';
 
-export type EosKind = 'ideal' | 'barotropic' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz';
+export type EosKind = 'ideal' | 'barotropic' | 'liquid' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz';
+
+/** The kind carries an energy of its own: its pressure is not a function of the density alone. */
+export const eosHasEnergy = (kind: EosKind): boolean => kind !== 'barotropic' && kind !== 'liquid';
 
 export interface EosParams {
   gamma: number;
@@ -44,6 +47,12 @@ export interface EosParams {
   helmYe: number;
   helmIons: number;
   helmCoulomb: number;
+  /**
+   * The weakly compressible liquid (eos/liquid.wgsl), p = c0^2 (rho - rho0): the density at
+   * which its pressure is zero, and its sound speed.
+   */
+  liqRho: number;
+  liqC: number;
 }
 
 /** The equation of state `e` (of proper quantities) for a state of comoving ones, a^3 = `s` times them. */
@@ -72,6 +81,7 @@ export interface Eos {
 export const EOS_MODULES: Record<EosKind, string> = {
   ideal: 'eos/ideal.wgsl',
   barotropic: 'eos/barotropic.wgsl',
+  liquid: 'eos/liquid.wgsl',
   gas_radiation: 'eos/gas_radiation.wgsl',
   degenerate: 'eos/degenerate.wgsl',
   ionizing: 'eos/ionizing.wgsl',
@@ -121,6 +131,7 @@ fn eos_prim(rho: f32, eint: f32) -> vec2<f32> { let s = cosmo_a3(); let r = eosp
 export const EOS_LABELS: Record<EosKind, string> = {
   ideal: 'Ideal gas',
   barotropic: 'Barotropic',
+  liquid: 'Liquid (weakly compressible)',
   gas_radiation: 'Gas + radiation',
   degenerate: 'Gas + radiation + degenerate electrons',
   ionizing: 'Ionizing hydrogen (Saha)',
@@ -129,12 +140,13 @@ export const EOS_LABELS: Record<EosKind, string> = {
 
 export const defaultEosParams = (): EosParams => ({
   gamma: 5 / 3, K: 1, R: 1, arad: 1, degRho: 1, degP: 1, ...ionParams(COMPOSITIONS.solar), ionT: 1, ionRho: 1,
-  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1.75, helmYe: 0.5, helmIons: 1 / 14, helmCoulomb: 1,
+  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1.75, helmYe: 0.5, helmIons: 1 / 14, helmCoulomb: 1, liqRho: 1, liqC: 10,
 });
 
 /** The first vec4 of equation-of-state constants (Params.eos in hydro/common.wgsl). */
 export function eosConstants1(kind: EosKind, p: EosParams): number[] {
   if (kind === 'helmholtz') return [p.helmRho, p.helmE, p.helmT, p.helmMu];
+  if (kind === 'liquid') return [p.liqRho, p.liqC, 0, 0];
   return [p.gamma, p.K, p.R, p.arad];
 }
 
@@ -237,7 +249,7 @@ export function quartic(A: number, B: number, C: number, iters = 8): number {
  */
 export function mixtureParams(kind: EosKind, params: EosParams, k: readonly number[], zh1 = 2): EosParams {
   const out = { ...params };
-  if (kind === 'barotropic') return out;
+  if (!eosHasEnergy(kind)) return out;
   out.gamma = 1 + k[0] / k[3];
   if (kind === 'gas_radiation' || kind === 'degenerate') out.R = params.R * k[0];
   if (kind === 'degenerate' || kind === 'helmholtz') out.degRho = params.degRho / k[1];
@@ -292,6 +304,23 @@ export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[],
         eintFromP: (_rho, p) => (g < 1.001 ? 1.5 * p : p / (g - 1)),
         temperature: (rho) => pressure(rho) / rho,
         eintFromT: (rho) => (g < 1.001 ? 1.5 : 1 / (g - 1)) * pressure(rho),
+      };
+    }
+    case 'liquid': {
+      const { liqRho: r0, liqC: c0 } = params;
+      const k = r0 * c0 * c0;
+      const pressure = (rho: number) => c0 * c0 * (rho - r0);
+      // The elastic energy, to third order in p / (rho0 c0^2), as eos/liquid.wgsl has it.
+      const elastic = (p: number) => 0.5 * k * (p / k) ** 2 * (1 - p / k / 3);
+      return {
+        kind,
+        hasEnergy: false,
+        params,
+        pressure,
+        soundSpeed: () => c0,
+        eintFromP: (_rho, p) => elastic(p),
+        temperature: () => c0 * c0,
+        eintFromT: (rho) => elastic(pressure(rho)),
       };
     }
     case 'gas_radiation':

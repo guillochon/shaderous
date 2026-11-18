@@ -69,7 +69,13 @@ fn second(c: vec3<i32>, e: vec3<i32>, r0: f32, p0: f32) -> vec4<f32> {
   let pp = textureLoad(W2, c + e, 0).x;
   let pm = textureLoad(W2, c - e, 0).x;
   let dr = abs(rp - r0) + abs(r0 - rm) + EPS * (abs(rp) + 2.0 * abs(r0) + abs(rm));
-  let dp = abs(pp - p0) + abs(p0 - pm) + EPS * (abs(pp) + 2.0 * abs(p0) + abs(pm));
+  var dp = abs(pp - p0) + abs(p0 - pm) + EPS * (abs(pp) + 2.0 * abs(p0) + abs(pm));
+  // A pressure that takes both signs (a liquid's) is near zero where nothing happens, and its
+  // round-off there would count as ripples: its scale is rho c^2.
+  if (p_signed()) {
+    let cs = textureLoad(W2, c, 0).y;
+    dp = abs(pp - p0) + abs(p0 - pm) + EPS * 4.0 * r0 * cs * cs;
+  }
   return vec4<f32>(rp - 2.0 * r0 + rm, dr, pp - 2.0 * p0 + pm, dp);
 }
 

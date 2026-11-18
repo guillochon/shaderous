@@ -1,0 +1,77 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "taylor-green",
+  "name": "Taylor-Green vortex",
+  "group": "Slow flows",
+  "family": "taylor-green",
+  "familyName": "Taylor-Green vortex",
+  "variant": "Liquid",
+  "blurb": "An array of counter-rotating vortices in a viscous liquid at Mach 0.1. In 2D the array keeps its shape and its kinetic energy decays as exp(-4 ν k² t), an exact solution of the incompressible equations; in 3D it breaks down into turbulence.",
+  "domain": {
+    "ndim": 2,
+    "n": 128,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [
+        0,
+        0,
+        0
+      ],
+      "hi": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "physics": {
+    "eos": "liquid",
+    "eosParams": {
+      "liqRho": 1,
+      "liqC": 10
+    },
+    "gravity": "off",
+    "G": 0,
+    "riemann": "hllclm",
+    "viscosity": 0.005
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "taylor-green"
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "checkpointDt": 0.5,
+    "tDyn": 1
+  },
+  "view": {
+    "field": 11,
+    "log": false,
+    "mode": "slice"
+  },
+  "featured": [
+    {
+      "path": "physics.eosParams.liqC",
+      "id": "c0",
+      "label": "Sound speed",
+      "min": 2,
+      "max": 1000,
+      "factor": 1.25,
+      "tip": "The liquid's sound speed. The flow's speed is 1, so the Mach number is 1 over this: at 10 the density stays within 1% of its reference and the flow is incompressible to that accuracy. The step shrinks in proportion as it grows"
+    },
+    {
+      "path": "physics.viscosity",
+      "id": "nu",
+      "label": "Viscosity",
+      "min": 1e-05,
+      "max": 0.1,
+      "factor": 1.25,
+      "tip": "Kinematic viscosity: the Reynolds number is 1 over 2π times this (the vortices are a box wide and turn at speed 1). In 2D the kinetic energy decays at the rate 4 ν k², k = 2π"
+    }
+  ]
+}

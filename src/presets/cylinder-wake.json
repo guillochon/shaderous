@@ -1,0 +1,133 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "cylinder-wake",
+  "name": "Cylinder wake",
+  "group": "Slow flows",
+  "family": "cylinder-wake",
+  "familyName": "Cylinder wake",
+  "variant": "Liquid, Reynolds number 100",
+  "blurb": "A liquid flows at speed 1 past a cylinder (a disk in 2D) at Reynolds number 100: the wake goes unstable and sheds vortices from alternate sides, a von Kármán vortex street, about one pair every six cylinder diameters of flow (a Strouhal number near 0.165). The liquid's sound speed is 10 (Mach 0.1).",
+  "domain": {
+    "ndim": 2,
+    "n": 512,
+    "amr": 0,
+    "box": 4,
+    "supports2d": true,
+    "bc": {
+      "lo": [
+        1,
+        0,
+        0
+      ],
+      "hi": [
+        1,
+        0,
+        0
+      ]
+    }
+  },
+  "physics": {
+    "eos": "liquid",
+    "eosParams": {
+      "liqRho": 1,
+      "liqC": 10
+    },
+    "gravity": "off",
+    "G": 0,
+    "riemann": "hllclm",
+    "viscosity": 0.0025
+  },
+  "background": {
+    "rho": 1,
+    "p": 0,
+    "v": [
+      1,
+      0,
+      0
+    ]
+  },
+  "parts": [
+    {
+      "kind": "obstacle",
+      "id": "cylinder",
+      "shape": {
+        "type": "sphere",
+        "center": [
+          -1,
+          0,
+          0
+        ],
+        "radius": 0.125
+      }
+    },
+    {
+      "kind": "inflow",
+      "id": "inlet",
+      "shape": {
+        "type": "box",
+        "min": [
+          null,
+          null,
+          null
+        ],
+        "max": [
+          -1.95,
+          null,
+          null
+        ]
+      }
+    },
+    {
+      "kind": "region",
+      "id": "kick",
+      "shape": {
+        "type": "sphere",
+        "center": [
+          -0.7,
+          0.06,
+          0
+        ],
+        "radius": 0.1
+      },
+      "rho": 1,
+      "p": 0,
+      "v": [
+        1,
+        0.3,
+        0
+      ],
+      "s": 1
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "checkpointDt": 1,
+    "tDyn": 1.5
+  },
+  "view": {
+    "field": 11,
+    "log": false,
+    "mode": "slice"
+  },
+  "featured": [
+    {
+      "path": "physics.viscosity",
+      "id": "nu",
+      "label": "Viscosity",
+      "min": 0.0001,
+      "max": 0.05,
+      "factor": 1.25,
+      "tip": "Kinematic viscosity: the Reynolds number is the flow speed (1) times the cylinder's diameter (0.25) over this, 100 at 0.0025. Below about 47 the wake stays steady"
+    },
+    {
+      "path": "physics.eosParams.liqC",
+      "id": "c0",
+      "label": "Sound speed",
+      "min": 2,
+      "max": 1000,
+      "factor": 1.25,
+      "tip": "The liquid's sound speed. The flow's speed is 1, so the Mach number is 1 over this. The step shrinks in proportion as it grows"
+    }
+  ]
+}

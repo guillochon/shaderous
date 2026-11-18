@@ -1,0 +1,67 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "gresho",
+  "name": "Gresho vortex",
+  "group": "Slow flows",
+  "family": "gresho",
+  "familyName": "Gresho vortex",
+  "variant": "Liquid",
+  "blurb": "A steady vortex in a liquid whose sound speed is ten times its fastest flow (Mach 0.1): the pressure balances the centrifugal force, and nothing should change. What does is the solver's own dissipation, which is what the test measures (Gresho & Chan 1990).",
+  "domain": {
+    "ndim": 2,
+    "n": 128,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": {
+      "lo": [
+        0,
+        0,
+        0
+      ],
+      "hi": [
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "physics": {
+    "eos": "liquid",
+    "eosParams": {
+      "liqRho": 1,
+      "liqC": 10
+    },
+    "gravity": "off",
+    "G": 0,
+    "riemann": "hllclm"
+  },
+  "parts": [
+    {
+      "kind": "flow",
+      "name": "gresho"
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "checkpointDt": 1,
+    "tDyn": 1.2566
+  },
+  "view": {
+    "field": 4,
+    "log": false,
+    "mode": "slice"
+  },
+  "featured": [
+    {
+      "path": "physics.eosParams.liqC",
+      "id": "c0",
+      "label": "Sound speed",
+      "min": 2,
+      "max": 1000,
+      "factor": 1.25,
+      "tip": "The liquid's sound speed. The flow's speed is 1, so the Mach number is 1 over this: at 10 the density stays within 1% of its reference and the flow is incompressible to that accuracy. The step shrinks in proportion as it grows"
+    }
+  ]
+}
