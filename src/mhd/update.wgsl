@@ -220,6 +220,7 @@ fn shock_flag(c: vec3<i32>, axes: i32) -> f32 {
 // at the end of the stage; with what the check of mhd/fofc.wgsl reads.
 struct CellOut { st: NewState, rho_start: f32, rho_raw: f32, eint_raw: f32 }
 var<private> g_redo = false;
+const FOFC_HEAT = 4.0;
 fn cell_step(t: vec3<i32>, tf: vec3<i32>, bc: vec3<f32>, axes: i32, dt: f32, dtdx: f32) -> CellOut {
   var out: CellOut;
   var net_a = vec4<f32>(0.0);   // (mass, momentum)
@@ -316,13 +317,14 @@ fn cell_step(t: vec3<i32>, tf: vec3<i32>, bc: vec3<f32>, axes: i32, dt: f32, dtd
   out.eint_raw = eint;
   let sc = u2.z + dtdx * net_b.z;
   g_kphi = swirl_ke(rho, mom);
-  // A redo (mhd/fofc.wgsl) keeps the advected internal energy, and E is rebuilt from it: its faces
-  // carry first-order energy fluxes, and the field second-order constrained transport, so E - KE -
-  // B^2 / 2 would take as heat the difference between the two in the field's energy, which in
-  // gas of low beta is many times the heat itself (cells near a sink in 1e-7 gas at 1e7 times
-  // their temperature).
+  // A redo (mhd/fofc.wgsl) keeps the advected internal energy, and E is rebuilt from it, where
+  // E - KE - B^2 / 2 would make more than FOFC_HEAT times that energy: its faces carry first-order
+  // energy fluxes, and the field second-order constrained transport, and in gas of low beta the
+  // difference between the two in the field's energy is many times the heat itself (cells near a
+  // sink in 1e-7 gas at 1e7 times their temperature). Elsewhere E stays as the fluxes made it.
   let ke = 0.5 * dot(mom, mom) / rho + eb;
-  var en = dual_energy(rho, ke, select(E, ke, g_redo), eint);
+  let heated = g_redo && eint > 0.0 && E - ke > FOFC_HEAT * eint;
+  var en = dual_energy(rho, ke, select(E, ke, heated), eint);
   var mout = mom;
   let tame = tame_fluff(rho, mom, en.y);
   if (tame.changed) {

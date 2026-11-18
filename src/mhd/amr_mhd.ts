@@ -31,10 +31,11 @@ const FLAT_WG = 64;
  * GPU bytes per atlas texel of a field's own textures: the face field and its compensation at
  * both parities, half-step faces, assembled faces and centered field, edge impulses (eight
  * rgba32float), and what stage 2's first-order flux correction keeps of stage 1's assembly (three
- * rgba32float: mhd/amr_keep.wgsl). The assembled primitives W1 and W2 are the
+ * rgba32float: mhd/amr_keep.wgsl), and the flux correction's round-1 marks (one r32float:
+ * mhd/amr_fofc.wgsl). The assembled primitives W1 and W2 are the
  * hydro atlas's, which a run with a field does not otherwise use.
  */
-export const MHD_BLOCK_BYTES = 11 * 16;
+export const MHD_BLOCK_BYTES = 11 * 16 + 4;
 
 /** Bytes of the flux register per slot: six faces of BS^2 cells (BS in 2D), two vec4 each (mhd/amr_block.wgsl, reg_entry). */
 export const registerBytes = (ndim: 2 | 3) => 6 * (ndim === 3 ? BS * BS : BS) * 32;
@@ -181,14 +182,21 @@ export class AmrMhd {
    */
   private redoList: GPUBuffer;
   private redoArgs: GPUBuffer;
+  /** round 1's marks, a float a texel (mhd/amr_fofc_recheck.wgsl) */
+  private marks1: GPUTexture;
   /** the substep's stamp per slot of the leaves listed (mhd/amr_fofc_scan.wgsl) */
   private redoSeen: GPUBuffer;
-  private pScan?: GPUComputePipeline;
+  /** [round] */
+  private pScan: GPUComputePipeline[] = [];
+  private pRecheck?: GPUComputePipeline;
+  /** [parity][chunk]: between the rounds, the cells round 0 left all but emptied (mhd/amr_fofc_recheck.wgsl) */
+  private gRecheck: GPUBindGroup[][] = [];
   private pScanReset?: GPUComputePipeline;
   private pFluxRedo?: GPUComputePipeline;
   private pUpdateRedo?: GPUComputePipeline;
-  private gScan: GPUBindGroup[] = [];
-  private gScanL: GPUBindGroup[] = [];
+  /** [parity][round] */
+  private gScan: GPUBindGroup[][] = [];
+  private gScanL: GPUBindGroup[][] = [];
   private gScanReset?: GPUBindGroup;
   private gFluxRedo: GPUBindGroup[][] = [];
   private gUpdateRedo: GPUBindGroup[][] = [];
@@ -204,6 +212,7 @@ export class AmrMhd {
     this.w = [dep.prim[0], dep.prim[1], t('assembled centered field')];
     this.kept = [t('kept start: density, velocity'), t('kept start: pressure, scalar, b_x, b_y'), t('kept start: b_z, centered field')];
     this.emf = t('edge impulses');
+    this.marks1 = t('flux correction marks, round 1', 'r32float');
     const perBlock = (this.ndim === 3 ? 3 * FBOX ** 3 : 2 * FBOX ** 2) * 48;
     this.perChunk = Math.max(1, Math.min(dep.cap, Math.floor(Math.min(scratchBytes, maxBinding(d)) / perBlock), 65535));
     this.scratch = d.createBuffer({ label: 'MHD flux scratch', size: this.perChunk * perBlock, usage: GPUBufferUsage.STORAGE });
@@ -272,7 +281,7 @@ export class AmrMhd {
     const still = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
     const slots = { ...still, bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl' };
     const v = (x: GPUTexture) => x.createView();
-    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be, f2r, u2r, scan, scanReset] = await Promise.all([
+    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be, f2r, u2r, scan, scanReset, scan1, recheck] = await Promise.all([
       computePipeline(d, assemble('mhd/amr_regrid.wgsl', still), 'MHD re-mesh faces'),
       computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', still), 'MHD re-mesh energy'),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1, ASM_STAGE: 1 }),
@@ -303,10 +312,13 @@ export class AmrMhd {
       computePipeline(d, assemble('mhd/amr_update.wgsl', slots), 'MHD block update, correction', { STAGE: 2, SPECIES_FLUX: this.dep.massFlux ? 1 : 0, REDO: 1 }),
       computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction scan', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length }),
       computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction list reset', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length }, 'reset_main'),
+      computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction scan, round 1', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length, ROUND: 1 }),
+      computePipeline(d, assemble('mhd/amr_fofc_recheck.wgsl', slots), 'MHD flux correction recheck'),
     ]);
     this.pFluxRedo = f2r;
     this.pUpdateRedo = u2r;
-    this.pScan = scan;
+    this.pScan = [scan, scan1];
+    this.pRecheck = recheck;
     this.pScanReset = scanReset;
     this.gScanReset = bindGroupUsed(d, scanReset, { 36: this.redoList, 37: this.redoArgs }, 'MHD flux correction list reset');
     this.pBrush = [bf, be];
@@ -349,6 +361,7 @@ export class AmrMhd {
     this.gCommitAll = [];
     this.gScan = [];
     this.gScanL = [];
+    this.gRecheck = [];
     this.gFluxRedo = [];
     this.gUpdateRedo = [];
     for (let p = 0; p < 2; p++) {
@@ -391,14 +404,14 @@ export class AmrMhd {
               15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
               12: this.dep.massFlux?.lo ?? this.noFlux(),
               ...((this.dep.massFlux?.hi ? { 32: this.dep.massFlux.hi } : {}) as Record<number, Bindable>),
-              35: v(marks),
+              35: v(marks), 39: v(this.marks1),
             }),
           );
         return {
           assemble: [bindGroup(d, a1, { ...c0, ...out, ...stores }), bindGroup(d, a2, { ...c0, ...out, ...stores })],
           keep: bindGroup(d, kp, { 0: params, 31: list, 2: v(this.w[0]), 3: v(this.w[1]), 4: v(this.fa), 5: v(this.kept[0]), 6: v(this.kept[1]), 7: v(this.kept[2]), 8: v(this.w[2]) }),
           flux: [f1, f2].map((pipe) =>
-            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]) })),
+            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]), 39: v(this.marks1) })),
           ),
           emf: [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), 6: this.scratch, 8: v(this.emf), 14: c }))),
           update: [
@@ -409,16 +422,19 @@ export class AmrMhd {
           // its update writing the cells alone (its faces output (11) a texture it leaves alone),
           // both reading the marks in the new faces.
           fluxRedo: perChunk((c) =>
-            bindGroup(d, f2r, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]) }),
+            bindGroup(d, f2r, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]), 39: v(this.marks1) }),
           ),
           updateRedo: upd(u2r, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.halfFaces) }, this.faces[o]),
           // (Not over its own list, which it fills.)
-          scan: list === this.redoList ? undefined : bindGroupUsed(d, scan, { 0: params, 1: clock, 30: bt, 31: list, 28: v(idx), 35: v(this.faces[o]), 36: this.redoList, 37: this.redoArgs, 38: this.redoSeen, ...bin }, 'MHD flux correction scan'),
+          scan: list === this.redoList ? undefined : [scan, scan1].map((pipe) => bindGroupUsed(d, pipe, { 0: params, 1: clock, 30: bt, 31: list, 28: v(idx), 35: v(this.faces[o]), 36: this.redoList, 37: this.redoArgs, 38: this.redoSeen, 39: v(this.marks1), ...bin }, 'MHD flux correction scan')),
+          // Over its own list: what round 0 left, against the start.
+          recheck: perChunk((c) => bindGroupUsed(d, recheck, { 0: params, 1: clock, 30: bt, 31: list, 14: c, 2: v(state[p][0]), 9: v(state[o][0]), 11: v(this.marks1) }, 'MHD flux correction recheck')),
         };
       };
       const all = groups(listLeaf, this.chunkBufs);
       const redo = groups(this.redoList, this.chunkBufs);
       this.gFluxRedo.push(redo.fluxRedo);
+      this.gRecheck.push(redo.recheck);
       this.gUpdateRedo.push(redo.updateRedo);
       this.gScan.push(all.scan!);
       this.gAssemble.push(all.assemble);
@@ -588,30 +604,44 @@ export class AmrMhd {
    * then stage 2's fluxes and update again over that list, chunk by chunk, and empty it. When
    * nothing is listed the fluxes and update dispatch no workgroups.
    */
-  private encodeCorrection(pass: GPUComputePassEncoder, parity: number, scan: GPUBindGroup) {
-    pass.setPipeline(this.pScan!);
-    pass.setBindGroup(0, scan);
-    pass.dispatchWorkgroups(Math.max(1, Math.ceil(this.nLeaf / 64)));
+  private encodeCorrection(pass: GPUComputePassEncoder, parity: number, scan: GPUBindGroup[]) {
     const n = this.chunks();
-    const fluxes = (i: number) => {
-      pass.setPipeline(this.pFluxRedo!);
-      pass.setBindGroup(0, this.gFluxRedo[parity][i]);
-      pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i);
+    const reset = () => {
+      pass.setPipeline(this.pScanReset!);
+      pass.setBindGroup(0, this.gScanReset!);
+      pass.dispatchWorkgroups(1);
     };
-    // As the step does: with several chunks, every chunk's fluxes first (they correct the
-    // register, which a coarser or slower neighbor in another chunk reads), then each chunk's
-    // again before its update (the scratch holds one chunk).
-    if (n > 1) for (let i = 0; i < n; i++) fluxes(i);
-    for (let i = 0; i < n; i++) {
-      fluxes(i);
-      pass.setPipeline(this.pUpdateRedo!);
-      pass.setBindGroup(0, this.gUpdateRedo[parity][i]);
-      pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i + 12);
+    for (let r = 0; r < 2; r++) {
+      pass.setPipeline(this.pScan[r]);
+      pass.setBindGroup(0, scan[r]);
+      pass.dispatchWorkgroups(Math.max(1, Math.ceil(this.nLeaf / 64)));
+      const fluxes = (i: number) => {
+        pass.setPipeline(this.pFluxRedo!);
+        pass.setBindGroup(0, this.gFluxRedo[parity][i]);
+        pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i);
+      };
+      // As the step does: with several chunks, every chunk's fluxes first (they correct the
+      // register, which a coarser or slower neighbor in another chunk reads), then each chunk's
+      // again before its update (the scratch holds one chunk).
+      if (n > 1) for (let i = 0; i < n; i++) fluxes(i);
+      for (let i = 0; i < n; i++) {
+        fluxes(i);
+        pass.setPipeline(this.pUpdateRedo!);
+        pass.setBindGroup(0, this.gUpdateRedo[parity][i]);
+        pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i + 12);
+      }
+      if (r === 0) {
+        // Between the rounds: mark what round 0 left all but emptied, over its list.
+        for (let i = 0; i < n; i++) {
+          pass.setPipeline(this.pRecheck!);
+          pass.setBindGroup(0, this.gRecheck[parity][i]);
+          pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i + 12);
+        }
+      }
+      reset();
     }
-    pass.setPipeline(this.pScanReset!);
-    pass.setBindGroup(0, this.gScanReset!);
-    pass.dispatchWorkgroups(1);
   }
+
 
   /**
    * The run starts again (its step count with it): forget which leaves the flux correction listed
@@ -682,7 +712,7 @@ export class AmrMhd {
 
   destroy() {
     // (w[0] and w[1] are the hydro atlas's, which the run destroys.)
-    for (const x of [...this.faces, ...this.comps, this.halfFaces, this.fa, this.w[2], ...this.kept, this.emf]) x.destroy();
+    for (const x of [...this.faces, ...this.comps, this.halfFaces, this.fa, this.w[2], ...this.kept, this.emf, this.marks1]) x.destroy();
     this.scratch.destroy();
     this.btOld.destroy();
     this.idxOld.destroy();

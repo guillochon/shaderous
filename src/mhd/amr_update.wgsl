@@ -57,6 +57,7 @@ override SPECIES_FLUX: bool = false;    // the gravity field atlas: acceleration
 
 override STAGE: u32 = 1u;
 override REDO: bool = false;
+const FOFC_HEAT = 4.0;
 
 #include "mhd/state.wgsl"
 #include "mhd/amr_block.wgsl"
@@ -514,8 +515,13 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
       near = near || fofc_local_marked(g_slot, t - e) || fofc_local_marked(g_slot, t + e);
     }
   }
+  // Only where E - KE - B^2 / 2 makes heat out of that difference, though: more than FOFC_HEAT times
+  // the advected internal energy. Everywhere beside a corrected face, the advected energy of the
+  // thin corona over a magnetized disk drifted cold, and the corona drained to the floor (a
+  // thousand floored cells and more at 64^3 on blocks, none on the uniform grid).
   let ke = 0.5 * dot(mom, mom) / rho + eb;
-  var en = dual_energy(rho, ke, select(E, ke, near), eint);
+  let heated = near && eint > 0.0 && E - ke > FOFC_HEAT * eint;
+  var en = dual_energy(rho, ke, select(E, ke, heated), eint);
   var mout = mom;
   let tame = tame_fluff(rho, mom, en.y);
   if (tame.changed) {

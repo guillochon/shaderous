@@ -23,10 +23,21 @@
 // the cell's own texel, and at the block's corner padding texel, which nothing else uses, for the
 // block. The step counter moves on every substep, so a mark never outlives its substep.
 //
+// Round 1 (mhd/amr_fofc_recheck.wgsl) marks the cells round 0 left all but emptied in M1, a
+// texture of one float a texel, at the same texels; a cell or block is marked if either holds the
+// stamp.
+//
 // Requires P, clock, amr/grid.wgsl, mhd/amr_lookup.wgsl (IDX) and a binding NF (the step's new
 // faces, sampled).
 
+@group(0) @binding(39) var M1: texture_3d<f32>;
+
 const FOFC_KEEP = 0.125;
+// The texel at atlas position x is marked, in either round.
+fn fofc_texel_marked(x: vec3<i32>) -> bool {
+  let s = fofc_stamp();
+  return textureLoad(NF, x, 0).w == s || textureLoad(M1, x, 0).x == s;
+}
 
 fn fofc_stamp() -> f32 {
   return clock.steps + 1.0;
@@ -36,7 +47,7 @@ fn fofc_corner(slot: i32) -> vec3<i32> {
   return atl(blk_origin(slot), vec3<i32>(-NGH, -NGH, select(-NGH, 0, is2d())));
 }
 fn fofc_block_marked(slot: i32) -> bool {
-  return textureLoad(NF, fofc_corner(slot), 0).w == fofc_stamp();
+  return fofc_texel_marked(fofc_corner(slot));
 }
 // Beyond a wall or an open face of the domain there is no cell of another block.
 fn fofc_beyond_wall(level: u32, g: vec3<i32>) -> bool {
@@ -65,13 +76,13 @@ fn fofc_cell_marked(level: u32, g: vec3<i32>) -> bool {
   var gc = g;
   if (h.rel < 0) { gc = g >> vec3<u32>(1u); }
   if (is2d()) { gc.z = 0; }
-  return textureLoad(NF, atl(blk_origin(h.slot), local_of(h.slot, gc)), 0).w == fofc_stamp();
+  return fofc_texel_marked(atl(blk_origin(h.slot), local_of(h.slot, gc)));
 }
 // Local cell l (inside the block or a face ghost) of block `slot` is marked.
 fn fofc_local_marked(slot: i32, l: vec3<i32>) -> bool {
   let top = vec3<i32>(BS, BS, select(BS, 1, is2d()));
   if (all(l >= vec3<i32>(0)) && all(l < top)) {
-    return textureLoad(NF, atl(blk_origin(slot), l), 0).w == fofc_stamp();
+    return fofc_texel_marked(atl(blk_origin(slot), l));
   }
   let level = u32(bt(slot, 0u));
   let g = blk_coord(slot) * BS + l;

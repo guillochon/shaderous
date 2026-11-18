@@ -20,13 +20,15 @@
 
 override PER_CHUNK: u32 = 1u;
 override CHUNKS: u32 = 1u;
+// The correction's round (mhd/amr_fofc.wgsl): each lists its leaves once, under a stamp of its own.
+override ROUND: u32 = 0u;
 
 #include "mhd/amr_lookup.wgsl"
 #include "mhd/amr_fofc.wgsl"
 
 // List leaf `slot`, unless this step has already.
 fn list_leaf(slot: i32) {
-  let stamp = u32(fofc_stamp());
+  let stamp = 2u * u32(fofc_stamp()) + ROUND;
   if (atomicExchange(&SEEN[u32(slot)], stamp) == stamp) { return; }
   let at = atomicAdd(&RL[0], 1u);
   atomicStore(&RL[1u + at], u32(slot));

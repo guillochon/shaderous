@@ -1305,11 +1305,15 @@ $`E`$ includes $`B^2/2`$.
   internal energy, is listed. The faces of a listed cell then take the first-order HLLE flux of
   the start in their mass, momentum and energy, and the listed cells and their neighbors are
   updated again. The field's fluxes and the edge fields stay those of the second-order step, so
-  the field and $`\nabla\cdot B`$ are untouched. A cell updated again beside a corrected face
-  keeps its advected internal energy and rebuilds $`E`$ from it: with first-order energy fluxes
-  beside a second-order field, $`E - KE - B^2/2`$ took the difference in the field's energy as heat
-  (in $`\beta \ll 1`$ gas near a sink, $`10^7`$ times the cell's temperature; without it the
-  block runs gained 13% of their energy and stalled).
+  the field and $`\nabla\cdot B`$ are untouched. With first-order energy fluxes beside a
+  second-order field, $`E - KE - B^2/2`$ can take the difference in the field's energy as heat (in
+  $`\beta \ll 1`$ gas near a sink, $`10^7`$ times the cell's temperature; the block runs gained
+  13% of their energy and stalled). So a cell updated again beside a corrected face whose
+  $`E - KE - B^2/2`$ is more than 4 times its advected internal energy keeps the advected energy
+  and rebuilds $`E`$ from it; elsewhere $`E`$ stays as the fluxes made it. Keeping the advected energy
+  in every such cell was worse: in the thin gas over the poles it drifted cold, and on blocks the
+  corona drained to the floor (thousands of floored cells at $`64^3`$, tens of thousands at
+  $`128^3`$).
 
   On the uniform grid, a fix pass rewrites the listed cells' faces in the slab's flux buffers
   and a redo pass updates the cells again. A neighbor that the redo leaves all but emptied in its
@@ -1331,18 +1335,23 @@ $`E`$ includes $`B^2/2`$.
   the first-order flux, into the scratch and, on the block's surface, the register; the block's
   other surface faces take back the register's own entry, the very flux the neighbor used; inner
   faces are computed again. With several chunks every chunk's fluxes go first, as in the step,
-  since a coarser or slower neighbor reads the corrected register. One chunk per leaf agrees with
-  one chunk bit for bit. Blocks have one round only.
+  since a coarser or slower neighbor reads the corrected register. A second round follows, as on
+  the uniform grid: a pass over the leaves of the first marks, in a texture of one float a texel
+  (the face texture, of four, cannot be read and written in one pass), the cells the first round
+  left with less than 1/8 of their density, and the scan, fluxes and update run again with both
+  marks. It judges by density alone: it sees the internal energy after its floor, and marking
+  every cold cell at the floor, step after step, left the cold gas over the poles at the pressure
+  floor in a thousand cells and more. One chunk per leaf agrees with one chunk bit for bit.
 
   Measured on an RTX 3080, paired runs against the step without the correction: on the uniform
   grid Orszag-Tang at $`1024^2`$ 8% faster (the update's cell code, now one function, compiles
   better), an MHD blast at $`128^3`$ and $`256^3`$ 3% slower, the MRI box at $`128^3`$ within 2%; on
   blocks an MHD blast at $`128^3`$ with one level and a field loop at $`1024^2`$ with two within 2%.
-  Issue #3's disk at $`128^3`$ now runs on the uniform grid with $`\nabla\cdot B`$ at $`10^{-7}`$,
-  and on blocks with one and two levels and with time bins for 400 steps. The gas around its sink
-  drains to the floor, and the step falls with it, as the setup check warns; on blocks, where a
-  neighbor emptied by the redo is not corrected again, tens of thousands of cells sit at the
-  pressure floor by then, against a hundred or so on the uniform grid. With the sink's point
+  Issue #3's disk at $`128^3`$ now runs 400 steps on the uniform grid with at most 5 floored cells,
+  and on blocks with one and two levels and with time bins with at most 58 (from tens of
+  thousands before the second round and the narrower energy rule), all with $`\nabla\cdot B`$ at
+  $`10^{-7}`$. The gas around its sink thins, and the step falls with it, as the setup check warns.
+  With the sink's point
   mass every block of that disk takes the fastest bin, so the correction beside a slower block
   is exercised by the random setups, not by a validation test.
 - **Compile time.** GPU compilers inline every function at every call, so a lookup called at
