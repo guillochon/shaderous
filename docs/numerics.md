@@ -1808,18 +1808,33 @@ $`-y`$, which is $`-z`$ here. The scheme solves
   at its inner edge: at $`256^2`$ a torus with $`\ell\propto R^{1/4}`$ (stable to axisymmetric
   displacements) reached 2.2 times its peak density in two orbits, while the same torus in 3D
   at the same cell size, well balanced along $`x`$ and $`y`$, stayed within 2.5%, and with the
-  radial balance off the axisymmetric one stayed within 1%. What it gets wrong is partly
-  understood. The balance the deviations are measured against is hydrostatic, so for gas held
-  up by its rotation the deviation is the centrifugal term $`\rho v_\phi^2\Delta R/R`$, ten
-  times the pressure or more near a torus's edges; there the limiter clips it, and the
-  unlimited hydrostatic step that goes back in gives the faces a pressure slope that rotation
-  does not hold up. (In 3D the same rotation is carried by the advection of the swirl, which the
-  reconstruction does not see.) Measuring the balance against the effective potential,
-  $`\Phi - \int v_\phi^2/R\,dR`$ with the step density weighted so that it is the trapezoid
-  rule on $`\rho v_\phi^2/R`$, removes that: it held the torus for an orbit (peak +3%, from
-  +48%), but by the second the inner edge piled up again (+29%), the thin gas there moving
-  outward where without the radial balance it falls in. That remainder is not explained, so
-  the radial balance is off rather than half right. It still holds a stratified column along
+  radial balance off the axisymmetric one stayed within 1%. What was found:
+  - The balance ignores rotation. For gas held up by its rotation the deviation from
+    hydrostatic balance is the centrifugal term $`\rho v_\phi^2\Delta R/R`$, ten times the
+    pressure or more near a torus's edges, where the limiter clips it and the unlimited
+    hydrostatic step that goes back in gives the faces a pressure slope rotation does not hold
+    up. (In 3D the rotation is carried by the advection of the swirl, which the reconstruction
+    does not see.) Measuring against the effective potential $`\Phi - \int v_\phi^2/R\,dR`$
+    needs it at two orders: between two cells, a step density weighted so that
+    $`\tfrac12(\rho_a + \rho_b)`$ times it is the trapezoid rule on $`\rho v_\phi^2/R`$; and
+    from a cell's center to its own face, its own $`v_\phi^2/R`$, so that its two faces differ by
+    exactly what its kick and its geometric source cancel (with the pair's step there instead,
+    they differ at first order where the density changes). With both, a torus with
+    $`\ell\propto R^{1/4}`$ held for an orbit at $`256^2`$ (peak +0.3%, from +48%).
+  - That is not all of it, and the rest is not the reconstruction's. With the radial balance
+    off, the same torus piles up at its inner edge too whenever the scheme is less dissipative:
+    with the minmod limiter (peak +129% in one orbit at $`64^2`$, against +1% with Koren's), or
+    with the shock detector's HLL fallback switched off (+183%). The same torus in 3D at the same
+    cell size, with the detector off, stays within 7%. So $`(R, z)`$ has an instability of its
+    own at a rotating torus's inner edge, which dissipation holds down and the radial balance,
+    taking dissipation away, lets through: the thin gas spilled inside the edge, carrying the
+    torus's angular momentum, is flung outward (correctly) and gathers in the edge cell. It is
+    not the predictor's geometric terms (without them it is worse). The next suspects are the
+    geometric source's use of the cell's half-step $`v_\phi`$ where the face fluxes carry the
+    angular momentum, and the cell-center values standing for ring averages.
+  - So the radial balance stays off. With it on and both parts of the effective potential, the
+    constant-$`\ell`$ torus of the tests rose 17% in three orbits; along $`z`$ alone it keeps
+    within 2.6% for five. It still holds a stratified column along
   the axis as it does in Cartesian coordinates.
 - **Predictor:** the half step's geometric terms, $`-\rho v_R/R`$ in the density,
   $`-\rho c_s^2 v_R/R`$ in the pressure, $`+v_\phi^2/R`$ in $`v_R`$ and $`-v_Rv_\phi/R`$ in
