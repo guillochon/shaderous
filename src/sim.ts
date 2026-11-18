@@ -407,8 +407,31 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
 export function withSymmetry(cfg: SimConfig, want: readonly boolean[] | undefined): SimConfig {
   const allowed = cfg.problem.symmetry?.axes ?? [false, false, false];
   const sym = [0, 1, 2].map((a) => !!want?.[a] && allowed[a] && (a < 2 || cfg.ndim === 3)) as [boolean, boolean, boolean];
-  const bcLo = cfg.bcLo.map((b, a) => (sym[a] ? REFLECT : b)) as Bc3;
+  // (An axisymmetric run's lower x face is its axis, which reflects as such a plane does.)
+  const bcLo = cfg.bcLo.map((b, a) => (sym[a] || (a === 0 && cylindrical(cfg)) ? REFLECT : b)) as Bc3;
   return { ...cfg, symmetry: sym, bcLo };
+}
+
+/** The run is axisymmetric, in (R, z) (Problem.geometry). */
+export const cylindrical = (c: SimConfig): boolean => c.problem.geometry === 'cylindrical' && c.ndim === 2;
+
+/**
+ * Why an axisymmetric run cannot go as configured, or null. The first version: hydrodynamics on
+ * a uniform 2D grid, with a uniform field along z (docs/numerics.md section 22).
+ */
+export function cylindricalUnsupported(c: SimConfig): string | null {
+  if (c.problem.geometry !== 'cylindrical') return null;
+  if (c.ndim !== 2) return 'an axisymmetric run is two-dimensional, in (R, z)';
+  if (c.amrLevels > 0) return 'the adaptive mesh is not available for axisymmetric runs yet';
+  if (c.problem.mhd) return 'magnetic fields are not available in axisymmetric runs yet';
+  if (c.viscosity > 0) return 'viscosity is not available in axisymmetric runs yet (it needs the curvilinear stress)';
+  if (c.problem.masses) return 'point masses are not available in axisymmetric runs yet';
+  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in axisymmetric runs yet';
+  if (c.problem.rotation || c.problem.shear || c.problem.cosmology) return 'an axisymmetric run has no rotating frame, shear or expansion';
+  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in axisymmetric runs yet';
+  if (uniformField(c)[0] !== 0) return 'a uniform field must lie along the axis';
+  if (c.driving.accel > 0) return 'turbulence driving is not available in axisymmetric runs';
+  return null;
 }
 
 /** The run's background expansion (Problem.cosmology), or null. */
@@ -873,7 +896,13 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
  * times 2^k; momentum and the center of mass are zero along the mirrored axes and times 2^k
  * (momentum) or unchanged (center) along the others. Cell counts stay the grid's.
  */
-export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] | undefined): Diagnostics {
+export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] | undefined, axisymmetric = false): Diagnostics {
+  // An axisymmetric run's rings have no net radial or azimuthal momentum, and their center of
+  // mass is on the axis: what is left is along z (code y).
+  if (axisymmetric) {
+    d.momentum = [0, d.momentum[1], 0];
+    d.com = [0, d.com[1], 0];
+  }
   d.symmetry = [0, 1, 2].map((a) => !!symmetry?.[a]) as [boolean, boolean, boolean];
   const k = d.symmetry.filter(Boolean).length;
   if (!k) return d;
@@ -942,7 +971,7 @@ export function packParams(
   FACE_KEYS.forEach((k, i) => f.set([...c.wallVelocity[k], 0], 72 + 4 * i));
   f.set([...domainLo(c), 0], 96);
   f.set(rotationOf(c), 100);
-  u.set([0, 1, 2].map((a) => (c.symmetry?.[a] ? 1 : 0)).concat(0), 104);
+  u.set([0, 1, 2].map((a) => (a === 0 && cylindrical(c) ? 2 : c.symmetry?.[a] ? 1 : 0)).concat(0), 104);
   const k = cosmologyOf(c);
   f.set(k ? [k.omegaM, omegaK(k), k.omegaL, 1] : [0, 0, 0, 0], 108);
   const sh = c.problem.shear;
@@ -1196,6 +1225,8 @@ export class Sim implements Simulation {
     if (acos) throw new Error(`Comoving coordinates: ${acos}`);
     const ashear = shearUnsupported(cfg);
     if (ashear) throw new Error(`Shearing box: ${ashear}`);
+    const acyl = cylindricalUnsupported(cfg);
+    if (acyl) throw new Error(`Axisymmetric run: ${acyl}`);
     noteAllocation(cfg.n ** cfg.ndim * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
@@ -2096,7 +2127,7 @@ export class Sim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
-      return unfoldDiagnostics(diag, this.cfg.symmetry);
+      return unfoldDiagnostics(diag, this.cfg.symmetry, cylindrical(this.cfg));
     } finally {
       this.stagingBusy = false;
     }

@@ -53,7 +53,8 @@ struct Params {
   rot: vec4<f32>,        // a rotating frame (gravity/rot.wgsl): its angular velocity, and 1 in w
                          //   for the centrifugal force; all zero for an inertial frame
   sym: vec4<u32>,        // per axis: 0, or 1 where the lower face is a plane of mirror symmetry
-                         //   (SimConfig.symmetry; the gas sees it as reflecting)
+                         //   (SimConfig.symmetry; the gas sees it as reflecting), 2 where it is
+                         //   the axis of an axisymmetric (R, z) run (x only: Problem.geometry)
   cosmo: vec4<f32>,      // comoving coordinates (src/cosmo.ts): (Omega_m, Omega_k, Omega_Lambda, 1);
                          //   all zero otherwise
   shear: vec4<f32>,      // shearing box (Problem.shear): (Omega, q, 1 if stratified, 1); all zero
@@ -103,11 +104,27 @@ fn cosmo_hubble(a: f32) -> f32 {
   return sqrt(P.cosmo.x / (a * a * a) + P.cosmo.y / (a * a) + P.cosmo.z);
 }
 
-// The lower face along `axis` is a plane of mirror symmetry, not a wall: what lies beyond it is
-// the mirror image of what lies inside (the potential is even across it).
+// The lower face along `axis` is a plane of mirror symmetry, or the axis of an axisymmetric
+// run, not a wall: what lies beyond it is the image of what lies inside (the potential is even
+// across it).
 fn sym_lo(axis: i32) -> bool {
-  return P.sym[axis] == 1u;
+  return P.sym[axis] != 0u;
 }
+
+// An axisymmetric (R, z) run (Problem.geometry 'cylindrical'): code x is R from the axis (the
+// lower x face), y is z, and the single layer is the azimuth, v_z being v_phi.
+fn cylindrical() -> bool {
+  return P.sym.x == 2u;
+}
+// The weights of cell i's radial faces, area over (cell volume / dx): R_- / R_c and R_+ / R_c,
+// as pure ratios of indices (no cancellation in float32). The axis face weighs exactly 0.
+fn cyl_weights(i: i32) -> vec2<f32> {
+  let c = f32(i) + 0.5;
+  return vec2<f32>(f32(i) / c, f32(i + 1) / c);
+}
+// For the predictor (hydro/predictor.wgsl): the cell's radius in cells (i + 1/2) in an
+// axisymmetric run, 0 otherwise.
+var<private> g_cyl_r: f32 = 0.0;
 
 // A position as a fraction of the box from the domain's lower corner (0 to 1 inside it), and
 // back. With the corner at -box/2 these are x / box + 0.5 and (f - 0.5) box, bit for bit.
@@ -230,6 +247,8 @@ fn bc_map(c0: vec3<i32>) -> Mapped {
     m.c[a] = bc_ghost_cell(c[a], n[a], k);
     if (bc_wall(k)) {
       m.flip *= bc_vsign(k, a);
+      // Across the axis of an axisymmetric run the swirl v_phi changes sign too.
+      if (!up && P.sym[a] == 2u) { m.flip.z = -m.flip.z; }
       m.bflip *= bc_bsign_at(k, a, up);
       m.vadd += 2.0 * bc_wall_velocity(k, a, up);
     }

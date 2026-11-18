@@ -435,6 +435,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
     jeansCells: ph.jeansCells,
     supports2d: d.supports2d,
     symmetry: d.symmetric ? { axes: mirrorAxes(d.symmetric), mhd: d.symmetricField ?? false } : undefined,
+    geometry: d.geometry === 'cylindrical' ? 'cylindrical' : undefined,
     bc2d: d.bc2d,
     wallVelocity: d.wallVelocity ? { ...d.wallVelocity } : undefined,
     fluff: fl ? { rho: fl.rho ?? 0, u: fl.u ?? 0, v: fl.v ?? 0, ...(fl.va !== undefined ? { va: fl.va } : {}) } : undefined,

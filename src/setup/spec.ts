@@ -66,6 +66,11 @@ export interface DomainSpec {
   symmetric?: string;
   symmetricField?: boolean;
   /**
+   * 'cylindrical': a 2D run that is a body of revolution about the y axis, in (R, z): x is R
+   * from the axis (the lower x face) to the box side, y is z, the third velocity v_phi.
+   */
+  geometry?: 'cartesian' | 'cylindrical';
+  /**
    * The mirrors this run uses (some of `symmetric`): each mirrored axis's domain is then
    * [0, box] and its lower face a plane of symmetry.
    */

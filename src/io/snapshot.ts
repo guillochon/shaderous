@@ -43,6 +43,11 @@ export interface Snapshot {
   /** written by this program: enough to set the run up again exactly */
   meta?: SnapshotMeta;
   /**
+   * An axisymmetric run (Problem.geometry): its x is R and its y is z, with the third velocity
+   * component v_phi. Files hold it in Athena++'s cylindrical order (R, phi, z) (io/athdf.ts).
+   */
+  geometry?: 'cylindrical';
+  /**
    * A snapshot captured only to be sampled at points (capture()'s lazyPressure): `press` holds
    * NaN until SnapshotSampler.prim() works a cell's out with this and keeps it. Never written
    * to a file.

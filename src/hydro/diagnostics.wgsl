@@ -13,7 +13,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   let u2 = textureLoad(U2, c, 0);
   if (u2.w > 0.5) { return red_identity(); }   // solid: no gas
   comp_use(comp_tex(c));
-  let dv = P.geom.x;
+  // (An axisymmetric run's cell is a ring: its true volume, 2 pi R dx^2, so masses are true ones.)
+  let dv = select(P.geom.x, 6.2831853 * (f32(c.x) + 0.5) * P.dx * P.dx * P.dx, cylindrical());
   let rho = max(u1.x, P.rho_floor);
   let v = u1.yzw / rho;
   let eint = u2.y;

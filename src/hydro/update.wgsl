@@ -275,7 +275,21 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     ekick = kd.w;
   }
 
-  var nw = advance(u1, u2, net_inflow_heated(fx, fy, fz, w0.a.yzw), dw, p0.b.x, kick, ekick);
+  // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
+  // geometric source (p + rho v_phi^2) / R, with p the mean of the two radial faces' pressures:
+  // with it, uniform pressure is in balance to rounding, and a balanced state stays as the
+  // Cartesian one does. (The velocities are the half step's.)
+  var src_r = 0.0;
+  if (cylindrical()) {
+    let w = cyl_weights(c.x);
+    let ps = 0.5 * (face_pressure(fx.lo, 0) + face_pressure(fx.hi, 0));
+    src_r = (ps + p0.a.x * p0.a.w * p0.a.w) / (f32(c.x) + 0.5);
+    fx.lo = cyl_face(fx.lo, w.x);
+    fx.hi = cyl_face(fx.hi, w.y);
+  }
+  var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
+  net.mom.x += src_r;
+  var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);
   if (has_sources()) { nw = apply_sources(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt); }
   nw = apply_damping(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt);
   nw = apply_cooling(nw, clock.dt);

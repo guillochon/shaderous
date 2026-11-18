@@ -39,6 +39,21 @@ describe('Athena++ HDF5 snapshots', () => {
     expect(back.meta).toEqual(s.meta);
   });
 
+  it('writes an axisymmetric run in cylindrical coordinates (R, phi, z) and reads it back', async () => {
+    const cells = 4 * 4;
+    const data = Object.fromEntries(VARIABLES.map((v, q) => [v, Float32Array.from({ length: 4 * cells }, (_, i) => q * 1000 + i + 0.25)]));
+    const s: Snapshot = {
+      ndim: 2, rootSize: [8, 8, 1], blockSize: [4, 4, 1], lo: [0, -0.5, -0.5], hi: [1, 0.5, 0.5], time: 1, steps: 3,
+      levels: new Int32Array(4), locations: Int32Array.from([0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 1, 0]), data, geometry: 'cylindrical',
+    };
+    const bytes = await writeAthdf(s, h5);
+    const back = await readAthdf(bytes, h5);
+    expect(back.geometry).toBe('cylindrical');
+    expect([back.ndim, back.rootSize, back.blockSize, back.lo.slice(0, 2), back.hi.slice(0, 2)]).toEqual([2, [8, 8, 1], [4, 4, 1], [0, -0.5], [1, 0.5]]);
+    expect(Array.from(back.locations)).toEqual(Array.from(s.locations));
+    for (const v of VARIABLES) expect(Array.from(back.data[v]!)).toEqual(Array.from(s.data[v]!));
+  });
+
   it('round-trips species as variables named after them', async () => {
     const s = sample();
     const n = s.levels.length * 16;

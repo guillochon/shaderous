@@ -98,6 +98,14 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   );
   var b = vec2<f32>(q.b.x - h * (db.x + rho * cs * cs * dv), q.b.y - h * db.y);
   if (FRAME_ON) { b.x += 0.5 * g_dt * dp; }
+  // An axisymmetric run: the geometric terms of the half step, at the cell's radius.
+  if (g_cyl_r > 0.0) {
+    let k = 0.5 * g_dt / (g_cyl_r * g_dx);
+    a.x -= k * rho * v.x;
+    a.y += k * v.z * v.z;
+    a.w -= k * v.x * v.z;
+    b.x -= k * rho * cs * cs * v.x;
+  }
 
   // Positivity: if any face state would be non-positive, this cell is first order this step
   // (unpredicted state, and the update zeroes its slopes).

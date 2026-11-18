@@ -71,7 +71,7 @@ fn bc_bsign(k: u32, axis: i32) -> vec3<f32> {
 // conducting wall.
 fn bc_bsign_at(k: u32, axis: i32, up: bool) -> vec3<f32> {
   let s = bc_bsign(k, axis);
-  return select(s, -s, !up && sym_lo(axis));
+  return select(s, -s, !up && P.sym[axis] == 1u);
 }
 
 // Beyond an outflow-only face: -1 below, +1 above (the side the ghost's normal velocity is

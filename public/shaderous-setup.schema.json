@@ -127,6 +127,14 @@
      "title": "Mirror symmetry",
      "description": "Compute only the part of a symmetric setup above its planes of symmetry: each mirrored axis runs from 0 to the box side, its lower face a plane of symmetry, and the totals are those of the whole. An octant in 3D (or a quadrant in 2D) gives twice the resolution for the same cells"
     },
+    "geometry": {
+     "enum": [
+      "cartesian",
+      "cylindrical"
+     ],
+     "title": "Geometry",
+     "description": "Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings"
+    },
     "bc": {
      "type": "object",
      "properties": {

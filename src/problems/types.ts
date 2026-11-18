@@ -283,6 +283,12 @@ export interface Problem {
    * v_y = -q omega x, and the x faces are periodic with the shift that flow gives.
    */
   shear?: { omega: number; q: number; stratified?: boolean };
+  /**
+   * 'cylindrical': a 2D run that is a body of revolution about the y axis, in (R, z): code x is
+   * R from the axis (0 to box), y is z, and the third velocity component is v_phi (the layer is
+   * the azimuth). Cells are rings, of volume 2 pi R dx^2: masses and energies are true ones.
+   */
+  geometry?: 'cartesian' | 'cylindrical';
   /** Density below which gas does not ask for refinement (default: the fluff density, else ten times a star's ambient density, else 0, off). */
   refineRho?: number;
   /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */

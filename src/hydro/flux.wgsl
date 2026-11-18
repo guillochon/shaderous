@@ -200,6 +200,17 @@ fn flux_zero() -> Flux {
   return Flux(0.0, vec3<f32>(0.0), 0.0, 0.0, 0.0, 0.0, vec4<f32>(0.0));
 }
 
+// Axisymmetric runs: a radial face's flux weighed by its area over the cell's (cyl_weights), and
+// the angular momentum's by the square, so that R rho v_phi is conserved with no source.
+fn cyl_face(f: Flux, w: f32) -> Flux {
+  return Flux(f.m * w, vec3<f32>(f.mom.xy * w, f.mom.z * w * w), f.e * w, f.ei * w, f.s * w, f.vn * w, vec4<f32>(f.d.xy * w, f.d.z * w * w, f.d.w * w));
+}
+// The pressure at a face, as its flux has it: the normal momentum flux less what the mass flux
+// carries at the face's normal velocity.
+fn face_pressure(f: Flux, axis: i32) -> f32 {
+  return f.mom[axis] - f.m * f.vn;
+}
+
 // The flux through a plane of mirror symmetry (sym_lo): nothing crosses it, so only the normal
 // momentum flux (the pressure, and viscosity's normal stress) is kept. The Riemann problem
 // between a state and its image gives this up to rounding; it is set exactly, so that the
