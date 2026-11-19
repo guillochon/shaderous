@@ -62,8 +62,8 @@ function shearingWave(kx0: number, ky: number, c: number, A: number, ts: number[
   return out;
 }
 
-/** Largest departure of the velocity from the background flow, over the grid. */
-async function departure(sim: Sim): Promise<{ dv: number; drho: number }> {
+/** Largest departure of the velocity from the background flow, and of the density from rho0, over the grid. */
+async function departure(sim: Sim, rho0: number): Promise<{ dv: number; drho: number }> {
   const { u1 } = await sim.readState();
   const n = sim.cfg.n;
   let dv = 0;
@@ -73,7 +73,7 @@ async function departure(sim: Sim): Promise<{ dv: number; drho: number }> {
       const o = 4 * (j * n + i);
       const x = (i + 0.5) / n - 0.5;
       dv = Math.max(dv, Math.abs(u1[o + 1] / u1[o]), Math.abs(u1[o + 2] / u1[o] + Q * OMEGA * x));
-      drho = Math.max(drho, Math.abs(u1[o] - 1));
+      drho = Math.max(drho, Math.abs(u1[o] / rho0 - 1));
     }
   return { dv, drho };
 }
@@ -82,12 +82,13 @@ export const SHEAR_TESTS: TestDef[] = [
   {
     id: 'shear-steady',
     name: 'Shearing box: the background flow is steady',
-    criterion: 'Uniform gas in a Keplerian shearing sheet (2D, 64^2), moving with the background flow v_y = -q Omega x: over 10 orbits (16,700 steps) the velocity stays within 2e-3 of the shear speed at the box edge and the density within 1e-3 of 1, and the mass is kept to 1e-6. (What departs is float32 rounding of the Coriolis and tidal increments to a velocity of order the shear speed, the same every step in a steady state, so it adds up: about 1e-4 of the shear speed an orbit.)',
+    criterion: 'Uniform gas of density and pressure 1.4 (the sound speed of density 1 and pressure 1) in a Keplerian shearing sheet (2D, 64^2), moving with the background flow v_y = -q Omega x: over 10 orbits (16,700 steps) the velocity stays within 2e-3 of the shear speed at the box edge and the density within 1e-3 of 1.4, and the mass is kept to 1e-6. (What departs is float32 rounding of the Coriolis and tidal increments to a velocity of order the shear speed, the same every step in a steady state, so it adds up: about 1e-4 of the shear speed an orbit. The density is 1.4, not 1: a float32 density that hovers about 1.0, a power of two, keeps an increment just below it that it loses just above it, where the spacing of floats doubles, and so loses mass: 2e-6 over the run on Metal, against 1e-7 or less at 1.3, 1.4 or 1.75.)',
     async run(gpu) {
-      return withSim(gpu, sheet(20 * Math.PI), 64, { ndim: 2 }, async (sim) => {
+      const rho0 = 1.4;
+      return withSim(gpu, sheet(20 * Math.PI, () => ({ rho: rho0, p: rho0 })), 64, { ndim: 2 }, async (sim) => {
         const d0 = await sim.diagnostics();
         await sim.runToEnd();
-        const d = await departure(sim);
+        const d = await departure(sim, rho0);
         const d1 = await sim.diagnostics();
         const edge = Q * OMEGA * 0.5;
         return {

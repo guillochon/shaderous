@@ -33,6 +33,10 @@ for (const id of TESTS) {
     await page.evaluate(() => window.shaderous.ready);
     const r = await page.evaluate((t) => window.shaderous.run(t), id);
     console.log(`${id}: ${r.pass ? 'pass' : 'FAIL'} in ${r.seconds.toFixed(1)} s\n` + JSON.stringify(r.metrics, null, 1));
+    // Close the page before judging, within the test's own timeout and for at most 30 s: a failure
+    // then leaves Playwright no page to snapshot or close in its failure handling, which runs
+    // after the test body, where a page stuck on the GPU once held a run for hours.
+    await Promise.race([page.close(), new Promise((resolve) => setTimeout(resolve, 30_000))]);
     expect(r.pass, `${r.criterion}\n${JSON.stringify(r.metrics, null, 1)}`).toBe(true);
   });
 }
