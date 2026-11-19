@@ -754,6 +754,34 @@ explicit scheme takes 737 steps and 11 s and holds it to 0.8%. Mass changes by 0
 explicit: the thin gas around the star leaving) and total energy by 0.6% (0.3%). Only a star
 at rest is tested, as on the uniform grid.
 
+*Point masses* (`psplit-masses`; ideal gas, uniform grid and blocks). Their pull kicks the
+face velocities like self-gravity's: by the difference of their softened potential across the
+face, taken half a step ahead along their motion (`gravity/ext.wgsl` forms the difference
+without subtracting two large potentials), and by the cell's own pull at walls and open faces.
+The masses then move through the step pulled by the corrected state. An isothermal atmosphere
+in balance with a mass, its central density $`e^2`$ times the outer, stays at Mach
+$`1.2\times10^{-3}`$ over a sound crossing in 40 steps (explicit: $`1.3\times10^{-3}`$ in 380)
+with a tenth of the explicit scheme's energy drift; on a mesh refined at the center,
+$`4.7\times10^{-3}`$, at the refined patch's corners. Three things to know:
+
+- *Momentum between the gas and a mass is exchanged to first order in the step, not exactly.*
+  The explicit scheme kicks both with the same accelerations at the step's two ends and
+  conserves their sum to round-off. Here the mass is still kicked at the two ends, by the gas
+  as it is there, and the gas once, with the mass at the middle and the advected density. A
+  mass moving at Mach 0.25 through uniform gas loses 2.4% of the momentum exchanged at a
+  quarter of the default Courant number (3.3% on blocks), in proportion to the step. With a
+  mass that moves, lower `cfl`.
+- *The face that wraps around a periodic box* takes the two cells' pulls instead: the masses'
+  potential is not periodic, and its difference to a point outside the box left 2% of the
+  exchanged momentum unaccounted for whatever the step.
+- *Sinks are refused.* What a sink takes is removed by the explicit scheme's second gravity
+  kick, which this step does not run; a point mass's sink radius must be 0. And a liquid with
+  point masses is refused.
+
+The masses' work on the gas is in flux form here (kick times the mass the faces carry), where
+the explicit passes use the kick form for it: right for slow flows, and what the explicit
+scheme's note on cold, fast debris warns against.
+
 Measured (`psplit-amr-*`): a Gresho vortex on a three-level mesh whose refinement boundaries
 run through it (512 cells across at the finest, refined on its velocity at a threshold of
 0.6) takes 273 steps to $`t = 1`$ at Mach 0.1, 0.01 and 0.001 alike, against the explicit
@@ -772,8 +800,8 @@ merges its fine blocks as it runs leaves the density within $`0.78\,M^2`$: no pr
 Without refinement the block grid reproduces the uniform grid's run to $`10^{-7}`$ in kinetic
 energy. In 3D it runs and conserves; it has not been measured beyond that.
 
-Limits. The liquid and the ideal gas only, on a Cartesian grid, without point masses, cooling
-or frames (and the liquid without self-gravity); on the adaptive mesh also
+Limits. The liquid and the ideal gas only, on a Cartesian grid, without sinks, cooling
+or frames (and the liquid without self-gravity or point masses); on the adaptive mesh also
 without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
@@ -2464,7 +2492,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 153 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 154 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],

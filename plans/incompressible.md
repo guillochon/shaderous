@@ -5,8 +5,8 @@ liquid. Implicit pressure for an
 ideal gas is done on the uniform grid (4.12), with a uniform field and species (5.11). Self-gravity
 for the ideal gas is done on the uniform grid (5.11). Obstacles and
 inlets work with it on the adaptive mesh (5.11), and so does the ideal gas, with a uniform
-field and its own gravity (5.11). Not done: point masses with implicit pressure; second order
-in time. Figures quoted from the code in
+field, its own gravity and point masses without sinks (5.11). Not done: sinks and liquids
+with point masses; second order in time. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each
@@ -930,7 +930,13 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   (`faces_gas.wgsl`), the gravity atlas's field in the offset term and at walls and open
   faces, and the block gravity solve moved after the correction. `psplit-amr-polytrope`: a
   star one level finer than its box, central density to 0.2% over two dynamical times in 58
-  steps (explicit: 0.8% in 737). Only a star at rest: no collapse, no point masses.
+  steps (explicit: 0.8% in 737). Only a star at rest: no collapse.
+- **Point masses** (gas, both grids): their potential's difference in the face kick, half a
+  step ahead; the masses drift and are kicked after the correction, by the corrected state.
+  `psplit-masses`. Momentum between gas and mass is exchanged to first order in the step (the
+  explicit scheme: exactly); making it exact would need the mass kicked by the reduction of
+  what the gas was given. The periodic wrap-around face needed its own form. Sinks are
+  refused (their removal is in the explicit scheme's second kick), and so is a liquid.
 - **The starting mesh reads the velocity** and measures a liquid's pressure against
   $`\rho c_0^2`$, as the GPU indicator does. The Gresho tests' three-level meshes had come from
   the old starting indicator dividing by a pressure near zero; they are now made by the

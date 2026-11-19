@@ -17,7 +17,7 @@
 @group(0) @binding(25) var PF: texture_storage_3d<r32float, write>;
 @group(0) @binding(29) var PN: texture_3d<f32>;
 @group(0) @binding(14) var U1: texture_3d<f32>;
-@group(0) @binding(20) var G: texture_3d<f32>;   // the gravity field: (acceleration, potential)
+@group(0) @binding(23) var G: texture_3d<f32>;   // the gravity field: (acceleration, potential)
 
 fn pn(slot: i32, l: vec3<i32>) -> f32 {
   return textureLoad(PN, atl(blk_origin(slot), l), 0).x;

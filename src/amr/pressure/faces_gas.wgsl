@@ -15,23 +15,25 @@
 // assembly; its solved change the ghost of common.wgsl). A cell whose neighbor is refined takes
 // the mean of the fine faces' values, formed from the fine blocks' own cells and ghosts: the
 // same numbers, so mass, momentum and energy are conserved across levels.
-struct GCell { rho: f32, v: vec3<f32>, eint: f32, s: f32, p: f32, phi: f32 }
+struct GCell { rho: f32, v: vec3<f32>, eint: f32, s: f32, p: f32, phi: f32, x: vec3<f32> }
 // The gravity field: (acceleration, potential), ghosts filled (amr/gravity).
-@group(0) @binding(20) var G: texture_3d<f32>;
+@group(0) @binding(23) var G: texture_3d<f32>;
+// The point masses, whose pull each pass adds itself (gravity/ext.wgsl).
+#include "gravity/ext_bind.wgsl"
 
 // The acceleration at a cell: the uniform field's and the gas's own.
-fn g_accel(c: vec3<i32>) -> vec3<f32> {
+fn g_accel(slot: i32, l: vec3<i32>) -> vec3<f32> {
   var g = P.gext.xyz;
-  if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
-  return g;
+  if (P.grav_on != 0u) { g += textureLoad(G, atl(blk_origin(slot), l), 0).xyz; }
+  return g + ext_accel(blk_pos(slot, l));
 }
 // ap_lift (common.wgsl) with the gas's own gravity too: the field along the offset from fine
 // cell l of block `slot` to the coarse cell's center, in fine cells.
 fn g_lift(slot: i32, l: vec3<i32>, a: i32) -> f32 {
   var s = ap_lift(slot, l, a);
-  if (P.grav_on != 0u) {
+  if (P.grav_on != 0u || ext_on()) {
     let par = (blk_coord(slot) * BS + l) & vec3<i32>(1);
-    let g = textureLoad(G, atl(blk_origin(slot), l), 0).xyz;
+    let g = textureLoad(G, atl(blk_origin(slot), l), 0).xyz + ext_accel(blk_pos(slot, l));
     let axes = ap_axes();
     for (var b = 0; b < axes; b++) {
       if (b != a) { s += g[b] * (0.5 - f32(par[b])); }
@@ -56,7 +58,7 @@ fn g_cell(slot: i32, l: vec3<i32>, p: f32) -> GCell {
   let w2 = textureLoad(W2, c, 0);
   var phi = 0.0;
   if (P.grav_on != 0u) { phi = textureLoad(G, c, 0).w; }
-  return GCell(abs(w1.x), w1.yzw, w2.w, w2.z, p, phi);
+  return GCell(abs(w1.x), w1.yzw, w2.w, w2.z, p, phi, blk_pos(slot, l));
 }
 fn g_base(slot: i32, l: vec3<i32>) -> f32 {
   return textureLoad(PBT, atl(blk_origin(slot), l), 0).x;
@@ -82,7 +84,23 @@ fn g_face(lo: GCell, hi: GCell, a: i32, uf: f32, dtdx: f32) -> GFace {
   let pf = (hi.rho * lo.p + lo.rho * hi.p) / sum;
   // The kick: the uniform field's, and the potential's difference across the face
   // (pressure/kick.wgsl).
-  let kick = clock.dt * P.gext[a] - dtdx * (hi.phi - lo.phi);
+  // (and the point masses', half a step ahead along their motion)
+  var kick = clock.dt * P.gext[a] - dtdx * (hi.phi - lo.phi);
+  if (ext_on()) {
+    // (The box: its root blocks, of BS level-0 cells.)
+    let len = f32(P.amr.y) * f32(BS) * P.dx;
+    if (lo.x[a] < P.org[a] || hi.x[a] > P.org[a] + len) {
+      // The face that wraps around a periodic box takes the two cells' pulls where they are
+      // (pressure/kick.wgsl has why).
+      var xl = lo.x;
+      var xh = hi.x;
+      if (xl[a] < P.org[a]) { xl[a] += len; }
+      if (xh[a] > P.org[a] + len) { xh[a] -= len; }
+      kick += clock.dt * 0.5 * (ext_accel(xl)[a] + ext_accel(xh)[a]);
+    } else {
+      kick -= dtdx * ext_dphi(lo.x, hi.x - lo.x, 0.5 * clock.dt);
+    }
+  }
   let vh = (lo.rho * lo.v[a] + hi.rho * hi.v[a]) / sum + kick - dtdx * (2.0 / sum) * (hi.p - lo.p);
   let du = vh - uf;
   var d = lo;
@@ -100,7 +118,7 @@ fn ap_gface(slot: i32, l: vec3<i32>, a: i32, up: bool, dc: f32, dtdx: f32, solve
   let w = select(0.0, 1.0, solved);
   let own = g_cell(slot, l, g_base(slot, l) + w * dc);
   let h = blk_dx(slot);
-  let ga = g_accel(atl(blk_origin(slot), l))[a];
+  let ga = g_accel(slot, l)[a];
   let kc = clock.dt * ga;
   let none = GFace(vec2<f32>(own.p + select(-0.5, 0.5, up) * h * ga * own.rho, 0.0), vec4<f32>(0.0), vec3<f32>(0.0), 0.0, kc);
   if (n.kind == 2) { return none; }

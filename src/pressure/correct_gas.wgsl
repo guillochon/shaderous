@@ -30,6 +30,7 @@
 // The new pressure of cell c, less the reference.
 @group(0) @binding(12) var G: texture_3d<f32>;   // the gravity field: (acceleration, half-step potential)
 
+#include "gravity/ext_bind.wgsl"
 #include "pressure/kick.wgsl"
 
 fn p_new(c: vec3<i32>) -> f32 {

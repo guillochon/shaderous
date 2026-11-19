@@ -4,7 +4,7 @@ import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareHelmholtz } from './eos/helmholtz';
 import { assemble, shaderFiles } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
-import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Gpu } from './gpu/device';
+import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Bindable, type Gpu } from './gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
 import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
@@ -543,7 +543,13 @@ export function implicitUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid' && c.eos !== 'ideal') return 'it is built for the liquid and the ideal gas only, so far';
   if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'it is not available in axisymmetric or spherical runs';
   // (A uniform field is the pressure passes' own: pressure/correct.wgsl.)
-  if (c.problem.masses) return 'point masses are not available with it yet';
+  if (c.problem.masses) {
+    // (Their pull kicks the faces, pressure/kick.wgsl. What a sink takes is removed by the
+    // explicit scheme's second gravity kick, which this step does not run.)
+    if (c.eos === 'liquid') return 'point masses are not available with it for a liquid yet';
+    const sinks = c.problem.masses(c.params, c.G, c.problem.box / c.n, c.ndim).some((m) => (m.sinkRadius ?? m.soft ?? 1) > 0);
+    if (sinks) return 'point masses that take gas in are not available with it yet (set their sink radius to 0)';
+  }
   if (c.problem.rotation || c.problem.shear || c.problem.frame) return 'rotating frames and shearing boxes are not available with it';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
   // (Species that only ride with the gas are moved after the correction, and scaled to its
@@ -1606,14 +1612,14 @@ export class Sim implements Simulation {
         bindGroup(d, this.pPsSource!, {
           0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[1 - p][0]), 4: v(this.state[1 - p][1]),
           5: v(prs.levels[0].rhs), 6: v(prs.levels[0].coef), 8: v(prs.p),
-          ...((gas ? { 9: v(this.state[p][1]), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield) } : { 7: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
+          ...((gas ? { 9: v(this.state[p][1]), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield), 20: this.bh } : { 7: v(prs.rho0) }) as Record<number, Bindable>), ...k,
         }),
       );
       this.gPsCorrect = [0, 1].map((p) =>
         bindGroup(d, this.pPsCorrect!, {
           0: this.params, 1: this.clock, 2: v(this.state[1 - p][0]), 3: v(this.state[1 - p][1]), 4: v(prs.p),
           6: v(this.state[p][0]), 7: v(this.state[p][1]),
-          ...((gas ? { 9: v(this.faceVel!), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield) } : { 5: v(prs.rho0) }) as Record<number, GPUTextureView>), ...k,
+          ...((gas ? { 9: v(this.faceVel!), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield), 20: this.bh } : { 5: v(prs.rho0) }) as Record<number, Bindable>), ...k,
         }),
       );
     } else {
@@ -2214,7 +2220,7 @@ export class Sim implements Simulation {
         pass.setPipeline(this.pBhDrift);
         pass.setBindGroup(0, this.gBhDrift);
         pass.dispatchWorkgroups(1);
-        this.encodeMassKick(pass, 1 - p, true);
+        this.encodeMassKick(pass, gp, true);
       }
       if (this.fieldOn && !this.sphMono) this.encodeField(pass);
       if (this.prs) {

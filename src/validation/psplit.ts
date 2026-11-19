@@ -825,6 +825,69 @@ export const PSPLIT_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'psplit-masses',
+    name: 'Implicit pressure with point masses (ideal gas, 2D 128^2, uniform grid and blocks): an atmosphere at rest around one, and one moving through the gas',
+    criterion:
+      'An isothermal atmosphere in balance with a softened point mass (G M = 0.2, softening 0.1, central density e^2 times the outer), between walls, over one sound crossing: on the uniform grid the largest Mach number stays under 2e-3 and no more than the explicit scheme\'s plus a tenth, in under a fifth of its steps, total energy to 1e-5 and the mass where it is to 1e-6; on a two-level mesh with the center refined, under 1e-2 (the refined patch\'s corners) and energy to 2e-5. A mass moving at Mach 0.25 through uniform gas in a periodic box, at a quarter of the default Courant number: its velocity at t = 1 within 5% of the explicit run\'s (2.1%, and 2.8% on blocks), the gas\'s mass conserved to 1e-6, and the momentum of gas and mass together changed by less than 5% of what they exchanged (the explicit scheme conserves it exactly: here the mass is kicked by the gas at the step\'s two ends and the gas by the mass at its middle), on the uniform grid and on a mesh refined around the wake',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      let pass = true;
+      const base = { label: '', blurb: '', eos: 'ideal', eosParams: { gamma: 1.4 }, gravity: 'off', G: 1, box: 1, tEnd: 1, supports2d: true } as const;
+      const gm = 0.2;
+      const soft = 0.1;
+      const atmosphere = {
+        ...base, id: 'atmosphere', bcLo: [2, 2, 2], bcHi: [2, 2, 2],
+        masses: () => [{ gm, pos: [0, 0, 0], vel: [0, 0, 0], soft, sinkRadius: 0 }],
+        init: () => (x: number, y: number) => {
+          const rho = Math.exp(gm / Math.sqrt(x * x + y * y + soft * soft));
+          return { rho, vx: 0, vy: 0, vz: 0, p: rho, s: 0 };
+        },
+      } as unknown as Problem;
+      const rest = async (sim: Sim | AmrSim) => {
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(64, 1e6);
+        const d = await sim.diagnostics();
+        return { steps, mach: d.maxMach, etot: Math.abs(d.eTot / d0.eTot - 1), moved: Math.hypot(...d.masses[0].pos) };
+      };
+      const blocks: Partial<SimConfig> = { amrLevels: 1, refineDense: 3, refineLo: 0, timeBins: 0 };
+      const re = await withSim(gpu, atmosphere, 128, { ndim: 2 }, rest);
+      const ri = await withSim(gpu, atmosphere, 128, { ndim: 2, pressure: 'implicit' }, rest);
+      const rb = await withAmr(gpu, atmosphere, 128, { ndim: 2, pressure: 'implicit', ...blocks }, async (sim) => ({ ...(await rest(sim)), levels: new Set(sim.tree.leaves().map((b) => b.level)).size }));
+      Object.assign(m, {
+        rest_max_mach: ri.mach, rest_max_mach_explicit: re.mach, rest_steps: ri.steps, rest_steps_explicit: re.steps, rest_energy_drift: ri.etot, rest_mass_moved: ri.moved,
+        rest_blocks_max_mach: rb.mach, rest_blocks_energy_drift: rb.etot, rest_blocks_levels: rb.levels,
+      });
+      pass &&= ri.mach < 2e-3 && ri.mach < 1.1 * re.mach && ri.steps < 0.2 * re.steps && ri.etot < 1e-5 && ri.moved < 1e-6;
+      pass &&= rb.levels === 2 && rb.mach < 1e-2 && rb.etot < 2e-5 && rb.moved < 1e-6;
+
+      const gmm = 0.05;
+      const mover = {
+        ...base, id: 'mover', bcLo: all(PERIODIC), bcHi: all(PERIODIC),
+        masses: () => [{ gm: gmm, pos: [-0.2, 0, 0], vel: [0.3, 0.1, 0], soft: 0.08, sinkRadius: 0 }],
+        init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 1, s: 0 }),
+      } as unknown as Problem;
+      const moving = async (sim: Sim | AmrSim) => {
+        const d0 = await sim.diagnostics();
+        await sim.runToEnd(64, 1e6);
+        const d = await sim.diagnostics();
+        const total = (q: typeof d) => [0, 1].map((a) => q.momentum[a] + gmm * q.masses[0].vel[a]);
+        const [t0, t1] = [total(d0), total(d)];
+        const given = Math.hypot(d.momentum[0] - d0.momentum[0], d.momentum[1] - d0.momentum[1]);
+        return { vel: d.masses[0].vel, lost: Math.hypot(t1[0] - t0[0], t1[1] - t0[1]) / given, mass: Math.abs(d.mass / d0.mass - 1) };
+      };
+      const me = await withSim(gpu, mover, 128, { ndim: 2 }, moving);
+      const off = (r: { vel: number[] }) => Math.hypot(r.vel[0] - me.vel[0], r.vel[1] - me.vel[1]) / Math.hypot(me.vel[0], me.vel[1]);
+      const mi = await withSim(gpu, mover, 128, { ndim: 2, pressure: 'implicit', cfl: 0.1 }, moving);
+      const mb = await withAmr(gpu, mover, 128, { ndim: 2, pressure: 'implicit', cfl: 0.1, amrLevels: 1, refineHi: 0.3, timeBins: 0 }, moving);
+      Object.assign(m, {
+        moving_velocity_difference: off(mi), moving_momentum_lost: mi.lost, moving_gas_mass_drift: mi.mass, moving_momentum_lost_explicit: me.lost,
+        moving_blocks_velocity_difference: off(mb), moving_blocks_momentum_lost: mb.lost, moving_blocks_gas_mass_drift: mb.mass,
+      });
+      pass &&= off(mi) < 0.05 && mi.lost < 0.05 && mi.mass < 1e-6 && off(mb) < 0.05 && mb.lost < 0.05 && mb.mass < 1e-6;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'psplit-amr-wake',
     name: 'Implicit pressure on the adaptive mesh with an obstacle and an inlet: the cylinder wake (2D, 512 finest, 2 levels, liquid, Reynolds number 100)',
     criterion:

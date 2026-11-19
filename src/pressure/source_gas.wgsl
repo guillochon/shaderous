@@ -32,6 +32,7 @@
 @group(0) @binding(11) var PF: texture_3d<f32>;
 @group(0) @binding(12) var G: texture_3d<f32>;   // the gravity field: (acceleration, half-step potential)
 
+#include "gravity/ext_bind.wgsl"
 #include "pressure/kick.wgsl"
 @group(0) @binding(9) var U2N: texture_3d<f32>;
 

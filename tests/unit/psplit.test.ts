@@ -204,5 +204,11 @@ describe('implicit pressure, as a setting', () => {
     expect(implicitBlocksUnsupported({ ...gas, gext: [0, -1, 0] })).toBeNull();
     expect(implicitBlocksUnsupported({ ...gas, gravity: 'periodic' })).toBeNull();
     expect(implicitBlocksUnsupported({ ...gas, timeBins: 2 })).toMatch(/per-block timesteps/);
+    // Point masses: with a gas, and without sinks (the default sink is the softening length).
+    const { implicitUnsupported } = await import('../../src/sim');
+    const withMass = (m: object, eos = gas.eos) => ({ ...gas, eos, problem: { ...gas.problem, masses: () => [{ gm: 1, pos: [0, 0, 0], vel: [0, 0, 0], ...m }] } }) as typeof gas;
+    expect(implicitUnsupported(withMass({ sinkRadius: 0 }))).toBeNull();
+    expect(implicitUnsupported(withMass({}))).toMatch(/take gas in/);
+    expect(implicitUnsupported(withMass({ sinkRadius: 0 }, 'liquid'))).toMatch(/for a liquid/);
   });
 });

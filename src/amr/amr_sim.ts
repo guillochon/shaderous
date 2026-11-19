@@ -800,7 +800,7 @@ export class AmrSim implements Simulation {
       this.prs ??= await AmrPressure.create({
         device: d, params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, listLevel: this.listLevel, levels: this.levels,
         state: this.state, prim: this.prim[0], prim2: this.prim[1], slots,
-        gas: this.faceVel ? { faceLo: this.faceVel[0], faceHi: this.faceVel[1], lag: this.lagP!, gfield: this.gfield } : undefined,
+        gas: this.faceVel ? { faceLo: this.faceVel[0], faceHi: this.faceVel[1], lag: this.lagP!, gfield: this.gfield, bh: this.bh } : undefined,
         flat: (pass, count, reach) => this.flat(pass, count, reach),
         rootDims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),
         interior: (pass, count) => this.interior(pass, count),
@@ -2210,10 +2210,11 @@ export class AmrSim implements Simulation {
         // (The state is back in parity p.) A gas's own gravity: the potential of the corrected
         // state, for the next step's face kicks (the pressure passes ran before it, as on the
         // uniform grid: src/sim.ts).
-        if (this.selfGravity) {
-          this.grav!.copyPhiToOld(enc, this.tree.highSlot);
+        // And the point masses move through the step, pulled by that state.
+        if (this.fieldOn) {
+          if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
           const gp = beginPass(enc);
-          this.encodeSolve(gp, p, this.cfg.vcycles, 'none', false, true);
+          this.encodeSolve(gp, p, this.cfg.vcycles, 'step', false, true);
           this.encodeField(gp);
           gp.end();
         }
