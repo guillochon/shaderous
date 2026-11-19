@@ -6,7 +6,13 @@ ideal gas is done on the uniform grid (4.12), with a uniform field and species (
 for the ideal gas is done on the uniform grid (5.11). Obstacles and
 inlets work with it on the adaptive mesh (5.11), and so does the ideal gas, with a uniform
 field, its own gravity and point masses without sinks (5.11). Not done: sinks and liquids
-with point masses; second order in time. Figures quoted from the code in
+with point masses; second order in time. Open, found by random testing (seed 70293 of
+`tools/random-test`, 2026-11-18): with implicit pressure a star in near-vacuum goes non-finite
+within some ten steps. A polytrope at rest holds with the gas around it at 1e-4 of its central
+density (and so does `psplit-gas-polytrope`), and fails at 1e-5 and below, where that gas falls in
+at Mach 40 and more; 16 V-cycles change nothing, and one acoustic step per step only delays it.
+The explicit scheme runs the same setup. Until it is understood the method should refuse, or
+warn of, such a contrast. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each

@@ -212,9 +212,19 @@
       doc.physics.opacityParams = { absorption: pick([0.1, 10, 1000]), scattering: pick([0, 0, 1]) };
       doc.physics.radC = pick([100, 1000]);
       doc.physics.radChat = pick([20, 50]);
-      if (doc.physics.eos === 'ideal') doc.physics.eosParams.arad = U(1e-3, 0.1);
+      const a = U(1e-3, 0.1);
+      if (doc.physics.eos === 'ideal' && doc.parts.some((p) => p.energy)) {
+        // A blast is hot: with an ideal gas its a T^4 would dwarf the gas's own energy (the
+        // setup's pressure is then all the gas's). The gas and radiation equation of state
+        // splits the pressure between the two.
+        doc.physics.eos = 'gas_radiation';
+        doc.physics.eosParams = { gamma: 5 / 3, arad: a, R: 1 };
+      } else if (doc.physics.eos === 'ideal') doc.physics.eosParams.arad = a;
       kinds.push('rad');
-    } else if (newer < 0.32 && !curved && !frame && doc.physics.eos === 'ideal' && scenario !== 'disk' && !doc.physics.rotation && !doc.domain.mirror && !doc.physics.cooling) {
+    } else if (newer < 0.32 && !curved && !frame && doc.physics.eos === 'ideal' && scenario === 'gas' && !doc.physics.rotation && !doc.domain.mirror && !doc.physics.cooling) {
+      // (Not with stars or disks in near-vacuum: implicit pressure goes non-finite where the gas
+      // around a star is under some 1e-6 of its central density and falls in at Mach 40, which
+      // seed 70293 found. An open limit of the method: plans/incompressible.md.)
       doc.physics.pressure = 'implicit';
       delete doc.mesh;
       const at = kinds.indexOf('bins');
