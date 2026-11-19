@@ -42,6 +42,16 @@ fn rad_reduction(tau: f32) -> f32 {
   return min(1.0, base * max(1.0, tau / P.rad2.z));
 }
 
+// The sweep's slopes of (E, f): the central difference, at most 1.2 times either one-sided one
+// for E and twice for f (as energySlope and mcSlope in reference/radiation.ts, where the 1.2 is
+// explained: with 2 an opaque body's surface sends out its light in pulses).
+const RAD_THETA = vec4<f32>(1.2, 2.0, 2.0, 2.0);
+fn rad_slope(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
+  let c = 0.5 * (a + b);
+  let s = sign(c) * min(min(RAD_THETA * abs(a), RAD_THETA * abs(b)), abs(c));
+  return select(vec4<f32>(0.0), s, a * b > vec4<f32>(0.0));
+}
+
 // Monotonized-central slope, componentwise (as mcSlope in reference/radiation.ts).
 fn rad_mc(a: vec4<f32>, b: vec4<f32>) -> vec4<f32> {
   let c = 0.5 * (a + b);

@@ -275,3 +275,30 @@ describe('Su & Olson Marshak wave', () => {
     }
   });
 });
+
+describe('an opaque slab lit from behind', () => {
+  it('shines steadily: its surface does not send the light out in pulses', () => {
+    // A held cell at E = 1, seven cells of optical depth 5 each, then transparent gas (the
+    // cooling sphere of the GPU tests along a line). With the monotonized-central slope on E the
+    // light at the far end swung by a quarter around its mean with a period of some 40 sweeps.
+    const n = 40;
+    const dx = 1 / 64;
+    const s = new RefRad1D({ n, dx, c: 100, chat: 5, a: 1, gamma: 5 / 3, bc: 'outflow', localC: true, dims: 2, holdFirst: true, opacity: () => ({ planck: 0, rosseland: (5 / dx) * 1e-4 }) });
+    for (let i = 0; i < n; i++) {
+      s.rho[i] = i <= 7 ? 1e4 : 1e-4;
+      s.eint[i] = s.rho[i] * 1.5e-6;
+      s.E[i] = i === 0 ? 1 : 1e-8;
+    }
+    while (s.t < 3) s.sweep(s.sweepDt);
+    let lo = Infinity;
+    let hi = 0;
+    for (let k = 0; k < 320; k++) {
+      s.sweep(s.sweepDt);
+      lo = Math.min(lo, s.F[n - 1]);
+      hi = Math.max(hi, s.F[n - 1]);
+    }
+    expect((hi - lo) / (hi + lo)).toBeLessThan(2e-3);
+    // The converged luminosity (four times the cells) is 0.88.
+    expect(Math.abs(0.5 * (hi + lo) / 0.88 - 1)).toBeLessThan(0.05);
+  });
+});

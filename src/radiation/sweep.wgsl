@@ -49,7 +49,7 @@ struct RFlux { E: f32, F: vec3<f32> }
 
 // The flux of (E, F) along axis a through the face between q1 and q2, from the four cells
 // q0, q1 | q2, q3 in the order of increasing position: as RefRad1D.faceFlux. Linear
-// reconstruction of E and the reduced flux f = F / (c E), limited; a face whose reconstructed
+// reconstruction of E and the reduced flux f = F / (c E), limited (rad_slope); a face whose reconstructed
 // states are not physical (E <= 0 or |f| > 1) takes the two cells' own.
 fn face_flux(a: i32, q0: RCell, q1: RCell, q2: RCell, q3: RCell) -> RFlux {
   let c = rad_c();
@@ -58,8 +58,8 @@ fn face_flux(a: i32, q0: RCell, q1: RCell, q2: RCell, q3: RCell) -> RFlux {
   var fR = rad_reduced(q2.E, q2.F);
   let f3 = rad_reduced(q3.E, q3.F);
   // Slopes of (E, f) of the two cells beside the face.
-  let s1 = rad_mc(vec4<f32>(q1.E - q0.E, fL - f0), vec4<f32>(q2.E - q1.E, fR - fL));
-  let s2 = rad_mc(vec4<f32>(q2.E - q1.E, fR - fL), vec4<f32>(q3.E - q2.E, f3 - fR));
+  let s1 = rad_slope(vec4<f32>(q1.E - q0.E, fL - f0), vec4<f32>(q2.E - q1.E, fR - fL));
+  let s2 = rad_slope(vec4<f32>(q2.E - q1.E, fR - fL), vec4<f32>(q3.E - q2.E, f3 - fR));
   var EL = q1.E;
   var ER = q2.E;
   let eL = q1.E + 0.5 * s1.x;

@@ -2210,8 +2210,8 @@ The radiation energy density $`E`$ and flux $`\mathbf F`$ are evolved in the gas
 
 ```math
 \begin{aligned}
-\partial_t E + \nabla\cdot(\mathbf v E) + \nabla\cdot(\mathbf v\cdot\mathsf P) + r\,\nabla\cdot\mathbf F &= r c\kappa_P\rho\,(aT^4 - E) - \mathbf v\cdot\mathbf g,\\
-\partial_t \mathbf F + \nabla\cdot(\mathbf v\,\mathbf F) + r c^2\,\nabla\cdot\mathsf P &= -r c\kappa_R\rho\,\mathbf F,
+\partial_t E + r\,\big[\nabla\cdot(\mathbf v E) + \nabla\cdot(\mathbf v\cdot\mathsf P) + \nabla\cdot\mathbf F\big] &= r\,\big[c\kappa_P\rho\,(aT^4 - E) - \mathbf v\cdot\mathbf g\big],\\
+\partial_t \mathbf F + r\,\big[\nabla\cdot(\mathbf v\,\mathbf F) + c^2\,\nabla\cdot\mathsf P\big] &= -r c\kappa_R\rho\,\mathbf F,
 \end{aligned}
 ```
 
@@ -2249,8 +2249,17 @@ rate $`d\,\hat c`$. With $`c/\hat c = 100`$, every cell of optical depth above a
 true speed, so the inside of a star has the right heat capacity and conserves energy exactly.
 The one condition is $`\hat c \gg |v| + c_s`$ (the diagnostics count the cells where
 $`|v| + c_s > \hat c/3`$), not $`\hat c \gg v\tau`$. Where $`r < 1`$ what is conserved is
-$`E_\text{gas} + E/r`$. In steady state $`r`$ drops out. This rule is Shaderous's own;
-`radLocalC = false` gives the usual uniform $`r = \hat c/c`$.
+$`E_\text{gas} + E/r`$. Every term but the time derivative carries $`r`$, the advection with
+the gas included, so in a steady state $`r`$ drops out, in moving gas too. (With the advection
+left at full speed, the supercritical shock of `rad-shock`, whose precursor's cells are reduced,
+came out 6% too cool.) Where $`r = 1`$ the radiation moves exactly with the gas.
+
+What a reduced speed cannot give is a radiative structure that moves across the grid through
+reduced cells: the precursor of a shock of speed $`D`$ has only $`\hat c/D`$ rather than $`c/D`$
+of a head start, and the state behind is off by as much as the precursor matters. In `rad-shock`
+the temperature behind the supercritical shock is 3.2% low at $`\hat c = c/5`$, 1.1% at
+$`c/2.5`$ and 0.06% at $`c`$. This rule is Shaderous's own; `radLocalC = false` gives the usual
+uniform $`r = \hat c/c`$.
 
 ### A step
 
@@ -2259,7 +2268,7 @@ rates, clock     the step; the radiation's push adds (4/9) min(1, tau_c) E / rho
                  and the step is at most N_r sweeps of 0.5 dx / (d chat)
 predict, update  as without radiation; the update records the face mass fluxes
 radiation/advect E / rho and F / rho moved with those mass fluxes, as species are, plus the
-                 flux v . P
+                 flux v . P; each cell's change times its r
 gravity, correct
 radiation/sweep  N_r times (8 by default, at most 16): transport, then the local exchange
 radiation/commit the gas's side of the sweeps into the state
@@ -2272,7 +2281,13 @@ as the gas does.
 **Transport.** Each cell computes the fluxes of all its faces itself from the four cells across
 each, so both cells of a face get the same bits (the gathered fluxes of
 [architecture.md](architecture.md)). $`E`$ and the reduced flux $`\mathbf f = \mathbf F/(cE)`$
-are reconstructed linearly with the monotonized-central limiter; a face whose reconstructed
+are reconstructed linearly: the slope is the central difference, at most $`\theta`$ times
+either one-sided difference, with $`\theta = 2`$ (monotonized central) for $`\mathbf f`$ and
+$`\theta = 1.2`$ for $`E`$. With $`\theta = 2`$ on $`E`$ and the single forward Euler stage, the
+surface of an opaque body sent its light out in pulses: in the reference, 26% up and down with a
+period of some 40 sweeps at 5 optical depths a cell, and still 3% with four times the cells. With
+1.2 it is steady to 0.3% at 1 to 20 optical depths a cell, and the luminosity is 3% above the
+converged one where minmod ($`\theta = 1`$) is 8% above. A face whose reconstructed
 states have $`E \le 0`$ or $`|\mathbf f| > 1`$ takes its cells' own ([Wibking & Krumholz
 2022][Wibking2022]). The flux is Rusanov's with the largest M1 wave speed along the face,
 $`S = c\max(\sqrt{D_{nn}}, |f_n|)`$ of the two states (or $`c`$, global Lax-Friedrichs), and its
@@ -2333,7 +2348,10 @@ cells, the luminosity through the open faces, and the warning counts; `.athdf` f
 | `rad-diffusion` | A Gaussian spreads at $`c/(3\kappa\rho)`$ to 1% at $`\tau_c = 1`$, 100 and $`10^4`$ |
 | `rad-shadow` | Behind an opaque disc, 6% of the beam beside it |
 | `rad-advect` | Trapped radiation at $`\beta = 10^{-2}`$, $`\beta\tau = 10^4`$, $`\hat c = c/100`$ moves with the gas to $`10^{-4}`$ of the box and keeps its width to 3.5% (the lab-frame reference lags at $`(\hat c/c)\,v`$) |
-| `rad-cooling-sphere` | A hot core behind a reduced-speed shell: the same luminosity at $`\hat c`$ and $`2\hat c`$ to 5% |
+| `rad-marshak` | [Su & Olson (1996)][SuOlson1996]'s non-equilibrium Marshak wave: the GPU matches the float64 reference to $`2\times10^{-3}`$ of the incident energy, and both the float64 diffusion solution with the Marshak boundary to 0.03 at $`\tau = 3.16`$ and 0.015 at $`\tau = 10`$ |
+| `rad-star` | An $`n = 3`$ polytrope with a tenth of its pressure in radiation, over a dynamical time: it holds as the same star with its radiation in the equation of state does (speeds inside both under 1% of the sound speed), and crossing the box at Mach 10 it follows that baseline |
+| `rad-shock` | Gas driven into a wall: the state behind the shock matches the Rankine-Hugoniot conditions with radiation to 0.1% (subcritical), and to 3% at $`\hat c = c/5`$ (supercritical; the limit above) |
+| `rad-cooling-sphere` | A hot core behind a reduced-speed shell: the luminosity is steady to 0.03% over 30 steps (12% before the limiter above) and the same at $`\hat c`$ and $`2\hat c`$ to 5% |
 | `rad-restart` | The radiation comes back from a snapshot bit for bit |
 
 On an RTX 3080 a sweep costs about a quarter of a hydro step (3D $`128^3`$: 2.1 ms a step
@@ -2353,6 +2371,7 @@ stars held up largely by radiation are not yet in discrete balance.
 [He2024]: https://arxiv.org/abs/2404.08247
 [Skinner2013]: https://arxiv.org/abs/1306.0010
 [Skinner2019]: https://arxiv.org/abs/1806.07390
+[SuOlson1996]: https://doi.org/10.1016/0022-4073(96)00084-7
 [Wibking2022]: https://arxiv.org/abs/2110.01792
 [Bate1995]: https://doi.org/10.1093/mnras/277.2.362
 [Berger1984]: https://doi.org/10.1016/0021-9991(84)90073-1

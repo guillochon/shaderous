@@ -628,10 +628,11 @@ export const RAD_TESTS: TestDef[] = [
   {
     id: 'rad-cooling-sphere',
     name: 'Radiation: a hot core shining through an opaque shell gives the same luminosity at chat and 2 chat',
-    criterion: 'A core held at E = 1 inside a scattering shell (cell optical depth 5, so its speed of light is reduced by the per-cell rule) in transparent gas reaches a steady luminosity through the box faces (its mean over 30 steps) that differs by under 5% between chat = c/20 and c/10; the shell is reduced (r < 1) in both',
+    criterion: 'A core held at E = 1 inside a scattering shell (cell optical depth 5, so its speed of light is reduced by the per-cell rule) in transparent gas reaches a steady luminosity through the box faces (over 30 steps it stays within 2% of its mean) that differs by under 5% between chat = c/20 and c/10; the shell is reduced (r < 1) in both',
     async run(gpu) {
       const m: Record<string, number> = {};
       const lum: number[] = [];
+      let steady = true;
       const n = 64;
       for (const chat of [5, 10]) {
         const p = radGas({
@@ -648,16 +649,23 @@ export const RAD_TESTS: TestDef[] = [
         // The shell's diffusion time is 0.1, and its reduced cells (r about 0.3 at chat = c/20)
         // settle r times slower: thirty of them.
         await withSim(gpu, p, n, D2, async (sim) => {
-          // The light at the faces flickers with a period of about five steps (as much with one
-          // reduced speed everywhere): its mean over 30 steps.
+          // Steady over 30 steps too: with a steeper slope on E the shell's surface sent its
+          // light out in pulses, 12% up and down at the faces (radiation/common.wgsl, rad_slope).
           await runTo(sim, 3);
           sim.cfg.tEnd = 100;
           sim.writeParams();
           let sum = 0;
+          let lo = Infinity;
+          let hi = 0;
           for (let k = 0; k < 30; k++) {
             sim.step(1);
-            sum += (await sim.diagnostics()).radiation!.luminosity;
+            const l = (await sim.diagnostics()).radiation!.luminosity;
+            sum += l;
+            lo = Math.min(lo, l);
+            hi = Math.max(hi, l);
           }
+          m[`chat${chat}_swing`] = (hi - lo) / (hi + lo);
+          steady &&= (hi - lo) / (hi + lo) < 0.02;
           const d = await sim.diagnostics();
           lum.push(sum / 30);
           m[`chat${chat}_luminosity`] = sum / 30;
@@ -666,7 +674,7 @@ export const RAD_TESTS: TestDef[] = [
         });
       }
       m.ratio = lum[1] / lum[0];
-      return { pass: Math.abs(m.ratio - 1) < 0.05 && lum[0] > 0 && m.chat5_reduced_share > 0 && m.chat10_reduced_share > 0, metrics: m };
+      return { pass: steady && Math.abs(m.ratio - 1) < 0.05 && lum[0] > 0 && m.chat5_reduced_share > 0 && m.chat10_reduced_share > 0, metrics: m };
     },
   },
 ];

@@ -49,6 +49,21 @@ export function mcSlope(a: number, b: number): number {
   return Math.sign(c) * Math.min(2 * Math.abs(a), 2 * Math.abs(b), Math.abs(c));
 }
 
+/**
+ * The steepest slope the energy's reconstruction takes, as a multiple of the smaller one-sided
+ * difference (2 is monotonized central, 1 minmod). With 2 and the sweep's single forward Euler
+ * stage, the surface of an opaque body sent out its light in pulses (a quarter of the luminosity
+ * up and down, with a period of some 40 sweeps); with 1.2 it is steady to 0.3% (docs/numerics.md
+ * section 24). As RAD_THETA_E in radiation/common.wgsl.
+ */
+export const RAD_THETA_E = 1.2;
+
+/** The energy's slope: the central difference, at most RAD_THETA_E times either one-sided one. */
+export function energySlope(a: number, b: number): number {
+  if (a * b <= 0) return 0;
+  return Math.sign(a) * Math.min(RAD_THETA_E * Math.abs(a), RAD_THETA_E * Math.abs(b), 0.5 * Math.abs(a + b));
+}
+
 export class RefRad1D {
   readonly o: Required<Omit<RefRadOptions, 'v' | 'labFrame' | 'eos' | 'holdFirst'>> & { v: number; labFrame: boolean; holdFirst: boolean };
   private readonly eos: NonNullable<RefRadOptions['eos']>;
@@ -121,8 +136,8 @@ export class RefRad1D {
     let fL = red(q1);
     let fR = red(q2);
     if (this.o.order === 2) {
-      const eL = q1.E + 0.5 * mcSlope(q1.E - q0.E, q2.E - q1.E);
-      const eR = q2.E - 0.5 * mcSlope(q2.E - q1.E, q3.E - q2.E);
+      const eL = q1.E + 0.5 * energySlope(q1.E - q0.E, q2.E - q1.E);
+      const eR = q2.E - 0.5 * energySlope(q2.E - q1.E, q3.E - q2.E);
       const gL = fL + 0.5 * mcSlope(fL - red(q0), fR - fL);
       const gR = fR - 0.5 * mcSlope(fR - fL, red(q3) - fR);
       // Positivity: a face whose reconstructed state is not physical takes the cells' own.
