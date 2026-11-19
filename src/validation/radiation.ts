@@ -306,7 +306,7 @@ const RAD_BLOCK_TESTS: TestDef[] = [
   {
     id: 'rad-blocks-cooling-sphere',
     name: 'Radiation on blocks: the hot core behind its shell shines as on the fine uniform grid (2D, 128 cells, one level)',
-    criterion: 'The sphere of rad-cooling-sphere with only the blocks that hold the shell refined: after 1.5 time units its luminosity through the box faces (which coarse blocks hold) is within 1% of the uniform fine grid’s, and steady to 1% over 20 steps',
+    criterion: 'The sphere of rad-cooling-sphere with only the blocks that hold the shell refined: after 1.5 time units its luminosity through the box faces (which coarse blocks hold) is within 1% of the uniform fine grid’s, steady to 1% over 20 steps, and the same to 0.1% as the energy counted out of the box over them gives',
     async run(gpu) {
       const m: Record<string, number> = {};
       const n = 128;
@@ -325,6 +325,7 @@ const RAD_BLOCK_TESTS: TestDef[] = [
         let sum = 0;
         let lo = Infinity;
         let hi = 0;
+        const before = await sim.diagnostics();
         for (let k = 0; k < 20; k++) {
           sim.step(1);
           const l = (await sim.diagnostics()).radiation!.luminosity;
@@ -332,6 +333,8 @@ const RAD_BLOCK_TESTS: TestDef[] = [
           lo = Math.min(lo, l);
           hi = Math.max(hi, l);
         }
+        const after = await sim.diagnostics();
+        m[`${tag}_counted_luminosity`] = (after.radiation!.escaped - before.radiation!.escaped) / (after.t - before.t);
         m[`${tag}_luminosity`] = sum;
         m[`${tag}_swing`] = (hi - lo) / (hi + lo);
       };
@@ -343,7 +346,7 @@ const RAD_BLOCK_TESTS: TestDef[] = [
         await run('blocks', sim);
       });
       m.ratio = m.blocks_luminosity / m.uniform_luminosity;
-      return { pass: m.coarse_leaves > 0 && m.fine_leaves > 0 && Math.abs(m.ratio - 1) < 0.01 && m.blocks_swing < 0.01, metrics: m };
+      return { pass: m.coarse_leaves > 0 && m.fine_leaves > 0 && Math.abs(m.ratio - 1) < 0.01 && m.blocks_swing < 0.01 && Math.abs(m.blocks_counted_luminosity / m.blocks_luminosity - 1) < 1e-3, metrics: m };
     },
   },
   {
@@ -880,11 +883,12 @@ export const RAD_TESTS: TestDef[] = [
   {
     id: 'rad-cooling-sphere',
     name: 'Radiation: a hot core shining through an opaque shell gives the same luminosity at chat and 2 chat',
-    criterion: 'A core held at E = 1 inside a scattering shell (cell optical depth 5, so its speed of light is reduced by the per-cell rule) in transparent gas reaches a steady luminosity through the box faces (over 30 steps it stays within 2% of its mean) that differs by under 5% between chat = c/20 and c/10; the shell is reduced (r < 1) in both',
+    criterion: 'A core held at E = 1 inside a scattering shell (cell optical depth 5, so its speed of light is reduced by the per-cell rule) in transparent gas reaches a steady luminosity through the box faces (over 30 steps it stays within 2% of its mean, and the energy counted out of the box step by step over them gives the same luminosity to 0.1%) that differs by under 5% between chat = c/20 and c/10; the shell is reduced (r < 1) in both',
     async run(gpu) {
       const m: Record<string, number> = {};
       const lum: number[] = [];
       let steady = true;
+      let counted = true;
       const n = 64;
       for (const chat of [5, 10]) {
         const p = radGas({
@@ -909,6 +913,7 @@ export const RAD_TESTS: TestDef[] = [
           let sum = 0;
           let lo = Infinity;
           let hi = 0;
+          const before = await sim.diagnostics();
           for (let k = 0; k < 30; k++) {
             sim.step(1);
             const l = (await sim.diagnostics()).radiation!.luminosity;
@@ -916,6 +921,10 @@ export const RAD_TESTS: TestDef[] = [
             lo = Math.min(lo, l);
             hi = Math.max(hi, l);
           }
+          // The light curve's luminosity: the energy the GPU counted out of the box over the time.
+          const after = await sim.diagnostics();
+          m[`chat${chat}_counted_luminosity`] = (after.radiation!.escaped - before.radiation!.escaped) / (after.t - before.t);
+          counted &&= Math.abs(m[`chat${chat}_counted_luminosity`] / (sum / 30) - 1) < 1e-3;
           m[`chat${chat}_swing`] = (hi - lo) / (hi + lo);
           steady &&= (hi - lo) / (hi + lo) < 0.02;
           const d = await sim.diagnostics();
@@ -926,7 +935,7 @@ export const RAD_TESTS: TestDef[] = [
         });
       }
       m.ratio = lum[1] / lum[0];
-      return { pass: steady && Math.abs(m.ratio - 1) < 0.05 && lum[0] > 0 && m.chat5_reduced_share > 0 && m.chat10_reduced_share > 0, metrics: m };
+      return { pass: steady && counted && Math.abs(m.ratio - 1) < 0.05 && lum[0] > 0 && m.chat5_reduced_share > 0 && m.chat10_reduced_share > 0, metrics: m };
     },
   },
   ...RAD_BLOCK_TESTS,

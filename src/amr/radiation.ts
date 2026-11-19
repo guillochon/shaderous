@@ -12,7 +12,7 @@ import { bindGroupUsed, computePipeline, type Bindable } from '../gpu/device';
 import { Reducer } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { radSweeps } from '../radiation/radiation';
-import { RAD_DIAG_OPS, radDiagnosticsFrom, type RadDiagnostics } from '../radiation/passes';
+import { ESCAPE_FLOATS, RAD_DIAG_OPS, radDiagnosticsFrom, type RadDiagnostics } from '../radiation/passes';
 import { BS, PAD } from './tree';
 
 export interface AmrRadInit {
@@ -53,6 +53,11 @@ export class AmrRad {
   private pSweep!: GPUComputePipeline;
   private pCommit!: GPUComputePipeline;
   private pRegrid!: GPUComputePipeline;
+  private pEscape!: GPUComputePipeline;
+  /** gEscape[state parity][R parity] */
+  private gEscape: GPUBindGroup[][] = [];
+  /** the energy that has left the box (amr/rad_escape.wgsl) */
+  private escaped: GPUBuffer;
   /** gAssemble[state parity][R parity][first] */
   private gAssemble: GPUBindGroup[][][] = [];
   /** gAdvect[state parity][R parity] */
@@ -78,7 +83,8 @@ export class AmrRad {
       d.queue.writeBuffer(b, 0, new Uint32Array([first, 0, 0, 0]));
       return b;
     });
-    this.staging = d.createBuffer({ size: RAD_DIAG_OPS.length * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    this.staging = d.createBuffer({ size: (RAD_DIAG_OPS.length + ESCAPE_FLOATS) * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    this.escaped = d.createBuffer({ label: 'radiation escaped', size: ESCAPE_FLOATS * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
   }
 
   static async create(o: AmrRadInit, slots: Record<string, string>, comp: Record<number, GPUTextureView>): Promise<AmrRad> {
@@ -98,12 +104,13 @@ export class AmrRad {
     );
     red.catch(() => {});
     const pipe = (file: string, label: string) => computePipeline(d, assemble(file, slots), label);
-    [this.pAssemble, this.pAdvect, this.pSweep, this.pCommit, this.pRegrid] = await Promise.all([
+    [this.pAssemble, this.pAdvect, this.pSweep, this.pCommit, this.pRegrid, this.pEscape] = await Promise.all([
       pipe('amr/rad_assemble.wgsl', 'amr radiation assembly'),
       pipe('amr/rad_advect.wgsl', 'amr radiation advection'),
       pipe('amr/rad_sweep.wgsl', 'amr radiation sweep'),
       pipe('amr/rad_commit.wgsl', 'amr radiation commit'),
       pipe('amr/rad_regrid.wgsl', 'amr radiation regrid'),
+      pipe('amr/rad_escape.wgsl', 'amr radiation escaped'),
     ]);
     this.red = await red;
     const tree = { 30: bt, 31: listLeaf };
@@ -129,6 +136,7 @@ export class AmrRad {
     this.gCommit = both((p, q) =>
       bindGroupUsed(d, this.pCommit, { 0: params, 2: v(state[p][0]), 3: v(state[p][1]), 5: v(this.G[q]), 7: v(state[1 - p][0]), 8: v(state[1 - p][1]), ...tree, ...comp }),
     );
+    this.gEscape = both((p, q) => bindGroupUsed(d, this.pEscape, { 0: params, 1: clock, 2: v(state[p][1]), 3: v(this.R[q]), 4: this.escaped, ...tree }));
     this.gRegrid = [0, 1].map((q) => bindGroupUsed(d, this.pRegrid, { 0: params, 2: v(this.R[q]), 3: ra, 6: v(this.R[1 - q]), 7: this.o.rg, ...tree }));
   }
 
@@ -166,6 +174,15 @@ export class AmrRad {
     pass.setPipeline(this.pCommit);
     pass.setBindGroup(0, this.gCommit[s][this.cur]);
     this.o.interior(pass, leaves);
+    // What left the box over this step (amr/rad_escape.wgsl).
+    pass.setPipeline(this.pEscape);
+    pass.setBindGroup(0, this.gEscape[s][this.cur]);
+    pass.dispatchWorkgroups(1);
+  }
+
+  /** Start the count of the energy that has left the box again (a new run). */
+  resetEscaped() {
+    this.o.device.queue.writeBuffer(this.escaped, 0, new Float32Array(ESCAPE_FLOATS));
   }
 
   /**
@@ -194,6 +211,7 @@ export class AmrRad {
     this.red.encode(pass, 2 * parity + this.cur);
     pass.end();
     enc.copyBufferToBuffer(this.red.result, 0, this.staging, 0, RAD_DIAG_OPS.length * 4);
+    enc.copyBufferToBuffer(this.escaped, 0, this.staging, RAD_DIAG_OPS.length * 4, ESCAPE_FLOATS * 4);
     d.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
@@ -214,5 +232,6 @@ export class AmrRad {
     for (const t of [...this.R, ...this.G, this.RA, this.RK]) t.destroy();
     for (const b of this.info) b.destroy();
     this.staging.destroy();
+    this.escaped.destroy();
   }
 }

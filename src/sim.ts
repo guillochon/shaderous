@@ -1966,6 +1966,7 @@ export class Sim implements Simulation {
     if (rad) {
       diffusionFlux(c, [nx, ny, nz], this.dx, rad, radRho!, radT!, radGiven!);
       this.rad!.set(rad);
+      this.rad!.resetEscaped();
     }
     if (G) {
       this.speciesCur = 0;

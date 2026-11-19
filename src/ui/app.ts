@@ -4415,8 +4415,8 @@ function liveText(parent: HTMLElement): (v: string) => void {
 
 // [label, tooltip, CSV column, a count]; DIAG_SIDE puts each in the left (0) or right column.
 // BURN_COL is burning's, shown only for a run that burns; LIQUID_COL a liquid's, shown only for
-// one (eos/liquid.wgsl); the last MAG_ROWS are a magnetic
-// field's, shown only with one.
+// one (eos/liquid.wgsl); RAD_ROWS from RAD_COL are radiation transport's, shown only with it
+// (the first is the light curve); the last MAG_ROWS are a magnetic field's, shown only with one.
 const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['t', 'Time', 't'], ['dt', 'Timestep', 'dt'], ['steps', 'Steps taken', 'steps', true], ['mass', 'Total mass', 'mass'],
   ['Mach', 'Maximum Mach number', 'max_mach'], ['floor', 'Cells at the density or pressure floor (emptied voids, usually)', 'floored_cells', true],
@@ -4425,6 +4425,11 @@ const DIAG_ROWS: [string, string, string, boolean?][] = [
   ['E kin', 'Kinetic energy', 'e_kin'], ['E int', 'Internal energy', 'e_int'], ['E grav', 'Gravitational energy', 'e_grav'], ['E tot', 'Total energy (with a magnetic field, its energy included)', 'e_tot'],
   ['L nuc', 'Nuclear heating: the energy burning released per unit time over the last step, summed over the gas', 'l_nuc'],
   ['δρ max', 'A liquid: the largest departure of its density from the reference, |ρ / ρ₀ − 1|. It is about the Mach number squared, and is the error of treating the flow as incompressible: raise the sound speed to lower it', 'rho_deviation'],
+  ['L rad', 'Luminosity: the radiation energy leaving through the open faces of the box per unit time, averaged over the time since the readout before (summed step by step, so nothing between readouts is missed). Its history is the bolometric light curve, as seen at the box’s edge: light takes the box’s size over the reduced speed of light to get there', 'l_rad'],
+  ['E rad', 'Radiation energy in the box', 'e_rad'],
+  ['E esc', 'Radiation energy that has left through the open faces of the box since the run started', 'e_escaped'],
+  ['T rad', 'Largest radiation temperature, (E / a)^(1/4), of any cell', 't_rad_max'],
+  ['ĉ slow', 'Cells where the gas’s speed plus its sound speed is over a third of the reduced speed of light: raise the reduced speed of light if this is not zero', 'chat_slow_cells', true],
   ['E mag', 'Magnetic energy, the sum of B² / 2 over the cells (code units: B_Gauss = √(4π) B)', 'e_mag'],
   ['|B| max', 'Largest field strength at a cell center (code units: B_Gauss = √(4π) B)', 'b_max'],
   ['β min', 'Least plasma beta, 2p / B², of any cell: below 1 the field’s pressure dominates the gas’s', 'beta_min'],
@@ -4441,23 +4446,45 @@ const MAG_ROWS = 4 + DISK_ROWS;
 const BURN_COL = 14;
 /** A liquid's row (its largest density departure). */
 const LIQUID_COL = 15;
+/** Radiation transport's rows: luminosity, energy, energy escaped, largest temperature, cells too fast for chat. */
+const RAD_COL = 16;
+const RAD_ROWS = 5;
+const radCol = (c: number) => c >= RAD_COL && c < RAD_COL + RAD_ROWS;
 // Seven a side; burning's row left; a field's four rows two a side (|B| max, beta min left;
 // E mag, div B right), and a disk's likewise (the alphas left, the Qs right).
-const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1];
+// Radiation's five: luminosity, temperature and the warning left; the two energies right.
+const DIAG_SIDE = [0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1];
 /** What each diagnostic measures, in DIAG_ROWS order (the field's in code units). */
-const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'power', null, 'energy', null, null, null, null, null, null, null];
+const DIAG_MEASURES: Measure[] = ['time', 'time', null, 'mass', null, null, null, 'momentum', 'momentum', 'momentum', 'energy', 'energy', 'energy', 'energy', 'power', null, 'power', 'energy', 'energy', 'temperature', null, 'energy', null, null, null, null, null, null, null];
 /** A liquid's largest |rho / rho0 - 1|, from the density's range (NaN for any other gas). */
 const liquidDeviation = (d: Diagnostics): number => {
   if (cfg?.eos !== 'liquid') return NaN;
   const r0 = cfg.eosParams.liqRho;
   return Math.max(Math.abs(d.ranges[0][0] / r0 - 1), Math.abs(d.ranges[0][1] / r0 - 1));
 };
+/** The readout before, for the luminosity: its time, the energy that had left, and the luminosity shown. */
+let radPrev: { t: number; escaped: number; lum: number } | null = null;
+/**
+ * Radiation's rows (RAD_ROWS of them; NaN without it). The luminosity is the energy that left
+ * since the readout before over the time between: the first readout's, and one that repeats a
+ * time, is the readout's own.
+ */
+function radValues(d: Diagnostics): number[] {
+  const r = d.radiation;
+  if (!r) return new Array<number>(RAD_ROWS).fill(NaN);
+  let lum = r.luminosity;
+  if (radPrev && d.t > radPrev.t) lum = (r.escaped - radPrev.escaped) / (d.t - radPrev.t);
+  else if (radPrev && d.t === radPrev.t) lum = radPrev.lum; // paused: the readout repeats
+  radPrev = { t: d.t, escaped: r.escaped, lum };
+  return [lum, r.eRad, r.escaped, r.maxTrad, r.tooFast];
+}
 /** The diagnostics in DIAG_ROWS order. */
 const diagValues = (d: Diagnostics): number[] => {
   const m = d.magnetic;
   const k = m?.disk;
   return [
     d.t, d.dt, d.steps, d.mass, d.maxMach, d.floored, d.jeansUnresolved, ...d.momentum, d.eKin, d.eInt, d.eGrav, d.eTot, d.nuclearHeating, liquidDeviation(d),
+    ...radValues(d),
     ...(m ? [m.eMag, m.bMax, m.betaMin, m.divB] : new Array<number>(MAG_ROWS - DISK_ROWS).fill(NaN)),
     ...(k ? [k.alphaMaxwell, k.alphaReynolds, k.qz, k.qphi] : new Array<number>(DISK_ROWS).fill(NaN)),
   ];
@@ -4576,7 +4603,8 @@ function diagCell(col: number, label: string, into: Element): DiagCell {
 const diagCells = DIAG_ROWS.map(([label], i) => diagCell(i, label, diagCols[DIAG_SIDE[i]]));
 /** Show the magnetic field's rows with one, hide them without; a disk's only for a disk. */
 /** Show a magnetic field's rows (and a disk's), and burning's. */
-function showMagneticRows(on: boolean, disk = false, burn = false) {
+function showMagneticRows(on: boolean, disk = false, burn = false, rad = false) {
+  $('diag').classList.toggle('rad', rad);
   $('diag').classList.toggle('mag', on);
   $('diag').classList.toggle('disk', on && disk);
   $('diag').classList.toggle('burn', burn);
@@ -4584,6 +4612,7 @@ function showMagneticRows(on: boolean, disk = false, burn = false) {
     let show: boolean;
     if (c.col === BURN_COL) show = burn;
     else if (c.col === LIQUID_COL) show = cfg?.eos === 'liquid';
+    else if (radCol(c.col)) show = rad;
     else if (magneticCol(c.col)) show = on && (disk || !diskCol(c.col));
     else continue;
     for (const el of [c.dt, c.dd, c.spark]) el.style.display = show ? '' : 'none';
@@ -4669,10 +4698,15 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
   if (of !== diagOf) {
     diagHistory.clear();
     sinkPrev = [];
+    radPrev = null;
     diagOf = of;
-    showMagneticRows(!!of.cfg.problem.mhd, !!of.cfg.problem.disk, !!burnSpec(of.cfg));
+    showMagneticRows(!!of.cfg.problem.mhd, !!of.cfg.problem.disk, !!burnSpec(of.cfg), of.cfg.radiation === 'm1');
     showDiagUnits();
-  } else if (last && d.steps < last[2]) sinkPrev = []; // the run went back: its history starts again
+  } else if (last && d.steps < last[2]) {
+    // The run went back: its history starts again.
+    sinkPrev = [];
+    radPrev = null;
+  }
   const u = units();
   const values = [...diagValues(d), ...sinkValues(d)];
   diagHistory.push(values);
@@ -4684,6 +4718,8 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
     showDiagUnits();
   }
   const warns = [false, false, false, false, false, d.floored > 0, d.jeansUnresolved > 0 && !cfg.jeansFloor];
+  // Radiation: the reduced speed of light is too slow for the gas somewhere.
+  warns[RAD_COL + 4] = (d.radiation?.tooFast ?? 0) > 0;
   const cells = [...diagCells, ...sinkBlocks.slice(0, n).flatMap((b) => b.cells)];
   for (const cell of cells) {
     cell.set(shownValue(values[cell.col], DIAG_COLS[cell.col], u));
@@ -4703,7 +4739,7 @@ function exportDiagnostics() {
   const width = diagHistory.rows.reduce((w, r) => Math.max(w, r.length), BASE_COLS);
   // A magnetic field's columns only with one, a disk's only for a disk, burning's only for a run that burns.
   const burns = !!burnSpec(cfg);
-  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) && (i !== BURN_COL || burns) && (i !== LIQUID_COL || cfg.eos === 'liquid') ? [i] : []));
+  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) && (i !== BURN_COL || burns) && (i !== LIQUID_COL || cfg.eos === 'liquid') && (!radCol(i) || cfg.radiation === 'm1') ? [i] : []));
   const csv = diagHistory.csv(cols, cols.map((i) => DIAG_COLS[i].csv!));
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');

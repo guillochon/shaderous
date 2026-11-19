@@ -1611,7 +1611,10 @@ export class AmrSim implements Simulation {
     for (const m of leafMass) mass += m;
     this.cur = 0;
     this.speciesCur = 0;
-    if (this.rad) this.rad.cur = 0;
+    if (this.rad) {
+      this.rad.cur = 0;
+      this.rad.resetEscaped();
+    }
     this.pending = null;
     this.stepsSinceFlag = 0;
     this.regrids = 0;

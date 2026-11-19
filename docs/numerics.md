@@ -2718,8 +2718,18 @@ $`c`$, $`a`$ and these constants come from the units and composition.
 
 **Output.** The view's Radiation group (energy, temperature, $`|\mathbf F|`$, $`f`$,
 $`\tau_c`$, $`r`$); the diagnostics' radiation energy, $`\sum E/r`$, the share of $`E`$ in reduced
-cells, the luminosity through the open faces, and the warning counts; `.athdf` files carry
+cells, the luminosity through the open faces, the energy that has left through them, and the
+warning counts; `.athdf` files carry
 `Er`, `Fr1`-`Fr3`, and a run restarts from one with its radiation bit for bit.
+
+**The light curve.** The luminosity is the outward $`\mathbf F\cdot\hat n\,dA`$ of the cells on
+the open faces of the box. After each step's sweeps one small pass (`radiation/escape.wgsl`,
+`amr/rad_escape.wgsl`) adds it times the step to a running total of the energy that has left,
+so the luminosity the Diagnostics panel shows (`L rad`, with `E rad`, `E esc`, `T rad` and the
+count of cells too fast for $`\hat c`$) is that energy's change over the time between two
+readouts: nothing between them is missed, and its history, in the panel's plot and its CSV, is
+the bolometric light curve. It is the light at the box's edge, which left the gas a box's size
+over $`\hat c`$ earlier, and in the gas's frame. The count starts again from zero on a restart.
 
 ### On the adaptive mesh
 
