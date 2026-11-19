@@ -20,8 +20,8 @@ Every number quoted in `paper/main.tex` comes from one of the sources below. All
 | Local timesteps: cycle length; Sedov 3D 256 with 3 levels; isothermal collapse 256 with 3 levels | up to 8 substeps; 2.2x fewer block updates, 1.9x faster; 2.3x fewer, 1.6x faster | "Local timesteps" |
 | Local timesteps: fallback thresholds | share of updates above 80% (65% with gravity) | same |
 | Local timesteps: cost of extra passes | about 10% per block update without gravity, 50 to 70% with gravity (3D) | same |
-| Evrard energy loss with local timesteps | 2.1 times (128, 2 levels), 1.1 times (256, 3 levels) | same |
-| AMR gravity: error on a uniform sphere | below 0.3% with three levels | "Gravity on the adaptive mesh" |
+| Evrard energy loss with local timesteps | 1.0 times that of one timestep (128, 2 levels; 2.1 before the half step took the potential's curvature and the history was kept into the cycles) | same |
+| AMR gravity: error on a uniform sphere | 0.03% with two levels at 128, 0.05% with three at 256 (0.15% on 64^3 blocks) | "Gravity on the adaptive mesh" |
 | AMR block budget in 3D | 2197 blocks, about 3 GB with gravity | same |
 | Viscosity: cost of the flux update; diffusive signal speed | 1.6 times in 2D, 1.8 times in 3D, conduction alone unmeasurable; 2.5 d D / dx | "Viscosity and conduction" |
 | Point-mass pair limit: fraction, steps per circular orbit; eccentricity-0.9 orbit over two periods | CFL / 16, about 125 steps; energy to 0.7% with the limit, 94% lost without | "Point masses" |

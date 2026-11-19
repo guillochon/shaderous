@@ -23,6 +23,18 @@ fn coarse_phi(cs: i32, q: vec3<i32>, fallback: f32) -> f32 {
   return textureLoad(PHI, blk_origin(r.slot) + r.l).x;
 }
 
+// The same for an interpolation point q off coarse cell lc (value `base`): where q cannot be
+// reached (beyond an isolated boundary of the box, or where the level ends), its value extended
+// linearly through lc from the opposite cell, 2 base - phi(2 lc - q), and base only if that is
+// unreachable too. Taken as base, the interpolation fell to first order along that axis: at a
+// refinement boundary that met the box's face, the potential of a uniform sphere was off by
+// 0.17% there, against 0.02% elsewhere on the level.
+fn coarse_phi_lin(cs: i32, lc: vec3<i32>, q: vec3<i32>, base: f32) -> f32 {
+  let r = g_resolve(cs, q, BS);
+  if (r.ok) { return textureLoad(PHI, blk_origin(r.slot) + r.l).x; }
+  return 2.0 * base - coarse_phi(cs, 2 * lc - q, base);
+}
+
 // Only the face ghosts get an invocation: per block, 6 faces x 2 layers x BS x BS cells (in 2D
 // 4 x 2 x BS), in rows of 64 (workgroup x), one block of the list per workgroup row (y), the
 // rows in slabs of FLAT_ROWS along z as a flat pass's (amr/list.wgsl). Edge and corner ghosts
@@ -77,7 +89,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
       for (var i = 0; i < 4; i++) {
         let s = vec3<i32>(i & 1, (i >> 1u) & 1, 0);
         let w = mix(vec2<f32>(0.75), vec2<f32>(0.25), vec2<f32>(s.xy));
-        sum += w.x * w.y * coarse_phi(cs, lc + s * d, base);
+        sum += w.x * w.y * coarse_phi_lin(cs, lc, lc + s * d, base);
       }
       textureStore(PHI, c, vec4<f32>(sum, 0.0, 0.0, 0.0));
       return;
@@ -85,7 +97,7 @@ fn main(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index) 
     for (var i = 0; i < 8; i++) {
       let s = vec3<i32>(i & 1, (i >> 1u) & 1, (i >> 2u) & 1);
       let w = mix(vec3<f32>(0.75), vec3<f32>(0.25), vec3<f32>(s));
-      sum += w.x * w.y * w.z * coarse_phi(cs, lc + s * d, base);
+      sum += w.x * w.y * w.z * coarse_phi_lin(cs, lc, lc + s * d, base);
     }
     textureStore(PHI, c, vec4<f32>(sum, 0.0, 0.0, 0.0));
     return;

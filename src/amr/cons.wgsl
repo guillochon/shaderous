@@ -84,7 +84,14 @@ fn slope_between(uc: Cons, m: Cons, p: Cons) -> Cons {
 // slopes are scaled back together, by the one factor that keeps the density and both energies
 // of every fine cell at least half the coarse cell's. The factor depends on the coarse data
 // only, so the fine cells still average to the coarse one.
+// The slopes along each axis, already scaled back by that factor.
+struct Slopes { x: Cons, y: Cons, z: Cons, f: f32 }
+
 fn prolong(uc: Cons, xm: MaybeCons, xp: MaybeCons, ym: MaybeCons, yp: MaybeCons, zm: MaybeCons, zp: MaybeCons, par: vec3<i32>) -> Cons {
+  return prolong_child(uc, prolong_slopes(uc, xm, xp, ym, yp, zm, zp), par);
+}
+
+fn prolong_slopes(uc: Cons, xm: MaybeCons, xp: MaybeCons, ym: MaybeCons, yp: MaybeCons, zm: MaybeCons, zp: MaybeCons) -> Slopes {
   var sx = Cons(vec4<f32>(0.0), vec4<f32>(0.0));
   var sy = sx;
   var sz = sx;
@@ -95,7 +102,15 @@ fn prolong(uc: Cons, xm: MaybeCons, xp: MaybeCons, ym: MaybeCons, yp: MaybeCons,
   let drop = 0.25 * (abs(vec3<f32>(sx.a.x, sx.b.x, sx.b.y)) + abs(vec3<f32>(sy.a.x, sy.b.x, sy.b.y)) + abs(vec3<f32>(sz.a.x, sz.b.x, sz.b.y)));
   let room = 0.5 * max(vec3<f32>(uc.a.x, uc.b.x, uc.b.y), vec3<f32>(0.0));
   let fit = min(vec3<f32>(1.0), room / max(drop, vec3<f32>(1.0e-37)));
-  let f = min(fit.x, min(fit.y, fit.z));
+  return Slopes(sx, sy, sz, min(fit.x, min(fit.y, fit.z)));
+}
+
+// The fine cell of parity `par` from the coarse cell and its slopes.
+fn prolong_child(uc: Cons, s: Slopes, par: vec3<i32>) -> Cons {
+  let f = s.f;
+  let sx = s.x;
+  let sy = s.y;
+  let sz = s.z;
   var off = f * (vec3<f32>(par) - 0.5) * 0.5;   // -1/4 or +1/4 of a coarse cell, scaled back
   // An axisymmetric run: about the coarse ring's centroid, not its middle, so that the fine
   // rings' volume-weighted mean is the coarse one (their weights 1 -+ 1 / (4 (I + 1/2))).

@@ -56,7 +56,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     if (cylindrical()) { g_cyl_ic = f32(blk_coord(src).x * BS + lc.x) + 0.5; }
     if (spherical()) { g_sph_pro = sph_centroid(bt(src, 0u), (blk_coord(src) * BS + lc).xy); }
-    u = prolong(uc, cons_from_w(c - ex), cons_from_w(c + ex), cons_from_w(c - ey), cons_from_w(c + ey), zm, zp, l & vec3<i32>(1));
+    let s = prolong_slopes(uc, cons_from_w(c - ex), cons_from_w(c + ex), cons_from_w(c - ey), cons_from_w(c + ey), zm, zp);
+    u = prolong_child(uc, s, l & vec3<i32>(1));
+    // The total energy: each child's own kinetic energy and its interpolated internal energy,
+    // plus one offset shared by all the children that keeps their mean the coarse cell's.
+    // Interpolated on its own, E carries its own slope, and E - KE in a child is then off by
+    // terms of the order of the kinetic energy's variation over the coarse cell: in cold gas
+    // moving fast, many times its internal energy. Where the flow converges E is little more than
+    // KE, so the dual-energy switch (hydro/dual_energy.wgsl) takes that difference as heat: a
+    // Zel'dovich pancake refined at its center was heated a hundred-million-fold there, and its
+    // density was off by 6.5% at a = 0.05 against 0.6% without the re-mesh. The offset is the
+    // kinetic energy the children's spread adds to the coarse cell's (never positive, as KE is
+    // convex in density and momentum), taken from the heat: where that leaves E - KE below the
+    // switch, the interpolated internal energy carries on.
+    let nz = select(2, 1, is2d());
+    var ke = 0.0;
+    for (var k = 0; k < nz; k++) {
+      for (var j = 0; j < 2; j++) {
+        for (var i = 0; i < 2; i++) {
+          let ch = prolong_child(uc, s, vec3<i32>(i, j, k));
+          ke += child_weight(src, lc, i, j) * 0.5 * dot(ch.a.yzw, ch.a.yzw) / max(ch.a.x, P.rho_floor);
+        }
+      }
+    }
+    ke *= select(0.125, 0.25, is2d());
+    u.b.x = 0.5 * dot(u.a.yzw, u.a.yzw) / max(u.a.x, P.rho_floor) + u.b.y + (uc.b.x - uc.b.y - ke);
   } else if (kind == 3) {
     let ch = RG[r + 4u + u32(h.x | (h.y << 1u) | (h.z << 2u))];
     let o = blk_origin(ch);

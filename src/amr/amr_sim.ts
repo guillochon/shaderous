@@ -1128,7 +1128,8 @@ export class AmrSim implements Simulation {
     this.device.queue.writeBuffer(this.bins, 0, new Uint32Array(this.cap + 1));
     if (this.selfGravity) {
       const pass = beginPass(enc);
-      this.grav!.encodeForget(pass, this.nAll);
+      if (live && this.binsPrimed === false) this.grav!.encodeSeed(pass, this.nAll);
+      else this.grav!.encodeForget(pass, this.nAll);
       pass.end();
     }
     this.binsPrimed = live;

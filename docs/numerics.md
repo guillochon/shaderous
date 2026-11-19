@@ -1092,7 +1092,15 @@ into balance (`problems/settle.ts`).
 averaged into the parents. A level's ghost cells come from its neighbors or are interpolated
 from the level above. A multigrid cycle runs inside the blocks (16, 8, 4, 2 and 1 cells across).
 The coupling between levels is one-way: a fine level never corrects the coarse potential
-beneath it. On a uniform sphere the error stays below 0.3% with three levels. A new mesh is
+beneath it. A level's boundary values are trilinear in the coarser potential; where one of the
+coarse cells the interpolation needs cannot be reached (beyond an isolated face of the box, or
+where the coarser level itself ends) it is extended linearly through the nearest coarse cell.
+Taken as that cell's value, as it once was, the interpolation fell to first order along the
+axis: the potential of a uniform sphere was off by 0.17% (two levels at 128) and 0.26% (three
+at 256) at the edges of the refined regions, against 0.02% elsewhere, and so got worse as
+levels were added. It is now 0.03% and 0.05%, below the 0.15% of 64^3 blocks with no
+refinement; re-solving from scratch with 12 V-cycles a level changes none of these, so the
+iteration has converged. A new mesh is
 solved level by level from the coarsest down. During a run all levels relax in the same
 dispatches, each against the boundary values its coarser level had at the start of the cycle,
 so the cost does not grow with the depth of the tree.
@@ -1137,7 +1145,12 @@ a hundredfold, after which the dual-energy switch kept the drained value. In kic
 star's entropy holds to 0.1 dex. These fields are external, so the gas's own energy is not
 conserved under them in either form.
 
-The half-step potential $`\Phi^{n+1/2}`$ is extrapolated from the last two solves.
+The half-step potential $`\Phi^{n+1/2}`$ is extrapolated from the last two solves. What
+conserves energy is the mean of the potentials at the two ends of the step (the work of the
+mass fluxes is then exactly the change in $`\tfrac12\sum\rho\Phi`$), which in a collapse runs
+ahead of a linear extrapolation by the potential's curvature in time. With per-block
+timesteps ([§18](#18-local-per-block-timesteps)) the extrapolation takes that curvature from
+the rates of the block's last two steps.
 
 ## 15. Point masses and sinks
 
@@ -1276,7 +1289,17 @@ disk at the finest level in our tests. Further criteria:
 
 The mesh is rebuilt every 8 steps from a per-block indicator read back without blocking. New
 leaves are filled by copying, by restriction (averaging the $`2^d`$ children, which conserves),
-or by prolongation with MC-limited linear interpolation, which also conserves.
+or by prolongation with MC-limited linear interpolation, which also conserves. The total energy
+is not interpolated with its own slope: a new cell gets its own kinetic energy (from its
+interpolated density and momentum), its interpolated internal energy, and one offset shared by
+its siblings that keeps their mean $`E`$ the coarse cell's. The offset is the kinetic energy
+that the spread of velocities among the children adds (never positive, as $`|\mathbf{m}|^2/\rho`$
+is convex), taken from the heat. Interpolated on its own, $`E`$ left $`E - KE`$ off by terms of
+the order of the kinetic energy's variation across the coarse cell, which in cold, fast gas is
+many times its heat, and where the flow converges (so that $`E`$ is little more than $`KE`$)
+the dual-energy switch took that for heat. A Zel'dovich pancake refined at its caustic was
+heated $`10^8`$-fold there ([§22](#comoving-coordinates)). With a magnetic field $`E`$ is
+rebuilt after a re-mesh in any case.
 
 **A full block budget.** The atlas holds a fixed number of blocks, set by the GPU memory budget
 ([architecture.md](architecture.md#gpu-memory-budget)). When a re-mesh wants more than it holds,
@@ -1326,15 +1349,27 @@ as GADGET-2 ([Springel 2005][Springel2005]).
   took none at all).
 - With self-gravity the potential is solved on every block at the end of a cycle. In between it
   is solved only on blocks finishing a step, and carried forward elsewhere at the rate at which
-  it last changed. Point masses move every substep.
+  it last changed. Point masses move every substep. A block's half-step potential, for the
+  energy's work, is $`\Phi + \tfrac{\Delta t}{2}(2r_1 - r_0)`$ with $`r_1`$ and $`r_0`$ the rates
+  over its last two steps (taken as equal in length): the mean of $`\Phi`$ and a quadratic's
+  next value. When the run goes over from single steps to cycles, the rate starts from the last
+  single step rather than from nothing.
 
 The extra passes cost about 10% per block update without gravity and 50 to 70% with it (3D).
 So the share of updates actually made is read back every few cycles, and the run falls back to
 one timestep while that share is above 80% (65% with gravity). Measured against one timestep:
 a 3D Sedov blast at 256 cells with 3 levels makes 2.2 times fewer block updates and runs 1.9
 times faster; an isothermal collapse at 256 with 3 levels makes 2.3 times fewer and runs 1.6
-times faster. With gravity, energy is conserved slightly less well, because a block that steps
-less often has its half-step potential extrapolated further.
+times faster. With gravity, energy is conserved as well as with one timestep: an Evrard collapse
+(128, 2 levels, to $`t = 0.8`$) loses $`5.7\times10^{-4}`$ of it against $`5.8\times10^{-4}`$. It
+lost $`1.2\times10^{-3}`$, which had been put down to slow blocks extrapolating their
+potential further. That was not it: with every block forced into the fastest bin the loss was
+the same. Two things were. The potential's history was dropped when the cycles began, so the
+first cycle's half step was the potential itself. And at the start of each cycle the half step
+was extrapolated linearly over the new step, which lags the mean of the step's two potentials
+in a collapse; single steps lag it as well, but their $`\tfrac32\Phi^n - \tfrac12\Phi^{n-1}`$
+over-extrapolates when the step shrinks, which happens to offset it (skipping that
+re-extrapolation, cycles of two substeps reproduced the single steps' loss to four digits).
 
 ## 19. Accelerating frames and damping zones
 
@@ -2281,9 +2316,16 @@ pressure as $`a^{3 - 3\gamma}`$ ($`5\times10^{-7}`$, uniform grid and blocks); a
 grows as $`a`$ (0.8%); a traveling sound wave whose phase, over 25 radians from $`a = 0.1`$ to
 0.3, follows $`\int k c_s/a\,dt`$ with the proper sound speed falling as $`1/a`$ (0.07%, its
 comoving wavelength fixed); gas and radiation expanding (above); and the pancake against its
-exact solution at half its caustic time (density 0.6%, velocity 0.25%; on blocks 6.5% in
-density, at the pancake's center, which is not understood: the uniform grid at the blocks'
-finest cell size gets 0.6%).
+exact solution at half its caustic time (density 0.6%, velocity 0.25%; on blocks 0.7% and 0.2%
+on a mesh refined as it runs, and 0.7% and 0.3% on one fixed with the caustic in its fine half).
+The blocks were off by 6.5% in density at the caustic until a re-mesh built each new cell's
+total energy from its own kinetic energy ([§17](#17-adaptive-mesh-refinement)): the cold gas
+there was split into finer blocks after the first steps, the interpolated $`E - KE`$ was
+$`10^{-4}`$ against a heat of $`10^{-12}`$, and the dual-energy switch kept it, so the caustic
+formed from gas $`10^8`$ times too hot. Ruled out on the way: a mesh fine everywhere from the
+start, or coarse everywhere, reproduces the uniform grid at that size to every digit; the error
+followed the caustic when it was moved off the blocks' faces; and with no re-mesh the coarse-fine
+boundary, a quarter of the box from the caustic, costs nothing measurable.
 
 ### Shearing box
 

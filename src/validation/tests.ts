@@ -1246,7 +1246,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-gravity-static',
     name: 'Adaptive mesh: Poisson solve and its coupling',
     criterion:
-      'Potential of a uniform sphere within 1% of the analytic solution everywhere, on meshes with 0, 2 and 3 levels of refinement; Jeans growth rate on the block grid within 5% of linear theory',
+      'Potential of a uniform sphere within 0.3% of the analytic solution everywhere on 64^3 blocks with no refinement (0.15%, the grid’s own error), and within 0.1% with 2 levels at 128 and 3 at 256 (0.03% and 0.05%: finer, so better; 0.17% and 0.26% while a coarse cell the interpolation of a level’s boundary values could not reach, beyond the box or where the coarser level ends, was taken as the cell beside it, docs/numerics.md section 13); Jeans growth rate on the block grid within 5% of linear theory',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -1262,7 +1262,7 @@ export const TESTS: TestDef[] = [
           const st = sim.tree.stats();
           metrics[`sphere_${n}_L${levels}_max_error`] = worst;
           metrics[`sphere_${n}_L${levels}_leaf_blocks`] = st.leaves;
-          pass &&= worst < 0.01 && st.deepest === levels;
+          pass &&= worst < (levels === 0 ? 0.003 : 0.001) && st.deepest === levels;
         });
       }
       await withAmr(gpu, jeans, 64, { amrLevels: 1, refineHi: 1e-6, refineLo: 1e-7 }, async (sim) => {
@@ -1376,7 +1376,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-time-bins',
     name: 'Adaptive mesh: per-block timesteps (Sod 2D, Sedov 3D, Evrard collapse)',
     criterion:
-      'With blocks stepping up to 8 times less often than the fastest: Sod L1 density error < 0.003 and Sedov shock radius within 2%, as with one timestep; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates (a small box: the blast fills much of it); Evrard collapse to t = 0.8 (64 steps) loses no more than 3 times the energy it does with one timestep, both at two V-cycles a step (about 2 here, 1.1 at twice the resolution: the half-step potential of a block that steps less often is extrapolated further)',
+      'With blocks stepping up to 8 times less often than the fastest: Sod L1 density error < 0.003 and Sedov shock radius within 2%, as with one timestep; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates (a small box: the blast fills much of it); Evrard collapse to t = 0.8 (64 steps) loses no more than 1.5 times the energy it does with one timestep, both at two V-cycles a step (about 1.0: it was 2.1 while the potential’s history was dropped as the cycles began and the half-step potential extrapolated linearly, which lags the mean of the step’s two potentials in a collapse; it was not that slow blocks extrapolate further, as the same loss with every block in the fastest bin showed. docs/numerics.md section 18)',
     async run(gpu) {
       const bins = { timeBins: 3, timeBinsAlways: true };
       const drift = (a: { mass: number; eTot: number }, b: { mass: number; eTot: number }) => [Math.abs(b.mass - a.mass) / a.mass, Math.abs(b.eTot - a.eTot) / Math.abs(a.eTot)];
@@ -1414,7 +1414,7 @@ export const TESTS: TestDef[] = [
       const eBins = await collapse(bins);
       return {
         pass:
-          sod.l1 < 0.003 && Math.max(...sod.drift) < 1e-6 && blast.err < 0.02 && Math.max(...blast.drift) < 1e-6 && blast.share < 0.85 && eBins < 3 * eOne,
+          sod.l1 < 0.003 && Math.max(...sod.drift) < 1e-6 && blast.err < 0.02 && Math.max(...blast.drift) < 1e-6 && blast.share < 0.85 && eBins < 1.5 * eOne,
         metrics: {
           sod_l1: sod.l1, sod_mass_drift: sod.drift[0], sod_energy_drift: sod.drift[1],
           sedov_radius_error: blast.err, sedov_mass_drift: blast.drift[0], sedov_energy_drift: blast.drift[1], sedov_share_of_block_updates: blast.share,

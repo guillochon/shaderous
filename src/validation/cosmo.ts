@@ -303,46 +303,48 @@ export const COSMO_TESTS: TestDef[] = [
   {
     id: 'cosmo-pancake',
     name: 'Comoving coordinates: the Zel’dovich pancake',
-    criterion: 'A plane wave that reaches its caustic at a = 0.1 (Einstein-de Sitter, self-gravity, cold gas, 64^3), started at a = 0.01 on the exact solution: at a = 0.05 the density is within 2% and the velocity within 2% of the largest of the exact solution at every cell; on blocks (64^3 finest, one level, the rest at 32^3) within 8% and 2% (6.5% measured, at the pancake’s center: block-specific, as the uniform grid at the same finest size gets 0.6%, and not yet understood; with the flux-form gravitational energy, which disagreed with the kick in comoving runs and heated the cold gas, it was 3.6%)',
+    criterion: 'A plane wave that reaches its caustic at a = 0.1 (Einstein-de Sitter, self-gravity, cold gas, 64^3), started at a = 0.01 on the exact solution: at a = 0.05 the density is within 2% and the velocity within 2% of the largest of the exact solution at every cell, on the uniform grid and on two meshes of blocks (64^3 finest, one level): one refined as it runs, which splits the cold gas at the caustic into finer blocks after the first steps, and one fixed from the start with the caustic in its fine half, a quarter of the box from either level boundary. (The first was off by 6.5% at the caustic until a re-mesh built each new cell’s total energy from its own kinetic energy: interpolated on its own, it left E - KE many times the cold gas’s heat, which the dual-energy switch kept; docs/numerics.md section 17)',
     async run(gpu) {
       const aC = 0.1;
       const pc = pancake(aC);
-      const p = universe(EDS, 0.05, () => (x) => {
-        const e = pc.exact(x, EDS.aStart);
-        return { rho: e.rho, vx: e.v, vy: 0, vz: 0, p: 1e-12, s: 0 };
-      }, { gravity: 'periodic', supports2d: false });
+      const wrap = (x: number) => ((((x + 0.5) % 1) + 1) % 1) - 0.5;
+      // The caustic at x = shift.
+      const setup = (shift: number) =>
+        universe(EDS, 0.05, () => (x) => {
+          const e = pc.exact(wrap(x - shift), EDS.aStart);
+          return { rho: e.rho, vx: e.v, vy: 0, vz: 0, p: 1e-12, s: 0 };
+        }, { gravity: 'periodic', supports2d: false });
       const m: Record<string, number> = {};
-      const check = async (sim: Sim | AmrSim, tag: string, n: number) => {
+      const check = async (sim: Sim | AmrSim, tag: string, n: number, shift = 0) => {
         await sim.runToEnd();
         const d = await sim.diagnostics();
         const a = d.scale!;
         const vmax = Math.abs(pc.exact(0.25, a).v) * 1.5;
         let er = 0;
         let ev = 0;
+        const at = (x: number, rho: number, mx: number) => {
+          const e = pc.exact(wrap(x - shift), a);
+          er = Math.max(er, Math.abs(rho / e.rho - 1));
+          ev = Math.max(ev, Math.abs(mx / rho - e.v) / vmax);
+        };
         if (tag === 'uniform') {
           const { u1 } = await (sim as Sim).readState();
-          for (let i = 0; i < n; i++) {
-            const x = (i + 0.5) / n - 0.5;
-            const e = pc.exact(x, a);
-            const o = 4 * i;
-            er = Math.max(er, Math.abs(u1[o] / e.rho - 1));
-            ev = Math.max(ev, Math.abs(u1[o + 1] / u1[o] - e.v) / vmax);
-          }
+          for (let i = 0; i < n; i++) at((i + 0.5) / n - 0.5, u1[4 * i], u1[4 * i + 1]);
         } else {
           const c = await (sim as AmrSim).readLeaves();
-          for (let q = 0; q < c.count; q++) {
-            const e = pc.exact(c.x[q], a);
-            er = Math.max(er, Math.abs(c.u1[4 * q] / e.rho - 1));
-            ev = Math.max(ev, Math.abs(c.u1[4 * q + 1] / c.u1[4 * q] - e.v) / vmax);
-          }
+          for (let q = 0; q < c.count; q++) at(c.x[q], c.u1[4 * q], c.u1[4 * q + 1]);
+          m[`${tag}_coarse_share`] = c.dx.filter((h) => h > 1.5 / n).length / c.count;
         }
         m[`${tag}_density_error`] = er;
         m[`${tag}_velocity_error`] = ev;
         m[`${tag}_a`] = a;
       };
-      await withSim(gpu, p, 64, {}, (sim) => check(sim, 'uniform', 64));
-      await withAmr(gpu, p, 64, { amrLevels: 1, jeansRefine: 0 } as Partial<SimConfig>, (sim) => check(sim, 'blocks', 64));
-      const pass = m.uniform_density_error < 0.02 && m.uniform_velocity_error < 0.02 && m.blocks_density_error < 0.08 && m.blocks_velocity_error < 0.02;
+      await withSim(gpu, setup(0), 64, {}, (sim) => check(sim, 'uniform', 64));
+      await withAmr(gpu, setup(0), 64, { amrLevels: 1, jeansRefine: 0 } as Partial<SimConfig>, (sim) => check(sim, 'blocks', 64));
+      // Refined where the gas is denser than 1.05 and nowhere else: the half of the box around the
+      // caustic from the start (the two 32^3 root blocks along x split at x = 0).
+      await withAmr(gpu, setup(0.25), 64, { amrLevels: 1, jeansRefine: 0, refineHi: 10, refineLo: 9, refineDense: 1.05 } as Partial<SimConfig>, (sim) => check(sim, 'mixed', 64, 0.25));
+      const pass = ['uniform', 'blocks', 'mixed'].every((t) => m[`${t}_density_error`] < 0.02 && m[`${t}_velocity_error`] < 0.02) && m.mixed_coarse_share > 0.05;
       return { pass, metrics: m };
     },
   },

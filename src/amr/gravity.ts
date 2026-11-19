@@ -103,10 +103,13 @@ export class AmrGravity {
   stats!: GPUBuffer;
   // Per-block timesteps: the passes of a solve restricted to the blocks starting a step.
   private dphi?: GPUTexture;
+  private dphi0?: GPUTexture;
   private pFieldB?: GPUComputePipeline;
   private pExtrap?: GPUComputePipeline;
   private pSync?: GPUComputePipeline;
   private pForget?: GPUComputePipeline;
+  private pSeed?: GPUComputePipeline;
+  private gSeed?: GPUBindGroup;
   private gFieldB?: GPUBindGroup;
   private gFieldAllB?: GPUBindGroup;
   private gExtrap?: GPUBindGroup;
@@ -373,25 +376,29 @@ export class AmrGravity {
     const ctx = this.ctx;
     const d = ctx.device;
     const v = (t: GPUTexture) => t.createView();
-    this.dphi = ctx.flat ? tex3d(d, ctx.slotsPerSide * PAD, 'r32float', 'amr phi rate', ctx.layers!) : tex3d(d, ctx.slotsPerSide * PAD, 'r32float', 'amr phi rate');
-    const half = FIELD_SLOTS_BINS.half;
-    [this.pFieldB, this.pExtrap, this.pSync, this.pForget] = await Promise.all([
+    const rateTex = (label: string) => (ctx.flat ? tex3d(d, ctx.slotsPerSide * PAD, 'r32float', label, ctx.layers!) : tex3d(d, ctx.slotsPerSide * PAD, 'r32float', label));
+    this.dphi = rateTex('amr phi rate');
+    this.dphi0 = rateTex('amr phi rate before');
+    const half = '#include "amr/gravity/half_on.wgsl"\n#include "amr/gravity/half_curve.wgsl"';
+    [this.pFieldB, this.pExtrap, this.pSync, this.pForget, this.pSeed] = await Promise.all([
       computePipeline(d, assemble('amr/gravity/field.wgsl', { ...FIELD_SLOTS_BINS, half }), 'amr gravity field (bins)'),
       computePipeline(d, assemble('amr/gravity/extrap.wgsl'), 'amr potential extrapolation'),
       computePipeline(d, assemble('amr/gravity/sync.wgsl'), 'amr potential rate'),
       computePipeline(d, assemble('amr/gravity/sync.wgsl'), 'amr potential rate reset', { FORGET: 1 }),
+      computePipeline(d, assemble('amr/gravity/sync.wgsl'), 'amr potential rate from the last step', { SEED: 1 }),
     ]);
     const phi0 = v(this.phi);
     const field = (list: GPUBuffer) =>
-      bindGroup(d, this.pFieldB!, { 0: ctx.params, 1: phi0, 3: v(ctx.gfield), 5: ctx.clock, 6: v(this.dphi!), 29: ctx.bins, 30: ctx.bt, 31: list });
+      bindGroup(d, this.pFieldB!, { 0: ctx.params, 1: phi0, 3: v(ctx.gfield), 5: ctx.clock, 6: v(this.dphi!), 7: v(this.dphi0!), 29: ctx.bins, 30: ctx.bt, 31: list });
     this.gFieldB = field(ctx.listAct);
     this.gFieldAllB = field(ctx.listAll);
     this.gExtrap = bindGroup(d, this.pExtrap, { 0: ctx.params, 1: ctx.clock, 2: phi0, 6: v(this.dphi), 29: ctx.bins, 31: ctx.listAll });
     const sync = (pipe: GPUComputePipeline, list: GPUBuffer) =>
-      bindGroup(d, pipe, { 0: ctx.params, 1: ctx.clock, 2: phi0, 3: v(this.phiOld), 4: v(this.dphi!), 29: ctx.bins, 31: list });
+      bindGroup(d, pipe, { 0: ctx.params, 1: ctx.clock, 2: phi0, 3: v(this.phiOld), 4: v(this.dphi!), 5: v(this.dphi0!), 29: ctx.bins, 31: list });
     this.gSync = sync(this.pSync, ctx.listAct);
     this.gSyncAll = sync(this.pSync, ctx.listAll);
     this.gForget = sync(this.pForget, ctx.listAll);
+    this.gSeed = sync(this.pSeed, ctx.listAll);
   }
 
   /** Source from the blocks the last substep changed, restricted onto their ancestors. */
@@ -448,6 +455,18 @@ export class AmrGravity {
     this.padded(pass, nAll);
   }
 
+  /**
+   * The run goes over from single timesteps to cycles: the potential's history from the step just
+   * taken (the "previous" potential copyPhiToOld kept, and the clock's dt), not afresh. Dropped, the
+   * first cycle's half-step potential was the potential itself for a whole step of every block.
+   */
+  encodeSeed(pass: GPUComputePassEncoder, nAll: number) {
+    if (!this.pSeed) return;
+    pass.setPipeline(this.pSeed);
+    pass.setBindGroup(0, this.gSeed!);
+    this.padded(pass, nAll);
+  }
+
   /** First guess for the potential in blocks the last re-mesh created. */
   encodeNewBlocks(pass: GPUComputePassEncoder, nLeaf: number) {
     pass.setPipeline(this.pNew);
@@ -499,5 +518,6 @@ export class AmrGravity {
     }
     this.phiOld.destroy();
     this.dphi?.destroy();
+    this.dphi0?.destroy();
   }
 }
