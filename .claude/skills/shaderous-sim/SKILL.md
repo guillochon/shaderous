@@ -70,6 +70,7 @@ query then only says the grid and what differs. Worked examples are in `examples
 | In the description | Part | Notes |
 | --- | --- | --- |
 | Main-sequence star, brown dwarf, giant's envelope | `star`, `type: "polytrope"` | `mass`, `radius`, index `n`: 3 for a Sun-like or heavier star, 1.5 for a low-mass (under about 0.4 M☉) or fully convective one. Gas γ = 5/3. On the main sequence R/R☉ ≈ (M/M☉)^0.8 below a solar mass, ^0.57 above |
+| Red giant | `star`, `type: "polytrope"`, with a `core` | `n` 1.5 (a convective envelope), `mass` the whole star's, `core.mass` the core's (0.3 to 0.5 M☉ on the giant branch), `core.soft` at least two finest cells and a tenth of the radius or less. The core is a point mass that moves with the star; the envelope is settled around it |
 | White dwarf, resolved | `star`, `type: "white-dwarf"` | Only its `mass` (the radius follows). Needs `eos` `degenerate` or `helmholtz` and the white dwarf units of `wd-collision`. Cannot share a setup with a polytrope |
 | White dwarf beside a normal star; neutron star; black hole; planet as a perturber | `mass` | A point mass: `gm` = G M, `soft` at least two finest cells, `sink: 0` unless it should swallow gas |
 | Orbit, encounter, collision | `orbit` | Places two bodies: below |

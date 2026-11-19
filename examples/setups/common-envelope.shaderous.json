@@ -3,7 +3,7 @@
   "format": "shaderous-setup",
   "version": 1,
   "name": "Common envelope",
-  "blurb": "A 0.5 solar mass main-sequence star, as a point mass, starts on a circular orbit just outside the surface of a 1 solar mass red giant of 50 solar radii, and spirals into its envelope. In the frame of the center of mass.",
+  "blurb": "A 0.5 solar mass main-sequence star, as a point mass, starts on a circular orbit just outside the surface of a 1 solar mass red giant of 50 solar radii (a 0.4 solar mass point-mass core in a convective envelope), and spirals into its envelope. In the frame of the center of mass.",
   "domain": {
     "ndim": 3,
     "n": 256,
@@ -25,7 +25,7 @@
   "mesh": { "refineMasses": true, "refineDense": 0.001 },
   "background": { "rho": 1e-7, "cut": 2e-6, "relativeTo": "giant" },
   "parts": [
-    { "kind": "star", "id": "giant", "type": "polytrope", "n": 3, "mass": 1, "radius": 1, "pos": [-0.4, 0, 0], "vel": [0, -0.37267799624996495, 0] },
+    { "kind": "star", "id": "giant", "type": "polytrope", "n": 1.5, "mass": 1, "radius": 1, "core": { "mass": 0.4, "soft": 0.1 }, "pos": [-0.4, 0, 0], "vel": [0, -0.37267799624996495, 0] },
     { "kind": "mass", "id": "companion", "gm": 0.5, "pos": [0.8, 0, 0], "vel": [0, 0.7453559924999299, 0], "soft": 0.1, "sink": 0 }
   ],
   "run": { "tEnd": 60, "checkpointDt": 1, "tDyn": 1 },

@@ -5,6 +5,7 @@
 // compiled from its JSON file starts bit for bit as its hand-written problem did.
 import type { Eos } from '../../eos/eos';
 import { dipoleField, gm17Dipole, gm17Random, randomField, type StarProfile } from '../../mhd/star_fields';
+import { coredPolytrope } from '../../problems/cored_polytrope';
 import { laneEmden, laneEmdenCached, polytropeK, polytropeMass, polytropeScales } from '../../problems/lane_emden';
 import { polytropeBarotrope, type Barotrope } from '../../problems/settle';
 import type { PointMass } from '../../problems/types';
@@ -20,7 +21,7 @@ export function partIds(parts: readonly Part[]): string[] {
 export interface BuiltStar {
   id: string;
   part: StarPart;
-  /** mass, radius and central density, in code units */
+  /** mass (with its core's, if it has one), radius and central density, in code units */
   M: number;
   R: number;
   rhoc: number;
@@ -28,6 +29,8 @@ export interface BuiltStar {
   rho(r: number): number;
   pressure(rho: number): number;
   barotrope: Barotrope;
+  /** a point-mass core at its center: its mass and softening (StarPart.core) */
+  core?: { mass: number; soft: number };
   /** farthest from its center its settling may reach */
   reach?: number;
   center: number[];
@@ -58,7 +61,7 @@ function polytropeByDensity(n: number, R: number, rhoc: number, G: number) {
 
 function buildStar(part: StarPart, G: number, eos: Eos | undefined) {
   // A white dwarf is built on its equation of state's cold curve: the electrons' scales, and the Coulomb term if it has one.
-  const key = JSON.stringify([part.type, part.n, part.radius, part.mass, part.rhoc, G, part.type === 'white-dwarf' && eos ? scalesOf(eos) : 0]);
+  const key = JSON.stringify([part.type, part.n, part.radius, part.mass, part.rhoc, part.core, G, part.type === 'white-dwarf' && eos ? scalesOf(eos) : 0]);
   const hit = starCache.get(key);
   if (hit) return hit;
   let out: Omit<BuiltStar, 'id' | 'part' | 'center' | 'vel' | 'scalar'>;
@@ -76,7 +79,24 @@ function buildStar(part: StarPart, G: number, eos: Eos | undefined) {
     const n = part.n ?? 1.5;
     const R = part.radius ?? 1;
     const g = 1 + 1 / n;
-    if (part.mass !== undefined && part.rhoc === undefined) {
+    if (part.core) {
+      // An envelope around a point-mass core (problems/cored_polytrope.ts). Its gas is settled
+      // on the CPU, which adds the core's potential (no `gpu` kind: problems/settle.ts).
+      const M = part.mass ?? 1;
+      if (part.rhoc !== undefined) throw new Error('a star with a core is given by its mass and radius, not its central density');
+      if (!(part.core.mass > 0 && part.core.mass < M)) throw new Error('a star’s core must have a mass above zero and below the star’s');
+      const soft = part.core.soft ?? R / 20;
+      const env = coredPolytrope(n, M - part.core.mass, R, part.core.mass, soft, G);
+      const { rhoc, K } = env;
+      const { gpu: _gpu, ...barotrope } = polytropeBarotrope(n, K);
+      out = {
+        M, R, rhoc, core: { mass: part.core.mass, soft },
+        rho: (r) => rhoc * Math.pow(env.theta(r / R), n),
+        pressure: (rho) => K * Math.pow(rho, g),
+        barotrope,
+        profile: () => ({ pressure: (r) => (r >= R ? 0 : K * Math.pow(rhoc * Math.pow(env.theta(r / R), n), g)), pc: K * Math.pow(rhoc, g), pcut: 0, radius: R }),
+      };
+    } else if (part.mass !== undefined && part.rhoc === undefined) {
       // By mass and radius (the tidal disruption's star).
       const le = laneEmden(n);
       const { rhoc, K } = polytropeScales(le, part.mass, R, G);
@@ -257,6 +277,13 @@ export function buildBodies(spec: SetupSpec, ctx: BodyContext): Bodies {
       s2.center = orb.pos[1];
       s2.vel = orb.vel[1];
     }
+  }
+  // A star's core: a point mass where the star is and moving as it does, once the orbits have
+  // placed the stars. It takes no gas in. After the parts' own masses, as "<star>.core".
+  for (const s of stars) {
+    if (!s.core) continue;
+    masses.push({ gm: ctx.G * s.core.mass, pos: [...s.center], vel: [...s.vel], soft: s.core.soft, sinkRadius: 0 });
+    massIds.push(`${s.id}.core`);
   }
   return out;
 }

@@ -1148,6 +1148,25 @@ of the other stars as point masses), and a moving star keeps its velocity. For w
 each round is over-relaxed by 1.6 and the rounds stop at $`10^{-3}`$: 7 to 12 rounds, taking
 1.6 to 5.5 s.
 
+*A star with a point-mass core* (a giant; `StarPart.core`, `problems/cored_polytrope.ts`). Part
+of the star's mass is a point mass at its center with the point masses' softened potential,
+$`-G M_c / \sqrt{r^2 + \epsilon^2}`$, and the rest a polytropic envelope in balance with its own
+gravity and the core's pull. With $`h = h_c\theta`$, $`x = r/R`$ and
+$`\nu = A\,m(x)/M_\mathrm{env}`$,
+
+```math
+\theta' = -\frac{\nu + A\,q_c\,x^3 (x^2 + e^2)^{-3/2}}{x^2}, \qquad \nu' = P\,x^2\theta^n,
+```
+
+with $`A = G M_\mathrm{env} / (h_c R)`$, $`P = 4\pi G R^2 \rho_c / h_c`$,
+$`q_c = M_c / M_\mathrm{env}`$ and $`e = \epsilon / R`$. The envelope's radius and mass,
+$`\theta(1) = 0`$ and $`\nu(1) = A`$, fix $`A`$ and $`P`$ (two nested bisections); without a core
+only their product matters and this is the Lane-Emden equation. The settling adds the core's
+potential to the grid's, which holds the gas's alone, and runs on the CPU. A giant of one solar
+mass with a core of 0.4 softened by a tenth of its radius, on a mesh with 32 finest cells across
+the radius, holds its central density within 6% over six dynamical times, with a kinetic energy
+under $`2\times10^{-3}`$ of its internal energy.
+
 Settling rewrites a star as cold gas. A problem that lights a star (the sub-Chandrasekhar
 supernova) puts its heat in afterward (`Problem.heat`): the internal energy that each cell of a
 hot spot should have, written into the settled state on the uniform grid and the adaptive mesh.

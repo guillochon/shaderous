@@ -1570,6 +1570,26 @@
         "description": "Instead of the mass: a polytrope’s central density",
         "minimum": 1e-300
        },
+       "core": {
+        "type": "object",
+        "properties": {
+         "mass": {
+          "type": "number",
+          "title": "Core mass",
+          "description": "The core’s share of the star’s mass, in code units: less than the star’s",
+          "minimum": 1e-12
+         },
+         "soft": {
+          "type": "number",
+          "title": "Core softening",
+          "description": "Plummer softening length of the core’s gravity: a twentieth of the star’s radius if left empty. At least two finest cells, and the envelope’s steep inner part should span several",
+          "minimum": 1e-12
+         }
+        },
+        "additionalProperties": false,
+        "title": "Point-mass core",
+        "description": "A giant: part of the star’s mass is a point mass at its center, and the rest a polytropic envelope in balance with its own gravity and the core’s softened pull. The core moves with the star and then as the gas and the other masses pull it. By mass and radius only"
+       },
        "pos": {
         "type": "array",
         "items": {

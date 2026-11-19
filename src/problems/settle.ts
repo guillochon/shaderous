@@ -67,6 +67,12 @@ export interface SettleStar {
   reach?: number;
   /** passive scalar of its gas */
   scalar: number;
+  /**
+   * A point-mass core at its center (problems/cored_polytrope.ts): G times its mass and its
+   * softening. Point masses are not in the grid's potential, so the core's is added to it: the
+   * envelope is balanced in both.
+   */
+  core?: { gm: number; soft: number };
 }
 
 /** The stars of the initial conditions, the ambient gas around them, and G. */
@@ -352,8 +358,9 @@ export class Settler {
       const ph = new Float64Array(idx.length);
       for (let k = 0; k < idx.length; k++) {
         let p = phi[idx[k]];
-        if (at.length || others.length) {
+        if (at.length || others.length || s.core) {
           const [x, y, z] = this.grid.pos(idx[k]);
+          if (s.core) p -= s.core.gm / Math.hypot(x - s.center[0], y - s.center[1], z - (s.center[2] ?? 0), s.core.soft);
           for (let j = 0; j < at.length; j++) if (j !== i) p += (this.set.G * this.mass[j]) / Math.hypot(x - at[j][0], y - at[j][1], z - at[j][2]);
           for (const m of others) p += m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
         }

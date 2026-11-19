@@ -208,7 +208,9 @@ function bodiesOf(spec: SetupSpec, built: BuiltSetup): Body[] {
   const flyby = new Set(parts.flatMap((p) => (p.kind === 'orbit' && p.type === 'flyby' ? p.of ?? [] : [])));
   const out: Body[] = [];
   for (const s of b.stars) out.push({ index: built.ids.indexOf(s.id), id: s.id, star: s, pos: s.center, radius: s.R, flyby: flyby.has(s.id) });
-  b.masses.forEach((m, k) => out.push({ index: built.ids.indexOf(b.massIds[k]), id: b.massIds[k], mass: m, pos: m.pos, radius: 0, flyby: flyby.has(b.massIds[k]) }));
+  // (A star's core, "<star>.core", is its star's part.)
+  const partOf = (id: string) => built.ids.indexOf(id.endsWith('.core') && !built.ids.includes(id) ? id.slice(0, -5) : id);
+  b.masses.forEach((m, k) => out.push({ index: partOf(b.massIds[k]), id: b.massIds[k], mass: m, pos: m.pos, radius: 0, flyby: flyby.has(b.massIds[k]) }));
   return out;
 }
 
@@ -234,7 +236,7 @@ function checkBodies(spec: SetupSpec, built: BuiltSetup, out: Issue[]): void {
         if (d < a.radius + b.radius) out.push({ level: 'error', path, text: `Stars "${a.id}" and "${b.id}" overlap: their centers are ${fmt(d)} apart and their radii add to ${fmt(a.radius + b.radius)}` });
       } else if (a.star || b.star) {
         const [star, mass] = a.star ? [a, b] : [b, a];
-        if (d < star.radius && !mass.mass?.massless) out.push({ level: 'warning', path: `parts.${mass.index}`, text: `Point mass "${mass.id}" starts inside star "${star.id}"` });
+        if (d < star.radius && !mass.mass?.massless && mass.id !== `${star.id}.core`) out.push({ level: 'warning', path: `parts.${mass.index}`, text: `Point mass "${mass.id}" starts inside star "${star.id}"` });
       } else {
         if (a.mass?.massless || b.mass?.massless) continue;
         const reach = Math.max(a.mass?.soft ?? 2 * built.dx, b.mass?.soft ?? 2 * built.dx);
@@ -333,6 +335,13 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     parts.forEach((p, i) => {
       if (p.kind === 'mass' && p.soft !== undefined && built.dx > 0 && p.soft < 2 * built.dx)
         out.push({ level: 'warning', path: `parts.${i}.soft`, text: `${label(i)}: its softening of ${fmt(p.soft)} is under two cells of the grid (${fmt(2 * built.dx)}), and is raised to that` });
+      if (p.kind === 'star' && p.type === 'polytrope' && p.core) {
+        const soft = p.core.soft ?? (p.radius ?? 1) / 20;
+        if (p.rhoc !== undefined) out.push({ level: 'error', path: `parts.${i}.core`, text: `${label(i)}: a star with a core is given by its mass and radius, not its central density` });
+        else if (!(p.core.mass > 0 && p.core.mass < (p.mass ?? 1))) out.push({ level: 'error', path: `parts.${i}.core.mass`, text: `${label(i)}: its core’s mass of ${fmt(p.core.mass)} must be above zero and below the star’s ${fmt(p.mass ?? 1)}` });
+        if (built.dx > 0 && soft < 2 * built.dx)
+          out.push({ level: 'warning', path: `parts.${i}.core.soft`, text: `${label(i)}: its core’s softening of ${fmt(soft)} is under two cells of the grid (${fmt(2 * built.dx)}): the envelope’s inner part, shaped by it, is not resolved` });
+      }
       if (p.kind === 'star' && p.type === 'polytrope') {
         const n = p.n ?? 1.5;
         if (n > 0 && gamma < 1 + 1 / n - 1e-9)

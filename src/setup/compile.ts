@@ -257,7 +257,7 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
   // (A flow that only changes what the stars painted, a hot spot, brings no gas of its own.)
   const others = (spec.parts ?? []).some((p) => p.kind === 'disk' || p.kind === 'region' || (p.kind === 'flow' && flowValues(p).def.wholeBox));
   return {
-    stars: bodies.stars.map((s) => ({ barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(s.reach !== undefined ? { reach: s.reach } : others ? { reach: OWN_REACH * s.R } : {}), scalar: s.scalar })),
+    stars: bodies.stars.map((s) => ({ barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(s.reach !== undefined ? { reach: s.reach } : others ? { reach: OWN_REACH * s.R } : {}), scalar: s.scalar, ...(s.core ? { core: { gm: G * s.core.mass, soft: s.core.soft } } : {}) })),
     rhoCut: amb.cut,
     rhoAmb: amb.rho,
     pAmb: spec.background?.p ?? bodies.stars[0].barotrope.pressure(amb.cut),
@@ -396,7 +396,8 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const all = (b: number): Bc3 => [b, b, b];
   const flows = flowsOf(spec);
   const kinds = fieldKinds(spec);
-  const hasMasses = parts.some((p) => p.kind === 'mass');
+  // (A star's core is a point mass too: parts/bodies.ts.)
+  const hasMasses = parts.some((p) => p.kind === 'mass' || (p.kind === 'star' && p.core));
   const hasStars = parts.some((p) => p.kind === 'star');
   const debris = parts.some((p) => p.kind === 'orbit' && p.debris);
   const unitsFollow = !!d.units && (unitsFollowParts(d.units) || feats.some((f) => featuredPaths(f).some((p) => p.startsWith('domain.units.'))));

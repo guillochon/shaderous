@@ -283,6 +283,12 @@ export interface StarPart {
   radius?: number;
   mass?: number;
   rhoc?: number;
+  /**
+   * A point-mass core at its center (a giant's): `mass` of the star's mass is the core's and
+   * the rest a polytropic envelope in balance with its own gravity and the core's softened
+   * pull. `soft` is the core's softening length (default a twentieth of the radius).
+   */
+  core?: { mass: number; soft?: number };
   pos?: Vec3;
   vel?: Vec3;
   /** passive scalar of its gas (default: spread over (0, 1] by its place among the stars) */
