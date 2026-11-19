@@ -1,0 +1,21 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "thermal-instability-hhe",
+  "extends": "thermal-instability",
+  "variant": "Molecular, atomic and ionized",
+  "blurb": "The thermal instability with the tabulated hydrogen and helium equation of state: the gas starts atomic near 1500 K, its cold clouds turn molecular below 1000 K and its warm medium ionizes above 4000 K, so the two phases differ fourfold in particles per gram as well as in temperature, and the heat that dissociating and ionizing take makes the gas separate about three times later than an ideal gas does (by t = 2). The box is 31 pc, one unit of density a hydrogen atom per cm³ and one of temperature 1000 K. The chemistry is that of equilibrium, taken at the table’s least density (10⁻²⁰ g/cm³), which real interstellar gas is not in.",
+  "domain": {
+    "units": {
+      "name": "interstellar",
+      "length": { "unit": "pc", "value": 31.4 },
+      "density": { "unit": "g/cm3", "value": 2.2497e-24 },
+      "velocity": { "unit": "km/s", "value": 2.5808 }
+    }
+  },
+  "physics": {
+    "eos": "hhe",
+    "eosParams": { "hheRad": 0 },
+    "composition": "solarNeutral"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "tidal-disruption-hhe",
+  "extends": "tidal-disruption",
+  "variant": "Partial, hydrogen and helium",
+  "blurb": "The partial disruption of a Sun-like star (β = 0.6) with the tabulated hydrogen and helium equation of state in place of an ideal gas: the star is ionized, and the gas it loses recombines as it expands and cools, which gives it back 13.6 eV for every hydrogen atom. Gas alone, without the radiation term. In the star’s rest frame.",
+  "physics": {
+    "eos": "hhe",
+    "eosParams": { "hheRad": 0 }
+  }
+}
