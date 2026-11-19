@@ -1,10 +1,11 @@
-// What the tabulated equations of state share (eos/helmholtz.ts, eos/hhe.ts), in float64 and
+// What the tabulated equations of state share (eos/helmholtz.ts, eos/hhe.ts; eos/aneos.ts the
+// loading, the texture and the Hermite basis only), in float64 and
 // as eos/table.wgsl has it: loading a table and giving it to the GPU, and the bicubic Hermite
 // lookup of a free energy h(x, y) and its derivatives from (h, h_x, h_y, h_xy) per node. Each
 // module keeps what is its own: its terms outside the table, and its solve for the temperature.
 import { setSharedBinding } from '../gpu/device';
 
-/** The binding of the table in eos/table.wgsl (EOS_TAB): whichever the run's equation of state uses. */
+/** The binding of the table in eos/table_tex.wgsl (EOS_TAB): whichever the run's equation of state uses. */
 export const EOS_TABLE_BINDING = 22;
 
 /** A table's texels (rgba32float, `rows` rows of `width`) and the grid of its free energy. */
@@ -46,8 +47,12 @@ export async function loadTableData(url: URL, floats: number, name: string): Pro
 
 export const tableTexel = (t: EosTable, row: number, col: number, c: number): number => t.data[(row * t.width + col) * 4 + c];
 
-const hb = (t: number) => [2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2];
-const hb1 = (t: number) => [6 * t ** 2 - 6 * t, 3 * t ** 2 - 4 * t + 1, -6 * t ** 2 + 6 * t, 3 * t ** 2 - 2 * t];
+/** The cubic Hermite basis at t in [0, 1]: weights of (value at 0, slope at 0, value at 1, slope at 1) (tab_hb in eos/table_tex.wgsl). */
+export const hermite = (t: number): [number, number, number, number] => [2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2];
+/** Its derivative in t (tab_hb1). */
+export const hermite1 = (t: number): [number, number, number, number] => [6 * t ** 2 - 6 * t, 3 * t ** 2 - 4 * t + 1, -6 * t ** 2 + 6 * t, 3 * t ** 2 - 2 * t];
+const hb = hermite;
+const hb1 = hermite1;
 const hb2 = (t: number) => [12 * t - 6, 6 * t - 4, -12 * t + 6, 6 * t - 2];
 
 /**

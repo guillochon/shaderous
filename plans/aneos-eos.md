@@ -15,9 +15,14 @@ description as built. Departures from the text below:
   iteration per mixed cell). The closure is solved in the page when a pair is first asked for
   (1.4 s), into tables at mass fractions 1/4, 1/2 and 3/4, and a cell blends the two on either
   side of its own. The shader reads a mixture exactly as it reads one material.
-- **The shared table module (section 7, step 3) was not built.** The ANEOS module shares the
-  Hermite basis with the white dwarf one by copy, a dozen lines; the two tables differ in
-  everything else.
+- **The shared table module (section 7, step 3) is shared in part.** ANEOS loads its files
+  with `loadTableData`, binds its table as `EOS_TAB` (binding 22) with `bindTable`, and reads it
+  with the Hermite basis of `eos/table_tex.wgsl` and `hermite` in `src/eos/table.ts`. The
+  lookup and the Newton solve (`tab_lookup`, `tab_solve`, `tableLookup`) are not used: they
+  take one free energy per node, one column per temperature, and solve for a derivative of it,
+  where an ANEOS row holds the pressure's columns, the energy's and the cold curve, a pair's
+  five mixtures are blended before they are read, and the temperature comes from the value
+  itself by bisection over the nodes.
 - **Planets are not settled** (section 7 said settled as stars are): their layers are not one
   barotrope. They start on the integrated structure and ring by 3.6% in central density at 16
   cells to the radius.

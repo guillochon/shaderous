@@ -2955,6 +2955,15 @@ ANEOS's own derivatives (differences of a part in $`10^4`$), limited as a monoto
 the nodes do, which the solve for the temperature needs. One table is 2.2 MB, fetched when a
 run asks for its material.
 
+On the GPU the table is the texture every tabulated equation of state reads (`EOS_TAB`,
+`eos/table_tex.wgsl`), loaded and bound as the white dwarf's and the hydrogen–helium tables
+are (`src/eos/table.ts`), with their bicubic Hermite basis. Their lookup and their solve for the
+temperature are not shared: those read one free energy, one column per temperature, and solve
+for a derivative of it. Here a row holds $`\psi`$'s columns, then $`\lambda`$'s, then the cold
+curve, a pair stacks its five mixtures along the rows and blends two before reading them, and
+the solve is for the value of $`\lambda`$ or $`\psi`$ itself, by bisection over the nodes and
+Newton's method on the cubic between them.
+
 Against ANEOS at 6000 random states per material, between the nodes, by its phase flag:
 
 | Phase | Pressure, median | 90th percentile | Energy, median | 90th percentile |

@@ -19,8 +19,14 @@
 // 0, 1/4, 1/2, 3/4 and 1 of the second material, in the same form as a material's own. The
 // shader blends the two tables on either side of a cell's mass fraction, texel by texel, and
 // reads the blend as it reads one material.
+//
+// Loading, the texture (binding 22, EOS_TAB, shared with the other tables) and the Hermite basis
+// are eos/table.ts's. Its lookup (tableLookup) is not used: it reads one free energy, one column
+// per temperature, whose derivatives are the pressure and the energy; here the pressure and the
+// energy are tabulated themselves, side by side along a row with the cold curve after them, and
+// a pair's levels are blended before they are read.
 import { ANEOS_META as M } from './aneos_meta';
-import { setSharedBinding } from '../gpu/device';
+import { bindTable, hermite as hb, hermite1 as hb1, loadTableData, type EosTable } from './table';
 
 /** The materials there are tables of (src/eos/aneos/<name>.bin), in the order of their ids. */
 export const ANEOS_MATERIALS = ['pyrolite', 'fe85si15', 'water', 'forsterite'] as const;
@@ -61,12 +67,13 @@ export const ANEOS_C2_MAX = 1e14;
 /** The most (dp/de)_rho / rho may be (AN_GRUN_MAX in eos/aneos.wgsl, which says why). */
 export const ANEOS_GRUN_MAX = 5;
 
-/** A table: one material (levels 1) or a pair at ANEOS_INTERVALS + 1 mass fractions. */
-export interface AneosTable {
+/**
+ * A table: one material (levels 1) or a pair at ANEOS_INTERVALS + 1 mass fractions, stacked
+ * along the rows (levels x NR rows of W rgba texels). Its grid (x0 ... ny) is that of one level.
+ */
+export interface AneosTable extends EosTable {
   key: string;
   levels: number;
-  /** levels x NR rows of W rgba texels */
-  data: Float32Array;
 }
 
 const materials = new Map<AneosMaterial, Float32Array>();
@@ -88,22 +95,10 @@ async function loadMaterial(name: AneosMaterial): Promise<Float32Array> {
   if (have) return have;
   let p = loadingMaterial.get(name);
   if (!p) {
-    p = (async () => {
-      const url = URLS[name];
-      let bytes: ArrayBuffer;
-      if (url.protocol === 'file:') {
-        // Under Node (the unit tests): read the file (as eos/helmholtz.ts does).
-        const fsName = 'node:fs/promises';
-        const { readFile } = (await import(/* @vite-ignore */ fsName)) as { readFile: (u: URL) => Promise<Uint8Array> };
-        bytes = new Uint8Array(await readFile(url)).buffer as ArrayBuffer;
-      } else {
-        bytes = await (await fetch(url)).arrayBuffer();
-      }
-      const t = new Float32Array(bytes);
-      if (t.length !== NR * W * 4) throw new Error(`ANEOS table of ${name}: ${t.length} floats, expected ${NR * W * 4}`);
+    p = loadTableData(URLS[name], NR * W * 4, `ANEOS table of ${name}`).then((t) => {
       materials.set(name, t);
       return t;
-    })();
+    });
     loadingMaterial.set(name, p);
   }
   return p;
@@ -116,7 +111,11 @@ export async function loadAneos(key: string): Promise<AneosTable> {
   const names = aneosMaterialsOf(key);
   if (names.length > 2) throw new Error('an ANEOS run holds one material or two');
   const data = await Promise.all(names.map(loadMaterial));
-  const t: AneosTable = names.length === 1 ? { key, levels: 1, data: data[0] } : { key, levels: ANEOS_INTERVALS + 1, data: buildPair(data[0], data[1]) };
+  const levels = names.length === 1 ? 1 : ANEOS_INTERVALS + 1;
+  const t: AneosTable = {
+    key, levels, data: levels === 1 ? data[0] : buildPair(data[0], data[1]),
+    width: W, rows: levels * NR, x0: X0, dx: D, nx: NR, y0: Y0, dy: D, ny: NT,
+  };
   tables.set(key, t);
   return t;
 }
@@ -129,9 +128,6 @@ export function aneosTable(key: string): AneosTable {
 }
 
 // ---- Reading a table ----
-
-const hb = (t: number): [number, number, number, number] => [2 * t ** 3 - 3 * t ** 2 + 1, t ** 3 - 2 * t ** 2 + t, -2 * t ** 3 + 3 * t ** 2, t ** 3 - t ** 2];
-const hb1 = (t: number): [number, number, number, number] => [6 * t ** 2 - 6 * t, 3 * t ** 2 - 4 * t + 1, -6 * t ** 2 + 6 * t, 3 * t ** 2 - 2 * t];
 
 /** A table read at one mass fraction of its second material: the two levels on either side, and the weight of the upper. */
 interface View {
@@ -477,26 +473,11 @@ export function aneosSplit(a: AneosTable, b: AneosTable, rho: number, T: number,
 
 // ---- The GPU ----
 
-/** The binding of the table in eos/aneos.wgsl (AN_TAB). */
-export const ANEOS_BINDING = 41;
-
-const deviceTextures = new WeakMap<GPUDevice, Map<string, GPUTexture>>();
-
 /**
  * Ready a device for runs with the table of `key`: loaded (and built, for a pair), uploaded
- * once, and registered as binding 41 of every bind group whose shader reaches it
- * (gpu/device.ts). One table at a time per device: the last one asked for.
+ * once, and made the device's EOS_TAB (eos/table.ts bindTable) for the bind groups made from
+ * here on.
  */
 export async function prepareAneos(device: GPUDevice, key: string): Promise<void> {
-  const t = await loadAneos(key);
-  let m = deviceTextures.get(device);
-  if (!m) deviceTextures.set(device, (m = new Map()));
-  let tex = m.get(key);
-  if (!tex) {
-    const rows = t.levels * NR;
-    tex = device.createTexture({ label: `ANEOS table ${key}`, size: [W, rows], format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
-    device.queue.writeTexture({ texture: tex }, t.data as Float32Array<ArrayBuffer>, { bytesPerRow: W * 16 }, [W, rows]);
-    m.set(key, tex);
-  }
-  setSharedBinding(device, ANEOS_BINDING, tex.createView());
+  bindTable(device, `aneos ${key}`, await loadAneos(key));
 }

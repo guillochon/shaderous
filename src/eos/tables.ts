@@ -21,8 +21,8 @@ export async function loadEosTable(kind: EosKind, params: TableParams): Promise<
 
 /**
  * Ready a device for runs with `kind`: its table loaded, uploaded, and made the one every
- * bind group made from here on gets (eos/table.ts; the ANEOS materials' at a binding of their
- * own, eos/aneos.ts). Call it before the run's passes are built.
+ * bind group made from here on gets (eos/table.ts bindTable). Call it before the run's passes
+ * are built.
  */
 export async function prepareEosTable(device: GPUDevice, kind: EosKind, params: TableParams): Promise<void> {
   if (kind === 'helmholtz') await prepareHelmholtz(device);

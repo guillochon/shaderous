@@ -13,6 +13,12 @@
 // (eos/aneos.ts buildPair), stacked along the rows, and a cell reads the two on either side of
 // its own fraction, blended texel by texel. The fraction is g_comp.y (species/mixture.ts).
 //
+// The texture is EOS_TAB and the Hermite basis tab_hb, tab_comb (eos/table_tex.wgsl), as the
+// free energies' of eos/table.wgsl. That module's lookup and solve are not used: they take the
+// table for one free energy h, whose pressure and energy are its derivatives, at one column per
+// temperature; here two quantities sit side by side along a row, with the cold curve after
+// them, the rows of a pair are blended, and the solve is for a value, not a derivative.
+//
 // P.eos = (g/cm^3, erg/g, kelvin per code unit of density, specific energy, temperature; unused)
 // Float64 mirror: src/eos/aneos.ts.
 const EOS_HAS_ENERGY = true;
@@ -21,9 +27,9 @@ const EOS_KEEP_TOTAL = true;
 
 #include "eos/aneos_consts.wgsl"
 
-@group(0) @binding(41) var AN_TAB: texture_2d<f32>;
+#include "eos/table_tex.wgsl"
 
-const AN_LN10: f32 = 2.30258509;
+const AN_LN10: f32 = TAB_LN10;
 // The least c^2, (cm/s)^2: inside the vapor dome it nearly vanishes. And the most: 100 km/s,
 // several times any sound speed of the tables.
 const AN_C2_MIN: f32 = 1e7;
@@ -50,7 +56,7 @@ fn an_view() {
   g_an_hi = 0;
   g_an_w = 0.0;
   if (COMP) {
-    let levels = i32(textureDimensions(AN_TAB).y) / AN_NR;
+    let levels = i32(textureDimensions(EOS_TAB).y) / AN_NR;
     if (levels > 1) {
       let f = clamp(g_comp.y, 0.0, 1.0) * f32(levels - 1);
       let l = min(i32(floor(f)), levels - 2);
@@ -61,13 +67,10 @@ fn an_view() {
   }
 }
 fn an_tex(col: i32, row: i32) -> vec4<f32> {
-  let a = textureLoad(AN_TAB, vec2<i32>(col, g_an_lo + row), 0);
-  if (g_an_w > 0.0) { return mix(a, textureLoad(AN_TAB, vec2<i32>(col, g_an_hi + row), 0), g_an_w); }
+  let a = textureLoad(EOS_TAB, vec2<i32>(col, g_an_lo + row), 0);
+  if (g_an_w > 0.0) { return mix(a, textureLoad(EOS_TAB, vec2<i32>(col, g_an_hi + row), 0), g_an_w); }
   return a;
 }
-
-fn an_hb(t: f32) -> vec4<f32> { return vec4<f32>(2.0*t*t*t - 3.0*t*t + 1.0, t*t*t - 2.0*t*t + t, -2.0*t*t*t + 3.0*t*t, t*t*t - t*t); }
-fn an_hb1(t: f32) -> vec4<f32> { return vec4<f32>(6.0*t*t - 6.0*t, 3.0*t*t - 4.0*t + 1.0, -6.0*t*t + 6.0*t, 3.0*t*t - 2.0*t); }
 
 // Where a density (g/cm^3) lies along x: the row below, the place between rows, and rho over
 // the table's least density where it is below that (1 otherwise).
@@ -82,7 +85,7 @@ fn an_x(rho: f32) -> AnX {
 }
 // A column of the table at a place along x: (value, slope along y per grid step).
 fn an_column(col: i32, a: AnX) -> vec2<f32> {
-  let A = an_hb(a.u);
+  let A = tab_hb(a.u);
   let t0 = an_tex(col, a.i);
   let t1 = an_tex(col, a.i + 1);
   return vec2<f32>(A.x * t0.x + A.y * t0.y + A.z * t1.x + A.w * t1.y, A.x * t0.z + A.y * t0.w + A.z * t1.z + A.w * t1.w);
@@ -112,8 +115,8 @@ fn an_solve(off: i32, a: AnX, goal: f32) -> f32 {
   var t = 0.0;
   if (ghi.x > glo.x) { t = (goal - glo.x) / (ghi.x - glo.x); }
   for (var k = 0; k < AN_NEWTON; k++) {
-    let B = an_hb(t);
-    let B1 = an_hb1(t);
+    let B = tab_hb(t);
+    let B1 = tab_hb1(t);
     let f = B.x * glo.x + B.y * glo.y + B.z * ghi.x + B.w * ghi.y - goal;
     if (f > 0.0) {
       a1 = t;
@@ -143,31 +146,18 @@ fn an_cold(a: AnX) -> vec2<f32> {
   let c0 = an_tex(2 * AN_NT, a.i);
   if (a.thin < 1.0) { return vec2<f32>(c0.x, 0.0); }
   let c1 = an_tex(2 * AN_NT, a.i + 1);
-  let A = an_hb(a.u);
-  let A1 = an_hb1(a.u);
+  let A = tab_hb(a.u);
+  let A1 = tab_hb1(a.u);
   return vec2<f32>(A.x * c0.x + A.y * c0.y + A.z * c1.x + A.w * c1.y, (A1.x * c0.x + A1.y * c0.y + A1.z * c1.x + A1.w * c1.y) / (AN_D * AN_LN10));
 }
 
-// One block of the table at a place: (value, d/dln rho, d/dln T). Node by node, with no array
-// (as helm_comb in eos/helmholtz.wgsl, and for its reason).
-fn an_node(q: vec4<f32>, a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
-  return a0 * b0 * q.x + a1 * b0 * q.y + a0 * b1 * q.z + a1 * b1 * q.w;
-}
+// One block of the table at a place: (value, d/dln rho, d/dln T).
 fn an_block(off: i32, a: AnX, j: i32, t: f32) -> vec3<f32> {
-  let c00 = an_tex(off + j, a.i);
-  let c01 = an_tex(off + j + 1, a.i);
-  let c10 = an_tex(off + j, a.i + 1);
-  let c11 = an_tex(off + j + 1, a.i + 1);
-  let A = an_hb(a.u);
-  let A1 = an_hb1(a.u);
-  let B = an_hb(t);
-  let B1 = an_hb1(t);
+  let c = TabCell(an_tex(off + j, a.i), an_tex(off + j + 1, a.i), an_tex(off + j, a.i + 1), an_tex(off + j + 1, a.i + 1));
+  let A = tab_hb(a.u);
+  let B = tab_hb(t);
   let s = 1.0 / (AN_D * AN_LN10);
-  return vec3<f32>(
-    an_node(c00, A.x, A.y, B.x, B.y) + an_node(c01, A.x, A.y, B.z, B.w) + an_node(c10, A.z, A.w, B.x, B.y) + an_node(c11, A.z, A.w, B.z, B.w),
-    (an_node(c00, A1.x, A1.y, B.x, B.y) + an_node(c01, A1.x, A1.y, B.z, B.w) + an_node(c10, A1.z, A1.w, B.x, B.y) + an_node(c11, A1.z, A1.w, B.z, B.w)) * s,
-    (an_node(c00, A.x, A.y, B1.x, B1.y) + an_node(c01, A.x, A.y, B1.z, B1.w) + an_node(c10, A.z, A.w, B1.x, B1.y) + an_node(c11, A.z, A.w, B1.z, B1.w)) * s,
-  );
+  return vec3<f32>(tab_comb(c, A, B), tab_comb(c, tab_hb1(a.u), B) * s, tab_comb(c, A, tab_hb1(t)) * s);
 }
 
 // The state at a place of the table, cgs: (pressure, energy per gram, temperature, c^2).
