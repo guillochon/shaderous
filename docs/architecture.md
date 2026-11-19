@@ -588,7 +588,7 @@ held bit for bit to the object it replaced before those objects were retired.
 ## Limitations and lessons that carry over
 
 Shaderous runs on one GPU, inside the memory the browser grants. Its radiation transport (gray,
-M1: [numerics.md](numerics.md#24-radiation-transport)) runs on the uniform grid only so far, and
+M1: [numerics.md](numerics.md#24-radiation-transport)) takes one timestep for all blocks, and
 its diffusion is explicit. Single precision is enough for the shipped
 problems. Round-off is biased, though, when a uniform background sits exactly on a power of two
 (see `problems/advection.ts`), and long integrations accumulate errors that double precision

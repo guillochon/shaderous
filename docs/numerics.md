@@ -2579,7 +2579,7 @@ result.
 ## 24. Radiation transport
 
 Gray radiation hydrodynamics with the M1 closure (`src/radiation/`, `src/opacity/`;
-`plans/radiation-m1.md`), on the uniform grid in Cartesian coordinates. The setting is
+`plans/radiation-m1.md`), on the uniform grid and on blocks, in Cartesian coordinates. The setting is
 `physics.radiation` (`m1` or `off`); off, a run builds none of it and steps as before, bit for
 bit.
 
@@ -2715,6 +2715,50 @@ $`\tau_c`$, $`r`$); the diagnostics' radiation energy, $`\sum E/r`$, the share o
 cells, the luminosity through the open faces, and the warning counts; `.athdf` files carry
 `Er`, `Fr1`-`Fr3`, and a run restarts from one with its radiation bit for bit.
 
+### On the adaptive mesh
+
+One timestep for all blocks (`src/amr/radiation.ts`, `src/amr/rad_*.wgsl`): with radiation on,
+per-block timesteps are off, as with species.
+
+```
+amr/rad_assemble      (E, F) and kappa_R rho of every leaf's cells and two layers of ghosts
+amr/assemble, clock   the step: the radiation's push, and its limit as each cell's own rate
+predict, update       the update records the face mass fluxes, as for species
+amr/rad_advect
+gravity, correct
+N_r times:  amr/rad_assemble, amr/rad_sweep
+amr/rad_commit
+```
+
+**Ghosts** are computed on load, as the gas's are (§10): a same-level neighbor's cell, its
+image at a boundary with the flux reversed across a wall, the mean of a finer block's cells, or
+the coarser cell beyond the face with minmod slopes toward the ghost's quarter (which keep
+$`E`$ positive) and its flux held to $`cE`$. $`\kappa_R\rho`$ is taken as it is from a coarser
+cell and averaged from finer ones. The assembly runs before every sweep: 16 small passes a step
+at the default 8 sweeps.
+
+**Refinement boundaries.** A coarse cell takes, through a face it shares with finer cells, the
+mean of their fluxes, each computed in the fine block from the fine block's cells and ghosts as
+the fine cell computes it; the advection does the same with the fine blocks' recorded mass
+fluxes. What leaves one level enters the other. Each cell multiplies the divergence by its own
+$`r`$, and $`\tau_c`$ is the cell's own, so a coarse cell may have the true speed of light where
+the fine cells beside it have a reduced one: across such a face $`E`$ is conserved, and
+$`E/r`$ where both have the same $`r`$ (1 in opaque gas).
+
+**The step.** A cell's sweeps are stable to $`N_r \cdot 0.5\,\Delta x/(d\hat c)`$ with its own
+$`\Delta x`$; the limit is folded into each cell's rate, so the finest leaves set it.
+
+**Re-meshing** (`amr/rad_regrid.wgsl`): an unchanged block is copied, a merged block takes the
+mean of its children, and a new child its parent's cell with minmod slopes from the parent's
+neighbors (assembled on the old mesh just before). $`E`$ and $`\mathbf F`$ are conserved.
+
+**Initial states and settling.** Each block's $`\mathbf F`$ is the diffusion flux from
+differences within the block (one-sided at its faces). A star is settled on the CPU with
+radiation on, its pressure split between gas and radiation as on the uniform grid.
+
+Memory: 84 bytes a texel on top of a block's 152, and 59 kB a block in 3D for the face mass
+fluxes where no species already record them.
+
 ### Validation and cost
 
 `src/reference/radiation.ts` is a float64 version of the scheme in 1D (unit tests in
@@ -2733,13 +2777,17 @@ cells, the luminosity through the open faces, and the warning counts; `.athdf` f
 | `rad-shock` | Gas driven into a wall: the state behind the shock matches the Rankine-Hugoniot conditions with radiation to 0.1% (subcritical), and to 3% at $`\hat c = c/5`$ (supercritical; the limit above) |
 | `rad-cooling-sphere` | A hot core behind a reduced-speed shell: the luminosity is steady to 0.03% over 30 steps (12% before the limiter above) and the same at $`\hat c`$ and $`2\hat c`$ to 5% |
 | `rad-restart` | The radiation comes back from a snapshot bit for bit |
+| `rad-blocks-diffusion` | A Gaussian centered on the face between coarse and fine blocks (20 and 10 optical depths a cell) spreads as on the fine uniform grid: centroid to $`2\times10^{-4}`$ of the box, widths to 0.4%; the total energy changes by $`1.3\times10^{-5}`$, the uniform grid's by $`1.4\times10^{-5}`$ (rounding) |
+| `rad-blocks-advect` | The pulse of `rad-advect` on a mesh that re-meshes four times as it moves: where the gas took it to $`10^{-4}`$ of the box, width kept to 2%, $`E_\text{gas} + E/r`$ to $`2\times10^{-6}`$ |
+| `rad-blocks-cooling-sphere` | Only the blocks holding the shell refined: the luminosity through the box faces, on coarse blocks, is the fine uniform grid's to $`10^{-5}`$, and as steady |
+| `rad-blocks-restart` | From a snapshot: the same mesh and the same radiation in every cell, bit for bit |
 
 On an RTX 3080 a sweep costs about a quarter of a hydro step (3D $`128^3`$: 2.1 ms a step
 without radiation, 6.6 ms with 8 sweeps); at $`\hat c`$ about 15 times the gas's signal speed a
 unit of simulated time costs 4.2 times what the gas alone does.
 
-**Not yet.** The adaptive mesh and per-block timesteps (refused, with a message); curvilinear
-coordinates; magnetic fields; more than one frequency group; sources that shine. The sweep is
+**Not yet.** Per-block timesteps with radiation (switched off); refinement on the radiation
+energy itself; settling a star with radiation on the GPU; curvilinear coordinates; magnetic fields; more than one frequency group; sources that shine. The sweep is
 first order in time ([He, Wibking & Krumholz 2024][He2024]'s two-stage scheme is the upgrade).
 Radiation pressure enters as a source term the well-balanced reconstruction (§8) does not see, so
 stars held up largely by radiation are not yet in discrete balance.

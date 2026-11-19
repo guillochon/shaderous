@@ -54,7 +54,7 @@ self.onmessage = async (e: MessageEvent<InitRequest>) => {
     for (const b of m.blocks) {
       const s = leafState(ctx, b);
       const transfer: Transferable[] = [s.u1.buffer, s.u2.buffer];
-      for (const t of [s.faces, s.km, s.sp]) if (t) transfer.push(t.buffer);
+      for (const t of [s.faces, s.km, s.sp, s.rad]) if (t) transfer.push(t.buffer);
       post({ kind: 'leaf', key: m.key, job: m.job, index: b.index, state: s }, transfer);
     }
     post({ kind: 'done', key: m.key, job: m.job });

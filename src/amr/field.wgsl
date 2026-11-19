@@ -51,6 +51,28 @@ struct View {
 @group(0) @binding(15) var HEAT: texture_3d<f32>;
 #include "mhd/mri.wgsl"
 
+// Radiation (amr/radiation.ts): (E, F) of the leaves' cells as of the frame; a placeholder texel without.
+@group(0) @binding(16) var RAD: texture_3d<f32>;
+#include <opacity>
+#include "radiation/common.wgsl"
+
+// The radiation fields, F_RADIATION onward, at the leaf cell at atlas texel c, of density rho and
+// internal energy eint (render/field.wgsl radiation_value). g_dx is the cell's size.
+fn radiation_value(f: u32, c: vec3<i32>, rho: f32, eint: f32) -> f32 {
+  if (P.rad.w == 0.0) { return 0.0; }
+  let R = textureLoad(RAD, c, 0);
+  let E = max(R.x, 0.0);
+  let tau = kappa_rosseland(rho, eos_temperature(rho, eint)) * rho * g_dx;
+  switch (f - F_RADIATION) {
+    case 0u { return E; }
+    case 1u { return sqrt(sqrt(E / rad_a())); }
+    case 2u { return length(R.yzw); }
+    case 3u { return select(0.0, length(R.yzw) / (rad_c() * E), E > 0.0); }
+    case 4u { return tau; }
+    default { return rad_reduction(tau); }
+  }
+}
+
 // The magnetic fields, F_MAGNETIC onward, at the leaf cell at atlas texel c, whose gas pressure
 // is p and density rho, at x (relative to the box center): from the block's own faces (texel BS
 // holds its upper ones). g_dx is the cell's size.
@@ -138,6 +160,7 @@ fn leaf_value(f: Leaf) -> Cell {
   if (V.field == F_SHOCK) { x = textureLoad(PB, c, 0).z; }
   if (V.field == F_TIME_BIN) { x = f32(TBIN[1u + u32(f.slot)]); }
   if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + N_MAGNETIC) { x = magnetic_value(V.field, c, eos_pressure(max(u1.x, P.rho_floor), u2.y), u1.x, xp); }
+  if (V.field >= F_RADIATION && V.field < F_RADIATION + N_RADIATION) { x = radiation_value(V.field, c, max(u1.x, P.rho_floor), u2.y); }
   return Cell(x, u1.x, u2.w > 0.5);
 }
 

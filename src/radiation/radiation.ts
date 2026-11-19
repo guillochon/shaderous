@@ -177,8 +177,7 @@ const RAD_EOS: readonly EosKind[] = ['ideal', 'gas_radiation', 'degenerate', 'io
  */
 export function radiationUnsupported(c: SimConfig): string | null {
   if (!radiationOn(c)) return null;
-  if (c.timeBins > 0 && c.amrLevels > 0) return 'radiation transport is not available with per-block timesteps yet';
-  if (c.amrLevels > 0) return 'radiation transport is not available on the adaptive mesh yet';
+  if (c.pressure === 'implicit') return 'radiation transport with implicit pressure is not available yet';
   if (c.problem.mhd) return 'radiation transport with a magnetic field is not available yet';
   if (!RAD_EOS.includes(c.eos)) return `radiation transport needs an equation of state with an energy and no radiation table of its own (ideal, gas + radiation, degenerate, ionizing), not ${c.eos}`;
   if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'radiation transport is Cartesian only for now';

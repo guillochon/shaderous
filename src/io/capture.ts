@@ -114,8 +114,9 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
   }
   // Radiation (radiation/passes.ts): its energy and flux, in the gas's frame, as Er and Fr1-3.
   const rad: Record<string, Float32Array> = {};
-  if (sim instanceof Sim && sim.rad) {
-    const R = await sim.rad.read();
+  if ((sim instanceof Sim || sim instanceof AmrSim) && sim.rad) {
+    // (Blocks: leaf by leaf, in the order of the gas's cells.)
+    const R = sim instanceof AmrSim ? await sim.readLeafRadiation() : await sim.rad.read();
     const count = R.length / 4;
     for (const k of ['Er', 'Fr1', 'Fr2', 'Fr3']) rad[k] = new Float32Array(count);
     for (let i = 0; i < count; i++) {

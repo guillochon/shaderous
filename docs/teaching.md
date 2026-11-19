@@ -59,7 +59,7 @@ intervals, which is useful for a time series.
 
 **What it is not.** Shaderous is a teaching and exploration tool with a validated scheme. It is
 not a production code: it runs on one GPU in single precision, and its radiation transport is
-gray and runs on the uniform grid only. Say so when students compare its results to the literature. For
+gray, with one opacity for all frequencies. Say so when students compare its results to the literature. For
 advanced students, the reasons for its limits make good material in their own right.
 
 ---

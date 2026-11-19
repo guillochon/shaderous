@@ -40,6 +40,8 @@ var<workgroup> wg_max: array<atomic<u32>, 2>;
 #include <mid>
 #include <comp_src>
 #include <ap_acc>
+// With radiation, its push on the timestep (amr/rad_rate_on.wgsl).
+#include <rad_rate>
 
 // Fine ghost cell l of block `slot`, interpolated from the coarser leaf `cs` beyond the face.
 fn from_coarse(slot: i32, l: vec3<i32>, cs: i32) -> Cons {
@@ -107,6 +109,7 @@ fn main(
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
         // (With implicit pressure the sound speed only sets a ceiling: hydro/rates.wgsl.)
         let snd = select(1.0, P.ohm.y, P.ohm.y > 0.0);
+        if (RAD_RATE) { w.w2.y = sqrt(w.w2.y * w.w2.y + rad_cs2(c, abs(w.w1.x), u.b.y)); }
         var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y * snd + diff_speed(abs(w.w1.x), w.w2.w);
         // A spherical run: per axis over its own cell length (hydro/rates.wgsl).
         var geo = 0.0;
@@ -121,6 +124,9 @@ fn main(
           rate = (abs(w.w1.y) + w.w2.y) * h.x + (abs(w.w1.z) + w.w2.y) * h.y;
           geo = sph_accel(sg, w.w1.yzw, g_dx);
         }
+        // Radiation: at most P.rad2.x sweeps of P.rad2.y dx / (d chat) a step, dx the cell's own
+        // (hydro/clock.wgsl has the uniform grid's), as a rate the step's Courant number divides.
+        if (RAD_RATE) { rate = max(rate, P.cfl * P.geom.y * P.rad.y / (P.rad2.x * P.rad2.y)); }
         var g = P.gext.xyz;
         if (P.grav_on != 0u) { g += textureLoad(G, c, 0).xyz; }
         g += ext_accel(blk_pos(inv.slot, inv.l));

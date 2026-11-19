@@ -14,6 +14,7 @@ import { burnSpec, implicitPressure, type SimConfig } from '../sim';
 import { packSpecies, SPECIES_JUMP_SCALE } from '../species/species';
 import { hydrogenParticles, mixMoments, type Moments } from '../species/mixture';
 import { blockFaces } from '../mhd/amr_mhd';
+import { diffusionFlux, splitPressure } from '../radiation/init';
 
 /** Samples of the setup the indicator may take per pass over all leaves, in 2D and 3D. */
 export const INDICATOR_SAMPLES_2D = 1 << 25;
@@ -193,6 +194,8 @@ export interface LeafState {
   km: Float32Array<ArrayBuffer> | null;
   /** the species' partial densities, groups of four */
   sp: Float32Array<ArrayBuffer> | null;
+  /** the radiation (E, F), with radiation transport */
+  rad?: Float32Array<ArrayBuffer> | null;
   /** the leaf's mass */
   mass: number;
   /** a cell of the leaf is inside an obstacle */
@@ -215,6 +218,8 @@ export interface FillContext {
   /** species groups of four */
   groups: number;
   mhd: boolean;
+  /** radiation transport is on (radiation/radiation.ts) */
+  rad?: boolean;
 }
 
 /** A leaf's conserved state (and magnetic faces) from the setup, at its cell centers. */
@@ -228,6 +233,12 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
   const u2 = new Float32Array(blockCells * 4);
   const sp = G ? new Float32Array(blockCells * 4 * G) : null;
   const km = kc ? new Float32Array(blockCells * 4) : null;
+  // Radiation (radiation/init.ts): E and F as the problem gives them, or a T^4 at the gas's
+  // temperature and its diffusion flux within the block.
+  const rad = x.rad ? new Float32Array(blockCells * 4) : null;
+  const radRho = rad ? new Float32Array(blockCells) : null;
+  const radT = rad ? new Float32Array(blockCells) : null;
+  const radGiven = rad ? new Uint8Array(blockCells) : null;
   const dx = x.dx0 / (1 << b.level);
   const vol = dx ** c.ndim;
   // A magnetic field: the leaf's faces, and their energy in each cell's total.
@@ -251,7 +262,20 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
           km.set(mo, o);
           ce = makeEos(c.eos, c.eosParams, mo, hydrogenParticles(c.problem.composition));
         }
-        const eint = ce.eintFromP(w.rho, p);
+        let eint = ce.eintFromP(w.rho, p);
+        if (rad) {
+          const moments = km ? [...km.subarray(o, o + 4)] : undefined;
+          const sp = w.erad === undefined ? splitPressure(c, ce, w.rho, p, moments, km ? hydrogenParticles(c.problem.composition) : undefined) : { eint, T: ce.temperature(w.rho, eint) };
+          eint = sp.eint;
+          const q = o / 4;
+          radRho![q] = w.rho;
+          radT![q] = sp.T;
+          rad[o] = w.erad ?? c.radA * sp.T ** 4;
+          if (w.frad) {
+            rad.set(w.frad, o + 1);
+            radGiven![q] = 1;
+          }
+        }
         const mark = cellMark(w);
         if (mark) solids = true;
         else {
@@ -281,5 +305,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
         u2[o + 3] = mark;
         if (sp) packSpecies(sp, o, blockCells * 4, G, w.rho, w.X);
       }
-  return { u1, u2, faces, km, sp, mass, solids, vmax, pstat };
+  // (One-sided differences at the block's own faces.)
+  if (rad) diffusionFlux({ ...c, bcLo: [1, 1, 1] }, [BS, BS, depth], dx, rad, radRho!, radT!, radGiven!);
+  return { u1, u2, faces, km, sp, rad, mass, solids, vmax, pstat };
 }

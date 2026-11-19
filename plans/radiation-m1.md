@@ -1,12 +1,15 @@
 # Plan: radiation transport with the M1 closure
 
-Status: stages 1 to 4 and most of 7 done (2026-11-18); stages 5 and 6 (adaptive mesh, per-block
-timesteps) not started, and refused with a message until then. Written 2026-11-15.
+Status: stages 1 to 5 and most of 7 done (2026-11-18); stage 6 (per-block timesteps) not
+started: with radiation they are switched off. Written 2026-11-15.
 
 Done, as built (docs/numerics.md section 24): the uniform-grid scheme of sections 3 and 4, with
 the per-cell speed of light; opacities; view fields; diagnostics; Er and Fr1-3 in snapshots;
 settings, links and scripting; two presets; GPU tests rad-off, -restart, -equilibrium, -f32,
--streaming, -diffusion, -shadow, -advect, -marshak, -star, -shock, -cooling-sphere. Departures from the text below: the
+-streaming, -diffusion, -shadow, -advect, -marshak, -star, -shock, -cooling-sphere, and on
+blocks rad-blocks-diffusion, -advect, -cooling-sphere, -restart. Stage 5 as built: section 5
+below, with the ghosts assembled before every sweep, the step's limit in each cell's rate, and
+no refinement criterion on E yet. Departures from the text below: the
 sweep's Courant number is 0.5 (forward Euler with linear reconstruction was unstable at 0.8);
 tau_0 is 2.5/3 (the streaming rate counts d, as the hydro's does); the face flux is Rusanov's
 with the largest M1 wave speed; the work term takes r and the half-kick velocity, and the

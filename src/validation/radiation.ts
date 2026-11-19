@@ -1,9 +1,10 @@
 // Validation of radiation transport (radiation/radiation.ts; plans/radiation-m1.md section 9).
-// Registered in tests.ts after the others. All on the uniform grid in 2D, small enough to share
-// the GPU.
+// Registered in tests.ts after the others. On the uniform grid and on blocks (rad-blocks-*), in
+// 2D but for the star, small enough to share the GPU.
 import { all, OUTFLOW, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
 import type { Sim, SimConfig } from '../sim';
-import { withSim, type TestDef } from './tests';
+import { withAmr, withSim, type TestDef } from './tests';
+import { AmrSim } from '../amr/amr_sim';
 import { capture, restartFrom } from '../io/capture';
 import { configFor, Sim as SimClass } from '../sim';
 import { marshakDiffusion, RefRad1D } from '../reference/radiation';
@@ -144,6 +145,220 @@ function radiativeJump(rho1: number, T1: number, u0: number, a: number): { rho2:
   }
   return { rho2: x[0], T2: x[1], D: x[2] };
 }
+
+/**
+ * Moments of the radiation energy above `floor` over a run's cells, uniform grid or blocks: its
+ * total (times the cells' areas), centroid and variance along x and y, positions from the box's
+ * center.
+ */
+async function radMoments(sim: Sim | AmrSim, floor: number) {
+  let m0 = 0;
+  const m1 = [0, 0];
+  const m2 = [0, 0];
+  const add = (E: number, x: number, y: number, dx: number) => {
+    const w = (E - floor) * dx * dx;
+    m0 += w;
+    m1[0] += w * x;
+    m1[1] += w * y;
+    m2[0] += w * x * x;
+    m2[1] += w * y * y;
+  };
+  if (sim instanceof AmrSim) {
+    const c = await sim.readLeaves();
+    const R = await sim.readLeafRadiation();
+    for (let q = 0; q < c.count; q++) add(R[4 * q], c.x[q], c.y[q], c.dx[q]);
+  } else {
+    const R = await sim.rad!.read();
+    for (let j = 0; j < sim.ny; j++) for (let i = 0; i < sim.nx; i++) add(R[4 * (j * sim.nx + i)], (i + 0.5) * sim.dx - 0.5 * sim.nx * sim.dx, (j + 0.5) * sim.dx - 0.5 * sim.ny * sim.dx, sim.dx);
+  }
+  const mean = m1.map((v) => v / m0);
+  return { total: m0, mean, variance: m2.map((v, a) => v / m0 - mean[a] ** 2) };
+}
+
+/** How many leaves a block mesh has at each level, coarsest first. */
+const leavesByLevel = (sim: AmrSim) => {
+  const n: number[] = [];
+  for (const b of sim.tree.leaves()) n[b.level] = (n[b.level] ?? 0) + 1;
+  return Array.from(n, (v) => v ?? 0);
+};
+
+/** The radiation tests on blocks (docs/numerics.md section 24). */
+const RAD_BLOCK_TESTS: TestDef[] = [
+  {
+    id: 'rad-blocks-diffusion',
+    name: 'Radiation on blocks: a pulse diffuses across a refinement boundary as on the fine uniform grid, and no energy is lost (2D, 128 cells, one level)',
+    criterion: 'A Gaussian of radiation centered on the face between coarse and fine blocks (the middle of the box refined, 20 and 10 optical depths a cell, scattering only, chat = c) spreads for 4 time units: the total energy (the radiation is 95% of it) is kept to 1e-4, as the uniform grid keeps it to 1e-5 (the rounding of 2048 sweeps in 32-bit floats), and the centroid (to 0.002 of the box) and the widths along x and y (to 2%) are those of the uniform grid at the fine resolution',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const n = 128;
+      const p = radGas({
+        radC: 1, radChat: 1, opacityParams: { absorption: 0, scattering: (10 * n) / 1e6 }, tEnd: 4,
+        // Heavy gas, which the radiation does not move; twice as dense in the middle, which the mesh refines.
+        init: () => (x, y): Prim => {
+          const rho = Math.abs(x) < 0.2 && Math.abs(y) < 0.2 ? 2e6 : 1e6;
+          return { rho, vx: 0, vy: 0, vz: 0, p: 1e-3, s: 0, erad: 0.01 + Math.exp(-(((x - 0.25) ** 2 + y ** 2) / (2 * 0.06 ** 2))), frad: [0, 0, 0] };
+        },
+      });
+      const run = async (tag: string, sim: Sim | AmrSim) => {
+        // (The radiation's push does a little work on the gas: the total is what is kept.)
+        const total = (x: Awaited<ReturnType<Sim['diagnostics']>>) => x.eTot + x.radiation!.eRadReduced;
+        const e0 = total(await sim.diagnostics());
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const r = await radMoments(sim, 0.01);
+        m[`${tag}_energy_change`] = total(d) / e0 - 1;
+        m[`${tag}_centroid_x`] = r.mean[0];
+        m[`${tag}_width_x`] = Math.sqrt(r.variance[0]);
+        m[`${tag}_width_y`] = Math.sqrt(r.variance[1]);
+        m[`${tag}_steps`] = d.steps;
+      };
+      await withSim(gpu, p, n, D2, (sim) => run('uniform', sim));
+      await withAmr(gpu, p, n, { ...D2, amrLevels: 1, refineHi: 2, refineDense: 1.5e6 }, async (sim) => {
+        const by = leavesByLevel(sim);
+        m.coarse_leaves = by[0];
+        m.fine_leaves = by[1];
+        await run('blocks', sim);
+      });
+      const pass =
+        m.coarse_leaves > 0 && m.fine_leaves > 0 && Math.abs(m.blocks_energy_change) < 1e-4 && Math.abs(m.blocks_energy_change - m.uniform_energy_change) < 1e-5 && Math.abs(m.blocks_centroid_x - m.uniform_centroid_x) < 0.002 &&
+        Math.abs(m.blocks_width_x / m.uniform_width_x - 1) < 0.02 && Math.abs(m.blocks_width_y / m.uniform_width_y - 1) < 0.02;
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'rad-blocks-advect',
+    name: 'Radiation on blocks: trapped radiation moves with the gas while the mesh follows it (2D, 256 cells, one level)',
+    criterion: 'The pulse of rad-advect on a mesh refined on its gradients, which re-meshes as it moves (at least twice, with coarse and fine blocks throughout): its centroid within 0.002 of the box of where the gas took it, its width kept to 5%, and E_gas + E / r to 1e-5',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const v = 1;
+      const p = radGas({
+        radC: 100, radChat: 1, opacityParams: { absorption: 1e6, scattering: 0 }, tEnd: 0.25,
+        init: () => (x) => {
+          const T = 1 + 0.3 * Math.exp(-((x / 0.08) ** 2));
+          const rho = (2 - T ** 4 / 3) / T;
+          return { rho, vx: v, vy: 0, vz: 0, p: rho * T, s: 0 };
+        },
+      });
+      await withAmr(gpu, p, 256, { ...D2, amrLevels: 1, refineHi: 0.1, refineLo: 0.03 }, async (sim) => {
+        const total = (d: Awaited<ReturnType<AmrSim['diagnostics']>>) => d.eTot + d.radiation!.eRadReduced;
+        const d0 = await sim.diagnostics();
+        const r0 = await radMoments(sim, 1);
+        const by0 = leavesByLevel(sim);
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const r1 = await radMoments(sim, 1);
+        const by = leavesByLevel(sim);
+        m.moved = r1.mean[0] - r0.mean[0];
+        m.expected = v * 0.25;
+        m.width_ratio = Math.sqrt(r1.variance[0] / r0.variance[0]);
+        m.energy_drift = total(d) / total(d0) - 1;
+        m.regrids = sim.regrids;
+        m.coarse_leaves = Math.min(by0[0], by[0]);
+        m.fine_leaves = Math.min(by0[1], by[1]);
+        m.steps = d.steps;
+      });
+      const pass = Math.abs(m.moved - m.expected) < 0.002 && Math.abs(m.width_ratio - 1) < 0.05 && Math.abs(m.energy_drift) < 1e-5 && m.regrids >= 2 && m.coarse_leaves > 0 && m.fine_leaves > 0;
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'rad-blocks-cooling-sphere',
+    name: 'Radiation on blocks: the hot core behind its shell shines as on the fine uniform grid (2D, 128 cells, one level)',
+    criterion: 'The sphere of rad-cooling-sphere with only the blocks that hold the shell refined: after 1.5 time units its luminosity through the box faces (which coarse blocks hold) is within 1% of the uniform fine grid’s, and steady to 1% over 20 steps',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const n = 128;
+      const p = radGas({
+        bcLo: all(OUTFLOW), bcHi: all(OUTFLOW), radChat: 5, opacityParams: { absorption: 0, scattering: 5 * n * 1e-4 }, tEnd: 1.5,
+        init: () => (x, y): Prim => {
+          const r = Math.hypot(x, y);
+          const rho = r < 0.2 ? 1e4 : 1e-4;
+          return { rho, vx: 0, vy: 0, vz: 0, p: rho * 1e-6, s: 0, fixed: r < 0.1, erad: r < 0.1 ? 1 : 1e-8, frad: [0, 0, 0] };
+        },
+      });
+      const run = async (tag: string, sim: Sim | AmrSim) => {
+        await sim.runToEnd();
+        sim.cfg.tEnd = 100;
+        sim.writeParams();
+        let sum = 0;
+        let lo = Infinity;
+        let hi = 0;
+        for (let k = 0; k < 20; k++) {
+          sim.step(1);
+          const l = (await sim.diagnostics()).radiation!.luminosity;
+          sum += l / 20;
+          lo = Math.min(lo, l);
+          hi = Math.max(hi, l);
+        }
+        m[`${tag}_luminosity`] = sum;
+        m[`${tag}_swing`] = (hi - lo) / (hi + lo);
+      };
+      await withSim(gpu, p, n, D2, (sim) => run('uniform', sim));
+      await withAmr(gpu, p, n, { ...D2, amrLevels: 1, refineHi: 2, refineDense: 1 }, async (sim) => {
+        const by = leavesByLevel(sim);
+        m.coarse_leaves = by[0];
+        m.fine_leaves = by[1];
+        await run('blocks', sim);
+      });
+      m.ratio = m.blocks_luminosity / m.uniform_luminosity;
+      return { pass: m.coarse_leaves > 0 && m.fine_leaves > 0 && Math.abs(m.ratio - 1) < 0.01 && m.blocks_swing < 0.01, metrics: m };
+    },
+  },
+  {
+    id: 'rad-blocks-restart',
+    name: 'Radiation on blocks: a snapshot restarts the run exactly',
+    criterion: 'The run of rad-blocks-advect part way, saved to a snapshot and restarted from it, has the same mesh and the same radiation in every cell bit for bit, and after ten more steps the two agree to 1e-5 in E',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const p = radGas({
+        radC: 100, radChat: 1, opacityParams: { absorption: 1e6, scattering: 0 },
+        init: () => (x) => {
+          const T = 1 + 0.3 * Math.exp(-((x / 0.08) ** 2));
+          const rho = (2 - T ** 4 / 3) / T;
+          return { rho, vx: 1, vy: 0, vz: 0, p: rho * T, s: 0 };
+        },
+      });
+      const over = { ...D2, amrLevels: 1, refineHi: 0.1, refineLo: 0.03 };
+      // Each cell's E by its position: leaves may be stored in another order.
+      const byCell = async (sim: AmrSim) => {
+        const c = await sim.readLeaves();
+        const R = await sim.readLeafRadiation();
+        const at = new Map<string, number>();
+        for (let q = 0; q < c.count; q++) at.set(`${c.x[q]},${c.y[q]}`, R[4 * q]);
+        return at;
+      };
+      const compare = (a: Map<string, number>, b: Map<string, number>) => {
+        let same = 0;
+        let worst = 0;
+        for (const [k, v] of a) {
+          const w = b.get(k);
+          if (w === v) same++;
+          worst = Math.max(worst, w === undefined ? Infinity : Math.abs(w - v) / Math.abs(v));
+        }
+        return { share: same / a.size, worst };
+      };
+      await withAmr(gpu, p, 256, { ...over, tEnd: 0.05 }, async (sim) => {
+        await sim.runToEnd();
+        sim.flush();
+        const snap = await capture(sim);
+        const again = await AmrSim.create(gpu, { ...configFor(p, 256, { ...over, tEnd: 0.05 }), ...restartFrom(snap, p, true, 128) });
+        try {
+          const key = (s: AmrSim) => s.tree.leaves().map((l) => `${l.level}:${l.c.join(',')}`).sort().join(' ');
+          m.same_mesh = key(sim) === key(again) ? 1 : 0;
+          m.identical_share = compare(await byCell(sim), await byCell(again)).share;
+          await sim.advance(10);
+          await again.advance(10);
+          m.same_mesh_later = key(sim) === key(again) ? 1 : 0;
+          m.radiation_difference = compare(await byCell(sim), await byCell(again)).worst;
+        } finally {
+          again.destroy();
+        }
+      });
+      return { pass: m.same_mesh === 1 && m.identical_share === 1 && m.radiation_difference < 1e-5, metrics: m };
+    },
+  },
+];
 
 export const RAD_TESTS: TestDef[] = [
   {
@@ -677,5 +892,6 @@ export const RAD_TESTS: TestDef[] = [
       return { pass: steady && Math.abs(m.ratio - 1) < 0.05 && lum[0] > 0 && m.chat5_reduced_share > 0 && m.chat10_reduced_share > 0, metrics: m };
     },
   },
+  ...RAD_BLOCK_TESTS,
 ];
 

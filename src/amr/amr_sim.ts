@@ -49,6 +49,9 @@ import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from 
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
 import { AmrMhd, maxBinding, MHD_BLOCK_BYTES, registerBytes } from '../mhd/amr_mhd';
 import { mhdUnsupported } from '../mhd/mhd';
+import { AmrRad } from './radiation';
+import { radiationOn } from '../radiation/radiation';
+import { diffusionFlux, splitPressure } from '../radiation/init';
 
 /**
  * Steps between refinement checks, and how far the flow may run past an unanswered check.
@@ -162,6 +165,12 @@ export class AmrSim implements Simulation {
   }
   private comp?: GPUTexture;
   private speciesDepth = 0;
+  /** Radiation transport (amr/radiation.ts), when it is on. */
+  rad?: AmrRad;
+  /** The update records its face mass fluxes: for the species, and for the radiation it carries. */
+  private get recordsMassFlux(): boolean {
+    return this.speciesGroups > 0 || radiationOn(this.cfg);
+  }
   private speciesX?: GPUTexture;
   private speciesHalf?: GPUTexture;
   private massFlux?: GPUBuffer;
@@ -409,7 +418,7 @@ export class AmrSim implements Simulation {
     if (cfg.problem.mhd) fit = Math.min(fit, Math.floor(maxBinding(d) / registerBytes(cfg.ndim)));
     // With species, the face mass fluxes are one buffer of some 59 kB per block in 3D, bound as
     // two windows of at most a binding's size each (massFluxWindows).
-    if (this.speciesGroups > 0) fit = Math.min(fit, Math.floor(massFluxMaxBytes(d) / speciesFaceBytes(cfg.ndim)));
+    if (this.recordsMassFlux) fit = Math.min(fit, Math.floor(massFluxMaxBytes(d) / speciesFaceBytes(cfg.ndim)));
     // Where the atlas textures cannot be render attachments, WebGPU zero-fills each on first use
     // through one staging buffer of its size, which may be no larger than a buffer may be (4 GiB
     // on NVIDIA; see tex3d in gpu/device.ts): a 35^3-block atlas's 5.5 GB textures lost the
@@ -460,6 +469,9 @@ export class AmrSim implements Simulation {
       this.species = [ts('species 0'), ts('species 1')];
       this.speciesX = ts('species fractions');
       this.speciesHalf = ts('species half step');
+      if (this.compCoeffs) this.comp = t('composition');
+    }
+    if (this.recordsMassFlux) {
       const bytes = this.cap * speciesFaceBytes(cfg.ndim);
       this.massFlux = d.createBuffer({ label: 'face mass fluxes', size: bytes, usage: GPUBufferUsage.STORAGE });
       const window = massFluxWindowBytes(d);
@@ -467,7 +479,6 @@ export class AmrSim implements Simulation {
         bytes <= window
           ? { lo: this.massFlux, hi: null, split: 0xffffffff }
           : { lo: { buffer: this.massFlux, offset: 0, size: window }, hi: { buffer: this.massFlux, offset: window, size: bytes - window }, split: window / 4 };
-      if (this.compCoeffs) this.comp = t('composition');
     }
     // Burning: each texel's heating rate over the last step (burn/burn.ts); else one texel of nothing.
     this.heat = burnSpec(cfg) ? tex3d(d, side, 'r32float', 'nuclear heating', this.layers * (cfg.ndim === 2 ? 1 : PAD)) : noHeat(d);
@@ -529,7 +540,9 @@ export class AmrSim implements Simulation {
     const groups = speciesGroups(cfg.problem);
     // Implicit pressure (amr/pressure.ts): six one-channel atlases.
     const implicit = implicitPressure(cfg) ? 6 * 4 * PAD ** cfg.ndim : 0;
-    return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit;
+    // Radiation (amr/radiation.ts): its atlases, and the face mass fluxes if the species do not already record them.
+    const rad = radiationOn(cfg) ? AmrRad.blockBytes(cfg.ndim) + (groups > 0 ? 0 : speciesFaceBytes(cfg.ndim)) : 0;
+    return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit + rad;
   }
 
   /**
@@ -695,6 +708,8 @@ export class AmrSim implements Simulation {
   private get timeBins(): number {
     // Species are moved with one timestep for all blocks (amr/species.wgsl).
     if (this.speciesGroups > 0) return 0;
+    // So is the radiation, and all blocks sweep together (amr/radiation.ts).
+    if (radiationOn(this.cfg)) return 0;
     return Math.max(0, Math.min(MAX_TIME_BINS, Math.floor(this.cfg.timeBins || 0)));
   }
   /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
@@ -712,7 +727,8 @@ export class AmrSim implements Simulation {
       ...(implicitPressure(this.cfg) && this.cfg.eos !== 'liquid' ? { ap_acc: 'const AP_ACC = true;\n#include "amr/pressure/acc_gas.wgsl"\n' } : {}),
       bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl',
       mid: on ? 'amr/mid_on.wgsl' : 'amr/mid_off.wgsl',
-      species: this.speciesGroups > 0 ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
+      species: this.recordsMassFlux ? 'amr/species_on.wgsl' : 'amr/species_off.wgsl',
+      ...(radiationOn(this.cfg) ? { rad_rate: 'amr/rad_rate_on.wgsl' } : {}),
       comp_src: compSrcSlot(this.compCoeffs, this.speciesDepth),
       ...this.mfSlots,
     };
@@ -788,6 +804,26 @@ export class AmrSim implements Simulation {
       assembleP, predictP, regridP, correctP, brushP, deferUpdate ? undefined : updateP,
     ]);
     if (pPredict) this.pPredict = pPredict;
+    if (radiationOn(this.cfg)) {
+      if (this.rad) await this.rad.rebuild(slots, this.compIn);
+      else {
+        const at = this.state[0][0];
+        this.rad = await AmrRad.create(
+          {
+            device: d, cfg: this.cfg, cap: this.cap,
+            texture: (label, format = 'rgba32float') => tex3d(d, at.width, format, label, at.depthOrArrayLayers, at.height),
+            params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, rg: this.rg, state: this.state, prim: this.prim[0],
+            massFlux: this.massFluxWindows!,
+            flat: (pass, count, reach) => this.flat(pass, count, reach),
+            interior: (pass, count) => this.interior(pass, count),
+          },
+          slots, this.compIn,
+        );
+      }
+    } else {
+      this.rad?.destroy();
+      this.rad = undefined;
+    }
     if (implicitPressure(this.cfg)) {
       const c = this.cfg;
       if (c.eos !== 'liquid' && !this.faceVel) {
@@ -839,6 +875,7 @@ export class AmrSim implements Simulation {
         5: v(this.gfield), 6: this.redDt.first, 20: this.bh, 30: this.bt, 31: list, ...bin, ...mid,
         ...((this.lagP && implicitPressure(this.cfg) ? { 47: v(this.lagP) } : {}) as Record<number, GPUTextureView>),
         ...((q >= 0 ? { 25: v(this.species[q]), 26: v(this.comp!) } : {}) as Record<number, GPUTextureView>),
+        ...((this.rad ? { 28: v(this.rad.RA) } : {}) as Record<number, GPUTextureView>),
       });
     if (pPredict) this.gPredict = predict(this.listLeaf);
     this.gAssemble = [];
@@ -1548,6 +1585,7 @@ export class AmrSim implements Simulation {
       d.queue.writeTexture({ texture: this.state[0][0], origin }, s.u1, layout, [BS, BS, depth]);
       d.queue.writeTexture({ texture: this.state[0][1], origin }, s.u2, layout, [BS, BS, depth]);
       if (s.km) d.queue.writeTexture({ texture: this.comp!, origin }, s.km, layout, [BS, BS, depth]);
+      if (s.rad && this.rad) d.queue.writeTexture({ texture: this.rad.R[0], origin }, s.rad, layout, [BS, BS, depth]);
       for (let g = 0; g < G; g++) {
         const go = speciesGroupOffset(g, this.speciesDepth);
         const og = [origin[0] + go[0], origin[1] + go[1], origin[2] + go[2]];
@@ -1566,13 +1604,14 @@ export class AmrSim implements Simulation {
     let filled = false;
     if (run && leaves.length > 1) filled = await run.leaves(leaves, write).then(() => true, () => false);
     if (!filled) {
-      const ctx = { cfg: c, dx0: this.dx0, levels: this.levels, fn, eos, kc: this.compCoeffs, groups: G, mhd: !!this.mhd };
+      const ctx = { cfg: c, dx0: this.dx0, levels: this.levels, fn, eos, kc: this.compCoeffs, groups: G, mhd: !!this.mhd, rad: !!this.rad };
       leaves.forEach((b, i) => write(i, leafState(ctx, b)));
     }
     let mass = 0;
     for (const m of leafMass) mass += m;
     this.cur = 0;
     this.speciesCur = 0;
+    if (this.rad) this.rad.cur = 0;
     this.pending = null;
     this.stepsSinceFlag = 0;
     this.regrids = 0;
@@ -1655,7 +1694,8 @@ export class AmrSim implements Simulation {
     // On the GPU where every star's gas is one the GPU knows; the CPU's settling reads the whole
     // mesh back, some 100 bytes a cell, which a mesh of tens of GB does not fit in a page.
     // (The GPU's sums are of cubes: an axisymmetric run's rings settle on the CPU.)
-    const onGpu = c.problem.geometry !== 'cylindrical' && !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
+    // (With radiation the settled pressure is split between gas and radiation, on the CPU.)
+    const onGpu = !this.rad && c.problem.geometry !== 'cylindrical' && !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
     this.settled = (async () => {
       try {
         setLoadStage(settleStage(0));
@@ -1739,10 +1779,32 @@ export class AmrSim implements Simulation {
       this.refreshPotential();
       if (change < (set.tol ?? SETTLE_TOL) * peak) break;
     }
-    settler.finish(eos.eintFromP);
+    // (With radiation, the settled pressure is the gas's and the radiation's: split as the
+    // initial conditions split it, radiation/init.ts.)
+    settler.finish(this.rad ? (rho, p) => splitPressure(this.cfg, eos, rho, p).eint : eos.eintFromP);
     if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
     upload(this.state[this.cur][0], u1);
     upload(this.state[this.cur][1], u2);
+    if (this.rad) {
+      // The radiation of the rewritten blocks: E = a T^4 at the settled gas's temperature, and
+      // F its diffusion value within each block.
+      const c = this.cfg;
+      const R = new Float32Array(per * 4);
+      const rho = new Float32Array(per);
+      const T = new Float32Array(per);
+      const given = new Uint8Array(per);
+      for (const b of leaves) {
+        const i = index.get(b)!;
+        for (let q = 0; q < per; q++) {
+          const o = 4 * (i * per + q);
+          rho[q] = u1[o];
+          T[q] = eos.temperature(Math.max(rho[q], c.rhoFloor), u2[o + 1]);
+          R[4 * q] = c.radA * T[q] ** 4;
+        }
+        diffusionFlux({ ...c, bcLo: [1, 1, 1] }, [BS, BS, depth], this.dx0 / (1 << b.level), R, rho, T, given);
+        d.queue.writeTexture({ texture: this.rad.current, origin: this.origin(b.slot) }, R, layout, [BS, BS, depth]);
+      }
+    }
     this.refreshPotential();
   }
 
@@ -2080,6 +2142,15 @@ export class AmrSim implements Simulation {
       this.mhd.snapshotTree(pre);
       this.device.queue.submit([pre.finish()]);
     }
+    if (this.rad) {
+      // Before the new tree replaces it: the radiation with its ghosts on the old mesh, for the
+      // slopes of new children (amr/rad_regrid.wgsl).
+      const pre = this.device.createCommandEncoder();
+      const pp = beginPass(pre);
+      this.rad.encodeAssemble(pp, this.cur, this.nLeaf);
+      pp.end();
+      this.device.queue.submit([pre.finish()]);
+    }
     this.uploadTree();
     this.device.queue.writeBuffer(this.rg, 0, BlockTree.regridTable(plan.ops, this.cap) as Int32Array<ArrayBuffer>);
     const pass = beginPass(enc);
@@ -2094,6 +2165,7 @@ export class AmrSim implements Simulation {
       this.interior(pass, this.nLeaf);
       this.speciesCur = 1 - this.speciesCur;
     }
+    this.rad?.encodeRegrid(pass, this.nLeaf);
     pass.end();
     if (!this.mhd) this.cur = 1 - this.cur;
     this.regrids++;
@@ -2182,6 +2254,8 @@ export class AmrSim implements Simulation {
         this.prs.encodeInit(pass, p, this.nLeaf);
         this.lagFresh = false;
       }
+      // Radiation: with its ghosts as the step starts, for the timestep and the advection.
+      this.rad?.encodeAssemble(pass, p, this.nLeaf);
       pass.setPipeline(this.pAssemble);
       pass.setBindGroup(0, this.assembleGroup(p));
       this.flat(pass, this.nAll, NG);
@@ -2196,6 +2270,8 @@ export class AmrSim implements Simulation {
       pass.setBindGroup(0, this.gUpdate[p]);
       this.interior(pass, this.nLeaf);
       this.encodeSpecies(pass, p);
+      // The radiation moves with the mass fluxes too (amr/rad_advect.wgsl).
+      this.rad?.encodeAdvect(pass, p, this.nLeaf);
       if (this.prs) {
         // Implicit pressure: the advected state's primitives, ghosts and all, then the equation,
         // the solve and the correction back into this parity (amr/pressure.ts).
@@ -2240,6 +2316,14 @@ export class AmrSim implements Simulation {
         gp.end();
       } else {
         this.cur = 1 - p;
+      }
+      if (this.rad) {
+        // The radiation's sweeps on the gas as the step left it, and their commit into the other
+        // parity (amr/radiation.ts), as on the uniform grid.
+        const rp = beginPass(enc);
+        this.rad.encodeSweeps(rp, this.cur, this.nLeaf);
+        rp.end();
+        this.cur = 1 - this.cur;
       }
       syncScale(enc, this.cfg, this.clock, this.params);
       this.encodeBurn(enc);
@@ -2780,6 +2864,7 @@ export class AmrSim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
+      if (this.rad && !this.destroyed) diag.radiation = (await this.rad.diagnostics(this.cur)) ?? undefined;
       return unfoldDiagnostics(diag, this.cfg.symmetry);
     } finally {
       this.stagingBusy = false;
@@ -2816,6 +2901,7 @@ export class AmrSim implements Simulation {
       // A magnetic field: its own assembly measures the rates, with the fast magnetosonic speed.
       this.mhd.encodeAssembly(pass, this.cur, () => this.flat(pass, this.nLeaf, NG));
     } else {
+      this.rad?.encodeAssemble(pass, this.cur, this.nLeaf);
       pass.setPipeline(this.pAssemble);
       pass.setBindGroup(0, this.assembleGroup(this.cur));
       this.flat(pass, this.nAll, NG);
@@ -2892,7 +2978,10 @@ export class AmrSim implements Simulation {
     if (this.cfg.ndim !== 3) return null;
     return { side: this.slotsPerSide * PAD, slotsPerSide: this.slotsPerSide, roots: this.n0 / BS, halved: this.halvedAxes().reduce((m, h, a) => m | (h ? 1 << a : 0), 0), levels: this.levels, idx: this.idx, list: this.listLeaf, leaves: this.nLeaf };
   }
-  fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
+  get radCur(): number {
+    return this.rad?.cur ?? 0;
+  }
+  fieldResources(parity: number, speciesParity: number, radParity = 0): Record<number, GPUBuffer | GPUTextureView> {
     // With a magnetic field the primitives come from its own assembly (the same layout), and the
     // display reads the faces; without, one placeholder texel.
     const r: Record<number, GPUBuffer | GPUTextureView> = {
@@ -2900,6 +2989,7 @@ export class AmrSim implements Simulation {
       6: (this.mhd?.prim ?? this.prim[0]).createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(),
       13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(), 29: this.bins, 30: this.bt, 20: this.bh,
       14: this.mhd?.magResult ?? this.noMag(), 15: this.heat.createView(),
+      16: (this.rad?.R[radParity] ?? this.noFaces()).createView(),
     };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
@@ -3023,6 +3113,12 @@ export class AmrSim implements Simulation {
     });
     this.device.queue.writeBuffer(this.clock, 0, clockState(this.cfg));
     this.refreshPotential();
+  }
+
+  /** The radiation (E, F) of every leaf cell, four numbers each, the cells in the order of readLeaves(). */
+  async readLeafRadiation(): Promise<Float32Array> {
+    this.flush();
+    return this.readBoxes(this.rad!.current, this.tree.leaves(), 4);
   }
 
   /**
@@ -3266,6 +3362,7 @@ export class AmrSim implements Simulation {
 
   destroy() {
     this.mhd?.destroy();
+    this.rad?.destroy();
     this.prs?.destroy();
     this.placeholderFaces?.destroy();
     this.destroyed = true;
