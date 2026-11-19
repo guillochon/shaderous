@@ -118,3 +118,17 @@ Every figure's simulations were run again with its script (`--run`) on the RTX 3
 | Shaderous against AthenaK per unit of bandwidth, 256^3 | 1.52e6 per GB/s against 3.01e5 to 3.95e5: 3.9 to 5.1 times (quoted as 4 to 5) | `make_performance.py` output |
 | Firefox against Chrome | largest uniform grids 1.63e9 against 1.85e9 (2048^2) and 1.38e9 against 1.39e9 (256^3); adaptive 1.5 to 7.3 times fewer; ms per step 1.9 to 2.5 (2D) and 4.0 to 4.6 (3D) against 0.33 to 0.77 and 1.9 to 3.7 | same |
 | Nickel from the collision of two 0.64 M_sun dwarfs with the tabulated equation of state | 0.61 M_sun | no record of the run was found in the repository on 2026-11-15; with a network still trained on the first equation of state's heating. Measure again after the retraining |
+
+## Validation run again after the accuracy changes (2026-11-19)
+
+The three accuracy branches merged (`d5a0032` self-gravity's solver guess and half-step work, `9c9053f` self-gravity on the adaptive mesh, `b0f9d59` time-centered implicit pressure), on the Apple M4 Pro in headless Chrome 157.
+
+| Quantity | Value | Source |
+|---|---|---|
+| Validation suite | 184 of 184 passed in 17.7 min, and the runner exited by itself | `research/validation-run-m4pro.json` (Playwright's JSON report; each test's metrics are in its `stdout`) |
+| The run that would not end | `mhd-near-vacuum-bins` alone (40 s) leaves Chrome's crash handler holding the pipe Playwright's `Browser.close` waits on; ended by `tools/headless/close.mjs` | `tests/gpu/fixtures.ts` |
+| Evrard energy drift: 64^3; whole box, octant, blocks (`sym-evrard`); (R, z) | 0.23% (was 0.82%); 0.28%, 0.13%, 0.08% (0.44%, 0.69%, 0.19%); 0.037% (0.11%) | `evrard`, `sym-evrard`, `cyl-evrard` |
+| Evrard with per-block timesteps against one timestep | 5.7e-4 against 5.8e-4 (was 1.21e-3) | `amr-time-bins` |
+| Uniform sphere's potential on 2 and 3 levels | 0.027%, 0.053% (was 0.17%, 0.26%) | `amr-gravity-static` |
+| Zel'dovich pancake on blocks: density, velocity | 0.66%, 0.18% (was 6.5%, 1.0%); uniform 0.59% | `cosmo-pancake` |
+| Implicit pressure: sound wave's amplitude after a period; Sod L1; point mass's velocity against explicit | 98.4% (was 85.8%); 0.97% (1.6%), on blocks 0.61% (0.93%); 2.8% (7.9%) | `psplit-acoustic`, `psplit-sod`, `psplit-amr-sod`, `psplit-masses` |

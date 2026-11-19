@@ -593,7 +593,11 @@ held bit for bit to the object it replaced before those objects were retired.
 - **GPU tests** (`npm run test:gpu`): Playwright drives an installed Chrome (or Edge with
   `PW_CHANNEL=msedge`) through the 180-test validation suite on the real GPU. Each test closes
   its page, bounded to 30 s, before its result is judged, and a global timeout (180 minutes,
-  `PW_GLOBAL_TIMEOUT`) runs in the runner process, so a failed test cannot hold the suite.
+  `PW_GLOBAL_TIMEOUT`) runs in the runner process, so a failed test cannot hold the suite. The
+  specs take `test` from `tests/gpu/fixtures.ts`, whose browser fixture closes Chrome through
+  `tools/headless/close.mjs` (as the headless session does): on macOS Chrome's crash handler can
+  outlive Chrome while holding the pipe that Playwright's `Browser.close` waits on, and every
+  full run then passed its tests and never exited.
 - **In the browser**: [validate.html](https://guillochon.github.io/shaderous/validate.html) runs
   the same suite on the visitor's GPU, with each test's pass criterion next to its result.
 - **Float64 mirrors**: every WGSL equation of state and cooling function has a TypeScript

@@ -8,6 +8,7 @@ import { createServer as createHttpServer } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { closeBrowser } from './close.mjs';
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const DIST = path.join(REPO, 'dist');
@@ -146,7 +147,8 @@ export async function openSession(opts = {}) {
   log(`shaderous: opening ${u.origin}${u.pathname}`);
   await page.goto(u.toString());
   const close = async () => {
-    await browser.close().catch(() => {});
+    // Not browser.close() alone: on macOS Chrome's crash handler can hold it for good (close.mjs).
+    await closeBrowser(browser);
     await server?.close().catch(() => {});
   };
   try {

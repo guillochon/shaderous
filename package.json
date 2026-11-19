@@ -1,6 +1,6 @@
 {
   "name": "shaderous",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "mcpName": "io.github.guillochon/shaderous",
   "description": "GPU gas dynamics in the browser (WebGPU): compressible hydro and MHD with gravity, cooling and adaptive mesh refinement. Includes a headless runner and an MCP server for AI agents.",
   "license": "MIT",
@@ -39,6 +39,7 @@
     "tools/headless/cli.mjs",
     "tools/headless/mcp.mjs",
     "tools/headless/session.mjs",
+    "tools/headless/close.mjs",
     "tools/headless/flags.mjs",
     "tools/headless/npy.mjs",
     "tools/headless/schema.json"

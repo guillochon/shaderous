@@ -60,8 +60,8 @@ What changed in each release of Shaderous. A release's section here is the body 
 - Species that set the equation of state no longer raise a WebGPU validation error on the
   uniform grid.
 - Restarts resume at the step they were saved at.
-- The GPU test suite no longer waits forever at its end on macOS, where Chrome's crash handler
-  could outlive Chrome and hold the test runner.
+- Headless runs and the GPU test suite no longer wait forever at their end on macOS, where
+  Chrome's crash handler could outlive Chrome and hold the browser's close.
 
 ## 0.2.0 (2026-11-17)
 
