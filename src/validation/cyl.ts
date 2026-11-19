@@ -234,7 +234,7 @@ export const CYL_TESTS: TestDef[] = [
   {
     id: 'cyl-evrard',
     name: 'Axisymmetric: the Evrard collapse with self-gravity in (R, z)',
-    criterion: 'The Evrard sphere (G = M = R = 1, u = 0.05) in (R, z) at 128^2 (R to 4, z across 4): through collapse and bounce (t <= 1.5) the total energy keeps to 2% and the thermal energy peaks between t = 0.9 and 1.3, as in 3D',
+    criterion: 'The Evrard sphere (G = M = R = 1, u = 0.05) in (R, z) at 128^2 (R to 4, z across 4): through collapse and bounce (t <= 1.5) the total energy keeps to 0.1% and the thermal energy peaks between t = 0.9 and 1.3, as in 3D',
     async run(gpu) {
       const n = 128;
       // R to 4 and z across +-2, as the 3D test's box: the sphere and its bounce well inside.
@@ -261,7 +261,7 @@ export const CYL_TESTS: TestDef[] = [
           worst = Math.max(worst, Math.abs(d.eTot - d0.eTot) / Math.abs(d0.eTot));
           if (d.eInt > peakU) [peakU, peakT] = [d.eInt, d.t];
         }
-        return { pass: worst < 0.02 && peakT >= 0.9 && peakT <= 1.3, metrics: { energy_drift: worst, thermal_peak_time: peakT, e_total_initial: d0.eTot, mass: d0.mass } };
+        return { pass: worst < 0.001 && peakT >= 0.9 && peakT <= 1.3, metrics: { energy_drift: worst, thermal_peak_time: peakT, e_total_initial: d0.eTot, mass: d0.mass } };
       });
     },
   },

@@ -2425,7 +2425,7 @@ export const TESTS: TestDef[] = [
     id: 'evrard',
     name: 'Evrard collapse',
     criterion:
-      'Total energy conserved to 2% through collapse and bounce (t <= 1.5, before the outgoing shock reaches the box edge); thermal energy peaks between t = 0.9 and 1.3',
+      'Total energy conserved to 0.6% through collapse and bounce (t <= 1.5, before the outgoing shock reaches the box edge); thermal energy peaks between t = 0.9 and 1.3',
     async run(gpu) {
       return withSim(gpu, evrard, 64, { tEnd: 0 }, async (sim) => {
         const d0 = await sim.diagnostics();
@@ -2447,7 +2447,7 @@ export const TESTS: TestDef[] = [
           if (i % 2 === 0) curve.push(`${last.t.toFixed(2)}:${last.eKin.toFixed(3)}/${last.eInt.toFixed(3)}/${last.eGrav.toFixed(3)}`);
         }
         return {
-          pass: worst < 0.02 && peakT >= 0.9 && peakT <= 1.3,
+          pass: worst < 0.006 && peakT >= 0.9 && peakT <= 1.3,
           metrics: {
             e_total_initial: d0.eTot, e_total_final: last.eTot, max_energy_drift: worst, thermal_peak_time: peakT,
             thermal_peak: peakU, potential_minimum: minW, mass_change: (last.mass - d0.mass) / d0.mass, steps,
