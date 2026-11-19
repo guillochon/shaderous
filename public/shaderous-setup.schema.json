@@ -1964,6 +1964,22 @@
         "title": "Composition",
         "description": "Mass fractions inside the shape, by species name"
        },
+       "erad": {
+        "type": "number",
+        "title": "Radiation energy",
+        "description": "With radiation transport: the radiation’s energy density inside the shape. Empty: that in equilibrium with the gas, a T⁴",
+        "minimum": 0
+       },
+       "frad": {
+        "type": "array",
+        "items": {
+         "type": "number"
+        },
+        "minItems": 3,
+        "maxItems": 3,
+        "title": "Radiation flux",
+        "description": "With radiation transport: the radiation’s flux inside the shape, at most c times its energy (a beam). Empty: the flux of diffusion. With an inflow over the same shape, a lamp that shines for the whole run"
+       },
        "supersample": {
         "type": "integer",
         "title": "Smooth edge (samples)",

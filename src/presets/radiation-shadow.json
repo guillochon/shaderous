@@ -1,0 +1,77 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "radiation-shadow",
+  "name": "Shadow of an opaque clump",
+  "group": "Radiation",
+  "family": "radiation-shadow",
+  "familyName": "Shadow of an opaque clump",
+  "variant": "Standard",
+  "blurb": "A lamp at the left edge shines a beam across thin, transparent gas onto a dense clump that scatters light (optical depth about 20), in pressure balance with its surroundings: behind the clump is a shadow with a sharp edge, which radiation that only diffuses would fill in (gray M1 radiation transport, docs/numerics.md section 24).",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "amr": 0,
+    "box": 1,
+    "symmetric": "yz",
+    "supports2d": true,
+    "bc": { "lo": [1, 1, 1], "hi": [1, 1, 1] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667, "R": 1, "arad": 1e-8 },
+    "gravity": "off",
+    "G": 0,
+    "radiation": "m1",
+    "opacity": "constant",
+    "opacityParams": { "absorption": 0, "scattering": 0.1 },
+    "radC": 100,
+    "radChat": 10
+  },
+  "background": { "rho": 0.1, "p": 0.1 },
+  "parts": [
+    {
+      "kind": "region",
+      "id": "clump",
+      "shape": { "type": "sphere", "radius": 0.1 },
+      "rho": 1000,
+      "s": 1,
+      "erad": 1e-8,
+      "frad": [0, 0, 0]
+    },
+    {
+      "kind": "region",
+      "id": "beam",
+      "shape": { "type": "box", "min": [null, null, null], "max": [-0.48, null, null] },
+      "erad": 0.1,
+      "frad": [10, 0, 0]
+    },
+    {
+      "kind": "inflow",
+      "id": "lamp",
+      "shape": { "type": "box", "min": [null, null, null], "max": [-0.48, null, null] }
+    }
+  ],
+  "run": { "tEnd": 0.2, "checkpointDt": 0.005 },
+  "view": { "field": 31, "log": true, "mode": "slice" },
+  "featured": [
+    {
+      "path": "parts.0.shape.radius",
+      "id": "radius",
+      "label": "Clump radius",
+      "tip": "Radius of the clump, as a share of the box. Changing it starts the run again",
+      "min": 0.02,
+      "max": 0.3,
+      "step": 0.02
+    },
+    {
+      "path": "parts.0.rho",
+      "id": "rho",
+      "label": "Clump density",
+      "tip": "Density of the clump: its optical depth is the scattering opacity times this times its diameter. At 100 or less the beam shines through it. Changing it starts the run again",
+      "min": 0.1,
+      "max": 10000,
+      "factor": 10
+    }
+  ]
+}

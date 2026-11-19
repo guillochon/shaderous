@@ -368,6 +368,13 @@ export interface RegionPart {
   v?: Vec3;
   s?: number;
   X?: Record<string, number>;
+  /**
+   * With radiation transport: the radiation's energy density and flux inside the shape, instead
+   * of those in equilibrium with the gas (radiation/init.ts). A beam is a flux of c times the
+   * energy; with an `inflow` over the same shape, a lamp that shines for the whole run.
+   */
+  erad?: number;
+  frad?: Vec3;
   /** cells the surface crosses take the share inside it, from this many samples a side */
   supersample?: number;
 }

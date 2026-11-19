@@ -198,6 +198,16 @@ describe('setups no preset has', () => {
     return compileSetup(spec!).problem;
   };
 
+  it('gives a region’s radiation to its cells, a lamp’s fixed, and leaves the rest to equilibrium', () => {
+    const at = read({ domain: { ndim: 2 }, physics: { eosParams: { gamma: 5 / 3, arad: 1 }, radiation: 'm1', radC: 100 }, background: { rho: 1, p: 1 }, parts: [
+      { kind: 'region', shape: { type: 'sphere', radius: 0.1 }, rho: 10 },
+      { kind: 'region', shape: { type: 'box', min: [null, null, null], max: [-0.4, null, null] }, erad: 2, frad: [200, 0, 0] },
+      { kind: 'inflow', shape: { type: 'box', min: [null, null, null], max: [-0.4, null, null] } }] }).init(64, eos, 2, {});
+    expect(at(-0.45, 0.2, 0)).toMatchObject({ rho: 1, erad: 2, frad: [200, 0, 0], fixed: true });
+    const [gas, clump] = [at(0.3, 0.2, 0), at(0, 0, 0)];
+    expect([gas.erad, gas.frad, gas.fixed, clump.rho, clump.erad]).toEqual([undefined, undefined, undefined, 10, undefined]);
+  });
+
   it('adds the densities of two disks about one mass, sharing momentum by mass', () => {
     const disk = (id: string, rIn: number, rOut: number, sigma0: number) => ({ kind: 'disk', id, about: ['m'], profile: 'balanced', rIn, rOut, sigma0, slope: -1.5, cs: 0.1, floor: 1e-9 });
     const one = (parts: object[]) => read({ domain: { box: 8 }, physics: { eos: 'barotropic', eosParams: { gamma: 1, K: 0.01 }, G: 1 }, parts: [{ kind: 'mass', id: 'm', gm: 1, soft: 0.1 }, ...parts] }).init(64, eos, 3, {});

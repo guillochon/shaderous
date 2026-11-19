@@ -122,6 +122,14 @@ export function regionPainter(part: RegionPart, ctx: PaintContext): Painter {
     const eDep = part.energy / (Math.max(count, 1) * dx ** ctx.ndim);
     pEnergy = (rho) => ctx.eos.pressure(rho, eDep);
   }
+  // The radiation of a cell: the region's where it is given and the cell is the region's
+  // (`own`), else what was under it.
+  const radiationOf = (out: Prim, w: Prim, own: boolean) => {
+    const erad = own ? (part.erad ?? w.erad) : w.erad;
+    const frad = own ? (part.frad ?? w.frad) : w.frad;
+    if (erad !== undefined) out.erad = erad;
+    if (frad !== undefined) out.frad = frad;
+  };
   const set = (w: Prim): Prim => {
     const rho = part.rho ?? w.rho;
     const v = part.v;
@@ -134,6 +142,7 @@ export function regionPainter(part: RegionPart, ctx: PaintContext): Painter {
     if (X ?? w.X) out.X = X ?? w.X;
     if (w.solid) out.solid = true;
     if (w.fixed) out.fixed = true;
+    radiationOf(out, w, true);
     return out;
   };
   const sub = part.supersample;
@@ -162,6 +171,7 @@ export function regionPainter(part: RegionPart, ctx: PaintContext): Painter {
     if (w.X || X) out.X = X && frac >= 0.5 ? X : w.X;
     if (w.solid) out.solid = true;
     if (w.fixed) out.fixed = true;
+    radiationOf(out, w, frac >= 0.5);
     return out;
   };
 }

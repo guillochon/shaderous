@@ -1,0 +1,33 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "radiative-shock",
+  "name": "Radiative shock",
+  "group": "Radiation",
+  "family": "radiative-shock",
+  "familyName": "Radiative shock",
+  "variant": "Subcritical",
+  "blurb": "Gas at temperature 1 driven at speed 1.5 into a wall at the left: a shock moves back up the stream. Behind it gas and radiation come to one temperature; at the front the gas overshoots it in a thin spike, and radiation leaking ahead barely warms the gas coming in (gray M1 radiation transport, docs/numerics.md section 24).",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [2, 0, 0], "hi": [1, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667, "R": 1, "arad": 0.00012 },
+    "gravity": "off",
+    "G": 0,
+    "radiation": "m1",
+    "opacity": "constant",
+    "opacityParams": { "absorption": 240, "scattering": 0 },
+    "radC": 1000,
+    "radChat": 200
+  },
+  "background": { "rho": 1, "p": 1, "v": [-1.5, 0, 0] },
+  "run": { "tEnd": 0.6, "checkpointDt": 0.02 },
+  "view": { "field": 1, "log": false, "mode": "slice" }
+}

@@ -1,0 +1,28 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "radiation-star",
+  "extends": "polytrope",
+  "name": "Star held up partly by radiation",
+  "group": "Radiation",
+  "family": "radiation-star",
+  "familyName": "Star held up partly by radiation",
+  "variant": "Standard",
+  "blurb": "Eddington’s standard model: an n = 3 polytrope with a tenth of its pressure everywhere in radiation, which the run carries as a field of its own, trapped in the opaque gas, instead of in the equation of state. The star stays at rest, on an adaptive mesh of three levels, one octant computed (gray M1 radiation transport, docs/numerics.md section 24).",
+  "domain": { "ndim": 3, "n": 128, "amr": 2, "mirror": "xyz" },
+  "physics": {
+    "eos": "gas_radiation",
+    "eosParams": { "gamma": 1.6666666666666667, "R": 1, "arad": 2177099.2716427804 },
+    "radiation": "m1",
+    "opacity": "constant",
+    "opacityParams": { "absorption": 1000000, "scattering": 0 },
+    "radChat": 50,
+    "radSweeps": 16
+  },
+  "parts": [
+    { "kind": "star", "id": "star", "type": "polytrope", "n": 3, "radius": 0.3, "rhoc": 1 }
+  ],
+  "run": { "tEnd": 1, "checkpointDt": 0.05, "tDyn": 1 },
+  "view": { "field": 0, "log": true, "mode": "slice" },
+  "featured": []
+}

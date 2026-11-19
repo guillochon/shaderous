@@ -106,7 +106,7 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 | `orbit` | Not an object: places two bodies, `of: [idA, idB]`. `type: "binary"`: two point masses about their center of mass at pericenter (`q`, `separation`, `ecc`, `incl`, `retrograde`). `"flyby"`: a point mass on a parabola about a star that stays at the origin (`q`, `beta` = tidal radius over pericenter, `start` in tidal radii, `debris`). `"collision"`: two stars on a parabola (`impact` in sums of their radii, `starts`) |
 | `star` | `type: "polytrope"` (`n`, `radius`, and `mass` or `rhoc`) or `"white-dwarf"` (`mass`); `pos`, `vel`, `dye`, `X`; `field` (`type`: `dipole`, `random`, `gm17-dipole`, `gm17-random`; `beta`; `seed`). Stars are settled into the grid's own hydrostatic balance before the run. Self-gravity (isolated) and stars need 3D or an axisymmetric (R, z) run, where a star sits on the axis |
 | `disk` | `about: [ids]` (point masses, stars or both; the disk is centered on their center of mass and moves with it), `profile` (`thin`: a surface density with a cavity and a Gaussian vertical profile; `balanced`: a midplane density in vertical balance with the softened potential), `rIn`, `rOut`, `sigma0`, `slope`, `cs`, `floor`, `radialFn`, `verticalFn`, `verticalIn` (a density profile of your own: below), `damp` (`from`, `rate`: the damping zone), `loops` (`beta`, `span`, `count`: field loops), `stresses` |
-| `region` | A `shape` with a state that replaces what is under it: `rho`, `p` (or `energy`, a total spread over a sphere's cells), `v`, `s`, `X`; `supersample` for a smooth edge |
+| `region` | A `shape` with a state that replaces what is under it: `rho`, `p` (or `energy`, a total spread over a sphere's cells), `v`, `s`, `X`; with radiation transport `erad` and `frad`, the radiation's energy and flux; `supersample` for a smooth edge |
 | `obstacle`, `inflow` | A `shape` whose cells are solid, or held at their initial state |
 | `field` | A uniform magnetic field: `b` (a vector) or `up` (a strength along the axis drawn upward) |
 | `flow` | A built-in initial condition by `name`, with its parameters: what shapes cannot say (a shear layer with its seeded modes, a ZND detonation, an Alfvén wave). Every flow has parameters (densities, speeds, amplitudes, wavelengths, seeds), listed with their ranges in the dialog and by `describe().setup.flows`; left out, each takes the value its preset has always had. The flows are in `src/setup/parts/flows/` |
@@ -442,6 +442,8 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `v` | Velocity | `[x, y, z]` | Velocity inside the shape |
 | `s` | Dye | a number, 0 to 1 | Passive scalar inside the shape |
 | `X` | Composition | `{ species: fraction }` | Mass fractions inside the shape, by species name |
+| `erad` | Radiation energy | a number, at least 0 | With radiation transport: the radiation’s energy density inside the shape. Empty: that in equilibrium with the gas, a T⁴ |
+| `frad` | Radiation flux | `[x, y, z]` | With radiation transport: the radiation’s flux inside the shape, at most c times its energy (a beam). Empty: the flux of diffusion. With an inflow over the same shape, a lamp that shines for the whole run |
 | `supersample` | Smooth edge (samples) | a whole number, 2 to 8 | A sphere’s edge cells take the share of their volume inside it, from this many samples a side. Empty: a sharp edge |
 
 **`obstacle`** (Obstacle). A solid body the gas reflects off

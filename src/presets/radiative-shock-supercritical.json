@@ -1,0 +1,11 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "radiative-shock-supercritical",
+  "extends": "radiative-shock",
+  "variant": "Supercritical",
+  "blurb": "The radiative shock driven at speed 5: enough radiation leaks ahead of the front to heat the gas coming in to several times its temperature before the shock arrives, in a precursor a few photon mean free paths (here, cells) wide.",
+  "physics": { "radChat": 400 },
+  "background": { "v": [-5, 0, 0] },
+  "run": { "tEnd": 0.36, "checkpointDt": 0.012 }
+}
