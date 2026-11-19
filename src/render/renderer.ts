@@ -460,7 +460,7 @@ export class Renderer {
    */
   fieldPipelines(fieldShader: string, cfg: SimConfig, atlas: boolean) {
     const d = this.device;
-    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp });
+    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp, opacity: hydroSlots(cfg).opacity });
     return Promise.all([
       computePipeline(d, code, 'field'),
       computePipeline(d, code, 'slice', undefined, 'slice'),
@@ -530,14 +530,16 @@ export class Renderer {
       this.gSlice = bindGroup(d, this.pSlice, { 0: this.cam, 2: this.tf.createView(), 3: this.sampler, 4: this.map.createView() });
     }
     [this.pField, this.pPlane, this.pProject, this.pAtlas] = await this.fieldPipelines(sim.fieldShader, sim.cfg, !!info);
-    // One per parity of the state and of the species (a run without species binds a stand-in).
+    // One per parity of the state, of the species and of the radiation (a run without species
+    // binds a stand-in).
     this.noSpecies ??= d.createTexture({ label: 'no species', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING });
-    const common = (k: number) => ({ 0: sim.paramBuffer, 1: this.viewBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources(k >> 1, k & 1) });
-    this.gField = [0, 1, 2, 3].map((k) => bindGroup(d, this.pField!, { ...common(k), 4: this.vol!.createView(), 8: this.rangeBuf }));
+    const common = (k: number) => ({ 0: sim.paramBuffer, 1: this.viewBuf, 9: this.noSpecies!.createView(), ...sim.fieldResources((k >> 1) & 1, k & 1, k >> 2) });
+    const all8 = [0, 1, 2, 3, 4, 5, 6, 7];
+    this.gField = all8.map((k) => bindGroup(d, this.pField!, { ...common(k), 4: this.vol!.createView(), 8: this.rangeBuf }));
     // The slice pass records no range: the display pass does, over the whole box.
-    this.gPlane = [0, 1, 2, 3].map((k) => bindGroup(d, this.pPlane!, { ...common(k), 11: this.map!.createView() }));
-    this.gProject = [0, 1, 2, 3].map((k) => bindGroup(d, this.pProject!, { ...common(k), 8: this.rangeBuf, 11: this.map!.createView() }));
-    this.gAtlas = info ? [0, 1, 2, 3].map((k) => bindGroup(d, this.pAtlas!, { ...common(k), 8: this.rangeBuf, 12: this.atlas!.tex.createView(), 31: info.list })) : [];
+    this.gPlane = all8.map((k) => bindGroup(d, this.pPlane!, { ...common(k), 11: this.map!.createView() }));
+    this.gProject = all8.map((k) => bindGroup(d, this.pProject!, { ...common(k), 8: this.rangeBuf, 11: this.map!.createView() }));
+    this.gAtlas = info ? all8.map((k) => bindGroup(d, this.pAtlas!, { ...common(k), 8: this.rangeBuf, 12: this.atlas!.tex.createView(), 31: info.list })) : [];
     this.range = null;
     this.stale = true;
     await this.fieldLines.attach(sim, this.cam);
@@ -770,7 +772,7 @@ export class Renderer {
         // negative if r is logarithmic (the slice draws the (R, z) half-plane, src/spherical.ts).
         ...mir.map((m) => (m ? 1 : 0)), sphViewParam(sim.cfg),
     ]);
-    const parity = 2 * sim.cur + sim.speciesCur;
+    const parity = 4 * (sim.radCur ?? 0) + 2 * sim.cur + sim.speciesCur;
 
     // Everything the picture is drawn from but the state itself. Field lines move with the gas,
     // by the run's clock: while it stands still so do they, and only their number is an input.

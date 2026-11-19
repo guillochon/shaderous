@@ -12,6 +12,7 @@
 #include "hydro/pfloor.wgsl"
 #include "hydro/prim.wgsl"
 #include "hydro/diff_rate.wgsl"
+#include <rad_rate>
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -33,7 +34,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let c = vec3<i32>(gid);
     let u2 = textureLoad(U2, c, 0);
     comp_use(comp_tex(c));
-    let w = prim_from_cons(textureLoad(U1, c, 0), u2);
+    var w = prim_from_cons(textureLoad(U1, c, 0), u2);
+    // With radiation, its push in gas it is trapped in (radiation/rate_on.wgsl).
+    if (RAD_RATE) { w.w2.y = sqrt(w.w2.y * w.w2.y + rad_cs2(c, w.w1.x, u2.y)); }
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
     // (With implicit pressure the sound speed only sets a ceiling: P.ohm.y is one over the
     // acoustic steps a step may span, 0 for the explicit scheme. src/sim.ts packParams.)

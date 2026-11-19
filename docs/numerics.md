@@ -34,7 +34,8 @@ precision, are pointed out where they occur.
 21. [Ideal MHD](#21-ideal-mhd)
 22. [Rotating frames, symmetry and coordinates](#22-rotating-frames-symmetry-and-coordinates)
 23. [Validation](#23-validation)
-24. [References](#references)
+24. [Radiation transport](#24-radiation-transport)
+25. [References](#references)
 
 ---
 
@@ -1672,6 +1673,69 @@ $`E`$ includes $`B^2/2`$.
   more faces to empty through than the one that filled it. A settled gamma = 5/3 star on its
   tidal-disruption grid now steps like the hydro control (no floored cells to t = 2, mass lost
   only by outflow).
+- **First-order flux correction after the update** (`mhd/fofc.wgsl`; on blocks
+  `mhd/amr_fofc.wgsl`). The test above misses a cell that stage 2 empties without stage 1
+  having moved its density much: in the thin corona over a magnetized disk (issue #3: midplane
+  density 25, ambient $`10^{-5}`$, loops of $`\beta = 100`$), the half-step fluxes of the
+  neighbors carried out more mass than the cell held, at speeds of $`10^6`$ after the first step,
+  and the run went non-finite within ten steps on either grid. So stage 2 also checks every cell
+  after its update, as Athena++ does: one left with less than 1/8 of its density, or with no
+  internal energy, is listed. The faces of a listed cell then take the first-order HLLE flux of
+  the start in their mass, momentum and energy, and the listed cells and their neighbors are
+  updated again. The field's fluxes and the edge fields stay those of the second-order step, so
+  the field and $`\nabla\cdot B`$ are untouched. With first-order energy fluxes beside a
+  second-order field, $`E - KE - B^2/2`$ can take the difference in the field's energy as heat (in
+  $`\beta \ll 1`$ gas near a sink, $`10^7`$ times the cell's temperature; the block runs gained
+  13% of their energy and stalled). So a cell updated again beside a corrected face whose
+  $`E - KE - B^2/2`$ is more than 4 times its advected internal energy keeps the advected energy
+  and rebuilds $`E`$ from it; elsewhere $`E`$ stays as the fluxes made it. Keeping the advected energy
+  in every such cell was worse: in the thin gas over the poles it drifted cold, and on blocks the
+  corona drained to the floor (thousands of floored cells at $`64^3`$, tens of thousands at
+  $`128^3`$).
+
+  On the uniform grid, a fix pass rewrites the listed cells' faces in the slab's flux buffers
+  and a redo pass updates the cells again. A neighbor that the redo leaves all but emptied in its
+  turn is listed too and corrected in a second round (without it the disk went non-finite at
+  $`128^3`$ by step 10); round 0 judges cells on the update's own list alone, so which cells are
+  listed does not depend on the slabs. The list runs through all slabs of a step: each slab
+  fixes the faces its buffers hold and redoes the cells whose faces and field are at hand (its
+  own but the top layer, and the two layers below), and slabs of 4 layers agree with one bit for
+  bit, with outflow faces and with $`z`$ periodic (the last slab then holds $`z`$ face $`n + 1`$, the
+  twin of face 1). The passes run 16 workgroups that step through the list and end at once when
+  it is empty; there is no indirect dispatch, because the update has no storage buffer to spare
+  under WebGPU's limit of 8.
+
+  On blocks, the update marks a cell in the fourth channel, otherwise unused, of its new face
+  texel, and its block at a corner of its ghost padding, which nothing reads. A scan lists each
+  marked leaf and its face neighbors (with time bins, those that start a step: one at its
+  midpoint takes the corrected register in its deposit), reading one texel per unmarked leaf.
+  Stage 2's flux and update passes then run again over that list: a face of a marked cell takes
+  the first-order flux, into the scratch and, on the block's surface, the register; the block's
+  other surface faces take back the register's own entry, the very flux the neighbor used; inner
+  faces are computed again. With several chunks every chunk's fluxes go first, as in the step,
+  since a coarser or slower neighbor reads the corrected register. A second round follows, as on
+  the uniform grid: a pass over the leaves of the first marks, in a texture of one float a texel
+  (the face texture, of four, cannot be read and written in one pass), the cells the first round
+  left with less than 1/8 of their density and adds their leaves' face neighbors to the list,
+  and the fluxes and update run again over the whole list with both marks. It judges by density alone: it sees the internal energy after its floor, and marking
+  every cold cell at the floor, step after step, left the cold gas over the poles at the pressure
+  floor in a thousand cells and more. One chunk per leaf agrees with one chunk bit for bit.
+
+  Measured on an RTX 3080, paired runs against the step without the correction: on the uniform
+  grid Orszag-Tang at $`1024^2`$ 8% faster (the update's cell code, now one function, compiles
+  better), an MHD blast at $`128^3`$ and $`256^3`$ 3% slower, the MRI box at $`128^3`$ within 2%; on
+  blocks an MHD blast at $`128^3`$ with one level within 1%, and a field loop at $`1024^2`$ with two
+  levels, whose step takes 1.1 ms, 11.5% slower: the two rounds add seven small passes a step
+  (scan, fluxes, update, recheck, fluxes, update, reset of the list), about 0.13 ms in Chrome on
+  Windows however little they do. They were nine (13%) until round 1 kept round 0's list, adding
+  to it from the recheck, instead of emptying it and scanning again.
+  Issue #3's disk at $`128^3`$ now runs 400 steps on the uniform grid with at most 5 floored cells,
+  and on blocks with one and two levels and with time bins with at most 58 (from tens of
+  thousands before the second round and the narrower energy rule), all with $`\nabla\cdot B`$ at
+  $`10^{-7}`$. The gas around its sink thins, and the step falls with it, as the setup check warns.
+  With the sink's point
+  mass every block of that disk takes the fastest bin, so the correction beside a slower block
+  is exercised by the random setups, not by a validation test.
 - **Compile time.** GPU compilers inline every function at every call, so a lookup called at
   several places, or in a loop they unroll, is compiled that many times. The block grid's
   assembly took 4 s to compile in Chrome (far more in Firefox), with the face lookup inlined
@@ -2498,7 +2562,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 154 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 167 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -2512,10 +2576,183 @@ disruption, cooling, viscosity, conduction, sinks, binary orbits, the equations 
 round trips, GPU against CPU reference, the weakly compressible liquid and its implicit pressure (§9), and the MHD tests of §21. Each test's pass criterion is printed next to its
 result.
 
+## 24. Radiation transport
+
+Gray radiation hydrodynamics with the M1 closure (`src/radiation/`, `src/opacity/`;
+`plans/radiation-m1.md`), on the uniform grid in Cartesian coordinates. The setting is
+`physics.radiation` (`m1` or `off`); off, a run builds none of it and steps as before, bit for
+bit.
+
+### Equations
+
+The radiation energy density $`E`$ and flux $`\mathbf F`$ are evolved in the gas's frame
+([Fornax][Skinner2019]), to first order in $`v/c`$ and without its terms in the flux equation:
+
+```math
+\begin{aligned}
+\partial_t E + r\,\big[\nabla\cdot(\mathbf v E) + \nabla\cdot(\mathbf v\cdot\mathsf P) + \nabla\cdot\mathbf F\big] &= r\,\big[c\kappa_P\rho\,(aT^4 - E) - \mathbf v\cdot\mathbf g\big],\\
+\partial_t \mathbf F + r\,\big[\nabla\cdot(\mathbf v\,\mathbf F) + c^2\,\nabla\cdot\mathsf P\big] &= -r c\kappa_R\rho\,\mathbf F,
+\end{aligned}
+```
+
+and the gas gains the momentum $`\mathbf g = \kappa_R\rho\mathbf F/c`$ per unit time and the heat
+$`c\kappa_P\rho(E - aT^4)`$. $`\kappa_P`$ is the absorption opacity, $`\kappa_R`$ the total
+(absorption and scattering), $`\mathsf P = \mathsf D E`$ the pressure tensor with Levermore's
+Eddington factor
+
+```math
+\chi(f) = \frac{3 + 4f^2}{5 + 2\sqrt{4 - 3f^2}},\qquad
+\mathsf D = \tfrac{1-\chi}{2}\,\mathsf I + \tfrac{3\chi-1}{2}\,\hat n\hat n,\qquad f = \frac{|\mathbf F|}{cE}.
+```
+
+$`\nabla\cdot(\mathbf v\cdot\mathsf P) + \mathbf v\cdot\mathbf g`$ is the compression work
+$`\mathsf P:\nabla\mathbf v`$, split so that what the radiation loses the gas's kinetic energy
+gains. With radiation on, the equation of state leaves out a radiation term of its own (the gas
+and radiation one, the degenerate one): $`E`$ carries it.
+
+### The reduced speed of light, cell by cell
+
+$`r`$ is the factor on the speed of light. Explicit transport at the true $`c`$ would cost a
+step of $`\Delta x/c`$ everywhere; a reduced speed $`\hat c`$ everywhere gives radiation in
+equilibrium with the gas $`c/\hat c`$ times its weight (26% too cold in `rad-equilibrium` at
+$`\hat c = c/10`$), and trapped radiation in a lab-frame scheme lags the gas at $`(\hat c/c)\,v`$
+([Skinner & Ostriker 2013][Skinner2013]; [Wibking & Krumholz 2022][Wibking2022]). Shaderous
+reduces it only where a cell is too transparent to afford the true one:
+
+```math
+r = \min\!\Big(1,\ \frac{\hat c}{c}\,\max\!\big(1,\ \tau_c/\tau_0\big)\Big),\qquad \tau_c = \kappa_R\rho\Delta x,\quad \tau_0 = 2.5/3 .
+```
+
+In an opaque cell the step is limited by diffusion at $`D = rc/(3\kappa_R\rho)`$, and
+$`\tau_0`$ is where its rate, $`2.5\,d\,D/\Delta x`$ as for conduction (§3), equals the streaming
+rate $`d\,\hat c`$. With $`c/\hat c = 100`$, every cell of optical depth above about 80 has the
+true speed, so the inside of a star has the right heat capacity and conserves energy exactly.
+The one condition is $`\hat c \gg |v| + c_s`$ (the diagnostics count the cells where
+$`|v| + c_s > \hat c/3`$), not $`\hat c \gg v\tau`$. Where $`r < 1`$ what is conserved is
+$`E_\text{gas} + E/r`$. Every term but the time derivative carries $`r`$, the advection with
+the gas included, so in a steady state $`r`$ drops out, in moving gas too. (With the advection
+left at full speed, the supercritical shock of `rad-shock`, whose precursor's cells are reduced,
+came out 6% too cool.) Where $`r = 1`$ the radiation moves exactly with the gas.
+
+What a reduced speed cannot give is a radiative structure that moves across the grid through
+reduced cells: the precursor of a shock of speed $`D`$ has only $`\hat c/D`$ rather than $`c/D`$
+of a head start, and the state behind is off by as much as the precursor matters. In `rad-shock`
+the temperature behind the supercritical shock is 3.2% low at $`\hat c = c/5`$, 1.1% at
+$`c/2.5`$ and 0.06% at $`c`$. This rule is Shaderous's own; `radLocalC = false` gives the usual
+uniform $`r = \hat c/c`$.
+
+### A step
+
+```
+rates, clock     the step; the radiation's push adds (4/9) min(1, tau_c) E / rho to c_s^2,
+                 and the step is at most N_r sweeps of 0.5 dx / (d chat)
+predict, update  as without radiation; the update records the face mass fluxes
+radiation/advect E / rho and F / rho moved with those mass fluxes, as species are, plus the
+                 flux v . P; each cell's change times its r
+gravity, correct
+radiation/sweep  N_r times (8 by default, at most 16): transport, then the local exchange
+radiation/commit the gas's side of the sweeps into the state
+```
+
+**Advection** is upwind on the sign of each face's mass flux, with the upwind cell's limited
+slope over $`(1-\nu)/2`$, $`\nu`$ the face's Courant number: trapped radiation then moves exactly
+as the gas does.
+
+**Transport.** Each cell computes the fluxes of all its faces itself from the four cells across
+each, so both cells of a face get the same bits (the gathered fluxes of
+[architecture.md](architecture.md)). $`E`$ and the reduced flux $`\mathbf f = \mathbf F/(cE)`$
+are reconstructed linearly: the slope is the central difference, at most $`\theta`$ times
+either one-sided difference, with $`\theta = 2`$ (monotonized central) for $`\mathbf f`$ and
+$`\theta = 1.2`$ for $`E`$. With $`\theta = 2`$ on $`E`$ and the single forward Euler stage, the
+surface of an opaque body sent its light out in pulses: in the reference, 26% up and down with a
+period of some 40 sweeps at 5 optical depths a cell, and still 3% with four times the cells. With
+1.2 it is steady to 0.3% at 1 to 20 optical depths a cell, and the luminosity is 3% above the
+converged one where minmod ($`\theta = 1`$) is 8% above. A face whose reconstructed
+states have $`E \le 0`$ or $`|\mathbf f| > 1`$ takes its cells' own ([Wibking & Krumholz
+2022][Wibking2022]). The flux is Rusanov's with the largest M1 wave speed along the face,
+$`S = c\max(\sqrt{D_{nn}}, |f_n|)`$ of the two states (or $`c`$, global Lax-Friedrichs), and its
+dissipation is scaled by $`\min(1, 1/\tau_\text{face})`$ ([Skinner et al. 2019][Skinner2019]), so
+that in opaque gas the scheme diffuses at $`c/(3\kappa_R\rho)`$ whether or not cells resolve the
+mean free path. The face flux uses the true $`c`$; each cell multiplies its divergence by its own
+$`r`$. One forward Euler stage is stable to a Courant number of 0.5 with this reconstruction (at
+0.8 a streaming pulse gained energy sevenfold in the reference), so the sweep's step is
+$`0.5\,\Delta x/(d\hat c)`$.
+
+**Exchange.** After the transport has made $`E^*`$ and $`\mathbf F^*`$, per cell, implicitly:
+
+1. $`\mathbf F' = \mathbf F^*/(1+\theta_F)`$, $`\theta_F = rc\kappa_R\rho\Delta t`$; the gas
+   gains $`(\mathbf F^* - \mathbf F')/(rc^2)`$ of momentum. In the gas's frame the equilibrium
+   flux is zero, so nothing has to be iterated.
+2. Backward Euler for the pair $`(\rho e, E)`$ eliminates $`E'`$:
+   $`\rho e(T') + A\,aT'^4 = \rho e + A E^*`$, $`A = \theta/(r(1+\theta))`$,
+   $`\theta = rc\kappa_P\rho\Delta t`$. Its root comes from Newton's method from the smaller of
+   the two one-term solutions, an upper bound it descends from; then
+   $`E' = E^*/(1+\theta) + aT'^4\,\theta/(1+\theta)`$. Both sides are sums of positive terms:
+   nothing subtracts $`aT^4`$ from $`E`$, so float32 is enough at any optical depth
+   (`rad-f32` holds $`E = aT^4`$ to $`10^{-6}`$ at $`\tau_c = 10^{10}`$ over $`10^4`$ sweeps).
+   The larger of $`\rho e'`$ and $`E'/r`$ then takes what the root's rounding left, so the
+   exchange conserves $`E_\text{gas} + E/r`$ exactly.
+3. The work $`r\,\mathbf v\cdot\Delta(\rho\mathbf v)`$ comes off $`E'`$, at the gas's velocity half
+   way through the sweep's kick: summed over the sweeps it is exactly the kinetic energy the
+   commit adds.
+
+The gas's side, $`(\rho e, \Delta\rho\mathbf v)`$, collects in a texture of its own through the
+sweeps; the commit adds it to the state with the change of kinetic energy and runs the
+dual-energy synchronization (§7).
+
+**Initial states.** A problem may give $`E`$ and $`\mathbf F`$ (`Prim.erad`, `Prim.frad`); by
+default $`E = aT^4`$ at the gas's temperature (with a radiation-bearing equation of state, the
+problem's pressure is split between gas and radiation at the temperature the full equation of
+state gives) and $`\mathbf F`$ is its diffusion value from the grid's centered differences.
+
+**Opacities** (`<opacity>`, `src/opacity/`): constant absorption and scattering; electron
+scattering $`0.2(1+X)`$ cm²/g with a small true absorption; Kramers' free-free
+$`3.7\times10^{22}(1-Z)(1+X)\rho T^{-3.5}`$ cm²/g plus electron scattering. With physical units,
+$`c`$, $`a`$ and these constants come from the units and composition.
+
+**Output.** The view's Radiation group (energy, temperature, $`|\mathbf F|`$, $`f`$,
+$`\tau_c`$, $`r`$); the diagnostics' radiation energy, $`\sum E/r`$, the share of $`E`$ in reduced
+cells, the luminosity through the open faces, and the warning counts; `.athdf` files carry
+`Er`, `Fr1`-`Fr3`, and a run restarts from one with its radiation bit for bit.
+
+### Validation and cost
+
+`src/reference/radiation.ts` is a float64 version of the scheme in 1D (unit tests in
+`tests/unit/radiation.test.ts`), and `src/validation/radiation.ts` holds the GPU tests:
+
+| Test | Result |
+|---|---|
+| `rad-equilibrium` | Closed box: with $`r = 1`$ the temperature is the root of $`e(T) + aT^4 = e_0 + E_0`$ to $`2\times10^{-7}`$, energy kept to $`5\times10^{-8}`$; one reduced speed $`c/10`$ everywhere misses it by 26%; the per-cell rule in an opaque box, by $`5\times10^{-8}`$ |
+| `rad-f32` | Equilibrium at $`\tau_c = 10^{10}`$, $`10^4`$ sweeps: $`E/aT^4 - 1 < 1.3\times10^{-6}`$; total energy kept exactly at rest, to $`4\times10^{-5}`$ (about $`10^{-8}`$ a step) where the gas moves |
+| `rad-streaming` | A pulse in vacuum moves at $`\hat c`$ to 0.1% with $`f = 1`$ |
+| `rad-diffusion` | A Gaussian spreads at $`c/(3\kappa\rho)`$ to 1% at $`\tau_c = 1`$, 100 and $`10^4`$ |
+| `rad-shadow` | Behind an opaque disc, 6% of the beam beside it |
+| `rad-advect` | Trapped radiation at $`\beta = 10^{-2}`$, $`\beta\tau = 10^4`$, $`\hat c = c/100`$ moves with the gas to $`10^{-4}`$ of the box and keeps its width to 3.5% (the lab-frame reference lags at $`(\hat c/c)\,v`$) |
+| `rad-marshak` | [Su & Olson (1996)][SuOlson1996]'s non-equilibrium Marshak wave: the GPU matches the float64 reference to $`2\times10^{-3}`$ of the incident energy, and both the float64 diffusion solution with the Marshak boundary to 0.03 at $`\tau = 3.16`$ and 0.015 at $`\tau = 10`$ |
+| `rad-star` | An $`n = 3`$ polytrope with a tenth of its pressure in radiation, over a dynamical time: it holds as the same star with its radiation in the equation of state does (speeds inside both under 1% of the sound speed), and crossing the box at Mach 10 it follows that baseline |
+| `rad-shock` | Gas driven into a wall: the state behind the shock matches the Rankine-Hugoniot conditions with radiation to 0.1% (subcritical), and to 3% at $`\hat c = c/5`$ (supercritical; the limit above) |
+| `rad-cooling-sphere` | A hot core behind a reduced-speed shell: the luminosity is steady to 0.03% over 30 steps (12% before the limiter above) and the same at $`\hat c`$ and $`2\hat c`$ to 5% |
+| `rad-restart` | The radiation comes back from a snapshot bit for bit |
+
+On an RTX 3080 a sweep costs about a quarter of a hydro step (3D $`128^3`$: 2.1 ms a step
+without radiation, 6.6 ms with 8 sweeps); at $`\hat c`$ about 15 times the gas's signal speed a
+unit of simulated time costs 4.2 times what the gas alone does.
+
+**Not yet.** The adaptive mesh and per-block timesteps (refused, with a message); curvilinear
+coordinates; magnetic fields; more than one frequency group; sources that shine. The sweep is
+first order in time ([He, Wibking & Krumholz 2024][He2024]'s two-stage scheme is the upgrade).
+Radiation pressure enters as a source term the well-balanced reconstruction (§8) does not see, so
+stars held up largely by radiation are not yet in discrete balance.
+
 ---
 
 ## References
 
+[He2024]: https://arxiv.org/abs/2404.08247
+[Skinner2013]: https://arxiv.org/abs/1306.0010
+[Skinner2019]: https://arxiv.org/abs/1806.07390
+[SuOlson1996]: https://doi.org/10.1016/0022-4073(96)00084-7
+[Wibking2022]: https://arxiv.org/abs/2110.01792
 [Bate1995]: https://doi.org/10.1093/mnras/277.2.362
 [Berger1984]: https://doi.org/10.1016/0021-9991(84)90073-1
 [Berger1989]: https://doi.org/10.1016/0021-9991(89)90035-1

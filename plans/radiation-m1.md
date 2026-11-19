@@ -1,6 +1,22 @@
 # Plan: radiation transport with the M1 closure
 
-Status: not started. Written 2026-11-15.
+Status: stages 1 to 4 and most of 7 done (2026-11-18); stages 5 and 6 (adaptive mesh, per-block
+timesteps) not started, and refused with a message until then. Written 2026-11-15.
+
+Done, as built (docs/numerics.md section 24): the uniform-grid scheme of sections 3 and 4, with
+the per-cell speed of light; opacities; view fields; diagnostics; Er and Fr1-3 in snapshots;
+settings, links and scripting; two presets; GPU tests rad-off, -restart, -equilibrium, -f32,
+-streaming, -diffusion, -shadow, -advect, -marshak, -star, -shock, -cooling-sphere. Departures from the text below: the
+sweep's Courant number is 0.5 (forward Euler with linear reconstruction was unstable at 0.8);
+tau_0 is 2.5/3 (the streaming rate counts d, as the hydro's does); the face flux is Rusanov's
+with the largest M1 wave speed; the work term takes r and the half-kick velocity, and the
+exchange gives its rounding to the larger energy, so E_gas + E / r is kept exactly; N_r is a
+setting (default 8), not chosen per step; the advection with the gas takes each cell's r too
+(without it a supercritical shock was 6% too cool), and what a reduced speed still gets wrong is
+a radiative structure moving through reduced cells (3% at chat = c/5 in rad-shock); the energy's
+slope is limited to 1.2 times the one-sided differences (monotonized central made an opaque
+surface shine in pulses). Not yet: rad-flux-match; the star's light curve preset (it needs the
+adaptive mesh).
 
 Goal: gray radiation hydrodynamics on the uniform grid and the adaptive mesh, good enough for
 the problems Shaderous already runs: white dwarfs, stars being disrupted, their debris. Those

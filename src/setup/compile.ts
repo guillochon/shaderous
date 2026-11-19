@@ -470,6 +470,11 @@ export function compileSetup(spec: SetupSpec): Compiled {
     refineDense: mesh.refineDense,
     cooling: ph.cooling,
     coolParams: ph.coolParams,
+    radiation: ph.radiation,
+    opacity: ph.opacity,
+    opacityParams: ph.opacityParams,
+    radC: ph.radC,
+    radChat: ph.radChat,
     burn: burnFlow
       ? (params) => burnFlow.def.burn!(flowCtx(at(params), 3), flowValues(at(params).parts!.find((p) => p.kind === 'flow' && p.name === burnFlow.part.name) as FlowPart).values)
       : burn
@@ -547,6 +552,9 @@ export function compileSetup(spec: SetupSpec): Compiled {
   over('refineLo', mesh.refineLo);
   over('timeBins', mesh.timeBins);
   over('jeansRefine', mesh.jeansRefine);
+  over('radLocalC', ph.radLocalC);
+  over('radSolver', ph.radSolver);
+  over('radSweeps', ph.radSweeps);
   over('symmetry', d.mirror ? mirrorAxes(d.mirror) : undefined);
   return { spec, problem, overrides };
 }

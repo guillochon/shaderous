@@ -54,7 +54,7 @@ describe('shader assembly', () => {
                 bins: `amr/bins_${bins}.wgsl`, mid: `amr/mid_${bins}.wgsl`,
                 diffusion: 'const VISCOSITY = true;\nconst CONDUCTION = true;\nconst RESISTIVITY = true;\n',
                 damping: binary.damping!.wgsl,
-                species: `hydro/species_${bins}.wgsl`,
+                species: `hydro/species_${bins}.wgsl`, rad_rate: 'radiation/rate_off.wgsl',
               };
               for (const entry of ['hydro/rates.wgsl', 'hydro/update.wgsl', 'amr/update.wgsl', 'amr/assemble.wgsl', 'amr/predict.wgsl', 'gravity/correct.wgsl', 'amr/correct.wgsl']) {
                 const src = assemble(entry, slots);
@@ -83,7 +83,7 @@ const SP_DEPTH: i32 = 40;
     for (const eos of Object.values(EOS_MODULES))
       for (const cooling of Object.values(COOLING_MODULES))
         for (const entry of ['render/field.wgsl', 'amr/field.wgsl']) {
-          const src = assemble(entry, { eos, cooling, diffusion: 'const VISCOSITY = false;\nconst CONDUCTION = true;\nconst RESISTIVITY = true;\n' });
+          const src = assemble(entry, { eos, cooling, diffusion: 'const VISCOSITY = false;\nconst CONDUCTION = true;\nconst RESISTIVITY = true;\n', opacity: 'opacity/constant.wgsl' });
           expect(src).not.toMatch(/^\s*#include/m);
           expect(src).toContain('fn field_value');
         }

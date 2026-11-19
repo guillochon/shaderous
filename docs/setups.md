@@ -253,6 +253,17 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.coolParams.heat` | Heating rate | a number, at least 0. Default `0` | Heating per unit mass (power law), or the heating rate at unit density (interstellar) |
 | `physics.coolParams.tUnit` | Kelvin per unit T | a number, at least 0.000001. Default `1000` | Interstellar: kelvin per code unit of temperature (code density is atoms per cm³) |
 | `physics.coolParams.tFloor` | Temperature floor | a number, at least 0. Default `0` | Gas at or below this temperature does not cool |
+| `physics.radiation` | Radiation transport | `off`, `m1`. Default `off` | Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Uniform Cartesian grids, without a magnetic field, for now |
+| `physics.opacity` | Opacity | `constant`, `electron`, `kramers`. Default `constant` | How opaque the gas is to the radiation, per unit mass: a constant, electron scattering, or Kramers’ free-free absorption with electron scattering. With physical units the scattering and Kramers constants come from the composition |
+| `physics.opacityParams.absorption` | Absorption κ_a | a number, at least 0. Default `1` | Absorption opacity per unit mass (the Planck mean), which exchanges heat between gas and radiation. With electron scattering, a small true absorption |
+| `physics.opacityParams.scattering` | Scattering κ_s | a number, at least 0. Default `0` | Scattering opacity per unit mass: it drags on the radiation’s flux without heating the gas (electron scattering is 0.2 (1 + X) cm²/g) |
+| `physics.opacityParams.kramers` | Kramers K₀ | a number, at least 0. Default `0` | Kramers: the free-free absorption is K₀ ρ T^-3.5 per unit mass, in code units |
+| `physics.opacityParams.tFloor` | Kramers least T | a number, at least 0. Default `0` | Kramers: the opacity is taken at no lower temperature than this (it grows without bound as T falls) |
+| `physics.radC` | Speed of light c | a number, at least 0 | The speed of light in code units. With physical units it is theirs; a scale-free setup sets its own |
+| `physics.radChat` | Reduced speed of light | a number, at least 0 | The speed light crosses transparent gas at in the run (at most c): its step is about dx / chat. Ten times the fastest gas is enough; opaque cells take the true speed whatever this is |
+| `physics.radLocalC` | Speed of light per cell | `true` or `false`. Default `true` | Opaque cells take the true speed of light and only transparent ones the reduced one, so the radiation in a star has its true heat capacity. Off, one reduced speed everywhere |
+| `physics.radSolver` | Radiation flux | `hll`, `glf`. Default `hll` | The flux between cells: HLL with the M1 closure’s wave speeds, or global Lax-Friedrichs (the speed of light: more diffusive, more isotropic around sources) |
+| `physics.radSweeps` | Radiation sweeps per step | a whole number, 1 to 16. Default `8` | Radiation sweeps per hydro step (1 to 16). The hydro step is at most this many of the sweep’s own steps, so more sweeps let it be longer |
 | `physics.viscosity` | Viscosity ν | a number, 0 to 1e+30. Default `0` | Kinematic viscosity: the stress is ρ ν times the shear. Obstacles hold the gas at their walls. 0 is off |
 | `physics.conductivity` | Conductivity κ | a number, 0 to 1e+30. Default `0` | Thermal conduction: the heat flux is -κ ρ grad T, so the temperature of an ideal gas diffuses at (γ - 1) κ. 0 is off |
 | `physics.resistivity` | Resistivity η | a number, 0 to 1e+30. Default `0` | With a magnetic field: magnetic diffusivity, so the field diffuses as η ∇²B (the electric field gains η curl B) and the current it dissipates, η J², heats the gas. 0 is off (ideal MHD, with only the scheme’s own diffusion) |
@@ -328,7 +339,7 @@ default, and what it does. A number out of its range is held to it when the file
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
 | `view.mode` | Opening view | `volume`, `slice`, `projection`. Default `volume` | How the gas is drawn when the setup opens in 3D |
-| `view.field` | Opening field | a whole number, 0 to 29. Default `0` | The quantity shown when the setup opens (the View panel’s Field, by its number) |
+| `view.field` | Opening field | a whole number, 0 to 36. Default `0` | The quantity shown when the setup opens (the View panel’s Field, by its number) |
 | `view.log` | Logarithmic colors | `true` or `false`. Default `true` | The color scale the setup opens with |
 | `view.axis` | Slice normal | `2`, `1`, `0`. Default `2` | The axis the opening slice is perpendicular to (0 x, 1 y, 2 z) |
 | `view.pitch` | Camera elevation | a number, -1.5 to 1.5. Default `0.45` | Elevation of the volume view’s camera when the setup opens, in radians |

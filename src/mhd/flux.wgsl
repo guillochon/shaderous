@@ -42,14 +42,20 @@
 @group(0) @binding(9) var S1: texture_3d<f32>;
 @group(0) @binding(10) var S2: texture_3d<f32>;
 @group(0) @binding(11) var SF: texture_3d<f32>;
+// The first-order flux correction after the update (mhd/fofc.wgsl): the cells this step's stage 2
+// listed, whose count stage 2 resets.
+@group(0) @binding(34) var<storage, read_write> FOFC: Fofc;
 
 override STAGE: u32 = 1u;
+// The fix's round (mhd/fofc.wgsl): round 1 takes every level of the list, round 0 level 0.
+override FOFC_ALL_LEVELS: bool = false;
 
 #include "mhd/common.wgsl"
 #include "mhd/flux_index.wgsl"
 #include "mhd/riemann/common.wgsl"
 #include <mhd_riemann>
 #include "mhd/face_flux.wgsl"
+#include "mhd/fofc.wgsl"
 
 // For the diffusive fluxes: a cell's velocity and composition, ghosts through the boundary
 // mapping, and every cell has its transverse neighbors.
@@ -104,12 +110,26 @@ fn face(t: vec3<i32>, axis: i32) -> FaceOut {
     let ml = bc_map(t - e).c;
     let mr = bc_map(t).c;
     if (fofc_suspect(textureLoad(S1, ml, 0).x, textureLoad(U1, ml, 0).x) || fofc_suspect(textureLoad(S1, mr, 0).x, textureLoad(U1, mr, 0).x)) {
-      let a = mq_start(t - e);
-      let b = mq_start(t);
-      let bn = textureLoad(SF, face_texel(axis, t), 0)[axis];
-      return face_of(a, a, b, b, bn, axis, false, 1.0, comp_tex(ml), comp_tex(mr), clock.dt);
+      return face_first_order(t, axis, ml, mr);
     }
   }
+  return face_second_order(t, axis);
+}
+
+// The first-order HLLE flux of the state at the start of the step (stage 2; mhd/face_flux.wgsl).
+fn face_first_order(t: vec3<i32>, axis: i32, ml: vec3<i32>, mr: vec3<i32>) -> FaceOut {
+  var e = vec3<i32>(0);
+  e[axis] = 1;
+  let a = mq_start(t - e);
+  let b = mq_start(t);
+  let bn = textureLoad(SF, face_texel(axis, t), 0)[axis];
+  return face_of(a, a, b, b, bn, axis, false, 1.0, comp_tex(ml), comp_tex(mr), clock.dt);
+}
+
+// The stage's own flux.
+fn face_second_order(t: vec3<i32>, axis: i32) -> FaceOut {
+  var e = vec3<i32>(0);
+  e[axis] = 1;
   let ql = mq_load(t - e);
   let qr = mq_load(t);
   var qll = ql;
@@ -141,12 +161,70 @@ fn put(axis: i32, i: u32, o: FaceOut, extra: f32) {
   if (axis == 2) { FZ[3u * i] = a; FZ[3u * i + 1u] = b; FZ[3u * i + 2u] = c; }
 }
 
-@compute @workgroup_size(8, 8, 4)
-fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+// The fix of mhd/fofc.wgsl: face k = j % 6 of listed cell j / 6, its mass, momentum and energy
+// entries rewritten with the first-order flux, wherever this slab's buffers hold it: a face on the
+// grid's boundary of a periodic axis is held twice (indices 0 and n), and both are written. A
+// shearing box's x boundary faces are left as the shear pass made them.
+fn fix(j: u32) {
+  let c = fofc_listed(j / 6u);
+  let a = i32((j % 6u) / 2u);
+  let up = (j % 2u) == 1u;
+  let n = mhd_dims();
+  if (a >= select(3, 2, P.dims.z == 1u)) { return; }
+  if (shear_on() && a == 0 && ((!up && c.x == 0) || (up && c.x == n.x - 1))) { return; }
+  var t = c;
+  if (up) { t[a] += 1; }
+  var e = vec3<i32>(0);
+  e[a] = 1;
+  let o = face_first_order(t, a, bc_map(t - e).c, bc_map(t).c);
+  let fa = vec4<f32>(o.f.m, o.f.mom);
+  let fb = vec4<f32>(o.f.e, o.f.ei, o.f.s, o.f.vn);
   let fd = flux_dims();
-  if (any(vec3<i32>(gid) >= fd)) { return; }
+  let z0 = flux_first().z;
+  let flat = P.dims.z == 1u;
+  // Each copy: the face itself or its twin across its own periodic axis, and on a grid periodic
+  // along z, either of those a period up or down, where the last slab's buffers hold the first
+  // layers again beyond the top (and the first slab's the last ones below the bottom).
+  for (var copy = 0; copy < 2; copy++) {
+    var tc = t;
+    if (copy == 1) {
+      if (!periodic_axis(a)) { break; }
+      if (t[a] == 0) { tc[a] = n[a]; } else if (t[a] == n[a]) { tc[a] = 0; } else { break; }
+    }
+    for (var shift = -1; shift <= 1; shift++) {
+      if (shift != 0 && (flat || !periodic_axis(2))) { continue; }
+      var tt = tc;
+      tt.z += shift * n.z;
+      if (!flat && (tt.z < z0 || tt.z >= z0 + fd.z)) { continue; }
+      let i = 3u * flux_index(tt);
+      if (a == 0) { FX[i] = fa; FX[i + 1u] = fb; }
+      if (a == 1) { FY[i] = fa; FY[i + 1u] = fb; }
+      if (a == 2) { FZ[i] = fa; FZ[i + 1u] = fb; }
+    }
+  }
+}
+
+// The fix of mhd/fofc.wgsl, after the stage-2 update of a slab: FOFC_GROUPS workgroups through the
+// list's faces (an entry point of its own, so that the flux pass carries none of its code).
+@compute @workgroup_size(256)
+fn fix_main(@builtin(local_invocation_index) li: u32, @builtin(workgroup_id) wg: vec3<u32>) {
   g_dx = P.dx;
   g_dt = clock.dt;
+  if (shear_on()) { g_shear = shear_half(clock.shear, clock.dt) / P.dx; }
+  let count = fofc_count();
+  for (var j = wg.x * 256u + li; j < 6u * count; j += FOFC_THREADS) {
+    if (fofc_in_round(j / 6u, FOFC_ALL_LEVELS)) { fix(j); }
+  }
+}
+
+@compute @workgroup_size(8, 8, 4)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+  g_dx = P.dx;
+  g_dt = clock.dt;
+  let fd = flux_dims();
+  if (any(vec3<i32>(gid) >= fd)) { return; }
+  // A new step's list (mhd/fofc.wgsl), which then runs through all its slabs.
+  if (STAGE == 2u && SLAB.z0 == 0 && all(gid == vec3<u32>(0u))) { atomicStore(&FOFC.count, 0u); }
   // A shearing box: the offset of the x faces for the stage's state (the start's, or the half
   // step's in stage 2).
   if (shear_on()) { g_shear = select(clock.shear, shear_half(clock.shear, clock.dt), STAGE == 2u) / P.dx; }
@@ -155,7 +233,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let axes = select(3, 2, P.dims.z == 1u);
   let i = flux_index(t);
   for (var a = 0; a < axes; a++) {
-    if (t[a] >= 0 && t[a] <= n[a]) {
+    // On a grid periodic along z, the last slab also holds z face n + 1, the twin of face 1: the
+    // redo of mhd/fofc.wgsl updates cell 0 there again, as layer n (mhd/update.wgsl redo).
+    if (t[a] >= 0 && (t[a] <= n[a] || (a == 2 && t[a] == n[a] + 1 && periodic_axis(2)))) {
       var extra = 0.0;
       if (cylindrical()) {
         if (a == 0) { extra = bface(0, t); }

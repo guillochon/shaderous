@@ -4,7 +4,7 @@ import { expect, test } from '@playwright/test';
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'species', 'species-eos', 'shock-bubble', 'detonation', 'advection-accuracy', 'flux-determinism',
   'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-species', 'amr-species-eos', 'amr-detonation', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'driving', 'point-mass-sink', 'point-mass-many', 'orbit-preview', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'burn-network', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption',
-  'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-replaced', 'mhd-field-brush', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-diffusion', 'mhd-resistivity', 'mhd-line-tied', 'moving-wall', 'mhd-tidal-disruption', 'mhd-disk',
+  'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-replaced', 'mhd-near-vacuum', 'mhd-field-brush', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-diffusion', 'mhd-resistivity', 'mhd-line-tied', 'moving-wall', 'mhd-tidal-disruption', 'mhd-disk',
   'rot-off', 'rot-inertial', 'rot-balance', 'rot-blob', 'rot-binary', 'rot-mhd',
   'sym-flux', 'sym-sedov', 'sym-half', 'sym-sphere', 'sym-ellipsoid', 'sym-polytrope', 'sym-evrard', 'sym-mhd', 'sym-mass',
   'cosmo-a', 'cosmo-drift', 'cosmo-cool', 'cosmo-eos', 'cosmo-wave', 'cosmo-growth', 'cosmo-pancake',
@@ -13,6 +13,7 @@ const TESTS = [
   'sph-rest', 'sph-conserve', 'sph-sedov', 'sph-polytrope', 'sph-bondi', 'sph-blocks', 'sph-polytrope-blocks', 'sph-swirl',
   'liquid-eos', 'liquid-gresho', 'liquid-taylor-green', 'liquid-cavity', 'liquid-amr',
   'psplit-solver', 'psplit-gresho', 'psplit-2d-3d', 'psplit-taylor-green', 'psplit-cavity', 'psplit-obstacle', 'psplit-balance', 'psplit-acoustic', 'psplit-amr-unrefined', 'psplit-amr-gresho', 'psplit-amr-regrid', 'psplit-amr-3d', 'psplit-amr-shear', 'psplit-amr-balance', 'psplit-amr-wake', 'psplit-amr-field', 'psplit-amr-polytrope', 'psplit-masses', 'psplit-species', 'psplit-gas-balance', 'psplit-gas-polytrope', 'psplit-gas-gresho', 'psplit-amr-gas', 'psplit-sod', 'psplit-amr-sod',
+  'rad-restart', 'rad-off', 'rad-equilibrium', 'rad-f32', 'rad-streaming', 'rad-diffusion', 'rad-shadow', 'rad-advect', 'rad-marshak', 'rad-star', 'rad-shock', 'rad-cooling-sphere',
 ];
 
 // One worker (playwright.config.ts), in order; a failure does not skip the tests after it.

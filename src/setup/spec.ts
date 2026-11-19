@@ -6,6 +6,8 @@
 // SimConfig overrides the solvers already take. No code and no formulas: a file from a
 // stranger is safe to open.
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
+import type { OpacityKind, OpacityParams } from '../opacity/opacity';
+import type { RadiationKind, RadSolver } from '../radiation/radiation';
 import type { EosKind, EosParams } from '../eos/eos';
 import type { Bc3, GravityMode, LimiterKind, RiemannKind } from '../problems/types';
 import type { ViewMode } from '../render/view_options';
@@ -106,6 +108,20 @@ export interface PhysicsSpec {
   gext?: Vec3 | { down: number };
   cooling?: CoolingKind;
   coolParams?: Partial<CoolingParams>;
+  /**
+   * Radiation transport (radiation/radiation.ts): gray M1 or off; the opacity law and its
+   * constants (code units, over those the units give); the speed of light (code units; from the
+   * units without) and the reduced speed chat; chat chosen per cell; the face flux; sweeps per
+   * hydro step.
+   */
+  radiation?: RadiationKind;
+  opacity?: OpacityKind;
+  opacityParams?: Partial<OpacityParams>;
+  radC?: number;
+  radChat?: number;
+  radLocalC?: boolean;
+  radSolver?: RadSolver;
+  radSweeps?: number;
   viscosity?: number;
   conductivity?: number;
   /** magnetic diffusivity eta (with a field): the Ohmic electric field is eta curl B */

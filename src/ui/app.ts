@@ -17,7 +17,8 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
-import { type CellProbe, configFor, refusal, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, type SourceSpec } from '../sim';
+import { syncRadiationEos } from '../radiation/radiation';
+import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -25,7 +26,7 @@ import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
 import { prepareHelmholtz } from '../eos/helmholtz';
-import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
+import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, RADIATION_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { sphFromView, sphToView, spherical } from '../spherical';
 import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
@@ -1698,7 +1699,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     if (params && !(keepPhysics && cfg && cfg.problem.id === problem.id)) {
       // Parameters set while the preset waited for Run (Autoload off).
       Object.assign(next.params, params);
-      if (typeof problem.units === 'function') Object.assign(next.eosParams, physicalEosParams(problemUnits(problem, next.params), problem.composition), problem.eosParams);
+      if (typeof problem.units === 'function') unitConstants(next);
     }
     // Settings changed in the Setup dialog while it waited.
     if (settings && !(keepPhysics && cfg && cfg.problem.id === problem.id)) for (const s of settings) setSetting(next, s.setting, s.value);
@@ -1709,9 +1710,12 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       if (link.cfg.symmetry) Object.assign(next, withSymmetry(next, link.cfg.symmetry));
       Object.assign(next.params, link.params);
       // Units that follow the preset's parameters: the equation of state's physical constants are the link's parameters', not the defaults'.
-      if (typeof problem.units === 'function') Object.assign(next.eosParams, physicalEosParams(problemUnits(problem, next.params), problem.composition), problem.eosParams);
+      if (typeof problem.units === 'function') unitConstants(next);
       Object.assign(next.eosParams, link.eosParams);
       Object.assign(next.coolParams, link.coolParams);
+      next.opacityParams = { ...next.opacityParams, ...link.opacityParams };
+      // Radiation switched on or off by the link: the equation of state's radiation term follows.
+      Object.assign(next, syncRadiationEos(next));
       next.fluff = { ...next.fluff, ...link.fluff };
       next.driving = { ...next.driving, ...link.driving };
       if (ndim === 2) {
@@ -2234,7 +2238,7 @@ function setParams(changed: Record<string, number>) {
   // than a barotropic one takes from them: refresh those (the setup's own values still win),
   // and the run must start again.
   const physical = typeof cfg.problem.units === 'function' && eosHasEnergy(cfg.eos);
-  if (physical) Object.assign(cfg.eosParams, physicalEosParams(problemUnits(cfg.problem, cfg.params), cfg.problem.composition), cfg.problem.eosParams);
+  if (physical) unitConstants(cfg);
   if (defs.some((q) => q.id === cfg.problem.boxParam)) {
     // The side of the box: the grid's cells change size, so the run is built again.
     const { n, ndim, amrLevels } = cfg;
@@ -2355,7 +2359,7 @@ function freshConfig(problem: Problem, g: { n: number; ndim: 2 | 3; levels: numb
   const c = configFor(problem, g.n, { ndim: g.ndim, amrLevels: g.levels });
   if (params) {
     Object.assign(c.params, params);
-    if (typeof problem.units === 'function') Object.assign(c.eosParams, physicalEosParams(problemUnits(problem, c.params), problem.composition), problem.eosParams);
+    if (typeof problem.units === 'function') unitConstants(c);
   }
   return c;
 }
@@ -4328,6 +4332,11 @@ function syncSpeciesFields(sel: HTMLSelectElement) {
   const heat = sel.querySelector<HTMLOptionElement>(`option[value="${NUCLEAR_HEATING_FIELD}"]`);
   if (heat) heat.hidden = !burns;
   if (!burns && view.field === NUCLEAR_HEATING_FIELD) view.field = 0;
+  // The radiation fields, only for a run with radiation transport.
+  const rad = cfg.radiation === 'm1';
+  const radGroup = [...sel.querySelectorAll('optgroup')].find((g) => g.label === 'Radiation');
+  if (radGroup) radGroup.hidden = !rad;
+  if (!rad && RADIATION_FIELDS.includes(view.field)) view.field = 0;
   const species = cfg.problem.species ?? [];
   const key = species.join(',');
   let group = sel.querySelector<HTMLOptGroupElement>('optgroup[data-species]');

@@ -38,12 +38,15 @@ import { capture, restartFrom } from '../io/capture';
 import { readAthdf, writeAthdf } from '../io/athdf';
 import { alfvenWave, brioWu, fieldLoop, fieldLoopDense, mhdBlast, mhdRotor, orszagTang } from '../presets/names';
 import { initialFaces, setMhdSlabBytes } from '../mhd/mhd';
+import { compileSetup } from '../setup/compile';
+import type { SetupSpec } from '../setup/spec';
 import { RefMhd } from '../reference/mhd';
 import { setMhdScratchBytes } from '../mhd/amr_mhd';
 import { BS, PAD as PAD_BLOCK } from '../amr/tree';
 import { FRAME_TESTS } from './frames';
 import { cavityError, GHIA_RE100, LIQUID_TESTS } from './liquid';
 import { PSPLIT_TESTS } from './psplit';
+import { RAD_TESTS } from './radiation';
 
 export interface TestResult {
   id: string;
@@ -2873,6 +2876,96 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'mhd-near-vacuum',
+    name: 'MHD: the first-order flux correction after the update (thin disk with field loops in 1e-5 gas, 3D at 128, uniform in one slab and many, outflow and periodic along z; blocks of 1 level in one chunk and many, and with per-block timesteps)',
+    criterion:
+      'The disk of issue #3 (midplane density 25, ambient 1e-5, loops of beta 100, a point mass with a sink), 100 steps at 128^3 (without the correction NaN by step 10 on either grid): every value finite, no gas above 1e-6 faster than 100, |div B| dx / max |B| below 1e-6. On the uniform grid the same run in slabs of 4 layers agrees bit for bit (mhd/fofc.wgsl corrects faces between slabs in both), also with z periodic, across whose boundary the first and last slabs meet; on blocks (mhd/amr_fofc.wgsl) every leaf in a chunk of its own agrees with one chunk bit for bit, and the run with 2 bins of per-block timesteps stays finite',
+    async run(gpu) {
+      const doc = {
+        format: 'shaderous-setup', version: 1, name: 'near vacuum',
+        domain: { ndim: 3, n: 64, amr: 0, box: 1, geometry: 'cartesian', supports2d: true, bc: { lo: [1, 1, 1], hi: [1, 1, 1] } },
+        physics: { eos: 'ideal', eosParams: { gamma: 1.1 }, gravity: 'off', G: 0, riemann: 'hllclm' },
+        parts: [
+          { kind: 'mass', id: 'bh', gm: 1, pos: [0, 0, 0], soft: 0.02, sink: 0.02 },
+          { kind: 'disk', about: ['bh'], profile: 'thin', rIn: 0.08, rOut: 0.4, sigma0: 1, slope: -1, cs: 0.05, floor: 0.0001, loops: { beta: 100, span: 2, count: 2 } },
+        ],
+        background: { rho: 0.00001, p: 1e-8 },
+      } as SetupSpec;
+      const outflow = compileSetup(doc).problem;
+      const periodic = compileSetup({ ...doc, domain: { ...doc.domain, bc: { lo: [1, 1, 0], hi: [1, 1, 0] } } } as SetupSpec).problem;
+      const m: Record<string, number> = {};
+      const runs: { u1: Float32Array; u2: Float32Array; f: Float32Array }[] = [];
+      const tags: string[] = ['one_slab', 'slabs', 'one_slab_periodic', 'slabs_periodic'];
+      for (const [tag, bytes, p] of [['one_slab', null, outflow], ['slabs', 1, outflow], ['one_slab_periodic', null, periodic], ['slabs_periodic', 1, periodic]] as const) {
+        setMhdSlabBytes(bytes);
+        try {
+          await withSim(gpu, p, 128, { ndim: 3, tEnd: Infinity }, async (sim) => {
+            sim.step(100);
+            const d = await sim.diagnostics();
+            const { u1, u2 } = await sim.readState();
+            let vmax = 0;
+            let finite = Number.isFinite(d.eTot) && Number.isFinite(d.mass);
+            for (let i = 0; i < u1.length; i += 4) {
+              if (!Number.isFinite(u1[i]) || !Number.isFinite(u2[i])) finite = false;
+              if (u1[i] > 1e-6) vmax = Math.max(vmax, Math.hypot(u1[i + 1], u1[i + 2], u1[i + 3]) / u1[i]);
+            }
+            m[`${tag}_finite`] = finite ? 1 : 0;
+            m[`${tag}_max_speed`] = vmax;
+            m[`${tag}_divB`] = d.magnetic!.divB;
+            runs.push({ u1, u2, f: await sim.mhd!.readFaces(sim.cur) });
+          });
+        } finally {
+          setMhdSlabBytes(null);
+        }
+      }
+      const differ = (x: number, y: number) => {
+        let diff = 0;
+        for (const k of ['u1', 'u2', 'f'] as const) {
+          const a = runs[x][k];
+          const b = runs[y][k];
+          for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++;
+        }
+        return diff;
+      };
+      m.slabs_differing_values = differ(0, 1);
+      m.slabs_periodic_differing_values = differ(2, 3);
+      // Blocks: the leaves' cells and faces.
+      // (Per-block timesteps from the document, as a setup asks for them.)
+      const binned = compileSetup({ ...doc, mesh: { timeBins: 2 } } as SetupSpec).problem;
+      const blocks: [string, number | null, Problem, Partial<SimConfig>][] = [['blocks', null, outflow, {}], ['blocks_chunks', 1, outflow, {}], ['blocks_bins', null, binned, { timeBinsAlways: true }]];
+      const leaves: Float32Array[][] = [];
+      for (const [tag, bytes, prob, over] of blocks) {
+        tags.push(tag);
+        setMhdScratchBytes(bytes);
+        try {
+          await withAmr(gpu, prob, 128, { ndim: 3, amrLevels: 1, tEnd: Infinity, ...over }, async (sim) => {
+            sim.step(100);
+            const d = await sim.diagnostics();
+            const c = await sim.readLeaves();
+            let vmax = 0;
+            let finite = Number.isFinite(d.eTot) && Number.isFinite(d.mass);
+            for (let i = 0; i < c.u1.length; i += 4) {
+              if (!Number.isFinite(c.u1[i]) || !Number.isFinite(c.u2[i])) finite = false;
+              if (c.u1[i] > 1e-6) vmax = Math.max(vmax, Math.hypot(c.u1[i + 1], c.u1[i + 2], c.u1[i + 3]) / c.u1[i]);
+            }
+            m[`${tag}_finite`] = finite ? 1 : 0;
+            m[`${tag}_max_speed`] = vmax;
+            m[`${tag}_divB`] = d.magnetic!.divB;
+            m[`${tag}_t`] = d.t;
+            if (tag !== 'blocks_bins') leaves.push([c.u1, c.u2, await leafFaces(sim)]);
+          });
+        } finally {
+          setMhdScratchBytes(null);
+        }
+      }
+      let bdiff = 0;
+      for (let j = 0; j < 3; j++) for (let i = 0; i < leaves[0][j].length; i++) if (leaves[0][j][i] !== leaves[1][j][i]) bdiff++;
+      m.blocks_chunks_differing_values = bdiff;
+      const pass = tags.every((t) => m[`${t}_finite`] === 1 && m[`${t}_max_speed`] < 100 && m[`${t}_divB`] < 1e-6) && m.slabs_differing_values === 0 && m.slabs_periodic_differing_values === 0 && bdiff === 0;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'mhd-field-brush',
     name: 'MHD field brushes: strength (stronger, then weaker) and pull, on the rotor (2D, 128) and an outflow blast (3D, 32), and on blocks (rotor 2D, 256 finest; outflow blast 3D, 128 finest; 1 level)',
     criterion:
@@ -3929,6 +4022,8 @@ export const TESTS: TestDef[] = [
   ...LIQUID_TESTS,
   // Implicit pressure (validation/psplit.ts).
   ...PSPLIT_TESTS,
+  // Radiation transport (validation/radiation.ts).
+  ...RAD_TESTS,
 ];
 
 export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {

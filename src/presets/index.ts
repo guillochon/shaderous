@@ -19,6 +19,7 @@ export const PRESET_ORDER: readonly string[] = [
   'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'driven-turbulence', 'jeans',
   'taylor-green', 'shear-layers', 'cylinder-wake', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho',
   'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
+  'radiating-sphere', 'sedov-rad-transport',
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',
   'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'zeldovich-pancake',
   'wd-collision', 'wd-collision-burning',

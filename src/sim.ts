@@ -30,6 +30,11 @@ import { domainLo, gridDims, rectangular } from './domain';
 export { gridDims, rectangular } from './domain';
 import { spherical, sphGrid, sphParams } from './spherical';
 import { hubble, omegaK, scaleFactor, type Cosmology } from './cosmo';
+import { codeLightSpeed, defaultOpacityParams, OPACITY_MODULES, packOpacity, physicalOpacity, type OpacityKind, type OpacityParams } from './opacity/opacity';
+import { packRadiation, radiationOn, radiationUnsupported, syncRadiationEos, type RadiationKind, type RadSolver } from './radiation/radiation';
+import { COMPOSITIONS } from './units/composition';
+import { RadPasses, type RadDiagnostics } from './radiation/passes';
+import { diffusionFlux, splitPressure } from './radiation/init';
 
 import type { LimiterKind, RiemannKind } from './problems/types';
 export { LIMITER_KINDS, RIEMANN_KINDS, type LimiterKind, type RiemannKind } from './problems/types';
@@ -178,6 +183,19 @@ export interface SimConfig {
    * timestep divided by this, which is what bounds the step of a liquid at rest.
    */
   acousticCfl: number;
+  /**
+   * Gray radiation transport with the M1 closure (radiation/radiation.ts): its settings. With it
+   * on, the equation of state's own radiation term is off (eosParams.arad is 0; radA keeps it).
+   */
+  radiation: RadiationKind;
+  opacity: OpacityKind;
+  opacityParams: OpacityParams;
+  radC: number;
+  radChat: number;
+  radA: number;
+  radLocalC: boolean;
+  radSolver: RadSolver;
+  radSweeps: number;
 }
 
 /** One cell of the grid as the query tool reads it (Simulation.probe). */
@@ -312,8 +330,13 @@ export interface Simulation {
   /** Size of the uniform volume the renderer displays, and the pass that fills it. */
   readonly displayDims: [number, number, number];
   readonly fieldShader: string;
-  /** The display pass's resources with the state at `parity` and the species at `speciesParity`. */
-  fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView>;
+  /**
+   * The display pass's resources with the state at `parity`, the species at `speciesParity` and
+   * the radiation (binding 16, uniform grid) at `radParity`.
+   */
+  fieldResources(parity: number, speciesParity: number, radParity?: number): Record<number, GPUBuffer | GPUTextureView>;
+  /** Radiation (radiation/passes.ts): the parity of its texture holding the current radiation. */
+  readonly radCur?: number;
   /**
    * With a field: reduce its magnetic diagnostics for the state at `parity`, which the display's
    * magnetic fields read (fieldResources' binding 14).
@@ -445,12 +468,53 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     wallVelocity: { ...noWallVelocity(), ...problem.wallVelocity },
     dampRadius: problem.damping?.radius ?? 0,
     dampRate: problem.damping?.rate ?? 0,
+    ...radiationDefaults(problem, params),
     // A problem compiled from a setup document brings the solver's and the mesh's settings too.
     ...(problem.setup ? compiledFrom(problem.setup).overrides : {}),
     ...over,
   };
   const want = cfg.symmetry;
-  return withSymmetry({ ...cfg, symmetry: [false, false, false] }, want);
+  return syncRadiationEos(withSymmetry({ ...cfg, symmetry: [false, false, false] } as SimConfig, want));
+}
+
+/**
+ * Refresh what a run takes from its problem's units, for units that follow its parameters: the
+ * equation of state's physical constants (the problem's own values still win), and with them the
+ * speed of light, the radiation constant and the physical opacities. A reduced speed of light
+ * that was the speed of light stays it. Changes `c` in place.
+ */
+export function unitConstants(c: SimConfig): void {
+  const units = problemUnits(c.problem, c.params);
+  const comp = c.problem.composition;
+  Object.assign(c.eosParams, physicalEosParams(units, comp), c.problem.eosParams);
+  const oldC = c.radC;
+  c.radC = c.problem.radC ?? codeLightSpeed(units);
+  c.radChat = c.radChat >= oldC ? c.radC : Math.min(c.radChat, c.radC);
+  c.opacityParams = { ...c.opacityParams, ...(units ? physicalOpacity(units, comp ?? COMPOSITIONS.solar) : {}), ...c.problem.opacityParams };
+  // The radiation constant is the equation of state's new one (moved to radA with radiation on).
+  if (!(c.eosParams.arad > 0)) c.radA = 0;
+  Object.assign(c, syncRadiationEos(c));
+}
+
+/**
+ * A problem's radiation settings (SimConfig.radiation and the rest): its own, over the physical
+ * opacities and speed of light of its units and composition, over the defaults. The radiation
+ * constant is the equation of state's (radA is set from eosParams.arad by syncRadiationEos).
+ */
+function radiationDefaults(problem: Problem, params: Record<string, number>): Pick<SimConfig, 'radiation' | 'opacity' | 'opacityParams' | 'radC' | 'radChat' | 'radA' | 'radLocalC' | 'radSolver' | 'radSweeps'> {
+  const units = problemUnits(problem, params);
+  const radC = problem.radC ?? codeLightSpeed(units);
+  return {
+    radiation: problem.radiation ?? 'off',
+    opacity: problem.opacity ?? 'constant',
+    opacityParams: { ...defaultOpacityParams(), ...(units ? physicalOpacity(units, problem.composition ?? COMPOSITIONS.solar) : {}), ...problem.opacityParams },
+    radC,
+    radChat: Math.min(problem.radChat ?? radC, radC),
+    radA: 0,
+    radLocalC: true,
+    radSolver: 'hll',
+    radSweeps: 8,
+  };
 }
 
 /**
@@ -513,6 +577,7 @@ export function refusal(c: SimConfig): string | null {
     ['Shearing box', shearUnsupported(c)],
     ['Axisymmetric run', cylindricalUnsupported(c)],
     ['Spherical run', sphericalUnsupported(c)],
+    ['Radiation', radiationUnsupported(c)],
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
@@ -557,6 +622,8 @@ export function implicitUnsupported(c: SimConfig): string | null {
   // know each cell's composition.)
   if (problemCoefficients(c.problem, c.eosParams.gamma) !== null) return 'species that set the equation of state are not available with it yet';
   if (c.problem.burn) return 'burning is not available with it';
+  // (Its rates and the pressure's gradient take the same binding, and its transport the species' passes.)
+  if (radiationOn(c)) return 'radiation transport is not available with it';
   if (c.cooling !== 'off' || c.problem.damping) return 'cooling and damping zones are not available with it';
   return null;
 }
@@ -715,8 +782,12 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     diffusion: `const VISCOSITY = ${c.viscosity > 0};\nconst CONDUCTION = ${conducts(c)};\nconst RESISTIVITY = ${resists(c)};\n`,
     // The preset's damping zone (hydro/damping.wgsl), or none.
     damping: c.problem.damping?.wgsl ?? NO_DAMPING,
-    // Whether the update records face mass fluxes for the species pass (species/species.ts).
-    species: speciesSlot(speciesGroups(c.problem)),
+    // Whether the update records face mass fluxes for the species pass (species/species.ts) and
+    // the radiation's advection (radiation/advect.wgsl).
+    species: speciesSlot(speciesGroups(c.problem) + (radiationOn(c) ? 1 : 0)),
+    // Radiation's push on the timestep (radiation/rate_on.wgsl), and the opacity law.
+    rad_rate: radiationOn(c) ? 'radiation/rate_on.wgsl' : 'radiation/rate_off.wgsl',
+    opacity: OPACITY_MODULES[c.opacity],
     // One composition everywhere, or the species' own in every cell (species/mixture.ts).
     comp: problemCompSlot(c.problem, c.eosParams.gamma, speciesGroups(c.problem)),
     // Whether the update tallies the gas leaving the box by its orbital energy (debris/debris.ts).
@@ -1106,7 +1177,7 @@ export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] |
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 496;
+export const PARAM_BYTES = 544;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -1178,6 +1249,9 @@ export function packParams(
   const sh = c.problem.shear;
   f.set(sh ? [sh.omega, sh.q, sh.stratified ? 1 : 0, 1] : [0, 0, 0, 0], 112);
   f.set(sphParams(c), 116);
+  // Radiation (radiation/radiation.ts): P.rad, P.rad2, and the opacity law's constants P.kap.
+  f.set(packRadiation(c), 124);
+  f.set(packOpacity(c.opacity, c.opacityParams), 132);
   return buf;
 }
 
@@ -1220,6 +1294,8 @@ export interface Diagnostics {
    * eInt then does not, and the largest |div B| dx relative to the largest |B|.
    */
   magnetic?: MagDiagnostics;
+  /** With radiation transport: its totals, luminosity and warnings (radiation/passes.ts). */
+  radiation?: RadDiagnostics;
 }
 
 
@@ -1324,6 +1400,8 @@ export class Sim implements Simulation {
   private gSpeciesPredict: GPUBindGroup[][] = [];
   /** Nuclear burning (burn/burn.ts, burn/network.ts), after the species pass; none without. */
   private burn?: Burner;
+  /** Radiation transport (radiation/passes.ts); none without. */
+  rad?: RadPasses;
   mg!: Multigrid;
   rhoMean = 0;
 
@@ -1458,7 +1536,7 @@ export class Sim implements Simulation {
     const why = refusal(cfg);
     if (why) throw new Error(why);
     const cells = gridDims(cfg).reduce((a, b) => a * b, 1);
-    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0) + Sim.implicitBytes(cfg)));
+    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0) + Sim.implicitBytes(cfg) + (radiationOn(cfg) ? RadPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
@@ -1476,10 +1554,13 @@ export class Sim implements Simulation {
       throw new Error(`out of GPU memory for a uniform grid of ${cfg.n}^${cfg.ndim} cells (about ${gb.toFixed(1)} GB): ${oom.message}`);
     }
     const G = sim.speciesGroups;
+    // The face mass fluxes the update records, for the species and the radiation's advection.
+    if (G > 0 || radiationOn(cfg)) {
+      sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (nx + 1) * (ny + 1) * (nz + 1), usage: GPUBufferUsage.STORAGE });
+    }
     if (G > 0) {
       for (let p = 0; p < 2; p++) sim.species.push(tex3d(d, nx, 'rgba32float', `species ${p}`, nz * G, ny));
       sim.speciesHalf = tex3d(d, nx, 'rgba32float', 'species half step', nz * G, ny);
-      sim.massFlux = d.createBuffer({ label: 'face mass fluxes', size: 3 * 4 * (nx + 1) * (ny + 1) * (nz + 1), usage: GPUBufferUsage.STORAGE });
       if (sim.compCoeffs) sim.comp = t('composition');
     }
     // Burning: each cell's heating rate over the last step (burn/burn.ts); else one texel of nothing.
@@ -1637,6 +1718,14 @@ export class Sim implements Simulation {
       computePipeline(d, assemble('gravity/correct.wgsl', slots), 'gravity correct', { MHD: mhdOn(c) ? 1 : 0 }),
       computePipeline(d, assemble('edit/brush.wgsl', slots), 'brush'),
     ]);
+    if (radiationOn(c)) {
+      if (this.rad) await this.rad.rebuild(slots, k);
+      else {
+        this.rad = await RadPasses.create({
+          device: d, cfg: c, dims: [this.nx, this.ny, this.nz], params: this.params, clock: this.clock, state: this.state, massFlux: this.massFlux!, slots, comp: k,
+        });
+      }
+    }
     this.gBrush = [0, 1].map((p) =>
       bindGroup(d, this.pBrush, {
         0: this.params, 1: this.brush, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]), ...k,
@@ -1648,18 +1737,21 @@ export class Sim implements Simulation {
     this.gPredict = [];
     for (let p = 0; p < 2; p++) {
       const o = 1 - p;
-      this.gPrim.push(
-        bindGroup(d, this.pPrim, {
-          0: this.params,
-          20: this.bh,
-          1: v(this.state[p][0]),
-          2: v(this.state[p][1]),
-          5: v(this.gfield),
-          6: this.redDt.first,
-          ...((this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
-          ...k,
-        }),
-      );
+      // (With radiation, one for each parity of its texture too: the rates read it, binding 30.)
+      for (let q = 0; q < 2; q++)
+        this.gPrim.push(
+          bindGroup(d, this.pPrim, {
+            0: this.params,
+            20: this.bh,
+            1: v(this.state[p][0]),
+            2: v(this.state[p][1]),
+            5: v(this.gfield),
+            6: this.redDt.first,
+            // (Or, with implicit pressure, the pressure whose gradient limits the step: the two are not combined.)
+            ...((this.rad ? { 30: v(this.rad.R[q]) } : this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
+            ...k,
+          }),
+        );
       if (!this.pPredict || !this.pUpdate) continue;
       this.gPredict.push(
         this.pPredict.groups({
@@ -1807,6 +1899,12 @@ export class Sim implements Simulation {
     const emag = faces ? new Float32Array(cells) : null;
     let mass = 0;
     let o = 0;
+    // Radiation (radiation/init.ts): (E, F) per cell, and what the flux's diffusion value needs.
+    const radOn = radiationOn(c);
+    const rad = radOn ? new Float32Array(cells * 4) : null;
+    const radRho = radOn ? new Float32Array(cells) : null;
+    const radT = radOn ? new Float32Array(cells) : null;
+    const radGiven = radOn ? new Uint8Array(cells) : null;
     this.solids = false;
     this.nSources = 0;
     this.device.queue.writeBuffer(this.sources, 0, packSources([]));
@@ -1826,7 +1924,22 @@ export class Sim implements Simulation {
             ce = makeEos(c.eos, c.eosParams, m, hydrogenParticles(c.problem.composition));
           }
           const p = ce.hasEnergy ? w.p : ce.pressure(w.rho, 0);
-          const eint = ce.eintFromP(w.rho, p);
+          let eint = ce.eintFromP(w.rho, p);
+          if (rad) {
+            // The problem's pressure is the gas's and the radiation's: split where the equation
+            // of state had a radiation term of its own; E = a T^4 unless given.
+            const q = o / 4;
+            // (A cell that gives its radiation, as a snapshot's do, gives the gas's pressure alone.)
+            const sp = w.erad === undefined ? splitPressure(c, ce, w.rho, p, km ? [...km.subarray(o, o + 4)] : undefined, km ? hydrogenParticles(c.problem.composition) : undefined) : { eint, T: ce.temperature(w.rho, eint) };
+            eint = sp.eint;
+            radRho![q] = w.rho;
+            radT![q] = sp.T;
+            rad[o] = w.erad ?? c.radA * sp.T ** 4;
+            if (w.frad) {
+              rad.set(w.frad, o + 1);
+              radGiven![q] = 1;
+            }
+          }
           const mark = cellMark(w);
           if (mark) this.solids = true;
           const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
@@ -1850,6 +1963,10 @@ export class Sim implements Simulation {
     }
     this.setState(u1, u2, mass / cells);
     if (faces) this.mhd!.setFaces(faces);
+    if (rad) {
+      diffusionFlux(c, [nx, ny, nz], this.dx, rad, radRho!, radT!, radGiven!);
+      this.rad!.set(rad);
+    }
     if (G) {
       this.speciesCur = 0;
       writeTexture(this.device, this.species[0], nx, 4, sp, nz * G, ny);
@@ -1955,12 +2072,15 @@ export class Sim implements Simulation {
           this.refreshPotential();
           if (change < (set.tol ?? SETTLE_TOL) * peak) break;
         }
-        settler.finish(eos.eintFromP);
+        // (With radiation, the settled pressure is the gas's and the radiation's: split as the
+        // initial conditions split it, radiation/init.ts.)
+        settler.finish(this.rad ? (rho, p) => splitPressure(this.cfg, eos, rho, p).eint : eos.eintFromP);
         // The settled E is the gas's own: a magnetic field's energy goes back in.
         if (emag) for (let q = 0; q < cells.count; q++) u2[4 * q] += emag(settler, q);
         if (fresh && this.cfg.problem.heat) heatCells(this.cfg.problem.heat(this.cfg.params, eos), cells);
         writeTexture(this.device, this.state[this.cur][0], this.nx, 4, u1, this.nz, this.ny);
         writeTexture(this.device, this.state[this.cur][1], this.nx, 4, u2, this.nz, this.ny);
+        if (this.rad) await this.settledRadiation(u1, u2, eos, fresh ? null : settler.rewrote);
         this.refreshPotential();
       } finally {
         if (epoch === this.settleEpoch) {
@@ -1970,6 +2090,28 @@ export class Sim implements Simulation {
         }
       }
     })();
+  }
+
+  /**
+   * With radiation, after a settling: E = a T^4 at the settled gas's temperature and F its
+   * diffusion value (radiation/init.ts), in every cell, or only in those the settling rewrote.
+   */
+  private async settledRadiation(u1: Float32Array, u2: Float32Array, eos: Eos, rewrote: ArrayLike<boolean | number> | null) {
+    const rad = this.rad!;
+    const c = this.cfg;
+    const cells = u1.length / 4;
+    const R = rewrote ? await rad.read() : new Float32Array(cells * 4);
+    const rho = new Float32Array(cells);
+    const T = new Float32Array(cells);
+    const given = new Uint8Array(cells);
+    for (let q = 0; q < cells; q++) {
+      rho[q] = u1[4 * q];
+      T[q] = eos.temperature(Math.max(rho[q], c.rhoFloor), u2[4 * q + 1]);
+      if (rewrote && !rewrote[q]) given[q] = 1;
+      else R[4 * q] = c.radA * T[q] ** 4;
+    }
+    diffusionFlux(c, [this.nx, this.ny, this.nz], this.dx, R, rho, T, given);
+    rad.set(R);
   }
 
   /** Time, step count and point masses, for a snapshot (see io/snapshot.ts). */
@@ -2123,8 +2265,13 @@ export class Sim implements Simulation {
       return;
     }
     pass.setPipeline(this.pPrim);
-    pass.setBindGroup(0, this.gPrim[parity]);
+    pass.setBindGroup(0, this.primGroup(parity));
     this.dispatch(pass);
+  }
+
+  /** The timestep rates' bind group for the state at `parity` (and the radiation as it is now). */
+  private primGroup(parity: number): GPUBindGroup {
+    return this.gPrim[2 * parity + (this.rad?.cur ?? 0)];
   }
 
   private dispatch(pass: GPUComputePassEncoder) {
@@ -2204,6 +2351,8 @@ export class Sim implements Simulation {
       }
       // (With implicit pressure the final state is in parity p already, and the potential is its.)
       const gp = this.prs ? p : 1 - p;
+      // Radiation carried with the gas, by the update's mass fluxes (radiation/advect.wgsl).
+      this.rad?.encodeAdvect(pass, p);
       if (selfGravity && this.sphMono) {
         this.encodeMonopole(pass, 1 - p);
       } else if (selfGravity) {
@@ -2242,6 +2391,11 @@ export class Sim implements Simulation {
         }
       } else {
         this.cur = 1 - p;
+      }
+      if (this.rad) {
+        // The radiation sweeps, then the gas's side of them folded into the other parity.
+        this.rad.encodeSweeps(pass, this.cur);
+        this.cur = 1 - this.cur;
       }
       if (this.burn) {
         // Burn the step's end state into the other parities (burn/burn.ts).
@@ -2409,17 +2563,21 @@ export class Sim implements Simulation {
   get clockBuffer(): GPUBuffer {
     return this.clock;
   }
-  fieldResources(parity: number, speciesParity: number): Record<number, GPUBuffer | GPUTextureView> {
+  fieldResources(parity: number, speciesParity: number, radParity = 0): Record<number, GPUBuffer | GPUTextureView> {
     const r: Record<number, GPUBuffer | GPUTextureView> = {
       2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(), 20: this.bh,
       13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(),
       14: this.mhd?.magResult ?? this.noMag(), 15: this.heat.createView(),
+      16: (this.rad?.R[radParity] ?? this.noFaces()).createView(),
     };
     if (this.speciesGroups) r[9] = this.species[speciesParity].createView();
     return { ...r, ...this.compIn };
   }
   get speciesStride(): number {
     return this.speciesGroups ? this.nz : 0;
+  }
+  get radCur(): number {
+    return this.rad?.cur ?? 0;
   }
   /** The display pass's face field without a magnetic field: one texel of nothing. */
   private placeholderFaces?: GPUTexture;
@@ -2469,7 +2627,7 @@ export class Sim implements Simulation {
     const out: Record<string, number> = {};
     out.rates = await time(reps, (pass) => {
       pass.setPipeline(this.pPrim);
-      pass.setBindGroup(0, this.gPrim[p]);
+      pass.setBindGroup(0, this.primGroup(p));
       this.dispatch(pass);
     });
     out.timestep = await time(reps, (pass) => this.redDt.encode(pass));
@@ -2529,6 +2687,7 @@ export class Sim implements Simulation {
         diag.magnetic = await this.mhd.diagnostics(this.cur);
         diag.eInt -= diag.magnetic.eMag;
       }
+      if (this.rad && !this.destroyed) diag.radiation = (await this.rad.diagnostics(this.cur)) ?? undefined;
       return unfoldDiagnostics(diag, this.cfg.symmetry, cylindrical(this.cfg) || spherical(this.cfg));
     } finally {
       this.stagingBusy = false;
@@ -2641,7 +2800,7 @@ export class Sim implements Simulation {
     const enc = d.createCommandEncoder();
     const pass = beginPass(enc);
     pass.setPipeline(this.pPrim);
-    pass.setBindGroup(0, this.gPrim[p]);
+    pass.setBindGroup(0, this.primGroup(p));
     this.dispatch(pass);
     if (!this.pPredict) throw new Error('fluxMismatch checks the hydro update, which a magnetized run does not have');
     this.pPredict.encode(pass, this.gPredict[p]);
@@ -2750,6 +2909,7 @@ export class Sim implements Simulation {
     this.debrisBuf?.destroy();
     this.mg?.destroy();
     this.mhd?.destroy();
+    this.rad?.destroy();
     this.placeholderFaces?.destroy();
   }
 

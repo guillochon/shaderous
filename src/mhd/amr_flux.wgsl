@@ -37,14 +37,21 @@
 @group(0) @binding(8) var K0: texture_3d<f32>;
 @group(0) @binding(9) var K1: texture_3d<f32>;
 @group(0) @binding(10) var K2: texture_3d<f32>;
+// The first-order flux correction after the update (mhd/amr_fofc.wgsl), whose REDO pass this is
+// over the blocks it lists: the leaf index, and the step's new faces with their marks.
+@group(0) @binding(28) var IDX: texture_3d<u32>;
+@group(0) @binding(35) var NF: texture_3d<f32>;
 
 override STAGE: u32 = 1u;
+override REDO: bool = false;
 
 #include "mhd/state.wgsl"
 #include "mhd/amr_block.wgsl"
 #include "mhd/riemann/common.wgsl"
 #include <mhd_riemann>
 #include "mhd/face_flux.wgsl"
+#include "mhd/amr_lookup.wgsl"
+#include "mhd/amr_fofc.wgsl"
 
 // Stage 1's lower face along a at texel c, as kept.
 fn kept_face(c: vec3<i32>, a: i32) -> f32 {
@@ -91,8 +98,41 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     across[a] = 0;
     if (is2d()) { across.z = 0; }
     if (across.x + across.y + across.z > 1) { continue; }
+    // The redo (mhd/amr_fofc.wgsl) needs only the faces of the block's own cells: the ghost rows'
+    // feed the edge fields, which it leaves as they are.
+    if (REDO && across.x + across.y + across.z != 0) { continue; }
     var e = vec3<i32>(0);
     e[a] = 1;
+    let on_surface = t[a] == 0 || t[a] == BS;
+    let t1 = t[(a + 1) % 3];
+    let t2 = t[(a + 2) % 3];
+    let r = reg_entry(slot, a, t[a] == BS, select(t1, 0, is2d() && (a + 1) % 3 == 2), select(t2, 0, is2d() && (a + 2) % 3 == 2));
+    if (REDO) {
+      let i = flux_entry(inv.row, a, t);
+      if (fofc_local_marked(slot, t - e) || fofc_local_marked(slot, t)) {
+        // A face of a marked cell: the first-order flux of the start, as below.
+        let cl = atl(o, t - e);
+        let cr = atl(o, t);
+        let sl = mq_start(cl);
+        let sr = mq_start(cr);
+        let F = face_of(sl, sl, sr, sr, kept_face(cr, a), a, false, 1.0, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+        let fa = vec4<f32>(F.f.m, F.f.mom);
+        let fb = vec4<f32>(F.f.e, F.f.ei, F.f.s, F.f.vn);
+        FL[i] = fa;
+        FL[i + 1u] = fb;
+        if (on_surface) {
+          REG[r] = fa;
+          REG[r + 1u] = fb;
+        }
+        continue;
+      }
+      if (on_surface) {
+        // Unchanged on the block's surface: what the register holds, the flux of the step.
+        FL[i] = REG[r];
+        FL[i + 1u] = REG[r + 1u];
+        continue;
+      }
+    }
     let ql = mq_block(o, t - e);
     let qr = mq_block(o, t);
     var qll = ql;
@@ -126,10 +166,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     FL[i + 1u] = fb;
     FL[i + 2u] = vec4<f32>(F.f.bt, F.w, 0.0);
     // A face on the block's own lower or upper face: into the register.
-    if ((t[a] == 0 || t[a] == BS) && across.x + across.y + across.z == 0) {
-      let t1 = t[(a + 1) % 3];
-      let t2 = t[(a + 2) % 3];
-      let r = reg_entry(slot, a, t[a] == BS, select(t1, 0, is2d() && (a + 1) % 3 == 2), select(t2, 0, is2d() && (a + 2) % 3 == 2));
+    if (on_surface && across.x + across.y + across.z == 0) {
       REG[r] = fa;
       REG[r + 1u] = fb;
     }
