@@ -196,9 +196,9 @@ default, and what it does. A number out of its range is held to it when the file
 | `domain.units` | Physical units | an object, which may be left out, in one of 2 shapes: length and mass (`mass`); or length, density and velocity (`density`, `velocity`) | What one code unit is, for a setup that stands for something real: a length and a mass (the time unit then makes G = 1), or a length, a density and a velocity. Without them the setup is scale free and shown in code units |
 | `domain.units.name` | Name | text. Default `custom` | A name for the unit system |
 | `domain.units.length.value` | Length | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of length |
-| `domain.units.length.unit` | Length unit | `m`, `cm`, `km`, `Rsun`, `au`, `pc`. Default `Rsun` | The unit of the length |
+| `domain.units.length.unit` | Length unit | `m`, `cm`, `km`, `Rearth`, `Rsun`, `au`, `pc`. Default `Rsun` | The unit of the length |
 | `domain.units.mass.value` | Mass | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of mass |
-| `domain.units.mass.unit` | Mass unit | `kg`, `g`, `Msun`. Default `Msun` | The unit of the mass |
+| `domain.units.mass.unit` | Mass unit | `kg`, `g`, `Mearth`, `Msun`. Default `Msun` | The unit of the mass |
 | `domain.units.density.value` | Density | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of density |
 | `domain.units.density.unit` | Density unit | `kg/m3`, `g/cm3`. Default `g/cm3` | The unit of the density |
 | `domain.units.velocity.value` | Velocity | a number, 1e-300 to 1e+300. Default `1` | This many of the unit beside it are one code unit of velocity |
@@ -218,7 +218,8 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.toolScale` | Scale of the editing tools | an object, which may be left out | Least density and speed the editing tools (paint, push) measure their amounts against. They take the densest and fastest gas of the run, which leaves them nothing to go by in a box that holds next to nothing |
 | `physics.toolScale.rho` | Density | a number, at least 0. Default `1` | The tools’ density scale is at least this |
 | `physics.toolScale.v` | Speed | a number, at least 0. Default `1` | The tools’ speed scale is at least this |
-| `physics.eos` | Equation of state | `ideal`, `barotropic`, `liquid`, `gas_radiation`, `degenerate`, `ionizing`, `helmholtz`, `hhe`. Default `ideal` | How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `physics.eos` | Equation of state | `ideal`, `barotropic`, `liquid`, `gas_radiation`, `degenerate`, `ionizing`, `helmholtz`, `hhe`, `aneos`. Default `ideal` | How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `physics.eosParams.aneosA` | Material | `0`, `1`, `2`, `3`. Default `0` | The material of the ANEOS equation of state: rock, iron alloy or water, each from its published tables. A run whose two species are materials (a planet with a core) takes them instead |
 | `physics.eosParams.gamma` | gamma | a number, 1 to 100. Default `1.6666666666666667` | Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
 | `physics.eosParams.K` | K (p = K rho^gamma) | a number, at least 0 | Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
 | `physics.eosParams.liqC` | Sound speed | a number, at least 1e-30. Default `10` | The liquid’s sound speed c₀, a constant: p = c₀² (ρ - ρ₀). It is chosen, not physical: ten times the fastest flow keeps the density within 1% of ρ₀ (a Mach number of 0.1), and the step shrinks in proportion as it grows |
@@ -386,10 +387,14 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
-| `type` | Kind of star | `polytrope`, `white-dwarf`. Default `polytrope` | A polytrope of index n, or a cold white dwarf held up by degenerate electrons |
+| `type` | Kind of star | `polytrope`, `white-dwarf`, `planet`. Default `polytrope` | A polytrope of index n, or a cold white dwarf held up by degenerate electrons |
 | `n` | Polytropic index n | a number, 0.5 to 4.5. Default `1.5` | The star’s structure, p = K ρ^(1 + 1/n): the larger n, the more centrally concentrated. Stable against convection only if the gas’s adiabatic index is at least 1 + 1/n |
 | `mass` | Mass | a number, at least 1e-12. Default `1` | Its mass, in code units (solar masses for a white dwarf in its usual units) |
 | `radius` | Radius | a number, at least 1e-12. Default `0.2` | A polytrope’s radius, in code units. A white dwarf’s follows from its mass |
+| `material` | Material | `pyrolite`, `fe85si15`, `water`, `forsterite`. Default `pyrolite` | What a planet is made of; with a core, its mantle. A run holds two materials at most, and they are its species: the mantle’s first |
+| `coreMaterial` | Core material | `pyrolite`, `fe85si15`, `water`, `forsterite` | A planet’s core, if it has one: the inner part of its mass, of this material |
+| `coreFraction` | Core mass fraction | a number, 0.01 to 0.99. Default `0.3` | The core’s share of a planet’s mass (the Earth’s is 0.32) |
+| `surfaceT` | Surface temperature (K) | a number, 50 to 20000. Default `2000` | A planet’s temperature at its surface, in kelvin. Each of its layers lies along its adiabat from there: 2000 K is a body still hot from its accretion, as the published giant-impact calculations start |
 | `rhoc` | Central density | a number, at least 1e-300 | Instead of the mass: a polytrope’s central density |
 | `core` | Point-mass core | an object, which may be left out | A giant: part of the star’s mass is a point mass at its center, and the rest a polytropic envelope in balance with its own gravity and the core’s softened pull. The core moves with the star and then as the gas and the other masses pull it. By mass and radius only |
 | `core.mass` | Core mass | a number, at least 1e-12. Default `0.4` | The core’s share of the star’s mass, in code units: less than the star’s |

@@ -47,6 +47,7 @@ file ([docs/setups.md](docs/setups.md)). Some examples:
 - [A vortex street behind a cylinder, in a nearly incompressible liquid](https://guillochon.github.io/shaderous/?problem=cylinder-wake)
 - [The shadow of an opaque clump in a beam of radiation](https://guillochon.github.io/shaderous/?problem=radiation-shadow)
 - [A sub-Chandrasekhar Type Ia supernova: a white dwarf's helium shell detonates, then its core](https://guillochon.github.io/shaderous/?problem=sub-chandra)
+- [The Moon-forming impact: Theia strikes the proto-Earth](https://guillochon.github.io/shaderous/?problem=moon-forming-impact)
 
 **From an AI agent, or the command line.** The npm package runs the simulator in headless
 Chrome on your GPU (it needs Node 20+ and Chrome). `npx -y shaderous mcp` is an
@@ -117,6 +118,9 @@ degenerate electrons. It uses the methods of production simulation codes:
   temperature, in the manner of the Helmholtz equation of state, and for gas from
   molecular clouds to stellar envelopes a tabulated mixture of hydrogen and helium with H₂,
   its dissociation and the ionization of both;
+- rock, iron alloy and water from their published ANEOS models, with melting and vaporization,
+  one material or two in a cell: planets with iron cores under rock mantles, and their
+  collisions;
 - nearly incompressible flow: a weakly compressible liquid on the same explicit scheme, and for
   it an implicit pressure solve (multigrid) that takes the timestep from the flow speed instead
   of the sound speed, on the uniform grid and the adaptive mesh;

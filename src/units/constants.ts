@@ -22,4 +22,6 @@ export const ASTRO = {
   pc: 3.0856775814913673e16, // m
   yr: 3.15576e7, // Julian year, s
   km: 1e3,
+  Mearth: 5.9722e24, // kg
+  Rearth: 6.371e6, // m
 } as const;

@@ -31,6 +31,7 @@
 // hydro passes read them before every call to the equation of state.
 import { COMPOSITIONS, SPECIES, meanMolecularWeight, nuclearAverages, type Composition, type Species } from '../units/composition';
 import { SPECIES_PER_GROUP } from './species';
+import { ANEOS_MATERIALS, type AneosMaterial } from '../eos/aneos';
 
 export type Moments = [number, number, number, number];
 
@@ -44,6 +45,23 @@ export function speciesNuclides(names: readonly string[] | undefined): Species[]
     out.push(s);
   }
   return out;
+}
+
+/**
+ * The run's species as ANEOS materials (eos/aneos.ts), or null unless they are exactly two of
+ * them: a planet's layers. Then the equation of state reads a cell's mass fraction of the
+ * second from the moment y (and gamma, for an equation of state that takes one, is the run's).
+ */
+export function speciesMaterials(names: readonly string[] | undefined): [AneosMaterial, AneosMaterial] | null {
+  if (!names || names.length !== 2 || names[0] === names[1]) return null;
+  const m = names as readonly AneosMaterial[];
+  return m.every((n) => ANEOS_MATERIALS.includes(n)) ? [m[0], m[1]] : null;
+}
+
+/** The equation of state's materials for a run whose species are two of them (EosParams.aneosA, aneosB): its species' own, in their order. */
+export function materialEosParams(names: readonly string[] | undefined): { aneosA?: number; aneosB?: number } {
+  const m = speciesMaterials(names);
+  return m ? { aneosA: ANEOS_MATERIALS.indexOf(m[0]), aneosB: ANEOS_MATERIALS.indexOf(m[1]) } : {};
 }
 
 /** Free electrons per ion of a species, as the reference composition has it ionized. */
@@ -100,6 +118,7 @@ type MixtureProblem = { species?: readonly string[]; composition?: Composition; 
  * the run's adiabatic index, for the species the problem gives none of their own.
  */
 export function problemCoefficients(p: MixtureProblem, gamma: number): Moments[] | null {
+  if (speciesMaterials(p.species)) return [[1, 0, 0, 1 / (gamma - 1)], [1, 1, 0, 1 / (gamma - 1)]];
   const nuc = speciesNuclides(p.species);
   return nuc ? momentCoefficients(nuc, p.composition ?? COMPOSITIONS.solar, gamma, p.speciesGamma) : null;
 }

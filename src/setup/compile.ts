@@ -10,6 +10,7 @@ import { cosmoG, timeAtRedshift, type Cosmology } from '../cosmo';
 import { NET_SPECIES } from '../burn/network';
 import type { AnyBurnSpec } from '../burn/burn';
 import { defaultEosParams, makeEos, physicalEosParams, type Eos } from '../eos/eos';
+import { materialEosParams } from '../species/mixture';
 import type { Settling } from '../problems/settle';
 import { OUTFLOW, type Bc3, type MhdSpec, type PointMass, type Prim, type Problem, type ProblemParam } from '../problems/types';
 import type { SimConfig } from '../sim';
@@ -104,10 +105,13 @@ function scales(spec: SetupSpec): { units?: UnitSystem; G: number } {
 /** The equation of state a setup opens with, for what is asked without one (the masses, the field). */
 function specEos(spec: SetupSpec, units: UnitSystem | undefined): Eos {
   const ph = spec.physics ?? {};
-  return makeEos(ph.eos ?? 'ideal', { ...defaultEosParams(), ...physicalEosParams(units, namedComposition(ph.composition)), ...ph.eosParams });
+  return makeEos(ph.eos ?? 'ideal', { ...defaultEosParams(), ...physicalEosParams(units, namedComposition(ph.composition)), ...ph.eosParams, ...materialEosParams(speciesOf(spec)) });
 }
 
-const hasWhiteDwarf = (spec: SetupSpec) => (spec.parts ?? []).some((p) => p.kind === 'star' && p.type === 'white-dwarf');
+/** A star that is built from the equation of state: a white dwarf, a planet. */
+const hasWhiteDwarf = (spec: SetupSpec) => (spec.parts ?? []).some((p) => p.kind === 'star' && (p.type === 'white-dwarf' || p.type === 'planet'));
+/** A star that is settled before the run (problems/settle.ts): any but a planet, which starts on its own structure. */
+const settles = (p: { kind: string; type?: string }) => p.kind === 'star' && p.type !== 'planet';
 
 /** Mass fractions in the run's species order from fractions by name. */
 function fractionsOf(species: readonly string[] | undefined) {
@@ -217,6 +221,16 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3): InitFn {
     const placed = stars.map((st) => ({ st, X: st.part.X ? fractions(st.part.X) : bgX }));
     at = (x, y, z) => {
       for (const { st, X } of placed) {
+        if (st.planet) {
+          // A planet: its own pressure at that radius, and the material of the layer there.
+          const g = st.planet.at(Math.hypot(x - st.center[0], y - st.center[1], z - st.center[2]));
+          if (!(g.rho > amb.cut)) continue;
+          const [vx, vy, vz] = st.vel;
+          const w: Prim = { rho: g.rho, vx, vy, vz, p: g.p, s: st.scalar };
+          if (species && species.length >= 2) w.X = species.map((_, i) => (i === g.xb ? 1 : 0));
+          else if (X) w.X = X;
+          return w;
+        }
         const rho = st.rho(Math.hypot(x - st.center[0], y - st.center[1], z - st.center[2]));
         if (rho > amb.cut) {
           // Cold: the star's own pressure at that density.
@@ -257,7 +271,7 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
   // (A flow that only changes what the stars painted, a hot spot, brings no gas of its own.)
   const others = (spec.parts ?? []).some((p) => p.kind === 'disk' || p.kind === 'region' || (p.kind === 'flow' && flowValues(p).def.wholeBox));
   return {
-    stars: bodies.stars.map((s) => ({ barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(s.reach !== undefined ? { reach: s.reach } : others ? { reach: OWN_REACH * s.R } : {}), scalar: s.scalar, ...(s.core ? { core: { gm: G * s.core.mass, soft: s.core.soft } } : {}) })),
+    stars: bodies.stars.filter((s) => !s.planet && s.part.type !== 'planet').map((s) => ({ barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(s.reach !== undefined ? { reach: s.reach } : others ? { reach: OWN_REACH * s.R } : {}), scalar: s.scalar, ...(s.core ? { core: { gm: G * s.core.mass, soft: s.core.soft } } : {}) })),
     rhoCut: amb.cut,
     rhoAmb: amb.rho,
     pAmb: spec.background?.p ?? bodies.stars[0].barotrope.pressure(amb.cut),
@@ -398,7 +412,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const kinds = fieldKinds(spec);
   // (A star's core is a point mass too: parts/bodies.ts.)
   const hasMasses = parts.some((p) => p.kind === 'mass' || (p.kind === 'star' && p.core));
-  const hasStars = parts.some((p) => p.kind === 'star');
+  const hasStars = parts.some(settles);
   const debris = parts.some((p) => p.kind === 'orbit' && p.debris);
   const unitsFollow = !!d.units && (unitsFollowParts(d.units) || feats.some((f) => featuredPaths(f).some((p) => p.startsWith('domain.units.'))));
   const boxFeature = feats.find((f) => featuredPaths(f).includes('domain.box'));

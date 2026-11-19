@@ -5,8 +5,9 @@ import { SI } from '../units/constants';
 import { eosConstants, kelvinPerCodeT, toCode, unitOf, type UnitSystem } from '../units/units';
 import { helmCoulombCold, helmSolve, helmThermo } from './helmholtz';
 import { HHE_TABLES_SAY, hheSolve, hheSound2, hheTableFor, hheThermo } from './hhe';
+import { ANEOS_MATERIALS, aneosFromE, aneosFromP, aneosFromT, aneosKey, aneosTable } from './aneos';
 
-export type EosKind = 'ideal' | 'barotropic' | 'liquid' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz' | 'hhe';
+export type EosKind = 'ideal' | 'barotropic' | 'liquid' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz' | 'hhe' | 'aneos';
 
 /** The kind carries an energy of its own: its pressure is not a function of the density alone. */
 export const eosHasEnergy = (kind: EosKind): boolean => kind !== 'barotropic' && kind !== 'liquid';
@@ -62,6 +63,19 @@ export interface EosParams {
    */
   liqRho: number;
   liqC: number;
+  /**
+   * ANEOS materials (eos/aneos.wgsl), by their place in ANEOS_MATERIALS: the run's material,
+   * and a second one where the run holds two (-1 for none), whose mass fraction in a cell is
+   * its second species' (species/mixture.ts). The conversions to cgs are helmRho, helmE and helmT.
+   */
+  aneosA: number;
+  aneosB: number;
+}
+
+/** The key of the ANEOS table a run's parameters ask for (eos/aneos.ts). */
+export function aneosKeyOf(p: Pick<EosParams, 'aneosA' | 'aneosB'>): string {
+  const a = ANEOS_MATERIALS[p.aneosA] ?? ANEOS_MATERIALS[0];
+  return aneosKey(a, p.aneosB >= 0 ? ANEOS_MATERIALS[p.aneosB] : null);
 }
 
 /** The equation of state `e` (of proper quantities) for a state of comoving ones, a^3 = `s` times them. */
@@ -96,6 +110,7 @@ export const EOS_MODULES: Record<EosKind, string> = {
   ionizing: 'eos/ionizing.wgsl',
   helmholtz: 'eos/helmholtz.wgsl',
   hhe: 'eos/hhe.wgsl',
+  aneos: 'eos/aneos.wgsl',
 };
 
 /** The functions of the equation-of-state interface that take densities (docs/numerics.md section 9). */
@@ -147,17 +162,19 @@ export const EOS_LABELS: Record<EosKind, string> = {
   ionizing: 'Ionizing hydrogen (Saha)',
   helmholtz: 'White dwarf matter (tabulated electrons, Helmholtz)',
   hhe: 'Hydrogen and helium (H2, ionization)',
+  aneos: 'Rock, iron and water (tabulated, ANEOS)',
 };
 
 export const defaultEosParams = (): EosParams => ({
   gamma: 5 / 3, K: 1, R: 1, arad: 1, degRho: 1, degP: 1, ...ionParams(COMPOSITIONS.solar), ionT: 1, ionRho: 1,
-  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1.75, helmYe: 0.5, helmIons: 1 / 14, helmCoulomb: 1, hheX: hydrogenFraction(COMPOSITIONS.solar), hheRad: 1, liqRho: 1, liqC: 10,
+  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1.75, helmYe: 0.5, helmIons: 1 / 14, helmCoulomb: 1, hheX: hydrogenFraction(COMPOSITIONS.solar), hheRad: 1, liqRho: 1, liqC: 10, aneosA: 0, aneosB: -1,
 });
 
 /** The first vec4 of equation-of-state constants (Params.eos in hydro/common.wgsl). */
 export function eosConstants1(kind: EosKind, p: EosParams): number[] {
   if (kind === 'helmholtz') return [p.helmRho, p.helmE, p.helmT, p.helmMu];
   if (kind === 'hhe') return [p.helmRho, p.helmE, p.helmT, hheRadiation(p)];
+  if (kind === 'aneos') return [p.helmRho, p.helmE, p.helmT, 0];
   if (kind === 'liquid') return [p.liqRho, p.liqC, 0, 0];
   return [p.gamma, p.K, p.R, p.arad];
 }
@@ -304,6 +321,8 @@ export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[],
   // a^3 times the proper ones the equation of state relates (comovingEosSlot).
   const s = params.comovingA3;
   if (s !== undefined && s !== 1 && kind !== 'ideal') return comovingEos(makeEos(kind, { ...params, comovingA3: undefined }, k, zh1), s);
+  // ANEOS: a mixture's moment y is the mass fraction of the table's second material.
+  if (kind === 'aneos') return aneosEos(params, k ? k[1] : 0);
   if (k) {
     const eos = makeEos(kind, mixtureParams(kind, params, k, zh1));
     if (kind !== 'ideal') return eos;
@@ -417,6 +436,28 @@ export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[],
     case 'hhe':
       return hheEos(params);
   }
+}
+
+/**
+ * Float64 mirror of eos/aneos.wgsl in code units, at mass fraction xb of the table's second
+ * material. Needs the table loaded (loadAneos in eos/aneos.ts, or loadEosTable in eos/tables.ts).
+ */
+function aneosEos(params: EosParams, xb: number): Eos {
+  const { helmRho: cr, helmE: ce, helmT: cT } = params;
+  // Asked for when first used: an equation of state may be made before its table has come.
+  const key = aneosKeyOf(params);
+  const t = () => aneosTable(key);
+  const cp = cr * ce;
+  return {
+    kind: 'aneos',
+    hasEnergy: true,
+    params,
+    pressure: (rho, eint) => aneosFromE(t(), rho * cr, (eint / rho) * ce, xb).p / cp,
+    soundSpeed: (rho, p) => Math.sqrt(aneosFromP(t(), rho * cr, p * cp, xb).c2 / ce),
+    eintFromP: (rho, p) => (rho * aneosFromP(t(), rho * cr, p * cp, xb).e) / ce,
+    temperature: (rho, eint) => aneosFromE(t(), rho * cr, (eint / rho) * ce, xb).T / cT,
+    eintFromT: (rho, T) => (rho * aneosFromT(t(), rho * cr, T * cT, xb).e) / ce,
+  };
 }
 
 /**

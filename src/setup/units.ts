@@ -5,14 +5,14 @@ import type { UnitsSpec, UnitValue } from './spec';
 
 /** SI value of each unit a setup may name. */
 export const UNIT_SI: Record<string, number> = {
-  m: 1, cm: 1e-2, km: 1e3, Rsun: ASTRO.Rsun, au: ASTRO.au, pc: ASTRO.pc,
-  kg: 1, g: 1e-3, Msun: ASTRO.Msun,
+  m: 1, cm: 1e-2, km: 1e3, Rearth: ASTRO.Rearth, Rsun: ASTRO.Rsun, au: ASTRO.au, pc: ASTRO.pc,
+  kg: 1, g: 1e-3, Mearth: ASTRO.Mearth, Msun: ASTRO.Msun,
   'kg/m3': 1, 'g/cm3': 1e3,
   'm/s': 1, 'km/s': 1e3, 'cm/s': 1e-2,
 };
 
-export const LENGTH_UNITS = ['m', 'cm', 'km', 'Rsun', 'au', 'pc'] as const;
-export const MASS_UNITS = ['kg', 'g', 'Msun'] as const;
+export const LENGTH_UNITS = ['m', 'cm', 'km', 'Rearth', 'Rsun', 'au', 'pc'] as const;
+export const MASS_UNITS = ['kg', 'g', 'Mearth', 'Msun'] as const;
 export const DENSITY_UNITS = ['kg/m3', 'g/cm3'] as const;
 export const VELOCITY_UNITS = ['m/s', 'km/s', 'cm/s'] as const;
 

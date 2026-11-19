@@ -101,6 +101,11 @@ export const MCP_TOOLS: McpTool[] = [
     own: { save_path: { type: 'string', description: 'Write the full report as JSON to this file' } },
   },
   {
+    name: 'impact', method: 'impact',
+    brief: 'Gives what a giant impact has left: the masses of the planet, the disk around it and the escaping gas, what each is made of, and the moon the disk would gather into',
+    more: 'For 3D runs with gravity (the moon-forming-impact preset). Masses in code units (Earth masses in that preset); shares are mass fractions by species, and the mean dye, which tells the two bodies apart.',
+  },
+  {
     name: 'edit', method: 'tool',
     brief: 'Uses an editing tool on the run, as a person would: `name` (mass, velocity, temperature, obstacle, field, pull, source, sink, star, clear, query) and its `options`',
     pass: ['name', 'options'],

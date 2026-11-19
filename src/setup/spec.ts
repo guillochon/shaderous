@@ -16,7 +16,7 @@ import type { ViewMode } from '../render/view_options';
 // option table (and so the Setup dialog and the codec) and the generated schema all read them.
 export const FRAMES = ['inertial', 'gas', 'masses'] as const;
 export const ORBIT_TYPES = ['binary', 'flyby', 'collision'] as const;
-export const STAR_TYPES = ['polytrope', 'white-dwarf'] as const;
+export const STAR_TYPES = ['polytrope', 'white-dwarf', 'planet'] as const;
 export const STAR_FIELD_TYPES = ['dipole', 'random', 'gm17-dipole', 'gm17-random'] as const;
 export const DISK_PROFILES = ['thin', 'balanced'] as const;
 export const DISK_HEIGHTS = ['H', 'length'] as const;
@@ -276,7 +276,7 @@ export interface StarField {
 export interface StarPart {
   kind: 'star';
   id?: string;
-  /** a polytrope of index n, or a cold white dwarf */
+  /** a polytrope of index n, a cold white dwarf, or a planet of rock, iron or ice */
   type: (typeof STAR_TYPES)[number];
   /** polytrope: its index and radius, and either its mass or its central density */
   n?: number;
@@ -289,6 +289,16 @@ export interface StarPart {
    * pull. `soft` is the core's softening length (default a twentieth of the radius).
    */
   core?: { mass: number; soft?: number };
+  /**
+   * A planet (problems/planet.ts; needs the ANEOS equation of state and physical units): a body
+   * of `material` of mass `mass`, in balance along its adiabat from a surface at `surfaceT`
+   * kelvin (default 2000). With `coreMaterial`, a core of that material holds `coreFraction` of
+   * the mass (default 0.3). The two materials are the run's species, the mantle's first.
+   */
+  material?: string;
+  coreMaterial?: string;
+  coreFraction?: number;
+  surfaceT?: number;
   pos?: Vec3;
   vel?: Vec3;
   /** passive scalar of its gas (default: spread over (0, 1] by its place among the stars) */

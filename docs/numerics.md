@@ -35,6 +35,7 @@ precision, are pointed out where they occur.
 22. [Rotating frames, symmetry and coordinates](#22-rotating-frames-symmetry-and-coordinates)
 23. [Validation](#23-validation)
 24. [Radiation transport](#24-radiation-transport)
+25. [ANEOS materials and planets](#25-aneos-materials-and-planets)
 25. [References](#references)
 
 ---
@@ -375,6 +376,7 @@ float64 TypeScript mirror for testing (`tests/unit/eos*.test.ts`).
 | **White dwarf matter** (`helmholtz.wgsl`) | $`p = p_\text{deg}(\rho) + p_{e,\text{th}} + p_\text{ion} + p_\text{rad} + p_\text{C}`$ | The electron-positron gas at any degeneracy and temperature from a table of its free energy, in the manner of Helmholtz ([Timmes & Swesty 2000][TimmesSwesty2000]); ideal ions, radiation, and the ions' Coulomb energy |
 | **Ionizing hydrogen** (`ionizing.wgsl`) | $`p = \dfrac{\rho k T}{m_u}\left[h(1 + x) + o\right]`$ | Ionized fraction $`x`$ of the hydrogen from Saha equilibrium ([Saha 1920][Saha1920]); $`h`$ and $`o`$ are the particles per $`m_u`$ from hydrogen nuclei and from the other species |
 | **Hydrogen and helium** (`hhe.wgsl`) | $`p = \dfrac{\rho kT}{m_u}\dfrac{\partial h}{\partial\ln\rho} + \tfrac13 aT^4`$ | H₂, H, H⁺, He, He⁺, He⁺⁺ and electrons in chemical equilibrium, from a table of their free energy $`h = F m_u/kT`$ (the model of [Tomida et al. 2013][Tomida2013]); the radiation term is optional |
+| **Rock, iron and water** (`aneos.wgsl`) | $`p(\rho, T)`$ and $`e(\rho, T)`$ of ANEOS, tabulated | Condensed matter with melting and vaporization, one material or two in a cell; §25 |
 
 **Degenerate electrons.** With $`x = p_F/(m_e c)`$ the dimensionless Fermi momentum and
 $`n_e = \rho Y_e/m_u`$,
@@ -2664,7 +2666,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 167 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 180 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -2675,7 +2677,7 @@ vortex, the well-balanced column, AMR versions of the shock problems, flux match
 levels and time bins, the sphere potential, the Jeans instability ([Jeans 1902][Jeans1902]), a
 polytrope, a cold white dwarf, the Evrard collapse ([Evrard 1988][Evrard1988]), tidal
 disruption, cooling, viscosity, conduction, sinks, binary orbits, the equations of state, HDF5
-round trips, GPU against CPU reference, the weakly compressible liquid and its implicit pressure (§9), and the MHD tests of §21. Each test's pass criterion is printed next to its
+round trips, GPU against CPU reference, the weakly compressible liquid and its implicit pressure (§9), the MHD tests of §21, and the ANEOS materials, a planet at rest and the moon-forming impact (§25). Each test's pass criterion is printed next to its
 result.
 
 ## 24. Radiation transport
@@ -2906,8 +2908,212 @@ stars held up largely by radiation are not yet in discrete balance.
 
 ---
 
+## 25. ANEOS materials and planets
+
+`src/eos/aneos.ts`, `eos/aneos.wgsl`, `src/problems/planet.ts`, `src/debris/impact.ts`;
+`tools/eos/aneos_table.py`. Rock, iron and water for planetary impacts, from ANEOS
+([Thompson & Lauson 1972][ThompsonLauson1972]; [Melosh 2007][Melosh2007];
+[Stewart et al. 2020][Stewart2020]): the equation of state `aneos` (`physics.eos`).
+
+### Materials and their tables
+
+| Material | Deck | Use |
+|---|---|---|
+| `pyrolite` | Pyrolite-ANEOS-SLVTv0.2G1 ([Stewart 2022][StewartPyrolite]) | a mantle |
+| `fe85si15` | Fe85Si15-ANEOS-SLVTv0.2G1 ([Stewart 2020][StewartFe85Si15]) | a core |
+| `water` | Water-ANEOS-SLVTv0.3G1 ([Stewart 2024][StewartWater]) | ice and water |
+| `forsterite` | Forsterite-ANEOS-SLVTv1.0G1 ([Stewart et al. 2019][StewartForsterite]) | rock, as the older calculations have it |
+
+Each material's published input deck is run through pyaneos ([Stewart 2026][pyaneos]), the
+Python port of M-ANEOS, on one grid for all of them: 401 densities from $`10^{-8}`$ to
+$`100\ \mathrm{g\,cm^{-3}}`$ and 173 temperatures from 50 K to $`10^6`$ K, uniform in the
+logarithms at 0.025 dex. pyaneos reproduces each published table at its own nodes to
+$`5\times10^{-9}`$, the precision the tables are printed to. The decks are run with pyaneos's
+`NOTENSION`: the solid stretched below its reference density is tabulated in equilibrium with
+its vapor, so the pressure is positive everywhere.
+
+**What is tabulated is the pressure and the energy, not the free energy.** ANEOS is built as a
+Helmholtz free energy, but in its fluid with ionization its pressure and entropy are not the
+derivatives of the free energy it reports: at $`2\times10^4`$ K they differ from them by 1 to
+13% in the iron alloy (the solid agrees to $`10^{-6}`$). A table of $`F`$ with $`p`$ and $`s`$
+as its slopes is then inconsistent with itself, and a first version built that way was wrong by
+3% at the median in the fluid. So the table holds what every code that uses these materials
+uses, ANEOS's own $`p(\rho, T)`$ and $`e(\rho, T)`$, as two functions with their first and
+cross derivatives at every node, for bicubic Hermite interpolation:
+
+```math
+\psi = \operatorname{asinh}\frac{p}{P_s},\quad P_s = 10^9\ \mathrm{dyn\,cm^{-2}};\qquad
+\lambda = \ln\left[e - E_c(\rho)\right],\quad E_c(\rho) = F(\rho, T_0) + E_\text{off}
+```
+
+$`\psi`$ is linear in the pressure below $`P_s`$ (vapor, and a body's surface, where the
+pressure falls to nothing across one cell of the table) and logarithmic above. $`E_c`$, the
+cold curve, is the free energy of the lowest isotherm, so $`e - E_c`$ is $`T_0 s`$ there,
+positive, and rises with $`T`$; $`E_\text{off}`$ makes $`E_c`$ positive. The node slopes are
+ANEOS's own derivatives (differences of a part in $`10^4`$), limited as a monotone cubic's are
+([Fritsch & Carlson 1980][FritschCarlson1980]): the interpolant then rises along $`T`$ wherever
+the nodes do, which the solve for the temperature needs. One table is 2.2 MB, fetched when a
+run asks for its material.
+
+Against ANEOS at 6000 random states per material, between the nodes, by its phase flag:
+
+| Phase | Pressure, median | 90th percentile | Energy, median | 90th percentile |
+|---|---|---|---|---|
+| Solid | $`10^{-8}`$ | $`10^{-5}`$ | $`3\times10^{-7}`$ | $`10^{-5}`$ |
+| Liquid and gas | $`10^{-6}`$ | $`2\times10^{-4}`$ | $`10^{-5}`$ | $`8\times10^{-4}`$ |
+| Vapor dome | rounding | 4 to 13% | $`10^{-5}`$ | up to the latent heat |
+
+In the dome the saturation pressure rises by up to a factor of 20 from one temperature node to
+the next, and along the line where the last liquid boils away the energy rises by the latent
+heat across one or two nodes: there the table is right to about half a node, 3% in
+temperature, and wrong by the size of the jump if read as an error at a point.
+
+### Reading it
+
+The hydro holds the density and the energy (or, at a face, the pressure), so the temperature
+comes first. $`\lambda`$ (or $`\psi`$) rises along $`y = \log_{10}T`$ at the cell's density:
+the two node rows on either side of the answer are found by bisection (8 steps for 173 rows,
+each the cubic along the density through two texels), and the place between them by Newton's
+method on the cubic through them, kept in its bracket by a step of false position (the Illinois
+rule) where a limited slope is zero; 8 steps. The other quantity and the sound speed are then
+read there. Single precision against the float64 mirror (`aneos-eos`): the pressure back from
+its own energy to $`10^{-4}`$ at worst, the sound speed to $`3\times10^{-4}`$ at the 99th
+percentile.
+
+The sound speed is $`c^2 = (\partial p/\partial\rho)_T + \Gamma\,(\partial p/\partial\ln T)_\rho/\rho`$
+with $`\Gamma = (\partial p/\partial T)/(\rho\,\partial e/\partial T)`$ held between 0 and 5,
+and $`c`$ between 30 m/s and 100 km/s. Every term is positive. (The form with the energy's
+slope along the density, which is the exact speed of a system whose pressure is $`p(\rho, e)`$,
+multiplies a latent heat by a ratio of two slopes along $`T`$ that are both next to nothing in
+cold gas: cold dust came out at 26 km/s and set the timestep of a whole run.)
+
+A state below the table's lowest isotherm is read as that isotherm's, and `eos_eint_floor` is
+its energy: without the floor a cell that had landed there handed its faces more energy than it
+held, step after step. Thinner than the table's least density the gas is ideal: the pressure
+of the least density, in proportion.
+
+### Two materials in a cell
+
+A run holds one material or two. With two, they are its species (the mantle's first), and a
+cell's mass fraction $`X`$ of the second reaches the equation of state as the composition's
+moment $`y`$ (§12). In a cell that holds both, each takes the volume that brings the two to one
+pressure at the cell's temperature:
+
+```math
+\frac{1 - X}{\rho_a} + \frac{X}{\rho_b} = \frac{1}{\rho},\qquad p_a(\rho_a, T) = p_b(\rho_b, T)
+```
+
+This closure is solved when the pair is first asked for, in the page (about a second), not in
+the shader: at every node, by bisection on $`\rho_a`$, for $`X = \tfrac14, \tfrac12,
+\tfrac34`$. The result is three more tables of the same form, between the two materials' own:
+the mixture's pressure, and its energy $`(1 - X)e_a + Xe_b`$. A cell reads the two tables on
+either side of its $`X`$, blended texel by texel, exactly as it reads one material. Between
+tables the blend is linear in $`\psi`$ and $`\lambda`$, which is an interpolation of the
+closure, not the closure: at the tables' own $`X`$ the pressure is each material's at its own
+density to 0.5% (90th percentile, both condensed).
+
+### Planets
+
+A planet (`problems/planet.ts`; a star part of type `planet`) is given by its mass, its mantle's
+material, optionally a core's material and share of the mass, and the temperature of its
+surface (2000 K by default: a body still hot from its accretion, as the published impact
+calculations start). Each layer lies along its own adiabat, $`de = p\,d\rho/\rho^2`$ with the
+pressure the table gives, so that a layer moved whole stays on it; where two layers meet the
+pressure and the temperature are continuous. The structure is integrated inward from the
+surface for a trial radius (fourth-order Runge-Kutta, 2000 steps), and the radius is the one at
+which the mass runs out at the center.
+
+| Body | Radius | Central pressure | Central density |
+|---|---|---|---|
+| 1 M⊕, 30% Fe85Si15 under pyrolite | 1.024 R⊕ | 351 GPa (the Earth: 364) | 12.6 g/cm³ (13.1) |
+| 0.12 M⊕, the same | 0.544 R⊕ | 73 GPa | 9.0 g/cm³ |
+
+A planet is not settled (§16): its layers are not one barotrope. It starts on the integrated
+structure, and at 16 cells to the radius rings by 3.6% in central density.
+
+The gas around a planet is its mantle's material, thin, at the surface's temperature: vapor
+and dust with next to no pressure, which falls onto the planet. It carries $`10^{-7}`$ of the
+planet's mass.
+
+### What an impact leaves
+
+`debris/impact.ts` sorts the gas of a run as the moon-forming impact calculations do
+([Canup 2004][Canup2004]). About the densest gas, every cell is on the Kepler orbit its
+position and velocity give it around the planet's mass: escaping if the orbit is unbound, the
+planet's if its pericenter is inside the planet's radius (that of a body of the planet's mass
+at the Earth's mean density), the disk's otherwise; the planet's mass and radius are taken
+again from what fell to it, until they settle. The disk's mass $`M_D`$ and angular momentum
+$`L_D`$ give the moon it would gather into ([Ida et al. 1997][Ida1997];
+[Kokubo et al. 2000][Kokubo2000]):
+
+```math
+M_\text{moon} = 1.9\,\frac{L_D}{\sqrt{G M_p a_R}} - 1.1\,M_D - 1.9\,M_\text{esc},\qquad a_R = 2.9\,R_p,\quad M_\text{esc} = 0.05\,M_D
+```
+
+**The moon-forming impact** (`moon-forming-impact`). Theia, 0.12 M⊕, strikes the proto-Earth,
+0.9 M⊕, on a parabola whose pericenter is half the sum of their radii, so that they touch at
+45° ([Canup 2004][Canup2004]); both have 30% Fe85Si15 cores under pyrolite. A run in a box of
+24 R⊕ (the preset's is 16) at 256 finest cells on two levels of refinement (10.7 cells to an
+Earth radius; 0.7 million cells at the start and 3.5 million by the end), with a time unit of
+805.5 s:
+
+| Time | Planet (M⊕) | Disk (M⊕) | Escaping (M⊕) | Disk from Theia | Iron in the disk | Moon (lunar masses) |
+|---|---|---|---|---|---|---|
+| 12 (2.7 h) | 0.989 | 0.032 | 0.00002 | 80% | 26% | 1.3 |
+| 16 (3.6 h) | 0.991 | 0.030 | 0.00005 | 81% | 27% | 1.1 |
+| 28 (6.3 h) | 0.986 | 0.035 | 0.00001 | 74% | 25% | 0.85 |
+| 36 (8.1 h) | 0.981 | 0.036 | 0.004 | 72% | 24% | 1.25 |
+| 48 (10.7 h) | 0.960 | 0.057 | 0.004 | 50% | 17% | 1.95 |
+
+Contact is at t = 3; what is left of Theia comes round and strikes again near t = 20, when the
+sorting means little. Total energy is conserved to $`4\times10^{-4}`$ over the run, and
+$`1.3\times10^{-4}`$ of the mass leaves through the box's faces. The run takes 65 steps per
+time unit.
+
+The disk of the first hours, 0.03 M⊕ of which four fifths is Theia's and which would gather
+into about one lunar mass, is the published result for this impact. Two things in the table are
+the resolution's, not the impact's:
+
+- **Iron.** The published disks hold a few percent of iron; this one a quarter. Theia's core
+  is 6 cells across, and what the mesh mixes into its mantle goes where the mantle goes.
+- **The disk's growth after t = 36**, at the planet's expense and with the Earth's rock. The
+  planet is then hot, swollen and spinning near its limit, and its outer layers spread across
+  the radius the sorting uses, which is a cold Earth's.
+
+In the preset's own box at 128 finest cells on one level of refinement, 8 cells to an Earth
+radius (the `giant-impact` test), the disk at t = 12 is 0.034 M⊕, 80% Theia's, and would gather
+into 1.5 lunar masses. In that box at 256 cells on two levels (16 cells to the radius) total
+energy drifts by 0.24% in the first four time units, before contact, and by 0.02% after; 0.2%
+of the mass has left through the faces by t = 28.
+
+### Limits
+
+- **The table's cell at a body's surface is soft.** The pressure rises from the vapor
+  pressure to GPa across the one cell of the table that holds the edge of the condensed phase
+  (6% in density), where in ANEOS it rises from the edge itself. The outermost cells of a body
+  are the ones in it.
+- **Water's solid is not ice Ih**: the 2024 model has one solid, of 1.25 g/cm³. A cold icy
+  body is about a third too dense near its surface.
+- **No strength.** Bodies are fluids: right above a few hundred kilometers.
+- **Refused with it**: magnetic fields are not; comoving coordinates are. Radiation, burning
+  and implicit pressure have not been tried.
+- A run's two materials must be its two species. A third species, a tracer, turns the
+  composition off: the dye (the passive scalar) tells bodies apart instead.
+
 ## References
 
+[ThompsonLauson1972]: https://github.com/isale-code/M-ANEOS/tree/master/docs
+[Melosh2007]: https://doi.org/10.1111/j.1945-5100.2007.tb01009.x
+[Stewart2020]: https://arxiv.org/abs/1910.04687
+[StewartPyrolite]: https://doi.org/10.5281/zenodo.6968539
+[StewartFe85Si15]: https://doi.org/10.5281/zenodo.3866550
+[StewartWater]: https://doi.org/10.5281/zenodo.14226693
+[StewartForsterite]: https://doi.org/10.5281/zenodo.3478631
+[pyaneos]: https://doi.org/10.5281/zenodo.20736271
+[FritschCarlson1980]: https://doi.org/10.1137/0717021
+[Canup2004]: https://doi.org/10.1016/j.icarus.2003.09.028
+[Ida1997]: https://doi.org/10.1038/38669
+[Kokubo2000]: https://doi.org/10.1006/icar.2000.6496
 [He2024]: https://arxiv.org/abs/2404.08247
 [Skinner2013]: https://arxiv.org/abs/1306.0010
 [Skinner2019]: https://arxiv.org/abs/1806.07390
@@ -2990,6 +3196,7 @@ stars held up largely by radiation are not yet in discrete balance.
 - Brandt, A. (1977). Multi-level adaptive solutions to boundary-value problems. Mathematics of Computation 31, 333. [doi:10.1090/S0025-5718-1977-0431719-X](https://doi.org/10.1090/S0025-5718-1977-0431719-X)
 - Bryan, G. L., et al. (1995). A piecewise parabolic method for cosmological hydrodynamics. Computer Physics Communications 89, 149. [doi:10.1016/0010-4655(94)00191-4](https://doi.org/10.1016/0010-4655(94)00191-4)
 - Čada, M., & Torrilhon, M. (2009). Compact third-order limiter functions for finite volume methods. Journal of Computational Physics 228, 4118. [doi:10.1016/j.jcp.2009.02.020](https://doi.org/10.1016/j.jcp.2009.02.020)
+- Canup, R. M. (2004). Simulations of a late lunar-forming impact. Icarus 168, 433. [doi:10.1016/j.icarus.2003.09.028](https://doi.org/10.1016/j.icarus.2003.09.028)
 - Chandrasekhar, S. (1935). The Highly Collapsed Configurations of a Stellar Mass (Second Paper). MNRAS 95, 207. [doi:10.1093/mnras/95.3.207](https://doi.org/10.1093/mnras/95.3.207)
 - Davis, S. F. (1988). Simplified Second-Order Godunov-Type Methods. SIAM Journal on Scientific and Statistical Computing 9, 445. [doi:10.1137/0909030](https://doi.org/10.1137/0909030)
 - de Val-Borro, M., et al. (2006). A comparative study of disc-planet interaction. MNRAS 370, 529. [doi:10.1111/j.1365-2966.2006.10488.x](https://doi.org/10.1111/j.1365-2966.2006.10488.x)
@@ -2997,6 +3204,7 @@ stars held up largely by radiation are not yet in discrete balance.
 - Farris, B. D., et al. (2014). Binary Black Hole Accretion from a Circumbinary Disk: Gas Dynamics inside the Central Cavity. ApJ 783, 134. [doi:10.1088/0004-637X/783/2/134](https://doi.org/10.1088/0004-637X/783/2/134)
 - Federrath, C., et al. (2010). Modeling Collapse and Accretion in Turbulent Gas Clouds: Implementation and Comparison of Sink Particles in AMR and SPH. ApJ 713, 269. [doi:10.1088/0004-637X/713/1/269](https://doi.org/10.1088/0004-637X/713/1/269)
 - Fleischmann, N., et al. (2020). A low dissipation method to cure the grid-aligned shock instability. Journal of Computational Physics 401, 109004. [doi:10.1016/j.jcp.2019.109004](https://doi.org/10.1016/j.jcp.2019.109004)
+- Fritsch, F. N., & Carlson, R. E. (1980). Monotone Piecewise Cubic Interpolation. SIAM Journal on Numerical Analysis 17, 238. [doi:10.1137/0717021](https://doi.org/10.1137/0717021)
 - Fryxell, B., et al. (2000). FLASH: An Adaptive Mesh Hydrodynamics Code for Modeling Astrophysical Thermonuclear Flashes. ApJS 131, 273. [doi:10.1086/317361](https://doi.org/10.1086/317361)
 - Gresho, P. M., & Chan, S. T. (1990). On the theory of semi-implicit projection methods for viscous incompressible flow and its implementation via a finite element method that also introduces a nearly consistent mass matrix. II - Implementation. International Journal for Numerical Methods in Fluids 11, 621. [doi:10.1002/fld.1650110510](https://doi.org/10.1002/fld.1650110510)
 - Guillochon, J., et al. (2009). Three-dimensional Simulations of Tidally Disrupted Solar-type Stars and the Observational Signatures of Shock Breakout. ApJ 705, 844. [doi:10.1088/0004-637X/705/1/844](https://doi.org/10.1088/0004-637X/705/1/844)
@@ -3005,8 +3213,10 @@ stars held up largely by radiation are not yet in discrete balance.
 - Harten, A., Lax, P. D., & van Leer, B. (1983). On Upstream Differencing and Godunov-Type Schemes for Hyperbolic Conservation Laws. SIAM Review 25, 35. [doi:10.1137/1025002](https://doi.org/10.1137/1025002)
 - Hawley, J. F. (2000). Global Magnetohydrodynamical Simulations of Accretion Tori. ApJ 528, 462. [doi:10.1086/308180](https://doi.org/10.1086/308180)
 - Hawley, J. F., Guan, X., & Krolik, J. H. (2011). Assessing Quantitative Results in Accretion Simulations: From Local to Global. ApJ 738, 84. [doi:10.1088/0004-637X/738/1/84](https://doi.org/10.1088/0004-637X/738/1/84)
+- Ida, S., Canup, R. M., & Stewart, G. R. (1997). Lunar accretion from an impact-generated disk. Nature 389, 353. [doi:10.1038/38669](https://doi.org/10.1038/38669)
 - Jeans, J. H. (1902). The Stability of a Spherical Nebula. Philosophical Transactions of the Royal Society of London Series A 199, 1. [doi:10.1098/rsta.1902.0012](https://doi.org/10.1098/rsta.1902.0012)
 - Käppeli, R., & Mishra, S. (2014). Well-balanced schemes for the Euler equations with gravitation. Journal of Computational Physics 259, 199. [doi:10.1016/j.jcp.2013.11.028](https://doi.org/10.1016/j.jcp.2013.11.028)
+- Kokubo, E., Ida, S., & Makino, J. (2000). Evolution of a Circumterrestrial Disk and Formation of a Single Moon. Icarus 148, 419. [doi:10.1006/icar.2000.6496](https://doi.org/10.1006/icar.2000.6496)
 - Koren, B. (1993). A robust upwind discretization method for advection, diffusion and source terms. In Numerical Methods for Advection-Diffusion Problems, Notes on Numerical Fluid Mechanics 45, 117. Vieweg. [OpenAlex](https://openalex.org/W2125064741)
 - Koyama, H., & Inutsuka, S. (2002). An Origin of Supersonic Motions in Interstellar Clouds. ApJL 564, L97. [doi:10.1086/338978](https://doi.org/10.1086/338978)
 - Koyama, H., & Inutsuka, S. (2004). The Field Condition: A New Constraint on Spatial Resolution in Simulations of the Nonlinear Development of Thermal Instability. ApJL 602, L25. [doi:10.1086/382478](https://doi.org/10.1086/382478)
@@ -3014,6 +3224,7 @@ stars held up largely by radiation are not yet in discrete balance.
 - Kwatra, N., Su, J., Grétarsson, J. T., & Fedkiw, R. (2009). A method for avoiding the acoustic time step restriction in compressible flow. Journal of Computational Physics 228, 4146. [doi:10.1016/j.jcp.2009.02.027](https://doi.org/10.1016/j.jcp.2009.02.027)
 - Löhner, R. (1987). An adaptive finite element scheme for transient problems in CFD. Computer Methods in Applied Mechanics and Engineering 61, 323. [doi:10.1016/0045-7825(87)90098-3](https://doi.org/10.1016/0045-7825(87)90098-3)
 - Masunaga, H., & Inutsuka, S. (2000). A Radiation Hydrodynamic Model for Protostellar Collapse. II. The Second Collapse and the Birth of a Protostar. ApJ 531, 350. [doi:10.1086/308439](https://doi.org/10.1086/308439)
+- Melosh, H. J. (2007). A hydrocode equation of state for SiO2. Meteoritics & Planetary Science 42, 2079. [doi:10.1111/j.1945-5100.2007.tb01009.x](https://doi.org/10.1111/j.1945-5100.2007.tb01009.x)
 - Plewa, T., & Müller, E. (1999). The consistent multi-fluid advection method. A&A 342, 179. [arXiv:astro-ph/9807241](https://arxiv.org/abs/astro-ph/9807241)
 - Plummer, H. C. (1911). On the problem of distribution in globular star clusters. MNRAS 71, 460. [doi:10.1093/mnras/71.5.460](https://doi.org/10.1093/mnras/71.5.460)
 - Quirk, J. J. (1994). A contribution to the great Riemann solver debate. International Journal for Numerical Methods in Fluids 18, 555. [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
@@ -3024,8 +3235,15 @@ stars held up largely by radiation are not yet in discrete balance.
 - Smith Clark, A. I., et al. (2023). pynucastro: A Python library for nuclear astrophysics. ApJ. [doi:10.3847/1538-4357/acbaff](https://doi.org/10.3847/1538-4357/acbaff)
 - Springel, V. (2005). The cosmological simulation code GADGET-2. MNRAS 364, 1105. [doi:10.1111/j.1365-2966.2005.09655.x](https://doi.org/10.1111/j.1365-2966.2005.09655.x)
 - Springel, V. (2010). E pur si muove: Galilean-invariant cosmological hydrodynamical simulations on a moving mesh. MNRAS 401, 791. [doi:10.1111/j.1365-2966.2009.15715.x](https://doi.org/10.1111/j.1365-2966.2009.15715.x)
+- Stewart, S. T. (2020). Equation of State Model Fe85Si15-ANEOS: Development and documentation (Version SLVTv0.2G1). Zenodo. [doi:10.5281/zenodo.3866550](https://doi.org/10.5281/zenodo.3866550)
+- Stewart, S. T. (2022). ANEOS-PYROLITE (v0.2.0). Zenodo. [doi:10.5281/zenodo.6968539](https://doi.org/10.5281/zenodo.6968539)
+- Stewart, S. T. (2024). ANEOS Equation of State Model for Water (v0.3). Zenodo. [doi:10.5281/zenodo.14226693](https://doi.org/10.5281/zenodo.14226693)
+- Stewart, S. T. (2026). pyaneos: an oracle-validated Python port of M-ANEOS (v1.0). Zenodo. [doi:10.5281/zenodo.20736271](https://doi.org/10.5281/zenodo.20736271)
+- Stewart, S. T., et al. (2019). Equation of State Model Forsterite-ANEOS-SLVTv1.0G1: Documentation and Comparisons. Zenodo. [doi:10.5281/zenodo.3478631](https://doi.org/10.5281/zenodo.3478631)
+- Stewart, S. T., et al. (2020). The shock physics of giant impacts: Key requirements for the equations of state. AIP Conference Proceedings 2272, 080003. [arXiv:1910.04687](https://arxiv.org/abs/1910.04687)
 - Stone, J. M., et al. (2020). The Athena++ Adaptive Mesh Refinement Framework: Design and Magnetohydrodynamic Solvers. ApJS 249, 4. [doi:10.3847/1538-4365/ab929b](https://doi.org/10.3847/1538-4365/ab929b)
 - Taylor, G. (1950). The Formation of a Blast Wave by a Very Intense Explosion. I. Theoretical Discussion. Proceedings of the Royal Society of London Series A 201, 159. [doi:10.1098/rspa.1950.0049](https://doi.org/10.1098/rspa.1950.0049)
+- Thompson, S. L., & Lauson, H. S. (1972). Improvements in the Chart D radiation-hydrodynamic code III: Revised analytic equations of state. Sandia National Laboratories. [In the M-ANEOS repository](https://github.com/isale-code/M-ANEOS/tree/master/docs)
 - Thornber, B., et al. (2008). An improved reconstruction method for compressible flows with low Mach number features. Journal of Computational Physics 227, 4873. [doi:10.1016/j.jcp.2008.01.036](https://doi.org/10.1016/j.jcp.2008.01.036)
 - Timmes, F. X., & Swesty, F. D. (2000). The Accuracy, Consistency, and Speed of an Electron-Positron Equation of State Based on Table Interpolation of the Helmholtz Free Energy. ApJS 126, 501. [doi:10.1086/313304](https://doi.org/10.1086/313304)
 - Timmes, F. X., Hoffman, R. D., & Woosley, S. E. (2000). An inexpensive nuclear energy generation network for stellar hydrodynamics. ApJS 129, 377. [doi:10.1086/313407](https://doi.org/10.1086/313407)

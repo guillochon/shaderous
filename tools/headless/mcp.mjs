@@ -216,6 +216,10 @@ const TOOLS = [
     },
   },
   {
+    name: 'impact',
+    run: async () => text(await call('impact')),
+  },
+  {
     name: 'edit',
     run: async ({ name, options }) => text(await call('tool', name, options ?? {})),
   },

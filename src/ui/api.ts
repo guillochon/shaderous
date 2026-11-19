@@ -10,6 +10,8 @@ import type { Gpu } from '../gpu/device';
 import type { LinkOverrides } from './link';
 import { decodeLink } from './link';
 import { capture } from '../io/capture';
+import { impactDebris, snapshotCells } from '../debris/impact';
+import { toCode } from '../units/units';
 import { AmrSim } from '../amr/amr_sim';
 import { DERIVED_VARIABLES, SnapshotSampler, VARIABLES, type Snapshot } from '../io/snapshot';
 import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
@@ -1179,6 +1181,35 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         if (!r) throw new Error(`${cfg.problem.id} does not track debris energies: see describe(), problems[].debris`);
         const u = problemUnits(cfg.problem, cfg.params);
         return { ...r, units: u ? { time: u.time, mass: u.mass } : null };
+      }),
+
+    /**
+     * What a giant impact has left (debris/impact.ts): the gas sorted, by the Kepler orbit each
+     * cell is on about the densest body, into that planet, the disk around it and what escapes,
+     * with the moon the disk would gather into. 3D runs with gravity.
+     */
+    impact: () =>
+      serial(async () => {
+        const cfg = app.cfg();
+        if (cfg.ndim !== 3 || !(cfg.G > 0)) throw new Error('impact() is for 3D runs with gravity');
+        const { snap, species } = await sampled(false);
+        const names = [...species, 'r0'];
+        const { cells, fields } = snapshotCells(snap, names);
+        const u = problemUnits(cfg.problem, cfg.params);
+        let peak = 0;
+        for (let q = 0; q < cells.count; q++) peak = Math.max(peak, cells.u1[4 * q]);
+        // The Earth's mean density where the run has units; else half the densest gas's.
+        const meanDensity = u ? toCode(u, 'density', 5513) : 0.5 * peak;
+        const r = impactDebris(cells, cfg.G, meanDensity, fields, 1e-7 * peak);
+        const share = (k: number) => Object.fromEntries(names.map((v, i) => [v === 'r0' ? 'dye' : v, r.shares[k][i]]));
+        return {
+          planet: { mass: r.planet, radius: r.radius, center: r.center, velocity: r.velocity, shares: share(0) },
+          disk: { mass: r.disk, angularMomentum: r.diskL, overRoche: r.diskLRoche, shares: share(1) },
+          escaping: { mass: r.escaping, shares: share(2) },
+          moon: r.moon,
+          meanDensity,
+          units: u ? { time: u.time, mass: u.mass, length: u.length } : null,
+        };
       }),
 
     /** Each variable's least, greatest and volume-weighted mean value over the box. */

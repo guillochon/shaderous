@@ -3,7 +3,10 @@
 // The star and orbit builders are those of the presets they came from (the polytrope, the tidal
 // disruption, the white dwarf collision, the binary), kept operation for operation: a preset
 // compiled from its JSON file starts bit for bit as its hand-written problem did.
-import type { Eos } from '../../eos/eos';
+import { aneosKeyOf, type Eos } from '../../eos/eos';
+import { aneosFromT, aneosMaterialsOf, aneosTable, type AneosMaterial, type AneosTable } from '../../eos/aneos';
+import { buildPlanet } from '../../problems/planet';
+import { SI } from '../../units/constants';
 import { dipoleField, gm17Dipole, gm17Random, randomField, type StarProfile } from '../../mhd/star_fields';
 import { coredPolytrope } from '../../problems/cored_polytrope';
 import { laneEmden, laneEmdenCached, polytropeK, polytropeMass, polytropeScales } from '../../problems/lane_emden';
@@ -38,6 +41,12 @@ export interface BuiltStar {
   scalar: number;
   /** its pressure profile, for a field inside it */
   profile(): StarProfile;
+  /**
+   * A planet (problems/planet.ts): its gas at a radius, with the pressure it has there (warm,
+   * not on one cold curve) and which of the run's materials it is (the mass fraction of the
+   * second). A planet is not settled: it starts on its own integrated structure.
+   */
+  planet?: { at(r: number): { rho: number; p: number; xb: number } };
 }
 
 const starCache = new Map<string, Omit<BuiltStar, 'id' | 'part' | 'center' | 'vel' | 'scalar'>>();
@@ -59,13 +68,70 @@ function polytropeByDensity(n: number, R: number, rhoc: number, G: number) {
   return { K, M: polytropeMass(le, rhoc, R), density: (r: number) => rhoc * Math.pow(le.theta(r / R), n), pressure: (rho: number) => K * Math.pow(rho, g) };
 }
 
+/** The table a planet is built from, if the run's equation of state is ANEOS and its table has come. */
+function planetTable(eos: Eos | undefined): { table: AneosTable; names: AneosMaterial[] } | null {
+  if (eos?.kind !== 'aneos') return null;
+  try {
+    const key = aneosKeyOf(eos.params);
+    return { table: aneosTable(key), names: aneosMaterialsOf(key) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * A planet (StarPart.material and the fields after it). Without the equation of state's table
+ * (a document being checked, or drawn, before a run has loaded it) it is a uniform ball of
+ * about the right size, R = M^0.27 in Earth units, which is enough to place it.
+ */
+function buildPlanetStar(part: StarPart, G: number, eos: Eos | undefined): Omit<BuiltStar, 'id' | 'part' | 'center' | 'vel' | 'scalar'> {
+  const M = part.mass ?? 1;
+  const tab = planetTable(eos);
+  if (!tab || !eos) {
+    const R = Math.pow(M, 0.27);
+    const rho = M / ((4 / 3) * Math.PI * R ** 3);
+    return { M, R, rhoc: rho, rho: (r) => (r < R ? rho : 0), pressure: () => 0, barotrope: { pressure: () => 0, rhoOfH: () => 0 }, profile: () => ({ pressure: () => 0, pc: 0, pcut: 0, radius: R }) };
+  }
+  const xbOf = (m: string): number => {
+    const i = tab.names.indexOf(m as AneosMaterial);
+    if (i < 0) throw new Error(`a planet of ${m} needs it among the run's materials (${tab.names.join(', ')}): its species are its materials, the mantle's first`);
+    return i;
+  };
+  const mantle = xbOf(part.material ?? tab.names[0]);
+  const cf = part.coreFraction ?? 0.3;
+  const layers = part.coreMaterial ? [{ xb: xbOf(part.coreMaterial), fraction: cf }, { xb: mantle, fraction: 1 - cf }] : [{ xb: mantle, fraction: 1 }];
+  const Ts = part.surfaceT ?? 2000;
+  // The code's units in cgs: density and specific energy from the equation of state's
+  // conversions, and the length from G (G_cgs = G v^2 / (rho L^2) in those units).
+  const { helmRho: cr, helmE: ce } = eos.params;
+  const L = Math.sqrt((G * ce) / (cr * SI.G * 1e3));
+  const pl = buildPlanet(tab.table, layers, M * cr * L ** 3, Ts);
+  const cp = cr * ce;
+  const at = (r: number) => {
+    const s = pl.at(r * L);
+    return { rho: s.rho / cr, p: s.p / cp, xb: layers[s.layer].xb };
+  };
+  // Outside itself: its mantle's material at the surface's temperature (the vapor over it).
+  const pressure = (rho: number) => aneosFromT(tab.table, rho * cr, Ts, mantle).p / cp;
+  return {
+    M, R: pl.R / L, rhoc: pl.rhoc / cr,
+    rho: (r) => at(r).rho,
+    pressure,
+    barotrope: { pressure, rhoOfH: () => 0 },
+    profile: () => ({ pressure: (r) => at(r).p, pc: pl.p[0] / cp, pcut: 0, radius: pl.R / L }),
+    planet: { at },
+  };
+}
+
 function buildStar(part: StarPart, G: number, eos: Eos | undefined) {
   // A white dwarf is built on its equation of state's cold curve: the electrons' scales, and the Coulomb term if it has one.
-  const key = JSON.stringify([part.type, part.n, part.radius, part.mass, part.rhoc, part.core, G, part.type === 'white-dwarf' && eos ? scalesOf(eos) : 0]);
+  const key = JSON.stringify([part.type, part.n, part.radius, part.mass, part.rhoc, part.core, G, part.type === 'white-dwarf' && eos ? scalesOf(eos) : 0,
+    part.type === 'planet' ? [part.material, part.coreMaterial, part.coreFraction, part.surfaceT, eos?.params.helmRho, eos?.params.helmE, planetTable(eos)?.table.key ?? null] : 0]);
   const hit = starCache.get(key);
   if (hit) return hit;
   let out: Omit<BuiltStar, 'id' | 'part' | 'center' | 'vel' | 'scalar'>;
-  if (part.type === 'white-dwarf') {
+  if (part.type === 'planet') out = buildPlanetStar(part, G, eos);
+  else if (part.type === 'white-dwarf') {
     if (!eos) throw new Error('a white dwarf needs the equation of state');
     const s = scalesOf(eos);
     const wd = whiteDwarf(part.mass ?? 0.6, s, G);

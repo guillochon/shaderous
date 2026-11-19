@@ -1,0 +1,40 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "moon-forming-impact",
+  "name": "Moon-forming impact",
+  "group": "Self-gravity",
+  "blurb": "The proto-Earth struck by Theia, a body near the mass of Mars, at the speed it falls from far away and at 45 degrees: the canonical giant impact (Canup 2004). Both are iron-alloy cores under rock mantles with ANEOS equations of state. Rock from both is thrown into orbit; the Moon gathers from that disk. Lengths in Earth radii, masses in Earth masses; a time unit is 13.4 minutes, so a day is 107.",
+  "extends": "planet",
+  "variant": "Earth and Theia",
+  "family": "giant-impact",
+  "familyName": "Giant impact",
+  "view": { "field": 0, "log": true, "mode": "projection", "axis": 2 },
+  "domain": { "box": 16 },
+  "parts": [
+    { "kind": "star", "id": "earth", "type": "planet", "mass": 0.9, "material": "pyrolite", "coreMaterial": "fe85si15", "coreFraction": 0.3, "surfaceT": 2000 },
+    { "kind": "star", "id": "theia", "type": "planet", "mass": 0.12, "material": "pyrolite", "coreMaterial": "fe85si15", "coreFraction": 0.3, "surfaceT": 2000 },
+    { "kind": "orbit", "id": "orbit", "of": ["earth", "theia"], "type": "collision", "impact": 0.5, "starts": 2 }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 5, "tDyn": 4 },
+  "featured": [
+    {
+      "path": "parts.1.mass",
+      "id": "theia",
+      "label": "Theia’s mass (M⊕)",
+      "tip": "The impactor’s mass, in Earth masses: 0.11 is Mars. Changing it starts the run again",
+      "min": 0.02,
+      "max": 0.9,
+      "factor": 1.25
+    },
+    {
+      "path": "parts.2.impact",
+      "id": "b",
+      "label": "Impact parameter",
+      "tip": "Pericenter distance of the parabolic orbit over the sum of the two radii, which is the square of the sine of the angle at which they touch: 0 is head-on, 0.5 is 45 degrees, 1 just grazes. Changing it starts the run again",
+      "min": 0,
+      "max": 1.2,
+      "step": 0.05
+    }
+  ]
+}

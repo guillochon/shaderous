@@ -76,6 +76,7 @@ export const API_METHODS: ApiMethod[] = [
   { name: 'pause', summary: 'Stop the page’s own loop from stepping the run.', args: [], changesRun: true },
   { name: 'diagnostics', summary: 'Totals and extremes read back now: mass, momentum, kinetic/internal/gravitational/total energy, max Mach number, floored cells, Jeans-unresolved cells, center of mass, point masses, and the [min, max] of every field.', args: [], changesRun: false },
   { name: 'debris', summary: 'Debris energies, for problems that track them (describe: problems[].debris, e.g. tidal-disruption): the gas binned by its specific orbital energy about the point mass, both what has left the box (tallied as it left) and what is in it, a surviving self-bound core set apart, and the return rate of the bound debris to pericenter, dM/dt (Kepler).', args: [], changesRun: false },
+  { name: 'impact', summary: 'What a giant impact has left (3D runs with gravity, e.g. moon-forming-impact): the gas sorted by the Kepler orbit each cell is on about the densest body into the planet (pericenter inside it), the disk around it and what escapes, with each part’s mass, the share of it that is each species and the mean dye, the disk’s angular momentum, and the mass of the moon the disk would gather into.', args: [], changesRun: false },
   { name: 'stats', summary: 'Least, greatest and volume-weighted mean of each variable over the box (rho, press, vel1-3, r0 and species mass fractions).', args: [], changesRun: false },
   {
     name: 'slice',

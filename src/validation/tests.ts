@@ -46,6 +46,7 @@ import { setMhdScratchBytes } from '../mhd/amr_mhd';
 import { BS, PAD as PAD_BLOCK } from '../amr/tree';
 import { FRAME_TESTS } from './frames';
 import { cavityError, GHIA_RE100, LIQUID_TESTS } from './liquid';
+import { ANEOS_TESTS } from './aneos';
 import { PSPLIT_TESTS } from './psplit';
 import { RAD_TESTS } from './radiation';
 
@@ -4105,6 +4106,8 @@ export const TESTS: TestDef[] = [
   ...FRAME_TESTS,
   // The weakly compressible liquid (validation/liquid.ts).
   ...LIQUID_TESTS,
+  // ANEOS materials and planets (validation/aneos.ts).
+  ...ANEOS_TESTS,
   // Implicit pressure (validation/psplit.ts).
   ...PSPLIT_TESTS,
   // Radiation transport (validation/radiation.ts).

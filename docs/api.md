@@ -122,7 +122,8 @@ by `npm run gen`.
 | `amr` | The run | Levels of refinement, 0 to 5. With n but no amr, the grid is uniform |
 | `tend` | Settings | End time (inf for none) |
 | `sym` | Settings | Mirror symmetry: none, x, y, z, xy, xz, yz, xyz. Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost |
-| `eos` | Settings | Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz, hhe. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `eos` | Settings | Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz, hhe, aneos. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `material` | Settings | Material: 0, 1, 2, 3. The material of the ANEOS equation of state: rock, iron alloy or water, each from its published tables. A run whose two species are materials (a planet with a core) takes them instead |
 | `gamma` | Settings | gamma. Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
 | `K` | Settings | K (p = K rho^gamma). Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
 | `lc` | Settings | Sound speed. The liquid’s sound speed c₀, a constant: p = c₀² (ρ - ρ₀). It is chosen, not physical: ten times the fastest flow keeps the density within 1% of ρ₀ (a Mach number of 0.1), and the step shrinks in proportion as it grows |
@@ -430,6 +431,30 @@ Run a few dynamical times past pericenter before reading it, so that the energie
 stopped changing. Until then the core is not settled either: while the star is still
 stretched, the gas that will fall back onto it can read as unbound. The census reads the grid
 once per iteration, which takes milliseconds.
+
+### `impact() → object`
+
+What a giant impact has left, for 3D runs with gravity (the `moon-forming-impact` preset). The
+gas is sorted as the moon-forming impact calculations sort it (Canup 2004; numerics.md section
+25): about the densest body, every cell is on the Kepler orbit its position and velocity give
+it around that body's mass, and it is escaping if the orbit is unbound, the planet's if the
+orbit's pericenter is inside the planet, and the disk's otherwise. The planet's mass and radius
+are taken again from what fell to it until they settle. Gas thinner than 1e-7 of the densest is
+left out.
+
+| Field | |
+|---|---|
+| `planet` | `mass`, `radius` (that of a body of its mass at `meanDensity`), `center`, `velocity`, and `shares` |
+| `disk` | `mass`, `angularMomentum` (about the planet, along the whole system's), `overRoche` (that over the angular momentum of the disk's mass on a circular orbit at the Roche radius, 2.9 planet radii), and `shares` |
+| `escaping` | `mass` and `shares` |
+| `moon` | The mass of the moon the disk would gather into: 1.9 L / √(G M a_R) − 1.1 M_D − 1.9 M_esc, with M_esc = 0.05 M_D (Ida et al. 1997; Kokubo et al. 2000); 0 if the disk is too compact |
+| `shares` | Of that part's mass, the fraction that is each species (`fe85si15`: how much of it is iron) and its mean `dye` (the passive scalar, which tells the two bodies apart: 1 in the first and 0.5 in the second in `moon-forming-impact`) |
+| `meanDensity` | The planet's mean density as used: the Earth's, 5513 kg/m³, in code units where the run has units |
+| `units` | `time`, `mass`, `length` of a code unit in SI, or `null` |
+
+Masses are in code units: Earth masses in `moon-forming-impact`, where the Moon is 0.0123.
+While the bodies are still colliding the orbits are not Kepler's and the sorting means little;
+it settles some hours after the last large clump has fallen back.
 
 ### `stats() → { t, steps, variables }`
 

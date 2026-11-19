@@ -23,7 +23,7 @@ import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_T
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
 import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
-import { hydrogenParticles, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
+import { hydrogenParticles, materialEosParams, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
 import { compiledFrom } from './setup/compile';
 import { domainLo, gridDims, rectangular } from './domain';
@@ -416,6 +416,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
       ...defaultEosParams(),
       ...physicalEosParams(problemUnits(problem, params), problem.composition),
       ...problem.eosParams,
+      ...materialEosParams(problem.species),
       ...(problem.cosmology ? { comovingA3: problem.cosmology.aStart ** 3 } : {}),
     },
     riemann: 'hllc',
@@ -486,7 +487,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
 export function unitConstants(c: SimConfig): void {
   const units = problemUnits(c.problem, c.params);
   const comp = c.problem.composition;
-  Object.assign(c.eosParams, physicalEosParams(units, comp), c.problem.eosParams);
+  Object.assign(c.eosParams, physicalEosParams(units, comp), c.problem.eosParams, materialEosParams(c.problem.species));
   const oldC = c.radC;
   c.radC = c.problem.radC ?? codeLightSpeed(units);
   c.radChat = c.radChat >= oldC ? c.radC : Math.min(c.radChat, c.radC);
@@ -686,7 +687,7 @@ export function cosmologyUnsupported(c: SimConfig): string | null {
   if (![...c.bcLo, ...c.bcHi].every((b) => b === PERIODIC)) return 'comoving coordinates need a periodic box';
   if (c.gravity !== 'off' && c.gravity !== 'periodic') return 'comoving coordinates take periodic self-gravity or none';
   if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in comoving coordinates';
-  if (c.eos === 'helmholtz' || c.eos === 'hhe') return 'the tabulated equations of state are not available in comoving coordinates';
+  if (c.eos === 'helmholtz' || c.eos === 'hhe' || c.eos === 'aneos') return 'the tabulated equations of state are not available in comoving coordinates';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in comoving coordinates';
   if (c.problem.mhd) return 'magnetic fields are not available in comoving coordinates yet';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available in comoving coordinates (each block would expand by its own a)';

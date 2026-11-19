@@ -1,0 +1,56 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "planet",
+  "name": "Planet",
+  "group": "Self-gravity",
+  "blurb": "An Earth: an iron-alloy core under a rock mantle, each along its adiabat from a 2000 K surface, held up against its own gravity by the ANEOS equations of state of the two materials. Lengths in Earth radii, masses in Earth masses; a time unit is 13.4 minutes.",
+  "physics": {
+    "eos": "aneos",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "isolated",
+    "G": "units",
+    "species": ["pyrolite", "fe85si15"],
+    "floors": { "rho": 1e-11, "p": 1e-18 },
+    "fluff": { "rho": 0.000001, "u": 1, "v": 3 }
+  },
+  "mesh": { "refineDense": 1 },
+  "background": { "rho": 1e-9, "cut": 0.0001 },
+  "view": { "field": 0, "log": true, "mode": "slice" },
+  "family": "planet",
+  "familyName": "Planet",
+  "variant": "Earth",
+  "domain": {
+    "box": 4,
+    "bc": { "lo": [3, 3, 3], "hi": [3, 3, 3] },
+    "units": {
+      "name": "Earth",
+      "length": { "unit": "Rearth", "value": 1 },
+      "mass": { "unit": "Mearth", "value": 1 }
+    }
+  },
+  "parts": [
+    { "kind": "star", "id": "planet", "type": "planet", "mass": 1, "material": "pyrolite", "coreMaterial": "fe85si15", "coreFraction": 0.3, "surfaceT": 2000 }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 1, "tDyn": 1 },
+  "featured": [
+    {
+      "path": "parts.0.mass",
+      "id": "mass",
+      "label": "Mass (M⊕)",
+      "tip": "The planet’s mass, in Earth masses. Changing it starts the run again",
+      "min": 0.05,
+      "max": 5,
+      "factor": 1.25
+    },
+    {
+      "path": "parts.0.coreFraction",
+      "id": "core",
+      "label": "Core mass fraction",
+      "tip": "The iron core’s share of the mass (the Earth’s is 0.32, Mercury’s about 0.7). Changing it starts the run again",
+      "min": 0.05,
+      "max": 0.9,
+      "step": 0.05
+    }
+  ]
+}

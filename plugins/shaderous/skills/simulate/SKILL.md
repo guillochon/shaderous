@@ -29,7 +29,7 @@ A setup is described with the same keys as a share link (`describe` gives each o
 
 <!-- gen:link-key-list -->
 - The run: `problem`, `setup`, `dim`, `n`, `amr`
-- Settings, each an override of the preset's own: `tend`, `sym`, `eos`, `gamma`, `K`, `lc`, `lrho`, `arad`, `degrho`, `degp`, `coulomb`, `hherad`, `iont`, `ionrho`, `frho`, `fu`, `fv`, `fva`, `cool`, `crate`, `calpha`, `cheat`, `ctunit`, `ctfloor`, `rad`, `kap`, `kapa`, `kaps`, `kapk`, `kapt`, `clight`, `chat`, `clocal`, `radflux`, `rsweeps`, `nu`, `kappa`, `eta`, `drive`, `dtau`, `dkmin`, `dkmax`, `dzeta`, `dseed`, `gravity`, `G`, `vcycles`, `jfloor`, `jcells`, `fluxwork`, `refhi`, `reflo`, `refrho`, `tbins`, `riemann`, `limiter`, `cfl`, `psplit`, `pcycles`, `ptol`, `acfl`, `dampr`, `damprate`, `wb`, `bc`, `p.<id>`
+- Settings, each an override of the preset's own: `tend`, `sym`, `eos`, `material`, `gamma`, `K`, `lc`, `lrho`, `arad`, `degrho`, `degp`, `coulomb`, `hherad`, `iont`, `ionrho`, `frho`, `fu`, `fv`, `fva`, `cool`, `crate`, `calpha`, `cheat`, `ctunit`, `ctfloor`, `rad`, `kap`, `kapa`, `kaps`, `kapk`, `kapt`, `clight`, `chat`, `clocal`, `radflux`, `rsweeps`, `nu`, `kappa`, `eta`, `drive`, `dtau`, `dkmin`, `dkmax`, `dzeta`, `dseed`, `gravity`, `G`, `vcycles`, `jfloor`, `jcells`, `fluxwork`, `refhi`, `reflo`, `refrho`, `tbins`, `riemann`, `limiter`, `cfl`, `psplit`, `pcycles`, `ptol`, `acfl`, `dampr`, `damprate`, `wb`, `bc`, `p.<id>`
 - The view: `mode`, `field`, `species`, `log`, `lo`, `hi`, `axis`, `slice`, `rhocut`, `opacity`, `yaw`, `pitch`, `dist`, `tx`, `ty`, `tz`, `zoom`, `cx`, `cy`, `blocks`, `contours`, `ncont`, `fog`, `isoa`, `light`, `box`, `flines`, `nflines`, `mirror`, `cmap`, `tf`
 <!-- /gen:link-key-list -->
 
@@ -206,6 +206,7 @@ Typical sequence: `describe` → `load {setup}` → `run {until}` → `diagnosti
 | `record` | Records the run from where it is as an MP4 movie to `path`, with a color bar, axes and the status line (with the simulation time): a frame every `every` steps or near every `dt` of code time, until `until` or `frames` |
 | `load_athdf` | Starts a run from an `.athdf` file |
 | `debris` | Gives debris energies and the return rate dM/dt, for problems that track them: totals, the surviving core, the first return and the peak. `save_path` writes the full report |
+| `impact` | Gives what a giant impact has left: the masses of the planet, the disk around it and the escaping gas, what each is made of, and the moon the disk would gather into |
 | `edit` | Uses an editing tool on the run, as a person would: `name` (mass, velocity, temperature, obstacle, field, pull, source, sink, star, clear, query) and its `options` |
 | `session_log` | Summarizes what has been done to the run since it started (actions by kind, steps), and writes the full session log to `save_path` |
 | `replay` | Runs a saved session log (a file written by session_log or the page’s Save session log button) again, step for step |

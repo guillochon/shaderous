@@ -1,8 +1,36 @@
 # Plan: ANEOS materials for planetary impacts
 
-Status: proposed 2026-11-16, not built. The sources and table formats of section 3 were
-checked against the repositories and their Zenodo records on 2026-11-18, with a search for
-newer releases; section 10 marks the references that are still from memory.
+Status (2026-11-18): built, for rock and iron: the tables, the equation of state on the GPU with
+its float64 mirror, two materials in a cell, planets, the `planet` and `moon-forming-impact`
+presets and the analysis of what an impact leaves. `docs/numerics.md` section 25 is the
+description as built. Departures from the text below:
+
+- **The table holds ANEOS's pressure and energy, not its free energy** (sections 1, 2 and 4
+  say free energy). ANEOS's p and s are not the derivatives of the F it reports in the fluid
+  with ionization: they differ by 1 to 13% at 2e4 K in the iron alloy. A Hermite table of F
+  with p and s as slopes was wrong by 3% at the median there. Each material has two bicubic
+  Hermite tables with limited slopes, asinh(p / 1e9) and ln(e - E_c), and a table is 2.2 MB,
+  not "well under a megabyte".
+- **Two materials are tabulated, not solved in the shader** (section 6 planned a 2D Newton
+  iteration per mixed cell). The closure is solved in the page when a pair is first asked for
+  (1.4 s), into tables at mass fractions 1/4, 1/2 and 3/4, and a cell blends the two on either
+  side of its own. The shader reads a mixture exactly as it reads one material.
+- **The shared table module (section 7, step 3) was not built.** The ANEOS module shares the
+  Hermite basis with the white dwarf one by copy, a dozen lines; the two tables differ in
+  everything else.
+- **Planets are not settled** (section 7 said settled as stars are): their layers are not one
+  barotrope. They start on the integrated structure and ring by 3.6% in central density at 16
+  cells to the radius.
+- **Vapor fraction and entropy view fields: not built.** Nor a teaching activity.
+- **Water: the table is built and tested against ANEOS** (`water.bin`), and a planet can be
+  made of it, but no icy preset or IAPWS-95 test exists yet.
+- Tests as built: `tests/unit/aneos.test.ts`, `planet.test.ts`, `impact.test.ts`; GPU
+  `aneos-eos`. The Hugoniot test against laboratory points (section 8) is not built: the table
+  is tested against ANEOS itself, which the decks' own notebooks compare with the laboratory.
+
+Sources and table formats of section 3 were checked against the repositories and their Zenodo
+records on 2026-11-18, with a search for newer releases; section 10 marks the references that
+are still from memory.
 
 ## 1. Goal
 

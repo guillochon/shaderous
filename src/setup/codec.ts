@@ -61,7 +61,7 @@ const PROFILE: Schema = { array: 'pair', max: 32 };
 const PART_SCHEMAS: Record<string, Record<string, Schema>> = {
   mass: { gm: 'number', pos: 'vec3', vel: 'vec3', soft: 'number', sink: 'number', sinkRate: 'number', massless: 'boolean', fixed: 'boolean', onOrbit: 'boolean' },
   orbit: { of: { array: 'string', max: 2 }, type: partChoice('orbit', 'type'), q: 'number', separation: 'number', ecc: 'number', incl: 'number', retrograde: 'boolean', beta: 'number', start: 'number', impact: 'number', starts: 'number', debris: 'boolean' },
-  star: { type: partChoice('star', 'type'), n: 'number', radius: 'number', mass: 'number', rhoc: 'number', core: obj({ mass: 'number', soft: 'number' }), pos: 'vec3', vel: 'vec3', dye: 'number', X: 'fractions', field: obj({ type: partChoice('star', 'field.type'), beta: 'number', seed: 'number' }) },
+  star: { type: partChoice('star', 'type'), n: 'number', radius: 'number', mass: 'number', rhoc: 'number', core: obj({ mass: 'number', soft: 'number' }), material: partChoice('star', 'material'), coreMaterial: partChoice('star', 'coreMaterial'), coreFraction: 'number', surfaceT: 'number', pos: 'vec3', vel: 'vec3', dye: 'number', X: 'fractions', field: obj({ type: partChoice('star', 'field.type'), beta: 'number', seed: 'number' }) },
   disk: { about: { array: 'string', max: 32 }, profile: partChoice('disk', 'profile'), radial: PROFILE, vertical: PROFILE, radialFn: 'string', verticalFn: 'string', verticalIn: partChoice('disk', 'verticalIn'), rIn: 'number', rOut: 'number', sigma0: 'number', slope: 'number', cs: 'number', floor: 'number', damp: obj({ from: 'number', rate: 'number' }), loops: obj({ beta: 'number', span: 'number', count: 'int' }), stresses: 'boolean' },
   region: { shape: SHAPE, rho: 'number', p: 'number', energy: 'number', v: 'vec3', s: 'number', X: 'fractions', erad: 'number', frad: 'vec3', supersample: 'int' },
   obstacle: { shape: SHAPE },
@@ -80,7 +80,7 @@ const DOCUMENT: Record<string, Schema> = {
   domain: obj({ ndim: choice('domain.ndim'), n: 'int', amr: 'int', box: 'number', supports2d: 'boolean', symmetric: choice('domain.symmetric'), symmetricField: 'boolean', mirror: choice('domain.mirror'), geometry: choice('domain.geometry'), rMin: 'number', logR: 'boolean', bc: FACES, bc2d: FACES, wallVelocity: obj({ xlo: 'vec3', xhi: 'vec3', ylo: 'vec3', yhi: 'vec3', zlo: 'vec3', zhi: 'vec3' }), units: obj({ name: 'string', length: UNIT, mass: UNIT, density: UNIT, velocity: UNIT }) }),
   physics: obj({
     eos: choice('physics.eos'),
-    eosParams: { object: {}, open: 'number' },
+    eosParams: { object: { aneosA: choice('physics.eosParams.aneosA') }, open: 'number' },
     gravity: choice('physics.gravity'), G: { any: ['number', { enum: ['units'] }] }, gext: { any: ['vec3', obj({ down: 'number' })] },
     cooling: choice('physics.cooling'), coolParams: { object: {}, open: 'number' },
     radiation: choice('physics.radiation'), opacity: choice('physics.opacity'), opacityParams: { object: {}, open: 'number' }, radC: 'number', radChat: 'number', radLocalC: 'boolean', radSolver: choice('physics.radSolver'), radSweeps: 'int',

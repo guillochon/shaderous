@@ -23,6 +23,7 @@ export const PRESET_ORDER: readonly string[] = [
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',
   'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'second-collapse', 'zeldovich-pancake',
   'wd-collision', 'wd-collision-burning',
+  'planet', 'moon-forming-impact',
   'tidal-disruption', 'tidal-disruption-hhe', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',
   'common-envelope', 'common-envelope-ideal',
   'binary', 'mri-disk', 'shearing-wave', 'mri-box',
