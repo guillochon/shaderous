@@ -556,7 +556,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-sod',
     name: 'Implicit pressure for an ideal gas: Sod shock tube (128 cells along x)',
     criterion:
-      'At t = 0.2 the shock is within one cell of its exact position, mass and total energy are conserved to 1e-6, and the run takes under a third of the explicit scheme\'s steps; the L1 density error against the exact solution is under 0.02 at the default Courant number and under 0.013 at half of it (the explicit scheme: 0.004; the split is first order in time)',
+      'At t = 0.2 the shock is within one cell of its exact position, mass and total energy are conserved to 1e-6, and the run takes under 0.4 of the explicit scheme\'s steps (a third, before the flow\'s and the pressure\'s limits on the step were combined: psplit-moving-jump); the L1 density error against the exact solution is under 0.02 at the default Courant number and under 0.013 at half of it (the explicit scheme: 0.004; the split is first order in time)',
     async run(gpu) {
       const n = 128;
       const exact = exactRiemann({ rho: 1, u: 0, p: 1 }, { rho: 0.125, u: 0, p: 0.1 }, 1.4);
@@ -585,7 +585,7 @@ export const PSPLIT_TESTS: TestDef[] = [
         l1: implicit.l1, l1_half_courant: half.l1, l1_explicit: explicit.l1, steps: implicit.steps, steps_half_courant: half.steps, steps_explicit: explicit.steps,
         shock_error_cells: implicit.shock * n, shock_error_cells_half_courant: half.shock * n, mass_drift: implicit.mass, energy_drift: implicit.etot,
       };
-      const pass = implicit.shock < 1 / n && half.shock < 1 / n && implicit.mass < 1e-6 && implicit.etot < 1e-6 && half.etot < 1e-6 && implicit.steps < explicit.steps / 3 && implicit.l1 < 0.02 && half.l1 < 0.013;
+      const pass = implicit.shock < 1 / n && half.shock < 1 / n && implicit.mass < 1e-6 && implicit.etot < 1e-6 && half.etot < 1e-6 && implicit.steps < 0.4 * explicit.steps && implicit.l1 < 0.02 && half.l1 < 0.013;
       return { pass, metrics: m };
     },
   },
@@ -618,6 +618,37 @@ export const PSPLIT_TESTS: TestDef[] = [
         const pass = m.l1 < 0.012 && Math.abs(steps - uniform) <= 0.1 * uniform && m.mass_drift < 1e-6 && m.energy_drift < 1e-6 && m.unconverged === 0 && m.leaf_levels === 2;
         return { pass, metrics: m };
       });
+    },
+  },
+  {
+    id: 'psplit-moving-jump',
+    name: 'Implicit pressure for an ideal gas: a hot spot in dense gas that is already moving (2D 128^2, uniform grid and blocks)',
+    criterion:
+      'Gas of density 30 and pressure 1 crossing a periodic box at 0.42, with a spot of pressure 10 in it, at the default settings (the flow alone allows a step of 0.7 cells, and the spot\'s pressure another: the step has to answer to both together). To t = 0.1, on the uniform grid and on a two-level mesh: no cell is floored, the density stays within a factor of 6 of 30 (the blast thins its middle to 9), the first step moves the gas under 0.6 of a cell, and mass is conserved to 1e-6',
+    async run(gpu) {
+      const n = 128;
+      const v = 0.42;
+      const spot: Problem = {
+        id: 'moving-jump', label: '', blurb: '', eos: 'ideal', eosParams: { gamma: 1.4 }, bcLo: all(PERIODIC), bcHi: all(PERIODIC), gravity: 'off', G: 1, box: 1, tEnd: 0.1, supports2d: true,
+        init: () => (x, y) => ({ rho: 30, vx: 0, vy: v, vz: 0, p: Math.hypot(x, y) < 0.04 ? 10 : 1, s: 0 }),
+      };
+      const m: Record<string, number> = {};
+      let pass = true;
+      const read = async (tag: string, sim: Sim | AmrSim) => {
+        const d0 = await sim.diagnostics();
+        sim.step(1);
+        const first = (await sim.diagnostics()).t;
+        const steps = 1 + (await sim.runToEnd(64, 1e6));
+        const d = await sim.diagnostics();
+        Object.assign(m, {
+          [`${tag}_first_step_cells`]: first * v * n, [`${tag}_steps`]: steps, [`${tag}_rho_min`]: d.ranges[0][0], [`${tag}_rho_max`]: d.ranges[0][1],
+          [`${tag}_floored`]: d.floored, [`${tag}_mass_drift`]: Math.abs(d.mass / d0.mass - 1),
+        });
+        pass &&= d.floored === 0 && d.ranges[0][0] > 5 && d.ranges[0][1] < 180 && first * v * n < 0.6 && Math.abs(d.mass / d0.mass - 1) < 1e-6;
+      };
+      await withSim(gpu, spot, n, { ndim: 2, pressure: 'implicit' }, (sim) => read('uniform', sim));
+      await withAmr(gpu, spot, n, { ndim: 2, amrLevels: 1, pressure: 'implicit' }, (sim) => read('blocks', sim));
+      return { pass, metrics: m };
     },
   },
   {

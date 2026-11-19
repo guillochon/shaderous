@@ -39,7 +39,7 @@ const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
-import { implicitPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -649,7 +649,7 @@ export class AmrSim implements Simulation {
         'amr timestep',
         [flatGroups(cfg.ndim, NG), sim.cap, 1], // one record per workgroup of the assembly pass
       ),
-      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1 }),
+      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', { PER_DX: 1, ...clockPressure(cfg) }),
       computePipeline(d, assemble('amr/flag.wgsl', flagSlots), 'amr flag'),
       // Point masses, in 2D and 3D: their reduction over the leaf cells and their orbit passes.
       MassSums.create(
@@ -665,7 +665,7 @@ export class AmrSim implements Simulation {
       cfg.ndim === 3 || flatGravity ? gravity() : undefined,
     ]);
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
-    sim.pClockPreview = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { PER_DX: 1, ADVANCE_DRIVE: 0 });
+    sim.pClockPreview = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { PER_DX: 1, ADVANCE_DRIVE: 0, ...clockPressure(cfg) });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     if (cfg.problem.mhd) {
       const side = sim.slotsPerSide * PAD;

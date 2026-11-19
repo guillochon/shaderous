@@ -598,6 +598,8 @@ export function liquidUnsupported(c: SimConfig): string | null {
 
 /** The run solves for its pressure each step (SimConfig.pressure). */
 export const implicitPressure = (c: SimConfig): boolean => c.pressure === 'implicit';
+/** The clock's build constants for implicit pressure: a gas with an energy combines its two step limits (hydro/clock.wgsl PSPLIT_GAS). */
+export const clockPressure = (c: SimConfig): Record<string, number> => (implicitPressure(c) && eosHasEnergy(c.eos) ? { PSPLIT_GAS: 1 } : {});
 
 /**
  * Why a run cannot take implicit pressure as configured, or null. What is built is the liquid's
@@ -1595,8 +1597,8 @@ export class Sim implements Simulation {
       await sim.buildHydro();
     })();
     [sim.pClock, sim.pClockPreview, sim.pField, sim.redBh, sim.pBhDrift, sim.pBhKick, sim.pBhEval, sim.pCensus] = await Promise.all([
-      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock'),
-      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { ADVANCE_DRIVE: 0 }),
+      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock', clockPressure(cfg)),
+      computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { ADVANCE_DRIVE: 0, ...clockPressure(cfg) }),
       computePipeline(d, assemble('gravity/field.wgsl'), 'gravity field'),
       // Point masses: their pull on the gas and what their sinks take are reduced each step, and
       // drive their orbits, their growth and (in the gas's frame) the frame's acceleration.

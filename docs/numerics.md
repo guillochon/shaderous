@@ -569,7 +569,13 @@ error of a Gresho vortex from 7% to 0.07%, and removes the ceiling of some 20 ac
 that the published form needs to stay stable below Mach 0.01. An open face carries no pressure
 gradient (the gas leaves at its own pressure and velocity). The timestep is also limited by
 the pressure's own acceleration, $`C\sqrt{\Delta x\,\rho/|\nabla p'|}`$, which is what bounds
-the first step of a shock tube at rest.
+the first step of a shock tube at rest. For a gas the flow's limit and this one act together:
+the step is also at most the solution of $`(v + a\,\Delta t)\,\Delta t = C\,\Delta x`$, with $`v`$ and $`a`$ the largest
+rate and acceleration on the grid: the correction carries the gas at the velocity the step
+ends with. Gas moving at the flow's limit that the
+pressure also pushes would otherwise cross more than a cell in a step, with no sound speed in
+the rate to cover it: a hot spot in dense gas moving at 0.7 of a cell a step emptied the cells
+ahead of it in its first step (`psplit-moving-jump`).
 
 *The solve is for the change of the pressure*, $`d = p - q`$, from the last step's solved
 pressure $`q`$, which the correction keeps: the right-hand side gains
@@ -636,7 +642,7 @@ takes 212 steps at Mach 0.1 and 0.01 (explicit low-Mach HLLC: 3 422 at Mach 0.1)
 1 and mass and energy conserved to $`3\times10^{-7}`$. At Mach 0.001 single precision shows:
 0.973 kept, the density off by up to 2% (the pressure there is the difference of an energy of
 $`10^6`$ and a kinetic energy of order 1). The Sod tube on 128 cells conserves mass and energy
-to $`10^{-7}`$ and puts the shock within 0.9 of a cell in 32 steps (explicit: 111), with an L1
+to $`10^{-7}`$ and puts the shock within 0.9 of a cell in 37 steps (explicit: 111), with an L1
 density error of 0.017 against the explicit scheme's 0.004 (0.012 at half the Courant number):
 the split is first order in time, and a shock is not what it is for.
 
@@ -716,8 +722,8 @@ coefficients it is 0.04 a cycle, as on a two-level mesh and as for the liquid. T
 follow the uniform grid: an open face carries no pressure gradient, on the root level's solver
 too, and the carried pressure's acceleration limits the step (`amr/pressure/acc_gas.wgsl`,
 in the primitives pass), without which a shock tube starts with one step far too long. The
-Sod tube on a two-level mesh that follows its waves takes 62 steps (the uniform grid at the
-same finest cell: 61) and conserves mass and energy to $`10^{-8}`$ (`psplit-amr-sod`).
+Sod tube on a two-level mesh that follows its waves takes 71 steps (the uniform grid at the
+same finest cell: 72) and conserves mass and energy to $`10^{-8}`$ (`psplit-amr-sod`).
 
 *Obstacles, inlets and a uniform field on blocks.* A face on an obstacle, in this block or the
 next, on the coarser side or among the fine faces of a refined one, takes no pressure flux and

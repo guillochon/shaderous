@@ -13,6 +13,8 @@ override PER_DX: bool = false;
 // Per-block timesteps (amr/bins_on.wgsl): the step set here is repeated for a cycle of
 // substeps, and the step just taken is banked by amr/bins_tick.wgsl instead.
 override BANK: bool = true;
+// Implicit pressure for a gas with an energy: the flow's and the acceleration's limits combine (main).
+override PSPLIT_GAS: bool = false;
 override CYCLE: f32 = 1.0;
 // Off for the preview of a step not yet taken (previewDt in sim.ts, amr/amr_sim.ts): it works
 // out a dt for the readout, and must leave the driving's amplitudes, which are shared and not
@@ -65,6 +67,15 @@ fn main() {
   // (And with implicit pressure, P.ohm.y, the pressure's own acceleration: hydro/rates.wgsl.)
   if ((P.grav_on != 0u || PER_DX || P.rot.w != 0.0 || P.sph.z > 0.0 || cylindrical() || any(P.gext.xyz != vec3<f32>(0.0)) || P.ohm.y > 0.0) && RED[1] > 0.0) {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
+    if (PSPLIT_GAS) {
+      // Implicit pressure for a gas: the two limits together. The correction carries the gas at
+      // the velocity the step ends with, v + a dt, so the step solves (v + a dt) dt = C dx.
+      // Gas moving at the flow's limit that the pressure also pushes otherwise crosses more
+      // than a cell in the step, and nothing else holds it: the explicit scheme's sound speed,
+      // which covers what a pressure jump adds in one step, is not in this rate. (A hot spot in
+      // dense gas moving at 0.7 cells a step emptied the cells ahead of it in the first step.)
+      dt = min(dt, 2.0 * P.cfl * dx / (RED[0] + sqrt(RED[0] * RED[0] + 4.0 * RED[1] * P.cfl * dx)));
+    }
   }
   // Radiation (radiation/radiation.ts): at most P.rad2.x sweeps of the sweep's own step,
   // P.rad2.y dx / (d chat), per hydro step.
