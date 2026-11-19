@@ -1800,16 +1800,20 @@ export class Sim implements Simulation {
           ),
         );
       this.gSpeciesPredict = both(this.pSpeciesPredict, (p) => ({ 2: v(this.state[p][0]), 6: v(this.speciesHalf!) }));
+      // (Where the species set the equation of state: the moments out, and the predictor's flag.)
+      const kio = (this.comp ? { 26: v(this.comp), 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>;
       this.gSpecies = both(this.pSpecies, (p, q) => ({
         4: v(this.state[1 - p][0]),
         6: v(this.species[1 - q]),
         7: this.massFlux!,
         8: v(this.speciesHalf!),
-        ...((this.comp ? { 26: v(this.comp), 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>),
+        ...kio,
       }));
       // With implicit pressure the density is final only after the correction, which writes it
       // back into parity p: the species are moved then, and scaled to that density.
-      this.gSpeciesFinal = both(this.pSpecies, (p, q) => ({ 4: v(this.state[p][0]), 6: v(this.species[1 - q]), 7: this.massFlux!, 8: v(this.speciesHalf!) }));
+      // (Built only then, and with the composition's bindings like the other: without them every
+      // uniform run whose species set the equation of state reported a WebGPU validation error.)
+      this.gSpeciesFinal = implicitPressure(c) ? both(this.pSpecies, (p, q) => ({ 4: v(this.state[p][0]), 6: v(this.species[1 - q]), 7: this.massFlux!, 8: v(this.speciesHalf!), ...kio })) : [];
     }
     this.burn?.destroy();
     this.burn = undefined;

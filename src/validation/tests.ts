@@ -4096,8 +4096,17 @@ export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {
   const t = TESTS.find((x) => x.id === id);
   if (!t) throw new Error(`unknown test: ${id}`);
   const start = performance.now();
+  // A WebGPU error no scope caught (a bind group that does not match its pipeline, say: the
+  // pass then does nothing, and the numbers may still pass) fails the test whatever it measured.
+  // (A random setup found one that every uniform run with species of two gases had reported.)
+  const gpuErrors: string[] = [];
+  const onGpuError = (e: Event) => gpuErrors.push(String((e as CustomEvent).detail).split('\n')[0].slice(0, 200));
+  globalThis.addEventListener?.('shaderous-gpu-error', onGpuError);
   try {
     const r = await t.run(gpu);
+    // (Errors are reported once the work that raised them has run.)
+    await gpu.device.queue.onSubmittedWorkDone();
+    if (gpuErrors.length) return { id: t.id, name: t.name, criterion: t.criterion, pass: false, metrics: { ...r.metrics, gpu_errors: gpuErrors.length, first_gpu_error: gpuErrors[0] }, seconds: (performance.now() - start) / 1000 };
     return { id: t.id, name: t.name, criterion: t.criterion, ...r, seconds: (performance.now() - start) / 1000 };
   } catch (e) {
     return {
@@ -4105,5 +4114,7 @@ export async function runTest(gpu: Gpu, id: string): Promise<TestResult> {
       metrics: { error: e instanceof Error ? e.message : String(e) },
       seconds: (performance.now() - start) / 1000,
     };
+  } finally {
+    globalThis.removeEventListener?.('shaderous-gpu-error', onGpuError);
   }
 }

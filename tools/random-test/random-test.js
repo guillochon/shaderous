@@ -4,7 +4,8 @@
 //   randomTest.presetSetup(seed)    a preset with random grid and solver options (link keys)
 //   randomTest.composedSetup(seed)  a setup document assembled from parts: geometry, gas
 //                                   regions, obstacles, stars, point masses and disks, fields,
-//                                   frames, cosmology, shear, mirrors, per-block timesteps
+//                                   frames, cosmology, shear, mirrors, per-block timesteps,
+//                                   radiation transport, implicit pressure
 //   randomTest.runOne(seed, opts)   load one (alternating presets and documents by seed parity
 //                                   unless opts.kind says), run it, return a row with flags
 //   randomTest.runBatch(seeds, opts) runOne over a list; the rows also land in randomTest.rows
@@ -199,6 +200,27 @@
     }
     if (rnd() < 0.3) doc.physics.riemann = pick(['hllc', 'hllclm', 'hll']);
     if (rnd() < 0.3) doc.physics.limiter = pick(['koren', 'mc', 'vanleer', 'minmod']);
+    // Radiation transport and implicit pressure, drawn last so that a seed's setup is otherwise
+    // what it was before they were added. Each only where it can run at all; the page's check
+    // turns away the rest.
+    const newer = rnd();
+    const magnetic = doc.parts.some((p) => p.kind === 'field' || p.loops);
+    const frame = doc.physics.shear || doc.physics.cosmology;
+    if (newer < 0.18 && !curved && !magnetic && !frame) {
+      doc.physics.radiation = 'm1';
+      doc.physics.opacity = 'constant';
+      doc.physics.opacityParams = { absorption: pick([0.1, 10, 1000]), scattering: pick([0, 0, 1]) };
+      doc.physics.radC = pick([100, 1000]);
+      doc.physics.radChat = pick([20, 50]);
+      if (doc.physics.eos === 'ideal') doc.physics.eosParams.arad = U(1e-3, 0.1);
+      kinds.push('rad');
+    } else if (newer < 0.32 && !curved && !frame && doc.physics.eos === 'ideal' && scenario !== 'disk' && !doc.physics.rotation && !doc.domain.mirror && !doc.physics.cooling) {
+      doc.physics.pressure = 'implicit';
+      delete doc.mesh;
+      const at = kinds.indexOf('bins');
+      if (at >= 0) kinds.splice(at, 1);
+      kinds.push('implicit');
+    }
     return { doc, kinds, geometry, ndim, scenario };
   }
 
@@ -243,6 +265,7 @@
       if (d.floored > 0.01 * cells) row.flags.push(`floored ${d.floored}`);
       if (d.maxMach > 100) row.flags.push(`mach ${d.maxMach.toPrecision(3)}`);
       if (d.magnetic && d.magnetic.divB > 1e-4) row.flags.push(`divB ${d.magnetic.divB}`);
+      if (d.radiation && !Object.values(d.radiation).every(Number.isFinite)) row.flags.push('non-finite radiation');
       if (closed && Math.abs(row.massChange) > 1e-4) row.flags.push(`mass ${row.massChange} in a closed box`);
       const errs = s.errors().slice(e0);
       if (errs.length) row.flags.push(`errors: ${errs.join(' | ').slice(0, 300)}`);
