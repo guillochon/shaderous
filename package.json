@@ -34,6 +34,7 @@
   },
   "files": [
     "dist",
+    "CHANGELOG.md",
     "tools/headless/bin.mjs",
     "tools/headless/cli.mjs",
     "tools/headless/mcp.mjs",

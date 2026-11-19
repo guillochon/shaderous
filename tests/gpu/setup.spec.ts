@@ -1,7 +1,7 @@
 // The Setup dialog and the side bar that goes with it, on a real GPU: every setting of the
 // simulation is in the dialog, the bar keeps the preset menus and a setup's featured fields,
 // and both edit one document.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 
 // Node's own modules, without its type package (the project does not install it).
 declare const Buffer: { from(text: string): never };

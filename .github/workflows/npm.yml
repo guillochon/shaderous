@@ -1,9 +1,11 @@
 name: Release
 
 # Push a tag vX.Y.Z to release: the npm package (the built page with the headless runner and the
-# MCP server: `npx shaderous`, `npx shaderous mcp`), then its listing in the MCP Registry
-# (server.json). `node tools/version.mjs X.Y.Z` sets the version in every file first; the tag
-# must match all of them. The Claude Code plugin runs the latest npm version, so it follows.
+# MCP server: `npx shaderous`, `npx shaderous mcp`), a GitHub release whose notes are the version's
+# section of CHANGELOG.md, then its listing in the MCP Registry (server.json).
+# `node tools/version.mjs X.Y.Z` sets the version in every file first; the tag must match all of
+# them, and CHANGELOG.md must have a section for it (it ships in the npm package too). The Claude
+# Code plugin runs the latest npm version, so it follows.
 #
 # Built here from a clean checkout, so nothing uncommitted reaches the package. No tokens: npm
 # trusted publishing (the package's settings name this repository and this file, with
@@ -15,7 +17,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write # the GitHub release
   id-token: write
 
 jobs:
@@ -42,9 +44,26 @@ jobs:
             test "v$(node -p "require('./package.json').version")" = "$GITHUB_REF_NAME"
           fi
 
+      # Before anything is published: a version without notes is not released.
+      - name: The changelog has this version
+        run: node tools/changelog.mjs > release-notes.md
+
       # prepack builds dist/.
       - name: Publish to npm
         run: npm publish --access public --provenance
+
+      # The notes are the changelog's section. A run started again after a later step failed finds
+      # the release there and only brings its notes up to date.
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --notes-file release-notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file release-notes.md
+          fi
 
       # The registry checks the package on npm (its mcpName), so wait until npm serves it.
       - name: Wait for npm to serve this version

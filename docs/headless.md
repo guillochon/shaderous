@@ -264,10 +264,19 @@ claude mcp add shaderous -- npx -y shaderous mcp
 { "mcpServers": { "shaderous": { "command": "npx", "args": ["-y", "shaderous", "mcp"] } } }
 ```
 
-Releases: `node tools/version.mjs X.Y.Z` sets the version in package.json, server.json and
-the plugin's manifest; commit, then push the tag `vX.Y.Z`. The
-[release workflow](../.github/workflows/npm.yml) checks that the versions agree with the tag,
-publishes the npm package, and updates the MCP Registry listing.
+### Releases
+
+1. Add a section `## X.Y.Z (YYYY-MM-DD)` to [CHANGELOG.md](../CHANGELOG.md), above the last
+   release's, saying what was added, changed and fixed (`git log vA.B.C..HEAD` lists what went
+   in). `node tools/changelog.mjs X.Y.Z` prints it back.
+2. `node tools/version.mjs X.Y.Z` sets the version in package.json, server.json and the plugin's
+   manifest, and says so if the changelog has no section for it.
+3. Commit, then push the tag `vX.Y.Z`.
+
+The [release workflow](../.github/workflows/npm.yml) checks that the versions agree with the
+tag and that the changelog has the version, publishes the npm package (CHANGELOG.md is in it),
+creates the [GitHub release](https://github.com/guillochon/shaderous/releases) with the
+changelog's section as its notes, and updates the MCP Registry listing.
 
 The server is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as
 `io.github.guillochon/shaderous` ([server.json](../server.json)); clients that browse the

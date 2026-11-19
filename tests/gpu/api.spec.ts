@@ -1,6 +1,6 @@
 // The scripting API, window.shaderous (src/ui/api.ts, docs/api.md), driven as an agent would:
 // a headless page, every call through page.evaluate.
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 import { decodeArray } from '../../src/io/arrays';
 import { besideLayout } from '../../src/render/overlays';
 

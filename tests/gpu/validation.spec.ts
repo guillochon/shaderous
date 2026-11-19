@@ -1,5 +1,5 @@
 // Runs the in-page validation suite (src/validation/tests.ts) on a real GPU.
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
 
 const TESTS = [
   'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'species', 'species-eos', 'shock-bubble', 'detonation', 'advection-accuracy', 'flux-determinism',

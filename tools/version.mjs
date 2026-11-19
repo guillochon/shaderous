@@ -37,6 +37,12 @@ for (const [file, slots] of Object.entries(FILES)) {
   }
   console.log(`${file}: ${versions.join(', ')}`);
 }
+// A release needs its notes (tools/changelog.mjs): say so now rather than when the tag is pushed.
+const version = next ?? [...seen][0];
+const changelog = readFileSync(new URL('CHANGELOG.md', root), 'utf8');
+if (!changelog.split('\n').some((l) => new RegExp(`^## +\\[?v?${version.replace(/[.+]/g, '\\$&')}\\]?(\\s|$)`).test(l))) {
+  console.error(`CHANGELOG.md has no section for ${version} yet: the release workflow will refuse the tag without one`);
+}
 if (!next && seen.size > 1) {
   console.error(`versions differ: ${[...seen].join(', ')}`);
   process.exit(1);
