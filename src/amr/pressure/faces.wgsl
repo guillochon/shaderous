@@ -1,6 +1,12 @@
 // Face values for the source and the correction of the implicit step on blocks. Requires W1
-// (the advected state's primitives, ghosts filled: amr/assemble.wgsl), prs(), and
-// amr/pressure/common.wgsl.
+// (the advected state's primitives, ghosts filled: amr/assemble.wgsl), prs(), ap_mix() and
+// ap_mn() (below), and amr/pressure/common.wgsl.
+//
+// Time-centered (amr/pressure/theta.wgsl): a face's mass flux is theta times the one below, with
+// the pressure x = theta p' + (1 - theta) p^n, plus (1 - theta) times ap_mn(lo, hi, a), the face
+// momentum the step started from (the mean of its two cells', the coarse and the fine one at a
+// refinement face: the same bits from either side). ap_mix() is theta; the source passes 1.
+// An inlet's flux is its own; an open face's pressure term takes theta.
 //
 // A face's momentum is the mean of its two cells' (density times velocity, from the same
 // primitives whichever cell asks), its pressure the mean of their pressures, its mass flux
@@ -49,7 +55,7 @@ fn ap_face(slot: i32, l: vec3<i32>, a: i32, up: bool, pc: f32, rc: f32, dtdx: f3
   if (n.kind == 3) {
     var m = mc + kg * rc;
     if (n.only) { m = select(min(m, 0.0), max(m, 0.0), up); }
-    return vec3<f32>(0.0, m + w * select(-2.0, 2.0, up) * dtdx * pc, rc);
+    return vec3<f32>(0.0, m + ap_mix() * w * select(-2.0, 2.0, up) * dtdx * pc, rc);
   }
   if (n.kind == 0 && n.fine) {
     // The fine faces, as the fine cells form them (their cell size is half this one's).
@@ -71,8 +77,9 @@ fn ap_face(slot: i32, l: vec3<i32>, a: i32, up: bool, pc: f32, rc: f32, dtdx: f3
       let lift = AP_TWO_THIRDS * ri * ap_lift(f.slot, f.l, a);
       let pt = pg - 0.5 * blk_dx(slot) * lift;
       let ft = select(1.0, -1.0, up) * clock.dt * lift;
-      if (up) { acc += vec3<f32>(0.5 * (pt + pi), ft + ap_mass_flux(mg, mi, w * pg, w * pi, 2.0 * dtdx, kg, rc, ri), 0.5 * (rc + ri)); }
-      else { acc += vec3<f32>(0.5 * (pi + pt), ft + ap_mass_flux(mi, mg, w * pi, w * pg, 2.0 * dtdx, kg, ri, rc), 0.5 * (ri + rc)); }
+      let th = ap_mix();
+      if (up) { acc += vec3<f32>(0.5 * (pt + pi), th * (ft + ap_mass_flux(mg, mi, w * pg, w * pi, 2.0 * dtdx, kg, rc, ri)) + (1.0 - th) * ap_mn(slot, l, f.slot, f.l, a), 0.5 * (rc + ri)); }
+      else { acc += vec3<f32>(0.5 * (pi + pt), th * (ft + ap_mass_flux(mi, mg, w * pi, w * pg, 2.0 * dtdx, kg, ri, rc)) + (1.0 - th) * ap_mn(f.slot, f.l, slot, l, a), 0.5 * (ri + rc)); }
     }
     return acc / f32(nf);
   }
@@ -89,6 +96,7 @@ fn ap_face(slot: i32, l: vec3<i32>, a: i32, up: bool, pc: f32, rc: f32, dtdx: f3
   }
   let rq = rho_old(n.slot, n.l);
   let mq = ap_mom(slot, l + e, a);
-  if (up) { return vec3<f32>(0.5 * (pc + pt), ft + ap_mass_flux(mc, mq, w * pc, w * pq, dtdx, kg, rc, rq), 0.5 * (rc + rq)); }
-  return vec3<f32>(0.5 * (pt + pc), ft + ap_mass_flux(mq, mc, w * pq, w * pc, dtdx, kg, rq, rc), 0.5 * (rq + rc));
+  let th = ap_mix();
+  if (up) { return vec3<f32>(0.5 * (pc + pt), th * (ft + ap_mass_flux(mc, mq, w * pc, w * pq, dtdx, kg, rc, rq)) + (1.0 - th) * ap_mn(slot, l, n.slot, n.l, a), 0.5 * (rc + rq)); }
+  return vec3<f32>(0.5 * (pt + pc), th * (ft + ap_mass_flux(mq, mc, w * pq, w * pc, dtdx, kg, rq, rc)) + (1.0 - th) * ap_mn(n.slot, n.l, slot, l, a), 0.5 * (rq + rc));
 }

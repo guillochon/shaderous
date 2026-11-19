@@ -15,7 +15,13 @@
 // gradient of the last solve's pressure in their place: g_pgrad, the difference across the cell
 // along each axis, set by the pass (hydro/predict.wgsl). Without that gradient the faces'
 // velocities are off by half a step of the pressure force, first order in time (4.2.1).
+// Time-centered (PSPLIT_CENTER, pressure/theta.wgsl): where the step resolves sound, the half
+// step's pressure takes the compression too, weighted by 2 (1 - theta) with theta the cell's
+// (1 where theta is 1/2, none where sound is not resolved). The advected energy flux then sees
+// the pressure half way through the step: in the float64 prototype a smooth wave's error in the
+// step fell from first order to second.
 #include <psplit>
+#include "pressure/theta.wgsl"
 var<private> g_pgrad: vec3<f32>;
 
 // The half-step state `pr` of cell q moved toward first order by weight w: at w = 1 the cell as
@@ -101,7 +107,7 @@ fn predictor(q: Q, xm0: Q, xp0: Q, ym0: Q, yp0: Q, zm0: Q, zp0: Q, g: vec3<f32>,
   var acoustic = 1.0;
   if (PSPLIT) {
     if (PSPLIT_LAG) { gradp = g_pgrad; }
-    acoustic = 0.0;
+    acoustic = select(0.0, 2.0 * (1.0 - ps_theta(cs, g_dt, g_dx)), PSPLIT_CENTER);
   }
   // A non-inertial frame's velocity-dependent forces join the half kick (and, with comoving
   // coordinates, the expansion's cooling the half step's pressure).

@@ -545,7 +545,8 @@ vortex, double shear layer, cylinder wake, lid-driven cavity (liquid), Gresho vo
 **Implicit pressure for the liquid.** With the pressure explicit, a liquid at Mach number
 $`M`$ takes $`1 + 1/M`$ times the steps its flow needs. The implicit step (`src/pressure/`,
 the setting *Pressure: implicit*, `psplit=implicit` in a link) takes the flow's own: advection,
-viscosity and driving are explicit as before, and the sound is taken by backward Euler,
+viscosity and driving are explicit as before, and the sound is taken implicitly. In backward
+Euler form, which the time-centered step below generalizes,
 
 ```math
 \rho' = \rho - \Delta t\,\nabla\cdot\mathbf{m}', \qquad
@@ -595,6 +596,54 @@ step is then:
    so mass and momentum are conserved to round-off. The density the explicit update advected is
    not used.
 
+*Time-centered* (`pressure/theta.wgsl`; `splitCentered` in `src/reference/psplit.ts`). Backward
+Euler damps sound it resolves (a wave at an acoustic Courant number of 0.5 lost 14% of its
+amplitude a period) and makes the whole step first order. The step's pressure force is instead
+that of $`p_\theta = \theta p' + (1-\theta)p^n`$, and the divergence its solve sees that of
+$`\theta\mathbf m' + (1-\theta)\mathbf m^n`$, with $`p^n`$ the last step's solved pressure and
+$`\mathbf m^n`$ the face momenta the step starts from. Eliminating as before,
+
+```math
+\frac{x}{\theta^2 c_0^2\Delta t^2} - \nabla^2 x
+= \frac{p(\rho)}{\theta\,c_0^2\Delta t^2} + \frac{(1-\theta)\,p^n}{\theta^2 c_0^2\Delta t^2}
+- \frac{\theta\,\nabla\cdot\mathbf m^* + (1-\theta)\,\nabla\cdot\mathbf m^n}{\theta\,\Delta t},
+\qquad x = p_\theta,
+```
+
+the same operator with $`\alpha/\theta^2`$ for $`\alpha`$: one solve a step, started from
+$`p^n`$, with the same three cycles (a larger $`\alpha`$ only helps the smoother). The correction
+takes its force from $`x`$ and the mass fluxes
+$`\theta(\bar m^*_f - \Delta t\,\partial_n x) + (1-\theta)\bar m^n_f`$, and hands
+$`p' = (x - (1-\theta)p^n)/\theta`$ on to the next step and the predictor. Each cell takes
+
+```math
+\theta = \max\big(\chi,\ \min(1,\ \tfrac12 + 0.1\,C)\big),\qquad C = \frac{c_s\Delta t}{\Delta x},
+\qquad \chi = \min\big(1,\ \tfrac12 + 4\,\Delta t\max(0, -\nabla\cdot\mathbf v)\big),
+```
+
+from its own acoustic Courant number and compression. Sound the step resolves is carried nearly
+undamped (Crank-Nicolson at $`\theta = \tfrac12`$); sound it does not resolve, $`C \ge 5`$, which
+is every flow at a low Mach number, is damped by backward Euler as before. ($`\theta = \tfrac12`$
+everywhere leaves grid-scale sound ringing: a vortex at Mach 0.03 in the float64 prototype did
+not converge in the step.) $`\chi`$ is for shocks, where Crank-Nicolson rings: with $`\theta`$
+near $`\tfrac12`$ the gas behind the Sod tube's shock overshot its speed by 40% and oscillated
+behind it; with $`\chi`$, cells a shock compresses within the step take backward Euler and the
+rest stay centered. Where the step resolves sound, the predictor's half-step pressure also takes
+the compression $`-\rho c^2\nabla\cdot\mathbf v`$, weighted by $`2(1-\theta)`$
+(`hydro/predictor.wgsl`), so the advected energy's flux sees the pressure half way through the
+step. The cost: no pass, solve or cycle more; a few more texture reads in the source, the
+correction and the predictor; 20 bytes a cell more for the liquid and 12 for a gas (the pressure
+and face momenta or velocities at the start of the step, the solved pressure).
+
+Measured in the float64 prototype (each run against the same scheme at a fortieth of the
+default step, so that only the error in the step is counted): a simple wave of amplitude 0.05 in
+gas moving at Mach 0.42 converges at second order in the step (the error falls 3.9 and 3.6 times
+a halving; backward Euler: 2.0), and its error is a sixth of backward Euler's at the default
+Courant number of 0.8 and a twelfth at 0.4. A vortex at Mach 0.03 converges at second order when the grid and the step are
+refined together (3.6 times a halving; backward Euler 2.2 times): what remains first order at a
+fixed grid is a mixed term of the step and the cell size. The Sod tube's error is first order
+in the step with either scheme, as a shock's is.
+
 For a gas whose pressure is a function of its density the mass flux has to be corrected like
 this: the published form of the method ([Kwatra et al. 2009][Kwatra2009]), which leaves the
 density as advection made it, is explicit in such a gas's pressure and unstable for it
@@ -624,13 +673,24 @@ liquid a gas has nothing that pushes a density error back (it is an entropy erro
 face also moves $`(\hat v_f - u_f)`$ times the upwind advected state. The density and the
 energy then see the divergence the solve left. In the float64 prototype that takes the density
 error of a Gresho vortex from 7% to 0.07%, and removes the ceiling of some 20 acoustic steps
-that the published form needs to stay stable below Mach 0.01. An open face carries no pressure
+that the published form needs to stay stable below Mach 0.01. Time-centered, the solve is for
+$`e = \theta(p' - q)`$, the change of the pressure the step's force is from (with $`\theta`$ the
+cell's, the operator stays symmetric:
+$`(\alpha/\theta^2)\,e - \nabla\cdot(\beta\nabla e)`$ equals the backward Euler right-hand side
+with $`\theta\nabla\cdot\mathbf v^* + (1-\theta)\nabla\cdot\mathbf v^n`$ for the divergence, over
+$`\theta`$). And the velocity that carries the mass, momentum and energy through a face, and
+that the pressure and the fields do their work on, is
+$`v_c = v^n_f + \chi_f(\hat v_f - v^n_f)`$, with $`\chi_f`$ the larger of the two cells' switches:
+the mean of the old and the corrected face velocity in smooth flow, whatever $`\theta`$, the
+corrected one in a shock. Carried on $`\hat v_f`$ alone, as backward Euler has it, the step was
+first order even where the flow is all but incompressible; with the mean, the kinetic energy a
+face's kick and pressure difference give its gas is the work they do on it. An open face carries no pressure
 gradient (the gas leaves at its own pressure and velocity). The timestep is also limited by
 the pressure's own acceleration, $`C\sqrt{\Delta x\,\rho/|\nabla p'|}`$, which is what bounds
 the first step of a shock tube at rest. For a gas the flow's limit and this one act together:
 the step is also at most the solution of $`(v + a\,\Delta t)\,\Delta t = C\,\Delta x`$, with $`v`$ and $`a`$ the largest
-rate and acceleration on the grid: the correction carries the gas at the velocity the step
-ends with. Gas moving at the flow's limit that the
+rate and acceleration on the grid: the correction carries the gas at up to the velocity the
+step ends with (in a shock; the mean of it and the starting one elsewhere). Gas moving at the flow's limit that the
 pressure also pushes would otherwise cross more than a cell in a step, with no sound speed in
 the rate to cover it: a hot spot in dense gas moving at 0.7 of a cell a step emptied the cells
 ahead of it in its first step (`psplit-moving-jump`).
@@ -676,42 +736,52 @@ toward where its field lagged it, and lost 10% of its momentum in a dynamical ti
 $`C\sqrt{\Delta x/|\mathbf g|}`$: without it the columns above took five steps a sound crossing
 and lost their balance. A settled polytrope on $`64^3`$ cells holds its central density to
 0.5% over two dynamical times in 27 steps, where the explicit scheme takes 436 and drifts 2%;
-its total energy drifts 0.8% against the explicit 0.2%, the price of steps that long with
-a first-order split (`psplit-gas-polytrope`). Collapse and other dynamic self-gravity have not
+its total energy drifts 0.8% against the explicit 0.2% (`psplit-gas-polytrope`). That is not
+the steps' length: at a half, a quarter and an eighth of the Courant number it is 0.70%, 0.60%
+and 0.53%, and the mass, 0.22% (the thin gas around the star), does not change with the step. Collapse and other dynamic self-gravity have not
 been tested with it. A star that moves is held: at 0.3 of its central sound speed, 6.4 cells
-in a dynamical time, its central density stays within 0.5%, its momentum within 0.2% and its
-energy within 0.24% (`psplit-gas-star-moving`; M4 Pro, 2026-11-19). Two limits remain. On a mesh
+in a dynamical time, its central density stays within 0.6%, its momentum within 0.2% and its
+energy within 0.4% (`psplit-gas-star-moving`; M4 Pro, 2026-11-19). Two limits remain. On a mesh
 of two levels the same star gains about 1% of its momentum in a dynamical time, as the explicit scheme does there at a
 hundredth of the size with steps a tenth as long: not looked into. And two stars 8 cells in
 radius, of a gas softer than their structure, set to collide in near-vacuum (random setup 70293)
 collapse as they move under either scheme; the explicit one stays finite through it and the
 implicit step, which is for slow flow, does not.
 
-*Species* that ride with the gas are moved after the correction, with the advective mass
-fluxes, and scaled to the corrected density: mass fractions sum to one and a uniform species
-stays uniform to round-off, and each species' total mass is kept to the order of the density's
-correction ($`2\times10^{-3}`$ in a liquid at Mach 0.1, $`10^{-7}`$ in the gas test;
-`psplit-species`), on the uniform grid and on blocks. Species that set the equation of state,
+*Species* that ride with the gas are moved after the correction and scaled to the corrected
+density: mass fractions sum to one and a uniform species stays uniform to round-off. On the
+uniform grid the correction leaves the mass fluxes of the whole step, advection and correction,
+in the update's record of them (`pressure/mf_on.wgsl`), and the species move with those: each
+species' total mass is kept to $`10^{-7}`$, in the liquid as in the gas (`psplit-species`). On
+blocks the correction does the same to each block's records of its faces' mass fluxes, which
+the species pass reads (`amr/pressure/mf_on.wgsl`): a liquid's species keep their mass to
+$`3\times10^{-7}`$ on a mesh that re-meshes as it runs. (Moved with the advective fluxes and
+scaled, a species' mass changed by the order of the density's correction: $`2\times10^{-3}`$ in
+a liquid at Mach 0.1 on the uniform grid, $`5\times10^{-4}`$ on blocks.) Species that set the equation of state,
 and burning, are refused.
 
-Measured (`psplit-gas-gresho`, `psplit-sod`): the Gresho vortex on $`64^2`$ cells to $`t = 2`$
-takes 212 steps at Mach 0.1 and 0.01 (explicit low-Mach HLLC: 3 422 at Mach 0.1) and keeps
-0.9907 of its kinetic energy (explicit: 0.9896), with the density within $`8\times10^{-4}`$ of
-1 and mass and energy conserved to $`3\times10^{-7}`$. At Mach 0.001 single precision shows:
-0.973 kept, the density off by up to 2% (the pressure there is the difference of an energy of
+Measured (`psplit-gas-gresho`, `psplit-sod`; M4 Pro, 2026-11-19, time-centered): the Gresho
+vortex on $`64^2`$ cells to $`t = 2`$ takes 219 steps at Mach 0.1 and 0.01 (explicit low-Mach
+HLLC: 3 422 at Mach 0.1) and keeps 0.9924 of its kinetic energy (backward Euler: 0.9908;
+explicit: 0.9896), with the density within $`3\times10^{-4}`$ of 1 and mass and energy
+conserved to $`10^{-7}`$. At Mach 0.001 single precision shows: 0.985 kept (backward Euler:
+0.974), the density off by up to 1.4% (2%; the pressure there is the difference of an energy of
 $`10^6`$ and a kinetic energy of order 1). The Sod tube on 128 cells conserves mass and energy
-to $`10^{-7}`$ and puts the shock within 0.9 of a cell in 37 steps (explicit: 111), with an L1
-density error of 0.017 against the explicit scheme's 0.004 (0.012 at half the Courant number):
-the split is first order in time, and a shock is not what it is for.
+to $`10^{-7}`$ and puts the shock within 0.6 of a cell in 38 steps (explicit: 111), with an L1
+density error of 0.0097 (backward Euler: 0.016 in 37 steps; explicit: 0.004), 0.0078 at half
+the Courant number (0.011). The rest is not the step's: in the prototype, at 128 cells, the
+error tends to 0.007 as the step goes to zero, the pressure's part of the flux having no
+upwinding but what backward Euler or the switch gives it. A shock is not what the step is for.
 
 Measured (`src/validation/psplit.ts`, an Apple GPU): a Gresho vortex on $`64^2`$ cells to
 $`t = 2`$ takes 212 steps at Mach 0.1, 0.01 and 0.001 alike, where the explicit scheme takes
 3 411 and 32 198 at the first two (and by its timestep's scaling ten times that again at the third), and keeps 0.9922 of its kinetic energy at each (explicit, Mach 0.1:
 0.9896), with the density within $`0.8\,M^2`$ of the reference. The Taylor-Green vortex decays
 at 1.0026 times the exact rate in 237 steps (explicit: 1.0035 in 1 837). A sound wave resolved
-at an acoustic Courant number of 0.5 returns after a period within 0.24% of a wavelength at
-0.858 of its amplitude, which is backward Euler's damping; at a Courant number of 10 it is
-damped to 0.12. The solver on its own reaches a manufactured solution to $`10^{-5}`$ in eight
+at an acoustic Courant number of 0.5 returns after a period within 0.18% of a wavelength at
+0.984 of its amplitude, in 129 steps ($`\theta = 0.55`$; backward Euler: 0.858); at a Courant
+number of 10 ($`\theta = 1`$) it is damped to 0.125, its density never above the starting
+amplitude, as before. The solver on its own reaches a manufactured solution to $`10^{-5}`$ in eight
 cycles from zero, with an obstacle and variable coefficients, cutting the residual 5 times a
 cycle in 2D.
 
@@ -780,8 +850,44 @@ coefficients it is 0.04 a cycle, as on a two-level mesh and as for the liquid. T
 follow the uniform grid: an open face carries no pressure gradient, on the root level's solver
 too, and the carried pressure's acceleration limits the step (`amr/pressure/acc_gas.wgsl`,
 in the primitives pass), without which a shock tube starts with one step far too long. The
-Sod tube on a two-level mesh that follows its waves takes 71 steps (the uniform grid at the
-same finest cell: 72) and conserves mass and energy to $`10^{-8}`$ (`psplit-amr-sod`).
+Sod tube on a two-level mesh that follows its waves takes 73 steps (the uniform grid at the
+same finest cell: 75), conserves mass and energy to $`10^{-7}`$, and its L1 density error is
+0.0061 (backward Euler: 0.0093 in 71 steps; `psplit-amr-sod`).
+
+*Time-centered on blocks* (`amr/pressure/theta.wgsl`). The uniform grid's step, with three
+things particular to the mesh, and no pass, solve or cycle more.
+
+- *A gas's theta, cell by cell.* The source writes each leaf cell's switch $`\chi`$, and every
+  pass that forms the cell's $`\theta`$ takes it from there with the cell's sound speed and
+  its own block's cell size. The solve is for $`e = \theta d`$ with $`\alpha/\theta^2`$ on the
+  diagonal, and the parents take the means of their children's $`1/(\rho c^2\theta^2)`$, so the
+  coarse levels solve the leaves' equation; the source runs before that restriction now. The
+  liquid takes one $`\theta`$ for the whole mesh, that of the finest cell it may have: with
+  $`\theta`$ varying from level to level it would enter the faces' coefficients, and the
+  coarse levels' plain operator of a liquid, $`\beta = 1`$, would solve another equation.
+- *The state the step started from.* The source keeps it, $`(\rho, \rho\mathbf v)`$ of every
+  leaf cell, for the correction (the correction writes over it). A face's starting velocity or
+  momentum is formed from its two cells, the coarse cell and the fine one at a refinement face,
+  so the two sides of every face, fine faces included, form the same bits, and mass, momentum and
+  energy stay conserved across levels.
+- *Refinement faces carry with the larger of their two cells' $`\theta`$.* There the starting
+  velocity, from the two cells' centers, is not formed as the face's own velocity is, from the
+  fine cell and its ghost, and the difference is sound that the step must damp. Carried on the
+  mean of the two, a gas vortex at Mach 0.01 across refinement boundaries kept a density error
+  of $`6\times10^{-3}`$ (backward Euler: $`3.3\times10^{-3}`$); with the larger $`\theta`$,
+  which is 1 where sound is not resolved, $`3.0\times10^{-3}`$. On the corrected velocity alone
+  at every refinement face, the Sod tube's waves, which the step resolves, were smoothed there
+  enough that the mesh stopped following them.
+
+Measured on blocks (`psplit-amr-*` and the block halves of the other tests; M4 Pro,
+2026-11-19), against backward Euler: the gas vortex keeps 0.99929 of its kinetic energy
+(0.99919) in the same 276 steps, its residual after ten steps $`6\times10^{-5}`$
+($`3\times10^{-5}`$), no solve above the tolerance; a mass moving through gas is within 0.37%
+of the explicit run's velocity at an eighth of the Courant number (1.3%); the polytrope on two
+levels holds its central density to 0.07% (0.22%) in 63 steps (62), its energy drifting 0.64%
+(0.56%); the liquid's runs at low Mach number, where $`\theta = 1`$, are as before to round-off,
+and the cylinder wake's solves end above the tolerance 0.03% of the time (0.5%). An unrefined
+mesh keeps the uniform grid's kinetic energy to $`10^{-7}`$ in the same steps.
 
 *Obstacles, inlets and a uniform field on blocks.* A face on an obstacle, in this block or the
 next, on the coarser side or among the fine faces of a refined one, takes no pressure flux and
@@ -859,7 +965,9 @@ $`4.7\times10^{-3}`$, at the refined patch's corners. Three things to know:
   (Kicked by the gas as it is at the step's two ends instead, with the usual reduction, they
   lost 2.4% at a quarter of the default Courant number and 30% at the default.) The step is
   still long for a mass that moves: at the default Courant number its velocity after a
-  crossing differs from the explicit run's by 8.5%, at a quarter of it by 1%.
+  crossing differs from the explicit run's by 2.8% (backward Euler: 7.9%), and by 1.1%, 0.82%,
+  0.47% and 0.25% at a half, a quarter, an eighth and a sixteenth of it: first order in the
+  step, in the coupling of the masses and the gas (not looked into further).
 - *The face that wraps around a periodic box* takes the two cells' pulls instead: the masses'
   potential is not periodic, and its difference to a point outside the box left 2% of the
   exchanged momentum unaccounted for whatever the step.
@@ -892,7 +1000,7 @@ energy. In 3D it runs and conserves; it has not been measured beyond that.
 Limits. The liquid and the ideal gas only, on a Cartesian grid, without sinks, cooling,
 damping zones, frames, mirror symmetry, burning or radiation transport (and the liquid without
 self-gravity or point masses); on the adaptive mesh also
-without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
+without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
@@ -2925,9 +3033,35 @@ pressure is refused with the reason (`radiationUnsupported`, `src/radiation/radi
 The equation of state must have an energy and no radiation table
 of its own: the ideal gas, gas and radiation, degenerate electrons or ionizing hydrogen, not white
 dwarf matter, hydrogen and helium, ANEOS, the liquid or a barotropic gas. The sweep is
-first order in time ([He, Wibking & Krumholz 2024][He2024]'s two-stage scheme is the upgrade).
-Radiation pressure enters as a source term the well-balanced reconstruction (§8) does not see, so
-stars held up largely by radiation are not yet in discrete balance.
+first order in time, and neither it nor the order of the sweeps and the hydro step is what
+limits the tests (below), so [He, Wibking & Krumholz 2024][He2024]'s two-stage scheme, which
+would take a second set of sweeps or halve their step, is not taken. Radiation pressure enters as
+a source term the well-balanced reconstruction (§8) does not see, so stars held up largely by
+radiation are not yet in discrete balance, and the Riemann solver sees the gas pressure's jumps
+without the radiation's that balance them (`rad-advect`, below).
+
+**What limits the accuracy** (M4 Pro, 2026-11-19). *Not the step.* The supercritical shock of
+`rad-shock` at $`\hat c = c/5`$ is the same with 4, 8 and 16 sweeps a step (hydro steps of a
+half, one and two times the default, the sweeps' own step fixed) and with the sweeps' step
+halved: the shock at 0.9612 to 0.9617 of where its speed puts it, the density behind 1.0252 to
+1.0255 times the jump's and the temperature 0.9676 to 0.9680 times. The 3 to 4% is the reduced
+speed of light in the precursor, whose cells have $`\tau_c \approx 1`$ and so
+$`r \approx 0.22`$: the radiation there diffuses at $`r c/(3\kappa\rho)`$ and the structure,
+moving across the grid, sees $`1/r`$ times its radiation's heat capacity. It falls as
+$`\hat c`$ grows (1.7%, 0.9% and 1.1% at $`c/2.5`$; 0.7%, 0.09%, 0.06% at $`c`$). The per-cell
+rule cannot give these cells more: $`r = (\hat c/c)\,\tau_c/\tau_0`$ is where the explicit
+transport's diffusion rate meets the sweep's streaming rate, so a larger $`r`$ needs a shorter
+sweep. And 16 sweeps a step give the same shock in half the hydro steps here (2 710, against
+5 419 at the default 8). *The radiation's pressure, unseen by the Riemann solver.* The pulse of
+`rad-advect` narrows by 3.4% at the default Courant number and 2.0% at half of it, first order in
+the hydro step, and the same whatever the sweeps' number or step; the same pulse with its
+radiation in the equation of state (no transport) keeps its width to 0.3%. Within the pulse the
+gas pressure is low where the radiation's is high; the hydro step sees only the gas's jumps, and
+each step moves gas toward the pulse that the sweeps' force then stops. (Giving the predictor the
+radiation's force as a half kick, as it has gravity's, moved the narrowing by 1.7% either way
+with its sign, so it is not that.) The cure is the radiation's force in the well-balanced
+reconstruction and in the update, the sweeps then giving only the rest of it: not a contained
+change, and not made.
 
 ---
 

@@ -62,7 +62,41 @@ export interface SplitConfig {
   maxIter: number;
   /** round the state to single precision after every step */
   single: boolean;
+  /**
+   * Time-centering of the pressure: the step's pressure force is that of theta p' + (1 - theta) q
+   * and the divergence the solve sees that of theta v' + (1 - theta) v^n (1: backward Euler;
+   * 1/2: Crank-Nicolson). 'auto' takes theta = min(1, 1/2 + thetaK C), C the step's acoustic
+   * Courant number. One solve a step either way.
+   */
+  theta?: number | 'auto';
+  thetaK?: number;
+  /**
+   * The predictor's half-step pressure: advected only, with the compression -rho c^2 div v too, or
+   * with the compression weighted by 2 (1 - theta), theta = min(1, 1/2 + thetaK C) the cell's (the
+   * shaders: hydro/predictor.wgsl).
+   */
+  predP?: 'advect' | 'full' | 'theta';
+  /** rho c^2 of the pressure equation: the start of the step's, or the mean of it and the advected state's */
+  rc2?: 'start' | 'mid';
+  /**
+   * A gas: the face velocity that carries mass, momentum and energy over the step (and does the
+   * pressure's work) is thc v' + (1 - thc) v^n, v' the corrected face velocity. Default: theta.
+   */
+  thetaCarry?: number;
+  /**
+   * A gas with theta set: each cell's theta and carrying fraction rise toward 1 with its
+   * compression over the step, chi = 1/2 + thetaMu dt max(0, -div v), so that a shock is taken
+   * by backward Euler (Crank-Nicolson rings behind one). theta = max(chi, 1/2 + thetaK C).
+   */
+  thetaMu?: number;
 }
+
+/**
+ * The time-centered step the shaders take (pressure/theta.wgsl): theta from each cell's acoustic
+ * Courant number and compression, the gas carried on the mean of the old and corrected face
+ * velocities, and the predictor's pressure compressed where sound is resolved.
+ */
+export const splitCentered = { theta: 'auto' as const, thetaK: 0.1, thetaCarry: 0.5, thetaMu: 4, predP: 'theta' as const };
 
 export const splitDefaults = {
   cfl: 0.4, acousticCfl: 20, rhoFloor: 1e-10, limiter: 'koren' as const, flux: 'llf' as const, pa: 'pressure' as const,
@@ -84,6 +118,8 @@ export class RefSplit {
   steps = 0;
   /** iterations of the last solve, and the largest face divergence it left, |div v| dx */
   iters = 0;
+  /** the theta of the last step */
+  theta = 1;
   private W: Float64Array;
   private nbr: Int32Array[][] = [];
   private dims: number;
@@ -138,12 +174,14 @@ export class RefSplit {
   }
 
   /** Primitives of every cell; returns the largest flow rate, signal rate and pressure acceleration. */
+  private csMax = 0;
   private primitives(): [number, number, number] {
     const { eos, rhoFloor, dx } = this.cfg;
     const [R, MX, MY, MZ, E, EI, SC] = this.U;
     const W = this.W;
     let flow = 0;
     let sound = 0;
+    this.csMax = 0;
     for (let o = 0; o < this.ncell; o++) {
       const rho = Math.max(R[o], rhoFloor);
       const v = [MX[o] / rho, MY[o] / rho, MZ[o] / rho];
@@ -160,15 +198,20 @@ export class RefSplit {
       W[w + 6] = cs;
       const f = Math.abs(v[0]) + Math.abs(v[1]) + Math.abs(v[2]);
       flow = Math.max(flow, f);
+      this.csMax = Math.max(this.csMax, cs);
       sound = Math.max(sound, f + this.dims * cs);
     }
     let acc = 0;
+    // (The time-centered step takes the last solve's pressure, as the shaders do: hydro/rates.wgsl.
+    // The state's keeps the sound the step does not resolve, damped by 0.7 a step, not wiped out.)
+    const solved = this.cfg.theta !== undefined && this.steps > 0;
+    const pr = (o: number) => (solved ? this.p[o] : W[o * 7 + 4]);
     for (let o = 0; o < this.ncell; o++) {
       let g2 = 0;
       for (let a = 0; a < 3; a++) {
         const [l, h] = [this.nbr[a][0][o], this.nbr[a][1][o]];
-        const pl = l >= 0 ? W[l * 7 + 4] : W[o * 7 + 4];
-        const ph = h >= 0 ? W[h * 7 + 4] : W[o * 7 + 4];
+        const pl = l >= 0 ? pr(l) : pr(o);
+        const ph = h >= 0 ? pr(h) : pr(o);
         g2 += ((ph - pl) / (2 * dx)) ** 2;
       }
       acc = Math.max(acc, Math.sqrt(g2) / W[o * 7]);
@@ -194,6 +237,8 @@ export class RefSplit {
     if (acc > 0) dt = Math.min(dt, c.cfl * Math.sqrt(dx / acc));
     dt = Math.min(dt, Math.max(tEnd - this.t, 0));
     this.dt = dt;
+    const th = c.theta === 'auto' ? Math.min(1, 0.5 + (c.thetaK ?? 0.1) * (dt * this.csMax) / dx) : (c.theta ?? 1);
+    this.theta = th;
     const dtdx = dt / dx;
     const h = 0.5 * dtdx;
     const lim = LIMITERS[c.limiter];
@@ -236,7 +281,8 @@ export class RefSplit {
         }
         qh[1 + d] = v[d] - h * (adv(1 + d) + gp / rho);
       }
-      qh[4] = W[w + 4] - h * adv(4);
+      const wc = c.predP === 'full' ? 1 : c.predP === 'theta' ? 2 * (1 - Math.min(1, 0.5 + ((c.thetaK ?? 0.1) * W[w + 6] * dt) / dx)) : 0;
+      qh[4] = W[w + 4] - h * (adv(4) + wc * rho * W[w + 6] ** 2 * dv);
       qh[5] = W[w + 5] - h * adv(5);
       if (!(qh[0] - 0.5 * rmin > 0)) {
         for (let n = 0; n < NQ; n++) qh[n] = W[w + n];
@@ -338,6 +384,11 @@ export class RefSplit {
     for (let o = 0; o < N; o++) {
       const w = o * 7;
       let rc2 = W[w] * W[w + 6] ** 2;
+      if (c.rc2 === 'mid' && eos.hasEnergy) {
+        const ke = (0.5 * (MX[o] ** 2 + MY[o] ** 2 + MZ[o] ** 2)) / R[o];
+        const pr = eos.pressure(R[o], E[o] - ke);
+        rc2 = 0.5 * (rc2 + R[o] * eos.soundSpeed(R[o], pr) ** 2);
+      }
       if (!eos.hasEnergy) {
         // The pressure of the advected density, and the sound speed there.
         const rho = consistent ? R[o] : W[w];
@@ -362,6 +413,8 @@ export class RefSplit {
     // momentum of the new state carries beyond the flux the density already took.
     const beta = [new Float64Array(N), new Float64Array(N), new Float64Array(N)];
     const vs = [new Float64Array(N), new Float64Array(N), new Float64Array(N)];
+    const vsA = [new Float64Array(N), new Float64Array(N), new Float64Array(N)];
+    const vsN = [new Float64Array(N), new Float64Array(N), new Float64Array(N)];
     /** an open face's own term: its ghost holds the cell's advected pressure at the face */
     const open = new Float64Array(N);
     for (let o = 0; o < N; o++)
@@ -371,15 +424,62 @@ export class RefSplit {
           const [rl, rr] = [R[o], R[nb]];
           if (consistent) {
             beta[a][o] = 1;
-            vs[a][o] = 0.5 * (MOM[a][o] + MOM[a][nb]) - FM[a][o];
+            // (theta: the face momentum is th m* + (1 - th) m^n, from the state at the start of the step)
+            const mn = W[o * 7] * W[o * 7 + 1 + a] + W[nb * 7] * W[nb * 7 + 1 + a];
+            vs[a][o] = 0.5 * th * (MOM[a][o] + MOM[a][nb]) + 0.5 * (1 - th) * mn - FM[a][o];
           } else {
             beta[a][o] = 2 / (rl + rr);
-            vs[a][o] = (MOM[a][o] + MOM[a][nb]) / (rl + rr);
+            const vn = (W[o * 7] * W[o * 7 + 1 + a] + W[nb * 7] * W[nb * 7 + 1 + a]) / (W[o * 7] + W[nb * 7]);
+            vs[a][o] = (th * (MOM[a][o] + MOM[a][nb])) / (rl + rr) + (1 - th) * vn;
+            vsA[a][o] = (MOM[a][o] + MOM[a][nb]) / (rl + rr);
+            vsN[a][o] = vn;
           }
         }
         for (let hi = 0; hi < 2; hi++) if (this.nbr[a][hi][o] === -1) open[o] += 2 * (consistent ? 1 : 1 / R[o]);
       }
     const idx2 = 1 / (dx * dx);
+    // A gas with theta set: theta and the carrying fraction cell by cell (the shaders' scheme,
+    // pressure/theta.wgsl), and the solve for e = theta (p' - q) from zero.
+    const local = !consistent && eos.hasEnergy && c.theta !== undefined;
+    const thc = new Float64Array(N).fill(th);
+    const chi = new Float64Array(N).fill(c.thetaCarry ?? th);
+    if (local && c.theta === 'auto') {
+      for (let o = 0; o < N; o++) {
+        const rho = R[o];
+        const ke = (0.5 * (MX[o] ** 2 + MY[o] ** 2 + MZ[o] ** 2)) / rho;
+        const pr = eos.pressure(rho, E[o] - ke);
+        const cs = eos.soundSpeed(rho, pr);
+        // The compression: the divergence of the advected face velocities (an open face moves at
+        // the cell's own, a wall not at all).
+        let dv = 0;
+        for (let a = 0; a < 3; a++) {
+          const own = MOM[a][o] / rho;
+          const lo = this.nbr[a][0][o];
+          const hi = this.nbr[a][1][o];
+          dv += ((hi >= 0 ? (MOM[a][o] + MOM[a][hi]) / (rho + R[hi]) : hi === -1 ? own : 0) - (lo >= 0 ? (MOM[a][lo] + MOM[a][o]) / (R[lo] + rho) : lo === -1 ? own : 0)) / dx;
+        }
+        const ch = Math.min(1, (c.thetaCarry ?? 0.5) + (c.thetaMu ?? 0) * dt * Math.max(0, -dv));
+        chi[o] = ch;
+        thc[o] = Math.min(1, Math.max(ch, 0.5 + (c.thetaK ?? 0.1) * (cs * dt) / dx));
+      }
+    }
+    // theta: (alpha / th^2) p' - div(beta grad p') = [alpha p^a - div(v_th) / dt] / th^2 + (1 - th) / th div(beta grad q)
+    const th2 = th * th;
+    const alpha0 = Float64Array.from(alpha);
+    for (let o = 0; o < N; o++) alpha[o] /= local ? thc[o] ** 2 : th2;
+    if (local) open.fill(0);
+    const q0 = Float64Array.from(this.p);
+    const lapq = new Float64Array(N);
+    for (let o = 0; o < N; o++) {
+      let l = 0;
+      for (let a = 0; a < 3; a++) {
+        const hi = this.nbr[a][1][o];
+        const lo = this.nbr[a][0][o];
+        if (hi >= 0) l += beta[a][o] * (q0[hi] - q0[o]) * idx2;
+        if (lo >= 0) l += beta[a][lo] * (q0[lo] - q0[o]) * idx2;
+      }
+      lapq[o] = l;
+    }
     const apply = (x: Float64Array, y: Float64Array) => {
       for (let o = 0; o < N; o++) {
         let acc2 = (alpha[o] + open[o] * idx2) * x[o];
@@ -402,11 +502,25 @@ export class RefSplit {
         const own = consistent ? 0 : MOM[a][o] / R[o];
         div += (hi >= 0 ? vs[a][o] : hi === -1 ? own : 0) - (lo >= 0 ? vs[a][lo] : lo === -1 ? own : 0);
       }
-      b[o] = (alpha[o] + open[o] * idx2) * pa[o] - div / (dt * dx);
+      b[o] = (alpha[o] + open[o] * idx2) * pa[o] - div / (dt * dx * th2) + ((1 - th) / th) * lapq[o];
+      if (local) {
+        // An open face is closed to the solve, and moves at the cell's own velocity.
+        let dA = 0;
+        let dN = 0;
+        for (let a = 0; a < 3; a++) {
+          const lo = this.nbr[a][0][o];
+          const hi = this.nbr[a][1][o];
+          const own = MOM[a][o] / R[o];
+          dA += (hi >= 0 ? vsA[a][o] : hi === -1 ? own : 0) - (lo >= 0 ? vsA[a][lo] : lo === -1 ? own : 0);
+          dN += (hi >= 0 ? vsN[a][o] : hi === -1 ? own : 0) - (lo >= 0 ? vsN[a][lo] : lo === -1 ? own : 0);
+        }
+        const t = thc[o];
+        b[o] = (alpha0[o] * (pa[o] - q0[o]) - (t * (dA / dx - dt * lapq[o]) + ((1 - t) * dN) / dx) / dt) / t;
+      }
       bmax = Math.max(bmax, Math.abs(div / (dt * dx)), Math.abs(alpha[o] * (pa[o] - this.p[o])));
     }
     // Conjugate gradients with the diagonal as preconditioner, started from the last pressure.
-    const x = this.p;
+    const x = local ? new Float64Array(N) : this.p;
     const r = new Float64Array(N);
     const z = new Float64Array(N);
     const d = new Float64Array(N);
@@ -461,7 +575,13 @@ export class RefSplit {
     this.iters = it;
 
     // ---- correct, with differences of face values ----
-    const P = this.p;
+    const P = new Float64Array(N);
+    for (let o = 0; o < N; o++) P[o] = th * this.p[o] + (1 - th) * q0[o];
+    if (local)
+      for (let o = 0; o < N; o++) {
+        P[o] = q0[o] + x[o];
+        this.p[o] = q0[o] + x[o] / thc[o];
+      }
     const carried = eos.hasEnergy && c.gas === 'carried';
     const S = carried ? [R, MX, MY, MZ, E].map((a) => Float64Array.from(a)) : [];
     const DQ = carried ? S.map(() => new Float64Array(N)) : [];
@@ -480,7 +600,11 @@ export class RefSplit {
           if (nb >= 0) {
             const g = (P[rr] - P[l]) / dx;
             fp[hi] = consistent ? 0.5 * (P[l] + P[rr]) : (R[rr] * P[l] + R[l] * P[rr]) / (R[l] + R[rr]);
-            fv[hi] = vs[a][l] - dt * beta[a][l] * g;
+            fv[hi] = vs[a][l] - th * dt * beta[a][l] * g;
+            if (local) {
+              const ch = Math.max(chi[l], chi[rr]);
+              fv[hi] = ch * (vsA[a][l] - dt * beta[a][l] * g) + (1 - ch) * vsN[a][l];
+            } else if (!consistent && c.thetaCarry !== undefined) fv[hi] = c.thetaCarry * (vsA[a][l] - dt * beta[a][l] * g) + (1 - c.thetaCarry) * vsN[a][l];
             if (carried) {
               const du = fv[hi] - FU[a][l];
               const donor = du > 0 ? l : rr;
@@ -488,6 +612,10 @@ export class RefSplit {
             }
           } else if (nb === -2) {
             fp[hi] = P[o];
+          } else if (local) {
+            // Open, as the shaders: the cell's own pressure and velocity.
+            fp[hi] = P[o];
+            fv[hi] = MOM[a][o] / R[o];
           } else {
             // Open: the face holds the cell's advected pressure, and the gas follows its gradient.
             fp[hi] = pa[o];

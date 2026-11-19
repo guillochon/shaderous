@@ -372,7 +372,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-acoustic',
     name: 'Implicit pressure: a sound wave resolved in time, and one that is not (2D 64^2, liquid at rest)',
     criterion:
-      'A plane wave of one wavelength across the box: at an acoustic Courant number of 0.5 it is back where it started after one period to 1% of a wavelength, with more than 70% of its amplitude; at a Courant number of 10 it is damped to under 20% of its amplitude and its density never exceeds the starting amplitude',
+      'A plane wave of one wavelength across the box: at an acoustic Courant number of 0.5 it is back where it started after one period to 0.5% of a wavelength, with more than 97% of its amplitude and no more than all of it (the time-centered step, theta = 0.55 there: backward Euler kept 86%); at a Courant number of 10 (theta = 1) it is damped to under 20% of its amplitude and its density never exceeds the starting amplitude',
     async run(gpu) {
       const n = 64;
       const a = 1e-3;
@@ -408,7 +408,7 @@ export const PSPLIT_TESTS: TestDef[] = [
       const fine = await wave(0.5);
       const coarse = await wave(10);
       const m = { resolved_shift: fine.shift, resolved_amplitude: fine.amp, resolved_steps: fine.steps, coarse_amplitude: coarse.amp, coarse_peak: coarse.peak, coarse_steps: coarse.steps };
-      return { pass: Math.abs(fine.shift) < 0.01 && fine.amp > 0.7 && fine.amp < 1.001 && coarse.amp < 0.2 && coarse.peak < 1.001, metrics: m };
+      return { pass: Math.abs(fine.shift) < 0.005 && fine.amp > 0.97 && fine.amp < 1.001 && coarse.amp < 0.2 && coarse.peak < 1.001, metrics: m };
     },
   },
   {
@@ -556,7 +556,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-sod',
     name: 'Implicit pressure for an ideal gas: Sod shock tube (128 cells along x)',
     criterion:
-      'At t = 0.2 the shock is within one cell of its exact position, mass and total energy are conserved to 1e-6, and the run takes under 0.4 of the explicit scheme\'s steps (a third, before the flow\'s and the pressure\'s limits on the step were combined: psplit-moving-jump); the L1 density error against the exact solution is under 0.02 at the default Courant number and under 0.013 at half of it (the explicit scheme: 0.004; the split is first order in time)',
+      'At t = 0.2 the shock is within one cell of its exact position, mass and total energy are conserved to 1e-6, and the run takes under 0.4 of the explicit scheme\'s steps (a third, before the flow\'s and the pressure\'s limits on the step were combined: psplit-moving-jump); the L1 density error against the exact solution is under 0.012 at the default Courant number and under 0.009 at half of it (the explicit scheme: 0.004; backward Euler for the pressure, before the step was time-centered: 0.016 and 0.011)',
     async run(gpu) {
       const n = 128;
       const exact = exactRiemann({ rho: 1, u: 0, p: 1 }, { rho: 0.125, u: 0, p: 0.1 }, 1.4);
@@ -585,7 +585,7 @@ export const PSPLIT_TESTS: TestDef[] = [
         l1: implicit.l1, l1_half_courant: half.l1, l1_explicit: explicit.l1, steps: implicit.steps, steps_half_courant: half.steps, steps_explicit: explicit.steps,
         shock_error_cells: implicit.shock * n, shock_error_cells_half_courant: half.shock * n, mass_drift: implicit.mass, energy_drift: implicit.etot,
       };
-      const pass = implicit.shock < 1 / n && half.shock < 1 / n && implicit.mass < 1e-6 && implicit.etot < 1e-6 && half.etot < 1e-6 && implicit.steps < 0.4 * explicit.steps && implicit.l1 < 0.02 && half.l1 < 0.013;
+      const pass = implicit.shock < 1 / n && half.shock < 1 / n && implicit.mass < 1e-6 && implicit.etot < 1e-6 && half.etot < 1e-6 && implicit.steps < 0.4 * explicit.steps && implicit.l1 < 0.012 && half.l1 < 0.009;
       return { pass, metrics: m };
     },
   },
@@ -593,7 +593,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-amr-sod',
     name: 'Implicit pressure for an ideal gas on the adaptive mesh: Sod shock tube (256 cells along x at the finest, 2 levels)',
     criterion:
-      'With the default refinement and timestep settings (open faces along x, the mesh following the waves): at t = 0.2 mass and total energy are conserved to 1e-6, the run takes within 10% of the uniform grid\'s steps at 256 cells (the solved pressure\'s acceleration limits the first steps on blocks as there), the volume-weighted L1 density error against the exact solution is under 0.012, and no step\'s solve ends above the tolerance',
+      'With the default refinement and timestep settings (open faces along x, the mesh following the waves): at t = 0.2 mass and total energy are conserved to 1e-6, the run takes within 10% of the uniform grid\'s steps at 256 cells (the solved pressure\'s acceleration limits the first steps on blocks as there), the volume-weighted L1 density error against the exact solution is under 0.008 (0.0093 before the step was time-centered), and no step\'s solve ends above the tolerance',
     async run(gpu) {
       const exact = exactRiemann({ rho: 1, u: 0, p: 1 }, { rho: 0.125, u: 0, p: 0.1 }, 1.4);
       const sod = problemById('sod-x');
@@ -615,7 +615,7 @@ export const PSPLIT_TESTS: TestDef[] = [
           l1: l1 / area, steps, steps_uniform: uniform, mass_drift: Math.abs(d.mass / d0.mass - 1), energy_drift: Math.abs(d.eTot / d0.eTot - 1),
           unconverged: solve.unconverged, leaf_levels: new Set(sim.tree.leaves().map((b) => b.level)).size,
         };
-        const pass = m.l1 < 0.012 && Math.abs(steps - uniform) <= 0.1 * uniform && m.mass_drift < 1e-6 && m.energy_drift < 1e-6 && m.unconverged === 0 && m.leaf_levels === 2;
+        const pass = m.l1 < 0.008 && Math.abs(steps - uniform) <= 0.1 * uniform && m.mass_drift < 1e-6 && m.energy_drift < 1e-6 && m.unconverged === 0 && m.leaf_levels === 2;
         return { pass, metrics: m };
       });
     },
@@ -724,7 +724,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-species',
     name: 'Implicit pressure with species carried by the gas (2D 64^2): a liquid vortex, and an ideal gas carrying a density bump across a periodic box',
     criterion:
-      'Three species (a disc, a uniform 0.2, the rest) are moved after the pressure correction and scaled to its density. In both runs, at the end: the mass fractions of every cell sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]; the uniform species is still 0.2 to 1e-4 everywhere; and each species\' total mass is kept to 5e-3 (the scaling is by the density\'s correction, of order the Mach number squared, so it is not round-off: 2e-3 in the liquid, 1e-7 in the gas). A species\' sharp edge can overshoot by a percent of its jump. The liquid run again on a block grid: the same sums, bounds and uniform species',
+      'Three species (a disc, a uniform 0.2, the rest) are moved after the pressure correction, with the mass fluxes of the whole step (pressure/mf_on.wgsl), and scaled to its density. In both runs, at the end: the mass fractions of every cell sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]; the uniform species is still 0.2 to 1e-4 everywhere; and each species\' total mass is kept to 1e-6 (moved with the advective mass fluxes alone, the scaling was by the density\'s correction: 2e-3 in the liquid). A species\' sharp edge can overshoot by a percent of its jump. The liquid run again on a block grid, where the correction leaves the whole step\'s mass fluxes in each block\'s records (amr/pressure/mf_on.wgsl): the same sums, bounds, uniform species and species\' masses (with the advective fluxes alone: 5e-4 of their mass)',
     async run(gpu) {
       const n = 64;
       const X = (r: number) => (r < 0.2 ? [0.7, 0.2, 0.1] : [0.1, 0.2, 0.7]);
@@ -758,12 +758,20 @@ export const PSPLIT_TESTS: TestDef[] = [
           }
           const drift = Math.max(...m1.map((v, i) => Math.abs(v / m0[i] - 1)));
           Object.assign(m, { [`${tag}_sum_error`]: sum, [`${tag}_min`]: lo, [`${tag}_max`]: hi, [`${tag}_uniform_species_error`]: flat, [`${tag}_species_mass_drift`]: drift, [`${tag}_steps`]: steps });
-          pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4 && drift < 5e-3;
+          pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4 && drift < 1e-6;
         });
       }
       // And on blocks (the liquid, 128 finest, one level of refinement allowed).
       await withAmr(gpu, liquid, 128, { ndim: 2, tEnd: 1, amrLevels: 1, ...IMPLICIT }, async (sim) => {
+        // Each species' mass: X rho dx^2 over the leaves (readLeaves and readLeafSpecies list them alike).
+        const mass = async () => {
+          const c = await sim.readLeaves();
+          const Xs = await sim.readLeafSpecies();
+          return Xs.map((x) => x.reduce((t, v, q) => t + v * c.u1[4 * q] * c.dx[q] * c.dx[q], 0));
+        };
+        const m0 = await mass();
         const steps = await sim.runToEnd(64, 1e6);
+        const m1 = await mass();
         const X = await sim.readLeafSpecies();
         let sum = 0;
         let lo = Infinity;
@@ -777,8 +785,9 @@ export const PSPLIT_TESTS: TestDef[] = [
           }
           flat = Math.max(flat, Math.abs(X[1][q] - 0.2));
         }
-        Object.assign(m, { blocks_sum_error: sum, blocks_min: lo, blocks_max: hi, blocks_uniform_species_error: flat, blocks_steps: steps });
-        pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4;
+        const drift = Math.max(...m1.map((v, i) => Math.abs(v / m0[i] - 1)));
+        Object.assign(m, { blocks_sum_error: sum, blocks_min: lo, blocks_max: hi, blocks_uniform_species_error: flat, blocks_species_mass_drift: drift, blocks_steps: steps });
+        pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4 && drift < 1e-6;
       });
       return { pass, metrics: m };
     },
@@ -933,7 +942,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-masses',
     name: 'Implicit pressure with point masses (ideal gas, 2D 128^2, uniform grid and blocks): an atmosphere at rest around one, and one moving through the gas',
     criterion:
-      'An isothermal atmosphere in balance with a softened point mass (G M = 0.2, softening 0.1, central density e^2 times the outer), between walls, over one sound crossing: on the uniform grid the largest Mach number stays under 2e-3 and no more than the explicit scheme\'s plus a tenth, in under a fifth of its steps, total energy to 1e-5 and the mass where it is to 1e-6; on a two-level mesh with the center refined, under 1e-2 (the refined patch\'s corners) and energy to 2e-5. Two masses moving at Mach 0.25 and 0.08 through uniform gas in a periodic box, to t = 1: the gas\'s mass conserved to 1e-6 and the momentum of gas and masses together to 1e-4 of what they exchanged, at the default Courant number (the masses are given the sum of the very kicks the gas was given), on the uniform grid and on a mesh refined around the wakes; and at a quarter of the default Courant number the first mass\'s velocity is within 3% of the explicit run\'s',
+      'An isothermal atmosphere in balance with a softened point mass (G M = 0.2, softening 0.1, central density e^2 times the outer), between walls, over one sound crossing: on the uniform grid the largest Mach number stays under 2e-3 and no more than the explicit scheme\'s plus a tenth, in under a fifth of its steps, total energy to 1e-5 and the mass where it is to 1e-6; on a two-level mesh with the center refined, under 1e-2 (the refined patch\'s corners) and energy to 2e-5. Two masses moving at Mach 0.25 and 0.08 through uniform gas in a periodic box, to t = 1: the gas\'s mass conserved to 1e-6 and the momentum of gas and masses together to 1e-4 of what they exchanged, at the default Courant number (the masses are given the sum of the very kicks the gas was given), on the uniform grid and on a mesh refined around the wakes; and the first mass\'s velocity is within 4% of the explicit run\'s at the default Courant number and within 1% at an eighth of it, on the uniform grid and on the mesh (backward Euler for the pressure: 8% and 1%, and 1.3% on the mesh)',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -994,7 +1003,7 @@ export const PSPLIT_TESTS: TestDef[] = [
         moving_blocks_momentum_lost: mb.lost, moving_blocks_gas_mass_drift: mb.mass,
         moving_velocity_difference: off(mi), moving_velocity_difference_quarter_courant: off(mq), moving_blocks_velocity_difference_quarter_courant: off(bq),
       });
-      pass &&= mi.lost < 1e-4 && mi.mass < 1e-6 && mb.lost < 1e-4 && mb.mass < 1e-6 && mq.lost < 1e-4 && bq.lost < 1e-4 && off(mq) < 0.03 && off(bq) < 0.03;
+      pass &&= mi.lost < 1e-4 && mi.mass < 1e-6 && mb.lost < 1e-4 && mb.mass < 1e-6 && mq.lost < 1e-4 && bq.lost < 1e-4 && off(mi) < 0.04 && off(mq) < 0.01 && off(bq) < 0.01;
       return { pass, metrics: m };
     },
   },

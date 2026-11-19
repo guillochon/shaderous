@@ -14,18 +14,27 @@
 @group(0) @binding(22) var W2: texture_3d<f32>;
 @group(0) @binding(7) var KR: texture_3d<f32>;
 @group(0) @binding(8) var KA: texture_3d<f32>;
+// The leaves' switches (amr/pressure/source_gas.wgsl): their alpha is divided by theta^2
+// (amr/pressure/theta.wgsl), which the parents' means then take too.
+@group(0) @binding(35) var CHI: texture_3d<f32>;
+#include "amr/pressure/theta.wgsl"
+
+// A leaf cell's 1 / (rho c^2 theta^2), from its advected primitives and switch.
+fn ap_ka_leaf(slot: i32, l: vec3<i32>) -> f32 {
+  let c = atl(blk_origin(slot), l);
+  let rho = abs(textureLoad(W1, c, 0).x);
+  let cs = textureLoad(W2, c, 0).y;
+  let th = ap_theta(textureLoad(CHI, c, 0).x, cs, blk_dx(slot));
+  return 1.0 / (rho * cs * cs * th * th);
+}
 
 const AP_OPEN = 0.0;
 
-// (rho, 1 / (rho c^2)) of a block's cell. (Every reader goes through here, so that each pass
+// (rho, 1 / (rho c^2 theta^2)) of a block's cell. (Every reader goes through here, so that each pass
 // that uses a coefficient binds all four textures.)
 fn ap_k(slot: i32, l: vec3<i32>) -> vec2<f32> {
   let c = atl(blk_origin(slot), l);
-  if (blk_leaf(slot)) {
-    let rho = abs(textureLoad(W1, c, 0).x);
-    let cs = textureLoad(W2, c, 0).y;
-    return vec2<f32>(rho, 1.0 / (rho * cs * cs));
-  }
+  if (blk_leaf(slot)) { return vec2<f32>(abs(textureLoad(W1, c, 0).x), ap_ka_leaf(slot, l)); }
   return vec2<f32>(textureLoad(KR, c, 0).x, textureLoad(KA, c, 0).x);
 }
 fn ap_beta(slot: i32, l: vec3<i32>, a: i32, up: bool) -> f32 {

@@ -11,9 +11,18 @@
 // state, u_f being the velocity that carried the advective flux (FU, kept by the update): the
 // density and the energy then see the divergence the solve left. In the prototype that takes a
 // vortex's density error from 7% to 0.07% and removes the need for a ceiling on the step.
+//
+// Time-centered (pressure/theta.wgsl): PRS holds e = theta (p' - q), so the faces' pressures are
+// those of p_theta = q + e, and the next step's q is p' = q + e / theta. The corrected face
+// velocity v^ is the one the step ends with; what the face carries, and the work done on it, take
+// v_c = v^n + chi_f (v^ - v^n), v^n the face velocity the step started from (PN.yzw, the cell's
+// upper faces) and chi_f the larger of the two cells' switches (CHI): 1/2 in smooth flow, where
+// the kinetic energy a face's kick and its pressure difference give its gas is then the work
+// they do on it, nothing left over for heat; toward 1 in a shock.
 #include "hydro/common.wgsl"
 #include <eos>
 #include "hydro/dual_energy.wgsl"
+#include "pressure/theta_cell.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1S: texture_3d<f32>;
@@ -26,18 +35,21 @@
 // PRS holds the solved change from it. And where their sum goes, for the next step.
 @group(0) @binding(10) var PN: texture_3d<f32>;
 @group(0) @binding(11) var PFO: texture_storage_3d<r32float, write>;
+// The cells' compression switches (pressure/source_gas.wgsl).
+@group(0) @binding(5) var CHI: texture_3d<f32>;
 
-// The new pressure of cell c, less the reference.
 @group(0) @binding(12) var G: texture_3d<f32>;   // the gravity field: (acceleration, half-step potential)
 
 #include "gravity/ext_bind.wgsl"
 #include "pressure/kick.wgsl"
 
+// The pressure of cell c the step's force is from, p_theta, less the reference.
 fn p_new(c: vec3<i32>) -> f32 {
   return textureLoad(PN, c, 0).x + textureLoad(PRS, c, 0).x;
 }
 
 #include "pressure/faces.wgsl"
+#include <psplit_mf>
 
 // What a face between a lower and an upper gas cell does: (its pressure, its corrected velocity)
 // and, in `carry`, what the corrected velocity carries beyond the advective flux: (mass,
@@ -54,7 +66,9 @@ fn gas_face(lo: vec3<i32>, hi: vec3<i32>, a: i32, dtdx: f32) -> GFace {
   let pf = P.ohm.w + (ur.x * pl + ul.x * pr) / sum;
   // (With a uniform field's kick, dt g: the face is at rest when p_R - p_L = g dx (rho_L +
   // rho_R) / 2, the balance the explicit scheme's well-balanced reconstruction holds too.)
-  let vh = (ul[a + 1] + ur[a + 1]) / sum + face_kick(lo, hi, a, clock.dt) - dtdx * (2.0 / sum) * (pr - pl);
+  let ve = (ul[a + 1] + ur[a + 1]) / sum + face_kick(lo, hi, a, clock.dt) - dtdx * (2.0 / sum) * (pr - pl);
+  let vn = textureLoad(PN, lo, 0)[a + 1];
+  let vh = vn + max(textureLoad(CHI, lo, 0).x, textureLoad(CHI, hi, 0).x) * (ve - vn);
   let du = vh - textureLoad(FU, lo, 0)[a];
   var d1 = ul;
   var d2 = textureLoad(U2S, lo, 0).xyz;
@@ -72,13 +86,15 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   g_dx = P.dx;
   let u1 = textureLoad(U1S, c, 0);
   let u2 = textureLoad(U2S, c, 0);
-  textureStore(PFO, c, vec4<f32>(p_new(c), 0.0, 0.0, 0.0));
   if (abs(u2.w) > 0.5) {
+    textureStore(PFO, c, vec4<f32>(p_new(c), 0.0, 0.0, 0.0));
     textureStore(O1, c, u1);
     textureStore(O2, c, u2);
     return;
   }
   let dtdx = clock.dt / P.dx;
+  // (No step: theta is 1/2 and e is 0.)
+  textureStore(PFO, c, vec4<f32>(textureLoad(PN, c, 0).x + textureLoad(PRS, c, 0).x / cell_theta(c, clock.dt, textureLoad(CHI, c, 0).x), 0.0, 0.0, 0.0));
   let pc = P.ohm.w + p_new(c);
   var mom = u1.yzw;
   var de = 0.0;
@@ -118,6 +134,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       kh = f.k;
       c1 += f.c1;
       c2 += f.c2;
+      mf_add(c, a, true, f.c1.x);
     }
     if (hi.kind == FK_INLET) { let q = textureLoad(U1S, hi.q, 0); fh.y = q[a + 1] / q.x; }
     // An open face: the cell's own pressure and advected velocity (pressure/source_gas.wgsl).
@@ -129,6 +146,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
       kl = f.k;
       c1 -= f.c1;
       c2 -= f.c2;
+      mf_add(c, a, false, f.c1.x);
     }
     if (lo.kind == FK_INLET) { let q = textureLoad(U1S, lo.q, 0); fl.y = q[a + 1] / q.x; }
     if (lo.kind == FK_OPEN) { fl = vec2<f32>(pc, open_mom(u1[a + 1] + kc * u1.x, false, lo.only) / u1.x); ml = fl.y; }

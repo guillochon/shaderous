@@ -1,8 +1,13 @@
 // Face values of the implicit step for a gas with an energy on blocks (the uniform grid's are in
 // pressure/correct_gas.wgsl). Requires W1, W2 (the advected state's primitives, ghosts filled),
 // PBT (the last step's solved pressure, carried with its ghosts: amr/pressure/lag_fill.wgsl), prs() (the solved change, or zero
-// for the source), FLO and FHI (the face velocities the update kept), and
+// for the source), FLO and FHI (the face velocities the update kept), ap_vc() (below), and
 // amr/pressure/common.wgsl.
+//
+// Time-centered (amr/pressure/theta.wgsl): what a face carries, and the work done on it, ride on
+// v_c = v^n + chi_f (v^ - v^n), v^ the corrected face velocity; ap_vc(lo, hi, a) of the face's
+// two cells gives (v^n, chi_f), from either side the same bits (the coarse cell and the fine
+// one at a refinement face). The source passes (0, 1): its face velocity is v^.
 //
 // Pressures here are less the reference pressure (P.ohm.w), which the correction adds back
 // where a pressure multiplies a velocity.
@@ -79,7 +84,7 @@ fn g_ghost_rho(rho_i: f32, rho_c: f32) -> f32 {
 
 // One piece of code, whichever cell asks. `uf` is the velocity that carried the advective flux,
 // dtdx dt over the cell size of the level the face belongs to.
-fn g_face(lo: GCell, hi: GCell, a: i32, uf: f32, dtdx: f32) -> GFace {
+fn g_face(lo: GCell, hi: GCell, a: i32, uf: f32, dtdx: f32, vc: vec2<f32>) -> GFace {
   let sum = lo.rho + hi.rho;
   let pf = (hi.rho * lo.p + lo.rho * hi.p) / sum;
   // The kick: the uniform field's, and the potential's difference across the face
@@ -101,7 +106,8 @@ fn g_face(lo: GCell, hi: GCell, a: i32, uf: f32, dtdx: f32) -> GFace {
       kick -= dtdx * ext_dphi(lo.x, hi.x - lo.x, 0.5 * clock.dt);
     }
   }
-  let vh = (lo.rho * lo.v[a] + hi.rho * hi.v[a]) / sum + kick - dtdx * (2.0 / sum) * (hi.p - lo.p);
+  let ve = (lo.rho * lo.v[a] + hi.rho * hi.v[a]) / sum + kick - dtdx * (2.0 / sum) * (hi.p - lo.p);
+  let vh = vc.x + vc.y * (ve - vc.x);
   let du = vh - uf;
   var d = lo;
   if (du < 0.0) { d = hi; }
@@ -147,8 +153,8 @@ fn ap_gface(slot: i32, l: vec3<i32>, a: i32, up: bool, dc: f32, dtdx: f32, solve
       var cg = g_cell(f.slot, f.l - e, ci.p + AP_TWO_THIRDS * (own.p - ci.p - own.rho * 0.5 * h * g_lift(f.slot, f.l, a)));
       cg.rho = g_ghost_rho(ci.rho, own.rho);
       var g: GFace;
-      if (up) { g = g_face(cg, ci, a, textureLoad(FLO, fo, 0)[a], 2.0 * dtdx); }
-      else { g = g_face(ci, cg, a, textureLoad(FHI, fo, 0)[a], 2.0 * dtdx); }
+      if (up) { g = g_face(cg, ci, a, textureLoad(FLO, fo, 0)[a], 2.0 * dtdx, ap_vc(slot, l, f.slot, f.l, a)); }
+      else { g = g_face(ci, cg, a, textureLoad(FHI, fo, 0)[a], 2.0 * dtdx, ap_vc(f.slot, f.l, slot, l, a)); }
       acc.pv += g.pv;
       acc.c1 += g.c1;
       acc.c2 += g.c2;
@@ -173,6 +179,6 @@ fn ap_gface(slot: i32, l: vec3<i32>, a: i32, up: bool, dc: f32, dtdx: f32, solve
   var far = g_cell(slot, l + e, pq);
   if (n.kind == 1) { far.rho = g_ghost_rho(own.rho, rho_c); }
   let co = atl(blk_origin(slot), l);
-  if (up) { return g_face(own, far, a, textureLoad(FHI, co, 0)[a], dtdx); }
-  return g_face(far, own, a, textureLoad(FLO, co, 0)[a], dtdx);
+  if (up) { return g_face(own, far, a, textureLoad(FHI, co, 0)[a], dtdx, ap_vc(slot, l, n.slot, n.l, a)); }
+  return g_face(far, own, a, textureLoad(FLO, co, 0)[a], dtdx, ap_vc(n.slot, n.l, slot, l, a));
 }
