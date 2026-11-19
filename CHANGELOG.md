@@ -5,6 +5,13 @@ What changed in each release of Shaderous. A release's section here is the body 
 [npm package](https://www.npmjs.com/package/shaderous). To cut a release, see
 [docs/headless.md](docs/headless.md#releases).
 
+## Unreleased
+
+### Fixed
+
+- The command-line runner starts `diag.jsonl` empty: a second run into the same folder appended
+  its diagnostics to the first run's.
+
 ## 0.3.0 (2026-11-19)
 
 ### Added

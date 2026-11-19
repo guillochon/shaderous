@@ -1,11 +1,11 @@
 {
   "program": "shaderous",
-  "build": "6fbf2cb (2026-11-15)",
-  "adapter": "nvidia ampere",
+  "build": "5baf183 (2026-11-19)",
+  "adapter": "apple metal-3",
   "setup": "problem=evrard&dim=3&n=128&amr=2",
   "view": {},
   "problem": "evrard",
-  "started": "2026-11-15T23:22:12.687Z",
+  "started": "2026-11-19T21:48:34.595Z",
   "command": [
     "run",
     "--problem",
@@ -25,7 +25,7 @@
     "--low-priority",
     "--quiet",
     "--out",
-    "C:\\Users\\guill\\shaderous\\paper\\paper\\figures\\data\\gravity\\evrard-adaptive-flux"
+    "/Users/jam11491/shaderous/.claude/worktrees/shaderous-accuracy-analysis-cd15af/paper/paper/figures/data/gravity/evrard-adaptive-flux"
   ],
   "outputs": [
     {
@@ -395,7 +395,7 @@
       "files": []
     }
   ],
-  "finished": "2026-11-15T23:22:24.215Z",
+  "finished": "2026-11-19T21:49:03.571Z",
   "stopped": "time",
-  "seconds": 11.527
+  "seconds": 28.976
 }

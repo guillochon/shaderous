@@ -132,3 +132,6 @@ The three accuracy branches merged (`d5a0032` self-gravity's solver guess and ha
 | Uniform sphere's potential on 2 and 3 levels | 0.027%, 0.053% (was 0.17%, 0.26%) | `amr-gravity-static` |
 | Zel'dovich pancake on blocks: density, velocity | 0.66%, 0.18% (was 6.5%, 1.0%); uniform 0.59% | `cosmo-pancake` |
 | Implicit pressure: sound wave's amplitude after a period; Sod L1; point mass's velocity against explicit | 98.4% (was 85.8%); 0.97% (1.6%), on blocks 0.61% (0.93%); 2.8% (7.9%) | `psplit-acoustic`, `psplit-sod`, `psplit-amr-sod`, `psplit-masses` |
+| Lines of WGSL and TypeScript in `src/`, and of the validation suite, at `5baf183` | 21,675 and 51,197 (quoted as about 22,000 and 51,000); 9,404 (about 9,000) | `find src -name "*.wgsl" | xargs cat | wc -l` (and `*.ts`; `src/validation/*.ts`) |
+| Validation tables: rows measured in this run | self-gravity (sphere potential, Jeans, Evrard on every grid, planet), the Zel'dovich pancake, implicit pressure | `research/validation-run-m4pro.json` |
+| Gravity figure, both panels | simulations run again at `5baf183` with `make_gravity.py --run`; panel (a)'s committed data had held two runs in each `diag.jsonl` (the runner appended), now one | `figures/data/gravity/` |

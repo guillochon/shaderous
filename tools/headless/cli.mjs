@@ -137,6 +137,9 @@ async function runOne(session, q, dir) {
   };
   const writeManifest = () => writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
   writeManifest();
+  // A run's diagnostics start empty, as its manifest does: a second run into the same folder
+  // used to append to the first one's, and a plot of the file drew both.
+  writeFileSync(path.join(dir, 'diag.jsonl'), '');
 
   const t0 = Date.now();
   let k = 0;

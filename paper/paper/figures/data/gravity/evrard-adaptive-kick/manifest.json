@@ -1,11 +1,11 @@
 {
   "program": "shaderous",
-  "build": "6fbf2cb (2026-11-15)",
-  "adapter": "nvidia ampere",
+  "build": "5baf183 (2026-11-19)",
+  "adapter": "apple metal-3",
   "setup": "problem=evrard&dim=3&n=128&amr=2&fluxwork=0",
   "view": {},
   "problem": "evrard",
-  "started": "2026-11-15T23:22:33.917Z",
+  "started": "2026-11-19T21:49:09.798Z",
   "command": [
     "run",
     "--problem",
@@ -25,7 +25,7 @@
     "--low-priority",
     "--quiet",
     "--out",
-    "C:\\Users\\guill\\shaderous\\paper\\paper\\figures\\data\\gravity\\evrard-adaptive-kick"
+    "/Users/jam11491/shaderous/.claude/worktrees/shaderous-accuracy-analysis-cd15af/paper/paper/figures/data/gravity/evrard-adaptive-kick"
   ],
   "outputs": [
     {
@@ -54,7 +54,7 @@
     },
     {
       "output": 4,
-      "t": 0.20000000298023224,
+      "t": 0.19999998807907104,
       "steps": 9,
       "files": []
     },
@@ -395,7 +395,7 @@
       "files": []
     }
   ],
-  "finished": "2026-11-15T23:22:45.058Z",
+  "finished": "2026-11-19T21:49:41.631Z",
   "stopped": "time",
-  "seconds": 11.141
+  "seconds": 31.828
 }
