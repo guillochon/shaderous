@@ -1840,3 +1840,387 @@ archivePrefix = {arXiv},
         pages = {072105},
           doi = {10.1063/1.5035489}
 }
+
+% Proposed bibliography entries for edits/aneos.py (ANEOS materials, planets, the moon-forming
+% impact). Not yet in paper/references.bib: append them there when the items that cite them are
+% applied. Each entry was rechecked on 2026-11-19 against the record named in its comment:
+% journal DOIs at api.crossref.org, Zenodo DOIs at api.datacite.org, the arXiv id at
+% export.arxiv.org and the Sandia report at osti.gov (authors, title, venue, volume, issue,
+% pages, year, version). No ADS token was available, so none carries an adsurl.
+
+% Report SC-RR-71-0714, OSTI 4208328 (authors, title and report number from OSTI). OSTI gives
+% 1974-03 as its publication date; the M-ANEOS README, whose citation this follows, and the copy
+% of the report in M-ANEOS's docs/ give 1972.
+@TECHREPORT{ThompsonLauson1972,
+       author = {{Thompson}, S.~L. and {Lauson}, H.~S.},
+        title = "{Improvements in the Chart D radiation-hydrodynamic code III: Revised analytic equations of state}",
+  institution = {Sandia National Laboratories},
+      address = {Albuquerque, NM},
+         type = {Technical Report},
+       number = {SC-RR-71-0714},
+         year = 1972,
+          url = {https://www.osti.gov/biblio/4208328}
+}
+
+% Crossref 10.1111/j.1945-5100.2007.tb01009.x.
+@ARTICLE{Melosh2007,
+       author = {{Melosh}, H.~J.},
+        title = "{A hydrocode equation of state for SiO$_2$}",
+      journal = {Meteoritics and Planetary Science},
+         year = 2007,
+       volume = {42},
+       number = {12},
+        pages = {2079-2098},
+          doi = {10.1111/j.1945-5100.2007.tb01009.x}
+}
+
+% Zenodo record 3525030 (creators, title, version 1.0, 2019-11-01).
+@MISC{ThompsonMANEOS2019,
+       author = {{Thompson}, S.~L. and {Lauson}, H.~S. and {Melosh}, H.~J. and {Collins}, G.~S. and {Stewart}, S.~T.},
+        title = "{M-ANEOS}",
+ howpublished = {Zenodo},
+         year = 2019,
+        month = nov,
+      version = {1.0},
+          doi = {10.5281/zenodo.3525030},
+          url = {https://github.com/isale-code/M-ANEOS}
+}
+
+% Crossref 10.1063/12.0000946 (nine authors) and arXiv:1910.04687.
+@INPROCEEDINGS{Stewart2020,
+       author = {{Stewart}, Sarah T. and {Davies}, Erik J. and {Duncan}, Megan S. and {Lock}, Simon J. and {Root}, Seth and {Townsend}, Joshua P. and {Kraus}, Richard G. and {Caracas}, Razvan and {Jacobsen}, Stein B.},
+        title = "{The shock physics of giant impacts: Key requirements for the equations of state}",
+    booktitle = {Shock Compression of Condensed Matter -- 2019},
+       series = {American Institute of Physics Conference Series},
+         year = 2020,
+       volume = {2272},
+          eid = {080003},
+        pages = {080003},
+          doi = {10.1063/12.0000946},
+       eprint = {1910.04687},
+archivePrefix = {arXiv},
+ primaryClass = {astro-ph.EP}
+}
+
+% Zenodo record 6968539 (creator, title, version v0.2.0, 2022-08-05).
+@MISC{StewartPyrolite2022,
+       author = {{Stewart}, Sarah T.},
+        title = "{ANEOS-PYROLITE}",
+ howpublished = {Zenodo},
+         year = 2022,
+        month = aug,
+      version = {0.2.0},
+          doi = {10.5281/zenodo.6968539},
+          url = {https://github.com/ststewart/aneos-pyrolite-2022}
+}
+
+% Zenodo record 3866550 (creator, title, 2020-05-30).
+@MISC{StewartFe85Si15_2020,
+       author = {{Stewart}, Sarah T.},
+        title = "{Equation of State Model Fe85Si15-ANEOS: Development and documentation (Version SLVTv0.2G1)}",
+ howpublished = {Zenodo},
+         year = 2020,
+        month = may,
+          doi = {10.5281/zenodo.3866550},
+          url = {https://github.com/ststewart/aneos-Fe85Si15-2020}
+}
+
+% Zenodo record 14226694, version v0.3, 2024-11-27 (the concept record 14226693 resolves to it).
+@MISC{StewartWater2024,
+       author = {{Stewart}, Sarah T.},
+        title = "{ANEOS Equation of State Model for Water}",
+ howpublished = {Zenodo},
+         year = 2024,
+        month = nov,
+      version = {0.3},
+          doi = {10.5281/zenodo.14226694},
+          url = {https://github.com/ststewart/aneos-water}
+}
+
+% Zenodo record 3478631 (nine creators, title, version v1.0.0, 2019-10-05).
+@MISC{StewartForsterite2019,
+       author = {{Stewart}, Sarah T. and {Davies}, Erik J. and {Duncan}, Megan S. and {Lock}, Simon J. and {Root}, Seth and {Townsend}, Joshua P. and {Kraus}, Richard G. and {Caracas}, Razvan and {Jacobsen}, Stein B.},
+        title = "{Equation of State Model Forsterite-ANEOS-SLVTv1.0G1: Documentation and Comparisons}",
+ howpublished = {Zenodo},
+         year = 2019,
+        month = oct,
+      version = {1.0.0},
+          doi = {10.5281/zenodo.3478631},
+          url = {https://github.com/ststewart/aneos-forsterite-2019}
+}
+
+% Zenodo record 20736272, version 1.0, 2026-06-17 (the concept record 20736271 resolves to it).
+@MISC{StewartPyaneos2026,
+       author = {{Stewart}, Sarah T.},
+        title = "{pyaneos v1.0 --- oracle-validated Python port of M-ANEOS}",
+ howpublished = {Zenodo},
+         year = 2026,
+        month = jun,
+      version = {1.0},
+          doi = {10.5281/zenodo.20736272},
+          url = {https://github.com/ImpactsWiki/pyaneos}
+}
+
+% Crossref 10.1137/0717021.
+@ARTICLE{FritschCarlson1980,
+       author = {{Fritsch}, F.~N. and {Carlson}, R.~E.},
+        title = "{Monotone Piecewise Cubic Interpolation}",
+      journal = {SIAM Journal on Numerical Analysis},
+         year = 1980,
+       volume = {17},
+       number = {2},
+        pages = {238-246},
+          doi = {10.1137/0717021}
+}
+
+% Crossref 10.1016/0031-9201(81)90046-7.
+@ARTICLE{Dziewonski1981,
+       author = {{Dziewonski}, Adam M. and {Anderson}, Don L.},
+        title = "{Preliminary reference Earth model}",
+      journal = {Physics of the Earth and Planetary Interiors},
+         year = 1981,
+       volume = {25},
+       number = {4},
+        pages = {297-356},
+          doi = {10.1016/0031-9201(81)90046-7}
+}
+
+% Crossref 10.1016/j.icarus.2003.09.028.
+@ARTICLE{Canup2004,
+       author = {{Canup}, Robin M.},
+        title = "{Simulations of a late lunar-forming impact}",
+      journal = {\icarus},
+         year = 2004,
+       volume = {168},
+       number = {2},
+        pages = {433-456},
+          doi = {10.1016/j.icarus.2003.09.028}
+}
+
+% Crossref 10.1038/38669.
+@ARTICLE{Ida1997,
+       author = {{Ida}, Shigeru and {Canup}, Robin M. and {Stewart}, Glen R.},
+        title = "{Lunar accretion from an impact-generated disk}",
+      journal = {\nat},
+         year = 1997,
+       volume = {389},
+       number = {6649},
+        pages = {353-357},
+          doi = {10.1038/38669}
+}
+
+% Crossref 10.1006/icar.2000.6496 (Crossref lists the first author only; Semantic Scholar gives
+% all three).
+@ARTICLE{Kokubo2000,
+       author = {{Kokubo}, Eiichiro and {Ida}, Shigeru and {Makino}, Junichiro},
+        title = "{Evolution of a Circumterrestrial Disk and Formation of a Single Moon}",
+      journal = {\icarus},
+         year = 2000,
+       volume = {148},
+       number = {2},
+        pages = {419-436},
+          doi = {10.1006/icar.2000.6496}
+}
+
+% Proposed bibliography entries for edits/hhe-and-cores.py (the hydrogen and helium equation of
+% state, stars with a core that is a point mass, and the problems that use them). Not yet in
+% paper/references.bib: append them there when the items that cite them are applied. Each entry
+% was checked on 2026-11-19 against the record named in its comment (Crossref by DOI; arXiv API
+% for the eprint where one exists). No ADS token was available, so none carries an adsurl.
+
+% Crossref 10.1088/0004-637X/763/1/6 (seven authors, ApJ 763, issue 1, article 6); arXiv API
+% 1206.3567, journal_ref "ApJ 763 (2013) 6". Crossref's issued date is the online date,
+% 2012-12-27; the issue is January 2013.
+@ARTICLE{Tomida2013,
+       author = {{Tomida}, Kengo and {Tomisaka}, Kohji and {Matsumoto}, Tomoaki and {Hori}, Yasunori and {Okuzumi}, Satoshi and {Machida}, Masahiro N. and {Saigo}, Kazuya},
+        title = "{Radiation Magnetohydrodynamic Simulations of Protostellar Collapse: Protostellar Core Formation}",
+      journal = {\apj},
+         year = 2013,
+        month = jan,
+       volume = {763},
+       number = {1},
+          eid = {6},
+        pages = {6},
+          doi = {10.1088/0004-637X/763/1/6},
+archivePrefix = {arXiv},
+       eprint = {1206.3567},
+ primaryClass = {astro-ph.SR}
+}
+
+% Crossref 10.1086/308439 (ApJ 531, issue 1, pages 350-365, March 2000). The arXiv API found no
+% eprint by title or by the two authors, so none is given.
+@ARTICLE{Masunaga2000,
+       author = {{Masunaga}, Hirohiko and {Inutsuka}, Shu-ichiro},
+        title = "{A Radiation Hydrodynamic Model for Protostellar Collapse. II. The Second Collapse and the Birth of a Protostar}",
+      journal = {\apj},
+         year = 2000,
+        month = mar,
+       volume = {531},
+       number = {1},
+        pages = {350-365},
+          doi = {10.1086/308439}
+}
+
+% Crossref 10.1093/mnras/145.3.271 (MNRAS 145, issue 3, pages 271-295, August 1969).
+@ARTICLE{Larson1969,
+       author = {{Larson}, R.~B.},
+        title = "{Numerical Calculations of the Dynamics of a Collapsing Proto-Star}",
+      journal = {\mnras},
+         year = 1969,
+        month = aug,
+       volume = {145},
+       number = {3},
+        pages = {271-295},
+          doi = {10.1093/mnras/145.3.271}
+}
+
+% Crossref 10.1007/s00159-013-0059-2 (19 authors, A&A Rev. 21, article 59, February 2013); arXiv
+% API 1209.4302, whose DOI field is the same.
+@ARTICLE{Ivanova2013,
+       author = {{Ivanova}, N. and {Justham}, S. and {Chen}, X. and {De Marco}, O. and {Fryer}, C.~L. and {Gaburov}, E. and {Ge}, H. and {Glebbeek}, E. and {Han}, Z. and {Li}, X. -D. and {Lu}, G. and {Marsh}, T. and {Podsiadlowski}, P. and {Potter}, A. and {Soker}, N. and {Taam}, R. and {Tauris}, T.~M. and {van den Heuvel}, E.~P.~J. and {Webbink}, R.~F.},
+        title = "{Common envelope evolution: where we stand and how we can move forward}",
+      journal = {\aapr},
+         year = 2013,
+        month = feb,
+       volume = {21},
+          eid = {59},
+        pages = {59},
+          doi = {10.1007/s00159-013-0059-2},
+archivePrefix = {arXiv},
+       eprint = {1209.4302},
+ primaryClass = {astro-ph.HE}
+}
+
+% Proposed bibliography entries for edits/implicit-pressure.py (the weakly compressible liquid
+% and implicit pressure). Not yet in paper/references.bib: append them there when the items that
+% cite them are applied. Each entry was checked on 2026-11-19 against its Crossref record (DOI
+% named in the comment): authors, title, journal, volume, issue, pages and year. No ADS token
+% was available, so none carries an adsurl.
+
+% Crossref 10.1016/j.jcp.2009.02.027.
+@ARTICLE{Kwatra2009,
+       author = {{Kwatra}, N. and {Su}, J. and {Gr{\'e}tarsson}, J.~T. and {Fedkiw}, R.},
+        title = "{A method for avoiding the acoustic time step restriction in compressible flow}",
+      journal = {Journal of Computational Physics},
+         year = 2009,
+        month = jun,
+       volume = {228},
+       number = {11},
+        pages = {4146-4161},
+          doi = {10.1016/j.jcp.2009.02.027}
+}
+
+% Crossref 10.1016/0021-9991(89)90151-4.
+@ARTICLE{Bell1989,
+       author = {{Bell}, J.~B. and {Colella}, P. and {Glaz}, H.~M.},
+        title = "{A second-order projection method for the incompressible Navier-Stokes equations}",
+      journal = {Journal of Computational Physics},
+         year = 1989,
+        month = dec,
+       volume = {85},
+       number = {2},
+        pages = {257-283},
+          doi = {10.1016/0021-9991(89)90151-4}
+}
+
+% Crossref 10.1006/jcph.1994.1034.
+@ARTICLE{Monaghan1994,
+       author = {{Monaghan}, J.~J.},
+        title = "{Simulating free surface flows with SPH}",
+      journal = {Journal of Computational Physics},
+         year = 1994,
+        month = feb,
+       volume = {110},
+       number = {2},
+        pages = {399-406},
+          doi = {10.1006/jcph.1994.1034}
+}
+
+% Proposed bibliography entries for edits/radiation.py (gray radiation transport with the M1
+% closure). Not yet in paper/references.bib: append them there when the items that cite them are
+% applied. Wibking2022 (QUOKKA) is already in references.bib and is not repeated here.
+% Each entry was checked on 2026-11-19 against the record named in its comment (Crossref by DOI,
+% and the arXiv API for the arXiv ids); no ADS token was available, so none carries an adsurl.
+
+% Crossref 10.1016/0022-4073(84)90112-2: Levermore, C.D., JQSRT 31(2), 149-160, 1984-02.
+@ARTICLE{Levermore1984,
+       author = {{Levermore}, C.~D.},
+        title = "{Relating Eddington factors to flux limiters}",
+      journal = {\jqsrt},
+         year = 1984,
+        month = feb,
+       volume = {31},
+       number = {2},
+        pages = {149-160},
+          doi = {10.1016/0022-4073(84)90112-2}
+}
+
+% Crossref 10.1088/0067-0049/206/2/21 (ApJS 206(2), article 21, 2013-06); arXiv 1306.0010
+% (authors and title agree; arXiv lists the same DOI).
+@ARTICLE{Skinner2013,
+       author = {{Skinner}, M. Aaron and {Ostriker}, Eve C.},
+        title = "{A Two-moment Radiation Hydrodynamics Module in Athena Using a Time-explicit Godunov Method}",
+      journal = {\apjs},
+         year = 2013,
+        month = jun,
+       volume = {206},
+       number = {2},
+          eid = {21},
+        pages = {21},
+          doi = {10.1088/0067-0049/206/2/21},
+archivePrefix = {arXiv},
+       eprint = {1306.0010},
+ primaryClass = {astro-ph.IM}
+}
+
+% Crossref 10.3847/1538-4365/ab007f (ApJS 241(1), article 7, 2019-02); arXiv 1806.07390
+% (authors and title agree; arXiv lists the same DOI).
+@ARTICLE{Skinner2019,
+       author = {{Skinner}, M. Aaron and {Dolence}, Joshua C. and {Burrows}, Adam and {Radice}, David and {Vartanyan}, David},
+        title = "{Fornax: A Flexible Code for Multiphysics Astrophysical Simulations}",
+      journal = {\apjs},
+         year = 2019,
+        month = feb,
+       volume = {241},
+       number = {1},
+          eid = {7},
+        pages = {7},
+          doi = {10.3847/1538-4365/ab007f},
+archivePrefix = {arXiv},
+       eprint = {1806.07390},
+ primaryClass = {astro-ph.IM}
+}
+
+% Crossref 10.1016/0022-4073(96)84524-9: JQSRT 56(3), 337-351, 1996-09. Crossref swaps the first
+% author's given and family names ("Bingjing, Su"); the author is Bingjing Su, as in the
+% companion papers of Su & Olson in Crossref (10.1016/s0306-4549(96)00100-4,
+% 10.1016/s0022-4073(98)00105-8). Note: docs/numerics.md links this paper as
+% 10.1016/0022-4073(96)00084-7, which does not resolve (doi.org returns 404).
+@ARTICLE{SuOlson1996,
+       author = {{Su}, Bingjing and {Olson}, Gordon L.},
+        title = "{Benchmark results for the non-equilibrium Marshak diffusion problem}",
+      journal = {\jqsrt},
+         year = 1996,
+        month = sep,
+       volume = {56},
+       number = {3},
+        pages = {337-351},
+          doi = {10.1016/0022-4073(96)84524-9}
+}
+
+% Crossref 10.1093/mnras/stae1244: MNRAS 531(1), 1228-1242, 2024-05; arXiv 2404.08247
+% (authors and title agree; arXiv lists the same DOI).
+@ARTICLE{He2024,
+       author = {{He}, Chong-Chong and {Wibking}, Benjamin D. and {Krumholz}, Mark R.},
+        title = "{An asymptotically correct implicit-explicit time integration scheme for finite volume radiation-hydrodynamics}",
+      journal = {\mnras},
+         year = 2024,
+        month = may,
+       volume = {531},
+       number = {1},
+        pages = {1228-1242},
+          doi = {10.1093/mnras/stae1244},
+archivePrefix = {arXiv},
+       eprint = {2404.08247},
+ primaryClass = {astro-ph.IM}
+}

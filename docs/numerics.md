@@ -2676,9 +2676,12 @@ a strong ($`10^5`$) shock tube, the Sedov-Taylor blast ([Taylor 1950][Taylor1950
 vortex, the well-balanced column, AMR versions of the shock problems, flux matching across
 levels and time bins, the sphere potential, the Jeans instability ([Jeans 1902][Jeans1902]), a
 polytrope, a cold white dwarf, the Evrard collapse ([Evrard 1988][Evrard1988]), tidal
-disruption, cooling, viscosity, conduction, sinks, binary orbits, the equations of state, HDF5
-round trips, GPU against CPU reference, the weakly compressible liquid and its implicit pressure (§9), the MHD tests of §21, and the ANEOS materials, a planet at rest and the moon-forming impact (§25). Each test's pass criterion is printed next to its
-result.
+disruption, cooling, viscosity, conduction, sinks, binary orbits, the equations of state
+(hydrogen and helium among them, with the second collapse of a first core in spherical
+coordinates), HDF5 round trips, GPU against CPU reference, the weakly compressible liquid and
+implicit pressure for the liquid and the gas (§9), the MHD tests of §21, the frames and
+coordinates of §22, radiation transport (§24), and the ANEOS materials, a planet at rest and
+the moon-forming impact (§25). Each test's pass criterion is printed next to its result.
 
 ## 24. Radiation transport
 
@@ -3126,7 +3129,7 @@ of the mass has left through the faces by t = 28.
 [He2024]: https://arxiv.org/abs/2404.08247
 [Skinner2013]: https://arxiv.org/abs/1306.0010
 [Skinner2019]: https://arxiv.org/abs/1806.07390
-[SuOlson1996]: https://doi.org/10.1016/0022-4073(96)00084-7
+[SuOlson1996]: https://doi.org/10.1016/0022-4073(96)84524-9
 [Wibking2022]: https://arxiv.org/abs/2110.01792
 [Bate1995]: https://doi.org/10.1093/mnras/277.2.362
 [Berger1984]: https://doi.org/10.1016/0021-9991(84)90073-1

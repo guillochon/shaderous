@@ -367,6 +367,52 @@ orbit inside a viscous disk, clear a cavity, and feed through streams. Discuss a
 momentum transport, the role of viscosity ($`\alpha`$ prescription), and why the cavity is about
 twice the binary's separation.
 
+### Activity 7: Where the Moon came from (a giant impact)
+
+Open the [Moon-forming impact](https://guillochon.github.io/shaderous/?problem=moon-forming-impact).
+Theia, a body near the mass of Mars, strikes the proto-Earth at 45 degrees. Both have iron
+cores under rock mantles, and the rock and iron follow measured equations of state (ANEOS), so
+they melt and vaporize where the shock heats them.
+
+1. Before running it, ask students to predict how much of Theia ends up in orbit rather than
+   in the Earth, and whether the orbiting material comes mostly from Theia or from the Earth.
+2. After a few hours of simulated time (a time unit is 13.4 minutes), type
+   `await shaderous.impact()` in the browser's console. It sorts the gas by its Kepler orbit into
+   the planet, a disk and what escapes, and estimates the mass of the moon that the disk would
+   gather into. Compare with the Moon, 0.0123 Earth masses.
+3. The `fe85si15` share of the disk is how much of it is iron. The Moon has a small iron
+   core. Discuss what the impact must do to keep the iron out of the disk, and why a coarse
+   grid puts too much in (Theia's core is only a few cells across).
+4. Change Theia's mass or the impact parameter with the sliders and repeat. Which change
+   gives a bigger disk? Relate it to the angular momentum that the impact delivers.
+
+### Activity 8: Radiation that diffuses and radiation that streams
+
+Open the [shadow of an opaque clump](https://guillochon.github.io/shaderous/?problem=radiation-shadow)
+and the [hot sphere cooling into vacuum](https://guillochon.github.io/shaderous/?problem=radiating-sphere).
+
+- In the shadow, a beam crosses thin gas and stops at a dense clump. Why is the edge of the
+  shadow sharp? What would a model in which radiation only diffuses predict behind the clump?
+- In the sphere, radiation diffuses out through opaque gas and streams away from its surface.
+  Estimate the diffusion time $`t_\text{diff} \sim \tau R / c`$ from the optical depth and
+  compare it with how fast the sphere cools.
+- Discuss what an optical depth of one means, and why the code needs a closure (M1) to treat
+  both regimes with the same two equations.
+
+### Activity 9: A vortex street in a liquid
+
+Open the [cylinder wake](https://guillochon.github.io/shaderous/?problem=cylinder-wake). A
+liquid flows past a cylinder at Reynolds number 100 and sheds vortices from alternate sides.
+
+1. Measure the shedding frequency $`f`$: count the vortices that leave one side of the
+   cylinder over a stretch of time, or read $`v_y`$ at a point behind it with the query tool at
+   several times. Compute the Strouhal number $`\mathrm{St} = f D / U`$ and compare it with the
+   value near 0.165 measured in experiments at this Reynolds number.
+2. Raise the viscosity slider until the Reynolds number $`U D / \nu`$ falls below about 47.
+   What happens to the shedding? Then lower it well below the preset's value. What changes?
+3. The liquid is slightly compressible: its sound speed is 10 times the flow speed. Lower the
+   sound speed slider and watch when compressibility starts to change the flow.
+
 ### Lab module: "Is it converged?"
 
 A two- to three-week module that teaches the most important habit in computational physics:
@@ -442,6 +488,21 @@ include changing the source, and term projects. The code is about 6,000 lines of
   the same result by recomputing fluxes instead of storing them.
 - Turn on local timesteps (`&tbins=3` with `&amr=3`) and measure the speedup on a problem with a small refined
   region and on one where refinement fills the box. Explain the difference.
+
+**Low Mach numbers.**
+- Run the [lid-driven cavity](https://guillochon.github.io/shaderous/?problem=lid-driven-cavity)
+  as a gas and as a liquid
+  ([`?problem=lid-driven-cavity-liquid`](https://guillochon.github.io/shaderous/?problem=lid-driven-cavity-liquid)).
+  Explain why an explicit scheme's step falls as the Mach number does, and how treating the
+  pressure implicitly (a Poisson-type solve each step, [numerics.md](numerics.md#9-equations-of-state))
+  removes the sound speed from the step limit. What does the solve cost, and when is it worth it?
+
+**Equations of state from tables.**
+- Compare how the white dwarf, hydrogen–helium and ANEOS tables are built
+  ([numerics.md](numerics.md#9-equations-of-state), [§25](numerics.md#25-aneos-materials-and-planets)):
+  the first two tabulate one free energy, so pressure and energy agree by construction, while
+  ANEOS's pressure and energy are tabulated separately. What does each choice guarantee? Why
+  does the temperature solve need the energy to rise with temperature between table nodes?
 
 **Resolution criteria.**
 - Collapse an isothermal cloud

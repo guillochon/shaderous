@@ -77,8 +77,17 @@ src/
                GPU memory budget, timestamp timing
   hydro/       rates, clock, predictor and update passes; riemann/ and limiters/ modules;
                dual energy, diffusion, cooling hooks, species passes
-  eos/         WGSL equation-of-state modules and their float64 mirrors (eos.ts)
+  eos/         WGSL equation-of-state modules and their float64 mirrors (eos.ts); the tables
+               of white dwarf matter, hydrogen and helium (table.ts, shared lookup) and the
+               ANEOS materials (aneos/, aneos.ts), loaded only when a run uses them (tables.ts)
   gravity/     multigrid passes, multipole boundary, half-kick corrector, point masses, sinks
+  pressure/    the implicit pressure step: its multigrid for alpha p - div(beta grad p) = b,
+               the face velocities it corrects, and their passes for the liquid and the gas
+  radiation/   gray M1 radiation transport: advection, the implicit exchange with the gas,
+               escape and diagnostics; opacity/ has the opacity modules it slots in
+  mhd/         constrained transport, HLLD, the field's passes on blocks
+  burn/        the nuclear network surrogate and its reference network
+  debris/      bound and unbound mass, and the giant-impact census (impact.ts)
   cooling/     WGSL cooling functions and their float64 mirrors
   species/     packing and bookkeeping of mass fractions
   amr/         block tree (tree.ts), atlas passes and the adaptive driver (amr_sim.ts);
@@ -150,6 +159,18 @@ Each pair has a ping and a pong copy; a step reads one and writes the other. Oth
   four composition moments (`species/mixture.ts`); hydro passes read it at binding 27, and the
   passes that write it use binding 26. The species passes also read the predictor's half-step
   state (binding 24), for how far toward first order it went where the gammas jump.
+- **Equation-of-state tables:** a tabulated equation of state reads one `rgba32float` 2D
+  texture, uploaded once per device and handed to every bind group whose shader reaches it
+  (`setSharedBinding` in `gpu/device.ts`). White dwarf matter, hydrogen and helium, and the
+  ANEOS materials all use binding 22 (`EOS_TAB`, declared in `eos/table_tex.wgsl`), since a run has only one;
+  for a pair of ANEOS materials, the mixture's levels are stacked along the texture's rows. The files are fetched only when a
+  run picks that equation of state: 2.2 MB per ANEOS material, 5.2 MB per hydrogen–helium
+  composition.
+- **Radiation:** $`(E, \mathbf{F})`$ and the gas's energy and momentum gained from it, each in
+  two parities that the advection, the implicit sweeps and the commit to the gas alternate
+  between (`radiation/passes.ts`).
+- **Implicit pressure:** per multigrid level, the pressure, right-hand side, residual and
+  coefficient textures of `pressure/multigrid.ts`, beside gravity's.
 
 On the uniform grid there are **no primitive-variable textures**. The predictor and the update
 convert the conserved state as they load it. The flux update is bound by texture fetches: with
