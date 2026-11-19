@@ -1,0 +1,12 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "common-envelope-ideal",
+  "extends": "common-envelope",
+  "variant": "Ideal gas",
+  "blurb": "The common envelope with an ideal gas of γ = 5/3 in place of hydrogen and helium: the envelope has no ionization energy to give back, so it is bound more tightly. In the frame of the center of mass.",
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 }
+  }
+}

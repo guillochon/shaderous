@@ -162,8 +162,8 @@ of central temperature against density is checked twice: as the model's adiabat 
 decades of density; the test asks for 1% and takes about three minutes).
 
 **More presets (2026-11-18).** Variants of three setups with this equation of state, each
-gas alone (`hheRad` 0): `tidal-disruption-hhe`, `common-envelope-hhe` (with `common-envelope`,
-which was the example setup and is now a preset, as its ideal-gas base) and `thermal-instability-hhe` (in
+gas alone (`hheRad` 0): `tidal-disruption-hhe`, `common-envelope` (which was the example setup; it opens with
+this equation of state, and `common-envelope-ideal` is its ideal-gas variant) and `thermal-instability-hhe` (in
 physical units: 31 pc, a hydrogen atom per cm^3, 1000 K). Checked on the GPU at 128^3 with two
 levels for two time units (the stars hold as the ideal-gas ones do, no floored cells) and the
 instability at 256^2 to t = 6. The giant with a point-mass core runs as the ideal-gas one does (greatest density within

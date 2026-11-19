@@ -24,7 +24,7 @@ export const PRESET_ORDER: readonly string[] = [
   'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'second-collapse', 'zeldovich-pancake',
   'wd-collision', 'wd-collision-burning',
   'tidal-disruption', 'tidal-disruption-hhe', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',
-  'common-envelope', 'common-envelope-hhe',
+  'common-envelope', 'common-envelope-ideal',
   'binary', 'mri-disk', 'shearing-wave', 'mri-box',
   'orszag-tang', 'mhd-blast', 'mhd-rotor', 'brio-wu', 'field-loop', 'field-loop-dense', 'alfven-wave', 'alfven-collision', 'alfven-packets', 'tearing', 'island-coalescence', 'x-point', 'driven-turbulence-mhd',
   'advection', 'empty', 'empty-mhd',
