@@ -18,8 +18,9 @@ setting (default 8), not chosen per step; the advection with the gas takes each 
 (without it a supercritical shock was 6% too cool), and what a reduced speed still gets wrong is
 a radiative structure moving through reduced cells (3% at chat = c/5 in rad-shock); the energy's
 slope is limited to 1.2 times the one-sided differences (monotonized central made an opaque
-surface shine in pulses). Not yet: rad-flux-match; the star's light curve preset (it needs the
-adaptive mesh).
+surface shine in pulses). Not yet: rad-flux-match. The luminosity through the box
+faces is in the Diagnostics panel; light curves proper (shock breakout, and a disruption's, which
+accretion powers) are `plans/radiation-light-curves.md`.
 
 Goal: gray radiation hydrodynamics on the uniform grid and the adaptive mesh, good enough for
 the problems Shaderous already runs: white dwarfs, stars being disrupted, their debris. Those
