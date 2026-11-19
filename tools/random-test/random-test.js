@@ -221,10 +221,10 @@
         doc.physics.eosParams = { gamma: 5 / 3, arad: a, R: 1 };
       } else if (doc.physics.eos === 'ideal') doc.physics.eosParams.arad = a;
       kinds.push('rad');
-    } else if (newer < 0.32 && !curved && !frame && doc.physics.eos === 'ideal' && scenario === 'gas' && !doc.physics.rotation && !doc.domain.mirror && !doc.physics.cooling) {
-      // (Not with stars or disks in near-vacuum: implicit pressure goes non-finite where the gas
-      // around a star is under some 1e-6 of its central density and falls in at Mach 40, which
-      // seed 70293 found. An open limit of the method: plans/incompressible.md.)
+    } else if (newer < 0.32 && !curved && !frame && doc.physics.eos === 'ideal' && (scenario === 'gas' || kinds.includes('star')) && !doc.physics.rotation && !doc.domain.mirror && !doc.physics.cooling) {
+      // (Ordinary gas, or one star at rest. Not stars that move, nor disks: implicit pressure does
+      // not hold a self-gravitating body that moves, which seed 70293 found. An open limit of
+      // the method: plans/incompressible.md.)
       doc.physics.pressure = 'implicit';
       delete doc.mesh;
       const at = kinds.indexOf('bins');

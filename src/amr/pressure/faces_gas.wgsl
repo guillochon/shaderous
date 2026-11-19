@@ -106,7 +106,7 @@ fn g_face(lo: GCell, hi: GCell, a: i32, uf: f32, dtdx: f32) -> GFace {
   var d = lo;
   if (du < 0.0) { d = hi; }
   let e = d.eint + 0.5 * d.rho * dot(d.v, d.v);
-  return GFace(vec2<f32>(pf, vh), du * vec4<f32>(d.rho, d.rho * d.v), du * vec3<f32>(e, d.eint, d.rho * d.s), 0.5 * sum * vh, kick);
+  return GFace(vec2<f32>(pf, vh), du * vec4<f32>(d.rho, d.rho * d.v), du * vec3<f32>(e, d.eint, d.rho * d.s), vh, kick);
 }
 
 // Face (a, up) of leaf cell l of block `slot`, whose solved change is dc. With `solved` false
@@ -128,7 +128,7 @@ fn ap_gface(slot: i32, l: vec3<i32>, a: i32, up: bool, dc: f32, dtdx: f32, solve
   if (n.kind == 3) {
     var v = own.v[a] + kc;
     if (n.only) { v = select(min(v, 0.0), max(v, 0.0), up); }
-    return GFace(vec2<f32>(own.p, v), vec4<f32>(0.0), vec3<f32>(0.0), own.rho * v, kc);
+    return GFace(vec2<f32>(own.p, v), vec4<f32>(0.0), vec3<f32>(0.0), v, kc);
   }
   if (n.kind == 0 && n.fine) {
     var acc = GFace(vec2<f32>(0.0), vec4<f32>(0.0), vec3<f32>(0.0), 0.0, 0.0);

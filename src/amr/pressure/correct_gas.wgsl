@@ -44,8 +44,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var mom = u1.yzw;
   var de = 0.0;
   var dvh = 0.0;
-  // The field's work, in flux form: its kick times the mass the cell's two faces carry, halved
-  // (pressure/correct_gas.wgsl has why).
+  // The field's work, in flux form: the cell's density times half the sum of its two faces'
+  // kicks times their velocities (pressure/correct_gas.wgsl has why, and why by its density).
   var ek = 0.0;
   var c1 = vec4<f32>(0.0);
   var c2 = vec3<f32>(0.0);
@@ -55,7 +55,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fl = ap_gface(inv.slot, inv.l, a, false, dc, dtdx, true);
     // (The cell's kick is the mean of its two faces'.)
     mom[a] += 0.5 * (fh.k + fl.k) * u1.x - dtdx * (fh.pv.x - fl.pv.x);
-    ek += 0.5 * (fh.k * fh.m + fl.k * fl.m);
+    ek += 0.5 * u1.x * (fh.k * fh.m + fl.k * fl.m);
     de += (P.ohm.w + fh.pv.x) * fh.pv.y - (P.ohm.w + fl.pv.x) * fl.pv.y;
     dvh += fh.pv.y - fl.pv.y;
     c1 += fh.c1 - fl.c1;

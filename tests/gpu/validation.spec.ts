@@ -12,7 +12,7 @@ const TESTS = [
   'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-blocks', 'cyl-sphere', 'cyl-evrard', 'cyl-sphere-blocks', 'cyl-evrard-blocks', 'cyl-noh', 'cyl-bondi', 'cyl-torus', 'cyl-mhd', 'cyl-column', 'cyl-star', 'cyl-swirl',
   'sph-rest', 'sph-conserve', 'sph-sedov', 'sph-polytrope', 'sph-bondi', 'sph-blocks', 'sph-polytrope-blocks', 'sph-swirl',
   'liquid-eos', 'liquid-gresho', 'liquid-taylor-green', 'liquid-cavity', 'liquid-amr',
-  'psplit-solver', 'psplit-gresho', 'psplit-2d-3d', 'psplit-taylor-green', 'psplit-cavity', 'psplit-obstacle', 'psplit-balance', 'psplit-acoustic', 'psplit-amr-unrefined', 'psplit-amr-gresho', 'psplit-amr-regrid', 'psplit-amr-3d', 'psplit-amr-shear', 'psplit-amr-balance', 'psplit-amr-wake', 'psplit-amr-field', 'psplit-amr-polytrope', 'psplit-masses', 'psplit-species', 'psplit-gas-balance', 'psplit-gas-polytrope', 'psplit-gas-gresho', 'psplit-amr-gas', 'psplit-sod', 'psplit-amr-sod',
+  'psplit-solver', 'psplit-gresho', 'psplit-2d-3d', 'psplit-taylor-green', 'psplit-cavity', 'psplit-obstacle', 'psplit-balance', 'psplit-acoustic', 'psplit-amr-unrefined', 'psplit-amr-gresho', 'psplit-amr-regrid', 'psplit-amr-3d', 'psplit-amr-shear', 'psplit-amr-balance', 'psplit-amr-wake', 'psplit-amr-field', 'psplit-amr-polytrope', 'psplit-masses', 'psplit-species', 'psplit-gas-balance', 'psplit-gas-polytrope', 'psplit-gas-star-vacuum', 'psplit-gas-gresho', 'psplit-amr-gas', 'psplit-sod', 'psplit-amr-sod',
   'rad-restart', 'rad-off', 'rad-equilibrium', 'rad-f32', 'rad-streaming', 'rad-diffusion', 'rad-shadow', 'rad-advect', 'rad-marshak', 'rad-star', 'rad-shock', 'rad-cooling-sphere', 'rad-blocks-diffusion', 'rad-blocks-advect', 'rad-blocks-cooling-sphere', 'rad-blocks-star', 'rad-blocks-restart',
 ];
 

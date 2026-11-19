@@ -5,7 +5,9 @@ import type { Gpu } from '../gpu/device';
 import { configFor, Sim, type SimConfig } from '../sim';
 import { AmrSim } from '../amr/amr_sim';
 import { defaultEosParams } from '../eos/eos';
-import { problemById } from '../presets/index';
+import { presetSpec, problemById } from '../presets/index';
+import { compileSetup } from '../setup/compile';
+import { cloneSetup } from '../setup/spec';
 import { all, PERIODIC, type Problem } from '../problems/types';
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from '../pressure/multigrid';
 import { cavityError, GHIA_RE100, greshoGas } from './liquid';
@@ -795,6 +797,43 @@ export const PSPLIT_TESTS: TestDef[] = [
         mass_drift: implicit.mass, energy_drift: implicit.etot, energy_drift_explicit: explicit.etot,
       };
       return { pass: Math.abs(implicit.rhoc - 1) < 0.02 && implicit.mass < 5e-3 && implicit.etot < 0.02 && implicit.steps < 0.2 * explicit.steps, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-gas-star-vacuum',
+    name: 'Implicit pressure with self-gravity: a star at rest in near-vacuum (3D 64^3)',
+    criterion:
+      'The polytrope preset with the gas around it at 1e-7 of its central density, settled as usual, over one dynamical time with implicit pressure: no cell is ever hotter than 1.5 times the hottest at the start (the center), none reaches the floors, and the central density stays within 5% of its start. (Gravity\'s work on a face is shared between its two cells by their densities. Shared evenly, the first cell of near-vacuum beyond the surface took half the work done on the star\'s gas and was 3e5 times hotter after one step, and the run was not finite after ten: a random setup found it.)',
+    async run(gpu) {
+      const spec = cloneSetup(presetSpec('polytrope')!);
+      spec.background = { rho: 1e-7, p: 1e-9 };
+      spec.physics = { ...spec.physics, floors: { rho: 1e-11, p: 1e-15 } };
+      const star = compileSetup(spec).problem;
+      const m: Record<string, number> = {};
+      let pass = true;
+      await withSim(gpu, star, 64, { ndim: 3, tEnd: 0, pressure: 'implicit' }, async (sim) => {
+        await sim.settled;
+        const d0 = await sim.diagnostics();
+        let hottest = 0;
+        let floored = 0;
+        let finite = true;
+        for (const t of [0.05, 0.1, 0.2, 0.4, 0.7, 1]) {
+          sim.cfg.tEnd = t * (star.tDyn ?? 1);
+          sim.writeParams();
+          await sim.runToEnd(16, 1e4);
+          const d = await sim.diagnostics();
+          finite &&= [d.mass, d.eTot, d.maxMach, d.ranges[1][1]].every(Number.isFinite);
+          hottest = Math.max(hottest, d.ranges[1][1] / d0.ranges[1][1]);
+          floored = Math.max(floored, d.floored);
+          m.central_density = d.ranges[0][1] / d0.ranges[0][1];
+          m.steps = d.steps;
+        }
+        m.hottest_over_central = hottest;
+        m.floored_cells = floored;
+        m.density_contrast = d0.ranges[0][1] / d0.ranges[0][0];
+        pass = finite && hottest < 1.5 && floored === 0 && Math.abs(m.central_density - 1) < 0.05;
+      });
+      return { pass, metrics: m };
     },
   },
   {
