@@ -20,6 +20,10 @@
 @group(0) @binding(6) var O2: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(7) var<storage, read> BH: Masses;
 @group(0) @binding(8) var BF: texture_3d<f32>;       // with a field: the updated faces
+// The flux-form energy's correction (P.flags bit 6): the step's change of density
+// (gravity/rhs.wgsl) and the potential the step started from (G.w holds the new one).
+@group(0) @binding(43) var AUX: texture_3d<f32>;
+@group(0) @binding(44) var PHI_OLD: texture_3d<f32>;
 
 override MHD: bool = false;
 #include "mhd/bcell.wgsl"
@@ -69,6 +73,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // masses' and the frame's part of the kick adds its own (gravity/ext.wgsl). Then re-derive
     // e_int.
     E += dot(kx, u1.yzw + 0.5 * kick) / u1.x;
+    if ((P.flags & 64u) != 0u) {
+      // The update charged the work with the potential the step started from, phi^n
+      // (gravity/field.wgsl). With the new one known, move it to the mean of the two solves,
+      // (phi^n + phi^(n+1)) / 2, with which the work summed over the grid is exactly the change
+      // of the potential energy (docs/numerics.md section 14): this cell's share is
+      // -(rho^(n+1) - rho^n) (phi^(n+1) - phi^n) / 2. (A cell's share of a face's work differs
+      // from the flux form's by a flux of energy between cells, so the total is the same.)
+      let drho = textureLoad(AUX, c, 0).x;
+      E -= 0.5 * drho * (textureLoad(G, c, 0).w - textureLoad(PHI_OLD, c, 0).x);
+    }
     g_kphi = swirl_ke(u1.x, mom);
     let en = dual_energy(u1.x, 0.5 * dot(mom, mom) / u1.x + emag, E, eint);
     E = en.x;

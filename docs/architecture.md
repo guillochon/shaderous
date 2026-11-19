@@ -196,8 +196,8 @@ another form therefore costs more than repeating the conversion.
 | 5. Species *(optional)* | `hydro/species*.wgsl` | Move each species with the face mass fluxes the update recorded. |
 | 6. Implicit pressure *(optional)* | `pressure/source*.wgsl`, `pressure/multigrid.ts`, `pressure/correct*.wgsl` | The pressure equation from the old and the advected state, its V-cycles, and the correction of the face fluxes (with self-gravity, the potential is solved first, for the advected density). Replaces the second half kick. |
 | 7. Radiation advection *(optional)* | `radiation/advect.wgsl` | $`E`$ and $`\mathbf F`$ moved with the update's face mass fluxes. |
-| 8. Gravity *(optional)* | `gravity/rhs.wgsl`, V-cycles, `gravity/field.wgsl` | New source, warm-started V-cycles, the field texture. |
-| 9. Correct *(optional)* | `gravity/correct.wgsl`, `bh_*.wgsl` | Second half kick; point masses kick, drift and accrete. |
+| 8. Gravity *(optional)* | `gravity/advance.wgsl`, `gravity/rhs.wgsl`, V-cycles, `gravity/field.wgsl` | The guess extrapolated in time, the new source, V-cycles, the field texture. |
+| 9. Correct *(optional)* | `gravity/correct.wgsl`, `bh_*.wgsl` | Second half kick and the flux-form work moved to the mean of the two potentials; point masses kick, drift and accrete. |
 | 10. Radiation sweeps *(optional)* | `radiation/sweep.wgsl`, `commit.wgsl`, `escape.wgsl` | $`N_r`$ sweeps of transport and exchange with the gas, then their commit to the state. |
 | 11. Burning *(optional)* | `hydro/burn*.wgsl` | The network surrogate on the step's end state. |
 

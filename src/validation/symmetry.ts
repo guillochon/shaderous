@@ -251,12 +251,12 @@ export const SYM_TESTS: TestDef[] = [
   {
     id: 'sym-evrard',
     name: 'Mirror symmetry: the Evrard collapse in an octant',
-    criterion: 'Through collapse and bounce (t <= 1.5) the octant (32^3, box 2) conserves total energy to 2% and its thermal energy peaks between t = 0.9 and 1.3, as the whole box does (64^3); on blocks with per-block timesteps (octant, 64^3 finest, one level) too',
+    criterion: 'Through collapse and bounce (t <= 1.5) the octant (32^3, box 2) conserves total energy to 0.6% and its thermal energy peaks between t = 0.9 and 1.3, as the whole box does (64^3); on blocks with per-block timesteps (octant, 64^3 finest, one level) too',
     async run(gpu) {
       const w = await withSim(gpu, evrard, 64, { tEnd: 0 }, (sim) => energyDrift(sim, 1.5, 6));
       const o = await withSim(gpu, mirrored(evrard, 0.5), 32, { symmetry: MIRRORS, tEnd: 0 }, (sim) => energyDrift(sim, 1.5, 6));
       const b = await withAmr(gpu, mirrored(evrard, 0.5), 64, { symmetry: MIRRORS, tEnd: 0, amrLevels: 1, timeBins: 2, timeBinsAlways: true }, (sim) => energyDrift(sim, 1.5, 6));
-      const ok = (r: { worst: number; peakT: number }) => r.worst < 0.02 && r.peakT >= 0.9 && r.peakT <= 1.3;
+      const ok = (r: { worst: number; peakT: number }) => r.worst < 0.006 && r.peakT >= 0.9 && r.peakT <= 1.3;
       return {
         pass: ok(w) && ok(o) && ok(b) && Math.abs(o.e0 / w.e0 - 1) < 0.01,
         metrics: {

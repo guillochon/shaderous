@@ -1066,8 +1066,26 @@ smeared itself ever wider.
 - V-cycles with red-black Gauss-Seidel smoothing: 2 sweeps before restriction, 2 after
   prolongation, 8 on the coarsest $`2^3`$ level.
 - Restriction averages 8 cells; prolongation is trilinear.
-- Warm-started from the previous potential. The default is 2 V-cycles per step (3 on the
-  adaptive mesh, where later cycles run only while they still reduce the residual).
+- Warm-started from the previous potential extrapolated linearly in time,
+  $`\Phi^n + (\Delta t_n/\Delta t_{n-1})(\Phi^n - \Phi^{n-1})`$ (at most twice the last step
+  ahead; `gravity/advance.wgsl`, the uniform grid). The default is one V-cycle per step on the
+  uniform grid (3 on the adaptive mesh, where later cycles run only while they still reduce the
+  residual).
+- *How converged.* After two cycles the largest residual is at single precision's floor,
+  about $`10^{-5}`$ of the source (thirty more cycles do not lower it), but a smooth part of the
+  error is not: it is what the total energy and momentum see. A converged solve responds symmetrically to
+  the density, $`\sum\rho^n\Phi^{n+1} = \sum\rho^{n+1}\Phi^n`$, and the departure from it,
+  $`\tfrac12\sum(\rho^n\Phi^{n+1} - \rho^{n+1}\Phi^n)`$ summed over the steps, is energy lost or
+  gained. On the Evrard collapse at $`64^3`$ to $`t = 1.5`$ it came to $`-1.5\times10^{-2}`$ of
+  $`|E|`$ with one cycle a step from the previous potential, $`-1.1\times10^{-3}`$ with two,
+  $`-1\times10^{-4}`$ with three and $`-8\times10^{-6}`$ with four. From the extrapolated guess:
+  $`-4.6\times10^{-4}`$ with one cycle, $`-3\times10^{-5}`$ with two. Momentum says the same: on
+  the isothermal collapse (`isothermal-collapse`, $`64^3`$, periodic) to $`t = 2`$ the total
+  momentum's largest drift, as a fraction of $`\sum|\rho\mathbf v|`$, was $`2.5\times10^{-3}`$
+  with one cycle from the previous potential (why two were the default) and
+  $`2.2\times10^{-4}`$ with two, but $`2.4\times10^{-5}`$ with one from the guess and
+  $`9\times10^{-6}`$ with two. One cycle from the guess is the default: it is more converged
+  than two were, and a cycle is 1.5 ms of a $`128^3`$ step's 12.7 (M4 Pro).
 - **Periodic** boundaries subtract the mean density, $`\bar\rho_\text{per} = \langle\rho\rangle`$.
 - **Isolated** boundaries: a reduction sums the gas's moments $`\sum m\,x^a y^b z^c`$ about the box
   center for $`a + b + c \le 4`$ (35 of them), a pass moves them to the center of mass, and the
@@ -1129,7 +1147,8 @@ hydrostatic balance, which slowly cools a star.
 
    Summed over the cells, this work is the negative of the change in $`\sum\rho\Phi`$ that the
    same mass fluxes cause, so gas plus gravitational energy is conserved to round-off in a fixed
-   potential, and to the accuracy of the solve and of $`\Phi^{n+1/2}`$ with self-gravity. It can overheat low-density cells next to a sharp density contrast.
+   potential, and with self-gravity to the accuracy of the solve once $`\Phi^{n+1/2}`$ is the
+   mean of the two solves (below). It can overheat low-density cells next to a sharp density contrast.
 2. **Kick form.** Each kick $`\mathbf{k}`$ adds exactly the kinetic energy it creates,
    $`\mathbf{k}\cdot(\mathbf{m} + \mathbf{k}/2)/\rho`$. Gravity then never changes the internal
    energy, but total energy is not conserved where the flow is under-resolved.
@@ -1145,12 +1164,69 @@ a hundredfold, after which the dual-energy switch kept the drained value. In kic
 star's entropy holds to 0.1 dex. These fields are external, so the gas's own energy is not
 conserved under them in either form.
 
-The half-step potential $`\Phi^{n+1/2}`$ is extrapolated from the last two solves. What
-conserves energy is the mean of the potentials at the two ends of the step (the work of the
-mass fluxes is then exactly the change in $`\tfrac12\sum\rho\Phi`$), which in a collapse runs
-ahead of a linear extrapolation by the potential's curvature in time. With per-block
-timesteps ([§18](#18-local-per-block-timesteps)) the extrapolation takes that curvature from
-the rates of the block's last two steps.
+**The half-step potential.** Exact conservation needs the work charged with the mean of the two
+solves: with a symmetric solve,
+
+```math
+\tfrac12\sum\left(\rho^{n+1}\Phi^{n+1} - \rho^n\Phi^n\right) = \sum\left(\rho^{n+1} - \rho^n\right)\tfrac12\left(\Phi^n + \Phi^{n+1}\right),
+```
+
+and the change of density is the divergence of the very mass fluxes the work uses. The update
+cannot have $`\Phi^{n+1}`$, so on the uniform grid it charges the work with $`\Phi^n`$
+(`gravity/field.wgsl`), and once the new potential is solved the pass of the second kick
+(`gravity/correct.wgsl`) moves each cell's work to the mean:
+
+```math
+E_i \mathrel{-}= \tfrac12\left(\rho_i^{n+1} - \rho_i^n\right)\left(\Phi_i^{n+1} - \Phi_i^n\right).
+```
+
+A cell's share of the correction differs from the flux form's share of the faces' by a flux of
+energy between cells, so the total is the same. The source pass keeps the step's change of
+density, which is gone by then (a one-channel texture, 4 bytes a cell; `gravity/rhs.wgsl`). A
+star at rest is untouched (its density does not change, and $`\Phi^n`$ is what it was charged
+with before), and the correction comes before the dual-energy synchronization of the same pass,
+so that sees the corrected energy. It is on with the multigrid's self-gravity in flux form and a
+gas with an energy, not with implicit pressure (whose faces take the work) or comoving
+coordinates (kick form). Without it, and on the block mesh, the work is charged with the
+potential extrapolated from the last two solves, $`\tfrac32\Phi^n - \tfrac12\Phi^{n-1}`$: off by
+$`\tfrac12\Delta t^2\ddot\Phi`$ at equal steps, and first order after the potential is set
+without a step (the first step, a restart, a change of $`G`$) and after steps of
+$`\Delta t = 0`$ past an output time, where $`\Phi^{n-1} = \Phi^n`$. (Charging the extrapolated
+potential and correcting from it, as first done, gave the same energies, but kept twice the
+bytes and cost a quarter more.)
+
+With per-block timesteps ([§18](#18-local-per-block-timesteps)) the block mesh's extrapolation
+adds the potential's curvature in time, from the rates of the block's last two steps: in a
+collapse the mean of the two solves runs ahead of a linear extrapolation by that curvature.
+
+**Where the energy error of a self-gravitating run comes from.** Summed over the cells, the
+change of total energy each step splits exactly into: the half-step potential (above), the
+solve's asymmetry ([§13](#13-self-gravity)), and everything that changes $`E`$ besides the hydro
+fluxes and the work. Measured at $`64^3`$, with the box's faces made reflecting to keep out what
+crosses them:
+
+| | before (2 cycles) | now (1 cycle) |
+|---|---|---|
+| Evrard, $`t = 1.5`$: half-step potential | $`-2.7\times10^{-3}`$ | $`\approx 0`$ |
+| solve's asymmetry | $`-1.1\times10^{-3}`$ | $`-4.6\times10^{-4}`$ |
+| dual-energy synchronization after the second kick | $`+4.6\times10^{-3}`$ | $`+4.1\times10^{-3}`$ |
+
+The last is where cold gas falls in supersonically: the kick gives a cell slightly more kinetic
+energy than the flux-form work gave its total energy, $`E - \tfrac12\rho v^2`$ goes negative,
+and the synchronization ([§7](#7-robustness-in-single-precision)) rebuilds $`E`$ from the
+advected internal energy. It does not change with the timestep (the same at a CFL number of
+0.8, 0.4 and 0.2, while the potential's term fell fourfold for each halving) and falls fast
+with resolution: 1.6%, 0.46% and 0.034% of $`|E|`$ at $`32^3`$, $`64^3`$ and $`128^3`$. Before the
+correction the first two terms happened to cancel part of it. With the box's own outflow faces,
+the steps that land on output times and the steps of $`\Delta t = 0`$ past them made the
+potential's term larger. The tests' largest drifts: `evrard` 0.82% to 0.23%, `sym-evrard`'s
+whole box 0.44% to 0.28% and octant 0.69% to 0.13%, `cyl-evrard` 0.11% to 0.04%. Stars
+at rest (the polytropes, the white dwarf, the planet) have no error from gravity to speak of
+(their half-step and asymmetry terms are below $`10^{-5}`$): what their total energy does is
+gas crossing the box's outflow faces. An $`n = 1`$ polytrope gained $`7\times10^{-4}`$ of
+$`|E|`$ per dynamical time in its open box and $`4\times10^{-5}`$ in a closed one; the $`n = 3`$
+star with radiation in its equation of state in an octant (`rad-star`), 8.9% against 0.11% in a
+closed box.
 
 ## 15. Point masses and sinks
 
@@ -2493,7 +2569,7 @@ needs no new evaluator: each ring's moments are filled in by symmetry about the 
 the axis), and the boundary is evaluated in the plane of the run. The flux-form
 gravitational work takes the weighted mass fluxes. A uniform sphere's potential comes out
 within $`7\times10^{-4}`$ of the analytic one (the 3D solve: $`1.5\times10^{-3}`$), and the
-Evrard collapse in $`(R, z)`$ keeps its energy to 0.2% through bounce.
+Evrard collapse in $`(R, z)`$ keeps its energy to 0.04% through bounce.
 
 On blocks the per-level solver of §13 runs in 2D. Its blocks are one cell deep, laid out in
 each sublevel's atlas as the hydro atlas is in 2D, and a dispatch's four invocations along

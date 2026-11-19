@@ -434,12 +434,15 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     shockThresh: 0.5,
     jeansFloor: problem.jeansFloor ?? false,
     jeansCells: problem.jeansCells ?? 4,
-    // Warm-started from the previous step. One cycle is enough for the validation tests, but
-    // leaves total momentum drifting about ten times faster in long collapse runs. On the
-    // adaptive mesh this is the most a step runs: cycles after the first run only while they
-    // still cut the residual (amr/gravity/gate.wgsl), and three help where the potential
-    // changes fast, as at the bounce of a stellar collision.
-    vcycles: (over.amrLevels ?? 0) > 0 ? 3 : 2,
+    // Started from the potential extrapolated in time (gravity/advance.wgsl). On the uniform
+    // grid one cycle from that guess leaves the solve closer to converged than two from the last
+    // potential did: on the isothermal collapse to t = 2 total momentum drifted 2.4e-5 of the
+    // sum of |momentum| against 2.2e-4 (and 2.5e-3 with one cycle from the last potential), and
+    // on the Evrard collapse the solve's cost to the total energy was 4.6e-4 against 1.1e-3
+    // (docs/numerics.md section 13). On the adaptive mesh this is the most a step runs: cycles
+    // after the first run only while they still cut the residual (amr/gravity/gate.wgsl), and
+    // three help where the potential changes fast, as at the bounce of a stellar collision.
+    vcycles: (over.amrLevels ?? 0) > 0 ? 3 : 1,
     // (A spherical run's energy takes gravity's work in kick form: with the flux form and the
     // well-balanced reconstruction a settled polytrope's fundamental mode grew, 8% in 16 time
     // units; docs/numerics.md section 22.)
@@ -600,6 +603,18 @@ export function liquidUnsupported(c: SimConfig): string | null {
 
 /** The run solves for its pressure each step (SimConfig.pressure). */
 export const implicitPressure = (c: SimConfig): boolean => c.pressure === 'implicit';
+
+/**
+ * The uniform grid's flux-form gravitational work is charged with the potential a step starts
+ * from and corrected after the solve to the mean of the two solves (gravity/correct.wgsl,
+ * docs/numerics.md section 14): with the multigrid's self-gravity, the flux form, a gas with an
+ * energy, and neither implicit pressure (whose faces take the work) nor comoving coordinates
+ * (kick form).
+ */
+export function energyCorrection(c: SimConfig): boolean {
+  const solved = isSelfGravity(c.gravity) && (c.ndim === 3 || cylindrical(c)) && !spherical(c);
+  return solved && c.gravEnergyFlux && c.eos !== 'barotropic' && !cosmologyOf(c) && !implicitPressure(c);
+}
 /** The clock's build constants for implicit pressure: a gas with an energy combines its two step limits (hydro/clock.wgsl PSPLIT_GAS). */
 export const clockPressure = (c: SimConfig): Record<string, number> => (implicitPressure(c) && eosHasEnergy(c.eos) ? { PSPLIT_GAS: 1 } : {});
 
@@ -1186,7 +1201,7 @@ export const PARAM_BYTES = 544;
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
   c: SimConfig,
-  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number; vref?: number; pref?: number },
+  x: { dims: number[]; rect?: boolean; dx: number; rhoMean: number; selfGravity: boolean; masses: number; amr?: number[]; refine?: number[]; solids?: boolean; sources?: boolean; scale?: number; vref?: number; pref?: number; gravCorrection?: boolean },
 ): ArrayBuffer {
   const buf = new ArrayBuffer(PARAM_BYTES);
   const u = new Uint32Array(buf);
@@ -1211,7 +1226,7 @@ export function packParams(
   // with the potential's differences, while the kick takes the proper field grad(phi) / a, so
   // there the two disagreed by a factor a, and in cold gas E - KE was that disagreement. The kick
   // form adds the kinetic energy the kick adds, exactly.)
-  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && eosHasEnergy(c.eos) && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0)], 36);
+  u.set([c.n, x.selfGravity || x.masses > 0 ? 1 : 0, c.gravity === 'isolated' || !x.selfGravity || spherical(c) ? 1 : 0, (c.gravEnergyFlux && !cosmologyOf(c) ? 1 : 0) | (x.solids ? 2 : 0) | (x.sources ? 4 : 0) | (c.wellBalanced && eosHasEnergy(c.eos) && !cosmologyOf(c) ? 8 : 0) | (c.problem.refineMasses && c.amrLevels > 0 ? 16 : 0) | (c.problem.mhd ? 32 : 0) | (x.gravCorrection ? 64 : 0)], 36);
   f.set(
     [
       x.dx,
@@ -1515,7 +1530,9 @@ export class Sim implements Simulation {
    * residual at each coarser level, about 8/7 of a grid each, and the previous potential).
    */
   static cellBytes(ndim: 2 | 3): number {
-    return 7 * 16 + (ndim === 3 ? 4 + 3 * 4 * (8 / 7) : 0);
+    // (3D: the old potential, the energy's correction (8, with self-gravity: gravity/rhs.wgsl)
+    // and the multigrid levels.)
+    return 7 * 16 + (ndim === 3 ? 4 + 8 + 3 * 4 * (8 / 7) : 0);
   }
 
   /**
@@ -1584,7 +1601,7 @@ export class Sim implements Simulation {
       // (potential, multipoles) still exist; it is never dispatched.
       [sim.mg, sim.redDt] = await Promise.all([
         // (A spherical run's monopole writes the solver's potential textures in its place.)
-        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg)),
+        Multigrid.create(d, cfg.ndim === 2 && !cylindrical(cfg) && !spherical(cfg) ? 2 : [nx, ny, nz], cfg.problem.box, sim.params, [sim.state[0][0], sim.state[1][0]], cfg.symmetry, sim.clock, cylindrical(cfg) || spherical(cfg), energyCorrection(cfg)),
         Reducer.create(
           d,
           [nx, ny, nz],
@@ -1622,7 +1639,7 @@ export class Sim implements Simulation {
     const phi = sim.mg.phi;
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
-    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.clock });
+    sim.gField = bindGroup(d, sim.pField, { 0: sim.params, 1: v(phi), 2: v(sim.mg.phiOld), 3: v(sim.gfield), 4: sim.clock, 5: sim.mg.dtPrev });
     if (spherical(cfg)) {
       const code = assemble('gravity/sph_monopole.wgsl');
       const [shells, enclose, field] = await Promise.all(['shells', 'enclose', 'field'].map((e) => computePipeline(d, code, `spherical monopole ${e}`, undefined, e)));
@@ -1849,6 +1866,7 @@ export class Sim implements Simulation {
       return bindGroup(d, this.pCorrect, {
         0: this.params, 1: this.clock, 2: v(this.state[o][0]), 3: v(this.state[o][1]), 4: v(this.gfield),
         5: v(this.state[p][0]), 6: v(this.state[p][1]), 7: this.bh, 8: v(this.mhd?.faces[o] ?? this.noFaces()), ...k,
+        43: v(this.mg.aux), 44: v(this.mg.phiOld),
       });
     });
   }
@@ -1869,6 +1887,8 @@ export class Sim implements Simulation {
       selfGravity: this.selfGravity,
       masses: this.nMasses,
       solids: this.solids,
+      // (The solver's correction texture is full size only if the run started with it on.)
+      gravCorrection: this.selfGravity && !this.sphMono && energyCorrection(c) && this.mg?.aux.width === this.nx,
       sources: this.nSources > 0,
       pref: this.pRef,
     });
@@ -2350,9 +2370,7 @@ export class Sim implements Simulation {
       // dynamical time.
       const early = !!this.prs && selfGravity && !this.sphMono;
       if (early) {
-        pass.end();
-        this.copyPhiToOld(enc);
-        pass = beginPass(enc);
+        this.mg.encodeAdvance(pass);
         this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
         this.encodeField(pass);
@@ -2380,10 +2398,9 @@ export class Sim implements Simulation {
       if (selfGravity && this.sphMono) {
         this.encodeMonopole(pass, 1 - p);
       } else if (selfGravity && !early) {
-        // Keep the old potential and solve for that of the updated density (warm-started).
-        pass.end();
-        this.copyPhiToOld(enc);
-        pass = beginPass(enc);
+        // Keep the old potential and solve for that of the updated density, from the old one
+        // extrapolated in time (gravity/advance.wgsl).
+        this.mg.encodeAdvance(pass);
         this.mg.encodeSource(pass, gp, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
       }

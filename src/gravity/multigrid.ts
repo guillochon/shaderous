@@ -26,12 +26,22 @@ interface Level {
 export class Multigrid {
   levels: Level[] = [];
   phiOld!: GPUTexture; // potential one step back, for extrapolating to the half step
+  /**
+   * For the flux-form energy's correction (gravity/correct.wgsl): each cell's change of density
+   * over the step, written by the source pass (gravity/rhs.wgsl). A single texel when there is
+   * no correction.
+   */
+  aux!: GPUTexture;
+  /** The last step's dt (gravity/field.wgsl writes it, gravity/advance.wgsl reads it). */
+  dtPrev!: GPUBuffer;
   multipole!: Multipoles;
   private pSmooth!: GPUComputePipeline;
   private pResidual!: GPUComputePipeline;
   private pRestrict!: GPUComputePipeline;
   private pProlong!: GPUComputePipeline;
   private pRhs!: GPUComputePipeline;
+  private pAdvance!: GPUComputePipeline;
+  private gAdvance!: GPUBindGroup;
   private rhsGroups: GPUBindGroup[] = [];
   // Isolated boundaries: the finest level's face values, once per solve (gravity/boundary.wgsl).
   private pBoundary!: GPUComputePipeline;
@@ -42,7 +52,10 @@ export class Multigrid {
     return this.levels[0].phi;
   }
 
-  /** @param stateU1 the density-carrying state texture for each parity */
+  /**
+   * @param stateU1 the density-carrying state texture for each parity
+   * @param correction whether that correction is kept (a full-size `aux`)
+   */
   static async create(
     device: GPUDevice,
     size: number | readonly [number, number, number],
@@ -51,7 +64,8 @@ export class Multigrid {
     stateU1: GPUTexture[],
     symmetry: readonly boolean[] | undefined,
     clock: GPUBuffer,
-    flat = false,
+    flat: boolean,
+    correction: boolean,
   ): Promise<Multigrid> {
     // A cube of n, or (docs/numerics.md section 22) a box of three counts, each a power
     // of two; the longest is n, and h = box / n.
@@ -63,6 +77,8 @@ export class Multigrid {
     const mg = new Multigrid();
     mg.flat = flat;
     mg.phiOld = tex3d(device, dims0[0], 'r32float', 'phi old', dims0[2], dims0[1]);
+    mg.aux = correction ? tex3d(device, dims0[0], 'r32float', 'gravity energy correction', dims0[2], dims0[1]) : tex3d(device, 1, 'r32float', 'no gravity energy correction');
+    mg.dtPrev = device.createBuffer({ label: 'previous dt', size: 4, usage: GPUBufferUsage.STORAGE });
 
     mg.multipole = await Multipoles.create(
       device,
@@ -73,13 +89,14 @@ export class Multigrid {
       symmetry,
     );
 
-    [mg.pSmooth, mg.pResidual, mg.pRestrict, mg.pProlong, mg.pRhs, mg.pBoundary] = await Promise.all([
+    [mg.pSmooth, mg.pResidual, mg.pRestrict, mg.pProlong, mg.pRhs, mg.pBoundary, mg.pAdvance] = await Promise.all([
       computePipeline(device, assemble('gravity/smooth.wgsl'), 'mg smooth'),
       computePipeline(device, assemble('gravity/residual.wgsl'), 'mg residual'),
       computePipeline(device, assemble('gravity/restrict.wgsl'), 'mg restrict'),
       computePipeline(device, assemble('gravity/prolong.wgsl'), 'mg prolong'),
       computePipeline(device, assemble('gravity/rhs.wgsl'), 'mg rhs'),
       computePipeline(device, assemble('gravity/boundary.wgsl'), 'mg isolated boundary'),
+      computePipeline(device, assemble('gravity/advance.wgsl'), 'mg advance'),
     ]);
 
     const mp = mg.multipole.result;
@@ -122,7 +139,10 @@ export class Multigrid {
           11: bf,
         }),
       };
-      if (l === 0) mg.gBoundary = bindGroup(device, mg.pBoundary, { 0: params, 1: uni[0], 10: mp, 11: bf });
+      if (l === 0) {
+        mg.gBoundary = bindGroup(device, mg.pBoundary, { 0: params, 1: uni[0], 10: mp, 11: bf });
+        mg.gAdvance = bindGroup(device, mg.pAdvance, { 1: uni[0], 2: phi.createView(), 3: mg.phiOld.createView(), 4: clock, 5: mg.dtPrev });
+      }
       if (l > 0) {
         const fine = mg.levels[l - 1];
         lev.restrict = bindGroup(device, mg.pRestrict, {
@@ -144,8 +164,11 @@ export class Multigrid {
       mg.levels.push(lev);
     }
 
-    mg.rhsGroups = stateU1.map((t) =>
-      bindGroup(device, mg.pRhs, { 0: params, 1: t.createView(), 2: mg.levels[0].rhs.createView(), 3: clock }),
+    mg.rhsGroups = stateU1.map((t, p) =>
+      bindGroup(device, mg.pRhs, {
+        0: params, 1: t.createView(), 2: mg.levels[0].rhs.createView(), 3: clock,
+        4: stateU1[1 - p].createView(), 5: mg.aux.createView(),
+      }),
     );
     return mg;
   }
@@ -166,6 +189,16 @@ export class Multigrid {
         pass.dispatchWorkgroups(Math.ceil(lev.dims[0] / 16), Math.ceil(lev.dims[1] / 8), Math.ceil(lev.dims[2] / 4));
       }
     }
+  }
+
+  /**
+   * Start a step's solve: the potential becomes the old one, and the guess its extrapolation in
+   * time (gravity/advance.wgsl). Replaces copying the potential to `phiOld`.
+   */
+  encodeAdvance(pass: GPUComputePassEncoder) {
+    pass.setPipeline(this.pAdvance);
+    pass.setBindGroup(0, this.gAdvance);
+    this.dispatch(pass, this.levels[0].dims);
   }
 
   /** Build the source from the state of the given parity (and the multipoles if isolated). */
@@ -218,6 +251,8 @@ export class Multigrid {
       l.res.destroy();
     }
     this.phiOld.destroy();
+    this.aux.destroy();
+    this.dtPrev.destroy();
     this.boundary.destroy();
   }
 }
