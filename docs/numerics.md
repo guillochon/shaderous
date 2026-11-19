@@ -1217,7 +1217,10 @@ as GADGET-2 ([Springel 2005][Springel2005]).
 - A cycle keeps the smallest step it starts with, so a run begins with 16 single steps.
   Initial conditions out of balance can shrink the step 30-fold within two steps (gas at rest
   falling onto a point mass at the inner radius of an $`(r, \theta)`$ run), and a cycle begun
-  at $`t = 0`$ took all its substeps at the step of the gas at rest and went non-finite.
+  at $`t = 0`$ took all its substeps at the step of the gas at rest and went non-finite. Whether
+  to take a cycle is decided before each one, so a long call of steps goes on into cycles once
+  the single steps are taken (decided once per call, a validation run of many steps in one call
+  took none at all).
 - With self-gravity the potential is solved on every block at the end of a cycle. In between it
   is solved only on blocks finishing a step, and carried forward elsewhere at the rate at which
   it last changed. Point masses move every substep.
@@ -1734,8 +1737,11 @@ $`E`$ includes $`B^2/2`$.
   thousands before the second round and the narrower energy rule), all with $`\nabla\cdot B`$ at
   $`10^{-7}`$. The gas around its sink thins, and the step falls with it, as the setup check warns.
   With the sink's point
-  mass every block of that disk takes the fastest bin, so the correction beside a slower block
-  is exercised by the random setups, not by a validation test.
+  mass every block of that disk takes the fastest bin; the correction beside slower blocks is
+  tested by a dense blob (density 10, speed 3) through gas of $`10^{-6}`$ threaded by a weak field
+  across its path, at $`128^3`$ with 2 bins (`mhd-near-vacuum-bins`): some 1,900 leaves corrected
+  in 120 steps while the bins save 30% of block updates, mass conserved to the last bit, and one
+  chunk per leaf as one chunk.
 - **Compile time.** GPU compilers inline every function at every call, so a lookup called at
   several places, or in a loop they unroll, is compiled that many times. The block grid's
   assembly took 4 s to compile in Chrome (far more in Firefox), with the face lookup inlined

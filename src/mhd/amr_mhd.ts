@@ -230,7 +230,8 @@ export class AmrMhd {
       this.chunkBufs.push(d.createBuffer({ label: `MHD chunk ${i}`, size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
     }
     this.chunkArgs = d.createBuffer({ label: 'MHD chunk dispatch sizes', size: 24 * this.chunkBufs.length, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
-    this.redoList = d.createBuffer({ label: 'MHD flux correction list', size: 4 * (dep.cap + 1), usage: GPUBufferUsage.STORAGE });
+    // (count, slots, and the leaves corrected so far)
+    this.redoList = d.createBuffer({ label: 'MHD flux correction list', size: 4 * (dep.cap + 2), usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     this.redoSeen = d.createBuffer({ label: 'MHD flux correction leaves listed', size: 4 * dep.cap, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.redoArgs = d.createBuffer({ label: 'MHD flux correction dispatch sizes', size: 24 * this.chunkBufs.length, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST });
     // Per chunk, (boxes of the fluxes, rows, 1) and (boxes of the update, rows, 1); the scan sets
@@ -658,6 +659,20 @@ export class AmrMhd {
    */
   forgetCorrection() {
     this.dep.device.queue.writeBuffer(this.redoSeen, 0, new Uint32Array(this.redoSeen.size / 4));
+    this.dep.device.queue.writeBuffer(this.redoList, this.redoList.size - 4, new Uint32Array(1));
+  }
+
+  /** Leaves the flux correction has updated again since the run started, both rounds counted (validation). */
+  async correctedLeaves(): Promise<number> {
+    const d = this.dep.device;
+    const buf = d.createBuffer({ size: 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = d.createCommandEncoder();
+    enc.copyBufferToBuffer(this.redoList, this.redoList.size - 4, buf, 0, 4);
+    d.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const n = new Uint32Array(buf.getMappedRange().slice(0))[0];
+    buf.destroy();
+    return n;
   }
 
   /** Copy the block table and leaf index, before a re-mesh uploads the new ones. */

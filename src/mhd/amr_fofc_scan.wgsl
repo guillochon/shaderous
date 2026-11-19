@@ -40,6 +40,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 @group(0) @binding(40) var<storage, read_write> ARGS1: array<atomic<u32>>;
 @compute @workgroup_size(1)
 fn reset_main() {
+  // The list's last word counts the leaves corrected since the run started, for the validation
+  // (mhd/amr_mhd.ts correctedLeaves).
+  atomicAdd(&RL[arrayLength(&RL) - 1u], atomicLoad(&RL[0]));
   atomicStore(&RL[0], 0u);
   for (var c = 0u; c < CHUNKS; c++) {
     atomicStore(&ARGS[6u * c + 1u], 0u);

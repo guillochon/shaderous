@@ -2191,9 +2191,14 @@ export class AmrSim implements Simulation {
     }
     this.primeBins(enc);
     syncScale(enc, this.cfg, this.clock, this.params);
-    const cycle = this.binsLive ? 1 << this.builtBins : 0;
+    let cycle = 0;
     let done = 0;
     for (; done < count; done += cycle || 1) {
+      // Cycles or single steps, step by step: a run's first BIN_START_STEPS are single, and a call
+      // longer than that goes on in cycles (decided once, at the call's start, a single call of
+      // many steps took none: the validation's runs with time bins had none since that start).
+      cycle = this.binsLive ? 1 << this.builtBins : 0;
+      this.primeBins(enc);
       if (this.levels > 0 && (this.flagInFlight || this.wantMap) && this.stepsSinceFlag >= MAX_STEPS_AHEAD) break;
       if (cycle) {
         // Whole cycles only: the mesh, the display and the diagnostics need every block at

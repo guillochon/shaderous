@@ -2930,16 +2930,16 @@ export const TESTS: TestDef[] = [
       m.slabs_differing_values = differ(0, 1);
       m.slabs_periodic_differing_values = differ(2, 3);
       // Blocks: the leaves' cells and faces.
-      // (Per-block timesteps from the document, as a setup asks for them.)
-      const binned = compileSetup({ ...doc, mesh: { timeBins: 2 } } as SetupSpec).problem;
-      const blocks: [string, number | null, Problem, Partial<SimConfig>][] = [['blocks', null, outflow, {}], ['blocks_chunks', 1, outflow, {}], ['blocks_bins', null, binned, { timeBinsAlways: true }]];
+      // (The run's own timeBins: configFor does not read the document's mesh.)
+      const blocks: [string, number | null, Problem, Partial<SimConfig>][] = [['blocks', null, outflow, {}], ['blocks_chunks', 1, outflow, {}], ['blocks_bins', null, outflow, { timeBins: 2, timeBinsAlways: true }]];
       const leaves: Float32Array[][] = [];
       for (const [tag, bytes, prob, over] of blocks) {
         tags.push(tag);
         setMhdScratchBytes(bytes);
         try {
           await withAmr(gpu, prob, 128, { ndim: 3, amrLevels: 1, tEnd: Infinity, ...over }, async (sim) => {
-            sim.step(100);
+            // (advance: a single step() call stops while a refinement readback is in flight.)
+            await sim.advance(100);
             const d = await sim.diagnostics();
             const c = await sim.readLeaves();
             let vmax = 0;
@@ -2962,6 +2962,72 @@ export const TESTS: TestDef[] = [
       for (let j = 0; j < 3; j++) for (let i = 0; i < leaves[0][j].length; i++) if (leaves[0][j][i] !== leaves[1][j][i]) bdiff++;
       m.blocks_chunks_differing_values = bdiff;
       const pass = tags.every((t) => m[`${t}_finite`] === 1 && m[`${t}_max_speed`] < 100 && m[`${t}_divB`] < 1e-6) && m.slabs_differing_values === 0 && m.slabs_periodic_differing_values === 0 && bdiff === 0;
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'mhd-near-vacuum-bins',
+    name: 'MHD on blocks: the flux correction beside slower blocks (a dense blob through thin magnetized gas, 3D at 128 finest, 1 level, 2 bins of per-block timesteps)',
+    criterion:
+      'A blob of density 10 and radius 0.06 at speed 3 in gas of 1e-6 threaded by B = 0.002 across its path (Alfven speed 2 outside), periodic box, 120 steps with per-block timesteps: the correction runs (leaves corrected), the bins step some blocks less often (the run differs from the same run with one timestep: slower blocks beside the corrected ones take the corrected register in their deposits), every value finite, no gas above 1e-6 faster than 20, mass conserved to 1e-6 (nothing leaves the box; a correction or deposit that took a face once on one side and not the other would show), |div B| dx / max |B| below 1e-6, and every leaf in a chunk of its own agrees with one chunk bit for bit',
+    async run(gpu) {
+      const doc = {
+        format: 'shaderous-setup', version: 1, name: 'blob through thin field',
+        domain: { ndim: 3, n: 128, amr: 1, box: 1, geometry: 'cartesian', supports2d: true, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } },
+        physics: { eos: 'ideal', eosParams: { gamma: 5 / 3 }, gravity: 'off', G: 0 },
+        background: { rho: 0.000001, p: 1e-8 },
+        parts: [
+          { kind: 'field', b: [0, 0.002, 0] },
+          { kind: 'region', shape: { type: 'sphere', center: [0, 0, 0], radius: 0.06 }, rho: 10, v: [3, 0, 0] },
+        ],
+        mesh: { timeBins: 2 },
+      } as SetupSpec;
+      const p = compileSetup(doc).problem;
+      const m: Record<string, number> = {};
+      const leaves: Float32Array[][] = [];
+      for (const [tag, bytes, bins] of [['one_chunk', null, 2], ['chunks', 1, 2], ['one_timestep', null, 0]] as const) {
+        setMhdScratchBytes(bytes);
+        try {
+          // Refined everywhere: the thin gas then steps in slower bins than the blob's surroundings.
+          await withAmr(gpu, p, 128, { ndim: 3, amrLevels: 1, tEnd: Infinity, timeBins: bins, timeBinsAlways: bins > 0, refineHi: -1, refineLo: -2 }, async (sim) => {
+            const d0 = await sim.diagnostics();
+            await sim.advance(120);
+            const d = await sim.diagnostics();
+            const c = await sim.readLeaves();
+            let vmax = 0;
+            let finite = Number.isFinite(d.eTot) && Number.isFinite(d.mass);
+            for (let i = 0; i < c.u1.length; i += 4) {
+              if (!Number.isFinite(c.u1[i]) || !Number.isFinite(c.u2[i])) finite = false;
+              if (c.u1[i] > 1e-6) vmax = Math.max(vmax, Math.hypot(c.u1[i + 1], c.u1[i + 2], c.u1[i + 3]) / c.u1[i]);
+            }
+            const mhd = (sim as unknown as { mhd: { correctedLeaves(): Promise<number> } }).mhd;
+            m[`${tag}_corrected_leaves`] = await mhd.correctedLeaves();
+            m[`${tag}_finite`] = finite ? 1 : 0;
+            m[`${tag}_max_speed`] = vmax;
+            m[`${tag}_mass_change`] = Math.abs(d.mass / d0.mass - 1);
+            m[`${tag}_divB`] = d.magnetic!.divB;
+            m[`${tag}_floored`] = d.floored;
+            const st = sim.status();
+            m[`${tag}_blocks`] = parseInt(st);
+            m[`${tag}_uniform_percent`] = Number(/(\d+)% of uniform/.exec(st)?.[1] ?? -1);
+            m[`${tag}_saved_percent`] = Number(/save (\d+)%/.exec(st)?.[1] ?? -1);
+            leaves.push([c.u1, c.u2, await leafFaces(sim)]);
+          });
+        } finally {
+          setMhdScratchBytes(null);
+        }
+      }
+      let diff = 0;
+      for (let j = 0; j < 3; j++) for (let i = 0; i < leaves[0][j].length; i++) if (leaves[0][j][i] !== leaves[1][j][i]) diff++;
+      m.chunks_differing_values = diff;
+      // The bins step some blocks less often: the run differs from the same run with one timestep.
+      let binned = 0;
+      for (let j = 0; j < 3; j++) for (let i = 0; i < leaves[0][j].length; i++) if (leaves[0][j][i] !== leaves[2][j][i]) binned++;
+      m.bins_vs_one_timestep_differing_values = binned;
+      const pass =
+        ['one_chunk', 'chunks'].every(
+          (t) => m[`${t}_corrected_leaves`] > 0 && m[`${t}_finite`] === 1 && m[`${t}_max_speed`] < 20 && m[`${t}_mass_change`] < 1e-6 && m[`${t}_divB`] < 1e-6,
+        ) && diff === 0 && binned > 0;
       return { pass, metrics: m };
     },
   },
