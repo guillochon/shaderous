@@ -255,7 +255,8 @@ every face of every cell, in single precision, including where one material is a
    pyrolite and water decks. Half a day.
 2. The table builder, with its error report, for Fe85Si15, pyrolite and water (forsterite and
    pure iron are then a deck each). Two to three days.
-3. The shared table module. One day.
+3. The shared table module. One day. Done 2026-11-18 with the hydrogen and helium equation
+   of state: `eos/table.wgsl`, `src/eos/table.ts`.
 4. The module, mirror and option for one material; validation test; the Hugoniot and water
    tests. Two to three days.
 5. Planetary units, the planet part, single-material collision presets (rock, ice). Two days.

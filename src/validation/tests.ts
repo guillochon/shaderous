@@ -6,11 +6,12 @@ import NET_CASES from '../burn/aprox13_net_cases.json';
 import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
 import { configFor, MAX_MASSES, PARAM_BYTES, Sim, type BrushOp, type Diagnostics, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
-import { prepareHelmholtz } from '../eos/helmholtz';
+import { prepareEosTable } from '../eos/tables';
 import { WD_UNITS } from '../problems/white_dwarf';
 import { defaultEosParams, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type EosKind, type EosParams } from '../eos/eos';
 import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
 import { COMPOSITIONS, composition } from '../units/composition';
+import { gravityUnits } from '../units/units';
 import { bubbleDensity, shockBubble } from '../presets/names';
 import { detonationStable, DETONATION_CJ_SPEED, zndOf } from '../presets/names';
 import { exactRiemann } from '../reference/riemann_exact';
@@ -2218,13 +2219,26 @@ export const TESTS: TestDef[] = [
   {
     id: 'eos',
     name: 'Equations of state on the GPU',
-    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4 (the tabulated white dwarf gas: 5e-5 and 5e-4, single precision’s limit for its Newton solve and its sound speed); gas+radiation reduces to its ideal-gas and pure-radiation limits. The degenerate and tabulated cases put each pressure on top of the degenerate one; the ionizing case spans neutral to fully ionized gas',
+    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4 (the tabulated gases, white dwarf matter and hydrogen and helium: 5e-5 and 5e-4, single precision’s limit for their Newton solve and their sound speed); gas+radiation reduces to its ideal-gas and pure-radiation limits. The degenerate and white dwarf cases put each pressure on top of the degenerate one; the ionizing case spans neutral to fully ionized gas; hydrogen and helium’s span 1e-18 to 1e-2 g/cm^3 and 20 K to 1e7 K, molecular to fully ionized',
     async run(gpu) {
       const d = gpu.device;
       const metrics: Record<string, number> = {};
       let pass = true;
       const pairs: [number, number][] = [];
       for (let i = 0; i < 16; i++) for (let j = 0; j < 16; j++) pairs.push([10 ** (-4 + (8 * i) / 15), 10 ** (-4 + (8 * j) / 15)]);
+      // Hydrogen and helium, in units of a solar mass and an astronomical unit: molecular clouds to
+      // stellar envelopes, on a grid of density and temperature.
+      const AU = gravityUnits('au', 1.495978707e11, 1.98847e30);
+      const hheStates = (eos: ReturnType<typeof makeEos>): [number, number][] => {
+        const out: [number, number][] = [];
+        for (let i = 0; i < 16; i++)
+          for (let j = 0; j < 16; j++) {
+            const rho = 10 ** (-18 + (16 * (i + 0.37)) / 16) / eos.params.helmRho;
+            const T = 10 ** (1.3 + (5.7 * (j + 0.61)) / 16) / eos.params.helmT;
+            out.push([rho, eos.pressure(rho, eos.eintFromT(rho, T))]);
+          }
+        return out;
+      };
       const cases: { kind: EosKind; label: string; params: Partial<ReturnType<typeof defaultEosParams>> }[] = [
         { kind: 'ideal', label: 'ideal', params: { gamma: 1.4 } },
         { kind: 'barotropic', label: 'isothermal', params: { gamma: 1, K: 0.7 } },
@@ -2238,8 +2252,10 @@ export const TESTS: TestDef[] = [
         { kind: 'helmholtz', label: 'helmholtz', params: physicalEosParams(WD_UNITS, COMPOSITIONS.carbonOxygen) },
         // And without the ions' Coulomb energy (on by default).
         { kind: 'helmholtz', label: 'helmholtz_no_coulomb', params: { ...physicalEosParams(WD_UNITS, COMPOSITIONS.carbonOxygen), helmCoulomb: 0 } },
+        { kind: 'hhe', label: 'hhe', params: { ...physicalEosParams(AU, COMPOSITIONS.solar), hheRad: 0 } },
+        { kind: 'hhe', label: 'hhe_radiation', params: { ...physicalEosParams(AU, COMPOSITIONS.solar), hheRad: 1 } },
+        { kind: 'hhe', label: 'hhe_hydrogen', params: { ...physicalEosParams(AU, COMPOSITIONS.hydrogen), hheRad: 0 } },
       ];
-      await prepareHelmholtz(d);
       const inData = new Float32Array(pairs.length * 4);
       const inBuf = d.createBuffer({ size: inData.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
       d.queue.writeBuffer(inBuf, 0, inData);
@@ -2248,9 +2264,12 @@ export const TESTS: TestDef[] = [
       const params = d.createBuffer({ size: PARAM_BYTES, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
       for (const c of cases) {
         const ep = { ...defaultEosParams(), ...c.params };
+        // A tabulated case's table, loaded and bound for the bind group below (one binding
+        // holds whichever the case uses).
+        await prepareEosTable(d, c.kind, ep);
         const eos = makeEos(c.kind, ep);
         // Degenerate gas cannot be below its zero-temperature pressure: test the thermal part on top.
-        const cp = c.kind === 'degenerate' || c.kind === 'helmholtz' ? pairs.map(([rho, p]) => [rho, eos.pressure(rho, 0) + p]) : pairs;
+        const cp = c.kind === 'hhe' ? hheStates(eos) : c.kind === 'degenerate' || c.kind === 'helmholtz' ? pairs.map(([rho, p]) => [rho, eos.pressure(rho, 0) + p]) : pairs;
         cp.forEach(([rho, p], i) => inData.set([rho, p, 0, 0], i * 4));
         d.queue.writeBuffer(inBuf, 0, inData);
         const pb = new Float32Array(PARAM_BYTES / 4);
@@ -2278,9 +2297,9 @@ export const TESTS: TestDef[] = [
           round = Math.max(round, rel(pBack, pIn));
           if (eos.hasEnergy) {
             mirror = Math.max(mirror, rel(eint, eos.eintFromP(rho, p)), rel(cs, eos.soundSpeed(rho, p)));
-            if (c.kind === 'helmholtz') {
-              metrics.helmholtz_eint_vs_float64 = Math.max(metrics.helmholtz_eint_vs_float64 ?? 0, rel(eint, eos.eintFromP(rho, p)));
-              metrics.helmholtz_cs_vs_float64 = Math.max(metrics.helmholtz_cs_vs_float64 ?? 0, rel(cs, eos.soundSpeed(rho, p)));
+            if (c.kind === 'helmholtz' || c.kind === 'hhe') {
+              metrics[`${c.kind}_eint_vs_float64`] = Math.max(metrics[`${c.kind}_eint_vs_float64`] ?? 0, rel(eint, eos.eintFromP(rho, p)));
+              metrics[`${c.kind}_cs_vs_float64`] = Math.max(metrics[`${c.kind}_cs_vs_float64`] ?? 0, rel(cs, eos.soundSpeed(rho, p)));
             }
           } else {
             mirror = Math.max(mirror, rel(pBack, pIn));
@@ -2295,7 +2314,7 @@ export const TESTS: TestDef[] = [
         // precision holds to about 1.5e-6, and p goes as up to T^4: two solves per round trip. Its
         // sound speed takes second derivatives of the table, which single precision keeps to about
         // 1e-4 (the Hermite terms cancel); well inside what the hydro needs.
-        const [rt, mt] = c.kind === 'helmholtz' ? [5e-5, 5e-4] : [1e-5, 1e-4];
+        const [rt, mt] = c.kind === 'helmholtz' || c.kind === 'hhe' ? [5e-5, 5e-4] : [1e-5, 1e-4];
         pass &&= round < rt && mirror < mt && limit < 1e-4;
       }
       return { pass, metrics };

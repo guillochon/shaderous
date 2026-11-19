@@ -8,7 +8,8 @@
    "gas_radiation",
    "degenerate",
    "ionizing",
-   "helmholtz"
+   "helmholtz",
+   "hhe"
   ],
   "cooling": [
    "off",
@@ -83,7 +84,7 @@
   {
    "key": "eos",
    "group": "settings",
-   "about": "Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz"
+   "about": "Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz, hhe"
   },
   {
    "key": "gamma",
@@ -124,6 +125,11 @@
    "key": "coulomb",
    "group": "settings",
    "about": "Coulomb corrections"
+  },
+  {
+   "key": "hherad",
+   "group": "settings",
+   "about": "Radiation term"
   },
   {
    "key": "iont",

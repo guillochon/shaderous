@@ -4,8 +4,9 @@ import { meanMolecularWeight, nuclearAverages, COMPOSITIONS, type Composition } 
 import { SI } from '../units/constants';
 import { eosConstants, kelvinPerCodeT, toCode, unitOf, type UnitSystem } from '../units/units';
 import { helmCoulombCold, helmSolve, helmThermo } from './helmholtz';
+import { HHE_TABLES_SAY, hheSolve, hheSound2, hheTableFor, hheThermo } from './hhe';
 
-export type EosKind = 'ideal' | 'barotropic' | 'liquid' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz';
+export type EosKind = 'ideal' | 'barotropic' | 'liquid' | 'gas_radiation' | 'degenerate' | 'ionizing' | 'helmholtz' | 'hhe';
 
 /** The kind carries an energy of its own: its pressure is not a function of the density alone. */
 export const eosHasEnergy = (kind: EosKind): boolean => kind !== 'barotropic' && kind !== 'liquid';
@@ -38,7 +39,8 @@ export interface EosParams {
    * erg/g and kelvin per code unit of density, specific energy and temperature; and the
    * reference composition's mu, Ye and ions per atomic mass unit (1 / Abar, which is
    * 1 / mu - Ye: the shader derives it from those two). helmCoulomb multiplies the ions'
-   * Coulomb energy (eos/helmholtz.ts): 1 for all of it, 0 for none.
+   * Coulomb energy (eos/helmholtz.ts): 1 for all of it, 0 for none. helmRho, helmE and helmT are
+   * also the cgs conversions of hydrogen and helium's table (eos/hhe.wgsl).
    */
   helmRho: number;
   helmE: number;
@@ -47,6 +49,13 @@ export interface EosParams {
   helmYe: number;
   helmIons: number;
   helmCoulomb: number;
+  /**
+   * Hydrogen and helium (eos/hhe.wgsl): the hydrogen mass fraction of the run's composition,
+   * which picks the table (eos/hhe.ts, hheTableFor), and the multiplier of the radiation term
+   * a T^4 (1, or 0 for gas alone; left out too while radiation transport carries it, arad = 0).
+   */
+  hheX: number;
+  hheRad: number;
   /**
    * The weakly compressible liquid (eos/liquid.wgsl), p = c0^2 (rho - rho0): the density at
    * which its pressure is zero, and its sound speed.
@@ -86,6 +95,7 @@ export const EOS_MODULES: Record<EosKind, string> = {
   degenerate: 'eos/degenerate.wgsl',
   ionizing: 'eos/ionizing.wgsl',
   helmholtz: 'eos/helmholtz.wgsl',
+  hhe: 'eos/hhe.wgsl',
 };
 
 /** The functions of the equation-of-state interface that take densities (docs/numerics.md section 9). */
@@ -136,16 +146,18 @@ export const EOS_LABELS: Record<EosKind, string> = {
   degenerate: 'Gas + radiation + degenerate electrons',
   ionizing: 'Ionizing hydrogen (Saha)',
   helmholtz: 'White dwarf matter (tabulated electrons, Helmholtz)',
+  hhe: 'Hydrogen and helium (H2, ionization)',
 };
 
 export const defaultEosParams = (): EosParams => ({
   gamma: 5 / 3, K: 1, R: 1, arad: 1, degRho: 1, degP: 1, ...ionParams(COMPOSITIONS.solar), ionT: 1, ionRho: 1,
-  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1.75, helmYe: 0.5, helmIons: 1 / 14, helmCoulomb: 1, liqRho: 1, liqC: 10,
+  helmRho: 1, helmE: 1, helmT: 1, helmMu: 1.75, helmYe: 0.5, helmIons: 1 / 14, helmCoulomb: 1, hheX: hydrogenFraction(COMPOSITIONS.solar), hheRad: 1, liqRho: 1, liqC: 10,
 });
 
 /** The first vec4 of equation-of-state constants (Params.eos in hydro/common.wgsl). */
 export function eosConstants1(kind: EosKind, p: EosParams): number[] {
   if (kind === 'helmholtz') return [p.helmRho, p.helmE, p.helmT, p.helmMu];
+  if (kind === 'hhe') return [p.helmRho, p.helmE, p.helmT, hheRadiation(p)];
   if (kind === 'liquid') return [p.liqRho, p.liqC, 0, 0];
   return [p.gamma, p.K, p.R, p.arad];
 }
@@ -156,6 +168,24 @@ export function eosConstants2(kind: EosKind, p: EosParams): number[] {
   if (kind === 'helmholtz') return [p.degRho, p.degP, p.helmYe, p.helmCoulomb];
   if (kind === 'ionizing') return [p.ionH, p.ionOther, p.ionT, p.ionRho];
   return [0, 0, 0, 0];
+}
+
+/** The mass fraction of hydrogen in a composition. */
+function hydrogenFraction(c: Composition): number {
+  const ih = c.species.findIndex((s) => s.name === 'h1');
+  return ih >= 0 ? c.X[ih] : 0;
+}
+
+/** The multiplier of hydrogen and helium's radiation term as the run has it: none while arad is 0. */
+const hheRadiation = (p: EosParams): number => (p.arad > 0 ? p.hheRad : 0);
+
+/**
+ * Why a run with hydrogen and helium's tabulated equation of state cannot go as configured, or
+ * null: a table ships for two compositions.
+ */
+export function hheUnsupported(kind: EosKind, p: EosParams, composition = 'this composition'): string | null {
+  if (kind !== 'hhe' || hheTableFor(p.hheX)) return null;
+  return `it has tables for ${HHE_TABLES_SAY} gas, not ${composition} (hydrogen mass fraction ${+p.hheX.toFixed(4)})`;
 }
 
 /** Particles per atomic mass unit from hydrogen nuclei and from everything else, times mu. */
@@ -178,7 +208,7 @@ function ionParams(c: Composition): { ionH: number; ionOther: number } {
  * change.
  */
 export function physicalEosParams(units: UnitSystem | undefined, comp: Composition = COMPOSITIONS.solar): Partial<EosParams> {
-  const out: Partial<EosParams> = ionParams(comp);
+  const out: Partial<EosParams> = { ...ionParams(comp), hheX: hydrogenFraction(comp) };
   if (!units) return out;
   Object.assign(out, eosConstants(units, comp)); // the gas constant (1) and the radiation constant
   const mu = meanMolecularWeight(comp);
@@ -384,6 +414,8 @@ export function makeEos(kind: EosKind, params: EosParams, k?: readonly number[],
       return ionizingEos(params);
     case 'helmholtz':
       return helmholtzEos(params);
+    case 'hhe':
+      return hheEos(params);
   }
 }
 
@@ -435,6 +467,39 @@ function helmholtzEos(params: EosParams): Eos {
     },
     temperature: (rho, eint) => Math.exp(lnTFromE(rho, eint)) / cT,
     eintFromT,
+  };
+}
+
+/**
+ * Float64 mirror of eos/hhe.wgsl in code units, with Newton's method run to convergence. Needs
+ * the composition's table loaded (loadEosTable in eos/tables.ts).
+ */
+function hheEos(params: EosParams): Eos {
+  const { helmRho: cr, helmE: ce, helmT: cT } = params;
+  const rad = hheRadiation(params);
+  const name = hheTableFor(params.hheX);
+  if (!name) throw new Error(`Hydrogen and helium: ${hheUnsupported('hhe', params)}`);
+  const at = (rho: number, lnT: number) => hheThermo(name, rho * cr, lnT, rad);
+  const lnTFromE = (rho: number, eint: number) => hheSolve(name, rho * cr, (eint / rho) * ce, false, rad);
+  const lnTFromP = (rho: number, p: number) => hheSolve(name, rho * cr, (p / rho) * ce, true, rad);
+  return {
+    kind: 'hhe',
+    hasEnergy: true,
+    params,
+    pressure: (rho, eint) => {
+      const lnT = lnTFromE(rho, eint);
+      return Number.isFinite(lnT) ? (at(rho, lnT).pr * rho) / ce : 0;
+    },
+    soundSpeed: (rho, p) => {
+      const lnT = lnTFromP(rho, p);
+      return Number.isFinite(lnT) ? Math.sqrt(hheSound2(at(rho, lnT)) / ce) : 0;
+    },
+    eintFromP: (rho, p) => {
+      const lnT = lnTFromP(rho, p);
+      return Number.isFinite(lnT) ? (at(rho, lnT).e * rho) / ce : 0;
+    },
+    temperature: (rho, eint) => Math.exp(lnTFromE(rho, eint)) / cT,
+    eintFromT: (rho, T) => (T > 0 ? (at(rho, Math.log(T * cT)).e * rho) / ce : 0),
   };
 }
 

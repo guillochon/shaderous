@@ -101,7 +101,9 @@ degenerate electrons. It uses the methods of production simulation codes:
 - point masses with sinks;
 - equations of state from an ideal gas to degenerate electrons and ionizing hydrogen, and for
   burning white dwarf matter a tabulated electron-positron gas at any degeneracy and
-  temperature, in the manner of the Helmholtz equation of state;
+  temperature, in the manner of the Helmholtz equation of state, and for gas from
+  molecular clouds to stellar envelopes a tabulated mixture of hydrogen and helium with H₂,
+  its dissociation and the ionization of both;
 - nearly incompressible flow: a weakly compressible liquid on the same explicit scheme, and for
   it an implicit pressure solve (multigrid) that takes the timestep from the flow speed instead
   of the sound speed, on the uniform grid and the adaptive mesh;

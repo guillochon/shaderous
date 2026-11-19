@@ -25,7 +25,7 @@ import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLeve
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt, sizedProblem } from '../problems/types';
 import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
-import { prepareHelmholtz } from '../eos/helmholtz';
+import { prepareEosTable } from '../eos/tables';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, RADIATION_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { sphFromView, sphToView, spherical } from '../spherical';
 import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, type ViewState } from '../render/renderer';
@@ -2109,7 +2109,7 @@ function switchEos(kind: EosKind) {
         gpu.device.queue.submit([enc.finish()]);
       };
       // The tabulated equation of state needs its table on the device before its shaders are built.
-      if (kind === 'helmholtz') await prepareHelmholtz(gpu.device);
+      await prepareEosTable(gpu.device, kind, cfg.eosParams);
       convert('eos-out');
       setEos();
       s.cfg = cfg;

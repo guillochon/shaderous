@@ -2,6 +2,7 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { makeEos } from '../../src/eos/eos';
 import { loadHelmholtz } from '../../src/eos/helmholtz';
+import { loadHhe } from '../../src/eos/hhe';
 import { PRESET_IDS, presetSpec } from '../../src/presets/index';
 import { readSetup } from '../../src/setup/codec';
 import { compileSetup } from '../../src/setup/compile';
@@ -55,6 +56,7 @@ function fingerprint(spec: SetupSpec): string {
 describe('the built-in flows', () => {
   beforeAll(async () => {
     await loadHelmholtz();
+    await loadHhe('solar');
   });
 
   it('each have a preset that uses them', () => {

@@ -4,7 +4,7 @@
  * cross to a worker) and the rest of the configuration as sent.
  */
 import { makeEos } from '../eos/eos';
-import { loadHelmholtz } from '../eos/helmholtz';
+import { loadEosTable } from '../eos/tables';
 import { compileSetup } from '../setup/compile';
 import type { SimConfig } from '../sim';
 import { sphSetup } from '../spherical';
@@ -24,9 +24,9 @@ self.onmessage = async (e: MessageEvent<InitRequest>) => {
     if (m.kind === 'setup') {
       const problem = { ...compileSetup(m.setup).problem, box: m.box };
       const cfg = { ...m.cfg, problem } as SimConfig;
-      // Its float64 mirror needs the table here too (eos/helmholtz.ts); the pool sends no work
-      // before this setup answers.
-      if (cfg.eos === 'helmholtz') await loadHelmholtz();
+      // A tabulated equation of state's float64 mirror needs its table here too (eos/tables.ts);
+      // the pool sends no work before this setup answers.
+      await loadEosTable(cfg.eos, cfg.eosParams);
       const eos = makeEos(cfg.eos, cfg.eosParams);
       const fn = sphSetup(cfg, problem.init(m.n, eos, cfg.ndim, cfg.params));
       ctx = {

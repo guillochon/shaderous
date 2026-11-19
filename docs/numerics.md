@@ -374,6 +374,7 @@ float64 TypeScript mirror for testing (`tests/unit/eos*.test.ts`).
 | **Degenerate** (`degenerate.wgsl`) | $`p = p_\text{deg}(\rho) + p_\text{ion} + p_\text{rad}`$ | Zero-temperature electrons at any degree of relativity ([Chandrasekhar 1935][Chandrasekhar1935]), plus ideal ions and radiation |
 | **White dwarf matter** (`helmholtz.wgsl`) | $`p = p_\text{deg}(\rho) + p_{e,\text{th}} + p_\text{ion} + p_\text{rad} + p_\text{C}`$ | The electron-positron gas at any degeneracy and temperature from a table of its free energy, in the manner of Helmholtz ([Timmes & Swesty 2000][TimmesSwesty2000]); ideal ions, radiation, and the ions' Coulomb energy |
 | **Ionizing hydrogen** (`ionizing.wgsl`) | $`p = \dfrac{\rho k T}{m_u}\left[h(1 + x) + o\right]`$ | Ionized fraction $`x`$ of the hydrogen from Saha equilibrium ([Saha 1920][Saha1920]); $`h`$ and $`o`$ are the particles per $`m_u`$ from hydrogen nuclei and from the other species |
+| **Hydrogen and helium** (`hhe.wgsl`) | $`p = \dfrac{\rho kT}{m_u}\dfrac{\partial h}{\partial\ln\rho} + \tfrac13 aT^4`$ | H₂, H, H⁺, He, He⁺, He⁺⁺ and electrons in chemical equilibrium, from a table of their free energy $`h = F m_u/kT`$ (the model of [Tomida et al. 2013][Tomida2013]); the radiation term is optional |
 
 **Degenerate electrons.** With $`x = p_F/(m_e c)`$ the dimensionless Fermi momentum and
 $`n_e = \rho Y_e/m_u`$,
@@ -428,6 +429,58 @@ is about twice as cheap per step where nothing burns (`tools/eos/NOTES.md`), at 
 reading shocked gas too cold. The burning network was
 trained with the heat capacity of the gas without it, a difference of a few percent at burning
 temperatures, where $`\Gamma`$ is near one.
+
+**Hydrogen and helium.** From molecular clouds to stellar envelopes the gas is hydrogen and
+helium in seven forms, and what it costs to turn one into another is most of its heat capacity:
+4.48 eV to dissociate an H₂ molecule, 13.6 eV to ionize an atom, 24.6 and 54.4 eV for helium.
+The module is one free energy, that of an ideal mixture (`src/eos/hhe_model.ts`): each species
+has its translational states and its internal ones (for H₂ the rotation, with ortho and para
+hydrogen held at 3:1, and the vibration), and energies are counted from the ground states of H₂
+and He, so that the energy is zero at $`T = 0`$. The numbers of the species are those that
+minimize it at fixed nuclei, which gives the dissociation and Saha equations, solved for one
+unknown, the electron density. Because the free energy is at a minimum, its first derivatives
+need none of the composition's:
+
+```math
+\frac{p}{\rho} = \frac{kT}{m_u}\frac{\partial h}{\partial\ln\rho},\qquad
+e = -\frac{kT}{m_u}\frac{\partial h}{\partial\ln T},\qquad h = \frac{F m_u}{kT}.
+```
+
+$`h`$ is tabulated in $`\log\rho`$ ($`10^{-20}`$ to $`10^3`$ g/cm³, 0.1 dex) and $`\log T`$ (10 to
+$`10^8`$ K, 0.01 dex) with its exact first derivatives and its cross derivative, and
+interpolated by bicubic Hermite polynomials: the lookup and the solve for the temperature are
+the white dwarf module's (`eos/table.wgsl`). Two things differ. $`h`$ itself runs to ±100,
+which single precision would round to $`10^{-4}`$ of the pressure and $`10^{-2}`$ of the sound
+speed, so the table holds its differences between neighbouring nodes instead (only derivatives
+are ever needed). And Newton's method starts from a table of the gas's own inverse at the
+table's full resolution, which is what carries it through dissociation and ionization, where
+the energy rises steeply at nearly constant temperature; it takes under two evaluations on
+average. Between the nodes the table gives the model's pressure to $`6\times10^{-5}`$, its
+energy to $`4\times10^{-4}`$ and $`c_s^2`$ to 0.4% at worst (on the fronts at the lowest
+densities, where they are sharpest); on the GPU, in single precision, pressure to energy and
+back agrees to $`10^{-5}`$.
+
+$`\Gamma_1`$ is 5/3 below 50 K, where H₂ does not turn, 7/5 at a few hundred kelvin, and falls
+to 1.1 where H₂ dissociates (2000 K at $`10^{-8}`$ g/cm³) and again where hydrogen ionizes:
+below the 4/3 a self-gravitating ball needs, which is what sets off the second collapse of a
+protostar (the `second-collapse` preset). The adiabat of gas that turned opaque at
+$`10^{-13}`$ g/cm³ and 10 K reaches 2060 K at $`10^{-8}`$ g/cm³, the track of
+[Masunaga & Inutsuka (2000)][Masunaga2000].
+
+A table is for one composition; two ship, the code's solar gas (X = 0.7381, its metals
+counted as helium) and hydrogen, chosen by `physics.composition`, and a run with another is
+refused. The radiation term $`aT^4`$ is analytic and optional
+(`physics.eosParams.hheRad`, link key `hherad`): 1 for a star's interior, 0 for a cloud, which
+its radiation leaves. What the model lacks sets where it holds: there are no degenerate
+electrons and no Coulomb terms, and pressure ionization is a stand-in, each bound electron
+costing $`kT\rho/\rho_\text{pi}`$ with $`\rho_\text{pi} = 0.33`$ g/cm³ (hard spheres of a Bohr
+radius). That term is part of the free energy, so pressure and energy stay consistent; it
+leaves gas below 0.01 g/cm³ alone and ionizes it above about 1 g/cm³, as a star's interior is
+(bare Saha equations leave a third of the hydrogen at the Sun's center neutral). So the table
+holds below about 0.1 g/cm³ at any of its temperatures, and above that where the gas is hot
+enough to be ionized. Cool gas denser than about 1 g/cm³ is outside it: there the pressure
+need not rise with temperature or density, and the sound speed has a floor.
+`tools/eos/NOTES.md` has the model's choices and the table's construction.
 
 **Saha hydrogen.** The ionization fraction solves
 
@@ -2901,6 +2954,8 @@ stars held up largely by radiation are not yet in discrete balance.
 [Roe1986]: https://doi.org/10.1146/annurev.fl.18.010186.002005
 [Ross2011]: https://arxiv.org/abs/1011.0686
 [Saha1920]: https://doi.org/10.1080/14786441008636148
+[Tomida2013]: https://doi.org/10.1088/0004-637X/763/1/6
+[Masunaga2000]: https://doi.org/10.1086/308439
 [Sedov1959]: https://ui.adsabs.harvard.edu/abs/1959sdmm.book.....S
 [Smith2023]: https://doi.org/10.3847/1538-4357/acbaff
 [Springel2005]: https://doi.org/10.1111/j.1365-2966.2005.09655.x
@@ -2958,6 +3013,7 @@ stars held up largely by radiation are not yet in discrete balance.
 - Krumholz, M. R., McKee, C. F., & Klein, R. I. (2004). Embedding Lagrangian Sink Particles in Eulerian Grids. ApJ 611, 399. [doi:10.1086/421935](https://doi.org/10.1086/421935)
 - Kwatra, N., Su, J., Grétarsson, J. T., & Fedkiw, R. (2009). A method for avoiding the acoustic time step restriction in compressible flow. Journal of Computational Physics 228, 4146. [doi:10.1016/j.jcp.2009.02.027](https://doi.org/10.1016/j.jcp.2009.02.027)
 - Löhner, R. (1987). An adaptive finite element scheme for transient problems in CFD. Computer Methods in Applied Mechanics and Engineering 61, 323. [doi:10.1016/0045-7825(87)90098-3](https://doi.org/10.1016/0045-7825(87)90098-3)
+- Masunaga, H., & Inutsuka, S. (2000). A Radiation Hydrodynamic Model for Protostellar Collapse. II. The Second Collapse and the Birth of a Protostar. ApJ 531, 350. [doi:10.1086/308439](https://doi.org/10.1086/308439)
 - Plewa, T., & Müller, E. (1999). The consistent multi-fluid advection method. A&A 342, 179. [arXiv:astro-ph/9807241](https://arxiv.org/abs/astro-ph/9807241)
 - Plummer, H. C. (1911). On the problem of distribution in globular star clusters. MNRAS 71, 460. [doi:10.1093/mnras/71.5.460](https://doi.org/10.1093/mnras/71.5.460)
 - Quirk, J. J. (1994). A contribution to the great Riemann solver debate. International Journal for Numerical Methods in Fluids 18, 555. [doi:10.1002/fld.1650180603](https://doi.org/10.1002/fld.1650180603)
@@ -2973,6 +3029,7 @@ stars held up largely by radiation are not yet in discrete balance.
 - Thornber, B., et al. (2008). An improved reconstruction method for compressible flows with low Mach number features. Journal of Computational Physics 227, 4873. [doi:10.1016/j.jcp.2008.01.036](https://doi.org/10.1016/j.jcp.2008.01.036)
 - Timmes, F. X., & Swesty, F. D. (2000). The Accuracy, Consistency, and Speed of an Electron-Positron Equation of State Based on Table Interpolation of the Helmholtz Free Energy. ApJS 126, 501. [doi:10.1086/313304](https://doi.org/10.1086/313304)
 - Timmes, F. X., Hoffman, R. D., & Woosley, S. E. (2000). An inexpensive nuclear energy generation network for stellar hydrodynamics. ApJS 129, 377. [doi:10.1086/313407](https://doi.org/10.1086/313407)
+- Tomida, K., et al. (2013). Radiation Magnetohydrodynamic Simulations of Protostellar Collapse: Protostellar Core Formation. ApJ 763, 6. [doi:10.1088/0004-637X/763/1/6](https://doi.org/10.1088/0004-637X/763/1/6)
 - Toro, E. F., Spruce, M., & Speares, W. (1994). Restoration of the contact surface in the HLL-Riemann solver. Shock Waves 4, 25. [doi:10.1007/BF01414629](https://doi.org/10.1007/BF01414629)
 - Toro, E. F. (2009). Riemann Solvers and Numerical Methods for Fluid Dynamics: A Practical Introduction, 3rd ed. Springer. [doi:10.1007/b79761](https://doi.org/10.1007/b79761)
 - Truelove, J. K., et al. (1997). The Jeans Condition: A New Constraint on Spatial Resolution in Simulations of Isothermal Self-gravitational Hydrodynamics. ApJL 489, L179. [doi:10.1086/310975](https://doi.org/10.1086/310975)

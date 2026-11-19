@@ -1,7 +1,7 @@
 // The simulation: owns the state textures and encodes hydro + gravity steps.
 import { FACE_KEYS, noWallVelocity, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT, type WallVelocity } from './problems/boundaries';
 import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
-import { prepareHelmholtz } from './eos/helmholtz';
+import { prepareEosTable } from './eos/tables';
 import { assemble, shaderFiles } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
 import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Bindable, type Gpu } from './gpu/device';
@@ -13,7 +13,7 @@ import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
 import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
-import { comovingEosSlot, defaultEosParams, eosHasEnergy, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
+import { comovingEosSlot, defaultEosParams, eosHasEnergy, hheUnsupported, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from './pressure/multigrid';
 import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
@@ -578,6 +578,7 @@ export function refusal(c: SimConfig): string | null {
     ['Axisymmetric run', cylindricalUnsupported(c)],
     ['Spherical run', sphericalUnsupported(c)],
     ['Radiation', radiationUnsupported(c)],
+    ['Hydrogen and helium', hheUnsupported(c.eos, c.eosParams, c.problem.composition?.name)],
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
@@ -685,7 +686,7 @@ export function cosmologyUnsupported(c: SimConfig): string | null {
   if (![...c.bcLo, ...c.bcHi].every((b) => b === PERIODIC)) return 'comoving coordinates need a periodic box';
   if (c.gravity !== 'off' && c.gravity !== 'periodic') return 'comoving coordinates take periodic self-gravity or none';
   if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in comoving coordinates';
-  if (c.eos === 'helmholtz') return 'the tabulated stellar equation of state is not available in comoving coordinates';
+  if (c.eos === 'helmholtz' || c.eos === 'hhe') return 'the tabulated equations of state are not available in comoving coordinates';
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in comoving coordinates';
   if (c.problem.mhd) return 'magnetic fields are not available in comoving coordinates yet';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available in comoving coordinates (each block would expand by its own a)';
@@ -1527,8 +1528,8 @@ export class Sim implements Simulation {
   }
 
   static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
-    // The tabulated white dwarf equation of state needs its table on the device (eos/helmholtz.ts).
-    if (cfg.eos === 'helmholtz') await prepareHelmholtz(gpu.device);
+    // A tabulated equation of state needs its table on the device (eos/tables.ts).
+    await prepareEosTable(gpu.device, cfg.eos, cfg.eosParams);
     // Every grid, 2D included, lives in 3D textures, whose side WebGPU caps (2048 on most
     // adapters). Past it the textures are invalid and every step would silently do nothing.
     const side = gpu.device.limits.maxTextureDimension3D;

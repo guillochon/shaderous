@@ -143,3 +143,85 @@ The idea was a network small enough to be cheaper than a table lookup with its N
 Conclusion: on this smooth, two-dimensional function, a GPU table beats a network on both speed
 and accuracy, even counting the inversion. `fit.py`, `fit_inverse.py`, `gen_inverse.py` and
 `bench/` are kept as the record of the experiment.
+
+# Equation of state for hydrogen and helium (H2, dissociation, ionization)
+
+Built 2026-11-18 from `plans/hydrogen-helium-eos.md`: `src/eos/hhe_model.ts` (the free energy),
+`make_hhe_table.mjs` (the tables), `src/eos/hhe.ts` and `eos/hhe.wgsl` (the mirror and the
+shader), on the table code the white dwarf module now shares (`src/eos/table.ts`,
+`eos/table.wgsl`). The generator is Node, not Python: it imports the model the unit tests
+check the table against, and needs nothing installed (`node tools/eos/make_hhe_table.mjs`,
+12 s for both tables).
+
+## The model
+
+An ideal mixture of H2, H, H+, He, He+, He++ and electrons in chemical equilibrium, after
+Tomida et al. (2013, ApJ 763, 6, appendix), whose constants were checked against the paper:
+theta_rot = 85.32 K (their 170.64 K is twice it), theta_vib = 5984.48 K, D = 7.17e-12 erg
+(4.478 eV), 13.60, 24.59 and 54.42 eV. What differs from theirs, and why:
+
+- **Zero of energy** at the ground states of H2 and He, with no zero-point term in the
+  vibration: every energy is positive and e goes to 0 with T.
+- **Statistical weights** are the textbook ones. Theirs give H2 a factor 2 for an electronic
+  degeneracy it does not have (its ground state is a singlet) and 3^(3/4) where a 3:1 mixture
+  of ortho and para hydrogen, with its entropy of mixing, has 1: H2 is weighted 4.6 times
+  more, and dissociates about 6% hotter at a given density. Ours goes over to the equilibrium
+  rotational sum at high temperature, as it must. `--ortho-para equilibrium` builds tables
+  with the equilibrium ratio at every temperature.
+- **Masses** are nucleon numbers (H 1, He 4), as `units/composition.ts` has them, and what is
+  not hydrogen is helium: solar is X = 0.7381, Y = 0.2619.
+- **Pressure ionization**, the plan's step 5, is not built. In its place, as the plan allows
+  for a first version, a term that takes the gas as ionized at high density and is part of the
+  free energy: each bound electron costs k T rho / 0.334 g/cm^3 (the excess chemical potential
+  of hard spheres of a Bohr radius at low packing). It is not calibrated against anything.
+  What it does: the Sun's center is ionized (bare Saha: 69%), gas below 0.01 g/cm^3 is
+  untouched (1e-3 of the pressure at 1e-4 g/cm^3), and the gas does not turn molecular again
+  above 0.1 g/cm^3 when hot, which Tomida et al. note theirs does. What it costs: cool gas
+  denser than about 1 g/cm^3 gets a stiff repulsion, and where it gives way to ionization the
+  pressure falls with rising temperature, and with rising density at fixed temperature
+  (a van der Waals loop). That corner needs degenerate electrons to be right in any case.
+  The shader and the mirror floor the sound speed there (c_s^2 >= 0.01 p / rho).
+- Not in it: electron degeneracy, Coulomb terms, excited atoms, metals, dust.
+
+## The table
+
+- One rgba32float texture per composition, 701 x 462 texels, 5.2 MB: log rho from -20 to 3 at
+  0.1 dex, log T from 1 to 8 at 0.01 dex. The plan had 0.02 dex both ways (6.5 MB); the
+  fronts are sharp in T and broad in rho, and this grid is five times closer for less:
+
+  | Grid (rho, T), dex | MB | e, p99 / worst | p, worst | c_s^2, p99 / worst |
+  |---|---|---|---|---|
+  | 0.05, 0.02 | 5.2 | 3.8e-4 / 2.2e-3 | 6.5e-4 | 6.1e-3 / 1.9e-2 |
+  | 0.05, 0.01 | 10.3 | 5.0e-5 / 3.4e-4 | 5.5e-5 | 1.3e-3 / 3.9e-3 |
+  | 0.1, 0.01 (shipped) | 5.2 | 5.0e-5 / 3.4e-4 | 5.4e-5 | 1.3e-3 / 3.9e-3 |
+
+  (Solar, 4000 states between the nodes below 0.1 g/cm^3, against the model in float64. The
+  worst are on the ionization and dissociation fronts near 1e-17 g/cm^3.)
+- Nodes hold (h_x, h_y, h_xy) and **differences of h**, not h: h = F m_u / (k T) runs from
+  -100 to 100 over the table (the logarithms of n lambda^3, and the ionization energy over
+  k T), which single precision rounds to 4e-6. Divided by a step of 0.02 in ln T that is 1e-4
+  of the pressure, and by its square 1e-2 of the sound speed. Only derivatives of h are ever
+  used, so each node stores h's difference to the next node along T, and a second block its
+  difference to the next along rho (`TAB_DIFF` in `eos/table.wgsl`): one more texel fetch per
+  cell of the table, and the rounding is 1e-7 of the differences themselves.
+- h_xy is a central difference of the exact h_x over 1e-4 in ln T, not a difference between
+  nodes.
+- The second block also holds the inverse, log T from (rho, log e) and from (rho, log p/rho),
+  701 points across each range, for Newton's starting point: the solve as the shader runs it
+  takes under 3 evaluations on average and under 8 at most (the unit test's states), where a
+  classical guess would stall on the fronts. With radiation the start is the lesser of that
+  and the temperature whose radiation alone is the goal.
+- On the GPU (Apple GPU, single precision; `validate.html`, test `eos`): pressure to energy
+  and back 7e-6, energy and sound speed against the float64 mirror 2.5e-5.
+- A compiler that multiplies before it divides (Metal's fast math) overflowed the sound
+  speed's (dp/dT)^2 / c_v with radiation in thin gas, where each slope is 1e31 erg/g: the
+  ratio is formed first and passed through `min`, which it cannot reassociate across.
+
+## Radiation
+
+a T^4 is analytic, outside the table, and optional (`hheRad`). It is on by default, as in the
+white dwarf module, which is right for a star and wrong for a cloud: in equilibrium with
+radiation, gas at 1e-18 g/cm^3 and 10 K has a sixth as much energy in radiation as in itself,
+and at 100 K a hundred times more. Thin gas should run with `hheRad` 0. Radiation transport is
+not yet allowed with this equation of state (`RAD_EOS` in `src/radiation/radiation.ts`); the
+module already leaves the term out when it is (arad = 0).

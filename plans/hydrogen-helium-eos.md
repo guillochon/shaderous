@@ -1,7 +1,10 @@
 # Plan: an equation of state for partially ionized hydrogen and helium, with H2
 
-Status: proposed 2026-11-16, not built. The physical constants and literature below are from
-memory and are to be checked against the sources in step 1.
+Status: built 2026-11-18, steps 1 to 4 and 6. Step 5 (calibrated pressure ionization) is not
+built; a stand-in is in its place. What was built, and where it differs from what follows, is
+in section 8; `tools/eos/NOTES.md` has the model's choices and the table's accuracy, and
+`docs/numerics.md` section 9 the description. The rest of this file is the plan as proposed
+on 2026-11-16, with constants then from memory.
 
 ## 1. Goal
 
@@ -133,3 +136,48 @@ dwarf table needed that spacing for the pair onset.
 
 About a week and a half. Step 3 is shared with [aneos-eos.md](aneos-eos.md); whichever is
 built first does it.
+
+## 8. As built (2026-11-18)
+
+| Step | Built | Differs from the plan |
+|---|---|---|
+| 1. Sources | Constants checked against Tomida et al. (2013), appendix: theta_rot 85.32 K, theta_vib 5984.48 K, D = 4.478 eV | Their statistical weights for H2 are not the textbook ones (4.6 times too many); the textbook ones are used, so dissociation is about 6% cooler than theirs |
+| 2. Generator | `src/eos/hhe_model.ts` (the free energy), `tools/eos/make_hhe_table.mjs` | Node, not Python: the tests import the same model, and nothing needs installing |
+| 3. Shared table module | `eos/table.wgsl`, `src/eos/table.ts`, `tools/eos/table.py`; the white dwarf module is on it, its tests and its GPU numbers unchanged | `make_table.py` was edited to match and not run (its input grid is not in the repository) |
+| 4. Module, mirror, option | `eos/hhe.wgsl`, `src/eos/hhe.ts`, `EosKind` `'hhe'`, `physics.eosParams.hheRad`, cases in the `eos` validation test | The grid is 0.1 dex in rho and 0.01 in T, not 0.02 both ways: the same 5.2 MB, five times closer on the fronts. The table holds differences of h, which single precision needs. Solar is the code's X = 0.7381 |
+| 5. Pressure ionization | Not built | A stand-in in the free energy (each bound electron costs k T rho / 0.33 g/cm^3) takes dense hot gas as ionized. Not calibrated |
+| 6. Collapse preset | `second-collapse`: a first core past its greatest mass, through dissociation to a second core, in (r, theta); validation test `sph-second-collapse` | Not a 1 solar mass cloud from 1e-18 g/cm^3. See below |
+
+**The collapse preset.** The plan asked for a solar-mass cloud forming a first core and then a
+second, with an energy equation and no barotrope. Two things stand in the way, neither in the
+equation of state. A cloud stays at 10 K until 1e-13 g/cm^3 because it radiates, so the run
+needs radiation transport, which is Cartesian only and not yet allowed with this equation of
+state; and from a cloud of 1e17 cm to a second core of 1e11 cm is six decades of radius, which
+the (r, theta) grid's timestep (set by its innermost cells) cannot span in one run. What is
+built is the part this equation of state decides: a first core on the published adiabat (10 K
+at 1e-13 g/cm^3), 0.036 solar masses, its center at 2100 K, which collapses when H2
+dissociates and forms a second core at 1e-3 to 1e-2 g/cm^3 and 20,000 K. The published track
+of central temperature against density is checked twice: as the model's adiabat (a unit test:
+2060 K at 1e-8 g/cm^3) and in the run (the center stays within 0.1% of the adiabat over four
+decades of density; the test asks for 1% and takes about three minutes).
+
+**More presets (2026-11-18).** Variants of three setups with this equation of state, each
+gas alone (`hheRad` 0): `tidal-disruption-hhe`, `common-envelope-hhe` (with `common-envelope`,
+the example setup as a preset, as its ideal-gas base) and `thermal-instability-hhe` (in
+physical units: 31 pc, a hydrogen atom per cm^3, 1000 K). Checked on the GPU at 128^3 with two
+levels for two time units (the stars hold as the ideal-gas ones do, no floored cells) and the
+instability at 256^2 to t = 6. The red giant's total energy is -0.49 G M^2 / R against -0.91
+for the ideal gas: the rest is ionization energy. Not run through the encounter or the
+spiral-in.
+
+**Still open.**
+- Step 5, and with it stellar interiors cooler than a few 1e5 K above 0.1 g/cm^3.
+- The comparison of a solar envelope profile against a stellar-evolution table (section 5): no
+  such table was at hand. The tests check that a Sun-like interior is ionized and ideal to 1%.
+- Radiation transport with this equation of state (`RAD_EOS`), which the cloud-to-first-core
+  run needs.
+- The radiation term is on by default, as the plan has it. For thin gas that is wrong (section
+  "Radiation" of the notes); whether the default should follow the density is undecided.
+- Total energy in the preset's run is not conserved once the second core forms (it drifts by
+  about the first core's binding energy): spherical runs do not use the flux form of
+  gravity's work.

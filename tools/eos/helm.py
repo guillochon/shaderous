@@ -1,6 +1,6 @@
 """The shipped equation-of-state table (src/eos/helmholtz_table.bin, made by make_table.py) for
 the burner and its training: the same bicubic Hermite interpolation as eos/helmholtz.wgsl and
-src/eos/helmholtz.ts, in numpy (thermo, for burner.py's heat capacity) and in torch (thermo_t
+src/eos/helmholtz.ts (the lookup itself is table.py, as theirs is eos/table.wgsl and table.ts), in numpy (thermo, for burner.py's heat capacity) and in torch (thermo_t
 and heat_t, batched and differentiable, for train.py's rollouts). Ye = 1/2, as for every
 nucleus of the alpha chain.
 
@@ -13,6 +13,8 @@ from pathlib import Path
 
 import numpy as np
 
+from table import basis as _basis, basis1 as _basis1, basis2 as _basis2, comb as _comb
+
 ROOT = Path(__file__).resolve().parents[2]
 _meta_src = (ROOT / "src" / "eos" / "helmholtz_meta.ts").read_text(encoding="utf-8")
 META = json.loads(re.search(r"HELM_META = (\{.*\}) as const", _meta_src, re.S).group(1))
@@ -24,18 +26,6 @@ YE = 0.5
 LNT_MIN, LNT_MAX = math.log(1e4), math.log(1e11)
 _T, _P = META["table"], META["pair"]
 _Q, _DQ, _D2Q = (np.array(_P[k]) for k in ("q", "dq", "d2q"))
-
-
-def _basis(t):
-    return [2 * t**3 - 3 * t**2 + 1, t**3 - 2 * t**2 + t, -2 * t**3 + 3 * t**2, t**3 - t**2]
-
-
-def _basis1(t):
-    return [6 * t**2 - 6 * t, 3 * t**2 - 4 * t + 1, -6 * t**2 + 6 * t, 3 * t**2 - 2 * t]
-
-
-def _basis2(t):
-    return [12 * t - 6, 6 * t - 4, -12 * t + 6, 6 * t - 2]
 
 
 def _cheb(c, x):
@@ -54,17 +44,9 @@ def thermo(rho, lnT, ia):
     i, j = x.astype(int), y.astype(int)
     u, v = x - i, y - j
     nodes = [TAB[i + a, j + b] for a in (0, 1) for b in (0, 1)]
-
-    def comb(A, B):
-        s = 0.0
-        for a in (0, 1):
-            for b in (0, 1):
-                q = nodes[a * 2 + b]
-                s = s + A[2*a] * B[2*b] * q[..., 0] + A[2*a+1] * B[2*b] * q[..., 1] + A[2*a] * B[2*b+1] * q[..., 2] + A[2*a+1] * B[2*b+1] * q[..., 3]
-        return s
     sc = 1.0 / (_T["d"] * L10)
-    ht = comb(_basis(u), _basis1(v)) * sc
-    htt = comb(_basis(u), _basis2(v)) * sc * sc
+    ht = _comb(nodes, _basis(u), _basis1(v)) * sc
+    htt = _comb(nodes, _basis(u), _basis2(v)) * sc * sc
     T = np.exp(lnT)
     beta = K * T / MEC2
     px = np.clip((lt - _P["mid"]) / _P["half"], -1, 1)
@@ -117,17 +99,9 @@ def thermo_t(rho, lnT, ia):
     i, j = x.detach().floor().long(), y.detach().floor().long()
     u, v = x - i, y - j
     nodes = [tab[i + a, j + b] for a in (0, 1) for b in (0, 1)]
-
-    def comb(A, B):
-        s = 0.0
-        for a in (0, 1):
-            for b in (0, 1):
-                q = nodes[a * 2 + b]
-                s = s + A[2*a] * B[2*b] * q[..., 0] + A[2*a+1] * B[2*b] * q[..., 1] + A[2*a] * B[2*b+1] * q[..., 2] + A[2*a+1] * B[2*b+1] * q[..., 3]
-        return s
     sc = 1.0 / (_T["d"] * L10)
-    ht = comb(_basis(u), _basis1(v)) * sc
-    htt = comb(_basis(u), _basis2(v)) * sc * sc
+    ht = _comb(nodes, _basis(u), _basis1(v)) * sc
+    htt = _comb(nodes, _basis(u), _basis2(v)) * sc * sc
     T = torch.exp(lnT)
     beta = K * T / MEC2
     px = ((lt - _P["mid"]) / _P["half"]).clamp(-1, 1)

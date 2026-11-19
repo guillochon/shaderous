@@ -16,7 +16,7 @@
 // With self-gravity (3D, or 2D in (R, z)), the potential is solved on every tree level after the update
 // (src/amr/gravity.ts), and the second half of the gravity kick runs as its own pass.
 import { domainLo } from '../domain';
-import { prepareHelmholtz } from '../eos/helmholtz';
+import { prepareEosTable } from '../eos/tables';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
@@ -552,8 +552,8 @@ export class AmrSim implements Simulation {
    *   shown meanwhile; it is `preparing`, and takes no steps, until `compiled` resolves.
    */
   static async create(gpu: Gpu, cfg: SimConfig, opts: { deferUpdate?: boolean } = {}): Promise<AmrSim> {
-    // The tabulated white dwarf equation of state needs its table on the device (eos/helmholtz.ts).
-    if (cfg.eos === 'helmholtz') await prepareHelmholtz(gpu.device);
+    // A tabulated equation of state needs its table on the device (eos/tables.ts).
+    await prepareEosTable(gpu.device, cfg.eos, cfg.eosParams);
     const why = refusal(cfg) ?? (implicitPressure(cfg) && implicitBlocksUnsupported(cfg) ? `Implicit pressure: ${implicitBlocksUnsupported(cfg)}` : null);
     if (why) throw new Error(why);
     let lastTried: number | null = null;

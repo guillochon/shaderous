@@ -20,7 +20,8 @@
 // as Helmholtz: Yakovlev & Shalybkov 1989), so the two stay consistent. Its part that does not
 // depend on T joins the zero-temperature electrons (helm_cold); the rest is thermal
 // (helm_coul). Both are faded out in thin matter, where they do not apply. Derivation and
-// tests: eos/helmholtz.ts.
+// tests: eos/helmholtz.ts. The table's lookup and the solve are eos/table.wgsl, shared with
+// eos/hhe.wgsl.
 //
 // P.eos  = (g/cm^3, erg/g, kelvin per code unit of density, specific energy, temperature; mu
 //           of the reference composition)
@@ -36,8 +37,6 @@ const EOS_HAS_ENERGY = true;
 const EOS_KEEP_TOTAL = true;
 
 #include "eos/helmholtz_consts.wgsl"
-
-@group(0) @binding(22) var HELM_TAB: texture_2d<f32>;
 
 const HK: f32 = 1.380649e-16;
 const HMU: f32 = 1.6605390666e-24;
@@ -101,76 +100,22 @@ fn deg_c2(rho: f32) -> f32 {
   return P.eos2.y * 8.0 * x2 * x2 * x / (3.0 * rho * sqrt(1.0 + x2));
 }
 
-// ---- The table ----
+// ---- The table (eos/table.wgsl): h on log10(rho Ye) and log10 T ----
 
-struct HelmH { hn: f32, ht: f32, hnn: f32, hnt: f32, htt: f32 }
-
-fn helm_hb(t: f32) -> vec4<f32> { return vec4<f32>(2.0*t*t*t - 3.0*t*t + 1.0, t*t*t - 2.0*t*t + t, -2.0*t*t*t + 3.0*t*t, t*t*t - t*t); }
-fn helm_hb1(t: f32) -> vec4<f32> { return vec4<f32>(6.0*t*t - 6.0*t, 3.0*t*t - 4.0*t + 1.0, -6.0*t*t + 6.0*t, 3.0*t*t - 2.0*t); }
-fn helm_hb2(t: f32) -> vec4<f32> { return vec4<f32>(12.0*t - 6.0, 6.0*t - 4.0, -12.0*t + 6.0, 6.0*t - 2.0); }
-// sum over the four nodes of A_a(u) B_b(v) (h, h_x, h_y, h_xy): basis entries 0 and 2 weigh the
-// value at nodes 0 and 1, entries 1 and 3 the slope there. Written out node by node, with no
-// array: arrays in a function live in each thread's local memory, and on Firefox (Direct3D,
-// NVIDIA) the adaptive mesh's update ran out of it (SKEDCHECK05_LOCAL_MEMORY_TOTAL_SIZE) and lost the device.
-fn helm_node(q: vec4<f32>, a0: f32, a1: f32, b0: f32, b1: f32) -> f32 {
-  return a0 * b0 * q.x + a1 * b0 * q.y + a0 * b1 * q.z + a1 * b1 * q.w;
-}
-// The nodes (u, v) = (0, 0), (0, 1), (1, 0), (1, 1).
-struct HelmCell { c00: vec4<f32>, c01: vec4<f32>, c10: vec4<f32>, c11: vec4<f32> }
-fn helm_comb(c: HelmCell, A: vec4<f32>, B: vec4<f32>) -> f32 {
-  return helm_node(c.c00, A.x, A.y, B.x, B.y) + helm_node(c.c01, A.x, A.y, B.z, B.w)
-       + helm_node(c.c10, A.z, A.w, B.x, B.y) + helm_node(c.c11, A.z, A.w, B.z, B.w);
-}
-// The four nodes of the table's cell (i, j): i along log10(rho Ye), j along log10 T.
-fn helm_cell(i: i32, j: i32) -> HelmCell {
-  return HelmCell(
-    textureLoad(HELM_TAB, vec2<i32>(j, i), 0),
-    textureLoad(HELM_TAB, vec2<i32>(j + 1, i), 0),
-    textureLoad(HELM_TAB, vec2<i32>(j, i + 1), 0),
-    textureLoad(HELM_TAB, vec2<i32>(j + 1, i + 1), 0),
-  );
-}
-// The table's cell at log10(rho Ye) and log10 T, and where in it the point lies.
-struct HelmAt { c: HelmCell, u: f32, v: f32 }
-fn helm_at(lrye: f32, lt: f32) -> HelmAt {
-  let x = clamp((lrye - HT_R0) / HT_D, 0.0, f32(HT_NR) - 1.0001);
-  let y = clamp((lt - HT_T0) / HT_D, 0.0, f32(HT_NT) - 1.0001);
-  let i = i32(floor(x));
-  let j = i32(floor(y));
-  return HelmAt(helm_cell(i, j), x - f32(i), y - f32(j));
-}
-// h's first and second derivatives per ln n and ln T there (h itself is never needed).
-fn helm_lookup(lrye: f32, lt: f32) -> HelmH {
-  let a = helm_at(lrye, lt);
-  let s = 1.0 / (HT_D * HLN10);
-  let A0 = helm_hb(a.u);
-  let A1 = helm_hb1(a.u);
-  let B0 = helm_hb(a.v);
-  let B1 = helm_hb1(a.v);
-  var r: HelmH;
-  r.hn = helm_comb(a.c, A1, B0) * s;
-  r.ht = helm_comb(a.c, A0, B1) * s;
-  r.hnn = helm_comb(a.c, helm_hb2(a.u), B0) * s * s;
-  r.hnt = helm_comb(a.c, A1, B1) * s * s;
-  r.htt = helm_comb(a.c, A0, helm_hb2(a.v)) * s * s;
-  return r;
-}
-// The two of them Newton's method needs: (h_T, h_TT) to solve by the energy, (h_n, h_nT) by
-// the pressure. A third of the work of the whole set.
-fn helm_lookup2(a: HelmAt, byP: bool) -> vec2<f32> {
-  let s = 1.0 / (HT_D * HLN10);
-  let B1 = helm_hb1(a.v);
-  if (byP) {
-    let A1 = helm_hb1(a.u);
-    return vec2<f32>(helm_comb(a.c, A1, helm_hb(a.v)) * s, helm_comb(a.c, A1, B1) * s * s);
-  }
-  let A0 = helm_hb(a.u);
-  return vec2<f32>(helm_comb(a.c, A0, B1) * s, helm_comb(a.c, A0, helm_hb2(a.v)) * s * s);
-}
+const TAB_X0: f32 = HT_R0;
+const TAB_DX: f32 = HT_D;
+const TAB_NX: i32 = HT_NR;
+const TAB_Y0: f32 = HT_T0;
+const TAB_DY: f32 = HT_D;
+const TAB_NY: i32 = HT_NT;
+const TAB_DIFF = false;
+const TAB_LNT_MIN: f32 = HLNT_MIN;
+const TAB_LNT_MAX: f32 = HLNT_MAX;
+#include "eos/table.wgsl"
 
 // The three Chebyshev series of the pair gas (HP_Q, HP_DQ, HP_D2Q) at x, together, by
 // Clenshaw's recurrence. Unrolled, so every coefficient is a constant: a loop indexes the series
-// at run time, which puts them in each thread's local memory (see helm_comb).
+// at run time, which puts them in each thread's local memory (see tab_comb in eos/table.wgsl).
 fn helm_clen(b: mat2x3<f32>, x: f32, c: vec3<f32>) -> mat2x3<f32> {
   return mat2x3<f32>(2.0 * x * b[0] - b[1] + c, b[0]);
 }
@@ -299,7 +244,7 @@ fn helm_c2(t: HelmThermo) -> f32 {
 fn helm_thermo(rho: f32, lnT: f32, ye: f32, ia: f32) -> HelmThermo {
   let lt = lnT / HLN10;
   let T = exp(lnT);
-  let hh = helm_lookup(log(rho * ye) / HLN10, lt);
+  let hh = tab_lookup(tab_at(log(rho * ye) / HLN10, lt));
   let pp = helm_pairs(lt, rho);
   let sm = ye * HK * T / HMU;           // n k T / rho
   let im = ia * HK * T / HMU;           // n_i k T / rho
@@ -326,13 +271,7 @@ fn helm_thermo(rho: f32, lnT: f32, ye: f32, ia: f32) -> HelmThermo {
 fn helm_guess(rho: f32, x: f32, ia: f32, byP: bool) -> f32 {
   let gx = clamp((log(rho) / HLN10 - HG_RHO0) / HG_DRHO, 0.0, f32(HG_NRHO) - 1.0001);
   let gy = clamp((log(x) / HLN10 - HG_X0) / HG_DX, 0.0, f32(HG_NX) - 1.0001);
-  let i = i32(floor(gx));
-  let j = i32(floor(gy));
-  let u = gx - f32(i);
-  let v = gy - f32(j);
-  let row = select(HG_ROW_E, HG_ROW_P, byP);
-  let a = mix(mix(textureLoad(HELM_TAB, vec2<i32>(j, row + i), 0), textureLoad(HELM_TAB, vec2<i32>(j + 1, row + i), 0), v),
-              mix(textureLoad(HELM_TAB, vec2<i32>(j, row + i + 1), 0), textureLoad(HELM_TAB, vec2<i32>(j + 1, row + i + 1), 0), v), u);
+  let a = tab_bilinear(select(HG_ROW_E, HG_ROW_P, byP), gx, gy);
   // Abar = 4, 14, 56 in r, g, b.
   let la = clamp(-log(ia), 1.3862944, 4.0253517);
   let w = (la - 1.3862944) / (2.6390573 - 1.3862944);
@@ -340,16 +279,17 @@ fn helm_guess(rho: f32, x: f32, ia: f32, byP: bool) -> f32 {
   return select(mix(a.x, a.y, w), mix(a.y, a.z, w2), la > 2.6390573);
 }
 
-// What Newton's method needs of helm_thermo: the thermal energy per gram (byP false) or
-// p_th / rho (byP true) at ln T, and its derivative in ln T.
-fn helm_fd(rho: f32, at: HelmAt, lnT: f32, ye: f32, ia: f32, byP: bool, cs: vec3<f32>) -> vec2<f32> {
+// What Newton's method needs of helm_thermo (tab_fd of eos/table.wgsl): the thermal energy per
+// gram (byP false) or p_th / rho (byP true) at ln T, and its derivative in ln T.
+struct TabCtx { rho: f32, ye: f32, ia: f32, cs: vec3<f32> }
+fn tab_fd(at: TabAt, lnT: f32, byP: bool, c: TabCtx) -> vec2<f32> {
   let lt = lnT / HLN10;
   let T = exp(lnT);
-  let h = helm_lookup2(at, byP);
-  let pp = helm_pairs(lt, rho);
-  let sm = ye * HK * T / HMU;
-  let im = ia * HK * T / HMU;
-  let rm = helm_rad(T, rho);
+  let h = tab_lookup2(at, byP);
+  let pp = helm_pairs(lt, c.rho);
+  let sm = c.ye * HK * T / HMU;
+  let im = c.ia * HK * T / HMU;
+  let rm = helm_rad(T, c.rho);
   var r: vec2<f32>;
   if (byP) {
     r = vec2<f32>(pp.x + sm * h.x + im + rm / 3.0, pp.x * pp.y + sm * (h.x + h.y) + im + 4.0 * rm / 3.0);
@@ -357,17 +297,13 @@ fn helm_fd(rho: f32, at: HelmAt, lnT: f32, ye: f32, ia: f32, byP: bool, cs: vec3
     r = vec2<f32>(pp.x * (pp.y - 1.0) - sm * h.x + 1.5 * im + rm, pp.x * (pp.y * pp.y - pp.y + pp.z) - sm * (h.x + h.y) + 1.5 * im + 4.0 * rm);
   }
   if (P.eos2.w > 0.0) {
-    let c = helm_coul(cs, lnT, ia);
-    r += select(vec2<f32>(c.e, c.de), vec2<f32>(c.pr, c.dpr), byP);
+    let k = helm_coul(c.cs, lnT, c.ia);
+    r += select(vec2<f32>(k.e, k.de), vec2<f32>(k.pr, k.dpr), byP);
   }
   return r;
 }
-
-// Newton's method converges quadratically, so a step this small in ln T leaves an error of its
-// square times half the curvature (at most a few): under the 1.5e-6 single precision holds
-// ln T to. The step is taken and not checked by another evaluation; what the callers return is
-// then corrected from the evaluation they make anyway (helm_fix).
-const HELM_LAST_STEP: f32 = 3e-4;
+// Above 1e11 K the thermal energy is radiation's, as T^4.
+fn tab_above(fd: vec2<f32>, goal: f32, byP: bool, c: TabCtx) -> f32 { return 0.25 * log(goal / fd.x); }
 
 // ln T at which the thermal energy per gram (byP false) or p_th / rho (byP true) is `goal`.
 // Outside the table: below 1e4 K the gas's thermal energy is nearly that of its ions, linear in
@@ -383,39 +319,12 @@ fn helm_solve(rho: f32, goal: f32, ye: f32, ia: f32, byP: bool) -> f32 {
     let c = helm_coul(cs, lnT, ia);
     lnT = max(lnT - log(1.0 + select(c.e, c.pr, byP) / goal), HLNT_MIN);
   }
-  // The density's place in the table does not change, and after the first step or two neither
-  // does the temperature's cell: its four nodes are fetched only when it does.
-  let x = clamp((log(rho * ye) / HLN10 - HT_R0) / HT_D, 0.0, f32(HT_NR) - 1.0001);
-  let i = i32(floor(x));
-  var j = -1;
-  var cell: HelmCell;
-  for (var it = 0; it < 10; it++) {
-    let y = clamp((lnT / HLN10 - HT_T0) / HT_D, 0.0, f32(HT_NT) - 1.0001);
-    let jn = i32(floor(y));
-    if (jn != j) {
-      j = jn;
-      cell = helm_cell(i, j);
-    }
-    let fd = helm_fd(rho, HelmAt(cell, x - f32(i), y - f32(j)), lnT, ye, ia, byP, cs);
-    if (lnT <= HLNT_MIN && fd.x > goal) { return HLNT_MIN + log(goal / fd.x); }
-    if (lnT >= HLNT_MAX && fd.x < goal) { return HLNT_MAX + 0.25 * log(goal / fd.x); }
-    let step = clamp(-(fd.x - goal) / fd.y, -1.0, 1.0);
-    lnT = clamp(lnT + step, HLNT_MIN, HLNT_MAX);
-    // At an end of the table the next pass decides whether the answer lies beyond it.
-    if (abs(step) < HELM_LAST_STEP && lnT > HLNT_MIN && lnT < HLNT_MAX) { break; }
-  }
-  return lnT;
+  return tab_solve(lnT, log(rho * ye) / HLN10, goal, byP, HLNT_MAX, TabCtx(rho, ye, ia, cs));
 }
 
-// The evaluation at the temperature found gives what is returned, and with it one more
-// Newton step for nothing: the step in ln T that would take the solved quantity (the energy,
-// or p / rho if byP) from its value there onto `goal`. Callers move what they return by its
-// own slope times this, so the pair (energy, pressure) they hand back is consistent to second
-// order in what the iteration left, with no evaluation the iteration did not already owe.
-// Inside the table only: beyond it the temperature is an extrapolation.
+// One more Newton step from the evaluation at the temperature found (tab_fix in eos/table.wgsl).
 fn helm_fix(t: HelmThermo, goal: f32, byP: bool, lnT: f32) -> f32 {
-  if (lnT <= HLNT_MIN || lnT >= HLNT_MAX) { return 0.0; }
-  return clamp((goal - select(t.e, t.pr, byP)) / select(t.de, t.dpr, byP), -1e-3, 1e-3);
+  return tab_fix(select(t.e, t.pr, byP), select(t.de, t.dpr, byP), goal, lnT);
 }
 
 // Thermal energy per gram and p_th / rho in cgs, from the code's internal energy density.

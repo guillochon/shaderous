@@ -16,14 +16,15 @@ export const PRESET_FILES: Record<string, SetupSpec> = Object.fromEntries(Object
  * file not listed goes last, in its own group.
  */
 export const PRESET_ORDER: readonly string[] = [
-  'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'driven-turbulence', 'jeans',
+  'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'thermal-instability-hhe', 'driven-turbulence', 'jeans',
   'taylor-green', 'shear-layers', 'cylinder-wake', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho',
   'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
   'radiating-sphere', 'sedov-rad-transport', 'radiation-shadow', 'radiative-shock', 'radiative-shock-supercritical', 'radiation-star',
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',
-  'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'zeldovich-pancake',
+  'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'second-collapse', 'zeldovich-pancake',
   'wd-collision', 'wd-collision-burning',
-  'tidal-disruption', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',
+  'tidal-disruption', 'tidal-disruption-hhe', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',
+  'common-envelope', 'common-envelope-hhe',
   'binary', 'mri-disk', 'shearing-wave', 'mri-box',
   'orszag-tang', 'mhd-blast', 'mhd-rotor', 'brio-wu', 'field-loop', 'field-loop-dense', 'alfven-wave', 'alfven-collision', 'alfven-packets', 'tearing', 'island-coalescence', 'x-point', 'driven-turbulence-mhd',
   'advection', 'empty', 'empty-mhd',

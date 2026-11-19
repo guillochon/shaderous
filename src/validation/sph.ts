@@ -9,6 +9,8 @@ import { withAmr, withSim, type TestDef } from './tests';
 import type { AmrSim } from '../amr/amr_sim';
 import { compileSetup } from '../setup/compile';
 import type { SetupSpec } from '../setup/spec';
+import { makeEos } from '../eos/eos';
+import { problemById } from '../presets/index';
 
 /**
  * A spherical run from `rMin` to `rMax` (logarithmic in r with `log`), ideal gas, from
@@ -449,6 +451,85 @@ export const SPH_TESTS: TestDef[] = [
       await withAmr(gpu, p, 128, { ndim: 2, amrLevels: 1 }, (sim) => check(sim, 'blocks'));
       const pass = ['uniform', 'blocks'].every((t) => m[`${t}_finite`] === 1 && m[`${t}_floored`] === 0 && m[`${t}_mass_change`] < 1e-5);
       return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'sph-second-collapse',
+    name: 'Spherical: the second collapse of a protostellar first core (hydrogen and helium)',
+    criterion: 'The second-collapse preset at 128 x 128: a first core whose center is at 1.8e-8 g/cm^3 and 2100 K, where H2 is dissociating, run for 2.4 time units (3.8 years). The center collapses along its adiabat: its temperature is within 1% of the adiabat’s, by the float64 mirror of the tabulated equation of state, from 2 to 10,000 times the starting density (published: 2000 K at 1e-8 g/cm^3, a few thousand kelvin through dissociation; Masunaga & Inutsuka 2000, Tomida et al. 2013). It stops when the hydrogen is atomic: a second core, its center 30,000 times denser than at the start (5e-4 g/cm^3) and its gas hotter than 15,000 K, behind a shock inside 0.3 au, with the mass held to 0.5% (the outer face is open)',
+    async run(gpu) {
+      return withSim(gpu, problemById('second-collapse'), 128, { ndim: 2 }, async (sim) => {
+        const c = sim.cfg;
+        const eos = makeEos(c.eos, c.eosParams);
+        const { helmRho: cr, helmT: cT } = c.eosParams;
+        const n = c.n;
+        const g = sphGrid(c);
+        const j = n >> 1;
+        // The innermost shell at the equator: density (g/cm^3), temperature (K).
+        const center = (u1: Float32Array, u2: Float32Array) => {
+          const o = 4 * (j * n);
+          return { rho: u1[o], eint: u2[o + 1], T: eos.temperature(u1[o], u2[o + 1]) * cT };
+        };
+        const first = await sim.readState();
+        const c0 = center(first.u1, first.u2);
+        // The adiabat through the starting center, du = p / rho^2 drho, by Runge-Kutta in ln rho.
+        const N = 2400;
+        const h = Math.log(1e6) / N;
+        const lnT: number[] = [];
+        let u = c0.eint / c0.rho;
+        const f = (lr: number, v: number) => eos.pressure(Math.exp(lr), Math.exp(lr) * v) / Math.exp(lr);
+        for (let k = 0; k <= N; k++) {
+          const lr = Math.log(c0.rho) + k * h;
+          lnT.push(Math.log(eos.temperature(Math.exp(lr), Math.exp(lr) * u) * cT));
+          const k1 = f(lr, u);
+          const k2 = f(lr + h / 2, u + (h * k1) / 2);
+          const k3 = f(lr + h / 2, u + (h * k2) / 2);
+          const k4 = f(lr + h, u + h * k3);
+          u += (h * (k1 + 2 * k2 + 2 * k3 + k4)) / 6;
+        }
+        const adiabat = (rho: number) => {
+          const x = Math.min(Math.max(Math.log(rho / c0.rho) / h, 0), N - 1e-9);
+          const k = Math.floor(x);
+          return Math.exp(lnT[k] + (x - k) * (lnT[k + 1] - lnT[k]));
+        };
+        const d0 = await sim.diagnostics();
+        let track = 0;
+        let samples = 0;
+        let d = d0;
+        let last = first;
+        for (let it = 0; it < 400 && d.t < c.tEnd && d.dt === d.dt; it++) {
+          sim.step(500);
+          d = await sim.diagnostics();
+          last = await sim.readState();
+          const w = center(last.u1, last.u2);
+          if (w.rho > 2 * c0.rho && w.rho < 1e4 * c0.rho) {
+            track = Math.max(track, Math.abs(w.T / adiabat(w.rho) - 1));
+            samples++;
+          }
+        }
+        // The second core: the center, the hottest shell, and the shock (the fastest infall).
+        const end = center(last.u1, last.u2);
+        let tMax = 0;
+        let shock = 0;
+        let vIn = 0;
+        for (let i = 0; i < n; i++) {
+          const o = 4 * (j * n + i);
+          tMax = Math.max(tMax, eos.temperature(last.u1[o], last.u2[o + 1]) * cT);
+          const v = last.u1[o + 1] / last.u1[o];
+          if (v < vIn) {
+            vIn = v;
+            shock = g.r(i);
+          }
+        }
+        const metrics = {
+          start_rho_cgs: c0.rho * cr, start_T_K: c0.T,
+          track_T_vs_adiabat: track, track_samples: samples,
+          end_rho_cgs: end.rho * cr, end_T_K: end.T, hottest_K: tMax, shock_radius_au: shock,
+          mass_change: Math.abs(d.mass / d0.mass - 1), steps: d.steps, t: d.t,
+        };
+        const pass = c0.T > 2000 && c0.T < 2200 && samples >= 4 && track < 0.01 && end.rho * cr > 5e-4 && tMax > 15000 && shock < 0.3 && metrics.mass_change < 5e-3 && Number.isFinite(d.eTot);
+        return { pass, metrics };
+      });
     },
   },
 ];

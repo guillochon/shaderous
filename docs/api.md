@@ -122,7 +122,7 @@ by `npm run gen`.
 | `amr` | The run | Levels of refinement, 0 to 5. With n but no amr, the grid is uniform |
 | `tend` | Settings | End time (inf for none) |
 | `sym` | Settings | Mirror symmetry: none, x, y, z, xy, xz, yz, xyz. Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost |
-| `eos` | Settings | Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
+| `eos` | Settings | Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz, hhe. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |
 | `gamma` | Settings | gamma. Adiabatic index γ: p = (γ - 1) ρ e for an ideal gas, p = K ρ^γ for a barotropic one |
 | `K` | Settings | K (p = K rho^gamma). Barotropic constant K: p = K ρ^γ. With γ = 1 it is the square of the sound speed |
 | `lc` | Settings | Sound speed. The liquid’s sound speed c₀, a constant: p = c₀² (ρ - ρ₀). It is chosen, not physical: ten times the fastest flow keeps the density within 1% of ρ₀ (a Mach number of 0.1), and the step shrinks in proportion as it grows |
@@ -131,6 +131,7 @@ by `npm run gen`.
 | `degrho` | Settings | Degeneracy density. Density at which the electrons’ Fermi momentum reaches mₑc. For a setup with physical units it is set from the composition (about 2×10⁶ g/cm³ for C/O); in code units |
 | `degp` | Settings | Degeneracy pressure scale. The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units |
 | `coulomb` | Settings | Coulomb corrections. The ions’ Coulomb energy, as a multiplier: 1 for all of it, 0 for none. It lowers the cold pressure by a percent or two in dense white dwarf matter (more in the envelope) and adds to the heat capacity of cold, strongly coupled ions |
+| `hherad` | Settings | Radiation term. The radiation’s pressure a T⁴ / 3 and energy a T⁴ in the equation of state, as a multiplier: 1 for gas in equilibrium with its radiation (a star’s interior), 0 for gas alone (a cloud or thin gas, which its radiation leaves). Radiation transport carries it instead when it is on |
 | `iont` | Settings | Ionization temperature. The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Set from physical constants for a setup with physical units |
 | `ionrho` | Settings | Saha density. Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units |
 | `frho` | Settings | Tenuous below density. Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off |

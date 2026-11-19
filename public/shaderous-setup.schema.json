@@ -488,7 +488,8 @@
       "gas_radiation",
       "degenerate",
       "ionizing",
-      "helmholtz"
+      "helmholtz",
+      "hhe"
      ],
      "title": "Equation of state",
      "description": "How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues"
@@ -956,7 +957,7 @@
       }
      ],
      "title": "Composition",
-     "description": "What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen"
+     "description": "What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen. The hydrogen and helium equation of state has tables for the solar ones and for hydrogen"
     },
     "species": {
      "anyOf": [
@@ -2618,6 +2619,56 @@
       ],
       "additionalProperties": false,
       "description": "A cold gas sphere whose density falls as 1/r, rho = M / (2 pi R^2 r), in thin gas at the same specific internal energy (for gamma = 5/3). With G = M = R = 1 it collapses in about a unit of time."
+     },
+     {
+      "type": "object",
+      "title": "Flow: First core (protostellar)",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "first-core"
+       },
+       "logrhoc": {
+        "type": "number",
+        "title": "Central density (log₁₀ g/cm³)",
+        "default": -7.75,
+        "minimum": -11,
+        "maximum": -6
+       },
+       "tad": {
+        "type": "number",
+        "title": "Adiabat (K at 10⁻¹³ g/cm³)",
+        "default": 10,
+        "minimum": 3,
+        "maximum": 100
+       },
+       "deficit": {
+        "type": "number",
+        "title": "Pressure deficit",
+        "default": 0.05,
+        "minimum": 0,
+        "maximum": 0.5
+       },
+       "logamb": {
+        "type": "number",
+        "title": "Density outside (log₁₀ g/cm³)",
+        "default": -13,
+        "minimum": -16,
+        "maximum": -11
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A first hydrostatic core of protostellar collapse at the middle of the box: molecular gas on one adiabat, in balance with its own gravity, in thin gas at its surface pressure. Past a central density of 3e-9 g/cm^3 its center is above 2000 K, where H2 dissociates, and it collapses. Needs physical units and an equation of state with a temperature (hydrogen and helium)."
      },
      {
       "type": "object",

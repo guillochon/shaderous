@@ -1,0 +1,39 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "second-collapse",
+  "name": "Protostellar second collapse",
+  "group": "Self-gravity",
+  "family": "second-collapse",
+  "familyName": "Protostellar second collapse",
+  "variant": "Standard",
+  "blurb": "A first hydrostatic core of protostellar collapse, 0.036 solar masses of molecular hydrogen and helium 2.6 au across, whose center has reached 2100 K. There H2 dissociates, which takes up the heat of compression: Γ₁ falls to 1.1, below the 4/3 a ball needs to hold itself up, and the center falls in until its hydrogen is atomic, a hundred thousand times denser. A second core, the protostar, forms there behind a shock. A spherical (r, θ) run on shells spaced evenly in ln r, from 0.008 to 6 au, with the tabulated hydrogen and helium equation of state.",
+  "domain": {
+    "ndim": 2,
+    "n": 128,
+    "box": 6,
+    "supports2d": true,
+    "geometry": "spherical",
+    "rMin": 0.008,
+    "logR": true,
+    "bc": { "lo": [2, 2, 0], "hi": [1, 2, 0] },
+    "units": {
+      "name": "first core",
+      "length": { "unit": "au", "value": 1 },
+      "mass": { "unit": "Msun", "value": 0.01 }
+    }
+  },
+  "physics": {
+    "eos": "hhe",
+    "eosParams": { "hheRad": 0 },
+    "composition": "solar",
+    "gravity": "isolated",
+    "G": "units",
+    "floors": { "rho": 1e-7, "p": 1e-12 }
+  },
+  "parts": [
+    { "kind": "flow", "name": "first-core", "logrhoc": -7.75, "tad": 10, "deficit": 0.05, "logamb": -13 }
+  ],
+  "run": { "tEnd": 2.4, "checkpointDt": 0.05 },
+  "view": { "field": 0, "log": true, "mode": "slice" }
+}
