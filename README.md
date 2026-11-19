@@ -9,8 +9,8 @@
 <a href="docs/img/gallery/detonation-pulsating.jpg"><img src="docs/img/gallery/thumb/detonation-pulsating.jpg" width="16%" alt="Pulsating detonation front: pressure (2D, 1024² cells)" title="Pulsating detonation front: pressure (2D, 1024² cells)"></a> <a href="docs/img/gallery/tidal-disruption-n3-full.jpg"><img src="docs/img/gallery/thumb/tidal-disruption-n3-full.jpg" width="16%" alt="A centrally concentrated (γ = 4/3) star torn apart by a black hole: density (3D, adaptive mesh, 512³ finest)" title="A centrally concentrated (γ = 4/3) star torn apart by a black hole: density (3D, adaptive mesh, 512³ finest)"></a> <a href="docs/img/gallery/radiation-shadow.jpg"><img src="docs/img/gallery/thumb/radiation-shadow.jpg" width="16%" alt="A dense clump casting a shadow in a beam of radiation: radiation energy (2D, 1024² cells)" title="A dense clump casting a shadow in a beam of radiation: radiation energy (2D, 1024² cells)"></a> <a href="docs/img/gallery/sedov.jpg"><img src="docs/img/gallery/thumb/sedov.jpg" width="16%" alt="Sedov-Taylor blast wave: isosurfaces of density (3D, 128³ cells)" title="Sedov-Taylor blast wave: isosurfaces of density (3D, 128³ cells)"></a> <a href="docs/img/gallery/x-point.jpg"><img src="docs/img/gallery/thumb/x-point.jpg" width="16%" alt="Magnetic X-point collapse: pressure (2D, 1024² cells)" title="Magnetic X-point collapse: pressure (2D, 1024² cells)"></a> <a href="docs/img/gallery/blast-axisymmetric.jpg"><img src="docs/img/gallery/thumb/blast-axisymmetric.jpg" width="16%" alt="Axisymmetric blast wave in (R, z) coordinates: density gradient (2D, 1024² cells)" title="Axisymmetric blast wave in (R, z) coordinates: density gradient (2D, 1024² cells)"></a>
 </p>
 
-**Compressible gas dynamics and ideal MHD, with shocks, gravity and adaptive mesh refinement,
-running entirely on your GPU inside a web browser. For physics research and teaching.**
+**Compressible gas dynamics, ideal MHD and radiation transport, with shocks, gravity, nearly
+incompressible liquids and adaptive mesh refinement, running entirely on your GPU inside a web browser. For physics research and teaching.**
 
 **▶ Open it: https://guillochon.github.io/shaderous/** · Validation suite:
 [validate.html](https://guillochon.github.io/shaderous/validate.html) · Requires a browser
@@ -20,7 +20,9 @@ with WebGPU (current Chrome, Edge, Firefox or Safari).
 
 **In the browser (no install).** Open the [live site](https://guillochon.github.io/shaderous/).
 It starts with a 2D Kelvin-Helmholtz instability. Choose another problem from the left
-panel: shock tubes, blasts, instabilities, a supersonic wind tunnel, detonations, magnetized
+panel: shock tubes, blasts, instabilities, a supersonic wind tunnel, liquids at low Mach number
+(a vortex street behind a cylinder, a lid-driven cavity), detonations, radiation (a clump's
+shadow, radiative shocks), magnetized
 flows, and astrophysical flows such as stars, white dwarf collisions, tidal disruptions and
 accreting binaries. Drag in the view to rotate it, and use the brushes to stir, heat or add
 gas, or, in a magnetized run, to strengthen or drag the field. The address bar always describes the current setup, so copying it (or pressing
@@ -42,6 +44,8 @@ file ([docs/setups.md](docs/setups.md)). Some examples:
 - [The Orszag-Tang vortex, a classic of magnetohydrodynamics](https://guillochon.github.io/shaderous/?problem=orszag-tang)
 - [A magnetized star torn apart by a black hole, with its field lines](https://guillochon.github.io/shaderous/?problem=tidal-disruption-dipole)
 - [A cellular detonation front](https://guillochon.github.io/shaderous/?problem=detonation-cellular)
+- [A vortex street behind a cylinder, in a nearly incompressible liquid](https://guillochon.github.io/shaderous/?problem=cylinder-wake)
+- [The shadow of an opaque clump in a beam of radiation](https://guillochon.github.io/shaderous/?problem=radiation-shadow)
 - [A sub-Chandrasekhar Type Ia supernova: a white dwarf's helium shell detonates, then its core](https://guillochon.github.io/shaderous/?problem=sub-chandra)
 
 **From an AI agent, or the command line.** The npm package runs the simulator in headless
@@ -90,12 +94,12 @@ Playwright, and `npm run test:headless` checks the command-line runner and the M
 
 ## What it is
 
-Shaderous is a three-dimensional finite-volume code for compressible gas dynamics and ideal
-magnetohydrodynamics. Every
+Shaderous is a three-dimensional finite-volume code for compressible gas dynamics, ideal
+magnetohydrodynamics and radiation hydrodynamics, which also runs nearly incompressible liquids. Every
 fluid and gravity computation runs in WGSL compute shaders through WebGPU, so it runs on GPUs
 from any vendor, from a phone to a workstation, with nothing to install. Nothing in the
 scheme is specific to astrophysics: it solves the compressible Euler equations, or the ideal
-MHD equations, with optional gravity, diffusion, heating, cooling and nuclear burning, and fits a fluid dynamics course as well as an
+MHD equations, with optional gravity, diffusion, heating, cooling, radiation transport and nuclear burning, and fits a fluid dynamics course as well as an
 astrophysics one. The problems that ship with it are mostly astrophysical because they test
 every part of the code at once: strong shocks, self-gravity, stars that must stay in
 hydrostatic balance, accreting point masses, cooling, and matter as far from an ideal gas as
@@ -116,6 +120,9 @@ degenerate electrons. It uses the methods of production simulation codes:
 - nearly incompressible flow: a weakly compressible liquid on the same explicit scheme, and for
   it an implicit pressure solve (multigrid) that takes the timestep from the flow speed instead
   of the sound speed, on the uniform grid and the adaptive mesh;
+- gray radiation transport with the M1 closure, in the gas's frame and with a reduced speed of
+  light: radiation that diffuses through opaque gas, streams through thin gas and casts shadows,
+  heats and pushes the gas, on the uniform grid and the adaptive mesh;
 - optically thin cooling, viscosity, thermal conduction, and species carried with the gas,
   whose composition (and each species' own gamma) sets the equation of state cell by cell;
 - nuclear burning from fuel to ash by a single-step Arrhenius reaction, with steady (ZND)
