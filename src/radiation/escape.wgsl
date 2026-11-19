@@ -54,4 +54,7 @@ fn main(@builtin(local_invocation_index) lix: u32) {
   ESC[1] = (t - ESC[0]) - y;
   ESC[0] = t;
   ESC[2] = lum;
+  // The time this total is of: the end of the step (the clock banks it at the next). A readout
+  // made while the run goes on reads the clock and this record some steps apart.
+  ESC[3] = clock.t + clock.dt;
 }

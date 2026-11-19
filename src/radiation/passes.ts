@@ -29,6 +29,12 @@ export interface RadDiagnostics {
    * time between them is the mean luminosity, with nothing missed.
    */
   escaped: number;
+  /**
+   * The time `escaped` is the total at. A readout made while the run goes on reads the clock
+   * first and this some steps later: a luminosity from the change of `escaped` divides by the
+   * change of this, not of the readout's t.
+   */
+  escapedAt: number;
   /** cells at the streaming limit |F| = c E */
   streaming: number;
   /** cells where |v| + c_s > chat / 3: the reduced speed of light is too slow for the gas there */
@@ -46,6 +52,7 @@ export function radDiagnosticsFrom(r: Float32Array): RadDiagnostics {
   return {
     eRad: r[0], eRadReduced: r[1], reducedShare: r[0] > 0 ? r[2] / r[0] : 0, luminosity: r[3],
     escaped: r.length > k ? r[k] : 0,
+    escapedAt: r.length > k ? r[k + 3] : 0,
     streaming: r[4], tooFast: r[5], maxReducedFlux: r[6], maxTrad: r[7],
   };
 }

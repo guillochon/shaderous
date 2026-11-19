@@ -125,6 +125,24 @@ test('drives the panel controls and reports bad calls', async ({ page }) => {
   expect((await call(page, 'step', 1)).taken).toBe(1);
 });
 
+test('a setting the simulator is built with, changed mid-run, starts the run again with it', async ({ page }) => {
+  await page.goto('/?headless=1&problem=sedov&dim=2&n=128');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'step', 10);
+  expect((await call(page, 'diagnostics')).radiation).toBeUndefined();
+  // Radiation transport's passes are made with the simulator: the control builds it again.
+  await call(page, 'control', 'rad', 'm1');
+  expect(await call(page, 'state')).toMatchObject({ steps: 0 });
+  await call(page, 'step', 5);
+  const d = await call(page, 'diagnostics');
+  expect(d.radiation.eRad).toBeGreaterThan(0);
+  // And off again.
+  await call(page, 'control', 'rad', 'off');
+  await call(page, 'step', 5);
+  expect((await call(page, 'diagnostics')).radiation).toBeUndefined();
+  expect(await call(page, 'errors')).toEqual([]);
+});
+
 test('the field tools strengthen, weaken and pull the magnetic field, keeping div B', async ({ page }) => {
   // A page someone is watching (the tools paint in its frame loop), paused.
   await page.goto('/?problem=mhd-rotor&dim=2&n=256');

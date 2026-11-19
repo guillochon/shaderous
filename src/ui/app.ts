@@ -2192,6 +2192,7 @@ function applySettings(list: { setting: Setting; value: unknown }[]) {
   let shaders = false;
   let gravity = false;
   let again = false;
+  let rebuilt = false;
   for (const { setting, value } of list) {
     const key = setting.cfg;
     if (key === 'eos') {
@@ -2217,6 +2218,25 @@ function applySettings(list: { setting: Setting; value: unknown }[]) {
     if (key === 'bc' && cfg.amrLevels > 0 && [0, 1, 2].some((a) => cfg.bcLo[a] === 0 && !periodic[a])) again = true;
     if (key === 'gravity' || key === 'G') gravity = true;
     if (setting.option.apply === 'shaders') shaders = true;
+    // What the simulator is built with (radiation's passes, the pressure solver, mirrors, the
+    // driving's modes): a parameter write would leave the run as it was with the setting
+    // showing as changed. (Radiation switched on from the Setup dialog ran on without it.)
+    if (setting.option.apply === 'restart') rebuilt = true;
+    // The equation of state's own radiation term goes with the switch (as a link's does).
+    if (key === 'radiation') Object.assign(cfg, syncRadiationEos(cfg));
+  }
+  if (rebuilt) {
+    if (eos && eos !== cfg.eos) {
+      cfg.eos = eos;
+      if (eosHasEnergy(eos)) cfg.eosParams.gamma = Math.max(1.001, cfg.eosParams.gamma);
+    }
+    // The same setup with the settings as they now are, from its start; the view stays.
+    const mode = view.mode;
+    build(cfg.problem.id, cfg.n, cfg.ndim, cfg.amrLevels, true).then(() => {
+      view.mode = mode;
+      if (cfg) syncControls();
+    });
+    return;
   }
   if (eos && eos !== cfg.eos) switchEos(eos);
   else if (shaders) rebuildPipelines();
@@ -4462,20 +4482,23 @@ const liquidDeviation = (d: Diagnostics): number => {
   const r0 = cfg.eosParams.liqRho;
   return Math.max(Math.abs(d.ranges[0][0] / r0 - 1), Math.abs(d.ranges[0][1] / r0 - 1));
 };
-/** The readout before, for the luminosity: its time, the energy that had left, and the luminosity shown. */
-let radPrev: { t: number; escaped: number; lum: number } | null = null;
+/** The readout before, for the luminosity: the time of its escaped total, the total, and the luminosity shown. */
+let radPrev: { at: number; escaped: number; lum: number } | null = null;
 /**
  * Radiation's rows (RAD_ROWS of them; NaN without it). The luminosity is the energy that left
- * since the readout before over the time between: the first readout's, and one that repeats a
- * time, is the readout's own.
+ * since the readout before over the time between the two totals (their own times: a readout
+ * made while the run goes on reads the clock some steps before the total, so over the clock's
+ * interval the last readout before a pause gave a pause's the luminosity 0, and the first after
+ * it a spike). The first readout's, and a run started again, is the readout's own; one that
+ * repeats a time keeps the one before.
  */
 function radValues(d: Diagnostics): number[] {
   const r = d.radiation;
   if (!r) return new Array<number>(RAD_ROWS).fill(NaN);
   let lum = r.luminosity;
-  if (radPrev && d.t > radPrev.t) lum = (r.escaped - radPrev.escaped) / (d.t - radPrev.t);
-  else if (radPrev && d.t === radPrev.t) lum = radPrev.lum; // paused: the readout repeats
-  radPrev = { t: d.t, escaped: r.escaped, lum };
+  if (radPrev && r.escapedAt > radPrev.at) lum = (r.escaped - radPrev.escaped) / (r.escapedAt - radPrev.at);
+  else if (radPrev && r.escapedAt === radPrev.at) lum = radPrev.lum; // paused: the readout repeats
+  radPrev = { at: r.escapedAt, escaped: r.escaped, lum };
   return [lum, r.eRad, r.escaped, r.maxTrad, r.tooFast];
 }
 /** The diagnostics in DIAG_ROWS order. */
