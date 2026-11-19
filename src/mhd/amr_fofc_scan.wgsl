@@ -20,24 +20,10 @@
 
 override PER_CHUNK: u32 = 1u;
 override CHUNKS: u32 = 1u;
-// The correction's round (mhd/amr_fofc.wgsl): each lists its leaves once, under a stamp of its own.
-override ROUND: u32 = 0u;
 
 #include "mhd/amr_lookup.wgsl"
 #include "mhd/amr_fofc.wgsl"
-
-// List leaf `slot`, unless this step has already.
-fn list_leaf(slot: i32) {
-  let stamp = 2u * u32(fofc_stamp()) + ROUND;
-  if (atomicExchange(&SEEN[u32(slot)], stamp) == stamp) { return; }
-  let at = atomicAdd(&RL[0], 1u);
-  atomicStore(&RL[1u + at], u32(slot));
-  // Its chunk dispatches at least this many rows.
-  let c = at / PER_CHUNK;
-  let rows = at % PER_CHUNK + 1u;
-  atomicMax(&ARGS[6u * c + 1u], rows);
-  atomicMax(&ARGS[6u * c + 4u], rows);
-}
+#include "mhd/amr_fofc_list.wgsl"
 
 @compute @workgroup_size(64)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -46,39 +32,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let slot = i32(LIST[1u + i]);
   if (!fofc_block_marked(slot)) { return; }
   list_leaf(slot);
-  // Its face neighbors: the leaves at points one cell beyond each face, at the middles of its
-  // quarters (halves in 2D), so that a neighbor one level finer is found at each of its blocks.
-  let level = u32(bt(slot, 0u));
-  let base = blk_coord(slot) * BS;
-  for (var k = 0; k < loop_count(6 * 4); k++) {
-    let a = k / 8;
-    if (a >= select(3, 2, is2d())) { break; }
-    let up = ((k / 4) & 1) == 1;
-    let q = k & 3;
-    let b = (a + 1) % 3;
-    let c = (a + 2) % 3;
-    var l = vec3<i32>(0);
-    l[a] = select(-1, BS, up);
-    l[b] = select(BS / 4, 3 * BS / 4, (q & 1) == 1);
-    l[c] = select(BS / 4, 3 * BS / 4, (q & 2) == 2);
-    if (is2d()) {
-      if (c == 2 && q >= 2) { continue; }
-      if (b == 2 && (q & 1) == 1) { continue; }
-      l.z = 0;
-    }
-    let g = base + l;
-    if (fofc_beyond_wall(level, g)) { continue; }
-    let s = fofc_leaf_at(level, map_cell(level, g).g);
-    // (With time bins, a neighbor at its midpoint takes the corrected register in its deposit.)
-    if (s >= 0 && s != slot && blk_active(s)) { list_leaf(s); }
-  }
+  list_neighbors(slot);
 }
 
+// After the correction: the list empty, and both rounds' dispatches (ARGS, and ARGS1 the
+// recheck's: mhd/amr_fofc_recheck.wgsl) with no rows.
+@group(0) @binding(40) var<storage, read_write> ARGS1: array<atomic<u32>>;
 @compute @workgroup_size(1)
 fn reset_main() {
   atomicStore(&RL[0], 0u);
   for (var c = 0u; c < CHUNKS; c++) {
     atomicStore(&ARGS[6u * c + 1u], 0u);
     atomicStore(&ARGS[6u * c + 4u], 0u);
+    atomicStore(&ARGS1[6u * c + 1u], 0u);
+    atomicStore(&ARGS1[6u * c + 4u], 0u);
   }
 }

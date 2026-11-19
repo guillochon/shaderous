@@ -32,41 +32,16 @@
 
 @group(0) @binding(39) var M1: texture_3d<f32>;
 
-const FOFC_KEEP = 0.125;
+#include "mhd/amr_fofc_core.wgsl"
+
 // The texel at atlas position x is marked, in either round.
 fn fofc_texel_marked(x: vec3<i32>) -> bool {
   let s = fofc_stamp();
   return textureLoad(NF, x, 0).w == s || textureLoad(M1, x, 0).x == s;
 }
 
-fn fofc_stamp() -> f32 {
-  return clock.steps + 1.0;
-}
-// The atlas texel of a block that holds its mark: a corner of its ghost padding.
-fn fofc_corner(slot: i32) -> vec3<i32> {
-  return atl(blk_origin(slot), vec3<i32>(-NGH, -NGH, select(-NGH, 0, is2d())));
-}
 fn fofc_block_marked(slot: i32) -> bool {
   return fofc_texel_marked(fofc_corner(slot));
-}
-// Beyond a wall or an open face of the domain there is no cell of another block.
-fn fofc_beyond_wall(level: u32, g: vec3<i32>) -> bool {
-  let n = n_at(level);
-  for (var a = 0; a < select(3, 2, is2d()); a++) {
-    if (g[a] < 0 && P.bc_lo[a] != BC_PERIODIC) { return true; }
-    if (g[a] >= n[a] && P.bc_hi[a] != BC_PERIODIC) { return true; }
-  }
-  return false;
-}
-// The leaf at global cell g (in the domain) of `level`: that level's, the coarser one around it,
-// or the finer one at its lower corner; -1 if none.
-fn fofc_leaf_at(level: u32, g: vec3<i32>) -> i32 {
-  let h = holder(level, g);
-  if (h.rel <= 0) { return h.slot; }
-  var gf = 2 * g;
-  if (is2d()) { gf.z = 0; }
-  let f = holder(level + 1u, gf);
-  return select(-1, f.slot, f.rel == 0);
 }
 // Global cell g (in the domain) of `level` is marked: in the leaf of that level, or the coarser
 // one around it (a finer neighbor's cells mark its own faces, not this level's).

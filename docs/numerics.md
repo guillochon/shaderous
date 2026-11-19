@@ -1338,8 +1338,8 @@ $`E`$ includes $`B^2/2`$.
   since a coarser or slower neighbor reads the corrected register. A second round follows, as on
   the uniform grid: a pass over the leaves of the first marks, in a texture of one float a texel
   (the face texture, of four, cannot be read and written in one pass), the cells the first round
-  left with less than 1/8 of their density, and the scan, fluxes and update run again with both
-  marks. It judges by density alone: it sees the internal energy after its floor, and marking
+  left with less than 1/8 of their density and adds their leaves' face neighbors to the list,
+  and the fluxes and update run again over the whole list with both marks. It judges by density alone: it sees the internal energy after its floor, and marking
   every cold cell at the floor, step after step, left the cold gas over the poles at the pressure
   floor in a thousand cells and more. One chunk per leaf agrees with one chunk bit for bit.
 
@@ -1347,8 +1347,10 @@ $`E`$ includes $`B^2/2`$.
   grid Orszag-Tang at $`1024^2`$ 8% faster (the update's cell code, now one function, compiles
   better), an MHD blast at $`128^3`$ and $`256^3`$ 3% slower, the MRI box at $`128^3`$ within 2%; on
   blocks an MHD blast at $`128^3`$ with one level within 1%, and a field loop at $`1024^2`$ with two
-  levels, whose step takes 1.1 ms, 13% slower (7.6% with the first round alone): the two rounds
-  add nine small passes a step, about 0.14 ms in Chrome on Windows however little they do.
+  levels, whose step takes 1.1 ms, 11.5% slower: the two rounds add seven small passes a step
+  (scan, fluxes, update, recheck, fluxes, update, reset of the list), about 0.13 ms in Chrome on
+  Windows however little they do. They were nine (13%) until round 1 kept round 0's list, adding
+  to it from the recheck, instead of emptying it and scanning again.
   Issue #3's disk at $`128^3`$ now runs 400 steps on the uniform grid with at most 5 floored cells,
   and on blocks with one and two levels and with time bins with at most 58 (from tens of
   thousands before the second round and the narrower energy rule), all with $`\nabla\cdot B`$ at

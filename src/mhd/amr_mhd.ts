@@ -182,12 +182,14 @@ export class AmrMhd {
    */
   private redoList: GPUBuffer;
   private redoArgs: GPUBuffer;
+  /** round 1's dispatch sizes, which the recheck sets as it adds to the list (mhd/amr_fofc_recheck.wgsl) */
+  private redoArgs1: GPUBuffer;
   /** round 1's marks, a float a texel (mhd/amr_fofc_recheck.wgsl) */
   private marks1: GPUTexture;
   /** the substep's stamp per slot of the leaves listed (mhd/amr_fofc_scan.wgsl) */
   private redoSeen: GPUBuffer;
   /** [round] */
-  private pScan: GPUComputePipeline[] = [];
+  private pScan?: GPUComputePipeline;
   private pRecheck?: GPUComputePipeline;
   /** [parity][chunk]: between the rounds, the cells round 0 left all but emptied (mhd/amr_fofc_recheck.wgsl) */
   private gRecheck: GPUBindGroup[][] = [];
@@ -195,8 +197,8 @@ export class AmrMhd {
   private pFluxRedo?: GPUComputePipeline;
   private pUpdateRedo?: GPUComputePipeline;
   /** [parity][round] */
-  private gScan: GPUBindGroup[][] = [];
-  private gScanL: GPUBindGroup[][] = [];
+  private gScan: GPUBindGroup[] = [];
+  private gScanL: GPUBindGroup[] = [];
   private gScanReset?: GPUBindGroup;
   private gFluxRedo: GPUBindGroup[][] = [];
   private gUpdateRedo: GPUBindGroup[][] = [];
@@ -236,6 +238,8 @@ export class AmrMhd {
     const template = new Uint32Array(6 * this.chunkBufs.length);
     for (let i = 0; i < this.chunkBufs.length; i++) template.set([this.groups(FBOX), 0, 1, this.groups(BS + 1), 0, 1], 6 * i);
     d.queue.writeBuffer(this.redoArgs, 0, template);
+    this.redoArgs1 = d.createBuffer({ label: 'MHD flux correction dispatch sizes, round 1', size: 24 * this.chunkBufs.length, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT | GPUBufferUsage.COPY_DST });
+    d.queue.writeBuffer(this.redoArgs1, 0, template);
   }
 
   /** The W textures are the hydro primitives' (W1, W2) when given, so the display can share them. */
@@ -281,7 +285,7 @@ export class AmrMhd {
     const still = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
     const slots = { ...still, bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl' };
     const v = (x: GPUTexture) => x.createView();
-    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be, f2r, u2r, scan, scanReset, scan1, recheck] = await Promise.all([
+    const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be, f2r, u2r, scan, scanReset, recheck] = await Promise.all([
       computePipeline(d, assemble('mhd/amr_regrid.wgsl', still), 'MHD re-mesh faces'),
       computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', still), 'MHD re-mesh energy'),
       computePipeline(d, assemble('mhd/amr_assemble.wgsl', slots), 'MHD block assembly 1', { RATES_ON: 1, ASM_STAGE: 1 }),
@@ -312,15 +316,14 @@ export class AmrMhd {
       computePipeline(d, assemble('mhd/amr_update.wgsl', slots), 'MHD block update, correction', { STAGE: 2, SPECIES_FLUX: this.dep.massFlux ? 1 : 0, REDO: 1 }),
       computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction scan', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length }),
       computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction list reset', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length }, 'reset_main'),
-      computePipeline(d, assemble('mhd/amr_fofc_scan.wgsl', slots), 'MHD flux correction scan, round 1', { PER_CHUNK: this.perChunk, CHUNKS: this.chunkBufs.length, ROUND: 1 }),
-      computePipeline(d, assemble('mhd/amr_fofc_recheck.wgsl', slots), 'MHD flux correction recheck'),
+      computePipeline(d, assemble('mhd/amr_fofc_recheck.wgsl', slots), 'MHD flux correction recheck', { PER_CHUNK: this.perChunk }),
     ]);
     this.pFluxRedo = f2r;
     this.pUpdateRedo = u2r;
-    this.pScan = [scan, scan1];
+    this.pScan = scan;
     this.pRecheck = recheck;
     this.pScanReset = scanReset;
-    this.gScanReset = bindGroupUsed(d, scanReset, { 36: this.redoList, 37: this.redoArgs }, 'MHD flux correction list reset');
+    this.gScanReset = bindGroupUsed(d, scanReset, { 36: this.redoList, 37: this.redoArgs, 40: this.redoArgs1 }, 'MHD flux correction list reset');
     this.pBrush = [bf, be];
     this.gBrush = [0, 1].map((p) => {
       const o = 1 - p;
@@ -426,9 +429,14 @@ export class AmrMhd {
           ),
           updateRedo: upd(u2r, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.halfFaces) }, this.faces[o]),
           // (Not over its own list, which it fills.)
-          scan: list === this.redoList ? undefined : [scan, scan1].map((pipe) => bindGroupUsed(d, pipe, { 0: params, 1: clock, 30: bt, 31: list, 28: v(idx), 35: v(this.faces[o]), 36: this.redoList, 37: this.redoArgs, 38: this.redoSeen, 39: v(this.marks1), ...bin }, 'MHD flux correction scan')),
+          scan: list === this.redoList ? undefined : bindGroupUsed(d, scan, { 0: params, 1: clock, 30: bt, 31: list, 28: v(idx), 35: v(this.faces[o]), 36: this.redoList, 37: this.redoArgs, 38: this.redoSeen, 39: v(this.marks1), ...bin }, 'MHD flux correction scan'),
           // Over its own list: what round 0 left, against the start.
-          recheck: perChunk((c) => bindGroupUsed(d, recheck, { 0: params, 1: clock, 30: bt, 31: list, 14: c, 2: v(state[p][0]), 9: v(state[o][0]), 11: v(this.marks1) }, 'MHD flux correction recheck')),
+          recheck: perChunk((c) =>
+            bindGroupUsed(d, recheck, {
+              0: params, 1: clock, 30: bt, 14: c, 2: v(state[p][0]), 9: v(state[o][0]), 11: v(this.marks1), 28: v(idx),
+              36: this.redoList, 37: this.redoArgs1, 38: this.redoSeen, ...bin,
+            }, 'MHD flux correction recheck'),
+          ),
         };
       };
       const all = groups(listLeaf, this.chunkBufs);
@@ -604,21 +612,19 @@ export class AmrMhd {
    * then stage 2's fluxes and update again over that list, chunk by chunk, and empty it. When
    * nothing is listed the fluxes and update dispatch no workgroups.
    */
-  private encodeCorrection(pass: GPUComputePassEncoder, parity: number, scan: GPUBindGroup[]) {
+  private encodeCorrection(pass: GPUComputePassEncoder, parity: number, scan: GPUBindGroup) {
     const n = this.chunks();
-    const reset = () => {
-      pass.setPipeline(this.pScanReset!);
-      pass.setBindGroup(0, this.gScanReset!);
-      pass.dispatchWorkgroups(1);
-    };
+    pass.setPipeline(this.pScan!);
+    pass.setBindGroup(0, scan);
+    pass.dispatchWorkgroups(Math.max(1, Math.ceil(this.nLeaf / 64)));
+    // Round 0 over the scan's list, sized by redoArgs; round 1 over the list as the recheck left it,
+    // sized by redoArgs1.
     for (let r = 0; r < 2; r++) {
-      pass.setPipeline(this.pScan[r]);
-      pass.setBindGroup(0, scan[r]);
-      pass.dispatchWorkgroups(Math.max(1, Math.ceil(this.nLeaf / 64)));
+      const args = r === 0 ? this.redoArgs : this.redoArgs1;
       const fluxes = (i: number) => {
         pass.setPipeline(this.pFluxRedo!);
         pass.setBindGroup(0, this.gFluxRedo[parity][i]);
-        pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i);
+        pass.dispatchWorkgroupsIndirect(args, 24 * i);
       };
       // As the step does: with several chunks, every chunk's fluxes first (they correct the
       // register, which a coarser or slower neighbor in another chunk reads), then each chunk's
@@ -628,19 +634,22 @@ export class AmrMhd {
         fluxes(i);
         pass.setPipeline(this.pUpdateRedo!);
         pass.setBindGroup(0, this.gUpdateRedo[parity][i]);
-        pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i + 12);
+        pass.dispatchWorkgroupsIndirect(args, 24 * i + 12);
       }
       if (r === 0) {
-        // Between the rounds: mark what round 0 left all but emptied, over its list.
+        // Between the rounds: mark what round 0 left all but emptied, and add to the list.
         for (let i = 0; i < n; i++) {
           pass.setPipeline(this.pRecheck!);
           pass.setBindGroup(0, this.gRecheck[parity][i]);
           pass.dispatchWorkgroupsIndirect(this.redoArgs, 24 * i + 12);
         }
       }
-      reset();
     }
+    pass.setPipeline(this.pScanReset!);
+    pass.setBindGroup(0, this.gScanReset!);
+    pass.dispatchWorkgroups(1);
   }
+
 
 
   /**
@@ -721,6 +730,7 @@ export class AmrMhd {
     this.redoList.destroy();
     this.redoSeen.destroy();
     this.redoArgs.destroy();
+    this.redoArgs1.destroy();
     this.allChunk.destroy();
     for (const b of this.chunkBufs) b.destroy();
   }
