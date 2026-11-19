@@ -1,7 +1,7 @@
 // The float64 prototype of the implicit-pressure step (src/reference/psplit.ts; plans/incompressible.md 4.2).
 import { describe, expect, it } from 'vitest';
 import { exactRiemann } from '../../src/reference/riemann_exact';
-import { RefSplit, splitDefaults, type SplitConfig } from '../../src/reference/psplit';
+import { RefSplit, splitCentered, splitDefaults, type SplitConfig } from '../../src/reference/psplit';
 import { defaultEosParams, makeEos, type Eos } from '../../src/eos/eos';
 import { greshoProfile } from '../../src/setup/parts/flows/low_mach';
 
@@ -166,6 +166,117 @@ describe('implicit-pressure prototype, a gas with an energy', () => {
     expect(Math.abs(single.kept - double.kept)).toBeLessThan(2e-3);
     expect(single.dev).toBeLessThan(2e-3);
   });
+
+  it('holds the vortex alike at Mach 0.1, 0.01 and 0.001 time-centered too, and keeps more of it', () => {
+    const be = run(0.01, { gas: 'carried' });
+    const runs = [0.1, 0.01, 0.001].map((m) => ({ m, ...run(m, { gas: 'carried', ...splitCentered }) }));
+    for (const r of runs) {
+      expect(r.done, `Mach ${r.m}`).toBe(true);
+      expect(r.kept, `Mach ${r.m}`).toBeGreaterThan(be.kept);
+      expect(r.kept, `Mach ${r.m}`).toBeLessThan(1);
+      expect(Math.abs(r.steps - be.steps), `Mach ${r.m}`).toBeLessThanOrEqual(0.15 * be.steps);
+      expect(r.dev, `Mach ${r.m}`).toBeLessThan(2e-3);
+      expect(r.mass, `Mach ${r.m}`).toBeLessThan(1e-11);
+      expect(r.energy, `Mach ${r.m}`).toBeLessThan(1e-11);
+    }
+  });
+});
+
+// The time-centered step (pressure/theta.wgsl; splitCentered): theta = max(chi, 1/2 + K C) per
+// cell, the gas carried on the mean of the old and corrected face velocities, and the predictor's
+// pressure compressed where sound is resolved. One solve a step, as backward Euler.
+describe('implicit-pressure prototype, time-centered', () => {
+  const l1 = (a: Float64Array, b: Float64Array) => a.reduce((s, v, i) => s + Math.abs(v - b[i]), 0) / a.length;
+
+  it('carries resolved sound without backward Euler’s damping, and still damps sound it does not resolve', () => {
+    const n = 64;
+    const wave = (courant: number) => {
+      const s = new RefSplit(cfg({ nx: n, ny: 1, dx: 1 / n, eos: liquid(1), cfl: 1, acousticCfl: courant, predGradP: 'none', tol: 1e-12, ...splitCentered }));
+      const a = 1e-4;
+      s.init((x) => ({ rho: 1 + a * Math.sin(2 * Math.PI * x), vx: a * Math.sin(2 * Math.PI * x), vy: 0, vz: 0, p: 0, s: 0 }));
+      let peak = 0;
+      while (s.t < 1 - 1e-12) {
+        s.step(1);
+        for (let i = 0; i < n; i++) peak = Math.max(peak, Math.abs(s.U[0][i] - 1));
+      }
+      let re = 0;
+      let im = 0;
+      for (let i = 0; i < n; i++) {
+        const x = (i + 0.5) / n - 0.5;
+        re += (s.U[0][i] - 1) * Math.sin(2 * Math.PI * x);
+        im += (s.U[0][i] - 1) * Math.cos(2 * Math.PI * x);
+      }
+      return { amp: (2 * Math.hypot(re, im)) / n / a, peak: peak / a, steps: s.steps };
+    };
+    // theta = 0.55 at an acoustic Courant number of 0.5: 1.5% a period (backward Euler: 14%).
+    const fine = wave(0.5);
+    expect(fine.amp).toBeGreaterThan(0.98);
+    expect(fine.amp).toBeLessThan(1);
+    // theta = 1 at 10: damped as before, with no overshoot.
+    const coarse = wave(10);
+    expect(coarse.steps).toBeLessThan(10);
+    expect(coarse.amp).toBeLessThan(0.2);
+    expect(coarse.peak).toBeLessThanOrEqual(1 + 1e-9);
+  });
+
+  it('is second order in the step for a smooth wave in moving gas, where backward Euler is first', () => {
+    // A simple wave of amplitude 0.05 on a flow at 0.5 (Mach 0.42), 128 cells, to t = 0.3: each
+    // run against the same scheme at a fortieth of the default step.
+    const n = 128;
+    const run = (cfl: number, over: Partial<SplitConfig>) => {
+      const s = new RefSplit(cfg({ nx: n, ny: 1, dx: 1 / n, cfl, acousticCfl: Infinity, pa: 'upwind', gas: 'carried', tol: 1e-12, ...over }));
+      s.init((x) => {
+        const w = 0.05 * Math.sin(2 * Math.PI * x);
+        return { rho: 1 + w, vx: 0.5 + Math.sqrt(1.4) * w, vy: 0, vz: 0, p: 1 + 1.4 * w, s: 0 };
+      });
+      s.run(0.3);
+      return [Float64Array.from(s.U[0]), Float64Array.from(s.U[1])];
+    };
+    const error = (over: Partial<SplitConfig>) => {
+      const ref = run(0.01, over);
+      return [0.4, 0.2, 0.1].map((cfl) => {
+        const r = run(cfl, over);
+        return l1(r[0], ref[0]) + l1(r[1], ref[1]);
+      });
+    };
+    const be = error({});
+    const tc = error(splitCentered);
+    // Backward Euler: halving the step halves the error.
+    expect(be[0] / be[1]).toBeLessThan(2.2);
+    // Time-centered: it falls by four (measured: 3.9 and 3.6), and is a tenth of backward Euler's.
+    expect(tc[0] / tc[1]).toBeGreaterThan(3.4);
+    expect(tc[1] / tc[2]).toBeGreaterThan(3.2);
+    expect(tc[0]).toBeLessThan(0.1 * be[0]);
+  });
+
+  it('takes the Sod tube’s shock by backward Euler and the rest centered: less error, no ringing, as many steps', () => {
+    const n = 128;
+    const exact = exactRiemann({ rho: 1, u: 0, p: 1 }, { rho: 0.125, u: 0, p: 0.1 }, 1.4);
+    const tube = (cfl: number, over: Partial<SplitConfig>) => {
+      const s = new RefSplit(cfg({ nx: n, ny: 1, dx: 1 / n, bcLo: [1, 0, 0], bcHi: [1, 0, 0], cfl, acousticCfl: 20, pa: 'upwind', gas: 'carried', tol: 1e-10, ...over }));
+      s.init((x) => (x < 0 ? { rho: 1, vx: 0, vy: 0, vz: 0, p: 1, s: 1 } : { rho: 0.125, vx: 0, vy: 0, vz: 0, p: 0.1, s: 0 }));
+      const [m0, e0] = [sum(s.U[0]), sum(s.U[4])];
+      s.run(0.2);
+      let err = 0;
+      let vmax = 0;
+      for (let i = 0; i < n; i++) {
+        err += Math.abs(s.U[0][i] - exact(((i + 0.5) / n - 0.5) / 0.2).rho) / n;
+        vmax = Math.max(vmax, s.U[1][i] / s.U[0][i]);
+      }
+      return { err, vmax, steps: s.steps, mass: Math.abs(sum(s.U[0]) / m0 - 1), energy: Math.abs(sum(s.U[4]) / e0 - 1) };
+    };
+    for (const cfl of [0.8, 0.4]) {
+      const be = tube(cfl, {});
+      const tc = tube(cfl, splitCentered);
+      // Measured: 0.0107 against 0.0167 at 0.8, 0.0081 against 0.0117 at 0.4.
+      expect(tc.err, `CFL ${cfl}`).toBeLessThan(0.7 * be.err);
+      // Behind the shock the gas moves at 0.927: theta near 1/2 there rang to 1.3.
+      expect(tc.vmax, `CFL ${cfl}`).toBeLessThan(1.03);
+      expect(tc.steps, `CFL ${cfl}`).toBeLessThanOrEqual(1.1 * be.steps);
+      expect(tc.mass).toBeLessThan(1e-12);
+      expect(tc.energy).toBeLessThan(1e-12);
+    }
+  });
 });
 
 describe('implicit pressure, as a setting', () => {
@@ -176,8 +287,8 @@ describe('implicit pressure, as a setting', () => {
     expect(implicitUnsupported(liquid)).toBeNull();
     expect(refusal(liquid)).toBeNull();
     // Its flux is advection's alone, and its predictor takes the last solve's gradient.
-    expect(hydroSlots(liquid)).toMatchObject({ riemann: 'hydro/riemann/advect.wgsl', psplit: 'const PSPLIT = true;\nconst PSPLIT_LAG = true;\n', psplit_grad: 'pressure/predict_on.wgsl' });
-    expect(hydroSlots({ ...liquid, pressure: 'explicit' })).toMatchObject({ riemann: 'hydro/riemann/hllclm.wgsl', psplit: 'const PSPLIT = false;\nconst PSPLIT_LAG = false;\n' });
+    expect(hydroSlots(liquid)).toMatchObject({ riemann: 'hydro/riemann/advect.wgsl', psplit: 'const PSPLIT = true;\nconst PSPLIT_LAG = true;\nconst PSPLIT_CENTER = true;\n', psplit_grad: 'pressure/predict_on.wgsl' });
+    expect(hydroSlots({ ...liquid, pressure: 'explicit' })).toMatchObject({ riemann: 'hydro/riemann/hllclm.wgsl', psplit: 'const PSPLIT = false;\nconst PSPLIT_LAG = false;\nconst PSPLIT_CENTER = false;\n' });
     // The sound speed's weight in the timestep: one over the acoustic steps a step may span.
     const weight = (c: typeof liquid) => new Float32Array(packParams(c, { dims: [64, 64, 1], dx: 1 / 64, rhoMean: 1, selfGravity: false, masses: 0 }))[69];
     expect(weight({ ...liquid, acousticCfl: 50 })).toBeCloseTo(0.02, 8);

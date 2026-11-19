@@ -5,10 +5,17 @@
 // block takes the fine faces' own values, so mass and momentum are conserved across levels to
 // round-off. Reads the advected state (N1, N2: the cell's own momentum and energies), its
 // primitives with ghosts (W1), the pressure and the old density; writes the other parity.
+//
+// Time-centered (amr/pressure/source.wgsl): PRS holds x = theta p' + (1 - theta) p^n, the
+// pressure the step's force is from; the faces' mass fluxes mix in the face momenta the step
+// started from (OLD); and the state carries p' = (x - (1 - theta) p^n) / theta to the next step.
 #include "amr/pressure/common.wgsl"
+#include "amr/pressure/theta.wgsl"
+@group(0) @binding(34) var OLD: texture_3d<f32>;
+#include <ap_mf>
 
 @group(0) @binding(2) var PRS: texture_storage_3d<r32float, read>;
-@group(0) @binding(13) var RHO0: texture_3d<f32>;
+@group(0) @binding(13) var PNL: texture_3d<f32>;
 @group(0) @binding(15) var W1: texture_3d<f32>;
 @group(0) @binding(16) var N1: texture_3d<f32>;
 @group(0) @binding(17) var N2: texture_3d<f32>;
@@ -20,7 +27,13 @@ fn prs(slot: i32, l: vec3<i32>) -> f32 {
 }
 // The density at the start of the step, of a leaf's cell (the source pass kept it).
 fn rho_old(slot: i32, l: vec3<i32>) -> f32 {
-  return textureLoad(RHO0, atl(blk_origin(slot), l), 0).x;
+  return textureLoad(OLD, atl(blk_origin(slot), l), 0).x;
+}
+fn ap_mix() -> f32 {
+  return ap_theta_liquid();
+}
+fn ap_mn(slo: i32, llo: vec3<i32>, shi: i32, lhi: vec3<i32>, a: i32) -> f32 {
+  return 0.5 * (textureLoad(OLD, atl(blk_origin(slo), llo), 0)[a + 1] + textureLoad(OLD, atl(blk_origin(shi), lhi), 0)[a + 1]);
 }
 #include "amr/pressure/faces.wgsl"
 
@@ -39,7 +52,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
   let dtdx = clock.dt / blk_dx(inv.slot);
   let pc = textureLoad(PRS, c).x;
-  let rc = textureLoad(RHO0, c, 0).x;
+  let rc = rho_old(inv.slot, inv.l);
+  let th = ap_theta_liquid();
+  let pnew = (pc - (1.0 - th) * textureLoad(PNL, c, 0).x) / th;
   var mom = u1.yzw;
   var dm = 0.0;
   let axes = ap_axes();
@@ -49,6 +64,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     // (The field's kick on the cell: the mean of its two faces'.)
     mom[a] += clock.dt * P.gext[a] * 0.5 * (fh.z + fl.z) - dtdx * (fh.x - fl.x);
     dm += fh.y - fl.y;
+    ap_mf_face(inv.slot, inv.l, a, false, fl.y);
+    ap_mf_face(inv.slot, inv.l, a, true, fh.y);
   }
   let rho = max(rc - dtdx * dm, P.rho_floor);
   let eint = eos_eint_from_p(rho, eos_pressure(rho, 0.0));
@@ -58,5 +75,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // The internal-energy slot, which a liquid does not use, carries the solved pressure to the
   // next step: its predictor's gradient and its solve's start (it is regridded and its ghosts
   // filled with the rest of the state).
-  textureStore(O2, c, vec4<f32>(0.5 * dot(mom, mom) / rho + eint, pc, sc, u2.w));
+  textureStore(O2, c, vec4<f32>(0.5 * dot(mom, mom) / rho + eint, pnew, sc, u2.w));
 }

@@ -9,8 +9,18 @@
 // which the correction (pressure/correct.wgsl) needs after the old state is overwritten.
 // The divergence is of face momenta, each the mean of its two cells': the correction forms the
 // same ones.
+//
+// Time-centered (pressure/theta.wgsl): the step's mass flux is theta m'_f + (1 - theta) m^n_f
+// and its force that of x = theta p' + (1 - theta) p^n, p^n the last step's p' (PL). The solve
+// is for x:
+//   (alpha / theta^2) x - lap x = alpha p(rho) / theta + alpha (1 - theta) p^n / theta^2
+//                                 - (theta div(m*) + (1 - theta) div(m^n)) / (theta dt),
+// started from p^n. p^n and the face momenta the step started from, m^n_f on the cell's upper
+// faces, go to the correction (PNO), which hands on p' = (x - (1 - theta) p^n) / theta. The
+// liquid's sound speed is one constant, so theta is the same in every cell.
 #include "hydro/common.wgsl"
 #include <eos>
+#include "pressure/theta_cell.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1N: texture_3d<f32>;
@@ -19,7 +29,9 @@
 @group(0) @binding(5) var RHS: texture_storage_3d<r32float, write>;
 @group(0) @binding(6) var COEF: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(7) var RHO0: texture_storage_3d<r32float, write>;
-@group(0) @binding(8) var PRS: texture_3d<f32>;
+@group(0) @binding(8) var PRS: texture_storage_3d<r32float, write>;
+@group(0) @binding(10) var PNO: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(11) var PL: texture_3d<f32>;
 
 #include "pressure/faces.wgsl"
 
@@ -27,10 +39,15 @@
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
-  let rho = textureLoad(U1N, c, 0).x;
+  let un = textureLoad(U1N, c, 0);
+  let rho = un.x;
   textureStore(RHO0, c, vec4<f32>(rho, 0.0, 0.0, 0.0));
+  // The solve starts from the last step's pressure.
+  let pn = textureLoad(PL, c, 0).x;
+  textureStore(PRS, c, vec4<f32>(pn, 0.0, 0.0, 0.0));
   // A solid or held cell is not part of the solve.
   if (abs(textureLoad(U2S, c, 0).w) > 0.5) {
+    textureStore(PNO, c, vec4<f32>(pn, 0.0, 0.0, 0.0));
     textureStore(RHS, c, vec4<f32>(0.0));
     textureStore(COEF, c, vec4<f32>(0.0));
     return;
@@ -38,12 +55,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dt = clock.dt;
   // No step (the run is holding at a stop): the pressure stays as it is.
   if (!(dt > 0.0)) {
-    textureStore(RHS, c, vec4<f32>(textureLoad(PRS, c, 0).x, 0.0, 0.0, 0.0));
+    textureStore(PNO, c, vec4<f32>(pn, 0.0, 0.0, 0.0));
+    textureStore(RHS, c, vec4<f32>(pn, 0.0, 0.0, 0.0));
     textureStore(COEF, c, vec4<f32>(0.0, 0.0, 0.0, 1.0));
     return;
   }
   let ms = textureLoad(U1S, c, 0).yzw;
   var div = 0.0;
+  // The divergence of the face momenta the step started from, and those of the upper faces.
+  var divn = 0.0;
+  var mn = vec3<f32>(0.0);
   var beta = vec3<f32>(0.0);
   let axes = select(3, 2, P.dims.z == 1u);
   for (var a = 0; a < axes; a++) {
@@ -60,12 +81,22 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (lo.kind == FK_GAS) { fl = 0.5 * (textureLoad(U1S, lo.q, 0)[a + 1] + ms[a]) + kg * 0.5 * (textureLoad(U1N, lo.q, 0).x + rho); }
     if (lo.kind == FK_INLET) { fl = textureLoad(U1S, lo.q, 0)[a + 1]; }
     if (lo.kind == FK_OPEN) { fl = open_mom(ms[a] + kg * rho, false, lo.only); }
+    // (An inlet or an open face takes its momentum as it is now in place of m^n; a wall has none.)
+    var fhn = fh;
+    var fln = fl;
+    if (hi.kind == FK_GAS) { fhn = 0.5 * (un[a + 1] + textureLoad(U1N, hi.q, 0)[a + 1]); }
+    if (lo.kind == FK_GAS) { fln = 0.5 * (textureLoad(U1N, lo.q, 0)[a + 1] + un[a + 1]); }
+    mn[a] = fhn;
     div += fh - fl;
+    divn += fhn - fln;
     beta[a] = select(0.0, 1.0, hi.kind == FK_GAS || hi.kind == FK_OPEN);
   }
   let p = eos_pressure(rho, 0.0);
   let cs = eos_sound_speed(rho, p);
   let alpha = 1.0 / (cs * cs * dt * dt);
-  textureStore(RHS, c, vec4<f32>(alpha * p - div / (P.dx * dt), 0.0, 0.0, 0.0));
-  textureStore(COEF, c, vec4<f32>(beta, alpha));
+  let th = cell_theta(c, dt, 0.5);
+  let rhs = alpha * (p + (1.0 - th) / th * pn) / th - (th * div + (1.0 - th) * divn) / (th * P.dx * dt);
+  textureStore(RHS, c, vec4<f32>(rhs, 0.0, 0.0, 0.0));
+  textureStore(COEF, c, vec4<f32>(beta, alpha / (th * th)));
+  textureStore(PNO, c, vec4<f32>(pn, mn));
 }

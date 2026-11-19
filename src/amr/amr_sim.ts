@@ -191,6 +191,8 @@ export class AmrSim implements Simulation {
     return {
       mf_load: decl('read') + 'fn mf_load(i: u32) -> f32 {\n  if (i < MF_SPLIT) { return MF[i]; }\n  return MF_HI[i - MF_SPLIT];\n}\n',
       mf_store: decl('read_write') + 'fn mf_store(i: u32, v: f32) {\n  if (i < MF_SPLIT) { MF[i] = v; } else { MF_HI[i - MF_SPLIT] = v; }\n}\n',
+      // (Implicit pressure on a gas adds to the record: amr/pressure/mf_on.wgsl.)
+      mf_add: 'fn mf_add(i: u32, v: f32) {\n  if (i < MF_SPLIT) { MF[i] += v; } else { MF_HI[i - MF_SPLIT] += v; }\n}\n',
     };
   }
   private pSpecies: GPUComputePipeline[] = [];
@@ -538,8 +540,9 @@ export class AmrSim implements Simulation {
   /** Bytes of one block of the atlas for a run's problem (blockBytes with its field and species). */
   static blockBytesFor(cfg: SimConfig): number {
     const groups = speciesGroups(cfg.problem);
-    // Implicit pressure (amr/pressure.ts): six one-channel atlases.
-    const implicit = implicitPressure(cfg) ? 6 * 4 * PAD ** cfg.ndim : 0;
+    // Implicit pressure (amr/pressure.ts): six one-channel atlases, the state the step started
+    // from (four channels), and a gas's switches (one).
+    const implicit = implicitPressure(cfg) ? (10 + (cfg.eos === 'liquid' ? 0 : 1)) * 4 * PAD ** cfg.ndim : 0;
     // Radiation (amr/radiation.ts): its atlases, and the face mass fluxes if the species do not already record them.
     const rad = radiationOn(cfg) ? AmrRad.blockBytes(cfg.ndim) + (groups > 0 ? 0 : speciesFaceBytes(cfg.ndim)) : 0;
     return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit + rad;
@@ -836,6 +839,7 @@ export class AmrSim implements Simulation {
       this.prs ??= await AmrPressure.create({
         device: d, params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, listLevel: this.listLevel, levels: this.levels,
         state: this.state, prim: this.prim[0], prim2: this.prim[1], slots,
+        massFlux: this.speciesGroups > 0 && this.massFluxWindows ? this.massFluxWindows : undefined,
         gas: this.faceVel ? { faceLo: this.faceVel[0], faceHi: this.faceVel[1], lag: this.lagP!, gfield: this.gfield, bh: this.bh } : undefined,
         flat: (pass, count, reach) => this.flat(pass, count, reach),
         rootDims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),

@@ -3,7 +3,7 @@
 // multigrid over the tree's levels in full-approximation form, with the fine fluxes matched at
 // refinement faces, and the root level solved by the uniform grid's multigrid.
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, tex3d, type Bindable } from '../gpu/device';
+import { bindGroup, bindGroupUsed, computePipeline, tex3d, type Bindable } from '../gpu/device';
 import { PressureSolver } from '../pressure/multigrid';
 
 const PRE = 2; // red-black sweeps of a level before restricting it
@@ -33,6 +33,11 @@ export interface AmrPressureContext {
   gas?: { faceLo: GPUTexture; faceHi: GPUTexture; lag: GPUTexture; gfield: GPUTexture; bh: GPUBuffer };
   /** dispatch over the cells and `reach` ghost layers of `count` blocks of the bound list (amr/list.wgsl inv_flat) */
   flat(pass: GPUComputePassEncoder, count: number, reach: number): void;
+  /**
+   * With species: the face mass flux records (amr/species_on.wgsl), which the correction makes
+   * the whole step's (amr/pressure/mf_on.wgsl). Absent without species.
+   */
+  massFlux?: { lo: Bindable; hi: Bindable | null };
   /** the modules the hydro shaders are assembled with (the equation of state) */
   slots: Record<string, string>;
   /** the root level as a uniform grid: its cells along each axis (1 along z in 2D), its cell size, and the kinds of the box's faces (pressure/multigrid.ts PF_*) */
@@ -84,9 +89,21 @@ export class AmrPressure {
     const v0 = (x: GPUTexture) => x.createView();
     const atlas = ctx.state[0][0];
     const mk = (name: string) => tex3d(d, atlas.width, 'r32float', `amr pressure ${name}`, atlas.depthOrArrayLayers, atlas.height);
+    // (rho0: a liquid's pressure at the start of the step, for its time-centered correction.)
     const [prs, rhs, tau, auxr, auxp, rho0] = (s.tex = ['p', 'rhs', 'tau', 'restricted residual', 'restricted p', 'rho0'].map(mk));
+    // The state the step started from, (rho, momentum), for the time-centered correction's face
+    // velocities or momenta (amr/pressure/theta.wgsl); and a gas's switches chi.
+    const old = tex3d(d, atlas.width, 'rgba32float', 'amr pressure old state', atlas.depthOrArrayLayers, atlas.height);
+    s.tex.push(old);
     const gas = ctx.gas;
-    const slots = { ...ctx.slots, ap_coef: gas ? 'amr/pressure/coef_gas.wgsl' : 'amr/pressure/coef_liquid.wgsl' };
+    const mf = ctx.massFlux;
+    const slots = {
+      ...ctx.slots, ap_coef: gas ? 'amr/pressure/coef_gas.wgsl' : 'amr/pressure/coef_liquid.wgsl',
+      ap_mf: mf ? 'amr/pressure/mf_on.wgsl' : 'amr/pressure/mf_off.wgsl',
+      // (A liquid's record becomes the face's whole flux; a gas's gains the correction's.)
+      ap_mf_op: gas ? 'fn ap_mf_op(i: u32, v: f32) { mf_add(i, v); }\n' : 'fn ap_mf_op(i: u32, v: f32) { mf_store(i, v); }\n',
+    };
+    const mfBind: Record<number, Bindable> = mf ? (mf.hi ? { 12: mf.lo, 32: mf.hi } : { 12: mf.lo }) : {};
     const pipe = (file: string, label: string, k?: Record<string, number>) => computePipeline(d, assemble(`amr/pressure/${file}.wgsl`, slots), `amr pressure ${label}`, k);
     [s.root, s.pSmooth[0], s.pSmooth[1], s.pRestrict[0], s.pRestrict[1], s.pProlong, s.pRoot[0], s.pRoot[1], s.pMeasure, s.pTally, s.pSource, s.pCorrect] = await Promise.all([
       PressureSolver.create(d, ctx.rootDims, ctx.dx0, ctx.lo, ctx.hi),
@@ -104,11 +121,11 @@ export class AmrPressure {
     ]);
     // A gas: its pressure's advected change, and its new pressure on the way to the carried one.
     // And its coefficients on the parents (amr/pressure/coef_restrict.wgsl).
-    const [pd, pn, kr, ka] = gas ? ['advected p', 'new p', 'parent rho', 'parent alpha'].map(mk) : [];
+    const [pd, pn, kr, ka, chi] = gas ? ['advected p', 'new p', 'parent rho', 'parent alpha', 'switch'].map(mk) : [];
     if (gas) {
-      s.tex.push(pd, pn, kr, ka);
+      s.tex.push(pd, pn, kr, ka, chi);
       s.pCoef = await pipe('coef_restrict', 'parent coefficients');
-      s.gCoef = ctx.listLevel.map((list) => bindGroup(d, s.pCoef!, { 0: ctx.params, 30: ctx.bt, 31: list, 15: v0(ctx.prim), 22: v0(ctx.prim2), 7: v0(kr), 8: v0(ka) }));
+      s.gCoef = ctx.listLevel.map((list) => bindGroup(d, s.pCoef!, { 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: list, 15: v0(ctx.prim), 22: v0(ctx.prim2), 7: v0(kr), 8: v0(ka), 35: v0(chi) }));
       [s.pKeep, s.pLagInit, s.pLagFill] = await Promise.all([pipe('keep', 'advect the old pressure'), pipe('lag_init', 'start the carried pressure'), pipe('lag_fill', 'carry the pressure')]);
       s.gKeep = bindGroup(d, s.pKeep, { 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: ctx.listLeaf, 15: v0(ctx.prim), 22: v0(ctx.prim2), 24: v0(pd) });
       s.gLagInit = [0, 1].map((p) => bindGroup(d, s.pLagInit!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 14: v0(ctx.state[p][0]), 16: v0(ctx.state[p][1]), 29: v0(pn), 2: v0(s.tex[0]) }));
@@ -125,7 +142,7 @@ export class AmrPressure {
       // The marks: of the advected state's parity, which no pass of the step writes.
       // (A gas's coefficients are the advected state's primitives: amr/pressure/coef_gas.wgsl.)
       const prims: Record<number, Bindable> = gas ? { 15: v(ctx.prim), 22: v(ctx.prim2) } : {};
-      const coef: Record<number, Bindable> = gas ? { ...prims, 7: v(kr), 8: v(ka) } : {};
+      const coef: Record<number, Bindable> = gas ? { ...prims, 7: v(kr), 8: v(ka), 35: v(chi) } : {};
       const bare = (list: GPUBuffer): Record<number, Bindable> => ({ 0: ctx.params, 1: ctx.clock, 21: v(ctx.state[o][1]), 30: ctx.bt, 31: list });
       const base = (list: GPUBuffer): Record<number, Bindable> => ({ ...bare(list), ...coef });
       s.gSmooth[p] = ctx.listLevel.map((list) => s.pSmooth.map((pl) => bindGroup(d, pl, { ...base(list), 2: v(prs), 3: v(rhs), 4: v(tau) })));
@@ -136,14 +153,14 @@ export class AmrPressure {
       s.gMeasure[p] = bindGroup(d, s.pMeasure, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 9: s.res });
       if (gas) {
         const faces = { 25: v(gas.lag), 27: v(gas.faceLo), 28: v(gas.faceHi), 23: v(gas.gfield), 20: gas.bh };
-        s.gSource.push(bindGroup(d, s.pSource, { ...base(ctx.listLeaf), 3: v(rhs), 4: v(tau), 26: v(pd), 14: v(ctx.state[p][0]), 16: v(ctx.state[p][1]), ...faces }));
-        s.gCorrect.push(bindGroup(d, s.pCorrect, { ...bare(ctx.listLeaf), ...prims, 2: v(prs), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 29: v(pn), ...faces }));
+        s.gSource.push(bindGroupUsed(d, s.pSource, { ...base(ctx.listLeaf), 3: v(rhs), 4: v(tau), 26: v(pd), 14: v(ctx.state[p][0]), 16: v(ctx.state[p][1]), 34: v(old), 35: v(chi), ...faces }));
+        s.gCorrect.push(bindGroupUsed(d, s.pCorrect, { ...bare(ctx.listLeaf), ...prims, 2: v(prs), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 29: v(pn), 34: v(old), 35: v(chi), ...mfBind, ...faces }));
         continue;
       }
-      s.gSource.push(bindGroup(d, s.pSource, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 4: v(tau), 13: v(rho0), 14: v(ctx.state[p][0]), 15: v(ctx.prim), 16: v(ctx.state[p][1]) }));
+      s.gSource.push(bindGroupUsed(d, s.pSource, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 4: v(tau), 13: v(rho0), 14: v(ctx.state[p][0]), 15: v(ctx.prim), 16: v(ctx.state[p][1]), 34: v(old) }));
       s.gCorrect.push(
         bindGroup(d, s.pCorrect, {
-          ...base(ctx.listLeaf), 2: v(prs), 13: v(rho0), 15: v(ctx.prim), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]),
+          ...base(ctx.listLeaf), 2: v(prs), 13: v(rho0), 15: v(ctx.prim), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 34: v(old), ...mfBind,
         }),
       );
     }
@@ -221,8 +238,9 @@ export class AmrPressure {
    * parity `p`.
    */
   encode(pass: GPUComputePassEncoder, p: number, nLevel: readonly number[], nLeaf: number, cycles: number) {
-    if (this.pCoef) for (let l = this.ctx.levels - 1; l >= 0; l--) this.run(pass, this.pCoef, this.gCoef[l], nLevel[l]);
+    // (The source first: it writes the leaves' switches, whose theta the parents' coefficients take.)
     this.run(pass, this.pSource, this.gSource[p], nLeaf);
+    if (this.pCoef) for (let l = this.ctx.levels - 1; l >= 0; l--) this.run(pass, this.pCoef, this.gCoef[l], nLevel[l]);
     for (let c = 0; c < cycles; c++) this.encodeCycle(pass, p, nLevel);
     this.run(pass, this.pMeasure, this.gMeasure[p], nLeaf);
     pass.setPipeline(this.pTally);

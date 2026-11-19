@@ -69,7 +69,8 @@ fn main() {
     dt = min(dt, P.cfl * sqrt(dx / RED[1]));
     if (PSPLIT_GAS) {
       // Implicit pressure for a gas: the two limits together. The correction carries the gas at
-      // the velocity the step ends with, v + a dt, so the step solves (v + a dt) dt = C dx.
+      // up to the velocity the step ends with, v + a dt (in a shock: pressure/theta.wgsl), so the
+      // step solves (v + a dt) dt = C dx.
       // Gas moving at the flow's limit that the pressure also pushes otherwise crosses more
       // than a cell in the step, and nothing else holds it: the explicit scheme's sound speed,
       // which covers what a pressure jump adds in one step, is not in this rate. (A hot spot in

@@ -18,8 +18,18 @@
 // velocity is the density-weighted mean of its two cells' advected ones, and its density their
 // mean: symmetric in the two, so both form the same bits (pressure/correct_gas.wgsl does too).
 // Reads the state at the start of the step (U1N, U2N) and the advected one (U1S, U2S).
+//
+// Time-centered (pressure/theta.wgsl): with theta the cell's, the solve is for e = theta d, the
+// change of the pressure the step's force is from, p_theta = q + e:
+//   (alpha / theta^2) e - div(beta grad e)
+//     = [alpha (p^a - q) - (theta (div(v*) - dt div(beta grad q)) + (1 - theta) div(v^n)) / dt] / theta,
+// with v^n the face velocities the step started from. The operator stays symmetric with theta
+// varying from cell to cell. The correction takes the force from p_theta and hands on
+// p' = q + e / theta. v^n goes to the correction too, in PNO with q: it carries the step's mass on
+// the mean of v^n and the corrected face velocity.
 #include "hydro/common.wgsl"
 #include <eos>
+#include "pressure/theta_cell.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1N: texture_3d<f32>;
@@ -28,7 +38,9 @@
 @group(0) @binding(5) var RHS: texture_storage_3d<r32float, write>;
 @group(0) @binding(6) var COEF: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(8) var PRS: texture_storage_3d<r32float, write>;
-@group(0) @binding(10) var PNO: texture_storage_3d<r32float, write>;
+@group(0) @binding(10) var PNO: texture_storage_3d<rgba32float, write>;
+// The cell's compression switch chi (pressure/theta.wgsl), for the correction.
+@group(0) @binding(7) var CHI: texture_storage_3d<r32float, write>;
 @group(0) @binding(11) var PF: texture_3d<f32>;
 @group(0) @binding(12) var G: texture_3d<f32>;   // the gravity field: (acceleration, half-step potential)
 
@@ -52,14 +64,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // The solve starts from no change.
   textureStore(PRS, c, vec4<f32>(0.0));
   let pf = textureLoad(PF, c, 0).x;
-  textureStore(PNO, c, vec4<f32>(pf, 0.0, 0.0, 0.0));
+  textureStore(CHI, c, vec4<f32>(0.5, 0.0, 0.0, 0.0));
   if (abs(textureLoad(U2S, c, 0).w) > 0.5) {
+    textureStore(PNO, c, vec4<f32>(pf, 0.0, 0.0, 0.0));
     textureStore(RHS, c, vec4<f32>(0.0));
     textureStore(COEF, c, vec4<f32>(0.0));
     return;
   }
   let dt = clock.dt;
   if (!(dt > 0.0)) {
+    textureStore(PNO, c, vec4<f32>(pf, 0.0, 0.0, 0.0));
     textureStore(RHS, c, vec4<f32>(0.0));
     textureStore(COEF, c, vec4<f32>(0.0, 0.0, 0.0, 1.0));
     return;
@@ -71,6 +85,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let us = textureLoad(U1S, c, 0);
   var adv = 0.0;
   var div = 0.0;
+  // The divergence of the face velocities the step started from, and those of the upper faces.
+  var divn = 0.0;
+  var vn = vec3<f32>(0.0);
+  // And of the advected ones without the field's kicks, for the switch.
+  var diva = 0.0;
   // h^2 div(beta grad p^n): the faces' beta (p_far - p), which a face in balance with the
   // field's kick cancels in `div`.
   var lap = 0.0;
@@ -91,25 +110,48 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let kg = dt * cell_accel(c)[a];
     if (hi.kind == FK_GAS) {
       let q = textureLoad(U1S, hi.q, 0);
-      fh = (us[a + 1] + q[a + 1]) / (us.x + q.x) + face_kick(c, hi.q, a, dt);
+      let va = (us[a + 1] + q[a + 1]) / (us.x + q.x);
+      fh = va + face_kick(c, hi.q, a, dt);
+      diva += va;
       beta[a] = 2.0 / (us.x + q.x);
       lap += beta[a] * (textureLoad(PF, hi.q, 0).x - pf);
+      let qn = textureLoad(U1N, hi.q, 0);
+      vn[a] = (un[a + 1] + qn[a + 1]) / (rho + max(qn.x, P.rho_floor));
     }
     if (hi.kind == FK_INLET) { let q = textureLoad(U1S, hi.q, 0); fh = q[a + 1] / q.x; }
     // An open face: the gas leaves at its own velocity and pressure (no gradient across it), so
     // the solve sees it as closed and the divergence takes the advected velocity there.
     if (hi.kind == FK_OPEN) { fh = open_mom(us[a + 1] + kg * us.x, true, hi.only) / us.x; }
+    if (hi.kind != FK_GAS) {
+      vn[a] = fh;
+      diva += fh;
+    }
+    divn += vn[a];
     if (lo.kind == FK_GAS) {
       let q = textureLoad(U1S, lo.q, 0);
-      fl = (q[a + 1] + us[a + 1]) / (q.x + us.x) + face_kick(lo.q, c, a, dt);
+      let va = (q[a + 1] + us[a + 1]) / (q.x + us.x);
+      fl = va + face_kick(lo.q, c, a, dt);
+      diva -= va;
       lap += 2.0 / (q.x + us.x) * (textureLoad(PF, lo.q, 0).x - pf);
+      let qn = textureLoad(U1N, lo.q, 0);
+      divn -= (qn[a + 1] + un[a + 1]) / (max(qn.x, P.rho_floor) + rho);
     }
     if (lo.kind == FK_INLET) { let q = textureLoad(U1S, lo.q, 0); fl = q[a + 1] / q.x; }
     if (lo.kind == FK_OPEN) { fl = open_mom(us[a + 1] + kg * us.x, false, lo.only) / us.x; }
+    // (An inlet or an open face takes its velocity as it is now in place of v^n; a wall has none.)
+    if (lo.kind != FK_GAS) {
+      divn -= fl;
+      diva -= fl;
+    }
     div += fh - fl;
   }
   let alpha = 1.0 / (rho * cs * cs * dt * dt);
   let pa = p - dt / P.dx * adv;
-  textureStore(RHS, c, vec4<f32>(alpha * ((pa - P.ohm.w) - pf) - (div - dt / P.dx * lap) / (P.dx * dt), 0.0, 0.0, 0.0));
-  textureStore(COEF, c, vec4<f32>(beta, alpha));
+  let chi = ps_chi(dt, diva / P.dx);
+  textureStore(CHI, c, vec4<f32>(chi, 0.0, 0.0, 0.0));
+  let th = cell_theta(c, dt, chi);
+  let rhs = alpha * ((pa - P.ohm.w) - pf) - (th * (div - dt / P.dx * lap) + (1.0 - th) * divn) / (P.dx * dt);
+  textureStore(RHS, c, vec4<f32>(rhs / th, 0.0, 0.0, 0.0));
+  textureStore(COEF, c, vec4<f32>(beta, alpha / (th * th)));
+  textureStore(PNO, c, vec4<f32>(pf, vn));
 }

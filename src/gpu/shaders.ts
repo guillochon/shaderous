@@ -22,7 +22,7 @@ const DEFAULT_SLOTS: Slots = {
   // An inertial frame (gravity/frame_off.wgsl) unless hydroSlots says otherwise.
   frame: 'gravity/frame_off.wgsl',
   // The pressure in the explicit fluxes unless hydroSlots says implicit (hydro/predictor.wgsl).
-  psplit: 'const PSPLIT = false;\nconst PSPLIT_LAG = false;\n',
+  psplit: 'const PSPLIT = false;\nconst PSPLIT_LAG = false;\nconst PSPLIT_CENTER = false;\n',
   psplit_grad: 'pressure/predict_off.wgsl',
   psplit_store: 'pressure/store_off.wgsl',
   ap_store: 'amr/pressure/store_off.wgsl',
@@ -35,6 +35,7 @@ const DEFAULT_SLOTS: Slots = {
   // Face mass flux records in one window (amr/species_index.wgsl) unless AmrSim splits them.
   mf_load: 'fn mf_load(i: u32) -> f32 { return MF[i]; }\n',
   mf_store: 'fn mf_store(i: u32, v: f32) { MF[i] = v; }\n',
+  mf_add: 'fn mf_add(i: u32, v: f32) { MF[i] = MF[i] + v; }\n',
 };
 
 export function assemble(entry: string, slots: Slots = {}): string {

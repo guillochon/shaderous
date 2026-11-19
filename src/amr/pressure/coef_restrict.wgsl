@@ -1,5 +1,5 @@
 // A gas's coefficients on the parents of a tree level (amr/pressure/coef_gas.wgsl): each
-// parent cell takes the mean of its children's density and of their 1 / (rho c^2). Run over
+// parent cell takes the mean of its children's density and of their 1 / (rho c^2 theta^2). Run over
 // the levels from the deepest parents down, once a step: a child that is a leaf gives the
 // advected state's primitives, one that is a parent what the pass before this one left.
 #include "amr/pressure/common.wgsl"
@@ -8,6 +8,8 @@
 @group(0) @binding(22) var W2: texture_3d<f32>;
 @group(0) @binding(7) var KR: texture_storage_3d<r32float, read_write>;
 @group(0) @binding(8) var KA: texture_storage_3d<r32float, read_write>;
+@group(0) @binding(35) var CHI: texture_3d<f32>;
+#include "amr/pressure/theta.wgsl"
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -23,9 +25,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   for (var i = 0; i < nk; i++) {
     let cf = atl(blk_origin(child), f0 + vec3<i32>(i & 1, (i >> 1) & 1, (i >> 2) & 1));
     if (leaf) {
+      // (As amr/pressure/coef_gas.wgsl ap_ka_leaf: with the leaf's theta.)
       let rho = abs(textureLoad(W1, cf, 0).x);
       let cs = textureLoad(W2, cf, 0).y;
-      k += vec2<f32>(rho, 1.0 / (rho * cs * cs));
+      let th = ap_theta(textureLoad(CHI, cf, 0).x, cs, blk_dx(child));
+      k += vec2<f32>(rho, 1.0 / (rho * cs * cs * th * th));
     } else {
       k += vec2<f32>(textureLoad(KR, cf).x, textureLoad(KA, cf).x);
     }

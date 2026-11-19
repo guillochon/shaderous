@@ -791,7 +791,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     // With implicit pressure the flux is advection's alone (hydro/riemann/advect.wgsl), and the
     // predictor takes the last solve's pressure gradient (hydro/predictor.wgsl).
     riemann: implicitPressure(c) ? 'hydro/riemann/advect.wgsl' : `hydro/riemann/${c.riemann}.wgsl`,
-    psplit: `const PSPLIT = ${implicitPressure(c)};\nconst PSPLIT_LAG = ${implicitPressure(c)};\n`,
+    // (PSPLIT_CENTER: the time-centered step of pressure/theta.wgsl, on the uniform grid and on blocks.)
+    psplit: `const PSPLIT = ${implicitPressure(c)};\nconst PSPLIT_LAG = ${implicitPressure(c)};\nconst PSPLIT_CENTER = ${implicitPressure(c)};\n`,
     psplit_grad: implicitPressure(c) ? 'pressure/predict_on.wgsl' : 'pressure/predict_off.wgsl',
     // A gas with an energy: the update keeps the face velocities that carried its fluxes.
     psplit_store: implicitPressure(c) && eosHasEnergy(c.eos) ? 'pressure/store_on.wgsl' : 'pressure/store_off.wgsl',
@@ -1538,11 +1539,12 @@ export class Sim implements Simulation {
   /**
    * GPU bytes per cell that implicit pressure adds (src/pressure): the solver's pressure,
    * right-hand side, residual (4 each) and coefficients (16) on every multigrid level, the old
-   * density (4), and for a gas with an energy the face velocities (16).
+   * density (4), the pressure and face velocities or momenta at the start of the step (16), the
+   * solved pressure (4), and for a gas with an energy the face velocities the update kept (16).
    */
   static implicitBytes(cfg: SimConfig): number {
     if (!implicitPressure(cfg)) return 0;
-    return 28 * (cfg.ndim === 3 ? 8 / 7 : 4 / 3) + 4 + (eosHasEnergy(cfg.eos) ? 24 : 0);
+    return 28 * (cfg.ndim === 3 ? 8 / 7 : 4 / 3) + 24 + (eosHasEnergy(cfg.eos) ? 16 : 0);
   }
 
   static async create(gpu: Gpu, cfg: SimConfig): Promise<Sim> {
@@ -1697,31 +1699,39 @@ export class Sim implements Simulation {
       const gas = eosHasEnergy(c.eos);
       [this.pPsSource, this.pPsCorrect, this.pPsInit] = await Promise.all([
         computePipeline(d, assemble(gas ? 'pressure/source_gas.wgsl' : 'pressure/source.wgsl', slots), 'pressure source'),
-        computePipeline(d, assemble(gas ? 'pressure/correct_gas.wgsl' : 'pressure/correct.wgsl', slots), 'pressure correct'),
+        // (With species, the correction leaves the step's whole mass fluxes for them: pressure/mf_on.wgsl.)
+        computePipeline(d, assemble(gas ? 'pressure/correct_gas.wgsl' : 'pressure/correct.wgsl', { ...slots, psplit_mf: this.speciesGroups > 0 ? 'pressure/mf_on.wgsl' : 'pressure/mf_off.wgsl' }), 'pressure correct'),
         computePipeline(d, assemble('pressure/init.wgsl', slots), 'pressure start'),
       ]);
       const prs = this.prs;
       prs.setTolerance(c.pressureTol);
-      if (gas) {
-        this.faceVel ??= tex3d(d, this.nx, 'rgba32float', 'face velocities', this.nz, this.ny);
-        this.pOld ??= tex3d(d, this.nx, 'r32float', 'pressure at the start of the step', this.nz, this.ny);
-        this.pFull ??= tex3d(d, this.nx, 'r32float', 'pressure', this.nz, this.ny);
-      }
+      if (gas) this.faceVel ??= tex3d(d, this.nx, 'rgba32float', 'face velocities', this.nz, this.ny);
+      // The pressure at the start of the step with the face velocities (a gas) or momenta (the
+      // liquid) the step started from, for the time-centered correction (pressure/theta.wgsl);
+      // and the solved pressure the step ends with.
+      this.pOld ??= tex3d(d, this.nx, 'rgba32float', 'pressure and face velocities at the start of the step', this.nz, this.ny);
+      this.pFull ??= tex3d(d, this.nx, 'r32float', 'pressure', this.nz, this.ny);
       // The pressure the predictor and the timestep take the gradient of.
-      this.pLag = gas ? this.pFull! : prs.p;
+      this.pLag = this.pFull;
       this.gPsInit = [0, 1].map((p) => bindGroup(d, this.pPsInit!, { 0: this.params, 1: v(this.state[p][0]), 2: v(this.pLag!), 3: v(this.state[p][1]), ...k }));
       this.gPsSource = [0, 1].map((p) =>
         bindGroup(d, this.pPsSource!, {
           0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[1 - p][0]), 4: v(this.state[1 - p][1]),
           5: v(prs.levels[0].rhs), 6: v(prs.levels[0].coef), 8: v(prs.p),
-          ...((gas ? { 9: v(this.state[p][1]), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield), 20: this.bh } : { 7: v(prs.rho0) }) as Record<number, Bindable>), ...k,
+          10: v(this.pOld!), 11: v(this.pFull!),
+          // (prs.rho0: the old density for the liquid, the compression switch for a gas.)
+          7: v(prs.rho0),
+          ...((gas ? { 9: v(this.state[p][1]), 12: v(this.gfield), 20: this.bh } : {}) as Record<number, Bindable>), ...k,
         }),
       );
       this.gPsCorrect = [0, 1].map((p) =>
         bindGroup(d, this.pPsCorrect!, {
           0: this.params, 1: this.clock, 2: v(this.state[1 - p][0]), 3: v(this.state[1 - p][1]), 4: v(prs.p),
           6: v(this.state[p][0]), 7: v(this.state[p][1]),
-          ...((gas ? { 9: v(this.faceVel!), 10: v(this.pOld!), 11: v(this.pFull!), 12: v(this.gfield), 20: this.bh } : { 5: v(prs.rho0) }) as Record<number, Bindable>), ...k,
+          10: v(this.pOld!), 11: v(this.pFull!),
+          5: v(prs.rho0),
+          ...((this.speciesGroups > 0 ? { 13: this.massFlux! } : {}) as Record<number, Bindable>),
+          ...((gas ? { 9: v(this.faceVel!), 12: v(this.gfield), 20: this.bh } : {}) as Record<number, Bindable>), ...k,
         }),
       );
     } else {
