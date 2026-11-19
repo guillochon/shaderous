@@ -12,7 +12,8 @@
 # Everything a training run needs except its data is baked in: torch, pynucastro, Numba and
 # SciPy for the reference burner, the code, the generated network (aprox13.py, from
 # build_net.py), the shipped surrogate (a teacher for distillation), and the equation of
-# state's table with its Python reader (tools/eos/helm.py), kept at the repository's own
+# state's table with its Python reader (tools/eos/helm.py and the lookup it shares,
+# tools/eos/table.py), kept at the repository's own
 # relative paths so that the code finds them as it does in a checkout.
 #
 # Data goes in /opt/shaderous/tools/burn/data: sent in (runpodctl), a network volume mounted
@@ -41,7 +42,7 @@ RUN pip install --no-cache-dir torch==2.8.0 --index-url $TORCH_INDEX \
 
 WORKDIR /opt/shaderous/tools/burn
 COPY src/eos/helmholtz_table.bin src/eos/helmholtz_meta.ts /opt/shaderous/src/eos/
-COPY tools/eos/helm.py /opt/shaderous/tools/eos/
+COPY tools/eos/helm.py tools/eos/table.py /opt/shaderous/tools/eos/
 COPY tools/burn/*.py tools/burn/aprox13_surrogate.pt ./
 # The network, then one import of the burner, which reads it.
 RUN python build_net.py > /dev/null && python -c "import burner, train" && mkdir -p data

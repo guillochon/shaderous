@@ -8,6 +8,7 @@ on:
     paths:
       - "tools/burn/**"
       - "tools/eos/helm.py"
+      - "tools/eos/table.py"
       - "src/eos/helmholtz_table.bin"
       - "src/eos/helmholtz_meta.ts"
       - ".github/workflows/burn-image.yml"
