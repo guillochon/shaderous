@@ -7,7 +7,7 @@ Done, as built (docs/numerics.md section 24): the uniform-grid scheme of section
 the per-cell speed of light; opacities; view fields; diagnostics; Er and Fr1-3 in snapshots;
 settings, links and scripting; two presets; GPU tests rad-off, -restart, -equilibrium, -f32,
 -streaming, -diffusion, -shadow, -advect, -marshak, -star, -shock, -cooling-sphere, and on
-blocks rad-blocks-diffusion, -advect, -cooling-sphere, -restart. Stage 5 as built: section 5
+blocks rad-blocks-diffusion, -advect, -cooling-sphere, -star, -restart. Stage 5 as built: section 5
 below, with the ghosts assembled before every sweep, the step's limit in each cell's rate, and
 no refinement criterion on E yet. Departures from the text below: the
 sweep's Courant number is 0.5 (forward Euler with linear reconstruction was unstable at 0.8);

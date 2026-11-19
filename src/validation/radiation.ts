@@ -54,7 +54,7 @@ async function cells(sim: Sim) {
 }
 
 /** Run to time t (the run's end time set to it). */
-async function runTo(sim: Sim, t: number) {
+async function runTo(sim: Sim | AmrSim, t: number) {
   sim.cfg.tEnd = t;
   sim.writeParams();
   return sim.runToEnd();
@@ -173,6 +173,47 @@ async function radMoments(sim: Sim | AmrSim, floor: number) {
   }
   const mean = m1.map((v) => v / m0);
   return { total: m0, mean, variance: m2.map((v, a) => v / m0 - mean[a] ** 2) };
+}
+
+/**
+ * Run a star (radStar) to each of `times` and record under `tag`: its central density against the
+ * start, the drift of the total energy (gas and E / r), and at the end the mass-weighted rms and
+ * largest speeds, about its own motion vx, inside 1% of the central density.
+ */
+async function starRun(sim: Sim | AmrSim, tag: string, vx: number, times: readonly number[], m: Record<string, number>) {
+  const d0 = await sim.diagnostics();
+  const rho0 = d0.ranges[0][1];
+  for (const t of times) {
+    await runTo(sim, t);
+    const d = await sim.diagnostics();
+    m[`${tag}_rhoc_t${t}`] = d.ranges[0][1] / rho0;
+    const e0 = d0.eTot + (d0.radiation?.eRadReduced ?? 0);
+    m[`${tag}_drift_t${t}`] = (d.eTot + (d.radiation?.eRadReduced ?? 0) - e0) / Math.abs(e0);
+    if (d.radiation) {
+      m[`${tag}_too_fast_t${t}`] = d.radiation.tooFast;
+      m[`${tag}_lum_t${t}`] = d.radiation.luminosity;
+    }
+  }
+  // (On blocks each cell counts by its volume.)
+  const leaf = sim instanceof AmrSim ? await sim.readLeaves() : null;
+  const u1 = leaf ? leaf.u1 : (await (sim as Sim).readState()).u1;
+  let mv2 = 0;
+  let mass = 0;
+  let vmax = 0;
+  for (let q = 0; q < u1.length / 4; q++) {
+    const r = u1[4 * q];
+    if (r < 0.01 * rho0) continue;
+    const w = r * (leaf ? leaf.dx[q] ** 3 : 1);
+    const v2 = ((u1[4 * q + 1] - vx * r) ** 2 + u1[4 * q + 2] ** 2 + u1[4 * q + 3] ** 2) / (r * r);
+    mv2 += w * v2;
+    mass += w;
+    vmax = Math.max(vmax, Math.sqrt(v2));
+  }
+  m[`${tag}_vrms`] = Math.sqrt(mv2 / mass);
+  m[`${tag}_vmax`] = vmax;
+  m[`${tag}_steps`] = (await sim.diagnostics()).steps;
+  // The star's central sound speed, sqrt(5/3 K rho_c^(1/3)) (radStar: radius 0.3, rho_c = 1, G = 1).
+  m.central_sound_speed = Math.sqrt((5 / 3) * polytropeK(laneEmdenCached(3), 1, 0.3, 1));
 }
 
 /** How many leaves a block mesh has at each level, coarsest first. */
@@ -303,6 +344,30 @@ const RAD_BLOCK_TESTS: TestDef[] = [
       });
       m.ratio = m.blocks_luminosity / m.uniform_luminosity;
       return { pass: m.coarse_leaves > 0 && m.fine_leaves > 0 && Math.abs(m.ratio - 1) < 0.01 && m.blocks_swing < 0.01, metrics: m };
+    },
+  },
+  {
+    id: 'rad-blocks-star',
+    name: 'Radiation on blocks: an n = 3 polytrope with a tenth of its pressure in radiation stays at rest (octant, 128 cells across at the finest of two levels)',
+    criterion: 'The star of rad-star on a mesh of three levels. At rest for one dynamical time: its central density within 5% of the start, its mass-weighted rms speed inside 1% of the central density under 3% of the central sound speed and the largest under 10%, total energy (gas and E / r) kept to 2%. Moving at ten times its sound speed for half the box, the mesh following it (at least two re-meshes), against the same star with its radiation in the equation of state: central density within 2% of the baseline’s, rms speed about its own motion under 1.5 times the baseline’s, energy kept to 1%',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      for (const [tag, transport, vx] of [['eos', false, 0], ['transport', true, 0], ['moving_eos', false, 6], ['moving_transport', true, 6]] as const) {
+        await withAmr(gpu, radStar(transport, 1e6, 50, vx), 128, { amrLevels: 2, symmetry: [!vx, true, true], radSweeps: 16, tEnd: 0 }, async (sim) => {
+          const by = leavesByLevel(sim);
+          by.forEach((n, l) => (m[`${tag}_leaves_level${l}`] = n));
+          await starRun(sim, tag, vx, vx ? [0.025, 0.05] : [0.25, 0.5, 1], m);
+          m[`${tag}_regrids`] = sim.regrids;
+          m[`${tag}_settle_ms`] = sim.settleMs;
+          m[`${tag}_settle_rounds`] = sim.settleLog.length;
+        });
+      }
+      const cs = m.central_sound_speed;
+      const pass =
+        Math.abs(m.transport_rhoc_t1 - 1) < 0.05 && m.transport_vrms < 0.03 * cs && m.transport_vmax < 0.1 * cs && Math.abs(m.transport_drift_t1) < 0.02 &&
+        Math.abs(m['moving_transport_rhoc_t0.05'] - m['moving_eos_rhoc_t0.05']) < 0.02 && m.moving_transport_vrms < 1.5 * m.moving_eos_vrms &&
+        Math.abs(m['moving_transport_drift_t0.05']) < 0.01 && m.moving_transport_regrids >= 2;
+      return { pass, metrics: m };
     },
   },
   {
@@ -741,35 +806,7 @@ export const RAD_TESTS: TestDef[] = [
         // Moving: along x at about ten times the central sound speed, for half the box.
         const times = vx ? [0.025, 0.05] : [0.25, 0.5, 1];
         await withSim(gpu, radStar(transport, 1e6, 50, vx), 64, { symmetry: [!vx, true, true], radSweeps: 16, tEnd: 0 }, async (sim) => {
-          const d0 = await sim.diagnostics();
-          const rho0 = d0.ranges[0][1];
-          for (const t of times) {
-            await runTo(sim, t);
-            const d = await sim.diagnostics();
-            m[`${tag}_rhoc_t${t}`] = d.ranges[0][1] / rho0;
-            const e0 = d0.eTot + (d0.radiation?.eRadReduced ?? 0);
-            m[`${tag}_drift_t${t}`] = (d.eTot + (d.radiation?.eRadReduced ?? 0) - e0) / Math.abs(e0);
-            if (d.radiation) {
-              m[`${tag}_too_fast_t${t}`] = d.radiation.tooFast;
-              m[`${tag}_lum_t${t}`] = d.radiation.luminosity;
-            }
-          }
-          // Inside the star (density above 1% of the central): mass-weighted rms and largest speed.
-          const { u1 } = await sim.readState();
-          let mv2 = 0;
-          let mass = 0;
-          let vmax = 0;
-          for (let q = 0; q < u1.length / 4; q++) {
-            const r = u1[4 * q];
-            if (r < 0.01 * rho0) continue;
-            const v2 = ((u1[4 * q + 1] - vx * r) ** 2 + u1[4 * q + 2] ** 2 + u1[4 * q + 3] ** 2) / (r * r);
-            mv2 += r * v2;
-            mass += r;
-            vmax = Math.max(vmax, Math.sqrt(v2));
-          }
-          m[`${tag}_vrms`] = Math.sqrt(mv2 / mass);
-          m[`${tag}_vmax`] = vmax;
-          m[`${tag}_steps`] = (await sim.diagnostics()).steps;
+          await starRun(sim, tag, vx, times, m);
           m[`${tag}_settle_ms`] = sim.settleMs;
         });
       }

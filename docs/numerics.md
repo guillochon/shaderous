@@ -2779,13 +2779,14 @@ fluxes where no species already record them.
 | `rad-shadow` | Behind an opaque disc, 6% of the beam beside it |
 | `rad-advect` | Trapped radiation at $`\beta = 10^{-2}`$, $`\beta\tau = 10^4`$, $`\hat c = c/100`$ moves with the gas to $`10^{-4}`$ of the box and keeps its width to 3.5% (the lab-frame reference lags at $`(\hat c/c)\,v`$) |
 | `rad-marshak` | [Su & Olson (1996)][SuOlson1996]'s non-equilibrium Marshak wave: the GPU matches the float64 reference to $`2\times10^{-3}`$ of the incident energy, and both the float64 diffusion solution with the Marshak boundary to 0.03 at $`\tau = 3.16`$ and 0.015 at $`\tau = 10`$ |
-| `rad-star` | An $`n = 3`$ polytrope with a tenth of its pressure in radiation, over a dynamical time: it holds as the same star with its radiation in the equation of state does (speeds inside both under 1% of the sound speed), and crossing the box at Mach 10 it follows that baseline |
+| `rad-star` | An $`n = 3`$ polytrope with a tenth of its pressure in radiation, over a dynamical time: it holds as the same star with its radiation in the equation of state does (rms speed inside 2.9% of the central sound speed, the baseline's 2.1%, at $`64^3`$), and crossing the box at Mach 10 it follows that baseline |
 | `rad-shock` | Gas driven into a wall: the state behind the shock matches the Rankine-Hugoniot conditions with radiation to 0.1% (subcritical), and to 3% at $`\hat c = c/5`$ (supercritical; the limit above) |
 | `rad-cooling-sphere` | A hot core behind a reduced-speed shell: the luminosity is steady to 0.03% over 30 steps (12% before the limiter above) and the same at $`\hat c`$ and $`2\hat c`$ to 5% |
 | `rad-restart` | The radiation comes back from a snapshot bit for bit |
 | `rad-blocks-diffusion` | A Gaussian centered on the face between coarse and fine blocks (20 and 10 optical depths a cell) spreads as on the fine uniform grid: centroid to $`2\times10^{-4}`$ of the box, widths to 0.4%; the total energy changes by $`1.3\times10^{-5}`$, the uniform grid's by $`1.4\times10^{-5}`$ (rounding) |
 | `rad-blocks-advect` | The pulse of `rad-advect` on a mesh that re-meshes four times as it moves: where the gas took it to $`10^{-4}`$ of the box, width kept to 2%, $`E_\text{gas} + E/r`$ to $`2\times10^{-6}`$ |
 | `rad-blocks-cooling-sphere` | Only the blocks holding the shell refined: the luminosity through the box faces, on coarse blocks, is the fine uniform grid's to $`10^{-5}`$, and as steady |
+| `rad-blocks-star` | The star of `rad-star` on three levels (128 cells across at the finest), settled on the mesh: over a dynamical time its central density rises 2% (the baseline's 1%), the rms speed inside is 1.1% of the central sound speed and the largest 2.9%, energy kept to 0.6%. Crossing the box at Mach 10 through four re-meshes: central density within 0.1% of the baseline's, the same rms speed about its motion, energy to 0.1% |
 | `rad-blocks-restart` | From a snapshot: the same mesh and the same radiation in every cell, bit for bit |
 
 On an RTX 3080 a sweep costs about a quarter of a hydro step (3D $`128^3`$: 2.1 ms a step
