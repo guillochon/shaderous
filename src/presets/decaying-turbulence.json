@@ -1,0 +1,30 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "decaying-turbulence",
+  "name": "Decaying turbulence",
+  "group": "Instabilities",
+  "family": "decaying-turbulence",
+  "familyName": "Decaying turbulence",
+  "variant": "Ideal gas",
+  "blurb": "A periodic box of gas given a random swirl of large eddies at Mach 0.3 and left alone: the eddies break up, merge and decay. The passive scalar marks a band across the box, which the turbulence mixes into the rest. Each seed is a different flow with the same statistics.",
+  "domain": {
+    "ndim": 2,
+    "n": 512,
+    "amr": 0,
+    "box": 1,
+    "supports2d": true,
+    "bc": { "lo": [0, 0, 0], "hi": [0, 0, 0] }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.4 },
+    "gravity": "off",
+    "G": 0
+  },
+  "parts": [
+    { "kind": "flow", "name": "decaying-turbulence" }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 0.1, "tDyn": 1 },
+  "view": { "field": 11, "log": false, "mode": "slice" }
+}

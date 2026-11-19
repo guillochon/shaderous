@@ -27,3 +27,13 @@ tools/eos/bench/assets/
 tools/burn/data_old/
 tools/burn/pod_helm/
 random-test-out/
+
+# Turbulence closure (tools/closure): environment, generated data, trained models and logs
+tools/closure/.venv/
+tools/closure/data/
+tools/closure/__pycache__/
+tools/closure/models/*
+!tools/closure/models/final.pt
+tools/closure/*.log
+tools/closure/eval/
+tools/closure/*.out

@@ -51,7 +51,7 @@ export interface LinkOverrides {
   ndim: 2 | 3;
   n: number; // 0: the default for that dimensionality
   amr: number;
-  cfg: Partial<Pick<SimConfig, 'symmetry' | 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'resistivity' | 'dampRadius' | 'dampRate' | 'radiation' | 'opacity' | 'radC' | 'radChat' | 'radLocalC' | 'radSolver' | 'radSweeps'>>;
+  cfg: Partial<Pick<SimConfig, 'symmetry' | 'tEnd' | 'eos' | 'riemann' | 'limiter' | 'cfl' | 'timeBins' | 'refineHi' | 'refineLo' | 'refineRho' | 'gravity' | 'G' | 'vcycles' | 'jeansFloor' | 'jeansCells' | 'gravEnergyFlux' | 'wellBalanced' | 'bcLo' | 'bcHi' | 'cooling' | 'viscosity' | 'conductivity' | 'resistivity' | 'closure' | 'dampRadius' | 'dampRate' | 'radiation' | 'opacity' | 'radC' | 'radChat' | 'radLocalC' | 'radSolver' | 'radSweeps'>>;
   eosParams: Partial<EosParams>;
   coolParams: Partial<CoolingParams>;
   opacityParams: Partial<SimConfig['opacityParams']>;

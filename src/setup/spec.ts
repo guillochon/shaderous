@@ -124,6 +124,8 @@ export interface PhysicsSpec {
   radSweeps?: number;
   viscosity?: number;
   conductivity?: number;
+  /** the trained turbulence closure (closure/closure.ts): 2D runs of a gas with an energy on the uniform grid */
+  closure?: boolean;
   /** magnetic diffusivity eta (with a field): the Ohmic electric field is eta curl B */
   resistivity?: number;
   /** turbulence driving (hydro/drive.ts): rms acceleration (0 off), correlation time, band, solenoidal weight, seed */

@@ -661,6 +661,11 @@
      "minimum": 0,
      "maximum": 1e+30
     },
+    "closure": {
+     "type": "boolean",
+     "title": "Turbulence closure",
+     "description": "A small trained network tells the flux update, cell by cell, how much of the Riemann solver’s own dissipation of shear and of the dye to leave out where the flow is turbulence the grid only just resolves, so that a coarse run keeps more of the small eddies and mixes less than it otherwise would. It switches itself off at shocks and in gas that is not sheared. Trained on 2D turbulence and shear layers of an ideal gas below Mach 1 (docs/closure.md)"
+    },
     "driving": {
      "type": "object",
      "properties": {
@@ -2573,6 +2578,56 @@
       ],
       "additionalProperties": false,
       "description": "Carbon and oxygen at rest at one density, with a hot layer at the low-x edge of the box that sets it alight. Needs physical units, an equation of state with a temperature (Helmholtz) and the species of the aprox13 network."
+     },
+     {
+      "type": "object",
+      "title": "Flow: Decaying turbulence",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "decaying-turbulence"
+       },
+       "mach": {
+        "type": "number",
+        "title": "Mach number",
+        "default": 0.3,
+        "minimum": 0.01,
+        "maximum": 3
+       },
+       "kpeak": {
+        "type": "number",
+        "title": "Peak wavenumber",
+        "default": 4,
+        "minimum": 1,
+        "maximum": 16
+       },
+       "seed": {
+        "type": "number",
+        "title": "Seed",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 1000000
+       },
+       "ratio": {
+        "type": "number",
+        "title": "Density of the band",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A periodic box given a random, divergence-free velocity field at large scales (rms speed 1) and left to decay. The passive scalar marks a band across the middle of the box, which can be denser than the rest."
      },
      {
       "type": "object",

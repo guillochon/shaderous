@@ -132,6 +132,7 @@ export const shockBubble = problem('shock-bubble');
 export const detonationStable = problem('detonation-stable');
 export const advection = problem('advection');
 export const kelvinHelmholtz = problem('kelvin-helmholtz');
+export const decayingTurbulence = problem('decaying-turbulence');
 export const rayleighTaylor = problem('rayleigh-taylor');
 export const jeans = problem('jeans');
 export const whiteDwarfStar = problem('white-dwarf');

@@ -16,7 +16,7 @@ export const PRESET_FILES: Record<string, SetupSpec> = Object.fromEntries(Object
  * file not listed goes last, in its own group.
  */
 export const PRESET_ORDER: readonly string[] = [
-  'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'thermal-instability-hhe', 'driven-turbulence', 'jeans',
+  'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'thermal-instability-hhe', 'driven-turbulence', 'decaying-turbulence', 'jeans',
   'taylor-green', 'shear-layers', 'cylinder-wake', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho',
   'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
   'radiating-sphere', 'sedov-rad-transport', 'radiation-shadow', 'radiative-shock', 'radiative-shock-supercritical', 'radiation-star',

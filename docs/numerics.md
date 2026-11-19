@@ -36,7 +36,8 @@ precision, are pointed out where they occur.
 23. [Validation](#23-validation)
 24. [Radiation transport](#24-radiation-transport)
 25. [ANEOS materials and planets](#25-aneos-materials-and-planets)
-25. [References](#references)
+26. [Turbulence closure](#26-turbulence-closure)
+27. [References](#references)
 
 ---
 
@@ -2905,7 +2906,7 @@ bound, and the rate grew with it.
 
 ## 23. Validation
 
-The validation suite (`src/validation/tests.ts`) has 180 tests. It runs on your own GPU at
+The validation suite (`src/validation/tests.ts`) has 181 tests. It runs on your own GPU at
 [validate.html](https://guillochon.github.io/shaderous/validate.html) or with
 `npm run test:gpu`. Reference solutions come from a float64 CPU implementation of the same
 scheme (`src/reference/hydro.ts`) and an exact Riemann solver ([Toro 2009][Toro2009],
@@ -2919,8 +2920,8 @@ disruption, cooling, viscosity, conduction, sinks, binary orbits, the equations 
 (hydrogen and helium among them, with the second collapse of a first core in spherical
 coordinates), HDF5 round trips, GPU against CPU reference, the weakly compressible liquid and
 implicit pressure for the liquid and the gas (§9), the MHD tests of §21, the frames and
-coordinates of §22, radiation transport (§24), and the ANEOS materials, a planet at rest and
-the moon-forming impact (§25). Each test's pass criterion is printed next to its result.
+coordinates of §22, radiation transport (§24), the ANEOS materials, a planet at rest and
+the moon-forming impact (§25), and the turbulence closure (§26). Each test's pass criterion is printed next to its result.
 
 ## 24. Radiation transport
 
@@ -3384,6 +3385,88 @@ of the mass has left through the faces by t = 28.
   have not been tried.
 - A run's two materials must be its two species. A third species, a tracer, turns the
   composition off: the dye (the passive scalar) tells bodies apart instead.
+
+## 26. Turbulence closure
+
+`src/closure/closure.ts`, `hydro/closure.wgsl`, `hydro/closure_net.wgsl`, `hydro/closure_on.wgsl`;
+trained offline in `tools/closure/`. How it was trained, what it was measured to do and where it
+stops are in [closure.md](closure.md). It is off unless a setup asks for it
+(`physics.closure`, `closure=1` in a link), and is refused outside two-dimensional runs of a gas
+with an energy on the uniform Cartesian grid.
+
+**What it corrects.** A coarse run of this scheme has too little small-scale motion, not too
+much: against a run four times finer averaged onto its grid, decaying turbulence on $`128^2`$
+cells keeps about a fifth of the kinetic energy at 4 to 8 cells per wavelength, and its dye is
+more mixed. The loss is the Riemann solver's: it damps the jump in velocity it is shown at each
+face, and where an eddy spans a few cells the limited reconstruction leaves large jumps. An
+eddy viscosity adds to that damping, so a closure of that kind makes a coarse run of this
+scheme worse on every measure (it was tried: [closure.md](closure.md)). What helps is to leave
+part of the solver's own damping out, where the flow is turbulence and nowhere else.
+
+**The correction.** Before a face's two states go to the Riemann solver, their velocities and
+their passive scalars are moved toward each other's mean:
+
+```math
+\mathbf{v}_{L,R} \to \tfrac12(\mathbf{v}_L + \mathbf{v}_R) \pm \tfrac12(1 - a)(\mathbf{v}_L - \mathbf{v}_R),
+\qquad
+s_{L,R} \to \tfrac12(s_L + s_R) \pm \tfrac12(1 - b)(s_L - s_R).
+```
+
+This is the form of the low-Mach correction of [§6](#hllc-with-a-low-mach-correction)
+([Thornber et al. 2008][Thornber2008]), with the factor learned per cell instead of set by the
+Mach number, and applied to the scalar as well. The solver's dissipation of shear and its
+diffusion of the scalar are proportional to those jumps, so they fall by the shares $`a`$ and
+$`b`$. Density and pressure are left alone: scaled, the density's jump rang at contacts.
+
+**Bounds, whatever the weights.**
+
+- $`a \le 0.8`$: at least a fifth of the solver's damping of every velocity jump always
+  remains. (The Gresho vortex of [§6](#hllc-with-a-low-mach-correction) decays with a fifth and
+  gains energy with a tenth.)
+- The scalar's face states are held to where a slope limiter could have put them. With
+  $`s_c`$ the state's own cell, $`\delta_\text{near}`$ the difference to the other cell of the
+  face and $`\delta_\text{far}`$ that from the neighbor on the far side, the state moves no
+  further from $`s_c`$ than $`\mathrm{minmod}(\delta_\text{far}, \delta_\text{near})`$, or than the
+  reconstruction itself had gone if that is further (`closure_bound` in `hydro/flux.wgsl`). No
+  value then leaves the range of its neighbors. Without this bound a dye of 0 to 1 rang
+  between -0.4 and 1.1 at the edge of a Kelvin-Helmholtz slab; with it, the dye's range over a
+  run is the range it has without the closure. The scalar is passive, so $`b`$ cannot disturb
+  the flow in any case.
+- A face takes the smaller of its two cells' values of $`a`$ and $`b`$, so both cells of a face
+  scale its jumps alike and compute the same flux: mass, momentum and total energy are
+  conserved to rounding, as without the closure, and the flux-determinism check passes with it
+  on.
+
+**Gates.** Each cell's coefficients are multiplied by three factors, each exactly zero where
+it applies, formed from the cell and its four neighbors. With $`D`$, $`W`$ and $`A`$ the
+divergence, the rotation and the deviatoric strain of the velocity across a cell (in units of
+velocity: $`\Delta x`$ times the derivatives), and $`c_s`$ the sound speed:
+
+| Gate | Shut where | For |
+|---|---|---|
+| Compression | $`D^2 / (D^2 + W^2 + A^2) \ge 0.35`$ (fully open below 0.10) | Shocks, rarefactions and blasts: the ratio is 3/7 in any planar flow, whatever its strength or direction, and more in a radial one |
+| Pressure jump | $`\max_d \lvert p_{i+1} - p_{i-1}\rvert / \min(p_{i+1}, p_{i-1}) \ge 0.15`$ (open below 0.05) | The cells beside a shock, where its staircase on the grid makes shear |
+| Activity | $`\sqrt{W^2 + A^2} \le 10^{-3} c_s`$ (open above $`4\times10^{-3} c_s`$) | Gas that is neither sheared nor turning: a contact at rest, a uniform flow |
+
+Because a face takes the smaller of its two cells' coefficients, one shut cell shuts all four
+of its faces, and their fluxes are the solver's own. The closure also leaves the faces of the
+box that are not periodic alone, and every cell beside an obstacle.
+
+**The network.** A cell's $`a`$ and $`b`$ are the two sigmoid outputs of a network of two
+hidden layers of 24 tanh units (964 weights), evaluated once per cell per step from ten
+features of the cell and its four neighbors: the strain across the cell over the sound speed
+(its logarithm); rotation against strain, $`(W^2 - A^2)/(W^2 + A^2)`$; the dilatation's share
+of the gradient; how far the velocity, the density and the scalar are from straight across the
+cell (0 for a straight line, 1 at an extremum); the Mach number in the grid's frame (on which
+the solver's damping depends); the relative gradients of density and pressure; and the strain
+over the speed. All are dimensionless and unchanged by reflecting the grid or swapping its
+axes, so the closure has the grid's symmetries and no scale of its own: the same weights serve
+any resolution, speed and density.
+
+**In a step.** One pass before the predictor (`hydro/closure.wgsl`) writes each cell's
+coefficients to a texture, from the state the step starts from; the flux update reads two
+texels per face. With the closure off, the pass does not exist and the hook in
+`hydro/flux.wgsl` compiles out.
 
 ## References
 
