@@ -1,4 +1,4 @@
-// Validation tests for comoving coordinates (plans/coordinate-systems-plan.md, Part C).
+// Validation tests for comoving coordinates (docs/numerics.md section 22).
 // Registered through validation/frames.ts.
 import { all, PERIODIC, type Problem } from '../problems/types';
 import { cosmoG, edsScaleFactor, hubble, rk4, scaleFactor, timeOf, type Cosmology } from '../cosmo';

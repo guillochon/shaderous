@@ -1,4 +1,4 @@
-// Validation tests for axisymmetric (R, z) runs (plans/coordinate-systems-plan.md, Part E).
+// Validation tests for axisymmetric (R, z) runs (docs/numerics.md section 22).
 // Registered through validation/frames.ts.
 import { all, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
 import { SEDOV_XI0, SPHERE, spherePotential } from '../presets/names';

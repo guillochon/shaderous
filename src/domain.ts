@@ -73,7 +73,7 @@ export interface GridShape {
 const BLOCK = 16;
 
 /**
- * Cells along each axis of the uniform grid (plans/coordinate-systems-plan.md B6). A mirrored
+ * Cells along each axis of the uniform grid (docs/numerics.md section 22). A mirrored
  * axis has half of them, over [0, box / 2], where some axis in use is not mirrored: a half or a
  * 3D quadrant run then computes its part of the same cube a run without mirrors would, at the
  * same cell size, for half or a quarter of the cost. Where every axis in use is mirrored (an

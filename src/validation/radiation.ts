@@ -1,4 +1,4 @@
-// Validation of radiation transport (radiation/radiation.ts; plans/radiation-m1.md section 9).
+// Validation of radiation transport (radiation/radiation.ts; docs/numerics.md section 24).
 // Registered in tests.ts after the others. On the uniform grid and on blocks (rad-blocks-*), in
 // 2D but for the star, small enough to share the GPU.
 import { all, OUTFLOW, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';

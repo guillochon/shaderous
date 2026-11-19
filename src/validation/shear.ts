@@ -1,4 +1,4 @@
-// Validation tests for the shearing box (plans/coordinate-systems-plan.md, Part D). Registered
+// Validation tests for the shearing box (docs/numerics.md section 22). Registered
 // through validation/frames.ts.
 import { all, PERIODIC, type Prim, type Problem } from '../problems/types';
 import type { Sim } from '../sim';

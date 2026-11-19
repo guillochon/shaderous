@@ -1,4 +1,4 @@
-// A shearing box with a magnetic field (plans/coordinate-systems-plan.md D4; docs/numerics.md
+// A shearing box with a magnetic field (docs/numerics.md
 // section 22): what the two x planes of the box compute for the same face or edge, made to
 // agree. Each side works out its boundary faces' fluxes and edges' fields from its own ghosts,
 // the other side's cells sheared along y; the two evaluations differ. As in the hydrodynamic

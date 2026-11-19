@@ -1,7 +1,7 @@
 # Plan: light curves from radiation transport
 
 Status (2026-11-18): not started, and set aside for now. What exists is in section 1. Written
-after stage 5 of `plans/radiation-m1.md` (radiation on the adaptive mesh).
+after radiation on the adaptive mesh was built (`docs/numerics.md` section 24).
 
 Goal: light curves a reader would compare with observations, for the two kinds of transient the
 code can reach: a shock breaking out of a star or a shell, and a tidal disruption.
@@ -28,17 +28,17 @@ What is missing, in order of need:
 
 1. **A sink that shines.** Radiation energy put into the cells around a sink at
    `L = η Ṁ c²` (η a setting, 0.1 by default; capped at a multiple of the Eddington luminosity,
-   also a setting), isotropic, as a source term in the sweeps. `plans/radiation-m1.md` section
-   10 notes that the `Mass` record has no room for a luminosity; either it grows, or the
+   also a setting), isotropic, as a source term in the sweeps. The `Mass` record has no
+   room for a luminosity; either it grows, or the
    luminosity rides on `SourceSpec`. `Ṁ` is already measured between steps.
 2. **Reprocessing by the debris.** The emitted light must diffuse out through the bound debris
    and any outflow: that is the transport we have, but it needs the debris resolved where it is
    opaque, so the adaptive mesh, and a refinement criterion on the radiation energy
-   (`plans/radiation-m1.md` section 5: Löhner's indicator on `E`, not yet written).
+   (Löhner's indicator on `E`, not yet written: [issue 19](https://github.com/guillochon/shaderous/issues/19)).
 3. **The simplest stand-in, with no transport.** `L = η Ṁ c²` from the sink's accretion rate,
    as a column of the diagnostics and its CSV. No radiation run is needed for it, and it is
    what most disruption papers plot. Worth doing first: an afternoon's work.
-4. **Per-block timesteps with radiation** (stage 6 of `plans/radiation-m1.md`). A disruption
+4. **Per-block timesteps with radiation** ([issue 18](https://github.com/guillochon/shaderous/issues/18)). A disruption
    spans a large range of cell sizes, and one timestep for all blocks makes it slow.
 5. **The reduced speed of light near the hole.** The rule is `ĉ ≫ |v| + c_s`; debris near
    pericenter moves at a good fraction of `c`, so `ĉ` cannot be much reduced there. To measure:
@@ -74,8 +74,8 @@ A preset, and a check against a known answer:
 2. Luminosity through a sphere of chosen radius, in the lab frame (section 3's delay and frame).
 3. Refinement on the radiation energy.
 4. The shock-breakout preset and its checks.
-5. Sinks that shine (2.1), then a disruption with reprocessing (2.2), which wants stage 6 of
-   `plans/radiation-m1.md` first.
+5. Sinks that shine (2.1), then a disruption with reprocessing (2.2), which wants per-block timesteps
+   with radiation ([issue 18](https://github.com/guillochon/shaderous/issues/18)) first.
 
 ## 5. Open questions
 

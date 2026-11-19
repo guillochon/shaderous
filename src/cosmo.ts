@@ -1,5 +1,5 @@
 /**
- * Comoving coordinates (plans/coordinate-systems-plan.md, Part C): the background expansion, in
+ * Comoving coordinates (docs/numerics.md section 22): the background expansion, in
  * float64 on the CPU. The GPU advances the scale factor itself, step by step, in the clock pass
  * (hydro/clock.wgsl); this is the reference it is held to, and what converts redshifts to times.
  *

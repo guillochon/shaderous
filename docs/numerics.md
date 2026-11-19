@@ -2526,7 +2526,7 @@ pointer (probes, tools, contour labels) and its markers use the same mapping
 is a linear map of the screen). A native screenshot is the same picture at the map's size. The `blast-spherical` preset is a
 point explosion at the origin.
 
-**On blocks** (spherical-plan S1's mesh refinement and S5), a level is the uniform grid at its
+**On blocks**, a level is the uniform grid at its
 own resolution: each cell's geometry (areas, volumes, lever arms, sources, the predictor's
 $`h_r/\Delta x`$ and $`h_\theta/\Delta x`$, the timestep's per-axis rates, both poles and the
 inner sphere) comes from its global indices on its level, with that level's
@@ -2608,8 +2608,7 @@ result.
 
 ## 24. Radiation transport
 
-Gray radiation hydrodynamics with the M1 closure (`src/radiation/`, `src/opacity/`;
-`plans/radiation-m1.md`), on the uniform grid and on blocks, in Cartesian coordinates. The setting is
+Gray radiation hydrodynamics with the M1 closure (`src/radiation/`, `src/opacity/`), on the uniform grid and on blocks, in Cartesian coordinates. The setting is
 `physics.radiation` (`m1` or `off`); off, a run builds none of it and steps as before, bit for
 bit.
 

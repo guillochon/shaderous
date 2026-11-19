@@ -53,7 +53,7 @@ export class Multigrid {
     clock: GPUBuffer,
     flat = false,
   ): Promise<Multigrid> {
-    // A cube of n, or (plans/coordinate-systems-plan.md B6) a box of three counts, each a power
+    // A cube of n, or (docs/numerics.md section 22) a box of three counts, each a power
     // of two; the longest is n, and h = box / n.
     const dims0: [number, number, number] = typeof size === 'number' ? [size, size, size] : [size[0], size[1], size[2]];
     // An axisymmetric (R, z) run's levels are one cell deep (gravity/stencil.wgsl).

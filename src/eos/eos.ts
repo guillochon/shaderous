@@ -92,8 +92,8 @@ export const EOS_MODULES: Record<EosKind, string> = {
 const EOS_SCALED = ['pressure', 'sound_speed', 'eint_from_p', 'temperature', 'eint_from_T', 'eint_floor', 'face', 'prim'];
 
 /**
- * The equation-of-state slot of a run in comoving coordinates (plans/coordinate-systems-plan.md,
- * C6). The state's densities and pressures are comoving, a^3 times the proper ones, while
+ * The equation-of-state slot of a run in comoving coordinates (docs/numerics.md
+ * section 22). The state's densities and pressures are comoving, a^3 times the proper ones, while
  * specific energies and temperatures are proper; an equation of state relates proper
  * quantities. So the module's functions are renamed eosp_* and called through wrappers that
  * divide by a^3 on the way in and multiply on the way out, a^3 being cosmo_a3()

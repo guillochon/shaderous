@@ -1,4 +1,4 @@
-// Validation tests for spherical (r, theta) runs (plans/spherical-plan.md, coordinate plan E9).
+// Validation tests for spherical (r, theta) runs (docs/numerics.md section 22).
 // Registered through validation/frames.ts.
 import { OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT, type Prim, type Problem } from '../problems/types';
 import { SEDOV_XI0 } from '../presets/names';

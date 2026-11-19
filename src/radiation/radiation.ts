@@ -1,4 +1,4 @@
-// Gray radiation transport with the M1 closure (plans/radiation-m1.md, docs/numerics.md
+// Gray radiation transport with the M1 closure (docs/numerics.md
 // section 24): the settings, the constants the shaders take, and float64 versions of the
 // closure, the reduced speed of light per cell and the local implicit exchange, which the 1D
 // reference (reference/radiation.ts) and the tests share.
@@ -173,7 +173,7 @@ const RAD_EOS: readonly EosKind[] = ['ideal', 'gas_radiation', 'degenerate', 'io
 
 /**
  * Why a run with radiation cannot go as configured, or null. The first version: the uniform grid
- * in Cartesian coordinates, without a magnetic field (plans/radiation-m1.md, section 1).
+ * in Cartesian coordinates, without a magnetic field (docs/numerics.md section 24).
  */
 export function radiationUnsupported(c: SimConfig): string | null {
   if (!radiationOn(c)) return null;

@@ -1,4 +1,4 @@
-// Validation tests for the non-inertial frames and coordinate systems (plans/coordinate-systems-plan.md):
+// Validation tests for the non-inertial frames and coordinate systems (docs/numerics.md section 22):
 // the rotating frame (Part A) and mirror symmetry (Part B). Registered in tests.ts after the others.
 import type { Gpu } from '../gpu/device';
 import { all, OUTFLOW, PERIODIC, REFLECT, type Problem } from '../problems/types';

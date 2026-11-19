@@ -1,4 +1,4 @@
-// Validation tests for mirror symmetry (plans/coordinate-systems-plan.md, Part B): a run that
+// Validation tests for mirror symmetry (docs/numerics.md section 22): a run that
 // computes one octant (or a 2D quadrant) of a mirror-symmetric problem against the whole of it
 // at the same cell size. Registered through validation/frames.ts.
 import type { Gpu } from '../gpu/device';
@@ -144,7 +144,7 @@ export const SYM_TESTS: TestDef[] = [
   {
     id: 'sym-half',
     name: 'Mirror symmetry: half and quadrant runs on rectangular grids',
-    criterion: 'At the same box and cell size as the whole (64^3), a run mirrored about z alone computes 64 x 64 x 32 cells and one mirrored about x and y 32 x 32 x 64 (plans/coordinate-systems-plan.md B6): a Sedov blast agrees with the whole box in density to 1e-5 at every computed cell, with the same mass unfolded; and a uniform sphere’s potential (isolated boundaries, the rectangular multigrid) within 1e-4 of the whole box’s; and on blocks (two levels), the half has half the leaves and the same unfolded mass (1e-5), total energy (1e-4) and kinetic energy (1e-3) as the whole',
+    criterion: 'At the same box and cell size as the whole (64^3), a run mirrored about z alone computes 64 x 64 x 32 cells and one mirrored about x and y 32 x 32 x 64 (docs/numerics.md section 22): a Sedov blast agrees with the whole box in density to 1e-5 at every computed cell, with the same mass unfolded; and a uniform sphere’s potential (isolated boundaries, the rectangular multigrid) within 1e-4 of the whole box’s; and on blocks (two levels), the half has half the leaves and the same unfolded mass (1e-5), total energy (1e-4) and kinetic energy (1e-3) as the whole',
     async run(gpu) {
       const N = 64;
       const sedovAt = (sym: [boolean, boolean, boolean]) => ({ ...(sedov.setup ? compileSetup(sedov.setup).problem : sedov), symmetry: { axes: sym } });

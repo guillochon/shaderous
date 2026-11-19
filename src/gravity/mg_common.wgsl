@@ -8,7 +8,7 @@ struct Lvl {
   flat: u32,     // 1: an axisymmetric (R, z) run's levels, one cell deep (gravity/stencil.wgsl)
   h: f32,        // cell size on this level
   nx: u32,       // cells along each axis: half along a mirrored axis of a rectangular grid
-  ny: u32,       // (plans/coordinate-systems-plan.md B6), one along z for an axisymmetric run
+  ny: u32,       // (docs/numerics.md section 22), one along z for an axisymmetric run
   nz: u32,
 }
 @group(0) @binding(1) var<uniform> L: Lvl;

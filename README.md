@@ -143,9 +143,8 @@ command-line runner for single runs and parameter sweeps, or an MCP server.
 | **[Scripting API](docs/api.md)** | Driving the simulator from a script or an AI agent, headless or not: `window.shaderous` loads setups, steps to exact times, reads the gas back, takes screenshots, records movies, saves and loads `.athdf` files, uses the editing tools, and logs and replays sessions step for step. |
 | **[Headless runs](docs/headless.md)** | The command-line runner (single runs and parameter sweeps, writing diagnostics, images, slices, movies and `.athdf` files) and the MCP server that gives AI agents the simulator as tools. |
 
-The method paper is in progress in [`paper/`](paper/). Design plans for work in progress or
-proposed are in [`plans/`](plans/): frames, symmetric domains and coordinate systems in
-[plans/coordinate-systems-plan.md](plans/coordinate-systems-plan.md).
+The method paper is in progress in [`paper/`](paper/). Design plans for proposed work are
+in [`plans/`](plans/).
 
 ## Acknowledgments
 
