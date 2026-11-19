@@ -605,8 +605,8 @@ export const clockPressure = (c: SimConfig): Record<string, number> => (implicit
 
 /**
  * Why a run cannot take implicit pressure as configured, or null. What is built is the liquid's
- * form (plans/incompressible.md 4.2.1) on a uniform Cartesian grid, with any of the box faces,
- * obstacles, inflows, viscosity and driving.
+ * form (plans/incompressible.md 4.2.1) and the ideal gas's, in Cartesian coordinates, with any of
+ * the box faces, obstacles, inflows, viscosity and driving (on blocks, implicitBlocksUnsupported).
  */
 export function implicitUnsupported(c: SimConfig): string | null {
   if (c.eos !== 'liquid' && c.eos !== 'ideal') return 'it is built for the liquid and the ideal gas only, so far';

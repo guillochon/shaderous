@@ -23,9 +23,9 @@ It starts with a 2D Kelvin-Helmholtz instability. Choose another problem from th
 panel: shock tubes, blasts, instabilities, a supersonic wind tunnel, liquids at low Mach number
 (a vortex street behind a cylinder, a lid-driven cavity), detonations, radiation (a clump's
 shadow, radiative shocks), magnetized
-flows, and astrophysical flows such as stars, white dwarf collisions, tidal disruptions and
-accreting binaries. Drag in the view to rotate it, and use the brushes to stir, heat or add
-gas, or, in a magnetized run, to strengthen or drag the field. The address bar always describes the current setup, so copying it (or pressing
+flows, and astrophysical flows such as stars, white dwarf collisions, tidal disruptions,
+accreting binaries, a common envelope, and planets and the Moon-forming impact. Drag in the
+view to rotate it, and use the brushes to stir, heat or add gas, or, in a magnetized run, to strengthen or drag the field. The address bar always describes the current setup, so copying it (or pressing
 **Share**) gives someone else the same run. **Record** saves the run as an MP4 movie with a
 color bar, axes and the simulation time drawn on it, **Screenshot** (under Movie and
 screenshot) saves a slice, a projection or a 2D run as a PNG at the grid's own resolution, one
@@ -48,6 +48,7 @@ file ([docs/setups.md](docs/setups.md)). Some examples:
 - [The shadow of an opaque clump in a beam of radiation](https://guillochon.github.io/shaderous/?problem=radiation-shadow)
 - [A sub-Chandrasekhar Type Ia supernova: a white dwarf's helium shell detonates, then its core](https://guillochon.github.io/shaderous/?problem=sub-chandra)
 - [The Moon-forming impact: Theia strikes the proto-Earth](https://guillochon.github.io/shaderous/?problem=moon-forming-impact)
+- [A common envelope: a star spirals into a red giant's envelope](https://guillochon.github.io/shaderous/?problem=common-envelope)
 
 **From an AI agent, or the command line.** The npm package runs the simulator in headless
 Chrome on your GPU (it needs Node 20+ and Chrome). `npx -y shaderous mcp` is an
@@ -112,7 +113,7 @@ degenerate electrons. It uses the methods of production simulation codes:
 - ideal MHD by van Leer integration with constrained transport and HLLD or HLLE fluxes, on the
   uniform grid and the adaptive mesh alike, keeping div B at round-off through refinement and
   per-block timesteps, with field lines drawn in 2D and 3D;
-- point masses with sinks;
+- point masses with sinks, which can also be the cores of giant stars;
 - equations of state from an ideal gas to degenerate electrons and ionizing hydrogen, and for
   burning white dwarf matter a tabulated electron-positron gas at any degeneracy and
   temperature, in the manner of the Helmholtz equation of state, and for gas from
@@ -151,7 +152,7 @@ a magnetized accretion disk at 512^3 with three levels of refinement, held 16.8 
 memory (about 24 million cells) on an RTX 4090 and ran an orbit in 14 minutes
 ([details](docs/headless.md#largest-run-so-far)). The state can be exported as Athena++-style HDF5 that
 [yt](https://yt-project.org/) reads directly, and a run can be recorded as an MP4 movie. A
-suite of 64 validation tests runs on your own GPU, in the browser or from the command line.
+suite of 180 validation tests runs on your own GPU, in the browser or from the command line.
 Scripts and AI agents can drive the simulator too: through a JavaScript API in the page, a
 command-line runner for single runs and parameter sweeps, or an MCP server.
 

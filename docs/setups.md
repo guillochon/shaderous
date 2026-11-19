@@ -52,6 +52,8 @@ units of the setup's own box, which is the cube `[-box/2, box/2]³` centered on 
 | `ndim`, `n`, `amr` | The grid the setup opens on: 2 or 3 dimensions, cells per side (the finest level's on an adaptive mesh), levels of refinement. Absent: the grid already chosen is kept |
 | `box` | Side of the box (default 1) |
 | `supports2d` | The setup also makes sense on a 2D (x, y) grid |
+| `geometry`, `rMin`, `logR` | `cartesian` (default), or a 2D run in `cylindrical` (R, z) or `spherical` (r, theta) coordinates; a spherical run's inner radius, and whether its cells are spaced evenly in ln r |
+| `symmetric`, `symmetricField`, `mirror` | The mirrors the setup is symmetric under (`"x"`, `"xy"`, …), whether its magnetic field is too, and the mirrors a run uses to compute only the part above them |
 | `bc` | `{ "lo": [x, y, z], "hi": [x, y, z] }`: 0 periodic, 1 outflow, 2 reflecting, 3 outflow only, 4 line-tied wall (no slip, and it holds the magnetic field lines that cross it), 5 moving wall (a line-tied wall sliding along itself at the velocity `wallVelocity` gives its face). Periodic faces come in pairs |
 | `wallVelocity` | `{ "xlo": [vx, vy, vz], "xhi": ..., "ylo": ..., "yhi": ..., "zlo": ..., "zhi": ... }`: the velocity of each face that is a moving wall, along it |
 | `bc2d` | The same for a 2D run, where it differs |
@@ -64,21 +66,35 @@ velocity:
 "units": { "name": "solar", "length": { "unit": "Rsun", "value": 1 }, "mass": { "unit": "Msun", "value": 1 } }
 ```
 
-Units: `m`, `cm`, `km`, `Rsun`, `au`, `pc`; `kg`, `g`, `Msun`; `kg/m3`, `g/cm3`; `m/s`, `km/s`,
-`cm/s`. A value may be `per` a code value, or per a part's quantity: `"per": "star.radius"`
-says the star with id `star` has that many solar radii, whatever its radius in code units
+Units: `m`, `cm`, `km`, `Rearth`, `Rsun`, `au`, `pc`; `kg`, `g`, `Mearth`, `Msun`; `kg/m3`,
+`g/cm3`; `m/s`, `km/s`, `cm/s`. A value may be `per` a code value, or per a part's quantity:
+`"per": "star.radius"` says the star with id `star` has that many solar radii, whatever its radius in code units
 (`<id>.mass` and `<id>.radius`).
 
 ### `physics`
 
-`eos` and `eosParams` (`gamma`, `K`, …); `gravity` and `G` (a number, or `"units"` for what
-the units make it); `gext`, a uniform acceleration as a vector or `{ "down": g }` (along -y in
-2D, -z in 3D); `cooling` and `coolParams`; `viscosity`, `conductivity`; `riemann`, `limiter`,
-`cfl`; `floors` (`rho`, `p`); `fluff` (`rho`, `u`, `v`, `va`: the limits on tenuous gas);
-`frame`; `jeansFloor`, `jeansCells`, `vcycles`, `gravEnergyFlux`; `composition` (a name, or
-`{ "name", "X": { species: fraction }, "ionization" }`); `species` (names, or `"aprox13"`),
-`speciesGamma`; `burn` (`{ "network": "aprox13", "inShocks", "limiter" }`). The choices each
-takes are under [Every key](#every-key).
+`eos` and `eosParams` (`gamma`, `K`, the liquid's `liqC` and `liqRho`, the hydrogen and helium
+gas's `hheRad`, the ANEOS material `aneosA`, …); `gravity` and `G` (a number, or `"units"` for
+what the units make it); `gext`, a uniform acceleration as a vector or `{ "down": g }` (along -y
+in 2D, -z in 3D); `cooling` and `coolParams`; `radiation`, `opacity` and `opacityParams`, `radC`
+(the speed of light), `radChat` (its reduced value), `radLocalC`, `radSolver`, `radSweeps`;
+`viscosity`, `conductivity`, `resistivity`; `driving` (turbulence driving); `riemann`,
+`limiter`, `cfl`; `pressure` (`explicit` or `implicit`) with `pressureCycles`, `pressureTol`
+and `acousticCfl`; `floors` (`rho`, `p`); `fluff` (`rho`, `u`, `v`, `va`: the limits on tenuous
+gas); `frame`, `rotation`, `shear` (a shearing box), `cosmology` (comoving coordinates);
+`jeansFloor`, `jeansCells`, `vcycles`, `gravEnergyFlux`; `composition` (a name, or
+`{ "name", "X": { species: fraction }, "ionization" }`); `species` (names, or `"aprox13"`; with
+ANEOS, material names such as `pyrolite` and `fe85si15`), `speciesGamma`; `burn`
+(`{ "network": "aprox13", "inShocks", "limiter" }`, or `{ "fuel", "ash", "q", "ea", "k" }`);
+`toolScale`. The choices each takes are under [Every key](#every-key).
+
+The equations of state (`eos`) are `ideal`, `barotropic`, `liquid` (weakly compressible,
+p = c₀² (ρ - ρ₀)), `gas_radiation`, `degenerate`, `ionizing`, `helmholtz` (white dwarf
+matter), `hhe` (hydrogen and helium with H₂, its dissociation and the ionization of both, from
+tables for the solar compositions and pure hydrogen; its hydrogen fraction comes from
+`composition`) and `aneos` (rock, iron alloy and water, which needs physical units). With
+`aneos`, a run whose two species are materials holds both, the second's mass fraction in each
+cell setting the mix; a planet with a core makes them so.
 
 ### `mesh`, `run`, `view`
 
@@ -103,8 +119,8 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 | Kind | Fields |
 |---|---|
 | `mass` | A point mass: `gm` (G M), `pos`, `vel`, `soft` (softening, at least two cells), `sink` (radius; absent: the softening, 0: none), `sinkRate`, `massless`, `fixed`, `onOrbit` (held on its orbit: below) |
-| `orbit` | Not an object: places two bodies, `of: [idA, idB]`. `type: "binary"`: two point masses about their center of mass at pericenter (`q`, `separation`, `ecc`, `incl`, `retrograde`). `"flyby"`: a point mass on a parabola about a star that stays at the origin (`q`, `beta` = tidal radius over pericenter, `start` in tidal radii, `debris`). `"collision"`: two stars on a parabola (`impact` in sums of their radii, `starts`) |
-| `star` | `type: "polytrope"` (`n`, `radius`, and `mass` or `rhoc`) or `"white-dwarf"` (`mass`); `core` (`mass`, `soft`: a giant, with that much of a polytrope's mass a point mass at its center, which joins the run's point masses as `<id>.core`); `pos`, `vel`, `dye`, `X`; `field` (`type`: `dipole`, `random`, `gm17-dipole`, `gm17-random`; `beta`; `seed`). Stars are settled into the grid's own hydrostatic balance before the run. Self-gravity (isolated) and stars need 3D or an axisymmetric (R, z) run, where a star sits on the axis |
+| `orbit` | Not an object: places two bodies, `of: [idA, idB]`. `type: "binary"`: two point masses about their center of mass at pericenter (`q`, `separation`, `ecc`, `incl`, `retrograde`). `"flyby"`: a point mass on a parabola about a star that stays at the origin (`q`, `beta` = tidal radius over pericenter, `start` in tidal radii, `debris`). `"collision"`: two stars or planets on a parabola (`impact` in sums of their radii, `starts`) |
+| `star` | `type: "polytrope"` (`n`, `radius`, and `mass` or `rhoc`), `"white-dwarf"` (`mass`) or `"planet"` (`mass`, `material`, and for a core `coreMaterial` and `coreFraction`; `surfaceT`, the kelvin its layers' adiabats start from: a planet needs the `aneos` equation of state and physical units, and its materials are the run's species, the mantle's first); `core` (`mass`, `soft`: a giant, with that much of a polytrope's mass a point mass at its center, which joins the run's point masses as `<id>.core`); `pos`, `vel`, `dye`, `X`; `field` (`type`: `dipole`, `random`, `gm17-dipole`, `gm17-random`; `beta`; `seed`). Stars are settled into the grid's own hydrostatic balance before the run. Self-gravity (isolated) and stars need 3D or an axisymmetric (R, z) run, where a star sits on the axis |
 | `disk` | `about: [ids]` (point masses, stars or both; the disk is centered on their center of mass and moves with it), `profile` (`thin`: a surface density with a cavity and a Gaussian vertical profile; `balanced`: a midplane density in vertical balance with the softened potential), `rIn`, `rOut`, `sigma0`, `slope`, `cs`, `floor`, `radialFn`, `verticalFn`, `verticalIn` (a density profile of your own: below), `damp` (`from`, `rate`: the damping zone), `loops` (`beta`, `span`, `count`: field loops), `stresses` |
 | `region` | A `shape` with a state that replaces what is under it: `rho`, `p` (or `energy`, a total spread over a sphere's cells), `v`, `s`, `X`; with radiation transport `erad` and `frad`, the radiation's energy and flux; `supersample` for a smooth edge |
 | `obstacle`, `inflow` | A `shape` whose cells are solid, or held at their initial state |
@@ -228,7 +244,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.eosParams.degRho` | Degeneracy density | a number, at least 1e-30 | Density at which the electrons’ Fermi momentum reaches mₑc. For a setup with physical units it is set from the composition (about 2×10⁶ g/cm³ for C/O); in code units |
 | `physics.eosParams.degP` | Degeneracy pressure scale | a number, at least 1e-30 | The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units |
 | `physics.eosParams.helmCoulomb` | Coulomb corrections | a number, 0 to 1. Default `1` | The ions’ Coulomb energy, as a multiplier: 1 for all of it, 0 for none. It lowers the cold pressure by a percent or two in dense white dwarf matter (more in the envelope) and adds to the heat capacity of cold, strongly coupled ions |
-| `physics.eosParams.hheRad` | Radiation term | a number, 0 to 1. Default `1` | The radiation’s pressure a T⁴ / 3 and energy a T⁴ in the equation of state, as a multiplier: 1 for gas in equilibrium with its radiation (a star’s interior), 0 for gas alone (a cloud or thin gas, which its radiation leaves). Radiation transport carries it instead when it is on |
+| `physics.eosParams.hheRad` | Radiation term | a number, 0 to 1. Default `1` | The radiation’s pressure a T⁴ / 3 and energy a T⁴ in the equation of state, as a multiplier: 1 for gas in equilibrium with its radiation (a star’s interior), 0 for gas alone (a cloud or thin gas, which its radiation leaves). Radiation transport does not run with this equation of state |
 | `physics.eosParams.ionT` | Ionization temperature | a number, at least 1e-30 | The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Set from physical constants for a setup with physical units |
 | `physics.eosParams.ionRho` | Saha density | a number, at least 1e-30 | Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units |
 | `physics.composition` | Composition | `solar`, `solarNeutral`, `hydrogen`, `carbonOxygen`. Default `solar` | What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen. The hydrogen and helium equation of state has tables for the solar ones and for hydrogen |
@@ -255,7 +271,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.coolParams.heat` | Heating rate | a number, at least 0. Default `0` | Heating per unit mass (power law), or the heating rate at unit density (interstellar) |
 | `physics.coolParams.tUnit` | Kelvin per unit T | a number, at least 0.000001. Default `1000` | Interstellar: kelvin per code unit of temperature (code density is atoms per cm³) |
 | `physics.coolParams.tFloor` | Temperature floor | a number, at least 0. Default `0` | Gas at or below this temperature does not cool |
-| `physics.radiation` | Radiation transport | `off`, `m1`. Default `off` | Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Uniform Cartesian grids, without a magnetic field, for now |
+| `physics.radiation` | Radiation transport | `off`, `m1`. Default `off` | Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Cartesian coordinates, on the uniform grid or the adaptive mesh (all blocks then take one timestep), without a magnetic field |
 | `physics.opacity` | Opacity | `constant`, `electron`, `kramers`. Default `constant` | How opaque the gas is to the radiation, per unit mass: a constant, electron scattering, or Kramers’ free-free absorption with electron scattering. With physical units the scattering and Kramers constants come from the composition |
 | `physics.opacityParams.absorption` | Absorption κ_a | a number, at least 0. Default `1` | Absorption opacity per unit mass (the Planck mean), which exchanges heat between gas and radiation. With electron scattering, a small true absorption |
 | `physics.opacityParams.scattering` | Scattering κ_s | a number, at least 0. Default `0` | Scattering opacity per unit mass: it drags on the radiation’s flux without heating the gas (electron scattering is 0.2 (1 + X) cm²/g) |
@@ -299,7 +315,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.riemann` | Riemann solver | `hllc`, `hllclm`, `hll`. Default `hllc` | How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust |
 | `physics.limiter` | Limiter | `koren`, `mc`, `vanleer`, `minmod`. Default `koren` | How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
 | `physics.cfl` | CFL number | a number, 0.05 to 1. Default `0.8` | Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
-| `physics.pressure` | Pressure | `explicit`, `implicit`. Default `explicit` | How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid |
+| `physics.pressure` | Pressure | `explicit`, `implicit`. Default `explicit` | How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid and the ideal gas, in Cartesian coordinates, on the uniform grid or the adaptive mesh |
 | `physics.pressureCycles` | Pressure V-cycles | a whole number, 1 to 16. Default `3` | Implicit pressure: multigrid V-cycles per step (warm-started). More converge the pressure further, at more cost |
 | `physics.pressureTol` | Pressure tolerance | a number, 1e-8 to 1. Default `0.0001` | Implicit pressure: the residual of the pressure equation after a step’s V-cycles, relative to its largest right-hand side, above which the step is counted as unconverged |
 | `physics.acousticCfl` | Acoustic steps per step | a number, 1 to 1000000. Default `1000` | Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped |
@@ -383,11 +399,11 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `impact` | Impact parameter | a number, 0 to 5. Default `0` | Pericenter distance over the sum of the two radii: 0 is head-on, 1 just grazes |
 | `starts` | Starts at (sums of radii) | a number, 1.05 to 20. Default `4` | Separation at the start, in sums of the two radii (closer if they would not fit in the box) |
 
-**`star`** (Star). A polytrope or a cold white dwarf, settled into the grid’s own hydrostatic balance before the run. At most 4
+**`star`** (Star). A polytrope, a cold white dwarf or a planet of ANEOS materials, settled into the grid’s own hydrostatic balance before the run. At most 4
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
-| `type` | Kind of star | `polytrope`, `white-dwarf`, `planet`. Default `polytrope` | A polytrope of index n, or a cold white dwarf held up by degenerate electrons |
+| `type` | Kind of star | `polytrope`, `white-dwarf`, `planet`. Default `polytrope` | A polytrope of index n, a cold white dwarf held up by degenerate electrons, or a planet of an ANEOS material, with or without a core of another (physical units) |
 | `n` | Polytropic index n | a number, 0.5 to 4.5. Default `1.5` | The star’s structure, p = K ρ^(1 + 1/n): the larger n, the more centrally concentrated. Stable against convection only if the gas’s adiabatic index is at least 1 + 1/n |
 | `mass` | Mass | a number, at least 1e-12. Default `1` | Its mass, in code units (solar masses for a white dwarf in its usual units) |
 | `radius` | Radius | a number, at least 1e-12. Default `0.2` | A polytrope’s radius, in code units. A white dwarf’s follows from its mass |
@@ -539,12 +555,21 @@ file that breaks a rule still opens; the dialog's issues list says which. The ru
 
 | Option | Requires, excludes |
 |---|---|
-| Self-gravity (periodic or isolated) | 3D |
-| Self-gravity, periodic | every face periodic; no star |
-| Self-gravity, isolated | no periodic face |
-| Star | 3D, isolated self-gravity, no periodic face |
+| A 2D run | a setup that makes sense in 2D; no self-gravity and no star, unless the run is axisymmetric (R, z) (or, for self-gravity, spherical) |
+| Axisymmetric or spherical geometry | 2D |
+| Mirror symmetry | a setup symmetric under those mirrors, with its field (if any) symmetric too; a z mirror needs 3D |
+| Self-gravity, periodic | 3D; every face periodic; no star |
+| Self-gravity, isolated | 3D, or an axisymmetric or spherical run; no periodic face |
+| Uniform gravity or acceleration | not a spherical run |
+| Star | 3D or an axisymmetric run, isolated self-gravity, no periodic face |
 | White dwarf | the degenerate or Helmholtz equation of state; no polytropic star |
 | Polytropic star | an equation of state with an energy; no white dwarf |
+| Planet | the ANEOS equation of state |
+| ANEOS equation of state | physical units |
+| Radiation transport | an equation of state with an energy, not Helmholtz or ANEOS; no magnetic field; Cartesian geometry |
+| A region's radiation energy or flux | radiation transport |
+| Resistivity, Alfvén speed cap | a magnetic field |
+| Burning, fuel to ash | species that are not all nuclides |
 | Point mass, disk | no periodic face |
 | Disk | a point mass or a star to orbit |
 | Damping zone | one a run |
@@ -557,7 +582,18 @@ file that breaks a rule still opens; the dialog's issues list says which. The ru
 
 Checks on values run with them and show in the same list: bodies that overlap or leave the
 box, a softening under two cells, a disk heavier than a tenth of what it orbits, a polytrope
-whose gas has gamma below 1 + 1/n, the grid against the GPU memory budget.
+whose gas has gamma below 1 + 1/n, a star's point-mass core heavier than the star or softened
+over less than two cells, the grid against the GPU memory budget.
+
+The same list shows, as an error, what the simulators refuse to run (`refusal` in `src/sim.ts`),
+which is not in the option table. Among it: the liquid equation of state takes no magnetic field,
+self-gravity or comoving coordinates; implicit pressure is for the liquid and the ideal gas, in
+Cartesian geometry, without radiation, cooling, damping zones, burning, species that set the
+equation of state, rotating or accelerating frames, shearing boxes, mirrors, per-block
+timesteps, or (for the liquid) point masses, and its point masses take in no gas; radiation transport takes the ideal gas, gas + radiation, degenerate or
+ionizing equation of state, not implicit pressure, comoving coordinates or a shearing box; the
+hydrogen and helium equation of state needs a composition it has a table for (solar or
+hydrogen); obstacles and inflows take no magnetic field.
 
 ## Featured options
 

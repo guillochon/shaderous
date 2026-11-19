@@ -590,7 +590,7 @@
       "m1"
      ],
      "title": "Radiation transport",
-     "description": "Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Uniform Cartesian grids, without a magnetic field, for now"
+     "description": "Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Cartesian coordinates, on the uniform grid or the adaptive mesh (all blocks then take one timestep), without a magnetic field"
     },
     "opacity": {
      "enum": [
@@ -741,7 +741,7 @@
       "implicit"
      ],
      "title": "Pressure",
-     "description": "How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid"
+     "description": "How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid and the ideal gas, in Cartesian coordinates, on the uniform grid or the adaptive mesh"
     },
     "pressureCycles": {
      "type": "integer",
@@ -1565,7 +1565,7 @@
          "planet"
         ],
         "title": "Kind of star",
-        "description": "A polytrope of index n, or a cold white dwarf held up by degenerate electrons"
+        "description": "A polytrope of index n, a cold white dwarf held up by degenerate electrons, or a planet of an ANEOS material, with or without a core of another (physical units)"
        },
        "n": {
         "type": "number",

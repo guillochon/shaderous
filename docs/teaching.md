@@ -33,7 +33,8 @@ refinement, physics options and view. Set up what you want students to see, then
 address or use **Share**. A link opens paused or running, depending on the **Autoplay**
 checkbox. With **Autoload** off, a change of problem, grid or initial conditions waits until
 you press Run (which loads and plays) or **Load** (which loads paused), so a large setup is
-loaded once instead of at every change. A bare visit opens Kelvin-Helmholtz at $`1024^2`$ in 2D. Examples used below:
+loaded once instead of at every change. A bare visit opens Kelvin-Helmholtz in 2D on an
+adaptive mesh of three levels of refinement, $`512^2`$ at its finest. Examples used below:
 
 | What | Link |
 |---|---|
@@ -442,8 +443,9 @@ readable code.
 
 **Format.** Assigned reading from [numerics.md](numerics.md) and
 [architecture.md](architecture.md) alongside a textbook (see below), problem sets that
-include changing the source, and term projects. The code is about 6,000 lines of WGSL and
-15,000 of TypeScript, and each physics module is a small file. Students can clone the repository, run
+include changing the source, and term projects. The code is about 21,000 lines of WGSL and
+51,000 of TypeScript (9,000 of them the validation suite), and each physics module is a small
+file. Students can clone the repository, run
 `npm install && npm run dev`, and change a shader in minutes.
 
 ### Topics and exercises
@@ -460,7 +462,7 @@ include changing the source, and term projects. The code is about 6,000 lines of
 - Derive the third-order face value $`q_c + (\delta_\text{far} + 2\delta_\text{near})/6`$ and show
   where TVD limiters clip extrema. Measure the convergence order of smooth advection
   (`?problem=advection`) with each limiter.
-- Change the smoothness threshold `SMOOTH` in `hydro/recon.wgsl` and explore the trade between
+- Change the smoothness threshold `SMOOTH` in `hydro/limiters/koren.wgsl` and explore the trade between
   peak preservation and oscillations.
 
 **Hydrostatic equilibrium in finite precision.**
@@ -503,6 +505,13 @@ include changing the source, and term projects. The code is about 6,000 lines of
   the first two tabulate one free energy, so pressure and energy agree by construction, while
   ANEOS's pressure and energy are tabulated separately. What does each choice guarantee? Why
   does the temperature solve need the energy to rise with temperature between table nodes?
+- Run the [protostellar second collapse](https://guillochon.github.io/shaderous/?problem=second-collapse),
+  a first core of hydrogen and helium whose center has reached 2100 K, and read the center's
+  temperature and density with the query tool as it goes. Where H₂ dissociates the heat
+  capacity soars and $`\Gamma_1`$ falls below 4/3: explain from the virial theorem why the core
+  then collapses again. Compare the
+  [thermal instability with hydrogen and helium](https://guillochon.github.io/shaderous/?problem=thermal-instability-hhe)
+  with the ideal-gas version.
 
 **Resolution criteria.**
 - Collapse an isothermal cloud

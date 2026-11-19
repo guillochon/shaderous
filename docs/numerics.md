@@ -456,10 +456,13 @@ which single precision would round to $`10^{-4}`$ of the pressure and $`10^{-2}`
 speed, so the table holds its differences between neighbouring nodes instead (only derivatives
 are ever needed). And Newton's method starts from a table of the gas's own inverse at the
 table's full resolution, which is what carries it through dissociation and ionization, where
-the energy rises steeply at nearly constant temperature; it takes under two evaluations on
-average. Between the nodes the table gives the model's pressure to $`6\times10^{-5}`$, its
-energy to $`4\times10^{-4}`$ and $`c_s^2`$ to 0.4% at worst (on the fronts at the lowest
-densities, where they are sharpest); on the GPU, in single precision, pressure to energy and
+the energy rises steeply at nearly constant temperature; as the shader runs it (at most 10
+evaluations, a last step under $`3\times10^{-4}`$ in $`\ln T`$ taken without another), it takes
+1.1 evaluations on average and 3 at most on the unit test's 1200 solves below 0.1 g/cm³
+(`tests/unit/hhe.test.ts`, which asks for under 3 and under 8). Between the nodes the table gives the model's pressure to $`6\times10^{-5}`$, its
+energy to $`4\times10^{-4}`$ and $`c_s^2`$ to 0.6% at worst, 0.15% at the 99th percentile (on
+the fronts at the lowest densities, where they are sharpest; the 1500 states of
+`tests/unit/hhe.test.ts` and the 4000 of `tools/eos/NOTES.md`); on the GPU, in single precision, pressure to energy and
 back agrees to $`10^{-5}`$.
 
 $`\Gamma_1`$ is 5/3 below 50 K, where H₂ does not turn, 7/5 at a few hundred kelvin, and falls
@@ -672,13 +675,13 @@ of the step before extrapolated half a step, a star moving 0.8 of a cell a step 
 toward where its field lagged it, and lost 10% of its momentum in a dynamical time.) The timestep keeps gravity's limit,
 $`C\sqrt{\Delta x/|\mathbf g|}`$: without it the columns above took five steps a sound crossing
 and lost their balance. A settled polytrope on $`64^3`$ cells holds its central density to
-0.01% over two dynamical times in 22 steps, where the explicit scheme takes 436 and drifts
-2.5%; its total energy drifts 1% against the explicit 0.2%, the price of steps that long with
+0.5% over two dynamical times in 27 steps, where the explicit scheme takes 436 and drifts 2%;
+its total energy drifts 0.8% against the explicit 0.2%, the price of steps that long with
 a first-order split (`psplit-gas-polytrope`). Collapse and other dynamic self-gravity have not
 been tested with it. A star that moves is held: at 0.3 of its central sound speed, 6.4 cells
-in a dynamical time, its central density stays within 0.2%, its momentum within 0.2% and its
-energy within 0.3% (`psplit-gas-star-moving`). Two limits remain. On a mesh of two levels the
-same star gains 1.7% of its momentum in a dynamical time, as the explicit scheme does there at a
+in a dynamical time, its central density stays within 0.5%, its momentum within 0.2% and its
+energy within 0.24% (`psplit-gas-star-moving`; M4 Pro, 2026-11-19). Two limits remain. On a mesh
+of two levels the same star gains about 1% of its momentum in a dynamical time, as the explicit scheme does there at a
 hundredth of the size with steps a tenth as long: not looked into. And two stars 8 cells in
 radius, of a gas softer than their structure, set to collide in near-vacuum (random setup 70293)
 collapse as they move under either scheme; the explicit one stays finite through it and the
@@ -886,8 +889,9 @@ merges its fine blocks as it runs leaves the density within $`0.78\,M^2`$: no pr
 Without refinement the block grid reproduces the uniform grid's run to $`10^{-7}`$ in kinetic
 energy. In 3D it runs and conserves; it has not been measured beyond that.
 
-Limits. The liquid and the ideal gas only, on a Cartesian grid, without sinks, cooling
-or frames (and the liquid without self-gravity or point masses); on the adaptive mesh also
+Limits. The liquid and the ideal gas only, on a Cartesian grid, without sinks, cooling,
+damping zones, frames, mirror symmetry, burning or radiation transport (and the liquid without
+self-gravity or point masses); on the adaptive mesh also
 without per-block timesteps (one solve couples every cell at one time). Each is refused with the reason. First order in time. And on
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
@@ -1228,8 +1232,9 @@ hot spot should have, written into the settled state on the uniform grid and the
 
 For an $`n = 1`$ polytrope this relation is exactly the trapezoid rule of
 [§8](#8-well-balanced-reconstruction). Unsettled, a $`1\,M_\odot`$ white dwarf (whose nearly
-relativistic core has $`\Gamma_1`$ close to 4/3 and so little restoring force) swung by 25% in
-central density. Settled, it stays within 3.5% over six dynamical times.
+relativistic core has $`\Gamma_1`$ close to 4/3 and so little restoring force) swung by 30% in
+central density at a finest resolution of 256 cells on two levels. Settled, it stays within
+0.5% (`paper/paper/figures/make_balance.py`).
 
 ## 17. Adaptive mesh refinement
 
@@ -2247,7 +2252,8 @@ after every step. The expansion drag on $`\rho e`$ uses the gas's own $`g = p/\r
 step $`\rho e`$ goes as $`a^{-3g}`$ with $`g`$ taken half way through (second order). Uniform gas
 plus radiation, their pressures equal at $`a = 0.1`$, expanding to $`a = 0.3`$ ends within
 $`2\times10^{-7}`$ in temperature of a float64 integration of $`de = -p\,d(1/\rho)`$, where an
-ideal gas would be off by a factor 2.6. The tabulated stellar equation of state is refused.
+ideal gas would be off by a factor 2.6. The tabulated equations of state (white dwarf matter,
+hydrogen and helium, ANEOS) are refused.
 
 **Cooling** works on proper quantities: the state's densities are comoving, so the cooling
 function is called at the proper density $`\rho/a^3`$ (at the middle of the step) and its rate,
@@ -2325,7 +2331,12 @@ mass to $`10^{-8}`$.
 and tidal increments to velocities of the order of the shear speed, and in a steady state the
 rounding of those additions is the same every step, so it adds up, to about $`10^{-4}`$ of the
 shear speed an orbit. Orbital advection (evolving the departure from the background) would
-remove it and the shear speed's limit on the timestep; it is not implemented yet. The Coriolis
+remove it and the shear speed's limit on the timestep; it is not implemented yet. A density
+that sits on a power of two is a trap of the same kind: float32 spacing is $`6\times10^{-8}`$
+just below 1 and $`1.2\times10^{-7}`$ just above, so a small flux increment survives rounding
+on one side and is lost on the other, a one-sided drain. A uniform sheet at density and
+pressure 1 lost $`2.3\times10^{-6}`$ of its mass over ten orbits on Metal; at 1.3, 1.4 or 1.75
+(the same sound speed and steps) it keeps it to $`10^{-7}`$, so the test runs at 1.4. The Coriolis
 turn takes its sines from their series for small angles: the GPU's `sin` is accurate in absolute
 terms only, and its error over the small angle of one step was biased enough to shift the phase
 of the rotating-frame test by $`7\times10^{-6}`$ (now $`3\times10^{-7}`$).
@@ -2349,7 +2360,9 @@ The first version runs on a uniform grid, periodic along $`y`$ (and $`z`$ unless
 blocks (whose neighbors across the boundary change with time), self-gravity and diffusion are
 refused. The `shearing-wave` preset swings a leading density wave round to trailing; `mri-box`
 grows the magnetorotational instability from noise in a vertical field. Tests: the background
-over ten orbits (within $`10^{-3}`$ of the shear speed), the blob, epicycles at
+over ten orbits at density 1.4 (`shear-steady`: velocity within $`8.8\times10^{-4}`$ of the
+shear speed, density within $`2.4\times10^{-4}`$, mass kept to $`8.5\times10^{-8}`$; the test
+asks for $`2\times10^{-3}`$, $`10^{-3}`$ and $`10^{-6}`$), the blob, epicycles at
 $`\kappa = \sqrt{2(2 - q)}\,\Omega`$ (back to $`5\times10^{-5}`$ after one, epicyclic energy to
 $`5\times10^{-5}`$); the compressive shearing wave of
 [Johnson & Gammie (2005)](https://doi.org/10.1086/426637) at $`128^2`$, projected on the sheared
@@ -2846,7 +2859,7 @@ N_r times:  amr/rad_assemble, amr/rad_sweep
 amr/rad_commit
 ```
 
-**Ghosts** are computed on load, as the gas's are (§10): a same-level neighbor's cell, its
+**Ghosts** are computed on load, as the gas's are (§17): a same-level neighbor's cell, its
 image at a boundary with the flux reversed across a wall, the mean of a finer block's cells, or
 the coarser cell beyond the face with minmod slopes toward the ghost's quarter (which keep
 $`E`$ positive) and its flux held to $`cE`$. $`\kappa_R\rho`$ is taken as it is from a coarser
@@ -2888,11 +2901,12 @@ fluxes where no species already record them.
 | `rad-diffusion` | A Gaussian spreads at $`c/(3\kappa\rho)`$ to 1% at $`\tau_c = 1`$, 100 and $`10^4`$ |
 | `rad-shadow` | Behind an opaque disc, 6% of the beam beside it |
 | `rad-advect` | Trapped radiation at $`\beta = 10^{-2}`$, $`\beta\tau = 10^4`$, $`\hat c = c/100`$ moves with the gas to $`10^{-4}`$ of the box and keeps its width to 3.5% (the lab-frame reference lags at $`(\hat c/c)\,v`$) |
-| `rad-marshak` | [Su & Olson (1996)][SuOlson1996]'s non-equilibrium Marshak wave: the GPU matches the float64 reference to $`2\times10^{-3}`$ of the incident energy, and both the float64 diffusion solution with the Marshak boundary to 0.03 at $`\tau = 3.16`$ and 0.015 at $`\tau = 10`$ |
+| `rad-marshak` | [Su & Olson (1996)][SuOlson1996]'s non-equilibrium Marshak wave: the GPU matches the float64 reference to $`2\times10^{-3}`$ of the incident energy at $`\tau = 1`$, 3.16 and 10, and both the float64 diffusion solution with the Marshak boundary to 0.03 at $`\tau = 3.16`$ ($`x \le 2`$) and $`\tau = 10`$ ($`x \le 5`$), beyond half a mean free path of the boundary, where M1 and diffusion part ways |
 | `rad-star` | An $`n = 3`$ polytrope with a tenth of its pressure in radiation, over a dynamical time: it holds as the same star with its radiation in the equation of state does (rms speed inside 2.9% of the central sound speed, the baseline's 2.1%, at $`64^3`$), and crossing the box at Mach 10 it follows that baseline |
 | `rad-shock` | Gas driven into a wall: the state behind the shock matches the Rankine-Hugoniot conditions with radiation to 0.1% (subcritical), and to 3% at $`\hat c = c/5`$ (supercritical; the limit above) |
 | `rad-cooling-sphere` | A hot core behind a reduced-speed shell: the luminosity is steady to 0.03% over 30 steps (12% before the limiter above) and the same at $`\hat c`$ and $`2\hat c`$ to 5% |
 | `rad-restart` | The radiation comes back from a snapshot bit for bit |
+| `rad-off` | Off, a run has no radiation passes and its equation of state keeps its radiation term; on, the radiation constant moves from the equation of state to the transport |
 | `rad-blocks-diffusion` | A Gaussian centered on the face between coarse and fine blocks (20 and 10 optical depths a cell) spreads as on the fine uniform grid: centroid to $`2\times10^{-4}`$ of the box, widths to 0.4%; the total energy changes by $`1.3\times10^{-5}`$, the uniform grid's by $`1.4\times10^{-5}`$ (rounding) |
 | `rad-blocks-advect` | The pulse of `rad-advect` on a mesh that re-meshes four times as it moves: where the gas took it to $`10^{-4}`$ of the box, width kept to 2%, $`E_\text{gas} + E/r`$ to $`2\times10^{-6}`$ |
 | `rad-blocks-cooling-sphere` | Only the blocks holding the shell refined: the luminosity through the box faces, on coarse blocks, is the fine uniform grid's to $`10^{-5}`$, and as steady |
@@ -2904,7 +2918,13 @@ without radiation, 6.6 ms with 8 sweeps); at $`\hat c`$ about 15 times the gas's
 unit of simulated time costs 4.2 times what the gas alone does.
 
 **Not yet.** Per-block timesteps with radiation (switched off); refinement on the radiation
-energy itself; settling a star with radiation on the GPU; curvilinear coordinates; magnetic fields; more than one frequency group; sources that shine. The sweep is
+energy itself; settling a star with radiation on the GPU; curvilinear coordinates, comoving
+coordinates and the shearing box; magnetic fields; implicit pressure; more than one frequency
+group; sources that shine. A run that asks for one of the coordinates, the field or implicit
+pressure is refused with the reason (`radiationUnsupported`, `src/radiation/radiation.ts`).
+The equation of state must have an energy and no radiation table
+of its own: the ideal gas, gas and radiation, degenerate electrons or ionizing hydrogen, not white
+dwarf matter, hydrogen and helium, ANEOS, the liquid or a barotropic gas. The sweep is
 first order in time ([He, Wibking & Krumholz 2024][He2024]'s two-stage scheme is the upgrade).
 Radiation pressure enters as a source term the well-balanced reconstruction (§8) does not see, so
 stars held up largely by radiation are not yet in discrete balance.
@@ -3107,8 +3127,9 @@ of the mass has left through the faces by t = 28.
 - **Water's solid is not ice Ih**: the 2024 model has one solid, of 1.25 g/cm³. A cold icy
   body is about a third too dense near its surface.
 - **No strength.** Bodies are fluids: right above a few hundred kilometers.
-- **Refused with it**: magnetic fields are not; comoving coordinates are. Radiation, burning
-  and implicit pressure have not been tried.
+- **Refused with it**: comoving coordinates, radiation transport (§24) and implicit pressure
+  (the liquid and the ideal gas only, §9). Magnetic fields are not refused; they and burning
+  have not been tried.
 - A run's two materials must be its two species. A third species, a tracer, turns the
   composition off: the dye (the passive scalar) tells bodies apart instead.
 

@@ -63,8 +63,8 @@ In the console of an open page you can call the same methods directly:
 
 ## Conventions
 
-- **Every method returns a promise.** The one exception is `errors()`, which returns its
-  answer directly.
+- **Every method returns a promise**, except `describe()`, `preset()`, `check()` and
+  `errors()`, which return their answer directly (and `preset()` throws rather than rejects).
 - **Results are plain JSON.** They hold numbers, strings, arrays and objects, and binary files
   come as base64. A result therefore survives `page.evaluate`, CDP's `Runtime.evaluate` with
   `returnByValue`, or any other bridge.
@@ -132,7 +132,7 @@ by `npm run gen`.
 | `degrho` | Settings | Degeneracy density. Density at which the electrons’ Fermi momentum reaches mₑc. For a setup with physical units it is set from the composition (about 2×10⁶ g/cm³ for C/O); in code units |
 | `degp` | Settings | Degeneracy pressure scale. The scale π mₑ⁴ c⁵ / 3h³ of the degenerate electron pressure. Set from physical constants for a setup with physical units; in code units |
 | `coulomb` | Settings | Coulomb corrections. The ions’ Coulomb energy, as a multiplier: 1 for all of it, 0 for none. It lowers the cold pressure by a percent or two in dense white dwarf matter (more in the envelope) and adds to the heat capacity of cold, strongly coupled ions |
-| `hherad` | Settings | Radiation term. The radiation’s pressure a T⁴ / 3 and energy a T⁴ in the equation of state, as a multiplier: 1 for gas in equilibrium with its radiation (a star’s interior), 0 for gas alone (a cloud or thin gas, which its radiation leaves). Radiation transport carries it instead when it is on |
+| `hherad` | Settings | Radiation term. The radiation’s pressure a T⁴ / 3 and energy a T⁴ in the equation of state, as a multiplier: 1 for gas in equilibrium with its radiation (a star’s interior), 0 for gas alone (a cloud or thin gas, which its radiation leaves). Radiation transport does not run with this equation of state |
 | `iont` | Settings | Ionization temperature. The ionization energy of hydrogen, 13.6 eV, over k, in code temperature. Set from physical constants for a setup with physical units |
 | `ionrho` | Settings | Saha density. Density scale of the Saha equation in code density: denser gas needs a higher temperature to ionize. Set from physical constants for a setup with physical units |
 | `frho` | Settings | Tenuous below density. Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off |
@@ -145,7 +145,7 @@ by `npm run gen`.
 | `cheat` | Settings | Heating rate. Heating per unit mass (power law), or the heating rate at unit density (interstellar) |
 | `ctunit` | Settings | Kelvin per unit T. Interstellar: kelvin per code unit of temperature (code density is atoms per cm³) |
 | `ctfloor` | Settings | Temperature floor. Gas at or below this temperature does not cool |
-| `rad` | Settings | Radiation transport: off, m1. Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Uniform Cartesian grids, without a magnetic field, for now |
+| `rad` | Settings | Radiation transport: off, m1. Gray radiation transport with the M1 closure: the radiation’s energy and flux, carried with the gas, streaming and diffusing between cells, and trading heat and momentum with the gas through its opacity (docs/numerics.md section 24). Cartesian coordinates, on the uniform grid or the adaptive mesh (all blocks then take one timestep), without a magnetic field |
 | `kap` | Settings | Opacity: constant, electron, kramers. How opaque the gas is to the radiation, per unit mass: a constant, electron scattering, or Kramers’ free-free absorption with electron scattering. With physical units the scattering and Kramers constants come from the composition |
 | `kapa` | Settings | Absorption κ_a. Absorption opacity per unit mass (the Planck mean), which exchanges heat between gas and radiation. With electron scattering, a small true absorption |
 | `kaps` | Settings | Scattering κ_s. Scattering opacity per unit mass: it drags on the radiation’s flux without heating the gas (electron scattering is 0.2 (1 + X) cm²/g) |
@@ -178,7 +178,7 @@ by `npm run gen`.
 | `riemann` | Settings | Riemann solver: hllc, hllclm, hll. How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust |
 | `limiter` | Settings | Limiter: koren, mc, vanleer, minmod. How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
 | `cfl` | Settings | CFL number. Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
-| `psplit` | Settings | Pressure: explicit, implicit. How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid equation of state on a uniform grid |
+| `psplit` | Settings | Pressure: explicit, implicit. How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid and the ideal gas, in Cartesian coordinates, on the uniform grid or the adaptive mesh |
 | `pcycles` | Settings | Pressure V-cycles. Implicit pressure: multigrid V-cycles per step (warm-started). More converge the pressure further, at more cost |
 | `ptol` | Settings | Pressure tolerance. Implicit pressure: the residual of the pressure equation after a step’s V-cycles, relative to its largest right-hand side, above which the step is counted as unconverged |
 | `acfl` | Settings | Acoustic steps per step. Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped |
@@ -263,7 +263,10 @@ Everything there is to choose from:
 - `resolutions`: the grid sizes on offer for 2 and 3 dimensions, and `uniformMax`. A larger
   grid must be adaptive, with `amr` of 1 or more.
 - `eos`, `cooling`, `riemann`, `limiter`, `gravity`, `colormaps`: the allowed values.
-- `setup`: what a setup document may hold. `options` are the general settings, each with its
+- `methods`: this API's own methods, each with `name`, `summary`, `args` (as JSON Schema) and
+  `changesRun`.
+- `setup`: what a setup document may hold. `format` is the value of a document's `format`
+  key (`shaderous-setup`). `options` are the general settings, each with its
   `path` in the document, `id` (its key in a link, where it has one), `label`, `title`, `kind`,
   range or `options`, `default`, and `apply`: what changing it costs a running simulation
   (`live`, `shaders` or `restart`). `parts` are the kinds of part with their fields, and
@@ -324,7 +327,9 @@ Advances the run, stopping at whichever limit comes first:
   lands on `until` exactly;
 - `timeoutMs`: give up after this much wall time and return where the run got to.
 
-The result is `{ t, dt, steps, taken, seconds, stopped }`. `stopped` is one of:
+The result is `{ t, dt, steps, taken, seconds, stopped, lastDt }`, where `taken` is the steps
+this call took and `lastDt` the timestep of the last step taken (`dt` reads 0 while the clock
+is held at a stop). `stopped` is one of:
 
 - `'steps'`: the step count was reached;
 - `'time'`: the clock reached `until`;
@@ -373,8 +378,24 @@ The run's diagnostics, read back now:
   last step, summed over the gas (0 otherwise; the panel's L nuc, and the view "Nuclear heating"
   per unit volume);
 - `com`: the gas's center of mass relative to the box center;
+- `perturber`: the first point mass's position relative to the box center, or null;
 - `masses`: the point masses, with position, velocity, mass and accreted mass;
-- `ranges`: the least and greatest value of each field, keyed by field name;
+- `ranges`: the least and greatest value of each field, keyed by field name (the panel's
+  δρ max for a liquid, |ρ / ρ₀ − 1|, comes from the density's);
+- `symmetry`, for a mirror-symmetric run: the mirrored axes. The totals are then those of the
+  whole configuration;
+- `scale` and `redshift`, in comoving coordinates: the scale factor and 1 / a − 1;
+- `radiation`, for a run with radiation transport: `eRad` (the radiation energy in the box,
+  which `eTot` does not include), `eRadReduced` (the sum of E / r, r being each cell's reduced
+  speed of light over the true one: `eTot + eRadReduced` is what the scheme conserves),
+  `reducedShare` (the share of `eRad` in cells with r < 1), `luminosity` (the outward flux
+  through the box's open faces now),
+  `escaped` (the radiation energy that has left through the open faces since the run
+  started, summed step by step) and `escapedAt` (the time `escaped` is the total at),
+  `streaming` (cells at the streaming limit), `tooFast` (cells where the gas's speed plus its
+  sound speed is over a third of the reduced speed of light), `maxReducedFlux` (the largest
+  |F| / (c E)) and `maxTrad` (the largest radiation temperature, (E / a)^¼). The panel's L rad, the light curve, is the change of
+  `escaped` between two readouts over the change of `escapedAt`;
 - `magnetic`, for a run with a magnetic field: `eMag` (the magnetic energy, which `eTot`
   includes and `eInt` then does not), `divB` (the largest |div B| dx of any cell over
   the largest |B|), `bMax` and `betaMin` (the least plasma beta, 2p / B^2, of any cell).
@@ -449,7 +470,7 @@ left out.
 | `escaping` | `mass` and `shares` |
 | `moon` | The mass of the moon the disk would gather into: 1.9 L / √(G M a_R) − 1.1 M_D − 1.9 M_esc, with M_esc = 0.05 M_D (Ida et al. 1997; Kokubo et al. 2000); 0 if the disk is too compact |
 | `shares` | Of that part's mass, the fraction that is each species (`fe85si15`: how much of it is iron) and its mean `dye` (the passive scalar, which tells the two bodies apart: 1 in the first and 0.5 in the second in `moon-forming-impact`) |
-| `meanDensity` | The planet's mean density as used: the Earth's, 5513 kg/m³, in code units where the run has units |
+| `meanDensity` | The planet's mean density as used: the Earth's, 5513 kg/m³, in code units where the run has units, and half the densest gas's density where it has none |
 | `units` | `time`, `mass`, `length` of a code unit in SI, or `null` |
 
 Masses are in code units: Earth masses in `moon-forming-impact`, where the Moon is 0.0123.
@@ -634,7 +655,8 @@ the grid, the gas, gravity, the boundaries, the mesh, the solver, and the fields
 Each has `id` (its key in a link, such as `gamma` or `riemann`, or its path in the document,
 such as `parts.0.soft`), `path`, `label`, `title`, `page`, `kind`, `value`, its range or
 `options`, `apply` (what changing it costs: `live`, `shaders` or `restart`), and `unavailable`,
-the reasons it cannot be used in this setup, where there are any.
+the reasons it cannot be used in this setup, where there are any. A field of a part also has
+`part`, that part's `id` (or its kind).
 
 ### `control(id, value?)`
 
@@ -648,6 +670,9 @@ there, as the dialog's Apply does: a uniform write, new shaders, or a fresh star
 
 This lets you change a run partway through, the way a user can: switch the Riemann solver,
 the equation of state, gravity, viscosity, or a preset parameter, without starting from t = 0.
+A few settings start the run again whenever they change, as their `apply` of `restart` in
+`controls()` says: among them radiation transport (`rad`), implicit pressure (`psplit`,
+`pcycles`) and the ANEOS `material`.
 
 The GPU memory the simulation may take is the control `gpumem`, in GB: `control('gpumem', 4)`
 sets it (it decides how many blocks the adaptive mesh can hold, and starts the run again), and

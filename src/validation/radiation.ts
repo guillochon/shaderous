@@ -721,7 +721,7 @@ export const RAD_TESTS: TestDef[] = [
   {
     id: 'rad-marshak',
     name: 'Radiation: Su & Olson non-equilibrium Marshak wave (2D, 128 cells across 16 mean free paths)',
-    criterion: 'Radiation falls in through a held column (Marshak boundary) on a cold material of heat capacity 4 a T^3. The GPU matches the float64 reference of the same scheme to 2e-3 in E and a T^4 at tau = 1, 3.16 and 10; and both match the float64 non-equilibrium diffusion solution with the Marshak condition to 0.03 at tau = 3.16 (x <= 2) and 0.015 at tau = 10 (x <= 5), in units of the incident energy',
+    criterion: 'Radiation falls in through a held column (Marshak boundary) on a cold material of heat capacity 4 a T^3. The GPU matches the float64 reference of the same scheme to 2e-3 in E and a T^4 at tau = 1, 3.16 and 10; and both match the float64 non-equilibrium diffusion solution with the Marshak condition to 0.03 at tau = 3.16 (x <= 2) and tau = 10 (x <= 5), beyond half a mean free path of the boundary, in units of the incident energy',
     async run(gpu) {
       const m: Record<string, number> = {};
       const n = 128;

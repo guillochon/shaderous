@@ -78,8 +78,10 @@ src/
   hydro/       rates, clock, predictor and update passes; riemann/ and limiters/ modules;
                dual energy, diffusion, cooling hooks, species passes
   eos/         WGSL equation-of-state modules and their float64 mirrors (eos.ts); the tables
-               of white dwarf matter, hydrogen and helium (table.ts, shared lookup) and the
-               ANEOS materials (aneos/, aneos.ts), loaded only when a run uses them (tables.ts)
+               of white dwarf matter, hydrogen and helium and the ANEOS materials (aneos/),
+               loaded only when a run uses them (tables.ts). table.ts loads and binds all three
+               and has the Hermite basis (table_tex.wgsl on the GPU); the free-energy lookup and
+               its solve for T (table.wgsl) are the first two's, ANEOS's its own (aneos.wgsl)
   gravity/     multigrid passes, multipole boundary, half-kick corrector, point masses, sinks
   pressure/    the implicit pressure step: its multigrid for alpha p - div(beta grad p) = b,
                the face velocities it corrects, and their passes for the liquid and the gas
@@ -93,6 +95,7 @@ src/
   amr/         block tree (tree.ts), atlas passes and the adaptive driver (amr_sim.ts);
                gravity/ for the Poisson solve on blocks
   render/      field extraction, ray-marcher, slice view, picking, transfer functions
+  edit/        the brushes' passes on the uniform grid (amr/ has the blocks')
   setup/       the setup document: its types, the option table, reader and writer, and the
                compiler that turns one into a Problem; parts/ has the stars, orbits, disks,
                regions and the built-in flows
@@ -104,9 +107,12 @@ src/
   validation/  the in-page validation suite (validate.html)
   io/          snapshots, Athena++ HDF5 reader and writer, checkpoints, capture
   ui/          the simulator front end, shareable links
+  schema/      the generated schema and doc tables (`npm run gen`, below)
   sim.ts       owns the textures and encodes a uniform-grid step
 tests/         unit/ (Vitest, Node) and gpu/ (Playwright, real GPU)
 tools/burn/    offline Python tools for the nuclear-burning surrogate
+tools/eos/     offline tools that build the equation-of-state tables, and their notes (NOTES.md)
+tools/headless/ the command-line runner and the MCP server
 paper/         the method paper (AASTeX)
 ```
 
@@ -188,8 +194,14 @@ another form therefore costs more than repeating the conversion.
 | 3. Predictor | `hydro/predictor.wgsl` | Limited slopes, the half-step primitive state, shock and first-order flags. |
 | 4. Update | `hydro/update.wgsl` | Face states, Riemann solves on all $`2d`$ faces, diffusion fluxes, the conservative update, the first half kick, cooling, dual-energy sync, floors. |
 | 5. Species *(optional)* | `hydro/species*.wgsl` | Move each species with the face mass fluxes the update recorded. |
-| 6. Gravity *(optional)* | `gravity/rhs.wgsl`, V-cycles, `gravity/field.wgsl` | New source, warm-started V-cycles, the field texture. |
-| 7. Correct *(optional)* | `gravity/correct.wgsl`, `bh_*.wgsl` | Second half kick; point masses kick, drift and accrete. |
+| 6. Implicit pressure *(optional)* | `pressure/source*.wgsl`, `pressure/multigrid.ts`, `pressure/correct*.wgsl` | The pressure equation from the old and the advected state, its V-cycles, and the correction of the face fluxes (with self-gravity, the potential is solved first, for the advected density). Replaces the second half kick. |
+| 7. Radiation advection *(optional)* | `radiation/advect.wgsl` | $`E`$ and $`\mathbf F`$ moved with the update's face mass fluxes. |
+| 8. Gravity *(optional)* | `gravity/rhs.wgsl`, V-cycles, `gravity/field.wgsl` | New source, warm-started V-cycles, the field texture. |
+| 9. Correct *(optional)* | `gravity/correct.wgsl`, `bh_*.wgsl` | Second half kick; point masses kick, drift and accrete. |
+| 10. Radiation sweeps *(optional)* | `radiation/sweep.wgsl`, `commit.wgsl`, `escape.wgsl` | $`N_r`$ sweeps of transport and exchange with the gas, then their commit to the state. |
+| 11. Burning *(optional)* | `hydro/burn*.wgsl` | The network surrogate on the step's end state. |
+
+With a magnetic field, passes 3 and 4 are the field's own two-stage step (`mhd/`).
 
 `sim.profile()`, or **Time GPU passes** in the Performance panel, reports the GPU time of each
 pipeline from timestamp queries (`gpu/timing.ts`).
@@ -318,8 +330,14 @@ assemble   primitives for every block, ghosts included, straight from the conser
 timestep   reduce the signal rate over leaf cells; set dt
 predict    half-step states for leaf blocks and their first ghost layer
 update     leaf cells only, with fluxes matched at refinement boundaries
+[radiation] E and F moved with the update's mass fluxes
+[pressure] implicit pressure: the source, V-cycles over the tree's levels, the correction
 [gravity]  restrict density, relax every level in the same dispatches, field, second half kick
+[radiation] N_r sweeps, each after assembling (E, F) with ghosts, then the commit
 ```
+
+The two are not taken together. With either every block takes one timestep (per-block
+timesteps are refused with implicit pressure and switched off with radiation).
 
 ### Ghost cells computed on load
 
@@ -467,7 +485,7 @@ cannot make is retried smaller within seconds.
 ## Setups: one document, compiled
 
 Every setting of a simulation is a field of one JSON document, a `SetupSpec`
-(`setup/spec.ts`; [setups.md](setups.md) describes the format). The presets are 47 such files
+(`setup/spec.ts`; [setups.md](setups.md) describes the format). The presets are 79 such files
 in `src/presets/`, and a setup made in the Setup dialog is the same kind of file. A document
 holds numbers and names and no code, so one from a stranger is safe to open; `setup/codec.ts`
 reads it as untrusted input.
@@ -573,7 +591,9 @@ held bit for bit to the object it replaced before those objects were retired.
   their float64 mirrors and analytic limits, white dwarf structure and the collision orbit, the
   exact Riemann solver, the float64 reference scheme, the AMR tree, links, units and checkpoints.
 - **GPU tests** (`npm run test:gpu`): Playwright drives an installed Chrome (or Edge with
-  `PW_CHANNEL=msedge`) through the 36-test validation suite on the real GPU.
+  `PW_CHANNEL=msedge`) through the 180-test validation suite on the real GPU. Each test closes
+  its page, bounded to 30 s, before its result is judged, and a global timeout (180 minutes,
+  `PW_GLOBAL_TIMEOUT`) runs in the runner process, so a failed test cannot hold the suite.
 - **In the browser**: [validate.html](https://guillochon.github.io/shaderous/validate.html) runs
   the same suite on the visitor's GPU, with each test's pass criterion next to its result.
 - **Float64 mirrors**: every WGSL equation of state and cooling function has a TypeScript
@@ -609,8 +629,8 @@ held bit for bit to the object it replaced before those objects were retired.
 ## Limitations and lessons that carry over
 
 Shaderous runs on one GPU, inside the memory the browser grants. Its radiation transport (gray,
-M1: [numerics.md](numerics.md#24-radiation-transport)) takes one timestep for all blocks, and
-its diffusion is explicit. Single precision is enough for the shipped
+M1: [numerics.md](numerics.md#24-radiation-transport)) and its implicit pressure take one
+timestep for all blocks, and its diffusion is explicit. Single precision is enough for the shipped
 problems. Round-off is biased, though, when a uniform background sits exactly on a power of two
 (see `problems/advection.ts`), and long integrations accumulate errors that double precision
 would not.

@@ -208,7 +208,8 @@ theta_rot = 85.32 K (their 170.64 K is twice it), theta_vib = 5984.48 K, D = 7.1
   nodes.
 - The second block also holds the inverse, log T from (rho, log e) and from (rho, log p/rho),
   701 points across each range, for Newton's starting point: the solve as the shader runs it
-  takes under 3 evaluations on average and under 8 at most (the unit test's states), where a
+  takes 1.1 evaluations on average and 3 at most over the unit test's 1200 states (the test
+  requires under 3 and under 8), where a
   classical guess would stall on the fronts. With radiation the start is the lesser of that
   and the temperature whose radiation alone is the goal.
 - On the GPU (Apple GPU, single precision; `validate.html`, test `eos`): pressure to energy
