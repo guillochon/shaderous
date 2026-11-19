@@ -10,10 +10,13 @@
 // momentum, and angular momentum about the mass in its rest frame. The sink leaves the rest
 // of rho and mom for the next mass.
 struct BhTake { pull: vec3<f32>, taken: vec4<f32>, l: vec3<f32> }
+// The cell being reduced, for a source whose pull is not the cell center's (bh_pull): a
+// uniform grid's (c, 0), a block grid's (l, slot). red_cell() sets it.
+var<private> g_rc: vec4<i32>;
 fn bh_take(i: u32, x: vec3<f32>, m: f32, vol: f32, dt: f32, rho: ptr<function, f32>, mom: ptr<function, vec3<f32>>) -> BhTake {
   let b = BH.list[i];
   var t: BhTake;
-  t.pull = m * bh_accel(x, b);
+  t.pull = m * bh_pull(x, b);
   t.taken = vec4<f32>(0.0);
   t.l = vec3<f32>(0.0);
   let f = sink_fraction(b, x, *rho, dt);

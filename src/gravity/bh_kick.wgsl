@@ -89,6 +89,18 @@ fn red_l(i: u32) -> vec3<f32> {
   return unfold_l(v);
 }
 
+// With implicit pressure (P.ohm.y; src/pressure) the step is drift-kick-drift instead, all of
+// it here (gravity/bh_drift.wgsl does not run). The gas was kicked once, by the masses half a
+// step along their way (pressure/kick.wgsl), and the reduction summed exactly those kicks
+// (gravity/bh_moment.wgsl bh_pull): so the masses go half a step, take the whole step's kick
+// from that sum and from one another where they then are, and go the other half. What the gas
+// was given and what the masses are given are the same numbers, and their momentum together
+// is conserved to round-off, as in the explicit scheme. (No sinks or frames there: src/sim.ts
+// implicitUnsupported.)
+fn implicit_step() -> bool {
+  return P.ohm.y > 0.0;
+}
+
 // Cleared for a pipeline that only evaluates the accelerations (a fresh start, or a potential
 // solved again in mid-run): no step has been taken, so nothing is accreted and nothing kicked.
 override LIVE: bool = true;
@@ -134,6 +146,13 @@ fn main() {
     }
   }
 
+  if (LIVE && implicit_step()) {
+    for (var i = 0u; i < n; i++) {
+      let b = BH.list[i];
+      if (!mass_fixed(b)) { BH.list[i].pos = vec4<f32>(b.pos.xyz + 0.5 * clock.dt * b.vel.xyz, b.pos.w); }
+    }
+  }
+
   let m = red_s(0u);
   var abar = vec3<f32>(0.0);
   if (P.bh.y == 1.0 && m > 0.0) {
@@ -169,12 +188,21 @@ fn main() {
       acc -= other.pos.w * d / (r2 * sqrt(r2));
     }
     BH.list[i].acc = vec4<f32>(acc, b.acc.w);
-    if (LIVE && !mass_fixed(b)) {
+    if (LIVE && implicit_step()) {
+      if (!mass_fixed(b)) { BH.list[i].vel = vec4<f32>(b.vel.xyz + clock.dt * acc, b.vel.w); }
+    } else if (LIVE && !mass_fixed(b)) {
       // The second half of the step's Coriolis turn (gravity/bh_drift.wgsl has the first), then
       // the closing half kick.
       var v = BH.list[i].vel.xyz;
       if (rot_on()) { v = rot_turn(v, 0.5 * clock.dt); }
       BH.list[i].vel = vec4<f32>(v + 0.5 * clock.dt * acc, b.vel.w);
+    }
+  }
+  if (LIVE && implicit_step()) {
+    // (After every mass's kick: each felt the others at mid-step.)
+    for (var i = 0u; i < n; i++) {
+      let b = BH.list[i];
+      if (!mass_fixed(b)) { BH.list[i].pos = vec4<f32>(b.pos.xyz + 0.5 * clock.dt * b.vel.xyz, b.pos.w); }
     }
   }
   if (LIVE && P.bh.y == 2.0) {

@@ -2210,11 +2210,18 @@ export class AmrSim implements Simulation {
         // (The state is back in parity p.) A gas's own gravity: the potential of the corrected
         // state, for the next step's face kicks (the pressure passes ran before it, as on the
         // uniform grid: src/sim.ts).
-        // And the point masses move through the step, pulled by that state.
+        // And the point masses move through the step, given what the correction gave the
+        // advected gas (the other parity): amr/bh_moment.wgsl, gravity/bh_kick.wgsl.
         if (this.fieldOn) {
           if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
           const gp = beginPass(enc);
-          this.encodeSolve(gp, p, this.cfg.vcycles, 'step', false, true);
+          this.encodeSolve(gp, p, this.cfg.vcycles, 'none', false, true);
+          if (this.hasMasses) {
+            this.redBh!.encode(gp, 1 - p, this.nMasses);
+            gp.setPipeline(this.pBhKick!);
+            gp.setBindGroup(0, this.gBhKick!);
+            gp.dispatchWorkgroups(1);
+          }
           this.encodeField(gp);
           gp.end();
         }

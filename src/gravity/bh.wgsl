@@ -60,6 +60,18 @@ fn bh_accel(x: vec3<f32>, m: Mass) -> vec3<f32> {
   return -m.pos.w * d / (r2 * sqrt(r2));
 }
 
+// phi(x + d) - phi(x) of one mass, moved on by `ahead`: formed as
+// G M (q1 - q0) / (r0 r1 (r0 + r1)), q = r^2 + soft^2, not as the difference of two potentials
+// thousands of times larger than it.
+fn bh_dphi(m: Mass, x: vec3<f32>, d: vec3<f32>, ahead: f32) -> f32 {
+  let r = x - (m.pos.xyz + ahead * m.vel.xyz);
+  let q0 = dot(r, r) + m.vel.w * m.vel.w;
+  let dq = dot(2.0 * r + d, d);
+  let r0 = sqrt(q0);
+  let r1 = sqrt(q0 + dq);
+  return m.pos.w * dq / (r0 * r1 * (r0 + r1));
+}
+
 // Potential of a mass that has moved on by `ahead` (the half-step extrapolation).
 fn bh_phi(x: vec3<f32>, m: Mass, ahead: f32) -> f32 {
   let d = x - (m.pos.xyz + ahead * m.vel.xyz);

@@ -764,13 +764,19 @@ $`1.2\times10^{-3}`$ over a sound crossing in 40 steps (explicit: $`1.3\times10^
 with a tenth of the explicit scheme's energy drift; on a mesh refined at the center,
 $`4.7\times10^{-3}`$, at the refined patch's corners. Three things to know:
 
-- *Momentum between the gas and a mass is exchanged to first order in the step, not exactly.*
-  The explicit scheme kicks both with the same accelerations at the step's two ends and
-  conserves their sum to round-off. Here the mass is still kicked at the two ends, by the gas
-  as it is there, and the gas once, with the mass at the middle and the advected density. A
-  mass moving at Mach 0.25 through uniform gas loses 2.4% of the momentum exchanged at a
-  quarter of the default Courant number (3.3% on blocks), in proportion to the step. With a
-  mass that moves, lower `cfl`.
+- *The masses are given exactly what the gas was given.* The gas is kicked once, by the masses
+  half a step along their way, so the masses' step is drift-kick-drift here (kick-drift-kick
+  in the explicit scheme): half a step, the whole step's kick, the other half
+  (`gravity/bh_kick.wgsl`). The kick is from the reduction of the gas's own kicks: each cell's
+  advected density times the mean of its faces' kicks by that mass, formed face for face as
+  the correction formed them, fine faces and wrap-around faces included
+  (`gravity/bh_moment.wgsl`, `amr/bh_moment.wgsl`). Two masses moving through uniform gas
+  then conserve the momentum of gas and masses together to $`6\times10^{-7}`$ of what they
+  exchange, on the uniform grid and across refinement boundaries, as the explicit scheme does.
+  (Kicked by the gas as it is at the step's two ends instead, with the usual reduction, they
+  lost 2.4% at a quarter of the default Courant number and 30% at the default.) The step is
+  still long for a mass that moves: at the default Courant number its velocity after a
+  crossing differs from the explicit run's by 8.5%, at a quarter of it by 1%.
 - *The face that wraps around a periodic box* takes the two cells' pulls instead: the masses'
   potential is not periodic, and its difference to a point outside the box left 2% of the
   exchanged momentum unaccounted for whatever the step.

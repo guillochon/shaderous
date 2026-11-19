@@ -828,7 +828,7 @@ export const PSPLIT_TESTS: TestDef[] = [
     id: 'psplit-masses',
     name: 'Implicit pressure with point masses (ideal gas, 2D 128^2, uniform grid and blocks): an atmosphere at rest around one, and one moving through the gas',
     criterion:
-      'An isothermal atmosphere in balance with a softened point mass (G M = 0.2, softening 0.1, central density e^2 times the outer), between walls, over one sound crossing: on the uniform grid the largest Mach number stays under 2e-3 and no more than the explicit scheme\'s plus a tenth, in under a fifth of its steps, total energy to 1e-5 and the mass where it is to 1e-6; on a two-level mesh with the center refined, under 1e-2 (the refined patch\'s corners) and energy to 2e-5. A mass moving at Mach 0.25 through uniform gas in a periodic box, at a quarter of the default Courant number: its velocity at t = 1 within 5% of the explicit run\'s (2.1%, and 2.8% on blocks), the gas\'s mass conserved to 1e-6, and the momentum of gas and mass together changed by less than 5% of what they exchanged (the explicit scheme conserves it exactly: here the mass is kicked by the gas at the step\'s two ends and the gas by the mass at its middle), on the uniform grid and on a mesh refined around the wake',
+      'An isothermal atmosphere in balance with a softened point mass (G M = 0.2, softening 0.1, central density e^2 times the outer), between walls, over one sound crossing: on the uniform grid the largest Mach number stays under 2e-3 and no more than the explicit scheme\'s plus a tenth, in under a fifth of its steps, total energy to 1e-5 and the mass where it is to 1e-6; on a two-level mesh with the center refined, under 1e-2 (the refined patch\'s corners) and energy to 2e-5. Two masses moving at Mach 0.25 and 0.08 through uniform gas in a periodic box, to t = 1: the gas\'s mass conserved to 1e-6 and the momentum of gas and masses together to 1e-4 of what they exchanged, at the default Courant number (the masses are given the sum of the very kicks the gas was given), on the uniform grid and on a mesh refined around the wakes; and at a quarter of the default Courant number the first mass\'s velocity is within 3% of the explicit run\'s',
     async run(gpu) {
       const m: Record<string, number> = {};
       let pass = true;
@@ -863,27 +863,33 @@ export const PSPLIT_TESTS: TestDef[] = [
       const gmm = 0.05;
       const mover = {
         ...base, id: 'mover', bcLo: all(PERIODIC), bcHi: all(PERIODIC),
-        masses: () => [{ gm: gmm, pos: [-0.2, 0, 0], vel: [0.3, 0.1, 0], soft: 0.08, sinkRadius: 0 }],
+        masses: () => [
+          { gm: gmm, pos: [-0.2, 0, 0], vel: [0.3, 0.1, 0], soft: 0.08, sinkRadius: 0 },
+          { gm: 0.03, pos: [0.2, 0.2, 0], vel: [-0.1, 0, 0], soft: 0.08, sinkRadius: 0 },
+        ],
         init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 1, s: 0 }),
       } as unknown as Problem;
       const moving = async (sim: Sim | AmrSim) => {
         const d0 = await sim.diagnostics();
         await sim.runToEnd(64, 1e6);
         const d = await sim.diagnostics();
-        const total = (q: typeof d) => [0, 1].map((a) => q.momentum[a] + gmm * q.masses[0].vel[a]);
+        const total = (q: typeof d) => [0, 1].map((a) => q.momentum[a] + gmm * q.masses[0].vel[a] + 0.03 * q.masses[1].vel[a]);
         const [t0, t1] = [total(d0), total(d)];
         const given = Math.hypot(d.momentum[0] - d0.momentum[0], d.momentum[1] - d0.momentum[1]);
         return { vel: d.masses[0].vel, lost: Math.hypot(t1[0] - t0[0], t1[1] - t0[1]) / given, mass: Math.abs(d.mass / d0.mass - 1) };
       };
       const me = await withSim(gpu, mover, 128, { ndim: 2 }, moving);
       const off = (r: { vel: number[] }) => Math.hypot(r.vel[0] - me.vel[0], r.vel[1] - me.vel[1]) / Math.hypot(me.vel[0], me.vel[1]);
-      const mi = await withSim(gpu, mover, 128, { ndim: 2, pressure: 'implicit', cfl: 0.1 }, moving);
-      const mb = await withAmr(gpu, mover, 128, { ndim: 2, pressure: 'implicit', cfl: 0.1, amrLevels: 1, refineHi: 0.3, timeBins: 0 }, moving);
+      const mi = await withSim(gpu, mover, 128, { ndim: 2, pressure: 'implicit' }, moving);
+      const mb = await withAmr(gpu, mover, 128, { ndim: 2, pressure: 'implicit', amrLevels: 1, refineHi: 0.3, timeBins: 0 }, moving);
+      const mq = await withSim(gpu, mover, 128, { ndim: 2, pressure: 'implicit', cfl: 0.1 }, moving);
+      const bq = await withAmr(gpu, mover, 128, { ndim: 2, pressure: 'implicit', cfl: 0.1, amrLevels: 1, refineHi: 0.3, timeBins: 0 }, moving);
       Object.assign(m, {
-        moving_velocity_difference: off(mi), moving_momentum_lost: mi.lost, moving_gas_mass_drift: mi.mass, moving_momentum_lost_explicit: me.lost,
-        moving_blocks_velocity_difference: off(mb), moving_blocks_momentum_lost: mb.lost, moving_blocks_gas_mass_drift: mb.mass,
+        moving_momentum_lost: mi.lost, moving_gas_mass_drift: mi.mass, moving_momentum_lost_explicit: me.lost,
+        moving_blocks_momentum_lost: mb.lost, moving_blocks_gas_mass_drift: mb.mass,
+        moving_velocity_difference: off(mi), moving_velocity_difference_quarter_courant: off(mq), moving_blocks_velocity_difference_quarter_courant: off(bq),
       });
-      pass &&= off(mi) < 0.05 && mi.lost < 0.05 && mi.mass < 1e-6 && off(mb) < 0.05 && mb.lost < 0.05 && mb.mass < 1e-6;
+      pass &&= mi.lost < 1e-4 && mi.mass < 1e-6 && mb.lost < 1e-4 && mb.mass < 1e-6 && mq.lost < 1e-4 && bq.lost < 1e-4 && off(mq) < 0.03 && off(bq) < 0.03;
       return { pass, metrics: m };
     },
   },

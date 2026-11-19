@@ -2217,10 +2217,14 @@ export class Sim implements Simulation {
       if (this.hasMasses) {
         // Move the masses to the new time, then their pull on the updated gas and what their
         // sinks take from it (removed in the correction pass below).
-        pass.setPipeline(this.pBhDrift);
-        pass.setBindGroup(0, this.gBhDrift);
-        pass.dispatchWorkgroups(1);
-        this.encodeMassKick(pass, gp, true);
+        // (With implicit pressure they are given what the correction gave the advected gas, and
+        // drift within the kick's pass: gravity/bh_kick.wgsl.)
+        if (!this.prs) {
+          pass.setPipeline(this.pBhDrift);
+          pass.setBindGroup(0, this.gBhDrift);
+          pass.dispatchWorkgroups(1);
+        }
+        this.encodeMassKick(pass, 1 - p, true);
       }
       if (this.fieldOn && !this.sphMono) this.encodeField(pass);
       if (this.prs) {

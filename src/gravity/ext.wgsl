@@ -27,23 +27,13 @@ fn ext_accel(x: vec3<f32>) -> vec3<f32> {
 }
 
 // phi(x + d) - phi(x) for the masses (moved on by `ahead`) and the frame, whose acceleration a
-// acts as a uniform field -a of potential a . x. Each mass's part is formed as
-// G M (q1 - q0) / (r0 r1 (r0 + r1)), q = r^2 + soft^2, not as the difference of two potentials
-// thousands of times larger than it.
+// acts as a uniform field -a of potential a . x (each mass's part: gravity/bh.wgsl bh_dphi).
 fn ext_dphi(x: vec3<f32>, d: vec3<f32>, ahead: f32) -> f32 {
   if (!ext_on()) { return 0.0; }
   var s = dot(BH.frame.xyz, d);
   if (P.rot.w != 0.0) { s += rot_dphi(x, d); }
   if (P.shear.w != 0.0) { s += tidal_dphi_vertical(x, d); }
-  for (var i = 0u; i < mass_count(); i++) {
-    let m = BH.list[i];
-    let r = x - (m.pos.xyz + ahead * m.vel.xyz);
-    let q0 = dot(r, r) + m.vel.w * m.vel.w;
-    let dq = dot(2.0 * r + d, d);
-    let r0 = sqrt(q0);
-    let r1 = sqrt(q0 + dq);
-    s += m.pos.w * dq / (r0 * r1 * (r0 + r1));
-  }
+  for (var i = 0u; i < mass_count(); i++) { s += bh_dphi(BH.list[i], x, d, ahead); }
   return s;
 }
 

@@ -933,9 +933,10 @@ against a manufactured solution; its order of convergence is unmeasured), `pspli
   steps (explicit: 0.8% in 737). Only a star at rest: no collapse.
 - **Point masses** (gas, both grids): their potential's difference in the face kick, half a
   step ahead; the masses drift and are kicked after the correction, by the corrected state.
-  `psplit-masses`. Momentum between gas and mass is exchanged to first order in the step (the
-  explicit scheme: exactly); making it exact would need the mass kicked by the reduction of
-  what the gas was given. The periodic wrap-around face needed its own form. Sinks are
+  `psplit-masses`. The masses are kicked by the reduction of what the gas was given, face for
+  face, in a drift-kick-drift step, so the momentum of the two together is conserved to
+  round-off (it was first order in the step with the usual reduction: 30% of the exchange
+  lost at the default Courant number). The periodic wrap-around face needed its own form. Sinks are
   refused (their removal is in the explicit scheme's second kick), and so is a liquid.
 - **The starting mesh reads the velocity** and measures a liquid's pressure against
   $`\rho c_0^2`$, as the GPU indicator does. The Gresho tests' three-level meshes had come from
