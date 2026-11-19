@@ -222,9 +222,10 @@
       } else if (doc.physics.eos === 'ideal') doc.physics.eosParams.arad = a;
       kinds.push('rad');
     } else if (newer < 0.32 && !curved && !frame && doc.physics.eos === 'ideal' && (scenario === 'gas' || kinds.includes('star')) && !doc.physics.rotation && !doc.domain.mirror && !doc.physics.cooling) {
-      // (Ordinary gas, or one star at rest. Not stars that move, nor disks: implicit pressure does
-      // not hold a self-gravitating body that moves, which seed 70293 found. An open limit of
-      // the method: plans/incompressible.md.)
+      // (Ordinary gas, or one star at rest. Not the pairs set to collide, nor disks: these stars
+      // are 8 cells in radius, of a gas softer than their structure, and collapse as they move
+      // under either scheme; the explicit one stays finite through it and the implicit step,
+      // which is for slow flow, does not. Seed 70293; plans/incompressible.md.)
       doc.physics.pressure = 'implicit';
       delete doc.mesh;
       const at = kinds.indexOf('bins');

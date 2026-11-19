@@ -2256,6 +2256,10 @@ export class AmrSim implements Simulation {
         }
         continue;
       }
+      // Implicit pressure with self-gravity: the potential is solved for the advected density,
+      // before the pressure passes that kick the faces with it (below; src/sim.ts has why).
+      const early = !!this.prs && this.selfGravity && !this.sphMono;
+      if (early) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
       const pass = beginPass(enc);
       if (this.prs && this.lagFresh) {
         // A gas's carried pressure, from the state's: at the start and after a regrid.
@@ -2287,20 +2291,23 @@ export class AmrSim implements Simulation {
         pass.setPipeline(this.pAssemble);
         pass.setBindGroup(0, this.assembleGroup(1 - p));
         this.flat(pass, this.nAll, NG);
+        if (early) {
+          this.encodeSolve(pass, 1 - p, this.cfg.vcycles, 'none', false, true);
+          this.encodeField(pass);
+        }
         this.prs.encode(pass, p, this.nLevel, this.nLeaf, this.cfg.pressureCycles);
         this.encodeSpeciesMove(pass, p);
       }
       pass.end();
       if (this.prs) {
-        // (The state is back in parity p.) A gas's own gravity: the potential of the corrected
-        // state, for the next step's face kicks (the pressure passes ran before it, as on the
-        // uniform grid: src/sim.ts).
+        // (The state is back in parity p.) A gas's own gravity was solved above, for the advected
+        // density, as on the uniform grid: src/sim.ts.
         // And the point masses move through the step, given what the correction gave the
         // advected gas (the other parity): amr/bh_moment.wgsl, gravity/bh_kick.wgsl.
         if (this.fieldOn) {
-          if (this.selfGravity) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
+          if (this.selfGravity && !early) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
           const gp = beginPass(enc);
-          this.encodeSolve(gp, p, this.cfg.vcycles, 'none', false, true);
+          if (!early) this.encodeSolve(gp, p, this.cfg.vcycles, 'none', false, true);
           if (this.hasMasses) {
             this.redBh!.encode(gp, 1 - p, this.nMasses);
             gp.setPipeline(this.pBhKick!);

@@ -1,7 +1,8 @@
 // Gravity field texture, written once per step after the Poisson solve:
 //   xyz = self-gravity's acceleration, from the new potential
 //   w   = self-gravity's potential extrapolated half a step ahead (1.5 phi - 0.5 phi_old),
-//         which the next update uses for its time-centered energy source
+//         which the next update uses for its time-centered energy source; with implicit
+//         pressure the potential itself
 // The hydro passes then need one load per cell instead of six potential loads. The point
 // masses and the frame are not in it: each pass adds them itself (gravity/ext.wgsl).
 #include "hydro/common.wgsl"
@@ -21,7 +22,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   var ph = 0.0;
   if (has_potential()) {
     g = gravity(PHI, c) / select(1.0, clock.a1, cosmo_on());
-    ph = 1.5 * textureLoad(PHI, c, 0).x - 0.5 * textureLoad(PHI_OLD, c, 0).x;
+    // (With implicit pressure, P.ohm.y, the potential is the advected density's already, solved
+    // before the pressure passes that kick the faces with it: src/sim.ts.)
+    let ahead = select(0.5, 0.0, P.ohm.y > 0.0);
+    ph = (1.0 + ahead) * textureLoad(PHI, c, 0).x - ahead * textureLoad(PHI_OLD, c, 0).x;
   }
   textureStore(GOUT, c, vec4<f32>(g, ph));
 }

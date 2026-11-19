@@ -268,7 +268,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
 
   // Flux-form gravitational work (P.flags bit 0): each face hands half of F_mass * dphi to the
   // two cells it separates, so the sum over cells telescopes to -d/dt of the potential energy.
-  let flux_work = has_gravity() && (P.flags & 1u) != 0u;
+  // (Not with implicit pressure: gravity's kick and its work are then the pressure passes', formed
+  // on the faces (pressure/correct_gas.wgsl), as the block grid's update has it. Added here too,
+  // the work on gas that moves was counted twice: a star crossing the grid left its heat behind,
+  // and collapsed within a dynamical time.)
+  let flux_work = !PSPLIT && has_gravity() && (P.flags & 1u) != 0u;
   var dw = 0.0;
   if (flux_work) {
     // (Giving each face's work wholly to the downstream cell was tried; it conserves just as

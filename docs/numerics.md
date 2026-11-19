@@ -596,21 +596,32 @@ $`2\times10^{-7}`$ (`psplit-gas-balance`); the explicit scheme holds them to $`1
 $`g\,\Delta x`$: a face is kicked by $`-\Delta t\,(\phi_R - \phi_L)/\Delta x`$, with the
 half-step potential the explicit scheme's reconstruction also differences (§14), the cell's
 kick is its density times the mean of its two faces', and the work is each face's kick times
-the mass it carries, shared between its two cells by their densities: a cell takes half its
+the mass it carries (the update's own flux form of the work, §14, is off with implicit pressure,
+on the uniform grid as on blocks: left on, it counted the work on moving gas twice, and a star
+crossing the grid left its heat behind and tripled its central density in a dynamical time),
+shared between its two cells by their densities: a cell takes half its
 density times the face's kick times the face's velocity, the kinetic energy its half of the kick
 gives it. (Halved evenly, the first cell of near-vacuum beyond a star's surface took half the
 work done on the star's gas: with the gas around a star at $`10^{-5}`$ of its central density
 or less, that cell was $`3\times10^5`$ times hotter after one step and the run was not finite
-after ten. `psplit-gas-star-vacuum` holds the star at a contrast of $`10^7`$.) The potential is solved after the pressure
-correction, for the final density. The timestep keeps gravity's limit,
+after ten. `psplit-gas-star-vacuum` holds the star at a contrast of $`10^7`$.) The potential is
+solved for the advected density, before the pressure passes, and the faces are kicked with it as
+it is: the gas the kicks act on is then the gas the potential is of. (Kicked with the potential
+of the step before extrapolated half a step, a star moving 0.8 of a cell a step was pulled back
+toward where its field lagged it, and lost 10% of its momentum in a dynamical time.) The timestep keeps gravity's limit,
 $`C\sqrt{\Delta x/|\mathbf g|}`$: without it the columns above took five steps a sound crossing
 and lost their balance. A settled polytrope on $`64^3`$ cells holds its central density to
 0.01% over two dynamical times in 22 steps, where the explicit scheme takes 436 and drifts
 2.5%; its total energy drifts 1% against the explicit 0.2%, the price of steps that long with
 a first-order split (`psplit-gas-polytrope`). Collapse and other dynamic self-gravity have not
-been tested with it, and a star that moves is not held: one crossing the grid at a third of its
-sound speed tripled its central density in twelve steps, and two set to collide in near-vacuum
-were not finite after six (random setup 70293). The step is for slow flow.
+been tested with it. A star that moves is held: at 0.3 of its central sound speed, 6.4 cells
+in a dynamical time, its central density stays within 0.2%, its momentum within 0.2% and its
+energy within 0.3% (`psplit-gas-star-moving`). Two limits remain. On a mesh of two levels the
+same star gains 1.7% of its momentum in a dynamical time, as the explicit scheme does there at a
+hundredth of the size with steps a tenth as long: not looked into. And two stars 8 cells in
+radius, of a gas softer than their structure, set to collide in near-vacuum (random setup 70293)
+collapse as they move under either scheme; the explicit one stays finite through it and the
+implicit step, which is for slow flow, does not.
 
 *Species* that ride with the gas are moved after the correction, with the advective mass
 fluxes, and scaled to the corrected density: mass fractions sum to one and a uniform species

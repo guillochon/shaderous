@@ -2338,6 +2338,21 @@ export class Sim implements Simulation {
           this.speciesCur = 1 - q;
         }
       }
+      // Implicit pressure with self-gravity: the potential of the advected density, before the
+      // pressure passes, whose face kicks take it as it is (gravity/field.wgsl). The gas the kicks
+      // act on is then the gas the potential is of. With the potential of the step before
+      // extrapolated half a step instead, a star crossing the grid at 0.8 of a cell a step was
+      // pulled back toward where its field lagged it, and lost 10% of its momentum in a
+      // dynamical time.
+      const early = !!this.prs && selfGravity && !this.sphMono;
+      if (early) {
+        pass.end();
+        this.copyPhiToOld(enc);
+        pass = beginPass(enc);
+        this.mg.encodeSource(pass, 1 - p, this.cfg.gravity === 'isolated');
+        for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
+        this.encodeField(pass);
+      }
       if (this.prs) {
         // Implicit pressure: the equation from the old state (parity p) and the advected one
         // (parity 1 - p), the solve, and the correction back into parity p.
@@ -2360,7 +2375,7 @@ export class Sim implements Simulation {
       this.rad?.encodeAdvect(pass, p);
       if (selfGravity && this.sphMono) {
         this.encodeMonopole(pass, 1 - p);
-      } else if (selfGravity) {
+      } else if (selfGravity && !early) {
         // Keep the old potential and solve for that of the updated density (warm-started).
         pass.end();
         this.copyPhiToOld(enc);

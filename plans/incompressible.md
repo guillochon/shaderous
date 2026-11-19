@@ -10,12 +10,16 @@ with point masses; second order in time. Found by random testing (seed 70293 of 
 star at rest in near-vacuum (the gas around it at 1e-5 of its central density or less) went
 non-finite within ten steps, because gravity's work on a face was halved between its two cells
 whatever their densities; it is shared by density now (`psplit-gas-star-vacuum`, at a contrast
-of 1e7). Open: a star that moves is not held. Crossing the grid at a third of its sound speed
-(8 cells in radius, 128^3) its central density triples in twelve steps, where the explicit
-scheme keeps it within 7% over the same time; two such stars set to collide are not finite after
-six steps. Not looked into: the half-step potential, extrapolated over a step in which the star
-moves most of a cell, is the first suspect. Until then the method should refuse, or warn of,
-self-gravitating bodies that move. Figures quoted from the code in
+of 1e7). Also fixed: a star that moves was not held. The uniform grid's update still added gravity's
+flux-form work, which the pressure correction adds too (the block grid's update already left it
+out): the heat stayed behind as the mass moved, and the star's central density tripled in a
+dynamical time. And the faces were kicked with the last step's potential extrapolated half a
+step, while the gas kicked is a whole step on: the star lost 10% of its momentum. The potential
+is now solved for the advected density before the pressure passes, on both grids
+(`psplit-gas-star-moving`). Open: on a mesh of two levels the moving star gains 1.7% of its
+momentum in a dynamical time (the explicit scheme 0.15%, with steps a tenth as long): the
+multi-level gravity solve is the suspect. And seed 70293's pair of under-resolved stars, which
+collapse as they move under either scheme, still ends non-finite with implicit pressure. Figures quoted from the code in
 section 1 come from `docs/numerics.md` and the source comments.
 
 Goal: run flows at low Mach number in Shaderous, with the density nearly constant along each

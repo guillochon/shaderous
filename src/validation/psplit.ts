@@ -837,6 +837,41 @@ export const PSPLIT_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'psplit-gas-star-moving',
+    name: 'Implicit pressure with self-gravity: a star crossing the grid (3D 64^3, and blocks of two levels, 128^3 finest)',
+    criterion:
+      'The polytrope preset, settled as usual, set moving at 0.1 (0.3 of its central sound speed: 6.4 cells in the dynamical time run, 0.8 of a cell a step) with implicit pressure. On the uniform grid its central density stays within 2% of its start, its momentum within 1% and its total energy within 1%; on blocks of two levels (the star at the finer, 128 cells across) the central density within 2% and the momentum within 4% (it gains 1.6% there, which the multi-level gravity solve is suspected of: the explicit scheme gains a tenth of that). (Two things a random setup found. The uniform grid\'s update added gravity\'s work on the moving gas as the explicit scheme does, and the pressure correction added it again: the heat stayed where it was while the mass moved on, and the star\'s central density tripled in a dynamical time. And the faces were kicked with the potential of the step before, extrapolated half a step, while the gas they act on is a whole step on: the star lost 10% of its momentum. The potential is now solved for the advected density, before the pressure passes.)',
+    async run(gpu) {
+      const spec = cloneSetup(presetSpec('polytrope')!);
+      (spec.parts![0] as { vel?: number[] }).vel = [0.1, 0, 0];
+      const star = compileSetup(spec).problem;
+      const T = star.tDyn ?? 1;
+      const m: Record<string, number> = {};
+      const go = async (tag: string, sim: Sim | AmrSim) => {
+        await sim.settled;
+        const d0 = await sim.diagnostics();
+        const steps = await sim.runToEnd(16, 1e4);
+        const d = await sim.diagnostics();
+        m[`${tag}_central_density`] = d.ranges[0][1] / d0.ranges[0][1];
+        m[`${tag}_momentum`] = d.momentum[0] / d0.momentum[0];
+        m[`${tag}_energy_drift`] = Math.abs(d.eTot / d0.eTot - 1);
+        m[`${tag}_steps`] = steps;
+      };
+      await withSim(gpu, star, 64, { ndim: 3, tEnd: T, pressure: 'implicit' }, (sim) => go('uniform', sim));
+      const blocks = await AmrSim.create(gpu, configFor(star, 128, { ndim: 3, tEnd: T, amrLevels: 1, timeBins: 0, pressure: 'implicit' }));
+      try {
+        await go('blocks', blocks);
+        m.blocks_leaf_levels = new Set(blocks.tree.leaves().map((b) => b.level)).size;
+      } finally {
+        blocks.destroy();
+      }
+      const pass =
+        Math.abs(m.uniform_central_density - 1) < 0.02 && Math.abs(m.uniform_momentum - 1) < 0.01 && m.uniform_energy_drift < 0.01 &&
+        Math.abs(m.blocks_central_density - 1) < 0.02 && Math.abs(m.blocks_momentum - 1) < 0.04 && m.blocks_leaf_levels === 2;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'psplit-amr-polytrope',
     name: 'Implicit pressure with self-gravity on the adaptive mesh: a polytropic star at rest (3D, 128^3 finest, 2 levels)',
     criterion:
