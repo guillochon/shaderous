@@ -163,12 +163,12 @@ decades of density; the test asks for 1% and takes about three minutes).
 
 **More presets (2026-11-18).** Variants of three setups with this equation of state, each
 gas alone (`hheRad` 0): `tidal-disruption-hhe`, `common-envelope-hhe` (with `common-envelope`,
-the example setup as a preset, as its ideal-gas base) and `thermal-instability-hhe` (in
+which was the example setup and is now a preset, as its ideal-gas base) and `thermal-instability-hhe` (in
 physical units: 31 pc, a hydrogen atom per cm^3, 1000 K). Checked on the GPU at 128^3 with two
 levels for two time units (the stars hold as the ideal-gas ones do, no floored cells) and the
-instability at 256^2 to t = 6. The red giant's total energy is -0.49 G M^2 / R against -0.91
-for the ideal gas: the rest is ionization energy. Not run through the encounter or the
-spiral-in.
+instability at 256^2 to t = 6. The giant with a point-mass core runs as the ideal-gas one does (greatest density within
+0.2% over two time units); its gas holds 0.24 G M^2 / R more energy than the ideal gas's, the
+ionization energy. Not run through the encounter or the spiral-in.
 
 **Still open.**
 - Step 5, and with it stellar interiors cooler than a few 1e5 K above 0.1 g/cm^3.
