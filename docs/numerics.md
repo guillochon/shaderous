@@ -1004,9 +1004,10 @@ without per-block timesteps (one solve couples every cell at one time). Each is 
 small grids the step costs more than it saves: the $`128^2`$ cavity at Reynolds number 100
 takes a third of the explicit scheme's steps (viscosity sets its step, not the flow) and three
 times its wall-clock time, because a V-cycle's many small passes cost more than its cells. A
-step costs about 11 explicit steps at $`512^2`$ and 4 at $`128^3`$ (three cycles; timed in
-batches of 20 steps, so roughly), against the $`1 + 1/M`$ it replaces: it pays below a Mach
-number of about 0.1 in 2D and 0.3 in 3D.
+step costs 6.6 explicit steps at $`512^2`$ and 4.2 at $`128^3`$ (three cycles; the Gresho vortex
+of an ideal gas on an Apple M4 Pro, 200 steps, the best of three: 2.9 against 0.44 ms and 18
+against 4.4 ms), against the $`1 + 1/M`$ it replaces: it pays below a Mach number of about 0.2
+in 2D and 0.3 in 3D.
 
 ## 10. Optically thin cooling and heating
 
@@ -3263,6 +3264,12 @@ rule) where a limited slope is zero; 8 steps. The other quantity and the sound s
 read there. Single precision against the float64 mirror (`aneos-eos`): the pressure back from
 its own energy to $`10^{-4}`$ at worst, the sound speed to $`3\times10^{-4}`$ at the 99th
 percentile.
+
+Against the published tables' own sound speed, at their nodes, in solid and liquid rock and iron
+at or above the reference density: $`3\times10^{-6}`$ at the median and $`2\times10^{-4}`$ at the
+90th percentile, and over 1% at 2 to 3% of the nodes (`tests/unit/aneos_published.test.ts`, which
+runs where the published files are at hand; below the reference density the published solid is
+under tension and ours is not).
 
 The sound speed is $`c^2 = (\partial p/\partial\rho)_T + \Gamma\,(\partial p/\partial\ln T)_\rho/\rho`$
 with $`\Gamma = (\partial p/\partial T)/(\rho\,\partial e/\partial T)`$ held between 0 and 5,
