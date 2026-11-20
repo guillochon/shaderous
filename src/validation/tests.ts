@@ -1680,85 +1680,98 @@ export const TESTS: TestDef[] = [
   },
   {
     id: 'closure',
-    name: 'Turbulence closure: the shader is the trained network, it conserves, and shocks do not see it',
+    name: 'Turbulence closure: the shader is its mirror, it conserves, and shocks do not see it',
     criterion:
-      'The coefficients the shader writes for decaying turbulence on 128^2 agree with the float64 mirror of the trained network to 2e-3 in every cell, and lie within their limits; with the closure on, both cells of every face compute bit-identical mass fluxes, and mass, momentum and total energy are conserved to 1e-6, 1e-6 and 1e-5 over a time unit; the run keeps more kinetic energy than without it; with the closure on, the density of a Sod shock tube on 128^2 changes by less than 1e-5 of its peak (rounding: the gates are shut in every cell, and the update is compiled with the hook in it), and that of a Sedov blast on 128^2 by less than 1e-3',
+      'For the constants and for the trained network: the coefficients the shader writes for decaying turbulence on 128^2 agree with the float64 mirror to 2e-3 in every cell, and lie within their limits; both cells of every face compute bit-identical mass fluxes, and mass, momentum and total energy are conserved to 1e-6, 1e-6 and 1e-5 over a time unit; the run keeps more kinetic energy than without the closure, and its dye stays within 0.005 of its starting range; the density of a Sod shock tube on 128^2 changes by less than 1e-5 of its peak (rounding: the gates are shut in every cell, and the update is compiled with the hook in it), and that of a Sedov blast on 128^2 by less than 1e-3',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
       const n = 128;
-      const on = { ndim: 2 as const, closure: true };
-      // The shader against the mirror: the coefficients written for a step, and the state it started from.
-      await withSim(gpu, decayingTurbulence, n, { ...on, tEnd: Infinity }, async (sim) => {
-        sim.step(200);
-        const { u1, u2 } = await sim.readState();
-        sim.step(1);
-        const got = await readTexture(gpu.device, sim.closure!.coefficients, n, 4, 1, n);
-        const eos = makeEos(sim.cfg.eos, sim.cfg.eosParams);
-        const cell = (i: number, j: number): ClosureCell & { cs: number } => {
-          const q = (((j + n) % n) * n + ((i + n) % n)) * 4;
-          const rho = u1[q];
-          const p = eos.pressure(rho, u2[q + 1]);
-          return { rho, vx: u1[q + 1] / rho, vy: u1[q + 2] / rho, p, s: u2[q + 2] / rho, cs: eos.soundSpeed(rho, p) };
-        };
-        let err = 0;
-        let open = 0;
-        let amax = 0;
-        let bmax = 0;
-        for (let j = 0; j < n; j++)
-          for (let i = 0; i < n; i++) {
-            const c = cell(i, j);
-            const want = closureCell(c, cell(i - 1, j), cell(i + 1, j), cell(i, j - 1), cell(i, j + 1), c.cs);
-            const q = (j * n + i) * 4;
-            err = Math.max(err, Math.abs(got[q] - want.a), Math.abs(got[q + 1] - want.b), Math.abs(got[q + 2] - want.gate));
-            if (got[q + 2] > 0) open++;
-            amax = Math.max(amax, got[q]);
-            bmax = Math.max(bmax, got[q + 1]);
-          }
-        metrics.shader_vs_mirror = err;
-        metrics.open_fraction = open / (n * n);
-        metrics.a_max = amax;
-        metrics.b_max = bmax;
-        pass &&= err < 2e-3 && open > 0.5 * n * n && amax <= CLOSURE_DATA.aMax && bmax <= CLOSURE_DATA.bMax && amax > 0.05;
-        const mm = await sim.fluxMismatch();
-        metrics.faces_mismatched = mm.mismatched;
-        pass &&= mm.mismatched === 0;
-      });
-      // Conservation, and what the closure is for: more of the small eddies survive.
-      const decay = (closure: boolean) =>
+      // What a run of decaying turbulence to t = 1 conserves and keeps.
+      const decay = (closure: SimConfig['closure']) =>
         withSim(gpu, decayingTurbulence, n, { ndim: 2, closure, tEnd: 1 }, async (sim) => {
           const d0 = await sim.diagnostics();
           await sim.runToEnd();
           const d1 = await sim.diagnostics();
+          const { u1, u2 } = await sim.readState();
+          let lo = Infinity;
+          let hi = -Infinity;
+          for (let q = 0; q < n * n; q++) {
+            const s = u2[q * 4 + 2] / u1[q * 4];
+            lo = Math.min(lo, s);
+            hi = Math.max(hi, s);
+          }
           return {
             mass: Math.abs(d1.mass - d0.mass) / d0.mass,
             momentum: Math.max(...d1.momentum.map((m, a) => Math.abs(m - d0.momentum[a]))),
             energy: Math.abs(d1.eTot - d0.eTot) / d0.eTot,
             kinetic: d1.eKin / d0.eKin,
+            dye: Math.max(-lo, hi - 1),
           };
         });
-      const off = await decay(false);
-      const with_ = await decay(true);
-      metrics.mass_drift = with_.mass;
-      metrics.momentum_drift = with_.momentum;
-      metrics.energy_drift = with_.energy;
-      metrics.kinetic_kept = with_.kinetic;
-      metrics.kinetic_kept_without = off.kinetic;
-      pass &&= with_.mass < 1e-6 && with_.momentum < 1e-6 && with_.energy < 1e-5 && with_.kinetic > off.kinetic;
-      // Shocks: the gates shut, and the solver's own fluxes are used.
-      const rhoOf = (problem: Problem, closure: boolean) =>
+      const rhoOf = (problem: Problem, closure: SimConfig['closure']) =>
         withSim(gpu, problem, n, { ndim: 2, closure }, async (sim) => {
           await sim.runToEnd();
           const { u1 } = await sim.readState();
           return Float64Array.from({ length: n * n }, (_, q) => u1[q * 4]);
         });
-      for (const [tag, problem] of [['sod', sodX], ['sedov', sedov]] as const) {
-        const a = await rhoOf(problem, false);
-        const b = await rhoOf(problem, true);
-        const peak = a.reduce((m, v) => Math.max(m, v), 0);
-        metrics[`${tag}_max_change`] = maxDiff(a, b) / peak;
+      const off = await decay('off');
+      const plain = { sod: await rhoOf(sodX, 'off'), sedov: await rhoOf(sedov, 'off') };
+      metrics.kinetic_kept_without = off.kinetic;
+      for (const kind of ['constant', 'network'] as const) {
+        // The shader against the mirror: the coefficients written for a step, and the state it started from.
+        await withSim(gpu, decayingTurbulence, n, { ndim: 2, closure: kind, tEnd: Infinity }, async (sim) => {
+          sim.step(200);
+          const { u1, u2 } = await sim.readState();
+          sim.step(1);
+          const got = await readTexture(gpu.device, sim.closure!.coefficients, n, 4, 1, n);
+          const eos = makeEos(sim.cfg.eos, sim.cfg.eosParams);
+          const cell = (i: number, j: number): ClosureCell & { cs: number } => {
+            const q = (((j + n) % n) * n + ((i + n) % n)) * 4;
+            const rho = u1[q];
+            const p = eos.pressure(rho, u2[q + 1]);
+            return { rho, vx: u1[q + 1] / rho, vy: u1[q + 2] / rho, p, s: u2[q + 2] / rho, cs: eos.soundSpeed(rho, p) };
+          };
+          let err = 0;
+          let open = 0;
+          let amax = 0;
+          let bmax = 0;
+          for (let j = 0; j < n; j++)
+            for (let i = 0; i < n; i++) {
+              const c = cell(i, j);
+              const want = closureCell(c, cell(i - 1, j), cell(i + 1, j), cell(i, j - 1), cell(i, j + 1), c.cs, kind);
+              const q = (j * n + i) * 4;
+              err = Math.max(err, Math.abs(got[q] - want.a), Math.abs(got[q + 1] - want.b), Math.abs(got[q + 2] - want.gate));
+              if (got[q + 2] > 0) open++;
+              amax = Math.max(amax, got[q]);
+              bmax = Math.max(bmax, got[q + 1]);
+            }
+          metrics[`${kind}_shader_vs_mirror`] = err;
+          metrics[`${kind}_open_fraction`] = open / (n * n);
+          metrics[`${kind}_a_max`] = amax;
+          metrics[`${kind}_b_max`] = bmax;
+          // (Single precision: the limits as the shader holds them.)
+          pass &&= err < 2e-3 && open > 0.5 * n * n && amax <= Math.fround(CLOSURE_DATA.aMax) && bmax <= Math.fround(CLOSURE_DATA.bMax) && amax > 0.05;
+          const mm = await sim.fluxMismatch();
+          metrics[`${kind}_faces_mismatched`] = mm.mismatched;
+          pass &&= mm.mismatched === 0;
+        });
+        // Conservation, and what the closure is for: more of the small eddies survive.
+        const on = await decay(kind);
+        metrics[`${kind}_mass_drift`] = on.mass;
+        metrics[`${kind}_momentum_drift`] = on.momentum;
+        metrics[`${kind}_energy_drift`] = on.energy;
+        metrics[`${kind}_kinetic_kept`] = on.kinetic;
+        metrics[`${kind}_dye_beyond_range`] = on.dye;
+        pass &&= on.mass < 1e-6 && on.momentum < 1e-6 && on.energy < 1e-5 && on.kinetic > off.kinetic && on.dye < 0.005;
+        // Shocks: the gates shut, and the solver's own fluxes are used.
+        for (const [tag, problem] of [['sod', sodX], ['sedov', sedov]] as const) {
+          const b = await rhoOf(problem, kind);
+          const peak = plain[tag].reduce((m, v) => Math.max(m, v), 0);
+          metrics[`${kind}_${tag}_max_change`] = maxDiff(plain[tag], b) / peak;
+        }
+        pass &&= metrics[`${kind}_sod_max_change`] < 1e-5 && metrics[`${kind}_sedov_max_change`] < 1e-3;
       }
-      pass &&= metrics.sod_max_change < 1e-5 && metrics.sedov_max_change < 1e-3;
       return { pass, metrics };
     },
   },

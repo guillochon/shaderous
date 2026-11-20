@@ -13,7 +13,8 @@ its statistics are compared with the reference's at every tenth of a time unit:
 Two ways of running the coarse case:
 
   --mode app     in the simulator itself (tools/headless), as a user would: closure off
-                 (HLLC, and HLLC with the low-Mach fix) and on. This is the result that counts.
+                 (HLLC, and HLLC with the low-Mach fix) and on, with constants and with
+                 the trained network. This is the result that counts.
   --mode mirror  in the PyTorch mirror (solver.py) from the restricted reference's first
                  state: any trained variant, also those the simulator does not have (the eddy
                  viscosity heads).
@@ -88,7 +89,8 @@ def summarize(series, ref_series, t):
 APP_METHODS = {
     "base": [],
     "hllclm": ["--set", "riemann=hllclm"],
-    "closure": ["--set", "closure=1"],
+    "constant": ["--set", "closure=constant"],
+    "closure": ["--set", "closure=network"],
 }
 
 

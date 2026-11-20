@@ -358,7 +358,7 @@ export interface Problem {
   viscosity?: number;
   conductivity?: number;
   /** The turbulence closure switched on by default (see SimConfig.closure). */
-  closure?: boolean;
+  closure?: import('../closure/kinds').ClosureKind;
   /** Magnetic diffusivity eta switched on by default (see SimConfig.resistivity). */
   resistivity?: number;
   /** Velocities of the faces that are moving walls (SimConfig.wallVelocity). */

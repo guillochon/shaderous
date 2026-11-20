@@ -3,8 +3,8 @@
     tools/closure/.venv/bin/python tools/closure/figures.py
 
 Writes docs/img/closure/*.png. One color per run throughout: the reference in black, the
-coarse run as it is in blue, with the low-Mach Riemann solver in orange, with the closure in
-green.
+coarse run as it is in blue, with the low-Mach Riemann solver in orange, with the closure by
+constants in green and by the trained network in dashed yellow.
 """
 import json
 from pathlib import Path
@@ -26,7 +26,8 @@ STYLE = {
     "ref": ("Reference (4x finer, averaged)", INK, "-"),
     "base": ("Coarse, no closure", "#2a78d6", "-"),
     "hllclm": ("Coarse, low-Mach solver", "#eb6834", "-"),
-    "closure": ("Coarse, closure on", "#1baf7a", "-"),
+    "constant": ("Coarse, closure (constants)", "#1baf7a", "-"),
+    "closure": ("Coarse, closure (network)", "#eda100", "--"),
 }
 plt.rcParams.update({
     "font.size": 9, "axes.edgecolor": MUTED, "axes.labelcolor": INK, "xtick.color": MUTED, "ytick.color": MUTED,
@@ -58,7 +59,7 @@ def spectra(res, snaps, names, fname, which="E"):
     fig, axes = plt.subplots(1, len(names), figsize=(3.3 * len(names), 3.0), sharey=False)
     for ax, name in zip(np.atleast_1d(axes), names):
         fn = M.ke_spectrum if which == "E" else M.scalar_spectrum
-        for key in ("ref", "base", "hllclm", "closure"):
+        for key in ("ref", "base", "hllclm", "constant", "closure"):
             if f"{name}/{key}" not in snaps:
                 continue
             U = snaps[f"{name}/{key}"][-1].astype(np.float64)
@@ -81,7 +82,7 @@ def series(res, names, key, ylabel, fname):
         r = res[name]
         t = r["t"]
         ax.plot(t, [x[key] for x in r["ref"]], color=INK, lw=2.2, label=STYLE["ref"][0])
-        for m in ("base", "hllclm", "closure"):
+        for m in ("base", "hllclm", "constant", "closure"):
             if m in r["methods"]:
                 ax.plot(t, [x[key] for x in r["methods"][m]["series"]], color=STYLE[m][1], label=STYLE[m][0])
         ax.set_title(title(r["case"]))
@@ -93,7 +94,7 @@ def series(res, names, key, ylabel, fname):
 
 def snapshots(res, snaps, name, fname, when=-1):
     """The passive scalar: reference, coarse, coarse with the closure."""
-    keys = [k for k in ("ref", "base", "hllclm", "closure") if f"{name}/{k}" in snaps]
+    keys = [k for k in ("ref", "base", "hllclm", "constant") if f"{name}/{k}" in snaps]
     fig, axes = plt.subplots(1, len(keys), figsize=(2.6 * len(keys), 2.9))
     for ax, key in zip(axes, keys):
         U = snaps[f"{name}/{key}"][when].astype(np.float64)
@@ -119,16 +120,16 @@ def bars(res, fname):
     fig, axes = plt.subplots(1, len(rows), figsize=(3.1 * len(rows), 0.42 * len(names) + 1.3), sharey=True)
     y = np.arange(len(names))
     for ax, (key, label) in zip(axes, rows):
-        for i, m in enumerate(("base", "hllclm", "closure")):
+        for i, m in enumerate(("base", "hllclm", "constant", "closure")):
             v = [res[n]["methods"][m]["summary"][key] if m in res[n]["methods"] else np.nan for n in names]
-            ax.barh(y + (i - 1) * 0.27, v, height=0.24, color=STYLE[m][1], label=STYLE[m][0])
+            ax.barh(y + (i - 1.5) * 0.2, v, height=0.18, color=STYLE[m][1], label=STYLE[m][0])
         ax.set_xlabel(label)
         ax.set_yticks(y)
         ax.set_yticklabels([title(res[n]["case"]) + (f" ({res[n]['case']['n']}²)" if res[n]["case"]["n"] != 128 else "") for n in names], fontsize=8)
         ax.invert_yaxis()
         ax.grid(axis="y", visible=False)
     h, lab = axes[0].get_legend_handles_labels()
-    fig.legend(h, lab, loc="upper center", ncol=3, fontsize=8, bbox_to_anchor=(0.5, 1.06))
+    fig.legend(h, lab, loc="upper center", ncol=4, fontsize=8, bbox_to_anchor=(0.5, 1.06))
     save(fig, fname)
 
 
@@ -143,15 +144,15 @@ def shocks_fig():
     ax = axes[0]
     ax.plot(d["sod_x"], d["sod_exact"], color=INK, lw=1.2, label="Exact")
     ax.plot(d["sod_x"], d["sod_off"][n // 2], color=STYLE["base"][1], lw=3.2, alpha=0.55, label="No closure")
-    ax.plot(d["sod_x"], d["sod_on"][n // 2], color=STYLE["closure"][1], lw=1.2, label="Closure on")
-    ax.set_title(f"Sod shock tube: density (largest change {r['sod']['rho_max_change']:.1e})")
+    ax.plot(d["sod_x"], d["sod_constant"][n // 2], color=STYLE["closure"][1], lw=1.2, label="Closure (constants)")
+    ax.set_title(f"Sod shock tube: density (largest change {r['sod']['rho_max_change_constant']:.1e})")
     ax.set_xlabel("x")
     ax.legend(fontsize=7.5)
     x = (np.arange(n) + 0.5) / n - 0.5
     for ax, key, name in ((axes[1], "strong_shock", "Strong shock tube"), (axes[2], "sedov", "Sedov blast, along y = 0")):
         ax.plot(x, d[f"{key}_off"][n // 2], color=STYLE["base"][1], lw=3.2, alpha=0.55, label="No closure")
-        ax.plot(x, d[f"{key}_on"][n // 2], color=STYLE["closure"][1], lw=1.2, label="Closure on")
-        ax.set_title(f"{name}: density (largest change {r[key]['rho_max_change']:.1e})")
+        ax.plot(x, d[f"{key}_constant"][n // 2], color=STYLE["closure"][1], lw=1.2, label="Closure (constants)")
+        ax.set_title(f"{name}: density (largest change {r[key]['rho_max_change_constant']:.1e})")
         ax.set_xlabel("x")
     save(fig, "shocks.png")
 
@@ -163,10 +164,10 @@ def long_fig():
     r = json.loads(f.read_text())
     fig, axes = plt.subplots(1, 3, figsize=(10.2, 2.8))
     for name, ls in (("decaying-turbulence", "-"), ("kelvin-helmholtz", "--")):
-        for tag, key in (("off", "base"), ("on", "closure")):
+        for tag, key in (("off", "base"), ("constant", "constant")):
             rows = r[f"{name}/{tag}"]
             t = [x["t"] for x in rows]
-            label = f"{'Turbulence' if name.startswith('dec') else 'Shear layer'}, {'closure on' if tag == 'on' else 'no closure'}"
+            label = f"{'Turbulence' if name.startswith('dec') else 'Shear layer'}, {'closure (constants)' if tag == 'constant' else 'no closure'}"
             axes[0].semilogy(t, [x["eKin"] for x in rows], color=STYLE[key][1], ls=ls, label=label)
             axes[1].plot(t, [x["eTot"] / rows[0]["eTot"] - 1 for x in rows], color=STYLE[key][1], ls=ls)
             axes[2].plot(t, [x["maxMach"] for x in rows], color=STYLE[key][1], ls=ls)

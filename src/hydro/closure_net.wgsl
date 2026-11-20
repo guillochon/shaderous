@@ -130,6 +130,9 @@ fn cl_cell(c: ClCell, xm: ClCell, xp: ClCell, ym: ClCell, yp: ClCell, cs: f32) -
   let ft = cl_features(c, xm, xp, ym, yp, cs);
   // (Where the gate is shut the network is not run: most of a shock tube.)
   if (ft.gate <= 0.0) { return vec4<f32>(0.0); }
+  // Constants: both at their limits wherever the gates are open (CL_NET is false; the network
+  // and the features compile out).
+  if (!CL_NET) { return vec4<f32>(CL_A_MAX * ft.gate, CL_B_MAX * ft.gate, ft.gate, 0.0); }
   let o = cl_net(ft.f);
   return vec4<f32>(CL_A_MAX * o.x * ft.gate * CL_HEADS.x, CL_B_MAX * o.y * ft.gate * CL_HEADS.y, ft.gate, 0.0);
 }

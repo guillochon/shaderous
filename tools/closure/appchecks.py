@@ -118,7 +118,7 @@ def shocks():
     results, keep = {}, {}
     for name, doc in cases.items():
         fields = {}
-        for tag, extra in (("off", []), ("on", ["--set", "closure=1"])):
+        for tag, extra in (("off", []), ("on", ["--set", "closure=network"]), ("constant", ["--set", "closure=constant"])):
             man, diag, out = run(doc, n, ["--slice-res", str(n), *SLICES, *extra], f"{name}_{tag}")
             fields[tag] = final_slices(man, out)
             fields[tag]["steps"] = diag[-1]["steps"]
@@ -126,15 +126,18 @@ def shocks():
         a, b = fields["off"]["rho"], fields["on"]["rho"]
         r = {"t": fields["off"]["t"], "steps_off": fields["off"]["steps"], "steps_on": fields["on"]["steps"],
              "rho_max_change": float(abs(a - b).max() / a.max()), "rho_mean_change": float(abs(a - b).mean() / a.mean()),
-             "p_max_change": float(abs(fields["off"]["press"] - fields["on"]["press"]).max() / fields["off"]["press"].max())}
+             "p_max_change": float(abs(fields["off"]["press"] - fields["on"]["press"]).max() / fields["off"]["press"].max()),
+             "rho_max_change_constant": float(abs(a - fields["constant"]["rho"]).max() / a.max())}
         if name == "sod":
             x = (np.arange(n) + 0.5) / n - 0.5
             ex = exact_riemann((1.0, 0.0, 1.0), (0.125, 0.0, 0.1), x / r["t"])
             r["l1_off"] = float(abs(a[n // 2] - ex[0]).mean())
             r["l1_on"] = float(abs(b[n // 2] - ex[0]).mean())
+            r["l1_constant"] = float(abs(fields["constant"]["rho"][n // 2] - ex[0]).mean())
             keep["sod_x"], keep["sod_exact"] = x, ex[0]
         results[name] = r
         keep[f"{name}_off"], keep[f"{name}_on"] = a.astype(np.float32), b.astype(np.float32)
+        keep[f"{name}_constant"] = fields["constant"]["rho"].astype(np.float32)
         print(name, json.dumps(r), flush=True)
     (EVAL / "shocks.json").write_text(json.dumps(results, indent=1))
     np.savez_compressed(EVAL / "shocks.npz", **keep)
@@ -177,7 +180,7 @@ def oblique(model="final"):
 def long():
     results = {}
     for name in ("decaying-turbulence", "kelvin-helmholtz"):
-        for tag, extra in (("off", []), ("on", ["--set", "closure=1"])):
+        for tag, extra in (("off", []), ("on", ["--set", "closure=network"]), ("constant", ["--set", "closure=constant"])):
             man, diag, _ = run(preset(name), 128, ["--until", "30", "--every", "0.5", *extra], f"long_{name}_{tag}")
             rows = [{"t": d["t"], "steps": d["steps"], "mass": d["mass"], "eTot": d["eTot"], "eKin": d["eKin"], "maxMach": d["maxMach"],
                      "floored": d["floored"], "s": d["ranges"]["Passive scalar"], "rho": d["ranges"]["Density"]} for d in diag]
@@ -193,7 +196,7 @@ def cost():
     doc = preset("decaying-turbulence")
     for n, steps in ((512, 6000), (1024, 2000), (2048, 600)):
         row = {}
-        for tag, extra in (("off", []), ("on", ["--set", "closure=1"]), ("hllclm", ["--set", "riemann=hllclm"]), ("viscous", ["--set", "nu=1e-6"])):
+        for tag, extra in (("off", []), ("on", ["--set", "closure=network"]), ("constant", ["--set", "closure=constant"]), ("hllclm", ["--set", "riemann=hllclm"]), ("viscous", ["--set", "nu=1e-6"])):
             best = None
             for rep in range(3):
                 # Outputs at the start (pipelines compiled) and the end only: the wall time between
@@ -204,6 +207,7 @@ def cost():
                 best = ms if best is None else min(best, ms)
             row[tag] = best
         row["overhead"] = row["on"] / row["off"] - 1
+        row["overhead_constant"] = row["constant"] / row["off"] - 1
         results[str(n)] = row
         print(n, json.dumps(row), flush=True)
     (EVAL / "cost.json").write_text(json.dumps(results, indent=1))

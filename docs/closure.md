@@ -1,4 +1,4 @@
-# A learned turbulence closure: what was built and what it does
+# A turbulence closure, learned and then reduced to constants: what was built and what it does
 
 This is the report on the closure of [numerics.md section 26](numerics.md#26-turbulence-closure):
 why it has the form it has, how it was trained, and what it was measured to do in the
@@ -19,12 +19,14 @@ simulator. The code is in `src/closure/`, `src/hydro/closure*.wgsl` and `tools/c
   and 1.08 of the errors without it), and it makes the thickness worse in two of three shear
   layers.
 - It is stable to 300 times its training window, conserves mass, momentum and energy to
-  rounding, changes shock tubes by rounding and blasts by 2e-4, and costs 44 to 48% more time
-  per step. That is not negligible.
-- **The network learned almost nothing.** Trained, it returns 99.4% and 99.9% of its two
-  limits in every cell where its gates are open. Two constants behind the same gates give the
-  same results to two digits, and would cost a few percent instead of 45%. What does the work
-  is the form, the gates and the bounds, which were set by hand.
+  rounding, and changes shock tubes by rounding and blasts by 2e-4.
+- **The network learned almost nothing, so the closure has two forms.** Trained, the network
+  returns 99.4% and 99.9% of its two limits in every cell where its gates are open. Two
+  constants behind the same gates (`closure=constant`) give the same results in the simulator
+  on every held-out case, to within 0.01 on every measure, for about 20% more time per step
+  against about 50% with the network (`closure=network`). Use the constants. What does the
+  work is the form, the gates and the bounds, which were set by hand, and that form has
+  precedent (section 9).
 
 ## 1. The premise, checked
 
@@ -109,11 +111,14 @@ phase the terms averaged 0.84 (state), 0.49 (spectra) and 0.70 (mixing) of the b
 
 ## 4. Results on held-out conditions
 
-Everything in this section and the next three was run **in the simulator** with
-`closure=1`, from each case's own start to its end (1,700 to 6,300 steps), and compared with
+Everything in this section and the next three was run **in the simulator**, from each case's own start to its end (1,700 to 6,300 steps), and compared with
 the reference every tenth of a time unit. None of these cases was trained on: new seeds, Mach
 0.4 and 0.7, a band three times denser, shear speeds 1.2 and 2, density ratios 2.5 and 5.
-"Low-Mach solver" is the existing hand-set alternative (`riemann=hllclm`).
+"Low-Mach solver" is the existing hand-set alternative (`riemann=hllclm`). "Closure" in the
+tables is the trained network (`closure=network`); the constants (`closure=constant`) differ
+from it by at most 0.01 in any entry, and are compared with it at the end of this section.
+In the figures the constants are the green line and the network the dashed yellow one on top
+of it.
 
 Errors are time averages: for the spectra, the mean over shells of $`\lvert\log_{10}\rvert`$
 of the ratio to the reference; for mixedness and thickness, the mean absolute difference.
@@ -193,28 +198,31 @@ again worse.
 
 **What the network contributes: nothing measurable.** The trained network's outputs, where its
 gates are open, are 0.994 of the limit of $`a`$ (least 0.94 in any cell examined) and 0.999 of
-the limit of $`b`$, in turbulence and shear layers alike, at every time. Run in the solver's
-mirror from the reference's first state:
+the limit of $`b`$, in turbulence and shear layers alike, at every time. The limits are set by
+stability (a fifth of the solver's damping must stay) and by the scalar's bound, not by the
+data; the data says only "as much as is allowed". So the closure has a second form with no
+network: $`a = 0.8`$ and $`b = 0.9`$ times the gates. In the simulator, mean errors over the
+seven held-out cases (and the two at 256²):
+
+| Run | KE spectrum | Scalar spectrum | Mixedness | Thickness |
+|---|---|---|---|---|
+| none | 1.060 (1.478) | 0.825 (1.018) | 0.058 (0.078) | 0.033 (0.034) |
+| low-Mach solver | 0.737 (1.002) | 0.830 (1.008) | 0.069 (0.083) | 0.030 (0.037) |
+| closure, constants | 0.636 (0.807) | 0.597 (0.691) | 0.062 (0.078) | 0.036 (0.038) |
+| closure, trained network | 0.641 (0.814) | 0.597 (0.692) | 0.062 (0.078) | 0.036 (0.039) |
+
+Case by case the two differ by at most 0.01 in the spectra and 0.002 in mixedness and
+thickness. The variants trained with the eddy viscosity and diffusivity alone, run in the
+solver's mirror from the reference's first state, are the run without a closure:
 
 | Case | Run | KE spectrum | Scalar spectrum | Mixedness | Thickness |
 |---|---|---|---|---|---|
 | Turbulence, Mach 0.4 | none | 1.17 | 0.91 | 0.079 | 0.009 |
 |  | eddy viscosity and diffusivity, trained | 1.17 | 0.92 | 0.079 | 0.009 |
-|  | constants 0.8 and 0.9 behind the gates | 0.45 | 0.67 | 0.086 | 0.004 |
-|  | trained network | 0.46 | 0.67 | 0.086 | 0.004 |
 | Shear layer, speed 1, density ratio 5 | none | 1.06 | 0.76 | 0.024 | 0.098 |
 |  | eddy viscosity and diffusivity, trained | 1.06 | 0.76 | 0.024 | 0.098 |
-|  | constants | 0.71 | 0.48 | 0.024 | 0.051 |
-|  | trained network | 0.72 | 0.48 | 0.024 | 0.051 |
 | Shear layer, speed 1.2, density ratio 2.5 | none | 0.98 | 0.71 | 0.027 | 0.042 |
 |  | eddy viscosity and diffusivity, trained | 0.98 | 0.71 | 0.027 | 0.042 |
-|  | constants | 0.62 | 0.52 | 0.050 | 0.066 |
-|  | trained network | 0.63 | 0.52 | 0.049 | 0.065 |
-
-The limits are set by stability (a fifth of the solver's damping must stay) and by the
-scalar's bound, not by the data; the data says only "as much as is allowed". A version with
-two constants and the same gates would need no network pass, which is nearly all of the cost
-below.
 
 ## 5. Stability
 
@@ -224,6 +232,8 @@ below.
 | Decaying turbulence, closure | 43,733 | 1.2e-7 | 3.4e-7 | 0.500 to 0.425 | 0.81 | -0.0003 to 1.0008 |
 | Kelvin-Helmholtz, no closure | 21,632 | 0 | 3.7e-8 | 0.188 to 0.160 | 0.78 | -0.0012 to 1.0010 |
 | Kelvin-Helmholtz, closure | 21,564 | 0 | 2.3e-9 | 0.188 to 0.161 | 0.75 | -0.0009 to 1.0005 |
+| Decaying turbulence, constants | 43,615 | 6e-8 | 2.9e-7 | 0.500 to 0.427 | 0.80 | -0.0003 to 1.0008 |
+| Kelvin-Helmholtz, constants | 21,996 | 7.9e-8 | 3.7e-8 | 0.188 to 0.166 | 0.77 | -0.0010 to 1.0005 |
 
 The training window is at most 150 steps, so these are 290 and 140 times it. Nothing grows:
 the kinetic energy decays throughout, more slowly with the closure, and no cell reaches a
@@ -235,7 +245,7 @@ most 5e-8.
 ## 6. Shocks
 
 Closure on against off, in the simulator on 256², as the largest change of the density over
-its peak:
+its peak (the same with the constants as with the network, to the digits shown):
 
 | Problem | Largest change | Note |
 |---|---|---|
@@ -257,23 +267,26 @@ they are open in 30 to 60% of the gas, against 70 to 80% at Mach 0.4.
 
 ## 7. Cost
 
-Wall time per step in the simulator (Apple M4 Pro, Chrome, decaying turbulence):
+Wall time per step in the simulator (Apple M4 Pro, Chrome, decaying turbulence; the least of
+three or four runs):
 
-| Grid | No closure | Closure | More | Constant viscosity, for scale |
-|---|---|---|---|---|
-| 512² | 0.61 ms | 0.88 ms | 45% | 41% |
-| 1024² | 2.07 ms | 2.99 ms | 44% | 38% |
-| 2048² | 7.45 ms | 10.99 ms | 48% | 41% |
+| Grid | No closure | Constants | More | Trained network | More |
+|---|---|---|---|---|---|
+| 512² | 0.59 ms | 0.71 ms | 21% | 0.88 ms | 49% |
+| 1024² | 1.96 ms | 2.33 ms | 19% | 2.91 ms | 48% |
+| 2048² | 7.26 ms | 8.72 ms | 20% | 10.96 ms | 51% |
 
-Nearly all of it is the network: on 1024² the closure's pass takes 0.83 ms of GPU time and
-the hook in the flux update 0.15 ms, and with the network taken out of the pass it takes no
-measurable time. (Packing the weights four to a vector and writing them into the shader as
-constants took the pass from 1.12 to 0.83 ms.) Two ways to make it cheap: a narrower network
-(one with 16 units a layer trained to the same losses, and would take about half the time),
-or, given section 4, no network at all.
+For scale, a constant viscosity (`nu`) adds 41 to 45% at 1024² and 2048², and the low-Mach
+solver nothing. Neither closure is negligible, as was asked; the constants are the cheaper by
+more than half. With the network, nearly all of the cost is the network itself: on 1024² its
+pass takes 0.83 ms of GPU time and the hook in the flux update 0.15 ms. (Packing the weights
+four to a vector and writing them into the shader as constants took the pass from 1.12 to
+0.83 ms; a network with 16 units a layer trained to the same losses and would take about half
+the time.) With the constants what is left is the gates' pass (five cells loaded per cell)
+and the hook, two more loads per face and the scalar's bound.
 
-For scale, the alternative to a closure is a finer grid: twice the resolution costs eight
-times as much in 2D.
+The alternative to a closure is a finer grid: twice the resolution costs eight times as much
+in 2D.
 
 ## 8. Limits, and what was left out
 
@@ -298,12 +311,40 @@ times as much in 2D.
   reconstruction the pressure's jump is not scaled, so hydrostatic balance is untouched; the
   activity gate would keep it shut in a star at rest. Untested.
 - **Species.** Only the passive scalar is treated; species are advected as before.
-- **Mach numbers.** Trained at Mach 0.2 to 0.5, tested to 0.7. Below Mach 0.1 the bound on
+- **Mach numbers.** Trained (and the constants' limits chosen) at Mach 0.2 to 0.5, tested to 0.7. Below Mach 0.1 the bound on
   $`a`$ rests on one test of this scheme (the Gresho vortex) and was not re-examined.
 
-## 9. Reproducing this
+## 9. Precedent
+
+Leaving out part of an upwind flux's dissipation of velocity jumps in turbulence, and keeping
+all of it at shocks by a sensor, is established practice; what is particular here is the
+combination (one constant for the velocity's jump and one for the scalar's, three gates, the
+limiter's bound on the scalar) and that the constants were arrived at by training a network
+that could have chosen otherwise.
+
+- Scaling the velocity jump shown to the Riemann solver: [Thornber et al. (2008)](https://doi.org/10.1016/j.jcp.2008.01.036),
+  by the local Mach number (Shaderous's `hllclm`). The closure is that form with a constant
+  factor behind gates.
+- [Li (2016)](https://arxiv.org/abs/1509.02777) splits the Roe flux into parts and finds that
+  the velocity-difference parts dissipate far more than a sub-grid model would, so that the
+  scheme cannot give a turbulence spectrum on a coarse grid until they are reduced: the
+  finding of section 1, for another solver. [Li & Gu (2013)](https://arxiv.org/abs/1107.3744)
+  and [their HLL version](https://arxiv.org/abs/1111.4885) multiply the velocity-difference
+  term by a function of the local Mach number; [Gogoi & Mandal (2023)](https://arxiv.org/abs/2308.09439)
+  reconstruct the interface velocities with the face's Mach number and treat shocks apart.
+- Sensors that keep full dissipation where the flow is compressive and little where it is
+  vortical: [Chamarthi, Hoffmann & Frankel (2023)](https://arxiv.org/abs/2305.08369) and
+  [Chamarthi (2026)](https://arxiv.org/abs/2604.02757), with a Ducros-type sensor, as the
+  compression gate here. [Deng et al. (2020)](https://arxiv.org/abs/2007.07397) give one
+  tunable parameter between an upwind-biased and a non-dissipative scheme, for implicit LES.
+- Learning the dissipation instead of a viscosity: [Beck & Kurz (2023)](https://arxiv.org/abs/2309.06260)
+  learn a blending of a more and a less dissipative discretization as an implicit closure;
+  [Maulik, San & Jacob (2019)](https://arxiv.org/abs/1901.09329) learn, in 2D turbulence, where
+  to use an upwind flux and where a non-dissipative one.
+
+## 10. Reproducing this
 
 `tools/closure/README.md` has the commands, from the reference data to the figures. The
-validation suite's `closure` test checks, on the GPU, that the shader is the trained network
-(to 2e-3 in every cell; it is 1e-5), that both cells of every face compute the same flux with
+validation suite's `closure` test checks, on the GPU, for the constants and for the network,
+that the shader is its float64 mirror (to 2e-3 in every cell; it is 1e-5), that both cells of every face compute the same flux with
 it on, conservation, and the shock tube and blast above.

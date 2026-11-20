@@ -18,6 +18,7 @@ import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from './pressure/mult
 import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { ClosurePass } from './closure/closure';
+import type { ClosureKind } from './closure/kinds';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
 import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
@@ -108,12 +109,13 @@ export interface SimConfig {
    */
   conductivity: number;
   /**
-   * The trained turbulence closure (closure/closure.ts): cell by cell, the flux update leaves
-   * out part of the Riemann solver's own dissipation of shear and of the passive scalar where
-   * the flow is under-resolved turbulence, and none of it at shocks. Two-dimensional runs of a
-   * gas with an energy on the uniform grid (closureUnsupported).
+   * The turbulence closure (closure/closure.ts): cell by cell, the flux update leaves out part
+   * of the Riemann solver's own dissipation of shear and of the passive scalar where the flow
+   * is under-resolved turbulence, and none of it at shocks: by constants behind its gates, or
+   * by the trained network. Two-dimensional runs of a gas with an energy on the uniform grid
+   * (closureUnsupported).
    */
-  closure: boolean;
+  closure: ClosureKind;
   /**
    * Magnetic diffusivity eta, with a field: the edge electric fields gain eta J, J = curl B, the
    * energy flux eta J x B, and the internal energy the Ohmic heat eta J^2 (mhd/ohm.wgsl). 0 is off.
@@ -475,7 +477,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
     viscosity: problem.viscosity ?? 0,
     conductivity: problem.conductivity ?? 0,
-    closure: problem.closure ?? false,
+    closure: problem.closure ?? 'off',
     resistivity: problem.resistivity ?? 0,
     driving: { ...defaultDrive(), ...problem.driving },
     wallVelocity: { ...noWallVelocity(), ...problem.wallVelocity },
@@ -604,8 +606,8 @@ export function refusal(c: SimConfig): string | null {
  * Cartesian grid, and its pass and its hook in the flux update exist only there.
  */
 export function closureUnsupported(c: SimConfig): string | null {
-  if (!c.closure) return null;
-  if (c.ndim !== 2) return 'it is trained for two-dimensional runs only';
+  if (c.closure === 'off') return null;
+  if (c.ndim !== 2) return 'it is for two-dimensional runs only';
   if (c.amrLevels > 0) return 'it is not available on the adaptive mesh yet';
   if (c.problem.mhd) return 'it is not available with a magnetic field';
   if (!eosHasEnergy(c.eos) || c.eos === 'liquid') return 'it needs a gas with an energy equation';
@@ -616,7 +618,7 @@ export function closureUnsupported(c: SimConfig): string | null {
 }
 
 /** The turbulence closure is on (and the run is one it can go with). */
-export const closureOn = (c: SimConfig): boolean => c.closure && !closureUnsupported(c);
+export const closureOn = (c: SimConfig): boolean => c.closure !== 'off' && !closureUnsupported(c);
 
 /**
  * Why a run of the weakly compressible liquid (eos/liquid.wgsl) cannot go as configured, or
@@ -1726,7 +1728,7 @@ export class Sim implements Simulation {
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
     this.closure?.destroy();
-    this.closure = closureOn(c) ? await ClosurePass.create(d, dims, slots, this.params, this.state, k) : undefined;
+    this.closure = c.closure !== 'off' && closureOn(c) ? await ClosurePass.create(d, c.closure, dims, slots, this.params, this.state, k) : undefined;
     // Implicit pressure: the solver (kept across rebuilds, with its warm start) and its passes.
     if (implicitPressure(c)) {
       // (A gas's open faces carry no pressure gradient, pressure/source_gas.wgsl: closed, to the solve.)

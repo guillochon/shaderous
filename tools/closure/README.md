@@ -16,8 +16,8 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python torch nu
 | `closure.py` | The closure: features, gates, network, and its limits |
 | `gen_data.py` | Reference data: runs of the simulator at 4 times the resolution (tools/headless), averaged onto the coarse grid. Sets `train`, `test` (held-out conditions) and `res` (other resolutions) |
 | `train.py` | Unrolled training through `solver.py`, with the model's own drift in the starts |
-| `evaluate.py` | Whole coarse runs against the reference: spectra, mixing, conservation. `--mode app` runs the simulator, `--mode mirror` the PyTorch solver (any variant) |
-| `appchecks.py` | In the simulator: shock tubes and blasts with the closure on and off, runs to t = 30, cost per step |
+| `evaluate.py` | Whole coarse runs against the reference: spectra, mixing, conservation. `--mode app` runs the simulator (no closure, the low-Mach solver, `closure=constant`, `closure=network`), `--mode mirror` the PyTorch solver (any variant) |
+| `appchecks.py` | In the simulator: shock tubes and blasts with the closure on (constants, network) and off, runs to t = 30, cost per step |
 | `figures.py` | The figures of docs/closure.md |
 | `export.py` | A trained model into `src/closure/` |
 | `metrics.py`, `data.py` | Statistics of a state; reading the runner's outputs |

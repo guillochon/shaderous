@@ -3391,7 +3391,7 @@ of the mass has left through the faces by t = 28.
 `src/closure/closure.ts`, `hydro/closure.wgsl`, `hydro/closure_net.wgsl`, `hydro/closure_on.wgsl`;
 trained offline in `tools/closure/`. How it was trained, what it was measured to do and where it
 stops are in [closure.md](closure.md). It is off unless a setup asks for it
-(`physics.closure`, `closure=1` in a link), and is refused outside two-dimensional runs of a gas
+(`physics.closure`: `constant` or `network`; `closure=constant` in a link), and is refused outside two-dimensional runs of a gas
 with an energy on the uniform Cartesian grid.
 
 **What it corrects.** A coarse run of this scheme has too little small-scale motion, not too
@@ -3452,16 +3452,19 @@ Because a face takes the smaller of its two cells' coefficients, one shut cell s
 of its faces, and their fluxes are the solver's own. The closure also leaves the faces of the
 box that are not periodic alone, and every cell beside an obstacle.
 
-**The network.** A cell's $`a`$ and $`b`$ are the two sigmoid outputs of a network of two
-hidden layers of 24 tanh units (964 weights), evaluated once per cell per step from ten
-features of the cell and its four neighbors: the strain across the cell over the sound speed
-(its logarithm); rotation against strain, $`(W^2 - A^2)/(W^2 + A^2)`$; the dilatation's share
-of the gradient; how far the velocity, the density and the scalar are from straight across the
-cell (0 for a straight line, 1 at an extremum); the Mach number in the grid's frame (on which
-the solver's damping depends); the relative gradients of density and pressure; and the strain
-over the speed. All are dimensionless and unchanged by reflecting the grid or swapping its
-axes, so the closure has the grid's symmetries and no scale of its own: the same weights serve
-any resolution, speed and density.
+**Constants or the network.** Where the gates are open, `constant` sets $`a = 0.8`$ and
+$`b = 0.9`$, their limits. `network` sets them by a network of two hidden layers of 24 tanh
+units (964 weights), evaluated once per cell per step from ten features of the cell and its
+four neighbors: the strain across the cell over the sound speed (its logarithm); rotation
+against strain, $`(W^2 - A^2)/(W^2 + A^2)`$; the dilatation's share of the gradient; how far
+the velocity, the density and the scalar are from straight across the cell (0 for a straight
+line, 1 at an extremum); the Mach number in the grid's frame (on which the solver's damping
+depends); the relative gradients of density and pressure; and the strain over the speed. All
+are dimensionless and unchanged by reflecting the grid or swapping its axes. Trained through
+the solver against runs four times finer, the network returns 99% of the limits in every cell
+where the gates are open, and the two give the same results; the network costs several times
+as much ([closure.md](closure.md)). The constants are the ones to use: the network is kept as
+the evidence for them.
 
 **In a step.** One pass before the predictor (`hydro/closure.wgsl`) writes each cell's
 coefficients to a texture, from the state the step starts from; the flux update reads two

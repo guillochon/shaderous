@@ -54,16 +54,24 @@ describe('the turbulence closure', () => {
     expect(shear.a).toBeLessThanOrEqual(CLOSURE_DATA.aMax);
     expect(shear.b).toBeGreaterThanOrEqual(0);
     expect(shear.b).toBeLessThanOrEqual(CLOSURE_DATA.bMax);
+    // Constants: the limits themselves, times the gate; the same gates.
+    const flat = closureCell(cell(1, 0.2, 0, 1, 0.5), cell(1, 0.2, -0.05, 1, 0.5), cell(1, 0.2, 0.05, 1, 0.5), cell(1, 0.1, 0, 1, 0.3), cell(1, 0.3, 0, 1, 0.7), 1.2, 'constant');
+    expect(flat.gate).toBe(shear.gate);
+    expect(flat.a).toBeCloseTo(CLOSURE_DATA.aMax * flat.gate, 12);
+    expect(flat.b).toBeCloseTo(CLOSURE_DATA.bMax * flat.gate, 12);
+    expect(closureCell(cell(1.5, 0, 0, 1, 0.5), cell(1, 0, 0, 1, 0), cell(2, 0, 0, 1, 1), cell(1.5, 0, 0, 1, 0.5), cell(1.5, 0, 0, 1, 0.5), 1, 'constant').a).toBe(0);
   });
 
   it('is compiled in only where a run can have it', () => {
     const kh = preset('kelvin-helmholtz').problem;
-    const on = configFor(kh, 128, { ndim: 2, closure: true });
+    const on = configFor(kh, 128, { ndim: 2, closure: 'network' });
     expect(closureUnsupported(on)).toBeNull();
     expect(hydroSlots(on).closure).toBe('hydro/closure_on.wgsl');
     expect(hydroSlots(configFor(kh, 128, { ndim: 2 })).closure).toBe('hydro/closure_off.wgsl');
-    expect(closureUnsupported(configFor(kh, 64, { ndim: 3, closure: true }))).toMatch(/two-dimensional/);
-    expect(closureUnsupported(configFor(kh, 128, { ndim: 2, closure: true, amrLevels: 2 }))).toMatch(/adaptive mesh/);
-    expect(closureOn(configFor(preset('driven-turbulence').problem, 128, { ndim: 2, closure: true }))).toBe(false);
+    expect(hydroSlots(configFor(kh, 128, { ndim: 2, closure: 'constant' })).closure).toBe('hydro/closure_on.wgsl');
+    expect(closureNetSlot('constant')).toContain('const CL_NET = false;');
+    expect(closureUnsupported(configFor(kh, 64, { ndim: 3, closure: 'network' }))).toMatch(/two-dimensional/);
+    expect(closureUnsupported(configFor(kh, 128, { ndim: 2, closure: 'network', amrLevels: 2 }))).toMatch(/adaptive mesh/);
+    expect(closureOn(configFor(preset('driven-turbulence').problem, 128, { ndim: 2, closure: 'network' }))).toBe(false);
   });
 });

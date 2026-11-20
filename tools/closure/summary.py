@@ -10,7 +10,7 @@ import numpy as np
 from figures import title
 
 EVAL = Path(__file__).resolve().parent / "eval"
-METHODS = (("base", "none"), ("hllclm", "low-Mach solver"), ("closure", "closure"))
+METHODS = (("base", "none"), ("hllclm", "low-Mach solver"), ("constant", "closure, constants"), ("closure", "closure, network"))
 
 
 def table(stem):
@@ -27,25 +27,26 @@ def table(stem):
             s = r["methods"][m]["summary"]
             cells = [f"{s[k]:.{d}f}" if k in s else "" for k, _, d in cols]
             print(f"| {label if m == 'base' else ''} | {mname} | " + " | ".join(cells) + f" | {s['growth']:.3f} ({s['growth_ref']:.3f}) | {s['s_min']:.3f} to {s['s_max']:.3f} |")
-        b, c = r["methods"]["base"]["summary"], r["methods"]["closure"]["summary"]
+        b, c = r["methods"]["base"]["summary"], r["methods"]["constant"]["summary"]
         for k, _, _ in cols:
             if k in b:
                 better = abs(np.log(c[k])) < abs(np.log(b[k])) if k == "E_k16" else c[k] < b[k]
                 wins[k] += bool(better)
     n = len(res)
-    print(f"\nCloser to the reference with the closure than without, of {n} cases: " + ", ".join(f"{c[1]} {wins[c[0]]}" for c in cols))
+    print(f"\nCloser to the reference with the closure (constants) than without, of {n} cases: " + ", ".join(f"{c[1]} {wins[c[0]]}" for c in cols))
     for k, lab, _ in cols:
         if k == "E_k16":
             continue
         b = np.array([r["methods"]["base"]["summary"][k] for r in res.values()])
         h = np.array([r["methods"]["hllclm"]["summary"][k] for r in res.values()])
-        c = np.array([r["methods"]["closure"]["summary"][k] for r in res.values()])
-        print(f"  {lab}: mean error {b.mean():.3f} without, {h.mean():.3f} low-Mach, {c.mean():.3f} with (ratio {c.mean() / b.mean():.2f}; per case {np.round(c / b, 2).tolist()})")
+        c = np.array([r["methods"]["constant"]["summary"][k] for r in res.values()])
+        w = np.array([r["methods"]["closure"]["summary"][k] for r in res.values()])
+        print(f"  {lab}: mean error {b.mean():.3f} without, {h.mean():.3f} low-Mach, {c.mean():.3f} constants (ratio {c.mean() / b.mean():.2f}; per case {np.round(c / b, 2).tolist()}), {w.mean():.3f} network (ratio {w.mean() / b.mean():.2f})")
     g = [(abs(r["methods"][m]["summary"]["growth"] - r["methods"][m]["summary"]["growth_ref"])) for r in res.values() for m in ("base",)]
-    gc = [(abs(r["methods"]["closure"]["summary"]["growth"] - r["methods"]["closure"]["summary"]["growth_ref"])) for r in res.values()]
+    gc = [(abs(r["methods"]["constant"]["summary"]["growth"] - r["methods"]["constant"]["summary"]["growth_ref"])) for r in res.values()]
     print(f"  Growth rate: mean |error| {np.mean(g):.3f} without, {np.mean(gc):.3f} with; per case without {np.round(g, 3).tolist()} with {np.round(gc, 3).tolist()}")
-    drift = {k: max(r["methods"]["closure"]["summary"][f"{k}_drift"] for r in res.values()) for k in ("mass", "energy", "px", "scalar")}
-    print("  Largest drifts with the closure:", {k: f"{v:.1e}" for k, v in drift.items()}, " steps:", [r["methods"]["closure"]["summary"]["steps"] for r in res.values()])
+    drift = {k: max(r["methods"]["constant"]["summary"][f"{k}_drift"] for r in res.values()) for k in ("mass", "energy", "px", "scalar")}
+    print("  Largest drifts with the closure:", {k: f"{v:.1e}" for k, v in drift.items()}, " steps:", [r["methods"]["constant"]["summary"]["steps"] for r in res.values()])
 
 
 for stem in ("app_test", "app_res"):

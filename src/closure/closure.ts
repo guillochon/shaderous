@@ -1,5 +1,5 @@
-// The turbulence closure: a small trained network that tells the flux update, cell by cell, how
-// much of its own numerical dissipation to leave out, so that a coarse run keeps more of what a
+// The turbulence closure: it tells the flux update, cell by cell, how much of its own numerical
+// dissipation to leave out, so that a coarse run keeps more of what a
 // fine one resolves (docs/numerics.md section 26, docs/closure.md for how it was trained and
 // what it does and does not do).
 //
@@ -18,6 +18,10 @@
 // face, computed alike by both of its cells: mass, momentum and energy are conserved to
 // rounding, as without the closure.
 //
+// Where the gates are open, a and b are either their limits (`constant`) or what a small trained
+// network returns (`network`): trained, it returns 99% of the limits everywhere, so the two
+// give the same results and the constants cost far less (kinds.ts, docs/closure.md).
+//
 // Gates (closureCell below) shut the closure, exactly, where the flow is compressive (any
 // planar shock, rarefaction or blast), across a pressure jump, and where the gas is neither
 // sheared nor turning; there the fluxes are the solver's own to the bit.
@@ -26,6 +30,7 @@
 // file holds a float64 mirror of one cell for the tests, the WGSL of its constants, and the
 // pass that runs it on the uniform grid (hydro/closure.wgsl).
 import { CLOSURE_DATA, CLOSURE_WEIGHTS_F32 } from './closure_net';
+import type { ClosureKind } from './kinds';
 import { bindGroup, computePipeline, type Bindable } from '../gpu/device';
 import { assemble } from '../gpu/shaders';
 
@@ -102,7 +107,7 @@ export function closureNet(f: readonly number[]): number[] {
  * features, the gate and the coefficients a and b, from the cell, its neighbors below and
  * above along x and y, and its sound speed.
  */
-export function closureCell(c: ClosureCell, xm: ClosureCell, xp: ClosureCell, ym: ClosureCell, yp: ClosureCell, cs: number): { features: number[]; gate: number; a: number; b: number } {
+export function closureCell(c: ClosureCell, xm: ClosureCell, xp: ClosureCell, ym: ClosureCell, yp: ClosureCell, cs: number, kind: Exclude<ClosureKind, 'off'> = 'network'): { features: number[]; gate: number; a: number; b: number } {
   const K = CLOSURE_DATA;
   const gx = [0.5 * (xp.vx - xm.vx), 0.5 * (xp.vy - xm.vy)];
   const gy = [0.5 * (yp.vx - ym.vx), 0.5 * (yp.vy - ym.vy)];
@@ -147,6 +152,7 @@ export function closureCell(c: ClosureCell, xm: ClosureCell, xp: ClosureCell, ym
   const active = Math.sqrt(Wz * Wz + A2 + 1e-30) / cs;
   const gate = (1 - smoothstep(K.ducros, (D * D) / tot)) * (1 - smoothstep(K.jump, jump)) * smoothstep(K.active, active);
   if (gate <= 0) return { features, gate: 0, a: 0, b: 0 };
+  if (kind === 'constant') return { features, gate, a: K.aMax * gate, b: K.bMax * gate };
   const o = closureNet(features);
   return { features, gate, a: K.aMax * o[0] * gate * K.heads[0], b: K.bMax * o[1] * gate * K.heads[1] };
 }
@@ -157,11 +163,12 @@ const f = (x: number): string => {
 };
 
 /** The <closure_net> slot of hydro/closure_net.wgsl: the weights, and the constants exported with them. */
-export function closureNetSlot(): string {
+export function closureNetSlot(kind: Exclude<ClosureKind, 'off'> = 'network'): string {
   const K = CLOSURE_DATA;
   const v2 = (a: readonly number[]) => `vec2<f32>(${f(a[0])}, ${f(a[1])})`;
   const w = packedWeights();
   return [
+    `const CL_NET = ${kind === 'network'};`,
     `const CL_IN: u32 = ${K.features}u;`,
     `const CL_H: u32 = ${K.hidden}u;`,
     `const CL_K0: u32 = ${Math.ceil(K.features / 4)}u;`,
@@ -194,7 +201,7 @@ export class ClosurePass {
    * `state` is the two parities of the state's two textures; `slots` the hydro shaders' (the
    * equation of state and the composition); `comp` the composition's binding where it varies.
    */
-  static async create(device: GPUDevice, dims: number[], slots: Record<string, string>, params: GPUBuffer, state: GPUTexture[][], comp: Record<number, Bindable>): Promise<ClosurePass> {
+  static async create(device: GPUDevice, kind: Exclude<ClosureKind, 'off'>, dims: number[], slots: Record<string, string>, params: GPUBuffer, state: GPUTexture[][], comp: Record<number, Bindable>): Promise<ClosurePass> {
     const [nx, ny, nz] = dims;
     const coefficients = device.createTexture({
       label: 'closure coefficients',
@@ -203,7 +210,7 @@ export class ClosurePass {
       format: 'rgba32float',
       usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
     });
-    const pipeline = await computePipeline(device, assemble('hydro/closure.wgsl', { ...slots, closure_net: closureNetSlot() }), 'closure');
+    const pipeline = await computePipeline(device, assemble('hydro/closure.wgsl', { ...slots, closure_net: closureNetSlot(kind) }), 'closure');
     const out = coefficients.createView();
     const groups = [0, 1].map((p) =>
       bindGroup(device, pipeline, { 0: params, 1: state[p][0].createView(), 2: state[p][1].createView(), 3: out, ...comp }),

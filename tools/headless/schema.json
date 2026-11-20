@@ -265,7 +265,7 @@
   {
    "key": "closure",
    "group": "settings",
-   "about": "Turbulence closure (0 or 1)"
+   "about": "Turbulence closure: off, constant, network"
   },
   {
    "key": "eta",
