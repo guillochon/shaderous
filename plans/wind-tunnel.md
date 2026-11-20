@@ -1,6 +1,6 @@
 # Plan: wind tunnel runs of arbitrary objects
 
-Status (2026-11-20): proposed, nothing built. Published values and citations below are from
+Status (2026-11-20): stage 0's three checks done (2.1); the rest in progress. Published values and citations below are from
 memory; each is checked against its paper before it becomes a test threshold. Cost figures in
 section 9 are estimates, not measurements.
 
@@ -114,6 +114,44 @@ staircase should give first order.
    (`render/fieldlines.ts`) take a vector field other than the magnetic one? Stage 7.
 3. How long does a re-mesh take with 2 000 to 5 000 blocks? Stage 4 on blocks, and the choice
    in 9.2.
+
+### 2.1 Answers to the checks (2026-11-20)
+
+1. **Rotating frame.** The explicit scheme takes all three together: `cylinder-wake` with
+   `physics.rotation.omega = [0, 0, 0.5]` (liquid, obstacle, inlet, viscosity) runs at 256 on
+   the uniform grid and with 2 levels, no errors, to t = 1. Implicit pressure is refused in
+   both grids (`implicitUnsupported` in `sim.ts`: "rotating frames and shearing boxes are not
+   available with it"). The reason is in the step's order, not the physics: the centrifugal
+   force is part of `ext_accel` (`gravity/ext.wgsl`), which the pressure passes already kick
+   with (`pressure/kick.wgsl`, `amr/pressure/faces_gas.wgsl`), and the update applies the
+   first half-turn of the Coriolis force (`frame_open`); the second half-turn, `frame_close`,
+   is in `gravity/correct.wgsl` and `amr/correct.wgsl`, which an implicit step does not run.
+   The fix is to give the implicit step its second half-turn (in the update before the solve,
+   so that the projection sees it, or after the correction), lift the refusal, and test that
+   a liquid at rest in the inertial frame stays so. Days, not weeks: stage 3 goes ahead.
+2. **Vorticity and field lines.** The display has vorticity (field 11, `render/field_value.wgsl`:
+   the signed z component in 2D, the magnitude in 3D), but no Q criterion. The field-line
+   renderer is attached only to runs with a magnetic field (`FieldLines.attach` returns when
+   `!sim.cfg.problem.mhd`), and traces the field volume `BV`. Its sampling pass
+   (`render/bsample.wgsl`, `amr/bsample.wgsl`) already resamples the velocity into a second
+   volume, `VV`, for moving the seeds. Streamlines are therefore: a sampling variant that
+   writes the velocity into `BV` (or a tracer that reads `VV`), seeds on a rake, and the
+   attach gate opened for them. A small change.
+3. **Re-mesh time.** Measured on the RTX 3080 (Chrome, D3D11) with a 3D blast on blocks of
+   16³, the mesh filled by hand to 2 300 to 5 100 leaves and then one leaf in 20 refined per
+   re-mesh (`tree.adapt`, then `applyNow`, timed to `onSubmittedWorkDone`):
+
+   | Leaves | Tree (CPU) | Encode and upload | GPU | Total | One step |
+   |---|---|---|---|---|---|
+   | 2 276 → 3 459 | 2.3 ms | 2.3 ms | 4.0 ms | 8.6 ms | 28 ms at 2 276 |
+   | 3 459 → 4 733 | 4.0 ms | 2.5 ms | 2.9 ms | 9.4 ms | |
+   | 5 100 (budget of 5 832 full) | 21 to 29 ms | 3 to 4 ms | 3.5 to 5.5 ms | 29 to 36 ms | |
+
+   A re-mesh costs a third of a step at 3 000 leaves and about one step with the budget full,
+   where the CPU's tree search dominates. A mesh that follows the blades, re-meshing every 20
+   to 40 steps, would spend 1 to 5% of its time re-meshing: affordable. 9.2's default (refine
+   the swept disk once) stands for its other reason, no refinement boundary crossing a blade.
+   (Probe: a Playwright script over `tools/headless/session.mjs`; not kept in the repository.)
 
 ## 3. Stage 1: mesh files
 
