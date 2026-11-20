@@ -10,6 +10,7 @@ import { compileSetup } from './compile';
 import { FACTS, PART_OPTIONS, ruleIssues, type Issue } from './options';
 import { buildBodies, partIds, type Bodies, type BuiltStar } from './parts/bodies';
 import { FLOWS } from './parts/flow';
+import { eggleton } from '../problems/roche';
 import type { DiskPart, OrbitPart, Part, SetupSpec } from './spec';
 import { unitSystem } from './units';
 
@@ -75,11 +76,11 @@ function eosOf(spec: SetupSpec, units: UnitSystem | undefined): Eos | undefined 
   }
 }
 
-/** What an orbit's two bodies must be, by its type. */
-const ORBIT_KINDS: Record<OrbitPart['type'], [Part['kind'], Part['kind']]> = {
-  binary: ['mass', 'mass'],
-  flyby: ['star', 'mass'],
-  collision: ['star', 'star'],
+/** What an orbit's two bodies may be, by its type. */
+const ORBIT_KINDS: Record<OrbitPart['type'], [Part['kind'][], Part['kind'][]]> = {
+  binary: [['mass', 'star'], ['mass', 'star']],
+  flyby: [['star'], ['mass']],
+  collision: [['star'], ['star']],
 };
 const KIND_NAMES: Partial<Record<Part['kind'], string>> = { mass: 'a point mass', star: 'a star' };
 
@@ -97,10 +98,47 @@ function orbitFaults(o: OrbitPart, parts: Part[], ids: string[]): string[] {
     }
     const at = ids.indexOf(id);
     if (at < 0) out.push(`it names "${id}", which is not there`);
-    else if (parts[at].kind !== want[k]) out.push(`its ${which} body must be ${KIND_NAMES[want[k]]} for this kind of orbit, and "${id}" is ${KIND_NAMES[parts[at].kind] ?? `a ${parts[at].kind}`}`);
+    else if (!want[k].includes(parts[at].kind)) out.push(`its ${which} body must be ${want[k].map((w) => KIND_NAMES[w]).join(' or ')} for this kind of orbit, and "${id}" is ${KIND_NAMES[parts[at].kind] ?? `a ${parts[at].kind}`}`);
   }
   if (of[0] && of[0] === of[1]) out.push('it names the same body twice');
+  if (o.type === 'binary' && o.fill !== undefined && of[0] && parts[ids.indexOf(of[0])]?.kind !== 'star') out.push('its fill is of its first body, which must be a star');
   return out;
+}
+
+/** What is wrong with a binary's other fields: a frame that cannot turn with it, a tilt its stars cannot take. */
+function binaryIssues(spec: SetupSpec, parts: Part[], ids: string[], label: (i: number) => string, out: Issue[]) {
+  const binaries = parts.flatMap((p, i) => (p.kind === 'orbit' && p.type === 'binary' ? [{ o: p, i }] : []));
+  const withStar = (o: OrbitPart) => (o.of ?? []).some((id) => parts[ids.indexOf(id)]?.kind === 'star');
+  const framed = binaries.filter(({ o }) => !o.ecc && (o.corotating || withStar(o)));
+  if (framed.length > 1) out.push({ level: 'error', path: `parts.${framed[1].i}`, text: `${label(framed[1].i)}: only one circular binary may hold stars or turn the frame, and ${label(framed[0].i)} already does` });
+  for (const { o, i } of binaries) {
+    if (o.corotating && o.ecc) out.push({ level: 'error', path: `parts.${i}.corotating`, text: `${label(i)}: only a circular orbit has a frame that turns with it (its eccentricity is ${fmt(o.ecc)})` });
+    if (o.corotating && spec.physics?.rotation?.omega?.some((w) => w !== 0)) out.push({ level: 'error', path: `parts.${i}.corotating`, text: `${label(i)}: it turns the frame with the orbit, and the setup has a rotating frame of its own. Clear one` });
+    if (o.corotating && parts.some((p) => p.kind === 'disk')) out.push({ level: 'error', path: `parts.${i}.corotating`, text: `${label(i)}: a disk is set up moving in an inertial frame, not in one turning with the binary` });
+    if (o.track && !o.corotating) out.push({ level: 'warning', path: `parts.${i}.track`, text: `${label(i)}: it follows the orbit only in the corotating frame, which it does not turn` });
+    if (withStar(o) && (o.incl ?? 0) !== 0) out.push({ level: 'error', path: `parts.${i}.incl`, text: `${label(i)}: a binary with a star orbits in the x-y plane (its inclination must be 0)` });
+    if (o.q !== undefined && (o.of ?? []).every((id) => parts[ids.indexOf(id)]?.kind === 'star')) out.push({ level: 'warning', path: `parts.${i}.q`, text: `${label(i)}: the mass ratio of two stars is their masses’: q is not used` });
+  }
+}
+
+/** How full a binary's stars are of their Roche lobes (Eggleton 1983): above 1 one pours gas onto its companion from the start. */
+function rocheIssues(parts: Part[], ids: string[], built: BuiltSetup, label: (i: number) => string, out: Issue[]) {
+  const b = built.bodies;
+  if (!b?.binary) return;
+  parts.forEach((p, i) => {
+    if (p.kind !== 'orbit' || p.type !== 'binary' || p.ecc) return;
+    const [A, B] = p.of;
+    const mass = (id: string) => b.stars.find((s) => s.id === id)?.M ?? (b.masses[b.massIds.indexOf(id)]?.gm ?? 0) / built.G;
+    const sep = b.binary!.separation;
+    for (const [id, other] of [[A, B], [B, A]]) {
+      const st = b.stars.find((s) => s.id === id);
+      if (!st || !(mass(other) > 0)) continue;
+      const fill = st.R / (eggleton(st.M / mass(other)) * sep);
+      if (fill > 1.001 && p.fill === undefined)
+        out.push({ level: 'warning', path: `parts.${i}.separation`, text: `${label(i)}: star "${id}" is ${fmt(fill)} times the size of its Roche lobe: it overflows onto "${other}" from the start` });
+      else if (fill > 1.001 && id !== A) out.push({ level: 'warning', path: `parts.${i}.fill`, text: `${label(i)}: star "${id}" overfills its Roche lobe too, ${fmt(fill)} times its size` });
+    }
+  });
 }
 
 /**
@@ -352,6 +390,8 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     });
 
     checkBodies(spec, built, out);
+    binaryIssues(spec, parts, ids, label, out);
+    rocheIssues(parts, ids, built, label, out);
 
     // A disk heavier than a tenth of what it orbits pulls on itself more than the setup accounts for.
     if (built.bodies) {

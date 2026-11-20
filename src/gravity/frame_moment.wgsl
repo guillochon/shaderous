@@ -1,0 +1,18 @@
+// Reduction source for a rotating frame that follows a binary, on the uniform grid
+// (gravity/frame_cell.wgsl).
+#include "hydro/common.wgsl"
+#include "gravity/bh.wgsl"
+
+@group(0) @binding(1) var U1: texture_3d<f32>;
+@group(0) @binding(2) var<storage, read> BH: Masses;
+@group(0) @binding(3) var U2: texture_3d<f32>;
+
+#include "gravity/frame_cell.wgsl"
+
+fn red_cell(c: vec3<i32>) -> Red {
+  var u1 = textureLoad(U1, c, 0);
+  // Solid and fixed cells are not gas.
+  if (abs(textureLoad(U2, c, 0).w) > 0.5) { u1 = vec4<f32>(0.0); }
+  // (An axisymmetric run has no rotating frame.)
+  return frame_cell(u1, P.geom.x, cell_pos(c));
+}

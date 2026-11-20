@@ -2,7 +2,8 @@
 // the method and the CPU version it mirrors; amr/amr_sim.ts, settleOnGpu, drives the rounds).
 //
 // Each star's density is made to satisfy h(rho) + phi = C, with phi the grid's potential less
-// the other stars' pull and C fixed by the star's mass. The host finds C from sums over the
+// the other stars' pull and C fixed by the star's mass. In a circular binary (S.g.y = 1) phi is
+// instead the whole Roche potential: the grid's, the point masses' and the centrifugal term. The host finds C from sums over the
 // star's cells, which these passes make per block; it adds the blocks' sums in double precision.
 //
 //   measure, MODE 0: per block, each star's mass (cells denser than the cut) and the densest cell
@@ -26,16 +27,19 @@ struct SStar {
   c: vec4<f32>, // center (relative to the box center), radius
   r: vec4<f32>, // reach, mass, passive scalar, barotrope (0 polytrope, 1 cold degenerate gas)
   b: vec4<f32>, // barotrope: polytrope (n, K, (n + 1) K, 0); degenerate (rho_d, A, and the cold Coulomb term's c1 and rho0: 0 and 1 for none)
-  v: vec4<f32>, // velocity
+  v: vec4<f32>, // velocity, and the angular velocity it turns at about z through its center
   k: vec4<f32>, // C as two floats (C = k.x + k.y)
-  q: vec4<f32>, // center of mass, where its pull on the other stars comes from
+  q: vec4<f32>, // center of mass, where its pull on the other stars comes from; in a binary, the pull holding it in place
 }
 struct Settle {
   h: vec4<u32>,        // number of stars, star S of measure modes 1 and 2
   f: vec4<f32>,        // density cut, ambient density, ambient pressure, over-relaxation
-  g: vec4<f32>,        // G
+  g: vec4<f32>,        // G, 1 for a binary's Roche potential
   stars: array<SStar, 4>,
   cand: array<vec4<f32>, 8>, // the 16 trial values of C of MODE 2, as (hi, lo) pairs
+  w: vec4<f32>,        // a binary: the frame's angular velocity about z, and how many point masses
+  pm: array<vec4<f32>, 4>, // a binary's point masses: position, G M
+  ps: vec4<f32>,       // and their softenings
 }
 
 @group(0) @binding(10) var<uniform> S: Settle;
@@ -67,8 +71,18 @@ fn owner(x: vec3<f32>) -> i32 {
 }
 
 // The other stars' pull on star i, undone: outside a spherical star it is that of a point of its mass.
+// In a binary, what the Roche potential adds to the grid's (problems/settle.ts, binaryPhi).
 fn pull(i: u32, x: vec3<f32>) -> f32 {
   var p = 0.0;
+  if (S.g.y != 0.0) {
+    p = -0.5 * S.w.x * S.w.x * dot(x.xy, x.xy);
+    for (var j = 0u; j < u32(S.w.y); j++) {
+      let d = x - S.pm[j].xyz;
+      p -= S.pm[j].w / sqrt(dot(d, d) + S.ps[j] * S.ps[j]);
+    }
+    // The uniform pull holding the star where the orbit put it (problems/settle.ts, holdPull).
+    return p + dot(S.stars[i].q.xyz, x - S.stars[i].c.xyz);
+  }
   for (var j = 0u; j < S.h.x; j++) {
     if (j == i) { continue; }
     p += S.g.x * S.stars[j].r.y / length(x - S.stars[j].q.xyz);
@@ -291,7 +305,8 @@ fn finish(@builtin(workgroup_id) wid: vec3<u32>, @builtin(local_invocation_index
       if (r > S.f.x) {
         let s = S.stars[u32(who)];
         let eint = eos_eint_from_p(r, baro_pressure(u32(who), r));
-        let v = s.v.xyz;
+        // (A star in a binary turns with the orbit about its own center.)
+        let v = s.v.xyz + s.v.w * vec3<f32>(-(x.y - s.c.y), x.x - s.c.x, 0.0);
         u1 = vec4<f32>(r, r * v);
         u2 = vec4<f32>(eint + 0.5 * r * dot(v, v), eint, r * s.r.z, u2.w);
       } else {

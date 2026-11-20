@@ -84,6 +84,8 @@ export interface SnapshotMeta {
   setup?: unknown;
   /** the point masses, if the run has any */
   masses?: PointMass[];
+  /** a rotating frame that follows a binary: its angular velocity and the rest of its state (src/sim.ts frameTrack) */
+  frame?: number[];
   /** files written before there could be several: position and velocity of the one mass */
   perturber?: { pos: number[]; vel: number[] };
   /** debris energies (debris/debris.ts): the mass that has left the box, per energy bin */
@@ -247,6 +249,8 @@ export interface Restart {
   steps: number;
   /** the point masses' state, laid over the preset's */
   masses?: Partial<PointMass>[];
+  /** a rotating frame that follows a binary: its state (src/sim.ts frameTrack) */
+  frame?: number[];
   /** refinement level the mesh should have at a position (adaptive runs) */
   levelAt?: (x: number, y: number, z: number) => number;
   /** debris energies: what had left the box by then, per energy bin */

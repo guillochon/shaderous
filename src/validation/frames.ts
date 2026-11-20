@@ -218,6 +218,53 @@ export const FRAME_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'rot-follow',
+    name: 'Rotating frame that follows a binary: it catches up with the orbit',
+    criterion:
+      'Two equal point masses on a circular orbit of separation 1, in a 2D frame started turning 10% slower than the orbit and set to follow it (Problem.rotation track): the line of centers comes back to where it started, critically damped (over the second of two orbits within 2 degrees, the tail of a 10% start; at the end within 0.3 degree), the frame turns at the orbit\'s rate to within 0.5%, and the separation stays within 2e-3 of 1 (the Euler force leaves the orbit as it was), on the uniform grid and on blocks',
+    async run(gpu) {
+      const soft = 0.25;
+      const omega = Math.pow(1 + soft * soft, -0.75);
+      const slow = 0.9 * omega;
+      // On the circular orbit, as the slow frame sees it: turning at the difference.
+      const v = 0.5 * (omega - slow);
+      const p = gas({
+        id: 'rot-follow', box: 4, tEnd: (4 * Math.PI) / omega, bcLo: all(OUTFLOW), bcHi: all(OUTFLOW),
+        rotation: () => ({ omega: [0, 0, slow], track: { rhoMin: 3e38 } }),
+        init: () => () => ({ rho: 1e-6, vx: 0, vy: 0, vz: 0, p: 1e-6, s: 0 }),
+        masses: () => [
+          { gm: 0.5, pos: [-0.5, 0, 0], vel: [0, -v, 0], soft, sinkRadius: 0 },
+          { gm: 0.5, pos: [0.5, 0, 0], vel: [0, v, 0], soft, sinkRadius: 0 },
+        ],
+      });
+      const follow = async (sim: Sim | AmrSim) => {
+        let sep = 0;
+        let angle = 0;
+        let last = 0;
+        let rate = 1;
+        const tEnd = sim.cfg.tEnd;
+        for (let i = 1; i <= 16; i++) {
+          sim.cfg.tEnd = (tEnd * i) / 16;
+          sim.writeParams();
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          const [a, b] = d.masses;
+          sep = Math.max(sep, Math.abs(Math.hypot(a.pos[0] - b.pos[0], a.pos[1] - b.pos[1]) - 1));
+          last = Math.abs(Math.atan2(b.pos[1] - a.pos[1], b.pos[0] - a.pos[0])) * (180 / Math.PI);
+          if (i > 8) angle = Math.max(angle, last);
+          rate = (d.frame?.omega ?? 0) / omega;
+        }
+        return { ok: sep < 2e-3 && angle < 2 && last < 0.3 && Math.abs(rate - 1) < 5e-3, sep, angle, last, rate };
+      };
+      const u = await withSim(gpu, p, 64, { ndim: 2 }, follow);
+      const b = await withAmr(gpu, p, 64, { ndim: 2, amrLevels: 0 }, follow);
+      return {
+        pass: u.ok && b.ok,
+        metrics: { separation_max_deviation: u.sep, angle_max_deg: u.angle, angle_end_deg: u.last, frame_rate_over_orbit: u.rate, blocks_separation_max_deviation: b.sep, blocks_angle_max_deg: b.angle, blocks_angle_end_deg: b.last, blocks_frame_rate_over_orbit: b.rate },
+      };
+    },
+  },
+  {
     id: 'rot-mhd',
     name: 'Rotating frame: a uniform field along Omega with uniform flow (MHD)',
     criterion:

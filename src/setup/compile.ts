@@ -151,6 +151,9 @@ function disksOf(spec: SetupSpec, bodies: Bodies, G: number, n: number, ndim: 2 
   });
 }
 
+/** A frame that follows two point masses alone counts no gas: denser than any. */
+const NO_GAS = 3e38;
+
 /** How far from its center, in radii, a star's settling may reach where other gas is about (as a star the star tool places). */
 const OWN_REACH = 1.3;
 
@@ -270,8 +273,25 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
   const dwarfs = bodies.stars.some((s) => s.part.type === 'white-dwarf');
   // (A flow that only changes what the stars painted, a hot spot, brings no gas of its own.)
   const others = (spec.parts ?? []).some((p) => p.kind === 'disk' || p.kind === 'region' || (p.kind === 'flow' && flowValues(p).def.wholeBox));
+  // A circular binary: its stars are balanced in the Roche potential, each within its L1 point,
+  // and every point mass's pull (cores too) is in that potential (problems/settle.ts).
+  const bin = bodies.binary;
+  const reachOf = (s: (typeof bodies.stars)[number]): number | undefined => {
+    const own = s.reach !== undefined ? s.reach : others ? OWN_REACH * s.R : undefined;
+    const l1 = bin?.l1.get(s.id);
+    return l1 === undefined ? own : Math.min(own ?? Infinity, l1);
+  };
   return {
-    stars: bodies.stars.filter((s) => !s.planet && s.part.type !== 'planet').map((s) => ({ barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(s.reach !== undefined ? { reach: s.reach } : others ? { reach: OWN_REACH * s.R } : {}), scalar: s.scalar, ...(s.core ? { core: { gm: G * s.core.mass, soft: s.core.soft } } : {}) })),
+    stars: bodies.stars.filter((s) => !s.planet && s.part.type !== 'planet').map((s) => {
+      const reach = reachOf(s);
+      return {
+        barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(reach !== undefined ? { reach } : {}), scalar: s.scalar,
+        ...(s.spin ? { spin: s.spin } : {}),
+        ...(bin ? { stiff: (G * s.M) / s.R ** 3, gm: G * s.M } : {}),
+        ...(s.core && !bin ? { core: { gm: G * s.core.mass, soft: s.core.soft } } : {}),
+      };
+    }),
+    ...(bin ? { binary: { omega: bin.omega, masses: bodies.masses.filter((m) => !m.massless).map((m) => ({ gm: m.gm, at: [...m.pos], soft: m.soft ?? 0 })) } } : {}),
     rhoCut: amb.cut,
     rhoAmb: amb.rho,
     pAmb: spec.background?.p ?? bodies.stars[0].barotrope.pressure(amb.cut),
@@ -414,6 +434,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const hasMasses = parts.some((p) => p.kind === 'mass' || (p.kind === 'star' && p.core));
   const hasStars = parts.some(settles);
   const debris = parts.some((p) => p.kind === 'orbit' && p.debris);
+  const corotating = parts.some((p) => p.kind === 'orbit' && p.type === 'binary' && p.corotating && !p.ecc);
   const unitsFollow = !!d.units && (unitsFollowParts(d.units) || feats.some((f) => featuredPaths(f).some((p) => p.startsWith('domain.units.'))));
   const boxFeature = feats.find((f) => featuredPaths(f).includes('domain.box'));
   const burnFlow = flows.find((f) => f.def.burn);
@@ -478,9 +499,22 @@ export function compileSetup(spec: SetupSpec): Compiled {
     frame: ph.frame === 'gas' || ph.frame === 'masses' ? ph.frame : undefined,
     cosmology: cosmology ?? undefined,
     shear: ph.shear ? { omega: ph.shear.omega ?? 1, q: ph.shear.q ?? 1.5, stratified: ph.shear.stratified ?? false } : undefined,
-    rotation: ph.rotation?.omega && ph.rotation.omega.some((w) => w !== 0)
-      ? () => ({ omega: [...ph.rotation!.omega!] as [number, number, number], centrifugal: ph.rotation!.centrifugal ?? true })
-      : undefined,
+    rotation: corotating
+      ? (params) => {
+          // The frame turning with a binary (OrbitPart.corotating): at its angular velocity about z.
+          const s = at(params);
+          const bodies = buildBodies(s, { G: scales(s).G, dx: 0, ndim: 3, box: boxOf(s), eos: hasWhiteDwarf(s) ? specEos(s, scales(s).units) : undefined });
+          const b = bodies.binary;
+          // (A parameter may turn the frame off: the run is then inertial.)
+          const w = b?.corotating ? b.omega : 0;
+          // It follows the axis of the mass's quadrupole: the stars' gas (denser than where they
+          // end, so that a stream, a disk or an outflow does not turn it) and the point masses.
+          const track = b?.corotating && b.track ? { rhoMin: bodies.stars.length ? ambient(s, bodies).cut : NO_GAS } : undefined;
+          return { omega: [0, 0, w], centrifugal: true, ...(track ? { track } : {}) };
+        }
+      : ph.rotation?.omega && ph.rotation.omega.some((w) => w !== 0)
+        ? () => ({ omega: [...ph.rotation!.omega!] as [number, number, number], centrifugal: ph.rotation!.centrifugal ?? true })
+        : undefined,
     refineRho: mesh.refineRho,
     refineDense: mesh.refineDense,
     cooling: ph.cooling,

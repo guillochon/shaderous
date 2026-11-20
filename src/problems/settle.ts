@@ -28,6 +28,22 @@
 // from its center crept toward each other until the isolated boundary's multipoles went past
 // the quadrupole (gravity/multipole_eval.wgsl).
 //
+// A star in a circular binary is different: it is not falling freely but held, in the frame
+// turning with the orbit, against its companion's pull by the centrifugal force. There it is
+// balanced in the whole potential, the grid's (both stars' gas) and the point masses' with the
+// frame's centrifugal term, the Roche potential (Settling.binary, problems/roche.ts), so that it
+// starts tidally stretched toward its companion as a star in a close binary is. Each star then
+// reaches no farther than its L1 point. But nothing in h + phi = C says where along the line of
+// centers the star is, and there the tidal field pulls it away from its place: left alone, the
+// rounds slid a star that fills its lobe half its radius toward L1 and cut it off there. So each
+// star is held where the orbit put it, as self-consistent-field binaries are (Hachisu 1986, who
+// fixes its boundary points): a uniform pull, lambda . (x - x_star), is added to its potential
+// every round (holdPull). It cancels the pull of the rest of the binary at the star's center of
+// mass (which is what slides it: zero where the orbit put it, growing as it strays), and adds
+// gentle proportional and integral feedback on how far that center is from its place, in units
+// of G M / R^3. Settled, the proportional part is gone, and what the integral part holds is the
+// small force the point-mass orbit leaves unbalanced on an extended star.
+//
 // On an adaptive mesh the rounds run on the GPU (amr/settle.wgsl, AmrSim.settleOnGpu) when each
 // star's gas is one it knows (Barotrope.gpu): only per-block sums come back, where the Settler
 // here reads the whole mesh back, some 100 bytes a cell, more than a page may hold on a mesh of
@@ -61,6 +77,12 @@ export interface SettleStar {
   barotrope: Barotrope;
   center: number[];
   vel: number[];
+  /** angular velocity about z through its center, on top of `vel` (a tidally locked star in a binary) */
+  spin?: number;
+  /** In a binary: G M / R^3, which scales the feedback holding it in place (holdPull) */
+  stiff?: number;
+  /** In a binary: G times its mass, for its pull on the other star */
+  gm?: number;
   /** roughly its radius: cells go to the star they are fewest radii from */
   R: number;
   /** farthest from its center a cell may become part of it (default: anywhere) */
@@ -98,6 +120,62 @@ export interface Settling {
    * against what it falls freely toward. `gm` is G times the mass.
    */
   others?: { gm: number; at: number[]; soft: number }[];
+  /**
+   * The stars are in a circular binary (problems/roche.ts): each is balanced in the whole
+   * potential of the frame turning with it at `omega` about z through the box center, the grid's
+   * (no star's pull is undone) plus these point masses' softened pull (G times the mass; every
+   * point mass, the stars' cores among them, which SettleStar.core then leaves out) and the
+   * centrifugal term.
+   */
+  binary?: { omega: number; masses: { gm: number; at: number[]; soft: number }[] };
+}
+
+/**
+ * Gains of the feedback that holds a star of a binary in its place, per round, in units of
+ * G M / R^3. A star's center of mass answers a uniform pull f by moving between f / (G M / R^3)
+ * (its surface layers) and a sixth of that (an n = 1.5 star's center) in a round: gains this
+ * small cannot overshoot.
+ */
+const HOLD_P = 0.3;
+const HOLD_I = 0.05;
+
+/**
+ * A round's uniform pull holding star i of a binary in place: lambda, for the potential term
+ * lambda . (x - center). `coms` are the stars' centers of mass, and `sum` the integral of the
+ * rounds before (updated). The pull of the rest of the binary at the star's center of mass is
+ * cancelled: the point masses', the frame's centrifugal term and the other star's, as a point of
+ * its mass at its center of mass.
+ */
+export function holdPull(set: Settling, i: number, coms: number[][], sum: number[]): number[] {
+  const s = set.stars[i];
+  const b = set.binary!;
+  const com = coms[i];
+  const k = s.stiff ?? 0;
+  const ext = (x: number, y: number, z: number) => {
+    let p = binaryPhi(b, x, y, z);
+    coms.forEach((c, j) => {
+      if (j !== i) p -= (set.stars[j].gm ?? 0) / Math.hypot(x - c[0], y - c[1], z - c[2]);
+    });
+    return p;
+  };
+  const h = 1e-4 * s.R;
+  const grad = [0, 1, 2].map((a) => {
+    const lo = [...com];
+    const hi = [...com];
+    lo[a] -= h;
+    hi[a] += h;
+    return (ext(hi[0], hi[1], hi[2]) - ext(lo[0], lo[1], lo[2])) / (2 * h);
+  });
+  const d = [0, 1, 2].map((a) => com[a] - (s.center[a] ?? 0));
+  for (let a = 0; a < 3; a++) sum[a] += HOLD_I * k * d[a];
+  return d.map((v, a) => -grad[a] + HOLD_P * k * v + sum[a]);
+}
+
+/** The potential a star in a binary is balanced in, besides the grid's: the point masses' and the centrifugal term. */
+export function binaryPhi(b: NonNullable<Settling['binary']>, x: number, y: number, z: number): number {
+  let p = -0.5 * b.omega * b.omega * (x * x + y * y);
+  for (const m of b.masses) p -= m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
+  return p;
 }
 
 /** A polytrope the star tool has just placed: where, how it moves, and its profile's scales. */
@@ -286,6 +364,8 @@ export class Settler {
   private mass: number[] = [];
   /** per star: its constant C of the last round */
   private C: (number | undefined)[] = [];
+  /** per star, in a binary: the integral part of the pull holding it in place (holdPull) */
+  readonly held: number[][] = [];
   private vol: Float64Array;
   /** star each cell can belong to, or -1 for none (ambient for good) */
   readonly owner: Int32Array;
@@ -351,16 +431,21 @@ export class Settler {
     let change = 0;
     // Each star is balanced in its own potential: the grid's, less the others' pull, which
     // outside a spherical star is that of a point of its mass at its center of mass.
-    const at = this.set.stars.length > 1 ? this.centers() : [];
+    // (In a binary the whole potential: nothing is undone.)
+    const bin = this.set.binary;
+    const coms = this.set.stars.length > 1 || bin ? this.centers() : [];
+    const at = bin ? [] : coms;
     const others = this.set.others ?? [];
     this.set.stars.forEach((s, i) => {
       const idx = this.cells[i];
+      const hold = bin ? holdPull(this.set, i, coms, (this.held[i] ??= [0, 0, 0])) : null;
       const ph = new Float64Array(idx.length);
       for (let k = 0; k < idx.length; k++) {
         let p = phi[idx[k]];
-        if (at.length || others.length || s.core) {
+        if (at.length || others.length || s.core || bin) {
           const [x, y, z] = this.grid.pos(idx[k]);
-          if (s.core) p -= s.core.gm / Math.hypot(x - s.center[0], y - s.center[1], z - (s.center[2] ?? 0), s.core.soft);
+          if (bin) p += binaryPhi(bin, x, y, z) + hold![0] * (x - s.center[0]) + hold![1] * (y - s.center[1]) + hold![2] * (z - (s.center[2] ?? 0));
+          else if (s.core) p -= s.core.gm / Math.hypot(x - s.center[0], y - s.center[1], z - (s.center[2] ?? 0), s.core.soft);
           for (let j = 0; j < at.length; j++) if (j !== i) p += (this.set.G * this.mass[j]) / Math.hypot(x - at[j][0], y - at[j][1], z - at[j][2]);
           for (const m of others) p += m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
         }
@@ -398,7 +483,12 @@ export class Settler {
       if (r > rhoCut) {
         const s = this.set.stars[i];
         const eint = eintFromP(r, s.barotrope.pressure(r));
-        const [vx, vy, vz] = s.vel;
+        let [vx, vy, vz] = s.vel;
+        if (s.spin) {
+          const [x, y] = this.grid.pos(q);
+          vx -= s.spin * (y - s.center[1]);
+          vy += s.spin * (x - s.center[0]);
+        }
         u1[o + 1] = r * vx;
         u1[o + 2] = r * vy;
         u1[o + 3] = r * vz;

@@ -7,6 +7,21 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ## Unreleased
 
+### Added
+
+- **Stars in binaries, and Roche lobe overflow.** A `binary` orbit may now hold stars as well as
+  point masses: a star and a point mass, or two stars. On a circular orbit its stars start
+  tidally locked and settled in the Roche potential (the grid's, the point masses' and the
+  centrifugal term), stretched toward their companions, each out to its L1 point. `fill` sets
+  the separation from how full the first star is of its Roche lobe (Eggleton 1983), and
+  `corotating` runs in the frame turning with the orbit, where a binary in balance stands
+  still; with `track` the frame follows the orbit as it changes, keeping the axis of the binary's
+  quadrupole in place, with the Euler force of its changing turn. Two stars held still in a
+  followed frame keep their orbit; moving across the grid, the same pair spiraled in. The setup checks warn of a star that overflows its lobe from the start. A new preset,
+  **Roche lobe overflow**: a Sun-like star pouring gas through L1 onto a 3 solar mass black hole,
+  stably, in a stream that winds into a disk; and its variant **Two stars**, a Sun-like star
+  filling its lobe beside a 0.6 solar mass star, both resolved.
+
 ### Fixed
 
 - The command-line runner starts `diag.jsonl` empty: a second run into the same folder appended

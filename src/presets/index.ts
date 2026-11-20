@@ -25,7 +25,7 @@ export const PRESET_ORDER: readonly string[] = [
   'wd-collision', 'wd-collision-burning',
   'planet', 'moon-forming-impact',
   'tidal-disruption', 'tidal-disruption-hhe', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',
-  'common-envelope', 'common-envelope-ideal',
+  'common-envelope', 'common-envelope-ideal', 'roche-lobe-overflow', 'roche-lobe-overflow-stars',
   'binary', 'mri-disk', 'shearing-wave', 'mri-box',
   'orszag-tang', 'mhd-blast', 'mhd-rotor', 'brio-wu', 'field-loop', 'field-loop-dense', 'alfven-wave', 'alfven-collision', 'alfven-packets', 'tearing', 'island-coalescence', 'x-point', 'driven-turbulence-mhd',
   'advection', 'empty', 'empty-mhd',

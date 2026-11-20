@@ -1465,7 +1465,7 @@
         },
         "maxItems": 2,
         "title": "Bodies",
-        "description": "The two bodies it places: two point masses (binary), a star and a point mass (flyby), or two stars (collision)"
+        "description": "The two bodies it places: point masses or stars (binary), a star and a point mass (flyby), or two stars (collision)"
        },
        "type": {
         "enum": [
@@ -1474,12 +1474,12 @@
          "collision"
         ],
         "title": "Kind of orbit",
-        "description": "Binary: two point masses about their center of mass, at pericenter. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass"
+        "description": "Binary: two bodies, point masses or stars, about their center of mass, at pericenter; on a circular orbit its stars turn with it and start in the balance of the Roche potential. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass"
        },
        "q": {
         "type": "number",
         "title": "Mass ratio",
-        "description": "Mass of the second body over the first. It sets their masses: in a binary the total stays, in a flyby the star’s",
+        "description": "Mass of the second body over the first. It sets their masses: in a binary of two point masses the total stays, in a binary with a star or a flyby the star’s",
         "minimum": 0.000001,
         "maximum": 1000000000
        },
@@ -1507,6 +1507,23 @@
         "type": "boolean",
         "title": "Retrograde",
         "description": "In 2D: the binary orbits clockwise"
+       },
+       "fill": {
+        "type": "number",
+        "title": "Roche lobe fill",
+        "description": "In place of the separation: the first body, a star, is this many times the size of its Roche lobe (Eggleton 1983), which sets how far apart the two are. 1 just fills it; above 1 it pours gas through L1 onto its companion from the start",
+        "minimum": 0.05,
+        "maximum": 2
+       },
+       "corotating": {
+        "type": "boolean",
+        "title": "Corotating frame",
+        "description": "A circular binary: the run is in the frame turning with the orbit, so the bodies start at rest and a binary in balance stays still"
+       },
+       "track": {
+        "type": "boolean",
+        "title": "Follow the orbit",
+        "description": "With the corotating frame: the frame turns faster or slower as the orbit changes (mass transfer, drag, gas lost through the faces), keeping the line between the two bodies where it started, and the gas and the point masses feel the Euler force of its changing turn. It follows the axis of the stars’ and point masses’ quadrupole, so any two bodies can be followed"
        },
        "beta": {
         "type": "number",

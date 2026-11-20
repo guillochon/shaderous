@@ -21,6 +21,9 @@ fn ext_accel(x: vec3<f32>) -> vec3<f32> {
   if (!ext_on()) { return vec3<f32>(0.0); }
   var g = -BH.frame.xyz;
   if (P.rot.w != 0.0) { g += rot_accel(x); }
+  // A frame that follows a binary turns faster or slower: the Euler force, -dOmega/dt x x. (Not a
+  // potential, so it is in neither ext_dphi nor ext_phi.)
+  if (BH.track.y != 0.0) { g += BH.track.y * vec3<f32>(x.y, -x.x, 0.0); }
   if (P.shear.w != 0.0) { g += tidal_accel(x); }
   for (var i = 0u; i < mass_count(); i++) { g += bh_accel(x, BH.list[i]); }
   return g;

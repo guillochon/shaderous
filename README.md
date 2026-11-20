@@ -24,7 +24,7 @@ panel: shock tubes, blasts, instabilities, a supersonic wind tunnel, liquids at 
 (a vortex street behind a cylinder, a lid-driven cavity), detonations, radiation (a clump's
 shadow, radiative shocks), magnetized
 flows, and astrophysical flows such as stars, white dwarf collisions, tidal disruptions,
-accreting binaries, a common envelope, and planets and the Moon-forming impact. Drag in the
+accreting binaries, Roche lobe overflow, a common envelope, and planets and the Moon-forming impact. Drag in the
 view to rotate it, and use the brushes to stir, heat or add gas, or, in a magnetized run, to strengthen or drag the field. The address bar always describes the current setup, so copying it (or pressing
 **Share**) gives someone else the same run. **Record** saves the run as an MP4 movie with a
 color bar, axes and the simulation time drawn on it, **Screenshot** (under Movie and
@@ -49,6 +49,8 @@ file ([docs/setups.md](docs/setups.md)). Some examples:
 - [A sub-Chandrasekhar Type Ia supernova: a white dwarf's helium shell detonates, then its core](https://guillochon.github.io/shaderous/?problem=sub-chandra)
 - [The Moon-forming impact: Theia strikes the proto-Earth](https://guillochon.github.io/shaderous/?problem=moon-forming-impact)
 - [A common envelope: a star spirals into a red giant's envelope](https://guillochon.github.io/shaderous/?problem=common-envelope)
+- [Roche lobe overflow: a star pours gas through L1 onto a black hole](https://guillochon.github.io/shaderous/?problem=roche-lobe-overflow)
+- [Roche lobe overflow between two resolved stars](https://guillochon.github.io/shaderous/?problem=roche-lobe-overflow-stars)
 
 **From an AI agent, or the command line.** The npm package runs the simulator in headless
 Chrome on your GPU (it needs Node 20+ and Chrome). `npx -y shaderous mcp` is an

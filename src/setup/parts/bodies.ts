@@ -12,6 +12,7 @@ import { coredPolytrope } from '../../problems/cored_polytrope';
 import { laneEmden, laneEmdenCached, polytropeK, polytropeMass, polytropeScales } from '../../problems/lane_emden';
 import { polytropeBarotrope, type Barotrope } from '../../problems/settle';
 import type { PointMass } from '../../problems/types';
+import { binaryOmega, fillSeparation, l1Distance } from '../../problems/roche';
 import { coldPressure, degenerateBarotrope, scalesOf, whiteDwarf } from '../../problems/white_dwarf';
 import type { MassPart, OrbitPart, Part, SetupSpec, StarPart, Vec3 } from '../spec';
 
@@ -38,6 +39,11 @@ export interface BuiltStar {
   reach?: number;
   center: number[];
   vel: number[];
+  /**
+   * In a circular binary, not in its corotating frame: the star turns with the orbit, at this
+   * angular velocity about z through its center (tidally locked), on top of `vel`.
+   */
+  spin?: number;
   scalar: number;
   /** its pressure profile, for a field inside it */
   profile(): StarProfile;
@@ -289,6 +295,24 @@ export interface Bodies {
   debris?: { mass: number; de: number; tPeri: number; refMass: number; scalar: boolean };
   /** semi-major axis of the orbit joining two masses, by "idA+idB" */
   separations: Map<string, number>;
+  /**
+   * A circular binary: the frame turning with it about z through the box center (where its
+   * center of mass is), and for each of its stars how far its L1 point is from its center, as
+   * far as the star's settling may reach. Its stars are settled in the Roche potential.
+   */
+  binary?: BinaryFrame;
+}
+
+export interface BinaryFrame {
+  /** angular velocity of the orbit about z */
+  omega: number;
+  /** the run is in the frame turning with it: the bodies start at rest */
+  corotating: boolean;
+  separation: number;
+  /** each star's distance to L1, by its id */
+  l1: Map<string, number>;
+  /** the frame follows the orbit (OrbitPart.track) */
+  track?: boolean;
 }
 
 export interface BodyContext {
@@ -322,7 +346,10 @@ export function buildBodies(spec: SetupSpec, ctx: BodyContext): Bodies {
   for (const o of parts) {
     if (o.kind !== 'orbit') continue;
     const [a, b] = o.of;
-    if (o.type === 'binary') placeBinary(o, out, massAt(a), massAt(b), ctx);
+    if (o.type === 'binary') {
+      if (starOf(a) || starOf(b)) placeStarBinary(o, out, ctx);
+      else placeBinary(o, out, massAt(a), massAt(b), ctx);
+    }
     else if (o.type === 'flyby') {
       const star = starOf(a);
       const i = massAt(b);
@@ -353,6 +380,7 @@ export function buildBodies(spec: SetupSpec, ctx: BodyContext): Bodies {
   }
   return out;
 }
+
 
 /** A point mass part as the solver takes it: softening and sink at least two cells across. */
 function massOf(p: MassPart, dx: number): PointMass {
@@ -389,6 +417,68 @@ function placeBinary(o: OrbitPart, out: Bodies, i: number, j: number, ctx: BodyC
   out.masses[i] = place(a, unit[0]);
   out.masses[j] = place(b, unit[1]);
   out.separations.set(`${o.of[0]}+${o.of[1]}`, sep);
+  if (o.corotating && !(o.ecc ?? 0)) {
+    // In the frame turning with the orbit the two masses start at rest.
+    out.masses[i] = { ...out.masses[i], vel: [0, 0, 0] };
+    out.masses[j] = { ...out.masses[j], vel: [0, 0, 0] };
+    out.binary = { omega: binaryOmega(total, sep, soft), corotating: true, separation: sep, l1: new Map(), ...(o.track ? { track: true } : {}) };
+  }
+}
+
+/**
+ * A binary with a star in it: a star and a point mass, or two stars, about their center of mass
+ * at the box center, at pericenter on the x axis, the first body at -x. Their masses are their
+ * parts' (`q` sets a point mass's against the star's). `fill` puts the first body, a star,
+ * against its Roche lobe. A circular one is tidally locked: its stars turn with the orbit, and
+ * are settled in the Roche potential (BinaryFrame). An eccentric one is placed as two point
+ * masses are, its stars each settled in its own potential.
+ */
+function placeStarBinary(o: OrbitPart, out: Bodies, ctx: BodyContext) {
+  const body = (id: string) => {
+    const star = out.stars.find((s) => s.id === id);
+    const i = out.massIds.indexOf(id);
+    if (!star && i < 0) throw new Error(`a binary orbit is of point masses and stars, and "${id}" is neither`);
+    return { star, i };
+  };
+  const [A, B] = o.of.map(body);
+  // Masses in code units (G M for a point mass over G).
+  const G = ctx.G;
+  if (o.q !== undefined && !(A.star && B.star)) {
+    if (A.star) out.masses[B.i] = { ...out.masses[B.i], gm: G * A.star.M * o.q };
+    else out.masses[A.i] = { ...out.masses[A.i], gm: (G * B.star!.M) / o.q };
+  }
+  const mOf = (b: typeof A) => (b.star ? b.star.M : out.masses[b.i].gm / G);
+  const m1 = mOf(A);
+  const m2 = mOf(B);
+  const ecc = o.ecc ?? 0;
+  let sep = o.separation ?? 1;
+  if (o.fill !== undefined) {
+    if (!A.star) throw new Error('a binary’s fill is of its first body, which must be a star');
+    sep = fillSeparation(A.star.R, m1, m2, o.fill);
+  }
+  // A point mass's softening lowers the orbit's speed as the pull between the two is softened.
+  const soft = [A, B].reduce((s, b) => (b.star ? s : Math.max(s, out.masses[b.i].soft ?? 2 * ctx.dx)), 0);
+  const unit = binaryMasses(m2 / m1, ecc, soft / sep, 0);
+  const vs = Math.sqrt((G * (m1 + m2)) / sep);
+  const circular = ecc === 0;
+  const corotating = circular && !!o.corotating;
+  [A, B].forEach((b, k) => {
+    const pos = unit[k].pos.map((x) => sep * x);
+    const vel = corotating ? [0, 0, 0] : unit[k].vel.map((v) => vs * v);
+    if (b.star) {
+      b.star.center = pos;
+      b.star.vel = vel;
+    } else out.masses[b.i] = { ...out.masses[b.i], pos, vel };
+  });
+  out.separations.set(`${o.of[0]}+${o.of[1]}`, sep);
+  if (!circular) return;
+  const omega = binaryOmega(G * (m1 + m2), sep, soft);
+  const d1 = l1Distance(m1, m2) * sep;
+  const l1 = new Map<string, number>();
+  if (A.star) l1.set(A.star.id, d1);
+  if (B.star) l1.set(B.star.id, sep - d1);
+  for (const b of [A, B]) if (b.star && !corotating) b.star.spin = omega;
+  out.binary = { omega, corotating, separation: sep, l1, ...(corotating && o.track ? { track: true } : {}) };
 }
 
 /** A part's quantity by name, for units that follow one: "<id>.mass" or "<id>.radius". */

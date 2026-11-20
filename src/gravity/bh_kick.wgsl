@@ -38,6 +38,9 @@
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var<storage, read> RED: array<f32>;
 @group(0) @binding(3) var<storage, read_write> BH: Masses;
+// A rotating frame that follows a binary: the gas's sums (gravity/frame_cell.wgsl); a few
+// zeros otherwise.
+@group(0) @binding(4) var<storage, read> FR: array<f32>;
 
 // Mirror symmetry (Params.sym): the reduction summed one 2^k-th of the configuration, and the
 // masses lie on the planes. The whole's totals are the grid's unfolded: a scalar times 2^k; a
@@ -218,4 +221,79 @@ fn main() {
       BH.list[i].vel = vec4<f32>(BH.list[i].vel.xyz - vc, BH.list[i].vel.w);
     }
   }
+  follow_binary();
+}
+
+// A rotating frame that follows a binary (Masses.track): it keeps the binary's axis where it
+// started, the axis of the quadrupole of its mass in the orbital plane. That is the gas denser
+// than a threshold (the stars', FR: gravity/frame_cell.wgsl) and the point masses, about their
+// center of mass, with no need to say which gas is which star's:
+//   A = I_xx - I_yy, B = 2 I_xy, the axis at psi / 2 with psi = atan2(B, A),
+// turning in the frame at w = (A dB/dt - B dA/dt) / (2 (A^2 + B^2)), the I's rates from the
+// momenta. Its angle phi from where it started (taken before the first step) and w set the frame's
+// angular acceleration, dOmega/dt = 2 k w + k^2 phi, with k = Omega_0 / 2: critically damped, so
+// the axis comes back to its place in about a third of an orbit and does not swing past it.
+// Turning faster by dOmega, the frame sees every velocity change by -dOmega x x (the Euler force
+// over the step): the masses' here, the gas's through ext_accel in the next step.
+fn follow_binary() {
+  let t = BH.track;
+  if (t.w == 0.0) { return; }
+  let n = mass_count();
+  var s0 = FR[0];
+  var sx = vec2<f32>(FR[1], FR[2]);
+  var sxx = FR[3];
+  var syy = FR[4];
+  var sxy = FR[5];
+  var sp = vec2<f32>(FR[6], FR[7]);
+  var sxvx = FR[8];
+  var syvy = FR[9];
+  var sxv = FR[10];
+  if (P.G > 0.0) {
+    for (var i = 0u; i < n; i++) {
+      let b = BH.list[i];
+      if (mass_massless(b)) { continue; }
+      let m = b.pos.w / P.G;
+      let x = b.pos.xy;
+      let p = m * b.vel.xy;
+      s0 += m;
+      sx += m * x;
+      sxx += m * x.x * x.x;
+      syy += m * x.y * x.y;
+      sxy += m * x.x * x.y;
+      sp += p;
+      sxvx += x.x * p.x;
+      syvy += x.y * p.y;
+      sxv += x.x * p.y + x.y * p.x;
+    }
+  }
+  if (!(s0 > 0.0)) { return; }
+  let c = sx / s0;
+  let v = sp / s0;
+  let a = (sxx - s0 * c.x * c.x) - (syy - s0 * c.y * c.y);
+  let bq = 2.0 * (sxy - s0 * c.x * c.y);
+  let da = 2.0 * (sxvx - s0 * c.x * v.x) - 2.0 * (syvy - s0 * c.y * v.y);
+  let db = 2.0 * (sxv - s0 * (c.x * v.y + c.y * v.x));
+  let q2 = a * a + bq * bq;
+  if (!(q2 > 0.0)) { return; }
+  let s = BH.track2;
+  if (t.w == 1.0) {
+    // Before the first step (the accelerations' evaluation, or the first kick if there was
+    // none): the axis it keeps from now on, as (cos psi, sin psi).
+    let q = sqrt(q2);
+    BH.track2 = vec4<f32>(a / q, bq / q, s.z, s.w);
+    BH.track = vec4<f32>(t.xyz, 2.0);
+    return;
+  }
+  if (!LIVE) { return; }
+  let w = 0.5 * (a * db - bq * da) / q2;
+  let phi = 0.5 * atan2(s.x * bq - s.y * a, s.x * a + s.y * bq);
+  let k = 0.5 * t.z;
+  let wdot = 2.0 * k * w + k * k * phi;
+  let dw = wdot * clock.dt;
+  for (var i = 0u; i < n; i++) {
+    let b = BH.list[i];
+    if (mass_fixed(b)) { continue; }
+    BH.list[i].vel = vec4<f32>(b.vel.xyz + dw * vec3<f32>(b.pos.y, -b.pos.x, 0.0), b.vel.w);
+  }
+  BH.track = vec4<f32>(t.x + dw, wdot, t.z, t.w);
 }

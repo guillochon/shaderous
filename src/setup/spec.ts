@@ -255,6 +255,23 @@ export interface OrbitPart {
   incl?: number;
   /** binary: the orbit runs clockwise (2D) */
   retrograde?: boolean;
+  /**
+   * binary with a star first: the separation that makes that star this many times the size of
+   * its Roche lobe (Eggleton 1983), in place of `separation`. 1 just fills it; above 1 it
+   * overflows through L1 from the start.
+   */
+  fill?: number;
+  /**
+   * binary, circular: the run is in the frame turning with the orbit (Problem.rotation), so the
+   * bodies start at rest in it. Off, they move about their center of mass.
+   */
+  corotating?: boolean;
+  /**
+   * binary, corotating: the frame follows the orbit, turning faster or slower to keep the line
+   * of centers where it started as the orbit changes (gravity/bh_kick.wgsl follow_binary). The
+   * line is the axis of the quadrupole of the stars' gas and the point masses.
+   */
+  track?: boolean;
   /** flyby: tidal radius over pericenter distance */
   beta?: number;
   /** flyby: starting separation in tidal radii (never inside 1.5 pericenters) */

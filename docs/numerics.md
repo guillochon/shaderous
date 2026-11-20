@@ -1405,6 +1405,61 @@ of the other stars as point masses), and a moving star keeps its velocity. For w
 each round is over-relaxed by 1.6 and the rounds stop at $`10^{-3}`$: 7 to 12 rounds, taking
 1.6 to 5.5 s.
 
+*Stars in a circular binary* (`OrbitPart` of type `binary`, `problems/roche.ts`). A star held
+on a circular orbit is not falling freely, so it is settled in the whole potential of the frame
+turning with the orbit at $`\Omega`$: the grid's (both stars' gas), the point masses' and
+$`-\tfrac12\Omega^2 R^2`$, the Roche potential. It starts tidally stretched toward its
+companion, reaching no farther than its L1 point, and turning with the orbit (tidally locked).
+Along the line of centers the tide pulls a star away from its place, and the rounds slid a
+star that fills its lobe half its radius toward L1. So each round adds a uniform pull
+$`\boldsymbol\lambda\cdot(\mathbf x - \mathbf x_\star)`$ to its potential, as
+self-consistent-field binaries fix their boundary points ([Hachisu 1986][Hachisu1986]): it cancels the rest of
+the binary's pull at the star's center of mass, with proportional and integral feedback (gains
+0.3 and 0.05 of $`GM/R^3`$ per round) on how far that center has strayed. A Sun-like star
+filling its lobe beside a $`0.7\,M_\odot`$ point mass settles within $`10^{-3}`$ of its
+radius of where the orbit puts it. `fill` sets the separation from [Eggleton's (1983)][Eggleton1983]
+lobe radius,
+
+```math
+\frac{r_L}{a} = \frac{0.49\,q^{2/3}}{0.6\,q^{2/3} + \ln(1 + q^{1/3})}, \qquad q = \frac{M_1}{M_2}.
+```
+
+*A frame that follows a binary* (`OrbitPart.track`, `gravity/bh_kick.wgsl` `follow_binary`). A
+corotating frame turns at the orbit's starting $`\Omega_0`$, and an orbit that changes drifts
+round the grid. Following it, the frame's angular velocity is the GPU's own: after every step
+the point masses' pass measures the binary's axis: that of the quadrupole of its mass in the
+orbital plane, the gas denser than where the stars end and the point masses, about their center
+of mass. With $`A = I_{xx} - I_{yy}`$ and $`B = 2 I_{xy}`$ the axis lies at
+$`\tfrac12 \operatorname{atan2}(B, A)`$, and it turns in the frame at
+$`w = (A \dot B - B \dot A) / 2(A^2 + B^2)`$, the moments' rates summed from the momenta
+(`gravity/frame_cell.wgsl`, a reduction of eleven sums over the grid each step). No gas has to be
+told apart as one star's or the other's. Its angle $`\varphi`$ from where it started (taken before
+the first step) and $`w`$ set
+
+```math
+\dot\Omega = 2k\,w + k^2\varphi, \qquad k = \Omega_0 / 2,
+```
+
+critically damped, so the line returns to its place in about a third of an orbit without
+swinging past it. The new $`\Omega`$ is copied into the shaders' `P.rot` as the scale factor of
+comoving coordinates is, and every velocity feels the Euler force $`-\dot{\boldsymbol\Omega}
+\times \mathbf x`$: the masses' as an impulse in that pass, the gas's in the external
+acceleration of the next step's kicks (`gravity/ext.wgsl`). It is not a potential, so the
+well-balanced reconstruction does not see it. Two point masses in a frame started 10% slower
+than their orbit (`rot-follow`): after two orbits the frame turns at the orbit's rate to
+$`6\times10^{-4}`$ and the line of centers is $`0.2^\circ`$ from where it started, having swung
+at most $`1.6^\circ`$ in the second orbit; the separation holds to $`10^{-3}`$. In the Roche lobe
+overflow preset, whose orbit slows about 12% in two orbits as gas leaves the donor, the line of
+centers stays within $`4.5^\circ`$ of its place, where a frame at the starting rate let it turn
+$`32^\circ`$. Two stars without cores (n = 1.5 polytropes of masses 1 and 0.6 and radii 1 and
+0.6, the first filling its lobe, on a $`128^3`$ grid with three levels): followed, their axis
+stays within $`4.2^\circ`$ over two orbits and their separation holds (2.15 to 2.45 from 2.40, as
+the density peaks give it to a cell); at the starting rate the axis turned $`51^\circ`$ by
+$`t = 28`$ and the separation fell to 1.99, and the pair had nearly merged by $`t = 36`$. The
+physics is the same in either frame, so the difference is numerical: most likely the orbital
+angular momentum a binary moving across the grid loses to the advection's error, which one
+held still does not.
+
 *A star with a point-mass core* (a giant; `StarPart.core`, `problems/cored_polytrope.ts`). Part
 of the star's mass is a point mass at its center with the point masses' softened potential,
 $`-G M_c / \sqrt{r^2 + \epsilon^2}`$, and the rest a polytropic envelope in balance with its own
@@ -3422,6 +3477,7 @@ of the mass has left through the faces by t = 28.
 [deValBorro2006]: https://doi.org/10.1111/j.1365-2966.2006.10488.x
 [Hawley2000]: https://doi.org/10.1086/308180
 [Hawley2011]: https://doi.org/10.1088/0004-637X/738/1/84
+[Eggleton1983]: https://doi.org/10.1086/160960
 [Evrard1988]: https://doi.org/10.1093/mnras/235.3.911
 [Farris2014]: https://doi.org/10.1088/0004-637X/783/2/134
 [Federrath2010]: https://doi.org/10.1088/0004-637X/713/1/269
@@ -3430,6 +3486,7 @@ of the mass has left through the faces by t = 28.
 [Gresho1990]: https://doi.org/10.1002/fld.1650110510
 [Guillochon2009]: https://doi.org/10.1088/0004-637X/705/1/844
 [Guillochon2013]: https://doi.org/10.1088/0004-637X/767/1/25
+[Hachisu1986]: https://doi.org/10.1086/191148
 [Harten1983]: https://doi.org/10.1137/1025002
 [Jeans1902]: https://doi.org/10.1098/rsta.1902.0012
 [Kappeli2014]: https://doi.org/10.1016/j.jcp.2013.11.028
@@ -3492,6 +3549,7 @@ of the mass has left through the faces by t = 28.
 - Chandrasekhar, S. (1935). The Highly Collapsed Configurations of a Stellar Mass (Second Paper). MNRAS 95, 207. [doi:10.1093/mnras/95.3.207](https://doi.org/10.1093/mnras/95.3.207)
 - Davis, S. F. (1988). Simplified Second-Order Godunov-Type Methods. SIAM Journal on Scientific and Statistical Computing 9, 445. [doi:10.1137/0909030](https://doi.org/10.1137/0909030)
 - de Val-Borro, M., et al. (2006). A comparative study of disc-planet interaction. MNRAS 370, 529. [doi:10.1111/j.1365-2966.2006.10488.x](https://doi.org/10.1111/j.1365-2966.2006.10488.x)
+- Eggleton, P. P. (1983). Approximations to the radii of Roche lobes. ApJ 268, 368. [doi:10.1086/160960](https://doi.org/10.1086/160960)
 - Evrard, A. E. (1988). Beyond N-body: 3D cosmological gas dynamics. MNRAS 235, 911. [doi:10.1093/mnras/235.3.911](https://doi.org/10.1093/mnras/235.3.911)
 - Farris, B. D., et al. (2014). Binary Black Hole Accretion from a Circumbinary Disk: Gas Dynamics inside the Central Cavity. ApJ 783, 134. [doi:10.1088/0004-637X/783/2/134](https://doi.org/10.1088/0004-637X/783/2/134)
 - Federrath, C., et al. (2010). Modeling Collapse and Accretion in Turbulent Gas Clouds: Implementation and Comparison of Sink Particles in AMR and SPH. ApJ 713, 269. [doi:10.1088/0004-637X/713/1/269](https://doi.org/10.1088/0004-637X/713/1/269)
@@ -3502,6 +3560,7 @@ of the mass has left through the faces by t = 28.
 - Guillochon, J., et al. (2009). Three-dimensional Simulations of Tidally Disrupted Solar-type Stars and the Observational Signatures of Shock Breakout. ApJ 705, 844. [doi:10.1088/0004-637X/705/1/844](https://doi.org/10.1088/0004-637X/705/1/844)
 - Guillochon, J., & Ramirez-Ruiz, E. (2013). Hydrodynamical Simulations to Determine the Feeding Rate of Black Holes by the Tidal Disruption of Stars: The Importance of the Impact Parameter and Stellar Structure. ApJ 767, 25. [doi:10.1088/0004-637X/767/1/25](https://doi.org/10.1088/0004-637X/767/1/25)
 - Hamada, T., & Salpeter, E. E. (1961). Models for Zero-Temperature Stars. ApJ 134, 683. [doi:10.1086/147195](https://doi.org/10.1086/147195)
+- Hachisu, I. (1986). A Versatile Method for Obtaining Structures of Rapidly Rotating Stars. II. Three-dimensional Self-consistent Field Method. ApJS 62, 461. [doi:10.1086/191148](https://doi.org/10.1086/191148)
 - Harten, A., Lax, P. D., & van Leer, B. (1983). On Upstream Differencing and Godunov-Type Schemes for Hyperbolic Conservation Laws. SIAM Review 25, 35. [doi:10.1137/1025002](https://doi.org/10.1137/1025002)
 - Hawley, J. F. (2000). Global Magnetohydrodynamical Simulations of Accretion Tori. ApJ 528, 462. [doi:10.1086/308180](https://doi.org/10.1086/308180)
 - Hawley, J. F., Guan, X., & Krolik, J. H. (2011). Assessing Quantitative Results in Accretion Simulations: From Local to Global. ApJ 738, 84. [doi:10.1088/0004-637X/738/1/84](https://doi.org/10.1088/0004-637X/738/1/84)

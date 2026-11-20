@@ -20,7 +20,7 @@ import { prepareEosTable } from '../eos/tables';
 import { assemble } from '../gpu/shaders';
 import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
-import { MAX, Reducer } from '../gpu/reduce';
+import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
 import { memoryBudget, noteAllocation } from '../gpu/memory';
 import { AmrGravity, FIELD_SLOTS, FIELD_SLOTS_BINS } from './gravity';
@@ -32,14 +32,14 @@ import { MassSums } from '../gravity/mass_sums';
 import { makeEos, type Eos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
-import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
+import { heatCells, holdPull, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
 
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
-import { implicitPressure, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_STRIDE, MAX_SOURCES, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -65,8 +65,10 @@ const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
 /** The GPU's settling (amr/settle.wgsl): its uniform's size, and the most stars it takes. */
-const SETTLE_BYTES = 560;
+const SETTLE_BYTES = 656;
 const SETTLE_MAX_STARS = 4;
+/** The most point masses the GPU's settling takes in a binary's Roche potential. */
+const SETTLE_MAX_MASSES = 4;
 /** The first window of the face mass flux records: a binding's largest size, aligned for the second's offset. */
 const massFluxWindowBytes = (d: GPUDevice) => Math.floor(d.limits.maxStorageBufferBindingSize / d.limits.minStorageBufferOffsetAlignment) * d.limits.minStorageBufferOffsetAlignment;
 /** Most bytes of face mass flux records: two windows, in a buffer no larger than a buffer may be. */
@@ -243,6 +245,9 @@ export class AmrSim implements Simulation {
   private dummyPhi: GPUTexture;
   private redMp?: Multipoles;
   private redBh?: MassSums;
+  /** A rotating frame that follows a binary: the gas's sums it keeps its axis by (gravity/frame_cell.wgsl) */
+  private redFrame?: Reducer;
+  private frameZeros?: GPUBuffer;
   private pBhDrift?: GPUComputePipeline;
   private pBhKick?: GPUComputePipeline;
   private pBhEval?: GPUComputePipeline;
@@ -688,7 +693,13 @@ export class AmrSim implements Simulation {
       ...((sim.speciesX ? { 5: v(sim.speciesX) } : {}) as Record<number, GPUTextureView>),
     });
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
-    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
+    if (followsBinary(cfg)) {
+      sim.redFrame = await Reducer.create(
+        d, [sim.cap * BS, BS, depth], new Array(FRAME_SUMS).fill(SUM), 'amr/frame_moment.wgsl', {},
+        [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]), 30: sim.bt })), 'amr binary frame',
+      );
+    } else sim.frameZeros = frameZeros(d);
+    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh, 4: sim.redFrame?.result ?? sim.frameZeros! };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
     if (spherical(cfg) && (isSelfGravity(cfg.gravity) || (cfg.problem.masses?.(cfg.params, cfg.G, cfg.problem.box / cfg.n, cfg.ndim).length ?? 0) > 0)) await sim.buildMonopole();
@@ -1093,7 +1104,7 @@ export class AmrSim implements Simulation {
       d, MAX_MASSES, [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS], 'amr/bh_moment.wgsl', { bins: 'amr/bins_on.wgsl' },
       [0, 1].map((p) => ({ 0: this.params, 1: v(this.state[p][0]), 2: this.bh, 3: v(this.state[p][1]), 4: this.clock, 29: A, 30: this.bt })), 'amr point masses (bins)',
     );
-    this.gBhKickB = bindGroup(d, this.pBhKick!, { 0: this.params, 1: this.clock, 2: this.redBhB.result, 3: this.bh });
+    this.gBhKickB = bindGroup(d, this.pBhKick!, { 0: this.params, 1: this.clock, 2: this.redBhB.result, 3: this.bh, 4: this.redFrame?.result ?? this.frameZeros! });
     if (!this.grav && !this.pMassFieldB) {
       // 2D: no potential (the bindings are declared but never read).
       this.pMassFieldB = await computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS_BINS), 'amr point mass field (bins)');
@@ -1181,6 +1192,7 @@ export class AmrSim implements Simulation {
       run(pass, this.pBhDrift!, this.gBhDrift!);
       pass.dispatchWorkgroups(1);
       this.redBhB!.encode(pass, p, this.nMasses);
+      this.redFrame?.encode(pass, p);
       run(pass, this.pBhKick!, this.gBhKickB!);
       pass.dispatchWorkgroups(1);
     };
@@ -1278,7 +1290,7 @@ export class AmrSim implements Simulation {
           g.encodeSolveB(pass, this.cfg.vcycles);
           g.encodeSync(pass, -1);
         }
-        if (this.hasMasses) stepMasses(pass);
+        if (this.massPasses) stepMasses(pass);
         fieldB(pass, last ? this.nAll : -1);
         // The kick goes through the other state texture and back.
         run(pass, this.pCorrect, last ? this.gCorrect[o] : this.gCorrectB[o]);
@@ -1397,6 +1409,11 @@ export class AmrSim implements Simulation {
     return this.nMasses > 0;
   }
 
+  /** The masses' passes run: for point masses, or for a frame that follows a binary (which the kick turns). */
+  private get massPasses(): boolean {
+    return this.hasMasses || !!this.redFrame;
+  }
+
   /** Acceleration and half-step potential for every block, into the field atlas. */
   private encodeField(pass: GPUComputePassEncoder) {
     if (this.sphMono) {
@@ -1430,7 +1447,7 @@ export class AmrSim implements Simulation {
       g.encodeSolve(pass, this.nLevel, this.nAll, cycles, cold, together);
     }
     if (this.sphMono) this.encodeMonopole(pass, parity);
-    if (this.hasMasses && perturber !== 'none') {
+    if (this.massPasses && perturber !== 'none') {
       const live = perturber === 'step';
       if (live) {
         pass.setPipeline(this.pBhDrift!);
@@ -1438,6 +1455,7 @@ export class AmrSim implements Simulation {
         pass.dispatchWorkgroups(1);
       }
       this.redBh!.encode(pass, parity, this.nMasses);
+      this.redFrame?.encode(pass, parity);
       pass.setPipeline(live ? this.pBhKick! : this.pBhEval!);
       pass.setBindGroup(0, live ? this.gBhKick! : this.gBhEval!);
       pass.dispatchWorkgroups(1);
@@ -1644,7 +1662,7 @@ export class AmrSim implements Simulation {
     this.centralGM = sph ? initialMasses(c, this.massDx).reduce((a, m) => a + m.gm, 0) : 0;
     if (this.sphMono) d.queue.writeBuffer(this.sphMono.buf, 0, new Float32Array([this.centralGM, isSelfGravity(c.gravity) ? 1 : 0, 0, 0]));
     this.nMasses = this.nOwnMasses = masses.length;
-    d.queue.writeBuffer(this.bh, 0, packMasses(masses));
+    d.queue.writeBuffer(this.bh, 0, packMasses(masses, frameTrack(c, masses)));
     this.debrisBuf?.reset(c.restart?.debris);
     writeDrive(d, c.driving, c.ndim, c.problem.box);
     this.writeParams();
@@ -1703,7 +1721,7 @@ export class AmrSim implements Simulation {
     // mesh back, some 100 bytes a cell, which a mesh of tens of GB does not fit in a page.
     // (The GPU's sums are of cubes: an axisymmetric run's rings settle on the CPU.)
     // (With radiation the settled pressure is split between gas and radiation, on the CPU.)
-    const onGpu = !this.rad && c.problem.geometry !== 'cylindrical' && !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
+    const onGpu = !this.rad && c.problem.geometry !== 'cylindrical' && !set.keep && set.stars.length <= SETTLE_MAX_STARS && set.stars.every((st) => st.barotrope.gpu) && (set.binary?.masses.length ?? 0) <= SETTLE_MAX_MASSES && !(globalThis as { shaderousCpuSettling?: boolean }).shaderousCpuSettling;
     this.settled = (async () => {
       try {
         setLoadStage(settleStage(0));
@@ -1894,21 +1912,30 @@ export class AmrSim implements Simulation {
     const stars = set.stars;
     const mass = stars.map(() => 0);
     const C: number[] = stars.map(() => 0);
-    // Where each star's mass is: the others' pull on it is taken from there.
-    const at = stars.map((st) => [st.center[0], st.center[1], st.center[2] ?? 0]);
+    // Where each star's mass is: the others' pull on it is taken from there. (In a binary: the pull holding it in place, none to begin with.)
+    const at = stars.map((st) => (set.binary ? [0, 0, 0] : [st.center[0], st.center[1], st.center[2] ?? 0]));
     const relax = set.relax ?? 1;
+    const held: number[][] = [];
     // The uniform (amr/settle.wgsl, Settle): star S of the measures, and their trial values of C.
     const pack = (star: number, cands: number[] = []) => {
       f.fill(0);
       u[0] = stars.length;
       u[1] = star;
-      f.set([set.rhoCut, set.rhoAmb, set.pAmb, relax, set.G], 4);
+      f.set([set.rhoCut, set.rhoAmb, set.pAmb, relax, set.G, set.binary ? 1 : 0], 4);
+      if (set.binary) {
+        const ms = set.binary.masses;
+        f.set([set.binary.omega, ms.length], 140);
+        ms.forEach((m, j) => {
+          f.set([m.at[0], m.at[1], m.at[2] ?? 0, m.gm], 144 + 4 * j);
+          f[160 + j] = m.soft;
+        });
+      }
       stars.forEach((st, i) => {
         const o = 12 + 24 * i;
         const g = st.barotrope.gpu!;
         f.set([st.center[0], st.center[1], st.center[2] ?? 0, st.R, st.reach ?? 3e38, mass[i], st.scalar, g.kind === 'polytrope' ? 0 : 1], o);
         f.set(g.kind === 'polytrope' ? [g.n, g.K, (g.n + 1) * g.K, 0] : [g.degRho, g.degP, g.c1 ?? 0, g.rho0 ?? 1], o + 8);
-        f.set([st.vel[0], st.vel[1], st.vel[2] ?? 0, 0], o + 12);
+        f.set([st.vel[0], st.vel[1], st.vel[2] ?? 0, st.spin ?? 0], o + 12);
         const hi = Math.fround(C[i]);
         f.set([hi, C[i] - hi], o + 16);
         f.set(at[i], o + 20);
@@ -2026,14 +2053,16 @@ export class AmrSim implements Simulation {
       for (let round = 0; round < SETTLE_ROUNDS; round++) {
         setLoadStage(settleStage(round));
         if (stale()) return;
-        if (stars.length > 1) {
+        if (stars.length > 1 || set.binary) {
           pack(0);
           const mom = await measure(pMeasure3, bg.measure[3]);
-          stars.forEach((_, i) => {
+          const coms = stars.map((st, i) => {
             const s4 = [0, 0, 0, 0];
             for (let r = 0; r < nRows; r++) for (let a = 0; a < 4; a++) s4[a] += mom[r * NC + 4 * i + a];
-            if (s4[0] > 0) at[i] = [s4[1] / s4[0], s4[2] / s4[0], s4[3] / s4[0]];
+            return s4[0] > 0 ? [s4[1] / s4[0], s4[2] / s4[0], s4[3] / s4[0]] : [st.center[0], st.center[1], st.center[2] ?? 0];
           });
+          // In a binary the others' pull is not undone, and the slot holds the pull holding each star in place.
+          stars.forEach((_, i) => (at[i] = set.binary ? holdPull(set, i, coms, (held[i] ??= [0, 0, 0])) : coms[i]));
         }
         for (let i = 0; i < stars.length; i++) await solveC(i);
         pack(0);
@@ -2198,7 +2227,7 @@ export class AmrSim implements Simulation {
       this.dtStale = false;
     }
     this.primeBins(enc);
-    syncScale(enc, this.cfg, this.clock, this.params);
+    syncScale(enc, this.cfg, this.clock, this.params, this.bh);
     let cycle = 0;
     let done = 0;
     for (; done < count; done += cycle || 1) {
@@ -2313,8 +2342,9 @@ export class AmrSim implements Simulation {
           if (this.selfGravity && !early) this.grav!.copyPhiToOld(enc, this.tree.highSlot);
           const gp = beginPass(enc);
           if (!early) this.encodeSolve(gp, p, this.cfg.vcycles, 'none', false, true);
-          if (this.hasMasses) {
+          if (this.massPasses) {
             this.redBh!.encode(gp, 1 - p, this.nMasses);
+            this.redFrame?.encode(gp, 1 - p);
             gp.setPipeline(this.pBhKick!);
             gp.setBindGroup(0, this.gBhKick!);
             gp.dispatchWorkgroups(1);
@@ -2345,7 +2375,7 @@ export class AmrSim implements Simulation {
         rp.end();
         this.cur = 1 - this.cur;
       }
-      syncScale(enc, this.cfg, this.clock, this.params);
+      syncScale(enc, this.cfg, this.clock, this.params, this.bh);
       this.encodeBurn(enc);
       this.stepsSinceFlag++;
       if (this.encodeFlags(enc)) {
@@ -2665,7 +2695,7 @@ export class AmrSim implements Simulation {
 
   addMass(m: Parameters<Simulation['addMass']>[0]): boolean {
     if (this.nMasses >= MAX_MASSES) return false;
-    this.device.queue.writeBuffer(this.bh, 16 + 4 * MASS_STRIDE * this.nMasses, packMasses([completeMass(m, this.dx0)]), 4, MASS_STRIDE);
+    this.device.queue.writeBuffer(this.bh, 4 * MASS_HEADER + 4 * MASS_STRIDE * this.nMasses, packMasses([completeMass(m, this.dx0)]), MASS_HEADER, MASS_STRIDE);
     this.nMasses++;
     this.writeParams();
     this.refreshPotential();

@@ -380,6 +380,8 @@ The run's diagnostics, read back now:
 - `com`: the gas's center of mass relative to the box center;
 - `perturber`: the first point mass's position relative to the box center, or null;
 - `masses`: the point masses, with position, velocity, mass and accreted mass;
+- `frame`, for a rotating frame that follows a binary (an orbit's `track`): `omega`, its angular
+  velocity about z now, `omegaDot`, its rate of change, and `omega0`, where it started;
 - `ranges`: the least and greatest value of each field, keyed by field name (the panel's
   δρ max for a liquid, |ρ / ρ₀ − 1|, comes from the density's);
 - `symmetry`, for a mirror-symmetric run: the mirrored axes. The totals are then those of the

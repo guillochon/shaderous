@@ -1,0 +1,80 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "roche-lobe-overflow",
+  "name": "Roche lobe overflow",
+  "group": "Point masses",
+  "family": "roche-lobe-overflow",
+  "familyName": "Roche lobe overflow",
+  "variant": "Corotating",
+  "blurb": "A Sun-like γ = 5/3 star a little larger than its Roche lobe, in a circular orbit with a 3 solar mass black hole (a point mass with a sink). The star starts tidally locked and settled in the Roche potential, stretched toward its companion, and pours gas through the inner Lagrange point L1 in a stream that winds into a disk about the hole. The donor is the lighter, so the transfer is stable; make the accretor lighter than about 1.6 donor masses and it runs away, and the two merge within a few orbits. In the frame turning with the orbit, which follows it as it changes, so that the binary stands still.",
+  "domain": {
+    "ndim": 3,
+    "n": 256,
+    "amr": 2,
+    "box": 12,
+    "supports2d": false,
+    "bc": { "lo": [3, 3, 3], "hi": [3, 3, 3] },
+    "units": {
+      "name": "solar",
+      "length": { "unit": "Rsun", "value": 1 },
+      "mass": { "unit": "Msun", "value": 1 }
+    }
+  },
+  "physics": {
+    "eos": "ideal",
+    "eosParams": { "gamma": 1.6666666666666667 },
+    "gravity": "isolated",
+    "G": "units",
+    "composition": "solar",
+    "floors": { "rho": 1e-10, "p": 1e-14 },
+    "fluff": { "rho": 0.000014301753568736848, "u": 1.5, "v": 20 }
+  },
+  "mesh": { "refineMasses": true, "refineDense": 0.01 },
+  "background": { "rho": 0.000001, "cut": 0.0001, "relativeTo": "donor" },
+  "parts": [
+    { "kind": "star", "id": "donor", "type": "polytrope", "n": 1.5, "mass": 1, "radius": 1 },
+    { "kind": "mass", "id": "accretor", "gm": 3, "soft": 0.06, "sink": 0.06 },
+    { "kind": "orbit", "id": "orbit", "of": ["donor", "accretor"], "type": "binary", "q": 3, "fill": 1.03, "ecc": 0, "corotating": true, "track": true }
+  ],
+  "run": { "tEnd": null, "checkpointDt": 1, "tDyn": 19.3 },
+  "view": { "field": 0, "log": true, "mode": "slice", "axis": 2 },
+  "featured": [
+    {
+      "path": "parts.2.fill",
+      "id": "fill",
+      "label": "Roche lobe fill",
+      "tip": "The donor’s radius over its Roche lobe’s (Eggleton 1983), which sets the separation: 1 just fills it, above 1 it overflows from the start. Changing it starts the run again",
+      "min": 0.7,
+      "max": 1.2,
+      "step": 0.01
+    },
+    {
+      "path": "parts.2.q",
+      "id": "q",
+      "label": "Accretor : donor mass",
+      "tip": "Mass of the point-mass accretor over the donor’s. Below about 1.6 the transfer runs away: the convective donor swells as it loses mass while its lobe shrinks, and the two merge within a few orbits. Changing it starts the run again",
+      "min": 0.1,
+      "max": 10,
+      "factor": 1.25
+    },
+    {
+      "path": "parts.2.track",
+      "id": "track",
+      "label": "Follow the orbit",
+      "tip": "The corotating frame turns faster or slower as the orbit changes, so that the binary stays where it started on the grid. Off, it turns at the starting rate, and a binary whose orbit changes drifts round. Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "control": "checkbox"
+    },
+    {
+      "path": "parts.2.corotating",
+      "id": "corot",
+      "label": "Corotating frame",
+      "tip": "Run in the frame turning with the orbit, where the binary stands still. Off, in the frame of the center of mass, with the star and the dwarf going round. Changing it starts the run again",
+      "min": 0,
+      "max": 1,
+      "control": "checkbox"
+    }
+  ]
+}

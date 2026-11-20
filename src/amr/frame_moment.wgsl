@@ -1,0 +1,23 @@
+// Reduction source for a rotating frame that follows a binary, on the block grid, over leaf
+// cells (gravity/frame_cell.wgsl).
+#include "hydro/common.wgsl"
+#include "amr/grid.wgsl"
+#include "gravity/bh.wgsl"
+
+@group(0) @binding(1) var U1: texture_3d<f32>;
+@group(0) @binding(2) var<storage, read> BH: Masses;
+@group(0) @binding(3) var U2: texture_3d<f32>;
+
+#include "gravity/frame_cell.wgsl"
+
+fn red_cell(c: vec3<i32>) -> Red {
+  let slot = c.x / BS;
+  let l = vec3<i32>(c.x % BS, c.y, c.z);
+  let at = atl(blk_origin(slot), l);
+  var u1 = textureLoad(U1, at, 0);
+  if (!blk_leaf(slot) || abs(textureLoad(U2, at, 0).w) > 0.5) { u1 = vec4<f32>(0.0); }
+  let dx = blk_dx(slot);
+  // 2D quantities are per unit length along z.
+  let vol = select(dx * dx * dx, dx * dx, is2d());
+  return frame_cell(u1, vol, blk_pos(slot, l));
+}

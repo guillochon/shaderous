@@ -7,7 +7,7 @@ import { readSetup } from '../../src/setup/codec';
 import { compileSetup } from '../../src/setup/compile';
 import { parseFormula } from '../../src/setup/expr';
 import { emptySetup } from '../../src/setup/spec';
-import { completeMass, configFor, packMasses, unpackMasses } from '../../src/sim';
+import { completeMass, configFor, MASS_HEADER, MASS_STRIDE, packMasses, unpackMasses } from '../../src/sim';
 
 describe('formulas in a setup', () => {
   const f = (text: string, vars: Record<string, number> = {}) => parseFormula(text, Object.keys(vars)).at(vars);
@@ -134,7 +134,7 @@ describe('a point mass held on its orbit', () => {
     const p = compileSetup(spec!).problem;
     expect(p.masses!({}, 1, 0.01, 3).map((m) => !!m.onOrbit)).toEqual([true, false]);
     const packed = packMasses(p.masses!({}, 1, 0.01, 3).map((m) => completeMass(m, 0.01)));
-    expect([packed[4 + 15], packed[4 + 40 + 15]]).toEqual([4, 0]);
+    expect([packed[MASS_HEADER + 15], packed[MASS_HEADER + MASS_STRIDE + 15]]).toEqual([4, 0]);
     expect(unpackMasses(packed, 2).map((m) => m.onOrbit)).toEqual([true, false]);
     const binary = preset('binary').problem;
     expect(binary.masses!({ ...configFor(binary, 64).params, hold: 1 }, 1, 0.01, 2).every((m) => m.onOrbit)).toBe(true);

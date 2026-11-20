@@ -119,7 +119,7 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 | Kind | Fields |
 |---|---|
 | `mass` | A point mass: `gm` (G M), `pos`, `vel`, `soft` (softening, at least two cells), `sink` (radius; absent: the softening, 0: none), `sinkRate`, `massless`, `fixed`, `onOrbit` (held on its orbit: below) |
-| `orbit` | Not an object: places two bodies, `of: [idA, idB]`. `type: "binary"`: two point masses about their center of mass at pericenter (`q`, `separation`, `ecc`, `incl`, `retrograde`). `"flyby"`: a point mass on a parabola about a star that stays at the origin (`q`, `beta` = tidal radius over pericenter, `start` in tidal radii, `debris`). `"collision"`: two stars or planets on a parabola (`impact` in sums of their radii, `starts`) |
+| `orbit` | Not an object: places two bodies, `of: [idA, idB]`. `type: "binary"`: two bodies, point masses or stars, about their center of mass at pericenter (`q`, `separation` or `fill`, `ecc`, `incl`, `retrograde`, `corotating`: below). `"flyby"`: a point mass on a parabola about a star that stays at the origin (`q`, `beta` = tidal radius over pericenter, `start` in tidal radii, `debris`). `"collision"`: two stars or planets on a parabola (`impact` in sums of their radii, `starts`) |
 | `star` | `type: "polytrope"` (`n`, `radius`, and `mass` or `rhoc`), `"white-dwarf"` (`mass`) or `"planet"` (`mass`, `material`, and for a core `coreMaterial` and `coreFraction`; `surfaceT`, the kelvin its layers' adiabats start from: a planet needs the `aneos` equation of state and physical units, and its materials are the run's species, the mantle's first); `core` (`mass`, `soft`: a giant, with that much of a polytrope's mass a point mass at its center, which joins the run's point masses as `<id>.core`); `pos`, `vel`, `dye`, `X`; `field` (`type`: `dipole`, `random`, `gm17-dipole`, `gm17-random`; `beta`; `seed`). Stars are settled into the grid's own hydrostatic balance before the run. Self-gravity (isolated) and stars need 3D or an axisymmetric (R, z) run, where a star sits on the axis |
 | `disk` | `about: [ids]` (point masses, stars or both; the disk is centered on their center of mass and moves with it), `profile` (`thin`: a surface density with a cavity and a Gaussian vertical profile; `balanced`: a midplane density in vertical balance with the softened potential), `rIn`, `rOut`, `sigma0`, `slope`, `cs`, `floor`, `radialFn`, `verticalFn`, `verticalIn` (a density profile of your own: below), `damp` (`from`, `rate`: the damping zone), `loops` (`beta`, `span`, `count`: field loops), `stresses` |
 | `region` | A `shape` with a state that replaces what is under it: `rho`, `p` (or `energy`, a total spread over a sphere's cells), `v`, `s`, `X`; with radiation transport `erad` and `frad`, the radiation's energy and flux; `supersample` for a smooth edge |
@@ -140,6 +140,49 @@ grow, so a binary with both masses held keeps the orbit it was given, as in most
 circumbinary disks. Its sink still takes gas, and what it took is still counted in the
 diagnostics. It can be switched while a run goes on: the Binary accretion preset has it as
 **Hold the orbit** beside its other fields.
+
+### Stars in a binary
+
+A `binary` orbit may hold a star and a point mass, or two stars, in the x-y plane with their
+center of mass at the box center:
+
+```json
+{ "kind": "star", "id": "donor", "type": "polytrope", "n": 1.5, "mass": 1, "radius": 1 },
+{ "kind": "mass", "id": "accretor", "gm": 0.7, "soft": 0.06, "sink": 0.06 },
+{ "kind": "orbit", "of": ["donor", "accretor"], "type": "binary", "fill": 1.03, "corotating": true }
+```
+
+- The masses are the parts' own; `q` sets a point mass's against the star's.
+- `fill` takes the place of `separation`: the first body, a star, is that many times the size
+  of its Roche lobe, by Eggleton's (1983) formula. At 1 it just fills it; above 1 it pours gas
+  through the inner Lagrange point L1 onto its companion from the start (Roche lobe overflow).
+  The checks warn of a star that overflows when `fill` does not say so.
+- On a circular orbit the stars are tidally locked: they are settled in the Roche potential (the
+  grid's own, the point masses' and the centrifugal term of the frame turning with the orbit),
+  so that each starts stretched toward its companion in hydrostatic balance, and each reaches
+  no farther than its L1 point. In an inertial frame their gas then turns with the orbit.
+- `"corotating": true` runs in the frame turning with the orbit (as `physics.rotation` would,
+  at the orbit's angular velocity): every body starts at rest, and a binary in balance stays
+  still. Not with a disk, whose gas is set up moving in an inertial frame.
+- `"track": true` with it makes the frame follow the orbit. A corotating frame turns at the
+  orbit's starting rate, so a binary whose orbit changes (mass transfer, drag, gas lost through
+  the faces) drifts round the grid. Following it, the frame turns faster or slower to keep the
+  line between the two bodies where it started, and the gas and the point masses feel the Euler
+  force of its changing turn. The line it keeps is the axis of the binary's quadrupole in the
+  orbital plane: that of the stars' gas (denser than where they end, `background.cut`, so that
+  a stream, a disk or an outflow does not turn it) and the point masses, about their center of
+  mass. No gas needs to be told apart as one star's or the other's, so any two bodies can be
+  followed: two stars, a star and a point mass, two point masses. The frame's angular velocity is
+  in the diagnostics (`frame`), and a snapshot keeps it.
+- An eccentric binary with a star places it at pericenter as two point masses are placed, and
+  settles each star in its own potential, as a star falling freely.
+
+The Roche lobe overflow preset is a Sun-like star at `fill` 1.03 beside a 3 solar mass black
+hole. Whether the transfer is stable is the setup's to choose: a convective (n = 1.5) donor
+heavier than about 0.63 of its accretor swells as it loses mass while its lobe shrinks, and the
+transfer runs away; at a mass ratio of 1.4 the pair merged within two orbits. Its variant
+**Two stars** (`roche-lobe-overflow-stars`) puts two resolved stars in a followed frame: a
+Sun-like star filling its lobe beside a 0.6 solar mass star of 0.6 solar radii.
 
 ### Disk profiles of your own
 
@@ -386,12 +429,15 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
-| `of` | Bodies | the ids of two of `mass` or `star` parts | The two bodies it places: two point masses (binary), a star and a point mass (flyby), or two stars (collision) |
-| `type` | Kind of orbit | `binary`, `flyby`, `collision`. Default `binary` | Binary: two point masses about their center of mass, at pericenter. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass |
-| `q` | Mass ratio | a number, 0.000001 to 1000000000 | Mass of the second body over the first. It sets their masses: in a binary the total stays, in a flyby the star’s |
+| `of` | Bodies | the ids of two of `mass` or `star` parts | The two bodies it places: point masses or stars (binary), a star and a point mass (flyby), or two stars (collision) |
+| `type` | Kind of orbit | `binary`, `flyby`, `collision`. Default `binary` | Binary: two bodies, point masses or stars, about their center of mass, at pericenter; on a circular orbit its stars turn with it and start in the balance of the Roche potential. Flyby: a point mass on a parabola about a star that stays at the origin (a tidal disruption in the star’s frame). Collision: two stars on a parabola about their center of mass |
+| `q` | Mass ratio | a number, 0.000001 to 1000000000 | Mass of the second body over the first. It sets their masses: in a binary of two point masses the total stays, in a binary with a star or a flyby the star’s |
 | `separation` | Separation | a number, at least 0.000001. Default `1` | Semi-major axis of the binary’s orbit |
 | `ecc` | Eccentricity | a number, 0 to 0.95. Default `0` | Eccentricity of the binary’s orbit |
 | `incl` | Inclination (°) | a number, 0 to 180. Default `0` | Tilt of the binary’s orbit about the line through pericenter, in degrees (3D): 180 is retrograde |
+| `fill` | Roche lobe fill | a number, 0.05 to 2 | In place of the separation: the first body, a star, is this many times the size of its Roche lobe (Eggleton 1983), which sets how far apart the two are. 1 just fills it; above 1 it pours gas through L1 onto its companion from the start |
+| `corotating` | Corotating frame | `true` or `false`. Default `false` | A circular binary: the run is in the frame turning with the orbit, so the bodies start at rest and a binary in balance stays still |
+| `track` | Follow the orbit | `true` or `false`. Default `false` | With the corotating frame: the frame turns faster or slower as the orbit changes (mass transfer, drag, gas lost through the faces), keeping the line between the two bodies where it started, and the gas and the point masses feel the Euler force of its changing turn. It follows the axis of the stars’ and point masses’ quadrupole, so any two bodies can be followed |
 | `retrograde` | Retrograde | `true` or `false`. Default `false` | In 2D: the binary orbits clockwise |
 | `beta` | Impact parameter β | a number, 0.05 to 20. Default `1` | Tidal radius over pericenter distance: above 1 the mass passes inside the star’s tidal radius |
 | `start` | Starts at (tidal radii) | a number, 1 to 20. Default `3` | Separation at the start, in tidal radii (never inside 1.5 pericenters) |

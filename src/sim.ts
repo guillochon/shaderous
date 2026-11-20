@@ -852,8 +852,42 @@ export const resists = (c: SimConfig): boolean => c.resistivity > 0 && !!c.probl
 export const MAX_MASSES = 32;
 /** Floats per mass in the Masses block (gravity/bh.wgsl). */
 export const MASS_STRIDE = 40;
-/** Floats in the Masses block: the frame's acceleration, then MASS_STRIDE per mass. */
-export const MASS_FLOATS = 4 + MASS_STRIDE * MAX_MASSES;
+/** Floats before the first mass in the Masses block: the frame's acceleration, and a followed frame's state (frameTrack). */
+export const MASS_HEADER = 12;
+/** Floats in the Masses block: its header, then MASS_STRIDE per mass. */
+export const MASS_FLOATS = MASS_HEADER + MASS_STRIDE * MAX_MASSES;
+
+/**
+ * A rotating frame that follows a binary (Problem.rotation track): its state as the Masses
+ * block's header holds it after the frame's acceleration (gravity/bh.wgsl Masses.track and
+ * track2): the angular velocity now, its rate of change, the one it started at, and 1 (2 once
+ * the axis it keeps is taken, before the first step); that axis, as the cosine and sine of twice its angle, and the
+ * density below which gas is not counted. From a snapshot, as it was. Eight zeros when the
+ * frame does not follow one.
+ */
+export function frameTrack(c: SimConfig, _masses?: readonly Required<PointMass>[]): number[] {
+  const r = c.problem.rotation?.(c.params, c.ndim);
+  const w0 = rotationOf(c)[2];
+  if (!r?.track || w0 === 0) return [0, 0, 0, 0, 0, 0, 0, 0];
+  if (c.restart?.frame?.length === 8) return [...c.restart.frame];
+  // (The axis it keeps is taken on the GPU before the first step: 1 in the fourth until then.)
+  return [w0, 0, w0, 1, 0, 0, Math.min(r.track.rhoMin, 3e38), 0];
+}
+
+/** Channels of a followed frame's sums over the gas (gravity/frame_cell.wgsl). */
+export const FRAME_SUMS = 11;
+
+/** The point-mass kick's frame sums where the frame follows no binary: zeros it never reads. */
+export function frameZeros(d: GPUDevice): GPUBuffer {
+  return d.createBuffer({ label: 'no binary frame', size: FRAME_SUMS * 4, usage: GPUBufferUsage.STORAGE });
+}
+
+/** Where Params.rot.z (the rotating frame's angular velocity about z) lies. */
+export const PARAM_ROT_Z_BYTE = (100 + 2) * 4;
+/** Where a followed frame's angular velocity lies in the Masses block (frameTrack). */
+const MASS_TRACK_BYTE = 4 * 4;
+/** The frame follows a binary: its angular velocity is the GPU's own, copied into the params. */
+export const followsBinary = (c: SimConfig): boolean => !!c.problem.rotation?.(c.params, c.ndim)?.track && rotationOf(c)[2] !== 0;
 
 /**
  * The point masses a run starts with: the preset's, with what a snapshot recorded laid over
@@ -889,7 +923,7 @@ export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: nu
   const base = (c.problem.masses?.(c.params, c.G, dx, c.ndim) ?? []).slice(0, count);
   base.forEach((q, i) => {
     const m = completeMass(q, dx);
-    const at = 16 + 4 * MASS_STRIDE * i;
+    const at = 4 * MASS_HEADER + 4 * MASS_STRIDE * i;
     d.queue.writeBuffer(bh, at + 28, new Float32Array([m.soft]));
     d.queue.writeBuffer(bh, at + 44, new Float32Array([m.sinkRadius]));
     // Whether it is held on its orbit can change mid-run too.
@@ -900,9 +934,10 @@ export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: nu
 /** A mass's flags as the Masses block holds them (gravity/bh.wgsl). */
 const massFlags = (m: Required<PointMass>): number => (m.massless ? 1 : 0) + (m.fixed ? 2 : 0) + (m.onOrbit ? 4 : 0);
 
-/** Pack the Masses block. The layout must match the struct in gravity/bh.wgsl. */
-export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffer> {
+/** Pack the Masses block, with a followed frame's state (frameTrack). The layout must match the struct in gravity/bh.wgsl. */
+export function packMasses(list: Required<PointMass>[], track?: readonly number[]): Float32Array<ArrayBuffer> {
   const f = new Float32Array(MASS_FLOATS);
+  if (track) f.set(track, 4);
   // A value summed with Kahan compensation goes in as its float32 rounding, with the
   // compensation set to what that rounding added, so that nothing is lost in the round trip.
   const c = (v: number) => Math.fround(v) - v;
@@ -912,7 +947,7 @@ export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffe
         ...m.pos, m.gm, ...m.vel, m.soft, 0, 0, 0, m.sinkRadius, m.sinkRate, m.accreted, 0, massFlags(m), ...m.accretedMomentum, 0, ...m.accretedSpin, 0,
         c(m.gm), c(m.accreted), 0, 0, ...m.vel.map(c), 0, ...m.accretedMomentum.map(c), 0, ...m.accretedSpin.map(c), 0,
       ],
-      4 + MASS_STRIDE * i,
+      MASS_HEADER + MASS_STRIDE * i,
     ),
   );
   return f;
@@ -922,7 +957,7 @@ export function packMasses(list: Required<PointMass>[]): Float32Array<ArrayBuffe
 export function unpackMasses(f: Float32Array, count: number): Required<PointMass>[] {
   const out: Required<PointMass>[] = [];
   for (let i = 0; i < count; i++) {
-    const o = 4 + MASS_STRIDE * i;
+    const o = MASS_HEADER + MASS_STRIDE * i;
     // Kahan-summed values, less their compensation (gravity/bh.wgsl), in double precision.
     const v3 = (at: number, c: number) => [f[at] - f[c], f[at + 1] - f[c + 1], f[at + 2] - f[c + 2]];
     out.push({
@@ -1129,8 +1164,11 @@ export const PARAM_SCALE_BYTE = (108 + 3) * 4;
  * Params.cosmo.w, so that passes without the clock (the timestep's rates, the diagnostics, the
  * display) convert the equation of state at the state's own a. Encoded between passes.
  */
-export function syncScale(enc: GPUCommandEncoder, c: SimConfig, clock: GPUBuffer, params: GPUBuffer): void {
+export function syncScale(enc: GPUCommandEncoder, c: SimConfig, clock: GPUBuffer, params: GPUBuffer, bh?: GPUBuffer): void {
   if (cosmologyOf(c)) enc.copyBufferToBuffer(clock, 6 * 4, params, PARAM_SCALE_BYTE, 4);
+  // A frame that follows a binary: its angular velocity as the point masses' pass last set it
+  // (gravity/bh_kick.wgsl follow_binary), into Params.rot.z.
+  if (bh && followsBinary(c)) enc.copyBufferToBuffer(bh, MASS_TRACK_BYTE, params, PARAM_ROT_Z_BYTE, 4);
 }
 
 /** Comoving coordinates: the state's scale factor from the clock (where the last step ended, a1). */
@@ -1164,7 +1202,13 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
     perturber: masses.length ? (masses[0].pos as [number, number, number]) : null,
     masses,
     ranges,
+    ...frameOf(a.subarray(CLOCK_FLOATS + DIAG_CHANNELS)),
   };
+}
+
+/** A followed frame's angular velocity and its rate of change, from a Masses block, if it follows a binary. */
+function frameOf(bh: Float32Array): Pick<Diagnostics, 'frame'> {
+  return bh[7] >= 1 ? { frame: { omega: bh[4], omegaDot: bh[5], omega0: bh[6] } } : {};
 }
 
 /**
@@ -1299,6 +1343,8 @@ export interface Diagnostics {
   perturber: [number, number, number] | null;
   /** the point masses as they are now */
   masses: Required<PointMass>[];
+  /** A rotating frame that follows a binary: its angular velocity about z now, its rate of change, and where it started */
+  frame?: { omega: number; omegaDot: number; omega0: number };
   /**
    * The mirrored axes (SimConfig.symmetry): the totals above are then those of the whole
    * configuration, of which the grid holds one 2^k-th (unfoldDiagnostics).
@@ -1323,6 +1369,8 @@ export interface RestartState {
   time: number;
   steps: number;
   masses?: Required<PointMass>[];
+  /** a rotating frame that follows a binary: its state (frameTrack) */
+  frame?: number[];
 }
 
 /** Read the clock and the point masses back, for a snapshot. */
@@ -1338,7 +1386,8 @@ export async function readRestart(d: GPUDevice, clock: GPUBuffer, bh: GPUBuffer,
   buf.destroy();
   // The clock holds the start of the step last taken and its dt, banked as the next step
   // begins: the state is at their sum, as diagnosticsFrom has it.
-  return { time: f[1] + f[0], steps: f[3] + (f[0] > 0 ? 1 : 0), masses: nMasses ? unpackMasses(f.subarray(CLOCK_FLOATS), nMasses) : undefined };
+  const block = f.subarray(CLOCK_FLOATS);
+  return { time: f[1] + f[0], steps: f[3] + (f[0] > 0 ? 1 : 0), masses: nMasses ? unpackMasses(block, nMasses) : undefined, ...(block[7] >= 1 ? { frame: Array.from(block.subarray(4, 12)) } : {}) };
 }
 
 /**
@@ -1475,6 +1524,9 @@ export class Sim implements Simulation {
   /** a spherical run's monopole gravity: its passes, their bind groups by parity, and its buffer */
   private sphMono: { shells: GPUComputePipeline; enclose: GPUComputePipeline; field: GPUComputePipeline; g: GPUBindGroup[][]; buf: GPUBuffer } | null = null;
   private redBh!: MassSums;
+  /** A rotating frame that follows a binary: the gas's sums it keeps its axis by (gravity/frame_cell.wgsl) */
+  private redFrame?: Reducer;
+  private frameZeros?: GPUBuffer;
   /** the point masses (gravity/bh.wgsl) */
   private bh: GPUBuffer;
   private gPredict: RegionGroups[] = [];
@@ -1638,6 +1690,9 @@ export class Sim implements Simulation {
       spec ? computePipeline(d, assemble('debris/census.wgsl'), 'debris census') : undefined,
       hydro,
     ]);
+    if (followsBinary(cfg)) {
+      sim.redFrame = await Reducer.create(d, [nx, ny, nz], new Array(FRAME_SUMS).fill(SUM), 'gravity/frame_moment.wgsl', {}, [0, 1].map((p) => ({ 0: sim.params, 1: v(sim.state[p][0]), 2: sim.bh, 3: v(sim.state[p][1]) })), 'binary frame');
+    } else sim.frameZeros = frameZeros(d);
     const phi = sim.mg.phi;
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
@@ -1654,7 +1709,7 @@ export class Sim implements Simulation {
       sim.sphMono = { shells, enclose, field, g, buf };
     }
     sim.gBhDrift = bindGroup(d, sim.pBhDrift, { 0: sim.params, 1: sim.clock, 2: sim.bh });
-    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh };
+    const kick = { 0: sim.params, 1: sim.clock, 2: sim.redBh.result, 3: sim.bh, 4: sim.redFrame?.result ?? sim.frameZeros! };
     sim.gBhKick = bindGroup(d, sim.pBhKick, kick);
     sim.gBhEval = bindGroup(d, sim.pBhEval, kick);
     await showLoadStage(INIT_STAGE);
@@ -1922,7 +1977,7 @@ export class Sim implements Simulation {
     const masses = sph ? [] : initialMasses(c, this.dx);
     this.centralGM = sph ? initialMasses(c, this.dx).reduce((a, m) => a + m.gm, 0) : 0;
     this.nMasses = this.nOwnMasses = masses.length;
-    this.device.queue.writeBuffer(this.bh, 0, packMasses(masses));
+    this.device.queue.writeBuffer(this.bh, 0, packMasses(masses, frameTrack(c, masses)));
     this.debrisBuf?.reset(c.restart?.debris);
     const u1 = new Float32Array(cells * 4);
     const u2 = new Float32Array(cells * 4);
@@ -2244,7 +2299,7 @@ export class Sim implements Simulation {
     if (this.selfGravity && !this.sphMono) this.copyPhiToOld(enc);
     const pass = beginPass(enc);
     // No step is being taken: the masses' accelerations are evaluated, nothing more.
-    if (this.hasMasses) this.encodeMassKick(pass, this.cur, false);
+    if (this.massPasses) this.encodeMassKick(pass, this.cur, false);
     // (A spherical run's monopole has written the field already.)
     if (!this.sphMono) this.encodeField(pass);
     pass.end();
@@ -2281,6 +2336,11 @@ export class Sim implements Simulation {
     return this.nMasses > 0;
   }
 
+  /** The masses' passes run: for point masses, or for a frame that follows a binary (which the kick turns). */
+  private get massPasses(): boolean {
+    return this.hasMasses || !!this.redFrame;
+  }
+
   /** The gravity field texture is in use: by self-gravity, point masses or both. */
   private get fieldOn(): boolean {
     return this.selfGravity || this.hasMasses;
@@ -2292,6 +2352,7 @@ export class Sim implements Simulation {
    */
   private encodeMassKick(pass: GPUComputePassEncoder, parity: number, live: boolean) {
     this.redBh.encode(pass, parity, this.nMasses);
+    this.redFrame?.encode(pass, parity);
     pass.setPipeline(live ? this.pBhKick : this.pBhEval);
     pass.setBindGroup(0, live ? this.gBhKick : this.gBhEval);
     pass.dispatchWorkgroups(1);
@@ -2335,7 +2396,7 @@ export class Sim implements Simulation {
     // (A rotating frame needs the correction pass for its centrifugal kick and closing turn, and
     // comoving coordinates for the second half of the expansion drag.)
     const anyGravity = this.fieldOn || uniformField(this.cfg).some((g) => g !== 0) || rotating(this.cfg) || !!cosmologyOf(this.cfg);
-    syncScale(enc, this.cfg, this.clock, this.params);
+    syncScale(enc, this.cfg, this.clock, this.params, this.bh);
     for (let i = 0; i < count; i++) {
       const p = this.cur;
       let pass = beginPass(enc);
@@ -2414,7 +2475,7 @@ export class Sim implements Simulation {
         this.mg.encodeSource(pass, gp, this.cfg.gravity === 'isolated');
         for (let v = 0; v < this.cfg.vcycles; v++) this.mg.encodeVCycle(pass);
       }
-      if (this.hasMasses) {
+      if (this.massPasses) {
         // Move the masses to the new time, then their pull on the updated gas and what their
         // sinks take from it (removed in the correction pass below).
         // (With implicit pressure they are given what the correction gave the advected gas, and
@@ -2461,7 +2522,7 @@ export class Sim implements Simulation {
         this.speciesCur = 1 - this.speciesCur;
       }
       pass.end();
-      syncScale(enc, this.cfg, this.clock, this.params);
+      syncScale(enc, this.cfg, this.clock, this.params, this.bh);
     }
     return count;
   }
@@ -2533,7 +2594,7 @@ export class Sim implements Simulation {
   addMass(m: PointMass): boolean {
     if (this.nMasses >= MAX_MASSES) return false;
     // Only its own slot is written: the others are mid-orbit on the GPU.
-    this.device.queue.writeBuffer(this.bh, 16 + 4 * MASS_STRIDE * this.nMasses, packMasses([completeMass(m, this.dx)]), 4, MASS_STRIDE);
+    this.device.queue.writeBuffer(this.bh, 4 * MASS_HEADER + 4 * MASS_STRIDE * this.nMasses, packMasses([completeMass(m, this.dx)]), MASS_HEADER, MASS_STRIDE);
     this.nMasses++;
     this.writeParams();
     this.refreshPotential();

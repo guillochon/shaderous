@@ -80,10 +80,30 @@ describe('checkSetup', () => {
     const found = checkSetup(missing).find((i) => /"nobody", which is not there/.test(i.text));
     expect(found?.level).toBe('error');
     expect(found?.path).toBe('parts.1.of');
-    const wrong = stellar([star('s', [0, 0, 0]), mass('m', [1.5, 0, 0]), { kind: 'orbit', of: ['s', 'm'], type: 'binary' }]);
-    expect(has(texts(wrong, 'error'), /must be a point mass/)).toBe(true);
+    const wrong = stellar([star('s', [0, 0, 0]), mass('m', [1.5, 0, 0]), { kind: 'orbit', of: ['s', 'm'], type: 'collision' }]);
+    expect(has(texts(wrong, 'error'), /second body must be a star/)).toBe(true);
+    const region: Part = { kind: 'region', id: 'r', shape: { type: 'sphere', center: [0, 0, 0], radius: 0.1 }, rho: 1 };
+    const notBody = stellar([star('s', [0, 0, 0]), region, { kind: 'orbit', of: ['s', 'r'], type: 'binary' }]);
+    expect(has(texts(notBody, 'error'), /must be a point mass or a star/)).toBe(true);
     const unset = setup({}, [mass('a'), mass('b', [1, 0, 0]), { kind: 'orbit', of: ['', ''], type: 'binary' }]);
     expect(has(texts(unset, 'error'), /not chosen/)).toBe(true);
+  });
+
+  it('checks a binary with a star: its frame, its tilt and how full its star is of its Roche lobe', () => {
+    const orbit = (more: Partial<Extract<Part, { kind: 'orbit' }>> = {}): Part => ({ kind: 'orbit', of: ['s', 'm'], type: 'binary', separation: 1.6, ...more });
+    const binary = (more: Partial<Extract<Part, { kind: 'orbit' }>> = {}, over: Partial<SetupSpec> = {}) => stellar([star('s', [0, 0, 0]), mass('m', [0, 0, 0], { gm: 0.5, soft: 0.15 }), orbit(more)], over);
+    expect(checkSetup(binary())).toEqual([]);
+    expect(checkSetup(binary({ corotating: true }))).toEqual([]);
+    // A star of radius 0.5 and mass 1 beside half its mass fills its lobe at a = 0.5 / 0.4406 = 1.135.
+    expect(checkSetup(binary({ separation: undefined, fill: 1 }))).toEqual([]);
+    const over = checkSetup(binary({ separation: 1.05 })).find((i) => /Roche lobe/.test(i.text));
+    expect(over?.level).toBe('warning');
+    expect(over?.text).toMatch(/star "s" is 1\.0\d times the size of its Roche lobe/);
+    expect(has(texts(binary({ corotating: true, ecc: 0.2 }), 'error'), /only a circular orbit/)).toBe(true);
+    expect(has(texts(binary({ corotating: true }, { physics: { gravity: 'isolated', rotation: { omega: [0, 0, 1] } } }), 'error'), /rotating frame of its own/)).toBe(true);
+    expect(has(texts(binary({ incl: 30 }), 'error'), /x-y plane/)).toBe(true);
+    const fillOfMass = stellar([mass('m', [0, 0, 0], { gm: 0.5 }), star('s', [0, 0, 0]), { kind: 'orbit', of: ['m', 's'], type: 'binary', fill: 1 }]);
+    expect(has(texts(fillOfMass, 'error'), /fill is of its first body/)).toBe(true);
   });
 
   it('finds a disk that orbits nothing', () => {

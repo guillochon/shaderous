@@ -29,6 +29,13 @@ struct Mass {
 }
 struct Masses {
   frame: vec4<f32>,   // acceleration of the frame (gravity/bh_kick.wgsl), or zero
+  // A rotating frame that follows a binary (Problem.rotation track; gravity/bh_kick.wgsl): its
+  // angular velocity about z now (copied into P.rot.z after every step, src/sim.ts syncScale),
+  // the rate it changes at (the Euler force's), the angular velocity it started at, and 1 if on.
+  track: vec4<f32>,
+  // The axis it keeps: (cos, sin) of twice its angle, taken before the first step (track.w 2 from
+  // then on), then the density below which gas is not counted.
+  track2: vec4<f32>,
   list: array<Mass, 32>,   // MAX_MASSES (src/sim.ts)
 }
 

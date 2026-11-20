@@ -282,8 +282,12 @@ export interface Problem {
    * (gravity/rot.wgsl): the Coriolis force, and the centrifugal force unless `centrifugal` is
    * false (an f-plane). In 2D only omega's z part is used. Velocities, in `init` and everywhere
    * after, are those relative to the turning frame (toRotating converts an inertial setup).
+   * `track`: the frame follows a binary (about z): it turns faster or slower to keep the axis of
+   * the mass's quadrupole in the plane where it started (that of the gas denser than `rhoMin`
+   * and the point masses, about their center of mass), and every velocity feels the Euler force
+   * (gravity/bh_kick.wgsl follow_binary).
    */
-  rotation?: (params: Record<string, number>, ndim: 2 | 3) => { omega: [number, number, number]; centrifugal?: boolean };
+  rotation?: (params: Record<string, number>, ndim: 2 | 3) => { omega: [number, number, number]; centrifugal?: boolean; track?: { rhoMin: number } };
   /**
    * The mirrors the setup is symmetric under, each a plane through the origin normal to an axis:
    * a run may then compute only the part above them (SimConfig.symmetry). `mhd`: its magnetic
