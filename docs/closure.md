@@ -15,9 +15,13 @@ simulator. The code is in `src/closure/`, `src/hydro/closure*.wgsl` and `tools/c
   model of unresolved physics.
 - On seven held-out flows it brings the kinetic energy spectrum and the scalar's spectrum
   closer to the reference in every one (mean errors 0.60 and 0.72 of what they are without
-  it). It does **not** improve the mixing layers' thickness or the mixedness on average (1.09
-  and 1.08 of the errors without it), and it makes the thickness worse in two of three shear
-  layers.
+  it). On those single runs the mixing layers' thickness and the mixedness are no better on
+  average (1.09 and 1.08 of the errors without it).
+- A follow-up with a well-posed shear layer run as an ensemble (section 4, at its end) says
+  what to make of that. The thickness is not a target: a coarse run already has it right
+  without any closure, and what the single runs showed was the scatter between realizations.
+  The mixedness is a real error of the coarse run (it over-mixes), which the closure cuts by
+  14 to 19% and the low-Mach solver does not.
 - It is stable to 300 times its training window, conserves mass, momentum and energy to
   rounding, and changes shock tubes by rounding and blasts by 2e-4.
 - **The network learned almost nothing, so the closure has two forms.** Trained, the network
@@ -160,12 +164,11 @@ Against the run without it, over the seven cases:
 | Mixing-layer thickness | 4 of 7 | 1.09 |
 | Growth rate of the thickness | 3 of 7 | 1.35 (mean error 0.017 becomes 0.023) |
 
-So the first success criterion is met for the spectra and **not** for the mixing layers. The
-closure keeps more small eddies, and they stir: in two of the three shear layers the layer
-then grows wider than the reference's, where without the closure it was nearer. In the third
-(density ratio 5) the coarse run's layer stops growing at t = 1.5 and the closure's keeps up
-with the reference. These are single runs of a chaotic flow, and three of them are too few to
-say more than that the closure does not reliably help here.
+So on these runs the first success criterion is met for the spectra and not for the mixing
+layers: in two of the three shear layers the layer grows wider than the reference's with the
+closure, and in the third (density ratio 5) the closure's keeps up with the reference where
+the coarse run's stops growing. These are single runs of a chaotic flow with no converged
+answer; the ensemble at the end of this section shows that the differences are their scatter.
 
 Against the low-Mach solver, which costs nothing: the closure's kinetic energy spectrum is
 better in five of seven, its scalar spectrum in seven of seven (the low-Mach solver does
@@ -178,6 +181,52 @@ nothing for the scalar), its thickness in two of seven.
 ![Mixedness](img/closure/mixedness.png)
 ![The scalar in a shear layer](img/closure/snapshot_shear.png)
 ![The scalar in turbulence](img/closure/snapshot_turbulence.png)
+
+**Is the thickness a fair target? A well-posed ensemble.** The slabs above have a sharp edge
+and no viscosity, so no resolution converges on them (the reference's own growth rate for one
+case is 0.059 from 512² and 0.127 from 1024²), and each is one run of a chaotic flow. So the
+question was put again where it has an answer (`tools/closure/diagnostic.py`): edges a tanh of
+width 0.02, a viscosity of 2e-4, the kick a random mix of wavelengths, six seeds per case, to
+t = 4. For each seed, references at 512² and 1024² and coarse runs at 128². Ensemble means,
+with the scatter between seeds in brackets:
+
+| Shear 1, density ratio 2 | Thickness at t = 3 | at t = 4 | Growth rate | Error of the mean thickness | Mixedness at t = 4 | Error of the mean mixedness |
+|---|---|---|---|---|---|---|
+| Reference, 512² | 0.373 (0.046) | 0.601 (0.161) | 0.100 | | 0.178 (0.013) | |
+| Reference, 1024² | 0.368 (0.046) | 0.598 (0.162) | 0.099 | 0.003 | 0.159 (0.011) | 0.008 |
+| Coarse, no closure | 0.373 (0.035) | 0.601 (0.153) | 0.100 | 0.002 | 0.270 (0.021) | 0.035 |
+| Coarse, low-Mach solver | 0.381 (0.036) | 0.607 (0.155) | 0.103 | 0.006 | 0.275 (0.021) | 0.038 |
+| Coarse, closure (constants) | 0.382 (0.036) | 0.606 (0.157) | 0.103 | 0.006 | 0.252 (0.021) | 0.030 |
+
+| Shear 1.4, density ratio 1 | Thickness at t = 3 | at t = 4 | Growth rate | Error of the mean thickness | Mixedness at t = 4 | Error of the mean mixedness |
+|---|---|---|---|---|---|---|
+| Reference, 512² | 0.606 (0.177) | 0.857 (0.080) | 0.216 | | 0.256 (0.011) | |
+| Coarse, no closure | 0.599 (0.169) | 0.873 (0.083) | 0.211 | 0.008 | 0.385 (0.007) | 0.059 |
+| Coarse, low-Mach solver | 0.604 (0.171) | 0.868 (0.079) | 0.213 | 0.004 | 0.388 (0.006) | 0.062 |
+| Coarse, closure (constants) | 0.604 (0.172) | 0.865 (0.079) | 0.213 | 0.004 | 0.359 (0.012) | 0.048 |
+
+(Errors are of the ensemble mean against the 512² reference's, averaged over t from 1 to 4.)
+
+- **The thickness is already right on the coarse grid.** The two references agree (0.003), and
+  every coarse run's mean is within 0.008 of them, with or without a closure. The standard
+  error of such a difference with six seeds is 0.025 to 0.045, and one run differs from the
+  mean by 0.03 to 0.06: the size of the "errors" in the table of single runs above. Those were
+  realizations of a flow with no converged answer, not a defect the closure adds or could
+  remove. The growth rates agree to 3%.
+- **The mixedness is a real error, and the closure reduces it.** The coarse run over-mixes by
+  0.035 and 0.059, six to ten standard errors. The constants bring that to 0.030 and 0.048
+  (14% and 19% less); the low-Mach solver makes it slightly worse, as it leaves the dye's
+  advection alone and stirs more. Most of the error remains. It is the grid's diffusion of the
+  dye at extrema and thin filaments, which the bound on the scalar's jump keeps the closure
+  from touching.
+- **A caveat on the mixedness.** The dye has no physical diffusion in the simulator, so the
+  reference's mixedness is set by its grid too: 0.178 at 512² against 0.159 at 1024². The
+  coarse run's error is four times that difference, so the conclusion stands, but its size is
+  not converged.
+
+What this leaves for a learned model is the dye's advection: where to use a more compressive
+limiter, within the same bounds. A reference for it would need a physical diffusivity for the
+dye, which the simulator does not have.
 
 **Another resolution.** The same two cases on 256² against 1024², with the weights trained at
 128²: the spectra improve as they do at 128², the shear layer's thickness and mixedness are

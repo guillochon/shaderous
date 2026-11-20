@@ -18,6 +18,7 @@ uv venv --python 3.12 .venv && uv pip install --python .venv/bin/python torch nu
 | `train.py` | Unrolled training through `solver.py`, with the model's own drift in the starts |
 | `evaluate.py` | Whole coarse runs against the reference: spectra, mixing, conservation. `--mode app` runs the simulator (no closure, the low-Mach solver, `closure=constant`, `closure=network`), `--mode mirror` the PyTorch solver (any variant) |
 | `appchecks.py` | In the simulator: shock tubes and blasts with the closure on (constants, network) and off, runs to t = 30, cost per step |
+| `diagnostic.py` | The well-posed shear layer as an ensemble: smooth edges, viscosity, six seeds, references at 512² and 1024² |
 | `figures.py` | The figures of docs/closure.md |
 | `export.py` | A trained model into `src/closure/` |
 | `metrics.py`, `data.py` | Statistics of a state; reading the runner's outputs |

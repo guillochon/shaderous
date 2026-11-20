@@ -2995,6 +2995,20 @@
         "minimum": 0.005,
         "maximum": 0.2
        },
+       "smooth": {
+        "type": "number",
+        "title": "Edge width",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 0.2
+       },
+       "seed": {
+        "type": "number",
+        "title": "Seed",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1000000
+       },
        "zmod": {
         "type": "number",
         "title": "Variation along z",
