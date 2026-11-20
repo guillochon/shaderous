@@ -148,9 +148,11 @@ const check = (ok, what) => {
   const wlast = wman.outputs.at(-1);
   const ckpt = wlast ? path.join(wout, wlast.files.find((f) => f.endsWith('.athdf')) ?? '') : '';
   const fout = path.join(tmp, 'cli-from');
-  const fres = ckpt ? spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--from', ckpt, '--steps', '5', '--out', fout, '--quiet'], { encoding: 'utf8' }) : { status: 1, stderr: 'no checkpoint' };
+  const fres = ckpt ? spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--from', ckpt, '--steps', '5', '--athdf-every', '1', '--out', fout, '--quiet'], { encoding: 'utf8' }) : { status: 1, stderr: 'no checkpoint' };
   const flines = existsSync(path.join(fout, 'diag.jsonl')) ? readFileSync(path.join(fout, 'diag.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
   check(fres.status === 0 && flines.length === 2 && Math.abs(flines[0].t - wlast.t) < 1e-6 * Math.max(1, wlast.t) && flines[1].steps === wlast.steps + 5, `cli --from carries on from a checkpoint${fres.status ? `: ${fres.stderr}` : ''}`);
+  const fathdf = existsSync(fout) ? readdirSync(fout).filter((f) => f.endsWith('.athdf')) : [];
+  check(fathdf.length === 1 && fathdf[0].startsWith('0001-'), `cli --from with --athdf-every writes no checkpoint of the file it started from (wrote ${fathdf.join(', ') || 'none'})`);
   const bad = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'nope', '--out', path.join(tmp, 'bad'), '--quiet'], { encoding: 'utf8' });
   check(bad.status === 1 && /unknown problem/.test(bad.stderr) && !existsSync(path.join(tmp, 'bad')), 'cli reports a bad setup and writes nothing');
 }

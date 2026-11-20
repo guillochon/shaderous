@@ -43,7 +43,7 @@ export const SECTIONS = [
       F(['slice-axis A', 'slice-pos P', 'slice-res R'], 'Its axis (0 to 2), position (0 to 1) and cells per side'),
       F('slice-format F', ['json (default): NNNN-tT-VAR.json, the whole slice() result; or npy:', "NNNN-tT-VAR.npy, float32 of shape [res, res] for numpy's np.load,", 'with the slice\'s other fields under that output\'s "slices" in', 'manifest.json']),
       F('athdf', 'An .athdf file at each output'),
-      F('athdf-every N', 'Or an .athdf file every Nth output and at the last (0: the last only)'),
+      F('athdf-every N', 'Or an .athdf file every Nth output and at the last (0: the last only; a --from run skips its first)'),
       F('debris', ['Debris energies and dM/dt at each output, as JSON (problems that track', 'them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py']),
     ],
   },

@@ -113,7 +113,7 @@ Each run writes a folder, `--out DIR`, which defaults to `runs/<problem>-<date>`
 | `NNNN-tT-NAME.png` | A screenshot of each `--shot NAME:KEY=VALUE,..` at each output: the `--view` settings with the shot's on top (the same keys, comma-separated), so that each output can show several views. Each shot starts again from the `--view` settings and the colormap they leave, so one shot's settings do not carry into the next |
 | `NNNN-tT-VAR.json` | A slice of variable VAR at each output, with `--slice VAR` (repeatable). Set it with `--slice-axis`, `--slice-pos` and `--slice-res`; the format is that of `slice()` in [api.md](api.md#reference) |
 | `NNNN-tT-VAR.npy` | The same slice with `--slice-format npy`, as a file numpy reads: float32 of shape `[res, res]`, row `j` and column `i` as in `slice()`. The slice's other fields (`t`, `variable`, `axis`, `pos`, `res`, `axes`, `min`, `max`) are in `manifest.json`, under that output's `slices` |
-| `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`, or at every Nth output and the last with `--athdf-every N` (0: the last only). yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them. They are read out of the page 64 MB at a time, so files of gigabytes come out whole |
+| `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`, or at every Nth output and the last with `--athdf-every N` (0: the last only; a run resumed with `--from` skips output 0, the file it started from). yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them. They are read out of the page 64 MB at a time, so files of gigabytes come out whole |
 | `movie.mp4` | The whole run as a movie, with `--mp4`: a frame near every `--frame-dt DT` of simulated time (default a 600th of the problem's dynamical time) or every `--frame-every N` steps, played at `--fps` (default 60), at `--bitrate` megabits per second (default 0.2 bits per pixel per frame), at `--width` x `--height` (default 1920 x 1080), with a color bar, axes and the status line unless `--no-overlays`. `manifest.json` gets a `movie` entry with its frame count and length. Not with `--every` or `--steps`; outputs are then written at the start and the end only |
 | `NNNN-tT-debris.json` | Debris energies and the return rate dM/dt at each output, with `--debris`, for problems that track them (the tidal disruption). The format is that of `debris()` in [api.md](api.md#reference) |
 
@@ -228,7 +228,7 @@ flags, [flags.mjs](../tools/headless/flags.mjs), by `npm run gen`):
 | `--slice-axis A`, `--slice-pos P`, `--slice-res R` | Its axis (0 to 2), position (0 to 1) and cells per side |
 | `--slice-format F` | json (default): NNNN-tT-VAR.json, the whole slice() result; or npy: NNNN-tT-VAR.npy, float32 of shape [res, res] for numpy's np.load, with the slice's other fields under that output's "slices" in manifest.json |
 | `--athdf` | An .athdf file at each output |
-| `--athdf-every N` | Or an .athdf file every Nth output and at the last (0: the last only) |
+| `--athdf-every N` | Or an .athdf file every Nth output and at the last (0: the last only; a --from run skips its first) |
 | `--debris` | Debris energies and dM/dt at each output, as JSON (problems that track them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py |
 
 **Movie (--mp4 records the whole run as movie.mp4, with a color bar, axes and the status line; not with --every or --steps; outputs are written at the start and the end)**
@@ -394,6 +394,10 @@ SwiftShader. What the machine needs:
   A WebGPU canvas cannot be read then, so with this switch screenshots and movie frames are
   drawn into a texture of their own and copied back from the GPU, as slices are (the pixels
   match the canvas's exactly on an RTX 3080).
+
+On a cluster with Slurm and Apptainer (no Docker), [tools/headless/slurm](../tools/headless/slurm/README.md)
+runs the same image under Apptainer: a check job for the GPU's Vulkan driver, and a long run
+split into jobs that each carry on from the last checkpoint (`--from`) and submit the next.
 
 ### Largest run so far
 

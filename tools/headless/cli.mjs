@@ -216,7 +216,8 @@ async function runOne(session, q, dir) {
       log(`    debris: escaped ${s.totals.escaped.toPrecision(4)}  in box ${s.totals.inBox.toPrecision(4)}  core ${s.totals.core.toPrecision(5)}  bound ${s.totals.bound.toPrecision(4)}` +
         (p ? `  dM/dt peak ${p.peakMsunPerYear.toPrecision(3)} Msun/yr at ${p.peakDaysAfterPericenter.toPrecision(3)} d after pericenter` : ''));
     }
-    if (athdfEvery !== undefined && (last || (athdfEvery > 0 && k % athdfEvery === 0))) {
+    // Not at a resumed run's first output: that state is the file it was loaded from.
+    if (athdfEvery !== undefined && (last || (athdfEvery > 0 && k % athdfEvery === 0 && !(o.from && k === 0)))) {
       await saveAthdf(call, path.join(dir, `${name}.athdf`));
       files.push(`${name}.athdf`);
     }
