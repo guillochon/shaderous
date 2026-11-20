@@ -1285,8 +1285,6 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * pixels (a square of `width` if only that is given; 1024 x 1024 when the page has no layout).
      */
     screenshot: (opts?: ScreenshotOptions) => serial(() => screenshot(opts)),
-    /** The page's Screenshot button: the picture as a canvas, with what it shows. */
-    shoot: (opts?: ScreenshotOptions) => serial(() => shoot(opts)),
 
     /**
      * Record the run as an MP4 movie: the view with a color bar and a triad over it, a frame
@@ -1355,7 +1353,9 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     errors: () => [...errorLog()],
   };
   Object.assign(window, { shaderous: api });
-  return api;
+  // The page's own handle: the API, and the Screenshot button's picture as a canvas, which no
+  // script could take (window.shaderous is only what api_schema.ts describes).
+  return { ...api, shoot: (opts?: ScreenshotOptions) => serial(() => shoot(opts)) };
 }
 
 export type ShaderousApi = ReturnType<typeof installApi>;

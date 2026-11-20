@@ -33,6 +33,8 @@ const dialog = (page: Page) => page.locator('dialog[open]');
 const field = (page: Page, label: string) => dialog(page).getByLabel(label, { exact: true }).first();
 const tab = (page: Page, name: string) => dialog(page).locator('.sd-tabs').getByRole('tab', { name, exact: true });
 const applyButton = (page: Page) => dialog(page).locator('.sd-apply');
+/** Apply closes the dialog once what it applied runs. */
+const applied = (page: Page) => expect(page.locator('dialog[open]')).toHaveCount(0, { timeout: 60_000 });
 /** Unfold a group of the dialog's preset list (all but the running preset's start folded). */
 const unfold = (page: Page, group: string) => dialog(page).locator('.sd-group', { has: page.locator('summary', { hasText: group }) }).evaluate((d) => ((d as HTMLDetailsElement).open = true));
 
@@ -82,7 +84,7 @@ test('a featured field changed in the bar shows in the dialog, and one changed i
   await dialog(page).locator('.sd-strip').getByLabel('Mass ratio', { exact: true }).press('Tab');
   await expect(applyButton(page)).toHaveText('Apply and restart');
   await applyButton(page).click();
-  await expect(applyButton(page)).toBeDisabled({ timeout: 60_000 });
+  await applied(page);
   const c = await app(page).cfg();
   // Still the binary: its own parameters changed, not its parts.
   expect([c.id, c.params.q, c.params.ecc]).toEqual(['binary', 0.5, 0.3]);
@@ -134,23 +136,23 @@ test('a live option carries the run on, a compiled one rebuilds it, a part start
   expect((await app(page).cfg()).riemann).toBe('hllc');
   await applyButton(page).click();
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.riemann === 'hll');
-  await expect(applyButton(page)).toBeDisabled({ timeout: 60_000 });
+  await applied(page);
   expect(await app(page).time()).toBe(t0);
 
   // A new part: a third point mass. The run starts again, as a setup of its own.
+  await page.click('#setup');
   await tab(page, 'Objects').click();
   await dialog(page).locator('.sd-add summary').click();
   await dialog(page).locator('.sd-add').getByRole('button', { name: /Point mass/ }).click();
   await expect(applyButton(page)).toHaveText('Apply and restart');
   await applyButton(page).click();
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'custom' && (window as any).shaderousApp.sim);
-  await expect(applyButton(page)).toBeDisabled({ timeout: 60_000 });
+  await applied(page);
   const c = await app(page).cfg();
   expect([c.label, c.viscosity, c.riemann]).toEqual(['Binary accretion (modified)', 0.004, 'hll']);
   expect(await app(page).time()).toBe(0);
   expect(await page.evaluate(() => (window as any).shaderousApp.sim.massCount)).toBe(3);
   // The bar's menu shows it among the user's own setups.
-  await dialog(page).locator('.sd-close, [aria-label="Close"]').first().click();
   await expect(page.locator('#problem')).toHaveValue('custom');
   await app(page).run(5);
   expect(await app(page).time()).toBeGreaterThan(0);
@@ -168,7 +170,8 @@ test('a saved file opens again as the same setup, with the same link', async ({ 
   await disk.getByLabel('Inner radius', { exact: true }).press('Tab');
   await applyButton(page).click();
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'custom' && (window as any).shaderousApp.sim);
-  await expect(applyButton(page)).toBeDisabled({ timeout: 60_000 });
+  await applied(page);
+  await page.click('#setup');
   const [download] = await Promise.all([page.waitForEvent('download'), dialog(page).getByRole('button', { name: 'Save file' }).click()]);
   expect(download.suggestedFilename()).toMatch(/\.shaderous\.json$/);
   const saved = await readText(await download.path());
@@ -187,7 +190,7 @@ test('a saved file opens again as the same setup, with the same link', async ({ 
   await expect(applyButton(page)).toHaveText('Apply and restart');
   await applyButton(page).click();
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'custom' && (window as any).shaderousApp.sim);
-  await expect(applyButton(page)).toBeDisabled({ timeout: 60_000 });
+  await applied(page);
   const setup2 = await page.evaluate(() => (window as any).shaderous.state().then((s: any) => s.setup));
   expect(setup2).toEqual(setup1);
 
@@ -403,8 +406,7 @@ test('the preset list opens folded, but for the group of the preset that runs', 
   // Opened again on another run, it folds to that run's group.
   await applyButton(page).click();
   await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'rayleigh-taylor' && (window as any).shaderousApp.sim);
-  // Applying closes the dialog.
-  await expect(page.locator('dialog[open]')).toHaveCount(0);
+  await applied(page);
   await page.click('#setup');
   expect((await groups()).filter((g) => g[1]).map((g) => g[0])).toEqual(['Instabilities']);
 });
