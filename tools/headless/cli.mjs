@@ -179,7 +179,7 @@ async function runOne(session, q, dir) {
     appendFileSync(path.join(dir, 'diag.jsonl'), JSON.stringify({ output: k, wall: (Date.now() - t0) / 1000, ...d }) + '\n');
     const shotOpts = o.native
       ? { native: true, overlays: { colorbar: true, triad: true, status: true } }
-      : { width: num(o.width, 'width') ?? 1024, height: num(o.height, 'height') ?? num(o.width, 'width') ?? 1024 };
+      : { width: num(o.width, 'width') ?? 1024, height: num(o.height, 'height') ?? num(o.width, 'width') ?? 1024, ...(o.overlays ? { overlays: { colorbar: true, triad: true, status: true } } : {}) };
     if (o.png) {
       const png = await call('screenshot', shotOpts);
       writeFileSync(path.join(dir, `${name}.png`), pngBytes(png));

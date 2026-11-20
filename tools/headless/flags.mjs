@@ -34,6 +34,7 @@ export const SECTIONS = [
       F('out DIR', 'Folder (default: runs/<problem>-<date>)'),
       F('png', 'A screenshot at each output'),
       F(['width PX', 'height PX'], 'Screenshot size (default 1024 square)'),
+      F('overlays', 'The color bar, axes and status line (with the time) on each screenshot'),
       F('native', ["Screenshots at the grid's own resolution (a plane: a 2D run, a slice or", 'a projection): one pixel per cell of the finest level, with the color bar,', 'axes and status line beside it. Not with --width or --height']),
       F('view KEY=VALUE', 'View setting for screenshots, repeatable: --view field=3 --view colormap=viridis', { many: true }),
       F('shot NAME:KEY=VALUE,..', ['A screenshot of its own at each output, NNNN-tT-NAME.png: the --view', 'settings with these on top. Repeatable, one per view:', '--shot vol:mode=volume --shot rho:mode=slice,sliceAxis=2'], { many: true }),

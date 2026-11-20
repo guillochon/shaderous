@@ -168,7 +168,7 @@ A run held to four hours on a rented GPU: a volume rendering with field lines an
 slice every ten minutes, a checkpoint every hour, and the last state when the time is up:
 
 ```bash
-npm run headless -- run --setup examples/setups/rlof-stars-random-field.shaderous.json --n 1024 --amr 4 --wall 14100 --every-wall 600 --athdf-every 6 --shot vol:mode=volume,showBlocks=false,fieldLines=true --shot rho:mode=slice,sliceAxis=2,showBlocks=false --gpu-memory 80 --out runs/rlof
+npm run headless -- run --setup examples/setups/rlof-stars-random-field.shaderous.json --n 1024 --amr 4 --wall 14100 --every-wall 600 --athdf-every 6 --shot vol:mode=volume,showBlocks=false,fieldLines=true --shot rho:mode=slice,sliceAxis=2,showBlocks=false --overlays --gpu-memory 80 --out runs/rlof
 ```
 
 A tidal disruption's return rate, the classic dM/dt diagram. Run a few dynamical times past
@@ -219,6 +219,7 @@ flags, [flags.mjs](../tools/headless/flags.mjs), by `npm run gen`):
 | `--out DIR` | Folder (default: runs/<problem>-<date>) |
 | `--png` | A screenshot at each output |
 | `--width PX`, `--height PX` | Screenshot size (default 1024 square) |
+| `--overlays` | The color bar, axes and status line (with the time) on each screenshot |
 | `--native` | Screenshots at the grid's own resolution (a plane: a 2D run, a slice or a projection): one pixel per cell of the finest level, with the color bar, axes and status line beside it. Not with --width or --height |
 | `--view KEY=VALUE` | View setting for screenshots, repeatable: --view field=3 --view colormap=viridis |
 | `--shot NAME:KEY=VALUE,..` | A screenshot of its own at each output, NNNN-tT-NAME.png: the --view settings with these on top. Repeatable, one per view: --shot vol:mode=volume --shot rho:mode=slice,sliceAxis=2 |

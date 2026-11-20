@@ -139,7 +139,7 @@ const check = (ok, what) => {
   check(mres.status === 0 && existsSync(path.join(mout, 'movie.mp4')) && mman.movie?.frames >= 5 && mman.movie?.stopped === 'time', `cli --mp4 writes movie.mp4${mres.status ? `: ${mres.stderr}` : ''}`);
   // Outputs by the wall clock, stopped by --wall, with two named views and a checkpoint only at the last.
   const wout = path.join(tmp, 'cli-wall');
-  const wres = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'sedov', '--dim', '2', '--n', '256', '--set', 'tend=100', '--every-wall', '2', '--wall', '12', '--width', '64', '--shot', 'rho:field=0,log=true', '--shot', 'p:field=pressure,colormap=viridis', '--athdf-every', '0', '--out', wout, '--quiet'], { encoding: 'utf8' });
+  const wres = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'sedov', '--dim', '2', '--n', '256', '--set', 'tend=100', '--every-wall', '2', '--wall', '12', '--width', '64', '--shot', 'rho:field=0,log=true', '--shot', 'p:field=pressure,colormap=viridis', '--athdf-every', '0', '--overlays', '--out', wout, '--quiet'], { encoding: 'utf8' });
   const wman = existsSync(path.join(wout, 'manifest.json')) ? JSON.parse(readFileSync(path.join(wout, 'manifest.json'), 'utf8')) : { outputs: [] };
   const wfiles = wman.outputs.map((x) => x.files);
   check(wres.status === 0 && wman.stopped === 'wall' && wfiles.length >= 2 && wfiles.every((f, i) => f.some((n) => n.endsWith('-rho.png')) && f.some((n) => n.endsWith('-p.png')) && f.some((n) => n.endsWith('.athdf')) === (i === wfiles.length - 1)),
