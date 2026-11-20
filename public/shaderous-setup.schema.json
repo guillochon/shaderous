@@ -661,6 +661,15 @@
      "minimum": 0,
      "maximum": 1e+30
     },
+    "closure": {
+     "enum": [
+      "off",
+      "constant",
+      "network"
+     ],
+     "title": "Turbulence closure",
+     "description": "Cell by cell, the flux update leaves out most of the Riemann solver’s own dissipation of shear and of the dye where the flow is turbulence the grid only just resolves, so that a coarse run keeps more of the small eddies. It switches itself off at shocks and in gas that is not sheared. Constants: four fifths of the damping of shear and nine tenths of the dye’s, wherever the gates are open, and the dye’s fronts kept from spreading (a bounded compression). Trained network: a small network sets the shares cell by cell; it gives the same results and adds half again to the time of a step, where the constants add a fifth (docs/closure.md)"
+    },
     "driving": {
      "type": "object",
      "properties": {
@@ -2576,6 +2585,56 @@
      },
      {
       "type": "object",
+      "title": "Flow: Decaying turbulence",
+      "properties": {
+       "kind": {
+        "const": "flow"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "name": {
+        "const": "decaying-turbulence"
+       },
+       "mach": {
+        "type": "number",
+        "title": "Mach number",
+        "default": 0.3,
+        "minimum": 0.01,
+        "maximum": 3
+       },
+       "kpeak": {
+        "type": "number",
+        "title": "Peak wavenumber",
+        "default": 4,
+        "minimum": 1,
+        "maximum": 16
+       },
+       "seed": {
+        "type": "number",
+        "title": "Seed",
+        "default": 1,
+        "minimum": 0,
+        "maximum": 1000000
+       },
+       "ratio": {
+        "type": "number",
+        "title": "Density of the band",
+        "default": 1,
+        "minimum": 0.01,
+        "maximum": 100
+       }
+      },
+      "required": [
+       "kind",
+       "name"
+      ],
+      "additionalProperties": false,
+      "description": "A periodic box given a random, divergence-free velocity field at large scales (rms speed 1) and left to decay. The passive scalar marks a band across the middle of the box, which can be denser than the rest."
+     },
+     {
+      "type": "object",
       "title": "Flow: ZND detonation",
       "properties": {
        "kind": {
@@ -2935,6 +2994,20 @@
         "default": 0.035,
         "minimum": 0.005,
         "maximum": 0.2
+       },
+       "smooth": {
+        "type": "number",
+        "title": "Edge width",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 0.2
+       },
+       "seed": {
+        "type": "number",
+        "title": "Seed",
+        "default": 0,
+        "minimum": 0,
+        "maximum": 1000000
        },
        "zmod": {
         "type": "number",

@@ -89,6 +89,7 @@ src/
                escape and diagnostics; opacity/ has the opacity modules it slots in
   mhd/         constrained transport, HLLD, the field's passes on blocks
   burn/        the nuclear network surrogate and its reference network
+  closure/     the trained turbulence closure: its weights, float64 mirror and pass
   debris/      bound and unbound mass, and the giant-impact census (impact.ts)
   cooling/     WGSL cooling functions and their float64 mirrors
   species/     packing and bookkeeping of mass fractions
@@ -111,6 +112,8 @@ src/
   sim.ts       owns the textures and encodes a uniform-grid step
 tests/         unit/ (Vitest, Node) and gpu/ (Playwright, real GPU)
 tools/burn/    offline Python tools for the nuclear-burning surrogate
+tools/closure/ offline Python tools for the turbulence closure: a differentiable mirror of the
+               hydro step, reference data, training, evaluation
 tools/eos/     offline tools that build the equation-of-state tables, and their notes (NOTES.md)
 tools/headless/ the command-line runner and the MCP server
 paper/         the method paper (AASTeX)
@@ -191,6 +194,7 @@ another form therefore costs more than repeating the conversion.
 |---|---|---|
 | 1. Rates | `hydro/rates.wgsl` | Reads the state once and writes only the first stage of the timestep reduction: max signal rate and max $`\lvert g\rvert`$ per $`4^3`$ block, folded in workgroup-shared atomics. |
 | 2. Clock | `hydro/clock.wgsl` + `gpu/reduce.wgsl` | Finishes the reduction, applies the point-mass and output limits, and writes $`\Delta t`$ and the time to a small buffer that later passes read. |
+| 2b. Closure *(optional)* | `hydro/closure.wgsl` | The trained turbulence closure's coefficients per cell, from the state the step starts from ([numerics.md](numerics.md#26-turbulence-closure)). |
 | 3. Predictor | `hydro/predictor.wgsl` | Limited slopes, the half-step primitive state, shock and first-order flags. |
 | 4. Update | `hydro/update.wgsl` | Face states, Riemann solves on all $`2d`$ faces, diffusion fluxes, the conservative update, the first half kick, cooling, dual-energy sync, floors. |
 | 5. Species *(optional)* | `hydro/species*.wgsl` | Move each species with the face mass fluxes the update recorded. |
@@ -485,7 +489,7 @@ cannot make is retried smaller within seconds.
 ## Setups: one document, compiled
 
 Every setting of a simulation is a field of one JSON document, a `SetupSpec`
-(`setup/spec.ts`; [setups.md](setups.md) describes the format). The presets are 79 such files
+(`setup/spec.ts`; [setups.md](setups.md) describes the format). The presets are 80 such files
 in `src/presets/`, and a setup made in the Setup dialog is the same kind of file. A document
 holds numbers and names and no code, so one from a stranger is safe to open; `setup/codec.ts`
 reads it as untrusted input.
@@ -591,7 +595,7 @@ held bit for bit to the object it replaced before those objects were retired.
   their float64 mirrors and analytic limits, white dwarf structure and the collision orbit, the
   exact Riemann solver, the float64 reference scheme, the AMR tree, links, units and checkpoints.
 - **GPU tests** (`npm run test:gpu`): Playwright drives an installed Chrome (or Edge with
-  `PW_CHANNEL=msedge`) through the 180-test validation suite on the real GPU. Each test closes
+  `PW_CHANNEL=msedge`) through the 181-test validation suite on the real GPU. Each test closes
   its page, bounded to 30 s, before its result is judged, and a global timeout (180 minutes,
   `PW_GLOBAL_TIMEOUT`) runs in the runner process, so a failed test cannot hold the suite. The
   specs take `test` from `tests/gpu/fixtures.ts`, whose browser fixture closes Chrome through

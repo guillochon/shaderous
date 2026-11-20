@@ -263,6 +263,11 @@
    "about": "Conductivity κ"
   },
   {
+   "key": "closure",
+   "group": "settings",
+   "about": "Turbulence closure: off, constant, network"
+  },
+  {
    "key": "eta",
    "group": "settings",
    "about": "Resistivity η"

@@ -18,6 +18,8 @@ const DEFAULT_SLOTS: Slots = {
   // other run's shaders are what they were before it, bit for bit (hydro/common.wgsl).
   geometry: 'const SPHERICAL = false;\n',
   comp_src: 'amr/comp_src_off.wgsl',
+  // No turbulence closure (hydro/flux.wgsl) unless hydroSlots says the run has one.
+  closure: 'hydro/closure_off.wgsl',
   debris: 'debris/debris_off.wgsl',
   // An inertial frame (gravity/frame_off.wgsl) unless hydroSlots says otherwise.
   frame: 'gravity/frame_off.wgsl',

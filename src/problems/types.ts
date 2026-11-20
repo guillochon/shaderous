@@ -357,6 +357,8 @@ export interface Problem {
   /** Kinematic viscosity and thermal conduction switched on by default (see SimConfig). */
   viscosity?: number;
   conductivity?: number;
+  /** The turbulence closure switched on by default (see SimConfig.closure). */
+  closure?: import('../closure/kinds').ClosureKind;
   /** Magnetic diffusivity eta switched on by default (see SimConfig.resistivity). */
   resistivity?: number;
   /** Velocities of the faces that are moving walls (SimConfig.wallVelocity). */

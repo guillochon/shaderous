@@ -17,6 +17,8 @@ import { comovingEosSlot, defaultEosParams, eosHasEnergy, hheUnsupported, EOS_MO
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from './pressure/multigrid';
 import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
+import { ClosurePass } from './closure/closure';
+import type { ClosureKind } from './closure/kinds';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
 import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
@@ -106,6 +108,14 @@ export interface SimConfig {
    * energy. 0 is off.
    */
   conductivity: number;
+  /**
+   * The turbulence closure (closure/closure.ts): cell by cell, the flux update leaves out part
+   * of the Riemann solver's own dissipation of shear and of the passive scalar where the flow
+   * is under-resolved turbulence, and none of it at shocks: by constants behind its gates, or
+   * by the trained network. Two-dimensional runs of a gas with an energy on the uniform grid
+   * (closureUnsupported).
+   */
+  closure: ClosureKind;
   /**
    * Magnetic diffusivity eta, with a field: the edge electric fields gain eta J, J = curl B, the
    * energy flux eta J x B, and the internal energy the Ohmic heat eta J^2 (mhd/ohm.wgsl). 0 is off.
@@ -467,6 +477,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
     viscosity: problem.viscosity ?? 0,
     conductivity: problem.conductivity ?? 0,
+    closure: problem.closure ?? 'off',
     resistivity: problem.resistivity ?? 0,
     driving: { ...defaultDrive(), ...problem.driving },
     wallVelocity: { ...noWallVelocity(), ...problem.wallVelocity },
@@ -582,11 +593,32 @@ export function refusal(c: SimConfig): string | null {
     ['Axisymmetric run', cylindricalUnsupported(c)],
     ['Spherical run', sphericalUnsupported(c)],
     ['Radiation', radiationUnsupported(c)],
+    ['Turbulence closure', closureUnsupported(c)],
     ['Hydrogen and helium', hheUnsupported(c.eos, c.eosParams, c.problem.composition?.name)],
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
 }
+
+/**
+ * Why the turbulence closure (closure/closure.ts) cannot go with a run as configured, or null.
+ * It was trained on two-dimensional turbulence and shear layers of an ideal gas on a uniform
+ * Cartesian grid, and its pass and its hook in the flux update exist only there.
+ */
+export function closureUnsupported(c: SimConfig): string | null {
+  if (c.closure === 'off') return null;
+  if (c.ndim !== 2) return 'it is for two-dimensional runs only';
+  if (c.amrLevels > 0) return 'it is not available on the adaptive mesh yet';
+  if (c.problem.mhd) return 'it is not available with a magnetic field';
+  if (!eosHasEnergy(c.eos) || c.eos === 'liquid') return 'it needs a gas with an energy equation';
+  if (implicitPressure(c)) return 'it is not available with implicit pressure';
+  if (c.problem.geometry === 'cylindrical' || c.problem.geometry === 'spherical') return 'it is not available in axisymmetric or spherical runs';
+  if (c.problem.shear || c.problem.cosmology) return 'it is not available in a shearing box or in comoving coordinates';
+  return null;
+}
+
+/** The turbulence closure is on (and the run is one it can go with). */
+export const closureOn = (c: SimConfig): boolean => c.closure !== 'off' && !closureUnsupported(c);
 
 /**
  * Why a run of the weakly compressible liquid (eos/liquid.wgsl) cannot go as configured, or
@@ -817,6 +849,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     frame: cosmologyOf(c) ? 'gravity/frame_cosmo.wgsl' : rotating(c) ? 'gravity/frame_rot.wgsl' : 'gravity/frame_off.wgsl',
     // A spherical run (hydro/common.wgsl spherical()).
     geometry: `const SPHERICAL = ${spherical(c)};\n`,
+    // The turbulence closure's hook in the face flux (hydro/flux.wgsl).
+    closure: closureOn(c) ? 'hydro/closure_on.wgsl' : 'hydro/closure_off.wgsl',
   };
 }
 
@@ -1420,6 +1454,8 @@ export class Sim implements Simulation {
   private gSpeciesPredict: GPUBindGroup[][] = [];
   /** Nuclear burning (burn/burn.ts, burn/network.ts), after the species pass; none without. */
   private burn?: Burner;
+  /** The turbulence closure's pass (closure/closure.ts), before the predictor; none without. */
+  closure?: ClosurePass;
   /** Radiation transport (radiation/passes.ts); none without. */
   rad?: RadPasses;
   mg!: Multigrid;
@@ -1691,6 +1727,8 @@ export class Sim implements Simulation {
     diag.catch(() => {}); // a failure is reported where it is awaited, below
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
+    this.closure?.destroy();
+    this.closure = c.closure !== 'off' && closureOn(c) ? await ClosurePass.create(d, c.closure, dims, slots, this.params, this.state, k) : undefined;
     // Implicit pressure: the solver (kept across rebuilds, with its warm start) and its passes.
     if (implicitPressure(c)) {
       // (A gas's open faces carry no pressure gradient, pressure/source_gas.wgsl: closed, to the solve.)
@@ -1814,6 +1852,7 @@ export class Sim implements Simulation {
           11: this.sources,
           ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
           ...(this.debrisBuf?.bindings(this.bh) ?? {}),
+          ...((this.closure ? { 48: v(this.closure.coefficients) } : {}) as Record<number, GPUTextureView>),
           ...k,
         }),
       );
@@ -2355,6 +2394,8 @@ export class Sim implements Simulation {
         // (mhd/update.wgsl); the second half kick follows below as for the gas alone.
         this.mhd.encode(pass, p);
       } else {
+        // The closure's coefficients, from the state the step starts from (closure/closure.ts).
+        this.closure?.encode(pass, p);
         this.pPredict!.encode(pass, this.gPredict[p]);
         this.pUpdate!.encode(pass, this.gUpdate[p]);
       }
@@ -2682,6 +2723,7 @@ export class Sim implements Simulation {
       this.dispatch(pass);
     });
     out.timestep = await time(reps, (pass) => this.redDt.encode(pass));
+    if (this.closure) out.closure = await time(reps, (pass) => this.closure!.encode(pass, p));
     out.predict = await time(reps, (pass) => {
       this.pPredict?.encode(pass, this.gPredict[p]);
     });
@@ -2846,6 +2888,7 @@ export class Sim implements Simulation {
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources,
       ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
       ...(this.debrisBuf?.bindings(this.bh) ?? {}),
+      ...((this.closure ? { 48: v(this.closure.coefficients) } : {}) as Record<number, GPUTextureView>),
       ...this.compIn,
     });
     const enc = d.createCommandEncoder();
@@ -2854,6 +2897,7 @@ export class Sim implements Simulation {
     pass.setBindGroup(0, this.primGroup(p));
     this.dispatch(pass);
     if (!this.pPredict) throw new Error('fluxMismatch checks the hydro update, which a magnetized run does not have');
+    this.closure?.encode(pass, p);
     this.pPredict.encode(pass, this.gPredict[p]);
     pipe.encode(pass, group);
     pass.end();
@@ -2948,6 +2992,7 @@ export class Sim implements Simulation {
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     this.burn?.destroy();
+    this.closure?.destroy();
     for (const t of [...this.pred, this.gfield, ...this.species]) t.destroy();
     this.heat?.destroy();
     this.comp?.destroy();

@@ -12,7 +12,7 @@ const MACH: FlowField = {
 };
 
 /** The pressure at which gas of density 1 has sound speed c (bisection in the logarithm). */
-function pressureForSoundSpeed(eos: Eos, c: number): number {
+export function pressureForSoundSpeed(eos: Eos, c: number): number {
   let lo = -60;
   let hi = 60;
   for (let i = 0; i < 80; i++) {

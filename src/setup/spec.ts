@@ -8,6 +8,7 @@
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { OpacityKind, OpacityParams } from '../opacity/opacity';
 import type { RadiationKind, RadSolver } from '../radiation/radiation';
+import type { ClosureKind } from '../closure/kinds';
 import type { EosKind, EosParams } from '../eos/eos';
 import type { Bc3, GravityMode, LimiterKind, RiemannKind } from '../problems/types';
 import type { ViewMode } from '../render/view_options';
@@ -124,6 +125,8 @@ export interface PhysicsSpec {
   radSweeps?: number;
   viscosity?: number;
   conductivity?: number;
+  /** the turbulence closure (closure/closure.ts), by constants or by the trained network: 2D runs of a gas with an energy on the uniform grid */
+  closure?: ClosureKind;
   /** magnetic diffusivity eta (with a field): the Ohmic electric field is eta curl B */
   resistivity?: number;
   /** turbulence driving (hydro/drive.ts): rms acceleration (0 off), correlation time, band, solenoidal weight, seed */

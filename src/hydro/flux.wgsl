@@ -23,6 +23,40 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32, d: vec4<
 
 #include <riemann>
 #include "hydro/diffusion.wgsl"
+// The turbulence closure (closure/closure.ts), or nothing: <closure> is hydro/closure_on.wgsl
+// or hydro/closure_off.wgsl. g_clos is the face's (a, b), which the functions that know the
+// face's two cells (axis_fluxes, flux_between) set before they call face_flux.
+#include <closure>
+var<private> g_clos: vec3<f32> = vec3<f32>(0.0);
+// With it, the passive scalar of the four cells along the face's normal, lowest first (the
+// face lies between the second and the third), as they are at the start of the step.
+var<private> g_clos_s: vec4<f32> = vec4<f32>(0.0);
+
+// A face's scalar state moved to `want` by the closure, but no further from its own cell's
+// value `own` than a limited slope could have put it: toward the other cell of the face (by
+// `b`, the difference to it), and by no more than the cell's value differs from its neighbor
+// on the far side (`a`); or as far as the reconstruction itself went (`base`), if that is
+// further. So the closure never steepens the scalar past what a slope limiter allows, and no
+// value leaves the range of its neighbors: without this the scalar rang at sharp fronts.
+fn closure_bound(want: f32, base: f32, own: f32, a: f32, b: f32) -> f32 {
+  let m = select(0.0, sign(b) * min(abs(a), abs(b)), a * b > 0.0);
+  let d0 = base - own;
+  return own + clamp(want - own, min(min(m, d0), 0.0), max(max(m, d0), 0.0));
+}
+
+// The scalar's compression: a face's state `have` moved on toward the other cell of the face
+// by the share c of what is left to the limiter's bound (the same a and b as closure_bound),
+// which keeps a front between two values of the dye from spreading over more cells each step.
+// Not at an extremum, where there is no bound to move toward. The state's own cell value
+// `own` is half a step on, so the result is held, as a value, between the face's two cells as
+// they are at the start of the step (sc, so): it may reach the other cell's value, not pass it.
+fn closure_compress(have: f32, own: f32, a: f32, b: f32, c: f32, sc: f32, so: f32) -> f32 {
+  let m = select(0.0, sign(b) * min(abs(a), abs(b)), a * b > 0.0);
+  let d1 = have - own;
+  if (m == 0.0 || abs(m) <= abs(d1)) { return have; }
+  let want = own + d1 + c * (m - d1);
+  return max(min(want, max(max(sc, so), have)), min(min(sc, so), have));
+}
 
 // Cyclic rotation that puts the face normal in x, and its inverse.
 fn rot(v: vec3<f32>, axis: i32) -> vec3<f32> {
@@ -81,9 +115,36 @@ fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>) 
   // Neither face state may fall below half the smaller of the two cells' own values.
   let lo = 0.5 * min(vec2<f32>(l.a.x, l.b.x), vec2<f32>(r.a.x, r.b.x));
   comp_use(kl);
-  let sl = to_side(l, ls, 1.0, axis, lo);
+  var sl = to_side(l, ls, 1.0, axis, lo);
   comp_use(kr);
-  let sr = to_side(r, rs, -1.0, axis, lo);
+  var sr = to_side(r, rs, -1.0, axis, lo);
+  if (CLOSURE) {
+    // The closure: the Riemann solver is shown only the share 1 - a of the velocity's jump and
+    // 1 - b of the passive scalar's, about the mean of the two face states. Its dissipation of
+    // shear and its diffusion of the scalar are proportional to those jumps, so they fall by
+    // the same shares; a is at most 0.8, so a fifth of the first always remains, and the
+    // scalar's states are bounded as a limited slope bounds them (closure_bound). Where
+    // they are zero (every face of a cell whose gate is shut) the states are left as they are,
+    // to the bit.
+    if (g_clos.x > 0.0) {
+      let vm = 0.5 * (sl.v + sr.v);
+      let vh = 0.5 * (1.0 - g_clos.x) * (sl.v - sr.v);
+      sl.v = vm + vh;
+      sr.v = vm - vh;
+    }
+    if (g_clos.y > 0.0) {
+      let cm = 0.5 * (sl.s + sr.s);
+      let ch = 0.5 * (1.0 - g_clos.y) * (sl.s - sr.s);
+      let q = g_clos_s;
+      sl.s = closure_bound(cm + ch, sl.s, l.b.y, q.y - q.x, q.z - q.y);
+      sr.s = closure_bound(cm - ch, sr.s, r.b.y, q.z - q.w, q.y - q.z);
+    }
+    if (g_clos.z > 0.0) {
+      let q = g_clos_s;
+      sl.s = closure_compress(sl.s, l.b.y, q.y - q.x, q.z - q.y, g_clos.z, q.y, q.z);
+      sr.s = closure_compress(sr.s, r.b.y, q.z - q.w, q.y - q.z, g_clos.z, q.z, q.y);
+    }
+  }
   var F = riemann_flux(sl, sr, w);
   F.mom = unrot(F.mom, axis);
   return F;
@@ -137,10 +198,11 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   let lo = edge_dn(wm1, w0, wp1, d.y, d.z, t.x);
   let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
   let sp = edge_dn(w0, wp1, wp2, d.z, d.w, select(-t.y, t.y, d.z == t.y));
-  return Faces(
-    add_diffusion(face_flux(pm1, sm, p0, lo, axis, km1, k0), c - e, e, axis, nm1, w0),
-    add_diffusion(face_flux(p0, hi, pp1, sp, axis, k0, kp1), c, e, axis, w0, np1),
-  );
+  if (CLOSURE) { g_clos = closure_face(c - e, c); g_clos_s = vec4<f32>(wm2.b.y, wm1.b.y, w0.b.y, wp1.b.y); }
+  let flo = add_diffusion(face_flux(pm1, sm, p0, lo, axis, km1, k0), c - e, e, axis, nm1, w0);
+  if (CLOSURE) { g_clos = closure_face(c, c + e); g_clos_s = vec4<f32>(wm1.b.y, w0.b.y, wp1.b.y, wp2.b.y); }
+  let fhi = add_diffusion(face_flux(p0, hi, pp1, sp, axis, k0, kp1), c, e, axis, w0, np1);
+  return Faces(flo, fhi);
 }
 
 // Flux through the single face between cell a and cell a + e. The same arithmetic as
@@ -198,6 +260,7 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   // the wall from its own side.
   let sl = edge_up(wll, wl, wr, d.x, d.y, ws.x * (sides.x * ws.y));
   let sr = edge_dn(wl, wr, wrr, d.y, d.z, ws.x * (sides.y * ws.z));
+  if (CLOSURE) { g_clos = closure_face(a, a + e); g_clos_s = vec4<f32>(wll.b.y, wl.b.y, wr.b.y, wrr.b.y); }
   return add_diffusion(face_flux(pl, sl, pr, sr, axis, kl, kr), a, e, axis, nl, nr);
 }
 

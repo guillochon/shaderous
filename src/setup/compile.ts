@@ -501,6 +501,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
     damping,
     viscosity: ph.viscosity,
     conductivity: ph.conductivity,
+    closure: ph.closure,
     resistivity: ph.resistivity,
     driving: ph.driving ? { ...ph.driving } : undefined,
     gext: gext === undefined ? undefined : Array.isArray(gext) ? () => [...gext] as [number, number, number] : (ndim) => (ndim === 2 ? [0, -gext.down, 0] : [0, 0, -gext.down]),
