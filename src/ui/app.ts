@@ -177,7 +177,7 @@ side.innerHTML = `
     <div id="timing"></div>
   </details>
 
-  <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a> &middot; <a href="https://hub.valency.io/works/W_e4sja6m3" target="_blank" rel="noopener" title="The paper that describes this simulator">Paper on Valency</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 // On a phone the rail lies over the simulation, so it can be put away (remembered in this
