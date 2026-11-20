@@ -97,6 +97,9 @@ export interface AppHooks {
   background(): string;
   athdf(): Promise<{ time: number; bytes: Uint8Array; stem: string }>;
   setColormap(name: string): void;
+  /** The volume view's opacity curve (render/transfer.ts), and setting it. */
+  opacityCurve(): { x: number; a: number }[];
+  setOpacityCurve(points: { x: number; a: number }[]): void;
   setAutoRange(on: boolean): void;
   sync(): void;
   /** What the color bar and the triad show, for the view as it stands (render/overlays.ts). */
@@ -736,6 +739,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
   let recording: { status: RecordingStatus; stop: boolean } | null = null;
   /** The file athdf({ chunked: true }) made, until athdfChunk has read it out. */
   let heldAthdf: Uint8Array | null = null;
+  /** The .athdf file athdfPut is putting together for loadAthdf(), and how many bytes have come. */
+  let incoming: { bytes: Uint8Array; got: number } | null = null;
 
   async function record(opts: RecordOptions = {}): Promise<RecordResult> {
     const s = current();
@@ -861,8 +866,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
 
   const VIEW_KEYS: string[] = VIEW_OPTIONS.map((o) => o.key);
 
-  function setView(changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean }) {
-    const { colormap, autoRange, ...v } = changes;
+  function setView(changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean; tf?: string }) {
+    const { colormap, autoRange, tf, ...v } = changes;
     for (const k of Object.keys(v)) if (!VIEW_KEYS.includes(k)) throw new Error(`unknown view setting "${k}": use one of ${[...VIEW_KEYS, ...VIEW_EXTRAS.map((o) => o.key)].join(', ')}`);
     if (v.field !== undefined && !(v.field >= 0 && v.field < FIELDS.length)) throw new Error(`field is an index into FIELDS, 0 to ${FIELDS.length - 1}`);
     if (v.mode !== undefined && !VIEW_MODES.includes(v.mode)) throw new Error(`mode is one of ${VIEW_MODES.join(', ')}`);
@@ -870,13 +875,20 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       if (!(colormap in COLORMAPS)) throw new Error(`unknown colormap "${colormap}": use one of ${Object.keys(COLORMAPS).join(', ')}`);
       app.setColormap(colormap);
     }
+    if (tf !== undefined) {
+      const pts = String(tf).split(',').map((s) => s.split(':').map(Number));
+      if (!(pts.length >= 2 && pts.length <= 16 && pts.every((p) => p.length === 2 && p.every((x) => x >= 0 && x <= 1)))) {
+        throw new Error('tf is 2 to 16 points "x:a" separated by commas, each number 0 to 1');
+      }
+      app.setOpacityCurve(pts.map(([x, a]) => ({ x, a })).sort((p, q) => p.x - q.x));
+    }
     Object.assign(app.view, v);
     if (v.lo !== undefined || v.hi !== undefined) app.setAutoRange(false);
     if (autoRange !== undefined) app.setAutoRange(autoRange);
     app.sync();
     // The colormap in force, as the panel's menu holds it (synced above), so that a caller can put it back.
     const menu = document.getElementById('cmap') as HTMLSelectElement | null;
-    return { ...app.view, colormap: menu?.value || colormap };
+    return { ...app.view, colormap: menu?.value || colormap, tf: app.opacityCurve().map((p) => `${+p.x.toFixed(4)}:${+p.a.toFixed(4)}`).join(',') };
   }
 
   /** The panel's controls that are showing, with what each holds. */
@@ -1137,15 +1149,34 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
 
     /**
      * Start a run from an .athdf file, given as base64: one of ours with its settings, or another
-     * code's. `warnings` lists what an older file of ours could not carry over as written.
+     * code's. `warnings` lists what an older file of ours could not carry over as written. With
+     * no argument, the file athdfPut has put together: a large file is past the longest string
+     * the browser takes in one piece.
      */
-    loadAthdf: (base64: string) =>
+    loadAthdf: (base64?: string) =>
       serial(async () => {
+        let bytes: Uint8Array;
+        if (base64 !== undefined) bytes = fromBase64(base64);
+        else {
+          if (!incoming || incoming.got !== incoming.bytes.length) throw new Error('no whole .athdf file has been put: call athdfPut for each piece first');
+          bytes = incoming.bytes;
+        }
+        incoming = null;
         let warnings: string[] = [];
         await built(async () => {
-          warnings = await app.importAthdf(fromBase64(base64));
+          warnings = await app.importAthdf(bytes);
         });
         return { ...(await state()), warnings };
+      }),
+    /** One piece of an .athdf file for loadAthdf(): `base64` is its bytes from `offset`, of a file of `total` bytes. */
+    athdfPut: (offset: number, base64: string, total: number) =>
+      serial(async () => {
+        if (offset === 0 || !incoming || incoming.bytes.length !== total) incoming = { bytes: new Uint8Array(total), got: 0 };
+        const piece = fromBase64(base64);
+        if (offset + piece.length > total) throw new Error(`a piece at ${offset} of ${piece.length} bytes runs past the file's ${total}`);
+        incoming.bytes.set(piece, offset);
+        incoming.got += piece.length;
+        return { got: incoming.got, total };
       }),
 
     /** The run: problem, grid, clock, and the query string that reproduces its setup. */
@@ -1305,7 +1336,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     recordingStatus: async (): Promise<RecordingStatus | null> => (recording ? { ...recording.status } : null),
 
     /** Change what the view shows (ViewState keys, plus colormap and autoRange). The run is untouched. */
-    view: (changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean } = {}) => serial(async () => setView(changes)),
+    view: (changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean; tf?: string } = {}) => serial(async () => setView(changes)),
 
     /**
      * The state of the gas as an .athdf file (HDF5, readable by yt and Athena++'s tools), base64.

@@ -215,6 +215,7 @@ by `npm run gen`.
 | `box` | The view | Volume view: outline the box (on by default) |
 | `flines` | The view | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
 | `nflines` | The view | How many field lines |
+| `flfloor` | The view | Field lines end where \|B\| falls below this fraction of the largest \|B\|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star |
 | `mirror` | The view | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
 | `cmap` | The view | Colormap |
 | `tf` | The view | Volume view: the opacity curve, as x:a points separated by commas |
@@ -297,9 +298,10 @@ paused at t = 0. With a `document`, the run is built from that setup document, a
 says the grid and what differs from it; a document may also be given alone. If the build
 fails, the call rejects with the page's error.
 
-### `loadAthdf(base64) → state`
+### `loadAthdf(base64?) → state`
 
-Starts a run from an `.athdf` file, paused at the file's time. A file Shaderous wrote carries
+Starts a run from an `.athdf` file, paused at the file's time. With no argument, from the file
+`athdfPut` has put together (for a file too large for one string; see `athdf`). A file Shaderous wrote carries
 its own setup, so the run continues exactly where the file left off. A file from another code
 (Athena++, or anything else that writes the same layout) is loaded into the current preset at
 the nearest resolution on offer.
@@ -638,8 +640,10 @@ carries each under the key in the second column:
 | `box` | `box` | Volume view: outline the box (on by default) |
 | `fieldLines` | `flines` | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
 | `fieldLineCount` | `nflines` | How many field lines |
+| `fieldLineFloor` | `flfloor` | Field lines end where \|B\| falls below this fraction of the largest \|B\|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star |
 | `mirrorImages` | `mirror` | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
 | `colormap` | `cmap` | A name from `describe().colormaps` |
+| `tf` | `tf` | Volume view: the opacity curve, as `x:a` points separated by commas (2 to 16 of them; x a fraction of the color range, a the opacity, each 0 to 1), as in a link. The default is `0:0,0.25:0.02,0.6:0.25,1:0.9` |
 | `autoRange` |  | Fit the color range to the data |
 <!-- /gen:view -->
 
@@ -783,6 +787,13 @@ over. With `{ chunked: true }` the page keeps the file and returns no `base64`; 
 with `athdfChunk(offset, length) → { offset, end, base64 }`, bytes `offset` to `end`, until
 `end` reaches `bytes`. The page lets the file go once its last byte is read. The runner and the
 MCP server's `save_athdf` read every file this way, 64 MB at a time.
+
+### `athdfPut(offset, base64, total) → { got, total }`
+
+One piece of an `.athdf` file for `loadAthdf()`: its bytes from `offset`, base64-encoded, of a
+file of `total` bytes. Send the pieces in order from offset 0, then call `loadAthdf()` with no
+argument to start the run from the whole file. The runner's `--from` and the MCP server's
+`load_athdf` send files this way, 48 MB at a time.
 
 ### `errors() → string[]`
 

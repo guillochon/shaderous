@@ -2,7 +2,7 @@
 // when installed from npm, or from a URL given), opened in Chrome with WebGPU, and its scripting
 // API (window.shaderous, docs/api.md) callable from Node. Shared by the command-line runner
 // (cli.mjs) and the MCP server (mcp.mjs).
-import { closeSync, existsSync, openSync, writeSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync, statSync, writeSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import os from 'node:os';
@@ -217,6 +217,28 @@ export async function saveAthdf(call, pick) {
     closeSync(fd);
   }
   return { file, name: f.name, time: f.time, bytes: f.bytes };
+}
+
+/**
+ * Start the page's run from the .athdf file at `file`, sent in pieces (athdfPut, then
+ * loadAthdf()), so that a file of gigabytes is never one string. Returns what loadAthdf returns.
+ */
+export async function uploadAthdf(call, file) {
+  const CHUNK = 48 * 1024 * 1024;
+  const total = statSync(file).size;
+  const fd = openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(Math.min(CHUNK, total));
+    for (let offset = 0; offset < total; ) {
+      const n = readSync(fd, buf, 0, Math.min(CHUNK, total - offset), offset);
+      if (n <= 0) throw new Error(`${file}: short read at byte ${offset}`);
+      await call('athdfPut', offset, buf.subarray(0, n).toString('base64'), total);
+      offset += n;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return call('loadAthdf');
 }
 
 /** A PNG data URL as bytes. */

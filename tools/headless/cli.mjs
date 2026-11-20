@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { helpText, OPTIONS } from './flags.mjs';
-import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, saveAthdf, setupQuery } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, saveAthdf, setupQuery, uploadAthdf } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const HELP = `Usage: shaderous <command> [setup] [options]   (in a checkout: npm run headless -- <command> ...)
@@ -53,6 +53,9 @@ if (o.help || !command) {
 }
 if (!['run', 'sweep', 'describe'].includes(command)) usage(`unknown command "${command}"\n\n${HELP}`);
 if (o['low-priority']) lowerPriority();
+if (o.from && (setupArg || o.setup || o.problem || o.dim || o.n || o.amr || o.set?.length || o.vary?.length || command === 'sweep')) {
+  usage('--from carries on a run as its file has it: give no setup, --setup, --problem, --dim, --n, --amr, --set or --vary with it, and use run, not sweep');
+}
 const sliceFormat = o['slice-format'] ?? 'json';
 if (!['json', 'npy'].includes(sliceFormat)) usage(`--slice-format is json or npy, not "${sliceFormat}"`);
 
@@ -120,7 +123,8 @@ async function runOne(session, q, dir) {
   const tw = Date.now();
   const wallMs = o.wall === undefined ? undefined : num(o.wall, 'wall') * 1000;
   if (wallMs !== undefined && !(wallMs > 0)) fail('--wall must be positive');
-  const st = await call('load', q.toString(), ...(setupDocument ? [setupDocument] : []));
+  const st = o.from ? await uploadAthdf(call, o.from) : await call('load', q.toString(), ...(setupDocument ? [setupDocument] : []));
+  for (const w of st.warnings ?? []) log(`  ${o.from}: ${w}`);
   mkdirSync(dir, { recursive: true });
   const until = num(o.until, 'until') ?? (o.steps === undefined ? st.tEnd : undefined);
   const steps = num(o.steps, 'steps');

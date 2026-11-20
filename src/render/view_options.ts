@@ -63,12 +63,14 @@ export const VIEW_OPTIONS = [
   { key: 'box', link: 'box', type: 'boolean', doc: 'Volume view: outline the box (on by default)' },
   { key: 'fieldLines', link: 'flines', type: 'boolean', doc: 'A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function' },
   { key: 'fieldLineCount', link: 'nflines', type: 'int', min: 1, max: MAX_FIELD_LINES, doc: 'How many field lines' },
+  { key: 'fieldLineFloor', link: 'flfloor', type: 'number', min: 0.00001, max: 0.5, doc: 'Field lines end where |B| falls below this fraction of the largest |B|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star' },
   { key: 'mirrorImages', link: 'mirror', type: 'boolean', doc: 'An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default)' },
 ] as const satisfies readonly ViewOption[];
 
 /** What `shaderous.view()` takes besides: settings that are not part of the view's own state. */
 export const VIEW_EXTRAS = [
   { key: 'colormap', link: 'cmap', doc: 'A name from `describe().colormaps`' },
+  { key: 'tf', link: 'tf', doc: 'Volume view: the opacity curve, as `x:a` points separated by commas (2 to 16 of them; x a fraction of the color range, a the opacity, each 0 to 1), as in a link. The default is `0:0,0.25:0.02,0.6:0.25,1:0.9`' },
   { key: 'autoRange', link: '', doc: 'Fit the color range to the data' },
 ] as const;
 

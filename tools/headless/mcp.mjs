@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import { debrisSummary, fetchSlice, lowerPriority, openSession, saveAthdf } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, saveAthdf, uploadAthdf } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const { values: o } = parseArgs({
@@ -200,7 +200,7 @@ const TOOLS = [
   },
   {
     name: 'load_athdf',
-    run: async ({ path: p }) => text(await call('loadAthdf', readFileSync(resolvePath(p)).toString('base64'))),
+    run: async ({ path: p }) => text(await uploadAthdf(call, resolvePath(p))),
   },
   {
     name: 'debris',

@@ -5280,6 +5280,11 @@ const api = installApi(
       editor.set(editor.points, name);
       pushTransfer();
     },
+    opacityCurve: () => editor.points.map((p) => ({ ...p })),
+    setOpacityCurve(points) {
+      editor.set(points, editor.colormap);
+      pushTransfer();
+    },
     setAutoRange(on) {
       $<HTMLInputElement>('auto').checked = on;
     },

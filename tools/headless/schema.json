@@ -548,6 +548,11 @@
    "about": "How many field lines"
   },
   {
+   "key": "flfloor",
+   "group": "view",
+   "about": "Field lines end where |B| falls below this fraction of the largest |B|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star"
+  },
+  {
    "key": "mirror",
    "group": "view",
    "about": "An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default)"
@@ -765,6 +770,14 @@
    "about": "How many field lines"
   },
   {
+   "key": "fieldLineFloor",
+   "link": "flfloor",
+   "type": "number",
+   "min": 0.00001,
+   "max": 0.5,
+   "about": "Field lines end where |B| falls below this fraction of the largest |B|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star"
+  },
+  {
    "key": "mirrorImages",
    "link": "mirror",
    "type": "boolean",
@@ -775,6 +788,12 @@
    "link": "cmap",
    "type": "extra",
    "about": "A name from `describe().colormaps`"
+  },
+  {
+   "key": "tf",
+   "link": "tf",
+   "type": "extra",
+   "about": "Volume view: the opacity curve, as `x:a` points separated by commas (2 to 16 of them; x a fraction of the color range, a the opacity, each 0 to 1), as in a link. The default is `0:0,0.25:0.02,0.6:0.25,1:0.9`"
   },
   {
    "key": "autoRange",
@@ -1150,7 +1169,7 @@
     {
      "name": "changes",
      "type": "object",
-     "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, mirrorImages, colormap, autoRange"
+     "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, colormap, tf, autoRange"
     }
    ],
    "changesRun": false
@@ -1621,7 +1640,7 @@
    "name": "screenshot",
    "method": "screenshot",
    "brief": "Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path`",
-   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, mirrorImages, colormap, autoRange. Settings persist for later screenshots. `native` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.",
+   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, colormap, tf, autoRange. Settings persist for later screenshots. `native` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1687,7 +1706,7 @@
     "properties": {
      "changes": {
       "type": "object",
-      "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, mirrorImages, colormap, autoRange"
+      "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, colormap, tf, autoRange"
      }
     },
     "required": [

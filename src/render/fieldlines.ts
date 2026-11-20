@@ -298,7 +298,8 @@ export class FieldLines {
     const points = plane ? POINTS.plane : POINTS.space;
     const axis = v.sliceAxis;
     const pos = v.slicePos;
-    const key = `${plane}|${axis}|${pos}|${count}`;
+    const floor = Math.min(0.5, Math.max(1e-5, v.fieldLineFloor || 0.01));
+    const key = `${plane}|${axis}|${pos}|${count}|${floor}`;
     const again = key !== this.placedFor;
     this.placedFor = key;
     this.count = count;
@@ -308,7 +309,7 @@ export class FieldLines {
       m.width, m.height, m.depthOrArrayLayers, sim.cfg.problem.box,
       plane ? 1 : 0, axis, pos, count,
       points, plane ? STEP.plane : STEP.space, this.frameNo++, again ? 1 : 0,
-      per[0], per[1], per[2], 0,
+      per[0], per[1], per[2], floor,
     ]));
     // Largest |B| in the volume, and the least and greatest on the lines: from nothing. The box
     // around the field new seeds are drawn in (render/fieldlines.wgsl): empty.

@@ -17,7 +17,7 @@ struct Lines {
   dims: vec4<f32>,    // xyz: voxels of the volume; w: the box's side in code units
   plane: vec4<f32>,   // x: 1 to trace in a plane; y: its normal axis; z: its position; w: seeds
   trace: vec4<f32>,   // x: points per line; y: step, a fraction of the box; z: frame number; w: 1 to place every seed again
-  per: vec4<f32>,     // xyz: 1 along periodic axes
+  per: vec4<f32>,     // xyz: 1 along periodic axes; w: the floor, the fraction of the largest |B| where lines end
 }
 @group(0) @binding(0) var<uniform> F: Lines;
 @group(0) @binding(1) var BV: texture_3d<f32>;
@@ -90,7 +90,9 @@ fn place(st: ptr<function, u32>) -> vec3<f32> {
     var q = sp.lo + sp.size * vec3<f32>(rnd(st), rnd(st), rnd(st));
     if (in_plane()) { q[axis()] = F.plane.z; }
     let b = length(field(q));
-    let w = select(b * b, b, in_plane());
+    // In the plane: by the field's decades above the seed floor, so a field that falls off
+    // steeply (to a star's surface) still gets lines out where it is weak.
+    let w = select(b * b, log(max(b / (2.0 * F.per.w * bmax()), 1.0)), in_plane());
     if (w <= 0.0) { continue; }
     // Weighted reservoir sampling: the largest log(u) / w.
     let kk = log(max(rnd(st), 1.0e-30)) / w;
@@ -107,7 +109,7 @@ fn place(st: ptr<function, u32>) -> vec3<f32> {
 fn bound(@builtin(global_invocation_id) gid: vec3<u32>) {
   let m = vec3<u32>(F.dims.xyz);
   if (any(gid >= m)) { return; }
-  if (length(textureLoad(BV, gid, 0).xyz) < 0.02 * bmax()) { return; }
+  if (length(textureLoad(BV, gid, 0).xyz) < 2.0 * F.per.w * bmax()) { return; }
   for (var a = 0; a < 3; a++) {
     atomicMin(&BB[a], gid[a]);
     atomicMax(&BB[a + 3], gid[a]);
@@ -131,7 +133,7 @@ fn advect(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     if (in_plane()) { q[axis()] = F.plane.z; }
     // Gone, or where the field has faded: placed again.
-    fresh = !inside(q) || length(field(q)) < 0.02 * bmax();
+    fresh = !inside(q) || length(field(q)) < 2.0 * F.per.w * bmax();
     s = vec4<f32>(q, 1.0);
   }
   if (fresh) { s = vec4<f32>(place(&st), 1.0); }
@@ -177,7 +179,7 @@ fn trace(@builtin(global_invocation_id) gid: vec3<u32>) {
   let h = F.trace.y;
   let p0 = SEEDS[i].xyz;
   let gap = vec4<f32>(0.0, 0.0, 0.0, -1.0);
-  let faint = 0.01 * bmax();
+  let faint = F.per.w * bmax();
   put(base + half, p0);
   // Forward, then backward unless the line closed on itself.
   var p = p0;

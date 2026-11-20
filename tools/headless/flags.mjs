@@ -15,6 +15,7 @@ export const SECTIONS = [
       F(['problem ID', 'dim 2|3', 'n CELLS', 'amr LEVELS'], 'The preset, and its grid'),
       F('set KEY=VALUE', 'Any other setup key, repeatable: --set gamma=1.4 --set p.mach=3', { many: true }),
       F('setup FILE', ['A setup document (name.shaderous.json, see docs/setups.md) in place of', "--problem: a preset's file, or one saved from the Setup dialog. The", 'keys above then say the grid and what differs from the file']),
+      F('from FILE', ['Carry on from an .athdf file the runner, the page or save_athdf wrote, at', "its time, with its settings: no setup keys, --setup or --vary. Times", "(--until, output times) are the run's own, so --until is where it ends"]),
     ],
   },
   {

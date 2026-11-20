@@ -144,6 +144,13 @@ const check = (ok, what) => {
   const wfiles = wman.outputs.map((x) => x.files);
   check(wres.status === 0 && wman.stopped === 'wall' && wfiles.length >= 2 && wfiles.every((f, i) => f.some((n) => n.endsWith('-rho.png')) && f.some((n) => n.endsWith('-p.png')) && f.some((n) => n.endsWith('.athdf')) === (i === wfiles.length - 1)),
     `cli --every-wall, --wall, --shot and --athdf-every 0${wres.status ? `: ${wres.stderr}` : ''}`);
+  // Carry on from the checkpoint the run above ended with.
+  const wlast = wman.outputs.at(-1);
+  const ckpt = wlast ? path.join(wout, wlast.files.find((f) => f.endsWith('.athdf')) ?? '') : '';
+  const fout = path.join(tmp, 'cli-from');
+  const fres = ckpt ? spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--from', ckpt, '--steps', '5', '--out', fout, '--quiet'], { encoding: 'utf8' }) : { status: 1, stderr: 'no checkpoint' };
+  const flines = existsSync(path.join(fout, 'diag.jsonl')) ? readFileSync(path.join(fout, 'diag.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+  check(fres.status === 0 && flines.length === 2 && Math.abs(flines[0].t - wlast.t) < 1e-6 * Math.max(1, wlast.t) && flines[1].steps === wlast.steps + 5, `cli --from carries on from a checkpoint${fres.status ? `: ${fres.stderr}` : ''}`);
   const bad = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'nope', '--out', path.join(tmp, 'bad'), '--quiet'], { encoding: 'utf8' });
   check(bad.status === 1 && /unknown problem/.test(bad.stderr) && !existsSync(path.join(tmp, 'bad')), 'cli reports a bad setup and writes nothing');
 }

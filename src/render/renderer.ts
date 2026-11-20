@@ -76,6 +76,8 @@ export interface ViewState {
    */
   fieldLines: boolean;
   fieldLineCount: number;
+  /** Where the lines end: |B| below this fraction of the largest. New seeds go only where it is above twice that. */
+  fieldLineFloor: number;
   /**
    * A run computing an octant (or a 2D quadrant) of a mirror-symmetric configuration: draw the
    * whole of it, the computed part and its images (mirrorShown()).
@@ -194,6 +196,7 @@ export const defaultView = (): ViewState => ({
   box: true,
   fieldLines: false,
   fieldLineCount: 160,
+  fieldLineFloor: 0.01,
   mirrorImages: true,
 });
 
