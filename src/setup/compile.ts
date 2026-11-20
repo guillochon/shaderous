@@ -273,7 +273,7 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
   const dwarfs = bodies.stars.some((s) => s.part.type === 'white-dwarf');
   // (A flow that only changes what the stars painted, a hot spot, brings no gas of its own.)
   const others = (spec.parts ?? []).some((p) => p.kind === 'disk' || p.kind === 'region' || (p.kind === 'flow' && flowValues(p).def.wholeBox));
-  // A circular binary: its stars are balanced in the Roche potential, each within its L1 point,
+  // A circular binary: its stars are balanced in the Roche potential, each within its Roche lobe,
   // and every point mass's pull (cores too) is in that potential (problems/settle.ts).
   const bin = bodies.binary;
   const reachOf = (s: (typeof bodies.stars)[number]): number | undefined => {
@@ -287,11 +287,12 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
       return {
         barotrope: s.barotrope, center: s.center, vel: s.vel, R: s.R, ...(reach !== undefined ? { reach } : {}), scalar: s.scalar,
         ...(s.spin ? { spin: s.spin } : {}),
+        ...(bin?.l1.has(s.id) ? { lobe: true } : {}),
         ...(bin ? { stiff: (G * s.M) / s.R ** 3, gm: G * s.M } : {}),
         ...(s.core && !bin ? { core: { gm: G * s.core.mass, soft: s.core.soft } } : {}),
       };
     }),
-    ...(bin ? { binary: { omega: bin.omega, masses: bodies.masses.filter((m) => !m.massless).map((m) => ({ gm: m.gm, at: [...m.pos], soft: m.soft ?? 0 })) } } : {}),
+    ...(bin ? { binary: { omega: bin.omega, masses: bodies.masses.filter((m) => !m.massless).map((m) => ({ gm: m.gm, at: [...m.pos], soft: m.soft ?? 0 })), lobe: bin.lobe } } : {}),
     rhoCut: amb.cut,
     rhoAmb: amb.rho,
     pAmb: spec.background?.p ?? bodies.stars[0].barotrope.pressure(amb.cut),

@@ -41,6 +41,9 @@ struct Settle {
   pm: array<vec4<f32>, 4>, // a binary's point masses: position, G M
   ps: vec4<f32>,       // and their softenings
   sp: vec4<f32>,       // a rotating frame's angular velocity (problems/settle.ts Settling.omega; 0 for none)
+  lf: vec4<f32>,       // a binary: per star, 1 if it stays inside its Roche lobe
+  lb: array<vec4<f32>, 2>, // the lobes' two bodies as points: position, G M
+  lbs: vec4<f32>,      // their softenings, and the Roche potential at L1
 }
 
 @group(0) @binding(10) var<uniform> S: Settle;
@@ -97,6 +100,8 @@ fn pull(i: u32, x: vec3<f32>) -> f32 {
       let d = x - S.pm[j].xyz;
       p -= S.pm[j].w / sqrt(dot(d, d) + S.ps[j] * S.ps[j]);
     }
+    // Outside its Roche lobe, no star: a potential this high holds no gas (problems/settle.ts).
+    if (S.lf[i] != 0.0 && lobe_phi(x) > S.lbs.z) { return 3.0e38; }
     // The uniform pull holding the star where the orbit put it (problems/settle.ts, holdPull).
     return p + dot(S.stars[i].q.xyz, x - S.stars[i].c.xyz);
   }
@@ -105,6 +110,13 @@ fn pull(i: u32, x: vec3<f32>) -> f32 {
     p += S.g.x * S.stars[j].r.y / length(x - S.stars[j].q.xyz);
   }
   return p;
+}
+
+// The Roche potential of the binary's two bodies as points (problems/roche.ts, lobePotential).
+fn lobe_phi(x: vec3<f32>) -> f32 {
+  let d0 = x - S.lb[0].xyz;
+  let d1 = x - S.lb[1].xyz;
+  return -0.5 * S.w.x * S.w.x * dot(x.xy, x.xy) - S.lb[0].w / sqrt(dot(d0, d0) + S.lbs.x * S.lbs.x) - S.lb[1].w / sqrt(dot(d1, d1) + S.lbs.y * S.lbs.y);
 }
 
 fn rho_of_h(i: u32, h: f32) -> f32 {

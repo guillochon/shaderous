@@ -12,7 +12,7 @@ import { coredPolytrope } from '../../problems/cored_polytrope';
 import { laneEmden, laneEmdenCached, polytropeK, polytropeMass, polytropeScales } from '../../problems/lane_emden';
 import { polytropeBarotrope, type Barotrope } from '../../problems/settle';
 import type { PointMass } from '../../problems/types';
-import { binaryOmega, fillSeparation, l1Distance } from '../../problems/roche';
+import { binaryOmega, fillSeparation, innerLagrange, type RocheBody } from '../../problems/roche';
 import { coldPressure, degenerateBarotrope, scalesOf, whiteDwarf } from '../../problems/white_dwarf';
 import type { MassPart, OrbitPart, Part, SetupSpec, StarPart, Vec3 } from '../spec';
 
@@ -311,6 +311,11 @@ export interface BinaryFrame {
   separation: number;
   /** each star's distance to L1, by its id */
   l1: Map<string, number>;
+  /**
+   * The Roche lobes: the two bodies as points and the potential at L1. A star's lobe is where,
+   * within its distance to L1, the Roche potential is no higher than that.
+   */
+  lobe?: { bodies: RocheBody[]; phi: number };
   /** the frame follows the orbit (OrbitPart.track) */
   track?: boolean;
 }
@@ -473,12 +478,17 @@ function placeStarBinary(o: OrbitPart, out: Bodies, ctx: BodyContext) {
   out.separations.set(`${o.of[0]}+${o.of[1]}`, sep);
   if (!circular) return;
   const omega = binaryOmega(G * (m1 + m2), sep, soft);
-  const d1 = l1Distance(m1, m2) * sep;
+  // The Roche lobes of the two as points (a point mass softened as its pull is), and L1 between them.
+  const bodies: RocheBody[] = [A, B].map((b) =>
+    b.star ? { gm: G * b.star.M, at: [...b.star.center], soft: 0 } : { gm: out.masses[b.i].gm, at: [...out.masses[b.i].pos], soft: out.masses[b.i].soft ?? 2 * ctx.dx },
+  );
+  const L1 = innerLagrange(bodies, omega);
+  const dist = (p: number[]) => Math.hypot(L1.at[0] - p[0], L1.at[1] - p[1], L1.at[2] - (p[2] ?? 0));
   const l1 = new Map<string, number>();
-  if (A.star) l1.set(A.star.id, d1);
-  if (B.star) l1.set(B.star.id, sep - d1);
+  if (A.star) l1.set(A.star.id, dist(bodies[0].at));
+  if (B.star) l1.set(B.star.id, dist(bodies[1].at));
   for (const b of [A, B]) if (b.star && !corotating) b.star.spin = omega;
-  out.binary = { omega, corotating, separation: sep, l1, ...(corotating && o.track ? { track: true } : {}) };
+  out.binary = { omega, corotating, separation: sep, l1, lobe: { bodies, phi: L1.phi }, ...(corotating && o.track ? { track: true } : {}) };
 }
 
 /** A part's quantity by name, for units that follow one: "<id>.mass" or "<id>.radius". */

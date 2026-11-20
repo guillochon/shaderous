@@ -2,8 +2,8 @@
 // places a star (setup/parts/bodies.ts) and what the compiled setup hands the run.
 import { describe, expect, it } from 'vitest';
 import { defaultEosParams, makeEos } from '../../src/eos/eos';
-import { binaryOmega, eggleton, fillSeparation, l1Distance, rochePotential } from '../../src/problems/roche';
-import { binaryPhi, holdPull } from '../../src/problems/settle';
+import { binaryOmega, eggleton, fillSeparation, innerLagrange, l1Distance, lobePotential, rochePotential } from '../../src/problems/roche';
+import { binaryPhi, holdPull, Settler, type SettleCells } from '../../src/problems/settle';
 import { compileSetup } from '../../src/setup/compile';
 import { buildBodies } from '../../src/setup/parts/bodies';
 import { checkSetup } from '../../src/setup/check';
@@ -42,6 +42,34 @@ describe('the Roche geometry', () => {
     expect(1 - l1Distance(1, 1e-6)).toBeCloseTo(Math.cbrt(1e-6 / 3), 4);
   });
 
+  it('finds L1 as the top of the pass between two bodies, and bounds each lobe by its level', () => {
+    for (const [m1, m2] of [[1, 0.6], [0.3, 1], [1, 1e-2]]) {
+      const M = m1 + m2;
+      const bodies = [{ gm: m1, at: [-m2 / M, 0, 0], soft: 0 }, { gm: m2, at: [m1 / M, 0, 0], soft: 0 }];
+      const L1 = innerLagrange(bodies, Math.sqrt(M));
+      expect(L1.at[0]).toBeCloseTo(-m2 / M + l1Distance(m1, m2), 6);
+      expect(L1.phi).toBeCloseTo(rochePotential(m1, m2, 1, L1.at[0], 0, 0), 12);
+      // Each lobe lies within the sphere of its body's distance to L1, and is the whole of what is
+      // under L1's level in that sphere: along any ray from the body the potential crosses it once.
+      bodies.forEach((b, k) => {
+        const r1 = Math.abs(L1.at[0] - b.at[0]);
+        for (let t = 0; t < 40; t++) {
+          const th = Math.acos(1 - (2 * (t + 0.5)) / 40);
+          const ph = 2.4 * t;
+          const dir = [Math.cos(th), Math.sin(th) * Math.cos(ph), Math.sin(th) * Math.sin(ph)];
+          let out = false;
+          for (let s = 1; s <= 200; s++) {
+            const r = (s / 200) * r1;
+            const x = b.at.map((c, a) => c + r * dir[a]);
+            const inside = lobePotential(bodies, Math.sqrt(M), x[0], x[1], x[2]) <= L1.phi;
+            if (!inside) out = true;
+            else expect(out, `body ${k}: back inside after leaving`).toBe(false);
+          }
+        }
+      });
+    }
+  });
+
   it('turns a softened binary as binaryMasses moves it', () => {
     expect(binaryOmega(1, 1)).toBe(1);
     expect(binaryOmega(8, 2, 0)).toBeCloseTo(1, 12);
@@ -74,7 +102,11 @@ describe('a binary with a star', () => {
     expect(st.vel[1]).toBeCloseTo(w * st.center[0], 12);
     expect(m.vel[1]).toBeCloseTo(w * m.pos[0], 12);
     expect(st.spin).toBeCloseTo(w, 12);
-    expect(b.binary!.l1.get('donor')).toBeCloseTo(l1Distance(1, 0.5) * a, 12);
+    // L1 of the softened companion's pull: near the point masses' own.
+    expect(b.binary!.l1.get('donor')).toBeCloseTo(l1Distance(1, 0.5) * a, 2);
+    const L1 = innerLagrange(b.binary!.lobe!.bodies, w);
+    expect(b.binary!.l1.get('donor')).toBeCloseTo(L1.at[0] - st.center[0], 12);
+    expect(b.binary!.lobe!.phi).toBeCloseTo(L1.phi, 12);
   });
 
   it('starts every body at rest in the corotating frame, which the run turns with', () => {
@@ -118,6 +150,8 @@ describe('a binary with a star', () => {
     expect(set.stars[0].reach).toBeCloseTo(b.binary!.l1.get('donor')!, 12);
     expect(set.stars[0].spin).toBeCloseTo(b.binary!.omega, 12);
     expect(set.stars[0].stiff).toBeCloseTo(1 / 0.5 ** 3, 12);
+    expect(set.stars[0].lobe).toBe(true);
+    expect(set.binary!.lobe).toEqual(b.binary!.lobe);
     // The grid holds the star's own pull: the rest is the companion's and the centrifugal term.
     const a = b.binary!.separation;
     const x1 = b.stars[0].center[0];
@@ -125,6 +159,41 @@ describe('a binary with a star', () => {
       const own = -1 / Math.hypot(x - x1, y, z);
       expect(binaryPhi(set.binary!, x, y, z) + own).toBeCloseTo(rochePotential(1, 0.5, a, x, y, z, 0.05), 10);
     }
+  });
+
+  it('takes no cell outside the Roche lobe, however much the star overfills it', () => {
+    const set = compileSetup(binary({ fill: 1.15 })).problem.settle!({}, eos);
+    const st = set.stars[0];
+    const lobe = set.binary!.lobe!;
+    const R = st.reach!;
+    const n = 48;
+    const h = (2.2 * R) / n;
+    const pos: [number, number, number][] = [];
+    for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) pos.push([st.center[0] + (i + 0.5) * h - 1.1 * R, (j + 0.5) * h - 1.1 * R, (k + 0.5) * h - 1.1 * R]);
+    // The grid's potential: the star's own, as a point.
+    const phi = new Float32Array(pos.map(([x, y, z]) => -1 / Math.max(Math.hypot(x - st.center[0], y, z), h)));
+    const settle = (inLobe: boolean) => {
+      const u1 = new Float32Array(pos.length * 4);
+      const u2 = new Float32Array(pos.length * 4);
+      // The star as painted, a sphere heavy enough to overfill its lobe.
+      pos.forEach(([x, y, z], q) => (u1[4 * q] = Math.hypot(x - st.center[0], y, z) < st.R ? 4 : set.rhoAmb));
+      const cells: SettleCells = { count: pos.length, pos: (q) => pos[q], vol: () => h ** 3, u1, u2 };
+      const s = new Settler({ ...set, stars: [{ ...st, lobe: inLobe }] }, cells);
+      for (let r = 0; r < 4; r++) s.round(phi);
+      let outside = 0;
+      let filled = 0;
+      pos.forEach(([x, y, z], q) => {
+        if (!(u1[4 * q] > set.rhoCut)) return;
+        filled++;
+        if (lobePotential(lobe.bodies, set.binary!.omega, x, y, z) > lobe.phi) outside++;
+      });
+      return { outside, filled };
+    };
+    // Bounded by its reach alone, it spills past the lobe around L1; bounded by the lobe, not a cell.
+    expect(settle(false).outside).toBeGreaterThan(100);
+    const inLobe = settle(true);
+    expect(inLobe.filled).toBeGreaterThan(1000);
+    expect(inLobe.outside).toBe(0);
   });
 
   it('takes a point-mass companion’s mass from q against the star’s', () => {

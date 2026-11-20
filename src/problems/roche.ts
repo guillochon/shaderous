@@ -61,6 +61,62 @@ export function rochePotential(gm1: number, gm2: number, a: number, x: number, y
   return -gm1 / Math.hypot(x - x1, y, z) - gm2 / Math.hypot(x - x2, y, z, soft) - 0.5 * w * w * (x * x + y * y);
 }
 
+/** One body of a binary as the Roche potential sees it: G times its mass, where it is, its softening. */
+export interface RocheBody {
+  gm: number;
+  at: number[];
+  soft: number;
+}
+
+/**
+ * The Roche potential of two point bodies anywhere (box-centered coordinates) in the frame
+ * turning at `omega` about z through the box center, where their center of mass is.
+ */
+export function lobePotential(bodies: RocheBody[], omega: number, x: number, y: number, z: number): number {
+  let p = -0.5 * omega * omega * (x * x + y * y);
+  for (const b of bodies) p -= b.gm / Math.hypot(x - b.at[0], y - b.at[1], z - (b.at[2] ?? 0), b.soft);
+  return p;
+}
+
+/**
+ * L1 of two bodies: the highest point of the Roche potential on the segment between them (a
+ * saddle, the lowest pass from one lobe to the other). Returns the point and its potential, the
+ * level of the surface that bounds both Roche lobes.
+ */
+export function innerLagrange(bodies: RocheBody[], omega: number): { at: number[]; phi: number } {
+  const [a, b] = bodies;
+  const pt = (t: number) => [0, 1, 2].map((k) => (a.at[k] ?? 0) + t * ((b.at[k] ?? 0) - (a.at[k] ?? 0)));
+  const f = (t: number) => {
+    const [x, y, z] = pt(t);
+    return lobePotential(bodies, omega, x, y, z);
+  };
+  // Golden-section search for the maximum: the potential falls toward each body.
+  const g = (Math.sqrt(5) - 1) / 2;
+  let lo = 1e-6;
+  let hi = 1 - 1e-6;
+  let c = hi - g * (hi - lo);
+  let d = lo + g * (hi - lo);
+  let fc = f(c);
+  let fd = f(d);
+  for (let i = 0; i < 200 && hi - lo > 1e-14; i++) {
+    if (fc > fd) {
+      hi = d;
+      d = c;
+      fd = fc;
+      c = hi - g * (hi - lo);
+      fc = f(c);
+    } else {
+      lo = c;
+      c = d;
+      fc = fd;
+      d = lo + g * (hi - lo);
+      fd = f(d);
+    }
+  }
+  const t = 0.5 * (lo + hi);
+  return { at: pt(t), phi: f(t) };
+}
+
 /** Separation at which body 1, of radius R1, is `fill` times the size of its Roche lobe (Eggleton). */
 export function fillSeparation(R1: number, m1: number, m2: number, fill: number): number {
   return R1 / (fill * eggleton(m1 / m2));

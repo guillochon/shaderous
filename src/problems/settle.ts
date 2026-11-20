@@ -33,7 +33,10 @@
 // balanced in the whole potential, the grid's (both stars' gas) and the point masses' with the
 // frame's centrifugal term, the Roche potential (Settling.binary, problems/roche.ts), so that it
 // starts tidally stretched toward its companion as a star in a close binary is. Each star then
-// reaches no farther than its L1 point. But nothing in h + phi = C says where along the line of
+// stays inside its Roche lobe: a cell where the Roche potential of the two bodies as points is
+// higher than at L1 takes none of its gas (Settling.binary.lobe). Bounded only by the sphere of
+// its distance to L1, a star that fills its lobe bulged past the lobe around L1, out to that
+// sphere, which cut it off flat across the line of centers. But nothing in h + phi = C says where along the line of
 // centers the star is, and there the tidal field pulls it away from its place: left alone, the
 // rounds slid a star that fills its lobe half its radius toward L1 and cut it off there. So each
 // star is held where the orbit put it, as self-consistent-field binaries are (Hachisu 1986, who
@@ -54,6 +57,8 @@
 // star's gas is one it knows (Barotrope.gpu): only per-block sums come back, where the Settler
 // here reads the whole mesh back, some 100 bytes a cell, more than a page may hold on a mesh of
 // tens of GB. The two agree to a few parts in a million of the peak density.
+
+import { lobePotential, type RocheBody } from './roche';
 
 /** A polytropic star at rest at the box center, to be settled into the grid's hydrostatic balance. */
 export interface StarSpec {
@@ -93,6 +98,8 @@ export interface SettleStar {
   R: number;
   /** farthest from its center a cell may become part of it (default: anywhere) */
   reach?: number;
+  /** In a binary: it stays inside its Roche lobe (Settling.binary.lobe) */
+  lobe?: boolean;
   /** passive scalar of its gas */
   scalar: number;
   /**
@@ -133,7 +140,16 @@ export interface Settling {
    * point mass, the stars' cores among them, which SettleStar.core then leaves out) and the
    * centrifugal term.
    */
-  binary?: { omega: number; masses: { gm: number; at: number[]; soft: number }[] };
+  binary?: {
+    omega: number;
+    masses: { gm: number; at: number[]; soft: number }[];
+    /**
+     * The binary's Roche lobes (problems/roche.ts): its two bodies as points, and the potential
+     * at L1. A star with SettleStar.lobe takes no cell where that potential is higher: it ends
+     * on the Roche surface, not on the sphere of its reach.
+     */
+    lobe?: { bodies: RocheBody[]; phi: number };
+  };
   /**
    * The angular velocity of a rotating frame with the centrifugal force (Problem.rotation): each
    * star is balanced in the centrifugal potential of its own spin, -|Omega x (x - x_c)|^2 / 2
@@ -483,6 +499,7 @@ export class Settler {
     this.set.stars.forEach((s, i) => {
       const idx = this.cells[i];
       const hold = bin ? holdPull(this.set, i, coms, (this.held[i] ??= [0, 0, 0])) : null;
+      const lobe = s.lobe && bin?.lobe ? bin.lobe : null;
       const ph = new Float64Array(idx.length);
       // A rotating frame: the star's spin, about its own center, out to the ridge its mass sets.
       // (A binary's Roche potential has the frame's centrifugal term already.)
@@ -499,6 +516,11 @@ export class Settler {
           }
           for (let j = 0; j < at.length; j++) if (j !== i) p += (this.set.G * this.mass[j]) / Math.hypot(x - at[j][0], y - at[j][1], z - at[j][2]);
           for (const m of others) p += m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
+        }
+        // Outside its Roche lobe, no star: an infinite potential holds no gas.
+        if (lobe) {
+          const [x, y, z] = this.grid.pos(idx[k]);
+          if (lobePotential(lobe.bodies, bin!.omega, x, y, z) > lobe.phi) p = Infinity;
         }
         ph[k] = p;
       }

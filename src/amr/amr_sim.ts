@@ -65,7 +65,7 @@ const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
 /** The GPU's settling (amr/settle.wgsl): its uniform's size, and the most stars it takes. */
-const SETTLE_BYTES = 672;
+const SETTLE_BYTES = 736;
 const SETTLE_MAX_STARS = 4;
 /** The most point masses the GPU's settling takes in a binary's Roche potential. */
 const SETTLE_MAX_MASSES = 4;
@@ -1932,6 +1932,16 @@ export class AmrSim implements Simulation {
           f.set([m.at[0], m.at[1], m.at[2] ?? 0, m.gm], 144 + 4 * j);
           f[160 + j] = m.soft;
         });
+        const lobe = set.binary.lobe;
+        if (lobe) {
+          // After the rotating frame's spin (164).
+          stars.forEach((st, i) => (f[168 + i] = st.lobe ? 1 : 0));
+          lobe.bodies.forEach((b, j) => {
+            f.set([b.at[0], b.at[1], b.at[2] ?? 0, b.gm], 172 + 4 * j);
+            f[180 + j] = b.soft;
+          });
+          f[182] = lobe.phi;
+        }
       }
       // A rotating frame's spin (Settling.omega), after the binary's point masses' softenings.
       f.set([...(set.omega ?? [0, 0, 0]), 0], 164);
