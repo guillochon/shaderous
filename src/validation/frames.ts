@@ -3,6 +3,7 @@
 import type { Gpu } from '../gpu/device';
 import { all, OUTFLOW, PERIODIC, REFLECT, type Problem } from '../problems/types';
 import { toRotating } from '../problems/rotating';
+import { problemById } from '../presets/index';
 import { domainLo } from '../domain';
 import type { Sim } from '../sim';
 import type { AmrSim } from '../amr/amr_sim';
@@ -74,6 +75,31 @@ async function scalarCenter(sim: Sim): Promise<[number, number]> {
       sy += w * ((j + 0.5) * dx + lo[1]);
     }
   return [sx / s, sy / s];
+}
+
+/**
+ * The star's mass-weighted extent along the rotation axis (z) over that across it, from the
+ * second moments of the gas denser than `cut`: 1 for a sphere, below 1 for a star flattened at
+ * its poles. Its densest cell, and the fastest its gas denser than `inner` moves in the frame
+ * (its thin surface layers, which the grid resolves least, are left out).
+ */
+function flattening(count: number, pos: (q: number) => [number, number, number], vol: (q: number) => number, u1: Float32Array, cut: number, inner: number) {
+  let rr = 0;
+  let zz = 0;
+  let peak = 0;
+  let speed = 0;
+  for (let q = 0; q < count; q++) {
+    const rho = u1[4 * q];
+    peak = Math.max(peak, rho);
+    if (!(rho > cut)) continue;
+    const [x, y, z] = pos(q);
+    const m = rho * vol(q);
+    rr += m * (x * x + y * y);
+    zz += m * z * z;
+    if (rho > inner) speed = Math.max(speed, Math.hypot(u1[4 * q + 1], u1[4 * q + 2], u1[4 * q + 3]) / rho);
+  }
+  // <x^2> and <y^2> are each half of <x^2 + y^2>.
+  return { ratio: Math.sqrt(zz / (0.5 * rr)), peak, speed };
 }
 
 export const FRAME_TESTS: TestDef[] = [
@@ -279,6 +305,63 @@ export const FRAME_TESTS: TestDef[] = [
         (t) => (m[`${t}_phase_error`] as number) < 1e-4 && (m[`${t}_kinetic_drift`] as number) < 1e-5 && (m[`${t}_field_drift`] as number) < 1e-6,
       );
       return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'rot-star',
+    name: 'Rotating frame: a rigidly rotating polytrope at rest in the frame',
+    criterion:
+      'The rotating polytrope preset (n = 1, Omega = 0.4 about z), settled in the frame with the centrifugal potential on the uniform grid (128^3, on the CPU) and on blocks (128^3 finest, one level, on the GPU): it starts flattened (axis ratio below 0.92, the two settlings alike to 1e-3), and over 4 dynamical times its central density stays within 2% and its axis ratio within 0.005 of where they started, its gas denser than a tenth of the center slower than 0.01 in the frame (a thirtieth of its central sound speed); the same star settled without the spin changes its axis ratio at least ten times as much',
+    async run(gpu) {
+      const p = problemById('polytrope-rotating');
+      const cut = 0.01;
+      const inner = 0.1;
+      const watch = async (sim: Sim | AmrSim) => {
+        const shape = async () => {
+          if ('readLeaves' in sim) {
+            const c = await sim.readLeaves();
+            return flattening(c.count, (q) => [c.x[q], c.y[q], c.z[q]], (q) => c.dx[q] ** 3, c.u1, cut, inner);
+          }
+          const { u1 } = await sim.readState();
+          const n = sim.cfg.n;
+          const dx = sim.cfg.problem.box / n;
+          const lo = domainLo(sim.cfg);
+          const at = (i: number, a: number) => (i + 0.5) * dx + lo[a];
+          return flattening(u1.length / 4, (q) => [at(q % n, 0), at(Math.floor(q / n) % n, 1), at(Math.floor(q / (n * n)), 2)], () => dx ** 3, u1, cut, inner);
+        };
+        const s0 = await shape();
+        let rhoDev = 0;
+        let ratioDev = 0;
+        let speed = 0;
+        for (let t = 1; t <= 4; t++) {
+          sim.cfg.tEnd = t;
+          sim.writeParams();
+          await sim.runToEnd();
+          const s = await shape();
+          rhoDev = Math.max(rhoDev, Math.abs(s.peak / s0.peak - 1));
+          ratioDev = Math.max(ratioDev, Math.abs(s.ratio - s0.ratio));
+          speed = Math.max(speed, s.speed);
+        }
+        return { ratio: s0.ratio, rhoDev, ratioDev, speed, ok: s0.ratio < 0.92 && rhoDev < 0.02 && ratioDev < 0.005 && speed < 0.01 };
+      };
+      // At 64^3 the equator's surface layers stir up to most of their sound speed within a
+      // few dynamical times; at 128^3 they stay as still as a star that does not spin.
+      const u = await withSim(gpu, p, 128, { tEnd: 0 }, watch);
+      const b = await withAmr(gpu, p, 128, { tEnd: 0, amrLevels: 1 }, watch);
+      // The same star in the same frame, settled as if it did not spin (a settling that names its
+      // own Omega keeps it: problems/settle.ts, inFrame).
+      const spinless: Problem = { ...p, settle: (params, eos) => ({ ...p.settle!(params, eos), omega: [0, 0, 0] }) };
+      const c = await withSim(gpu, spinless, 128, { tEnd: 0 }, watch);
+      const agree = Math.abs(u.ratio - b.ratio);
+      return {
+        pass: u.ok && b.ok && agree < 1e-3 && c.ratioDev > 10 * Math.max(u.ratioDev, b.ratioDev),
+        metrics: {
+          axis_ratio: u.ratio, central_density_deviation: u.rhoDev, axis_ratio_deviation: u.ratioDev, max_speed: u.speed,
+          blocks_axis_ratio: b.ratio, blocks_central_density_deviation: b.rhoDev, blocks_axis_ratio_deviation: b.ratioDev, blocks_max_speed: b.speed,
+          cpu_gpu_axis_ratio_difference: agree,
+          spinless_axis_ratio: c.ratio, spinless_central_density_deviation: c.rhoDev, spinless_axis_ratio_deviation: c.ratioDev, spinless_max_speed: c.speed,
+        },
+      };
     },
   },
   ...SYM_TESTS,

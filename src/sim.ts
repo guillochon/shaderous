@@ -19,7 +19,7 @@ import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type Gra
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
-import { heatCells, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
+import { heatCells, inFrame, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
 import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
@@ -2093,8 +2093,10 @@ export class Sim implements Simulation {
     this.settled = Promise.resolve();
     if (c.restart || !c.wellBalanced || !this.selfGravity) return;
     const eos = makeEos(c.eos, c.eosParams);
-    const set = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
-    if (!set) return;
+    const base = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
+    if (!base) return;
+    // In a rotating frame the stars spin with it (problems/settle.ts, inFrame).
+    const set = inFrame(base, rotationOf(c));
     this.settleCells(set, u1, u2, eos, emag ? (_s, q) => emag[q] : undefined, epoch, true);
   }
 
@@ -2109,8 +2111,9 @@ export class Sim implements Simulation {
     const { u1, u2 } = await this.readState();
     if (epoch !== this.settleEpoch) return '';
     const eos = makeEos(c.eos, c.eosParams);
-    const set = placedSettling(star, c.G, this.cellsOf(u1, u2), eos.pressure, c.problem.box);
-    if (typeof set === 'string') return set;
+    const placed = placedSettling(star, c.G, this.cellsOf(u1, u2), eos.pressure, c.problem.box);
+    if (typeof placed === 'string') return placed;
+    const set = inFrame(placed, rotationOf(c));
     // With a magnetic field, E holds its energy too: what is left of E in a cell goes back in.
     const rest = this.mhd ? new Float32Array(u1.length / 4) : null;
     if (rest) {

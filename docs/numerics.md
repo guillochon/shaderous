@@ -2372,13 +2372,40 @@ steps a turn; the turn is exact, so this bounds the splitting error, not stabili
 Debris energies and the disk stresses add $`\boldsymbol\Omega\times\mathbf{x}`$ back to the
 velocities, which they need in the inertial frame.
 
+**Rotating stars.** In a frame with the centrifugal force the stars of the initial conditions
+are settled ([§16](#16-initial-states-in-discrete-balance)) at rest in it, spinning rigidly at
+$`\Omega`$: each is balanced in the centrifugal potential of its spin about its own center
+$`\mathbf{x}_c`$ as well,
+
+```math
+h(\rho) + \phi - \tfrac12\,|\boldsymbol\Omega\times(\mathbf{x}-\mathbf{x}_c)|^2 = C ,
+```
+
+which flattens it into a rotating polytrope (`Settling.omega`, `inFrame` in `problems/settle.ts`;
+`amr/settle.wgsl` on the GPU). For a star on the axis this is the frame's own $`\Phi_c`$; off
+it, $`\Phi_c`$ differs by a part linear in $`\mathbf{x}-\mathbf{x}_c`$, a uniform force that
+moves the star whole and is left out as its companions' pull is. (The stars of a circular
+binary are settled in the Roche potential instead, which has the frame's whole centrifugal
+term: [§16](#16-initial-states-in-discrete-balance).) The star's gas ends at the
+ridge of its effective potential, $`w^3 = GM/\Omega^2`$ from its axis (its mass $`M`$ taken as
+a point): past it the centrifugal potential wins, and the condition would fill the box's far
+corners. The `polytrope-rotating` preset is the $`n = 1`$ polytrope at $`\Omega = 0.4`$ (its
+second moments' axis ratio 0.908). On $`128^3`$ cells, settled on the CPU (uniform grid) or the
+GPU (blocks, one level), it holds its central density to 0.2% and its axis ratio to $`10^{-3}`$
+over four dynamical times, its gas denser than a tenth of the center slower than 0.004 in the
+frame, as still as a star that does not spin; the two settlings agree to $`10^{-5}`$. Settled
+without the spin, the same star changes its axis ratio by 0.15 (`rot-star`). On $`64^3`$ the
+equator's thin outer layers stir to most of their sound speed within a few dynamical times,
+though the star keeps its shape to 0.01.
+
 Tests (`validation/frames.ts`): uniform flow on an f-plane turns at $`2\Omega`$ with its phase
 right to $`3\times10^{-7}`$ rad and its kinetic energy to $`10^{-6}`$; isothermal gas held by
 the centrifugal force stays below Mach $`10^{-5}`$ for more than a sound crossing (Mach 0.02
 without the well-balanced reconstruction); a blob carried by gas moving straight in the
 inertial frame lands within a sixth of a cell of where it should after a quarter turn; a binary
-at rest in its corotating frame keeps its separation to $`10^{-10}`$ for two orbits; and a
-uniform field along the axis is left exactly as it was.
+at rest in its corotating frame keeps its separation to $`10^{-10}`$ for two orbits; a
+uniform field along the axis is left exactly as it was; and a rotating polytrope holds its
+shape (above).
 
 ### Mirror symmetry
 

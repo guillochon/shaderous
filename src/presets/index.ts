@@ -21,7 +21,7 @@ export const PRESET_ORDER: readonly string[] = [
   'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
   'radiating-sphere', 'sedov-rad-transport', 'radiation-shadow', 'radiative-shock', 'radiative-shock-supercritical', 'radiation-star',
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',
-  'polytrope', 'polytrope-dipole', 'polytrope-random', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'second-collapse', 'zeldovich-pancake',
+  'polytrope', 'polytrope-dipole', 'polytrope-random', 'polytrope-rotating', 'white-dwarf', 'sub-chandra', 'evrard', 'sphere', 'isothermal-collapse', 'second-collapse', 'zeldovich-pancake',
   'wd-collision', 'wd-collision-burning',
   'planet', 'moon-forming-impact',
   'tidal-disruption', 'tidal-disruption-hhe', 'tidal-disruption-full', 'tidal-disruption-n3', 'tidal-disruption-n3-full', 'tidal-disruption-dipole', 'tidal-disruption-random', 'tidal-disruption-full-random',

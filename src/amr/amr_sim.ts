@@ -32,14 +32,14 @@ import { MassSums } from '../gravity/mass_sums';
 import { makeEos, type Eos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
-import { heatCells, holdPull, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
+import { heatCells, holdPull, inFrame, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
 
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
-import { implicitPressure, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, rotationOf, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -65,7 +65,7 @@ const READ_CHUNK_BYTES = 256 * 1024 * 1024;
 /** Bytes per block of the species' face mass fluxes (amr/species.wgsl): (BS + 1)^d faces of three axes. */
 const speciesFaceBytes = (ndim: 2 | 3) => (BS + 1) ** 2 * (ndim === 3 ? BS + 1 : 1) * 3 * 4;
 /** The GPU's settling (amr/settle.wgsl): its uniform's size, and the most stars it takes. */
-const SETTLE_BYTES = 656;
+const SETTLE_BYTES = 672;
 const SETTLE_MAX_STARS = 4;
 /** The most point masses the GPU's settling takes in a binary's Roche potential. */
 const SETTLE_MAX_MASSES = 4;
@@ -1712,8 +1712,10 @@ export class AmrSim implements Simulation {
     this.settled = Promise.resolve();
     if (c.restart || !c.wellBalanced || !this.selfGravity) return;
     const eos = makeEos(c.eos, c.eosParams);
-    const set = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
-    if (!set) return;
+    const base = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
+    if (!base) return;
+    // In a rotating frame the stars spin with it (problems/settle.ts, inFrame).
+    const set = inFrame(base, rotationOf(c));
     this.settling = true;
     const tree = this.tree;
     const t0 = performance.now();
@@ -1850,8 +1852,9 @@ export class AmrSim implements Simulation {
     if (stale()) return '';
     const eos = makeEos(c.eos, c.eosParams);
     const { u1, u2 } = leaf;
-    const set = placedSettling(star, c.G, AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical'), eos.pressure, c.problem.box);
-    if (typeof set === 'string') return set;
+    const placed = placedSettling(star, c.G, AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical'), eos.pressure, c.problem.box);
+    if (typeof placed === 'string') return placed;
+    const set = inFrame(placed, rotationOf(c));
     // With a magnetic field, E holds its energy too: what is left of E in a cell goes back in.
     const rest = this.mhd ? new Float32Array(leaf.count) : null;
     if (rest) {
@@ -1930,6 +1933,8 @@ export class AmrSim implements Simulation {
           f[160 + j] = m.soft;
         });
       }
+      // A rotating frame's spin (Settling.omega), after the binary's point masses' softenings.
+      f.set([...(set.omega ?? [0, 0, 0]), 0], 164);
       stars.forEach((st, i) => {
         const o = 12 + 24 * i;
         const g = st.barotrope.gpu!;

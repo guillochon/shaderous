@@ -40,6 +40,7 @@ struct Settle {
   w: vec4<f32>,        // a binary: the frame's angular velocity about z, and how many point masses
   pm: array<vec4<f32>, 4>, // a binary's point masses: position, G M
   ps: vec4<f32>,       // and their softenings
+  sp: vec4<f32>,       // a rotating frame's angular velocity (problems/settle.ts Settling.omega; 0 for none)
 }
 
 @group(0) @binding(10) var<uniform> S: Settle;
@@ -70,10 +71,26 @@ fn owner(x: vec3<f32>) -> i32 {
   return best;
 }
 
+// A rotating frame: star i's spin about its center, -|Omega x d|^2 / 2, and none of its gas past
+// the ridge of its effective potential, at w^3 = G M / Omega^2 from its axis (problems/settle.ts,
+// spinPotential).
+fn spin(i: u32, x: vec3<f32>) -> f32 {
+  let w = S.sp.xyz;
+  let w2 = dot(w, w);
+  if (w2 == 0.0) { return 0.0; }
+  let r = cross(w, x - S.stars[i].c.xyz);
+  let s = dot(r, r);
+  let gm = S.g.x * S.stars[i].r.y;
+  if (s >= w2 * pow(gm * gm / (w2 * w2), 1.0 / 3.0)) { return 3.0e38; }
+  return -0.5 * s;
+}
+
 // The other stars' pull on star i, undone: outside a spherical star it is that of a point of its mass.
 // In a binary, what the Roche potential adds to the grid's (problems/settle.ts, binaryPhi).
 fn pull(i: u32, x: vec3<f32>) -> f32 {
-  var p = 0.0;
+  // A rotating frame's spin (none in a binary, whose Roche potential has the frame's).
+  var p = spin(i, x);
+  if (p >= 3.0e38) { return p; }
   if (S.g.y != 0.0) {
     p = -0.5 * S.w.x * S.w.x * dot(x.xy, x.xy);
     for (var j = 0u; j < u32(S.w.y); j++) {

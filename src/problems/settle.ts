@@ -44,6 +44,12 @@
 // of G M / R^3. Settled, the proportional part is gone, and what the integral part holds is the
 // small force the point-mass orbit leaves unbalanced on an extended star.
 //
+// In a rotating frame with the centrifugal force (Problem.rotation) the stars spin with the
+// frame, at rest in it: each is balanced in the centrifugal potential of its spin about its own
+// center as well, -|Omega x (x - x_c)|^2 / 2, which flattens it into a rotating polytrope
+// (Settling.omega, inFrame). Its gas ends at the ridge of its effective potential: past it the
+// centrifugal potential wins, and the condition above would fill the box's far corners.
+//
 // On an adaptive mesh the rounds run on the GPU (amr/settle.wgsl, AmrSim.settleOnGpu) when each
 // star's gas is one it knows (Barotrope.gpu): only per-block sums come back, where the Settler
 // here reads the whole mesh back, some 100 bytes a cell, more than a page may hold on a mesh of
@@ -128,6 +134,12 @@ export interface Settling {
    * centrifugal term.
    */
   binary?: { omega: number; masses: { gm: number; at: number[]; soft: number }[] };
+  /**
+   * The angular velocity of a rotating frame with the centrifugal force (Problem.rotation): each
+   * star is balanced in the centrifugal potential of its own spin, -|Omega x (x - x_c)|^2 / 2
+   * about its center x_c, as well, and so rotates rigidly with the frame (inFrame).
+   */
+  omega?: number[];
 }
 
 /**
@@ -176,6 +188,38 @@ export function binaryPhi(b: NonNullable<Settling['binary']>, x: number, y: numb
   let p = -0.5 * b.omega * b.omega * (x * x + y * y);
   for (const m of b.masses) p -= m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
   return p;
+}
+
+/**
+ * A settling in a rotating frame (sim.ts rotationOf: Omega, and 1 for the centrifugal force):
+ * its stars spin with the frame, at rest in it. The frame's centrifugal potential is
+ * -|Omega x x|^2 / 2 about the axis through the box center; about a star's center x_c it is
+ * -|Omega x (x - x_c)|^2 / 2 plus a part linear in x - x_c, a uniform force that moves the star
+ * whole, as its companion's pull does, and is left out as that is. For a star on the axis the
+ * two are the same.
+ */
+export function inFrame(set: Settling, rot: readonly number[]): Settling {
+  // A settling that names its own spin keeps it.
+  // A binary is balanced in the frame's whole centrifugal potential already (Settling.binary).
+  if (set.omega || set.binary || !rot[3] || !(Math.hypot(rot[0], rot[1], rot[2]) > 0)) return set;
+  return { ...set, omega: [rot[0], rot[1], rot[2]] };
+}
+
+/**
+ * A spinning star's centrifugal potential at d from its center (Settling.omega), or Infinity
+ * where no gas of the star can be at rest: past the ridge of its effective potential,
+ * -G M / r - Omega^2 w^2 / 2 (w the distance from its axis), which is at w^3 = G M / Omega^2.
+ * Beyond it the potential falls again, and the gas held there would be the box's corners'.
+ */
+export function spinPotential(w: readonly number[], gm: number, dx: number, dy: number, dz: number): number {
+  const cx = w[1] * dz - w[2] * dy;
+  const cy = w[2] * dx - w[0] * dz;
+  const cz = w[0] * dy - w[1] * dx;
+  const s = cx * cx + cy * cy + cz * cz;
+  const w2 = w[0] * w[0] + w[1] * w[1] + w[2] * w[2];
+  // |Omega x d|^2 = Omega^2 w^2, past the ridge's w^2 = (G M / Omega^2)^(2/3).
+  if (s >= w2 * Math.cbrt((gm * gm) / (w2 * w2))) return Infinity;
+  return -0.5 * s;
 }
 
 /** A polytrope the star tool has just placed: where, how it moves, and its profile's scales. */
@@ -440,12 +484,19 @@ export class Settler {
       const idx = this.cells[i];
       const hold = bin ? holdPull(this.set, i, coms, (this.held[i] ??= [0, 0, 0])) : null;
       const ph = new Float64Array(idx.length);
+      // A rotating frame: the star's spin, about its own center, out to the ridge its mass sets.
+      // (A binary's Roche potential has the frame's centrifugal term already.)
+      const spinW = !bin && this.set.omega?.some((v) => v !== 0) ? this.set.omega : undefined;
+      const gm = this.set.G * this.mass[i] + (s.core?.gm ?? 0);
       for (let k = 0; k < idx.length; k++) {
         let p = phi[idx[k]];
-        if (at.length || others.length || s.core || bin) {
+        if (at.length || others.length || s.core || bin || spinW) {
           const [x, y, z] = this.grid.pos(idx[k]);
           if (bin) p += binaryPhi(bin, x, y, z) + hold![0] * (x - s.center[0]) + hold![1] * (y - s.center[1]) + hold![2] * (z - (s.center[2] ?? 0));
-          else if (s.core) p -= s.core.gm / Math.hypot(x - s.center[0], y - s.center[1], z - (s.center[2] ?? 0), s.core.soft);
+          else {
+            if (spinW) p += spinPotential(spinW, gm, x - s.center[0], y - s.center[1], z - (s.center[2] ?? 0));
+            if (s.core) p -= s.core.gm / Math.hypot(x - s.center[0], y - s.center[1], z - (s.center[2] ?? 0), s.core.soft);
+          }
           for (let j = 0; j < at.length; j++) if (j !== i) p += (this.set.G * this.mass[j]) / Math.hypot(x - at[j][0], y - at[j][1], z - at[j][2]);
           for (const m of others) p += m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
         }

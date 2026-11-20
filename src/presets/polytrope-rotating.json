@@ -1,0 +1,23 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "polytrope-rotating",
+  "extends": "polytrope",
+  "name": "Rotating polytrope",
+  "variant": "Rotating",
+  "blurb": "The polytrope (n = 1 by default) spinning rigidly at Ω = 0.4 about z, at rest in a frame that turns with it (the rotating frame, on the gravity page): settled into balance with the centrifugal force as well as gravity, it starts flattened at the poles and holds that shape. One dynamical time is t = 1; one turn is t = 2π / Ω. Its equator's thin outer layers need about 128 cells across the box to stay still.",
+  "domain": {
+    "symmetric": "z",
+    "n": 128,
+    "amr": 1
+  },
+  "physics": {
+    "rotation": {
+      "omega": [
+        0,
+        0,
+        0.4
+      ]
+    }
+  }
+}
