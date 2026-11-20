@@ -85,6 +85,7 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 
 #include "hydro/flux.wgsl"
 #include "hydro/tile.wgsl"
+#include <walls>
 
 // A shearing box: the flux through one of its x faces, averaged with what the cells across the
 // boundary compute for the same face (sheared along y, their velocity boosted by the jump of
@@ -187,6 +188,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if (abs(held.w) > 0.5) {
       textureStore(O1, c, textureLoad(U1, c, 0));
       textureStore(O2, c, held);
+      store_wall_none(c);
       return;
     }
   }
@@ -263,6 +265,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     return;
   }
   store_mass_flux(c, fx, fy, fz, flat);
+  // Forces on bodies: their wall faces' fluxes (hydro/walls_on.wgsl).
+  store_wall_forces(c, fx, fy, fz, flat);
   store_face_velocity(c, vec3<f32>(fx.hi.vn, fy.hi.vn, fz.hi.vn));
   if (DEBRIS) { escape(c, w0.a.yzw, fx, fy, fz, flat); }
 

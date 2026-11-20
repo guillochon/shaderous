@@ -132,6 +132,15 @@ cylinder in 2D), `{ "type": "box", "min", "max" }` (a bound may be `null`: open 
 `rotate`, degrees about its center about x, then y, then z),
 `{ "type": "half", "normal", "at" }` (the side the normal points away from).
 
+### Forces on obstacles
+
+Every `obstacle` is a body, and the diagnostics report the force the gas exerts on each (as
+`bodies`: the force, its pressure and viscous parts, and the torque about the body's center),
+in the page's panel, the runner's `diag.jsonl` and the MCP `diagnostics` tool. The first four
+obstacles are reported apart, in the order of the list, and any after them together with the
+fourth. The force is the momentum the gas lost to the body's walls over the last step
+([numerics.md](numerics.md#26-bodies-in-a-stream)). Not in axisymmetric or spherical runs.
+
 ### A point mass held on its orbit
 
 `"onOrbit": true` on a point mass holds it on its orbit: the other point masses move it and the

@@ -285,7 +285,7 @@ export function leafState(x: FillContext, b: BlockAt): LeafState {
           pstat[2] = Math.min(pstat[2], p);
           pstat[3] = Math.max(pstat[3], p);
         }
-        const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
+        const go = mark > 0 ? 0 : 1; // the gas kept inside an obstacle is at rest
         mass += w.rho * vol;
         u1[o] = w.rho;
         u1[o + 1] = w.rho * w.vx * go;

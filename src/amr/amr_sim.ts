@@ -39,7 +39,8 @@ const SETTLE_CPU_CELLS = 4e7;
 import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
-import { implicitPressure, rotationOf, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
+import { implicitPressure, rotationOf, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -366,6 +367,8 @@ export class AmrSim implements Simulation {
   /** the block list changed since the timestep records were last cleared */
   private dtStale = true;
   private redDiag!: Reducer;
+  /** Forces on bodies (hydro/forces.ts), where the run has any. */
+  walls?: WallForces;
 
   private nAll = 0;
   private nLeaf = 0;
@@ -550,7 +553,9 @@ export class AmrSim implements Simulation {
     const implicit = implicitPressure(cfg) ? (10 + (cfg.eos === 'liquid' ? 0 : 1)) * 4 * PAD ** cfg.ndim : 0;
     // Radiation (amr/radiation.ts): its atlases, and the face mass fluxes if the species do not already record them.
     const rad = radiationOn(cfg) ? AmrRad.blockBytes(cfg.ndim) + (groups > 0 ? 0 : speciesFaceBytes(cfg.ndim)) : 0;
-    return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit + rad;
+    // Forces on bodies (hydro/forces.ts): two four-channel atlases.
+    const walls = forcesOn(cfg) ? 2 * 16 * PAD ** cfg.ndim : 0;
+    return AmrSim.blockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null) + implicit + rad + walls;
   }
 
   /**
@@ -838,6 +843,14 @@ export class AmrSim implements Simulation {
       this.rad?.destroy();
       this.rad = undefined;
     }
+    // Forces on bodies: their atlases (both parts, so that viscosity may be turned on mid-run) and reduction, once.
+    if (forcesOn(this.cfg) && !this.walls) {
+      const at = this.state[0][0];
+      this.walls = await WallForces.create(
+        d, (label) => tex3d(d, at.width, 'rgba32float', `amr ${label}`, at.depthOrArrayLayers, at.height), true, this.cfg.problem.bodies!,
+        [this.cap * BS, BS, this.cfg.ndim === 2 ? 1 : BS], 'amr/forces.wgsl', slots, this.params, { 30: this.bt },
+      );
+    }
     if (implicitPressure(this.cfg)) {
       const c = this.cfg;
       if (c.eos !== 'liquid' && !this.faceVel) {
@@ -849,7 +862,7 @@ export class AmrSim implements Simulation {
       const kind = (b: number) => (b === PERIODIC ? PF_PERIODIC : (b === 1 || b === 3) && this.cfg.eos === 'liquid' ? PF_OPEN : PF_CLOSED);
       this.prs ??= await AmrPressure.create({
         device: d, params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, listLevel: this.listLevel, levels: this.levels,
-        state: this.state, prim: this.prim[0], prim2: this.prim[1], slots,
+        state: this.state, prim: this.prim[0], prim2: this.prim[1], slots, walls: this.walls?.correctBindings(),
         massFlux: this.speciesGroups > 0 && this.massFluxWindows ? this.massFluxWindows : undefined,
         gas: this.faceVel ? { faceLo: this.faceVel[0], faceHi: this.faceVel[1], lag: this.lagP!, gfield: this.gfield, bh: this.bh } : undefined,
         flat: (pass, count, reach) => this.flat(pass, count, reach),
@@ -1070,6 +1083,7 @@ export class AmrSim implements Simulation {
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(this.prim[0]), 5: v(this.prim[1]), 6: v(this.gfield),
       7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources, 20: this.bh, 30: this.bt, 31: list,
       ...((this.faceVel && implicitPressure(this.cfg) ? { 45: v(this.faceVel[0]), 46: v(this.faceVel[1]) } : {}) as Record<number, GPUTextureView>),
+      ...(this.walls?.updateBindings() ?? {}),
       ...bin,
       ...this.compIn,
       ...((this.massFluxWindows ? { 12: this.massFluxWindows.lo, ...(this.massFluxWindows.hi ? { 32: this.massFluxWindows.hi } : {}) } : {}) as Record<number, Bindable>),
@@ -2915,12 +2929,18 @@ export class AmrSim implements Simulation {
     enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, CLOCK_BYTES);
     enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, CLOCK_BYTES, DIAG_OPS.length * 4);
     enc.copyBufferToBuffer(this.bh, 0, this.staging, CLOCK_BYTES + DIAG_OPS.length * 4, MASS_FLOATS * 4);
+    if (this.walls) {
+      const fp = beginPass(enc);
+      this.walls.encode(fp);
+      fp.end();
+      enc.copyBufferToBuffer(this.walls.result, 0, this.staging, FORCE_FLOAT * 4, FORCE_CHANNELS * 4);
+    }
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
-      const diag = diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0);
+      const diag = withForces(diagnosticsFrom(a, this.hasMasses ? this.nMasses : 0), a, this.cfg);
       if (cosmologyOf(this.cfg)) this.lastScale = withScale(diag, a).scale;
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
@@ -3426,6 +3446,7 @@ export class AmrSim implements Simulation {
   }
 
   destroy() {
+    this.walls?.destroy();
     this.mhd?.destroy();
     this.rad?.destroy();
     this.prs?.destroy();

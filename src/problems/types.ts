@@ -19,6 +19,8 @@ export interface Prim {
   X?: readonly number[];
   /** The cell is part of an obstacle: a solid body the gas reflects off. */
   solid?: boolean;
+  /** Which body a solid cell belongs to (Problem.bodies, from 0): its forces are summed apart. */
+  body?: number;
   /** The cell is held at this state for the whole run (an inflow, say). */
   fixed?: boolean;
   /**
@@ -30,8 +32,34 @@ export interface Prim {
   frad?: readonly [number, number, number];
 }
 
-/** How a cell's kind is stored with its state: 1 solid, -1 fixed, 0 ordinary gas. */
-export const cellMark = (w: Prim): number => (w.solid ? 1 : w.fixed ? -1 : 0);
+/** Bodies whose forces are summed apart (hydro/forces.wgsl); bodies past the last share its sums. */
+export const MAX_BODIES = 4;
+
+/**
+ * How a cell's kind is stored with its state: 1 + its body's index (at most MAX_BODIES - 1) for
+ * a solid cell, -1 fixed, 0 ordinary gas. Every test of the mark is > 0.5 or < -0.5.
+ */
+export const cellMark = (w: Prim): number => (w.solid ? 1 + Math.min(Math.max(Math.floor(w.body ?? 0), 0), MAX_BODIES - 1) : w.fixed ? -1 : 0);
+
+/** A body the gas exerts a force on: an obstacle of the setup, in its order (Problem.bodies). */
+export interface BodyRef {
+  id: string;
+  /** the point torques are taken about, in box coordinates */
+  center: [number, number, number];
+}
+
+/**
+ * What the force coefficients are scaled by: C = F / (rho U^2 A / 2), a moment's by a further
+ * length. `drag` is the axis the stream flows along, `lift` the one lift is measured along.
+ */
+export interface ForceRef {
+  rho: number;
+  speed: number;
+  area: number;
+  length: number;
+  drag: 0 | 1 | 2;
+  lift: 0 | 1 | 2;
+}
 
 export { LINE_TIED, MOVING_WALL, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT } from './boundaries';
 export type Bc3 = [number, number, number];
@@ -181,6 +209,10 @@ export interface ProblemParam {
 
 export interface Problem {
   id: string;
+  /** Obstacles whose forces are reported (Diagnostics.bodies), in the order of their marks. */
+  bodies?: BodyRef[];
+  /** The scales of the force coefficients (Diagnostics.bodies' coefficients), if there are any. */
+  forceRef?: ForceRef;
   label: string;
   blurb: string;
   eos: EosKind;

@@ -97,6 +97,16 @@ export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 
   return { inside: (x, y, z) => x * d[0] + y * d[1] + z * d[2] < at, center: [0, 0, 0], radius: 0 };
 }
 
+/**
+ * The point a body's torque is taken about: a sphere's center, a box's pivot (its center), the
+ * origin for a half-space.
+ */
+export function bodyCenter(shape: Shape): Vec3 {
+  if (shape.type === 'sphere') return [...(shape.center ?? [0, 0, 0])] as Vec3;
+  if (shape.type === 'box') return boxPivot(shape);
+  return [0, 0, 0];
+}
+
 type Painter = (w: Prim, x: number, y: number, z: number) => Prim;
 
 /** A region's painter: the state under it, replaced inside its shape (or blended at a supersampled edge). */
@@ -176,9 +186,13 @@ export function regionPainter(part: RegionPart, ctx: PaintContext): Painter {
   };
 }
 
-/** An obstacle: its cells are solid, at rest. An inflow: its cells (not solid ones) keep their state for the whole run. */
-export function obstaclePainter(part: ObstaclePart, ctx: PaintContext): Painter {
+/**
+ * An obstacle: its cells are solid, at rest, and belong to body `body` (the obstacle's place
+ * among the setup's obstacles: its forces are summed apart). An inflow: its cells (not solid
+ * ones) keep their state for the whole run.
+ */
+export function obstaclePainter(part: ObstaclePart, ctx: PaintContext, body = 0): Painter {
   const { inside } = insideOf(part.shape, ctx);
-  if (part.kind === 'obstacle') return (w, x, y, z) => (inside(x, y, z) ? { ...w, vx: 0, vy: 0, vz: 0, solid: true, fixed: false } : w);
+  if (part.kind === 'obstacle') return (w, x, y, z) => (inside(x, y, z) ? { ...w, vx: 0, vy: 0, vz: 0, solid: true, fixed: false, body } : w);
   return (w, x, y, z) => (!w.solid && inside(x, y, z) ? { ...w, fixed: true } : w);
 }

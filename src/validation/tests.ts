@@ -48,6 +48,7 @@ import { FRAME_TESTS } from './frames';
 import { cavityError, GHIA_RE100, LIQUID_TESTS } from './liquid';
 import { ANEOS_TESTS } from './aneos';
 import { PSPLIT_TESTS } from './psplit';
+import { WALL_TESTS } from './walls';
 import { RAD_TESTS } from './radiation';
 
 export interface TestResult {
@@ -4110,6 +4111,7 @@ export const TESTS: TestDef[] = [
   ...ANEOS_TESTS,
   // Implicit pressure (validation/psplit.ts).
   ...PSPLIT_TESTS,
+  ...WALL_TESTS,
   // Radiation transport (validation/radiation.ts).
   ...RAD_TESTS,
 ];

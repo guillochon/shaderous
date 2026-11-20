@@ -23,7 +23,7 @@ import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
-import { defaultFrameDt, sizedProblem } from '../problems/types';
+import { defaultFrameDt, MAX_BODIES, sizedProblem } from '../problems/types';
 import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
 import { prepareEosTable } from '../eos/tables';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, RADIATION_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
@@ -4554,19 +4554,46 @@ const SINK_FIELDS: SinkField[] = [
 ];
 /** Sink fields the panel shows. */
 const SINK_SHOWN = 5;
+/**
+ * Each body's columns (Diagnostics.bodies: forces on the setup's obstacles, hydro/forces.ts), one
+ * set per body, after the diagnostics above and before the sinks'. The coefficients need a
+ * reference (a tunnel's): without one they are blank.
+ */
+const DIMENSIONLESS: Measure = [0, 0, 0];
+const BODY_FIELDS: SinkField[] = [
+  ['cd', 'C_d', 'Drag coefficient: the force along the stream over rho U^2 A / 2', DIMENSIONLESS],
+  ['cl', 'C_l', 'Lift coefficient: the force along the lift axis over rho U^2 A / 2', DIMENSIONLESS],
+  ['fx', 'F_x', 'Force the gas exerts on the body, x', FORCE],
+  ['fy', 'F_y', 'Force the gas exerts on the body, y', FORCE],
+  ['fz', 'F_z', 'Force the gas exerts on the body, z', FORCE],
+  ['torque', 'τ', 'Torque the gas exerts on the body about its point (z in 2D; magnitude in 3D)', TORQUE],
+  ...xyz('f_visc', 'Viscosity\u2019s part of the force', FORCE),
+  ...xyz('torque', 'Torque about the body\u2019s point', TORQUE),
+];
+/** Body fields the panel shows. */
+const BODY_SHOWN = 6;
 const BASE_COLS = DIAG_ROWS.length;
+const bodyCol = (i: number, field: number) => BASE_COLS + BODY_FIELDS.length * i + field;
+const SINK_BASE = BASE_COLS + BODY_FIELDS.length * MAX_BODIES;
 const DIAG_COLS: DiagCol[] = [
   ...DIAG_ROWS.map(([label, title, csv, count], i) => ({ label, title, csv, measure: DIAG_MEASURES[i], count })),
+  ...Array.from({ length: MAX_BODIES }, (_, i) =>
+    BODY_FIELDS.map(([csv, label, title, measure]) => ({ label: label || (csv ?? ''), title, csv: csv && `body${i + 1}_${csv}`, measure })),
+  ).flat(),
   ...Array.from({ length: MAX_MASSES }, (_, i) =>
     SINK_FIELDS.map(([csv, label, title, measure]) => ({ label: label || (csv ?? ''), title, csv: csv && `sink${i + 1}_${csv}`, measure })),
   ).flat(),
 ];
-const sinkCol = (i: number, field: number) => BASE_COLS + SINK_FIELDS.length * i + field;
+const sinkCol = (i: number, field: number) => SINK_BASE + SINK_FIELDS.length * i + field;
 /** The tooltip of column `c`. */
 function colTitle(c: number): string {
   if (c < BASE_COLS) return DIAG_COLS[c].title;
-  const i = Math.floor((c - BASE_COLS) / SINK_FIELDS.length);
-  const field = (c - BASE_COLS) % SINK_FIELDS.length;
+  if (c < SINK_BASE) {
+    const i = Math.floor((c - BASE_COLS) / BODY_FIELDS.length);
+    return `${cfg?.problem.bodies?.[i]?.id ?? `Body ${i + 1}`}: ${DIAG_COLS[c].title}`;
+  }
+  const i = Math.floor((c - SINK_BASE) / SINK_FIELDS.length);
+  const field = (c - SINK_BASE) % SINK_FIELDS.length;
   const title =
     field !== 4
       ? DIAG_COLS[c].title
@@ -4596,6 +4623,21 @@ function sinkValues(d: Diagnostics): number[] {
     const lShown = cfg.ndim === 2 ? l[2] : norm(l);
     out.push(mass, rates[0], m.accreted, norm(p), lShown, ...p, ...l, ...rates.slice(1), ...m.pos, ...m.vel);
   });
+  return out;
+}
+
+/** The body columns of a readout: BODY_FIELDS.length per body, MAX_BODIES of them (NaN for none). */
+function bodyValues(d: Diagnostics): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < MAX_BODIES; i++) {
+    const b = d.bodies?.[i];
+    if (!b) {
+      out.push(...new Array<number>(BODY_FIELDS.length).fill(NaN));
+      continue;
+    }
+    const k = b.coefficients;
+    out.push(k?.drag ?? NaN, k?.lift ?? NaN, ...b.force, cfg.ndim === 2 ? b.torque[2] : norm(b.torque), ...b.viscous, ...b.torque);
+  }
   return out;
 }
 
@@ -4656,7 +4698,23 @@ const sinkBlocks = Array.from({ length: MAX_MASSES }, (_, i) => {
   return { box, cells: SINK_FIELDS.slice(0, SINK_SHOWN).map(([, label], k) => diagCell(sinkCol(i, k), label, dl)) };
 });
 let sinksShown = 0;
-const allCells = () => [...diagCells, ...sinkBlocks.flatMap((b) => b.cells)];
+/** Each body's block in the panel, shown while the run has that body. */
+const bodyBlocks = Array.from({ length: MAX_BODIES }, (_, i) => {
+  const box = document.createElement('div');
+  box.className = 'sink';
+  box.hidden = true;
+  const head = document.createElement('div');
+  head.className = 'sink-head';
+  head.textContent = `Body ${i + 1}`;
+  const dl = document.createElement('dl');
+  box.append(head, dl);
+  sinkPanel.prepend(box);
+  return { box, head, cells: BODY_FIELDS.slice(0, BODY_SHOWN).map(([, label], k) => diagCell(bodyCol(i, k), label, dl)) };
+});
+// (Prepended one by one: put them back in order, ahead of the sinks.)
+for (const b of [...bodyBlocks].reverse()) sinkPanel.prepend(b.box);
+let bodiesShown = 0;
+const allCells = () => [...diagCells, ...bodyBlocks.flatMap((b) => b.cells), ...sinkBlocks.flatMap((b) => b.cells)];
 const shownValue = (v: number | undefined, c: DiagCol, u: Readout) => (v !== undefined && Number.isFinite(v) ? fmt3(v * u.scale(c.measure), c.count) : '–');
 
 /** Put the unit of each diagnostic in its tooltip, and show the latest values in the current units. */
@@ -4731,19 +4789,25 @@ function showDiagnostics(d: Diagnostics, of: Simulation) {
     radPrev = null;
   }
   const u = units();
-  const values = [...diagValues(d), ...sinkValues(d)];
+  const values = [...diagValues(d), ...bodyValues(d), ...sinkValues(d)];
   diagHistory.push(values);
   const n = d.masses.length;
-  if (n !== sinksShown) {
+  const nb = Math.min(d.bodies?.length ?? 0, MAX_BODIES);
+  if (n !== sinksShown || nb !== bodiesShown) {
     sinksShown = n;
+    bodiesShown = nb;
     sinkBlocks.forEach((b, i) => (b.box.hidden = i >= n));
-    sinkPanel.hidden = n === 0;
+    bodyBlocks.forEach((b, i) => {
+      b.box.hidden = i >= nb;
+      if (i < nb) b.head.textContent = d.bodies![i].id;
+    });
+    sinkPanel.hidden = n === 0 && nb === 0;
     showDiagUnits();
   }
   const warns = [false, false, false, false, false, d.floored > 0, d.jeansUnresolved > 0 && !cfg.jeansFloor];
   // Radiation: the reduced speed of light is too slow for the gas somewhere.
   warns[RAD_COL + 4] = (d.radiation?.tooFast ?? 0) > 0;
-  const cells = [...diagCells, ...sinkBlocks.slice(0, n).flatMap((b) => b.cells)];
+  const cells = [...diagCells, ...bodyBlocks.slice(0, nb).flatMap((b) => b.cells), ...sinkBlocks.slice(0, n).flatMap((b) => b.cells)];
   for (const cell of cells) {
     cell.set(shownValue(values[cell.col], DIAG_COLS[cell.col], u));
     const warn = warns[cell.col] ?? false;
@@ -4762,7 +4826,9 @@ function exportDiagnostics() {
   const width = diagHistory.rows.reduce((w, r) => Math.max(w, r.length), BASE_COLS);
   // A magnetic field's columns only with one, a disk's only for a disk, burning's only for a run that burns.
   const burns = !!burnSpec(cfg);
-  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) && (i !== BURN_COL || burns) && (i !== LIQUID_COL || cfg.eos === 'liquid') && (!radCol(i) || cfg.radiation === 'm1') ? [i] : []));
+  // (A body's columns only for the bodies the run has.)
+  const bodies = Math.min(cfg.problem.bodies?.length ?? 0, MAX_BODIES);
+  const cols = DIAG_COLS.slice(0, width).flatMap((c, i) => (c.csv && (i < BASE_COLS || i >= bodyCol(bodies, 0)) && (!magneticCol(i) || cfg.problem.mhd) && (!diskCol(i) || cfg.problem.disk) && (i !== BURN_COL || burns) && (i !== LIQUID_COL || cfg.eos === 'liquid') && (!radCol(i) || cfg.radiation === 'm1') ? [i] : []));
   const csv = diagHistory.csv(cols, cols.map((i) => DIAG_COLS[i].csv!));
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');

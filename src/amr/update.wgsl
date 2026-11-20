@@ -147,6 +147,7 @@ fn dphi_face(a: vec3<i32>, axis: i32, k: i32) -> f32 {
 
 #include "hydro/flux.wgsl"
 #include "amr/tile.wgsl"
+#include <amr_walls>
 #include <species>
 #include "hydro/advance.wgsl"
 #include "hydro/sources.wgsl"
@@ -352,6 +353,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if (abs(held.w) > 0.5) {
       textureStore(O1, c, textureLoad(U1, c, 0));
       textureStore(O2, c, held);
+      if (!g_deposit) { store_wall_none(c); }
       return;
     }
   }
@@ -388,6 +390,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     if (gm.z == 0 && sym_lo(2) && !is2d()) { oz.lo = mirror_flux(oz.lo, 2); }
     // With species, their pass needs the mass fluxes as this cell computed them.
     store_mass_flux(slot, l, c, ox, oy, oz);
+    // Forces on bodies: their wall faces' fluxes (amr/walls_on.wgsl).
+    store_wall_forces(slot, l, c, ox, oy, oz);
     store_face_velocities(c, vec3<f32>(ox.lo.vn, oy.lo.vn, oz.lo.vn), vec3<f32>(ox.hi.vn, oy.hi.vn, oz.hi.vn));
     own = array<Faces, 3>(ox, oy, oz);
   }

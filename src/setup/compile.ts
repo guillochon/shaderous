@@ -19,8 +19,8 @@ import { codeG, type UnitSystem } from '../units/units';
 import { buildBodies, partIds, partQuantity, starPotential, type Bodies } from './parts/bodies';
 import { buildDisk, checkDiskFormulas, sumDisks, type BuiltDisk } from './parts/disk';
 import { flowValues, type FaceFn, type FlowContext, type FlowDef, type FlowInitContext, type InitFn, type PotentialFn } from './parts/flow';
-import { obstaclePainter, regionPainter, type PaintContext } from './parts/region';
-import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type SetupSpec } from './spec';
+import { bodyCenter, obstaclePainter, regionPainter, type PaintContext } from './parts/region';
+import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type ObstaclePart, type SetupSpec } from './spec';
 import { unitSystem, unitsFollowParts } from './units';
 
 export interface Compiled {
@@ -256,8 +256,9 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3): InitFn {
   }
 
   const pctx: PaintContext = { box, n, ndim, eos, fractions };
+  let body = 0;
   for (const p of spec.parts ?? []) {
-    const paint = p.kind === 'region' ? regionPainter(p, pctx) : p.kind === 'obstacle' || p.kind === 'inflow' ? obstaclePainter(p, pctx) : null;
+    const paint = p.kind === 'region' ? regionPainter(p, pctx) : p.kind === 'obstacle' || p.kind === 'inflow' ? obstaclePainter(p, pctx, p.kind === 'obstacle' ? body++ : 0) : null;
     if (!paint) continue;
     const under = at;
     at = (x, y, z) => paint(under(x, y, z), x, y, z);
@@ -463,7 +464,9 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const fl = ph.fluff;
 
   const cosmology = cosmologyOfSetup(spec);
+  const obstacles = parts.filter((p): p is ObstaclePart => p.kind === 'obstacle');
   const optional: Partial<Problem> = {
+    bodies: obstacles.length ? obstacles.map((p, i) => ({ id: p.id ?? `obstacle ${i + 1}`, center: bodyCenter(p.shape) })) : undefined,
     units: base.units === undefined ? undefined : unitsFollow ? (params: Record<string, number>) => scales(at(params)).units! : base.units,
     composition: namedComposition(ph.composition),
     species: speciesOf(spec),

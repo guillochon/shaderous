@@ -13,6 +13,7 @@
 #include "amr/pressure/theta.wgsl"
 @group(0) @binding(34) var OLD: texture_3d<f32>;
 #include <ap_mf>
+#include <ap_walls>
 
 @group(0) @binding(2) var PRS: texture_storage_3d<r32float, read>;
 @group(0) @binding(13) var PNL: texture_3d<f32>;
@@ -48,6 +49,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (abs(u2.w) > 0.5) {
     textureStore(O1, c, u1);
     textureStore(O2, c, u2);
+    apwall_store(c);
     return;
   }
   let dtdx = clock.dt / blk_dx(inv.slot);
@@ -63,6 +65,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fl = ap_face(inv.slot, inv.l, a, false, pc, rc, dtdx, true);
     // (The field's kick on the cell: the mean of its two faces'.)
     mom[a] += clock.dt * P.gext[a] * 0.5 * (fh.z + fl.z) - dtdx * (fh.x - fl.x);
+    // Forces on bodies (amr/pressure/pwalls_on.wgsl).
+    apwall_face(inv.slot, inv.l, a, true, fh.x);
+    apwall_face(inv.slot, inv.l, a, false, fl.x);
     dm += fh.y - fl.y;
     ap_mf_face(inv.slot, inv.l, a, false, fl.y);
     ap_mf_face(inv.slot, inv.l, a, true, fh.y);
@@ -76,4 +81,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // next step: its predictor's gradient and its solve's start (it is regridded and its ghosts
   // filled with the rest of the state).
   textureStore(O2, c, vec4<f32>(0.5 * dot(mom, mom) / rho + eint, pnew, sc, u2.w));
+  apwall_store(c);
 }

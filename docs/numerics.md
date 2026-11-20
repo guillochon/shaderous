@@ -36,7 +36,8 @@ precision, are pointed out where they occur.
 23. [Validation](#23-validation)
 24. [Radiation transport](#24-radiation-transport)
 25. [ANEOS materials and planets](#25-aneos-materials-and-planets)
-25. [References](#references)
+26. [Bodies in a stream](#26-bodies-in-a-stream)
+27. [References](#references)
 
 ---
 
@@ -3473,6 +3474,61 @@ of the mass has left through the faces by t = 28.
   have not been tried.
 - A run's two materials must be its two species. A third species, a tracer, turns the
   composition off: the dye (the passive scalar) tells bodies apart instead.
+
+## 26. Bodies in a stream
+
+What the code does with solid bodies in a flow: the force the gas exerts on each. The plan
+this follows, with what is still to come (bodies from mesh files, a wind tunnel, moving
+bodies), is [plans/wind-tunnel.md](../plans/wind-tunnel.md).
+
+### Forces on bodies
+
+A body is an obstacle of the setup: its cells are solid, and each face between a gas cell and
+a solid one is a reflecting wall, made by the gas cell's mirror image (section 6, and
+`hydro/flux.wgsl`); with viscosity the wall is also no-slip (section 11). The flux through a
+wall face is the momentum the gas gives the wall there. So the force on a body is the sum,
+over its wall faces, of the fluxes the update has formed anyway, times the faces' areas:
+
+```math
+\mathbf F = \sum_{\text{wall faces } f} \pm\, \mathbf F^{\text{mom}}_f A_f ,
+```
+
+with + for a gas cell's upper face and - for its lower one. This is the momentum the gas lost
+to the body, exactly: a control volume around the body balances it to round-off, which test
+`force-balance` checks (below). The torque is taken about each body's point (a sphere's
+center, a box's) with each cell's force at the cell's center: exact for the pressure, whose
+force on a face is along the face's normal, and off by half a cell's lever for viscosity's.
+
+- **Which body.** A solid cell's mark (the fourth component of the second state texture) is
+  1 plus its body's index: the setup's obstacles in order, the first four apart and any after
+  them summed with the fourth (`MAX_BODIES`). Every test of the mark is > 0.5, so a mark of 2
+  is as solid as one of 1. An obstacle drawn with the brush belongs to the first body.
+- **Where it is summed.** The update writes each gas cell's wall flux into two textures laid
+  out as the state (`hydro/walls_on.wgsl`, `amr/walls_on.wgsl`): the pressure's part (the flux's
+  momentum less viscosity's) and viscosity's, each with the body's mark. A reduction sums
+  them per body (`hydro/forces.wgsl`, `amr/forces.wgsl`, `src/hydro/forces.ts`), with the
+  diagnostics. Without bodies none of this is compiled in.
+- **Implicit pressure.** The update's wall flux is then advection's, which carries nothing
+  through a wall, and viscosity's; the pressure's force is the correction's, which forms each
+  wall face's pressure (the cell's, carried half a cell along a uniform field) and moves the
+  momentum by it. The correction writes that part (`pressure/pwalls_on.wgsl`,
+  `amr/pressure/pwalls_on.wgsl`). A gas's pressure is taken less the solve's reference
+  pressure: a constant pressure has no net force on a closed body, and float32 keeps its
+  digits for the part that does.
+- **On blocks.** A body's surface is always at the finest level (section 17), so a wall face
+  is never a refinement face and the sum over the leaves counts each once. With per-block
+  timesteps a block writes only on its own steps (not in the passes that add a faster
+  neighbor's flux half way through), so what is read is each block's last step's force.
+- **Reported** as `bodies` in the diagnostics (the page's panel, the runner's `diag.jsonl`,
+  the MCP `diagnostics` tool): per body its force, the pressure's and viscosity's parts, the
+  torque, and, where the setup gives a reference (a density, speed, area and length), the drag
+  and lift coefficients $`C = F / (\tfrac12 \rho U^2 A)`$ and the moment coefficients.
+
+**Validation.** `force-balance`: a periodic box with a cylinder and a slab of fluid moving
+toward it, viscosity on, so that only the body changes the gas's momentum. Over 30 steps the
+change of the gas's momentum is minus the sum of the force times dt to 3e-7 to 5e-6 of it,
+in each of eight runs: liquid and ideal gas, explicit and implicit pressure, uniform grid and
+two levels of blocks (the test's threshold is 1e-4).
 
 ## References
 

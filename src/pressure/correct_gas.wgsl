@@ -50,6 +50,7 @@ fn p_new(c: vec3<i32>) -> f32 {
 
 #include "pressure/faces.wgsl"
 #include <psplit_mf>
+#include <pwalls>
 
 // What a face between a lower and an upper gas cell does: (its pressure, its corrected velocity)
 // and, in `carry`, what the corrected velocity carries beyond the advective flux: (mass,
@@ -90,6 +91,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(PFO, c, vec4<f32>(p_new(c), 0.0, 0.0, 0.0));
     textureStore(O1, c, u1);
     textureStore(O2, c, u2);
+    pwall_store(c);
     return;
   }
   let dtdx = clock.dt / P.dx;
@@ -152,6 +154,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (lo.kind == FK_OPEN) { fl = vec2<f32>(pc, open_mom(u1[a + 1] + kc * u1.x, false, lo.only) / u1.x); ml = fl.y; }
     ek += 0.5 * u1.x * (kh * mh + kl * ml);
     mom[a] += 0.5 * (kh + kl) * u1.x - dtdx * (fh.x - fl.x);
+    // Forces on bodies (pressure/pwalls_on.wgsl), less the reference pressure.
+    if (hi.kind == FK_WALL) { pwall_face(c, a, true, fh.x - P.ohm.w); }
+    if (lo.kind == FK_WALL) { pwall_face(c, a, false, fl.x - P.ohm.w); }
     de += fh.x * fh.y - fl.x * fl.y;
     dvh += fh.y - fl.y;
   }
@@ -163,4 +168,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
   textureStore(O1, c, vec4<f32>(rho, mom));
   textureStore(O2, c, vec4<f32>(en.x, en.y, u2.z - dtdx * c2.z, u2.w));
+  pwall_store(c);
 }

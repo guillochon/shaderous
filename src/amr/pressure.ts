@@ -40,6 +40,8 @@ export interface AmrPressureContext {
   massFlux?: { lo: Bindable; hi: Bindable | null };
   /** the modules the hydro shaders are assembled with (the equation of state) */
   slots: Record<string, string>;
+  /** Forces on bodies (hydro/forces.ts): the texture the correction writes their pressure's part into. */
+  walls?: Record<number, Bindable>;
   /** the root level as a uniform grid: its cells along each axis (1 along z in 2D), its cell size, and the kinds of the box's faces (pressure/multigrid.ts PF_*) */
   rootDims: [number, number, number];
   dx0: number;
@@ -154,13 +156,14 @@ export class AmrPressure {
       if (gas) {
         const faces = { 25: v(gas.lag), 27: v(gas.faceLo), 28: v(gas.faceHi), 23: v(gas.gfield), 20: gas.bh };
         s.gSource.push(bindGroupUsed(d, s.pSource, { ...base(ctx.listLeaf), 3: v(rhs), 4: v(tau), 26: v(pd), 14: v(ctx.state[p][0]), 16: v(ctx.state[p][1]), 34: v(old), 35: v(chi), ...faces }));
-        s.gCorrect.push(bindGroupUsed(d, s.pCorrect, { ...bare(ctx.listLeaf), ...prims, 2: v(prs), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 29: v(pn), 34: v(old), 35: v(chi), ...mfBind, ...faces }));
+        s.gCorrect.push(bindGroupUsed(d, s.pCorrect, { ...bare(ctx.listLeaf), ...prims, ...(ctx.walls ?? {}), 2: v(prs), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 29: v(pn), 34: v(old), 35: v(chi), ...mfBind, ...faces }));
         continue;
       }
       s.gSource.push(bindGroupUsed(d, s.pSource, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 4: v(tau), 13: v(rho0), 14: v(ctx.state[p][0]), 15: v(ctx.prim), 16: v(ctx.state[p][1]), 34: v(old) }));
       s.gCorrect.push(
         bindGroup(d, s.pCorrect, {
           ...base(ctx.listLeaf), 2: v(prs), 13: v(rho0), 15: v(ctx.prim), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 34: v(old), ...mfBind,
+          ...(ctx.walls ?? {}),
         }),
       );
     }

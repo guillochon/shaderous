@@ -30,6 +30,7 @@ fn prs(slot: i32, l: vec3<i32>) -> f32 {
 // The state the step started from (amr/pressure/source_gas.wgsl kept it).
 @group(0) @binding(34) var OLD: texture_3d<f32>;
 #include <ap_mf>
+#include <ap_walls>
 // (v^n, chi_f) of the face between two leaves' cells, lower and upper: as the source formed v^n.
 fn ap_vc(slo: i32, llo: vec3<i32>, shi: i32, lhi: vec3<i32>, a: i32) -> vec2<f32> {
   let clo = atl(blk_origin(slo), llo);
@@ -67,6 +68,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (abs(u2.w) > 0.5) {
     textureStore(O1, c, u1);
     textureStore(O2, c, u2);
+    apwall_store(c);
     return;
   }
   let dtdx = clock.dt / g_dx;
@@ -86,6 +88,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let fl = ap_gface(inv.slot, inv.l, a, false, dc, dtdx, true);
     // (The cell's kick is the mean of its two faces'.)
     mom[a] += 0.5 * (fh.k + fl.k) * u1.x - dtdx * (fh.pv.x - fl.pv.x);
+    // Forces on bodies (amr/pressure/pwalls_on.wgsl).
+    apwall_face(inv.slot, inv.l, a, true, fh.pv.x);
+    apwall_face(inv.slot, inv.l, a, false, fl.pv.x);
     ek += 0.5 * u1.x * (fh.k * fh.m + fl.k * fl.m);
     de += (P.ohm.w + fh.pv.x) * fh.pv.y - (P.ohm.w + fl.pv.x) * fl.pv.y;
     dvh += fh.pv.y - fl.pv.y;
@@ -102,4 +107,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let en = dual_energy(rho, 0.5 * dot(mom, mom) / rho, E, eint);
   textureStore(O1, c, vec4<f32>(rho, mom));
   textureStore(O2, c, vec4<f32>(en.x, en.y, u2.z - dtdx * c2.z, u2.w));
+  apwall_store(c);
 }

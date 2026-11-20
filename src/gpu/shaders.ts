@@ -25,6 +25,11 @@ const DEFAULT_SLOTS: Slots = {
   psplit: 'const PSPLIT = false;\nconst PSPLIT_LAG = false;\nconst PSPLIT_CENTER = false;\n',
   psplit_grad: 'pressure/predict_off.wgsl',
   psplit_store: 'pressure/store_off.wgsl',
+  // Forces on bodies (plans/wind-tunnel.md 4.2): summed only where a run has bodies (walls_on).
+  walls: 'hydro/walls_off.wgsl',
+  amr_walls: 'amr/walls_off.wgsl',
+  pwalls: 'pressure/pwalls_off.wgsl',
+  ap_walls: 'amr/pressure/pwalls_off.wgsl',
   ap_store: 'amr/pressure/store_off.wgsl',
   ap_lag: 'amr/pressure/lag_liquid.wgsl',
   // No limit on the block grid's step from the solved pressure, unless AmrSim says a gas has one.

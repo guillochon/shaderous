@@ -25,6 +25,7 @@
 
 #include "pressure/faces.wgsl"
 #include <psplit_mf>
+#include <pwalls>
 
 // The mass flux through the face between a lower and an upper cell, from their advected momenta
 // along the face normal and their pressures: one expression, whichever of the two cells asks.
@@ -46,6 +47,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     textureStore(PFO, c, vec4<f32>(pn, 0.0, 0.0, 0.0));
     textureStore(O1, c, u1);
     textureStore(O2, c, u2);
+    pwall_store(c);
     return;
   }
   let dtdx = clock.dt / P.dx;
@@ -86,6 +88,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (lo.kind == FK_INLET) { fl.y = textureLoad(U1S, lo.q, 0)[a + 1]; }
     if (lo.kind == FK_OPEN) { fl = vec3<f32>(0.0, open_mom(u1[a + 1] + kg * rc, false, lo.only) - 2.0 * th * dtdx * pc, rc); }
     mom[a] += kg * 0.5 * (fh.z + fl.z) - dtdx * (fh.x - fl.x);
+    // Forces on bodies: the pressure on this cell's faces on one (pressure/pwalls_on.wgsl).
+    if (hi.kind == FK_WALL) { pwall_face(c, a, true, fh.x); }
+    if (lo.kind == FK_WALL) { pwall_face(c, a, false, fl.x); }
     dm += fh.y - fl.y;
     // (A wall's face carries nothing: fh.y and fl.y are 0 there.)
     mf_set(c, a, false, fl.y);
@@ -97,4 +102,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let sc = u2.z * rho / max(u1.x, P.rho_floor);
   textureStore(O1, c, vec4<f32>(rho, mom));
   textureStore(O2, c, vec4<f32>(0.5 * dot(mom, mom) / rho + eint, eint, sc, u2.w));
+  pwall_store(c);
 }

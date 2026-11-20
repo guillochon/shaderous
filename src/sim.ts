@@ -8,6 +8,7 @@ import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Bind
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
 import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
+import { bodyForcesFrom, FORCE_CHANNELS, forcesOn, WallForces, wallSlots, type BodyForce } from './hydro/forces';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
@@ -817,6 +818,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     frame: cosmologyOf(c) ? 'gravity/frame_cosmo.wgsl' : rotating(c) ? 'gravity/frame_rot.wgsl' : 'gravity/frame_off.wgsl',
     // A spherical run (hydro/common.wgsl spherical()).
     geometry: `const SPHERICAL = ${spherical(c)};\n`,
+    // Forces on bodies (hydro/forces.ts): the passes that write each cell's wall forces.
+    ...wallSlots(forcesOn(c)),
   };
 }
 
@@ -1149,7 +1152,16 @@ export function clockState(c: SimConfig, time = 0, steps = 0): Float32Array<Arra
   return new Float32Array([0, time, 0, steps, a, a, a, k ? hubble(k, a) : 0, shear, 0]);
 }
 
-export const DIAG_FLOATS = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS;
+/** Then the forces on bodies (hydro/forces.ts), where a run has any. */
+export const DIAG_FLOATS = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS + FORCE_CHANNELS;
+/** Where the forces on bodies start in a diagnostics readback, in floats. */
+export const FORCE_FLOAT = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS;
+
+/** The forces on a run's bodies from a diagnostics readback, into `d`. */
+export function withForces(d: Diagnostics, a: Float32Array, c: SimConfig): Diagnostics {
+  if (forcesOn(c)) d.bodies = bodyForcesFrom(a.subarray(FORCE_FLOAT), c.problem.bodies!, c.problem.forceRef);
+  return d;
+}
 
 /** Burning's heating rate texture where a run does not burn: one texel of nothing. */
 export function noHeat(d: GPUDevice): GPUTexture {
@@ -1350,6 +1362,11 @@ export interface Diagnostics {
    * configuration, of which the grid holds one 2^k-th (unfoldDiagnostics).
    */
   symmetry?: [boolean, boolean, boolean];
+  /**
+   * Obstacles of the setup (Problem.bodies): the force and torque the gas exerts on each, as
+   * the last step's wall faces carried it (hydro/forces.ts), and its coefficients with a reference.
+   */
+  bodies?: BodyForce[];
   /** Comoving coordinates: the scale factor of the state, and its redshift 1 / a - 1. */
   scale?: number;
   redshift?: number;
@@ -1537,6 +1554,8 @@ export class Sim implements Simulation {
   private gClock!: GPUBindGroup;
   private redDt!: Reducer;
   private redDiag!: Reducer;
+  /** Forces on bodies (hydro/forces.ts), where the run has any. */
+  walls?: WallForces;
   private staging: GPUBuffer;
   private stagingBusy = false;
   private brush: GPUBuffer;
@@ -1744,6 +1763,11 @@ export class Sim implements Simulation {
       'diagnostics',
     );
     diag.catch(() => {}); // a failure is reported where it is awaited, below
+    // Forces on bodies: the textures the update (and the correction) write, and their reduction.
+    this.walls?.destroy();
+    this.walls = forcesOn(c)
+      ? await WallForces.create(d, (label) => tex3d(d, this.nx, 'rgba32float', label, this.nz, this.ny), c.viscosity > 0 || implicitPressure(c), c.problem.bodies!, dims, 'hydro/forces.wgsl', slots, this.params)
+      : undefined;
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
     // Implicit pressure: the solver (kept across rebuilds, with its warm start) and its passes.
@@ -1786,6 +1810,7 @@ export class Sim implements Simulation {
           10: v(this.pOld!), 11: v(this.pFull!),
           5: v(prs.rho0),
           ...((this.speciesGroups > 0 ? { 13: this.massFlux! } : {}) as Record<number, Bindable>),
+          ...(this.walls?.correctBindings() ?? {}),
           ...((gas ? { 9: v(this.faceVel!), 12: v(this.gfield), 20: this.bh } : {}) as Record<number, Bindable>), ...k,
         }),
       );
@@ -1866,6 +1891,7 @@ export class Sim implements Simulation {
           9: v(this.pred[0]),
           10: v(this.pred[1]),
           ...((this.faceVel && implicitPressure(c) && eosHasEnergy(c.eos) ? { 32: v(this.faceVel) } : {}) as Record<number, GPUTextureView>),
+          ...(this.walls?.updateBindings() ?? {}),
           11: this.sources,
           ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
           ...(this.debrisBuf?.bindings(this.bh) ?? {}),
@@ -2035,7 +2061,7 @@ export class Sim implements Simulation {
           }
           const mark = cellMark(w);
           if (mark) this.solids = true;
-          const go = mark === 1 ? 0 : 1; // the gas kept inside an obstacle is at rest
+          const go = mark > 0 ? 0 : 1; // the gas kept inside an obstacle is at rest
           u1[o] = w.rho;
           u1[o + 1] = w.rho * w.vx * go;
           u1[o + 2] = w.rho * w.vy * go;
@@ -2788,12 +2814,18 @@ export class Sim implements Simulation {
     enc.copyBufferToBuffer(this.clock, 0, this.staging, 0, CLOCK_BYTES);
     enc.copyBufferToBuffer(this.redDiag.result, 0, this.staging, CLOCK_BYTES, DIAG_OPS.length * 4);
     enc.copyBufferToBuffer(this.bh, 0, this.staging, CLOCK_BYTES + DIAG_OPS.length * 4, MASS_FLOATS * 4);
+    if (this.walls) {
+      const fp = beginPass(enc);
+      this.walls.encode(fp);
+      fp.end();
+      enc.copyBufferToBuffer(this.walls.result, 0, this.staging, FORCE_FLOAT * 4, FORCE_CHANNELS * 4);
+    }
     this.device.queue.submit([enc.finish()]);
     try {
       await this.staging.mapAsync(GPUMapMode.READ);
       const a = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
-      const diag = diagnosticsFrom(a, this.nMasses);
+      const diag = withForces(diagnosticsFrom(a, this.nMasses), a, this.cfg);
       if (cosmologyOf(this.cfg)) this.lastScale = withScale(diag, a).scale;
       if (diag.steps === 0 && diag.dt === 0) diag.dt = await this.previewDt();
       // A magnetic field: its diagnostics, and its energy taken out of the reduction's internal
@@ -3014,6 +3046,7 @@ export class Sim implements Simulation {
     this.burn?.destroy();
     for (const t of [...this.pred, this.gfield, ...this.species]) t.destroy();
     this.heat?.destroy();
+    this.walls?.destroy();
     this.comp?.destroy();
     this.speciesHalf?.destroy();
     this.massFlux?.destroy();
