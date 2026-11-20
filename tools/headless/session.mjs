@@ -2,7 +2,7 @@
 // when installed from npm, or from a URL given), opened in Chrome with WebGPU, and its scripting
 // API (window.shaderous, docs/api.md) callable from Node. Shared by the command-line runner
 // (cli.mjs) and the MCP server (mcp.mjs).
-import { existsSync } from 'node:fs';
+import { closeSync, existsSync, openSync, writeSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import os from 'node:os';
@@ -194,6 +194,29 @@ export async function fetchSlice(call, opts) {
   const r = await call('slice', { ...opts, encoding: 'base64' });
   const { array, ...head } = r;
   return { head, values: sliceArray(r) };
+}
+
+/**
+ * The run's .athdf file written to `file`, read out of the page in pieces (athdf({ chunked })),
+ * so that a file of gigabytes is never one string. `name` is the file's name in the page (the
+ * problem and time); `pick(name)` may choose the path from it. Returns { file, name, time, bytes }.
+ */
+export async function saveAthdf(call, pick) {
+  const f = await call('athdf', { chunked: true });
+  const file = typeof pick === 'function' ? pick(f.name) : pick;
+  const CHUNK = 64 * 1024 * 1024;
+  const fd = openSync(file, 'w');
+  try {
+    for (let offset = 0; offset < f.bytes; ) {
+      const c = await call('athdfChunk', offset, CHUNK);
+      const b = Buffer.from(c.base64, 'base64');
+      writeSync(fd, b);
+      offset = c.end;
+    }
+  } finally {
+    closeSync(fd);
+  }
+  return { file, name: f.name, time: f.time, bytes: f.bytes };
 }
 
 /** A PNG data URL as bytes. */

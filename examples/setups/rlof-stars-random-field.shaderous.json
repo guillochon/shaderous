@@ -1,0 +1,28 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "extends": "roche-lobe-overflow-stars",
+  "name": "Roche lobe overflow, two magnetized stars",
+  "blurb": "The two-star Roche lobe overflow preset (a 1 solar mass donor of 1 solar radius at 0.97 of its Roche lobe, and a 0.6 solar mass accretor of 0.6 solar radii, both gamma = 5/3, n = 3/2), with each star threaded by its own tangled Kolmogorov field confined to the star (plasma beta 1000 at the center), from different seeds.",
+  "parts": [
+    {
+      "kind": "star",
+      "id": "donor",
+      "type": "polytrope",
+      "n": 1.5,
+      "mass": 1,
+      "radius": 1,
+      "field": { "type": "random", "beta": 1000, "seed": 1 }
+    },
+    {
+      "kind": "star",
+      "id": "accretor",
+      "type": "polytrope",
+      "n": 1.5,
+      "mass": 0.6,
+      "radius": 0.6,
+      "field": { "type": "random", "beta": 1000, "seed": 2 }
+    },
+    { "kind": "orbit", "id": "orbit", "of": ["donor", "accretor"], "type": "binary", "fill": 0.97, "ecc": 0, "corotating": true, "track": true }
+  ]
+}

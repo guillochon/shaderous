@@ -6,11 +6,11 @@
 //   node tools/headless/cli.mjs sweep --problem sedov --dim 2 --vary gamma=1.1,1.4,1.667 --until 0.05
 //   node tools/headless/cli.mjs run "problem=kelvin-helmholtz&dim=2&n=256" --until 2 --mp4
 //   node tools/headless/cli.mjs describe [problem]
-import { mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { helpText, OPTIONS } from './flags.mjs';
-import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, setupQuery } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, saveAthdf, setupQuery } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const HELP = `Usage: shaderous <command> [setup] [options]   (in a checkout: npm run headless -- <command> ...)
@@ -74,11 +74,11 @@ function baseSetup() {
   return q;
 }
 
-/** View settings: numbers and booleans parsed, a field given by name or by index. */
-function viewSettings(fields) {
+/** View settings from KEY=VALUE strings: numbers and booleans parsed, a field given by name or by index. */
+function viewSettings(fields, list = o.view ?? [], flag = 'view') {
   const v = {};
-  for (const s of o.view ?? []) {
-    const [k, raw] = pair(s, 'view');
+  for (const s of list) {
+    const [k, raw] = pair(s, flag);
     if (k === 'field' && !/^\d+$/.test(raw)) {
       const f = fields.find((x) => x.name.toLowerCase() === raw.toLowerCase());
       if (!f) fail(`no field "${raw}": use one of ${fields.map((x) => x.name).join(', ')}`);
@@ -86,6 +86,17 @@ function viewSettings(fields) {
     } else v[k] = raw === 'true' ? true : raw === 'false' ? false : Number.isFinite(Number(raw)) && raw !== '' ? Number(raw) : raw;
   }
   return v;
+}
+
+/** The --shot views: [{ name, view }], each view's settings parsed as --view's. */
+function shotViews(fields) {
+  return (o.shot ?? []).map((s) => {
+    const i = s.indexOf(':');
+    const name = i < 0 ? s : s.slice(0, i);
+    if (!/^[\w-]+$/.test(name)) fail(`--shot takes NAME:KEY=VALUE,.. with a name of letters, digits, - and _, not "${s}"`);
+    const list = i < 0 ? [] : s.slice(i + 1).split(',').filter(Boolean);
+    return { name, view: viewSettings(fields, list, 'shot') };
+  });
 }
 
 /** Every combination of the --vary values, as lists of [key, value]. */
@@ -106,16 +117,24 @@ const tag = (t) => String(+t.toPrecision(6));
 /** One run of a setup, outputs into `dir`. Returns its summary. */
 async function runOne(session, q, dir) {
   const { call } = session;
+  const tw = Date.now();
+  const wallMs = o.wall === undefined ? undefined : num(o.wall, 'wall') * 1000;
+  if (wallMs !== undefined && !(wallMs > 0)) fail('--wall must be positive');
   const st = await call('load', q.toString(), ...(setupDocument ? [setupDocument] : []));
   mkdirSync(dir, { recursive: true });
   const until = num(o.until, 'until') ?? (o.steps === undefined ? st.tEnd : undefined);
   const steps = num(o.steps, 'steps');
   const every = num(o.every, 'every');
-  if (until == null && steps === undefined) fail(`${st.problem} has no end time: give --until or --steps`);
+  if (until == null && steps === undefined && wallMs === undefined) fail(`${st.problem} has no end time: give --until, --steps or --wall`);
   if (every !== undefined && !(every > 0)) fail('--every must be positive');
   if (every !== undefined && until == null) fail('--every needs --until (or a problem with an end time)');
   const timeoutMs = o.timeout === undefined ? undefined : num(o.timeout, 'timeout') * 1000;
-  if (o.mp4 && (every !== undefined || steps !== undefined)) fail('--mp4 records the whole run: give --until, not --every or --steps');
+  const everyWallMs = o['every-wall'] === undefined ? undefined : num(o['every-wall'], 'every-wall') * 1000;
+  if (everyWallMs !== undefined && !(everyWallMs > 0)) fail('--every-wall must be positive');
+  if (everyWallMs !== undefined && every !== undefined) fail('give --every or --every-wall, not both');
+  const athdfEvery = o['athdf-every'] === undefined ? (o.athdf ? 1 : undefined) : num(o['athdf-every'], 'athdf-every');
+  if (athdfEvery !== undefined && !(Number.isInteger(athdfEvery) && athdfEvery >= 0)) fail('--athdf-every takes a whole number, 0 or more');
+  if (o.mp4 && (every !== undefined || everyWallMs !== undefined || steps !== undefined)) fail('--mp4 records the whole run: give --until, not --every, --every-wall or --steps');
   if (!o.mp4 && (o['frame-every'] || o['frame-dt'] || o.fps || o.bitrate || o['no-overlays'])) fail('--frame-every, --frame-dt, --fps, --bitrate and --no-overlays go with --mp4');
   if (o['frame-every'] !== undefined && o['frame-dt'] !== undefined) fail('give --frame-every or --frame-dt, not both');
   if (o.native && !o.png) fail('--native goes with --png');
@@ -124,6 +143,15 @@ async function runOne(session, q, dir) {
   const d0 = await call('describe');
   const view = viewSettings(d0.fields);
   if (Object.keys(view).length) await call('view', view);
+  const shots = shotViews(d0.fields);
+  // Each shot starts from the view as --view left it (its colormap too), so that one shot's
+  // settings do not carry into the next. Not the range (lo, hi), which would hold it fixed,
+  // unless --view set it.
+  let baseView;
+  if (shots.length) {
+    const { colormap, lo, hi, ...rest } = await call('view', {});
+    baseView = { ...rest, ...(colormap ? { colormap } : {}), ...view, autoRange: view.lo === undefined && view.hi === undefined };
+  }
   const manifest = {
     program: 'shaderous',
     build: await session.page.evaluate(() => window.shaderous.build),
@@ -144,20 +172,24 @@ async function runOne(session, q, dir) {
   const t0 = Date.now();
   let k = 0;
   /** Diagnostics and the requested files, at the run's current time. */
-  const output = async () => {
+  const output = async (last = false) => {
     const d = await call('diagnostics');
     const name = `${String(k).padStart(4, '0')}-t${tag(d.t)}`;
     const files = [];
     appendFileSync(path.join(dir, 'diag.jsonl'), JSON.stringify({ output: k, wall: (Date.now() - t0) / 1000, ...d }) + '\n');
+    const shotOpts = o.native
+      ? { native: true, overlays: { colorbar: true, triad: true, status: true } }
+      : { width: num(o.width, 'width') ?? 1024, height: num(o.height, 'height') ?? num(o.width, 'width') ?? 1024 };
     if (o.png) {
-      const png = await call(
-        'screenshot',
-        o.native
-          ? { native: true, overlays: { colorbar: true, triad: true, status: true } }
-          : { width: num(o.width, 'width') ?? 1024, height: num(o.height, 'height') ?? num(o.width, 'width') ?? 1024 },
-      );
+      const png = await call('screenshot', shotOpts);
       writeFileSync(path.join(dir, `${name}.png`), pngBytes(png));
       files.push(`${name}.png`);
+    }
+    for (const s of shots) {
+      await call('view', { ...baseView, ...s.view });
+      const png = await call('screenshot', shotOpts);
+      writeFileSync(path.join(dir, `${name}-${s.name}.png`), pngBytes(png));
+      files.push(`${name}-${s.name}.png`);
     }
     // Fetched as float32 bytes either way (the values are those of the JSON result, bit for
     // bit), which is many times faster than a list of numbers through page.evaluate.
@@ -180,9 +212,8 @@ async function runOne(session, q, dir) {
       log(`    debris: escaped ${s.totals.escaped.toPrecision(4)}  in box ${s.totals.inBox.toPrecision(4)}  core ${s.totals.core.toPrecision(5)}  bound ${s.totals.bound.toPrecision(4)}` +
         (p ? `  dM/dt peak ${p.peakMsunPerYear.toPrecision(3)} Msun/yr at ${p.peakDaysAfterPericenter.toPrecision(3)} d after pericenter` : ''));
     }
-    if (o.athdf) {
-      const f = await call('athdf');
-      writeFileSync(path.join(dir, `${name}.athdf`), Buffer.from(f.base64, 'base64'));
+    if (athdfEvery !== undefined && (last || (athdfEvery > 0 && k % athdfEvery === 0))) {
+      await saveAthdf(call, path.join(dir, `${name}.athdf`));
       files.push(`${name}.athdf`);
     }
     manifest.outputs.push({ output: k, t: d.t, steps: d.steps, files, ...(slices.length ? { slices } : {}) });
@@ -193,6 +224,18 @@ async function runOne(session, q, dir) {
 
   let stopped = 'steps';
   let r = { t: 0, steps: 0 };
+  /** Why the run should stop now, apart from its own stops: the --wall budget spent, or a STOP file. */
+  const halt = () => (wallMs !== undefined && Date.now() - tw >= wallMs ? 'wall' : existsSync(path.join(dir, 'STOP')) ? 'stop-file' : null);
+  /** A run call's time limit: the least of --timeout, what is left of --wall, and `more`. */
+  const limit = (more) => {
+    const all = [timeoutMs, wallMs === undefined ? undefined : Math.max(1, wallMs - (Date.now() - tw)), more].filter((x) => x !== undefined);
+    return all.length ? Math.min(...all) : undefined;
+  };
+  // run() needs a time or a number of steps: a run held only by the wall clock gets no end of steps.
+  const bound = until != null ? { until } : steps === undefined ? { steps: Number.MAX_SAFE_INTEGER } : {};
+  // A time limit on a run call covers the stars settling too, and fails it if they are not done:
+  // runs timed by the wall clock let them settle first (under --timeout alone).
+  if (wallMs !== undefined || everyWallMs !== undefined) await call('run', { steps: 0, timeoutMs });
   await output();
   if (o.mp4) {
     const frameDt = num(o['frame-dt'], 'frame-dt');
@@ -200,7 +243,7 @@ async function runOne(session, q, dir) {
     const m = await call('record', {
       ...(o['frame-every'] !== undefined ? { every: num(o['frame-every'], 'frame-every') } : frameDt !== undefined ? { dt: frameDt } : {}),
       until,
-      timeoutMs,
+      timeoutMs: limit(),
       fps: num(o.fps, 'fps'),
       bitrate: o.bitrate === undefined ? undefined : num(o.bitrate, 'bitrate') * 1e6,
       width: num(o.width, 'width') ?? 1920,
@@ -215,21 +258,35 @@ async function runOne(session, q, dir) {
     log(`  movie.mp4: ${m.frames} frames, ${m.seconds.toFixed(1)} s at ${m.width} x ${m.height}, ${(m.bytes / 1e6).toFixed(1)} MB`);
     const st1 = await call('state');
     r = { t: st1.t, steps: st1.steps };
-    stopped = m.stopped;
-    await output();
+    stopped = halt() ?? m.stopped;
+    await output(true);
   } else if (every !== undefined) {
     // Output times are multiples of `every`, so runs line up whatever their timesteps.
     for (let j = 1; ; j++) {
       const target = Math.min(j * every, until);
-      r = await call('run', { until: target, ...(steps !== undefined ? { steps: steps - r.steps } : {}), timeoutMs });
-      stopped = r.stopped;
-      await output();
-      if (r.stopped !== 'time' || target >= until) break;
+      r = await call('run', { until: target, ...(steps !== undefined ? { steps: steps - r.steps } : {}), timeoutMs: limit() });
+      const h = halt();
+      stopped = h ?? r.stopped;
+      const last = !!h || r.stopped !== 'time' || target >= until;
+      await output(last);
+      if (last) break;
+    }
+  } else if (everyWallMs !== undefined) {
+    // Outputs by the clock on the wall: each run call is held to the time until the next.
+    for (;;) {
+      r = await call('run', { ...bound, ...(steps !== undefined ? { steps: steps - r.steps } : {}), timeoutMs: limit(everyWallMs) });
+      const h = halt();
+      // A 'timeout' is the output interval ending, unless --timeout itself was what ran out.
+      const timedOut = r.stopped === 'timeout' && timeoutMs !== undefined && timeoutMs <= everyWallMs;
+      stopped = h ?? r.stopped;
+      const last = !!h || r.stopped !== 'timeout' || timedOut;
+      await output(last);
+      if (last) break;
     }
   } else {
-    r = await call('run', { ...(until != null ? { until } : {}), ...(steps !== undefined ? { steps } : {}), timeoutMs });
-    stopped = r.stopped;
-    await output();
+    r = await call('run', { ...bound, ...(steps !== undefined ? { steps } : {}), timeoutMs: limit() });
+    stopped = halt() ?? r.stopped;
+    await output(true);
   }
   manifest.finished = new Date().toISOString();
   manifest.stopped = stopped;

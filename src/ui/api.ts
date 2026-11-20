@@ -734,6 +734,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
 
   // The recording under way, if any.
   let recording: { status: RecordingStatus; stop: boolean } | null = null;
+  /** The file athdf({ chunked: true }) made, until athdfChunk has read it out. */
+  let heldAthdf: Uint8Array | null = null;
 
   async function record(opts: RecordOptions = {}): Promise<RecordResult> {
     const s = current();
@@ -872,7 +874,9 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     if (v.lo !== undefined || v.hi !== undefined) app.setAutoRange(false);
     if (autoRange !== undefined) app.setAutoRange(autoRange);
     app.sync();
-    return { ...app.view, colormap: colormap };
+    // The colormap in force, as the panel's menu holds it (synced above), so that a caller can put it back.
+    const menu = document.getElementById('cmap') as HTMLSelectElement | null;
+    return { ...app.view, colormap: menu?.value || colormap };
   }
 
   /** The panel's controls that are showing, with what each holds. */
@@ -1303,12 +1307,31 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     /** Change what the view shows (ViewState keys, plus colormap and autoRange). The run is untouched. */
     view: (changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean } = {}) => serial(async () => setView(changes)),
 
-    /** The state of the gas as an .athdf file (HDF5, readable by yt and Athena++'s tools), base64. */
-    athdf: () =>
+    /**
+     * The state of the gas as an .athdf file (HDF5, readable by yt and Athena++'s tools), base64.
+     * With `chunked`, the file is held in the page instead and read out with athdfChunk: a large
+     * file is past the longest string the browser can hand over in one piece.
+     */
+    athdf: (opts: { chunked?: boolean } = {}) =>
       serial(async () => {
         current();
         const { time, bytes, stem } = await app.athdf();
-        return { name: `${stem}-t${+time.toPrecision(4)}.athdf`, time, bytes: bytes.length, base64: await toBase64(bytes) };
+        const name = `${stem}-t${+time.toPrecision(4)}.athdf`;
+        if (opts.chunked) {
+          heldAthdf = bytes;
+          return { name, time, bytes: bytes.length };
+        }
+        heldAthdf = null;
+        return { name, time, bytes: bytes.length, base64: await toBase64(bytes) };
+      }),
+    /** Bytes `offset` to `offset + length` of the file athdf({ chunked: true }) holds, base64; the file is let go after its last byte is read. */
+    athdfChunk: (offset: number, length: number) =>
+      serial(async () => {
+        if (!heldAthdf) throw new Error('no .athdf file is held: call athdf({ chunked: true }) first');
+        const end = Math.min(heldAthdf.length, offset + length);
+        const base64 = await toBase64(heldAthdf.subarray(offset, end));
+        if (end >= heldAthdf.length) heldAthdf = null;
+        return { offset, end, base64 };
       }),
 
     /** The panel's controls as they stand: id, kind, label, value, options. */

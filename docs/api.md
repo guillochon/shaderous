@@ -643,6 +643,9 @@ carries each under the key in the second column:
 | `autoRange` |  | Fit the color range to the data |
 <!-- /gen:view -->
 
+It returns the view as it then stands: every key above, and `colormap`, the color map in force.
+`view({})` reads it without changing anything.
+
 ### `controls() → array`
 
 Everything that can be set on a running page, in two parts.
@@ -769,11 +772,17 @@ themselves for a while after a read-back of their saving, and that pause depends
 A change to the equation of state mid-run is replayed through the setting, not the conversion
 the page made.
 
-### `athdf() → { name, time, bytes, base64 }`
+### `athdf(opts?) → { name, time, bytes, base64 }`
 
 The state of the gas as an `.athdf` file, base64-encoded: HDF5 in Athena++'s layout, which yt
 and Athena++'s own tools read. The file also carries the setup, so `loadAthdf` can continue
 the run exactly.
+
+A file of more than a few hundred megabytes is past the longest string the browser can hand
+over. With `{ chunked: true }` the page keeps the file and returns no `base64`; read it out
+with `athdfChunk(offset, length) → { offset, end, base64 }`, bytes `offset` to `end`, until
+`end` reaches `bytes`. The page lets the file go once its last byte is read. The runner and the
+MCP server's `save_athdf` read every file this way, 64 MB at a time.
 
 ### `errors() → string[]`
 

@@ -93,6 +93,13 @@ a `problem` returns that preset's document to start from.
 - `--every DT` writes outputs at t = 0 and every DT after it. Output times are exact multiples
   of DT, so outputs line up across runs with different timesteps.
 - `--timeout SECONDS` stops a run that is taking too long.
+- `--every-wall SECONDS` writes outputs at the start and every SECONDS of wall time after it,
+  in place of `--every`: for a run whose pace is not known in advance.
+- `--wall SECONDS` is a budget of wall time for the whole run, loading included. When it is
+  spent the run stops and writes its last outputs (with `--athdf-every`, a checkpoint), so
+  leave room for them; the manifest says `"stopped": "wall"`. With `--wall` a run needs no
+  `--until`. A file named `STOP` put in the output folder stops the run the same way at its
+  next output (`"stopped": "stop-file"`).
 
 ### Outputs
 
@@ -103,9 +110,10 @@ Each run writes a folder, `--out DIR`, which defaults to `runs/<problem>-<date>`
 | `manifest.json` | The setup in force (`setup`, a query string that reproduces the run), view settings, build, GPU adapter, the command line, start and end time, why the run stopped, the files of each output, and any errors the page reported |
 | `diag.jsonl` | One line of diagnostics per output: time, steps, wall time, mass, momentum, energies, Mach number, point masses, field ranges, and the magnetic and radiation totals of a run that has them (all of `diagnostics()` in [api.md](api.md#reference)). With radiation transport, the light curve between two outputs is the change of `radiation.escaped` over the change of `radiation.escapedAt` |
 | `NNNN-tT.png` | A screenshot at each output, with `--png`. Set the size with `--width` and `--height`, and what is drawn with `--view KEY=VALUE`. With `--native` instead of a size, a plane (a 2D run, a slice or a projection) at the grid's own resolution, one pixel per cell of the finest level, with the color bar, axes and status line beside it (`screenshot({ native })` in [api.md](api.md#reference)) |
+| `NNNN-tT-NAME.png` | A screenshot of each `--shot NAME:KEY=VALUE,..` at each output: the `--view` settings with the shot's on top (the same keys, comma-separated), so that each output can show several views. Each shot starts again from the `--view` settings and the colormap they leave, so one shot's settings do not carry into the next |
 | `NNNN-tT-VAR.json` | A slice of variable VAR at each output, with `--slice VAR` (repeatable). Set it with `--slice-axis`, `--slice-pos` and `--slice-res`; the format is that of `slice()` in [api.md](api.md#reference) |
 | `NNNN-tT-VAR.npy` | The same slice with `--slice-format npy`, as a file numpy reads: float32 of shape `[res, res]`, row `j` and column `i` as in `slice()`. The slice's other fields (`t`, `variable`, `axis`, `pos`, `res`, `axes`, `min`, `max`) are in `manifest.json`, under that output's `slices` |
-| `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`. yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them |
+| `NNNN-tT.athdf` | The state of the gas at each output, with `--athdf`, or at every Nth output and the last with `--athdf-every N` (0: the last only). yt and Athena++'s tools read these, and the page or `load_athdf` can continue the run from them. They are read out of the page 64 MB at a time, so files of gigabytes come out whole |
 | `movie.mp4` | The whole run as a movie, with `--mp4`: a frame near every `--frame-dt DT` of simulated time (default a 600th of the problem's dynamical time) or every `--frame-every N` steps, played at `--fps` (default 60), at `--bitrate` megabits per second (default 0.2 bits per pixel per frame), at `--width` x `--height` (default 1920 x 1080), with a color bar, axes and the status line unless `--no-overlays`. `manifest.json` gets a `movie` entry with its frame count and length. Not with `--every` or `--steps`; outputs are then written at the start and the end only |
 | `NNNN-tT-debris.json` | Debris energies and the return rate dM/dt at each output, with `--debris`, for problems that track them (the tidal disruption). The format is that of `debris()` in [api.md](api.md#reference) |
 
@@ -156,6 +164,13 @@ A long 3D run, at low priority so the machine stays responsive, with checkpoints
 npm run headless -- run --problem tidal-disruption-full --dim 3 --n 512 --amr 4 --every 0.5 --athdf --low-priority --out runs/tde
 ```
 
+A run held to four hours on a rented GPU: a volume rendering with field lines and a density
+slice every ten minutes, a checkpoint every hour, and the last state when the time is up:
+
+```bash
+npm run headless -- run --setup examples/setups/rlof-stars-random-field.shaderous.json --n 1024 --amr 4 --wall 14100 --every-wall 600 --athdf-every 6 --shot vol:mode=volume,showBlocks=false,fieldLines=true --shot rho:mode=slice,sliceAxis=2,showBlocks=false --gpu-memory 80 --out runs/rlof
+```
+
 A tidal disruption's return rate, the classic dM/dt diagram. Run a few dynamical times past
 pericenter with `--debris`, then plot the last output:
 
@@ -193,7 +208,9 @@ flags, [flags.mjs](../tools/headless/flags.mjs), by `npm run gen`):
 | `--until T` | Run to this time (landed on exactly) |
 | `--steps N` | Run at most this many steps |
 | `--every DT` | Write outputs every DT of simulated time (and at the start) |
+| `--every-wall SECONDS` | Or write outputs every SECONDS of wall time (and at the start) |
 | `--timeout SECONDS` | Give up on a run after this much wall time |
+| `--wall SECONDS` | Stop after this much wall time in all (loading included), and write the last outputs then. A file named STOP in the output folder stops the run the same way at its next output |
 
 **Outputs (diag.jsonl and manifest.json are always written)**
 
@@ -204,10 +221,12 @@ flags, [flags.mjs](../tools/headless/flags.mjs), by `npm run gen`):
 | `--width PX`, `--height PX` | Screenshot size (default 1024 square) |
 | `--native` | Screenshots at the grid's own resolution (a plane: a 2D run, a slice or a projection): one pixel per cell of the finest level, with the color bar, axes and status line beside it. Not with --width or --height |
 | `--view KEY=VALUE` | View setting for screenshots, repeatable: --view field=3 --view colormap=viridis |
+| `--shot NAME:KEY=VALUE,..` | A screenshot of its own at each output, NNNN-tT-NAME.png: the --view settings with these on top. Repeatable, one per view: --shot vol:mode=volume --shot rho:mode=slice,sliceAxis=2 |
 | `--slice VAR` | A slice of this variable at each output (repeatable) |
 | `--slice-axis A`, `--slice-pos P`, `--slice-res R` | Its axis (0 to 2), position (0 to 1) and cells per side |
 | `--slice-format F` | json (default): NNNN-tT-VAR.json, the whole slice() result; or npy: NNNN-tT-VAR.npy, float32 of shape [res, res] for numpy's np.load, with the slice's other fields under that output's "slices" in manifest.json |
 | `--athdf` | An .athdf file at each output |
+| `--athdf-every N` | Or an .athdf file every Nth output and at the last (0: the last only) |
 | `--debris` | Debris energies and dM/dt at each output, as JSON (problems that track them, such as tidal-disruption); plot with tools/headless/plot_dmdt.py |
 
 **Movie (--mp4 records the whole run as movie.mp4, with a color bar, axes and the status line; not with --every or --steps; outputs are written at the start and the end)**

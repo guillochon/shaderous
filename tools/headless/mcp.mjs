@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import { debrisSummary, fetchSlice, lowerPriority, openSession } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, saveAthdf } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const { values: o } = parseArgs({
@@ -168,12 +168,13 @@ const TOOLS = [
   {
     name: 'save_athdf',
     async run({ path: p }) {
-      const f = await call('athdf');
-      let file = resolvePath(p ?? f.name);
-      if (!p || p.endsWith('/') || p.endsWith('\\')) file = path.join(resolvePath(p ?? '.'), f.name);
-      mkdirSync(path.dirname(file), { recursive: true });
-      writeFileSync(file, Buffer.from(f.base64, 'base64'));
-      return text({ saved: file, time: f.time, bytes: f.bytes });
+      const f = await saveAthdf(call, (name) => {
+        let file = resolvePath(p ?? name);
+        if (!p || p.endsWith('/') || p.endsWith('\\')) file = path.join(resolvePath(p ?? '.'), name);
+        mkdirSync(path.dirname(file), { recursive: true });
+        return file;
+      });
+      return text({ saved: f.file, time: f.time, bytes: f.bytes });
     },
   },
   {
