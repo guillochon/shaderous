@@ -123,16 +123,16 @@ fn cl_net(f: array<f32, CL_IN>) -> vec4<f32> {
   return 1.0 / (1.0 + exp(-out));
 }
 
-// A cell's coefficients (a, b): the shares of the velocity's and the passive scalar's jumps
-// that the Riemann solver is not shown on the cell's faces (hydro/closure_on.wgsl), and the
-// gate in z.
+// A cell's coefficients (a, b, c): the shares of the velocity's and the passive scalar's jumps
+// that the Riemann solver is not shown on the cell's faces, and the scalar's compression
+// (hydro/closure_on.wgsl, hydro/flux.wgsl); and the gate in w.
 fn cl_cell(c: ClCell, xm: ClCell, xp: ClCell, ym: ClCell, yp: ClCell, cs: f32) -> vec4<f32> {
   let ft = cl_features(c, xm, xp, ym, yp, cs);
   // (Where the gate is shut the network is not run: most of a shock tube.)
   if (ft.gate <= 0.0) { return vec4<f32>(0.0); }
   // Constants: both at their limits wherever the gates are open (CL_NET is false; the network
   // and the features compile out).
-  if (!CL_NET) { return vec4<f32>(CL_A_MAX * ft.gate, CL_B_MAX * ft.gate, ft.gate, 0.0); }
+  if (!CL_NET) { return vec4<f32>(CL_A_MAX * ft.gate, CL_B_MAX * ft.gate, CL_C * ft.gate, ft.gate); }
   let o = cl_net(ft.f);
-  return vec4<f32>(CL_A_MAX * o.x * ft.gate * CL_HEADS.x, CL_B_MAX * o.y * ft.gate * CL_HEADS.y, ft.gate, 0.0);
+  return vec4<f32>(CL_A_MAX * o.x * ft.gate * CL_HEADS.x, CL_B_MAX * o.y * ft.gate * CL_HEADS.y, CL_C * ft.gate, ft.gate);
 }

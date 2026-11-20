@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from closure import Closure
+from closure import A_MAX, B_MAX, Closure
 from solver import Config, advance, primitives
 
 HERE = Path(__file__).resolve().parent
@@ -152,6 +152,7 @@ def main():
     ap.add_argument("--w-mix", type=float, default=0.5)
     ap.add_argument("--w-range", type=float, default=200.0)
     ap.add_argument("--init", default=None, help="a model to start from")
+    ap.add_argument("--fixed-ab", action="store_true", help="hold a and b at their limits (the constants) and learn only the other heads")
     ap.add_argument("--phases", default="0.3:1:0,0.35:2:2,0.35:3:3",
                     help="share of the iterations : outputs unrolled : most outputs of the model's own drift, per phase")
     a = ap.parse_args()
@@ -162,7 +163,7 @@ def main():
     data = load_set("train")
     n = data[0]["U"].shape[-1]
     shells = Shells(n, torch.float32)
-    model = Closure(a.hidden, a.layers, a.heads)
+    model = Closure(a.hidden, a.layers, a.heads, (A_MAX, B_MAX) if a.fixed_ab else None)
     if a.init:
         model.load_state_dict(torch.load(HERE / "models" / f"{a.init}.pt")["state"])
     opt = torch.optim.Adam(model.parameters(), lr=a.lr)
@@ -192,7 +193,7 @@ def main():
             if it % 10 == 0:
                 print(line, flush=True)
             if it % 50 == 0 or it == a.iters:
-                torch.save({"state": model.state_dict(), "hidden": a.hidden, "layers": a.layers, "heads": a.heads, "iters": it, "args": vars(a)}, out / f"{a.name}.pt")
+                torch.save({"state": model.state_dict(), "hidden": a.hidden, "layers": a.layers, "heads": a.heads, "fixed": a.fixed_ab, "iters": it, "args": vars(a)}, out / f"{a.name}.pt")
 
 
 if __name__ == "__main__":

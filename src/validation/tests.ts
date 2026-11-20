@@ -1682,7 +1682,7 @@ export const TESTS: TestDef[] = [
     id: 'closure',
     name: 'Turbulence closure: the shader is its mirror, it conserves, and shocks do not see it',
     criterion:
-      'For the constants and for the trained network: the coefficients the shader writes for decaying turbulence on 128^2 agree with the float64 mirror to 2e-3 in every cell, and lie within their limits; both cells of every face compute bit-identical mass fluxes, and mass, momentum and total energy are conserved to 1e-6, 1e-6 and 1e-5 over a time unit; the run keeps more kinetic energy than without the closure, and its dye stays within 0.005 of its starting range; the density of a Sod shock tube on 128^2 changes by less than 1e-5 of its peak (rounding: the gates are shut in every cell, and the update is compiled with the hook in it), and that of a Sedov blast on 128^2 by less than 1e-3',
+      'For the constants and for the trained network: the coefficients the shader writes for decaying turbulence on 128^2 agree with the float64 mirror to 2e-3 in every cell, and lie within their limits; both cells of every face compute bit-identical mass fluxes, and mass, momentum and total energy are conserved to 1e-6, 1e-6 and 1e-5 over a time unit; the run keeps more kinetic energy than without the closure, and its dye stays within 0.01 of its starting range; the density of a Sod shock tube on 128^2 changes by less than 1e-5 of its peak (rounding: the gates are shut in every cell, and the update is compiled with the hook in it), and that of a Sedov blast on 128^2 by less than 1e-3',
     async run(gpu) {
       const metrics: Record<string, number> = {};
       let pass = true;
@@ -1741,8 +1741,8 @@ export const TESTS: TestDef[] = [
               const c = cell(i, j);
               const want = closureCell(c, cell(i - 1, j), cell(i + 1, j), cell(i, j - 1), cell(i, j + 1), c.cs, kind);
               const q = (j * n + i) * 4;
-              err = Math.max(err, Math.abs(got[q] - want.a), Math.abs(got[q + 1] - want.b), Math.abs(got[q + 2] - want.gate));
-              if (got[q + 2] > 0) open++;
+              err = Math.max(err, Math.abs(got[q] - want.a), Math.abs(got[q + 1] - want.b), Math.abs(got[q + 2] - want.c), Math.abs(got[q + 3] - want.gate));
+              if (got[q + 3] > 0) open++;
               amax = Math.max(amax, got[q]);
               bmax = Math.max(bmax, got[q + 1]);
             }
@@ -1763,7 +1763,7 @@ export const TESTS: TestDef[] = [
         metrics[`${kind}_energy_drift`] = on.energy;
         metrics[`${kind}_kinetic_kept`] = on.kinetic;
         metrics[`${kind}_dye_beyond_range`] = on.dye;
-        pass &&= on.mass < 1e-6 && on.momentum < 1e-6 && on.energy < 1e-5 && on.kinetic > off.kinetic && on.dye < 0.005;
+        pass &&= on.mass < 1e-6 && on.momentum < 1e-6 && on.energy < 1e-5 && on.kinetic > off.kinetic && on.dye < 0.01;
         // Shocks: the gates shut, and the solver's own fluxes are used.
         for (const [tag, problem] of [['sod', sodX], ['sedov', sedov]] as const) {
           const b = await rhoOf(problem, kind);

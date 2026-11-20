@@ -668,7 +668,7 @@
       "network"
      ],
      "title": "Turbulence closure",
-     "description": "Cell by cell, the flux update leaves out most of the Riemann solver’s own dissipation of shear and of the dye where the flow is turbulence the grid only just resolves, so that a coarse run keeps more of the small eddies. It switches itself off at shocks and in gas that is not sheared. Constants: four fifths of the damping of shear and nine tenths of the dye’s, wherever the gates are open. Trained network: a small network sets the shares cell by cell; it gives the same results and adds half again to the time of a step, where the constants add a fifth (docs/closure.md)"
+     "description": "Cell by cell, the flux update leaves out most of the Riemann solver’s own dissipation of shear and of the dye where the flow is turbulence the grid only just resolves, so that a coarse run keeps more of the small eddies. It switches itself off at shocks and in gas that is not sheared. Constants: four fifths of the damping of shear and nine tenths of the dye’s, wherever the gates are open, and the dye’s fronts kept from spreading (a bounded compression). Trained network: a small network sets the shares cell by cell; it gives the same results and adds half again to the time of a step, where the constants add a fifth (docs/closure.md)"
     },
     "driving": {
      "type": "object",

@@ -14,17 +14,20 @@ simulator. The code is in `src/closure/`, `src/hydro/closure*.wgsl` and `tools/c
   under-resolved turbulence, and leaves shocks alone. It is a correction to the numerics, not a
   model of unresolved physics.
 - On seven held-out flows it brings the kinetic energy spectrum and the scalar's spectrum
-  closer to the reference in every one (mean errors 0.60 and 0.72 of what they are without
-  it). On those single runs the mixing layers' thickness and the mixedness are no better on
-  average (1.09 and 1.08 of the errors without it).
-- A follow-up with a well-posed shear layer run as an ensemble (section 4, at its end) says
-  what to make of that. The thickness is not a target: a coarse run already has it right
-  without any closure, and what the single runs showed was the scatter between realizations.
-  The mixedness is a real error of the coarse run (it over-mixes), which the closure cuts by
-  14 to 19% and the low-Mach solver does not.
+  closer to the reference in every one (mean errors 0.60 and 0.52 of what they are without
+  it), and the mixedness in six (0.62). The mixing layers' thickness is no better (1.08), and
+  need not be: a well-posed shear layer run as an ensemble (section 4, at its end) shows that
+  a coarse run already has the thickness right without any closure, and that what the single
+  runs show is the scatter between realizations.
+- The mixedness is the coarse run's real error (it over-mixes the dye). A third lever, a
+  bounded compression of the dye's fronts, was added for it after that ensemble: with it the
+  closure cuts the ensemble's mixedness error by 63 and 68%, where the first two levers alone
+  cut it by 14 and 19% and the low-Mach solver by nothing.
 - It is stable to 300 times its training window, conserves mass, momentum and energy to
   rounding, and changes shock tubes by rounding and blasts by 2e-4.
-- **The network learned almost nothing, so the closure has two forms.** Trained, the network
+- **The networks learned almost nothing, so the closure has two forms.** A second network,
+  trained to set the dye's compression cell by cell, returns 0.70 in nearly every cell and does
+  what the constant 0.7 does. Trained, the network
   returns 99.4% and 99.9% of its two limits in every cell where its gates are open. Two
   constants behind the same gates (`closure=constant`) give the same results in the simulator
   on every held-out case, to within 0.01 on every measure, for about 20% more time per step
@@ -74,12 +77,23 @@ share $`1 - a`$ of the velocity's jump and $`1 - b`$ of the passive scalar's. Th
 both to zero in compression, across pressure jumps, and where nothing is sheared. The scalar's
 face states are held to where a slope limiter could have put them.
 
-Two things were found on the way and are part of the design:
+A third lever acts on the dye alone, after those: its face states are moved on toward the
+other cell of the face by the share $`c = 0.5`$ of what is left to the limiter's bound, which
+keeps a front between two values of the dye from spreading over more cells each step (a
+compressive limiter, within the bounds of numerics.md section 26). It was added after the
+ensemble of section 4 showed that the dye's over-mixing is the error left to correct.
+
+Things found on the way that are part of the design:
 
 - **The scalar needs a hard bound.** With only a training penalty against overshoot, a dye of
   0 to 1 ranged from -0.42 to 1.12 at the edge of a held-out Kelvin-Helmholtz slab. With the
   bound its range is the one it has without the closure (-0.003 to 1.002 over every run
   below), and the scalar's spectrum still improves.
+- **The compression needs two bounds.** The limiter's bound along the face's normal is not
+  enough: the state's own cell value is half a step on, so a state moved to that bound could
+  pass the other cell's value, and at full strength the dye fell to -0.05. Held between the
+  face's two cells as they are at the start of the step, it stays within 0.006 of its range
+  at $`c = 0.5`$ (0.003 without the closure) and 0.011 at 0.75.
 - **A rounding-sensitive feature.** The measure of how far the scalar is from straight across
   a cell was noise where the dye is flat, and the shader (float32) and the training code
   disagreed by up to 0.009 in a coefficient. With a floor on it they agree to 1e-5.
@@ -119,8 +133,8 @@ Everything in this section and the next three was run **in the simulator**, from
 the reference every tenth of a time unit. None of these cases was trained on: new seeds, Mach
 0.4 and 0.7, a band three times denser, shear speeds 1.2 and 2, density ratios 2.5 and 5.
 "Low-Mach solver" is the existing hand-set alternative (`riemann=hllclm`). "Closure" in the
-tables is the trained network (`closure=network`); the constants (`closure=constant`) differ
-from it by at most 0.01 in any entry, and are compared with it at the end of this section.
+tables is the constants (`closure=constant`); the trained network (`closure=network`) differs
+from them by at most 0.01 in any entry, and is compared with them at the end of this section.
 In the figures the constants are the green line and the network the dashed yellow one on top
 of it.
 
@@ -131,25 +145,25 @@ of the ratio to the reference; for mixedness and thickness, the mean absolute di
 |---|---|---|---|---|---|---|---|
 | Turbulence, Mach 0.3 | none | 1.24 | 0.21 | 0.92 | 0.111 | 0.004 | 0.052 (0.047) |
 |  | low-Mach solver | 0.64 | 0.42 | 0.94 | 0.121 | 0.004 | 0.048 |
-|  | closure | **0.46** | 0.50 | **0.69** | **0.109** | 0.004 | 0.049 |
-| Turbulence, Mach 0.4 | none | 1.14 | 0.23 | 0.90 | **0.079** | 0.009 | 0.162 (0.186) |
-|  | low-Mach solver | 0.60 | 0.43 | 0.89 | 0.098 | 0.005 | 0.184 |
-|  | closure | **0.44** | 0.51 | **0.66** | 0.087 | 0.005 | 0.187 |
-| Turbulence, Mach 0.4, band 3x denser | none | 1.05 | 0.20 | 0.77 | 0.035 | **0.009** | 0.028 (0.028) |
+|  | closure | **0.45** | 0.50 | **0.46** | **0.054** | **0.003** | 0.047 |
+| Turbulence, Mach 0.4 | none | 1.14 | 0.23 | 0.90 | 0.079 | 0.009 | 0.162 (0.186) |
+|  | low-Mach solver | 0.60 | 0.43 | 0.89 | 0.098 | **0.005** | 0.184 |
+|  | closure | **0.44** | 0.51 | **0.46** | **0.044** | 0.006 | 0.187 |
+| Turbulence, Mach 0.4, band 3x denser | none | 1.05 | 0.20 | 0.77 | 0.035 | 0.009 | 0.028 (0.028) |
 |  | low-Mach solver | **0.76** | 0.32 | 0.79 | 0.044 | 0.011 | 0.011 |
-|  | closure | 0.79 | 0.29 | **0.60** | **0.032** | 0.010 | 0.018 |
+|  | closure | 0.78 | 0.29 | **0.43** | **0.026** | **0.008** | 0.024 |
 | Turbulence, Mach 0.7 | none | 0.82 | 0.36 | 0.82 | 0.090 | 0.006 | 0.227 (0.247) |
 |  | low-Mach solver | **0.58** | 0.48 | 0.82 | 0.099 | **0.004** | 0.239 |
-|  | closure | 0.63 | 0.46 | **0.65** | **0.085** | 0.006 | 0.230 |
+|  | closure | 0.62 | 0.46 | **0.51** | **0.054** | 0.005 | 0.229 |
 | Shear layer, speed 1.2, density ratio 2.5 | none | 0.98 | 0.12 | 0.71 | **0.026** | 0.042 | 0.080 (0.059) |
 |  | low-Mach solver | 0.79 | 0.17 | 0.83 | 0.038 | **0.030** | 0.054 |
-|  | closure | **0.63** | 0.25 | **0.52** | 0.049 | 0.065 | 0.089 |
-| Shear layer, speed 2, density ratio 2 | none | 1.13 | 0.12 | 0.89 | **0.037** | **0.060** | 0.177 (0.204) |
+|  | closure | **0.62** | 0.25 | **0.37** | 0.027 | 0.062 | 0.090 |
+| Shear layer, speed 2, density ratio 2 | none | 1.13 | 0.12 | 0.89 | 0.037 | **0.060** | 0.177 (0.204) |
 |  | low-Mach solver | 0.91 | 0.19 | 0.82 | 0.060 | 0.072 | 0.200 |
-|  | closure | **0.83** | 0.22 | **0.58** | 0.049 | 0.109 | 0.163 |
+|  | closure | **0.83** | 0.22 | **0.39** | **0.025** | 0.111 | 0.165 |
 | Shear layer, speed 1, density ratio 5 | none | 1.06 | 0.14 | 0.76 | 0.024 | 0.098 | 0.125 (0.145) |
 |  | low-Mach solver | 0.88 | 0.22 | 0.72 | 0.024 | 0.084 | 0.120 |
-|  | closure | **0.72** | 0.29 | **0.48** | 0.024 | **0.051** | 0.203 |
+|  | closure | **0.71** | 0.29 | **0.36** | **0.018** | **0.050** | 0.205 |
 
 ![Errors against the reference, per case](img/closure/errors.png)
 
@@ -158,21 +172,22 @@ Against the run without it, over the seven cases:
 | Measure | Closer to the reference in | Mean error, closure / none |
 |---|---|---|
 | Kinetic energy spectrum | 7 of 7 | 0.60 |
-| Kinetic energy at k = 16-32 | 7 of 7 | (0.20 of the reference's energy becomes 0.36) |
-| Scalar spectrum | 7 of 7 | 0.72 |
-| Mixedness | 3 of 7 | 1.08 |
-| Mixing-layer thickness | 4 of 7 | 1.09 |
-| Growth rate of the thickness | 3 of 7 | 1.35 (mean error 0.017 becomes 0.023) |
+| Scalar spectrum | 7 of 7 | 0.52 |
+| Mixedness | 6 of 7 | 0.62 |
+| Mixing-layer thickness | 5 of 7 | 1.08 |
+| Growth rate of the thickness | 3 of 7 | 1.30 (mean error 0.017 becomes 0.022) |
 
-So on these runs the first success criterion is met for the spectra and not for the mixing
-layers: in two of the three shear layers the layer grows wider than the reference's with the
-closure, and in the third (density ratio 5) the closure's keeps up with the reference where
-the coarse run's stops growing. These are single runs of a chaotic flow with no converged
-answer; the ensemble at the end of this section shows that the differences are their scatter.
+So on these runs the first success criterion is met for the spectra and for the mixedness, and
+not for the mixing layers' thickness: in two of the three shear layers the layer grows wider
+than the reference's with the closure, and in the third (density ratio 5) the closure's keeps
+up with the reference where the coarse run's stops growing. These are single runs of a chaotic
+flow with no converged answer; the ensemble at the end of this section shows that the
+thickness differences are their scatter. The dye stays between -0.005 and 1.003 in every run
+(-0.002 to 1.002 without the closure).
 
 Against the low-Mach solver, which costs nothing: the closure's kinetic energy spectrum is
-better in five of seven, its scalar spectrum in seven of seven (the low-Mach solver does
-nothing for the scalar), its thickness in two of seven.
+better in 5 of seven, and its scalar spectrum and mixedness in 7 and 7 of seven (the low-Mach
+solver does nothing for the dye).
 
 ![Kinetic energy spectra, turbulence](img/closure/spectra_turbulence.png)
 ![Kinetic energy spectra, shear layers](img/closure/spectra_shear.png)
@@ -196,14 +211,16 @@ with the scatter between seeds in brackets:
 | Reference, 1024² | 0.368 (0.046) | 0.598 (0.162) | 0.099 | 0.003 | 0.159 (0.011) | 0.008 |
 | Coarse, no closure | 0.373 (0.035) | 0.601 (0.153) | 0.100 | 0.002 | 0.270 (0.021) | 0.035 |
 | Coarse, low-Mach solver | 0.381 (0.036) | 0.607 (0.155) | 0.103 | 0.006 | 0.275 (0.021) | 0.038 |
-| Coarse, closure (constants) | 0.382 (0.036) | 0.606 (0.157) | 0.103 | 0.006 | 0.252 (0.021) | 0.030 |
+| Coarse, closure without the compression | 0.382 (0.036) | 0.606 (0.157) | 0.103 | 0.006 | 0.252 (0.021) | 0.030 |
+| Coarse, closure (constants) | 0.383 (0.036) | 0.602 (0.158) | 0.104 | 0.005 | 0.210 (0.019) | 0.013 |
 
 | Shear 1.4, density ratio 1 | Thickness at t = 3 | at t = 4 | Growth rate | Error of the mean thickness | Mixedness at t = 4 | Error of the mean mixedness |
 |---|---|---|---|---|---|---|
 | Reference, 512² | 0.606 (0.177) | 0.857 (0.080) | 0.216 | | 0.256 (0.011) | |
 | Coarse, no closure | 0.599 (0.169) | 0.873 (0.083) | 0.211 | 0.008 | 0.385 (0.007) | 0.059 |
 | Coarse, low-Mach solver | 0.604 (0.171) | 0.868 (0.079) | 0.213 | 0.004 | 0.388 (0.006) | 0.062 |
-| Coarse, closure (constants) | 0.604 (0.172) | 0.865 (0.079) | 0.213 | 0.004 | 0.359 (0.012) | 0.048 |
+| Coarse, closure without the compression | 0.604 (0.172) | 0.865 (0.079) | 0.213 | 0.004 | 0.359 (0.012) | 0.048 |
+| Coarse, closure (constants) | 0.601 (0.173) | 0.860 (0.082) | 0.214 | 0.005 | 0.291 (0.020) | 0.019 |
 
 (Errors are of the ensemble mean against the 512² reference's, averaged over t from 1 to 4.)
 
@@ -213,33 +230,49 @@ with the scatter between seeds in brackets:
   mean by 0.03 to 0.06: the size of the "errors" in the table of single runs above. Those were
   realizations of a flow with no converged answer, not a defect the closure adds or could
   remove. The growth rates agree to 3%.
-- **The mixedness is a real error, and the closure reduces it.** The coarse run over-mixes by
-  0.035 and 0.059, six to ten standard errors. The constants bring that to 0.030 and 0.048
-  (14% and 19% less); the low-Mach solver makes it slightly worse, as it leaves the dye's
-  advection alone and stirs more. Most of the error remains. It is the grid's diffusion of the
-  dye at extrema and thin filaments, which the bound on the scalar's jump keeps the closure
-  from touching.
+- **The mixedness is a real error, and the closure removes two thirds of it.** The coarse run
+  over-mixes by 0.035 and 0.059, six to ten standard errors. Scaling the jumps alone brings
+  that to 0.030 and 0.048 (14% and 19% less); with the dye's compression it is 0.013 and 0.019
+  (63% and 68% less), and the thickness and its growth rate stay where they were. The low-Mach
+  solver makes the mixedness slightly worse, as it leaves the dye's advection alone and stirs
+  more.
 - **A caveat on the mixedness.** The dye has no physical diffusion in the simulator, so the
   reference's mixedness is set by its grid too: 0.178 at 512² against 0.159 at 1024². The
-  coarse run's error is four times that difference, so the conclusion stands, but its size is
-  not converged.
+  coarse run's error without the closure is four times that difference; with it, the error is
+  within twice that difference, which is as far as this reference can say. A sharper target
+  would need a physical diffusivity for the dye.
 
-What this leaves for a learned model is the dye's advection: where to use a more compressive
-limiter, within the same bounds. A reference for it would need a physical diffusivity for the
-dye, which the simulator does not have.
+**A learned limiter, and what it learned.** The compression was first tried as constants in the
+solver's mirror (three seeds of the first case, error of the mean mixedness against the 512²
+reference, and the furthest the dye left its range):
+
+| Compression | Mixedness error | Dye beyond its range |
+|---|---|---|
+| none (jumps scaled only) | 0.027 | 0.001 |
+| 0.5 | 0.011 | 0.003 |
+| 0.7 | 0.007 | 0.006 |
+| 0.75 | 0.006 | 0.006 |
+| trained network | 0.008 | 0.005 |
+
+The network (`--heads c --fixed-ab`: sixteen units a layer, the other two levers held at
+their constants, 200 iterations with the mixing terms weighted three times as before) could
+set the compression cell by cell from the same ten features. It returns 0.70 where its gates
+are open, between 0.67 and 0.72 in nine cells of ten, and does what the constant 0.7 does. As
+with the first network, what training found is a constant near the top of what the bounds
+allow. The simulator uses 0.5: a third less of the gain for half the excursion of the dye.
 
 **Another resolution.** The same two cases on 256² against 1024², with the weights trained at
-128²: the spectra improve as they do at 128², the shear layer's thickness and mixedness are
-again worse.
+128²: the spectra improve as they do at 128², and the turbulence's mixedness; the shear
+layer's thickness and mixedness are worse, on one run of a flow with no converged answer.
 
 | Case | Run | KE spectrum | Scalar spectrum | Mixedness | Thickness |
 |---|---|---|---|---|---|
 | Turbulence, Mach 0.3, 256² | none | 1.50 | 1.06 | 0.120 | 0.003 |
 |  | low-Mach solver | 0.89 | 1.09 | 0.126 | 0.003 |
-|  | closure | **0.68** | **0.71** | **0.107** | 0.003 |
+|  | closure | **0.66** | **0.43** | **0.045** | **0.002** |
 | Shear layer, speed 1.2, density ratio 2.5, 256² | none | 1.46 | 0.97 | **0.035** | **0.064** |
 |  | low-Mach solver | 1.12 | 0.93 | 0.039 | 0.071 |
-|  | closure | **0.95** | **0.67** | 0.048 | 0.075 |
+|  | closure | **0.95** | **0.44** | 0.058 | 0.073 |
 
 ![Spectra at 256²](img/closure/spectra_res.png)
 
@@ -257,10 +290,10 @@ seven held-out cases (and the two at 256²):
 |---|---|---|---|---|
 | none | 1.060 (1.478) | 0.825 (1.018) | 0.058 (0.078) | 0.033 (0.034) |
 | low-Mach solver | 0.737 (1.002) | 0.830 (1.008) | 0.069 (0.083) | 0.030 (0.037) |
-| closure, constants | 0.636 (0.807) | 0.597 (0.691) | 0.062 (0.078) | 0.036 (0.038) |
-| closure, trained network | 0.641 (0.814) | 0.597 (0.692) | 0.062 (0.078) | 0.036 (0.039) |
+| closure, constants | 0.636 (0.807) | 0.426 (0.437) | 0.035 (0.052) | 0.035 (0.037) |
+| closure, trained network | 0.641 (0.814) | 0.425 (0.436) | 0.035 (0.052) | 0.035 (0.039) |
 
-Case by case the two differ by at most 0.01 in the spectra and 0.002 in mixedness and
+Case by case the two differ by at most 0.01 in the spectra and 0.0014 in mixedness and
 thickness. The variants trained with the eddy viscosity and diffusivity alone, run in the
 solver's mirror from the reference's first state, are the run without a closure:
 
@@ -278,11 +311,11 @@ solver's mirror from the reference's first state, are the run without a closure:
 | Run on 128², to t = 30 | Steps | Mass drift | Energy drift | Kinetic energy | Largest Mach | Scalar range |
 |---|---|---|---|---|---|---|
 | Decaying turbulence, no closure | 42,482 | 1.2e-7 | 3.6e-7 | 0.500 to 0.400 | 0.78 | -0.0007 to 1.0008 |
-| Decaying turbulence, closure | 43,733 | 1.2e-7 | 3.4e-7 | 0.500 to 0.425 | 0.81 | -0.0003 to 1.0008 |
+| Decaying turbulence, network (before the compression) | 43,733 | 1.2e-7 | 3.4e-7 | 0.500 to 0.425 | 0.81 | -0.0003 to 1.0008 |
 | Kelvin-Helmholtz, no closure | 21,632 | 0 | 3.7e-8 | 0.188 to 0.160 | 0.78 | -0.0012 to 1.0010 |
-| Kelvin-Helmholtz, closure | 21,564 | 0 | 2.3e-9 | 0.188 to 0.161 | 0.75 | -0.0009 to 1.0005 |
-| Decaying turbulence, constants | 43,615 | 6e-8 | 2.9e-7 | 0.500 to 0.427 | 0.80 | -0.0003 to 1.0008 |
-| Kelvin-Helmholtz, constants | 21,996 | 7.9e-8 | 3.7e-8 | 0.188 to 0.166 | 0.77 | -0.0010 to 1.0005 |
+| Kelvin-Helmholtz, network (before the compression) | 21,564 | 0 | 2.3e-9 | 0.188 to 0.161 | 0.75 | -0.0009 to 1.0005 |
+| Decaying turbulence, constants | 43,615 | 6e-8 | 2.9e-7 | 0.500 to 0.427 | 0.80 | -0.0029 to 1.0023 |
+| Kelvin-Helmholtz, constants | 21,996 | 7.9e-8 | 3.7e-8 | 0.188 to 0.166 | 0.77 | -0.0034 to 1.0011 |
 
 The training window is at most 150 steps, so these are 290 and 140 times it. Nothing grows:
 the kinetic energy decays throughout, more slowly with the closure, and no cell reaches a
@@ -322,8 +355,8 @@ three or four runs):
 | Grid | No closure | Constants | More | Trained network | More |
 |---|---|---|---|---|---|
 | 512² | 0.59 ms | 0.71 ms | 21% | 0.88 ms | 49% |
-| 1024² | 1.96 ms | 2.33 ms | 19% | 2.91 ms | 48% |
-| 2048² | 7.26 ms | 8.72 ms | 20% | 10.96 ms | 51% |
+| 1024² | 1.96 ms | 2.37 ms | 21% | 2.96 ms | 51% |
+| 2048² | 7.20 ms | 8.83 ms | 23% | 11.10 ms | 54% |
 
 For scale, a constant viscosity (`nu`) adds 41 to 45% at 1024² and 2048², and the low-Mach
 solver nothing. Neither closure is negligible, as was asked; the constants are the cheaper by

@@ -29,6 +29,9 @@ from solver import _shift
 N_FEATURES = 10
 A_MAX = 0.8
 B_MAX = 0.9
+# The scalar's compression (solver.py): the share of what is left to the limiter's bound that
+# a face state is moved on by, wherever the gates are open. A constant, not an output.
+COMPRESS = 0.5
 C_MAX = 0.5
 CAP = 0.1
 # Gates. Compression: closed where the dilatation is this share of the velocity gradient
@@ -123,16 +126,20 @@ class Closure(nn.Module):
     the others are held at zero (for the ablations: 'nk' is the eddy viscosity and diffusivity
     alone)."""
 
-    def __init__(self, hidden=24, layers=2, heads="abnk"):
+    def __init__(self, hidden=24, layers=2, heads="abnk", fixed=None):
         super().__init__()
-        dims = [N_FEATURES] + [hidden] * layers + [4]
+        # A fifth output, the scalar's compression c (solver.py), for models with the head 'c'.
+        # `fixed` = (a, b) holds those two at constants times the gate instead of learning them.
+        self.nout = 5 if "c" in heads else 4
+        self.fixed = fixed
+        dims = [N_FEATURES] + [hidden] * layers + [self.nout]
         self.net = nn.ModuleList(nn.Linear(a, b) for a, b in zip(dims[:-1], dims[1:]))
         self.heads = heads
         with torch.no_grad():
             # Start close to no closure at all: small a and b, almost no diffusion.
             self.net[-1].weight.mul_(0.1)
-            self.net[-1].bias.copy_(torch.tensor([-2.0, -2.0, -5.0, -5.0]))
-        self.register_buffer("mask", torch.tensor([float(h in heads) for h in "abnk"]))
+            self.net[-1].bias.copy_(torch.tensor([-2.0, -2.0, -5.0, -5.0, -2.0][: self.nout]))
+        self.register_buffer("mask", torch.tensor([float(h in heads) for h in "abnkc"[: self.nout]]))
 
     def raw(self, F):
         """Network outputs for features F[..., N_FEATURES] (the last axis)."""
@@ -143,25 +150,35 @@ class Closure(nn.Module):
 
     def forward(self, rho, vx, vy, p, s, cs, dx):
         F, gate, A = features(rho, vx, vy, p, s, cs, dx)
-        o = torch.sigmoid(self.raw(F.movedim(1, -1))).movedim(-1, 1) * self.mask.view(1, 4, 1, 1)
+        o = torch.sigmoid(self.raw(F.movedim(1, -1))).movedim(-1, 1) * self.mask.view(1, self.nout, 1, 1)
         cap = CAP * dx * cs
         a = A_MAX * o[:, 0] * gate
         b = B_MAX * o[:, 1] * gate
+        if self.fixed is not None:
+            a, b = self.fixed[0] * gate, self.fixed[1] * gate
         nu = torch.minimum(C_MAX * o[:, 2] * dx * A, cap) * gate
         kap = torch.minimum(C_MAX * o[:, 3] * dx * A, cap) * gate
-        return torch.stack([a, b, nu, kap], dim=1)
+        out = [a, b, nu, kap]
+        # The scalar's compression: this model's own output, or the constant.
+        out.append(o[:, 4] * gate if self.nout == 5 else COMPRESS * gate)
+        return torch.stack(out, dim=1)
 
 
 class Constant(nn.Module):
     """Fixed coefficients behind the same gates: the hand-set baselines."""
 
-    def __init__(self, a=0.0, b=0.0, cn=0.0, ck=0.0):
+    def __init__(self, a=0.0, b=0.0, cn=0.0, ck=0.0, c=None, nu=0.0):
         super().__init__()
         self.v = (a, b, cn, ck)
+        self.c = c  # the scalar's compression (solver.py), or None for none
+        self.nu = nu  # a physical viscosity besides, the same everywhere and not gated
 
     def forward(self, rho, vx, vy, p, s, cs, dx):
         F, gate, A = features(rho, vx, vy, p, s, cs, dx)
         a, b, cn, ck = self.v
         cap = CAP * dx * cs
         one = torch.ones_like(rho)
-        return torch.stack([a * one * gate, b * one * gate, torch.minimum(cn * dx * A, cap) * gate, torch.minimum(ck * dx * A, cap) * gate], dim=1)
+        out = [a * one * gate, b * one * gate, torch.minimum(cn * dx * A, cap) * gate + self.nu, torch.minimum(ck * dx * A, cap) * gate]
+        if self.c is not None:
+            out.append(self.c * one * gate)
+        return torch.stack(out, dim=1)

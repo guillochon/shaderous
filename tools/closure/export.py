@@ -29,7 +29,7 @@ CASES = ROOT / "src" / "closure" / "closure_cases.json"
 
 def load_model(name):
     ck = torch.load(HERE / "models" / f"{name}.pt")
-    model = Closure(ck["hidden"], ck["layers"], ck["heads"])
+    model = Closure(ck["hidden"], ck["layers"], ck["heads"], (C.A_MAX, C.B_MAX) if ck.get("fixed") else None)
     model.load_state_dict(ck["state"])
     model.eval()
     return model, ck
@@ -57,7 +57,7 @@ def main():
         "hidden": ck["hidden"],
         "layers": ck["layers"],
         "heads": [float("a" in ck["heads"]), float("b" in ck["heads"])],
-        "aMax": C.A_MAX, "bMax": C.B_MAX,
+        "aMax": C.A_MAX, "bMax": C.B_MAX, "compress": C.COMPRESS,
         "ducros": list(C.DUCROS), "jump": list(C.JUMP), "active": list(C.ACTIVE), "epsV": C.EPS_V,
     }
     OUT.write_text(

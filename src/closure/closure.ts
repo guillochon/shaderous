@@ -12,6 +12,10 @@
 //   b  in [0, 0.9]  the same for the passive scalar's jump, each face state then held to where
 //                   a limited slope could have put it (hydro/flux.wgsl closure_bound)
 //
+//   c  = 0.5        the dye's compression: its face states moved on toward the other cell by
+//                   that share of what is left to the limiter's bound, so that a front of the
+//                   dye keeps its width (hydro/flux.wgsl closure_compress)
+//
 // and a face takes the smaller of its two cells' values (hydro/flux.wgsl, hydro/closure_on.wgsl).
 // The solver's dissipation of shear and its diffusion of the scalar are proportional to those
 // jumps, so they fall by those shares and never by all of it. The flux is still one number per
@@ -107,7 +111,7 @@ export function closureNet(f: readonly number[]): number[] {
  * features, the gate and the coefficients a and b, from the cell, its neighbors below and
  * above along x and y, and its sound speed.
  */
-export function closureCell(c: ClosureCell, xm: ClosureCell, xp: ClosureCell, ym: ClosureCell, yp: ClosureCell, cs: number, kind: Exclude<ClosureKind, 'off'> = 'network'): { features: number[]; gate: number; a: number; b: number } {
+export function closureCell(c: ClosureCell, xm: ClosureCell, xp: ClosureCell, ym: ClosureCell, yp: ClosureCell, cs: number, kind: Exclude<ClosureKind, 'off'> = 'network'): { features: number[]; gate: number; a: number; b: number; c: number } {
   const K = CLOSURE_DATA;
   const gx = [0.5 * (xp.vx - xm.vx), 0.5 * (xp.vy - xm.vy)];
   const gy = [0.5 * (yp.vx - ym.vx), 0.5 * (yp.vy - ym.vy)];
@@ -151,10 +155,10 @@ export function closureCell(c: ClosureCell, xm: ClosureCell, xp: ClosureCell, ym
   const jump = Math.max(Math.abs(xp.p - xm.p) / Math.min(xp.p, xm.p), Math.abs(yp.p - ym.p) / Math.min(yp.p, ym.p));
   const active = Math.sqrt(Wz * Wz + A2 + 1e-30) / cs;
   const gate = (1 - smoothstep(K.ducros, (D * D) / tot)) * (1 - smoothstep(K.jump, jump)) * smoothstep(K.active, active);
-  if (gate <= 0) return { features, gate: 0, a: 0, b: 0 };
-  if (kind === 'constant') return { features, gate, a: K.aMax * gate, b: K.bMax * gate };
+  if (gate <= 0) return { features, gate: 0, a: 0, b: 0, c: 0 };
+  if (kind === 'constant') return { features, gate, a: K.aMax * gate, b: K.bMax * gate, c: K.compress * gate };
   const o = closureNet(features);
-  return { features, gate, a: K.aMax * o[0] * gate * K.heads[0], b: K.bMax * o[1] * gate * K.heads[1] };
+  return { features, gate, a: K.aMax * o[0] * gate * K.heads[0], b: K.bMax * o[1] * gate * K.heads[1], c: K.compress * gate };
 }
 
 const f = (x: number): string => {
@@ -176,6 +180,7 @@ export function closureNetSlot(kind: Exclude<ClosureKind, 'off'> = 'network'): s
     `const CL_LAYERS: u32 = ${K.layers}u;`,
     `const CL_A_MAX: f32 = ${f(K.aMax)};`,
     `const CL_B_MAX: f32 = ${f(K.bMax)};`,
+    `const CL_C: f32 = ${f(K.compress)};`,
     `const CL_HEADS = ${v2(K.heads)};`,
     `const CL_DUCROS = ${v2(K.ducros)};`,
     `const CL_JUMP = ${v2(K.jump)};`,
@@ -192,7 +197,7 @@ export class ClosurePass {
   private constructor(
     private pipeline: GPUComputePipeline,
     private groups: GPUBindGroup[],
-    /** each cell's (a, b, gate, 0), as of the last step's start */
+    /** each cell's (a, b, c, gate), as of the last step's start */
     readonly coefficients: GPUTexture,
     private dims: number[],
   ) {}

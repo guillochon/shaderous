@@ -27,7 +27,7 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32, d: vec4<
 // or hydro/closure_off.wgsl. g_clos is the face's (a, b), which the functions that know the
 // face's two cells (axis_fluxes, flux_between) set before they call face_flux.
 #include <closure>
-var<private> g_clos: vec2<f32> = vec2<f32>(0.0);
+var<private> g_clos: vec3<f32> = vec3<f32>(0.0);
 // With it, the passive scalar of the four cells along the face's normal, lowest first (the
 // face lies between the second and the third), as they are at the start of the step.
 var<private> g_clos_s: vec4<f32> = vec4<f32>(0.0);
@@ -42,6 +42,20 @@ fn closure_bound(want: f32, base: f32, own: f32, a: f32, b: f32) -> f32 {
   let m = select(0.0, sign(b) * min(abs(a), abs(b)), a * b > 0.0);
   let d0 = base - own;
   return own + clamp(want - own, min(min(m, d0), 0.0), max(max(m, d0), 0.0));
+}
+
+// The scalar's compression: a face's state `have` moved on toward the other cell of the face
+// by the share c of what is left to the limiter's bound (the same a and b as closure_bound),
+// which keeps a front between two values of the dye from spreading over more cells each step.
+// Not at an extremum, where there is no bound to move toward. The state's own cell value
+// `own` is half a step on, so the result is held, as a value, between the face's two cells as
+// they are at the start of the step (sc, so): it may reach the other cell's value, not pass it.
+fn closure_compress(have: f32, own: f32, a: f32, b: f32, c: f32, sc: f32, so: f32) -> f32 {
+  let m = select(0.0, sign(b) * min(abs(a), abs(b)), a * b > 0.0);
+  let d1 = have - own;
+  if (m == 0.0 || abs(m) <= abs(d1)) { return have; }
+  let want = own + d1 + c * (m - d1);
+  return max(min(want, max(max(sc, so), have)), min(min(sc, so), have));
 }
 
 // Cyclic rotation that puts the face normal in x, and its inverse.
@@ -124,6 +138,11 @@ fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>) 
       let q = g_clos_s;
       sl.s = closure_bound(cm + ch, sl.s, l.b.y, q.y - q.x, q.z - q.y);
       sr.s = closure_bound(cm - ch, sr.s, r.b.y, q.z - q.w, q.y - q.z);
+    }
+    if (g_clos.z > 0.0) {
+      let q = g_clos_s;
+      sl.s = closure_compress(sl.s, l.b.y, q.y - q.x, q.z - q.y, g_clos.z, q.y, q.z);
+      sr.s = closure_compress(sr.s, r.b.y, q.z - q.w, q.y - q.z, g_clos.z, q.z, q.y);
     }
   }
   var F = riemann_flux(sl, sr, w);

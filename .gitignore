@@ -34,6 +34,7 @@ tools/closure/data/
 tools/closure/__pycache__/
 tools/closure/models/*
 !tools/closure/models/final.pt
+!tools/closure/models/limiter.pt
 tools/closure/*.log
 tools/closure/eval/
 tools/closure/*.out

@@ -3418,6 +3418,13 @@ Mach number, and applied to the scalar as well. The solver's dissipation of shea
 diffusion of the scalar are proportional to those jumps, so they fall by the shares $`a`$ and
 $`b`$. Density and pressure are left alone: scaled, the density's jump rang at contacts.
 
+**The dye's compression.** After that, where the gates are open, each of the scalar's face
+states is moved on toward the other cell of its face by the share $`c = 0.5`$ of what is left
+to the limiter's bound below. A front between two values of the dye then keeps its width
+instead of spreading a little each step, which is what makes a coarse run's dye too mixed: on
+an ensemble of shear layers the coarse run's excess mixedness falls by two thirds
+([closure.md](closure.md)). Nothing is moved at an extremum.
+
 **Bounds, whatever the weights.**
 
 - $`a \le 0.8`$: at least a fifth of the solver's damping of every velocity jump always
@@ -3429,9 +3436,12 @@ $`b`$. Density and pressure are left alone: scaled, the density's jump rang at c
   further from $`s_c`$ than $`\mathrm{minmod}(\delta_\text{far}, \delta_\text{near})`$, or than the
   reconstruction itself had gone if that is further (`closure_bound` in `hydro/flux.wgsl`). No
   value then leaves the range of its neighbors. Without this bound a dye of 0 to 1 rang
-  between -0.4 and 1.1 at the edge of a Kelvin-Helmholtz slab; with it, the dye's range over a
-  run is the range it has without the closure. The scalar is passive, so $`b`$ cannot disturb
-  the flow in any case.
+  between -0.4 and 1.1 at the edge of a Kelvin-Helmholtz slab. The compressed state is held to
+  the same bound and, as a value, between the face's two cells as they are at the start of the
+  step (`closure_compress`): the state's own cell value is half a step on, and without that it
+  could pass the other cell's. With both, the dye stays within 0.006 of its range in every run
+  of closure.md (0.003 without the closure). The scalar is passive, so neither lever can
+  disturb the flow.
 - A face takes the smaller of its two cells' values of $`a`$ and $`b`$, so both cells of a face
   scale its jumps alike and compute the same flux: mass, momentum and total energy are
   conserved to rounding, as without the closure, and the flux-determinism check passes with it

@@ -47,6 +47,9 @@ The shipped weights are `models/final.pt` (two hidden layers of 24). They came f
 checkpoint with the bound in place (`--init`, `--phases 0.25:1:0,0.35:2:2,0.4:3:3`,
 `--lr 2e-3`). `--heads nk` trains the eddy viscosity and diffusivity alone, and `--heads abnk`
 all four outputs: the two variants docs/closure.md reports as no better than no closure.
-`appchecks.py oblique final` is the oblique shock tubes.
+`appchecks.py oblique final` is the oblique shock tubes. `models/limiter.pt` is the network
+trained to set the dye's compression (`--name limiter --heads c --fixed-ab --hidden 16
+--iters 200 --w-mix 1.5 --phases 0.4:1:0,0.6:2:2`); it returns 0.7 nearly everywhere, and the
+simulator uses the constant `COMPRESS` of `closure.py` instead.
 
 `data/`, `eval/`, the other models and the logs are not in the repository.

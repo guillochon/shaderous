@@ -152,8 +152,8 @@ def _hllc(l, r, w_hll, cfg):
 
 def step(U, cfg, dt, closure=None):
     """One step of length dt. `closure`, if given, maps the primitives to per-cell coefficients
-    C[B, 4, ny, nx] = (a, b, nu, kappa), gates applied (closure.py); a face takes the smaller of
-    its two cells'. Returns the new state."""
+    C[B, 4 or 5, ny, nx] = (a, b, nu, kappa[, c]), gates applied (closure.py); a face takes the
+    smaller of its two cells'. Returns the new state."""
     n = U.shape[-1]
     dx = cfg.box / n
     g = cfg.gamma
@@ -232,7 +232,21 @@ def step(U, cfg, dt, closure=None):
                 m_ = torch.where(a_ * b_ > 0, torch.sign(b_) * torch.minimum(a_.abs(), b_.abs()), torch.zeros_like(a_))
                 d0 = sd["s"] - own
                 lo_, hi_ = torch.minimum(torch.minimum(m_, d0), torch.zeros_like(m_)), torch.maximum(torch.maximum(m_, d0), torch.zeros_like(m_))
-                sd["s"] = own + torch.maximum(torch.minimum(new - own, hi_), lo_)
+                d1 = torch.maximum(torch.minimum(new - own, hi_), lo_)
+                if Cf.shape[1] > 4:
+                    # Compression: the state moved on toward the other cell, by the share c of
+                    # what is left to the limiter's bound m (the most a slope limiter allows:
+                    # as far as the other cell, and no further than the cell's own value lies
+                    # from its neighbor on the far side). Not at an extremum (m = 0), where the
+                    # state stays where the reconstruction put it.
+                    # The state's own cell value here is half a step on, so the compressed state
+                    # is held, as a value, between the two cells of the face as they are at the
+                    # start of the step: it may reach the other cell's value and not pass it.
+                    d2 = d1 + Cf[:, 4] * (m_ - d1)
+                    lo2, hi2 = torch.minimum(s0, s1), torch.maximum(s0, s1)
+                    d2 = torch.maximum(torch.minimum(own + d2, torch.maximum(hi2, own + d1)), torch.minimum(lo2, own + d1)) - own
+                    d1 = torch.where((m_ != 0) & (m_.abs() > d1.abs()), d2, d1)
+                sd["s"] = own + d1
         for sd in (l, r):
             sd["cs"] = torch.sqrt(g * sd["p"] / sd["rho"])
             sd["eint"] = sd["p"] / (g - 1.0)
