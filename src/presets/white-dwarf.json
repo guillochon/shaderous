@@ -3,7 +3,7 @@
   "version": 1,
   "id": "white-dwarf",
   "name": "White dwarf (hydrostatic)",
-  "group": "Self-gravity",
+  "group": "Stars and planets",
   "blurb": "A cold carbon-oxygen white dwarf held up by degenerate electrons, in equilibrium. Mass in solar masses.",
   "physics": {
     "eos": "helmholtz",

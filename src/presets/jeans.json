@@ -3,7 +3,7 @@
   "version": 1,
   "id": "jeans",
   "name": "Jeans instability",
-  "group": "Instabilities",
+  "group": "Gravitational collapse",
   "family": "jeans",
   "familyName": "Jeans instability",
   "variant": "Standard",

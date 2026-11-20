@@ -3,7 +3,7 @@
   "version": 1,
   "id": "evrard",
   "name": "Evrard collapse",
-  "group": "Self-gravity",
+  "group": "Gravitational collapse",
   "family": "evrard",
   "familyName": "Evrard collapse",
   "variant": "Standard",

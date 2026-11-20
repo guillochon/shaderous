@@ -1921,7 +1921,7 @@ $`E`$ includes $`B^2/2`$.
   erg on the presets' grid (6.8e44 from their own lattice at theirs); the least beta, about
   0.1, is in the edge cells just inside the cut. `mhd-tidal-disruption` checks the dipole's
   energy and central beta and runs the grazing encounter against its hydro control.
-- **Magnetized accretion disk** (`problems/mri_disk.ts`, "Point masses" group). A globally
+- **Magnetized accretion disk** (`problems/mri_disk.ts`, "Accretion disks" group). A globally
   isothermal disk (c_s = 0.15, so H / r = 0.15 r^(1/2)) around one Plummer-softened point mass
   with a sink, in exact vertical and radial balance with the softened potential: the density is
   rho_mid(R) exp(-(Phi(R, z) - Phi(R, 0)) / c_s^2), with rho_mid proportional to R^(-3/2) (a flat
@@ -2573,7 +2573,7 @@ stand. Code units show the state's comoving values.
 
 The first version takes a periodic box of gas, with periodic self-gravity or none, on a uniform
 grid or on blocks with one timestep for all; anything else is refused with a message.
-The `zeldovich-pancake` preset (Cosmology group) runs the pancake of
+The `zeldovich-pancake` preset (Gravitational collapse group) runs the pancake of
 [Zel'dovich (1970)](https://ui.adsabs.harvard.edu/abs/1970A%26A.....5...84Z) through its
 caustic at $`z = 1`$.
 

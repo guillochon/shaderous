@@ -3,7 +3,7 @@
   "version": 1,
   "id": "mri-disk",
   "name": "Magnetized accretion disk",
-  "group": "Point masses",
+  "group": "Accretion disks",
   "family": "mri-disk",
   "familyName": "Magnetized accretion disk",
   "variant": "Standard",

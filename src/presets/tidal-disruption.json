@@ -3,7 +3,7 @@
   "version": 1,
   "id": "tidal-disruption",
   "name": "Tidal disruption",
-  "group": "Point masses",
+  "group": "Binaries and encounters",
   "family": "tidal-disruption",
   "familyName": "Tidal disruption",
   "variant": "Partial, γ = 5/3",

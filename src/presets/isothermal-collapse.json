@@ -3,7 +3,7 @@
   "version": 1,
   "id": "isothermal-collapse",
   "name": "Isothermal turbulent collapse",
-  "group": "Self-gravity",
+  "group": "Gravitational collapse",
   "family": "isothermal-collapse",
   "familyName": "Isothermal turbulent collapse",
   "variant": "Standard",

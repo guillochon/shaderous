@@ -3,7 +3,7 @@
   "version": 1,
   "id": "binary",
   "name": "Binary accretion",
-  "group": "Point masses",
+  "group": "Accretion disks",
   "family": "binary",
   "familyName": "Binary accretion",
   "variant": "Standard",

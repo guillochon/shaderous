@@ -3,7 +3,7 @@
   "version": 1,
   "id": "planet",
   "name": "Planet",
-  "group": "Self-gravity",
+  "group": "Stars and planets",
   "blurb": "An Earth: an iron-alloy core under a rock mantle, each along its adiabat from a 2000 K surface, held up against its own gravity by the ANEOS equations of state of the two materials. Lengths in Earth radii, masses in Earth masses; a time unit is 13.4 minutes.",
   "physics": {
     "eos": "aneos",

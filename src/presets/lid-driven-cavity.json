@@ -3,7 +3,7 @@
   "version": 1,
   "id": "lid-driven-cavity",
   "name": "Lid-driven cavity",
-  "group": "Tests and sandbox",
+  "group": "Slow flows",
   "family": "lid-driven-cavity",
   "familyName": "Lid-driven cavity",
   "variant": "Reynolds number 100",

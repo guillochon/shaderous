@@ -3,7 +3,7 @@
   "version": 1,
   "id": "shearing-wave",
   "name": "Shearing wave",
-  "group": "Disks",
+  "group": "Accretion disks",
   "family": "shearing-wave",
   "familyName": "Shearing wave",
   "variant": "Keplerian",

@@ -3,7 +3,7 @@
   "version": 1,
   "id": "roche-lobe-overflow",
   "name": "Roche lobe overflow",
-  "group": "Point masses",
+  "group": "Binaries and encounters",
   "family": "roche-lobe-overflow",
   "familyName": "Roche lobe overflow",
   "variant": "Corotating",

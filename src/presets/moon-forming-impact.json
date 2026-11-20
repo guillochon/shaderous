@@ -3,7 +3,7 @@
   "version": 1,
   "id": "moon-forming-impact",
   "name": "Moon-forming impact",
-  "group": "Self-gravity",
+  "group": "Binaries and encounters",
   "blurb": "The proto-Earth struck by Theia, a body near the mass of Mars, at the speed it falls from far away and at 45 degrees: the canonical giant impact (Canup 2004). Both are iron-alloy cores under rock mantles with ANEOS equations of state. Rock from both is thrown into orbit; the Moon gathers from that disk. Lengths in Earth radii, masses in Earth masses; a time unit is 13.4 minutes, so a day is 107.",
   "extends": "planet",
   "variant": "Earth and Theia",

@@ -3,7 +3,7 @@
   "version": 1,
   "id": "polytrope",
   "name": "Polytrope (hydrostatic star)",
-  "group": "Self-gravity",
+  "group": "Stars and planets",
   "family": "polytrope",
   "familyName": "Polytrope (hydrostatic star)",
   "variant": "Standard",

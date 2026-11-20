@@ -29,7 +29,7 @@ error in the editor, where reading drops it with a note.
   "version": 1,                      // required: counts changes to the format
   "id": "binary",                    // presets: the name links and tests use
   "name": "Binary accretion",
-  "group": "Point masses", "family": "binary", "familyName": "Binary accretion", "variant": "Standard",
+  "group": "Accretion disks", "family": "binary", "familyName": "Binary accretion", "variant": "Standard",
   "blurb": "Two point masses orbiting inside a gas disk: …",
   "extends": "tidal-disruption",     // optional: give only the differences from a preset
   "domain": { … }, "physics": { … }, "mesh": { … }, "background": { … },

@@ -3,7 +3,7 @@
   "version": 1,
   "id": "sphere",
   "name": "Uniform sphere collapse",
-  "group": "Self-gravity",
+  "group": "Gravitational collapse",
   "family": "sphere",
   "familyName": "Uniform sphere collapse",
   "variant": "Standard",

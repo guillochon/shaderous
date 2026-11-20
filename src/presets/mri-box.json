@@ -3,7 +3,7 @@
   "version": 1,
   "id": "mri-box",
   "name": "MRI shearing box",
-  "group": "Disks",
+  "group": "Accretion disks",
   "family": "mri-box",
   "familyName": "MRI shearing box",
   "variant": "Vertical field",

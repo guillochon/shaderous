@@ -3,7 +3,7 @@
   "version": 1,
   "id": "sub-chandra",
   "name": "Sub-Chandrasekhar Type Ia (double detonation)",
-  "group": "Self-gravity",
+  "group": "Stars and planets",
   "blurb": "A 1 M☉ carbon-oxygen white dwarf under a thin helium shell, set alight at the base of the shell at its pole. The helium detonation wraps around the star and drives a shock into the core, which converges off center and can ignite carbon: the double-detonation model of Type Ia supernovae. Burned by the trained aprox13 network.",
   "physics": {
     "eos": "helmholtz",

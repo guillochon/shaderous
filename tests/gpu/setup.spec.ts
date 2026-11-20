@@ -94,7 +94,7 @@ test('the dialog greys out what cannot be combined and says why', async ({ page 
   const errors = await open(page, 'problem=kelvin-helmholtz&dim=2&n=128');
   await page.click('#setup');
   // Pick the polytrope in the dialog's preset list: a star, with isolated self-gravity.
-  await unfold(page, 'Self-gravity');
+  await unfold(page, 'Stars and planets');
   await dialog(page).locator('.sd-entry', { hasText: 'Polytrope (hydrostatic star): Standard' }).click();
   await tab(page, 'Gravity').click();
   const periodic = field(page, 'Gravity').locator('option', { hasText: 'Self, periodic' });
@@ -103,7 +103,7 @@ test('the dialog greys out what cannot be combined and says why', async ({ page 
   await tab(page, 'Domain and grid').click();
   const twoD = field(page, 'Dimensions').locator('option', { hasText: '2D' });
   await expect(twoD).toBeDisabled();
-  expect(await twoD.getAttribute('title')).toMatch(/Self-gravity/);
+  expect(await twoD.getAttribute('title')).toMatch(/self-gravity/i);
   // A barotropic gas cannot hold a polytropic star, nor cool.
   await tab(page, 'Gas').click();
   await expect(field(page, 'Equation of state').locator('option[value="barotropic"]')).toBeDisabled();
@@ -369,7 +369,7 @@ test('a disk with a density of its own, from formulas, about a star', async ({ p
 test('a preset whose name does not fit shows it whole at once on hover', async ({ page }) => {
   await open(page, 'problem=sedov&dim=2&n=128');
   await page.click('#setup');
-  await unfold(page, 'Point masses');
+  await unfold(page, 'Binaries and encounters');
   await unfold(page, 'Magnetic fields');
   const long = dialog(page).locator('.sd-entry', { hasText: 'Tidal disruption: Partial, random field' });
   const short = dialog(page).locator('.sd-entry', { hasText: /^MHD rotor$/ });
@@ -390,17 +390,21 @@ test('the preset list opens folded, but for the group of the preset that runs', 
   await open(page, 'problem=binary&dim=2&n=128');
   await page.click('#setup');
   const groups = () => dialog(page).locator('.sd-group').evaluateAll((ds) => ds.map((d) => [d.querySelector('summary')!.textContent, (d as HTMLDetailsElement).open]));
-  expect(await groups()).toEqual([['Instabilities', false], ['Shocks and blasts', false], ['Self-gravity', false], ['Point masses', true], ['Magnetic fields', false], ['Tests and sandbox', false]]);
+  expect(await groups()).toEqual([
+    ['Instabilities', false], ['Slow flows', false], ['Shocks and blasts', false], ['Radiation', false], ['Stars and planets', false], ['Gravitational collapse', false],
+    ['Binaries and encounters', false], ['Accretion disks', true], ['Magnetic fields', false], ['Tests and sandbox', false],
+  ]);
   await expect(dialog(page).locator('.sd-entry.sd-current')).toHaveText('Binary accretion');
-  await expect(dialog(page).locator('.sd-entry', { hasText: 'Jeans instability' })).toBeHidden();
+  await expect(dialog(page).locator('.sd-entry', { hasText: 'Rayleigh-Taylor' })).toBeHidden();
   // A group unfolds on a click of its name, and its presets load as before.
   await dialog(page).locator('.sd-group summary', { hasText: 'Instabilities' }).click();
-  await dialog(page).locator('.sd-entry', { hasText: 'Jeans instability' }).click();
+  await dialog(page).locator('.sd-entry', { hasText: 'Rayleigh-Taylor' }).click();
   await expect(applyButton(page)).toHaveText('Apply and restart');
   // Opened again on another run, it folds to that run's group.
   await applyButton(page).click();
-  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'jeans' && (window as any).shaderousApp.sim);
-  await dialog(page).locator('.sd-close, [aria-label="Close"]').first().click();
+  await page.waitForFunction(() => (window as any).shaderousApp.cfg.problem.id === 'rayleigh-taylor' && (window as any).shaderousApp.sim);
+  // Applying closes the dialog.
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
   await page.click('#setup');
   expect((await groups()).filter((g) => g[1]).map((g) => g[0])).toEqual(['Instabilities']);
 });
