@@ -93,7 +93,7 @@ now. The first 1000-run batch of the table-driven generator (20 November 2026, s
 needed units, species, a shearing box or comoving coordinates; a wind tunnel's liquid and its
 implicit pressure; gamma 1 outside the barotropic gas; units that carried the equations of
 state's constants past 32-bit numbers; face-defined fields in (R, z)), plus MHD on the adaptive
-mesh with species that set the equation of state (refused), the magnetic diagnostics' missing
+mesh with species that set the equation of state (the blocks' MHD passes now read each cell's composition), the magnetic diagnostics' missing
 composition binding, a star field without beta, and a radiation readback racing a reload.
 Open issues it found are on GitHub (label them `random-test`). When a new failure is real,
 fix it, add a validation test that would have caught it (`src/validation/*.ts`, listed in
