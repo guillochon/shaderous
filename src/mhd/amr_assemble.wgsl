@@ -45,6 +45,23 @@ var<workgroup> wg_max: array<atomic<u32>, 2>;
 #include "amr/cons.wgsl"
 #include <bins>
 #include "mhd/amr_common.wgsl"
+#include <comp_src>
+
+// The composition moments of a texel, where the composition varies (species/mixture.ts), from
+// rho X where its state comes from, as cons_at finds it: a leaf's own cell, the sum over the
+// child cells of a parent's, or the coarser cell that covers it (taken as it is: piecewise
+// constant, as amr/assemble.wgsl's comp_assembled). The flux, update and diagnostics passes read
+// them back (binding 27): without them every pressure came from zero moments, NaN from the first
+// step (random test seed 10113).
+fn comp_held(level: u32, g0: vec3<i32>) -> vec4<f32> {
+  let m = map_cell(level, g0);
+  let h = holder(level, m.g);
+  if (h.rel >= 0) { return comp_moments(comp_rhox(h.slot, local_of(h.slot, m.g))); }
+  let nc = i32(P.amr.y) * BS * (1 << u32(bt(h.slot, 0u)));
+  var gc = m.g >> vec3<u32>(1u);
+  gc = ((gc % nc) + nc) % nc;
+  return comp_moments(comp_rhox(h.slot, local_of(h.slot, gc)));
+}
 
 @compute @workgroup_size(FLAT_WG)
 fn main(
@@ -77,11 +94,17 @@ fn main(
       let g = blk_coord(slot) * BS + l;
       var u: Cons;
       if (count == 0) { u = u_leaf_m(slot, l); } else { u = cons_at(level, g); }
+      let c = atl(blk_origin(slot), l);
+      if (COMP) {
+        var k: vec4<f32>;
+        if (count == 0) { k = comp_moments(comp_rhox(slot, l)); } else { k = comp_held(level, g); }
+        comp_use(k);
+        comp_store(c, k);
+      }
       let w = prim_from_cons(u.a, u.b);
       let cf = faces_at(level, g);
       let B = cf.B;
       let f = cf.lo;
-      let c = atl(blk_origin(slot), l);
       textureStore(W1, c, w.w1);
       textureStore(W2, c, w.w2);
       // The fourth channel carries the shock flag the half-step state holds in U2.w (stage 2).

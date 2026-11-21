@@ -74,7 +74,9 @@ fn load_vel(c: vec3<i32>) -> vec3<f32> {
   return textureLoad(W1, c, 0).yzw;
 }
 fn load_comp(c: vec3<i32>) -> vec4<f32> {
-  return vec4<f32>(0.0);
+  // (The stage's assembly wrote every texel's moments, ghosts included: mhd/amr_assemble.wgsl.)
+  if (!COMP) { return vec4<f32>(0.0); }
+  return comp_tex(c);
 }
 fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
   return 0;
@@ -415,6 +417,8 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
   }
   var u1 = textureLoad(U1, x, 0);
   var u2 = textureLoad(U2, x, 0);
+  // The cell's own composition, where it varies, for every equation of state call below.
+  comp_use(comp_tex(x));
   // A deposit that touches neither the cell's fluxes nor its faces leaves it as it is.
   if (g_deposit && !g_touched) {
     textureStore(O1, x, u1);

@@ -74,6 +74,12 @@ interface Deps {
   slots: Record<string, string>;
   /** Per-block timesteps (amr/bins_on.wgsl): the bins, the lists of a substep and their dispatch sizes. */
   bins: BinsDeps;
+  /**
+   * Where the composition varies from cell to cell (species/mixture.ts): the moments' atlas, which
+   * the assembly fills for every texel it builds (ghosts included) from rho X, and the flux, update
+   * and diagnostics passes read; the species' textures [parity]; and the species parity now.
+   */
+  comp?: { texture: GPUTexture; species: GPUTexture[]; parity: () => number };
 }
 
 /** What the passes of a substep of time bins work from (src/amr/amr_sim.ts, encodeCycle()). */
@@ -132,8 +138,8 @@ export class AmrMhd {
   private pFlux: GPUComputePipeline[] = [];
   private pEmf: GPUComputePipeline[] = [];
   private pUpdate: GPUComputePipeline[] = [];
-  /** [parity][stage] for the assembly; [parity][stage][chunk] for the others */
-  private gAssemble: GPUBindGroup[][] = [];
+  /** [parity][species parity][stage] for the assembly; [parity][stage][chunk] for the others */
+  private gAssemble: GPUBindGroup[][][] = [];
   private gFlux: GPUBindGroup[][][] = [];
   private gEmf: GPUBindGroup[][][] = [];
   private gUpdate: GPUBindGroup[][][] = [];
@@ -156,8 +162,8 @@ export class AmrMhd {
   private chunkArgs: GPUBuffer;
   /** a chunk that covers any list (its length bounds it) */
   private allChunk: GPUBuffer;
-  /** [parity][stage] over LL */
-  private gAssembleL: GPUBindGroup[][] = [];
+  /** [parity][species parity][stage] over LL */
+  private gAssembleL: GPUBindGroup[][][] = [];
   /** [parity][stage][chunk] over LL */
   private gFluxL: GPUBindGroup[][][] = [];
   private gEmfL: GPUBindGroup[][][] = [];
@@ -202,6 +208,11 @@ export class AmrMhd {
   private gScanReset?: GPUBindGroup;
   private gFluxRedo: GPUBindGroup[][] = [];
   private gUpdateRedo: GPUBindGroup[][] = [];
+
+  /** The species' parity the assembly reads them at (0 where the composition is the same everywhere). */
+  private speciesParity(): number {
+    return this.dep.comp?.parity() ?? 0;
+  }
 
   private constructor(private dep: Deps) {
     const d = dep.device;
@@ -286,6 +297,10 @@ export class AmrMhd {
     const still = { ...this.dep.slots, mhd_riemann: mhdRiemann(cfg), bins: 'amr/bins_off.wgsl', mid: 'amr/mid_off.wgsl' };
     const slots = { ...still, bins: on ? 'amr/bins_on.wgsl' : 'amr/bins_off.wgsl' };
     const v = (x: GPUTexture) => x.createView();
+    // The composition's moments: written by the assembly, from the species at their parity q; read by the rest.
+    const comp = this.dep.comp;
+    const compIn = (comp ? { 27: v(comp.texture) } : {}) as Record<number, GPUTextureView>;
+    const compOut = (q: number) => (comp ? { 25: v(comp.species[q]), 26: v(comp.texture) } : {}) as Record<number, GPUTextureView>;
     const [rgp, enp, a1, a2, f1, f2, e1, e2, u1, u2, red, cm, ca, kp, bf, be, f2r, u2r, scan, scanReset, recheck] = await Promise.all([
       computePipeline(d, assemble('mhd/amr_regrid.wgsl', still), 'MHD re-mesh faces'),
       computePipeline(d, assemble('mhd/amr_regrid_energy.wgsl', still), 'MHD re-mesh energy'),
@@ -303,7 +318,7 @@ export class AmrMhd {
         MAG_OPS,
         'mhd/amr_diagnostics.wgsl',
         still,
-        [0, 1].map((p) => ({ 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 4: v(this.faces[p]), 5: this.dep.bh, 30: bt })),
+        [0, 1].map((p) => ({ 0: params, 1: v(state[p][0]), 2: v(state[p][1]), 4: v(this.faces[p]), 5: this.dep.bh, 30: bt, ...compIn })),
         'magnetic diagnostics (blocks)',
       ),
       computePipeline(d, assemble('mhd/amr_commit.wgsl'), 'MHD commit faces'),
@@ -402,20 +417,21 @@ export class AmrMhd {
         // new faces where the pass does not write them, and otherwise a texture it leaves alone.
         const upd = (pipe: GPUComputePipeline, outs: Record<number, GPUTextureView>, marks: GPUTexture) =>
           perChunk((c) =>
-            bindGroup(d, pipe, {
+            bindGroupUsed(d, pipe, {
               ...c0, 1: clock, 2: v(state[p][0]), 3: v(state[p][1]), 4: v(this.faces[p]), 5: v(this.comps[p]),
               6: this.scratch, 7: this.register, 8: v(this.emf), ...outs, 13: v(this.comps[o]), 14: c,
               15: v(this.w[0]), 16: v(this.w[1]), 17: v(this.w[2]), 28: v(idx), 19: v(this.dep.gfield), 20: this.dep.bh,
               12: this.dep.massFlux?.lo ?? this.noFlux(),
               ...((this.dep.massFlux?.hi ? { 32: this.dep.massFlux.hi } : {}) as Record<number, Bindable>),
-              35: v(marks), 39: v(this.marks1),
-            }),
+              35: v(marks), 39: v(this.marks1), ...compIn,
+            }, 'MHD update'),
           );
         return {
-          assemble: [bindGroup(d, a1, { ...c0, ...out, ...stores }), bindGroup(d, a2, { ...c0, ...out, ...stores })],
+          // [species parity][stage]
+          assemble: [0, 1].map((q) => [bindGroup(d, a1, { ...c0, ...out, ...stores, ...compOut(q) }), bindGroup(d, a2, { ...c0, ...out, ...stores, ...compOut(q) })]),
           keep: bindGroup(d, kp, { 0: params, 31: list, 2: v(this.w[0]), 3: v(this.w[1]), 4: v(this.fa), 5: v(this.kept[0]), 6: v(this.kept[1]), 7: v(this.kept[2]), 8: v(this.w[2]) }),
           flux: [f1, f2].map((pipe) =>
-            perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]), 39: v(this.marks1) })),
+            perChunk((c) => bindGroupUsed(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]), 39: v(this.marks1), ...compIn }, 'MHD fluxes')),
           ),
           emf: [e1, e2].map((pipe) => perChunk((c) => bindGroup(d, pipe, { ...c0, 1: clock, ...W, 5: v(this.fa), 6: this.scratch, 8: v(this.emf), 14: c }))),
           update: [
@@ -426,7 +442,7 @@ export class AmrMhd {
           // its update writing the cells alone (its faces output (11) a texture it leaves alone),
           // both reading the marks in the new faces.
           fluxRedo: perChunk((c) =>
-            bindGroup(d, f2r, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]), 39: v(this.marks1) }),
+            bindGroupUsed(d, f2r, { ...c0, 1: clock, ...W, 5: v(this.fa), ...start, 6: this.scratch, 7: this.register, 14: c, 28: v(idx), 35: v(this.faces[o]), 39: v(this.marks1), ...compIn }, 'MHD flux correction fluxes'),
           ),
           updateRedo: upd(u2r, { 9: v(state[o][0]), 10: v(state[o][1]), 11: v(this.halfFaces) }, this.faces[o]),
           // (Not over its own list, which it fills.)
@@ -526,7 +542,7 @@ export class AmrMhd {
     pass.dispatchWorkgroups(1);
     for (let s = 0; s < 2; s++) {
       pass.setPipeline(this.pAssemble[s]);
-      pass.setBindGroup(0, this.gAssembleL[parity][s]);
+      pass.setBindGroup(0, this.gAssembleL[parity][this.speciesParity()][s]);
       pass.dispatchWorkgroupsIndirect(args, ARG(ARG_ASSEMBLE));
       if (s === 0) {
         pass.setPipeline(this.pKeep!);
@@ -576,7 +592,7 @@ export class AmrMhd {
     const sizeOf = (i: number) => Math.min(this.perChunk, this.nLeaf - i * this.perChunk);
     for (let s = 0; s < 2; s++) {
       pass.setPipeline(this.pAssemble[s]);
-      pass.setBindGroup(0, this.gAssemble[parity][s]);
+      pass.setBindGroup(0, this.gAssemble[parity][this.speciesParity()][s]);
       assembleDispatch();
       if (s === 0) {
         // Kept for stage 2's first-order flux correction, before stage 2's assembly overwrites it.
@@ -697,7 +713,7 @@ export class AmrMhd {
   /** Encode the start-of-step assembly alone, which measures the timestep rates. */
   encodeAssembly(pass: GPUComputePassEncoder, parity: number, dispatch: () => void) {
     pass.setPipeline(this.pAssemble[0]);
-    pass.setBindGroup(0, this.gAssemble[parity][0]);
+    pass.setBindGroup(0, this.gAssemble[parity][this.speciesParity()][0]);
     dispatch();
   }
 

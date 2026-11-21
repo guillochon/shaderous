@@ -3681,6 +3681,56 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'mhd-amr-species-eos',
+    name: 'Species that set the equation of state in a magnetic field, on blocks (2D, uniform 512^2 and blocks 512 finest, 2 levels)',
+    criterion:
+      'A blast beside a blob of carbon (gamma 1.3) in helium (gamma 5/3), threaded by a uniform field, to t = 0.1: on blocks (the mesh mixed: fewer leaves than a uniform finest grid has blocks) the kinetic, magnetic and total energies agree with the uniform grid\'s to 1e-3 and the largest Mach number to 2%, every value is finite, and |div B| dx / max |B| stays below 1e-6 on both; and the largest Mach number on blocks differs by more than 10% from the same run\'s with tracer species (fuel and ash, the run\'s one gamma), so each cell\'s composition is read. (Random test seed 10113: the blocks\' MHD passes once read none, and every pressure came out NaN in the first step.)',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const T = 0.1;
+      const doc = (species: [string, string]): SetupSpec => ({
+        format: 'shaderous-setup', version: 1,
+        domain: { ndim: 2, n: 512, box: 1, supports2d: true, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } },
+        physics: { eos: 'ideal', eosParams: { gamma: 5 / 3 }, gravity: 'off', species, ...(species[0] === 'he4' ? { speciesGamma: { c12: 1.3 } } : {}) },
+        background: { rho: 1, p: 0.1, X: { [species[0]]: 1 } },
+        parts: [
+          { kind: 'field', b: [0.3, 0.2, 0.1] },
+          { kind: 'region', shape: { type: 'sphere', center: [0.15, 0.1, 0], radius: 0.12 }, rho: 3, X: { [species[1]]: 1 } },
+          { kind: 'region', shape: { type: 'sphere', center: [-0.1, -0.05, 0], radius: 0.05 }, energy: 0.5 },
+        ],
+      });
+      const take = async (tag: string, sim: Simulation) => {
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        m[`${tag}_kinetic_energy`] = d.eKin;
+        m[`${tag}_magnetic_energy`] = d.magnetic!.eMag;
+        m[`${tag}_total_energy`] = d.eTot;
+        m[`${tag}_max_mach`] = d.maxMach;
+        m[`${tag}_divB`] = d.magnetic!.divB;
+        m[`${tag}_finite`] = [d.mass, d.eTot, d.eKin, d.maxMach, ...d.ranges.flat()].every(Number.isFinite) ? 1 : 0;
+      };
+      const comp = compileSetup(doc(['he4', 'c12'])).problem;
+      const tracer = compileSetup(doc(['fuel', 'ash'])).problem;
+      await withSim(gpu, comp, 512, { ndim: 2, tEnd: T }, (sim) => take('uniform', sim));
+      await withAmr(gpu, comp, 512, { ndim: 2, amrLevels: 2, tEnd: T }, async (sim) => {
+        await take('blocks', sim);
+        m.blocks_leaves = (await sim.readLeaves()).count / (16 * 16);
+      });
+      await withAmr(gpu, tracer, 512, { ndim: 2, amrLevels: 2, tEnd: T }, (sim) => take('tracer_blocks', sim));
+      const rel = (a: number, b: number) => Math.abs(a / b - 1);
+      m.kinetic_energy_vs_uniform = rel(m.blocks_kinetic_energy, m.uniform_kinetic_energy);
+      m.magnetic_energy_vs_uniform = rel(m.blocks_magnetic_energy, m.uniform_magnetic_energy);
+      m.total_energy_vs_uniform = rel(m.blocks_total_energy, m.uniform_total_energy);
+      m.max_mach_vs_uniform = rel(m.blocks_max_mach, m.uniform_max_mach);
+      m.max_mach_vs_tracer = rel(m.blocks_max_mach, m.tracer_blocks_max_mach);
+      const pass =
+        m.uniform_finite === 1 && m.blocks_finite === 1 && m.blocks_leaves < (512 / 16) ** 2 &&
+        m.kinetic_energy_vs_uniform < 1e-3 && m.magnetic_energy_vs_uniform < 1e-3 && m.total_energy_vs_uniform < 1e-3 && m.max_mach_vs_uniform < 0.02 &&
+        m.uniform_divB < 1e-6 && m.blocks_divB < 1e-6 && m.max_mach_vs_tracer > 0.1;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'mhd-diffusion',
     name: 'Viscosity and conduction with a magnetic field (2D, uniform 64^2 to 128^2 and blocks 128 to 256 finest)',
     criterion:

@@ -71,7 +71,9 @@ fn load_vel(c: vec3<i32>) -> vec3<f32> {
   return textureLoad(W1, c, 0).yzw;
 }
 fn load_comp(c: vec3<i32>) -> vec4<f32> {
-  return vec4<f32>(0.0);
+  // (The stage's assembly wrote every texel's moments, ghosts included: mhd/amr_assemble.wgsl.)
+  if (!COMP) { return vec4<f32>(0.0); }
+  return comp_tex(c);
 }
 fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
   return 0;
@@ -115,7 +117,7 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
         let cr = atl(o, t);
         let sl = mq_start(cl);
         let sr = mq_start(cr);
-        let F = face_of(sl, sl, sr, sr, kept_face(cr, a), a, false, 1.0, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+        let F = face_of(sl, sl, sr, sr, kept_face(cr, a), a, false, 1.0, comp_tex(cl), comp_tex(cr), dt);
         let fa = vec4<f32>(F.f.m, F.f.mom);
         let fb = vec4<f32>(F.f.e, F.f.ei, F.f.s, F.f.vn);
         FL[i] = fa;
@@ -150,9 +152,11 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
       // First-order flux correction: the first-order HLLE flux of the state at the start.
       let sl = mq_start(cl);
       let sr = mq_start(cr);
-      F = face_of(sl, sl, sr, sr, kept_face(cr, a), a, false, 1.0, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+      F = face_of(sl, sl, sr, sr, kept_face(cr, a), a, false, 1.0, comp_tex(cl), comp_tex(cr), dt);
     } else {
-      F = face_of(qll, ql, qr, qrr, textureLoad(FA, cr, 0)[a], a, STAGE == 2u, w, vec4<f32>(0.0), vec4<f32>(0.0), dt);
+      // (Each side's own composition, where it varies: mhd/face_flux.wgsl selects it for the side's
+      // sound speed. Zero moments made every pressure NaN: random test seed 10113.)
+      F = face_of(qll, ql, qr, qrr, textureLoad(FA, cr, 0)[a], a, STAGE == 2u, w, comp_tex(cl), comp_tex(cr), dt);
     }
     // A face in a line-tied wall of the domain (the block table holds it as -1 - its kind).
     let blo = bt(slot, 6u + u32(2 * a));

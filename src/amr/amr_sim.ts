@@ -689,6 +689,7 @@ export class AmrSim implements Simulation {
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg, brush: sim.brush,
         state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFluxWindows ?? undefined,
         bins: { A: sim.bins, LL: sim.listEnd, LU: sim.listUpd, LD: sim.listDep, args: sim.binArgs },
+        ...(sim.comp ? { comp: { texture: sim.comp, species: sim.species, parity: () => sim.speciesCur } } : {}),
       });
     }
     // With a magnetic field the refinement indicator reads its assembly's primitives (the same layout).
