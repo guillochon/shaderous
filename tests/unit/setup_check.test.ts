@@ -52,6 +52,11 @@ describe('checkSetup', () => {
     expect(has(doc(1, ['he4', 'c12']), /each needs a gamma above 1/)).toBe(true);
     expect(has(doc(1, ['fuel', 'ash']), /gamma above 1/)).toBe(false);
     expect(has(doc(5 / 3, 'aprox13'), /gamma above 1/)).toBe(false);
+    // Seed 10624: the degenerate gas (and its kin) at gamma 1.
+    const gas = (eos: 'degenerate' | 'gas_radiation' | 'ionizing' | 'ideal', gamma: number) => texts(setup({ physics: { eos, eosParams: { gamma } } }), 'error');
+    for (const eos of ['degenerate', 'gas_radiation', 'ionizing'] as const) expect(has(gas(eos, 1), /needs a gamma above 1/)).toBe(true);
+    expect(has(gas('ideal', 1), /gamma above 1/)).toBe(false);
+    expect(has(gas('degenerate', 5 / 3), /gamma above 1/)).toBe(false);
   });
 
   it('finds a star without gravity, a liquid far from its density, and the Helmholtz gas without units (seeds 10028, 10006, 10025)', () => {

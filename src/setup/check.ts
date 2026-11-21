@@ -336,6 +336,16 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     if (flat.length) out.push({ level: 'error', path: 'physics.speciesGamma', text: `Gamma by species: ${flat.join(', ')} need a gamma above 1` });
   });
 
+  // Gas with radiation or degenerate electrons beside it has the gas's share of the energy as
+  // (gamma - 1) of it: gamma 1 (the ideal gas's isothermal limit) made it NaN (random test seed
+  // 10624, the isothermal collapse with the degenerate equation of state).
+  guard(() => {
+    const eos = spec.physics?.eos;
+    const gamma = spec.physics?.eosParams?.gamma ?? 5 / 3;
+    if ((eos === 'gas_radiation' || eos === 'degenerate' || eos === 'ionizing') && !(gamma > 1))
+      out.push({ level: 'error', path: 'physics.eosParams.gamma', text: `gamma is ${fmt(gamma)}: this equation of state needs a gamma above 1 (only the ideal gas takes 1, as an isothermal gas)` });
+  });
+
   // A star is held together by its own gravity: with G = 0 its structure is NaN (random test
   // seeds 10028 and 10056, a star added to presets without gravity).
   guard(() => {

@@ -334,7 +334,9 @@ function addUnits(doc: SetupSpec, g: Rng, form?: string) {
 function setEos(doc: SetupSpec, eos: string, g: Rng) {
   const ph = (doc.physics ??= {});
   ph.eos = eos as never;
-  const gamma = ph.eosParams?.gamma ?? 5 / 3;
+  let gamma = ph.eosParams?.gamma ?? 5 / 3;
+  // (Only the ideal gas takes gamma 1, as an isothermal gas.)
+  if (gamma <= 1 && eos !== 'ideal') gamma = 5 / 3;
   ph.eosParams = { gamma };
   if (eos === 'gas_radiation') ph.eosParams = { gamma: 5 / 3, arad: r3(g.L(0.01, 1)), R: 1 };
   if (eos === 'barotropic') ph.eosParams = { gamma: g.pick([1, 1.4, 5 / 3]), K: r3(g.L(0.1, 1)) };
