@@ -758,6 +758,28 @@ export class AmrSim implements Simulation {
     return this.comp ? { 27: this.comp.createView() } : {};
   }
 
+  /**
+   * Before the display of a field with derivatives (render/renderer.ts DERIVATIVE_FIELDS): the
+   * primitives, ghosts and all, of the state as it is now, which amr/field.wgsl takes them from.
+   * A step with implicit pressure leaves those of its advected state, before the correction
+   * (encodeSteps), and drawn from those the liquid's density gradient showed the pressure the
+   * correction removes: a different picture after the page's own steps than after a script's,
+   * whose diagnostics readout came between. Every step rebuilds them as it starts (previewDt).
+   */
+  encodeDisplayPrimitives(enc: GPUCommandEncoder): void {
+    if (this.settling || this.compiling || this.destroyed) return;
+    const pass = beginPass(enc);
+    if (this.mhd) {
+      this.mhd.encodeAssembly(pass, this.cur, () => this.flat(pass, this.nLeaf, NG));
+    } else {
+      this.rad?.encodeAssemble(pass, this.cur, this.nLeaf);
+      pass.setPipeline(this.pAssemble);
+      pass.setBindGroup(0, this.assembleGroup(this.cur));
+      this.flat(pass, this.nAll, NG);
+    }
+    pass.end();
+  }
+
   /** The assembly's bind group for the state of parity p (and the species as they are now). */
   private assembleGroup(p: number): GPUBindGroup {
     return this.comp ? this.gAssembleQ[p][this.speciesCur] : this.gAssemble[p];

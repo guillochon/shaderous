@@ -269,6 +269,8 @@ export interface Simulation {
    */
   stepsResume(): Promise<void> | null;
   readDiagnostics(): Promise<Diagnostics | null>;
+  /** The block grid: before a display of a field with derivatives, the primitives of the state as it is (amr/amr_sim.ts). */
+  encodeDisplayPrimitives?(enc: GPUCommandEncoder): void;
   diagnostics(): Promise<Diagnostics>;
   runToEnd(batch?: number, maxSteps?: number): Promise<number>;
   /** Load the initial conditions (the adaptive mesh's may wait on workers: amr/init_pool.ts). */

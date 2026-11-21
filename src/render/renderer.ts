@@ -95,6 +95,9 @@ export interface ViewState {
 const _viewTable: ViewFromOptions extends ViewState ? (ViewState extends ViewFromOptions ? true : never) : never = true;
 void _viewTable;
 
+/** The fields drawn from derivatives (render/field_value.wgsl field_needs_grad): vorticity, divergence, density gradient. */
+const DERIVATIVE_FIELDS = new Set([11, 12, 13]);
+
 /** The background behind the box: dark, or white with `light`. */
 const BG_DARK = [0.05, 0.058, 0.078];
 const BG_LIGHT = [1, 1, 1];
@@ -836,6 +839,8 @@ export class Renderer {
     // The plane (a slice, or a 2D run) is drawn by the plane pass alone. The pass over the whole
     // box then only finds the range, so it runs on the frames that read the range back.
     const plane = v.mode !== 'volume' || nz === 1;
+    // A field with derivatives, on the block grid: the primitives they come from, of the state shown.
+    if (DERIVATIVE_FIELDS.has(v.field)) sim.encodeDisplayPrimitives?.(enc);
     const cp2 = enc.beginComputePass();
     // The plasma beta and the field's divergence read the largest |B| (render/field.wgsl).
     if (v.field === MAGNETIC_FIELDS[4] || v.field === MAGNETIC_FIELDS[5]) sim.encodeMagnetic?.(cp2, sim.cur);
