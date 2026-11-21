@@ -43,7 +43,8 @@ about a fifth more than at load; `mesh` in `diag.jsonl` says when it fills.
 The chain: each job runs with `--wall` set to the time the job has left less `MARGIN` (30
 minutes, for the last checkpoint), screenshots every `EVERY` of simulated time, or every `SHOT_EVERY` seconds of wall time without it (`NNNN-tT-vol.png` and
 `-slice.png` in `RUN_DIR/seg-<job>/`), a checkpoint every `ATHDF_EVERY` screenshots, and keeps
-the newest `KEEP` checkpoints. When it stops on its wall budget it submits the next job; when
+the newest `KEEP` checkpoints (and, with `KEEP_EVERY`, the first at or after each multiple of that
+much simulated time, for good). When it stops on its wall budget it submits the next job; when
 the run reaches `UNTIL` it writes `RUN_DIR/DONE`. A job killed while writing a checkpoint
 leaves a file its manifest does not list, which the next job ignores. Stop early by touching
 `STOP` in the running segment's folder.

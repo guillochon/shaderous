@@ -2,7 +2,8 @@
 // manifests list them. A file is listed only once it is written whole, so a job killed while
 // writing one leaves a file here that is never picked.
 //   node checkpoints.mjs latest RUN_DIR       prints the path of the newest checkpoint (or nothing)
-//   node checkpoints.mjs prune RUN_DIR KEEP   deletes all but the newest KEEP
+//   node checkpoints.mjs prune RUN_DIR KEEP [KEEP_EVERY]   deletes all but the newest KEEP and, with
+//                                            KEEP_EVERY, the first at or after each multiple of it
 //   node checkpoints.mjs stopped RUN_DIR      prints why the newest finished segment stopped
 import { existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -23,7 +24,18 @@ if (cmd === 'latest') {
   if (listed.length) console.log(listed.at(-1).file);
 } else if (cmd === 'prune') {
   const keep = Math.max(1, Number(keepArg ?? 2));
-  for (const c of listed.slice(0, Math.max(0, listed.length - keep))) {
+  // Kept for good as well: the first checkpoint at or after each multiple of KEEP_EVERY (in
+  // simulated time), so the run's history can be restarted or studied from along the way.
+  const every = Number(process.argv[5] ?? 0);
+  const milestones = new Set();
+  if (every > 0) {
+    const seen = new Set();
+    for (const c of listed) {
+      const m = Math.floor(c.t / every + 1e-9);
+      if (!seen.has(m)) { seen.add(m); milestones.add(c.file); }
+    }
+  }
+  for (const c of listed.slice(0, Math.max(0, listed.length - keep)).filter((c) => !milestones.has(c.file))) {
     rmSync(c.file);
     console.log(`removed ${c.file} (t = ${c.t})`);
   }
@@ -31,6 +43,6 @@ if (cmd === 'latest') {
   const done = manifests.filter(({ m }) => m.finished).sort((a, b) => a.m.finished.localeCompare(b.m.finished));
   if (done.length) console.log(done.at(-1).m.stopped);
 } else {
-  console.error('usage: checkpoints.mjs latest|prune|stopped RUN_DIR [KEEP]');
+  console.error('usage: checkpoints.mjs latest|prune|stopped RUN_DIR [KEEP [KEEP_EVERY]]');
   process.exit(1);
 }

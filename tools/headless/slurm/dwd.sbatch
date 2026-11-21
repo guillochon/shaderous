@@ -15,6 +15,8 @@
 #              Unset: SHOT_EVERY seconds of wall time instead (default 1800)
 #   ATHDF_EVERY  a checkpoint every this many screenshots (default 4: every 2 hours)
 #   KEEP       checkpoints to keep (default 2); older ones are deleted as new ones land
+#   KEEP_EVERY also keep, for good, the first checkpoint at or after each multiple of this much
+#              simulated time (default 0: none)
 #   MARGIN     seconds left at the end of a job for the last checkpoint (default 1800)
 #   MAX_JOBS   the most jobs the chain may run (default 20)
 # Stop the chain: touch RUN_DIR/seg-<job>/STOP (the job stops at its next screenshot and
@@ -33,7 +35,7 @@ source "${SHADEROUS_DIR:-$HOME/shaderous}/tools/headless/slurm/common.sh"
 export N="${N:-2048}" AMR="${AMR:-5}" EVERY="${EVERY:-}"
 export RUN_DIR="${RUN_DIR:-$SHADEROUS_DIR/runs/dwd-$N}"
 export UNTIL="${UNTIL:-100}" SHOT_EVERY="${SHOT_EVERY:-1800}" ATHDF_EVERY="${ATHDF_EVERY:-4}"
-export KEEP="${KEEP:-2}" MARGIN="${MARGIN:-1800}" MAX_JOBS="${MAX_JOBS:-20}"
+export KEEP="${KEEP:-2}" KEEP_EVERY="${KEEP_EVERY:-0}" MARGIN="${MARGIN:-1800}" MAX_JOBS="${MAX_JOBS:-20}"
 export JOB_NUMBER=$(( ${JOB_NUMBER:-0} + 1 ))
 ckpt() { in_container node tools/headless/slurm/checkpoints.mjs "$@"; }
 
@@ -55,7 +57,7 @@ fi
 if [ -n "$EVERY" ]; then spacing=(--every "$EVERY"); else spacing=(--every-wall "$SHOT_EVERY"); fi
 
 # Older checkpoints are deleted while the run goes on, so they do not fill the disk.
-( while sleep 600; do ckpt prune "$RUN_DIR" "$KEEP"; done ) &
+( while sleep 600; do ckpt prune "$RUN_DIR" "$KEEP" "$KEEP_EVERY"; done ) &
 pruner=$!
 
 in_container node tools/headless/cli.mjs run "${start[@]}" \
@@ -67,7 +69,7 @@ in_container node tools/headless/cli.mjs run "${start[@]}" \
   --out "$seg"
 status=$?
 kill "$pruner" 2>/dev/null
-ckpt prune "$RUN_DIR" "$KEEP"
+ckpt prune "$RUN_DIR" "$KEEP" "$KEEP_EVERY"
 
 stopped=$(ckpt stopped "$RUN_DIR")
 echo "runner exit $status, stopped: ${stopped:-unknown}"
