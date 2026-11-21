@@ -32,6 +32,10 @@ describe('checkSetup', () => {
     expect(has(flow('helium-shell-ignition'), /needs a star/i)).toBe(true);
     expect(has(flow('shearing-noise'), /needs a shearing box/i)).toBe(true);
     expect(has(flow('zeldovich'), /needs comoving coordinates/i)).toBe(true);
+    // Seed 10747: a field given on the faces is divergence-free in Cartesian coordinates only.
+    const axisym = (name: string) => texts(setup({ domain: { ndim: 2, n: 64, geometry: 'cylindrical', supports2d: true, bc: { lo: [2, 1, 0], hi: [1, 1, 0] } } }, [{ kind: 'flow', name }]), 'error');
+    expect(has(axisym('alfven-packets'), /divergence-free in Cartesian coordinates only/)).toBe(true);
+    expect(has(axisym('field-loop'), /divergence-free in Cartesian coordinates only/)).toBe(false);
     // (Seed 10159: the ZND detonation burns fuel into ash.)
     expect(has(flow('znd-detonation'), /needs the species fuel and ash/i)).toBe(true);
     expect(has(flow('znd-detonation', { physics: { species: ['fuel', 'ash'] } }), /needs the species fuel and ash/i)).toBe(false);

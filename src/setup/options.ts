@@ -659,7 +659,12 @@ export function partFields(part: Part): Option[] {
   if (part.kind !== 'flow') return PART_OPTIONS[part.kind].fields;
   return [
     P({ path: 'name', label: 'Flow', tip: 'Which built-in initial condition', default: part.name,
-      control: pick(...Object.values(FLOWS).map((f): Choice => ({ value: f.name, label: f.label, tip: f.tip, ...(f.requires ? { requires: f.requires } : {}), ...(f.wholeBox ? { excludes: [{ fact: 'parts.flow.whole', reason: 'Only one flow can fill the whole box' }, ...(f.liquid ? [] : [{ fact: 'physics.eos', is: 'liquid', reason: 'Not for the liquid: its densities stray far from the liquid’s one reference density' }])] } : {}) }))) }),
+      control: pick(...Object.values(FLOWS).map((f): Choice => ({ value: f.name, label: f.label, tip: f.tip, ...(f.requires ? { requires: f.requires } : {}), excludes: [
+        ...(f.wholeBox ? [{ fact: 'parts.flow.whole', reason: 'Only one flow can fill the whole box' }, ...(f.liquid ? [] : [{ fact: 'physics.eos', is: 'liquid', reason: 'Not for the liquid: its densities stray far from the liquid’s one reference density' }])] : []),
+        // A field given on the faces, not by a potential, is divergence-free in Cartesian
+        // coordinates only: in (R, z) a radial field has B_R / R besides (random test seed 10747).
+        ...(f.face && !f.potential ? [{ fact: 'domain.curvilinear', reason: 'Not in an axisymmetric or spherical run: its field is divergence-free in Cartesian coordinates only' }] : []),
+      ] }))) }),
     ...flowOptions(part.name),
   ];
 }
