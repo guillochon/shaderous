@@ -32,6 +32,8 @@ export interface Tunnel {
   liquid: boolean;
   sponge: number;
   inlet: number;
+  /** the rotor frame's angular velocity about the stream's axis (0: none) */
+  rotor: number;
 }
 
 export function tunnelParams(t: TunnelPart, ndim: 2 | 3): Tunnel {
@@ -43,7 +45,21 @@ export function tunnelParams(t: TunnelPart, ndim: 2 | 3): Tunnel {
   const cs = Math.abs(speed) / Math.max(mach, 1e-6);
   const liquid = mach < 0.3;
   const gamma = 1.4;
-  return { part: t, speed, a, up, rho, cs, p: liquid ? 0 : (rho * cs * cs) / gamma, liquid, sponge: t.sponge ?? TUNNEL_DEFAULTS.sponge, inlet: t.inlet ?? TUNNEL_DEFAULTS.inlet };
+  return { part: t, speed, a, up, rho, cs, p: liquid ? 0 : (rho * cs * cs) / gamma, liquid, sponge: t.sponge ?? TUNNEL_DEFAULTS.sponge, inlet: t.inlet ?? TUNNEL_DEFAULTS.inlet, rotor: ndim === 3 ? (t.rotor ?? 0) : 0 };
+}
+
+/** The stream's velocity at a point (relative to the box's center): U along the axis, less Omega x r in a rotor's frame. */
+export function streamAt(k: Tunnel, x: number, y: number, z: number): [number, number, number] {
+  const v: [number, number, number] = [0, 0, 0];
+  v[k.a] = k.speed;
+  if (k.rotor !== 0) {
+    const w = [0, 0, 0];
+    w[k.a] = k.rotor;
+    v[0] -= w[1] * z - w[2] * y;
+    v[1] -= w[2] * x - w[0] * z;
+    v[2] -= w[0] * y - w[1] * x;
+  }
+  return v;
 }
 
 /**
@@ -85,6 +101,12 @@ export function expandTunnel(spec: SetupSpec): SetupSpec {
     ph.pressure = 'explicit';
   }
   ph.gravity = ph.gravity ?? 'off';
+  // A rotor's frame: the run turns about the stream's axis (the inlet and the sponge follow, below).
+  if (k.rotor !== 0) {
+    const omega: Vec3 = [0, 0, 0];
+    omega[k.a] = k.rotor;
+    ph.rotation = { omega, centrifugal: true };
+  }
   return {
     ...spec,
     domain: { ...(spec.domain ?? {}), bc: { lo, hi }, ...(Object.keys(wallVelocity).length ? { wallVelocity: { ...(spec.domain?.wallVelocity ?? {}), ...wallVelocity } } : {}) },
@@ -97,11 +119,24 @@ export function expandTunnel(spec: SetupSpec): SetupSpec {
 export function tunnelPainter(t: TunnelPart, ctx: { box: number; n: number; ndim: 2 | 3 }): (w: Prim, x: number, y: number, z: number) => Prim {
   const k = tunnelParams(t, ctx.ndim);
   const edge = -ctx.box / 2 + (k.inlet * ctx.box) / ctx.n;
-  const v = [0, 0, 0];
-  v[k.a] = k.speed;
+  if (k.rotor === 0) {
+    const v = streamAt(k, 0, 0, 0);
+    return (w, x, y, z) => {
+      if ([x, y, z][k.a] >= edge || w.solid) return w;
+      return { ...w, rho: k.rho, vx: v[0], vy: v[1], vz: v[2], p: k.p, fixed: true };
+    };
+  }
+  // A rotor's frame: every cell starts at U - Omega x r, and those outside the cylinder of the
+  // box's half-width less the inlet's cells, as well as the inlet's, keep that state: the box
+  // is a cylinder's worth (its corners would otherwise move at Omega r across open faces).
+  const R = ctx.box / 2 - (k.inlet * ctx.box) / ctx.n;
+  const [u, v2] = [(k.a + 1) % 3, (k.a + 2) % 3];
   return (w, x, y, z) => {
-    if ([x, y, z][k.a] >= edge || w.solid) return w;
-    return { ...w, rho: k.rho, vx: v[0], vy: v[1], vz: v[2], p: k.p, fixed: true };
+    if (w.solid) return w;
+    const p = [x, y, z];
+    const v = streamAt(k, x, y, z);
+    const held = p[k.a] < edge || Math.hypot(p[u], p[v2]) > R;
+    return { ...w, rho: k.rho, vx: v[0], vy: v[1], vz: v[2], p: k.p, ...(held ? { fixed: true } : {}) };
   };
 }
 
@@ -121,14 +156,17 @@ export function tunnelDamping(t: TunnelPart, box: number, ndim: 2 | 3): { wgsl: 
   const len = k.sponge * box;
   const start = box / 2 - len;
   const rate = (4 * Math.abs(k.speed)) / len;
-  const v = [0, 0, 0];
-  v[k.a] = k.speed;
+  const v = streamAt(k, 0, 0, 0);
+  // In a rotor's frame the target turns with r: U - Omega x x.
+  const w = [0, 0, 0];
+  w[k.a] = k.rotor;
+  const vel = k.rotor !== 0 ? `vec3<f32>(${v.map(f32).join(', ')}) - cross(vec3<f32>(${w.map(f32).join(', ')}), x)` : `vec3<f32>(${v.map(f32).join(', ')})`;
   const wgsl = `const DAMPING = true;
 fn damping_target(x: vec3<f32>) -> DampTarget {
   let s = (x[${k.a}] - ${f32(start)}) / ${f32(len)};
   if (s <= 0.0) { return DampTarget(0.0, 1.0, vec3<f32>(0.0), 1.0); }
   let ramp = min(s, 1.0);
-  return DampTarget(${f32(rate)} * ramp * ramp, ${f32(k.rho)}, vec3<f32>(${v.map(f32).join(', ')}), ${f32(k.p)});
+  return DampTarget(${f32(rate)} * ramp * ramp, ${f32(k.rho)}, ${vel}, ${f32(k.p)});
 }
 `;
   return { wgsl, radius: 0, rate: 0 };

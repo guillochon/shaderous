@@ -2530,6 +2530,11 @@
         "title": "Reference length",
         "description": "The length the moment coefficients are over. Empty: the square root of the area (the area itself in 2D)",
         "minimum": 0
+       },
+       "rotor": {
+        "type": "number",
+        "title": "Rotor frame",
+        "description": "An angular velocity about the stream’s axis through the box’s center: the run is in the frame that turns at it, so that a rotor centered there is at rest (the stream is U - Omega x r, the corners of the box held at it). Torque and thrust then come steady. 0: none. 3D only"
        }
       },
       "required": [

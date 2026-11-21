@@ -635,7 +635,8 @@ export function implicitUnsupported(c: SimConfig): string | null {
     const sinks = c.problem.masses(c.params, c.G, c.problem.box / c.n, c.ndim).some((m) => (m.sinkRadius ?? m.soft ?? 1) > 0);
     if (sinks) return 'point masses that take gas in are not available with it yet (set their sink radius to 0)';
   }
-  if (c.problem.rotation || c.problem.shear || c.problem.frame) return 'rotating frames and shearing boxes are not available with it';
+  // (A rotating frame for the liquid: the update gives it the frame's whole kick before the solve, hydro/update.wgsl.)
+  if ((c.problem.rotation && c.eos !== 'liquid') || c.problem.shear || c.problem.frame) return 'rotating frames (but for a liquid) and shearing boxes are not available with it';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
   // (Species that only ride with the gas are moved after the correction, and scaled to its
   // density. Where they set the equation of state, or burn, the pressure passes would have to

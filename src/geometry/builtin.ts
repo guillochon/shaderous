@@ -45,9 +45,39 @@ export function ahmedBody(slant = 25, sections = 16): Mesh {
   return { positions: new Float32Array(pos), indices: new Uint32Array(idx), parts: [wholePart(idx.length / 3, 'ahmed')], meters: 1 };
 }
 
+/** A sphere of diameter 1: an icosahedron subdivided `levels` times, its vertices on the sphere. */
+export function icosphere(levels = 4): Mesh {
+  const t = (1 + Math.sqrt(5)) / 2;
+  let v: number[][] = [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]];
+  let f = [[0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11], [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8], [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9], [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1]];
+  const norm = (p: number[]) => {
+    const l = Math.hypot(p[0], p[1], p[2]);
+    return p.map((x) => (0.5 * x) / l);
+  };
+  v = v.map(norm);
+  for (let l = 0; l < levels; l++) {
+    const mid = new Map<string, number>();
+    const m = (a: number, b: number) => {
+      const k = a < b ? `${a},${b}` : `${b},${a}`;
+      if (!mid.has(k)) {
+        v.push(norm(v[a].map((x, i) => (x + v[b][i]) / 2)));
+        mid.set(k, v.length - 1);
+      }
+      return mid.get(k)!;
+    };
+    f = f.flatMap(([a, b, c]) => {
+      const [ab, bc, ca] = [m(a, b), m(b, c), m(c, a)];
+      return [[a, ab, ca], [b, bc, ab], [c, ca, bc], [ab, bc, ca]];
+    });
+  }
+  return { positions: new Float32Array(v.flat()), indices: new Uint32Array(f.flat()), parts: [wholePart(f.length, 'sphere')] };
+}
+
 export const BUILTIN_BODIES: Record<string, () => Mesh> = {
   ahmed: () => ahmedBody(25),
   'ahmed-35': () => ahmedBody(35),
+  // A sphere of diameter 1 (5120 triangles): the mesh path against the built-in sphere shape.
+  sphere: () => icosphere(4),
 };
 
 /** The body a "builtin:<name>" file names, or undefined. */

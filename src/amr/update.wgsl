@@ -554,6 +554,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   // The second half of the frame's forces, where no correction pass follows: last, as the
   // correction pass applies it after all of the update on the uniform grid.
   if (FRAME_ON && !self_gravity) {
+    // (Implicit pressure, the liquid: the centrifugal force's whole kick too, before the solve.)
+    if (PSPLIT && P.rot.w != 0.0) { nw = NewState(vec4<f32>(nw.u1.x, nw.u1.yzw + g_dt * nw.u1.x * rot_accel(blk_pos(slot, l))), nw.u2); }
     let fs = frame_close(nw.u1, nw.u2, 0.5 * g_dt);
     nw = NewState(fs.u1, fs.u2);
   }

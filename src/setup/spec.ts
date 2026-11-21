@@ -468,6 +468,13 @@ export interface TunnelPart {
   /** the force coefficients' reference area (default: the first obstacle's shadow along the stream) and length */
   area?: number;
   length?: number;
+  /**
+   * A rotor's frame (plans/wind-tunnel.md section 5): the run turns at this angular velocity
+   * about the stream's axis through the box's center (right-handed), so that a rotor there is
+   * at rest. The stream, the inlet and the sponge's target are then U - Omega x r, and the cells
+   * outside the cylinder the box holds are held at that state. 3D only
+   */
+  rotor?: number;
 }
 
 export type Part = MassPart | OrbitPart | StarPart | DiskPart | RegionPart | ObstaclePart | FieldPart | FlowPart | TunnelPart;

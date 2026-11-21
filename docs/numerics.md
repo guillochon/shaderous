@@ -3538,6 +3538,18 @@ still refused for a gas, whose solve also carries the energy). The force coeffic
 (`Diagnostics.bodies`) are over $`\tfrac12\rho U^2 A`$, with $`A`$ the first obstacle's shadow
 along the stream unless the tunnel gives one.
 
+**A rotor's frame.** With `rotor` the run turns at $`\Omega`$ about the stream's axis (section
+22, Rotating frame), and the stream is $`U\hat{\mathbf{a}} - \boldsymbol\Omega\times\mathbf{r}`$
+at the inlet, in the sponge's target and at the start. Cells outside the cylinder the box holds
+are held at it: the box's corners would otherwise carry gas at $`\Omega r`$ across open faces.
+For this the liquid's implicit pressure now runs in a rotating frame: the update gives the cell
+the centrifugal force's whole kick and the Coriolis force's second half-turn before the solve
+(`hydro/update.wgsl`, `amr/update.wgsl`; the explicit step has them in its correction pass, which
+an implicit step does not run). For a liquid of uniform density the centrifugal force is a
+gradient, which the solve takes into the pressure. A gas with implicit pressure is still refused
+in a rotating frame. Test `rotor-frame`: a two-bladed paddle in its frame, the torque about the
+axis from the explicit scheme and from implicit pressure, -3.99 and -4.06 (1.7%).
+
 ### Bodies from mesh files
 
 A `mesh` shape (setups.md) is a triangle mesh read from a file (`src/geometry/`: STL, OBJ,

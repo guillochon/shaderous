@@ -331,6 +331,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (has_sources()) { nw = apply_sources(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt); }
   nw = apply_damping(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt);
   nw = apply_cooling(nw, clock.dt);
+  // Implicit pressure in a rotating frame (the liquid; plans/wind-tunnel.md 2.1): the
+  // centrifugal force's whole kick and the Coriolis force's second half-turn, here, before the
+  // solve. (The explicit step has them in gravity/correct.wgsl, which this step does not run.)
+  // For a liquid of uniform density the centrifugal force is a gradient, which the solve takes
+  // into the pressure.
+  if (PSPLIT && FRAME_ON) {
+    var u1n = nw.u1;
+    if (P.rot.w != 0.0) { u1n = vec4<f32>(u1n.x, u1n.yzw + clock.dt * u1n.x * rot_accel(cell_pos(c))); }
+    let fs = frame_close(u1n, nw.u2, 0.5 * clock.dt);
+    nw = NewState(fs.u1, fs.u2);
+  }
   textureStore(O1, c, nw.u1);
   textureStore(O2, c, nw.u2);
 }
