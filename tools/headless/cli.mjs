@@ -182,7 +182,9 @@ async function runOne(session, q, dir) {
     const d = await call('diagnostics');
     const name = `${String(k).padStart(4, '0')}-t${tag(d.t)}`;
     const files = [];
-    appendFileSync(path.join(dir, 'diag.jsonl'), JSON.stringify({ output: k, wall: (Date.now() - t0) / 1000, ...d }) + '\n');
+    const { mesh } = await call('state');
+    appendFileSync(path.join(dir, 'diag.jsonl'), JSON.stringify({ output: k, wall: (Date.now() - t0) / 1000, ...(mesh ? { mesh } : {}), ...d }) + '\n');
+    if (mesh) log(`  mesh: ${mesh}`);
     const shotOpts = o.native
       ? { native: true, overlays: { colorbar: true, triad: true, status: true } }
       : { width: num(o.width, 'width') ?? 1024, height: num(o.height, 'height') ?? num(o.width, 'width') ?? 1024, ...(o.overlays ? { overlays: { colorbar: true, triad: true, status: true } } : {}) };

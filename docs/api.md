@@ -325,7 +325,9 @@ take this build's values. A file of ours whose preset this build does not have i
 Returns `problem`, `label`, `ndim`, `n`, `amr`, `t`, `dt`, `steps`, `tEnd` (null if none),
 `running`, `finished` and `preparing`, plus `query`, the setup as a query string, `setup`,
 the setup document the run stands for now (its preset or file with every setting changed
-since: `load` it to get the same run), and `adapter`, the GPU adapter the run is on.
+since: `load` it to get the same run), and `adapter`, the GPU adapter the run is on. On an adaptive mesh, `mesh` is the status bar's
+line for it (`"8123 blocks, 4% of uniform"`, and whether the block budget is full); `null` on a
+uniform grid.
 `preparing` is true while a star in the initial conditions is still being settled into
 hydrostatic balance. No steps are taken during that time, and `run` waits for it to finish.
 

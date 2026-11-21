@@ -13,7 +13,7 @@ NVIDIA Vulkan ICD file into it when there is one, and set `PW_CHANNEL=shell` and
 | File | What it does |
 | --- | --- |
 | `setup.sh` | Once, on a login node: clone or update the checkout in `~/shaderous`, pull the image to `~/containers/`, `npm ci` inside it |
-| `gpu-check.sbatch` | A one-hour job: the driver and Vulkan files, a small Sedov blast (its `manifest.json` should name an NVIDIA adapter), then the double white dwarf at 2048^3 with 5 levels for 100 steps with Helmholtz and with the degenerate gas: the mesh's block count (on the PNGs) and seconds per step |
+| `gpu-check.sbatch` | A one-hour job: the driver and Vulkan files, a small Sedov blast (its `manifest.json` should name an NVIDIA adapter), then the double white dwarf at 2048^3 with 5 levels for 100 steps with Helmholtz and with the degenerate gas: the block count (`mesh` in each `diag.jsonl` line, and printed) and seconds per step |
 | `dwd-2048.sbatch` | The long run, as a chain of jobs that each carry on from the newest checkpoint |
 | `checkpoints.mjs` | Finds the newest whole checkpoint of a chained run, prunes old ones, says why the last job stopped |
 | `common.sh` | Shared settings: paths, the container call, GPU memory, time left in the job |
@@ -31,7 +31,7 @@ Unity are A100 80 GB nodes and one H100 node (`sinfo -p gpu-highvram -o "%N %G %
 The `gpu` partition has no 80 GB cards; the one H200 node is only in `gpu-preempt-highvram`,
 where a job can be preempted. The magnetized mesh can hold at most 35^3 = 42,875 blocks (about
 110 GB); the double white dwarf at 2048^3 was estimated at 25 to 30 thousand blocks, 70 to 80
-GB, so an 80 GB card is close. The check job's PNG gives the real count.
+GB, so an 80 GB card is close. The check job measured the run itself (below).
 
 The chain: each job runs with `--wall` set to the time the job has left less `MARGIN` (30
 minutes, for the last checkpoint), screenshots every `SHOT_EVERY` seconds (`NNNN-tT-vol.png` and

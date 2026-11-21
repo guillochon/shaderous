@@ -1,9 +1,9 @@
 #!/bin/bash
 # Does Shaderous run on this cluster's GPUs? A short job: the driver, the Vulkan ICD, a small
-# Sedov blast, then the double white dwarf at 2048^3 with 5 levels for 20 steps, to read the
+# Sedov blast, then the double white dwarf at 2048^3 with 5 levels for 100 steps, to read the
 # mesh's size and the time a step takes before committing to the long run.
 #   sbatch tools/headless/slurm/gpu-check.sbatch
-# Results: runs/slurm-check-<job>/ (manifest.json names the adapter; the PNG's status line has
+# Results: runs/slurm-check-<job>/ (manifest.json names the adapter; diag.jsonl's `mesh` gives
 # the block count) and slurm-check-<job>.out.
 #SBATCH --job-name=shaderous-check
 #SBATCH --partition=gpu-highvram,gpu-preempt-highvram
@@ -44,4 +44,4 @@ for eos in helmholtz degenerate; do
     --out "$out/dwd-$eos"
   per_step "$out/dwd-$eos"
 done
-echo "== done: $out (the PNGs' status line gives the block count)"
+echo "== done: $out"

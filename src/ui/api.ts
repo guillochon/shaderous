@@ -426,6 +426,8 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       query: app.query(),
       setup: app.runningSpec(),
       adapter: app.adapter(),
+      // The adaptive mesh's line of the status bar: blocks, share of uniform, a full block budget.
+      mesh: s.status() || null,
     };
   }
 
