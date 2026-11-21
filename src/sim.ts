@@ -783,9 +783,14 @@ export function symmetryUnsupported(c: SimConfig): string | null {
     for (let b = 0; b < 3; b++) if (b !== a && w[b] !== 0) return `a frame turning about an axis other than ${name(a)} is not symmetric under the ${name(a)} mirror`;
   for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
     for (const a of axes) if ((m.pos[a] ?? 0) !== 0 || (m.vel[a] ?? 0) !== 0) return `a point mass lies or moves off the ${name(a)} plane of symmetry`;
-  const stars = (c.problem.setup?.parts ?? []).filter((p) => p.kind === 'star');
-  if (stars.length > 1) return 'more than one star: settling handles one, on the planes';
-  for (const s of stars) for (const a of axes) if (((s as { pos?: number[] }).pos?.[a] ?? 0) !== 0) return `a star lies off the ${name(a)} plane of symmetry`;
+  // Stars, as many as there are, each on every plane (settling holds their centers there).
+  const parts = c.problem.setup?.parts ?? [];
+  for (const s of parts.filter((p) => p.kind === 'star')) for (const a of axes) if (((s as { pos?: number[] }).pos?.[a] ?? 0) !== 0) return `a star lies off the ${name(a)} plane of symmetry`;
+  // An orbit places its bodies in the plane z = 0, apart along x and y.
+  for (const o of parts.filter((p) => p.kind === 'orbit')) {
+    if (sym[0] || sym[1]) return 'an orbit places its bodies off the x and y planes of symmetry (mirror z alone)';
+    if (((o as { incl?: number }).incl ?? 0) !== 0) return 'a tilted orbit takes its bodies off the z plane of symmetry';
+  }
   return null;
 }
 
@@ -2275,7 +2280,10 @@ export class Sim implements Simulation {
 
   /** The grid's cells and this state of them, for settling. */
   private cellsOf(u1: Float32Array, u2: Float32Array): SettleCells {
-    const vol = this.dx ** 3;
+    // (With mirrors each cell stands for 2^k: problems/settle.ts SettleCells.vol.)
+    const unfold = 2 ** mirrors(this.cfg);
+    const mirror = this.cfg.symmetry;
+    const vol = this.dx ** 3 * unfold;
     const { nx, ny } = this;
     const lo = domainLo(this.cfg);
     const at = (i: number, a: number) => (i + 0.5) * this.dx + lo[a];
@@ -2283,7 +2291,7 @@ export class Sim implements Simulation {
     // volumes, so a star on the axis settles as a body of revolution (plan E5).
     if (this.cfg.problem.geometry === 'cylindrical') {
       const area = 2 * Math.PI * this.dx * this.dx;
-      return { count: u1.length / 4, pos: (q) => [at(q % nx, 0), at(Math.floor(q / nx) % ny, 1), 0], vol: (q) => area * at(q % nx, 0), u1, u2 };
+      return { count: u1.length / 4, pos: (q) => [at(q % nx, 0), at(Math.floor(q / nx) % ny, 1), 0], vol: (q) => area * at(q % nx, 0) * unfold, u1, u2, mirror };
     }
     return {
       count: u1.length / 4,
@@ -2291,6 +2299,7 @@ export class Sim implements Simulation {
       vol: () => vol,
       u1,
       u2,
+      mirror,
     };
   }
 

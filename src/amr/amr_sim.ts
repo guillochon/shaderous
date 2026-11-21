@@ -40,7 +40,7 @@ import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
 import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
-import { implicitPressure, rotationOf, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, rotationOf, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -1800,7 +1800,7 @@ export class AmrSim implements Simulation {
     const leaf = await this.readLeaves();
     if (stale()) return;
     const per = BS * BS * (this.cfg.ndim === 3 ? BS : 1);
-    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical');
+    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical', this.cfg.symmetry);
     const leaves = this.tree.leaves();
     const touched = new Uint8Array(cells.count);
     if (!heatCells(heat, cells, touched)) return;
@@ -1816,10 +1816,12 @@ export class AmrSim implements Simulation {
   }
 
   /** The leaves' cells as readLeaves() returned them, for settling. */
-  private static cellsOf(leaf: LeafCells, cyl = false): SettleCells {
-    // In (R, z) a cell is a ring, 2 pi R dx^2: the settling's sums are of its volume.
-    const vol = cyl ? (q: number) => 2 * Math.PI * leaf.x[q] * leaf.dx[q] ** 2 : (q: number) => leaf.dx[q] ** 3;
-    return { count: leaf.count, pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]], vol, u1: leaf.u1, u2: leaf.u2 };
+  private static cellsOf(leaf: LeafCells, cyl = false, mirror?: readonly boolean[]): SettleCells {
+    // In (R, z) a cell is a ring, 2 pi R dx^2: the settling's sums are of its volume; with mirrors,
+    // its images' too (problems/settle.ts SettleCells.vol).
+    const unfold = 2 ** (mirror ?? []).filter(Boolean).length;
+    const vol = cyl ? (q: number) => 2 * Math.PI * leaf.x[q] * leaf.dx[q] ** 2 * unfold : (q: number) => leaf.dx[q] ** 3 * unfold;
+    return { count: leaf.count, pos: (q) => [leaf.x[q], leaf.y[q], leaf.z[q]], vol, u1: leaf.u1, u2: leaf.u2, mirror };
   }
 
   /**
@@ -1829,7 +1831,7 @@ export class AmrSim implements Simulation {
   private async settleOnCpu(set: Settling, eos: Eos, leaf: LeafCells, stale: () => boolean, emag?: (s: Settler, q: number) => number) {
     const d = this.device;
     const tree = this.tree;
-    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical');
+    const cells = AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical', this.cfg.symmetry);
     const { u1, u2 } = cells;
     let peak = 0;
     for (let q = 0; q < cells.count; q++) peak = Math.max(peak, u1[q * 4]);
@@ -1902,7 +1904,7 @@ export class AmrSim implements Simulation {
     if (stale()) return '';
     const eos = makeEos(c.eos, c.eosParams);
     const { u1, u2 } = leaf;
-    const placed = placedSettling(star, c.G, AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical'), eos.pressure, c.problem.box);
+    const placed = placedSettling(star, c.G, AmrSim.cellsOf(leaf, this.cfg.problem.geometry === 'cylindrical', this.cfg.symmetry), eos.pressure, c.problem.box);
     if (typeof placed === 'string') return placed;
     const set = inFrame(placed, rotationOf(c));
     // With a magnetic field, E holds its energy too: what is left of E in a cell goes back in.
@@ -2054,8 +2056,10 @@ export class AmrSim implements Simulation {
       pack(0);
       const m0 = await measure(pMeasure0, bg.measure[0]);
       let peak = 0;
+      // (With mirrors the leaves hold 2^-k of each star: its whole mass is what pulls.)
+      const unfold = 2 ** mirrors(this.cfg);
       for (let r = 0; r < nRows; r++) {
-        for (let i = 0; i < stars.length; i++) mass[i] += m0[r * NC + i];
+        for (let i = 0; i < stars.length; i++) mass[i] += unfold * m0[r * NC + i];
         peak = Math.max(peak, m0[r * NC + 4]);
       }
       // Star i's mass at trial values of C.
@@ -2063,7 +2067,7 @@ export class AmrSim implements Simulation {
         pack(i, cands);
         const m = await measure(pMeasure2, bg.measure[2]);
         const sums = cands.map(() => 0);
-        for (let r = 0; r < nRows; r++) for (let k = 0; k < NC; k++) sums[k] += m[r * NC + k];
+        for (let r = 0; r < nRows; r++) for (let k = 0; k < NC; k++) sums[k] += unfold * m[r * NC + k];
         return sums;
       };
       const solveC = async (i: number) => {
@@ -2124,7 +2128,9 @@ export class AmrSim implements Simulation {
           const coms = stars.map((st, i) => {
             const s4 = [0, 0, 0, 0];
             for (let r = 0; r < nRows; r++) for (let a = 0; a < 4; a++) s4[a] += mom[r * NC + 4 * i + a];
-            return s4[0] > 0 ? [s4[1] / s4[0], s4[2] / s4[0], s4[3] / s4[0]] : [st.center[0], st.center[1], st.center[2] ?? 0];
+            // (On a mirrored axis the star is on the plane.)
+            const sym = this.cfg.symmetry ?? [false, false, false];
+            return s4[0] > 0 ? [0, 1, 2].map((a) => (sym[a] ? 0 : s4[a + 1] / s4[0])) : [st.center[0], st.center[1], st.center[2] ?? 0];
           });
           // In a binary the others' pull is not undone, and the slot holds the pull holding each star in place.
           stars.forEach((_, i) => (at[i] = set.binary ? holdPull(set, i, coms, (held[i] ??= [0, 0, 0])) : coms[i]));

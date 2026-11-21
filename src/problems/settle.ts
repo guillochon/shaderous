@@ -405,7 +405,13 @@ export interface SettleCells {
   count: number;
   /** cell center relative to the box center */
   pos(q: number): [number, number, number];
+  /**
+   * The volume a cell stands for: with mirror symmetry, its own and its images' (2^k of it), so
+   * that a star's mass is the whole star's, whose pull the others feel.
+   */
   vol(q: number): number;
+  /** The mirrored axes (Params.sym): a star lies on their planes, where its center of mass is held. */
+  mirror?: readonly boolean[];
   /** conserved state: (rho, momentum), (E, e_int, rho s, mark) */
   u1: Float32Array;
   u2: Float32Array;
@@ -480,7 +486,8 @@ export class Settler {
         m += dm;
         for (let a = 0; a < 3; a++) c[a] += dm * x[a];
       }
-      return m > 0 ? c.map((v) => v / m) : [s.center[0], s.center[1], s.center[2] ?? 0];
+      // (On a mirrored axis the star is on the plane: the cells hold only the half above it.)
+      return m > 0 ? c.map((v, a) => (this.grid.mirror?.[a] ? 0 : v / m)) : [s.center[0], s.center[1], s.center[2] ?? 0];
     });
   }
 

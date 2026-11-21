@@ -8,6 +8,7 @@ import type { Sim, SimConfig } from '../sim';
 import type { AmrSim } from '../amr/amr_sim';
 import { withAmr, withSim, type TestDef } from './tests';
 import { compileSetup } from '../setup/compile';
+import type { SetupSpec } from '../setup/spec';
 
 const MIRRORS: [boolean, boolean, boolean] = [true, true, true];
 
@@ -295,6 +296,68 @@ export const SYM_TESTS: TestDef[] = [
         pass: m.density_difference < 1e-4 && m.magnetic_energy_difference < 1e-5 && m.blocks_magnetic_energy_difference < 1e-4 && o.divB < 1e-5 && w.divB < 1e-5 && b.divB < 1e-5,
         metrics: m,
       };
+    },
+  },
+  {
+    id: 'sym-stars',
+    name: 'Mirror symmetry: two stars in the plane z = 0, settled and falling together, against the whole box',
+    criterion: 'Two polytropes (n = 1.5, masses 0.1 and 0.06) at rest on the x axis with isolated self-gravity, settled and run to t = 0.05: computed above z = 0 only (64 x 64 x 32) and whole (64^3) at the same cell size, the settled stars have the same mass to 1e-5 (each settled with the whole star’s pull on the other) and the same peak density to 1e-4, and at the end the density agrees to 2e-3 (mass-weighted) and the total energy to 1e-4; on blocks of one level (128^3 finest), mass and energy agree to 1e-4 and the peak density to 1e-3',
+    async run(gpu) {
+      const MZ: [boolean, boolean, boolean] = [false, false, true];
+      const doc = (symmetric: boolean): SetupSpec => ({
+        format: 'shaderous-setup', version: 1,
+        domain: { ndim: 3, box: 1, bc: { lo: [1, 1, 1], hi: [1, 1, 1] }, ...(symmetric ? { symmetric: 'z' } : {}) },
+        physics: { eos: 'ideal', eosParams: { gamma: 5 / 3 }, gravity: 'isolated', G: 1 },
+        background: { rho: 1e-6, p: 1e-9 },
+        parts: [
+          { kind: 'star', id: 'a', type: 'polytrope', n: 1.5, mass: 0.1, radius: 0.12, pos: [-0.2, 0, 0] },
+          { kind: 'star', id: 'b', type: 'polytrope', n: 1.5, mass: 0.06, radius: 0.1, pos: [0.22, 0.05, 0] },
+        ],
+        run: { tEnd: 0.05 },
+      });
+      const m: Record<string, number> = {};
+      const n = 64;
+      const uniform = (mirror: boolean) =>
+        withSim(gpu, compileSetup(doc(mirror)).problem, n, mirror ? { symmetry: MZ } : {}, async (sim) => {
+          await sim.settled;
+          const d0 = await sim.diagnostics();
+          await sim.runToEnd();
+          const d1 = await sim.diagnostics();
+          return { mass: d0.mass, peak0: d0.ranges[0][1], e: d1.eTot, u1: (await sim.readState()).u1 };
+        });
+      const w = await uniform(false);
+      const h = await uniform(true);
+      // The mirrored grid's cells (i, j, k) are the whole's (i, j, k + n/2).
+      let diff = 0;
+      let sum = 0;
+      for (let k = 0; k < n / 2; k++)
+        for (let j = 0; j < n; j++)
+          for (let i = 0; i < n; i++) {
+            const a = h.u1[4 * ((k * n + j) * n + i)];
+            const b = w.u1[4 * (((k + n / 2) * n + j) * n + i)];
+            diff += Math.abs(a - b);
+            sum += b;
+          }
+      m.settled_mass = Math.abs(h.mass / w.mass - 1);
+      m.settled_peak = Math.abs(h.peak0 / w.peak0 - 1);
+      m.density_difference = diff / sum;
+      m.energy = Math.abs(h.e / w.e - 1);
+      const blocks = (mirror: boolean) =>
+        withAmr(gpu, compileSetup(doc(mirror)).problem, 128, { amrLevels: 1, ...(mirror ? { symmetry: MZ } : {}) }, async (sim) => {
+          await sim.settled;
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          return { mass: d.mass, e: d.eTot, peak: d.ranges[0][1] };
+        });
+      const bw = await blocks(false);
+      const bh = await blocks(true);
+      m.blocks_mass = Math.abs(bh.mass / bw.mass - 1);
+      m.blocks_energy = Math.abs(bh.e / bw.e - 1);
+      m.blocks_peak = Math.abs(bh.peak / bw.peak - 1);
+      const pass =
+        m.settled_mass < 1e-5 && m.settled_peak < 1e-4 && m.density_difference < 2e-3 && m.energy < 1e-4 &&
+        m.blocks_mass < 1e-4 && m.blocks_energy < 1e-4 && m.blocks_peak < 1e-3;
+      return { pass, metrics: m };
     },
   },
   {
