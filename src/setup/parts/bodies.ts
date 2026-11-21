@@ -198,13 +198,15 @@ export function starPotential(st: BuiltStar): ((x: number, y: number, z: number)
   const f = st.part.field;
   if (!f) return null;
   const seed = Math.round(f.seed ?? 1);
+  // A field left without its beta takes the option table's default (options.ts), as the dialog shows it: undefined made it NaN.
+  const beta = f.beta > 0 ? f.beta : 1000;
   const prof = st.profile();
   // Guillochon & McCourt's fields follow the pressure to the surface: no cut.
   const A =
-    f.type === 'dipole' ? dipoleField(prof, f.beta)
-    : f.type === 'random' ? randomField(prof, f.beta, seed)
-    : f.type === 'gm17-dipole' ? gm17Dipole({ ...prof, pcut: 0 }, f.beta)
-    : gm17Random({ ...prof, pcut: 0 }, f.beta, seed);
+    f.type === 'dipole' ? dipoleField(prof, beta)
+    : f.type === 'random' ? randomField(prof, beta, seed)
+    : f.type === 'gm17-dipole' ? gm17Dipole({ ...prof, pcut: 0 }, beta)
+    : gm17Random({ ...prof, pcut: 0 }, beta, seed);
   const [cx, cy, cz] = st.center;
   return cx === 0 && cy === 0 && cz === 0 ? A : (x, y, z) => A(x - cx, y - cy, z - cz);
 }

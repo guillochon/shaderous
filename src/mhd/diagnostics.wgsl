@@ -33,6 +33,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   r[1] = abs(div);
   r[2] = length(B);
   let u1 = textureLoad(U1, c, 0);
+  // (The cell's own composition, where it varies: species/mixture.ts.)
+  comp_use(comp_tex(c));
   let p = eos_pressure(max(u1.x, P.rho_floor), textureLoad(U2, c, 0).y);
   r[3] = 0.5 * dot(B, B) / max(p, 1.0e-30);
   let dk = disk_channels(B, u1.x, u1.yzw, p, cell_pos(c), P.dx, P.geom.x);
