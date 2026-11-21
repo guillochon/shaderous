@@ -14,6 +14,11 @@ fi
 if [ ! -f "$SIF" ]; then
   mkdir -p "$(dirname "$SIF")"
   # Apptainer unpacks layers in its cache (home by default); a small home quota may want it elsewhere.
+  # Unity's login nodes mount /tmp noexec, where packing the SIF fails ("proot error: ... no
+  # execution permission"): APPTAINER_SCRATCH (default: the image's folder) holds its temporary files.
+  scratch="${APPTAINER_SCRATCH:-$(dirname "$SIF")/tmp}"
+  mkdir -p "$scratch"
+  export APPTAINER_TMPDIR="${APPTAINER_TMPDIR:-$scratch}" PROOT_TMP_DIR="${PROOT_TMP_DIR:-$scratch}"
   apptainer pull "$SIF" "docker://mcr.microsoft.com/playwright:v${PLAYWRIGHT_VERSION}-noble"
 fi
 
