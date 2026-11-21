@@ -153,6 +153,14 @@ const check = (ok, what) => {
   check(fres.status === 0 && flines.length === 2 && Math.abs(flines[0].t - wlast.t) < 1e-6 * Math.max(1, wlast.t) && flines[1].steps === wlast.steps + 5, `cli --from carries on from a checkpoint${fres.status ? `: ${fres.stderr}` : ''}`);
   const fathdf = existsSync(fout) ? readdirSync(fout).filter((f) => f.endsWith('.athdf')) : [];
   check(fathdf.length === 1 && fathdf[0].startsWith('0001-'), `cli --from with --athdf-every writes no checkpoint of the file it started from (wrote ${fathdf.join(', ') || 'none'})`);
+  // --every on a resumed run: outputs at the multiples of it after the start, none before.
+  const ev = wlast ? wlast.t / 2.5 : 1;
+  const eout = path.join(tmp, 'cli-from-every');
+  const eres = ckpt ? spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--from', ckpt, '--every', String(ev), '--until', String(4 * ev), '--out', eout, '--quiet'], { encoding: 'utf8' }) : { status: 1, stderr: 'no checkpoint' };
+  const elines = existsSync(path.join(eout, 'diag.jsonl')) ? readFileSync(path.join(eout, 'diag.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : [];
+  const near = (a, b) => Math.abs(a - b) < 1e-5 * b;
+  check(eres.status === 0 && elines.length === 3 && near(elines[1].t, 3 * ev) && near(elines[2].t, 4 * ev),
+    `cli --from with --every carries on at the next multiple (times ${elines.map((l) => l.t.toPrecision(4)).join(', ')})${eres.status ? `: ${eres.stderr}` : ''}`);
   const bad = spawnSync(process.execPath, [path.join(REPO, 'tools/headless/cli.mjs'), 'run', '--problem', 'nope', '--out', path.join(tmp, 'bad'), '--quiet'], { encoding: 'utf8' });
   check(bad.status === 1 && /unknown problem/.test(bad.stderr) && !existsSync(path.join(tmp, 'bad')), 'cli reports a bad setup and writes nothing');
 }

@@ -270,8 +270,10 @@ async function runOne(session, q, dir) {
     stopped = halt() ?? m.stopped;
     await output(true);
   } else if (every !== undefined) {
-    // Output times are multiples of `every`, so runs line up whatever their timesteps.
-    for (let j = 1; ; j++) {
+    // Output times are multiples of `every`, so runs line up whatever their timesteps; a run
+    // resumed --from a file carries on from the first multiple after its start.
+    const tStart = (await call('state')).t;
+    for (let j = Math.floor(tStart / every + 1e-9) + 1; ; j++) {
       const target = Math.min(j * every, until);
       r = await call('run', { until: target, ...(steps !== undefined ? { steps: steps - r.steps } : {}), timeoutMs: limit() });
       const h = halt();

@@ -14,7 +14,7 @@ NVIDIA Vulkan ICD file into it when there is one, and set `PW_CHANNEL=shell` and
 | --- | --- |
 | `setup.sh` | Once, on a login node: clone or update the checkout in `~/shaderous`, pull the image to `~/containers/`, `npm ci` inside it |
 | `gpu-check.sbatch` | A one-hour job: the driver and Vulkan files, a small Sedov blast (its `manifest.json` should name an NVIDIA adapter), then the double white dwarf at 2048^3 with 5 levels for 100 steps with Helmholtz and with the degenerate gas: the block count (`mesh` in each `diag.jsonl` line, and printed) and seconds per step |
-| `dwd-2048.sbatch` | The long run, as a chain of jobs that each carry on from the newest checkpoint |
+| `dwd.sbatch` | The long run (grid `N`, levels `AMR`), as a chain of jobs that each carry on from the newest checkpoint |
 | `checkpoints.mjs` | Finds the newest whole checkpoint of a chained run, prunes old ones, says why the last job stopped |
 | `common.sh` | Shared settings: paths, the container call, GPU memory, time left in the job |
 
@@ -23,7 +23,7 @@ bash ~/shaderous/tools/headless/slurm/setup.sh     # after cloning, or fetch the
 cd ~/shaderous
 sbatch tools/headless/slurm/gpu-check.sbatch
 # Read slurm-check-<job>.out and runs/slurm-check-<job>/, then:
-RUN_DIR=/work/pi_<group>/dwd-2048 SHADEROUS_BINDS=/work/pi_<group> sbatch tools/headless/slurm/dwd-2048.sbatch
+N=1024 EVERY=0.5 RUN_DIR=/work/pi_<group>/dwd-1024 SHADEROUS_BINDS=/work/pi_<group> sbatch tools/headless/slurm/dwd.sbatch
 ```
 
 The GPU: the scripts ask for the `gpu-highvram` partition and `--constraint=vram80`, which on
@@ -41,7 +41,7 @@ with the degenerate gas (dt 0.0020): Helmholtz costs 6.6 times as much per unit 
 about a fifth more than at load; `mesh` in `diag.jsonl` says when it fills.
 
 The chain: each job runs with `--wall` set to the time the job has left less `MARGIN` (30
-minutes, for the last checkpoint), screenshots every `SHOT_EVERY` seconds (`NNNN-tT-vol.png` and
+minutes, for the last checkpoint), screenshots every `EVERY` of simulated time, or every `SHOT_EVERY` seconds of wall time without it (`NNNN-tT-vol.png` and
 `-slice.png` in `RUN_DIR/seg-<job>/`), a checkpoint every `ATHDF_EVERY` screenshots, and keeps
 the newest `KEEP` checkpoints. When it stops on its wall budget it submits the next job; when
 the run reaches `UNTIL` it writes `RUN_DIR/DONE`. A job killed while writing a checkpoint
