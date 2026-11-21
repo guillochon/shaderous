@@ -33,7 +33,7 @@ fn pred_count(n: i32) -> i32 {
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rc = region_cell(gid);
   if (!rc.mine) { return; }
-  g_dx = cell_dx(P.dx, clock.ah);
+  set_proper_dx(P.dx, clock.ah);
   if (cosmo_on()) { g_a3 = clock.a * clock.a * clock.a; }
   g_dt = clock.dt;
   // A shearing box: the offset of its x faces, for the ghosts beyond them.

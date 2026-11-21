@@ -2,8 +2,12 @@
 
 // Jeans (Truelove) floor: the pressure at which the Jeans length spans the requested number of
 // cells. P.jeans_floor is (cells / 4)^2, or 0 when the floor is off.
+// In comoving coordinates the floor holds the proper Jeans length to that many proper cells:
+// 16 G rho^2 dx^2 / (pi a) in the comoving state, dx the comoving cell (g_dx / g_dx_a).
 fn jeans_pressure(rho: f32) -> f32 {
-  return P.jeans_floor * 16.0 * P.G * rho * rho * g_dx * g_dx / 3.14159265;
+  let j = jeans_comoving();
+  let dx = g_dx / g_dx_a;
+  return P.jeans_floor * 16.0 * P.G * rho * rho * dx * dx / (3.14159265 * j * j);
 }
 
 fn pressure_floor(rho: f32) -> f32 {

@@ -183,7 +183,7 @@ override DEBUG_FLUX: bool = false;
 @compute @workgroup_size(WGX, WGY, WGZ)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wid: vec3<u32>,
         @builtin(local_invocation_index) li: u32) {
-  g_dx = cell_dx(P.dx, clock.ah);
+  set_proper_dx(P.dx, clock.ah);
   g_dt = clock.dt;
   // Comoving coordinates: cooling's rate at the proper density (hydro/cooling.wgsl).
   if (cosmo_on()) { g_a3 = clock.ah * clock.ah * clock.ah; }

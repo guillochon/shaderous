@@ -132,6 +132,14 @@ fn cosmo_a3() -> f32 {
   let a = P.cosmo.w;
   return a * a * a;
 }
+// The Jeans length cs sqrt(pi / (G rho)) of the state's comoving density, counted in comoving
+// cells, times this is the proper Jeans length counted in proper cells a dx: proper rho is
+// rho / a^3 and the sound speed is the same in both, so the factor is sqrt(a). 1 without
+// expansion. (The Jeans floor's pressure, which goes as the length's square, divides by a.)
+fn jeans_comoving() -> f32 {
+  if (!cosmo_on()) { return 1.0; }
+  return pow(cosmo_a3(), 1.0 / 6.0);
+}
 
 // The lower face along `axis` is a plane of mirror symmetry, or the axis of an axisymmetric
 // run, not a wall: what lies beyond it is the image of what lies inside (the potential is even
@@ -394,6 +402,15 @@ struct PhiSteps { seen: vec3<f32>, face: vec3<f32> }
 // Size of the cell this invocation is working on. Every entry point sets it first: it is P.dx
 // on a uniform grid and depends on the block's level on an adaptive one.
 var<private> g_dx: f32;
+// What g_dx is in comoving cells: a pass in comoving coordinates that sets the proper cell a dx
+// (set_proper_dx) records a here, so the Jeans floor (hydro/pfloor.wgsl) can take the comoving
+// cell back whichever it was given. 1 for a comoving (or any non-expanding) cell.
+var<private> g_dx_a: f32 = 1.0;
+// g_dx as the proper cell size a dx of a comoving cell dx (cell_dx), recording a.
+fn set_proper_dx(dx: f32, a: f32) {
+  g_dx = cell_dx(dx, a);
+  g_dx_a = select(1.0, a, cosmo_on());
+}
 // Length of the step this invocation is taking. Entry points that advance the state set it:
 // the clock's dt, or a multiple of it for a block of an adaptive mesh that steps less often.
 var<private> g_dt: f32;

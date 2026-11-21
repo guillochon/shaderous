@@ -338,7 +338,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (!inv.ok) { return; }
   let slot = inv.slot;
   let l = inv.l;
-  g_dx = cell_dx(blk_dx(slot), clock.ah);
+  set_proper_dx(blk_dx(slot), clock.ah);
   // Comoving coordinates: cooling's rate at the proper density (hydro/cooling.wgsl).
   if (cosmo_on()) { g_a3 = clock.ah * clock.ah * clock.ah; }
   g_dt = blk_dt(slot);

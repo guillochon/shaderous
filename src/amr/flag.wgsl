@@ -148,7 +148,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (has_potential() && P.geom.w > 0.0) {
     let rho = abs(textureLoad(W1, c, 0).x);
     let cs = textureLoad(W2, c, 0).y;
-    let lj = cs * sqrt(3.14159265 / (P.G * rho));
+    let lj = cs * sqrt(3.14159265 / (P.G * rho)) * jeans_comoving();
     ind = max(ind, P.geom.z * P.geom.w * blk_dx(inv.slot) / lj);
   }
   atomicMax(&FLAGS[u32(inv.slot)], bitcast<u32>(max(ind, GAS_MIN)));

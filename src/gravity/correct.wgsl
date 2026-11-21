@@ -35,7 +35,7 @@ override MHD: bool = false;
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
-  g_dx = cell_dx(P.dx, clock.a1);
+  set_proper_dx(P.dx, clock.a1);
   if (cosmo_on()) { g_a3 = clock.a1 * clock.a1 * clock.a1; }
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);

@@ -348,4 +348,72 @@ export const COSMO_TESTS: TestDef[] = [
       return { pass, metrics: m };
     },
   },
+  {
+    id: 'cosmo-jeans',
+    name: 'Comoving coordinates: the Jeans floor, Jeans refinement and the Jeans diagnostic, in proper lengths',
+    criterion:
+      'In comoving coordinates the Jeans length is the proper one against the proper cell a dx, sqrt(a) times the standard formula of the comoving state (from a = 0.1, Einstein-de Sitter, periodic self-gravity). A wave of the box’s length in cold gas (16^3) grows from a0 to 4 a0 alike, to 1e-3 in its growth factor, from a0 = 0.1 and from 0.5 (more than twofold without the floor, not at all with it at 32 or 64 cells, where the floor’s Jeans length is twice the box or more), the comoving Jeans wavenumber being the same at every scale factor; a uniform box whose standard Jeans length is 20 coarse cells and proper one 6.3 is refined to the finest level where 16 cells are asked for and not at all where 4 are (blocks, 64^3 finest, 1 level); and a uniform box whose proper Jeans length is 2 cells (6.3 by the standard formula) counts every cell unresolved in the diagnostics',
+    async run(gpu) {
+      const k: Cosmology = { omegaM: 1, omegaL: 0, aStart: 0.1 };
+      const G = cosmoG(k);
+      const gamma = 5 / 3;
+      // A uniform box at rest whose standard Jeans length is `cells` cells of side dx.
+      const pFor = (cells: number, dx: number) => ((cells * dx) ** 2 * G) / (Math.PI * gamma);
+      const box = (p: number, aEnd: number, over: Partial<Problem> = {}) =>
+        universe(k, aEnd, () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p, s: 0 }), { gravity: 'periodic', supports2d: false, ...over });
+      const m: Record<string, number> = {};
+
+      // The floor, by what it is for. With it the comoving Jeans wavenumber is the same at every
+      // scale factor (proper rho = rho / a^3, proper cells a dx), so in Einstein-de Sitter a wave
+      // of the box's length in cold gas grows alike from a0 to 4 a0 whatever a0: compared at
+      // a0 = 0.1 and 0.5, where a floor off by a power of a would hold Jeans lengths sqrt(5)
+      // apart. At 32 cells of a 16^3 grid and more the floor's Jeans length is twice the box or
+      // more, and the wave oscillates instead of growing. (A floor that took the proper cell for
+      // the comoving one grew as a^3 relative to this, and held only the later epoch's.) (It
+      // raises the pressure the fluxes see, not the stored energy, which keeps the gas's own.)
+      const wave = (cells: number, a0: number) => {
+        const kk: Cosmology = { ...k, aStart: a0 };
+        return withSim(gpu, universe(kk, 4 * a0, () => (x) => ({ rho: 1 + 0.01 * Math.cos(2 * Math.PI * (x + 0.5)), vx: 0, vy: 0, vz: 0, p: 1e-10, s: 0 }), {
+          gravity: 'periodic', supports2d: false, ...(cells > 0 ? { jeansFloor: true, jeansCells: cells } : {}),
+        }), 16, {}, async (sim) => {
+          const amp = async () => {
+            const { u1 } = await sim.readState();
+            let sum = 0;
+            for (let q = 0; q < 16 ** 3; q++) sum += (u1[4 * q] - 1) * Math.cos((2 * Math.PI * ((q % 16) + 0.5)) / 16);
+            return sum / (16 ** 3 / 2);
+          };
+          const start = await amp();
+          await sim.runToEnd();
+          return (await amp()) / start;
+        });
+      };
+      for (const cells of [0, 32, 64]) for (const a0 of [0.1, 0.5]) m[`wave_growth_${cells || 'nofloor'}_from_${String(a0).replace('.', '_')}`] = await wave(cells, a0);
+
+      // Refinement: the standard length 20 coarse cells (dx 1/32), the proper one 20 sqrt(0.1).
+      const refined = (cells: number) =>
+        withAmr(gpu, box(pFor(20, 1 / 32), 0.115), 64, { amrLevels: 1, jeansRefine: cells, refineHi: 0.8 } as Partial<SimConfig>, async (sim) => {
+          await sim.runToEnd();
+          return sim.tree.stats();
+        });
+      const r16 = await refined(16);
+      const r4 = await refined(4);
+      m.refine_16_deepest = r16.deepest;
+      m.refine_16_leaves = r16.leaves;
+      m.refine_4_deepest = r4.deepest;
+      m.refine_4_leaves = r4.leaves;
+
+      // The diagnostic: the proper length 2 cells, the standard 6.3.
+      await withSim(gpu, box(pFor(2 / Math.sqrt(0.1), 1 / 32), 0.1), 32, {}, async (sim) => {
+        const d = await sim.diagnostics();
+        m.unresolved_cells = d.jeansUnresolved;
+        m.cells = 32 ** 3;
+      });
+
+      const pass =
+        m.wave_growth_nofloor_from_0_1 > 2 && Math.abs(m.wave_growth_32_from_0_1) < 1 && Math.abs(m.wave_growth_64_from_0_1) < 1 &&
+        [0, 32, 64].every((c) => Math.abs(m[`wave_growth_${c || 'nofloor'}_from_0_1`] - m[`wave_growth_${c || 'nofloor'}_from_0_5`]) < 1e-3) &&
+        m.refine_16_deepest === 1 && m.refine_4_deepest === 0 && m.unresolved_cells === m.cells;
+      return { pass, metrics: m };
+    },
+  },
 ];

@@ -732,8 +732,6 @@ export function cosmologyUnsupported(c: SimConfig): string | null {
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in comoving coordinates';
   if (c.problem.mhd) return 'magnetic fields are not available in comoving coordinates yet';
   if (c.amrLevels > 0 && c.timeBins > 0) return 'per-block timesteps are not available in comoving coordinates (each block would expand by its own a)';
-  if (c.amrLevels > 0 && isSelfGravity(c.gravity) && c.jeansRefine > 0) return 'refining on the Jeans length is not available in comoving coordinates (set it to 0)';
-  if (c.jeansFloor) return 'the Jeans pressure floor is not available in comoving coordinates';
   if (rotating(c) || c.problem.shear) return 'a rotating frame is not available in comoving coordinates';
   if (c.driving.accel > 0 || c.problem.damping) return 'driving and damping zones are not available in comoving coordinates';
   return null;

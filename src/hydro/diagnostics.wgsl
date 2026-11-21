@@ -34,7 +34,7 @@ fn red_cell(c: vec3<i32>) -> Red {
     let w = select(rho, rho - P.rho_mean, P.grav_bc == 0u);
     egrav = 0.5 * w * phi * dv;
     // Truelove: Jeans length under 4 cells.
-    let lj = cs * sqrt(3.14159265 / (P.G * rho));
+    let lj = cs * sqrt(3.14159265 / (P.G * rho)) * jeans_comoving();
     jeans = select(0.0, 1.0, lj < 4.0 * P.dx);
   }
   // Potential energy in the uniform external field, measured from the box center. A 2D run

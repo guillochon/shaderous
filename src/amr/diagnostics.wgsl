@@ -81,7 +81,7 @@ fn red_cell(c: vec3<i32>) -> Red {
     let w = select(rho, rho - P.rho_mean, P.grav_bc == 0u);
     egrav += 0.5 * w * textureLoad(PHI, a, 0).x * dv;
     // Truelove: Jeans length under 4 cells.
-    jeans = select(0.0, 1.0, cs * sqrt(3.14159265 / (P.G * rho)) < 4.0 * dx);
+    jeans = select(0.0, 1.0, cs * sqrt(3.14159265 / (P.G * rho)) * jeans_comoving() < 4.0 * dx);
   }
   let floored = select(0.0, 1.0, u1.x <= P.rho_floor * 1.0001 || p <= P.p_floor * 1.0001);
 
