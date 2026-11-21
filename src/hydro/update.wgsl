@@ -27,6 +27,7 @@
 #include <psplit>
 #include <psplit_store>
 #include "hydro/moving_flags.wgsl"
+#include "hydro/cut_flags.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -176,6 +177,11 @@ fn escape(c: vec3<i32>, v: vec3<f32>, fx: Faces, fy: Faces, fz: Faces, flat: boo
   }
 }
 
+// A face's flux through a share s of its area.
+fn flux_scale(f: Flux, s: f32) -> Flux {
+  return Flux(f.m * s, f.mom * s, f.e * s, f.ei * s, f.s * s, f.vn * s, f.d * s);
+}
+
 // Validation hook: when set, the pass writes the six face mass fluxes instead of the new state,
 // so the test suite can check that both cells sharing a face computed the same bits.
 override DEBUG_FLUX: bool = false;
@@ -245,6 +251,19 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
         let f = shear_face(c, own, upper);
         if (upper) { fx.hi = f; } else { fx.lo = f; }
       }
+    }
+  }
+  // Partly filled cells (hydro/cut.ts): each face carries its flux through its open share alone,
+  // nothing crosses the wall, and the cell's change is over its gas share (below).
+  if (CUT) {
+    let k = cut_at(c);
+    fx.lo = flux_scale(fx.lo, cut_lo(c, 0));
+    fx.hi = flux_scale(fx.hi, k.y);
+    fy.lo = flux_scale(fy.lo, cut_lo(c, 1));
+    fy.hi = flux_scale(fy.hi, k.z);
+    if (!flat) {
+      fz.lo = flux_scale(fz.lo, cut_lo(c, 2));
+      fz.hi = flux_scale(fz.hi, k.w);
     }
   }
   // Planes of mirror symmetry: nothing crosses them.
@@ -356,6 +375,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   }
 
   var net = net_inflow_heated(fx, fy, fz, w0.a.yzw);
+  if (CUT) {
+    let g = 1.0 / cut_at(c).x;
+    net = Net(net.m * g, net.mom * g, net.e * g, net.ei * g, net.s * g, net.vn * g);
+  }
   net.mom.x += src_r;
   if (spherical()) { net.mom.y += src_t; }
   var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);

@@ -147,6 +147,21 @@ function sweptPoses(chain: Moving[], i: number, ctx: Ctx, reach: number, step: n
 }
 
 /**
+ * Each obstacle's signed distance (negative inside) where it starts, and its cells' mark: exact for
+ * spheres, boxes and half-spaces, a mesh's distance field (exact within a few finest cells of its
+ * surface, clamped beyond) for a mesh. In 2D at z = 0.
+ */
+export function obstacleDistances(obstacles: ObstaclePart[], ctx: { box: number; n: number; ndim: 2 | 3 }): { mark: number; distance(x: number, y: number, z: number): number }[] {
+  return obstacles.map((p, i) => {
+    const mark = 1 + Math.min(i, MAX_BODIES - 1);
+    const d = shapeDistance(p.shape, ctx);
+    if (d) return { mark, distance: d };
+    const m = placeMesh(p.shape as Extract<Shape, { type: 'mesh' }>, { box: ctx.box, ndim: ctx.ndim, dx: ctx.box / ctx.n });
+    return { mark, distance: ctx.ndim === 2 ? (x: number, y: number) => m.distance(x, y, 0) : m.distance };
+  });
+}
+
+/**
  * The surfaces of a setup's obstacles that ask for refinement (all but those with
  * `refine: "off"`), in the order of their marks.
  */

@@ -185,7 +185,40 @@ export function turbineRotor(o: TurbineOptions = TURBINE_DEFAULTS): Mesh {
   return { positions: new Float32Array(pos), indices: new Uint32Array(idx), parts: [wholePart(idx.length / 3, 'rotor')], meters: 1 };
 }
 
+/**
+ * A NACA four-digit symmetric section (thickness `t` of the chord, its trailing edge closed),
+ * chord 1 along x with the quarter chord at the origin, thickness along y, extruded along z from
+ * -span/2 to span/2: a wing of constant section, whose cut at z = 0 is the airfoil (a 2D run's).
+ */
+export function nacaWing(t = 0.12, n = 160, span = 2): Mesh {
+  const yt = (x: number) => 5 * t * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
+  const xs = Array.from({ length: n + 1 }, (_, k) => 0.5 * (1 - Math.cos((Math.PI * k) / n)));
+  // Around the section, counterclockwise seen from +z: the lower side from the leading edge, then the upper back.
+  const ring = [...xs.map((x) => [x - 0.25, -yt(x)]), ...xs.slice(1, -1).reverse().map((x) => [x - 0.25, yt(x)])];
+  const m = ring.length;
+  const pos: number[] = [];
+  const idx: number[] = [];
+  for (const z of [-span / 2, span / 2]) for (const [x, y] of ring) pos.push(x, y, z);
+  for (let k = 0; k < m; k++) {
+    const a = k, b = (k + 1) % m;
+    idx.push(a, b, m + b, a, m + b, m + a);
+  }
+  // Caps: fans about each end's middle (the section's centroid is near its quarter-chord axis).
+  for (const [end, z] of [[0, -span / 2], [1, span / 2]] as const) {
+    const c = pos.length / 3;
+    pos.push(0.17, 0, z);
+    for (let k = 0; k < m; k++) {
+      const a = end * m + k, b = end * m + ((k + 1) % m);
+      if (end === 0) idx.push(c, b, a);
+      else idx.push(c, a, b);
+    }
+  }
+  return { positions: new Float32Array(pos), indices: new Uint32Array(idx), parts: [wholePart(idx.length / 3, 'wing')], meters: 1 };
+}
+
 export const BUILTIN_BODIES: Record<string, () => Mesh> = {
+  // A NACA 0012 wing of chord 1 and span 2 about its quarter chord (2D: the airfoil).
+  naca0012: () => nacaWing(0.12),
   // A three-bladed wind turbine rotor of radius 1 about +x, pitched for a tip-speed ratio of 1
   // (wide blades, steeply pitched: a grid of 2 cells through a blade still shows the pitch).
   turbine: () => turbineRotor(),

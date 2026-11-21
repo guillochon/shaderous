@@ -72,6 +72,8 @@ export interface CutConfig {
   faceVelocity: boolean;
   /** the wall's shear from the velocity this many cells out along the wall's normal (0: the cell's own, point-implicit) */
   wallProbe: number;
+  /** the probe leaves out cells under a quarter full (false: takes them at reduced weight) */
+  probeSkip?: boolean;
   /** a sponge from x = `from` to the box's downstream edge, its strength rising to `rate` per unit time, toward the stream U along x */
   sponge?: { from: number; rate: number; U: number };
 }
@@ -686,7 +688,9 @@ export class CutCell {
     for (const [di, dj, wt] of [[0, 0, (1 - tx) * (1 - ty)], [1, 0, tx * (1 - ty)], [0, 1, (1 - tx) * ty], [1, 1, tx * ty]] as const) {
       const k = (((j + dj) % ny) + ny) % ny * nx + ((((i + di) % nx) + nx) % nx);
       if (phi[k] <= 0 || wt <= 0) continue;
-      // A cell under a quarter full holds a velocity redistribution has just averaged: half weight.
+      // A cell under a quarter full holds a velocity redistribution has yet to average: reduced
+      // weight, or (probeSkip) left out, as the GPU's (hydro/cut_shear.wgsl).
+      if (this.cfg.probeSkip && phi[k] < 0.25) continue;
       const ww = wt * Math.min(1, phi[k] * 4);
       w += ww;
       a += ww * ux[k];

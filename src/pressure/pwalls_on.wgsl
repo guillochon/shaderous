@@ -5,6 +5,7 @@
 // reference pressure (pressure/source_gas.wgsl): a constant pressure has no net force on a closed
 // body, and the sum keeps its digits for the part that does. Requires P and U2S.
 @group(0) @binding(56) var WP: texture_storage_3d<rgba32float, write>;
+#include "hydro/cut_flags.wgsl"
 
 var<private> g_pw: vec4<f32>;
 
@@ -22,6 +23,14 @@ fn pwall_face(c: vec3<i32>, a: i32, up: bool, p: f32) {
   if (m < 0.5) { return; }
   g_pw[a] += select(-1.0, 1.0, up) * p * P.geom.x / P.dx;
   g_pw.w = max(g_pw.w, m);
+}
+
+// Partly filled cells (hydro/cut.ts): the wall's share w of the cell's boundary across axis a
+// (its vector by closure, out of the gas), at the cell's pressure p, on the body of the cell's mark.
+fn pwall_cut(c: vec3<i32>, a: i32, w: f32, p: f32) {
+  if (w == 0.0) { return; }
+  g_pw[a] += w * p * P.geom.x / P.dx;
+  g_pw.w = max(g_pw.w, cut_wall(c).y);
 }
 
 fn pwall_store(c: vec3<i32>) {

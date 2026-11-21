@@ -218,6 +218,11 @@ export interface Problem {
    * amr/bodies.ts), for a grid of `n` finest cells across with lower corner `lo`.
    */
   surfaces?: (n: number, ndim: 2 | 3, lo: readonly number[], params?: Record<string, number>) => import('../setup/parts/surfaces').BodySurface[];
+  /**
+   * Every obstacle's signed distance (negative inside) where it starts, with its cells' mark: what
+   * partly filled cells are cut from (hydro/cut.ts), for a grid of `n` finest cells across.
+   */
+  obstacleDistances?: (n: number, ndim: 2 | 3, params?: Record<string, number>) => { mark: number; distance(x: number, y: number, z: number): number }[];
   /** Obstacles that move (hydro/moving.ts), with their motions and chains: the uniform grid's stamp and exchange passes. */
   moving?: import('../hydro/moving').MovingBody[];
   /** The scales of the force coefficients (Diagnostics.bodies' coefficients), if there are any: fixed, or for the run's grid. */

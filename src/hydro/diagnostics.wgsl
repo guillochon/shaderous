@@ -2,6 +2,7 @@
 #include "hydro/common.wgsl"
 #include <eos>
 #include "gravity/rot.wgsl"
+#include "hydro/cut_flags.wgsl"
 
 @group(0) @binding(1) var U1: texture_3d<f32>;
 @group(0) @binding(2) var U2: texture_3d<f32>;
@@ -17,6 +18,8 @@ fn red_cell(c: vec3<i32>) -> Red {
   var dv = select(P.geom.x, 6.2831853 * (f32(c.x) + 0.5) * P.dx * P.dx * P.dx, cylindrical());
   // (A spherical run's cell is a ring too, of volume 2 pi dr^3/3 dcos(theta): sph_volume.)
   if (spherical()) { dv = sph_volume(c.x, c.y); }
+  // A partly filled cell holds gas in its share of the volume (hydro/cut.ts).
+  if (CUT) { dv *= cut_at(c).x; }
   let rho = max(u1.x, P.rho_floor);
   let v = u1.yzw / rho;
   let eint = u2.y;

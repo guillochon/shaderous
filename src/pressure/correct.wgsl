@@ -35,6 +35,7 @@ fn mass_flux(m_lo: f32, m_hi: f32, p_lo: f32, p_hi: f32, dtdx: f32, kg: f32, r_l
   return 0.5 * (m_lo + m_hi) + kg * 0.5 * (r_lo + r_hi) - dtdx * (p_hi - p_lo);
 }
 #include "hydro/moving_flags.wgsl"
+#include "hydro/cut_flags.wgsl"
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -58,6 +59,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rc = textureLoad(RHO0, c, 0).x;
   var mom = u1.yzw;
   var dm = 0.0;
+  // Partly filled cells (hydro/cut.ts): the gas share the changes are over.
+  let ck = cut_at(c);
   let axes = select(3, 2, P.dims.z == 1u);
   for (var a = 0; a < axes; a++) {
     let hi = pface(c, a, true);
@@ -89,16 +92,31 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     if (lo.kind == FK_INLET) { fl.y = textureLoad(U1S, lo.q, 0)[a + 1]; }
     if (lo.kind == FK_OPEN) { fl = vec3<f32>(0.0, open_mom(u1[a + 1] + kg * rc, false, lo.only) - 2.0 * th * dtdx * pc, rc); }
-    mom[a] += kg * 0.5 * (fh.z + fl.z) - dtdx * (fh.x - fl.x);
-    // Forces on bodies: the pressure on this cell's faces on one (pressure/pwalls_on.wgsl).
-    if (hi.kind == FK_WALL) { pwall_face(c, a, true, fh.x); }
-    if (lo.kind == FK_WALL) { pwall_face(c, a, false, fl.x); }
-    dm += fh.y - fl.y;
+    if (CUT) {
+      // Through the faces' open shares, and the cell's own pressure on the wall (what closes the
+      // cell's boundary: a uniform pressure pushes nothing), over its gas share.
+      let ah = ck[a + 1];
+      let al = cut_lo(c, a);
+      mom[a] += (kg * 0.5 * (ah * fh.z + al * fl.z) - dtdx * (ah * fh.x - al * fl.x + (al - ah) * pc)) / ck.x;
+      pwall_cut(c, a, al - ah, pc);
+      dm += (ah * fh.y - al * fl.y) / ck.x;
+      fh.y *= ah;
+      fl.y *= al;
+    } else {
+      mom[a] += kg * 0.5 * (fh.z + fl.z) - dtdx * (fh.x - fl.x);
+      // Forces on bodies: the pressure on this cell's faces on one (pressure/pwalls_on.wgsl).
+      if (hi.kind == FK_WALL) { pwall_face(c, a, true, fh.x); }
+      if (lo.kind == FK_WALL) { pwall_face(c, a, false, fl.x); }
+      dm += fh.y - fl.y;
+    }
     // (A wall's face carries nothing: fh.y and fl.y are 0 there.)
     mf_set(c, a, false, fl.y);
     mf_set(c, a, true, fh.y);
   }
-  let rho = max(rc - dtdx * dm, P.rho_floor);
+  // (Partly filled cells: a cell holding a sliver of gas may take its density below nothing for
+  // a moment, which redistribution then averages with its neighbors' (hydro/cut_final.wgsl): a
+  // floor here would make mass, and the cell's velocity, from nothing.)
+  let rho = select(max(rc - dtdx * dm, P.rho_floor), rc - dtdx * dm, CUT);
   let eint = eos_eint_from_p(rho, eos_pressure(rho, 0.0));
   // The passive scalar rode on the advective mass flux: it keeps its value per unit mass.
   let sc = u2.z * rho / max(u1.x, P.rho_floor);

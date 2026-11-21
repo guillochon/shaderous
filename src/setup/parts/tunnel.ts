@@ -93,7 +93,13 @@ export function expandTunnel(spec: SetupSpec): SetupSpec {
   const ph = { ...(spec.physics ?? {}) };
   if (k.liquid) {
     ph.eos = 'liquid';
-    ph.eosParams = { ...(ph.eosParams ?? {}), liqRho: k.rho, liqC: k.cs };
+    // In a rotor's frame the frame's own motion sets a pressure head too: rho (Omega r)^2 / 2
+    // from the axis to the box's corners, which must stay small against rho c^2, or the liquid's
+    // density at the axis goes to nothing (at a tip-speed ratio of 6 in the wind-turbine's box,
+    // Omega r there was 16 with c = 10, and the run stalled on floored cells). The sound speed is
+    // kept at least 3 times the corners' speed: the head at most 1/18 of rho c^2.
+    const corner = k.rotor !== 0 ? Math.abs(k.rotor) * ((spec.domain?.box ?? 1) / Math.SQRT2) : 0;
+    ph.eosParams = { ...(ph.eosParams ?? {}), liqRho: k.rho, liqC: Math.max(k.cs, 3 * corner) };
     ph.pressure = 'implicit';
   } else {
     ph.eos = 'ideal';

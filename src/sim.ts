@@ -9,6 +9,7 @@ import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, se
 import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { bodyForcesFrom, FORCE_CHANNELS, forcesOn, WallForces, wallSlots, type BodyForce } from './hydro/forces';
+import { cutGeometry, cutSlot, CutTextures, type CutGeometry } from './hydro/cut';
 import { MAX_MOVING, movingBodies, movingFlags } from './hydro/moving';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
@@ -186,6 +187,13 @@ export interface SimConfig {
    * equation of state on a uniform grid (implicitUnsupported).
    */
   pressure: 'explicit' | 'implicit';
+  /**
+   * Partly filled cells (plans/wind-tunnel.md 8.1; hydro/cut.ts): obstacles cut cells where their
+   * surfaces lie, each cell holding gas in a share of its volume and each face open in a share of
+   * its area, in place of cells wholly gas or wholly solid. The liquid with implicit pressure, on
+   * the uniform grid, with obstacles at rest (cutUnsupported).
+   */
+  cutCells: boolean;
   /**
    * Implicit pressure: the multigrid V-cycles a step takes (warm-started), and the residual,
    * relative to the largest right-hand side, above which a step's solve is counted as
@@ -466,6 +474,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     gravEnergyFlux: problem.geometry !== 'spherical',
     wellBalanced: true,
     pressure: 'explicit',
+    cutCells: false,
     pressureCycles: 3,
     pressureTol: 1e-4,
     acousticCfl: 1000,
@@ -600,10 +609,25 @@ export function refusal(c: SimConfig): string | null {
     ['Spherical run', sphericalUnsupported(c)],
     ['Radiation', radiationUnsupported(c)],
     ['Moving bodies', movingUnsupported(c)],
+    ['Partly filled cells', cutUnsupported(c)],
     ['Hydrogen and helium', hheUnsupported(c.eos, c.eosParams, c.problem.composition?.name)],
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
+}
+
+/** Partly filled cells are in force: asked for, with obstacles to cut (hydro/cut.ts). */
+export const cutOn = (c: SimConfig): boolean => c.cutCells && !!c.problem.obstacleDistances && !cutUnsupported(c);
+
+/** Why partly filled cells cannot go as configured, or null. The first version: obstacles at rest, the liquid with implicit pressure, the uniform grid. */
+export function cutUnsupported(c: SimConfig): string | null {
+  if (!c.cutCells) return null;
+  if (c.eos !== 'liquid' || !implicitPressure(c)) return 'partly filled cells are for the liquid with implicit pressure, so far';
+  if (c.amrLevels > 0) return 'partly filled cells are on the uniform grid only, so far';
+  if (c.problem.moving?.length) return 'obstacles must be at rest, so far';
+  if (c.problem.mhd || c.problem.geometry || (c.problem.species?.length ?? 0) > 0 || radiationOn(c)) return 'not with a magnetic field, species, radiation or curved coordinates';
+  if ((c.symmetry ?? []).some(Boolean) || c.problem.shear || c.problem.cosmology) return 'not with mirror symmetry, a shearing box or comoving coordinates';
+  return null;
 }
 
 /** Moving bodies with gas and open fractions (plans/wind-tunnel.md 8.1's cheap form): the liquid with implicit pressure. */
@@ -858,6 +882,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     ...wallSlots(forcesOn(c)),
     // Moving bodies (hydro/moving.ts): walls that move, on the uniform grid.
     moving: movingFlags(c.amrLevels > 0 ? [] : (c.problem.moving ?? []), movingFractions(c)),
+    // Partly filled cells (hydro/cut.ts), on the uniform grid.
+    cut: cutSlot(cutOn(c)),
   };
 }
 
@@ -1621,6 +1647,76 @@ export class Sim implements Simulation {
     gExchange: GPUBindGroup[];
   };
 
+  /** Partly filled cells (hydro/cut.ts): the geometry, made once for the run. */
+  private cut?: CutTextures;
+  private cutGeo?: CutGeometry;
+  private cutPasses?: { pShear: GPUComputePipeline; pMeans: GPUComputePipeline; pFinal: GPUComputePipeline; textures: GPUTexture[]; gShear: GPUBindGroup[]; gMeans: GPUBindGroup[]; gMeansBare: GPUBindGroup[]; gFinal: GPUBindGroup[] };
+
+  /** The cut geometry of the run's obstacles where they start. */
+  private cutGeometry(): CutGeometry {
+    const c = this.cfg;
+    this.cutGeo ??= cutGeometry(c.problem.obstacleDistances!(c.n, c.ndim, c.params), [this.nx, this.ny, this.nz], this.dx, domainLo(c));
+    return this.cutGeo;
+  }
+
+  /** The three passes after the correction: the wall's shear, the neighborhoods' means, the redistributed state. */
+  private async buildCut(slots: Record<string, string>) {
+    const d = this.device;
+    const v = (t: GPUTexture) => t.createView();
+    const [pShear, pMeans, pFinal] = await Promise.all([
+      computePipeline(d, assemble('hydro/cut_shear.wgsl', slots), 'cut cells: wall shear'),
+      computePipeline(d, assemble('hydro/cut_means.wgsl', slots), 'cut cells: neighborhood means'),
+      computePipeline(d, assemble('hydro/cut_final.wgsl', slots), 'cut cells: redistribution'),
+    ]);
+    const t = (label: string, f: GPUTextureFormat = 'rgba32float') => tex3d(d, this.nx, f, `cut cells: ${label}`, this.nz, this.ny);
+    // (A shear of nothing, for the redistribution after advection.)
+    const [cn, dm, dm0, uh1, uh2] = [t('counts', 'r32float'), t('shear'), t('no shear'), t('means'), t('means 2')];
+    const wv = this.walls!.updateBindings()[57];
+    const passes = {
+      pShear, pMeans, pFinal, textures: [cn, dm, dm0, uh1, uh2],
+      gShear: [0, 1].map((p) => bindGroup(d, pShear, { 0: this.params, 1: this.clock, 2: v(this.state[p][0]), 4: v(cn), 5: v(dm), 57: wv })),
+      gMeans: [0, 1].map((p) => bindGroup(d, pMeans, { 0: this.params, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(cn), 5: v(dm), 6: v(uh1), 7: v(uh2) })),
+      gMeansBare: [0, 1].map((p) => bindGroup(d, pMeans, { 0: this.params, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(cn), 5: v(dm0), 6: v(uh1), 7: v(uh2) })),
+      gFinal: [0, 1].map((p) => bindGroup(d, pFinal, { 0: this.params, 4: v(cn), 6: v(uh1), 7: v(uh2), 8: v(this.state[p][0]), 9: v(this.state[p][1]) })),
+    };
+    // The neighborhoods' counts depend on the geometry alone: made now, for the first step's
+    // redistribution after advection (the shear pass makes them again each step).
+    const enc = d.createCommandEncoder();
+    const pass = beginPass(enc);
+    pass.setPipeline(pShear);
+    pass.setBindGroup(0, passes.gShear[0]);
+    pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
+    pass.end();
+    d.queue.submit([enc.finish()]);
+    return passes;
+  }
+
+  /**
+   * Partly filled cells, after advection (into parity q, in place): redistribution alone, so
+   * that the pressure's passes see no sliver's amplified state (Berger and Giuliani redistribute
+   * after every stage of an update).
+   */
+  private encodeCutAdvected(pass: GPUComputePassEncoder, q: number) {
+    const k = this.cutPasses;
+    if (!k) return;
+    for (const [pipe, g] of [[k.pMeans, k.gMeansBare[q]], [k.pFinal, k.gFinal[q]]] as const) {
+      pass.setPipeline(pipe);
+      pass.setBindGroup(0, g);
+      pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
+    }
+  }
+
+  /** Partly filled cells: the wall's shear and redistribution, on the state in parity p, in place. */
+  private encodeCut(pass: GPUComputePassEncoder, p: number) {
+    const k = this.cutPasses;
+    if (!k) return;
+    for (const [pipe, g] of [[k.pShear, k.gShear[p]], [k.pMeans, k.gMeans[p]], [k.pFinal, k.gFinal[p]]] as const) {
+      pass.setPipeline(pipe);
+      pass.setBindGroup(0, g);
+      pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
+    }
+  }
+
   private async buildMoving(slots: Record<string, string>) {
     const d = this.device;
     const c = this.cfg;
@@ -1875,6 +1971,11 @@ export class Sim implements Simulation {
   async buildHydro() {
     const d = this.device;
     const c = this.cfg;
+    // Partly filled cells (hydro/cut.ts): the geometry first, shared with every pass built below.
+    if (cutOn(c)) {
+      this.cut ??= new CutTextures(d, this.cutGeometry(), [this.nx, this.ny, this.nz]);
+      this.cut.share();
+    }
     const slots = hydroSlots(c);
     const v = (t: GPUTexture) => t.createView();
     const k = this.compIn;
@@ -1902,6 +2003,7 @@ export class Sim implements Simulation {
     this.moving?.poses.destroy();
     this.moving = c.problem.moving?.length && !c.amrLevels ? await this.buildMoving(slots) : undefined;
     this.stampMoving();
+    this.cutPasses = this.cut ? await this.buildCut(slots) : undefined;
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
     // Implicit pressure: the solver (kept across rebuilds, with its warm start) and its passes.
@@ -2165,6 +2267,8 @@ export class Sim implements Simulation {
     this.solids = false;
     this.nSources = 0;
     this.device.queue.writeBuffer(this.sources, 0, packSources([]));
+    // Partly filled cells: which cells are solid comes from the cut geometry (hydro/cut.ts).
+    const cutMarks = cutOn(c) && !c.restart ? this.cutGeometry().solid : null;
     for (let k = 0; k < nz; k++) {
       const z = nz === 1 ? 0 : (k + 0.5) * this.dx + lo[2];
       for (let j = 0; j < ny; j++) {
@@ -2197,7 +2301,9 @@ export class Sim implements Simulation {
               radGiven![q] = 1;
             }
           }
-          const mark = cellMark(w);
+          // With partly filled cells, a cell is solid only where it holds no gas (hydro/cut.ts):
+          // one the surface crosses is gas whatever side its center is on, at rest where it was painted solid.
+          const mark = cutMarks ? cutMarks[o / 4] || (w.fixed ? -1 : 0) : cellMark(w);
           if (mark) this.solids = true;
           const go = mark > 0 ? 0 : 1; // the gas kept inside an obstacle is at rest
           u1[o] = w.rho;
@@ -2623,6 +2729,7 @@ export class Sim implements Simulation {
         // (parity 1 - p), the solve, and the correction back into parity p.
         // (Moving bodies with fractions: where they will be at the step's end, for the solve.)
         if (this.moving?.gf) this.encodeMovingStamp(pass, p);
+        this.encodeCutAdvected(pass, 1 - p);
         pass.setPipeline(this.pPsSource!);
         pass.setBindGroup(0, this.gPsSource[p]);
         this.dispatch(pass);
@@ -2631,6 +2738,7 @@ export class Sim implements Simulation {
         pass.setPipeline(this.pPsCorrect!);
         pass.setBindGroup(0, this.gPsCorrect[p]);
         this.dispatch(pass);
+        this.encodeCut(pass, p);
         if (this.pSpecies) {
           speciesPass(this.pSpecies, this.gSpeciesFinal[p][this.speciesCur]);
           this.speciesCur = 1 - this.speciesCur;
@@ -3186,6 +3294,8 @@ export class Sim implements Simulation {
 
   destroy() {
     this.destroyed = true;
+    this.cut?.destroy();
+    for (const t of this.cutPasses?.textures ?? []) t.destroy();
     this.lumpReader?.destroy();
     this.lumpGrid?.destroy();
     this.settleEpoch++; // abandon a settling in progress: its textures are going

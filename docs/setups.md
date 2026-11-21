@@ -261,6 +261,17 @@ level's idea of it. `"refine": "swept"` refines everywhere the surface passes as
 moves (over the run, or one period of its motions when the run has no end): what a rotor's
 blades sweep. `"refine": "off"` leaves the obstacle to the flow's own refinement, as before.
 
+### Partly filled cells
+
+With `"physics": { "cutCells": true }` (link key `cut`) an obstacle cuts the cells its surface
+crosses: each cell holds gas in a share of its volume and each face is open in a share of its
+area, taken from the obstacle's own shape, so a body keeps its true outline below a cell (a
+thin blade, its pitch) where it is otherwise a staircase of whole cells. The wall pushes on the
+gas with the cell's pressure, its shear is taken from the velocity a cell and a half out from
+it, and a cell holding little gas is merged with its neighbors after each stage of the step.
+For the liquid with implicit pressure (the tunnel below Mach 0.3), on the uniform grid, with
+obstacles at rest, so far. A cell holding under 5% gas counts as solid.
+
 ### Forces on obstacles
 
 Every `obstacle` is a body, and the diagnostics report the force the gas exerts on each (as
@@ -497,6 +508,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.limiter` | Limiter | `koren`, `mc`, `vanleer`, `minmod`. Default `koren` | How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
 | `physics.cfl` | CFL number | a number, 0.05 to 1. Default `0.8` | Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |
 | `physics.pressure` | Pressure | `explicit`, `implicit`. Default `explicit` | How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid and the ideal gas, in Cartesian coordinates, on the uniform grid or the adaptive mesh |
+| `physics.cutCells` | Partly filled cells | `true` or `false`. Default `false` | Obstacles cut the cells their surfaces cross: each cell holds gas in a share of its volume and each face is open in a share of its area, so a body keeps its true shape below a cell (a thin blade, its pitch), where the plain grid makes it a staircase of whole cells. For the liquid with implicit pressure, on the uniform grid, with obstacles at rest |
 | `physics.pressureCycles` | Pressure V-cycles | a whole number, 1 to 16. Default `3` | Implicit pressure: multigrid V-cycles per step (warm-started). More converge the pressure further, at more cost |
 | `physics.pressureTol` | Pressure tolerance | a number, 1e-8 to 1. Default `0.0001` | Implicit pressure: the residual of the pressure equation after a step’s V-cycles, relative to its largest right-hand side, above which the step is counted as unconverged |
 | `physics.acousticCfl` | Acoustic steps per step | a number, 1 to 1000000. Default `1000` | Implicit pressure: the most steps of the explicit scheme that one step may span. It is what bounds the step of a liquid at rest; sound that a step spans many times over is damped |

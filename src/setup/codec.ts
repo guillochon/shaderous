@@ -98,7 +98,7 @@ const DOCUMENT: Record<string, Schema> = {
     cooling: choice('physics.cooling'), coolParams: { object: {}, open: 'number' },
     radiation: choice('physics.radiation'), opacity: choice('physics.opacity'), opacityParams: { object: {}, open: 'number' }, radC: 'number', radChat: 'number', radLocalC: 'boolean', radSolver: choice('physics.radSolver'), radSweeps: 'int',
     viscosity: 'number', conductivity: 'number', resistivity: 'number', driving: obj({ accel: 'number', tau: 'number', kMin: 'number', kMax: 'number', zeta: 'number', seed: 'number' }),
-    riemann: choice('physics.riemann'), limiter: choice('physics.limiter'), cfl: 'number', pressure: choice('physics.pressure'), pressureCycles: 'int', pressureTol: 'number', acousticCfl: 'number',
+    riemann: choice('physics.riemann'), limiter: choice('physics.limiter'), cfl: 'number', pressure: choice('physics.pressure'), cutCells: 'boolean', pressureCycles: 'int', pressureTol: 'number', acousticCfl: 'number',
     floors: obj({ rho: 'number', p: 'number' }), fluff: obj({ rho: 'number', u: 'number', v: 'number', va: 'number' }),
     frame: choice('physics.frame'), rotation: obj({ omega: 'vec3', centrifugal: 'boolean' }), cosmology: obj({ omegaM: 'number', omegaL: 'number', zStart: 'number', zEnd: 'number', h: 'number', boxMpc: 'number' }), shear: obj({ omega: 'number', q: 'number', stratified: 'boolean' }), jeansFloor: 'boolean', jeansCells: 'int', vcycles: 'int', gravEnergyFlux: 'boolean',
     composition: { any: [choice('physics.composition'), obj({ name: 'string', X: 'fractions', ionization: { enum: ['full', 'neutral'] } })] },

@@ -368,6 +368,11 @@
    "about": "Pressure: explicit, implicit"
   },
   {
+   "key": "cut",
+   "group": "settings",
+   "about": "Partly filled cells (0 or 1)"
+  },
+  {
    "key": "pcycles",
    "group": "settings",
    "about": "Pressure V-cycles"

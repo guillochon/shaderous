@@ -22,7 +22,7 @@ import { codeG, type UnitSystem } from '../units/units';
 import { buildBodies, partIds, partQuantity, starPotential, type Bodies } from './parts/bodies';
 import { buildDisk, checkDiskFormulas, sumDisks, type BuiltDisk } from './parts/disk';
 import { flowValues, type FaceFn, type FlowContext, type FlowDef, type FlowInitContext, type InitFn, type PotentialFn } from './parts/flow';
-import { bodySurfaces } from './parts/surfaces';
+import { bodySurfaces, obstacleDistances } from './parts/surfaces';
 import { bodyCenter, obstaclePainter, reachOf, regionPainter, shadowOf, type PaintContext } from './parts/region';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type ObstaclePart, type SetupSpec } from './spec';
 import { unitSystem, unitsFollowParts } from './units';
@@ -488,6 +488,12 @@ export function compileSetup(input: SetupSpec): Compiled {
           return bodySurfaces(obs, { box: boxOf(s), n, ndim, lo, tEnd: s.run?.tEnd ?? Infinity });
         }
       : undefined,
+    obstacleDistances: obstacles.length
+      ? (n: number, ndim: 2 | 3, params?: Record<string, number>) => {
+          const s = at(params);
+          return obstacleDistances((s.parts ?? []).filter((p): p is ObstaclePart => p.kind === 'obstacle'), { box: boxOf(s), n, ndim });
+        }
+      : undefined,
     // A tunnel's force coefficients: over the stream's dynamic pressure and the first obstacle's
     // shadow, with the featured values in force (a wind's speed, a rotor's).
     forceRef: tunnel
@@ -629,6 +635,7 @@ export function compileSetup(input: SetupSpec): Compiled {
   over('limiter', ph.limiter);
   over('cfl', ph.cfl);
   over('pressure', ph.pressure);
+  over('cutCells', ph.cutCells);
   over('pressureCycles', ph.pressureCycles);
   over('pressureTol', ph.pressureTol);
   over('acousticCfl', ph.acousticCfl);

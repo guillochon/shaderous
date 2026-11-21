@@ -6,7 +6,7 @@ const box = Number(process.argv[2] ?? 4), N = Number(process.argv[3] ?? 256), tE
 const small = Number(process.argv[5] ?? 0.5), muscl = (process.argv[6] ?? '1') === '1';
 const dx = box / N, D = 0.25;
 const staircase = (process.argv[7] ?? '0') === '1';
-const cfg = { ...cutDefaults, nx: N, ny: N, dx, x0: -box / 2, y0: -box / 2, nu: 0.0025, c: 10, small, muscl, tol: 1e-8, subSteps: 4, staircase };
+const cfg = { ...cutDefaults, nx: N, ny: N, dx, x0: -box / 2, y0: -box / 2, nu: 0.0025, c: 10, small, muscl, tol: 1e-8, subSteps: 4, staircase, probeSkip: (process.argv[8] ?? '0') === '1' };
 const x0 = box / 2 - 0.8;
 function history(moving: boolean) {
   const s = new CutCell(cfg, moving ? rigid(circle(D / 2), [x0, 0.01], [-1, 0]) : rigid(circle(D / 2), [0, 0.01]), () => ({ rho: 1, vx: moving ? 0 : 1, vy: 0 }));

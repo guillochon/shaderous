@@ -140,6 +140,8 @@ export interface PhysicsSpec {
   cfl?: number;
   /** how the pressure acts: in the explicit fluxes, or solved for each step (SimConfig.pressure) */
   pressure?: 'explicit' | 'implicit';
+  /** obstacles cut the cells they cross (SimConfig.cutCells): the liquid with implicit pressure */
+  cutCells?: boolean;
   pressureCycles?: number;
   pressureTol?: number;
   acousticCfl?: number;

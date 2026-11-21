@@ -49,6 +49,7 @@ import { cavityError, GHIA_RE100, LIQUID_TESTS } from './liquid';
 import { ANEOS_TESTS } from './aneos';
 import { PSPLIT_TESTS } from './psplit';
 import { WALL_TESTS } from './walls';
+import { CUT_TESTS } from './cut';
 import { RAD_TESTS } from './radiation';
 
 export interface TestResult {
@@ -4162,6 +4163,8 @@ export const TESTS: TestDef[] = [
   // Implicit pressure (validation/psplit.ts).
   ...PSPLIT_TESTS,
   ...WALL_TESTS,
+  // Partly filled cells (validation/cut.ts).
+  ...CUT_TESTS,
   // Radiation transport (validation/radiation.ts).
   ...RAD_TESTS,
 ];

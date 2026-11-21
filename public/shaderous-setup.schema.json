@@ -743,6 +743,11 @@
      "title": "Pressure",
      "description": "How the pressure acts. Explicit: in the fluxes between cells, with a timestep that follows the sound speed. Implicit: advection is explicit and the pressure is solved for each step, so the timestep follows the flow speed, however fast the sound: for the liquid and the ideal gas, in Cartesian coordinates, on the uniform grid or the adaptive mesh"
     },
+    "cutCells": {
+     "type": "boolean",
+     "title": "Partly filled cells",
+     "description": "Obstacles cut the cells their surfaces cross: each cell holds gas in a share of its volume and each face is open in a share of its area, so a body keeps its true shape below a cell (a thin blade, its pitch), where the plain grid makes it a staircase of whole cells. For the liquid with implicit pressure, on the uniform grid, with obstacles at rest"
+    },
     "pressureCycles": {
      "type": "integer",
      "title": "Pressure V-cycles",

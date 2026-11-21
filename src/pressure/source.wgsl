@@ -35,6 +35,7 @@
 
 #include "pressure/faces.wgsl"
 #include "hydro/moving_flags.wgsl"
+#include "hydro/cut_flags.wgsl"
 
 // A moving body's wall (hydro/moving.ts): the momentum through the face that the body's motion
 // imposes, the cell's density times the wall's velocity along the axis (its solid cell holds that
@@ -77,7 +78,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   let ms = textureLoad(U1S, c, 0).yzw;
-  let gf = gas_fractions(c);
+  // Partly filled cells (hydro/cut.ts): the cell's gas share and its upper faces' open shares,
+  // which weigh the face momenta and the coefficients; the state holds the gas's own density.
+  let gf = select(gas_fractions(c), cut_at(c), CUT);
   var div = 0.0;
   // The divergence of the face momenta the step started from, and those of the upper faces.
   var divn = 0.0;
@@ -107,16 +110,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (hi.kind == FK_GAS) { fhn = 0.5 * (un[a + 1] + textureLoad(U1N, hi.q, 0)[a + 1]); }
     if (lo.kind == FK_GAS) { fln = 0.5 * (textureLoad(U1N, lo.q, 0)[a + 1] + un[a + 1]); }
     mn[a] = fhn;
-    div += fh - fl;
-    divn += fhn - fln;
+    let ah = select(1.0, gf[a + 1], CUT);
+    let al = select(1.0, cut_lo(c, a), CUT);
+    div += ah * fh - al * fl;
+    divn += ah * fhn - al * fln;
     beta[a] = select(0.0, 1.0, hi.kind == FK_GAS || hi.kind == FK_OPEN) * gf[a + 1];
   }
   // Near a moving body (plans/wind-tunnel.md 8.1's cheap form): the cell holds gas in a fraction
   // phi of its volume (at the step's end), so its true density is rho / phi, and its
   // compressibility term is phi's share: as a body sweeps through the cell its pressure rises
   // and the solve pushes the liquid out, before the cell becomes the body's. (1 elsewhere.)
-  let phi = max(gf.x, 0.02);
-  let p = eos_pressure(rho / phi, 0.0);
+  let phi = select(max(gf.x, 0.02), gf.x, CUT);
+  let p = eos_pressure(select(rho / phi, rho, CUT), 0.0);
   let cs = eos_sound_speed(rho, p);
   let alpha = phi / (cs * cs * dt * dt);
   let th = cell_theta(c, dt, 0.5);
