@@ -111,8 +111,8 @@ Unit tests (`tests/unit/comoving_waves.test.ts`, vitest, no GPU):
 - Against the growing mode delta proportional to a for cold gas with gravity (Omega_s = 0).
 - A handful of values copied from running Berlok's Python (analytic for gamma = 5/3, scipy for
   gamma = 1.2) into a small JSON fixture, so the mapping of section 2 is checked against his
-  code and not only against our own derivation. Generate it once with his repo (BSD-style
-  license, check) in a scratch virtualenv; commit only the numbers and the script that made
+  code and not only against our own derivation. Generate it once with his repo (its README states no
+  license: copy numbers, not code) in a scratch virtualenv; commit only the numbers and the script that made
   them under `tools/`.
 
 ## 4. Stage 2: standing waves with pressure and gravity
