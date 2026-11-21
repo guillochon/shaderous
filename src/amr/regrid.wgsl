@@ -2,6 +2,10 @@
 //   copy      the block is unchanged
 //   prolong   a new child: conservative, limited linear interpolation from its old parent
 //   restrict  a merged block: the average of its old children
+// A new child near an obstacle's surface (amr/bodies.ts) takes its solid cells from the body's
+// shape at its own level (PAINT), not from its parent's: a cell the shape covers becomes solid
+// and at rest, and one it does not, that was solid in a body of the shape's, becomes gas (the gas
+// kept inside, at rest).
 // The slopes for prolongation come from the primitives of the previous step, which include the
 // old parent's ghost cells.
 #include "hydro/common.wgsl"
@@ -16,6 +20,9 @@
 @group(0) @binding(5) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(6) var O2: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(7) var<storage, read> RG: array<i32>;
+// [0] where the marks start, [1] the bodies' marks as bits, [2 + slot] 1 + the block's place
+// among the painted (0: not painted), then four marks to a word per painted block.
+@group(0) @binding(8) var<storage, read> PAINT: array<u32>;
 
 #include "amr/cons.wgsl"
 
@@ -81,6 +88,20 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
     ke *= select(0.125, 0.25, is2d());
     u.b.x = 0.5 * dot(u.a.yzw, u.a.yzw) / max(u.a.x, P.rho_floor) + u.b.y + (uc.b.x - uc.b.y - ke);
+    let pb = PAINT[2u + u32(inv.slot)];
+    if (pb > 0u) {
+      let li = u32((l.z * BS + l.y) * BS + l.x);
+      let words = u32(BS * BS * select(BS, 1, is2d())) / 4u;
+      let m = (PAINT[PAINT[0] + (pb - 1u) * words + (li >> 2u)] >> (8u * (li & 3u))) & 255u;
+      if (m > 0u) {
+        // Covered: at rest, as the gas kept inside an obstacle is.
+        u.b.x -= 0.5 * dot(u.a.yzw, u.a.yzw) / max(u.a.x, P.rho_floor);
+        u.a = vec4<f32>(u.a.x, 0.0, 0.0, 0.0);
+        u.b.w = f32(m);
+      } else if (u.b.w >= 0.5 && ((PAINT[1] >> u32(round(u.b.w))) & 1u) != 0u) {
+        u.b.w = 0.0;
+      }
+    }
   } else if (kind == 3) {
     let ch = RG[r + 4u + u32(h.x | (h.y << 1u) | (h.z << 2u))];
     let o = blk_origin(ch);

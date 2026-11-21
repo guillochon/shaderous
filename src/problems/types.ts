@@ -213,6 +213,11 @@ export interface Problem {
   id: string;
   /** Obstacles whose forces are reported (Diagnostics.bodies), in the order of their marks. */
   bodies?: BodyRef[];
+  /**
+   * On an adaptive mesh, the obstacles' surfaces that ask for refinement (setup/parts/surfaces.ts,
+   * amr/bodies.ts), for a grid of `n` finest cells across with lower corner `lo`.
+   */
+  surfaces?: (n: number, ndim: 2 | 3, lo: readonly number[], params?: Record<string, number>) => import('../setup/parts/surfaces').BodySurface[];
   /** Obstacles that move (hydro/moving.ts), with their motions and chains: the uniform grid's stamp and exchange passes. */
   moving?: import('../hydro/moving').MovingBody[];
   /** The scales of the force coefficients (Diagnostics.bodies' coefficients), if there are any: fixed, or for the run's grid. */

@@ -26,6 +26,8 @@ export const SHAPE_TYPES = ['sphere', 'box', 'half', 'mesh'] as const;
 export const MESH_UPS = ['x', 'y', 'z'] as const;
 /** What a mesh's `center` places: the middle of its bounding box, or the file's own origin (a rotor's hub). */
 export const MESH_ANCHORS = ['box', 'origin'] as const;
+/** What an obstacle refines on an adaptive mesh: a band about its surface, all its surface sweeps as it moves, or nothing of its own. */
+export const REFINE_MODES = ['surface', 'swept', 'off'] as const;
 
 export const SETUP_FORMAT = 'shaderous-setup';
 /** Counts changes to the document's shape: setup/codec.ts keeps one migration per step. */
@@ -439,6 +441,16 @@ export interface ObstaclePart {
   motion?: Motion;
   /** another obstacle (by id) whose motion this one's is made on top of: its pivots move with it */
   parent?: string;
+  /**
+   * On an adaptive mesh (setup/parts/surfaces.ts): `surface` (the default) refines every block
+   * within `refineBand` finest cells of the obstacle's surface to `refineLevel` (the finest by
+   * default), decided from its shape, not from the cells a coarse level has; `swept` the same
+   * about everywhere its surface passes as it moves (a rotor's disk); `off` leaves it to the
+   * flow's own refinement
+   */
+  refine?: (typeof REFINE_MODES)[number];
+  refineBand?: number;
+  refineLevel?: number;
 }
 
 export interface FieldPart {

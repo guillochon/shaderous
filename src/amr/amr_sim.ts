@@ -44,6 +44,7 @@ import { implicitPressure, rotationOf, clockPressure, implicitBlocksUnsupported,
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
+import { BodyBands } from './bodies';
 import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS, SLAB_QUADS } from './dispatch';
 import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
@@ -217,6 +218,11 @@ export class AmrSim implements Simulation {
   private flags: GPUBuffer;
   private flagStaging: GPUBuffer;
   private rg: GPUBuffer;
+  /** what amr/regrid.wgsl paints in new blocks near an obstacle's surface (amr/bodies.ts) */
+  private paintBuf: GPUBuffer;
+  private painted = false;
+  /** the obstacles' surfaces that ask for refinement, on a mesh with levels */
+  private bands: BodyBands | null = null;
   /** one list per tree level, for the per-level gravity solve */
   private listLevel: GPUBuffer[] = [];
   private nLevel: number[] = [];
@@ -516,6 +522,7 @@ export class AmrSim implements Simulation {
     this.dummyPhi = d.createTexture({ size: [1, 1, 1], dimension: '3d', format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
     this.flags = d.createBuffer({ size: this.cap * 4, usage: storage });
     this.rg = d.createBuffer({ size: this.cap * RG_STRIDE * 4, usage: storage });
+    this.paintBuf = d.createBuffer({ size: this.levels > 0 && cfg.problem.surfaces ? BodyBands.bytes(cfg.ndim, this.cap) : 4 * (2 + this.cap), usage: storage });
     this.flagStaging = d.createBuffer({ size: this.cap * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const list = () => d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     this.bins = list();
@@ -965,7 +972,7 @@ export class AmrSim implements Simulation {
         bindGroup(d, this.pRegrid, {
           0: this.params, 1: v(this.state[p][0]), 2: v(this.state[p][1]),
           3: v((this.mhd?.primitives ?? this.prim)[0]), 4: v((this.mhd?.primitives ?? this.prim)[1]),
-          5: v(this.state[o][0]), 6: v(this.state[o][1]), 7: this.rg, 30: this.bt, 31: this.listLeaf,
+          5: v(this.state[o][0]), 6: v(this.state[o][1]), 7: this.rg, 8: this.paintBuf, 30: this.bt, 31: this.listLeaf,
         }),
       );
     }
@@ -1591,6 +1598,10 @@ export class AmrSim implements Simulation {
     const fn = sphSetup(c, c.problem.init(this.n, eos, c.ndim, c.params, c.amrLevels));
     const surface = surfaceOf(fn, eos);
     let run = await InitRun.start(c, this.n, this.dx0, this.levels);
+    // Obstacles ask for their surfaces' bands from their shapes (amr/bodies.ts).
+    const lo = domainLo(c);
+    this.bands = this.levels > 0 && c.problem.surfaces && !spherical(c) ? new BodyBands(c.problem.surfaces(this.n, c.ndim, lo, c.params), c.ndim, lo, this.dx0, this.levels) : null;
+    if (this.bands && !this.bands.surfaces.length) this.bands = null;
     // With self-gravity a level that only partly fits the block budget is left out altogether:
     // a refinement boundary that cuts a steep hydrostatic gradient at an arbitrary place
     // disturbs the balance far more than resolving all of it one level coarser.
@@ -1623,7 +1634,7 @@ export class AmrSim implements Simulation {
         let values: Float64Array | null = null;
         if (run && todo.length > 1) values = await run.indicators(todo.map(({ b, sub }) => ({ level: b.level, c: b.c, sub }))).catch(() => ((run = null), null));
         todo.forEach(({ b, sub }, i) => sampled.set(b, { sub, ind: values ? values[i] : indicator(c, this.dx0, b, surface, sub) }));
-        if (!this.tree.adapt((b) => sampled.get(b)!.ind, c.refineHi, c.refineLo)) break;
+        if (!this.tree.adapt((b) => this.withBodies(b, sampled.get(b)!.ind), c.refineHi, c.refineLo)) break;
       }
       if (levelAt || !strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;
     }
@@ -2250,6 +2261,11 @@ export class AmrSim implements Simulation {
     this.interior(pass, this.nLeaf);
     // The field's faces, then the energy rebuilt and everything back in this parity.
     this.mhd?.encodeRegrid(pass, this.cur);
+    // New blocks near an obstacle take its cells from its shape (amr/bodies.ts).
+    const paint = this.bands?.paint(plan.ops, this.tree.leaves(), this.cap);
+    if (paint) this.device.queue.writeBuffer(this.paintBuf, 0, paint as Uint32Array<ArrayBuffer>);
+    else if (this.painted) this.device.queue.writeBuffer(this.paintBuf, 0, new Uint32Array(2 + this.cap));
+    this.painted = !!paint;
     if (this.speciesGroups) {
       pass.setPipeline(this.pSpecies[3]);
       pass.setBindGroup(0, this.gSpecies[3][this.cur][this.speciesCur]);
@@ -2562,7 +2578,7 @@ export class AmrSim implements Simulation {
     const parents = new Set<Block>();
     for (const b of tree.leaves()) if (b.parent) parents.add(b.parent);
     const candidates = [...parents]
-      .filter((p) => tree.canCoarsen(p) && p.children!.every((ch) => !near.has(ch) && score(ch) < 0.999))
+      .filter((p) => tree.canCoarsen(p) && p.children!.every((ch) => !near.has(ch) && score(ch) < 0.999 && !(this.bands && this.bands.target(ch) >= ch.level)))
       .map((p) => ({ p, s: Math.max(...p.children!.map(score)) }))
       .sort((a, b) => a.s - b.s);
     const merge = new Set<Block>();
@@ -2863,7 +2879,7 @@ export class AmrSim implements Simulation {
         for (const b of leaves) this.indicatorOf.set(b, ind[b.slot]);
         if (!this.autoRegrid) return; // a check already in flight when a replay took over
         // Exactly 0: no gas in the block, only the inside of an obstacle (see amr/flag.wgsl).
-        const ops = tree.adapt((b) => (ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo);
+        const ops = tree.adapt((b) => this.withBodies(b, ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo);
         if (ops) this.pending = { ops, steps: tree.lastSteps };
       })
       .finally(() => {
@@ -2890,7 +2906,12 @@ export class AmrSim implements Simulation {
     if (leaves.length !== indicators.length) throw new Error(`the mesh has ${leaves.length} leaves where the log's re-mesh had ${indicators.length}: the replay has gone another way`);
     const at = new Map(leaves.map((b, i) => [b, indicators[i]]));
     for (const b of leaves) this.indicatorOf.set(b, at.get(b)!);
-    this.applyNow(this.tree.adapt((b) => (at.get(b) === 0 ? -1 : at.get(b)!), this.cfg.refineHi, this.cfg.refineLo));
+    this.applyNow(this.tree.adapt((b) => this.withBodies(b, at.get(b) === 0 ? -1 : at.get(b)!), this.cfg.refineHi, this.cfg.refineLo));
+  }
+
+  /** A block's refinement indicator with what the obstacles near it ask for (amr/bodies.ts). */
+  private withBodies(b: Block, raw: number): number {
+    return this.bands ? this.bands.indicator(b, raw, this.cfg.refineHi, this.cfg.refineLo, this.tree.levelLimit) : raw;
   }
 
   /** Apply a re-mesh the tree has just taken, now (after any re-mesh by hand that waits). */

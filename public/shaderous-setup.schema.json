@@ -2416,6 +2416,29 @@
        "parent": {
         "type": "string",
         "maxLength": 4000
+       },
+       "refine": {
+        "enum": [
+         "surface",
+         "swept",
+         "off"
+        ],
+        "title": "Refines",
+        "description": "On an adaptive mesh: Surface refines every block within a band of the obstacle’s surface, decided from its shape (so a part thinner than a coarse cell is whole at the finest level); Swept, everywhere its surface passes as it moves (a rotor’s disk; for a body at rest the same as Surface); Off leaves it to the flow’s own refinement"
+       },
+       "refineBand": {
+        "type": "number",
+        "title": "Refined band (cells)",
+        "description": "How far from the surface the mesh is kept at the obstacle’s level, in finest cells",
+        "minimum": 0,
+        "maximum": 64
+       },
+       "refineLevel": {
+        "type": "integer",
+        "title": "Refined to level",
+        "description": "The level its band is kept at, 0 the coarsest. Empty: the finest",
+        "minimum": 0,
+        "maximum": 5
        }
       },
       "required": [

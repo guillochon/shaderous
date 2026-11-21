@@ -239,6 +239,29 @@ function finish(shape: MeshShape, ctx: { box: number; ndim: 2 | 3; dx: number },
   };
 }
 
+/**
+ * Points on a placed mesh's surface (3D), in the box's frame, no two neighbors on a triangle
+ * further apart than `spacing`: each triangle's vertices, edges and inside on a grid of that
+ * pitch. What an adaptive mesh's refinement near a body is decided from (setup/parts/surfaces.ts).
+ */
+export function meshSurfacePoints(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }, spacing: number): Float64Array {
+  const { mesh, toBox } = placement(shape, ctx);
+  const W = transformed(mesh.positions, toBox);
+  const idx = mesh.indices;
+  const out: number[] = [];
+  const v = (i: number, a: number) => W[3 * idx[i] + a];
+  for (let t = 0; t < idx.length; t += 3) {
+    const e = Math.max(...[[0, 1], [1, 2], [2, 0]].map(([p, q]) => Math.hypot(v(t + p, 0) - v(t + q, 0), v(t + p, 1) - v(t + q, 1), v(t + p, 2) - v(t + q, 2))));
+    const m = Math.max(1, Math.ceil(e / spacing));
+    for (let i = 0; i <= m; i++)
+      for (let j = 0; j <= m - i; j++) {
+        const a = i / m, b = j / m, c = 1 - a - b;
+        for (let k = 0; k < 3; k++) out.push(a * v(t, k) + b * v(t + 1, k) + c * v(t + 2, k));
+      }
+  }
+  return Float64Array.from(out);
+}
+
 function transformed(P: Float32Array, m: Mat4): Float32Array {
   const out = new Float32Array(P.length);
   for (let i = 0; i < P.length; i += 3) out.set(apply(m, P[i], P[i + 1], P[i + 2]), i);

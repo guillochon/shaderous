@@ -93,6 +93,8 @@ export interface TurbineOptions {
 }
 
 export const TURBINE_DEFAULTS: TurbineOptions = { tsr: 1, alpha: 10, hub: 0.2, rootChord: 0.4, tipChord: 0.25, thickness: 0.2, minThickness: 0.06, blades: 3 };
+/** A fast rotor: builtin:turbine-fast. */
+export const TURBINE_FAST: TurbineOptions = { tsr: 4, alpha: 6, hub: 0.2, rootChord: 0.3, tipChord: 0.15, thickness: 0.2, minThickness: 0.03, blades: 3 };
 
 /**
  * A wind turbine's rotor of radius 1 turning about +x (right-handed) in a wind along +x: a
@@ -187,6 +189,10 @@ export const BUILTIN_BODIES: Record<string, () => Mesh> = {
   // A three-bladed wind turbine rotor of radius 1 about +x, pitched for a tip-speed ratio of 1
   // (wide blades, steeply pitched: a grid of 2 cells through a blade still shows the pitch).
   turbine: () => turbineRotor(),
+  // The same, pitched for a tip-speed ratio of 4 with slimmer blades (chord 0.3 R at the root to
+  // 0.15 R at the tip, 6 degrees to the relative wind, 3 to 10 degrees from the rotor's plane
+  // outboard): a fast rotor, which needs its blades resolved (plans/wind-tunnel.md 5.3).
+  'turbine-fast': () => turbineRotor(TURBINE_FAST),
   ahmed: () => ahmedBody(25),
   'ahmed-35': () => ahmedBody(35),
   // A sphere of diameter 1 (5120 triangles): the mesh path against the built-in sphere shape.

@@ -5,6 +5,8 @@ import { AmrSim } from '../amr/amr_sim';
 import { compileSetup } from '../setup/compile';
 import type { SetupSpec } from '../setup/spec';
 import type { TestDef } from './tests';
+import { preset } from '../presets/index';
+import { placeMesh, type MeshShape } from '../geometry/store';
 
 /**
  * A periodic box of liquid or gas at rest, a cylinder off center, and a slab of it moving
@@ -68,7 +70,171 @@ function tunnelSpec(shape: Record<string, unknown>, over: { n?: number; amr?: nu
   } as SetupSpec;
 }
 
+/**
+ * A closed box of liquid split in two by a plate 0.9 of a coarsest cell thick, centered on a face
+ * of the coarsest cells, so that no coarsest cell's center is inside it: the coarsest level does
+ * not see the plate at all. A slab on one side runs at the plate.
+ */
+function plateSpec(refine: 'surface' | 'off'): SetupSpec {
+  const half = 0.45 / 32;
+  return {
+    format: 'shaderous-setup', version: 1, id: 'thin-plate', name: 'Thin plate',
+    domain: { ndim: 3, n: 128, amr: 2, box: 1, bc: { lo: [2, 2, 2], hi: [2, 2, 2] } },
+    physics: { eos: 'liquid', eosParams: { liqRho: 1, liqC: 5 }, gravity: 'off', G: 0, viscosity: 0.001 },
+    background: { rho: 1, p: 0, v: [0, 0, 0] },
+    parts: [
+      { kind: 'obstacle', id: 'plate', shape: { type: 'box', min: [-half, null, null], max: [half, null, null] }, refine },
+      { kind: 'region', id: 'slab', shape: { type: 'box', min: [-0.3, null, null], max: [-0.06, null, null] }, v: [1, 0.3, 0] },
+    ],
+  } as unknown as SetupSpec;
+}
+
+/** Of the leaves' cells: the solid ones, the mass on each side of x = 0 (gas only), and whether every cell within `reach` of the plane x = 0 is at the finest size. */
+async function plateCells(sim: AmrSim, finest: number, reach: number) {
+  const c = await sim.readLeaves();
+  let solid = 0;
+  let left = 0;
+  let right = 0;
+  let coarseNear = 0;
+  for (let q = 0; q < c.count; q++) {
+    const vol = c.dx[q] ** 3;
+    if (c.u2[4 * q + 3] > 0.5) solid += vol / finest ** 3;
+    else if (c.x[q] < 0) left += c.u1[4 * q] * vol;
+    else right += c.u1[4 * q] * vol;
+    if (Math.abs(c.x[q]) < reach && c.dx[q] > finest * 1.5) coarseNear++;
+  }
+  return { solid, left, right, coarseNear };
+}
+
+/**
+ * How a mesh obstacle sits on the blocks: the leaf cells within `reach` of its surface (by its
+ * distance field) that are not at the finest level, and its solid cells by blade (the sector of
+ * azimuth about x each blade starts in, beyond the spinner), against the same counts from the
+ * shape painted at every finest cell center of its bounds.
+ */
+async function rotorOnBlocks(sim: AmrSim, compiled: { spec: SetupSpec }, n: number, blades: number, hubR: number) {
+  const box = compiled.spec.domain!.box!;
+  const finest = box / n;
+  const part = compiled.spec.parts!.find((q) => q.kind === 'obstacle') as { shape: MeshShape };
+  const placed = placeMesh(part.shape, { box, ndim: 3, dx: finest });
+  const center = part.shape.center ?? [0, 0, 0];
+  const bladeOf = (y: number, z: number) => {
+    if (Math.hypot(y - center[1], z - center[2]) < hubR) return -1;
+    const az = (Math.atan2(z - center[2], y - center[1]) + 2 * Math.PI + Math.PI / blades) % (2 * Math.PI);
+    return Math.floor((az * blades) / (2 * Math.PI));
+  };
+  const c = await sim.readLeaves();
+  const got = new Array(blades).fill(0);
+  let coarseNear = 0;
+  for (let q = 0; q < c.count; q++) {
+    const d = placed.distance(c.x[q], c.y[q], c.z[q]);
+    if (Math.abs(d) < 2 * finest && c.dx[q] > 1.5 * finest) coarseNear++;
+    if (c.u2[4 * q + 3] > 0.5) {
+      const b = bladeOf(c.y[q], c.z[q]);
+      if (b >= 0) got[b] += Math.round((c.dx[q] / finest) ** 3);
+    }
+  }
+  const want = new Array(blades).fill(0);
+  const lo = placed.min.map((v) => Math.floor((v + box / 2) / finest) - 1);
+  const hi = placed.max.map((v) => Math.ceil((v + box / 2) / finest) + 1);
+  for (let k = lo[2]; k < hi[2]; k++)
+    for (let j = lo[1]; j < hi[1]; j++)
+      for (let i = lo[0]; i < hi[0]; i++) {
+        const x = (i + 0.5) * finest - box / 2, y = (j + 0.5) * finest - box / 2, z = (k + 0.5) * finest - box / 2;
+        if (!placed.inside(x, y, z)) continue;
+        const b = bladeOf(y, z);
+        if (b >= 0) want[b]++;
+      }
+  return { got, want, coarseNear, leaves: (sim as unknown as { tree: { leaves(): { level: number }[] } }).tree.leaves() };
+}
+
 export const WALL_TESTS: TestDef[] = [
+  {
+    id: 'thin-plate-blocks',
+    name: 'A plate thinner than a coarsest cell, on blocks: refined from its shape, whole, and nothing passes through it (3D 128, 2 levels, liquid)',
+    criterion:
+      'A closed box of liquid split by a plate 0.9 coarsest cells thick that no coarsest cell center falls in, a slab running at it: at the start and after 150 steps every cell within 6 finest cells of the plate is at the finest level and the solid cells are the whole plate (4 x 128 x 128 finest cells), the mass on each side of it changes by under 1e-6 of itself; the same after the mesh is merged to the coarsest level (where the plate vanishes) and refined back (the new blocks painted from the plate’s shape, amr/bodies.ts) and run 100 steps more. With the plate’s own refinement off, for comparison, the merge loses the plate for good and the liquid flows through where it was',
+    async run(gpu: Gpu) {
+      const m: Record<string, number> = {};
+      const finest = 1 / 128;
+      const whole = 4 * 128 * 128;
+      let pass = true;
+      for (const refine of ['surface', 'off'] as const) {
+        const compiled = compileSetup(plateSpec(refine));
+        const sim = await AmrSim.create(gpu, configFor(compiled.problem, 128, { ndim: 3, tEnd: 1e9, amrLevels: 2, ...compiled.overrides }));
+        try {
+          const a = await plateCells(sim, finest, 6 * finest);
+          await sim.advance(150);
+          const b = await plateCells(sim, finest, 6 * finest);
+          m[`${refine}_solid_cells_start`] = a.solid;
+          m[`${refine}_solid_cells_end`] = b.solid;
+          m[`${refine}_coarse_cells_near_start`] = a.coarseNear;
+          m[`${refine}_coarse_cells_near_end`] = b.coarseNear;
+          m[`${refine}_left_mass_change`] = Math.abs(b.left / a.left - 1);
+          m[`${refine}_right_mass_change`] = Math.abs(b.right / a.right - 1);
+          if (refine === 'surface') {
+            pass &&= a.solid === whole && b.solid === whole && a.coarseNear === 0 && b.coarseNear === 0;
+            pass &&= m.surface_left_mass_change < 1e-6 && m.surface_right_mass_change < 1e-6;
+          }
+          // Merge everything back to the coarsest level, which cannot hold the plate, then refine
+          // as the plate asks: its new blocks are painted from its shape. Without its own
+          // refinement nothing brings it back.
+          const s = sim as unknown as { tree: { adapt(f: () => number, hi: number, lo: number): unknown; leaves(): unknown[] }; applyNow(ops: unknown): void };
+          for (let k = 0; k < 2; k++) s.applyNow(s.tree.adapt(() => -1, 1, 0));
+          const merged = await plateCells(sim, finest, 6 * finest);
+          for (let k = 0; k < 2; k++) sim.forceRegrid(new Float32Array(s.tree.leaves().length));
+          const c = await plateCells(sim, finest, 6 * finest);
+          await sim.advance(100);
+          const d = await plateCells(sim, finest, 6 * finest);
+          m[`${refine}_merged_solid_cells`] = merged.solid;
+          m[`${refine}_refined_again_solid_cells`] = c.solid;
+          m[`${refine}_refined_again_coarse_cells_near`] = c.coarseNear;
+          m[`${refine}_refined_again_left_mass_change`] = Math.abs(d.left / c.left - 1);
+          m[`${refine}_refined_again_right_mass_change`] = Math.abs(d.right / c.right - 1);
+          if (refine === 'surface') pass &&= c.solid === whole && c.coarseNear === 0 && d.solid === whole && Math.abs(d.left / c.left - 1) < 1e-6 && Math.abs(d.right / c.right - 1) < 1e-6;
+        } finally {
+          sim.destroy();
+        }
+      }
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'turbine-blocks',
+    name: 'The wind-turbine preset on blocks: every blade whole at the finest level, from its distance field (3D 256, 2 levels)',
+    criterion:
+      'The preset `wind-turbine` on 256 finest cells with 2 levels (the 2.5 GB default budget): at the start and after 100 steps no leaf cell within 2 finest cells of the rotor’s surface is coarser than the finest, and each blade’s solid cells (beyond the spinner) are the cells the shape covers on a uniform grid of the finest cells, cell for cell in number',
+    async run(gpu: Gpu) {
+      const compiled = preset('wind-turbine');
+      const n = 256;
+      const amr = 2;
+      const sim = await AmrSim.create(gpu, configFor(compiled.problem, n, { ndim: 3, tEnd: 1e9, amrLevels: amr, ...compiled.overrides }));
+      const m: Record<string, number> = { n, amr };
+      let pass = true;
+      try {
+        for (const when of ['start', 'end'] as const) {
+          if (when === 'end') {
+            const t0 = performance.now();
+            await sim.advance(100);
+            m.ms_per_step = (performance.now() - t0) / 100;
+          }
+          const r = await rotorOnBlocks(sim, compiled, n, 3, 0.2 * 0.8);
+          m[`${when}_coarse_cells_near_surface`] = r.coarseNear;
+          m[`${when}_blocks`] = r.leaves.length;
+          for (let l = 0; l <= amr; l++) m[`${when}_blocks_level_${l}`] = r.leaves.filter((b) => b.level === l).length;
+          r.got.forEach((g, b) => {
+            m[`${when}_blade_${b}_solid`] = g;
+            m[`${when}_blade_${b}_shape`] = r.want[b];
+          });
+          pass &&= r.coarseNear === 0 && r.got.every((g, b) => g === r.want[b] && g > 0);
+        }
+        m.slots = (sim as unknown as { cap: number }).cap;
+      } finally {
+        sim.destroy();
+      }
+      return { pass, metrics: m };
+    },
+  },
   {
     id: 'force-balance',
     name: 'Forces on bodies: the wall faces against the momentum balance of the whole box (2D 128, liquid and ideal gas, explicit and implicit pressure, uniform grid and 2 levels of blocks)',

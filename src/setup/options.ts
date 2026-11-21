@@ -18,7 +18,7 @@ import { VIEW_MODES } from '../render/view_options';
 import { COMPOSITIONS } from '../units/composition';
 import { ANEOS_LABELS, ANEOS_MATERIALS } from '../eos/aneos';
 import { speciesNuclides } from '../species/mixture';
-import { AXES, MESH_ANCHORS, TUNNEL_FLOORS, TUNNEL_SIDES } from './spec';
+import { AXES, MESH_ANCHORS, REFINE_MODES, TUNNEL_FLOORS, TUNNEL_SIDES } from './spec';
 import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, MESH_UPS, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
 import { DENSITY_UNITS, LENGTH_UNITS, MASS_UNITS, VELOCITY_UNITS } from './units';
 
@@ -604,7 +604,12 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
   obstacle: {
     kind: 'obstacle', label: 'Obstacle', tip: 'A solid body the gas reflects off',
     make: () => ({ kind: 'obstacle', shape: { type: 'box', min: [-0.1, -0.1, -0.1], max: [0.1, 0.1, 0.1] } }),
-    fields: [...SHAPE],
+    fields: [
+      ...SHAPE,
+      P({ path: 'refine', label: 'Refines', tip: 'On an adaptive mesh: Surface refines every block within a band of the obstacle’s surface, decided from its shape (so a part thinner than a coarse cell is whole at the finest level); Swept, everywhere its surface passes as it moves (a rotor’s disk; for a body at rest the same as Surface); Off leaves it to the flow’s own refinement', control: pickOf(REFINE_MODES, ['surface', 'Its surface'], ['swept', 'All it sweeps'], ['off', 'Off']), default: 'surface', requires: ADAPTIVE }),
+      P({ path: 'refineBand', label: 'Refined band (cells)', tip: 'How far from the surface the mesh is kept at the obstacle’s level, in finest cells', control: num(0, 64, { step: 1 }), default: 4, requires: ADAPTIVE, show: { path: 'refine', is: ['surface', 'swept'] } }),
+      P({ path: 'refineLevel', label: 'Refined to level', tip: 'The level its band is kept at, 0 the coarsest. Empty: the finest', control: num(0, 5, { integer: true, step: 1 }), requires: ADAPTIVE, show: { path: 'refine', is: ['surface', 'swept'] } }),
+    ],
   },
   tunnel: {
     kind: 'tunnel', label: 'Wind tunnel', max: 1,

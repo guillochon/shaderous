@@ -249,6 +249,18 @@ and dragged, and the body does work on it (the energy is not conserved, as with 
 of the box). Its cells change from gas to solid and back as it goes, a cell at a time; mass is
 conserved as they do ([numerics.md](numerics.md#26-bodies-in-a-stream)).
 
+### Obstacles on an adaptive mesh
+
+On blocks, an obstacle refines the mesh from its own shape: every block within `refineBand`
+finest cells (4 by default) of its surface is kept at `refineLevel` (the finest by default),
+from the start and for the whole run, and a block made there by refinement has its solid cells
+painted from the shape at its own level. A part thinner than a coarse cell (a blade, a plate),
+which the coarse levels see in pieces or not at all, is so whole at the finest level. The band
+is wider than the reach of the ghost cells, so the flow next to the body never sees a coarser
+level's idea of it. `"refine": "swept"` refines everywhere the surface passes as the obstacle
+moves (over the run, or one period of its motions when the run has no end): what a rotor's
+blades sweep. `"refine": "off"` leaves the obstacle to the flow's own refinement, as before.
+
 ### Forces on obstacles
 
 Every `obstacle` is a body, and the diagnostics report the force the gas exerts on each (as
@@ -668,6 +680,9 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
+| `refine` | Refines | `surface`, `swept`, `off`. Default `surface` | On an adaptive mesh: Surface refines every block within a band of the obstacle’s surface, decided from its shape (so a part thinner than a coarse cell is whole at the finest level); Swept, everywhere its surface passes as it moves (a rotor’s disk; for a body at rest the same as Surface); Off leaves it to the flow’s own refinement |
+| `refineBand` | Refined band (cells) | a number, 0 to 64. Default `4` | How far from the surface the mesh is kept at the obstacle’s level, in finest cells |
+| `refineLevel` | Refined to level | a whole number, 0 to 5 | The level its band is kept at, 0 the coarsest. Empty: the finest |
 
 **`tunnel`** (Wind tunnel). A stream through the box from an inlet to an outlet with a sponge, and the box’s faces, its gas and its background set to match: put obstacles in it, and the diagnostics give their drag and lift coefficients. Below Mach 0.3 the gas is the liquid with implicit pressure; above, an ideal gas. At most 1
 
