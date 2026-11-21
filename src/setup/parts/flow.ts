@@ -53,6 +53,12 @@ export interface FlowDef<P = Record<string, number | boolean>> {
   wholeBox: boolean;
   /** What the setup must have for it to run (options.ts facts): its init throws without them. */
   requires?: Rule[];
+  /**
+   * A whole-box flow whose state suits the weakly compressible liquid (densities near one
+   * reference). Other whole-box flows are not offered for it: their densities, a liquid
+   * compressed or stretched far past its model, tore runs apart (random test seed 10207).
+   */
+  liquid?: boolean;
   /** The initial state everywhere (a whole-box flow). */
   init?(ctx: FlowInitContext, p: P): InitFn;
   /** Or a change to the state the other parts painted. */

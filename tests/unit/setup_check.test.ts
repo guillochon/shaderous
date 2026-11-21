@@ -69,6 +69,10 @@ describe('checkSetup', () => {
     const tunnel = (mach: number) => texts(setup({}, [{ kind: 'tunnel', mach }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }, { kind: 'flow', name: 'first-core' }]), 'error');
     expect(has(tunnel(0.1), /equation of state with an energy/i)).toBe(true);
     expect(has(tunnel(2), /equation of state with an energy/i)).toBe(false);
+    // Seed 10207: the Rayleigh-Taylor flow's two densities in the tunnel's liquid; the flows made for the liquid stay offered.
+    const flowIn = (name: string) => texts(setup({}, [{ kind: 'tunnel', mach: 0.1 }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }, { kind: 'flow', name }]), 'error');
+    expect(has(flowIn('rayleigh-taylor'), /not for the liquid/i)).toBe(true);
+    expect(has(flowIn('taylor-green'), /not for the liquid/i)).toBe(false);
   });
 
   it('finds nothing wrong with an empty box or a well-made binary', () => {

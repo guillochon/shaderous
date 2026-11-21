@@ -62,6 +62,7 @@ export function greshoProfile(r: number): { u: number; dp: number } {
 
 const gresho: FlowDef<{ mach: number }> = {
   name: 'gresho',
+  liquid: true,
   label: 'Gresho vortex',
   tip: 'A steady vortex (Gresho & Chan 1990): the gas turns rigidly out to a fifth of the box, slows to rest by two fifths, and the pressure balances the centrifugal force. Nothing should change; what does is the solver’s own dissipation. In 3D it is a column along z.',
   wholeBox: true,
@@ -79,6 +80,7 @@ const gresho: FlowDef<{ mach: number }> = {
 
 const taylorGreen: FlowDef<{ mach: number; modes: number }> = {
   name: 'taylor-green',
+  liquid: true,
   label: 'Taylor-Green vortex',
   tip: 'An array of counter-rotating vortices. In 2D with viscosity it keeps its shape and decays as exp(-2 ν k² t), an exact solution of the incompressible equations; in 3D the same start, varying along z, breaks down into turbulence.',
   wholeBox: true,
@@ -99,6 +101,7 @@ const taylorGreen: FlowDef<{ mach: number; modes: number }> = {
 
 const shearLayers: FlowDef<{ mach: number; sharp: number; kick: number }> = {
   name: 'shear-layers',
+  liquid: true,
   label: 'Double shear layer',
   tip: 'Two shear layers in a doubly periodic box, the band between them moving at +1 and the rest at -1, with a small sideways kick (Bell, Colella & Glaz 1989): each layer rolls up into one vortex. Under-resolved, a scheme grows spurious vortices along the thin braids between them.',
   wholeBox: true,

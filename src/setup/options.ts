@@ -654,7 +654,7 @@ export function partFields(part: Part): Option[] {
   if (part.kind !== 'flow') return PART_OPTIONS[part.kind].fields;
   return [
     P({ path: 'name', label: 'Flow', tip: 'Which built-in initial condition', default: part.name,
-      control: pick(...Object.values(FLOWS).map((f): Choice => ({ value: f.name, label: f.label, tip: f.tip, ...(f.requires ? { requires: f.requires } : {}), ...(f.wholeBox ? { excludes: [{ fact: 'parts.flow.whole', reason: 'Only one flow can fill the whole box' }] } : {}) }))) }),
+      control: pick(...Object.values(FLOWS).map((f): Choice => ({ value: f.name, label: f.label, tip: f.tip, ...(f.requires ? { requires: f.requires } : {}), ...(f.wholeBox ? { excludes: [{ fact: 'parts.flow.whole', reason: 'Only one flow can fill the whole box' }, ...(f.liquid ? [] : [{ fact: 'physics.eos', is: 'liquid', reason: 'Not for the liquid: its densities stray far from the liquid’s one reference density' }])] } : {}) }))) }),
     ...flowOptions(part.name),
   ];
 }
