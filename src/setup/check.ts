@@ -346,6 +346,23 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
       out.push({ level: 'error', path: 'physics.eosParams.gamma', text: `gamma is ${fmt(gamma)}: this equation of state needs a gamma above 1 (only the ideal gas takes 1, as an isothermal gas)` });
   });
 
+  // The constants the equation of state takes from the units, in code units, must fit the GPU's
+  // 32-bit numbers: a mass unit of a kilogram over a solar radius made the degenerate pressure
+  // scale 2e67, which is Infinity there, and the run NaN before its first step (random test
+  // seed 10759).
+  guard(() => {
+    const eos = spec.physics?.eos ?? 'ideal';
+    const used: Record<string, string[]> = { gas_radiation: ['arad'], degenerate: ['degRho', 'degP', 'arad'], ionizing: ['ionT', 'ionRho', 'arad'], helmholtz: ['helmRho', 'helmE', 'helmT'] };
+    const keys = used[eos];
+    const units = plainUnits(spec);
+    if (!keys || !units) return;
+    const c = spec.physics?.composition;
+    const comp = typeof c === 'string' ? (COMPOSITIONS as Record<string, Composition>)[c] : c ? composition(c.name, c.X, c.ionization ?? 'full') : undefined;
+    const p = { ...physicalEosParams(units, comp), ...spec.physics?.eosParams } as Record<string, number>;
+    for (const k of keys)
+      if (Math.abs(p[k]) > 1e37) out.push({ level: 'error', path: 'domain.units', text: `The units put the equation of state’s ${k} at ${fmt(p[k])} code units, past what the GPU’s 32-bit numbers hold: choose units nearer the gas’s own scales` });
+  });
+
   // A star is held together by its own gravity: with G = 0 its structure is NaN (random test
   // seeds 10028 and 10056, a star added to presets without gravity).
   guard(() => {
