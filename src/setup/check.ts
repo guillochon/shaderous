@@ -352,15 +352,21 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
   // seed 10759).
   guard(() => {
     const eos = spec.physics?.eos ?? 'ideal';
-    const used: Record<string, string[]> = { gas_radiation: ['arad'], degenerate: ['degRho', 'degP', 'arad'], ionizing: ['ionT', 'ionRho', 'arad'], helmholtz: ['helmRho', 'helmE', 'helmT'] };
+    const used: Record<string, string[]> = { gas_radiation: ['arad'], degenerate: ['degRho', 'degP', 'arad'], ionizing: ['ionT', 'ionRho', 'arad'], helmholtz: ['helmRho', 'helmE', 'helmT'], hhe: ['helmRho', 'helmE', 'helmT'] };
     const keys = used[eos];
     const units = plainUnits(spec);
     if (!keys || !units) return;
     const c = spec.physics?.composition;
     const comp = typeof c === 'string' ? (COMPOSITIONS as Record<string, Composition>)[c] : c ? composition(c.name, c.X, c.ionization ?? 'full') : undefined;
     const p = { ...physicalEosParams(units, comp), ...spec.physics?.eosParams } as Record<string, number>;
-    for (const k of keys)
-      if (Math.abs(p[k]) > 1e37) out.push({ level: 'error', path: 'domain.units', text: `The units put the equation of state’s ${k} at ${fmt(p[k])} code units, past what the GPU’s 32-bit numbers hold: choose units nearer the gas’s own scales` });
+    // (Too small is as bad for the scales the tables are read through, which go to zero; the
+    // radiation constant may: the radiation is then negligible. Seeds 10828 and 10830: a mass
+    // unit of 0.01 g put the hydrogen and helium table's density scale at 3e-42.)
+    for (const k of keys) {
+      const v = Math.abs(p[k]);
+      if (v > 1e37 || (k !== 'arad' && v > 0 && v < 1e-37))
+        out.push({ level: 'error', path: 'domain.units', text: `The units put the equation of state’s ${k} at ${fmt(p[k])} code units, past what the GPU’s 32-bit numbers hold: choose units nearer the gas’s own scales` });
+    }
   });
 
   // A star is held together by its own gravity: with G = 0 its structure is NaN (random test

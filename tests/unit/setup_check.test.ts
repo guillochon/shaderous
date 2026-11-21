@@ -60,6 +60,10 @@ describe('checkSetup', () => {
     const scaled = (mass: string) => texts(setup({ domain: { ndim: 2, n: 64, supports2d: true, units: { length: { unit: 'Rsun', value: 1 }, mass: { unit: mass, value: 1 } } }, physics: { eos: 'degenerate' } }), 'error');
     expect(has(scaled('kg'), /past what the GPU’s 32-bit numbers hold/)).toBe(true);
     expect(has(scaled('Msun'), /32-bit/)).toBe(false);
+    // Seeds 10828, 10830: and a table's scale gone to zero (the first core's units with grams for solar masses).
+    const core = (unit: string) => texts(setup({ domain: { ndim: 2, n: 64, supports2d: true, units: { length: { unit: 'au', value: 1 }, mass: { unit, value: 0.01 } } }, physics: { eos: 'hhe', composition: 'solar' } }), 'error');
+    expect(has(core('g'), /helmRho .* 32-bit/)).toBe(true);
+    expect(has(core('Msun'), /32-bit/)).toBe(false);
     // Seed 10624: the degenerate gas (and its kin) at gamma 1.
     const gas = (eos: 'degenerate' | 'gas_radiation' | 'ionizing' | 'ideal', gamma: number) => texts(setup({ physics: { eos, eosParams: { gamma } } }), 'error');
     for (const eos of ['degenerate', 'gas_radiation', 'ionizing'] as const) expect(has(gas(eos, 1), /needs a gamma above 1/)).toBe(true);
