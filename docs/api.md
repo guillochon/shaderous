@@ -296,7 +296,16 @@ issues, so call `check` first.
 Builds a new run from a setup (see [Setups](#setups)) and returns `state()` with the run
 paused at t = 0. With a `document`, the run is built from that setup document, and `setup`
 says the grid and what differs from it; a document may also be given alone. If the build
-fails, the call rejects with the page's error.
+fails, the call rejects with the page's error. A document whose `mesh` shapes name files the
+page does not have is refused, naming them: give each with `meshFile` first (a URL is fetched;
+a name is also looked up among the files this browser kept from the Setup dialog).
+
+### `meshFile(name, base64) → { name, bytes }`
+
+Gives the page a mesh file a setup document's `mesh` shape names (STL, OBJ, PLY, glTF, GLB; an
+airfoil `.dat` or an SVG outline), by that name, as base64. A `.gltf` whose buffers are separate
+files needs each of them too, by the URI the `.gltf` gives it. The runner and the MCP server do
+this for you, from the folder of the setup document ([headless.md](headless.md)).
 
 ### `loadAthdf(base64?) → state`
 
@@ -382,6 +391,12 @@ The run's diagnostics, read back now:
 - `com`: the gas's center of mass relative to the box center;
 - `perturber`: the first point mass's position relative to the box center, or null;
 - `masses`: the point masses, with position, velocity, mass and accreted mass;
+- `bodies`, for a setup with obstacles: per obstacle (the first four apart, in the setup's
+  order, any after them summed with the fourth) its `id`, the `force` the gas exerts on it, the
+  `pressure` and `viscous` parts of that, the `torque` about its center, and with a reference
+  (a wind tunnel's) `coefficients`: `drag`, `lift`, `side` and `moment` (x, y, z). The force
+  is the momentum the gas gave the body's walls over the last step
+  ([numerics.md](numerics.md#26-bodies-in-a-stream));
 - `frame`, for a rotating frame that follows a binary (an orbit's `track`): `omega`, its angular
   velocity about z now, `omegaDot`, its rate of change, and `omega0`, where it started;
 - `ranges`: the least and greatest value of each field, keyed by field name (the panel's

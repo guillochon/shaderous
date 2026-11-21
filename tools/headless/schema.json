@@ -822,6 +822,23 @@
    "changesRun": false
   },
   {
+   "name": "meshFile",
+   "summary": "Give the page a mesh file a setup document refers to (a `mesh` shape’s `file`: STL, OBJ, PLY, glTF, GLB, or an airfoil .dat or SVG outline), by that name, before `load`. Returns its size in bytes.",
+   "args": [
+    {
+     "name": "name",
+     "type": "string",
+     "description": "The name the setup gives the file"
+    },
+    {
+     "name": "base64",
+     "type": "string",
+     "description": "The file’s bytes, base64-encoded"
+    }
+   ],
+   "changesRun": false
+  },
+  {
    "name": "preset",
    "summary": "A preset’s whole setup document: a starting point for one of your own.",
    "args": [
@@ -1472,6 +1489,10 @@
      "document": {
       "type": "object",
       "description": "The setup document (format \"shaderous-setup\")"
+     },
+     "dir": {
+      "type": "string",
+      "description": "The folder the document’s mesh files are in (its `mesh` shapes name them); default the server’s working folder"
      }
     },
     "required": [
@@ -1498,6 +1519,10 @@
      "document": {
       "type": "object",
       "description": "A setup document (format \"shaderous-setup\", see docs/setups.md and describe().setup): the run is built from it, and `setup` then says the grid and what differs. Start from preset(id) to make one"
+     },
+     "dir": {
+      "type": "string",
+      "description": "The folder the document’s mesh files are in (its `mesh` shapes name them); default the server’s working folder"
      }
     },
     "required": [],

@@ -12,12 +12,13 @@
  * any way.
  */
 import { compiledFrom } from '../setup/compile';
+import { meshFilesFor } from '../geometry/store';
 import type { SetupSpec } from '../setup/spec';
 import type { SimConfig } from '../sim';
 import type { BlockAt, LeafState } from './init_cpu';
 
 export type InitRequest =
-  | { kind: 'setup'; key: string; job: number; setup: SetupSpec; box: number; cfg: Omit<SimConfig, 'problem'>; n: number; dx0: number; levels: number }
+  | { kind: 'setup'; key: string; job: number; setup: SetupSpec; box: number; cfg: Omit<SimConfig, 'problem'>; n: number; dx0: number; levels: number; meshes: Record<string, Uint8Array> }
   | { kind: 'indicators'; key: string; job: number; blocks: (BlockAt & { sub: number })[] }
   | { kind: 'leaves'; key: string; job: number; blocks: (BlockAt & { index: number })[] };
 
@@ -100,7 +101,8 @@ export class InitRun {
     const run = new InitRun(ws, key);
     try {
       await run.all((w, job) => {
-        w.postMessage({ kind: 'setup', key, job, setup: share.setup, box: cfg.problem.box, cfg: share.plain, n, dx0, levels } satisfies InitRequest);
+        // (The mesh files the setup refers to: a worker compiles the setup itself. Each builds its own distance field.)
+        w.postMessage({ kind: 'setup', key, job, setup: share.setup, box: cfg.problem.box, cfg: share.plain, n, dx0, levels, meshes: meshFilesFor(share.setup) } satisfies InitRequest);
         return (m) => m.kind === 'ready';
       }, READY_MS);
       return run;

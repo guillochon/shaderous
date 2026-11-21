@@ -272,3 +272,31 @@ export function debrisSummary(r) {
   }
   return out;
 }
+
+/**
+ * Give the page the mesh files a setup document's `mesh` shapes name (plans/wind-tunnel.md 3.3),
+ * read from `dir` (the setup document's folder): each by the name the setup gives it, and a
+ * .gltf's separate buffers by their own. URLs are left to the page, which fetches them.
+ */
+export async function sendMeshFiles(call, spec, dir) {
+  const { readFileSync } = await import('node:fs');
+  const names = new Set();
+  for (const p of spec?.parts ?? []) {
+    const f = p?.shape?.type === 'mesh' ? p.shape.file : undefined;
+    if (typeof f === 'string' && f && !/^(https?:|data:|blob:)/.test(f)) names.add(f);
+  }
+  for (const name of names) {
+    const file = path.resolve(dir, name);
+    if (!existsSync(file)) throw new Error(`the setup's mesh file "${name}" is not in ${dir}`);
+    const bytes = readFileSync(file);
+    await call('meshFile', name, bytes.toString('base64'));
+    if (name.toLowerCase().endsWith('.gltf')) {
+      for (const b of JSON.parse(bytes.toString('utf8')).buffers ?? []) {
+        if (!b.uri || b.uri.startsWith('data:')) continue;
+        const f = path.resolve(path.dirname(file), b.uri);
+        if (existsSync(f)) await call('meshFile', b.uri, readFileSync(f).toString('base64'));
+      }
+    }
+  }
+  return [...names];
+}

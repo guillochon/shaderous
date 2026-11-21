@@ -7,6 +7,7 @@
 // Anything drawn can be clicked, which shows its settings: a body, a shape, a face of the box.
 // A body whose position is its own (not placed by an orbit) can be dragged in either view, as can
 // a shape; an obstacle that is a box or a half-space also turns, by the handle it shows when picked.
+import { meshSilhouette } from '../../geometry/store';
 import { BOUNDARIES } from '../../problems/boundaries';
 import { boxFrame, boxPivot, eulerOf, rotationMatrix } from '../../setup/parts/region';
 import { buildSetupBodies, type BuiltSetup } from '../../setup/check';
@@ -298,6 +299,14 @@ function outlineOf(sh: Shape, view: View, scene: Scene, extent: number): Outline
       corners.push([p[a], p[b]]);
     }
     let poly = hull(corners);
+    for (const [n, at] of [[[1, 0], extent], [[-1, 0], extent], [[0, 1], extent], [[0, -1], extent]] as [[number, number], number][]) poly = clip(poly, n, at);
+    return poly.length >= 3 ? { poly } : null;
+  }
+  if (sh.type === 'mesh') {
+    // A mesh file, once loaded: the hull of its vertices as the view sees them (geometry/store.ts).
+    const pts = meshSilhouette(sh, { box: scene.box, ndim: scene.ndim }, [a, b]);
+    if (!pts || pts.length < 3) return null;
+    let poly = hull(pts);
     for (const [n, at] of [[[1, 0], extent], [[-1, 0], extent], [[0, 1], extent], [[0, -1], extent]] as [[number, number], number][]) poly = clip(poly, n, at);
     return poly.length >= 3 ? { poly } : null;
   }
@@ -807,7 +816,7 @@ export function createPreview(opts: { onEdit(path: string, value: unknown): void
         d[b] = tidy(y - drag.start[1], box);
         const shift = (v: readonly (number | null)[] | undefined, k: number) => (typeof v?.[k] === 'number' ? tidy(v[k] + d[k], box) : (v?.[k] ?? null));
         let next: Shape;
-        if (sh.type === 'sphere') next = { ...sh, center: [0, 1, 2].map((k) => tidy((sh.center?.[k] ?? 0) + d[k], box)) as Vec3 };
+        if (sh.type === 'sphere' || sh.type === 'mesh') next = { ...sh, center: [0, 1, 2].map((k) => tidy((sh.center?.[k] ?? 0) + d[k], box)) as Vec3 };
         else if (sh.type === 'box') next = { ...sh, min: [0, 1, 2].map((k) => shift(sh.min, k)) as Vec3, max: [0, 1, 2].map((k) => shift(sh.max, k)) as Vec3 };
         else {
           const norm = Math.hypot(...sh.normal) || 1;

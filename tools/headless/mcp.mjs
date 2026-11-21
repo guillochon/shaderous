@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import { debrisSummary, fetchSlice, lowerPriority, openSession, saveAthdf, uploadAthdf } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, saveAthdf, sendMeshFiles, uploadAthdf } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const { values: o } = parseArgs({
@@ -78,11 +78,18 @@ const TOOLS = [
   },
   {
     name: 'check_setup',
-    run: async ({ document }) => text(await call('check', document)),
+    async run({ document, dir }) {
+      if (document) await sendMeshFiles(call, document, path.resolve(dir ?? process.cwd())).catch(() => {});
+      return text(await call('check', document));
+    },
   },
   {
     name: 'load',
-    run: async ({ setup, document }) => text(await call('load', setup ?? '', ...(document ? [document] : []))),
+    async run({ setup, document, dir }) {
+      // A document's mesh files, from `dir` (default the server's folder).
+      if (document) await sendMeshFiles(call, document, path.resolve(dir ?? process.cwd()));
+      return text(await call('load', setup ?? '', ...(document ? [document] : [])));
+    },
   },
   {
     name: 'run',

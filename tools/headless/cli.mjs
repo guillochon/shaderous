@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { helpText, OPTIONS } from './flags.mjs';
-import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, saveAthdf, setupQuery, uploadAthdf } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, saveAthdf, sendMeshFiles, setupQuery, uploadAthdf } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const HELP = `Usage: shaderous <command> [setup] [options]   (in a checkout: npm run headless -- <command> ...)
@@ -123,6 +123,8 @@ async function runOne(session, q, dir) {
   const tw = Date.now();
   const wallMs = o.wall === undefined ? undefined : num(o.wall, 'wall') * 1000;
   if (wallMs !== undefined && !(wallMs > 0)) fail('--wall must be positive');
+  // A setup document's mesh files, from its folder (session.mjs sendMeshFiles).
+  if (setupDocument && !o.from) await sendMeshFiles(call, setupDocument, path.dirname(path.resolve(o.setup)));
   const st = o.from ? await uploadAthdf(call, o.from) : await call('load', q.toString(), ...(setupDocument ? [setupDocument] : []));
   for (const w of st.warnings ?? []) log(`  ${o.from}: ${w}`);
   mkdirSync(dir, { recursive: true });

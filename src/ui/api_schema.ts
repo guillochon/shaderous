@@ -44,6 +44,15 @@ export const API_METHODS: ApiMethod[] = [
     args: [{ name: 'document', type: 'object', description: 'The setup document (format "shaderous-setup")' }],
     changesRun: false,
   },
+  {
+    name: 'meshFile',
+    summary: 'Give the page a mesh file a setup document refers to (a `mesh` shape’s `file`: STL, OBJ, PLY, glTF, GLB, or an airfoil .dat or SVG outline), by that name, before `load`. Returns its size in bytes.',
+    args: [
+      { name: 'name', type: 'string', description: 'The name the setup gives the file' },
+      { name: 'base64', type: 'string', description: 'The file’s bytes, base64-encoded' },
+    ],
+    changesRun: false,
+  },
   { name: 'preset', summary: 'A preset’s whole setup document: a starting point for one of your own.', args: [{ name: 'id', type: 'string', description: 'A problem id' }], changesRun: false },
   {
     name: 'load',

@@ -130,7 +130,40 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 Shapes: `{ "type": "sphere", "center", "radius" }` (or `radiusCells`, in finest cells; a
 cylinder in 2D), `{ "type": "box", "min", "max" }` (a bound may be `null`: open on that side;
 `rotate`, degrees about its center about x, then y, then z),
-`{ "type": "half", "normal", "at" }` (the side the normal points away from).
+`{ "type": "half", "normal", "at" }` (the side the normal points away from), and
+`{ "type": "mesh", "file", ... }`, a body from a mesh file (below).
+
+### Bodies from mesh files
+
+A shape of type `mesh` is the inside of a triangle mesh: an obstacle in the shape of a car, a
+wing, a rabbit (or a region of gas in that shape).
+
+```json
+{ "kind": "obstacle", "id": "car",
+  "shape": { "type": "mesh", "file": "car.stl", "fit": 0.3, "center": [-0.5, 0, 0], "rotate": [0, 0, 10], "up": "z" } }
+```
+
+| Key | Meaning |
+|---|---|
+| `file` | The file, by its name beside the setup document (the runner, the MCP server's `dir`), a file dropped on the Setup dialog, or a URL. STL (binary or ASCII), OBJ, PLY (ASCII or binary), glTF or GLB (uncompressed). For 2D runs also an airfoil's coordinates (`.dat`, Selig or Lednicer order) or an SVG path |
+| `node` | A glTF node or an OBJ group, with what is below it; the whole file if absent |
+| `fit` or `scale` | The longest side as a fraction of the box, or a factor on the file's lengths. STL has no units: it needs one of the two (`fit` 0.25 is taken otherwise, with an error from the check) |
+| `center` | Where the middle of the mesh's bounding box goes |
+| `rotate` | Degrees about x, then y, then z, as for a box |
+| `up` | Which of the file's axes is up: `y` for glTF and most 3D programs, `z` (the default) for most CAD. It becomes the box's z, or y in 2D |
+
+In 2D the body is the mesh's cross-section through the plane z = 0, after it is placed. STEP and
+IGES files hold exact surfaces, not triangles, and are not read: export STL or glTF from the
+CAD program (FreeCAD: File > Export, Mesh formats; Blender: File > Export > glTF or STL;
+Fusion and Onshape: export as STL or OBJ).
+
+The check reports a missing file, a part thinner than two finest cells (a wall thinner than that
+is not a wall), and a mesh so broken that what is inside is a guess. Holes, flipped triangles
+and pieces that pass through each other are taken care of
+([numerics.md](numerics.md#26-bodies-in-a-stream)). On the page, the Setup dialog's
+"Open file…" button and dropping files on the dialog add mesh files: each is kept in the
+browser, and one the setup does not name yet becomes an obstacle. A link to such a setup
+carries the file's name, and finds the file again only in a browser that has it (or by URL).
 
 ### Forces on obstacles
 
@@ -507,13 +540,18 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
-| `shape.type` | Shape | `sphere`, `box`, `half`. Default `sphere` | A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane |
-| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere |
+| `shape.type` | Shape | `sphere`, `box`, `half`, `mesh`. Default `sphere` | A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D) |
+| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere, or where the middle of the mesh’s bounding box goes |
+| `shape.file` | File | text. Default `` | The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program |
+| `shape.node` | Part of the file | text | A glTF node or an OBJ group, with the parts below it. Empty: the whole file |
+| `shape.fit` | Fit | a number, 0 to 1 | The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale |
+| `shape.scale` | Scale | a number, at least 0 | A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters) |
+| `shape.up` | Up axis | `x`, `y`, `z`. Default `z` | Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D) |
 | `shape.radius` | Radius | a number, at least 0. Default `0.1` | Radius of the sphere |
 | `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
 | `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
 | `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
-| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts |
+| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
 | `rho` | Density | a number, at least 1e-300 | Density inside the shape |
@@ -530,13 +568,18 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
-| `shape.type` | Shape | `sphere`, `box`, `half`. Default `sphere` | A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane |
-| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere |
+| `shape.type` | Shape | `sphere`, `box`, `half`, `mesh`. Default `sphere` | A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D) |
+| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere, or where the middle of the mesh’s bounding box goes |
+| `shape.file` | File | text. Default `` | The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program |
+| `shape.node` | Part of the file | text | A glTF node or an OBJ group, with the parts below it. Empty: the whole file |
+| `shape.fit` | Fit | a number, 0 to 1 | The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale |
+| `shape.scale` | Scale | a number, at least 0 | A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters) |
+| `shape.up` | Up axis | `x`, `y`, `z`. Default `z` | Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D) |
 | `shape.radius` | Radius | a number, at least 0. Default `0.1` | Radius of the sphere |
 | `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
 | `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
 | `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
-| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts |
+| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
 
@@ -544,13 +587,18 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 
 | Key | In the dialog | Values | Meaning |
 | --- | --- | --- | --- |
-| `shape.type` | Shape | `sphere`, `box`, `half`. Default `sphere` | A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane |
-| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere |
+| `shape.type` | Shape | `sphere`, `box`, `half`, `mesh`. Default `sphere` | A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D) |
+| `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere, or where the middle of the mesh’s bounding box goes |
+| `shape.file` | File | text. Default `` | The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program |
+| `shape.node` | Part of the file | text | A glTF node or an OBJ group, with the parts below it. Empty: the whole file |
+| `shape.fit` | Fit | a number, 0 to 1 | The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale |
+| `shape.scale` | Scale | a number, at least 0 | A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters) |
+| `shape.up` | Up axis | `x`, `y`, `z`. Default `z` | Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D) |
 | `shape.radius` | Radius | a number, at least 0. Default `0.1` | Radius of the sphere |
 | `shape.radiusCells` | Radius in cells | a number, 0.5 to 64 | Instead of the radius: this many finest cells, whatever the resolution (a point explosion) |
 | `shape.min` | Lower corner | `[x, y, z]`. Default `[-0.1,-0.1,-0.1]` | Corner of the box nearest -x, -y, -z |
 | `shape.max` | Upper corner | `[x, y, z]`. Default `[0.1,0.1,0.1]` | Corner of the box nearest +x, +y, +z |
-| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts |
+| `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
 

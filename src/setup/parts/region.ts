@@ -2,6 +2,7 @@
 import type { Eos } from '../../eos/eos';
 import type { Prim } from '../../problems/types';
 import type { ObstaclePart, RegionPart, Shape, Vec3 } from '../spec';
+import { placeMesh } from '../../geometry/store';
 
 export interface PaintContext {
   box: number;
@@ -90,6 +91,12 @@ export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 
     };
     return { inside, center: [0, 0, 0], radius: 0 };
   }
+  if (shape.type === 'mesh') {
+    // A mesh file (geometry/store.ts): its distance field at the finest cell size. In 2D every
+    // cell is at z = 0: the cross-section through the plane z = 0 of the placed mesh.
+    const m = placeMesh(shape, { box: ctx.box, ndim: ctx.ndim, dx: ctx.box / ctx.n });
+    return { inside: (x, y, z) => m.inside(x, y, ctx.ndim === 2 ? 0 : z), center: m.center, radius: 0 };
+  }
   const normal = shape.normal ?? [1, 0, 0];
   const norm = Math.hypot(...normal) || 1;
   const d = normal.map((c) => c / norm);
@@ -104,6 +111,7 @@ export function insideOf(shape: Shape, ctx: { box: number; n: number; ndim: 2 | 
 export function bodyCenter(shape: Shape): Vec3 {
   if (shape.type === 'sphere') return [...(shape.center ?? [0, 0, 0])] as Vec3;
   if (shape.type === 'box') return boxPivot(shape);
+  if (shape.type === 'mesh') return [0, 1, 2].map((a) => shape.center?.[a] ?? 0) as Vec3;
   return [0, 0, 0];
 }
 

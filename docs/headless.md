@@ -81,9 +81,14 @@ file:
 npm run headless -- run --setup my-triple.shaderous.json --dim 3 --n 256 --amr 2 --until 10 --every 1 --png --out runs/triple
 ```
 
+A document whose obstacles are mesh files (a `mesh` shape, [setups.md](setups.md)) names
+them; the runner reads each from the document's folder and gives it to the page before the
+run is built (a `.gltf`'s separate buffers too). A URL is fetched by the page.
+
 The MCP server's `check_setup` tool reads a document without running it and returns what is
 wrong with it or worth a second look (`check` in [api.md](api.md)). The MCP server's `load` tool takes the same thing as `document`, and its `describe` tool with
-a `problem` returns that preset's document to start from.
+a `problem` returns that preset's document to start from. Both read a document's mesh files
+from `dir` (default: the server's working folder).
 
 ### When to stop
 

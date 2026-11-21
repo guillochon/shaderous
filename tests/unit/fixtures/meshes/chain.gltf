@@ -1,0 +1,116 @@
+{
+ "asset": {
+  "version": "2.0"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "base",
+   "mesh": 0,
+   "children": [
+    1
+   ]
+  },
+  {
+   "name": "arm",
+   "mesh": 0,
+   "translation": [
+    2,
+    0,
+    0
+   ],
+   "rotation": [
+    0,
+    0,
+    0.7071067811865476,
+    0.7071067811865476
+   ],
+   "children": [
+    2
+   ]
+  },
+  {
+   "name": "tip",
+   "mesh": 0,
+   "matrix": [
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    0,
+    0,
+    0,
+    1,
+    0,
+    1,
+    0,
+    0,
+    1
+   ]
+  }
+ ],
+ "meshes": [
+  {
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0
+     },
+     "indices": 1
+    }
+   ]
+  }
+ ],
+ "buffers": [
+  {
+   "uri": "data:application/octet-stream;base64,AAAAvwAAAL8AAAC/AAAAPwAAAL8AAAC/AAAAPwAAAD8AAAC/AAAAvwAAAD8AAAC/AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAA/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/AAADAAIAAAACAAEABAAFAAYABAAGAAcAAAABAAUAAAAFAAQAAgADAAcAAgAHAAYAAQACAAYAAQAGAAUAAAAEAAcAAAAHAAMA",
+   "byteLength": 168
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 96
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 96,
+   "byteLength": 72
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 8,
+   "type": "VEC3",
+   "min": [
+    -0.5,
+    -0.5,
+    -0.5
+   ],
+   "max": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5123,
+   "count": 36,
+   "type": "SCALAR"
+  }
+ ]
+}

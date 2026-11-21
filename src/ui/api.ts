@@ -36,6 +36,7 @@ import { readSetup } from '../setup/codec';
 import { factsOf, factsWithout, flatten, OPTIONS, optionAt, PART_OPTIONS, partFields, unavailable, valueAt, type Option } from '../setup/options';
 import { FLOWS } from '../setup/parts/flow';
 import { cloneSetup, SETUP_FORMAT, setPath, type SetupSpec } from '../setup/spec';
+import { ensureMeshFiles, missingMeshFiles, putMeshFile } from '../geometry/store';
 
 /** What the page lends the API: its state, and the operations its own controls use. */
 export interface AppHooks {
@@ -1123,6 +1124,15 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
       return { ok: !issues.some((i) => i.level === 'error'), notes: report.notes, issues, document: spec };
     },
 
+    /** Give the page a mesh file a setup refers to, by its name (base64 bytes). */
+    meshFile(name: string, base64: string) {
+      const s = atob(base64);
+      const bytes = new Uint8Array(s.length);
+      for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i);
+      putMeshFile(name, bytes);
+      return { name, bytes: bytes.length };
+    },
+
     /** A preset's whole setup document: a starting point for one of your own. */
     preset(id: string) {
       const spec = presetSpec(id);
@@ -1139,6 +1149,11 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         if (document !== undefined) {
           const { spec, report } = readSetup(document, (id) => PRESET_FILES[id]);
           if (!spec) throw new Error(`not a setup document: ${report.error}`);
+          // Mesh files by URL are fetched, by name looked up among those this browser keeps;
+          // otherwise they must have been given (meshFile).
+          await ensureMeshFiles(spec);
+          const missing = missingMeshFiles(spec);
+          if (missing.length) throw new Error(`the setup refers to mesh files the page does not have: ${missing.join(', ')}. Give each with meshFile(name, base64) first (the runner and the MCP server send those beside the setup document)`);
           q.set('problem', app.adopt(spec));
           q.delete('setup');
         }

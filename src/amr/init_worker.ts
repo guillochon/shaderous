@@ -6,6 +6,7 @@
 import { makeEos } from '../eos/eos';
 import { loadEosTable } from '../eos/tables';
 import { compileSetup } from '../setup/compile';
+import { putMeshFile } from '../geometry/store';
 import type { SimConfig } from '../sim';
 import { sphSetup } from '../spherical';
 import { problemCoefficients } from '../species/mixture';
@@ -22,6 +23,7 @@ self.onmessage = async (e: MessageEvent<InitRequest>) => {
   const m = e.data;
   try {
     if (m.kind === 'setup') {
+      for (const [name, bytes] of Object.entries(m.meshes ?? {})) putMeshFile(name, bytes);
       const problem = { ...compileSetup(m.setup).problem, box: m.box };
       const cfg = { ...m.cfg, problem } as SimConfig;
       // A tabulated equation of state's float64 mirror needs its table here too (eos/tables.ts);

@@ -34,8 +34,10 @@ export const MCP_TOOLS: McpTool[] = [
     more: 'Give `problem` for one problem in full, with its description.',
     own: { problem: { type: 'string', description: 'A problem id for its full entry' } },
   },
-  { name: 'check_setup', method: 'check', brief: 'Checks a setup document without running it: whether it can be read, what reading left out, and the errors and warnings the Setup dialog would list', pass: ['document'], required: ['document'] },
-  { name: 'load', method: 'load', brief: 'Builds a run from a setup (query string or object) or a setup document, paused at t = 0', pass: ['setup', 'document'] },
+  { name: 'check_setup', method: 'check', brief: 'Checks a setup document without running it: whether it can be read, what reading left out, and the errors and warnings the Setup dialog would list', pass: ['document'], required: ['document'],
+    own: { dir: { type: 'string', description: 'The folder the document’s mesh files are in (its `mesh` shapes name them); default the server’s working folder' } } },
+  { name: 'load', method: 'load', brief: 'Builds a run from a setup (query string or object) or a setup document, paused at t = 0', pass: ['setup', 'document'],
+    own: { dir: { type: 'string', description: 'The folder the document’s mesh files are in (its `mesh` shapes name them); default the server’s working folder' } } },
   {
     name: 'run', method: 'run',
     brief: 'Advances to a time (`until`, landed on exactly), by a number of `steps`, or whichever comes first, with an optional `timeout_seconds`',

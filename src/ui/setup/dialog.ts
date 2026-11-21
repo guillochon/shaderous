@@ -7,6 +7,12 @@
 //
 // A setting that costs a running simulation nothing (`live`) is applied as it is changed;
 // everything else waits for Apply, whose label says what it will do.
+import { extensionOf } from '../../geometry';
+import { keepMeshFile, meshFilesOf } from '../../geometry/store';
+
+/** Mesh files the dialog takes (picked or dropped): their extensions. */
+const MESH_ACCEPT = '.stl,.obj,.ply,.gltf,.glb,.bin,.dat,.svg';
+const MESH_FILE = /\.(stl|obj|ply|gltf|glb|bin|dat|svg)$/i;
 import './setup.css';
 import { checkSetup } from '../../setup/check';
 import { formatSetup, readSetup } from '../../setup/codec';
@@ -168,9 +174,9 @@ function build() {
   // ---- left: presets, library, files ----
   const presetsEl = h('div', { class: 'sd-presets' });
   const libraryEl = h('div', { class: 'sd-library' });
-  const fileInput = h('input', { type: 'file', accept: '.json,application/json', hidden: true, 'aria-label': 'Open a setup file' });
+  const fileInput = h('input', { type: 'file', multiple: true, accept: `.json,application/json,${MESH_ACCEPT}`, hidden: true, 'aria-label': 'Open a setup file, or add mesh files' });
   const newBtn = h('button', { type: 'button', text: 'New', title: 'An empty setup on the grid of the run: a box of still gas, to build on' });
-  const openBtn = h('button', { type: 'button', text: 'Open file…', title: 'Open a .shaderous.json file (or drop one on this dialog)' });
+  const openBtn = h('button', { type: 'button', text: 'Open file…', title: 'Open a .shaderous.json file, or add mesh files (STL, OBJ, PLY, glTF, GLB; an airfoil .dat or an SVG outline for 2D) as obstacles. Or drop them on this dialog' });
   left.append(
     h('h3', { text: 'Presets' }), presetsEl,
     h('a', { class: 'sd-all', href: PRESETS_URL, target: '_blank', rel: 'noopener', text: 'All preset files on GitHub', title: 'The folder of preset files in the repository, to download them all' }),
@@ -296,9 +302,11 @@ function build() {
   });
   openBtn.addEventListener('click', () => fileInput.click());
   fileInput.addEventListener('change', () => {
-    const f = fileInput.files?.[0];
+    const all = [...(fileInput.files ?? [])];
     fileInput.value = '';
-    if (f) void openFile(f);
+    for (const f of all.filter(isMesh)) void addMesh(f);
+    const setup = all.find((f) => !isMesh(f));
+    if (setup) void openFile(setup);
   });
 
   async function openFile(file: File) {
@@ -314,18 +322,42 @@ function build() {
     }
   }
 
-  // A setup file dropped anywhere on the dialog opens in it.
+  /**
+   * A mesh file, picked or dropped: kept in this browser (geometry/store.ts), and, if the setup
+   * does not name it yet, added as an obstacle that fits a quarter of the box. A .bin goes with
+   * a .gltf and is only kept.
+   */
+  async function addMesh(file: File) {
+    try {
+      await keepMeshFile(file.name, new Uint8Array(await file.arrayBuffer()));
+      const ext = extensionOf(file.name);
+      const named = meshFilesOf(draft).includes(file.name);
+      if (ext !== 'bin' && !named) {
+        const id = file.name.replace(/\.[^.]*$/, '').replace(/[^A-Za-z0-9_-]+/g, '-') || 'body';
+        draft.parts = [...(draft.parts ?? []), { kind: 'obstacle', id, shape: { type: 'mesh', file: file.name, fit: 0.25, ...(ext === 'gltf' || ext === 'glb' ? { up: 'y' } : {}) } }];
+        status(`Added ${file.name} as the obstacle "${id}"`);
+      } else status(`Loaded ${file.name}`);
+      refresh();
+    } catch (e) {
+      status(`${file.name} could not be read: ${message(e)}`, true);
+    }
+  }
+  const isMesh = (f: File) => MESH_FILE.test(f.name);
+
+  // A setup file dropped anywhere on the dialog opens in it; mesh files are added.
   el.addEventListener('dragover', (e) => {
     if (!e.dataTransfer?.types.includes('Files')) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
   });
   el.addEventListener('drop', (e) => {
-    const f = e.dataTransfer?.files?.[0];
-    if (!f) return;
+    const all = [...(e.dataTransfer?.files ?? [])];
+    if (!all.length) return;
     e.preventDefault();
     e.stopPropagation();
-    void openFile(f);
+    for (const f of all.filter(isMesh)) void addMesh(f);
+    const setup = all.find((f) => !isMesh(f));
+    if (setup) void openFile(setup);
   });
 
   // ---- middle: notes, featured strip, pages ----

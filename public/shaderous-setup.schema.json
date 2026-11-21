@@ -1926,10 +1926,11 @@
           "enum": [
            "sphere",
            "box",
-           "half"
+           "half",
+           "mesh"
           ],
           "title": "Shape",
-          "description": "A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane"
+          "description": "A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D)"
          },
          "center": {
           "type": "array",
@@ -1939,7 +1940,7 @@
           "minItems": 3,
           "maxItems": 3,
           "title": "Center",
-          "description": "Center of the sphere"
+          "description": "Center of the sphere, or where the middle of the mesh’s bounding box goes"
          },
          "radius": {
           "type": "number",
@@ -2009,7 +2010,41 @@
           "minItems": 3,
           "maxItems": 3,
           "title": "Rotation",
-          "description": "Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts"
+          "description": "Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box"
+         },
+         "file": {
+          "type": "string",
+          "maxLength": 4000,
+          "title": "File",
+          "description": "The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program"
+         },
+         "node": {
+          "type": "string",
+          "maxLength": 4000,
+          "title": "Part of the file",
+          "description": "A glTF node or an OBJ group, with the parts below it. Empty: the whole file"
+         },
+         "scale": {
+          "type": "number",
+          "title": "Scale",
+          "description": "A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters)",
+          "minimum": 0
+         },
+         "fit": {
+          "type": "number",
+          "title": "Fit",
+          "description": "The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale",
+          "minimum": 0,
+          "maximum": 1
+         },
+         "up": {
+          "enum": [
+           "x",
+           "y",
+           "z"
+          ],
+          "title": "Up axis",
+          "description": "Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D)"
          }
         },
         "additionalProperties": false
@@ -2104,10 +2139,11 @@
           "enum": [
            "sphere",
            "box",
-           "half"
+           "half",
+           "mesh"
           ],
           "title": "Shape",
-          "description": "A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane"
+          "description": "A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D)"
          },
          "center": {
           "type": "array",
@@ -2117,7 +2153,7 @@
           "minItems": 3,
           "maxItems": 3,
           "title": "Center",
-          "description": "Center of the sphere"
+          "description": "Center of the sphere, or where the middle of the mesh’s bounding box goes"
          },
          "radius": {
           "type": "number",
@@ -2187,7 +2223,41 @@
           "minItems": 3,
           "maxItems": 3,
           "title": "Rotation",
-          "description": "Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts"
+          "description": "Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box"
+         },
+         "file": {
+          "type": "string",
+          "maxLength": 4000,
+          "title": "File",
+          "description": "The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program"
+         },
+         "node": {
+          "type": "string",
+          "maxLength": 4000,
+          "title": "Part of the file",
+          "description": "A glTF node or an OBJ group, with the parts below it. Empty: the whole file"
+         },
+         "scale": {
+          "type": "number",
+          "title": "Scale",
+          "description": "A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters)",
+          "minimum": 0
+         },
+         "fit": {
+          "type": "number",
+          "title": "Fit",
+          "description": "The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale",
+          "minimum": 0,
+          "maximum": 1
+         },
+         "up": {
+          "enum": [
+           "x",
+           "y",
+           "z"
+          ],
+          "title": "Up axis",
+          "description": "Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D)"
          }
         },
         "additionalProperties": false
@@ -2216,10 +2286,11 @@
           "enum": [
            "sphere",
            "box",
-           "half"
+           "half",
+           "mesh"
           ],
           "title": "Shape",
-          "description": "A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane"
+          "description": "A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D)"
          },
          "center": {
           "type": "array",
@@ -2229,7 +2300,7 @@
           "minItems": 3,
           "maxItems": 3,
           "title": "Center",
-          "description": "Center of the sphere"
+          "description": "Center of the sphere, or where the middle of the mesh’s bounding box goes"
          },
          "radius": {
           "type": "number",
@@ -2299,7 +2370,41 @@
           "minItems": 3,
           "maxItems": 3,
           "title": "Rotation",
-          "description": "Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts"
+          "description": "Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box"
+         },
+         "file": {
+          "type": "string",
+          "maxLength": 4000,
+          "title": "File",
+          "description": "The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program"
+         },
+         "node": {
+          "type": "string",
+          "maxLength": 4000,
+          "title": "Part of the file",
+          "description": "A glTF node or an OBJ group, with the parts below it. Empty: the whole file"
+         },
+         "scale": {
+          "type": "number",
+          "title": "Scale",
+          "description": "A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters)",
+          "minimum": 0
+         },
+         "fit": {
+          "type": "number",
+          "title": "Fit",
+          "description": "The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale",
+          "minimum": 0,
+          "maximum": 1
+         },
+         "up": {
+          "enum": [
+           "x",
+           "y",
+           "z"
+          ],
+          "title": "Up axis",
+          "description": "Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D)"
          }
         },
         "additionalProperties": false

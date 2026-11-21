@@ -3524,6 +3524,45 @@ force on a face is along the face's normal, and off by half a cell's lever for v
   torque, and, where the setup gives a reference (a density, speed, area and length), the drag
   and lift coefficients $`C = F / (\tfrac12 \rho U^2 A)`$ and the moment coefficients.
 
+### Bodies from mesh files
+
+A `mesh` shape (setups.md) is a triangle mesh read from a file (`src/geometry/`: STL, OBJ,
+PLY, glTF and GLB, and outlines for 2D). Each file becomes a signed distance field in its own
+frame, on a grid at the finest cell size (`geometry/sdf.ts`), which the painters sample: a
+cell is solid where the distance at its center is negative.
+
+1. **Winding made consistent.** Vertices at the same place (to a millionth of the mesh's size)
+   are welded, and each triangle's neighbor across an edge of exactly two triangles is turned
+   where the two run along it the same way. A closed piece is then turned outward (its enclosed
+   volume positive); an open one keeps the way most of its triangles were given. An edge of
+   three or more triangles, where pieces touch, joins nothing.
+2. **A bounding-volume tree** over the triangles, with each node's area-weighted normal and
+   centroid.
+3. **Distance**, exact (to the nearest triangle) within a band of three cells of the surface,
+   and clamped to the band's width beyond.
+4. **Sign** by the generalized winding number ([Jacobson et al. 2013][Jacobson2013]), with a
+   node more than two of its radii away counted as its dipole ([Barill et al. 2018][Barill2018]):
+   inside above 1/2. Holes and pieces that pass through each other change the number a little
+   and not the answer; a triangle wound the wrong way would subtract its solid angle, which is
+   why the winding is made consistent first. For a single closed piece, a point whose nearest
+   surface point is inside a face takes that face's side instead. Beyond the band a point takes
+   the number of a coarse grid of the band's spacing: it is at least the band's width from the
+   surface, and its coarse sample within 0.87 of that, so the two are on the same side.
+5. **A report**: volume, area, bounds, the shadow along each axis (the drag's reference area),
+   the thinnest part (from each triangle inward along its normal to the next surface), and how
+   far the winding number strays from 0 or 1 away from the surface (how broken the mesh is).
+
+Measured (unit tests `sdf-*`, `tests/unit/geometry.test.ts`): an icosphere of 5120 triangles
+matches r - R within the band to 0.1 of a cell; the volume the field holds (each point counted
+as clamp(1/2 - d/h, 0, 1) of a cell) converges to the mesh's at order 1.7 to 2.9 (relative
+error 1.2e-2, 3.5e-3, 5.3e-4, 7.1e-5 at 10, 20, 40, 80 points across); a tenth of the triangles
+removed, or half of them flipped, changes no point more than a cell from the surface; touching
+pieces stay solid at their shared face. A field takes seconds on the CPU for meshes of tens of
+thousands of triangles and under half a minute for a million (one core of a desktop CPU:
+82 000 triangles on 129 cubed points in 2.7 s, 330 000 on 249 cubed in 19 s, 1.3 million on
+249 cubed in 26 s). It is made where the setup is compiled, and kept for later runs at the
+same spacing; on blocks each initialization worker makes its own.
+
 **Validation.** `force-balance`: a periodic box with a cylinder and a slab of fluid moving
 toward it, viscosity on, so that only the body changes the gas's momentum. Over 30 steps the
 change of the gas's momentum is minus the sum of the force times dt to 3e-7 to 5e-6 of it,
@@ -3532,6 +3571,8 @@ two levels of blocks (the test's threshold is 1e-4).
 
 ## References
 
+[Jacobson2013]: https://doi.org/10.1145/2461912.2461916
+[Barill2018]: https://doi.org/10.1145/3197517.3201337
 [ThompsonLauson1972]: https://github.com/isale-code/M-ANEOS/tree/master/docs
 [Melosh2007]: https://doi.org/10.1111/j.1945-5100.2007.tb01009.x
 [Stewart2020]: https://arxiv.org/abs/1910.04687
@@ -3622,6 +3663,7 @@ two levels of blocks (the test's threshold is 1e-4).
 [Karni1996]: https://doi.org/10.1137/S106482759528003X
 [QuirkKarni1996]: https://doi.org/10.1017/S0022112096007069
 
+- Barill, G., Dickson, N. G., Schmidt, R., Levin, D. I. W., & Jacobson, A. (2018). Fast winding numbers for soups and clouds. ACM Trans. Graph. 37, 43. [doi:10.1145/3197517.3201337](https://doi.org/10.1145/3197517.3201337)
 - Bate, M. R., Bonnell, I. A., & Price, N. M. (1995). Modelling accretion in protobinary systems. MNRAS 277, 362. [doi:10.1093/mnras/277.2.362](https://doi.org/10.1093/mnras/277.2.362)
 - Berger, M. J., & Oliger, J. (1984). Adaptive Mesh Refinement for Hyperbolic Partial Differential Equations. Journal of Computational Physics 53, 484. [doi:10.1016/0021-9991(84)90073-1](https://doi.org/10.1016/0021-9991(84)90073-1)
 - Berger, M. J., & Colella, P. (1989). Local Adaptive Mesh Refinement for Shock Hydrodynamics. Journal of Computational Physics 82, 64. [doi:10.1016/0021-9991(89)90035-1](https://doi.org/10.1016/0021-9991(89)90035-1)
@@ -3648,6 +3690,7 @@ two levels of blocks (the test's threshold is 1e-4).
 - Hawley, J. F. (2000). Global Magnetohydrodynamical Simulations of Accretion Tori. ApJ 528, 462. [doi:10.1086/308180](https://doi.org/10.1086/308180)
 - Hawley, J. F., Guan, X., & Krolik, J. H. (2011). Assessing Quantitative Results in Accretion Simulations: From Local to Global. ApJ 738, 84. [doi:10.1088/0004-637X/738/1/84](https://doi.org/10.1088/0004-637X/738/1/84)
 - Ida, S., Canup, R. M., & Stewart, G. R. (1997). Lunar accretion from an impact-generated disk. Nature 389, 353. [doi:10.1038/38669](https://doi.org/10.1038/38669)
+- Jacobson, A., Kavan, L., & Sorkine-Hornung, O. (2013). Robust inside-outside segmentation using generalized winding numbers. ACM Trans. Graph. 32, 33. [doi:10.1145/2461912.2461916](https://doi.org/10.1145/2461912.2461916)
 - Jeans, J. H. (1902). The Stability of a Spherical Nebula. Philosophical Transactions of the Royal Society of London Series A 199, 1. [doi:10.1098/rsta.1902.0012](https://doi.org/10.1098/rsta.1902.0012)
 - Käppeli, R., & Mishra, S. (2014). Well-balanced schemes for the Euler equations with gravitation. Journal of Computational Physics 259, 199. [doi:10.1016/j.jcp.2013.11.028](https://doi.org/10.1016/j.jcp.2013.11.028)
 - Kokubo, E., Ida, S., & Makino, J. (2000). Evolution of a Circumterrestrial Disk and Formation of a Single Moon. Icarus 148, 419. [doi:10.1006/icar.2000.6496](https://doi.org/10.1006/icar.2000.6496)

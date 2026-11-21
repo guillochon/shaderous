@@ -2,6 +2,8 @@
 // (options.ts ruleIssues) and the checks on values a list of options cannot express, each a plain
 // sentence with the path of the part or option it is about. Free of the DOM, and it never throws:
 // a document that cannot even be built is itself an issue.
+import { extensionOf } from '../geometry';
+import { hasMeshFile, placeMesh, type MeshShape } from '../geometry/store';
 import { defaultEosParams, makeEos, physicalEosParams, type Eos } from '../eos/eos';
 import type { PointMass } from '../problems/types';
 import { COMPOSITIONS, composition, type Composition } from '../units/composition';
@@ -363,6 +365,7 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
       if (!s || typeof s !== 'object') out.push({ level: 'error', path, text: `${label(i)}: it has no shape` });
       else if (s.type === 'box' && !(Array.isArray(s.min) && Array.isArray(s.max))) out.push({ level: 'error', path, text: `${label(i)}: a box needs its lower and upper corners` });
       else if (s.type === 'half' && !(Array.isArray(s.normal) && Math.hypot(...(s.normal as number[])) > 0)) out.push({ level: 'error', path, text: `${label(i)}: a half-space needs a normal that is not zero` });
+      else if (s.type === 'mesh') out.push(...meshIssues(p.shape as MeshShape, i, label(i), spec));
     });
     parts.forEach((p, i) => {
       if (p.kind === 'flow' && !FLOWS[p.name]) out.push({ level: 'error', path: `parts.${i}.name`, text: `${label(i)}: this build has no flow named "${p.name}"` });
@@ -417,6 +420,35 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
   } catch (e) {
     const text = message(e);
     if (!out.some((o) => o.text.includes(text))) out.push({ level: 'error', text: `This setup cannot be built: ${text}` });
+  }
+  return out;
+}
+
+/**
+ * A mesh shape (geometry/store.ts): a file that is named and loaded, a size for STL (which has
+ * no units), and, once it is loaded, its thinnest part against the finest cell (plans/wind-tunnel.md
+ * section 1: a wall thinner than two cells is not a wall).
+ */
+function meshIssues(sh: MeshShape, i: number, label: string, spec: SetupSpec): Issue[] {
+  const path = `parts.${i}.shape`;
+  if (typeof sh.file !== 'string' || !sh.file) return [{ level: 'error', path: `${path}.file`, text: `${label}: a mesh shape needs its file` }];
+  const out: Issue[] = [];
+  if (extensionOf(sh.file) === 'stl' && !(sh.scale! > 0) && !(sh.fit! > 0)) out.push({ level: 'error', path: `${path}.fit`, text: `${label}: an STL file has no units: give it a fit (its longest side as a fraction of the box) or a scale` });
+  if (!hasMeshFile(sh.file)) {
+    out.push({ level: 'warning', path: `${path}.file`, text: `${label}: the file "${sh.file}" is not loaded yet: the run needs it beside the setup document, or dropped on the Setup dialog` });
+    return out;
+  }
+  const d = spec.domain ?? {};
+  const box = typeof d.box === 'number' ? d.box : 1;
+  const n = typeof d.n === 'number' ? d.n : 256;
+  const ndim = d.ndim === 3 ? 3 : 2;
+  try {
+    const m = placeMesh(sh, { box, ndim, dx: box / n });
+    if (ndim === 3 && m.report.thinnest < 2) out.push({ level: 'warning', path, text: `${label}: its thinnest part is ${m.report.thinnest.toFixed(1)} finest cells across: a wall thinner than two cells is not a wall` });
+    if (m.report.stray > 0.1) out.push({ level: 'warning', path, text: `${label}: the mesh is open or broken (its winding number strays ${m.report.stray.toFixed(2)} from 0 or 1 away from its surface): what is inside is a guess near the holes` });
+    if (m.min.some((x, a) => (ndim === 2 && a === 2 ? false : x < -box / 2)) || m.max.some((x, a) => (ndim === 2 && a === 2 ? false : x > box / 2))) out.push({ level: 'warning', path, text: `${label}: it reaches past the box` });
+  } catch (e) {
+    out.push({ level: 'error', path: `${path}.file`, text: `${label}: ${(e as Error).message}` });
   }
   return out;
 }

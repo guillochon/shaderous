@@ -237,6 +237,47 @@ the unit tests of 11.1 pass; `setups.md` documents the shape; the schema
 (`public/shaderous-setup.schema.json`, `tools/headless/schema.json`) has it; random testing
 (`tools/random-test`) draws mesh obstacles from two fixture files.
 
+### 3.5 As built (2026-11-20)
+
+`src/geometry/`: `stl.ts`, `obj.ts`, `ply.ts`, `gltf.ts`, `outline.ts` (airfoil `.dat`, SVG
+paths), `mesh.ts` (parts, transforms, `flatten`, `orient`), `sdf.ts`, `store.ts` (files by name,
+placement, the page's private file system). Unit tests in `tests/unit/geometry.test.ts` on
+fixtures in `tests/unit/fixtures/meshes/` (written by `make.mjs` there). Departures and
+measurements:
+
+- **The winding number does not survive flipped triangles**, against 3.2's claim: a flipped
+  triangle subtracts its solid angle, and a sphere with half of its triangles flipped had a
+  winding number near 0 inside (`sdf-broken` failed). The triangles are now made consistent
+  first (`orient`: weld, propagate across edges of exactly two triangles, turn each closed piece
+  outward, leave an open one as most of it was given). Edges of three or more triangles, where
+  pieces touch, join nothing: welded across them, two touching cubes came out as one "closed"
+  piece and the shared face's side was wrong (seen in a run; test `sdf-touching`).
+- **Sign**: one closed piece takes the side of the nearest face where the nearest point is
+  inside a face; anything else the winding number (the shortcut is wrong where pieces touch
+  or pass through each other).
+- **Decision (13): the distance field on the CPU**, default kept. On one core: 82 000 triangles
+  on 129³ points 2.7 s, 330 000 on 249³ 19 s, 1.3 million on 249³ 26 s (after measuring the
+  stray with the far field beyond 8 radii; with the exact sum it was 32, 156 and 478 s). It is
+  made on the thread that compiles the setup, not yet in a worker of its own; on blocks each
+  initialization worker makes its own copy. Distances are kept as float32 on the CPU; no GPU
+  texture yet (stage 4 and 7 need one).
+- `sdf-volume`: relative volume error 1.2e-2, 3.5e-3, 5.3e-4, 7.1e-5 at 10, 20, 40, 80 points
+  across a sphere (order 1.7 to 2.9). `sdf-sphere`: within the band, 0.1 of a cell.
+- **In the format**: a `mesh` member of `Shape` (decision 13 default), with `file`, `node`,
+  `scale` or `fit`, `center`, `rotate`, `up`. In 2D the body is the cross-section at z = 0; an
+  outline file (`.dat`, `.svg`) is a 2D body directly (in 3D it is extruded through the box).
+- **Where the file lives**: the runner and the MCP server send the files beside the document
+  (`sendMeshFiles` in `tools/headless/session.mjs`; MCP `load` and `check_setup` take `dir`);
+  the page API has `meshFile(name, base64)`; the Setup dialog takes mesh files by "Open file…"
+  and by drop, keeps them in the origin's private file system under their SHA-256 (an index
+  by name), and adds one the setup does not name as an obstacle. The page's build looks a
+  missing file up there, or fetches a URL. Links carry the name, not the hash: a link to a
+  setup with a mesh works only in a browser that has the file, or with a URL.
+- **Not done**: `.athdf` checkpoints do not store the hash or pose (needed only for moving
+  bodies), random testing does not draw mesh obstacles yet, and the preview draws a mesh as
+  the hull of its vertices (no surface rendering: stage 7). Not yet verified in the page by
+  hand: the drop and pick on the Setup dialog.
+
 ## 4. Stage 2: the tunnel and the forces
 
 ### 4.1 A tunnel part

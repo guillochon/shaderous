@@ -36,6 +36,7 @@ import { bakeTransfer, COLORMAPS, defaultOpacity, OpacityEditor } from '../rende
 import { installApi, type RecordingStatus } from './api';
 import { PRESET_FILES, presetSpec } from '../presets/index';
 import { CUSTOM_ID, customSetup, customVersion, setCustomSetup } from '../presets/custom';
+import { ensureMeshFiles } from '../geometry/store';
 import { familyFor, problemOf } from '../presets/lookup';
 import { decodeSetupParam, encodeSetupParam, formatSetup, MAX_LINK, readSetup } from '../setup/codec';
 import { compiledFrom, isParamPath, paramFeatures } from '../setup/compile';
@@ -1679,6 +1680,12 @@ function loadPending(play?: boolean) {
 function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPhysics = false, link?: LinkOverrides, snap?: Snapshot, hold = false, params?: Record<string, number>, settings?: { setting: Setting; value: unknown }[]) {
   pending = null; // whatever waited for Run is superseded
   return enqueue(async () => {
+    // A custom setup's mesh files: fetched (URLs) or found among those this browser keeps.
+    const custom = problemId === CUSTOM_ID ? customSetup() : null;
+    if (custom) {
+      const missing = await ensureMeshFiles(custom.spec);
+      if (missing.length) throw new Error(`the setup needs mesh files this page does not have: ${missing.join(', ')}. Drop them on the Setup dialog`);
+    }
     const problem = problemOf(problemId);
     ({ n, ndim, levels } = resolveGrid(problem, n, ndim, levels));
     const next = configFor(problem, n, { ndim, amrLevels: levels });

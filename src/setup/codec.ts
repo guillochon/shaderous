@@ -53,6 +53,8 @@ const UNIT = obj({ unit: { enum: Object.keys(UNIT_SI) }, value: 'number', per: {
 const SHAPE: Schema = obj({
   type: partChoice('region', 'shape.type'), center: 'vec3', radius: 'number', radiusCells: 'number',
   min: { array: { nullable: 'number' }, max: 3 }, max: { array: { nullable: 'number' }, max: 3 }, normal: 'vec3', at: 'number', rotate: 'vec3',
+  // A mesh file (geometry/store.ts).
+  file: 'string', node: 'string', scale: 'number', fit: 'number', up: partChoice('region', 'shape.up'),
 });
 const ID: Schema = 'string';
 /** A tabulated profile: up to 32 points (x, value). */

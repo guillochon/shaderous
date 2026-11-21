@@ -18,7 +18,7 @@ import { VIEW_MODES } from '../render/view_options';
 import { COMPOSITIONS } from '../units/composition';
 import { ANEOS_LABELS, ANEOS_MATERIALS } from '../eos/aneos';
 import { speciesNuclides } from '../species/mixture';
-import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
+import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, MESH_UPS, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
 import { DENSITY_UNITS, LENGTH_UNITS, MASS_UNITS, VELOCITY_UNITS } from './units';
 
 
@@ -450,13 +450,18 @@ const VEL: Option = { path: 'vel', label: 'Velocity', tip: 'How it moves at the 
 const P = <T extends Partial<Option>>(o: T & Pick<Option, 'path' | 'label' | 'tip' | 'control'>): Option => ({ page: 'parts', apply: 'restart', ...o });
 
 const SHAPE: Option[] = [
-  P({ path: 'shape.type', label: 'Shape', tip: 'A sphere (a cylinder in 2D), a box, or the half of space on one side of a plane', control: pickOf(SHAPE_TYPES, ['sphere', 'Sphere'], ['box', 'Box'], ['half', 'Half-space']), default: 'sphere' }),
-  P({ path: 'shape.center', label: 'Center', tip: 'Center of the sphere', control: { type: 'vec3' }, default: [0, 0, 0], show: { path: 'shape.type', is: ['sphere'] } }),
+  P({ path: 'shape.type', label: 'Shape', tip: 'A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D)', control: pickOf(SHAPE_TYPES, ['sphere', 'Sphere'], ['box', 'Box'], ['half', 'Half-space'], ['mesh', 'Mesh file']), default: 'sphere' }),
+  P({ path: 'shape.center', label: 'Center', tip: 'Center of the sphere, or where the middle of the mesh\u2019s bounding box goes', control: { type: 'vec3' }, default: [0, 0, 0], show: { path: 'shape.type', is: ['sphere', 'mesh'] } }),
+  P({ path: 'shape.file', label: 'File', tip: 'The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program', control: { type: 'text' }, default: '', show: { path: 'shape.type', is: ['mesh'] } }),
+  P({ path: 'shape.node', label: 'Part of the file', tip: 'A glTF node or an OBJ group, with the parts below it. Empty: the whole file', control: { type: 'text' }, show: { path: 'shape.type', is: ['mesh'] } }),
+  P({ path: 'shape.fit', label: 'Fit', tip: 'The mesh\u2019s longest side, as a fraction of the box. STL has no units: give this or the scale', control: num(0, 1, { step: 0.05 }), show: { path: 'shape.type', is: ['mesh'] } }),
+  P({ path: 'shape.scale', label: 'Scale', tip: 'A factor on the file\u2019s lengths, instead of fitting it to the box (glTF\u2019s are meters)', control: num(0, undefined, { factor: 2 }), show: { path: 'shape.type', is: ['mesh'] } }),
+  P({ path: 'shape.up', label: 'Up axis', tip: 'Which of the file\u2019s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box\u2019s z (y in 2D)', control: pickOf(MESH_UPS, ['x', 'x'], ['y', 'y'], ['z', 'z']), default: 'z', show: { path: 'shape.type', is: ['mesh'] } }),
   P({ path: 'shape.radius', label: 'Radius', tip: 'Radius of the sphere', control: num(0, undefined, { factor: 1.25, quantity: 'length' }), default: 0.1, show: { path: 'shape.type', is: ['sphere'] } }),
   P({ path: 'shape.radiusCells', label: 'Radius in cells', tip: 'Instead of the radius: this many finest cells, whatever the resolution (a point explosion)', control: num(0.5, 64, { step: 0.5 }), show: { path: 'shape.type', is: ['sphere'] } }),
   P({ path: 'shape.min', label: 'Lower corner', tip: 'Corner of the box nearest -x, -y, -z', control: { type: 'vec3' }, default: [-0.1, -0.1, -0.1], show: { path: 'shape.type', is: ['box'] } }),
   P({ path: 'shape.max', label: 'Upper corner', tip: 'Corner of the box nearest +x, +y, +z', control: { type: 'vec3' }, default: [0.1, 0.1, 0.1], show: { path: 'shape.type', is: ['box'] } }),
-  P({ path: 'shape.rotate', label: 'Rotation', tip: 'Degrees the box is turned about its center: about x, then y, then z. In 2D only the turn about z counts', control: { type: 'vec3' }, default: [0, 0, 0], show: { path: 'shape.type', is: ['box'] } }),
+  P({ path: 'shape.rotate', label: 'Rotation', tip: 'Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box', control: { type: 'vec3' }, default: [0, 0, 0], show: { path: 'shape.type', is: ['box', 'mesh'] } }),
   P({ path: 'shape.normal', label: 'Normal', tip: 'The plane’s normal: the shape is the side the normal points away from', control: { type: 'vec3' }, default: [1, 0, 0], show: { path: 'shape.type', is: ['half'] } }),
   P({ path: 'shape.at', label: 'Plane at', tip: 'Distance of the plane from the box center, along its normal', control: num(undefined, undefined, { step: 0.05, quantity: 'length' }), default: 0, show: { path: 'shape.type', is: ['half'] } }),
 ];

@@ -20,7 +20,9 @@ export const STAR_TYPES = ['polytrope', 'white-dwarf', 'planet'] as const;
 export const STAR_FIELD_TYPES = ['dipole', 'random', 'gm17-dipole', 'gm17-random'] as const;
 export const DISK_PROFILES = ['thin', 'balanced'] as const;
 export const DISK_HEIGHTS = ['H', 'length'] as const;
-export const SHAPE_TYPES = ['sphere', 'box', 'half'] as const;
+export const SHAPE_TYPES = ['sphere', 'box', 'half', 'mesh'] as const;
+/** Which of a mesh file's axes is up (glTF's is y; the box's is z in 3D, y in 2D). */
+export const MESH_UPS = ['x', 'y', 'z'] as const;
 
 export const SETUP_FORMAT = 'shaderous-setup';
 /** Counts changes to the document's shape: setup/codec.ts keeps one migration per step. */
@@ -385,7 +387,15 @@ export type Shape =
   /** `rotate`: degrees about its center, about x, then y, then z (in 2D, only z turns it) */
   | { type: 'box'; min: Vec3; max: Vec3; rotate?: Vec3 }
   /** the gas where (x - at) . normal < 0 */
-  | { type: 'half'; normal: Vec3; at?: number };
+  | { type: 'half'; normal: Vec3; at?: number }
+  /**
+   * A mesh file (plans/wind-tunnel.md 3.3; src/geometry): `file` by name (beside the setup
+   * document, or dropped on the page) or URL, `node` the part of it (glTF node, OBJ group; all of
+   * it if absent), `scale` a factor on its lengths or `fit` its longest side as a fraction of the
+   * box (one of the two for STL, which has no units), `center` where its bounding box's center
+   * goes, `rotate` degrees about x, then y, then z, `up` which of its axes is up
+   */
+  | { type: 'mesh'; file: string; node?: string; scale?: number; fit?: number; center?: Vec3; rotate?: Vec3; up?: (typeof MESH_UPS)[number] };
 // SHAPE_TYPES names each shape, and nothing else.
 const _shapes: [Shape['type']] extends [(typeof SHAPE_TYPES)[number]] ? ([(typeof SHAPE_TYPES)[number]] extends [Shape['type']] ? true : never) : never = true;
 void _shapes;
