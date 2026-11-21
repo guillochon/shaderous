@@ -73,6 +73,10 @@ describe('checkSetup', () => {
     const flowIn = (name: string) => texts(setup({}, [{ kind: 'tunnel', mach: 0.1 }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }, { kind: 'flow', name }]), 'error');
     expect(has(flowIn('rayleigh-taylor'), /not for the liquid/i)).toBe(true);
     expect(has(flowIn('taylor-green'), /not for the liquid/i)).toBe(false);
+    // Seed 10227: the tunnel's liquid is solved with implicit pressure, which takes no per-block timesteps.
+    const binned = (mach: number) => texts(setup({ domain: { ndim: 3, n: 128, amr: 1 }, mesh: { timeBins: 1 } }, [{ kind: 'tunnel', mach }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }]), 'error');
+    expect(has(binned(0.1), /not with implicit pressure/i)).toBe(true);
+    expect(has(binned(2), /not with implicit pressure/i)).toBe(false);
   });
 
   it('finds nothing wrong with an empty box or a well-made binary', () => {

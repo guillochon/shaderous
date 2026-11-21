@@ -706,6 +706,12 @@ const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | unde
   'bc.allPeriodic': (doc, want) => (want ? (setFaces(doc, [0, 0, 0], [0, 0, 0]), true) : (openFaces(doc), true)),
   units: (doc, want, _v, ctx) => (want ? addUnits(doc, ctx.g) : delete doc.domain!.units, true),
   'species.nuclides': (doc, want, _v, ctx) => ((doc.physics!.species = want ? ['he4', 'c12', 'o16'] : ['fuel', 'ash']), !!ctx),
+  'pressure.implicit': (doc, want) => {
+    if (want) return ((doc.physics ??= {}).pressure = 'implicit'), true;
+    if ((doc.parts ?? []).some((p) => p.kind === 'tunnel')) return false;
+    delete doc.physics?.pressure;
+    return true;
+  },
   'species.fuelAsh': (doc, want) => {
     if (!want) return false;
     doc.physics!.species = ['fuel', 'ash'];

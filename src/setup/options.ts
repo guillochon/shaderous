@@ -186,6 +186,8 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'parts.disk': { label: 'A disk', of: (s) => count(s, (p) => p.kind === 'disk') > 0 },
   'parts.body': { label: 'A point mass or a star', of: (s) => count(s, (p) => p.kind === 'mass' || p.kind === 'star') > 0 },
   'parts.damping': { label: 'A damping zone', of: (s) => count(s, (p) => (p.kind === 'disk' && !!p.damp) || (p.kind === 'tunnel' && (p.sponge ?? 0.1) > 0)) > 0 },
+  // (A wind tunnel's liquid is solved with implicit pressure: parts/tunnel.ts.)
+  'pressure.implicit': { label: 'Implicit pressure', of: (s) => (s.physics?.pressure ?? 'explicit') === 'implicit' || (eosKind(s) === 'liquid' && parts(s).some((p) => p.kind === 'tunnel')) },
   'physics.shear': { label: 'A shearing box', of: (s) => !!s.physics?.shear },
   'physics.cosmology': { label: 'Comoving coordinates', of: (s) => !!s.physics?.cosmology },
   'parts.flow.whole': { label: 'A flow that fills the box', of: (s) => count(s, (p) => !!flowDef(p)?.wholeBox) > 0 },
@@ -433,7 +435,7 @@ export const OPTIONS: Option[] = [
   { path: 'mesh.refineRho', label: 'Refine above density', tip: 'Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off', page: 'mesh', control: num(0, undefined, { factor: 10, quantity: 'density' }), apply: 'live', linkKey: 'refrho', cfg: 'refineRho', requires: ADAPTIVE },
   { path: 'mesh.refineDense', label: 'Always refine above density', tip: 'Adaptive mesh: gas denser than this is always at the finest level, as the smooth interior of a star must be. 0 is off', page: 'mesh', control: num(0, undefined, { factor: 10, quantity: 'density' }), apply: 'restart', default: 0, requires: ADAPTIVE },
   { path: 'mesh.refineMasses', label: 'Refine around point masses', tip: 'Adaptive mesh: keep the gas around every point mass at the finest level, so that softening and sinks can be as small as the finest cells allow', page: 'mesh', control: check, apply: 'restart', default: false, requires: [...ADAPTIVE, { fact: 'parts.mass' }] },
-  { path: 'mesh.timeBins', label: 'Local timesteps', tip: 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work', page: 'mesh', apply: 'shaders', default: 0, linkKey: 'tbins', cfg: 'timeBins', requires: ADAPTIVE,
+  { path: 'mesh.timeBins', label: 'Local timesteps', tip: 'Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work', page: 'mesh', apply: 'shaders', default: 0, linkKey: 'tbins', cfg: 'timeBins', requires: ADAPTIVE, excludes: [{ fact: 'pressure.implicit', reason: 'Not with implicit pressure: one solve couples every cell at one time' }],
     control: pick([0, 'Off'], [1, 'Up to 2× longer'], [2, 'Up to 4× longer'], [3, 'Up to 8× longer']) },
   { path: 'mesh.jeansRefine', label: 'Refine the Jeans length', tip: 'With self-gravity, refine where the Jeans length is under this many cells. 0 is off', page: 'mesh', control: num(0, 64, { integer: true, step: 1 }), apply: 'restart', default: 16, requires: [...ADAPTIVE, ...SELF] },
 
