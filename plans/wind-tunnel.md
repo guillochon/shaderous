@@ -883,6 +883,54 @@ the liquid with implicit pressure and a moving rigid body, before any GPU work:
   and correction, and the force sum over cut faces; then blocks. Comparable in size to the
   implicit pressure work (plans/incompressible.md).
 
+#### 8.1.2 The float64 prototype, as built (2026-11-21)
+
+`src/reference/cutcell.ts` (unit tests `tests/unit/cutcell.test.ts`, scripts in
+`tools/cutcell/`, run with `node --experimental-strip-types`): 2D, periodic, the liquid
+(p = c^2 (rho - rho0)) with implicit pressure, a rigid convex polygon (a circle of 256 sides)
+moving and turning. What it does:
+
+- **Geometry**, exact for the polygon: phi by clipping each cell's square, each face's open
+  share and the first moment of its open part by clipping the face, the wall vector by closure
+  (W = -sum_f a_f n_f), the wall's distance and nearest point from the gas centroid. Over a
+  step the faces' shares are averaged by the trapezoidal rule on `subSteps` parts (4): with
+  only midpoints, a face that opens late in a step was shut through it, leaving a newly
+  uncovered cell with no open face, and the piston blew up at some sample counts.
+- **Update**, per whole cell (Q = phi rho, M = phi rho v): MUSCL advection through the open
+  faces (one-sided beside the wall), viscosity through them, nothing through the wall; the
+  pressure solve (phi'/c^2) p + (dt^2/dx^2) sum a_f (p - p_nb) = Q* - phi' rho0, which empties
+  a cell being covered and fills one being uncovered; the mass it moves carrying the mean
+  velocity of its two cells (the upwind one beside a small cell); the face pressures at their
+  open parts' centroids, the wall pressure carried to the wall along the gradient; the viscous
+  wall stress at the true distance, point-implicit. Then state redistribution (Berger &
+  Giuliani 2021, unweighted, first order) for cells under half full. A cell covered with no
+  open face left hands what it holds to its neighbors (round-off: 5e-13 of the mass in the
+  Galilean run).
+- **Measured**:
+  - mass to 1e-15 and the box's momentum balance against the force on the body to 1e-15,
+    at rest, moving and turning;
+  - liquid at rest around a body at rest stays at rest, force 0 to round-off;
+  - **Galilean drag** (box 4, 256^2, 16 cells across, Re 100, Mach 0.1, t = 1 to 2.2): C_d
+    1.405 at rest, 1.412 moving: 0.5% apart (criterion 2 to 3%); rms difference of the two
+    histories 0.75% of the mean, the moving body's raw noise 1.2% (criterion 10% after a running
+    mean). The GPU's staircase gave 87% and 164% apart (6.7);
+  - **the open-ended piston**, started over 0.5: the liquid at 0.5 to 0.2% (criterion 1%) at
+    32, 64 and 128; the force's mean near nil (|mean| <= 0.05 against a dynamic pressure times
+    height of 0.25); what is left is sound sloshing between the plate's faces (period 0.36),
+    excited by the start;
+  - **the inviscid cylinder**, started from the potential flow, C_d over t = 0.1 to 0.3 at 8,
+    16, 32, 64 cells across: 0.96, 0.49, 0.23, 0.12, **first order** (criterion: better than
+    first order, not met); a staircase in the same prototype: 1.15, 0.89, 0.69, 0.52. The
+    error is the rear's pressure recovery (Cp 0.33 against 0.62 at 32 across), not the force's
+    sum: the face centroids, the wall's pressure gradient, one-sided slopes at the wall and a
+    central carry changed it by under 3% each; halving the timestep changed nothing. Likely
+    first-order terms left: the unweighted redistribution (threshold 0.25 instead of 0.5: 7%
+    less drag), and the pressure's compact face gradient between cut cells' centers, not their
+    centroids.
+- **Not done**: the oscillating cylinder of Dütsch et al.; second order at the wall; walls of
+  the box other than periodic; a body crossing the periodic edge.
+
+
 ### 8.2 A wall model
 
 At high Reynolds number a no-slip wall on this grid gives the wrong stress (the first cell is
