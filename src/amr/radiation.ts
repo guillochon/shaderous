@@ -218,6 +218,11 @@ export class AmrRad {
       const r = new Float32Array(this.staging.getMappedRange().slice(0));
       this.staging.unmap();
       return radDiagnosticsFrom(r);
+    } catch (e) {
+      // Destroyed while the read was in flight (a new setup loaded): nothing to report. Uncaught,
+      // the rejected map reached the page as an error (random test seed 10437, after 10436).
+      if (this.destroyed) return null;
+      throw e;
     } finally {
       this.stagingBusy = false;
     }
@@ -228,7 +233,10 @@ export class AmrRad {
     return PAD ** ndim * AmrRad.texelBytes;
   }
 
+  private destroyed = false;
+
   destroy() {
+    this.destroyed = true;
     for (const t of [...this.R, ...this.G, this.RA, this.RK]) t.destroy();
     for (const b of this.info) b.destroy();
     this.staging.destroy();
