@@ -564,6 +564,15 @@ held bit for bit to the object it replaced before those objects were retired.
   one continues the same run on the same mesh. Species are written as variables named after
   them (`he4`, `c12`). A file from another code is sampled onto the nearest available
   resolution.
+- **Viewing a checkpoint too large to run** (`io/view.ts`, `io/view_worker.ts`,
+  plans/view-only.md). The file is opened in a worker through Emscripten's WORKERFS, which
+  reads the `File` in place, and read 1024 blocks at a time (`openAthdf`'s ranged reads). Blocks
+  finer than the level that fits the budget are merged into their ancestors as they are read
+  (`readForView`), and the merged snapshot is loaded like any restart by an `AmrSim` with
+  `viewOnly`: every atlas only the step uses (the second parity, the predictor, gravity, a
+  field's compensation, half-step, assembly and impulse textures) is one texel, so the bind
+  groups stay valid while it never steps. The atlas is sized to the merged tree exactly
+  (`amrBudget`).
 - **Checkpoints** (`io/checkpoints.ts`) write the same file every $`\Delta t`$. In Chrome and Edge
   they go to a folder chosen once through the File System Access API; other browsers download
   them. The cell data is gzip-compressed at level 1. Uncompressed, a state is 24 bytes per cell (about 400 MB at

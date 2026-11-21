@@ -9,6 +9,14 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Added
 
+- **Opening a checkpoint for viewing only** (plans/view-only.md), for runs too large to continue
+  on this device: "Open for viewing" in the page, `viewAthdf()` in the API, `load_athdf` with
+  `view: true` in the MCP server. The file is read in parts, never copied whole (files past
+  WebAssembly's 4 GB open), its finest levels merged into coarser ones until it fits the GPU
+  memory budget (mass and momentum kept, the magnetic field divergence-free), and shown by a mesh
+  that holds only what the display reads, about a quarter of what running it takes. It does not
+  step. A 3.5 GB magnetized double white dwarf checkpoint (19,419 blocks to level 5) opens in the
+  default 2.5 GB budget at level 3 in about 95 s.
 - **Wind tunnels and bodies from mesh files** (plans/wind-tunnel.md). Obstacles may be read from
   STL, OBJ, PLY, glTF and GLB files (a `mesh` shape; airfoil `.dat` and SVG outlines for 2D),
   given beside a setup document, through the MCP server's `dir`, by URL, or dropped on the Setup

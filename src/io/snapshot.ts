@@ -60,6 +60,12 @@ export interface Snapshot {
    * to a file.
    */
   pressureAt?: (cell: number) => number;
+  /**
+   * Read to be viewed only (io/view.ts): its blocks merged to `level`, and the blocks of its tree
+   * (leaves and their ancestors), which the atlas is sized for, and the file's own finest
+   * level. Never written to a file.
+   */
+  view?: { level: number; nodes: number; fileLevel: number };
 }
 
 /**

@@ -85,6 +85,11 @@ export interface SimConfig {
   /** Atlas slots per side for the adaptive mesh (0 = choose from the root grid). */
   amrBudget: number;
   /**
+   * View only (plans/view-only.md): a checkpoint loaded to be looked at, never stepped. The
+   * adaptive mesh then holds only what the display reads (AmrSim.viewBlockBytes).
+   */
+  viewOnly?: boolean;
+  /**
    * Adaptive mesh: per-block timesteps. A block may step up to 2^timeBins times less often
    * than the fastest one, where its own signal speeds allow (0 = one timestep for all).
    */

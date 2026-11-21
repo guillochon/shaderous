@@ -95,7 +95,14 @@ export const MCP_TOOLS: McpTool[] = [
       timeout_s: { type: 'number', description: 'Give up after this much wall time, keeping what was recorded' },
     },
   },
-  { name: 'load_athdf', method: 'loadAthdf', brief: 'Starts a run from an `.athdf` file', own: { path: { type: 'string', description: 'The file to read' } }, required: ['path'] },
+  {
+    name: 'load_athdf', method: 'loadAthdf', brief: 'Starts a run from an `.athdf` file, or opens it for viewing only',
+    own: {
+      path: { type: 'string', description: 'The file to read' },
+      view: { type: 'boolean', description: 'Open it only to look at (a run too large to continue here): read in parts, its finest levels merged until it fits the GPU memory budget, never stepped (run refuses). slice, probe, screenshot and view work. The result says the level kept (`view`)' },
+    },
+    required: ['path'],
+  },
   {
     name: 'debris', method: 'debris',
     brief: 'Gives debris energies and the return rate dM/dt, for problems that track them: totals, the surviving core, the first return and the peak. `save_path` writes the full report',

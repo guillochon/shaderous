@@ -27,8 +27,13 @@ interface H5Files {
   writeFile(path: string, data: Uint8Array): void;
   readFile(path: string): Uint8Array;
   unlink(path: string): void;
+  // Emscripten's: the web build mounts a File without copying it, in a worker (io/view_worker.ts).
+  mkdir?(path: string): void;
+  mount?(type: unknown, opts: unknown, path: string): void;
+  unmount?(path: string): void;
+  filesystems?: Record<string, unknown>;
 }
-interface Library {
+export interface Library {
   File: H5['File'];
   FS: H5Files;
 }
@@ -54,7 +59,7 @@ interface H5File {
 }
 
 let loaded: Promise<Library> | null = null;
-async function library(h5?: H5): Promise<Library> {
+export async function library(h5?: H5): Promise<Library> {
   if (h5) return { File: h5.File, FS: (await h5.ready).FS };
   loaded ??= import('h5wasm').then(async (m) => {
     const lib = (m.default ?? m) as unknown as H5;
@@ -238,6 +243,45 @@ export async function readAthdfFile(file: string, h5: H5): Promise<Snapshot> {
 }
 
 function readFrom(lib: Library, name: string): Snapshot {
+  const r = openAthdf(lib, name);
+  try {
+    const snap = r.header();
+    for (const v of r.variables) snap.data[v] = r.read(v, 0, r.blocks);
+    if (r.hasFaces) snap.faces = r.readFaces(0, r.blocks);
+    return r.finish(snap);
+  } finally {
+    r.close();
+  }
+}
+
+/**
+ * An .athdf file open for reading in parts (io/view.ts reads one too large to hold): its header
+ * as a snapshot without data, and any variable or the face field over a range of blocks.
+ */
+export interface AthdfReader {
+  /** blocks in the file */
+  readonly blocks: number;
+  /** cells per block */
+  readonly cells: number;
+  /** every variable of the file, the primitives and the species, by name */
+  readonly variables: string[];
+  /** the file has a magnetized run's faces (Snapshot.faces) */
+  readonly hasFaces: boolean;
+  /** texels of faces per block, when it has them */
+  readonly facesPerBlock: number;
+  /** a new snapshot of the header (no data, in the file's own axis order) */
+  header(): Snapshot;
+  /** variable `name` for blocks b0 to b1 (exclusive), each block as [z][y][x] */
+  read(name: string, b0: number, b1: number): Float32Array;
+  /** the faces of blocks b0 to b1, three per texel */
+  readFaces(b0: number, b1: number): Float32Array;
+  /** turn a snapshot read from this file into the program's axis order (a cylindrical file's) */
+  finish(s: Snapshot): Snapshot;
+  close(): void;
+}
+
+/** Open an .athdf file in the library's file system for reading in parts (readFrom reads it whole). */
+export function openAthdf(lib: Library, name: string): AthdfReader {
   let f: H5File;
   try {
     f = new lib.File(name, 'r');
@@ -274,7 +318,7 @@ function readFrom(lib: Library, name: string): Snapshot {
     const grid = [1, 2, 3].map((a) => numbers(`RootGridX${a}`));
     if (grid.some((g) => Math.abs(g[2] - 1) > 1e-6)) throw new Error('only uniformly spaced grids can be read');
 
-    const snap: Snapshot = {
+    const head: Snapshot = {
       ndim: rootSize[2] === 1 ? 2 : 3,
       rootSize,
       blockSize,
@@ -286,51 +330,65 @@ function readFrom(lib: Library, name: string): Snapshot {
       locations: Int32Array.from(dataset('LogicalLocations').value as ArrayLike<number | bigint>, Number),
       data: {},
     };
-    if (snap.levels.length !== nb || snap.locations.length !== 3 * nb) throw new Error('the block tables do not match NumMeshBlocks');
-
-    // Variables are listed dataset by dataset; find each one we use.
-    const names = strings('VariableNames');
-    const counts = numbers('NumVariables');
-    const sets = strings('DatasetNames');
-    const cells = blockCells(snap);
-    let first = 0;
-    for (let d = 0; d < sets.length; d++) {
-      for (let v = 0; v < counts[d]; v++) {
-        // Every variable is kept: the primitives, and species a run may carry.
-        const variable = names[first + v];
-        if (!variable || snap.data[variable]) continue;
-        const set = dataset(sets[d]);
-        const got = set.slice([[v, v + 1], [], [], [], []]) as ArrayLike<number>;
-        if (got.length !== nb * cells) throw new Error(`"${sets[d]}" does not have the shape the header describes`);
-        snap.data[variable] = got instanceof Float32Array ? got : Float32Array.from(got);
-      }
-      first += counts[d];
-    }
-
-    const faces = f.get('ShaderousFaces') as H5Dataset | null;
-    if (faces?.shape) {
-      // Read a slab of blocks at a time, as it is written.
-      const n = faces.shape[0];
-      const per = faces.shape.slice(1).reduce((a, b) => a * b, 1);
-      snap.faces = new Float32Array(n * per);
-      for (let b = 0; b < n; b += FACE_SLAB) {
-        const e = Math.min(n, b + FACE_SLAB);
-        snap.faces.set(faces.slice([[b, e], [], [], [], []]) as ArrayLike<number>, b * per);
-      }
-    }
-
+    if (head.levels.length !== nb || head.locations.length !== 3 * nb) throw new Error('the block tables do not match NumMeshBlocks');
     const meta = f.attrs.Shaderous?.value;
     if (typeof meta === 'string') {
       try {
         const parsed = JSON.parse(meta) as SnapshotMeta;
-        if (parsed.program === 'shaderous' && typeof parsed.query === 'string') snap.meta = parsed;
+        if (parsed.program === 'shaderous' && typeof parsed.query === 'string') head.meta = parsed;
       } catch {
         // Not ours after all; read it as any other file.
       }
     }
-    if (cyl) return { ...swapAxes23(snap, false), ndim: 2, geometry: 'cylindrical' };
-    return snap;
-  } finally {
+
+    // Variables are listed dataset by dataset; find each one we use (the first of a name).
+    const names = strings('VariableNames');
+    const counts = numbers('NumVariables');
+    const sets = strings('DatasetNames');
+    const cells = blockCells(head);
+    const where = new Map<string, { set: H5Dataset; index: number }>();
+    let first = 0;
+    for (let d = 0; d < sets.length; d++) {
+      for (let v = 0; v < counts[d]; v++) {
+        const variable = names[first + v];
+        if (!variable || where.has(variable)) continue;
+        const set = dataset(sets[d]);
+        if (set.shape!.length !== 5 || set.shape![1] !== nb || set.shape![2] * set.shape![3] * set.shape![4] !== cells) throw new Error(`"${sets[d]}" does not have the shape the header describes`);
+        where.set(variable, { set, index: v });
+      }
+      first += counts[d];
+    }
+    const faces = f.get('ShaderousFaces') as H5Dataset | null;
+    const facesPerBlock = faces?.shape ? faces.shape.slice(1, 4).reduce((a, b) => a * b, 1) : 0;
+    const asF32 = (got: unknown) => (got instanceof Float32Array ? got : Float32Array.from(got as ArrayLike<number>));
+    return {
+      blocks: nb,
+      cells,
+      variables: [...where.keys()],
+      hasFaces: facesPerBlock > 0,
+      facesPerBlock,
+      header: () => ({ ...head, levels: head.levels.slice(), locations: head.locations.slice(), data: {} }),
+      read(name, b0, b1) {
+        const w = where.get(name);
+        if (!w) throw new Error(`the file has no variable "${name}"`);
+        const got = asF32(w.set.slice([[w.index, w.index + 1], [b0, b1], [], [], []]));
+        if (got.length !== (b1 - b0) * cells) throw new Error(`"${name}" does not have the shape the header describes`);
+        return got;
+      },
+      readFaces(b0, b1) {
+        // A slab of blocks at a time, as it is written.
+        const out = new Float32Array((b1 - b0) * facesPerBlock * 3);
+        for (let b = b0; b < b1; b += FACE_SLAB) {
+          const e = Math.min(b1, b + FACE_SLAB);
+          out.set(faces!.slice([[b, e], [], [], [], []]) as ArrayLike<number>, (b - b0) * facesPerBlock * 3);
+        }
+        return out;
+      },
+      finish: (s) => (cyl ? { ...swapAxes23(s, false), ndim: 2, geometry: 'cylindrical' } : s),
+      close: () => void f.close(),
+    };
+  } catch (e) {
     f.close();
+    throw e;
   }
 }

@@ -7,12 +7,13 @@
 // intact. Calls that change the run are served one at a time, in the order they were made.
 import { isSessionLog, type Action, type SessionLog } from './session';
 import type { Gpu } from '../gpu/device';
+import { memoryBudget } from '../gpu/memory';
 import type { LinkOverrides } from './link';
 import { decodeLink } from './link';
 import { capture } from '../io/capture';
 import { impactDebris, snapshotCells } from '../debris/impact';
 import { toCode } from '../units/units';
-import { AmrSim } from '../amr/amr_sim';
+import { AmrSim, VIEW_ONLY_REFUSAL } from '../amr/amr_sim';
 import { DERIVED_VARIABLES, SnapshotSampler, VARIABLES, type Snapshot } from '../io/snapshot';
 import { hydrogenParticles, mixMoments, problemCoefficients } from '../species/mixture';
 import { COMPOSITIONS, meanMolecularWeight } from '../units/composition';
@@ -56,6 +57,8 @@ export interface AppHooks {
   importAthdf(bytes: Uint8Array): Promise<string[]>;
   /** the same from a snapshot (one read from an .athdf file) */
   importSnapshot(snap: Snapshot): Promise<string[]>;
+  /** open an .athdf file for viewing only (plans/view-only.md): the level it was merged to, of the file's finest, and its leaf blocks before and after */
+  viewFile(file: File): Promise<{ level: number; fileLevel: number; blocks: number; fileBlocks: number }>;
   restart(): Promise<void>;
   running(): boolean;
   finished(): boolean;
@@ -492,6 +495,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
   async function run(opts: RunInternal = {}): Promise<RunResult> {
     const s = current();
     const cfg = app.cfg();
+    if (cfg.viewOnly) throw new Error(VIEW_ONLY_REFUSAL);
     const { steps, until, timeoutMs, frameAt } = opts;
     if (steps === undefined && until === undefined && frameAt === undefined) throw new Error('run() needs `steps`, `until`, or both');
     if (steps !== undefined && !(steps >= 0)) throw new Error('`steps` must be a number of steps, 0 or more');
@@ -770,6 +774,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
   async function record(opts: RecordOptions = {}): Promise<RecordResult> {
     const s = current();
     const cfg = app.cfg();
+    if (cfg.viewOnly) throw new Error(VIEW_ONLY_REFUSAL); // a movie's frames are steps apart
     if (opts.every !== undefined && opts.dt !== undefined) throw new Error('record() takes `every` or `dt`, not both');
     if (opts.every !== undefined && !(opts.every >= 1)) throw new Error('`every` is a number of steps, 1 or more');
     if (opts.dt !== undefined && !(opts.dt > 0)) throw new Error('`dt` is a time interval, more than 0');
@@ -1263,6 +1268,33 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         bytes.set(piece, offset);
         return { end: offset + piece.length };
       }),
+    /**
+     * Open an .athdf file for viewing only (plans/view-only.md): read without copying it whole,
+     * its finest levels merged into coarser ones until it fits the GPU memory budget, shown by
+     * a mesh that holds only what the display reads, never stepped. `url` is a file the page
+     * can fetch (the dev server serves the project's own); with none, the file athdfPut has put
+     * together. Returns the run's state and how it was merged.
+     */
+    viewAthdf: (url?: string) =>
+      serial(async () => {
+        let file: File;
+        if (url !== undefined) {
+          const res = await fetch(url);
+          if (!res.ok) throw new Error(`${url}: ${res.status} ${res.statusText}`);
+          file = new File([await res.blob()], url.split('/').pop() || 'checkpoint.athdf');
+        } else {
+          if (!incoming || incoming.got !== incoming.bytes.length) throw new Error('no whole .athdf file has been put: call athdfPut for each piece first');
+          file = new File([incoming.bytes as Uint8Array<ArrayBuffer>], 'checkpoint.athdf');
+        }
+        incoming = null;
+        let merged: Awaited<ReturnType<AppHooks['viewFile']>> | undefined;
+        await built(async () => {
+          merged = await app.viewFile(file);
+        });
+        return { ...(await state()), view: merged };
+      }),
+    /** The GPU memory the adaptive mesh may use, in bytes: what a caller sizing a view-only load (snapshotIn's `view`) plans against. */
+    viewBudget: () => serial(async () => memoryBudget()),
     /** Start a run from the snapshot snapshotIn() and snapshotPut() put together, as loadAthdf() does from a file. */
     loadSnapshot: () =>
       serial(async () => {

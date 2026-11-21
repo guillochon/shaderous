@@ -194,7 +194,7 @@ Typical sequence: `describe` → `load {setup}` → `run {until}` → `diagnosti
 | `restart` | Starts again from the initial conditions |
 | `save_athdf` | Writes the state of the gas to an `.athdf` file |
 | `record` | Records the run from where it is as an MP4 movie to `path`, with a color bar, axes and the status line (with the simulation time): a frame every `every` steps or near every `dt` of code time, until `until` or `frames` |
-| `load_athdf` | Starts a run from an `.athdf` file |
+| `load_athdf` | Starts a run from an `.athdf` file, or opens it for viewing only |
 | `debris` | Gives debris energies and the return rate dM/dt, for problems that track them: totals, the surviving core, the first return and the peak. `save_path` writes the full report |
 | `impact` | Gives what a giant impact has left: the masses of the planet, the disk around it and the escaping gas, what each is made of, and the moon the disk would gather into |
 | `edit` | Uses an editing tool on the run, as a person would: `name` (mass, velocity, temperature, obstacle, field, pull, source, sink, star, clear, query) and its `options` |

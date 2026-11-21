@@ -8,6 +8,7 @@ import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport 
 import { capture, restartFrom } from '../io/capture';
 import { canPickFolder, checkpointIndex, download, downloadBlob, downloadSink, nextCheckpoint, pickFolder, type CheckpointSink } from '../io/checkpoints';
 import { maxLevel, type Snapshot } from '../io/snapshot';
+import { fileSpeciesGroups, planView, viewBlockBytes } from '../io/view';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
 import { unitOf, type DisplaySystem } from '../units/units';
@@ -105,6 +106,10 @@ side.innerHTML = `
       <button id="import" title="Load a state from an .athdf file: one saved here, or another code's with density, velocity and pressure">Import state</button>
       <button id="export" title="Save the state of the gas as an HDF5 file in the Athena++ layout (.athdf), readable by yt and VisIt">Export state</button>
       <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
+    </div>
+    <div class="io state-io">
+      <button id="view-file" title="Open an .athdf checkpoint only to look at it: the GPU holds only what the display reads, and if even that does not fit, its finest levels are merged into coarser ones. For runs too large to continue on this device">Open for viewing</button>
+      <input id="view-file-input" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
     </div>
     <div class="io log-io">
       <button id="save-log" title="Save what was done to this run since it started (the editing tools, the settings changed, the adaptive mesh's re-meshes, each at the step it happened) as a session log, with the run's diagnostics along the way. The API's replay() runs it again step for step">Save session log</button>
@@ -1371,7 +1376,7 @@ function syncControls() {
   const self = isSelfGravity(cfg.gravity);
   $('sum-time').textContent = `${Number.isFinite(cfg.tEnd) ? `to t = ${+cfg.tEnd.toPrecision(6)}` : 'no end'}${ckpt.on ? `, checkpoints every ${+ckpt.every.toPrecision(6)}` : ''}`;
   // What the Setup dialog holds, at a glance: the grid and the gas.
-  $('setup-sum').textContent = `${g.n}${g2 ? '²' : '³'}${g.levels ? `, ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''} · ${gProblem.mhd ? 'MHD' : 'Gas'} · ${EOS_LABELS[pending?.pick ? gProblem.eos : cfg.eos]}`;
+  $('setup-sum').textContent = `${cfg.viewOnly && !pending ? `View only${cfg.restart && viewNote ? ` (${viewNote})` : ''} · ` : ''}${g.n}${g2 ? '²' : '³'}${g.levels ? `, ${g.levels} level${g.levels > 1 ? 's' : ''}` : ''} · ${gProblem.mhd ? 'MHD' : 'Gas'} · ${EOS_LABELS[pending?.pick ? gProblem.eos : cfg.eos]}`;
   showCheckpoints();
   // Fields this run cannot show: a z velocity in 2D, heating without a cooling function, and
   // refinement levels on a uniform grid.
@@ -1425,6 +1430,13 @@ function syncControls() {
   editor.setEditable(!solid);
   $<HTMLSelectElement>('cmap').value = editor.colormap;
   $('run').textContent = running ? 'Pause' : 'Run';
+  // A checkpoint open for viewing does not step.
+  const looking = !!cfg.viewOnly && !pending;
+  for (const id of ['run', 'step', 'reset'] as const) {
+    const b = $<HTMLButtonElement>(id);
+    b.disabled = looking;
+    if (looking) b.title = 'This checkpoint is open for viewing only: Import state loads it to run, if this device has the GPU memory';
+  }
   showLoad();
   syncTools();
 }
@@ -1693,6 +1705,14 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     }
     const problem = problemOf(problemId);
     ({ n, ndim, levels } = resolveGrid(problem, n, ndim, levels));
+    // View only: the file's mesh merged to its level, whatever the presets' grids are (at least
+    // one level, so the blocks are the adaptive mesh's).
+    const look = snap?.view;
+    if (look && snap) {
+      levels = Math.max(1, look.level);
+      n = snap.rootSize[0] << levels;
+      ndim = snap.ndim;
+    }
     const next = configFor(problem, n, { ndim, amrLevels: levels });
     if (!Number.isFinite(next.tEnd)) next.tEnd = Infinity;
     if (keepPhysics && cfg && cfg.problem.id === problem.id && !cfg.restart && cfg.ndim === ndim) {
@@ -1745,6 +1765,9 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     }
     // The box is as wide as the run's parameters make it (a preset with a size of its own).
     next.problem = sizedProblem(problem, next.params);
+    // View only: never stepped, an atlas just large enough, and no gravity to solve.
+    if (look) Object.assign(next, { viewOnly: true, amrBudget: look.nodes, gravity: 'off' });
+    viewNote = look && look.level < look.fileLevel ? `to level ${look.level} of ${look.fileLevel}` : '';
     // From a file: the same preset, started from the saved state instead of its own.
     if (snap) Object.assign(next, restartFrom(snap, next.problem, levels > 0, n >> levels));
     // A new problem brings its own checkpoint interval; the clock starts at the snapshot's time, if any.
@@ -1968,6 +1991,43 @@ async function importAthdf(bytes: Uint8Array): Promise<string[]> {
   return importSnapshot(await readAthdf(bytes));
 }
 
+/** What a view-only load merged, for the setup summary ('' when nothing was). */
+let viewNote = '';
+
+/**
+ * Open an .athdf file for viewing only (plans/view-only.md): read in a worker without copying
+ * it, its finest levels merged into coarser ones until the blocks fit this device's GPU memory
+ * budget, and shown by an adaptive mesh that holds only what the display reads.
+ */
+async function viewState(file: File): Promise<{ level: number; fileLevel: number; blocks: number; fileBlocks: number }> {
+  const button = $('view-file');
+  button.textContent = 'Opening…';
+  const { openViewFile } = await import('../io/view_open');
+  const vf = await openViewFile(file);
+  try {
+    const h = vf.header;
+    if (h.levels.length === 1) throw new Error('a uniform grid’s file cannot be opened for viewing yet: Import state loads it');
+    const groups = fileSpeciesGroups(vf.variables);
+    const per = viewBlockBytes(h.ndim, vf.hasFaces, groups, groups > 0);
+    const plan = planView(h, Math.floor(memoryBudget() / per));
+    if (!plan) throw new Error(`not even the root grid's blocks fit in this device's GPU memory budget (${(memoryBudget() / GB).toFixed(1)} GB)`);
+    const reading = `Reading ${file.name}`;
+    setLoadStage(reading);
+    let snap: Snapshot;
+    try {
+      snap = await vf.read(plan.level, (f) => setLoadStage(`${reading}: ${Math.round(100 * f)}%`));
+    } finally {
+      setLoadStage('');
+    }
+    snap.view = { level: plan.level, nodes: plan.nodes, fileLevel: plan.fileLevel };
+    await importSnapshot(snap);
+    return { level: plan.level, fileLevel: plan.fileLevel, blocks: plan.leaves, fileBlocks: plan.fileLeaves };
+  } finally {
+    vf.close();
+    button.textContent = 'Open for viewing';
+  }
+}
+
 /** Start the run from a snapshot (one read from an .athdf file), as importAthdf does. */
 async function importSnapshot(snap: Snapshot): Promise<string[]> {
   {
@@ -2023,6 +2083,8 @@ let lastQuery = '';
 let linkFrame = 0;
 function syncAddress(force = false) {
   if (!cfg || !sim || building) return;
+  // A checkpoint open for viewing is its file's merged mesh, not a setup a link could rebuild.
+  if (cfg.viewOnly) return;
   if (!force && ++linkFrame % 30) return;
   // (A setting that reached the run by a path that does not log it: logged late, but logged.)
   noteSettings();
@@ -2610,6 +2672,7 @@ function bind() {
   $('run').addEventListener('click', () => {
     // A change waiting for Run (Autoload off): load it, then play.
     if (pending) return loadPending(true);
+    if (cfg?.viewOnly) return;
     running = !running;
     if (running && finished) {
       // Past the end time: keep going without a limit.
@@ -2657,6 +2720,13 @@ function bind() {
     const file = picker.files?.[0];
     picker.value = ''; // so the same file can be chosen again
     if (file) importState(file);
+  });
+  const viewPicker = $<HTMLInputElement>('view-file-input');
+  $('view-file').addEventListener('click', () => viewPicker.click());
+  viewPicker.addEventListener('change', () => {
+    const file = viewPicker.files?.[0];
+    viewPicker.value = '';
+    if (file) viewState(file).catch((e) => alert(`Could not open ${file.name}: ${e instanceof Error ? e.message : String(e)}`));
   });
 
   $('share').addEventListener('click', async () => {
@@ -5304,6 +5374,7 @@ const api = installApi(
     build: (link) => build(link.problem, link.n, link.ndim, link.amr, false, link),
     importAthdf,
     importSnapshot,
+    viewFile: viewState,
     restart: () => restartRun(),
     running: () => running,
     finished: () => finished,

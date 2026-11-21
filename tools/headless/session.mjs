@@ -231,6 +231,12 @@ export async function saveAthdf(call, pick) {
  */
 export async function uploadAthdf(call, file) {
   if (call.loadModule) return uploadAthdfHere(call, file);
+  await putAthdf(call, file);
+  return call('loadAthdf');
+}
+
+/** The file at `file` put together in the page in pieces (athdfPut), for loadAthdf or viewAthdf. */
+async function putAthdf(call, file) {
   const CHUNK = 48 * 1024 * 1024;
   const total = statSync(file).size;
   const fd = openSync(file, 'r');
@@ -245,7 +251,6 @@ export async function uploadAthdf(call, file) {
   } finally {
     closeSync(fd);
   }
-  return call('loadAthdf');
 }
 
 /** The .athdf reader and writer (src/io/athdf.ts) and the build of HDF5 whose files are this computer's. */
@@ -300,7 +305,45 @@ async function saveAthdfHere(call, pick) {
 /** uploadAthdf with the file read here: the page is handed the snapshot's arrays in pieces. */
 async function uploadAthdfHere(call, file) {
   const { readAthdfFile, h5 } = await athdfHere(call);
-  const snap = await readAthdfFile(path.resolve(file), h5);
+  await sendSnapshot(call, await readAthdfFile(path.resolve(file), h5));
+  return call('loadSnapshot');
+}
+
+/**
+ * Open the .athdf file at `file` for viewing only (plans/view-only.md, the page's viewAthdf):
+ * read here in parts, its finest levels merged into coarser ones until its blocks fit the
+ * page's GPU memory budget, and the merged snapshot handed to the page, which shows it without
+ * stepping. Returns the page's state and `view`: the level kept, the file's finest, and leaf
+ * blocks after and before. Without the page's own modules (a page not served by Vite), the
+ * file is sent whole and the page merges it.
+ */
+export async function viewAthdf(call, file) {
+  if (!call.loadModule) {
+    await putAthdf(call, file);
+    return call('viewAthdf');
+  }
+  const [{ library, openAthdf, h5 }, view] = await Promise.all([athdfHere(call), call.loadModule('/src/io/view.ts')]);
+  const r = openAthdf(await library(h5), path.resolve(file));
+  let snap;
+  let plan;
+  try {
+    const head = r.header();
+    const groups = view.fileSpeciesGroups(r.variables);
+    const budget = await call('viewBudget');
+    plan = view.planView(head, Math.floor(budget / view.viewBlockBytes(head.ndim, r.hasFaces, groups, groups > 0)));
+    if (!plan) throw new Error(`${file}: not even its root blocks fit in the page's GPU memory budget (${(budget / 2 ** 30).toFixed(1)} GB)`);
+    snap = view.readForView(r, plan.level);
+  } finally {
+    r.close();
+  }
+  snap.view = { level: plan.level, nodes: plan.nodes, fileLevel: plan.fileLevel };
+  await sendSnapshot(call, snap);
+  const st = await call('loadSnapshot');
+  return { ...st, view: { level: plan.level, fileLevel: plan.fileLevel, blocks: plan.leaves, fileBlocks: plan.fileLeaves } };
+}
+
+/** Hand the page a snapshot's arrays in pieces (snapshotIn, snapshotPut), for loadSnapshot. */
+async function sendSnapshot(call, snap) {
   const arrays = arraysOf(snap);
   const { levels: _l, locations: _p, data: _d, faces: _f, ...header } = snap;
   await call('snapshotIn', header, arrays.map(([key, a]) => ({ key, type: a instanceof Int32Array ? 'int32' : 'float32', length: a.length })));
@@ -310,7 +353,6 @@ async function uploadAthdfHere(call, file) {
       await call('snapshotPut', key, offset, bytes.subarray(offset, Math.min(bytes.length, offset + SNAPSHOT_CHUNK)).toString('base64'));
     }
   }
-  return call('loadSnapshot');
 }
 
 /** A PNG data URL as bytes. */

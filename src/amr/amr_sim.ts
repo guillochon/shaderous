@@ -50,6 +50,7 @@ import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, S
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
 import { AmrMhd, maxBinding, MHD_BLOCK_BYTES, registerBytes } from '../mhd/amr_mhd';
+import { viewBlockBytes } from '../io/view';
 import { mhdUnsupported } from '../mhd/mhd';
 import { AmrRad } from './radiation';
 import { radiationOn } from '../radiation/radiation';
@@ -123,6 +124,9 @@ export interface LeafCells {
   count: number;
 }
 
+/** Why a checkpoint opened for viewing does not step. */
+export const VIEW_ONLY_REFUSAL = 'this checkpoint is open for viewing only: load it to run it (it may need more GPU memory than this device has)';
+
 export class AmrSim implements Simulation {
   readonly device: GPUDevice;
   cfg: SimConfig;
@@ -173,7 +177,7 @@ export class AmrSim implements Simulation {
   rad?: AmrRad;
   /** The update records its face mass fluxes: for the species, and for the radiation it carries. */
   private get recordsMassFlux(): boolean {
-    return this.speciesGroups > 0 || radiationOn(this.cfg);
+    return !this.cfg.viewOnly && (this.speciesGroups > 0 || radiationOn(this.cfg));
   }
   private speciesX?: GPUTexture;
   private speciesHalf?: GPUTexture;
@@ -470,9 +474,12 @@ export class AmrSim implements Simulation {
 
     const side = this.slotsPerSide * PAD;
     const t = (label: string) => tex3d(d, side, 'rgba32float', label, this.layers * (cfg.ndim === 2 ? 1 : PAD));
-    for (let p = 0; p < 2; p++) this.state.push([t(`U1 ${p}`), t(`U2 ${p}`)]);
-    this.prim = [t('W1'), t('W2')];
-    this.pred = [t('PA'), t('PB')];
+    // View only: what the steps alone use is one texel, so its bindings stay valid (viewBlockBytes).
+    const view = cfg.viewOnly;
+    const st = (label: string) => (view ? tex3d(d, 1, 'rgba32float', `${label} (view only: unused)`, 1) : t(label));
+    for (let p = 0; p < 2; p++) this.state.push(p === 0 ? [t(`U1 ${p}`), t(`U2 ${p}`)] : [st(`U1 ${p}`), st(`U2 ${p}`)]);
+    this.prim = [t('W1'), st('W2')];
+    this.pred = [st('PA'), st('PB')];
     const G = this.speciesGroups;
     if (G > 0) {
       this.speciesDepth = this.layers * (cfg.ndim === 2 ? 1 : PAD);
@@ -482,9 +489,9 @@ export class AmrSim implements Simulation {
         throw new Error(`${cfg.problem.species!.length} species need an atlas ${sy} x ${sz} texels, more than this GPU allows (${d.limits.maxTextureDimension3D}): pick a lower resolution`);
       }
       const ts = (label: string) => tex3d(d, side, 'rgba32float', label, sz, sy);
-      this.species = [ts('species 0'), ts('species 1')];
-      this.speciesX = ts('species fractions');
-      this.speciesHalf = ts('species half step');
+      this.species = [ts('species 0'), view ? st('species 1') : ts('species 1')];
+      this.speciesX = view ? st('species fractions') : ts('species fractions');
+      this.speciesHalf = view ? st('species half step') : ts('species half step');
       if (this.compCoeffs) this.comp = t('composition');
     }
     if (this.recordsMassFlux) {
@@ -517,7 +524,7 @@ export class AmrSim implements Simulation {
     this.listAll = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     this.listLeaf = d.createBuffer({ size: (this.cap + 1) * 4, usage: storage });
     for (let l = 0; l <= this.levels; l++) this.listLevel.push(d.createBuffer({ size: (this.cap + 1) * 4, usage: storage }));
-    this.gfield = t('gravity field');
+    this.gfield = st('gravity field');
     this.bh = d.createBuffer({ size: MASS_FLOATS * 4, usage: storage });
     this.dummyPhi = d.createTexture({ size: [1, 1, 1], dimension: '3d', format: 'r32float', usage: GPUTextureUsage.TEXTURE_BINDING });
     this.flags = d.createBuffer({ size: this.cap * 4, usage: storage });
@@ -552,8 +559,17 @@ export class AmrSim implements Simulation {
     return PAD ** ndim * texel + (mhd ? registerBytes(ndim) : 0) + (speciesGroups > 0 ? speciesFaceBytes(ndim) : 0);
   }
 
+  /**
+   * GPU bytes per atlas block in view only (SimConfig.viewOnly): io/view.ts viewBlockBytes.
+   */
+  static viewBlockBytes(cfg: SimConfig): number {
+    const groups = speciesGroups(cfg.problem);
+    return viewBlockBytes(cfg.ndim, cfg.problem.mhd !== undefined, groups, groups > 0 && problemCoefficients(cfg.problem, cfg.eosParams.gamma) !== null);
+  }
+
   /** Bytes of one block of the atlas for a run's problem (blockBytes with its field and species). */
   static blockBytesFor(cfg: SimConfig): number {
+    if (cfg.viewOnly) return AmrSim.viewBlockBytes(cfg);
     const groups = speciesGroups(cfg.problem);
     // Implicit pressure (amr/pressure.ts): six one-channel atlases, the state the step started
     // from (four channels), and a gas's switches (one).
@@ -682,16 +698,18 @@ export class AmrSim implements Simulation {
       // 2D without self-gravity, so no solver: the field atlas holds the point masses alone.
       cfg.ndim === 2 && !flatGravity ? computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr point mass field') : undefined,
       spec ? computePipeline(d, assemble('debris/census_amr.wgsl'), 'amr debris census') : undefined,
-      cfg.ndim === 3 || flatGravity ? gravity() : undefined,
+      (cfg.ndim === 3 || flatGravity) && !cfg.viewOnly ? gravity() : undefined,
     ]);
     sim.gClock = bindGroup(d, sim.pClock, { 0: sim.params, 1: sim.redDt.result, 2: sim.clock, 3: sim.bh });
     sim.pClockPreview = await computePipeline(d, assemble('hydro/clock.wgsl'), 'clock preview', { PER_DX: 1, ADVANCE_DRIVE: 0, ...clockPressure(cfg) });
     sim.gClockPreview = bindGroup(d, sim.pClockPreview, { 0: sim.params, 1: sim.redDt.result, 2: sim.clockPreview, 3: sim.bh });
     if (cfg.problem.mhd) {
       const side = sim.slotsPerSide * PAD;
+      // View only: the display reads the faces at the parity of the state (fieldResources); the rest is one texel.
       sim.mhd = await AmrMhd.create({
         device: d, cfg, cap: sim.cap,
-        texture: (label, format = 'rgba32float') => tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
+        texture: (label, format = 'rgba32float') =>
+          cfg.viewOnly && label !== 'face field 0' ? tex3d(d, 1, format, `${label} (view only: unused)`, 1) : tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
         prim: sim.prim,
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg, brush: sim.brush,
         state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFluxWindows ?? undefined,
@@ -2295,6 +2313,7 @@ export class AmrSim implements Simulation {
    * replaces the tables that earlier passes in an unsubmitted encoder would still expect.
    */
   encodeSteps(enc: GPUCommandEncoder, count: number): number {
+    if (this.cfg.viewOnly) return 0; // a checkpoint to look at: the step's own atlases are not there
     if (this.settling || this.compiling) return 0; // a star is still being settled, or the update pass compiling
     if (this.pending) this.applyRegrid(enc);
     if (this.dtStale) {
@@ -2964,6 +2983,7 @@ export class AmrSim implements Simulation {
 
   /** Take exactly `count` steps, re-meshing as it goes (tests). */
   async advance(count: number) {
+    if (this.cfg.viewOnly) throw new Error(VIEW_ONLY_REFUSAL);
     await this.compiled;
     await this.settled;
     let left = count;
@@ -3068,6 +3088,7 @@ export class AmrSim implements Simulation {
 
   /** Step until the clock reaches cfg.tEnd, re-meshing as it goes. Returns the steps taken. */
   async runToEnd(_batch = 16, maxSteps = 1e6): Promise<number> {
+    if (this.cfg.viewOnly) throw new Error(VIEW_ONLY_REFUSAL);
     if (!Number.isFinite(this.cfg.tEnd)) throw new Error('runToEnd needs a finite tEnd');
     await this.compiled;
     await this.settled;

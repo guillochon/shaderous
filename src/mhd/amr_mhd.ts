@@ -742,7 +742,8 @@ export class AmrMhd {
     const layout = { bytesPerRow: (BS + 1) * 16, rowsPerImage: BS + 1 };
     const size = [BS + 1, BS + 1, depth];
     d.queue.writeTexture({ texture: this.faces[0], origin }, faces as Float32Array<ArrayBuffer>, layout, size);
-    d.queue.writeTexture({ texture: this.comps[0], origin }, new Float32Array(faces.length), layout, size);
+    // (View only, the compensation is one texel nothing reads: AmrSim's viewOnly.)
+    if (this.comps[0].width > 1) d.queue.writeTexture({ texture: this.comps[0], origin }, new Float32Array(faces.length), layout, size);
   }
 
   /** The whole face atlas at `parity` (validation). */

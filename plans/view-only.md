@@ -1,7 +1,32 @@
 # Plan: a view-only mode for checkpoints too large to run here
 
-Status (2026-11-21): not begun. The memory figures below are worked out from
-`AmrSim.blockBytes` and the code as it stands, not measured; stage 0 measures them.
+Status (2026-11-21): stages 1, 2, 4 (the level cap only) and 5 built; stage 3 (one field
+baked at a time) and stage 4's region at full resolution not begun. Stage 0 was replaced by
+measuring the one large file at hand (below).
+
+**As built.**
+
+- Reader (`io/athdf.ts` `openAthdf`, `io/view.ts` `readForView`, `io/view_worker.ts`): ranged
+  reads of 1024 blocks; in the page a worker mounts the `File` with WORKERFS. Merging averages
+  density, pressure and the cell-centred field by volume, velocities, the scalar and species by
+  mass, and faces by area (unit tests: mass, momentum and scalar kept to 1e-4, div B stays at
+  round-off). Uniform-grid files are refused for now.
+- `AmrSim` with `viewOnly` (stage 2 as a flag rather than a class, decision 2): textures only
+  the step uses are one texel; 72 bytes a texel plus a field's flux register, 0.62 MB a block
+  with a field, against 2.7 MB to run it. Gravity is not built (so the potential is not shown).
+  A view-only load of a file that fits is bit for bit the run's state (probes, magnetic energy,
+  div B, total energy of an MHD blast on blocks).
+- Page: "Open for viewing"; Run, Step and Reset disabled; the summary says "View only (to level
+  L of M)"; the address bar is left alone. API `viewAthdf(url?)`, `viewBudget()`;
+  `loadSnapshot` honours a snapshot's `view`; `run` and `record` refuse. Runner and MCP:
+  `load_athdf` with `view: true` merges in Node and hands over the smaller snapshot.
+- Measured on `runs/unity-dwd-1024/seg-2070200-r1/0010-t46.athdf` (3.5 GB, magnetized, 19,419
+  leaves to level 5, 22,192 tree blocks): in the default 2.5 GB budget it opens at level 3 (1,730
+  leaves). Reading and merging takes 29 s in Node, 85 s through the runner, 95 to 150 s in the
+  page (WORKERFS reads are slower than Node's; not profiled). At level 4 it would need 4 GB, at
+  its full level 5 some 14 GB: stage 3 is what would show it whole in the default budget.
+
+The memory figures below were worked out from `AmrSim.blockBytes` before building.
 
 Goal: open an `.athdf` checkpoint of a run that does not fit in this device's GPU memory (made
 on a Runpod pod or a cluster, say) and look at it: slices, projections, the volume view,

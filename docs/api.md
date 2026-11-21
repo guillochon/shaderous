@@ -321,6 +321,32 @@ from another build: it then says so, and names any setting this build could not 
 written (a key it no longer reads, a value it rejects or holds to its limits). Those settings
 take this build's values. A file of ours whose preset this build does not have is refused.
 
+### `viewAthdf(url?) → state`
+
+Opens an `.athdf` checkpoint for viewing only: for a run too large to continue on this device.
+The file is read in a worker without being copied whole (files larger than WebAssembly's 4 GB
+open), and if its blocks do not fit the GPU memory budget (`viewBudget()`), its finest levels
+are merged into their ancestors, one level at a time, until they do: density, pressure and the
+magnetic field averaged by volume, velocities, the passive scalar and species by mass, and the
+face field by area, so it stays divergence-free. The mesh that shows it holds only what the
+display reads: the state at one parity, the primitives, the display's atlas, a field's faces
+(some 0.6 MB a block with a field, against 2.7 MB to run it). It never steps: `run`,
+`step`, `record` and the page's Run, Step and Reset refuse. Views, slices, projections,
+`probe`, `slice`, `stats` and `screenshot` work. Gravity is off, so the potential is not
+shown.
+
+`url` is a file the page can fetch (the dev server serves the project's own files, e.g.
+`/runs/x/0010.athdf`); with none, the file `athdfPut` put together. The result is `state()`
+plus `view`: `level`, the finest level kept; `fileLevel`, the file's finest; `blocks` and
+`fileBlocks`, the leaf blocks after and before merging. Uniform-grid files are not supported
+yet (`loadAthdf` loads them).
+
+### `viewBudget() → bytes`
+
+The GPU memory the adaptive mesh may use (the `gpumem` control): what a caller merging a
+file for viewing itself plans against, as the runner does (`snapshotIn` with a `view` field:
+`{ level, nodes, fileLevel }`, nodes being the blocks of its tree, ancestors included).
+
 ### `state() → object`
 
 Returns `problem`, `label`, `ndim`, `n`, `amr`, `t`, `dt`, `steps`, `tEnd` (null if none),
