@@ -31,7 +31,14 @@ Unity are A100 80 GB nodes and one H100 node (`sinfo -p gpu-highvram -o "%N %G %
 The `gpu` partition has no 80 GB cards; the one H200 node is only in `gpu-preempt-highvram`,
 where a job can be preempted. The magnetized mesh can hold at most 35^3 = 42,875 blocks (about
 110 GB); the double white dwarf at 2048^3 was estimated at 25 to 30 thousand blocks, 70 to 80
-GB, so an 80 GB card is close. The check job measured the run itself (below).
+GB, so an 80 GB card is close.
+
+Measured on Unity (A100-SXM4-80GB, `--gpu-memory 74`, 2026-11-20): the double white dwarf at
+2048^3 with 5 levels loads with 23,024 blocks at all 5 levels (1% of uniform, budget not full)
+and peaks at 75.2 GB of GPU memory. A step takes 1.88 s with Helmholtz (dt 0.00097) and 0.58 s
+with the degenerate gas (dt 0.0020): Helmholtz costs 6.6 times as much per unit of time, about
+10.5 hours per orbit (19.5 code units) at the start. The budget holds roughly 28,000 blocks,
+about a fifth more than at load; `mesh` in `diag.jsonl` says when it fills.
 
 The chain: each job runs with `--wall` set to the time the job has left less `MARGIN` (30
 minutes, for the last checkpoint), screenshots every `SHOT_EVERY` seconds (`NNNN-tT-vol.png` and
