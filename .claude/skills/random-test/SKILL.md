@@ -88,6 +88,13 @@ on Apple GPUs, swirls emptying the axis cells of (R, z) and spherical runs in on
 under a uniform field falling through walls, magnetic fields flowing into obstacles, thin disks
 with field loops crashing the page, and setup checks that passed documents the simulators then
 refused. Seeds from before the table-driven generator (20 November 2026) make other documents
-now. Open issues it found are on GitHub (label them `random-test`). When a new failure is real,
+now. The first 1000-run batch of the table-driven generator (20 November 2026, seeds 10000 to
+10999) flagged 26 runs, all fixed: mostly setups the check passed that then failed (flows that
+needed units, species, a shearing box or comoving coordinates; a wind tunnel's liquid and its
+implicit pressure; gamma 1 outside the barotropic gas; units that carried the equations of
+state's constants past 32-bit numbers; face-defined fields in (R, z)), plus MHD on the adaptive
+mesh with species that set the equation of state (refused), the magnetic diagnostics' missing
+composition binding, a star field without beta, and a radiation readback racing a reload.
+Open issues it found are on GitHub (label them `random-test`). When a new failure is real,
 fix it, add a validation test that would have caught it (`src/validation/*.ts`, listed in
 `tests/gpu/validation.spec.ts`), and rerun the seeds that found it.
