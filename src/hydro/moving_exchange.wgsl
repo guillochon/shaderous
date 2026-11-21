@@ -72,12 +72,18 @@ fn donors(u: vec3<i32>) -> f32 {
   }
   return n;
 }
+// What each donor gives an uncovered cell, as a fraction of its state: 1 / (n + 1), times the
+// cell's gas fraction with fractions (it starts nearly empty, at about its neighbors' true
+// density).
+fn share(u: vec3<i32>) -> f32 {
+  return select(1.0, gas_fractions(u).x, MOVING_FRACTIONS) / (donors(u) + 1.0);
+}
 // What a cell that stays gas gives its uncovered neighbors, before the limit, as a fraction.
 fn gifts(r: vec3<i32>) -> f32 {
   var g = 0.0;
   for (var k = 0; k < n_dirs(); k++) {
     let u = r + dir(k);
-    if (uncovered(u)) { g += 1.0 / (donors(u) + 1.0); }
+    if (uncovered(u)) { g += share(u); }
   }
   return g;
 }
@@ -131,13 +137,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   // Uncovered: what its donors give, moving with the body (its velocity as the cell held it).
-  let n = donors(c);
+  let sh = share(c);
   var a1 = vec4<f32>(0.0);
   var a2 = vec3<f32>(0.0);
   for (var k = 0; k < n_dirs(); k++) {
     let r = c + dir(k);
     if (stays(r)) {
-      let f = gift_scale(r) / (n + 1.0);
+      let f = gift_scale(r) * sh;
       a1 += f * textureLoad(U1, r, 0);
       a2 += f * textureLoad(U2, r, 0).xyz;
     }

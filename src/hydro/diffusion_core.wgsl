@@ -71,9 +71,12 @@ fn visc_flux(a: vec3<i32>, e: vec3<i32>, axis: i32, l: DSide, r: DSide) -> vec4<
   var d2 = vec3<f32>(0.0);
   var vf = 0.5 * (vl + vr);
   if (wall) {
-    // The wall is at rest half a cell from the gas cell's center, and nothing varies along it.
-    dn = select(2.0 * vr, -2.0 * vl, r.solid);
-    vf = vec3<f32>(0.0);
+    // The wall is half a cell from the gas cell's center, and nothing varies along it. It moves
+    // with its solid cell's velocity: 0 for an obstacle at rest (whose gas is held at rest), a
+    // moving body's (hydro/moving.ts) for one of those. (At rest, the same numbers as 2 v_r and
+    // -2 v_l.)
+    dn = 2.0 * (vr - vl);
+    vf = select(vl, vr, r.solid);
   } else {
     let flat = P.dims.z == 1u;
     if (!(flat && t1 == 2)) { d1 = visc_across(a, e, axis, t1, vl, vr); }

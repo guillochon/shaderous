@@ -3583,12 +3583,28 @@ With implicit pressure the wall's velocity enters the solve's source: a face ont
 body's cell carries the cell's density times the wall's normal velocity, so that the solve
 sees the body push (`pressure/source.wgsl`); no mass crosses the face in the correction.
 
+The force on a moving body also counts the momentum the exchange hands the gas where a cell
+changes kind (an uncovered cell's $`m\mathbf v_s`$ less what its donors gave), so that it is
+the momentum the body gave the gas, exactly: test `force-balance-moving` (a cylinder sliding
+through a periodic box) closes the box's momentum balance to 6e-8. The viscous stress at a wall
+takes the wall's velocity (a moving body's solid cell's).
+
+**With the liquid and implicit pressure, gas fractions near moving bodies** (plans/wind-tunnel.md
+8.1's cheap form): each cell near a moving body gets a gas fraction $`\phi`$ and its faces open
+fractions $`a_f`$, from the bodies' signed distances at the step's end, stamped before the solve.
+The solve takes the cell's pressure at its true density $`\rho/\phi`$, $`\phi`$ times its
+compressibility term and $`\beta_f = a_f`$, and the correction the same $`a_f`$ on the pressure's
+push in its mass flux, so that as a body sweeps through a cell the solve pushes the liquid out
+of it; a cell becomes the body's only when $`\phi < 0.05`$. This moves an open-ended column of
+liquid at the piston's speed to 10% with a force on the piston near nil (without it: 40% and
+forces of up to 16).
+
 Not yet good enough: test `galilean-drag` (a cylinder moving through still liquid against
-liquid streaming past it at rest) gives a drag 58% higher for the moving body with the explicit
-scheme, and nonsense with implicit pressure; the force history of a moving body is dominated by
-the jumps of its cells. The force diagnostic also leaves out the momentum the exchange hands
-over. Not built: moving bodies on blocks, moving mesh bodies (their distance field on the GPU),
-partly filled cells (plans/wind-tunnel.md section 8).
+liquid streaming past it at rest) gives a drag 87% higher for the moving body with the explicit
+scheme and 164% with the fractions; the force history of a moving body is dominated by the
+jumps of its cells. The cure is cut cells with state redistribution (plans/wind-tunnel.md 8.1,
+whose float64 prototype comes first). Not built: moving bodies on blocks, moving mesh bodies
+(their distance field on the GPU).
 
 ### Bodies from mesh files
 

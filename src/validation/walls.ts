@@ -272,7 +272,7 @@ export const WALL_TESTS: TestDef[] = [
     id: 'galilean-drag',
     name: 'A body moving through still liquid against liquid streaming past it: the same drag (2D 512^2, cylinder, Reynolds number 100, explicit and implicit pressure)',
     criterion:
-      'A cylinder of diameter 0.25 (16 cells across) in a periodic box of liquid 8 across (Mach 0.1, nu = 0.0025): at rest with the liquid at U = 1, and sliding at -1 through the liquid at rest. Over t = 1 to 3 the mean drag agrees to 5% with the explicit scheme; the moving body’s drag is noisier (each cell it crosses a small piston stroke): the rms of the difference of the two histories is reported. With implicit pressure the same is measured and reported (the wall’s velocity is not in the solve’s source yet), not judged',
+      'A cylinder of diameter 0.25 (16 cells across) in a periodic box of liquid 8 across (Mach 0.1, nu = 0.0025): at rest with the liquid at U = 1, and sliding at -1 through the liquid at rest. Over t = 1 to 3 the mean drag agrees to 5% with the explicit scheme; the moving body’s drag is noisier (each cell it crosses a small piston stroke): the rms of the difference of the two histories is reported. With implicit pressure (gas fractions near the body: plans/wind-tunnel.md 8.1’s cheap form) the same is measured and reported, not judged. Fails, 2026-11-20 (plans/wind-tunnel.md 6.7): explicit C_d 1.317 at rest, 2.459 moving; implicit 1.348 and 3.565: the staircase’s jumps, which the full 8.1 is to remove',
     async run(gpu: Gpu) {
       const spec = (moving: boolean): SetupSpec => ({
         format: 'shaderous-setup', version: 1, id: 'galilean', name: 'Galilean drag',

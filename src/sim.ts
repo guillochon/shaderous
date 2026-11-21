@@ -591,6 +591,9 @@ export function refusal(c: SimConfig): string | null {
   return hit ? `${hit[0]}: ${hit[1]}` : null;
 }
 
+/** Moving bodies with gas and open fractions (plans/wind-tunnel.md 8.1's cheap form): the liquid with implicit pressure. */
+export const movingFractions = (c: SimConfig): boolean => !!c.problem.moving?.length && c.eos === 'liquid' && implicitPressure(c);
+
 /**
  * Why a run with moving obstacles (hydro/moving.ts) cannot go as configured, or null. The first
  * version: spheres and boxes on the uniform grid, in Cartesian coordinates, with the gas alone.
@@ -840,7 +843,7 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     // Forces on bodies (hydro/forces.ts): the passes that write each cell's wall forces.
     ...wallSlots(forcesOn(c)),
     // Moving bodies (hydro/moving.ts): walls that move, on the uniform grid.
-    moving: movingFlags(c.amrLevels > 0 ? [] : (c.problem.moving ?? [])),
+    moving: movingFlags(c.amrLevels > 0 ? [] : (c.problem.moving ?? []), movingFractions(c)),
   };
 }
 
@@ -1594,6 +1597,8 @@ export class Sim implements Simulation {
   private moving?: {
     poses: GPUBuffer;
     mk: GPUTexture;
+    /** with fractions: the gas and open fractions the stamp writes and the solve reads */
+    gf?: GPUTexture;
     pPose: GPUComputePipeline;
     pStamp: GPUComputePipeline;
     pExchange: GPUComputePipeline;
@@ -1615,11 +1620,15 @@ export class Sim implements Simulation {
     ]);
     const poses = d.createBuffer({ label: 'moving bodies: poses', size: 4 * 5 * 16, usage: GPUBufferUsage.STORAGE });
     const mk = tex3d(d, this.nx, 'rgba32float', 'moving bodies: new marks', this.nz, this.ny);
+    const gf = movingFractions(c) ? tex3d(d, this.nx, 'rgba32float', 'moving bodies: gas fractions', this.nz, this.ny) : undefined;
+    const g = (t?: GPUTexture, b = 58): Record<number, GPUTextureView> => (t ? { [b]: v(t) } : {});
+    const noFractions = d.createTexture({ label: 'moving bodies: no fractions', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING });
     const moving = {
-      poses, mk, pPose, pStamp, pExchange,
+      poses, mk, gf, pPose, pStamp, pExchange,
       gPose: bindGroupUsed(d, pPose, { 0: this.params, 1: this.clock, 2: poses }),
-      gStamp: [0, 1].map((p) => bindGroupUsed(d, pStamp, { 0: this.params, 2: poses, 3: v(this.state[p][1]), 4: v(mk) })),
-      gExchange: [0, 1].map((p) => bindGroupUsed(d, pExchange, { 0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(mk), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]), 7: v(this.walls!.wx) })),
+      // (Without fractions the stamp still names its texture: one texel no one writes.)
+      gStamp: [0, 1].map((p) => bindGroupUsed(d, pStamp, { 0: this.params, 2: poses, 3: v(this.state[p][1]), 4: v(mk), 59: v(gf ?? noFractions) })),
+      gExchange: [0, 1].map((p) => bindGroupUsed(d, pExchange, { 0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(mk), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]), 7: v(this.walls!.wx), ...g(gf) })),
     };
     return moving;
   }
@@ -1628,21 +1637,28 @@ export class Sim implements Simulation {
    * Moving bodies: their poses at the end of the step just encoded, each cell's new mark, and the
    * exchange of the cells that change kind, into the other parity (hydro/moving_*.wgsl).
    */
-  private encodeMoving(pass: GPUComputePassEncoder) {
+  private encodeMoving(pass: GPUComputePassEncoder, stamped = false) {
     const m = this.moving;
     if (!m) return;
     const q = this.cur;
     const groups: [number, number, number] = [Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4)];
+    // (With fractions the bodies were stamped before the solve, at the same time: pressure/source.wgsl reads them.)
+    if (!stamped) this.encodeMovingStamp(pass, q);
+    pass.setPipeline(m.pExchange);
+    pass.setBindGroup(0, m.gExchange[q]);
+    pass.dispatchWorkgroups(...groups);
+    this.cur = 1 - q;
+  }
+
+  /** The bodies' poses at the step's end, and each cell's new mark (and fractions), from parity q's marks. */
+  private encodeMovingStamp(pass: GPUComputePassEncoder, q: number) {
+    const m = this.moving!;
     pass.setPipeline(m.pPose);
     pass.setBindGroup(0, m.gPose);
     pass.dispatchWorkgroups(1);
     pass.setPipeline(m.pStamp);
     pass.setBindGroup(0, m.gStamp[q]);
-    pass.dispatchWorkgroups(...groups);
-    pass.setPipeline(m.pExchange);
-    pass.setBindGroup(0, m.gExchange[q]);
-    pass.dispatchWorkgroups(...groups);
-    this.cur = 1 - q;
+    pass.dispatchWorkgroups(Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4));
   }
 
   /** Stamp the moving bodies where they start (the clock's t and dt at a reset), now. */
@@ -1868,6 +1884,7 @@ export class Sim implements Simulation {
       : undefined;
     // Moving bodies (hydro/moving.ts): their poses, each cell's new mark, and the three passes.
     this.moving?.mk.destroy();
+    this.moving?.gf?.destroy();
     this.moving?.poses.destroy();
     this.moving = c.problem.moving?.length && !c.amrLevels ? await this.buildMoving(slots) : undefined;
     this.stampMoving();
@@ -1903,6 +1920,7 @@ export class Sim implements Simulation {
           10: v(this.pOld!), 11: v(this.pFull!),
           // (prs.rho0: the old density for the liquid, the compression switch for a gas.)
           7: v(prs.rho0),
+          ...((this.moving?.gf ? { 58: v(this.moving.gf) } : {}) as Record<number, Bindable>),
           ...((gas ? { 9: v(this.state[p][1]), 12: v(this.gfield), 20: this.bh } : {}) as Record<number, Bindable>), ...k,
         }),
       );
@@ -1914,6 +1932,7 @@ export class Sim implements Simulation {
           5: v(prs.rho0),
           ...((this.speciesGroups > 0 ? { 13: this.massFlux! } : {}) as Record<number, Bindable>),
           ...(this.walls?.correctBindings() ?? {}),
+          ...((this.moving?.gf ? { 58: v(this.moving.gf) } : {}) as Record<number, Bindable>),
           ...((gas ? { 9: v(this.faceVel!), 12: v(this.gfield), 20: this.bh } : {}) as Record<number, Bindable>), ...k,
         }),
       );
@@ -2582,6 +2601,8 @@ export class Sim implements Simulation {
       if (this.prs) {
         // Implicit pressure: the equation from the old state (parity p) and the advected one
         // (parity 1 - p), the solve, and the correction back into parity p.
+        // (Moving bodies with fractions: where they will be at the step's end, for the solve.)
+        if (this.moving?.gf) this.encodeMovingStamp(pass, p);
         pass.setPipeline(this.pPsSource!);
         pass.setBindGroup(0, this.gPsSource[p]);
         this.dispatch(pass);
@@ -2655,7 +2676,7 @@ export class Sim implements Simulation {
         this.speciesCur = 1 - this.speciesCur;
       }
       // Moving bodies: where they are at the step's end, and the cells that changed kind.
-      this.encodeMoving(pass);
+      this.encodeMoving(pass, !!this.moving?.gf);
       pass.end();
       syncScale(enc, this.cfg, this.clock, this.params, this.bh);
     }

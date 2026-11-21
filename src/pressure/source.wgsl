@@ -40,8 +40,9 @@
 // imposes, the cell's density times the wall's velocity along the axis (its solid cell holds that
 // velocity in its momentum). The solve then sees the body push and pull the liquid; no mass
 // crosses the face in the correction. 0 for a wall at rest, or of the box.
+// (With fractions the swept volume carries the push instead: the cell's gas fraction falls.)
 fn wall_mom(c: vec3<i32>, a: i32, up: bool, rho: f32) -> f32 {
-  if (!MOVING) { return 0.0; }
+  if (!MOVING || MOVING_FRACTIONS) { return 0.0; }
   var q = c;
   q[a] += select(-1, 1, up);
   if (q[a] < 0 || q[a] >= i32(P.dims[a])) { return 0.0; }
@@ -76,6 +77,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     return;
   }
   let ms = textureLoad(U1S, c, 0).yzw;
+  let gf = gas_fractions(c);
   var div = 0.0;
   // The divergence of the face momenta the step started from, and those of the upper faces.
   var divn = 0.0;
@@ -107,11 +109,16 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     mn[a] = fhn;
     div += fh - fl;
     divn += fhn - fln;
-    beta[a] = select(0.0, 1.0, hi.kind == FK_GAS || hi.kind == FK_OPEN);
+    beta[a] = select(0.0, 1.0, hi.kind == FK_GAS || hi.kind == FK_OPEN) * gf[a + 1];
   }
-  let p = eos_pressure(rho, 0.0);
+  // Near a moving body (plans/wind-tunnel.md 8.1's cheap form): the cell holds gas in a fraction
+  // phi of its volume (at the step's end), so its true density is rho / phi, and its
+  // compressibility term is phi's share: as a body sweeps through the cell its pressure rises
+  // and the solve pushes the liquid out, before the cell becomes the body's. (1 elsewhere.)
+  let phi = max(gf.x, 0.02);
+  let p = eos_pressure(rho / phi, 0.0);
   let cs = eos_sound_speed(rho, p);
-  let alpha = 1.0 / (cs * cs * dt * dt);
+  let alpha = phi / (cs * cs * dt * dt);
   let th = cell_theta(c, dt, 0.5);
   let rhs = alpha * (p + (1.0 - th) / th * pn) / th - (th * div + (1.0 - th) * divn) / (th * P.dx * dt);
   textureStore(RHS, c, vec4<f32>(rhs, 0.0, 0.0, 0.0));

@@ -22,7 +22,7 @@ export interface MovingBody {
 export const MAX_MOVING = 4;
 
 /** The slot without moving bodies: what the passes that look at walls compile against. */
-export const MOVING_OFF = 'const MOVING = false;\nfn moving_mark(m: f32) -> bool { return false; }\n';
+export const MOVING_OFF = 'const MOVING = false;\nconst MOVING_FRACTIONS = false;\nfn moving_mark(m: f32) -> bool { return false; }\nfn gas_fractions(c: vec3<i32>) -> vec4<f32> { return vec4<f32>(1.0); }\n';
 
 const f32 = (x: number) => {
   const s = String(Math.fround(Number(x) || 0));
@@ -84,13 +84,16 @@ function motionWgsl(m: Motion | undefined, i: number): string {
   return `${pre}fn own_pose_${i}(t: f32) -> Pose {\n${body}  return p;\n}\n`;
 }
 
-/** WGSL of a shape's inside test at the start, `inside_<i>(x)`, in the box's coordinates. */
-function insideWgsl(shape: Shape, i: number, box: number, n: number, ndim: 2 | 3): string {
+/**
+ * WGSL of a shape's signed distance at the start, `dist_<i>(x)`, in the box's coordinates:
+ * negative inside. A box's open sides are far away.
+ */
+function distWgsl(shape: Shape, i: number, box: number, n: number, ndim: 2 | 3): string {
   if (shape.type === 'sphere') {
     const r = shape.radiusCells !== undefined ? shape.radiusCells * (box / n) : (shape.radius ?? 0.1 * box);
     const c = shape.center ?? [0, 0, 0];
     const flat = ndim === 2 ? 'q.z = 0.0;\n  ' : '';
-    return `fn inside_${i}(x: vec3<f32>) -> bool {\n  var q = x - ${v3(c)};\n  ${flat}return dot(q, q) < ${f32(r * r)};\n}\n`;
+    return `fn dist_${i}(x: vec3<f32>) -> f32 {\n  var q = x - ${v3(c)};\n  ${flat}return length(q) - ${f32(r)};\n}\n`;
   }
   if (shape.type === 'box') {
     const lo = [0, 1, 2].map((a) => shape.min?.[a] ?? -1e30);
@@ -102,19 +105,29 @@ function insideWgsl(shape: Shape, i: number, box: number, n: number, ndim: 2 | 3
       return fl && fh ? (lo[a] + hi[a]) / 2 : fl ? lo[a] : fh ? hi[a] : 0;
     });
     const turned = deg.some((d) => d % 360 !== 0);
-    const flat = ndim === 2 ? ' && true' : ` && q.z > ${f32(lo[2])} && q.z < ${f32(hi[2])}`;
     const local = turned
       ? `  let r = euler_xyz(${deg.map((d) => f32((d * Math.PI) / 180)).join(', ')});\n  let q = transpose(r) * (x - ${v3(pivot)}) + ${v3(pivot)};\n`
       : '  let q = x;\n';
-    return `fn inside_${i}(x: vec3<f32>) -> bool {\n${local}  return q.x > ${f32(lo[0])} && q.x < ${f32(hi[0])} && q.y > ${f32(lo[1])} && q.y < ${f32(hi[1])}${flat};\n}\n`;
+    // Per axis, how far outside the slab (negative inside); in 2D z does not count.
+    const dz = ndim === 2 ? '-1.0e30' : `max(${f32(lo[2])} - q.z, q.z - ${f32(hi[2])})`;
+    return `fn dist_${i}(x: vec3<f32>) -> f32 {\n${local}  let d = vec3<f32>(max(${f32(lo[0])} - q.x, q.x - ${f32(hi[0])}), max(${f32(lo[1])} - q.y, q.y - ${f32(hi[1])}), ${dz});\n  return length(max(d, vec3<f32>(0.0))) + min(max(d.x, max(d.y, d.z)), 0.0);\n}\n`;
   }
   throw new Error(`a moving obstacle must be a sphere or a box for now (not a ${shape.type})`);
 }
 
-/** The `moving` slot: MOVING, and which marks are moving bodies'. */
-export function movingFlags(bodies: MovingBody[]): string {
+/**
+ * The `moving` slot: MOVING, which marks are moving bodies', and, with `fractions` (the liquid
+ * with implicit pressure: plans/wind-tunnel.md 8.1's cheap form), MOVING_FRACTIONS and
+ * `gas_fractions(c)`: the cell's gas fraction and its upper faces' open fractions near a moving
+ * body (1 elsewhere), which the stamp pass writes (GF, binding 58).
+ */
+export function movingFlags(bodies: MovingBody[], fractions = false): string {
   if (!bodies.length) return MOVING_OFF;
-  return `const MOVING = true;\nfn moving_mark(m: f32) -> bool {\n  return ${bodies.map((b) => `abs(m - ${f32(b.mark)}) < 0.25`).join(' || ')};\n}\n`;
+  const marks = `fn moving_mark(m: f32) -> bool {\n  return ${bodies.map((b) => `abs(m - ${f32(b.mark)}) < 0.25`).join(' || ')};\n}\n`;
+  const gf = fractions
+    ? '@group(0) @binding(58) var GF: texture_3d<f32>;\nfn gas_fractions(c: vec3<i32>) -> vec4<f32> {\n  return textureLoad(GF, c, 0);\n}\n'
+    : 'fn gas_fractions(c: vec3<i32>) -> vec4<f32> {\n  return vec4<f32>(1.0);\n}\n';
+  return `const MOVING = true;\nconst MOVING_FRACTIONS = ${fractions};\n${marks}${gf}`;
 }
 
 /**
@@ -137,11 +150,18 @@ export function movingBodies(bodies: MovingBody[], ctx: { box: number; n: number
     })
     .join('');
   s += `fn body_pose(i: u32, t: f32) -> Pose {\n${bodies.map((_, i) => `  if (i == ${i}u) { return pose_${i}(t); }\n`).join('')}  return pose_id();\n}\n`;
-  s += bodies.map((b, i) => insideWgsl(b.shape, i, ctx.box, ctx.n, ctx.ndim)).join('');
-  // The first body that holds the point (its start position from the pose's inverse).
-  s += `fn moving_at(x: vec3<f32>) -> vec4<f32> {\n`;
+  s += bodies.map((b, i) => distWgsl(b.shape, i, ctx.box, ctx.n, ctx.ndim)).join('');
+  // Each body's distance at a point now (from its start position, the pose's inverse).
+  bodies.forEach((_, i) => {
+    s += `fn now_dist_${i}(x: vec3<f32>) -> f32 {\n  let p = POSES[${i}];\n  let r = mat3x3<f32>(p.r0.xyz, p.r1.xyz, p.r2.xyz);\n  let d = vec3<f32>(p.r0.w, p.r1.w, p.r2.w);\n  return dist_${i}(r * (x - d));\n}\n`;
+  });
+  // The signed distance to the nearest body now.
+  s += `fn moving_dist(x: vec3<f32>) -> f32 {\n  var d = 1.0e30;\n${bodies.map((_, i) => `  d = min(d, now_dist_${i}(x));\n`).join('')}  return d;\n}\n`;
+  // The first body that holds the point, deeper than `thr` (0: its center is inside), its mark
+  // and its velocity there; mark 0 where none does.
+  s += `fn moving_at(x: vec3<f32>, thr: f32) -> vec4<f32> {\n`;
   bodies.forEach((b, i) => {
-    s += `  {\n    let p = POSES[${i}];\n    let r = mat3x3<f32>(p.r0.xyz, p.r1.xyz, p.r2.xyz);\n    let d = vec3<f32>(p.r0.w, p.r1.w, p.r2.w);\n    let x0 = r * (x - d);\n    if (inside_${i}(x0)) { return vec4<f32>(${f32(b.mark)}, cross(p.w.xyz, x) + p.v.xyz); }\n  }\n`;
+    s += `  if (now_dist_${i}(x) < thr) {\n    let p = POSES[${i}];\n    return vec4<f32>(${f32(b.mark)}, cross(p.w.xyz, x) + p.v.xyz);\n  }\n`;
   });
   s += '  return vec4<f32>(0.0);\n}\n';
   return s;

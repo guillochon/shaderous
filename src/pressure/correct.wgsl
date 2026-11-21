@@ -34,6 +34,7 @@
 fn mass_flux(m_lo: f32, m_hi: f32, p_lo: f32, p_hi: f32, dtdx: f32, kg: f32, r_lo: f32, r_hi: f32) -> f32 {
   return 0.5 * (m_lo + m_hi) + kg * 0.5 * (r_lo + r_hi) - dtdx * (p_hi - p_lo);
 }
+#include "hydro/moving_flags.wgsl"
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -74,7 +75,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (hi.kind == FK_GAS) {
       let pq = textureLoad(PRS, hi.q, 0).x;
       let rq = textureLoad(RHO0, hi.q, 0).x;
-      let f = mass_flux(u1[a + 1], textureLoad(U1S, hi.q, 0)[a + 1], pc, pq, dtdx, kg, rc, rq);
+      // (Near a moving body, the face's open fraction on the pressure's push, as the solve has it: pressure/source.wgsl.)
+      let f = mass_flux(u1[a + 1], textureLoad(U1S, hi.q, 0)[a + 1], pc, pq, dtdx * gas_fractions(c)[a + 1], kg, rc, rq);
       fh = vec3<f32>(0.5 * (pc + pq), th * f + (1.0 - th) * textureLoad(PN, c, 0)[a + 1], 0.5 * (rc + rq));
     }
     if (hi.kind == FK_INLET) { fh.y = textureLoad(U1S, hi.q, 0)[a + 1]; }
@@ -82,7 +84,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (lo.kind == FK_GAS) {
       let pq = textureLoad(PRS, lo.q, 0).x;
       let rq = textureLoad(RHO0, lo.q, 0).x;
-      let f = mass_flux(textureLoad(U1S, lo.q, 0)[a + 1], u1[a + 1], pq, pc, dtdx, kg, rq, rc);
+      let f = mass_flux(textureLoad(U1S, lo.q, 0)[a + 1], u1[a + 1], pq, pc, dtdx * gas_fractions(lo.q)[a + 1], kg, rq, rc);
       fl = vec3<f32>(0.5 * (pq + pc), th * f + (1.0 - th) * textureLoad(PN, lo.q, 0)[a + 1], 0.5 * (rq + rc));
     }
     if (lo.kind == FK_INLET) { fl.y = textureLoad(U1S, lo.q, 0)[a + 1]; }

@@ -621,16 +621,66 @@ uniform grid, then on blocks; a spinning-rotor preset runs in the page.
   of 11 times the mean: each cell the body crosses is a piston stroke. Implicit pressure: C_d
   1.35 at rest, 16 moving without the wall's velocity in the solve's source, and -4.0 with it
   (`pressure/source.wgsl`: a face onto a moving body's cell takes the cell's density times the
-  wall's velocity; added, kept). Two causes, not yet separated: the jumps themselves, and the
-  diagnostic, which counts the wall faces' fluxes but not the momentum the exchange hands over
-  when a cell changes kind (an uncovered cell's m v_s comes from the body). **Decision 13,
-  "staircase noise acceptable for rotors": no.** Next: count the exchange's momentum in the
-  force, then section 8.1's cheap form (the swept volume as a smooth source in the solve, open
-  fractions in the pressure's coefficients), before rotors with moving cells, as 6.3 foresaw.
+  wall's velocity; added, kept). **Decision 13, "staircase noise acceptable for rotors":
+  no.**
+
+### 6.7 Making the forces on moving bodies right (2026-11-20, second pass)
+
+1. **The diagnostic.** The exchange pass now writes the momentum it gives the gas where a cell
+   changes kind (an uncovered cell's m v_s, less what its donors gave), over dt, as a force on
+   the body (WX, `hydro/forces.ts`; a covered cell's momentum stays in the gas). Test
+   `force-balance-moving` (GPU): a cylinder sliding through a periodic box of liquid, the
+   box's momentum change against the summed impulse over 200 steps, 6.3e-8 explicit and 5.4e-8
+   implicit. The diagnostic is now the momentum the body gave the gas, exactly. It did not
+   change `galilean-drag` (to the last digit at its sampled times: the exchange's share is
+   small); sampled every step, the explicit moving body's force swings from -2.3 to +5.0 with
+   the period of one cell crossed, where its mean should be about 0.17. **So the error is the
+   staircase's jumps, not the diagnostic.**
+2. **The wall's velocity in the implicit source: sign and weighting are right.** A liquid piston
+   in a tube closed behind it: the pocket the piston leaves goes to -15 and lower (suction, as a
+   stiff liquid must); with the wrong sign it would be compressed. With both ends open (the liquid
+   should simply move at the piston's 0.1, the force near 0): explicit, 0.16 ahead of it and a
+   force of -3 to -9; implicit with the source, 0.14 and +1 to +16. A covered cell hands its
+   whole mass to one or two neighbors, doubling their density: in a liquid of sound speed 10 a
+   pulse of c^2 rho ~ 100. The sign change in `galilean-drag` (16 without the source, -4 with
+   it) was the mean of such pulses, not a sign error.
+3. **A real error found on the way: the viscous wall assumed a wall at rest**
+   (`hydro/diffusion_core.wgsl`: `dn = 2 v_gas`, face velocity 0), so a moving body's viscous
+   force had the wrong sign (C_d's viscous part -2.2 where it should be about +0.3). Now
+   `dn = 2 (v_r - v_l)` with the solid cell's velocity and the wall's velocity on the face: the
+   same numbers for a wall at rest (regression: viscosity, force-balance, psplit-obstacle,
+   psplit-cavity, liquid-cavity, rotor-frame, piston all pass).
+4. **8.1's cheap form, built** (the liquid with implicit pressure, the uniform grid; on whenever
+   such a run has moving bodies): each cell near a moving body gets a gas fraction phi and its
+   upper faces open fractions a_f, from the bodies' signed distances at the step's end
+   (`hydro/moving_stamp.wgsl`, `moving_dist`; the poses and fractions are now stamped before the
+   solve). The solve takes the cell's true density rho / phi in the pressure, phi times its
+   compressibility term, and beta = a_f on its faces, and the correction the same a_f on the
+   pressure's push in the face mass flux (`pressure/source.wgsl`, `pressure/correct.wgsl`): as a
+   body sweeps through a cell, its pressure rises and the solve pushes the liquid out. A cell
+   becomes the body's only once phi < 0.05, nearly empty; an uncovered one starts with phi of the
+   shares. The wall-velocity source is off with fractions (the swept volume carries the push).
+   Results: the open-ended liquid piston moves the liquid at 0.087 to 0.095 (0.1 wanted), the
+   force on it within +-0.9 (was +-16); the pressure dips to -80 in some cells the piston
+   uncovers, which start nearly empty. **`galilean-drag`: still fails.** C_d (viscous fix in):
+
+   | | At rest | Moving | Mean difference | rms difference / mean |
+   |---|---|---|---|---|
+   | explicit, staircase | 1.317 | 2.459 | 87% | 11.2 |
+   | implicit, staircase (wall velocity in the source) | 1.348 | -4.03 | | 10.1 |
+   | implicit, cheap 8.1 (fractions) | 1.348 | 3.565 | 164% | 4.4 |
+
+   The noise fell by half; the mean did not come near. Most of the excess is the pressure part.
+   Why the cheap form cannot fix it: the momentum update of a partly filled cell still takes
+   the pressures of its full faces (the wall's share of a cut face pushes as if it were gas),
+   the advection still crosses full faces into cells the body is sweeping, and the explicit
+   fluxes still see the wall jump a whole cell when a cell flips, however little it holds.
+   **Stopped here, as decided: the full 8.1 comes next, by its float64 prototype (8.1.1).**
+5. **Not verified in the cheap form**: 3D, blocks, a gas, mesh bodies (none moves yet).
 - **Not built**: blocks (6.4; refused there), moving mesh bodies (they need the distance field
-  on the GPU), the exchange's momentum in the force diagnostic, the work tally in the
-  diagnostics (the tests sum it from the force), tests `oscillating-cylinder`,
-  `spinning-cylinder` and `rotor-two-frames`, and a spinning-rotor preset.
+  on the GPU), the work tally in the diagnostics (the tests sum it from the force), tests
+  `oscillating-cylinder`, `spinning-cylinder` and `rotor-two-frames`, and a spinning-rotor
+  preset. Not started, as the plan said, until moving drag is right.
 
 ## 7. Stage 5: bodies the flow moves
 
@@ -682,7 +732,42 @@ prototype in `src/reference/` comes first, on the cylinder and the piston, as
 
 A cheaper alternative to measure first: keep the staircase for the fluxes and use only
 $`\beta_f = a_f/\rho_f`$ in the pressure solve, with the swept volume as a smooth source. For
-the liquid that may remove most of the noise by itself.
+the liquid that may remove most of the noise by itself. **Measured (6.7): it halves the noise
+and does not fix the mean; the full form is needed.**
+
+#### 8.1.1 What the float64 prototype needs (2026-11-20)
+
+A reference solver in `src/reference/` (as `reference/psplit.ts`), 2D, float64, on the CPU, of
+the liquid with implicit pressure and a moving rigid body, before any GPU work:
+
+- **Geometry, exact.** For a circle and a turned rectangle: each cell's gas fraction phi and
+  each face's aperture a_f by clipping the cell's square against the shape (polygon clipping,
+  or the circle's segment areas), at the step's start and end; the cut face's length and normal
+  in each cut cell; the swept volume of each cell over the step, phi(t + dt) - phi(t), to
+  round-off.
+- **The conservative update** phi dU/dt = -(1/dx) sum_f a_f F_f + (the cut face's flux), the
+  cut face's flux being the moving-wall one (no mass through it, the pressure p* on it and its
+  work p* v_s n, viscosity at the true distance to it): no cell flips. A cell born from the body
+  starts at phi = 0 and fills by the fluxes; one being swallowed empties by them.
+- **Small cells: state redistribution** (Berger & Giuliani 2021): after each update a cell with
+  phi below about 1/2 is merged with a neighborhood, its own and their states replaced by
+  volume-weighted averages, conservatively. This replaces the exchange of 6.3 entirely.
+- **The pressure solve with beta_f = a_f / rho_f and the swept volume in its source** (Ng, Min &
+  Gibou 2009): div(a_f u_f) = -(1/dt) (swept volume) in each cut cell, the same a_f on the
+  correction's mass flux, so that solve and correction agree to round-off.
+- **Forces from the cut faces**: the integral of p n and the viscous stress over each cut face,
+  which must equal the momentum balance of a box around the body to round-off (as
+  `force-balance-moving` checks now).
+- **Tests the prototype must pass before the GPU port**: Galilean drag (moving and at rest within
+  2 to 3% in the mean, the moving body's force noise under 10% after a running mean over one
+  cell crossed); the inviscid cylinder's drag (should be nil) falling at better than first
+  order; the open-ended piston (the liquid at the piston's speed to 1%, the force near nil);
+  the oscillating cylinder of Dütsch et al. (1998), its drag history.
+- **Then the GPU port**: phi and a_f textures from the distance field (analytic shapes first,
+  then mesh bodies, whose distance field must go to the GPU for this), the cut-cell update in
+  `hydro/update.wgsl` (the uniform grid first), a redistribution pass, apertures in the source
+  and correction, and the force sum over cut faces; then blocks. Comparable in size to the
+  implicit pressure work (plans/incompressible.md).
 
 ### 8.2 A wall model
 
