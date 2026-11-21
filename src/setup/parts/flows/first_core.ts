@@ -104,7 +104,7 @@ const firstCore: FlowDef<{ logrhoc: number; tad: number; deficit: number; logamb
   label: 'First core (protostellar)',
   tip: 'A first hydrostatic core of protostellar collapse at the middle of the box: molecular gas on one adiabat, in balance with its own gravity, in thin gas at its surface pressure. Past a central density of 3e-9 g/cm^3 its center is above 2000 K, where H2 dissociates, and it collapses. Needs physical units and an equation of state with a temperature (hydrogen and helium).',
   wholeBox: true,
-  requires: [{ fact: 'units' }, { fact: 'eos.energy' }],
+  requires: [{ fact: 'units.own' }, { fact: 'eos.energy' }],
   fields: {
     logrhoc: { label: 'Central density (log₁₀ g/cm³)', default: -7.75, min: -11, max: -6, step: 0.25, tip: 'Central density of the core, log10 of g/cm^3. Up to -8.5 the core is stable (its mass rises with its central density, to 0.040 solar masses); denser, its center is dissociating and it collapses' },
     tad: { label: 'Adiabat (K at 10⁻¹³ g/cm³)', default: 10, min: 3, max: 100, step: 1, tip: 'Temperature of the core’s adiabat at 1e-13 g/cm^3, the density at which a collapsing cloud turns opaque: 10 K is the usual cloud' },

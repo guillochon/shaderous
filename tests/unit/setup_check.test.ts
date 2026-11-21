@@ -72,7 +72,8 @@ describe('checkSetup', () => {
     const units = { length: { unit: 'au', value: 1 }, mass: { unit: 'Msun', value: 1 } };
     const cosmo = (boxMpc?: number) => texts(setup({ domain: { ndim: 3, n: 64, units, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } }, physics: { cosmology: { zStart: 10, ...(boxMpc ? { boxMpc } : {}) } } }, [{ kind: 'flow', name: 'co-ignition' }]), 'error');
     expect(has(cosmo(), /needs physical units/i)).toBe(true);
-    expect(has(cosmo(10), /needs physical units/i)).toBe(false);
+    // Seed 10713: but a flow is given the document's units, which comoving coordinates set aside.
+    expect(has(cosmo(10), /needs physical units of its own/i)).toBe(true);
   });
 
   it('takes a wind tunnel’s gas for the run’s (random test seed 10012)', () => {
