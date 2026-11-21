@@ -5,6 +5,7 @@ import type { AnyBurnSpec } from '../../burn/burn';
 import type { Eos } from '../../eos/eos';
 import type { Prim } from '../../problems/types';
 import type { UnitSystem } from '../../units/units';
+import type { Rule } from '../options';
 import type { FlowPart, SetupSpec } from '../spec';
 import type { Bodies } from './bodies';
 
@@ -50,6 +51,8 @@ export interface FlowDef<P = Record<string, number | boolean>> {
   fields: Record<string, FlowField>;
   /** It fills the whole box: it excludes other such flows, and the background is not used. */
   wholeBox: boolean;
+  /** What the setup must have for it to run (options.ts facts): its init throws without them. */
+  requires?: Rule[];
   /** The initial state everywhere (a whole-box flow). */
   init?(ctx: FlowInitContext, p: P): InitFn;
   /** Or a change to the state the other parts painted. */

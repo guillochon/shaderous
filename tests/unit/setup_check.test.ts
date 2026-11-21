@@ -25,6 +25,16 @@ describe('checkSetup', () => {
     for (const id of PRESET_IDS) expect(texts(presetSpec(id)!, 'error'), id).toEqual([]);
   });
 
+  it('finds a flow without what its init needs (random test seeds 5015, 5019, 5022)', () => {
+    const flow = (name: string, over: Partial<SetupSpec> = {}) => texts(setup(over, [{ kind: 'flow', name }]), 'error');
+    expect(has(flow('first-core'), /needs physical units/i)).toBe(true);
+    expect(has(flow('co-ignition'), /needs physical units/i)).toBe(true);
+    expect(has(flow('helium-shell-ignition'), /needs a star/i)).toBe(true);
+    expect(has(flow('shearing-noise'), /needs a shearing box/i)).toBe(true);
+    expect(has(flow('zeldovich'), /needs comoving coordinates/i)).toBe(true);
+    expect(has(flow('first-core', { domain: { ndim: 3, n: 64, units: { length: { unit: 'au', value: 1 }, mass: { unit: 'Msun', value: 1 } } } }), /needs physical units/i)).toBe(false);
+  });
+
   it('finds nothing wrong with an empty box or a well-made binary', () => {
     expect(checkSetup(setup({}))).toEqual([]);
     const binary = setup({}, [mass('a', [0, 0, 0], { gm: 0.5 }), mass('b', [0, 0, 0], { gm: 0.5 }), { kind: 'orbit', of: ['a', 'b'], type: 'binary', separation: 1 }, disk(['a', 'b'], { rIn: 1, rOut: 1.8 })]);

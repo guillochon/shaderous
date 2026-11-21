@@ -79,6 +79,7 @@ const heliumShell: FlowDef<Shell & Record<string, number | boolean>> = {
   label: 'Helium shell with a hot spot',
   tip: 'Turns the outermost mass of the first star into helium over a carbon-oxygen core and heats a spot at the base of that shell, on the +z axis. Needs the 13 species of the burning network, the tabulated equation of state and physical units.',
   wholeBox: false,
+  requires: [{ fact: 'parts.star', reason: 'Needs a star: the shell is laid on it' }, { fact: 'units' }],
   fields: {
     mhe: { label: 'Helium shell (M☉)', default: 0.05, min: 0.005, max: 0.15, step: 0.005, tip: 'Mass of the helium shell: the outermost mass of the star' },
     tign: { label: 'Ignition temperature (10⁹ K)', default: 3, min: 1, max: 6, step: 0.25, tip: 'Temperature of the hot spot that sets the helium alight, in 1e9 K' },

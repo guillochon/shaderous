@@ -179,6 +179,8 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'parts.disk': { label: 'A disk', of: (s) => count(s, (p) => p.kind === 'disk') > 0 },
   'parts.body': { label: 'A point mass or a star', of: (s) => count(s, (p) => p.kind === 'mass' || p.kind === 'star') > 0 },
   'parts.damping': { label: 'A damping zone', of: (s) => count(s, (p) => (p.kind === 'disk' && !!p.damp) || (p.kind === 'tunnel' && (p.sponge ?? 0.1) > 0)) > 0 },
+  'physics.shear': { label: 'A shearing box', of: (s) => !!s.physics?.shear },
+  'physics.cosmology': { label: 'Comoving coordinates', of: (s) => !!s.physics?.cosmology },
   'parts.flow.whole': { label: 'A flow that fills the box', of: (s) => count(s, (p) => !!flowDef(p)?.wholeBox) > 0 },
 };
 
@@ -645,7 +647,7 @@ export function partFields(part: Part): Option[] {
   if (part.kind !== 'flow') return PART_OPTIONS[part.kind].fields;
   return [
     P({ path: 'name', label: 'Flow', tip: 'Which built-in initial condition', default: part.name,
-      control: pick(...Object.values(FLOWS).map((f): Choice => ({ value: f.name, label: f.label, tip: f.tip, ...(f.wholeBox ? { excludes: [{ fact: 'parts.flow.whole', reason: 'Only one flow can fill the whole box' }] } : {}) }))) }),
+      control: pick(...Object.values(FLOWS).map((f): Choice => ({ value: f.name, label: f.label, tip: f.tip, ...(f.requires ? { requires: f.requires } : {}), ...(f.wholeBox ? { excludes: [{ fact: 'parts.flow.whole', reason: 'Only one flow can fill the whole box' }] } : {}) }))) }),
     ...flowOptions(part.name),
   ];
 }

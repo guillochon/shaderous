@@ -9,6 +9,7 @@ const shearingWave: FlowDef<{ amplitude: number; kx: number; ky: number; pressur
   label: 'Shearing wave',
   tip: 'The background flow of a shearing sheet, v_y = -q Omega x, with a small density wave cos(kx x + ky y) on it (kx and ky in wavelengths across the box). A leading wave (kx < 0) is swung to trailing by the shear and amplified on the way. Needs physics.shear.',
   wholeBox: true,
+  requires: [{ fact: 'physics.shear' }],
   fields: {
     amplitude: { label: 'Amplitude', default: 0.01, min: 0, max: 0.5, factor: 2, tip: 'Relative amplitude of the density wave' },
     kx: { label: 'Wavenumber along x', default: -2, min: -32, max: 32, step: 1, tip: 'Wavelengths across the box along x (negative: a leading wave)' },
@@ -43,6 +44,7 @@ const shearingNoise: FlowDef<{ noise: number; pressure: number }> = {
   label: 'Shearing box',
   tip: 'The background flow of a shearing box, v_y = -q Omega x, in gas of uniform density 1 and pressure, with small random velocities on it (a fraction of the sound speed) to seed instabilities such as the magnetorotational. Needs physics.shear.',
   wholeBox: true,
+  requires: [{ fact: 'physics.shear' }],
   fields: {
     noise: { label: 'Velocity noise', default: 1e-3, min: 0, max: 0.5, factor: 2, tip: 'Random velocities, as a fraction of the sound speed' },
     pressure: { label: 'Pressure', default: 0.6, min: 1e-8, max: 100, factor: 2, tip: 'Uniform pressure of the gas (its density is 1)' },

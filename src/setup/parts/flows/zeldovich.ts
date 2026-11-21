@@ -23,6 +23,7 @@ const zeldovich: FlowDef<{ zCaustic: number; temperature: number }> = {
   label: 'Zel’dovich pancake',
   tip: 'One plane wave along x on its growing mode in an Einstein-de Sitter universe (physics.cosmology with Omega_m = 1): the gas converges into a sheet, a caustic, at the given redshift, and then shocks. Cold gas: its specific internal energy at the start is given.',
   wholeBox: true,
+  requires: [{ fact: 'physics.cosmology' }],
   fields: {
     zCaustic: { label: 'Caustic redshift', default: 1, min: 0, max: 1e3, factor: 1.5, tip: 'Redshift at which the wave would collapse to a sheet' },
     temperature: { label: 'Specific internal energy', default: 1e-10, min: 0, max: 1, factor: 10, tip: 'Internal energy per unit mass of the gas at the start, in (box length times H0) squared' },
