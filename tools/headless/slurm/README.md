@@ -1,8 +1,9 @@
 # Shaderous on a Slurm cluster
 
 Scripts for running the command-line runner on a GPU cluster with Slurm and Apptainer, written
-for UMass's Unity cluster (`gpu` partition, `apptainer/latest` module). Untested there so far:
-start with the check job.
+for UMass's Unity cluster (log in as `<user>@unity.rc.umass.edu`; an ACCESS CI account's user is
+`<access id>_access-ci_org`). From Git Bash or Windows OpenSSH, add `-c aes256-gcm@openssh.com`
+(the default cipher fails with "Corrupted MAC on input").
 
 Shaderous needs the GPU's Vulkan driver (it runs WebGPU in headless Chromium on Vulkan), not
 CUDA. The scripts run the Playwright Docker image under Apptainer with `--nv`, bind the host's
@@ -25,11 +26,12 @@ sbatch tools/headless/slurm/gpu-check.sbatch
 RUN_DIR=/work/pi_<group>/dwd-2048 SHADEROUS_BINDS=/work/pi_<group> sbatch tools/headless/slurm/dwd-2048.sbatch
 ```
 
-To check before the first job: the GPU constraint. The scripts ask for `--constraint=vram80` (an
-80 GB card or more); `sinfo -o "%20N %G %f"` lists the cluster's real feature names. The
-magnetized mesh can hold at most 35^3 = 42,875 blocks (about 110 GB); the double white dwarf
-at 2048^3 was estimated at 25 to 30 thousand blocks, 70 to 80 GB, so an 80 GB card is close
-and the H200 is safe. The check job's PNG gives the real count.
+The GPU: the scripts ask for the `gpu-highvram` partition and `--constraint=vram80`, which on
+Unity are A100 80 GB nodes and one H100 node (`sinfo -p gpu-highvram -o "%N %G %f"` lists them).
+The `gpu` partition has no 80 GB cards; the one H200 node is only in `gpu-preempt-highvram`,
+where a job can be preempted. The magnetized mesh can hold at most 35^3 = 42,875 blocks (about
+110 GB); the double white dwarf at 2048^3 was estimated at 25 to 30 thousand blocks, 70 to 80
+GB, so an 80 GB card is close. The check job's PNG gives the real count.
 
 The chain: each job runs with `--wall` set to the time the job has left less `MARGIN` (30
 minutes, for the last checkpoint), screenshots every `SHOT_EVERY` seconds (`NNNN-tT-vol.png` and

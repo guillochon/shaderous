@@ -17,7 +17,7 @@
 # Stop the chain: touch RUN_DIR/seg-<job>/STOP (the job stops at its next screenshot and
 # writes a checkpoint) and scancel any job waiting, or touch RUN_DIR/DONE before the next starts.
 #SBATCH --job-name=shaderous-dwd
-#SBATCH --partition=gpu
+#SBATCH --partition=gpu-highvram
 #SBATCH --gpus=1
 #SBATCH --constraint=vram80
 #SBATCH --cpus-per-task=8

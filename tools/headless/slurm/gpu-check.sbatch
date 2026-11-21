@@ -6,7 +6,7 @@
 # Results: runs/slurm-check-<job>/ (manifest.json names the adapter; the PNG's status line has
 # the block count) and slurm-check-<job>.out.
 #SBATCH --job-name=shaderous-check
-#SBATCH --partition=gpu
+#SBATCH --partition=gpu-highvram
 #SBATCH --gpus=1
 #SBATCH --constraint=vram80
 #SBATCH --cpus-per-task=8
