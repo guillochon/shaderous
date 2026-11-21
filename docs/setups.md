@@ -218,8 +218,9 @@ the adaptive mesh it fails too: the coarsest level sees a sub-cell blade in piec
 surface that asks for refinement is never all there (the preset is on the uniform grid for this).
 Over the rotor's speed (headless, at t = 2): C_p 0.038 at Omega = 0.6, 0.048 at 0.9, about 0 at
 1.6 and -0.12 at 2.2, where the wind brakes it. The rotor is a hole in the gas (the blades'
-fractional cells are plan stage 7). The picture is in the turning frame: the rotor stands still, and the wake's helix, which turns with
-it, is the one a fixed camera would see at that moment, turned.
+fractional cells are plan stage 7). The picture is in the turning frame: the rotor stands
+still. The View section's Turn with frame (link `turn=1`) turns the box at the frame's rate, so
+the volume view is the one a camera at rest sees, the rotor turning and its wake left behind.
 
 Yaw and angle of attack turn the body (its shape's `rotate`), not the stream. The `wind-tunnel`
 preset puts a built-in car-like body (`"file": "builtin:ahmed"`, with the Ahmed body's

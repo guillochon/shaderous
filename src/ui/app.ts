@@ -18,7 +18,7 @@ import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
 import { syncRadiationEos } from '../radiation/radiation';
-import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, type SourceSpec } from '../sim';
+import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec } from '../sim';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -28,7 +28,7 @@ import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type EosKind } fr
 import { prepareEosTable } from '../eos/tables';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, RADIATION_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { sphFromView, sphToView, spherical } from '../spherical';
-import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, type ViewState } from '../render/renderer';
+import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, setFrameTurn, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
 import type { MhdSpec, PointMass } from '../problems/types';
@@ -155,6 +155,7 @@ side.innerHTML = `
       ${field('Slice normal', select('axis', opt(2, 'z') + opt(1, 'y') + opt(0, 'x')), 'row-axis', 'The axis the slice is perpendicular to')}
       ${field('Slice position', '<input id="slicepos" type="range" min="0" max="0.999" step="0.001" />', 'row-slicepos', 'Where the slice cuts the box along its normal')}
       ${field('Contours', number('ncont', `min="1" max="${MAX_CONTOURS}" step="1"`), 'row-ncont', 'How many contour lines the slice and projection views draw, or isosurfaces the volume view draws, when Contours is on (beside the color bar): evenly spaced in log |value| between the ends of the displayed range, the ends themselves left out. A range reaching zero or below is contoured in |value| over the four decades under its largest magnitude')}
+      ${field('Turn with frame', '<input id="turnframe" type="checkbox" />', 'row-turnframe', 'Volume view of a run in a rotating frame: turn the box at the frame’s rate, so the picture is the one a camera at rest sees (a rotor turning and its wake left behind, rather than the rotor standing still)')}
       ${field('Surface opacity', '<input id="isoa" type="range" min="0" max="1" step="0.005" />', 'row-isoa', 'Volume view, with Contours on: how opaque each isosurface is. Below 1 the surfaces behind show through')}
       ${field('Field lines', number('nflines', `min="1" max="${MAX_FIELD_LINES}" step="1"`), 'row-nflines', 'A run with a magnetic field, with Field lines on (beside the color bar): how many lines. In 2D they are contours of the flux function, this many levels: the same magnetic flux passes between any two, so they crowd where the field is strong. In 3D, this many lines traced from seeds that move with the gas, so each stays the same line as the field evolves: thin tubes in the volume view, lines along the field in the plane in the slice view. Colored by the magnetic pressure B^2/2 on a log scale over up to six decades below the strongest, as Guillochon & McCourt (2017) drew theirs: red weak, then yellow, green, cyan, blue, magenta strong')}
     </div>
@@ -1344,6 +1345,10 @@ function syncControls() {
   $<HTMLInputElement>('fog').disabled = !marching || !view.contours;
   $<HTMLInputElement>('box').checked = view.box;
   $<HTMLInputElement>('box').disabled = !marching;
+  // Turning with the frame: a 3D run in a rotating frame (not a shearing box), in the volume view.
+  $('row-turnframe').hidden = !frameOmega();
+  $<HTMLInputElement>('turnframe').checked = view.turnWithFrame;
+  $<HTMLInputElement>('turnframe').disabled = !marching;
   $<HTMLInputElement>('isoa').value = String(logPos(view.surfaceOpacity, SURFACE_RANGE));
   $<HTMLInputElement>('isoa').disabled = !marching || !view.contours;
   // Field lines: only with a magnetic field, and not through a projection.
@@ -2521,6 +2526,7 @@ function bind() {
   });
   on('fog', (el) => (view.fog = el.checked));
   on('box', (el) => (view.box = el.checked));
+  on('turnframe', (el) => (view.turnWithFrame = el.checked));
   on('isoa', (el) => (view.surfaceOpacity = logAt(+el.value, SURFACE_RANGE)), 'input');
   // The lines follow the count as it is typed or stepped; leaving the field tidies what it shows.
   const contourCount = (el: HTMLInputElement) => Math.min(MAX_CONTOURS, Math.max(1, Math.round(numOr(el, view.nContours))));
@@ -4868,6 +4874,23 @@ let frame = 0;
 let lastReadout = 0;
 let stepRate = 0; // steps per second of wall time
 let stepsSubmitted = 0;
+/**
+ * The run's time for the view's turn with a rotating frame: the last readout's (with the steps
+ * submitted by then), carried on by the steps submitted since at the readout's step. Readouts
+ * come five times a second; the view turns every frame.
+ */
+let timeMark: { t: number; dt: number; submitted: number } | null = null;
+/** The rotating frame's angular velocity, for the view's turn: a 3D run in one (not a shearing box), else null. */
+function frameOmega(): number[] | null {
+  if (!cfg || cfg.ndim !== 3 || cfg.problem.shear) return null;
+  const w = rotationOf(cfg).slice(0, 3);
+  return w.some((x) => x !== 0) ? w : null;
+}
+/** Hand the renderer the frame and the time, before it draws. */
+function syncFrameTurn() {
+  const t = lastDiag && timeMark ? timeMark.t + Math.max(0, stepsSubmitted - timeMark.submitted) * timeMark.dt : (cfg?.restart?.time ?? 0);
+  setFrameTurn(frameOmega(), t);
+}
 let rateMark = { time: 0, steps: 0, frames: 0 };
 // Implicit pressure: the tally of the solves of the run it was read from, and whether a read is out.
 let solveTally: { of: Simulation; stats: SolveStats } | null = null;
@@ -5079,6 +5102,7 @@ function tick(now: number) {
     refreshContourHover();
     renderer.densityCut = densityCut();
     renderer.slice = sliceLayout();
+    syncFrameTurn();
     if (renderer.encode(enc, s, view, changed)) {
       lastDraw = now;
       framesDrawn++;
@@ -5111,9 +5135,11 @@ function tick(now: number) {
   frame++;
   if (now - lastReadout >= 200) {
     lastReadout = now;
+    const mark = stepsSubmitted;
     s.readDiagnostics().then((d) => {
       if (!d || s !== sim) return;
       lastDiag = d;
+      timeMark = { t: d.t, dt: d.dt, submitted: mark };
       session.trace({
         steps: d.steps, t: d.t, dt: d.dt, mass: d.mass, eTot: d.eTot, maxMach: d.maxMach, floored: d.floored,
         ...(d.magnetic ? { bMax: d.magnetic.bMax, betaMin: d.magnetic.betaMin, divB: d.magnetic.divB } : {}),
@@ -5287,6 +5313,7 @@ const api = installApi(
     query: () => linkQuery(),
     refresh(d) {
       lastDiag = d;
+      timeMark = { t: d.t, dt: d.dt, submitted: stepsSubmitted };
       updateRange(d);
       showDensityCut();
     },
@@ -5301,6 +5328,7 @@ const api = installApi(
       const k = size ? size[0] / Math.max(1, canvas.clientWidth) : 1;
       const page = sliceLayout();
       renderer.slice = !size ? page : asPage ? { span: page.span * k, shift: page.shift * k } : { span: 0.94 * Math.min(...size), shift: 0 };
+      syncFrameTurn();
       renderer.encode(enc, sim, view);
       renderer.capture = false;
       gpu.device.queue.submit([enc.finish()]);

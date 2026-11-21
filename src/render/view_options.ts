@@ -65,6 +65,7 @@ export const VIEW_OPTIONS = [
   { key: 'fieldLineCount', link: 'nflines', type: 'int', min: 1, max: MAX_FIELD_LINES, doc: 'How many field lines' },
   { key: 'fieldLineFloor', link: 'flfloor', type: 'number', min: 0.00001, max: 0.5, doc: 'Field lines end where |B| falls below this fraction of the largest |B|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star' },
   { key: 'mirrorImages', link: 'mirror', type: 'boolean', doc: 'An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default)' },
+  { key: 'turnWithFrame', link: 'turn', type: 'boolean', doc: 'Volume view of a run in a rotating frame: turn the box at the frame’s rate, so the picture is the one a camera at rest sees (a rotor turning, its wake left behind)' },
 ] as const satisfies readonly ViewOption[];
 
 /** What `shaderous.view()` takes besides: settings that are not part of the view's own state. */

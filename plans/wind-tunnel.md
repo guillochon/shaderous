@@ -508,8 +508,10 @@ against: the same rotor run both ways must give the same torque.
   against the explicit one, which other tests (`rot-*`) check against theory. The plan's own
   `rotor-frame` (a helical paddle whose torque vanishes where its blades are edge-on to the
   relative wind) is not built.
-- Not built: the display turned back to the tunnel's frame. (The power coefficient came with
-  5.2.) An empty rotor-frame tunnel holds U - Omega x r (kinetic energy to 1e-6 over 423
+- The display turned back to the tunnel's frame came later: the view's `turnWithFrame` (View
+  section, Turn with frame; link `turn`) turns the volume view's camera back about the frame's
+  axis by Omega t, t carried on between readouts by the steps submitted. Any 3D rotating frame
+  but a shearing box; volume view only. (The power coefficient came with 5.2.) An empty rotor-frame tunnel holds U - Omega x r (kinetic energy to 1e-6 over 423
   steps; not discriminating, as that state is steady with or without the frame). Measured
   again with 5.2's tunnel at Omega = 2.5, 128³: after t = 1.6 the axial velocity a plane
   upstream is 1 to 6 digits and the swirl is the frame's.
@@ -561,7 +563,7 @@ against: the same rotor run both ways must give the same torque.
   same need.
 - **Not shown**: the blades are holes in the gas (stage 7's fractional cells would give them
   their shape below a cell); the tip vortices are a few cells across and fade within a rotor's
-  diameter; no tower, nacelle or ground; the picture is in the turning frame (not turned back).
+  diameter; no tower, nacelle or ground.
 
 ## 6. Stage 4: moving bodies
 

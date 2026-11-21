@@ -558,6 +558,11 @@
    "about": "An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default)"
   },
   {
+   "key": "turn",
+   "group": "view",
+   "about": "Volume view of a run in a rotating frame: turn the box at the frame’s rate, so the picture is the one a camera at rest sees (a rotor turning, its wake left behind)"
+  },
+  {
    "key": "cmap",
    "group": "view",
    "about": "Colormap"
@@ -782,6 +787,12 @@
    "link": "mirror",
    "type": "boolean",
    "about": "An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default)"
+  },
+  {
+   "key": "turnWithFrame",
+   "link": "turn",
+   "type": "boolean",
+   "about": "Volume view of a run in a rotating frame: turn the box at the frame’s rate, so the picture is the one a camera at rest sees (a rotor turning, its wake left behind)"
   },
   {
    "key": "colormap",
@@ -1186,7 +1197,7 @@
     {
      "name": "changes",
      "type": "object",
-     "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, colormap, tf, autoRange"
+     "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange"
     }
    ],
    "changesRun": false
@@ -1665,7 +1676,7 @@
    "name": "screenshot",
    "method": "screenshot",
    "brief": "Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path`",
-   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, colormap, tf, autoRange. Settings persist for later screenshots. `native` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.",
+   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange. Settings persist for later screenshots. `native` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1731,7 +1742,7 @@
     "properties": {
      "changes": {
       "type": "object",
-      "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, colormap, tf, autoRange"
+      "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange"
      }
     },
     "required": [

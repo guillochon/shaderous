@@ -83,6 +83,13 @@ export interface ViewState {
    * whole of it, the computed part and its images (mirrorShown()).
    */
   mirrorImages: boolean;
+  /**
+   * Volume view of a run in a rotating frame: turn the box at the frame's rate (the camera
+   * turns the other way about the frame's axis through the box's center), so the picture is the
+   * one a camera at rest sees. The turn is the frame's angular velocity times the time
+   * (setFrameTurn).
+   */
+  turnWithFrame: boolean;
 }
 // The table of the view's settings (view_options.ts) names each of these, with its type, and nothing else.
 const _viewTable: ViewFromOptions extends ViewState ? (ViewState extends ViewFromOptions ? true : never) : never = true;
@@ -198,7 +205,28 @@ export const defaultView = (): ViewState => ({
   fieldLineCount: 160,
   fieldLineFloor: 0.01,
   mirrorImages: true,
+  turnWithFrame: false,
 });
+
+/**
+ * The rotating frame the volume view may turn with (ViewState.turnWithFrame): its angular
+ * velocity (in the box's axes) and the run's time, as whoever draws last set them. Null, or a
+ * zero velocity: no turn.
+ */
+let frameTurn: { omega: [number, number, number]; t: number } | null = null;
+export function setFrameTurn(omega: readonly number[] | null, t: number): void {
+  frameTurn = omega && omega.some((w) => w !== 0) ? { omega: [omega[0], omega[1], omega[2]], t } : null;
+}
+/** The view turns with a frame: it asks to, and the run is in one. */
+export const turningWithFrame = (v: { mode: ViewMode; turnWithFrame: boolean }): boolean => v.mode === 'volume' && v.turnWithFrame && frameTurn !== null;
+
+/** v turned by `angle` radians about the unit axis k (Rodrigues). */
+function turned(v: number[], k: number[], angle: number): number[] {
+  const c = Math.cos(angle), s = Math.sin(angle);
+  const kv = k[0] * v[0] + k[1] * v[1] + k[2] * v[2];
+  const x = [k[1] * v[2] - k[2] * v[1], k[2] * v[0] - k[0] * v[2], k[0] * v[1] - k[1] * v[0]];
+  return [0, 1, 2].map((i) => v[i] * c + x[i] * s + k[i] * kv * (1 - c));
+}
 
 /**
  * The mirrored axes the view shows images across: with mirrorImages, when every axis the run
@@ -258,7 +286,17 @@ export function cameraFrame(v: ViewState, aspect: number) {
     right[0] * fwd[1] - right[1] * fwd[0],
   ];
   // The field of view applies to the shorter side, so the box always fits.
-  return { eye, fwd, right, up, tan: Math.tan(0.35) / Math.min(aspect, 1) };
+  const tan = Math.tan(0.35) / Math.min(aspect, 1);
+  // Turning with a rotating frame: the frame has turned by Omega t since t = 0, about its axis
+  // through the box's center; a camera at rest is, in the frame's axes, turned back by as much.
+  if (frameTurn && turningWithFrame(v)) {
+    const w = frameTurn.omega;
+    const wl = Math.hypot(w[0], w[1], w[2]);
+    const k = w.map((c) => c / wl);
+    const a = -wl * frameTurn.t;
+    return { eye: turned(eye, k, a), fwd: turned(fwd, k, a), right: turned(right, k, a), up: turned(up, k, a), tan };
+  }
+  return { eye, fwd, right, up, tan };
 }
 
 export class Renderer {

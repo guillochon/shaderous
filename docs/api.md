@@ -217,6 +217,7 @@ by `npm run gen`.
 | `nflines` | The view | How many field lines |
 | `flfloor` | The view | Field lines end where \|B\| falls below this fraction of the largest \|B\|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star |
 | `mirror` | The view | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
+| `turn` | The view | Volume view of a run in a rotating frame: turn the box at the frame’s rate, so the picture is the one a camera at rest sees (a rotor turning, its wake left behind) |
 | `cmap` | The view | Colormap |
 | `tf` | The view | Volume view: the opacity curve, as x:a points separated by commas |
 <!-- /gen:link-keys -->
@@ -659,6 +660,7 @@ carries each under the key in the second column:
 | `fieldLineCount` | `nflines` | How many field lines |
 | `fieldLineFloor` | `flfloor` | Field lines end where \|B\| falls below this fraction of the largest \|B\|, and start only where it is above twice that (default 0.01): lower it to follow a weak field farther out, such as to the surface of a star |
 | `mirrorImages` | `mirror` | An octant (or 2D quadrant) of a mirror-symmetric run: show the whole configuration, the computed part with its mirror images (on by default) |
+| `turnWithFrame` | `turn` | Volume view of a run in a rotating frame: turn the box at the frame’s rate, so the picture is the one a camera at rest sees (a rotor turning, its wake left behind) |
 | `colormap` | `cmap` | A name from `describe().colormaps` |
 | `tf` | `tf` | Volume view: the opacity curve, as `x:a` points separated by commas (2 to 16 of them; x a fraction of the color range, a the opacity, each 0 to 1), as in a link. The default is `0:0,0.25:0.02,0.6:0.25,1:0.9` |
 | `autoRange` |  | Fit the color range to the data |
