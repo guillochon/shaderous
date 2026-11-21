@@ -125,6 +125,7 @@ then disks, then stars, then regions, obstacles and inflows in the order of the 
 | `region` | A `shape` with a state that replaces what is under it: `rho`, `p` (or `energy`, a total spread over a sphere's cells), `v`, `s`, `X`; with radiation transport `erad` and `frad`, the radiation's energy and flux; `supersample` for a smooth edge |
 | `obstacle`, `inflow` | A `shape` whose cells are solid, or held at their initial state |
 | `field` | A uniform magnetic field: `b` (a vector) or `up` (a strength along the axis drawn upward) |
+| `tunnel` | A wind tunnel: `speed`, `axis`, `mach`, `rho`, `sides`, `floor`, `sponge`, `inlet`, and the coefficients' reference `area` and `length` (below). At most one |
 | `flow` | A built-in initial condition by `name`, with its parameters: what shapes cannot say (a shear layer with its seeded modes, a ZND detonation, an Alfvén wave). Every flow has parameters (densities, speeds, amplitudes, wavelengths, seeds), listed with their ranges in the dialog and by `describe().setup.flows`; left out, each takes the value its preset has always had. The flows are in `src/setup/parts/flows/` |
 
 Shapes: `{ "type": "sphere", "center", "radius" }` (or `radiusCells`, in finest cells; a
@@ -164,6 +165,37 @@ and pieces that pass through each other are taken care of
 "Open file…" button and dropping files on the dialog add mesh files: each is kept in the
 browser, and one the setup does not name yet becomes an obstacle. A link to such a setup
 carries the file's name, and finds the file again only in a browser that has it (or by URL).
+
+### A wind tunnel
+
+A `tunnel` part makes the box a wind tunnel, and replaces what the document says of the box's
+faces, the gas and the background:
+
+```json
+{ "kind": "tunnel", "speed": 1, "axis": "x", "mach": 0.1, "sides": "slip", "floor": "none", "sponge": 0.15 }
+```
+
+- The stream flows along `axis` toward + at `speed`. The cells within `inlet` finest cells
+  (default 2) of the upstream face are held at the stream's state; the downstream face is open,
+  with a sponge over its last `sponge` of the box's length (default 0.1; 0 for none): a damping
+  zone that pulls the gas back to the stream's state, its rate rising as the square of the
+  depth to 4 U / (sponge x box) at the face, so that a wake leaves without reflecting.
+- `sides` (and the roof): `slip` walls (the default), `open` faces, or `periodic`. `floor`, the
+  lower face along the box's up axis (z in 3D, y in 2D): `none` (as the sides), `slip`, `fixed`
+  (no slip) or `moving` (a wall moving with the stream: a car on a road).
+- The gas: below Mach 0.3 (`mach`, default 0.1) the liquid with implicit pressure, of density
+  `rho` and sound speed speed / mach; above, an ideal gas (gamma 1.4, explicit) at that Mach
+  number. The whole box starts at the stream's speed.
+- Viscosity is the document's own (`physics.viscosity`): the Reynolds number is the speed
+  times the body's size over it.
+- The diagnostics' force coefficients are over the stream's dynamic pressure and a reference
+  area: `area`, or the first obstacle's shadow along the stream (in 2D a length). Drag is
+  along the stream, lift along the box's up axis. The check warns when the first obstacle
+  blocks more than 5% of the tunnel's cross-section.
+
+Yaw and angle of attack turn the body (its shape's `rotate`), not the stream. The `wind-tunnel`
+preset puts a built-in car-like body (`"file": "builtin:ahmed"`, with the Ahmed body's
+proportions; `builtin:ahmed-35` slants at 35 degrees) in a tunnel.
 
 ### Forces on obstacles
 
@@ -582,6 +614,21 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.rotate` | Rotation | `[x, y, z]`. Default `[0,0,0]` | Degrees the box or mesh is turned about its center: about x, then y, then z. In 2D only the turn about z counts for a box |
 | `shape.normal` | Normal | `[x, y, z]`. Default `[1,0,0]` | The plane’s normal: the shape is the side the normal points away from |
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
+
+**`tunnel`** (Wind tunnel). A stream through the box from an inlet to an outlet with a sponge, and the box’s faces, its gas and its background set to match: put obstacles in it, and the diagnostics give their drag and lift coefficients. Below Mach 0.3 the gas is the liquid with implicit pressure; above, an ideal gas. At most 1
+
+| Key | In the dialog | Values | Meaning |
+| --- | --- | --- | --- |
+| `speed` | Speed | a number, at least 0. Default `1` | The stream’s speed |
+| `axis` | Along | `x`, `y`, `z`. Default `x` | The axis the stream flows along, toward +. Yaw and angle of attack turn the body, not the stream |
+| `mach` | Mach number | a number, 0.01 to 5. Default `0.1` | The stream’s speed over the gas’s sound speed. Below 0.3 the gas is the liquid with implicit pressure (incompressible, in effect); above, an ideal gas with the explicit scheme (shocks) |
+| `rho` | Density | a number, at least 0. Default `1` | The gas’s density |
+| `sides` | Sides and roof | `slip`, `open`, `periodic`. Default `slip` | Slip: walls the gas slides along. Open: faces it may leave by. Periodic: the box repeats sideways |
+| `floor` | Floor | `none`, `slip`, `fixed`, `moving`. Default `none` | The lower face along the box’s up axis (z in 3D, y in 2D): as the sides, a slip wall, a no-slip wall, or a wall moving with the stream (a car on a road) |
+| `sponge` | Sponge | a number, 0 to 0.5. Default `0.1` | The outlet’s damping zone, as a fraction of the box’s length: it pulls the gas back to the stream so that the wake leaves without reflecting. 0 for none |
+| `inlet` | Inlet cells | a whole number, 1 to 16. Default `2` | Finest cells held at the stream’s state at the upstream face |
+| `area` | Reference area | a number, at least 0 | The area the force coefficients are over (a length in 2D). Empty: the first obstacle’s shadow along the stream |
+| `length` | Reference length | a number, at least 0 | The length the moment coefficients are over. Empty: the square root of the area (the area itself in 2D) |
 
 **`inflow`** (Inflow). Cells held at their initial state for the whole run: an inlet
 

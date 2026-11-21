@@ -8,6 +8,7 @@ import { parseMeshFile, extensionOf } from './index';
 import { apply, bounds, flatten, invert, measure, mul, type Mat4, type Mesh } from './mesh';
 import { buildSdf, sampleSdf, type DistanceField, type MeshReport } from './sdf';
 import { outlineBounds, parseAirfoil, parseSvgPath, windingNumber, type Outline } from './outline';
+import { builtinBody } from './builtin';
 
 type Vec3 = [number, number, number];
 
@@ -34,7 +35,7 @@ export function putMeshFile(name: string, bytes: Uint8Array) {
   for (const k of [...parsed.keys()]) if (k.startsWith(`${name}|`)) parsed.delete(k);
   for (const k of [...fields.keys()]) if (k.startsWith(`${name}|`)) fields.delete(k);
 }
-export const hasMeshFile = (name: string): boolean => files.has(name);
+export const hasMeshFile = (name: string): boolean => files.has(name) || name.startsWith('builtin:');
 export const meshFileBytes = (name: string): Uint8Array | undefined => files.get(name);
 
 /** The file names a setup's shapes refer to. */
@@ -58,7 +59,7 @@ export function meshFilesFor(spec: { parts?: readonly unknown[] }): Record<strin
 }
 
 /** The names a setup refers to that are not registered. */
-export const missingMeshFiles = (spec: { parts?: readonly unknown[] }): string[] => meshFilesOf(spec).filter((f) => !files.has(f));
+export const missingMeshFiles = (spec: { parts?: readonly unknown[] }): string[] => meshFilesOf(spec).filter((f) => !hasMeshFile(f));
 
 function bytesOf(file: string): Uint8Array {
   const b = files.get(file);
@@ -73,7 +74,10 @@ function meshOf(file: string, node?: string): Mesh {
   const key = `${file}|${node ?? ''}`;
   let m = parsed.get(key);
   if (!m) {
-    m = flatten(parseMeshFile(file, bytesOf(file), (uri) => files.get(uri) ?? null), node);
+    // (A built-in body, geometry/builtin.ts, is made here: no file.)
+    const made = builtinBody(file);
+    if (file.startsWith('builtin:') && !made) throw new Error(`there is no built-in body "${file.slice(8)}"`);
+    m = flatten(made ?? parseMeshFile(file, bytesOf(file), (uri) => files.get(uri) ?? null), node);
     parsed.set(key, m);
   }
   return m;
@@ -187,7 +191,7 @@ function placement(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }): { mesh:
  * or a file not loaded.
  */
 export function meshSilhouette(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }, axes: [number, number], max = 4000): number[][] | null {
-  if (!files.has(shape.file) || isOutlineFile(shape.file)) return null;
+  if (!hasMeshFile(shape.file) || isOutlineFile(shape.file)) return null;
   try {
     const { mesh, toBox } = placement(shape, ctx);
     const nv = mesh.positions.length / 3;

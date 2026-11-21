@@ -1,0 +1,67 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "wind-tunnel",
+  "name": "Wind tunnel",
+  "group": "Slow flows",
+  "family": "wind-tunnel",
+  "familyName": "Wind tunnel",
+  "variant": "A car-like body",
+  "blurb": "Air (an incompressible liquid at Mach 0.1) flows at speed 1 past a bluff car-like body with the Ahmed body's proportions: a rounded front and a roof sloping down at 25 degrees at the rear. The diagnostics give its drag and lift coefficients over its frontal area. At this Reynolds number (12 000 on its length) the grid resolves the large eddies of the wake, not the boundary layers: a showcase, not a measurement of the real body's drag. Drop an STL, OBJ, PLY or glTF file on the Setup dialog to put your own body in the tunnel.",
+  "domain": {
+    "ndim": 3,
+    "n": 256,
+    "amr": 2,
+    "box": 4,
+    "supports2d": true
+  },
+  "physics": {
+    "viscosity": 0.0001
+  },
+  "parts": [
+    {
+      "kind": "tunnel",
+      "id": "tunnel",
+      "speed": 1,
+      "axis": "x",
+      "sides": "slip",
+      "sponge": 0.15,
+      "mach": 0.1
+    },
+    {
+      "kind": "obstacle",
+      "id": "body",
+      "shape": {
+        "type": "mesh",
+        "file": "builtin:ahmed",
+        "fit": 0.3,
+        "center": [
+          -0.6,
+          0,
+          0
+        ],
+        "up": "z"
+      }
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "tDyn": 1.2
+  },
+  "view": {
+    "field": 11,
+    "log": false,
+    "mode": "slice"
+  },
+  "featured": [
+    {
+      "path": "physics.viscosity",
+      "id": "nu",
+      "label": "Viscosity",
+      "min": 1e-05,
+      "max": 0.01,
+      "factor": 1.5,
+      "tip": "Kinematic viscosity: the Reynolds number is the speed (1) times the body's length (1.2) over this"
+    }
+  ]
+}

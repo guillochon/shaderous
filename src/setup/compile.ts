@@ -5,6 +5,7 @@
 // The compiled initial state paints in layers: a whole-box flow or the background, then disks,
 // then stars (also left to settling), then regions, obstacles and inflows in the order of the
 // parts, and last the flows that only change what is there.
+import { expandTunnel, tunnelDamping, tunnelForceRef, tunnelOf, tunnelPainter, tunnelParams } from './parts/tunnel';
 import { mirrorAxes } from '../domain';
 import { cosmoG, timeAtRedshift, type Cosmology } from '../cosmo';
 import { NET_SPECIES } from '../burn/network';
@@ -19,7 +20,7 @@ import { codeG, type UnitSystem } from '../units/units';
 import { buildBodies, partIds, partQuantity, starPotential, type Bodies } from './parts/bodies';
 import { buildDisk, checkDiskFormulas, sumDisks, type BuiltDisk } from './parts/disk';
 import { flowValues, type FaceFn, type FlowContext, type FlowDef, type FlowInitContext, type InitFn, type PotentialFn } from './parts/flow';
-import { bodyCenter, obstaclePainter, regionPainter, type PaintContext } from './parts/region';
+import { bodyCenter, obstaclePainter, regionPainter, shadowOf, type PaintContext } from './parts/region';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type ObstaclePart, type SetupSpec } from './spec';
 import { unitSystem, unitsFollowParts } from './units';
 
@@ -258,7 +259,11 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3): InitFn {
   const pctx: PaintContext = { box, n, ndim, eos, fractions };
   let body = 0;
   for (const p of spec.parts ?? []) {
-    const paint = p.kind === 'region' ? regionPainter(p, pctx) : p.kind === 'obstacle' || p.kind === 'inflow' ? obstaclePainter(p, pctx, p.kind === 'obstacle' ? body++ : 0) : null;
+    const paint =
+      p.kind === 'region' ? regionPainter(p, pctx)
+      : p.kind === 'obstacle' || p.kind === 'inflow' ? obstaclePainter(p, pctx, p.kind === 'obstacle' ? body++ : 0)
+      : p.kind === 'tunnel' ? tunnelPainter(p, pctx)
+      : null;
     if (!paint) continue;
     const under = at;
     at = (x, y, z) => paint(under(x, y, z), x, y, z);
@@ -395,7 +400,9 @@ function problemParam(spec: SetupSpec, f: Featured): ProblemParam {
 }
 
 /** Compile a setup. The document must be whole: `extends` resolved (setup/codec.ts). */
-export function compileSetup(spec: SetupSpec): Compiled {
+export function compileSetup(input: SetupSpec): Compiled {
+  // A wind tunnel sets the box's faces, the gas and the background (parts/tunnel.ts).
+  const spec = expandTunnel(input);
   const d = spec.domain ?? {};
   const ph = spec.physics ?? {};
   const mesh = spec.mesh ?? {};
@@ -449,6 +456,9 @@ export function compileSetup(spec: SetupSpec): Compiled {
     const bodies = buildBodies(spec, { G: base.G, dx: 0, ndim: 3, box: boxOf(spec) });
     damping = disksOf(spec, bodies, base.G, 0, 3).find((k) => k.damping)?.damping ?? undefined;
   }
+  // A tunnel's sponge (it excludes a disk's damping zone).
+  const tunnel = tunnelOf(spec);
+  if (tunnel) damping = tunnelDamping(tunnel, boxOf(spec), d.ndim === 3 ? 3 : 2) ?? damping;
 
   const mhd: MhdSpec | undefined =
     kinds.potential || kinds.face
@@ -467,6 +477,10 @@ export function compileSetup(spec: SetupSpec): Compiled {
   const obstacles = parts.filter((p): p is ObstaclePart => p.kind === 'obstacle');
   const optional: Partial<Problem> = {
     bodies: obstacles.length ? obstacles.map((p, i) => ({ id: p.id ?? `obstacle ${i + 1}`, center: bodyCenter(p.shape) })) : undefined,
+    // A tunnel's force coefficients: over the stream's dynamic pressure and the first obstacle's shadow.
+    forceRef: tunnel
+      ? (ndim: 2 | 3, n: number) => tunnelForceRef(tunnel, ndim, obstacles.length ? shadowOf(obstacles[0].shape, tunnelParams(tunnel, ndim).a, { box: boxOf(spec), n, ndim }) : undefined)
+      : undefined,
     units: base.units === undefined ? undefined : unitsFollow ? (params: Record<string, number>) => scales(at(params)).units! : base.units,
     composition: namedComposition(ph.composition),
     species: speciesOf(spec),
@@ -583,7 +597,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
         return { ...w, vx: w.vx * sn + w.vy * cs, vy: w.vx * cs - w.vy * sn };
       };
     },
-    setup: spec,
+    setup: input,
   };
   // Only what the setup gives: an absent key is the Problem's own default (sim.ts configFor).
   for (const [k, v] of Object.entries(optional)) if (v !== undefined) (problem as unknown as Record<string, unknown>)[k] = v;
@@ -609,7 +623,7 @@ export function compileSetup(spec: SetupSpec): Compiled {
   over('radSolver', ph.radSolver);
   over('radSweeps', ph.radSweeps);
   over('symmetry', d.mirror ? mirrorAxes(d.mirror) : undefined);
-  return { spec, problem, overrides };
+  return { spec: input, problem, overrides };
 }
 
 const compiledOnce = new WeakMap<SetupSpec, Compiled>();

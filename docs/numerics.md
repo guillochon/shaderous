@@ -3524,6 +3524,20 @@ force on a face is along the face's normal, and off by half a cell's lever for v
   torque, and, where the setup gives a reference (a density, speed, area and length), the drag
   and lift coefficients $`C = F / (\tfrac12 \rho U^2 A)`$ and the moment coefficients.
 
+### A wind tunnel
+
+The `tunnel` part (`setup/parts/tunnel.ts`) is a document transform and two pieces of the
+solver that already exist: the box's faces (open upstream and downstream; slip walls, open or
+periodic at the sides; a floor that may be a no-slip or a moving wall, section 2's kinds 4 and
+5), held cells at the inlet (as an `inflow`), and a damping zone at the outlet (section 19's,
+`hydro/damping.wgsl`, with a target written for the tunnel: the stream's state, at a rate
+$`4U/\ell\,s^2`$ at depth $`s \in [0, 1]`$ into a zone of length $`\ell`$). Below Mach 0.3 the
+gas is the liquid with implicit pressure; the damping then relaxes the advected state before
+the solve, which projects it, and so is allowed with implicit pressure for the liquid (it is
+still refused for a gas, whose solve also carries the energy). The force coefficients
+(`Diagnostics.bodies`) are over $`\tfrac12\rho U^2 A`$, with $`A`$ the first obstacle's shadow
+along the stream unless the tunnel gives one.
+
 ### Bodies from mesh files
 
 A `mesh` shape (setups.md) is a triangle mesh read from a file (`src/geometry/`: STL, OBJ,

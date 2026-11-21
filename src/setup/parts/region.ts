@@ -115,6 +115,54 @@ export function bodyCenter(shape: Shape): Vec3 {
   return [0, 0, 0];
 }
 
+/**
+ * The area of a shape's shadow along `axis` (in 2D its length across the plane): the reference
+ * area of its drag. A sphere's is exact; a mesh's from its triangles (geometry/store.ts) in 3D;
+ * anything else is counted on a grid of samples (half a cell in 2D, the box over 128 in 3D).
+ */
+export function shadowOf(shape: Shape, axis: number, ctx: { box: number; n: number; ndim: 2 | 3 }): number {
+  if (shape.type === 'sphere') {
+    const r = shape.radiusCells !== undefined ? shape.radiusCells * (ctx.box / ctx.n) : (shape.radius ?? 0.1 * ctx.box);
+    return ctx.ndim === 2 ? 2 * r : Math.PI * r * r;
+  }
+  if (shape.type === 'mesh' && ctx.ndim === 3) return placeMesh(shape, { box: ctx.box, ndim: 3, dx: ctx.box / ctx.n }).report.frontalBox[axis];
+  const { inside } = insideOf(shape, ctx);
+  const half = ctx.box / 2;
+  if (ctx.ndim === 2) {
+    const t = axis === 0 ? 1 : 0;
+    const res = ctx.box / ctx.n / 2;
+    let hits = 0;
+    for (let q = -half + res / 2; q < half; q += res) {
+      for (let s = -half + res / 2; s < half; s += res) {
+        const p = [0, 0, 0];
+        p[axis] = s;
+        p[t] = q;
+        if (inside(p[0], p[1], 0)) {
+          hits++;
+          break;
+        }
+      }
+    }
+    return hits * res;
+  }
+  const res = ctx.box / 128;
+  const [u, v] = [(axis + 1) % 3, (axis + 2) % 3];
+  let hits = 0;
+  for (let qu = -half + res / 2; qu < half; qu += res)
+    for (let qv = -half + res / 2; qv < half; qv += res)
+      for (let s = -half + res / 2; s < half; s += res) {
+        const p = [0, 0, 0];
+        p[axis] = s;
+        p[u] = qu;
+        p[v] = qv;
+        if (inside(p[0], p[1], p[2])) {
+          hits++;
+          break;
+        }
+      }
+  return hits * res * res;
+}
+
 type Painter = (w: Prim, x: number, y: number, z: number) => Prim;
 
 /** A region's painter: the state under it, replaced inside its shape (or blended at a supersampled edge). */

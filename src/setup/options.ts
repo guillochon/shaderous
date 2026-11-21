@@ -18,6 +18,7 @@ import { VIEW_MODES } from '../render/view_options';
 import { COMPOSITIONS } from '../units/composition';
 import { ANEOS_LABELS, ANEOS_MATERIALS } from '../eos/aneos';
 import { speciesNuclides } from '../species/mixture';
+import { AXES, TUNNEL_FLOORS, TUNNEL_SIDES } from './spec';
 import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, MESH_UPS, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
 import { DENSITY_UNITS, LENGTH_UNITS, MASS_UNITS, VELOCITY_UNITS } from './units';
 
@@ -177,7 +178,7 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'eos.aneos': { label: 'The ANEOS equation of state (rock, iron and water)', of: (s) => s.physics?.eos === 'aneos' },
   'parts.disk': { label: 'A disk', of: (s) => count(s, (p) => p.kind === 'disk') > 0 },
   'parts.body': { label: 'A point mass or a star', of: (s) => count(s, (p) => p.kind === 'mass' || p.kind === 'star') > 0 },
-  'parts.damping': { label: 'A damping zone', of: (s) => count(s, (p) => p.kind === 'disk' && !!p.damp) > 0 },
+  'parts.damping': { label: 'A damping zone', of: (s) => count(s, (p) => (p.kind === 'disk' && !!p.damp) || (p.kind === 'tunnel' && (p.sponge ?? 0.1) > 0)) > 0 },
   'parts.flow.whole': { label: 'A flow that fills the box', of: (s) => count(s, (p) => !!flowDef(p)?.wholeBox) > 0 },
 };
 
@@ -589,6 +590,24 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
     kind: 'obstacle', label: 'Obstacle', tip: 'A solid body the gas reflects off',
     make: () => ({ kind: 'obstacle', shape: { type: 'box', min: [-0.1, -0.1, -0.1], max: [0.1, 0.1, 0.1] } }),
     fields: [...SHAPE],
+  },
+  tunnel: {
+    kind: 'tunnel', label: 'Wind tunnel', max: 1,
+    tip: 'A stream through the box from an inlet to an outlet with a sponge, and the box\u2019s faces, its gas and its background set to match: put obstacles in it, and the diagnostics give their drag and lift coefficients. Below Mach 0.3 the gas is the liquid with implicit pressure; above, an ideal gas',
+    excludes: [{ fact: 'magnetic', reason: 'Obstacles take no magnetic field' }, { fact: 'domain.curvilinear', reason: 'The tunnel is Cartesian' }],
+    make: () => ({ kind: 'tunnel', speed: 1, axis: 'x', sponge: 0.1, mach: 0.1 }),
+    fields: [
+      P({ path: 'speed', label: 'Speed', tip: 'The stream\u2019s speed', control: num(0, undefined, { factor: 1.25, quantity: 'velocity' }), default: 1 }),
+      P({ path: 'axis', label: 'Along', tip: 'The axis the stream flows along, toward +. Yaw and angle of attack turn the body, not the stream', control: pickOf(AXES, ['x', 'x'], ['y', 'y'], ['z', 'z']), default: 'x' }),
+      P({ path: 'mach', label: 'Mach number', tip: 'The stream\u2019s speed over the gas\u2019s sound speed. Below 0.3 the gas is the liquid with implicit pressure (incompressible, in effect); above, an ideal gas with the explicit scheme (shocks)', control: num(0.01, 5, { factor: 1.25 }), default: 0.1 }),
+      P({ path: 'rho', label: 'Density', tip: 'The gas\u2019s density', control: num(0, undefined, { factor: 2, quantity: 'density' }), default: 1 }),
+      P({ path: 'sides', label: 'Sides and roof', tip: 'Slip: walls the gas slides along. Open: faces it may leave by. Periodic: the box repeats sideways', control: pickOf(TUNNEL_SIDES, ['slip', 'Slip walls'], ['open', 'Open'], ['periodic', 'Periodic']), default: 'slip' }),
+      P({ path: 'floor', label: 'Floor', tip: 'The lower face along the box\u2019s up axis (z in 3D, y in 2D): as the sides, a slip wall, a no-slip wall, or a wall moving with the stream (a car on a road)', control: pickOf(TUNNEL_FLOORS, ['none', 'As the sides'], ['slip', 'Slip wall'], ['fixed', 'No-slip wall'], ['moving', 'Moving with the stream']), default: 'none' }),
+      P({ path: 'sponge', label: 'Sponge', tip: 'The outlet\u2019s damping zone, as a fraction of the box\u2019s length: it pulls the gas back to the stream so that the wake leaves without reflecting. 0 for none', control: num(0, 0.5, { step: 0.05 }), default: 0.1 }),
+      P({ path: 'inlet', label: 'Inlet cells', tip: 'Finest cells held at the stream\u2019s state at the upstream face', control: num(1, 16, { step: 1, integer: true }), default: 2 }),
+      P({ path: 'area', label: 'Reference area', tip: 'The area the force coefficients are over (a length in 2D). Empty: the first obstacle\u2019s shadow along the stream', control: num(0, undefined, { factor: 2 }) }),
+      P({ path: 'length', label: 'Reference length', tip: 'The length the moment coefficients are over. Empty: the square root of the area (the area itself in 2D)', control: num(0, undefined, { factor: 2, quantity: 'length' }) }),
+    ],
   },
   inflow: {
     kind: 'inflow', label: 'Inflow', tip: 'Cells held at their initial state for the whole run: an inlet',

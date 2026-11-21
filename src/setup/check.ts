@@ -2,6 +2,8 @@
 // (options.ts ruleIssues) and the checks on values a list of options cannot express, each a plain
 // sentence with the path of the part or option it is about. Free of the DOM, and it never throws:
 // a document that cannot even be built is itself an issue.
+import { tunnelParams } from './parts/tunnel';
+import { shadowOf } from './parts/region';
 import { extensionOf } from '../geometry';
 import { hasMeshFile, placeMesh, type MeshShape } from '../geometry/store';
 import { defaultEosParams, makeEos, physicalEosParams, type Eos } from '../eos/eos';
@@ -366,6 +368,24 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
       else if (s.type === 'box' && !(Array.isArray(s.min) && Array.isArray(s.max))) out.push({ level: 'error', path, text: `${label(i)}: a box needs its lower and upper corners` });
       else if (s.type === 'half' && !(Array.isArray(s.normal) && Math.hypot(...(s.normal as number[])) > 0)) out.push({ level: 'error', path, text: `${label(i)}: a half-space needs a normal that is not zero` });
       else if (s.type === 'mesh') out.push(...meshIssues(p.shape as MeshShape, i, label(i), spec));
+    });
+    // A wind tunnel: its blockage (the first obstacle's shadow over the tunnel's cross-section).
+    parts.forEach((p, i) => {
+      if (p.kind !== 'tunnel') return;
+      const ndim = spec.domain?.ndim === 3 ? 3 : 2;
+      const k = tunnelParams(p, ndim);
+      if (p.floor && p.floor !== 'none' && k.up === k.a) out.push({ level: 'warning', path: `parts.${i}.floor`, text: `${label(i)}: the stream runs along the box’s up axis, so it has no floor: the floor setting does nothing` });
+      const first = parts.find((q) => q.kind === 'obstacle');
+      if (!first || first.kind !== 'obstacle') return;
+      const box = typeof spec.domain?.box === 'number' ? spec.domain.box : 1;
+      try {
+        if (first.shape.type === 'mesh' && !hasMeshFile(first.shape.file)) return;
+        const area = shadowOf(first.shape, k.a, { box, n: Math.min(spec.domain?.n ?? 256, 256), ndim });
+        const blockage = area / (ndim === 3 ? box * box : box);
+        if (blockage > 0.05) out.push({ level: 'warning', path: `parts.${i}`, text: `${label(i)}: the first obstacle blocks ${(100 * blockage).toFixed(1)}% of the tunnel’s cross-section: above 5% the walls change its drag. A larger box, or a smaller body` });
+      } catch {
+        // (The shape's own issues are reported with it.)
+      }
     });
     parts.forEach((p, i) => {
       if (p.kind === 'flow' && !FLOWS[p.name]) out.push({ level: 'error', path: `parts.${i}.name`, text: `${label(i)}: this build has no flow named "${p.name}"` });

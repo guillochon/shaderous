@@ -1,6 +1,7 @@
 // Mesh files and signed distance fields (plans/wind-tunnel.md 11.1).
 import { describe, expect, it } from 'vitest';
-import { apply, axisAngle, buildSdf, flatten, identity, measure, mul, parseAirfoil, parseMeshFile, parseSvgPath, sampleSdf, windingNumber, worldMatrix, type Mesh } from '../../src/geometry';
+import { apply, axisAngle, buildSdf, flatten, identity, measure, mul, orient, parseAirfoil, parseMeshFile, parseSvgPath, sampleSdf, windingNumber, worldMatrix, type Mesh } from '../../src/geometry';
+import { ahmedBody } from '../../src/geometry/builtin';
 
 const { readFileSync }: { readFileSync(p: URL): Uint8Array } = await import(/* @vite-ignore */ 'node:fs' as string);
 const fixture = (name: string) => new Uint8Array(readFileSync(new URL(`./fixtures/meshes/${name}`, import.meta.url)));
@@ -180,6 +181,23 @@ describe('sdf-touching', () => {
     const { field } = buildSdf(flatten(parseMeshFile('chain.glb', fixture('chain.glb'))), { h: 0.05 });
     for (const y of [0.42, 0.47, 0.53, 0.58]) for (const x of [1.8, 2, 2.2]) expect(sampleSdf(field, x, y, 0.1)).toBeLessThan(0);
     expect(sampleSdf(field, 2.7, 0.5, 0)).toBeGreaterThan(0);
+  });
+});
+
+describe('builtin bodies', () => {
+  it('the Ahmed-like body is one closed piece, wound outward, of the right size', () => {
+    const m = ahmedBody(25);
+    const o = orient(m);
+    expect(o.flipped).toBe(0);
+    expect(o.pieces).toBe(1);
+    expect(o.open).toBe(0);
+    const { volume } = measure(m);
+    // The box less the front's rounding and the slant: a little under L W H.
+    expect(volume).toBeGreaterThan(0.85 * 1.044 * 0.389 * 0.288);
+    expect(volume).toBeLessThan(1.044 * 0.389 * 0.288);
+    const { report } = buildSdf(m, { h: 0.02 });
+    // Its shadow along x: the section, W x H (counted on the field's points, h = 0.02: to 10%).
+    expect(Math.abs(report.frontal[0] / (0.389 * 0.288) - 1)).toBeLessThan(0.1);
   });
 });
 

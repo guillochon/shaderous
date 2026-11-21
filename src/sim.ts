@@ -16,7 +16,7 @@ import { MassSums } from './gravity/mass_sums';
 import type { Lump } from './gravity/preview';
 import { comovingEosSlot, defaultEosParams, eosHasEnergy, hheUnsupported, EOS_MODULES, eosConstants1, eosConstants2, makeEos, physicalEosParams, type Eos, type EosKind, type EosParams } from './eos/eos';
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from './pressure/multigrid';
-import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type GravityMode, type PointMass, type Problem } from './problems/types';
+import { cellMark, isSelfGravity, problemUnits, sizedProblem, type Bc3, type ForceRef, type GravityMode, type PointMass, type Problem } from './problems/types';
 import { createBurnPass, type AnyBurnSpec, type Burner } from './burn/burn';
 import { COOLING_MODULES, defaultCoolingParams, packCooling, type CoolingKind, type CoolingParams } from './cooling/cooling';
 import type { Restart } from './io/snapshot';
@@ -644,7 +644,8 @@ export function implicitUnsupported(c: SimConfig): string | null {
   if (c.problem.burn) return 'burning is not available with it';
   // (Its rates and the pressure's gradient take the same binding, and its transport the species' passes.)
   if (radiationOn(c)) return 'radiation transport is not available with it';
-  if (c.cooling !== 'off' || c.problem.damping) return 'cooling and damping zones are not available with it';
+  // (A liquid's damping zone, a wind tunnel's sponge, relaxes the advected state before the solve.)
+  if (c.cooling !== 'off' || (c.problem.damping && c.eos !== 'liquid')) return 'cooling, and damping zones for a gas, are not available with it';
   return null;
 }
 
@@ -1157,9 +1158,22 @@ export const DIAG_FLOATS = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS + FORCE_CH
 /** Where the forces on bodies start in a diagnostics readback, in floats. */
 export const FORCE_FLOAT = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS;
 
+const forceRefs = new WeakMap<object, { key: string; ref: ForceRef | undefined }>();
+/** The run's force reference (Problem.forceRef), for its grid: worked out once per problem and grid. */
+function forceRefOf(c: SimConfig): ForceRef | undefined {
+  const r = c.problem.forceRef;
+  if (typeof r !== 'function') return r;
+  const key = `${c.ndim}/${c.n}`;
+  const got = forceRefs.get(c.problem);
+  if (got?.key === key) return got.ref;
+  const ref = r(c.ndim, c.n);
+  forceRefs.set(c.problem, { key, ref });
+  return ref;
+}
+
 /** The forces on a run's bodies from a diagnostics readback, into `d`. */
 export function withForces(d: Diagnostics, a: Float32Array, c: SimConfig): Diagnostics {
-  if (forcesOn(c)) d.bodies = bodyForcesFrom(a.subarray(FORCE_FLOAT), c.problem.bodies!, c.problem.forceRef);
+  if (forcesOn(c)) d.bodies = bodyForcesFrom(a.subarray(FORCE_FLOAT), c.problem.bodies!, forceRefOf(c));
   return d;
 }
 

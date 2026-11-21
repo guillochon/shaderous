@@ -283,7 +283,7 @@ export async function sendMeshFiles(call, spec, dir) {
   const names = new Set();
   for (const p of spec?.parts ?? []) {
     const f = p?.shape?.type === 'mesh' ? p.shape.file : undefined;
-    if (typeof f === 'string' && f && !/^(https?:|data:|blob:)/.test(f)) names.add(f);
+    if (typeof f === 'string' && f && !/^(https?:|data:|blob:|builtin:)/.test(f)) names.add(f);
   }
   for (const name of names) {
     const file = path.resolve(dir, name);

@@ -69,6 +69,7 @@ const PART_SCHEMAS: Record<string, Record<string, Schema>> = {
   obstacle: { shape: SHAPE },
   inflow: { shape: SHAPE },
   field: { b: 'vec3', up: 'number' },
+  tunnel: { speed: 'number', axis: partChoice('tunnel', 'axis'), floor: partChoice('tunnel', 'floor'), sides: partChoice('tunnel', 'sides'), sponge: 'number', mach: 'number', rho: 'number', inlet: 'int', area: 'number', length: 'number' },
 };
 
 const FEATURED: Schema = { any: ['string', obj({

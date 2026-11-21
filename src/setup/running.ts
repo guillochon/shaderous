@@ -1,6 +1,7 @@
 // A run and its setup document, both ways: the document a run's configuration stands for, and
 // what it takes to get from one document to another (a uniform write, new shaders, or a fresh
 // start). Free of the DOM: the page (ui/app.ts), the dialog and the scripting interface share it.
+import { expandTunnel, tunnelOf } from './parts/tunnel';
 import { configFor, withSymmetry, type SimConfig } from '../sim';
 import { mirrorAxes, mirrorName } from '../domain';
 import { compileSetup, withParams } from './compile';
@@ -71,9 +72,12 @@ export function runningSpec(cfg: SimConfig): SetupSpec {
     const def = configFor(problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels, symmetry: cfg.symmetry });
     const plain = configFor(problem, cfg.n, { ndim: cfg.ndim, amrLevels: cfg.amrLevels });
     let changed = false;
+    // What a wind tunnel sets (parts/tunnel.ts), the run holding it still: the tunnel's, not written in.
+    const tunnel = tunnelOf(spec) ? expandTunnel(spec) : null;
     for (const s of settingsOf(spec)) {
       const now = settingValue(cfg, s);
       if (same(now, settingValue(s.cfg === 'symmetry' ? plain : def, s))) continue;
+      if (tunnel && getPath(spec, s.path) === undefined && getPath(tunnel, s.path) !== undefined && same(now, getPath(tunnel, s.path))) continue;
       changed = true;
       // The faces of a 2D run are the document's 2D faces, where it keeps them apart.
       if (s.cfg === 'bc' && cfg.ndim === 2) spec.domain = { ...spec.domain, bc2d: now as { lo: [number, number, number]; hi: [number, number, number] } };

@@ -444,7 +444,33 @@ export interface FlowPart {
   [param: string]: unknown;
 }
 
-export type Part = MassPart | OrbitPart | StarPart | DiskPart | RegionPart | ObstaclePart | FieldPart | FlowPart;
+export const TUNNEL_FLOORS = ['none', 'slip', 'fixed', 'moving'] as const;
+export const TUNNEL_SIDES = ['slip', 'open', 'periodic'] as const;
+export const AXES = ['x', 'y', 'z'] as const;
+
+export interface TunnelPart {
+  kind: 'tunnel';
+  id?: string;
+  /** the stream's speed (default 1) */
+  speed?: number;
+  /** the axis it flows along, toward + (default x) */
+  axis?: (typeof AXES)[number];
+  floor?: (typeof TUNNEL_FLOORS)[number];
+  sides?: (typeof TUNNEL_SIDES)[number];
+  /** the outlet's damping zone, as a fraction of the box's length (default 0.1; 0 for none) */
+  sponge?: number;
+  /** the stream's Mach number (default 0.1): its speed over the gas's sound speed */
+  mach?: number;
+  /** the gas's density (default 1) */
+  rho?: number;
+  /** cells held at the stream's state at the upstream face (default 2) */
+  inlet?: number;
+  /** the force coefficients' reference area (default: the first obstacle's shadow along the stream) and length */
+  area?: number;
+  length?: number;
+}
+
+export type Part = MassPart | OrbitPart | StarPart | DiskPart | RegionPart | ObstaclePart | FieldPart | FlowPart | TunnelPart;
 export type PartKind = Part['kind'];
 
 /** An option shown with the preset: a path into the document, and how the side bar presents it. */

@@ -211,8 +211,8 @@ export interface Problem {
   id: string;
   /** Obstacles whose forces are reported (Diagnostics.bodies), in the order of their marks. */
   bodies?: BodyRef[];
-  /** The scales of the force coefficients (Diagnostics.bodies' coefficients), if there are any. */
-  forceRef?: ForceRef;
+  /** The scales of the force coefficients (Diagnostics.bodies' coefficients), if there are any: fixed, or for the run's grid. */
+  forceRef?: ForceRef | ((ndim: 2 | 3, n: number) => ForceRef | undefined);
   label: string;
   blurb: string;
   eos: EosKind;

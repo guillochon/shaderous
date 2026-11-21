@@ -2449,6 +2449,96 @@
      },
      {
       "type": "object",
+      "title": "Wind tunnel",
+      "properties": {
+       "kind": {
+        "const": "tunnel"
+       },
+       "id": {
+        "type": "string",
+        "description": "A name other parts refer to it by (an orbit’s `of`, a disk’s `about`)"
+       },
+       "speed": {
+        "type": "number",
+        "title": "Speed",
+        "description": "The stream’s speed",
+        "minimum": 0
+       },
+       "axis": {
+        "enum": [
+         "x",
+         "y",
+         "z"
+        ],
+        "title": "Along",
+        "description": "The axis the stream flows along, toward +. Yaw and angle of attack turn the body, not the stream"
+       },
+       "floor": {
+        "enum": [
+         "none",
+         "slip",
+         "fixed",
+         "moving"
+        ],
+        "title": "Floor",
+        "description": "The lower face along the box’s up axis (z in 3D, y in 2D): as the sides, a slip wall, a no-slip wall, or a wall moving with the stream (a car on a road)"
+       },
+       "sides": {
+        "enum": [
+         "slip",
+         "open",
+         "periodic"
+        ],
+        "title": "Sides and roof",
+        "description": "Slip: walls the gas slides along. Open: faces it may leave by. Periodic: the box repeats sideways"
+       },
+       "sponge": {
+        "type": "number",
+        "title": "Sponge",
+        "description": "The outlet’s damping zone, as a fraction of the box’s length: it pulls the gas back to the stream so that the wake leaves without reflecting. 0 for none",
+        "minimum": 0,
+        "maximum": 0.5
+       },
+       "mach": {
+        "type": "number",
+        "title": "Mach number",
+        "description": "The stream’s speed over the gas’s sound speed. Below 0.3 the gas is the liquid with implicit pressure (incompressible, in effect); above, an ideal gas with the explicit scheme (shocks)",
+        "minimum": 0.01,
+        "maximum": 5
+       },
+       "rho": {
+        "type": "number",
+        "title": "Density",
+        "description": "The gas’s density",
+        "minimum": 0
+       },
+       "inlet": {
+        "type": "integer",
+        "title": "Inlet cells",
+        "description": "Finest cells held at the stream’s state at the upstream face",
+        "minimum": 1,
+        "maximum": 16
+       },
+       "area": {
+        "type": "number",
+        "title": "Reference area",
+        "description": "The area the force coefficients are over (a length in 2D). Empty: the first obstacle’s shadow along the stream",
+        "minimum": 0
+       },
+       "length": {
+        "type": "number",
+        "title": "Reference length",
+        "description": "The length the moment coefficients are over. Empty: the square root of the area (the area itself in 2D)",
+        "minimum": 0
+       }
+      },
+      "required": [
+       "kind"
+      ],
+      "additionalProperties": false
+     },
+     {
+      "type": "object",
       "title": "Flow: Advected Gaussian blob",
       "properties": {
        "kind": {
