@@ -15,6 +15,8 @@ import { FACTS, PART_OPTIONS, ruleIssues, type Issue } from './options';
 import { buildBodies, partIds, type Bodies, type BuiltStar } from './parts/bodies';
 import { FLOWS } from './parts/flow';
 import { eggleton } from '../problems/roche';
+import { ANEOS_MATERIALS } from '../eos/aneos';
+import { speciesMaterials, speciesNuclides } from '../species/mixture';
 import type { DiskPart, OrbitPart, Part, SetupSpec } from './spec';
 import { unitSystem } from './units';
 
@@ -319,6 +321,21 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
       out.push({ level: 'warning', path: 'physics.fluff.va', text: 'A magnetic field around a sink: the gas the sink empties sets the timestep by its Alfven speed. Set an Alfven speed cap (Hydro, tenuous-gas caps), as the magnetized disk does' });
   });
 
+  // Species that set the equation of state (nuclides, or a planet's two materials) are a mixture
+  // of ideal gases, each weighed by 1 / (gamma - 1): a gamma of 1 is no gas of that kind (it wrote
+  // Infinity into the shaders; random test seed 10062, the isothermal binary with aprox13).
+  guard(() => {
+    const sp = spec.physics?.species;
+    const names = sp === 'aprox13' ? ['he4'] : sp;
+    if (!speciesNuclides(names) && !speciesMaterials(Array.isArray(sp) ? sp : undefined)) return;
+    const gamma = spec.physics?.eosParams?.gamma ?? 5 / 3;
+    const own = spec.physics?.speciesGamma ?? {};
+    const flat = Object.entries(own).filter(([, g]) => !(g > 1)).map(([n]) => n);
+    if (!(gamma > 1) && (sp === 'aprox13' || (Array.isArray(sp) && sp.some((n) => own[n] === undefined))))
+      out.push({ level: 'error', path: 'physics.eosParams.gamma', text: `gamma is ${fmt(gamma)}: the species set the equation of state, a mixture of ideal gases, and each needs a gamma above 1` });
+    if (flat.length) out.push({ level: 'error', path: 'physics.speciesGamma', text: `Gamma by species: ${flat.join(', ')} need a gamma above 1` });
+  });
+
   // Fuel to ash burning: both are species the gas carries, and a flow with its own burning wins.
   guard(() => {
     const burn = spec.physics?.burn;
@@ -402,6 +419,13 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
         else if (!(p.core.mass > 0 && p.core.mass < (p.mass ?? 1))) out.push({ level: 'error', path: `parts.${i}.core.mass`, text: `${label(i)}: its core’s mass of ${fmt(p.core.mass)} must be above zero and below the star’s ${fmt(p.mass ?? 1)}` });
         if (built.dx > 0 && soft < 2 * built.dx)
           out.push({ level: 'warning', path: `parts.${i}.core.soft`, text: `${label(i)}: its core’s softening of ${fmt(soft)} is under two cells of the grid (${fmt(2 * built.dx)}): the envelope’s inner part, shaped by it, is not resolved` });
+      }
+      // A planet's layers are the run's materials: its two species, or the one material chosen (bodies.ts buildPlanetStar).
+      if (p.kind === 'star' && p.type === 'planet') {
+        const sp = spec.physics?.species;
+        const run: string[] = speciesMaterials(Array.isArray(sp) ? sp : undefined) ?? [ANEOS_MATERIALS[spec.physics?.eosParams?.aneosA ?? 0]];
+        for (const [what, m] of [['material', p.material ?? run[0]], ['coreMaterial', p.coreMaterial]] as const)
+          if (m && !run.includes(m)) out.push({ level: 'error', path: `parts.${i}.${what}`, text: `${label(i)}: its ${what === 'material' ? 'material' : 'core’s material'}, ${m}, is not among the run’s materials (${run.join(', ')}). A planet with a core needs the two as the run’s species, the mantle’s first` });
       }
       if (p.kind === 'star' && p.type === 'polytrope') {
         const n = p.n ?? 1.5;

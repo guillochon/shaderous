@@ -35,6 +35,28 @@ describe('checkSetup', () => {
     expect(has(flow('first-core', { domain: { ndim: 3, n: 64, units: { length: { unit: 'au', value: 1 }, mass: { unit: 'Msun', value: 1 } } } }), /needs physical units/i)).toBe(false);
   });
 
+  it('finds a planet whose core is not among the run’s materials (random test seed 10031)', () => {
+    const units = { length: { unit: 'Rearth', value: 1 }, mass: { unit: 'Mearth', value: 1 } };
+    const planet: Part = { kind: 'star', id: 'p', type: 'planet', mass: 1, material: 'pyrolite', coreMaterial: 'fe85si15' };
+    const doc = (species?: string[]) => stellar([planet], { domain: { ndim: 3, n: 64, box: 4, units }, physics: { eos: 'aneos', gravity: 'isolated', G: 'units', ...(species ? { species } : {}) } });
+    expect(has(texts(doc(), 'error'), /fe85si15, is not among the run’s materials/)).toBe(true);
+    expect(has(texts(doc(['pyrolite', 'fe85si15']), 'error'), /not among the run’s materials/)).toBe(false);
+  });
+
+  it('finds a gamma of 1 where the species set the gas (random test seed 10062)', () => {
+    const doc = (gamma: number, species: string[] | 'aprox13') => texts(setup({ physics: { eosParams: { gamma }, species } }), 'error');
+    expect(has(doc(1, 'aprox13'), /each needs a gamma above 1/)).toBe(true);
+    expect(has(doc(1, ['he4', 'c12']), /each needs a gamma above 1/)).toBe(true);
+    expect(has(doc(1, ['fuel', 'ash']), /gamma above 1/)).toBe(false);
+    expect(has(doc(5 / 3, 'aprox13'), /gamma above 1/)).toBe(false);
+  });
+
+  it('takes a wind tunnel’s gas for the run’s (random test seed 10012)', () => {
+    const tunnel = (mach: number) => texts(setup({}, [{ kind: 'tunnel', mach }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }, { kind: 'flow', name: 'first-core' }]), 'error');
+    expect(has(tunnel(0.1), /equation of state with an energy/i)).toBe(true);
+    expect(has(tunnel(2), /equation of state with an energy/i)).toBe(false);
+  });
+
   it('finds nothing wrong with an empty box or a well-made binary', () => {
     expect(checkSetup(setup({}))).toEqual([]);
     const binary = setup({}, [mass('a', [0, 0, 0], { gm: 0.5 }), mass('b', [0, 0, 0], { gm: 0.5 }), { kind: 'orbit', of: ['a', 'b'], type: 'binary', separation: 1 }, disk(['a', 'b'], { rIn: 1, rOut: 1.8 })]);

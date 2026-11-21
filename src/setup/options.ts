@@ -140,6 +140,12 @@ const faces = (s: SetupSpec): number[] => {
   return [...(s.domain?.bc?.lo ?? [1, 1, 1]).slice(0, k), ...(s.domain?.bc?.hi ?? [1, 1, 1]).slice(0, k)];
 };
 const flowDef = (p: Part) => (p.kind === 'flow' ? FLOWS[p.name] : undefined);
+/** The gas the run has: a wind tunnel's own (the liquid below Mach 0.3, else an ideal gas: parts/tunnel.ts), or the document's. */
+const eosKind = (s: SetupSpec): string => {
+  const t = parts(s).find((p) => p.kind === 'tunnel');
+  if (t && t.kind === 'tunnel') return (t.mach ?? 0.1) < 0.3 ? 'liquid' : 'ideal';
+  return s.physics?.eos ?? 'ideal';
+};
 
 /** What rules are about: each a named property of a setup, with how to say it. */
 export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value; say?: (v: Value) => string }> = {
@@ -155,11 +161,11 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'symmetric.z': { label: 'A setup symmetric under the z mirror', of: (s) => !!s.domain?.symmetric?.includes('z') },
   'symmetric.field': { label: 'A magnetic field symmetric under the mirrors, or none', of: (s) => !!s.domain?.symmetricField || !FACTS.magnetic.of(s) },
   'mesh.adaptive': { label: 'An adaptive mesh', of: (s) => (s.domain?.amr ?? 0) > 0 },
-  'physics.eos': { label: 'Equation of state', of: (s) => s.physics?.eos ?? 'ideal', say: (v) => EOS_LABELS[v as keyof typeof EOS_LABELS] ?? String(v) },
-  'eos.energy': { label: 'An equation of state with an energy', of: (s) => eosHasEnergy(s.physics?.eos ?? 'ideal') },
-  'eos.tabulated': { label: 'A tabulated equation of state (white dwarf matter, or hydrogen and helium)', of: (s) => s.physics?.eos === 'helmholtz' || s.physics?.eos === 'hhe' },
+  'physics.eos': { label: 'Equation of state', of: (s) => eosKind(s), say: (v) => EOS_LABELS[v as keyof typeof EOS_LABELS] ?? String(v) },
+  'eos.energy': { label: 'An equation of state with an energy', of: (s) => eosHasEnergy(eosKind(s) as never) },
+  'eos.tabulated': { label: 'A tabulated equation of state (white dwarf matter, or hydrogen and helium)', of: (s) => eosKind(s) === 'helmholtz' || eosKind(s) === 'hhe' },
   'domain.curvilinear': { label: 'An axisymmetric (R, z) or spherical (r, theta) run', of: (s) => ['cylindrical', 'spherical'].includes(s.domain?.geometry ?? 'cartesian') },
-  'eos.degenerate': { label: 'The degenerate or tabulated (Helmholtz) equation of state', of: (s) => ['degenerate', 'helmholtz'].includes(s.physics?.eos ?? 'ideal') },
+  'eos.degenerate': { label: 'The degenerate or tabulated (Helmholtz) equation of state', of: (s) => ['degenerate', 'helmholtz'].includes(eosKind(s)) },
   'physics.gravity': { label: 'Gravity', of: (s) => s.physics?.gravity ?? 'off', say: (v) => ({ off: 'Off', constant: 'Constant', periodic: 'Self, periodic', isolated: 'Self, isolated' })[String(v)] ?? String(v) },
   'gravity.self': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') },
   'bc.periodic': { label: 'A periodic face', of: (s) => faces(s).some((b) => b === 0) },
@@ -175,7 +181,7 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'parts.star.polytrope': { label: 'A polytropic star', of: (s) => count(s, (p) => p.kind === 'star' && p.type === 'polytrope') > 0 },
   'parts.star.white-dwarf': { label: 'A white dwarf', of: (s) => count(s, (p) => p.kind === 'star' && p.type === 'white-dwarf') > 0 },
   'parts.star.planet': { label: 'A planet', of: (s) => count(s, (p) => p.kind === 'star' && p.type === 'planet') > 0 },
-  'eos.aneos': { label: 'The ANEOS equation of state (rock, iron and water)', of: (s) => s.physics?.eos === 'aneos' },
+  'eos.aneos': { label: 'The ANEOS equation of state (rock, iron and water)', of: (s) => eosKind(s) === 'aneos' },
   'parts.disk': { label: 'A disk', of: (s) => count(s, (p) => p.kind === 'disk') > 0 },
   'parts.body': { label: 'A point mass or a star', of: (s) => count(s, (p) => p.kind === 'mass' || p.kind === 'star') > 0 },
   'parts.damping': { label: 'A damping zone', of: (s) => count(s, (p) => (p.kind === 'disk' && !!p.damp) || (p.kind === 'tunnel' && (p.sponge ?? 0.1) > 0)) > 0 },
