@@ -51,6 +51,17 @@ describe('checkSetup', () => {
     expect(has(doc(5 / 3, 'aprox13'), /gamma above 1/)).toBe(false);
   });
 
+  it('finds a star without gravity, a liquid far from its density, and the Helmholtz gas without units (seeds 10028, 10006, 10025)', () => {
+    expect(has(texts(stellar([star('a', [0, 0, 0])], { physics: { gravity: 'isolated', G: 0 } }), 'error'), /a star needs gravity/)).toBe(true);
+    expect(has(texts(stellar([star('a', [0, 0, 0])]), 'error'), /a star needs gravity/)).toBe(false);
+    const blob = (rho: number): Part => ({ kind: 'region', shape: { type: 'sphere', radius: 0.1 }, rho });
+    const tunnel = (rho: number) => texts(setup({}, [{ kind: 'tunnel', mach: 0.1 }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }, blob(rho)]), 'error');
+    expect(has(tunnel(0.16), /must start within 10%/)).toBe(true);
+    expect(has(tunnel(1.05), /must start within 10%/)).toBe(false);
+    expect(has(texts(setup({ physics: { eos: 'liquid', eosParams: { liqRho: 2 } } }, [blob(1)]), 'error'), /must start within 10%/)).toBe(true);
+    expect(has(texts(setup({ physics: { eos: 'helmholtz' } }), 'error'), /needs physical units/i)).toBe(true);
+  });
+
   it('takes a wind tunnel’s gas for the run’s (random test seed 10012)', () => {
     const tunnel = (mach: number) => texts(setup({}, [{ kind: 'tunnel', mach }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }, { kind: 'flow', name: 'first-core' }]), 'error');
     expect(has(tunnel(0.1), /equation of state with an energy/i)).toBe(true);

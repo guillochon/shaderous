@@ -336,6 +336,28 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     if (flat.length) out.push({ level: 'error', path: 'physics.speciesGamma', text: `Gamma by species: ${flat.join(', ')} need a gamma above 1` });
   });
 
+  // A star is held together by its own gravity: with G = 0 its structure is NaN (random test
+  // seeds 10028 and 10056, a star added to presets without gravity).
+  guard(() => {
+    const G = spec.physics?.G;
+    if (typeof G === 'number' && !(G > 0) && partsOf(spec).some((p) => p.kind === 'star'))
+      out.push({ level: 'error', path: 'physics.G', text: `G is ${fmt(G)}: a star needs gravity to hold it together` });
+  });
+
+  // The weakly compressible liquid stays within a few percent of its reference density: a region
+  // far from it is liquid compressed or stretched beyond the model, whose pressure c0^2 (rho - rho0)
+  // then tore the run apart (random test seed 10006: a blob at 0.16 in the wind tunnel).
+  guard(() => {
+    const tunnel = partsOf(spec).find((p) => p.kind === 'tunnel');
+    const liquid = tunnel && tunnel.kind === 'tunnel' ? (tunnel.mach ?? 0.1) < 0.3 : spec.physics?.eos === 'liquid';
+    if (!liquid) return;
+    const rho0 = tunnel && tunnel.kind === 'tunnel' ? (tunnel.rho ?? 1) : (spec.physics?.eosParams?.liqRho ?? 1);
+    partsOf(spec).forEach((p, i) => {
+      if (p.kind === 'region' && p.rho !== undefined && Math.abs(p.rho / rho0 - 1) > 0.1)
+        out.push({ level: 'error', path: `parts.${i}.rho`, text: `Gas region "${partIds(partsOf(spec))[i]}": its density of ${fmt(p.rho)} is ${fmt(p.rho / rho0)} times the liquid’s reference density: the liquid is weakly compressible, and must start within 10% of it` });
+    });
+  });
+
   // Fuel to ash burning: both are species the gas carries, and a flow with its own burning wins.
   guard(() => {
     const burn = spec.physics?.burn;
