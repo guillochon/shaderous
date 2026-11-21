@@ -344,8 +344,14 @@ measurements:
   setup with a mesh works only in a browser that has the file, or with a URL.
 - **Not done**: `.athdf` checkpoints do not store the hash or pose (needed only for moving
   bodies), random testing does not draw mesh obstacles yet, and the preview draws a mesh as
-  the hull of its vertices (no surface rendering: stage 7). Not yet verified in the page by
-  hand: the drop and pick on the Setup dialog.
+  the hull of its vertices (no surface rendering: stage 7). **The drop on the Setup dialog,
+  checked in the page (2026-11-20)**, on the static build in the app's browser: a binary STL
+  cube (a real File, dropped by a script's DataTransfer on the dialog: the drag from the
+  desktop itself could not be driven) was added as the obstacle "cube" (fit 0.25), drawn in the
+  preview, applied, and ran beside the preset's cylinder with its own force in the panel; the
+  browser kept it under its SHA-256. A fresh page, without the file in memory, loaded a document
+  naming `cube.stl` and found it there. Not tried: the "Open file..." picker, glTF with a
+  separate .bin, a real drag from the desktop.
 
 ## 4. Stage 2: the tunnel and the forces
 
@@ -463,8 +469,7 @@ damping zone with a target written for it. Departures:
   showcase at Reynolds number 12 000, not the body's measured 0.29).
 - `mesh-vs-shape` (GPU): the icosphere through the mesh path and the built-in sphere mark the
   same cells and give the same drag, to the bit, at 8 and 16 cells across.
-- Not verified by hand in the page: dropping an STL on the Setup dialog (the runner and the
-  MCP paths were run).
+- Dropping an STL on the Setup dialog: checked in the page (3.5).
 
 ## 5. Stage 3: rotors in their own frame
 
