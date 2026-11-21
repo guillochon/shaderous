@@ -559,11 +559,68 @@ against: the same rotor run both ways must give the same torque.
   those pieces are, and refinement stalled at 260 blocks with two blades left on level 1 (and
   a third broken into separate cells at mid-span). That run gave negative thrust and torque:
   a rotor that leaks. Refining on the mesh's own distance field (not on the coarse grid's
-  solid cells) would fix it; not built. The plan's 9.2 (refining what the rotor sweeps) is the
+  solid cells) fixes it: built in 5.3. The plan's 9.2 (refining what the rotor sweeps) is the
   same need.
 - **Not shown**: the blades are holes in the gas (stage 7's fractional cells would give them
   their shape below a cell); the tip vortices are a few cells across and fade within a rotor's
   diameter; no tower, nacelle or ground.
+
+### 5.3 As built (2026-11-21): refinement from the body's shape, and what resolution gives a fast rotor
+
+- **Refinement from the shape** (4.3 and 9.2 built; `setup/parts/surfaces.ts`,
+  `amr/bodies.ts`). Each obstacle keeps every block within `refineBand` finest cells (4) of its
+  surface at `refineLevel` (the finest), from the start and through every re-mesh, decided
+  from the shape: exact distances for spheres, boxes and half-spaces, points on the triangles
+  for a mesh (a 2D section from its inside on a grid). Below that level the block's indicator
+  is infinite; at it, held between the merge and refine thresholds; such blocks are never
+  evicted to make room. A block a re-mesh makes there by refinement takes its solid cells from
+  the shape at its own level (`amr/regrid.wgsl`, a mark per cell from the CPU), and a cell of
+  the body's that the shape does not cover at that level becomes gas. The band is wider than
+  the ghost cells reach (2), so no coarser block's cells, nor ghosts filled from them, lie on
+  the body: the coarse levels' idea of a thin body never meets the flow beside it. `refine:
+  "swept"` takes the union of the surface over the run (or one period of its motions), poses
+  sampled close enough that a point moves at most half the band between them: in place for
+  stage 4 on blocks; for a body at rest it is the band. `refine: "off"` is the old behavior.
+- **Tests.** `thin-plate-blocks`: a plate 0.9 coarsest cells thick, centered on a coarsest
+  cell face (no coarsest center inside it), across a closed box of liquid at 128 with 2
+  levels: the whole plate (65 536 finest cells) solid at the start, after 150 steps, and after
+  the mesh is merged to the coarsest level (the plate gone: 0 solid cells) and refined back
+  (65 536 again, painted), no cell within 6 finest cells of it coarser than the finest, and
+  the mass on either side constant to 1e-8. With `refine: "off"` the same merge loses the
+  plate for good and 3.4% of the liquid crosses where it was. `turbine-blocks`: the preset on
+  256 with 2 levels, each blade's solid cells those of the shape on the finest grid (5146, 5153,
+  5155), at the start and after 100 steps, nothing within 2 finest cells of the surface
+  coarser. `force-balance` (all eight runs, blocks included), `mesh-vs-shape`, `rotor-frame`,
+  `psplit-obstacle`, `liquid-amr` pass; `sphere-drag` gives Cd 1.2534 as before (its sphere
+  was already refined right); the `wind-tunnel` preset is identical to the bit with the band
+  on or off (260 blocks, Cd 0.894 at t = 1).
+- **The preset on blocks** (256, 2 levels, 2.5 GB, 1331 slots): 526 blocks at the start, the
+  three blades whole at the finest level (a slice through the rotor's plane in the page shows
+  them inside the smallest blocks); the wake then fills the budget (1170 blocks, 29% of
+  uniform) and a step takes 115 ms; with the flow's own refinement held off (`refhi=1`) 526
+  blocks and 73 ms. The uniform 256^3 grid takes 208 ms. **The preset stays on uniform 128^3**
+  (7.4 ms a step in the page): blocks are not interactive at this size, and the finer grid
+  does not make the slow rotor honest in a way that pays for it.
+- **The fast rotor's power against resolution** (`builtin:turbine-fast`: tip-speed ratio 4
+  design, chord 0.30 R to 0.15 R, 6 degrees to the relative wind, thinnest 0.03 R). Same tunnel
+  and frame as the preset, the band only (`refhi=1`), C_p averaged over t = 1.5 to 3 (2.5 for
+  56 cells; each settled within a few percent by t = 1.5). Cells along the chord at 75% span:
+
+  | cells along the chord | finest cell | blocks | GPU memory | ms / step | TSR 2 | TSR 3 | TSR 4 | TSR 5 |
+  |---|---|---|---|---|---|---|---|---|
+  | 14 | R/68 (256, 2 levels) | 526 | 2.5 GB | 61 to 71 | -0.155 | -0.227 | -0.469 | -0.937 |
+  | 28 | R/137 (512, 3 levels) | 1065 | 3 GB | 82 to 90 | -0.110 | -0.141 | -0.314 | -0.790 |
+  | 56 | R/273 (1024, 4 levels) | 2745 | 6 GB | 292 | | | -0.193 | |
+
+  The torque is against the turning in every run (at TSR 4: -0.094, -0.063, -0.039 about the
+  axis; thrust 0.97 to 1.05). Halving the cell takes about 0.15 off the loss at TSR 4 each
+  time, first order; extrapolated to no cell at all (2 x 56 minus 28) C_p is still about -0.07.
+  Resolution alone does not get this rotor to drive itself within any grid this machine
+  holds: a staircase blade feels its drag and not enough of its lift, and the cure is the cut
+  cells of 8.1, not more cells. TSR 6 (Omega = 7.5) did not run: the runner stopped advancing
+  at t = 0.3 to 0.4 on both grids, no error reported, twice (not investigated).
+- **Not done.** The view turned back to the tunnel frame. The TSR 6 hang. The slow (TSR 1)
+  rotor's C_p on blocks against its uniform 0.044.
 
 ## 6. Stage 4: moving bodies
 
