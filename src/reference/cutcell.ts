@@ -66,10 +66,18 @@ export interface CutConfig {
   centralCarry: boolean;
   /** the old way, for comparison: each cell whole gas or whole body by its center, faces open where both cells are gas */
   staircase?: boolean;
+  /** the slopes' limiter: minmod, monotonized central, or none (central slopes) */
+  limiter: 'minmod' | 'mc' | 'none';
+  /** advect with each face's velocity from the last step (Rhie and Chow: its cells' mean with its own pressure correction; false: the mean of its cells') */
+  faceVelocity: boolean;
+  /** the wall's shear from the velocity this many cells out along the wall's normal (0: the cell's own, point-implicit) */
+  wallProbe: number;
+  /** a sponge from x = `from` to the box's downstream edge, its strength rising to `rate` per unit time, toward the stream U along x */
+  sponge?: { from: number; rate: number; U: number };
 }
 
 export const cutDefaults: Omit<CutConfig, 'nx' | 'ny' | 'dx' | 'x0' | 'y0'> = {
-  rho0: 1, c: 10, nu: 0, cfl: 0.4, tol: 1e-10, maxIter: 2000, small: 0.5, muscl: true, subSteps: 8, wallGradient: true, oneSided: true, faceCentroid: true, centralCarry: true,
+  rho0: 1, c: 10, nu: 0, cfl: 0.4, tol: 1e-10, maxIter: 2000, small: 0.5, muscl: true, subSteps: 8, wallGradient: true, oneSided: true, faceCentroid: true, centralCarry: true, limiter: 'minmod', faceVelocity: false, wallProbe: 1.5,
 };
 
 /** A circle of `n` sides (vertices on the circle), or a rectangle, about the body's origin. */
@@ -206,6 +214,9 @@ export class CutCell {
   /** mass left in cells the body covered (should be round-off) */
   lost = 0;
   iters = 0;
+  /** each face's velocity from the last step's mass flux (NaN: none) */
+  ufx: Float64Array;
+  ufy: Float64Array;
   readonly cfg: CutConfig;
   readonly body: Body | null;
 
@@ -217,6 +228,8 @@ export class CutCell {
     this.Mx = new Float64Array(this.n);
     this.My = new Float64Array(this.n);
     this.p = new Float64Array(this.n);
+    this.ufx = new Float64Array(this.n).fill(NaN);
+    this.ufy = new Float64Array(this.n).fill(NaN);
     this.g = this.geometry(0);
     for (let j = 0; j < cfg.ny; j++)
       for (let i = 0; i < cfg.nx; i++) {
@@ -411,12 +424,23 @@ export class CutCell {
       }
     const dQ = new Float64Array(n), dMx = new Float64Array(n), dMy = new Float64Array(n);
     const at = (i: number, j: number) => ((j + ny) % ny) * nx + ((i + nx) % nx);
-    const minmod = (a: number, b: number) => (a * b <= 0 ? 0 : Math.abs(a) < Math.abs(b) ? a : b);
+    const lim = this.cfg.limiter;
+    const minmod = (a: number, b: number) => {
+      if (lim === 'none') return 0.5 * (a + b);
+      if (a * b <= 0) return 0;
+      if (lim === 'mc') return Math.sign(a) * Math.min(2 * Math.abs(a), 2 * Math.abs(b), 0.5 * Math.abs(a + b));
+      return Math.abs(a) < Math.abs(b) ? a : b;
+    };
     const muscl = this.cfg.muscl;
     // One face, between cells L and R along axis `ax` (0: x, 1: y), open share a.
-    const face = (L: number, R: number, LL: number, RR: number, a: number, axis: number) => {
+    const face = (L: number, R: number, LL: number, RR: number, a: number, axis: number, f: number) => {
       if (a <= 0 || !(has[L] || has[R])) return;
-      const un = has[L] && has[R] ? 0.5 * ((axis ? vy[L] : vx[L]) + (axis ? vy[R] : vx[R])) : has[L] ? (axis ? vy[L] : vx[L]) : (axis ? vy[R] : vx[R]);
+      let un = has[L] && has[R] ? 0.5 * ((axis ? vy[L] : vx[L]) + (axis ? vy[R] : vx[R])) : has[L] ? (axis ? vy[L] : vx[L]) : (axis ? vy[R] : vx[R]);
+      // The face's own velocity from the last step's corrected flux, where it was open then too.
+      if (this.cfg.faceVelocity) {
+        const last = (axis ? this.ufy : this.ufx)[f];
+        if (Number.isFinite(last)) un = last;
+      }
       // The upwind cell's values at the face, with a limited slope where its far neighbor has gas.
       const up = un >= 0 ? L : R, far = un >= 0 ? LL : RR, near = un >= 0 ? R : L;
       let r = rho[up], u = vx[up], v = vy[up];
@@ -447,8 +471,8 @@ export class CutCell {
     for (let j = 0; j < ny; j++)
       for (let i = 0; i < nx; i++) {
         const k = j * nx + i;
-        face(at(i - 1, j), k, at(i - 2, j), at(i + 1, j), gh.ax[k], 0);
-        face(at(i, j - 1), k, at(i, j - 2), at(i, j + 1), gh.ay[k], 1);
+        face(at(i - 1, j), k, at(i - 2, j), at(i + 1, j), gh.ax[k], 0, k);
+        face(at(i, j - 1), k, at(i, j - 2), at(i, j + 1), gh.ay[k], 1, k);
       }
     for (let k = 0; k < n; k++) {
       Q[k] += dQ[k];
@@ -491,9 +515,11 @@ export class CutCell {
         vys[k] = My[k] / Q[k];
       }
     const cMx = new Float64Array(n), cMy = new Float64Array(n), cQ = new Float64Array(n);
-    const corr = (L: number, R: number, a: number, axis: number, mom: number) => {
+    const pflux = [new Float64Array(n), new Float64Array(n)];
+    const corr = (L: number, R: number, a: number, axis: number, mom: number, fk: number) => {
       if (a <= 0) return;
       const G = s * a * (p[L] - p[R]);
+      pflux[axis][fk] = G;
       const up = G >= 0 ? L : R;
       const other = up === L ? R : L;
       let ux = Q[up] > 0 ? vxs[up] : vxs[other], uy = Q[up] > 0 ? vys[up] : vys[other];
@@ -525,8 +551,28 @@ export class CutCell {
     for (let j = 0; j < ny; j++)
       for (let i = 0; i < nx; i++) {
         const k = j * nx + i;
-        corr(at(i - 1, j), k, gh.ax[k], 0, gh.mx[k]);
-        corr(at(i, j - 1), k, gh.ay[k], 1, gh.my[k]);
+        corr(at(i - 1, j), k, gh.ax[k], 0, gh.mx[k], k);
+        corr(at(i, j - 1), k, gh.ay[k], 1, gh.my[k], k);
+      }
+    // The faces' velocities for the next step's advection (Rhie and Chow): the mean of the two
+    // cells' velocities after advection and viscosity, with the face's own pressure correction
+    // (the mass the solve moved through it over its open share and mean density), not the cells'
+    // central one: what makes the faces' velocities balance the volumes, as the cells' do not
+    // beside a wall.
+    for (let j = 0; j < ny; j++)
+      for (let i = 0; i < nx; i++) {
+        const k = j * nx + i;
+        for (const axis of [0, 1]) {
+          const L = axis ? at(i, j - 1) : at(i - 1, j);
+          const a = axis ? gh.ay[k] : gh.ax[k];
+          const rl = Q[L] + cQ[L], rr = Q[k] + cQ[k];
+          const out = axis ? this.ufy : this.ufx;
+          if (a > 0 && g1.phi[L] > 0 && g1.phi[k] > 0 && rl > 0 && rr > 0 && Q[L] > 0 && Q[k] > 0) {
+            const rf = 0.5 * (rl / g1.phi[L] + rr / g1.phi[k]);
+            const vs = axis ? 0.5 * (vys[L] + vys[k]) : 0.5 * (vxs[L] + vxs[k]);
+            out[k] = vs + pflux[axis][k] / ((dt / dx) * a * rf);
+          } else out[k] = NaN;
+        }
       }
     const F = { px: 0, py: 0, vx: 0, vy: 0 };
     for (let k = 0; k < n; k++) {
@@ -537,6 +583,12 @@ export class CutCell {
     if (this.body) {
       // The wall: its pressure (the cell's), and its viscous stress at the true distance.
       const cells = new Set([...gh.cut, ...g1.cut]);
+      const u0x = new Float64Array(n), u0y = new Float64Array(n);
+      for (let k = 0; k < n; k++)
+        if (Q[k] > 0 && g1.phi[k] > 0) {
+          u0x[k] = Mx[k] / Q[k];
+          u0y[k] = My[k] / Q[k];
+        }
       for (const k of cells) {
         const wx = gh.wx[k], wy = gh.wy[k];
         if (wx === 0 && wy === 0) continue;
@@ -554,7 +606,21 @@ export class CutCell {
         My[k] -= fy;
         F.px += (fx * dx * dx) / dt;
         F.py += (fy * dx * dx) / dt;
-        if (nu > 0 && Q[k] > 0 && g1.phi[k] > 0) {
+        if (nu > 0 && Q[k] > 0 && g1.phi[k] > 0 && this.cfg.wallProbe > 0) {
+          // The wall's shear from the velocity at a point `wallProbe` cells out from the wall
+          // along its normal (bilinear among the cells with gas around it), not from the cell's
+          // own velocity over its centroid's distance, which in a small cell is a sliver's.
+          const [sx, sy] = this.wallVelocity(gh.px[k], gh.py[k], this.t + dt / 2);
+          const wl = Math.hypot(wx, wy);
+          const h = this.cfg.wallProbe * dx;
+          const [ux, uy] = this.probe(u0x, u0y, g1.phi, gh.px[k] - (h * wx) / wl, gh.py[k] - (h * wy) / wl);
+          const rk = Q[k] / g1.phi[k];
+          const ex = -(dt * nu * rk * wl * (ux - sx)) / (h * dx), ey = -(dt * nu * rk * wl * (uy - sy)) / (h * dx);
+          Mx[k] += ex;
+          My[k] += ey;
+          F.vx -= (ex * dx * dx) / dt;
+          F.vy -= (ey * dx * dx) / dt;
+        } else if (nu > 0 && Q[k] > 0 && g1.phi[k] > 0) {
           const [sx, sy] = this.wallVelocity(gh.px[k], gh.py[k], this.t + dt / 2);
           const kk = (dt * nu * Math.hypot(wx, wy)) / (Math.min(gh.dist[k], 1e30) * g1.phi[k] * dx);
           const ux = Mx[k] / Q[k], uy = My[k] / Q[k];
@@ -588,8 +654,45 @@ export class CutCell {
       }
     this.g = g1;
     if (this.body && this.cfg.small > 0) this.redistribute();
+    // A sponge downstream: the gas pulled back to the free stream (rho0, U along x), so that a
+    // wake does not come round the periodic box to the body, nor the body slow the whole stream.
+    const sp = this.cfg.sponge;
+    if (sp) {
+      for (let i = 0; i < nx; i++) {
+        const x = this.cfg.x0 + (i + 0.5) * dx;
+        const w = x > sp.from ? Math.min(1, sp.rate * dt * ((x - sp.from) / (this.cfg.x0 + nx * dx - sp.from))) : 0;
+        if (w <= 0) continue;
+        for (let j = 0; j < ny; j++) {
+          const k = j * nx + i;
+          if (g1.phi[k] <= 0) continue;
+          const q = g1.phi[k] * rho0;
+          Q[k] += w * (q - Q[k]);
+          Mx[k] += w * (q * sp.U - Mx[k]);
+          My[k] += w * (0 - My[k]);
+        }
+      }
+    }
     this.t += dt;
     this.steps++;
+  }
+
+  /** The velocity at a point: bilinear among the four cell centers around it that hold gas. */
+  private probe(ux: Float64Array, uy: Float64Array, phi: Float64Array, x: number, y: number): [number, number] {
+    const { nx, ny, dx, x0, y0 } = this.cfg;
+    const fx = (x - x0) / dx - 0.5, fy = (y - y0) / dx - 0.5;
+    const i = Math.floor(fx), j = Math.floor(fy);
+    const tx = fx - i, ty = fy - j;
+    let w = 0, a = 0, b = 0;
+    for (const [di, dj, wt] of [[0, 0, (1 - tx) * (1 - ty)], [1, 0, tx * (1 - ty)], [0, 1, (1 - tx) * ty], [1, 1, tx * ty]] as const) {
+      const k = (((j + dj) % ny) + ny) % ny * nx + ((((i + di) % nx) + nx) % nx);
+      if (phi[k] <= 0 || wt <= 0) continue;
+      // A cell under a quarter full holds a velocity redistribution has just averaged: half weight.
+      const ww = wt * Math.min(1, phi[k] * 4);
+      w += ww;
+      a += ww * ux[k];
+      b += ww * uy[k];
+    }
+    return w > 0 ? [a / w, b / w] : [0, 0];
   }
 
   /** A difference of p across cell k (per cell), central where both neighbors have gas. */

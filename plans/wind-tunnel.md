@@ -930,6 +930,56 @@ moving and turning. What it does:
 - **Not done**: the oscillating cylinder of Dütsch et al.; second order at the wall; walls of
   the box other than periodic; a body crossing the periodic edge.
 
+#### 8.1.3 Accuracy at the wall, measured (2026-11-21, second pass)
+
+The question: would second order at the wall matter for lift (the turbine)? New scripts
+`tools/cutcell/airfoil.ts` (NACA 0012 at 5 degrees, box 8 chords), `cyl40.ts` (the steady
+cylinder at Re 40, box 16 diameters, a sponge downstream: without it the body drains the
+periodic stream and meets its own wake, and C_d read 1.0), `residual.ts`, `cp.ts`.
+
+- **Inviscid lift is not a test.** Without dissipation the scheme keeps the potential flow
+  around the sharp trailing edge and the airfoil gets no lift (no Kutta condition); with the
+  old advection the "lift" (0.28 to 0.39) was numerical dissipation's. Measured viscous instead.
+- **The wall's shear was the large error, not the advection's order.** The viscous stress was
+  the cell's velocity over its gas centroid's distance to the wall, point-implicit: in a small
+  cell that distance is a sliver's, and redistribution has just averaged its velocity with its
+  neighbors', so the shear was far too large. Now (`wallProbe`, default 1.5): the velocity at
+  a point 1.5 cells out from the wall along its normal (bilinear among the cells with gas
+  around it, small cells at reduced weight), over that distance.
+
+  | | cylinder Re 40, C_d at 8 / 16 / 32 across | airfoil Re 1000, C_l / C_d at 14 cells | 28 | 56 | 112 |
+  |---|---|---|---|---|---|
+  | cut cells, old wall shear | 1.885 / 1.789 / 1.730 | 0.13 / 0.24 | 0.13 / 0.20 | 0.18 / 0.16 | 0.23 / 0.138 |
+  | cut cells, probe | 1.607 / 1.727 / 1.738 | 0.26 / 0.085 | 0.32 / 0.115 | 0.25 / 0.134 | 0.24 / 0.133 |
+  | staircase (same prototype) | 1.777 / 1.742 / 1.723 | 0.18 / 0.18 | 0.25 / 0.16 | 0.25 / 0.14 | |
+
+  Both converge to about C_d 1.73 for the cylinder in this box (1.50 to 1.57 unbounded:
+  Fornberg 1980, Dennis & Chang 1970; the box's confinement raises it) and C_l 0.24, C_d 0.133
+  for the airfoil (its lift from t = 5 to 6; at 56 and 112 cells the airfoil sheds and its lift
+  swings from 0.21 to 0.38, so these means are good to about 0.02; at 14 and 28 the grid's own
+  viscosity keeps it steady). With the old shear the cut cells were worse than the staircase on
+  every viscous body at 8 to 56 cells; with the probe they are at least as good from 16 across,
+  and the airfoil's lift is within 0.02 from 56 cells (0.26 at 14, an overshoot to 0.32 at 28).
+  The probe underestimates the shear while the boundary layer is thinner than 1.5 cells (the
+  airfoil's drag at 14 cells: 0.085 against 0.133).
+- **What was ruled out** (each changed the inviscid cylinder's drag by 10% or less): the
+  limiter (minmod, MC, none), the face pressures at their open parts' centroids, the wall's
+  pressure carried along its gradient, one-sided slopes at the wall, the carried velocity of
+  the corrected mass, the timestep, the redistribution's threshold. Advecting with face
+  velocities from the last step's mass flux alone gave drag 20 to 1000 times smaller: an
+  artifact, as those velocities never saw the momentum's advection or viscosity (the flow
+  stayed potential: zero lift even with viscosity); with the cells' velocities and the face's
+  own pressure correction (Rhie and Chow, `faceVelocity`, off) the results are those of the
+  default. The inviscid drag's first order is still not explained.
+- **Galilean drag with the probe** (as 8.1.2): C_d 1.221 at rest, 1.192 moving, 2.4% apart
+  (criterion 2 to 3%; 0.5% with the old shear), rms difference 2.5%, the moving body's raw
+  noise 1.3%. The probe mixes the moving wall's velocity with cells the body is crossing, which
+  the old point-implicit form did not; not looked into further.
+- **For the turbine**: at Re ~1e4 and 14 to 56 cells along the chord the boundary layer is
+  under a cell, and the probe's shear is low there; the pressure, which carries the lift, is
+  what the cut cells get right that the staircase cannot (a blade's pitch below a cell). A wall
+  model (8.2) is what the shear needs at that resolution, not second order.
+
 
 ### 8.2 A wall model
 
