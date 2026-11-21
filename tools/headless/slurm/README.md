@@ -26,10 +26,20 @@ sbatch tools/headless/slurm/gpu-check.sbatch
 N=1024 EVERY=0.5 RUN_DIR=/work/pi_<group>/dwd-1024 SHADEROUS_BINDS=/work/pi_<group> sbatch tools/headless/slurm/dwd.sbatch
 ```
 
-The GPU: the scripts ask for the `gpu-highvram` partition and `--constraint=vram80`, which on
-Unity are A100 80 GB nodes and one H100 node (`sinfo -p gpu-highvram -o "%N %G %f"` lists them).
-The `gpu` partition has no 80 GB cards; the one H200 node is only in `gpu-preempt-highvram`,
-where a job can be preempted. The magnetized mesh can hold at most 35^3 = 42,875 blocks (about
+The GPU: the scripts ask for the `umd-cscdr-gpu` partition and `--constraint=vram80`. That
+partition belongs to the UMass Dartmouth groups (the account `pi_rfisher1_umassd_edu` among
+them): its 80 GB cards are 12 A100s (umd-cscdr-gpu001 and -002; its other nodes have 16 GB A16s),
+its jobs are never preempted, and they may run 5 days, so a long run reloads its checkpoint (20
+minutes at 17,000 blocks) less often. Its CPU partition, `umd-cscdr-cpu`, is for CPU-only work.
+The same nodes are also in `gpu-preempt-highvram`, so other users' jobs may be on them: a job in
+`umd-cscdr-gpu` preempts those, it does not wait for them.
+
+Without access to it, pass another partition: `sbatch -p gpu-highvram --time=2-00:00:00 ...`
+(A100 80 GB nodes and one H100 node; `sinfo -p gpu-highvram -o "%N %G %f"` lists them), or
+`-p gpu-highvram,gpu-preempt-highvram`, which adds the H200 node and many more A100s but where a
+job can be preempted (it is requeued and carries on from its newest checkpoint, in a segment of
+its own). The `gpu` partition has no 80 GB cards. A chained job resubmits itself to the
+partition it ran in, with its time limit. The magnetized mesh can hold at most 35^3 = 42,875 blocks (about
 110 GB); the double white dwarf at 2048^3 was estimated at 25 to 30 thousand blocks, 70 to 80
 GB, so an 80 GB card is close.
 

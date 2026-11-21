@@ -6,7 +6,7 @@
 # Results: runs/slurm-check-<job>/ (manifest.json names the adapter; diag.jsonl's `mesh` gives
 # the block count) and slurm-check-<job>.out.
 #SBATCH --job-name=shaderous-check
-#SBATCH --partition=gpu-highvram,gpu-preempt-highvram
+#SBATCH --partition=umd-cscdr-gpu
 #SBATCH --qos=short
 #SBATCH --gpus=1
 #SBATCH --constraint=vram80

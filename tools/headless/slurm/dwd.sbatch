@@ -19,19 +19,22 @@
 #              simulated time (default 0: none)
 #   MARGIN     seconds left at the end of a job for the last checkpoint (default 1800)
 #   MAX_JOBS   the most jobs the chain may run (default 20)
-# Partitions: gpu-highvram, or gpu-preempt-highvram (more 80 GB cards, often free at once) where
-# a job can be preempted; it is then requeued and loses only the time since its last checkpoint.
+# Partition: umd-cscdr-gpu, the UMass Dartmouth groups' own (A100 80 GB, never preempted, jobs of
+# up to 5 days). Without access to it: sbatch -p gpu-highvram --time=2-00:00:00 (or with
+# gpu-preempt-highvram as well, where a job can be preempted: it is then requeued and loses only
+# the time since its last checkpoint). The jobs that follow keep the partition and time limit
+# the job ran with.
 # Stop the chain: touch RUN_DIR/seg-<job>/STOP (the job stops at its next screenshot and
 # writes a checkpoint) and scancel any job waiting, or touch RUN_DIR/DONE before the next starts.
 #SBATCH --job-name=shaderous-dwd
-#SBATCH --partition=gpu-highvram,gpu-preempt-highvram
+#SBATCH --partition=umd-cscdr-gpu
 #SBATCH --requeue
 #SBATCH --open-mode=append
 #SBATCH --gpus=1
 #SBATCH --constraint=vram80
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=128G
-#SBATCH --time=2-00:00:00
+#SBATCH --time=5-00:00:00
 #SBATCH --output=slurm-dwd-%j.out
 set -uo pipefail
 source "${SHADEROUS_DIR:-$HOME/shaderous}/tools/headless/slurm/common.sh"
@@ -80,7 +83,8 @@ ckpt prune "$RUN_DIR" "$KEEP" "$KEEP_EVERY"
 stopped=$(ckpt stopped "$RUN_DIR")
 echo "runner exit $status, stopped: ${stopped:-unknown}"
 if [ "$status" -eq 0 ] && [ "$stopped" = "wall" ] && [ "$JOB_NUMBER" -lt "$MAX_JOBS" ]; then
-  sbatch "$SHADEROUS_DIR/tools/headless/slurm/dwd.sbatch"
+  limit=$(scontrol show job "$SLURM_JOB_ID" -o | grep -oP 'TimeLimit=\K\S+')
+  sbatch -p "$SLURM_JOB_PARTITION" ${limit:+--time="$limit"} "$SHADEROUS_DIR/tools/headless/slurm/dwd.sbatch"
 elif [ "$stopped" = "time" ]; then
   touch "$RUN_DIR/DONE"
   echo "reached t = $UNTIL"
