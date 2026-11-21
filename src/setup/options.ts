@@ -170,7 +170,8 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'gravity.self': { label: 'Self-gravity', of: (s) => ['periodic', 'isolated'].includes(s.physics?.gravity ?? 'off') },
   'bc.periodic': { label: 'A periodic face', of: (s) => faces(s).some((b) => b === 0) },
   'bc.allPeriodic': { label: 'Every face periodic', of: (s) => faces(s).every((b) => b === 0) },
-  'units': { label: 'Physical units', of: (s) => !!s.domain?.units },
+  // (Comoving coordinates take their units from the box's size in Mpc/h, and drop the document's: compile.ts scales.)
+  'units': { label: 'Physical units', of: (s) => (s.physics?.cosmology ? !!s.physics.cosmology.boxMpc : !!s.domain?.units) },
   'species.nuclides': { label: 'Species that are all nuclides (they set the equation of state)', of: (s) => { const sp = s.physics?.species; return speciesNuclides(sp === 'aprox13' ? ['he4'] : sp) !== null; } },
   'species.fuelAsh': { label: 'The species fuel and ash', of: (s) => Array.isArray(s.physics?.species) && ['fuel', 'ash'].every((n) => (s.physics!.species as string[]).includes(n)) },
   'species.aprox13': { label: 'The 13 species of the burning network', of: (s) => s.physics?.species === 'aprox13' },

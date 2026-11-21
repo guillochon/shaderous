@@ -704,7 +704,14 @@ const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | unde
     return true;
   },
   'bc.allPeriodic': (doc, want) => (want ? (setFaces(doc, [0, 0, 0], [0, 0, 0]), true) : (openFaces(doc), true)),
-  units: (doc, want, _v, ctx) => (want ? addUnits(doc, ctx.g) : delete doc.domain!.units, true),
+  units: (doc, want, _v, ctx) => {
+    const k = doc.physics?.cosmology;
+    // (Comoving coordinates take theirs from the box's size in Mpc/h.)
+    if (k) return want ? ((k.boxMpc = ctx.g.pick([10, 50, 100])), true) : (delete k.boxMpc, true);
+    if (want) addUnits(doc, ctx.g);
+    else delete doc.domain!.units;
+    return true;
+  },
   'species.nuclides': (doc, want, _v, ctx) => ((doc.physics!.species = want ? ['he4', 'c12', 'o16'] : ['fuel', 'ash']), !!ctx),
   'pressure.implicit': (doc, want) => {
     if (want) return ((doc.physics ??= {}).pressure = 'implicit'), true;

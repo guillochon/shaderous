@@ -63,6 +63,11 @@ describe('checkSetup', () => {
     expect(has(tunnel(1.05), /must start within 10%/)).toBe(false);
     expect(has(texts(setup({ physics: { eos: 'liquid', eosParams: { liqRho: 2 } } }, [blob(1)]), 'error'), /must start within 10%/)).toBe(true);
     expect(has(texts(setup({ physics: { eos: 'helmholtz' } }), 'error'), /needs physical units/i)).toBe(true);
+    // Seed 10601: comoving coordinates have units only from their box size in Mpc/h.
+    const units = { length: { unit: 'au', value: 1 }, mass: { unit: 'Msun', value: 1 } };
+    const cosmo = (boxMpc?: number) => texts(setup({ domain: { ndim: 3, n: 64, units, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } }, physics: { cosmology: { zStart: 10, ...(boxMpc ? { boxMpc } : {}) } } }, [{ kind: 'flow', name: 'co-ignition' }]), 'error');
+    expect(has(cosmo(), /needs physical units/i)).toBe(true);
+    expect(has(cosmo(10), /needs physical units/i)).toBe(false);
   });
 
   it('takes a wind tunnel’s gas for the run’s (random test seed 10012)', () => {
