@@ -1619,7 +1619,7 @@ export class Sim implements Simulation {
       poses, mk, pPose, pStamp, pExchange,
       gPose: bindGroupUsed(d, pPose, { 0: this.params, 1: this.clock, 2: poses }),
       gStamp: [0, 1].map((p) => bindGroupUsed(d, pStamp, { 0: this.params, 2: poses, 3: v(this.state[p][1]), 4: v(mk) })),
-      gExchange: [0, 1].map((p) => bindGroupUsed(d, pExchange, { 0: this.params, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(mk), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]) })),
+      gExchange: [0, 1].map((p) => bindGroupUsed(d, pExchange, { 0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(mk), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]), 7: v(this.walls!.wx) })),
     };
     return moving;
   }
@@ -1864,7 +1864,7 @@ export class Sim implements Simulation {
     // Forces on bodies: the textures the update (and the correction) write, and their reduction.
     this.walls?.destroy();
     this.walls = forcesOn(c)
-      ? await WallForces.create(d, (label) => tex3d(d, this.nx, 'rgba32float', label, this.nz, this.ny), c.viscosity > 0 || implicitPressure(c), c.problem.bodies!, dims, 'hydro/forces.wgsl', slots, this.params)
+      ? await WallForces.create(d, (label) => tex3d(d, this.nx, 'rgba32float', label, this.nz, this.ny), c.viscosity > 0 || implicitPressure(c), c.problem.bodies!, dims, 'hydro/forces.wgsl', slots, this.params, {}, !!c.problem.moving?.length && !c.amrLevels)
       : undefined;
     // Moving bodies (hydro/moving.ts): their poses, each cell's new mark, and the three passes.
     this.moving?.mk.destroy();

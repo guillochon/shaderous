@@ -51,9 +51,9 @@ export function wallSlots(on: boolean): Slots {
 }
 
 /** The reduction's output function, written out channel by channel (no run-time indexing: gpu/reduce.ts). */
-function forcePut(visc: boolean): string {
+function forcePut(visc: boolean, moving: boolean): string {
   const parts = ['fp.x', 'fp.y', 'fp.z', 'fv.x', 'fv.y', 'fv.z', 'tq.x', 'tq.y', 'tq.z'];
-  let s = `const FORCE_VISC = ${visc};\n`;
+  let s = `const FORCE_VISC = ${visc};\nconst FORCE_MOVING = ${moving};\n`;
   s += 'fn force_put(b: u32, fp: vec3<f32>, fv: vec3<f32>, tq: vec3<f32>) -> Red {\n  var r = red_identity();\n';
   for (let k = 0; k < MAX_BODIES; k++) {
     s += `  if (b == ${k}u) {\n`;
@@ -72,9 +72,20 @@ export class WallForces {
   private red!: Reducer;
   /** whether a pass writes WV: with viscosity, or with implicit pressure (the update's whole wall flux) */
   readonly visc: boolean;
+  /**
+   * Moving bodies (hydro/moving_exchange.wgsl): the momentum the exchange hands the gas where a
+   * cell changes kind, over the step's dt, as a force on the body, and its mark; or one texel of
+   * nothing.
+   */
+  readonly wx: GPUTexture;
+  readonly moving: boolean;
 
-  private constructor(d: GPUDevice, make: (label: string) => GPUTexture, visc: boolean, bodies: BodyRef[]) {
+  private constructor(d: GPUDevice, make: (label: string) => GPUTexture, visc: boolean, bodies: BodyRef[], moving: boolean) {
     this.visc = visc;
+    this.moving = moving;
+    this.wx = moving
+      ? make('wall forces (exchange)')
+      : d.createTexture({ label: 'no exchange forces', size: [1, 1, 1], dimension: '3d', format: 'rgba32float', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.STORAGE_BINDING });
     this.wp = make('wall forces (pressure)');
     this.wv = visc
       ? make('wall forces (viscous)')
@@ -91,11 +102,11 @@ export class WallForces {
    * @param source   hydro/forces.wgsl or amr/forces.wgsl
    * @param extra    further bindings of the reduction (the block table on blocks)
    */
-  static async create(d: GPUDevice, make: (label: string) => GPUTexture, visc: boolean, bodies: BodyRef[], dims: number[], source: string, slots: Slots, params: GPUBuffer, extra: Record<number, Bindable> = {}): Promise<WallForces> {
-    const w = new WallForces(d, make, visc, bodies);
+  static async create(d: GPUDevice, make: (label: string) => GPUTexture, visc: boolean, bodies: BodyRef[], dims: number[], source: string, slots: Slots, params: GPUBuffer, extra: Record<number, Bindable> = {}, moving = false): Promise<WallForces> {
+    const w = new WallForces(d, make, visc, bodies, moving);
     w.red = await Reducer.create(
-      d, dims, new Array(FORCE_CHANNELS).fill(SUM), source, { ...slots, force_put: forcePut(visc) },
-      [{ 0: params, 1: w.wp.createView(), 2: w.wv.createView(), 3: w.refs, ...extra }], 'wall forces',
+      d, dims, new Array(FORCE_CHANNELS).fill(SUM), source, { ...slots, force_put: forcePut(visc, moving) },
+      [{ 0: params, 1: w.wp.createView(), 2: w.wv.createView(), 3: w.refs, 4: w.wx.createView(), ...extra }], 'wall forces',
     );
     return w;
   }
@@ -121,6 +132,7 @@ export class WallForces {
   destroy() {
     this.wp.destroy();
     this.wv.destroy();
+    this.wx.destroy();
     this.refs.destroy();
   }
 }

@@ -103,6 +103,39 @@ export const WALL_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'force-balance-moving',
+    name: 'Forces on a moving body: its wall faces and the cells it crosses against the momentum balance of the box (2D 256^2, liquid, explicit and implicit pressure)',
+    criterion:
+      'A cylinder 0.25 across sliding at -1 through a periodic box of liquid at rest (Mach 0.1, nu = 0.0025), over 200 steps: the change of the liquid\u2019s momentum is minus the impulse the force diagnostic gives the body (its wall faces\u2019 fluxes and the momentum the exchange hands over where its cells change kind), to 1e-3 of that impulse, with either scheme',
+    async run(gpu: Gpu) {
+      const spec = {
+        format: 'shaderous-setup', version: 1, id: 'moving-balance', name: 'Moving balance',
+        domain: { ndim: 2, n: 256, amr: 0, box: 4, supports2d: true, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } },
+        physics: { eos: 'liquid', eosParams: { liqRho: 1, liqC: 10 }, gravity: 'off', riemann: 'hllc', viscosity: 0.0025 },
+        background: { rho: 1, p: 0, v: [0, 0, 0] },
+        parts: [{ kind: 'obstacle', id: 'cylinder', shape: { type: 'sphere', center: [1, 0.01, 0], radius: 0.125 }, motion: { slide: { velocity: [-1, 0, 0] } } }],
+      } as unknown as SetupSpec;
+      const c = compileSetup(spec);
+      const m: Record<string, number> = {};
+      let pass = true;
+      for (const pressure of ['explicit', 'implicit'] as const) {
+        const sim = await Sim.create(gpu, configFor(c.problem, 256, { ndim: 2, tEnd: 1e9, ...c.overrides, pressure }));
+        try {
+          const b = await balance(sim, 200);
+          const size = Math.hypot(...b.impulse);
+          const off = Math.hypot(b.dp[0] + b.impulse[0], b.dp[1] + b.impulse[1]) / size;
+          m[`${pressure}_impulse_x`] = b.impulse[0];
+          m[`${pressure}_momentum_change_x`] = b.dp[0];
+          m[`${pressure}_mismatch`] = off;
+          pass &&= off < 1e-3;
+        } finally {
+          sim.destroy();
+        }
+      }
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'cylinder-forces',
     name: 'A cylinder in a tunnel at Reynolds number 100: drag, lift and shedding (2D, 16 and 32 cells across, liquid, implicit pressure)',
     criterion:

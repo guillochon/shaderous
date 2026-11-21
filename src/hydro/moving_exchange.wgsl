@@ -19,6 +19,11 @@
 @group(0) @binding(4) var MK: texture_3d<f32>;
 @group(0) @binding(5) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(6) var O2: texture_storage_3d<rgba32float, write>;
+@group(0) @binding(1) var<storage, read> clock: Clock;
+// The force the exchange puts on the body (hydro/forces.ts WX): where an uncovered cell takes
+// the body's velocity, the gas gains m v_s less what its donors gave; the body loses as much.
+// Over the step's dt, with the body's mark. (A covered cell's momentum stays in the gas.)
+@group(0) @binding(7) var WX: texture_storage_3d<rgba32float, write>;
 
 fn n_dirs() -> i32 {
   return select(6, 4, P.dims.z == 1u);
@@ -91,6 +96,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let om = u2.w;
   let mk = textureLoad(MK, c, 0);
   let nm = mk.x;
+  textureStore(WX, c, vec4<f32>(0.0));
   // Held cells and static bodies' are as they were.
   if (nm < -0.5 || (nm > 0.5 && !moving_mark(nm))) {
     textureStore(O1, c, u1);
@@ -141,4 +147,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let eint = a2.y;
   textureStore(O1, c, vec4<f32>(m, m * vs));
   textureStore(O2, c, vec4<f32>(0.5 * m * dot(vs, vs) + eint, eint, a2.z, 0.0));
+  // (Per unit volume as the state is: times the cell's volume. None at a reset, dt = 0.)
+  if (clock.dt > 0.0) { textureStore(WX, c, vec4<f32>(-(m * vs - a1.yzw) * P.geom.x / clock.dt, om)); }
 }
