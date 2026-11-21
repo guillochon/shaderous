@@ -27,7 +27,8 @@ const ignition: FlowDef<Params> = {
   label: 'Carbon–oxygen fuel with an ignition layer',
   tip: 'Carbon and oxygen at rest at one density, with a hot layer at the low-x edge of the box that sets it alight. Needs physical units, an equation of state with a temperature (Helmholtz) and the species of the aprox13 network.',
   wholeBox: true,
-  requires: [{ fact: 'units.own' }, { fact: 'species.aprox13' }],
+  // (White dwarf densities in units far from them overflowed 32 bits: random test seeds 10442, 10803.)
+  requires: [{ fact: 'units.own' }, { fact: 'species.aprox13' }, { fact: 'physics.eos', is: 'helmholtz' }],
   fields: {
     logrho: { label: 'Density (log₁₀ g/cm³)', default: 7, min: 6, max: 9.5, step: 0.25, tip: 'Density of the fuel, log10 of g/cm^3: white dwarf matter is 6 to 9.5. Above about 1e8 the ash reaches the iron group; below 1e7 burning stops at silicon or oxygen' },
     carbon: { label: 'Carbon fraction', default: 0.5, min: 0.2, max: 0.8, step: 0.05, tip: 'Mass fraction of carbon in the fuel, the rest oxygen' },

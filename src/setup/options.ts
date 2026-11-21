@@ -348,7 +348,7 @@ export const OPTIONS: Option[] = [
     requires: [{ fact: 'eos.energy' }],
     control: { type: 'group', optional: true,
       forms: { label: 'Reaction', tip: 'What burns, and at what rate', choices: [
-        { value: 'network', label: 'Network (aprox13)', tip: 'Nuclear burning of the 13-isotope alpha chain, by its trained network', keys: ['network', 'limiter'], requires: [{ fact: 'species.aprox13' }, { fact: 'units' }] },
+        { value: 'network', label: 'Network (aprox13)', tip: 'Nuclear burning of the 13-isotope alpha chain, by its trained network', keys: ['network', 'limiter'], requires: [{ fact: 'species.aprox13' }, { fact: 'units' }], excludes: [{ fact: 'physics.cosmology', reason: 'Not with comoving coordinates: the gas is in code units there, and the network would read it in the box’s physical ones (random test seed 10601)' }] },
         { value: 'arrhenius', label: 'Fuel to ash (Arrhenius)', tip: 'One reaction, fuel to ash: the fuel fraction f falls as df/dt = -k f exp(-Ea / T), and each unit of mass burned releases q', keys: ['fuel', 'ash', 'q', 'ea', 'k'], set: { inShocks: true }, excludes: [{ fact: 'species.nuclides', reason: 'Not available where every species is a nuclide (he4, c12, ...): those set the equation of state, which one reaction from fuel to ash cannot. Name the fuel and ash species otherwise' }] },
       ] },
       fields: [

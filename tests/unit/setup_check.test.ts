@@ -36,6 +36,10 @@ describe('checkSetup', () => {
     const axisym = (name: string) => texts(setup({ domain: { ndim: 2, n: 64, geometry: 'cylindrical', supports2d: true, bc: { lo: [2, 1, 0], hi: [1, 1, 0] } } }, [{ kind: 'flow', name }]), 'error');
     expect(has(axisym('alfven-packets'), /divergence-free in Cartesian coordinates only/)).toBe(true);
     expect(has(axisym('field-loop'), /divergence-free in Cartesian coordinates only/)).toBe(false);
+    // Seeds 10442, 10803: the carbon-oxygen ignition is white dwarf matter, for the Helmholtz gas.
+    expect(has(flow('co-ignition', { physics: { eos: 'ideal', species: 'aprox13' } }), /needs equation of state: white dwarf matter/i)).toBe(true);
+    // Seed 10601: network burning in comoving coordinates.
+    expect(has(texts(setup({ domain: { ndim: 3, n: 64, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } }, physics: { species: 'aprox13', burn: { network: 'aprox13' }, cosmology: { zStart: 10, boxMpc: 100 } } }), 'error'), /not with comoving coordinates/i)).toBe(true);
     // (Seed 10159: the ZND detonation burns fuel into ash.)
     expect(has(flow('znd-detonation'), /needs the species fuel and ash/i)).toBe(true);
     expect(has(flow('znd-detonation', { physics: { species: ['fuel', 'ash'] } }), /needs the species fuel and ash/i)).toBe(false);
