@@ -14,6 +14,7 @@ import { bindGroup, bindGroupUsed, computePipeline, readTexture, tex3d, writeTex
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import type { SimConfig } from '../sim';
 import { PERIODIC } from '../problems/types';
+import { problemCoefficients } from '../species/mixture';
 
 /** The run evolves a magnetic field. */
 export const mhdOn = (c: SimConfig): boolean => c.problem.mhd !== undefined;
@@ -32,6 +33,11 @@ export function mhdUnsupported(c: SimConfig): string | null {
   // fixed cell (mhd/flux.wgsl), and gas flowed into an obstacle (a random setup gained 0.14% of
   // its mass in 200 steps between walls).
   if ((c.problem.setup?.parts ?? []).some((p) => p.kind === 'obstacle' || p.kind === 'inflow')) return 'obstacles and inflows are not available with a magnetic field yet';
+  // The adaptive mesh's MHD passes (mhd/amr_*.wgsl) evaluate the equation of state without the
+  // cell's composition, which the uniform grid's select (mhd/flux.wgsl): with species that set
+  // it, every pressure came out of zero moments and the run was NaN from its first step (random
+  // test seed 10113, the 13 network species with a uniform field).
+  if (c.amrLevels > 0 && problemCoefficients(c.problem, c.eosParams.gamma) !== null) return 'species that set the equation of state are not available with a magnetic field on the adaptive mesh yet: use the uniform grid';
   return null;
 }
 
