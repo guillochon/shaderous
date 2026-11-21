@@ -83,7 +83,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rho = max(un.x, P.rho_floor);
   let v = un.yzw / rho;
   comp_use(comp_tex(c));
-  let cs = eos_sound_speed(rho, p);
+  // (At the pressure floor, as the explicit primitives are: gas at zero pressure has no sound
+  // speed, and 1 / (rho c^2) below would be infinite. A liquid's floor is -1e30, src/sim.ts.)
+  let cs = eos_sound_speed(rho, max(p, P.p_floor));
   let us = textureLoad(U1S, c, 0);
   var adv = 0.0;
   var div = 0.0;

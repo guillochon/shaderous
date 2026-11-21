@@ -301,7 +301,9 @@ function setGeometry(doc: SetupSpec, geometry: 'cartesian' | 'cylindrical' | 'sp
     d.ndim = 2;
     setGrid(doc, g, d.amr);
   }
-  delete d.mirror;
+  // A spherical run has both poles in the grid; an axisymmetric one is mirrored across z = 0 only
+  // (code y: R already starts at the axis).
+  if (geometry === 'spherical' || d.mirror?.includes('x')) delete d.mirror;
   if (geometry === 'spherical') {
     d.rMin ??= g.pick([0.005, 0.02, 0.05]);
     d.box = 0.5;
