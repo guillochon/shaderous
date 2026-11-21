@@ -32,6 +32,9 @@ describe('checkSetup', () => {
     expect(has(flow('helium-shell-ignition'), /needs a star/i)).toBe(true);
     expect(has(flow('shearing-noise'), /needs a shearing box/i)).toBe(true);
     expect(has(flow('zeldovich'), /needs comoving coordinates/i)).toBe(true);
+    // (Seed 10159: the ZND detonation burns fuel into ash.)
+    expect(has(flow('znd-detonation'), /needs the species fuel and ash/i)).toBe(true);
+    expect(has(flow('znd-detonation', { physics: { species: ['fuel', 'ash'] } }), /needs the species fuel and ash/i)).toBe(false);
     expect(has(flow('first-core', { domain: { ndim: 3, n: 64, units: { length: { unit: 'au', value: 1 }, mass: { unit: 'Msun', value: 1 } } } }), /needs physical units/i)).toBe(false);
   });
 

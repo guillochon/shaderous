@@ -172,6 +172,7 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'bc.allPeriodic': { label: 'Every face periodic', of: (s) => faces(s).every((b) => b === 0) },
   'units': { label: 'Physical units', of: (s) => !!s.domain?.units },
   'species.nuclides': { label: 'Species that are all nuclides (they set the equation of state)', of: (s) => { const sp = s.physics?.species; return speciesNuclides(sp === 'aprox13' ? ['he4'] : sp) !== null; } },
+  'species.fuelAsh': { label: 'The species fuel and ash', of: (s) => Array.isArray(s.physics?.species) && ['fuel', 'ash'].every((n) => (s.physics!.species as string[]).includes(n)) },
   'species.aprox13': { label: 'The 13 species of the burning network', of: (s) => s.physics?.species === 'aprox13' },
   'burn.network': { label: 'Network burning', of: (s) => !!s.physics?.burn && 'network' in s.physics.burn },
   'radiation': { label: 'Radiation transport', of: (s) => (s.physics?.radiation ?? 'off') !== 'off' },

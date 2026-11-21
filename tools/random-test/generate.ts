@@ -706,6 +706,12 @@ const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | unde
   'bc.allPeriodic': (doc, want) => (want ? (setFaces(doc, [0, 0, 0], [0, 0, 0]), true) : (openFaces(doc), true)),
   units: (doc, want, _v, ctx) => (want ? addUnits(doc, ctx.g) : delete doc.domain!.units, true),
   'species.nuclides': (doc, want, _v, ctx) => ((doc.physics!.species = want ? ['he4', 'c12', 'o16'] : ['fuel', 'ash']), !!ctx),
+  'species.fuelAsh': (doc, want) => {
+    if (!want) return false;
+    doc.physics!.species = ['fuel', 'ash'];
+    doc.background = { ...doc.background, X: { fuel: 1 } };
+    return true;
+  },
   'species.aprox13': (doc, want) => ((doc.physics!.species = want ? 'aprox13' : undefined), true),
   radiation: (doc, want, _v, ctx) => {
     const ph = (doc.physics ??= {});

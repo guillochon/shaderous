@@ -48,6 +48,7 @@ const detonation: FlowDef<Params> = {
   label: 'ZND detonation',
   tip: 'The steady (ZND) detonation of the single-step Arrhenius model, moving toward +x into fuel of density 1 and pressure 1 (for gamma = 1.2; heat release 50), with its burning. Lengths are half-reaction lengths. Needs the species fuel and ash.',
   wholeBox: true,
+  requires: [{ fact: 'species.fuelAsh' }],
   fields: {
     ea: { label: 'Activation temperature Ea', default: 25, min: 5, max: 50, step: 0.5, tip: 'Activation temperature of the reaction, in units of the unburned gas temperature. Above 25.26 a planar detonation is unstable and pulses' },
     overdrive: { label: 'Overdrive (D / D_CJ)²', default: 1, min: 1, max: 2, step: 0.05, tip: 'Square of the detonation speed over the Chapman–Jouguet speed: 1 is a self-sustained detonation; above it a piston behind would drive it faster' },
