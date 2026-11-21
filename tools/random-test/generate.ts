@@ -339,6 +339,12 @@ function setEos(doc: SetupSpec, eos: string, g: Rng) {
   if (eos === 'gas_radiation') ph.eosParams = { gamma: 5 / 3, arad: r3(g.L(0.01, 1)), R: 1 };
   if (eos === 'barotropic') ph.eosParams = { gamma: g.pick([1, 1.4, 5 / 3]), K: r3(g.L(0.1, 1)) };
   if (eos === 'liquid') ph.eosParams = { liqC: g.pick([5, 10, 20]), liqRho: 1 };
+  // As the white dwarf presets: 10^4 km and a solar mass, carbon and oxygen.
+  if (eos === 'helmholtz' && !doc.domain?.units) {
+    doc.domain = { ...doc.domain, units: { length: { unit: 'm', value: 1e7 }, mass: { unit: 'Msun', value: 1 } } };
+    ph.composition ??= 'carbonOxygen';
+    if (typeof ph.G === 'number') ph.G = 'units';
+  }
   // As the planet preset: Earth radii and masses, G from them, a box four radii across.
   if (eos === 'aneos' && !doc.domain?.units) {
     doc.domain = { ...doc.domain, units: { length: { unit: 'Rearth', value: 1 }, mass: { unit: 'Mearth', value: 1 } }, box: 4 };
@@ -385,6 +391,7 @@ function makePart(doc: SetupSpec, kind: PartKind, ctx: Ctx, opts: PartOpts = {})
     case 'disk':
       return { kind, id, about: [], profile: ndimOf(doc) === 3 && g.rnd() < 0.5 ? 'balanced' : 'thin', rIn: 0.08, rOut: 0.4, sigma0: 1, slope: -1, cs: g.pick([0.05, 0.1]), floor: 1e-4 };
     case 'region':
+      if (liquidRho(doc)) return { kind, id, shape: randomShape(doc, g, true, opts.shape), rho: r3(liquidRho(doc)! * g.U(0.95, 1.05)), v: vec(g, 0.5, doc), s: 1 };
       return { kind, id, shape: randomShape(doc, g, true, opts.shape), ...g.pick([{ rho: r3(g.L(3, 30)) }, { rho: r3(g.L(0.1, 0.5)) }, { p: r3(g.L(1, 30)) }]), s: 1 };
     case 'obstacle':
       return { kind, id, shape: randomShape(doc, g, false, opts.shape) };
@@ -420,6 +427,7 @@ function addPart(doc: SetupSpec, kind: PartKind, ctx: Ctx, opts: PartOpts = {}, 
   const part = makePart(doc, kind, ctx, opts);
   (doc.parts ??= []).push(part);
   if (kind === 'star' || kind === 'disk') thinBackground(doc);
+  if (kind === 'star' && !(typeof doc.physics?.G === 'string' || (doc.physics?.G ?? 1) > 0)) doc.physics!.G = 1;
   if (kind === 'orbit') {
     const o = part as Extract<Part, { kind: 'orbit' }>;
     const want: PartKind[] = o.type === 'collision' ? ['star', 'star'] : o.type === 'flyby' ? ['star', 'mass'] : [ctx.g.pick(['mass', 'star']), 'mass'];
@@ -491,6 +499,13 @@ function fractions(names: string[], g: Rng): Record<string, number> {
   return Object.fromEntries(names.map((n, i) => [n, r3(w[i] / sum)]));
 }
 
+/** A liquid's reference density (a wind tunnel's below Mach 0.3, or the liquid's own), or undefined for a gas. */
+function liquidRho(doc: SetupSpec): number | undefined {
+  const t = (doc.parts ?? []).find((p) => p.kind === 'tunnel');
+  if (t && t.kind === 'tunnel') return (t.mach ?? 0.1) < 0.3 ? (t.rho ?? 1) : undefined;
+  return doc.physics?.eos === 'liquid' ? (doc.physics.eosParams?.liqRho ?? 1) : undefined;
+}
+
 /** Values for numbers whose table range is too wide, by path ('physics.viscosity', 'mass.gm'). */
 const HINTS: Record<string, (g: Rng, doc: SetupSpec, part?: Part) => unknown> = {
   'domain.amr': (g) => g.int(1, 5),
@@ -558,7 +573,7 @@ const HINTS: Record<string, (g: Rng, doc: SetupSpec, part?: Part) => unknown> = 
   'disk.floor': (g) => r3(g.L(1e-5, 1e-3)),
   'disk.radialFn': (g) => g.pick(['sigma0 * (r / rIn)^-1 * exp(-(r / rOut)^2) * step(r - rIn)', 'sigma0 * exp(-((r - 0.25) / 0.05)^2)']),
   'disk.verticalFn': (g) => g.pick(['exp(-z^2 / 2)', '1 / cosh(z)^2', 'max(1 - z / 3, 0)']),
-  'region.rho': (g) => r3(g.L(0.1, 30)),
+  'region.rho': (g, d) => (liquidRho(d) ? r3(liquidRho(d)! * g.U(0.95, 1.05)) : r3(g.L(0.1, 30))),
   'region.p': (g) => r3(g.L(1e-3, 10)),
   'region.energy': (g) => r3(g.L(0.1, 2)),
   'region.v': (g, d) => vec(g, 1, d),
@@ -670,7 +685,7 @@ const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | unde
   'physics.gravity': (doc, want, value, ctx) => {
     const ph = (doc.physics ??= {});
     ph.gravity = (want ? value : 'off') as never;
-    if (want && (value === 'periodic' || value === 'isolated')) ph.G ??= 1;
+    if (want && (value === 'periodic' || value === 'isolated') && !(typeof ph.G === 'string' || (ph.G ?? 1) > 0)) ph.G = 1;
     return !!ctx;
   },
   'gravity.self': (doc, want, _v, ctx) => {
@@ -678,7 +693,7 @@ const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | unde
     if (!want) return (ph.gravity = 'off'), true;
     ph.gravity = facesOf(doc).every((b) => b === PERIODIC) && ndimOf(doc) === 3 ? 'periodic' : 'isolated';
     if (ph.gravity === 'isolated') openFaces(doc);
-    ph.G ??= 1;
+    if (!(typeof ph.G === 'string' || (ph.G ?? 1) > 0)) ph.G = 1;
     return !!ctx;
   },
   'bc.periodic': (doc, want) => {
