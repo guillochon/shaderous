@@ -5,6 +5,7 @@
 // table (setup/options.ts). compileSetup (setup/compile.ts) turns one into the Problem and the
 // SimConfig overrides the solvers already take. No code and no formulas: a file from a
 // stranger is safe to open.
+import type { Motion } from '../geometry/motion';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { OpacityKind, OpacityParams } from '../opacity/opacity';
 import type { RadiationKind, RadSolver } from '../radiation/radiation';
@@ -426,6 +427,15 @@ export interface ObstaclePart {
   kind: 'obstacle' | 'inflow';
   id?: string;
   shape: Shape;
+  /**
+   * An obstacle that moves (plans/wind-tunnel.md 6.1; geometry/motion.ts): `spin` (axis, a
+   * point on it `about`, `rate` in radians per unit time), `slide` (`velocity`), `swing` (axis,
+   * about, `amplitude` degrees, `period`, `phase`) or `path` (`pos` and `rotate` as formulas of
+   * t). Rates may be formulas of t. A sphere or a box, on the uniform grid, for now
+   */
+  motion?: Motion;
+  /** another obstacle (by id) whose motion this one's is made on top of: its pivots move with it */
+  parent?: string;
 }
 
 export interface FieldPart {

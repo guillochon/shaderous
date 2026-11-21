@@ -203,6 +203,29 @@ Yaw and angle of attack turn the body (its shape's `rotate`), not the stream. Th
 preset puts a built-in car-like body (`"file": "builtin:ahmed"`, with the Ahmed body's
 proportions; `builtin:ahmed-35` slants at 35 degrees) in a tunnel.
 
+### Obstacles that move
+
+An obstacle may move (a sphere or a box, on the uniform grid, for now):
+
+```json
+{ "kind": "obstacle", "id": "paddle", "shape": { "type": "box", "min": [-0.05, 0.1, -0.2], "max": [0.05, 0.8, 0.2] },
+  "motion": { "spin": { "axis": [1, 0, 0], "about": [0, 0, 0], "rate": "2 * min(t, 1)" } } }
+```
+
+| Motion | Keys |
+|---|---|
+| `spin` | `axis`, `about` (a point on it), `rate` in radians per unit time |
+| `slide` | `velocity` |
+| `swing` | `axis`, `about`, `amplitude` in degrees, `period`, `phase` in degrees |
+| `path` | `pos` and `rotate` (degrees about x, then y, then z, about the point `about`), each a formula of t |
+
+Rates, velocities and paths may be numbers or formulas of `t` (a rotor spun up over a turn).
+`parent` names another obstacle whose motion this one's is made on top of: its pivots move with
+the parent (a blade that pitches on a hub that turns). The body's walls move: the gas is pushed
+and dragged, and the body does work on it (the energy is not conserved, as with a moving wall
+of the box). Its cells change from gas to solid and back as it goes, a cell at a time; mass is
+conserved as they do ([numerics.md](numerics.md#26-bodies-in-a-stream)).
+
 ### Forces on obstacles
 
 Every `obstacle` is a body, and the diagnostics report the force the gas exerts on each (as

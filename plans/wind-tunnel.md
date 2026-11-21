@@ -153,6 +153,52 @@ staircase should give first order.
    the swept disk once) stands for its other reason, no refinement boundary crossing a blade.
    (Probe: a Playwright script over `tools/headless/session.mjs`; not kept in the repository.)
 
+### 2.2 Measurements (2026-11-20)
+
+With the force diagnostic of 4.2, on the RTX 3080, through the runner. The published values
+were checked against comparison tables in open papers (the primary papers' texts were closed;
+notes in the session's shared folder): cylinder at Reynolds number 100, unbounded, mean drag
+coefficient 1.32 to 1.35 (Park, Kwon & Choi 1998: 1.33; Posdziech & Grundmann 2007: 1.325;
+Liu et al. 1998: 1.35), lift amplitude about 0.33 (rms 0.23), Strouhal number 0.164 to 0.165;
+sphere at 100, drag coefficient 1.08 to 1.09 (Johnson & Patel 1999: 1.08; Fornberg 1988:
+1.085; Clift, Grace & Weber's correlation 1.087) and a recirculation 0.88 diameters long. The
+Allen and Vincenti correction puts a 6% blockage at about +4.5% on the drag and +2.3% on the
+Strouhal number (an estimate, not a published result).
+
+**The `cylinder-wake` preset as it is** (box 4 = 16 diameters, periodic sides, the cylinder 4
+diameters from the inlet), statistics over t = 30 to 60:
+
+| Cells across | Scheme, grid | Mean Cd | Cd swing | Lift amplitude | St |
+|---|---|---|---|---|---|
+| 8 | explicit, uniform / blocks | 1.681 / 1.627 | 0.025 / 0.047 | 0.34 / 0.35 | 0.167 / 0.163 |
+| 8 | implicit, uniform / blocks | 1.693 / 1.727 | 0.008 / 0.012 | 0.35 / 0.42 | 0.167 / 0.169 |
+| 16 | explicit, uniform / blocks | 1.624 / 1.566 | 0.027 / 0.042 | 0.43 / 0.45 | 0.175 / 0.170 |
+| 16 | implicit, uniform / blocks | 1.656 / 1.652 | 0.008 / 0.009 | 0.43 / 0.43 | 0.175 / 0.175 |
+| 32 | explicit, uniform / blocks | 1.541 / 1.544 | 0.023 / 0.034 | 0.40 / 0.40 | 0.179 / 0.179 |
+| 32 | implicit, uniform / blocks | 1.563 / 1.563 | 0.005 / 0.005 | 0.40 / 0.40 | 0.180 / 0.179 |
+| 64 | explicit, uniform / blocks | 1.520 / 1.534 | 0.021 / 0.029 | 0.40 / 0.41 | 0.179 / 0.180 |
+| 64 | implicit, uniform / blocks | 1.551 / 1.544 | 0.007 / 0.011 | 0.39 / 0.38 | 0.181 / 0.179 |
+
+The four ways agree to 2% from 32 cells across. The drag is 15% above the published value and
+the Strouhal number 9%: the box is small and periodic across (a 6% blockage), and the cylinder
+4 diameters from a held inlet. The explicit scheme's drag swings 3 to 5 times more than the
+implicit one's: sound at Mach 0.1 that the implicit step does not carry. Runs took 1 to 12
+minutes each to t = 60.
+
+**In the tunnel** (box 8 = 32 diameters, slip sides 32 diameters apart: 3% blockage; the
+cylinder 8 diameters from the inlet; implicit, uniform grid), statistics over t = 40 to 80:
+
+| Cells across | Mean Cd | Lift amplitude (rms) | St |
+|---|---|---|---|
+| 16 | 1.548 | 0.48 (0.34) | 0.168 |
+| 32 | 1.463 | 0.43 (0.31) | 0.171 |
+
+The drag falls at first order, as a staircase's should: extrapolated, 2 x 1.463 - 1.548 =
+1.378, within the published 1.32 to 1.35 plus the blockage's few percent. The Strouhal number
+is 2 to 4% high; the lift amplitude 30% high (not understood; the published amplitude is itself
+only quoted, and lift is more sensitive than drag to the wall's shape). The 64-cell run and the
+sphere's are in 4.5.
+
 ## 3. Stage 1: mesh files
 
 ### 3.1 Formats
@@ -340,6 +386,57 @@ intermediate level behind it. `refineOutline` is the model.
 in; tests `force-balance`, `sphere-drag` and `cylinder-forces` pass; a preset `wind-tunnel`
 ships with a small public-domain body.
 
+### 4.5 As built (2026-11-20)
+
+**Forces (4.2).** As planned, with these choices and departures:
+
+- The mark is 1 + the body's index (`cellMark`, `problems/types.ts`); the obstacles are the
+  bodies, in order, `MAX_BODIES` = 4 apart and the rest summed with the fourth. A restricted
+  block averages its children's marks, as it did; a body's surface is never merged, so the
+  averages are of equal marks.
+- Each gas cell writes its wall-face fluxes (pressure part, viscous part, the body's mark)
+  into two rgba32float textures laid out as the state (`hydro/walls_on.wgsl`,
+  `amr/walls_on.wgsl`); with implicit pressure the correction writes the pressure part
+  (`pressure/pwalls_on.wgsl`, `amr/pressure/pwalls_on.wgsl`), less a gas's reference pressure.
+  A separate reduction of 36 channels (`hydro/forces.wgsl`, `amr/forces.wgsl`,
+  `src/hydro/forces.ts`) runs with each diagnostics readback. Memory: two more atlas textures
+  (+32 bytes a cell) for runs with obstacles only; without obstacles the shaders are as before.
+- The torque takes each cell's force at its center: exact for the pressure, half a cell's
+  lever off for viscosity's. A gas cell touching two bodies gives its whole wall force to the
+  one of the larger mark.
+- With per-block timesteps each block's texture holds its own last step's force; after a
+  re-mesh a reused slot may hold another block's force until that block next steps.
+- Reported as `bodies` in the diagnostics, the page's panel (a block per body beside the
+  sinks', with C_d, C_l, the force and the torque, and CSV columns `body<i>_*`), the runner's
+  `diag.jsonl` and the MCP `diagnostics` tool. Running means over a window are not built: the
+  runner's series serve for now.
+- `force-balance` (GPU): the change of a periodic box's momentum against the sum of force
+  times dt over 30 steps, liquid and ideal gas, explicit and implicit, uniform and blocks:
+  3e-7 to 5e-6 of the impulse (threshold 1e-4).
+
+**The tunnel (4.1).** A part `tunnel` (`setup/parts/tunnel.ts`), compiled as a transform of the
+document (box faces, gas, how the pressure acts, background) plus an inlet painter and a
+damping zone with a target written for it. Departures:
+
+- The sponge's rate rises as the square of the depth to 4 U / (sponge x box) at the outlet;
+  damping zones are now allowed with implicit pressure for the liquid (still refused for a
+  gas).
+- Units (SI speed, meters, air's viscosity) and the report of the Reynolds number the grid
+  resolves are not built; the tunnel is in code units.
+- The reference area is the first obstacle's shadow along the stream (`shadowOf`: exact for a
+  sphere, from the triangles for a 3D mesh, sampled otherwise), or the part's `area`; lift is
+  along the box's up axis. The blockage warning is in the check.
+- Refinement along the body's surface is the existing outline refinement; the `wake` option of
+  4.3 (a cylinder of intermediate level behind the body) is not built.
+- The preset `wind-tunnel` uses a body made in code, `builtin:ahmed` (the Ahmed body's nominal
+  proportions: `geometry/builtin.ts`), rather than a shipped file: nothing to fetch, public by
+  construction. At 256 finest cells with 2 levels it gives C_d near 0.9 and C_l 0.34 early on (a
+  showcase at Reynolds number 12 000, not the body's measured 0.29).
+- `mesh-vs-shape` (GPU): the icosphere through the mesh path and the built-in sphere mark the
+  same cells and give the same drag, to the bit, at 8 and 16 cells across.
+- Not verified by hand in the page: dropping an STL on the Setup dialog (the runner and the
+  MCP paths were run).
+
 ## 5. Stage 3: rotors in their own frame
 
 An isolated rotor in a wind along its axis is steady in the frame that turns with it. In that
@@ -359,6 +456,28 @@ centrifugal forces the code already has.
 
 This stage is small if check 1 of stage 0 passes. It is also the reference stage 4 is tested
 against: the same rotor run both ways must give the same torque.
+
+### 5.1 As built (2026-11-20)
+
+- **Implicit pressure in a rotating frame**, for the liquid (check 1's fix): the update gives
+  the cell the centrifugal force's whole kick and the Coriolis force's second half-turn before
+  the solve (`hydro/update.wgsl`, `amr/update.wgsl`). For a liquid of uniform density the
+  centrifugal force is a gradient, which the solve takes into the pressure. A gas with implicit
+  pressure is still refused in a rotating frame (its solve also carries the energy; not tried).
+- **The tunnel's `rotor`** (an angular velocity about the stream's axis through the box's
+  center; 3D only), rather than `"frame": "rotor"`: it sets the run's rotation, and the inlet,
+  every cell's starting state and the sponge's target take U - Omega x r; the cells outside the
+  cylinder the box holds (less the inlet's cells) are held at that state.
+- **Test `rotor-frame`** (GPU): two flat blades pitched at +-45 degrees, Omega = 2, U = 1, 64³:
+  the torque about the axis from the explicit scheme and from implicit pressure, averaged over
+  t = 1.5 to 3, -3.99 and -4.06 (1.7%; threshold 5%). This checks the implicit rotating frame
+  against the explicit one, which other tests (`rot-*`) check against theory. The plan's own
+  `rotor-frame` (a helical paddle whose torque vanishes where its blades are edge-on to the
+  relative wind) is not built.
+- Not built: the power coefficient in the diagnostics (power is Omega times the torque about
+  the axis, from the bodies' torques and forces), and the display turned back to the tunnel's
+  frame. An empty rotor-frame tunnel holds U - Omega x r (kinetic energy to 1e-6 over 423
+  steps; not discriminating, as that state is steady with or without the frame).
 
 ## 6. Stage 4: moving bodies
 
@@ -442,6 +561,36 @@ the cure, and comes before stage 5.
 
 Tests `piston`, `galilean-drag`, `oscillating-cylinder` and `rotor-two-frames` pass on the
 uniform grid, then on blocks; a spinning-rotor preset runs in the page.
+
+### 6.6 As built so far (2026-11-20): the uniform grid, spheres and boxes
+
+- **Format**: `motion` (`spin`, `slide`, `swing`, `path`; rates and paths numbers or formulas of
+  t) and `parent` on obstacles (`setup/spec.ts`), poses and chains in `geometry/motion.ts`
+  (unit tests `body-pose motion`: a hub on a turning nacelle against a worked example, position
+  to 1e-9 and velocity to 1e-5).
+- **On the GPU** the poses are WGSL generated from the setup (`hydro/moving.ts`), evaluated
+  once a step at the step's end time by one invocation (`hydro/moving_pose.wgsl`): the step's
+  dt is decided on the GPU, so the CPU cannot give the poses. Velocities by central differences
+  of the poses (h = 1e-3). A formula's rate is integrated by Simpson's rule (64 pieces) there.
+- **Stamp and exchange** run after the step (`hydro/moving_stamp.wgsl`,
+  `hydro/moving_exchange.wgsl`), as 6.2 and 6.3 say, with the one departure that an uncovered
+  cell takes 1/(n+1) of each of its n donors' states (a donor giving at most half), rather than
+  the donors' mean: it starts lighter than its neighbors, a thin band of lower density behind a
+  body. Mass is conserved to the bit; momentum is not (the body's push), nor energy (its work).
+- **Moving walls in the fluxes** (`hydro/flux.wgsl`, under `MOVING`): the image's normal
+  velocity is 2 v_s - v, and a wall face carries no mass, only the Riemann pressure and its
+  work p v_s (a staircase face does not move until its cell changes kind, so mass across it
+  would be lost into the body). `load_vel` gives a body's cells their velocity, so viscosity
+  drags the gas along. The body's cells count in the timestep's rates.
+- **Test `piston`** (GPU, 2D 64², a slab at Mach 0.085 through a closed box of ideal gas for
+  t = 2): mass to the bit, the compressed gas's mean pressure 1.443 against the adiabat's
+  1.456, the energy gained 0.18745 against the work done 0.18735.
+- **Not built**: blocks (6.4; refused there), moving mesh bodies (they need the distance field
+  on the GPU), the wall's velocity in the implicit pressure's source (the push reaches the
+  liquid through the cells that change kind and the solve's compressibility; not measured),
+  the work tally in the diagnostics (the test sums it from the force), tests `galilean-drag`,
+  `oscillating-cylinder`, `spinning-cylinder` and `rotor-two-frames`, and a spinning-rotor
+  preset. Decision 13's "staircase noise acceptable for rotors" is therefore not settled.
 
 ## 7. Stage 5: bodies the flow moves
 

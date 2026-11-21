@@ -4,11 +4,12 @@ import { defaultDrive, type DriveParams, writeDrive } from './hydro/drive';
 import { prepareEosTable } from './eos/tables';
 import { assemble, shaderFiles } from './gpu/shaders';
 import { RegionPass, type RegionGroups } from './hydro/region_pass';
-import { bindGroup, computePipeline, readTexture, tex3d, writeTexture, type Bindable, type Gpu } from './gpu/device';
+import { bindGroup, bindGroupUsed, computePipeline, readTexture, tex3d, writeTexture, type Bindable, type Gpu } from './gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from './gpu/progress';
 import { noteAllocation } from './gpu/memory';
 import { MAX, MIN, Reducer, SUM } from './gpu/reduce';
 import { bodyForcesFrom, FORCE_CHANNELS, forcesOn, WallForces, wallSlots, type BodyForce } from './hydro/forces';
+import { MAX_MOVING, movingBodies, movingFlags } from './hydro/moving';
 import { beginPass } from './gpu/timing';
 import { Multigrid } from './gravity/multigrid';
 import { LumpReader, lumpGrid } from './gravity/lumps';
@@ -583,10 +584,26 @@ export function refusal(c: SimConfig): string | null {
     ['Axisymmetric run', cylindricalUnsupported(c)],
     ['Spherical run', sphericalUnsupported(c)],
     ['Radiation', radiationUnsupported(c)],
+    ['Moving bodies', movingUnsupported(c)],
     ['Hydrogen and helium', hheUnsupported(c.eos, c.eosParams, c.problem.composition?.name)],
   ];
   const hit = why.find(([, w]) => w);
   return hit ? `${hit[0]}: ${hit[1]}` : null;
+}
+
+/**
+ * Why a run with moving obstacles (hydro/moving.ts) cannot go as configured, or null. The first
+ * version: spheres and boxes on the uniform grid, in Cartesian coordinates, with the gas alone.
+ */
+export function movingUnsupported(c: SimConfig): string | null {
+  const m = c.problem.moving;
+  if (!m?.length) return null;
+  if (c.amrLevels > 0) return 'moving obstacles are on the uniform grid only, so far';
+  if (m.length > MAX_MOVING) return `at most ${MAX_MOVING} obstacles may move`;
+  if (m.some((b) => b.shape.type !== 'sphere' && b.shape.type !== 'box')) return 'a moving obstacle must be a sphere or a box, so far';
+  if (c.problem.mhd || c.problem.geometry || (c.problem.species?.length ?? 0) > 0 || radiationOn(c)) return 'not with a magnetic field, species, radiation or curved coordinates';
+  if ((c.symmetry ?? []).some(Boolean) || c.problem.shear || c.problem.cosmology) return 'not with mirror symmetry, a shearing box or comoving coordinates';
+  return null;
 }
 
 /**
@@ -822,6 +839,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     geometry: `const SPHERICAL = ${spherical(c)};\n`,
     // Forces on bodies (hydro/forces.ts): the passes that write each cell's wall forces.
     ...wallSlots(forcesOn(c)),
+    // Moving bodies (hydro/moving.ts): walls that move, on the uniform grid.
+    moving: movingFlags(c.amrLevels > 0 ? [] : (c.problem.moving ?? [])),
   };
 }
 
@@ -1571,6 +1590,70 @@ export class Sim implements Simulation {
   private redDiag!: Reducer;
   /** Forces on bodies (hydro/forces.ts), where the run has any. */
   walls?: WallForces;
+  /** Moving bodies (hydro/moving.ts): the poses' buffer, the new marks, the passes and their bind groups (by parity). */
+  private moving?: {
+    poses: GPUBuffer;
+    mk: GPUTexture;
+    pPose: GPUComputePipeline;
+    pStamp: GPUComputePipeline;
+    pExchange: GPUComputePipeline;
+    gPose: GPUBindGroup;
+    gStamp: GPUBindGroup[];
+    gExchange: GPUBindGroup[];
+  };
+
+  private async buildMoving(slots: Record<string, string>) {
+    const d = this.device;
+    const c = this.cfg;
+    const v = (t: GPUTexture) => t.createView();
+    const body = movingBodies(c.problem.moving!, { box: c.problem.box, n: c.n, ndim: c.ndim });
+    const s = { ...slots, moving_body: body };
+    const [pPose, pStamp, pExchange] = await Promise.all([
+      computePipeline(d, assemble('hydro/moving_pose.wgsl', s), 'moving bodies: poses'),
+      computePipeline(d, assemble('hydro/moving_stamp.wgsl', s), 'moving bodies: stamp'),
+      computePipeline(d, assemble('hydro/moving_exchange.wgsl', s), 'moving bodies: exchange'),
+    ]);
+    const poses = d.createBuffer({ label: 'moving bodies: poses', size: 4 * 5 * 16, usage: GPUBufferUsage.STORAGE });
+    const mk = tex3d(d, this.nx, 'rgba32float', 'moving bodies: new marks', this.nz, this.ny);
+    const moving = {
+      poses, mk, pPose, pStamp, pExchange,
+      gPose: bindGroupUsed(d, pPose, { 0: this.params, 1: this.clock, 2: poses }),
+      gStamp: [0, 1].map((p) => bindGroupUsed(d, pStamp, { 0: this.params, 2: poses, 3: v(this.state[p][1]), 4: v(mk) })),
+      gExchange: [0, 1].map((p) => bindGroupUsed(d, pExchange, { 0: this.params, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(mk), 5: v(this.state[1 - p][0]), 6: v(this.state[1 - p][1]) })),
+    };
+    return moving;
+  }
+
+  /**
+   * Moving bodies: their poses at the end of the step just encoded, each cell's new mark, and the
+   * exchange of the cells that change kind, into the other parity (hydro/moving_*.wgsl).
+   */
+  private encodeMoving(pass: GPUComputePassEncoder) {
+    const m = this.moving;
+    if (!m) return;
+    const q = this.cur;
+    const groups: [number, number, number] = [Math.ceil(this.nx / 8), Math.ceil(this.ny / 8), Math.ceil(this.nz / 4)];
+    pass.setPipeline(m.pPose);
+    pass.setBindGroup(0, m.gPose);
+    pass.dispatchWorkgroups(1);
+    pass.setPipeline(m.pStamp);
+    pass.setBindGroup(0, m.gStamp[q]);
+    pass.dispatchWorkgroups(...groups);
+    pass.setPipeline(m.pExchange);
+    pass.setBindGroup(0, m.gExchange[q]);
+    pass.dispatchWorkgroups(...groups);
+    this.cur = 1 - q;
+  }
+
+  /** Stamp the moving bodies where they start (the clock's t and dt at a reset), now. */
+  private stampMoving() {
+    if (!this.moving) return;
+    const enc = this.device.createCommandEncoder();
+    const pass = beginPass(enc);
+    this.encodeMoving(pass);
+    pass.end();
+    this.device.queue.submit([enc.finish()]);
+  }
   private staging: GPUBuffer;
   private stagingBusy = false;
   private brush: GPUBuffer;
@@ -1783,6 +1866,11 @@ export class Sim implements Simulation {
     this.walls = forcesOn(c)
       ? await WallForces.create(d, (label) => tex3d(d, this.nx, 'rgba32float', label, this.nz, this.ny), c.viscosity > 0 || implicitPressure(c), c.problem.bodies!, dims, 'hydro/forces.wgsl', slots, this.params)
       : undefined;
+    // Moving bodies (hydro/moving.ts): their poses, each cell's new mark, and the three passes.
+    this.moving?.mk.destroy();
+    this.moving?.poses.destroy();
+    this.moving = c.problem.moving?.length && !c.amrLevels ? await this.buildMoving(slots) : undefined;
+    this.stampMoving();
     this.pPredict?.destroy();
     this.pUpdate?.destroy();
     // Implicit pressure: the solver (kept across rebuilds, with its warm start) and its passes.
@@ -2314,6 +2402,7 @@ export class Sim implements Simulation {
     writeDrive(d, this.cfg.driving, this.cfg.ndim, this.cfg.problem.box);
     this.writeParams();
     this.refreshPotential();
+    this.stampMoving();
   }
 
   /** Solve for the potential of the current state from the current guess. */
@@ -2565,6 +2654,8 @@ export class Sim implements Simulation {
         this.cur = 1 - this.cur;
         this.speciesCur = 1 - this.speciesCur;
       }
+      // Moving bodies: where they are at the step's end, and the cells that changed kind.
+      this.encodeMoving(pass);
       pass.end();
       syncScale(enc, this.cfg, this.clock, this.params, this.bh);
     }

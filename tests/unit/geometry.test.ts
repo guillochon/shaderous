@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import { apply, axisAngle, buildSdf, flatten, identity, measure, mul, orient, parseAirfoil, parseMeshFile, parseSvgPath, sampleSdf, windingNumber, worldMatrix, type Mesh } from '../../src/geometry';
 import { ahmedBody } from '../../src/geometry/builtin';
+import { chainPose, motionPose, pointVelocity, poseApply, type Moving } from '../../src/geometry/motion';
 
 const { readFileSync }: { readFileSync(p: URL): Uint8Array } = await import(/* @vite-ignore */ 'node:fs' as string);
 const fixture = (name: string) => new Uint8Array(readFileSync(new URL(`./fixtures/meshes/${name}`, import.meta.url)));
@@ -213,6 +214,37 @@ describe('sdf-thin', () => {
     expect(buildSdf(plate(0.03), { h }).report.thinnest).toBeLessThan(1);
     expect(buildSdf(plate(0.03), { h }).report.thinnest).toBeCloseTo(0.3, 2);
     expect(buildSdf(plate(0.5), { h }).report.thinnest).toBeCloseTo(5, 2);
+  });
+});
+
+describe('body-pose motion', () => {
+  it('a hub spinning on a nacelle that turns: position and velocity of a blade point as worked by hand', () => {
+    // Nacelle: turning about z through the origin at 0.5. Hub: spinning about x through
+    // (1, 0, 10) at 2 (its axis in the nacelle's frame). A point at (1, 2, 10) on the hub.
+    const parts: Moving[] = [
+      { motion: { spin: { axis: [0, 0, 1], rate: 0.5 } }, parent: -1 },
+      { motion: { spin: { axis: [1, 0, 0], about: [1, 0, 10], rate: '2' } }, parent: 0 },
+    ];
+    const t = 0.7;
+    const [f, th] = [0.5 * t, 2 * t];
+    const want = [Math.cos(f) - Math.sin(f) * 2 * Math.cos(th), Math.sin(f) + Math.cos(f) * 2 * Math.cos(th), 10 + 2 * Math.sin(th)];
+    const p = poseApply(chainPose(parts, 1, t), [1, 2, 10]);
+    want.forEach((x, k) => expect(p[k]).toBeCloseTo(x, 9));
+    // d/dt by hand: f' = 0.5, th' = 2.
+    const wantV = [
+      -0.5 * Math.sin(f) - 0.5 * Math.cos(f) * 2 * Math.cos(th) + Math.sin(f) * 2 * Math.sin(th) * 2,
+      0.5 * Math.cos(f) - 0.5 * Math.sin(f) * 2 * Math.cos(th) - Math.cos(f) * 2 * Math.sin(th) * 2,
+      2 * Math.cos(th) * 2,
+    ];
+    const { v, omega } = pointVelocity((s) => chainPose(parts, 1, s), p, t);
+    wantV.forEach((x, k) => expect(v[k]).toBeCloseTo(x, 5));
+    // The hub's angular velocity: 2 about its axis turned by the nacelle, plus 0.5 about z.
+    [2 * Math.cos(f), 2 * Math.sin(f), 0.5].forEach((x, k) => expect(omega[k]).toBeCloseTo(x, 5));
+  });
+  it('a slide by a formula and a swing', () => {
+    expect(poseApply(motionPose({ slide: { velocity: ['2 * t', 0, 1] } }, 3), [0, 0, 0])).toEqual([expect.closeTo(9, 9), 0, expect.closeTo(3, 12)]);
+    const p = poseApply(motionPose({ swing: { axis: [0, 0, 1], amplitude: 90, period: 4 } }, 1), [1, 0, 0]);
+    [0, 1, 0].forEach((x, k) => expect(p[k]).toBeCloseTo(x, 12));
   });
 });
 

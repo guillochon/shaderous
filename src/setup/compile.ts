@@ -5,6 +5,8 @@
 // The compiled initial state paints in layers: a whole-box flow or the background, then disks,
 // then stars (also left to settling), then regions, obstacles and inflows in the order of the
 // parts, and last the flows that only change what is there.
+import type { MovingBody } from '../hydro/moving';
+import { MAX_BODIES } from '../problems/types';
 import { expandTunnel, tunnelDamping, tunnelForceRef, tunnelOf, tunnelPainter, tunnelParams } from './parts/tunnel';
 import { mirrorAxes } from '../domain';
 import { cosmoG, timeAtRedshift, type Cosmology } from '../cosmo';
@@ -477,6 +479,7 @@ export function compileSetup(input: SetupSpec): Compiled {
   const obstacles = parts.filter((p): p is ObstaclePart => p.kind === 'obstacle');
   const optional: Partial<Problem> = {
     bodies: obstacles.length ? obstacles.map((p, i) => ({ id: p.id ?? `obstacle ${i + 1}`, center: bodyCenter(p.shape) })) : undefined,
+    moving: movingOf(obstacles),
     // A tunnel's force coefficients: over the stream's dynamic pressure and the first obstacle's shadow.
     forceRef: tunnel
       ? (ndim: 2 | 3, n: number) => tunnelForceRef(tunnel, ndim, obstacles.length ? shadowOf(obstacles[0].shape, tunnelParams(tunnel, ndim).a, { box: boxOf(spec), n, ndim }) : undefined)
@@ -632,4 +635,25 @@ export function compiledFrom(spec: SetupSpec): Compiled {
   let c = compiledOnce.get(spec);
   if (!c) compiledOnce.set(spec, (c = compileSetup(spec)));
   return c;
+}
+
+/**
+ * The obstacles that move (plans/wind-tunnel.md 6.1): those with a motion, or below one that has
+ * one, each with its body's mark and its parent's place in the list. Undefined if none moves.
+ */
+function movingOf(obstacles: ObstaclePart[]): MovingBody[] | undefined {
+  const byId = new Map(obstacles.map((p, i) => [p.id ?? `obstacle ${i + 1}`, i]));
+  const parentOf = (i: number) => (obstacles[i].parent !== undefined ? (byId.get(obstacles[i].parent!) ?? -1) : -1);
+  const moves = (i: number): boolean => {
+    for (let k = i, guard = 0; k >= 0 && guard <= obstacles.length; k = parentOf(k), guard++) if (obstacles[k].motion) return true;
+    return false;
+  };
+  const list = obstacles.map((_, i) => i).filter(moves);
+  if (!list.length) return undefined;
+  // A parent that does not move is no part of the chain.
+  const place = (i: number): number => {
+    for (let k = parentOf(i), guard = 0; k >= 0 && guard <= obstacles.length; k = parentOf(k), guard++) if (list.includes(k)) return list.indexOf(k);
+    return -1;
+  };
+  return list.map((i) => ({ mark: 1 + Math.min(i, MAX_BODIES - 1), shape: obstacles[i].shape, motion: obstacles[i].motion, parent: place(i) }));
 }

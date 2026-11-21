@@ -57,6 +57,16 @@ const SHAPE: Schema = obj({
   file: 'string', node: 'string', scale: 'number', fit: 'number', up: partChoice('region', 'shape.up'),
 });
 const ID: Schema = 'string';
+/** A number or a formula of t. */
+const AMOUNT: Schema = { any: ['number', 'string'] };
+const AMOUNTS: Schema = { array: AMOUNT, max: 3 };
+/** An obstacle's motion (geometry/motion.ts). */
+const MOTION: Schema = obj({
+  spin: obj({ axis: 'vec3', about: 'vec3', rate: AMOUNT }),
+  slide: obj({ velocity: AMOUNTS }),
+  swing: obj({ axis: 'vec3', about: 'vec3', amplitude: 'number', period: 'number', phase: 'number' }),
+  path: obj({ pos: AMOUNTS, rotate: AMOUNTS, about: 'vec3' }),
+});
 /** A tabulated profile: up to 32 points (x, value). */
 const PROFILE: Schema = { array: 'pair', max: 32 };
 
@@ -66,7 +76,7 @@ const PART_SCHEMAS: Record<string, Record<string, Schema>> = {
   star: { type: partChoice('star', 'type'), n: 'number', radius: 'number', mass: 'number', rhoc: 'number', core: obj({ mass: 'number', soft: 'number' }), material: partChoice('star', 'material'), coreMaterial: partChoice('star', 'coreMaterial'), coreFraction: 'number', surfaceT: 'number', pos: 'vec3', vel: 'vec3', dye: 'number', X: 'fractions', field: obj({ type: partChoice('star', 'field.type'), beta: 'number', seed: 'number' }) },
   disk: { about: { array: 'string', max: 32 }, profile: partChoice('disk', 'profile'), radial: PROFILE, vertical: PROFILE, radialFn: 'string', verticalFn: 'string', verticalIn: partChoice('disk', 'verticalIn'), rIn: 'number', rOut: 'number', sigma0: 'number', slope: 'number', cs: 'number', floor: 'number', damp: obj({ from: 'number', rate: 'number' }), loops: obj({ beta: 'number', span: 'number', count: 'int' }), stresses: 'boolean' },
   region: { shape: SHAPE, rho: 'number', p: 'number', energy: 'number', v: 'vec3', s: 'number', X: 'fractions', erad: 'number', frad: 'vec3', supersample: 'int' },
-  obstacle: { shape: SHAPE },
+  obstacle: { shape: SHAPE, motion: MOTION, parent: 'string' },
   inflow: { shape: SHAPE },
   field: { b: 'vec3', up: 'number' },
   tunnel: { speed: 'number', axis: partChoice('tunnel', 'axis'), floor: partChoice('tunnel', 'floor'), sides: partChoice('tunnel', 'sides'), sponge: 'number', mach: 'number', rho: 'number', inlet: 'int', area: 'number', length: 'number', rotor: 'number' },

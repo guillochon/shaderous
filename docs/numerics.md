@@ -3550,6 +3550,39 @@ gradient, which the solve takes into the pressure. A gas with implicit pressure 
 in a rotating frame. Test `rotor-frame`: a two-bladed paddle in its frame, the torque about the
 axis from the explicit scheme and from implicit pressure, -3.99 and -4.06 (1.7%).
 
+### Bodies that move
+
+An obstacle with a `motion` (`geometry/motion.ts` for its definitions; `hydro/moving.ts` for
+the GPU's) moves on the uniform grid. Its pose and velocity are WGSL generated from the setup:
+each step, after everything else, one invocation evaluates every moving body's pose at the
+step's end time (the clock's, so that the GPU's own timestep sets it), and its velocity by
+central differences of the poses (`hydro/moving_pose.wgsl`); a pass marks each cell from the
+poses (`hydro/moving_stamp.wgsl`), and a third hands the gas of the cells that change kind to
+their neighbors (`hydro/moving_exchange.wgsl`):
+
+- **Covered** (gas, now in the body): its mass, momentum, energies and scalar go to its face
+  neighbors that stay gas, shared by their densities.
+- **Uncovered** (in the body, now gas): each neighbor that stays gas gives it $`1/(n+1)`$ of
+  its state ($`n`$ such neighbors; at most half of what the neighbor holds goes, where it gives
+  to several), and it moves at the body's velocity there.
+
+Both are gathers, each cell working out what it gives and takes with the arithmetic its
+neighbors use, so mass is conserved to the bit. A body's cell holds the body's velocity there
+in its momentum slot (its density as it was). Its wall then moves: the mirror image of a gas
+cell has the normal velocity $`2v_{s,n} - v_n`$, and the wall face carries no mass, only the
+pressure $`p^*`$ of the Riemann problem between the cell and its image, and its work
+$`p^* v_{s,n}`$; viscosity drags the gas toward $`\mathbf v_s`$. A body's cells count in the
+timestep's rates, with its velocity, so that it crosses at most the Courant fraction of a cell
+in a step. Test `piston` (a slab sliding at Mach 0.085 through a closed box): mass to the bit,
+the compressed gas's mean pressure 0.9% from the adiabat, and the energy the gas gained equal
+to the work the wall did (the force diagnostic's $`-\sum \mathbf F\cdot\mathbf V\,\Delta t`$)
+to 0.06%. The staircase jumps a cell at a time, which leaves a thin band of lower density in
+the cells a body uncovers and a bump ahead of it (plans/wind-tunnel.md 6.3).
+
+Not yet: moving bodies on blocks, moving mesh bodies (their distance field on the GPU), the
+wall's velocity in the implicit pressure's source, partly filled cells (plans/wind-tunnel.md
+section 8).
+
 ### Bodies from mesh files
 
 A `mesh` shape (setups.md) is a triangle mesh read from a file (`src/geometry/`: STL, OBJ,

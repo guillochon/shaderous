@@ -2261,6 +2261,145 @@
          }
         },
         "additionalProperties": false
+       },
+       "motion": {
+        "type": "object",
+        "properties": {
+         "spin": {
+          "type": "object",
+          "properties": {
+           "axis": {
+            "type": "array",
+            "items": {
+             "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+           },
+           "about": {
+            "type": "array",
+            "items": {
+             "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+           },
+           "rate": {
+            "anyOf": [
+             {
+              "type": "number"
+             },
+             {
+              "type": "string",
+              "maxLength": 4000
+             }
+            ]
+           }
+          },
+          "additionalProperties": false
+         },
+         "slide": {
+          "type": "object",
+          "properties": {
+           "velocity": {
+            "type": "array",
+            "items": {
+             "anyOf": [
+              {
+               "type": "number"
+              },
+              {
+               "type": "string",
+               "maxLength": 4000
+              }
+             ]
+            },
+            "maxItems": 3
+           }
+          },
+          "additionalProperties": false
+         },
+         "swing": {
+          "type": "object",
+          "properties": {
+           "axis": {
+            "type": "array",
+            "items": {
+             "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+           },
+           "about": {
+            "type": "array",
+            "items": {
+             "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+           },
+           "amplitude": {
+            "type": "number"
+           },
+           "period": {
+            "type": "number"
+           },
+           "phase": {
+            "type": "number"
+           }
+          },
+          "additionalProperties": false
+         },
+         "path": {
+          "type": "object",
+          "properties": {
+           "pos": {
+            "type": "array",
+            "items": {
+             "anyOf": [
+              {
+               "type": "number"
+              },
+              {
+               "type": "string",
+               "maxLength": 4000
+              }
+             ]
+            },
+            "maxItems": 3
+           },
+           "rotate": {
+            "type": "array",
+            "items": {
+             "anyOf": [
+              {
+               "type": "number"
+              },
+              {
+               "type": "string",
+               "maxLength": 4000
+              }
+             ]
+            },
+            "maxItems": 3
+           },
+           "about": {
+            "type": "array",
+            "items": {
+             "type": "number"
+            },
+            "minItems": 3,
+            "maxItems": 3
+           }
+          },
+          "additionalProperties": false
+         }
+        },
+        "additionalProperties": false
+       },
+       "parent": {
+        "type": "string",
+        "maxLength": 4000
        }
       },
       "required": [

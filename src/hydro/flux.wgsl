@@ -23,6 +23,7 @@ struct Flux { m: f32, mom: vec3<f32>, e: f32, ei: f32, s: f32, vn: f32, d: vec4<
 
 #include <riemann>
 #include "hydro/diffusion.wgsl"
+#include "hydro/moving_flags.wgsl"
 
 // Cyclic rotation that puts the face normal in x, and its inverse.
 fn rot(v: vec3<f32>, axis: i32) -> vec3<f32> {
@@ -91,6 +92,37 @@ fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>) 
 
 struct Faces { lo: Flux, hi: Flux }
 
+// Moving bodies (plans/wind-tunnel.md 6.2; hydro/moving.ts): a solid cell holds its body's
+// velocity there in its momentum slot, so its primitives (load_q) carry it, and a wall moves.
+// Its image is the gas cell's state with the normal velocity 2 v_s - v (reflected about the
+// wall's), and the face carries no mass, only the pressure of the Riemann problem between them
+// and its work, p v_s: a wall that pushes, whose cells change kind as it goes (6.3,
+// hydro/moving_exchange.wgsl). Without moving bodies these are the plain mirror and flux.
+fn mir(q: Q, axis: i32, vs: f32) -> Q {
+  if (MOVING) {
+    var a = q.a;
+    a[axis + 1] = 2.0 * vs - a[axis + 1];
+    return Q(a, vec4<f32>(q.b.xyz, 0.0));
+  }
+  return q_mirror(q, axis);
+}
+fn pmir(p: Q, axis: i32, vs: f32) -> Q {
+  if (MOVING) {
+    var a = p.a;
+    a[axis + 1] = 2.0 * vs - a[axis + 1];
+    return Q(a, p.b);
+  }
+  return pred_mirror(p, axis);
+}
+// A wall face's flux, where the wall may move at vs along the axis: the pressure and its work.
+fn wall_face(F: Flux, wall: bool, axis: i32, vs: f32) -> Flux {
+  if (!MOVING || !wall) { return F; }
+  let p = F.mom[axis] - F.m * F.vn;
+  var o = Flux(0.0, vec3<f32>(0.0), p * vs, 0.0, 0.0, vs, vec4<f32>(0.0));
+  o.mom[axis] = p;
+  return o;
+}
+
 // Both faces of cell c along one axis. w0 and p0 are the cell's own primitives and half-step state.
 //
 // Walls: where a neighbor is solid, the face between is a reflecting wall, and the cells
@@ -122,14 +154,19 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
     d = vec4<f32>(dphi_step(c, axis, -2).x, below.x, above.x, dphi_step(c, axis, 1).x);
     t = vec2<f32>(below.y, above.y);
   }
+  var below = false;
+  var above = false;
   if (has_solids()) {
-    let below = q_solid(wm1);
-    let above = q_solid(wp1);
+    below = q_solid(wm1);
+    above = q_solid(wp1);
+    // (The walls' velocities along the axis, for moving bodies: those of the solid cells.)
+    let vb = nm1.a[axis + 1];
+    let va = np1.a[axis + 1];
     // An image has the potential of the cell it mirrors.
-    if (below) { wm1 = q_mirror(w0, axis); pm1 = pred_mirror(p0, axis); d.y = 0.0; km1 = k0; }
-    if (above) { wp1 = q_mirror(w0, axis); pp1 = pred_mirror(p0, axis); d.z = 0.0; kp1 = k0; }
-    if (below) { wm2 = q_mirror(wp1, axis); d.x = -d.z; } else if (q_solid(wm2)) { wm2 = q_mirror(wm1, axis); d.x = 0.0; }
-    if (above) { wp2 = q_mirror(wm1, axis); d.w = -d.y; } else if (q_solid(wp2)) { wp2 = q_mirror(wp1, axis); d.w = 0.0; }
+    if (below) { wm1 = mir(w0, axis, vb); pm1 = pmir(p0, axis, vb); d.y = 0.0; km1 = k0; }
+    if (above) { wp1 = mir(w0, axis, va); pp1 = pmir(p0, axis, va); d.z = 0.0; kp1 = k0; }
+    if (below) { wm2 = mir(wp1, axis, vb); d.x = -d.z; } else if (q_solid(wm2)) { wm2 = mir(wm1, axis, wm2.a[axis + 1]); d.x = 0.0; }
+    if (above) { wp2 = mir(wm1, axis, va); d.w = -d.y; } else if (q_solid(wp2)) { wp2 = mir(wp1, axis, wp2.a[axis + 1]); d.w = 0.0; }
   }
   // A neighbor that is this cell's image in a wall (the step the deviations see is not the
   // true one) reaches the wall from the other side: the negative of the true step.
@@ -138,8 +175,8 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
   let sp = edge_dn(w0, wp1, wp2, d.z, d.w, select(-t.y, t.y, d.z == t.y));
   return Faces(
-    add_diffusion(face_flux(pm1, sm, p0, lo, axis, km1, k0), c - e, e, axis, nm1, w0),
-    add_diffusion(face_flux(p0, hi, pp1, sp, axis, k0, kp1), c, e, axis, w0, np1),
+    add_diffusion(wall_face(face_flux(pm1, sm, p0, lo, axis, km1, k0), below, axis, nm1.a[axis + 1]), c - e, e, axis, nm1, w0),
+    add_diffusion(wall_face(face_flux(p0, hi, pp1, sp, axis, k0, kp1), above, axis, np1.a[axis + 1]), c, e, axis, w0, np1),
   );
 }
 
@@ -166,39 +203,43 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   // the grid: what axis_fluxes uses there. Elsewhere (across, 1, 1).
   let ws = wall_step(a, axis, across);
   var sides = vec2<f32>(1.0);
+  var wall = false;
+  var vw = 0.0;
   if (has_solids()) {
     let ls = q_solid(wl);
     let rs = q_solid(wr);
     if (ls && rs) { return flux_zero(); }
+    wall = ls || rs;
+    vw = select(nl.a[axis + 1], nr.a[axis + 1], rs);
     if (rs) {
       // Wall on the right: as the left cell computes its upper face.
-      if (q_solid(wll)) { wll = q_mirror(wl, axis); d.x = 0.0; }
-      wr = q_mirror(wl, axis);
-      pr = pred_mirror(pl, axis);
+      if (q_solid(wll)) { wll = mir(wl, axis, wll.a[axis + 1]); d.x = 0.0; }
+      wr = mir(wl, axis, vw);
+      pr = pmir(pl, axis, vw);
       kr = kl;
-      wrr = q_mirror(wll, axis);
+      wrr = mir(wll, axis, vw);
       d.y = 0.0;
       d.z = -d.x;
       sides.y = -1.0;
     } else if (ls) {
-      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); d.z = 0.0; }
-      wl = q_mirror(wr, axis);
-      pl = pred_mirror(pr, axis);
+      if (q_solid(wrr)) { wrr = mir(wr, axis, wrr.a[axis + 1]); d.z = 0.0; }
+      wl = mir(wr, axis, vw);
+      pl = pmir(pr, axis, vw);
       kl = kr;
-      wll = q_mirror(wrr, axis);
+      wll = mir(wrr, axis, vw);
       d.y = 0.0;
       d.x = -d.z;
       sides.x = -1.0;
     } else {
-      if (q_solid(wll)) { wll = q_mirror(wl, axis); d.x = 0.0; }
-      if (q_solid(wrr)) { wrr = q_mirror(wr, axis); d.z = 0.0; }
+      if (q_solid(wll)) { wll = mir(wl, axis, wll.a[axis + 1]); d.x = 0.0; }
+      if (q_solid(wrr)) { wrr = mir(wr, axis, wrr.a[axis + 1]); d.z = 0.0; }
     }
   }
   // ws.x is the true step across the face; a cell that is the other's image in a wall reaches
   // the wall from its own side.
   let sl = edge_up(wll, wl, wr, d.x, d.y, ws.x * (sides.x * ws.y));
   let sr = edge_dn(wl, wr, wrr, d.y, d.z, ws.x * (sides.y * ws.z));
-  return add_diffusion(face_flux(pl, sl, pr, sr, axis, kl, kr), a, e, axis, nl, nr);
+  return add_diffusion(wall_face(face_flux(pl, sl, pr, sr, axis, kl, kr), wall, axis, vw), a, e, axis, nl, nr);
 }
 
 fn flux_zero() -> Flux {

@@ -14,7 +14,7 @@ const TESTS = [
   'liquid-eos', 'liquid-gresho', 'liquid-taylor-green', 'liquid-cavity', 'liquid-amr',
   'aneos-eos', 'planet-rest', 'giant-impact',
   'psplit-solver', 'psplit-gresho', 'psplit-2d-3d', 'psplit-taylor-green', 'psplit-cavity', 'psplit-obstacle', 'psplit-balance', 'psplit-acoustic', 'psplit-amr-unrefined', 'psplit-amr-gresho', 'psplit-amr-regrid', 'psplit-amr-3d', 'psplit-amr-shear', 'psplit-gas-gresho', 'psplit-amr-gas', 'psplit-sod', 'psplit-amr-sod', 'psplit-moving-jump', 'psplit-amr-balance', 'psplit-amr-field', 'psplit-species', 'psplit-gas-balance', 'psplit-gas-polytrope', 'psplit-gas-star-vacuum', 'psplit-gas-star-moving', 'psplit-amr-polytrope', 'psplit-masses', 'psplit-amr-wake',
-  'force-balance', 'mesh-vs-shape', 'rotor-frame',
+  'force-balance', 'cylinder-forces', 'sphere-drag', 'piston', 'galilean-drag', 'mesh-vs-shape', 'rotor-frame',
   'rad-restart', 'rad-off', 'rad-equilibrium', 'rad-f32', 'rad-streaming', 'rad-diffusion', 'rad-shadow', 'rad-advect', 'rad-marshak', 'rad-star', 'rad-shock', 'rad-cooling-sphere', 'rad-blocks-diffusion', 'rad-blocks-advect', 'rad-blocks-cooling-sphere', 'rad-blocks-star', 'rad-blocks-restart',
 ];
 
@@ -27,8 +27,12 @@ test('the page lists the same tests as this file', async ({ page }) => {
   expect(await page.evaluate(() => window.shaderous.tests)).toEqual(TESTS);
 });
 
+/** Tests that take longer than the suite's five minutes a test, and how long they may take (minutes). */
+const SLOW: Record<string, number> = { 'cylinder-forces': 20, 'sphere-drag': 30 };
+
 for (const id of TESTS) {
   test(id, async ({ page }) => {
+    if (SLOW[id]) test.setTimeout(SLOW[id] * 60_000);
     // What a test logs (details of a failure) goes to the report.
     page.on('console', (m) => m.type() === 'log' && console.log(m.text()));
     await page.goto('/validate.html');

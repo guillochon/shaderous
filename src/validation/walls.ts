@@ -103,6 +103,186 @@ export const WALL_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'cylinder-forces',
+    name: 'A cylinder in a tunnel at Reynolds number 100: drag, lift and shedding (2D, 16 and 32 cells across, liquid, implicit pressure)',
+    criterion:
+      'A cylinder of diameter 0.25 in a tunnel 32 diameters long and wide (slip sides: 3% blockage), Mach 0.1, nu = 0.0025, to t = 60, statistics from t = 35. The staircase wall converges at first order, so the drag is extrapolated from 16 and 32 cells across, 2 Cd(32) - Cd(16): within 1.30 to 1.45 (published, unbounded: 1.32 to 1.35, Park et al. 1998, Posdziech & Grundmann 2007, Liu et al. 1998; the blockage adds a few percent). At 32 cells across the Strouhal number is within 0.160 to 0.178 (published 0.164 to 0.165) and the lift amplitude within 0.25 to 0.50 (published about 0.33; measured 0.43). Measured 2026-11-20: Cd 1.548 and 1.463 (1.378 extrapolated), St 0.168 and 0.171, lift amplitude 0.48 and 0.43',
+    async run(gpu: Gpu) {
+      const spec = (n: number): SetupSpec => ({
+        format: 'shaderous-setup', version: 1, id: 'tunnel-cylinder', name: 'Cylinder in a tunnel',
+        domain: { ndim: 2, n, amr: 0, box: 8, supports2d: true },
+        physics: { viscosity: 0.0025 },
+        parts: [
+          { kind: 'tunnel', speed: 1, axis: 'x', sides: 'slip', sponge: 0.15, mach: 0.1 },
+          { kind: 'obstacle', id: 'cylinder', shape: { type: 'sphere', center: [-2, 0.01, 0], radius: 0.125 } },
+        ],
+      }) as SetupSpec;
+      const measure = async (n: number) => {
+        const c = compileSetup(spec(n));
+        const sim = await Sim.create(gpu, configFor(c.problem, n, { ndim: 2, tEnd: 35, ...c.overrides }));
+        try {
+          await sim.runToEnd(64, 1e7);
+          const t: number[] = [];
+          const cd: number[] = [];
+          const cl: number[] = [];
+          for (let k = 1; k <= 500; k++) {
+            sim.cfg.tEnd = 35 + 0.05 * k;
+            sim.writeParams();
+            await sim.runToEnd(64, 1e7);
+            const d = await sim.diagnostics();
+            t.push(d.t);
+            cd.push(d.bodies![0].coefficients!.drag);
+            cl.push(d.bodies![0].coefficients!.lift);
+          }
+          const mean = cl.reduce((a, b) => a + b, 0) / cl.length;
+          const ups: number[] = [];
+          for (let i = 1; i < t.length; i++) if (cl[i - 1] < mean && cl[i] >= mean) ups.push(t[i - 1] + ((mean - cl[i - 1]) / (cl[i] - cl[i - 1])) * (t[i] - t[i - 1]));
+          const period = (ups[ups.length - 1] - ups[0]) / (ups.length - 1);
+          return { cd: cd.reduce((a, b) => a + b, 0) / cd.length, amp: (Math.max(...cl) - Math.min(...cl)) / 2, st: 0.25 / period };
+        } finally {
+          sim.destroy();
+        }
+      };
+      const a = await measure(512);
+      const b = await measure(1024);
+      const cdInf = 2 * b.cd - a.cd;
+      const m = { cd_16: a.cd, cd_32: b.cd, cd_extrapolated: cdInf, st_16: a.st, st_32: b.st, lift_amplitude_16: a.amp, lift_amplitude_32: b.amp };
+      return { pass: cdInf > 1.3 && cdInf < 1.45 && b.st > 0.16 && b.st < 0.178 && b.amp > 0.25 && b.amp < 0.5, metrics: m };
+    },
+  },
+  {
+    id: 'sphere-drag',
+    name: 'A sphere in a tunnel at Reynolds number 100: its drag (3D, 16 cells across, 2 levels of blocks, liquid, implicit pressure)',
+    criterion:
+      'A sphere of diameter 0.25 in a tunnel 16 diameters across (slip sides: 1.2% blockage), Mach 0.1, nu = 0.0025, 256 finest cells with 2 levels: the mean drag coefficient over t = 10 to 12 is within 0.95 to 1.35 (published 1.08 to 1.09: Johnson & Patel 1999, Fornberg 1988; a staircase at 16 cells across reads high, as the cylinder’s does)',
+    async run(gpu: Gpu) {
+      const spec = {
+        format: 'shaderous-setup', version: 1, id: 'tunnel-sphere', name: 'Sphere in a tunnel',
+        domain: { ndim: 3, n: 256, amr: 2, box: 4 },
+        physics: { viscosity: 0.0025 },
+        parts: [
+          { kind: 'tunnel', speed: 1, axis: 'x', sides: 'slip', sponge: 0.15, mach: 0.1 },
+          { kind: 'obstacle', id: 'sphere', shape: { type: 'sphere', center: [-1, 0, 0], radius: 0.125 } },
+        ],
+      } as SetupSpec;
+      const c = compileSetup(spec);
+      const sim = await AmrSim.create(gpu, configFor(c.problem, 256, { ndim: 3, amrLevels: 2, tEnd: 10, ...c.overrides }));
+      try {
+        await sim.runToEnd(16, 1e7);
+        const cd: number[] = [];
+        for (let k = 1; k <= 20; k++) {
+          sim.cfg.tEnd = 10 + 0.1 * k;
+          sim.writeParams();
+          await sim.runToEnd(16, 1e7);
+          cd.push((await sim.diagnostics()).bodies![0].coefficients!.drag);
+        }
+        const mean = cd.reduce((a, b) => a + b, 0) / cd.length;
+        const m = { cd: mean, cd_min: Math.min(...cd), cd_max: Math.max(...cd), leaves: sim.tree.leaves().length };
+        return { pass: mean > 0.95 && mean < 1.35, metrics: m };
+      } finally {
+        sim.destroy();
+      }
+    },
+  },
+  {
+    id: 'piston',
+    name: 'A moving wall: a piston in a closed box of ideal gas (2D 64^2, explicit)',
+    criterion:
+      'A slab across the box slides at 0.1 (Mach 0.085) for t = 2, compressing the gas ahead of it from 0.85 to 0.65 of the box and expanding the gas behind it: the gas’s mass is conserved to 1e-6, the mean pressure ahead of it is within 5% of the adiabat (0.85 / 0.65)^1.4, and the energy the gas gained equals the work the piston did on it (minus the sum over steps of the force on the body times its velocity times dt) to 5%. Measured 2026-11-20: mass to the bit, pressure 1.443 against 1.456, energy 0.18745 against work 0.18735',
+    async run(gpu: Gpu) {
+      const spec = {
+        format: 'shaderous-setup', version: 1, id: 'piston', name: 'Piston',
+        domain: { ndim: 2, n: 64, amr: 0, box: 1, supports2d: true, bc: { lo: [2, 2, 0], hi: [2, 2, 0] } },
+        physics: { eos: 'ideal', eosParams: { gamma: 1.4 }, gravity: 'off' },
+        background: { rho: 1, p: 1, v: [0, 0, 0] },
+        parts: [{ kind: 'obstacle', id: 'piston', shape: { type: 'box', min: [-0.45, null, null], max: [-0.35, null, null] }, motion: { slide: { velocity: [0.1, 0, 0] } } }],
+      } as unknown as SetupSpec;
+      const c = compileSetup(spec);
+      const sim = await Sim.create(gpu, configFor(c.problem, 64, { ndim: 2, tEnd: 2, ...c.overrides }));
+      try {
+        const d0 = await sim.diagnostics();
+        let work = 0;
+        for (let k = 0; k < 100000; k++) {
+          sim.step(1);
+          const d = await sim.diagnostics();
+          work -= d.bodies![0].force[0] * 0.1 * d.dt;
+          if (d.t >= 2 - 1e-6) break;
+        }
+        const d = await sim.diagnostics();
+        const { u1, u2 } = await sim.readState();
+        // The gas ahead of the piston (its front at x = -0.35 + 0.2 = -0.15), a cell clear of it.
+        const n = 64;
+        let ps = 0;
+        let cells = 0;
+        for (let j = 0; j < n; j++)
+          for (let i = 0; i < n; i++) {
+            const x = (i + 0.5) / n - 0.5;
+            const o = 4 * (j * n + i);
+            if (x > -0.15 + 2 / n && u2[o + 3] === 0) {
+              ps += 0.4 * u2[o + 1];
+              cells++;
+            }
+          }
+        void u1;
+        const adiabat = (0.85 / 0.65) ** 1.4;
+        const m = {
+          mass_drift: Math.abs(d.mass / d0.mass - 1), pressure_ahead: ps / cells, adiabat, energy_gained: d.eTot - d0.eTot, work, steps: d.steps,
+        };
+        const pass = m.mass_drift < 1e-6 && Math.abs(m.pressure_ahead / adiabat - 1) < 0.05 && Math.abs(m.energy_gained / work - 1) < 0.05;
+        return { pass, metrics: m };
+      } finally {
+        sim.destroy();
+      }
+    },
+  },
+  {
+    id: 'galilean-drag',
+    name: 'A body moving through still liquid against liquid streaming past it: the same drag (2D 512^2, cylinder, Reynolds number 100, explicit and implicit pressure)',
+    criterion:
+      'A cylinder of diameter 0.25 (16 cells across) in a periodic box of liquid 8 across (Mach 0.1, nu = 0.0025): at rest with the liquid at U = 1, and sliding at -1 through the liquid at rest. Over t = 1 to 3 the mean drag agrees to 5% with the explicit scheme; the moving body’s drag is noisier (each cell it crosses a small piston stroke): the rms of the difference of the two histories is reported. With implicit pressure the same is measured and reported (the wall’s velocity is not in the solve’s source yet), not judged',
+    async run(gpu: Gpu) {
+      const spec = (moving: boolean): SetupSpec => ({
+        format: 'shaderous-setup', version: 1, id: 'galilean', name: 'Galilean drag',
+        domain: { ndim: 2, n: 512, amr: 0, box: 8, supports2d: true, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } },
+        physics: { eos: 'liquid', eosParams: { liqRho: 1, liqC: 10 }, gravity: 'off', riemann: 'hllc', viscosity: 0.0025 },
+        background: { rho: 1, p: 0, v: [moving ? 0 : 1, 0, 0] },
+        parts: [{ kind: 'obstacle', id: 'cylinder', shape: { type: 'sphere', center: [moving ? 2 : 0, 0.01, 0], radius: 0.125 }, ...(moving ? { motion: { slide: { velocity: [-1, 0, 0] } } } : {}) }],
+      }) as unknown as SetupSpec;
+      const history = async (moving: boolean, pressure: 'explicit' | 'implicit') => {
+        const c = compileSetup(spec(moving));
+        const sim = await Sim.create(gpu, configFor(c.problem, 512, { ndim: 2, tEnd: 1, ...c.overrides, pressure }));
+        try {
+          await sim.runToEnd(64, 1e7);
+          const f: number[] = [];
+          for (let k = 1; k <= 200; k++) {
+            sim.cfg.tEnd = 1 + 0.01 * k;
+            sim.writeParams();
+            await sim.runToEnd(64, 1e7);
+            f.push((await sim.diagnostics()).bodies![0].force[0]);
+          }
+          return f;
+        } finally {
+          sim.destroy();
+        }
+      };
+      const m: Record<string, number> = {};
+      let pass = true;
+      for (const pressure of ['explicit', 'implicit'] as const) {
+        const a = await history(false, pressure);
+        const b = await history(true, pressure);
+        const mean = (x: number[]) => x.reduce((s, v) => s + v, 0) / x.length;
+        const diff = Math.abs(mean(b) / mean(a) - 1);
+        const rms = Math.sqrt(mean(a.map((v, i) => (b[i] - v) ** 2))) / Math.abs(mean(a));
+        m[`${pressure}_cd_rest`] = mean(a) / 0.125;
+        m[`${pressure}_cd_moving`] = mean(b) / 0.125;
+        m[`${pressure}_mean_difference`] = diff;
+        m[`${pressure}_rms_difference_over_mean`] = rms;
+        if (pressure === 'explicit') pass &&= diff < 0.05;
+      }
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'mesh-vs-shape',
     name: 'A sphere from a mesh against the built-in sphere (3D 64 and 128, tunnel, Reynolds number 100)',
     criterion:

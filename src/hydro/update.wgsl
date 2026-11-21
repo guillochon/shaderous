@@ -26,6 +26,7 @@
 #include <frame>
 #include <psplit>
 #include <psplit_store>
+#include "hydro/moving_flags.wgsl"
 
 @group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(2) var U1: texture_3d<f32>;
@@ -61,15 +62,16 @@ fn load_pred(c: vec3<i32>) -> Q {
 }
 
 // For viscosity (hydro/diffusion.wgsl): the velocity alone, which costs one load and no
-// equation of state. A solid cell is at rest.
+// equation of state. A solid cell is at rest, but in a moving body (hydro/moving.ts), whose
+// velocity its momentum holds.
 fn load_vel(c: vec3<i32>) -> vec3<f32> {
   if (INTERIOR) {
-    if (has_solids() && textureLoad(U2, c, 0).w > 0.5) { return vec3<f32>(0.0); }
+    if (!MOVING && has_solids() && textureLoad(U2, c, 0).w > 0.5) { return vec3<f32>(0.0); }
     let u = textureLoad(U1, c, 0);
     return u.yzw / max(u.x, P.rho_floor);
   }
   let m = bc_map(c);
-  if (has_solids() && textureLoad(U2, m.c, 0).w > 0.5) { return vec3<f32>(0.0); }
+  if (!MOVING && has_solids() && textureLoad(U2, m.c, 0).w > 0.5) { return vec3<f32>(0.0); }
   let u = textureLoad(U1, m.c, 0);
   var v = u.yzw / max(u.x, P.rho_floor);
   if (shear_ghost(c)) {

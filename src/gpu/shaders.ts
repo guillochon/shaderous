@@ -29,6 +29,9 @@ const DEFAULT_SLOTS: Slots = {
   walls: 'hydro/walls_off.wgsl',
   amr_walls: 'amr/walls_off.wgsl',
   pwalls: 'pressure/pwalls_off.wgsl',
+  // Moving bodies (hydro/moving.ts): none unless a run has them.
+  moving: 'const MOVING = false;\nfn moving_mark(m: f32) -> bool { return false; }\n',
+  moving_body: 'const N_MOVING = 0u;\nfn body_pose(i: u32, t: f32) -> Pose { return pose_id(); }\nfn moving_at(x: vec3<f32>) -> vec4<f32> { return vec4<f32>(0.0); }\n',
   ap_walls: 'amr/pressure/pwalls_off.wgsl',
   ap_store: 'amr/pressure/store_off.wgsl',
   ap_lag: 'amr/pressure/lag_liquid.wgsl',

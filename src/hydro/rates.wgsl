@@ -7,6 +7,7 @@
 // gpu/reduce.wgsl expect. Both values are non-negative, so comparing their bit patterns as
 // integers orders them as floats.
 #include "hydro/common.wgsl"
+#include "hydro/moving_flags.wgsl"
 #include "gravity/ext_bind.wgsl"
 #include <eos>
 #include "hydro/pfloor.wgsl"
@@ -59,8 +60,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
       rate = (abs(w.w1.y) + w.w2.y) * h.x + (abs(w.w1.z) + w.w2.y) * h.y;
       acc += sph_accel(sg, w.w1.yzw, g_dx);
     }
-    // Solid cells hold no gas to keep stable.
-    if (u2.w <= 0.5) {
+    // Solid cells hold no gas to keep stable; a moving body's cells count, with their body's
+    // velocity in their momentum, so that the body crosses at most the Courant fraction of a cell.
+    if (u2.w <= 0.5 || (MOVING && moving_mark(u2.w))) {
       atomicMax(&wg_max[blk], bitcast<u32>(rate));
       atomicMax(&wg_max[blk + 1u], bitcast<u32>(acc));
     }
