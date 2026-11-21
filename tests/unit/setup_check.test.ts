@@ -38,6 +38,10 @@ describe('checkSetup', () => {
     expect(has(axisym('field-loop'), /divergence-free in Cartesian coordinates only/)).toBe(false);
     // Seeds 10442, 10803: the carbon-oxygen ignition is white dwarf matter, for the Helmholtz gas.
     expect(has(flow('co-ignition', { physics: { eos: 'ideal', species: 'aprox13' } }), /needs equation of state: white dwarf matter/i)).toBe(true);
+    // Seed 10803: and units in which white dwarf matter's numbers do not fit 32 bits.
+    const ign = (units: NonNullable<NonNullable<SetupSpec['domain']>['units']>) => texts(setup({ domain: { ndim: 3, n: 64, units }, physics: { eos: 'helmholtz', species: 'aprox13' } }, [{ kind: 'flow', name: 'co-ignition' }]), 'error');
+    expect(has(ign({ length: { unit: 'pc', value: 1 }, density: { unit: 'g/cm3', value: 1e-20 }, velocity: { unit: 'km/s', value: 1 } }), /too far from 1 for the GPU’s|too far from 1 for the GPU's/)).toBe(true);
+    expect(has(ign({ length: { unit: 'm', value: 1e7 }, mass: { unit: 'Msun', value: 1 } }), /too far from 1/)).toBe(false);
     // Seed 10601: network burning in comoving coordinates.
     expect(has(texts(setup({ domain: { ndim: 3, n: 64, bc: { lo: [0, 0, 0], hi: [0, 0, 0] } }, physics: { species: 'aprox13', burn: { network: 'aprox13' }, cosmology: { zStart: 10, boxMpc: 100 } } }), 'error'), /not with comoving coordinates/i)).toBe(true);
     // (Seed 10159: the ZND detonation burns fuel into ash.)

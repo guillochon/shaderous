@@ -68,6 +68,12 @@ export interface FlowDef<P = Record<string, number | boolean>> {
   face?(ctx: FlowContext, p: P): FaceFn;
   /** Burning that goes with the flow. */
   burn?(ctx: FlowContext, p: P): AnyBurnSpec;
+  /**
+   * What is wrong with the flow in this setup that rules cannot say (setup/check.ts asks): a
+   * sentence, or null. For values the flow sets in physical units that the setup's units would
+   * carry past the GPU's 32-bit numbers.
+   */
+  issues?(ctx: FlowContext, p: P): string | null;
   /** Heat put in once the stars are settled (Problem.heat). */
   heat?(ctx: FlowInitContext, p: P): (x: number, y: number, z: number, rho: number) => number | undefined;
 }

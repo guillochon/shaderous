@@ -13,7 +13,8 @@ import { codeG, type UnitSystem } from '../units/units';
 import { compileSetup } from './compile';
 import { FACTS, PART_OPTIONS, ruleIssues, type Issue } from './options';
 import { buildBodies, partIds, type Bodies, type BuiltStar } from './parts/bodies';
-import { FLOWS } from './parts/flow';
+import { FLOWS, flowValues } from './parts/flow';
+import { NET_SPECIES } from '../burn/network';
 import { eggleton } from '../problems/roche';
 import { ANEOS_MATERIALS } from '../eos/aneos';
 import { speciesMaterials, speciesNuclides } from '../species/mixture';
@@ -463,6 +464,13 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     });
     parts.forEach((p, i) => {
       if (p.kind === 'flow' && !FLOWS[p.name]) out.push({ level: 'error', path: `parts.${i}.name`, text: `${label(i)}: this build has no flow named "${p.name}"` });
+      // What the flow itself finds wrong (FlowDef.issues), in the document's own units, as its init is given them.
+      if (p.kind === 'flow' && FLOWS[p.name]?.issues) {
+        const units = spec.physics?.cosmology ? undefined : plainUnits(spec);
+        const sp = spec.physics?.species;
+        const why = FLOWS[p.name].issues!({ spec, box: spec.domain?.box ?? 1, ndim: spec.domain?.ndim === 2 ? 2 : 3, G: gravConst(spec, units), units, species: sp === 'aprox13' ? NET_SPECIES : sp }, flowValues(p).values as never);
+        if (why) out.push({ level: 'error', path: `parts.${i}`, text: `${label(i)}: ${why}` });
+      }
     });
 
     const built = buildSetupBodies(spec);

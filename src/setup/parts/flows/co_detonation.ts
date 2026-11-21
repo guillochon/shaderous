@@ -36,6 +36,16 @@ const ignition: FlowDef<Params> = {
     tign: { label: 'Ignition temperature (10⁹ K)', default: 4, min: 2, max: 8, step: 0.25, tip: 'Temperature of the layer at the closed end that sets the fuel alight, in 1e9 K' },
     width: { label: 'Ignition layer (km)', default: 30, min: 5, max: 200, step: 5, tip: 'Thickness of the hot layer at the closed end, in km' },
   },
+  // White dwarf matter's density and pressure (about 1e25 dyn/cm^2 at 1e7 g/cm^3), in the
+  // setup's units, must fit 32 bits: in parsecs, 1e-20 g/cm^3 and km/s they did not, and the run
+  // was NaN before its first step (random test seed 10803).
+  issues: (ctx, p) => {
+    if (!ctx.units) return null;
+    const rho = toCode(ctx.units, 'density', 10 ** p.logrho * 1e3);
+    const pressure = toCode(ctx.units, 'pressure', 1e-1 * 1e25 * 10 ** (1.5 * (p.logrho - 7)));
+    const worst = Math.max(rho, pressure, 1 / rho, 1 / pressure);
+    return worst > 1e30 ? `in these units the fuel's density is ${rho.toPrecision(2)} and its pressure about ${pressure.toPrecision(2)} code units, too far from 1 for the GPU's 32-bit numbers: choose units nearer white dwarf matter (10^4 km and a solar mass, say)` : null;
+  },
   init: (ctx, p) => {
     const units = ctx.units;
     if (!units) throw new Error('the carbon–oxygen ignition needs physical units (domain.units)');
