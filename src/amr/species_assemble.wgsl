@@ -34,7 +34,9 @@ fn x_at(slot: i32, l: vec3<i32>) -> array<vec4<f32>, NG> {
     for (var j = 0; j < 2; j++) {
       for (var i = 0; i < 2; i++) {
         let c = u_leaf(ch, f + vec3<i32>(i, j, k));
-        for (var g = 0u; g < NG; g++) { u[g] += c[g]; }
+        // (Weighed by the children's volumes in (R, z) and (r, theta) runs: amr/grid.wgsl.)
+        let cw = child_weight(slot, l, i, j);
+        for (var g = 0u; g < NG; g++) { u[g] += cw * c[g]; }
       }
     }
   }

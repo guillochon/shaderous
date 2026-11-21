@@ -177,30 +177,7 @@ fn share(nb: i32) -> f32 {
   return select(1.0, 0.0, g_deposit);
 }
 
-// A spherical run: a refined neighbor's fine face (cell `a` of block `src` below or above it)
-// against the mean of the two that cover cell l's face along `axis`: its area over theirs, so
-// that the coarse face's flux is their area-weighted mean. A radial face's area goes as its
-// dcos(theta), a polar face's as the integral of r dr over it (r_c dr, or r_c^2 sinh D).
-fn sph_fine_face(slot: i32, l: vec3<i32>, axis: i32, src: i32, a: vec3<i32>) -> f32 {
-  let q = blk_sph_grid(src);
-  let fg = blk_coord(src) * BS + a;
-  let cg = 2 * (blk_coord(slot) * BS + l);
-  var w0 = 0.0;
-  var w1 = 0.0;
-  var hi = false;
-  if (axis == 0) {
-    w0 = sph_dcos(cg.y, q);
-    w1 = sph_dcos(cg.y + 1, q);
-    hi = fg.y == cg.y + 1;
-  } else {
-    let r0 = sph_cell_g(cg.x, 0, q).r;
-    let r1 = sph_cell_g(cg.x + 1, 0, q).r;
-    w0 = select(r0, r0 * r0, q.d != 0.0);
-    w1 = select(r1, r1 * r1, q.d != 0.0);
-    hi = fg.x == cg.x + 1;
-  }
-  return 2.0 * select(w0, w1, hi) / (w0 + w1);
-}
+// (sph_fine_face: amr/grid.wgsl, shared with amr/species.wgsl.)
 
 // Replace the fluxes `own` through the cell's faces on its block's faces with its neighbors':
 //  - a refined neighbor's: the average of the fine fluxes through the face, as the fine cells

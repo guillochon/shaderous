@@ -562,7 +562,6 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
     if (p.kind === 'orbit') return 'an orbit puts its bodies off the axis: an axisymmetric run takes bodies only on it';
     if (p.kind === 'star' && ((p.pos?.[0] ?? 0) !== 0 || (p.pos?.[2] ?? 0) !== 0 || (p.vel?.[0] ?? 0) !== 0 || (p.vel?.[2] ?? 0) !== 0)) return 'a star must sit on the axis (R = 0) and move along it';
   }
-  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in axisymmetric runs yet';
   if (c.problem.rotation || c.problem.shear || c.problem.cosmology) return 'an axisymmetric run has no rotating frame, shear or expansion';
   // (A mirror across z = 0 halves the run, as in Cartesian coordinates; R already starts at the axis.)
   if (c.symmetry?.[0]) return 'an axisymmetric run is mirrored across z = 0 only (code y): R already starts at the axis';
@@ -697,7 +696,6 @@ export function sphericalUnsupported(c: SimConfig): string | null {
   if (c.viscosity > 0 || c.conductivity > 0) return 'viscosity and conduction are not available in spherical runs yet';
   for (const m of c.problem.masses?.(c.params, c.G, c.problem.box / c.n, c.ndim) ?? [])
     if (m.pos.some((x) => (x ?? 0) !== 0) || m.vel.some((v) => (v ?? 0) !== 0)) return 'a point mass must sit at the origin, at rest';
-  if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in spherical runs yet';
   if (c.problem.rotation || c.problem.shear || c.problem.cosmology || c.problem.frame) return 'a spherical run has no rotating or accelerating frame, shear or expansion';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in spherical runs (both poles are in the grid)';
   if (uniformField(c).some((g) => g !== 0)) return 'a uniform field is not available in spherical runs';
@@ -2022,7 +2020,8 @@ export class Sim implements Simulation {
       );
     }
     if (this.speciesGroups > 0) {
-      const ns = { species_n: speciesConst(this.speciesGroups), comp: slots.comp };
+      // (And the geometry: a spherical run's species are weighed by its cells' faces, hydro/species.wgsl.)
+      const ns = { species_n: speciesConst(this.speciesGroups), comp: slots.comp, geometry: slots.geometry };
       [this.pSpeciesPredict, this.pSpecies] = await Promise.all([
         computePipeline(d, assemble('hydro/species_predict.wgsl', ns), 'species half step'),
         computePipeline(d, assemble('hydro/species.wgsl', ns), 'species'),

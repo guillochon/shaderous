@@ -252,6 +252,11 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (c.y == 0 && sym_lo(1)) { fy.lo = mirror_flux(fy.lo, 1); }
   if (c.z == 0 && sym_lo(2) && !flat) { fz.lo = mirror_flux(fz.lo, 2); }
 
+  // The species pass's records (hydro/species_on.wgsl): the bare mass fluxes, before (R, z) and
+  // (r, theta) runs weigh them by their faces' areas over this cell's volume, which the species
+  // pass does for each cell itself (a face's weight is not the same for the cells on its sides).
+  store_mass_flux(c, fx, fy, fz, flat);
+
   // An axisymmetric run: the radial faces weighed by their areas, and the radial momentum's
   // geometric source (p + rho v_phi^2) / R, with p the mean of the two radial faces' pressures:
   // with it, uniform pressure is in balance to rounding, and a balanced state stays as the
@@ -291,7 +296,6 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     textureStore(O2, c, vec4<f32>(fz.lo.m, fz.hi.m, 0.0, 0.0));
     return;
   }
-  store_mass_flux(c, fx, fy, fz, flat);
   // Forces on bodies: their wall faces' fluxes (hydro/walls_on.wgsl).
   store_wall_forces(c, fx, fy, fz, flat);
   store_face_velocity(c, vec3<f32>(fx.hi.vn, fy.hi.vn, fz.hi.vn));

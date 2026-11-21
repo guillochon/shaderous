@@ -24,13 +24,20 @@ fn predict_x(slot: i32, l: vec3<i32>, mask: vec3<f32>) -> array<vec4<f32>, NG> {
   let w = textureLoad(W1, c, 0);
   if (w.x < 0.0) { return x; }
   let h = 0.5 * clock.dt / cell_dx(blk_dx(slot), clock.ah);
+  // (A spherical run's cells are dx / h long along r and theta: hydro/species_predict.wgsl.)
+  var hs = vec2<f32>(1.0);
+  if (spherical()) {
+    let gl = blk_coord(slot) * BS + l;
+    hs = sph_cell_g(gl.x, gl.y, blk_sph_grid(slot)).h;
+  }
   let nax = select(3, 2, is2d());
   for (var a = 0; a < nax; a++) {
     if (mask[a] == 0.0) { continue; }
     var e = vec3<i32>(0);
     e[a] = 1;
     let s = slopes(load_sx(c - e), x, load_sx(c + e));
-    for (var g = 0u; g < NG; g++) { xh[g] -= h * w.yzw[a] * s[g]; }
+    let ha = select(h, h * hs[min(a, 1)], a < 2);
+    for (var g = 0u; g < NG; g++) { xh[g] -= ha * w.yzw[a] * s[g]; }
   }
   return xh;
 }

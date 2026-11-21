@@ -24,8 +24,16 @@ fn mf_index(c: vec3<i32>, axis: i32) -> u32 {
 
 // Net inflow of every species through the two faces of cell c along one axis, given the
 // fractions of the five cells around it at the start of the step, k = -2 .. 2 (index k + 2).
+// (R, z) and (r, theta) runs weigh each face's flux by its area over the cell's volume / dx, as
+// the hydro does (hydro/flux.wgsl cyl_face, sph_face): the records hold the bare fluxes.
 fn axis_inflow(c: vec3<i32>, axis: i32, cells: array<array<vec4<f32>, NG>, 5>, acc: ptr<function, array<vec4<f32>, NG>>) {
   let e = unit(axis);
+  var fw = vec2<f32>(1.0);
+  if (cylindrical() && axis == 0) { fw = cyl_weights(c.x); }
+  if (spherical() && axis < 2) {
+    let g = sph_cell(c.x, c.y);
+    fw = select(g.wt, g.wr, axis == 0);
+  }
   for (var side = 0; side < 2; side++) {
     // Face between cells k = side - 1 and k = side (index side + 1 and side + 2).
     let F = MF[mf_index(c + side * e, axis)];
@@ -41,7 +49,7 @@ fn axis_inflow(c: vec3<i32>, axis: i32, cells: array<array<vec4<f32>, NG>, 5>, a
       for (var g = 0u; g < NG; g++) { xf[g] = mix(xf[g], cells[up][g], w); }
     }
     xf = face_fractions(xf);
-    let w = select(-F, F, side == 0);  // inflow through the lower face, outflow through the upper
+    let w = select(-F * fw.y, F * fw.x, side == 0);  // inflow through the lower face, outflow through the upper
     for (var g = 0u; g < NG; g++) { (*acc)[g] += w * xf[g]; }
   }
 }

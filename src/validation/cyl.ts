@@ -471,6 +471,68 @@ export const CYL_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'cyl-species',
+    name: 'Axisymmetric: species carried by a point blast, on the uniform grid and on blocks',
+    criterion:
+      'The point blast of cyl-sedov (128^2; and on blocks of two levels, 128^2 finest) in gas of three nuclides that set its equation of state: helium, carbon at a uniform 0.2, and an oxygen blob off the axis. At t = 0.05 each species keeps its mass, summed over the rings, to 1e-5 (the species pass weighs each face by its area over the ring’s volume, as the hydro does; with other weights the rescaling to each cell’s density moves mass between species: 3e-3 of the oxygen’s), the carbon is still 0.2 to 1e-4 at every cell, and the fractions sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4]',
+    async run(gpu) {
+      const n = 128;
+      const dx = 1 / n;
+      const r0 = 3 * dx;
+      let vol = 0;
+      for (let j = 0; j < n; j++)
+        for (let i = 0; i < n; i++) if (Math.hypot((i + 0.5) * dx, (j + 0.5) * dx - 0.5) < r0) vol += 2 * Math.PI * (i + 0.5) * dx * dx * dx;
+      const blast = ring((R, z) => {
+        const o = 0.5 * (1 - Math.tanh((Math.hypot(R - 0.2, z - 0.1) - 0.06) / 0.01));
+        return { rho: 1, vx: 0, vy: 0, vz: 0, p: Math.hypot(R, z) < r0 ? 0.4 / vol : 1e-5, s: 0, X: [0.8 * (1 - o), 0.2, 0.8 * o] };
+      }, { bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], tEnd: 0.05, species: ['he4', 'c12', 'o16'] });
+      const m: Record<string, number> = {};
+      let pass = true;
+      const judge = (tag: string, X0: Float32Array[], X1: Float32Array[], rho0: (q: number) => number, rho1: (q: number) => number, dv0: (q: number) => number, dv1: (q: number) => number) => {
+        const mass = (X: Float32Array[], rho: (q: number) => number, dv: (q: number) => number) => X.map((x) => x.reduce((t, v, q) => t + v * rho(q) * dv(q), 0));
+        const a = mass(X0, rho0, dv0);
+        const b = mass(X1, rho1, dv1);
+        let flat = 0;
+        let sum = 0;
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let q = 0; q < X1[0].length; q++) {
+          flat = Math.max(flat, Math.abs(X1[1][q] - 0.2));
+          sum = Math.max(sum, Math.abs(X1[0][q] + X1[1][q] + X1[2][q] - 1));
+          for (const x of X1) {
+            lo = Math.min(lo, x[q]);
+            hi = Math.max(hi, x[q]);
+          }
+        }
+        const drift = Math.max(...b.map((v, i) => Math.abs(v / a[i] - 1)));
+        const gas = (rho: (q: number) => number, dv: (q: number) => number, count: number) => { let t = 0; for (let q = 0; q < count; q++) t += rho(q) * dv(q); return t; };
+        m[`${tag}_gas_mass_drift`] = Math.abs(gas(rho1, dv1, X1[0].length) / gas(rho0, dv0, X0[0].length) - 1);
+        b.forEach((v, i) => (m[`${tag}_species_${i}_mass_drift`] = v / a[i] - 1));
+        Object.assign(m, { [`${tag}_uniform_species_error`]: flat, [`${tag}_sum_error`]: sum, [`${tag}_min`]: lo, [`${tag}_max`]: hi, [`${tag}_species_mass_drift`]: drift });
+        pass &&= flat < 1e-4 && sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && drift < 1e-5;
+      };
+      await withSim(gpu, blast, n, { ndim: 2 }, async (sim) => {
+        const ringDv = (q: number) => 2 * Math.PI * ((q % n) + 0.5) * dx * dx * dx;
+        const s0 = await sim.readState();
+        const X0 = await sim.readSpecies();
+        await sim.runToEnd();
+        const s1 = await sim.readState();
+        judge('uniform', X0, await sim.readSpecies(), (q) => s0.u1[4 * q], (q) => s1.u1[4 * q], ringDv, ringDv);
+      });
+      await withAmr(gpu, blast, n, { ndim: 2, amrLevels: 2 }, async (sim) => {
+        const c0 = await sim.readLeaves();
+        const X0 = await sim.readLeafSpecies();
+        await sim.runToEnd();
+        const c1 = await sim.readLeaves();
+        const leaf = (c: typeof c0) => (q: number) => 2 * Math.PI * c.x[q] * c.dx[q] * c.dx[q];
+        judge('blocks', X0, await sim.readLeafSpecies(), (q) => c0.u1[4 * q], (q) => c1.u1[4 * q], leaf(c0), leaf(c1));
+        m.blocks_levels = new Set(Array.from(c1.dx)).size;
+      });
+      pass &&= m.blocks_levels > 1;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'cyl-noh',
     name: 'Axisymmetric: the spherical Noh implosion',
     criterion: 'Cold gas (gamma = 5/3) falling at unit speed toward the origin from every direction, in (R, z) at 512^2 (R to 2, so that no gas measured came in through a boundary): at t = 0.6 the shock is at r = 0.2 and the post-shock density, 64 in the exact solution, averages within 5% of it over 0.06 < r < 0.17 away from the axis (R > 4 cells; the origin keeps the wall heating every code has there), and the pre-shock density at r = 0.3 is within 5% of (1 + t / r)^2 = 9',

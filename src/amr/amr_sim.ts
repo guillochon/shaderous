@@ -997,7 +997,8 @@ export class AmrSim implements Simulation {
   private async buildSpecies() {
     const d = this.device;
     const v = (t: GPUTexture) => t.createView();
-    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n`, comp: hydroSlots(this.cfg).comp, ...this.mfSlots };
+    // (And the geometry: a spherical run's species are weighed by its cells' faces, amr/species.wgsl.)
+    const ns = { species_n: `const NG: u32 = ${this.speciesGroups}u;\nconst SP_DEPTH: i32 = ${this.speciesDepth};\n`, comp: hydroSlots(this.cfg).comp, geometry: hydroSlots(this.cfg).geometry, ...this.mfSlots };
     const kout = (this.comp ? { 26: v(this.comp) } : {}) as Record<number, GPUTextureView>;
     const kflag = (this.comp ? { 24: v(this.pred[1]) } : {}) as Record<number, GPUTextureView>;
     this.pSpecies = await Promise.all(

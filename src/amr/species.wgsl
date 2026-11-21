@@ -61,7 +61,9 @@ fn own_flux(slot: i32, l: vec3<i32>, axis: i32, side: i32) -> array<vec4<f32>, N
 
 // Average of the fine species fluxes through the face coarse cell l shares with the refined
 // neighbor `np` (amr/update.wgsl match_faces): `upper` says the fine blocks lie on np's upper side.
-fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> array<vec4<f32>, NG> {
+// In (R, z) and (r, theta) runs the fine faces' areas differ, and the coarse face's flux is their
+// area-weighted mean, as the hydro's (amr/update.wgsl match_faces).
+fn fine_flux(slot: i32, np: i32, axis: i32, upper: bool, l: vec3<i32>) -> array<vec4<f32>, NG> {
   let h = vec3<i32>(l >= vec3<i32>(BS / 2));
   var bits = h;
   bits[axis] = i32(upper);
@@ -81,7 +83,9 @@ fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> array<vec4<f32>, 
       var a = f;
       a[t1] += i;
       a[t2] += j;
-      let F = mf_load(mf_index(ch, a + e, axis));
+      var F = mf_load(mf_index(ch, a + e, axis));
+      if (cylindrical() && axis == 1) { F *= cyl_child_weight(blk_coord(slot).x * BS + l.x, blk_coord(ch).x * BS + a.x); }
+      if (spherical()) { F *= sph_fine_face(slot, l, axis, ch, a); }
       let ff = face_flux(ch, a, axis, F);
       for (var g = 0u; g < NG; g++) { sum[g] += ff[g]; }
     }
@@ -89,6 +93,18 @@ fn fine_flux(np: i32, axis: i32, upper: bool, l: vec3<i32>) -> array<vec4<f32>, 
   let w = 1.0 / f32(n1 * n2);
   for (var g = 0u; g < NG; g++) { sum[g] *= w; }
   return sum;
+}
+
+// The weights of a cell's lower and upper faces along an axis: area over volume / dx in (R, z)
+// and (r, theta) runs, 1 otherwise.
+fn face_weights(slot: i32, l: vec3<i32>, axis: i32) -> vec2<f32> {
+  let gl = blk_coord(slot) * BS + l;
+  if (cylindrical() && axis == 0) { return cyl_weights(gl.x); }
+  if (spherical() && axis < 2) {
+    let g = sph_cell_g(gl.x, gl.y, blk_sph_grid(slot));
+    return select(g.wt, g.wr, axis == 0);
+  }
+  return vec2<f32>(1.0);
 }
 
 @compute @workgroup_size(8, 8, 4)
@@ -114,9 +130,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var hi: array<vec4<f32>, NG>;
     let nlo = select(-1, bt(slot, 6u + u32(2 * a)), l[a] == 0);
     let nhi = select(-1, bt(slot, 7u + u32(2 * a)), l[a] == BS - 1);
-    if (nlo >= 0 && !blk_leaf(nlo)) { lo = fine_flux(nlo, a, true, l); } else { lo = own_flux(slot, l, a, 0); }
-    if (nhi >= 0 && !blk_leaf(nhi)) { hi = fine_flux(nhi, a, false, l); } else { hi = own_flux(slot, l, a, 1); }
-    for (var g = 0u; g < NG; g++) { acc[g] += lo[g] - hi[g]; }
+    if (nlo >= 0 && !blk_leaf(nlo)) { lo = fine_flux(slot, nlo, a, true, l); } else { lo = own_flux(slot, l, a, 0); }
+    if (nhi >= 0 && !blk_leaf(nhi)) { hi = fine_flux(slot, nhi, a, false, l); } else { hi = own_flux(slot, l, a, 1); }
+    // (R, z) and (r, theta) runs: each face's flux weighed by its area over the cell's volume /
+    // dx, as the hydro's (hydro/flux.wgsl cyl_face, sph_face). The records hold the bare fluxes.
+    let w = face_weights(slot, l, a);
+    for (var g = 0u; g < NG; g++) { acc[g] += w.x * lo[g] - w.y * hi[g]; }
   }
   let dtdx = clock.dt / cell_dx(blk_dx(slot), clock.ah);
   var out: array<vec4<f32>, NG>;

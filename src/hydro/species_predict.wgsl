@@ -17,12 +17,17 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let u = textureLoad(U1, c, 0);
     let v = u.yzw / max(u.x, P.rho_floor);
     let h = 0.5 * clock.dt / cell_dx(P.dx, clock.ah);
+    // (A spherical run's cells are dx / h long along r and theta: sph_cell. The polar step
+    // taken as dx overshot the face values, and clipping them moved mass between species.)
+    var hs = vec2<f32>(1.0);
+    if (spherical()) { hs = sph_cell(c.x, c.y).h; }
     let flat = P.dims.z == 1u;
     for (var a = 0; a < 3; a++) {
       if (a == 2 && flat) { break; }
       let e = unit(a);
       let s = slopes(load_x(c - e), x, load_x(c + e));
-      for (var g = 0u; g < NG; g++) { xh[g] -= h * v[a] * s[g]; }
+      let ha = select(h, h * hs[min(a, 1)], a < 2);
+      for (var g = 0u; g < NG; g++) { xh[g] -= ha * v[a] * s[g]; }
     }
   }
   for (var g = 0u; g < NG; g++) { textureStore(SH, group_at(c, g), xh[g]); }
