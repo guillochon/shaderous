@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import h5wasm from 'h5wasm/node';
 
 import { library, openAthdf, readAthdfFile, writeAthdfFile, type H5 } from '../../src/io/athdf';
-import { countAtCap, planView, readForView } from '../../src/io/view';
+import { blocksOfUniform, countAtCap, planView, probeFile, readForView, streamForView } from '../../src/io/view';
 import type { Snapshot } from '../../src/io/snapshot';
 
 const h5 = h5wasm as unknown as H5;
@@ -133,5 +133,92 @@ describe('view-only loading', () => {
       expect(v.time).toBe(3);
     }
     (await library(h5)).FS.unlink(file);
+  });
+});
+
+/** A uniform 2D grid of n x n cells on [0, 1]^2 with a periodic, divergence-free face field. */
+function uniform(n: number): Snapshot {
+  const data: Record<string, Float32Array> = {};
+  for (const v of ['rho', 'press', 'vel1', 'vel2', 'vel3', 'Bcc1', 'Bcc2', 'Bcc3', 'Bf1', 'Bf2', 'Bf3']) data[v] = new Float32Array(n * n);
+  const dx = 1 / n;
+  const A = (x: number, y: number) => Math.sin(2 * Math.PI * x) * Math.cos(2 * Math.PI * y) / (2 * Math.PI);
+  for (let j = 0; j < n; j++)
+    for (let i = 0; i < n; i++) {
+      const c = j * n + i;
+      const x = (i + 0.5) * dx;
+      const y = (j + 0.5) * dx;
+      data.rho[c] = 1 + 0.5 * Math.sin(2 * Math.PI * x) * Math.sin(4 * Math.PI * y);
+      data.press[c] = 1 + y;
+      data.vel1[c] = Math.cos(2 * Math.PI * (x + y));
+      data.Bf1[c] = (A(i * dx, (j + 1) * dx) - A(i * dx, j * dx)) / dx;
+      data.Bf2[c] = -(A((i + 1) * dx, j * dx) - A(i * dx, j * dx)) / dx;
+    }
+  return {
+    ndim: 2, rootSize: [n, n, 1], blockSize: [n, n, 1], lo: [0, 0, -0.5], hi: [1, 1, 0.5], time: 1, steps: 1,
+    levels: Int32Array.of(0), locations: Int32Array.of(0, 0, 0), data,
+    meta: { program: 'shaderous', build: 'test', query: 'problem=sedov&dim=2&n=32', mhd: { n, nz: 1, upper: [[], [], []] } },
+  };
+}
+
+describe('view-only loading in parts', () => {
+  it('streams merged blocks in batches, the same as reading them whole', async () => {
+    const s = sample();
+    const file = `view-stream-${Math.random().toString(36).slice(2)}.athdf`;
+    await writeAthdfFile(file, s, h5);
+    const lib = await library(h5);
+    const r = openAthdf(lib, file);
+    const whole = readForView(r, 1, { chunk: 2 });
+    const parts: number[] = [];
+    let blocks = 0;
+    streamForView(r, 1, { chunk: 3, batch: 2, emit: (b) => (parts.push(b.levels.length), (blocks += b.levels.length)) });
+    expect(blocks).toBe(whole.levels.length);
+    expect(Math.max(...parts)).toBeLessThanOrEqual(2);
+    // A probe reads the file's own cell, whatever the view merged.
+    const [p] = probeFile(r, [[0.80, 0.30, 0]]);
+    expect(p.level).toBe(1);
+    const x = 0.8 * 2;
+    const y = 0.3;
+    const dx = 2 / (32 << 1);
+    const cx = (Math.floor(x / dx) + 0.5) * dx;
+    const cy = (Math.floor(y / dx) + 0.5) * dx;
+    expect(p.values.rho).toBeCloseTo(1 + 0.5 * Math.sin(3 * cx) * Math.cos(2 * cy), 5);
+    r.close();
+    lib.FS.unlink(file);
+  });
+
+  it('reads a uniform grid as blocks of 16, downsampled by merging, its field divergence-free', async () => {
+    const n = 64;
+    const s = uniform(n);
+    const file = `view-uniform-${Math.random().toString(36).slice(2)}.athdf`;
+    await writeAthdfFile(file, s, h5);
+    const lib = await library(h5);
+    const r = blocksOfUniform(openAthdf(lib, file));
+    const head = r.header();
+    expect(head.rootSize).toEqual([16, 16, 1]);
+    expect(head.blockSize).toEqual([16, 16, 1]);
+    expect(r.blocks).toBe(16);
+    expect(Math.max(...head.levels)).toBe(2);
+    expect(r.variables).not.toContain('Bf1');
+    expect(r.hasFaces).toBe(true);
+    const full = readForView(r, 2, { chunk: 5 });
+    // Each block's cells are the grid's.
+    for (let b = 0; b < full.levels.length; b++) {
+      const [bi, bj] = [full.locations[3 * b], full.locations[3 * b + 1]];
+      for (const [i, j] of [[0, 0], [15, 3], [7, 15]]) expect(full.data.rho![b * 256 + j * 16 + i]).toBe(s.data.rho![(bj * 16 + j) * n + bi * 16 + i]);
+    }
+    expect(maxDiv(full)).toBeLessThan(1e-4);
+    for (const cap of [1, 0]) {
+      const v = readForView(r, cap, { chunk: 7 });
+      expect(v.levels.length).toBe(cap === 1 ? 4 : 1);
+      let m0 = 0;
+      for (const x of s.data.rho!) m0 += x / (n * n);
+      let m1 = 0;
+      const cellsAt = (16 << cap) ** 2;
+      for (const x of v.data.rho!) m1 += x / cellsAt;
+      expect(m1).toBeCloseTo(m0, 5);
+      expect(maxDiv(v)).toBeLessThan(1e-4);
+    }
+    r.close();
+    lib.FS.unlink(file);
   });
 });

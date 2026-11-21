@@ -83,6 +83,14 @@ export class FieldLines {
   private frameNo = 0;
   /** What the seeds were placed for: when it changes they are placed again. */
   private placedFor = '';
+  /**
+   * Place the seeds again on the next draw though nothing they depend on changed: the field
+   * itself did without the clock moving (a view-only checkpoint's faces, loaded a batch at a
+   * time while frames were drawn: seeds placed then sit only where the field had arrived).
+   */
+  reseed() {
+    this.placedFor = '';
+  }
 
   constructor(device: GPUDevice, private format: GPUTextureFormat) {
     this.device = device;
@@ -181,19 +189,20 @@ export class FieldLines {
     // The sampling pass reads the state's first texture, the faces and (blocks) the leaf index and
     // block table; its layout is explicit, so what the shader leaves unused does no harm.
     const entries: Entry[] = [buf(0, 'uniform'), tex(2), tex(13), store3d(14), store3d(15), buf(16, 'storage')];
-    if (amr) entries.push({ binding: 5, visibility: C, texture: { sampleType: 'uint', viewDimension: '3d' } }, buf(30, 'read-only-storage'));
+    // (Blocks: and the baked field's atlas, whose density a view that holds one field samples.)
+    if (amr) entries.push({ binding: 5, visibility: C, texture: { sampleType: 'uint', viewDimension: '3d' } }, buf(30, 'read-only-storage'), tex(17));
     else entries.push(tex(3));
     const layout = d.createBindGroupLayout({ label: 'field-line sampling', entries });
     const code = amr ? assemble('amr/bsample.wgsl') : assemble('render/bsample.wgsl', { eos: EOS_MODULES[sim.cfg.eos] });
     const pSample = await d.createComputePipelineAsync({
       label: 'field-line sampling',
       layout: d.createPipelineLayout({ bindGroupLayouts: [layout] }),
-      compute: { module: d.createShaderModule({ code, label: 'field-line sampling' }), entryPoint: 'main' },
+      compute: { module: d.createShaderModule({ code, label: 'field-line sampling' }), entryPoint: 'main', ...(amr ? { constants: { BAKED: sim.cfg.viewBaked ? 1 : 0 } } : {}) },
     });
     const gSample = [0, 1].map((p) => {
       const r = sim.fieldResources(p, 0);
       const pick: Record<number, GPUBuffer | GPUTextureView> = { 0: sim.paramBuffer, 2: r[2], 13: r[13], 14: bv.createView(), 15: vv.createView(), 16: this.frame };
-      if (amr) Object.assign(pick, { 5: r[5], 30: r[30] });
+      if (amr) Object.assign(pick, { 5: r[5], 30: r[30], 17: r[17] });
       else pick[3] = r[3];
       return d.createBindGroup({
         layout,

@@ -63,9 +63,10 @@ export interface Snapshot {
   /**
    * Read to be viewed only (io/view.ts): its blocks merged to `level`, and the blocks of its tree
    * (leaves and their ancestors), which the atlas is sized for, and the file's own finest
-   * level. Never written to a file.
+   * level. `baked`: the view holds one field (SimConfig.viewBaked), and the snapshot has no data,
+   * only its block tables. Never written to a file.
    */
-  view?: { level: number; nodes: number; fileLevel: number };
+  view?: { level: number; nodes: number; fileLevel: number; baked?: boolean; faces?: boolean };
 }
 
 /**
@@ -172,6 +173,8 @@ export class SnapshotSampler {
     for (let b = 0; b < snap.levels.length; b++) {
       this.index.set(this.key(snap.levels[b], snap.locations[3 * b], snap.locations[3 * b + 1], snap.locations[3 * b + 2]), b);
     }
+    // (A view that holds one field gives the block tables alone: only level() is asked of it.)
+    if (snap.view?.baked) return;
     for (const v of ['rho', 'press', 'vel1', 'vel2', 'vel3'] as const) {
       if (!snap.data[v]) throw new Error(`the file has no "${v}" variable`);
     }

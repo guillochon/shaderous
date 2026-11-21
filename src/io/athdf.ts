@@ -273,6 +273,8 @@ export interface AthdfReader {
   header(): Snapshot;
   /** variable `name` for blocks b0 to b1 (exclusive), each block as [z][y][x] */
   read(name: string, b0: number, b1: number): Float32Array;
+  /** variable `name` in one block, cells [z0, z1) x [y0, y1) x [x0, x1), as [z][y][x] */
+  readSlab(name: string, block: number, z: number[], y: number[], x: number[]): Float32Array;
   /** the faces of blocks b0 to b1, three per texel */
   readFaces(b0: number, b1: number): Float32Array;
   /** turn a snapshot read from this file into the program's axis order (a cylindrical file's) */
@@ -374,6 +376,11 @@ export function openAthdf(lib: Library, name: string): AthdfReader {
         const got = asF32(w.set.slice([[w.index, w.index + 1], [b0, b1], [], [], []]));
         if (got.length !== (b1 - b0) * cells) throw new Error(`"${name}" does not have the shape the header describes`);
         return got;
+      },
+      readSlab(name, block, z, y, x) {
+        const w = where.get(name);
+        if (!w) throw new Error(`the file has no variable "${name}"`);
+        return asF32(w.set.slice([[w.index, w.index + 1], [block, block + 1], z, y, x]));
       },
       readFaces(b0, b1) {
         // A slab of blocks at a time, as it is written.

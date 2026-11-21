@@ -321,31 +321,44 @@ from another build: it then says so, and names any setting this build could not 
 written (a key it no longer reads, a value it rejects or holds to its limits). Those settings
 take this build's values. A file of ours whose preset this build does not have is refused.
 
-### `viewAthdf(url?) → state`
+### `viewAthdf(url?, { oneField?, faces? }?) → state`
 
 Opens an `.athdf` checkpoint for viewing only: for a run too large to continue on this device.
 The file is read in a worker without being copied whole (files larger than WebAssembly's 4 GB
-open), and if its blocks do not fit the GPU memory budget (`viewBudget()`), its finest levels
-are merged into their ancestors, one level at a time, until they do: density, pressure and the
-magnetic field averaged by volume, velocities, the passive scalar and species by mass, and the
-face field by area, so it stays divergence-free. The mesh that shows it holds only what the
-display reads: the state at one parity, the primitives, the display's atlas, a field's faces
-(some 0.6 MB a block with a field, against 2.7 MB to run it). It never steps: `run`,
-`step`, `record` and the page's Run, Step and Reset refuse. Views, slices, projections,
-`probe`, `slice`, `stats` and `screenshot` work. Gravity is off, so the potential is not
-shown.
+open). A uniform grid's file is read as blocks of 16 cells. The run never steps: `run`, `step`,
+`record` and the page's Run, Step and Reset refuse. Gravity is off, so the potential is not
+shown; nor are the shock flag, time bins, burning or radiation.
+
+It is shown in one of two ways, whichever keeps more of the file's levels in the GPU memory
+budget (`viewBudget()`):
+
+- **With its state**: the state at one parity, the primitives, the display's atlas and a
+  field's faces, some 0.6 MB a block with a field (against 2.7 MB to run it). Every field,
+  field lines, `slice`, `stats` and `probe` work, as for a run.
+- **Holding one field**: only the field shown and the density at each cell, some 0.1 MB a block
+  in 3D, worked out on the GPU from the file's primitives (`AmrSim.bake`). Changing the field
+  reads it from the file again (seconds to tens of seconds for a file of gigabytes; `view` and
+  `control` return once it is done). Fields that need neighboring cells (vorticity, divergence,
+  density gradient, the divergence of B) are not offered. `probe` reads the file's own cells,
+  at its full resolution, with the magnetic field (`B`); `slice` and `stats` refuse. Field lines
+  need the face field, 0.13 MB a block more: turning them on opens the file again with it, at
+  the finest level where it fits (`faces: true` asks for it from the start).
+
+If even that does not fit, the finest levels are merged into their ancestors, one level at a
+time, until it does: density, pressure and the magnetic field averaged by volume, velocities,
+the passive scalar and species by mass, and the face field by area, so it stays
+divergence-free. A uniform grid is downsampled the same way, by twos.
 
 `url` is a file the page can fetch (the dev server serves the project's own files, e.g.
-`/runs/x/0010.athdf`); with none, the file `athdfPut` put together. The result is `state()`
-plus `view`: `level`, the finest level kept; `fileLevel`, the file's finest; `blocks` and
-`fileBlocks`, the leaf blocks after and before merging. Uniform-grid files are not supported
-yet (`loadAthdf` loads them).
+`/runs/x/0010.athdf`); with none, the file `athdfPut` put together. `oneField` picks the mode
+instead (true: one field; false: the state). The result is `state()` plus `view`: `level`, the
+finest level kept; `fileLevel`, the file's finest; `blocks` and `fileBlocks`, the leaf blocks
+after and before merging; `oneField`; and `faces`, whether the face field is held.
 
 ### `viewBudget() → bytes`
 
-The GPU memory the adaptive mesh may use (the `gpumem` control): what a caller merging a
-file for viewing itself plans against, as the runner does (`snapshotIn` with a `view` field:
-`{ level, nodes, fileLevel }`, nodes being the blocks of its tree, ancestors included).
+The GPU memory the adaptive mesh may use (the `gpumem` control), which a view-only load plans
+against.
 
 ### `state() → object`
 

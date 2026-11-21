@@ -1325,13 +1325,19 @@
   },
   {
    "name": "viewAthdf",
-   "summary": "Open an .athdf checkpoint for viewing only, for runs too large to continue here: read without copying it whole, its finest levels merged into coarser ones until it fits the GPU memory budget, shown by a mesh that holds only what the display reads. It never steps (run refuses); slices, probes, screenshots and the view work. Returns the state and `view`: the level kept, the file’s finest, and leaf blocks after and before.",
+   "summary": "Open an .athdf checkpoint for viewing only, for runs too large to continue here: read without copying it whole, held with its state (every field) or holding only the field shown (baked from the file again when the field changes), whichever keeps more of its levels, its finest levels merged until it fits the GPU memory budget. Uniform grids too, as blocks of 16. It never steps (run refuses); probes, screenshots and the view work, and with the state slices and statistics too. Returns the state and `view`: the level kept, the file’s finest, leaf blocks after and before, and `oneField`.",
    "args": [
     {
      "name": "url",
      "optional": true,
      "type": "string",
      "description": "A URL the page can fetch the file from (the dev server serves the project’s files); without it, the file athdfPut put together"
+    },
+    {
+     "name": "opts",
+     "optional": true,
+     "type": "object",
+     "description": "{ oneField }: hold only the field shown (true) or the state (false), instead of whichever keeps more levels"
     }
    ],
    "changesRun": true
@@ -2040,7 +2046,11 @@
      },
      "view": {
       "type": "boolean",
-      "description": "Open it only to look at (a run too large to continue here): read in parts, its finest levels merged until it fits the GPU memory budget, never stepped (run refuses). slice, probe, screenshot and view work. The result says the level kept (`view`)"
+      "description": "Open it only to look at (a run too large to continue here): read in parts, never stepped (run refuses), held with its state or holding only the field shown (baked from the file again when the field changes), whichever keeps more levels, its finest levels merged until it fits the GPU memory budget. probe, screenshot and view work; slice and stats need the state. The result says the level kept and the mode (`view`)"
+     },
+     "one_field": {
+      "type": "boolean",
+      "description": "With view: hold only the field shown (true) or the state (false), instead of whichever keeps more levels"
      }
     },
     "required": [

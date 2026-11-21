@@ -492,6 +492,12 @@ export class Renderer {
     return this.gVolumeTubes.group;
   }
 
+  /** Draw again on the next frame though no input changed (a view that holds one field baked anew), field lines seeded anew. */
+  invalidate() {
+    this.stale = true;
+    this.fieldLines.reseed();
+  }
+
   setTransfer(rgba: Uint8Array<ArrayBuffer>) {
     this.device.queue.writeTexture({ texture: this.tf }, rgba, { bytesPerRow: 1024 }, [256, 1]);
     this.stale = true;
@@ -505,11 +511,13 @@ export class Renderer {
   fieldPipelines(fieldShader: string, cfg: SimConfig, atlas: boolean) {
     const d = this.device;
     const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp, opacity: hydroSlots(cfg).opacity });
+    // A view that holds one field reads it in place of the state (amr/field.wgsl BAKED).
+    const k = cfg.viewBaked ? { BAKED: 1 } : undefined;
     return Promise.all([
-      computePipeline(d, code, 'field'),
-      computePipeline(d, code, 'slice', undefined, 'slice'),
-      computePipeline(d, code, 'projection', undefined, 'project'),
-      atlas ? computePipeline(d, code, 'display atlas', undefined, 'atlas') : Promise.resolve(undefined),
+      computePipeline(d, code, 'field', k),
+      computePipeline(d, code, 'slice', k, 'slice'),
+      computePipeline(d, code, 'projection', k, 'project'),
+      atlas ? computePipeline(d, code, 'display atlas', k, 'atlas') : Promise.resolve(undefined),
     ]);
   }
 

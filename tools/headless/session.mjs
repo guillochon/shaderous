@@ -2,7 +2,8 @@
 // when installed from npm, or from a URL given), opened in Chrome with WebGPU, and its scripting
 // API (window.shaderous, docs/api.md) callable from Node. Shared by the command-line runner
 // (cli.mjs) and the MCP server (mcp.mjs).
-import { closeSync, existsSync, openSync, readSync, statSync, writeSync } from 'node:fs';
+import { closeSync, createReadStream, existsSync, openSync, readSync, statSync, writeSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createServer as createHttpServer } from 'node:http';
 import os from 'node:os';
@@ -31,9 +32,36 @@ const MIME = {
 };
 
 /** The built page (dist/) on a free local port; resolves to { url, close }. */
+/**
+ * Files this process lets the page fetch (viewAthdf), by a token in their URL: served from where
+ * they are, streamed, never read whole. Only files named here are served.
+ */
+const servedFiles = new Map();
+const SERVED_PREFIX = '/__shaderous-file/';
+function serveRegistered(req, res) {
+  const p = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  if (!p.startsWith(SERVED_PREFIX)) return false;
+  const file = servedFiles.get(p.slice(SERVED_PREFIX.length).split('/')[0]);
+  if (!file) return res.writeHead(404).end(), true;
+  // Ranges: the page's reader asks for the parts of the file HDF5 needs (Emscripten's lazy file).
+  const size = statSync(file).size;
+  const r = /^bytes=(\d+)-(\d*)$/.exec(req.headers.range ?? '');
+  const [start, end] = r ? [Number(r[1]), r[2] ? Math.min(Number(r[2]), size - 1) : size - 1] : [0, size - 1];
+  res.writeHead(r ? 206 : 200, {
+    'content-type': 'application/octet-stream',
+    'accept-ranges': 'bytes',
+    'content-length': end - start + 1,
+    ...(r ? { 'content-range': `bytes ${start}-${end}/${size}` } : {}),
+  });
+  if (req.method === 'HEAD') return res.end(), true;
+  createReadStream(file, { start, end }).pipe(res);
+  return true;
+}
+
 async function serveDist() {
   if (!existsSync(path.join(DIST, 'index.html'))) throw new Error(`no built page in ${DIST}: run \`npm run build\`, or pass --url`);
   const server = createHttpServer(async (req, res) => {
+    if (serveRegistered(req, res)) return;
     const rel = decodeURIComponent(new URL(req.url, 'http://x').pathname).replace(/^\/+/, '') || 'index.html';
     const file = path.resolve(DIST, rel);
     if (!file.startsWith(DIST + path.sep)) return res.writeHead(403).end();
@@ -103,6 +131,8 @@ export async function openSession(opts = {}) {
       server: { port: 0, strictPort: false, host: '127.0.0.1', hmr: false, watch: null },
       logLevel: 'error',
       clearScreen: false,
+      // Ahead of Vite's own handlers, whose page fallback would answer the files' URLs.
+      plugins: [{ name: 'shaderous-served-files', configureServer: (s) => void s.middlewares.use((req, res, next) => serveRegistered(req, res) || next()) }],
     });
     await server.listen();
     base = server.resolvedUrls.local[0];
@@ -172,6 +202,14 @@ export async function openSession(opts = {}) {
   // uploadAthdf then write and read .athdf files here, where their size is not bounded by the
   // page's memory (a Chromium page holds some 8 GB of arrays in all).
   if (server?.ssrLoadModule) call.loadModule = (id) => server.ssrLoadModule(id);
+  // The page can fetch a file of this computer's from the server that serves it (viewAthdf).
+  if (server) {
+    call.serveFile = (file) => {
+      const token = randomBytes(12).toString('hex');
+      servedFiles.set(token, file);
+      return `${SERVED_PREFIX}${token}/${encodeURIComponent(path.basename(file))}`;
+    };
+  }
   return { page, call, close, url: u.toString() };
 }
 
@@ -311,35 +349,17 @@ async function uploadAthdfHere(call, file) {
 
 /**
  * Open the .athdf file at `file` for viewing only (plans/view-only.md, the page's viewAthdf):
- * read here in parts, its finest levels merged into coarser ones until its blocks fit the
- * page's GPU memory budget, and the merged snapshot handed to the page, which shows it without
- * stepping. Returns the page's state and `view`: the level kept, the file's finest, and leaf
- * blocks after and before. Without the page's own modules (a page not served by Vite), the
- * file is sent whole and the page merges it.
+ * the page fetches it from the server that serves it (streamed from where it is), reads it in
+ * parts, and shows it with its state or holding one field, its finest levels merged until it
+ * fits its GPU memory budget; it does not step. `opts.oneField` picks the mode instead of the
+ * page. Returns the page's state and `view`: the level kept, the file's finest, leaf blocks after
+ * and before, and whether one field is held. A page this process does not serve is sent the
+ * file in pieces.
  */
-export async function viewAthdf(call, file) {
-  if (!call.loadModule) {
-    await putAthdf(call, file);
-    return call('viewAthdf');
-  }
-  const [{ library, openAthdf, h5 }, view] = await Promise.all([athdfHere(call), call.loadModule('/src/io/view.ts')]);
-  const r = openAthdf(await library(h5), path.resolve(file));
-  let snap;
-  let plan;
-  try {
-    const head = r.header();
-    const groups = view.fileSpeciesGroups(r.variables);
-    const budget = await call('viewBudget');
-    plan = view.planView(head, Math.floor(budget / view.viewBlockBytes(head.ndim, r.hasFaces, groups, groups > 0)));
-    if (!plan) throw new Error(`${file}: not even its root blocks fit in the page's GPU memory budget (${(budget / 2 ** 30).toFixed(1)} GB)`);
-    snap = view.readForView(r, plan.level);
-  } finally {
-    r.close();
-  }
-  snap.view = { level: plan.level, nodes: plan.nodes, fileLevel: plan.fileLevel };
-  await sendSnapshot(call, snap);
-  const st = await call('loadSnapshot');
-  return { ...st, view: { level: plan.level, fileLevel: plan.fileLevel, blocks: plan.leaves, fileBlocks: plan.fileLeaves } };
+export async function viewAthdf(call, file, opts = {}) {
+  if (call.serveFile) return call('viewAthdf', call.serveFile(path.resolve(file)), opts);
+  await putAthdf(call, file);
+  return call('viewAthdf', undefined, opts);
 }
 
 /** Hand the page a snapshot's arrays in pieces (snapshotIn, snapshotPut), for loadSnapshot. */

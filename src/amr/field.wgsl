@@ -87,7 +87,11 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32, rho: f32, x: vec3<f32>) -> f32 {
     hi[a] = textureLoad(BF, c + e, 0)[a];
     div += hi[a] - lo[a];
   }
-  let B = 0.5 * (lo + hi);
+  return magnetic_of(f, 0.5 * (lo + hi), div, p, rho, x);
+}
+
+// The same from the cell's field B and the sum of its faces' differences div.
+fn magnetic_of(f: u32, B: vec3<f32>, div: f32, p: f32, rho: f32, x: vec3<f32>) -> f32 {
   let b2 = dot(B, B);
   switch (f - F_MAGNETIC) {
     case 0u, 1u, 2u { return B[f - F_MAGNETIC]; }
@@ -100,6 +104,13 @@ fn magnetic_value(f: u32, c: vec3<i32>, p: f32, rho: f32, x: vec3<f32>) -> f32 {
     default { return abs(div) / max(MAG[2], 1.0e-30); }
   }
 }
+// View only, one field held (AmrSim viewBaked, plans/view-only.md): the field and the density at
+// each leaf cell, without ghost cells, in slots of BS cells laid out as the atlas's are. Written
+// by `bake` from a checkpoint's primitives, a batch of blocks at a time; read by leaf_value in
+// place of the state. A placeholder texel otherwise.
+override BAKED: u32 = 0u;
+@group(0) @binding(17) var BK: texture_3d<f32>;   // texel bk_texel (amr/grid.wgsl)
+
 // Per-block timesteps (amr/bins_on.wgsl): BIN[1 + slot] is a block's time bin; all zero when off.
 @group(0) @binding(29) var<storage, read> TBIN: array<u32>;
 
@@ -143,6 +154,11 @@ fn leaf_at(frac0: vec3<f32>) -> Leaf {
 }
 
 fn leaf_value(f: Leaf) -> Cell {
+  // View only, one field held (AmrSim viewBaked): the field and the density as `bake` left them.
+  if (BAKED != 0u) {
+    let b = textureLoad(BK, bk_texel(f.slot, f.l), 0);
+    return Cell(b.x, b.y, false);
+  }
   let c = f.c;
   let u1 = textureLoad(U1, c, 0);
   let u2 = textureLoad(U2, c, 0);
@@ -280,4 +296,48 @@ fn atlas(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocatio
     textureStore(DA, atl(blk_origin(slot), l), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), log10_abs(q.x), 0.0));
   }
   range_end(lix);
+}
+
+// `bake`: the field V.field at each cell of a batch of blocks, from a checkpoint's primitives
+// (io/view.ts streamForView), into BKW (the BK above). CH holds each variable for the batch's
+// blocks, each block as [z][y][x]; BAKE_IN its layout: [0] blocks, [1] cells per block, [2..12)
+// where each of rho, p, v_x, v_y, v_z, the passive scalar, B_x, B_y, B_z and the mass fraction
+// shown starts in CH (BAKE_NONE where the batch does not have it), then each block's slot. Fields
+// that need neighbors (derivatives, the shock flag) or what a checkpoint does not hold (the
+// potential, time bins, burning, radiation, the divergence of B) are not offered for baking.
+@group(0) @binding(18) var<storage, read> CH: array<f32>;
+@group(0) @binding(19) var<storage, read> BAKE_IN: array<u32>;
+@group(0) @binding(21) var BKW: texture_storage_3d<rg32float, write>;
+const BAKE_NONE = 0xffffffffu;
+
+fn bake_var(k: u32, i: u32) -> f32 {
+  let o = BAKE_IN[2u + k];
+  return select(CH[o + i], 0.0, o == BAKE_NONE);
+}
+
+@compute @workgroup_size(8, 8, 4)
+fn bake(@builtin(global_invocation_id) gid: vec3<u32>) {
+  let n = BAKE_IN[0];
+  let cells = BAKE_IN[1];
+  let b = gid.x / u32(BS);
+  if (b >= n || gid.y >= u32(BS) || (is2d() && gid.z > 0u) || gid.z >= u32(BS)) { return; }
+  let l = vec3<i32>(i32(gid.x % u32(BS)), i32(gid.y), i32(gid.z));
+  let slot = i32(BAKE_IN[12u + b]);
+  let i = b * cells + (gid.z * u32(BS) + gid.y) * u32(BS) + gid.x % u32(BS);
+  g_dx = blk_dx(slot);
+  g_acc = P.gext.xyz;
+  let rho = max(bake_var(0u, i), P.rho_floor);
+  let p = bake_var(1u, i);
+  let v = vec3<f32>(bake_var(2u, i), bake_var(3u, i), bake_var(4u, i));
+  let eint = eos_eint_from_p(rho, p);
+  let u1 = vec4<f32>(rho, rho * v);
+  let u2 = vec4<f32>(eint + 0.5 * rho * dot(v, v), eint, rho * bake_var(5u, i), 0.0);
+  var g: Grad;
+  let level = f32(bt(slot, 0u));
+  var x = field_value(V.field, u1, u2, g, level, 0.0);
+  if (V.field == F_MASS_FRACTION) { x = bake_var(9u, i); }
+  if (V.field >= F_MAGNETIC && V.field < F_MAGNETIC + N_MAGNETIC) {
+    x = magnetic_of(V.field, vec3<f32>(bake_var(6u, i), bake_var(7u, i), bake_var(8u, i)), 0.0, p, rho, blk_pos(slot, l));
+  }
+  textureStore(BKW, bk_texel(slot, l), vec4<f32>(x, rho, 0.0, 0.0));
 }

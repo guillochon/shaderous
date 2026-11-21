@@ -1,8 +1,21 @@
 # Plan: a view-only mode for checkpoints too large to run here
 
-Status (2026-11-21): stages 1, 2, 4 (the level cap only) and 5 built; stage 3 (one field
-baked at a time) and stage 4's region at full resolution not begun. Stage 0 was replaced by
-measuring the one large file at hand (below).
+Status (2026-11-21): stages 1, 2, 3, 4 (the level cap) and 5 built, uniform-grid files too.
+Stage 4's region at full resolution is issue #22. Stage 0 was replaced by measuring the one
+large file at hand (below).
+
+**As built, stage 3** (one field held, `viewBaked`). Rather than one channel in half precision,
+the baked atlas is rg32float (the field and the density, which the volume view's density cut
+and field lines need) in slots of 16^3 cells without ghosts, 32 kB a block, plus the display's
+own atlas the ray-marcher reads (64 kB): 0.1 MB a block in 3D. The baking runs on the GPU
+(`amr/field.wgsl` `bake`) from batches of the file's primitives, so no physics is written twice,
+and the display reads the baked atlas in `leaf_value` (override `BAKED`), so every view and the
+color range work unchanged. Fields that need neighbors are not offered. Merging streams: a
+merged block is passed on once the last of its file blocks is read. Field lines load the face
+field (0.13 MB a block more) when turned on, opening the file again at the finest level where
+it fits. On the 3.5 GB file: the whole of it, level 5, in the default 2.5 GB, in 34 s; another
+field in 21 s; field lines at level 4. A view that holds one field matches the run's own colour
+range exactly (an MHD blast on blocks). `slice` and `stats` refuse; `probe` reads the file.
 
 **As built.**
 

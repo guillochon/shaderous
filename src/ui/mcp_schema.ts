@@ -99,7 +99,8 @@ export const MCP_TOOLS: McpTool[] = [
     name: 'load_athdf', method: 'loadAthdf', brief: 'Starts a run from an `.athdf` file, or opens it for viewing only',
     own: {
       path: { type: 'string', description: 'The file to read' },
-      view: { type: 'boolean', description: 'Open it only to look at (a run too large to continue here): read in parts, its finest levels merged until it fits the GPU memory budget, never stepped (run refuses). slice, probe, screenshot and view work. The result says the level kept (`view`)' },
+      view: { type: 'boolean', description: 'Open it only to look at (a run too large to continue here): read in parts, never stepped (run refuses), held with its state or holding only the field shown (baked from the file again when the field changes), whichever keeps more levels, its finest levels merged until it fits the GPU memory budget. probe, screenshot and view work; slice and stats need the state. The result says the level kept and the mode (`view`)' },
+      one_field: { type: 'boolean', description: 'With view: hold only the field shown (true) or the state (false), instead of whichever keeps more levels' },
     },
     required: ['path'],
   },

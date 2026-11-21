@@ -572,7 +572,18 @@ held bit for bit to the object it replaced before those objects were retired.
   `viewOnly`: every atlas only the step uses (the second parity, the predictor, gravity, a
   field's compensation, half-step, assembly and impulse textures) is one texel, so the bind
   groups stay valid while it never steps. The atlas is sized to the merged tree exactly
-  (`amrBudget`).
+  (`amrBudget`). Merged blocks are handed on as soon as the last of the file's blocks inside
+  them is read (`streamForView`), so only the blocks still being filled are held. A uniform
+  grid's file is read as blocks of 16 at one level below a coarser root (`blocksOfUniform`), so
+  merging downsamples it.
+- **Holding one field** (`viewBaked`): not even the state is kept. A second atlas of slots of
+  16^3 cells without ghosts (rg32float: the field shown and the density) is filled on the GPU by
+  `amr/field.wgsl`'s `bake` entry from batches of the file's primitives, and the display passes,
+  compiled with the override `BAKED`, read it in `leaf_value` in place of the state, so the
+  volume, slice and projection views and the automatic color range work unchanged. Another field
+  is baked by reading the file again; the reader's worker keeps it open. Field lines need the
+  face field (`viewFaces`), loaded with the bake, and sample the baked density
+  (`amr/bsample.wgsl`).
 - **Checkpoints** (`io/checkpoints.ts`) write the same file every $`\Delta t`$. In Chrome and Edge
   they go to a folder chosen once through the File System Access API; other browsers download
   them. The cell data is gzip-compressed at level 1. Uncompressed, a state is 24 bytes per cell (about 400 MB at

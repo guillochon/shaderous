@@ -117,6 +117,15 @@ fn blk_origin(slot: i32) -> vec3<i32> {
   return vec3<i32>(slot % a, (slot / a) % a, slot / (a * a)) * PADW + NGH;
 }
 
+// View only, one field held (amr/field.wgsl BAKED): texel of local cell l of block `slot` in the
+// baked field's atlas, slots of BS cells laid out as the atlas's, without ghost cells.
+fn bk_texel(slot: i32, l: vec3<i32>) -> vec3<i32> {
+  let a = i32(P.amr.x);
+  let s = vec3<i32>(slot % a, (slot / a) % a, slot / (a * a));
+  if (is2d()) { return vec3<i32>(s.xy * BS + l.xy, s.z); }
+  return s * BS + l;
+}
+
 // Atlas texel of local cell l of the block whose origin is o. l may be a face ghost.
 fn atl(o: vec3<i32>, l: vec3<i32>) -> vec3<i32> {
   if (is2d()) { return vec3<i32>(o.xy + l.xy, o.z); }

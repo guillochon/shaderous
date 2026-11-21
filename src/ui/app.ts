@@ -8,7 +8,8 @@ import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport 
 import { capture, restartFrom } from '../io/capture';
 import { canPickFolder, checkpointIndex, download, downloadBlob, downloadSink, nextCheckpoint, pickFolder, type CheckpointSink } from '../io/checkpoints';
 import { maxLevel, type Snapshot } from '../io/snapshot';
-import { fileSpeciesGroups, planView, viewBlockBytes } from '../io/view';
+import { bakeVariables, fileSpeciesGroups, planView, viewBakedBlockBytes, viewBlockBytes, viewFacesBlockBytes, type ViewBatch } from '../io/view';
+import type { ViewFile } from '../io/view_open';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
 import { fieldMeasure, readout, type Measure, type Readout } from './units_view';
 import { unitOf, type DisplaySystem } from '../units/units';
@@ -108,10 +109,8 @@ side.innerHTML = `
       <input id="import-file" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
     </div>
     <div class="io state-io">
-      <button id="view-file" title="Open an .athdf checkpoint only to look at it: the GPU holds only what the display reads, and if even that does not fit, its finest levels are merged into coarser ones. For runs too large to continue on this device">Open for viewing</button>
+      <button id="view-file" title="Open an .athdf checkpoint only to look at it, for runs too large to continue on this device: the GPU holds what the display reads (or only the field shown), and if even that does not fit, its finest levels are merged into coarser ones">Open for viewing</button>
       <input id="view-file-input" type="file" accept=".athdf,.h5,.hdf5,.hdf" hidden />
-    </div>
-    <div class="io log-io">
       <button id="save-log" title="Save what was done to this run since it started (the editing tools, the settings changed, the adaptive mesh's re-meshes, each at the step it happened) as a session log, with the run's diagnostics along the way. The API's replay() runs it again step for step">Save session log</button>
     </div>
   </section>
@@ -1357,6 +1356,7 @@ function syncControls() {
   $<HTMLInputElement>('isoa').value = String(logPos(view.surfaceOpacity, SURFACE_RANGE));
   $<HTMLInputElement>('isoa').disabled = !marching || !view.contours;
   // Field lines: only with a magnetic field, and not through a projection.
+  // (A view that holds one field loads the face field when they are asked for: settleView.)
   const magnetic = !!cfg.problem.mhd;
   $('flines-check').hidden = $('row-nflines').hidden = !magnetic;
   $<HTMLInputElement>('flines').checked = view.fieldLines;
@@ -1388,7 +1388,8 @@ function syncControls() {
   // menu altogether.
   const noHeat = (i: number) => ((i === 1 || i === 9) && !eosHasEnergy(cfg.eos)) || (i === 10 && (cfg.cooling === 'off' || !eosHasEnergy(cfg.eos)));
   const noField = (i: number) => (i === 7 && two) || (i === 14 && cfg.amrLevels === 0) || (i === 21 && (cfg.amrLevels === 0 || !(cfg.timeBins > 0)))
-    || (i === 15 && !pulled) || (i === 17 && !self) || noHeat(i);
+    || (i === 15 && !pulled) || (i === 17 && !self) || noHeat(i)
+    || (!!cfg.viewOnly && VIEW_LOST.has(i)) || (!!cfg.viewBaked && UNBAKEABLE.has(i));
   for (const o of fieldSel.options) {
     o.disabled = noField(+o.value);
     o.hidden = noHeat(+o.value);
@@ -1766,7 +1767,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
     // The box is as wide as the run's parameters make it (a preset with a size of its own).
     next.problem = sizedProblem(problem, next.params);
     // View only: never stepped, an atlas just large enough, and no gravity to solve.
-    if (look) Object.assign(next, { viewOnly: true, amrBudget: look.nodes, gravity: 'off' });
+    if (look) Object.assign(next, { viewOnly: true, viewBaked: !!look.baked, viewFaces: !!look.faces, amrBudget: look.nodes, gravity: 'off' });
+    if (!look?.baked) closeViewing();
     viewNote = look && look.level < look.fileLevel ? `to level ${look.level} of ${look.fileLevel}` : '';
     // From a file: the same preset, started from the saved state instead of its own.
     if (snap) Object.assign(next, restartFrom(snap, next.problem, levels > 0, n >> levels));
@@ -1999,33 +2001,165 @@ let viewNote = '';
  * it, its finest levels merged into coarser ones until the blocks fit this device's GPU memory
  * budget, and shown by an adaptive mesh that holds only what the display reads.
  */
-async function viewState(file: File): Promise<{ level: number; fileLevel: number; blocks: number; fileBlocks: number }> {
+/**
+ * A checkpoint open for viewing with one field held (SimConfig.viewBaked): its file, kept open
+ * in the reader's worker to bake another field from, the level it is merged to, and the field
+ * (and species, for a mass fraction) baked now (-1 before the first).
+ */
+let viewing: { file: ViewFile; name: string; level: number; field: number; species: string | null; faces: boolean } | null = null;
+/** The bake under way, if any (settleView). */
+let baking: Promise<void> | null = null;
+/** Fields a view that holds one field cannot bake: they need neighbors, or what a checkpoint lacks. */
+const UNBAKEABLE = new Set([11, 12, 13, 15, 20, 21, 27, 30, 31, 32, 33, 34, 35, 36]);
+/** Fields no view-only load has: the potential (gravity is off), the shock flag, time bins, burning, radiation. */
+const VIEW_LOST = new Set([15, 20, 21, 30, 31, 32, 33, 34, 35, 36]);
+
+function closeViewing() {
+  viewing?.file.close();
+  viewing = null;
+}
+
+/** The species whose mass fraction is shown, by name, or null. */
+const shownSpecies = (): string | null => (view.field === 19 ? (cfg.problem.species?.[view.species] ?? null) : null);
+
+/**
+ * A view that holds one field: bake the field shown if it is not the one held (on the GPU, from
+ * the file, a batch of blocks at a time: AmrSim.bake). Resolves once it holds the field shown.
+ */
+function settleView(): Promise<void> {
+  if (baking) return baking;
+  if (!cfg?.viewBaked || !viewing || !sim) return Promise.resolve();
+  const v = viewing;
+  // Field lines asked for where the face field was not loaded: opened again with it, at the
+  // finest level where the faces fit too.
+  if (view.fieldLines && cfg.problem.mhd && !cfg.viewFaces) {
+    const reopen: Promise<void> = (async () => {
+      try {
+        await showView(v.file, v.name, { oneField: true, faces: true, settle: false });
+      } catch (e) {
+        view.fieldLines = false;
+        alert(`Field lines need the field's faces, which do not fit: ${e instanceof Error ? e.message : String(e)}`);
+        return;
+      } finally {
+        baking = null;
+      }
+      // (Then the bake of the new mesh, faces and all, as its own step: it would wait on this one.)
+      return settleView();
+    })();
+    baking = reopen;
+    return reopen;
+  }
+  if (UNBAKEABLE.has(view.field)) view.field = 0;
+  const species = shownSpecies();
+  const faces = !!cfg.viewFaces && !v.faces;
+  if (v.field === view.field && v.species === species && !faces) return Promise.resolve();
+  const s = sim as Simulation & { bake?: (b: ViewBatch, field: number, species: string | null) => Promise<void>; loadFaces?: (b: ViewBatch) => void };
+  const field = view.field;
+  baking = (async () => {
+    const what = `Reading ${viewFieldName().toLowerCase()}${faces ? ' and the magnetic field' : ''} from the file`;
+    setLoadStage(what);
+    try {
+      let chain = Promise.resolve();
+      let failed: unknown = null;
+      await v.file.stream(
+        v.level,
+        bakeVariables(field, species),
+        (b) => {
+          chain = chain
+            .then(async () => {
+              await s.bake!(b, field, species);
+              if (faces) s.loadFaces!(b);
+            })
+            .catch((e) => void (failed ??= e));
+        },
+        (f) => setLoadStage(`${what}: ${Math.round(100 * f)}%`),
+        faces,
+      );
+      await chain;
+      if (failed) throw failed;
+      v.field = field;
+      v.species = species;
+      if (faces) v.faces = true;
+      renderer.invalidate();
+    } finally {
+      setLoadStage('');
+    }
+  })().finally(() => (baking = null));
+  return baking;
+}
+
+/**
+ * Open an .athdf file for viewing only (plans/view-only.md): read in a worker without copying
+ * it, and shown either with its state (every field) or holding the one field shown (baked from
+ * the file again when the field changes), whichever keeps more of its levels in this device's
+ * GPU memory budget; its finest levels merged into coarser ones until it fits. `oneField` picks
+ * the second (true) or the first (false) instead.
+ */
+async function viewState(file: File | string, opts: { oneField?: boolean; faces?: boolean } = {}): Promise<ViewOpened> {
   const button = $('view-file');
   button.textContent = 'Opening…';
+  closeViewing();
   const { openViewFile } = await import('../io/view_open');
   const vf = await openViewFile(file);
   try {
-    const h = vf.header;
-    if (h.levels.length === 1) throw new Error('a uniform grid’s file cannot be opened for viewing yet: Import state loads it');
-    const groups = fileSpeciesGroups(vf.variables);
-    const per = viewBlockBytes(h.ndim, vf.hasFaces, groups, groups > 0);
-    const plan = planView(h, Math.floor(memoryBudget() / per));
-    if (!plan) throw new Error(`not even the root grid's blocks fit in this device's GPU memory budget (${(memoryBudget() / GB).toFixed(1)} GB)`);
-    const reading = `Reading ${file.name}`;
+    return await showView(vf, typeof file === 'string' ? decodeURIComponent(file.split('/').pop() || 'checkpoint.athdf') : file.name, opts);
+  } catch (e) {
+    if (viewing?.file === vf) viewing = null;
+    vf.close();
+    throw e;
+  } finally {
+    button.textContent = 'Open for viewing';
+  }
+}
+
+type ViewOpened = { level: number; fileLevel: number; blocks: number; fileBlocks: number; oneField: boolean; faces: boolean };
+
+/**
+ * Show a checkpoint open in the reader's worker (viewState). With one field held, the file stays
+ * open (`viewing`) to bake another field from; `faces` holds the face field too, for field lines
+ * (otherwise they are off until asked for, when it is opened again with them: settleView).
+ */
+async function showView(vf: ViewFile, name: string, opts: { oneField?: boolean; faces?: boolean; settle?: boolean }): Promise<ViewOpened> {
+  const h = vf.header;
+  const groups = fileSpeciesGroups(vf.variables);
+  const budget = memoryBudget();
+  const withState = planView(h, Math.floor(budget / viewBlockBytes(h.ndim, vf.hasFaces, groups, groups > 0)));
+  const faces = !!opts.faces && vf.hasFaces;
+  const oneField = planView(h, Math.floor(budget / (viewBakedBlockBytes(h.ndim) + (faces ? viewFacesBlockBytes(h.ndim) : 0))));
+  // (Species that set the equation of state need the composition at each cell, which a baked
+  // view does not hold: such a file is shown with its state unless asked otherwise.)
+  const baked = opts.oneField ?? (!!oneField && (!withState || oneField.level > withState.level) && groups === 0);
+  const plan = baked ? oneField : withState;
+  if (!plan) throw new Error(`not even the root grid's blocks fit in this device's GPU memory budget (${(budget / GB).toFixed(1)} GB)`);
+  let snap: Snapshot;
+  if (baked) {
+    snap = await vf.tables(plan.level);
+    viewing = { file: vf, name, level: plan.level, field: -1, species: null, faces: false };
+  } else {
+    if (viewing?.file === vf) viewing = null;
+    const reading = `Reading ${name}`;
     setLoadStage(reading);
-    let snap: Snapshot;
     try {
       snap = await vf.read(plan.level, (f) => setLoadStage(`${reading}: ${Math.round(100 * f)}%`));
     } finally {
       setLoadStage('');
     }
-    snap.view = { level: plan.level, nodes: plan.nodes, fileLevel: plan.fileLevel };
-    await importSnapshot(snap);
-    return { level: plan.level, fileLevel: plan.fileLevel, blocks: plan.leaves, fileBlocks: plan.fileLeaves };
-  } finally {
-    vf.close();
-    button.textContent = 'Open for viewing';
   }
+  snap.view = { level: plan.level, nodes: plan.nodes, fileLevel: plan.fileLevel, baked, faces: baked && faces };
+  await importSnapshot(snap);
+  if (baked) {
+    // Without the face field there are no field lines to draw until they are asked for.
+    if (!faces) view.fieldLines = false;
+    syncControls();
+    if (opts.settle !== false) await settleView();
+  } else vf.close();
+  return { level: plan.level, fileLevel: plan.fileLevel, blocks: plan.leaves, fileBlocks: plan.fileLeaves, oneField: baked, faces: baked ? faces : vf.hasFaces };
+}
+
+/** A view that holds one field: the file's own cells under these points, as probe() reports them; null otherwise. */
+async function viewProbe(points: number[][]) {
+  if (!cfg?.viewBaked || !viewing) return null;
+  return viewing.file.probe(points);
 }
 
 /** Start the run from a snapshot (one read from an .athdf file), as importAthdf does. */
@@ -4484,7 +4618,8 @@ function updateRange(d: Diagnostics) {
   // A projection is always ranged over the columns it drew.
   const r = renderer.range;
   const key = renderer.rangeKey(view);
-  const drawn = projecting() || view.field >= d.ranges.length;
+  // (A view that holds one field has no state for the diagnostics to range: what it drew does.)
+  const drawn = projecting() || view.field >= d.ranges.length || !!cfg.viewBaked;
   if (drawn && (!r || r.key !== key)) return;
   let [lo, hi] = drawn ? [r!.lo, r!.hi] : d.ranges[view.field];
   if (drawn) {
@@ -5144,7 +5279,11 @@ function tick(now: number) {
   }
   lastTick = now;
   // Loading: no simulation yet, a restart or rebuild under way, or a star still settling.
-  const loading = !sim || !!reloading || sim.preparing;
+  const loading = !sim || !!reloading || sim.preparing || !!baking;
+  // A view that holds one field bakes the field shown when it changes (headless too).
+  if (sim && !building && cfg?.viewBaked && viewing && !baking && (viewing.field !== view.field || viewing.species !== shownSpecies() || (view.fieldLines && !!cfg.problem.mhd && !cfg.viewFaces))) {
+    settleView().catch((e) => console.warn(`view: ${e instanceof Error ? e.message : String(e)}`));
+  }
   if (loadingEl.hidden === loading) loadingEl.hidden = !loading;
   if (loading) showLoadingMessage();
   if (!sim || building || headless) return;
@@ -5375,6 +5514,8 @@ const api = installApi(
     importAthdf,
     importSnapshot,
     viewFile: viewState,
+    viewProbe,
+    settleView,
     restart: () => restartRun(),
     running: () => running,
     finished: () => finished,
@@ -5458,7 +5599,7 @@ const api = installApi(
     flatView: () => flatView(),
     captured: () => renderer.captured(),
     rangeSettled: () => renderer.rangeSettled(),
-    rangedByDrawing: (d) => $<HTMLInputElement>('auto').checked && (projecting() || view.field >= d.ranges.length),
+    rangedByDrawing: (d) => $<HTMLInputElement>('auto').checked && (projecting() || view.field >= d.ranges.length || !!cfg.viewBaked),
     athdf: () => athdfOf(sim!),
     snapshot: () => snapshotOf(sim!),
     setColormap(name) {

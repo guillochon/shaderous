@@ -229,7 +229,8 @@ export class AmrMhd {
     const perBlock = (this.ndim === 3 ? 3 * FBOX ** 3 : 2 * FBOX ** 2) * 48;
     this.perChunk = Math.max(1, Math.min(dep.cap, Math.floor(Math.min(scratchBytes, maxBinding(d)) / perBlock), 65535));
     this.scratch = d.createBuffer({ label: 'MHD flux scratch', size: this.perChunk * perBlock, usage: GPUBufferUsage.STORAGE });
-    this.register = d.createBuffer({ label: 'MHD flux register', size: dep.cap * registerBytes(this.ndim), usage: GPUBufferUsage.STORAGE });
+    // (View only, it never steps: one slot's worth, so the bindings stay valid.)
+    this.register = d.createBuffer({ label: 'MHD flux register', size: (dep.cfg.viewOnly ? 1 : dep.cap) * registerBytes(this.ndim), usage: GPUBufferUsage.STORAGE });
     this.btOld = d.createBuffer({ label: 'old block table', size: dep.bt.size, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     this.idxOld = d.createTexture({
       label: 'old leaf index', size: [dep.idx.width, dep.idx.height, dep.idx.depthOrArrayLayers], dimension: '3d', format: 'r32uint',

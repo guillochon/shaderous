@@ -11,6 +11,10 @@
 @group(0) @binding(14) var BV: texture_storage_3d<rgba16float, write>;   // B, |B|
 @group(0) @binding(15) var VV: texture_storage_3d<rgba16float, write>;   // velocity, density
 @group(0) @binding(16) var<storage, read_write> FR: array<atomic<u32>, 4>;
+// View only, one field held (amr/field.wgsl BAKED): no state, so the density comes from the baked
+// field's atlas (its second channel) and the velocity is taken as zero.
+override BAKED: u32 = 0u;
+@group(0) @binding(17) var BK: texture_3d<f32>;
 
 @compute @workgroup_size(4, 4, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -33,7 +37,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     hi[a] = textureLoad(BF, c + e, 0)[a];
   }
   let B = 0.5 * (lo + hi);
-  let u = textureLoad(U1, c, 0);
+  var u = textureLoad(U1, c, 0);
+  if (BAKED != 0u) { u = vec4<f32>(textureLoad(BK, bk_texel(slot, l), 0).y, 0.0, 0.0, 0.0); }
   let rho = max(u.x, P.rho_floor);
   let b = length(B);
   textureStore(BV, vec3<i32>(gid), vec4<f32>(B, b));

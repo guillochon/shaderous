@@ -194,8 +194,11 @@ export const API_METHODS: ApiMethod[] = [
   { name: 'loadSnapshot', summary: 'Start a run from the snapshot snapshotIn() and snapshotPut() put together, as loadAthdf does from a file. Paused at its time.', args: [], changesRun: true },
   {
     name: 'viewAthdf',
-    summary: 'Open an .athdf checkpoint for viewing only, for runs too large to continue here: read without copying it whole, its finest levels merged into coarser ones until it fits the GPU memory budget, shown by a mesh that holds only what the display reads. It never steps (run refuses); slices, probes, screenshots and the view work. Returns the state and `view`: the level kept, the file’s finest, and leaf blocks after and before.',
-    args: [{ name: 'url', optional: true, type: 'string', description: 'A URL the page can fetch the file from (the dev server serves the project’s files); without it, the file athdfPut put together' }],
+    summary: 'Open an .athdf checkpoint for viewing only, for runs too large to continue here: read without copying it whole, held with its state (every field) or holding only the field shown (baked from the file again when the field changes), whichever keeps more of its levels, its finest levels merged until it fits the GPU memory budget. Uniform grids too, as blocks of 16. It never steps (run refuses); probes, screenshots and the view work, and with the state slices and statistics too. Returns the state and `view`: the level kept, the file’s finest, leaf blocks after and before, and `oneField`.',
+    args: [
+      { name: 'url', optional: true, type: 'string', description: 'A URL the page can fetch the file from (the dev server serves the project’s files); without it, the file athdfPut put together' },
+      { name: 'opts', optional: true, type: 'object', description: '{ oneField }: hold only the field shown (true) or the state (false), instead of whichever keeps more levels' },
+    ],
     changesRun: true,
   },
   { name: 'viewBudget', summary: 'The GPU memory the adaptive mesh may use, in bytes: what a caller sizing a view-only snapshot (snapshotIn with a `view` field) plans against.', args: [], changesRun: false },

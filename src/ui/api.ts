@@ -58,7 +58,11 @@ export interface AppHooks {
   /** the same from a snapshot (one read from an .athdf file) */
   importSnapshot(snap: Snapshot): Promise<string[]>;
   /** open an .athdf file for viewing only (plans/view-only.md): the level it was merged to, of the file's finest, and its leaf blocks before and after */
-  viewFile(file: File): Promise<{ level: number; fileLevel: number; blocks: number; fileBlocks: number }>;
+  viewFile(file: File | string, opts?: { oneField?: boolean; faces?: boolean }): Promise<{ level: number; fileLevel: number; blocks: number; fileBlocks: number; oneField: boolean; faces: boolean }>;
+  /** a view that holds one field: the file's cells under these points (io/view.ts probeFile); null for any other run */
+  viewProbe(points: number[][]): Promise<{ at: number[]; level: number; values: Record<string, number> }[] | null>;
+  /** a view that holds one field: resolves once the field shown is baked */
+  settleView(): Promise<void>;
   restart(): Promise<void>;
   running(): boolean;
   finished(): boolean;
@@ -1035,8 +1039,27 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
 
   /** The primitive state, the temperature and the refinement level at points (fractions of the box). */
   async function probePoints(points: Point[]) {
-    const { snap, sampler, species } = await sampled();
     const T = temperatureOf(app.cfg());
+    // A view that holds one field: the file's own cells.
+    const fromFile = await app.viewProbe(points as number[][]);
+    if (fromFile) {
+      const names = app.cfg().problem.species ?? [];
+      return {
+        t: app.cfg().restart?.time ?? 0,
+        points: fromFile.map((q) => {
+          const v = q.values;
+          const X = names.length && names.every((k) => k in v) ? names.map((k) => v[k]) : undefined;
+          const w = { rho: v.rho, p: v.press, vx: v.vel1, vy: v.vel2, vz: v.vel3, s: v.r0 ?? 0, X };
+          const temp = T.of(w);
+          return {
+            at: q.at, rho: w.rho, press: w.p, vel: [w.vx, w.vy, w.vz], r0: w.s, temp, ...(T.kelvin !== null ? { tempK: temp * T.kelvin } : {}),
+            level: q.level, ...(X ? { X: Object.fromEntries(names.map((k, i) => [k, X[i]])) } : {}),
+            ...(v.Bcc1 !== undefined ? { B: [v.Bcc1, v.Bcc2, v.Bcc3] } : {}),
+          };
+        }),
+      };
+    }
+    const { snap, sampler, species } = await sampled();
     return {
       t: snap.time,
       points: points.map((p) => {
@@ -1275,21 +1298,19 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * can fetch (the dev server serves the project's own); with none, the file athdfPut has put
      * together. Returns the run's state and how it was merged.
      */
-    viewAthdf: (url?: string) =>
+    viewAthdf: (url?: string, opts: { oneField?: boolean; faces?: boolean } = {}) =>
       serial(async () => {
-        let file: File;
-        if (url !== undefined) {
-          const res = await fetch(url);
-          if (!res.ok) throw new Error(`${url}: ${res.status} ${res.statusText}`);
-          file = new File([await res.blob()], url.split('/').pop() || 'checkpoint.athdf');
-        } else {
+        // A URL is read with range requests as the file is needed, never downloaded whole.
+        let file: File | string;
+        if (url !== undefined) file = url;
+        else {
           if (!incoming || incoming.got !== incoming.bytes.length) throw new Error('no whole .athdf file has been put: call athdfPut for each piece first');
           file = new File([incoming.bytes as Uint8Array<ArrayBuffer>], 'checkpoint.athdf');
         }
         incoming = null;
         let merged: Awaited<ReturnType<AppHooks['viewFile']>> | undefined;
         await built(async () => {
-          merged = await app.viewFile(file);
+          merged = await app.viewFile(file, opts);
         });
         return { ...(await state()), view: merged };
       }),
@@ -1475,7 +1496,13 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     recordingStatus: async (): Promise<RecordingStatus | null> => (recording ? { ...recording.status } : null),
 
     /** Change what the view shows (ViewState keys, plus colormap and autoRange). The run is untouched. */
-    view: (changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean; tf?: string } = {}) => serial(async () => setView(changes)),
+    // (A view that holds one field bakes the field shown first, if it changed: app.settleView.)
+    view: (changes: Partial<ViewState> & { colormap?: string; autoRange?: boolean; tf?: string } = {}) =>
+      serial(async () => {
+        const r = setView(changes);
+        await app.settleView();
+        return r;
+      }),
 
     /**
      * The state of the gas as an .athdf file (HDF5, readable by yt and Athena++'s tools), base64.
@@ -1507,7 +1534,12 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     /** The panel's controls as they stand: id, kind, label, value, options. */
     controls: () => serial(async () => controls()),
     /** Set one of the panel's controls (or press a button), as a person would, mid-run. */
-    control: (id: string, value?: string | number | boolean) => serial(() => control(id, value)),
+    control: (id: string, value?: string | number | boolean) =>
+      serial(async () => {
+        const r = await control(id, value);
+        await app.settleView();
+        return r;
+      }),
 
     /**
      * Use an editing tool, as a person would with the pointer: mass, velocity, temperature,

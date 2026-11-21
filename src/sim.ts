@@ -90,6 +90,14 @@ export interface SimConfig {
    */
   viewOnly?: boolean;
   /**
+   * View only, holding one field (plans/view-only.md): the adaptive mesh keeps no state, only the
+   * field shown and the density at each cell, baked from the checkpoint (AmrSim.bake) and baked
+   * again when the field changes (io/view.ts viewBakedBlockBytes: some 0.1 MB a block in 3D).
+   */
+  viewBaked?: boolean;
+  /** With viewBaked: the face field is held too (AmrSim.loadFaces), for field lines. */
+  viewFaces?: boolean;
+  /**
    * Adaptive mesh: per-block timesteps. A block may step up to 2^timeBins times less often
    * than the fastest one, where its own signal speeds allow (0 = one timestep for all).
    */

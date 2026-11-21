@@ -14,6 +14,7 @@ import { pressureOf, primitivesFrom, SNAPSHOT_FORMAT, SnapshotSampler, type Rest
  * everywhere at once, which with a tabulated equation of state takes seconds on a large mesh.
  */
 export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses' | 'perturber'>, opts: { lazyPressure?: boolean } = {}): Promise<Snapshot> {
+  if (sim.cfg.viewBaked) throw new Error('this checkpoint is open for viewing with one field held, not its state: probe() reads the file; slices, statistics and saved states need it opened with its state (viewAthdf with oneField: false, if it fits)');
   const cfg = sim.cfg;
   const lo = domainLo(cfg);
   const hi = domainHi(cfg);
@@ -170,7 +171,9 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
   }
   // A magnetic field comes back face by face, which needs the grid it was saved on.
   let mhd = problem.mhd;
-  if (mhd && adaptive) {
+  if (mhd && adaptive && snap.view?.baked) {
+    // A view that holds one field keeps no faces: its field is baked from the file (AmrSim.bake).
+  } else if (mhd && adaptive) {
     // Blocks: each leaf's faces from the file, which must hold that very leaf (the mesh is
     // rebuilt from the file's levels, so it is the file's mesh).
     const faces = snap.faces;

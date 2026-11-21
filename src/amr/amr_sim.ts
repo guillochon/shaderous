@@ -18,7 +18,7 @@
 import { domainLo } from '../domain';
 import { prepareEosTable } from '../eos/tables';
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
+import { bindGroup, bindGroupUsed, computePipeline, readTexture, rendersTo3d, tex3d, type Bindable, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileSetup, endLoadStage, setLoadStage, settleStage, showLoadStage } from '../gpu/progress';
 import { MAX, Reducer, SUM } from '../gpu/reduce';
 import { beginPass } from '../gpu/timing';
@@ -50,7 +50,8 @@ import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, S
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
 import { compSrcSlot, problemCoefficients, type Moments } from '../species/mixture';
 import { AmrMhd, maxBinding, MHD_BLOCK_BYTES, registerBytes } from '../mhd/amr_mhd';
-import { viewBlockBytes } from '../io/view';
+import { viewBakedBlockBytes, viewBlockBytes, viewFacesBlockBytes, type ViewBatch } from '../io/view';
+import { COOLING_MODULES } from '../cooling/cooling';
 import { mhdUnsupported } from '../mhd/mhd';
 import { AmrRad } from './radiation';
 import { radiationOn } from '../radiation/radiation';
@@ -477,8 +478,20 @@ export class AmrSim implements Simulation {
     // View only: what the steps alone use is one texel, so its bindings stay valid (viewBlockBytes).
     const view = cfg.viewOnly;
     const st = (label: string) => (view ? tex3d(d, 1, 'rgba32float', `${label} (view only: unused)`, 1) : t(label));
-    for (let p = 0; p < 2; p++) this.state.push(p === 0 ? [t(`U1 ${p}`), t(`U2 ${p}`)] : [st(`U1 ${p}`), st(`U2 ${p}`)]);
-    this.prim = [t('W1'), st('W2')];
+    // One field held (viewBaked): not even the state, only the baked field (bakedTex below).
+    const bk = (label: string) => (cfg.viewBaked ? st(label) : t(label));
+    for (let p = 0; p < 2; p++) this.state.push(p === 0 ? [bk(`U1 ${p}`), bk(`U2 ${p}`)] : [st(`U1 ${p}`), st(`U2 ${p}`)]);
+    this.prim = [bk('W1'), st('W2')];
+    if (cfg.viewBaked) {
+      const a = this.slotsPerSide;
+      this.bakedTex = d.createTexture({
+        label: 'view only: the field shown',
+        size: [a * BS, a * BS, cfg.ndim === 2 ? this.layers : this.layers * BS],
+        dimension: '3d',
+        format: 'rg32float',
+        usage: GPUTextureUsage.STORAGE_BINDING | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_SRC,
+      });
+    }
     this.pred = [st('PA'), st('PB')];
     const G = this.speciesGroups;
     if (G > 0) {
@@ -489,10 +502,10 @@ export class AmrSim implements Simulation {
         throw new Error(`${cfg.problem.species!.length} species need an atlas ${sy} x ${sz} texels, more than this GPU allows (${d.limits.maxTextureDimension3D}): pick a lower resolution`);
       }
       const ts = (label: string) => tex3d(d, side, 'rgba32float', label, sz, sy);
-      this.species = [ts('species 0'), view ? st('species 1') : ts('species 1')];
+      this.species = [cfg.viewBaked ? st('species 0') : ts('species 0'), view ? st('species 1') : ts('species 1')];
       this.speciesX = view ? st('species fractions') : ts('species fractions');
       this.speciesHalf = view ? st('species half step') : ts('species half step');
-      if (this.compCoeffs) this.comp = t('composition');
+      if (this.compCoeffs) this.comp = bk('composition');
     }
     if (this.recordsMassFlux) {
       const bytes = this.cap * speciesFaceBytes(cfg.ndim);
@@ -569,6 +582,7 @@ export class AmrSim implements Simulation {
 
   /** Bytes of one block of the atlas for a run's problem (blockBytes with its field and species). */
   static blockBytesFor(cfg: SimConfig): number {
+    if (cfg.viewBaked) return viewBakedBlockBytes(cfg.ndim) + (cfg.viewFaces ? viewFacesBlockBytes(cfg.ndim) : 0);
     if (cfg.viewOnly) return AmrSim.viewBlockBytes(cfg);
     const groups = speciesGroups(cfg.problem);
     // Implicit pressure (amr/pressure.ts): six one-channel atlases, the state the step started
@@ -709,7 +723,7 @@ export class AmrSim implements Simulation {
       sim.mhd = await AmrMhd.create({
         device: d, cfg, cap: sim.cap,
         texture: (label, format = 'rgba32float') =>
-          cfg.viewOnly && label !== 'face field 0' ? tex3d(d, 1, format, `${label} (view only: unused)`, 1) : tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
+          cfg.viewOnly && ((cfg.viewBaked && !cfg.viewFaces) || label !== 'face field 0') ? tex3d(d, 1, format, `${label} (view only: unused)`, 1) : tex3d(d, side, format, label, sim.layers * (cfg.ndim === 2 ? 1 : PAD)),
         prim: sim.prim,
         params: sim.params, clock: sim.clock, bt: sim.bt, listLeaf: sim.listLeaf, idx: sim.idx, rg: sim.rg, brush: sim.brush,
         state: sim.state, half: sim.pred, rates: sim.redDt.first, slots: sim.slots, gfield: sim.gfield, bh: sim.bh, massFlux: sim.massFluxWindows ?? undefined,
@@ -1692,8 +1706,9 @@ export class AmrSim implements Simulation {
         this.pStat[3] = Math.max(this.pStat[3], s.pstat[3]);
       }
     };
-    let filled = false;
-    if (run && leaves.length > 1) filled = await run.leaves(leaves, write).then(() => true, () => false);
+    // One field held: the leaves are filled by bake(), from the file, not from a setup.
+    let filled = !!c.viewBaked;
+    if (!filled && run && leaves.length > 1) filled = await run.leaves(leaves, write).then(() => true, () => false);
     if (!filled) {
       const ctx = { cfg: c, dx0: this.dx0, levels: this.levels, fn, eos, kc: this.compCoeffs, groups: G, mhd: !!this.mhd, rad: !!this.rad };
       leaves.forEach((b, i) => write(i, leafState(ctx, b)));
@@ -3141,6 +3156,97 @@ export class AmrSim implements Simulation {
   get radCur(): number {
     return this.rad?.cur ?? 0;
   }
+  /** View only, one field held (viewBaked): the field shown, its cells (bakedTex). */
+  private bakedTex?: GPUTexture;
+  private pBake?: GPUComputePipeline;
+  private bakeBufs?: { ch: GPUBuffer; inp: GPUBuffer; view: GPUBuffer };
+
+  /**
+   * View only, one field held (SimConfig.viewBaked, plans/view-only.md): work out field `field`
+   * at every cell of a batch of the mesh's leaves from a checkpoint's primitives (io/view.ts
+   * streamForView, with bakeVariables' variables), on the GPU (amr/field.wgsl `bake`), and keep it
+   * with the density in place of the state. The display reads it as it would the state. `species`
+   * names the variable of a mass fraction shown.
+   */
+  async bake(batch: ViewBatch, field: number, species: string | null): Promise<void> {
+    const c = this.cfg;
+    if (!c.viewBaked || !this.bakedTex) throw new Error('bake() is for a view that holds one field');
+    const d = this.device;
+    if (!this.pBake) {
+      const h = hydroSlots(c);
+      const code = assemble('amr/field.wgsl', { eos: h.eos, cooling: COOLING_MODULES[c.cooling], diffusion: h.diffusion, comp: h.comp, opacity: h.opacity });
+      this.pBake = await computePipeline(d, code, 'view bake', { BAKED: 1 }, 'bake');
+    }
+    const n = batch.levels.length;
+    const cells = c.ndim === 3 ? BS * BS * BS : BS * BS;
+    const names = ['rho', 'press', 'vel1', 'vel2', 'vel3', 'r0', 'Bcc1', 'Bcc2', 'Bcc3', species ?? ''];
+    const present = names.map((v) => (v && batch.data[v] ? batch.data[v] : null));
+    const floats = present.reduce((m, a) => m + (a ? a.length : 0), 0);
+    const inp = new Uint32Array(12 + n);
+    inp[0] = n;
+    inp[1] = cells;
+    let off = 0;
+    const ch = new Float32Array(Math.max(floats, 4));
+    present.forEach((a, k) => {
+      if (!a) return void (inp[2 + k] = 0xffffffff);
+      if (a.length !== n * cells) throw new Error(`a batch's "${names[k]}" does not have ${n} blocks of ${cells} cells`);
+      inp[2 + k] = off;
+      ch.set(a, off);
+      off += a.length;
+    });
+    for (let i = 0; i < n; i++) {
+      const b = this.tree.get(batch.levels[i], [batch.locations[3 * i], batch.locations[3 * i + 1], c.ndim === 2 ? 0 : batch.locations[3 * i + 2]]);
+      if (!b || b.children) throw new Error(`the mesh has no leaf at level ${batch.levels[i]}, [${batch.locations.slice(3 * i, 3 * i + 3)}]`);
+      inp[12 + i] = b.slot;
+    }
+    const grow = (buf: GPUBuffer | undefined, bytes: number, usage: number, label: string) =>
+      buf && buf.size >= bytes ? buf : (buf?.destroy(), d.createBuffer({ label, size: Math.ceil(bytes / 256) * 256, usage }));
+    const store = GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST;
+    const old = this.bakeBufs;
+    const bufs = {
+      ch: grow(old?.ch, ch.byteLength, store, 'view bake: primitives'),
+      inp: grow(old?.inp, inp.byteLength, store, 'view bake: layout'),
+      view: old?.view ?? d.createBuffer({ label: 'view bake: field', size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }),
+    };
+    this.bakeBufs = bufs;
+    d.queue.writeBuffer(bufs.ch, 0, ch);
+    d.queue.writeBuffer(bufs.inp, 0, inp);
+    const v = new Uint32Array(16);
+    v[0] = field;
+    d.queue.writeBuffer(bufs.view, 0, v);
+    // A bake that cannot run says why, rather than leaving the field blank.
+    d.pushErrorScope('validation');
+    const g = bindGroupUsed(d, this.pBake, { ...this.fieldResources(0, 0), 0: this.params, 1: bufs.view, 18: bufs.ch, 19: bufs.inp, 21: this.bakedTex.createView() }, 'view bake');
+    const enc = d.createCommandEncoder();
+    const pass = enc.beginComputePass();
+    pass.setPipeline(this.pBake);
+    pass.setBindGroup(0, g);
+    pass.dispatchWorkgroups(Math.ceil((n * BS) / 8), BS / 8, c.ndim === 3 ? BS / 4 : 1);
+    pass.end();
+    d.queue.submit([enc.finish()]);
+    const err = await d.popErrorScope();
+    if (err) throw new Error(`the field could not be baked: ${err.message}`);
+    await d.queue.onSubmittedWorkDone();
+  }
+
+  /**
+   * View only, one field held with the face field (viewFaces): put a batch's faces (io/view.ts
+   * streamForView with faces) into the field's face atlas, leaf by leaf, for field lines.
+   */
+  loadFaces(batch: ViewBatch) {
+    if (!this.cfg.viewFaces || !this.mhd || !batch.faces) throw new Error('loadFaces() is for a view that holds the face field');
+    const c = this.cfg;
+    const W = BS + 1;
+    const per = W * W * (c.ndim === 3 ? W : 1);
+    const texels = new Float32Array(per * 4);
+    for (let i = 0; i < batch.levels.length; i++) {
+      const b = this.tree.get(batch.levels[i], [batch.locations[3 * i], batch.locations[3 * i + 1], c.ndim === 2 ? 0 : batch.locations[3 * i + 2]]);
+      if (!b || b.children) throw new Error(`the mesh has no leaf at level ${batch.levels[i]}, [${batch.locations.slice(3 * i, 3 * i + 3)}]`);
+      for (let t = 0; t < per; t++) for (let a = 0; a < 3; a++) texels[4 * t + a] = batch.faces[3 * (i * per + t) + a];
+      this.mhd.writeFaces(this.origin(b.slot), texels);
+    }
+  }
+
   fieldResources(parity: number, speciesParity: number, radParity = 0): Record<number, GPUBuffer | GPUTextureView> {
     // With a magnetic field the primitives come from its own assembly (the same layout), and the
     // display reads the faces; without, one placeholder texel.
@@ -3148,6 +3254,7 @@ export class AmrSim implements Simulation {
       2: this.state[parity][0].createView(), 3: this.state[parity][1].createView(), 5: this.idx.createView(),
       6: (this.mhd?.prim ?? this.prim[0]).createView(), 7: this.gfield.createView(), 10: this.pred[1].createView(),
       13: (this.mhd?.faces[parity] ?? this.noFaces()).createView(), 29: this.bins, 30: this.bt, 20: this.bh,
+      17: (this.bakedTex ?? this.noFaces()).createView(),
       14: this.mhd?.magResult ?? this.noMag(), 15: this.heat.createView(),
       16: (this.rad?.R[radParity] ?? this.noFaces()).createView(),
     };

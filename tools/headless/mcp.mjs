@@ -207,7 +207,7 @@ const TOOLS = [
   },
   {
     name: 'load_athdf',
-    run: async ({ path: p, view }) => text(view ? await viewAthdf(call, resolvePath(p)) : await uploadAthdf(call, resolvePath(p))),
+    run: async ({ path: p, view, one_field }) => text(view ? await viewAthdf(call, resolvePath(p), one_field === undefined ? {} : { oneField: one_field }) : await uploadAthdf(call, resolvePath(p))),
   },
   {
     name: 'debris',
