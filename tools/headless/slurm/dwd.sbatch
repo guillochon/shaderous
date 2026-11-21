@@ -19,10 +19,14 @@
 #              simulated time (default 0: none)
 #   MARGIN     seconds left at the end of a job for the last checkpoint (default 1800)
 #   MAX_JOBS   the most jobs the chain may run (default 20)
+# Partitions: gpu-highvram, or gpu-preempt-highvram (more 80 GB cards, often free at once) where
+# a job can be preempted; it is then requeued and loses only the time since its last checkpoint.
 # Stop the chain: touch RUN_DIR/seg-<job>/STOP (the job stops at its next screenshot and
 # writes a checkpoint) and scancel any job waiting, or touch RUN_DIR/DONE before the next starts.
 #SBATCH --job-name=shaderous-dwd
-#SBATCH --partition=gpu-highvram
+#SBATCH --partition=gpu-highvram,gpu-preempt-highvram
+#SBATCH --requeue
+#SBATCH --open-mode=append
 #SBATCH --gpus=1
 #SBATCH --constraint=vram80
 #SBATCH --cpus-per-task=8
@@ -41,7 +45,9 @@ ckpt() { in_container node tools/headless/slurm/checkpoints.mjs "$@"; }
 
 if [ -e "$RUN_DIR/DONE" ]; then echo "$RUN_DIR/DONE exists: nothing to do"; exit 0; fi
 mkdir -p "$RUN_DIR"
-seg="$RUN_DIR/seg-$SLURM_JOB_ID"
+# A preempted job is requeued under the same id: it starts again from the newest checkpoint, in
+# a segment of its own.
+seg="$RUN_DIR/seg-$SLURM_JOB_ID${SLURM_RESTART_COUNT:+-r$SLURM_RESTART_COUNT}"
 from=$(ckpt latest "$RUN_DIR")
 wall=$(( $(job_seconds_left) - MARGIN ))
 gb=$(gpu_memory_gb)
