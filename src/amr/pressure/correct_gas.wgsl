@@ -19,8 +19,8 @@
 @group(0) @binding(18) var O1: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(19) var O2: texture_storage_3d<rgba32float, write>;
 @group(0) @binding(25) var PBT: texture_3d<f32>;
-@group(0) @binding(27) var FLO: texture_3d<f32>;
-@group(0) @binding(28) var FHI: texture_3d<f32>;
+@group(0) @binding(48) var FLO: texture_3d<f32>;   // (27 is the composition's, hydro/common.wgsl)
+@group(0) @binding(49) var FHI: texture_3d<f32>;
 // The new pressure (less the reference), for the next step (amr/pressure/lag_fill.wgsl).
 @group(0) @binding(29) var PN: texture_storage_3d<r32float, write>;
 
@@ -61,6 +61,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!inv.ok) { return; }
   let c = atl(blk_origin(inv.slot), inv.l);
   g_dx = blk_dx(inv.slot);
+  // The cell's own composition, where it varies, for the dual energy's floors (hydro/dual_energy.wgsl).
+  comp_use(comp_tex(c));
   let u1 = textureLoad(N1, c, 0);
   let u2 = textureLoad(N2, c, 0);
   let th = ap_theta(textureLoad(CHI, c, 0).x, textureLoad(W2, c, 0).y, blk_dx(inv.slot));

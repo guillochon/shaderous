@@ -13,6 +13,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   // (Less the reference pressure, P.ohm.w: zero for a liquid, a gas's mean at the start.)
+  comp_use(comp_tex(c));   // (The cell's own composition, where it varies: species/mixture.ts.)
   let p = eos_pressure(max(textureLoad(U1, c, 0).x, P.rho_floor), textureLoad(U2, c, 0).y);
   textureStore(PRS, c, vec4<f32>(p - P.ohm.w, 0.0, 0.0, 0.0));
 }

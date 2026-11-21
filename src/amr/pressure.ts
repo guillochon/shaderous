@@ -49,6 +49,8 @@ export interface AmrPressureContext {
   hi: number[];
   /** dispatch over the interior cells of `count` blocks of the bound list (amr/list.wgsl inv_interior) */
   interior(pass: GPUComputePassEncoder, count: number): void;
+  /** Where the composition varies (species/mixture.ts): its moments, per atlas texel, which a gas's passes read (binding 27). */
+  comp?: GPUTexture;
 }
 
 export class AmrPressure {
@@ -130,7 +132,7 @@ export class AmrPressure {
       s.gCoef = ctx.listLevel.map((list) => bindGroup(d, s.pCoef!, { 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: list, 15: v0(ctx.prim), 22: v0(ctx.prim2), 7: v0(kr), 8: v0(ka), 35: v0(chi) }));
       [s.pKeep, s.pLagInit, s.pLagFill] = await Promise.all([pipe('keep', 'advect the old pressure'), pipe('lag_init', 'start the carried pressure'), pipe('lag_fill', 'carry the pressure')]);
       s.gKeep = bindGroup(d, s.pKeep, { 0: ctx.params, 1: ctx.clock, 30: ctx.bt, 31: ctx.listLeaf, 15: v0(ctx.prim), 22: v0(ctx.prim2), 24: v0(pd) });
-      s.gLagInit = [0, 1].map((p) => bindGroup(d, s.pLagInit!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 14: v0(ctx.state[p][0]), 16: v0(ctx.state[p][1]), 29: v0(pn), 2: v0(s.tex[0]) }));
+      s.gLagInit = [0, 1].map((p) => bindGroup(d, s.pLagInit!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 14: v0(ctx.state[p][0]), 16: v0(ctx.state[p][1]), 29: v0(pn), 2: v0(s.tex[0]), ...((ctx.comp ? { 27: v0(ctx.comp) } : {}) as Record<number, GPUTextureView>) }));
       s.gLagFill = [0, 1].map((p) => bindGroup(d, s.pLagFill!, { 0: ctx.params, 30: ctx.bt, 31: ctx.listLeaf, 25: v0(gas.lag), 29: v0(pn), 14: v0(ctx.state[p][0]), 23: v0(gas.gfield) }));
     }
     const v = (t: GPUTexture) => t.createView();
@@ -154,7 +156,7 @@ export class AmrPressure {
       s.gRoot[p] = s.pRoot.map((pl) => bindGroup(d, pl, { ...base(ctx.listLevel[0]), 2: v(prs), 3: v(rhs), 4: v(tau), 10: v(r0.p), 11: v(r0.rhs), 12: v(r0.coef) }));
       s.gMeasure[p] = bindGroup(d, s.pMeasure, { ...base(ctx.listLeaf), 2: v(prs), 3: v(rhs), 9: s.res });
       if (gas) {
-        const faces = { 25: v(gas.lag), 27: v(gas.faceLo), 28: v(gas.faceHi), 23: v(gas.gfield), 20: gas.bh };
+        const faces = { 25: v(gas.lag), 48: v(gas.faceLo), 49: v(gas.faceHi), 23: v(gas.gfield), 20: gas.bh, ...((ctx.comp ? { 27: v(ctx.comp) } : {}) as Record<number, GPUTextureView>) };
         s.gSource.push(bindGroupUsed(d, s.pSource, { ...base(ctx.listLeaf), 3: v(rhs), 4: v(tau), 26: v(pd), 14: v(ctx.state[p][0]), 16: v(ctx.state[p][1]), 34: v(old), 35: v(chi), ...faces }));
         s.gCorrect.push(bindGroupUsed(d, s.pCorrect, { ...bare(ctx.listLeaf), ...prims, ...(ctx.walls ?? {}), 2: v(prs), 16: v(ctx.state[o][0]), 17: v(ctx.state[o][1]), 18: v(ctx.state[p][0]), 19: v(ctx.state[p][1]), 29: v(pn), 34: v(old), 35: v(chi), ...mfBind, ...faces }));
         continue;

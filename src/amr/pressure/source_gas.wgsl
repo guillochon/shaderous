@@ -34,8 +34,8 @@
 @group(0) @binding(26) var PDT: texture_3d<f32>;
 @group(0) @binding(14) var U1N: texture_3d<f32>;
 @group(0) @binding(16) var U2N: texture_3d<f32>;
-@group(0) @binding(27) var FLO: texture_3d<f32>;
-@group(0) @binding(28) var FHI: texture_3d<f32>;
+@group(0) @binding(48) var FLO: texture_3d<f32>;   // (27 is the composition's, hydro/common.wgsl)
+@group(0) @binding(49) var FHI: texture_3d<f32>;
 
 fn prs(slot: i32, l: vec3<i32>) -> f32 {
   return 0.0;
@@ -122,6 +122,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let alpha = 1.0 / (abs(w1.x) * cs * cs * dt * dt);
   let th = ap_theta(chi, cs, h);
   // p^a - q: the state's pressure, advected, less the carried one.
+  comp_use(comp_tex(c));   // (The cell's own composition, where it varies: species/mixture.ts.)
   let ps = eos_pressure(max(textureLoad(U1N, c, 0).x, P.rho_floor), textureLoad(U2N, c, 0).y) - P.ohm.w;
   let pa = ps + textureLoad(PDT, c, 0).x - textureLoad(PBT, c, 0).x;
   textureStore(RHS, c, vec4<f32>((alpha * pa - (th * div + (1.0 - th) * divn) / (h * dt)) / th, 0.0, 0.0, 0.0));

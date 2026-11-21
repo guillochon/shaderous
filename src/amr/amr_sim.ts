@@ -891,6 +891,7 @@ export class AmrSim implements Simulation {
         flat: (pass, count, reach) => this.flat(pass, count, reach),
         rootDims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),
         interior: (pass, count) => this.interior(pass, count),
+        ...(this.comp ? { comp: this.comp } : {}),
       });
       this.prs.setTolerance(c.pressureTol);
     } else {

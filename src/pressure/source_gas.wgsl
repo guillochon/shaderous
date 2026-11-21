@@ -52,6 +52,7 @@
 
 // The pressure of the state at the start of the step in cell c.
 fn p_old(c: vec3<i32>) -> f32 {
+  comp_use(comp_tex(c));   // (The cell's own composition, where it varies: species/mixture.ts.)
   return eos_pressure(max(textureLoad(U1N, c, 0).x, P.rho_floor), textureLoad(U2N, c, 0).y);
 }
 
@@ -81,6 +82,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let un = textureLoad(U1N, c, 0);
   let rho = max(un.x, P.rho_floor);
   let v = un.yzw / rho;
+  comp_use(comp_tex(c));
   let cs = eos_sound_speed(rho, p);
   let us = textureLoad(U1S, c, 0);
   var adv = 0.0;

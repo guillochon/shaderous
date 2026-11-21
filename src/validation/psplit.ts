@@ -8,6 +8,10 @@ import { defaultEosParams } from '../eos/eos';
 import { presetSpec, problemById } from '../presets/index';
 import { compileSetup } from '../setup/compile';
 import { cloneSetup } from '../setup/spec';
+import { mixMoments, problemCoefficients } from '../species/mixture';
+
+/** How uniform the pressure must stay in psplit-species-eos (the explicit scheme keeps it to 0.017). */
+const PTOL = 0.03;
 import { all, PERIODIC, type Problem } from '../problems/types';
 import { PF_CLOSED, PF_OPEN, PF_PERIODIC, PressureSolver } from '../pressure/multigrid';
 import { cavityError, GHIA_RE100, greshoGas } from './liquid';
@@ -788,6 +792,78 @@ export const PSPLIT_TESTS: TestDef[] = [
         const drift = Math.max(...m1.map((v, i) => Math.abs(v / m0[i] - 1)));
         Object.assign(m, { blocks_sum_error: sum, blocks_min: lo, blocks_max: hi, blocks_uniform_species_error: flat, blocks_species_mass_drift: drift, blocks_steps: steps });
         pass &&= sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && flat < 1e-4 && drift < 1e-6;
+      });
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'psplit-species-eos',
+    name: 'Implicit pressure with species that set the equation of state: a carbon blob carried through helium (2D, uniform 64^2 and blocks 128 finest, 1 level)',
+    criterion:
+      'A blob of carbon (gamma 1.3) in helium (gamma 5/3), at one pressure, carried across a periodic box at Mach 0.05: the pressure, worked out from each cell\'s internal energy and composition, stays uniform to 0.03 (the explicit scheme: 0.017; a solve blind to the composition would read the blob at 2.2 times the rest), the mass fractions sum to 1 within 1e-5 and lie in [-1e-4, 1 + 1e-4], and each species keeps its mass to 1e-6; on the uniform grid and on blocks. (Refused until the pressure passes read each cell\'s composition.)',
+    async run(gpu) {
+      const gas: Problem = {
+        id: 'carbon-blob', label: '', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 }, bcLo: all(PERIODIC), bcHi: all(PERIODIC), gravity: 'off', G: 1, box: 1, tEnd: 4, supports2d: true,
+        species: ['he4', 'c12'], speciesGamma: { c12: 1.3 },
+        init: () => (x, y) => {
+          const f = 0.5 * (1 - Math.tanh((Math.hypot(x, y) - 0.15) / 0.02));
+          return { rho: 1 + 2 * f, vx: 0.065, vy: 0.03, vz: 0, p: 1, s: 0, X: [1 - f, f] };
+        },
+      };
+      const coeffs = problemCoefficients(gas, 5 / 3)!;
+      // p = (gamma - 1) rho e of the mixture, gamma - 1 = x / w (species/mixture.ts).
+      const pressures = (eint: number[], X: Float32Array[]) => eint.map((e, q) => {
+        const k = mixMoments(coeffs, X.map((x) => x[q]));
+        return (e * k[0]) / k[3];
+      });
+      const m: Record<string, number> = {};
+      let pass = true;
+      const judge = (tag: string, p: number[], X: Float32Array[], m0: number[], m1: number[]) => {
+        let dev = 0;
+        let sum = 0;
+        let lo = Infinity;
+        let hi = -Infinity;
+        for (let q = 0; q < p.length; q++) {
+          dev = Math.max(dev, Math.abs(p[q] - 1));
+          sum = Math.max(sum, Math.abs(X[0][q] + X[1][q] - 1));
+          for (const x of X) {
+            lo = Math.min(lo, x[q]);
+            hi = Math.max(hi, x[q]);
+          }
+        }
+        const drift = Math.max(...m1.map((v, i) => Math.abs(v / m0[i] - 1)));
+        Object.assign(m, { [`${tag}_pressure_deviation`]: dev, [`${tag}_sum_error`]: sum, [`${tag}_min`]: lo, [`${tag}_max`]: hi, [`${tag}_species_mass_drift`]: drift });
+        pass &&= dev < PTOL && sum < 1e-5 && lo > -1e-4 && hi < 1 + 1e-4 && drift < 1e-6;
+      };
+      await withSim(gpu, gas, 64, { ndim: 2, ...IMPLICIT }, async (sim) => {
+        const mass = (X: Float32Array[], u1: Float32Array) => X.map((x) => x.reduce((t, v, q) => t + v * u1[4 * q], 0));
+        const s0 = await sim.readState();
+        const m0 = mass(await sim.readSpecies(), s0.u1);
+        m.uniform_steps = await sim.runToEnd(64, 1e6);
+        const s1 = await sim.readState();
+        const X = await sim.readSpecies();
+        const eint = Array.from({ length: X[0].length }, (_, q) => s1.u2[4 * q + 1]);
+        judge('uniform', pressures(eint, X), X, m0, mass(X, s1.u1));
+      });
+      // The explicit scheme on the same problem, for scale (not judged).
+      await withSim(gpu, gas, 64, { ndim: 2 }, async (sim) => {
+        await sim.runToEnd(64, 1e6);
+        const s1 = await sim.readState();
+        const X = await sim.readSpecies();
+        const p = pressures(Array.from({ length: X[0].length }, (_, q) => s1.u2[4 * q + 1]), X);
+        m.explicit_pressure_deviation = Math.max(...p.map((x) => Math.abs(x - 1)));
+      });
+      await withAmr(gpu, gas, 128, { ndim: 2, amrLevels: 1, ...IMPLICIT }, async (sim) => {
+        const read = async () => {
+          const c = await sim.readLeaves();
+          const X = await sim.readLeafSpecies();
+          return { c, X, mass: X.map((x) => x.reduce((t, v, q) => t + v * c.u1[4 * q] * c.dx[q] * c.dx[q], 0)) };
+        };
+        const r0 = await read();
+        m.blocks_steps = await sim.runToEnd(64, 1e6);
+        const r1 = await read();
+        const eint = Array.from({ length: r1.X[0].length }, (_, q) => r1.c.u2[4 * q + 1]);
+        judge('blocks', pressures(eint, r1.X), r1.X, r0.mass, r1.mass);
       });
       return { pass, metrics: m };
     },

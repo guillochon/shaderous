@@ -661,10 +661,9 @@ export function implicitUnsupported(c: SimConfig): string | null {
   // (A rotating frame for the liquid: the update gives it the frame's whole kick before the solve, hydro/update.wgsl.)
   if ((c.problem.rotation && c.eos !== 'liquid') || c.problem.shear || c.problem.frame) return 'rotating frames (but for a liquid) and shearing boxes are not available with it';
   if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available with it yet';
-  // (Species that only ride with the gas are moved after the correction, and scaled to its
-  // density. Where they set the equation of state, or burn, the pressure passes would have to
-  // know each cell's composition.)
-  if (problemCoefficients(c.problem, c.eosParams.gamma) !== null) return 'species that set the equation of state are not available with it yet';
+  // (Species are moved after the correction, and scaled to its density; where they set the
+  // equation of state, the pressure passes select each cell's composition from the step's start.
+  // Burning would have to know it through the solve as well.)
   if (c.problem.burn) return 'burning is not available with it';
   // (Its rates and the pressure's gradient take the same binding, and its transport the species' passes.)
   if (radiationOn(c)) return 'radiation transport is not available with it';

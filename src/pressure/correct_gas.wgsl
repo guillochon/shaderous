@@ -84,6 +84,8 @@ fn gas_face(lo: vec3<i32>, hi: vec3<i32>, a: i32, dtdx: f32) -> GFace {
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
+  // The cell's own composition, where it varies, for the dual energy's floors (hydro/dual_energy.wgsl).
+  comp_use(comp_tex(c));
   g_dx = P.dx;
   let u1 = textureLoad(U1S, c, 0);
   let u2 = textureLoad(U2S, c, 0);

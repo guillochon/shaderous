@@ -20,6 +20,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (!inv.ok) { return; }
   let c = atl(blk_origin(inv.slot), inv.l);
   g_dx = blk_dx(inv.slot);
+  comp_use(comp_tex(c));   // (The cell's own composition, where it varies: species/mixture.ts.)
   let p = eos_pressure(max(textureLoad(U1N, c, 0).x, P.rho_floor), textureLoad(U2N, c, 0).y);
   textureStore(PN, c, vec4<f32>(p - P.ohm.w, 0.0, 0.0, 0.0));
   textureStore(PRS, c, vec4<f32>(0.0));
