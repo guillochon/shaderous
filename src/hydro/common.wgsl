@@ -472,8 +472,11 @@ fn bc_map(c0: vec3<i32>) -> Mapped {
 // g_shear is for the state at the start of the step; load_pred uses g_shear_h, half a step on.
 var<private> g_shear: f32 = 0.0;
 var<private> g_shear_h: f32 = 0.0;
+// SHEAR_BOX (the slot <geometry>) is false where the run is known to have none: the second
+// conversion to primitives of a sheared ghost, in every load that may reach beyond a face, is
+// then compiled out (with a costly equation of state it was half of a pass's compile time).
 fn shear_on() -> bool {
-  return P.shear.w != 0.0;
+  return SHEAR_BOX && P.shear.w != 0.0;
 }
 // The jump of the background flow v_y = -q Omega x across the box, q Omega L.
 fn shear_jump() -> f32 {

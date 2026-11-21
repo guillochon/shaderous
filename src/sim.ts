@@ -838,8 +838,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     // Forces of a non-inertial frame that depend on the velocity (gravity/frame_off.wgsl): a
     // rotating frame's Coriolis force, or the expansion drag of comoving coordinates.
     frame: cosmologyOf(c) ? 'gravity/frame_cosmo.wgsl' : rotating(c) ? 'gravity/frame_rot.wgsl' : 'gravity/frame_off.wgsl',
-    // A spherical run (hydro/common.wgsl spherical()).
-    geometry: `const SPHERICAL = ${spherical(c)};\n`,
+    // A spherical run (hydro/common.wgsl spherical()), and a shearing box (shear_on()).
+    geometry: `const SPHERICAL = ${spherical(c)};\nconst SHEAR_BOX = ${!!c.problem.shear};\n`,
     // Forces on bodies (hydro/forces.ts): the passes that write each cell's wall forces.
     ...wallSlots(forcesOn(c)),
     // Moving bodies (hydro/moving.ts): walls that move, on the uniform grid.

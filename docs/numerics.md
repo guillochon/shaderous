@@ -2136,8 +2136,15 @@ $`E`$ includes $`B^2/2`$.
   83 s to 27 s); and the block grid's multigrid stencil evaluated the isolated boundary's
   multipole expansion inside every neighbor lookup, inlined some 120 times in the residual and
   restriction, where it is now filled in from one loop for the cells on the domain's edge
-  (11 s to 1.7 s). Both give the same bits as before. `tools/compile_times.mjs` times each
-  pipeline of a setup, alone, on a cold shader cache.
+  (11 s to 1.7 s). With a costly equation of state (Helmholtz, ANEOS) what counts is how many
+  times its solve is inlined. Every load that may reach beyond a face converted a sheared
+  ghost's second cell too, a second solve, compiled into every run: whether there is a
+  shearing box is now a constant (`SHEAR_BOX`, the slot `<geometry>`), which halved the update
+  again (the detonation 27 s to about 12 s). The prediction's shell, a rim two cells thick,
+  makes its six loads from one kept loop, in the interior's order (5 to 10 s to 2 to 3 s); the
+  interior keeps them inline. All give the same bits as before. `tools/compile_times.mjs`
+  times each pipeline of a setup, alone, on a cold shader cache; the machine's other load
+  moves its figures by up to a factor of two, so compare builds run by turns.
 - **Memory.** Five face textures (field and compensation at both parities, and the half step)
   add 80 bytes per cell to the uniform grid's 112 (`MhdPasses.cellBytes`), plus the slab
   buffers.

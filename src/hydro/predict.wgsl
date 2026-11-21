@@ -23,6 +23,12 @@
 #include <psplit_grad>
 #include "gravity/gfield.wgsl"
 
+// n, as a loop bound the shader compiler cannot see through (P.dims.x is never 0), so that it
+// keeps the loop a loop (loop_count in amr/grid.wgsl).
+fn pred_count(n: i32) -> i32 {
+  return select(n, 0, P.dims.x == 0u);
+}
+
 @compute @workgroup_size(WGX, WGY, WGZ)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let rc = region_cell(gid);
@@ -47,14 +53,37 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // In 2D the layer is its own neighbor along z.
   var zm = q;
   var zp = q;
-  if (P.dims.z != 1u) {
-    zm = load_q(c + vec3<i32>(0, 0, -1));
-    zp = load_q(c + vec3<i32>(0, 0, 1));
+  var xm: Q;
+  var xp: Q;
+  var ym: Q;
+  var yp: Q;
+  let flat = P.dims.z == 1u;
+  if (INTERIOR) {
+    if (!flat) {
+      zm = load_q(c + vec3<i32>(0, 0, -1));
+      zp = load_q(c + vec3<i32>(0, 0, 1));
+    }
+    xm = load_q(c + vec3<i32>(-1, 0, 0));
+    xp = load_q(c + vec3<i32>(1, 0, 0));
+    ym = load_q(c + vec3<i32>(0, -1, 0));
+    yp = load_q(c + vec3<i32>(0, 1, 0));
+  } else {
+    // The shell, a thin rim of the grid: its loads, each through the boundary mapping and the
+    // equation of state, from one call site in a kept loop (with a costly equation of state the
+    // six inlined took twice the interior's compile time). In the same order as the interior's,
+    // so that the last composition set (comp_use) is the same.
+    for (var k = select(0, 2, flat); k < pred_count(6); k++) {
+      var o = vec3<i32>(0);
+      o[(k / 2 + 2) % 3] = select(-1, 1, (k & 1) == 1);
+      let n = load_q(c + o);
+      if (k == 0) { zm = n; } else if (k == 1) { zp = n; } else if (k == 2) { xm = n; }
+      else if (k == 3) { xp = n; } else if (k == 4) { ym = n; } else { yp = n; }
+    }
   }
   var pr = predictor(
     q,
-    load_q(c + vec3<i32>(-1, 0, 0)), load_q(c + vec3<i32>(1, 0, 0)),
-    load_q(c + vec3<i32>(0, -1, 0)), load_q(c + vec3<i32>(0, 1, 0)),
+    xm, xp,
+    ym, yp,
     zm, zp,
     g_load(c), vec3<f32>(1.0), dphi_cell(c, -1), dphi_cell(c, 0),
   );
