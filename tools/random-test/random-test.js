@@ -22,6 +22,11 @@
     const row = { seed: gen.seed, mode: gen.mode, preset: gen.preset, features: gen.features.join(',') };
     try {
       const e0 = s.errors().length;
+      // The page's error panel stays up once an error comes, and covered every screenshot after
+      // the first run that had one (src/ui/errors.ts): hidden for each run, it shows again only for
+      // an error of this run's own.
+      const panel = document.getElementById('error');
+      if (panel) panel.style.display = 'none';
       const c = s.check(gen.doc);
       if (!c.ok) {
         row.skipped = (c.issues ?? []).filter((i) => i.level === 'error').map((i) => i.text).join(' | ').slice(0, 300) || c.error;
