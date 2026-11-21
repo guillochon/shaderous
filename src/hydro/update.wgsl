@@ -87,6 +87,13 @@ fn face_rim(a: vec3<i32>, axis: i32, t: i32) -> i32 {
 
 #include "hydro/flux.wgsl"
 #include "hydro/tile.wgsl"
+
+// n, as a loop bound the shader compiler cannot see through (P.dims.x is never 0), so that it
+// keeps the loop a loop: a large function called in a loop is compiled into it once, where
+// unrolled, or called at several places, it is inlined at every one (as amr/grid.wgsl).
+fn loop_count(n: i32) -> i32 {
+  return select(n, 0, P.dims.x == 0u);
+}
 #include <walls>
 
 // A shearing box: the flux through one of its x faces, averaged with what the cells across the
@@ -112,8 +119,13 @@ fn shear_face(c: vec3<i32>, own: Flux, upper: bool) -> Flux {
   let x = select(i32(P.dims.x) - 1, -1, upper);
   let ex = vec3<i32>(1, 0, 0);
   let u = select(1.0, -1.0, upper) * shear_jump();
-  let f0 = shear_boost(flux_between(vec3<i32>(x, j0, c.z), ex, 0), u);
-  let f1 = shear_boost(flux_between(vec3<i32>(x, j1, c.z), ex, 0), u);
+  // (The two faces from one call site in a kept loop: flux_between is inlined whole at each.)
+  var f0: Flux;
+  var f1: Flux;
+  for (var k = 0; k < loop_count(2); k++) {
+    let f = shear_boost(flux_between(vec3<i32>(x, select(j0, j1, k == 1), c.z), ex, 0), u);
+    if (k == 0) { f0 = f; } else { f1 = f; }
+  }
   let w0 = 0.5 * (1.0 - e);
   let w1 = 0.5 * e;
   return Flux(
@@ -212,15 +224,28 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
     fy = tile_faces(1, c, ey);
     if (!flat) { fz = tile_faces(2, c, ez); }
   } else {
-    fx = axis_fluxes(c, ex, 0, w0, p0);
-    fy = axis_fluxes(c, ey, 1, w0, p0);
-    if (!flat) { fz = axis_fluxes(c, ez, 2, w0, p0); }
+    // One call site in a loop the compiler keeps a loop: axis_fluxes holds two Riemann solves
+    // and the stencil's equation-of-state calls, and each call site is inlined whole.
+    for (var a = 0; a < loop_count(select(3, 2, flat)); a++) {
+      var e = vec3<i32>(0);
+      e[a] = 1;
+      let f = axis_fluxes(c, e, a, w0, p0);
+      if (a == 0) { fx = f; } else if (a == 1) { fy = f; } else { fz = f; }
+    }
   }
 
   // A shearing box's x faces: the two sides' fluxes, averaged.
   if (shear_on()) {
-    if (c.x == 0) { fx.lo = shear_face(c, fx.lo, false); }
-    if (c.x == i32(P.dims.x) - 1) { fx.hi = shear_face(c, fx.hi, true); }
+    // (Both from one call site, as shear_face's own faces.)
+    for (var k = 0; k < loop_count(2); k++) {
+      let upper = k == 1;
+      if (c.x == select(0, i32(P.dims.x) - 1, upper)) {
+        var own = fx.lo;
+        if (upper) { own = fx.hi; }
+        let f = shear_face(c, own, upper);
+        if (upper) { fx.hi = f; } else { fx.lo = f; }
+      }
+    }
   }
   // Planes of mirror symmetry: nothing crosses them.
   if (c.x == 0 && sym_lo(0)) { fx.lo = mirror_flux(fx.lo, 0); }

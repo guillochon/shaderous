@@ -2129,8 +2129,15 @@ $`E`$ includes $`B^2/2`$.
   order: assembly 0.45 s, update 0.26 s, re-meshing 0.9 s. The uniform grid's cell-centered
   field reads its six faces directly instead of through the boundary mapping (edge fields
   0.45 s to 0.14 s). A magnetized run builds no hydro update or prediction, which it never
-  runs (the hydro update was the slowest compile of a load). `tools/compile_times.mjs` times
-  each pipeline of a setup, alone, on a cold shader cache.
+  runs (the hydro update was the slowest compile of a load). The same holds off the MHD
+  passes: the uniform grid's hydro update compiled its fallback for a face tile that does not
+  fit (two face fluxes per axis) and the shearing box's four sampled faces at separate call
+  sites, which kept loops now hold once each (Sedov 11 s to 4 s, the Helmholtz detonation
+  83 s to 27 s); and the block grid's multigrid stencil evaluated the isolated boundary's
+  multipole expansion inside every neighbor lookup, inlined some 120 times in the residual and
+  restriction, where it is now filled in from one loop for the cells on the domain's edge
+  (11 s to 1.7 s). Both give the same bits as before. `tools/compile_times.mjs` times each
+  pipeline of a setup, alone, on a cold shader cache.
 - **Memory.** Five face textures (field and compensation at both parities, and the half step)
   add 80 bytes per cell to the uniform grid's 112 (`MhdPasses.cellBytes`), plus the slab
   buffers.
