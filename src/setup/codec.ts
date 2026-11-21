@@ -54,7 +54,7 @@ const SHAPE: Schema = obj({
   type: partChoice('region', 'shape.type'), center: 'vec3', radius: 'number', radiusCells: 'number',
   min: { array: { nullable: 'number' }, max: 3 }, max: { array: { nullable: 'number' }, max: 3 }, normal: 'vec3', at: 'number', rotate: 'vec3',
   // A mesh file (geometry/store.ts).
-  file: 'string', node: 'string', scale: 'number', fit: 'number', up: partChoice('region', 'shape.up'),
+  file: 'string', node: 'string', scale: 'number', fit: 'number', up: partChoice('region', 'shape.up'), anchor: partChoice('region', 'shape.anchor'),
 });
 const ID: Schema = 'string';
 /** A number or a formula of t. */

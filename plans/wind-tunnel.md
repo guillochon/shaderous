@@ -508,10 +508,60 @@ against: the same rotor run both ways must give the same torque.
   against the explicit one, which other tests (`rot-*`) check against theory. The plan's own
   `rotor-frame` (a helical paddle whose torque vanishes where its blades are edge-on to the
   relative wind) is not built.
-- Not built: the power coefficient in the diagnostics (power is Omega times the torque about
-  the axis, from the bodies' torques and forces), and the display turned back to the tunnel's
-  frame. An empty rotor-frame tunnel holds U - Omega x r (kinetic energy to 1e-6 over 423
-  steps; not discriminating, as that state is steady with or without the frame).
+- Not built: the display turned back to the tunnel's frame. (The power coefficient came with
+  5.2.) An empty rotor-frame tunnel holds U - Omega x r (kinetic energy to 1e-6 over 423
+  steps; not discriminating, as that state is steady with or without the frame). Measured
+  again with 5.2's tunnel at Omega = 2.5, 128³: after t = 1.6 the axial velocity a plane
+  upstream is 1 to 6 digits and the swirl is the frame's.
+
+### 5.2 As built (2026-11-20): the `wind-turbine` preset
+
+- **The rotor**, `builtin:turbine` (`geometry/builtin.ts` `turbineRotor`): three blades about
+  +x and a spherical spinner of radius 0.2 R. Chord 0.4 R at the root to 0.25 R at the tip
+  (linear), NACA 00xx thickness of 20% thickened to 0.06 R where thinner (a blunt trailing
+  edge), the section set at 10 degrees to the relative wind at a tip-speed ratio of 1 with the
+  Betz axial induction (inflow (2U/3, -Omega r)), pivoted at 30% chord. The blade starts at
+  0.08 R, inside the spinner, narrowing and keeping the spinner's pitch there, so no flat root
+  cap is exposed. The mesh's `anchor: "origin"` (new) puts the hub on the axis.
+- **The preset**: box 3, uniform 128³ (cells R/34; chords 14 to 8.5 cells, the thinnest
+  section 2 cells by construction), liquid at Mach 0.1, nu = 1e-4, sponge 0.15, Omega = 1.25.
+  Featured: the rotor's speed and the wind's. Default view: the volume of the density gradient
+  (in the liquid, the pressure's), on which the blades and the vortex trail they shed stand out
+  on a clear background. Vorticity was tried first: in the turning frame the whole box has the
+  frame's 2 Omega, a haze over everything (adding 2 Omega back in the field would change the
+  vorticity of every rotating-frame run, the binaries' included: not done).
+- **Measured** (2026-11-20). In the page (static build, adapter "nvidia ampere"): torque
+  +0.035 about the axis and thrust 0.29 at t = 15 and t = 30 alike, C_p 0.044; 7.4 ms a step
+  and 24 ms a screenshot (render and read-back), so at most about 30 frames a second with a step
+  a frame. The pane's own frame counter could not be read: the app's browser pane was throttled
+  to a frame or two a second even when paused. Headless runner: C_p 0.033 at t = 1.5 and 3
+  (still settling); over the rotor's speed at t = 2, C_p 0.038 at Omega = 0.6, 0.048 at
+  0.9, about 0 at 1.6, -0.12 at 2.2. The featured rotor and wind speeds did not reach the
+  coefficients' reference (C_p was over the preset's Omega whatever the control said): the
+  reference is now made from the setup with the featured values in force. No errors in either.
+- **Thinnest part**: the mesh's own measure (shortest way through along a triangle's inward
+  normal) says 0.51 cells, at the trailing edge of a blade's root just outside the spinner
+  (r = 0.23 R), a ray from the blunt edge's corner. Sections of the grid's solid cells there
+  and at 0.75 R are continuous and 2 cells thick at the trailing edge.
+- **What did not work, and why the rotor is slow.** The first rotor was pitched for a
+  tip-speed ratio of 4 (chord 0.3 to 0.15 R, 6 degrees): the wind braked it at every speed
+  (C_p -0.3 at Omega = 0.5 to -2.9 at 5; with the frame turned the other way the sign turned
+  too). An off-axis sphere in the same frame gives the torque of its drag (c_y F_z = -0.04, the
+  sign of drag against the turning), so the forces are right; the blades are not: a fast
+  rotor's outer blade lies 3 to 10 degrees from the rotor's plane, and a blade two cells thick
+  turns into a flat staircase that keeps none of that pitch, so it only feels drag. At a
+  tip-speed ratio of 2 (still negative) and then 1 the pitch is 20 to 40 degrees; with the
+  narrow blades C_p was 0.015 at best, with the wide ones 0.04.
+- **The adaptive mesh fails for this body**: on `n = 256, amr = 2` the coarsest level sees a
+  blade thinner than its cell in pieces, the surface that asks for refinement is only where
+  those pieces are, and refinement stalled at 260 blocks with two blades left on level 1 (and
+  a third broken into separate cells at mid-span). That run gave negative thrust and torque:
+  a rotor that leaks. Refining on the mesh's own distance field (not on the coarse grid's
+  solid cells) would fix it; not built. The plan's 9.2 (refining what the rotor sweeps) is the
+  same need.
+- **Not shown**: the blades are holes in the gas (stage 7's fractional cells would give them
+  their shape below a cell); the tip vortices are a few cells across and fade within a rotor's
+  diameter; no tower, nacelle or ground; the picture is in the turning frame (not turned back).
 
 ## 6. Stage 4: moving bodies
 

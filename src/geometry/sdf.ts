@@ -47,6 +47,8 @@ export interface MeshReport {
   frontal: [number, number, number];
   /** thinnest part: the shortest way through the body from any triangle, inward along its normal, in cells */
   thinnest: number;
+  /** where the thinnest part is: the triangle's middle the shortest way through starts from */
+  thinnestAt: [number, number, number];
   /** largest distance of the winding number from 0 or 1 away from the surface: 0 for a closed mesh, near 0.5 for a badly broken one */
   stray: number;
   /** triangles turned to make the winding consistent and outward */
@@ -206,7 +208,7 @@ class Bvh {
   }
 
   /** Distance along the ray from p in direction u to the nearest triangle it crosses, or Infinity. */
-  ray(px: number, py: number, pz: number, ux: number, uy: number, uz: number, skip: number): number {
+  ray(px: number, py: number, pz: number, ux: number, uy: number, uz: number, skip: number, after = 0): number {
     let best = Infinity;
     const stack = [0];
     const inv = [1 / ux, 1 / uy, 1 / uz];
@@ -231,7 +233,9 @@ class Bvh {
           const t = this.order[i];
           if (t === skip) continue;
           const h = rayTri(this.tri, t, px, py, pz, ux, uy, uz);
-          if (h > 0 && h < best) best = h;
+          // Only a surface met from inside (its outward normal along the ray): the far side of
+          // the wall, not another piece's surface entered from outside, where pieces overlap.
+          if (h > after && h < best && exits(this.tri, t, ux, uy, uz)) best = h;
         }
         continue;
       }
@@ -301,6 +305,14 @@ function solidAngle(T: Float64Array, t: number, px: number, py: number, pz: numb
   const det = ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
   const den = la * lb * lc + (ax * bx + ay * by + az * bz) * lc + (bx * cx + by * cy + bz * cz) * la + (cx * ax + cy * ay + cz * az) * lb;
   return 2 * Math.atan2(det, den);
+}
+
+/** Whether the ray along u leaves the body through triangle t (its winding's normal along u). */
+function exits(T: Float64Array, t: number, ux: number, uy: number, uz: number): boolean {
+  const o = 9 * t;
+  const ax = T[o + 3] - T[o], ay = T[o + 4] - T[o + 1], az = T[o + 5] - T[o + 2];
+  const bx = T[o + 6] - T[o], by = T[o + 7] - T[o + 1], bz = T[o + 8] - T[o + 2];
+  return (ay * bz - az * by) * ux + (az * bx - ax * bz) * uy + (ax * by - ay * bx) * uz > 0;
 }
 
 /** Möller-Trumbore: distance along the ray to triangle t, or -1. */
@@ -434,6 +446,7 @@ export function buildSdf(input: Mesh, opts: SdfOptions): { field: DistanceField;
   // winding the other way (a flipped triangle) looks outward and finds nothing, or the far side
   // of the body from outside: only hits are counted, and the thinnest of them is reported.
   let thinnest = Infinity;
+  let thinnestAt: [number, number, number] = [0, 0, 0];
   for (let t = 0; t < nt; t++) {
     const o = 9 * t;
     const ux = T[o + 3] - T[o], uy = T[o + 4] - T[o + 1], uz = T[o + 5] - T[o + 2];
@@ -445,13 +458,23 @@ export function buildSdf(input: Mesh, opts: SdfOptions): { field: DistanceField;
     qy /= -len;
     qz /= -len;
     const cx = (T[o] + T[o + 3] + T[o + 6]) / 3, cy = (T[o + 1] + T[o + 4] + T[o + 7]) / 3, cz = (T[o + 2] + T[o + 5] + T[o + 8]) / 3;
-    const d = bvh.ray(cx, cy, cz, qx, qy, qz, t);
-    if (d < thinnest) thinnest = d;
+    let d = bvh.ray(cx, cy, cz, qx, qy, qz, t);
+    // Pieces that pass through each other: a wall left is not the body left while the point
+    // just beyond it is still inside another piece (its winding number); go on to the next.
+    for (let k = 0; !closed && k < 8 && d < Infinity; k++) {
+      const e = 1e-3 * h + 1e-6 * d;
+      if (bvh.winding(cx + qx * (d + e), cy + qy * (d + e), cz + qz * (d + e), 8) < 0.5) break;
+      d = bvh.ray(cx, cy, cz, qx, qy, qz, t, d + e);
+    }
+    if (d < thinnest) {
+      thinnest = d;
+      thinnestAt = [cx, cy, cz];
+    }
   }
   const seconds = ((typeof performance !== 'undefined' ? performance.now() : Date.now()) - t0) / 1000;
   const report: MeshReport = {
     triangles: nt, volume: m.volume, insideVolume: inside * h ** 3, area: m.area, min, max, frontal,
-    thinnest: thinnest / h, stray, flipped, points: N, seconds,
+    thinnest: thinnest / h, thinnestAt, stray, flipped, points: N, seconds,
   };
   return { field, report };
 }

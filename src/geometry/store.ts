@@ -22,6 +22,8 @@ export interface MeshShape {
   center?: readonly number[];
   rotate?: readonly number[];
   up?: 'x' | 'y' | 'z';
+  /** what `center` places: the bounding box's middle (default) or the file's origin */
+  anchor?: 'box' | 'origin';
 }
 
 const files = new Map<string, Uint8Array>();
@@ -176,7 +178,8 @@ function placement(shape: MeshShape, ctx: { box: number; ndim: 2 | 3 }): { mesh:
   const mesh = meshOf(shape.file, shape.node);
   const U = upMatrix(shape.up ?? 'z', ctx.ndim);
   const ub = bounds({ ...mesh, positions: transformed(mesh.positions, U) });
-  const c0 = [0, 1, 2].map((a) => (ub.min[a] + ub.max[a]) / 2);
+  // What `center` places: the middle of the bounding box, or the file's origin (turned up).
+  const c0 = shape.anchor === 'origin' ? [0, 0, 0] : [0, 1, 2].map((a) => (ub.min[a] + ub.max[a]) / 2);
   const longest = Math.max(...[0, 1, 2].map((a) => ub.max[a] - ub.min[a])) || 1;
   const s = shape.scale !== undefined && shape.scale > 0 ? shape.scale : ((shape.fit !== undefined && shape.fit > 0 ? shape.fit : 0.25) * ctx.box) / longest;
   const center = [0, 1, 2].map((a) => Number(shape.center?.[a] ?? 0)) as Vec3;
@@ -323,7 +326,7 @@ function placeOutline(shape: MeshShape, ctx: { box: number; ndim: 2 | 3; dx: num
   for (let y = min[1] + res / 2; y < max[1]; y += res) for (let x = min[0] + res / 2; x < max[0]; x += res) if (inside(x, y)) area += res * res;
   const report = {
     triangles: 0, volume: area, insideVolume: area, area: 0, min, max, frontal: [span(0), span(1), 0] as Vec3, frontalBox: [span(0), span(1), 0] as Vec3,
-    thinnest: Infinity, stray: 0, flipped: 0, points: 0, seconds: 0,
+    thinnest: Infinity, thinnestAt: [0, 0, 0] as Vec3, stray: 0, flipped: 0, points: 0, seconds: 0,
   };
   return { inside: (x, y) => inside(x, y), distance: (x, y) => (inside(x, y) ? -ctx.dx : ctx.dx), toBox, scale: s, center, min, max, report };
 }

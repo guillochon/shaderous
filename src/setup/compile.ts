@@ -22,7 +22,7 @@ import { codeG, type UnitSystem } from '../units/units';
 import { buildBodies, partIds, partQuantity, starPotential, type Bodies } from './parts/bodies';
 import { buildDisk, checkDiskFormulas, sumDisks, type BuiltDisk } from './parts/disk';
 import { flowValues, type FaceFn, type FlowContext, type FlowDef, type FlowInitContext, type InitFn, type PotentialFn } from './parts/flow';
-import { bodyCenter, obstaclePainter, regionPainter, shadowOf, type PaintContext } from './parts/region';
+import { bodyCenter, obstaclePainter, reachOf, regionPainter, shadowOf, type PaintContext } from './parts/region';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type ObstaclePart, type SetupSpec } from './spec';
 import { unitSystem, unitsFollowParts } from './units';
 
@@ -480,9 +480,17 @@ export function compileSetup(input: SetupSpec): Compiled {
   const optional: Partial<Problem> = {
     bodies: obstacles.length ? obstacles.map((p, i) => ({ id: p.id ?? `obstacle ${i + 1}`, center: bodyCenter(p.shape) })) : undefined,
     moving: movingOf(obstacles),
-    // A tunnel's force coefficients: over the stream's dynamic pressure and the first obstacle's shadow.
+    // A tunnel's force coefficients: over the stream's dynamic pressure and the first obstacle's
+    // shadow, with the featured values in force (a wind's speed, a rotor's).
     forceRef: tunnel
-      ? (ndim: 2 | 3, n: number) => tunnelForceRef(tunnel, ndim, obstacles.length ? shadowOf(obstacles[0].shape, tunnelParams(tunnel, ndim).a, { box: boxOf(spec), n, ndim }) : undefined)
+      ? (ndim: 2 | 3, n: number, params?: Record<string, number>) => {
+          const s = at(params);
+          const t = tunnelOf(s) ?? tunnel;
+          const obs = (s.parts ?? []).filter((p): p is ObstaclePart => p.kind === 'obstacle');
+          const a = tunnelParams(t, ndim).a;
+          const ctx = { box: boxOf(s), n, ndim };
+          return tunnelForceRef(t, ndim, obs.length ? shadowOf(obs[0].shape, a, ctx) : undefined, obs.length ? reachOf(obs[0].shape, a, ctx) : undefined);
+        }
       : undefined,
     units: base.units === undefined ? undefined : unitsFollow ? (params: Record<string, number>) => scales(at(params)).units! : base.units,
     composition: namedComposition(ph.composition),

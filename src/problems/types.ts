@@ -59,6 +59,8 @@ export interface ForceRef {
   length: number;
   drag: 0 | 1 | 2;
   lift: 0 | 1 | 2;
+  /** a rotor's frame: its angular velocity about `axis` (through the box's center) and the rotor's radius, for the power coefficient */
+  rotor?: { omega: number; axis: 0 | 1 | 2; radius: number };
 }
 
 export { LINE_TIED, MOVING_WALL, OUTFLOW, OUTFLOW_ONLY, PERIODIC, REFLECT } from './boundaries';
@@ -214,7 +216,7 @@ export interface Problem {
   /** Obstacles that move (hydro/moving.ts), with their motions and chains: the uniform grid's stamp and exchange passes. */
   moving?: import('../hydro/moving').MovingBody[];
   /** The scales of the force coefficients (Diagnostics.bodies' coefficients), if there are any: fixed, or for the run's grid. */
-  forceRef?: ForceRef | ((ndim: 2 | 3, n: number) => ForceRef | undefined);
+  forceRef?: ForceRef | ((ndim: 2 | 3, n: number, params?: Record<string, number>) => ForceRef | undefined);
   label: string;
   blurb: string;
   eos: EosKind;

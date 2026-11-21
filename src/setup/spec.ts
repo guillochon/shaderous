@@ -24,6 +24,8 @@ export const DISK_HEIGHTS = ['H', 'length'] as const;
 export const SHAPE_TYPES = ['sphere', 'box', 'half', 'mesh'] as const;
 /** Which of a mesh file's axes is up (glTF's is y; the box's is z in 3D, y in 2D). */
 export const MESH_UPS = ['x', 'y', 'z'] as const;
+/** What a mesh's `center` places: the middle of its bounding box, or the file's own origin (a rotor's hub). */
+export const MESH_ANCHORS = ['box', 'origin'] as const;
 
 export const SETUP_FORMAT = 'shaderous-setup';
 /** Counts changes to the document's shape: setup/codec.ts keeps one migration per step. */
@@ -394,9 +396,10 @@ export type Shape =
    * document, or dropped on the page) or URL, `node` the part of it (glTF node, OBJ group; all of
    * it if absent), `scale` a factor on its lengths or `fit` its longest side as a fraction of the
    * box (one of the two for STL, which has no units), `center` where its bounding box's center
-   * goes, `rotate` degrees about x, then y, then z, `up` which of its axes is up
+   * (or, with `anchor` "origin", the file's origin) goes, `rotate` degrees about x, then y, then
+   * z, `up` which of its axes is up
    */
-  | { type: 'mesh'; file: string; node?: string; scale?: number; fit?: number; center?: Vec3; rotate?: Vec3; up?: (typeof MESH_UPS)[number] };
+  | { type: 'mesh'; file: string; node?: string; scale?: number; fit?: number; center?: Vec3; rotate?: Vec3; up?: (typeof MESH_UPS)[number]; anchor?: (typeof MESH_ANCHORS)[number] };
 // SHAPE_TYPES names each shape, and nothing else.
 const _shapes: [Shape['type']] extends [(typeof SHAPE_TYPES)[number]] ? ([(typeof SHAPE_TYPES)[number]] extends [Shape['type']] ? true : never) : never = true;
 void _shapes;

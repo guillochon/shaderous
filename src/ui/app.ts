@@ -4570,6 +4570,7 @@ const DIMENSIONLESS: Measure = [0, 0, 0];
 const BODY_FIELDS: SinkField[] = [
   ['cd', 'C_d', 'Drag coefficient: the force along the stream over rho U^2 A / 2', DIMENSIONLESS],
   ['cl', 'C_l', 'Lift coefficient: the force along the lift axis over rho U^2 A / 2', DIMENSIONLESS],
+  ['cp', 'C_p', 'Power coefficient, in a rotor\u2019s frame: Omega times the torque about the axis over rho U^3 pi R^2 / 2 (positive for a turbine; the Betz limit is 0.593)', DIMENSIONLESS],
   ['fx', 'F_x', 'Force the gas exerts on the body, x', FORCE],
   ['fy', 'F_y', 'Force the gas exerts on the body, y', FORCE],
   ['fz', 'F_z', 'Force the gas exerts on the body, z', FORCE],
@@ -4578,7 +4579,7 @@ const BODY_FIELDS: SinkField[] = [
   ...xyz('torque', 'Torque about the body\u2019s point', TORQUE),
 ];
 /** Body fields the panel shows. */
-const BODY_SHOWN = 6;
+const BODY_SHOWN = 7;
 const BASE_COLS = DIAG_ROWS.length;
 const bodyCol = (i: number, field: number) => BASE_COLS + BODY_FIELDS.length * i + field;
 const SINK_BASE = BASE_COLS + BODY_FIELDS.length * MAX_BODIES;
@@ -4643,7 +4644,7 @@ function bodyValues(d: Diagnostics): number[] {
       continue;
     }
     const k = b.coefficients;
-    out.push(k?.drag ?? NaN, k?.lift ?? NaN, ...b.force, cfg.ndim === 2 ? b.torque[2] : norm(b.torque), ...b.viscous, ...b.torque);
+    out.push(k?.drag ?? NaN, k?.lift ?? NaN, k?.power ?? NaN, ...b.force, cfg.ndim === 2 ? b.torque[2] : norm(b.torque), ...b.viscous, ...b.torque);
   }
   return out;
 }

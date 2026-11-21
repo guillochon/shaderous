@@ -30,9 +30,11 @@ export interface BodyForce {
   torque: Vec3;
   /**
    * With a reference (Problem.forceRef): the drag, lift and side coefficients F / (rho U^2 A / 2),
-   * and the moment coefficients T / (rho U^2 A L / 2) about x, y, z.
+   * and the moment coefficients T / (rho U^2 A L / 2) about x, y, z. In a rotor's frame, `power`:
+   * Omega times the torque about the axis over rho U^3 pi R^2 / 2 (positive where the gas drives
+   * the rotor: a turbine; the Betz limit is 16/27).
    */
-  coefficients?: { drag: number; lift: number; side: number; moment: Vec3 };
+  coefficients?: { drag: number; lift: number; side: number; moment: Vec3; power?: number };
 }
 
 /** Whether a run sums the forces on its bodies: it has some (the setup's obstacles), in Cartesian coordinates. */
@@ -158,6 +160,7 @@ export function bodyForcesFrom(a: Float32Array, bodies: BodyRef[], ref?: ForceRe
         lift: force[ref.lift] / q,
         side: side >= 0 && side < 3 && side !== ref.drag && side !== ref.lift ? force[side] / q : 0,
         moment: f.torque.map((t) => t / (q * (ref.length || 1))) as Vec3,
+        ...(ref.rotor ? { power: (ref.rotor.omega * f.torque[ref.rotor.axis]) / (0.5 * ref.rho * ref.speed ** 3 * Math.PI * ref.rotor.radius ** 2) } : {}),
       };
     }
     out.push(f);

@@ -165,6 +165,30 @@ export function shadowOf(shape: Shape, axis: number, ctx: { box: number; n: numb
   return hits * res * res;
 }
 
+/**
+ * How far a shape reaches from the axis `axis` through the box's center: a rotor's radius. A
+ * sphere's and a box's from their geometry (a box's corners), a mesh's from its placed bounds.
+ */
+export function reachOf(shape: Shape, axis: number, ctx: { box: number; n: number; ndim: 2 | 3 }): number | undefined {
+  const [u, v] = [(axis + 1) % 3, (axis + 2) % 3];
+  if (shape.type === 'sphere') {
+    const r = shape.radiusCells !== undefined ? shape.radiusCells * (ctx.box / ctx.n) : (shape.radius ?? 0.1 * ctx.box);
+    const c = shape.center ?? [0, 0, 0];
+    return Math.hypot(c[u] ?? 0, c[v] ?? 0) + r;
+  }
+  if (shape.type === 'mesh') {
+    const m = placeMesh(shape, { box: ctx.box, ndim: ctx.ndim, dx: ctx.box / ctx.n });
+    return Math.max(...[u, v].map((a) => Math.max(Math.abs(m.min[a]), Math.abs(m.max[a]))));
+  }
+  if (shape.type === 'box') {
+    const lo = shape.min ?? [], hi = shape.max ?? [];
+    let r = 0;
+    for (const a of [lo[u], hi[u]]) for (const b of [lo[v], hi[v]]) r = Math.max(r, Math.hypot(a ?? 0, b ?? 0));
+    return r || undefined;
+  }
+  return undefined;
+}
+
 type Painter = (w: Prim, x: number, y: number, z: number) => Prim;
 
 /** A region's painter: the state under it, replaced inside its shape (or blended at a supersampled edge). */

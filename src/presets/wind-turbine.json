@@ -1,0 +1,78 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "wind-turbine",
+  "name": "Wind turbine",
+  "group": "Slow flows",
+  "family": "wind-turbine",
+  "familyName": "Wind turbine",
+  "variant": "Three blades, in the rotor's frame",
+  "blurb": "A three-bladed wind turbine rotor of radius 0.8 in a wind of speed 1 (an incompressible liquid at Mach 0.1), turning at a tip-speed ratio of 1: a slow-running rotor with wide blades, pitched steeply enough that the grid can show their pitch. The run is in the frame that turns with the rotor, so the blades stand still and the wind comes at them helically; the corners of the box are held at that wind. The colors show the gradient of the liquid’s density, which follows its pressure: bright around the blades and in the vortices they shed into the wake. The diagnostics give the torque the wind puts on the rotor and its power coefficient (the Betz limit is 0.593). The blades are made in code, at least two cells thick on this grid. The rotor is a hole in the gas.",
+  "domain": {
+    "ndim": 3,
+    "n": 128,
+    "amr": 0,
+    "box": 3,
+    "supports2d": false
+  },
+  "physics": {
+    "viscosity": 0.0001
+  },
+  "parts": [
+    {
+      "kind": "tunnel",
+      "id": "tunnel",
+      "speed": 1,
+      "axis": "x",
+      "sides": "slip",
+      "sponge": 0.15,
+      "mach": 0.1,
+      "rotor": 1.25
+    },
+    {
+      "kind": "obstacle",
+      "id": "rotor",
+      "shape": {
+        "type": "mesh",
+        "file": "builtin:turbine",
+        "scale": 0.8,
+        "center": [
+          -0.4,
+          0,
+          0
+        ],
+        "up": "z",
+        "anchor": "origin"
+      }
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "tDyn": 1.2566
+  },
+  "view": {
+    "field": 13,
+    "log": false,
+    "mode": "volume"
+  },
+  "featured": [
+    {
+      "path": "parts.0.rotor",
+      "id": "omega",
+      "label": "Rotor speed",
+      "min": 0.5,
+      "max": 10,
+      "factor": 1.25,
+      "tip": "The rotor’s angular velocity: the tip-speed ratio is this times the radius (0.8) over the wind’s speed. The blades are pitched for a ratio of 1 (1.25 here); much faster, the blades meet the wind edge on and brake the rotor"
+    },
+    {
+      "path": "parts.0.speed",
+      "id": "wind",
+      "label": "Wind speed",
+      "min": 0.25,
+      "max": 2,
+      "factor": 1.25,
+      "tip": "The wind's speed (the gas's sound speed follows it, at Mach 0.1)"
+    }
+  ]
+}

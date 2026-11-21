@@ -18,7 +18,7 @@ import { VIEW_MODES } from '../render/view_options';
 import { COMPOSITIONS } from '../units/composition';
 import { ANEOS_LABELS, ANEOS_MATERIALS } from '../eos/aneos';
 import { speciesNuclides } from '../species/mixture';
-import { AXES, TUNNEL_FLOORS, TUNNEL_SIDES } from './spec';
+import { AXES, MESH_ANCHORS, TUNNEL_FLOORS, TUNNEL_SIDES } from './spec';
 import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, MESH_UPS, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
 import { DENSITY_UNITS, LENGTH_UNITS, MASS_UNITS, VELOCITY_UNITS } from './units';
 
@@ -454,6 +454,7 @@ const SHAPE: Option[] = [
   P({ path: 'shape.type', label: 'Shape', tip: 'A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D)', control: pickOf(SHAPE_TYPES, ['sphere', 'Sphere'], ['box', 'Box'], ['half', 'Half-space'], ['mesh', 'Mesh file']), default: 'sphere' }),
   P({ path: 'shape.center', label: 'Center', tip: 'Center of the sphere, or where the middle of the mesh\u2019s bounding box goes', control: { type: 'vec3' }, default: [0, 0, 0], show: { path: 'shape.type', is: ['sphere', 'mesh'] } }),
   P({ path: 'shape.file', label: 'File', tip: 'The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program', control: { type: 'text' }, default: '', show: { path: 'shape.type', is: ['mesh'] } }),
+  P({ path: 'shape.anchor', label: 'Placed by', tip: 'What the center places: the middle of the mesh\u2019s bounding box, or the file\u2019s own origin (a rotor\u2019s hub, which a rotor\u2019s frame needs on its axis)', control: pickOf(MESH_ANCHORS, ['box', 'The middle of its box'], ['origin', 'The file\u2019s origin']), default: 'box', show: { path: 'shape.type', is: ['mesh'] } }),
   P({ path: 'shape.node', label: 'Part of the file', tip: 'A glTF node or an OBJ group, with the parts below it. Empty: the whole file', control: { type: 'text' }, show: { path: 'shape.type', is: ['mesh'] } }),
   P({ path: 'shape.fit', label: 'Fit', tip: 'The mesh\u2019s longest side, as a fraction of the box. STL has no units: give this or the scale', control: num(0, 1, { step: 0.05 }), show: { path: 'shape.type', is: ['mesh'] } }),
   P({ path: 'shape.scale', label: 'Scale', tip: 'A factor on the file\u2019s lengths, instead of fitting it to the box (glTF\u2019s are meters)', control: num(0, undefined, { factor: 2 }), show: { path: 'shape.type', is: ['mesh'] } }),

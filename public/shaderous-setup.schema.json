@@ -2045,6 +2045,14 @@
           ],
           "title": "Up axis",
           "description": "Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D)"
+         },
+         "anchor": {
+          "enum": [
+           "box",
+           "origin"
+          ],
+          "title": "Placed by",
+          "description": "What the center places: the middle of the mesh’s bounding box, or the file’s own origin (a rotor’s hub, which a rotor’s frame needs on its axis)"
          }
         },
         "additionalProperties": false
@@ -2258,6 +2266,14 @@
           ],
           "title": "Up axis",
           "description": "Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D)"
+         },
+         "anchor": {
+          "enum": [
+           "box",
+           "origin"
+          ],
+          "title": "Placed by",
+          "description": "What the center places: the middle of the mesh’s bounding box, or the file’s own origin (a rotor’s hub, which a rotor’s frame needs on its axis)"
          }
         },
         "additionalProperties": false
@@ -2544,6 +2560,14 @@
           ],
           "title": "Up axis",
           "description": "Which of the file’s axes is up: y for glTF and most 3D programs, z for most CAD. It becomes the box’s z (y in 2D)"
+         },
+         "anchor": {
+          "enum": [
+           "box",
+           "origin"
+          ],
+          "title": "Placed by",
+          "description": "What the center places: the middle of the mesh’s bounding box, or the file’s own origin (a rotor’s hub, which a rotor’s frame needs on its axis)"
          }
         },
         "additionalProperties": false

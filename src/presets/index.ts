@@ -19,7 +19,7 @@ export const PRESET_ORDER: readonly string[] = [
   // Instabilities
   'kelvin-helmholtz', 'kelvin-helmholtz-he-h', 'kelvin-helmholtz-mhd', 'rayleigh-taylor', 'thermal-instability', 'thermal-instability-hhe', 'driven-turbulence',
   // Slow flows
-  'taylor-green', 'shear-layers', 'cylinder-wake', 'wind-tunnel', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho',
+  'taylor-green', 'shear-layers', 'cylinder-wake', 'wind-tunnel', 'wind-turbine', 'lid-driven-cavity', 'lid-driven-cavity-liquid', 'gresho',
   // Shocks and blasts
   'sedov', 'sedov-rad', 'blast-axisymmetric', 'blast-spherical', 'sod-x', 'sod-y', 'sod-z', 'sod-diag', 'strong-shock', 'forward-step', 'shock-bubble',
   'detonation-stable', 'detonation-pulsating', 'detonation-cellular', 'detonation-co',

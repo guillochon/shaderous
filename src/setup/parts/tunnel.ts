@@ -181,10 +181,12 @@ fn damping_target(x: vec3<f32>) -> DampTarget {
  * square root of the area; in 2D the area is a length itself). Drag along the stream, lift
  * along the box's up axis (or, for a stream along it, the next axis).
  */
-export function tunnelForceRef(t: TunnelPart, ndim: 2 | 3, shadow: number | undefined): ForceRef | undefined {
+export function tunnelForceRef(t: TunnelPart, ndim: 2 | 3, shadow: number | undefined, radius?: number): ForceRef | undefined {
   const k = tunnelParams(t, ndim);
   const area = t.area ?? shadow;
   if (!(area !== undefined && area > 0)) return undefined;
   const lift = (k.up !== k.a ? k.up : ((k.a + 1) % 3)) as 0 | 1 | 2;
-  return { rho: k.rho, speed: Math.abs(k.speed), area, length: t.length ?? (ndim === 2 ? area : Math.sqrt(area)), drag: k.a, lift };
+  // A rotor's frame: the power coefficient over the disk of the first obstacle's reach from the axis.
+  const rotor = k.rotor !== 0 && radius !== undefined && radius > 0 ? { omega: k.rotor, axis: k.a, radius } : undefined;
+  return { rho: k.rho, speed: Math.abs(k.speed), area, length: t.length ?? (ndim === 2 ? area : Math.sqrt(area)), drag: k.a, lift, ...(rotor ? { rotor } : {}) };
 }

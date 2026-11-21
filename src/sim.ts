@@ -1182,14 +1182,14 @@ export const DIAG_FLOATS = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS + FORCE_CH
 export const FORCE_FLOAT = CLOCK_FLOATS + DIAG_CHANNELS + MASS_FLOATS;
 
 const forceRefs = new WeakMap<object, { key: string; ref: ForceRef | undefined }>();
-/** The run's force reference (Problem.forceRef), for its grid: worked out once per problem and grid. */
+/** The run's force reference (Problem.forceRef), for its grid and parameters: worked out once per problem, grid and parameters. */
 function forceRefOf(c: SimConfig): ForceRef | undefined {
   const r = c.problem.forceRef;
   if (typeof r !== 'function') return r;
-  const key = `${c.ndim}/${c.n}`;
+  const key = `${c.ndim}/${c.n}/${JSON.stringify(c.params ?? {})}`;
   const got = forceRefs.get(c.problem);
   if (got?.key === key) return got.ref;
-  const ref = r(c.ndim, c.n);
+  const ref = r(c.ndim, c.n, c.params);
   forceRefs.set(c.problem, { key, ref });
   return ref;
 }

@@ -198,6 +198,28 @@ The run is then in the frame that turns with it, so that a rotor centered there 
 its torque and thrust come steady: the stream, the inlet and the sponge's target are
 U - Omega x r, and the cells outside the cylinder the box holds are held at that state. Only
 what is symmetric about the axis is steady in that frame (no tower, no ground, no yaw).
+A mesh rotor goes on the axis with its shape's `"anchor": "origin"` (the file's origin, its hub,
+at `center`; the default centers its bounding box, which for three blades is off the axis). The
+diagnostics then add the power coefficient C_p: Omega times the torque about the axis over
+rho U^3 pi R^2 / 2, with R the first obstacle's reach from the axis (positive when the wind
+drives the rotor; the Betz limit is 0.593).
+
+The `wind-turbine` preset is such a rotor: `builtin:turbine`, three blades and a spherical
+spinner made in code (scale 0.8, so R = 0.8), on the uniform 128³ grid of a box of 3 (cells of
+R/34), turning at Omega = 1.25, a tip-speed ratio of 1. The blades are wide (chord 0.4 R at the
+root to 0.25 R at the tip, 14 to 8.5 cells), 20% thick and never under 0.06 R (2 cells), and
+pitched for that ratio with a 10 degree angle of attack. Measured (2026-11-20, in the page):
+torque +0.035 about the axis, thrust 0.29, C_p 0.044, the same at t = 15 and 30; 7.4 ms a step
+(about 135 steps a second). It is a slow, inefficient rotor on purpose: a blade two or three
+cells thick turns into a staircase, which shows a pitch of 20 to 40 degrees but not the 3 to 10
+degrees of a fast rotor's outer blade. Pitched for a tip-speed ratio of 4, the same rotor was
+nearly flat to the grid, felt drag only and was braked by the wind (C_p -0.3 to -2.9) at any speed. On
+the adaptive mesh it fails too: the coarsest level sees a sub-cell blade in pieces, so the
+surface that asks for refinement is never all there (the preset is on the uniform grid for this).
+Over the rotor's speed (headless, at t = 2): C_p 0.038 at Omega = 0.6, 0.048 at 0.9, about 0 at
+1.6 and -0.12 at 2.2, where the wind brakes it. The rotor is a hole in the gas (the blades'
+fractional cells are plan stage 7). The picture is in the turning frame: the rotor stands still, and the wake's helix, which turns with
+it, is the one a fixed camera would see at that moment, turned.
 
 Yaw and angle of attack turn the body (its shape's `rotate`), not the stream. The `wind-tunnel`
 preset puts a built-in car-like body (`"file": "builtin:ahmed"`, with the Ahmed body's
@@ -604,6 +626,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.type` | Shape | `sphere`, `box`, `half`, `mesh`. Default `sphere` | A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D) |
 | `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere, or where the middle of the mesh’s bounding box goes |
 | `shape.file` | File | text. Default `` | The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program |
+| `shape.anchor` | Placed by | `box`, `origin`. Default `box` | What the center places: the middle of the mesh’s bounding box, or the file’s own origin (a rotor’s hub, which a rotor’s frame needs on its axis) |
 | `shape.node` | Part of the file | text | A glTF node or an OBJ group, with the parts below it. Empty: the whole file |
 | `shape.fit` | Fit | a number, 0 to 1 | The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale |
 | `shape.scale` | Scale | a number, at least 0 | A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters) |
@@ -632,6 +655,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.type` | Shape | `sphere`, `box`, `half`, `mesh`. Default `sphere` | A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D) |
 | `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere, or where the middle of the mesh’s bounding box goes |
 | `shape.file` | File | text. Default `` | The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program |
+| `shape.anchor` | Placed by | `box`, `origin`. Default `box` | What the center places: the middle of the mesh’s bounding box, or the file’s own origin (a rotor’s hub, which a rotor’s frame needs on its axis) |
 | `shape.node` | Part of the file | text | A glTF node or an OBJ group, with the parts below it. Empty: the whole file |
 | `shape.fit` | Fit | a number, 0 to 1 | The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale |
 | `shape.scale` | Scale | a number, at least 0 | A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters) |
@@ -667,6 +691,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.type` | Shape | `sphere`, `box`, `half`, `mesh`. Default `sphere` | A sphere (a cylinder in 2D), a box, the half of space on one side of a plane, or a mesh file (STL, OBJ, PLY, glTF; its cross-section through its center in 2D) |
 | `shape.center` | Center | `[x, y, z]`. Default `[0,0,0]` | Center of the sphere, or where the middle of the mesh’s bounding box goes |
 | `shape.file` | File | text. Default `` | The mesh file: its name beside the setup document (the runner, the MCP server), a file dropped on the Setup dialog, or a URL. STL, OBJ, PLY, glTF or GLB. STEP and IGES are not read: export STL or glTF from the CAD program |
+| `shape.anchor` | Placed by | `box`, `origin`. Default `box` | What the center places: the middle of the mesh’s bounding box, or the file’s own origin (a rotor’s hub, which a rotor’s frame needs on its axis) |
 | `shape.node` | Part of the file | text | A glTF node or an OBJ group, with the parts below it. Empty: the whole file |
 | `shape.fit` | Fit | a number, 0 to 1 | The mesh’s longest side, as a fraction of the box. STL has no units: give this or the scale |
 | `shape.scale` | Scale | a number, at least 0 | A factor on the file’s lengths, instead of fitting it to the box (glTF’s are meters) |
