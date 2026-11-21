@@ -73,21 +73,24 @@ fn unfold_l(l: vec3<f32>) -> vec3<f32> {
   }
   return l * f;
 }
+// (An axisymmetric run's axis, P.sym.x = 2, is no mirror: only one across z = 0, P.sym.y, counts.)
 fn red_s(i: u32) -> f32 {
-  if (all(P.sym.xyz == vec3<u32>(0u)) || cylindrical()) { return RED[i]; }
+  if (all(P.sym.xyz == vec3<u32>(0u))) { return RED[i]; }
   return unfold_s(RED[i]);
 }
 // An axisymmetric run (masses on its axis): each cell is a ring, whose pull, momentum and
-// angular momentum about the axis have no part across it. What is left is along the axis (y).
+// angular momentum about the axis have no part across it. What is left is along the axis (y),
+// which a mirror across z = 0 cancels against its image.
 fn red_v(i: u32) -> vec3<f32> {
   let v = vec3<f32>(RED[i], RED[i + 1u], RED[i + 2u]);
-  if (cylindrical()) { return vec3<f32>(0.0, v.y, 0.0); }
+  if (cylindrical()) { return vec3<f32>(0.0, select(v.y, 0.0, P.sym.y == 1u), 0.0); }
   if (all(P.sym.xyz == vec3<u32>(0u))) { return v; }
   return unfold_v(v);
 }
 fn red_l(i: u32) -> vec3<f32> {
   let v = vec3<f32>(RED[i], RED[i + 1u], RED[i + 2u]);
-  if (cylindrical()) { return vec3<f32>(0.0, v.y, 0.0); }
+  // (An angular momentum along the axis is even across z = 0: the image's doubles it.)
+  if (cylindrical()) { return vec3<f32>(0.0, select(v.y, 2.0 * v.y, P.sym.y == 1u), 0.0); }
   if (all(P.sym.xyz == vec3<u32>(0u))) { return v; }
   return unfold_l(v);
 }

@@ -9,7 +9,7 @@ const TESTS = [
   'sym-flux', 'sym-sedov', 'sym-half', 'sym-sphere', 'sym-ellipsoid', 'sym-polytrope', 'sym-evrard', 'sym-mhd', 'sym-mass',
   'cosmo-a', 'cosmo-drift', 'cosmo-cool', 'cosmo-eos', 'cosmo-wave', 'cosmo-growth', 'cosmo-pancake',
   'shear-steady', 'shear-mass', 'shear-wave', 'shear-flux', 'shear-mri', 'shear-epicycle',
-  'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-blocks', 'cyl-sphere', 'cyl-evrard', 'cyl-sphere-blocks', 'cyl-evrard-blocks', 'cyl-noh', 'cyl-bondi', 'cyl-torus', 'cyl-mhd', 'cyl-column', 'cyl-star', 'cyl-swirl',
+  'cyl-rest', 'cyl-conserve', 'cyl-sedov', 'cyl-sink', 'cyl-blocks', 'cyl-sphere', 'cyl-evrard', 'cyl-sphere-blocks', 'cyl-evrard-blocks', 'cyl-mirror', 'cyl-noh', 'cyl-bondi', 'cyl-torus', 'cyl-mhd', 'cyl-column', 'cyl-star', 'cyl-swirl',
   'sph-rest', 'sph-conserve', 'sph-sedov', 'sph-polytrope', 'sph-bondi', 'sph-blocks', 'sph-polytrope-blocks', 'sph-swirl', 'sph-second-collapse',
   'liquid-eos', 'liquid-gresho', 'liquid-taylor-green', 'liquid-cavity', 'liquid-amr',
   'aneos-eos', 'planet-rest', 'giant-impact',

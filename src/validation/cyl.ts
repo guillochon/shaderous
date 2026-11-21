@@ -342,6 +342,135 @@ export const CYL_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'cyl-mirror',
+    name: 'Axisymmetric: mirrored across z = 0, against the whole run',
+    criterion:
+      'Each run computed above z = 0 only (the mirror) against the whole at the same cell size: a point blast (128 x 64 against 128^2) agrees in density to 1e-5 at every cell, with mass and energy unfolded to 1e-5; the Evrard sphere with isolated self-gravity has the same potential at the start to 1e-3 and, collapsing to t = 0.75, the same density (mass-weighted) to 2e-3 and total energy to 1e-4; a sink on the axis takes in the same mass to 1e-4; and the blast on blocks of two levels keeps mass and energy within 1e-4 of the whole run on blocks, with the same shock radii',
+    async run(gpu) {
+      const MIR: [boolean, boolean, boolean] = [false, true, false];
+      const half = (p: Problem): Problem => ({ ...p, symmetry: { axes: MIR } });
+      // A mirrored run's rows are the whole's upper half: (i, j) of n x n/2 against (i, j + n/2).
+      const compare = (part: Float32Array, whole: Float32Array, n: number) => {
+        let worst = 0;
+        for (let j = 0; j < n / 2; j++)
+          for (let i = 0; i < n; i++) {
+            const a = part[4 * (j * n + i)];
+            const b = whole[4 * ((j + n / 2) * n + i)];
+            worst = Math.max(worst, Math.abs(a - b) / Math.max(Math.abs(b), 1e-30));
+          }
+        return worst;
+      };
+      const m: Record<string, number> = {};
+      const rel = (a: number, b: number) => Math.abs(a / b - 1);
+
+      // A point blast on the axis, as cyl-sedov.
+      const n = 128;
+      const dx = 1 / n;
+      const r0 = 3 * dx;
+      let vol = 0;
+      for (let j = 0; j < n; j++)
+        for (let i = 0; i < n; i++) if (Math.hypot((i + 0.5) * dx, (j + 0.5) * dx - 0.5) < r0) vol += 2 * Math.PI * (i + 0.5) * dx * dx * dx;
+      const blast = ring((R, z) => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: Math.hypot(R, z) < r0 ? 0.4 / vol : 1e-5, s: 0 }), {
+        bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], tEnd: 0.05,
+      });
+      const uniform = (p: Problem, size: number, mirror: boolean) =>
+        withSim(gpu, p, size, { ndim: 2, ...(mirror ? { symmetry: MIR } : {}) }, async (sim) => {
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          return { u1: (await sim.readState()).u1, mass: d.mass, e: d.eTot };
+        });
+      const bw = await uniform(blast, n, false);
+      const bh = await uniform(half(blast), n, true);
+      m.blast_density_difference = compare(bh.u1, bw.u1, n);
+      m.blast_mass = rel(bh.mass, bw.mass);
+      m.blast_energy = rel(bh.e, bw.e);
+
+      // The Evrard collapse with isolated self-gravity, as cyl-evrard, to t = 0.75.
+      const box = 4;
+      const ev = ring((R, z) => {
+        const r = Math.max(Math.hypot(R, z), 0.5 * (box / n));
+        const rho = r < 1 ? 1 / (2 * Math.PI * r) : 1e-4;
+        return { rho, vx: 0, vy: 0, vz: 0, p: (2 / 3) * rho * 0.05, s: r < 1 ? 1 : 0 };
+      }, { box, eosParams: { gamma: 5 / 3 }, bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], gravity: 'isolated', G: 1, tEnd: 0.75, rhoFloor: 1e-7, pFloor: 1e-12 });
+      // The potential at the start, the mirror's isolated boundary from its images' moments.
+      const solve = (p: Problem, mirror: boolean) =>
+        withSim(gpu, p, n, { ndim: 2, ...(mirror ? { symmetry: MIR } : {}) }, async (sim) => {
+          sim.solvePotential(10);
+          return sim.readPotential();
+        });
+      const pw = await solve(ev, false);
+      const ph = await solve(half(ev), true);
+      let worstPhi = 0;
+      for (let j = 0; j < n / 2; j++)
+        for (let i = 0; i < n; i++) worstPhi = Math.max(worstPhi, Math.abs(ph[j * n + i] / pw[(j + n / 2) * n + i] - 1));
+      m.evrard_potential_difference = worstPhi;
+      const ew = await uniform(ev, n, false);
+      const eh = await uniform(half(ev), n, true);
+      // (Through the collapse: the two grids' multigrid hierarchies differ, which a few near-empty
+      // cells amplify; the mass-weighted difference is what the run's state shows.)
+      let diff = 0;
+      let sum = 0;
+      for (let j = 0; j < n / 2; j++)
+        for (let i = 0; i < n; i++) {
+          const R = (i + 0.5) * (box / n);
+          diff += Math.abs(eh.u1[4 * (j * n + i)] - ew.u1[4 * ((j + n / 2) * n + i)]) * R;
+          sum += ew.u1[4 * ((j + n / 2) * n + i)] * R;
+        }
+      m.evrard_density_difference = diff / sum;
+      m.evrard_energy = rel(eh.e, ew.e);
+      m.evrard_mass = rel(eh.mass, ew.mass);
+
+      // A sink on the axis at z = 0, as cyl-sink.
+      const sink = ring(() => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 0.1, s: 0 }), {
+        box: 0.5, eosParams: { gamma: 5 / 3 }, bcLo: [REFLECT, OUTFLOW, PERIODIC], bcHi: [OUTFLOW, OUTFLOW, PERIODIC], G: 1, tEnd: 0.1,
+        masses: () => [{ gm: 1, pos: [0, 0, 0], vel: [0, 0, 0], soft: 0.05, sinkRadius: 0.06 }],
+      });
+      const take = (p: Problem, mirror: boolean) =>
+        withSim(gpu, p, 32, { ndim: 2, ...(mirror ? { symmetry: MIR } : {}) }, async (sim) => {
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          return { acc: d.masses[0].accreted, z: d.masses[0].pos[1] };
+        });
+      const sw = await take(sink, false);
+      const sh = await take(half(sink), true);
+      m.sink_accreted_whole = sw.acc;
+      m.sink_accreted_mirrored = sh.acc;
+      m.sink_accreted = rel(sh.acc, sw.acc);
+      m.sink_off_plane = Math.abs(sh.z);
+
+      // The blast on blocks.
+      const blocks = (p: Problem, mirror: boolean) =>
+        withAmr(gpu, p, n, { ndim: 2, amrLevels: 2, ...(mirror ? { symmetry: MIR } : {}) }, async (sim) => {
+          await sim.runToEnd();
+          const d = await sim.diagnostics();
+          const c = await sim.readLeaves();
+          let rR = 0;
+          let rz = 0;
+          for (let q = 0; q < c.count; q++) {
+            if (!(c.u1[4 * q] > 2)) continue;
+            if (Math.abs(c.y[q]) < c.dx[q]) rR = Math.max(rR, c.x[q]);
+            if (c.x[q] < c.dx[q]) rz = Math.max(rz, c.y[q]);
+          }
+          return { mass: d.mass, e: d.eTot, rR, rz };
+        });
+      const kw = await blocks(blast, false);
+      const kh = await blocks(half(blast), true);
+      m.blocks_mass = rel(kh.mass, kw.mass);
+      m.blocks_energy = rel(kh.e, kw.e);
+      m.blocks_radius_R = kh.rR;
+      m.blocks_radius_R_whole = kw.rR;
+      m.blocks_radius_z = kh.rz;
+      m.blocks_radius_z_whole = kw.rz;
+
+      const pass =
+        m.blast_density_difference < 1e-5 && m.blast_mass < 1e-5 && m.blast_energy < 1e-5 &&
+        m.evrard_potential_difference < 1e-3 && m.evrard_density_difference < 2e-3 && m.evrard_energy < 1e-4 && m.evrard_mass < 1e-5 &&
+        m.sink_accreted < 1e-4 && sw.acc > 0 && m.sink_off_plane === 0 &&
+        m.blocks_mass < 1e-4 && m.blocks_energy < 1e-4 && kh.rR === kw.rR && kh.rz === kw.rz;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'cyl-noh',
     name: 'Axisymmetric: the spherical Noh implosion',
     criterion: 'Cold gas (gamma = 5/3) falling at unit speed toward the origin from every direction, in (R, z) at 512^2 (R to 2, so that no gas measured came in through a boundary): at t = 0.6 the shock is at r = 0.2 and the post-shock density, 64 in the exact solution, averages within 5% of it over 0.06 < r < 0.17 away from the axis (R > 4 cells; the origin keeps the wall heating every code has there), and the pre-shock density at r = 0.3 is within 5% of (1 + t / r)^2 = 9',

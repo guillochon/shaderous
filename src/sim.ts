@@ -564,7 +564,8 @@ export function cylindricalUnsupported(c: SimConfig): string | null {
   }
   if ((c.problem.species?.length ?? 0) > 0) return 'species are not available in axisymmetric runs yet';
   if (c.problem.rotation || c.problem.shear || c.problem.cosmology) return 'an axisymmetric run has no rotating frame, shear or expansion';
-  if ((c.symmetry ?? []).some(Boolean)) return 'mirror symmetry is not available in axisymmetric runs yet';
+  // (A mirror across z = 0 halves the run, as in Cartesian coordinates; R already starts at the axis.)
+  if (c.symmetry?.[0]) return 'an axisymmetric run is mirrored across z = 0 only (code y): R already starts at the axis';
   if (uniformField(c)[0] !== 0) return 'a uniform field must lie along the axis';
   if (c.driving.accel > 0) return 'turbulence driving is not available in axisymmetric runs';
   if (c.gravity === 'periodic') return 'an axisymmetric run’s self-gravity is isolated (its axis is no periodic face)';
