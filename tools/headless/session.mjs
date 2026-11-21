@@ -168,6 +168,10 @@ export async function openSession(opts = {}) {
       throw new Error(pageMessage(e));
     }
   };
+  // Served from the source by Vite: the page's own modules can run here too. saveAthdf and
+  // uploadAthdf then write and read .athdf files here, where their size is not bounded by the
+  // page's memory (a Chromium page holds some 8 GB of arrays in all).
+  if (server?.ssrLoadModule) call.loadModule = (id) => server.ssrLoadModule(id);
   return { page, call, close, url: u.toString() };
 }
 
@@ -203,6 +207,7 @@ export async function fetchSlice(call, opts) {
  * problem and time); `pick(name)` may choose the path from it. Returns { file, name, time, bytes }.
  */
 export async function saveAthdf(call, pick) {
+  if (call.loadModule) return saveAthdfHere(call, pick);
   const f = await call('athdf', { chunked: true });
   const file = typeof pick === 'function' ? pick(f.name) : pick;
   const CHUNK = 64 * 1024 * 1024;
@@ -225,6 +230,7 @@ export async function saveAthdf(call, pick) {
  * loadAthdf()), so that a file of gigabytes is never one string. Returns what loadAthdf returns.
  */
 export async function uploadAthdf(call, file) {
+  if (call.loadModule) return uploadAthdfHere(call, file);
   const CHUNK = 48 * 1024 * 1024;
   const total = statSync(file).size;
   const fd = openSync(file, 'r');
@@ -240,6 +246,71 @@ export async function uploadAthdf(call, file) {
     closeSync(fd);
   }
   return call('loadAthdf');
+}
+
+/** The .athdf reader and writer (src/io/athdf.ts) and the build of HDF5 whose files are this computer's. */
+async function athdfHere(call) {
+  const [io, { default: h5 }] = await Promise.all([call.loadModule('/src/io/athdf.ts'), import('h5wasm/node')]);
+  await h5.ready;
+  return { ...io, h5 };
+}
+
+const SNAPSHOT_CHUNK = 64 * 1024 * 1024;
+
+/** Put a snapshot's array in its place: "levels", "locations", "faces" or "data.<variable>". */
+function placeArray(snap, key, a) {
+  if (key === 'levels' || key === 'locations' || key === 'faces') snap[key] = a;
+  else if (key.startsWith('data.')) snap.data[key.slice(5)] = a;
+  else throw new Error(`a snapshot has no array "${key}"`);
+}
+
+/** A snapshot's arrays by key, as placeArray puts them. */
+function arraysOf(snap) {
+  const out = [['levels', snap.levels], ['locations', snap.locations]];
+  for (const [k, a] of Object.entries(snap.data)) if (a) out.push([`data.${k}`, a]);
+  if (snap.faces) out.push(['faces', snap.faces]);
+  return out;
+}
+
+/** saveAthdf with the file written here: the page hands over the snapshot's arrays in pieces. */
+async function saveAthdfHere(call, pick) {
+  const { writeAthdfFile, h5 } = await athdfHere(call);
+  const out = await call('snapshotOut');
+  const file = typeof pick === 'function' ? pick(out.name) : pick;
+  const snap = { ...out.header, data: {} };
+  try {
+    for (const { key, type, length } of out.arrays) {
+      const a = type === 'int32' ? new Int32Array(length) : new Float32Array(length);
+      const bytes = new Uint8Array(a.buffer);
+      for (let offset = 0; offset < bytes.length; ) {
+        const c = await call('snapshotChunk', key, offset, SNAPSHOT_CHUNK);
+        bytes.set(Buffer.from(c.base64, 'base64'), offset);
+        offset = c.end;
+      }
+      placeArray(snap, key, a);
+    }
+  } finally {
+    await call('snapshotDone');
+  }
+  // gzip level 1, as the page writes its files.
+  await writeAthdfFile(file, snap, h5, 1);
+  return { file, name: out.name, time: snap.time, bytes: statSync(file).size };
+}
+
+/** uploadAthdf with the file read here: the page is handed the snapshot's arrays in pieces. */
+async function uploadAthdfHere(call, file) {
+  const { readAthdfFile, h5 } = await athdfHere(call);
+  const snap = await readAthdfFile(path.resolve(file), h5);
+  const arrays = arraysOf(snap);
+  const { levels: _l, locations: _p, data: _d, faces: _f, ...header } = snap;
+  await call('snapshotIn', header, arrays.map(([key, a]) => ({ key, type: a instanceof Int32Array ? 'int32' : 'float32', length: a.length })));
+  for (const [key, a] of arrays) {
+    const bytes = Buffer.from(a.buffer, a.byteOffset, a.byteLength);
+    for (let offset = 0; offset < bytes.length; offset += SNAPSHOT_CHUNK) {
+      await call('snapshotPut', key, offset, bytes.subarray(offset, Math.min(bytes.length, offset + SNAPSHOT_CHUNK)).toString('base64'));
+    }
+  }
+  return call('loadSnapshot');
 }
 
 /** A PNG data URL as bytes. */

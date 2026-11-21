@@ -54,6 +54,8 @@ export interface AppHooks {
   build(link: LinkOverrides): Promise<void>;
   /** resolves to what an older file of ours could not carry over as written */
   importAthdf(bytes: Uint8Array): Promise<string[]>;
+  /** the same from a snapshot (one read from an .athdf file) */
+  importSnapshot(snap: Snapshot): Promise<string[]>;
   restart(): Promise<void>;
   running(): boolean;
   finished(): boolean;
@@ -97,6 +99,8 @@ export interface AppHooks {
   /** The view's background, as a CSS color. */
   background(): string;
   athdf(): Promise<{ time: number; bytes: Uint8Array; stem: string }>;
+  /** the state of the gas as a snapshot, which athdf() writes to a file */
+  snapshot(): Promise<{ snap: Snapshot; stem: string }>;
   setColormap(name: string): void;
   /** The volume view's opacity curve (render/transfer.ts), and setting it. */
   opacityCurve(): { x: number; a: number }[];
@@ -279,6 +283,20 @@ async function toBase64(bytes: Uint8Array): Promise<string> {
   });
   return url.slice(url.indexOf(',') + 1);
 }
+
+/**
+ * The arrays of a snapshot by name ("levels", "locations", "faces", "data.<variable>"), as
+ * snapshotOut() hands them over and snapshotIn() takes them.
+ */
+function snapshotArrays(s: Snapshot): [string, Int32Array | Float32Array][] {
+  const out: [string, Int32Array | Float32Array][] = [['levels', s.levels], ['locations', s.locations]];
+  for (const [k, a] of Object.entries(s.data)) if (a) out.push([`data.${k}`, a]);
+  if (s.faces) out.push(['faces', s.faces]);
+  return out;
+}
+
+/** An array's bytes, as a view. */
+const bytesOf = (a: Int32Array | Float32Array) => new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
 
 function fromBase64(b64: string): Uint8Array {
   const s = atob(b64);
@@ -742,6 +760,10 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
   let recording: { status: RecordingStatus; stop: boolean } | null = null;
   /** The file athdf({ chunked: true }) made, until athdfChunk has read it out. */
   let heldAthdf: Uint8Array | null = null;
+  /** The snapshot snapshotOut() captured, until snapshotDone(). */
+  let heldSnapshot: Snapshot | null = null;
+  /** The snapshot snapshotIn() set out, which snapshotPut() fills for loadSnapshot(). */
+  let incomingSnapshot: { snap: Snapshot; arrays: Map<string, Int32Array | Float32Array> } | null = null;
   /** The .athdf file athdfPut is putting together for loadAthdf(), and how many bytes have come. */
   let incoming: { bytes: Uint8Array; got: number } | null = null;
 
@@ -1182,6 +1204,74 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         let warnings: string[] = [];
         await built(async () => {
           warnings = await app.importAthdf(bytes);
+        });
+        return { ...(await state()), warnings };
+      }),
+    /**
+     * The state of the gas as a snapshot held in the page, for a caller that writes the file
+     * itself (the runner, whose files are not bounded by the page's memory): its fields but the
+     * arrays, and each array's key, type and length. Read the arrays out with snapshotChunk, then
+     * call snapshotDone.
+     */
+    snapshotOut: () =>
+      serial(async () => {
+        current();
+        const { snap, stem } = await app.snapshot();
+        heldSnapshot = snap;
+        const { levels: _l, locations: _p, data: _d, faces: _f, pressureAt: _a, ...header } = snap;
+        const arrays = snapshotArrays(snap).map(([key, a]) => ({ key, type: a instanceof Int32Array ? 'int32' : 'float32', length: a.length }));
+        return { name: `${stem}-t${+snap.time.toPrecision(4)}.athdf`, header, arrays };
+      }),
+    /** Bytes `offset` to `offset + length` of the held snapshot's array `key`, base64. */
+    snapshotChunk: (key: string, offset: number, length: number) =>
+      serial(async () => {
+        const a = heldSnapshot && snapshotArrays(heldSnapshot).find(([k]) => k === key)?.[1];
+        if (!a) throw new Error(`no array "${key}" is held: call snapshotOut first`);
+        const bytes = bytesOf(a);
+        const end = Math.min(bytes.length, offset + length);
+        return { offset, end, base64: await toBase64(bytes.subarray(offset, end)) };
+      }),
+    /** Let the snapshot snapshotOut() holds go. */
+    snapshotDone: () =>
+      serial(async () => {
+        heldSnapshot = null;
+      }),
+    /** Set out a snapshot for loadSnapshot(): its fields but the arrays (as snapshotOut gives them), and the arrays' keys, types and lengths, to be filled by snapshotPut. */
+    snapshotIn: (header: Omit<Snapshot, 'levels' | 'locations' | 'data'>, arrays: { key: string; type: 'int32' | 'float32'; length: number }[]) =>
+      serial(async () => {
+        const snap = { ...header, data: {} } as Snapshot;
+        const map = new Map<string, Int32Array | Float32Array>();
+        for (const { key, type, length } of arrays) {
+          const a = type === 'int32' ? new Int32Array(length) : new Float32Array(length);
+          map.set(key, a);
+          if (key === 'levels') snap.levels = a as Int32Array;
+          else if (key === 'locations') snap.locations = a as Int32Array;
+          else if (key === 'faces') snap.faces = a as Float32Array;
+          else if (key.startsWith('data.')) snap.data[key.slice(5)] = a as Float32Array;
+          else throw new Error(`a snapshot has no array "${key}"`);
+        }
+        incomingSnapshot = { snap, arrays: map };
+      }),
+    /** One piece of an array of the snapshot snapshotIn() set out: its bytes from `offset`, base64. */
+    snapshotPut: (key: string, offset: number, base64: string) =>
+      serial(async () => {
+        const a = incomingSnapshot?.arrays.get(key);
+        if (!a) throw new Error(`no array "${key}" is set out: call snapshotIn first`);
+        const piece = fromBase64(base64);
+        const bytes = bytesOf(a);
+        if (offset + piece.length > bytes.length) throw new Error(`a piece at ${offset} of ${piece.length} bytes runs past the ${bytes.length} of "${key}"`);
+        bytes.set(piece, offset);
+        return { end: offset + piece.length };
+      }),
+    /** Start a run from the snapshot snapshotIn() and snapshotPut() put together, as loadAthdf() does from a file. */
+    loadSnapshot: () =>
+      serial(async () => {
+        if (!incomingSnapshot) throw new Error('no snapshot is set out: call snapshotIn first');
+        const { snap } = incomingSnapshot;
+        incomingSnapshot = null;
+        let warnings: string[] = [];
+        await built(async () => {
+          warnings = await app.importSnapshot(snap);
         });
         return { ...(await state()), warnings };
       }),

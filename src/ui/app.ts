@@ -1833,12 +1833,18 @@ if (!headless) setTimeout(() => void athdfModule().catch(() => {}), 10_000);
 
 /** The state of the gas as an .athdf file (see io/athdf.ts), and its time. */
 async function athdfOf(s: Simulation) {
-  const snap = await capture(s, { program: 'shaderous', build: BUILD, query: linkQuery(), setup: cfg.problem.setup });
+  const { snap } = await snapshotOf(s);
   const { writeAthdf } = await athdfModule();
   // gzip level 1: nearly all of the saving of higher levels (files are 8% to 86% of the raw
   // size, depending on how smooth the flow is) for the least time.
   const bytes = await writeAthdf(snap, undefined, 1);
   return { time: snap.time, bytes, stem: `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}` };
+}
+
+/** The state of the gas as a snapshot, with the stem of its file's name. */
+async function snapshotOf(s: Simulation) {
+  const snap = await capture(s, { program: 'shaderous', build: BUILD, query: linkQuery(), setup: cfg.problem.setup });
+  return { snap, stem: `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}` };
 }
 
 /** Save the state of the gas to an .athdf file. */
@@ -1958,9 +1964,13 @@ async function importState(file: File) {
  * code's. Returns what an older file of ours could not carry over as written.
  */
 async function importAthdf(bytes: Uint8Array): Promise<string[]> {
+  const { readAthdf } = await athdfModule();
+  return importSnapshot(await readAthdf(bytes));
+}
+
+/** Start the run from a snapshot (one read from an .athdf file), as importAthdf does. */
+async function importSnapshot(snap: Snapshot): Promise<string[]> {
   {
-    const { readAthdf } = await athdfModule();
-    const snap = await readAthdf(bytes);
     const cubic = snap.rootSize[0] === snap.rootSize[1] && (snap.ndim === 2 || snap.rootSize[2] === snap.rootSize[0]);
     const width = snap.hi.map((h, a) => h - snap.lo[a]);
     if (!cubic || Math.abs(width[0] - width[1]) > 1e-4 * width[0] || (snap.ndim === 3 && Math.abs(width[0] - width[2]) > 1e-4 * width[0])) {
@@ -5293,6 +5303,7 @@ const api = installApi(
     idle,
     build: (link) => build(link.problem, link.n, link.ndim, link.amr, false, link),
     importAthdf,
+    importSnapshot,
     restart: () => restartRun(),
     running: () => running,
     finished: () => finished,
@@ -5378,6 +5389,7 @@ const api = installApi(
     rangeSettled: () => renderer.rangeSettled(),
     rangedByDrawing: (d) => $<HTMLInputElement>('auto').checked && (projecting() || view.field >= d.ranges.length),
     athdf: () => athdfOf(sim!),
+    snapshot: () => snapshotOf(sim!),
     setColormap(name) {
       editor.set(editor.points, name);
       pushTransfer();

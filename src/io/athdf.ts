@@ -103,10 +103,29 @@ function swapAxes23(s: Snapshot, toFile: boolean): Snapshot {
  *             gzip is HDF5's standard filter, so every reader handles it.
  */
 export async function writeAthdf(s0: Snapshot, h5?: H5, gzip = 0): Promise<Uint8Array> {
-  const cyl = s0.geometry === 'cylindrical';
-  const s = cyl ? swapAxes23(s0, true) : s0;
   const lib = await library(h5);
   const name = `write-${counter++}.athdf`;
+  writeInto(lib, name, s0, gzip);
+  const bytes = lib.FS.readFile(name);
+  lib.FS.unlink(name);
+  return bytes;
+}
+
+/**
+ * The same, written straight to `file` by a build of HDF5 whose files are the computer's own
+ * (h5wasm/node), so no copy of the file is ever held in memory: the runner writes a checkpoint
+ * of gigabytes so.
+ */
+export async function writeAthdfFile(file: string, s: Snapshot, h5: H5, gzip = 0): Promise<void> {
+  writeInto(await library(h5), file, s, gzip);
+}
+
+/** Blocks of the face field written or read at a time, so HDF5's memory holds a part of it only. */
+const FACE_SLAB = 2048;
+
+function writeInto(lib: Library, name: string, s0: Snapshot, gzip: number): void {
+  const cyl = s0.geometry === 'cylindrical';
+  const s = cyl ? swapAxes23(s0, true) : s0;
   const f = new lib.File(name, 'w');
   const nb = blockCount(s);
   const [nx, ny, nz] = s.blockSize;
@@ -174,15 +193,29 @@ export async function writeAthdf(s0: Snapshot, h5?: H5, gzip = 0): Promise<Uint8
   for (let v = 1; v < present.length; v++) prim.write_slice([[v, v + 1], [], [], [], []], s.data[present[v]]!);
   if (s.faces) {
     // A magnetized run on blocks: the face field (Snapshot.faces), for a restart.
+    // Written a slab of blocks at a time: at tens of thousands of blocks the whole of it is
+    // gigabytes, and HDF5's memory (WebAssembly's) holds at most 4 GB.
     const shape = [nb, nz === 1 ? 1 : nz + 1, ny + 1, nx + 1, 3];
-    f.create_dataset({ name: 'ShaderousFaces', data: s.faces, shape, dtype: '<f4', ...(gzip > 0 ? { compression: 'gzip', compression_opts: gzip, chunks: [1, ...shape.slice(1)] } : {}) });
+    const per = shape[1] * shape[2] * shape[3] * 3;
+    const first = Math.min(nb, FACE_SLAB);
+    const set = f.create_dataset({
+      name: 'ShaderousFaces',
+      data: s.faces.subarray(0, first * per),
+      shape: [first, ...shape.slice(1)],
+      maxshape: shape,
+      chunks: [1, ...shape.slice(1)],
+      dtype: '<f4',
+      ...(gzip > 0 ? { compression: 'gzip', compression_opts: gzip } : {}),
+    });
+    if (nb > first) set.resize(shape);
+    for (let b = first; b < nb; b += FACE_SLAB) {
+      const e = Math.min(nb, b + FACE_SLAB);
+      set.write_slice([[b, e], [], [], [], []], s.faces.subarray(b * per, e * per));
+    }
   }
 
   f.flush();
   f.close();
-  const bytes = lib.FS.readFile(name);
-  lib.FS.unlink(name);
-  return bytes;
 }
 
 export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
@@ -192,11 +225,23 @@ export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
   const lib = await library(h5);
   const name = `read-${counter++}.athdf`;
   lib.FS.writeFile(name, bytes);
+  try {
+    return readFrom(lib, name);
+  } finally {
+    lib.FS.unlink(name);
+  }
+}
+
+/** The same, read straight from `file` by a build of HDF5 whose files are the computer's own (h5wasm/node). */
+export async function readAthdfFile(file: string, h5: H5): Promise<Snapshot> {
+  return readFrom(await library(h5), file);
+}
+
+function readFrom(lib: Library, name: string): Snapshot {
   let f: H5File;
   try {
     f = new lib.File(name, 'r');
   } catch {
-    lib.FS.unlink(name);
     throw new Error('this is not an HDF5 file');
   }
   try {
@@ -264,8 +309,14 @@ export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
 
     const faces = f.get('ShaderousFaces') as H5Dataset | null;
     if (faces?.shape) {
-      const v = faces.value as ArrayLike<number>;
-      snap.faces = v instanceof Float32Array ? v : Float32Array.from(v);
+      // Read a slab of blocks at a time, as it is written.
+      const n = faces.shape[0];
+      const per = faces.shape.slice(1).reduce((a, b) => a * b, 1);
+      snap.faces = new Float32Array(n * per);
+      for (let b = 0; b < n; b += FACE_SLAB) {
+        const e = Math.min(n, b + FACE_SLAB);
+        snap.faces.set(faces.slice([[b, e], [], [], [], []]) as ArrayLike<number>, b * per);
+      }
     }
 
     const meta = f.attrs.Shaderous?.value;
@@ -281,6 +332,5 @@ export async function readAthdf(bytes: Uint8Array, h5?: H5): Promise<Snapshot> {
     return snap;
   } finally {
     f.close();
-    lib.FS.unlink(name);
   }
 }

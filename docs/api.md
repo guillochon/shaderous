@@ -805,7 +805,19 @@ A file of more than a few hundred megabytes is past the longest string the brows
 over. With `{ chunked: true }` the page keeps the file and returns no `base64`; read it out
 with `athdfChunk(offset, length) → { offset, end, base64 }`, bytes `offset` to `end`, until
 `end` reaches `bytes`. The page lets the file go once its last byte is read. The runner and the
-MCP server's `save_athdf` read every file this way, 64 MB at a time.
+MCP server's `save_athdf` read a file this way, 64 MB at a time, when the page is not served
+from the source (the built page of the npm package).
+
+A file of several gigabytes cannot be made in the page at all: a Chromium page holds some 8 GB
+of arrays in all, and the state, the file and the copy made while the file grows are each a few
+gigabytes on a large adaptive mesh. So the runner and the MCP server, when they serve the page
+from the source, take the state instead and write the file themselves:
+`snapshotOut() → { name, header, arrays }` holds the state in the page and gives its fields but
+the arrays, and each array's `key` (`levels`, `locations`, `faces`, `data.<variable>`), `type`
+(`int32` or `float32`) and `length`; `snapshotChunk(key, offset, length) → { offset, end, base64 }`
+reads an array's bytes out; `snapshotDone()` lets the state go. Loading goes the other way:
+`snapshotIn(header, arrays)` sets out the arrays, `snapshotPut(key, offset, base64)` fills them,
+and `loadSnapshot()` starts the run from them, as `loadAthdf()` does from a file.
 
 ### `athdfPut(offset, base64, total) → { got, total }`
 
