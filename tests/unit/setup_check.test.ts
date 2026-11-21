@@ -54,7 +54,7 @@ describe('checkSetup', () => {
     const doc = (gamma: number, species: string[] | 'aprox13') => texts(setup({ physics: { eosParams: { gamma }, species } }), 'error');
     expect(has(doc(1, 'aprox13'), /each needs a gamma above 1/)).toBe(true);
     expect(has(doc(1, ['he4', 'c12']), /each needs a gamma above 1/)).toBe(true);
-    expect(has(doc(1, ['fuel', 'ash']), /gamma above 1/)).toBe(false);
+    expect(has(doc(1, ['fuel', 'ash']), /each needs a gamma above 1/)).toBe(false);
     expect(has(doc(5 / 3, 'aprox13'), /gamma above 1/)).toBe(false);
     // Seed 10759: units that put the degenerate gas's constants past 32-bit numbers.
     const scaled = (mass: string) => texts(setup({ domain: { ndim: 2, n: 64, supports2d: true, units: { length: { unit: 'Rsun', value: 1 }, mass: { unit: mass, value: 1 } } }, physics: { eos: 'degenerate' } }), 'error');
@@ -65,9 +65,10 @@ describe('checkSetup', () => {
     expect(has(core('g'), /helmRho .* 32-bit/)).toBe(true);
     expect(has(core('Msun'), /32-bit/)).toBe(false);
     // Seed 10624: the degenerate gas (and its kin) at gamma 1.
-    const gas = (eos: 'degenerate' | 'gas_radiation' | 'ionizing' | 'ideal', gamma: number) => texts(setup({ physics: { eos, eosParams: { gamma } } }), 'error');
-    for (const eos of ['degenerate', 'gas_radiation', 'ionizing'] as const) expect(has(gas(eos, 1), /needs a gamma above 1/)).toBe(true);
-    expect(has(gas('ideal', 1), /gamma above 1/)).toBe(false);
+    // (And seed 10872: the ideal gas, whose pressure gamma 1 makes zero.)
+    const gas = (eos: 'degenerate' | 'gas_radiation' | 'ionizing' | 'ideal' | 'barotropic', gamma: number) => texts(setup({ physics: { eos, eosParams: { gamma } } }), 'error');
+    for (const eos of ['degenerate', 'gas_radiation', 'ionizing', 'ideal'] as const) expect(has(gas(eos, 1), /needs a gamma above 1/)).toBe(true);
+    expect(has(gas('barotropic', 1), /gamma above 1/)).toBe(false);
     expect(has(gas('degenerate', 5 / 3), /gamma above 1/)).toBe(false);
   });
 

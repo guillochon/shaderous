@@ -336,14 +336,16 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     if (flat.length) out.push({ level: 'error', path: 'physics.speciesGamma', text: `Gamma by species: ${flat.join(', ')} need a gamma above 1` });
   });
 
-  // Gas with radiation or degenerate electrons beside it has the gas's share of the energy as
-  // (gamma - 1) of it: gamma 1 (the ideal gas's isothermal limit) made it NaN (random test seed
-  // 10624, the isothermal collapse with the degenerate equation of state).
+  // A gas with an energy has its pressure as (gamma - 1) of it: gamma 1, which only the
+  // barotropic gas takes (as an isothermal gas), is no pressure at all, and NaN with radiation or
+  // degenerate electrons beside it (random test seeds 10624, the isothermal collapse with the
+  // degenerate equation of state, and 10872, driven turbulence with an ideal gas: nothing held the
+  // stirred gas, which ran to Mach 1e5).
   guard(() => {
     const eos = spec.physics?.eos;
     const gamma = spec.physics?.eosParams?.gamma ?? 5 / 3;
-    if ((eos === 'gas_radiation' || eos === 'degenerate' || eos === 'ionizing') && !(gamma > 1))
-      out.push({ level: 'error', path: 'physics.eosParams.gamma', text: `gamma is ${fmt(gamma)}: this equation of state needs a gamma above 1 (only the ideal gas takes 1, as an isothermal gas)` });
+    if ((eos === undefined || eos === 'ideal' || eos === 'gas_radiation' || eos === 'degenerate' || eos === 'ionizing') && !(gamma > 1))
+      out.push({ level: 'error', path: 'physics.eosParams.gamma', text: `gamma is ${fmt(gamma)}: this equation of state needs a gamma above 1 (only the barotropic gas takes 1, as an isothermal gas)` });
   });
 
   // The constants the equation of state takes from the units, in code units, must fit the GPU's
