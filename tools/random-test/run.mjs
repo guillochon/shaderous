@@ -12,6 +12,8 @@
 //   --seed S           first seed (default: from the clock); a row's seed reproduces its setup
 //   --seeds A,B,C      these seeds instead
 //   --mode M           compose or preset, for every seed
+//   --docs A.json,...  these setup documents instead of generated ones (a row's `doc`, edited:
+//                      for bisecting a failure)
 //   --steps N          steps per run (default 400)
 //   --out DIR          where results.json and the screenshots go (default random-test-out)
 //   --shot-all         a screenshot of every run's end state (run-<seed>.png)
@@ -43,7 +45,7 @@ const out = path.resolve(opt('out', 'random-test-out'));
 const shotEvery = args.includes('--shot-all') ? 1 : Number(opt('shot-every', 8));
 const gpuMemory = opt('gpu-memory', '4');
 const coverageOnly = opt('coverage', undefined);
-const seeds = opt('seeds', undefined)?.split(',').map(Number) ?? Array.from({ length: coverageOnly ? Number(coverageOnly) : runs }, (_, i) => seed0 + i);
+const seeds = opt('docs', undefined)?.split(',').map((_, i) => i) ?? opt('seeds', undefined)?.split(',').map(Number) ?? Array.from({ length: coverageOnly ? Number(coverageOnly) : runs }, (_, i) => seed0 + i);
 
 lowerPriority();
 fs.mkdirSync(out, { recursive: true });
@@ -52,7 +54,12 @@ fs.mkdirSync(out, { recursive: true });
 const { createServer } = await import('vite');
 const vite = await createServer({ configFile: path.join(REPO, 'vite.config.ts'), server: { middlewareMode: true, hmr: false, watch: null }, appType: 'custom', logLevel: 'error' });
 const gen = await vite.ssrLoadModule('/tools/random-test/generate.ts');
-const make = (seed) => gen.generate(seed, mode ? { mode } : {});
+const docFiles = opt('docs', undefined)?.split(',');
+const make = (seed, i) => {
+  if (!docFiles) return gen.generate(seed, mode ? { mode } : {});
+  const doc = JSON.parse(fs.readFileSync(docFiles[i], 'utf8'));
+  return { seed: path.basename(docFiles[i]), mode: 'document', doc, tried: [], features: gen.featuresOf(doc), closed: gen.closedBox(doc) };
+};
 
 if (coverageOnly) {
   const t0 = Date.now();
@@ -79,7 +86,7 @@ const rows = [];
 try {
   for (let i = 0; i < seeds.length; i++) {
     const seed = seeds[i];
-    const g = make(seed);
+    const g = make(seed, i);
     const row = await page.evaluate(([gg, n]) => window.randomTest.runDoc(gg, { steps: n }), [g, steps]);
     row.doc = g.doc;
     rows.push(row);

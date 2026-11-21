@@ -30,6 +30,7 @@ import { FLOWS } from '../../src/setup/parts/flow';
 import { cloneSetup, getPath, setPath, SETUP_FORMAT, SETUP_VERSION, type Part, type PartKind, type SetupSpec, type Vec3 } from '../../src/setup/spec';
 import { BOUNDARIES, FACE_KEYS, MOVING_WALL, OUTFLOW, PERIODIC } from '../../src/problems/boundaries';
 import { PRESET_IDS, presetSpec } from '../../src/presets';
+import { ANEOS_MATERIALS } from '../../src/eos/aneos';
 import { configFor, refusal } from '../../src/sim';
 
 // ---- random numbers ----
@@ -815,15 +816,15 @@ function apply(doc: SetupSpec, f: Feature, ctx: Ctx): { ok: boolean; part?: Part
       if (!part) return { ok: false };
       if (!f.path) return { ok: true, part };
       const key = `${f.kind}.${f.path}`;
+      // A field of a group: the group first, with its defaults.
+      const top = f.path.split('.')[0];
+      if (top !== f.path && getPath(part, top) === undefined) {
+        const go = PART_OPTIONS[f.kind!].fields.find((x) => x.path === top);
+        if (go) setPath(part, top, groupValue(go, `${f.kind}.${top}`, g, doc));
+      }
       if (f.choice) setPath(part, f.path, f.choice.value);
       else if (o!.control.type === 'group') setPath(part, f.path, groupValue(o!, key, g, doc, f.form));
       else {
-        // A field of a group: the group first.
-        const top = f.path.split('.')[0];
-        if (top !== f.path && getPath(part, top) === undefined) {
-          const go = PART_OPTIONS[f.kind!].fields.find((x) => x.path === top);
-          if (go) setPath(part, top, groupValue(go, `${f.kind}.${top}`, g, doc));
-        }
         const v = f.off ? false : valueFor(o!, key, g, doc, part);
         if (v === undefined) return { ok: false };
         setPath(part, f.path, v);
@@ -953,8 +954,23 @@ function optionHooks(doc: SetupSpec, path: string, value: Value | Record<string,
   return false;
 }
 
+/** A planet's materials are the run's: its mantle's and core's as the two species, or its one material as the equation of state's. */
+function planetMaterials(doc: SetupSpec, part: Extract<Part, { kind: 'star' }>) {
+  const ph = (doc.physics ??= {});
+  // A core of the mantle's own material: the mantle becomes another.
+  if (part.coreMaterial && part.coreMaterial === (part.material ?? 'pyrolite')) part.material = ANEOS_MATERIALS.find((m) => m !== part.coreMaterial);
+  const mantle = part.material ?? 'pyrolite';
+  if (part.coreMaterial) ph.species = [mantle, part.coreMaterial];
+  else {
+    if (Array.isArray(ph.species) && ph.species.includes(mantle)) return;
+    delete ph.species;
+    (ph.eosParams ??= {}).aneosA = ANEOS_MATERIALS.indexOf(mantle as never);
+  }
+}
+
 /** What some parts' fields need besides their rules. */
 function partHooks(doc: SetupSpec, part: Part, f: Feature, ctx: Ctx) {
+  if (part.kind === 'star' && part.type === 'planet') planetMaterials(doc, part);
   if (part.kind === 'star' && f.path === 'rhoc') delete part.mass;
   if (part.kind === 'star' && f.path?.startsWith('core')) delete part.rhoc;
   if (part.kind === 'star' && f.path === 'type') {
@@ -974,6 +990,7 @@ function partHooks(doc: SetupSpec, part: Part, f: Feature, ctx: Ctx) {
     (doc.physics ??= {}).fluff = { ...doc.physics.fluff, va: 3 };
   }
   if (part.kind === 'disk' && f.path === 'damp' && part.damp) part.damp = { from: r3(ctx.g.U(0.3, 0.45)), rate: 3 };
+  if (part.kind === 'star' && part.type === 'planet') planetMaterials(doc, part);
 }
 
 /**
@@ -1016,6 +1033,8 @@ function tryFeature(doc: SetupSpec, f: Feature, ctx: Ctx): { doc: SetupSpec } | 
   }
   if (!out.ok) return { why: 'its rules could not be met', doc: trial };
   clampGrid(trial);
+  // (After the rules: an equation of state set for them takes the planet's material with it.)
+  for (const p of trial.parts ?? []) if (p.kind === 'star' && p.type === 'planet') planetMaterials(trial, p);
   if (!repair(trial, { path: f.type === 'option' ? f.path : undefined, part: out.part })) return { why: `the check: ${errorsOf(trial)[0]?.text ?? '(repair gave up)'}`, doc: trial };
   return hasFeature(trial, f) ? { doc: trial } : { why: 'the repair took it out', doc: trial };
 }
