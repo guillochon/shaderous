@@ -176,7 +176,7 @@ function ambient(spec: SetupSpec, bodies: Bodies) {
 }
 
 /** The initial state of a setup on a grid of n cells a side. */
-function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3): InitFn {
+function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3, levels = 0): InitFn {
   const { units, G } = scales(spec);
   const box = boxOf(spec);
   const species = speciesOf(spec);
@@ -258,7 +258,7 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3): InitFn {
     };
   }
 
-  const pctx: PaintContext = { box, n, ndim, eos, fractions };
+  const pctx: PaintContext = { box, n, ndim, eos, fractions, levels };
   let body = 0;
   for (const p of spec.parts ?? []) {
     const paint =
@@ -589,8 +589,8 @@ export function compileSetup(input: SetupSpec): Compiled {
     // (A spherical run's box is its radial extent: from the inner radius to the box side.)
     box: d.geometry === 'spherical' ? boxOf(spec) - (d.rMin ?? 0.01) : boxOf(spec),
     tEnd: cosmology && ph.cosmology?.zEnd !== undefined ? timeAtRedshift(cosmology, ph.cosmology.zEnd) : (run.tEnd ?? Infinity),
-    init: (n, eos, ndim, params) => {
-      const f = initOf(at(params), n, eos, ndim);
+    init: (n, eos, ndim, params, levels) => {
+      const f = initOf(at(params), n, eos, ndim, levels);
       if (d.geometry !== 'spherical') return f;
       // A spherical run's cells are at (r, theta): the setup's (R, z) and velocities in (v_R, v_z, v_phi).
       return (r, th) => {

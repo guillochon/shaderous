@@ -34,6 +34,21 @@
 @group(0) @binding(11) var PL: texture_3d<f32>;
 
 #include "pressure/faces.wgsl"
+#include "hydro/moving_flags.wgsl"
+
+// A moving body's wall (hydro/moving.ts): the momentum through the face that the body's motion
+// imposes, the cell's density times the wall's velocity along the axis (its solid cell holds that
+// velocity in its momentum). The solve then sees the body push and pull the liquid; no mass
+// crosses the face in the correction. 0 for a wall at rest, or of the box.
+fn wall_mom(c: vec3<i32>, a: i32, up: bool, rho: f32) -> f32 {
+  if (!MOVING) { return 0.0; }
+  var q = c;
+  q[a] += select(-1, 1, up);
+  if (q[a] < 0 || q[a] >= i32(P.dims[a])) { return 0.0; }
+  if (textureLoad(U2S, q, 0).w < 0.5) { return 0.0; }
+  let u = textureLoad(U1S, q, 0);
+  return rho * u[a + 1] / max(u.x, P.rho_floor);
+}
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -81,7 +96,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     if (lo.kind == FK_GAS) { fl = 0.5 * (textureLoad(U1S, lo.q, 0)[a + 1] + ms[a]) + kg * 0.5 * (textureLoad(U1N, lo.q, 0).x + rho); }
     if (lo.kind == FK_INLET) { fl = textureLoad(U1S, lo.q, 0)[a + 1]; }
     if (lo.kind == FK_OPEN) { fl = open_mom(ms[a] + kg * rho, false, lo.only); }
-    // (An inlet or an open face takes its momentum as it is now in place of m^n; a wall has none.)
+    if (hi.kind == FK_WALL) { fh = wall_mom(c, a, true, rho); }
+    if (lo.kind == FK_WALL) { fl = wall_mom(c, a, false, rho); }
+    // (An inlet or an open face takes its momentum as it is now in place of m^n; a wall has none,
+    // or a moving one's.)
     var fhn = fh;
     var fln = fl;
     if (hi.kind == FK_GAS) { fhn = 0.5 * (un[a + 1] + textureLoad(U1N, hi.q, 0)[a + 1]); }

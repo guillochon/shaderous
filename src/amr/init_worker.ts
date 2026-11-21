@@ -30,7 +30,7 @@ self.onmessage = async (e: MessageEvent<InitRequest>) => {
       // the pool sends no work before this setup answers.
       await loadEosTable(cfg.eos, cfg.eosParams);
       const eos = makeEos(cfg.eos, cfg.eosParams);
-      const fn = sphSetup(cfg, problem.init(m.n, eos, cfg.ndim, cfg.params));
+      const fn = sphSetup(cfg, problem.init(m.n, eos, cfg.ndim, cfg.params, cfg.amrLevels));
       ctx = {
         cfg, dx0: m.dx0, levels: m.levels, fn, eos,
         kc: problemCoefficients(problem, cfg.eosParams.gamma),

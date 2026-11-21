@@ -1563,7 +1563,7 @@ export class AmrSim implements Simulation {
     const d = this.device;
     const eos = makeEos(c.eos, c.eosParams);
     // (A spherical run's setup takes (r, theta): src/spherical.ts sphSetup.)
-    const fn = sphSetup(c, c.problem.init(this.n, eos, c.ndim, c.params));
+    const fn = sphSetup(c, c.problem.init(this.n, eos, c.ndim, c.params, c.amrLevels));
     const surface = surfaceOf(fn, eos);
     let run = await InitRun.start(c, this.n, this.dx0, this.levels);
     // With self-gravity a level that only partly fits the block budget is left out altogether:

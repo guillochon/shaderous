@@ -154,7 +154,7 @@ export const WALL_TESTS: TestDef[] = [
     id: 'sphere-drag',
     name: 'A sphere in a tunnel at Reynolds number 100: its drag (3D, 16 cells across, 2 levels of blocks, liquid, implicit pressure)',
     criterion:
-      'A sphere of diameter 0.25 in a tunnel 16 diameters across (slip sides: 1.2% blockage), Mach 0.1, nu = 0.0025, 256 finest cells with 2 levels: the mean drag coefficient over t = 10 to 12 is within 0.95 to 1.35 (published 1.08 to 1.09: Johnson & Patel 1999, Fornberg 1988; a staircase at 16 cells across reads high, as the cylinder’s does)',
+      'A sphere of diameter 0.25 in a tunnel 16 diameters across (slip sides: 1.2% blockage), Mach 0.1, nu = 0.0025, 256 finest cells with 2 levels: the mean drag coefficient over t = 10 to 12 is within 0.95 to 1.35 (published 1.08 to 1.09: Johnson & Patel 1999, Fornberg 1988; a staircase at 16 cells across reads high, as the cylinder’s does). Measured 2026-11-20: 1.253 (the runner’s run to t = 20: 1.158 over t = 15 to 20)',
     async run(gpu: Gpu) {
       const spec = {
         format: 'shaderous-setup', version: 1, id: 'tunnel-sphere', name: 'Sphere in a tunnel',

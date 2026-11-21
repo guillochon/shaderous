@@ -3579,9 +3579,16 @@ to the work the wall did (the force diagnostic's $`-\sum \mathbf F\cdot\mathbf V
 to 0.06%. The staircase jumps a cell at a time, which leaves a thin band of lower density in
 the cells a body uncovers and a bump ahead of it (plans/wind-tunnel.md 6.3).
 
-Not yet: moving bodies on blocks, moving mesh bodies (their distance field on the GPU), the
-wall's velocity in the implicit pressure's source, partly filled cells (plans/wind-tunnel.md
-section 8).
+With implicit pressure the wall's velocity enters the solve's source: a face onto a moving
+body's cell carries the cell's density times the wall's normal velocity, so that the solve
+sees the body push (`pressure/source.wgsl`); no mass crosses the face in the correction.
+
+Not yet good enough: test `galilean-drag` (a cylinder moving through still liquid against
+liquid streaming past it at rest) gives a drag 58% higher for the moving body with the explicit
+scheme, and nonsense with implicit pressure; the force history of a moving body is dominated by
+the jumps of its cells. The force diagnostic also leaves out the momentum the exchange hands
+over. Not built: moving bodies on blocks, moving mesh bodies (their distance field on the GPU),
+partly filled cells (plans/wind-tunnel.md section 8).
 
 ### Bodies from mesh files
 

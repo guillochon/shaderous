@@ -2654,7 +2654,7 @@
        "inlet": {
         "type": "integer",
         "title": "Inlet cells",
-        "description": "Finest cells held at the stream’s state at the upstream face",
+        "description": "Cells held at the stream’s state at the upstream face: finest cells on a uniform grid, the coarsest level’s on blocks",
         "minimum": 1,
         "maximum": 16
        },

@@ -175,7 +175,7 @@ faces, the gas and the background:
 { "kind": "tunnel", "speed": 1, "axis": "x", "mach": 0.1, "sides": "slip", "floor": "none", "sponge": 0.15 }
 ```
 
-- The stream flows along `axis` toward + at `speed`. The cells within `inlet` finest cells
+- The stream flows along `axis` toward + at `speed`. The cells within `inlet` cells (of the coarsest level, on blocks)
   (default 2) of the upstream face are held at the stream's state; the downstream face is open,
   with a sponge over its last `sponge` of the box's length (default 0.1; 0 for none): a damping
   zone that pulls the gas back to the stream's state, its rate rising as the square of the
@@ -655,7 +655,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `sides` | Sides and roof | `slip`, `open`, `periodic`. Default `slip` | Slip: walls the gas slides along. Open: faces it may leave by. Periodic: the box repeats sideways |
 | `floor` | Floor | `none`, `slip`, `fixed`, `moving`. Default `none` | The lower face along the box’s up axis (z in 3D, y in 2D): as the sides, a slip wall, a no-slip wall, or a wall moving with the stream (a car on a road) |
 | `sponge` | Sponge | a number, 0 to 0.5. Default `0.1` | The outlet’s damping zone, as a fraction of the box’s length: it pulls the gas back to the stream so that the wake leaves without reflecting. 0 for none |
-| `inlet` | Inlet cells | a whole number, 1 to 16. Default `2` | Finest cells held at the stream’s state at the upstream face |
+| `inlet` | Inlet cells | a whole number, 1 to 16. Default `2` | Cells held at the stream’s state at the upstream face: finest cells on a uniform grid, the coarsest level’s on blocks |
 | `rotor` | Rotor frame | a number. Default `0` | An angular velocity about the stream’s axis through the box’s center: the run is in the frame that turns at it, so that a rotor centered there is at rest (the stream is U - Omega x r, the corners of the box held at it). Torque and thrust then come steady. 0: none. 3D only |
 | `area` | Reference area | a number, at least 0 | The area the force coefficients are over (a length in 2D). Empty: the first obstacle’s shadow along the stream |
 | `length` | Reference length | a number, at least 0 | The length the moment coefficients are over. Empty: the square root of the area (the area itself in 2D) |

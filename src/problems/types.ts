@@ -436,7 +436,8 @@ export interface Problem {
   /** The setup document this problem was compiled from (setup/compile.ts), if it was. */
   setup?: SetupSpec;
   /** Returns the initial primitive state as a function of position. */
-  init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>): (x: number, y: number, z: number) => Prim;
+  /** `levels`: on blocks, the refinement levels above the coarsest (n is the finest grid's): what a painter that must reach the coarsest cells (a tunnel's inlet) needs */
+  init(n: number, eos: Eos, ndim: 2 | 3, params: Record<string, number>, levels?: number): (x: number, y: number, z: number) => Prim;
 }
 
 /**

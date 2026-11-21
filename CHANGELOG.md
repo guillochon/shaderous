@@ -9,6 +9,18 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Added
 
+- **Wind tunnels and bodies from mesh files** (plans/wind-tunnel.md). Obstacles may be read from
+  STL, OBJ, PLY, glTF and GLB files (a `mesh` shape; airfoil `.dat` and SVG outlines for 2D),
+  given beside a setup document, through the MCP server's `dir`, by URL, or dropped on the Setup
+  dialog, which keeps them in the browser. The diagnostics report the force and torque the gas
+  exerts on each obstacle, exactly the momentum its walls took (`bodies`; test `force-balance`
+  to 5e-6), with drag and lift coefficients in a `tunnel`: a part that sets an inlet, an outlet
+  with a sponge, the sides and floor, and the gas (the liquid with implicit pressure below Mach
+  0.3). A rotor can be run in its own frame (`rotor`), now that the liquid's implicit pressure
+  runs in a rotating frame. Spheres and boxes can move on the uniform grid (`motion`: spin,
+  slide, swing, path), pushing the gas with mass conserved. A preset, `wind-tunnel`, puts a
+  car-like body in a tunnel. The cylinder at Reynolds number 100 gives a drag coefficient of
+  1.38 extrapolated (published 1.32 to 1.35, with 3% blockage).
 - **Stars in binaries, and Roche lobe overflow.** A `binary` orbit may now hold stars as well as
   point masses: a star and a point mass, or two stars. On a circular orbit its stars start
   tidally locked and settled in the Roche potential (the grid's, the point masses' and the

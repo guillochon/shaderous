@@ -116,9 +116,12 @@ export function expandTunnel(spec: SetupSpec): SetupSpec {
 }
 
 /** The inlet: cells within `inlet` cells of the upstream face, held at the stream's state. */
-export function tunnelPainter(t: TunnelPart, ctx: { box: number; n: number; ndim: 2 | 3 }): (w: Prim, x: number, y: number, z: number) => Prim {
+export function tunnelPainter(t: TunnelPart, ctx: { box: number; n: number; ndim: 2 | 3; levels?: number }): (w: Prim, x: number, y: number, z: number) => Prim {
   const k = tunnelParams(t, ctx.ndim);
-  const edge = -ctx.box / 2 + (k.inlet * ctx.box) / ctx.n;
+  // On blocks the upstream face is at the coarsest level: the inlet is `inlet` of its cells deep,
+  // or a coarse cell's center would lie beyond it and none would be held.
+  const cell = (ctx.box / ctx.n) * 2 ** (ctx.levels ?? 0);
+  const edge = -ctx.box / 2 + k.inlet * cell;
   if (k.rotor === 0) {
     const v = streamAt(k, 0, 0, 0);
     return (w, x, y, z) => {
@@ -129,7 +132,7 @@ export function tunnelPainter(t: TunnelPart, ctx: { box: number; n: number; ndim
   // A rotor's frame: every cell starts at U - Omega x r, and those outside the cylinder of the
   // box's half-width less the inlet's cells, as well as the inlet's, keep that state: the box
   // is a cylinder's worth (its corners would otherwise move at Omega r across open faces).
-  const R = ctx.box / 2 - (k.inlet * ctx.box) / ctx.n;
+  const R = ctx.box / 2 - k.inlet * cell;
   const [u, v2] = [(k.a + 1) % 3, (k.a + 2) % 3];
   return (w, x, y, z) => {
     if (w.solid) return w;

@@ -1,8 +1,12 @@
 # Plan: wind tunnel runs of arbitrary objects
 
-Status (2026-11-20): stage 0's three checks done (2.1); the rest in progress. Published values and citations below are from
-memory; each is checked against its paper before it becomes a test threshold. Cost figures in
-section 9 are estimates, not measurements.
+Status (2026-11-20): stages 0 to 2 built (first release: static bodies from mesh files in a
+tunnel, with forces), stage 3 built (a rotor's frame), stage 4 begun (moving spheres and boxes
+on the uniform grid; its Galilean test fails, which settles decision 13 against the staircase
+for moving bodies). Each section has an "As built" note with the measurements. The values and
+citations below were from memory when written; 2.2 says which were checked and how (all eight
+citations of section 15 were confirmed against Crossref). Cost figures in section 9 are
+estimates, not measurements.
 
 Goal: load a 3D model file, put it in a stream of air, and get the flow, the drag, the lift
 and the torque. Bodies may have parts that move: a turbine rotor, a propeller, a flap, a
@@ -192,12 +196,31 @@ cylinder 8 diameters from the inlet; implicit, uniform grid), statistics over t 
 |---|---|---|---|
 | 16 | 1.548 | 0.48 (0.34) | 0.168 |
 | 32 | 1.463 | 0.43 (0.31) | 0.171 |
+| 64 (2 levels of blocks) | 1.435 | 0.40 (0.28) | 0.170 |
 
-The drag falls at first order, as a staircase's should: extrapolated, 2 x 1.463 - 1.548 =
-1.378, within the published 1.32 to 1.35 plus the blockage's few percent. The Strouhal number
-is 2 to 4% high; the lift amplitude 30% high (not understood; the published amplitude is itself
-only quoted, and lift is more sensitive than drag to the wall's shape). The 64-cell run and the
-sphere's are in 4.5.
+The drag falls by 0.085 and then 0.029: faster than first order at first, then slower. A
+first-order extrapolation from 16 and 32 gives 1.378 (what test `cylinder-forces` checks,
+within 1.30 to 1.45); from 32 and 64, 1.406. The drag is settling near 1.41, 4 to 6% above the
+published 1.32 to 1.35, of which the 3% blockage accounts for part. The Strouhal number is 2 to
+4% high; the lift amplitude 20 to 30% high (not understood; the published amplitude is itself
+only quoted, and lift is more sensitive than drag to the wall's shape). 
+
+**The sphere in the tunnel** (box 4 = 16 diameters, slip sides: 1.2% blockage; the sphere 4
+diameters from the inlet; implicit; to t = 20, statistics over t = 15 to 20, where it is
+steady):
+
+| Cells across | Grid | Cd | Without viscosity, t = 4 to 6 |
+|---|---|---|---|
+| 8 | uniform 128³ | 1.210 | |
+| 16 | 256, 2 levels | 1.158 | 0.44 |
+| 32 | 512, 3 levels | 1.163 | 0.50 |
+
+6 to 7% above the published 1.08 to 1.09, and not falling from 16 to 32. Without viscosity the
+sphere's drag should be nil until the flow separates; the staircase gives 0.44 and 0.50, and
+does not fall with the cell size (the scheme's own dissipation separates the flow from a
+stepped surface). This is the number section 8.1 is judged against. (`sphere-drag`, the GPU
+test, checks 0.95 to 1.35 at 16 cells across over t = 10 to 12: 1.253.) The recirculation's
+length was not measured.
 
 ## 3. Stage 1: mesh files
 
@@ -428,6 +451,12 @@ damping zone with a target written for it. Departures:
   along the box's up axis. The blockage warning is in the check.
 - Refinement along the body's surface is the existing outline refinement; the `wake` option of
   4.3 (a cylinder of intermediate level behind the body) is not built.
+- **The inlet on blocks** (found by the measurements): held cells were those within `inlet`
+  finest cells of the upstream face, but that face is at the coarsest level, whose cell centers
+  lie further in: on blocks no cell was held, and the stream died away (the cylinder's drag fell
+  from 1.0 to 0.33 over t = 80 at 64 cells across). The painters now get the block grid's
+  levels (`Problem.init`'s `levels`, `PaintContext.levels`), and the inlet is `inlet` cells of
+  the coarsest level deep. The block runs of 2.2 and 4.5 were redone after the fix.
 - The preset `wind-tunnel` uses a body made in code, `builtin:ahmed` (the Ahmed body's nominal
   proportions: `geometry/builtin.ts`), rather than a shipped file: nothing to fetch, public by
   construction. At 256 finest cells with 2 levels it gives C_d near 0.9 and C_l 0.34 early on (a
@@ -585,12 +614,23 @@ uniform grid, then on blocks; a spinning-rotor preset runs in the page.
 - **Test `piston`** (GPU, 2D 64², a slab at Mach 0.085 through a closed box of ideal gas for
   t = 2): mass to the bit, the compressed gas's mean pressure 1.443 against the adiabat's
   1.456, the energy gained 0.18745 against the work done 0.18735.
+- **Test `galilean-drag`** (GPU, built, **fails**): a cylinder 16 cells across in a periodic box
+  of liquid (Mach 0.1, Reynolds number 100), at rest in a stream at U = 1 against sliding at -1
+  through liquid at rest, drag averaged over t = 1 to 3. Explicit: C_d 1.32 at rest, 2.08
+  moving (58% high), and the moving body's force history has an rms difference from the other
+  of 11 times the mean: each cell the body crosses is a piston stroke. Implicit pressure: C_d
+  1.35 at rest, 16 moving without the wall's velocity in the solve's source, and -4.0 with it
+  (`pressure/source.wgsl`: a face onto a moving body's cell takes the cell's density times the
+  wall's velocity; added, kept). Two causes, not yet separated: the jumps themselves, and the
+  diagnostic, which counts the wall faces' fluxes but not the momentum the exchange hands over
+  when a cell changes kind (an uncovered cell's m v_s comes from the body). **Decision 13,
+  "staircase noise acceptable for rotors": no.** Next: count the exchange's momentum in the
+  force, then section 8.1's cheap form (the swept volume as a smooth source in the solve, open
+  fractions in the pressure's coefficients), before rotors with moving cells, as 6.3 foresaw.
 - **Not built**: blocks (6.4; refused there), moving mesh bodies (they need the distance field
-  on the GPU), the wall's velocity in the implicit pressure's source (the push reaches the
-  liquid through the cells that change kind and the solve's compressibility; not measured),
-  the work tally in the diagnostics (the test sums it from the force), tests `galilean-drag`,
-  `oscillating-cylinder`, `spinning-cylinder` and `rotor-two-frames`, and a spinning-rotor
-  preset. Decision 13's "staircase noise acceptable for rotors" is therefore not settled.
+  on the GPU), the exchange's momentum in the force diagnostic, the work tally in the
+  diagnostics (the tests sum it from the force), tests `oscillating-cylinder`,
+  `spinning-cylinder` and `rotor-two-frames`, and a spinning-rotor preset.
 
 ## 7. Stage 5: bodies the flow moves
 
@@ -806,8 +846,9 @@ beside its measured value with the difference stated.
   review of the methods of sections 6 and 8.
 - Kwatra et al. (2009): as cited in `plans/incompressible.md`.
 
-The citations above are from memory and have not been checked against the publishers' records;
-check each before any of this reaches `numerics.md` or the paper.
+The citations above were written from memory and then checked against Crossref and the papers'
+own pages (2026-11-20): all correct. Ng, Min & Gibou's title has an en dash ("fluid–solid");
+Mittal & Iaccarino's DOI is 10.1146/annurev.fluid.37.061903.175743.
 
 [Jacobson2013]: https://doi.org/10.1145/2461912.2461916
 [Barill2018]: https://doi.org/10.1145/3197517.3201337

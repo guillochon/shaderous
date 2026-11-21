@@ -11,6 +11,8 @@ export interface PaintContext {
   eos: Eos;
   /** mass fractions in the run's species order, from fractions by name */
   fractions(X: Record<string, number>): number[];
+  /** on blocks, the levels above the coarsest (0 on a uniform grid) */
+  levels?: number;
 }
 
 type Inside = (x: number, y: number, z: number) => boolean;
