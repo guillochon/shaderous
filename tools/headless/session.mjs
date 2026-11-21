@@ -11,7 +11,8 @@ import { fileURLToPath } from 'node:url';
 import { closeBrowser } from './close.mjs';
 
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const DIST = path.join(REPO, 'dist');
+// SHADEROUS_DIST: another built page (a frozen build, kept while the source changes under a long batch).
+const DIST = path.resolve(process.env.SHADEROUS_DIST ?? path.join(REPO, 'dist'));
 
 /**
  * What serves the page when no URL is given: 'vite' (the source, in a checkout) or 'dist' (the
