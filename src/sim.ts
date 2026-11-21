@@ -664,8 +664,6 @@ export function implicitUnsupported(c: SimConfig): string | null {
   // equation of state, the pressure passes select each cell's composition from the step's start.
   // Burning would have to know it through the solve as well.)
   if (c.problem.burn) return 'burning is not available with it';
-  // (Its rates and the pressure's gradient take the same binding, and its transport the species' passes.)
-  if (radiationOn(c)) return 'radiation transport is not available with it';
   // (A liquid's damping zone, a wind tunnel's sponge, relaxes the advected state before the solve.)
   if (c.cooling !== 'off' || (c.problem.damping && c.eos !== 'liquid')) return 'cooling, and damping zones for a gas, are not available with it';
   return null;
@@ -1897,7 +1895,7 @@ export class Sim implements Simulation {
       [this.pPsSource, this.pPsCorrect, this.pPsInit] = await Promise.all([
         computePipeline(d, assemble(gas ? 'pressure/source_gas.wgsl' : 'pressure/source.wgsl', slots), 'pressure source'),
         // (With species, the correction leaves the step's whole mass fluxes for them: pressure/mf_on.wgsl.)
-        computePipeline(d, assemble(gas ? 'pressure/correct_gas.wgsl' : 'pressure/correct.wgsl', { ...slots, psplit_mf: this.speciesGroups > 0 ? 'pressure/mf_on.wgsl' : 'pressure/mf_off.wgsl' }), 'pressure correct'),
+        computePipeline(d, assemble(gas ? 'pressure/correct_gas.wgsl' : 'pressure/correct.wgsl', { ...slots, psplit_mf: this.speciesGroups > 0 || radiationOn(c) ? 'pressure/mf_on.wgsl' : 'pressure/mf_off.wgsl' }), 'pressure correct'),
         computePipeline(d, assemble('pressure/init.wgsl', slots), 'pressure start'),
       ]);
       const prs = this.prs;
@@ -1928,7 +1926,7 @@ export class Sim implements Simulation {
           6: v(this.state[p][0]), 7: v(this.state[p][1]),
           10: v(this.pOld!), 11: v(this.pFull!),
           5: v(prs.rho0),
-          ...((this.speciesGroups > 0 ? { 13: this.massFlux! } : {}) as Record<number, Bindable>),
+          ...((this.speciesGroups > 0 || radiationOn(c) ? { 13: this.massFlux! } : {}) as Record<number, Bindable>),
           ...(this.walls?.correctBindings() ?? {}),
           ...((this.moving?.gf ? { 58: v(this.moving.gf) } : {}) as Record<number, Bindable>),
           ...((gas ? { 9: v(this.faceVel!), 12: v(this.gfield), 20: this.bh } : {}) as Record<number, Bindable>), ...k,
@@ -1978,8 +1976,9 @@ export class Sim implements Simulation {
             2: v(this.state[p][1]),
             5: v(this.gfield),
             6: this.redDt.first,
-            // (Or, with implicit pressure, the pressure whose gradient limits the step: the two are not combined.)
-            ...((this.rad ? { 30: v(this.rad.R[q]) } : this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
+            // (And with implicit pressure, the pressure whose gradient limits the step.)
+            ...((this.rad ? { 41: v(this.rad.R[q]) } : {}) as Record<number, GPUTextureView>),
+            ...((this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
             ...k,
           }),
         );

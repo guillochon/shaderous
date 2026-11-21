@@ -893,7 +893,7 @@ export class AmrSim implements Simulation {
       this.prs ??= await AmrPressure.create({
         device: d, params: this.params, clock: this.clock, bt: this.bt, listLeaf: this.listLeaf, listLevel: this.listLevel, levels: this.levels,
         state: this.state, prim: this.prim[0], prim2: this.prim[1], slots, walls: this.walls?.correctBindings(),
-        massFlux: this.speciesGroups > 0 && this.massFluxWindows ? this.massFluxWindows : undefined,
+        massFlux: this.recordsMassFlux && this.massFluxWindows ? this.massFluxWindows : undefined,
         gas: this.faceVel ? { faceLo: this.faceVel[0], faceHi: this.faceVel[1], lag: this.lagP!, gfield: this.gfield, bh: this.bh } : undefined,
         flat: (pass, count, reach) => this.flat(pass, count, reach),
         rootDims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0], dx0: this.dx0, lo: c.bcLo.map(kind), hi: c.bcHi.map(kind),
@@ -2386,8 +2386,9 @@ export class AmrSim implements Simulation {
       pass.setBindGroup(0, this.gUpdate[p]);
       this.interior(pass, this.nLeaf);
       this.encodeSpecies(pass, p);
-      // The radiation moves with the mass fluxes too (amr/rad_advect.wgsl).
-      this.rad?.encodeAdvect(pass, p, this.nLeaf);
+      // The radiation moves with the mass fluxes too (amr/rad_advect.wgsl); with implicit pressure,
+      // with the whole step's, after the correction.
+      if (!this.prs) this.rad?.encodeAdvect(pass, p, this.nLeaf);
       if (this.prs) {
         // Implicit pressure: the advected state's primitives, ghosts and all, then the equation,
         // the solve and the correction back into this parity (amr/pressure.ts).
@@ -2401,6 +2402,7 @@ export class AmrSim implements Simulation {
         }
         this.prs.encode(pass, p, this.nLevel, this.nLeaf, this.cfg.pressureCycles);
         this.encodeSpeciesMove(pass, p);
+        this.rad?.encodeAdvect(pass, p, this.nLeaf);
       }
       pass.end();
       if (this.prs) {

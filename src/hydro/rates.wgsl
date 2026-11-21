@@ -36,13 +36,18 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let u2 = textureLoad(U2, c, 0);
     comp_use(comp_tex(c));
     var w = prim_from_cons(textureLoad(U1, c, 0), u2);
-    // With radiation, its push in gas it is trapped in (radiation/rate_on.wgsl).
-    if (RAD_RATE) { w.w2.y = sqrt(w.w2.y * w.w2.y + rad_cs2(c, w.w1.x, u2.y)); }
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
     // (With implicit pressure the sound speed only sets a ceiling: P.ohm.y is one over the
     // acoustic steps a step may span, 0 for the explicit scheme. src/sim.ts packParams.)
     let snd = select(1.0, P.ohm.y, P.ohm.y > 0.0);
-    var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y * snd + diff_speed(w.w1.x, w.w2.w);
+    // With radiation, its push in gas it is trapped in (radiation/rate_on.wgsl): it acts in the
+    // sweeps, outside the implicit solve, so it limits the step whichever scheme the gas has.
+    // (Scaled by the ceiling like the sound speed, trapped radiation's push ran away: rad-implicit.)
+    var cr2 = 0.0;
+    if (RAD_RATE) { cr2 = rad_cs2(c, w.w1.x, u2.y); }
+    let signal = sqrt(w.w2.y * w.w2.y * snd * snd + cr2);
+    if (RAD_RATE) { w.w2.y = sqrt(w.w2.y * w.w2.y + cr2); }
+    var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * signal + diff_speed(w.w1.x, w.w2.w);
     // A spherical run: per axis over its own cell length (none along the azimuth).
     var acc = length(g_load(c));
     // With implicit pressure the sound speed does not limit the step, and gas at rest with a

@@ -109,8 +109,12 @@ fn main(
         // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
         // (With implicit pressure the sound speed only sets a ceiling: hydro/rates.wgsl.)
         let snd = select(1.0, P.ohm.y, P.ohm.y > 0.0);
-        if (RAD_RATE) { w.w2.y = sqrt(w.w2.y * w.w2.y + rad_cs2(c, abs(w.w1.x), u.b.y)); }
-        var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * w.w2.y * snd + diff_speed(abs(w.w1.x), w.w2.w);
+        // (The radiation's push acts outside the implicit solve: it limits the step at full weight.)
+        var cr2 = 0.0;
+        if (RAD_RATE) { cr2 = rad_cs2(c, abs(w.w1.x), u.b.y); }
+        let signal = sqrt(w.w2.y * w.w2.y * snd * snd + cr2);
+        if (RAD_RATE) { w.w2.y = sqrt(w.w2.y * w.w2.y + cr2); }
+        var rate = abs(w.w1.y) + abs(w.w1.z) + abs(w.w1.w) + P.geom.y * signal + diff_speed(abs(w.w1.x), w.w2.w);
         // A spherical run: per axis over its own cell length (hydro/rates.wgsl).
         var geo = 0.0;
         if (cylindrical()) {

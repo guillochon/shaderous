@@ -5,7 +5,8 @@
 // Requires the equation of state, comp and <opacity>.
 #include <opacity>
 
-@group(0) @binding(30) var RADR: texture_3d<f32>;   // radiation (E, F) as the step starts
+// (41: implicit pressure's lagged pressure takes 30, pressure/predict_on.wgsl, and the two combine.)
+@group(0) @binding(41) var RADR: texture_3d<f32>;   // radiation (E, F) as the step starts
 
 const RAD_RATE = true;
 fn rad_cs2(c: vec3<i32>, rho: f32, eint: f32) -> f32 {

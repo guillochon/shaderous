@@ -719,6 +719,87 @@ export const RAD_TESTS: TestDef[] = [
     },
   },
   {
+    id: 'rad-implicit',
+    name: 'Radiation with implicit pressure: equilibrium, and trapped radiation carried at Mach 0.08 (2D, uniform and blocks)',
+    criterion: 'With implicit pressure for the gas (the correction leaves the whole step’s mass fluxes, which carry the radiation): gas and radiation relax to their equilibrium temperature to 1e-4 with E_gas + E kept to 1e-5 (rad-equilibrium’s opaque box, r = 1); the trapped pulse of rad-advect carried at a tenth of its speed (Mach 0.08) to t = 1 keeps with the gas (its centroid within 0.01 of the box of where the gas took it at 128 cells, 0.005 at 256) and E_gas + E / r to 1e-5, and its width to 7% at 256 cells, the error at least 40% smaller than at 128 (the implicit step narrows the pulse at first order in dx: 25%, 12%, 5.5% at 64, 128, 256 cells; the explicit scheme 2% at 128); the radiation’s push limits the step at full weight, as it acts outside the implicit solve; and on blocks that re-mesh as it moves (256 cells, one level), its centroid within 0.004, its width to 5%, E_gas + E / r to 1e-5',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const IMPLICIT = { pressure: 'implicit' as const, acousticCfl: 1e6 };
+      const a = 1;
+      const exact = equilibriumT(a, 1);
+      const box = radGas({
+        eosParams: { gamma: 5 / 3, arad: a }, radChat: 100, opacityParams: { absorption: 10, scattering: 0 },
+        init: () => () => ({ rho: 1, vx: 0, vy: 0, vz: 0, p: 2 / 3, s: 0, erad: 0, frad: [0, 0, 0] }),
+      });
+      await withSim(gpu, box, 16, { ...D2, radLocalC: true, ...IMPLICIT }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const e0 = d0.eTot + d0.radiation!.eRadReduced;
+        await runTo(sim, 0.2);
+        const d1 = await sim.diagnostics();
+        const c = await cells(sim);
+        m.equilibrium_T_error = Math.abs((c.u2[1] * (2 / 3)) / c.u1[0] - exact) / exact;
+        m.equilibrium_energy_drift = Math.abs(d1.eTot + d1.radiation!.eRadReduced - e0) / e0;
+      });
+      const v = 0.1;
+      const pulse = (tEnd: number) => radGas({
+        radC: 100, radChat: 1, opacityParams: { absorption: 1e6, scattering: 0 }, tEnd,
+        init: () => (x) => {
+          const T = 1 + 0.3 * Math.exp(-((x / 0.08) ** 2));
+          const rho = (2 - T ** 4 / 3) / T;
+          return { rho, vx: v, vy: 0, vz: 0, p: rho * T, s: 0 };
+        },
+      });
+      await withSim(gpu, pulse(1), 128, { ...D2, ...IMPLICIT }, async (sim) => {
+        const d0 = await sim.diagnostics();
+        const r0 = moments((await cells(sim)).R, sim.nx, sim.ny, sim.dx, 1);
+        await runTo(sim, 1);
+        const d1 = await sim.diagnostics();
+        const r1 = moments((await cells(sim)).R, sim.nx, sim.ny, sim.dx, 1);
+        m.uniform_moved = r1.mean - r0.mean;
+        m.uniform_width_ratio = Math.sqrt(r1.variance / r0.variance);
+        m.uniform_energy_drift = (d1.eTot + d1.radiation!.eRadReduced) / (d0.eTot + d0.radiation!.eRadReduced) - 1;
+        m.uniform_steps = d1.steps;
+      });
+      // At twice the resolution: the width's error of the implicit step is first order in dx.
+      await withSim(gpu, pulse(1), 256, { ...D2, ...IMPLICIT }, async (sim) => {
+        const r0 = moments((await cells(sim)).R, sim.nx, sim.ny, sim.dx, 1);
+        await runTo(sim, 1);
+        const r1 = moments((await cells(sim)).R, sim.nx, sim.ny, sim.dx, 1);
+        m.fine_moved = r1.mean - r0.mean;
+        m.fine_width_ratio = Math.sqrt(r1.variance / r0.variance);
+      });
+      // The explicit scheme on the same pulse (128 cells), for scale: not judged.
+      await withSim(gpu, pulse(1), 128, D2, async (sim) => {
+        const r0 = moments((await cells(sim)).R, sim.nx, sim.ny, sim.dx, 1);
+        await runTo(sim, 1);
+        const r1 = moments((await cells(sim)).R, sim.nx, sim.ny, sim.dx, 1);
+        m.explicit_moved = r1.mean - r0.mean;
+        m.explicit_width_ratio = Math.sqrt(r1.variance / r0.variance);
+        m.explicit_steps = (await sim.diagnostics()).steps;
+      });
+      await withAmr(gpu, pulse(1), 256, { ...D2, amrLevels: 1, refineHi: 0.1, refineLo: 0.03, ...IMPLICIT }, async (sim) => {
+        const total = (d: Awaited<ReturnType<AmrSim['diagnostics']>>) => d.eTot + d.radiation!.eRadReduced;
+        const d0 = await sim.diagnostics();
+        const r0 = await radMoments(sim, 1);
+        await sim.runToEnd();
+        const d = await sim.diagnostics();
+        const r1 = await radMoments(sim, 1);
+        m.blocks_moved = r1.mean[0] - r0.mean[0];
+        m.blocks_width_ratio = Math.sqrt(r1.variance[0] / r0.variance[0]);
+        m.blocks_energy_drift = total(d) / total(d0) - 1;
+        m.blocks_regrids = sim.regrids;
+        m.blocks_steps = d.steps;
+      });
+      m.expected = v * 1;
+      const pass =
+        m.equilibrium_T_error < 1e-4 && m.equilibrium_energy_drift < 1e-5 &&
+        Math.abs(m.uniform_moved - m.expected) < 0.01 && Math.abs(m.fine_moved - m.expected) < 0.005 && Math.abs(m.uniform_energy_drift) < 1e-5 &&
+        Math.abs(m.fine_width_ratio - 1) < 0.07 && Math.abs(m.fine_width_ratio - 1) < 0.6 * Math.abs(m.uniform_width_ratio - 1) &&
+        Math.abs(m.blocks_moved - m.expected) < 0.004 && Math.abs(m.blocks_width_ratio - 1) < 0.05 && Math.abs(m.blocks_energy_drift) < 1e-5 && m.blocks_regrids >= 2;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'rad-marshak',
     name: 'Radiation: Su & Olson non-equilibrium Marshak wave (2D, 128 cells across 16 mean free paths)',
     criterion: 'Radiation falls in through a held column (Marshak boundary) on a cold material of heat capacity 4 a T^3. The GPU matches the float64 reference of the same scheme to 2e-3 in E and a T^4 at tau = 1, 3.16 and 10; and both match the float64 non-equilibrium diffusion solution with the Marshak condition to 0.03 at tau = 3.16 (x <= 2) and tau = 10 (x <= 5), beyond half a mean free path of the boundary, in units of the incident energy',

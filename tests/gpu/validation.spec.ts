@@ -15,7 +15,7 @@ const TESTS = [
   'aneos-eos', 'planet-rest', 'giant-impact',
   'psplit-solver', 'psplit-gresho', 'psplit-2d-3d', 'psplit-taylor-green', 'psplit-cavity', 'psplit-obstacle', 'psplit-balance', 'psplit-acoustic', 'psplit-amr-unrefined', 'psplit-amr-gresho', 'psplit-amr-regrid', 'psplit-amr-3d', 'psplit-amr-shear', 'psplit-gas-gresho', 'psplit-amr-gas', 'psplit-sod', 'psplit-amr-sod', 'psplit-moving-jump', 'psplit-amr-balance', 'psplit-amr-field', 'psplit-species', 'psplit-species-eos', 'psplit-gas-balance', 'psplit-gas-polytrope', 'psplit-gas-star-vacuum', 'psplit-gas-star-moving', 'psplit-amr-polytrope', 'psplit-masses', 'psplit-amr-wake',
   'thin-plate-blocks', 'turbine-blocks', 'force-balance', 'force-balance-moving', 'cylinder-forces', 'sphere-drag', 'piston', 'galilean-drag', 'mesh-vs-shape', 'rotor-frame',
-  'rad-restart', 'rad-off', 'rad-equilibrium', 'rad-f32', 'rad-streaming', 'rad-diffusion', 'rad-shadow', 'rad-advect', 'rad-marshak', 'rad-star', 'rad-shock', 'rad-cooling-sphere', 'rad-blocks-diffusion', 'rad-blocks-advect', 'rad-blocks-cooling-sphere', 'rad-blocks-star', 'rad-blocks-restart',
+  'rad-restart', 'rad-off', 'rad-equilibrium', 'rad-f32', 'rad-streaming', 'rad-diffusion', 'rad-shadow', 'rad-advect', 'rad-implicit', 'rad-marshak', 'rad-star', 'rad-shock', 'rad-cooling-sphere', 'rad-blocks-diffusion', 'rad-blocks-advect', 'rad-blocks-cooling-sphere', 'rad-blocks-star', 'rad-blocks-restart',
 ];
 
 // One worker (playwright.config.ts), in order; a failure does not skip the tests after it.
