@@ -9,7 +9,7 @@ const OMEGA = 1;
 const Q = 1.5;
 
 /** A 2D shearing sheet (Keplerian, Omega = 1, box 1) whose state is the background flow v_y = -q Omega x plus `extra`. */
-function sheet(tEnd: number, extra: (x: number, y: number, z: number) => Partial<Prim> = () => ({}), over: Partial<Problem> = {}): Problem {
+export function sheet(tEnd: number, extra: (x: number, y: number, z: number) => Partial<Prim> = () => ({}), over: Partial<Problem> = {}): Problem {
   return {
     id: 'shearing-sheet', label: 'Shearing sheet', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
     bcLo: all(PERIODIC), bcHi: all(PERIODIC), gravity: 'off', G: 0, box: 1, tEnd, supports2d: true,

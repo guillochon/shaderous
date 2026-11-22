@@ -178,10 +178,23 @@ Each pair has a ping and a pong copy; a step reads one and writes the other. Oth
 - **Implicit pressure:** per multigrid level, the pressure, right-hand side, residual and
   coefficient textures of `pressure/multigrid.ts`, beside gravity's.
 
-On the uniform grid there are **no primitive-variable textures**. The predictor and the update
-convert the conserved state as they load it. The flux update is bound by texture fetches: with
-all of its arithmetic removed it still takes 85% as long. A pass that only rewrites the state in
-another form therefore costs more than repeating the conversion.
+By default the uniform grid has **no primitive-variable textures**: the predictor and the update
+convert the conserved state as they load it, about twenty times a cell in a 3D step. Where memory
+bandwidth is scarce this is the cheaper choice: on the GPU where it was measured, the flux update
+with all of its arithmetic removed still took 85% as long, so a pass that only rewrites the state
+in another form cost more than repeating the conversion. On data-center GPUs (an A100) the update
+is limited by arithmetic instead: doubling its texture loads costs 4%, a cheaper limiter saves
+17%. And an equation of state that solves for its temperature or reads a table makes each
+conversion expensive. **Stored primitives** (`primStored` in `sim.ts`, the setup key
+`physics.storedPrims`) therefore convert each cell once a step, in the rates pass, into two
+textures that `load_q` reads (`hydro/prim_load_on.wgsl`, `hydro/prim_store_on.wgsl`). The values
+are the conversion's own, so results do not change (bit for bit with the ideal and degenerate
+gases; to the temperature solve's round-off with Helmholtz, which compiles a little differently
+in each pass). They cost 32 bytes per cell. On by default for every equation of state but the
+ideal gas, the barotropic gas and the liquid: on an A100 a 3D white dwarf's step is 2.8 to 3.0
+times faster with Helmholtz and 19 to 22% with the degenerate gas, while the ideal gas gains 1 to
+2% there and loses 3 to 5% on an RTX 3080. (The adaptive mesh stores its primitives anyway,
+ghosts included: `amr/assemble.wgsl`.)
 
 ## Anatomy of a uniform-grid step
 
@@ -189,7 +202,7 @@ another form therefore costs more than repeating the conversion.
 
 | Pass | Shader | Work |
 |---|---|---|
-| 1. Rates | `hydro/rates.wgsl` | Reads the state once and writes only the first stage of the timestep reduction: max signal rate and max $`\lvert g\rvert`$ per $`4^3`$ block, folded in workgroup-shared atomics. |
+| 1. Rates | `hydro/rates.wgsl` | Reads the state once and writes the first stage of the timestep reduction: max signal rate and max $`\lvert g\rvert`$ per $`4^3`$ block, folded in workgroup-shared atomics. With stored primitives it also writes each cell's primitives for the predictor and the update. |
 | 2. Clock | `hydro/clock.wgsl` + `gpu/reduce.wgsl` | Finishes the reduction, applies the point-mass and output limits, and writes $`\Delta t`$ and the time to a small buffer that later passes read. |
 | 3. Predictor | `hydro/predictor.wgsl` | Limited slopes, the half-step primitive state, shock and first-order flags. |
 | 4. Update | `hydro/update.wgsl` | Face states, Riemann solves on all $`2d`$ faces, diffusion fluxes, the conservative update, the first half kick, cooling, dual-energy sync, floors. |
@@ -626,8 +639,10 @@ held bit for bit to the object it replaced before those objects were retired.
 
 ## Performance notes
 
-- The flux update is bound by texture fetches, not arithmetic. This is why the uniform grid
-  stores no primitives and why a slope-storage pass was never added.
+- Where memory bandwidth is scarce (the GPU of the measurement above) the flux update is bound
+  by texture fetches, not arithmetic. This is why the uniform grid stores no primitives by
+  default and why a slope-storage pass was never added. On an A100 it is bound by arithmetic,
+  which is what stored primitives and the Koren limiter's early return in smooth cells address.
 - Textures beat storage buffers for the stencil by about 1.4×.
 - Nearly all of the update's cost is face work (reconstruction and Riemann solves), which the
   gather form does twice per face. On the uniform grid the update therefore computes each face

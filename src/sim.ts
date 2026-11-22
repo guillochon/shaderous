@@ -108,6 +108,12 @@ export interface SimConfig {
    * passes. Otherwise such stretches of a run are stepped with one timestep (tests set this).
    */
   timeBinsAlways: boolean;
+  /**
+   * Uniform grid: convert each cell to primitives once a step and store them
+   * (hydro/prim_load_on.wgsl), instead of converting at every load. Unset: on where the equation
+   * of state is costly to convert (primStored).
+   */
+  storedPrims?: boolean;
   /** Optically thin cooling and heating (cooling/*.wgsl); needs an equation of state with an energy. */
   cooling: CoolingKind;
   coolParams: CoolingParams;
@@ -756,6 +762,27 @@ export function cosmologyOf(c: SimConfig): Cosmology | null {
 }
 
 /**
+ * Equations of state that iterate, solve or read a table to convert the conserved state, so
+ * that converting each cell once a step (stored primitives) saves much more arithmetic than its
+ * texture traffic costs. Measured on an A100: a 3D white dwarf's step 2.8 to 3.0 times faster
+ * with Helmholtz and 19 to 22 percent with the degenerate gas; with the ideal gas 1 to 2
+ * percent, and 3 to 5 percent slower on an RTX 3080, so the closed-form ones are left out.
+ */
+const COSTLY_EOS: readonly EosKind[] = ['gas_radiation', 'degenerate', 'ionizing', 'helmholtz', 'hhe', 'aneos'];
+
+/**
+ * Whether a uniform-grid run stores its primitives once a step (hydro/prim_load_on.wgsl):
+ * SimConfig.storedPrims, or by default where the equation of state is costly. Never on blocks
+ * (they store theirs anyway, amr/assemble.wgsl), with a field (the MHD passes have their own
+ * loads) or in comoving coordinates (the scale factor moves on between the rates pass, which
+ * stores them, and the predictor).
+ */
+export function primStored(c: SimConfig): boolean {
+  if (c.amrLevels > 0 || c.problem.mhd || cosmologyOf(c)) return false;
+  return c.storedPrims ?? COSTLY_EOS.includes(c.eos);
+}
+
+/**
  * Why a run in comoving coordinates cannot go as configured, or null. The first version is a
  * periodic box of ideal gas, with or without self-gravity, on a uniform grid or on blocks that
  * share one timestep (docs/numerics.md section 22).
@@ -890,6 +917,8 @@ export function hydroSlots(c: SimConfig): Record<string, string> {
     moving: movingFlags(c.amrLevels > 0 ? [] : (c.problem.moving ?? []), movingFractions(c)),
     // Partly filled cells (hydro/cut.ts), on the uniform grid.
     cut: cutSlot(cutOn(c)),
+    // Stored primitives on the uniform grid (primStored): the rates pass writes them, load_q reads them.
+    ...(primStored(c) ? { prim_load: 'hydro/prim_load_on.wgsl', prim_store: 'hydro/prim_store_on.wgsl' } : {}),
   };
 }
 
@@ -1583,6 +1612,11 @@ export class Sim implements Simulation {
   state: GPUTexture[][] = [];
   /** half-step predicted primitives and per-cell flags (hydro/predict.wgsl) */
   pred: GPUTexture[] = [];
+  /**
+   * Stored primitives (primStored, hydro/prim_load_on.wgsl): what load_q returns for each cell of
+   * the current state, written by the rates pass for the predictor and the update. Empty when off.
+   */
+  prim: GPUTexture[] = [];
   /** Burning: each cell's heating rate over the last step (r32float; one texel without burning). */
   heat!: GPUTexture;
   /** gravitational acceleration and half-step potential (gravity/field.wgsl) */
@@ -1891,6 +1925,11 @@ export class Sim implements Simulation {
    * density (4), the pressure and face velocities or momenta at the start of the step (16), the
    * solved pressure (4), and for a gas with an energy the face velocities the update kept (16).
    */
+  /** GPU bytes per cell of the stored primitives (two rgba32float textures), if the run has them. */
+  static primBytes(cfg: SimConfig): number {
+    return primStored(cfg) ? 32 : 0;
+  }
+
   static implicitBytes(cfg: SimConfig): number {
     if (!implicitPressure(cfg)) return 0;
     return 28 * (cfg.ndim === 3 ? 8 / 7 : 4 / 3) + 24 + (eosHasEnergy(cfg.eos) ? 16 : 0);
@@ -1908,7 +1947,7 @@ export class Sim implements Simulation {
     const why = refusal(cfg);
     if (why) throw new Error(why);
     const cells = gridDims(cfg).reduce((a, b) => a * b, 1);
-    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0) + Sim.implicitBytes(cfg) + (radiationOn(cfg) ? RadPasses.cellBytes : 0)));
+    noteAllocation(cells * (Sim.cellBytes(cfg.ndim) + (mhdOn(cfg) ? MhdPasses.cellBytes : 0) + Sim.implicitBytes(cfg) + Sim.primBytes(cfg) + (radiationOn(cfg) ? RadPasses.cellBytes : 0)));
     setLoadStage('Allocating the grid');
     const sim = new Sim(gpu, cfg);
     const d = sim.device;
@@ -2016,6 +2055,11 @@ export class Sim implements Simulation {
     return sim;
   }
 
+  /** The stored primitives (bindings 61 and 62 of the rates pass, the predictor and the update), if any. */
+  private get primViews(): Record<number, GPUTextureView> {
+    return this.prim.length ? { 61: this.prim[0].createView(), 62: this.prim[1].createView() } : {};
+  }
+
   /** The composition moments for a pass that reads them (binding 27), if they vary. */
   private get compIn(): Record<number, GPUTextureView> {
     return this.comp ? { 27: this.comp.createView() } : {};
@@ -2029,6 +2073,11 @@ export class Sim implements Simulation {
     if (cutOn(c)) {
       this.cut ??= new CutTextures(d, this.cutGeometry(), [this.nx, this.ny, this.nz]);
       this.cut.share();
+    }
+    // Stored primitives come and go with the equation of state (primStored).
+    if (primStored(c) !== this.prim.length > 0) {
+      for (const t of this.prim) t.destroy();
+      this.prim = primStored(c) ? ['W1', 'W2'].map((l) => tex3d(d, this.nx, 'rgba32float', l, this.nz, this.ny)) : [];
     }
     const slots = hydroSlots(c);
     const v = (t: GPUTexture) => t.createView();
@@ -2150,6 +2199,7 @@ export class Sim implements Simulation {
             2: v(this.state[p][1]),
             5: v(this.gfield),
             6: this.redDt.first,
+            ...this.primViews,
             // (And with implicit pressure, the pressure whose gradient limits the step.)
             ...((this.rad ? { 41: v(this.rad.R[q]) } : {}) as Record<number, GPUTextureView>),
             ...((this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
@@ -2167,6 +2217,7 @@ export class Sim implements Simulation {
           4: v(this.gfield),
           5: v(this.pred[0]),
           6: v(this.pred[1]),
+          ...this.primViews,
           ...((this.prs ? { 30: v(this.pLag!) } : {}) as Record<number, GPUTextureView>),
           ...k,
         }),
@@ -2183,6 +2234,7 @@ export class Sim implements Simulation {
           8: v(this.state[o][1]),
           9: v(this.pred[0]),
           10: v(this.pred[1]),
+          ...this.primViews,
           ...((this.faceVel && implicitPressure(c) && eosHasEnergy(c.eos) ? { 32: v(this.faceVel) } : {}) as Record<number, GPUTextureView>),
           ...(this.walls?.updateBindings() ?? {}),
           11: this.sources,
@@ -3264,7 +3316,7 @@ export class Sim implements Simulation {
     const group = pipe.groups({
       0: this.params, 1: this.clock, 2: v(this.state[p][0]), 3: v(this.state[p][1]),
       6: v(this.gfield), 20: this.bh,
-      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), 11: this.sources,
+      7: v(this.state[o][0]), 8: v(this.state[o][1]), 9: v(this.pred[0]), 10: v(this.pred[1]), ...this.primViews, 11: this.sources,
       ...((this.massFlux ? { 13: this.massFlux } : {}) as Record<number, GPUBuffer>),
       ...(this.debrisBuf?.bindings(this.bh) ?? {}),
       ...this.compIn,
@@ -3371,7 +3423,7 @@ export class Sim implements Simulation {
     this.settleEpoch++; // abandon a settling in progress: its textures are going
     for (const s of this.state) for (const t of s) t.destroy();
     this.burn?.destroy();
-    for (const t of [...this.pred, this.gfield, ...this.species]) t.destroy();
+    for (const t of [...this.pred, ...this.prim, this.gfield, ...this.species]) t.destroy();
     this.heat?.destroy();
     this.walls?.destroy();
     this.comp?.destroy();

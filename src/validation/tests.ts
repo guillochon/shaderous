@@ -3,7 +3,8 @@
 import { assemble } from '../gpu/shaders';
 import { netFeatures, netSlot, netStep, netWeights } from '../burn/network';
 import NET_CASES from '../burn/aprox13_net_cases.json';
-import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
+import { bindGroup, computePipeline, readTexture, type Gpu } from '../gpu/device';
+import { sheet as shearingSheet } from './shear';
 import { configFor, MAX_MASSES, PARAM_BYTES, Sim, type BrushOp, type Diagnostics, type RiemannKind, type SimConfig, type Simulation } from '../sim';
 import { AmrSim, type LeafCells } from '../amr/amr_sim';
 import { prepareEosTable } from '../eos/tables';
@@ -914,6 +915,67 @@ export const TESTS: TestDef[] = [
         });
       }
       return { pass: bad === 0, metrics };
+    },
+  },
+  {
+    id: 'stored-primitives',
+    name: 'Stored primitives',
+    criterion:
+      'A uniform grid reaches the same state after 30 steps with its primitives converted once a step and stored as with them converted at every load: bit-identical for the ideal gas (open and reflecting faces in 3D, periodic in 2D, a shearing box) and for the degenerate gas, within 1e-4 of the largest value with Helmholtz (its temperature solve compiles a little differently in each pass)',
+    async run(gpu) {
+      const cases: { id: string; problem: Problem; n: number; over: Partial<SimConfig>; tol: number }[] = [
+        { id: 'sedov', problem: sedov, n: 32, over: {}, tol: 0 },
+        { id: 'sedov_reflecting', problem: sedov, n: 32, over: { bcLo: all(REFLECT), bcHi: all(REFLECT) }, tol: 0 },
+        { id: 'kelvin_helmholtz_2d', problem: kelvinHelmholtz, n: 64, over: { ndim: 2 }, tol: 0 },
+        { id: 'shearing_sheet_2d', problem: shearingSheet(Infinity, (x, y) => ({ rho: 1 + 0.01 * Math.cos(2 * Math.PI * (x + y)) })), n: 64, over: { ndim: 2 }, tol: 0 },
+        { id: 'white_dwarf_degenerate', problem: whiteDwarfStar, n: 32, over: { eos: 'degenerate' }, tol: 0 },
+        { id: 'white_dwarf_helmholtz', problem: whiteDwarfStar, n: 32, over: { eos: 'helmholtz' }, tol: 1e-4 },
+      ];
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      for (const c of cases) {
+        const states: Float32Array[][] = [];
+        for (const stored of [false, true]) {
+          await withSim(gpu, c.problem, c.n, { tEnd: Infinity, ...c.over, storedPrims: stored }, async (sim) => {
+            // Exactly 30 steps: a star still settling takes none until it is done.
+            let done = 0;
+            while (done < 30) {
+              const enc = sim.device.createCommandEncoder();
+              const k = sim.encodeSteps(enc, 30 - done);
+              sim.device.queue.submit([enc.finish()]);
+              sim.submitted();
+              done += k;
+              if (k === 0) await (sim.stepsResume() ?? sim.device.queue.onSubmittedWorkDone());
+            }
+            // (The comparison means something only if the run with them stored has its textures.)
+            if (sim.prim.length !== (stored ? 2 : 0)) {
+              metrics[`${c.id}_textures_wrong`] = sim.prim.length;
+              pass = false;
+            }
+            const u = sim.state[sim.cur];
+            states.push(await Promise.all(u.map((t) => readTexture(sim.device, t, sim.nx, 4, sim.nz, sim.ny))));
+          });
+        }
+        let diff = 0;
+        let scale = 0;
+        let differ = 0;
+        let bad = 0;
+        for (let k = 0; k < 2; k++) {
+          for (let i = 0; i < states[0][k].length; i++) {
+            const a = states[0][k][i];
+            const b = states[1][k][i];
+            if (!Number.isFinite(b)) bad++;
+            if (a !== b) differ++;
+            diff = Math.max(diff, Math.abs(a - b));
+            scale = Math.max(scale, Math.abs(a));
+          }
+        }
+        const rel = diff / (scale || 1);
+        metrics[`${c.id}_values_differing`] = differ;
+        metrics[`${c.id}_max_relative_difference`] = rel;
+        if (bad > 0 || (c.tol === 0 ? differ > 0 : rel > c.tol)) pass = false;
+      }
+      return { pass, metrics };
     },
   },
   {

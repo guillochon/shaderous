@@ -36,7 +36,7 @@ const copyFailing = document.getElementById('copy-failing') as HTMLButtonElement
  * them goes to Other, so a new test is never left off the page.
  */
 const GROUPS: { name: string; ids: string[] }[] = [
-  { name: 'Hydrodynamics', ids: ['sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'rayleigh-taylor', 'low-mach', 'well-balanced', 'advection', 'advection-accuracy', 'flux-determinism', 'reflecting-box', 'moving-wall', 'two-dimensional'] },
+  { name: 'Hydrodynamics', ids: ['sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'rayleigh-taylor', 'low-mach', 'well-balanced', 'advection', 'advection-accuracy', 'flux-determinism', 'stored-primitives', 'reflecting-box', 'moving-wall', 'two-dimensional'] },
   { name: 'Species, equations of state and burning', ids: ['species', 'species-eos', 'shock-bubble', 'detonation', 'burn-network', 'eos'] },
   { name: 'Cooling, diffusion and driving', ids: ['cooling', 'viscosity', 'conduction', 'driving'] },
   { name: 'Gravity and point masses', ids: ['sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption', 'point-mass-sink', 'point-mass-many', 'orbit-preview', 'binary-orbit', 'point-mass-encounter'] },

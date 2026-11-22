@@ -748,6 +748,15 @@
      "title": "Partly filled cells",
      "description": "Obstacles cut the cells their surfaces cross: each cell holds gas in a share of its volume and each face is open in a share of its area, so a body keeps its true shape below a cell (a thin blade, its pitch), where the plain grid makes it a staircase of whole cells. For the liquid with implicit pressure, on the uniform grid, with obstacles at rest"
     },
+    "storedPrims": {
+     "enum": [
+      "auto",
+      "on",
+      "off"
+     ],
+     "title": "Stored primitives",
+     "description": "Uniform grid: convert each cell from its conserved state to density, velocity and pressure once a step and keep the result, instead of converting it again at every one of the some twenty loads of the cell in a step. The results are the same. It costs 32 bytes of GPU memory per cell, and saves most where the equation of state solves for its temperature or reads a table (Helmholtz: steps about three times faster on an A100). Automatic: on for every equation of state but the ideal gas, the barotropic gas and the liquid"
+    },
     "pressureCycles": {
      "type": "integer",
      "title": "Pressure V-cycles",

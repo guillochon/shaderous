@@ -32,6 +32,9 @@ const DEFAULT_SLOTS: Slots = {
   pwalls: 'pressure/pwalls_off.wgsl',
   // Moving bodies (hydro/moving.ts): none unless a run has them.
   moving: 'const MOVING = false;\nconst MOVING_FRACTIONS = false;\nfn moving_mark(m: f32) -> bool { return false; }\nfn gas_fractions(c: vec3<i32>) -> vec4<f32> { return vec4<f32>(1.0); }\n',
+  // Stored primitives on the uniform grid (hydro/prim_load_on.wgsl): off unless hydroSlots says so.
+  prim_load: 'const PRIM_STORED = false;\nfn prim_a(c: vec3<i32>) -> vec4<f32> { return vec4<f32>(0.0); }\nfn prim_b(c: vec3<i32>) -> vec4<f32> { return vec4<f32>(0.0); }\n',
+  prim_store: 'fn prim_store(c: vec3<i32>, a: vec4<f32>, b: vec4<f32>) {}\n',
   // Partly filled cells (hydro/cut.ts): none unless a run asks.
   cut: 'const CUT = false;\nfn cut_at(c: vec3<i32>) -> vec4<f32> { return vec4<f32>(1.0); }\nfn cut_wall(c: vec3<i32>) -> vec4<f32> { return vec4<f32>(0.0); }\n',
   moving_body: 'const N_MOVING = 0u;\nfn body_pose(i: u32, t: f32) -> Pose { return pose_id(); }\nfn moving_at(x: vec3<f32>, thr: f32) -> vec4<f32> { return vec4<f32>(0.0); }\nfn moving_dist(x: vec3<f32>) -> f32 { return 1.0e30; }\n',

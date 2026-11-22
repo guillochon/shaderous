@@ -24,6 +24,9 @@
 // Implicit pressure: the last solve's pressure, whose gradient limits the step as gravity's
 // acceleration does (below). Off, pp_gradient is zero.
 #include <psplit_grad>
+// Stored primitives (hydro/prim_store_on.wgsl): this pass converts every cell anyway, and keeps
+// the result for load_q in the predictor and the update. Off, prim_store does nothing.
+#include <prim_store>
 
 var<workgroup> wg_max: array<atomic<u32>, 8>;
 
@@ -36,6 +39,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     let u2 = textureLoad(U2, c, 0);
     comp_use(comp_tex(c));
     var w = prim_from_cons(textureLoad(U1, c, 0), u2);
+    // (As load_q in hydro/recon.wgsl returns it, before the radiation's share below.)
+    prim_store(c, w.w1, vec4<f32>(w.w2.x, w.w2.z, w.w2.y, u2.w));
     // Unsplit scheme: the stable step is set by the sum of the per-axis signal speeds.
     // (With implicit pressure the sound speed only sets a ceiling: P.ohm.y is one over the
     // acoustic steps a step may span, 0 for the explicit scheme. src/sim.ts packParams.)

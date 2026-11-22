@@ -142,6 +142,8 @@ export interface PhysicsSpec {
   pressure?: 'explicit' | 'implicit';
   /** obstacles cut the cells they cross (SimConfig.cutCells): the liquid with implicit pressure */
   cutCells?: boolean;
+  /** uniform grid: convert each cell to primitives once a step and keep them (SimConfig.storedPrims); auto: where the equation of state is costly */
+  storedPrims?: 'auto' | 'on' | 'off';
   pressureCycles?: number;
   pressureTol?: number;
   acousticCfl?: number;

@@ -640,6 +640,8 @@ export function compileSetup(input: SetupSpec): Compiled {
   over('cfl', ph.cfl);
   over('pressure', ph.pressure);
   over('cutCells', ph.cutCells);
+  // ('auto' leaves it to the equation of state: primStored in sim.ts.)
+  over('storedPrims', ph.storedPrims === 'on' ? true : ph.storedPrims === 'off' ? false : undefined);
   over('pressureCycles', ph.pressureCycles);
   over('pressureTol', ph.pressureTol);
   over('acousticCfl', ph.acousticCfl);
