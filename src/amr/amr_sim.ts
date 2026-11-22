@@ -2334,17 +2334,17 @@ export class AmrSim implements Simulation {
     }
     this.uploadTree();
     this.device.queue.writeBuffer(this.rg, 0, BlockTree.regridTable(plan.ops, this.cap) as Int32Array<ArrayBuffer>);
+    // New blocks near an obstacle take its cells from its shape (amr/bodies.ts).
+    const paint = this.bands?.paint(plan.ops, this.tree.leaves(), this.cap);
+    if (paint) this.device.queue.writeBuffer(this.paintBuf, 0, paint as Uint32Array<ArrayBuffer>);
+    else if (this.painted) this.device.queue.writeBuffer(this.paintBuf, 0, new Uint32Array(2 + this.cap));
+    this.painted = !!paint;
     const pass = beginPass(enc);
     pass.setPipeline(this.pRegrid);
     pass.setBindGroup(0, this.gRegrid[this.cur]);
     this.interior(pass, this.nLeaf);
     // The field's faces, then the energy rebuilt and everything back in this parity.
     this.mhd?.encodeRegrid(pass, this.cur);
-    // New blocks near an obstacle take its cells from its shape (amr/bodies.ts).
-    const paint = this.bands?.paint(plan.ops, this.tree.leaves(), this.cap);
-    if (paint) this.device.queue.writeBuffer(this.paintBuf, 0, paint as Uint32Array<ArrayBuffer>);
-    else if (this.painted) this.device.queue.writeBuffer(this.paintBuf, 0, new Uint32Array(2 + this.cap));
-    this.painted = !!paint;
     if (this.speciesGroups) {
       pass.setPipeline(this.pSpecies[3]);
       pass.setBindGroup(0, this.gSpecies[3][this.cur][this.speciesCur]);

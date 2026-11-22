@@ -34,6 +34,34 @@
         "--strictPort"
       ],
       "port": 5197
+    },
+    {
+      "name": "wt-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "preview",
+        "--outDir",
+        "C:/Users/guill/AppData/Local/Temp/claude/d6a7306c88afdf2b/77b94896-4253-4615-a377-0d9b5bf69328/scratchpad/dist",
+        "--port",
+        "5211",
+        "--strictPort"
+      ],
+      "port": 5211
+    },
+    {
+      "name": "mhd-comp-static",
+      "runtimeExecutable": "node",
+      "runtimeArgs": [
+        "node_modules/vite/bin/vite.js",
+        "preview",
+        "--outDir",
+        "C:/Users/guill/AppData/Local/Temp/shaderous-frozen2",
+        "--port",
+        "5223",
+        "--strictPort"
+      ],
+      "port": 5223
     }
   ]
 }

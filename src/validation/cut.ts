@@ -371,4 +371,41 @@ export const CUT_TESTS: TestDef[] = [
       return { pass: true, metrics: m };
     },
   },
+  {
+    id: 'cut-turbine-sense',
+    name: 'Partly filled cells: the fast rotor (builtin:turbine-fast) turned the way it was built for and the other way (uniform 128^3)',
+    criterion: 'The wind-turbine preset’s tunnel and frame with the fast rotor, cut cells, Courant number 0.4, stepping freely: the torque about the axis averaged over t = 0.8 to 1.6 with the frame turning at Omega = +5 (the blades’ leading edges ahead) and -5. Built the right way, the rotor brakes less (or drives) at +5: the torque at +5 must be above the torque at -5 times the sign of the turning (C_p(+5) > C_p(-5)). Reported (plans/wind-tunnel.md 8.1.5)',
+    async run(gpu: Gpu) {
+      const m: Record<string, number> = {};
+      const R = 0.8;
+      for (const omega of [5, -5]) {
+        const spec = JSON.parse(JSON.stringify(preset('wind-turbine').spec));
+        spec.parts[1].shape.file = 'builtin:turbine-fast';
+        spec.parts[0].rotor = omega;
+        spec.physics = { ...(spec.physics ?? {}), cutCells: true };
+        const c = compileSetup(spec);
+        const sim = await Sim.create(gpu, configFor(c.problem, 128, { ndim: 3, tEnd: 1e9, ...c.overrides, amrLevels: 0, cutCells: true, cfl: 0.4 }));
+        try {
+          let tq = 0, fx = 0, k = 0;
+          for (;;) {
+            sim.step(50);
+            const d = await sim.diagnostics();
+            if (d.t > 0.8) {
+              tq += d.bodies![0].torque[0];
+              fx += d.bodies![0].force[0];
+              k++;
+            }
+            if (d.t > 1.6) break;
+          }
+          const tag = omega > 0 ? 'plus' : 'minus';
+          m[`torque_${tag}`] = tq / k;
+          m[`thrust_${tag}`] = fx / k;
+          m[`cp_${tag}`] = (omega * tq) / k / (0.5 * Math.PI * R * R);
+        } finally {
+          sim.destroy();
+        }
+      }
+      return { pass: m.cp_plus > m.cp_minus, metrics: m };
+    },
+  },
 ];
