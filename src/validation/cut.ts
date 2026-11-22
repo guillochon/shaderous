@@ -408,4 +408,115 @@ export const CUT_TESTS: TestDef[] = [
       return { pass: m.cp_plus > m.cp_minus, metrics: m };
     },
   },
+  {
+    id: 'cut-sections-check',
+    name: 'Partly filled cells: the fast rotor’s tip section at 9 degrees, Re 5000, on the GPU against the float64 prototype (2D, 16 and 32 cells on the chord)',
+    criterion: 'builtin:section-tip (a NACA 0020 floored at 20% of the chord: a rectangle) at 9 degrees in a 2D tunnel 8 chords across (slip sides, Mach 0.1, nu = 2e-4), Courant 0.4: C_l and C_d over t = 8 to 16, at 16 and 32 cells on the chord, with cut cells. The prototype (tools/cutcell/section.ts, periodic with a sponge, plans/wind-tunnel.md 8.1.5) gave C_l 0.50 and 0.38, C_d 0.26 and 0.30 at 10 and 20 cells. Reported; passes if C_d at 32 cells is within 0.2 to 0.4',
+    async run(gpu: Gpu) {
+      const m: Record<string, number> = {};
+      for (const cells of [16, 32]) {
+        const r = await sectionRun(gpu, 'section-tip', cells, { tEnd: 16 });
+        for (const [k, v] of Object.entries(r)) m[`${k}_${cells}`] = v;
+      }
+      return { pass: m.cd_32 > 0.2 && m.cd_32 < 0.4, metrics: m };
+    },
+  },
+  {
+    id: 'cut-sections',
+    name: 'Partly filled cells: the fast rotor’s blade sections and two airfoils at 9 degrees, Re 5000, converged (2D, 32 to 256 cells on the chord)',
+    criterion: 'Five sections (builtin:section-tip, section-075, section-round, naca0020, naca0012) at 9 degrees in a 2D tunnel 8 chords across (slip sides, Mach 0.1, nu = 2e-4), Courant 0.4: C_l, C_d, the shear’s part of C_d and the rms of C_l over t = 8 to 24, at 32, 64, 128 and 256 cells on the chord with cut cells, and at 32 and 128 with the staircase (plans/wind-tunnel.md 8.1.6). Reported; passes if every run gives a finite positive drag',
+    async run(gpu: Gpu) {
+      const m: Record<string, number> = {};
+      for (const file of SECTIONS)
+        for (const [cells, cut] of [[32, true], [64, true], [128, true], [256, true], [32, false], [128, false]] as const) {
+          const r = await sectionRun(gpu, file, cells, { cutCells: cut });
+          for (const [k, v] of Object.entries(r)) m[`${file}_${cells}${cut ? '' : '_staircase'}_${k}`] = v;
+        }
+      const cds = Object.entries(m).filter(([k]) => k.endsWith('_cd')).map(([, v]) => v);
+      return { pass: cds.every((v) => Number.isFinite(v) && v > 0), metrics: m };
+    },
+  },
+  {
+    id: 'cut-sections-box',
+    name: 'Partly filled cells: a blade section and the NACA 0012 at 9 degrees, Re 5000, in tunnels 8 and 16 chords across (2D, 64 cells on the chord)',
+    criterion: 'builtin:section-tip and naca0012 as cut-sections at 64 cells on the chord, in a tunnel 8 chords across (n = 512) and 16 (n = 1024): what the tunnel’s sides add to C_l and C_d (plans/wind-tunnel.md 8.1.6). Reported',
+    async run(gpu: Gpu) {
+      const m: Record<string, number> = {};
+      for (const file of ['section-tip', 'naca0012'])
+        for (const box of [8, 16]) {
+          const r = await sectionRun(gpu, file, 64, { box });
+          for (const [k, v] of Object.entries(r)) m[`${file}_box${box}_${k}`] = v;
+        }
+      return { pass: true, metrics: m };
+    },
+  },
+  {
+    id: 'cut-sections-dt',
+    name: 'Partly filled cells: a blade section at 9 degrees, Re 5000, at Courant numbers 0.8, 0.4 and 0.2 (2D, 128 cells on the chord)',
+    criterion: 'builtin:section-tip and naca0012 as cut-sections at 128 cells on the chord, at Courant numbers 0.8, 0.4 and 0.2: how much of C_l and C_d is the timestep’s (the fast rotor’s torque moved 11% between 0.4 and 0.2, plans/wind-tunnel.md 8.1.4). Reported',
+    async run(gpu: Gpu) {
+      const m: Record<string, number> = {};
+      for (const file of ['section-tip', 'naca0012'])
+        for (const cfl of [0.8, 0.4, 0.2]) {
+          const r = await sectionRun(gpu, file, 128, { cfl });
+          for (const [k, v] of Object.entries(r)) m[`${file}_cfl${cfl}_${k}`] = v;
+        }
+      return { pass: true, metrics: m };
+    },
+  },
 ];
+
+/** The blade sections of plans/wind-tunnel.md 8.1.6, as built-in wings. */
+export const SECTIONS = ['section-tip', 'section-075', 'section-round', 'naca0020', 'naca0012'];
+
+/**
+ * A blade section (a built-in wing, chord 1) at `alpha` degrees in a 2D tunnel `box` chords
+ * across, slip sides, Mach 0.1, U = 1; its quarter chord 1.5 chords upstream of the middle (as the
+ * prototype's, tools/cutcell/section.ts). The setup document, for the command-line runner too.
+ */
+export function sectionSpec(file: string, cells: number, o: { box?: number; alpha?: number; re?: number } = {}): SetupSpec {
+  const box = o.box ?? 8;
+  return {
+    format: 'shaderous-setup', version: 1, id: `section-${file}`, name: `Blade section ${file}`,
+    domain: { ndim: 2, n: box * cells, amr: 0, box, supports2d: true },
+    physics: { viscosity: 1 / (o.re ?? 5000), cutCells: true },
+    parts: [
+      { kind: 'tunnel', speed: 1, axis: 'x', sides: 'slip', sponge: 0.15, mach: 0.1 },
+      { kind: 'obstacle', id: 'section', shape: { type: 'mesh', file: `builtin:${file}`, scale: 1, center: [-1.4963, 0.0051, 0], anchor: 'origin', up: 'y', rotate: [0, 0, -(o.alpha ?? 9)] } },
+    ],
+  } as unknown as SetupSpec;
+}
+
+/**
+ * Run a section to `t0` and then step freely to `tEnd`: C_l and C_d (over the chord, rho U^2 / 2
+ * = 1/2), the shear's part of C_d, and the rms of C_l about its mean, each step weighed by its dt.
+ */
+async function sectionRun(gpu: Gpu, file: string, cells: number, o: { box?: number; cutCells?: boolean; cfl?: number; t0?: number; tEnd?: number } = {}): Promise<Record<string, number>> {
+  const spec = sectionSpec(file, cells, { box: o.box });
+  const n = (o.box ?? 8) * cells;
+  const cut = o.cutCells ?? true;
+  const sim = await makeSim(gpu, spec, n, { cutCells: cut, cfl: o.cfl ?? 0.4, tEnd: o.t0 ?? 8 });
+  try {
+    const t0 = performance.now();
+    await sim.runToEnd(64, 1e8);
+    sim.cfg.tEnd = 1e9;
+    sim.writeParams();
+    let w = 0, l = 0, l2 = 0, dr = 0, dp = 0, steps = 0;
+    for (;;) {
+      sim.step(1);
+      const d = await sim.diagnostics();
+      const b = d.bodies![0];
+      w += d.dt;
+      l += b.force[1] * d.dt;
+      l2 += b.force[1] * b.force[1] * d.dt;
+      dr += b.force[0] * d.dt;
+      dp += b.pressure[0] * d.dt;
+      steps = d.steps;
+      if (d.t >= (o.tEnd ?? 24)) break;
+    }
+    const cl = l / w / 0.5, cd = dr / w / 0.5;
+    return { cl, cd, cd_shear: (dr - dp) / w / 0.5, cl_rms: Math.sqrt(Math.max(0, l2 / w - (l / w) ** 2)) / 0.5, ms_per_step: (performance.now() - t0) / steps, steps };
+  } finally {
+    sim.destroy();
+  }
+}

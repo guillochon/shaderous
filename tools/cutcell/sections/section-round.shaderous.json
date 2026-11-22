@@ -1,0 +1,48 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "id": "section-section-round",
+  "name": "Blade section section-round",
+  "domain": {
+    "ndim": 2,
+    "n": 256,
+    "amr": 0,
+    "box": 8,
+    "supports2d": true
+  },
+  "physics": {
+    "viscosity": 0.0002,
+    "cutCells": true
+  },
+  "parts": [
+    {
+      "kind": "tunnel",
+      "speed": 1,
+      "axis": "x",
+      "sides": "slip",
+      "sponge": 0.15,
+      "mach": 0.1
+    },
+    {
+      "kind": "obstacle",
+      "id": "section",
+      "shape": {
+        "type": "mesh",
+        "file": "builtin:section-round",
+        "scale": 1,
+        "center": [
+          -1.4963,
+          0.0051,
+          0
+        ],
+        "anchor": "origin",
+        "up": "y",
+        "rotate": [
+          0,
+          0,
+          -9
+        ]
+      }
+    }
+  ]
+}

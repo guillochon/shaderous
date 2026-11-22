@@ -185,16 +185,39 @@ export function turbineRotor(o: TurbineOptions = TURBINE_DEFAULTS): Mesh {
   return { positions: new Float32Array(pos), indices: new Uint32Array(idx), parts: [wholePart(idx.length / 3, 'rotor')], meters: 1 };
 }
 
+/** A section thickened where it would be thinner than `minT` (of the chord), as turbineRotor's blades. */
+export interface SectionFloor {
+  /** the thinnest the section may be, of the chord (0: no floor) */
+  minT?: number;
+  /** the floor only aft of the thickest point (30% of the chord): a round nose and a blunt base */
+  roundNose?: boolean;
+}
+
+/**
+ * The outline of a NACA four-digit symmetric section of thickness `t`, chord 1 along x with the
+ * quarter chord at the origin, counterclockwise: the lower side from the leading edge to the
+ * trailing edge, then the upper back. With a floor, the blunt base's and the square nose's
+ * corners are kept; without, the edges are single points.
+ */
+export function sectionOutline(t: number, n = 160, o: SectionFloor = {}): [number, number][] {
+  const minT = o.minT ?? 0;
+  const naca = (x: number) => 5 * t * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
+  const yt = (x: number) => (minT <= 0 || (o.roundNose && x < 0.3) ? naca(x) : Math.max(naca(x), minT / 2));
+  const xs = Array.from({ length: n + 1 }, (_, k) => 0.5 * (1 - Math.cos((Math.PI * k) / n)));
+  const pts: [number, number][] = [...xs.map((x) => [x - 0.25, -yt(x)] as [number, number]), ...[...xs].reverse().map((x) => [x - 0.25, yt(x)] as [number, number])];
+  // Edges of no thickness are one point, not two: the first of each pair is kept (so that the
+  // floorless outline is the one naca0012 always had, point for point).
+  const same = (p: [number, number], q: [number, number]) => Math.hypot(p[0] - q[0], p[1] - q[1]) <= 1e-12;
+  return pts.filter((p, k) => (k === 0 || !same(p, pts[k - 1])) && !(k === pts.length - 1 && same(p, pts[0])));
+}
+
 /**
  * A NACA four-digit symmetric section (thickness `t` of the chord, its trailing edge closed),
  * chord 1 along x with the quarter chord at the origin, thickness along y, extruded along z from
  * -span/2 to span/2: a wing of constant section, whose cut at z = 0 is the airfoil (a 2D run's).
  */
-export function nacaWing(t = 0.12, n = 160, span = 2): Mesh {
-  const yt = (x: number) => 5 * t * (0.2969 * Math.sqrt(x) - 0.126 * x - 0.3516 * x * x + 0.2843 * x ** 3 - 0.1036 * x ** 4);
-  const xs = Array.from({ length: n + 1 }, (_, k) => 0.5 * (1 - Math.cos((Math.PI * k) / n)));
-  // Around the section, counterclockwise seen from +z: the lower side from the leading edge, then the upper back.
-  const ring = [...xs.map((x) => [x - 0.25, -yt(x)]), ...xs.slice(1, -1).reverse().map((x) => [x - 0.25, yt(x)])];
+export function nacaWing(t = 0.12, n = 160, span = 2, o: SectionFloor = {}): Mesh {
+  const ring = sectionOutline(t, n, o);
   const m = ring.length;
   const pos: number[] = [];
   const idx: number[] = [];
@@ -219,6 +242,13 @@ export function nacaWing(t = 0.12, n = 160, span = 2): Mesh {
 export const BUILTIN_BODIES: Record<string, () => Mesh> = {
   // A NACA 0012 wing of chord 1 and span 2 about its quarter chord (2D: the airfoil).
   naca0012: () => nacaWing(0.12),
+  naca0020: () => nacaWing(0.2),
+  // builtin:turbine-fast's sections as wings of chord 1, as naca0012 (plans/wind-tunnel.md 8.1.6):
+  // its NACA 0020 thickened to 0.03 R everywhere, which at the tip (chord 0.15 R) is a rectangle
+  // and at 0.75 R (chord 0.2 R) a square nose and base; and a round-nosed alternative.
+  'section-tip': () => nacaWing(0.2, 160, 2, { minT: 0.2 }),
+  'section-075': () => nacaWing(0.2, 160, 2, { minT: 0.15 }),
+  'section-round': () => nacaWing(0.2, 160, 2, { minT: 0.15, roundNose: true }),
   // A three-bladed wind turbine rotor of radius 1 about +x, pitched for a tip-speed ratio of 1
   // (wide blades, steeply pitched: a grid of 2 cells through a blade still shows the pitch).
   turbine: () => turbineRotor(),

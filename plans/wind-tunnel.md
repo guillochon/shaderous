@@ -1186,7 +1186,38 @@ The wind-turbine preset stays as it is. Nothing in the builtin or the solver was
 the inversion; the 2D sections are 2D, not converged, without rotation; no 3D run of a
 changed blade.
 
-#### 8.1.6 Plan: the blade sections on the GPU, converged (2026-11-22, not started)
+#### 8.1.6 Plan: the blade sections on the GPU, converged (2026-11-22; tools built, not run)
+
+**Built** (2026-11-22, the GPU's work not yet run):
+- `builtin:section-tip`, `section-075`, `section-round`, `naca0020` (`geometry/builtin.ts`,
+  `sectionOutline`; `naca0012`'s outline unchanged point for point). Unit tests: each one's gas
+  on a 2D grid holds its outline's area to 2%.
+- GPU tests (`validation/cut.ts`): `cut-sections-check` (the tip at 16 and 32 cells, against
+  the prototype), `cut-sections` (the study, about 1 to 2 hours), `cut-sections-box`,
+  `cut-sections-dt`; `sectionSpec` and `sectionRun` shared by them.
+- `tools/cutcell/sections/*.shaderous.json`, the same setups for the runner (a unit test keeps
+  them equal to `sectionSpec`); `section_fields.mjs` runs them (slices of the velocities and
+  pressure at one sample a cell, every 0.5, every 1 on 2048²; about 1 GB a run at the finest);
+  `section_cells.mjs` writes each grid's gas shares (`cutGeometry`, bundled by Vite) to
+  `runs/sections/<section>_<cells>/cut.npy`; `section_plots.py` draws the flow (`flow CELLS`),
+  the wall cells along the lower side by grid (`wall SECTION`) and the polars from the GPU
+  test's log (`polars LOG`), vorticity from gas cells only. Checked on made-up slices: the cells
+  the gas shares leave solid all lie inside the drawn outline, and the bodies' areas are the
+  outlines' (0.200, 0.167, 0.163, 0.136, 0.082).
+
+To run, on a static build on its own port (`PW_PORT`, as the other GPU tests):
+
+```bash
+npx playwright test tests/gpu/validation.spec.ts -g "cut-sections-check$"
+npx playwright test tests/gpu/validation.spec.ts -g "cut-sections$" > runs/sections/cut-sections.log
+node tools/cutcell/section_cells.mjs
+node tools/cutcell/section_fields.mjs --url http://localhost:PORT/
+python tools/cutcell/section_plots.py polars runs/sections/cut-sections.log
+python tools/cutcell/section_plots.py flow 256
+python tools/cutcell/section_plots.py wall section-tip
+```
+
+The plan as written before the build:
 
 The section polars of 8.1.5 came from the CPU prototype at 10 and 20 cells on the chord: the
 boundary layer under a cell, lift swinging 0.1 to 0.5 between grids, two finer runs diverged
