@@ -279,6 +279,19 @@ back, and part escapes.
   $`\gamma = 4/3`$ star must pass deeper than a $`\gamma = 5/3`$ star before it comes apart.
   The impact parameter $`\beta`$ (how deep the orbit goes) can also be changed by hand.
 
+### Activity 6: A car in a wind tunnel
+
+Open the [wind tunnel](https://guillochon.github.io/shaderous/?problem=wind-tunnel). Air flows
+past a body shaped like a car, and the Diagnostics panel gives the drag and lift coefficients:
+how hard the air pushes the body back and up, for its size and the wind's speed.
+
+- Look at the wake in the slice view, colored by vorticity. Where does the air swirl, and why
+  does a car need fuel to push through it?
+- Drop a 3D model of your own (an STL, OBJ, PLY or glTF file) on the Setup dialog and put it
+  in the tunnel. Which shapes have the least drag? Compare a sphere, a box and a teardrop.
+- Say what the run cannot do: at this resolution it resolves the large eddies of the wake but
+  not the thin layer of air on the body's surface, so its drag is a guide, not a measurement.
+
 ### Assessment ideas
 
 - A one-paragraph "observation log" of one simulation: what they changed, what they predicted,
@@ -419,8 +432,13 @@ liquid flows past a cylinder at Reynolds number 100 and sheds vortices from alte
 A two- to three-week module that teaches the most important habit in computational physics:
 
 1. Pick a problem with a known answer (Sod, Sedov, Jeans growth rate, polytrope).
-2. Run it at four resolutions, export each, and compute an error norm against the analytic
-   solution in Python with yt.
+2. Run it at four resolutions in one sweep of the command-line runner, which writes a slice of
+   each run as a file that numpy reads:
+   `npx shaderous sweep --problem sod-x --dim 2 --vary n=128,256,512,1024 --until 0.2 --slice rho --slice-res 1024 --slice-format npy --out runs/sod`.
+   Compute an error norm against the analytic solution from the slices (or export each run's
+   state and load it in yt). The [validation page](https://guillochon.github.io/shaderous/validate.html)
+   measures the order of convergence of smooth advection in the same way: a check on the
+   method.
 3. Plot error against cell size on log axes and measure the order of convergence. Explain why
    shock problems converge at first order regardless of the scheme's formal order.
 4. Repeat with a different limiter or Riemann solver (`&riemann=hll`) and explain the
