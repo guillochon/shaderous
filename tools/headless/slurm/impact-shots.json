@@ -1,0 +1,5 @@
+[
+ {"name": "theia", "view": {"mode": "volume", "contours": true, "fog": false, "light": true, "box": false, "showBlocks": false, "yaw": 0.6, "pitch": 0.9, "dist": 1.0, "field": 2, "log": false, "lo": 0.5, "hi": 1, "colormap": "coolwarm", "nContours": 3, "surfaceOpacity": 0.6, "minRho": 0.45}},
+ {"name": "iron", "view": {"mode": "volume", "contours": true, "fog": false, "light": true, "box": false, "showBlocks": false, "yaw": 0.6, "pitch": 0.9, "dist": 1.0, "field": 19, "species": 1, "log": false, "lo": 0, "hi": 1, "colormap": "inferno", "nContours": 3, "surfaceOpacity": 0.6, "minRho": 0.45}},
+ {"name": "density", "view": {"mode": "volume", "contours": true, "fog": false, "light": true, "box": false, "showBlocks": false, "yaw": 0.6, "pitch": 0.9, "dist": 1.0, "field": 0, "log": true, "lo": 1e-05, "hi": 0.5, "colormap": "turbo", "nContours": 5, "surfaceOpacity": 0.4, "minRho": 0}}
+]

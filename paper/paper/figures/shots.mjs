@@ -5,11 +5,13 @@
 //
 //   node paper/figures/shots.mjs SPEC.json OUTDIR [NAME...]
 //
-// SPEC.json is a list of shots: { name, setup, until, steps?, view?, width?, height?, page?, images?, document?, dialog?, fill?, scale?, athdf?, athdfOptions? }
+// SPEC.json is a list of shots: { name, setup, until, steps?, view?, width?, height?, page?, images?, document?, dialog?, fill?, scale?, athdf?, athdfOptions?, gpuMemory? }
 // (with NAMEs after OUTDIR, only those).
 // `setup` is a link's query string; `view` is passed to shaderous.view() (docs/api.md). `images`,
-// a list of { name, view? }, takes several images of the one run, each with its own view on top
-// of the shot's (the shot's own name is then only for the log). With `page`, the page
+// a list of { name, view?, until? }, takes several images of the one run, each with its own view on
+// top of the shot's (the shot's own name is then only for the log); an image's `until` runs on to
+// that later time first, so one run gives a time series. `gpuMemory`, in GB, is the GPU memory
+// the run may take (the page's guessed default otherwise). With `page`, the page
 // opens as a person sees it, at width x height, and the whole window is captured once the run
 // has reached `until` and drawn a few frames. `document` names a setup file beside SPEC.json
 // (docs/setups.md): the run is built from it, and `setup` then says only what differs. With
@@ -36,7 +38,7 @@ for (const shot of shots) {
   const t0 = Date.now();
   const width = shot.width ?? 1000;
   const height = shot.height ?? width;
-  const s = await openSession({ setup: shot.setup, interactive: !!shot.page, width, height, scale: shot.scale, log: () => {} });
+  const s = await openSession({ setup: shot.setup, interactive: !!shot.page, width, height, scale: shot.scale, gpuMemory: shot.gpuMemory, log: () => {} });
   try {
     if (shot.page) await s.call('pause');
     if (shot.document) await s.call('load', shot.setup ?? '', JSON.parse(readFileSync(path.join(path.dirname(specFile), shot.document), 'utf8')));
@@ -52,6 +54,7 @@ for (const shot of shots) {
     // One image per entry of `images`, each with its own view on top of the shot's.
     let errors = [];
     for (const img of shot.images ?? [{ name: shot.name }]) {
+      if (img.until !== undefined) r = await s.call('run', { until: img.until });
       if (img.view) full = await s.call('view', img.view);
       const file = path.join(outDir, `${img.name}.png`);
       if (shot.page) {
