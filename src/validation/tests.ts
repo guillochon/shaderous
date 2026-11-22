@@ -921,14 +921,14 @@ export const TESTS: TestDef[] = [
     id: 'stored-primitives',
     name: 'Stored primitives',
     criterion:
-      'A uniform grid reaches the same state after 30 steps with its primitives converted once a step and stored as with them converted at every load: bit-identical for the ideal gas (open and reflecting faces in 3D, periodic in 2D, a shearing box) and for the degenerate gas, within 1e-4 of the largest value with Helmholtz and with ANEOS in a planet of two compositions (their solves compile a little differently in each pass)',
+      'A uniform grid reaches the same state after 30 steps with its primitives converted once a step and stored as with them converted at every load, to round-off: within 1e-6 of the largest value for the ideal gas (open and reflecting faces in 3D, periodic in 2D, a shearing box) and the degenerate gas, within 1e-4 with Helmholtz and with ANEOS in a planet of two compositions, whose solves iterate. (Bit for bit on some drivers; others compile the conversion a little differently in each pass. A wrong or stale stored value differs by far more.)',
     async run(gpu) {
       const cases: { id: string; problem: Problem; n: number; over: Partial<SimConfig>; tol: number }[] = [
-        { id: 'sedov', problem: sedov, n: 32, over: {}, tol: 0 },
-        { id: 'sedov_reflecting', problem: sedov, n: 32, over: { bcLo: all(REFLECT), bcHi: all(REFLECT) }, tol: 0 },
-        { id: 'kelvin_helmholtz_2d', problem: kelvinHelmholtz, n: 64, over: { ndim: 2 }, tol: 0 },
-        { id: 'shearing_sheet_2d', problem: shearingSheet(Infinity, (x, y) => ({ rho: 1 + 0.01 * Math.cos(2 * Math.PI * (x + y)) })), n: 64, over: { ndim: 2 }, tol: 0 },
-        { id: 'white_dwarf_degenerate', problem: whiteDwarfStar, n: 32, over: { eos: 'degenerate' }, tol: 0 },
+        { id: 'sedov', problem: sedov, n: 32, over: {}, tol: 1e-6 },
+        { id: 'sedov_reflecting', problem: sedov, n: 32, over: { bcLo: all(REFLECT), bcHi: all(REFLECT) }, tol: 1e-6 },
+        { id: 'kelvin_helmholtz_2d', problem: kelvinHelmholtz, n: 64, over: { ndim: 2 }, tol: 1e-6 },
+        { id: 'shearing_sheet_2d', problem: shearingSheet(Infinity, (x, y) => ({ rho: 1 + 0.01 * Math.cos(2 * Math.PI * (x + y)) })), n: 64, over: { ndim: 2 }, tol: 1e-6 },
+        { id: 'white_dwarf_degenerate', problem: whiteDwarfStar, n: 32, over: { eos: 'degenerate' }, tol: 1e-6 },
         { id: 'white_dwarf_helmholtz', problem: whiteDwarfStar, n: 32, over: { eos: 'helmholtz' }, tol: 1e-4 },
         { id: 'planet_aneos', problem: problemById('planet')!, n: 32, over: {}, tol: 1e-4 },
       ];
@@ -974,7 +974,7 @@ export const TESTS: TestDef[] = [
         const rel = diff / (scale || 1);
         metrics[`${c.id}_values_differing`] = differ;
         metrics[`${c.id}_max_relative_difference`] = rel;
-        if (bad > 0 || (c.tol === 0 ? differ > 0 : rel > c.tol)) pass = false;
+        if (bad > 0 || rel > c.tol) pass = false;
       }
       return { pass, metrics };
     },

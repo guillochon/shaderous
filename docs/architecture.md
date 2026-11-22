@@ -188,9 +188,9 @@ is limited by arithmetic instead: doubling its texture loads costs 4%, a cheaper
 conversion expensive. **Stored primitives** (`primStored` in `sim.ts`, the setup key
 `physics.storedPrims`) therefore convert each cell once a step, in the rates pass, into two
 textures that `load_q` reads (`hydro/prim_load_on.wgsl`, `hydro/prim_store_on.wgsl`). The values
-are the conversion's own, so results do not change (bit for bit with the ideal and degenerate
-gases; to the temperature solve's round-off with Helmholtz, which compiles a little differently
-in each pass). They cost 32 bytes per cell. On by default for every equation of state but the
+are the conversion's own, so results change only at round-off: bit for bit on some drivers,
+while others compile the conversion a little differently in the rates pass than in the predictor
+(1e-8 relative after 30 steps with the degenerate gas on an A100, 1e-6 with Helmholtz). They cost 32 bytes per cell. On by default for every equation of state but the
 ideal gas, the barotropic gas and the liquid: on an A100 a 3D white dwarf's step is 2.8 to 3.0
 times faster with Helmholtz and 19 to 22% with the degenerate gas, while the ideal gas gains 1 to
 2% there and loses 3 to 5% on an RTX 3080. (The adaptive mesh stores its primitives anyway,
