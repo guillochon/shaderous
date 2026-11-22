@@ -20,6 +20,8 @@ from pathlib import Path
 
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+import numpy as np
+from PIL import Image
 
 import style
 
@@ -28,9 +30,13 @@ DATA = HERE / "data" / "setup"
 CODE = HERE.parents[2]
 
 # The part of the dialog that the figure shows, as fractions of its image (left, top, right,
-# bottom): the settings and the preview, without the list of presets beside them and the row of
-# buttons under them.
-CROP = (0.186, 0.0, 1.0, 0.835)
+# bottom): the settings and the preview, without the title, the list of presets beside them and
+# the row of buttons under them. The dialog is taken in a window 1100 CSS pixels wide at three
+# device pixels to one (spec.json), narrow enough that its text stays readable at the page's
+# width and wide enough that the settings keep their two columns.
+CROP = (0.217, 0.052, 1.0, 0.952)
+# The two views are embedded at this many pixels across; the dialog at its own resolution.
+VIEW_PIXELS = 1000
 
 
 def main() -> None:
@@ -49,6 +55,9 @@ def main() -> None:
     h, w = dialog.shape[:2]
     x0, y0, x1, y1 = CROP
     dialog = dialog[round(y0 * h) : round(y1 * h), round(x0 * w) : round(x1 * w)]
+    # A strip of the dialog's own background above it, for the panel's label to sit in.
+    strip = np.broadcast_to(dialog[2:6, 2:6].reshape(-1, dialog.shape[2]).mean(axis=0), (round(0.035 * dialog.shape[0]), dialog.shape[1], dialog.shape[2]))
+    dialog = np.concatenate([strip, dialog])
     dh, dw = dialog.shape[:2]
 
     # The dialog on the left, and the two square views stacked on the right at half its height.
@@ -57,11 +66,14 @@ def main() -> None:
     height = wide * dh / dw
     fig = plt.figure(figsize=(width, height))
     left = fig.add_axes((0, 0, wide / width, 1))
-    left.imshow(dialog, interpolation="lanczos")
+    # Embedded as is: resampled to the figure's default resolution, the dialog's text blurred.
+    left.imshow(dialog, interpolation="none")
     views = []
     for i, name in enumerate(("run", "collision")):
         ax = fig.add_axes((wide / width, 0.5 * (1 - i), 1 - wide / width, 0.5))
-        ax.imshow(mpimg.imread(DATA / f"{name}.png"), interpolation="lanczos")
+        view = Image.open(DATA / f"{name}.png").convert("RGB")
+        view = view.resize((VIEW_PIXELS, round(VIEW_PIXELS * view.height / view.width)), Image.LANCZOS)
+        ax.imshow(np.asarray(view), interpolation="none")
         views.append(ax)
     for ax, label in zip([left, *views], "abc"):
         ax.set_axis_off()
