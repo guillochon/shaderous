@@ -90,7 +90,12 @@ def main() -> None:
     ap.add_argument("--merge", nargs="+", type=Path, help="merge sets measured separately (collect.mjs outputs)")
     ap.add_argument("--firefox", action="store_true", help="measure in the installed Firefox, not in Chrome")
     ap.add_argument("--device", help="the device this machine's measurement is for, as named in reference.json")
+    ap.add_argument("--grids", action="store_true",
+                    help="print collect.mjs's argument for the set and stop (for runs elsewhere, as tools/headless/slurm/throughput.sbatch)")
     args = ap.parse_args()
+    if args.grids:
+        print(json.dumps([GRIDS]))
+        return
     if (args.run or args.merge) and not args.device:
         ap.error("--run and --merge need --device")
     if args.run:
@@ -102,12 +107,15 @@ def main() -> None:
     devices = [{**d, "bw": ref["bandwidth_gb_s"][d.get("gpu", d["name"])]["value"][0],
                 "data": json.loads((DATA / d["data"]).read_text())} for d in ref["devices"]]
     style.apply()
-    fig, axes = plt.subplots(2, 1, figsize=(style.COLUMN, 1.45 * style.COLUMN), sharex=True, layout="constrained")
+    # Rows: the throughput (a) and the same per unit of bandwidth (b). Columns: two dimensions and
+    # three, so that each panel holds two grids per device.
+    fig, axes = plt.subplots(2, 2, figsize=(style.PAGE, 0.78 * style.PAGE), sharex="col", sharey="row", layout="constrained")
     markers = {"2D uniform": "o", "2D adaptive": "s", "3D uniform": "^", "3D adaptive": "D"}
-    for ax, divide in zip(axes, [False, True]):
+    for row, divide in enumerate([False, True]):
         for k, d in enumerate(devices):
             per = d["bw"] if divide else 1.0
             for g in d["data"]["grids"]:
+                ax = axes[row, g["ndim"] - 2]
                 cells = [r["cells"] for r in g["runs"]]
                 rate = [r["updates_per_second"] / per for r in g["runs"]]
                 lo = [(r["updates_per_second"] - min(r.get("repeats", [r["updates_per_second"]]))) / per for r in g["runs"]]
@@ -115,8 +123,13 @@ def main() -> None:
                 filled = "uniform" in g["label"]
                 ax.errorbar(cells, rate, yerr=[lo, hi], marker=markers[g["label"]], color=style.PALETTE[k],
                             mfc=None if filled else "white", ls="-" if filled else "--", ms=3.5, capsize=0, elinewidth=0.8)
+        # AthenaK's benchmark is a three-dimensional uniform grid: drawn with the 3D panels.
+        ax = axes[row, 1]
         a = ref["athenak"]
+        # One marker per device, drawn apart along x for legibility (all ran the same grid).
+        at = {"V100": (0.72, "P"), "A100": (1.0, "*"), "H100": (1.38, "X")}
         for k, p in enumerate(a["points"]):
+            shift, mk = at[p["device"]]
             bw = p["bandwidth_gb_s"]
             if not divide:
                 y, err = p["updates_per_second"], None
@@ -124,17 +137,19 @@ def main() -> None:
                 ys = [p["updates_per_second"] / b for b in bw]
                 y = (max(ys) + min(ys)) / 2
                 err = [[y - min(ys)], [max(ys) - y]] if max(ys) > min(ys) else None
-            ax.errorbar([a["cells"] * (0.85 if k == 0 else 1.18)], [y], yerr=err, marker="*" if k else "P", color=style.MUTED, ms=6, ls="none",
+            ax.errorbar([a["cells"] * shift], [y], yerr=err, marker=mk, color=style.MUTED, ms=6, ls="none",
                         capsize=2, elinewidth=0.8, label=f"AthenaK, {p['device']}, 3D uniform")
             if divide:
                 # The same per byte moved, if the benchmark ran in double precision with two stages
                 # per step (see "like_for_like" in reference.json): hollow.
                 f = a["like_for_like"]["factor"]
-                ax.errorbar([a["cells"] * (0.85 if k == 0 else 1.18)], [f * y], yerr=None if err is None else [[f * e[0]] for e in err],
-                            marker="*" if k else "P", color=style.MUTED, mfc="white", ms=6, ls="none", capsize=2, elinewidth=0.8)
+                ax.errorbar([a["cells"] * shift], [f * y], yerr=None if err is None else [[f * e[0]] for e in err],
+                            marker=mk, color=style.MUTED, mfc="white", ms=6, ls="none", capsize=2, elinewidth=0.8)
+    for ax in axes.flat:
         ax.set_xscale("log")
-        ax.set_xlim(2e4, 8e7)
         ax.set_yscale("log")
+    axes[0, 0].set_xlim(4e4, 8e6)
+    axes[0, 1].set_xlim(2e4, 8e7)
     for d in devices:
         print(f"{d['name']} ({d['data']['adapter']}, {d['bw']} GB/s)")
         for g in d["data"]["grids"]:
@@ -146,26 +161,26 @@ def main() -> None:
     for p in ref["athenak"]["points"]:
         print(f"AthenaK {p['device']}: {p['updates_per_second']:.3g} updates/s, "
               + ", ".join(f"{p['updates_per_second'] / b:.3g} per GB/s at {b} GB/s" for b in p["bandwidth_gb_s"]))
-    axes[0].set_ylim(top=3.5e9)
-    axes[1].set_ylim(top=3.5e6)
-    axes[0].set_ylabel(r"Cell updates per second (s$^{-1}$)")
-    axes[1].set_ylabel("Cell updates per second\nper GB/s of peak bandwidth")
-    axes[1].set_xlabel("Cells (leaf cells on the adaptive mesh)")
+    axes[0, 0].set_ylabel(r"Cell updates per second (s$^{-1}$)")
+    axes[1, 0].set_ylabel("Cell updates per second\nper GB/s of peak bandwidth")
+    for ax in axes[1]:
+        ax.set_xlabel("Cells (leaf cells on the adaptive mesh)")
     # Color is the device, the marker the grid: one legend entry for each, not one per pair.
     handles = [Line2D([], [], color=style.PALETTE[k], label=f"Shaderous, {d['label']}") for k, d in enumerate(devices)]
     handles += [Line2D([], [], color=style.INK, marker=m, ms=3.5, mfc=None if "uniform" in g else "white",
                        ls="-" if "uniform" in g else "--", label=g) for g, m in markers.items()]
-    handles += axes[0].get_legend_handles_labels()[0][:len(ref["athenak"]["points"])]
+    handles += axes[0, 1].get_legend_handles_labels()[0][:len(ref["athenak"]["points"])]
     handles += [Line2D([], [], color=style.MUTED, marker="*", mfc="white", ms=6, ls="none",
-                       label=f"AthenaK, per byte moved (b)")]
+                       label="AthenaK, per byte moved (b)")]
     # Above the panels, where it covers no point.
-    fig.legend(handles=handles, loc="outside upper center", ncols=2, **{**style.LEGEND, "fontsize": style.LABEL_SIZE - 1})
-    axes[0].text(0.03, 0.97, "(a)", transform=axes[0].transAxes, va="top", fontsize=style.LABEL_SIZE - 1, bbox=style.LABEL_BOX)
+    fig.legend(handles=handles, loc="outside upper center", ncols=4, **{**style.LEGEND, "fontsize": style.LABEL_SIZE - 1})
+    for ax, tag in zip(axes.flat, ["(a) Two dimensions", "(a) Three dimensions", "(b) Two dimensions", "(b) Three dimensions"]):
+        ax.text(0.03, 0.97, tag, transform=ax.transAxes, va="top", fontsize=style.LABEL_SIZE - 1, bbox=style.LABEL_BOX)
     # One line per GPU: a second browser on the same GPU has the same bandwidth.
     gpus = {d.get("gpu", d["name"]): d["bw"] for d in devices}
-    bws = "\n".join(f"{name}: {bw} GB/s" for name, bw in gpus.items())
-    axes[1].text(0.36, 0.03, f"(b) Divided by peak memory bandwidth\n{bws}",
-                 transform=axes[1].transAxes, va="bottom", fontsize=style.LABEL_SIZE - 1, bbox=style.LABEL_BOX)
+    bws = "\n".join(f"{name}: {bw:,} GB/s" for name, bw in gpus.items())
+    axes[1, 0].text(0.97, 0.03, f"Peak memory bandwidth\n{bws}", transform=axes[1, 0].transAxes, ha="right", va="bottom",
+                    fontsize=style.LABEL_SIZE - 1, bbox=style.LABEL_BOX)
     style.save(fig, "performance")
 
 

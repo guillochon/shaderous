@@ -1,23 +1,31 @@
 {
   "notes": "Published single-GPU throughputs of AthenaK and the peak memory bandwidths of the devices, for the performance figure. See paper/research/performance-baseline.md for what each measurement ran.",
   "athenak": {
-    "source": "Stone2026, Section 5.1, Table 1: hydrodynamics, linear wave on a uniform 512 x 256 x 256 grid in 128^3 MeshBlocks, one device",
+    "source": "Stone2026, Section 5.1, Table 1: hydrodynamics, linear wave on a uniform 512 x 256 x 256 grid in 128^3 MeshBlocks, one device (V100 298, A100 614, H100 677 x 10^6 cells/s)",
     "cells": 33554432,
     "like_for_like": {"factor": 4, "note": "Stone2026 does not state the precision or the integrator of the benchmark. AthenaK builds in double precision unless Athena_SINGLE_PRECISION is set (CMakeLists.txt), and its linear-wave input (inputs/tests/linear_wave_hydro.athinput) uses integrator = rk2 with PLM and LLF; https://github.com/IAS-Astrophysics/athenak, read 2026-11-15. Double precision moves twice the bytes per cell of single, and two stages make two passes over them, so per byte moved AthenaK's update counts four times."},
     "points": [
       {"device": "V100", "updates_per_second": 2.98e8, "bandwidth_gb_s": [900, 900]},
-      {"device": "A100", "updates_per_second": 6.14e8, "bandwidth_gb_s": [1555, 2039]}
+      {"device": "A100", "updates_per_second": 6.14e8, "bandwidth_gb_s": [1555, 2039]},
+      {"device": "H100", "updates_per_second": 6.77e8, "bandwidth_gb_s": [2000, 3900]}
     ]
   },
   "bandwidth_gb_s": {
     "V100": {"value": [900, 900], "source": "https://images.nvidia.com/content/technologies/volta/pdf/tesla-volta-v100-datasheet-letter-fnl-web.pdf", "note": "900 GB/s for both the SXM2 and PCIe cards (the V100S, 1134 GB/s, is a different product)"},
     "A100": {"value": [1555, 2039], "source": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "note": "1555 GB/s for the 40 GB card, 2039 GB/s for the 80 GB SXM card (1935 for the 80 GB PCIe); Stone2026 does not say which"},
     "Apple M4 Pro": {"value": [273, 273], "source": "https://www.apple.com/macbook-pro/specs/", "note": "Unified LPDDR5X memory shared by the CPU and the integrated GPU, 273 GB/s on every M4 Pro (the M4 has 120, the M4 Max 410 or 546). Measured on a 14-inch MacBook Pro with the 20-core GPU and 48 GB"},
+    "A100 SXM4 80GB": {"value": [2039, 2039], "source": "https://www.nvidia.com/content/dam/en-zz/Solutions/Data-Center/a100/pdf/nvidia-a100-datasheet-us-nvidia-1758950-r4-web.pdf", "note": "The 80 GB SXM card (the 80 GB PCIe card has 1935 GB/s, the 40 GB 1555). Unity's card reports NVIDIA A100-SXM4-80GB (nvidia-smi)"},
+    "H100": {"value": [2000, 3900], "source": "https://www.nvidia.com/content/dam/en-zz/Solutions/gtcs22/data-center/h100/PB-11133-001_v01.pdf (the document itself is PB-11133-001_v02, November 2022) and https://www.nvidia.com/en-us/data-center/h100/", "note": "AthenaK's H100 (Stone2026, Table 1) is not said to be the PCIe, SXM or NVL card: 2000 GB/s for the 80 GB PCIe card (product brief PB-11133-001_v02, Table 2), 3350 for the SXM and 3900 for the NVL (product specifications on the H100 page); read 2026-11-22"},
+    "H100 SXM": {"value": [3350, 3350], "source": "https://www.nvidia.com/en-us/data-center/h100/", "note": "Product specifications, H100 SXM: 80 GB, 3.35 TB/s (the H100 NVL has 3.9 TB/s); read 2026-11-22. Unity's card reports NVIDIA H100 80GB HBM3 (nvidia-smi), the SXM5 card"},
+    "H200 NVL": {"value": [4800, 4800], "source": "https://www.nvidia.com/en-us/data-center/h200/", "note": "Specifications, H200 NVL: 141 GB, 4.8 TB/s, marked preliminary by NVIDIA (the H200 SXM has the same); read 2026-11-22. Unity's card reports NVIDIA H200 NVL, 143771 MiB (nvidia-smi)"},
     "RTX 3080 12GB": {"value": [912, 912], "source": "https://www.gigabyte.com/Graphics-Card/GV-N3080GAMING-OC-12GD/sp", "note": "384-bit GDDR6X at 19 Gbps; the 10 GB card has 760 GB/s. The machine's card reports 12288 MiB (nvidia-smi)"}
   },
   "devices": [
     {"name": "RTX 3080 12GB", "label": "RTX 3080, Chrome", "data": "throughput.json"},
     {"name": "RTX 3080 12GB, Firefox", "gpu": "RTX 3080 12GB", "label": "RTX 3080, Firefox", "data": "throughput_firefox.json"},
-    {"name": "Apple M4 Pro", "label": "M4 Pro, Chrome", "data": "throughput_m4pro.json"}
+    {"name": "Apple M4 Pro", "label": "M4 Pro, Chrome", "data": "throughput_m4pro.json"},
+    {"name": "A100 SXM4 80GB", "label": "A100, Chromium", "data": "throughput_a100.json"},
+    {"name": "H100 SXM", "label": "H100, Chromium", "data": "throughput_h100.json"},
+    {"name": "H200 NVL", "label": "H200, Chromium", "data": "throughput_h200.json"}
   ]
 }

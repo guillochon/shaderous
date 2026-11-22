@@ -14,6 +14,7 @@ NVIDIA Vulkan ICD file into it when there is one, and set `PW_CHANNEL=shell` and
 | --- | --- |
 | `setup.sh` | Once, on a login node: clone or update the checkout in `~/shaderous`, pull the image to `~/containers/`, `npm ci` inside it |
 | `gpu-check.sbatch` | A one-hour job: the driver and Vulkan files, a small Sedov blast (its `manifest.json` should name an NVIDIA adapter), then the double white dwarf at 2048^3 with 5 levels for 100 steps with Helmholtz and with the degenerate gas: the block count (`mesh` in each `diag.jsonl` line, and printed) and seconds per step |
+| `throughput.sbatch` | The paper's throughput benchmark (Figure 12) on one GPU: the set of `make_performance.py --grids`, three times at normal priority, with the GPU, driver and browser in `device.txt`; merge the three outputs at home with `make_performance.py --merge` |
 | `dwd.sbatch` | The long run (grid `N`, levels `AMR`), as a chain of jobs that each carry on from the newest checkpoint |
 | `checkpoints.mjs` | Finds the newest whole checkpoint of a chained run, prunes old ones, says why the last job stopped |
 | `common.sh` | Shared settings: paths, the container call, GPU memory, time left in the job |
