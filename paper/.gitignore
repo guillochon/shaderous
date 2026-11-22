@@ -24,3 +24,7 @@ Thumbs.db
 
 # uv
 uv.lock
+
+# Downloaded papers (research/<citekey>/): third-party texts, kept locally, never committed.
+# The notes beside them (research/*.md, *.json) are tracked.
+research/*/
