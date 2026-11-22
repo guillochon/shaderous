@@ -1074,6 +1074,118 @@ digit; the cause is not found.
   distances are the CPU's (fine for static bodies); second order in time for redistribution;
   the Galilean gap; the fast rotor's tip.
 
+#### 8.1.5 Why the fast rotor brakes: the twist checked, the sections' drag (2026-11-22)
+
+The question: is `builtin:turbine-fast` wrong for a tip-speed ratio of 4 (twist or a sign), or
+is its tip under-resolved? Neither, as such: **the twist and the sense of turning are right;
+the sections' drag is three to four times what a rotor at this ratio can afford.** Scripts:
+`tools/cutcell/turbine_bem.py` (geometry, blade element estimate), `turbine_invert.py` (the
+sections' lift and drag from 8.1.4's span loads), `section.ts` (a section on the 2D float64
+prototype); GPU test `cut-turbine-sense`.
+
+**The blade as built** (R = 0.8 box units in the preset; chord tapers 0.30 R to 0.15 R; the
+section NACA 0020 thickened to 0.03 R wherever thinner; set at 6° to the relative wind of the
+design ratio 4 with the Betz induction, φ = atan((2/3)/(4 r))):
+
+| r/R | 0.2 | 0.3 | 0.4 | 0.5 | 0.6 | 0.7 | 0.8 | 0.9 | 1.0 |
+|---|---|---|---|---|---|---|---|---|---|
+| chord / R | 0.300 | 0.281 | 0.263 | 0.244 | 0.225 | 0.206 | 0.187 | 0.169 | 0.150 |
+| twist to the rotor plane (°) | 33.8 | 23.1 | 16.6 | 12.4 | 9.5 | 7.4 | 5.8 | 4.5 | 3.5 |
+| thickest / chord | 0.20 | 0.20 | 0.20 | 0.20 | 0.20 | 0.20 | 0.20 | 0.20 | 0.20 |
+| the floor 0.03 R / chord | 0.10 | 0.11 | 0.11 | 0.12 | 0.13 | 0.15 | 0.16 | 0.18 | 0.20 |
+| cells on the chord, 128³ / 256³ | 10 / 20 | 10 / 19 | 9 / 18 | 8 / 17 | 8 / 15 | 7 / 14 | 6 / 13 | 6 / 12 | 5 / 10 |
+| cells through the thickest, 128³ / 256³ | 2.0 / 4.1 | 1.9 / 3.8 | 1.8 / 3.6 | 1.7 / 3.3 | 1.5 / 3.1 | 1.4 / 2.8 | 1.3 / 2.6 | 1.2 / 2.3 | 1.0 / 2.0 |
+
+The floor is applied along the whole chord, nose included: outboard it makes the section a slab
+with a square nose and a square base as thick as the floor (at the tip, where the floor equals
+the thickest point, a rectangle 20% of the chord thick). The Reynolds number on the chord is
+3000 at the root to 5000 at the tip (W c / ν, ν = 1e-4).
+
+**Conventions.** The blade's leading edge leads in +x × e_r, the frame turns at +Ω about +x
+(the tunnel's inflow is U − Ω × r), and the mesh's placement (`up: z`) is the identity: a
+positive lift has a component along the turning and drives. Measured
+(`cut-turbine-sense`, 128³, cut cells, Courant 0.4): C_p −0.097 at Ω = +5 against −0.703 at
+Ω = −5 (thrust 1.09 and 1.15): turned backwards, it brakes seven times harder.
+
+**What the simulation's blades see** (`turbine_invert.py`): from 8.1.4's thrust and torque on
+each tenth of the span (256³, cut cells, t = 1.2), the axial induction from momentum on each
+annulus (no tip loss), then each section's lift and drag:
+
+| r/R | 0.25 | 0.35 | 0.45 | 0.55 | 0.65 | 0.75 | 0.85 | 0.95 |
+|---|---|---|---|---|---|---|---|---|
+| induction a | 0.25 | 0.32 | 0.33 | 0.29 | 0.23 | 0.21 | 0.14 | 0.10 |
+| angle of attack (°) | +7.8 | +5.5 | +6.3 | +7.3 | +8.5 | +8.5 | +9.3 | +9.7 |
+| C_l | 0.75 | 0.90 | 0.83 | 0.71 | 0.56 | 0.51 | 0.35 | 0.24 |
+| C_d | 0.31 | 0.25 | 0.35 | 0.33 | 0.29 | 0.27 | 0.23 | 0.23 |
+| L/D | 2.4 | 3.6 | 2.4 | 2.2 | 1.9 | 1.9 | 1.5 | 1.0 |
+
+(Inboard of 0.4 R the spinner, of radius 0.4 R, adds its thrust to the bins: those columns
+overstate both.) The angle of attack is positive and near the design's 6° along the span; the
+lift is the right way. The drag is what is wrong: a section turns the wind's force into
+driving torque only where L/D > cot φ, which is 2.7 at 0.5 R and 5 to 6 at the tip.
+
+**Blade element estimate** (`turbine_bem.py`: momentum with Prandtl's tip and hub losses and the
+Glauert branch; C_l = 4.5 α, the slope the inversion gives, stalled at 15°; C_d constant):
+
+| C_p at tip-speed ratio | 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|
+| no induction, thin airfoil (2π α, C_d 0.01) | +0.36 | +0.76 | +1.26 | +1.43 | +1.37 |
+| with induction, thin airfoil | +0.28 | +0.40 | +0.41 | +0.40 | +0.34 |
+| with induction, C_d 0.08 | +0.25 | +0.29 | +0.18 | −0.03 | −0.36 |
+| with induction, C_d 0.15 | +0.22 | +0.19 | −0.02 | −0.41 | −1.00 |
+| with induction, C_d 0.28 | +0.15 | +0.03 | −0.38 | −1.06 | −2.07 |
+| **the simulation** (256³, cut cells, Courant 0.2) | **+0.03** | **−0.07** | **−0.32** | **−0.74** | **−1.39** |
+
+With C_d 0.28 the estimate gives what the simulation shows: at ratio 4 the torque drives
+inboard and brakes from 0.5 R out, C_p −0.38 (simulation −0.32 to −0.36), and the sign
+changes near ratio 3 (simulation: between 2 and 3). With the thin airfoil's polar the angle of
+attack at ratio 4 is +5 to +7° over the outer half and the rotor gives C_p 0.41: the twist is
+right for ratio 4. The rotor drives at ratio 4 only if the sections' C_d is under about 0.14.
+
+**The sections alone** (`section.ts`, the 2D float64 prototype, at 9°, Re 5000, a box of 8
+chords with a sponge, means over t = 8 to 16):
+
+| section | C_l / C_d, 10 cells on the chord | 20 cells |
+|---|---|---|
+| tip: NACA 0020 floored at 0.20 (a rectangle) | 0.50 / 0.26 | 0.38 / 0.30 |
+| 0.75 R: floored at 0.15 (square nose and base) | 0.50 / 0.17 | 0.05 / 0.16 |
+| NACA 0020, round nose, floor 0.20 aft of 30% (blunt base) | 0.72 / 0.22 | 0.70 / 0.17 |
+| the same, floor 0.15 | 0.51 / 0.16 | 0.32 / 0.14 |
+| the same, floor 0.05 | 0.38 / 0.09 | 0.55 / 0.13 |
+| NACA 0020, sharp | 0.48 / 0.16 | 0.53 / 0.12 |
+| NACA 0012, sharp | 0.51 / 0.11 | 0.58 / 0.12 |
+
+These sections shed and their means move by 0.1 to 0.5 in C_l between grids (the floored
+0.15 section's 0.05 at 20 cells is one such); the drag is steadier. Two runs at 20 and 40
+cells diverged after hours (not looked into). What holds across them: the tip's rectangle has
+C_d 0.26 to 0.30, as the GPU's blades imply; no section here, sharp ones included, does better
+than C_d 0.09 to 0.12 and L/D 4 to 5 at Re 5000. Drag did not fall from 10 to 20 cells.
+
+**Conclusion.** Not (a) as posed: the twist gives the design angle of attack at ratio 4, and
+the sense of turning is right. Not (b) as posed either: more cells on the tip's chord do not
+lower a rectangle's drag. It is the section and the Reynolds number:
+- **The thickness floor** (0.03 R, there so that a blade is two cells thick on the preset's
+  128³) makes the outer half of the blade square-nosed slabs, C_d 0.25 to 0.30.
+- **At Re 3000 to 5000** even a good section has L/D of 4 to 5, and a rotor at a tip-speed
+  ratio of 4 needs about 6 or more at the tip. A rotor designed for ratio 2 to 3 is what these
+  sections can turn; at ratio 4 the estimate's best case (C_d 0.08 to 0.12) gives C_p 0.05 to
+  0.18.
+
+What would make a fast rotor drive, in order of cost:
+1. A round nose (the floor only aft of the thickest point) and a thinner floor: cheaper drag,
+   C_d about 0.13 to 0.17 in 2D, which the estimate puts at C_p about 0 at ratio 4 and +0.2 at
+   ratio 3. A floor of 0.01 R at the tip (7% of its chord) is 2 cells only at 768³ uniform,
+   past this machine's uniform grids (256³): blocks with 3 levels, and cut cells on blocks
+   (not built).
+2. A design ratio of 2.5 to 3 for the same sections: the estimate gives C_p 0.2 to 0.3.
+3. A higher Reynolds number (ν 1e-5): needs the boundary layer under a cell, so the wall model
+   of 8.2 becomes what is missing then.
+
+The wind-turbine preset stays as it is. Nothing in the builtin or the solver was changed.
+**Not verified**: the estimate's polar is a fit, with the tip loss in the estimate and not in
+the inversion; the 2D sections are 2D, not converged, without rotation; no 3D run of a
+changed blade.
+
 
 ### 8.2 A wall model
 
