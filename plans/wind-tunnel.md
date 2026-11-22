@@ -1186,6 +1186,77 @@ The wind-turbine preset stays as it is. Nothing in the builtin or the solver was
 the inversion; the 2D sections are 2D, not converged, without rotation; no 3D run of a
 changed blade.
 
+#### 8.1.6 Plan: the blade sections on the GPU, converged (2026-11-22, not started)
+
+The section polars of 8.1.5 came from the CPU prototype at 10 and 20 cells on the chord: the
+boundary layer under a cell, lift swinging 0.1 to 0.5 between grids, two finer runs diverged
+after hours. The GPU does the same 2D runs at 32 to 256 cells on the chord in minutes. Goal:
+converged C_l and C_d for the five sections, the flow pictures of 8.1.5 (vorticity at an
+instant, mean speed and streamlines) at each resolution, and an answer to whether the steps
+seen along a sloped wall (about 5% in the wall cells' speed, every 1/tan(alpha) cells, where a
+cell's gas share falls through 1/2) are in the GPU's cut cells too, and whether they shrink.
+
+**What has to be built first** (no GPU needed):
+1. **The sections as built-in bodies.** Generalize `nacaWing` (`geometry/builtin.ts`) with the
+   floor and the round nose as in `turbineRotor`, and register `section-tip` (NACA 0020,
+   floor 0.20), `section-075` (floor 0.15), `section-round` (floor 0.15 aft of 30%),
+   `naca0020`; `naca0012` exists. Chord 1, quarter chord at the origin, as `naca0012`. A unit
+   test that each builtin's 2D cut (the shape at z = 0) has the area of the polygon in
+   `tools/cutcell/section.ts`.
+2. **The forces**: a GPU test `cut-sections` (`validation/cut.ts`, as `cut-airfoil`): box 8
+   chords (the prototype's), the section turned by 9° (`rotate`, as `cut-airfoil` turns its
+   5°), in a `tunnel` with its sponge (as `cut-cylinder-re40`; `cut-airfoil`'s box is periodic
+   without one, and over 16 units of time the wake would come round again), U = 1,
+   ν = 2e-4 (Re 5000), Mach 0.1, cut cells; C_l, C_d and the shear's part averaged by
+   `meanForce` over t = 8 to 24 (the sections shed: 16 units of time, about 16 shedding
+   periods), at 32, 64, 128 and 256 cells on the chord (n = 256 to 2048: the multigrid takes
+   powers of two), and the rms of C_l over the window. The staircase alongside at 32 and 128.
+3. **The fields**: the command-line runner on a setup document per section and grid
+   (`--slice` of the two velocities, the pressure and the density, `--slice-format npy`):
+   full-resolution slices at t = 16 and 24 for the instant pictures; every 0.25 from 8 to 24 at
+   `--slice-res 1024` for the means (64 snapshots, about 1 GB a run). The runner's force
+   readings land on its output times (a short landing step, 8.1.4), so forces come from (2)
+   only.
+4. **The gas share of each cell** for the plots and the wall-cell analysis: `cutGeometry`
+   (`hydro/cut.ts`) is CPU code; a node script runs it for the same body and grid and writes φ
+   and the face shares as npy, so the plots blank only cells the GPU had as solid, and the
+   wall cells can be listed as in 8.1.5 (speed along the wall against φ).
+5. **Plots**: the scratchpad's `figs.py` and `flowfigs.py` moved to `tools/cutcell/` and made
+   to read the GPU's npy files; vorticity from gas cells only (one-sided at the wall), not
+   differenced across it.
+
+**The runs** (GPU, below-normal priority, a static build on its own port):
+- **A check against the prototype first**: the NACA 0012 at 5°, Re 1000, at 32 and 64 cells,
+  against `cut-airfoil`'s numbers (already in the test suite), and the tip section at 9°, Re
+  5000, at 16 and 32 cells against 8.1.5's prototype numbers at 10 and 20 (they should
+  bracket them).
+- **The study**: 5 sections × 4 grids. Cost, from the 3D runs (256³, 16.7 M cells, 79 ms a
+  step): 2048² is 4.2 M cells, about 20 ms a step; at Courant 0.4 a step is about 1e-3, so
+  t = 24 is about 24 000 steps, 8 minutes. All twenty runs about an hour and a half; the
+  field runs about as much again. Memory: about 300 bytes a cell with implicit pressure and
+  cut cells, 1.3 GB at 2048².
+- **The box**: the tip section and the NACA 0012 at 64 cells in a box of 16 chords (n = 1024)
+  against 8: how much the box's walls add.
+- **512 cells on the chord** only if 256 has not settled: n = 4096 is about 5 GB, past what
+  the GPU budget allows; a box of 4 chords at 2048 instead, its effect measured by the box
+  check.
+- **The timestep**: the tip section at 128 cells at Courant 0.4 and 0.2 (8.1.4 found the
+  turbine's torque 11% apart between those).
+
+**What it answers, and what follows:**
+- Converged C_d for each section at Re 5000. If the sharp sections settle near 0.06 to 0.10
+  (my estimate, from laminar friction and separation at 9°; not measured), the 20-cell numbers
+  of 8.1.5 were 20 to 50% high; the slabs' ranking against the airfoils should hold.
+- A published low-Reynolds-number airfoil to compare against (NACA 0012 at Re 1000 to 10 000
+  from DNS; to be found and cited), so that the sections are checked against reality, not
+  against themselves.
+- The wall-cell steps on the GPU: their size against resolution, and whether the GPU's
+  smoothed gas shares (8.1.4) make them smaller than the prototype's exact clipping. If they
+  stay at about 5% when the grid is refined, they are the redistribution's and worth fixing
+  (weighting by the gas share, Berger & Giuliani's weighted form) before moving bodies.
+- The converged polars into `turbine_bem.py`: the fast rotor's C_p at ratios 2 to 6 for each
+  section, and with it whether a round-nosed builtin is worth a 3D run.
+
 
 ### 8.2 A wall model
 
