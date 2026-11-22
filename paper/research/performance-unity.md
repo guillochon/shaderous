@@ -72,3 +72,20 @@ The divisions cost nothing measurable. Returning early where the flow is smooth 
 - Larger uniform grids: 512^3 lost the device on every GPU tried; a two-dimensional grid is held in 3D textures, at most 2048 per side.
 
 Node and driver matter at the level of a few percent: the same A100 model gave 1.20 x 10^9 on 256^3 on umd-cscdr-gpu001 (driver 580.178.04) and 1.28 x 10^9 on umd-cscdr-gpu002 (595.91.07).
+
+## Stored primitives (after the figure)
+
+Following the experiments above, the uniform grid can keep each cell's primitives once a step (the timestep-rates pass writes what `load_q` returns; `primStored` in `src/sim.ts`, setup key `physics.storedPrims`). It is on by default for the equations of state that iterate, solve or read a table. Measured on the A100 (umd-cscdr-gpu002, driver 595.91.07, Slurm job 2129900, branch `stored-primitives` at commit afc5287), ms per step, off against on, the median of three timings that agreed to better than 1 percent (the 64^3 planet's first timing 8 percent above the others):
+
+| Setup | off | on | speedup |
+|---|---|---|---|
+| Kelvin-Helmholtz 2D, 2048^2, ideal gas | 2.119 | 2.098 | 1.01 |
+| Sedov 3D, 256^3, ideal gas | 12.198 | 11.872 | 1.03 |
+| White dwarf 3D, 128^3, degenerate | 5.743 | 4.255 | 1.35 |
+| White dwarf 3D, 256^3, degenerate | 35.310 | 24.220 | 1.46 |
+| White dwarf 3D, 128^3, Helmholtz | 19.490 | 6.251 | 3.12 |
+| White dwarf 3D, 256^3, Helmholtz | 116.850 | 38.454 | 3.04 |
+| Planet 3D (`planet` preset, ANEOS, two compositions), 64^3 | 5.399 | 2.024 | 2.67 |
+| Planet 3D, 128^3 | 29.882 | 7.758 | 3.85 |
+
+On the RTX 3080 (prototype, 64^3 and 1024^2) Helmholtz was 1.75 times faster, the degenerate gas 1.16 times, and the ideal gas 3 to 5 percent slower. The results agree to round-off: bit for bit on the RTX 3080 and with driver 580 on the A100; with driver 595, 9e-9 relative after 30 steps for the degenerate gas and 1e-6 for Helmholtz (validation test `stored-primitives`).

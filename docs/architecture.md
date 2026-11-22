@@ -191,9 +191,9 @@ textures that `load_q` reads (`hydro/prim_load_on.wgsl`, `hydro/prim_store_on.wg
 are the conversion's own, so results change only at round-off: bit for bit on some drivers,
 while others compile the conversion a little differently in the rates pass than in the predictor
 (1e-8 relative after 30 steps with the degenerate gas on an A100, 1e-6 with Helmholtz). They cost 32 bytes per cell. On by default for every equation of state but the
-ideal gas, the barotropic gas and the liquid: on an A100 a 3D white dwarf's step is 2.8 to 3.0
-times faster with Helmholtz and 19 to 22% with the degenerate gas, while the ideal gas gains 1 to
-2% there and loses 3 to 5% on an RTX 3080. (The adaptive mesh stores its primitives anyway,
+ideal gas, the barotropic gas and the liquid: on an A100 a 3D white dwarf's step is 3.0 to 3.1
+times faster with Helmholtz and 1.35 to 1.46 times with the degenerate gas, an ANEOS planet's 2.7
+to 3.9 times, while the ideal gas gains 1 to 3% there and loses 3 to 5% on an RTX 3080. (The adaptive mesh stores its primitives anyway,
 ghosts included: `amr/assemble.wgsl`.)
 
 ## Anatomy of a uniform-grid step

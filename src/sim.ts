@@ -764,9 +764,10 @@ export function cosmologyOf(c: SimConfig): Cosmology | null {
 /**
  * Equations of state that iterate, solve or read a table to convert the conserved state, so
  * that converting each cell once a step (stored primitives) saves much more arithmetic than its
- * texture traffic costs. Measured on an A100: a 3D white dwarf's step 2.8 to 3.0 times faster
- * with Helmholtz and 19 to 22 percent with the degenerate gas; with the ideal gas 1 to 2
- * percent, and 3 to 5 percent slower on an RTX 3080, so the closed-form ones are left out.
+ * texture traffic costs. Measured on an A100 (paper/research/performance-unity.md): a 3D white
+ * dwarf's step 3.0 to 3.1 times faster with Helmholtz and 1.35 to 1.46 times with the degenerate
+ * gas, an ANEOS planet's 2.7 to 3.9 times; with the ideal gas 1 to 3 percent faster, and 3 to 5
+ * percent slower on an RTX 3080, so the closed-form ones are left out.
  */
 const COSTLY_EOS: readonly EosKind[] = ['gas_radiation', 'degenerate', 'ionizing', 'helmholtz', 'hhe', 'aneos'];
 
