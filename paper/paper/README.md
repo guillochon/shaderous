@@ -39,6 +39,7 @@ Every figure is drawn by a script in `figures/`; the PDFs are committed and the 
 | `make_amr.py` | `amr.pdf` | `data/amr/`: images from the renderer (`shots.mjs`) |
 | `make_gravity.py` | `gravity.pdf` | `data/gravity/`: Evrard runs (the command-line runner) and the sphere's potential (`collect.mjs`) |
 | `make_tde.py` | `tde.pdf` | `data/tde/`: two tidal disruptions with debris energies (the command-line runner) |
+| `make_merger.py` | `merger.pdf` | `data/merger/`: a view of a magnetized double white dwarf from its checkpoint (`shots.mjs`). Taking it again needs the run's 3.5 GB checkpoint, which is not committed |
 | `make_gallery.py` | `gallery.pdf` | `data/gallery/`: images from the renderer and the interface (`shots.mjs`) |
 | `make_setup.py` | `setup.pdf` | `data/setup/`: a setup file (`collision.shaderous.json`), the Setup dialog showing it and two views of its run (`shots.mjs`) |
 | `make_performance.py` | `performance.pdf` | `data/performance/`: throughput on this machine's GPU (`collect.mjs`) |

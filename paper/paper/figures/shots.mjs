@@ -5,7 +5,7 @@
 //
 //   node paper/figures/shots.mjs SPEC.json OUTDIR [NAME...]
 //
-// SPEC.json is a list of shots: { name, setup, until, steps?, view?, width?, height?, page?, images?, document?, dialog?, fill?, scale? }
+// SPEC.json is a list of shots: { name, setup, until, steps?, view?, width?, height?, page?, images?, document?, dialog?, fill?, scale?, athdf?, athdfOptions? }
 // (with NAMEs after OUTDIR, only those).
 // `setup` is a link's query string; `view` is passed to shaderous.view() (docs/api.md). `images`,
 // a list of { name, view? }, takes several images of the one run, each with its own view on top
@@ -14,10 +14,12 @@
 // has reached `until` and drawn a few frames. `document` names a setup file beside SPEC.json
 // (docs/setups.md): the run is built from it, and `setup` then says only what differs. With
 // `dialog`, the name of one of its pages, the Setup dialog is opened on that page and the image
-// is of the dialog alone. Run from the code's repository, at low priority.
+// is of the dialog alone. `athdf`, a checkpoint's path from the code's repository, opens it for
+// viewing only (viewAthdf, with `athdfOptions`) instead of running a setup. Run from the code's
+// repository, at low priority.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { lowerPriority, openSession, pngBytes } from '../../../tools/headless/session.mjs';
+import { lowerPriority, openSession, pngBytes, REPO, viewAthdf } from '../../../tools/headless/session.mjs';
 
 const [specFile, outDir, ...only] = process.argv.slice(2);
 if (!specFile || !outDir) {
@@ -38,8 +40,10 @@ for (const shot of shots) {
   try {
     if (shot.page) await s.call('pause');
     if (shot.document) await s.call('load', shot.setup ?? '', JSON.parse(readFileSync(path.join(path.dirname(specFile), shot.document), 'utf8')));
+    if (shot.athdf) await viewAthdf(s.call, path.resolve(REPO, shot.athdf), shot.athdfOptions ?? {});
     const st = await s.call('state');
-    let r = await s.call('run', { until: shot.until });
+    // (A checkpoint open for viewing does not step: it is shown at its own time.)
+    let r = shot.athdf ? { t: st.t, steps: st.steps } : await s.call('run', { until: shot.until });
     // `steps`: then that many ordinary steps. A run that lands on a time shortens its last step,
     // and with per-block timesteps that last cycle's bins are not the run's usual ones.
     if (shot.steps) r = await s.call('run', { steps: shot.steps });

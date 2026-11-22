@@ -1,0 +1,30 @@
+[
+ {
+  "name": "merger",
+  "athdf": "runs/unity-dwd-1024/seg-2070200-r1/0010-t46.athdf",
+  "athdfOptions": { "oneField": true, "faces": true },
+  "width": 2400,
+  "height": 1500,
+  "view": {
+   "mode": "volume",
+   "field": 0,
+   "log": true,
+   "lo": 5.03e-6,
+   "hi": 0.0562,
+   "colormap": "inferno",
+   "tf": "0:0,0.15:0.15,0.4:0.25,0.7:0.3,1:0.5",
+   "fog": true,
+   "opacity": 40,
+   "contours": true,
+   "nContours": 8,
+   "surfaceOpacity": 0.11,
+   "box": false,
+   "showBlocks": false,
+   "fieldLines": true,
+   "fieldLineCount": 300,
+   "yaw": 1.0,
+   "pitch": 0.8,
+   "dist": 1.0
+  }
+ }
+]
