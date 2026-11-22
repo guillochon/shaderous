@@ -12,7 +12,7 @@ sweep's results and the optimizations are in.
 | Start | At `fill` 0.97 the pair ran about 3 orbits (t ≈ 60) before transfer grew, and 4.5 (t ≈ 88) before the merger | Start where transfer is just beginning: pick `fill` from the sweep (§1) |
 | Frame after the merger | The followed frame turned at random once the donor broke up (Ω from 0.36 to 0.07 and back to 0.13 between t = 83 and 106) | `release: true`, in the example since commit 0145dbc (§2) |
 | Block budget | Full at t = 60 (27,000 blocks with parents, 74 GB of an A100). The finest level then lost blocks to coarser ones as the debris spread | The coming optimizations (§3); a larger card or fewer levels if they are not enough |
-| Box | 8 units (40,000 km from center to face). The tidal tail left through the faces: 3.5% of the mass by t = 104 | A larger box (§4) |
+| Box | 8 units (40,000 km from center to face). The tidal tail left through the faces: 3.5% of the mass by t = 104 | Box 16 at 2048³, the same finest cell (§4) |
 | Center of mass | Drifted 0.003 per code unit in the inertial frame (0.13 by t = 80), from grid self-gravity's momentum error and uneven outflow | Watch it. Once the frame is released and at rest, the drift is seen as it is |
 | Cost | 4.2 GB checkpoints: about 15 min to write and 20 min to reload. 2.8 to 4.2 code units per wall hour | The optimizations (§3) |
 
@@ -35,9 +35,10 @@ adjusting. Also record ρ at L1 over the donor's central density, and look at sl
 - **Fills:** 0.935 to 0.965 in steps of 0.005, which is 7 runs. 0.97 is known to overflow, so
   nothing at or above it.
 - **Length:** 1 orbit each (t = 20), enough to see whether the donor overflows.
-- **Grid:** the run's own: box 12, 1024³ with 5 levels. On Unity's `umd-cscdr-gpu` (the first run holds one of its
+- **Grid:** the run's own: box 16, 2048³ with 5 levels, so the finest cell (0.0078) is the
+  first run's. Five levels is the most the code allows; at 2048³ it leaves 64³ root cells. On Unity's `umd-cscdr-gpu` (the first run holds one of its
   12 A100s), all 7 at once, with `--gpu-memory 74`. The first run took about 12 minutes per
-  code unit on an A100 at this stage, on a finer mesh, so each should finish in 3 to 5 hours.
+  code unit on an A100 at this stage, on the same finest cell, so each should finish in 4 to 5 hours.
   Eight checkpoints each, at 2 to 3 GB, come to about 150 GB of `/work`, which has 580 GB
   free. Delete them once Ṁ is measured.
 
@@ -61,11 +62,10 @@ Another session is working on optimizations. Before submitting:
 
 ## 4. Decisions
 
-1. **Box size: 12** (60,000 km from center to face; chosen 2026-11-22). Grids come in powers of
-   two, so at 1024³ the finest cell is 0.0117, 1.5 times the first run's 0.0078. Keeping 0.0078
-   in a box of 12 would take n = 1536, which is not on offer. The next size up, 2048³ with 6
-   levels, makes the cell 0.0059 and needs about 2.4 times the blocks on the stars. A box of 16
-   at 2048³ with 6 levels would keep exactly 0.0078 for about the first run's block count.
+1. **Box size: 16 at 2048³ with 5 levels** (80,000 km from center to face; chosen 2026-11-22).
+   The finest cell stays 0.0078, the first run's, so the stars and the stream are resolved as
+   before. The extra volume only adds coarse blocks where little gas goes. A box of 12 would have
+   needed a cell 1.5 times coarser at 1024³, since grids come in powers of two.
 2. **GPU.** The dedicated A100s (never preempted, 5 days) or the H200 (twice the memory,
    preempted twice before).
 3. **Length.** 20 orbits after the start, as in the first run, or a set time after the merger.
