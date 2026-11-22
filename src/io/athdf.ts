@@ -127,6 +127,12 @@ export async function writeAthdfFile(file: string, s: Snapshot, h5: H5, gzip = 0
 
 /** Blocks of the face field written or read at a time, so HDF5's memory holds a part of it only. */
 const FACE_SLAB = 2048;
+/**
+ * Blocks of the face field read at a time in parts (AthdfReader.readFaces): 7 MB in 3D. HDF5
+ * reads into WebAssembly's memory, where after some reads in a browser's worker a run of 60 MB
+ * (1,024 blocks) could not be found.
+ */
+const FACE_READ_SLAB = 128;
 
 function writeInto(lib: Library, name: string, s0: Snapshot, gzip: number): void {
   const cyl = s0.geometry === 'cylindrical';
@@ -383,10 +389,10 @@ export function openAthdf(lib: Library, name: string): AthdfReader {
         return asF32(w.set.slice([[w.index, w.index + 1], [block, block + 1], z, y, x]));
       },
       readFaces(b0, b1) {
-        // A slab of blocks at a time, as it is written.
+        // A slab of blocks at a time.
         const out = new Float32Array((b1 - b0) * facesPerBlock * 3);
-        for (let b = b0; b < b1; b += FACE_SLAB) {
-          const e = Math.min(b1, b + FACE_SLAB);
+        for (let b = b0; b < b1; b += FACE_READ_SLAB) {
+          const e = Math.min(b1, b + FACE_READ_SLAB);
           out.set(faces!.slice([[b, e], [], [], [], []]) as ArrayLike<number>, (b - b0) * facesPerBlock * 3);
         }
         return out;

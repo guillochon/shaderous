@@ -2010,6 +2010,12 @@ let viewNote = '';
 let viewing: { file: ViewFile; name: string; level: number; field: number; species: string | null; faces: boolean } | null = null;
 /** The bake under way, if any (settleView). */
 let baking: Promise<void> | null = null;
+/**
+ * What the last bake that failed was for (settleView's `want`), and why: not tried again on its
+ * own each frame (which flickered the loading message without end), only when what is shown
+ * changes, or when asked (control, view).
+ */
+let bakeFailed: { want: string; message: string } | null = null;
 /** Fields a view that holds one field cannot bake: they need neighbors, or what a checkpoint lacks. */
 const UNBAKEABLE = new Set([11, 12, 13, 15, 20, 21, 27, 30, 31, 32, 33, 34, 35, 36]);
 /** Fields no view-only load has: the potential (gravity is off), the shock flag, time bins, burning, radiation. */
@@ -2027,9 +2033,17 @@ const shownSpecies = (): string | null => (view.field === 19 ? (cfg.problem.spec
  * A view that holds one field: bake the field shown if it is not the one held (on the GPU, from
  * the file, a batch of blocks at a time: AmrSim.bake). Resolves once it holds the field shown.
  */
+/** What a view that holds one field is asked to show: its field, species and whether field lines are on (bakeFailed). */
+const viewWanted = () => `${view.field} ${shownSpecies()} ${!!view.fieldLines && !!cfg?.problem.mhd}`;
+
 function settleView(): Promise<void> {
   if (baking) return baking;
   if (!cfg?.viewBaked || !viewing || !sim) return Promise.resolve();
+  const want = viewWanted();
+  const fail = (e: unknown) => {
+    bakeFailed = { want, message: e instanceof Error ? e.message : String(e) };
+    throw e;
+  };
   const v = viewing;
   // Field lines asked for where the face field was not loaded: opened again with it, at the
   // finest level where the faces fit too.
@@ -2081,7 +2095,10 @@ function settleView(): Promise<void> {
       v.field = field;
       v.species = species;
       if (faces) v.faces = true;
+      bakeFailed = null;
       renderer.invalidate();
+    } catch (e) {
+      fail(e);
     } finally {
       setLoadStage('');
     }
@@ -5290,9 +5307,18 @@ function tick(now: number) {
   lastTick = now;
   // Loading: no simulation yet, a restart or rebuild under way, or a star still settling.
   const loading = !sim || !!reloading || sim.preparing || !!baking;
-  // A view that holds one field bakes the field shown when it changes (headless too).
-  if (sim && !building && cfg?.viewBaked && viewing && !baking && (viewing.field !== view.field || viewing.species !== shownSpecies() || (view.fieldLines && !!cfg.problem.mhd && !cfg.viewFaces))) {
-    settleView().catch((e) => console.warn(`view: ${e instanceof Error ? e.message : String(e)}`));
+  // A view that holds one field bakes the field shown when it changes (headless too); one that
+  // failed is not tried again until what is shown changes.
+  if (
+    sim && !building && cfg?.viewBaked && viewing && !baking &&
+    (viewing.field !== view.field || viewing.species !== shownSpecies() || (view.fieldLines && !!cfg.problem.mhd && (!cfg.viewFaces || !viewing.faces))) &&
+    bakeFailed?.want !== viewWanted()
+  ) {
+    settleView().catch((e) => {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`view: ${message}`);
+      alert(`Could not read ${viewFieldName().toLowerCase()}${view.fieldLines && cfg?.problem.mhd ? ' and the magnetic field' : ''} from ${viewing?.name ?? 'the file'}: ${message}`);
+    });
   }
   if (loadingEl.hidden === loading) loadingEl.hidden = !loading;
   if (loading) showLoadingMessage();

@@ -53,6 +53,10 @@ What changed in each release of Shaderous. A release's section here is the body 
   field, was bounded by a flux register a view does not use), so a file just under the budget
   failed with "the mesh has no leaf at level ..." and was drawn with holes. If the GPU makes a
   smaller atlas than asked, the view is planned again against it.
+- A view's field lines no longer flicker "Reading ... and the magnetic field" without end: the
+  reader's WebAssembly memory could run short of a 60 MB run for the faces after many reads, and
+  the page tried again every frame. The faces are read 128 blocks at a time, a reader that runs
+  short starts over in a fresh worker, and a read that still fails says why once.
 - The command-line runner starts `diag.jsonl` empty: a second run into the same folder appended
   its diagnostics to the first run's.
 

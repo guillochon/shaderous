@@ -34,38 +34,56 @@ type Reply = {
 
 /** Open a checkpoint for reading in parts: a File (read in place), or a URL the page can fetch from (read with range requests). */
 export async function openViewFile(file: File | string): Promise<ViewFile> {
-  const worker = new Worker(new URL('./view_worker.ts', import.meta.url), { type: 'module' });
+  let worker!: Worker;
   let progress: ((f: number) => void) | undefined;
   let onBatch: ((b: ViewBatch) => void) | undefined;
   let waiting: { resolve: (r: Reply) => void; reject: (e: Error) => void } | null = null;
   // One request at a time: the next waits for the last.
   let queue: Promise<unknown> = Promise.resolve();
-  worker.onmessage = (e: MessageEvent<Reply>) => {
-    if (e.data.progress !== undefined) return progress?.(e.data.progress);
-    if (e.data.batch) return onBatch?.(e.data.batch);
-    const w = waiting;
-    waiting = null;
-    if (e.data.error) w?.reject(new Error(e.data.error));
-    else w?.resolve(e.data);
+  const start = () => {
+    worker = new Worker(new URL('./view_worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (e: MessageEvent<Reply>) => {
+      if (e.data.progress !== undefined) return progress?.(e.data.progress);
+      if (e.data.batch) return onBatch?.(e.data.batch);
+      const w = waiting;
+      waiting = null;
+      if (e.data.error) w?.reject(new Error(e.data.error));
+      else w?.resolve(e.data);
+    };
+    worker.onerror = (e) => {
+      const w = waiting;
+      waiting = null;
+      w?.reject(new Error(e.message || 'the file reader stopped'));
+    };
   };
-  worker.onerror = (e) => {
-    const w = waiting;
-    waiting = null;
-    w?.reject(new Error(e.message || 'the file reader stopped'));
-  };
+  const send = (msg: unknown, p?: (f: number) => void, b?: (x: ViewBatch) => void) =>
+    new Promise<Reply>((resolve, reject) => {
+      progress = p;
+      onBatch = b;
+      waiting = { resolve, reject };
+      worker.postMessage(msg);
+    });
+  // HDF5's WebAssembly memory can run short after many reads (a large allocation finds no room):
+  // then the reader starts over in a fresh worker, the file opened again, and the request is
+  // made once more. (A stream's batches handed over before are handed over again; they are the
+  // same blocks.)
+  const short = (e: unknown) => /memory allocation|maximum memory|out of memory/i.test(e instanceof Error ? e.message : String(e));
   const ask = (msg: unknown, p?: (f: number) => void, b?: (x: ViewBatch) => void): Promise<Reply> => {
-    const run = queue.then(
-      () =>
-        new Promise<Reply>((resolve, reject) => {
-          progress = p;
-          onBatch = b;
-          waiting = { resolve, reject };
-          worker.postMessage(msg);
-        }),
-    );
+    const run = queue.then(async () => {
+      try {
+        return await send(msg, p, b);
+      } catch (e) {
+        if (!short(e)) throw e;
+        worker.terminate();
+        start();
+        await send({ open: file });
+        return await send(msg, p, b);
+      }
+    });
     queue = run.catch(() => {});
     return run;
   };
+  start();
   try {
     const head = await ask({ open: file });
     return {
