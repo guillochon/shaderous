@@ -921,7 +921,7 @@ export const TESTS: TestDef[] = [
     id: 'stored-primitives',
     name: 'Stored primitives',
     criterion:
-      'A uniform grid reaches the same state after 30 steps with its primitives converted once a step and stored as with them converted at every load: bit-identical for the ideal gas (open and reflecting faces in 3D, periodic in 2D, a shearing box) and for the degenerate gas, within 1e-4 of the largest value with Helmholtz (its temperature solve compiles a little differently in each pass)',
+      'A uniform grid reaches the same state after 30 steps with its primitives converted once a step and stored as with them converted at every load: bit-identical for the ideal gas (open and reflecting faces in 3D, periodic in 2D, a shearing box) and for the degenerate gas, within 1e-4 of the largest value with Helmholtz and with ANEOS in a planet of two compositions (their solves compile a little differently in each pass)',
     async run(gpu) {
       const cases: { id: string; problem: Problem; n: number; over: Partial<SimConfig>; tol: number }[] = [
         { id: 'sedov', problem: sedov, n: 32, over: {}, tol: 0 },
@@ -930,6 +930,7 @@ export const TESTS: TestDef[] = [
         { id: 'shearing_sheet_2d', problem: shearingSheet(Infinity, (x, y) => ({ rho: 1 + 0.01 * Math.cos(2 * Math.PI * (x + y)) })), n: 64, over: { ndim: 2 }, tol: 0 },
         { id: 'white_dwarf_degenerate', problem: whiteDwarfStar, n: 32, over: { eos: 'degenerate' }, tol: 0 },
         { id: 'white_dwarf_helmholtz', problem: whiteDwarfStar, n: 32, over: { eos: 'helmholtz' }, tol: 1e-4 },
+        { id: 'planet_aneos', problem: problemById('planet')!, n: 32, over: {}, tol: 1e-4 },
       ];
       const metrics: Record<string, number> = {};
       let pass = true;
