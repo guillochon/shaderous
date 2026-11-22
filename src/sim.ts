@@ -1677,7 +1677,7 @@ export class Sim implements Simulation {
       gShear: [0, 1].map((p) => bindGroup(d, pShear, { 0: this.params, 1: this.clock, 2: v(this.state[p][0]), 4: v(cn), 5: v(dm), 57: wv })),
       gMeans: [0, 1].map((p) => bindGroup(d, pMeans, { 0: this.params, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(cn), 5: v(dm), 6: v(uh1), 7: v(uh2) })),
       gMeansBare: [0, 1].map((p) => bindGroup(d, pMeans, { 0: this.params, 2: v(this.state[p][0]), 3: v(this.state[p][1]), 4: v(cn), 5: v(dm0), 6: v(uh1), 7: v(uh2) })),
-      gFinal: [0, 1].map((p) => bindGroup(d, pFinal, { 0: this.params, 4: v(cn), 6: v(uh1), 7: v(uh2), 8: v(this.state[p][0]), 9: v(this.state[p][1]) })),
+      gFinal: [0, 1].map((p) => bindGroup(d, pFinal, { 0: this.params, 1: this.clock, 4: v(cn), 6: v(uh1), 7: v(uh2), 8: v(this.state[p][0]), 9: v(this.state[p][1]) })),
     };
     // The neighborhoods' counts depend on the geometry alone: made now, for the first step's
     // redistribution after advection (the shear pass makes them again each step).

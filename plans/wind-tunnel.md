@@ -980,6 +980,100 @@ periodic stream and meets its own wake, and C_d read 1.0), `residual.ts`, `cp.ts
   what the cut cells get right that the staircase cannot (a blade's pitch below a cell). A wall
   model (8.2) is what the shear needs at that resolution, not second order.
 
+#### 8.1.4 Cut cells on the GPU, static bodies (2026-11-21)
+
+The option `physics.cutCells` (link key `cut`, default off): bodies at rest cut the uniform
+grid's cells, for the liquid with implicit pressure. Refused with moving bodies, species, the
+adaptive mesh and the explicit pressure. With the option off every shader is what it was
+(the `cut` slot compiles to constants), and `sphere-drag` reads C_d 1.2534 as before.
+
+- **Geometry** (`hydro/cut.ts`), on the CPU from the bodies' signed distances, once at build:
+  each cell's gas share φ and each face's open share from samples, each sample's share a ramp
+  of the distance over the width the patch spans along the normal (h Σ|n_t|), so that a face
+  beside a sliver is not half open; shares under 0.05 shut; a cell with gas and no open face
+  becomes solid, a cell with no gas shuts its faces. One texture (φ and the three upper faces'
+  shares, binding 61) and one of the cell's distance and body (62). The wall vector by
+  closure, W_a = a_lo − a_hi.
+- **The state is the gas's own density**, not φρ: the update divides the net flux through the
+  open faces by φ; the solve takes α = φ/(c² dt²) and the faces' shares on its coefficients
+  and divergence; the correction divides by φ. No density floor with cut cells (a floor in a
+  sliver made mass).
+- **The wall**: its pressure on the cut face from the solve (time-centered, as the staircase);
+  its shear from a probe 1.5 cells out along the normal (8.1.3), a rate so that a stop reads
+  it; cells under a quarter full are not probed.
+- **State redistribution** (Berger & Giuliani 2021) as three gathers: counts and the shear,
+  the neighborhood means, the final state. The neighborhood of a cell under half full lies
+  away from the wall along the axes where |W_a| is at least half the largest; when none of
+  those holds gas, its fullest face neighbor. Done after the advection (before the source) and
+  after the correction: with only the second, the advected momenta of slivers drove the face
+  mass flux and the cylinder went to NaN.
+- **Forces read at a stop were not the flow's.** A held step (dt = 0, as a stop's readback)
+  stored the pressure of the solve instead of the time-centered one, and the landing step,
+  shortened to hit the stop, enforces its divergence over a short dt. Both are fixed or
+  avoided: a held step keeps the last step's wall forces (for the staircase too), and the tests
+  average the forces over free steps (`meanForce`). The turbine numbers read at stops in this
+  session's first pass (C_p −0.30, −0.21, −0.54) were wrong.
+- **The timestep matters** with cut cells: redistribution each step is first order in time.
+
+Measured (`src/validation/cut.ts`, free stepping):
+
+| test | cut cells | staircase | reference |
+|---|---|---|---|
+| liquid at rest around bodies, 2D / 3D | speeds 3e-8, mass exact | | 0 |
+| box's momentum balance against the wall force, 2D / 3D | 3e-7 / 4e-6 | | 0 |
+| Galilean cylinder at rest (as 8.1.2), C_d | 1.204 | 1.300 | prototype 1.220 |
+| NACA 0012 at 5°, Re 1000, C_l / C_d at 16 cells on the chord | 0.273 / 0.125 | 0.164 / 0.164 | 0.24 / 0.133 |
+| at 32 | 0.319 / 0.118 | 0.183 / 0.146 | |
+| at 64 | 0.246 / 0.130 | 0.234 / 0.132 | |
+| cylinder Re 40 (as 8.1.3), C_d at 8 / 16 / 32 across | 1.689 / 1.768 / 1.757 | 1.835 / 1.772 / 1.753 | ~1.73 in this box |
+| sphere Re 100, C_d at 8 / 16 across | 0.985 / 1.073 | 1.210 / 1.139 | 1.08 to 1.09 |
+
+As in the prototype: from 16 across the cut cells are at least as good as the staircase, and
+much better at the coarsest grids for lift (the pitch below a cell). The Galilean gap of 8.1.3
+(0.5% to 2.4% with the probe): leaving small cells out of the probe changed nothing to every
+digit; the cause is not found.
+
+**The fast rotor** (`builtin:turbine-fast` in the wind-turbine preset's tunnel and frame, R =
+0.8, U = 1; torque averaged over t = 0.8 to 1.6, uniform grid; C_p = Ω T / (½ π R²)):
+
+| tip-speed ratio 4 | Courant 0.8 | 0.4 | 0.2 | extrapolated to dt → 0 |
+|---|---|---|---|---|
+| 128³ cut cells | −0.059 | −0.097 | −0.120 | −0.144 |
+| 128³ staircase | −0.751 | −0.796 | −0.836 | −0.877 |
+| 256³ cut cells | −0.199 | −0.278 | −0.317 | −0.356 |
+| 256³ staircase | −0.420 | −0.426 | | |
+
+| 256³ cut cells, Courant 0.2 | TSR 2 | 3 | 4 | 5 | 6 |
+|---|---|---|---|---|---|
+| C_p | **+0.029** | −0.071 | −0.317 | −0.741 | −1.390 |
+
+- **It does not drive itself at a tip-speed ratio of 4.** The torque changes sign only between
+  ratios 2 and 3, and C_p at 2 is 0.03. The fast rotor is not a working rotor on these grids,
+  so the wind-turbine preset stays as it is (128³, the slow rotor).
+- **Not converged.** From 128³ to 256³ the cut cells went from −0.14 to −0.36 and the
+  staircase from −0.88 to −0.43: they approach each other, near −0.4, rather than zero. The cut
+  cells' timestep dependence is large (a Courant number of 0.2 is still 11% short of the
+  extrapolation at 256³).
+- **By span** (256³, cut cells, Courant 0.2, the instant t = 1.2, C_p −0.36 then): the shear
+  gives 6% of the braking torque (−0.0045 of −0.072); the pressure the rest. Inboard (0.2 to
+  0.4 R) the pressure drives (+0.0049); from 0.5 R out it brakes, more toward the tip (0.9 to
+  1.0 R: −0.028). The thrust is nearly all pressure. **So the wall model of 8.2 is not what is
+  missing**: it acts on the shear, 6% of the torque. The outer blades' pressure is: either the
+  blade's twist gives the tip a negative angle of attack at this ratio, or the tip's chord,
+  a few cells at 256³, is too coarse for its suction peak. Checking the rotor's twist against
+  its design ratio, and a blade element estimate of the tip's angle of attack, come before any
+  more solver work.
+- **Cost**: 128³ 11 to 14 ms per step with cut cells, 13 to 15 staircase; 256³ 79 ms cut
+  (Courant 0.2) against 56 staircase. The 225 and 139 ms at 256³ at 0.8 and 0.4 ran alongside
+  another GPU test and are not timings.
+- **The tip-speed ratio 6 hang**: the tunnel's sound speed was U/Mach; in a rotor frame the
+  centrifugal head ½ (Ω r)² from the axis to the box's corners exceeded ρc² (Ω r 16 there, c
+  10), the density at the axis went to the floor and the run stalled on floored cells. The tunnel now takes c = max(U/Mach, 3 |Ω| box/√2) in a rotor frame
+  (`setup/parts/tunnel.ts`); ratio 6 runs.
+- **Not done**: moving bodies with cut cells, the adaptive mesh's blocks, gases; mesh bodies'
+  distances are the CPU's (fine for static bodies); second order in time for redistribution;
+  the Galilean gap; the fast rotor's tip.
+
 
 ### 8.2 A wall model
 

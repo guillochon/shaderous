@@ -34,5 +34,10 @@ fn pwall_cut(c: vec3<i32>, a: i32, w: f32, p: f32) {
 }
 
 fn pwall_store(c: vec3<i32>) {
+  // A step of nothing (the run holding at a stop) keeps the last step's force: its pressure is
+  // the time-centered one the step pushed with, where the held step has only the pressure the
+  // step ended with, which may swing from step to step beside partly filled cells (a rotor's
+  // torque read four times too large at every stop, plans/wind-tunnel.md 8.1.4).
+  if (!(clock.dt > 0.0)) { return; }
   textureStore(WP, c, g_pw);
 }

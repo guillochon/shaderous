@@ -26,10 +26,12 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   let k = cut_at(c);
+  // (A step of nothing, holding at a stop, keeps the last step's force: pressure/pwalls_on.wgsl.)
+  let held = !(clock.dt > 0.0);
   if (k.x <= 0.0) {
     textureStore(CN, c, vec4<f32>(1.0, 0.0, 0.0, 0.0));
     textureStore(DM, c, vec4<f32>(0.0));
-    textureStore(WV, c, vec4<f32>(0.0));
+    if (!held) { textureStore(WV, c, vec4<f32>(0.0)); }
     return;
   }
   textureStore(CN, c, vec4<f32>(cut_count(c), 0.0, 0.0, 0.0));
@@ -40,7 +42,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let dt = clock.dt;
   if (wl == 0.0 || nu <= 0.0) {
     textureStore(DM, c, vec4<f32>(0.0));
-    textureStore(WV, c, vec4<f32>(0.0));
+    if (!held) { textureStore(WV, c, vec4<f32>(0.0)); }
     return;
   }
   // The wall's nearest point and the probe, in cells (the cell's center at c + 1/2).
@@ -74,5 +76,5 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   // the step (none at a stop, dt = 0, where the force is still the rate's: it is read there).
   let rate = -nu * rho * wl * vp / (CUT_PROBE * P.dx * k.x * P.dx);
   textureStore(DM, c, vec4<f32>(select(vec3<f32>(0.0), dt * rate, dt > 0.0), 0.0));
-  textureStore(WV, c, vec4<f32>(-rate * k.x * P.geom.x, cut_wall(c).y));
+  if (!held) { textureStore(WV, c, vec4<f32>(-rate * k.x * P.geom.x, cut_wall(c).y)); }
 }

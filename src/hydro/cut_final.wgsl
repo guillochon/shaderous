@@ -7,6 +7,7 @@
 #include "hydro/cut_flags.wgsl"
 #include "hydro/cut_common.wgsl"
 
+@group(0) @binding(1) var<storage, read> clock: Clock;
 @group(0) @binding(4) var CN: texture_3d<f32>;
 @group(0) @binding(6) var UH1: texture_3d<f32>;
 @group(0) @binding(7) var UH2: texture_3d<f32>;
@@ -18,6 +19,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if (any(gid >= P.dims.xyz)) { return; }
   let c = vec3<i32>(gid);
   if (cut_at(c).x <= 0.0) { return; }
+  // A step of nothing (the run holding at a stop): nothing to redistribute. Averaging again at
+  // every such step smoothed the flow along the wall each time a run stopped (a runner's output
+  // every 0.1 changed a rotor's torque by a factor of 2.5).
+  if (!(clock.dt > 0.0)) { return; }
   let h2 = textureLoad(UH2, c, 0);
   if (abs(h2.w) > 0.5) { return; }
   var a = textureLoad(UH1, c, 0);
