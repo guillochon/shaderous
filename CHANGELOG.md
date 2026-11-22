@@ -57,6 +57,8 @@ What changed in each release of Shaderous. A release's section here is the body 
   reader's WebAssembly memory could run short of a 60 MB run for the faces after many reads, and
   the page tried again every frame. The faces are read 128 blocks at a time, a reader that runs
   short starts over in a fresh worker, and a read that still fails says why once.
+- Turning on a view's field lines keeps the view as it was (a volume stays a volume): the file,
+  opened again with its face field, reset the view as for a file just opened.
 - The command-line runner starts `diag.jsonl` empty: a second run into the same folder appended
   its diagnostics to the first run's.
 

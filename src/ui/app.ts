@@ -2048,9 +2048,14 @@ function settleView(): Promise<void> {
   // Field lines asked for where the face field was not loaded: opened again with it, at the
   // finest level where the faces fit too.
   if (view.fieldLines && cfg.problem.mhd && !cfg.viewFaces) {
+    // (Opening it again sets up the view anew, as for a file just opened: what is shown, and how,
+    // stays as it was.)
+    const shown = { ...view };
     const reopen: Promise<void> = (async () => {
       try {
         await showView(v.file, v.name, { oneField: true, faces: true, settle: false });
+        Object.assign(view, shown);
+        syncControls();
       } catch (e) {
         view.fieldLines = false;
         alert(`Field lines need the field's faces, which do not fit: ${e instanceof Error ? e.message : String(e)}`);
