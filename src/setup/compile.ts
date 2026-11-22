@@ -301,7 +301,10 @@ function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
         ...(s.core && !bin ? { core: { gm: G * s.core.mass, soft: s.core.soft } } : {}),
       };
     }),
-    ...(bin ? { binary: { omega: bin.omega, masses: bodies.masses.filter((m) => !m.massless).map((m) => ({ gm: m.gm, at: [...m.pos], soft: m.soft ?? 0 })), lobe: bin.lobe } } : {}),
+    // The orbit is found as the stars settle (problems/settle.ts OrbitFinder): in the frame
+    // turning with it, or in an inertial frame when only stars move on it (a point mass's
+    // velocity is not the settling's to change).
+    ...(bin ? { binary: { omega: bin.omega, masses: bodies.masses.filter((m) => !m.massless).map((m) => ({ gm: m.gm, at: [...m.pos], soft: m.soft ?? 0 })), lobe: bin.lobe, ...(bin.corotating || !bodies.masses.length ? { orbit: true } : {}) } } : {}),
     rhoCut: amb.cut,
     rhoAmb: amb.rho,
     pAmb: spec.background?.p ?? bodies.stars[0].barotrope.pressure(amb.cut),

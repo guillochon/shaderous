@@ -144,6 +144,12 @@ export interface SimConfig {
   /** Start from a snapshot: its time, step count and point masses rather than the preset's. */
   restart?: Restart;
   /**
+   * The angular velocity of the frame turning with a circular binary, as its stars' settling
+   * found it (problems/settle.ts OrbitFinder), in place of the point-mass one Problem.rotation
+   * gives. The simulations set it on the configuration they write from (orbitConfig).
+   */
+  orbitOmega?: number;
+  /**
    * A time the clock stops at short of tEnd, as it does at tEnd: the page sets it to the next
    * checkpoint, and moves it on once the checkpoint is written. Not a setting of the run.
    */
@@ -899,6 +905,9 @@ export function rotationOf(c: SimConfig): [number, number, number, number] {
   if (!r) return [0, 0, 0, 0];
   const w: [number, number, number] = c.ndim === 2 ? [0, 0, r.omega[2]] : [...r.omega];
   if (w.every((x) => x === 0)) return [0, 0, 0, 0];
+  // A binary's frame, at the Omega its settled stars orbit at (SimConfig.orbitOmega, or a snapshot's).
+  const settled = c.orbitOmega ?? c.restart?.orbitOmega;
+  if (settled !== undefined && w[2] !== 0) w[2] = settled;
   return [...w, r.centrifugal === false ? 0 : 1];
 }
 
@@ -964,7 +973,7 @@ export function frameZeros(d: GPUDevice): GPUBuffer {
 /** Where Params.rot.z (the rotating frame's angular velocity about z) lies. */
 export const PARAM_ROT_Z_BYTE = (100 + 2) * 4;
 /** Where a followed frame's angular velocity lies in the Masses block (frameTrack). */
-const MASS_TRACK_BYTE = 4 * 4;
+export const MASS_TRACK_BYTE = 4 * 4;
 /** The frame follows a binary: its angular velocity is the GPU's own, copied into the params. */
 export const followsBinary = (c: SimConfig): boolean => !!c.problem.rotation?.(c.params, c.ndim)?.track && rotationOf(c)[2] !== 0;
 
@@ -1489,6 +1498,27 @@ export interface RestartState {
   masses?: Required<PointMass>[];
   /** a rotating frame that follows a binary: its state (frameTrack) */
   frame?: number[];
+  /** the angular velocity of a binary's orbit, as its settling found it (SimConfig.orbitOmega) */
+  orbitOmega?: number;
+}
+
+/**
+ * The configuration a simulation writes its uniforms from: `c` with the angular velocity its
+ * settling found for a binary's orbit (SimConfig.orbitOmega), which the page's own copy of the
+ * configuration, set on the simulation again whenever a control changes, does not carry.
+ */
+export function orbitConfig(c: SimConfig, orbitOmega: number | undefined): SimConfig {
+  return orbitOmega === undefined ? c : { ...c, orbitOmega };
+}
+
+/**
+ * After a settling: the angular velocity its binary's orbit was found at, if the run's frame is
+ * the one turning with that binary (it turned at `omega0`, the settling's Omega to begin with).
+ */
+export function settledOrbit(c: SimConfig, set: Settling, omega0: number | undefined): number | undefined {
+  if (!set.binary?.orbit || omega0 === undefined || set.binary.omega === omega0) return undefined;
+  const w = rotationOf(c)[2];
+  return Math.abs(w - omega0) <= 1e-6 * Math.abs(omega0) ? set.binary.omega : undefined;
 }
 
 /** Read the clock and the point masses back, for a snapshot. */
@@ -2231,7 +2261,7 @@ export class Sim implements Simulation {
   private lastScale: number | undefined;
 
   writeParams() {
-    const c = this.cfg;
+    const c = orbitConfig(this.cfg, this.orbitOmega);
     const buf = packParams(c, {
       dims: [this.nx, this.ny, this.nz],
       rect: rectangular(c),
@@ -2368,6 +2398,17 @@ export class Sim implements Simulation {
   /** Resolves once a star in the initial conditions has been settled (see problems/settle.ts). */
   settled: Promise<void> = Promise.resolve();
   private settleEpoch = 0;
+  /** the angular velocity the last settling found for a binary's orbit (SimConfig.orbitOmega) */
+  private orbitOmega: number | undefined;
+
+  /** After a settling: the frame turns at the Omega its binary's orbit was found at (settledOrbit). */
+  private adoptOrbit(set: Settling, omega0: number | undefined) {
+    const w = settledOrbit(this.cfg, set, omega0);
+    if (w === undefined) return;
+    this.orbitOmega = w;
+    this.device.queue.writeBuffer(this.bh, MASS_TRACK_BYTE, new Float32Array(frameTrack(orbitConfig(this.cfg, w))));
+    this.writeParams();
+  }
   private settling = false;
   get preparing(): boolean {
     return this.settling;
@@ -2385,6 +2426,7 @@ export class Sim implements Simulation {
     const c = this.cfg;
     this.settling = false;
     this.settled = Promise.resolve();
+    this.orbitOmega = undefined;
     if (c.restart || !c.wellBalanced || !this.selfGravity) return;
     const eos = makeEos(c.eos, c.eosParams);
     const base = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
@@ -2451,6 +2493,7 @@ export class Sim implements Simulation {
     this.settling = true;
     const cells = this.cellsOf(u1, u2);
     const t0 = performance.now();
+    const omega0 = set.binary?.omega;
     this.settled = (async () => {
       try {
         let peak = 0;
@@ -2477,6 +2520,7 @@ export class Sim implements Simulation {
         writeTexture(this.device, this.state[this.cur][1], this.nx, 4, u2, this.nz, this.ny);
         if (this.rad) await this.settledRadiation(u1, u2, eos, fresh ? null : settler.rewrote);
         this.refreshPotential();
+        this.adoptOrbit(set, omega0);
       } finally {
         if (epoch === this.settleEpoch) {
           this.settling = false;
@@ -2511,7 +2555,9 @@ export class Sim implements Simulation {
 
   /** Time, step count and point masses, for a snapshot (see io/snapshot.ts). */
   async readRestart(): Promise<RestartState> {
-    return readRestart(this.device, this.clock, this.bh, this.nMasses);
+    // (A run from a snapshot keeps the snapshot's.)
+    const orbitOmega = this.orbitOmega ?? this.cfg.restart?.orbitOmega;
+    return { ...(await readRestart(this.device, this.clock, this.bh, this.nMasses)), ...(orbitOmega !== undefined ? { orbitOmega } : {}) };
   }
 
   async debrisLedger(): Promise<DebrisLedger | null> {

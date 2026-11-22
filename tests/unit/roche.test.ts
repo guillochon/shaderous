@@ -3,11 +3,11 @@
 import { describe, expect, it } from 'vitest';
 import { defaultEosParams, makeEos } from '../../src/eos/eos';
 import { binaryOmega, eggleton, fillSeparation, innerLagrange, l1Distance, lobePotential, rochePotential } from '../../src/problems/roche';
-import { binaryPhi, holdPull, Settler, type SettleCells } from '../../src/problems/settle';
+import { binaryPhi, holdPull, orbitOmega, Settler, turnBinary, type SettleCells } from '../../src/problems/settle';
 import { compileSetup } from '../../src/setup/compile';
 import { buildBodies } from '../../src/setup/parts/bodies';
 import { checkSetup } from '../../src/setup/check';
-import { completeMass, configFor, followsBinary, frameTrack, MASS_HEADER, packMasses, unpackMasses } from '../../src/sim';
+import { completeMass, configFor, followsBinary, frameTrack, MASS_HEADER, orbitConfig, packMasses, rotationOf, settledOrbit, unpackMasses } from '../../src/sim';
 import { emptySetup, type OrbitPart, type Part, type SetupSpec } from '../../src/setup/spec';
 
 const eos = makeEos('ideal', defaultEosParams());
@@ -297,5 +297,142 @@ describe('a frame that follows a binary', () => {
     const second: Part = { kind: 'star', id: 'acc', type: 'polytrope', n: 1.5, mass: 0.5, radius: 0.3 };
     const stars = binary({ fill: undefined, separation: 1.5, corotating: true, track: true }, [star, second]);
     expect(texts(stars).filter((t) => /^error/.test(t))).toEqual([]);
+  });
+});
+
+describe('a binary’s orbit, found as its stars settle', () => {
+  const second: Part = { kind: 'star', id: 'acc', type: 'polytrope', n: 1.5, mass: 0.5, radius: 0.35 };
+  const pair = (orbit: Partial<OrbitPart> = {}) => binary({ fill: 0.9, corotating: true, ...orbit }, [star, second]);
+
+  it('asks for it in the frame turning with the binary, and in an inertial one when only stars orbit', () => {
+    expect(compileSetup(pair()).problem.settle!({}, eos).binary!.orbit).toBe(true);
+    expect(compileSetup(pair({ corotating: false })).problem.settle!({}, eos).binary!.orbit).toBe(true);
+    expect(compileSetup(binary({ corotating: true })).problem.settle!({}, eos).binary!.orbit).toBe(true);
+    // A point mass's velocity is not the settling's to change.
+    expect(compileSetup(binary()).problem.settle!({}, eos).binary!.orbit).toBeUndefined();
+  });
+
+  it('finds the Omega that balances gravity, whatever Omega the pulls were measured at', () => {
+    const set = compileSetup(pair()).problem.settle!({}, eos);
+    const [a, b] = set.stars;
+    const coms = [a.center, b.center];
+    const sep = b.center[0] - a.center[0];
+    // Gravity 4% stronger than the points': g_i = -(1.04) G M_j / sep^2 toward the other.
+    const g = [(1.04 * b.gm!) / sep ** 2, (-1.04 * a.gm!) / sep ** 2];
+    for (const w of [set.binary!.omega, 0.5 * set.binary!.omega]) {
+      const pulls = coms.map((c, i) => [g[i] + w * w * c[0], w * w * c[1], 0]);
+      expect(orbitOmega(set, coms, pulls, w)).toBeCloseTo(Math.sqrt(1.04) * binaryOmega(1.5, sep), 10);
+    }
+    // No inward pull: no orbit to speak of.
+    expect(orbitOmega(set, coms, coms.map(() => [0, 0, 0]), 0)).toBeNull();
+  });
+
+  it('turns the binary: L1 found again, and stars that move in an inertial frame scaled to it', () => {
+    const set = compileSetup(pair({ corotating: false })).problem.settle!({}, eos);
+    const w0 = set.binary!.omega;
+    const vel = [...set.stars[1].vel];
+    const lobeVel = set.stars[1].spin!;
+    turnBinary(set, 1.02 * w0);
+    expect(set.binary!.omega).toBeCloseTo(1.02 * w0, 12);
+    expect(set.binary!.lobe!.phi).toBeCloseTo(innerLagrange(set.binary!.lobe!.bodies, 1.02 * w0).phi, 12);
+    set.stars[1].vel.forEach((v, k) => expect(v).toBeCloseTo(1.02 * vel[k], 12));
+    expect(set.stars[1].spin).toBeCloseTo(1.02 * lobeVel, 12);
+    // At rest in the frame turning with the binary: still at rest.
+    const co = compileSetup(pair()).problem.settle!({}, eos);
+    turnBinary(co, 1.02 * co.binary!.omega);
+    expect(co.stars.map((s) => s.vel)).toEqual([[0, 0, 0], [0, 0, 0]]);
+  });
+
+  it('settles two stars at the Omega their own pull asks for, holding each where the orbit put it', () => {
+    const settle = (orbit: boolean) => {
+      const set = compileSetup(pair()).problem.settle!({}, eos);
+      if (!orbit) delete set.binary!.orbit;
+      const [a, b] = set.stars;
+      const n = 64;
+      const h = 4 / n;
+      const pos: [number, number, number][] = [];
+      for (let k = 0; k < n; k++) for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) pos.push([(i + 0.5) * h - 2, (j + 0.5) * h - 2, (k + 0.5) * h - 2]);
+      const own = pos.map(([x, y, z]) => (Math.hypot(x - a.center[0], y, z) / a.R < Math.hypot(x - b.center[0], y, z) / b.R ? 0 : 1));
+      const u1 = new Float32Array(pos.length * 4);
+      const u2 = new Float32Array(pos.length * 4);
+      pos.forEach(([x, y, z], q) => (u1[4 * q] = Math.hypot(x - a.center[0], y, z) < a.R ? 3 : Math.hypot(x - b.center[0], y, z) < b.R ? 3 : set.rhoAmb));
+      const cells: SettleCells = { count: pos.length, pos: (q) => pos[q], vol: () => h ** 3, u1, u2 };
+      // The grid's potential, after each round: each star's own as a point at its center of mass
+      // (self-gravity moves with the star, and does not pull it), and its companion's 5% stronger
+      // than a point's.
+      const gm = [a.gm!, b.gm!];
+      const potential = () => {
+        const c = [[0, 0, 0, 0], [0, 0, 0, 0]];
+        pos.forEach((x, q) => {
+          const r = u1[4 * q];
+          if (!(r > set.rhoCut)) return;
+          const s4 = c[own[q]];
+          s4[0] += r;
+          for (let k = 0; k < 3; k++) s4[k + 1] += r * x[k];
+        });
+        const at = c.map((s4) => [s4[1] / s4[0], s4[2] / s4[0], s4[3] / s4[0]]);
+        // (Its own as a uniform sphere of its radius, which a uniform pull moves as it moves a star.)
+        const R = [a.R, b.R];
+        const pt = (i: number, [x, y, z]: number[]) => {
+          const r = Math.hypot(x - at[i][0], y - at[i][1], z - at[i][2]);
+          return r < R[i] ? (-gm[i] * (3 * R[i] ** 2 - r * r)) / (2 * R[i] ** 3) : -gm[i] / r;
+        };
+        return { at, phi: new Float32Array(pos.map((x, q) => pt(own[q], x) + 1.05 * pt(1 - own[q], x))) };
+      };
+      const w0 = set.binary!.omega;
+      const s = new Settler(set, cells);
+      for (let r = 0; r < 40; r++) s.round(potential().phi);
+      // The Omega that balances the gravity on the settled stars, summed cell by cell: each
+      // star's mean pull from its companion (its own pulls it nowhere) against Omega^2 r.
+      const { at } = potential();
+      const f = [[0, 0, 0], [0, 0, 0]];
+      pos.forEach(([x, y], q) => {
+        const r = u1[4 * q];
+        if (!(r > set.rhoCut)) return;
+        const i = own[q];
+        const j = 1 - i;
+        const dx = x - at[j][0];
+        const dy = y - at[j][1];
+        const d = Math.hypot(dx, dy, pos[q][2] - at[j][2]);
+        f[i][0] += r;
+        f[i][1] -= (r * 1.05 * gm[j] * dx) / d ** 3;
+        f[i][2] -= (r * 1.05 * gm[j] * dy) / d ** 3;
+      });
+      const g = f.map((v) => [v[1] / v[0], v[2] / v[0]]);
+      const num = -gm.reduce((acc, m, i) => acc + m * (g[i][0] * at[i][0] + g[i][1] * at[i][1]), 0);
+      const den = gm.reduce((acc, m, i) => acc + m * (at[i][0] ** 2 + at[i][1] ** 2), 0);
+      return { w0, w: set.binary!.omega, balance: Math.sqrt(num / den), at, centers: [a.center, b.center] };
+    };
+    const held = settle(false);
+    expect(held.w).toBe(held.w0);
+    // The companions' pull 5% stronger than the points': Omega about sqrt(1.05) times theirs, more
+    // for the tides (a star stretched toward its companion is pulled harder than its center), and
+    // the Omega that balances the pull on the settled stars.
+    const found = settle(true);
+    expect(found.w / found.w0).toBeGreaterThan(Math.sqrt(1.05));
+    expect(found.w / found.w0).toBeLessThan(1.05);
+    // (To 0.2%: the stand-in for self-gravity, a sphere, pulls on the gas a stretched star puts
+    // outside it, which a star's own pull does not.)
+    expect(Math.abs(found.w / found.balance - 1)).toBeLessThan(2e-3);
+    found.at.forEach((c, i) => expect(Math.abs(c[0] - found.centers[i][0])).toBeLessThan(0.01));
+  });
+
+  it('is the frame’s Omega in the run, and a snapshot’s', () => {
+    const problem = compileSetup(pair({ track: true })).problem;
+    const c = configFor(problem, 400);
+    const w0 = rotationOf(c)[2];
+    expect(rotationOf({ ...c, orbitOmega: 1.01 * w0 })[2]).toBeCloseTo(1.01 * w0, 12);
+    expect(rotationOf({ ...c, restart: { time: 1, steps: 1, orbitOmega: 1.01 * w0 } })[2]).toBeCloseTo(1.01 * w0, 12);
+    expect(frameTrack(orbitConfig(c, 1.01 * w0))[0]).toBeCloseTo(1.01 * w0, 6);
+    expect(orbitConfig(c, undefined)).toBe(c);
+    // After a settling: taken when the frame is the binary's, and the settling turned it.
+    const set = problem.settle!({}, eos);
+    expect(settledOrbit(c, set, set.binary!.omega)).toBeUndefined();
+    const before = set.binary!.omega;
+    turnBinary(set, 1.01 * before);
+    expect(settledOrbit(c, set, before)).toBeCloseTo(1.01 * before, 12);
+    // An inertial run's frame does not turn.
+    const still = configFor(compileSetup(pair({ corotating: false })).problem, 400);
+    expect(settledOrbit(still, set, before)).toBeUndefined();
   });
 });

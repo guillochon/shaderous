@@ -32,7 +32,7 @@ import { MassSums } from '../gravity/mass_sums';
 import { makeEos, type Eos } from '../eos/eos';
 import { createBurnPass, flagBurnSlot, isNetworkBurn, type Burner } from '../burn/burn';
 import { isSelfGravity, PERIODIC, problemUnits } from '../problems/types';
-import { heatCells, holdPull, inFrame, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
+import { heatCells, holdPull, inFrame, OrbitFinder, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from '../problems/settle';
 
 /** Most cells of a mesh the star tool's settling reads back (about 100 bytes each). */
 const SETTLE_CPU_CELLS = 4e7;
@@ -40,7 +40,7 @@ import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
 import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
-import { implicitPressure, rotationOf, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -1444,7 +1444,7 @@ export class AmrSim implements Simulation {
   private lastScale: number | undefined;
 
   writeParams() {
-    const c = this.cfg;
+    const c = orbitConfig(this.cfg, this.orbitOmega);
     const buf = packParams(c, {
       dims: [this.n0, this.n0, c.ndim === 2 ? 1 : this.n0],
       dx: this.dx0,
@@ -1620,7 +1620,9 @@ export class AmrSim implements Simulation {
 
   /** Time, step count and point masses, for a snapshot (see io/snapshot.ts). */
   async readRestart(): Promise<RestartState> {
-    return readRestart(this.device, this.clock, this.bh, this.hasMasses ? this.nMasses : 0);
+    // (A run from a snapshot keeps the snapshot's.)
+    const orbitOmega = this.orbitOmega ?? this.cfg.restart?.orbitOmega;
+    return { ...(await readRestart(this.device, this.clock, this.bh, this.hasMasses ? this.nMasses : 0)), ...(orbitOmega !== undefined ? { orbitOmega } : {}) };
   }
 
   async debrisLedger(): Promise<DebrisLedger | null> {
@@ -1809,6 +1811,17 @@ export class AmrSim implements Simulation {
   /** Resolves once a star in the initial conditions has been settled (see problems/settle.ts). */
   settled: Promise<void> = Promise.resolve();
   private settleEpoch = 0;
+  /** the angular velocity the last settling found for a binary's orbit (SimConfig.orbitOmega) */
+  private orbitOmega: number | undefined;
+
+  /** After a settling: the frame turns at the Omega its binary's orbit was found at (settledOrbit). */
+  private adoptOrbit(set: Settling, omega0: number | undefined) {
+    const w = settledOrbit(this.cfg, set, omega0);
+    if (w === undefined) return;
+    this.orbitOmega = w;
+    this.device.queue.writeBuffer(this.bh, MASS_TRACK_BYTE, new Float32Array(frameTrack(orbitConfig(this.cfg, w))));
+    this.writeParams();
+  }
   private settling = false;
   get preparing(): boolean {
     return this.settling || this.compiling || this.resetting;
@@ -1833,12 +1846,14 @@ export class AmrSim implements Simulation {
     const c = this.cfg;
     this.settling = false;
     this.settled = Promise.resolve();
+    this.orbitOmega = undefined;
     if (c.restart || !c.wellBalanced || !this.selfGravity) return;
     const eos = makeEos(c.eos, c.eosParams);
     const base = c.problem.settle ? c.problem.settle(c.params, eos) : c.problem.star ? settlingOf(c.problem.star, c.G) : null;
     if (!base) return;
     // In a rotating frame the stars spin with it (problems/settle.ts, inFrame).
     const set = inFrame(base, rotationOf(c));
+    const omega0 = set.binary?.omega;
     this.settling = true;
     const tree = this.tree;
     const t0 = performance.now();
@@ -1857,6 +1872,7 @@ export class AmrSim implements Simulation {
           if (epoch !== this.settleEpoch) return;
           await this.settleOnCpu(set, eos, leaf, stale);
         }
+        if (!stale()) this.adoptOrbit(set, omega0);
         if (!stale() && c.problem.heat) await this.heatSettled(c.problem.heat(c.params, eos), stale);
       } finally {
         if (epoch === this.settleEpoch) {
@@ -2044,6 +2060,7 @@ export class AmrSim implements Simulation {
     const at = stars.map((st) => (set.binary ? [0, 0, 0] : [st.center[0], st.center[1], st.center[2] ?? 0]));
     const relax = set.relax ?? 1;
     const held: number[][] = [];
+    const orbit = new OrbitFinder(set);
     // The uniform (amr/settle.wgsl, Settle): star S of the measures, and their trial values of C.
     const pack = (star: number, cands: number[] = []) => {
       f.fill(0);
@@ -2205,8 +2222,11 @@ export class AmrSim implements Simulation {
             const sym = this.cfg.symmetry ?? [false, false, false];
             return s4[0] > 0 ? [0, 1, 2].map((a) => (sym[a] ? 0 : s4[a + 1] / s4[0])) : [st.center[0], st.center[1], st.center[2] ?? 0];
           });
-          // In a binary the others' pull is not undone, and the slot holds the pull holding each star in place.
+          // In a binary the others' pull is not undone, and the slot holds the pull holding each
+          // star in place, at the Omega of its orbit as the last round found it.
+          orbit.turn();
           stars.forEach((_, i) => (at[i] = set.binary ? holdPull(set, i, coms, (held[i] ??= [0, 0, 0])) : coms[i]));
+          if (set.binary) orbit.record(coms, at);
         }
         for (let i = 0; i < stars.length; i++) await solveC(i);
         pack(0);

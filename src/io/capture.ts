@@ -141,7 +141,7 @@ export async function capture(sim: Simulation, meta?: Omit<SnapshotMeta, 'masses
     data: { ...primitivesFrom(cfg, u1, u2, X, opts.lazyPressure), ...Object.fromEntries((cfg.problem.species ?? []).map((k, i) => [k, X[i]])), ...mag, ...rad },
     ...(faces ? { faces } : {}),
     ...(opts.lazyPressure ? { pressureAt: pressureOf(cfg, u1, u2, X) } : {}),
-    meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(restart.frame ? { frame: restart.frame } : {}), ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
+    meta: meta ? { format: SNAPSHOT_FORMAT, ...meta, masses: restart.masses, ...(restart.frame ? { frame: restart.frame } : {}), ...(restart.orbitOmega !== undefined ? { orbitOmega: restart.orbitOmega } : {}), ...(debris ? { debris } : {}), ...(mhdMeta ? { mhd: mhdMeta } : {}) } : undefined,
     ...(cfg.problem.geometry === 'cylindrical' && cfg.ndim === 2 ? { geometry: 'cylindrical' as const } : {}),
     ...(spherical(cfg) ? sphericalAxes(cfg) : {}),
   };
@@ -163,7 +163,7 @@ export function restartFrom(snap: Snapshot, problem: Problem, adaptive: boolean,
   // halved axes: fractions are of its own extent there.
   const side = [0, 1, 2].map((a) => (snap.hi ? snap.hi[a] - flo[a] : box));
   const frac = (x: number, a: number) => (Math.abs(side[a] - box) < 1e-9 * box ? x / box - flo[a] / box : (x - flo[a]) / side[a]);
-  const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined), debris: snap.meta?.debris, ...(snap.meta?.frame ? { frame: snap.meta.frame } : {}) };
+  const restart: Restart = { time: snap.time, steps: snap.steps, masses: snap.meta?.masses ?? (snap.meta?.perturber ? [snap.meta.perturber] : undefined), debris: snap.meta?.debris, ...(snap.meta?.frame ? { frame: snap.meta.frame } : {}), ...(snap.meta?.orbitOmega !== undefined ? { orbitOmega: snap.meta.orbitOmega } : {}) };
   if (adaptive) {
     // Levels count from the root grid, and the file's root may not be the run's.
     const shift = Math.round(Math.log2(snap.rootSize[0] / rootCells));

@@ -310,6 +310,14 @@ center of mass at the box center:
   grid's own, the point masses' and the centrifugal term of the frame turning with the orbit),
   so that each starts stretched toward its companion in hydrostatic balance, and each reaches
   no farther than its L1 point. In an inertial frame their gas then turns with the orbit.
+- On a circular orbit the angular velocity is found as the stars settle. Two extended stars,
+  each stretched toward the other, pull harder than two points of their masses: started at the
+  point-mass Omega they fall toward each other and swing in and out on an eccentric orbit (two
+  white dwarfs of 0.6 and 0.9 solar masses at `fill` 0.935 came 2.7% closer at pericenter). So
+  the orbit turns at the Omega that balances the pull of the settled stars on each other, a
+  percent or so above the point-mass one: the frame turning with it, or the stars' velocities in
+  an inertial frame (not when a point mass is part of the orbit there, whose velocity is not the
+  settling's to change). A snapshot keeps it. The separation, and so `fill`, are as placed.
 - `"corotating": true` runs in the frame turning with the orbit (as `physics.rotation` would,
   at the orbit's angular velocity): every body starts at rest, and a binary in balance stays
   still. Not with a disk, whose gas is set up moving in an inertial frame.

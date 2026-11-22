@@ -47,6 +47,21 @@
 // of G M / R^3. Settled, the proportional part is gone, and what the integral part holds is the
 // small force the point-mass orbit leaves unbalanced on an extended star.
 //
+// That force is real, and in the run it is not held: two white dwarfs tidally stretched toward
+// each other pull harder than two points of their masses, so at the point-mass Omega they fall
+// toward each other and swing in and out on an eccentric orbit (e ~ 0.013 for two of 0.6 and
+// 0.9 M_sun at fill 0.935: the separation 2.7% smaller at pericenter, which raises the fill there
+// by more than a sweep's step). So the orbit is found as the stars settle (Settling.binary.orbit,
+// OrbitFinder). A settled star is in balance with its hold, so the pull lambda is the net force
+// on it, per unit mass, at the binary's Omega: gravity (the grid's, the point masses') and the
+// centrifugal force Omega^2 r. Taking the centrifugal part off leaves gravity alone, g = lambda -
+// Omega^2 r (r the center of mass, off the axis), which does not depend on Omega: the hold
+// cancels a change of the centrifugal force at the center of mass, so the star does not move
+// for it. Before each round the binary turns at the Omega that balances what the last round
+// found, Omega^2 = -sum M g . r / sum M |r|^2 over the stars; settled, it no longer changes and
+// the stars hold their places in orbit, unheld. The run's frame turns at it (or, in an inertial
+// frame, the stars move at it), and the Roche lobes' L1 is found again at it.
+//
 // In a rotating frame with the centrifugal force (Problem.rotation) the stars spin with the
 // frame, at rest in it: each is balanced in the centrifugal potential of its spin about its own
 // center as well, -|Omega x (x - x_c)|^2 / 2, which flattens it into a rotating polytrope
@@ -58,7 +73,7 @@
 // here reads the whole mesh back, some 100 bytes a cell, more than a page may hold on a mesh of
 // tens of GB. The two agree to a few parts in a million of the peak density.
 
-import { lobePotential, type RocheBody } from './roche';
+import { innerLagrange, lobePotential, type RocheBody } from './roche';
 
 /** A polytropic star at rest at the box center, to be settled into the grid's hydrostatic balance. */
 export interface StarSpec {
@@ -149,6 +164,12 @@ export interface Settling {
      * on the Roche surface, not on the sphere of its reach.
      */
     lobe?: { bodies: RocheBody[]; phi: number };
+    /**
+     * Find the angular velocity at which the settled stars are in orbit, and change `omega` to
+     * it as they settle (OrbitFinder): the frame turning with the binary then turns at it, or
+     * in an inertial frame the stars' velocities and spins are scaled to it.
+     */
+    orbit?: boolean;
   };
   /**
    * The angular velocity of a rotating frame with the centrifugal force (Problem.rotation): each
@@ -204,6 +225,69 @@ export function binaryPhi(b: NonNullable<Settling['binary']>, x: number, y: numb
   let p = -0.5 * b.omega * b.omega * (x * x + y * y);
   for (const m of b.masses) p -= m.gm / Math.hypot(x - m.at[0], y - m.at[1], z - (m.at[2] ?? 0), m.soft);
   return p;
+}
+
+/**
+ * The angular velocity at which a binary's stars are in orbit, from a round's holds (holdPull):
+ * `pulls`, the net force per unit mass on each star at `omega`, at its center of mass `coms`.
+ * Gravity alone is g = pull - omega^2 r (r off the z axis); Omega^2 = -sum M g . r / sum M |r|^2.
+ * Null if it cannot say (no star off the axis, or no inward pull).
+ */
+export function orbitOmega(set: Settling, coms: number[][], pulls: number[][], omega: number): number | null {
+  let num = 0;
+  let den = 0;
+  set.stars.forEach((s, i) => {
+    const m = s.gm ?? 0;
+    const [x, y] = coms[i];
+    const gx = pulls[i][0] - omega * omega * x;
+    const gy = pulls[i][1] - omega * omega * y;
+    num -= m * (gx * x + gy * y);
+    den += m * (x * x + y * y);
+  });
+  return den > 0 && num > 0 ? Math.sqrt(num / den) : null;
+}
+
+/**
+ * Turns a binary's settling at `omega` (Settling.binary.orbit): its centrifugal term, its Roche
+ * lobes' L1 found again, and the velocities and spins of stars that move in an inertial frame
+ * scaled to it.
+ */
+export function turnBinary(set: Settling, omega: number) {
+  const b = set.binary!;
+  const k = omega / b.omega;
+  if (!(k > 0) || k === 1) return;
+  b.omega = omega;
+  if (b.lobe) b.lobe = { bodies: b.lobe.bodies, phi: innerLagrange(b.lobe.bodies, omega).phi };
+  for (const s of set.stars) {
+    // (New arrays: a star's velocity may be its part's own.)
+    s.vel = s.vel.map((v) => v * k);
+    if (s.spin) s.spin *= k;
+  }
+}
+
+/**
+ * Finds, round by round, the angular velocity at which a circular binary's settling stars are in
+ * orbit (Settling.binary.orbit): before each round's holds, turn() turns the binary at the
+ * Omega the last round's holds ask for (orbitOmega); after them, record() keeps them. Inert
+ * for a settling that does not ask.
+ */
+export class OrbitFinder {
+  private last: { coms: number[][]; pulls: number[][]; omega: number } | null = null;
+  constructor(private set: Settling) {}
+
+  get on(): boolean {
+    return !!this.set.binary?.orbit;
+  }
+
+  turn() {
+    if (!this.on || !this.last) return;
+    const w = orbitOmega(this.set, this.last.coms, this.last.pulls, this.last.omega);
+    if (w !== null) turnBinary(this.set, w);
+  }
+
+  record(coms: number[][], pulls: number[][]) {
+    if (this.on) this.last = { coms: coms.map((c) => [...c]), pulls: pulls.map((p) => [...p]), omega: this.set.binary!.omega };
+  }
 }
 
 /**
@@ -432,6 +516,8 @@ export class Settler {
   private C: (number | undefined)[] = [];
   /** per star, in a binary: the integral part of the pull holding it in place (holdPull) */
   readonly held: number[][] = [];
+  /** a binary's orbit, found as it settles (Settling.binary.orbit) */
+  private orbit: OrbitFinder;
   private vol: Float64Array;
   /** star each cell can belong to, or -1 for none (ambient for good) */
   readonly owner: Int32Array;
@@ -441,6 +527,7 @@ export class Settler {
   readonly rewrote: Uint8Array;
 
   constructor(private set: Settling, private grid: SettleCells) {
+    this.orbit = new OrbitFinder(set);
     const n = grid.count;
     this.owner = new Int32Array(n).fill(-1);
     this.vol = new Float64Array(n);
@@ -503,9 +590,13 @@ export class Settler {
     const coms = this.set.stars.length > 1 || bin ? this.centers() : [];
     const at = bin ? [] : coms;
     const others = this.set.others ?? [];
+    // In a binary, turning at the Omega of its orbit as the last round found it.
+    this.orbit.turn();
+    const holds = bin ? this.set.stars.map((_, i) => holdPull(this.set, i, coms, (this.held[i] ??= [0, 0, 0]))) : [];
+    this.orbit.record(coms, holds);
     this.set.stars.forEach((s, i) => {
       const idx = this.cells[i];
-      const hold = bin ? holdPull(this.set, i, coms, (this.held[i] ??= [0, 0, 0])) : null;
+      const hold = bin ? holds[i] : null;
       const lobe = s.lobe && bin?.lobe ? bin.lobe : null;
       const ph = new Float64Array(idx.length);
       // A rotating frame: the star's spin, about its own center, out to the ridge its mass sets.
