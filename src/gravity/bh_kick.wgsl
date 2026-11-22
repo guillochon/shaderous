@@ -238,9 +238,30 @@ fn main() {
 // the axis comes back to its place in about a third of an orbit and does not swing past it.
 // Turning faster by dOmega, the frame sees every velocity change by -dOmega x x (the Euler force
 // over the step): the masses' here, the gas's through ext_accel in the next step.
+//
+// Released after a merger (track.w 3 to 5, OrbitPart.release): the frame hands over from keeping
+// the axis to coming to rest, as the mass stops looking like a binary. How much it does is
+//   e = sqrt(A^2 + B^2) / (I_xx + I_yy),
+// 1 for two points and 0 for a body symmetric about z (0.90 to 0.94 for the double white dwarf
+// of examples/setups until the donor is torn apart, 0.2 to 0.4 for the remnant after). Smoothed
+// over half a starting orbit and never let rise again (track2.w), it sets the weight
+// W = smoothstep(E_LO, E_HI, e) of the law above against slowing at Omega_0 per starting orbit:
+//   dOmega/dt = W (2 k w + k^2 phi) - (1 - W) sign(Omega) Omega_0^2 / 2 pi,
+// at rest within an orbit (an exponential approach would take several to get close). The axis
+// law is left out once W is under 1e-3: w divides by A^2 + B^2, which then vanishes. When W is
+// 0 and the step would take Omega past 0 the frame stops for good (track.w 5): Omega 0, no
+// Euler force, an inertial frame from then on.
+const RELEASE_E_HI = 0.7;  // two touching uniform spheres: 0.71; any star more concentrated: more
+const RELEASE_E_LO = 0.3;
 fn follow_binary() {
   let t = BH.track;
   if (t.w == 0.0) { return; }
+  if (t.w >= 5.0) {
+    // At rest: the gas has had the last turn's Euler force.
+    if (t.y != 0.0 && LIVE) { BH.track = vec4<f32>(0.0, 0.0, t.z, t.w); }
+    return;
+  }
+  let release = t.w >= 3.0;
   let n = mass_count();
   var s0 = FR[0];
   var sx = vec2<f32>(FR[1], FR[2]);
@@ -277,26 +298,54 @@ fn follow_binary() {
   let da = 2.0 * (sxvx - s0 * c.x * v.x) - 2.0 * (syvy - s0 * c.y * v.y);
   let db = 2.0 * (sxv - s0 * (c.x * v.y + c.y * v.x));
   let q2 = a * a + bq * bq;
-  if (!(q2 > 0.0)) { return; }
+  let trace = (sxx - s0 * c.x * c.x) + (syy - s0 * c.y * c.y);
+  if (!(q2 > 0.0) && !(release && trace > 0.0)) { return; }
   let s = BH.track2;
-  if (t.w == 1.0) {
+  // How much the mass looks like a binary (released frames only).
+  let e = select(0.0, sqrt(q2) / trace, trace > 0.0);
+  if (t.w == 1.0 || t.w == 3.0) {
     // Before the first step (the accelerations' evaluation, or the first kick if there was
-    // none): the axis it keeps from now on, as (cos psi, sin psi).
+    // none): the axis it keeps from now on, as (cos psi, sin psi), and e as it starts.
+    if (!(q2 > 0.0)) { return; }
     let q = sqrt(q2);
-    BH.track2 = vec4<f32>(a / q, bq / q, s.z, s.w);
-    BH.track = vec4<f32>(t.xyz, 2.0);
+    BH.track2 = vec4<f32>(a / q, bq / q, s.z, select(0.0, e, release));
+    BH.track = vec4<f32>(t.xyz, t.w + 1.0);
     return;
   }
   if (!LIVE) { return; }
-  let w = 0.5 * (a * db - bq * da) / q2;
-  let phi = 0.5 * atan2(s.x * bq - s.y * a, s.x * a + s.y * bq);
   let k = 0.5 * t.z;
-  let wdot = 2.0 * k * w + k * k * phi;
-  let dw = wdot * clock.dt;
+  var weight = 1.0;
+  var ebar = s.w;
+  if (release) {
+    // e smoothed over half a starting orbit, and never let rise (a negative one: not yet taken,
+    // as after a snapshot of a frame that was not released).
+    if (ebar < 0.0) { ebar = e; }
+    let rate = min(1.0, clock.dt * abs(t.z) / 3.14159265);
+    ebar = min(ebar, ebar + (e - ebar) * rate);
+    weight = smoothstep(RELEASE_E_LO, RELEASE_E_HI, ebar);
+  }
+  var wdot = 0.0;
+  if (weight > 1e-3 && q2 > 0.0) {
+    let w = 0.5 * (a * db - bq * da) / q2;
+    let phi = 0.5 * atan2(s.x * bq - s.y * a, s.x * a + s.y * bq);
+    wdot = weight * (2.0 * k * w + k * k * phi);
+  }
+  // Slowing at Omega_0 per starting orbit: at rest within an orbit of the handover's end.
+  let ramp = t.z * t.z / 6.28318531;
+  if (release) { wdot -= (1.0 - weight) * sign(t.x) * ramp; }
+  var dw = wdot * clock.dt;
+  var phase = t.w;
+  if (release && weight == 0.0 && abs(t.x) <= ramp * clock.dt) {
+    // At rest: Omega to 0 exactly. The gas feels this last turn in the next step; then no more.
+    dw = -t.x;
+    wdot = select(0.0, dw / clock.dt, clock.dt > 0.0);
+    phase = 5.0;
+  }
   for (var i = 0u; i < n; i++) {
     let b = BH.list[i];
     if (mass_fixed(b)) { continue; }
     BH.list[i].vel = vec4<f32>(b.vel.xyz + dw * vec3<f32>(b.pos.y, -b.pos.x, 0.0), b.vel.w);
   }
-  BH.track = vec4<f32>(t.x + dw, wdot, t.z, t.w);
+  BH.track = vec4<f32>(t.x + dw, wdot, t.z, phase);
+  if (release) { BH.track2 = vec4<f32>(s.xyz, ebar); }
 }

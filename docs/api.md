@@ -441,7 +441,11 @@ The run's diagnostics, read back now:
   is the momentum the gas gave the body's walls over the last step
   ([numerics.md](numerics.md#26-bodies-in-a-stream));
 - `frame`, for a rotating frame that follows a binary (an orbit's `track`): `omega`, its angular
-  velocity about z now, `omegaDot`, its rate of change, and `omega0`, where it started;
+  velocity about z now, `omegaDot`, its rate of change, and `omega0`, where it started. For one
+  released after a merger (the orbit's `release`), also `release`: `binaryLike`, how much the
+  mass still looks like a binary (smoothed: 1 for two points, 0 for a body symmetric about z;
+  the frame hands over between 0.7 and 0.3; null before the first step), and `atRest`, true
+  once the frame has stopped and the run is inertial;
 - `ranges`: the least and greatest value of each field, keyed by field name (the panel's
   δρ max for a liquid, |ρ / ρ₀ − 1|, comes from the density's);
 - `symmetry`, for a mirror-symmetric run: the mirrored axes. The totals are then those of the

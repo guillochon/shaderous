@@ -323,6 +323,17 @@ center of mass at the box center:
   mass. No gas needs to be told apart as one star's or the other's, so any two bodies can be
   followed: two stars, a star and a point mass, two point masses. The frame's angular velocity is
   in the diagnostics (`frame`), and a snapshot keeps it.
+- `"release": true` with `track` lets the frame go after a merger. Once one star is torn apart
+  over the other, the mass has no axis left to keep, and a frame still keeping it turns at
+  random. Released, the frame watches how much the mass still looks like a binary,
+  e = sqrt(A² + B²) / (I_xx + I_yy) of the same gas and masses (1 for two points, 0 for a body
+  symmetric about z; 0.85 to 0.94 for a pair before it merges, 0.2 to 0.4 for the remnant after),
+  smoothed over half an orbit and never let rise. As it falls from 0.7 to 0.3 the frame hands
+  over from keeping the axis to slowing down by its starting rate per orbit, so it stops within
+  an orbit, and once it has stopped the run
+  carries on in an inertial frame: the energy and momentum in the diagnostics are then the true
+  ones. A snapshot taken before the release, loaded with `release` set, is released from there.
+  The diagnostics' `frame.release` says how far it has got.
 - An eccentric binary with a star places it at pericenter as two point masses are placed, and
   settles each star in its own potential, as a star falling freely.
 
@@ -588,6 +599,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `fill` | Roche lobe fill | a number, 0.05 to 2 | In place of the separation: the first body, a star, is this many times the size of its Roche lobe (Eggleton 1983), which sets how far apart the two are. 1 just fills it; above 1 it pours gas through L1 onto its companion from the start |
 | `corotating` | Corotating frame | `true` or `false`. Default `false` | A circular binary: the run is in the frame turning with the orbit, so the bodies start at rest and a binary in balance stays still |
 | `track` | Follow the orbit | `true` or `false`. Default `false` | With the corotating frame: the frame turns faster or slower as the orbit changes (mass transfer, drag, gas lost through the faces), keeping the line between the two bodies where it started, and the gas and the point masses feel the Euler force of its changing turn. It follows the axis of the stars’ and point masses’ quadrupole, so any two bodies can be followed |
+| `release` | Release after a merger | `true` or `false`. Default `false` | With the frame following the orbit: once the mass no longer looks like a binary (the axis of its quadrupole fades, as when one star is torn apart over the other), the frame stops following the axis and comes to rest over about an orbit, and the run carries on in an inertial frame, where the energy and momentum it keeps are the true ones |
 | `retrograde` | Retrograde | `true` or `false`. Default `false` | In 2D: the binary orbits clockwise |
 | `beta` | Impact parameter β | a number, 0.05 to 20. Default `1` | Tidal radius over pericenter distance: above 1 the mass passes inside the star’s tidal radius |
 | `start` | Starts at (tidal radii) | a number, 1 to 20. Default `3` | Separation at the start, in tidal radii (never inside 1.5 pericenters) |

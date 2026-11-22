@@ -1530,6 +1530,11 @@
         "title": "Follow the orbit",
         "description": "With the corotating frame: the frame turns faster or slower as the orbit changes (mass transfer, drag, gas lost through the faces), keeping the line between the two bodies where it started, and the gas and the point masses feel the Euler force of its changing turn. It follows the axis of the stars’ and point masses’ quadrupole, so any two bodies can be followed"
        },
+       "release": {
+        "type": "boolean",
+        "title": "Release after a merger",
+        "description": "With the frame following the orbit: once the mass no longer looks like a binary (the axis of its quadrupole fades, as when one star is torn apart over the other), the frame stops following the axis and comes to rest over about an orbit, and the run carries on in an inertial frame, where the energy and momentum it keeps are the true ones"
+       },
        "beta": {
         "type": "number",
         "title": "Impact parameter β",

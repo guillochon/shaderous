@@ -123,6 +123,7 @@ function binaryIssues(spec: SetupSpec, parts: Part[], ids: string[], label: (i: 
     if (o.corotating && spec.physics?.rotation?.omega?.some((w) => w !== 0)) out.push({ level: 'error', path: `parts.${i}.corotating`, text: `${label(i)}: it turns the frame with the orbit, and the setup has a rotating frame of its own. Clear one` });
     if (o.corotating && parts.some((p) => p.kind === 'disk')) out.push({ level: 'error', path: `parts.${i}.corotating`, text: `${label(i)}: a disk is set up moving in an inertial frame, not in one turning with the binary` });
     if (o.track && !o.corotating) out.push({ level: 'warning', path: `parts.${i}.track`, text: `${label(i)}: it follows the orbit only in the corotating frame, which it does not turn` });
+    if (o.release && !o.track) out.push({ level: 'warning', path: `parts.${i}.release`, text: `${label(i)}: only a frame that follows the orbit is released after a merger, and it does not follow it` });
     if (withStar(o) && (o.incl ?? 0) !== 0) out.push({ level: 'error', path: `parts.${i}.incl`, text: `${label(i)}: a binary with a star orbits in the x-y plane (its inclination must be 0)` });
     if (o.q !== undefined && (o.of ?? []).every((id) => parts[ids.indexOf(id)]?.kind === 'star')) out.push({ level: 'warning', path: `parts.${i}.q`, text: `${label(i)}: the mass ratio of two stars is their masses’: q is not used` });
   }

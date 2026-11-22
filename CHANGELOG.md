@@ -9,6 +9,18 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Added
 
+- **Releasing a followed frame after a merger** (an orbit's `release`). A frame that follows a
+  binary keeps the axis of its mass; once one star is torn apart over the other there is no axis
+  left, and the frame turned at random (in a 1024³ double white dwarf its rate fell from 0.36 to
+  0.07 as the donor came apart, and was back at 0.13 two time units later). Released, it watches
+  how much the mass still looks like a binary (e, its quadrupole over its moment of inertia in
+  the orbital plane: 0.90 to 0.94 for that pair before it merged, 0.2 to 0.4 after), and as e
+  falls from 0.7 to 0.3 it hands over from keeping the axis to slowing down by its starting rate
+  per orbit; once stopped, the run carries on in an inertial frame. In a merging pair of
+  polytropes the released frame stopped an orbit after the merger and the remnant stayed compact
+  and centered, keeping 68% of the mass in the box, where the frame left following swung between
+  -0.22 and 0.47 and 52% stayed. A checkpoint saved before the release is released when loaded
+  with it set. The diagnostics' `frame.release` says how far it has got.
 - **Opening a checkpoint for viewing only** (plans/view-only.md), for runs too large to continue
   on this device: "Open for viewing" in the page, `viewAthdf()` in the API, `load_athdf` with
   `view: true` in the MCP server. The file is read in parts, never copied whole (files past

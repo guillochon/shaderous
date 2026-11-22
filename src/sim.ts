@@ -927,18 +927,30 @@ export const MASS_FLOATS = MASS_HEADER + MASS_STRIDE * MAX_MASSES;
 /**
  * A rotating frame that follows a binary (Problem.rotation track): its state as the Masses
  * block's header holds it after the frame's acceleration (gravity/bh.wgsl Masses.track and
- * track2): the angular velocity now, its rate of change, the one it started at, and 1 (2 once
- * the axis it keeps is taken, before the first step); that axis, as the cosine and sine of twice its angle, and the
- * density below which gas is not counted. From a snapshot, as it was. Eight zeros when the
- * frame does not follow one.
+ * track2): the angular velocity now, its rate of change, the one it started at, and its phase
+ * (1, then 2 once the axis it keeps is taken, before the first step; for a frame released after
+ * a merger 3, then 4, then 5 once at rest); that axis, as the cosine and sine of twice its angle,
+ * the density below which gas is not counted, and for a released frame how much the mass still
+ * looks like a binary (gravity/bh_kick.wgsl follow_binary). From a snapshot, as it was: a frame
+ * saved before it was released is released from there on, and one saved released carries on
+ * releasing even if the setup no longer asks. Eight zeros when the frame does not follow one.
  */
 export function frameTrack(c: SimConfig, _masses?: readonly Required<PointMass>[]): number[] {
   const r = c.problem.rotation?.(c.params, c.ndim);
   const w0 = rotationOf(c)[2];
   if (!r?.track || w0 === 0) return [0, 0, 0, 0, 0, 0, 0, 0];
-  if (c.restart?.frame?.length === 8) return [...c.restart.frame];
-  // (The axis it keeps is taken on the GPU before the first step: 1 in the fourth until then.)
-  return [w0, 0, w0, 1, 0, 0, Math.min(r.track.rhoMin, 3e38), 0];
+  const saved = c.restart?.frame;
+  if (saved?.length === 8) {
+    const f = [...saved];
+    // Saved following the axis, now to be released: from the next step, with e taken afresh.
+    if (r.track.release && (f[3] === 1 || f[3] === 2)) {
+      f[3] += 2;
+      f[7] = -1;
+    }
+    return f;
+  }
+  // (The axis it keeps is taken on the GPU before the first step: 1, or 3, in the fourth until then.)
+  return [w0, 0, w0, r.track.release ? 3 : 1, 0, 0, Math.min(r.track.rhoMin, 3e38), 0];
 }
 
 /** Channels of a followed frame's sums over the gas (gravity/frame_cell.wgsl). */
@@ -1295,9 +1307,16 @@ export function diagnosticsFrom(a: Float32Array, nMasses: number): Diagnostics {
   };
 }
 
-/** A followed frame's angular velocity and its rate of change, from a Masses block, if it follows a binary. */
+/**
+ * A followed frame's angular velocity and its rate of change, from a Masses block, if it follows
+ * a binary; for one released after a merger, how much the mass still looks like a binary and
+ * whether the frame has come to rest (frameTrack).
+ */
 function frameOf(bh: Float32Array): Pick<Diagnostics, 'frame'> {
-  return bh[7] >= 1 ? { frame: { omega: bh[4], omegaDot: bh[5], omega0: bh[6] } } : {};
+  if (!(bh[7] >= 1)) return {};
+  const frame: NonNullable<Diagnostics['frame']> = { omega: bh[4], omegaDot: bh[5], omega0: bh[6] };
+  if (bh[7] >= 3) frame.release = { binaryLike: bh[11] >= 0 ? bh[11] : null, atRest: bh[7] >= 5 };
+  return { frame };
 }
 
 /**
@@ -1432,8 +1451,13 @@ export interface Diagnostics {
   perturber: [number, number, number] | null;
   /** the point masses as they are now */
   masses: Required<PointMass>[];
-  /** A rotating frame that follows a binary: its angular velocity about z now, its rate of change, and where it started */
-  frame?: { omega: number; omegaDot: number; omega0: number };
+  /**
+   * A rotating frame that follows a binary: its angular velocity about z now, its rate of change,
+   * and where it started; released after a merger, how much the mass still looks like a binary
+   * (smoothed, 1 for two points, 0 for a body symmetric about z; null until taken) and whether
+   * the frame has come to rest
+   */
+  frame?: { omega: number; omegaDot: number; omega0: number; release?: { binaryLike: number | null; atRest: boolean } };
   /**
    * The mirrored axes (SimConfig.symmetry): the totals above are then those of the whole
    * configuration, of which the grid holds one 2^k-th (unfoldDiagnostics).

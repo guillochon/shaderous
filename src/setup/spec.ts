@@ -281,6 +281,12 @@ export interface OrbitPart {
    * line is the axis of the quadrupole of the stars' gas and the point masses.
    */
   track?: boolean;
+  /**
+   * binary, followed: once the mass no longer looks like a binary (a merger), the frame hands
+   * over from following the orbit to coming to rest, over about an orbit, and the run carries on
+   * in an inertial frame (gravity/bh_kick.wgsl follow_binary).
+   */
+  release?: boolean;
   /** flyby: tidal radius over pericenter distance */
   beta?: number;
   /** flyby: starting separation in tidal radii (never inside 1.5 pericenters) */

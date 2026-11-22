@@ -3,7 +3,7 @@
   "version": 1,
   "name": "Double white dwarf mass transfer, magnetized",
   "group": "Binaries and encounters",
-  "blurb": "Two cold carbon-oxygen white dwarfs on a circular orbit: a 0.6 solar mass donor at 0.97 of its Roche lobe and a 0.9 solar mass accretor, both settled in the Roche potential and tidally locked, in the frame turning with the orbit (tracking the pair's axis). Each is threaded by its own tangled Kolmogorov field confined to the star (plasma beta 1e5 at the center, from different seeds). Helmholtz equation of state; lengths in units of 10,000 km.",
+  "blurb": "Two cold carbon-oxygen white dwarfs on a circular orbit: a 0.6 solar mass donor at 0.97 of its Roche lobe and a 0.9 solar mass accretor, both settled in the Roche potential and tidally locked, in the frame turning with the orbit (tracking the pair's axis, and coming to rest once they have merged). Each is threaded by its own tangled Kolmogorov field confined to the star (plasma beta 1e5 at the center, from different seeds). Helmholtz equation of state; lengths in units of 10,000 km.",
   "domain": {
     "ndim": 3,
     "n": 128,
@@ -43,7 +43,7 @@
       "mass": 0.9,
       "field": { "type": "random", "beta": 100000, "seed": 2 }
     },
-    { "kind": "orbit", "id": "orbit", "of": ["donor", "accretor"], "type": "binary", "fill": 0.97, "ecc": 0, "corotating": true, "track": true }
+    { "kind": "orbit", "id": "orbit", "of": ["donor", "accretor"], "type": "binary", "fill": 0.97, "ecc": 0, "corotating": true, "track": true, "release": true }
   ],
   "run": { "tEnd": null, "checkpointDt": 1, "tDyn": 1 },
   "view": { "field": 0, "log": true, "mode": "slice", "axis": 2 }

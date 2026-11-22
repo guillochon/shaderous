@@ -1461,6 +1461,34 @@ physics is the same in either frame, so the difference is numerical: most likely
 angular momentum a binary moving across the grid loses to the advection's error, which one
 held still does not.
 
+*Releasing it after a merger* (`OrbitPart.release`). Once one star is torn apart over the
+other, $`A^2 + B^2`$ falls toward 0 and $`w`$ divides by it: the frame turns at random. In the
+magnetized double white dwarf at $`1024^3`$ its rate rose from 0.32 to 0.36 as the orbit
+shrank, fell to 0.07 by $`t = 104`$ as the donor came apart, and was back at 0.13 two units
+later. Released, the frame watches how much the mass still looks like a binary,
+$`e = \sqrt{A^2 + B^2} / (I_{xx} + I_{yy})`$ of the same gas and masses: 1 for two points, 0 for
+a body symmetric about z, 0.71 for two touching uniform spheres. In that run it was 0.90 to 0.94
+until the donor broke up, 0.38 at $`t = 100`$ and 0.22 at $`t = 106`$. Smoothed over half a
+starting orbit and never let rise ($`\bar e`$), it weighs the axis law against slowing down:
+
+```math
+\dot\Omega = W\,(2k\,w + k^2\varphi) - (1 - W)\,\operatorname{sign}(\Omega)\,\frac{\Omega_0^2}{2\pi},
+\qquad W = \operatorname{smoothstep}(0.3, 0.7, \bar e),
+```
+
+the axis law left out once $`W < 10^{-3}`$. The frame slows by $`\Omega_0`$ per starting orbit,
+a linear ramp that stops it within an orbit of the handover's end, where an exponential approach
+would take several orbits to get close. When the step would take it past 0 with $`W = 0`$, it
+stops for good: $`\Omega = 0`$, the gas feels that last turn's Euler force in the next step, and
+the run is inertial from then on. The energy and momentum in the diagnostics are then the true
+ones. The test was two n = 1.5 polytropes (masses 1 and 0.6) with the donor overfilling its lobe
+1.2 times, on a $`64^3`$ grid with two levels in a box 8 across, merging within an orbit
+($`P_0 = 13.7`$). Released, $`\bar e`$ fell from 0.85 to 0.31 between $`t = 6`$ and 18, the
+frame slowed at the ramp's $`0.0335`$ and stopped at $`t \approx 24`$, and the remnant sat
+compact at the center to $`t = 80`$, keeping 68% of the mass in the box. Followed without the
+release, the frame swung between $`\Omega = -0.22`$ and 0.47, the total energy jumped from
+$`-0.63`$ to $`-0.28`$ and back to $`-0.47`$, and only 52% of the mass stayed, in a lopsided remnant.
+
 *A star with a point-mass core* (a giant; `StarPart.core`, `problems/cored_polytrope.ts`). Part
 of the star's mass is a point mass at its center with the point masses' softened potential,
 $`-G M_c / \sqrt{r^2 + \epsilon^2}`$, and the rest a polytropic envelope in balance with its own

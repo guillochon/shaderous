@@ -269,10 +269,31 @@ describe('a frame that follows a binary', () => {
     expect(frameTrack(plain, masses)).toEqual([0, 0, 0, 0, 0, 0, 0, 0]);
   });
 
+  it('released after a merger: phase 3 from the start, and a snapshot saved following the axis is released from there', () => {
+    const released = binary({ corotating: true, track: true, release: true });
+    const problem = compileSetup(released).problem;
+    expect(problem.rotation!({}, 3).track!.release).toBe(true);
+    expect(compileSetup(spec).problem.rotation!({}, 3).track!.release).toBeUndefined();
+    const c = configFor(problem, 400);
+    const masses = problem.masses!(c.params, c.G, 0.01, 3).map((m) => completeMass(m, 0.01));
+    const t = frameTrack(c, masses);
+    expect(t[3]).toBe(3);
+    expect(t[7]).toBe(0);
+    // Saved following the axis: released from the next step, with e taken afresh.
+    const w = t[2];
+    expect(frameTrack({ ...c, restart: { time: 1, steps: 10, frame: [0.4, 1e-4, w, 2, 0.6, 0.8, 0.01, 0] } }, masses)).toEqual([0.4, 1e-4, w, 4, 0.6, 0.8, 0.01, -1]);
+    // Saved released, part way or at rest: as it was.
+    for (const saved of [[0.2, -1e-3, w, 4, 0.6, 0.8, 0.01, 0.35], [0, 0, w, 5, 0.6, 0.8, 0.01, 0.1]]) {
+      expect(frameTrack({ ...c, restart: { time: 1, steps: 10, frame: saved } }, masses)).toEqual(saved);
+    }
+  });
+
   it('is checked: corotating only; two stars without cores are fine', () => {
     const texts = (s: SetupSpec) => checkSetup(s).map((i) => `${i.level}: ${i.text}`);
     expect(texts(spec).filter((t) => /follow|inside/.test(t))).toEqual([]);
     expect(texts(binary({ track: true })).some((t) => /^warning: .*only in the corotating frame/.test(t))).toBe(true);
+    expect(texts(binary({ corotating: true, release: true })).some((t) => /^warning: .*only a frame that follows the orbit is released/.test(t))).toBe(true);
+    expect(texts(binary({ corotating: true, track: true, release: true })).filter((t) => /released/.test(t))).toEqual([]);
     const second: Part = { kind: 'star', id: 'acc', type: 'polytrope', n: 1.5, mass: 0.5, radius: 0.3 };
     const stars = binary({ fill: undefined, separation: 1.5, corotating: true, track: true }, [star, second]);
     expect(texts(stars).filter((t) => /^error/.test(t))).toEqual([]);

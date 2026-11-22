@@ -552,7 +552,8 @@ export function compileSetup(input: SetupSpec): Compiled {
           const w = b?.corotating ? b.omega : 0;
           // It follows the axis of the mass's quadrupole: the stars' gas (denser than where they
           // end, so that a stream, a disk or an outflow does not turn it) and the point masses.
-          const track = b?.corotating && b.track ? { rhoMin: bodies.stars.length ? ambient(s, bodies).cut : NO_GAS } : undefined;
+          // Released after a merger, it comes to rest instead once that mass stops looking like a binary.
+          const track = b?.corotating && b.track ? { rhoMin: bodies.stars.length ? ambient(s, bodies).cut : NO_GAS, ...(b.release ? { release: true } : {}) } : undefined;
           return { omega: [0, 0, w], centrifugal: true, ...(track ? { track } : {}) };
         }
       : ph.rotation?.omega && ph.rotation.omega.some((w) => w !== 0)

@@ -320,6 +320,8 @@ export interface BinaryFrame {
   lobe?: { bodies: RocheBody[]; phi: number };
   /** the frame follows the orbit (OrbitPart.track) */
   track?: boolean;
+  /** and comes to rest once the mass no longer looks like a binary (OrbitPart.release) */
+  release?: boolean;
 }
 
 export interface BodyContext {
@@ -428,7 +430,7 @@ function placeBinary(o: OrbitPart, out: Bodies, i: number, j: number, ctx: BodyC
     // In the frame turning with the orbit the two masses start at rest.
     out.masses[i] = { ...out.masses[i], vel: [0, 0, 0] };
     out.masses[j] = { ...out.masses[j], vel: [0, 0, 0] };
-    out.binary = { omega: binaryOmega(total, sep, soft), corotating: true, separation: sep, l1: new Map(), ...(o.track ? { track: true } : {}) };
+    out.binary = { omega: binaryOmega(total, sep, soft), corotating: true, separation: sep, l1: new Map(), ...(o.track ? { track: true, ...(o.release ? { release: true } : {}) } : {}) };
   }
 }
 
@@ -490,7 +492,7 @@ function placeStarBinary(o: OrbitPart, out: Bodies, ctx: BodyContext) {
   if (A.star) l1.set(A.star.id, dist(bodies[0].at));
   if (B.star) l1.set(B.star.id, dist(bodies[1].at));
   for (const b of [A, B]) if (b.star && !corotating) b.star.spin = omega;
-  out.binary = { omega, corotating, separation: sep, l1, lobe: { bodies, phi: L1.phi }, ...(corotating && o.track ? { track: true } : {}) };
+  out.binary = { omega, corotating, separation: sep, l1, lobe: { bodies, phi: L1.phi }, ...(corotating && o.track ? { track: true, ...(o.release ? { release: true } : {}) } : {}) };
 }
 
 /** A part's quantity by name, for units that follow one: "<id>.mass" or "<id>.radius". */
