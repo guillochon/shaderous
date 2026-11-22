@@ -24,24 +24,25 @@ measure Ṁ at several fills, fit Ṁ = A (f − f₀)³ above the floor, and ta
 f₀, Ṁ is a numerical floor: the atmosphere settling, and diffusion through L1. That floor depends
 on resolution, so the onset has to be found at the resolution the run will use.
 
-**How to measure Ṁ.** The stars carry dye, spread over (0, 1] by their order (the donor's is the
-lower). Ṁ is the rate at which donor-dyed mass appears on the accretor's side of the L1 plane,
-which stays put because the frame follows the pair. Write `--athdf` outputs every quarter orbit
-(about 5 code units) and a script, like `quadfrac.mjs`, that sums that mass in each. Leave out
-the first orbit, which is the stars settling. Also record ρ at L1 over the donor's central
-density, and look at slices for a stream.
+**How to measure Ṁ.** The stars carry dye, spread over (0, 1] by their order (check which value
+is the donor's). Ṁ is the rate at which donor-dyed mass appears on the accretor's side of the L1 plane,
+which stays put because the frame follows the pair. Write `--athdf` outputs every eighth of an
+orbit (about 2.5 code units) and a script, like `quadfrac.mjs`, that sums that mass in each. The
+stars are settled before t = 0, but leave out the first quarter orbit in case anything is still
+adjusting. Also record ρ at L1 over the donor's central density, and look at slices for a stream.
 
 **Runs.**
-- **Fills:** 0.92, 0.94, 0.95, 0.96, 0.97, 0.98 and 1.00. That's 7 runs, each 2 orbits (t = 40).
-- **Grid:** 512³ with 4 levels, on Unity's `umd-cscdr-gpu`, at the same time on separate A100s.
-  At about an eighth of 1024³'s blocks, each should take about 1 to 2 hours.
-- **Then 1024³ at two fills** either side of the onset found at 512³, to see how far the onset
-  moves with resolution (about 8 hours each). If it moves by more than 0.01, add one 1024³ run
-  at a third fill.
-- **Box:** the box chosen in §4, so the start is measured on the grid the run will use.
+- **Fills:** 0.935 to 0.965 in steps of 0.005, which is 7 runs. 0.97 is known to overflow, so
+  nothing at or above it.
+- **Length:** 1 orbit each (t = 20), enough to see whether the donor overflows.
+- **Grid:** the run's own: box 12, 1024³ with 5 levels. On Unity's `umd-cscdr-gpu` (the first run holds one of its
+  12 A100s), all 7 at once, with `--gpu-memory 74`. The first run took about 12 minutes per
+  code unit on an A100 at this stage, on a finer mesh, so each should finish in 3 to 5 hours.
+  Eight checkpoints each, at 2 to 3 GB, come to about 150 GB of `/work`, which has 580 GB
+  free. Delete them once Ṁ is measured.
 
-**Result.** A table of Ṁ against fill at both resolutions, the fit's f₀, and the fill chosen
-for the run, with slices at t = 20 and 40 for each fill.
+**Result.** A table of Ṁ against fill, the fit's f₀, and the fill chosen for the run, with slices
+at t = 10 and 20 for each fill.
 
 ## 2. Frame: release after the merger
 
@@ -55,16 +56,16 @@ Another session is working on optimizations. Before submitting:
 - Rerun `gpu-check.sbatch`, plus a short timing run (2 code units of the chosen setup on an
   A100). Compare code units per hour, the block budget at 74 GB, and checkpoint write and reload
   times against the first run.
-- If the budget still fills before the merger in the 512³ sweep's mesh growth scaled up, decide
-  between the H200 (141 GB, preemptible partitions only), one level fewer, or a looser
+- If the sweep's mesh growth says the budget will fill before the merger, decide between the H200 (141 GB, preemptible partitions only), one level fewer, or a looser
   `refineDense`.
 
 ## 4. Decisions
 
-1. **Box size.** 12 (60,000 km) or 16. On the same finest cell (0.0078) this means n = 1536 or
-   2048, with more root blocks and more memory. A larger box at the same n coarsens the finest
-   cell to 0.0117 or 0.0156, which changes the onset (§1). The tail's mass loss argues for 16. The
-   block budget may argue for 12.
+1. **Box size: 12** (60,000 km from center to face; chosen 2026-11-22). Grids come in powers of
+   two, so at 1024³ the finest cell is 0.0117, 1.5 times the first run's 0.0078. Keeping 0.0078
+   in a box of 12 would take n = 1536, which is not on offer. The next size up, 2048³ with 6
+   levels, makes the cell 0.0059 and needs about 2.4 times the blocks on the stars. A box of 16
+   at 2048³ with 6 levels would keep exactly 0.0078 for about the first run's block count.
 2. **GPU.** The dedicated A100s (never preempted, 5 days) or the H200 (twice the memory,
    preempted twice before).
 3. **Length.** 20 orbits after the start, as in the first run, or a set time after the merger.
