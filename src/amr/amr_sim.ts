@@ -426,47 +426,27 @@ export class AmrSim implements Simulation {
     this.dx0 = cfg.problem.box / this.n0;
     const nr = this.n0 / BS;
     const roots = nr ** cfg.ndim;
-    // Atlas size: room for the roots plus refinement, within what a texture can hold.
-    const limit = Math.floor(Math.min(gpu.limits.maxTextureDimension3D, 2048) / PAD);
     // Default size: what refining everywhere would need (leaves plus their parents), within the
-    // device's GPU memory budget (gpu/memory.ts: set by the user, or guessed: 2.5 GB on a
-    // desktop, 13^3 blocks in 3D, 1 GB on a phone, less after a crash), the atlas being nearly
-    // all of a run's memory. create() falls back to a smaller atlas if the GPU cannot hold that.
+    // device's GPU memory budget (atlasShape). create() falls back to a smaller atlas if the GPU
+    // cannot hold that.
     const full = Math.ceil(roots * (1 << (cfg.ndim * this.levels)) * (cfg.ndim === 3 ? 8 / 7 : 4 / 3));
     const explicit = slots || cfg.amrBudget;
-    let fit = Math.floor(memoryBudget() / AmrSim.blockBytesFor(cfg));
-    // A magnetic field's flux register is one buffer of a few kB per block: no more blocks than it may hold.
-    if (cfg.problem.mhd) fit = Math.min(fit, Math.floor(maxBinding(d) / registerBytes(cfg.ndim)));
-    // With species, the face mass fluxes are one buffer of some 59 kB per block in 3D, bound as
-    // two windows of at most a binding's size each (massFluxWindows).
-    if (this.recordsMassFlux) fit = Math.min(fit, Math.floor(massFluxMaxBytes(d) / speciesFaceBytes(cfg.ndim)));
-    // Where the atlas textures cannot be render attachments, WebGPU zero-fills each on first use
-    // through one staging buffer of its size, which may be no larger than a buffer may be (4 GiB
-    // on NVIDIA; see tex3d in gpu/device.ts): a 35^3-block atlas's 5.5 GB textures lost the
-    // device. Each atlas texture holds PAD^d texels of 16 bytes per block; the species' one
-    // stacks its groups along z.
-    if (!rendersTo3d(d)) fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** cfg.ndim * 16 * Math.max(1, this.speciesGroups))));
-    if (cfg.ndim === 3) {
-      const auto = Math.max(6, Math.ceil(Math.cbrt(Math.max(full, roots * 2)) - 1e-9));
-      // 3D passes over the blocks, self-gravity's multigrid's too, run in slabs along z
-      // (amr/dispatch.ts), so the dispatch limit does not bound the blocks.
-      this.slotsPerSide = Math.min(limit, explicit ? Math.ceil(Math.cbrt(explicit) - 1e-9) : auto, Math.max(1, Math.floor(Math.cbrt(fit) + 1e-9)));
-      // With species, their atlas's stacks of groups must fit a texture's sides too (thirteen
-      // species, four groups: 51^3 blocks).
-      if (this.speciesGroups > 0) {
-        const fits = (s: number) => Math.max(...speciesAtlasSize(s * PAD, s * PAD, s * PAD, this.speciesGroups).slice(1)) <= gpu.limits.maxTextureDimension3D;
-        while (this.slotsPerSide > 1 && !fits(this.slotsPerSide)) this.slotsPerSide--;
-      }
-      this.layers = this.slotsPerSide;
-    } else {
-      const want = Math.min(explicit || Math.max(full, roots * 2, 144), Math.max(1, fit));
-      this.layers = Math.ceil(want / limit ** 2);
-      this.slotsPerSide = Math.min(limit, Math.floor(Math.sqrt(fit / this.layers) + 1e-9), Math.ceil(Math.sqrt(want / this.layers) - 1e-9));
-    }
-    this.cap = this.slotsPerSide ** 2 * this.layers;
+    const fit = AmrSim.atlasLimits(d, {
+      ndim: cfg.ndim,
+      blockBytes: AmrSim.blockBytesFor(cfg),
+      // (A view's flux register is one block's, and it records no fluxes: amr_mhd.ts.)
+      register: !!cfg.problem.mhd && !cfg.viewOnly,
+      massFlux: this.recordsMassFlux,
+      // The species' atlas holds them only with the state (not in a view of one field).
+      groups: cfg.viewBaked ? 0 : this.speciesGroups,
+    });
+    const shape = AmrSim.atlasShape(d, cfg.ndim, fit, explicit || (cfg.ndim === 3 ? Math.max(216, full, roots * 2) : Math.max(full, roots * 2, 144)));
+    this.slotsPerSide = shape.slotsPerSide;
+    this.layers = shape.layers;
+    this.cap = shape.cap;
     if (roots > this.cap) {
       throw new Error(
-        fit < Infinity && roots > fit
+        fit.blocks < Infinity && roots > fit.blocks
           ? `${roots} root blocks need more GPU memory than this device allows (${Math.round(memoryBudget() / 2 ** 20)} MB): pick a lower resolution or more refinement levels`
           : `${roots} root blocks do not fit in an atlas of ${this.cap}`,
       );
@@ -555,6 +535,66 @@ export class AmrSim implements Simulation {
     this.binArgs = d.createBuffer({ size: BIN_ARGS_BYTES, usage: storage | GPUBufferUsage.INDIRECT });
     this.binStaging = d.createBuffer({ size: BIN_ARGS_BYTES, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     this.staging = d.createBuffer({ size: DIAG_FLOATS * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  }
+
+  /**
+   * What bounds a run's atlas on this device: `blocks`, the most blocks it may hold, and
+   * `groups`, the species' groups stacked in its atlas (whose sides bound it too: atlasShape).
+   */
+  static atlasLimits(
+    d: GPUDevice,
+    o: { ndim: 2 | 3; blockBytes: number; register: boolean; massFlux: boolean; groups: number },
+  ): { blocks: number; groups: number } {
+    const { ndim, groups } = o;
+    // The device's GPU memory budget (gpu/memory.ts: set by the user, or guessed: 2.5 GB on a
+    // desktop, 1 GB on a phone, less after a crash), the atlas being nearly all of a run's memory.
+    let fit = Math.floor(memoryBudget() / o.blockBytes);
+    // A magnetic field's flux register is one buffer of a few kB per block: no more blocks than it may hold.
+    if (o.register) fit = Math.min(fit, Math.floor(maxBinding(d) / registerBytes(ndim)));
+    // With species, the face mass fluxes are one buffer of some 59 kB per block in 3D, bound as
+    // two windows of at most a binding's size each (massFluxWindows).
+    if (o.massFlux) fit = Math.min(fit, Math.floor(massFluxMaxBytes(d) / speciesFaceBytes(ndim)));
+    // Where the atlas textures cannot be render attachments, WebGPU zero-fills each on first use
+    // through one staging buffer of its size, which may be no larger than a buffer may be (4 GiB
+    // on NVIDIA; see tex3d in gpu/device.ts): a 35^3-block atlas's 5.5 GB textures lost the
+    // device. Each atlas texture holds PAD^d texels of 16 bytes per block; the species' one
+    // stacks its groups along z.
+    if (!rendersTo3d(d)) fit = Math.min(fit, Math.floor(d.limits.maxBufferSize / (PAD ** ndim * 16 * Math.max(1, groups))));
+    return { blocks: Math.max(0, fit), groups };
+  }
+
+  /**
+   * The most blocks a view-only atlas (SimConfig.viewOnly) of `blockBytes` a block may hold on
+   * this device: what io/view.ts planView plans a checkpoint's view against. `groups`: the
+   * species' groups, held with the state (0 when one field is held).
+   */
+  static viewCapacity(d: GPUDevice, ndim: 2 | 3, blockBytes: number, groups: number): number {
+    return AmrSim.atlasShape(d, ndim, AmrSim.atlasLimits(d, { ndim, blockBytes, register: false, massFlux: false, groups })).cap;
+  }
+
+  /**
+   * The atlas's shape for `want` blocks (Infinity: as many as fit), within `fit` (atlasLimits)
+   * and what a texture's sides hold: a cube of slots in 3D, layers of squares in 2D. Its `cap`
+   * may be less than `want` or `fit.blocks`, rounded down to that shape.
+   */
+  static atlasShape(d: GPUDevice, ndim: 2 | 3, fit: { blocks: number; groups: number }, want = Infinity): { slotsPerSide: number; layers: number; cap: number } {
+    const limit = Math.floor(Math.min(d.limits.maxTextureDimension3D, 2048) / PAD);
+    if (ndim === 3) {
+      // 3D passes over the blocks, self-gravity's multigrid's too, run in slabs along z
+      // (amr/dispatch.ts), so the dispatch limit does not bound the blocks.
+      let side = Math.min(limit, Math.ceil(Math.cbrt(want) - 1e-9), Math.max(1, Math.floor(Math.cbrt(fit.blocks) + 1e-9)));
+      // With species, their atlas's stacks of groups must fit a texture's sides too (thirteen
+      // species, four groups: 51^3 blocks).
+      if (fit.groups > 0) {
+        const fits = (s: number) => Math.max(...speciesAtlasSize(s * PAD, s * PAD, s * PAD, fit.groups).slice(1)) <= d.limits.maxTextureDimension3D;
+        while (side > 1 && !fits(side)) side--;
+      }
+      return { slotsPerSide: side, layers: side, cap: side ** 3 };
+    }
+    const w = Math.min(want, Math.max(1, fit.blocks));
+    const layers = Math.ceil(w / limit ** 2);
+    const side = Math.min(limit, Math.floor(Math.sqrt(fit.blocks / layers) + 1e-9), Math.ceil(Math.sqrt(w / layers) - 1e-9));
+    return { slotsPerSide: side, layers, cap: side ** 2 * layers };
   }
 
   /**

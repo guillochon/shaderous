@@ -8,6 +8,7 @@ import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport 
 import { capture, restartFrom } from '../io/capture';
 import { canPickFolder, checkpointIndex, download, downloadBlob, downloadSink, nextCheckpoint, pickFolder, type CheckpointSink } from '../io/checkpoints';
 import { maxLevel, type Snapshot } from '../io/snapshot';
+import { AmrSim } from '../amr/amr_sim';
 import { bakeVariables, fileSpeciesGroups, planView, viewBakedBlockBytes, viewBlockBytes, viewFacesBlockBytes, type ViewBatch } from '../io/view';
 import type { ViewFile } from '../io/view_open';
 import { DiagHistory, drawFull, drawSpark, fmt3 } from './diag_plot';
@@ -2119,13 +2120,17 @@ type ViewOpened = { level: number; fileLevel: number; blocks: number; fileBlocks
  * open (`viewing`) to bake another field from; `faces` holds the face field too, for field lines
  * (otherwise they are off until asked for, when it is opened again with them: settleView).
  */
-async function showView(vf: ViewFile, name: string, opts: { oneField?: boolean; faces?: boolean; settle?: boolean }): Promise<ViewOpened> {
+async function showView(vf: ViewFile, name: string, opts: { oneField?: boolean; faces?: boolean; settle?: boolean; maxNodes?: number }): Promise<ViewOpened> {
   const h = vf.header;
   const groups = fileSpeciesGroups(vf.variables);
   const budget = memoryBudget();
-  const withState = planView(h, Math.floor(budget / viewBlockBytes(h.ndim, vf.hasFaces, groups, groups > 0)));
+  // Planned against the atlas the run will make (AmrSim's atlasShape): its cube of slots, not
+  // just the bytes, holds fewer blocks than the budget over a block's bytes.
+  const d = gpu.device;
+  const most = opts.maxNodes ?? Infinity;
+  const withState = planView(h, Math.min(most, AmrSim.viewCapacity(d, h.ndim, viewBlockBytes(h.ndim, vf.hasFaces, groups, groups > 0), groups)));
   const faces = !!opts.faces && vf.hasFaces;
-  const oneField = planView(h, Math.floor(budget / (viewBakedBlockBytes(h.ndim) + (faces ? viewFacesBlockBytes(h.ndim) : 0))));
+  const oneField = planView(h, Math.min(most, AmrSim.viewCapacity(d, h.ndim, viewBakedBlockBytes(h.ndim) + (faces ? viewFacesBlockBytes(h.ndim) : 0), 0)));
   // (Species that set the equation of state need the composition at each cell, which a baked
   // view does not hold: such a file is shown with its state unless asked otherwise.)
   const baked = opts.oneField ?? (!!oneField && (!withState || oneField.level > withState.level) && groups === 0);
@@ -2147,6 +2152,11 @@ async function showView(vf: ViewFile, name: string, opts: { oneField?: boolean; 
   }
   snap.view = { level: plan.level, nodes: plan.nodes, fileLevel: plan.fileLevel, baked, faces: baked && faces };
   await importSnapshot(snap);
+  // The GPU may not have held that atlas (AmrSim.create falls back to a smaller one): then the
+  // mesh lacks some of the plan's blocks, so plan again against the atlas made.
+  const made = sim instanceof AmrSim ? sim.cap : Infinity;
+  // (Holding the state, the file is read again at the level that fits.)
+  if (made < plan.nodes) return await showView(vf, name, { ...opts, oneField: baked, maxNodes: made });
   if (baked) {
     // Without the face field there are no field lines to draw until they are asked for.
     if (!faces) view.fieldLines = false;

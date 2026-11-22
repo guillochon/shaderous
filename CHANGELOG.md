@@ -48,6 +48,11 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Fixed
 
+- Opening a checkpoint for viewing picks a level the GPU's atlas can really hold: it planned
+  against the memory budget's bytes alone, but the atlas is a cube of slots (and, with a magnetic
+  field, was bounded by a flux register a view does not use), so a file just under the budget
+  failed with "the mesh has no leaf at level ..." and was drawn with holes. If the GPU makes a
+  smaller atlas than asked, the view is planned again against it.
 - The command-line runner starts `diag.jsonl` empty: a second run into the same folder appended
   its diagnostics to the first run's.
 
