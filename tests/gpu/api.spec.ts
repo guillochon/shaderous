@@ -225,10 +225,8 @@ test('every editing tool works from the API, and is logged', async ({ page }) =>
   expect(pull.frames).toBeGreaterThan(1);
   expect((await diag()).magnetic.divB).toBeLessThan(1e-6);
 
-  // An obstacle holds its gas at rest.
-  await call(page, 'tool', 'velocity', { pos: [0.1, 0.9], radius: 0.06, vel: [0.5, 0] });
-  await call(page, 'tool', 'obstacle', { shape: 'rect', center: [0.1, 0.9], half: [0.03, 0.03] });
-  expect((await at([0.1, 0.9, 0.5])).vel[0]).toBe(0);
+  // No obstacle with a field (the MHD fluxes know no solid cell): refused, not drawn.
+  await expect(call(page, 'tool', 'obstacle', { shape: 'rect', center: [0.1, 0.9], half: [0.03, 0.03] })).rejects.toThrow(/magnetic field/);
 
   await call(page, 'tool', 'source', { pos: [0.5, 0.1], fixed: true });
   const sink = await call(page, 'tool', 'sink', { pos: [0.9, 0.1], fixed: true });
@@ -248,11 +246,21 @@ test('every editing tool works from the API, and is logged', async ({ page }) =>
   const log = await call(page, 'actions');
   expect(log.format).toBe('shaderous-session');
   const brushes = log.entries.filter((e: any) => e.action.kind === 'brush').map((e: any) => e.action.op.kind);
-  for (const k of ['mass', 'velocity', 'temperature', 'field', 'pull', 'obstacle']) expect(brushes).toContain(k);
+  for (const k of ['mass', 'velocity', 'temperature', 'field', 'pull']) expect(brushes).toContain(k);
+  expect(brushes).not.toContain('obstacle');
   const kinds = log.entries.map((e: any) => e.action.kind);
   expect(kinds).toEqual(expect.arrayContaining(['sources', 'mass', 'remove']));
   // Every action has its step, and none is before the five taken first.
   expect(log.entries.every((e: any) => e.steps >= 5)).toBe(true);
+
+  // In a gas without a field, an obstacle holds its gas at rest, and is logged.
+  await call(page, 'load', { problem: 'kelvin-helmholtz', dim: 2, n: 128 });
+  await call(page, 'step', 5);
+  await call(page, 'tool', 'velocity', { pos: [0.1, 0.9], radius: 0.06, vel: [0.5, 0] });
+  await call(page, 'tool', 'obstacle', { shape: 'rect', center: [0.1, 0.9], half: [0.03, 0.03] });
+  expect((await at([0.1, 0.9, 0.5])).vel[0]).toBe(0);
+  const log2 = await call(page, 'actions');
+  expect(log2.entries.filter((e: any) => e.action.kind === 'brush').map((e: any) => e.action.op.kind)).toContain('obstacle');
 });
 
 test('a session log replays to the bit: tools, a setting, and the adaptive mesh re-meshing', async ({ page }) => {
