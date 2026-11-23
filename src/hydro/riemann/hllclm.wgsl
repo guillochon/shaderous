@@ -51,13 +51,25 @@ fn riemann_flux(l0: Side, r0: Side, w_hll: f32) -> Flux {
   } else {
     let ql = l.rho * (sl - l.v.x);
     let qr = r.rho * (sr - r.v.x);
-    let sm = (r.p - l.p + l.v.x * ql - r.v.x * qr) / (ql - qr);
 
     // HLL
     let inv = 1.0 / (sr - sl);
     let hm = (sr * fml - sl * fmr + sl * sr * (r.rho - l.rho)) * inv;
     let hp = (sr * fpl - sl * fpr + sl * sr * (mr - ml)) * inv;
     let he = (sr * fel - sl * fer + sl * sr * (er - el)) * inv;
+
+    // Gas so cold that its sound speed is below the rounding of its velocity (c_s = 1e-7 at
+    // v = 11: two cold streams pulled apart, a reflecting wall and its mirror image): sl - v.x
+    // rounds to 0, ql or qr with it, and the contact speed below to 0 / 0. Otherwise ql < 0 < qr
+    // always. The star region is then a vacuum, which HLL carries: take it.
+    if (!(ql < 0.0 && qr > 0.0)) {
+      out.m = hm; out.mom = hp; out.e = he; out.vn = 0.5 * (l.v.x + r.v.x);
+      let up0 = out.m >= 0.0;
+      out.ei = out.m * select(r.eint / r.rho, l.eint / l.rho, up0);
+      out.s = out.m * select(r.s, l.s, up0);
+      return out;
+    }
+    let sm = (r.p - l.p + l.v.x * ql - r.v.x * qr) / (ql - qr);
 
     // HLLC
     var cm: f32;

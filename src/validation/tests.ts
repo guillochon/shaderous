@@ -980,6 +980,37 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'cold-wall-vacuum',
+    name: 'Cold gas pulled off a reflecting wall (a vacuum between two cold streams)',
+    criterion:
+      'Gas at p = 1e-14 (sound speed 1.3e-7) moving at 11 in a closed 2D box (64^2): at the wall it leaves, it and its mirror image are two cold streams pulling apart, whose sound speed is below the rounding of their velocity. With HLLC and its low-Mach version: after 40 steps every value finite and the mass conserved to 1e-5. (HLLC took sl - v as 0 there and its contact speed as 0 / 0: random test seed 20001, a slab pulled off a wall by self-gravity.)',
+    async run(gpu) {
+      const p: Problem = {
+        id: 'cold-wall', label: 'Cold wall', blurb: '', eos: 'ideal', eosParams: { gamma: 5 / 3 },
+        bcLo: all(REFLECT), bcHi: all(REFLECT), gravity: 'off', G: 0, box: 1, tEnd: Infinity, supports2d: true,
+        init: () => () => ({ rho: 1, vx: 11, vy: 0, vz: 0, p: 1e-14, s: 0 }),
+      };
+      const metrics: Record<string, number> = {};
+      let pass = true;
+      for (const riemann of ['hllc', 'hllclm'] as const) {
+        await withSim(gpu, p, 64, { ndim: 2, riemann }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          sim.step(40);
+          const d = await sim.diagnostics();
+          const { u1, u2 } = await sim.readState();
+          let bad = 0;
+          for (let i = 0; i < u1.length; i++) if (!Number.isFinite(u1[i]) || !Number.isFinite(u2[i])) bad++;
+          const dm = Math.abs(d.mass / d0.mass - 1);
+          metrics[`${riemann}_non_finite`] = bad;
+          metrics[`${riemann}_mass_change`] = dm;
+          metrics[`${riemann}_steps`] = d.steps;
+          if (bad > 0 || !(dm < 1e-5)) pass = false;
+        });
+      }
+      return { pass, metrics };
+    },
+  },
+  {
     id: 'reflecting-box',
     name: 'Blast in a closed reflecting box',
     criterion: 'Mass conserved to 1e-5 and total energy to 1e-3 after the shock has reflected off the walls',

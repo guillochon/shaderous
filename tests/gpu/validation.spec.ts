@@ -2,7 +2,7 @@
 import { expect, test } from './fixtures';
 
 const TESTS = [
-  'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'species', 'species-eos', 'shock-bubble', 'detonation', 'advection-accuracy', 'flux-determinism', 'stored-primitives',
+  'sod-axes', 'sod-diagonal', 'strong-shock', 'sedov', 'kelvin-helmholtz', 'low-mach', 'well-balanced', 'advection', 'species', 'species-eos', 'shock-bubble', 'detonation', 'advection-accuracy', 'flux-determinism', 'stored-primitives', 'cold-wall-vacuum',
   'reflecting-box', 'two-dimensional', 'rayleigh-taylor', 'amr-unrefined', 'amr-shock-tube', 'amr-species', 'amr-species-eos', 'amr-detonation', 'amr-sedov', 'amr-instabilities', 'amr-gravity-static', 'amr-gravity-dynamic', 'amr-tidal-disruption', 'amr-time-bins', 'snapshot-roundtrip', 'cooling', 'viscosity', 'conduction', 'driving', 'point-mass-sink', 'point-mass-many', 'orbit-preview', 'binary-orbit', 'point-mass-encounter', 'gpu-vs-cpu', 'burn-network', 'eos', 'sphere-potential', 'jeans', 'polytrope', 'white-dwarf', 'evrard', 'tidal-disruption',
   'mhd-brio-wu', 'mhd-orszag-tang', 'mhd-field-loop', 'mhd-alfven-wave', 'mhd-blast-3d', 'mhd-slabs', 'mhd-gpu-vs-cpu', 'mhd-restart', 'mhd-replaced', 'mhd-near-vacuum', 'mhd-near-vacuum-bins', 'mhd-field-brush', 'mhd-amr-unrefined', 'mhd-amr-refined', 'mhd-amr-chunks', 'mhd-amr-moving', 'mhd-amr-bins', 'mhd-gravity', 'mhd-gravity-blocks', 'mhd-star-fields', 'mhd-species', 'mhd-amr-species-eos', 'mhd-diffusion', 'mhd-resistivity', 'mhd-line-tied', 'moving-wall', 'mhd-tidal-disruption', 'mhd-disk',
   'rot-off', 'rot-inertial', 'rot-balance', 'rot-blob', 'rot-binary', 'rot-follow', 'rot-mhd', 'rot-star',
