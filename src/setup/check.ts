@@ -371,6 +371,31 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
       if (v > 1e37 || (k !== 'arad' && v > 0 && v < 1e-37))
         out.push({ level: 'error', path: 'domain.units', text: `The units put the equation of state’s ${k} at ${fmt(p[k])} code units, past what the GPU’s 32-bit numbers hold: choose units nearer the gas’s own scales` });
     }
+    // White dwarf matter's table spans 1 to 1e11 g/cm^3 (rho Ye), and a run's densities span
+    // some 1e-6 to 1e2 code units: a density unit far outside it puts every cell past the table,
+    // where single precision fails too (a T^4 / rho overflows in thin gas). Random test seeds
+    // 20071 and 20160 (km and solar masses: 2e18 g/cm^3) and 20101 (Earth radii and grams:
+    // 4e-27 g/cm^3) ran to NaN.
+    if (eos === 'helmholtz' && p.helmRho > 0 && (p.helmRho > 1e13 || p.helmRho < 1e-10))
+      out.push({ level: 'error', path: 'domain.units', text: `The units make a density of 1 code unit ${fmt(p.helmRho)} g/cm³, far outside what white dwarf matter covers (its table spans 1 to 1e11 g/cm³): choose units nearer the star’s own scales, a solar or white dwarf radius and a solar mass` });
+  });
+
+  // A uniform field is free of divergence in Cartesian space, but on the rings of an (R, z) run
+  // one along R has div B = B_R / R, and in (r, theta) one along r or theta has 2 B_r / r or
+  // cot(theta) B_theta / r: the run starts with that divergence and keeps it (random test seed
+  // 20114: 0.6 at step 0, a uniform field along R). Along z, or the azimuth, is fine.
+  guard(() => {
+    const g = spec.domain?.geometry;
+    if (g !== 'cylindrical' && g !== 'spherical') return;
+    partsOf(spec).forEach((p, i) => {
+      if (p.kind !== 'field') return;
+      const b = p.b ?? [0, 0, 0];
+      const up = p.up !== undefined && p.up !== 0;
+      if (g === 'cylindrical' && !up && b[0] !== 0)
+        out.push({ level: 'error', path: `parts.${i}.b`, text: 'A uniform field along R is not free of divergence on the rings of an axisymmetric run (div B = B_R / R): give it along z (y) or the azimuth' });
+      if (g === 'spherical' && (up || b[0] !== 0 || b[1] !== 0))
+        out.push({ level: 'error', path: `parts.${i}.b`, text: 'A uniform field along r or theta is not free of divergence in a spherical run: only one along the azimuth (the third component) is' });
+    });
   });
 
   // A star is held together by its own gravity: with G = 0 its structure is NaN (random test

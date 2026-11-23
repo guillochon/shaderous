@@ -47,7 +47,16 @@
       if (!nums.every(Number.isFinite)) row.flags.push('non-finite');
       if (d.floored > 0.01 * cells) row.flags.push(`floored ${d.floored}`);
       if (d.maxMach > 100) row.flags.push(`mach ${d.maxMach.toPrecision(3)}`);
-      if (d.magnetic && d.magnetic.divB > 1e-4) row.flags.push(`divB ${d.magnetic.divB}`);
+      // div B is relative to the largest |B| now: where the field has left the box (a loop carried
+      // out through an outflow face) or decayed, its round-off over a vanishing largest field is no
+      // divergence (seed 20160: 0.58 with 1.5e-10 left of 1e-3; seed 20497: 1.3e-4 with 4e-6 left
+      // of 1e-2). Judged against the field the run started with. (And NaN compares false.)
+      if (d.magnetic) {
+        const b0 = d0.magnetic?.bMax ?? 0;
+        const scaled = d.magnetic.divB * (b0 > 0 ? Math.min(1, d.magnetic.bMax / b0) : 1);
+        if (!Number.isFinite(d.magnetic.divB) || !Number.isFinite(d.magnetic.bMax)) row.flags.push('non-finite field');
+        else if (scaled > 1e-4) row.flags.push(`divB ${d.magnetic.divB}`);
+      }
       if (d.radiation && !Object.values(d.radiation).every(Number.isFinite)) row.flags.push('non-finite radiation');
       if (gen.closed && Math.abs(row.massChange) > 1e-4) row.flags.push(`mass ${row.massChange} in a closed box`);
       const errs = s.errors().slice(e0);

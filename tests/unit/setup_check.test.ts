@@ -97,6 +97,20 @@ describe('checkSetup', () => {
     expect(has(cosmo(10), /needs physical units of its own/i)).toBe(true);
   });
 
+  it('finds a uniform field across the rings of an (R, z) run, and white dwarf matter in units far from its densities (seeds 20114, 20160, 20101)', () => {
+    const axisym = (b: [number, number, number], geometry: 'cylindrical' | 'spherical' = 'cylindrical') =>
+      texts(setup({ domain: { ndim: 2, n: 64, geometry, supports2d: true, bc: { lo: [2, 1, 0], hi: [1, 1, 0] } } }, [{ kind: 'field', b }]), 'error');
+    expect(has(axisym([0.1, 0, 0]), /along R is not free of divergence/)).toBe(true);
+    expect(axisym([0, 0.1, 0])).toEqual([]);
+    expect(has(axisym([0, 0.1, 0], 'spherical'), /along r or theta/)).toBe(true);
+    expect(axisym([0, 0, 0.1], 'spherical')).toEqual([]);
+    const wd = (length: string, mass: string) =>
+      texts(stellar([star('s', [0, 0, 0], { radius: 0.3 })], { domain: { ndim: 3, n: 64, amr: 0, box: 2, units: { length: { unit: length, value: 1 }, mass: { unit: mass, value: 1 } } }, physics: { gravity: 'isolated', G: 'units', eos: 'helmholtz' } }), 'error');
+    expect(has(wd('km', 'Msun'), /far outside what white dwarf matter covers/)).toBe(true);
+    expect(has(wd('Rearth', 'g'), /far outside what white dwarf matter covers/)).toBe(true);
+    expect(has(wd('Rsun', 'Msun'), /far outside what white dwarf matter covers/)).toBe(false);
+  });
+
   it('takes a wind tunnel’s gas for the run’s (random test seed 10012)', () => {
     const tunnel = (mach: number) => texts(setup({}, [{ kind: 'tunnel', mach }, { kind: 'obstacle', shape: { type: 'sphere', radius: 0.1 } }, { kind: 'flow', name: 'first-core' }]), 'error');
     expect(has(tunnel(0.1), /equation of state with an energy/i)).toBe(true);
