@@ -5,7 +5,7 @@ What changed in each release of Shaderous. A release's section here is the body 
 [npm package](https://www.npmjs.com/package/shaderous). To cut a release, see
 [docs/headless.md](docs/headless.md#releases).
 
-## Unreleased
+## 0.4.0 (2026-11-23)
 
 ### Added
 
@@ -56,9 +56,60 @@ What changed in each release of Shaderous. A release's section here is the body 
   followed frame keep their orbit; moving across the grid, the same pair spiraled in. The setup checks warn of a star that overflows its lobe from the start. A new preset,
   **Roche lobe overflow**: a Sun-like star pouring gas through L1 onto a 3 solar mass black hole,
   stably, in a stream that winds into a disk; and its variant **Two stars**, a Sun-like star
-  filling its lobe beside a 0.6 solar mass star, both resolved.
+  filling its lobe beside a 0.6 solar mass star, both resolved. A circular binary's orbit is
+  found as its stars settle, from the settled stars' own pull: at the point masses' rate two
+  stretched stars fell together (a separation 3.1% smaller by t = 10; now 0.1%).
+- **Rigidly rotating stars**, settled with the centrifugal potential, and a preset
+  **polytrope-rotating**.
+- **Partly filled cells** (`physics.cutCells`): obstacles at rest cut the uniform grid's cells
+  for the liquid with implicit pressure, with the wall's shear taken off the wall and small cells
+  redistributed. Drag and lift converge toward the reference values where the staircase walls
+  did not (a NACA 0012 at Re 1000, the cylinder at Re 40). Built-in bodies `naca0012` and blade
+  sections; a **wind turbine** preset, a three-bladed rotor in its own frame with its power
+  coefficient. Obstacles refine the adaptive mesh from their own shapes (`refine`,
+  `refineBand`, `refineLevel`), so parts thinner than a coarse cell stay whole.
+- **More combinations of physics.** Radiation transport with implicit pressure; species in
+  axisymmetric and spherical runs; species that set the equation of state under implicit
+  pressure and with MHD on the adaptive mesh; the Jeans floor and Jeans refinement in comoving
+  coordinates (in proper lengths); axisymmetric runs mirrored across z = 0; any number of stars
+  under mirror symmetry. Each has a validation test.
+- **A magnetized double white dwarf** example setup, and Slurm scripts for chained runs on a
+  cluster (resubmitted from checkpoints, requeued jobs resuming, checkpoints kept per stretch of
+  simulated time).
+- **The command-line runner**: `--from FILE.athdf` carries a run on from a checkpoint; several
+  views per output, `--overlays` (color bar, axes, status line), a wall-clock budget,
+  checkpoints on their own schedule; the adaptive mesh's status (blocks, a full budget) in
+  `diag.jsonl` and `state()`; `SHADEROUS_DIST` serves another built page. Checkpoints of
+  gigabytes: the runner and the MCP server write and read the .athdf file themselves, array by
+  array, past the browser's memory.
+- **Setup checks** refuse many more setups that could not run (found by randomized testing of
+  setup documents drawn from the option table): equation-of-state constants and table scales
+  that do not fit 32-bit numbers in the units chosen, a gamma of 1 outside the barotropic gas,
+  flows without what they need (units, a star, their species), a star with G = 0, uniform
+  fields with a divergence of their own in (R, z) and (r, θ), and others.
+- The view turns with a rotating frame; the block grid draws derivative fields from the state
+  shown; presets are grouped by what they model.
+
+### Changed
+
+- **Faster steps.** Equations of state that iterate or read a table keep each cell's primitives
+  from the timestep pass on the uniform grid instead of converting the state at every load
+  (`physics.storedPrims`): a 3D white dwarf with the Helmholtz gas about 3 times faster on an
+  A100, an ANEOS planet 2.7 to 3.9 times. The Koren reconstruction skips its limiter where the
+  flow is smooth (4 to 9% a step). Shaders compile faster where the equation of state is
+  costly.
 
 ### Fixed
+
+- HLLC and its low-Mach version take the HLL flux where gas too cold for its wave speeds gave
+  0 / 0 (every flux NaN), and HLLD takes HLLE where the contact speed rounds onto a fast wave.
+- The Helmholtz equation of state starts Newton's iteration for thin hot gas from the ideal gas
+  and radiation; below its tables' densities the solve by pressure returned up to 1e5 times the
+  energy, and stars' thin surroundings could run away to NaN.
+- Radiation pushes the gas by the absorbed share of the flux: in thin gas the difference it took
+  rounded to nothing or to noise, depending on the GPU's compiler.
+- Implicit pressure takes gas at zero pressure (its sound speed from the pressure floor).
+- The helium-shell ignition flow requires the Helmholtz gas it uses.
 
 - Opening a checkpoint for viewing picks a level the GPU's atlas can really hold: it planned
   against the memory budget's bytes alone, but the atlas is a cube of slots (and, with a magnetic
