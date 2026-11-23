@@ -25,6 +25,8 @@ cd ~/shaderous
 sbatch tools/headless/slurm/gpu-check.sbatch
 # Read slurm-check-<job>.out and runs/slurm-check-<job>/, then:
 N=1024 EVERY=0.5 RUN_DIR=/work/pi_<group>/dwd-1024 SHADEROUS_BINDS=/work/pi_<group> sbatch tools/headless/slurm/dwd.sbatch
+# The second run (plans/dwd-second-run.md): its own setup, box 16, so the shots are framed by ZOOM=2
+SETUP=tools/headless/slurm/dwd-run2.shaderous.json ZOOM=2 EVERY=1 ATHDF_EVERY=6 UNTIL=400 KEEP_EVERY=20 RUN_DIR=/work/pi_<group>/dwd-2048-f0.940 SHADEROUS_BINDS=/work/pi_<group> sbatch tools/headless/slurm/dwd.sbatch
 ```
 
 The GPU: the scripts ask for the `umd-cscdr-gpu` partition and `--constraint=vram80`. That

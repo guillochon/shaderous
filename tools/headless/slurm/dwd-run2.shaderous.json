@@ -1,0 +1,111 @@
+{
+  "format": "shaderous-setup",
+  "version": 1,
+  "name": "Double white dwarf mass transfer, magnetized: the second run, fill 0.940",
+  "blurb": "Two cold carbon-oxygen white dwarfs on a circular orbit: a 0.6 solar mass donor at 0.940 of its Roche lobe and a 0.9 solar mass accretor, both settled in the Roche potential and tidally locked, in the frame turning with the orbit (tracking the pair's axis, and coming to rest once they have merged). Each is threaded by its own tangled Kolmogorov field confined to the star (plasma beta 1e5 at the center, from different seeds). Helmholtz equation of state; lengths in units of 10,000 km. The second run (plans/dwd-second-run.md): box 16 at 2048^3 with 5 levels, from the fill the onset sweep chose (section 1).",
+  "domain": {
+    "ndim": 3,
+    "n": 2048,
+    "amr": 5,
+    "box": 16,
+    "supports2d": false,
+    "bc": {
+      "lo": [
+        3,
+        3,
+        3
+      ],
+      "hi": [
+        3,
+        3,
+        3
+      ]
+    },
+    "units": {
+      "name": "white dwarf",
+      "length": {
+        "unit": "m",
+        "value": 10000000
+      },
+      "mass": {
+        "unit": "Msun",
+        "value": 1
+      }
+    }
+  },
+  "physics": {
+    "eos": "helmholtz",
+    "eosParams": {
+      "gamma": 1.6666666666666667
+    },
+    "gravity": "isolated",
+    "G": "units",
+    "composition": "carbonOxygen",
+    "floors": {
+      "rho": 1e-10,
+      "p": 1e-14
+    },
+    "fluff": {
+      "rho": 0.000009999999999999999,
+      "u": 3,
+      "v": 10
+    }
+  },
+  "mesh": {
+    "refineDense": 0.01
+  },
+  "background": {
+    "rho": 0.000001,
+    "cut": 0.0001,
+    "relativeTo": "donor"
+  },
+  "parts": [
+    {
+      "kind": "star",
+      "id": "donor",
+      "type": "white-dwarf",
+      "mass": 0.6,
+      "field": {
+        "type": "random",
+        "beta": 100000,
+        "seed": 1
+      }
+    },
+    {
+      "kind": "star",
+      "id": "accretor",
+      "type": "white-dwarf",
+      "mass": 0.9,
+      "field": {
+        "type": "random",
+        "beta": 100000,
+        "seed": 2
+      }
+    },
+    {
+      "kind": "orbit",
+      "id": "orbit",
+      "of": [
+        "donor",
+        "accretor"
+      ],
+      "type": "binary",
+      "fill": 0.94,
+      "ecc": 0,
+      "corotating": true,
+      "track": true,
+      "release": true
+    }
+  ],
+  "run": {
+    "tEnd": null,
+    "checkpointDt": 1,
+    "tDyn": 1
+  },
+  "view": {
+    "field": 0,
+    "log": true,
+    "mode": "slice",
+    "axis": 2
+  }
+}

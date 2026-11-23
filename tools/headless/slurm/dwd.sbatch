@@ -5,8 +5,12 @@
 # simulated time reaches UNTIL. Submit once:
 #   sbatch tools/headless/slurm/dwd.sbatch
 # Settings (environment, passed on to the jobs that follow):
+#   SETUP      the setup document (default examples/setups/double-wd-random-field.shaderous.json);
+#              like N and AMR it applies to a new run only
 #   N, AMR     the finest grid and the number of levels (default 2048 and 5); they apply to a new
 #              run only, as a resumed one keeps its checkpoint's mesh
+#   ZOOM       the screenshots' framing, for the setup's box: the slice's zoom and the volume's
+#              distance are the box of 8's times this (default 1; 2 for a box of 16)
 #   RUN_DIR    where the run's segments go (default runs/dwd-N in the checkout). Checkpoints
 #              are several GB each: point it at a work or scratch space if home is small, and add
 #              that space to SHADEROUS_BINDS
@@ -39,7 +43,8 @@
 set -uo pipefail
 source "${SHADEROUS_DIR:-$HOME/shaderous}/tools/headless/slurm/common.sh"
 
-export N="${N:-2048}" AMR="${AMR:-5}" EVERY="${EVERY:-}"
+export SETUP="${SETUP:-examples/setups/double-wd-random-field.shaderous.json}"
+export N="${N:-2048}" AMR="${AMR:-5}" EVERY="${EVERY:-}" ZOOM="${ZOOM:-1}"
 export RUN_DIR="${RUN_DIR:-$SHADEROUS_DIR/runs/dwd-$N}"
 export UNTIL="${UNTIL:-100}" SHOT_EVERY="${SHOT_EVERY:-1800}" ATHDF_EVERY="${ATHDF_EVERY:-4}"
 export KEEP="${KEEP:-2}" KEEP_EVERY="${KEEP_EVERY:-0}" MARGIN="${MARGIN:-1800}" MAX_JOBS="${MAX_JOBS:-20}"
@@ -60,10 +65,13 @@ echo "from: ${from:-the initial conditions}"
 if [ -n "$from" ]; then
   start=(--from "$from")
 else
-  start=(--setup examples/setups/double-wd-random-field.shaderous.json --n "$N" --amr "$AMR")
+  start=(--setup "$SETUP" --n "$N" --amr "$AMR")
 fi
 
 if [ -n "$EVERY" ]; then spacing=(--every "$EVERY"); else spacing=(--every-wall "$SHOT_EVERY"); fi
+# Framed for a box of 8; a larger box is seen from nearer, and its slice zoomed in, by ZOOM.
+dist=$(awk -v z="$ZOOM" 'BEGIN { print 0.7 / z }')
+zoom=$(awk -v z="$ZOOM" 'BEGIN { print 1.5 * z }')
 
 # Older checkpoints are deleted while the run goes on, so they do not fill the disk.
 ( while sleep 600; do ckpt prune "$RUN_DIR" "$KEEP" "$KEEP_EVERY"; done ) &
@@ -73,8 +81,8 @@ in_container node tools/headless/cli.mjs run "${start[@]}" \
   --until "$UNTIL" --wall "$wall" "${spacing[@]}" --athdf-every "$ATHDF_EVERY" \
   --gpu-memory "$gb" --width 1024 --overlays \
   --view field=0 --view log=true --view "tf=0:0,0.15:0.15,0.4:0.25,0.7:0.3,1:0.5" \
-  --shot "vol:mode=volume,showBlocks=false,fieldLines=true,fieldLineCount=400,fieldLineFloor=0.001,dist=0.7,pitch=0.45,yaw=1.2,minRho=0.05,opacity=120,box=false" \
-  --shot "slice:mode=slice,sliceAxis=2,zoom=1.5,showBlocks=false,fieldLines=true,fieldLineCount=300,fieldLineFloor=0.00001" \
+  --shot "vol:mode=volume,showBlocks=false,fieldLines=true,fieldLineCount=400,fieldLineFloor=0.001,dist=$dist,pitch=0.45,yaw=1.2,minRho=0.05,opacity=120,box=false" \
+  --shot "slice:mode=slice,sliceAxis=2,zoom=$zoom,showBlocks=false,fieldLines=true,fieldLineCount=300,fieldLineFloor=0.00001" \
   --out "$seg"
 status=$?
 kill "$pruner" 2>/dev/null
