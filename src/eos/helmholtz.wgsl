@@ -279,6 +279,21 @@ fn helm_guess(rho: f32, x: f32, ia: f32, byP: bool) -> f32 {
   return select(mix(a.x, a.y, w), mix(a.y, a.z, w2), la > 2.6390573);
 }
 
+// Newton's starting point below the inverse tables' densities (rho < 2 g/cm^3, HG_RHO0), where
+// their guess is the one for their lowest density: in thin hot gas, whose thermal energy is
+// radiation's, that was 10 and more in ln T off, beyond what 10 Newton steps of at most 1 reach,
+// and the solve by pressure returned up to 1e5 times the energy (random test seed 20453: a star's
+// thin surroundings heated without end through the energy flux of their faces). There the
+// electrons are not degenerate, and every part of the thermal energy (ideal ions and electrons,
+// radiation, pairs) rises with T: the temperature at which the ideal gas alone, or radiation
+// alone, would hold `goal` bounds the answer from above, and the smaller starts Newton a step
+// or two from it. (helmStart in eos/helmholtz.ts is the same.)
+fn helm_thin_guess(rho: f32, goal: f32, ye: f32, ia: f32, byP: bool) -> f32 {
+  let lnTi = log(goal) + log(HMU / ((ia + ye) * HK)) - select(log(1.5), 0.0, byP);
+  let lnTr = 0.25 * (log(goal) + log(rho) + select(0.0, log(3.0), byP) - log(7.565723e-15));
+  return min(lnTi, lnTr);
+}
+
 // What Newton's method needs of helm_thermo (tab_fd of eos/table.wgsl): the thermal energy per
 // gram (byP false) or p_th / rho (byP true) at ln T, and its derivative in ln T.
 struct TabCtx { rho: f32, ye: f32, ia: f32, cs: vec3<f32> }
@@ -311,6 +326,7 @@ fn tab_above(fd: vec2<f32>, goal: f32, byP: bool, c: TabCtx) -> f32 { return 0.2
 fn helm_solve(rho: f32, goal: f32, ye: f32, ia: f32, byP: bool) -> f32 {
   if (!(goal > 0.0)) { return -1e30; }
   var lnT = clamp(helm_guess(rho, goal, ia, byP) * HLN10, HLNT_MIN, HLNT_MAX);
+  if (log(rho) / HLN10 < HG_RHO0) { lnT = clamp(helm_thin_guess(rho, goal, ye, ia, byP), HLNT_MIN, HLNT_MAX); }
   // The inverse tables know nothing of the Coulomb heat, several times the ideal ions' in cold,
   // strongly coupled matter: allow for it at their guess, taking both parts as linear in T.
   var cs = vec3<f32>(0.0);

@@ -248,6 +248,13 @@ function helmStart(rho: number, target: number, ye: number, ia: number, byP: boo
   const lo = Math.log(HELM_T_MIN);
   const hi = Math.log(HELM_T_MAX);
   let lnT = Math.min(Math.max(helmGuess(rho, target, ia, byP) * LN10, lo), hi);
+  // Below the inverse tables' densities: the smaller of the ideal gas's and radiation's
+  // temperatures for the target, an upper bound (helm_thin_guess in eos/helmholtz.wgsl).
+  if (Math.log10(rho) < M.guess.rho0) {
+    const lnTi = Math.log(target) + Math.log(MU / ((ia + ye) * K)) - (byP ? 0 : Math.log(1.5));
+    const lnTr = 0.25 * (Math.log(target) + Math.log(rho) + (byP ? Math.log(3) : 0) - Math.log(ARAD));
+    lnT = Math.min(Math.max(Math.min(lnTi, lnTr), lo), hi);
+  }
   if (coulomb > 0) {
     const c = helmCoulombThermal(rho, lnT, ye, ia, coulomb);
     lnT = Math.max(lnT - Math.log(1 + (byP ? c.pr : c.e) / target), lo);

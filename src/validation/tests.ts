@@ -2316,7 +2316,7 @@ export const TESTS: TestDef[] = [
   {
     id: 'eos',
     name: 'Equations of state on the GPU',
-    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4 (the tabulated gases, white dwarf matter and hydrogen and helium: 5e-5 and 5e-4, single precision’s limit for their Newton solve and their sound speed); gas+radiation reduces to its ideal-gas and pure-radiation limits. The degenerate and white dwarf cases put each pressure on top of the degenerate one; the ionizing case spans neutral to fully ionized gas; hydrogen and helium’s span 1e-18 to 1e-2 g/cm^3 and 20 K to 1e7 K, molecular to fully ionized',
+    criterion: 'p -> e_int -> p round trip to 1e-5; WGSL matches the float64 mirrors to 1e-4 (the tabulated gases, white dwarf matter and hydrogen and helium: 5e-5 and 5e-4, single precision’s limit for their Newton solve and their sound speed); gas+radiation reduces to its ideal-gas and pure-radiation limits. The degenerate and white dwarf cases put each pressure on top of the degenerate one, and white dwarf matter is also tested in solar units on hot gas (2e4 to 1e10 K) from 2 g/cm^3 down to 6e-6, where radiation holds its energy; the ionizing case spans neutral to fully ionized gas; hydrogen and helium’s span 1e-18 to 1e-2 g/cm^3 and 20 K to 1e7 K, molecular to fully ionized',
     async run(gpu) {
       const d = gpu.device;
       const metrics: Record<string, number> = {};
@@ -2349,6 +2349,10 @@ export const TESTS: TestDef[] = [
         { kind: 'helmholtz', label: 'helmholtz', params: physicalEosParams(WD_UNITS, COMPOSITIONS.carbonOxygen) },
         // And without the ions' Coulomb energy (on by default).
         { kind: 'helmholtz', label: 'helmholtz_no_coulomb', params: { ...physicalEosParams(WD_UNITS, COMPOSITIONS.carbonOxygen), helmCoulomb: 0 } },
+        // In solar units (6 g/cm^3 a unit of density): thin hot gas below the inverse tables'
+        // densities, where radiation holds the energy. Their guess was 10 in ln T off there and the
+        // solve by pressure returned up to 1e5 times the energy (random test seed 20453).
+        { kind: 'helmholtz', label: 'helmholtz_thin', params: physicalEosParams(gravityUnits('sun', 6.957e8, 1.98847e30), COMPOSITIONS.carbonOxygen) },
         { kind: 'hhe', label: 'hhe', params: { ...physicalEosParams(AU, COMPOSITIONS.solar), hheRad: 0 } },
         { kind: 'hhe', label: 'hhe_radiation', params: { ...physicalEosParams(AU, COMPOSITIONS.solar), hheRad: 1 } },
         { kind: 'hhe', label: 'hhe_hydrogen', params: { ...physicalEosParams(AU, COMPOSITIONS.hydrogen), hheRad: 0 } },
@@ -2366,7 +2370,19 @@ export const TESTS: TestDef[] = [
         await prepareEosTable(d, c.kind, ep);
         const eos = makeEos(c.kind, ep);
         // Degenerate gas cannot be below its zero-temperature pressure: test the thermal part on top.
-        const cp = c.kind === 'hhe' ? hheStates(eos) : c.kind === 'degenerate' || c.kind === 'helmholtz' ? pairs.map(([rho, p]) => [rho, eos.pressure(rho, 0) + p]) : pairs;
+        // (White dwarf matter's thin case: its own states, hot gas below the inverse tables' 2 g/cm^3.)
+        const thin = () => {
+          const out: [number, number][] = [];
+          for (let i = 0; i < 12; i++)
+            for (let j = 0; j < 21; j++) {
+              const rho = 10 ** (-6 + (5.5 * i) / 11);
+              const p = 10 ** (-6 + (10 * j) / 20);
+              const TK = eos.temperature(rho, eos.eintFromP(rho, p)) * ep.helmT;
+              if (TK > 2e4 && TK < 1e10) out.push([rho, p]);
+            }
+          return out;
+        };
+        const cp = c.label === 'helmholtz_thin' ? thin() : c.kind === 'hhe' ? hheStates(eos) : c.kind === 'degenerate' || c.kind === 'helmholtz' ? pairs.map(([rho, p]) => [rho, eos.pressure(rho, 0) + p]) : pairs;
         cp.forEach(([rho, p], i) => inData.set([rho, p, 0, 0], i * 4));
         d.queue.writeBuffer(inBuf, 0, inData);
         const pb = new Float32Array(PARAM_BYTES / 4);
