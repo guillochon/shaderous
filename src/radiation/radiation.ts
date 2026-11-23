@@ -118,7 +118,8 @@ export function exchange(
 ): Exchange {
   const thF = r * c * kR * rho * dt;
   const F = Fs.map((x) => x / (1 + thF));
-  const dmom = Fs.map((x, i) => (x - F[i]) / (r * c * c));
+  // (The absorbed share directly, as radiation/exchange.wgsl, not F* - F', which cancels in thin gas.)
+  const dmom = Fs.map((x) => (x * (thF / (1 + thF))) / (r * c * c));
   const th = r * c * kP * rho * dt;
   const A = th / (r * (1 + th));
   const C = eint + A * Es;

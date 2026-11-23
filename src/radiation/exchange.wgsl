@@ -37,7 +37,12 @@ fn rad_exchange(rho: f32, eint: f32, Es: f32, Fs: vec3<f32>, kP: f32, kR: f32, r
   var x: RadExchange;
   let thF = r * c * kR * rho * dt;
   x.F = Fs / (1.0 + thF);
-  x.dmom = (Fs - x.F) / (r * c * c);
+  // The share of the flux the gas takes, thF / (1 + thF), not F* - F': in thin gas thF is below
+  // the rounding of 1 (1e-8 in rho = 1e-6 at c = 100), 1 + thF rounds to 1 and the difference to
+  // nothing, and a little denser it kept a few bits of rounding. The gas there got no push, or a
+  // random one that a low density turned into a large speed: rad-shadow came out on one side or
+  // the other of passing by the rounding of the GPU. Momentum is then kept to the rounding of F.
+  x.dmom = Fs * (thF / (1.0 + thF)) / (r * c * c);
   let th = r * c * kP * rho * dt;
   let w = th / (1.0 + th);
   let A = w / r;
