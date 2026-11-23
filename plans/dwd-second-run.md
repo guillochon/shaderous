@@ -108,6 +108,13 @@ Another session is working on optimizations. Before submitting:
 
 ## 5. Running it
 
+**Started 2026-11-23** (Unity job 2165017 and the chain after it; Shaderous 4dca9bc):
+`SETUP=tools/headless/slurm/dwd-run2.shaderous.json ZOOM=2 EVERY=0.4 ATHDF_EVERY=15 UNTIL=400
+KEEP=2 KEEP_EVERY=20` into `/work/pi_rfisher1_umassd_edu/guilloch_access-ci_org/dwd-2048-f0.940/`.
+Fill 0.940, box 16 at 2048³ with 5 levels, on the dedicated A100s; shots every 0.4 (about every 5
+minutes at the start), a checkpoint every 6. Started without the optimizations of §3. The frame
+turns at 0.31029, the settled Omega, as in the sweep.
+
 As for the first run:
 - `dwd.sbatch` on `umd-cscdr-gpu`, chained, with `KEEP=2`, `KEEP_EVERY=20` and checkpoints every
   6 code units (or fewer if writes are faster after §3).
