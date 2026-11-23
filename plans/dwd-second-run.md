@@ -13,6 +13,7 @@ sweep's results and the optimizations are in.
 | Frame after the merger | The followed frame turned at random once the donor broke up (Ω from 0.36 to 0.07 and back to 0.13 between t = 83 and 106) | `release: true`, in the example since commit 0145dbc (§2) |
 | Block budget | Full at t = 60 (27,000 blocks with parents, 74 GB of an A100). The finest level then lost blocks to coarser ones as the debris spread | The coming optimizations (§3); a larger card or fewer levels if they are not enough |
 | Box | 8 units (40,000 km from center to face). The tidal tail left through the faces: 3.5% of the mass by t = 104 | Box 16 at 2048³, the same finest cell (§4) |
+| Orbit | Started at the point-mass Omega, the stars fell together on an eccentric orbit (e ~ 0.013: 2.7% closer at pericenter, which raises the fill there by more than a step of the sweep) | The orbit's Omega found as the stars settle (0f14845); the sweep's runs held their separation to 0.5% over an orbit |
 | Center of mass | Drifted 0.003 per code unit in the inertial frame (0.13 by t = 80), from grid self-gravity's momentum error and uneven outflow | Watch it. Once the frame is released and at rest, the drift is seen as it is |
 | Cost | 4.2 GB checkpoints: about 15 min to write and 20 min to reload. 2.8 to 4.2 code units per wall hour | The optimizations (§3) |
 
@@ -42,8 +43,43 @@ adjusting. Also record ρ at L1 over the donor's central density, and look at sl
   Eight checkpoints each, at 2 to 3 GB, come to about 150 GB of `/work`, which has 580 GB
   free. Delete them once Ṁ is measured.
 
-**Result.** A table of Ṁ against fill, the fit's f₀, and the fill chosen for the run, with slices
-at t = 10 and 20 for each fill.
+**Result** (2026-11-23; Unity jobs 2128002 to 2128008, commit 0f14845). A first sweep (jobs
+2119983 to 2119989) was stopped part way: its stars started at the point-mass Omega and fell together
+on an eccentric orbit (above), which moved each run's fill by more than the sweep's step. The orbit's
+Omega is now found as the stars settle, 0.74% (f 0.935) to 0.9% (f 0.965) above the point masses'.
+Over the orbit the separation then held to within 0.5% at every fill (+0.02% at 0.935, -0.46% at
+0.965), and the frame's axis stayed put.
+
+Ṁ from `tools/headless/slurm/dwd-mdot.mjs`, the slope of the donor's gas past the L1 plane from
+t = 5 to 20 (7 outputs), in M_sun per code time unit (2.75 s; an orbit is 20). m75 counts gas whose
+dye is above 0.75; mdye weighs each cell by the donor's share of a donor-accretor mix (2 s - 1). The
+two agree within 10% above 0.940.
+
+| fill | Ṁ (m75) | Ṁ (mdye) | Ṁ, t = 5 to 12.5 / 12.5 to 20 (m75) | ρ(L1)/ρ_c, mean (last) | separation over the orbit |
+| --- | --- | --- | --- | --- | --- |
+| 0.935 | 1.7e-6 ± 0.4e-6 | 5.1e-6 | 0.9e-6 / 3.0e-6 | 1.5e-3 (1.9e-3) | +0.02% |
+| 0.940 | 8.6e-6 ± 0.8e-6 | 1.2e-5 | 6.8e-6 / 1.1e-5 | 2.1e-3 (2.7e-3) | -0.01% |
+| 0.945 | 1.8e-5 ± 0.1e-5 | 2.3e-5 | 1.6e-5 / 2.1e-5 | 2.7e-3 (3.5e-3) | -0.05% |
+| 0.950 | 3.2e-5 ± 0.2e-5 | 3.8e-5 | 2.9e-5 / 3.7e-5 | 3.4e-3 (4.4e-3) | -0.10% |
+| 0.955 | 5.2e-5 ± 0.3e-5 | 5.7e-5 | 4.6e-5 / 5.9e-5 | 4.2e-3 (5.2e-3) | -0.17% |
+| 0.960 | 8.6e-5 ± 0.3e-5 | 9.3e-5 | 8.1e-5 / 9.0e-5 | 5.2e-3 (6.4e-3) | -0.34% |
+| 0.965 | 1.2e-4 ± 0.04e-4 | 1.3e-4 | 1.1e-4 / 1.2e-4 | 6.2e-3 (7.5e-3) | -0.46% |
+
+- **Fit.** Ṁ = A (f - f₀)³ over 0.940 to 0.965 (0.935 is the floor): A = 1.55, f₀ = 0.922 (m75); with
+  the floor taken off, A = 1.74, f₀ = 0.924; mdye gives f₀ = 0.920 and 0.923. So f₀ = 0.922 ± 0.002.
+  The law holds across the sweep: at 0.940 and 0.965 the fit is within 10% of what was measured.
+- **No sharp onset in the range.** f₀ lies below every fill swept: at this resolution even 0.935
+  carries a thin stream through L1 (slices), at about the floor's rate. Ṁ grows within the orbit
+  by 10 to 35% from 0.940 up, and threefold at 0.935.
+- **Slices** at t = 10 and 20 for each fill: `dwd-sweep-slices.png` and `f<fill>/00[24]0-t[12]0-slice.png`
+  in `/work/pi_rfisher1_umassd_edu/guilloch_access-ci_org/dwd-sweep/`. A stream at every fill, and
+  a halo of transferred gas around the accretor that grows with the fill.
+- **Chosen fill: 0.940.** The lowest fill clearly above the floor by both measures, on the cube law,
+  with Ṁ about 2e-4 M_sun an orbit: transfer just begun, and resolved. 0.935 would start nearer f₀
+  but at the floor, where what is measured is partly numerical. How fast Ṁ runs away from there (the
+  first run took 3 orbits from 0.97, with the eccentric start) is not measured by a one-orbit sweep.
+- The checkpoints (88 GB, plus 25 GB of the stopped first sweep in `dwd-sweep-eccentric/`) are to
+  be deleted once the run's start is settled.
 
 ## 2. Frame: release after the merger
 
