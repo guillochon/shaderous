@@ -28,8 +28,12 @@ test('the page lists the same tests as this file', async ({ page }) => {
   expect(await page.evaluate(() => window.shaderous.tests)).toEqual(TESTS);
 });
 
-/** Tests that take longer than the suite's five minutes a test, and how long they may take (minutes). */
-const SLOW: Record<string, number> = { 'cylinder-forces': 20, 'sphere-drag': 30, 'cut-airfoil': 30, 'cut-cylinder-re40': 30, 'cut-sphere-re100': 60, 'cut-turbine-span': 60, 'cut-turbine': 300, 'cut-turbine-sense': 30, 'cut-sections-check': 30, 'cut-sections': 360, 'cut-sections-box': 60, 'cut-sections-dt': 120 };
+/**
+ * Tests that take longer than the suite's five minutes a test, and how long they may take (minutes).
+ * (mhd-near-vacuum, its time bins and rad-blocks-star take about a minute on a desktop but are bound
+ * by the CPU, not the GPU: on a cluster node's slower cores, 3 to 5 minutes, at 10% GPU use.)
+ */
+const SLOW: Record<string, number> = { 'mhd-near-vacuum': 15, 'mhd-near-vacuum-bins': 15, 'rad-blocks-star': 15, 'cylinder-forces': 20, 'sphere-drag': 30, 'cut-airfoil': 30, 'cut-cylinder-re40': 30, 'cut-sphere-re100': 60, 'cut-turbine-span': 60, 'cut-turbine': 300, 'cut-turbine-sense': 30, 'cut-sections-check': 30, 'cut-sections': 360, 'cut-sections-box': 60, 'cut-sections-dt': 120 };
 
 for (const id of TESTS) {
   test(id, async ({ page }) => {
