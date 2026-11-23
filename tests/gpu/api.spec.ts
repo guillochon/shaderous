@@ -317,6 +317,10 @@ test('a session the page played, edited with the pointer, replays to the bit', a
   }
   await page.mouse.up();
   await frames(30);
+  // Until the mesh has re-meshed at least once, not for a fixed number of frames: on a slow GPU node
+  // (indirect dispatches about 0.5 ms each in Chrome on Vulkan) 90 frames held no re-mesh.
+  const regridded = async () => (await call(page, 'actions')).entries.some((e: any) => e.action.kind === 'regrid');
+  for (const t0 = Date.now(); !(await regridded()) && Date.now() - t0 < 180_000; ) await frames(10);
   await call(page, 'pause');
   const a = await call(page, 'diagnostics');
   const log = await call(page, 'actions');

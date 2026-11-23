@@ -3054,7 +3054,7 @@ export const TESTS: TestDef[] = [
     id: 'mhd-near-vacuum-bins',
     name: 'MHD on blocks: the flux correction beside slower blocks (a dense blob through thin magnetized gas, 3D at 128 finest, 1 level, 2 bins of per-block timesteps)',
     criterion:
-      'A blob of density 10 and radius 0.06 at speed 3 in gas of 1e-6 threaded by B = 0.002 across its path (Alfven speed 2 outside), periodic box, 120 steps with per-block timesteps: the correction runs (leaves corrected), the bins step some blocks less often (the run differs from the same run with one timestep: slower blocks beside the corrected ones take the corrected register in their deposits), every value finite, no gas above 1e-6 faster than 20, mass conserved to 1e-6 (nothing leaves the box; a correction or deposit that took a face once on one side and not the other would show), |div B| dx / max |B| below 1e-6, and every leaf in a chunk of its own agrees with one chunk bit for bit',
+      'A blob of density 10 and radius 0.06 at speed 3 in gas of 1e-6 threaded by B = 0.002 across its path (Alfven speed 2 outside), periodic box, 120 steps with per-block timesteps: the correction runs (leaves corrected), the bins step some blocks less often (the run differs from the same run with one timestep: slower blocks beside the corrected ones take the corrected register in their deposits), every value finite, no gas above 1e-6 faster than 20, mass conserved to 1e-6 (nothing leaves the box; a correction or deposit that took a face once on one side and not the other would show), |div B| dx / max |B| below 1e-6, and the run in chunks of eight leaves agrees with one chunk bit for bit',
     async run(gpu) {
       const doc = {
         format: 'shaderous-setup', version: 1, name: 'blob through thin field',
@@ -3070,7 +3070,11 @@ export const TESTS: TestDef[] = [
       const p = compileSetup(doc).problem;
       const m: Record<string, number> = {};
       const leaves: Float32Array[][] = [];
-      for (const [tag, bytes, bins] of [['one_chunk', null, 2], ['chunks', 1, 2], ['one_timestep', null, 0]] as const) {
+      // Chunks of eight leaves (a 3D leaf's flux scratch: 3 x 18^3 texels of 48 bytes, amr_mhd.ts), 64 of
+      // them, not one leaf each: still leaves beside other chunks' everywhere, and an eighth of the
+      // dispatches. With time bins the chunks' dispatches are indirect, which Chrome validates one by
+      // one: about 0.5 ms each on a Linux GPU node (Vulkan), where one-leaf chunks took 22 minutes.
+      for (const [tag, bytes, bins] of [['one_chunk', null, 2], ['chunks', 8 * 3 * 18 ** 3 * 48, 2], ['one_timestep', null, 0]] as const) {
         setMhdScratchBytes(bytes);
         try {
           // Refined everywhere: the thin gas then steps in slower bins than the blob's surroundings.
