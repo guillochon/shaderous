@@ -43,6 +43,9 @@ CLASS_CMD = re.compile(r"\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}")
 BST_CMD = re.compile(r"\\bibliographystyle\s*\{([^}]+)\}")
 # Classes of the LaTeX core, which every TeX installation has: never bundled.
 CORE_CLASSES = {"article", "report", "book", "letter", "slides", "proc", "minimal"}
+# Images that a journal class draws only if they exist (aastex701's ORCID and
+# co-first-author icons); bundled when paper/ holds them.
+CLASS_IMAGES = ["orcid-ID.png", "CoFirstAuthor.png"]
 
 
 def drop_comment_text(tex: str) -> str:
@@ -120,6 +123,7 @@ def collect(bbl: Path, mode: str, keep_comments: bool) -> list[tuple[str, bytes]
     local = local_packages(tex)
     items += [(name, (PAPER / name).read_bytes()) for name in local]
     items += installed_journal_files(tex, local)
+    items += [(name, (PAPER / name).read_bytes()) for name in CLASS_IMAGES if (PAPER / name).is_file()]
     items += [(name, (PAPER / name).read_bytes()) for name in names]
     return items
 
