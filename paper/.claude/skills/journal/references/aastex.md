@@ -41,8 +41,9 @@ who ask for it. `[linenumbers]` helps during review.
 
 ## arXiv
 
-`aastex701.cls` is on arXiv, so `util/arxiv_zip.py` does not bundle it.
-`aasjournalv7.bst` is not needed there because the zip carries the `.bbl`.
+arXiv's TeX Live lacked `aastex701.cls` in November 2026, and its upload scan also asks for
+`aasjournalv7.bst` although the zip's `.bbl` makes it unused. `util/arxiv_zip.py` therefore
+bundles both from the local TeX installation.
 
 ## After switching to `aastex`
 

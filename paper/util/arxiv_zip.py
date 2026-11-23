@@ -9,7 +9,10 @@ arXiv publishes the source; each comment's % is kept so line ends still behave.
 The bibliography goes in as main.bbl from a fresh build in a temporary
 directory, so arXiv needs neither BibTeX nor the .bib files. Every figure named
 by \\includegraphics keeps its path. A .cls or .sty in paper/ that the source
-loads goes in too; classes in arXiv's TeX Live do not.
+loads goes in too. So do the journal's class and bibliography style, taken from
+the local TeX installation: arXiv's TeX Live can lag the journals (it lacked
+aastex701.cls in 2026), and its upload scan asks for every class and style that
+the source names, the .bst included, even though the .bbl makes it unused.
 
     python util/arxiv_zip.py              # build, zip to <slug>-arxiv.zip, test-compile the zip
     python util/arxiv_zip.py --out PATH   # choose the zip path
@@ -36,6 +39,10 @@ from paperconf import PAPER, ROOT, flatten, load, split_comment, strip_comments,
 GRAPHICS_CMD = re.compile(r"\\includegraphics\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}")
 PACKAGE_CMD = re.compile(r"\\(?:documentclass|usepackage|RequirePackage)\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}")
 GRAPHIC_EXTS = ["", ".pdf", ".png", ".jpg", ".jpeg", ".eps"]
+CLASS_CMD = re.compile(r"\\documentclass\s*(?:\[[^\]]*\])?\s*\{([^}]+)\}")
+BST_CMD = re.compile(r"\\bibliographystyle\s*\{([^}]+)\}")
+# Classes of the LaTeX core, which every TeX installation has: never bundled.
+CORE_CLASSES = {"article", "report", "book", "letter", "slides", "proc", "minimal"}
 
 
 def drop_comment_text(tex: str) -> str:
@@ -80,6 +87,24 @@ def local_packages(tex: str) -> list[str]:
     return out
 
 
+def installed_journal_files(tex: str, local: list[str]) -> list[tuple[str, bytes]]:
+    """The journal's .cls and .bst from the TeX installation, unless paper/ holds them."""
+    src = strip_comments(tex)
+    wanted = [n.strip() + ".cls" for m in CLASS_CMD.finditer(src) for n in m.group(1).split(",")
+              if n.strip() not in CORE_CLASSES]
+    wanted += [n.strip() + ".bst" for m in BST_CMD.finditer(src) for n in m.group(1).split(",")]
+    out: list[tuple[str, bytes]] = []
+    for fname in dict.fromkeys(wanted):
+        if fname in local or (PAPER / fname).is_file():
+            continue
+        found = subprocess.run(["kpsewhich", fname], capture_output=True, text=True).stdout.strip()
+        if not found:
+            print(f"{fname} is not in paper/ or the TeX installation, so the zip lacks it", file=sys.stderr)
+            sys.exit(1)
+        out.append((fname, Path(found).read_bytes()))
+    return out
+
+
 def collect(bbl: Path, mode: str, keep_comments: bool) -> list[tuple[str, bytes]]:
     """(zip name, bytes) pairs, main.tex first."""
     tex = flatten()
@@ -92,7 +117,9 @@ def collect(bbl: Path, mode: str, keep_comments: bool) -> list[tuple[str, bytes]
         print(f"{bbl} has no \\bibitem entries; BibTeX did not find the references", file=sys.stderr)
         sys.exit(1)
     items.append(("main.bbl", bbl_bytes))
-    items += [(name, (PAPER / name).read_bytes()) for name in local_packages(tex)]
+    local = local_packages(tex)
+    items += [(name, (PAPER / name).read_bytes()) for name in local]
+    items += installed_journal_files(tex, local)
     items += [(name, (PAPER / name).read_bytes()) for name in names]
     return items
 
