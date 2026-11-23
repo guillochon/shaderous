@@ -109,6 +109,11 @@ describe('checkSetup', () => {
     expect(has(wd('km', 'Msun'), /far outside what white dwarf matter covers/)).toBe(true);
     expect(has(wd('Rearth', 'g'), /far outside what white dwarf matter covers/)).toBe(true);
     expect(has(wd('Rsun', 'Msun'), /far outside what white dwarf matter covers/)).toBe(false);
+    // Seed 20427: ANEOS in Earth radii and grams.
+    const rock = (mass: string) =>
+      texts(setup({ domain: { ndim: 2, n: 64, units: { length: { unit: 'Rearth', value: 1 }, mass: { unit: mass, value: 1 } } }, physics: { eos: 'aneos' } }), 'error');
+    expect(has(rock('g'), /far outside what ANEOS covers/)).toBe(true);
+    expect(has(rock('Mearth'), /far outside what ANEOS covers/)).toBe(false);
   });
 
   it('takes a wind tunnel’s gas for the run’s (random test seed 10012)', () => {

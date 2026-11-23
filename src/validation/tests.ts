@@ -1011,6 +1011,40 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'mhd-cold-rock',
+    name: 'MHD: a cold disk of rock (ANEOS) under a weak seed field',
+    criterion:
+      'A thin disk of rock (ANEOS, Earth radii and masses, 32^3, outflow faces) around a point mass with no gravity of its own, under the weak seed field, flies apart: cold rock near zero pressure moving at about 1.5 with fast speeds near 4e-3. With HLLD, for 150 steps every value finite. (HLLD’s contact speed rounded onto a fast wave there and its star state divided by 0: random test seed 20209 ran to NaN within 99 steps on this grid.)',
+    async run(gpu) {
+      const doc = {
+        format: 'shaderous-setup', version: 1, name: 'cold rock disk',
+        // Outflow (1) on every face.
+        domain: { ndim: 3, n: 32, box: 4, amr: 0, bc: { lo: [1, 1, 1], hi: [1, 1, 1] }, units: { length: { unit: 'Rearth', value: 1 }, mass: { unit: 'Mearth', value: 1 } } },
+        physics: { eos: 'aneos', eosParams: { aneosA: 0 } },
+        background: {},
+        parts: [
+          { kind: 'disk', id: 'disk', about: ['m'], profile: 'thin', rIn: 0.08, rOut: 0.4, sigma0: 1, slope: -1, cs: 0.1, floor: 1e-4 },
+          { kind: 'mass', id: 'm', gm: 1, pos: [0, 0, 0], soft: 0.02, sink: 0.02 },
+          { kind: 'flow', name: 'seed-field', in3d: true },
+        ],
+        run: { tEnd: null },
+      } as unknown as SetupSpec;
+      const p = compileSetup(doc).problem;
+      return withSim(gpu, p, 32, { ndim: 3 }, async (sim) => {
+        await sim.settled;
+        let steps = 0;
+        let finite = true;
+        for (let k = 0; k < 15 && finite; k++) {
+          sim.step(10);
+          const d = await sim.diagnostics();
+          steps = d.steps;
+          finite = Number.isFinite(d.mass) && Number.isFinite(d.eTot) && Number.isFinite(d.magnetic?.bMax ?? NaN);
+        }
+        return { pass: finite && steps >= 150, metrics: { steps, finite: finite ? 1 : 0 } };
+      });
+    },
+  },
+  {
     id: 'reflecting-box',
     name: 'Blast in a closed reflecting box',
     criterion: 'Mass conserved to 1e-5 and total energy to 1e-3 after the shock has reflected off the walls',

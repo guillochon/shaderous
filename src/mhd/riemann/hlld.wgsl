@@ -42,9 +42,17 @@ fn mhd_riemann(l: MSide, r: MSide, bn: f32, w_hll: f32) -> MFlux {
   let ptr = side_pt(r, bn);
   let ql = l.rho * (sl - l.v.x);
   let qr = r.rho * (sr - r.v.x);
+  // Gas too cold, and a field too weak, for its fast speeds to show above the rounding of its
+  // velocity: ql or qr is 0 and the contact speed 0 / 0 (as in hydro/riemann/hllc.wgsl).
+  if (!(ql < 0.0 && qr > 0.0)) { return mhd_hlle(l, r, bn); }
   // Contact speed and the total pressure across the Riemann fan.
   let sm = (qr * r.v.x - ql * l.v.x - ptr + ptl) / (qr - ql);
   let pts = (qr * ptl - ql * ptr + ql * qr * (r.v.x - l.v.x)) / (qr - ql);
+  // The contact rounded onto (or past) a fast wave, where the star state divides by sa - sm: a
+  // star density of 0, infinite or negative. Random test seed 20209 (cold ANEOS rock, its
+  // pressure near 0, under a weak seed field, moving at 1.5 with fast speeds of 4e-3) ran to NaN
+  // here; HLLE ran it.
+  if (!(sm > sl && sm < sr)) { return mhd_hlle(l, r, bn); }
   let ls = hlld_star(l, bn, sl, sm, pts);
   let rs = hlld_star(r, bn, sr, sm, pts);
   let ul = side_cons(l, bn);

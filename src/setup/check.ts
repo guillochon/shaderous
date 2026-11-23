@@ -380,6 +380,16 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
       out.push({ level: 'error', path: 'domain.units', text: `The units make a density of 1 code unit ${fmt(p.helmRho)} g/cm³, far outside what white dwarf matter covers (its table spans 1 to 1e11 g/cm³): choose units nearer the star’s own scales, a solar or white dwarf radius and a solar mass` });
   });
 
+  // The same for ANEOS, whose tables span 1e-8 to 1e2 g/cm^3 (random test seed 20427: Earth
+  // radii and grams, 4e-27 g/cm^3 a unit of density, ran to NaN; in Earth masses it runs).
+  guard(() => {
+    const units = plainUnits(spec);
+    if ((spec.physics?.eos ?? 'ideal') !== 'aneos' || !units) return;
+    const rho = physicalEosParams(units).helmRho ?? 0;
+    if (rho > 0 && (rho > 1e6 || rho < 1e-14))
+      out.push({ level: 'error', path: 'domain.units', text: `The units make a density of 1 code unit ${fmt(rho)} g/cm³, far outside what ANEOS covers (its tables span 1e-8 to 100 g/cm³): choose units nearer the planet’s own scales, an Earth radius and an Earth mass` });
+  });
+
   // A uniform field is free of divergence in Cartesian space, but on the rings of an (R, z) run
   // one along R has div B = B_R / R, and in (r, theta) one along r or theta has 2 B_r / r or
   // cot(theta) B_theta / r: the run starts with that divergence and keeps it (random test seed
