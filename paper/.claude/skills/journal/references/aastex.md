@@ -44,6 +44,9 @@ who ask for it. `[linenumbers]` helps during review.
 arXiv's TeX Live lacked `aastex701.cls` in November 2026, and its upload scan also asks for
 `aasjournalv7.bst` although the zip's `.bbl` makes it unused. `util/arxiv_zip.py` therefore
 bundles both from the local TeX installation.
+The scan then reports `CoFirstAuthor` and `orcid-ID.png` as missing: the class draws those
+icons only `\IfFileExists`, so uncheck their rows in "Review Files" (or add the AAS icons
+to `paper/` if the author list uses ORCIDs and should show the icon).
 
 ## After switching to `aastex`
 
