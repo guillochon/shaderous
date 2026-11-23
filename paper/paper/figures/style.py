@@ -101,6 +101,23 @@ def triad(ax, yaw: float, pitch: float, at=(0.11, 0.11), size: float = 0.075, co
                 fontsize=LABEL_SIZE - 1, color=color)
 
 
+def triad_plane(ax, at=(0.11, 0.11), size: float = 0.075, color: str = INK) -> None:
+    """The axes triad of a slice seen face on: x to the right, y up, z toward the reader (a dot in a circle).
+
+    `at` and `size` are in fractions of the axes, as for triad().
+    """
+    x0, y0 = at
+    for (dx, dy), name in (((size, 0), "x"), ((0, size), "y")):
+        ax.annotate("", xy=(x0 + dx, y0 + dy), xytext=(x0, y0), xycoords="axes fraction",
+                    arrowprops=dict(arrowstyle="-|>", color=color, lw=0.7, shrinkA=0, shrinkB=0, mutation_scale=5))
+        ax.text(x0 + 1.35 * dx, y0 + 1.35 * dy, f"${name}$", transform=ax.transAxes, ha="center", va="center",
+                fontsize=LABEL_SIZE - 1, color=color)
+    ax.plot([x0], [y0], marker="o", ms=4, mfc="none", mec=color, mew=0.6, transform=ax.transAxes)
+    ax.plot([x0], [y0], marker=".", ms=1.5, color=color, transform=ax.transAxes)
+    ax.text(x0 - 0.45 * size, y0 - 0.45 * size, "$z$", transform=ax.transAxes, ha="center", va="center",
+            fontsize=LABEL_SIZE - 1, color=color)
+
+
 def crop_to_content(img, aspect: float, margin: float = 0.02):
     """A rendering on a white background cut to what is drawn, plus a margin, at width / height = aspect.
 

@@ -1,0 +1,109 @@
+{
+ "t": 10.75,
+ "steps": 9290,
+ "wall": 16362.012,
+ "setup": "problem=custom&setup=nVVNj9s2EP0rgzklAFeQvOsmYU7NR4MC3TRI9xbkMJZGFrMSqZDD3bgLAz333kP_Xn5JMZTtbIIc2vpgm9SIfHzvzeMdbqi93saQfYf2DtssaOuqruvGYBwC2obPnuwNbsYcN2jxamCYY5Bw9pKiDJAk5vYaNju4GtiRAYJN6HbgmSLIwDBRShB6uKSYDJCUyTQzd-AEehrHBH0ME_QUgW5pB-Q7rbtYQ8fbyJxseaclH7xraYStIy_gpplagQfPyecZVnV98bCCZ0EGoMjgYvBnNI5hB22InCD7jiPE0F7DRF5GTnDrZIAfX7_89Tfgj5nEBV-gJiHhCt5qbYG20VVdAhliuPXgvAQIcePkaUF2GYKHLcnA8XAWGUigc-m6gl_Yb2VI4DwsjEXqnDOFF743vYyfAoG4iSF7J7plc15dwOR8Fk4GUgCCjnblSf2oQoNdmMh51W7T6vfg0L47N-fm_L3BMZwGqmH4hLapDeriSYvHAk7_6RRafMsKBg3e0JgZbbM3qMjulVx-p8TTxGixnAT3e4M9TW7cocWi1dmiFR7nXy_lr-7pqM-YJEfu0L67w55aCRFtU63WBl2HFkUNhgZH2vC4WNHR5z_-TovHHlx-_vOvh6h4P6mHnxiclJi6qlcGZ9Jz4kxRUtVU5UwGxc0HTy8oQjytZ76VxkJdNY0yr1au4PlAfuv8Vm2cRNctZojZA21Vkr25W4Bv7oH-eXHtTJEmFo5HvE21OuL9BuyqOjGUhOdyoPUR-huOrmUvHNVuQr5ldbAC0S02YXTtYlUIN7x0ZMrTsUZuw9GPt4NrDyZnSB-zNtGhKjl_-k9-O7K251IvA-9AQm4HC7W-PTB1Z8EbqKu1jr90sYEGPuQksI30O_8rAt8b7EOcSG2XBuo4hpzOEkue0aCmlnLwzHmKjlMJDvZtyMqHylvYb3OSMCnPnIrVI_fO8wv26Wv3ahuf6X4F0yFdptC53nGnxip6FHdqpPwUqdXIUEHOTZm6JOHoSHXu-fE6uWZ9RHFsmmunQYt6Xjy21uLVL-_OuxhGJ6yK59hTy1doV3VdG5TdrFDnkTxLcdh_h3Lso-9DaVb_H0tZvrhN91pca-tqfdrr-Cz0aN-dOFkAvTe4uADt6rR4G8bRJT2ammEedsm1JYxeoT3EmEEOCS2S198yeqPdVcq2NE2k3fXD159HmlFjCLFUzeWaax5_ufKaphTkvi-O0dlyK5Z7MaNtDN6gPd-rC-nGiUadS2Ek4U6pmrl1rF65T-BJCA3jmEtotwO313NwXl4IWu3rFzuP9sKgvFTKfB7HvWZt1LA8Zmyx-tVBxxuOhaECyvGtLkuf3MJj73jsSqiMYYtWYmaDU-iKcjF84MU4-_0_&dim=3&n=1024&amr=4&mode=volume&species=1&yaw=0.6&pitch=0.9&dist=1&ncont=5&isoa=0.4&blocks=0&contours=1&fog=0&light=1&box=0&lo=0.00001&hi=0.5&cmap=turbo",
+ "adapter": "nvidia ampere",
+ "mesh": "30584 blocks, 12% of uniform",
+ "gpuMemory": "74",
+ "diagnostics": {
+  "t": 10.75,
+  "dt": 0,
+  "steps": 9290,
+  "mass": 1.0193414688110352,
+  "momentum": [
+   -0.00026560245896689594,
+   -0.00023243532632477582,
+   7.153777914936654e-06
+  ],
+  "eKin": 0.02456662617623806,
+  "eInt": 0.0790308266878128,
+  "eGrav": -0.600461483001709,
+  "eTot": -0.4968640301376581,
+  "maxMach": 276.1058654785156,
+  "floored": 4331058,
+  "jeansUnresolved": 300468,
+  "nuclearHeating": 0,
+  "com": [
+   -0.0027482893598605803,
+   -0.002912873119808122,
+   3.1231275346420726e-05
+  ],
+  "perturber": null,
+  "masses": [],
+  "symmetry": [
+   false,
+   false,
+   false
+  ],
+  "ranges": {
+   "Density": [
+    9.999999960041972e-12,
+    0.5398643016815186
+   ],
+   "Temperature": [
+    0.011123653501272202,
+    9.090784072875977
+   ],
+   "Passive scalar": [
+    -0.007598805241286755,
+    1.0511037111282349
+   ],
+   "Pressure": [
+    1.000000045813705e-18,
+    0.22015061974525452
+   ],
+   "Speed": [
+    0.0009771669283509254,
+    1.7731385231018066
+   ]
+  }
+ },
+ "impact": {
+  "planet": {
+   "mass": 0.9842536975036736,
+   "radius": 0.9947501050906844,
+   "center": [
+    -0.08016576752895273,
+    -0.13595557302512756,
+    3.3904397078482555e-05
+   ],
+   "velocity": [
+    0.005089971150643261,
+    -0.012548036158166031,
+    5.642314904604021e-06
+   ],
+   "shares": {
+    "pyrolite": 0.6922315605055415,
+    "fe85si15": 0.30776844012397164,
+    "dye": 0.9510852140898718
+   }
+  },
+  "disk": {
+   "mass": 0.03486361479328511,
+   "angularMomentum": 0.050450434439419184,
+   "overRoche": 0.8587820783107212,
+   "shares": {
+    "pyrolite": 0.9048128054745369,
+    "fe85si15": 0.09518719512833129,
+    "dye": 0.6729062856996517
+   }
+  },
+  "escaping": {
+   "mass": 0.0002200248232246112,
+   "shares": {
+    "pyrolite": 0.9934540768782486,
+    "fe85si15": 0.0065459246374262045,
+    "dye": 0.5969188292267528
+   }
+  },
+  "moon": 0.015224450704267693,
+  "meanDensity": 0.2387132164524033,
+  "units": {
+   "time": 805.4551713590361,
+   "mass": 5.9722e+24,
+   "length": 6371000
+  }
+ },
+ "errors": []
+}
