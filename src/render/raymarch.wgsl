@@ -139,19 +139,28 @@ fn within_cell(q: vec3<f32>, dir: vec3<f32>, c: f32) -> bool {
   return near >= JUMP_SHARE * far;
 }
 
-// The ball of the tool in hand (C.tb): at q on its surface, d along the ray rd, how much of a
-// contour line covers it, drawn opaque in RING: the levels as they cross the ball's surface,
-// about three pixels wide on the screen. On the ball, not on the isosurfaces, so the lines stay
+// A contour line on the tool's ball: how much of its core covers a pixel, and of the dark edge
+// about it, and its color.
+struct BallLine {
+  core: f32,
+  edge: f32,
+  color: vec3<f32>,
+}
+
+// The ball of the tool in hand (C.tb): at q on its surface, d along the ray rd, the contour line
+// there, if any: the levels as they cross the ball's surface, each in its isosurface's color
+// (lightened, with a dark edge, to read over that surface), about three pixels wide on the
+// screen. On the ball, not on the isosurfaces, so the lines stay
 // clean where those are ragged or seen edge-on. The width comes from how fast the field changes
 // across the ball's surface per pixel (worked out by hand: derivatives are not to be had in the
 // march's loop).
-const RING = vec3<f32>(1.0, 0.92, 0.55);
-fn ball_lines(q: vec3<f32>, d: f32, rd: vec3<f32>) -> f32 {
+fn ball_lines(q: vec3<f32>, d: f32, rd: vec3<f32>) -> BallLine {
+  var none: BallLine;
   let exact = C.o.x != 0.0;
   var f: f32;
   if (exact) { f = iso_f(q); } else { f = iso_smooth(q); }
   let k = round(f);
-  if (k < 1.0 || k > C.k.x) { return 0.0; }
+  if (k < 1.0 || k > C.k.x) { return none; }
   // The field's gradient, from the corners of a tetrahedron half a cell out.
   let c = vol_look(q).cell;
   let e = 0.5 * c;
@@ -169,6 +178,7 @@ fn ball_lines(q: vec3<f32>, d: f32, rd: vec3<f32>) -> f32 {
   // A jump the cells do not resolve (as for the surfaces): one line, at its half-way value,
   // rather than its levels bunched together, the lower of them following the cells' outline.
   var aim = k;
+  var lv = k;   // the level whose color it takes
   if (!exact) {
     // (Across it as the value has it: the log's gradient, out in the jump's faint tail, follows
     // the cells' outline.)
@@ -179,6 +189,8 @@ fn ball_lines(q: vec3<f32>, d: f32, rd: vec3<f32>) -> f32 {
     let decades = abs(log(max(lb, 1.0e-30)) - log(max(la, 1.0e-30))) * 0.4342944819;
     if ((abs(iso_of_lin(lb) - iso_of_lin(la)) >= 2.0 || decades >= JUMP_DECADES) && within_cell(q, gn, c)) {
       aim = iso_of_lin(0.5 * (la + lb));
+      // (In the color its isosurface is drawn in: the first of its levels, from outside.)
+      lv = clamp(floor(min(iso_of_lin(la), iso_of_lin(lb))) + 1.0, 1.0, C.k.x);
     }
   }
   // A pixel's step right and up moves the point along the ball's surface (normal u); the change
@@ -190,7 +202,10 @@ fn ball_lines(q: vec3<f32>, d: f32, rd: vec3<f32>) -> f32 {
   let gr = dot(g, C.right.xyz - rd * dot(u, C.right.xyz) / den);
   let gu = dot(g, C.up.xyz - rd * dot(u, C.up.xyz) / den);
   let per = max(px * sqrt(gr * gr + gu * gu), 1.0e-9);
-  return 1.0 - smoothstep(1.0, 2.0, abs(f - aim) / per);
+  let x = abs(f - aim) / per;   // in pixels
+  let zero = -C.sc.y / max(C.sc.z - C.sc.y, 1.0e-20);
+  let neg = C.sc.x == 0.0 && vol_look(q).s.r < zero;
+  return BallLine(1.0 - smoothstep(1.0, 2.0, x), 1.0 - smoothstep(2.0, 3.0, x), mix(level_color(lv, neg), vec3<f32>(1.0), 0.3));
 }
 
 @fragment
@@ -380,8 +395,10 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   for (var j = 0; j < 2; j++) {
     let tb = select(bt.x, bt.y, j == 1);
     if (tb > t0 && tb < t1) {
-      let w = ball_lines(ro + rd * tb, tb, rd);
-      col = mix(col, RING * select(1.0, 0.55, j == 1), w);
+      let l = ball_lines(ro + rd * tb, tb, rd);
+      let dim = select(1.0, 0.55, j == 1);
+      col = mix(col, col * 0.25, l.edge * dim);
+      col = mix(col, l.color * dim, l.core);
     }
   }
 
