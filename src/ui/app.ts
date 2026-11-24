@@ -185,7 +185,7 @@ side.innerHTML = `
     <div id="timing"></div>
   </details>
 
-  <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a> &middot; <a href="https://hub.valency.io/works/W_e4sja6m3" target="_blank" rel="noopener" title="The paper that describes this simulator">Paper on Valency</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view; Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
+  <footer><a href="validate.html" title="Run the test problems and compare them with exact solutions">Validation suite</a> &middot; <a href="https://github.com/guillochon/shaderous" target="_blank" rel="noopener" title="The code of this simulator">Source on GitHub</a> &middot; <a href="https://hub.valency.io/works/W_e4sja6m3" target="_blank" rel="noopener" title="The paper that describes this simulator">Paper on Valency</a><br>drag to orbit (pan in a slice), wheel or pinch to zoom, double-click to reset a slice, space to play or pause<br>with an editing tool picked, drag edits the gas and right-drag moves the view, ↑ ↓ move its ball in depth (Shift: 10&times;, Home: back); Esc puts the tool away<br><span title="Build of the page you are looking at">build ${BUILD}</span></footer>
 `;
 
 // On a phone the rail lies over the simulation, so it can be put away (remembered in this
@@ -3881,6 +3881,44 @@ let hover: { x: number; y: number } | null = null;
 let guideAt: Vec3 | null = null;
 
 /**
+ * Volume view: how far beyond the plane through the point the camera orbits the brush's ball
+ * lies, along the view direction, in box lengths (the arrow keys, a hundredth of the box a
+ * press). Under the pointer still; where it lies in depth is what changes. While it is not 0 a
+ * stroke paints at that depth rather than on the gas seen under the pointer. Back to 0 with Home
+ * or another tool.
+ */
+let ballOffset = 0;
+let ballOffsetTool: ToolKind | null = null;
+
+/** Distance from the eye, along the view direction, of the brush's ball while it hovers. */
+function brushDepth(): number {
+  if (tool !== ballOffsetTool) {
+    ballOffset = 0;
+    ballOffsetTool = tool;
+  }
+  return Math.max(MIN_DIST * 0.25, view.dist + ballOffset);
+}
+
+// ↑ and ↓ move the ball of the tool in hand away and back along the view, a hundredth of the box
+// a press (a tenth with Shift); Home puts it back on the plane through the point orbited.
+window.addEventListener('keydown', (e) => {
+  if (!['ArrowUp', 'ArrowDown', 'Home'].includes(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (!tool || tool === 'query' || tool === 'obstacle' || !cfg || cfg.ndim !== 3 || flatView()) return;
+  // (Not where the keys mean something already: a field, a slider, a menu. A button, the tool's
+  // own just pressed, has no use for them.)
+  const t = e.target as HTMLElement | null;
+  if (t && (t.closest('input, select, textarea, [contenteditable]') || t.isContentEditable)) return;
+  e.preventDefault();
+  brushDepth();
+  if (e.key === 'Home') ballOffset = 0;
+  else {
+    const step = (e.shiftKey ? 0.1 : 0.01) * (e.key === 'ArrowUp' ? 1 : -1);
+    ballOffset = Math.max(MIN_DIST * 0.25 - view.dist, ballOffset + step);
+  }
+  if (hover && !stroke) drawBrush(hover.x, hover.y);
+});
+
+/**
  * Volume view: guides along x, y and z through the center of the brush on show, so it can be
  * placed in depth, and the contour levels on its ball. Called once per frame.
  */
@@ -3914,7 +3952,7 @@ function drawBrush(px?: number, py?: number) {
   const drag = stroke?.kind === 'velocity' || stroke?.kind === 'source' || stroke?.kind === 'star' || (stroke?.kind === 'sink' && !sinkFixed);
   const x = drag ? stroke!.x0 : (px ?? stroke?.x ?? 0);
   const y = drag ? stroke!.y0 : (py ?? stroke?.y ?? 0);
-  const { scale, pos } = locate(x, y, stroke?.ready ? stroke.depth : view.dist);
+  const { scale, pos } = locate(x, y, stroke?.ready ? stroke.depth : brushDepth());
   guideAt = pos;
   svg.style.display = 'block';
   // Pressed: the tool is acting (or, for a velocity, being aimed). Shift takes away.
@@ -3958,7 +3996,7 @@ function beginStroke(e: PointerEvent) {
   const r = canvas.getBoundingClientRect();
   const [x, y] = [e.clientX - r.left, e.clientY - r.top];
   const s: Stroke = {
-    id: e.pointerId, kind: tool!, x0: x, y0: y, x, y, shift: e.shiftKey, depth: view.dist, ready: flatView(),
+    id: e.pointerId, kind: tool!, x0: x, y0: y, x, y, shift: e.shiftKey, depth: brushDepth(), ready: flatView() || ballOffset !== 0,
     released: false, dabbed: false, t0: performance.now(), flowed: 0,
     ...toolRefs(),
   };
@@ -3967,7 +4005,8 @@ function beginStroke(e: PointerEvent) {
   if (s.kind === 'sink' || s.kind === 'source') refreshLumps(s.t0, true);
   if (!s.ready) {
     // Volume view: paint on the gas that is seen under the pointer, or, where the view is
-    // empty, on the plane through the middle of the box.
+    // empty, on the plane through the middle of the box (a ball moved in depth with the arrow
+    // keys paints where it is instead).
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     const [ux, uy] = [(2 * x) / w - 1, 1 - (2 * y) / h];
@@ -4475,7 +4514,7 @@ function updateOrbit(now: number) {
   if (!sim || !moves || !(pressed || resting) || (!star && massesNow().length >= MAX_MASSES)) {
     orbit = null;
   } else {
-    const { at, vel } = pressed ? strokeAim(s!) : { at: locate(hover!.x, hover!.y, view.dist), vel: [0, 0, 0] as Vec3 };
+    const { at, vel } = pressed ? strokeAim(s!) : { at: locate(hover!.x, hover!.y, brushDepth()), vel: [0, 0, 0] as Vec3 };
     const mine = star ? starSpec(at.pos, vel) : tool === 'source' ? carrierSpec(at.pos, vel, toolParams.source.size) : massSpec(at.pos, vel, toolParams.sink);
     const others = massesNow();
     const lumps = gasLumps && gasLumps.of === sim ? gasLumps : null;
