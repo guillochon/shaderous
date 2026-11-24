@@ -408,6 +408,19 @@ of coarse cells a workgroup needs into workgroup memory once, and ghost fills la
 only for face ghosts. These two changes cut a 3D Evrard step from 3.88 to 3.55 ms of GPU time,
 with identical results.
 
+Relaxing every level against the boundary values its coarser level had a step before is a lag,
+and a body moving across the mesh feels its own pull from where it was: a drag on its momentum.
+A converged potential differenced across refinement boundaries pushes such a body too, a third
+as much the other way. Neither is zero as the net force of an isolated body's gravity on itself
+is, and in a frame turning with a binary the drag sent the center of mass off the axis on an
+outward spiral. With isolated boundaries (3D Cartesian) a reduction (`amr/self_force.wgsl`)
+therefore sums $`\rho\,\mathbf{g}`$ over the leaves of each step's field, a one-thread pass
+(`amr/gravity/self_force.wgsl`) turns it into a uniform acceleration $`\mathbf{a}`$, and the
+next field pass subtracts $`\mathbf{a}`$ from the field and adds $`\mathbf{a}\cdot\mathbf{x}`$ to
+the potential it stores (`amr/gravity/fix_on.wgsl`). Not along a plane of mirror symmetry,
+where the image's pull is real. A 0.6 $`M_\odot`$ white dwarf moving at 182 km/s lost 1.8% of
+its momentum in 27 s before and 0.02% after; the step costs no measurable time more.
+
 ## Per-block timesteps on the GPU
 
 Per-block timesteps ([numerics.md](numerics.md#18-local-per-block-timesteps)) are scheduled
