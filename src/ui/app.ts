@@ -231,7 +231,8 @@ $('colorbar').innerHTML = `
     <label class="check" title="Logarithmic color scale"><input id="log" type="checkbox" />Log</label>
     <label class="check" title="Outline the blocks of an adaptive mesh, in the slice and the volume view"><input id="blocks" type="checkbox" checked />Blocks</label>
     <label class="check" title="Contour lines in the slice and projection views, isosurfaces in the volume view, evenly spaced in log |value| across the displayed range (how many: View, Contours)"><input id="contours" type="checkbox" />Contours</label>
-    <label class="check" title="Volume view: draw the gas as a glowing fog. Off, with Contours on, the isosurfaces show alone"><input id="fog" type="checkbox" checked />Fog</label>
+    <label class="check sub" id="fog-check" title="Volume view: draw the gas as a glowing fog. Off, the isosurfaces show alone"><input id="fog" type="checkbox" checked />Fog</label>
+    <label class="check sub" id="exact-check" title="Volume view: light the isosurfaces by the differences across one cell, as the cells have them. Off, across four, which smooths the terraces where the field jumps within a cell"><input id="exact" type="checkbox" />Exact</label>
     <label class="check" title="Volume view: outline the box"><input id="box" type="checkbox" checked />Box</label>
     <label class="check" id="flines-check" title="Magnetic field lines: tubes in the volume view, lines in the plane in the slice view and in 2D (how many: View, Field lines)"><input id="flines" type="checkbox" />Field lines</label>
   </div>
@@ -1348,7 +1349,11 @@ function syncControls() {
   $<HTMLInputElement>('ncont').value = String(view.nContours);
   $<HTMLInputElement>('ncont').disabled = !view.contours;
   $<HTMLInputElement>('fog').checked = view.fog;
-  $<HTMLInputElement>('fog').disabled = !marching || !view.contours;
+  $<HTMLInputElement>('fog').disabled = !marching;
+  $<HTMLInputElement>('exact').checked = view.exact;
+  $<HTMLInputElement>('exact').disabled = !marching;
+  // Fog and Exact are settings of the isosurfaces: shown under Contours while it is on.
+  $('fog-check').hidden = $('exact-check').hidden = !view.contours;
   $<HTMLInputElement>('box').checked = view.box;
   $<HTMLInputElement>('box').disabled = !marching;
   // Turning with the frame: a 3D run in a rotating frame (not a shearing box), in the volume view.
@@ -2781,6 +2786,7 @@ function bind() {
     syncControls();
   });
   on('fog', (el) => (view.fog = el.checked));
+  on('exact', (el) => (view.exact = el.checked));
   on('box', (el) => (view.box = el.checked));
   on('turnframe', (el) => (view.turnWithFrame = el.checked));
   on('isoa', (el) => (view.surfaceOpacity = logAt(+el.value, SURFACE_RANGE)), 'input');
