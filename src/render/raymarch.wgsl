@@ -30,10 +30,8 @@ fn iso_f(p: vec3<f32>) -> f32 {
 // The isosurface through p (in the box, [-0.5, 0.5]^3) seen along rd, lit: a key light above
 // and to the right of the camera, a fill from the camera, and a highlight.
 fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>) -> vec3<f32> {
-  // Differences across the cell the surface passes through (exact), or across four: where the
-  // field jumps within a cell the surface terraces cell by cell, and the wider differences
-  // light it as the smooth surface it stands for rather than step by step.
-  let e = vol_look(p).cell * select(4.0, 1.0, C.o.x != 0.0);
+  // Differences across the cell the surface passes through.
+  let e = vol_look(p).cell;
   let gr = vec3<f32>(
     iso_f(p + vec3<f32>(e, 0.0, 0.0)) - iso_f(p - vec3<f32>(e, 0.0, 0.0)),
     iso_f(p + vec3<f32>(0.0, e, 0.0)) - iso_f(p - vec3<f32>(0.0, e, 0.0)),
