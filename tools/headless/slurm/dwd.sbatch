@@ -28,6 +28,9 @@
 # gpu-preempt-highvram as well, where a job can be preempted: it is then requeued and loses only
 # the time since its last checkpoint). The jobs that follow keep the partition and time limit
 # the job ran with.
+# Host memory: about 8-9 times a checkpoint's size at its peak (35 GB for the 1024^3 run's 4.2 GB
+# checkpoints, 22 GB so far for the 2048^3 run's 2 GB). Check with sstat -j <job>.batch
+# --format=MaxRSS, and pass sbatch --mem for a run with species or larger checkpoints.
 # Stop the chain: touch RUN_DIR/seg-<job>/STOP (the job stops at its next screenshot and
 # writes a checkpoint) and scancel any job waiting, or touch RUN_DIR/DONE before the next starts.
 #SBATCH --job-name=shaderous-dwd
@@ -37,7 +40,7 @@
 #SBATCH --gpus=1
 #SBATCH --constraint=vram80
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=128G
+#SBATCH --mem=48G
 #SBATCH --time=5-00:00:00
 #SBATCH --output=slurm-dwd-%j.out
 set -uo pipefail

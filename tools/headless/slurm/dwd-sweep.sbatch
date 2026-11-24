@@ -18,6 +18,8 @@
 #              helium-donor pair)
 # The views are dwd.sbatch's, framed for the box of 16 (twice its 8): dist halved, zoom doubled.
 # Measure the mass transfer from the .athdf files with dwd-mdot.mjs (see its header).
+# Host memory peaks at about 8-9 times a checkpoint's size: 17-24 GB for the CO sweep (2 GB
+# checkpoints), 36-45 GB with the 13 aprox13 species (4.8 GB): sbatch --mem=64G for those.
 # Stop a run: touch SWEEP_DIR/f<FILL>/STOP (it stops at its next output, writing an .athdf file).
 #SBATCH --job-name=dwd-sweep
 #SBATCH --partition=umd-cscdr-gpu
@@ -25,7 +27,7 @@
 #SBATCH --gpus=1
 #SBATCH --constraint=vram80
 #SBATCH --cpus-per-task=8
-#SBATCH --mem=128G
+#SBATCH --mem=32G
 #SBATCH --time=1-00:00:00
 #SBATCH --output=slurm-dwd-sweep-%j.out
 set -uo pipefail
