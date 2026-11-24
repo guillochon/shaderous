@@ -531,6 +531,7 @@ export function compileSetup(input: SetupSpec): Compiled {
   const gext = ph.gext;
   const burn = ph.burn;
   const fl = ph.fluff;
+  const sd = ph.startDamping;
 
   const cosmology = cosmologyOfSetup(spec);
   const obstacles = parts.filter((p): p is ObstaclePart => p.kind === 'obstacle');
@@ -580,6 +581,7 @@ export function compileSetup(input: SetupSpec): Compiled {
     bc2d: d.bc2d,
     wallVelocity: d.wallVelocity ? { ...d.wallVelocity } : undefined,
     fluff: fl ? { rho: fl.rho ?? 0, u: fl.u ?? 0, v: fl.v ?? 0, ...(fl.va !== undefined ? { va: fl.va } : {}) } : undefined,
+    startDamping: sd ? { rate: sd.rate ?? 0, time: sd.time ?? 0 } : undefined,
     params: feats.length ? feats.map((f) => problemParam(spec, f)) : undefined,
     masses: hasMasses
       ? (params, G, dx, ndim): PointMass[] => {

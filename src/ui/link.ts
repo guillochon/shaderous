@@ -56,6 +56,7 @@ export interface LinkOverrides {
   coolParams: Partial<CoolingParams>;
   opacityParams: Partial<SimConfig['opacityParams']>;
   fluff: Partial<SimConfig['fluff']>;
+  startDamping: Partial<SimConfig['startDamping']>;
   driving: Partial<SimConfig['driving']>;
   params: Record<string, number>;
   view: Partial<ViewState>;
@@ -263,6 +264,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     opacityParams: {},
     driving: {},
     fluff: {},
+    startDamping: {},
     params: {},
     view: {},
   };
@@ -309,7 +311,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     if (o.cfg === 'symmetry') v = mirrorAxes(v as string);
     const [head, key] = o.cfg!.split('.');
     if (key === undefined) (out.cfg as Record<string, unknown>)[head] = v;
-    else (out[head as 'eosParams' | 'coolParams' | 'opacityParams' | 'fluff' | 'driving'] as Record<string, unknown>)[key] = v;
+    else (out[head as 'eosParams' | 'coolParams' | 'opacityParams' | 'fluff' | 'startDamping' | 'driving'] as Record<string, unknown>)[key] = v;
   }
   put(out.cfg, 'wellBalanced', bool('wb'));
   const bc = q.get('bc');

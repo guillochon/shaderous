@@ -533,9 +533,9 @@ fn main(@builtin(local_invocation_index) lix: u32, @builtin(workgroup_id) wid: v
     en = vec2<f32>(0.5 * dot(mout, mout) / rho + eb + tame.eint, tame.eint);
   }
   var st = NewState(vec4<f32>(rho, mout), vec4<f32>(en.x, en.y, sc, flag));
-  // The damping zone over the block's step, on the gas alone: B^2 / 2 stays out of it.
-  if (STAGE == 2u && DAMPING && !g_deposit) {
-    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), box_frac(blk_pos(inv.slot, t)), dt);
+  // The damping zone and start-up damping over the block's step, on the gas alone: B^2 / 2 stays out of it.
+  if (STAGE == 2u && damping_on() && !g_deposit) {
+    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), box_frac(blk_pos(inv.slot, t)), dt, clock.t);
     st = NewState(d.u1, vec4<f32>(d.u2.x + eb, d.u2.yz, flag));
   }
   // Cooling over the block's step (it changes E by exactly the change of e_int).

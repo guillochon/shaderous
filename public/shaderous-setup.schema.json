@@ -826,6 +826,24 @@
      },
      "additionalProperties": false
     },
+    "startDamping": {
+     "type": "object",
+     "properties": {
+      "rate": {
+       "type": "number",
+       "title": "Start-up damping rate",
+       "description": "For a while after the start, every cell’s velocity is damped at this rate (per unit time), so that whatever settled stars are still out of balance with on the grid is taken away while it is small instead of ringing through the run. The rate falls smoothly to zero over the start-up damping time. 0 is off",
+       "minimum": 0
+      },
+      "time": {
+       "type": "number",
+       "title": "Start-up damping time",
+       "description": "Time from the start over which the start-up damping falls smoothly to zero (as a half cosine). 0 is off",
+       "minimum": 0
+      }
+     },
+     "additionalProperties": false
+    },
     "frame": {
      "enum": [
       "inertial",

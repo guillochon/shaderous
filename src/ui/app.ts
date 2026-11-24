@@ -1757,6 +1757,7 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
       // Radiation switched on or off by the link: the equation of state's radiation term follows.
       Object.assign(next, syncRadiationEos(next));
       next.fluff = { ...next.fluff, ...link.fluff };
+      next.startDamping = { ...next.startDamping, ...link.startDamping };
       next.driving = { ...next.driving, ...link.driving };
       if (ndim === 2) {
         // (An axisymmetric or spherical run has the self-gravity of its rings or shells.)

@@ -288,6 +288,8 @@ export interface Problem {
    * mass (hydro/fluff.wgsl alfven_floor). See hydro/fluff.wgsl.
    */
   fluff?: { rho: number; u: number; v: number; va?: number };
+  /** Start-up damping of the velocity (SimConfig.startDamping): its rate at the start and the time it falls to zero over. */
+  startDamping?: { rate: number; time: number };
   /** Extra controls shown when this preset is selected. Changing one restarts the run, unless it is `live`. */
   params?: ProblemParam[];
   /**

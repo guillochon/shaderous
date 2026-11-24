@@ -182,6 +182,12 @@ export interface SimConfig {
    * magnetic field, `va` caps the Alfven speed everywhere by adding mass (0 or absent: none).
    */
   fluff: { rho: number; u: number; v: number; va?: number };
+  /**
+   * Start-up damping (hydro/damping.wgsl): every cell's velocity in the frame is damped at
+   * `rate` (per unit time) at the start, falling smoothly to zero at time `time`. A zero rate
+   * or time switches it off.
+   */
+  startDamping: { rate: number; time: number };
   /** With self-gravity, refine where the Jeans length is under this many cells (0 = off). */
   jeansRefine: number;
   /**
@@ -506,6 +512,7 @@ export function configFor(problem: Problem, n: number, over: Partial<SimConfig> 
     refineRho: problem.refineRho ?? problem.fluff?.rho ?? (problem.star ? 10 * problem.star.rhoAmb : 0),
     refineDense: problem.refineDense ?? 0,
     fluff: { ...(problem.fluff ?? { rho: 0, u: 0, v: 0 }) },
+    startDamping: { ...(problem.startDamping ?? { rate: 0, time: 0 }) },
     jeansRefine: 16,
     cooling: problem.cooling ?? 'off',
     coolParams: { ...defaultCoolingParams(), ...problem.coolParams },
@@ -1394,7 +1401,7 @@ export function unfoldDiagnostics(d: Diagnostics, symmetry: readonly boolean[] |
 }
 
 /** Size of the Params uniform block (hydro/common.wgsl). */
-export const PARAM_BYTES = 544;
+export const PARAM_BYTES = 560;
 
 /** Pack the Params block. The layout must match the struct in hydro/common.wgsl. */
 export function packParams(
@@ -1469,6 +1476,9 @@ export function packParams(
   // Radiation (radiation/radiation.ts): P.rad, P.rad2, and the opacity law's constants P.kap.
   f.set(packRadiation(c), 124);
   f.set(packOpacity(c.opacity, c.opacityParams), 132);
+  // Start-up damping (hydro/damping.wgsl P.calm): off unless both its rate and its time are positive.
+  const sd = c.startDamping;
+  f.set(sd && sd.rate > 0 && sd.time > 0 ? [sd.rate, sd.time, 0, 0] : [0, 0, 0, 0], 136);
   return buf;
 }
 

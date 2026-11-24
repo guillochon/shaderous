@@ -150,6 +150,8 @@ export interface PhysicsSpec {
   acousticCfl?: number;
   floors?: { rho?: number; p?: number };
   fluff?: { rho?: number; u?: number; v?: number; va?: number };
+  /** start-up damping: every cell's velocity damped at `rate` per unit time, falling smoothly to zero at `time` */
+  startDamping?: { rate?: number; time?: number };
   frame?: (typeof FRAMES)[number];
   /**
    * A frame turning at the angular velocity `omega` about an axis through the origin: the

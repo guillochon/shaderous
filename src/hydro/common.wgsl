@@ -69,6 +69,8 @@ struct Params {
                          //   all zero without
   rad2: vec4<f32>,       // (sweeps per hydro step, the sweep's Courant number, tau_0, 0)
   kap: vec4<f32>,        // the opacity law's constants (opacity/opacity.ts packOpacity)
+  calm: vec4<f32>,       // start-up damping (hydro/damping.wgsl): (rate at the start, time over
+                         //   which it falls to zero, 0, 0); zero without
 }
 
 // The state as the frame slot (gravity/frame_off.wgsl) hands it back.

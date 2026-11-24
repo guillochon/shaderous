@@ -363,6 +363,16 @@
    "about": "CFL number"
   },
   {
+   "key": "sdr",
+   "group": "settings",
+   "about": "Start-up damping rate"
+  },
+  {
+   "key": "sdt",
+   "group": "settings",
+   "about": "Start-up damping time"
+  },
+  {
    "key": "psplit",
    "group": "settings",
    "about": "Pressure: explicit, implicit"

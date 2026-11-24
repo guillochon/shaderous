@@ -332,9 +332,9 @@ fn cell_step(t: vec3<i32>, tf: vec3<i32>, bc: vec3<f32>, axes: i32, dt: f32, dtd
     en = vec2<f32>(0.5 * dot(mout, mout) / rho + eb + tame.eint, tame.eint);
   }
   var st = NewState(vec4<f32>(rho, mout), vec4<f32>(en.x, en.y, sc, flag));
-  // The damping zone over the whole step, on the gas alone: B^2 / 2 stays out of it.
-  if (STAGE == 2u && DAMPING) {
-    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), (vec3<f32>(t) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt);
+  // The damping zone and start-up damping over the whole step, on the gas alone: B^2 / 2 stays out of it.
+  if (STAGE == 2u && damping_on()) {
+    let d = apply_damping(NewState(st.u1, vec4<f32>(st.u2.x - eb, st.u2.yz, 0.0)), (vec3<f32>(t) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt, clock.t);
     st = NewState(d.u1, vec4<f32>(d.u2.x + eb, d.u2.yz, flag));
   }
   // Cooling over the whole step (it changes E by exactly the change of e_int).

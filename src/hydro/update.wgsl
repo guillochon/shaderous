@@ -383,7 +383,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(workgroup_id) wi
   if (spherical()) { net.mom.y += src_t; }
   var nw = advance(u1, u2, net, dw, p0.b.x, kick, ekick);
   if (has_sources()) { nw = apply_sources(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt); }
-  nw = apply_damping(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt);
+  nw = apply_damping(nw, (vec3<f32>(c) + 0.5) / vec3<f32>(P.dims.xyz), clock.dt, clock.t);
   nw = apply_cooling(nw, clock.dt);
   // Implicit pressure in a rotating frame (the liquid; plans/wind-tunnel.md 2.1): the
   // centrifugal force's whole kick and the Coriolis force's second half-turn, here, before the
