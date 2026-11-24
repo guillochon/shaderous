@@ -212,6 +212,7 @@ by `npm run gen`.
 | `ncont` | The view | How many contours |
 | `fog` | The view | Volume view: draw the gas as fog (off leaves the isosurfaces alone) |
 | `isoa` | The view | Volume view: how opaque the isosurfaces are |
+| `exact` | The view | Volume view: isosurfaces of the field’s log interpolated between cell centers (off, the default: of the value smoothed by a cubic B-spline, which places a surface within the cells it crosses and takes away their terraces) |
 | `light` | The view | A white background instead of the dark one |
 | `box` | The view | Volume view: outline the box (on by default) |
 | `flines` | The view | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |
@@ -702,6 +703,7 @@ carries each under the key in the second column:
 | `nContours` | `ncont` | How many contours |
 | `fog` | `fog` | Volume view: draw the gas as fog (off leaves the isosurfaces alone) |
 | `surfaceOpacity` | `isoa` | Volume view: how opaque the isosurfaces are |
+| `exact` | `exact` | Volume view: isosurfaces of the field’s log interpolated between cell centers (off, the default: of the value smoothed by a cubic B-spline, which places a surface within the cells it crosses and takes away their terraces) |
 | `light` | `light` | A white background instead of the dark one |
 | `box` | `box` | Volume view: outline the box (on by default) |
 | `fieldLines` | `flines` | A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function |

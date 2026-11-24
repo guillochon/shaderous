@@ -59,6 +59,7 @@ export const VIEW_OPTIONS = [
   { key: 'nContours', link: 'ncont', type: 'int', min: 1, max: MAX_CONTOURS, doc: 'How many contours' },
   { key: 'fog', link: 'fog', type: 'boolean', doc: 'Volume view: draw the gas as fog (off leaves the isosurfaces alone)' },
   { key: 'surfaceOpacity', link: 'isoa', type: 'number', min: 0.01, max: 1, doc: 'Volume view: how opaque the isosurfaces are' },
+  { key: 'exact', link: 'exact', type: 'boolean', doc: 'Volume view: isosurfaces of the field’s log interpolated between cell centers (off, the default: of the value smoothed by a cubic B-spline, which places a surface within the cells it crosses and takes away their terraces)' },
   { key: 'light', link: 'light', type: 'boolean', doc: 'A white background instead of the dark one' },
   { key: 'box', link: 'box', type: 'boolean', doc: 'Volume view: outline the box (on by default)' },
   { key: 'fieldLines', link: 'flines', type: 'boolean', doc: 'A run with a magnetic field: draw field lines (on by default with a field). In 2D they are contours of the flux function' },

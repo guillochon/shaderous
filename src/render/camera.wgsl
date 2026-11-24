@@ -13,6 +13,7 @@ struct Cam {
   sc: vec4<f32>,  // the color scale: 1 if logarithmic, its ends (in log10 when logarithmic); w: volume view, 1 to draw the gas as fog
   bg: vec4<f32>,  // the background color; w: volume view, 1 to outline the box
   mir: vec4<f32>, // 1 along the axes drawn with their mirror images (renderer.ts mirrorShown)
+  o: vec4<f32>,   // x: volume view, 1 for isosurfaces of the trilinear log field (exact), 0 of the value smoothed by a cubic B-spline
 }
 
 // A point of the view's box [-0.5, 0.5]^3 as a point of the computed box: folded back across the

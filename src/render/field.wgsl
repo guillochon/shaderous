@@ -20,6 +20,12 @@ struct View {
   sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; slice or projection axis in w
 }
 
+// |x| over the top of the color range (a: for isosurfaces interpolated in the value rather than its log).
+fn lin_scaled(x: f32) -> f32 {
+  let top = select(log(max(abs(V.hi), 1.0e-30)) * 0.4342944819, V.hi, V.logscale != 0u);
+  return abs(x) * exp2(-top * 3.321928095);
+}
+
 // Volume view: 1 where the gas is dense enough to be shown, stored in g.
 fn shown(rho: f32) -> f32 {
   return select(0.0, 1.0, log(max(rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
@@ -175,7 +181,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     if (!q.solid) { range_add(q.x); }
     // Solid: drawn as a body, not as gas.
     // b: log10 |value|, for the isosurfaces.
-    textureStore(VOL, c, vec4<f32>(display_t(q.x, q.solid), select(0.0, shown(q.rho), V.cut.y != 0.0), log10_abs(q.x), 0.0));
+    textureStore(VOL, c, vec4<f32>(display_t(q.x, q.solid), select(0.0, shown(q.rho), V.cut.y != 0.0), log10_abs(q.x), lin_scaled(q.x)));
   }
   range_end(lix);
 }

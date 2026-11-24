@@ -30,6 +30,12 @@ struct View {
   sp: vec4<u32>,   // mass fraction: species, texels along z between groups of four, groups; slice or projection axis in w
 }
 @group(0) @binding(1) var<uniform> V: View;
+
+// |x| over the top of the color range (a: for isosurfaces interpolated in the value rather than its log; as render/field.wgsl).
+fn lin_scaled(x: f32) -> f32 {
+  let top = select(log(max(abs(V.hi), 1.0e-30)) * 0.4342944819, V.hi, V.logscale != 0u);
+  return abs(x) * exp2(-top * 3.321928095);
+}
 @group(0) @binding(2) var U1: texture_3d<f32>;
 @group(0) @binding(3) var U2: texture_3d<f32>;
 @group(0) @binding(4) var VOL: texture_storage_3d<rgba16float, write>;
@@ -261,7 +267,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation
     // b: log10 |value|, for the isosurfaces (smoothed across coarse cells when they are on).
     var lg = log10_abs(q.x);
     if (V.cut.w != 0.0 && !q.solid) { lg = smooth_log(f, lg); }
-    textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), lg, 0.0));
+    textureStore(VOL, vec3<i32>(gid), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), lg, lin_scaled(q.x)));
   }
   range_end(lix);
 }
@@ -293,7 +299,7 @@ fn atlas(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocatio
     let q = leaf_value(f);
     if (inside && !q.solid) { range_add_w(q.x, 1u << (3u * (P.amr.z - u32(level)))); }
     let shown = select(0.0, 1.0, log(max(q.rho, 1.0e-30)) * 0.4342944819 >= V.cut.x);
-    textureStore(DA, atl(blk_origin(slot), l), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), log10_abs(q.x), 0.0));
+    textureStore(DA, atl(blk_origin(slot), l), vec4<f32>(display_t(q.x, q.solid), select(0.0, shown, V.cut.y != 0.0), log10_abs(q.x), lin_scaled(q.x)));
   }
   range_end(lix);
 }

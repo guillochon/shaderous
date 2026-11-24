@@ -533,6 +533,11 @@
    "about": "Volume view: how opaque the isosurfaces are"
   },
   {
+   "key": "exact",
+   "group": "view",
+   "about": "Volume view: isosurfaces of the field’s log interpolated between cell centers (off, the default: of the value smoothed by a cubic B-spline, which places a surface within the cells it crosses and takes away their terraces)"
+  },
+  {
    "key": "light",
    "group": "view",
    "about": "A white background instead of the dark one"
@@ -752,6 +757,12 @@
    "min": 0.01,
    "max": 1,
    "about": "Volume view: how opaque the isosurfaces are"
+  },
+  {
+   "key": "exact",
+   "link": "exact",
+   "type": "boolean",
+   "about": "Volume view: isosurfaces of the field’s log interpolated between cell centers (off, the default: of the value smoothed by a cubic B-spline, which places a surface within the cells it crosses and takes away their terraces)"
   },
   {
    "key": "light",
@@ -1202,7 +1213,7 @@
     {
      "name": "changes",
      "type": "object",
-     "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange"
+     "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, exact, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange"
     }
    ],
    "changesRun": false
@@ -1821,7 +1832,7 @@
    "name": "screenshot",
    "method": "screenshot",
    "brief": "Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path`",
-   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange. Settings persist for later screenshots. `native` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.",
+   "description": "A picture of the run as a PNG image. `view` changes what is drawn first: mode (volume|slice|projection), field (index, see describe), species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, exact, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange. Settings persist for later screenshots. `native` saves a plane at the grid's own resolution (one pixel per finest cell), with any overlays in margins beside it.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1887,7 +1898,7 @@
     "properties": {
      "changes": {
       "type": "object",
-      "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange"
+      "description": "Any of mode, field, species, log, lo, hi, sliceAxis, slicePos, minRho, opacity, yaw, pitch, dist, tx, ty, tz, zoom, cx, cy, showBlocks, contours, nContours, fog, surfaceOpacity, exact, light, box, fieldLines, fieldLineCount, fieldLineFloor, mirrorImages, turnWithFrame, colormap, tf, autoRange"
      }
     },
     "required": [

@@ -66,6 +66,12 @@ export interface ViewState {
   /** Volume view: draw the gas as fog (off, the isosurfaces show alone), and the surfaces' opacity. */
   fog: boolean;
   surfaceOpacity: number;
+  /**
+   * Volume view: draw the isosurfaces of the field's log interpolated between cell centers
+   * (exact), or (off, the default) of the value itself smoothed by a cubic B-spline, which
+   * places a surface within the cells it crosses and takes away their terraces.
+   */
+  exact: boolean;
   /** A white background instead of the dark one, in every view (for figures on a page). */
   light: boolean;
   /** Volume view: outline the box. */
@@ -202,6 +208,7 @@ export const defaultView = (): ViewState => ({
   nContours: 8,
   fog: true,
   surfaceOpacity: 0.5,
+  exact: false,
   light: false,
   box: true,
   fieldLines: false,
@@ -397,7 +404,7 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 176, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
@@ -823,6 +830,7 @@ export class Renderer {
         // The axes shown with their mirror images (mirrorShown); a spherical run's r_min / r_max,
         // negative if r is logarithmic (the slice draws the (R, z) half-plane, src/spherical.ts).
         ...mir.map((m) => (m ? 1 : 0)), sphViewParam(sim.cfg),
+        v.exact ? 1 : 0, 0, 0, 0,
     ]);
     const parity = 4 * (sim.radCur ?? 0) + 2 * sim.cur + sim.speciesCur;
 

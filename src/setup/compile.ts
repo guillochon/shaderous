@@ -160,6 +160,9 @@ function disksOf(spec: SetupSpec, bodies: Bodies, G: number, n: number, ndim: 2 
 /** A frame that follows two point masses alone counts no gas: denser than any. */
 const NO_GAS = 3e38;
 
+/** Points a side a planet's surface cells are sampled at, for the share of them inside it. */
+const PLANET_EDGE_SUB = 4;
+
 /** How far from its center, in radii, a star's settling may reach where other gas is about (as a star the star tool places). */
 const OWN_REACH = 1.3;
 
@@ -228,11 +231,49 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3, levels = 0): 
   if (amb) {
     const under = at;
     const placed = stars.map((st) => ({ st, X: st.part.X ? fractions(st.part.X) : bgX }));
+    // A planet's surface is a jump of many decades in density. Cells it crosses (on the finest
+    // level) take the share of their volume inside it, from PLANET_EDGE_SUB^3 points, rather than
+    // being all planet or all vapor: its surface on the grid is then round to within a part of
+    // a cell, not a staircase of whole cells. Such a cell is the planet's surface material at
+    // the surface's temperature, at the density the shares give (the law the vapor over it
+    // follows too), so its pressure comes from (rho, T) and needs no solving for.
+    const dxf = box / (n * 2 ** levels);
+    const sub = ndim === 2 ? 1 : PLANET_EDGE_SUB;
+    const o = (q: number) => ((q + 0.5) / PLANET_EDGE_SUB - 0.5) * dxf;
+    const planetEdge = (st: (typeof stars)[number], x: number, y: number, z: number, r: number): { rho: number; xb: number } | null => {
+      if (Math.abs(r - st.R) > dxf) return null;
+      const [cx, cy, cz] = st.center;
+      let inside = 0;
+      let mass = 0;
+      let xb = -1;
+      for (let c = 0; c < sub; c++)
+        for (let b = 0; b < PLANET_EDGE_SUB; b++)
+          for (let a = 0; a < PLANET_EDGE_SUB; a++) {
+            const rr = Math.hypot(x + o(a) - cx, y + o(b) - cy, ndim === 2 ? 0 : z + o(c) - cz);
+            if (rr >= st.R) continue;
+            const g = st.planet!.at(rr);
+            inside++;
+            mass += g.rho;
+            xb = g.xb;
+          }
+      const count = sub * PLANET_EDGE_SUB * PLANET_EDGE_SUB;
+      if (inside === 0 || inside === count) return null;
+      return { rho: (mass + (count - inside) * amb.rho) / count, xb };
+    };
     at = (x, y, z) => {
       for (const { st, X } of placed) {
         if (st.planet) {
           // A planet: its own pressure at that radius, and the material of the layer there.
-          const g = st.planet.at(Math.hypot(x - st.center[0], y - st.center[1], z - st.center[2]));
+          const r = Math.hypot(x - st.center[0], y - st.center[1], z - st.center[2]);
+          const edge = planetEdge(st, x, y, z, r);
+          if (edge) {
+            const [vx, vy, vz] = st.vel;
+            const w: Prim = { rho: edge.rho, vx, vy, vz, p: st.pressure(edge.rho), s: st.scalar };
+            if (species && species.length >= 2) w.X = species.map((_, i) => (i === edge.xb ? 1 : 0));
+            else if (X) w.X = X;
+            return w;
+          }
+          const g = st.planet.at(r);
           if (!(g.rho > amb.cut)) continue;
           const [vx, vy, vz] = st.vel;
           const w: Prim = { rho: g.rho, vx, vy, vz, p: g.p, s: st.scalar };

@@ -12,6 +12,9 @@
 @group(0) @binding(9) var TUBE: texture_2d<f32>;
 @group(0) @binding(10) var TUBE_T: texture_2d<f32>;
 
+// Isosurfaces closer together than this many cells along a ray are drawn as one.
+const ISO_GAP = 0.5;
+
 fn hash(p: vec2<f32>) -> f32 {
   return fract(sin(dot(p, vec2<f32>(12.9898, 78.233))) * 43758.5453);
 }
@@ -23,20 +26,73 @@ fn edge(p: vec3<f32>, w: f32) -> f32 {
 }
 
 // Volume view's isosurfaces: in units of the spacing between levels, level k lies at f = k.
+// From the log of the value (the volume's b), trilinear between cell centers: the exact surfaces,
+// and how the march finds a level crossed.
 fn iso_f(p: vec3<f32>) -> f32 {
   return (vol_look(p).s.b - C.k.y) * (C.k.x + 1.0) / max(C.k.z - C.k.y, 1.0e-6);
 }
 
+// Level units from the value itself, as a share of the color range's top (the volume's a).
+fn iso_of_lin(x: f32) -> f32 {
+  let top = select(log(max(abs(C.sc.z), 1.0e-30)) * 0.4342944819, C.sc.z, C.sc.x != 0.0);
+  return (log(max(x, 1.0e-30)) * 0.4342944819 + top - C.k.y) * (C.k.x + 1.0) / max(C.k.z - C.k.y, 1.0e-6);
+}
+
+// The same from the value (not its log) smoothed by a cubic B-spline across the cells around p,
+// from eight trilinear lookups (Sigg & Hadwiger 2005, GPU Gems 2 ch. 20), each placed between two
+// cells so that its blend of them carries their B-spline weights. The value, not its log: a cell
+// a surface crosses holds the share of it inside (a planet's edge), which places the surface
+// within the cell only in the value. The B-spline then takes away the kinks of the trilinear
+// field's gradient at each cell's faces, which show in the lighting as ripples a cell apart. The
+// grid's phase is taken from the cell at p (lookups across a change of level blend whatever
+// cells lie there).
+fn iso_smooth(p: vec3<f32>) -> f32 {
+  let c = vol_look(p).cell;
+  let t = (p + 0.5) / c - 0.5;   // in cells, cell centers at whole numbers
+  let i = floor(t);
+  let f = t - i;
+  let f2 = f * f;
+  let f3 = f2 * f;
+  let w0 = (1.0 - 3.0 * f + 3.0 * f2 - f3) / 6.0;
+  let w1 = (4.0 - 6.0 * f2 + 3.0 * f3) / 6.0;
+  let w2 = (1.0 + 3.0 * f + 3.0 * f2 - 3.0 * f3) / 6.0;
+  let w3 = f3 / 6.0;
+  let g0 = w0 + w1;
+  let g1 = w2 + w3;
+  // The two lookups along each axis, back in the box.
+  let q0 = (i - 1.0 + w1 / g0 + 0.5) * c - 0.5;
+  let q1 = (i + 1.0 + w3 / g1 + 0.5) * c - 0.5;
+  var sum = 0.0;
+  for (var j = 0u; j < 8u; j++) {
+    let hi = vec3<bool>((j & 1u) != 0u, (j & 2u) != 0u, (j & 4u) != 0u);
+    let w = select(g0, g1, hi);
+    sum += w.x * w.y * w.z * vol_look(select(q0, q1, hi)).s.a;
+  }
+  return iso_of_lin(sum);
+}
+
 // The isosurface through p (in the box, [-0.5, 0.5]^3) seen along rd, lit: a key light above
 // and to the right of the camera, a fill from the camera, and a highlight.
-fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>) -> vec3<f32> {
-  // Differences across the cell the surface passes through.
+fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>, exact: bool) -> vec3<f32> {
   let e = vol_look(p).cell;
-  let gr = vec3<f32>(
-    iso_f(p + vec3<f32>(e, 0.0, 0.0)) - iso_f(p - vec3<f32>(e, 0.0, 0.0)),
-    iso_f(p + vec3<f32>(0.0, e, 0.0)) - iso_f(p - vec3<f32>(0.0, e, 0.0)),
-    iso_f(p + vec3<f32>(0.0, 0.0, e)) - iso_f(p - vec3<f32>(0.0, 0.0, e)),
-  );
+  var gr: vec3<f32>;
+  if (exact) {
+    // Differences across the cell the surface passes through.
+    gr = vec3<f32>(
+      iso_f(p + vec3<f32>(e, 0.0, 0.0)) - iso_f(p - vec3<f32>(e, 0.0, 0.0)),
+      iso_f(p + vec3<f32>(0.0, e, 0.0)) - iso_f(p - vec3<f32>(0.0, e, 0.0)),
+      iso_f(p + vec3<f32>(0.0, 0.0, e)) - iso_f(p - vec3<f32>(0.0, 0.0, e)),
+    );
+  } else {
+    // The smoothed field's gradient from the corners of a tetrahedron, half a cell out: four
+    // lookups of it rather than six.
+    let h = 0.5 * e;
+    let a = vec3<f32>(1.0, -1.0, -1.0);
+    let b = vec3<f32>(-1.0, -1.0, 1.0);
+    let cc = vec3<f32>(-1.0, 1.0, -1.0);
+    let d = vec3<f32>(1.0, 1.0, 1.0);
+    gr = a * iso_smooth(p + h * a) + b * iso_smooth(p + h * b) + cc * iso_smooth(p + h * cc) + d * iso_smooth(p + h * d);
+  }
   var n = normalize(gr + vec3<f32>(1.0e-12));
   if (dot(n, rd) > 0.0) { n = -n; }
   let key = normalize(-rd + 0.6 * C.up.xyz + 0.4 * C.right.xyz);
@@ -83,6 +139,7 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   var fprev = 0.0;
   var pprev = vec3<f32>(0.0);
   var have = false;   // fprev, pprev hold the last sample
+  var tlast = -1.0e30;   // how far along the ray the last isosurface drawn lies
   // Each sample stands for the stretch of ray up to the next one, whose length depends on the
   // cell it is in (vol_step); the first is placed a random part of a step in, against banding.
   var t = t0 + jitter * vol_step(vol_look(ro + rd * t0));
@@ -99,23 +156,52 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
       break;
     }
     if (iso) {
-      // A level crossed since the last sample (the first, if several), in shown gas: found to a
-      // thirty-second of the step by bisection, then lit. It lies in front of this sample's fog.
+      // A level crossed since the last sample (the first, if several), in shown gas: found by
+      // bisection, then lit. It lies in front of this sample's fog.
       let f = (s.b - C.k.y) * (C.k.x + 1.0) / max(C.k.z - C.k.y, 1.0e-6);
       let up = f > fprev;
-      let k = select(floor(fprev), floor(fprev) + 1.0, up);
-      if (have && s.g > 0.5 && floor(f) != floor(fprev) && k >= 1.0 && k <= C.k.x) {
+      // The first level shown past the last sample's value, in the direction f went: a step
+      // across a sharp edge may start far outside the range the levels divide.
+      let k = select(min(floor(fprev), C.k.x), max(floor(fprev) + 1.0, 1.0), up);
+      let crossed = select((f < k), (f >= k), up);
+      if (have && s.g > 0.5 && crossed && k >= 1.0 && k <= C.k.x) {
+        // Unless exact, the smoothed surface is sought instead, in the step either side as well
+        // (smoothing moves it by up to about half a cell); where it does not cross there, the
+        // trilinear one is drawn.
+        var exact = C.o.x != 0.0;
         var a = pprev;
         var b = p;
-        for (var j = 0; j < 5; j++) {
+        var dir = up;
+        if (!exact) {
+          let d = p - pprev;
+          let fa = iso_smooth(pprev - d);
+          let fb = iso_smooth(p + d);
+          if ((fa < k) != (fb < k)) {
+            a = pprev - d;
+            b = p + d;
+            dir = fb > fa;
+          } else {
+            exact = true;
+          }
+        }
+        for (var j = 0; j < select(7, 5, exact); j++) {
           let m = 0.5 * (a + b);
-          if ((iso_f(m) < k) == up) { a = m; } else { b = m; }
+          var fm: f32;
+          if (exact) { fm = iso_f(m); } else { fm = iso_smooth(m); }
+          if ((fm < k) == dir) { a = m; } else { b = m; }
         }
         let h = 0.5 * (a + b);
-        let neg = C.sc.x == 0.0 && v < zero;
-        let sa = C.fwd.w;
-        col += (1.0 - alpha) * sa * iso_shade(h, rd, level_color(k, neg));
-        alpha += (1.0 - alpha) * sa;
+        // Levels packed closer than ISO_GAP cells along the ray (a jump that spans several) are
+        // drawn as one, the first: else which of them a pixel shows turns on where its samples
+        // fall, and the surface speckles.
+        let th = dot(h - ro, rd);
+        if (th - tlast >= ISO_GAP * vol_look(h).cell) {
+          tlast = th;
+          let neg = C.sc.x == 0.0 && v < zero;
+          let sa = C.fwd.w;
+          col += (1.0 - alpha) * sa * iso_shade(h, rd, level_color(k, neg), C.o.x != 0.0);
+          alpha += (1.0 - alpha) * sa;
+        }
       }
       fprev = f;
       pprev = p;
