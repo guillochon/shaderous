@@ -125,27 +125,58 @@ fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>, exact: bool) -> vec3<
   return c * (0.18 + 0.62 * diff + 0.25 * fill) + 0.35 * spec;
 }
 
-// The ball of the tool in hand where it meets an isosurface (at h, d along the ray rd, with
-// normal n): how much of a line about three pixels wide covers it, drawn opaque in RING over the
-// surface, whatever the surfaces' own opacity. The width is held on the screen, not in the box:
-// where the surface is seen slanting, a step of a pixel moves along it farther, and across the
-// ball's surface faster, than a pixel's width (worked out by hand: derivatives are not to be had
-// in the march's loop).
+// The ball of the tool in hand (C.tb): at q on its surface, d along the ray rd, how much of a
+// contour line covers it, drawn opaque in RING: the levels as they cross the ball's surface,
+// about three pixels wide on the screen. On the ball, not on the isosurfaces, so the lines stay
+// clean where those are ragged or seen edge-on. The width comes from how fast the field changes
+// across the ball's surface per pixel (worked out by hand: derivatives are not to be had in the
+// march's loop).
 const RING = vec3<f32>(1.0, 0.92, 0.55);
-fn ball_ring(h: vec3<f32>, d: f32, n: vec3<f32>, rd: vec3<f32>) -> f32 {
-  if (C.tb.w <= 0.0) { return 0.0; }
-  let r = h - C.tb.xyz;
-  let off = abs(length(r) - C.tb.w);
-  let u = normalize(r + vec3<f32>(1.0e-12));
-  let px = C.o.y * d;   // a pixel there, across the ray
-  // How far the hit moves along the surface for a pixel's step right and up, and the change in
-  // distance from the ball's center that makes.
-  let nr = dot(n, rd);
+fn ball_lines(q: vec3<f32>, d: f32, rd: vec3<f32>) -> f32 {
+  let exact = C.o.x != 0.0;
+  var f: f32;
+  if (exact) { f = iso_f(q); } else { f = iso_smooth(q); }
+  let k = round(f);
+  if (k < 1.0 || k > C.k.x) { return 0.0; }
+  // The field's gradient, from the corners of a tetrahedron half a cell out.
+  let c = vol_look(q).cell;
+  let e = 0.5 * c;
+  let ka = vec3<f32>(1.0, -1.0, -1.0);
+  let kb = vec3<f32>(-1.0, -1.0, 1.0);
+  let kc = vec3<f32>(-1.0, 1.0, -1.0);
+  let kd = vec3<f32>(1.0, 1.0, 1.0);
+  var g: vec3<f32>;
+  if (exact) {
+    g = ka * iso_f(q + e * ka) + kb * iso_f(q + e * kb) + kc * iso_f(q + e * kc) + kd * iso_f(q + e * kd);
+  } else {
+    g = ka * iso_smooth(q + e * ka) + kb * iso_smooth(q + e * kb) + kc * iso_smooth(q + e * kc) + kd * iso_smooth(q + e * kd);
+  }
+  g /= 4.0 * e;
+  // A jump the cells do not resolve (as for the surfaces): one line, at its half-way value,
+  // rather than its levels bunched together, the lower of them following the cells' outline.
+  var aim = k;
+  if (!exact) {
+    // (Across it as the value has it: the log's gradient, out in the jump's faint tail, follows
+    // the cells' outline.)
+    let gl = ka * lin_smooth(q + e * ka) + kb * lin_smooth(q + e * kb) + kc * lin_smooth(q + e * kc) + kd * lin_smooth(q + e * kd);
+    let gn = normalize(gl + vec3<f32>(1.0e-30));
+    let la = lin_smooth(q - 3.0 * c * gn);
+    let lb = lin_smooth(q + 3.0 * c * gn);
+    let decades = abs(log(max(lb, 1.0e-30)) - log(max(la, 1.0e-30))) * 0.4342944819;
+    if (abs(iso_of_lin(lb) - iso_of_lin(la)) >= 2.0 || decades >= JUMP_DECADES) {
+      aim = iso_of_lin(0.5 * (la + lb));
+    }
+  }
+  // A pixel's step right and up moves the point along the ball's surface (normal u); the change
+  // in the field that makes.
+  let u = normalize(q - C.tb.xyz);
+  let nr = dot(u, rd);
   let den = select(-1.0, 1.0, nr >= 0.0) * max(abs(nr), 0.05);
-  let gr = dot(u, C.right.xyz - rd * dot(n, C.right.xyz) / den);
-  let gu = dot(u, C.up.xyz - rd * dot(n, C.up.xyz) / den);
+  let px = C.o.y * d;
+  let gr = dot(g, C.right.xyz - rd * dot(u, C.right.xyz) / den);
+  let gu = dot(g, C.up.xyz - rd * dot(u, C.up.xyz) / den);
   let per = max(px * sqrt(gr * gr + gu * gu), 1.0e-9);
-  return 1.0 - smoothstep(1.0, 2.0, off / per);
+  return 1.0 - smoothstep(1.0, 2.0, abs(f - aim) / per);
 }
 
 @fragment
@@ -189,6 +220,18 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
   var gaplast = 0.0;   // and how close behind it, across it, another fades out
   // Each sample stands for the stretch of ray up to the next one, whose length depends on the
   // cell it is in (vol_step); the first is placed a random part of a step in, against banding.
+  // Where the ray enters and leaves the tool's ball, if it meets it (the levels are drawn there,
+  // over everything else).
+  var bt = vec2<f32>(-1.0);
+  if (iso && C.tb.w > 0.0) {
+    let oc = ro - C.tb.xyz;
+    let bb = dot(oc, rd);
+    let disc = bb * bb - (dot(oc, oc) - C.tb.w * C.tb.w);
+    if (disc > 0.0) {
+      let sq = sqrt(disc);
+      bt = vec2<f32>(-bb - sq, -bb + sq);
+    }
+  }
   var t = t0 + jitter * vol_step(vol_look(ro + rd * t0));
   for (var i = 0; i < VOL_MAX_SAMPLES && t < tend; i++) {
     let p = ro + rd * t;
@@ -293,10 +336,8 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
           }
           let neg = C.sc.x == 0.0 && v < zero;
           let sa = C.fwd.w * keep;
-          let rw = ball_ring(h, dot(h - ro, rd), nh, rd);
-          let shade = iso_shade(h, rd, level_color(k, neg), C.o.x != 0.0);
-          col += (1.0 - alpha) * ((1.0 - rw) * sa * shade + rw * RING);
-          alpha += (1.0 - alpha) * max(sa, rw);
+          col += (1.0 - alpha) * sa * iso_shade(h, rd, level_color(k, neg), C.o.x != 0.0);
+          alpha += (1.0 - alpha) * sa;
         }
       }
       fprev = f;
@@ -319,6 +360,16 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
     alpha += (1.0 - alpha) * tc.a;
   }
   col += (1.0 - alpha) * C.bg.rgb;
+
+  // The levels on the tool's ball, in the box: over the gas and its surfaces whatever lies in
+  // front, so they read however deep the level they cut; the far side dimmer, to tell them apart.
+  for (var j = 0; j < 2; j++) {
+    let tb = select(bt.x, bt.y, j == 1);
+    if (tb > t0 && tb < t1) {
+      let w = ball_lines(ro + rd * tb, tb, rd);
+      col = mix(col, RING * select(1.0, 0.55, j == 1), w);
+    }
+  }
 
   // Box outline, unless C.bg.w is 0: far edges are dimmed by the gas in front of them. On a light
   // background the outline is darker than the background, on a dark one lighter.

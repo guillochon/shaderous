@@ -3882,7 +3882,7 @@ let guideAt: Vec3 | null = null;
 
 /**
  * Volume view: guides along x, y and z through the center of the brush on show, so it can be
- * placed in depth, and its ball's outline on the isosurfaces. Called once per frame.
+ * placed in depth, and the contour levels on its ball. Called once per frame.
  */
 function updateGuides() {
   // The brush stays under the pointer while the view moves beneath it (dragged with another
@@ -3890,7 +3890,7 @@ function updateGuides() {
   if (hover && tool && tool !== 'query' && tool !== 'obstacle' && !stroke) drawBrush(hover.x, hover.y);
   const on = !!tool && tool !== 'obstacle' && tool !== 'query' && !!cfg && cfg.ndim === 3 && !flatView() && $('brush').style.display !== 'none';
   renderer.guides = on ? guideAt : null;
-  // Its ball, where it meets the isosurfaces (render/raymarch.wgsl).
+  // Its ball, with the contour levels drawn on its surface (render/raymarch.wgsl).
   const kind = stroke?.kind ?? tool;
   renderer.ball = on && guideAt && kind ? { pos: [guideAt[0], guideAt[1], guideAt[2]], radius: toolParams[kind].size } : null;
 }

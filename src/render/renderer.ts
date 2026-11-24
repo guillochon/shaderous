@@ -349,7 +349,7 @@ export class Renderer {
   hoverLevel = 0;
   /** Where the guides through a tool cross (in fractions of the box), or null for none. */
   guides: [number, number, number] | null = null;
-  /** Volume view: the ball of the tool in hand (center in fractions of the box, radius as a share of it), drawn where it meets the isosurfaces; null for none. */
+  /** Volume view: the ball of the tool in hand (center in fractions of the box, radius as a share of it), with the contour levels drawn on its surface; null for none. */
   ball: { pos: [number, number, number]; radius: number } | null = null;
   /**
    * Volume view: the path of a point mass being placed (gravity/preview.ts), drawn as a tube
@@ -833,7 +833,7 @@ export class Renderer {
         // negative if r is logarithmic (the slice draws the (R, z) half-plane, src/spherical.ts).
         ...mir.map((m) => (m ? 1 : 0)), sphViewParam(sim.cfg),
         v.exact ? 1 : 0, (2 * tan) / Math.max(1, this.canvas.height), 0, 0,
-        // The tool's ball, where it meets the isosurfaces.
+        // The tool's ball, the contour levels drawn on its surface.
         ...(this.ball && v.contours ? [...this.ball.pos.map((c) => c - 0.5), this.ball.radius] : [0, 0, 0, 0]),
     ]);
     const parity = 4 * (sim.radCur ?? 0) + 2 * sim.cur + sim.speciesCur;
