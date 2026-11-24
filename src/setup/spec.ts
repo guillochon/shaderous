@@ -184,7 +184,35 @@ export interface PhysicsSpec {
   toolScale?: { rho: number; v: number };
 }
 
+/** Where a refinement zone is: a binary's L1, or a star (by id), with a radius. */
+export interface ZoneAnchor {
+  /** "L1" (a circular binary with a star's inner Lagrange point), or a star's id */
+  at: string;
+  /** radius, in code units, or in the star's radii with `radii` */
+  r: number;
+  radii?: boolean;
+}
+
+/**
+ * A refinement zone (amr/zones.ts): kept at the finest level, with a tier (1 kept longest) that
+ * says who gives up blocks first when the block budget runs out. A point is in the first zone
+ * in the list that holds it.
+ */
+export type ZoneSpec = (
+  | ({ shape: 'sphere'; rIn?: number } & ZoneAnchor)
+  /** the cone tangent to two spheres, bridging them */
+  | { shape: 'cone'; from: ZoneAnchor; to: ZoneAnchor }
+) & {
+  tier: number;
+  /** keep only the side below (or above) a plane across an axis, in the box's coordinates */
+  below?: { x?: number; y?: number; z?: number };
+  above?: { x?: number; y?: number; z?: number };
+  /** a name for the diagnostics */
+  name?: string;
+};
+
 export interface MeshSpec {
+  zones?: ZoneSpec[];
   refineHi?: number;
   refineLo?: number;
   refineMasses?: boolean;

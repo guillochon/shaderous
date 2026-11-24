@@ -1095,6 +1095,104 @@
   "mesh": {
    "type": "object",
    "properties": {
+    "zones": {
+     "type": "array",
+     "items": {
+      "type": "object",
+      "properties": {
+       "shape": {
+        "enum": [
+         "sphere",
+         "cone"
+        ]
+       },
+       "at": {
+        "type": "string",
+        "maxLength": 4000
+       },
+       "r": {
+        "type": "number"
+       },
+       "rIn": {
+        "type": "number"
+       },
+       "radii": {
+        "type": "boolean"
+       },
+       "from": {
+        "type": "object",
+        "properties": {
+         "at": {
+          "type": "string",
+          "maxLength": 4000
+         },
+         "r": {
+          "type": "number"
+         },
+         "radii": {
+          "type": "boolean"
+         }
+        },
+        "additionalProperties": false
+       },
+       "to": {
+        "type": "object",
+        "properties": {
+         "at": {
+          "type": "string",
+          "maxLength": 4000
+         },
+         "r": {
+          "type": "number"
+         },
+         "radii": {
+          "type": "boolean"
+         }
+        },
+        "additionalProperties": false
+       },
+       "tier": {
+        "type": "number"
+       },
+       "below": {
+        "type": "object",
+        "properties": {
+         "x": {
+          "type": "number"
+         },
+         "y": {
+          "type": "number"
+         },
+         "z": {
+          "type": "number"
+         }
+        },
+        "additionalProperties": false
+       },
+       "above": {
+        "type": "object",
+        "properties": {
+         "x": {
+          "type": "number"
+         },
+         "y": {
+          "type": "number"
+         },
+         "z": {
+          "type": "number"
+         }
+        },
+        "additionalProperties": false
+       },
+       "name": {
+        "type": "string",
+        "maxLength": 4000
+       }
+      },
+      "additionalProperties": false
+     },
+     "maxItems": 16
+    },
     "refineHi": {
      "type": "number",
      "title": "Refine above",

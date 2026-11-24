@@ -1,5 +1,6 @@
 import type { Eos, EosKind, EosParams } from '../eos/eos';
 import type { Settling, StarSpec } from './settle';
+import type { Zone } from '../amr/zones';
 import type { CoolingKind, CoolingParams } from '../cooling/cooling';
 import type { AnyBurnSpec } from '../burn/burn';
 import type { UnitSystem } from '../units/units';
@@ -371,6 +372,8 @@ export interface Problem {
   refineRho?: number;
   /** Adaptive mesh: density above which gas is always refined to the finest level, as the stars of a collision are (default 0, none). */
   refineDense?: number;
+  /** Adaptive mesh: refinement zones and their tiers (mesh.zones, amr/zones.ts), worked out from the setup. */
+  refineZones?: (params: Record<string, number>) => Zone[];
   /** Optically thin cooling switched on by default, and its parameters. */
   cooling?: CoolingKind;
   coolParams?: Partial<CoolingParams>;

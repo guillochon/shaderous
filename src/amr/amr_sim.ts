@@ -41,6 +41,7 @@ import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
 import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
 import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { blockTier, type Zone } from './zones';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
@@ -407,6 +408,47 @@ export class AmrSim implements Simulation {
   lastIndicators: Float32Array | null = null;
   /** Each leaf's indicator at the last re-mesh, by block (slots are reused as the mesh changes). */
   private indicatorOf = new WeakMap<Block, number>();
+  /** The refinement zones (mesh.zones, amr/zones.ts), and each block's tier among them, worked out once per block. */
+  private zones: Zone[] | null = null;
+  private tierOf = new WeakMap<Block, number>();
+
+  /** How many tiers of the refinement zones the starting mesh held (the lowest give way first). */
+  private startTiers = 0;
+
+  /** The refinement zones of this configuration (an adaptive mesh's only). */
+  private zoneList(): Zone[] {
+    return (this.zones ??= this.levels > 0 ? (this.cfg.problem.refineZones?.(this.cfg.params) ?? []) : []);
+  }
+
+  /** A block's tier among the refinement zones (amr/zones.ts): Infinity outside them all. */
+  private tier = (b: Block): number => {
+    const zones = this.zoneList();
+    if (!zones.length) return Infinity;
+    let t = this.tierOf.get(b);
+    if (t === undefined) {
+      const dx = this.dx0 / (1 << b.level);
+      const lo = domainLo(this.cfg);
+      const side = BS * dx;
+      // Sampled at half a finest block, so that no zone a finest block could hold is missed.
+      t = blockTier(zones, [0, 1, 2].map((a) => lo[a] + (b.c[a] ?? 0) * side), side, this.cfg.ndim, (0.5 * BS * this.dx0) / (1 << this.levels));
+      this.tierOf.set(b, t);
+    }
+    return t;
+  };
+
+  /** Per tier of the refinement zones: its leaves, and the share of them at the finest level. */
+  zoneCoverage(): { tier: number; leaves: number; finest: number }[] {
+    const by = new Map<number, { tier: number; leaves: number; finest: number }>();
+    for (const b of this.tree.leaves()) {
+      const t = this.tier(b);
+      if (t === Infinity) continue;
+      const e = by.get(t) ?? { tier: t, leaves: 0, finest: 0 };
+      e.leaves++;
+      if (b.level === this.levels) e.finest++;
+      by.set(t, e);
+    }
+    return [...by.values()].sort((a, b) => a.tier - b.tier);
+  }
 
   get paramBuffer(): GPUBuffer {
     return this.params;
@@ -1666,6 +1708,9 @@ export class AmrSim implements Simulation {
 
   private async resetState() {
     const c = this.cfg;
+    // The zones of this configuration, worked out afresh (amr/zones.ts).
+    this.zones = null;
+    this.tierOf = new WeakMap();
     const d = this.device;
     const eos = makeEos(c.eos, c.eosParams);
     // (A spherical run's setup takes (r, theta): src/spherical.ts sphSetup.)
@@ -1682,12 +1727,24 @@ export class AmrSim implements Simulation {
     const strict = this.selfGravity;
     const levelAt = c.restart?.levelAt;
     const sampled = new Map<Block, { sub: number; ind: number }>();
-    for (let limit = this.levels; ; limit--) {
+    // Refinement zones (amr/zones.ts) that do not all fit give way by tier before a level does:
+    // the lowest tier's zones are left out first, then the next, and a level only once none is
+    // left. (The run itself keeps them all: there the tiers decide who gives up blocks.)
+    const zoneTiers = [...new Set(this.zoneList().map((z) => z.tier))].sort((a, b) => a - b);
+    this.startTiers = zoneTiers.length;
+    build: for (let limit = this.levels; ; limit--)
+    for (let keep = zoneTiers.length; keep >= 0; keep--) {
+      const cutoff = keep > 0 ? zoneTiers[keep - 1] : -Infinity;
+      const tier = (b: Block) => {
+        const t = this.tier(b);
+        return t <= cutoff ? t : Infinity;
+      };
       // A rectangular grid (src/domain.ts gridDims): half the root blocks along a halved axis.
       const gd = gridDims(c);
       const lim = [0, 1, 2].map((a) => (gd[a] * 2 === c.n ? this.n0 / BS / 2 : this.n0 / BS));
       this.tree = new BlockTree(c.ndim, this.n0 / BS, this.levels, this.cap, c.bcLo, c.bcHi, c.problem.mhd !== undefined, lim);
       this.tree.levelLimit = limit;
+      this.startTiers = keep;
       for (let pass = 0; pass < limit; pass++) {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
         // is finer than it at the center of one of its children.
@@ -1708,10 +1765,13 @@ export class AmrSim implements Simulation {
         let values: Float64Array | null = null;
         if (run && todo.length > 1) values = await run.indicators(todo.map(({ b, sub }) => ({ level: b.level, c: b.c, sub }))).catch(() => ((run = null), null));
         todo.forEach(({ b, sub }, i) => sampled.set(b, { sub, ind: values ? values[i] : indicator(c, this.dx0, b, surface, sub) }));
-        if (!this.tree.adapt((b) => this.withBodies(b, sampled.get(b)!.ind), c.refineHi, c.refineLo)) break;
+        if (!this.tree.adapt((b) => this.withBodies(b, sampled.get(b)!.ind), c.refineHi, c.refineLo, tier)) break;
       }
-      if (levelAt || !strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break;
+      if (levelAt || !strict || limit === 0 || this.tree.freeSlots >= this.tree.nchild) break build;
+      // Too many blocks: without the lowest tier's zones next, and a level fewer once none is left.
+      if (keep === 0) continue build;
     }
+    if (this.startTiers < zoneTiers.length) console.warn(`refinement zones: the starting mesh holds only tiers ${zoneTiers.slice(0, this.startTiers).join(', ') || 'none'} of ${zoneTiers.join(', ')} (the block budget)`);
 
     const three = c.ndim === 3;
     const depth = three ? BS : 1;
@@ -2981,7 +3041,7 @@ export class AmrSim implements Simulation {
         for (const b of leaves) this.indicatorOf.set(b, ind[b.slot]);
         if (!this.autoRegrid) return; // a check already in flight when a replay took over
         // Exactly 0: no gas in the block, only the inside of an obstacle (see amr/flag.wgsl).
-        const ops = tree.adapt((b) => this.withBodies(b, ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo);
+        const ops = tree.adapt((b) => this.withBodies(b, ind[b.slot] === 0 ? -1 : ind[b.slot]), this.cfg.refineHi, this.cfg.refineLo, this.tier);
         if (ops) this.pending = { ops, steps: tree.lastSteps };
       })
       .finally(() => {
@@ -3008,7 +3068,7 @@ export class AmrSim implements Simulation {
     if (leaves.length !== indicators.length) throw new Error(`the mesh has ${leaves.length} leaves where the log's re-mesh had ${indicators.length}: the replay has gone another way`);
     const at = new Map(leaves.map((b, i) => [b, indicators[i]]));
     for (const b of leaves) this.indicatorOf.set(b, at.get(b)!);
-    this.applyNow(this.tree.adapt((b) => this.withBodies(b, at.get(b) === 0 ? -1 : at.get(b)!), this.cfg.refineHi, this.cfg.refineLo));
+    this.applyNow(this.tree.adapt((b) => this.withBodies(b, at.get(b) === 0 ? -1 : at.get(b)!), this.cfg.refineHi, this.cfg.refineLo, this.tier));
   }
 
   /** A block's refinement indicator with what the obstacles near it ask for (amr/bodies.ts). */
@@ -3350,7 +3410,10 @@ export class AmrSim implements Simulation {
     const bins = this.builtBins === 0 || share === null ? ''
       : this.binPause > 0 ? `, local timesteps paused (would save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates)`
       : `, local timesteps save ${Math.max(0, 100 * (1 - share)).toFixed(0)}% of block updates`;
-    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${bins}`;
+    // The refinement zones: each tier's share of blocks at the finest level.
+    const cov = this.zoneCoverage();
+    const zones = cov.length ? `, zones at the finest level: ${cov.map((z) => `tier ${z.tier} ${((100 * z.finest) / z.leaves).toFixed(0)}%`).join(', ')}` : '';
+    return `${s.leaves} blocks, ${((100 * s.cells) / this.n ** this.cfg.ndim).toFixed(0)}% of uniform${full}${zones}${bins}`;
   }
 
   /**

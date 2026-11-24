@@ -92,6 +92,13 @@ export const ADAPT_MERGE = 2;
  */
 export const EVICT_MARGIN = 0.8;
 
+/**
+ * The indicator a block in a refinement zone (amr/zones.ts) asks with, whatever its gas: as
+ * strongly as the densest gas a run always refines (amr/flag.wgsl), so that its tier, not its
+ * indicator, decides against those.
+ */
+export const ZONE_INDICATOR = 1e30;
+
 export class BlockTree {
   readonly nchild: number;
   /** Deepest level refinement may reach; at most maxLevel. Lowered when the slot budget cannot hold more. */
@@ -416,14 +423,15 @@ export class BlockTree {
    * by the most strongly flagged child (a negative indicator, which needs no buffer, counts as
    * least of all).
    */
-  private evictable(leaves: Block[], ind: Map<Block, number>): { p: Block; score: number }[] {
+  private evictable(leaves: Block[], ind: Map<Block, number>, tier: (b: Block) => number): { p: Block; score: number; tier: number }[] {
     const parents = new Set(leaves.map((b) => b.parent).filter((p): p is Block => !!p));
-    const out: { p: Block; score: number }[] = [];
+    const out: { p: Block; score: number; tier: number }[] = [];
     for (const p of parents) {
       if (!p.children || p.children.some((ch) => ch.children)) continue;
-      out.push({ p, score: Math.max(...p.children.map((ch) => ind.get(ch) ?? 0)) });
+      out.push({ p, score: Math.max(...p.children.map((ch) => ind.get(ch) ?? 0)), tier: tier(p) });
     }
-    return out.sort((a, b) => a.score - b.score);
+    // The lowest tier first (no zone at all before any zone), then the least flagged.
+    return out.sort((a, b) => (a.tier === b.tier ? a.score - b.score : a.tier < b.tier ? 1 : -1));
   }
 
   /** Whether two blocks' boxes, the second grown by its own size on every side, overlap. */
@@ -443,15 +451,16 @@ export class BlockTree {
    * than EVICT_MARGIN times `level` (b's indicator) and away from b and the blocks its refinement splits (merging
    * those would only be undone by balance). Null if they cannot free enough; nothing is merged here.
    */
-  private makeRoom(b: Block, level: number, evictable: { p: Block; score: number }[], touched: Set<Block>): Block[] | null {
+  private makeRoom(b: Block, level: number, evictable: { p: Block; score: number; tier: number }[], touched: Set<Block>, tier: number): Block[] | null {
     if (b.children || b.level >= this.levelLimit) return null;
     const need = new Set<Block>();
     let short = this.refineCost(b, need) - this.free.length;
     if (short <= 0) return null;
     const nearby = [...need];
     const out: Block[] = [];
-    for (const { p, score } of evictable) {
-      if (score >= EVICT_MARGIN * level) break;
+    for (const { p, score, tier: pt } of evictable) {
+      // Never from a higher tier than b's; within b's own, only blocks flagged well below it.
+      if (pt < tier || (pt === tier && score >= EVICT_MARGIN * level)) break;
       if (touched.has(p) || !this.live(p) || !p.children || p.children.some((ch) => ch.children || touched.has(ch))) continue;
       if (need.has(p) || nearby.some((q) => this.near(p, q)) || !this.canCoarsen(p)) continue;
       out.push(p);
@@ -467,27 +476,41 @@ export class BlockTree {
    * indicator marks a leaf that needs no buffer either (the inside of an obstacle): it merges
    * whatever its neighbors.
    * Returns, per slot of the new tree, how to fill it from the old tree, or null if nothing changed.
+   *
+   * `tier` gives the refinement zones' say (amr/zones.ts): a block in a zone (a finite tier) is
+   * refined to the finest level whatever its indicator and never merged with its siblings;
+   * blocks are refined best tier first, and room is made from the lowest tier up, never from a
+   * tier above the block that needs it. Without it every block is in no zone.
    */
-  adapt(indicator: (b: Block) => number, hi: number, lo: number): RegridOp[] | null {
+  adapt(indicator: (b: Block) => number, hi: number, lo: number, tier: (b: Block) => number = () => Infinity): RegridOp[] | null {
     const before = this.leaves();
     const ind = new Map<Block, number>();
-    for (const b of before) ind.set(b, indicator(b));
+    const tiers = new Map<Block, number>();
+    for (const b of before) {
+      const t = tier(b);
+      tiers.set(b, t);
+      const raw = indicator(b);
+      ind.set(b, t < Infinity && raw >= 0 ? Math.max(raw, ZONE_INDICATOR) : raw);
+    }
     const touched = new Set<Block>();
     const run = this.adaptRun(touched);
 
     // Refine, most strongly flagged first so they get the slots if the budget runs out. When it
     // has, room is made by merging the parents whose children are least flagged (closest to
-    // being merged anyway), as long as they are flagged well below the block that needs it.
-    const wanted = before.filter((b) => ind.get(b)! > hi && b.level < this.levelLimit).sort((a, b) => ind.get(b)! - ind.get(a)!);
-    let evictable: { p: Block; score: number }[] | null = null;
+    // being merged anyway), as long as they are flagged well below the block that needs it; with
+    // refinement zones, the best tier first, and room made from the lowest tier up.
+    const wanted = before
+      .filter((b) => ind.get(b)! > hi && b.level < this.levelLimit)
+      .sort((a, b) => (tiers.get(a) === tiers.get(b) ? ind.get(b)! - ind.get(a)! : tiers.get(a)! < tiers.get(b)! ? -1 : 1));
+    let evictable: { p: Block; score: number; tier: number }[] | null = null;
     // Blocks merged to make room hold their data only through this re-mesh's restriction: none
     // may be split again in it (balance would ask that of a later refinement's neighbor), as its
     // new children would be filled from the old parent's slot, which holds no data.
     for (const b of wanted) {
       if (b.children || !this.live(b)) continue; // split by balance already, or merged to make room
       if (!run.step(ADAPT_REFINE, b)) {
-        evictable ??= this.evictable(before, ind);
-        const room = this.makeRoom(b, ind.get(b)!, evictable, touched);
+        evictable ??= this.evictable(before, ind, tier);
+        const room = this.makeRoom(b, ind.get(b)!, evictable, touched, tiers.get(b)!);
         if (room) {
           for (const p of room) run.step(ADAPT_EVICT, p);
           run.step(ADAPT_REFINE, b);
@@ -498,6 +521,7 @@ export class BlockTree {
     // Merge. A leaf next to a strongly flagged one stays, as a buffer ahead of moving features.
     const hot = (b: Block) => {
       if (ind.get(b)! > lo) return true;
+      if (tiers.get(b)! < Infinity) return true;
       if (ind.get(b)! < 0) return false;
       for (let f = 0; f < this.nface; f++) {
         const nb = this.neighbor(b, f);

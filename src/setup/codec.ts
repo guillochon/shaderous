@@ -106,7 +106,7 @@ const DOCUMENT: Record<string, Schema> = {
     burn: { any: [obj({ network: choice('physics.burn.network'), inShocks: 'boolean', limiter: 'number' }), obj({ fuel: 'string', ash: 'string', q: 'number', ea: 'number', k: 'number', inShocks: 'boolean' })] },
     toolScale: obj({ rho: 'number', v: 'number' }),
   }),
-  mesh: obj({ refineHi: 'number', refineLo: 'number', refineMasses: 'boolean', refineDense: 'number', refineRho: 'number', timeBins: choice('mesh.timeBins'), jeansRefine: 'number' }),
+  mesh: obj({ zones: { array: obj({ shape: { enum: ['sphere', 'cone'] }, at: 'string', r: 'number', rIn: 'number', radii: 'boolean', from: obj({ at: 'string', r: 'number', radii: 'boolean' }), to: obj({ at: 'string', r: 'number', radii: 'boolean' }), tier: 'number', below: obj({ x: 'number', y: 'number', z: 'number' }), above: obj({ x: 'number', y: 'number', z: 'number' }), name: 'string' }), max: 16 }, refineHi: 'number', refineLo: 'number', refineMasses: 'boolean', refineDense: 'number', refineRho: 'number', timeBins: choice('mesh.timeBins'), jeansRefine: 'number' }),
   background: obj({ rho: 'number', p: 'number', v: 'vec3', s: 'number', X: 'fractions', cut: 'number', relativeTo: 'string' }),
   run: obj({ tEnd: { nullable: 'number' }, checkpointDt: 'number', tDyn: 'number', startPaused: 'boolean' }),
   view: obj({ field: 'int', log: 'boolean', mode: choice('view.mode'), axis: choice('view.axis'), pitch: 'number' }),

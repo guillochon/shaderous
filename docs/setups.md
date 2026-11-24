@@ -99,8 +99,46 @@ cell setting the mix; a planet with a core makes them so.
 ### `mesh`, `run`, `view`
 
 `mesh`: `refineHi`, `refineLo`, `refineRho`, `refineDense`, `refineMasses`, `timeBins`,
-`jeansRefine`. `run`: `tEnd` (`null` runs forever), `checkpointDt`, `tDyn`, `startPaused`.
+`jeansRefine`, `zones` (below). `run`: `tEnd` (`null` runs forever), `checkpointDt`, `tDyn`, `startPaused`.
 `view`: the view the setup opens with (`field`, `log`, `mode`, `axis`, `pitch`).
+
+`mesh.zones` (adaptive mesh) are parts of the box kept at the finest level, each with a tier
+that says who gives up blocks first when the block budget runs out: tier 1 is kept longest, and
+gas in no zone is given up before any zone's. A block in a zone is refined whatever its gas and
+never merged with its siblings; blocks are refined best tier first, and room is made from the
+lowest tier up, never from a tier above the block that needs it (within a tier, as without
+zones, only from blocks flagged well below it). A point is in the first zone in the list that
+holds it, so a zone listed later yields to those before it where they overlap. Each zone is
+`{ "shape": "sphere", "at", "r", "rIn", "radii" }`, a sphere or shell about `at`, or
+`{ "shape": "cone", "from": { "at", "r", "radii" }, "to": { ... } }`, the cone tangent to two
+such spheres, bridging them; with `tier`, an optional `name`, and `below` or `above`
+(`{ "y": 0 }`: only the side of the plane y = 0 below or above it, in the box's coordinates).
+`at` is `"L1"`, a circular binary's inner Lagrange point, or a star's id; `r` and `rIn` are in
+code units, or in the star's radii with `radii`. The zones stay where the setup places the
+bodies: in the frame that follows a binary that is where they are. The run's status line gives
+each tier's share of blocks at the finest level. When the starting mesh cannot hold every zone
+at the finest level, the lowest tier's zones are left out of it first, then the next tier's,
+and a level is left out (as a self-gravitating run does rather than half fill one) only once no
+zone is left; the run then keeps them all, and its tiers decide who gives up blocks. A zone that
+gives way gives way whole, dense gas included: a star in a low tier can lose its finest level
+altogether to the zones above it. For the helium donor of a double white dwarf,
+seen from above with the donor at -x:
+
+```json
+"zones": [
+  { "name": "L1", "shape": "sphere", "at": "L1", "r": 0.25, "tier": 1 },
+  { "name": "shell, stream side", "shape": "sphere", "at": "accretor", "rIn": 1, "r": 2, "radii": true, "below": { "y": 0 }, "tier": 2 },
+  { "name": "shell, far side", "shape": "sphere", "at": "accretor", "rIn": 1, "r": 2, "radii": true, "above": { "y": 0 }, "tier": 3 },
+  { "name": "accretor", "shape": "sphere", "at": "accretor", "r": 1, "radii": true, "tier": 4 },
+  { "name": "donor", "shape": "sphere", "at": "donor", "r": 1, "radii": true, "tier": 5 },
+  { "name": "stream", "shape": "cone", "from": { "at": "L1", "r": 0.25 }, "to": { "at": "accretor", "r": 2, "radii": true }, "below": { "y": 0.25 }, "tier": 1 },
+  { "name": "neck", "shape": "cone", "from": { "at": "L1", "r": 0.25 }, "to": { "at": "donor", "r": 1, "radii": true }, "tier": 1 }
+]
+```
+
+The two cones come last, so the spheres take precedence where they overlap: the stream's cone
+is the first tier between L1 and the accretor's shell, and the neck's between the donor's
+surface and L1.
 
 ### `background`
 

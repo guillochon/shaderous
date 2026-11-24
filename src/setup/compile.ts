@@ -15,6 +15,8 @@ import type { AnyBurnSpec } from '../burn/burn';
 import { defaultEosParams, makeEos, physicalEosParams, type Eos } from '../eos/eos';
 import { materialEosParams } from '../species/mixture';
 import type { Settling } from '../problems/settle';
+import { innerLagrange } from '../problems/roche';
+import type { Zone } from '../amr/zones';
 import { OUTFLOW, type Bc3, type MhdSpec, type PointMass, type Prim, type Problem, type ProblemParam } from '../problems/types';
 import type { SimConfig } from '../sim';
 import { COMPOSITIONS, composition, type Composition } from '../units/composition';
@@ -24,7 +26,7 @@ import { buildDisk, checkDiskFormulas, sumDisks, type BuiltDisk } from './parts/
 import { flowValues, type FaceFn, type FlowContext, type FlowDef, type FlowInitContext, type InitFn, type PotentialFn } from './parts/flow';
 import { bodySurfaces, obstacleDistances } from './parts/surfaces';
 import { bodyCenter, obstaclePainter, reachOf, regionPainter, shadowOf, type PaintContext } from './parts/region';
-import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type ObstaclePart, type SetupSpec } from './spec';
+import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type CompositionSpec, type DiskPart, type Featured, type FlowPart, type ObstaclePart, type SetupSpec, type ZoneAnchor } from './spec';
 import { unitSystem, unitsFollowParts } from './units';
 
 export interface Compiled {
@@ -273,6 +275,41 @@ function initOf(spec: SetupSpec, n: number, eos: Eos, ndim: 2 | 3, levels = 0): 
   }
   for (const f of flows) if (f.def.decorate) at = f.def.decorate(fctx, f.values, at);
   return at;
+}
+
+/**
+ * A setup's refinement zones (mesh.zones) as shapes in the box: L1 and the stars where the
+ * setup places them (in the frame that follows a binary they stay there).
+ */
+export function zonesOfSetup(spec: SetupSpec): Zone[] {
+  const zones = spec.mesh?.zones ?? [];
+  if (!zones.length) return [];
+  const { G, units } = scales(spec);
+  const bodies = buildBodies(spec, { G, dx: 0, ndim: 3, box: boxOf(spec), eos: hasWhiteDwarf(spec) ? specEos(spec, units) : undefined });
+  const anchor = (a: ZoneAnchor): { c: number[]; r: number } => {
+    if (a.at === 'L1') {
+      const bin = bodies.binary;
+      if (!bin?.lobe) throw new Error('a refinement zone at L1 needs a star on a circular binary orbit');
+      return { c: innerLagrange(bin.lobe.bodies, bin.omega).at.map((v) => v ?? 0), r: a.r };
+    }
+    const star = bodies.stars.find((st) => st.id === a.at);
+    if (!star) throw new Error(`a refinement zone is at "${a.at}", which is neither L1 nor a star`);
+    return { c: [star.center[0], star.center[1], star.center[2] ?? 0], r: a.radii ? a.r * star.R : a.r };
+  };
+  const AXES = { x: 0, y: 1, z: 2 } as const;
+  return zones.map((z): Zone => {
+    const cuts = [
+      ...Object.entries(z.below ?? {}).map(([k, v]) => ({ axis: AXES[k as keyof typeof AXES], value: v as number })),
+      ...Object.entries(z.above ?? {}).map(([k, v]) => ({ axis: AXES[k as keyof typeof AXES], value: v as number, above: true })),
+    ];
+    if (z.shape === 'cone') {
+      const a = anchor(z.from);
+      const b = anchor(z.to);
+      return { shape: 'cone', c1: a.c, r1: a.r, c2: b.c, r2: b.r, tier: z.tier, cuts };
+    }
+    const a = anchor(z);
+    return { shape: 'sphere', c: a.c, r: a.r, rIn: z.rIn === undefined ? 0 : z.radii ? z.rIn * (a.r / z.r) : z.rIn, tier: z.tier, cuts };
+  });
 }
 
 function settlingOfSetup(spec: SetupSpec, eos: Eos): Settling {
@@ -564,6 +601,7 @@ export function compileSetup(input: SetupSpec): Compiled {
         : undefined,
     refineRho: mesh.refineRho,
     refineDense: mesh.refineDense,
+    refineZones: mesh.zones?.length ? (params) => zonesOfSetup(at(params)) : undefined,
     cooling: ph.cooling,
     coolParams: ph.coolParams,
     radiation: ph.radiation,
