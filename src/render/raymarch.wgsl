@@ -20,6 +20,8 @@ const ISO_GAP = 1.0;
 // A change of this many decades across a few cells is a jump the cells do not resolve
 // (smooth isosurfaces: its levels are drawn as one, at its middle).
 const JUMP_DECADES = 3.0;
+// ... and that share of it (in decades) within a cell either side.
+const JUMP_SHARE = 0.7;
 // How far either side of a crossing, in steps (two thirds of a cell), the gas is read to tell a
 // jump and where its middle lies: past the reach of the smoothing.
 const JW = 4.5;
@@ -125,6 +127,18 @@ fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>, exact: bool) -> vec3<
   return c * (0.18 + 0.62 * diff + 0.25 * fill) + 0.35 * spec;
 }
 
+// Whether the change in the value about q along dir (a unit vector) is nearly all within a cell
+// either side: a jump the cells do not resolve (a planet's edge, from one cell to the next), not
+// a steep fall they follow (a white dwarf's envelope, cell by cell). In decades, from the value
+// as the cells have it (trilinear: smoothing spreads a jump over four cells). For the levels on
+// the tool's ball, which should show each level of such a fall; the isosurfaces merge those
+// (drawn apart, the outermost show the cells' outline).
+fn within_cell(q: vec3<f32>, dir: vec3<f32>, c: f32) -> bool {
+  let near = abs(log(max(vol_look(q + c * dir).s.a, 1.0e-30)) - log(max(vol_look(q - c * dir).s.a, 1.0e-30)));
+  let far = abs(log(max(vol_look(q + 3.0 * c * dir).s.a, 1.0e-30)) - log(max(vol_look(q - 3.0 * c * dir).s.a, 1.0e-30)));
+  return near >= JUMP_SHARE * far;
+}
+
 // The ball of the tool in hand (C.tb): at q on its surface, d along the ray rd, how much of a
 // contour line covers it, drawn opaque in RING: the levels as they cross the ball's surface,
 // about three pixels wide on the screen. On the ball, not on the isosurfaces, so the lines stay
@@ -163,7 +177,7 @@ fn ball_lines(q: vec3<f32>, d: f32, rd: vec3<f32>) -> f32 {
     let la = lin_smooth(q - 3.0 * c * gn);
     let lb = lin_smooth(q + 3.0 * c * gn);
     let decades = abs(log(max(lb, 1.0e-30)) - log(max(la, 1.0e-30))) * 0.4342944819;
-    if (abs(iso_of_lin(lb) - iso_of_lin(la)) >= 2.0 || decades >= JUMP_DECADES) {
+    if ((abs(iso_of_lin(lb) - iso_of_lin(la)) >= 2.0 || decades >= JUMP_DECADES) && within_cell(q, gn, c)) {
       aim = iso_of_lin(0.5 * (la + lb));
     }
   }
