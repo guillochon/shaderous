@@ -11,9 +11,11 @@ const POST = 2; // and after prolongation
 const COARSE = 8; // sweeps on the coarsest sublevel (one cell per block)
 const NSUB = 5; // sublevels: 16, 8, 4, 2, 1 cells per block side
 /** The field pass with one timestep for all blocks. */
-export const FIELD_SLOTS = { bins: 'amr/bins_off.wgsl', half: 'amr/gravity/half_off.wgsl' };
+export const FIELD_SLOTS = { bins: 'amr/bins_off.wgsl', half: 'amr/gravity/half_off.wgsl', fix: 'amr/gravity/fix_off.wgsl' };
 /** And with per-block timesteps: the half step is each block's own. */
-export const FIELD_SLOTS_BINS = { bins: 'amr/bins_on.wgsl', half: '#include "amr/gravity/half_on.wgsl"\n#include "amr/gravity/half_field.wgsl"' };
+export const FIELD_SLOTS_BINS = { bins: 'amr/bins_on.wgsl', half: '#include "amr/gravity/half_on.wgsl"\n#include "amr/gravity/half_field.wgsl"', fix: 'amr/gravity/fix_off.wgsl' };
+/** Self-gravity's field takes off its net force on the gas (AmrGravity.fix). */
+const FIX_ON = { fix: 'amr/gravity/fix_on.wgsl' };
 const SEQUENTIAL = !!(globalThis as { AMR_GRAVITY_SEQUENTIAL?: boolean }).AMR_GRAVITY_SEQUENTIAL; // debugging: always level by level
 /**
  * Cycles after the first of a warm-started solve run only while the residual stays above
@@ -72,6 +74,13 @@ interface Sub {
 export class AmrGravity {
   private sub: Sub[] = [];
   phiOld!: GPUTexture;
+  /**
+   * The uniform acceleration taken off self-gravity's field (xyz), and its potential put on
+   * (amr/gravity/field.wgsl): the net force of the gas's gravity on itself, which is zero for
+   * an isolated body but not on the adaptive mesh. Zero unless amr/amr_sim.ts encodeSelfForce
+   * keeps it.
+   */
+  fix!: GPUBuffer;
   private pSmooth!: GPUComputePipeline;
   private pRestrict!: GPUComputePipeline;
   private pProlong!: GPUComputePipeline;
@@ -142,7 +151,7 @@ export class AmrGravity {
       computePipeline(d, assemble('amr/gravity/rhs_restrict.wgsl'), 'amr mg source restrict'),
       computePipeline(d, assemble('amr/gravity/ghost.wgsl'), 'amr mg ghost (coarse)', { MODE: 0 }),
       computePipeline(d, assemble('amr/gravity/ghost.wgsl'), 'amr mg ghost (rest)', { MODE: 1 }),
-      computePipeline(d, assemble('amr/gravity/field.wgsl', FIELD_SLOTS), 'amr gravity field'),
+      computePipeline(d, assemble('amr/gravity/field.wgsl', { ...FIELD_SLOTS, ...FIX_ON }), 'amr gravity field'),
       computePipeline(d, assemble('amr/gravity/new_blocks.wgsl'), 'amr mg new blocks'),
       computePipeline(d, assemble('amr/gravity/new_blocks.wgsl'), 'amr mg level init', { ALL: 1 }),
     ]);
@@ -207,7 +216,8 @@ export class AmrGravity {
     g.gRhsRestrictB = bindGroup(d, g.pRhsRestrict, { 0: ctx.params, 2: rhs0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostCoarseB = bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostRestB = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
-    g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 5: ctx.clock, 30: ctx.bt, 31: ctx.listAll });
+    g.fix = d.createBuffer({ label: 'amr self-gravity net force', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 5: ctx.clock, 8: g.fix, 30: ctx.bt, 31: ctx.listAll });
     g.gNew = bindGroup(d, g.pNew, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLeaf });
 
     [g.pResidual, g.pGate, g.pGateRecord] = await Promise.all([
@@ -319,9 +329,11 @@ export class AmrGravity {
     }
     if (together) {
       // Warm start (every step): all levels relax together, each against the boundary values
-      // its coarser level had at the start of the cycle. The lag costs nothing measurable when
-      // the potential changes little per step, and the number of dispatches no longer grows
-      // with the depth of the tree.
+      // its coarser level had at the start of the cycle, and the number of dispatches no longer
+      // grows with the depth of the tree. The lag is small where the potential changes little
+      // per step, but a body moving across the mesh feels its own pull from where it was: a
+      // drag on its momentum (a part in 500 per unit time for a white dwarf at 0.05). The net
+      // force that leaves is taken off the field (amr/amr_sim.ts encodeSelfForce).
       //
       // `cycles` is the most it runs. After the first, each further cycle runs only if the
       // residual the last one left is above VCYCLE_TOL of the largest source term and that
@@ -381,7 +393,7 @@ export class AmrGravity {
     this.dphi0 = rateTex('amr phi rate before');
     const half = '#include "amr/gravity/half_on.wgsl"\n#include "amr/gravity/half_curve.wgsl"';
     [this.pFieldB, this.pExtrap, this.pSync, this.pForget, this.pSeed] = await Promise.all([
-      computePipeline(d, assemble('amr/gravity/field.wgsl', { ...FIELD_SLOTS_BINS, half }), 'amr gravity field (bins)'),
+      computePipeline(d, assemble('amr/gravity/field.wgsl', { ...FIELD_SLOTS_BINS, half, ...FIX_ON }), 'amr gravity field (bins)'),
       computePipeline(d, assemble('amr/gravity/extrap.wgsl'), 'amr potential extrapolation'),
       computePipeline(d, assemble('amr/gravity/sync.wgsl'), 'amr potential rate'),
       computePipeline(d, assemble('amr/gravity/sync.wgsl'), 'amr potential rate reset', { FORGET: 1 }),
@@ -389,7 +401,7 @@ export class AmrGravity {
     ]);
     const phi0 = v(this.phi);
     const field = (list: GPUBuffer) =>
-      bindGroup(d, this.pFieldB!, { 0: ctx.params, 1: phi0, 3: v(ctx.gfield), 5: ctx.clock, 6: v(this.dphi!), 7: v(this.dphi0!), 29: ctx.bins, 30: ctx.bt, 31: list });
+      bindGroup(d, this.pFieldB!, { 0: ctx.params, 1: phi0, 3: v(ctx.gfield), 5: ctx.clock, 6: v(this.dphi!), 7: v(this.dphi0!), 8: this.fix, 29: ctx.bins, 30: ctx.bt, 31: list });
     this.gFieldB = field(ctx.listAct);
     this.gFieldAllB = field(ctx.listAll);
     this.gExtrap = bindGroup(d, this.pExtrap, { 0: ctx.params, 1: ctx.clock, 2: phi0, 6: v(this.dphi), 29: ctx.bins, 31: ctx.listAll });

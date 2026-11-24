@@ -4,6 +4,10 @@
 //         time-centered energy source (interior cells and the first ghost layer) and the
 //         well-balanced pressure reconstruction (both ghost layers)
 // The point masses and the frame are not in it: each pass adds them itself (gravity/ext.wgsl).
+// Self-gravity's net force on the gas, which the adaptive mesh does not keep at zero, is taken
+// off as a uniform acceleration a, and a . x put on the potential so that what the energy and
+// the balanced reconstruction difference is the field the kicks use (<fix>, amr/amr_sim.ts
+// encodeSelfForce).
 // With per-block timesteps the half step is the block's own, and the pass runs over the
 // blocks about to start a step.
 #include "hydro/common.wgsl"
@@ -22,6 +26,7 @@ fn phi(c: vec3<i32>) -> f32 {
 }
 
 #include <half>
+#include <fix>
 
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -53,6 +58,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
   }
   var ph = 0.0;
-  if (self_gravity) { ph = phi_half(c, inv.slot); }
+  if (self_gravity) {
+    let a = fix_accel();
+    if (nout == 0) { g -= a; }
+    ph = phi_half(c, inv.slot) + dot(a, blk_pos(inv.slot, l));
+  }
   textureStore(GOUT, c, vec4<f32>(g, ph));
 }

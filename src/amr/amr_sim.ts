@@ -257,6 +257,14 @@ export class AmrSim implements Simulation {
   private centralGM = 0;
   private dummyPhi: GPUTexture;
   private redMp?: Multipoles;
+  /**
+   * Self-gravity's net force on the gas (amr/self_force.wgsl), which an isolated body's gravity
+   * does not have but the adaptive mesh's does, and the pass that keeps it off the field
+   * (amr/gravity/self_force.wgsl, into AmrGravity.fix). See encodeSelfForce.
+   */
+  private redSelf?: Reducer;
+  private pSelfFix?: GPUComputePipeline;
+  private gSelfFix?: GPUBindGroup;
   private redBh?: MassSums;
   /** A rotating frame that follows a binary: the gas's sums it keeps its axis by (gravity/frame_cell.wgsl) */
   private redFrame?: Reducer;
@@ -769,6 +777,16 @@ export class AmrSim implements Simulation {
         multipole: sim.redMp.result, stateU1: [sim.state[0][0], sim.state[1][0]], gfield: sim.gfield,
         bins: sim.bins, listAct: sim.listAct, listUpd: sim.listUpd, binArgs: sim.binArgs,
       });
+      if (cfg.ndim === 3 && !flatGravity) {
+        // Self-gravity's net force on the gas (encodeSelfForce), free along every axis but a
+        // plane of mirror symmetry's.
+        const mirrored = (cfg.symmetry ?? []).reduce((m, s, a) => m | (s ? 1 << a : 0), 0);
+        [sim.redSelf, sim.pSelfFix] = await Promise.all([
+          Reducer.create(d, [sim.cap * BS, BS, depth], [SUM, SUM, SUM, SUM], 'amr/self_force.wgsl', {}, u1.map((t) => ({ 0: sim.params, 1: t, 4: v(sim.gfield), 30: sim.bt })), 'amr self-gravity net force'),
+          computePipeline(d, assemble('amr/gravity/self_force.wgsl'), 'amr self-gravity net force off the field', { MASK: 7 & ~mirrored }),
+        ]);
+        sim.gSelfFix = bindGroup(d, sim.pSelfFix, { 0: sim.redSelf.result, 1: sim.grav.fix });
+      }
     };
     [sim.redDt, sim.pClock, sim.pFlag, sim.redBh, sim.pBhDrift, sim.pBhKick, sim.pBhEval, sim.pMassField, sim.pCensus] = await Promise.all([
       Reducer.create(
@@ -1452,6 +1470,8 @@ export class AmrSim implements Simulation {
         }
         if (this.massPasses) stepMasses(pass);
         fieldB(pass, last ? this.nAll : -1);
+        // Self-gravity's net force on the gas, from the field just written, for the next field.
+        if (last && g) this.encodeSelfForce(pass, p);
         // The kick goes through the other state texture and back.
         run(pass, this.pCorrect, last ? this.gCorrect[o] : this.gCorrectB[o]);
         if (last) this.interior(pass, this.nLeaf);
@@ -1639,8 +1659,31 @@ export class AmrSim implements Simulation {
     pass.end();
   }
 
+  /**
+   * Self-gravity's net force on the gas, kept off its field (isolated boundaries, 3D Cartesian).
+   * An isolated body's gravity exerts no net force on it, but the adaptive mesh's does: the
+   * levels of a warm-started solve each relax against the boundary values their coarser level
+   * had a step before, so a body moving across the mesh feels its own pull from where it was,
+   * a drag; and a converged potential differenced across refinement boundaries pulls a body
+   * toward or away from them. A white dwarf moving through the box lost a part in 500 of its
+   * momentum per unit time; in a frame turning with a binary, drag toward the frame's rest sent
+   * the binary's center of mass off the axis on an outward spiral, e-folding every two orbits.
+   * The sums of m g over the leaves of the field each step has just written give what is left
+   * of the net force, and the next step's field takes the whole of it off: a step behind, as
+   * the net force changes little from one step to the next.
+   */
+  private encodeSelfForce(pass: GPUComputePassEncoder, parity: number) {
+    if (!this.redSelf || !this.selfGravity || this.cfg.gravity !== 'isolated') return;
+    this.redSelf.encode(pass, parity);
+    pass.setPipeline(this.pSelfFix!);
+    pass.setBindGroup(0, this.gSelfFix!);
+    pass.dispatchWorkgroups(1);
+  }
+
   /** Call after changing the gravity mode or G at run time. */
   refreshPotential() {
+    // Only isolated boundaries keep self-gravity's net force off the field.
+    if (this.grav && this.cfg.gravity !== 'isolated') this.device.queue.writeBuffer(this.grav.fix, 0, new Float32Array(4));
     if (!this.fieldOn) return;
     const enc = this.device.createCommandEncoder();
     this.encodeFreshPotential(enc, 12, 'kick', false);
@@ -2506,6 +2549,7 @@ export class AmrSim implements Simulation {
           const gp = beginPass(enc);
           this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
           this.encodeField(gp);
+          this.encodeSelfForce(gp, 1 - p);
           gp.setPipeline(this.pCorrect);
           gp.setBindGroup(0, this.gCorrect[p]);
           this.interior(gp, this.nLeaf);
@@ -2584,6 +2628,8 @@ export class AmrSim implements Simulation {
             gp.dispatchWorkgroups(1);
           }
           this.encodeField(gp);
+          // (The state is back in this parity: the correction has kicked it.)
+          this.encodeSelfForce(gp, p);
           gp.end();
         }
       } else if (this.fieldOn) {
@@ -2594,6 +2640,7 @@ export class AmrSim implements Simulation {
         const gp = beginPass(enc);
         this.encodeSolve(gp, 1 - p, this.cfg.vcycles, 'step', false, true);
         this.encodeField(gp);
+        this.encodeSelfForce(gp, 1 - p);
         gp.setPipeline(this.pCorrect);
         gp.setBindGroup(0, this.gCorrect[p]);
         this.interior(gp, this.nLeaf);
