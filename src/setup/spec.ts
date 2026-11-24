@@ -101,7 +101,8 @@ export interface DomainSpec {
 export type CompositionSpec = string | { name: string; X: Record<string, number>; ionization?: 'full' | 'neutral' };
 
 export type BurnSetup =
-  | { network: 'aprox13'; inShocks?: boolean; limiter?: number }
+  /** switchAt: with the species he4, c12, o16 alone, the share of a cell's internal energy released in a step that stops the run for the switch to all thirteen (burn/watch.ts) */
+  | { network: 'aprox13'; inShocks?: boolean; limiter?: number; switchAt?: number }
   | { fuel: string; ash: string; q: number; ea: number; k: number; inShocks?: boolean };
 
 export interface PhysicsSpec {

@@ -266,11 +266,13 @@ export async function saveAthdf(call, pick) {
 /**
  * Start the page's run from the .athdf file at `file`, sent in pieces (athdfPut, then
  * loadAthdf()), so that a file of gigabytes is never one string. Returns what loadAthdf returns.
+ * `opts.switchBurn`: the file is of a run that watched for burning; it carries on with all the
+ * network's species (burn/watch.ts).
  */
-export async function uploadAthdf(call, file) {
-  if (call.loadModule) return uploadAthdfHere(call, file);
+export async function uploadAthdf(call, file, opts = {}) {
+  if (call.loadModule) return uploadAthdfHere(call, file, opts);
   await putAthdf(call, file);
-  return call('loadAthdf');
+  return call('loadAthdf', undefined, opts);
 }
 
 /** The file at `file` put together in the page in pieces (athdfPut), for loadAthdf or viewAthdf. */
@@ -341,10 +343,10 @@ async function saveAthdfHere(call, pick) {
 }
 
 /** uploadAthdf with the file read here: the page is handed the snapshot's arrays in pieces. */
-async function uploadAthdfHere(call, file) {
+async function uploadAthdfHere(call, file, opts = {}) {
   const { readAthdfFile, h5 } = await athdfHere(call);
   await sendSnapshot(call, await readAthdfFile(path.resolve(file), h5));
-  return call('loadSnapshot');
+  return call('loadSnapshot', opts);
 }
 
 /**

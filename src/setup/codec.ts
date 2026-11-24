@@ -103,7 +103,7 @@ const DOCUMENT: Record<string, Schema> = {
     frame: choice('physics.frame'), rotation: obj({ omega: 'vec3', centrifugal: 'boolean' }), cosmology: obj({ omegaM: 'number', omegaL: 'number', zStart: 'number', zEnd: 'number', h: 'number', boxMpc: 'number' }), shear: obj({ omega: 'number', q: 'number', stratified: 'boolean' }), jeansFloor: 'boolean', jeansCells: 'int', vcycles: 'int', gravEnergyFlux: 'boolean',
     composition: { any: [choice('physics.composition'), obj({ name: 'string', X: 'fractions', ionization: { enum: ['full', 'neutral'] } })] },
     species: { any: [{ enum: ['aprox13'] }, { array: 'string', max: 64 }] }, speciesGamma: 'fractions',
-    burn: { any: [obj({ network: choice('physics.burn.network'), inShocks: 'boolean', limiter: 'number' }), obj({ fuel: 'string', ash: 'string', q: 'number', ea: 'number', k: 'number', inShocks: 'boolean' })] },
+    burn: { any: [obj({ network: choice('physics.burn.network'), inShocks: 'boolean', limiter: 'number', switchAt: 'number' }), obj({ fuel: 'string', ash: 'string', q: 'number', ea: 'number', k: 'number', inShocks: 'boolean' })] },
     toolScale: obj({ rho: 'number', v: 'number' }),
   }),
   mesh: obj({ zones: { array: obj({ shape: { enum: ['sphere', 'cone'] }, at: 'string', r: 'number', rIn: 'number', radii: 'boolean', from: obj({ at: 'string', r: 'number', radii: 'boolean' }), to: obj({ at: 'string', r: 'number', radii: 'boolean' }), tier: 'number', below: obj({ x: 'number', y: 'number', z: 'number' }), above: obj({ x: 'number', y: 'number', z: 'number' }), name: 'string' }), max: 16 }, refineHi: 'number', refineLo: 'number', refineMasses: 'boolean', refineDense: 'number', refineRho: 'number', timeBins: choice('mesh.timeBins'), jeansRefine: 'number' }),

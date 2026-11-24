@@ -16,6 +16,7 @@ export const SECTIONS = [
       F('set KEY=VALUE', 'Any other setup key, repeatable: --set gamma=1.4 --set p.mach=3', { many: true }),
       F('setup FILE', ['A setup document (name.shaderous.json, see docs/setups.md) in place of', "--problem: a preset's file, or one saved from the Setup dialog. The", 'keys above then say the grid and what differs from the file']),
       F('from FILE', ['Carry on from an .athdf file the runner, the page or save_athdf wrote, at', "its time, with its settings: no setup keys, --setup or --vary. Times", "(--until, output times) are the run's own, so --until is where it ends"]),
+      F('switch-burn', ['With --from: the file is of a run that watched for burning (he4, c12 and', "o16 alone, stopped 'burn'); carry on with all thirteen of the network's", 'species, the other ten starting at zero, and the network burning']),
     ],
   },
   {

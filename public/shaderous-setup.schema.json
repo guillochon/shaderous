@@ -1035,6 +1035,9 @@
         },
         "limiter": {
          "type": "number"
+        },
+        "switchAt": {
+         "type": "number"
         }
        },
        "additionalProperties": false

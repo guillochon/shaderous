@@ -736,6 +736,8 @@ const FIXERS: Record<string, (doc: SetupSpec, want: boolean, value: Value | unde
     return true;
   },
   'species.aprox13': (doc, want) => ((doc.physics!.species = want ? 'aprox13' : undefined), true),
+  // The network burns all thirteen species, or watches he4, c12 and o16 for burning.
+  'species.network': (doc, want, _v, ctx) => ((doc.physics!.species = want ? ctx.g.pick<'aprox13' | string[]>(['aprox13', ['he4', 'c12', 'o16']]) : undefined), true),
   radiation: (doc, want, _v, ctx) => {
     const ph = (doc.physics ??= {});
     if (!want) {

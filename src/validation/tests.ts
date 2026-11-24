@@ -1,7 +1,7 @@
 // Validation suite (plan section 7). Runs in the page against the real GPU; driven by
 // validate.html interactively and by Playwright in tests/gpu.
 import { assemble } from '../gpu/shaders';
-import { netFeatures, netSlot, netStep, netWeights } from '../burn/network';
+import { netEnergyRate, netFeatures, netSlot, netStep, netWatchSlot, netWeights, NET_SPECIES } from '../burn/network';
 import NET_CASES from '../burn/aprox13_net_cases.json';
 import { bindGroup, computePipeline, readTexture, type Gpu } from '../gpu/device';
 import { sheet as shearingSheet } from './shear';
@@ -2345,6 +2345,49 @@ export const TESTS: TestDef[] = [
         step = Math.max(step, rel);
       });
       return { pass: feat < 1e-3 && step < 0.02, metrics: { inputs_max_abs: feat, step_max_rel_l1: step } };
+    },
+  },
+  {
+    id: 'burn-watch',
+    name: 'Watching for burning on the GPU (he4, c12 and o16)',
+    criterion: 'The energy rate the watch for burning reads (hydro/burn_screen.wgsl and the <burn_watch> slot, single precision) within 1% of the float64 mirror (netEnergyRate) on 120 states of helium, carbon-oxygen and their mixtures, 1e4 to 1e8 g/cm^3 and 1e8 to 5e9 K, where the rate is above 1 erg/g/s',
+    async run(gpu) {
+      const d = gpu.device;
+      const comps: [number, number, number][] = [[1, 0, 0], [0, 0.5, 0.5], [0.5, 0.25, 0.25], [0.05, 0.6, 0.35]];
+      const cases: [number, number, number, number, number][] = [];
+      for (const [xhe, xc, xo] of comps) for (let i = 0; i < 5; i++) for (let j = 0; j < 6; j++) cases.push([10 ** (4 + i), 10 ** (8 + (j * Math.log10(50)) / 5), xhe, xc, xo]);
+      const inData = new Float32Array(cases.flat());
+      const buf = (size: number, usage: number) => d.createBuffer({ size, usage });
+      const inBuf = buf(inData.byteLength, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST);
+      d.queue.writeBuffer(inBuf, 0, inData);
+      const bytes = cases.length * 4;
+      const outBuf = buf(bytes, GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC);
+      const readBuf = buf(bytes, GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ);
+      const pipe = await computePipeline(d, assemble('burn/watch_test.wgsl', { burn_watch: netWatchSlot() }), 'burn watch test');
+      const enc = d.createCommandEncoder();
+      const pass_ = enc.beginComputePass();
+      pass_.setPipeline(pipe);
+      pass_.setBindGroup(0, bindGroup(d, pipe, { 1: inBuf, 2: outBuf }));
+      pass_.dispatchWorkgroups(Math.ceil(cases.length / 64));
+      pass_.end();
+      enc.copyBufferToBuffer(outBuf, 0, readBuf, 0, bytes);
+      d.queue.submit([enc.finish()]);
+      await readBuf.mapAsync(GPUMapMode.READ);
+      const out = new Float32Array(readBuf.getMappedRange().slice(0));
+      readBuf.unmap();
+      [inBuf, outBuf, readBuf].forEach((b) => b.destroy());
+      let worst = 0;
+      let counted = 0;
+      cases.forEach(([rho, T, xhe, xc, xo], k) => {
+        const X = NET_SPECIES.map((n) => (n === 'he4' ? xhe : n === 'c12' ? xc : n === 'o16' ? xo : 0));
+        const want = netEnergyRate(Math.log10(rho), Math.log10(T), X);
+        if (!(want > 1)) return;
+        counted++;
+        const rel = Math.abs(out[k] / want - 1);
+        if (rel > 0.01) console.log(`burn-watch case ${k} (rho ${rho.toExponential(1)}, T ${T.toExponential(2)}, X ${xhe}/${xc}/${xo}): ${out[k].toExponential(4)} against ${want.toExponential(4)}`);
+        worst = Math.max(worst, rel);
+      });
+      return { pass: counted > 60 && worst < 0.01, metrics: { rate_max_rel: worst, states: counted } };
     },
   },
   {

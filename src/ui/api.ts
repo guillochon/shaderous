@@ -54,9 +54,9 @@ export interface AppHooks {
   idle(): Promise<void>;
   build(link: LinkOverrides): Promise<void>;
   /** resolves to what an older file of ours could not carry over as written */
-  importAthdf(bytes: Uint8Array): Promise<string[]>;
-  /** the same from a snapshot (one read from an .athdf file) */
-  importSnapshot(snap: Snapshot): Promise<string[]>;
+  importAthdf(bytes: Uint8Array, opts?: { switchBurn?: boolean }): Promise<string[]>;
+  /** the same from a snapshot (one read from an .athdf file); `switchBurn`: from a run that watched for burning, on with all the network's species (burn/watch.ts) */
+  importSnapshot(snap: Snapshot, opts?: { switchBurn?: boolean }): Promise<string[]>;
   /** open an .athdf file for viewing only (plans/view-only.md): the level it was merged to, of the file's finest, and its leaf blocks before and after */
   viewFile(file: File | string, opts?: { oneField?: boolean; faces?: boolean }): Promise<{ level: number; fileLevel: number; blocks: number; fileBlocks: number; oneField: boolean; faces: boolean }>;
   /** a view that holds one field: the file's cells under these points (io/view.ts probeFile); null for any other run */
@@ -165,7 +165,8 @@ export interface RunResult {
   taken: number;
   seconds: number;
   /** why the call returned: `frame` only at a movie's soft stop (record() with `dt`) */
-  stopped: 'steps' | 'time' | 'end' | 'timeout' | 'frame';
+  /** 'burn': a run that watches for burning found it (burn/watch.ts), to be restarted with all the network's species */
+  stopped: 'steps' | 'time' | 'end' | 'timeout' | 'frame' | 'burn';
   /** the timestep of the last step taken, which a held clock's dt (0) no longer shows */
   lastDt: number;
 }
@@ -228,7 +229,7 @@ export interface RecordResult {
   steps: number;
   bytes: number;
   /** why the recording ended */
-  stopped: 'frames' | 'time' | 'end' | 'stopped' | 'replaced' | 'timeout';
+  stopped: 'frames' | 'time' | 'end' | 'stopped' | 'replaced' | 'timeout' | 'burn';
   base64?: string;
 }
 
@@ -590,6 +591,11 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         }
         if (left <= 0) return result(d, start, 'steps');
         if (until !== undefined && d.t >= until * (1 - 1e-6)) return result(d, start, 'time');
+        // Burning found by a run that only watches for it: stop, for the switch to all the network's species.
+        if (s.burnSwitch?.() != null) {
+          await drain();
+          return result(d, start, 'burn');
+        }
         // Held at the end time (or at `until`, a hair short of it in single precision). The
         // clock's dt is that of the last step, so only a step taken here tells.
         if (d.dt === 0 && rounds > 0) {
@@ -864,6 +870,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
           throw e;
         }
         if (r.stopped === 'timeout') { stopped = 'timeout'; break; }
+        if (r.stopped === 'burn') { stopped = 'burn'; break; }
         // A held clock that took no step since the last frame is at that frame's boundary
         // again: this frame time is nearest to it too, and is skipped, not recorded twice.
         if (r.steps !== frameSteps) await frame();
@@ -1220,7 +1227,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * no argument, the file athdfPut has put together: a large file is past the longest string
      * the browser takes in one piece.
      */
-    loadAthdf: (base64?: string) =>
+    loadAthdf: (base64?: string, opts: { switchBurn?: boolean } = {}) =>
       serial(async () => {
         let bytes: Uint8Array;
         if (base64 !== undefined) bytes = fromBase64(base64);
@@ -1231,7 +1238,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
         incoming = null;
         let warnings: string[] = [];
         await built(async () => {
-          warnings = await app.importAthdf(bytes);
+          warnings = await app.importAthdf(bytes, opts);
         });
         return { ...(await state()), warnings };
       }),
@@ -1317,14 +1324,14 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
     /** The GPU memory the adaptive mesh may use, in bytes: what a caller sizing a view-only load (snapshotIn's `view`) plans against. */
     viewBudget: () => serial(async () => memoryBudget()),
     /** Start a run from the snapshot snapshotIn() and snapshotPut() put together, as loadAthdf() does from a file. */
-    loadSnapshot: () =>
+    loadSnapshot: (opts: { switchBurn?: boolean } = {}) =>
       serial(async () => {
         if (!incomingSnapshot) throw new Error('no snapshot is set out: call snapshotIn first');
         const { snap } = incomingSnapshot;
         incomingSnapshot = null;
         let warnings: string[] = [];
         await built(async () => {
-          warnings = await app.importSnapshot(snap);
+          warnings = await app.importSnapshot(snap, opts);
         });
         return { ...(await state()), warnings };
       }),

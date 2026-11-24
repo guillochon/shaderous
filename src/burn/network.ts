@@ -52,7 +52,21 @@ export interface NetworkBurnSpec {
    * use f = 0.1, and find it leaves the result alone for f up to about 0.4. 0 or none: no limit.
    */
   limiter?: number;
+  /**
+   * With only some of the network's species (WATCH_SPECIES: he4, c12, o16), nothing burns: the
+   * run watches instead (NetWatchPass) and stops for the switch to all thirteen (stopped
+   * 'burn') once the energy the network's reactions would release in a cell over a step passes
+   * this share of the cell's internal energy (default 0.1).
+   */
+  switchAt?: number;
 }
+
+/** The species a run that watches for burning (NetworkBurnSpec.switchAt) carries: the network's first three. */
+export const WATCH_SPECIES: readonly string[] = ['he4', 'c12', 'o16'];
+
+/** A network burn with only the watched species: it watches, and does not burn. */
+export const watchesOnly = (species: readonly string[] | undefined): boolean =>
+  !!species && species.length === WATCH_SPECIES.length && species.every((k, i) => k === WATCH_SPECIES[i]);
 
 /**
  * The <burn_grid> slot on a uniform grid: invocation gid is texel gid, and every cell is P.dx
@@ -259,6 +273,113 @@ export function netStep(logRho: number, logT: number, logDt: number, Xin: readon
 
 /** Energy released per gram (erg/g) by a change D in mass fractions. */
 export const netEnergy = (D: readonly number[]): number => 1e18 * D.reduce((s, d, i) => s + d * NET_DATA.q[i], 0);
+
+// ---- The energy rate of a cell of helium, carbon and oxygen ----
+//
+// A run that carries only he4, c12 and o16 (WATCH_SPECIES) does not burn, but watches for the
+// moment burning would matter: the energy that the network's reactions release per gram and
+// second at a cell's density, temperature and composition, eps = 1e18 sum_t Q_t r_t, where r_t
+// is a reaction's rate (the term of the reference's dY/dt the network takes as an input, in
+// mol/g/s) and Q_t = sum_i q_i A_i nu_i its release, nu_i the species it uses up and makes. In
+// such a cell only the eight reactions below have rates other than zero; the others need a
+// species it does not hold. Each is matched against its term by its reactants, so that a
+// change in the network's data does not shift them unseen.
+
+/** The reactions of a cell of he4, c12 and o16: their reactants (as the term's powers and density power) and the species they change (index: nu). */
+const WATCH_REACTIONS: { powers: string; nrho: number; nu: Record<number, number> }[] = [
+  { powers: '[[0,1],[1,1]]', nrho: 1, nu: { 0: -1, 1: -1, 2: 1 } }, // c12(a,g)o16
+  { powers: '[[2,1]]', nrho: 0, nu: { 2: -1, 0: 1, 1: 1 } }, // o16(g,a)c12
+  { powers: '[[0,1],[2,1]]', nrho: 1, nu: { 0: -1, 2: -1, 3: 1 } }, // o16(a,g)ne20
+  { powers: '[[1,2]]', nrho: 1, nu: { 1: -2, 3: 1, 0: 1 } }, // c12 + c12 -> ne20 + a
+  { powers: '[[1,1],[2,1]]', nrho: 1, nu: { 1: -1, 2: -1, 4: 0.5, 0: 0.5, 5: 0.5 } }, // c12 + o16 -> mg24 + a (half), si28 (half)
+  { powers: '[[2,2]]', nrho: 1, nu: { 2: -2, 5: 1, 0: 1 } }, // o16 + o16 -> si28 + a
+  { powers: '[[0,3]]', nrho: 2, nu: { 0: -3, 1: 1 } }, // triple alpha
+  { powers: '[[1,1]]', nrho: 0, nu: { 1: -1, 0: 3 } }, // c12 -> 3 a
+];
+
+/** The network's terms that a cell of he4, c12 and o16 runs, each with its release Q (1e18 erg per mol). */
+function watchTerms(): { term: number; Q: number }[] {
+  const terms = NET_DATA.terms as readonly { powers: readonly (readonly number[])[]; nrho: number }[];
+  return WATCH_REACTIONS.map((r) => {
+    const found = terms.findIndex((t) => JSON.stringify(t.powers) === r.powers && t.nrho === r.nrho);
+    if (found < 0) throw new Error(`the network has no reaction of ${r.powers} at density power ${r.nrho}`);
+    const Q = Object.entries(r.nu).reduce((q, [i, n]) => q + NET_DATA.q[+i] * NET_DATA.A[+i] * n, 0);
+    return { term: found, Q };
+  });
+}
+
+/** ln of each of the network's terms (mol/g/s) at a density, temperature and composition, float64. */
+function termLogs(logRho: number, logT: number, Xin: readonly number[]): number[] {
+  // The network's last 32 inputs are these, scaled: (clamp(ln / ln 10, -30, 10) + 10) / 20.
+  const f = netFeatures(logRho, logT, NET_DATA.logDt[0], Xin);
+  return f.slice(f.length - NET_DATA.terms.length).map((v) => (20 * v - 10) * LN10);
+}
+
+/** The energy (erg/g/s) the network's reactions release at a density (g/cm^3), temperature (K) and 13 mass fractions, from the eight a cell of he4, c12 and o16 runs, float64. */
+export function netEnergyRate(logRho: number, logT: number, X: readonly number[]): number {
+  const ln = termLogs(logRho, logT, X);
+  return 1e18 * watchTerms().reduce((e, { term, Q }) => e + Q * Math.exp(ln[term]), 0);
+}
+
+/**
+ * The <burn_watch> slot of hydro/burn_watch.wgsl: net_watch_rate(rho, T, xhe, xc, xo), the energy
+ * (erg/g/s) the network's reactions release in a cell of he4, c12 and o16, as netEnergyRate.
+ */
+export function netWatchSlot(): string {
+  const used = watchTerms();
+  const lines: string[] = [];
+  const screens = new Map<string, string>();
+  const screen = (k: string): string => {
+    let v = screens.get(k);
+    if (!v) {
+      const p = PAIRS[k];
+      v = `s_${k}`;
+      lines.push(`  let ${v} = screen5(sc, ${wf(p.bb)}, ${wf(p.zs13)}, ${wf(p.zhat)}, ${wf(p.zhat2)}, ${wf(p.lzav)}, ${wf(p.aznut)});`);
+      screens.set(k, v);
+    }
+    return v;
+  };
+  const rate = (sets: Sets): string => {
+    const terms = sets.map((a) => `dot(vec4<f32>(${wf(a[0])}, ${wf(a[1])}, ${wf(a[2])}, ${wf(a[3])}), b0) + dot(vec3<f32>(${wf(a[4])}, ${wf(a[5])}, ${wf(a[6])}), b1)`);
+    return terms.length === 1 ? terms[0] : terms.slice(1).reduce((acc, t) => `logaddexp(${acc}, ${t})`, terms[0]);
+  };
+  const lny = ['lny0', 'lny1', 'lny2'];
+  used.forEach(({ term, Q }, k) => {
+    const t = NET_DATA.terms[term] as { coef: number; nrho: number; powers: readonly (readonly number[])[]; rate: { sets: Sets; screen?: readonly string[] } };
+    const lam = [rate(t.rate.sets), ...(t.rate.screen ?? []).map(screen)].join(' + ');
+    const ys = t.powers.map(([i, n]) => (n === 1 ? ` + ${lny[i]}` : ` + ${wf(n)} * ${lny[i]}`)).join('');
+    const rho = t.nrho ? ` + ${wf(t.nrho)} * ln_rho` : '';
+    lines.push(`  e += ${wf(Q)} * exp(min(${lam} + ${wf(Math.log(t.coef))}${rho}${ys}, 80.0)); // term ${term}`);
+    void k;
+  });
+  // Screening sees the three species alone: the others are 1e-30, as the network's inputs have them.
+  const zs = [NET_DATA.Z[0], NET_DATA.Z[1], NET_DATA.Z[2]];
+  return `// Generated by src/burn/network.ts (netWatchSlot) from aprox13_net.ts.
+const LN10: f32 = 2.30258509;
+const SCREEN_CO2: f32 = ${wf(NET_DATA.co2)};
+const SCREEN_AA: f32 = ${wf(NET_DATA.aaFac)};
+fn net_watch_rate(rho: f32, T: f32, xhe: f32, xc: f32, xo: f32) -> f32 {
+  let y0 = max(xhe, 0.0) / ${wf(NET_DATA.A[0])};
+  let y1 = max(xc, 0.0) / ${wf(NET_DATA.A[1])};
+  let y2 = max(xo, 0.0) / ${wf(NET_DATA.A[2])};
+  let lny0 = log(y0 + 1e-30);
+  let lny1 = log(y1 + 1e-30);
+  let lny2 = log(y2 + 1e-30);
+  let ytot = max(y0, 1e-30) + max(y1, 1e-30) + max(y2, 1e-30) + ${wf(10e-30)};
+  let zy = ${wf(zs[0])} * max(y0, 1e-30) + ${wf(zs[1])} * max(y1, 1e-30) + ${wf(zs[2])} * max(y2, 1e-30);
+  let z2y = ${wf(zs[0] ** 2)} * max(y0, 1e-30) + ${wf(zs[1] ** 2)} * max(y1, 1e-30) + ${wf(zs[2] ** 2)} * max(y2, 1e-30);
+  let sc = screen_moments(T, rho, ytot, zy / ytot, z2y / ytot);
+  let ln_rho = log(rho);
+  let T9 = clamp(T * 1e-9, 0.01, 10.0);
+  let t13 = pow(T9, 1.0 / 3.0);
+  let b0 = vec4<f32>(1.0, 1.0 / T9, 1.0 / t13, t13);
+  let b1 = vec3<f32>(T9, T9 * t13 * t13, log(T9));
+  var e = 0.0;
+${lines.join('\n')}
+  return 1e18 * e;
+}
+`;
+}
 
 // ---- WGSL ----
 

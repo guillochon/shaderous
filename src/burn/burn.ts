@@ -9,7 +9,8 @@ import { bindGroup, computePipeline, type Bindable } from '../gpu/device';
 import { assemble } from '../gpu/shaders';
 import { speciesConst } from '../species/species';
 import type { Eos } from '../eos/eos';
-import { burnHeatSlot, NetBurnPass, netUnits, type NetworkBurnSpec } from './network';
+import { burnHeatSlot, NetBurnPass, netUnits, watchesOnly, type NetworkBurnSpec } from './network';
+import { NetWatchPass } from './watch';
 import type { Composition } from '../units/composition';
 import type { UnitSystem } from '../units/units';
 
@@ -154,6 +155,10 @@ export interface Burner {
    */
   encode(pass: GPUComputePassEncoder, s: number, q: number, dispatch?: (pass: GPUComputePassEncoder) => void): void;
   destroy(): void;
+  /** A watch for burning (burn/watch.ts): read what the last steps found, after a batch of steps is submitted. */
+  poll?(): void;
+  /** A watch for burning: the share of a cell's internal energy that has passed its threshold, or null. */
+  triggered?(): number | null;
 }
 
 /** The problem's side of a burn pass: its species, and for the network its units and composition. */
@@ -165,7 +170,8 @@ export interface BurnProblem {
 
 /** The burn pass for a spec of either kind. */
 export async function createBurnPass(d: GPUDevice, spec: AnyBurnSpec, p: BurnProblem, t: BurnTargets): Promise<Burner> {
-  if (isNetworkBurn(spec)) return NetBurnPass.create(d, spec, p.species, netUnits(p.units, p.composition), t);
+  // With only he4, c12 and o16 the network's burning is watched for, not done (burn/watch.ts).
+  if (isNetworkBurn(spec)) return watchesOnly(p.species) ? NetWatchPass.create(d, spec, p.species, netUnits(p.units, p.composition), t) : NetBurnPass.create(d, spec, p.species, netUnits(p.units, p.composition), t);
   if (t.comp) throw new Error('burning one reaction with species that set the equation of state is not supported');
   return BurnPass.create(d, spec, p.species, t);
 }

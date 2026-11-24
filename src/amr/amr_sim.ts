@@ -1749,7 +1749,9 @@ export class AmrSim implements Simulation {
         // From a snapshot: the mesh it was saved on. A block is refined wherever the snapshot
         // is finer than it at the center of one of its children.
         if (levelAt) {
-          if (!this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1)) break;
+          // In tier order (amr/zones.ts), so that if the file's mesh does not fit this run's
+          // budget (a restart with more species, whose blocks are larger) the zones keep theirs.
+          if (!this.tree.adapt((b) => (this.finerInSnapshot(b, levelAt) ? 1 : 0), 0.5, -1, tier)) break;
           continue;
         }
         // A block kept from the last pass was sampled at least as finely then (the budget is
@@ -3023,7 +3025,12 @@ export class AmrSim implements Simulation {
   }
 
   /** Call after submitting an encoder that encodeSteps() wrote to. */
+  burnSwitch(): number | null {
+    return this.burn?.triggered?.() ?? null;
+  }
+
   submitted() {
+    this.burn?.poll?.();
     this.pollBins();
     if (!this.wantMap) return;
     this.wantMap = false;

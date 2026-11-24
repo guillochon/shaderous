@@ -589,7 +589,7 @@ export function compileSetup(input: SetupSpec): Compiled {
       : burn
         ? (params): AnyBurnSpec => {
             const b = at(params).physics!.burn!;
-            return 'network' in b ? { network: b.network, inShocks: !!b.inShocks, limiter: b.limiter ?? 0 } : { fuel: b.fuel, ash: b.ash, q: b.q, ea: b.ea, k: b.k, inShocks: b.inShocks ?? true };
+            return 'network' in b ? { network: b.network, inShocks: !!b.inShocks, limiter: b.limiter ?? 0, ...(b.switchAt !== undefined ? { switchAt: b.switchAt } : {}) } : { fuel: b.fuel, ash: b.ash, q: b.q, ea: b.ea, k: b.k, inShocks: b.inShocks ?? true };
           }
         : undefined,
     damping,

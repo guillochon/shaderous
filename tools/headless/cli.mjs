@@ -53,6 +53,7 @@ if (o.help || !command) {
 }
 if (!['run', 'sweep', 'describe'].includes(command)) usage(`unknown command "${command}"\n\n${HELP}`);
 if (o['low-priority']) lowerPriority();
+if (o['switch-burn'] && !o.from) usage('--switch-burn goes with --from: it carries on from the checkpoint of a run that watched for burning');
 if (o.from && (setupArg || o.setup || o.problem || o.dim || o.n || o.amr || o.set?.length || o.vary?.length || command === 'sweep')) {
   usage('--from carries on a run as its file has it: give no setup, --setup, --problem, --dim, --n, --amr, --set or --vary with it, and use run, not sweep');
 }
@@ -125,7 +126,7 @@ async function runOne(session, q, dir) {
   if (wallMs !== undefined && !(wallMs > 0)) fail('--wall must be positive');
   // A setup document's mesh files, from its folder (session.mjs sendMeshFiles).
   if (setupDocument && !o.from) await sendMeshFiles(call, setupDocument, path.dirname(path.resolve(o.setup)));
-  const st = o.from ? await uploadAthdf(call, o.from) : await call('load', q.toString(), ...(setupDocument ? [setupDocument] : []));
+  const st = o.from ? await uploadAthdf(call, o.from, o['switch-burn'] ? { switchBurn: true } : {}) : await call('load', q.toString(), ...(setupDocument ? [setupDocument] : []));
   for (const w of st.warnings ?? []) log(`  ${o.from}: ${w}`);
   mkdirSync(dir, { recursive: true });
   const until = num(o.until, 'until') ?? (o.steps === undefined ? st.tEnd : undefined);

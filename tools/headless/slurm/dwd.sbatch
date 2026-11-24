@@ -23,6 +23,12 @@
 #              simulated time (default 0: none)
 #   MARGIN     seconds left at the end of a job for the last checkpoint (default 1800)
 #   MAX_JOBS   the most jobs the chain may run (default 20)
+#   MEM        host memory for the jobs that follow (sbatch --mem, such as 64G for a run with the
+#              aprox13 species); unset, the script's own
+# A setup that watches for burning (he4, c12 and o16 alone with the network's burning:
+# burn/watch.ts) stops with 'burn' once it is found: the next job carries on from that
+# checkpoint with all thirteen of the network's species (the runner's --switch-burn), and the
+# chain goes on from there as usual. SWITCH_BURN is the chain's own: 1 for that one job.
 # Partition: umd-cscdr-gpu, the UMass Dartmouth groups' own (A100 80 GB, never preempted, jobs of
 # up to 5 days). Without access to it: sbatch -p gpu-highvram --time=2-00:00:00 (or with
 # gpu-preempt-highvram as well, where a job can be preempted: it is then requeued and loses only
@@ -52,6 +58,9 @@ export RUN_DIR="${RUN_DIR:-$SHADEROUS_DIR/runs/dwd-$N}"
 export UNTIL="${UNTIL:-100}" SHOT_EVERY="${SHOT_EVERY:-1800}" ATHDF_EVERY="${ATHDF_EVERY:-4}"
 export KEEP="${KEEP:-2}" KEEP_EVERY="${KEEP_EVERY:-0}" MARGIN="${MARGIN:-1800}" MAX_JOBS="${MAX_JOBS:-20}"
 export JOB_NUMBER=$(( ${JOB_NUMBER:-0} + 1 ))
+switch_burn="${SWITCH_BURN:-0}"
+# Only the job after a 'burn' stop switches: the jobs this one submits start without it.
+export SWITCH_BURN=0
 ckpt() { in_container node tools/headless/slurm/checkpoints.mjs "$@"; }
 
 if [ -e "$RUN_DIR/DONE" ]; then echo "$RUN_DIR/DONE exists: nothing to do"; exit 0; fi
@@ -67,6 +76,10 @@ echo "from: ${from:-the initial conditions}"
 
 if [ -n "$from" ]; then
   start=(--from "$from")
+  if [ "$switch_burn" = "1" ]; then
+    start+=(--switch-burn)
+    echo "switching to all thirteen of the network's species"
+  fi
 else
   start=(--setup "$SETUP" --n "$N" --amr "$AMR")
 fi
@@ -93,9 +106,16 @@ ckpt prune "$RUN_DIR" "$KEEP" "$KEEP_EVERY"
 
 stopped=$(ckpt stopped "$RUN_DIR")
 echo "runner exit $status, stopped: ${stopped:-unknown}"
-if [ "$status" -eq 0 ] && [ "$stopped" = "wall" ] && [ "$JOB_NUMBER" -lt "$MAX_JOBS" ]; then
+next() {
+  local limit
   limit=$(scontrol show job "$SLURM_JOB_ID" -o | grep -oP 'TimeLimit=\K\S+')
-  sbatch -p "$SLURM_JOB_PARTITION" ${limit:+--time="$limit"} "$SHADEROUS_DIR/tools/headless/slurm/dwd.sbatch"
+  sbatch -p "$SLURM_JOB_PARTITION" ${limit:+--time="$limit"} ${MEM:+--mem="$MEM"} "$SHADEROUS_DIR/tools/headless/slurm/dwd.sbatch"
+}
+if [ "$status" -eq 0 ] && [ "$stopped" = "wall" ] && [ "$JOB_NUMBER" -lt "$MAX_JOBS" ]; then
+  next
+elif [ "$status" -eq 0 ] && [ "$stopped" = "burn" ] && [ "$JOB_NUMBER" -lt "$MAX_JOBS" ]; then
+  echo "burning found: the next job carries on with all thirteen species"
+  SWITCH_BURN=1 next
 elif [ "$stopped" = "time" ]; then
   touch "$RUN_DIR/DONE"
   echo "reached t = $UNTIL"

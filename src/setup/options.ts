@@ -177,6 +177,8 @@ export const FACTS: Record<string, { label: string; of: (s: SetupSpec) => Value;
   'species.nuclides': { label: 'Species that are all nuclides (they set the equation of state)', of: (s) => { const sp = s.physics?.species; return speciesNuclides(sp === 'aprox13' ? ['he4'] : sp) !== null; } },
   'species.fuelAsh': { label: 'The species fuel and ash', of: (s) => Array.isArray(s.physics?.species) && ['fuel', 'ash'].every((n) => (s.physics!.species as string[]).includes(n)) },
   'species.aprox13': { label: 'The 13 species of the burning network', of: (s) => s.physics?.species === 'aprox13' },
+  // (Or only its first three: the run then watches for burning and stops for the switch to all thirteen, burn/watch.ts.)
+  'species.network': { label: 'The 13 species of the burning network, or he4, c12 and o16 alone', of: (s) => s.physics?.species === 'aprox13' || (Array.isArray(s.physics?.species) && s.physics.species.join() === 'he4,c12,o16') },
   'burn.network': { label: 'Network burning', of: (s) => !!s.physics?.burn && 'network' in s.physics.burn },
   'radiation': { label: 'Radiation transport', of: (s) => (s.physics?.radiation ?? 'off') !== 'off' },
   'magnetic': { label: 'A magnetic field', of: (s) => parts(s).some((p) => p.kind === 'field' || (p.kind === 'star' && !!p.field) || (p.kind === 'disk' && !!p.loops) || !!flowDef(p)?.potential || !!flowDef(p)?.face) },
@@ -350,7 +352,7 @@ export const OPTIONS: Option[] = [
     requires: [{ fact: 'eos.energy' }],
     control: { type: 'group', optional: true,
       forms: { label: 'Reaction', tip: 'What burns, and at what rate', choices: [
-        { value: 'network', label: 'Network (aprox13)', tip: 'Nuclear burning of the 13-isotope alpha chain, by its trained network', keys: ['network', 'limiter'], requires: [{ fact: 'species.aprox13' }, { fact: 'units' }], excludes: [{ fact: 'physics.cosmology', reason: 'Not with comoving coordinates: the gas is in code units there, and the network would read it in the box’s physical ones (random test seed 10601)' }] },
+        { value: 'network', label: 'Network (aprox13)', tip: 'Nuclear burning of the 13-isotope alpha chain, by its trained network', keys: ['network', 'limiter', 'switchAt'], requires: [{ fact: 'species.network' }, { fact: 'units' }], excludes: [{ fact: 'physics.cosmology', reason: 'Not with comoving coordinates: the gas is in code units there, and the network would read it in the box’s physical ones (random test seed 10601)' }] },
         { value: 'arrhenius', label: 'Fuel to ash (Arrhenius)', tip: 'One reaction, fuel to ash: the fuel fraction f falls as df/dt = -k f exp(-Ea / T), and each unit of mass burned releases q', keys: ['fuel', 'ash', 'q', 'ea', 'k'], set: { inShocks: true }, excludes: [{ fact: 'species.nuclides', reason: 'Not available where every species is a nuclide (he4, c12, ...): those set the equation of state, which one reaction from fuel to ash cannot. Name the fuel and ash species otherwise' }] },
       ] },
       fields: [
@@ -362,6 +364,7 @@ export const OPTIONS: Option[] = [
       { path: 'k', label: 'Rate constant k', tip: 'The rate per unit time of fuel far above its activation temperature: df/dt = -k f exp(-Ea / T)', page: 'gas', control: num(0, undefined, { factor: 2 }), apply: 'restart', default: 1 },
       { path: 'inShocks', label: 'Burn inside shocks', tip: 'Let cells the shock detector flags burn. Off, as in most supernova codes: a captured shock is a few cells of numerical smearing. Fuel to ash burning burns in them unless told not to', page: 'gas', control: check, apply: 'restart', default: false },
       { path: 'limiter', label: 'Burning limiter f', tip: 'No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013). 0 switches it off', page: 'gas', control: num(0, 1, { step: 0.05 }), apply: 'restart', default: 0 },
+      { path: 'switchAt', label: 'Switch at', tip: 'With the species he4, c12 and o16 alone: nothing burns, and the run stops for the switch to all thirteen (a checkpoint, restarted with them) once the energy the network\u2019s reactions would release in a cell over a step passes this share of the cell\u2019s internal energy', page: 'gas', control: num(0, 10, { factor: 2 }), apply: 'restart', default: 0.1 },
     ] } },
   { path: 'physics.floors.rho', label: 'Density floor', tip: 'No cell is thinner than this', page: 'gas', control: num(0, undefined, { factor: 10, quantity: 'density' }), apply: 'restart', default: 1e-10 },
   { path: 'physics.floors.p', label: 'Pressure floor', tip: 'No cell has less pressure than this', page: 'gas', control: num(0, undefined, { factor: 10 }), apply: 'restart', default: 1e-14 },

@@ -309,9 +309,11 @@ airfoil `.dat` or an SVG outline), by that name, as base64. A `.gltf` whose buff
 files needs each of them too, by the URI the `.gltf` gives it. The runner and the MCP server do
 this for you, from the folder of the setup document ([headless.md](headless.md)).
 
-### `loadAthdf(base64?) → state`
+### `loadAthdf(base64?, opts?) → state`
 
-Starts a run from an `.athdf` file, paused at the file's time. With no argument, from the file
+Starts a run from an `.athdf` file, paused at the file's time. `opts.switchBurn`: the file is of a
+run that watched for burning (he4, c12 and o16 alone, stopped `'burn'`); it carries on with all
+the network's species, the other ten at zero. With no argument, from the file
 `athdfPut` has put together (for a file too large for one string; see `athdf`). A file Shaderous wrote carries
 its own setup, so the run continues exactly where the file left off. A file from another code
 (Athena++, or anything else that writes the same layout) is loaded into the current preset at
@@ -388,7 +390,9 @@ is held at a stop). `stopped` is one of:
 - `'steps'`: the step count was reached;
 - `'time'`: the clock reached `until`;
 - `'end'`: the run reached its end time (`tEnd`), and the state is now `finished`;
-- `'timeout'`: `timeoutMs` ran out.
+- `'timeout'`: `timeoutMs` ran out;
+- `'burn'`: a run that watches for burning (he4, c12 and o16 with the network's burning, docs/setups.md) found it:
+  it is to be carried on with all the network's species (`loadSnapshot({ switchBurn: true })`, the runner's `--switch-burn`).
 
 To run past `tEnd`, load the setup with a later `tend`, or `control('tend', '')` for no end
 time.
@@ -861,7 +865,7 @@ the arrays, and each array's `key` (`levels`, `locations`, `faces`, `data.<varia
 (`int32` or `float32`) and `length`; `snapshotChunk(key, offset, length) → { offset, end, base64 }`
 reads an array's bytes out; `snapshotDone()` lets the state go. Loading goes the other way:
 `snapshotIn(header, arrays)` sets out the arrays, `snapshotPut(key, offset, base64)` fills them,
-and `loadSnapshot()` starts the run from them, as `loadAthdf()` does from a file.
+and `loadSnapshot(opts?)` starts the run from them, as `loadAthdf()` does from a file (`opts` as there).
 
 ### `athdfPut(offset, base64, total) → { got, total }`
 

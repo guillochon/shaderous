@@ -85,8 +85,23 @@ gas); `frame`, `rotation`, `shear` (a shearing box), `cosmology` (comoving coord
 `jeansFloor`, `jeansCells`, `vcycles`, `gravEnergyFlux`; `composition` (a name, or
 `{ "name", "X": { species: fraction }, "ionization" }`); `species` (names, or `"aprox13"`; with
 ANEOS, material names such as `pyrolite` and `fe85si15`), `speciesGamma`; `burn`
-(`{ "network": "aprox13", "inShocks", "limiter" }`, or `{ "fuel", "ash", "q", "ea", "k" }`);
+(`{ "network": "aprox13", "inShocks", "limiter", "switchAt" }`, or `{ "fuel", "ash", "q", "ea", "k" }`);
 `toolScale`. The choices each takes are under [Every key](#every-key).
+
+**Watching for burning.** The network's thirteen species cost a run their memory long before
+anything burns: a helium donor and a carbon-oxygen accretor need only he4, c12 and o16 until
+the stream heats the accreted helium. A setup with `"species": ["he4", "c12", "o16"]` and the
+network's burning does not burn. In place of the network's pass a watch (burn/watch.ts) works
+out, in each cell hot and dense enough to burn, the energy the network's reactions would
+release over the step: its eight reactions that these three species take part in, each rate the
+term the network takes as an input, within 30% of what the network releases over a short step.
+Once that passes `switchAt` (default 0.1) of a cell's internal energy, the run stops (the
+runner's `stopped` is `burn`) and writes its last outputs, a checkpoint among them. It carries
+on from there with all thirteen species: `--from FILE --switch-burn` sets the species to
+`aprox13`, the other ten starting at zero, and the network burns. The chain of jobs
+(tools/headless/slurm/dwd.sbatch) does this by itself. With more species each block is larger
+and the budget holds fewer: the checkpoint's mesh is rebuilt in the order of the refinement
+zones' tiers, so that what gives way is the lowest tier's.
 
 The equations of state (`eos`) are `ideal`, `barotropic`, `liquid` (weakly compressible,
 p = c₀² (ρ - ρ₀)), `gas_radiation`, `degenerate`, `ionizing`, `helmholtz` (white dwarf
@@ -502,7 +517,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.composition` | Composition | `solar`, `solarNeutral`, `hydrogen`, `carbonOxygen`. Default `solar` | What the gas is made of, which sets the kelvin scale and the physical constants of the equation of state: solar (fully ionized), solarNeutral, hydrogen or carbonOxygen. The hydrogen and helium equation of state has tables for the solar ones and for hydrogen |
 | `physics.species` | Species | a list of names | Species whose mass fractions the gas carries, by name (he4, c12, ...), separated by commas; or aprox13 for the burning network’s thirteen. None by default |
 | `physics.speciesGamma` | Gamma by species | `{ species: gamma }` | Adiabatic index of each species the gas carries, by name, where the species set the equation of state (a mixture of ideal gases): a species not listed takes the gas’s gamma |
-| `physics.burn` | Burning | an object, which may be left out, in one of 2 shapes: network (aprox13) (`network`, `limiter`); or fuel to ash (arrhenius) (`fuel`, `ash`, `q`, `ea`, `k`) | Burning of the gas, wherever it is hot and dense enough: nuclear, by the trained network of the 13-isotope alpha chain, or a single fuel to ash reaction at an Arrhenius rate |
+| `physics.burn` | Burning | an object, which may be left out, in one of 2 shapes: network (aprox13) (`network`, `limiter`, `switchAt`); or fuel to ash (arrhenius) (`fuel`, `ash`, `q`, `ea`, `k`) | Burning of the gas, wherever it is hot and dense enough: nuclear, by the trained network of the 13-isotope alpha chain, or a single fuel to ash reaction at an Arrhenius rate |
 | `physics.burn.network` | Network | `aprox13`. Default `aprox13` | The burning network |
 | `physics.burn.fuel` | Fuel | text. Default `fuel` | The species that burns: one the gas carries (Species) |
 | `physics.burn.ash` | Ash | text. Default `ash` | The species it burns to: one the gas carries (Species) |
@@ -511,6 +526,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `physics.burn.k` | Rate constant k | a number, at least 0. Default `1` | The rate per unit time of fuel far above its activation temperature: df/dt = -k f exp(-Ea / T) |
 | `physics.burn.inShocks` | Burn inside shocks | `true` or `false`. Default `false` | Let cells the shock detector flags burn. Off, as in most supernova codes: a captured shock is a few cells of numerical smearing. Fuel to ash burning burns in them unless told not to |
 | `physics.burn.limiter` | Burning limiter f | a number, 0 to 1. Default `0` | No cell takes in burning energy faster than f times its internal energy per sound crossing of the cell (Kushnir et al. 2013). 0 switches it off |
+| `physics.burn.switchAt` | Switch at | a number, 0 to 10. Default `0.1` | With the species he4, c12 and o16 alone: nothing burns, and the run stops for the switch to all thirteen (a checkpoint, restarted with them) once the energy the network’s reactions would release in a cell over a step passes this share of the cell’s internal energy |
 | `physics.floors.rho` | Density floor | a number, at least 0. Default `1e-10` | No cell is thinner than this |
 | `physics.floors.p` | Pressure floor | a number, at least 0. Default `1e-14` | No cell has less pressure than this |
 | `physics.fluff.rho` | Tenuous below density | a number, at least 0. Default `0` | Gas thinner than this has its heat and speed capped (the next two fields), so a few hot or fast cells of ambient gas cannot set the timestep for the whole grid. Not conservative, but such gas carries next to no mass. 0 is off |

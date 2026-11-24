@@ -297,6 +297,12 @@ export interface Simulation {
   /** Call after submitting an encoder that encodeSteps() wrote to. */
   submitted(): void;
   /**
+   * A run that watches for burning (burn/watch.ts): the share of a cell's internal energy that
+   * the network's reactions would release in a step, once it has passed the setup's threshold
+   * (the run should stop for the switch to all the network's species), else null.
+   */
+  burnSwitch?(): number | null;
+  /**
    * When encodeSteps() took fewer steps than asked because it is waiting on a refinement check,
    * a promise that settles once the check is answered and stepping can go on; otherwise null.
    */
@@ -2934,7 +2940,13 @@ export class Sim implements Simulation {
     return count;
   }
 
-  submitted() {}
+  submitted() {
+    this.burn?.poll?.();
+  }
+
+  burnSwitch(): number | null {
+    return this.burn?.triggered?.() ?? null;
+  }
 
   stepsResume(): Promise<void> | null {
     return null;

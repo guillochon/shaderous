@@ -22,6 +22,7 @@ import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
 import { syncRadiationEos } from '../radiation/radiation';
 import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec } from '../sim';
+import { expandSpecies, switchedSetup } from '../burn/watch';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
@@ -1989,9 +1990,18 @@ async function importState(file: File) {
  * Start a run from the bytes of an .athdf file: one of ours with its settings, or another
  * code's. Returns what an older file of ours could not carry over as written.
  */
-async function importAthdf(bytes: Uint8Array): Promise<string[]> {
+async function importAthdf(bytes: Uint8Array, opts: ImportOptions = {}): Promise<string[]> {
   const { readAthdf } = await athdfModule();
-  return importSnapshot(await readAthdf(bytes));
+  return importSnapshot(await readAthdf(bytes), opts);
+}
+
+/**
+ * How a snapshot is imported. `switchBurn`: the file is of a run that watched for burning (he4,
+ * c12 and o16 alone, burn/watch.ts), and it continues with all the network's species, the
+ * others starting at zero.
+ */
+interface ImportOptions {
+  switchBurn?: boolean;
 }
 
 /** What a view-only load merged, for the setup summary ('' when nothing was). */
@@ -2195,7 +2205,7 @@ async function viewProbe(points: number[][]) {
 }
 
 /** Start the run from a snapshot (one read from an .athdf file), as importAthdf does. */
-async function importSnapshot(snap: Snapshot): Promise<string[]> {
+async function importSnapshot(snap: Snapshot, opts: ImportOptions = {}): Promise<string[]> {
   {
     const cubic = snap.rootSize[0] === snap.rootSize[1] && (snap.ndim === 2 || snap.rootSize[2] === snap.rootSize[0]);
     const width = snap.hi.map((h, a) => h - snap.lo[a]);
@@ -2211,13 +2221,21 @@ async function importSnapshot(snap: Snapshot): Promise<string[]> {
       let meta = snap.meta!;
       // A file that carries its setup restarts as itself, whatever the preset files have become
       // since: as its preset if it still is that preset, else as a custom setup.
-      const { spec } = meta.setup ? readSetup(meta.setup, (id) => PRESET_FILES[id]) : { spec: null };
+      let { spec } = meta.setup ? readSetup(meta.setup, (id) => PRESET_FILES[id]) : { spec: null };
+      if (opts.switchBurn) {
+        if (!spec) throw new Error('this file carries no setup to switch to all the network\u2019s species');
+        spec = switchedSetup(spec);
+        const added = expandSpecies(snap.data);
+        warnings.push(`switched to all the network's species: ${added.join(', ')} start at zero`);
+      }
       if (spec) {
         const q = new URLSearchParams(meta.query);
         q.set('problem', adopt(spec));
         meta = { ...meta, query: q.toString() };
       }
+      const switched = warnings;
       ({ link, warnings } = snapshotSettings(meta, BUILD));
+      warnings = [...switched, ...warnings];
     }
     else link = decodeLink(new URLSearchParams(linkQuery()));
     if (!own) {
