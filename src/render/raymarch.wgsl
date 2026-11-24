@@ -125,6 +125,29 @@ fn iso_shade(p: vec3<f32>, rd: vec3<f32>, base: vec3<f32>, exact: bool) -> vec3<
   return c * (0.18 + 0.62 * diff + 0.25 * fill) + 0.35 * spec;
 }
 
+// The ball of the tool in hand where it meets an isosurface (at h, d along the ray rd, with
+// normal n): how much of a line about three pixels wide covers it, drawn opaque in RING over the
+// surface, whatever the surfaces' own opacity. The width is held on the screen, not in the box:
+// where the surface is seen slanting, a step of a pixel moves along it farther, and across the
+// ball's surface faster, than a pixel's width (worked out by hand: derivatives are not to be had
+// in the march's loop).
+const RING = vec3<f32>(1.0, 0.92, 0.55);
+fn ball_ring(h: vec3<f32>, d: f32, n: vec3<f32>, rd: vec3<f32>) -> f32 {
+  if (C.tb.w <= 0.0) { return 0.0; }
+  let r = h - C.tb.xyz;
+  let off = abs(length(r) - C.tb.w);
+  let u = normalize(r + vec3<f32>(1.0e-12));
+  let px = C.o.y * d;   // a pixel there, across the ray
+  // How far the hit moves along the surface for a pixel's step right and up, and the change in
+  // distance from the ball's center that makes.
+  let nr = dot(n, rd);
+  let den = select(-1.0, 1.0, nr >= 0.0) * max(abs(nr), 0.05);
+  let gr = dot(u, C.right.xyz - rd * dot(n, C.right.xyz) / den);
+  let gu = dot(u, C.up.xyz - rd * dot(n, C.up.xyz) / den);
+  let per = max(px * sqrt(gr * gr + gu * gu), 1.0e-9);
+  return 1.0 - smoothstep(1.0, 2.0, off / per);
+}
+
 @fragment
 fn fs(in: VOut) -> @location(0) vec4<f32> {
   let ro = C.eye.xyz;
@@ -270,8 +293,10 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
           }
           let neg = C.sc.x == 0.0 && v < zero;
           let sa = C.fwd.w * keep;
-          col += (1.0 - alpha) * sa * iso_shade(h, rd, level_color(k, neg), C.o.x != 0.0);
-          alpha += (1.0 - alpha) * sa;
+          let rw = ball_ring(h, dot(h - ro, rd), nh, rd);
+          let shade = iso_shade(h, rd, level_color(k, neg), C.o.x != 0.0);
+          col += (1.0 - alpha) * ((1.0 - rw) * sa * shade + rw * RING);
+          alpha += (1.0 - alpha) * max(sa, rw);
         }
       }
       fprev = f;

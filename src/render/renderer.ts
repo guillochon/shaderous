@@ -349,6 +349,8 @@ export class Renderer {
   hoverLevel = 0;
   /** Where the guides through a tool cross (in fractions of the box), or null for none. */
   guides: [number, number, number] | null = null;
+  /** Volume view: the ball of the tool in hand (center in fractions of the box, radius as a share of it), drawn where it meets the isosurfaces; null for none. */
+  ball: { pos: [number, number, number]; radius: number } | null = null;
   /**
    * Volume view: the path of a point mass being placed (gravity/preview.ts), drawn as a tube
    * with an arrowhead among the gas, and where the run's other masses go meanwhile, as
@@ -404,7 +406,7 @@ export class Renderer {
     this.ctx = canvas.getContext('webgpu')!;
     this.format = navigator.gpu.getPreferredCanvasFormat();
     this.ctx.configure({ device: this.device, format: this.format, alphaMode: 'opaque' });
-    this.cam = this.device.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+    this.cam = this.device.createBuffer({ size: 208, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.viewBuf = this.device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
     this.tf = this.device.createTexture({
       size: [256, 1],
@@ -830,7 +832,9 @@ export class Renderer {
         // The axes shown with their mirror images (mirrorShown); a spherical run's r_min / r_max,
         // negative if r is logarithmic (the slice draws the (R, z) half-plane, src/spherical.ts).
         ...mir.map((m) => (m ? 1 : 0)), sphViewParam(sim.cfg),
-        v.exact ? 1 : 0, 0, 0, 0,
+        v.exact ? 1 : 0, (2 * tan) / Math.max(1, this.canvas.height), 0, 0,
+        // The tool's ball, where it meets the isosurfaces.
+        ...(this.ball && v.contours ? [...this.ball.pos.map((c) => c - 0.5), this.ball.radius] : [0, 0, 0, 0]),
     ]);
     const parity = 4 * (sim.radCur ?? 0) + 2 * sim.cur + sim.speciesCur;
 
