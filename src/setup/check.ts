@@ -2,6 +2,7 @@
 // (options.ts ruleIssues) and the checks on values a list of options cannot express, each a plain
 // sentence with the path of the part or option it is about. Free of the DOM, and it never throws:
 // a document that cannot even be built is itself an issue.
+import { zoneOf } from './zones';
 import { tunnelParams } from './parts/tunnel';
 import { shadowOf } from './parts/region';
 import { extensionOf } from '../geometry';
@@ -130,6 +131,18 @@ function binaryIssues(spec: SetupSpec, parts: Part[], ids: string[], label: (i: 
 }
 
 /** How full a binary's stars are of their Roche lobes (Eggleton 1983): above 1 one pours gas onto its companion from the start. */
+/** Refinement zones (mesh.zones): one that cannot be placed, and zones on a grid that does not refine. */
+function zoneIssues(spec: SetupSpec, built: BuiltSetup, out: Issue[]) {
+  const zones = spec.mesh?.zones ?? [];
+  if (!zones.length) return;
+  if (!((spec.domain?.amr ?? 0) > 0)) out.push({ level: 'warning', path: 'mesh.zones', text: 'Refinement zones do nothing on a uniform grid: they need an adaptive mesh' });
+  if (!built.bodies) return;
+  zones.forEach((z, i) => {
+    const why = zoneOf(z, built.bodies!);
+    if (typeof why === 'string') out.push({ level: 'error', path: `mesh.zones.${i}`, text: `Refinement zone ${i + 1}${z.name ? ` (${z.name})` : ''}: ${why}` });
+  });
+}
+
 function rocheIssues(parts: Part[], ids: string[], built: BuiltSetup, label: (i: number) => string, out: Issue[]) {
   const b = built.bodies;
   if (!b?.binary) return;
@@ -540,6 +553,7 @@ export function checkSetup(spec: SetupSpec, env: CheckEnv = {}): Issue[] {
     checkBodies(spec, built, out);
     binaryIssues(spec, parts, ids, label, out);
     rocheIssues(parts, ids, built, label, out);
+    zoneIssues(spec, built, out);
 
     // A disk heavier than a tenth of what it orbits pulls on itself more than the setup accounts for.
     if (built.bodies) {

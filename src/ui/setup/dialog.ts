@@ -14,12 +14,13 @@ import { keepMeshFile, meshFilesOf } from '../../geometry/store';
 const MESH_ACCEPT = '.stl,.obj,.ply,.gltf,.glb,.bin,.dat,.svg';
 const MESH_FILE = /\.(stl|obj|ply|gltf|glb|bin|dat|svg)$/i;
 import './setup.css';
-import { checkSetup } from '../../setup/check';
+import { buildSetupBodies, checkSetup } from '../../setup/check';
 import { formatSetup, readSetup } from '../../setup/codec';
-import { factsOf, factsWithout, flatten, OPTIONS, optionAt, PART_OPTIONS, partFields, unavailable, type Control, type Issue, type Option, type Page, type Value } from '../../setup/options';
+import { factsOf, factsWithout, flatten, OPTIONS, optionAt, PART_OPTIONS, partFields, unavailable, ZONE_FIELDS, type Control, type Issue, type Option, type Page, type Value } from '../../setup/options';
 import { partIds } from '../../setup/parts/bodies';
 import { changeBetween, sameSetup } from '../../setup/running';
-import { cloneSetup, emptySetup, featuredOf, featuredPaths, getPath, setPath, type Featured, type Part, type PartKind, type SetupSpec, type Vec3 } from '../../setup/spec';
+import { cloneSetup, emptySetup, featuredOf, featuredPaths, getPath, setPath, type Featured, type Part, type PartKind, type SetupSpec, type Vec3, type ZoneSpec } from '../../setup/spec';
+import { binaryZones } from '../../setup/zones';
 import type { UnitSystem } from '../../units/units';
 import { h, installFactorSteps, renderOptions, type Form, type FormChoice, type FormContext } from './forms';
 import type { SetupHost } from './host';
@@ -119,6 +120,8 @@ function build() {
   let stripKey = '';
   let partsKey = '';
   const openParts = new Set<number>();
+  let zonesKey = '';
+  const openZones = new Set<number>();
   let applying = false;
   let liveTimer = 0;
   /** the last document applied without being asked: never sent twice */
@@ -463,6 +466,14 @@ function build() {
     if (path === 'domain.ndim' || path === 'domain.n') fixGrid();
     // A part's choice that brings fields of its own (a shape's kind, an orbit's) brings their
     // defaults with it: the compiler reads a box's corners, it does not make them up.
+    const zm = /^mesh\.zones\.(\d+)\.shape$/.exec(path);
+    const zone = zm ? draft.mesh?.zones?.[+zm[1]] : undefined;
+    if (zone && value === 'cone') {
+      const z = zone as ZoneSpec & { from?: unknown; to?: unknown };
+      const star = starIds()[0];
+      z.from ??= { at: 'L1', r: l1Radius() };
+      z.to ??= star ? { at: star, r: 1, radii: true } : { at: 'L1', r: 1 };
+    }
     const m = /^parts\.(\d+)\.(.+)$/.exec(path);
     const part = m ? draft.parts?.[+m[1]] : undefined;
     if (m && part) {
@@ -560,8 +571,125 @@ function build() {
     return true;
   }
 
+  // ---- refinement zones (mesh.zones) ----
+  /** The ids of the setup's stars, which a zone may be about. */
+  function starIds(): string[] {
+    const parts = draft.parts ?? [];
+    const ids = partIds(parts);
+    return parts.flatMap((p, i) => (p.kind === 'star' ? [ids[i]] : []));
+  }
+
+  /** The radius a new sphere about L1 takes: the one already listed, else a quarter of the first star's radius. */
+  function l1Radius(): number {
+    const listed = (draft.mesh?.zones ?? []).find((z) => z.shape === 'sphere' && z.at === 'L1');
+    if (listed && listed.shape === 'sphere') return listed.r;
+    const R = safe(() => buildSetupBodies(draft).bodies?.stars[0]?.R, undefined);
+    return R ? +(0.26 * R).toPrecision(2) : 0.25;
+  }
+
+  const hasL1 = () => safe(() => !!buildSetupBodies(draft).bodies?.binary?.lobe, false);
+
+  /** The places a zone may be about, as a menu: L1 (with a circular binary) and the stars. */
+  function zoneControl(o: Option, path: string): Control | undefined {
+    if (!/^mesh\.zones\.\d+\.((from|to)\.)?at$/.test(path)) return gridControl(o, path);
+    const choices: FormChoice[] = [
+      { value: 'L1', label: 'L1', tip: 'The inner Lagrange point of the circular binary', ...(hasL1() ? {} : { off: 'Needs a star on a circular binary orbit' }) },
+      ...starIds().map((id) => ({ value: id, label: id, tip: `The star ${id}` })),
+    ];
+    return { type: 'select', choices };
+  }
+
+  // (No featured fields: the strip takes the options of the table, which a zone's are not.)
+  const zoneContext = (): FormContext => ({ ...context(), control: zoneControl, featured: undefined, toggleFeatured: undefined });
+
+  function addZone(kind: 'sphere' | 'cone' | 'binary') {
+    const zones = ((draft.mesh ??= {}).zones ??= []);
+    if (kind === 'binary') {
+      const set = safe(() => {
+        const b = buildSetupBodies(draft).bodies;
+        return b ? binaryZones(draft, b) : null;
+      }, null);
+      if (!set) return status('The binary zones need two stars on a circular binary orbit', true);
+      zones.push(...set);
+      status(`Added ${set.length} zones for the binary`);
+    } else {
+      const star = starIds()[0];
+      const atL1 = hasL1() || !star;
+      const z: ZoneSpec = kind === 'sphere'
+        ? { shape: 'sphere', at: atL1 ? 'L1' : star, r: atL1 ? l1Radius() : 1, ...(atL1 ? {} : { radii: true }), tier: 1 }
+        : { shape: 'cone', from: { at: 'L1', r: l1Radius() }, to: star ? { at: star, r: 1, radii: true } : { at: 'L1', r: 1 }, tier: 1 };
+      zones.push(z);
+      openZones.add(zones.length - 1);
+    }
+    refresh();
+    zoneCards[zones.length - 1]?.scrollIntoView({ block: 'nearest' });
+  }
+
+  function removeZone(i: number) {
+    const zones = draft.mesh?.zones;
+    if (!zones) return;
+    zones.splice(i, 1);
+    if (!zones.length) delete draft.mesh!.zones;
+    const open = [...openZones];
+    openZones.clear();
+    for (const k of open) if (k !== i) openZones.add(k > i ? k - 1 : k);
+    refresh();
+  }
+
+  function moveZone(i: number, by: number) {
+    const zones = draft.mesh?.zones ?? [];
+    const j = i + by;
+    if (j < 0 || j >= zones.length) return;
+    [zones[i], zones[j]] = [zones[j], zones[i]];
+    const swap = (k: number) => (k === i ? j : k === j ? i : k);
+    const open = [...openZones].map(swap);
+    openZones.clear();
+    for (const k of open) openZones.add(k);
+    refresh();
+    zoneCards[j]?.querySelector<HTMLElement>(by < 0 ? '.sd-up' : '.sd-down')?.focus();
+  }
+
+  const zoneTitle = (z: ZoneSpec, i: number) =>
+    z.name || (z.shape === 'cone' ? `cone from ${z.from?.at ?? '?'} to ${z.to?.at ?? '?'}` : z.shape === 'sphere' ? `${z.rIn ? 'shell' : 'sphere'} about ${z.at ?? '?'}` : '') || `zone ${i + 1}`;
+
+  /** The zones' cards, built again when the list itself changed: a zone added, removed, moved, renamed, or reshaped. */
+  function buildZones() {
+    const zones = draft.mesh?.zones ?? [];
+    forms = forms.filter((f) => !zoneForms.includes(f));
+    zoneForms = [];
+    zoneCards = zones.map((z, i) => {
+      const bodyId = `sd-zone-${i}`;
+      const toggle = h('button', { type: 'button', class: 'sd-toggle', 'aria-expanded': String(openZones.has(i)), 'aria-controls': bodyId, title: 'Show or hide this zone’s settings' },
+        h('span', { class: 'sd-kind', text: `Tier ${z.tier ?? '?'}` }), h('span', { class: 'sd-id', text: zoneTitle(z, i) }));
+      const up = h('button', { type: 'button', class: 'sd-up', text: '↑', title: 'Move up: where zones overlap, the one listed first holds the gas', 'aria-label': `Move zone ${i + 1} up` });
+      const down = h('button', { type: 'button', class: 'sd-down', text: '↓', title: 'Move down: where zones overlap, the one listed first holds the gas', 'aria-label': `Move zone ${i + 1} down` });
+      const remove = h('button', { type: 'button', class: 'sd-remove', text: 'Remove', title: 'Take this zone out of the setup', 'aria-label': `Remove zone ${i + 1}` });
+      up.disabled = i === 0;
+      down.disabled = i === zones.length - 1;
+      up.addEventListener('click', () => moveZone(i, -1));
+      down.addEventListener('click', () => moveZone(i, 1));
+      remove.addEventListener('click', () => removeZone(i));
+      const fields = h('div', { class: 'sd-fields' });
+      const body = h('div', { class: 'sd-part-body', id: bodyId, hidden: !openZones.has(i) }, fields);
+      toggle.addEventListener('click', () => {
+        if (openZones.has(i)) openZones.delete(i);
+        else openZones.add(i);
+        body.hidden = !openZones.has(i);
+        toggle.setAttribute('aria-expanded', String(openZones.has(i)));
+      });
+      const f = { page: 'mesh' as Page, form: renderOptions(fields, ZONE_FIELDS, `mesh.zones.${i}.`, zoneContext()) };
+      zoneForms.push(f);
+      forms.push(f);
+      return h('div', { class: 'sd-part', 'data-path': `mesh.zones.${i}` }, h('div', { class: 'sd-part-head' }, toggle, up, down, remove), body);
+    });
+    zonesList.replaceChildren(...(zoneCards.length ? zoneCards : [h('p', { class: 'sd-hint', text: 'No zones: the mesh refines on the gas alone.' })]));
+  }
+
   // ---- building the forms ----
   let cards: HTMLElement[] = [];
+  let zoneCards: HTMLElement[] = [];
+  let zoneForms: { page: Page; form: Form }[] = [];
+  const zonesList = h('div', { class: 'sd-parts' });
   const partsList = h('div', { class: 'sd-parts' });
   const addMenu = h('details', { class: 'sd-add' });
   const addWhy = h('div', { class: 'sf-why', hidden: true });
@@ -577,6 +705,22 @@ function build() {
       if (p.page === 'parts') panel.append(h('h4', { text: 'The gas the objects sit in' }));
       panel.append(box);
       general.push({ page: p.page, form: renderOptions(box, OPTIONS.filter((o) => o.page === p.page), '', context()) });
+      if (p.page === 'mesh') {
+        const add = (label: string, kind: 'sphere' | 'cone' | 'binary', tip: string) => {
+          const b = h('button', { type: 'button', text: label, title: tip });
+          b.addEventListener('click', () => addZone(kind));
+          return b;
+        };
+        panel.append(
+          h('h4', { text: 'Refinement zones', title: 'Parts of the box kept at the finest level, each with a tier that says who gives up blocks first when the block budget runs out' }),
+          h('p', { class: 'sd-hint', text: 'Kept at the finest level whatever their gas. When blocks run short, the lowest tier gives way first (tier 1 last), and gas in no zone before any zone. Where zones overlap, the one listed first holds the gas. The preview shades them by tier.' }),
+          zonesList,
+          h('div', { class: 'sd-zone-add' },
+            add('Add a sphere', 'sphere', 'A sphere or a shell about L1 or a star'),
+            add('Add a cone', 'cone', 'The cone tangent to two spheres, bridging them'),
+            add('Add binary zones', 'binary', 'The usual set for two stars on a circular orbit: L1, the accretor’s shell (the stream’s side first), the accretor, the donor, and cones from L1 to the donor and to the shell')),
+        );
+      }
     }
     const panel = panels.get('parts')!;
     addMenu.append(h('summary', { text: 'Add an object', title: 'Add a point mass, a star, a disk, a region of gas, an obstacle, an inflow, a magnetic field, an orbit or a built-in flow' }));
@@ -620,7 +764,7 @@ function build() {
   function buildParts() {
     const parts = draft.parts ?? [];
     const ids = partIds(parts);
-    forms = forms.filter((f) => general.includes(f));
+    forms = forms.filter((f) => general.includes(f) || zoneForms.includes(f));
     cards = parts.map((part, i) => {
       const k = PART_OPTIONS[part.kind];
       const bodyId = `sd-part-${i}`;
@@ -715,6 +859,18 @@ function build() {
 
   function goTo(path: string) {
     const part = /^parts\.(\d+)/.exec(path);
+    const zone = /^mesh\.zones\.(\d+)/.exec(path);
+    if (zone) {
+      const i = +zone[1];
+      showPage('mesh');
+      showCol('mid');
+      if (!openZones.has(i)) zoneCards[i]?.querySelector<HTMLElement>('.sd-toggle')?.click();
+      if (!zoneForms[i]?.form.reveal(path)) {
+        zoneCards[i]?.scrollIntoView({ block: 'center' });
+        zoneCards[i]?.querySelector<HTMLElement>('.sd-toggle')?.focus();
+      }
+      return;
+    }
     let target: Page | undefined = part ? 'parts' : optionAt(draft, path)?.page;
     if (!target) target = flatten(OPTIONS).filter((o) => path.startsWith(o.path) || o.path.startsWith(path)).sort((a, b) => b.path.length - a.path.length)[0]?.page;
     showPage(target ?? page);
@@ -738,6 +894,11 @@ function build() {
     if (key !== partsKey) {
       partsKey = key;
       buildParts();
+    }
+    const zKey = JSON.stringify((draft.mesh?.zones ?? []).map((z, i) => [z.shape, z.tier, zoneTitle(z, i)]));
+    if (zKey !== zonesKey) {
+      zonesKey = zKey;
+      buildZones();
     }
     const sKey = JSON.stringify([draft.featured ?? [], key]);
     if (sKey !== stripKey) {
@@ -803,12 +964,13 @@ function build() {
     notesEl.replaceChildren(h('strong', { text: 'Reading the file changed it:' }), h('ul', {}, ...dropped.map((n) => h('li', { text: n }))));
     if (!keep) {
       openParts.clear();
+      openZones.clear();
       // A short list opens whole; a long one stays folded until a part is asked for.
       if ((draft.parts ?? []).length <= 2) (draft.parts ?? []).forEach((_, i) => openParts.add(i));
       status('');
     }
     liveSent = '';
-    partsKey = stripKey = '';
+    partsKey = stripKey = zonesKey = '';
     buildGeneral();
     forms = [...general];
     refresh();

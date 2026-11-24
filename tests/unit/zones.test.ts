@@ -6,7 +6,10 @@ import { BlockTree, type Block } from '../../src/amr/tree';
 import { innerLagrange } from '../../src/problems/roche';
 import { compileSetup, zonesOfSetup } from '../../src/setup/compile';
 import { buildBodies } from '../../src/setup/parts/bodies';
-import type { SetupSpec } from '../../src/setup/spec';
+import type { SetupSpec, ZoneSpec } from '../../src/setup/spec';
+import { binaryZones, zonesFrom } from '../../src/setup/zones';
+import { checkSetup } from '../../src/setup/check';
+import { sceneOf } from '../../src/ui/setup/preview';
 import { emptySetup, type Part } from '../../src/setup/spec';
 
 const sphere = (c: number[], r: number, tier: number, rIn = 0, cuts: Zone['cuts'] = []): Zone => ({ shape: 'sphere', c, r, rIn, tier, cuts });
@@ -161,5 +164,53 @@ describe('a short block budget spent by tier', () => {
     const t = grow(tierAt([{ ...a, tier: 2 }, { ...b, tier: 1 }]));
     expect(levelAt(t, [0.75, 0.75])).toBe(3);
     expect(levelAt(t, [0.25, 0.25])).toBeLessThan(3);
+  });
+});
+
+describe('zones in the setup dialog: the binary set, the checks, the preview', () => {
+  const donor: Part = { kind: 'star', id: 'donor', type: 'polytrope', n: 1.5, mass: 0.5, radius: 0.5 };
+  const acc: Part = { kind: 'star', id: 'acc', type: 'polytrope', n: 1.5, mass: 1, radius: 0.35 };
+  const base: SetupSpec = {
+    ...emptySetup(),
+    domain: { ndim: 3, n: 256, amr: 2, box: 8 },
+    physics: { gravity: 'isolated', G: 1 },
+    parts: [donor, acc, { kind: 'orbit', of: ['donor', 'acc'], type: 'binary', fill: 0.9, corotating: true, track: true }],
+  };
+  const bodies = () => buildBodies(base, { G: 1, dx: 0, ndim: 3, box: 8 });
+
+  it('the binary set: L1 first, the stream’s half of the shell before the other, cones last', () => {
+    const set = binaryZones(base, bodies())!;
+    expect(set.map((z) => z.tier)).toEqual([1, 2, 3, 4, 5, 1, 1]);
+    expect(set.map((z) => z.name)).toEqual(['L1', 'shell, stream side', 'shell, far side', 'accretor', 'donor', 'stream', 'neck']);
+    const z0 = set[0] as Extract<ZoneSpec, { shape: 'sphere' }>;
+    expect(z0.r).toBeCloseTo(0.26 * 0.5, 2);
+    expect(set[1]).toMatchObject({ at: 'acc', rIn: 1, r: 2, radii: true, below: { y: 0 } });
+    expect(set[5]).toMatchObject({ shape: 'cone', to: { at: 'acc', r: 2, radii: true }, below: { y: z0.r } });
+    expect(set[6]).toMatchObject({ shape: 'cone', to: { at: 'donor', r: 1, radii: true } });
+    // It places: every zone has a shape.
+    const spec = { ...base, mesh: { zones: set } };
+    expect(zonesOfSetup(spec)).toHaveLength(7);
+    expect(checkSetup(spec).filter((i) => i.path?.startsWith('mesh.zones'))).toEqual([]);
+    // No circular binary of two stars: no set.
+    expect(binaryZones({ ...base, parts: [donor] }, buildBodies({ ...base, parts: [donor] }, { G: 1, dx: 0, ndim: 3, box: 8 }))).toBeNull();
+  });
+
+  it('the checks: a zone that cannot be placed, and zones on a uniform grid', () => {
+    const bad: SetupSpec = { ...base, mesh: { zones: [{ shape: 'sphere', at: 'nobody', r: 1, tier: 1 }, { shape: 'sphere', at: 'acc', rIn: 2, r: 1, tier: 2 }, { shape: 'cone', from: { at: 'acc', r: 0.1 }, to: { at: 'acc', r: 1 }, tier: 1 }] } };
+    const issues = checkSetup(bad).filter((i) => i.path?.startsWith('mesh.zones'));
+    expect(issues.map((i) => [i.level, i.path])).toEqual([['error', 'mesh.zones.0'], ['error', 'mesh.zones.1'], ['error', 'mesh.zones.2']]);
+    expect(issues[0].text).toMatch(/neither L1 nor a star/);
+    expect(issues[1].text).toMatch(/inner radius/);
+    expect(issues[2].text).toMatch(/inside the other/);
+    const flat: SetupSpec = { ...base, domain: { ...base.domain!, amr: 0 }, mesh: { zones: [{ shape: 'sphere', at: 'L1', r: 0.2, tier: 1 }] } };
+    expect(checkSetup(flat).some((i) => i.level === 'warning' && i.path === 'mesh.zones')).toBe(true);
+  });
+
+  it('the preview knows the zones it can place, by their places in the list', () => {
+    const spec: SetupSpec = { ...base, mesh: { zones: [{ shape: 'sphere', at: 'nobody', r: 1, tier: 1 }, { shape: 'sphere', at: 'L1', r: 0.2, tier: 1 }] } };
+    const scene = sceneOf(spec);
+    expect(scene.zones.map((z) => z.index)).toEqual([1]);
+    const L1 = zonesFrom({ ...spec, mesh: { zones: [spec.mesh!.zones![1]] } }, bodies())[0] as Extract<Zone, { shape: 'sphere' }>;
+    expect(scene.zones[0].zone).toEqual(L1);
   });
 });

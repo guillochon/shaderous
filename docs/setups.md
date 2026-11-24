@@ -121,8 +121,11 @@ at the finest level, the lowest tier's zones are left out of it first, then the 
 and a level is left out (as a self-gravitating run does rather than half fill one) only once no
 zone is left; the run then keeps them all, and its tiers decide who gives up blocks. A zone that
 gives way gives way whole, dense gas included: a star in a low tier can lose its finest level
-altogether to the zones above it. For the helium donor of a double white dwarf,
-seen from above with the donor at -x:
+altogether to the zones above it. In the Setup dialog the zones are on the Mesh page, one card
+each, moved up and down as parts are; the preview shades them by tier where the box's middle
+planes cut them, and a click on one opens its card. **Add binary zones** puts in the set below
+for the setup's circular binary of two stars, its sphere about L1 a quarter of the donor's
+radius. For the helium donor of a double white dwarf, seen from above with the donor at -x:
 
 ```json
 "zones": [

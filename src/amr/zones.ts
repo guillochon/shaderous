@@ -62,10 +62,16 @@ export function inZone(z: Zone, p: number[]): boolean {
   return inShape(z, p);
 }
 
+/** The place in the list of the first zone holding a point, or -1. */
+export function zoneAt(zones: readonly Zone[], p: number[]): number {
+  for (let i = 0; i < zones.length; i++) if (inZone(zones[i], p)) return i;
+  return -1;
+}
+
 /** The tier of a point: that of the first zone holding it, or Infinity. */
 export function pointTier(zones: readonly Zone[], p: number[]): number {
-  for (const z of zones) if (inZone(z, p)) return z.tier;
-  return Infinity;
+  const i = zoneAt(zones, p);
+  return i < 0 ? Infinity : zones[i].tier;
 }
 
 /** A sphere every point of the zone's shape lies in, for a quick test that a block is far from it. */

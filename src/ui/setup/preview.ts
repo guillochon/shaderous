@@ -4,10 +4,15 @@
 // obstacles and inflows, and the paths the bodies would take as point masses for a chosen time.
 // No GPU work: it cannot disturb the run behind the dialog.
 //
-// Anything drawn can be clicked, which shows its settings: a body, a shape, a face of the box.
+// The refinement zones (mesh.zones) are shaded by tier, as the run's mesh sees them: each point
+// in the zone listed first that holds it (amr/zones.ts).
+//
+// Anything drawn can be clicked, which shows its settings: a body, a shape, a face of the box, a zone.
 // A body whose position is its own (not placed by an orbit) can be dragged in either view, as can
 // a shape; an obstacle that is a box or a half-space also turns, by the handle it shows when picked.
 import { meshSilhouette } from '../../geometry/store';
+import { zoneAt, type Zone } from '../../amr/zones';
+import { zoneOf } from '../../setup/zones';
 import { BOUNDARIES } from '../../problems/boundaries';
 import { boxFrame, boxPivot, eulerOf, rotationMatrix } from '../../setup/parts/region';
 import { buildSetupBodies, type BuiltSetup } from '../../setup/check';
@@ -157,6 +162,8 @@ export interface Scene {
   disks: { part: DiskPart; center: number[]; gm: number }[];
   /** with its part's place in the document */
   shapes: { part: number; kind: 'region' | 'obstacle' | 'inflow'; shape: Shape }[];
+  /** the refinement zones that could be placed, with their places in mesh.zones */
+  zones: { index: number; zone: Zone }[];
 }
 
 /** What the preview draws, from the document alone. Never throws. */
@@ -198,7 +205,51 @@ export function sceneOf(spec: SetupSpec): Scene {
     return [{ part: p, center, gm }];
   });
   const shapes = parts.flatMap((p, part) => (p.kind === 'region' || p.kind === 'obstacle' || p.kind === 'inflow') && p.shape && typeof p.shape === 'object' ? [{ part, kind: p.kind, shape: p.shape }] : []);
-  return { box, ndim, dx, faces: { lo: side(bc?.lo), hi: side(bc?.hi) }, bodies, disks, shapes };
+  const zones = b ? (spec.mesh?.zones ?? []).flatMap((z, index) => {
+    const zone = zoneOf(z, b);
+    return typeof zone === 'string' ? [] : [{ index, zone }];
+  }) : [];
+  return { box, ndim, dx, faces: { lo: side(bc?.lo), hi: side(bc?.hi) }, bodies, disks, shapes, zones };
+}
+
+/** A tier's color in the preview, by its rank among the setup's tiers (the first the warmest). */
+const TIER_COLORS = ['#e8590c', '#f59f00', '#e9d74a', '#d06fb0', '#4dabf7', '#69db7c', '#b197fc', '#adb5bd'];
+const tierRank = (scene: Scene) => [...new Set(scene.zones.map((z) => z.zone.tier))].sort((p, q) => p - q);
+
+/** The zones of a view, shaded by tier (lighter where hovered or picked), as an image of the view's window. */
+function zoneLayer(view: View, scene: Scene, extent: number, hover: string, picked: string): HTMLCanvasElement | null {
+  if (!scene.zones.length || typeof document === 'undefined') return null;
+  const [a, b] = view.axes;
+  const R = Math.max(32, Math.min(320, view.canvas.width));
+  const key = JSON.stringify([scene.zones, extent, a, b, R, hover.startsWith('zone.') ? hover : '', picked.startsWith('zone.') ? picked : '']);
+  if (view.zones?.key === key) return view.zones.image;
+  const image = document.createElement('canvas');
+  image.width = image.height = R;
+  const ctx = image.getContext('2d');
+  if (!ctx) return null;
+  const data = ctx.createImageData(R, R);
+  const ranks = tierRank(scene);
+  const shapes = scene.zones.map((z) => z.zone);
+  const rgb = (hex: string) => [1, 3, 5].map((k) => parseInt(hex.slice(k, k + 2), 16));
+  const colors = scene.zones.map((z) => rgb(TIER_COLORS[Math.min(ranks.indexOf(z.zone.tier), TIER_COLORS.length - 1)]));
+  const lit = scene.zones.map((z) => hover === `zone.${z.index}` || picked === `zone.${z.index}`);
+  const p = [0, 0, 0];
+  for (let j = 0; j < R; j++)
+    for (let i = 0; i < R; i++) {
+      p[a] = -extent + ((i + 0.5) * 2 * extent) / R;
+      p[b] = extent - ((j + 0.5) * 2 * extent) / R;
+      const k = zoneAt(shapes, p);
+      if (k < 0) continue;
+      const o = 4 * (j * R + i);
+      const c = colors[k];
+      data.data[o] = c[0];
+      data.data[o + 1] = c[1];
+      data.data[o + 2] = c[2];
+      data.data[o + 3] = lit[k] ? 150 : 95;
+    }
+  ctx.putImageData(data, 0, 0);
+  view.zones = { key, image };
+  return image;
 }
 
 /** A time over which the bodies visibly move, where the document names none: the period of a circular orbit as wide as they are apart. */
@@ -228,6 +279,8 @@ interface View {
   /** the world axes across and up the canvas */
   axes: [number, number];
   names: [string, string];
+  /** the zones' shaded layer, as last drawn (zoneLayer) */
+  zones?: { key: string; image: HTMLCanvasElement };
 }
 
 /** A convex polygon cut to the side of a line where n . p < at. */
@@ -323,8 +376,8 @@ function outlineOf(sh: Shape, view: View, scene: Scene, extent: number): Outline
 }
 
 /** What the pointer can take hold of: a body or a shape (by its part), a shape's turning handle, a face of the box. */
-type Target = { kind: 'part'; part: number } | { kind: 'turn'; part: number } | { kind: 'face'; side: 'lo' | 'hi'; axis: number };
-const keyOf = (t: Target | null) => (!t ? '' : t.kind === 'face' ? `face.${t.side}.${t.axis}` : `${t.kind}.${t.part}`);
+type Target = { kind: 'part'; part: number } | { kind: 'turn'; part: number } | { kind: 'face'; side: 'lo' | 'hi'; axis: number } | { kind: 'zone'; zone: number };
+const keyOf = (t: Target | null) => (!t ? '' : t.kind === 'face' ? `face.${t.side}.${t.axis}` : t.kind === 'zone' ? `zone.${t.zone}` : `${t.kind}.${t.part}`);
 
 /** A shape that turns in the preview: an obstacle that is a box or a half-space. */
 const turns = (s: Scene['shapes'][number]) => s.kind === 'obstacle' && (s.shape.type === 'box' || (s.shape.type === 'half' && Array.isArray(s.shape.normal)));
@@ -378,6 +431,13 @@ function draw(view: View, scene: Scene, paths: number[][][], extent: number, leg
   // The inside of the box, a shade lighter than what is beyond it.
   ctx.fillStyle = '#131722';
   ctx.fillRect(X(-half), Y(half), 2 * half * scale, 2 * half * scale);
+
+  // The refinement zones, shaded by tier, under everything else.
+  const layer = zoneLayer(view, scene, extent, hover, picked);
+  if (layer) {
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(layer, 0, 0, size, size);
+  }
 
   const window_: number[][] = [[-extent, -extent], [extent, -extent], [extent, extent], [-extent, extent]];
   const polygon = (poly: number[][]) => {
@@ -535,6 +595,21 @@ function draw(view: View, scene: Scene, paths: number[][][], extent: number, leg
   ctx.fillStyle = '#8792a8';
   ctx.fillText(`${view.names[0]} →`, size - px(26), size - px(9));
   ctx.fillText(`${view.names[1]} ↑`, px(5), px(9));
+  if (legend && scene.zones.length) {
+    // The tiers, top left: a swatch and the tier.
+    const ranks = tierRank(scene);
+    ctx.font = `${px(10)}px system-ui, sans-serif`;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(13, 15, 20, 0.8)';
+    ctx.fillRect(px(6), px(6), px(62), ranks.length * px(13) + px(6));
+    ranks.forEach((t, row) => {
+      const y = px(15) + row * px(13);
+      ctx.fillStyle = TIER_COLORS[Math.min(row, TIER_COLORS.length - 1)];
+      ctx.fillRect(px(11), y - px(4), px(10), px(8));
+      ctx.fillStyle = '#8792a8';
+      ctx.fillText(`tier ${t}`, px(26), y);
+    });
+  }
   if (legend) {
     const kinds = [...new Set([...scene.faces.lo, ...scene.faces.hi].slice(0, 6))].filter((k) => BC_CHOICES[k]).sort();
     // On a dark patch of its own: the corner it sits in is where the box's edges meet.
@@ -650,6 +725,7 @@ export function createPreview(opts: { onEdit(path: string, value: unknown): void
         movable || scene.shapes.length ? `Drag ${movable && scene.shapes.length ? 'a body or a shape' : movable ? 'a body' : 'a shape'} to move it${scene.shapes.some(turns) ? '; a picked obstacle turns by its handle' : ''}.` : '',
         placed ? 'These bodies are placed by an orbit: change the orbit to move them.' : '',
         unbuilt ? `${unbuilt === 1 ? 'A star is' : `${unbuilt} stars are`} drawn as a cross: the size follows from the equation of state, which the preview does not have.` : '',
+        scene.zones.length ? 'The refinement zones are shaded by tier, where the box\u2019s middle plane cuts them.' : '',
       ].filter(Boolean).join(' ');
     } catch (e) {
       // A document that cannot be drawn is the issues list's to explain.
@@ -670,6 +746,7 @@ export function createPreview(opts: { onEdit(path: string, value: unknown): void
   /** Where a click on what was taken hold of leads in the settings. */
   const pathOf = (t: Target): string => {
     if (t.kind === 'face') return `domain.bc.${t.side}.${t.axis}`;
+    if (t.kind === 'zone') return `mesh.zones.${t.zone}`;
     if (t.kind === 'part') return `parts.${t.part}`;
     const sh = scene?.shapes.find((s) => s.part === t.part)?.shape;
     return `parts.${t.part}.shape.${sh?.type === 'half' ? 'normal' : 'rotate'}`;
@@ -737,12 +814,19 @@ export function createPreview(opts: { onEdit(path: string, value: unknown): void
       if (inner) return inner;
 
       const plane = shapes.find((s) => s.shape.type === 'half' && hit(s));
-      return plane ? { kind: 'part', part: plane.part } : null;
+      if (plane) return { kind: 'part', part: plane.part };
+
+      // Last, a refinement zone: the one that holds the gas there.
+      const p = [0, 0, 0];
+      p[a] = x;
+      p[b] = y;
+      const k = zoneAt(scene.zones.map((z) => z.zone), p);
+      return k >= 0 ? { kind: 'zone', zone: scene.zones[k].index } : null;
     };
 
     /** Whether what was taken hold of moves when dragged. */
     const movable = (t: Target) => {
-      if (!scene || t.kind === 'face') return false;
+      if (!scene || t.kind === 'face' || t.kind === 'zone') return false;
       if (t.kind === 'turn') return true;
       const body = scene.bodies.find((k) => k.part === t.part);
       return body ? body.draggable : scene.shapes.some((s) => s.part === t.part);
@@ -770,7 +854,7 @@ export function createPreview(opts: { onEdit(path: string, value: unknown): void
         }
       }
       if (!target) return;
-      const shape = target.kind !== 'face' ? scene.shapes.find((s) => s.part === target.part)?.shape : undefined;
+      const shape = target.kind === 'part' || target.kind === 'turn' ? scene.shapes.find((s) => s.part === target.part)?.shape : undefined;
       const body = target.kind === 'part' ? scene.bodies.find((k) => k.part === target.part) : undefined;
       const start = world(e);
       drag = { view, target, start, client: [e.clientX, e.clientY], moved: false, pos: body && [...body.pos], shape: shape && structuredClone(shape) };

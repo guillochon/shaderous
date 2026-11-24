@@ -677,6 +677,36 @@ export function flowOptions(name: string): Option[] {
 }
 
 /** The fields of a part: its kind's, and for a flow the named flow's. */
+const Z = <T extends Partial<Option>>(o: T & Pick<Option, 'path' | 'label' | 'tip' | 'control'>): Option => ({ page: 'mesh', apply: 'restart', ...o });
+
+/** Where a zone may be: L1 or a star. The dialog offers the setup's own stars (ui/setup/dialog.ts). */
+const ZONE_AT = pick(['L1', 'L1', 'The inner Lagrange point of a circular binary with a star']);
+
+const anchorFields = (tip: string): Option[] => [
+  Z({ path: 'at', label: 'About', tip: `${tip}: L1 or a star`, control: ZONE_AT, default: 'L1' }),
+  Z({ path: 'r', label: 'Radius', tip: 'In code units, or in the star’s radii', control: num(0, undefined, { factor: 1.5 }), default: 1 }),
+  Z({ path: 'radii', label: 'In star radii', tip: 'The radius is in the star’s radii (about a star only)', control: check, default: false }),
+];
+
+const planeFields: Option[] = (['x', 'y', 'z'] as const).map((a) => Z({ path: a, label: a, tip: `The plane ${a} = this, in the box’s coordinates`, control: num(undefined, undefined, { nullable: true, factor: 1.5 }) }));
+
+/**
+ * The fields of a refinement zone (mesh.zones, amr/zones.ts), relative to the zone: a sphere or
+ * shell about L1 or a star, or the cone tangent to two such spheres; its tier; and the side of a
+ * plane it is kept to.
+ */
+export const ZONE_FIELDS: Option[] = [
+  Z({ path: 'name', label: 'Name', tip: 'What the zone is called (the list shows it)', control: { type: 'text' } }),
+  Z({ path: 'shape', label: 'Shape', tip: 'A sphere or a shell about L1 or a star, or the cone tangent to two such spheres, bridging them', control: pick(['sphere', 'Sphere or shell'], ['cone', 'Cone between two spheres']), default: 'sphere' }),
+  Z({ path: 'tier', label: 'Tier', tip: 'When blocks run short, the lowest tier gives up its blocks first: tier 1 is kept at the finest level longest. Gas in no zone gives way before any zone', control: num(1, 99, { integer: true, step: 1 }), default: 1 }),
+  ...anchorFields('Its center').map((o) => ({ ...o, show: { path: 'shape', is: ['sphere'] } })),
+  Z({ path: 'rIn', label: 'Inner radius', tip: 'A shell: empty inside this radius (in the star’s radii with In star radii). Empty: a whole sphere', control: num(0, undefined, { nullable: true, factor: 1.5 }), show: { path: 'shape', is: ['sphere'] } }),
+  Z({ path: 'from', label: 'First sphere', tip: 'The sphere the cone starts at', control: { type: 'group', optional: false, fields: anchorFields('The first sphere’s center') }, default: null, show: { path: 'shape', is: ['cone'] } }),
+  Z({ path: 'to', label: 'Second sphere', tip: 'The sphere the cone ends at', control: { type: 'group', optional: false, fields: anchorFields('The second sphere’s center') }, default: null, show: { path: 'shape', is: ['cone'] } }),
+  Z({ path: 'below', label: 'Only below a plane', tip: 'Keep only the side of a plane below it: y 0 is the half below the line of centers, seen from above', control: { type: 'group', optional: true, fields: planeFields } }),
+  Z({ path: 'above', label: 'Only above a plane', tip: 'Keep only the side of a plane above it', control: { type: 'group', optional: true, fields: planeFields } }),
+];
+
 export function partFields(part: Part): Option[] {
   if (part.kind !== 'flow') return PART_OPTIONS[part.kind].fields;
   return [
