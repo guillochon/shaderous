@@ -48,13 +48,26 @@ fi
 mkdir -p "$out"
 echo "fill $FILL on $(hostname): $(nvidia-smi --query-gpu=name --format=csv,noheader | head -1), --gpu-memory $GPU_MEMORY, out $out"
 
-in_container node tools/headless/cli.mjs run --setup "$setup" \
-  --until "$UNTIL" --every "$EVERY" --athdf-every "$ATHDF_EVERY" \
-  --gpu-memory "$GPU_MEMORY" --width 1024 --overlays \
-  --view field=0 --view log=true --view "tf=0:0,0.15:0.15,0.4:0.25,0.7:0.3,1:0.5" \
-  --shot "vol:mode=volume,showBlocks=false,fieldLines=true,fieldLineCount=400,fieldLineFloor=0.001,dist=$VOL_DIST,pitch=0.45,yaw=1.2,minRho=0.05,opacity=120,box=false" \
-  --shot "slice:mode=slice,sliceAxis=2,zoom=$SLICE_ZOOM,showBlocks=false,fieldLines=true,fieldLineCount=300,fieldLineFloor=0.00001" \
-  --out "$out"
+sim() {
+  in_container node tools/headless/cli.mjs run "$@" \
+    --until "$UNTIL" --every "$EVERY" --athdf-every "$ATHDF_EVERY" \
+    --gpu-memory "$GPU_MEMORY" --width 1024 --overlays \
+    --view field=0 --view log=true --view "tf=0:0,0.15:0.15,0.4:0.25,0.7:0.3,1:0.5" \
+    --shot "vol:mode=volume,showBlocks=false,fieldLines=true,fieldLineCount=400,fieldLineFloor=0.001,dist=$VOL_DIST,pitch=0.45,yaw=1.2,minRho=0.05,opacity=120,box=false" \
+    --shot "slice:mode=slice,sliceAxis=2,zoom=$SLICE_ZOOM,showBlocks=false,fieldLines=true,fieldLineCount=300,fieldLineFloor=0.00001"
+}
+sim --setup "$setup" --out "$out"
 status=$?
 echo "runner exit $status"
+# A setup that watches for burning (he4, c12 and o16 alone) stops with 'burn' once it is found:
+# the run carries on in the same job from that checkpoint with all thirteen of the network's
+# species, into f<FILL>/switched/ (dwd-mdot.mjs reads the folders below a fill's too).
+stopped=$(in_container node -e 'const m = require(process.argv[1]); console.log(m.stopped ?? "")' "$out/manifest.json" 2>/dev/null)
+if [ "$status" -eq 0 ] && [ "$stopped" = "burn" ]; then
+  from=$(in_container node -e 'const m = require(process.argv[1]); const f = m.outputs.flatMap((o) => o.files).filter((f) => f.endsWith(".athdf")).at(-1); console.log(f ? require("path").join(process.argv[2], f) : "")' "$out/manifest.json" "$out")
+  echo "burning found: carrying on from $from with all thirteen species"
+  sim --from "$from" --switch-burn --out "$out/switched"
+  status=$?
+  echo "runner exit $status"
+fi
 exit $status
