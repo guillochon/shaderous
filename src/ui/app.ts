@@ -26,11 +26,12 @@ import { opacity as meanOpacity } from '../opacity/opacity';
 import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec, cosmologyOf, cylindrical } from '../sim';
 import { expandSpecies, switchedSetup } from '../burn/watch';
 import { speciesLabel } from '../species/species';
-import { speciesNuclides } from '../species/mixture';
+import { mixMoments, problemCoefficients, speciesNuclides } from '../species/mixture';
+import { burnRates } from './burn_rates';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt, MAX_BODIES, sizedProblem } from '../problems/types';
-import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type EosKind } from '../eos/eos';
+import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type Eos, type EosKind } from '../eos/eos';
 import { prepareEosTable } from '../eos/tables';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, RADIATION_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { sphFromView, sphToView, spherical } from '../spherical';
@@ -3358,6 +3359,8 @@ type Thing = { mass: number } | { source: SourceSpec };
 let pin: (Thing & { own?: boolean }) | null = null;
 /** The gas where the pinned thing is, as last read, when that was asked for, and whether a read is in flight. */
 let pinCell: CellProbe | null = null;
+/** The pinned tracer's Fixed as last set here, until the masses read back show it (undefined: as read). */
+let pinFixed: boolean | undefined;
 let pinAsked = 0;
 let pinBusy = false;
 
@@ -3376,6 +3379,7 @@ function hideCellPop() {
 function dropPin() {
   pin = null;
   pinCell = null;
+  pinFixed = undefined;
   cellPop.classList.remove('pinned');
   cellPop.hidden = true;
 }
@@ -3494,8 +3498,9 @@ async function pinAt(clientX: number, clientY: number) {
   if (!to) {
     const f = await boxPointAt(px, py);
     if (!f || s !== sim) return;
-    // A tracer, at rest: softened over two cells, so that a mass it passes does not fling it.
-    const ok = addPlaced(s, carrierSpec(f, [0, 0, 0], 2 / cfg.n), 'query');
+    // A tracer, held where it is (the readout's Fixed lets it go): softened over two cells, so
+    // that a mass it passes does not fling it.
+    const ok = addPlaced(s, { ...carrierSpec(f, [0, 0, 0], 2 / cfg.n), fixed: true }, 'query');
     notice(ok ? '' : `A run holds at most ${MAX_MASSES} sinks, moving sources, tracers and point masses`);
     if (!ok) return;
     to = { mass: s.massCount - 1, own: true };
@@ -3505,6 +3510,7 @@ async function pinAt(clientX: number, clientY: number) {
   queryPoint = null;
   pin = to;
   pinCell = null;
+  pinFixed = undefined;
   pinAsked = 0;
   cellPop.classList.add('pinned');
 }
@@ -3570,7 +3576,7 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
     if (c) rows.push(['Gas there', '', 'head']);
   }
   if (c) {
-    const eos = makeEos(cfg.eos, cfg.eosParams);
+    const eos = cellEos(c).eos;
     const rho = c.u1[0];
     const vel = [c.u1[1] / rho, c.u1[2] / rho, c.u1[3] / rho];
     const eint = c.u2[1];
@@ -3608,6 +3614,11 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
   const dl = cellPop.querySelector('dl')!;
   if (dl.innerHTML !== html) dl.innerHTML = html;
   $('cell-remove').hidden = !pinRemovable();
+  // A pinned tracer can be held where it is or let go (the GPU's flag, or the one just set).
+  const tracer = pin && 'mass' in pin ? massesNow()[pin.mass] : undefined;
+  const canFix = !!tracer && tracer.massless && !(tracer.sinkRate > 0 && tracer.sinkRadius > 0) && !sources.some((q) => pin && 'mass' in pin && q.carrier === pin.mass);
+  ($('cell-fixed-row') as HTMLElement).hidden = !canFix;
+  if (canFix && document.activeElement !== cellFixed) cellFixed.checked = pinFixed ?? tracer.fixed;
   cellPop.hidden = false;
   // Beside the pointer (or what it is pinned to), kept on screen.
   const pw = cellPop.offsetWidth;
@@ -3618,6 +3629,14 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
   cellPop.style.top = `${Math.round(top)}px`;
 }
 $('cell-remove').addEventListener('click', removePinned);
+const cellFixed = $('cell-fixed') as HTMLInputElement;
+cellFixed.addEventListener('change', () => {
+  if (!sim || !pin || !('mass' in pin)) return;
+  pinFixed = cellFixed.checked;
+  sim.setTracerFixed(pin.mass, pinFixed);
+  logAction({ kind: 'fix', index: pin.mass, fixed: pinFixed });
+  cellFixed.blur();
+});
 
 // --- the equations at a pinned cell ---------------------------------------------------------
 // The pinned readout shows the equations the run solves, each term colored by its size in that
@@ -3627,9 +3646,6 @@ $('cell-remove').addEventListener('click', removePinned);
 function termsLeftOut(): string[] {
   const p = cfg.problem;
   const out: string[] = [];
-  if (p.mhd && cfg.resistivity > 0) out.push('the resistive energy flux');
-  if (radiationOn(cfg)) out.push('the radiation\u2019s own equations');
-  if (burnSpec(cfg)) out.push('the species\u2019 equations');
   if (rotationOf(cfg).some((w, i) => i < 3 && w !== 0) || p.frame) out.push('frame forces');
   if (p.damping) out.push('the damping zone');
   if (sources.length) out.push('sources and sinks');
@@ -3660,18 +3676,63 @@ function equationHtml(e: Equation): string {
 }
 
 /** The pinned cell's equations, or a line on why there are none. */
+/**
+ * The equation of state of the pinned cell, and of a cell of any mass fractions: where the species
+ * set it, each cell's own (species/mixture.ts), else the run's.
+ */
+function cellEos(c: CellProbe | null): { eos: Eos; at: ((X: number[]) => Eos) | null } {
+  const coeffs = problemCoefficients(cfg.problem, cfg.eosParams.gamma);
+  const at = coeffs ? (X: number[]) => makeEos(cfg.eos, cfg.eosParams, mixMoments(coeffs, X)) : null;
+  const rx = c?.stencil?.species?.[13];
+  const rho = c?.u1[0] ?? 0;
+  return { eos: at && rx && rho > 0 ? at(rx.map((r) => r / rho)) : makeEos(cfg.eos, cfg.eosParams), at };
+}
+
+/** The pinned run's burn rates, made once per run (ui/burn_rates.ts). */
+let rates: { of: SimConfig; fn: ReturnType<typeof burnRates> } | null = null;
+function runBurnRates() {
+  if (rates?.of !== cfg) rates = { of: cfg, fn: burnRates(burnSpec(cfg), { ...cfg.problem, units: problemUnits(cfg.problem, cfg.params) }, () => lastDiag?.dt ?? 0) };
+  return rates.fn;
+}
+
 function equationsHtml(c: CellProbe): string {
   if (cylindrical(cfg) || spherical(cfg)) return '<div class="head">Equations</div><div class="note">Shown on Cartesian grids only</div>';
+  const ce = cellEos(c);
   const list = cellEquations({
-    ndim: cfg.ndim, dx: c.dx, stencil: c.stencil!, pos: c.pos, eos: makeEos(cfg.eos, cfg.eosParams), gext: cfg.gext,
+    ndim: cfg.ndim, dx: c.dx, stencil: c.stencil!, pos: c.pos, eos: ce.eos, eosAt: ce.at, gext: cfg.gext,
     masses: massesNow().filter((m) => !m.massless).map((m) => ({ gm: m.gm, pos: m.pos, soft: m.soft })),
     cooling: cfg.cooling, coolParams: cfg.coolParams, calm: calmRate(lastDiag?.t ?? 0),
     resistivity: cfg.resistivity,
-    radiation: radiationOn(cfg) ? { c: cfg.radC, a: cfg.radA, opacity: (rho, T) => meanOpacity(cfg.opacity, cfg.opacityParams, rho, T) } : null,
+    radiation: radiationOn(cfg) ? { c: cfg.radC, chat: cfg.radChat, a: cfg.radA, localC: cfg.radLocalC, opacity: (rho, T) => meanOpacity(cfg.opacity, cfg.opacityParams, rho, T) } : null,
+    species: cfg.problem.species?.length ? { names: cfg.problem.species, burnRates: runBurnRates() } : null,
   });
   if (!list) return '';
   const left = termsLeftOut();
-  return `<div class="head">Equations <span class="legend">term size, of the largest: <span class="ramp"></span></span></div>${list.map(equationHtml).join('')}${left.length ? `<div class="note">Not shown: ${left.join(', ')}</div>` : ''}`;
+  const main = list.filter((e) => e.id !== 'species');
+  const species = list.filter((e) => e.id === 'species');
+  return `<div class="head">Equations <span class="legend">term size, of the largest: <span class="ramp"></span></span></div>${main.map(equationHtml).join('')}${speciesHtml(species)}${left.length ? `<div class="note">Not shown: ${left.join(', ')}</div>` : ''}`;
+}
+
+/**
+ * The species' equations, one form for all, and a line per species: each term's share of that
+ * species' own equation.
+ */
+function speciesHtml(list: Equation[]): string {
+  if (!list.length) return '';
+  const first = list[0];
+  // The form in the panel's own color: each species' line colors its terms.
+  const form = `<div class="eq"><math><mrow>${first.lhs}<mo>=</mo>${first.terms.map((t, i) => (i === 0 ? t.math.replace(/^<mrow><mo>\+<\/mo>/, '<mrow>') : t.math)).join('')}</mrow></math></div>`;
+  const pct = (size: number, largest: number) => {
+    const v = largest > 0 ? (100 * size) / largest : 0;
+    return v >= 1 || v === 0 ? v.toFixed(0) : v.toPrecision(1);
+  };
+  const lines = list
+    .map((e) => {
+      const parts = e.terms.map((t) => `<span class="swatch" style="background: ${rampColor(importance(t.size, e.largest))}"></span>${t.id === 'sp-burn' ? 'burning' : 'carried'} ${pct(t.size, e.largest)}%`).join(' ');
+      return `<div class="sp"><span class="what">${e.name}</span><span class="parts">${e.largest > 0 ? parts : 'unchanged'}</span></div>`;
+    })
+    .join('');
+  return `${form}${lines}`;
 }
 $('cell-unpin').addEventListener('click', unpin);
 
@@ -4530,6 +4591,10 @@ async function replayAction(a: Action) {
       break;
     case 'remove':
       removePlaced((_, index) => a.indices.includes(index));
+      break;
+    case 'fix':
+      s.setTracerFixed(a.index, a.fixed);
+      logAction(a);
       break;
     case 'sources':
       sources = a.list.map((q) => ({ ...q }));

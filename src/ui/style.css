@@ -353,7 +353,7 @@ details[open] > summary .sum { display: none; }
 #cell-pop dt.head { color: var(--text); margin-top: 4px; }
 /* Pinned (a click with the query tool): it takes clicks, and offers to remove what it follows. */
 /* The pinned cell's equations, each term colored by its size there (ui/terms.ts). */
-#cell-pop .eqs { width: 320px; border-left: 1px solid var(--line); padding-left: 10px; font-size: 11px; color: var(--dim); }
+#cell-pop .eqs { width: 320px; max-height: calc(100vh - 90px); overflow-y: auto; border-left: 1px solid var(--line); padding-left: 10px; font-size: 11px; color: var(--dim); }
 #cell-pop .eqs[hidden] { display: none; }
 #cell-pop .eqs .head { color: var(--text); display: flex; justify-content: space-between; align-items: center; }
 #cell-pop .eqs .legend { font-size: 10px; display: flex; align-items: center; gap: 4px; }
@@ -362,6 +362,10 @@ details[open] > summary .sum { display: none; }
 #cell-pop .eqs .term { display: grid; grid-template-columns: 8px 1fr auto; gap: 6px; align-items: center; }
 #cell-pop .eqs .swatch { width: 8px; height: 8px; border-radius: 2px; }
 #cell-pop .eqs .size { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); }
+#cell-pop .eqs .sp { display: grid; grid-template-columns: 44px 1fr; gap: 6px; align-items: center; }
+#cell-pop .eqs .sp .what { color: var(--text); }
+#cell-pop .eqs .sp .parts { display: flex; align-items: center; gap: 4px; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
+#cell-pop .eqs .sp .swatch { margin-left: 4px; }
 #cell-pop .eqs .net { font-style: italic; margin-top: 1px; }
 #cell-pop .eqs .note { margin-top: 4px; }
 #cell-pop .pin-actions { display: none; gap: 6px; justify-content: flex-end; margin-top: 6px; }
@@ -369,6 +373,8 @@ details[open] > summary .sum { display: none; }
 #cell-pop.pinned .pin-actions { display: flex; }
 #cell-pop .pin-actions button { height: 20px; padding: 0 8px; font-size: 11px; }
 #cell-pop .pin-actions button[hidden] { display: none; }
+#cell-pop .pin-actions .fixed { margin-right: auto; display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text); cursor: pointer; }
+#cell-pop .pin-actions .fixed[hidden] { display: none; }
 #marks .point circle.pinned { stroke: #fff; stroke-dasharray: none; stroke-width: 1.5; }
 /* The value of the contour under the pointer (slice and projection views, paused). */
 #contour-pop {

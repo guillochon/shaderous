@@ -15,6 +15,7 @@
 import type { CellStencil } from '../sim';
 import type { Eos } from '../eos/eos';
 import { coolRate, type CoolingKind, type CoolingParams } from '../cooling/cooling';
+import { reduction } from '../radiation/radiation';
 
 export interface TermMass {
   /** G M (code units) */
@@ -26,9 +27,12 @@ export interface TermMass {
 }
 
 export interface TermRadiation {
-  /** the speed of light and the radiation constant (code units) */
+  /** the speed of light, its reduced value and the radiation constant (code units) */
   c: number;
+  chat: number;
   a: number;
+  /** whether the reduction is chosen per cell by its optical depth (SimConfig.radLocalC) */
+  localC: boolean;
   /** Planck and Rosseland mean opacities per unit mass at (rho, T) */
   opacity: (rho: number, T: number) => { planck: number; rosseland: number };
 }
@@ -52,6 +56,10 @@ export interface TermInput {
   resistivity?: number;
   /** radiation transport's constants; the radiation itself is the stencil's rad */
   radiation?: TermRadiation | null;
+  /** species: their names, and the rate burning changes each one's rho X at a cell (null: nothing burns there) */
+  species?: { names: readonly string[]; burnRates?: ((rho: number, T: number, X: number[]) => number[] | null) | null } | null;
+  /** the equation of state of a cell of mass fractions X, where the species set it */
+  eosAt?: ((X: number[]) => Eos) | null;
 }
 
 export interface Term {
@@ -67,7 +75,9 @@ export interface Term {
 }
 
 export interface Equation {
-  id: 'mass' | 'momentum' | 'energy' | 'induction';
+  id: 'mass' | 'momentum' | 'energy' | 'induction' | 'species' | 'rad-energy' | 'rad-flux';
+  /** the species an equation of the species is for */
+  name?: string;
   /** left-hand side as MathML */
   lhs: string;
   terms: Term[];
@@ -103,16 +113,44 @@ interface Prim {
   /** cell-centered field (zero without MHD), and whether it is known */
   b: [number, number, number];
   hasB: boolean;
+  /** rho X of each species (empty without species) */
+  rx: number[];
+  /** radiation (E, Fx, Fy, Fz), zero without */
+  rad: number[];
+  hasRad: boolean;
 }
 
-function prims(s: CellStencil, eos: Eos): (Prim | null)[] {
+function prims(s: CellStencil, x: TermInput): (Prim | null)[] {
   return s.u1.map((u1, i) => {
     const u2 = s.u2[i];
     if (!u1 || !u2 || u2[3] > 0.5 || !(u1[0] > 0)) return null;
     const rho = u1[0];
     const b = s.b?.[i];
-    return { rho, v: [u1[1] / rho, u1[2] / rho, u1[3] / rho], p: eos.pressure(rho, u2[1]), E: u2[0], b: b ? [b[0], b[1], b[2]] : [0, 0, 0], hasB: !!b };
+    const rx = s.species?.[i] ?? [];
+    const eos = x.eosAt && rx.length ? x.eosAt(rx.map((r) => r / rho)) : x.eos;
+    const rad = s.rad?.[i];
+    return {
+      rho, v: [u1[1] / rho, u1[2] / rho, u1[3] / rho], p: eos.pressure(rho, u2[1]), E: u2[0],
+      b: b ? [b[0], b[1], b[2]] : [0, 0, 0], hasB: !!b, rx, rad: rad ?? [0, 0, 0, 0], hasRad: !!rad,
+    };
   });
+}
+
+/** Levermore's Eddington factor chi(f) of the M1 closure (radiation/common.wgsl rad_chi). */
+function eddingtonChi(f: number): number {
+  const g = Math.min(1, Math.max(0, f));
+  return (3 + 4 * g * g) / (5 + 2 * Math.sqrt(Math.max(4 - 3 * g * g, 0)));
+}
+
+/** The radiation pressure tensor's component P_ab = D_ab E of a cell's (E, F) (rad_eddington_row). */
+function radPressure(rad: number[], c: number, a: number, b: number): number {
+  const E = rad[0];
+  if (!(E > 0)) return 0;
+  const f = [rad[1], rad[2], rad[3]].map((v) => v / (c * E));
+  const m = Math.hypot(...f);
+  const chi = eddingtonChi(m);
+  const n = m > 0 ? f.map((v) => v / m) : [0, 0, 0];
+  return E * (0.5 * (3 * chi - 1) * n[a] * n[b] + (a === b ? 0.5 * (1 - chi) : 0));
 }
 
 /**
@@ -188,9 +226,11 @@ const term = (id: string, math: string, label: string, value: number[]): Term =>
 
 /** The cell's equations and their terms; null for a solid cell or one without gas. */
 export function cellEquations(x: TermInput): Equation[] | null {
-  const c = prims(x.stencil, x.eos);
+  const c = prims(x.stencil, x);
   const z = c[13];
   if (!z) return null;
+  const X = z.rx.map((r) => r / z.rho);
+  const eos = x.eosAt && X.length ? x.eosAt(X) : x.eos;
   const axes = x.ndim;
   const mhd = !!x.stencil.b && z.hasB;
   const withB = (q: Prim) => q.hasB;
@@ -207,15 +247,21 @@ export function cellEquations(x: TermInput): Equation[] | null {
   const u2 = x.stencil.u2[13]!;
   const out: Equation[] = [];
 
+  const T = eos.temperature(z.rho, u2[1]);
+  // MHD: the current J = curl B and the field's Laplacian at the cell.
+  const eta = mhd ? (x.resistivity ?? 0) : 0;
+  const dB = (b: number, a: number) => (mhd && a < axes ? deriv(c, (q) => q.b[b], a, x.dx, withB) : 0);
+  const J = [dB(2, 1) - dB(1, 2), dB(0, 2) - dB(2, 0), dB(1, 0) - dB(0, 1)];
+  const lapB = [0, 1, 2].map((b) => (mhd ? [0, 1, 2].reduce((s, a) => s + (a < axes ? deriv2(c, (q) => q.b[b], a, x.dx, withB) : 0), 0) : 0));
   // Radiation's coupling at the cell: the force on the gas and the heat it gains.
   let radForce: number[] | null = null;
   let radHeat = 0;
-  const rad = x.radiation && x.stencil.rad ? x.stencil.rad : null;
+  let kappa = { planck: 0, rosseland: 0 };
+  const rad = x.radiation && z.hasRad ? z.rad : null;
   if (rad && x.radiation) {
-    const T = x.eos.temperature(z.rho, u2[1]);
-    const k = x.radiation.opacity(z.rho, T);
-    radForce = [0, 1, 2].map((a) => (k.rosseland * z.rho * rad[1 + a]) / x.radiation!.c);
-    radHeat = x.radiation.c * k.planck * z.rho * diff(rad[0], x.radiation.a * T ** 4);
+    kappa = x.radiation.opacity(z.rho, T);
+    radForce = [0, 1, 2].map((a) => (kappa.rosseland * z.rho * rad[1 + a]) / x.radiation!.c);
+    radHeat = x.radiation.c * kappa.planck * z.rho * diff(rad[0], x.radiation.a * T ** 4);
   }
 
   out.push(equation('mass', dt(RHO), [term('mass-flux', row(mo('−'), DIV, paren(RHO, V)), 'mass carried in or out', [-div((q, a) => q.rho * q.v[a])])]));
@@ -233,8 +279,8 @@ export function cellEquations(x: TermInput): Equation[] | null {
     ]),
   );
 
-  if (x.eos.hasEnergy) {
-    const heat = x.cooling !== 'off' ? coolRate(x.cooling, x.coolParams, z.rho, x.eos.temperature(z.rho, u2[1])) : 0;
+  if (eos.hasEnergy) {
+    const heat = x.cooling !== 'off' ? coolRate(x.cooling, x.coolParams, z.rho, T) : 0;
     const v2 = dot(z.v, z.v);
     const ptot = mhd ? row(mi('P'), mo('+'), frac(sup(mi('B'), mn('2')), mn('2'))) : mi('P');
     out.push(
@@ -246,6 +292,10 @@ export function cellEquations(x: TermInput): Equation[] | null {
           [-div((q, a) => (q.E + q.p + (mhd ? 0.5 * dot(q.b, q.b) : 0)) * q.v[a], mhd ? withB : undefined)],
         ),
         mhd ? term('mag-work', row(mo('+'), DIV, brack(paren(V, mo('·'), B), B)), 'work of magnetic tension', [div((q, a) => dot(q.v, q.b) * q.b[a], withB)]) : null,
+        // -div(eta J x B) = eta (B . lap B + J^2), with curl curl B = -lap B where div B = 0.
+        mhd && eta > 0
+          ? term('ohm', row(mo('−'), DIV, paren(mi('η'), bold('J'), mo('×'), B)), 'resistive energy flux (Ohmic heating and field diffusion)', [eta * (dot(z.b, lapB) + dot(J, J))])
+          : null,
         gOn ? term('grav-work', row(mo('+'), RHO, V, mo('·'), bold('g')), 'work done by gravity', [z.rho * dot(z.v, g)]) : null,
         x.cooling !== 'off' ? term('cooling', row(mo('+'), mi('Γ'), mo('−'), mi('Λ')), 'heating less cooling', [heat]) : null,
         x.stencil.heat !== undefined ? term('burn', row(mo('+'), RHO, sub(mi('ε'), mi('nuc'))), 'nuclear burning (last step)', [x.stencil.heat]) : null,
@@ -263,12 +313,50 @@ export function cellEquations(x: TermInput): Equation[] | null {
     const e = (q: Prim) => cross(q.v, q.b);
     const d = (b: number, a: number) => (a < axes ? deriv(c, (q) => e(q)[b], a, x.dx, withB) : 0);
     const curl = [d(2, 1) - d(1, 2), d(0, 2) - d(2, 0), d(1, 0) - d(0, 1)];
-    const eta = x.resistivity ?? 0;
-    const lap = eta > 0 ? [0, 1, 2].map((b) => eta * [0, 1, 2].reduce((s, a) => s + (a < axes ? deriv2(c, (q) => q.b[b], a, x.dx, withB) : 0), 0)) : null;
+    const lap = eta > 0 ? lapB.map((v) => eta * v) : null;
     out.push(
       equation('induction', dt(B), [
         term('induction', row(mo('+'), CURL, paren(V, mo('×'), B)), 'field carried, stretched and compressed by the flow', curl),
         lap ? term('resistive', row(mo('+'), mi('η'), sup(mo('∇'), mn('2')), B), 'resistive diffusion', lap) : null,
+      ]),
+    );
+  }
+  // The species: each one's rho X carried with the gas, and changed by burning.
+  if (x.species && z.rx.length) {
+    const rates = x.species.burnRates?.(z.rho, T, X) ?? null;
+    z.rx.forEach((_, i) => {
+      const carried = -div((q, a) => (q.rx[i] ?? 0) * q.v[a]);
+      const burn = rates?.[i] ?? 0;
+      if (!(X[i] > 1e-6) && carried === 0 && burn === 0) return;
+      const e = equation('species', dt(row(RHO, sub(mi('X'), mi('i')))), [
+        term('sp-flux', row(mo('−'), DIV, paren(RHO, sub(mi('X'), mi('i')), V)), 'carried with the gas', [carried]),
+        rates ? term('sp-burn', row(mo('+'), RHO, sub(row(mo('Ẋ')), mi('i'))), 'made or used up by burning', [burn]) : null,
+      ]);
+      out.push({ ...e, name: x.species!.names[i] ?? `species ${i + 1}` });
+    });
+  }
+
+  // The radiation (M1): its energy and flux, carried with the gas, transported at the speed of
+  // light and exchanged with the gas, the last two slowed by the cell's reduction factor r
+  // (radiation/sweep.wgsl).
+  if (rad && x.radiation) {
+    const R = x.radiation;
+    const r = reduction(kappa.rosseland * z.rho * x.dx, R.chat, R.c, R.localC);
+    const withRad = (q: Prim) => q.hasRad;
+    const rmi = mi('r');
+    out.push(
+      equation('rad-energy', dt(sub(mi('E'), mi('r'))), [
+        term('rad-e-advect', row(mo('−'), DIV, paren(sub(mi('E'), mi('r')), V)), 'carried with the gas', [-div((q, a) => q.rad[0] * q.v[a], withRad)]),
+        term('rad-e-flux', row(mo('−'), rmi, DIV, bold('F')), 'radiation streaming or diffusing (r: reduced speed of light)', [-r * div((q, a) => q.rad[1 + a], withRad)]),
+        term('rad-e-exchange', row(mo('−'), rmi, mi('c'), sub(mi('κ'), mi('P')), RHO, paren(sub(mi('E'), mi('r')), mo('−'), mi('a'), sup(mi('T'), mn('4')))), 'absorbed less emitted by the gas', [-r * radHeat]),
+        term('rad-e-work', row(mo('−'), rmi, V, mo('·'), frac(row(sub(mi('κ'), mi('R')), RHO), mi('c')), bold('F')), 'work done on the gas', [-r * dot(z.v, radForce!)]),
+      ]),
+    );
+    out.push(
+      equation('rad-flux', dt(bold('F')), [
+        term('rad-f-advect', row(mo('−'), DIV, paren(V, bold('F'))), 'carried with the gas', vec((b) => -div((q, a) => q.rad[1 + b] * q.v[a], withRad))),
+        term('rad-f-pressure', row(mo('−'), rmi, sup(mi('c'), mn('2')), DIV, sub(mi('P'), mi('r'))), 'radiation pressure gradient (M1 closure)', vec((b) => -r * R.c * R.c * div((q, a) => radPressure(q.rad, R.c, a, b), withRad))),
+        term('rad-f-drag', row(mo('−'), rmi, mi('c'), sub(mi('κ'), mi('R')), RHO, bold('F')), 'absorbed and scattered by the gas', vec((b) => -r * R.c * kappa.rosseland * z.rho * z.rad[1 + b])),
       ]),
     );
   }

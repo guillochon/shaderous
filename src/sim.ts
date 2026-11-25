@@ -270,8 +270,10 @@ export interface CellStencil {
   b?: (number[] | null)[];
   /** burning: the cell's heating rate over the last step, per unit volume */
   heat?: number;
-  /** radiation: the cell's (E, Fx, Fy, Fz) */
-  rad?: number[];
+  /** radiation: (E, Fx, Fy, Fz) of each slot */
+  rad?: (number[] | null)[];
+  /** species: rho X of each species, in the problem's order, of each slot */
+  species?: (number[] | null)[];
 }
 
 /** The textures besides the state that a stencil reads, each laid out as the state is. */
@@ -283,6 +285,8 @@ export interface StencilSources {
   facesWrap?: boolean[];
   heat?: GPUTexture | null;
   rad?: GPUTexture | null;
+  /** species: rho X four to a texel, group g at the state's texel moved by offset(g) */
+  species?: { texture: GPUTexture; count: number; offset: (group: number) => [number, number, number] } | null;
 }
 
 const sameSize = (a: GPUTexture, b: GPUTexture) => a.width === b.width && a.height === b.height && a.depthOrArrayLayers === b.depthOrArrayLayers;
@@ -296,12 +300,21 @@ function window3(at: number[], lo: number[], hi: number[], before = 1, after = 1
 
 /**
  * Read the stencil around texel `at` of the state textures (u1, u2), the window kept within
- * [lo, hi] (a flat axis has lo = hi), with what `src` adds: self-gravity's acceleration, the
- * heating rate and the radiation at `at`, and the cell-centered magnetic field of every slot.
+ * [lo, hi] (a flat axis has lo = hi), with what `src` adds: self-gravity's acceleration and the
+ * heating rate at `at`, and the radiation, species and cell-centered magnetic field of every slot.
  */
 export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number, number, number], lo: number[], hi: number[], src: StencilSources = {}): Promise<CellStencil> {
   const w = window3(at, lo, hi);
   const ok = (t: GPUTexture | null | undefined): t is GPUTexture => !!t && sameSize(t, state[0]);
+  // Every texture read over the window, each from the window moved by its offset.
+  const wins: { key: string; tex: GPUTexture; off: number[] }[] = [
+    { key: 'u1', tex: state[0], off: [0, 0, 0] },
+    { key: 'u2', tex: state[1], off: [0, 0, 0] },
+  ];
+  if (ok(src.rad)) wins.push({ key: 'rad', tex: src.rad, off: [0, 0, 0] });
+  const sp = src.species && src.species.count > 0 ? src.species : null;
+  const groups = sp ? Math.ceil(sp.count / 4) : 0;
+  for (let g = 0; g < groups; g++) wins.push({ key: `s${g}`, tex: sp!.texture, off: sp!.offset(g) });
   const faces = src.faces && src.faces.width > 1 ? src.faces : null;
   const flat = lo.map((l, a) => l === hi[a]);
   // Faces: cell c's lower face is texel c, its upper one c + 1 (the faces beyond the window's
@@ -310,29 +323,34 @@ export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number
   const fw = window3(at, lo, hi.map((h, a) => (flat[a] ? h : Math.min(h + 1, fdims[a] - 1))), 1, 2);
   // Rows padded to 256 bytes; each region at its own 256-aligned offset.
   const region = 256 * w.size[1] * w.size[2];
+  const fOff = wins.length * region;
   const fRegion = faces ? 256 * fw.size[1] * fw.size[2] : 0;
   const centers: [string, GPUTexture][] = [];
   if (ok(src.gfield)) centers.push(['g', src.gfield]);
   if (ok(src.heat)) centers.push(['heat', src.heat]);
-  if (ok(src.rad)) centers.push(['rad', src.rad]);
-  const cOff = 2 * region + fRegion;
+  const cOff = fOff + fRegion;
   const buf = d.createBuffer({ size: cOff + 256 * Math.max(1, centers.length), usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = d.createCommandEncoder();
-  state.forEach((t, i) => enc.copyTextureToBuffer({ texture: t, origin: w.from }, { buffer: buf, offset: region * i, bytesPerRow: 256, rowsPerImage: w.size[1] }, w.size));
-  if (faces) enc.copyTextureToBuffer({ texture: faces, origin: fw.from }, { buffer: buf, offset: 2 * region, bytesPerRow: 256, rowsPerImage: fw.size[1] }, fw.size);
+  wins.forEach((v, i) => {
+    const origin = w.from.map((f, a) => f + v.off[a]) as [number, number, number];
+    enc.copyTextureToBuffer({ texture: v.tex, origin }, { buffer: buf, offset: region * i, bytesPerRow: 256, rowsPerImage: w.size[1] }, w.size);
+  });
+  if (faces) enc.copyTextureToBuffer({ texture: faces, origin: fw.from }, { buffer: buf, offset: fOff, bytesPerRow: 256, rowsPerImage: fw.size[1] }, fw.size);
   centers.forEach(([, t], i) => enc.copyTextureToBuffer({ texture: t, origin: at }, { buffer: buf, offset: cOff + 256 * i }, [1, 1, 1]));
   d.queue.submit([enc.finish()]);
   await buf.mapAsync(GPUMapMode.READ);
   const all = new Float32Array(buf.getMappedRange().slice(0));
   buf.unmap();
   buf.destroy();
-  const u: (number[] | null)[][] = [new Array(27).fill(null), new Array(27).fill(null)];
+  const read: Record<string, (number[] | null)[]> = {};
+  for (const v of wins) read[v.key] = new Array(27).fill(null);
   const b: (number[] | null)[] = new Array(27).fill(null);
+  const species: (number[] | null)[] = new Array(27).fill(null);
   // Component a of the face texel at texture coordinates t, or null outside the face window.
   const face = (t: number[], a: number): number | null => {
     const x = t.map((v, i) => v - fw.from[i]);
     if (x.some((v, i) => v < 0 || v >= fw.size[i])) return null;
-    return all[(2 * region + x[2] * fw.size[1] * 256 + x[1] * 256 + x[0] * 16) / 4 + a];
+    return all[(fOff + x[2] * fw.size[1] * 256 + x[1] * 256 + x[0] * 16) / 4 + a];
   };
   for (let k = -1; k <= 1; k++) {
     for (let j = -1; j <= 1; j++) {
@@ -344,7 +362,8 @@ export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number
         if (x < 0 || y < 0 || z < 0 || x >= w.size[0] || y >= w.size[1] || z >= w.size[2]) continue;
         const n = i + 1 + 3 * (j + 1) + 9 * (k + 1);
         const o = (z * w.size[1] * 256 + y * 256 + x * 16) / 4;
-        for (let s = 0; s < 2; s++) u[s][n] = [...all.slice(s * (region / 4) + o, s * (region / 4) + o + 4)];
+        wins.forEach((v, r) => (read[v.key][n] = [...all.slice(r * (region / 4) + o, r * (region / 4) + o + 4)]));
+        if (sp) species[n] = Array.from({ length: groups }, (_, g) => read[`s${g}`][n]!).flat().slice(0, sp.count);
         if (!faces) continue;
         // The mean of the cell's two faces along each axis; along a flat axis its one face.
         const bc: number[] = [];
@@ -369,13 +388,13 @@ export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number
   };
   const g = center('g');
   const heat = center('heat');
-  const rad = center('rad');
   return {
-    u1: u[0], u2: u[1],
+    u1: read.u1, u2: read.u2,
     g: g ? [g[0], g[1], g[2]] : [0, 0, 0],
     ...(faces ? { b } : {}),
     ...(heat ? { heat: heat[0] } : {}),
-    ...(rad ? { rad } : {}),
+    ...(read.rad ? { rad: read.rad } : {}),
+    ...(sp ? { species } : {}),
   };
 }
 
@@ -479,6 +498,8 @@ export interface Simulation {
   readMasses(): Promise<Required<PointMass>[] | null>;
   /** Remove the point masses added with addMass(), keeping the preset's. */
   removeAddedMasses(): void;
+  /** Hold the tracer at this place among the run's masses where it is, or let it move (writeTracerFixed). */
+  setTracerFixed(index: number, fixed: boolean): void;
   /** How many point masses the run holds: one added with addMass() is the last of them. */
   readonly massCount: number;
   /**
@@ -1185,6 +1206,20 @@ export function writeMassRadii(d: GPUDevice, bh: GPUBuffer, c: SimConfig, dx: nu
     // Whether it is held on its orbit can change mid-run too.
     d.queue.writeBuffer(bh, at + 60, new Float32Array([massFlags(m)]));
   });
+}
+
+/**
+ * Hold a tracer (a massless point mass, not on an orbit) where it is, or let it go to move as
+ * the forces on it take it. Held, it is also brought to rest: let go again, it starts from rest.
+ */
+export function writeTracerFixed(d: GPUDevice, bh: GPUBuffer, index: number, fixed: boolean) {
+  const at = 4 * MASS_HEADER + 4 * MASS_STRIDE * index;
+  d.queue.writeBuffer(bh, at + 60, new Float32Array([massFlags({ massless: true, fixed, onOrbit: false } as Required<PointMass>)]));
+  if (fixed) {
+    // The velocity and its Kahan compensation (packMasses).
+    d.queue.writeBuffer(bh, at + 16, new Float32Array([0, 0, 0]));
+    d.queue.writeBuffer(bh, at + 112, new Float32Array([0, 0, 0]));
+  }
 }
 
 /** A mass's flags as the Masses block holds them (gravity/bh.wgsl). */
@@ -3145,6 +3180,10 @@ export class Sim implements Simulation {
   }
   private lumpGrid?: GPUBuffer;
 
+  setTracerFixed(index: number, fixed: boolean) {
+    if (index >= 0 && index < this.nMasses) writeTracerFixed(this.device, this.bh, index, fixed);
+  }
+
   addMass(m: PointMass): boolean {
     if (this.nMasses >= MAX_MASSES) return false;
     // Only its own slot is written: the others are mid-orbit on the GPU.
@@ -3211,6 +3250,8 @@ export class Sim implements Simulation {
       ? await readStencil(this.device, this.state[this.cur], index as [number, number, number], [0, 0, 0], [t.width - 1, t.height - 1, t.depthOrArrayLayers - 1], {
           gfield: this.gfield, heat: this.heat, rad: this.rad?.R[this.rad.cur],
           faces: this.mhd?.faces[this.cur], facesWrap: [0, 1, 2].map((a) => this.cfg.bcLo[a] === 0 && !(a === 0 && !!this.cfg.problem.shear)),
+          // Groups stacked along z, nz texels apart.
+          species: this.speciesGroups > 0 ? { texture: this.species[this.speciesCur], count: this.cfg.problem.species?.length ?? 0, offset: (g) => [0, 0, g * this.nz] } : null,
         })
       : undefined;
     return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2], stencil };

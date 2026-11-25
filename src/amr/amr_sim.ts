@@ -40,7 +40,7 @@ import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
 import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
-import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, readStencil, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, readStencil, writeTracerFixed, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { blockTier, type Zone } from './zones';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
@@ -3052,6 +3052,7 @@ export class AmrSim implements Simulation {
       const stencil = opts?.stencil
         ? await readStencil(this.device, this.state[this.cur], at, o, [o[0] + BS - 1, o[1] + BS - 1, three ? o[2] + BS - 1 : o[2]], {
             gfield: this.gfield, heat: this.heat, rad: this.rad?.R[this.rad.cur], faces: this.mhd?.faces[this.cur],
+            species: this.speciesGroups > 0 ? { texture: this.species[this.speciesCur], count: this.cfg.problem.species?.length ?? 0, offset: (g) => speciesGroupOffset(g, this.speciesDepth) } : null,
           })
         : undefined;
       const dx = this.dx0 / (1 << b.level);
@@ -3064,6 +3065,11 @@ export class AmrSim implements Simulation {
       };
     }
     return null;
+  }
+
+  setTracerFixed(index: number, fixed: boolean) {
+    this.flush();
+    if (index >= 0 && index < this.nMasses) writeTracerFixed(this.device, this.bh, index, fixed);
   }
 
   retuneMasses() {

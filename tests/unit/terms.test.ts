@@ -139,8 +139,8 @@ describe('equation terms of the query readout', () => {
 
   it('radiation: force kappa_R rho F / c, heating c kappa_P rho (E - a T^4)', () => {
     const st = stencil(() => 2, () => [0.5, 0, 0], () => 1);
-    st.rad = [3, 0.6, 0, 0];
-    const radiation = { c: 10, a: 0.01, opacity: () => ({ planck: 0.2, rosseland: 0.5 }) };
+    st.rad = st.u1.map((u) => (u ? [3, 0.6, 0, 0] : null));
+    const radiation = { c: 10, chat: 10, localC: false, a: 0.01, opacity: () => ({ planck: 0.2, rosseland: 0.5 }) };
     const x = input(st, { radiation });
     const T = eos.temperature(2, st.u2[13]![1]);
     expect(termOf(x, 'momentum', 'rad-force')!.value[0]).toBeCloseTo((0.5 * 2 * 0.6) / 10, 12);
@@ -151,11 +151,53 @@ describe('equation terms of the query readout', () => {
   it('float32 round-off counts as zero: radiation in equilibrium, a rounded pressure', () => {
     const st = stencil(() => 2, () => [0, 0, 0], () => 1);
     const T = eos.temperature(2, st.u2[13]![1]);
-    st.rad = [0.01 * T ** 4 * (1 + 3e-7), 0, 0, 0];
-    const radiation = { c: 1e4, a: 0.01, opacity: () => ({ planck: 1e3, rosseland: 1e3 }) };
+    st.rad = st.u1.map((u) => (u ? [0.01 * T ** 4 * (1 + 3e-7), 0, 0, 0] : null));
+    const radiation = { c: 1e4, chat: 1e4, localC: false, a: 0.01, opacity: () => ({ planck: 1e3, rosseland: 1e3 }) };
     expect(termOf(input(st, { radiation }), 'energy', 'rad-heat')!.value[0]).toBe(0);
     const rounded = stencil(() => 1, () => [0, 0, 0], (r) => Math.fround(1 + 1e-8 * r[0]));
     expect(termOf(input(rounded), 'momentum', 'pressure')!.size).toBe(0);
+  });
+
+  it('radiation equations: streaming, exchange and drag slowed by r, advection not', () => {
+    // E_r = 1 + x, F = (0.2 x, 0, 0), gas moving at 0.5 along x: div(E v) = 0.5, div F = 0.2.
+    const st = stencil(() => 2, () => [0.5, 0, 0], () => 1);
+    st.rad = st.u1.map((u, n) => (u ? [1 + ((n % 3) - 1) * DX, 0.2 * ((n % 3) - 1) * DX, 0, 0] : null));
+    const radiation = { c: 10, chat: 2.5, localC: false, a: 0, opacity: () => ({ planck: 0.3, rosseland: 0.4 }) };
+    const x = input(st, { radiation });
+    const e = eq(x, 'rad-energy');
+    const t = (id: string) => e.terms.find((q) => q.id === id)!.value[0];
+    expect(t('rad-e-advect')).toBeCloseTo(-0.5, 10);
+    expect(t('rad-e-flux')).toBeCloseTo(-0.25 * 0.2, 10);
+    // a = 0: the gas emits nothing; r c kP rho E is absorbed.
+    expect(t('rad-e-exchange')).toBeCloseTo(-0.25 * 10 * 0.3 * 2 * 1, 10);
+    // Drag on the flux at the cell (F = 0 there) is zero; F's advection is -0.5 * 0.2.
+    const f = eq(x, 'rad-flux');
+    expect(f.terms.find((q) => q.id === 'rad-f-drag')!.size).toBe(0);
+    expect(f.terms.find((q) => q.id === 'rad-f-advect')!.value[0]).toBeCloseTo(-0.1, 10);
+    // Isotropic radiation (F = 0 at the cell): P = E / 3, so -r c^2 dP/dx = -0.25 * 100 / 3.
+    expect(f.terms.find((q) => q.id === 'rad-f-pressure')!.value[0]).toBeCloseTo((-0.25 * 100) / 3, 3);
+  });
+
+  it('species: carried with the gas, and burned at the rates given', () => {
+    const st = stencil(() => 1, (r) => [r[0], 0, 0], () => 1);
+    st.species = st.u1.map((u) => (u ? [0.7, 0.3] : null));
+    const x = input(st, { species: { names: ['fuel', 'ash'], burnRates: () => [-0.2, 0.2] } });
+    const sp = cellEquations(x)!.filter((e) => e.id === 'species');
+    expect(sp.map((e) => e.name)).toEqual(['fuel', 'ash']);
+    // div(rho X v) = X div v = X for v = (x, 0, 0).
+    expect(sp[0].terms.find((t) => t.id === 'sp-flux')!.value[0]).toBeCloseTo(-0.7, 10);
+    expect(sp[1].terms.find((t) => t.id === 'sp-burn')!.value[0]).toBe(0.2);
+    // Without a burn, no burning term.
+    const plain = cellEquations(input(st, { species: { names: ['fuel', 'ash'] } }))!.filter((e) => e.id === 'species');
+    expect(plain[0].terms.map((t) => t.id)).toEqual(['sp-flux']);
+  });
+
+  it('MHD resistivity: the energy flux eta (B . lap B + J^2)', () => {
+    // B = (0, x, 0): J = (0, 0, 1), lap B = 0, so the term is eta.
+    const st = stencil(() => 1, () => [0, 0, 0], () => 1);
+    st.b = st.u1.map((u, n) => (u ? [0, ((n % 3) - 1) * DX, 0] : null));
+    expect(termOf(input(st, { resistivity: 0.3 }), 'energy', 'ohm')!.value[0]).toBeCloseTo(0.3, 10);
+    expect(termOf(input(st), 'energy', 'ohm')).toBeUndefined();
   });
 
   it('importance runs over six decades below the largest term', () => {

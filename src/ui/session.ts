@@ -40,6 +40,8 @@ export type Action =
   | { kind: 'mass'; spec: PointMass; role: MassRole }
   /** point masses taken out of the run, by their places among its masses */
   | { kind: 'remove'; indices: number[] }
+  /** a tracer held where it is, or let go to follow the forces on it, by its place among the run's masses */
+  | { kind: 'fix'; index: number; fixed: boolean }
   /** the sources and sinks, all of them as set */
   | { kind: 'sources'; list: SourceSpec[] }
   /** the gas's total mass told to self-gravity (after a tool added or removed gas) */
