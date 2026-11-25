@@ -501,3 +501,19 @@ body.validate tr.group button { margin-left: 10px; font-weight: 400; }
 body.validate tr.group .group-tally { margin-left: 10px; font-weight: 400; color: var(--dim); }
 body.validate tr.group .group-tally.pass { color: var(--good); }
 body.validate tr.group .group-tally.fail { color: var(--bad); }
+
+/* the Share dialog (ui/share.ts): the copied link as a QR code */
+.share-dialog {
+  width: min(460px, 92vw); max-height: 94vh; padding: 20px 22px 22px; overflow-y: auto;
+  background: var(--panel); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+}
+.share-dialog[open] { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+.share-dialog::backdrop { background: rgba(5, 7, 10, 0.55); }
+.share-dialog h2 { margin: 6px 28px 0; font-size: 17px; font-weight: 600; text-align: center; }
+.share-x { position: absolute; top: 10px; right: 10px; width: 28px; height: 28px; padding: 0; font-size: 18px; line-height: 1; }
+.share-qr { width: min(380px, 100%); aspect-ratio: 1; background: #fff; border-radius: 6px; }
+.share-qr svg { display: block; width: 100%; height: 100%; }
+.share-qr.none { aspect-ratio: auto; background: none; color: var(--dim); text-align: center; }
+.share-url { width: 100%; height: 28px; font-size: 12px; color: var(--dim); }
+.share-dialog :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

@@ -54,6 +54,7 @@ import { changeBetween, runningSpec, sameSetup, setSetting, type Setting } from 
 import { SessionRecorder, base64ToF32, planeOutline, pullOps, pullStep, queryDiff, type Action, type MassRole, type PlaneShape, type SessionLog, type StarAction } from './session';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type SetupSpec } from '../setup/spec';
 import { openSetupDialog } from './setup/dialog';
+import { showShare } from './share';
 import { installSetupSearch } from './setup_search';
 import type { SetupHost } from './setup/host';
 import { getSetup, listSetups } from './setup/library';
@@ -2956,15 +2957,14 @@ function bind() {
 
   $('share').addEventListener('click', async () => {
     syncAddress(true);
-    const button = $('share');
+    const url = location.href;
+    let copied = true;
     try {
-      await navigator.clipboard.writeText(location.href);
-      button.textContent = 'Copied';
+      await navigator.clipboard.writeText(url);
     } catch {
-      // No clipboard access: the address bar already holds the link.
-      prompt('Copy this link', location.href);
+      copied = false; // the dialog shows the link to copy by hand
     }
-    setTimeout(() => (button.textContent = 'Share'), 2000);
+    showShare(url, copied);
   });
 
   on('mode', (el) => {

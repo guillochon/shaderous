@@ -59,7 +59,8 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "playwright-core": "^1.48.0"
+    "playwright-core": "^1.48.0",
+    "qrcode-generator": "^2.0.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
