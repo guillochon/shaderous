@@ -28,6 +28,8 @@ import { expandSpecies, switchedSetup } from '../burn/watch';
 import { speciesLabel } from '../species/species';
 import { mixMoments, problemCoefficients, speciesNuclides } from '../species/mixture';
 import { burnRates } from './burn_rates';
+import { ReadoutView, type Row } from './readout_view';
+import { hubble } from '../cosmo';
 import { amrFits, createSim, fieldShaderFor, gridBytes, maxAmrLevels, minAmrLevels, supportsAmr } from '../create';
 import { laneEmdenCached, polytropeMass } from '../problems/lane_emden';
 import { defaultFrameDt, MAX_BODIES, sizedProblem } from '../problems/types';
@@ -3380,6 +3382,8 @@ function dropPin() {
   pin = null;
   pinCell = null;
   pinFixed = undefined;
+  recorded = null;
+  queryView.reset();
   cellPop.classList.remove('pinned');
   cellPop.hidden = true;
 }
@@ -3511,6 +3515,8 @@ async function pinAt(clientX: number, clientY: number) {
   pin = to;
   pinCell = null;
   pinFixed = undefined;
+  recorded = null;
+  queryView.reset();
   pinAsked = 0;
   cellPop.classList.add('pinned');
 }
@@ -3551,7 +3557,16 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
     const l = u.label(m);
     return `(${v.slice(0, dims).map((a) => fmt3(a * u.scale(m))).join(', ')})${l ? ` ${l}` : ''}`;
   };
-  const rows: [string, string, string?][] = [];
+  const rows: Row[] = [];
+  // A row of a number (or a vector's components) in measure m, kept as a series while pinned.
+  // (The pinned thing's own rows are named after it in the series: its velocity, the gas's.)
+  let owner = '';
+  const num = (key: string, label: string, v: number | number[], m: Measure | null, text?: string) => {
+    const raw = Array.isArray(v) ? v.slice(0, dims) : [v];
+    const shown = text ?? (Array.isArray(v) ? (m ? vec(v, m) : `(${raw.map((a) => fmt3(a)).join(', ')})`) : m ? u.fmt(v, m) : fmt3(v));
+    rows.push({ key, label, text: shown, name: owner ? `${owner} ${label.toLowerCase()}` : undefined, series: { raw, scale: m ? u.scale(m) : 1, unit: m ? u.label(m) : '' } });
+  };
+  const txt = (key: string, label: string, text: string, cls?: string) => rows.push({ key, label, text, cls });
   let title = c ? `Cell (${c.index.join(', ')})` : 'Outside the box';
   if (thing) {
     const box = cfg.problem.box;
@@ -3559,21 +3574,30 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
     const source = 'source' in thing ? thing.source : sources.find((q) => q.carrier === thing.mass);
     const kind = source ? (source.decay > 0 ? 'Sink' : 'Source') : !m ? 'Point mass' : !m.massless ? 'Point mass' : m.sinkRate > 0 && m.sinkRadius > 0 ? 'Sink' : 'Tracer';
     title = `${kind}${'mass' in thing ? ` ${thing.mass + 1}` : ''}${m?.fixed || (source && !m) ? ', fixed' : ''}${c ? ` in cell (${c.index.join(', ')})` : ''}`;
+    owner = kind;
     if (m) {
-      rows.push(['Mass', m.massless ? 'none' : cfg.G > 0 ? u.fmt(m.gm / cfg.G, 'mass') : fmt3(m.gm)]);
-      rows.push(['Position', vec(m.pos, 'length')], ['Velocity', vec(m.vel, 'velocity')], ['Speed', u.fmt(Math.hypot(...m.vel.slice(0, dims)), 'velocity')]);
-      rows.push(['Softening', u.fmt(m.soft, 'length')]);
-      if (m.sinkRadius > 0 && m.sinkRate > 0) rows.push(['Sink radius', u.fmt(m.sinkRadius, 'length')], ['Gas taken in', u.fmt(m.accreted, 'mass')]);
+      if (m.massless) txt('mass', 'Mass', 'none');
+      else if (cfg.G > 0) num('mass', 'Mass', m.gm / cfg.G, 'mass');
+      else num('mass', 'Mass', m.gm, null);
+      num('m-pos', 'Position', m.pos, 'length');
+      num('m-vel', 'Velocity', m.vel, 'velocity');
+      num('m-speed', 'Speed', Math.hypot(...m.vel.slice(0, dims)), 'velocity');
+      num('m-soft', 'Softening', m.soft, 'length');
+      if (m.sinkRadius > 0 && m.sinkRate > 0) {
+        num('m-sink-r', 'Sink radius', m.sinkRadius, 'length');
+        num('m-taken', 'Gas taken in', m.accreted, 'mass');
+      }
     } else if (source) {
-      rows.push(['Position', vec(source.pos.map((v, a) => fracPos(cfg, v, a)), 'length')]);
+      num('s-pos', 'Position', source.pos.map((v, a) => fracPos(cfg, v, a)), 'length');
     }
     if (source) {
-      rows.push(['Radius', u.fmt(source.radius * box, 'length')]);
-      if (source.decay > 0) rows.push(['Removal rate', u.fmt(source.decay, 'rate')]);
-      else rows.push(['Density fed in', `${u.fmt(source.rate, [1, -3, -1])}`]);
-      if (!m && Math.hypot(...source.vel) > 0) rows.push(['Gas leaves at', vec(source.vel, 'velocity')]);
+      num('s-radius', 'Radius', source.radius * box, 'length');
+      if (source.decay > 0) num('s-decay', 'Removal rate', source.decay, 'rate');
+      else num('s-rate', 'Density fed in', source.rate, [1, -3, -1] as unknown as Measure);
+      if (!m && Math.hypot(...source.vel) > 0) num('s-vel', 'Gas leaves at', source.vel, 'velocity');
     }
-    if (c) rows.push(['Gas there', '', 'head']);
+    if (c) txt('head', 'Gas there', '', 'head');
+    owner = '';
   }
   if (c) {
     const eos = cellEos(c).eos;
@@ -3583,37 +3607,41 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
     const p = eos.pressure(rho, eint);
     const cs = eos.soundSpeed(rho, p);
     const speed = Math.hypot(...vel.slice(0, dims));
-    if (!thing) rows.push(['Position', vec(c.pos, 'length')]);
-    rows.push(['Cell size', u.fmt(c.dx, 'length')]);
+    if (!thing) num('pos', 'Position', c.pos, 'length');
+    num('dx', 'Cell size', c.dx, 'length');
     if (c.block) {
       const b = c.block;
-      rows.push(['Level', `${b.level} of ${cfg.amrLevels}`]);
-      rows.push(['Block', `(${b.coords.join(', ')}), slot ${b.slot}`]);
-      rows.push(['Indicator', b.indicator === null ? 'not yet read' : `${fmt3(b.indicator)} (split ${cfg.refineHi}, merge ${cfg.refineLo})`]);
+      num('level', 'Level', b.level, null, `${b.level} of ${cfg.amrLevels}`);
+      txt('block', 'Block', `(${b.coords.join(', ')}), slot ${b.slot}`);
+      if (b.indicator === null) txt('indicator', 'Indicator', 'not yet read');
+      else num('indicator', 'Indicator', b.indicator, null, `${fmt3(b.indicator)} (split ${cfg.refineHi}, merge ${cfg.refineLo})`);
     }
-    if (c.u2[3] > 0.5) rows.push(['Obstacle', 'solid cell; gas held for later', 'solid']);
-    rows.push(
-      ['Density', u.fmt(rho, 'density')],
-      ['Velocity', vec(vel, 'velocity')],
-      ['Speed', u.fmt(speed, 'velocity')],
-      ['Mach number', fmt3(cs > 0 ? speed / cs : 0)],
-      ['Pressure', u.fmt(p, 'pressure')],
-      ['Temperature', u.fmt(eos.temperature(rho, eint), 'temperature')],
-      ['Sound speed', u.fmt(cs, 'velocity')],
-      ['Internal energy', u.label('specificEnergy') ? u.fmt(eint / rho, 'specificEnergy') : `${fmt3(eint / rho)} per mass`],
-      ['Total energy', u.label('pressure') ? u.fmt(c.u2[0], 'pressure') : `${fmt3(c.u2[0])} per volume`],
-      ['Scalar', fmt3(c.u2[2] / rho)],
-    );
+    if (c.u2[3] > 0.5) txt('solid', 'Obstacle', 'solid cell; gas held for later', 'solid');
+    num('rho', 'Density', rho, 'density');
+    num('vel', 'Velocity', vel, 'velocity');
+    num('speed', 'Speed', speed, 'velocity');
+    num('mach', 'Mach number', cs > 0 ? speed / cs : 0, null);
+    num('p', 'Pressure', p, 'pressure');
+    num('T', 'Temperature', eos.temperature(rho, eint), 'temperature');
+    num('cs', 'Sound speed', cs, 'velocity');
+    if (u.label('specificEnergy')) num('e', 'Internal energy', eint / rho, 'specificEnergy');
+    else num('e', 'Internal energy', eint / rho, null, `${fmt3(eint / rho)} per mass`);
+    if (u.label('pressure')) num('E', 'Total energy', c.u2[0], 'pressure');
+    else num('E', 'Total energy', c.u2[0], null, `${fmt3(c.u2[0])} per volume`);
+    num('scalar', 'Scalar', c.u2[2] / rho, null);
   }
   cellPop.querySelector('.title')!.textContent = title;
-  const eqs = pin && c?.stencil ? equationsHtml(c) : '';
-  const box = cellPop.querySelector('.eqs') as HTMLElement;
-  if (box.innerHTML !== eqs) box.innerHTML = eqs;
-  box.hidden = !eqs;
-  const html = rows.map(([k, v, cls]) => `<dt${cls === 'head' ? ' class="head"' : ''}>${k}</dt><dd${cls ? ` class="${cls}"` : ''}>${v}</dd>`).join('');
-  const dl = cellPop.querySelector('dl')!;
-  if (dl.innerHTML !== html) dl.innerHTML = html;
+  const pinned = !!pin;
+  queryView.setRows(rows, pinned);
+  if (pinned && c?.stencil) setEquations(c);
+  else queryView.setEquations(null);
+  // A new reading of the pinned cell: add it to the series.
+  if (pinned && c && c !== recorded) {
+    recorded = c;
+    queryView.record((lastDiag?.t ?? 0) * u.scale('time'), lastDiag?.steps ?? 0, u.label('time'));
+  }
   $('cell-remove').hidden = !pinRemovable();
+  ($('cell-export') as HTMLElement).hidden = !pinned;
   // A pinned tracer can be held where it is or let go (the GPU's flag, or the one just set).
   const tracer = pin && 'mass' in pin ? massesNow()[pin.mass] : undefined;
   const canFix = !!tracer && tracer.massless && !(tracer.sinkRate > 0 && tracer.sinkRadius > 0) && !sources.some((q) => pin && 'mass' in pin && q.carrier === pin.mass);
@@ -3628,6 +3656,19 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
   cellPop.style.left = `${Math.round(Math.max(4, left))}px`;
   cellPop.style.top = `${Math.round(top)}px`;
 }
+/** The readout's rows, equations and their series (ui/readout_view.ts). */
+const queryPop = $('diag-pop');
+const queryView = new ReadoutView(cellPop.querySelector('dl')!, cellPop.querySelector('.eqs')!, { el: queryPop, title: queryPop.querySelector('.title')!, canvas: queryPop.querySelector('canvas')! }, cellPop);
+/** The reading of the pinned cell last added to the series. */
+let recorded: CellProbe | null = null;
+$('cell-export').addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([queryView.log.csv()], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-query.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+});
 $('cell-remove').addEventListener('click', removePinned);
 const cellFixed = $('cell-fixed') as HTMLInputElement;
 cellFixed.addEventListener('change', () => {
@@ -3642,17 +3683,6 @@ cellFixed.addEventListener('change', () => {
 // The pinned readout shows the equations the run solves, each term colored by its size in that
 // cell against the largest term of its equation (ui/terms.ts), on a log ramp over six decades.
 
-/** What the equations shown leave out, in words: the physics they have no terms for yet. */
-function termsLeftOut(): string[] {
-  const p = cfg.problem;
-  const out: string[] = [];
-  if (rotationOf(cfg).some((w, i) => i < 3 && w !== 0) || p.frame) out.push('frame forces');
-  if (p.damping) out.push('the damping zone');
-  if (sources.length) out.push('sources and sinks');
-  if (cosmologyOf(cfg)) out.push('the expansion');
-  return out;
-}
-
 /** Start-up damping's rate at time t (hydro/damping.wgsl start_damping_rate). */
 function calmRate(t: number): number {
   const sd = cfg.startDamping;
@@ -3660,22 +3690,6 @@ function calmRate(t: number): number {
   return 0.5 * sd.rate * (1 + Math.cos((Math.PI * Math.max(t, 0)) / sd.time));
 }
 
-function equationHtml(e: Equation): string {
-  // (The first term drops a leading plus: = curl(v x B), not = + curl(v x B).)
-  const terms = e.terms.map((t, i) => `<mrow style="color: ${rampColor(importance(t.size, e.largest))}">${i === 0 ? t.math.replace(/^<mrow><mo>\+<\/mo>/, '<mrow>') : t.math}</mrow>`).join('');
-  const lines = e.terms
-    .map((t) => {
-      const s = importance(t.size, e.largest);
-      const pct = e.largest > 0 ? (100 * t.size) / e.largest : 0;
-      return `<div class="term"><span class="swatch" style="background: ${rampColor(s)}"></span><span class="what">${t.label}</span><span class="size">${pct >= 1 || pct === 0 ? pct.toFixed(0) : pct.toPrecision(1)}%</span></div>`;
-    })
-    .join('');
-  const net = e.largest > 0 ? (100 * e.netSize) / e.largest : 0;
-  const netText = e.largest > 0 ? `sum of the terms: ${net >= 1 ? net.toFixed(0) : net.toPrecision(1)}% of the largest term${net < 5 && e.terms.length > 1 ? ': in balance' : ''}` : 'nothing changes here';
-  return `<div class="eq"><math><mrow>${e.lhs}<mo>=</mo>${terms}</mrow></math></div>${lines}<div class="net">${netText}</div>`;
-}
-
-/** The pinned cell's equations, or a line on why there are none. */
 /**
  * The equation of state of the pinned cell, and of a cell of any mass fractions: where the species
  * set it, each cell's own (species/mixture.ts), else the run's.
@@ -3695,9 +3709,53 @@ function runBurnRates() {
   return rates.fn;
 }
 
-function equationsHtml(c: CellProbe): string {
-  if (cylindrical(cfg) || spherical(cfg)) return '<div class="head">Equations</div><div class="note">Shown on Cartesian grids only</div>';
+/** The weight of a source or sink at the cell at `pos` (relative to the box center): hydro/sources.wgsl source_weight. */
+function sourceWeight(q: SourceSpec, pos: number[]): { w: number; vel: number[] } {
+  let at = q.pos as number[];
+  let vel = q.vel as number[];
+  if (q.carrier !== undefined) {
+    const m = massesNow()[q.carrier];
+    if (!m) return { w: 0, vel };
+    at = m.pos.map((v, a) => boxFrac(cfg, v, a));
+    vel = m.vel;
+  }
+  const d = [0, 1, 2].map((a) => {
+    if (a === 2 && cfg.ndim === 2) return 0;
+    let v = boxFrac(cfg, pos[a], a) - at[a];
+    if (cfg.bcLo[a] === 0) v -= Math.round(v);
+    return v;
+  });
+  const r = Math.hypot(...d) / q.radius;
+  if (!(r < 1)) return { w: 0, vel };
+  const e0 = Math.min(1 - q.softness, 0.999);
+  const t = Math.min(1, Math.max(0, (r - e0) / (1 - e0)));
+  return { w: 1 - t * t * (3 - 2 * t), vel };
+}
+
+/** The share of the gas the point masses' sinks take per unit time at `pos` (gravity/bh.wgsl sink_fraction). */
+function massSinkRate(pos: number[]): number {
+  let k = 0;
+  for (const m of massesNow()) {
+    if (!(m.sinkRadius > 0 && m.sinkRate > 0)) continue;
+    const d = [0, 1, 2].map((a) => (a === 2 && cfg.ndim === 2 ? 0 : pos[a] - m.pos[a]));
+    const q = (d[0] ** 2 + d[1] ** 2 + d[2] ** 2) / m.sinkRadius ** 2;
+    if (q >= 1) continue;
+    // The rate is in units of sqrt(G M / r_sink^3), per unit time for a massless particle.
+    const rate = m.massless ? m.sinkRate : m.sinkRate * Math.sqrt(m.gm / m.sinkRadius ** 3);
+    k += (1 - q) ** 2 * rate;
+  }
+  return k;
+}
+
+/** The pinned cell's equations, to the queryView. */
+function setEquations(c: CellProbe) {
+  if (cylindrical(cfg) || spherical(cfg)) return queryView.setEquations(null, 'Equations are shown on Cartesian grids only');
   const ce = cellEos(c);
+  const rot = rotationOf(cfg);
+  const fd = lastDiag?.frame;
+  const omega = [rot[0], rot[1], fd ? fd.omega : rot[2]];
+  const shear = cfg.problem.shear;
+  const cosmo = cosmologyOf(cfg);
   const list = cellEquations({
     ndim: cfg.ndim, dx: c.dx, stencil: c.stencil!, pos: c.pos, eos: ce.eos, eosAt: ce.at, gext: cfg.gext,
     masses: massesNow().filter((m) => !m.massless).map((m) => ({ gm: m.gm, pos: m.pos, soft: m.soft })),
@@ -3705,34 +3763,15 @@ function equationsHtml(c: CellProbe): string {
     resistivity: cfg.resistivity,
     radiation: radiationOn(cfg) ? { c: cfg.radC, chat: cfg.radChat, a: cfg.radA, localC: cfg.radLocalC, opacity: (rho, T) => meanOpacity(cfg.opacity, cfg.opacityParams, rho, T) } : null,
     species: cfg.problem.species?.length ? { names: cfg.problem.species, burnRates: runBurnRates() } : null,
+    frame: {
+      omega, centrifugal: rot[3] !== 0, omegaDot: fd?.omegaDot ?? 0, accel: c.stencil?.frameAccel ?? [0, 0, 0],
+      shear: shear ? { omega: shear.omega, q: shear.q, stratified: !!shear.stratified } : null,
+    },
+    sources: sources.map((q) => ({ ...sourceWeight(q, c.pos), rate: q.rate, decay: q.decay })),
+    sinkRate: massSinkRate(c.pos),
+    hubble: cosmo ? hubble(cosmo, lastDiag?.scale ?? 1) : 0,
   });
-  if (!list) return '';
-  const left = termsLeftOut();
-  const main = list.filter((e) => e.id !== 'species');
-  const species = list.filter((e) => e.id === 'species');
-  return `<div class="head">Equations <span class="legend">term size, of the largest: <span class="ramp"></span></span></div>${main.map(equationHtml).join('')}${speciesHtml(species)}${left.length ? `<div class="note">Not shown: ${left.join(', ')}</div>` : ''}`;
-}
-
-/**
- * The species' equations, one form for all, and a line per species: each term's share of that
- * species' own equation.
- */
-function speciesHtml(list: Equation[]): string {
-  if (!list.length) return '';
-  const first = list[0];
-  // The form in the panel's own color: each species' line colors its terms.
-  const form = `<div class="eq"><math><mrow>${first.lhs}<mo>=</mo>${first.terms.map((t, i) => (i === 0 ? t.math.replace(/^<mrow><mo>\+<\/mo>/, '<mrow>') : t.math)).join('')}</mrow></math></div>`;
-  const pct = (size: number, largest: number) => {
-    const v = largest > 0 ? (100 * size) / largest : 0;
-    return v >= 1 || v === 0 ? v.toFixed(0) : v.toPrecision(1);
-  };
-  const lines = list
-    .map((e) => {
-      const parts = e.terms.map((t) => `<span class="swatch" style="background: ${rampColor(importance(t.size, e.largest))}"></span>${t.id === 'sp-burn' ? 'burning' : 'carried'} ${pct(t.size, e.largest)}%`).join(' ');
-      return `<div class="sp"><span class="what">${e.name}</span><span class="parts">${e.largest > 0 ? parts : 'unchanged'}</span></div>`;
-    })
-    .join('');
-  return `${form}${lines}`;
+  queryView.setEquations(list);
 }
 $('cell-unpin').addEventListener('click', unpin);
 

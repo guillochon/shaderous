@@ -60,6 +60,18 @@ export interface TermInput {
   species?: { names: readonly string[]; burnRates?: ((rho: number, T: number, X: number[]) => number[] | null) | null } | null;
   /** the equation of state of a cell of mass fractions X, where the species set it */
   eosAt?: ((X: number[]) => Eos) | null;
+  /**
+   * A rotating or accelerating frame: its angular velocity (Coriolis; centrifugal too where
+   * `centrifugal`), the rate a frame that follows a binary turns faster at (Euler force), the
+   * frame's own acceleration (following the masses or the gas), and a shearing box's tidal force.
+   */
+  frame?: { omega: number[]; centrifugal: boolean; omegaDot: number; accel: number[]; shear?: { omega: number; q: number; stratified: boolean } | null } | null;
+  /** the sources and sinks of the tools at the cell: each one's weight there (hydro/sources.wgsl) */
+  sources?: { w: number; rate: number; decay: number; vel: number[] }[];
+  /** the point masses' sinks: the fraction of the gas they take per unit time at the cell (gravity/bh.wgsl sink_fraction) */
+  sinkRate?: number;
+  /** comoving coordinates: the expansion rate adot / a (per unit code time) */
+  hubble?: number;
 }
 
 export interface Term {
@@ -242,6 +254,48 @@ export function cellEquations(x: TermInput): Equation[] | null {
   };
   // All three components, in 2D too: a 2D run may carry v_z and B_z, though nothing varies along z.
   const vec = (f: (a: number) => number) => [0, 1, 2].map(f);
+  const xc = [0, 1, 2].map((a) => (a < axes ? x.pos[a] : 0));
+  const u2c = x.stencil.u2[13]!;
+  // Each process that adds or takes gas, as rates of (rho, rho v, rho e), and of E from them:
+  // dE = v . d(rho v) - v^2 / 2 d rho + d(rho e) (the kinetic energy's change, and the internal).
+  type Feed = { rho: number; mom: number[]; eint: number };
+  const energyOf = (f: Feed) => dot(z.v, f.mom) - 0.5 * dot(z.v, z.v) * f.rho + f.eint;
+  const eSpec = u2c[1] / z.rho;
+  // Sources: new gas at the source's velocity with the specific internal energy of what is there.
+  let fed: Feed | null = null;
+  // Sinks (the tools' and the point masses'): a share of everything taken, at k per unit time.
+  let sinkK = x.sinkRate ?? 0;
+  for (const q of x.sources ?? []) {
+    if (!(q.w > 0)) continue;
+    if (q.decay > 0) sinkK += q.decay * q.w;
+    else {
+      const r = q.rate * q.w;
+      fed ??= { rho: 0, mom: [0, 0, 0], eint: 0 };
+      fed.rho += r;
+      fed.mom = fed.mom.map((m, a) => m + r * q.vel[a]);
+      fed.eint += r * eSpec;
+    }
+  }
+  const taken: Feed | null = sinkK > 0 ? { rho: -sinkK * z.rho, mom: z.v.map((v) => -sinkK * z.rho * v), eint: -sinkK * u2c[1] } : null;
+  // The damping zone: the gas relaxed toward the target at its rate (hydro/damping.wgsl).
+  const dz = x.stencil.damp && x.stencil.damp.rate > 0 ? x.stencil.damp : null;
+  const damped: Feed | null = dz
+    ? {
+        rho: dz.rate * (dz.rho - z.rho),
+        mom: z.v.map((v, a) => dz.rate * ((dz.rho - z.rho) * v + z.rho * (dz.vel[a] - v))),
+        eint: x.eos.hasEnergy ? dz.rate * ((dz.rho - z.rho) * eSpec + z.rho * (x.eos.eintFromP(dz.rho, dz.p) / dz.rho - eSpec)) : 0,
+      }
+    : null;
+  // The frame's forces, per unit mass: Coriolis apart (it does no work).
+  const fr = x.frame;
+  const w = fr?.omega ?? [0, 0, 0];
+  const rotOn = norm(w) > 0;
+  const centrifugal = fr && rotOn && fr.centrifugal ? cross(w, cross(w, xc)).map((v) => -v) : null;
+  const euler = fr && fr.omegaDot !== 0 ? [fr.omegaDot * xc[1], -fr.omegaDot * xc[0], 0] : null;
+  const tidal = fr?.shear ? [2 * fr.shear.q * fr.shear.omega ** 2 * xc[0], 0, fr.shear.stratified ? -(fr.shear.omega ** 2) * xc[2] : 0] : null;
+  const frameAcc = fr && norm(fr.accel) > 0 ? fr.accel.map((v) => -v) : null;
+  const frameWork = [centrifugal, euler, tidal, frameAcc].reduce((s, a) => s + (a ? z.rho * dot(z.v, a) : 0), 0);
+  const H = x.hubble ?? 0;
   const g = gravityAt(x);
   const gOn = norm(g) > 0 || x.masses.some((m) => m.gm > 0);
   const u2 = x.stencil.u2[13]!;
@@ -264,7 +318,17 @@ export function cellEquations(x: TermInput): Equation[] | null {
     radHeat = x.radiation.c * kappa.planck * z.rho * diff(rad[0], x.radiation.a * T ** 4);
   }
 
-  out.push(equation('mass', dt(RHO), [term('mass-flux', row(mo('−'), DIV, paren(RHO, V)), 'mass carried in or out', [-div((q, a) => q.rho * q.v[a])])]));
+  const SRC = sub(mi('S'), mi('+'));
+  const SNK = sub(mi('S'), mi('−'));
+  const DMP = sub(mi('D'), mi('z'));
+  out.push(
+    equation('mass', dt(RHO), [
+      term('mass-flux', row(mo('−'), DIV, paren(RHO, V)), 'mass carried in or out', [-div((q, a) => q.rho * q.v[a])]),
+      fed ? term('mass-source', row(mo('+'), sub(SRC, RHO)), 'gas added by sources', [fed.rho]) : null,
+      taken ? term('mass-sink', row(mo('−'), sub(SNK, RHO)), 'gas taken by sinks', [taken.rho]) : null,
+      damped ? term('mass-damp', row(mo('+'), sub(DMP, RHO)), 'damping zone', [damped.rho]) : null,
+    ]),
+  );
 
   // The Lorentz force as the divergence of the magnetic stress, B B - (B^2 / 2) I.
   const lorentz = mhd ? [0, 1, 2].map((b) => div((q, a) => q.b[a] * q.b[b] - (a === b ? 0.5 * dot(q.b, q.b) : 0), withB)) : null;
@@ -276,6 +340,15 @@ export function cellEquations(x: TermInput): Equation[] | null {
       gOn ? term('gravity', row(mo('+'), RHO, bold('g')), 'gravity', vec((a) => z.rho * g[a])) : null,
       radForce ? term('rad-force', row(mo('+'), frac(row(sub(mi('κ'), mi('R')), RHO), mi('c')), bold('F')), 'radiation pressure on the gas', radForce) : null,
       x.calm > 0 ? term('calm', row(mo('−'), sub(mi('k'), mi('d')), RHO, V), 'start-up damping', vec((a) => -x.calm * z.rho * z.v[a])) : null,
+      rotOn ? term('coriolis', row(mo('−'), mn('2'), RHO, bold('Ω'), mo('×'), V), 'Coriolis force', cross(w, z.v).map((v) => -2 * z.rho * v)) : null,
+      centrifugal ? term('centrifugal', row(mo('−'), RHO, bold('Ω'), mo('×'), paren(bold('Ω'), mo('×'), bold('x'))), 'centrifugal force', centrifugal.map((v) => z.rho * v)) : null,
+      euler ? term('euler', row(mo('−'), RHO, row(mo('Ω̇')), mo('×'), bold('x')), 'Euler force (the frame turning faster or slower)', euler.map((v) => z.rho * v)) : null,
+      tidal ? term('tidal', row(mo('−'), RHO, mo('∇'), sub(mi('Φ'), mi('t'))), 'tidal force of the shearing box', tidal.map((v) => z.rho * v)) : null,
+      frameAcc ? term('frame-acc', row(mo('−'), RHO, sub(bold('a'), mi('f'))), 'the frame accelerating', frameAcc.map((v) => z.rho * v)) : null,
+      fed ? term('mom-source', row(mo('+'), sub(SRC, row(RHO, V))), 'gas added by sources', fed.mom) : null,
+      taken ? term('mom-sink', row(mo('−'), sub(SNK, row(RHO, V))), 'gas taken by sinks', taken.mom) : null,
+      damped ? term('mom-damp', row(mo('+'), sub(DMP, row(RHO, V))), 'damping zone', damped.mom) : null,
+      H > 0 ? term('hubble', row(mo('−'), mi('H'), RHO, V), 'expansion (Hubble drag)', z.v.map((v) => -H * z.rho * v)) : null,
     ]),
   );
 
@@ -304,6 +377,11 @@ export function cellEquations(x: TermInput): Equation[] | null {
           : null,
         radForce ? term('rad-work', row(mo('+'), V, mo('·'), frac(row(sub(mi('κ'), mi('R')), RHO), mi('c')), bold('F')), 'work of radiation pressure', [dot(z.v, radForce)]) : null,
         x.calm > 0 ? term('calm-e', row(mo('−'), sub(mi('k'), mi('d')), RHO, sup(mi('v'), mn('2'))), 'kinetic energy start-up damping removes', [-x.calm * z.rho * v2]) : null,
+        frameWork !== 0 || centrifugal || euler || tidal || frameAcc ? term('frame-work', row(mo('+'), RHO, V, mo('·'), sub(bold('a'), mi('frame'))), 'work of the frame\u2019s forces', [frameWork]) : null,
+        fed ? term('e-source', row(mo('+'), sub(SRC, mi('E'))), 'gas added by sources', [energyOf(fed)]) : null,
+        taken ? term('e-sink', row(mo('−'), sub(SNK, mi('E'))), 'gas taken by sinks', [energyOf(taken)]) : null,
+        damped ? term('e-damp', row(mo('+'), sub(DMP, mi('E'))), 'damping zone', [energyOf(damped)]) : null,
+        H > 0 ? term('hubble-e', row(mo('−'), mi('H'), paren(mn('2'), sub(mi('E'), mi('k')), mo('+'), mn('3'), mi('P'))), 'expansion', [-H * (z.rho * v2 + 3 * z.p)]) : null,
       ]),
     );
   }
@@ -347,7 +425,7 @@ export function cellEquations(x: TermInput): Equation[] | null {
     out.push(
       equation('rad-energy', dt(sub(mi('E'), mi('r'))), [
         term('rad-e-advect', row(mo('−'), DIV, paren(sub(mi('E'), mi('r')), V)), 'carried with the gas', [-div((q, a) => q.rad[0] * q.v[a], withRad)]),
-        term('rad-e-flux', row(mo('−'), rmi, DIV, bold('F')), 'radiation streaming or diffusing (r: reduced speed of light)', [-r * div((q, a) => q.rad[1 + a], withRad)]),
+        term('rad-e-flux', row(mo('−'), rmi, DIV, bold('F')), 'radiation streaming or diffusing', [-r * div((q, a) => q.rad[1 + a], withRad)]),
         term('rad-e-exchange', row(mo('−'), rmi, mi('c'), sub(mi('κ'), mi('P')), RHO, paren(sub(mi('E'), mi('r')), mo('−'), mi('a'), sup(mi('T'), mn('4')))), 'absorbed less emitted by the gas', [-r * radHeat]),
         term('rad-e-work', row(mo('−'), rmi, V, mo('·'), frac(row(sub(mi('κ'), mi('R')), RHO), mi('c')), bold('F')), 'work done on the gas', [-r * dot(z.v, radForce!)]),
       ]),

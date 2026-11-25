@@ -332,7 +332,7 @@ details[open] > summary .sum { display: none; }
 .state-io { grid-template-columns: 1fr 1fr; margin-top: 6px; }
 /* The whole run of one diagnostic, while its number or sparkline is hovered. */
 #diag-pop {
-  position: fixed; z-index: 20; width: 240px; padding: 6px 8px 6px; pointer-events: none;
+  position: fixed; z-index: 25; width: 240px; padding: 6px 8px 6px; pointer-events: none;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
 }
 #diag-pop[hidden] { display: none; }
@@ -347,26 +347,29 @@ details[open] > summary .sum { display: none; }
 #cell-pop .title { font-size: 11px; color: var(--text); margin-bottom: 4px; white-space: nowrap; }
 #cell-pop .body { display: flex; align-items: flex-start; gap: 10px; }
 #cell-pop dl { width: 274px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: 11px; }
+/* Pinned: a sparkline beside each number, of its readings since the pin. */
+#cell-pop dl.sparks { width: 304px; grid-template-columns: auto minmax(0, 1fr) 24px; gap: 1px 6px; }
+#cell-pop .spark { display: block; width: 24px; height: 13px; cursor: default; }
 #cell-pop dt { color: var(--dim); white-space: nowrap; }
 #cell-pop dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #cell-pop dd.solid { color: #ffb454; }
 #cell-pop dt.head { color: var(--text); margin-top: 4px; }
 /* Pinned (a click with the query tool): it takes clicks, and offers to remove what it follows. */
 /* The pinned cell's equations, each term colored by its size there (ui/terms.ts). */
-#cell-pop .eqs { width: 320px; max-height: calc(100vh - 90px); overflow-y: auto; border-left: 1px solid var(--line); padding-left: 10px; font-size: 11px; color: var(--dim); }
+/* The pinned cell's equations, each term colored by its size there (ui/terms.ts); hovering
+   one opens its breakdown, a click keeps it open. */
+#cell-pop .eqs { width: 340px; max-height: calc(100vh - 90px); overflow-y: auto; border-left: 1px solid var(--line); padding-left: 10px; font-size: 11px; color: var(--dim); }
 #cell-pop .eqs[hidden] { display: none; }
-#cell-pop .eqs .head { color: var(--text); display: flex; justify-content: space-between; align-items: center; }
-#cell-pop .eqs .legend { font-size: 10px; display: flex; align-items: center; gap: 4px; }
-#cell-pop .eqs .ramp { display: inline-block; width: 60px; height: 6px; border-radius: 3px; background: linear-gradient(90deg, rgb(74, 81, 98), rgb(51, 160, 220), rgb(120, 220, 200), rgb(255, 224, 102)); }
-#cell-pop .eqs .eq { font-size: 14px; margin: 6px 0 3px; white-space: nowrap; overflow: hidden; }
-#cell-pop .eqs .term { display: grid; grid-template-columns: 8px 1fr auto; gap: 6px; align-items: center; }
+#cell-pop .eqs .eq { font-size: 17px; padding: 4px 0 3px; white-space: nowrap; overflow: hidden; cursor: pointer; }
+#cell-pop .eqs .bd { display: none; padding: 0 0 6px; }
+#cell-pop .eqs .eqb:hover .bd, #cell-pop .eqs .eqb.open .bd { display: block; }
+#cell-pop .eqs .eqb.open .eq { border-left: 2px solid var(--accent); padding-left: 4px; margin-left: -6px; }
+#cell-pop .eqs .line { display: grid; grid-template-columns: 8px 1fr auto 24px; gap: 6px; align-items: center; }
+#cell-pop .eqs .line.hl .what { font-weight: 600; color: var(--text); }
 #cell-pop .eqs .swatch { width: 8px; height: 8px; border-radius: 2px; }
 #cell-pop .eqs .size { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); }
-#cell-pop .eqs .sp { display: grid; grid-template-columns: 44px 1fr; gap: 6px; align-items: center; }
-#cell-pop .eqs .sp .what { color: var(--text); }
-#cell-pop .eqs .sp .parts { display: flex; align-items: center; gap: 4px; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; }
-#cell-pop .eqs .sp .swatch { margin-left: 4px; }
 #cell-pop .eqs .net { font-style: italic; margin-top: 1px; }
+#cell-pop .eqs .net:empty { display: none; }
 #cell-pop .eqs .note { margin-top: 4px; }
 #cell-pop .pin-actions { display: none; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 #cell-pop.pinned { pointer-events: auto; }

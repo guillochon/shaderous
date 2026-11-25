@@ -25,6 +25,7 @@ import type { Restart } from './io/snapshot';
 import { heatCells, inFrame, placedSettling, Settler, settlingOf, SETTLE_ROUNDS, SETTLE_TOL, type PlacedStar, type SettleCells, type Settling } from './problems/settle';
 import { laneEmdenCached, polytropeK } from './problems/lane_emden';
 import { packSpecies, speciesConst, speciesGroups, speciesSlot, SPECIES_PER_GROUP } from './species/species';
+import { DampProbe, type DampTarget } from './hydro/damp_probe';
 import { DebrisBuffers, debrisSlot, debrisSpec, type DebrisLedger, type DebrisReport } from './debris/debris';
 import { hydrogenParticles, materialEosParams, mixMoments, problemCoefficients, problemCompSlot, type Moments } from './species/mixture';
 import { cellField, initialFaces, MhdPasses, mhdOn, mhdUnsupported, type MagDiagnostics } from './mhd/mhd';
@@ -274,6 +275,10 @@ export interface CellStencil {
   rad?: (number[] | null)[];
   /** species: rho X of each species, in the problem's order, of each slot */
   species?: (number[] | null)[];
+  /** the frame's acceleration (gravity/bh.wgsl Masses.frame), where the run has point masses */
+  frameAccel?: [number, number, number];
+  /** the damping zone's rate and target at the cell (hydro/damp_probe.ts), where the run has one */
+  damp?: DampTarget;
 }
 
 /** The textures besides the state that a stencil reads, each laid out as the state is. */
@@ -287,6 +292,8 @@ export interface StencilSources {
   rad?: GPUTexture | null;
   /** species: rho X four to a texel, group g at the state's texel moved by offset(g) */
   species?: { texture: GPUTexture; count: number; offset: (group: number) => [number, number, number] } | null;
+  /** the point masses' block, whose head holds the frame's acceleration */
+  bh?: GPUBuffer | null;
 }
 
 const sameSize = (a: GPUTexture, b: GPUTexture) => a.width === b.width && a.height === b.height && a.depthOrArrayLayers === b.depthOrArrayLayers;
@@ -329,7 +336,8 @@ export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number
   if (ok(src.gfield)) centers.push(['g', src.gfield]);
   if (ok(src.heat)) centers.push(['heat', src.heat]);
   const cOff = fOff + fRegion;
-  const buf = d.createBuffer({ size: cOff + 256 * Math.max(1, centers.length), usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const bhOff = cOff + 256 * centers.length;
+  const buf = d.createBuffer({ size: bhOff + 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = d.createCommandEncoder();
   wins.forEach((v, i) => {
     const origin = w.from.map((f, a) => f + v.off[a]) as [number, number, number];
@@ -337,6 +345,7 @@ export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number
   });
   if (faces) enc.copyTextureToBuffer({ texture: faces, origin: fw.from }, { buffer: buf, offset: fOff, bytesPerRow: 256, rowsPerImage: fw.size[1] }, fw.size);
   centers.forEach(([, t], i) => enc.copyTextureToBuffer({ texture: t, origin: at }, { buffer: buf, offset: cOff + 256 * i }, [1, 1, 1]));
+  if (src.bh) enc.copyBufferToBuffer(src.bh, 0, buf, bhOff, 16);
   d.queue.submit([enc.finish()]);
   await buf.mapAsync(GPUMapMode.READ);
   const all = new Float32Array(buf.getMappedRange().slice(0));
@@ -395,6 +404,7 @@ export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number
     ...(heat ? { heat: heat[0] } : {}),
     ...(read.rad ? { rad: read.rad } : {}),
     ...(sp ? { species } : {}),
+    ...(src.bh ? { frameAccel: [all[bhOff / 4], all[bhOff / 4 + 1], all[bhOff / 4 + 2]] as [number, number, number] } : {}),
   };
 }
 
@@ -1774,6 +1784,8 @@ export class MassReader {
 export class Sim implements Simulation {
   /** Called after the uniform block is written (Simulation.onParams). */
   onParams?: () => void;
+  /** The damping zone's probe for the query readout, made on first use. */
+  private dampProbe?: Promise<DampProbe>;
   readonly device: GPUDevice;
   cfg: SimConfig;
   /** cells along the longest axis: dx = box / n */
@@ -3252,8 +3264,13 @@ export class Sim implements Simulation {
           faces: this.mhd?.faces[this.cur], facesWrap: [0, 1, 2].map((a) => this.cfg.bcLo[a] === 0 && !(a === 0 && !!this.cfg.problem.shear)),
           // Groups stacked along z, nz texels apart.
           species: this.speciesGroups > 0 ? { texture: this.species[this.speciesCur], count: this.cfg.problem.species?.length ?? 0, offset: (g) => [0, 0, g * this.nz] } : null,
+          bh: this.bh,
         })
       : undefined;
+    if (stencil && this.cfg.problem.damping) {
+      this.dampProbe ??= DampProbe.create(this.device, hydroSlots(this.cfg), this.params);
+      stencil.damp = await (await this.dampProbe).at(pos, this.dx);
+    }
     return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2], stencil };
   }
 

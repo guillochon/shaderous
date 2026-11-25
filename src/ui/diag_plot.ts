@@ -224,3 +224,109 @@ export function drawFull(canvas: HTMLCanvasElement, xs: number[], ys: number[], 
   ctx.textAlign = 'right';
   ctx.fillText(fmt3(xs[xs.length - 1], true), w - right, h);
 }
+
+/** Colors of a vector's components (x, y, z), on the dark panel. */
+const COMPONENT_COLORS = ['#6cb6ff', '#ffb454', '#5fd08a'];
+
+/** Whether any of the series changes by more than float32 rounding. */
+export function varies(yss: number[][]): boolean {
+  for (const ys of yss) {
+    let lo = Infinity;
+    let hi = -Infinity;
+    for (const y of ys) {
+      if (!Number.isFinite(y)) continue;
+      lo = Math.min(lo, y);
+      hi = Math.max(hi, y);
+    }
+    if (hi > lo && hi - lo > 1e-6 * Math.max(Math.abs(hi), Math.abs(lo))) return true;
+  }
+  return false;
+}
+
+/** Lines through (xs, each of yss) on one shared scale in the box; returns the range [lo, hi]. */
+function traceAll(ctx: CanvasRenderingContext2D, xs: number[], yss: number[][], x0: number, y0: number, w: number, h: number): [number, number] {
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const ys of yss) {
+    for (const y of ys) {
+      if (!Number.isFinite(y)) continue;
+      lo = Math.min(lo, y);
+      hi = Math.max(hi, y);
+    }
+  }
+  const xa = xs[0];
+  const xb = xs[xs.length - 1];
+  const sx = xb > xa ? w / (xb - xa) : 0;
+  const flat = !(hi > lo);
+  yss.forEach((ys, k) => {
+    ctx.strokeStyle = yss.length > 1 ? COMPONENT_COLORS[k % COMPONENT_COLORS.length] : trendColor(trend(xs, ys));
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < xs.length; i++) {
+      if (!Number.isFinite(ys[i])) continue;
+      const px = x0 + (sx ? (xs[i] - xa) * sx : (i / Math.max(1, xs.length - 1)) * w);
+      const py = flat ? y0 + h / 2 : y0 + h - ((ys[i] - lo) / (hi - lo)) * h;
+      if (started) ctx.lineTo(px, py);
+      else ctx.moveTo(px, py);
+      started = true;
+    }
+    ctx.stroke();
+  });
+  return [lo, hi];
+}
+
+/** A sparkline of one series (colored by its trend) or of a vector's components (one color each). */
+export function drawSparkLines(canvas: HTMLCanvasElement, xs: number[], yss: number[][]) {
+  const p = prepare(canvas);
+  if (!p) return;
+  const [ctx, w, h] = p;
+  if (xs.length < 2) return;
+  ctx.lineWidth = 1.25;
+  ctx.lineJoin = 'round';
+  traceAll(ctx, xs, yss, 1, 1.5, w - 2, h - 3);
+}
+
+/** The whole series against `xName` (time, say), with the range of the values and of x. */
+export function drawFullLines(canvas: HTMLCanvasElement, xs: number[], yss: number[][], xName: string) {
+  const p = prepare(canvas);
+  if (!p) return;
+  const [ctx, w, h] = p;
+  const c = palette();
+  const left = 46;
+  const bottom = 14;
+  const top = 4;
+  const right = 4;
+  ctx.strokeStyle = c.line;
+  ctx.lineWidth = 1;
+  ctx.strokeRect(left + 0.5, top + 0.5, w - left - right - 1, h - top - bottom - 1);
+  ctx.font = '10px ui-monospace, Consolas, monospace';
+  ctx.fillStyle = c.dim;
+  if (xs.length < 2) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('not enough readings yet', (left + w - right) / 2, (top + h - bottom) / 2);
+    return;
+  }
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  const [lo, hi] = traceAll(ctx, xs, yss, left + 2, top + 3, w - left - right - 4, h - top - bottom - 6);
+  ctx.fillStyle = c.dim;
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'top';
+  ctx.fillText(fmt3(hi), left - 4, top);
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(fmt3(lo), left - 4, h - bottom);
+  ctx.textAlign = 'left';
+  ctx.fillText(`${xName} ${fmt3(xs[0])}`, left, h);
+  ctx.textAlign = 'right';
+  ctx.fillText(fmt3(xs[xs.length - 1]), w - right, h);
+  if (yss.length > 1) {
+    // Which line is which component.
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    yss.forEach((_, k) => {
+      ctx.fillStyle = COMPONENT_COLORS[k % COMPONENT_COLORS.length];
+      ctx.fillText('xyz'[k], left + 6 + 10 * k, top + 2);
+    });
+  }
+}

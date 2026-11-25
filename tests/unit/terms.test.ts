@@ -200,6 +200,49 @@ describe('equation terms of the query readout', () => {
     expect(termOf(input(st), 'energy', 'ohm')).toBeUndefined();
   });
 
+  it('rotating frame: Coriolis -2 rho Omega x v, centrifugal, and the work of the latter', () => {
+    const st = stencil(() => 2, () => [1, 0, 0], () => 1);
+    const frame = { omega: [0, 0, 0.5], centrifugal: true, omegaDot: 0, accel: [0, 0, 0] };
+    const x = input(st, { pos: [3, 0, 0], frame });
+    // -2 rho Omega x v = -2 * 2 * (0, 0.5, 0) for v = x-hat.
+    const cor = termOf(x, 'momentum', 'coriolis')!.value;
+    expect(cor[0]).toBeCloseTo(0, 12);
+    expect(cor[1]).toBeCloseTo(-2, 12);
+    expect(cor[2]).toBeCloseTo(0, 12);
+    // -Omega x (Omega x x) = Omega^2 x outward: 0.25 * 3, times rho 2.
+    expect(termOf(x, 'momentum', 'centrifugal')!.value[0]).toBeCloseTo(1.5, 12);
+    expect(termOf(x, 'energy', 'frame-work')!.value[0]).toBeCloseTo(1.5, 12);
+    expect(termOf(input(st), 'momentum', 'coriolis')).toBeUndefined();
+  });
+
+  it('sources add gas at their velocity; sinks take a share of everything', () => {
+    const st = stencil(() => 2, () => [1, 0, 0], () => 1);
+    const x = input(st, { sources: [{ w: 0.5, rate: 4, decay: 0, vel: [0, 3, 0] }, { w: 1, rate: 0, decay: 0.1, vel: [0, 0, 0] }], sinkRate: 0.2 });
+    expect(termOf(x, 'mass', 'mass-source')!.value[0]).toBeCloseTo(2, 12);
+    expect(termOf(x, 'mass', 'mass-sink')!.value[0]).toBeCloseTo(-0.3 * 2, 12);
+    expect(termOf(x, 'momentum', 'mom-source')!.value).toEqual([0, 6, 0]);
+    expect(termOf(x, 'momentum', 'mom-sink')!.value[0]).toBeCloseTo(-0.6, 12);
+    // A sink takes E at its rate: k (rho v^2 / 2 + rho e).
+    const E = st.u2[13]![0];
+    expect(termOf(x, 'energy', 'e-sink')!.value[0]).toBeCloseTo(-0.3 * E, 10);
+  });
+
+  it('damping zone: relaxes toward its target at its rate', () => {
+    const st = stencil(() => 2, () => [1, 0, 0], () => 1);
+    st.damp = { rate: 0.5, rho: 3, vel: [0, 0, 0], p: 1 };
+    const x = input(st);
+    expect(termOf(x, 'mass', 'mass-damp')!.value[0]).toBeCloseTo(0.5, 12);
+    // rate ((rho_t - rho) v + rho (v_t - v)) = 0.5 (1 - 2) along x.
+    expect(termOf(x, 'momentum', 'mom-damp')!.value[0]).toBeCloseTo(-0.5, 12);
+  });
+
+  it('expansion: Hubble drag on the momentum, and -H (rho v^2 + 3 P) on the energy', () => {
+    const st = stencil(() => 2, () => [1, 0, 0], () => 1);
+    const x = input(st, { hubble: 0.1 });
+    expect(termOf(x, 'momentum', 'hubble')!.value[0]).toBeCloseTo(-0.2, 12);
+    expect(termOf(x, 'energy', 'hubble-e')!.value[0]).toBeCloseTo(-0.1 * (2 + 3), 12);
+  });
+
   it('importance runs over six decades below the largest term', () => {
     expect(importance(1, 1)).toBe(1);
     expect(importance(1e-3, 1)).toBeCloseTo(0.5, 12);
