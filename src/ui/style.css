@@ -360,6 +360,9 @@ details[open] > summary .sum { display: none; }
    one opens its breakdown, a click keeps it open. */
 #cell-pop .eqs { width: 340px; max-height: calc(100vh - 90px); overflow-y: auto; border-left: 1px solid var(--line); padding-left: 10px; font-size: 11px; color: var(--dim); }
 #cell-pop .eqs[hidden] { display: none; }
+#cell-pop .eqs .head { color: var(--text); display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px; }
+#cell-pop .eqs .legend { font-size: 10px; color: var(--dim); display: flex; align-items: center; gap: 4px; }
+#cell-pop .eqs .ramp { display: inline-block; width: 60px; height: 6px; border-radius: 3px; background: linear-gradient(90deg, rgb(74, 81, 98), rgb(51, 160, 220), rgb(120, 220, 200), rgb(255, 224, 102)); }
 #cell-pop .eqs .eq { font-size: 17px; padding: 4px 0 3px; white-space: nowrap; overflow: hidden; cursor: pointer; }
 #cell-pop .eqs .bd { display: none; padding: 0 0 6px; }
 #cell-pop .eqs .eqb:hover .bd, #cell-pop .eqs .eqb.open .bd { display: block; }

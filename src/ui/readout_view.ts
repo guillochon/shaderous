@@ -224,7 +224,10 @@ export class ReadoutView {
     const shape = `${note}|${this.blocks.map((b) => `${b.key}:${b.colors.map((c) => c.term).join(',')}:${b.lines.map((l) => l.key).join(',')}`).join('|')}`;
     if (shape !== this.eqShape) {
       this.eqShape = shape;
+      // A header with the ramp the terms are colored on.
+      const head = this.blocks.length ? '<div class="head">Equations <span class="legend">term size, of the largest: <span class="ramp"></span></span></div>' : '';
       this.eqs.innerHTML =
+        head +
         this.blocks
           .map(
             (b) =>
