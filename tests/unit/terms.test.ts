@@ -99,6 +99,65 @@ describe('equation terms of the query readout', () => {
     expect(cellEquations(x)!.map((e) => e.id)).toEqual(['mass', 'momentum']);
   });
 
+  it('MHD: a uniform field exerts no force; a field-line bend gives tension', () => {
+    const uniform = stencil(() => 1, () => [0, 0, 0], () => 1);
+    uniform.b = uniform.u1.map((u) => (u ? [1, 0.5, 0] : null));
+    const x = input(uniform);
+    expect(termOf(x, 'momentum', 'lorentz')!.size).toBeLessThan(1e-12);
+    // B = (1, b0 x, 0): curl B x B = (B . grad) B - grad(B^2 / 2) = (-b0^2 x, b0, 0); at x = 0, (0, b0, 0).
+    const b0 = 0.3;
+    const bent = stencil(() => 1, () => [0, 0, 0], () => 1);
+    bent.b = bent.u1.map((u, n) => (u ? [1, b0 * ((n % 3) - 1) * DX, 0] : null));
+    const f = termOf(input(bent), 'momentum', 'lorentz')!.value;
+    expect(f[0]).toBeCloseTo(0, 12);
+    expect(f[1]).toBeCloseTo(b0, 12);
+  });
+
+  it('MHD: induction of a field compressed by a converging flow', () => {
+    // v = (-x, 0, 0), B = (0, 1, 0): dB_y/dt = -d(v_x B_y)/dx = 1.
+    const st = stencil(() => 1, (r) => [-r[0], 0, 0], () => 1);
+    st.b = st.u1.map((u) => (u ? [0, 1, 0] : null));
+    const x = input(st, { resistivity: 0.1 });
+    const ind = eq(x, 'induction');
+    expect(ind.terms.find((t) => t.id === 'induction')!.value[1]).toBeCloseTo(1, 10);
+    // A uniform field does not diffuse.
+    expect(ind.terms.find((t) => t.id === 'resistive')!.size).toBe(0);
+  });
+
+  it('MHD: energy has the magnetic tension work; no induction equation without a field', () => {
+    const st = stencil(() => 1, () => [0, 0, 0], () => 1);
+    st.b = st.u1.map((u) => (u ? [1, 0, 0] : null));
+    expect(eq(input(st), 'energy').terms.map((t) => t.id)).toContain('mag-work');
+    expect(cellEquations(input(stencil(() => 1, () => [0, 0, 0], () => 1)))!.map((e) => e.id)).not.toContain('induction');
+  });
+
+  it('burning heats the gas at the rate it read', () => {
+    const st = stencil(() => 1, () => [0, 0, 0], () => 1);
+    st.heat = 4.5;
+    expect(termOf(input(st), 'energy', 'burn')!.value[0]).toBe(4.5);
+  });
+
+  it('radiation: force kappa_R rho F / c, heating c kappa_P rho (E - a T^4)', () => {
+    const st = stencil(() => 2, () => [0.5, 0, 0], () => 1);
+    st.rad = [3, 0.6, 0, 0];
+    const radiation = { c: 10, a: 0.01, opacity: () => ({ planck: 0.2, rosseland: 0.5 }) };
+    const x = input(st, { radiation });
+    const T = eos.temperature(2, st.u2[13]![1]);
+    expect(termOf(x, 'momentum', 'rad-force')!.value[0]).toBeCloseTo((0.5 * 2 * 0.6) / 10, 12);
+    expect(termOf(x, 'energy', 'rad-heat')!.value[0]).toBeCloseTo(10 * 0.2 * 2 * (3 - 0.01 * T ** 4), 10);
+    expect(termOf(x, 'energy', 'rad-work')!.value[0]).toBeCloseTo(0.5 * 0.06, 12);
+  });
+
+  it('float32 round-off counts as zero: radiation in equilibrium, a rounded pressure', () => {
+    const st = stencil(() => 2, () => [0, 0, 0], () => 1);
+    const T = eos.temperature(2, st.u2[13]![1]);
+    st.rad = [0.01 * T ** 4 * (1 + 3e-7), 0, 0, 0];
+    const radiation = { c: 1e4, a: 0.01, opacity: () => ({ planck: 1e3, rosseland: 1e3 }) };
+    expect(termOf(input(st, { radiation }), 'energy', 'rad-heat')!.value[0]).toBe(0);
+    const rounded = stencil(() => 1, () => [0, 0, 0], (r) => Math.fround(1 + 1e-8 * r[0]));
+    expect(termOf(input(rounded), 'momentum', 'pressure')!.size).toBe(0);
+  });
+
   it('importance runs over six decades below the largest term', () => {
     expect(importance(1, 1)).toBe(1);
     expect(importance(1e-3, 1)).toBeCloseTo(0.5, 12);

@@ -3049,7 +3049,11 @@ export class AmrSim implements Simulation {
       const tree = this.tree;
       const [u1, u2] = await readTexels(this.device, this.state[this.cur], at);
       // The neighbors within the block: its ghosts may be from before the last step.
-      const stencil = opts?.stencil ? await readStencil(this.device, this.state[this.cur], this.gfield, at, o, [o[0] + BS - 1, o[1] + BS - 1, three ? o[2] + BS - 1 : o[2]]) : undefined;
+      const stencil = opts?.stencil
+        ? await readStencil(this.device, this.state[this.cur], at, o, [o[0] + BS - 1, o[1] + BS - 1, three ? o[2] + BS - 1 : o[2]], {
+            gfield: this.gfield, heat: this.heat, rad: this.rad?.R[this.rad.cur], faces: this.mhd?.faces[this.cur],
+          })
+        : undefined;
       const dx = this.dx0 / (1 << b.level);
       const lo = domainLo(this.cfg);
       const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx + lo[a] : 0)) as [number, number, number];

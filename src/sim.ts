@@ -266,48 +266,117 @@ export interface CellStencil {
   u2: (number[] | null)[];
   /** self-gravity's acceleration at the cell (zero without self-gravity) */
   g: [number, number, number];
+  /** MHD: the cell-centered field of each slot (null where its faces are not at hand) */
+  b?: (number[] | null)[];
+  /** burning: the cell's heating rate over the last step, per unit volume */
+  heat?: number;
+  /** radiation: the cell's (E, Fx, Fy, Fz) */
+  rad?: number[];
 }
 
-/** Where a 3 x 3 x 3 window around `at` lies inside [lo, hi] along each axis (inclusive). */
-function stencilWindow(at: number[], lo: number[], hi: number[]): { from: [number, number, number]; size: [number, number, number] } {
-  const from = at.map((c, a) => Math.max(lo[a], c - 1)) as [number, number, number];
-  const size = at.map((c, a) => Math.min(hi[a], c + 1) - from[a] + 1) as [number, number, number];
+/** The textures besides the state that a stencil reads, each laid out as the state is. */
+export interface StencilSources {
+  gfield?: GPUTexture | null;
+  /** face field (MHD): texel t holds the lower faces' components of cell t */
+  faces?: GPUTexture | null;
+  /** axes along which the face beyond the last cell is not stored (periodic on the uniform grid) */
+  facesWrap?: boolean[];
+  heat?: GPUTexture | null;
+  rad?: GPUTexture | null;
+}
+
+const sameSize = (a: GPUTexture, b: GPUTexture) => a.width === b.width && a.height === b.height && a.depthOrArrayLayers === b.depthOrArrayLayers;
+
+/** Where a window from at - before to at + after lies inside [lo, hi] along each axis (inclusive). */
+function window3(at: number[], lo: number[], hi: number[], before = 1, after = 1): { from: [number, number, number]; size: [number, number, number] } {
+  const from = at.map((c, a) => Math.max(lo[a], c - before)) as [number, number, number];
+  const size = at.map((c, a) => Math.min(hi[a], c + after) - from[a] + 1) as [number, number, number];
   return { from, size };
 }
 
 /**
  * Read the stencil around texel `at` of the state textures (u1, u2), the window kept within
- * [lo, hi], and self-gravity's acceleration at `at` from `gfield` when it is laid out as the state.
+ * [lo, hi] (a flat axis has lo = hi), with what `src` adds: self-gravity's acceleration, the
+ * heating rate and the radiation at `at`, and the cell-centered magnetic field of every slot.
  */
-export async function readStencil(d: GPUDevice, state: GPUTexture[], gfield: GPUTexture | null, at: [number, number, number], lo: number[], hi: number[]): Promise<CellStencil> {
-  const w = stencilWindow(at, lo, hi);
-  const useG = !!gfield && gfield.width === state[0].width && gfield.height === state[0].height && gfield.depthOrArrayLayers === state[0].depthOrArrayLayers;
-  // Rows padded to 256 bytes; each texture's window at its own 256-aligned offset.
+export async function readStencil(d: GPUDevice, state: GPUTexture[], at: [number, number, number], lo: number[], hi: number[], src: StencilSources = {}): Promise<CellStencil> {
+  const w = window3(at, lo, hi);
+  const ok = (t: GPUTexture | null | undefined): t is GPUTexture => !!t && sameSize(t, state[0]);
+  const faces = src.faces && src.faces.width > 1 ? src.faces : null;
+  const flat = lo.map((l, a) => l === hi[a]);
+  // Faces: cell c's lower face is texel c, its upper one c + 1 (the faces beyond the window's
+  // last cell included, where the texture has them).
+  const fdims = faces ? [faces.width, faces.height, faces.depthOrArrayLayers] : [1, 1, 1];
+  const fw = window3(at, lo, hi.map((h, a) => (flat[a] ? h : Math.min(h + 1, fdims[a] - 1))), 1, 2);
+  // Rows padded to 256 bytes; each region at its own 256-aligned offset.
   const region = 256 * w.size[1] * w.size[2];
-  const buf = d.createBuffer({ size: 2 * region + 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const fRegion = faces ? 256 * fw.size[1] * fw.size[2] : 0;
+  const centers: [string, GPUTexture][] = [];
+  if (ok(src.gfield)) centers.push(['g', src.gfield]);
+  if (ok(src.heat)) centers.push(['heat', src.heat]);
+  if (ok(src.rad)) centers.push(['rad', src.rad]);
+  const cOff = 2 * region + fRegion;
+  const buf = d.createBuffer({ size: cOff + 256 * Math.max(1, centers.length), usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
   const enc = d.createCommandEncoder();
   state.forEach((t, i) => enc.copyTextureToBuffer({ texture: t, origin: w.from }, { buffer: buf, offset: region * i, bytesPerRow: 256, rowsPerImage: w.size[1] }, w.size));
-  if (useG) enc.copyTextureToBuffer({ texture: gfield, origin: at }, { buffer: buf, offset: 2 * region }, [1, 1, 1]);
+  if (faces) enc.copyTextureToBuffer({ texture: faces, origin: fw.from }, { buffer: buf, offset: 2 * region, bytesPerRow: 256, rowsPerImage: fw.size[1] }, fw.size);
+  centers.forEach(([, t], i) => enc.copyTextureToBuffer({ texture: t, origin: at }, { buffer: buf, offset: cOff + 256 * i }, [1, 1, 1]));
   d.queue.submit([enc.finish()]);
   await buf.mapAsync(GPUMapMode.READ);
   const all = new Float32Array(buf.getMappedRange().slice(0));
   buf.unmap();
   buf.destroy();
   const u: (number[] | null)[][] = [new Array(27).fill(null), new Array(27).fill(null)];
+  const b: (number[] | null)[] = new Array(27).fill(null);
+  // Component a of the face texel at texture coordinates t, or null outside the face window.
+  const face = (t: number[], a: number): number | null => {
+    const x = t.map((v, i) => v - fw.from[i]);
+    if (x.some((v, i) => v < 0 || v >= fw.size[i])) return null;
+    return all[(2 * region + x[2] * fw.size[1] * 256 + x[1] * 256 + x[0] * 16) / 4 + a];
+  };
   for (let k = -1; k <= 1; k++) {
     for (let j = -1; j <= 1; j++) {
       for (let i = -1; i <= 1; i++) {
-        const x = at[0] + i - w.from[0];
-        const y = at[1] + j - w.from[1];
-        const z = at[2] + k - w.from[2];
+        const c = [at[0] + i, at[1] + j, at[2] + k];
+        const x = c[0] - w.from[0];
+        const y = c[1] - w.from[1];
+        const z = c[2] - w.from[2];
         if (x < 0 || y < 0 || z < 0 || x >= w.size[0] || y >= w.size[1] || z >= w.size[2]) continue;
+        const n = i + 1 + 3 * (j + 1) + 9 * (k + 1);
         const o = (z * w.size[1] * 256 + y * 256 + x * 16) / 4;
-        for (let s = 0; s < 2; s++) u[s][i + 1 + 3 * (j + 1) + 9 * (k + 1)] = [...all.slice(s * (region / 4) + o, s * (region / 4) + o + 4)];
+        for (let s = 0; s < 2; s++) u[s][n] = [...all.slice(s * (region / 4) + o, s * (region / 4) + o + 4)];
+        if (!faces) continue;
+        // The mean of the cell's two faces along each axis; along a flat axis its one face.
+        const bc: number[] = [];
+        for (let a = 0; a < 3; a++) {
+          const lower = face(c, a);
+          if (flat[a]) {
+            bc.push(lower ?? NaN);
+            continue;
+          }
+          const up = [...c];
+          up[a] += 1;
+          const upper = src.facesWrap?.[a] && c[a] === hi[a] ? null : face(up, a);
+          bc.push(lower === null || upper === null ? NaN : 0.5 * (lower + upper));
+        }
+        b[n] = bc.every(Number.isFinite) ? bc : null;
       }
     }
   }
-  const g = useG ? ([all[region / 2], all[region / 2 + 1], all[region / 2 + 2]] as [number, number, number]) : ([0, 0, 0] as [number, number, number]);
-  return { u1: u[0], u2: u[1], g };
+  const center = (name: string) => {
+    const i = centers.findIndex(([n]) => n === name);
+    return i < 0 ? null : [...all.slice(cOff / 4 + 64 * i, cOff / 4 + 64 * i + 4)];
+  };
+  const g = center('g');
+  const heat = center('heat');
+  const rad = center('rad');
+  return {
+    u1: u[0], u2: u[1],
+    g: g ? [g[0], g[1], g[2]] : [0, 0, 0],
+    ...(faces ? { b } : {}),
+    ...(heat ? { heat: heat[0] } : {}),
+    ...(rad ? { rad } : {}),
+  };
 }
 
 /**
@@ -3138,7 +3207,12 @@ export class Sim implements Simulation {
     const pos = index.map((i, a) => (i + 0.5) * this.dx + lo[a]) as [number, number, number];
     if (this.nz === 1) pos[2] = 0;
     const t = this.state[this.cur][0];
-    const stencil = opts?.stencil ? await readStencil(this.device, this.state[this.cur], this.gfield, index as [number, number, number], [0, 0, 0], [t.width - 1, t.height - 1, t.depthOrArrayLayers - 1]) : undefined;
+    const stencil = opts?.stencil
+      ? await readStencil(this.device, this.state[this.cur], index as [number, number, number], [0, 0, 0], [t.width - 1, t.height - 1, t.depthOrArrayLayers - 1], {
+          gfield: this.gfield, heat: this.heat, rad: this.rad?.R[this.rad.cur],
+          faces: this.mhd?.faces[this.cur], facesWrap: [0, 1, 2].map((a) => this.cfg.bcLo[a] === 0 && !(a === 0 && !!this.cfg.problem.shear)),
+        })
+      : undefined;
     return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2], stencil };
   }
 

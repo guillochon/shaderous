@@ -22,6 +22,7 @@ import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
 import { radiationOn, syncRadiationEos } from '../radiation/radiation';
 import { cellEquations, importance, rampColor, type Equation } from './terms';
+import { opacity as meanOpacity } from '../opacity/opacity';
 import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec, cosmologyOf, cylindrical } from '../sim';
 import { expandSpecies, switchedSetup } from '../burn/watch';
 import { speciesLabel } from '../species/species';
@@ -3386,8 +3387,11 @@ function unpin() {
   if (was && 'mass' in was && was.own) removePlaced((_, index) => index === was.mass);
 }
 
-/** Whether the pinned thing can be removed: a source, or a mass the tools placed (not the preset's own). */
-const pinRemovable = () => !!pin && ('source' in pin || pin.mass >= (sim?.massCount ?? 0) - placed.length);
+/**
+ * Whether the pinned thing can be removed: a source, or a mass the tools placed (not the preset's
+ * own). A tracer the readout let go itself is not offered: unpinning already takes it out.
+ */
+const pinRemovable = () => !!pin && !pin.own && ('source' in pin || pin.mass >= (sim?.massCount ?? 0) - placed.length);
 
 /** Remove what the readout is pinned to: the sink, the source (with the particle it rides) or the tracer. */
 function removePinned() {
@@ -3623,9 +3627,9 @@ $('cell-remove').addEventListener('click', removePinned);
 function termsLeftOut(): string[] {
   const p = cfg.problem;
   const out: string[] = [];
-  if (p.mhd) out.push('magnetic forces');
-  if (radiationOn(cfg)) out.push('radiation');
-  if (burnSpec(cfg)) out.push('nuclear burning');
+  if (p.mhd && cfg.resistivity > 0) out.push('the resistive energy flux');
+  if (radiationOn(cfg)) out.push('the radiation\u2019s own equations');
+  if (burnSpec(cfg)) out.push('the species\u2019 equations');
   if (rotationOf(cfg).some((w, i) => i < 3 && w !== 0) || p.frame) out.push('frame forces');
   if (p.damping) out.push('the damping zone');
   if (sources.length) out.push('sources and sinks');
@@ -3641,7 +3645,8 @@ function calmRate(t: number): number {
 }
 
 function equationHtml(e: Equation): string {
-  const terms = e.terms.map((t) => `<mrow style="color: ${rampColor(importance(t.size, e.largest))}">${t.math}</mrow>`).join('');
+  // (The first term drops a leading plus: = curl(v x B), not = + curl(v x B).)
+  const terms = e.terms.map((t, i) => `<mrow style="color: ${rampColor(importance(t.size, e.largest))}">${i === 0 ? t.math.replace(/^<mrow><mo>\+<\/mo>/, '<mrow>') : t.math}</mrow>`).join('');
   const lines = e.terms
     .map((t) => {
       const s = importance(t.size, e.largest);
@@ -3661,6 +3666,8 @@ function equationsHtml(c: CellProbe): string {
     ndim: cfg.ndim, dx: c.dx, stencil: c.stencil!, pos: c.pos, eos: makeEos(cfg.eos, cfg.eosParams), gext: cfg.gext,
     masses: massesNow().filter((m) => !m.massless).map((m) => ({ gm: m.gm, pos: m.pos, soft: m.soft })),
     cooling: cfg.cooling, coolParams: cfg.coolParams, calm: calmRate(lastDiag?.t ?? 0),
+    resistivity: cfg.resistivity,
+    radiation: radiationOn(cfg) ? { c: cfg.radC, a: cfg.radA, opacity: (rho, T) => meanOpacity(cfg.opacity, cfg.opacityParams, rho, T) } : null,
   });
   if (!list) return '';
   const left = termsLeftOut();

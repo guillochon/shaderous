@@ -340,19 +340,20 @@ details[open] > summary .sum { display: none; }
 #diag-pop canvas { display: block; width: 100%; height: 96px; }
 /* The query tool: the cell under the pointer. */
 #cell-pop {
-  position: fixed; z-index: 20; width: 290px; padding: 6px 8px 7px; pointer-events: none;
+  position: fixed; z-index: 20; width: max-content; padding: 6px 8px 7px; pointer-events: none;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
 }
 #cell-pop[hidden] { display: none; }
 #cell-pop .title { font-size: 11px; color: var(--text); margin-bottom: 4px; white-space: nowrap; }
-#cell-pop dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: 11px; }
+#cell-pop .body { display: flex; align-items: flex-start; gap: 10px; }
+#cell-pop dl { width: 274px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 1px 10px; margin: 0; font-size: 11px; }
 #cell-pop dt { color: var(--dim); white-space: nowrap; }
 #cell-pop dd { margin: 0; text-align: right; font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #cell-pop dd.solid { color: #ffb454; }
 #cell-pop dt.head { color: var(--text); margin-top: 4px; }
 /* Pinned (a click with the query tool): it takes clicks, and offers to remove what it follows. */
 /* The pinned cell's equations, each term colored by its size there (ui/terms.ts). */
-#cell-pop .eqs { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 4px; font-size: 11px; color: var(--dim); }
+#cell-pop .eqs { width: 320px; border-left: 1px solid var(--line); padding-left: 10px; font-size: 11px; color: var(--dim); }
 #cell-pop .eqs[hidden] { display: none; }
 #cell-pop .eqs .head { color: var(--text); display: flex; justify-content: space-between; align-items: center; }
 #cell-pop .eqs .legend { font-size: 10px; display: flex; align-items: center; gap: 4px; }
