@@ -2,7 +2,7 @@
   "format": "shaderous-setup",
   "version": 1,
   "name": "He + CO white dwarf fill sweep, fill 0.930",
-  "blurb": "Guillochon et al. (2010) run Ba as a whole binary: a 0.45 solar mass helium white dwarf donor at 0.930 of its Roche lobe and a 0.9 solar mass carbon-oxygen accretor, both settled in the Roche potential and tidally locked, in the frame turning with the orbit (tracking the pair, released after a merger). Each is threaded by its own tangled Kolmogorov field confined to the star (plasma beta 1e5 at the center, seeds 1 and 2). Helmholtz equation of state with the 13 species of the aprox13 network, which burns. Lengths in units of 10,000 km. Fill sweep: box 16 at 2048^3 with 5 levels, one orbit (t = 32).",
+  "blurb": "Guillochon et al. (2010) run Ba as a whole binary: a 0.45 solar mass helium white dwarf donor at 0.930 of its Roche lobe and a 0.9 solar mass carbon-oxygen accretor, both settled in the Roche potential and tidally locked, in the frame turning with the orbit (tracking the pair, released after a merger). Each is threaded by its own tangled Kolmogorov field confined to the star (plasma beta 1e5 at the center, seeds 1 and 2). Helmholtz equation of state with he4, c12 and o16, watched for burning: once a step would release a tenth of a cell's internal energy the run stops and carries on with the 13 species of the aprox13 network, which burns. Lengths in units of 10,000 km. Start-up damping (velocities damped at rate 1, easing to zero by t = 10). Fill sweep, with refinement zones by tier around L1, the stream and the accretor: box 16 at 2048^3 with 5 levels, one orbit (t = 32).",
   "domain": {
     "ndim": 3,
     "n": 2048,
@@ -46,20 +46,109 @@
       "p": 1e-14
     },
     "fluff": {
-      "rho": 0.000009999999999999999,
+      "rho": 9.999999999999999e-06,
       "u": 3,
       "v": 10
     },
-    "species": "aprox13",
+    "species": [
+      "he4",
+      "c12",
+      "o16"
+    ],
     "burn": {
-      "network": "aprox13"
+      "network": "aprox13",
+      "switchAt": 0.1
+    },
+    "startDamping": {
+      "rate": 1,
+      "time": 10
     }
   },
   "mesh": {
-    "refineDense": 0.01
+    "refineDense": 0.01,
+    "zones": [
+      {
+        "name": "L1",
+        "shape": "sphere",
+        "at": "L1",
+        "r": 0.25,
+        "tier": 1
+      },
+      {
+        "name": "shell, stream side",
+        "shape": "sphere",
+        "at": "accretor",
+        "rIn": 1,
+        "r": 2,
+        "radii": true,
+        "below": {
+          "y": 0
+        },
+        "tier": 2
+      },
+      {
+        "name": "shell, far side",
+        "shape": "sphere",
+        "at": "accretor",
+        "rIn": 1,
+        "r": 2,
+        "radii": true,
+        "above": {
+          "y": 0
+        },
+        "tier": 3
+      },
+      {
+        "name": "accretor",
+        "shape": "sphere",
+        "at": "accretor",
+        "r": 1,
+        "radii": true,
+        "tier": 4
+      },
+      {
+        "name": "donor",
+        "shape": "sphere",
+        "at": "donor",
+        "r": 1,
+        "radii": true,
+        "tier": 5
+      },
+      {
+        "name": "stream",
+        "shape": "cone",
+        "from": {
+          "at": "L1",
+          "r": 0.25
+        },
+        "to": {
+          "at": "accretor",
+          "r": 2,
+          "radii": true
+        },
+        "below": {
+          "y": 0.25
+        },
+        "tier": 1
+      },
+      {
+        "name": "neck",
+        "shape": "cone",
+        "from": {
+          "at": "L1",
+          "r": 0.25
+        },
+        "to": {
+          "at": "donor",
+          "r": 1,
+          "radii": true
+        },
+        "tier": 1
+      }
+    ]
   },
   "background": {
-    "rho": 0.000001,
+    "rho": 1e-06,
     "cut": 0.0001,
     "relativeTo": "donor",
     "X": {
