@@ -38,6 +38,29 @@ input[type='checkbox'] { margin: 0 6px 0 0; }
 .brand span { color: var(--dim); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 #side section { display: flex; flex-direction: column; gap: 6px; }
 #problem { font-weight: 600; height: 28px !important; }
+/* The setup menu with its search button; the popup that both open, a search box over the list. */
+.pick-row { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap: 4px; }
+#problem-search { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; color: var(--dim); }
+#problem-search:hover { color: var(--text); }
+#problem-search svg { width: 15px; height: 15px; }
+#problem-pop {
+  position: fixed; z-index: 50; display: flex; flex-direction: column; min-height: 0;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.5); overflow: hidden;
+}
+#problem-pop[hidden] { display: none; }
+#problem-pop input { flex: none; margin: 6px; height: 28px; padding: 0 8px; border-color: #34405a; }
+#problem-pop input:focus { outline: none; border-color: var(--accent); }
+#problem-pop .list { flex: 1; min-height: 0; overflow-y: auto; padding: 0 0 6px; scrollbar-width: thin; outline: none; overscroll-behavior: contain; }
+#problem-pop .grp { padding: 6px 10px 2px; color: var(--dim); font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+#problem-pop .opt { padding: 3px 10px 3px 18px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#problem-pop .opt.var { padding-left: 32px; color: #b4bccd; font-size: 12px; }
+#problem-pop .opt.var::before { content: '\21B3\00A0'; color: var(--dim); }
+#problem-pop .opt.dim { color: var(--dim); }
+#problem-pop .opt.cur { font-weight: 600; }
+#problem-pop .opt.active { background: #24324a; color: #fff; }
+#problem-pop .opt b { color: var(--accent); font-weight: 700; }
+#problem-pop .none { padding: 8px 12px; color: var(--dim); }
 .blurb {
   color: var(--dim); margin: 0; font-size: 12px; line-height: 16px; height: 32px; overflow: hidden;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -388,6 +411,11 @@ body.validate .buttons-cell button + button { margin-left: 4px; }
   /* Touch-sized controls. 16px text also stops iOS from zooming the page on focus. */
   #side select, #side input[type='number'] { height: 36px; font-size: 16px; }
   #problem { height: 40px !important; }
+  .pick-row { grid-template-columns: minmax(0, 1fr) 40px; }
+  #problem-search { width: 40px; height: 40px; }
+  #problem-pop input { height: 38px; font-size: 16px; }
+  #problem-pop .opt { padding-top: 8px; padding-bottom: 8px; font-size: 15px; }
+  #problem-pop .opt.var { font-size: 14px; }
   #side input[type='range'] { height: 36px; }
   .buttons button, .setup-row button { height: 40px; font-size: 15px; }
   .io button { height: 36px; font-size: 14px; }

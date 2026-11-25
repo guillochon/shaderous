@@ -49,6 +49,7 @@ import { changeBetween, runningSpec, sameSetup, setSetting, type Setting } from 
 import { SessionRecorder, base64ToF32, planeOutline, pullOps, pullStep, queryDiff, type Action, type MassRole, type PlaneShape, type SessionLog, type StarAction } from './session';
 import { cloneSetup, featuredId, featuredOf, featuredPaths, getPath, setPath, type SetupSpec } from '../setup/spec';
 import { openSetupDialog } from './setup/dialog';
+import { installSetupSearch } from './setup_search';
 import type { SetupHost } from './setup/host';
 import { getSetup, listSetups } from './setup/library';
 
@@ -90,7 +91,8 @@ side.innerHTML = `
 
   <section>
     <div class="f"><span>Preset</span>
-    ${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join('') + '<optgroup label="Your setups" id="own-setups" hidden></optgroup>', 'The preset to simulate, or a setup of your own: picking one starts it from its initial conditions')}
+    <div class="pick-row">${select('problem', MENU.map((g) => `<optgroup label="${g.group}">${g.families.map((f) => opt(f.id, f.label)).join('')}</optgroup>`).join('') + '<optgroup label="Your setups" id="own-setups" hidden></optgroup>', 'The preset to simulate, or a setup of your own: picking one starts it from its initial conditions')}
+    <button id="problem-search" type="button" title="Search the presets and their variants" aria-label="Search setups"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><circle cx="6.8" cy="6.8" r="4.3" /><path d="M10.1 10.1L14 14" /></svg></button></div>
     </div>
     <div class="g3">
       ${field('Variant', select('variant', ''), 'row-variant', 'Versions of this problem with different setups')}
@@ -276,6 +278,33 @@ function showProblem(id: string) {
   // A setup that is not a preset has no variants to show.
   $('row-variant').hidden = id === CUSTOM_ID;
 }
+// The menu's own popup, with a search box over the list (the browser's menu cannot hold one).
+installSetupSearch(
+  $<HTMLSelectElement>('problem'),
+  $<HTMLButtonElement>('problem-search'),
+  () => {
+    showOwnSetups();
+    return [...$<HTMLSelectElement>('problem').querySelectorAll('optgroup')]
+      .filter((g) => !g.hidden)
+      .flatMap((g) => [...g.querySelectorAll('option')].map((o) => ({
+        value: o.value,
+        label: o.textContent ?? o.value,
+        group: g.label,
+        variants: o.value === CUSTOM_ID || o.value.startsWith('lib:') ? [] : familyById(o.value).variants.map((v) => ({ id: v.problem.id, label: v.label })),
+      })));
+  },
+  (value, variant) => {
+    const problem = $<HTMLSelectElement>('problem');
+    problem.value = value;
+    // A variant other than the first: shown in the menus, then loaded as its own menu would.
+    if (variant && variant !== familyById(value).variants[0].problem.id) {
+      showProblem(variant);
+      $('sheet-title').textContent = problem.selectedOptions[0]?.textContent ?? 'Controls';
+      $('variant').dispatchEvent(new Event('change'));
+    } else problem.dispatchEvent(new Event('change'));
+  },
+);
+
 // The page opens on the preset it is about to load, not on the first in the menu.
 const firstLink = decodeLink(new URLSearchParams(location.search));
 showProblem(firstLink.problem);
