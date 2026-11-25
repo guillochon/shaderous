@@ -20,8 +20,9 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos } from '../domain';
-import { syncRadiationEos } from '../radiation/radiation';
-import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec } from '../sim';
+import { radiationOn, syncRadiationEos } from '../radiation/radiation';
+import { cellEquations, importance, rampColor, type Equation } from './terms';
+import { type CellProbe, configFor, refusal, unitConstants, withSymmetry, diffusionKey, MAX_MASSES, MAX_OUTLINE_VERTICES, MAX_SOURCES, type BrushOp, starBrush, burnSpec, type Diagnostics, type Outline, Sim, type SimConfig, type Simulation, type SolveStats, pressureNote, rotationOf, type SourceSpec, cosmologyOf, cylindrical } from '../sim';
 import { expandSpecies, switchedSetup } from '../burn/watch';
 import { speciesLabel } from '../species/species';
 import { speciesNuclides } from '../species/mixture';
@@ -3444,9 +3445,9 @@ async function boxPointAt(px: number, py: number): Promise<Vec3 | null> {
 }
 
 /** The cell of the gas at a point of the box (in fractions of it), or null outside the box. */
-async function probeAt(s: Simulation, f: number[]): Promise<CellProbe | null> {
+async function probeAt(s: Simulation, f: number[], stencil = false): Promise<CellProbe | null> {
   const g = [f[0], f[1], cfg.ndim === 2 ? 0 : f[2]] as [number, number, number];
-  return g.some((v) => !(v >= 0 && v < 1)) ? null : s.probe(g);
+  return g.some((v) => !(v >= 0 && v < 1)) ? null : s.probe(g, { stencil });
 }
 
 async function runQuery() {
@@ -3519,7 +3520,7 @@ function updatePin(now: number) {
   if (!pinBusy && now - pinAsked >= 150) {
     pinBusy = true;
     pinAsked = now;
-    probeAt(s, f).then(
+    probeAt(s, f, true).then(
       (c) => {
         pinBusy = false;
         if (s === sim) pinCell = c;
@@ -3595,6 +3596,10 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
     );
   }
   cellPop.querySelector('.title')!.textContent = title;
+  const eqs = pin && c?.stencil ? equationsHtml(c) : '';
+  const box = cellPop.querySelector('.eqs') as HTMLElement;
+  if (box.innerHTML !== eqs) box.innerHTML = eqs;
+  box.hidden = !eqs;
   const html = rows.map(([k, v, cls]) => `<dt${cls === 'head' ? ' class="head"' : ''}>${k}</dt><dd${cls ? ` class="${cls}"` : ''}>${v}</dd>`).join('');
   const dl = cellPop.querySelector('dl')!;
   if (dl.innerHTML !== html) dl.innerHTML = html;
@@ -3609,6 +3614,58 @@ function showQuery(thing: Thing | null, c: CellProbe | null, x: number, y: numbe
   cellPop.style.top = `${Math.round(top)}px`;
 }
 $('cell-remove').addEventListener('click', removePinned);
+
+// --- the equations at a pinned cell ---------------------------------------------------------
+// The pinned readout shows the equations the run solves, each term colored by its size in that
+// cell against the largest term of its equation (ui/terms.ts), on a log ramp over six decades.
+
+/** What the equations shown leave out, in words: the physics they have no terms for yet. */
+function termsLeftOut(): string[] {
+  const p = cfg.problem;
+  const out: string[] = [];
+  if (p.mhd) out.push('magnetic forces');
+  if (radiationOn(cfg)) out.push('radiation');
+  if (burnSpec(cfg)) out.push('nuclear burning');
+  if (rotationOf(cfg).some((w, i) => i < 3 && w !== 0) || p.frame) out.push('frame forces');
+  if (p.damping) out.push('the damping zone');
+  if (sources.length) out.push('sources and sinks');
+  if (cosmologyOf(cfg)) out.push('the expansion');
+  return out;
+}
+
+/** Start-up damping's rate at time t (hydro/damping.wgsl start_damping_rate). */
+function calmRate(t: number): number {
+  const sd = cfg.startDamping;
+  if (!sd || !(sd.rate > 0) || !(sd.time > 0) || !(t < sd.time)) return 0;
+  return 0.5 * sd.rate * (1 + Math.cos((Math.PI * Math.max(t, 0)) / sd.time));
+}
+
+function equationHtml(e: Equation): string {
+  const terms = e.terms.map((t) => `<mrow style="color: ${rampColor(importance(t.size, e.largest))}">${t.math}</mrow>`).join('');
+  const lines = e.terms
+    .map((t) => {
+      const s = importance(t.size, e.largest);
+      const pct = e.largest > 0 ? (100 * t.size) / e.largest : 0;
+      return `<div class="term"><span class="swatch" style="background: ${rampColor(s)}"></span><span class="what">${t.label}</span><span class="size">${pct >= 1 || pct === 0 ? pct.toFixed(0) : pct.toPrecision(1)}%</span></div>`;
+    })
+    .join('');
+  const net = e.largest > 0 ? (100 * e.netSize) / e.largest : 0;
+  const netText = e.largest > 0 ? `sum of the terms: ${net >= 1 ? net.toFixed(0) : net.toPrecision(1)}% of the largest term${net < 5 && e.terms.length > 1 ? ': in balance' : ''}` : 'nothing changes here';
+  return `<div class="eq"><math><mrow>${e.lhs}<mo>=</mo>${terms}</mrow></math></div>${lines}<div class="net">${netText}</div>`;
+}
+
+/** The pinned cell's equations, or a line on why there are none. */
+function equationsHtml(c: CellProbe): string {
+  if (cylindrical(cfg) || spherical(cfg)) return '<div class="head">Equations</div><div class="note">Shown on Cartesian grids only</div>';
+  const list = cellEquations({
+    ndim: cfg.ndim, dx: c.dx, stencil: c.stencil!, pos: c.pos, eos: makeEos(cfg.eos, cfg.eosParams), gext: cfg.gext,
+    masses: massesNow().filter((m) => !m.massless).map((m) => ({ gm: m.gm, pos: m.pos, soft: m.soft })),
+    cooling: cfg.cooling, coolParams: cfg.coolParams, calm: calmRate(lastDiag?.t ?? 0),
+  });
+  if (!list) return '';
+  const left = termsLeftOut();
+  return `<div class="head">Equations <span class="legend">term size, of the largest: <span class="ramp"></span></span></div>${list.map(equationHtml).join('')}${left.length ? `<div class="note">Not shown: ${left.join(', ')}</div>` : ''}`;
+}
 $('cell-unpin').addEventListener('click', unpin);
 
 // --- contour labels -----------------------------------------------------------------------

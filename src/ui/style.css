@@ -351,6 +351,18 @@ details[open] > summary .sum { display: none; }
 #cell-pop dd.solid { color: #ffb454; }
 #cell-pop dt.head { color: var(--text); margin-top: 4px; }
 /* Pinned (a click with the query tool): it takes clicks, and offers to remove what it follows. */
+/* The pinned cell's equations, each term colored by its size there (ui/terms.ts). */
+#cell-pop .eqs { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 4px; font-size: 11px; color: var(--dim); }
+#cell-pop .eqs[hidden] { display: none; }
+#cell-pop .eqs .head { color: var(--text); display: flex; justify-content: space-between; align-items: center; }
+#cell-pop .eqs .legend { font-size: 10px; display: flex; align-items: center; gap: 4px; }
+#cell-pop .eqs .ramp { display: inline-block; width: 60px; height: 6px; border-radius: 3px; background: linear-gradient(90deg, rgb(74, 81, 98), rgb(51, 160, 220), rgb(120, 220, 200), rgb(255, 224, 102)); }
+#cell-pop .eqs .eq { font-size: 14px; margin: 6px 0 3px; white-space: nowrap; overflow: hidden; }
+#cell-pop .eqs .term { display: grid; grid-template-columns: 8px 1fr auto; gap: 6px; align-items: center; }
+#cell-pop .eqs .swatch { width: 8px; height: 8px; border-radius: 2px; }
+#cell-pop .eqs .size { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); }
+#cell-pop .eqs .net { font-style: italic; margin-top: 1px; }
+#cell-pop .eqs .note { margin-top: 4px; }
 #cell-pop .pin-actions { display: none; gap: 6px; justify-content: flex-end; margin-top: 6px; }
 #cell-pop.pinned { pointer-events: auto; }
 #cell-pop.pinned .pin-actions { display: flex; }

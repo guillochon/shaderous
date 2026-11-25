@@ -40,7 +40,7 @@ import { writeDrive } from '../hydro/drive';
 import { gridDims } from '../domain';
 import { sphSetup, spherical } from '../spherical';
 import { FORCE_CHANNELS, forcesOn, WallForces } from '../hydro/forces';
-import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
+import { implicitPressure, rotationOf, orbitConfig, settledOrbit, MASS_TRACK_BYTE, clockPressure, implicitBlocksUnsupported, refusal, CLOCK_BYTES, clockState, syncScale, cosmologyOf, withScale, cosmologyUnsupported, shearUnsupported, cylindrical, cylindricalUnsupported, sphericalUnsupported, symmetryUnsupported, mirrors, unfoldDiagnostics, type CellProbe, type DisplayAtlas, readTexels, readStencil, completeMass, MassReader, MAX_MASSES, BRUSH_BYTES, DIAG_FLOATS, DIAG_OPS, diagnosticsFrom, withForces, FORCE_FLOAT, hydroSlots, initialMasses, MASS_FLOATS, MASS_HEADER, MASS_STRIDE, MAX_SOURCES, frameTrack, followsBinary, frameZeros, FRAME_SUMS, outlineContains, packBrush, packMasses, packParams, packSources, PARAM_BYTES, readRestart, SOURCE_BYTES, type RestartState, type BrushOp, type Diagnostics, type Outline, type SimConfig, type Simulation, type SourceSpec, writeMassRadii, burnSpec, noHeat, isFieldBrush, fieldBrushSteps } from '../sim';
 import { blockTier, type Zone } from './zones';
 import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type GridBox, type RegridOp, type AdaptStep } from './tree';
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
@@ -3032,7 +3032,7 @@ export class AmrSim implements Simulation {
     return this.cfg.problem.refineMasses ? this.dx0 / (1 << this.levels) : this.dx0;
   }
 
-  async probe(f: [number, number, number]): Promise<CellProbe | null> {
+  async probe(f: [number, number, number], opts?: { stencil?: boolean }): Promise<CellProbe | null> {
     this.flush();
     const three = this.cfg.ndim === 3;
     const axes = three ? 3 : 2;
@@ -3048,11 +3048,13 @@ export class AmrSim implements Simulation {
       const at = [o[0] + index[0] - b.c[0] * BS, o[1] + index[1] - b.c[1] * BS, three ? o[2] + index[2] - b.c[2] * BS : o[2]] as [number, number, number];
       const tree = this.tree;
       const [u1, u2] = await readTexels(this.device, this.state[this.cur], at);
+      // The neighbors within the block: its ghosts may be from before the last step.
+      const stencil = opts?.stencil ? await readStencil(this.device, this.state[this.cur], this.gfield, at, o, [o[0] + BS - 1, o[1] + BS - 1, three ? o[2] + BS - 1 : o[2]]) : undefined;
       const dx = this.dx0 / (1 << b.level);
       const lo = domainLo(this.cfg);
       const pos = [0, 1, 2].map((a) => (a < axes ? (index[a] + 0.5) * dx + lo[a] : 0)) as [number, number, number];
       return {
-        pos, index, dx, u1: [...u1], u2: [...u2],
+        pos, index, dx, u1: [...u1], u2: [...u2], stencil,
         // A block that has been split or merged since the read would show another's state.
         block: tree === this.tree ? { level: b.level, coords: b.c.slice(0, axes), slot: b.slot, indicator: this.indicatorOf.get(b) ?? null } : undefined,
       };

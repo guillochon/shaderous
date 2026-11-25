@@ -252,6 +252,62 @@ export interface CellProbe {
   u2: number[];
   /** Adaptive mesh: the leaf block that holds the cell. */
   block?: { level: number; coords: number[]; slot: number; indicator: number | null };
+  /** With probe(f, { stencil: true }): the cell's neighbors, for the readout's equation terms. */
+  stencil?: CellStencil;
+}
+
+/**
+ * A cell and its 26 neighbors, slot (i + 1) + 3 (j + 1) + 9 (k + 1) for the neighbor at offset
+ * (i, j, k); slot 13 is the cell. A neighbor that is not a cell of the same grid (beyond the box,
+ * or on the adaptive mesh beyond the cell's block) is null.
+ */
+export interface CellStencil {
+  u1: (number[] | null)[];
+  u2: (number[] | null)[];
+  /** self-gravity's acceleration at the cell (zero without self-gravity) */
+  g: [number, number, number];
+}
+
+/** Where a 3 x 3 x 3 window around `at` lies inside [lo, hi] along each axis (inclusive). */
+function stencilWindow(at: number[], lo: number[], hi: number[]): { from: [number, number, number]; size: [number, number, number] } {
+  const from = at.map((c, a) => Math.max(lo[a], c - 1)) as [number, number, number];
+  const size = at.map((c, a) => Math.min(hi[a], c + 1) - from[a] + 1) as [number, number, number];
+  return { from, size };
+}
+
+/**
+ * Read the stencil around texel `at` of the state textures (u1, u2), the window kept within
+ * [lo, hi], and self-gravity's acceleration at `at` from `gfield` when it is laid out as the state.
+ */
+export async function readStencil(d: GPUDevice, state: GPUTexture[], gfield: GPUTexture | null, at: [number, number, number], lo: number[], hi: number[]): Promise<CellStencil> {
+  const w = stencilWindow(at, lo, hi);
+  const useG = !!gfield && gfield.width === state[0].width && gfield.height === state[0].height && gfield.depthOrArrayLayers === state[0].depthOrArrayLayers;
+  // Rows padded to 256 bytes; each texture's window at its own 256-aligned offset.
+  const region = 256 * w.size[1] * w.size[2];
+  const buf = d.createBuffer({ size: 2 * region + 256, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+  const enc = d.createCommandEncoder();
+  state.forEach((t, i) => enc.copyTextureToBuffer({ texture: t, origin: w.from }, { buffer: buf, offset: region * i, bytesPerRow: 256, rowsPerImage: w.size[1] }, w.size));
+  if (useG) enc.copyTextureToBuffer({ texture: gfield, origin: at }, { buffer: buf, offset: 2 * region }, [1, 1, 1]);
+  d.queue.submit([enc.finish()]);
+  await buf.mapAsync(GPUMapMode.READ);
+  const all = new Float32Array(buf.getMappedRange().slice(0));
+  buf.unmap();
+  buf.destroy();
+  const u: (number[] | null)[][] = [new Array(27).fill(null), new Array(27).fill(null)];
+  for (let k = -1; k <= 1; k++) {
+    for (let j = -1; j <= 1; j++) {
+      for (let i = -1; i <= 1; i++) {
+        const x = at[0] + i - w.from[0];
+        const y = at[1] + j - w.from[1];
+        const z = at[2] + k - w.from[2];
+        if (x < 0 || y < 0 || z < 0 || x >= w.size[0] || y >= w.size[1] || z >= w.size[2]) continue;
+        const o = (z * w.size[1] * 256 + y * 256 + x * 16) / 4;
+        for (let s = 0; s < 2; s++) u[s][i + 1 + 3 * (j + 1) + 9 * (k + 1)] = [...all.slice(s * (region / 4) + o, s * (region / 4) + o + 4)];
+      }
+    }
+  }
+  const g = useG ? ([all[region / 2], all[region / 2 + 1], all[region / 2 + 2]] as [number, number, number]) : ([0, 0, 0] as [number, number, number]);
+  return { u1: u[0], u2: u[1], g };
 }
 
 /**
@@ -371,8 +427,8 @@ export interface Simulation {
    * for, leaving them where they are and as they move.
    */
   retuneMasses(): void;
-  /** The cell at `f` (in fractions of the box, each in [0, 1)) as it is now. */
-  probe(f: [number, number, number]): Promise<CellProbe | null>;
+  /** The cell at `f` (in fractions of the box, each in [0, 1)) as it is now; with `stencil`, its neighbors too. */
+  probe(f: [number, number, number], opts?: { stencil?: boolean }): Promise<CellProbe | null>;
   /** Replace the sources and sinks (at most MAX_SOURCES; a reset removes them all). */
   setSources(list: SourceSpec[]): void;
   destroy(): void;
@@ -3071,7 +3127,7 @@ export class Sim implements Simulation {
     this.refreshPotential();
   }
 
-  async probe(f: [number, number, number]): Promise<CellProbe | null> {
+  async probe(f: [number, number, number], opts?: { stencil?: boolean }): Promise<CellProbe | null> {
     // Fractions of the computed box along each axis (domain.ts boxFrac): of half the box along
     // a halved mirrored axis (gridDims).
     const dims = this.displayDims;
@@ -3081,7 +3137,9 @@ export class Sim implements Simulation {
     const lo = domainLo(this.cfg);
     const pos = index.map((i, a) => (i + 0.5) * this.dx + lo[a]) as [number, number, number];
     if (this.nz === 1) pos[2] = 0;
-    return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2] };
+    const t = this.state[this.cur][0];
+    const stencil = opts?.stencil ? await readStencil(this.device, this.state[this.cur], this.gfield, index as [number, number, number], [0, 0, 0], [t.width - 1, t.height - 1, t.depthOrArrayLayers - 1]) : undefined;
+    return { pos, index: this.nz === 1 ? index.slice(0, 2) : index, dx: this.dx, u1: [...u1], u2: [...u2], stencil };
   }
 
   retuneMasses() {
