@@ -312,6 +312,29 @@ fn follow_binary() {
     BH.track = vec4<f32>(t.xyz, t.w + 1.0);
     return;
   }
+  if (n == 0u) {
+    // A binary of gas alone is also held at the origin: the frame accelerates with its center of
+    // mass (that of the gas the sums count), a uniform acceleration that every pass takes off the
+    // gas (gravity/ext.wgsl) and the energy sees in kick form. A body off the axis of a turning
+    // frame moves round it, and the numerical errors that move the center of mass grow its
+    // distance, until the axis law above swings the frame (a double white dwarf's drifted 0.46 in
+    // 230 time units, and Omega swung 12%). In the frame the center obeys
+    //   c'' = Omega^2 c_xy - 2 Omega z x c' + dOmega/dt (c_y, -c_x, 0) - a,
+    // so a frame acceleration a that holds the centrifugal, Coriolis and Euler terms and adds
+    //   k^2 c + 2 k c'   (k = Omega_0 / 2, as the axis law)
+    // brings it back to the origin critically damped (on the time 1 / k = 2 / Omega_0, a third
+    // of an orbit; most of the way in two of them), without swinging past it. Across the
+    // orbital plane only the last term: not in 2D, nor where z is a plane of mirror symmetry.
+    let kc = 0.5 * t.z;
+    let w = t.x;
+    var hold = vec3<f32>(
+      (w * w + kc * kc) * c.x + 2.0 * kc * v.x + 2.0 * w * v.y + t.y * c.y,
+      (w * w + kc * kc) * c.y + 2.0 * kc * v.y - 2.0 * w * v.x - t.y * c.x,
+      0.0,
+    );
+    if (P.geom.y > 2.5 && P.sym.z == 0u) { hold.z = kc * kc * FR[11] / s0 + 2.0 * kc * FR[12] / s0; }
+    BH.frame = vec4<f32>(BH.frame.xyz + hold, 0.0);
+  }
   if (!LIVE) { return; }
   let k = 0.5 * t.z;
   var weight = 1.0;

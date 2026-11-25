@@ -1162,7 +1162,7 @@ export function frameTrack(c: SimConfig, _masses?: readonly Required<PointMass>[
 }
 
 /** Channels of a followed frame's sums over the gas (gravity/frame_cell.wgsl). */
-export const FRAME_SUMS = 11;
+export const FRAME_SUMS = 13;
 
 /** The point-mass kick's frame sums where the frame follows no binary: zeros it never reads. */
 export function frameZeros(d: GPUDevice): GPUBuffer {

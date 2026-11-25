@@ -3,8 +3,10 @@
 // threshold (Masses.track2.z), its mass m and
 //   0 m   1 m x   2 m y   3 m x^2   4 m y^2   5 m x y   6 m v_x   7 m v_y
 //   8 m x v_x   9 m y v_y   10 m (x v_y + y v_x)
-// in the orbital plane (x, y relative to the box center, velocities in the frame). Requires
-// gravity/bh.wgsl, a binding BH: Masses, and Red (gpu/reduce.wgsl) with 11 channels.
+// in the orbital plane (x, y relative to the box center, velocities in the frame), and across it
+//   11 m z   12 m v_z
+// for holding the center of mass. Requires gravity/bh.wgsl, a binding BH: Masses, and Red
+// (gpu/reduce.wgsl) with 13 channels.
 fn frame_cell(u1: vec4<f32>, vol: f32, x: vec3<f32>) -> Red {
   var r = red_identity();
   if (!(u1.x > BH.track2.z)) { return r; }
@@ -21,5 +23,7 @@ fn frame_cell(u1: vec4<f32>, vol: f32, x: vec3<f32>) -> Red {
   r[8] = x.x * p.x;
   r[9] = x.y * p.y;
   r[10] = x.x * p.y + x.y * p.x;
+  r[11] = m * x.z;
+  r[12] = u1.w * vol;
   return r;
 }
