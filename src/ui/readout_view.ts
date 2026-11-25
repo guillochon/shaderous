@@ -159,10 +159,12 @@ export class ReadoutView {
       const target = e.target as Element;
       const t = target.closest('math [data-term]');
       const block = target.closest('.eqb');
-      eqs.querySelectorAll('.line.hl').forEach((el) => el.classList.remove('hl'));
+      eqs.querySelectorAll('.line.hl, math .hl').forEach((el) => el.classList.remove('hl'));
+      // The term itself too: drawn heavier by a stroke, which leaves the layout as it is.
+      t?.classList.add('hl');
       if (t && block) block.querySelectorAll(`.line[data-term="${t.getAttribute('data-term')}"]`).forEach((el) => el.classList.add('hl'));
     });
-    eqs.addEventListener('pointerleave', () => eqs.querySelectorAll('.line.hl').forEach((el) => el.classList.remove('hl')));
+    eqs.addEventListener('pointerleave', () => eqs.querySelectorAll('.line.hl, math .hl').forEach((el) => el.classList.remove('hl')));
     // A breakdown opening on hover has had no room to draw its sparklines: draw them now.
     eqs.addEventListener('pointerover', (e) => {
       const block = (e.target as Element).closest('.eqb') as HTMLElement | null;
@@ -328,7 +330,7 @@ function blocksOf(list: Equation[]): Block[] {
     .map((e) => ({
       key: e.id,
       name: EQ_NAMES[e.id],
-      math: `<math><mrow>${e.lhs}<mo>=</mo>${e.terms.map((_, i) => color(e, i)).join('')}</mrow></math>`,
+      math: `<math><mrow><mrow class="lhs">${e.lhs}</mrow><mo>=</mo>${e.terms.map((_, i) => color(e, i)).join('')}</mrow></math>`,
       colors: e.terms.map((t) => ({ term: t.id, size: t.size, largest: e.largest })),
       lines: e.terms.map((t) => ({ key: `eq:${e.id}:${t.id}`, term: t.id, label: t.label, size: t.size, largest: e.largest })),
       net: netOf(e),
@@ -342,7 +344,7 @@ function blocksOf(list: Equation[]): Block[] {
     out.push({
       key: 'species',
       name: EQ_NAMES.species,
-      math: `<math><mrow>${form.lhs}<mo>=</mo>${form.terms.map((_, i) => color(form, i)).join('')}</mrow></math>`,
+      math: `<math><mrow><mrow class="lhs">${form.lhs}</mrow><mo>=</mo>${form.terms.map((_, i) => color(form, i)).join('')}</mrow></math>`,
       colors: form.terms.map((t) => ({ term: t.id, size: share(t.id), largest: 1 })),
       lines: species.flatMap((e) =>
         e.terms.map((t) => ({ key: `eq:species:${e.name}:${t.id}`, term: t.id, label: `${e.name}: ${t.id === 'sp-burn' ? 'burning' : 'carried'}`, size: t.size, largest: e.largest })),

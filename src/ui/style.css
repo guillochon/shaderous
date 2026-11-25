@@ -366,6 +366,10 @@ details[open] > summary .sum { display: none; }
 #cell-pop .eqs .eqb.open .eq { border-left: 2px solid var(--accent); padding-left: 4px; margin-left: -6px; }
 #cell-pop .eqs .line { display: grid; grid-template-columns: 8px 1fr auto 24px; gap: 6px; align-items: center; }
 #cell-pop .eqs .line.hl .what { font-weight: 600; color: var(--text); }
+/* A hovered term, bolder by a stroke of its own color: font-weight would widen it and push its neighbors. */
+#cell-pop .eqs math .hl { -webkit-text-stroke: 0.6px currentColor; paint-order: stroke fill; }
+/* The left-hand side's fraction, a little larger than an inline fraction's. */
+#cell-pop .eqs math .lhs { font-size: 125%; }
 #cell-pop .eqs .swatch { width: 8px; height: 8px; border-radius: 2px; }
 #cell-pop .eqs .size { font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; color: var(--text); }
 #cell-pop .eqs .net { font-style: italic; margin-top: 1px; }
