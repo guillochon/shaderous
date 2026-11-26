@@ -7,6 +7,7 @@
 //
 // A setting that costs a running simulation nothing (`live`) is applied as it is changed;
 // everything else waits for Apply, whose label says what it will do.
+import { MAX_AMR_LEVELS } from '../../amr/tree';
 import { extensionOf } from '../../geometry';
 import { keepMeshFile, meshFilesOf } from '../../geometry/store';
 
@@ -442,8 +443,8 @@ function build() {
       return { type: 'select', choices };
     }
     const n = draft.domain?.n;
-    const most = n ? maxLevels(n) : 5;
-    const choices: FormChoice[] = [0, 1, 2, 3, 4, 5].map((l) => ({
+    const most = n ? maxLevels(n) : MAX_AMR_LEVELS;
+    const choices: FormChoice[] = Array.from({ length: MAX_AMR_LEVELS + 1 }, (_, l) => ({
       value: l, label: l === 0 ? 'Uniform' : `${l} level${l > 1 ? 's' : ''}`,
       ...(l > most ? { off: `This resolution allows at most ${most} level${most === 1 ? '' : 's'} of refinement` } : {}),
     }));

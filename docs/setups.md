@@ -468,7 +468,7 @@ default, and what it does. A number out of its range is held to it when the file
 | --- | --- | --- | --- |
 | `domain.ndim` | Dimensions | `3`, `2` | Two or three dimensions. A 2D run is one layer of cells in x and y |
 | `domain.n` | Resolution | a whole number, 16 to 16384 | Cells across the box; on an adaptive mesh, at its finest level |
-| `domain.amr` | Refinement | a whole number, 0 to 5 | Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution |
+| `domain.amr` | Refinement | a whole number, 0 to 7 | Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution |
 | `domain.box` | Box size | a number, 1e-12 to 1e+30. Default `1` | Side of the box, in code units: the domain is a cube of this side centered on the origin |
 | `domain.geometry` | Geometry | `cartesian`, `cylindrical`, `spherical`. Default `cartesian` | Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings; or in (r, theta): x is then r from the inner radius to the box side, y theta from pole to pole |
 | `domain.rMin` | Inner radius | a number, 1e-12 to 1e+30. Default `0.01` | A spherical (r, theta) run: the radius of its inner face (above zero); the box side is then its outer radius |
@@ -776,7 +776,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `shape.at` | Plane at | a number. Default `0` | Distance of the plane from the box center, along its normal |
 | `refine` | Refines | `surface`, `swept`, `off`. Default `surface` | On an adaptive mesh: Surface refines every block within a band of the obstacle’s surface, decided from its shape (so a part thinner than a coarse cell is whole at the finest level); Swept, everywhere its surface passes as it moves (a rotor’s disk; for a body at rest the same as Surface); Off leaves it to the flow’s own refinement |
 | `refineBand` | Refined band (cells) | a number, 0 to 64. Default `4` | How far from the surface the mesh is kept at the obstacle’s level, in finest cells |
-| `refineLevel` | Refined to level | a whole number, 0 to 5 | The level its band is kept at, 0 the coarsest. Empty: the finest |
+| `refineLevel` | Refined to level | a whole number, 0 to 7 | The level its band is kept at, 0 the coarsest. Empty: the finest |
 
 **`tunnel`** (Wind tunnel). A stream through the box from an inlet to an outlet with a sponge, and the box’s faces, its gas and its background set to match: put obstacles in it, and the diagnostics give their drag and lift coefficients. Below Mach 0.3 the gas is the liquid with implicit pressure; above, an ideal gas. At most 1
 

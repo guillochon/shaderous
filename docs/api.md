@@ -119,7 +119,7 @@ by `npm run gen`.
 | `setup` | The run | A setup document of one’s own, packed (with problem=custom) |
 | `dim` | The run | 2 or 3 dimensions |
 | `n` | The run | Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid |
-| `amr` | The run | Levels of refinement, 0 to 5. With n but no amr, the grid is uniform |
+| `amr` | The run | Levels of refinement, 0 to 7. With n but no amr, the grid is uniform |
 | `tend` | Settings | End time (inf for none) |
 | `sym` | Settings | Mirror symmetry: none, x, y, z, xy, xz, yz, xyz. Compute only the part of a symmetric setup above its planes of symmetry, each mirrored axis’s lower face a plane of symmetry; the totals are those of the whole. With every axis mirrored (an octant in 3D, a quadrant in 2D) each runs from 0 to the box side: twice the resolution for the same cells. With only some (a half, or a quadrant in 3D) those run from 0 to half the box with half the cells: the same cube as without mirrors, at half or a quarter of the cost |
 | `eos` | Settings | Equation of state: ideal, barotropic, liquid, gas_radiation, degenerate, ionizing, helmholtz, hhe, aneos. How pressure follows from density and internal energy. Changing it carries each cell’s pressure over, and the run continues |

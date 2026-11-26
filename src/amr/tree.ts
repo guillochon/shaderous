@@ -10,6 +10,8 @@
 // section 21, Block grid).
 
 export const BS = 16; // cells per block side
+/** The most levels of refinement below the root grid (plans/seven-levels.md). */
+export const MAX_AMR_LEVELS = 7;
 export const NG = 2; // ghost layers
 export const PAD = BS + 2 * NG; // stored cells per block side, in the atlas
 export const BT_STRIDE = 32; // ints per block in the block table

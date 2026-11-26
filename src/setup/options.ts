@@ -18,6 +18,7 @@ import { VIEW_MODES } from '../render/view_options';
 import { COMPOSITIONS } from '../units/composition';
 import { ANEOS_LABELS, ANEOS_MATERIALS } from '../eos/aneos';
 import { speciesNuclides } from '../species/mixture';
+import { MAX_AMR_LEVELS } from '../amr/tree';
 import { AXES, MESH_ANCHORS, REFINE_MODES, TUNNEL_FLOORS, TUNNEL_SIDES } from './spec';
 import { DISK_HEIGHTS, DISK_PROFILES, FRAMES, getPath, MESH_UPS, ORBIT_TYPES, SHAPE_TYPES, STAR_FIELD_TYPES, STAR_TYPES, type Part, type PartKind, type SetupSpec } from './spec';
 import { DENSITY_UNITS, LENGTH_UNITS, MASS_UNITS, VELOCITY_UNITS } from './units';
@@ -283,7 +284,7 @@ export const OPTIONS: Option[] = [
   // ---- domain and grid ----
   { path: 'domain.ndim', label: 'Dimensions', tip: 'Two or three dimensions. A 2D run is one layer of cells in x and y', page: 'domain', control: pick({ value: 3, label: '3D', excludes: [{ fact: 'domain.geometry', is: ['cylindrical', 'spherical'] }] }, { value: 2, label: '2D', requires: [{ fact: 'domain.supports2d', reason: 'This setup is three-dimensional (its file says it does not make sense in 2D)' }], excludes: [{ fact: 'gravity.selfFlat', reason: 'Not available with self-gravity (but an axisymmetric (R, z) or spherical run has it)' }, { fact: 'parts.starFlat', reason: 'Not available with a star (but an axisymmetric (R, z) run takes one on its axis)' }] }), apply: 'restart', linkKey: 'dim' },
   { path: 'domain.n', label: 'Resolution', tip: 'Cells across the box; on an adaptive mesh, at its finest level', page: 'domain', control: num(16, 16384, { integer: true, factor: 2 }), apply: 'restart', linkKey: 'n' },
-  { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, 5, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
+  { path: 'domain.amr', label: 'Refinement', tip: 'Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution', page: 'domain', control: num(0, MAX_AMR_LEVELS, { integer: true, step: 1 }), apply: 'restart', linkKey: 'amr' },
   { path: 'domain.box', label: 'Box size', tip: 'Side of the box, in code units: the domain is a cube of this side centered on the origin', page: 'domain', control: num(1e-12, 1e30, { factor: 2, quantity: 'length' }), apply: 'restart', default: 1 },
   { path: 'domain.geometry', label: 'Geometry', tip: 'Cartesian, or a 2D body of revolution about the y axis, in (R, z): x is then R from the axis (the lower x face) to the box side, and cells are rings; or in (r, theta): x is then r from the inner radius to the box side, y theta from pole to pole', page: 'domain', apply: 'restart', default: 'cartesian',
     control: pick({ value: 'cartesian', label: 'Cartesian' }, { value: 'cylindrical', label: 'Axisymmetric (R, z)', requires: [{ fact: 'domain.ndim', is: 2, reason: 'An axisymmetric run is two-dimensional' }] }, { value: 'spherical', label: 'Spherical (r, theta)', requires: [{ fact: 'domain.ndim', is: 2, reason: 'A spherical run is two-dimensional' }] }) },
@@ -631,7 +632,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
       ...SHAPE,
       P({ path: 'refine', label: 'Refines', tip: 'On an adaptive mesh: Surface refines every block within a band of the obstacle’s surface, decided from its shape (so a part thinner than a coarse cell is whole at the finest level); Swept, everywhere its surface passes as it moves (a rotor’s disk; for a body at rest the same as Surface); Off leaves it to the flow’s own refinement', control: pickOf(REFINE_MODES, ['surface', 'Its surface'], ['swept', 'All it sweeps'], ['off', 'Off']), default: 'surface', requires: ADAPTIVE }),
       P({ path: 'refineBand', label: 'Refined band (cells)', tip: 'How far from the surface the mesh is kept at the obstacle’s level, in finest cells', control: num(0, 64, { step: 1 }), default: 4, requires: ADAPTIVE, show: { path: 'refine', is: ['surface', 'swept'] } }),
-      P({ path: 'refineLevel', label: 'Refined to level', tip: 'The level its band is kept at, 0 the coarsest. Empty: the finest', control: num(0, 5, { integer: true, step: 1 }), requires: ADAPTIVE, show: { path: 'refine', is: ['surface', 'swept'] } }),
+      P({ path: 'refineLevel', label: 'Refined to level', tip: 'The level its band is kept at, 0 the coarsest. Empty: the finest', control: num(0, MAX_AMR_LEVELS, { integer: true, step: 1 }), requires: ADAPTIVE, show: { path: 'refine', is: ['surface', 'swept'] } }),
     ],
   },
   tunnel: {

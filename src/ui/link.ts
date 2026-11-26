@@ -3,6 +3,7 @@
 // A link names the preset, dimensionality, resolution and refinement, and then only what
 // differs from that preset's defaults, so most links stay short. Anything unrecognized or
 // out of range in a link is ignored rather than trusted.
+import { MAX_AMR_LEVELS } from '../amr/tree';
 import { BOUNDARY_CODES, boundaryList } from '../problems/boundaries';
 import { configFor, unitConstants, type SimConfig } from '../sim';
 import { mirrorAxes, mirrorName } from '../domain';
@@ -111,7 +112,7 @@ export function linkKeys(): LinkKey[] {
     { key: 'setup', group: 'run', about: 'A setup document of one’s own, packed (with problem=custom)' },
     { key: 'dim', group: 'run', about: '2 or 3 dimensions' },
     { key: 'n', group: 'run', about: 'Cells per side (the finest level’s on an adaptive mesh). Left out: the preset’s own grid' },
-    { key: 'amr', group: 'run', about: 'Levels of refinement, 0 to 5. With n but no amr, the grid is uniform' },
+    { key: 'amr', group: 'run', about: 'Levels of refinement, 0 to 7. With n but no amr, the grid is uniform' },
     { key: 'tend', group: 'settings', about: 'End time (inf for none)' },
     ...settings,
     { key: 'wb', group: 'settings', about: 'Well-balanced reconstruction (0 or 1)' },
@@ -257,7 +258,7 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     problem,
     ndim: known ? (dim ? (dim === '2' ? 2 : 3) : (grid?.ndim ?? 3)) : DEFAULT_SETUP.ndim,
     n: known ? (q.has('n') ? Math.max(0, Math.round(+q.get('n')! || 0)) : (grid?.n ?? 0)) : DEFAULT_SETUP.n,
-    amr: known ? Math.min(5, Math.max(0, Math.round(q.has('amr') ? +q.get('amr')! || 0 : q.has('n') ? 0 : (grid?.amr ?? 0)))) : DEFAULT_SETUP.amr,
+    amr: known ? Math.min(MAX_AMR_LEVELS, Math.max(0, Math.round(q.has('amr') ? +q.get('amr')! || 0 : q.has('n') ? 0 : (grid?.amr ?? 0)))) : DEFAULT_SETUP.amr,
     cfg: {},
     eosParams: {},
     coolParams: {},

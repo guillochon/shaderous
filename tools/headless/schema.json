@@ -70,7 +70,7 @@
   {
    "key": "amr",
    "group": "run",
-   "about": "Levels of refinement, 0 to 5. With n but no amr, the grid is uniform"
+   "about": "Levels of refinement, 0 to 7. With n but no amr, the grid is uniform"
   },
   {
    "key": "tend",

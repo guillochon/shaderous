@@ -2,7 +2,7 @@
 import type { Gpu } from './gpu/device';
 import { Sim, type SimConfig, type Simulation } from './sim';
 import { AmrSim } from './amr/amr_sim';
-import { BS } from './amr/tree';
+import { BS, MAX_AMR_LEVELS } from './amr/tree';
 import { memoryBudget } from './gpu/memory';
 import type { Problem } from './problems/types';
 
@@ -16,7 +16,7 @@ export const supportsAmr = (p: Problem) => !p.shear;
 /** The deepest refinement that leaves at least one whole block per side at the coarsest level. */
 export function maxAmrLevels(n: number): number {
   let l = 0;
-  while (l < 5 && (n >> (l + 1)) % BS === 0 && n >> (l + 1) >= BS) l++;
+  while (l < MAX_AMR_LEVELS && (n >> (l + 1)) % BS === 0 && n >> (l + 1) >= BS) l++;
   return l;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BlockTree, BT_STRIDE, gridBox, FLAG_LEAF, NB_COARSE, RG_COPY, RG_PROLONG, RG_RESTRICT, type Block, type GridBox } from '../../src/amr/tree';
+import { BlockTree, BT_STRIDE, MAX_AMR_LEVELS, gridBox, FLAG_LEAF, NB_COARSE, RG_COPY, RG_PROLONG, RG_RESTRICT, type Block, type GridBox } from '../../src/amr/tree';
 
 const periodic = [0, 0, 0];
 const outflow = [1, 1, 1];
@@ -24,6 +24,26 @@ function covers(t: BlockTree) {
 }
 
 describe('block tree', () => {
+  it('nests to the deepest level allowed (plans/seven-levels.md)', () => {
+    expect(MAX_AMR_LEVELS).toBe(7);
+    // Refined toward a corner point until the finest level: 2D on 2 x 2 roots, 3D on one root block.
+    for (const [ndim, nr] of [[2, 2], [3, 1]] as const) {
+      const L = MAX_AMR_LEVELS;
+      const t = new BlockTree(ndim, nr, L, 4000, [...outflow], [...outflow]);
+      const p = [0.3, 0.6, 0.45];
+      for (let round = 0; round < L + 2; round++) {
+        t.adapt((blk: { level: number; c: number[] }) => {
+          const size = 1 / (nr << blk.level);
+          for (let i = 0; i < ndim; i++) if (p[i] < blk.c[i] * size || p[i] >= (blk.c[i] + 1) * size) return 0;
+          return 1;
+        }, 0.6, 0.2);
+      }
+      expect(Math.max(...t.leaves().map((b) => b.level))).toBe(L);
+      balanced(t);
+      covers(t);
+    }
+  });
+
   it('replays a re-mesh from its steps alone, slot for slot (session logs)', () => {
     // One tree re-meshes from indicators; its twin only from the steps the first recorded. A small
     // budget (cap) makes some refinements evict, and edge balance (MHD) cascades.

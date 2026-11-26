@@ -80,7 +80,7 @@
      "title": "Refinement",
      "description": "Adaptive mesh: levels of refinement below the coarsest grid. 0 puts every cell at the full resolution",
      "minimum": 0,
-     "maximum": 5
+     "maximum": 7
     },
     "box": {
      "type": "number",
@@ -2583,7 +2583,7 @@
         "title": "Refined to level",
         "description": "The level its band is kept at, 0 the coarsest. Empty: the finest",
         "minimum": 0,
-        "maximum": 5
+        "maximum": 7
        }
       },
       "required": [

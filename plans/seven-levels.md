@@ -1,7 +1,13 @@
 # Plan: up to seven levels of refinement
 
-Status (2026-11-23): not started. Written from reading the code; no mesh deeper than five
-levels has been built.
+Status (2026-11-26): stage 1 done (the caps lifted to `MAX_AMR_LEVELS = 7` in `amr/tree.ts`);
+first 2D run below. Stages 2 to 5 to do.
+
+Why 7 and not more: with the resolutions offered (2D to 16384^2, 3D to 2048^3) and a whole
+16-cell root block per side, 3D stops at 7 (one root block) and 2D could reach 10. Nothing in
+the data structures stops sooner (tree keys exact in a double far past 10; `sph_monopole.wgsl`'s
+`1 << 3 * level` overflows an i32 only at level 11), but past 7 the 3-bin local timesteps waste
+the coarse levels' steps and 3D has no root left, so 7 is where the plan stops.
 
 Goal: let the adaptive mesh go to 7 levels below the root grid (128 times finer than the
 roots), for problems whose interesting part is small against the box: a stellar core in a wide
@@ -20,6 +26,8 @@ deeper mesh breaks or slows, and proving it on the validation suite.
 | `tools/headless/mcp.mjs` | `SETUP_KEYS`: "amr 0 to 5" | doc string |
 | `tools/random-test/generate.ts` | `'domain.amr': (g) => g.int(1, 5)` | test range |
 | `src/ui/app.ts` `RES_3D` | 3D menu stops at 2048 | practical cap (below) |
+| `src/ui/link.ts` `decodeLink` | `Math.min(5, ...)` on `amr` | hard cap (every link, the runner and MCP server): missed by the first reading |
+| `src/setup/options.ts` obstacle `refineLevel` | `num(0, 5)` | hard cap: missed by the first reading |
 | `src/ui/app.ts` loading a snapshot | `Math.min(maxLevel(snap), maxAmrLevels(n))` | a 6- or 7-level `.athdf` is clamped to 5 on load |
 
 What already handles any depth: the tree's numeric keys (`(level * span + c) ...`, at most
@@ -81,6 +89,16 @@ gpu-tests-static-build):
   step and residual against depth.
 - A magnetized blast at 6 levels: div B stays at round-off through the regrids.
 Record the numbers here.
+
+Numbers (2026-11-26, Ampere GPU, headless runner, to t = 0.02):
+
+| 2D Sedov, 16384^2 finest | blocks at t = 0, 0.02 | steps | wall | mass | eTot 0 -> 0.02 |
+|---|---|---|---|---|---|
+| 5 levels (32 x 32 roots) | 1084, 6784 | 46,424 | 89 s | 1.000000 | 1.000025 -> 1.000032 |
+| 7 levels (8 x 8 roots) | 148, 6052 | 46,424 | 98 s | 1.000000 | 1.000025 -> 1.000032 |
+
+Same steps and the same energy to the digits printed; the 7-level mesh holds 11% fewer blocks
+but runs 10% slower (more levels to dispatch per step). Global steps: the gain waits on stage 4.
 
 **3. 3D beyond 2048** (only if stage 2 shows 3D depth is worth it). Add 4096 to `RES_3D` as
 an adaptive-only resolution (never uniform). The index at 4096^3 is 64 MB: acceptable, but
