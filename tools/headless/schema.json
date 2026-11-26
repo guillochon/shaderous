@@ -345,7 +345,7 @@
   {
    "key": "tbins",
    "group": "settings",
-   "about": "Local timesteps: 0, 1, 2, 3"
+   "about": "Local timesteps: 0, 1, 2, 3, 4, 5"
   },
   {
    "key": "riemann",

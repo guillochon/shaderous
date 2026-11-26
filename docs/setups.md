@@ -602,7 +602,7 @@ default, and what it does. A number out of its range is held to it when the file
 | `mesh.refineRho` | Refine above density | a number, at least 0 | Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off |
 | `mesh.refineDense` | Always refine above density | a number, at least 0. Default `0` | Adaptive mesh: gas denser than this is always at the finest level, as the smooth interior of a star must be. 0 is off |
 | `mesh.refineMasses` | Refine around point masses | `true` or `false`. Default `false` | Adaptive mesh: keep the gas around every point mass at the finest level, so that softening and sinks can be as small as the finest cells allow |
-| `mesh.timeBins` | Local timesteps | `0`, `1`, `2`, `3`. Default `0` | Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work |
+| `mesh.timeBins` | Local timesteps | `0`, `1`, `2`, `3`, `4`, `5`. Default `0` | Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work. With self-gravity, at most 16× longer |
 | `mesh.jeansRefine` | Refine the Jeans length | a whole number, 0 to 64. Default `16` | With self-gravity, refine where the Jeans length is under this many cells. 0 is off |
 
 **`background`**

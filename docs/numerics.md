@@ -1524,6 +1524,16 @@ central density at a finest resolution of 256 cells on two levels. Settled, it s
 A block splits into $`2^d`$ children of half the cell size, and face neighbors differ by at most
 one level. The data layout is described in [architecture.md](architecture.md#adaptive-mesh).
 
+**Depth.** Up to 7 levels below the root grid (`MAX_AMR_LEVELS` in `amr/tree.ts`), 128 times
+finer than the roots, as long as a whole root block of 16 cells is left per side: 7 levels from
+2048 cells across (one root block), 6 from 1024. 3D grids go to 4096³ at the finest level, on the
+adaptive mesh only. The leaf index, which finds the leaf over any point of the finest level, has
+one 4-byte entry per finest block, $`(n/16)^d`$: 8 MB at 2048³ and 64 MB at 4096³, counted in a
+grid's memory. Deeper than 7 the tree would still work (its keys stay exact in a double), but
+the root level would hold nothing in 3D, and with steps no longer than 32 times the finest
+([§18](#18-local-per-block-timesteps)) the coarse levels would take ever more steps than they
+need.
+
 ### Refinement criteria
 
 `amr/flag.wgsl`. The main indicator is the normalized second derivative of
@@ -1599,7 +1609,15 @@ Off by default ("Local timesteps" under Hydro, `tbins` in a link). The subcyclin
 Shaderous assigns steps per block instead, in power-of-two time bins as in particle codes such
 as GADGET-2 ([Springel 2005][Springel2005]).
 
-- Time advances in **cycles** of up to 8 substeps of the smallest step $`\Delta t_\text{min}`$.
+- Time advances in **cycles** of up to 32 substeps of the smallest step $`\Delta t_\text{min}`$
+  (`tbins` 1 to 5: cycles of 2 to 32). The mesh is checked again only between cycles, so a
+  cycle runs whole on a mesh flagged at its start. At a third of a cell per substep, 32
+  substeps carry a feature some 11 cells, inside the 16-cell buffer block kept around flagged
+  ones. Longer cycles would need the finer levels re-meshed within a cycle. With self-gravity
+  cycles stop at 16 substeps: over 32 the potential carried forward between solves (below)
+  lagged an Evrard collapse (128 finest, 3 levels, to $`t = 0.8`$) enough to lose
+  $`2.3	imes10^{-3}`$ of its energy, against $`5.7	imes10^{-4}`$ with one timestep and
+  $`6.0	imes10^{-4}`$ with cycles of 16.
 - At the start of a cycle each block gets a bin $`k`$ from its own signal speed, on the GPU.
   A block in bin $`k`$ advances $`2^k\Delta t_\text{min}`$ at a time.
 - A first sweep lowers every block to the bin of its fastest face neighbor (once, so each fast

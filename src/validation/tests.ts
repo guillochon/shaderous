@@ -260,16 +260,19 @@ export async function withSim<T>(gpu: Gpu, problem: Problem, n: number, over: Pa
   }
 }
 
-/** Radius of a blast wave on the adaptive mesh: the half-height point of the outer edge of the shell-averaged density. */
-function leafShockRadius(c: LeafCells): number {
-  const nb = 128;
+/**
+ * Radius of a blast wave on the adaptive mesh: the half-height point of the outer edge of the
+ * shell-averaged density, in `nb` shells out to half the box (cells weighed by their volume, or
+ * their area in 2D).
+ */
+function leafShockRadius(c: LeafCells, nb = 128, ndim: 2 | 3 = 3): number {
   const bw = 0.5 / nb;
   const sum = new Float64Array(nb);
   const vol = new Float64Array(nb);
   for (let q = 0; q < c.count; q++) {
     const b = Math.floor(Math.hypot(c.x[q], c.y[q], c.z[q]) / bw);
     if (b >= nb) continue;
-    const v = c.dx[q] ** 3;
+    const v = c.dx[q] ** ndim;
     sum[b] += c.u1[q * 4] * v;
     vol[b] += v;
   }
@@ -279,6 +282,62 @@ function leafShockRadius(c: LeafCells): number {
     if (prof[b - 1] >= half) return (b - 0.5 + (prof[b - 1] - half) / (prof[b - 1] - prof[b])) * bw;
   }
   return NaN;
+}
+
+/**
+ * The per-block timesteps' test (amr-time-bins) with bins up to K: cycles of 2^K substeps. Sod
+ * in 2D and Sedov in 3D against their exact solutions and conserved; an Evrard collapse losing no
+ * more energy than with one timestep.
+ */
+async function timeBinsRun(gpu: Gpu, K: number, deeper: number): Promise<{ pass: boolean; metrics: Record<string, number> }> {
+  const bins = { timeBins: K, timeBinsAlways: true };
+  // The highest bin a leaf is in at the end of the run.
+  const topBin = async (sim: AmrSim) => {
+    const b = await sim.readBins();
+    return Math.max(...sim.tree.leaves().map((l) => b[l.slot]));
+  };
+  const drift = (a: { mass: number; eTot: number }, b: { mass: number; eTot: number }) => [Math.abs(b.mass - a.mass) / a.mass, Math.abs(b.eTot - a.eTot) / Math.abs(a.eTot)];
+  const sod = await withAmr(gpu, sodX, 256 << deeper, { ndim: 2, amrLevels: 2 + deeper, ...bins }, async (sim) => {
+    const d0 = await sim.diagnostics();
+    await sim.runToEnd();
+    const d1 = await sim.diagnostics();
+    const c = await sim.readLeaves();
+    const exact = exactRiemann(sodX.left, sodX.right, 1.4);
+    let err = 0;
+    let area = 0;
+    for (let q = 0; q < c.count; q++) {
+      const a = c.dx[q] ** 2;
+      err += Math.abs(c.u1[q * 4] - exact(c.x[q] / sodX.tEnd).rho) * a;
+      area += a;
+    }
+    return { l1: err / area, drift: drift(d0, d1), top: await topBin(sim) };
+  });
+  const blast = await withAmr(gpu, sedov, 128, { amrLevels: 2 + Math.min(deeper, 1), ...bins }, async (sim) => {
+    const d0 = await sim.diagnostics();
+    await sim.runToEnd();
+    const d1 = await sim.diagnostics();
+    const r = leafShockRadius(await sim.readLeaves());
+    const rExact = SEDOV_XI0['1.4'] * Math.pow(sedov.tEnd ** 2, 0.2);
+    const work = await sim.binWork();
+    return { err: Math.abs(r - rExact) / rExact, drift: drift(d0, d1), share: work.updates / work.single, top: await topBin(sim) };
+  });
+  const collapse = async (over: Partial<SimConfig>) =>
+    withAmr(gpu, evrard, 128, { amrLevels: 2 + Math.min(deeper, 1), tEnd: 0.8, vcycles: 2, ...over }, async (sim) => {
+      const d0 = await sim.diagnostics();
+      await sim.runToEnd();
+      return { e: drift(d0, await sim.diagnostics())[1], top: await topBin(sim) };
+    });
+  const eOne = (await collapse({})).e;
+  const { e: eBins, top: evrardTop } = await collapse(bins);
+  return {
+    pass:
+      sod.l1 < 0.003 && Math.max(...sod.drift) < 1e-6 && blast.err < 0.02 && Math.max(...blast.drift) < 1e-6 && blast.share < 0.85 && eBins < 1.5 * eOne && evrardTop <= Math.min(K, 4),
+    metrics: {
+      sod_l1: sod.l1, sod_mass_drift: sod.drift[0], sod_energy_drift: sod.drift[1], sod_highest_bin: sod.top, sedov_highest_bin: blast.top,
+      sedov_radius_error: blast.err, sedov_mass_drift: blast.drift[0], sedov_energy_drift: blast.drift[1], sedov_share_of_block_updates: blast.share,
+      evrard_energy_drift_one_timestep: eOne, evrard_energy_drift_per_block: eBins, evrard_highest_bin: evrardTop,
+    },
+  };
 }
 
 export async function withAmr<T>(gpu: Gpu, problem: Problem, n: number, over: Partial<SimConfig>, fn: (s: AmrSim) => Promise<T>) {
@@ -1342,6 +1401,85 @@ export const TESTS: TestDef[] = [
     },
   },
   {
+    id: 'amr-seven-levels',
+    name: 'Adaptive mesh: seven levels of refinement (Sedov 2D, 2048 finest, one 16-cell root block)',
+    criterion:
+      'A 2D Sedov blast to t = 0.02 on 7 levels, refined to level 7 at the shock: its shock radius within 2% of the cylindrical similarity solution (xi0 = 1.004 for gamma 1.4) and within 0.5% of the same blast on 4 levels; mass and energy conserved to 1e-6; fluxes consistent across levels. Again with per-block timesteps in cycles of 32 substeps: the same radius within 0.5%, the same conservation, and fewer block updates than one timestep (plans/seven-levels.md)',
+    async run(gpu) {
+      const T = 0.02;
+      // Cylindrical Sedov, gamma 1.4: E = alpha rho R^4 / t^2 with alpha = 0.9840 (Kamm & Timmes 2007), E per unit length 1.
+      const rExact = 0.984 ** -0.25 * Math.pow(T * T, 0.25);
+      const blast = (levels: number, over: Partial<SimConfig> = {}) =>
+        withAmr(gpu, sedov, 2048, { ndim: 2, amrLevels: levels, tEnd: T, ...over }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd();
+          const d1 = await sim.diagnostics();
+          const c = await sim.readLeaves();
+          const flux = await sim.fluxMismatch();
+          const work = over.timeBins ? await sim.binWork() : null;
+          return {
+            r: leafShockRadius(c, 512, 2),
+            dm: Math.abs(d1.mass - d0.mass) / d0.mass,
+            de: Math.abs(d1.eTot - d0.eTot) / d0.eTot,
+            top: Math.max(...sim.tree.leaves().map((b) => b.level)),
+            leaves: sim.tree.stats().leaves,
+            flux,
+            steps,
+            share: work ? work.updates / work.single : 1,
+          };
+        });
+      const four = await blast(4);
+      const seven = await blast(7);
+      const bins = await blast(7, { timeBins: 5, timeBinsAlways: true });
+      const m: Record<string, number> = { similarity_radius: rExact, four_levels_radius: four.r, four_levels_leaf_blocks: four.leaves };
+      let pass = true;
+      for (const [k, x] of [['seven', seven], ['seven_bins', bins]] as const) {
+        m[`${k}_radius`] = x.r;
+        m[`${k}_radius_error`] = Math.abs(x.r - rExact) / rExact;
+        m[`${k}_vs_four_levels`] = Math.abs(x.r - four.r) / four.r;
+        m[`${k}_deepest_level`] = x.top;
+        m[`${k}_leaf_blocks`] = x.leaves;
+        m[`${k}_mass_drift`] = x.dm;
+        m[`${k}_energy_drift`] = x.de;
+        m[`${k}_same_level_mismatched`] = x.flux.mismatched;
+        m[`${k}_coarse_fine_worst`] = x.flux.worstCoarseFine;
+        m[`${k}_steps`] = x.steps;
+        pass &&= x.top === 7 && m[`${k}_radius_error`] < 0.02 && m[`${k}_vs_four_levels`] < 0.005 && x.dm < 1e-6 && x.de < 1e-6 && x.flux.mismatched === 0 && x.flux.worstCoarseFine < 1e-6;
+      }
+      m.seven_bins_share_of_block_updates = bins.share;
+      pass &&= bins.share < 1;
+      return { pass, metrics: m };
+    },
+  },
+  {
+    id: 'amr-gravity-depth',
+    name: 'Adaptive mesh: the multigrid of self-gravity against the depth of the mesh (Evrard collapse, 256 finest, 2 to 4 levels)',
+    criterion:
+      'The same collapse to t = 0.3 on 2, 3 and 4 levels below roots of 64, 32 and 16 cells (plans/seven-levels.md): the last relative residual of the multigrid below 1e-3 at every depth, its V-cycles a step beyond the first no more than 2 more at 4 levels than at 2, and the energy lost within 1.5 times that at 2 levels',
+    async run(gpu) {
+      const m: Record<string, number> = {};
+      const out: { extra: number; residual: number; de: number }[] = [];
+      for (const levels of [2, 3, 4]) {
+        await withAmr(gpu, evrard, 256, { amrLevels: levels, tEnd: 0.3 }, async (sim) => {
+          const d0 = await sim.diagnostics();
+          const steps = await sim.runToEnd();
+          const d1 = await sim.diagnostics();
+          const g = (await sim.gravityCycles())!;
+          const r = { extra: g.extra / Math.max(1, steps), residual: g.residual, de: Math.abs(d1.eTot - d0.eTot) / Math.abs(d0.eTot) };
+          out.push(r);
+          m[`L${levels}_extra_vcycles_per_step`] = r.extra;
+          m[`L${levels}_last_residual`] = r.residual;
+          m[`L${levels}_energy_drift`] = r.de;
+          m[`L${levels}_steps`] = steps;
+          m[`L${levels}_level_limit`] = sim.tree.levelLimit;
+          m[`L${levels}_leaf_blocks`] = sim.tree.stats().leaves;
+        });
+      }
+      const pass = out.every((r) => r.residual < 1e-3) && out[2].extra <= out[0].extra + 2 && out[2].de <= 1.5 * out[0].de;
+      return { pass, metrics: m };
+    },
+  },
+  {
     id: 'amr-instabilities',
     name: 'Adaptive mesh: Kelvin-Helmholtz and Rayleigh-Taylor (2D, 512 finest, 2 levels)',
     criterion:
@@ -1507,51 +1645,14 @@ export const TESTS: TestDef[] = [
     name: 'Adaptive mesh: per-block timesteps (Sod 2D, Sedov 3D, Evrard collapse)',
     criterion:
       'With blocks stepping up to 8 times less often than the fastest: Sod L1 density error < 0.003 and Sedov shock radius within 2%, as with one timestep; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates (a small box: the blast fills much of it); Evrard collapse to t = 0.8 (64 steps) loses no more than 1.5 times the energy it does with one timestep, both at two V-cycles a step (about 1.0: it was 2.1 while the potential’s history was dropped as the cycles began and the half-step potential extrapolated linearly, which lags the mean of the step’s two potentials in a collapse; it was not that slow blocks extrapolate further, as the same loss with every block in the fastest bin showed. docs/numerics.md section 18)',
-    async run(gpu) {
-      const bins = { timeBins: 3, timeBinsAlways: true };
-      const drift = (a: { mass: number; eTot: number }, b: { mass: number; eTot: number }) => [Math.abs(b.mass - a.mass) / a.mass, Math.abs(b.eTot - a.eTot) / Math.abs(a.eTot)];
-      const sod = await withAmr(gpu, sodX, 256, { ndim: 2, amrLevels: 2, ...bins }, async (sim) => {
-        const d0 = await sim.diagnostics();
-        await sim.runToEnd();
-        const d1 = await sim.diagnostics();
-        const c = await sim.readLeaves();
-        const exact = exactRiemann(sodX.left, sodX.right, 1.4);
-        let err = 0;
-        let area = 0;
-        for (let q = 0; q < c.count; q++) {
-          const a = c.dx[q] ** 2;
-          err += Math.abs(c.u1[q * 4] - exact(c.x[q] / sodX.tEnd).rho) * a;
-          area += a;
-        }
-        return { l1: err / area, drift: drift(d0, d1) };
-      });
-      const blast = await withAmr(gpu, sedov, 128, { amrLevels: 2, ...bins }, async (sim) => {
-        const d0 = await sim.diagnostics();
-        await sim.runToEnd();
-        const d1 = await sim.diagnostics();
-        const r = leafShockRadius(await sim.readLeaves());
-        const rExact = SEDOV_XI0['1.4'] * Math.pow(sedov.tEnd ** 2, 0.2);
-        const work = await sim.binWork();
-        return { err: Math.abs(r - rExact) / rExact, drift: drift(d0, d1), share: work.updates / work.single };
-      });
-      const collapse = async (over: Partial<SimConfig>) =>
-        withAmr(gpu, evrard, 128, { amrLevels: 2, tEnd: 0.8, vcycles: 2, ...over }, async (sim) => {
-          const d0 = await sim.diagnostics();
-          await sim.runToEnd();
-          return drift(d0, await sim.diagnostics())[1];
-        });
-      const eOne = await collapse({});
-      const eBins = await collapse(bins);
-      return {
-        pass:
-          sod.l1 < 0.003 && Math.max(...sod.drift) < 1e-6 && blast.err < 0.02 && Math.max(...blast.drift) < 1e-6 && blast.share < 0.85 && eBins < 1.5 * eOne,
-        metrics: {
-          sod_l1: sod.l1, sod_mass_drift: sod.drift[0], sod_energy_drift: sod.drift[1],
-          sedov_radius_error: blast.err, sedov_mass_drift: blast.drift[0], sedov_energy_drift: blast.drift[1], sedov_share_of_block_updates: blast.share,
-          evrard_energy_drift_one_timestep: eOne, evrard_energy_drift_per_block: eBins,
-        },
-      };
-    },
+    run: (gpu) => timeBinsRun(gpu, 3, 0),
+  },
+  {
+    id: 'amr-time-bins-32',
+    name: 'Adaptive mesh: per-block timesteps in cycles of 32 substeps (Sod 2D, 1024 finest, 4 levels; Sedov 3D and Evrard collapse, 128 finest, 3 levels)',
+    criterion:
+      'As amr-time-bins with blocks stepping up to 32 times less often than the fastest (5 bins, the most allowed: plans/seven-levels.md), on meshes deep enough for the coarse blocks to reach them: Sod L1 density error < 0.003 and Sedov shock radius within 2%; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates; the Evrard collapse, asked for 5 bins and given 4 (self-gravity stops at cycles of 16: at 32 it lost 2.3e-3 of its energy against 5.7e-4 with one timestep, at 16 6.0e-4), loses no more than 1.5 times the energy it does with one timestep',
+    run: (gpu) => timeBinsRun(gpu, 5, 2),
   },
   {
     id: 'snapshot-roundtrip',

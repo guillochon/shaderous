@@ -3,7 +3,7 @@ import { BUILD, reportError, setAdapterInfo } from './errors';
 import { decodeLink, DEFAULT_SETUP, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, type LinkOverrides } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, forgetCompileSetup, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
-import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget } from '../gpu/memory';
+import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget, forgetCrashes } from '../gpu/memory';
 import { frameTiming, initTiming, setTiming, timingAvailable, type TimingReport } from '../gpu/timing';
 import { capture, restartFrom } from '../io/capture';
 import { canPickFolder, checkpointIndex, download, downloadBlob, downloadSink, nextCheckpoint, pickFolder, type CheckpointSink } from '../io/checkpoints';
@@ -75,8 +75,9 @@ const number = (id: string, attrs = '', factor = 0) =>
   `<input id="${id}" type="number" ${/\bstep=/.test(attrs) ? '' : 'step="any" '}${factor ? `data-factor="${factor}" ` : ''}${attrs} />`;
 
 // 3D grids past 256^3 are adaptive only (UNIFORM_MAX): the mesh's memory goes by its blocks,
-// not by n, so a finer finest level costs only where the setup refines to it.
-const RES_3D = [32, 64, 128, 256, 512, 1024, 2048];
+// not by n, so a finer finest level costs only where the setup refines to it. At 4096^3 the
+// leaf index (one entry per finest block, amr/amr_sim.ts) is 64 MB, counted by gridBytes.
+const RES_3D = [32, 64, 128, 256, 512, 1024, 2048, 4096];
 const RES_2D = [128, 256, 512, 1024, 2048, 4096, 8192, 16384];
 // Largest uniform grids offered; beyond these the mesh must be adaptive. A phone, or a device
 // that crashed before, offers only the ones within its memory budget (gpu/memory.ts).
@@ -187,7 +188,7 @@ side.innerHTML = `
     <summary title="GPU memory for the simulation, and the GPU time of each of its passes">Performance</summary>
     <div class="g2 gpumem">
       ${field('GPU memory (GB)', number('gpumem', 'step="0.25" min="0.25" inputmode="decimal"'), '', 'Most GPU memory the simulation may take: it sets how many blocks the adaptive mesh can hold and which uniform grids are offered. Browsers do not say how much there is, so it is guessed: 2.5 GB on a desktop, 2 GB where the GPU shares the system’s memory, 1 GB on a phone or tablet, at most a third of the system’s memory where the browser reports it, and lower after the page has crashed. Set more if your GPU can take it. Changing it starts the run again; a crash goes back to the automatic value')}
-      <button id="gpumem-auto" type="button" title="Go back to the automatic value">Auto</button>
+      <button id="gpumem-auto" type="button" title="Go back to the automatic value, as guessed for this device: a value set here, or one a crash lowered, is dropped">Auto</button>
     </div>
     <div id="gpumem-note"></div>
     <label class="check" title="Time every pipeline of the simulation on the GPU. Each run of one pipeline then gets its own pass, which costs a few percent while this is on and nothing while it is off. Chrome rounds timestamps to 100 µs unless its WebGPU Developer Features flag is on"><input id="gputiming" type="checkbox" />Time GPU passes</label>
@@ -2774,7 +2775,10 @@ const setupHost: SetupHost = {
       return null;
     }
   },
-  grids: () => ({ res2d: RES_2D, res3d: RES_3D, uniformMax2d: uniformMax(2), uniformMax3d: uniformMax(3), maxLevels: maxAmrLevels }),
+  grids: () => ({
+    res2d: RES_2D, res3d: RES_3D, uniformMax2d: uniformMax(2), uniformMax3d: uniformMax(3), maxLevels: maxAmrLevels,
+    fits: (n: number, ndim: 2 | 3, levels: number) => (levels > 0 ? amrFits(n, ndim, levels) : n <= uniformMax(ndim)),
+  }),
   link: linkFor,
   units(spec) {
     try {
@@ -2902,9 +2906,17 @@ function bind() {
     rebuildForMemory();
   });
   $('gpumem-auto').addEventListener('click', () => {
-    if (userBudget() === null) return;
+    if (userBudget() === null && !autoBudget().lowered) return;
     setUserBudget(null);
+    forgetCrashes();
     rebuildForMemory();
+  });
+  // The warning over the simulation (showMemory) opens this panel.
+  $('mem-warn').addEventListener('click', () => {
+    const perf = $<HTMLDetailsElement>('perf');
+    perf.open = true;
+    perf.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    $('gpumem').focus({ preventScroll: true });
   });
   on('ckpt', (el) => void setCheckpoints(el.checked));
   on('ckdt', (el) => {
@@ -6209,13 +6221,21 @@ let wakeUntil = 0;
 for (const type of ['pointerdown', 'pointerup', 'keydown', 'keyup', 'input', 'change', 'wheel', 'drop'])
   addEventListener(type, () => (wakeUntil = performance.now() + 300), { capture: true, passive: true });
 
-/** The GPU memory field and the line under it: the budget in force, and the automatic one. */
+/**
+ * The GPU memory field and the line under it: the budget in force, and the automatic one. Where a
+ * crash has lowered the automatic budget and it is the one in force, a warning over the
+ * simulation says so, and opens this panel when clicked.
+ */
 function showMemory() {
   const gb = (b: number) => `${+(b / GB).toFixed(2)}`;
   const auto = autoBudget();
   const user = userBudget();
   $<HTMLInputElement>('gpumem').value = gb(user ?? auto.bytes);
-  $('gpumem-auto').toggleAttribute('disabled', user === null);
+  $('gpumem-auto').toggleAttribute('disabled', user === null && !auto.lowered);
+  const warn = $('mem-warn');
+  warn.hidden = !(user === null && auto.lowered);
+  warn.textContent = `⚠ Reduced GPU memory: ${gb(auto.bytes)} GB instead of ${gb(auto.full)} GB, since the page crashed. Fewer blocks fit and large grids are not offered. Check Performance to set it back.`;
+  warn.title = 'The page crashed while holding a large allocation, so the automatic GPU memory budget was halved below it. Click to open Performance: set the memory there, or press Auto to go back to the full automatic value';
   const crash = lastCrash() ? ` The page crashed last time, holding about ${gb(lastCrash())} GB.` : '';
   $('gpumem-note').textContent = user === null
     ? `Automatic: ${gb(auto.bytes)} GB (${auto.reason}).${crash}`

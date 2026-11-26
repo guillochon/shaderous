@@ -1,13 +1,15 @@
 # Plan: up to seven levels of refinement
 
-Status (2026-11-26): stage 1 done (the caps lifted to `MAX_AMR_LEVELS = 7` in `amr/tree.ts`);
-first 2D run below. Stages 2 to 5 to do.
+Status (2026-11-26): done. Stages 1 to 5 are in; the numbers are under each stage. Two limits
+came out of it: local timesteps stop at 5 bins (cycles of 32 substeps), and at 4 with
+self-gravity (stage 4).
 
-Why 7 and not more: with the resolutions offered (2D to 16384^2, 3D to 2048^3) and a whole
-16-cell root block per side, 3D stops at 7 (one root block) and 2D could reach 10. Nothing in
-the data structures stops sooner (tree keys exact in a double far past 10; `sph_monopole.wgsl`'s
-`1 << 3 * level` overflows an i32 only at level 11), but past 7 the 3-bin local timesteps waste
-the coarse levels' steps and 3D has no root left, so 7 is where the plan stops.
+Why 7 and not more: with the resolutions offered (2D to 16384^2, 3D to 4096^3) and a whole
+16-cell root block per side, 3D at 2048^3 stops at 7 (one root block) and 2D could reach 10.
+Nothing in the data structures stops sooner (tree keys exact in a double far past 10;
+`sph_monopole.wgsl`'s `1 << 3 * level` overflows an i32 only at level 11), but past 7 the coarse
+levels take far more steps than they need (local timesteps reach only 32 times the finest, and
+longer cycles need the finer levels re-meshed within a cycle), so 7 is where the plan stops.
 
 Goal: let the adaptive mesh go to 7 levels below the root grid (128 times finer than the
 roots), for problems whose interesting part is small against the box: a stellar core in a wide
@@ -100,19 +102,67 @@ Numbers (2026-11-26, Ampere GPU, headless runner, to t = 0.02):
 Same steps and the same energy to the digits printed; the 7-level mesh holds 11% fewer blocks
 but runs 10% slower (more levels to dispatch per step). Global steps: the gain waits on stage 4.
 
+The rest (static build, `--low-priority`, the default 2.5 GB budget):
+
+| Run | levels | steps | wall | mass | eTot | note |
+|---|---|---|---|---|---|---|
+| 3D Sedov 2048^3, to t = 0.01 | 7 (one root block) | 35,434 | 442 s | 1 -> 0.9999999 | 1.000025 -> 1.000029 | budget full from t = 0.0025 (1919 leaves) |
+| 3D Sedov 2048^3, to t = 0.01 | 5 (4^3 roots) | 35,438 | 444 s | 1 -> 0.9999999 | 1.000025 -> 1.000029 | budget full (1926 leaves) |
+| Evrard 2048^3, 1500 steps (t = 2.66) | 6 | 1500 | 49 s | | | "block budget limits refinement to 3 of 6 levels" |
+| Evrard 2048^3, 1500 steps (t = 2.66) | 7 | 1500 | 39 s | | | "4 of 7 levels"; mass leaves the open box after the bounce |
+| MHD blast 2D 4096^2, to t = 0.05 | 6 | 2180 | 32 s | 1.000000 | 1.116576 -> 1.116563 | div B 2.7e-7 |
+| MHD blast 2D 4096^2, to t = 0.05 | 4 | 2180 | 30 s | 1.000000 | 1.116576 -> 1.116563 | div B 2.7e-7 |
+
+The 3D Sedov on one root block nests and conserves as on 5 levels, at the same speed. An Evrard
+sphere fills too much of the box for 2.5 GB to refine it 6 or 7 levels deep: `levelLimit` lowers
+the depth and the status line says so, truthfully. The multigrid's convergence against depth is
+measured instead by the validation test `amr-gravity-depth` (Evrard, 256 finest, 2 to 4 levels
+below roots of 64, 32 and 16 cells, to t = 0.3): the last relative residual 6.8e-5, 6.5e-5,
+6.8e-5, two V-cycles a step beyond the first at every depth, energy lost 5.0e-5 at each. A
+deeper tree costs the multigrid nothing in convergence. (`AmrSim.gravityCycles()` reads the
+counts the gate pass kept, which nothing read before.)
+
 **3. 3D beyond 2048** (only if stage 2 shows 3D depth is worth it). Add 4096 to `RES_3D` as
 an adaptive-only resolution (never uniform). The index at 4096^3 is 64 MB: acceptable, but
 count it in `gridBytes`. For 8192^3, make the index one entry per block at level
 `levels - 1` with the deepest level resolved by the parent's child mask (an 8x smaller
 texture), or a hash of leaves; decide only if 8192^3 is wanted.
 
+Done: 4096 is in `RES_3D` (adaptive only, as every 3D grid past 256 is), and `gridBytes` and
+`amrFits` count the leaf index (`leafIndexBytes`). 8192^3 not done.
+
 **4. Local timesteps past 8 substeps.** Make the cycle length a setting (8, 32, 128), test the
 bin sweeps and the conservation checks of section 18 at 5 and 7 bins, then measure the gain on
 the stage 2 runs. Then widen the random tester to `g.int(1, 7)` with 2D at 7 levels allowed.
 
+Done, to 5 bins: `tbins` (`mesh.timeBins`) takes 4 and 5, cycles of 16 and 32 substeps; the bin
+passes were written for any count and needed no change. 7 bins (128 substeps) is not offered:
+the mesh is re-checked only between cycles, and 128 substeps carry a feature some 43 cells, out
+of the 16-cell buffer block around its refinement; it needs the finer levels re-meshed within a
+cycle. With self-gravity the cap is 4 bins (`MAX_TIME_BINS_SELF_GRAVITY`): at 5 an Evrard
+collapse (128 finest, 3 levels, to t = 0.8) lost 2.3e-3 of its energy, against 5.7e-4 with one
+timestep and 6.0e-4 at 4. Validation `amr-time-bins-32`: Sod in 2D (1024 finest, 4 levels) and
+Sedov in 3D (128, 3 levels) reach bin 5, with Sod's L1 error 0.0012, Sedov's radius within 1.6%,
+mass and energy to 2e-7, and 76% of the block updates of one timestep. On the 7-level 2D Sedov
+of `amr-seven-levels`, 5 bins make 29% of the block updates. The random tester draws 1 to 7
+levels, a 2D run of 6 or 7 levels on the finest grid that holds them (1024 or 2048).
+
 **5. Validation and docs.** Add one 7-level case to the validation suite (2D Sedov or a cloud
 crushing in 2D, which runs in seconds), update docs/numerics.md (the depth, the index's size,
 local-timestep bins), README's feature list, the CHANGELOG.
+
+Done: `amr-seven-levels` (29 s): a 2D Sedov at 2048^2 finest on one 16-cell root block, to
+t = 0.02, reaches level 7; its shock radius is within 0.3% of the cylindrical similarity
+solution (xi0 = 0.984^-1/4) and the same as on 4 levels; mass and energy conserved to round-off;
+fluxes consistent across levels; again with 5 bins. A 7-level `.athdf` (2D Sedov, 2048^2,
+50 steps) saved by the runner and continued with `--from` keeps 7 levels and its 76 blocks. Docs: numerics.md section 17 (depth, the
+index) and 18 (cycles of 32, the self-gravity cap), README, CHANGELOG (Unreleased).
+
+Also from this work: in the Setup dialog every resolution and every number of levels can be
+chosen; a choice the other cannot hold changes the other (more levels than the resolution has
+root for raise the resolution; a grid too large for the GPU memory lowers the resolution, or
+raises the levels when the resolution was the choice), and such choices carry an asterisk with
+a tip saying what will change.
 
 ## Done when
 

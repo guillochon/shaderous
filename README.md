@@ -114,7 +114,8 @@ degenerate electrons. It uses the methods of production simulation codes:
 
 - an unsplit MUSCL-Hancock scheme with third-order reconstruction and HLLC fluxes;
 - a multigrid Poisson solver with periodic or isolated boundaries;
-- block-structured adaptive mesh refinement with per-block timesteps;
+- block-structured adaptive mesh refinement, up to 7 levels (128 times finer than the coarsest
+  grid; 3D to 4096³ at the finest), with per-block timesteps of up to 32 times the smallest;
 - ideal MHD by van Leer integration with constrained transport and HLLD or HLLE fluxes, on the
   uniform grid and the adaptive mesh alike, keeping div B at round-off through refinement and
   per-block timesteps, with field lines drawn in 2D and 3D;

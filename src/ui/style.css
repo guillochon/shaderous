@@ -284,6 +284,14 @@ details[open] > summary .sum { display: none; }
   white-space: nowrap; overflow: hidden; contain: strict;
   color: var(--dim); text-shadow: 0 0 3px #000; pointer-events: none; font-variant-numeric: tabular-nums;
 }
+/* Under the status line: the GPU memory budget lowered after a crash (showMemory in app.ts). */
+#mem-warn {
+  position: absolute; left: 12px; top: 32px; max-width: min(960px, calc(100% - 110px)); z-index: 2;
+  padding: 3px 8px; border: 1px solid #c98a2b; border-radius: 4px; background: rgba(60, 38, 8, 0.88);
+  color: #ffc56b; font-weight: 600; font-size: 12px; line-height: 16px; text-align: left; cursor: pointer;
+}
+#mem-warn:hover { border-color: #ffc56b; }
+#mem-warn[hidden] { display: none; }
 #error {
   position: absolute; inset: 0; z-index: 5; display: none; flex-direction: column; gap: 10px;
   padding: 16px; background: var(--bg); overflow: hidden;
@@ -483,6 +491,7 @@ body.validate .buttons-cell button + button { margin-left: 4px; }
   .blurb { font-size: 13px; line-height: 18px; height: 36px; }
   /* Readouts over the simulation: narrower, and the status line may wrap to two lines. */
   #hud { left: 10px; top: 8px; width: calc(100% - 84px); height: 34px; line-height: 17px; white-space: normal; font-size: 12px; }
+  #mem-warn { left: 10px; top: 46px; max-width: calc(100% - 84px); }
   /* The rail scrolls when it is taller than the stage, and can be put away. */
   #rail {
     right: 8px; top: 8px; max-height: calc(100% - 16px); gap: 10px;

@@ -5,6 +5,28 @@ What changed in each release of Shaderous. A release's section here is the body 
 [npm package](https://www.npmjs.com/package/shaderous). To cut a release, see
 [docs/headless.md](docs/headless.md#releases).
 
+## Unreleased
+
+### Added
+
+- **Up to seven levels of refinement** (plans/seven-levels.md), from five: 128 times finer than
+  the coarsest grid, for problems whose interesting part is small against the box. A level needs
+  a whole 16-cell root block per side (7 levels from 2048 cells across). 3D grids go to 4096³ at
+  the finest, adaptive only; the leaf index (64 MB there) is counted in a grid's memory. A 2D
+  Sedov blast on one root block, 7 levels deep, matches the similarity solution to 0.3% and the
+  same blast on 4 levels exactly (validation `amr-seven-levels`).
+- **Longer local timesteps:** `tbins` 4 and 5, blocks stepping up to 16 and 32 times the
+  smallest step (validation `amr-time-bins-32`). With self-gravity they stop at 16: over 32
+  substeps an Evrard collapse lost four times the energy it does with one timestep.
+- **The Setup dialog's grid menus adjust each other.** Every resolution and number of levels can
+  be picked; one the other cannot hold changes the other (more levels than the resolution has
+  room for raise it; a grid too large for the GPU memory lowers the resolution, or raises the
+  levels), and such choices are marked with an asterisk whose tip says what will change.
+- **A warning when a crash has cut the GPU memory budget.** Under the status line, in amber:
+  the budget in force against the automatic one, and a click opens Performance. Auto there now
+  also forgets the crash and restores the full automatic budget (before, a lowered budget stayed
+  until the user typed a value).
+
 ## 0.4.0 (2026-11-23)
 
 ### Added

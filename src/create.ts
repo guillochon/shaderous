@@ -20,18 +20,23 @@ export function maxAmrLevels(n: number): number {
   return l;
 }
 
+/** The leaf index of an adaptive grid (AmrSim's 'leaf index' texture): one r32uint per block of the finest level. */
+export const leafIndexBytes = (n: number, ndim: 2 | 3) => 4 * (n / BS) ** ndim;
+
 /**
  * Whether a grid of n cells per side at the finest of `levels` fits the GPU memory budget: its
- * root blocks, with as many again to refine into.
+ * root blocks, with as many again to refine into, and its leaf index.
  */
 export function amrFits(n: number, ndim: 2 | 3, levels: number): boolean {
-  const roots = ((n >> levels) / BS) ** ndim;
-  return 2 * roots * AmrSim.blockBytes(ndim) <= memoryBudget();
+  return gridBytes(n, ndim, levels) <= memoryBudget();
 }
 
-/** GPU memory a grid takes at the least: a uniform grid's cells, or an adaptive one's root blocks with as many again to refine into. */
+/**
+ * GPU memory a grid takes at the least: a uniform grid's cells, or an adaptive one's root
+ * blocks with as many again to refine into, and its leaf index.
+ */
 export function gridBytes(n: number, ndim: 2 | 3, levels: number): number {
-  return levels > 0 ? 2 * ((n >> levels) / BS) ** ndim * AmrSim.blockBytes(ndim) : n ** ndim * Sim.cellBytes(ndim);
+  return levels > 0 ? 2 * ((n >> levels) / BS) ** ndim * AmrSim.blockBytes(ndim) + leafIndexBytes(n, ndim) : n ** ndim * Sim.cellBytes(ndim);
 }
 
 /** The fewest levels of refinement (at least 1) whose root blocks fit, or 0 if none do. */

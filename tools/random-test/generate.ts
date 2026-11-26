@@ -214,12 +214,17 @@ function setGrid(doc: SetupSpec, g: Rng, amr?: number) {
   clampGrid(doc);
 }
 
-/** A run that cannot refine (a shearing box) takes the uniform grid: keep 3D ones at 128^3. */
+/**
+ * A run that cannot refine (a shearing box) takes the uniform grid: keep 3D ones at 128^3. A 2D
+ * run of 6 or 7 levels gets the finest grid that holds them (one 16-cell root block a side at
+ * 7: 2048), so the deepest meshes are drawn too (plans/seven-levels.md); 3D stays at 256^3 and so
+ * at most 4 levels.
+ */
 function clampGrid(doc: SetupSpec) {
   const d = doc.domain!;
   if (ndimOf(doc) === 3 && (!d.amr || doc.physics?.shear)) d.n = Math.min(d.n ?? 128, 128);
   if (ndimOf(doc) === 3 && d.amr) d.n = Math.min(d.n ?? 128, 256);
-  if (ndimOf(doc) === 2) d.n = Math.min(d.n ?? 256, 1024);
+  if (ndimOf(doc) === 2) d.n = (d.amr ?? 0) >= 6 && !doc.physics?.shear ? 16 << d.amr! : Math.min(d.n ?? 256, 1024);
 }
 
 /** A place for a body or a shape: on the axis in (R, z) and (r, theta) runs. */
@@ -520,7 +525,7 @@ function liquidRho(doc: SetupSpec): number | undefined {
 
 /** Values for numbers whose table range is too wide, by path ('physics.viscosity', 'mass.gm'). */
 const HINTS: Record<string, (g: Rng, doc: SetupSpec, part?: Part) => unknown> = {
-  'domain.amr': (g) => g.int(1, 5),
+  'domain.amr': (g) => g.int(1, 7),
   'domain.box': (g) => g.pick([0.5, 2]),
   'domain.rMin': (g) => g.pick([0.005, 0.02, 0.05]),
   'physics.eosParams.gamma': (g) => g.pick([1.1, 1.3, 1.4, 5 / 3]),

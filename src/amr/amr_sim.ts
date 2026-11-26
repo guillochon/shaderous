@@ -63,6 +63,7 @@ import { diffusionFlux, splitPressure } from '../radiation/init';
  * Steps between refinement checks, and how far the flow may run past an unanswered check.
  * Signals cross at most about a third of a cell per step, and a block is 16 cells with a
  * buffer block kept around flagged ones, so 24 steps cannot carry a feature out of its refinement.
+ * A cycle of per-block timesteps is taken whole, up to 2^MAX_TIME_BINS = 32 substeps.
  */
 const REGRID_EVERY = 8;
 const MAX_STEPS_AHEAD = 24;
@@ -79,8 +80,21 @@ const SETTLE_MAX_MASSES = 4;
 const massFluxWindowBytes = (d: GPUDevice) => Math.floor(d.limits.maxStorageBufferBindingSize / d.limits.minStorageBufferOffsetAlignment) * d.limits.minStorageBufferOffsetAlignment;
 /** Most bytes of face mass flux records: two windows, in a buffer no larger than a buffer may be. */
 const massFluxMaxBytes = (d: GPUDevice) => Math.min(d.limits.maxBufferSize, massFluxWindowBytes(d) + d.limits.maxStorageBufferBindingSize);
-/** Most bins of per-block timesteps: a cycle of 2^3 substeps is one refinement interval. */
-const MAX_TIME_BINS = 3;
+/**
+ * Most bins of per-block timesteps. The mesh is checked between cycles only, so a cycle of
+ * 2^K substeps runs that long on a mesh flagged from its start: at a third of a cell per
+ * substep, 32 substeps carry a feature some 11 cells, inside the 16-cell buffer block kept
+ * around flagged ones (see REGRID_EVERY). 128 would carry it 43 cells, out of its refinement:
+ * more bins need the finer levels re-meshed within a cycle.
+ */
+export const MAX_TIME_BINS = 5;
+/**
+ * With self-gravity, at most cycles of 16 substeps. The potential of a block not being solved is
+ * carried forward at the rate it last changed, and over 32 substeps that lagged an Evrard collapse
+ * (128 finest, 3 levels, to t = 0.8) enough to lose 2.3e-3 of its energy, against 5.7e-4 with one
+ * timestep and 6.0e-4 with cycles of 16 (validation amr-time-bins-32).
+ */
+const MAX_TIME_BINS_SELF_GRAVITY = 4;
 /** The dispatch-size table of per-block timesteps (amr/bins_args.wgsl): 64 words, triple i at 12 i bytes. */
 const BIN_ARGS_BYTES = 256;
 const ARG = (i: number) => 12 * i;
@@ -896,7 +910,8 @@ export class AmrSim implements Simulation {
     if (this.speciesGroups > 0) return 0;
     // So is the radiation, and all blocks sweep together (amr/radiation.ts).
     if (radiationOn(this.cfg)) return 0;
-    return Math.max(0, Math.min(MAX_TIME_BINS, Math.floor(this.cfg.timeBins || 0)));
+    const most = isSelfGravity(this.cfg.gravity) ? MAX_TIME_BINS_SELF_GRAVITY : MAX_TIME_BINS;
+    return Math.max(0, Math.min(most, Math.floor(this.cfg.timeBins || 0)));
   }
   /** Per-block timesteps are stepping the run (they are on, and not paused for saving too little). */
   private get binsLive(): boolean {
@@ -3895,8 +3910,27 @@ export class AmrSim implements Simulation {
     return leaves.map((_, i) => f.subarray(i * per, (i + 1) * per));
   }
 
+  /**
+   * Self-gravity's multigrid since the run was built (amr/gravity/gate.wgsl's STATS): V-cycles run
+   * beyond the first of each solve, residuals measured, and the last relative residual measured.
+   * Null without self-gravity.
+   */
+  async gravityCycles(): Promise<{ extra: number; measured: number; residual: number } | null> {
+    if (!this.grav) return null;
+    const d = this.device;
+    this.flush();
+    const buf = d.createBuffer({ size: 16, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = d.createCommandEncoder();
+    enc.copyBufferToBuffer(this.grav.stats, 0, buf, 0, 16);
+    d.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const u = new Uint32Array(buf.getMappedRange().slice(0));
+    buf.destroy();
+    return { extra: u[0], measured: u[2], residual: new Float32Array(u.buffer)[1] };
+  }
+
   /** Each slot's time bin (0 when they are off). */
-  private async readBins(): Promise<Uint32Array> {
+  async readBins(): Promise<Uint32Array> {
     const d = this.device;
     const buf = d.createBuffer({ size: this.bins.size, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
     const enc = d.createCommandEncoder();

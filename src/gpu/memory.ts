@@ -87,8 +87,11 @@ let crashedAt = 0;
 // Leaving the page normally (a reload, a link, closing the tab) is not a crash.
 if (typeof addEventListener === 'function') addEventListener('pagehide', () => set(TRY_KEY, null));
 
-/** The budget this device gets unless the user sets one, and why. */
-export function autoBudget(): { bytes: number; reason: string } {
+/**
+ * The budget this device gets unless the user sets one, and why. `full` is what it would be had
+ * no crash lowered it (bytes otherwise), `lowered` whether one did.
+ */
+export function autoBudget(): { bytes: number; reason: string; full: number; lowered: boolean } {
   let bytes: number;
   let reason: string;
   if (isMobile()) {
@@ -108,12 +111,18 @@ export function autoBudget(): { bytes: number; reason: string } {
     bytes = (ram * GB) / 3;
     reason = `a third of ${ram} GB of memory`;
   }
+  const full = bytes;
   const learned = Number(get(CEILING_KEY));
   if (learned && learned < bytes) {
     bytes = learned;
     reason = 'lowered after a crash';
   }
-  return { bytes, reason };
+  return { bytes, reason, full, lowered: bytes < full };
+}
+
+/** Forget the crashes that lowered the automatic budget: it is the device's guess again. */
+export function forgetCrashes() {
+  set(CEILING_KEY, null);
 }
 
 /** The budget the user set (bytes), if any. */

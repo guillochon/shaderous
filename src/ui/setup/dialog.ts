@@ -426,6 +426,38 @@ function build() {
     refresh();
   }
 
+  // The resolution and the levels of refinement go together: a choice of one that the other
+  // cannot hold changes the other, and the menus mark such choices with an asterisk.
+  type Grids = ReturnType<SetupHost['grids']>;
+  const levelsLabel = (l: number) => (l === 0 ? 'Uniform' : `${l} level${l > 1 ? 's' : ''}`);
+  const cellsLabel = (n: number, ndim: 2 | 3) => `${n}${ndim === 2 ? '²' : '³'}`;
+  const mostLevels = (g: Grids, n: number) => Math.max(0, safe(() => g.maxLevels(n), 0));
+  const fits = (g: Grids, n: number, ndim: 2 | 3, l: number) => l <= mostLevels(g, n) && safe(() => g.fits(n, ndim, l), true);
+
+  /**
+   * The levels to go with resolution n, from `want`: no more than n leaves a whole root block
+   * for, and if that grid is too large for the GPU memory, the fewest more that make it fit.
+   */
+  function levelsFor(g: Grids, n: number, ndim: 2 | 3, want: number): number {
+    const most = mostLevels(g, n);
+    const l = Math.min(want, most);
+    if (fits(g, n, ndim, l)) return l;
+    for (let k = l + 1; k <= most; k++) if (fits(g, n, ndim, k)) return k;
+    return l;
+  }
+
+  /**
+   * The resolution to go with `levels`, from n: at least the finest that leaves a whole root
+   * block (16 << levels), and if that grid is too large for the GPU memory, the largest lower
+   * one that fits.
+   */
+  function resolutionFor(g: Grids, n: number, ndim: 2 | 3, levels: number): number {
+    const list = ndim === 2 ? g.res2d : g.res3d;
+    if (levels > mostLevels(g, n)) n = list.find((m) => m >= n && mostLevels(g, m) >= levels) ?? n;
+    if (!fits(g, n, ndim, levels)) n = [...list].reverse().find((m) => m < n && fits(g, m, ndim, levels)) ?? n;
+    return n;
+  }
+
   /** The grids on offer as menus, as the side bar's Resolution and Refinement are. */
   function gridControl(_o: Option, path: string): Control | undefined {
     if (path !== 'domain.n' && path !== 'domain.amr') return undefined;
@@ -433,38 +465,45 @@ function build() {
     if (!g) return undefined;
     const ndim = draft.domain?.ndim === 2 ? 2 : 3;
     const amr = draft.domain?.amr ?? 0;
-    const maxLevels = (n: number) => safe(() => g.maxLevels(n), 0);
     if (path === 'domain.n') {
-      const uniform = ndim === 2 ? g.uniformMax2d : g.uniformMax3d;
-      const choices: FormChoice[] = (ndim === 2 ? g.res2d : g.res3d).map((n) => ({
-        value: n, label: `${n}${ndim === 2 ? '²' : '³'}`,
-        ...(n > uniform && (amr === 0 || maxLevels(n) === 0) ? { off: 'Too large for the GPU memory as a uniform grid: choose a level of refinement first' } : {}),
-      }));
+      const choices: FormChoice[] = (ndim === 2 ? g.res2d : g.res3d).map((n) => {
+        const l = levelsFor(g, n, ndim, amr);
+        const label = cellsLabel(n, ndim);
+        if (l === amr) return { value: n, label };
+        const why = l < amr ? `${label} leaves a 16-cell root block a side for at most ${l} level${l === 1 ? '' : 's'}` : `the GPU memory holds ${label} only with more refinement`;
+        return { value: n, label: `${label} *`, tip: `Changes the refinement to ${levelsLabel(l).toLowerCase()}: ${why}` };
+      });
       return { type: 'select', choices };
     }
     const n = draft.domain?.n;
-    const most = n ? maxLevels(n) : MAX_AMR_LEVELS;
-    const choices: FormChoice[] = Array.from({ length: MAX_AMR_LEVELS + 1 }, (_, l) => ({
-      value: l, label: l === 0 ? 'Uniform' : `${l} level${l > 1 ? 's' : ''}`,
-      ...(l > most ? { off: `This resolution allows at most ${most} level${most === 1 ? '' : 's'} of refinement` } : {}),
-    }));
+    const choices: FormChoice[] = Array.from({ length: MAX_AMR_LEVELS + 1 }, (_, l) => {
+      const m = n ? resolutionFor(g, n, ndim, l) : n;
+      if (!n || !m || m === n) return { value: l, label: levelsLabel(l) };
+      const why = m > n ? `${levelsLabel(l).toLowerCase()} need a 16-cell root block a side` : `the GPU memory holds ${cellsLabel(n, ndim)} only with more refinement`;
+      return { value: l, label: `${levelsLabel(l)} *`, tip: `Changes the resolution to ${cellsLabel(m, ndim)}: ${why}` };
+    });
     return { type: 'select', choices };
   }
 
-  /** After the dimensions or the resolution change: a resolution that grid has, and no more levels than it allows. */
-  function fixGrid() {
+  /**
+   * After the dimensions, the resolution or the levels change: a resolution that grid has, and
+   * the other of the two made to go with the one just chosen (levelsFor, resolutionFor).
+   */
+  function fixGrid(changed: string) {
     const g = safe(() => host.grids(), null);
     const d = draft.domain;
     if (!g || !d) return;
     const ndim = d.ndim === 2 ? 2 : 3;
     const list = ndim === 2 ? g.res2d : g.res3d;
     if (d.n !== undefined && list.length && !list.includes(d.n)) d.n = list.includes(ndim === 2 ? 512 : 128) ? (ndim === 2 ? 512 : 128) : list[0];
-    if (d.n !== undefined && d.amr) d.amr = Math.min(d.amr, Math.max(0, safe(() => g.maxLevels(d.n!), 0)));
+    if (d.n === undefined) return;
+    if (changed === 'domain.amr') d.n = resolutionFor(g, d.n, ndim, d.amr ?? 0);
+    else d.amr = levelsFor(g, d.n, ndim, d.amr ?? 0);
   }
 
   function write(path: string, value: unknown) {
     setPath(draft, path, value);
-    if (path === 'domain.ndim' || path === 'domain.n') fixGrid();
+    if (path === 'domain.ndim' || path === 'domain.n' || path === 'domain.amr') fixGrid(path);
     // A part's choice that brings fields of its own (a shape's kind, an orbit's) brings their
     // defaults with it: the compiler reads a box's corners, it does not make them up.
     const zm = /^mesh\.zones\.(\d+)\.shape$/.exec(path);

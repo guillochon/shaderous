@@ -174,7 +174,7 @@ by `npm run gen`.
 | `refhi` | Settings | Refine above. Adaptive mesh: a block is split where the normalized second derivative of density or pressure exceeds this anywhere in it. The indicator is near 1 at a shock or contact and small where the gas varies smoothly. Lower refines more |
 | `reflo` | Settings | Merge below. Adaptive mesh: four sibling blocks are merged where the indicator is below this in all of them. Kept below the refinement threshold |
 | `refrho` | Settings | Refine above density. Adaptive mesh: gas thinner than this does not ask for refinement, so ripples in the ambient gas far from a star leave its blocks coarse. 0 is off |
-| `tbins` | Settings | Local timesteps: 0, 1, 2, 3. Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work |
+| `tbins` | Settings | Local timesteps: 0, 1, 2, 3, 4, 5. Adaptive mesh: blocks of slow gas take longer steps than the fastest block, where that saves work. With self-gravity, at most 16× longer |
 | `riemann` | Settings | Riemann solver: hllc, hllclm, hll. How the flux between neighboring cells is worked out. HLLC resolves contact waves; its low-Mach version cuts dissipation in slow flow; HLL is the most diffusive and the most robust |
 | `limiter` | Settings | Limiter: koren, mc, vanleer, minmod. How steeply the reconstruction may vary within a cell: Koren is sharpest, Minmod most diffusive and most robust |
 | `cfl` | Settings | CFL number. Timestep as a fraction of the time a signal takes to cross a cell. Smaller is more stable and slower |

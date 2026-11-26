@@ -26,8 +26,12 @@ export interface SetupHost {
   memory(spec: SetupSpec): { need: number; budget: number } | null;
   /** What the simulators would refuse in a document as the page would load it (sim.ts refusal), or null. */
   refusal(spec: SetupSpec): string | null;
-  /** The grids on offer: cells per side in 2D and 3D, the largest uniform ones, and the most levels of refinement for a resolution. */
-  grids(): { res2d: number[]; res3d: number[]; uniformMax2d: number; uniformMax3d: number; maxLevels(n: number): number };
+  /**
+   * The grids on offer: cells per side in 2D and 3D, the largest uniform ones, the most levels
+   * of refinement for a resolution, and whether a grid fits the GPU memory budget (an adaptive
+   * one's root blocks, a uniform one's cells).
+   */
+  grids(): { res2d: number[]; res3d: number[]; uniformMax2d: number; uniformMax3d: number; maxLevels(n: number): number; fits(n: number, ndim: 2 | 3, levels: number): boolean };
   /** A link that opens the page with a document, and whether it is short enough to share. */
   link(spec: SetupSpec): Promise<{ url: string; tooLong: boolean }>;
   /** The run's physical units for a document, or undefined if it is scale free. */
