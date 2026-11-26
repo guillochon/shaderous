@@ -200,7 +200,9 @@ export function starPotential(st: BuiltStar): ((x: number, y: number, z: number)
   const seed = Math.round(f.seed ?? 1);
   // A field left without its beta takes the option table's default (options.ts), as the dialog shows it: undefined made it NaN.
   const beta = f.beta > 0 ? f.beta : 1000;
-  const prof = st.profile();
+  const own = st.profile();
+  // A cut given in the setup replaces the star's own (a fraction of the central pressure).
+  const prof = f.cut !== undefined && f.cut >= 0 ? { ...own, pcut: Math.min(f.cut, 0.99) * own.pc } : own;
   // Guillochon & McCourt's fields follow the pressure to the surface: no cut.
   const A =
     f.type === 'dipole' ? dipoleField(prof, beta)

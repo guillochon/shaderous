@@ -336,6 +336,10 @@ export interface StarField {
   /** plasma beta at the center (dipole, random) or Guillochon & McCourt's beta_M */
   beta: number;
   seed?: number;
+  /** dipole, random: where the field ends, as a fraction of the central pressure (the field is
+   * zero where the pressure is below it); the star's own if left out: 1% for a white dwarf or a
+   * star from a table, 0 (the surface) for a polytrope */
+  cut?: number;
 }
 
 export interface StarPart {

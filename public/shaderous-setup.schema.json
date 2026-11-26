@@ -1862,6 +1862,13 @@
           "description": "Which random field: each seed gives another",
           "minimum": 1,
           "maximum": 9999
+         },
+         "cut": {
+          "type": "number",
+          "title": "Field edge",
+          "description": "Dipole or random: the field is zero where the pressure is below this fraction of the central pressure; 0 takes it to the surface. Left empty, the star’s own: 1% for a white dwarf or a star from a table, the surface for a polytrope",
+          "minimum": 0,
+          "maximum": 0.99
          }
         },
         "additionalProperties": false,

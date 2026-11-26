@@ -573,6 +573,7 @@ export const PART_OPTIONS: Record<PartKind, PartOption> = {
           P({ path: 'type', label: 'Shape', tip: 'Dipole or random, by the plasma beta at the center; or Guillochon & McCourt’s, by β_M', control: pickOf(STAR_FIELD_TYPES, ['dipole', 'Dipole'], ['random', 'Random'], ['gm17-dipole', 'Dipole (G&M 2017)'], ['gm17-random', 'Random (G&M 2017)']), default: 'dipole' }),
           P({ path: 'beta', label: 'Plasma beta', tip: 'Gas pressure over magnetic pressure B² / 2 at the center (or β_M): the larger, the weaker the field', control: num(1, 1e12, { factor: 10 }), default: 1000 }),
           P({ path: 'seed', label: 'Random seed', tip: 'Which random field: each seed gives another', control: num(1, 9999, { integer: true, step: 1 }), default: 1 }),
+          P({ path: 'cut', label: 'Field edge', tip: 'Dipole or random: the field is zero where the pressure is below this fraction of the central pressure; 0 takes it to the surface. Left empty, the star’s own: 1% for a white dwarf or a star from a table, the surface for a polytrope', control: num(0, 0.99, { step: 0.01 }) }),
         ] } }),
     ],
   },

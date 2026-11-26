@@ -700,6 +700,7 @@ A part's fields are given relative to the part (`soft` is `parts[i].soft`).
 | `field.type` | Shape | `dipole`, `random`, `gm17-dipole`, `gm17-random`. Default `dipole` | Dipole or random, by the plasma beta at the center; or Guillochon & McCourt’s, by β_M |
 | `field.beta` | Plasma beta | a number, 1 to 1000000000000. Default `1000` | Gas pressure over magnetic pressure B² / 2 at the center (or β_M): the larger, the weaker the field |
 | `field.seed` | Random seed | a whole number, 1 to 9999. Default `1` | Which random field: each seed gives another |
+| `field.cut` | Field edge | a number, 0 to 0.99 | Dipole or random: the field is zero where the pressure is below this fraction of the central pressure; 0 takes it to the surface. Left empty, the star’s own: 1% for a white dwarf or a star from a table, the surface for a polytrope |
 
 **`disk`** (Disk). A gas disk in the x-y plane about one or more bodies
 
