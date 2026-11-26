@@ -9,7 +9,7 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Added
 
-- **Up to seven levels of refinement** (plans/seven-levels.md), from five: 128 times finer than
+- **Up to seven levels of refinement** (docs/numerics.md section 17), from five: 128 times finer than
   the coarsest grid, for problems whose interesting part is small against the box. A level needs
   a whole 16-cell root block per side (7 levels from 2048 cells across). 3D grids go to 4096³ at
   the finest, adaptive only; the leaf index (64 MB there) is counted in a grid's memory. A 2D

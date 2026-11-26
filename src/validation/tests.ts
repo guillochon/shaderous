@@ -1404,7 +1404,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-seven-levels',
     name: 'Adaptive mesh: seven levels of refinement (Sedov 2D, 2048 finest, one 16-cell root block)',
     criterion:
-      'A 2D Sedov blast to t = 0.02 on 7 levels, refined to level 7 at the shock: its shock radius within 2% of the cylindrical similarity solution (xi0 = 1.004 for gamma 1.4) and within 0.5% of the same blast on 4 levels; mass and energy conserved to 1e-6; fluxes consistent across levels. Again with per-block timesteps in cycles of 32 substeps: the same radius within 0.5%, the same conservation, and fewer block updates than one timestep (plans/seven-levels.md)',
+      'A 2D Sedov blast to t = 0.02 on 7 levels, refined to level 7 at the shock: its shock radius within 2% of the cylindrical similarity solution (xi0 = 1.004 for gamma 1.4) and within 0.5% of the same blast on 4 levels; mass and energy conserved to 1e-6; fluxes consistent across levels. Again with per-block timesteps in cycles of 32 substeps: the same radius within 0.5%, the same conservation, and fewer block updates than one timestep (docs/numerics.md section 17)',
     async run(gpu) {
       const T = 0.02;
       // Cylindrical Sedov, gamma 1.4: E = alpha rho R^4 / t^2 with alpha = 0.9840 (Kamm & Timmes 2007), E per unit length 1.
@@ -1455,7 +1455,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-gravity-depth',
     name: 'Adaptive mesh: the multigrid of self-gravity against the depth of the mesh (Evrard collapse, 256 finest, 2 to 4 levels)',
     criterion:
-      'The same collapse to t = 0.3 on 2, 3 and 4 levels below roots of 64, 32 and 16 cells (plans/seven-levels.md): the last relative residual of the multigrid below 1e-3 at every depth, its V-cycles a step beyond the first no more than 2 more at 4 levels than at 2, and the energy lost within 1.5 times that at 2 levels',
+      'The same collapse to t = 0.3 on 2, 3 and 4 levels below roots of 64, 32 and 16 cells (docs/numerics.md section 17): the last relative residual of the multigrid below 1e-3 at every depth, its V-cycles a step beyond the first no more than 2 more at 4 levels than at 2, and the energy lost within 1.5 times that at 2 levels',
     async run(gpu) {
       const m: Record<string, number> = {};
       const out: { extra: number; residual: number; de: number }[] = [];
@@ -1651,7 +1651,7 @@ export const TESTS: TestDef[] = [
     id: 'amr-time-bins-32',
     name: 'Adaptive mesh: per-block timesteps in cycles of 32 substeps (Sod 2D, 1024 finest, 4 levels; Sedov 3D and Evrard collapse, 128 finest, 3 levels)',
     criterion:
-      'As amr-time-bins with blocks stepping up to 32 times less often than the fastest (5 bins, the most allowed: plans/seven-levels.md), on meshes deep enough for the coarse blocks to reach them: Sod L1 density error < 0.003 and Sedov shock radius within 2%; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates; the Evrard collapse, asked for 5 bins and given 4 (self-gravity stops at cycles of 16: at 32 it lost 2.3e-3 of its energy against 5.7e-4 with one timestep, at 16 6.0e-4), loses no more than 1.5 times the energy it does with one timestep',
+      'As amr-time-bins with blocks stepping up to 32 times less often than the fastest (5 bins, the most allowed: docs/numerics.md section 18), on meshes deep enough for the coarse blocks to reach them: Sod L1 density error < 0.003 and Sedov shock radius within 2%; mass and energy drift < 1e-6 in both; Sedov makes under 85% of the block updates; the Evrard collapse, asked for 5 bins and given 4 (self-gravity stops at cycles of 16: at 32 it lost 2.3e-3 of its energy against 5.7e-4 with one timestep, at 16 6.0e-4), loses no more than 1.5 times the energy it does with one timestep',
     run: (gpu) => timeBinsRun(gpu, 5, 2),
   },
   {

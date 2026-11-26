@@ -217,7 +217,7 @@ function setGrid(doc: SetupSpec, g: Rng, amr?: number) {
 /**
  * A run that cannot refine (a shearing box) takes the uniform grid: keep 3D ones at 128^3. A 2D
  * run of 6 or 7 levels gets the finest grid that holds them (one 16-cell root block a side at
- * 7: 2048), so the deepest meshes are drawn too (plans/seven-levels.md); 3D stays at 256^3 and so
+ * 7: 2048), so the deepest meshes are drawn too (docs/numerics.md section 17); 3D stays at 256^3 and so
  * at most 4 levels.
  */
 function clampGrid(doc: SetupSpec) {

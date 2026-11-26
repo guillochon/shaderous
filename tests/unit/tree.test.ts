@@ -24,7 +24,7 @@ function covers(t: BlockTree) {
 }
 
 describe('block tree', () => {
-  it('nests to the deepest level allowed (plans/seven-levels.md)', () => {
+  it('nests to the deepest level allowed (docs/numerics.md section 17)', () => {
     expect(MAX_AMR_LEVELS).toBe(7);
     // Refined toward a corner point until the finest level: 2D on 2 x 2 roots, 3D on one root block.
     for (const [ndim, nr] of [[2, 2], [3, 1]] as const) {
