@@ -310,7 +310,8 @@ async function runOne(session, q, dir) {
   return { dir, setup: st.query, t: r.t, steps: r.steps, stopped, seconds: manifest.seconds, errors: errors.length };
 }
 
-const session = await openSession({ url: o.url, headed: o.headed, gpuMemory: o['gpu-memory'], log });
+// A WebGPU error stops the run at once, rather than leaving it waiting on work that will not finish.
+const session = await openSession({ url: o.url, headed: o.headed, gpuMemory: o['gpu-memory'], log, stopOnGpuError: true });
 let code = 0;
 try {
   if (command === 'describe') {

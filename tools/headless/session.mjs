@@ -114,6 +114,9 @@ function pageMessage(e) {
  *   default, 2.5 GB on a desktop).
  * - scale: device pixels per CSS pixel (default 1): 2 for a sharper screenshot of the page
  * - log: where progress messages go (default stderr)
+ * - stopOnGpuError: a WebGPU error no scope caught, or a lost device, fails the call in flight
+ *   and every call after it, instead of leaving a run to wait on work that will never finish
+ *   (the command-line runner sets it; the MCP server only logs them)
  */
 export async function openSession(opts = {}) {
   const log = opts.log ?? ((m) => process.stderr.write(m + '\n'));
@@ -168,9 +171,29 @@ export async function openSession(opts = {}) {
   page.on('pageerror', (e) => pageErrors.push(e.message));
   // The page's errors and warnings, WebGPU's among them (a validation error, a lost device), go
   // to the log as they come: a run that stops making progress says why, if the page knows.
+  // (A pass that fails fails every step: after the first few, only that there are more.)
+  let pageLogged = 0;
+  const PAGE_LOG_MAX = 20;
   page.on('console', (m) => {
-    if (m.type() === 'error' || m.type() === 'warning') log(`  [page ${m.type()} ${new Date().toISOString().slice(11, 19)}] ${m.text()}`);
+    if (m.type() !== 'error' && m.type() !== 'warning') return;
+    if (++pageLogged <= PAGE_LOG_MAX) log(`  [page ${m.type()} ${new Date().toISOString().slice(11, 19)}] ${m.text()}`);
+    else if (pageLogged === PAGE_LOG_MAX + 1) log('  [page] more errors and warnings: not shown');
   });
+  // The page's own GPU errors (src/gpu/device.ts: an uncaptured error or a lost device) come out
+  // through its 'shaderous-gpu-error' event.
+  let gpuError = null;
+  let failRun;
+  const failed = new Promise((_, reject) => (failRun = reject));
+  failed.catch(() => {});
+  await page.exposeFunction('__shaderousGpuError', (detail) => {
+    if (gpuError) return;
+    gpuError = String(detail).split('\n')[0].slice(0, 500);
+    if (opts.stopOnGpuError) {
+      log(`  stopping: ${gpuError}`);
+      failRun(new Error(`the page's GPU work failed, so the run cannot go on: ${gpuError}`));
+    }
+  });
+  await page.addInitScript(() => addEventListener('shaderous-gpu-error', (e) => globalThis.__shaderousGpuError?.(String(e.detail))));
   if (process.env.SHADEROUS_NO_GPU_COMPOSITING) await page.addInitScript(() => (globalThis.shaderousReadBack = true));
   if (opts.gpuMemory !== undefined) {
     const gb = Number(opts.gpuMemory);
@@ -200,8 +223,12 @@ export async function openSession(opts = {}) {
 
   /** Call window.shaderous[name](...args) in the page; errors come back as plain Errors. */
   const call = async (name, ...callArgs) => {
+    if (opts.stopOnGpuError && gpuError) await failed;
     try {
-      return await page.evaluate(([n, a]) => window.shaderous[n](...a), [name, callArgs]);
+      const r = page.evaluate(([n, a]) => window.shaderous[n](...a), [name, callArgs]);
+      if (!opts.stopOnGpuError) return await r;
+      r.catch(() => {}); // (left behind when the GPU error wins the race)
+      return await Promise.race([r, failed]);
     } catch (e) {
       throw new Error(pageMessage(e));
     }
