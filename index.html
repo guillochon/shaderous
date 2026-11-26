@@ -37,6 +37,7 @@
     <div id="profile-pop" role="dialog" aria-label="Profile" hidden>
       <div class="head"><span class="title"></span><button id="profile-close" type="button" title="Close the profile, every line (Esc, with no tool in hand)" aria-label="Close">&times;</button></div>
       <div class="controls"><select id="profile-field" aria-label="Field"></select><label title="A logarithmic value axis"><input id="profile-log" type="checkbox" /> log</label><button id="profile-swap" type="button" title="Swap the line's ends">Swap</button><button id="profile-csv" type="button" title="Save the profile as CSV, in the units shown (every line, numbered, when there are several)">CSV</button></div>
+      <div class="controls"><select id="profile-field2" aria-label="Second field"></select><label title="A logarithmic axis for the second field" hidden><input id="profile-log2" type="checkbox" /> log</label></div>
       <div id="profile-lines" class="lines" hidden></div>
       <canvas></canvas>
       <div class="foot"></div>

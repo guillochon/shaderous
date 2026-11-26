@@ -611,6 +611,21 @@
    "key": "proflog",
    "group": "view",
    "about": "The profile plot’s value axis logarithmic (1) or linear (0); left out: as the field’s default"
+  },
+  {
+   "key": "proff2",
+   "group": "view",
+   "about": "A second field plotted along the same profile lines (dashed, on an axis of its own), an index into the fields"
+  },
+  {
+   "key": "profsp2",
+   "group": "view",
+   "about": "With proff2 a mass fraction: its species, by index"
+  },
+  {
+   "key": "proflog2",
+   "group": "view",
+   "about": "The second field’s axis logarithmic (1) or linear (0); left out: as the field’s default"
   }
  ],
  "view": [

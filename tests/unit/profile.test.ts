@@ -122,6 +122,11 @@ describe('the plot', () => {
     expect(profileCsv([{ s: [0, 1], values: [2, 3], levels: [0, 1] }], { distance: 'distance (cm)', value: 'X(He, 4)' })).toBe('distance (cm),"X(He, 4)",level\n0,2,0\n1,3,1\n');
   });
 
+  it('puts a second field in a column of its own, empty where a line has none', () => {
+    const csv = profileCsv([{ s: [0, 1], values: [2, 3], values2: [7, 8], levels: [0, 0] }, { s: [0], values: [5], levels: [1] }], { distance: 'distance', value: 'Density', value2: 'Pressure' });
+    expect(csv).toBe('line,distance,Density,Pressure,level\n1,0,2,7,0\n1,1,3,8,0\n2,0,5,,1\n');
+  });
+
   it('numbers the lines in CSV when there are several', () => {
     const csv = profileCsv([{ s: [0, 1], values: [2, 3], levels: [0, 0] }, { s: [0], values: [5], levels: [1] }], { distance: 'distance', value: 'Density' });
     expect(csv).toBe('line,distance,Density,level\n1,0,2,0\n1,1,3,0\n2,0,5,1\n');
@@ -159,6 +164,12 @@ describe('profile lines in a link', () => {
     const back = decodeLink(q, report);
     expect(report.ignored).toEqual([]);
     expect(back.profiles).toEqual({ lines: [[[0.5, 0.5, 0], [1, 0.5, 0]], [[0.5, 0.5, 0], [1, 1, 0]]], field: 3, log: false });
+    // A second field along the same lines.
+    const q2 = encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity(), profiles: { lines: [[[0.5, 0.5, 0], [1, 0.5, 0]]], field: 0, field2: 3, log2: true } });
+    expect([q2.get('proff2'), q2.get('proflog2')]).toEqual(['3', '1']);
+    const r2: LinkReport = { ignored: [] };
+    expect(decodeLink(q2, r2).profiles).toEqual({ lines: [[[0.5, 0.5, 0], [1, 0.5, 0]]], field: 0, field2: 3, log2: true });
+    expect(r2.ignored).toEqual([]);
     // No lines, no keys.
     expect(encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity() }).has('prof')).toBe(false);
   });

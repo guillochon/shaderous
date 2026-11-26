@@ -228,6 +228,9 @@ by `npm run gen`.
 | `proff` | The view | The field plotted along the profile lines, an index into the fields (default: the one shown) |
 | `profsp` | The view | With proff a mass fraction: its species, by index |
 | `proflog` | The view | The profile plot’s value axis logarithmic (1) or linear (0); left out: as the field’s default |
+| `proff2` | The view | A second field plotted along the same profile lines (dashed, on an axis of its own), an index into the fields |
+| `profsp2` | The view | With proff2 a mass fraction: its species, by index |
+| `proflog2` | The view | The second field’s axis logarithmic (1) or linear (0); left out: as the field’s default |
 <!-- /gen:link-keys -->
 
 Keys left out take the preset's defaults. A value that is unknown or out of range is ignored
@@ -612,8 +615,11 @@ mass fractions by name, when the run has species.
 A field along a straight line through the box, read by the same GPU code that draws the view: any
 field of `describe().fields` (Mach number, vorticity, plasma beta, radiation temperature, …), not
 only `slice`'s variables. The page's Profile tool draws the same lines and plots them: up to six
-at once, each in a colour of its own, their plots overlaid in one panel with one field for all.
-A shareable link carries them (keys `prof`, `proff`, `profsp`, `proflog`).
+at once, each in a colour of its own, their plots overlaid in one panel with one field for all,
+and optionally a second field along the same lines, dashed against an axis of its own on the
+right. A shareable link carries them (keys `prof`, `proff`, `profsp`, `proflog`, and `proff2`,
+`profsp2`, `proflog2` for the second field). Here each call reads one field: call again with
+another `field` for a second along the same line.
 
 - `from`, `to`: the line's ends, `[x, y]` or `[x, y, z]` in fractions of the box. The line is
   clipped to the box; one that misses it is an error. Both left out: a line the Profile tool

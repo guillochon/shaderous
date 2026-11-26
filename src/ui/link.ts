@@ -47,6 +47,10 @@ export interface LinkProfiles {
   field?: number;
   species?: number;
   log?: boolean | null;
+  /** a second field along the same lines, its species and its log axis */
+  field2?: number;
+  species2?: number;
+  log2?: boolean | null;
 }
 
 export interface LinkState {
@@ -140,6 +144,9 @@ export function linkKeys(): LinkKey[] {
     { key: 'proff', group: 'view', about: 'The field plotted along the profile lines, an index into the fields (default: the one shown)' },
     { key: 'profsp', group: 'view', about: 'With proff a mass fraction: its species, by index' },
     { key: 'proflog', group: 'view', about: 'The profile plot\u2019s value axis logarithmic (1) or linear (0); left out: as the field\u2019s default' },
+    { key: 'proff2', group: 'view', about: 'A second field plotted along the same profile lines (dashed, on an axis of its own), an index into the fields' },
+    { key: 'profsp2', group: 'view', about: 'With proff2 a mass fraction: its species, by index' },
+    { key: 'proflog2', group: 'view', about: 'The second field\u2019s axis logarithmic (1) or linear (0); left out: as the field\u2019s default' },
   ];
 }
 
@@ -195,6 +202,11 @@ export function encodeLink(s: LinkState): URLSearchParams {
     if (pr.field !== undefined) q.set('proff', String(pr.field));
     if (pr.field === MASS_FRACTION_FIELD && pr.species) q.set('profsp', String(pr.species));
     if (pr.log !== undefined && pr.log !== null) q.set('proflog', flag(pr.log));
+    if (pr.field2 !== undefined) {
+      q.set('proff2', String(pr.field2));
+      if (pr.field2 === MASS_FRACTION_FIELD && pr.species2) q.set('profsp2', String(pr.species2));
+      if (pr.log2 !== undefined && pr.log2 !== null) q.set('proflog2', flag(pr.log2));
+    }
   }
   return q;
 }
@@ -389,13 +401,26 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
   const pf = num('proff', 0, FIELDS.length - 1);
   const psp = num('profsp', 0, most.species);
   const plog = bool('proflog');
+  const pf2 = num('proff2', 0, FIELDS.length - 1);
+  const psp2 = num('profsp2', 0, most.species);
+  const plog2 = bool('proflog2');
   if (lines) {
     out.profiles = { lines };
     if (pf !== undefined) out.profiles.field = Math.round(pf);
     if (psp !== undefined && out.profiles.field === MASS_FRACTION_FIELD) out.profiles.species = Math.round(psp);
     if (plog !== undefined) out.profiles.log = plog;
+    if (pf2 !== undefined) {
+      out.profiles.field2 = Math.round(pf2);
+      if (psp2 !== undefined && out.profiles.field2 === MASS_FRACTION_FIELD) out.profiles.species2 = Math.round(psp2);
+      if (plog2 !== undefined) out.profiles.log2 = plog2;
+    } else {
+      for (const k of ['profsp2', 'proflog2']) {
+        const raw = q.get(k);
+        if (raw !== null) rejected(k, raw, 'goes with proff2');
+      }
+    }
   } else {
-    for (const k of ['proff', 'profsp', 'proflog']) {
+    for (const k of ['proff', 'profsp', 'proflog', 'proff2', 'profsp2', 'proflog2']) {
       const raw = q.get(k);
       if (raw !== null) rejected(k, raw, 'goes with prof');
     }

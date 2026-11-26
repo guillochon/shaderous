@@ -423,6 +423,7 @@ details[open] > summary .sum { display: none; }
 #profile-pop .controls { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
 #profile-pop .controls select { flex: 1; min-width: 0; height: 22px; font-size: 11px; }
 #profile-pop .controls label { display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
+#profile-pop .controls label[hidden] { display: none; }
 #profile-pop .controls button { height: 22px; padding: 0 8px; font-size: 11px; }
 #profile-pop .lines { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
 #profile-pop .lines[hidden] { display: none; }

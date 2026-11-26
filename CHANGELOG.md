@@ -14,6 +14,10 @@ What changed in each release of Shaderous. A release's section here is the body 
   field for all, and hovering the plot reads every line at that distance. Each line can be
   swapped end for end or removed in the panel; its CSV numbers the lines. The API's `profile`
   reads any of them (`line`) and adds one (`show: 'add'`).
+- **A second field along the same profile lines:** the panel's second menu plots another field
+  on every line, dashed, against an axis of its own on the right (with its own log switch);
+  hovering reads both, the CSV gets a column for it, and the link carries it (`proff2`,
+  `profsp2`, `proflog2`).
 - **Profiles in the shareable link:** `prof` (the lines' ends), `proff` (the field), `profsp`
   and `proflog`. A link opens with the lines and their panel on show.
 - **Profiles from the command-line runner:** `--profile NAME:FROM:TO[:FIELD,..]` writes a field

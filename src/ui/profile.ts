@@ -90,15 +90,18 @@ export function resolveField(spec: string | number | undefined, species: readonl
 }
 
 /**
- * Profiles as CSV: distance, value and refinement level, one sample a row. With several lines, a
- * first column numbers them (from 1), their rows one line after another.
+ * Profiles as CSV: distance, value and refinement level, one sample a row, and a second field's
+ * value after the first's when there is one (`head.value2`; a line without it leaves the column
+ * empty). With several lines, a first column numbers them (from 1), their rows one line after
+ * another.
  */
-export function profileCsv(lines: { s: ArrayLike<number>; values: ArrayLike<number>; levels: ArrayLike<number> }[], head: { distance: string; value: string }): string {
+export function profileCsv(lines: { s: ArrayLike<number>; values: ArrayLike<number>; values2?: ArrayLike<number>; levels: ArrayLike<number> }[], head: { distance: string; value: string; value2?: string }): string {
   const q = (x: string) => (/[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
   const several = lines.length > 1;
-  const rows = [`${several ? 'line,' : ''}${q(head.distance)},${q(head.value)},level`];
+  const two = head.value2 !== undefined;
+  const rows = [`${several ? 'line,' : ''}${q(head.distance)},${q(head.value)},${two ? `${q(head.value2!)},` : ''}level`];
   lines.forEach((l, j) => {
-    for (let i = 0; i < l.s.length; i++) rows.push(`${several ? `${j + 1},` : ''}${l.s[i]},${l.values[i]},${l.levels[i]}`);
+    for (let i = 0; i < l.s.length; i++) rows.push(`${several ? `${j + 1},` : ''}${l.s[i]},${l.values[i]},${two ? `${l.values2?.[i] ?? ''},` : ''}${l.levels[i]}`);
   });
   return rows.join('\n') + '\n';
 }
@@ -145,6 +148,8 @@ export interface ProfilePlot {
   range?: [number, number] | null;
   /** a distance to mark (the one hovered), or null */
   mark?: number | null;
+  /** a second field along the same lines: dashed, against an axis of its own on the right */
+  second?: { series: ProfileSeries[]; log: boolean; range?: [number, number] | null } | null;
   colors: { dim: string; frame: string; mark: string };
 }
 
@@ -181,9 +186,23 @@ export function seriesRange(series: { values: ArrayLike<number>; solid?: ArrayLi
 /** The x axis's end: the longest line's length (each line starts at distance 0). */
 export const plotLength = (series: { s: ArrayLike<number> }[]) => Math.max(0, ...series.map((q) => (q.s.length ? q.s[q.s.length - 1] : 0)));
 
+/** The plot's margins, in CSS pixels; with a second field the right one holds its axis. */
+const plotMargin = (second: boolean) => ({ ...PLOT_MARGIN, right: second ? PLOT_MARGIN.left : PLOT_MARGIN.right });
+
+/** One value axis: its range and the map from a value to a height. */
+interface Axis {
+  lo: number;
+  hi: number;
+  log: boolean;
+  y: (v: number) => number;
+  /** a sample's value as plotted (its log on a log axis), NaN where it cannot be */
+  of: (v: number) => number;
+}
+
 /** Draw the plot into a 2D context of CSS size w x h. */
 export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: number, p: ProfilePlot) {
-  const m = PLOT_MARGIN;
+  const second = p.second ? p.second.series.filter((q) => q.s.length >= 2) : null;
+  const m = plotMargin(!!p.second);
   const [x0, y0, pw, ph] = [m.left, m.top, w - m.left - m.right, h - m.top - m.bottom];
   ctx.clearRect(0, 0, w, h);
   ctx.strokeStyle = p.colors.frame;
@@ -193,30 +212,52 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
   ctx.fillStyle = p.colors.dim;
   const series = p.series.filter((q) => q.s.length >= 2);
   const range = p.range ?? seriesRange(series, p.log);
-  const sb = plotLength(series);
+  const sb = plotLength([...series, ...(second ?? [])]);
   if (!series.length || !range || !(sb > 0) || pw < 10 || ph < 10) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(p.log && series.length ? 'no positive values to show on a log scale' : 'nothing to show', x0 + pw / 2, y0 + ph / 2);
     return;
   }
-  const [lo, hi] = range;
   const px = (s: number) => x0 + (s / sb) * pw;
-  const py = (v: number) => y0 + ph - ((v - lo) / (hi - lo)) * ph;
-  const yOf = (v: number) => (p.log ? (v > 0 ? Math.log10(v) : NaN) : v);
+  const axis = (r: [number, number], log: boolean): Axis => ({
+    lo: r[0],
+    hi: r[1],
+    log,
+    y: (v: number) => y0 + ph - ((v - r[0]) / (r[1] - r[0])) * ph,
+    of: (v: number) => (log ? (v > 0 ? Math.log10(v) : NaN) : v),
+  });
+  const left = axis(range, p.log);
+  const range2 = p.second && second?.length ? (p.second.range ?? seriesRange(second, p.second.log)) : null;
+  const right = range2 ? axis(range2, p.second!.log) : null;
 
-  // Ticks: on a log scale at whole decades when there are a few, else as on a linear one.
-  ctx.textAlign = 'right';
+  // Ticks: on a log scale at whole decades when there are a few, else as on a linear one. The
+  // grid follows the left axis; the right one has its labels alone, with a tick on the frame.
+  const axisTicks = (a: Axis) => (a.log && a.hi - a.lo >= 1.5 ? ticks(Math.ceil(a.lo), Math.floor(a.hi), 4).filter(Number.isInteger) : ticks(a.lo, a.hi, 4));
   ctx.textBaseline = 'middle';
-  const yt = p.log && hi - lo >= 1.5 ? ticks(Math.ceil(lo), Math.floor(hi), 4).filter(Number.isInteger) : ticks(lo, hi, 4);
-  for (const t of yt) {
-    const y = Math.round(py(t)) + 0.5;
+  ctx.textAlign = 'right';
+  for (const t of axisTicks(left)) {
+    const y = Math.round(left.y(t)) + 0.5;
     ctx.strokeStyle = p.colors.frame;
     ctx.beginPath();
     ctx.moveTo(x0, y);
     ctx.lineTo(x0 + pw, y);
     ctx.stroke();
-    ctx.fillText(fmt3(p.log ? 10 ** t : t), x0 - 4, y);
+    ctx.fillText(fmt3(left.log ? 10 ** t : t), x0 - 4, y);
+  }
+  if (right) {
+    ctx.textAlign = 'left';
+    ctx.strokeStyle = p.colors.dim;
+    for (const t of axisTicks(right)) {
+      const y = Math.round(right.y(t)) + 0.5;
+      ctx.beginPath();
+      ctx.setLineDash([2, 2]);
+      ctx.moveTo(x0 + pw - 5, y);
+      ctx.lineTo(x0 + pw, y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillText(fmt3(right.log ? 10 ** t : t), x0 + pw + 4, y);
+    }
   }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
@@ -237,29 +278,36 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
     ctx.stroke();
   }
 
+  // The curves: the first field solid, the second dashed, each line in its colour.
   ctx.save();
   ctx.beginPath();
   ctx.rect(x0, y0, pw, ph);
   ctx.clip();
   ctx.lineWidth = 1.5;
   ctx.lineJoin = 'round';
-  for (const q of series) {
-    ctx.strokeStyle = q.color;
-    ctx.beginPath();
-    let pen = false;
-    for (let i = 0; i < q.s.length; i++) {
-      const v = yOf(q.values[i]);
-      if (q.solid?.[i] || !Number.isFinite(v)) {
-        pen = false;
-        continue;
+  const curves = (qs: ProfileSeries[], a: Axis, dash: number[]) => {
+    ctx.setLineDash(dash);
+    for (const q of qs) {
+      ctx.strokeStyle = q.color;
+      ctx.beginPath();
+      let pen = false;
+      for (let i = 0; i < q.s.length; i++) {
+        const v = a.of(q.values[i]);
+        if (q.solid?.[i] || !Number.isFinite(v)) {
+          pen = false;
+          continue;
+        }
+        const [x, y] = [px(q.s[i]), a.y(v)];
+        if (pen) ctx.lineTo(x, y);
+        else ctx.moveTo(x, y);
+        pen = true;
       }
-      const [x, y] = [px(q.s[i]), py(v)];
-      if (pen) ctx.lineTo(x, y);
-      else ctx.moveTo(x, y);
-      pen = true;
+      ctx.stroke();
     }
-    ctx.stroke();
-  }
+    ctx.setLineDash([]);
+  };
+  curves(series, left, []);
+  if (right && second) curves(second, right, [5, 3]);
   ctx.restore();
 
   const at = p.mark ?? null;
@@ -273,22 +321,36 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
     ctx.lineTo(x, y0 + ph);
     ctx.stroke();
     ctx.setLineDash([]);
-    for (const q of series) {
-      const k = sampleNear(q.s, at);
-      if (k < 0) continue;
-      const v = yOf(q.values[k]);
-      if (!Number.isFinite(v) || q.solid?.[k]) continue;
-      ctx.fillStyle = series.length > 1 ? q.color : p.colors.mark;
-      ctx.beginPath();
-      ctx.arc(Math.round(px(q.s[k])) + 0.5, Math.min(y0 + ph, Math.max(y0, py(v))), 3, 0, 2 * Math.PI);
-      ctx.fill();
-    }
+    const dots = (qs: ProfileSeries[], a: Axis, hollow: boolean) => {
+      for (const q of qs) {
+        const k = sampleNear(q.s, at);
+        if (k < 0) continue;
+        const v = a.of(q.values[k]);
+        if (!Number.isFinite(v) || q.solid?.[k]) continue;
+        const c = series.length > 1 || hollow ? q.color : p.colors.mark;
+        ctx.beginPath();
+        ctx.arc(Math.round(px(q.s[k])) + 0.5, Math.min(y0 + ph, Math.max(y0, a.y(v))), 3, 0, 2 * Math.PI);
+        if (hollow) {
+          ctx.strokeStyle = c;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = c;
+          ctx.fill();
+        }
+      }
+    };
+    dots(series, left, false);
+    if (right && second) dots(second, right, true);
   }
 }
 
-/** The distance under a point x (CSS pixels) of a plot w wide whose axis ends at `length`, or null off the plot. */
-export function distanceAt(x: number, w: number, length: number): number | null {
-  const m = PLOT_MARGIN;
+/**
+ * The distance under a point x (CSS pixels) of a plot w wide whose axis ends at `length`, or null
+ * off the plot. `second`: the plot has a second field's axis on its right.
+ */
+export function distanceAt(x: number, w: number, length: number, second = false): number | null {
+  const m = plotMargin(second);
   const pw = w - m.left - m.right;
   if (!(length > 0) || pw <= 0 || x < m.left - 4 || x > m.left + pw + 4) return null;
   return Math.min(1, Math.max(0, (x - m.left) / pw)) * length;

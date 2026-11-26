@@ -14,6 +14,13 @@ not started and not asked for.
   frame's profile pass samples every line in one dispatch, their points one after another.
   Hovering the plot reads each line at that distance; hovering a line marks that distance on
   every line. The CSV has a `line` column when there are several.
+- A second field (asked for after the first stage 4 commit): the panel's second menu plots
+  another field along every line, dashed, against its own axis on the right, with its own log
+  switch and eased range. The frame samples it in a second pass over the same points; the
+  renderer gives each pass encoded into one frame a uniform buffer of its own (`slot`), since
+  both writes reach the queue before either pass runs, and keeps six readbacks, not three.
+  Hover reads both (`first / second`), the CSV gets a column, the link carries `proff2`,
+  `profsp2`, `proflog2`. The API still reads one field a call.
 - The link: `prof` (each line's ends, four or six numbers to 4 decimals, `;` between lines),
   `proff` (the field's index), `profsp` (a mass fraction's species) and `proflog`. Decoded and
   clipped in `link.ts`; a malformed `prof` is reported as ignored. The page sets the lines while

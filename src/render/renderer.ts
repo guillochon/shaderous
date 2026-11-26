@@ -322,6 +322,9 @@ export interface ProfileValues {
   solid: Uint8Array;
 }
 
+/** Profile readbacks kept between frames: three frames' worth of two fields each. */
+const PROFILE_STAGES = 6;
+
 export class Renderer {
   private device: GPUDevice;
   private ctx: GPUCanvasContext;
@@ -709,7 +712,8 @@ export class Renderer {
   }
 
   /** The profile pass, compiled the first time a profile is asked for, and its View uniform. */
-  private profilePass: { pipe: GPUComputePipeline; view: GPUBuffer } | null = null;
+  /** The pass, and a uniform buffer for each field encoded into one frame (`slot` of encodeProfile). */
+  private profilePass: { pipe: GPUComputePipeline; views: GPUBuffer[] } | null = null;
   /** Compiling it, for the run attached. */
   private profileCompiling: Promise<void> | null = null;
   /** The resources the passes of the attached run bind (attach), for the profile pass's bind groups. */
@@ -734,8 +738,7 @@ export class Renderer {
       .then((pipe) => {
         // (A run attached meanwhile compiles its own.)
         if (this.profileRes !== res) return;
-        const view = this.device.createBuffer({ label: 'profile view', size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
-        this.profilePass = { pipe, view };
+        this.profilePass = { pipe, views: [] };
       })
       .finally(() => (this.profileCompiling = null));
     return this.profileCompiling;
@@ -749,9 +752,11 @@ export class Renderer {
    * projection view draws it. `key` names the points: they are uploaded again only when it
    * changes. Returns what reads the values back once `enc` is submitted; or null if the pass is
    * not compiled yet (it is then started), or if every readback buffer is still being read
-   * (unless `spare`: the call then takes one of its own).
+   * (unless `spare`: the call then takes one of its own). Passes encoded into one encoder (two
+   * fields along the same points) each take a `slot` of their own: their settings are written to
+   * the queue before any of them runs.
    */
-  encodeProfile(enc: GPUCommandEncoder, sim: Simulation, points: Float32Array<ArrayBuffer>, key: string, opts: ProfileFieldOptions, spare = false): (() => Promise<ProfileValues>) | null {
+  encodeProfile(enc: GPUCommandEncoder, sim: Simulation, points: Float32Array<ArrayBuffer>, key: string, opts: ProfileFieldOptions, spare = false, slot = 0): (() => Promise<ProfileValues>) | null {
     const d = this.device;
     const res = this.profileRes;
     if (!res || res.sim !== sim || !this.map) throw new Error('the view is not attached to this run');
@@ -768,9 +773,9 @@ export class Renderer {
       // A free one too small is let go. With three being read, a frame goes without; an API call takes one of its own.
       const small = this.profileStages.findIndex((q) => !q.busy);
       if (small >= 0) this.profileStages.splice(small, 1)[0].buf.destroy();
-      if (this.profileStages.length >= 3 && !spare) return null;
+      if (this.profileStages.length >= PROFILE_STAGES && !spare) return null;
       stage = { buf: d.createBuffer({ label: 'profile readback', size: bytes, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ }), busy: false };
-      if (this.profileStages.length < 3) this.profileStages.push(stage);
+      if (this.profileStages.length < PROFILE_STAGES) this.profileStages.push(stage);
     }
     let bufs = this.profileBufs;
     if (!bufs || bufs.cap < n) {
@@ -794,17 +799,19 @@ export class Renderer {
     new Uint32Array(vb, 16, 4).set([nx, ny, nz, this.map.width]);
     new Float32Array(vb, 32, 4).set([-1e30, 0, 0, projection !== null && nz > 1 ? 1 : 0]);
     new Uint32Array(vb, 48, 4).set([opts.species ?? 0, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), axis]);
-    d.queue.writeBuffer(pass.view, 0, vb);
+    while (pass.views.length <= slot) pass.views.push(d.createBuffer({ label: `profile view ${pass.views.length}`, size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }));
+    const viewBuf = pass.views[slot];
+    d.queue.writeBuffer(viewBuf, 0, vb);
     if (bufs.key !== key) {
       d.queue.writeBuffer(bufs.points, 0, points);
       bufs.key = key;
     }
     // The buffers are bound at the line's own length: the pass takes its count from the binding.
     const parity = 4 * (sim.radCur ?? 0) + 2 * sim.cur + sim.speciesCur;
-    const gkey = parity * 65536 + n;
+    const gkey = (parity * 65536 + n) * 8 + slot;
     let group = bufs.groups.get(gkey);
     if (!group) {
-      group = bindGroupUsed(d, pass.pipe, { ...res.common(parity), 1: pass.view, 24: { buffer: bufs.points, size: bytes }, 25: { buffer: bufs.values, size: bytes } }, 'profile');
+      group = bindGroupUsed(d, pass.pipe, { ...res.common(parity), 1: viewBuf, 24: { buffer: bufs.points, size: bytes }, 25: { buffer: bufs.values, size: bytes } }, 'profile');
       if (bufs.groups.size > 64) bufs.groups.clear();
       bufs.groups.set(gkey, group);
     }
