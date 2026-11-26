@@ -33,7 +33,9 @@ struct NetWatch {
 // The largest share since the CPU last read it, as the bits of a float (no share is below 0).
 @group(0) @binding(12) var<storage, read_write> WMAX: array<atomic<u32>, 1>;
 
-@compute @workgroup_size(4, 4, 4)
+// 8 x 4 x 2: two workgroups per block along x, as the other passes over the leaves (a slab of
+// SLAB_BLOCKS blocks at four along x was 65536 workgroups, one over the limit: amr/dispatch.ts).
+@compute @workgroup_size(8, 4, 2)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let at = burn_texel(gid);
   if (!at.ok) { return; }

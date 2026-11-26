@@ -623,7 +623,7 @@ export class NetBurnPass {
 
   /**
    * Burn the state of parity s with the species of parity q, into the other parities. On the
-   * block atlas `dispatch` covers the leaves' interior cells in workgroups of 4 x 4 x 4
+   * block atlas `dispatch` covers the leaves' interior cells in workgroups of 8 x 4 x 2
    * (AmrSim's burnDispatch); on a uniform grid the pass covers every texel.
    */
   encode(pass: GPUComputePassEncoder, s: number, q: number, dispatch?: (pass: GPUComputePassEncoder) => void) {
@@ -631,7 +631,7 @@ export class NetBurnPass {
     pass.setBindGroup(0, this.groupsBy[s][q]);
     if (dispatch) return dispatch(pass);
     const [x, y, z] = this.dims;
-    pass.dispatchWorkgroups(Math.ceil(x / 4), Math.ceil(y / 4), Math.ceil(z / 4));
+    pass.dispatchWorkgroups(Math.ceil(x / 8), Math.ceil(y / 4), Math.ceil(z / 2));
   }
 
   destroy() {

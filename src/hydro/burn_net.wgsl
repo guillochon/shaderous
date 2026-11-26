@@ -55,7 +55,9 @@ fn grouped(rho: f32, X: array<f32, 13>) -> array<vec4<f32>, NG> {
   return u;
 }
 
-@compute @workgroup_size(4, 4, 4)
+// 8 x 4 x 2: two workgroups per block along x, as the other passes over the leaves (a slab of
+// SLAB_BLOCKS blocks at four along x was 65536 workgroups, one over the limit: amr/dispatch.ts).
+@compute @workgroup_size(8, 4, 2)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   let at = burn_texel(gid);
   if (!at.ok) { return; }

@@ -46,7 +46,7 @@ import { BlockTree, BS, BT_STRIDE, NG, PAD, RG_STRIDE, type Block, gridBox, type
 import { indicator, leafState, samplesPerCell, surfaceOf, type LeafState } from './init_cpu';
 import { InitRun } from './init_pool';
 import { BodyBands } from './bodies';
-import { FLAT_ROWS, interior3d, padded3d, rows, SLAB_BLOCKS, SLAB_QUADS } from './dispatch';
+import { burnInterior, FLAT_ROWS, interior3d, padded3d, rows, SLAB_QUADS } from './dispatch';
 import { DampProbe } from '../hydro/damp_probe';
 import { flagSpeciesSlot, speciesAtlasSize, speciesGroupOffset, speciesGroups, SPECIES_PER_GROUP } from '../species/species';
 import { DebrisBuffers, debrisSpec, type DebrisLedger, type DebrisReport } from '../debris/debris';
@@ -1250,15 +1250,12 @@ export class AmrSim implements Simulation {
   }
 
   /**
-   * The interior cells of the first `count` blocks of the leaf list, in workgroups of 4 x 4 x 4
-   * (hydro/burn_net.wgsl), laid out as interior() lays them out (amr/list.wgsl inv_interior).
+   * The interior cells of the first `count` blocks of the leaf list, in workgroups of 8 x 4 x 2
+   * (hydro/burn_net.wgsl, burn_watch.wgsl), laid out as interior() lays them out (amr/list.wgsl
+   * inv_interior).
    */
   private burnDispatch(pass: GPUComputePassEncoder, count: number) {
-    const w = BS / 4;
-    if (this.cfg.ndim === 2) {
-      const q = Math.ceil(count / 4);
-      pass.dispatchWorkgroups(Math.min(q, SLAB_QUADS) * w, w, Math.ceil(q / SLAB_QUADS));
-    } else pass.dispatchWorkgroups(Math.min(count, SLAB_BLOCKS) * w, w, w * Math.ceil(count / SLAB_BLOCKS));
+    pass.dispatchWorkgroups(...burnInterior(this.cfg.ndim, count));
   }
 
   /** Move the species through the step just updated from parity p (after the update's dispatch). */

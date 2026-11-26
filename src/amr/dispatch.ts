@@ -27,6 +27,21 @@ export const gravityCells = (count: number, bsize: number): [number, number, num
 export const gravityColor = (count: number, bsize: number): [number, number, number] =>
   [Math.ceil((Math.min(count, SLAB_BLOCKS) * Math.max(bsize / 2, 1)) / 8), Math.ceil(bsize / 8), Math.ceil(bsize / 4) * slabs(count)];
 
+/**
+ * The network burn's and the burn watch's pass over the interior cells of `count` blocks
+ * (hydro/burn_net.wgsl, burn_watch.wgsl: workgroups of 8 x 4 x 2), laid out as inv_interior
+ * reads them. With workgroups four wide a full slab was 65536 along x, one over the limit: a
+ * mesh of more than 16383 leaves made every burn pass invalid, and the run waited for it
+ * forever.
+ */
+export const burnInterior = (ndim: 2 | 3, count: number): [number, number, number] => {
+  if (ndim === 2) {
+    const q = Math.ceil(count / 4);
+    return [Math.min(q, SLAB_QUADS) * 2, 4, 2 * Math.ceil(q / SLAB_QUADS)];
+  }
+  return [Math.min(count, SLAB_BLOCKS) * 2, 4, 8 * slabs(count)];
+};
+
 /** Slabs of a long 2D block list (amr/list.wgsl): must match SLAB_QUADS there and in amr/bins_args.wgsl. */
 export const SLAB_QUADS = 16384;
 

@@ -66,7 +66,7 @@ export class NetWatchPass implements Burner {
     pass.setBindGroup(0, this.groupsBy[s][q]);
     if (dispatch) return dispatch(pass);
     const [x, y, z] = this.dims;
-    pass.dispatchWorkgroups(Math.ceil(x / 4), Math.ceil(y / 4), Math.ceil(z / 4));
+    pass.dispatchWorkgroups(Math.ceil(x / 8), Math.ceil(y / 4), Math.ceil(z / 2));
   }
 
   /** Read the largest share since the last read, and start afresh (after a batch of steps is submitted). At most one read at a time. */
