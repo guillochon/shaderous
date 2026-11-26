@@ -149,6 +149,9 @@ export async function openSession(opts = {}) {
   // which took WebGPU down with it. Runs, diagnostics and slices work so; a WebGPU canvas then
   // cannot be read, so screenshots and movie frames are drawn off it and read back from the GPU
   // (shaderousReadBack, src/ui/api.ts).
+  // SHADEROUS_CHROME_ARGS: more of Chrome's switches, space-separated, such as
+  // "--enable-logging=stderr --v=1" for the GPU process's own log (shown with DEBUG=pw:browser).
+  if (process.env.SHADEROUS_CHROME_ARGS) args.push(...process.env.SHADEROUS_CHROME_ARGS.split(/\s+/).filter(Boolean));
   if (process.env.SHADEROUS_NO_GPU_COMPOSITING) args.push('--disable-gpu-compositing', '--disable-gpu-rasterization', '--disable-accelerated-2d-canvas');
   // PW_CHANNEL=shell: Playwright's own Chromium headless shell (the Playwright Docker images
   // have it, not Chrome); on a Linux pod it is the one that finds the GPU.
@@ -163,6 +166,11 @@ export async function openSession(opts = {}) {
   const page = await browser.newPage({ viewport: { width: opts.width ?? 1280, height: opts.height ?? 800 }, deviceScaleFactor: opts.scale ?? 1 });
   const pageErrors = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
+  // The page's errors and warnings, WebGPU's among them (a validation error, a lost device), go
+  // to the log as they come: a run that stops making progress says why, if the page knows.
+  page.on('console', (m) => {
+    if (m.type() === 'error' || m.type() === 'warning') log(`  [page ${m.type()} ${new Date().toISOString().slice(11, 19)}] ${m.text()}`);
+  });
   if (process.env.SHADEROUS_NO_GPU_COMPOSITING) await page.addInitScript(() => (globalThis.shaderousReadBack = true));
   if (opts.gpuMemory !== undefined) {
     const gb = Number(opts.gpuMemory);
