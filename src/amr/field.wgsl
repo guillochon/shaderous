@@ -232,6 +232,13 @@ fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
   return s;
 }
 
+// Profile: the leaf cell under a point, in fractions of the computed box (render/project.wgsl profile).
+fn profile_cell(f: vec3<f32>) -> PointCell {
+  let s = cube_scale();
+  let l = leaf_at(clamp(f, vec3<f32>(0.0), vec3<f32>(0.999999)) * s);
+  return PointCell(leaf_value(l), f32(l.level));
+}
+
 // log10 |value| at the center of display voxel `gid`, in leaf `f`, of value `own`: trilinear
 // between the centers of the 8 nearest cells of f's size, each taken from the leaf under it
 // (finer, coarser or the same), so the ray-marcher's isosurfaces are smooth across coarse cells.

@@ -1,7 +1,7 @@
 // Volume, slice and projection rendering on the simulation's own device.
 import { rectangular, type GridShape } from '../domain';
 import { assemble } from '../gpu/shaders';
-import { bindGroup, computePipeline, type Gpu } from '../gpu/device';
+import { bindGroup, bindGroupUsed, computePipeline, type Gpu } from '../gpu/device';
 import { COOLING_MODULES } from '../cooling/cooling';
 import { LINEAR_FIELDS, MAGNETIC_FIELDS } from '../problems/types';
 import { hydroSlots, type DisplayAtlas, type SimConfig, type Simulation } from '../sim';
@@ -519,15 +519,19 @@ export class Renderer {
    */
   fieldPipelines(fieldShader: string, cfg: SimConfig, atlas: boolean) {
     const d = this.device;
-    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp, opacity: hydroSlots(cfg).opacity });
-    // A view that holds one field reads it in place of the state (amr/field.wgsl BAKED).
-    const k = cfg.viewBaked ? { BAKED: 1 } : undefined;
+    const { code, k } = this.fieldCode(fieldShader, cfg);
     return Promise.all([
       computePipeline(d, code, 'field', k),
       computePipeline(d, code, 'slice', k, 'slice'),
       computePipeline(d, code, 'projection', k, 'project'),
       atlas ? computePipeline(d, code, 'display atlas', k, 'atlas') : Promise.resolve(undefined),
     ]);
+  }
+
+  /** The field passes' code for a run, and their constants: a view that holds one field reads it in place of the state (amr/field.wgsl BAKED). */
+  private fieldCode(fieldShader: string, cfg: SimConfig): { code: string; k?: Record<string, number> } {
+    const code = assemble(fieldShader, { eos: hydroSlots(cfg).eos, cooling: COOLING_MODULES[cfg.cooling], diffusion: hydroSlots(cfg).diffusion, comp: hydroSlots(cfg).comp, opacity: hydroSlots(cfg).opacity });
+    return { code, k: cfg.viewBaked ? { BAKED: 1 } : undefined };
   }
 
   /** Attach to a simulation (new grid, or a rebuilt equation of state). */
@@ -603,6 +607,9 @@ export class Renderer {
     this.gAtlas = info ? all8.map((k) => bindGroup(d, this.pAtlas!, { ...common(k), 8: this.rangeBuf, 12: this.atlas!.tex.createView(), 31: info.list })) : [];
     this.range = null;
     this.stale = true;
+    this.profilePass = null;
+    // (The code of the run attached, not of the last one asked for: fieldPipelines runs ahead of a load.)
+    this.profileRes = { sim, common, ...this.fieldCode(sim.fieldShader, sim.cfg) };
     await this.fieldLines.attach(sim, this.cam);
   }
 
@@ -685,6 +692,89 @@ export class Renderer {
     out.unmap();
     out.destroy();
     return t > 0 ? t : null;
+  }
+
+  /** The profile pass, compiled the first time a profile is asked for, and its View uniform. */
+  private profilePass: { pipe: GPUComputePipeline; view: GPUBuffer } | null = null;
+  /** The resources the passes of the attached run bind (attach), for the profile pass's bind groups. */
+  private profileRes: { sim: Simulation; common: (k: number) => Record<number, GPUBuffer | GPUTextureView>; code: string; k?: Record<string, number> } | null = null;
+  /** A profile in flight: one at a time, as they share their buffers' sizes. */
+  private profileChain: Promise<unknown> = Promise.resolve();
+
+  /**
+   * A field at points of the box (render/project.wgsl profile), raw (not normalized): each point
+   * in fractions of the computed box (the cell under it; the finest leaf on an adaptive mesh), or,
+   * with `projection` set to an axis, the projection along that axis through it, as the projection
+   * view draws it. `species` picks the mass fraction shown for that field. Returns the values, the
+   * refinement level of each point's cell, and whether it is solid (a column of nothing but solid).
+   * Reads the state as it stands when the call is made.
+   */
+  profile(sim: Simulation, points: ArrayLike<number>[], opts: { field: number; species?: number; projection?: number | null }): Promise<{ values: Float32Array; levels: Float32Array; solid: Uint8Array }> {
+    const job = this.profileChain.then(() => this.profileNow(sim, points, opts));
+    this.profileChain = job.catch(() => {});
+    return job;
+  }
+
+  private async profileNow(sim: Simulation, points: ArrayLike<number>[], opts: { field: number; species?: number; projection?: number | null }) {
+    const d = this.device;
+    const res = this.profileRes;
+    if (!res || res.sim !== sim || !this.map) throw new Error('the view is not attached to this run');
+    const n = points.length;
+    if (n < 1) throw new Error('a profile needs at least one point');
+    if (!this.profilePass) {
+      const pipe = await computePipeline(d, res.code, 'profile', res.k, 'profile');
+      const view = d.createBuffer({ label: 'profile view', size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+      if (this.profileRes !== res) throw new Error('the run changed during the profile');
+      this.profilePass = { pipe, view };
+    }
+    const pass = this.profilePass;
+    const [nx, ny, nz] = this.dims;
+    const projection = opts.projection ?? null;
+    const axis = projection ?? (nz > 1 ? 0 : 2);
+    const vb = new ArrayBuffer(64);
+    new Uint32Array(vb, 0, 2).set([opts.field, 0]);
+    new Float32Array(vb, 8, 2).set([0, 1]);
+    new Uint32Array(vb, 16, 4).set([nx, ny, nz, this.map.width]);
+    new Float32Array(vb, 32, 4).set([-1e30, 0, 0, projection !== null && nz > 1 ? 1 : 0]);
+    new Uint32Array(vb, 48, 4).set([opts.species ?? 0, sim.speciesStride, Math.ceil((sim.cfg.problem.species?.length ?? 0) / 4), axis]);
+    d.queue.writeBuffer(pass.view, 0, vb);
+
+    const input = new Float32Array(4 * n);
+    points.forEach((p, i) => input.set([p[0], p[1], p.length > 2 ? p[2] : 0, 0], 4 * i));
+    const inBuf = d.createBuffer({ label: 'profile points', size: input.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
+    const outBuf = d.createBuffer({ label: 'profile values', size: input.byteLength, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+    const stage = d.createBuffer({ label: 'profile readback', size: input.byteLength, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    try {
+      d.queue.writeBuffer(inBuf, 0, input);
+      const parity = 4 * (sim.radCur ?? 0) + 2 * sim.cur + sim.speciesCur;
+      const group = bindGroupUsed(d, pass.pipe, { ...res.common(parity), 1: pass.view, 24: inBuf, 25: outBuf }, 'profile');
+      const enc = d.createCommandEncoder();
+      if (DERIVATIVE_FIELDS.has(opts.field)) sim.encodeDisplayPrimitives?.(enc);
+      const cp = enc.beginComputePass();
+      if (opts.field === MAGNETIC_FIELDS[4] || opts.field === MAGNETIC_FIELDS[5]) sim.encodeMagnetic?.(cp, sim.cur);
+      cp.setPipeline(pass.pipe);
+      cp.setBindGroup(0, group);
+      cp.dispatchWorkgroups(Math.ceil(n / 64));
+      cp.end();
+      enc.copyBufferToBuffer(outBuf, 0, stage, 0, input.byteLength);
+      d.queue.submit([enc.finish()]);
+      await stage.mapAsync(GPUMapMode.READ);
+      const out = new Float32Array(stage.getMappedRange().slice(0));
+      stage.unmap();
+      const values = new Float32Array(n);
+      const levels = new Float32Array(n);
+      const solid = new Uint8Array(n);
+      for (let i = 0; i < n; i++) {
+        values[i] = out[4 * i];
+        levels[i] = out[4 * i + 1];
+        solid[i] = out[4 * i + 2] > 0.5 ? 1 : 0;
+      }
+      return { values, levels, solid };
+    } finally {
+      inBuf.destroy();
+      outBuf.destroy();
+      stage.destroy();
+    }
   }
 
   /**

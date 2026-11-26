@@ -85,6 +85,40 @@ fn slice(@builtin(global_invocation_id) gid: vec3<u32>) {
   }
 }
 
+// Profile (render/renderer.ts profile()): the field at points of the box, raw (not normalized).
+// PROF_IN holds each point in fractions of the computed box. Each point takes the cell under it
+// (profile_cell() of the field shader, the finest leaf there on an adaptive mesh); with V.cut.w set, the
+// projection instead: the column along V.sp.w through the map texel under the point, as the
+// projection view draws it. PROF_OUT: the value, the refinement level, 1 for a solid (or a column
+// of nothing but solid), and the density.
+@group(0) @binding(24) var<storage, read> PROF_IN: array<vec4<f32>>;
+@group(0) @binding(25) var<storage, read_write> PROF_OUT: array<vec4<f32>>;
+
+@compute @workgroup_size(64)
+fn profile(@builtin(global_invocation_id) gid: vec3<u32>) {
+  if (gid.x >= arrayLength(&PROF_IN)) { return; }
+  let f = PROF_IN[gid.x].xyz;
+  let s = profile_cell(f);
+  var x = s.q.x;
+  var solid = s.q.solid;
+  if (V.cut.w != 0.0) {
+    let axis = i32(V.sp.w);
+    let ab = map_axes(axis);
+    let side = i32(V.nd.w);
+    let ij = clamp(vec2<i32>(floor(vec2<f32>(f[ab.x], f[ab.y]) * f32(side))), vec2<i32>(0), vec2<i32>(side - 1));
+    let c = column(ij, ab, axis);
+    x = select(c.mx / max(c.m, 1.0e-30), c.m, V.field == F_DENSITY);
+    solid = !c.gas;
+  }
+  PROF_OUT[gid.x] = vec4<f32>(x, s.level, select(0.0, 1.0, solid), s.q.rho);
+}
+
+// The cell under a point, and its refinement level (field shaders' profile_cell()).
+struct PointCell {
+  q: Cell,
+  level: f32,
+}
+
 // One thread per texel of the map. 128 threads, one per bin of the range's histogram.
 @compute @workgroup_size(16, 8, 1)
 fn project(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {

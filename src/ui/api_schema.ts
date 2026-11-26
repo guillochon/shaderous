@@ -109,6 +109,23 @@ export const API_METHODS: ApiMethod[] = [
     changesRun: false,
   },
   {
+    name: 'profile',
+    summary: 'A field along a straight line through the box, from the view’s own field code: any field the view can show (describe().fields), not only slice()’s variables. Each sample is the cell under it (the finest leaf on an adaptive mesh); by default two samples per cell of the finest level. Returns `s`, the distance from `from` in code length, `values` in code units, `level` the refinement level of each sample, and `solid` when samples lie inside an obstacle. With no `from` and `to`: the line on show in the page (placed with the Profile tool).',
+    args: [{
+      name: 'options', optional: true, type: 'object',
+      properties: {
+        from: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3, description: 'Start of the line, [x, y] or [x, y, z] in fractions of the box; clipped to the box' },
+        to: { type: 'array', items: { type: 'number' }, minItems: 2, maxItems: 3, description: 'End of the line, as `from`' },
+        field: { type: ['string', 'integer'], description: 'An index into describe().fields, a field’s name (e.g. "Mach number"), one of rho, press, vel1, vel2, vel3, r0, temp, level, or a species (its mass fraction). Default: the field shown' },
+        n: { type: 'integer', minimum: 2, maximum: 16384, description: 'Samples along the line, both ends included. Default two per cell of the finest level, 64 to 4096' },
+        projection: { type: 'integer', minimum: 0, maximum: 2, description: '3D only: sample the projection along this axis through each point (column density for density, the mass-weighted mean for any other field), as the projection view draws it' },
+        show: { type: 'boolean', description: 'Also put the line and its plot on show in the page (screenshots do not draw it)' },
+        encoding: { type: 'string', enum: ['json', 'base64'], description: 'json (default): the arrays as lists; base64: as float32 bytes in `arrays`, faster out of the page at many samples' },
+      },
+    }],
+    changesRun: false,
+  },
+  {
     name: 'screenshot',
     summary: 'A picture of the run as a PNG image.',
     args: [{

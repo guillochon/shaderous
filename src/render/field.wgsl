@@ -172,6 +172,12 @@ fn column(ij: vec2<i32>, ab: vec2<i32>, axis: i32) -> Column {
   return s;
 }
 
+// Profile: the cell under a point, in fractions of the box (render/project.wgsl profile).
+fn profile_cell(f: vec3<f32>) -> PointCell {
+  var c = clamp(vec3<i32>(floor(f * vec3<f32>(P.dims.xyz))), vec3<i32>(0), vec3<i32>(P.dims.xyz) - 1);
+  return PointCell(voxel(c), 0.0);
+}
+
 @compute @workgroup_size(8, 8, 4)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>, @builtin(local_invocation_index) lix: u32) {
   range_begin(lix);

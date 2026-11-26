@@ -1,6 +1,27 @@
 # Plan: a profile tool — a field's value along a line
 
-Status (2026-11-24): plan only, nothing built.
+Status (2026-11-26): stages 1 to 3 built; stage 4 (runner `--profile`, the link, several
+profiles, exact cell crossings) not started.
+
+**As built.**
+
+- GPU pass: `profile` in `render/project.wgsl`, shared by both field shaders, each of which gives
+  `profile_cell()` (the cell under a point; the finest leaf on blocks). `Renderer.profile()`
+  compiles it the first time it is asked for, with the code of the run attached (not of the last
+  one asked for: `fieldPipelines` runs ahead of a load, and a profile read during a load once
+  paired the new code with the old run's resources). It matches `probe` to float precision for
+  density, pressure, velocity, temperature and level on 2D blocks, 3D uniform and 3D blocks.
+- Volume view: both ends lie on the plane facing the camera through the point orbited, not on the
+  gas under the pointer as planned. In a blast in a uniform medium the gas "seen" under the
+  pointer is wherever the fog's opacity reaches the pick's threshold, so a line meant to go
+  through the center missed it. Alt puts an end on the gas.
+- The plot's x axis is distance in the units shown; AMR level changes are marked on its bottom
+  edge; the field menu is the view's own, with what the run cannot show left out (the API
+  refuses those too). The panel goes beside the line inside the view area: right of it, left,
+  below or above, the first that fits.
+- Not done: screenshots do not draw the line (it is an SVG over the canvas); `view({ profile })`
+  became `profile({ show: true })`; mirror images shown: the ends fold into the computed part,
+  so a line across a mirror plane is not the line drawn.
 
 The person picks the Profile tool, presses at a start point in the box, and a line follows the
 pointer until they place the end. A panel then opens beside the line with a plot of one field

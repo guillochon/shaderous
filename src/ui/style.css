@@ -238,6 +238,7 @@ details[open] > summary .sum { display: none; }
 #tools #tool-index button[aria-pressed='true'], #tools #tool-star-field button[aria-pressed='true'] { color: #fff; }
 .scrub output { color: var(--text); font-variant-numeric: tabular-nums; }
 #view.tool { cursor: crosshair; }
+#view.on-profile-end { cursor: grab; }
 /* Markers of the sources (green) and sinks (orange) in the run. */
 #marks { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
 #marks circle { fill: none; stroke: #7fe3a0; stroke-width: 1.5; stroke-opacity: 0.9; }
@@ -393,6 +394,34 @@ details[open] > summary .sum { display: none; }
   font-size: 11px; color: var(--text); font-variant-numeric: tabular-nums;
 }
 #contour-pop[hidden] { display: none; }
+
+/* The profile tool: its line over the view, and the panel with the field along it. */
+#profile-line { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
+#profile-line line.trace { stroke: #ffe066; stroke-width: 2; stroke-linecap: round; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.85)); }
+#profile-line path.ticks { fill: none; stroke: #ffe066; stroke-width: 1.5; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85)); }
+#profile-line circle.end { fill: var(--panel); stroke: #ffe066; stroke-width: 2; }
+#profile-line circle.end.start { fill: #ffe066; }
+#profile-line circle.mark { fill: #fff; stroke: #000; stroke-width: 1; }
+#profile-pop {
+  position: fixed; z-index: 22; width: 380px; padding: 0 8px 7px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
+  font-size: 11px; color: var(--text);
+}
+#profile-pop[hidden] { display: none; }
+#profile-pop .head { display: flex; align-items: center; gap: 6px; height: 26px; cursor: move; user-select: none; touch-action: none; }
+#profile-pop .title { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#profile-pop .head button { width: 20px; height: 20px; padding: 0; font-size: 15px; line-height: 1; }
+#profile-pop .controls { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
+#profile-pop .controls select { flex: 1; min-width: 0; height: 22px; font-size: 11px; }
+#profile-pop .controls label { display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
+#profile-pop .controls button { height: 22px; padding: 0 8px; font-size: 11px; }
+#profile-pop canvas { display: block; width: 100%; height: 170px; cursor: crosshair; }
+#profile-pop .foot { margin-top: 3px; color: var(--dim); font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 700px) {
+  #profile-pop { left: 0 !important; right: 0; top: auto !important; bottom: 0; width: auto; border-radius: 8px 8px 0 0; }
+  #profile-pop .head { cursor: default; }
+  #profile-pop canvas { height: 140px; }
+}
 
 /* validation page */
 body.validate { padding: 20px 28px; height: auto; }

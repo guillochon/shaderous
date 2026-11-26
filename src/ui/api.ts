@@ -61,6 +61,11 @@ export interface AppHooks {
   viewFile(file: File | string, opts?: { oneField?: boolean; faces?: boolean }): Promise<{ level: number; fileLevel: number; blocks: number; fileBlocks: number; oneField: boolean; faces: boolean }>;
   /** a view that holds one field: the file's cells under these points (io/view.ts probeFile); null for any other run */
   viewProbe(points: number[][]): Promise<{ at: number[]; level: number; values: Record<string, number> }[] | null>;
+  /**
+   * A field along a line through the box (app.ts apiProfile, plans/profile-tool.md): `from` and
+   * `to` in fractions of the box, or the line on show in the page; `show` puts it on show.
+   */
+  profile(opts: ProfileOptions): Promise<ProfileSamplesOut>;
   /** a view that holds one field: resolves once the field shown is baked */
   settleView(): Promise<void>;
   restart(): Promise<void>;
@@ -145,6 +150,36 @@ export interface AppHooks {
   replayAction(a: Action): Promise<void>;
   /** A replay is under way: the adaptive mesh re-meshes only where the log says. */
   setReplaying(on: boolean): void;
+}
+
+/** Options of profile(). */
+export interface ProfileOptions {
+  /** the line's ends, [x, y] or [x, y, z] in fractions of the box; both left out: the line on show in the page */
+  from?: number[];
+  to?: number[];
+  /** an index into describe().fields, a field's name, a variable of slice() or a species; default the field shown (or the profile's on show) */
+  field?: string | number;
+  /** samples along the line, 2 to 16384; default two a cell of the finest level, 64 to 4096 */
+  n?: number;
+  /** 3D: sample the projection along this axis (as the projection view shows it) instead of the cells */
+  projection?: number | null;
+  /** put the line on show in the page, with its plot */
+  show?: boolean;
+  encoding?: 'json' | 'base64';
+}
+/** What app.profile() hands back: the arrays as they were read. */
+export interface ProfileSamplesOut {
+  from: number[];
+  to: number[];
+  field: string;
+  index: number;
+  species?: string;
+  projection: number | null;
+  length: number;
+  s: Float64Array;
+  values: Float32Array;
+  levels: Float32Array;
+  solid: Uint8Array;
 }
 
 /** Options of run(). */
@@ -1481,6 +1516,44 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * refinement level at points given in fractions of the box.
      */
     probe: (points: Point[]) => serial(() => probePoints(points)),
+
+    /**
+     * A field along a line through the box, from the GPU's own display code (the view's fields,
+     * not only slice()'s variables): each sample is the cell under it, the finest leaf on an
+     * adaptive mesh. `s` is the distance from `from` in code length, `values` in code units,
+     * `level` each sample's refinement level, `solid` the samples inside an obstacle. With no
+     * `from` and `to`, the line on show in the page (placed with the Profile tool). With
+     * `encoding: 'base64'`, `s`, `values` and `level` come as EncodedArrays (src/io/arrays.ts)
+     * in `arrays` instead: float32 bytes, faster out of the page at many samples.
+     */
+    profile: (opts: ProfileOptions = {}) =>
+      serial(async () => {
+        const encoding = opts.encoding ?? 'json';
+        if (encoding !== 'json' && encoding !== 'base64') throw new Error(`unknown encoding "${encoding}": use json or base64`);
+        const s = current();
+        const r = await app.profile(opts);
+        const d = s.preparing ? undefined : await s.diagnostics();
+        let min = Infinity, max = -Infinity;
+        r.values.forEach((v, i) => {
+          if (r.solid[i] || !Number.isFinite(v)) return;
+          if (v < min) min = v;
+          if (v > max) max = v;
+        });
+        const n = r.values.length;
+        const solid = r.solid.some((v) => v) ? Array.from(r.solid, (v) => v === 1) : undefined;
+        const head = {
+          t: d?.t ?? app.cfg().restart?.time ?? 0,
+          from: r.from, to: r.to, length: r.length,
+          field: r.field, index: r.index, ...(r.species !== undefined ? { species: r.species } : {}),
+          projection: r.projection, n,
+          min: min <= max ? min : null, max: min <= max ? max : null,
+          ...(solid ? { solid } : {}),
+        };
+        if (encoding === 'base64') {
+          return { ...head, arrays: { s: encodeArray(Float32Array.from(r.s), [n]), values: encodeArray(r.values, [n]), level: encodeArray(r.levels, [n]) } };
+        }
+        return { ...head, s: Array.from(r.s), values: Array.from(r.values), level: Array.from(r.levels) };
+      }),
 
     /**
      * The view as a PNG data URL: at the canvas's size on the page, or at `width` x `height`

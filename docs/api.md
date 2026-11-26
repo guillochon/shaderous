@@ -603,6 +603,42 @@ The state at a list of points `[x, y, z]`. Each point returns `rho`, `press`, `v
 `r0`, `temp` (and `tempK` with physical units, as for `slice`), `level`, and `X`, the species'
 mass fractions by name, when the run has species.
 
+### `profile({ from?, to?, field?, n?, projection?, show?, encoding? }) → object`
+
+A field along a straight line through the box, read by the same GPU code that draws the view: any
+field of `describe().fields` (Mach number, vorticity, plasma beta, radiation temperature, …), not
+only `slice`'s variables. The page's Profile tool draws the same line and plots it.
+
+- `from`, `to`: the line's ends, `[x, y]` or `[x, y, z]` in fractions of the box. The line is
+  clipped to the box; one that misses it is an error. Both left out: the line the Profile tool
+  placed in the page (an error if there is none), with its field unless `field` is given.
+- `field`: an index into `describe().fields`, a field's name in any case (`"Mach number"`), one of
+  `rho`, `press`, `vel1`, `vel2`, `vel3`, `r0`, `temp`, `level`, or a species' name (its mass
+  fraction). Default: the field shown. A field the run cannot show (a magnetic field without
+  MHD, the refinement level on a uniform grid) is an error; so is any field but the one held in
+  a view that holds one field.
+- `n`: samples, both ends included, 2 to 16384. Default: two per cell of the finest level along
+  the line, 64 to 4096.
+- `projection`: 3D only, an axis. Each sample is then the projection along that axis through it,
+  as the projection view draws it: the column density for density, the mass-weighted mean along
+  the line of sight for any other field.
+- `show`: also put the line and its plot on show in the page. (Screenshots do not draw it.)
+- `encoding`: as for `slice`; with `'base64'` the arrays come as EncodedArrays in `arrays`.
+
+Each sample is the cell under it, the finest leaf on an adaptive mesh, with no interpolation:
+steps at cell edges and changes of level show as they are. Returns `t`; `from` and `to` (as
+clipped); `length`, the line's length in code units; `field`, its name (`Column density` for a
+projected density), `index` and, for a mass fraction, `species`; `projection`; `n`; `min` and
+`max` (null if every sample is solid); `s`, the distance of each sample from `from` in code
+length; `values`, in code units; `level`, each sample's refinement level; and `solid`, true for
+each sample inside an obstacle, when any is.
+
+```js
+// The density from a blast's center to the box's edge, and the Mach number across the box.
+const r = await shaderous.profile({ from: [0.5, 0.5, 0.5], to: [1, 0.5, 0.5], field: 'rho' });
+const m = await shaderous.profile({ from: [0, 0.3, 0.5], to: [1, 0.7, 0.5], field: 'Mach number', n: 1000 });
+```
+
 ### `screenshot({ width?, height?, native?, overlays?, layout? }) → string`
 
 The view as a PNG data URL. With no size, it is drawn at the canvas's size on the page. Give

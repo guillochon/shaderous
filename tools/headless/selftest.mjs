@@ -71,6 +71,13 @@ const check = (ok, what) => {
   const npy = existsSync(big.saved) ? readNpy(readFileSync(big.saved)) : { shape: [], values: [] };
   const npyMean = npy.values.reduce((a, b) => a + b, 0) / npy.values.length;
   check(npy.shape.join() === '512,512' && Math.abs(npyMean - big.mean) < 1e-9 && npy.values.reduce((a, b) => Math.max(a, b), -Infinity) === big.max, 'slice: save_path .npy writes float32 [512, 512]');
+  // A profile from the blast's center outward: two samples a cell (128 cells), inlined at 256.
+  const pf = json(await tool('profile', { from: [0.5, 0.5], to: [1, 0.5], field: 'rho' }));
+  const at = json(await tool('probe', { points: [[0.5 + 0.5 * (100 / 255), 0.5, 0]] }));
+  check(pf.n === 256 && pf.values?.length === 256 && pf.max > 1 && pf.values[100] === +at.points[0].rho.toPrecision(5), 'profile: two samples a cell, as probe reads them');
+  const pfs = json(await tool('profile', { from: [0, 0.5], to: [1, 0.5], field: 'Mach number', n: 1000, save_path: path.join(tmp, 'mcp/mach.csv') }));
+  const csv = existsSync(pfs.saved ?? '') ? readFileSync(pfs.saved, 'utf8').trim().split('\n') : [];
+  check(csv.length === 1001 && csv[0] === 's,value,level' && pfs.values === undefined && pfs.field === 'Mach number', 'profile: save_path .csv writes a row a sample');
   const shot = await tool('screenshot', { width: 256, view: { field: 3 } });
   check(shot.content[0].type === 'image' && shot.content[0].data.length > 5000, 'screenshot');
   // The PNG's size from its header: the grid's own (256 a side), and larger with overlays beside it.

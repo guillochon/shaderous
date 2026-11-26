@@ -19,7 +19,8 @@ import { dipoleField, randomField, type StarProfile } from '../mhd/star_fields';
 import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
-import { boxFrac, fracPos } from '../domain';
+import { boxFrac, fracPos, gridDims } from '../domain';
+import { clipSegment, distances, drawProfilePlot, profileCsv, resolveField, sampleAt, sampleCount, samplePoints, valueRange } from './profile';
 import { radiationOn, syncRadiationEos } from '../radiation/radiation';
 import { cellEquations, importance, rampColor, type Equation } from './terms';
 import { opacity as meanOpacity } from '../opacity/opacity';
@@ -385,7 +386,9 @@ const hud = $('hud');
 // --- editing tools ------------------------------------------------------------------------
 // A column of tools under the color bar. Each paints with a soft ball (a disk in 2D) and
 // keeps its own size and softness.
-type ToolKind = Exclude<BrushOp['kind'], 'eos-out' | 'eos-in'> | 'source' | 'sink' | 'query';
+type ToolKind = Exclude<BrushOp['kind'], 'eos-out' | 'eos-in'> | 'source' | 'sink' | 'query' | 'profile';
+/** The tools that only read the run: no brush, no settings of their own. */
+const readsOnly = (t: ToolKind | null) => t === 'query' || t === 'profile';
 /** Polytropic indices the star tool offers. */
 const STAR_INDICES = [1, 1.5, 3];
 const starId = (n: number) => `star-n-${String(n).replace('.', '_')}`;
@@ -443,6 +446,11 @@ TOOLS.push({
   kind: 'query', label: 'Query',
   title: 'Query: hover over the gas to see the cell under the pointer (its state and, on an adaptive mesh, its block), or over a source, a sink or a point mass to see that too. Click to pin the readout: on a source or sink it follows that one; anywhere else it follows a massless tracer let go there. Dragging moves the view',
   icon: icon('<circle cx="6.8" cy="6.8" r="4.3" /><path d="M10 10l4.5 4.5" /><path d="M6.8 4.9v.01M6.8 6.6v2.6" />'),
+});
+TOOLS.push({
+  kind: 'profile', label: 'Profile',
+  title: 'Profile: press where a line starts and drag to where it ends (or click at each end) to plot a field along it. Shift keeps the line at 15° steps. In the volume view the line lies on the plane facing you through the point orbited; Alt puts an end on the gas seen under the pointer instead. Drag an end to move it; Esc lets a line being placed go',
+  icon: icon('<path d="M1.5 14.5h13M1.5 14.5V1.5" /><path d="M3.5 11l3-4 2.5 2.5 4-6" />'),
 });
 /**
  * The point masses the tools have placed in this run, in the order they were added: the last
@@ -512,6 +520,7 @@ const toolParams: Record<ToolKind, { size: number; softness: number; amount: num
   sink: { size: 0.04, softness: 0.5, amount: 0.25, mass: 0, soften: 0.04 },
   star: { size: 0.1, softness: 0, amount: 0, mass: 0, soften: 0.04 },
   query: { size: 0, softness: 0, amount: 0, mass: 0, soften: 0.04 },
+  profile: { size: 0, softness: 0, amount: 0, mass: 0, soften: 0.04 },
 };
 /** The sink tool, and the source tool, place ones that stay where they are put. */
 let sinkFixed = false;
@@ -599,17 +608,20 @@ function syncTools() {
   // The MHD fluxes know no solid cell (mhd/mhd.ts mhdUnsupported).
   const noObstacle = cfg?.problem.mhd ? 'Obstacles are not available with a magnetic field yet' : '';
   if (noObstacle && tool === 'obstacle') tool = null;
+  // A spherical run's cells are not along straight lines of the box.
+  const noProfile = cfg && spherical(cfg) ? 'Profiles are not available on a spherical grid yet' : '';
+  if (noProfile && tool === 'profile') tool = null;
   for (const t of TOOLS) {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
     b.hidden = noField && FIELD_TOOLS.includes(t.kind);
     b.setAttribute('aria-pressed', String(tool === t.kind));
-    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle);
-    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : 'This equation of state ties the temperature to the density';
+    b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle) || (t.kind === 'profile' && !!noProfile);
+    b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : t.kind === 'profile' ? noProfile : 'This equation of state ties the temperature to the density';
   }
   canvas.classList.toggle('tool', tool !== null);
   // The tool's settings slide out under its own button, pushing the buttons below it down.
   const panel = $('tool-params');
-  const open = tool !== null && tool !== 'query';
+  const open = tool !== null && !readsOnly(tool);
   if (open) {
     const b = $(`tool-${tool}`);
     if (b.nextElementSibling !== panel) {
@@ -633,7 +645,7 @@ function syncTools() {
   }
   panel.classList.toggle('open', open);
   if (tool !== 'query') hideCellPop();
-  if (tool === null || tool === 'query') {
+  if (tool === null || readsOnly(tool)) {
     $('brush').style.display = 'none';
     return;
   }
@@ -778,7 +790,7 @@ function toolReadout(k: ToolSlider): { factor: number; unit: string } {
 const toolShown = (k: ToolSlider) => (logSlider(k) ? 10 ** toolSetting(k) : toolSetting(k)) * toolReadout(k).factor;
 
 function showToolValues() {
-  if (!cfg || tool === null || tool === 'query') return;
+  if (!cfg || tool === null || readsOnly(tool)) return;
   for (const k of TOOL_SLIDERS) {
     const { unit } = toolReadout(k);
     const v = toolShown(k);
@@ -791,7 +803,7 @@ function showToolValues() {
  * shown. Enter or leaving the field applies it (kept within the slider's range); Escape does not.
  */
 function editToolValue(k: ToolSlider) {
-  if (tool === null || tool === 'query') return;
+  if (tool === null || readsOnly(tool)) return;
   const row = $(`tp-${k}-row`);
   const range = $<HTMLInputElement>(`tp-${k}`);
   const edit = document.createElement('input');
@@ -812,7 +824,7 @@ function editToolValue(k: ToolSlider) {
     const v = parseFloat(edit.value);
     edit.remove();
     row.classList.remove('editing');
-    if (!apply || !Number.isFinite(v) || tool === null || tool === 'query') return;
+    if (!apply || !Number.isFinite(v) || tool === null || readsOnly(tool)) return;
     const x = v / toolReadout(k).factor;
     if (logSlider(k) && !(x > 0)) return;
     const mr = k === 'mass' ? massRange() : null;
@@ -943,11 +955,14 @@ $('tool-rest').addEventListener('click', () => {
   syncTools();
 });
 window.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || (!tool && !pin)) return;
-  // Esc first drops a shape that is being drawn, then a pinned readout, then puts the tool away.
+  if (e.key !== 'Escape' || (!tool && !pin && !profile)) return;
+  // Esc first drops a shape or a profile line that is being drawn, then a pinned readout, then
+  // puts the tool away, then closes the profile.
   if (draft) draft = null;
+  else if (profileDraft) profileDraft = null;
   else if (pin) unpin();
-  else tool = null;
+  else if (tool) tool = null;
+  else closeProfile();
   syncTools();
 });
 
@@ -1426,18 +1441,19 @@ function syncControls() {
   // Nor a potential without gravity, nor a Jeans length without self-gravity.
   const pulled = cfg.gravity !== 'off' || cfg.gext.some((g) => g !== 0) || !!cfg.problem.masses || placed.length > 0;
   // A barotropic gas carries no internal energy of its own, so it has no temperature or entropy
-  // to show, and nothing heats or cools without a cooling function: those are left out of the
-  // menu altogether.
+  // to show, and nothing heats or cools without a cooling function.
   const noHeat = (i: number) => ((i === 1 || i === 9) && !eosHasEnergy(cfg.eos)) || (i === 10 && (cfg.cooling === 'off' || !eosHasEnergy(cfg.eos)));
   const noField = (i: number) => (i === 7 && two) || (i === 14 && cfg.amrLevels === 0) || (i === 21 && (cfg.amrLevels === 0 || !(cfg.timeBins > 0)))
     || (i === 15 && !pulled) || (i === 17 && !self) || noHeat(i)
     || (!!cfg.viewOnly && VIEW_LOST.has(i)) || (!!cfg.viewBaked && UNBAKEABLE.has(i));
-  for (const o of fieldSel.options) {
-    o.disabled = noField(+o.value);
-    o.hidden = noHeat(+o.value);
-  }
+  // What the run cannot show is left out of the menu altogether, and so is a group with nothing
+  // left in it (the magnetic and radiation groups come and go with their physics: syncSpeciesFields).
+  for (const o of fieldSel.options) o.disabled = o.hidden = noField(+o.value);
   if (noField(view.field)) view.field = 0;
   syncSpeciesFields(fieldSel);
+  for (const g of fieldSel.querySelectorAll('optgroup')) {
+    if (g.label !== 'Magnetic field' && g.label !== 'Radiation') g.hidden = [...g.children].every((o) => (o as HTMLOptionElement).hidden);
+  }
   $<HTMLInputElement>('log').disabled = LINEAR_FIELDS.has(view.field);
   const unitSel = $<HTMLSelectElement>('units');
   unitSel.value = cfg.problem.units ? unitSys : 'code';
@@ -3075,6 +3091,8 @@ function bind() {
   };
   canvas.addEventListener('pointerdown', (e) => {
     canvas.setPointerCapture(e.pointerId);
+    // The profile tool places a line; an end of the profile on show can be dragged (profile tool below).
+    if (e.button === 0 && pointers.size === 0 && !stroke && !draft && profilePress(e)) return;
     if (tool === 'obstacle' && sim && !building && e.button === 0 && pointers.size === 0) {
       seeMods(e);
       const p = at(e);
@@ -3093,7 +3111,7 @@ function bind() {
       drawBrush();
       return;
     }
-    if (tool && tool !== 'obstacle' && tool !== 'query' && sim && !building && e.button === 0 && pointers.size === 0 && !stroke) {
+    if (tool && tool !== 'obstacle' && !readsOnly(tool) && sim && !building && e.button === 0 && pointers.size === 0 && !stroke) {
       beginStroke(e);
       return;
     }
@@ -3108,6 +3126,7 @@ function bind() {
   });
   const release = (e: PointerEvent) => {
     pointers.delete(e.pointerId);
+    profileRelease(e);
     if (queryPress && tool === 'query' && e.type === 'pointerup' && Math.hypot(e.clientX - queryPress.x, e.clientY - queryPress.y) < 5) void pinAt(e.clientX, e.clientY);
     queryPress = null;
     if (draft && draft.id === e.pointerId) {
@@ -3126,6 +3145,7 @@ function bind() {
     if (tool || !flat()) e.preventDefault();
   });
   canvas.addEventListener('pointerleave', () => {
+    profileLineHover(null);
     hideCellPop();
     clearContourHover();
     hover = null;
@@ -3171,6 +3191,7 @@ function bind() {
       drawBrush();
       return;
     }
+    if (profileMove(e, pointers.size)) return;
     if (stroke && stroke.id === e.pointerId && !stroke.released) {
       const r = canvas.getBoundingClientRect();
       stroke.x = e.clientX - r.left;
@@ -3339,6 +3360,631 @@ function locateInView(px: number, py: number, depth: number): { pos: Vec3; right
   // Along the ray, fwd + ux right + uy up reaches distance `depth` from the eye, measured along fwd.
   const pos = [0, 1, 2].map((i) => f.eye[i] + depth * (f.fwd[i] + ux * f.right[i] + uy * f.up[i]) + 0.5) as Vec3;
   return { pos, right: f.right as Vec3, up: f.up as Vec3, scale: h / (2 * f.tan * depth) };
+}
+
+// --- profile tool -------------------------------------------------------------------------
+// (plans/profile-tool.md) A line through the box and a plot of a field along it. With the
+// profile tool in hand, a press places its start and a drag (or a second click) its end; in the
+// volume view both lie on the plane facing the camera through the point orbited, or with Alt on
+// the gas seen under the pointer (the end then on the plane through the start, Alt again putting
+// it on the gas too). The line stays on show, whatever
+// tool is in hand, with its plot in a panel beside it, until the panel is closed. The GPU samples
+// the field along it (Renderer.profile), again every so often while the run goes.
+/** The profile on show: its ends in fractions of the computed box, the field, and the log axis (null: as the field's default). */
+interface PlacedProfile {
+  a: Vec3;
+  b: Vec3;
+  field: number;
+  species: number;
+  log: boolean | null;
+  /** the run's dimensions when it was placed: another kind of run drops it */
+  dims: 2 | 3;
+}
+let profile: PlacedProfile | null = null;
+/** The samples read along a line. */
+interface ProfileSamples {
+  a: Vec3;
+  b: Vec3;
+  field: number;
+  species: number;
+  projection: number | null;
+  /** distance from the start, code length */
+  s: Float64Array;
+  length: number;
+  values: Float32Array;
+  levels: Float32Array;
+  solid: Uint8Array;
+}
+let profileData: ProfileSamples | null = null;
+let profileBusy = false;
+let profileWanted = false;
+/** When the profile was last sampled (performance.now()). */
+let profileAt = 0;
+/** The sample hovered, in the plot or on the line (-1: none). */
+let profileHover = -1;
+/** The plot's y range, eased while the run goes; reset when the field or the scale changes. */
+let profileRange: { key: string; range: [number, number] } | null = null;
+/**
+ * A line being placed: the press (CSS pixels), its start in the box once known (in the volume
+ * view the gas under the press is read back first), how deep the start lies along the view, the
+ * pointer, and the end on the gas under it (Alt, volume view). `id` is the pointer pressing, -1
+ * once the press was a click (the end is placed by a second one), -2 once the end is placed but
+ * the start is still being read.
+ */
+let profileDraft: { id: number; x0: number; y0: number; a: Vec3 | null; depth: number; x: number; y: number; alt: Vec3 | null } | null = null;
+/** An end of the profile being dragged, and how deep it lies along the view. */
+let profileGrab: { id: number; end: 0 | 1; depth: number } | null = null;
+/** One read of the gas under the pointer at a time (Alt in the volume view). */
+let profilePicking = false;
+
+/** How deep along the view direction the gas under a canvas point lies (volume view), or null. */
+async function gasDepth(px: number, py: number): Promise<number | null> {
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  const [ux, uy] = [(2 * px) / w - 1, 1 - (2 * py) / h];
+  const t = await renderer.pick(ux, uy);
+  if (t === null) return null;
+  const f = cameraFrame(view, w / h);
+  return t / Math.hypot(1, ux * (w / h) * f.tan, uy * f.tan);
+}
+
+/** The point of the box under a canvas point at a depth (ignored in a plane), z 0 in 2D. */
+function profilePoint(px: number, py: number, depth: number): Vec3 {
+  const p = locate(px, py, depth).pos;
+  if (cfg.ndim === 2) p[2] = 0;
+  return p;
+}
+
+/** Shift: the pointer moved around the press to the nearest 15° step. */
+function snapAngle(x0: number, y0: number, x: number, y: number): [number, number] {
+  const r = Math.hypot(x - x0, y - y0);
+  const step = Math.PI / 12;
+  const a = Math.round(Math.atan2(y - y0, x - x0) / step) * step;
+  return [x0 + r * Math.cos(a), y0 + r * Math.sin(a)];
+}
+
+/** Which end of the profile on show lies within reach of a canvas point, if one does. */
+function profileEndNear(px: number, py: number): 0 | 1 | null {
+  if (!profile || !cfg) return null;
+  const at = projector();
+  let best: 0 | 1 | null = null;
+  let dist = 9;
+  for (const end of [0, 1] as const) {
+    const c = at(end ? profile.b : profile.a);
+    const d = Math.hypot(c.x - px, c.y - py);
+    if (c.w > 0 && d < dist) [best, dist] = [end, d];
+  }
+  return best;
+}
+
+/** A press on the canvas: grab an end of the profile, or place a line with the profile tool. Whether it was taken. */
+function profilePress(e: PointerEvent): boolean {
+  if (!sim || building || !cfg) return false;
+  const r = canvas.getBoundingClientRect();
+  const [px, py] = [e.clientX - r.left, e.clientY - r.top];
+  if (profileDraft && profileDraft.id === -1) {
+    // The second click of a line placed by clicks.
+    [profileDraft.x, profileDraft.y] = e.shiftKey ? snapAngle(profileDraft.x0, profileDraft.y0, px, py) : [px, py];
+    finishDraft();
+    return true;
+  }
+  if (tool !== 'profile' && tool !== null) return false;
+  const end = profileEndNear(px, py);
+  if (end !== null) {
+    const p = end ? profile!.b : profile!.a;
+    profileGrab = { id: e.pointerId, end, depth: flatView() ? view.dist : projector()(p).w };
+    return true;
+  }
+  if (tool !== 'profile') return false;
+  // In the volume view the line lies on the plane facing the camera through the point orbited;
+  // with Alt the start is on the gas seen under the press (with none there, on that plane).
+  const onGas = !flatView() && e.altKey;
+  const draftNow = { id: e.pointerId, x0: px, y0: py, a: onGas ? null : profilePoint(px, py, view.dist), depth: view.dist, x: px, y: py, alt: null };
+  profileDraft = draftNow;
+  if (onGas) {
+    void gasDepth(px, py).then((d) => {
+      if (profileDraft !== draftNow) return;
+      draftNow.depth = d ?? view.dist;
+      draftNow.a = profilePoint(px, py, draftNow.depth);
+      if (draftNow.id === -2) finishDraft();
+      else drawProfileLine();
+    });
+  }
+  drawProfileLine();
+  return true;
+}
+
+/** The pointer moved: a line being placed, or an end being dragged, follows it. Whether it was taken. */
+function profileMove(e: PointerEvent, pressed: number): boolean {
+  const r = canvas.getBoundingClientRect();
+  const [px, py] = [e.clientX - r.left, e.clientY - r.top];
+  const d = profileDraft;
+  if (d && d.id !== -2 && (d.id === e.pointerId || (d.id === -1 && pressed === 0))) {
+    [d.x, d.y] = e.shiftKey ? snapAngle(d.x0, d.y0, px, py) : [px, py];
+    // Alt in the volume view: the end on the gas under the pointer, read one at a time.
+    d.alt = null;
+    if (e.altKey && !flatView() && !profilePicking) {
+      profilePicking = true;
+      const [x, y] = [d.x, d.y];
+      void gasDepth(x, y)
+        .then((depth) => {
+          if (profileDraft === d && depth !== null && d.x === x && d.y === y) d.alt = profilePoint(x, y, depth);
+          drawProfileLine();
+        })
+        .finally(() => (profilePicking = false));
+    }
+    drawProfileLine();
+    return true;
+  }
+  const g = profileGrab;
+  if (g && g.id === e.pointerId && profile) {
+    const [x, y] = e.shiftKey ? snapFrom(g.end, px, py) : [px, py];
+    const p = profilePoint(x, y, g.depth);
+    const c = clipSegment(g.end ? profile.a : p, g.end ? p : profile.b, cfg.ndim);
+    if (c) {
+      profile.a = c[0];
+      profile.b = c[1];
+      requestProfile();
+    }
+    drawProfileLine();
+    return true;
+  }
+  if (pressed === 0) profileLineHover(e);
+  return false;
+}
+
+/** Shift while an end is dragged: the line kept at 15° steps on screen, about its other end. */
+function snapFrom(end: 0 | 1, px: number, py: number): [number, number] {
+  const o = projector()(end ? profile!.a : profile!.b);
+  return snapAngle(o.x, o.y, px, py);
+}
+
+function profileRelease(e: PointerEvent) {
+  const d = profileDraft;
+  if (d && d.id === e.pointerId) {
+    if (e.type !== 'pointerup') profileDraft = null;
+    // A press let go where it began is a click: the end is placed with the next one.
+    else if (Math.hypot(d.x - d.x0, d.y - d.y0) < 5) d.id = -1;
+    else finishDraft();
+    drawProfileLine();
+  }
+  if (profileGrab && profileGrab.id === e.pointerId) {
+    profileGrab = null;
+    requestProfile();
+  }
+}
+
+/** Place the line being drawn, once its start is known. */
+function finishDraft() {
+  const d = profileDraft;
+  if (!d) return;
+  if (!d.a) {
+    // The gas under the press is still being read: placed when it is (profilePress).
+    d.id = -2;
+    return;
+  }
+  profileDraft = null;
+  const b = d.alt ?? profilePoint(d.x, d.y, d.depth);
+  const c = clipSegment(d.a, b, cfg.ndim);
+  if (!c) {
+    notice('That line does not cross the box');
+    drawProfileLine();
+    return;
+  }
+  const keep = profile ? { field: profile.field, species: profile.species, log: profile.log } : { field: view.field, species: view.species, log: null };
+  profile = { a: c[0], b: c[1], ...keep, dims: cfg.ndim };
+  profileData = null;
+  profileRange = null;
+  profileHover = -1;
+  openProfilePop(true);
+  requestProfile();
+  drawProfileLine();
+}
+
+/** Close the profile: its line and its panel. */
+function closeProfile() {
+  profile = null;
+  profileData = null;
+  profileDraft = null;
+  profileGrab = null;
+  profileHover = -1;
+  profilePop.hidden = true;
+  drawProfileLine();
+}
+
+/** The pointer over the canvas, nothing pressed: on the profile's line it marks the sample there in the plot. */
+let profileHoverFromLine = false;
+function profileLineHover(e: PointerEvent | null) {
+  let k = -1;
+  let px = 0;
+  let py = 0;
+  if (e) {
+    const r = canvas.getBoundingClientRect();
+    [px, py] = [e.clientX - r.left, e.clientY - r.top];
+  }
+  if (e && profile && profileData && !profileDraft && !profileGrab) {
+    const at = projector();
+    const [A, B] = [at(profile.a), at(profile.b)];
+    const [dx, dy] = [B.x - A.x, B.y - A.y];
+    const len2 = dx * dx + dy * dy;
+    if (A.w > 0 && B.w > 0 && len2 > 1) {
+      const t = Math.min(1, Math.max(0, ((px - A.x) * dx + (py - A.y) * dy) / len2));
+      if (Math.hypot(A.x + t * dx - px, A.y + t * dy - py) < 6) k = Math.round(t * (profileData.s.length - 1));
+    }
+  }
+  // An end that can be dragged shows a grab cursor.
+  canvas.classList.toggle('on-profile-end', !!e && (tool === 'profile' || tool === null) && profileEndNear(px, py) !== null);
+  if (k < 0 && !profileHoverFromLine) return;
+  profileHoverFromLine = k >= 0;
+  if (k !== profileHover) {
+    profileHover = k;
+    drawProfilePop();
+    drawProfileLine();
+  }
+}
+
+/** The line on the canvas: the one being placed, or the profile on show with its ends and tenths. */
+let profileLineDrawn = '';
+function drawProfileLine() {
+  let html = '';
+  if (cfg && (profileDraft || profile)) {
+    const at = projector();
+    const seg = (A: { x: number; y: number }, B: { x: number; y: number }) => `<line class="trace" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" />`;
+    const d = profileDraft;
+    if (d) {
+      const A = d.a ? at(d.a) : { x: d.x0, y: d.y0, w: 1 };
+      const B = d.alt ? at(d.alt) : { x: d.x, y: d.y, w: 1 };
+      if (A.w > 0) html += seg(A, B) + `<circle class="end start" cx="${A.x}" cy="${A.y}" r="4" /><circle class="end" cx="${B.x}" cy="${B.y}" r="4" />`;
+    } else if (profile) {
+      const p = profile;
+      const [A, B] = [at(p.a), at(p.b)];
+      if (A.w > 0 && B.w > 0) {
+        const [dx, dy] = [B.x - A.x, B.y - A.y];
+        const len = Math.hypot(dx, dy) || 1;
+        const [nx, ny] = [-dy / len, dx / len];
+        let ticks = '';
+        for (let i = 1; i < 10; i++) {
+          // Each tenth of the line, as the box holds it: foreshortened as the view sees it.
+          const c = at(p.a.map((v, k) => v + (i / 10) * (p.b[k] - v)));
+          const h = i === 5 ? 5 : 3;
+          ticks += `M${c.x - h * nx} ${c.y - h * ny}L${c.x + h * nx} ${c.y + h * ny}`;
+        }
+        html += seg(A, B) + `<path class="ticks" d="${ticks}" />`;
+        if (profileHover >= 0 && profileData) {
+          const t = profileData.s.length > 1 ? profileHover / (profileData.s.length - 1) : 0;
+          const c = at(p.a.map((v, k) => v + t * (p.b[k] - v)));
+          html += `<circle class="mark" cx="${c.x}" cy="${c.y}" r="4" />`;
+        }
+        html += `<circle class="end start" cx="${A.x}" cy="${A.y}" r="5" /><circle class="end" cx="${B.x}" cy="${B.y}" r="5" />`;
+      }
+    }
+  }
+  if (html !== profileLineDrawn) $('profile-line').innerHTML = profileLineDrawn = html;
+}
+
+/** Ask for the profile on show to be sampled again (one read in flight; the latest wish next). */
+function requestProfile() {
+  profileWanted = true;
+  if (!profileBusy) void runProfile();
+}
+
+async function runProfile() {
+  const s = sim;
+  const p = profile;
+  profileWanted = false;
+  if (!s || !p || building) return;
+  if (p.dims !== cfg.ndim || spherical(cfg)) {
+    closeProfile();
+    return;
+  }
+  profileBusy = true;
+  profileAt = performance.now();
+  try {
+    const r = await profileOf(s, p.a, p.b, { field: p.field, species: p.species, projection: projecting() ? view.sliceAxis : null });
+    if (s === sim && p === profile) {
+      profileData = r;
+      // (The view's menu may have changed with the run: a new one loaded with the panel open.)
+      syncProfileMenu();
+      drawProfilePop();
+      drawProfileLine();
+    }
+  } catch {
+    // The run was rebuilt under the read: the next one finds the new one.
+  } finally {
+    profileBusy = false;
+    if (profileWanted) void runProfile();
+  }
+}
+
+/** Sample a field along the segment from a to b (fractions of the computed box): `n` samples, or two a finest cell. */
+async function profileOf(s: Simulation, a: Vec3, b: Vec3, o: { field: number; species: number; projection: number | null }, n?: number): Promise<ProfileSamples> {
+  const dims = gridDims(cfg);
+  const cells = Math.hypot(...[0, 1, 2].map((k) => (b[k] - a[k]) * dims[k]));
+  const count = sampleCount(cells, n);
+  const r = await renderer.profile(s, samplePoints(a, b, count), o);
+  const axes = cfg.ndim === 3 ? [0, 1, 2] : [0, 1];
+  const [pa, pb] = [a, b].map((f) => axes.map((k) => fracPos(cfg, f[k], k)));
+  const sd = distances(pa, pb, count);
+  return { a: [...a] as Vec3, b: [...b] as Vec3, ...o, s: sd, length: sd[count - 1], ...r };
+}
+
+/** The name of a field (a mass fraction by its species), as projected when it is. */
+function profileFieldName(field: number, species: number, projected: boolean): string {
+  if (field === MASS_FRACTION_FIELD) return `X(${speciesLabel(cfg.problem.species?.[species] ?? '?')})`;
+  return projected && field === 0 ? 'Column density' : FIELDS[field];
+}
+/** What a profiled field measures: density projected is a column density. */
+const profileMeasure = (field: number, projected: boolean): Measure => (projected && field === 0 ? [1, -2, 0] : fieldMeasure(field, cfg.eosParams.gamma));
+/** The plot's value axis is logarithmic: as chosen, or as the view shows the field (fields of either sign never). */
+function profileLog(p: PlacedProfile): boolean {
+  if (LINEAR_FIELDS.has(p.field)) return false;
+  if (p.log !== null) return p.log;
+  return p.field === view.field ? view.log : true;
+}
+
+// The panel: the field, the scale, the plot, and the line's ends.
+const profilePop = $('profile-pop');
+const profileCanvas = profilePop.querySelector('canvas')!;
+const profileSel = $<HTMLSelectElement>('profile-field');
+/** The panel has been moved by hand: it stays where it was put. */
+let profilePopMoved = false;
+
+/** Open the panel: beside the line's end when the line is new (or the panel was not moved). */
+function openProfilePop(place: boolean) {
+  const was = profilePop.hidden;
+  profilePop.hidden = false;
+  syncProfileMenu();
+  if ((was || place) && !profilePopMoved && !phone.matches && profile) {
+    const at = projector();
+    const r = canvas.getBoundingClientRect();
+    const [A, B] = [at(profile.a), at(profile.b)];
+    const pw = profilePop.offsetWidth;
+    const ph = profilePop.offsetHeight;
+    // In the view area (left of the rail), beside the line: right of it, left of it, below or
+    // above it, the first that fits; else in the view area's lower left corner.
+    const [x0, x1] = [r.left + 8, $('rail').getBoundingClientRect().left - 8];
+    const [y0, y1] = [r.top + 8, Math.min(r.bottom, window.innerHeight) - 8];
+    const [lx, hx] = [Math.min(A.x, B.x) + r.left, Math.max(A.x, B.x) + r.left];
+    const [ly, hy] = [Math.min(A.y, B.y) + r.top, Math.max(A.y, B.y) + r.top];
+    const midY = Math.min(y1 - ph, Math.max(y0, B.y + r.top - ph / 2));
+    const midX = Math.min(x1 - pw, Math.max(x0, B.x + r.left - pw / 2));
+    const spots: [number, number][] = [[hx + 24, midY], [lx - 24 - pw, midY], [midX, hy + 24], [midX, ly - 24 - ph]];
+    const [x, y] = spots.find(([sx, sy]) => sx >= x0 && sx + pw <= x1 && sy >= y0 && sy + ph <= y1) ?? [x0, y1 - ph];
+    profilePop.style.left = `${Math.round(Math.max(4, Math.min(window.innerWidth - pw - 4, x)))}px`;
+    profilePop.style.top = `${Math.round(Math.max(4, Math.min(window.innerHeight - ph - 4, y)))}px`;
+  }
+  drawProfilePop();
+}
+
+/** The panel's field menu: the view's, with what this run cannot show left out. */
+function syncProfileMenu() {
+  if (!profile) return;
+  const main = $<HTMLSelectElement>('field');
+  if (profileSel.dataset.from !== main.innerHTML) {
+    profileSel.innerHTML = main.innerHTML;
+    profileSel.dataset.from = main.innerHTML;
+  }
+  // (The options' states as the view's menu holds them now.)
+  for (const [i, o] of [...main.options].entries()) {
+    const q = profileSel.options[i];
+    if (!q) continue;
+    q.disabled = o.disabled;
+    q.hidden = o.hidden;
+  }
+  profileSel.value = profile.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${profile.species}` : String(profile.field);
+  // A view that holds one field has only that one on the GPU.
+  profileSel.disabled = !!cfg.viewBaked;
+  profileSel.title = cfg.viewBaked ? 'A view that holds one field can profile only that field: change the field shown to profile another' : 'The field plotted along the line';
+  const log = $<HTMLInputElement>('profile-log');
+  log.checked = profileLog(profile);
+  log.disabled = LINEAR_FIELDS.has(profile.field);
+}
+
+profileSel.addEventListener('change', () => {
+  if (!profile) return;
+  const [f, k] = profileSel.value.split(':').map(Number);
+  profile.field = f;
+  profile.species = k || 0;
+  profile.log = null;
+  profileRange = null;
+  syncProfileMenu();
+  drawProfilePop();
+  requestProfile();
+});
+$<HTMLInputElement>('profile-log').addEventListener('change', (e) => {
+  if (!profile) return;
+  profile.log = (e.target as HTMLInputElement).checked;
+  profileRange = null;
+  drawProfilePop();
+});
+$('profile-swap').addEventListener('click', () => {
+  if (!profile) return;
+  [profile.a, profile.b] = [profile.b, profile.a];
+  profileHover = -1;
+  requestProfile();
+});
+$('profile-close').addEventListener('click', () => closeProfile());
+$('profile-csv').addEventListener('click', () => {
+  const d = profileData;
+  if (!d) return;
+  const u = units();
+  const projected = d.projection !== null;
+  const m = profileMeasure(d.field, projected);
+  const unit = (l: string) => (l ? ` (${l})` : '');
+  const csv = profileCsv(
+    Array.from(d.s, (v) => v * u.scale('length')),
+    Array.from(d.values, (v) => v * u.scale(m)),
+    d.levels,
+    { distance: `distance${unit(u.label('length'))}`, value: `${profileFieldName(d.field, d.species, projected)}${unit(u.label(m))}` },
+  );
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `shaderous-${cfg.problem.id}-${cfg.ndim}d-${cfg.n}-profile.csv`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
+});
+// Hovering the plot marks the sample there on the line.
+profileCanvas.addEventListener('pointermove', (e) => {
+  if (!profileData) return;
+  const r = profileCanvas.getBoundingClientRect();
+  const k = sampleAt(e.clientX - r.left, r.width, profileData.s);
+  profileHoverFromLine = false;
+  if (k !== profileHover) {
+    profileHover = k;
+    drawProfilePop();
+    drawProfileLine();
+  }
+});
+profileCanvas.addEventListener('pointerleave', () => {
+  profileHover = -1;
+  drawProfilePop();
+  drawProfileLine();
+});
+// The panel is moved by its title bar.
+{
+  const head = profilePop.querySelector<HTMLElement>('.head')!;
+  let grab: { dx: number; dy: number } | null = null;
+  head.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest('button') || phone.matches) return;
+    head.setPointerCapture(e.pointerId);
+    const r = profilePop.getBoundingClientRect();
+    grab = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+  });
+  head.addEventListener('pointermove', (e) => {
+    if (!grab) return;
+    profilePopMoved = true;
+    const x = Math.max(4 - profilePop.offsetWidth / 2, Math.min(window.innerWidth - profilePop.offsetWidth / 2, e.clientX - grab.dx));
+    const y = Math.max(0, Math.min(window.innerHeight - 24, e.clientY - grab.dy));
+    profilePop.style.left = `${Math.round(x)}px`;
+    profilePop.style.top = `${Math.round(y)}px`;
+  });
+  const drop = () => (grab = null);
+  head.addEventListener('pointerup', drop);
+  head.addEventListener('pointercancel', drop);
+}
+
+/** Draw the panel's plot and words from the samples last read. */
+function drawProfilePop() {
+  if (profilePop.hidden || !profile || !cfg) return;
+  const p = profile;
+  const d = profileData && profileData.field === p.field && profileData.species === p.species ? profileData : null;
+  const u = units();
+  const projected = d ? d.projection !== null : projecting();
+  const m = profileMeasure(p.field, projected);
+  const unit = u.label(m);
+  const title = profilePop.querySelector('.title')!;
+  const text = `${profileFieldName(p.field, p.species, projected)}${unit ? `, ${unit}` : ''}${projected ? ` (projected along ${'xyz'[d?.projection ?? view.sliceAxis]})` : ''}`;
+  if (title.textContent !== text) title.textContent = text;
+  const log = profileLog(p);
+  const w = profileCanvas.clientWidth;
+  const h = profileCanvas.clientHeight;
+  if (!w || !h) return;
+  const dpr = window.devicePixelRatio || 1;
+  if (profileCanvas.width !== Math.round(w * dpr) || profileCanvas.height !== Math.round(h * dpr)) {
+    profileCanvas.width = Math.round(w * dpr);
+    profileCanvas.height = Math.round(h * dpr);
+  }
+  const ctx = profileCanvas.getContext('2d')!;
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const cs = getComputedStyle(document.documentElement);
+  const color = (v: string, f: string) => cs.getPropertyValue(v).trim() || f;
+  const colors = { line: color('--accent', '#33d6ff'), dim: color('--dim', '#8792a8'), frame: color('--line', '#262c3a'), mark: color('--text', '#d6dbe6') };
+  const ls = u.scale('length');
+  const vs = u.scale(m);
+  const s = d ? Array.from(d.s, (v) => v * ls) : [];
+  const values = d ? Array.from(d.values, (v) => v * vs) : [];
+  // The value axis eases toward the values' range while the run goes, and widens at once.
+  const key = `${p.field}:${p.species}:${log}:${projected}:${unitSys}`;
+  const target = d ? valueRange(values, log, d.solid) : null;
+  if (target) {
+    const r = profileRange;
+    if (!r || r.key !== key) profileRange = { key, range: target };
+    else {
+      const ease = (cur: number, to: number, grow: boolean) => (grow ? to : cur + 0.3 * (to - cur));
+      r.range = [ease(r.range[0], target[0], target[0] < r.range[0]), ease(r.range[1], target[1], target[1] > r.range[1])];
+    }
+  }
+  drawProfilePlot(ctx, w, h, { s, values, solid: d?.solid, levels: cfg.amrLevels > 0 ? d?.levels : undefined, log, range: target ? profileRange!.range : null, mark: profileHover, colors });
+  // Under the plot: the value hovered, or the line's ends and length.
+  const foot = profilePop.querySelector('.foot')!;
+  const lu = u.label('length');
+  const pos = (f: Vec3) => `(${(cfg.ndim === 3 ? [0, 1, 2] : [0, 1]).map((k) => fmt3(fracPos(cfg, f[k], k) * ls)).join(', ')})`;
+  let line: string;
+  if (d && profileHover >= 0 && profileHover < values.length) {
+    const k = profileHover;
+    const v = d.solid[k] ? 'solid' : u.fmt(d.values[k], m);
+    line = `at ${fmt3(s[k])}${lu ? ` ${lu}` : ''}: ${v}${cfg.amrLevels > 0 ? `, level ${d.levels[k]}` : ''}`;
+  } else {
+    line = `${pos(p.a)} to ${pos(p.b)}${d ? `, ${fmt3(d.length * ls)}${lu ? ` ${lu}` : ''} long` : ''}`;
+  }
+  if (foot.textContent !== line) foot.textContent = line;
+}
+
+/** Each frame: the line where the view puts it, and the samples read again now and then. */
+function updateProfile(now: number) {
+  drawProfileLine();
+  if (!profile || profileBusy || profilePop.hidden) return;
+  if (now - profileAt > (running ? 250 : 1000)) requestProfile();
+}
+
+/** The API's profile (api.ts profile()): along a line given in fractions of the box, or the one on show. */
+async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | number; n?: number; projection?: number | null; show?: boolean }) {
+  const s = sim;
+  if (!s) throw new Error('no simulation is loaded');
+  if (spherical(cfg)) throw new Error('profiles are not available on a spherical grid yet');
+  let a: Vec3;
+  let b: Vec3;
+  if (o.from === undefined && o.to === undefined) {
+    if (!profile) throw new Error('no profile is on show in the page: give `from` and `to`');
+    [a, b] = [profile.a, profile.b];
+  } else {
+    const point = (v: unknown, name: string): number[] => {
+      if (!Array.isArray(v) || v.length < cfg.ndim || v.length > 3 || !v.every((x) => typeof x === 'number' && Number.isFinite(x))) {
+        throw new Error(`profile: "${name}" takes [x, y${cfg.ndim === 3 ? ', z' : ''}] in fractions of the box`);
+      }
+      return v;
+    };
+    const c = clipSegment(point(o.from, 'from'), point(o.to, 'to'), cfg.ndim);
+    if (!c) throw new Error('profile: that line does not cross the box');
+    [a, b] = c;
+  }
+  const fallback = profile && o.from === undefined ? { field: profile.field, species: profile.species } : { field: view.field, species: view.species };
+  const f = resolveField(o.field, cfg.problem.species ?? [], fallback);
+  const opt = [...$<HTMLSelectElement>('field').options].find((q) => q.value === String(f.field));
+  // (What the view's menu leaves out: disabled, or hidden with its group, as a magnetic field without one.)
+  if (opt && (opt.disabled || opt.hidden || (opt.parentElement as HTMLOptGroupElement | null)?.hidden)) throw new Error(`profile: ${FIELDS[f.field]} is not available in this run`);
+  if (cfg.viewBaked && (f.field !== view.field || (f.field === MASS_FRACTION_FIELD && f.species !== view.species))) {
+    throw new Error(`profile: a view that holds one field can profile only that field (${viewFieldName()}); change the field shown first`);
+  }
+  let projection: number | null = null;
+  if (o.projection !== undefined && o.projection !== null) {
+    if (cfg.ndim !== 3) throw new Error('profile: a 2D run has nothing to project');
+    if (![0, 1, 2].includes(o.projection)) throw new Error('profile: "projection" is an axis: 0, 1 or 2');
+    projection = o.projection;
+  }
+  const r = await profileOf(s, a, b, { ...f, projection }, o.n);
+  if (o.show) {
+    profile = { a, b, field: f.field, species: f.species, log: null, dims: cfg.ndim };
+    profileData = r;
+    profileRange = null;
+    profileHover = -1;
+    openProfilePop(true);
+    drawProfileLine();
+  }
+  return {
+    from: a.slice(0, cfg.ndim),
+    to: b.slice(0, cfg.ndim),
+    field: profileFieldName(f.field, f.species, projection !== null),
+    index: f.field,
+    ...(f.field === MASS_FRACTION_FIELD ? { species: cfg.problem.species![f.species] } : {}),
+    projection,
+    length: r.length,
+    s: r.s,
+    values: r.values,
+    levels: r.levels,
+    solid: r.solid,
+  };
 }
 
 // --- query tool ---------------------------------------------------------------------------
@@ -4097,7 +4743,7 @@ function brushDepth(): number {
 // a press (a tenth with Shift); Home puts it back on the plane through the point orbited.
 window.addEventListener('keydown', (e) => {
   if (!['ArrowUp', 'ArrowDown', 'Home'].includes(e.key) || e.ctrlKey || e.metaKey || e.altKey) return;
-  if (!tool || tool === 'query' || tool === 'obstacle' || !cfg || cfg.ndim !== 3 || flatView()) return;
+  if (!tool || readsOnly(tool) || tool === 'obstacle' || !cfg || cfg.ndim !== 3 || flatView()) return;
   // (Not where the keys mean something already: a field, a slider, a menu. A button, the tool's
   // own just pressed, has no use for them.)
   const t = e.target as HTMLElement | null;
@@ -4119,8 +4765,8 @@ window.addEventListener('keydown', (e) => {
 function updateGuides() {
   // The brush stays under the pointer while the view moves beneath it (dragged with another
   // button, or zoomed): drawn again where the pointer is now, so the guides go with it.
-  if (hover && tool && tool !== 'query' && tool !== 'obstacle' && !stroke) drawBrush(hover.x, hover.y);
-  const on = !!tool && tool !== 'obstacle' && tool !== 'query' && !!cfg && cfg.ndim === 3 && !flatView() && $('brush').style.display !== 'none';
+  if (hover && tool && !readsOnly(tool) && tool !== 'obstacle' && !stroke) drawBrush(hover.x, hover.y);
+  const on = !!tool && tool !== 'obstacle' && !readsOnly(tool) && !!cfg && cfg.ndim === 3 && !flatView() && $('brush').style.display !== 'none';
   renderer.guides = on ? guideAt : null;
   // Its ball, with the contour levels drawn on its surface (render/raymarch.wgsl).
   const kind = stroke?.kind ?? tool;
@@ -4130,7 +4776,7 @@ function updateGuides() {
 /** Outline of the brush under the pointer, and the arrow of a velocity stroke. */
 function drawBrush(px?: number, py?: number) {
   const svg = $('brush');
-  if (!tool || !cfg || tool === 'query') {
+  if (!tool || !cfg || readsOnly(tool)) {
     svg.style.display = 'none';
     return;
   }
@@ -4808,7 +5454,7 @@ function advanceStroke(now: number) {
     placeStar(at.pos, vel);
     return;
   }
-  if (s.kind === 'query') return; // the query tool reads, and never starts a stroke
+  if (s.kind === 'query' || s.kind === 'profile') return; // the tools that read never start a stroke
   const base = { kind: s.kind, radius: q.size, softness: q.softness, amount: 0, vel: [0, 0, 0] as Vec3 };
   if (s.kind === 'velocity') {
     if (!s.released) return;
@@ -5632,6 +6278,7 @@ function tick(now: number) {
       framesDrawn++;
     }
     drawSources();
+    updateProfile(now);
   }
   gpu.device.queue.submit([enc.finish()]);
   s.submitted();
@@ -5821,6 +6468,7 @@ const api = installApi(
     viewFile: viewState,
     viewProbe,
     settleView,
+    profile: apiProfile,
     restart: () => restartRun(),
     running: () => running,
     finished: () => finished,

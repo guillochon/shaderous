@@ -11,7 +11,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { parseArgs } from 'node:util';
-import { debrisSummary, fetchSlice, lowerPriority, openSession, saveAthdf, sendMeshFiles, uploadAthdf, viewAthdf } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, saveAthdf, sendMeshFiles, sliceArray, uploadAthdf, viewAthdf } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const { values: o } = parseArgs({
@@ -134,6 +134,30 @@ const TOOLS = [
   {
     name: 'probe',
     run: async ({ points }) => text(await call('probe', points)),
+  },
+  {
+    name: 'profile',
+    async run({ from, to, field, n, projection, show, include_values, save_path }) {
+      // Out of the page as float32 bytes, as slice's values are.
+      const { arrays, ...head } = await call('profile', { from, to, field, n, projection, show, encoding: 'base64' });
+      const [s, values, level] = ['s', 'values', 'level'].map((k) => sliceArray({ array: arrays[k] }));
+      const out = { ...head };
+      delete out.solid;
+      if (head.solid) out.solid_samples = head.solid.filter(Boolean).length;
+      if (save_path) {
+        const file = resolvePath(save_path);
+        mkdirSync(path.dirname(file), { recursive: true });
+        if (/\.npy$/i.test(file)) writeFileSync(file, npyBytes(values, [values.length]));
+        else if (/\.csv$/i.test(file)) writeFileSync(file, 's,value,level\n' + Array.from(values, (v, i) => `${s[i]},${v},${level[i]}`).join('\n') + '\n');
+        else writeFileSync(file, JSON.stringify({ ...head, s: Array.from(s), values: Array.from(values), level: Array.from(level) }) + '\n');
+        return text({ ...out, saved: file });
+      }
+      if (include_values ?? values.length <= 256) {
+        const r5 = (a) => Array.from(a, (v) => +v.toPrecision(5));
+        Object.assign(out, { s: r5(s), values: r5(values), level: Array.from(level) });
+      }
+      return text(out);
+    },
   },
   {
     name: 'screenshot',
