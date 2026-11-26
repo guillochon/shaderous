@@ -3446,9 +3446,15 @@ let profileRange2: { key: string; range: [number, number]; at: number } | null =
  * view the gas under the press is read back first), how deep the start lies along the view, the
  * pointer, and the end on the gas under it (Alt, volume view). `id` is the pointer pressing, -1
  * once the press was a click (the end is placed by a second one), -2 once the end is placed but
- * the start is still being read.
+ * the start is still being read. `t0`: when the press came (performance.now()).
  */
-let profileDraft: { id: number; x0: number; y0: number; a: Vec3 | null; depth: number; x: number; y: number; alt: Vec3 | null } | null = null;
+let profileDraft: { id: number; t0: number; x0: number; y0: number; a: Vec3 | null; depth: number; x: number; y: number; alt: Vec3 | null } | null = null;
+/**
+ * A press let go within this long (ms) is a click, however far the pointer slipped meanwhile:
+ * the end is then placed by a second click, not where the press was let go (which drew a tiny
+ * line when a click wobbled).
+ */
+const PROFILE_CLICK_MS = 400;
 /** An end of a line being dragged, and how deep it lies along the view. */
 let profileGrab: { id: number; line: number; end: 0 | 1; depth: number } | null = null;
 /** One read of the gas under the pointer at a time (Alt in the volume view). */
@@ -3519,7 +3525,7 @@ function profilePress(e: PointerEvent): boolean {
   // In the volume view the line lies on the plane facing the camera through the point orbited;
   // with Alt the start is on the gas seen under the press (with none there, on that plane).
   const onGas = !flatView() && e.altKey;
-  const draftNow = { id: e.pointerId, x0: px, y0: py, a: onGas ? null : profilePoint(px, py, view.dist), depth: view.dist, x: px, y: py, alt: null };
+  const draftNow = { id: e.pointerId, t0: performance.now(), x0: px, y0: py, a: onGas ? null : profilePoint(px, py, view.dist), depth: view.dist, x: px, y: py, alt: null };
   profileDraft = draftNow;
   if (onGas) {
     void gasDepth(px, py).then((d) => {
@@ -3584,8 +3590,9 @@ function profileRelease(e: PointerEvent) {
   const d = profileDraft;
   if (d && d.id === e.pointerId) {
     if (e.type !== 'pointerup') profileDraft = null;
-    // A press let go where it began is a click: the end is placed with the next one.
-    else if (Math.hypot(d.x - d.x0, d.y - d.y0) < 5) d.id = -1;
+    // A press let go where it began, or soon after it came, is a click: the end is placed with
+    // the next one.
+    else if (Math.hypot(d.x - d.x0, d.y - d.y0) < 5 || performance.now() - d.t0 < PROFILE_CLICK_MS) d.id = -1;
     else finishDraft();
     drawProfileLine();
   }
