@@ -2181,6 +2181,11 @@ export class Sim implements Simulation {
     const v = (t: GPUTexture) => t.createView();
     setLoadStage(COMPILE_STAGE);
     compileSetup(['uniform', cfg]);
+    // The hydro passes are the slowest to compile, and buildHydro asks for them only once the
+    // solver and the timestep's reduction have compiled: asked for here, they compile alongside
+    // those, and buildHydro finds them compiled or compiling. On a cold shader cache the update
+    // alone took 2.5 s, and was asked for 1.2 s into the load of a 2D Kelvin-Helmholtz run.
+    sim.prefetchHydro();
     const hydro = (async () => {
       // Self-gravity is 3D only. A 2D run keeps a 2^3 placeholder solver so the shared bindings
       // (potential, multipoles) still exist; it is never dispatched.
@@ -2261,6 +2266,18 @@ export class Sim implements Simulation {
   }
 
   /** (Re)build every pipeline that depends on the EOS, Riemann solver or limiter. */
+  /** Ask for buildHydro's slowest pipelines, with its arguments, without waiting for them. */
+  private prefetchHydro() {
+    const d = this.device;
+    const c = this.cfg;
+    if (c.problem.mhd) return;
+    const slots = hydroSlots(c);
+    const dims = [this.nx, this.ny, this.nz];
+    computePipeline(d, assemble('hydro/rates.wgsl', slots), 'timestep rates').catch(() => {});
+    RegionPass.prefetch(d, assemble('hydro/predict.wgsl', slots), 'predict', dims);
+    RegionPass.prefetch(d, assemble('hydro/update.wgsl', slots), 'update', dims, {}, true);
+  }
+
   async buildHydro() {
     const d = this.device;
     const c = this.cfg;

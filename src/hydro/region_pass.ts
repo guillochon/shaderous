@@ -90,31 +90,11 @@ export class RegionPass {
    * device's workgroup memory, and gathers if not.
    */
   static async create(device: GPUDevice, code: string, label: string, dims: number[], constants: Record<string, number> = {}, tile = false): Promise<RegionPass> {
-    const split = splitRegions(dims, tile);
-    if (tile) {
-      const flat = dims[2] === 1;
-      const fits = tileBytes(split.shell[0].wg, flat) <= device.limits.maxComputeWorkgroupStorageSize;
-      constants = { TILE: fits ? 1 : 0, TILE_FLAT: flat ? 1 : 0, ...constants };
-    }
+    const { split, wanted } = RegionPass.variants(device, code, label, dims, constants, tile);
     const pass = new RegionPass(device);
-    // One pipeline per distinct (variant, workgroup size).
-    const wanted = new Map<string, { interior: boolean; wg: number[]; list: Dispatch[] }>();
-    const want = (interior: boolean, r: Dispatch) => {
-      const key = `${interior}:${r.wg.join('x')}`;
-      if (!wanted.has(key)) wanted.set(key, { interior, wg: r.wg, list: [] });
-      wanted.get(key)!.list.push(r);
-    };
-    if (split.interior) want(true, split.interior);
-    for (const r of split.shell) want(false, r);
     pass.parts = await Promise.all(
       [...wanted.values()].map(async (w) => {
-        const pipeline = await computePipeline(device, code, `${label} (${w.interior ? 'interior' : 'shell'} ${w.wg.join('x')})`, {
-          ...constants,
-          INTERIOR: w.interior ? 1 : 0,
-          WGX: w.wg[0],
-          WGY: w.wg[1],
-          WGZ: w.wg[2],
-        });
+        const pipeline = await w.pipeline;
         const regions = w.list.map((r) => {
           const buffer = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
           const end = r.origin.map((o, a) => o + r.size[a]);
@@ -129,6 +109,43 @@ export class RegionPass {
       }),
     );
     return pass;
+  }
+
+  /**
+   * Ask for the pipelines create() would build with these arguments, and build nothing else:
+   * they compile in the background, and a later create() finds them compiled or compiling
+   * (gpu/device.ts keeps them by their code and constants).
+   */
+  static prefetch(device: GPUDevice, code: string, label: string, dims: number[], constants: Record<string, number> = {}, tile = false) {
+    for (const w of RegionPass.variants(device, code, label, dims, constants, tile).wanted.values()) w.pipeline.catch(() => {});
+  }
+
+  /** The regions of a pass and one pipeline per distinct (variant, workgroup size), asked for. */
+  private static variants(device: GPUDevice, code: string, label: string, dims: number[], constants: Record<string, number>, tile: boolean) {
+    const split = splitRegions(dims, tile);
+    if (tile) {
+      const flat = dims[2] === 1;
+      const fits = tileBytes(split.shell[0].wg, flat) <= device.limits.maxComputeWorkgroupStorageSize;
+      constants = { TILE: fits ? 1 : 0, TILE_FLAT: flat ? 1 : 0, ...constants };
+    }
+    const wanted = new Map<string, { interior: boolean; wg: number[]; list: Dispatch[]; pipeline: Promise<GPUComputePipeline> }>();
+    const want = (interior: boolean, r: Dispatch) => {
+      const key = `${interior}:${r.wg.join('x')}`;
+      if (!wanted.has(key)) {
+        const pipeline = computePipeline(device, code, `${label} (${interior ? 'interior' : 'shell'} ${r.wg.join('x')})`, {
+          ...constants,
+          INTERIOR: interior ? 1 : 0,
+          WGX: r.wg[0],
+          WGY: r.wg[1],
+          WGZ: r.wg[2],
+        });
+        wanted.set(key, { interior, wg: r.wg, list: [], pipeline });
+      }
+      wanted.get(key)!.list.push(r);
+    };
+    if (split.interior) want(true, split.interior);
+    for (const r of split.shell) want(false, r);
+    return { split, wanted };
   }
 
   groups(resources: Record<number, Bindable>): RegionGroups {
