@@ -614,7 +614,7 @@ function syncTools() {
   if (noProfile && tool === 'profile') tool = null;
   for (const t of TOOLS) {
     const b = $<HTMLButtonElement>(`tool-${t.kind}`);
-    b.hidden = noField && FIELD_TOOLS.includes(t.kind);
+    b.hidden = (noField && FIELD_TOOLS.includes(t.kind)) || (t.kind === 'star' && !!noStar);
     b.setAttribute('aria-pressed', String(tool === t.kind));
     b.disabled = (t.kind === 'temperature' && noTemp) || (t.kind === 'star' && !!noStar) || (t.kind === 'obstacle' && !!noObstacle) || (t.kind === 'profile' && !!noProfile);
     b.title = !b.disabled ? t.title : t.kind === 'star' ? noStar : t.kind === 'obstacle' ? noObstacle : t.kind === 'profile' ? noProfile : 'This equation of state ties the temperature to the density';
