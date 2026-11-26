@@ -852,6 +852,8 @@ holds:
     document after them;
   - `regrid`: a re-mesh of the adaptive mesh, as the steps the mesh took (`steps`: each block
     it refined or merged, in order, as `[what, level, coordinates...]`), a few dozen bytes;
+  - `bins`: per-block timesteps (`tbins`) paused their cycles for `pause` single steps,
+    because the last cycles saved too few block updates;
   - `clock`: the clock's stop changed (`stop`, the time the step reaching it is shortened to
     land on: the end time, a checkpoint, a scripted run's `until`), or a movie's frame time
     (`frame`);
@@ -868,7 +870,8 @@ Runs a session log again. It loads the setup the log started from, steps to each
 applies it. Then, with `untilSteps`, it runs on to that many steps. The adaptive mesh makes
 none of its own refinement checks meanwhile. Instead it re-meshes where the log says, taking
 the steps the log kept. That is what makes the replay exact: the step a live re-mesh lands
-on depends on when its check was read back from the GPU. (Logs of the first version kept every
+on depends on when its check was read back from the GPU. Per-block timesteps likewise pause
+their cycles where the log says, not where a read-back of their saving would. (Logs of the first version kept every
 leaf's refinement indicator for each re-mesh instead, about 30 kB each; they still replay.) GPU runs repeat to the bit on the same
 machine and browser, so the replay reaches the state the logged run reached. `stopped` says why
 it ended early, if the run went another way, for example by reaching its end time before an
@@ -878,10 +881,10 @@ This turns "it broke when I did this" into something that can be looked at. Save
 log, replay it up to just before the trouble, and inspect the state with `slice`, `probe` or
 `screenshot`.
 
-Two parts of a live run are not replayed exactly. Per-block timesteps (`tbins`) pause
-themselves for a while after a read-back of their saving, and that pause depends on timing.
-A change to the equation of state mid-run is replayed through the setting, not the conversion
-the page made.
+One part of a live run is not replayed exactly. A change to the equation of state mid-run is
+replayed through the setting, not the conversion the page made. (Logs written before pauses
+of per-block timesteps were logged hold none: a replay of one runs the cycles without pausing
+them.)
 
 ### `athdf(opts?) → { name, time, bytes, base64 }`
 

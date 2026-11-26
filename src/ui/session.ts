@@ -64,6 +64,13 @@ export type Action =
    */
   | { kind: 'regrid'; steps?: number[][]; indicators?: string }
   /**
+   * Per-block timesteps paused their cycles for `pause` single steps, because the last cycles
+   * saved too few block updates. The saving is read back from the GPU while the run goes on, so
+   * the step a pause lands on depends on timing; a replay pauses at the step logged instead of
+   * measuring it again.
+   */
+  | { kind: 'bins'; pause: number }
+  /**
    * The clock's stop changed: the time the step that reaches it is shortened to land on (the
    * end time, a checkpoint, a scripted run's `until`; null for none) and the frame time it is
    * held at (a movie's). A replay sets them at the same step, so its steps are the run's.

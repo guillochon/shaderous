@@ -346,6 +346,35 @@ test('a session the page played, edited with the pointer, replays to the bit', a
   expect([b.steps, b.t, b.mass, b.eTot, b.magnetic.eMag, b.magnetic.bMax]).toEqual([a.steps, a.t, a.mass, a.eTot, a.magnetic.eMag, a.magnetic.bMax]);
 });
 
+test('a session the page played with per-block timesteps replays to the bit', async ({ page }) => {
+  // The page playing on its own: the per-block timesteps pause their cycles when a read-back of
+  // their saving comes back, at a step that depends on timing (in the Evrard collapse they save
+  // too little within the first cycles). Each pause is logged, and the replay takes it from the log.
+  await page.goto('/?problem=evrard&dim=3&n=128&amr=2&tbins=2');
+  await page.evaluate(() => (window as any).shaderous.ready);
+  await call(page, 'play');
+  const frames = (k: number) => page.evaluate((k) => new Promise((r) => { let i = 0; const f = () => (++i >= k ? r(null) : requestAnimationFrame(f)); requestAnimationFrame(f); }), k);
+  const paused = async () => (await call(page, 'actions')).entries.some((e: any) => e.action.kind === 'bins');
+  for (const t0 = Date.now(); !(await paused()) && Date.now() - t0 < 180_000; ) await frames(10);
+  await frames(30);
+  await call(page, 'pause');
+  const a = await call(page, 'diagnostics');
+  const sa = await call(page, 'slice', { variable: 'rho', res: 128 });
+  const log = await call(page, 'actions');
+  expect(log.entries.map((e: any) => e.action.kind)).toContain('bins');
+
+  const r = await call(page, 'replay', log, { untilSteps: a.steps });
+  expect(r.stopped).toBeUndefined();
+  const b = await call(page, 'diagnostics');
+  expect([b.steps, b.t, b.mass, b.eTot]).toEqual([a.steps, a.t, a.mass, a.eTot]);
+  const sb = await call(page, 'slice', { variable: 'rho', res: 128 });
+  expect(sb.values).toEqual(sa.values);
+  // The replay logs the pauses it took from the log, at the same steps.
+  const again = await call(page, 'actions');
+  const binsOf = (l: any) => l.entries.filter((e: any) => e.action.kind === 'bins').map((e: any) => [e.steps, e.action.pause]);
+  expect(binsOf(again)).toEqual(binsOf(log));
+});
+
 test('draws magnetic field lines: contours in 2D, tubes and slices in 3D, on blocks too', async ({ page }) => {
   await page.goto('/?headless=1');
   await page.evaluate(() => (window as any).shaderous.ready);

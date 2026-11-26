@@ -568,6 +568,12 @@ export interface Simulation {
   autoRegrid?: boolean;
   /** An adaptive mesh: re-mesh by these steps, as a replay does (AmrSim.replayRegrid). */
   replayRegrid?(steps: number[][]): void;
+  /** An adaptive mesh: called as a pause of the per-block timesteps' cycles takes effect, with its length in steps (AmrSim.onBins). */
+  onBins?: (pause: number) => void;
+  /** An adaptive mesh: whether it decides pauses of its per-block timesteps itself (AmrSim.autoBins). */
+  autoBins?: boolean;
+  /** An adaptive mesh: pause the per-block timesteps' cycles for this many steps, as a replay does (AmrSim.replayBins). */
+  replayBins?(pause: number): void;
   /** An adaptive mesh: re-mesh from these indicators, as a replay of a first-version log does (AmrSim.forceRegrid). */
   forceRegrid?(indicators: Float32Array): void;
   /**

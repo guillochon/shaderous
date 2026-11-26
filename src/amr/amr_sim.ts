@@ -425,6 +425,16 @@ export class AmrSim implements Simulation {
    * (replayRegrid()).
    */
   autoRegrid = true;
+  /**
+   * Per-block timesteps: called as a pause of their cycles that the run decided takes effect,
+   * with its length in single steps, for the session log (ui/session.ts). The decision is read
+   * back from the GPU while the run goes on, so the step it lands on depends on timing.
+   */
+  onBins?: (pause: number) => void;
+  /** Off, the run decides no pauses of its own: a replay pauses where the log says (replayBins()). */
+  autoBins = true;
+  /** A pause pollBins() decided, applied at the start of the next encodeSteps() call. */
+  private pendingBinPause: number | null = null;
   /** total re-meshes applied, for the status line and tests */
   regrids = 0;
   /** the most recent refinement indicators, by slot (inspection only) */
@@ -1355,6 +1365,7 @@ export class AmrSim implements Simulation {
     this.binsPrimed = null;
     // What was measured with other bins says nothing about these.
     this.binPause = BIN_START_STEPS;
+    this.pendingBinPause = null;
     this.binPauseNext = BIN_PAUSE_STEPS;
     this.binShare = null;
   }
@@ -1928,6 +1939,7 @@ export class AmrSim implements Simulation {
     this.wantBinPoll = null;
     this.cyclesSincePoll = 0;
     this.binPause = BIN_START_STEPS;
+    this.pendingBinPause = null;
     this.binPauseNext = BIN_PAUSE_STEPS;
     this.binShare = null;
     this.mhd?.forgetCorrection();
@@ -2562,6 +2574,12 @@ export class AmrSim implements Simulation {
     if (this.cfg.viewOnly) return 0; // a checkpoint to look at: the step's own atlases are not there
     if (this.settling || this.compiling) return 0; // a star is still being settled, or the update pass compiling
     if (this.pending) this.applyRegrid(enc);
+    if (this.pendingBinPause !== null) {
+      // At a call's start, as a re-mesh is: the session log stamps it with the steps taken so far.
+      this.binPause = this.pendingBinPause;
+      this.pendingBinPause = null;
+      this.onBins?.(this.binPause);
+    }
     if (this.dtStale) {
       // The block list changed: drop timestep records of workgroups it no longer covers.
       enc.clearBuffer(this.redDt.first);
@@ -2756,9 +2774,10 @@ export class AmrSim implements Simulation {
         this.binSeen = { updates, single: at.full };
         if (ds <= 0) return;
         this.binShare = du / ds;
-        if (this.cfg.timeBinsAlways) return;
+        if (this.cfg.timeBinsAlways || !this.autoBins) return;
         if (this.binShare > (this.fieldOn ? BIN_SHARE_MAX.field : BIN_SHARE_MAX.hydro)) {
-          this.binPause = this.binPauseNext;
+          // Taken up as the next batch of steps starts (encodeSteps), where it is logged.
+          this.pendingBinPause = this.binPauseNext;
           this.binPauseNext = Math.min(BIN_PAUSE_MAX, 2 * this.binPauseNext);
         } else {
           this.binPauseNext = BIN_PAUSE_STEPS;
@@ -3191,6 +3210,15 @@ export class AmrSim implements Simulation {
    */
   replayRegrid(steps: AdaptStep[]) {
     this.applyNow(this.tree.replayAdapt(steps));
+  }
+
+  /**
+   * Pause the cycles of per-block timesteps for `pause` single steps, as a live run's read-back
+   * of their saving decided (onBins). For a replay, with autoBins off: now, at the step logged.
+   */
+  replayBins(pause: number) {
+    this.binPause = pause;
+    this.pendingBinPause = null;
   }
 
   /**

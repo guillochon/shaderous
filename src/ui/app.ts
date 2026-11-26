@@ -1183,6 +1183,11 @@ function watchRegrids(s: Simulation) {
     if (s === sim) logAction({ kind: 'regrid', steps });
   };
   if (s.autoRegrid !== undefined) s.autoRegrid = !replaying;
+  // Pauses of per-block timesteps likewise: decided live, taken from the log in a replay.
+  s.onBins = (pause) => {
+    if (s === sim) logAction({ kind: 'bins', pause });
+  };
+  if (s.autoBins !== undefined) s.autoBins = !replaying;
   sessionClock = clockOf();
   s.onParams = () => {
     if (s !== sim || !session.active) return;
@@ -5328,6 +5333,10 @@ async function replayAction(a: Action) {
       if (a.steps) s.replayRegrid?.(a.steps);
       else if (a.indicators) s.forceRegrid?.(base64ToF32(a.indicators));
       break;
+    case 'bins':
+      s.replayBins?.(a.pause);
+      logAction(a);
+      break;
     case 'clock':
       // The end time is a setting (logged as one): what differs from it is a stop of the clock's own.
       cfg.tStop = a.stop !== null && !(a.stop >= cfg.tEnd) ? a.stop : undefined;
@@ -6609,6 +6618,7 @@ const api = installApi(
     setReplaying(on) {
       replaying = on;
       if (sim?.autoRegrid !== undefined) sim.autoRegrid = !on;
+      if (sim?.autoBins !== undefined) sim.autoBins = !on;
     },
     gridMemory: (spec) => setupHost.memory(spec)!,
     refusal: (spec) => setupHost.refusal(spec),
