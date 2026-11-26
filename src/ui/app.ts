@@ -38,7 +38,7 @@ import { EOS_LABELS, eosHasEnergy, makeEos, physicalEosParams, type Eos, type Eo
 import { prepareEosTable } from '../eos/tables';
 import { familyById, FIELD_MENU, MAGNETIC_FIELDS, NUCLEAR_HEATING_FIELD, RADIATION_FIELDS, FIELD_TIPS, FIELDS, isSelfGravity, LINEAR_FIELDS, MASS_FRACTION_FIELD, PERIODIC, SIGNED_FIELDS, MENU, type Problem, type ProblemParam, problemUnits } from '../problems';
 import { sphFromView, sphToView, spherical } from '../spherical';
-import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, setFrameTurn, type ViewState } from '../render/renderer';
+import { backgroundCss, cameraFrame, defaultView, mirrorComputed, mirrorShown, Renderer, setFrameTurn, type ProfileValues, type ViewState } from '../render/renderer';
 import { MAX_FIELD_LINES } from '../render/fieldlines';
 import { fitLumps, previewOrbit, type Lump, type Orbit } from '../gravity/preview';
 import type { MhdSpec, PointMass } from '../problems/types';
@@ -3396,14 +3396,19 @@ interface ProfileSamples {
   solid: Uint8Array;
 }
 let profileData: ProfileSamples | null = null;
-let profileBusy = false;
+/** The profile on show is to be sampled on the next frame (its line or field changed). */
 let profileWanted = false;
+/** Profiles sampled, and the last one taken up: a read that comes back late is dropped. */
+let profileSeq = 0;
+let profileShown = 0;
+/** The points along the line on show, as last laid out (profileLine()), and what they were laid out for. */
+let profileLineCache: { key: string; points: Float32Array<ArrayBuffer>; s: Float64Array; a: Vec3; b: Vec3 } | null = null;
 /** When the profile was last sampled (performance.now()). */
 let profileAt = 0;
 /** The sample hovered, in the plot or on the line (-1: none). */
 let profileHover = -1;
-/** The plot's y range, eased while the run goes; reset when the field or the scale changes. */
-let profileRange: { key: string; range: [number, number] } | null = null;
+/** The plot's y range, eased while the run goes (`at` when last eased); reset when the field or the scale changes. */
+let profileRange: { key: string; range: [number, number]; at: number } | null = null;
 /**
  * A line being placed: the press (CSS pixels), its start in the box once known (in the volume
  * view the gas under the press is read back first), how deep the start lies along the view, the
@@ -3662,50 +3667,74 @@ function drawProfileLine() {
   if (html !== profileLineDrawn) $('profile-line').innerHTML = profileLineDrawn = html;
 }
 
-/** Ask for the profile on show to be sampled again (one read in flight; the latest wish next). */
+/** Ask for the profile on show to be sampled on the next frame. */
 function requestProfile() {
   profileWanted = true;
-  if (!profileBusy) void runProfile();
 }
 
-async function runProfile() {
-  const s = sim;
+/** The points along a line, and their distances from its start in code length: `n`, or two a finest cell. */
+function profileLine(a: Vec3, b: Vec3, n?: number): { points: Float32Array<ArrayBuffer>; s: Float64Array } {
+  const dims = gridDims(cfg);
+  const cells = Math.hypot(...[0, 1, 2].map((k) => (b[k] - a[k]) * dims[k]));
+  const count = sampleCount(cells, n);
+  const pts = samplePoints(a, b, count);
+  const points = new Float32Array(4 * count);
+  pts.forEach((q, i) => points.set([q[0], q[1], q[2], 0], 4 * i));
+  const axes = cfg.ndim === 3 ? [0, 1, 2] : [0, 1];
+  const [pa, pb] = [a, b].map((f) => axes.map((k) => fracPos(cfg, f[k], k)));
+  return { points, s: distances(pa, pb, count) };
+}
+
+/**
+ * Each frame: sample the profile on show in the frame's own commands, after its steps, so the
+ * plot follows the run frame by frame (as fast as frames are drawn, up to the display's rate).
+ * While the run stands still it is sampled when the line or field changes, and twice a second
+ * in case the state changed some other way. Returns what reads it back once `enc` is submitted.
+ */
+function encodeFrameProfile(now: number, enc: GPUCommandEncoder, s: Simulation): (() => void) | null {
   const p = profile;
-  profileWanted = false;
-  if (!s || !p || building) return;
+  if (!p || profilePop.hidden || building || s !== sim) return null;
   if (p.dims !== cfg.ndim || spherical(cfg)) {
     closeProfile();
-    return;
+    return null;
   }
-  profileBusy = true;
-  profileAt = performance.now();
+  if (!running && !profileWanted && now - profileAt < 500) return null;
+  const key = `${p.a.join()}|${p.b.join()}|${cfg.ndim}|${cfg.n}|${gridDims(cfg).join()}`;
+  if (profileLineCache?.key !== key) profileLineCache = { key, ...profileLine(p.a, p.b), a: [...p.a] as Vec3, b: [...p.b] as Vec3 };
+  const line = profileLineCache;
+  const o = { field: p.field, species: p.species, projection: projecting() ? view.sliceAxis : null };
+  let read: (() => Promise<ProfileValues>) | null;
   try {
-    const r = await profileOf(s, p.a, p.b, { field: p.field, species: p.species, projection: projecting() ? view.sliceAxis : null });
-    if (s === sim && p === profile) {
-      profileData = r;
-      // (The view's menu may have changed with the run: a new one loaded with the panel open.)
-      syncProfileMenu();
-      drawProfilePop();
-      drawProfileLine();
-    }
+    read = renderer.encodeProfile(enc, s, line.points, key, o);
   } catch {
-    // The run was rebuilt under the read: the next one finds the new one.
-  } finally {
-    profileBusy = false;
-    if (profileWanted) void runProfile();
+    return null; // the view is not attached to this run yet
   }
+  if (!read) return null; // compiling, or every readback busy: the next frame tries again
+  profileWanted = false;
+  profileAt = now;
+  const seq = ++profileSeq;
+  return () => {
+    read()
+      .then((r) => {
+        if (seq < profileShown || s !== sim || p !== profile) return;
+        profileShown = seq;
+        profileData = { a: line.a, b: line.b, ...o, s: line.s, length: line.s[line.s.length - 1], ...r };
+        // (The view's menu may have changed with the run: a new one loaded with the panel open.)
+        syncProfileMenu();
+        drawProfilePop();
+        drawProfileLine();
+      })
+      .catch(() => {});
+  };
 }
 
 /** Sample a field along the segment from a to b (fractions of the computed box): `n` samples, or two a finest cell. */
 async function profileOf(s: Simulation, a: Vec3, b: Vec3, o: { field: number; species: number; projection: number | null }, n?: number): Promise<ProfileSamples> {
-  const dims = gridDims(cfg);
-  const cells = Math.hypot(...[0, 1, 2].map((k) => (b[k] - a[k]) * dims[k]));
-  const count = sampleCount(cells, n);
-  const r = await renderer.profile(s, samplePoints(a, b, count), o);
-  const axes = cfg.ndim === 3 ? [0, 1, 2] : [0, 1];
-  const [pa, pb] = [a, b].map((f) => axes.map((k) => fracPos(cfg, f[k], k)));
-  const sd = distances(pa, pb, count);
-  return { a: [...a] as Vec3, b: [...b] as Vec3, ...o, s: sd, length: sd[count - 1], ...r };
+  const line = profileLine(a, b, n);
+  const count = line.s.length;
+  const pts = Array.from({ length: count }, (_, i) => line.points.subarray(4 * i, 4 * i + 3));
+  const r = await renderer.profile(s, pts, o);
+  return { a: [...a] as Vec3, b: [...b] as Vec3, ...o, s: line.s, length: line.s[count - 1], ...r };
 }
 
 /** The name of a field (a mass fraction by its species), as projected when it is. */
@@ -3899,10 +3928,15 @@ function drawProfilePop() {
   const target = d ? valueRange(values, log, d.solid) : null;
   if (target) {
     const r = profileRange;
-    if (!r || r.key !== key) profileRange = { key, range: target };
+    const now = performance.now();
+    if (!r || r.key !== key) profileRange = { key, range: target, at: now };
     else {
-      const ease = (cur: number, to: number, grow: boolean) => (grow ? to : cur + 0.3 * (to - cur));
+      // It widens at once; it narrows by time (a quarter second to close most of the way),
+      // however often the samples come.
+      const k = 1 - Math.exp(-(now - r.at) / 250);
+      const ease = (cur: number, to: number, grow: boolean) => (grow ? to : cur + k * (to - cur));
       r.range = [ease(r.range[0], target[0], target[0] < r.range[0]), ease(r.range[1], target[1], target[1] > r.range[1])];
+      r.at = now;
     }
   }
   drawProfilePlot(ctx, w, h, { s, values, solid: d?.solid, levels: cfg.amrLevels > 0 ? d?.levels : undefined, log, range: target ? profileRange!.range : null, mark: profileHover, colors });
@@ -3921,12 +3955,6 @@ function drawProfilePop() {
   if (foot.textContent !== line) foot.textContent = line;
 }
 
-/** Each frame: the line where the view puts it, and the samples read again now and then. */
-function updateProfile(now: number) {
-  drawProfileLine();
-  if (!profile || profileBusy || profilePop.hidden) return;
-  if (now - profileAt > (running ? 250 : 1000)) requestProfile();
-}
 
 /** The API's profile (api.ts profile()): along a line given in fractions of the box, or the one on show. */
 async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | number; n?: number; projection?: number | null; show?: boolean }) {
@@ -6242,6 +6270,8 @@ function tick(now: number) {
   // Top up the steps (normally done as batches complete), then edit and draw behind them.
   pump();
   const enc = gpu.device.createCommandEncoder();
+  /** The profile on show, sampled in this frame: read back once it is submitted. */
+  let readProfile: (() => void) | null = null;
   advanceStroke(now);
   updateOrbit(now);
   updatePin(now);
@@ -6278,9 +6308,11 @@ function tick(now: number) {
       framesDrawn++;
     }
     drawSources();
-    updateProfile(now);
+    drawProfileLine();
+    readProfile = encodeFrameProfile(now, enc, s);
   }
   gpu.device.queue.submit([enc.finish()]);
+  readProfile?.();
   s.submitted();
   renderer.submitted();
   if (timed) frameTiming.submitted();

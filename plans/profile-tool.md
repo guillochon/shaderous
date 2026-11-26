@@ -11,6 +11,10 @@ profiles, exact cell crossings) not started.
   one asked for: `fieldPipelines` runs ahead of a load, and a profile read during a load once
   paired the new code with the old run's resources). It matches `probe` to float precision for
   density, pressure, velocity, temperature and level on 2D blocks, 3D uniform and 3D blocks.
+- Live updates: the page encodes the profile pass into each frame's own commands, after its
+  steps (`Renderer.encodeProfile`, buffers kept between frames, three readback buffers in turn),
+  so the plot follows the run once a frame drawn, up to the display's rate, rather than every
+  250 ms as first built. The y axis eases by time (a quarter second), not per update.
 - Volume view: both ends lie on the plane facing the camera through the point orbited, not on the
   gas under the pointer as planned. In a blast in a uniform medium the gas "seen" under the
   pointer is wherever the fog's opacity reaches the pick's threshold, so a line meant to go
