@@ -6,7 +6,6 @@
 #include "amr/grid.wgsl"
 #include "amr/list.wgsl"
 #include "amr/gravity/common.wgsl"
-#include "gravity/multipole_eval.wgsl"
 
 @group(0) @binding(2) var PHI: texture_storage_3d<r32float, read>;
 @group(0) @binding(3) var RHS: texture_3d<f32>;

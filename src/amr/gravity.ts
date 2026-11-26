@@ -88,6 +88,7 @@ export class AmrGravity {
   private pRhsRestrict!: GPUComputePipeline;
   private pGhostCoarse!: GPUComputePipeline;
   private pGhostRest!: GPUComputePipeline;
+  private pBoundary!: GPUComputePipeline;
   private pField!: GPUComputePipeline;
   private pNew!: GPUComputePipeline;
   private pInit!: GPUComputePipeline;
@@ -96,6 +97,7 @@ export class AmrGravity {
   private gRhsRestrict: GPUBindGroup[] = [];
   private gGhostCoarse: GPUBindGroup[] = [];
   private gGhostRest!: GPUBindGroup;
+  private gBoundary!: GPUBindGroup;
   private gGhostCoarseAll!: GPUBindGroup;
   private gField!: GPUBindGroup;
   private gNew!: GPUBindGroup;
@@ -129,6 +131,7 @@ export class AmrGravity {
   private gRhsRestrictB!: GPUBindGroup;
   private gGhostCoarseB!: GPUBindGroup;
   private gGhostRestB!: GPUBindGroup;
+  private gBoundaryB!: GPUBindGroup;
 
   private constructor(private ctx: GravityContext) {}
 
@@ -143,7 +146,7 @@ export class AmrGravity {
     const v = (t: GPUTexture) => t.createView();
     // An atlas of `side` texels across: a cube, or in 2D one texel deep per layer of slots.
     const atlas = (side: number, label: string) => (ctx.flat ? tex3d(d, side, 'r32float', label, ctx.layers!) : tex3d(d, side, 'r32float', label));
-    [g.pSmooth, g.pRestrict, g.pProlong, g.pRhs, g.pRhsRestrict, g.pGhostCoarse, g.pGhostRest, g.pField, g.pNew, g.pInit] = await Promise.all([
+    [g.pSmooth, g.pRestrict, g.pProlong, g.pRhs, g.pRhsRestrict, g.pGhostCoarse, g.pGhostRest, g.pBoundary, g.pField, g.pNew, g.pInit] = await Promise.all([
       computePipeline(d, assemble('amr/gravity/smooth.wgsl'), 'amr mg smooth'),
       computePipeline(d, assemble('amr/gravity/restrict.wgsl'), 'amr mg residual + restrict'),
       computePipeline(d, assemble('amr/gravity/prolong.wgsl'), 'amr mg prolong'),
@@ -151,6 +154,7 @@ export class AmrGravity {
       computePipeline(d, assemble('amr/gravity/rhs_restrict.wgsl'), 'amr mg source restrict'),
       computePipeline(d, assemble('amr/gravity/ghost.wgsl'), 'amr mg ghost (coarse)', { MODE: 0 }),
       computePipeline(d, assemble('amr/gravity/ghost.wgsl'), 'amr mg ghost (rest)', { MODE: 1 }),
+      computePipeline(d, assemble('amr/gravity/boundary.wgsl'), 'amr mg boundary'),
       computePipeline(d, assemble('amr/gravity/field.wgsl', { ...FIELD_SLOTS, ...FIX_ON }), 'amr gravity field'),
       computePipeline(d, assemble('amr/gravity/new_blocks.wgsl'), 'amr mg new blocks'),
       computePipeline(d, assemble('amr/gravity/new_blocks.wgsl'), 'amr mg level init', { ALL: 1 }),
@@ -188,12 +192,12 @@ export class AmrGravity {
       for (let l = 0; l <= ctx.levels + 2; l++) {
         const list = lists[l];
         s.smooth.push(
-          uSmooth.map((u) => bindGroup(d, g.pSmooth, { 0: ctx.params, 1: u, 2: v(s.phi), 3: v(s.rhs), 10: ctx.multipole, 30: ctx.bt, 31: list })),
+          uSmooth.map((u) => bindGroup(d, g.pSmooth, { 0: ctx.params, 1: u, 2: v(s.phi), 3: v(s.rhs), 30: ctx.bt, 31: list })),
         );
         if (k < NSUB - 1) {
           const c = g.sub[k + 1];
           (s.restrict ??= []).push(
-            bindGroup(d, g.pRestrict, { 0: ctx.params, 1: uSmooth[0], 2: v(s.phi), 3: v(s.rhs), 4: v(c.rhs), 5: v(c.phi), 10: ctx.multipole, 30: ctx.bt, 31: list }),
+            bindGroup(d, g.pRestrict, { 0: ctx.params, 1: uSmooth[0], 2: v(s.phi), 3: v(s.rhs), 4: v(c.rhs), 5: v(c.phi), 30: ctx.bt, 31: list }),
           );
         }
         if (k < NSUB - 1) {
@@ -212,10 +216,12 @@ export class AmrGravity {
       g.gInit.push(bindGroup(d, g.pInit, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLevel[l] }));
     }
     g.gGhostRest = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAll });
+    g.gBoundary = bindGroup(d, g.pBoundary, { 0: ctx.params, 2: phi0, 10: ctx.multipole, 30: ctx.bt, 31: ctx.listAll });
     g.gRhsB = ctx.stateU1.map((t) => bindGroup(d, g.pRhs, { 0: ctx.params, 1: v(t), 2: rhs0, 5: ctx.clock, 31: ctx.listUpd }));
     g.gRhsRestrictB = bindGroup(d, g.pRhsRestrict, { 0: ctx.params, 2: rhs0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostCoarseB = bindGroup(d, g.pGhostCoarse, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
     g.gGhostRestB = bindGroup(d, g.pGhostRest, { 0: ctx.params, 2: phi0, 30: ctx.bt, 31: ctx.listAct });
+    g.gBoundaryB = bindGroup(d, g.pBoundary, { 0: ctx.params, 2: phi0, 10: ctx.multipole, 30: ctx.bt, 31: ctx.listAct });
     g.fix = d.createBuffer({ label: 'amr self-gravity net force', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST });
     g.gField = bindGroup(d, g.pField, { 0: ctx.params, 1: phi0, 2: v(g.phiOld), 3: v(ctx.gfield), 5: ctx.clock, 8: g.fix, 30: ctx.bt, 31: ctx.listAll });
     g.gNew = bindGroup(d, g.pNew, { 0: ctx.params, 2: phi0, 7: ctx.rg, 30: ctx.bt, 31: ctx.listLeaf });
@@ -229,7 +235,7 @@ export class AmrGravity {
     g.gateArgs = d.createBuffer({ label: 'amr mg gated sizes', size: 33 * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.INDIRECT });
     g.stats = d.createBuffer({ label: 'amr mg cycle stats', size: 16, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
     const uRes = uniform(0, 0, 1);
-    g.gResidual = bindGroup(d, g.pResidual, { 0: ctx.params, 1: uRes, 2: phi0, 3: rhs0, 4: g.res, 10: ctx.multipole, 30: ctx.bt, 31: ctx.listAll });
+    g.gResidual = bindGroup(d, g.pResidual, { 0: ctx.params, 1: uRes, 2: phi0, 3: rhs0, 4: g.res, 30: ctx.bt, 31: ctx.listAll });
     g.gGate = bindGroup(d, g.pGate, { 1: g.res, 2: g.gateArgs, 3: g.stats, 31: ctx.listAll });
     g.gGateRecord = bindGroup(d, g.pGateRecord, { 1: g.res, 2: g.gateArgs, 3: g.stats, 31: ctx.listAll });
     return g;
@@ -311,6 +317,10 @@ export class AmrGravity {
    */
   encodeSolve(pass: GPUComputePassEncoder, nLevel: number[], nAll: number, cycles: number, cold = false, together = false) {
     together &&= !cold && !SEQUENTIAL;
+    // The potential at isolated faces of the box, for the whole solve (amr/gravity/boundary.wgsl).
+    pass.setPipeline(this.pBoundary);
+    pass.setBindGroup(0, this.gBoundary);
+    this.faces(pass, nAll);
     for (let l = 0; l <= this.ctx.levels; l++) {
       if (together) break;
       if (nLevel[l] === 0) continue;
@@ -434,6 +444,9 @@ export class AmrGravity {
   /** Relax the potential on the blocks starting a step, all levels together (a warm start). */
   encodeSolveB(pass: GPUComputePassEncoder, cycles: number) {
     const act = this.ctx.levels + 2;
+    pass.setPipeline(this.pBoundary);
+    pass.setBindGroup(0, this.gBoundaryB);
+    this.faces(pass, -1);
     for (let c = 0; c < cycles; c++) {
       pass.setPipeline(this.pGhostCoarse);
       pass.setBindGroup(0, this.gGhostCoarseB);
