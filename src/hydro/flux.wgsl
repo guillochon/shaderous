@@ -73,8 +73,10 @@ fn to_side(pr: Q, s: Q, sgn: f32, axis: i32, lo: vec2<f32>) -> Side {
 }
 
 // Flux through the face between cells l and r, along +axis, in grid-aligned components. kl
-// and kr are the two cells' composition moments.
-fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>) -> Flux {
+// and kr are the two cells' composition moments. dfl and dfr are the potential steps that the
+// two sides' edge increments were given toward this face (edge_up's and edge_dn's `df`; zero
+// without the balanced reconstruction).
+fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>, dfl: f32, dfr: f32) -> Flux {
   var w = max(l.b.z, r.b.z);            // carbuncle fix: HLL next to flagged shocks
   // A barotropic gas takes HLL: it has no contact wave to resolve (HLLC was tried on its
   // collapse problems: no different). A liquid keeps HLLC, for the shear wave: HLL damps a jump
@@ -82,8 +84,21 @@ fn face_flux(l: Q, ls: Q, r: Q, rs: Q, axis: i32, kl: vec4<f32>, kr: vec4<f32>) 
   // cells then loses 8.4% of its kinetic energy in four turns where HLLC loses 2.2%
   // (plans/incompressible.md, 2.4 and 3.3).
   if (!EOS_HAS_ENERGY && !p_signed()) { w = 1.0; }
-  // Neither face state may fall below half the smaller of the two cells' own values.
-  let lo = 0.5 * min(vec2<f32>(l.a.x, l.b.x), vec2<f32>(r.a.x, r.b.x));
+  // Neither face state may fall below half the smaller of the two cells' own values. For the
+  // pressure, also below half of each cell's pressure carried to the face along hydrostatic
+  // balance, p -/+ rho df / 2, where that is positive: in a column at rest that is the face
+  // pressure itself. Between two gas cells it never binds (the upper cell's own pressure is
+  // the lower), but at a wall the other side is this cell's image, with its pressure, and a
+  // column with fewer than 2 cells per scale height has its balanced wall pressure,
+  // p (1 - 1/2h), below p / 2: the bound raised it, and the top cell fell at Mach 0.002 (h =
+  // 0.99) to 0.08 (h = 0.7) in a sound crossing (hydro-proofs' column maps).
+  var pb = min(l.b.x, r.b.x);
+  if (!p_signed()) {
+    let el = l.b.x - 0.5 * l.a.x * dfl;
+    let er = r.b.x + 0.5 * r.a.x * dfr;
+    pb = min(pb, min(select(l.b.x, el, el > 0.0), select(r.b.x, er, er > 0.0)));
+  }
+  let lo = 0.5 * vec2<f32>(min(l.a.x, r.a.x), pb);
   comp_use(kl);
   let sl = to_side(l, ls, 1.0, axis, lo);
   comp_use(kr);
@@ -173,13 +188,15 @@ fn axis_fluxes(c: vec3<i32>, e: vec3<i32>, axis: i32, w0: Q, p0: Q) -> Faces {
   }
   // A neighbor that is this cell's image in a wall (the step the deviations see is not the
   // true one) reaches the wall from the other side: the negative of the true step.
-  let sm = edge_up(wm2, wm1, w0, d.x, d.y, select(-t.x, t.x, d.y == t.x));
+  let fm = select(-t.x, t.x, d.y == t.x);
+  let fp = select(-t.y, t.y, d.z == t.y);
+  let sm = edge_up(wm2, wm1, w0, d.x, d.y, fm);
   let lo = edge_dn(wm1, w0, wp1, d.y, d.z, t.x);
   let hi = edge_up(wm1, w0, wp1, d.y, d.z, t.y);
-  let sp = edge_dn(w0, wp1, wp2, d.z, d.w, select(-t.y, t.y, d.z == t.y));
+  let sp = edge_dn(w0, wp1, wp2, d.z, d.w, fp);
   return Faces(
-    add_diffusion(wall_face(face_flux(pm1, sm, p0, lo, axis, km1, k0), below, axis, nm1.a[axis + 1]), c - e, e, axis, nm1, w0),
-    add_diffusion(wall_face(face_flux(p0, hi, pp1, sp, axis, k0, kp1), above, axis, np1.a[axis + 1]), c, e, axis, w0, np1),
+    add_diffusion(wall_face(face_flux(pm1, sm, p0, lo, axis, km1, k0, fm, t.x), below, axis, nm1.a[axis + 1]), c - e, e, axis, nm1, w0),
+    add_diffusion(wall_face(face_flux(p0, hi, pp1, sp, axis, k0, kp1, t.y, fp), above, axis, np1.a[axis + 1]), c, e, axis, w0, np1),
   );
 }
 
@@ -249,9 +266,11 @@ fn flux_between(a: vec3<i32>, e: vec3<i32>, axis: i32) -> Flux {
   }
   // ws.x is the true step across the face; a cell that is the other's image in a wall reaches
   // the wall from its own side.
-  let sl = edge_up(wll, wl, wr, d.x, d.y, ws.x * (sides.x * ws.y));
-  let sr = edge_dn(wl, wr, wrr, d.y, d.z, ws.x * (sides.y * ws.z));
-  return add_diffusion(wall_face(face_flux(pl, sl, pr, sr, axis, kl, kr), wall, axis, vw), a, e, axis, nl, nr);
+  let fl = ws.x * (sides.x * ws.y);
+  let fr = ws.x * (sides.y * ws.z);
+  let sl = edge_up(wll, wl, wr, d.x, d.y, fl);
+  let sr = edge_dn(wl, wr, wrr, d.y, d.z, fr);
+  return add_diffusion(wall_face(face_flux(pl, sl, pr, sr, axis, kl, kr, fl, fr), wall, axis, vw), a, e, axis, nl, nr);
 }
 
 fn flux_zero() -> Flux {

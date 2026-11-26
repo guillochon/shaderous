@@ -339,7 +339,23 @@ trapezoid rule with $`\delta p = 0`$:
 The discrete state is then stationary to round-off however steep it is. Walls and obstacles
 are also exact: the image cell beyond a wall has the cell's own potential, and the wall face
 is reached along the true potential. The shock detector ([§6](#carbuncle-suppression))
-measures pressure jumps against the same balance.
+measures pressure jumps against the same balance, and so does the lower bound on face
+pressures (`hydro/flux.wgsl`): no face state may fall below half the smaller of its two
+cells' pressures, nor below half of either one carried to the face along the balance. At a
+wall the other cell is this one's image, with its pressure, and the balanced wall pressure
+$`p\,(1 - 1/2h)`$ of an isothermal column with $`h`$ cells per scale height is below $`p/2`$
+once $`h < 1`$. Before the bound followed the balance, it raised that pressure, and the cell
+under a lid fell at Mach 0.002 ($`h = 0.99`$) to 0.08 ($`h = 0.7`$) in a sound crossing; now an
+8-cell column holds at $`5\times10^{-7}`$ down to $`h = 0.85`$ and $`5\times10^{-6}`$ at
+$`h = 0.7`$, the balance existing only above $`h = 1/2`$. (Found by the failure maps of the
+hydro-proofs project.)
+
+What remains is precision. A column of many scale heights fails once its total density
+contrast falls below about $`10^{-10}`$, at any $`h`$: rounding of order $`10^{-7}`$ in the
+initial state sends sound waves up the column, and their velocity grows as $`\rho^{-1/2}`$
+as they climb, about $`\sqrt{\text{contrast}}`$ in all: Mach $`5\times10^{-4}`$ at the top of
+a 64-cell column with $`h = 2.85`$ (contrast $`2\times10^{-10}`$), $`7\times10^{-7}`$ in 16
+cells of the same $`h`$.
 
 Measured: an isothermal column whose density falls by a factor $`e`$ every 4 cells (nine
 million over the box) keeps its largest Mach number at $`4\times10^{-5}`$ after a sound crossing,

@@ -43,6 +43,13 @@ What changed in each release of Shaderous. A release's section here is the body 
   also forgets the crash and restores the full automatic budget (before, a lowered budget stayed
   until the user typed a value).
 
+### Fixed
+
+- **Steep atmospheres under a lid stay at rest.** The lower bound on face pressures now follows
+  hydrostatic balance. At a reflecting wall it had raised the balanced wall pressure of a column
+  with fewer than 2 cells per scale height, and the top cell fell at Mach 0.002 to 0.08 in a
+  sound crossing; it now stays below Mach 10⁻⁴ down to h = 0.6 (docs/numerics.md section 8).
+
 ## 0.4.0 (2026-11-23)
 
 ### Added
