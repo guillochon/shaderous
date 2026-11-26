@@ -60,9 +60,9 @@ export const MCP_TOOLS: McpTool[] = [
   { name: 'probe', method: 'probe', brief: 'Gives the gas at given points', pass: ['points'], required: ['points'] },
   {
     name: 'profile', method: 'profile',
-    brief: 'Samples any field the view can show along a line from `from` to `to` (or the line placed in the page). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON',
+    brief: 'Samples any field the view can show along a line from `from` to `to` (or a line placed in the page, by `line`). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON',
     more: 'Returns the length, min and max, and `s` (distance from `from`), `values` and `level` when there are at most 256 samples or include_values is set; with save_path they are written there instead: as a .npy file (float32 values, shape [n]) when the name ends in .npy, as CSV (s, value, level, one sample a row) when it ends in .csv, else as JSON.',
-    pass: ['from', 'to', 'field', 'n', 'projection', 'show'],
+    pass: ['from', 'to', 'field', 'n', 'projection', 'line', 'show'],
     own: {
       include_values: { type: 'boolean', description: 'Return the values at any n (default: only when there are at most 256)' },
       save_path: { type: 'string', description: 'Write the profile to this file: .npy (float32 values), .csv, else JSON' },

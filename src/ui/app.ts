@@ -1,6 +1,6 @@
 // Interactive front end: controls, frame loop with adaptive substepping, diagnostics panel.
 import { BUILD, reportError, setAdapterInfo } from './errors';
-import { decodeLink, DEFAULT_SETUP, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, type LinkOverrides } from './link';
+import { decodeLink, DEFAULT_SETUP, encodeLink, snapshotSettings, viewDefaults, MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, type LinkOverrides, type LinkProfiles } from './link';
 import { initGpu, type Gpu } from '../gpu/device';
 import { COMPILE_STAGE, INIT_STAGE, compileProgress, endLoadStage, forgetCompileSetup, loadStage, resetCompileCount, setLoadStage, watchLoading } from '../gpu/progress';
 import { allocationSurvived, autoBudget, GB, lastCrash, memoryBudget, setAdapter, setUserBudget, userBudget, forgetCrashes } from '../gpu/memory';
@@ -20,7 +20,7 @@ import { initialFaces } from '../mhd/mhd';
 import { blockFaces } from '../mhd/amr_mhd';
 import type { Block } from '../amr/tree';
 import { boxFrac, fracPos, gridDims } from '../domain';
-import { clipSegment, distances, drawProfilePlot, profileCsv, resolveField, sampleAt, sampleCount, samplePoints, valueRange } from './profile';
+import { clipSegment, distanceAt, distances, drawProfilePlot, MAX_PROFILES, plotLength, PROFILE_COLORS, profileCsv, resolveField, sampleCount, sampleNear, samplePoints, seriesRange } from './profile';
 import { radiationOn, syncRadiationEos } from '../radiation/radiation';
 import { cellEquations, importance, rampColor, type Equation } from './terms';
 import { opacity as meanOpacity } from '../opacity/opacity';
@@ -956,9 +956,9 @@ $('tool-rest').addEventListener('click', () => {
   syncTools();
 });
 window.addEventListener('keydown', (e) => {
-  if (e.key !== 'Escape' || (!tool && !pin && !profile)) return;
+  if (e.key !== 'Escape' || (!tool && !pin && !profiles.length)) return;
   // Esc first drops a shape or a profile line that is being drawn, then a pinned readout, then
-  // puts the tool away, then closes the profile.
+  // puts the tool away, then closes the profile (every line).
   if (draft) draft = null;
   else if (profileDraft) profileDraft = null;
   else if (pin) unpin();
@@ -1828,6 +1828,8 @@ function build(problemId: string, n: number, ndim: 2 | 3, levels: number, keepPh
         editor.set(link.opacity ?? editor.points, link.colormap ?? editor.colormap);
         pushTransfer();
       }
+      // Profile lines the link carries: on show once the run is built.
+      if (link.profiles) setLinkProfiles(link.profiles, ndim);
     }
     // The box is as wide as the run's parameters make it (a preset with a size of its own).
     next.problem = sizedProblem(problem, next.params);
@@ -2322,7 +2324,7 @@ async function importSnapshot(snap: Snapshot, opts: ImportOptions = {}): Promise
 
 /** The current settings as a query string (see ui/link.ts). */
 function linkQuery(): string {
-  return encodeLink({ cfg, view, auto: $<HTMLInputElement>('auto').checked, colormap: editor.colormap, opacity: editor.points, setup: customLink?.text || undefined }).toString();
+  return encodeLink({ cfg, view, auto: $<HTMLInputElement>('auto').checked, colormap: editor.colormap, opacity: editor.points, setup: customLink?.text || undefined, profiles: linkProfiles() }).toString();
 }
 
 // The address bar follows the settings, so the page can be shared or reloaded as it stands.
@@ -3380,24 +3382,29 @@ function locateInView(px: number, py: number, depth: number): { pos: Vec3; right
 }
 
 // --- profile tool -------------------------------------------------------------------------
-// (plans/profile-tool.md) A line through the box and a plot of a field along it. With the
-// profile tool in hand, a press places its start and a drag (or a second click) its end; in the
-// volume view both lie on the plane facing the camera through the point orbited, or with Alt on
-// the gas seen under the pointer (the end then on the plane through the start, Alt again putting
-// it on the gas too). The line stays on show, whatever
-// tool is in hand, with its plot in a panel beside it, until the panel is closed. The GPU samples
-// the field along it (Renderer.profile), again every so often while the run goes.
-/** The profile on show: its ends in fractions of the computed box, the field, and the log axis (null: as the field's default). */
+// (plans/profile-tool.md) Lines through the box and a plot of a field along them. With the
+// profile tool in hand, a press places a line's start and a drag (or a second click) its end; in
+// the volume view both lie on the plane facing the camera through the point orbited, or with Alt
+// on the gas seen under the pointer (the end then on the plane through the start, Alt again
+// putting it on the gas too). Each new line is added to those on show (up to MAX_PROFILES), in a
+// colour of its own; they stay on show, whatever tool is in hand, with their plots overlaid in
+// one panel, one field for all, until the panel is closed. The GPU samples the field along all
+// of them in one pass (Renderer.encodeProfile), frame by frame while the run goes.
+/** A line on show: its ends in fractions of the computed box, its colour, and its samples as last read. */
 interface PlacedProfile {
   a: Vec3;
   b: Vec3;
-  field: number;
-  species: number;
-  log: boolean | null;
   /** the run's dimensions when it was placed: another kind of run drops it */
   dims: 2 | 3;
+  /** index into PROFILE_COLORS */
+  color: number;
+  data: ProfileSamples | null;
 }
-let profile: PlacedProfile | null = null;
+let profiles: PlacedProfile[] = [];
+/** The field plotted along every line, and the log axis (null: as the field's default). */
+const profileField: { field: number; species: number; log: boolean | null } = { field: 0, species: 0, log: null };
+/** Lines set by a link before their run was built: the panel opens on the first frame of the run. */
+let profileOpenPending = false;
 /** The samples read along a line. */
 interface ProfileSamples {
   a: Vec3;
@@ -3412,18 +3419,20 @@ interface ProfileSamples {
   levels: Float32Array;
   solid: Uint8Array;
 }
-let profileData: ProfileSamples | null = null;
-/** The profile on show is to be sampled on the next frame (its line or field changed). */
+/** The lines on show are to be sampled on the next frame (a line or the field changed). */
 let profileWanted = false;
 /** Profiles sampled, and the last one taken up: a read that comes back late is dropped. */
 let profileSeq = 0;
 let profileShown = 0;
-/** The points along the line on show, as last laid out (profileLine()), and what they were laid out for. */
-let profileLineCache: { key: string; points: Float32Array<ArrayBuffer>; s: Float64Array; a: Vec3; b: Vec3 } | null = null;
-/** When the profile was last sampled (performance.now()). */
+/**
+ * The points along the lines on show, one after another, as last laid out (profileLine()), what
+ * they were laid out for, and where each line's lie among them.
+ */
+let profileLineCache: { key: string; points: Float32Array<ArrayBuffer>; lines: { a: Vec3; b: Vec3; s: Float64Array; at: number; n: number }[] } | null = null;
+/** When the lines were last sampled (performance.now()). */
 let profileAt = 0;
-/** The sample hovered, in the plot or on the line (-1: none). */
-let profileHover = -1;
+/** The distance hovered (code length), in the plot or on a line (`line`, -1 from the plot); null: none. */
+let profileHover: { s: number; line: number } | null = null;
 /** The plot's y range, eased while the run goes (`at` when last eased); reset when the field or the scale changes. */
 let profileRange: { key: string; range: [number, number]; at: number } | null = null;
 /**
@@ -3434,8 +3443,8 @@ let profileRange: { key: string; range: [number, number]; at: number } | null = 
  * the start is still being read.
  */
 let profileDraft: { id: number; x0: number; y0: number; a: Vec3 | null; depth: number; x: number; y: number; alt: Vec3 | null } | null = null;
-/** An end of the profile being dragged, and how deep it lies along the view. */
-let profileGrab: { id: number; end: 0 | 1; depth: number } | null = null;
+/** An end of a line being dragged, and how deep it lies along the view. */
+let profileGrab: { id: number; line: number; end: 0 | 1; depth: number } | null = null;
 /** One read of the gas under the pointer at a time (Alt in the volume view). */
 let profilePicking = false;
 
@@ -3465,21 +3474,23 @@ function snapAngle(x0: number, y0: number, x: number, y: number): [number, numbe
   return [x0 + r * Math.cos(a), y0 + r * Math.sin(a)];
 }
 
-/** Which end of the profile on show lies within reach of a canvas point, if one does. */
-function profileEndNear(px: number, py: number): 0 | 1 | null {
-  if (!profile || !cfg) return null;
+/** Which end of which line on show lies within reach of a canvas point, if one does (the line drawn last first). */
+function profileEndNear(px: number, py: number): { line: number; end: 0 | 1 } | null {
+  if (!profiles.length || !cfg) return null;
   const at = projector();
-  let best: 0 | 1 | null = null;
+  let best: { line: number; end: 0 | 1 } | null = null;
   let dist = 9;
-  for (const end of [0, 1] as const) {
-    const c = at(end ? profile.b : profile.a);
-    const d = Math.hypot(c.x - px, c.y - py);
-    if (c.w > 0 && d < dist) [best, dist] = [end, d];
+  for (let i = profiles.length - 1; i >= 0; i--) {
+    for (const end of [0, 1] as const) {
+      const c = at(end ? profiles[i].b : profiles[i].a);
+      const d = Math.hypot(c.x - px, c.y - py);
+      if (c.w > 0 && d < dist) [best, dist] = [{ line: i, end }, d];
+    }
   }
   return best;
 }
 
-/** A press on the canvas: grab an end of the profile, or place a line with the profile tool. Whether it was taken. */
+/** A press on the canvas: grab an end of a line, or place a line with the profile tool. Whether it was taken. */
 function profilePress(e: PointerEvent): boolean {
   if (!sim || building || !cfg) return false;
   const r = canvas.getBoundingClientRect();
@@ -3491,10 +3502,11 @@ function profilePress(e: PointerEvent): boolean {
     return true;
   }
   if (tool !== 'profile' && tool !== null) return false;
-  const end = profileEndNear(px, py);
-  if (end !== null) {
-    const p = end ? profile!.b : profile!.a;
-    profileGrab = { id: e.pointerId, end, depth: flatView() ? view.dist : projector()(p).w };
+  const near = profileEndNear(px, py);
+  if (near) {
+    const l = profiles[near.line];
+    const p = near.end ? l.b : l.a;
+    profileGrab = { id: e.pointerId, ...near, depth: flatView() ? view.dist : projector()(p).w };
     return true;
   }
   if (tool !== 'profile') return false;
@@ -3539,13 +3551,14 @@ function profileMove(e: PointerEvent, pressed: number): boolean {
     return true;
   }
   const g = profileGrab;
-  if (g && g.id === e.pointerId && profile) {
-    const [x, y] = e.shiftKey ? snapFrom(g.end, px, py) : [px, py];
+  const l = g ? profiles[g.line] : undefined;
+  if (g && l && g.id === e.pointerId) {
+    const [x, y] = e.shiftKey ? snapFrom(l, g.end, px, py) : [px, py];
     const p = profilePoint(x, y, g.depth);
-    const c = clipSegment(g.end ? profile.a : p, g.end ? p : profile.b, cfg.ndim);
+    const c = clipSegment(g.end ? l.a : p, g.end ? p : l.b, cfg.ndim);
     if (c) {
-      profile.a = c[0];
-      profile.b = c[1];
+      l.a = c[0];
+      l.b = c[1];
       requestProfile();
     }
     drawProfileLine();
@@ -3556,8 +3569,8 @@ function profileMove(e: PointerEvent, pressed: number): boolean {
 }
 
 /** Shift while an end is dragged: the line kept at 15° steps on screen, about its other end. */
-function snapFrom(end: 0 | 1, px: number, py: number): [number, number] {
-  const o = projector()(end ? profile!.a : profile!.b);
+function snapFrom(l: PlacedProfile, end: 0 | 1, px: number, py: number): [number, number] {
+  const o = projector()(end ? l.a : l.b);
   return snapAngle(o.x, o.y, px, py);
 }
 
@@ -3576,7 +3589,7 @@ function profileRelease(e: PointerEvent) {
   }
 }
 
-/** Place the line being drawn, once its start is known. */
+/** Add the line being drawn to those on show, once its start is known. */
 function finishDraft() {
   const d = profileDraft;
   if (!d) return;
@@ -3593,98 +3606,169 @@ function finishDraft() {
     drawProfileLine();
     return;
   }
-  const keep = profile ? { field: profile.field, species: profile.species, log: profile.log } : { field: view.field, species: view.species, log: null };
-  profile = { a: c[0], b: c[1], ...keep, dims: cfg.ndim };
-  profileData = null;
-  profileRange = null;
-  profileHover = -1;
+  if (profiles.length >= MAX_PROFILES) {
+    notice(`At most ${MAX_PROFILES} profile lines at once: remove one in the profile panel first`);
+    drawProfileLine();
+    return;
+  }
+  // The first line plots the field the view shows; later ones plot the panel's.
+  if (!profiles.length) Object.assign(profileField, { field: view.field, species: view.species, log: null });
+  addProfile(c[0], c[1]);
   openProfilePop(true);
+}
+
+/** A line added to those on show, in the first colour none of them has. */
+function addProfile(a: Vec3, b: Vec3, data: ProfileSamples | null = null): PlacedProfile {
+  const used = new Set(profiles.map((p) => p.color));
+  const color = Math.max(0, PROFILE_COLORS.findIndex((_, i) => !used.has(i)));
+  const p: PlacedProfile = { a, b, dims: cfg.ndim, color, data };
+  profiles.push(p);
+  profileRange = null;
+  profileHover = null;
   requestProfile();
+  syncProfileLines();
+  drawProfileLine();
+  return p;
+}
+
+/** Remove one line; the last one closes the panel. */
+function removeProfile(i: number) {
+  if (profiles.length <= 1) return closeProfile();
+  profiles.splice(i, 1);
+  profileGrab = null;
+  profileHover = null;
+  profileRange = null;
+  requestProfile();
+  syncProfileLines();
+  drawProfilePop();
   drawProfileLine();
 }
 
-/** Close the profile: its line and its panel. */
+/** Close the profile: every line and the panel. */
 function closeProfile() {
-  profile = null;
-  profileData = null;
+  profiles = [];
   profileDraft = null;
   profileGrab = null;
-  profileHover = -1;
+  profileHover = null;
+  profileOpenPending = false;
   profilePop.hidden = true;
   drawProfileLine();
 }
 
-/** The pointer over the canvas, nothing pressed: on the profile's line it marks the sample there in the plot. */
+/**
+ * The lines a link carries (link.ts), set before their run is built: drawn and sampled once it
+ * is, the panel opened on its first frame. The field defaults to the one the view shows.
+ */
+function setLinkProfiles(lp: LinkProfiles, ndim: 2 | 3) {
+  profiles = lp.lines.slice(0, MAX_PROFILES).map(([a, b], i) => ({ a: [...a] as Vec3, b: [...b] as Vec3, dims: ndim, color: i, data: null }));
+  Object.assign(profileField, { field: lp.field ?? view.field, species: lp.species ?? (lp.field === undefined ? view.species : 0), log: lp.log ?? null });
+  profileRange = null;
+  profileHover = null;
+  profileDraft = null;
+  profileGrab = null;
+  profilePop.hidden = true;
+  profileOpenPending = profiles.length > 0;
+  requestProfile();
+}
+
+/** The lines on show as a link carries them, or undefined with none. */
+function linkProfiles(): LinkProfiles | undefined {
+  if (!profiles.length) return undefined;
+  return { lines: profiles.map((p) => [p.a, p.b] as [Vec3, Vec3]), field: profileField.field, species: profileField.species, log: profileField.log };
+}
+
+/** Whether the view's menu offers a field in this run (not disabled, nor hidden with its group). */
+function fieldOffered(field: number): boolean {
+  const opt = [...$<HTMLSelectElement>('field').options].find((q) => q.value === String(field) || q.value.startsWith(`${field}:`));
+  return !opt || !(opt.disabled || opt.hidden || (opt.parentElement as HTMLOptGroupElement | null)?.hidden);
+}
+
+/** The pointer over the canvas, nothing pressed: on a line it marks the distance there in the plot. */
 let profileHoverFromLine = false;
 function profileLineHover(e: PointerEvent | null) {
-  let k = -1;
+  let hover: { s: number; line: number } | null = null;
   let px = 0;
   let py = 0;
   if (e) {
     const r = canvas.getBoundingClientRect();
     [px, py] = [e.clientX - r.left, e.clientY - r.top];
   }
-  if (e && profile && profileData && !profileDraft && !profileGrab) {
+  if (e && profiles.length && !profileDraft && !profileGrab) {
     const at = projector();
-    const [A, B] = [at(profile.a), at(profile.b)];
-    const [dx, dy] = [B.x - A.x, B.y - A.y];
-    const len2 = dx * dx + dy * dy;
-    if (A.w > 0 && B.w > 0 && len2 > 1) {
+    let best = 6;
+    profiles.forEach((p, i) => {
+      const d = p.data;
+      if (!d) return;
+      const [A, B] = [at(p.a), at(p.b)];
+      const [dx, dy] = [B.x - A.x, B.y - A.y];
+      const len2 = dx * dx + dy * dy;
+      if (!(A.w > 0 && B.w > 0 && len2 > 1)) return;
       const t = Math.min(1, Math.max(0, ((px - A.x) * dx + (py - A.y) * dy) / len2));
-      if (Math.hypot(A.x + t * dx - px, A.y + t * dy - py) < 6) k = Math.round(t * (profileData.s.length - 1));
-    }
+      const off = Math.hypot(A.x + t * dx - px, A.y + t * dy - py);
+      if (off < best) {
+        best = off;
+        hover = { s: d.s[Math.round(t * (d.s.length - 1))], line: i };
+      }
+    });
   }
   // An end that can be dragged shows a grab cursor.
   canvas.classList.toggle('on-profile-end', !!e && (tool === 'profile' || tool === null) && profileEndNear(px, py) !== null);
-  if (k < 0 && !profileHoverFromLine) return;
-  profileHoverFromLine = k >= 0;
-  if (k !== profileHover) {
-    profileHover = k;
+  if (!hover && !profileHoverFromLine) return;
+  profileHoverFromLine = !!hover;
+  const h = hover as { s: number; line: number } | null;
+  if (h?.s !== profileHover?.s || h?.line !== profileHover?.line) {
+    profileHover = h;
     drawProfilePop();
     drawProfileLine();
   }
 }
 
-/** The line on the canvas: the one being placed, or the profile on show with its ends and tenths. */
+/** The lines on the canvas: the one being placed, and those on show with their ends and tenths. */
 let profileLineDrawn = '';
 function drawProfileLine() {
   let html = '';
-  if (cfg && (profileDraft || profile)) {
+  if (cfg && (profileDraft || profiles.length)) {
     const at = projector();
     const seg = (A: { x: number; y: number }, B: { x: number; y: number }) => `<line class="trace" x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" />`;
+    const several = profiles.length > 1;
+    for (const [i, p] of profiles.entries()) {
+      const [A, B] = [at(p.a), at(p.b)];
+      if (!(A.w > 0 && B.w > 0)) continue;
+      const [dx, dy] = [B.x - A.x, B.y - A.y];
+      const len = Math.hypot(dx, dy) || 1;
+      const [nx, ny] = [-dy / len, dx / len];
+      let ticks = '';
+      for (let k = 1; k < 10; k++) {
+        // Each tenth of the line, as the box holds it: foreshortened as the view sees it.
+        const c = at(p.a.map((v, j) => v + (k / 10) * (p.b[j] - v)));
+        const h = k === 5 ? 5 : 3;
+        ticks += `M${c.x - h * nx} ${c.y - h * ny}L${c.x + h * nx} ${c.y + h * ny}`;
+      }
+      let g = seg(A, B) + `<path class="ticks" d="${ticks}" />`;
+      const d = p.data;
+      if (profileHover && d && d.length > 0 && profileHover.s <= d.length) {
+        const t = profileHover.s / d.length;
+        const c = at(p.a.map((v, j) => v + t * (p.b[j] - v)));
+        g += `<circle class="mark" cx="${c.x}" cy="${c.y}" r="4" />`;
+      }
+      g += `<circle class="end start" cx="${A.x}" cy="${A.y}" r="5" /><circle class="end" cx="${B.x}" cy="${B.y}" r="5" />`;
+      // Several lines: each numbered at its start, as the panel numbers them.
+      if (several) g += `<text class="tag" x="${A.x - 9 * dx / len}" y="${A.y - 9 * dy / len}">${i + 1}</text>`;
+      html += `<g style="--c:${PROFILE_COLORS[p.color]}">${g}</g>`;
+    }
     const d = profileDraft;
     if (d) {
       const A = d.a ? at(d.a) : { x: d.x0, y: d.y0, w: 1 };
       const B = d.alt ? at(d.alt) : { x: d.x, y: d.y, w: 1 };
-      if (A.w > 0) html += seg(A, B) + `<circle class="end start" cx="${A.x}" cy="${A.y}" r="4" /><circle class="end" cx="${B.x}" cy="${B.y}" r="4" />`;
-    } else if (profile) {
-      const p = profile;
-      const [A, B] = [at(p.a), at(p.b)];
-      if (A.w > 0 && B.w > 0) {
-        const [dx, dy] = [B.x - A.x, B.y - A.y];
-        const len = Math.hypot(dx, dy) || 1;
-        const [nx, ny] = [-dy / len, dx / len];
-        let ticks = '';
-        for (let i = 1; i < 10; i++) {
-          // Each tenth of the line, as the box holds it: foreshortened as the view sees it.
-          const c = at(p.a.map((v, k) => v + (i / 10) * (p.b[k] - v)));
-          const h = i === 5 ? 5 : 3;
-          ticks += `M${c.x - h * nx} ${c.y - h * ny}L${c.x + h * nx} ${c.y + h * ny}`;
-        }
-        html += seg(A, B) + `<path class="ticks" d="${ticks}" />`;
-        if (profileHover >= 0 && profileData) {
-          const t = profileData.s.length > 1 ? profileHover / (profileData.s.length - 1) : 0;
-          const c = at(p.a.map((v, k) => v + t * (p.b[k] - v)));
-          html += `<circle class="mark" cx="${c.x}" cy="${c.y}" r="4" />`;
-        }
-        html += `<circle class="end start" cx="${A.x}" cy="${A.y}" r="5" /><circle class="end" cx="${B.x}" cy="${B.y}" r="5" />`;
-      }
+      const used = new Set(profiles.map((p) => p.color));
+      const c = PROFILE_COLORS[Math.max(0, PROFILE_COLORS.findIndex((_, i) => !used.has(i)))];
+      if (A.w > 0) html += `<g style="--c:${c}">${seg(A, B)}<circle class="end start" cx="${A.x}" cy="${A.y}" r="4" /><circle class="end" cx="${B.x}" cy="${B.y}" r="4" /></g>`;
     }
   }
   if (html !== profileLineDrawn) $('profile-line').innerHTML = profileLineDrawn = html;
 }
 
-/** Ask for the profile on show to be sampled on the next frame. */
+/** Ask for the lines on show to be sampled on the next frame. */
 function requestProfile() {
   profileWanted = true;
 }
@@ -3703,26 +3787,47 @@ function profileLine(a: Vec3, b: Vec3, n?: number): { points: Float32Array<Array
 }
 
 /**
- * Each frame: sample the profile on show in the frame's own commands, after its steps, so the
- * plot follows the run frame by frame (as fast as frames are drawn, up to the display's rate).
- * While the run stands still it is sampled when the line or field changes, and twice a second
- * in case the state changed some other way. Returns what reads it back once `enc` is submitted.
+ * Each frame: sample the lines on show in the frame's own commands, after its steps, all in one
+ * pass (their points one after another), so the plot follows the run frame by frame (as fast as
+ * frames are drawn, up to the display's rate). While the run stands still they are sampled when a
+ * line or the field changes, and twice a second in case the state changed some other way.
+ * Returns what reads them back once `enc` is submitted.
  */
 function encodeFrameProfile(now: number, enc: GPUCommandEncoder, s: Simulation): (() => void) | null {
-  const p = profile;
-  if (!p || profilePop.hidden || building || s !== sim) return null;
-  if (p.dims !== cfg.ndim || spherical(cfg)) {
+  if (!profiles.length || building || s !== sim) return null;
+  if (profilePop.hidden && !profileOpenPending) return null;
+  if (profiles.some((p) => p.dims !== cfg.ndim) || spherical(cfg)) {
     closeProfile();
     return null;
   }
+  if (profileOpenPending) {
+    // Lines from a link: a field this run does not offer gives way to the one shown.
+    profileOpenPending = false;
+    if (!fieldOffered(profileField.field) || (cfg.viewBaked && profileField.field !== view.field)) Object.assign(profileField, { field: view.field, species: view.species, log: null });
+    syncProfileLines();
+    openProfilePop(true);
+    drawProfileLine();
+  }
   if (!running && !profileWanted && now - profileAt < 500) return null;
-  const key = `${p.a.join()}|${p.b.join()}|${cfg.ndim}|${cfg.n}|${gridDims(cfg).join()}`;
-  if (profileLineCache?.key !== key) profileLineCache = { key, ...profileLine(p.a, p.b), a: [...p.a] as Vec3, b: [...p.b] as Vec3 };
-  const line = profileLineCache;
-  const o = { field: p.field, species: p.species, projection: projecting() ? view.sliceAxis : null };
+  const key = `${profiles.map((p) => `${p.a.join()}|${p.b.join()}`).join(';')}|${cfg.ndim}|${cfg.n}|${gridDims(cfg).join()}`;
+  if (profileLineCache?.key !== key) {
+    const laid = profiles.map((p) => ({ a: [...p.a] as Vec3, b: [...p.b] as Vec3, ...profileLine(p.a, p.b) }));
+    const points = new Float32Array(laid.reduce((t, l) => t + l.points.length, 0));
+    let at = 0;
+    const lines = laid.map((l) => {
+      points.set(l.points, 4 * at);
+      const n = l.s.length;
+      const out = { a: l.a, b: l.b, s: l.s, at, n };
+      at += n;
+      return out;
+    });
+    profileLineCache = { key, points, lines };
+  }
+  const cache = profileLineCache;
+  const o = { field: profileField.field, species: profileField.species, projection: projecting() ? view.sliceAxis : null };
   let read: (() => Promise<ProfileValues>) | null;
   try {
-    read = renderer.encodeProfile(enc, s, line.points, key, o);
+    read = renderer.encodeProfile(enc, s, cache.points, key, o);
   } catch {
     return null; // the view is not attached to this run yet
   }
@@ -3730,12 +3835,19 @@ function encodeFrameProfile(now: number, enc: GPUCommandEncoder, s: Simulation):
   profileWanted = false;
   profileAt = now;
   const seq = ++profileSeq;
+  const owners = profiles.slice();
   return () => {
     read()
       .then((r) => {
-        if (seq < profileShown || s !== sim || p !== profile) return;
+        if (seq < profileShown || s !== sim) return;
         profileShown = seq;
-        profileData = { a: line.a, b: line.b, ...o, s: line.s, length: line.s[line.s.length - 1], ...r };
+        owners.forEach((p, i) => {
+          // (A line removed meanwhile is not drawn again.)
+          if (!profiles.includes(p)) return;
+          const l = cache.lines[i];
+          const cut = <T extends Float32Array | Uint8Array>(v: T) => v.subarray(l.at, l.at + l.n) as T;
+          p.data = { a: l.a, b: l.b, ...o, s: l.s, length: l.s[l.n - 1], values: cut(r.values), levels: cut(r.levels), solid: cut(r.solid) };
+        });
         // (The view's menu may have changed with the run: a new one loaded with the panel open.)
         syncProfileMenu();
         drawProfilePop();
@@ -3762,28 +3874,33 @@ function profileFieldName(field: number, species: number, projected: boolean): s
 /** What a profiled field measures: density projected is a column density. */
 const profileMeasure = (field: number, projected: boolean): Measure => (projected && field === 0 ? [1, -2, 0] : fieldMeasure(field, cfg.eosParams.gamma));
 /** The plot's value axis is logarithmic: as chosen, or as the view shows the field (fields of either sign never). */
-function profileLog(p: PlacedProfile): boolean {
+function profileLog(): boolean {
+  const p = profileField;
   if (LINEAR_FIELDS.has(p.field)) return false;
   if (p.log !== null) return p.log;
   return p.field === view.field ? view.log : true;
 }
+/** Each line's samples as last read, if they are of the field plotted. */
+const profileSamples = (p: PlacedProfile) => (p.data && p.data.field === profileField.field && p.data.species === profileField.species ? p.data : null);
 
-// The panel: the field, the scale, the plot, and the line's ends.
+// The panel: the field, the scale, the plot, and the lines' ends.
 const profilePop = $('profile-pop');
 const profileCanvas = profilePop.querySelector('canvas')!;
 const profileSel = $<HTMLSelectElement>('profile-field');
 /** The panel has been moved by hand: it stays where it was put. */
 let profilePopMoved = false;
 
-/** Open the panel: beside the line's end when the line is new (or the panel was not moved). */
+/** Open the panel: beside the newest line's end when it is new (or the panel was not moved). */
 function openProfilePop(place: boolean) {
   const was = profilePop.hidden;
   profilePop.hidden = false;
   syncProfileMenu();
-  if ((was || place) && !profilePopMoved && !phone.matches && profile) {
+  syncProfileLines();
+  const last = profiles[profiles.length - 1];
+  if ((was || place) && !profilePopMoved && !phone.matches && last) {
     const at = projector();
     const r = canvas.getBoundingClientRect();
-    const [A, B] = [at(profile.a), at(profile.b)];
+    const [A, B] = [at(last.a), at(last.b)];
     const pw = profilePop.offsetWidth;
     const ph = profilePop.offsetHeight;
     // In the view area (left of the rail), beside the line: right of it, left of it, below or
@@ -3804,7 +3921,7 @@ function openProfilePop(place: boolean) {
 
 /** The panel's field menu: the view's, with what this run cannot show left out. */
 function syncProfileMenu() {
-  if (!profile) return;
+  if (!profiles.length) return;
   const main = $<HTMLSelectElement>('field');
   if (profileSel.dataset.from !== main.innerHTML) {
     profileSel.innerHTML = main.innerHTML;
@@ -3817,51 +3934,73 @@ function syncProfileMenu() {
     q.disabled = o.disabled;
     q.hidden = o.hidden;
   }
-  profileSel.value = profile.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${profile.species}` : String(profile.field);
+  const f = profileField;
+  profileSel.value = f.field === MASS_FRACTION_FIELD ? `${MASS_FRACTION_FIELD}:${f.species}` : String(f.field);
   // A view that holds one field has only that one on the GPU.
   profileSel.disabled = !!cfg.viewBaked;
-  profileSel.title = cfg.viewBaked ? 'A view that holds one field can profile only that field: change the field shown to profile another' : 'The field plotted along the line';
+  profileSel.title = cfg.viewBaked ? 'A view that holds one field can profile only that field: change the field shown to profile another' : 'The field plotted along the lines';
   const log = $<HTMLInputElement>('profile-log');
-  log.checked = profileLog(profile);
-  log.disabled = LINEAR_FIELDS.has(profile.field);
+  log.checked = profileLog();
+  log.disabled = LINEAR_FIELDS.has(f.field);
+}
+
+/** The panel's list of lines (with two or more): each one's colour and number, to swap its ends or remove it. */
+let profileLinesDrawn = '';
+function syncProfileLines() {
+  const several = profiles.length > 1;
+  const html = several
+    ? profiles.map((p, i) => `<span class="chip" style="--c:${PROFILE_COLORS[p.color]}"><i></i>${i + 1}<button type="button" data-swap="${i}" title="Swap line ${i + 1}'s ends" aria-label="Swap line ${i + 1}'s ends">&#8646;</button><button type="button" data-del="${i}" title="Remove line ${i + 1}" aria-label="Remove line ${i + 1}">&times;</button></span>`).join('')
+    : '';
+  const list = $('profile-lines');
+  if (html !== profileLinesDrawn) list.innerHTML = profileLinesDrawn = html;
+  list.hidden = !several;
+  // One Swap for one line; with several each has its own.
+  $('profile-swap').hidden = several;
+}
+
+/** Swap a line's ends. */
+function swapProfile(i: number) {
+  const p = profiles[i];
+  if (!p) return;
+  [p.a, p.b] = [p.b, p.a];
+  profileHover = null;
+  requestProfile();
+  drawProfileLine();
 }
 
 profileSel.addEventListener('change', () => {
-  if (!profile) return;
+  if (!profiles.length) return;
   const [f, k] = profileSel.value.split(':').map(Number);
-  profile.field = f;
-  profile.species = k || 0;
-  profile.log = null;
+  Object.assign(profileField, { field: f, species: k || 0, log: null });
   profileRange = null;
   syncProfileMenu();
   drawProfilePop();
   requestProfile();
 });
 $<HTMLInputElement>('profile-log').addEventListener('change', (e) => {
-  if (!profile) return;
-  profile.log = (e.target as HTMLInputElement).checked;
+  if (!profiles.length) return;
+  profileField.log = (e.target as HTMLInputElement).checked;
   profileRange = null;
   drawProfilePop();
 });
-$('profile-swap').addEventListener('click', () => {
-  if (!profile) return;
-  [profile.a, profile.b] = [profile.b, profile.a];
-  profileHover = -1;
-  requestProfile();
+$('profile-swap').addEventListener('click', () => swapProfile(0));
+$('profile-lines').addEventListener('click', (e) => {
+  const b = (e.target as HTMLElement).closest('button');
+  if (!b) return;
+  if (b.dataset.swap !== undefined) swapProfile(Number(b.dataset.swap));
+  else if (b.dataset.del !== undefined) removeProfile(Number(b.dataset.del));
 });
 $('profile-close').addEventListener('click', () => closeProfile());
 $('profile-csv').addEventListener('click', () => {
-  const d = profileData;
-  if (!d) return;
+  const list = profiles.map(profileSamples).filter((d): d is ProfileSamples => !!d);
+  if (!list.length) return;
   const u = units();
-  const projected = d.projection !== null;
-  const m = profileMeasure(d.field, projected);
+  const projected = list[0].projection !== null;
+  const m = profileMeasure(list[0].field, projected);
   const unit = (l: string) => (l ? ` (${l})` : '');
   const csv = profileCsv(
-    Array.from(d.s, (v) => v * u.scale('length')),
-    Array.from(d.values, (v) => v * u.scale(m)),
-    d.levels,
-    { distance: `distance${unit(u.label('length'))}`, value: `${profileFieldName(d.field, d.species, projected)}${unit(u.label(m))}` },
+    list.map((d) => ({ s: Array.from(d.s, (v) => v * u.scale('length')), values: Array.from(d.values, (v) => v * u.scale(m)), levels: d.levels })),
+    { distance: `distance${unit(u.label('length'))}`, value: `${profileFieldName(list[0].field, list[0].species, projected)}${unit(u.label(m))}` },
   );
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   const a = document.createElement('a');
@@ -3870,20 +4009,21 @@ $('profile-csv').addEventListener('click', () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 60_000);
 });
-// Hovering the plot marks the sample there on the line.
+// Hovering the plot marks the distance there on every line.
 profileCanvas.addEventListener('pointermove', (e) => {
-  if (!profileData) return;
+  const list = profiles.map(profileSamples).filter((d): d is ProfileSamples => !!d);
+  if (!list.length) return;
   const r = profileCanvas.getBoundingClientRect();
-  const k = sampleAt(e.clientX - r.left, r.width, profileData.s);
+  const at = distanceAt(e.clientX - r.left, r.width, plotLength(list));
   profileHoverFromLine = false;
-  if (k !== profileHover) {
-    profileHover = k;
+  if (at !== profileHover?.s) {
+    profileHover = at === null ? null : { s: at, line: -1 };
     drawProfilePop();
     drawProfileLine();
   }
 });
 profileCanvas.addEventListener('pointerleave', () => {
-  profileHover = -1;
+  profileHover = null;
   drawProfilePop();
   drawProfileLine();
 });
@@ -3910,19 +4050,22 @@ profileCanvas.addEventListener('pointerleave', () => {
   head.addEventListener('pointercancel', drop);
 }
 
+const escapeHtml = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
 /** Draw the panel's plot and words from the samples last read. */
 function drawProfilePop() {
-  if (profilePop.hidden || !profile || !cfg) return;
-  const p = profile;
-  const d = profileData && profileData.field === p.field && profileData.species === p.species ? profileData : null;
+  if (profilePop.hidden || !profiles.length || !cfg) return;
+  const f = profileField;
+  const lines = profiles.map((p) => ({ p, d: profileSamples(p) }));
+  const first = lines.find((l) => l.d)?.d;
   const u = units();
-  const projected = d ? d.projection !== null : projecting();
-  const m = profileMeasure(p.field, projected);
+  const projected = first ? first.projection !== null : projecting();
+  const m = profileMeasure(f.field, projected);
   const unit = u.label(m);
   const title = profilePop.querySelector('.title')!;
-  const text = `${profileFieldName(p.field, p.species, projected)}${unit ? `, ${unit}` : ''}${projected ? ` (projected along ${'xyz'[d?.projection ?? view.sliceAxis]})` : ''}`;
+  const text = `${profileFieldName(f.field, f.species, projected)}${unit ? `, ${unit}` : ''}${projected ? ` (projected along ${'xyz'[first?.projection ?? view.sliceAxis]})` : ''}`;
   if (title.textContent !== text) title.textContent = text;
-  const log = profileLog(p);
+  const log = profileLog();
   const w = profileCanvas.clientWidth;
   const h = profileCanvas.clientHeight;
   if (!w || !h) return;
@@ -3934,15 +4077,16 @@ function drawProfilePop() {
   const ctx = profileCanvas.getContext('2d')!;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   const cs = getComputedStyle(document.documentElement);
-  const color = (v: string, f: string) => cs.getPropertyValue(v).trim() || f;
-  const colors = { line: color('--accent', '#33d6ff'), dim: color('--dim', '#8792a8'), frame: color('--line', '#262c3a'), mark: color('--text', '#d6dbe6') };
+  const color = (v: string, fb: string) => cs.getPropertyValue(v).trim() || fb;
+  const colors = { dim: color('--dim', '#8792a8'), frame: color('--line', '#262c3a'), mark: color('--text', '#d6dbe6') };
   const ls = u.scale('length');
   const vs = u.scale(m);
-  const s = d ? Array.from(d.s, (v) => v * ls) : [];
-  const values = d ? Array.from(d.values, (v) => v * vs) : [];
+  const series = lines
+    .filter((l) => l.d)
+    .map(({ p, d }) => ({ s: Array.from(d!.s, (v) => v * ls), values: Array.from(d!.values, (v) => v * vs), solid: d!.solid, levels: cfg.amrLevels > 0 ? d!.levels : undefined, color: PROFILE_COLORS[p.color] }));
   // The value axis eases toward the values' range while the run goes, and widens at once.
-  const key = `${p.field}:${p.species}:${log}:${projected}:${unitSys}`;
-  const target = d ? valueRange(values, log, d.solid) : null;
+  const key = `${f.field}:${f.species}:${log}:${projected}:${unitSys}:${profiles.length}`;
+  const target = series.length ? seriesRange(series, log) : null;
   if (target) {
     const r = profileRange;
     const now = performance.now();
@@ -3956,34 +4100,55 @@ function drawProfilePop() {
       r.at = now;
     }
   }
-  drawProfilePlot(ctx, w, h, { s, values, solid: d?.solid, levels: cfg.amrLevels > 0 ? d?.levels : undefined, log, range: target ? profileRange!.range : null, mark: profileHover, colors });
-  // Under the plot: the value hovered, or the line's ends and length.
+  drawProfilePlot(ctx, w, h, { series, log, range: target ? profileRange!.range : null, mark: profileHover ? profileHover.s * ls : null, colors });
+  // Under the plot: the values at the distance hovered, or the line's ends and length.
   const foot = profilePop.querySelector('.foot')!;
   const lu = u.label('length');
-  const pos = (f: Vec3) => `(${(cfg.ndim === 3 ? [0, 1, 2] : [0, 1]).map((k) => fmt3(fracPos(cfg, f[k], k) * ls)).join(', ')})`;
-  let line: string;
-  if (d && profileHover >= 0 && profileHover < values.length) {
-    const k = profileHover;
-    const v = d.solid[k] ? 'solid' : u.fmt(d.values[k], m);
-    line = `at ${fmt3(s[k])}${lu ? ` ${lu}` : ''}: ${v}${cfg.amrLevels > 0 ? `, level ${d.levels[k]}` : ''}`;
+  const len = (v: number) => `${fmt3(v * ls)}${lu ? ` ${lu}` : ''}`;
+  const pos = (q: Vec3) => `(${(cfg.ndim === 3 ? [0, 1, 2] : [0, 1]).map((k) => fmt3(fracPos(cfg, q[k], k) * ls)).join(', ')})`;
+  let html: string;
+  const several = profiles.length > 1;
+  if (profileHover && series.length) {
+    const hs = profileHover.s;
+    const parts = lines.flatMap(({ p, d }, i) => {
+      if (!d) return [];
+      const k = sampleNear(d.s, hs);
+      if (k < 0) return [];
+      const v = d.solid[k] ? 'solid' : u.fmt(d.values[k], m);
+      const lev = cfg.amrLevels > 0 ? `, level ${d.levels[k]}` : '';
+      return [several ? `<span style="color:${PROFILE_COLORS[p.color]}">${i + 1}</span> ${escapeHtml(v)}${lev}` : `${escapeHtml(v)}${lev}`];
+    });
+    html = `at ${escapeHtml(len(hs))}: ${parts.join(several ? '; ' : '')}`;
+  } else if (!several) {
+    const d = lines[0].d;
+    html = escapeHtml(`${pos(profiles[0].a)} to ${pos(profiles[0].b)}${d ? `, ${len(d.length)} long` : ''}`);
   } else {
-    line = `${pos(p.a)} to ${pos(p.b)}${d ? `, ${fmt3(d.length * ls)}${lu ? ` ${lu}` : ''} long` : ''}`;
+    html = escapeHtml(`${profiles.length} lines; hover the plot to read them`);
   }
-  if (foot.textContent !== line) foot.textContent = line;
+  if (foot.innerHTML !== html) foot.innerHTML = html;
 }
 
 
-/** The API's profile (api.ts profile()): along a line given in fractions of the box, or the one on show. */
-async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | number; n?: number; projection?: number | null; show?: boolean }) {
+/**
+ * The API's profile (api.ts profile()): along a line given in fractions of the box, or one of
+ * those on show (`line`, from 0). `show`: true puts the line on show alone, 'add' adds it to
+ * those on show.
+ */
+async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | number; n?: number; projection?: number | null; show?: boolean | 'add'; line?: number }) {
   const s = sim;
   if (!s) throw new Error('no simulation is loaded');
   if (spherical(cfg)) throw new Error('profiles are not available on a spherical grid yet');
   let a: Vec3;
   let b: Vec3;
-  if (o.from === undefined && o.to === undefined) {
-    if (!profile) throw new Error('no profile is on show in the page: give `from` and `to`');
-    [a, b] = [profile.a, profile.b];
+  const onShow = o.from === undefined && o.to === undefined;
+  if (onShow) {
+    if (!profiles.length) throw new Error('no profile is on show in the page: give `from` and `to`');
+    const i = o.line ?? 0;
+    const p = Number.isInteger(i) ? profiles[i] : undefined;
+    if (!p) throw new Error(`profile: no line ${i} on show: there ${profiles.length === 1 ? 'is 1' : `are ${profiles.length}`}, numbered from 0`);
+    [a, b] = [p.a, p.b];
   } else {
+    if (o.line !== undefined) throw new Error('profile: give `line` (a line on show) or `from` and `to`, not both');
     const point = (v: unknown, name: string): number[] => {
       if (!Array.isArray(v) || v.length < cfg.ndim || v.length > 3 || !v.every((x) => typeof x === 'number' && Number.isFinite(x))) {
         throw new Error(`profile: "${name}" takes [x, y${cfg.ndim === 3 ? ', z' : ''}] in fractions of the box`);
@@ -3994,11 +4159,10 @@ async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | 
     if (!c) throw new Error('profile: that line does not cross the box');
     [a, b] = c;
   }
-  const fallback = profile && o.from === undefined ? { field: profile.field, species: profile.species } : { field: view.field, species: view.species };
+  if (o.show !== undefined && o.show !== true && o.show !== false && o.show !== 'add') throw new Error('profile: "show" is true (the line alone), "add" (with those on show) or false');
+  const fallback = profiles.length && (onShow || o.show === 'add') ? { field: profileField.field, species: profileField.species } : { field: view.field, species: view.species };
   const f = resolveField(o.field, cfg.problem.species ?? [], fallback);
-  const opt = [...$<HTMLSelectElement>('field').options].find((q) => q.value === String(f.field));
-  // (What the view's menu leaves out: disabled, or hidden with its group, as a magnetic field without one.)
-  if (opt && (opt.disabled || opt.hidden || (opt.parentElement as HTMLOptGroupElement | null)?.hidden)) throw new Error(`profile: ${FIELDS[f.field]} is not available in this run`);
+  if (!fieldOffered(f.field)) throw new Error(`profile: ${FIELDS[f.field]} is not available in this run`);
   if (cfg.viewBaked && (f.field !== view.field || (f.field === MASS_FRACTION_FIELD && f.species !== view.species))) {
     throw new Error(`profile: a view that holds one field can profile only that field (${viewFieldName()}); change the field shown first`);
   }
@@ -4008,14 +4172,14 @@ async function apiProfile(o: { from?: number[]; to?: number[]; field?: string | 
     if (![0, 1, 2].includes(o.projection)) throw new Error('profile: "projection" is an axis: 0, 1 or 2');
     projection = o.projection;
   }
+  if (o.show === 'add' && profiles.length >= MAX_PROFILES) throw new Error(`profile: at most ${MAX_PROFILES} lines on show at once`);
   const r = await profileOf(s, a, b, { ...f, projection }, o.n);
   if (o.show) {
-    profile = { a, b, field: f.field, species: f.species, log: null, dims: cfg.ndim };
-    profileData = r;
-    profileRange = null;
-    profileHover = -1;
+    // A new field for the lines on show resamples those already there.
+    if (o.show === true) profiles = [];
+    Object.assign(profileField, { field: f.field, species: f.species, log: o.show === true ? null : profileField.log });
+    addProfile(a, b, r);
     openProfilePop(true);
-    drawProfileLine();
   }
   return {
     from: a.slice(0, cfg.ndim),

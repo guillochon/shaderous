@@ -405,11 +405,12 @@ details[open] > summary .sum { display: none; }
 
 /* The profile tool: its line over the view, and the panel with the field along it. */
 #profile-line { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: hidden; }
-#profile-line line.trace { stroke: #ffe066; stroke-width: 2; stroke-linecap: round; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.85)); }
-#profile-line path.ticks { fill: none; stroke: #ffe066; stroke-width: 1.5; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85)); }
-#profile-line circle.end { fill: var(--panel); stroke: #ffe066; stroke-width: 2; }
-#profile-line circle.end.start { fill: #ffe066; }
+#profile-line line.trace { stroke: var(--c, #ffe066); stroke-width: 2; stroke-linecap: round; filter: drop-shadow(0 0 1.5px rgba(0, 0, 0, 0.85)); }
+#profile-line path.ticks { fill: none; stroke: var(--c, #ffe066); stroke-width: 1.5; filter: drop-shadow(0 0 1px rgba(0, 0, 0, 0.85)); }
+#profile-line circle.end { fill: var(--panel); stroke: var(--c, #ffe066); stroke-width: 2; }
+#profile-line circle.end.start { fill: var(--c, #ffe066); }
 #profile-line circle.mark { fill: #fff; stroke: #000; stroke-width: 1; }
+#profile-line text.tag { fill: var(--c, #ffe066); font: 600 11px ui-monospace, Consolas, monospace; text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: rgba(0, 0, 0, 0.85); stroke-width: 3px; }
 #profile-pop {
   position: fixed; z-index: 22; width: 380px; padding: 0 8px 7px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
@@ -423,6 +424,11 @@ details[open] > summary .sum { display: none; }
 #profile-pop .controls select { flex: 1; min-width: 0; height: 22px; font-size: 11px; }
 #profile-pop .controls label { display: flex; align-items: center; gap: 3px; white-space: nowrap; cursor: pointer; }
 #profile-pop .controls button { height: 22px; padding: 0 8px; font-size: 11px; }
+#profile-pop .lines { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+#profile-pop .lines[hidden] { display: none; }
+#profile-pop .chip { display: inline-flex; align-items: center; gap: 3px; padding: 0 2px 0 5px; border: 1px solid var(--line); border-radius: 10px; font-variant-numeric: tabular-nums; }
+#profile-pop .chip i { width: 10px; height: 3px; border-radius: 2px; background: var(--c); }
+#profile-pop .chip button { width: 18px; height: 18px; padding: 0; border: 0; background: none; font-size: 12px; line-height: 1; }
 #profile-pop canvas { display: block; width: 100%; height: 170px; cursor: crosshair; }
 #profile-pop .foot { margin-top: 3px; color: var(--dim); font-family: ui-monospace, Consolas, monospace; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 700px) {

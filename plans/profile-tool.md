@@ -1,9 +1,31 @@
 # Plan: a profile tool — a field's value along a line
 
-Status (2026-11-26): stages 1 to 3 built; stage 4 (runner `--profile`, the link, several
-profiles, exact cell crossings) not started.
+Status (2026-11-26): stages 1 to 4 built, but for exact cell crossings (decision 2), which is
+not started and not asked for.
 
-**As built.**
+**As built, stage 4.**
+
+- Several profiles (decision 5 changed): up to six lines (`MAX_PROFILES`), each in a colour of
+  its own (`PROFILE_COLORS`, the first the yellow the single line had), numbered at its start
+  when there are two or more. One panel, not one per line: the curves are overlaid against
+  distance from each line's start, with one field and one log axis for all, so lines are
+  compared at a glance. A new line is added, no longer replaces; the panel lists the lines with
+  a swap and a remove button each, and its close button lets them all go (as Esc does). The
+  frame's profile pass samples every line in one dispatch, their points one after another.
+  Hovering the plot reads each line at that distance; hovering a line marks that distance on
+  every line. The CSV has a `line` column when there are several.
+- The link: `prof` (each line's ends, four or six numbers to 4 decimals, `;` between lines),
+  `proff` (the field's index), `profsp` (a mass fraction's species) and `proflog`. Decoded and
+  clipped in `link.ts`; a malformed `prof` is reported as ignored. The page sets the lines while
+  the run is built and opens the panel on its first frame; a field the run does not offer gives
+  way to the one shown.
+- API: `profile({ line })` reads one of the lines on show; `show: 'add'` adds a line (and sets
+  the panel's field to its own), `show: true` puts it on show alone. MCP `profile` passes `line`.
+- Runner: `--profile NAME:x0,y0[,z0]:x1,y1[,z1][:FIELD,..]` (repeatable), `--profile-n`,
+  `--profile-format json|npy|csv`; files `NNNN-tT-profile-NAME[-FIELD].ext`, with the profile's
+  other fields under the output's `profiles` in `manifest.json` for npy and csv.
+
+**As built, stages 1 to 3.**
 
 - GPU pass: `profile` in `render/project.wgsl`, shared by both field shaders, each of which gives
   `profile_cell()` (the cell under a point; the finest leaf on blocks). `Renderer.profile()`

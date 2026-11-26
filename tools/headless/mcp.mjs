@@ -137,9 +137,9 @@ const TOOLS = [
   },
   {
     name: 'profile',
-    async run({ from, to, field, n, projection, show, include_values, save_path }) {
+    async run({ from, to, field, n, projection, line, show, include_values, save_path }) {
       // Out of the page as float32 bytes, as slice's values are.
-      const { arrays, ...head } = await call('profile', { from, to, field, n, projection, show, encoding: 'base64' });
+      const { arrays, ...head } = await call('profile', { from, to, field, n, projection, line, show, encoding: 'base64' });
       const [s, values, level] = ['s', 'values', 'level'].map((k) => sliceArray({ array: arrays[k] }));
       const out = { ...head };
       delete out.solid;

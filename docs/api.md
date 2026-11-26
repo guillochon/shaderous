@@ -224,6 +224,10 @@ by `npm run gen`.
 | `turn` | The view | Volume view of a run in a rotating frame: turn the box at the frame’s rate, so the picture is the one a camera at rest sees (a rotor turning, its wake left behind) |
 | `cmap` | The view | Colormap |
 | `tf` | The view | Volume view: the opacity curve, as x:a points separated by commas |
+| `prof` | The view | Profile lines on show, at most 6: each x0,y0,x1,y1 (2D) or x0,y0,z0,x1,y1,z1 (3D) in fractions of the box, ; between lines |
+| `proff` | The view | The field plotted along the profile lines, an index into the fields (default: the one shown) |
+| `profsp` | The view | With proff a mass fraction: its species, by index |
+| `proflog` | The view | The profile plot’s value axis logarithmic (1) or linear (0); left out: as the field’s default |
 <!-- /gen:link-keys -->
 
 Keys left out take the preset's defaults. A value that is unknown or out of range is ignored
@@ -603,15 +607,19 @@ The state at a list of points `[x, y, z]`. Each point returns `rho`, `press`, `v
 `r0`, `temp` (and `tempK` with physical units, as for `slice`), `level`, and `X`, the species'
 mass fractions by name, when the run has species.
 
-### `profile({ from?, to?, field?, n?, projection?, show?, encoding? }) → object`
+### `profile({ from?, to?, field?, n?, projection?, line?, show?, encoding? }) → object`
 
 A field along a straight line through the box, read by the same GPU code that draws the view: any
 field of `describe().fields` (Mach number, vorticity, plasma beta, radiation temperature, …), not
-only `slice`'s variables. The page's Profile tool draws the same line and plots it.
+only `slice`'s variables. The page's Profile tool draws the same lines and plots them: up to six
+at once, each in a colour of its own, their plots overlaid in one panel with one field for all.
+A shareable link carries them (keys `prof`, `proff`, `profsp`, `proflog`).
 
 - `from`, `to`: the line's ends, `[x, y]` or `[x, y, z]` in fractions of the box. The line is
-  clipped to the box; one that misses it is an error. Both left out: the line the Profile tool
-  placed in the page (an error if there is none), with its field unless `field` is given.
+  clipped to the box; one that misses it is an error. Both left out: a line the Profile tool
+  placed in the page (an error if there is none), with the panel's field unless `field` is given.
+- `line`: with no `from` and `to`, which line on show to read, from 0 in the order they were
+  placed. Default 0.
 - `field`: an index into `describe().fields`, a field's name in any case (`"Mach number"`), one of
   `rho`, `press`, `vel1`, `vel2`, `vel3`, `r0`, `temp`, `level`, or a species' name (its mass
   fraction). Default: the field shown. A field the run cannot show (a magnetic field without
@@ -622,7 +630,9 @@ only `slice`'s variables. The page's Profile tool draws the same line and plots 
 - `projection`: 3D only, an axis. Each sample is then the projection along that axis through it,
   as the projection view draws it: the column density for density, the mass-weighted mean along
   the line of sight for any other field.
-- `show`: also put the line and its plot on show in the page. (Screenshots do not draw it.)
+- `show`: also put the line and its plot on show in the page: `true` alone (the lines on show
+  are let go), `'add'` beside those on show (at most six; their field becomes this one). Screenshots
+  do not draw the lines.
 - `encoding`: as for `slice`; with `'base64'` the arrays come as EncodedArrays in `arrays`.
 
 Each sample is the cell under it, the finest leaf on an adaptive mesh, with no interpolation:

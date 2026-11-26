@@ -89,11 +89,17 @@ export function resolveField(spec: string | number | undefined, species: readonl
   return { field: i, species: 0 };
 }
 
-/** A profile as CSV: distance, value and refinement level, one sample a row. */
-export function profileCsv(s: ArrayLike<number>, values: ArrayLike<number>, levels: ArrayLike<number>, head: { distance: string; value: string }): string {
+/**
+ * Profiles as CSV: distance, value and refinement level, one sample a row. With several lines, a
+ * first column numbers them (from 1), their rows one line after another.
+ */
+export function profileCsv(lines: { s: ArrayLike<number>; values: ArrayLike<number>; levels: ArrayLike<number> }[], head: { distance: string; value: string }): string {
   const q = (x: string) => (/[",\n]/.test(x) ? `"${x.replace(/"/g, '""')}"` : x);
-  const rows = [`${q(head.distance)},${q(head.value)},level`];
-  for (let i = 0; i < s.length; i++) rows.push(`${s[i]},${values[i]},${levels[i]}`);
+  const several = lines.length > 1;
+  const rows = [`${several ? 'line,' : ''}${q(head.distance)},${q(head.value)},level`];
+  lines.forEach((l, j) => {
+    for (let i = 0; i < l.s.length; i++) rows.push(`${several ? `${j + 1},` : ''}${l.s[i]},${l.values[i]},${l.levels[i]}`);
+  });
   return rows.join('\n') + '\n';
 }
 
@@ -115,20 +121,31 @@ export function ticks(lo: number, hi: number, want = 4): number[] {
   return out;
 }
 
-/** What the plot draws: distance and value of each sample (displayed units), with its options. */
-export interface ProfilePlot {
+/** The lines' colours, in the order lines take them (the first as the single line has always been). */
+export const PROFILE_COLORS = ['#ffe066', '#33d6ff', '#ff6fae', '#7dff7a', '#ff9f43', '#b18cff'];
+/** The most lines on show at once. */
+export const MAX_PROFILES = PROFILE_COLORS.length;
+
+/** One line's samples in the plot: distance and value of each (displayed units). */
+export interface ProfileSeries {
   s: ArrayLike<number>;
   values: ArrayLike<number>;
   /** solid samples, left out of the line */
   solid?: ArrayLike<number>;
+  /** refinement levels, whose changes are marked along the bottom */
+  levels?: ArrayLike<number>;
+  color: string;
+}
+
+/** What the plot draws: the lines' samples against distance from each line's start, with its options. */
+export interface ProfilePlot {
+  series: ProfileSeries[];
   log: boolean;
   /** the y range to draw, eased by the caller; null to fit the values */
   range?: [number, number] | null;
-  /** a sample to mark (the one hovered), or -1 */
-  mark?: number;
-  /** refinement levels, whose changes are marked along the bottom */
-  levels?: ArrayLike<number>;
-  colors: { line: string; dim: string; frame: string; mark: string };
+  /** a distance to mark (the one hovered), or null */
+  mark?: number | null;
+  colors: { dim: string; frame: string; mark: string };
 }
 
 /** The plot's margins, in CSS pixels. */
@@ -136,14 +153,21 @@ export const PLOT_MARGIN = { left: 50, right: 8, top: 6, bottom: 18 };
 
 /** The y range of the values to plot (logs of the positive ones with `log`), or null if none. */
 export function valueRange(values: ArrayLike<number>, log: boolean, solid?: ArrayLike<number>): [number, number] | null {
+  return seriesRange([{ values, solid }], log);
+}
+
+/** The y range of several lines' values together, as valueRange. */
+export function seriesRange(series: { values: ArrayLike<number>; solid?: ArrayLike<number> }[], log: boolean): [number, number] | null {
   let lo = Infinity;
   let hi = -Infinity;
-  for (let i = 0; i < values.length; i++) {
-    if (solid?.[i]) continue;
-    const v = log ? (values[i] > 0 ? Math.log10(values[i]) : NaN) : values[i];
-    if (!Number.isFinite(v)) continue;
-    lo = Math.min(lo, v);
-    hi = Math.max(hi, v);
+  for (const { values, solid } of series) {
+    for (let i = 0; i < values.length; i++) {
+      if (solid?.[i]) continue;
+      const v = log ? (values[i] > 0 ? Math.log10(values[i]) : NaN) : values[i];
+      if (!Number.isFinite(v)) continue;
+      lo = Math.min(lo, v);
+      hi = Math.max(hi, v);
+    }
   }
   if (!(hi >= lo)) return null;
   if (hi === lo) {
@@ -153,6 +177,9 @@ export function valueRange(values: ArrayLike<number>, log: boolean, solid?: Arra
   const pad = (hi - lo) * 0.05;
   return [lo - pad, hi + pad];
 }
+
+/** The x axis's end: the longest line's length (each line starts at distance 0). */
+export const plotLength = (series: { s: ArrayLike<number> }[]) => Math.max(0, ...series.map((q) => (q.s.length ? q.s[q.s.length - 1] : 0)));
 
 /** Draw the plot into a 2D context of CSS size w x h. */
 export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: number, p: ProfilePlot) {
@@ -164,17 +191,17 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
   ctx.strokeRect(x0 + 0.5, y0 + 0.5, pw - 1, ph - 1);
   ctx.font = '10px ui-monospace, Consolas, monospace';
   ctx.fillStyle = p.colors.dim;
-  const n = p.s.length;
-  const range = p.range ?? valueRange(p.values, p.log, p.solid);
-  if (n < 2 || !range || pw < 10 || ph < 10) {
+  const series = p.series.filter((q) => q.s.length >= 2);
+  const range = p.range ?? seriesRange(series, p.log);
+  const sb = plotLength(series);
+  if (!series.length || !range || !(sb > 0) || pw < 10 || ph < 10) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(p.log && n >= 2 ? 'no positive values to show on a log scale' : 'nothing to show', x0 + pw / 2, y0 + ph / 2);
+    ctx.fillText(p.log && series.length ? 'no positive values to show on a log scale' : 'nothing to show', x0 + pw / 2, y0 + ph / 2);
     return;
   }
   const [lo, hi] = range;
-  const [sa, sb] = [p.s[0], p.s[n - 1]];
-  const px = (s: number) => x0 + ((s - sa) / (sb - sa || 1)) * pw;
+  const px = (s: number) => x0 + (s / sb) * pw;
   const py = (v: number) => y0 + ph - ((v - lo) / (hi - lo)) * ph;
   const yOf = (v: number) => (p.log ? (v > 0 ? Math.log10(v) : NaN) : v);
 
@@ -193,15 +220,17 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
   }
   ctx.textAlign = 'center';
   ctx.textBaseline = 'top';
-  for (const t of ticks(sa, sb, Math.max(2, Math.floor(pw / 50)))) ctx.fillText(fmt3(t), px(t), y0 + ph + 3);
+  for (const t of ticks(0, sb, Math.max(2, Math.floor(pw / 50)))) ctx.fillText(fmt3(t), px(t), y0 + ph + 3);
 
-  // Where the refinement level changes: a short mark on the bottom edge.
-  if (p.levels) {
-    ctx.strokeStyle = p.colors.dim;
+  // Where the refinement level changes: a short mark on the bottom edge, in the line's colour
+  // when there are several.
+  for (const q of series) {
+    if (!q.levels) continue;
+    ctx.strokeStyle = series.length > 1 ? q.color : p.colors.dim;
     ctx.beginPath();
-    for (let i = 1; i < n; i++) {
-      if (p.levels[i] === p.levels[i - 1]) continue;
-      const x = Math.round(px((p.s[i] + p.s[i - 1]) / 2)) + 0.5;
+    for (let i = 1; i < q.s.length; i++) {
+      if (q.levels[i] === q.levels[i - 1]) continue;
+      const x = Math.round(px((q.s[i] + q.s[i - 1]) / 2)) + 0.5;
       ctx.moveTo(x, y0 + ph - 4);
       ctx.lineTo(x, y0 + ph);
     }
@@ -212,28 +241,30 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
   ctx.beginPath();
   ctx.rect(x0, y0, pw, ph);
   ctx.clip();
-  ctx.strokeStyle = p.colors.line;
   ctx.lineWidth = 1.5;
   ctx.lineJoin = 'round';
-  ctx.beginPath();
-  let pen = false;
-  for (let i = 0; i < n; i++) {
-    const v = yOf(p.values[i]);
-    if (p.solid?.[i] || !Number.isFinite(v)) {
-      pen = false;
-      continue;
+  for (const q of series) {
+    ctx.strokeStyle = q.color;
+    ctx.beginPath();
+    let pen = false;
+    for (let i = 0; i < q.s.length; i++) {
+      const v = yOf(q.values[i]);
+      if (q.solid?.[i] || !Number.isFinite(v)) {
+        pen = false;
+        continue;
+      }
+      const [x, y] = [px(q.s[i]), py(v)];
+      if (pen) ctx.lineTo(x, y);
+      else ctx.moveTo(x, y);
+      pen = true;
     }
-    const [x, y] = [px(p.s[i]), py(v)];
-    if (pen) ctx.lineTo(x, y);
-    else ctx.moveTo(x, y);
-    pen = true;
+    ctx.stroke();
   }
-  ctx.stroke();
   ctx.restore();
 
-  const k = p.mark ?? -1;
-  if (k >= 0 && k < n) {
-    const x = Math.round(px(p.s[k])) + 0.5;
+  const at = p.mark ?? null;
+  if (at !== null && at >= 0 && at <= sb) {
+    const x = Math.round(px(at)) + 0.5;
     ctx.strokeStyle = p.colors.mark;
     ctx.lineWidth = 1;
     ctx.setLineDash([3, 3]);
@@ -242,24 +273,36 @@ export function drawProfilePlot(ctx: CanvasRenderingContext2D, w: number, h: num
     ctx.lineTo(x, y0 + ph);
     ctx.stroke();
     ctx.setLineDash([]);
-    const v = yOf(p.values[k]);
-    if (Number.isFinite(v) && !p.solid?.[k]) {
-      ctx.fillStyle = p.colors.mark;
+    for (const q of series) {
+      const k = sampleNear(q.s, at);
+      if (k < 0) continue;
+      const v = yOf(q.values[k]);
+      if (!Number.isFinite(v) || q.solid?.[k]) continue;
+      ctx.fillStyle = series.length > 1 ? q.color : p.colors.mark;
       ctx.beginPath();
-      ctx.arc(x, Math.min(y0 + ph, Math.max(y0, py(v))), 3, 0, 2 * Math.PI);
+      ctx.arc(Math.round(px(q.s[k])) + 0.5, Math.min(y0 + ph, Math.max(y0, py(v))), 3, 0, 2 * Math.PI);
       ctx.fill();
     }
   }
 }
 
-/** The sample nearest a point x (CSS pixels) of a plot w wide, or -1 off the plot. */
-export function sampleAt(x: number, w: number, s: ArrayLike<number>): number {
+/** The distance under a point x (CSS pixels) of a plot w wide whose axis ends at `length`, or null off the plot. */
+export function distanceAt(x: number, w: number, length: number): number | null {
   const m = PLOT_MARGIN;
   const pw = w - m.left - m.right;
+  if (!(length > 0) || pw <= 0 || x < m.left - 4 || x > m.left + pw + 4) return null;
+  return Math.min(1, Math.max(0, (x - m.left) / pw)) * length;
+}
+
+/**
+ * The sample of a line nearest a distance from its start, or -1 if the distance lies beyond the
+ * line's ends by more than half a sample spacing (a line shorter than the longest).
+ */
+export function sampleNear(s: ArrayLike<number>, target: number): number {
   const n = s.length;
-  if (n < 2 || x < m.left - 4 || x > m.left + pw + 4) return -1;
-  const t = Math.min(1, Math.max(0, (x - m.left) / pw));
-  const target = s[0] + t * (s[n - 1] - s[0]);
+  if (n < 1) return -1;
+  const half = n > 1 ? (s[n - 1] - s[0]) / (n - 1) / 2 : 0;
+  if (target < s[0] - half || target > s[n - 1] + half) return -1;
   let lo = 0;
   let hi = n - 1;
   while (hi - lo > 1) {
@@ -268,4 +311,25 @@ export function sampleAt(x: number, w: number, s: ArrayLike<number>): number {
     else hi = mid;
   }
   return Math.abs(s[lo] - target) <= Math.abs(s[hi] - target) ? lo : hi;
+}
+
+/** The lines of a link's `prof`: each `x0,y0,x1,y1` (2D) or `x0,y0,z0,x1,y1,z1` (3D) in fractions of the box, `;` between lines. */
+export function encodeProfileLines(lines: { a: readonly number[]; b: readonly number[] }[], dims: 2 | 3): string {
+  const f = (v: number) => String(+v.toFixed(4));
+  return lines.map((l) => [...l.a.slice(0, dims), ...l.b.slice(0, dims)].map(f).join(',')).join(';');
+}
+
+/** The lines of a link's `prof` (encodeProfileLines), clipped to the box; null if any is not one. */
+export function decodeProfileLines(raw: string, dims: 2 | 3): [Vec3, Vec3][] | null {
+  const parts = raw.split(';').filter(Boolean);
+  if (!parts.length || parts.length > MAX_PROFILES) return null;
+  const out: [Vec3, Vec3][] = [];
+  for (const part of parts) {
+    const v = part.split(',').map((x) => (x.trim() === '' ? NaN : Number(x)));
+    if (v.length !== 2 * dims || !v.every((x) => Number.isFinite(x) && x >= 0 && x <= 1)) return null;
+    const c = clipSegment(v.slice(0, dims), v.slice(dims), dims);
+    if (!c) return null;
+    out.push(c);
+  }
+  return out;
 }

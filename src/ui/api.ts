@@ -163,8 +163,10 @@ export interface ProfileOptions {
   n?: number;
   /** 3D: sample the projection along this axis (as the projection view shows it) instead of the cells */
   projection?: number | null;
-  /** put the line on show in the page, with its plot */
-  show?: boolean;
+  /** with no `from` and `to`: which line on show to read, from 0 in the order placed (default 0) */
+  line?: number;
+  /** put the line on show in the page with its plot: true alone, 'add' beside the lines already on show */
+  show?: boolean | 'add';
   encoding?: 'json' | 'base64';
 }
 /** What app.profile() hands back: the arrays as they were read. */
@@ -1522,7 +1524,7 @@ export function installApi(app: AppHooks, ready: Promise<void>) {
      * not only slice()'s variables): each sample is the cell under it, the finest leaf on an
      * adaptive mesh. `s` is the distance from `from` in code length, `values` in code units,
      * `level` each sample's refinement level, `solid` the samples inside an obstacle. With no
-     * `from` and `to`, the line on show in the page (placed with the Profile tool). With
+     * `from` and `to`, a line on show in the page (placed with the Profile tool; `line` picks which). With
      * `encoding: 'base64'`, `s`, `values` and `level` come as EncodedArrays (src/io/arrays.ts)
      * in `arrays` instead: float32 bytes, faster out of the page at many samples.
      */

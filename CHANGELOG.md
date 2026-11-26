@@ -9,6 +9,16 @@ What changed in each release of Shaderous. A release's section here is the body 
 
 ### Added
 
+- **Several profiles at once.** Each line the Profile tool places is added to those on show, up
+  to six, each in a colour of its own and numbered; their plots are overlaid in one panel, one
+  field for all, and hovering the plot reads every line at that distance. Each line can be
+  swapped end for end or removed in the panel; its CSV numbers the lines. The API's `profile`
+  reads any of them (`line`) and adds one (`show: 'add'`).
+- **Profiles in the shareable link:** `prof` (the lines' ends), `proff` (the field), `profsp`
+  and `proflog`. A link opens with the lines and their panel on show.
+- **Profiles from the command-line runner:** `--profile NAME:FROM:TO[:FIELD,..]` writes a field
+  along a line at each output, as JSON, `.npy` or CSV (`--profile-format`), with `--profile-n`
+  samples.
 - **Up to seven levels of refinement** (docs/numerics.md section 17), from five: 128 times finer than
   the coarsest grid, for problems whose interesting part is small against the box. A level needs
   a whole 16-cell root block per side (7 levels from 2048 cells across). 3D grids go to 4096³ at

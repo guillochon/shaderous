@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, appendFileSync } fr
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { helpText, OPTIONS } from './flags.mjs';
-import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, saveAthdf, sendMeshFiles, setupQuery, uploadAthdf } from './session.mjs';
+import { debrisSummary, fetchSlice, lowerPriority, openSession, pngBytes, saveAthdf, sendMeshFiles, setupQuery, sliceArray, uploadAthdf } from './session.mjs';
 import { npyBytes } from './npy.mjs';
 
 const HELP = `Usage: shaderous <command> [setup] [options]   (in a checkout: npm run headless -- <command> ...)
@@ -59,6 +59,31 @@ if (o.from && (setupArg || o.setup || o.problem || o.dim || o.n || o.amr || o.se
 }
 const sliceFormat = o['slice-format'] ?? 'json';
 if (!['json', 'npy'].includes(sliceFormat)) usage(`--slice-format is json or npy, not "${sliceFormat}"`);
+const profileFormat = o['profile-format'] ?? 'json';
+if (!['json', 'npy', 'csv'].includes(profileFormat)) usage(`--profile-format is json, npy or csv, not "${profileFormat}"`);
+
+/** The --profile lines: { name, from, to, fields }, read before anything starts. */
+const profileSpecs = (o.profile ?? []).map((s) => {
+  const parts = s.split(':');
+  const bad = (why) => usage(`--profile takes NAME:x0,y0[,z0]:x1,y1[,z1][:FIELD,..] (${why}), not "${s}"`);
+  if (parts.length < 3 || parts.length > 4) bad('three or four parts between colons');
+  const [name, a, b, fields = ''] = parts;
+  if (!/^[\w-]+$/.test(name)) bad('a name of letters, digits, - and _');
+  const point = (t) => {
+    const v = t.split(',').map((x) => (x.trim() === '' ? NaN : Number(x)));
+    if (v.length < 2 || v.length > 3 || !v.every(Number.isFinite)) bad('ends of two or three numbers');
+    return v;
+  };
+  const [from, to] = [point(a), point(b)];
+  if (from.length !== to.length) bad('both ends with as many numbers');
+  return { name, from, to, fields: fields.split(',').map((f) => f.trim()).filter(Boolean) };
+});
+if (new Set(profileSpecs.map((p) => p.name)).size !== profileSpecs.length) usage('each --profile needs a name of its own');
+const profileN = o['profile-n'] === undefined ? undefined : Number(o['profile-n']);
+if (profileN !== undefined && !(Number.isInteger(profileN) && profileN >= 2 && profileN <= 16384)) usage('--profile-n takes a whole number, 2 to 16384');
+if (!profileSpecs.length && (o['profile-n'] !== undefined || o['profile-format'] !== undefined)) usage('--profile-n and --profile-format go with --profile');
+/** A field's name as part of a file name. */
+const fieldSlug = (f) => String(f).toLowerCase().replace(/[^\w-]+/g, '_').replace(/^_|_$/g, '');
 
 /** The setup document of --setup, read once: the page checks it. */
 let setupDocument;
@@ -212,6 +237,22 @@ async function runOne(session, q, dir) {
       } else writeFileSync(path.join(dir, file), JSON.stringify({ ...head, values: Array.from(values) }) + '\n');
       files.push(file);
     }
+    // Profiles along lines, as float32 bytes out of the page as slices are.
+    const profiles = [];
+    for (const pr of profileSpecs) {
+      for (const field of pr.fields.length ? pr.fields : [undefined]) {
+        const r = await call('profile', { from: pr.from, to: pr.to, ...(field !== undefined ? { field: /^\d+$/.test(field) ? Number(field) : field } : {}), ...(profileN !== undefined ? { n: profileN } : {}), encoding: 'base64' });
+        const { arrays, ...head } = r;
+        const [s, values, level] = ['s', 'values', 'level'].map((k) => sliceArray({ array: arrays[k] }));
+        const file = `${name}-profile-${pr.name}${pr.fields.length > 1 ? `-${fieldSlug(field)}` : ''}.${profileFormat}`;
+        const out = path.join(dir, file);
+        if (profileFormat === 'npy') writeFileSync(out, npyBytes(values, [values.length]));
+        else if (profileFormat === 'csv') writeFileSync(out, 's,value,level\n' + Array.from(values, (v, i) => `${s[i]},${v},${level[i]}`).join('\n') + '\n');
+        else writeFileSync(out, JSON.stringify({ profile: pr.name, ...head, s: Array.from(s), values: Array.from(values), level: Array.from(level) }) + '\n');
+        if (profileFormat !== 'json') profiles.push({ file, profile: pr.name, ...head });
+        files.push(file);
+      }
+    }
     if (o.debris) {
       const r = await call('debris');
       writeFileSync(path.join(dir, `${name}-debris.json`), JSON.stringify(r) + '\n');
@@ -226,7 +267,7 @@ async function runOne(session, q, dir) {
       await saveAthdf(call, path.join(dir, `${name}.athdf`));
       files.push(`${name}.athdf`);
     }
-    manifest.outputs.push({ output: k, t: d.t, steps: d.steps, files, ...(slices.length ? { slices } : {}) });
+    manifest.outputs.push({ output: k, t: d.t, steps: d.steps, files, ...(slices.length ? { slices } : {}), ...(profiles.length ? { profiles } : {}) });
     writeManifest();
     log(`  t = ${tag(d.t)}  steps ${d.steps}  mass ${d.mass.toPrecision(7)}  eTot ${d.eTot.toPrecision(7)}  (${((Date.now() - t0) / 1000).toFixed(1)} s)`);
     k++;

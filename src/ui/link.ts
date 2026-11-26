@@ -9,7 +9,7 @@ import { configFor, unitConstants, type SimConfig } from '../sim';
 import { mirrorAxes, mirrorName } from '../domain';
 import { physicalEosParams, type EosParams } from '../eos/eos';
 import type { CoolingParams } from '../cooling/cooling';
-import { FIELDS, problemUnits, type Bc3, type Problem } from '../problems';
+import { FIELDS, MASS_FRACTION_FIELD, problemUnits, type Bc3, type Problem } from '../problems';
 import { CUSTOM_ID } from '../presets/custom';
 import { hasProblem, problemOf } from '../presets/lookup';
 import { flatten, OPTIONS, PART_OPTIONS, type Option } from '../setup/options';
@@ -17,6 +17,7 @@ import { defaultView, type ViewState } from '../render/renderer';
 import { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST, VIEW_MODES, VIEW_OPTIONS, type ViewOption } from '../render/view_options';
 import { COLORMAPS, defaultOpacity, type OpacityPoint } from '../render/transfer';
 import { SNAPSHOT_FORMAT, type SnapshotMeta } from '../io/snapshot';
+import { decodeProfileLines, encodeProfileLines, MAX_PROFILES, type Vec3 } from './profile';
 
 export { MAX_CONTOURS, MAX_DIST, MAX_ZOOM, MIN_DIST };
 
@@ -36,6 +37,18 @@ const coolingOnly = (o: Option) => o.cfg!.startsWith('coolParams.');
 const radiationOnly = (o: Option) => o.cfg!.startsWith('opacityParams.') || ['opacity', 'radC', 'radChat', 'radLocalC', 'radSolver', 'radSweeps'].includes(o.cfg!);
 const at = (c: object, path: string): unknown => path.split('.').reduce<unknown>((v, k) => (v as Record<string, unknown> | undefined)?.[k], c);
 
+/**
+ * Profile lines on show (the Profile tool, app.ts): their ends in fractions of the box, and the
+ * field plotted along them (default: the one the view shows) with its log axis (null: as the
+ * field's default).
+ */
+export interface LinkProfiles {
+  lines: [Vec3, Vec3][];
+  field?: number;
+  species?: number;
+  log?: boolean | null;
+}
+
 export interface LinkState {
   /** the custom setup's document, packed for a link (setup/codec.ts encodeSetupParam), when the run is one */
   setup?: string;
@@ -45,6 +58,7 @@ export interface LinkState {
   auto: boolean;
   colormap: string;
   opacity: OpacityPoint[];
+  profiles?: LinkProfiles;
 }
 
 export interface LinkOverrides {
@@ -64,6 +78,7 @@ export interface LinkOverrides {
   auto?: boolean;
   colormap?: string;
   opacity?: OpacityPoint[];
+  profiles?: LinkProfiles;
 }
 
 /** The view a preset opens with. */
@@ -121,6 +136,10 @@ export function linkKeys(): LinkKey[] {
     ...VIEW_OPTIONS.map((o): LinkKey => ({ key: o.link, group: 'view', about: o.doc })),
     { key: 'cmap', group: 'view', about: 'Colormap' },
     { key: 'tf', group: 'view', about: 'Volume view: the opacity curve, as x:a points separated by commas' },
+    { key: 'prof', group: 'view', about: `Profile lines on show, at most ${MAX_PROFILES}: each x0,y0,x1,y1 (2D) or x0,y0,z0,x1,y1,z1 (3D) in fractions of the box, ; between lines` },
+    { key: 'proff', group: 'view', about: 'The field plotted along the profile lines, an index into the fields (default: the one shown)' },
+    { key: 'profsp', group: 'view', about: 'With proff a mass fraction: its species, by index' },
+    { key: 'proflog', group: 'view', about: 'The profile plot\u2019s value axis logarithmic (1) or linear (0); left out: as the field\u2019s default' },
   ];
 }
 
@@ -170,6 +189,13 @@ export function encodeLink(s: LinkState): URLSearchParams {
   str('cmap', s.colormap, 'inferno');
   const pts = (p: OpacityPoint[]) => p.map((o) => `${+o.x.toFixed(3)}:${+o.a.toFixed(3)}`).join(',');
   str('tf', pts(s.opacity), pts(defaultOpacity()));
+  const pr = s.profiles;
+  if (pr?.lines.length) {
+    q.set('prof', encodeProfileLines(pr.lines.map(([a, b]) => ({ a, b })), cfg.ndim));
+    if (pr.field !== undefined) q.set('proff', String(pr.field));
+    if (pr.field === MASS_FRACTION_FIELD && pr.species) q.set('profsp', String(pr.species));
+    if (pr.log !== undefined && pr.log !== null) q.set('proflog', flag(pr.log));
+  }
   return q;
 }
 
@@ -354,6 +380,25 @@ function decodeRenamed(q: URLSearchParams, report?: LinkReport): LinkOverrides {
     const ok = pts.length >= 2 && pts.length <= 16 && pts.every((p) => p.length === 2 && p.every((v) => v >= 0 && v <= 1));
     if (ok) out.opacity = pts.map(([x, a]) => ({ x, a })).sort((a, b) => a.x - b.x);
     else rejected('tf', tf);
+  }
+  // The profile lines, and the field plotted along them: read whether or not there are lines
+  // to plot it along, so that what comes without them is reported, not passed over.
+  const prof = q.get('prof');
+  const lines = prof ? decodeProfileLines(prof, out.ndim) : null;
+  if (prof && !lines) rejected('prof', prof, `not ${out.ndim === 2 ? 'x0,y0,x1,y1' : 'x0,y0,z0,x1,y1,z1'} lines in fractions of the box, at most ${MAX_PROFILES}`);
+  const pf = num('proff', 0, FIELDS.length - 1);
+  const psp = num('profsp', 0, most.species);
+  const plog = bool('proflog');
+  if (lines) {
+    out.profiles = { lines };
+    if (pf !== undefined) out.profiles.field = Math.round(pf);
+    if (psp !== undefined && out.profiles.field === MASS_FRACTION_FIELD) out.profiles.species = Math.round(psp);
+    if (plog !== undefined) out.profiles.log = plog;
+  } else {
+    for (const k of ['proff', 'profsp', 'proflog']) {
+      const raw = q.get(k);
+      if (raw !== null) rejected(k, raw, 'goes with prof');
+    }
   }
   return out;
 }

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { clipSegment, distances, profileCsv, resolveField, sampleAt, sampleCount, samplePoints, ticks, valueRange, PLOT_MARGIN } from '../../src/ui/profile';
+import { clipSegment, decodeProfileLines, distanceAt, distances, encodeProfileLines, MAX_PROFILES, plotLength, profileCsv, resolveField, sampleCount, sampleNear, samplePoints, seriesRange, ticks, valueRange, PLOT_MARGIN } from '../../src/ui/profile';
+import { decodeLink, encodeLink, viewDefaults, type LinkReport } from '../../src/ui/link';
+import { configFor } from '../../src/sim';
+import { problemOf } from '../../src/presets/lookup';
+import { defaultOpacity } from '../../src/render/transfer';
 import { FIELDS, MASS_FRACTION_FIELD } from '../../src/problems/types';
 
 describe('clipSegment', () => {
@@ -93,17 +97,77 @@ describe('the plot', () => {
     expect(ticks(1, 1)).toEqual([]);
   });
 
-  it('finds the sample under the pointer', () => {
-    const s = [0, 1, 2, 3, 4];
+  it('finds the distance under the pointer, and each line\'s sample there', () => {
     const w = 200;
     const pw = w - PLOT_MARGIN.left - PLOT_MARGIN.right;
-    expect(sampleAt(PLOT_MARGIN.left, w, s)).toBe(0);
-    expect(sampleAt(PLOT_MARGIN.left + pw, w, s)).toBe(4);
-    expect(sampleAt(PLOT_MARGIN.left + pw * 0.52, w, s)).toBe(2);
-    expect(sampleAt(5, w, s)).toBe(-1);
+    expect(distanceAt(PLOT_MARGIN.left, w, 4)).toBe(0);
+    expect(distanceAt(PLOT_MARGIN.left + pw, w, 4)).toBe(4);
+    expect(distanceAt(PLOT_MARGIN.left + pw * 0.52, w, 4)).toBeCloseTo(2.08);
+    expect(distanceAt(5, w, 4)).toBeNull();
+    const s = [0, 1, 2, 3, 4];
+    expect(sampleNear(s, 0)).toBe(0);
+    expect(sampleNear(s, 2.08)).toBe(2);
+    expect(sampleNear(s, 4.4)).toBe(4);
+    // Past a shorter line's end: none of its samples.
+    expect(sampleNear(s, 4.6)).toBe(-1);
+  });
+
+  it('fits the y range to every line, and the x axis to the longest', () => {
+    expect(seriesRange([{ values: [1, 2] }, { values: [3] }], false)).toEqual([0.9, 3.1]);
+    expect(seriesRange([{ values: [1, 2] }, { values: [3] }], false)).toEqual(valueRange([1, 2, 3], false));
+    expect(plotLength([{ s: [0, 0.5] }, { s: [0, 0.25, 0.75] }])).toBe(0.75);
   });
 
   it('writes CSV with its header quoted where it must be', () => {
-    expect(profileCsv([0, 1], [2, 3], [0, 1], { distance: 'distance (cm)', value: 'X(He, 4)' })).toBe('distance (cm),"X(He, 4)",level\n0,2,0\n1,3,1\n');
+    expect(profileCsv([{ s: [0, 1], values: [2, 3], levels: [0, 1] }], { distance: 'distance (cm)', value: 'X(He, 4)' })).toBe('distance (cm),"X(He, 4)",level\n0,2,0\n1,3,1\n');
+  });
+
+  it('numbers the lines in CSV when there are several', () => {
+    const csv = profileCsv([{ s: [0, 1], values: [2, 3], levels: [0, 0] }, { s: [0], values: [5], levels: [1] }], { distance: 'distance', value: 'Density' });
+    expect(csv).toBe('line,distance,Density,level\n1,0,2,0\n1,1,3,0\n2,0,5,1\n');
+  });
+});
+
+describe('profile lines in a link', () => {
+  it('writes and reads lines in 2D and 3D', () => {
+    const lines = [{ a: [0.1, 0.2, 0], b: [0.9, 0.2, 0] }, { a: [0.5, 0, 0], b: [0.5, 1, 0] }];
+    expect(encodeProfileLines(lines, 2)).toBe('0.1,0.2,0.9,0.2;0.5,0,0.5,1');
+    expect(decodeProfileLines('0.1,0.2,0.9,0.2;0.5,0,0.5,1', 2)).toEqual([[[0.1, 0.2, 0], [0.9, 0.2, 0]], [[0.5, 0, 0], [0.5, 1, 0]]]);
+    expect(decodeProfileLines('0.1,0.2,0.3,0.9,0.8,0.7', 3)).toEqual([[[0.1, 0.2, 0.3], [0.9, 0.8, 0.7]]]);
+    expect(encodeProfileLines([{ a: [1 / 3, 0, 0.5], b: [1, 1, 0.5] }], 3)).toBe('0.3333,0,0.5,1,1,0.5');
+  });
+
+  it('refuses what is not a line of the box', () => {
+    expect(decodeProfileLines('0.1,0.2,0.9', 2)).toBeNull(); // too few numbers
+    expect(decodeProfileLines('0.1,0.2,0.9,0.2', 3)).toBeNull(); // a 2D line in 3D
+    expect(decodeProfileLines('0.1,0.2,1.5,0.2', 2)).toBeNull(); // outside the box
+    expect(decodeProfileLines('0.5,0.5,0.5,0.5', 2)).toBeNull(); // a point
+    expect(decodeProfileLines('0.1,x,0.9,0.2', 2)).toBeNull();
+    expect(decodeProfileLines(Array(MAX_PROFILES + 1).fill('0,0,1,1').join(';'), 2)).toBeNull();
+  });
+
+  it('round-trips through a whole link, with the field and its scale', () => {
+    const problem = problemOf('sedov');
+    const cfg = configFor(problem, 256, { ndim: 2, amrLevels: 0 });
+    const view = viewDefaults(problem, 2);
+    const q = encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity(), profiles: { lines: [[[0.5, 0.5, 0], [1, 0.5, 0]], [[0.5, 0.5, 0], [1, 1, 0]]], field: 3, species: 0, log: false } });
+    expect(q.get('prof')).toBe('0.5,0.5,1,0.5;0.5,0.5,1,1');
+    expect(q.get('proff')).toBe('3');
+    expect(q.get('proflog')).toBe('0');
+    expect(q.has('profsp')).toBe(false);
+    const report: LinkReport = { ignored: [] };
+    const back = decodeLink(q, report);
+    expect(report.ignored).toEqual([]);
+    expect(back.profiles).toEqual({ lines: [[[0.5, 0.5, 0], [1, 0.5, 0]], [[0.5, 0.5, 0], [1, 1, 0]]], field: 3, log: false });
+    // No lines, no keys.
+    expect(encodeLink({ cfg, view, auto: true, colormap: 'inferno', opacity: defaultOpacity() }).has('prof')).toBe(false);
+  });
+
+  it('reports a line it cannot read and keeps the rest of the link', () => {
+    const report: LinkReport = { ignored: [] };
+    const back = decodeLink(new URLSearchParams('problem=sedov&dim=2&n=256&prof=0.5,0.5,2,0.5'), report);
+    expect(back.profiles).toBeUndefined();
+    expect(back.n).toBe(256);
+    expect(report.ignored.join()).toMatch(/^prof=/);
   });
 });

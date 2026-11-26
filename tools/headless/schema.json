@@ -591,6 +591,26 @@
    "key": "tf",
    "group": "view",
    "about": "Volume view: the opacity curve, as x:a points separated by commas"
+  },
+  {
+   "key": "prof",
+   "group": "view",
+   "about": "Profile lines on show, at most 6: each x0,y0,x1,y1 (2D) or x0,y0,z0,x1,y1,z1 (3D) in fractions of the box, ; between lines"
+  },
+  {
+   "key": "proff",
+   "group": "view",
+   "about": "The field plotted along the profile lines, an index into the fields (default: the one shown)"
+  },
+  {
+   "key": "profsp",
+   "group": "view",
+   "about": "With proff a mass fraction: its species, by index"
+  },
+  {
+   "key": "proflog",
+   "group": "view",
+   "about": "The profile plot’s value axis logarithmic (1) or linear (0); left out: as the field’s default"
   }
  ],
  "view": [
@@ -1089,7 +1109,7 @@
   },
   {
    "name": "profile",
-   "summary": "A field along a straight line through the box, from the view’s own field code: any field the view can show (describe().fields), not only slice()’s variables. Each sample is the cell under it (the finest leaf on an adaptive mesh); by default two samples per cell of the finest level. Returns `s`, the distance from `from` in code length, `values` in code units, `level` the refinement level of each sample, and `solid` when samples lie inside an obstacle. With no `from` and `to`: the line on show in the page (placed with the Profile tool).",
+   "summary": "A field along a straight line through the box, from the view’s own field code: any field the view can show (describe().fields), not only slice()’s variables. Each sample is the cell under it (the finest leaf on an adaptive mesh); by default two samples per cell of the finest level. Returns `s`, the distance from `from` in code length, `values` in code units, `level` the refinement level of each sample, and `solid` when samples lie inside an obstacle. With no `from` and `to`: a line on show in the page (placed with the Profile tool; `line` picks which).",
    "args": [
     {
      "name": "options",
@@ -1133,9 +1153,18 @@
        "maximum": 2,
        "description": "3D only: sample the projection along this axis through each point (column density for density, the mass-weighted mean for any other field), as the projection view draws it"
       },
+      "line": {
+       "type": "integer",
+       "minimum": 0,
+       "maximum": 5,
+       "description": "With no `from` and `to`: which line on show in the page to read, from 0 in the order placed (default 0)"
+      },
       "show": {
-       "type": "boolean",
-       "description": "Also put the line and its plot on show in the page (screenshots do not draw it)"
+       "type": [
+        "boolean",
+        "string"
+       ],
+       "description": "Also put the line on show in the page with its plot: true alone, \"add\" beside the lines already on show (at most 6, one field for all; screenshots do not draw them)"
       },
       "encoding": {
        "type": "string",
@@ -1904,8 +1933,8 @@
   {
    "name": "profile",
    "method": "profile",
-   "brief": "Samples any field the view can show along a line from `from` to `to` (or the line placed in the page). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON",
-   "description": "A field along a straight line through the box, from the view’s own field code: any field the view can show (describe().fields), not only slice()’s variables. Each sample is the cell under it (the finest leaf on an adaptive mesh); by default two samples per cell of the finest level. Returns `s`, the distance from `from` in code length, `values` in code units, `level` the refinement level of each sample, and `solid` when samples lie inside an obstacle. With no `from` and `to`: the line on show in the page (placed with the Profile tool). Returns the length, min and max, and `s` (distance from `from`), `values` and `level` when there are at most 256 samples or include_values is set; with save_path they are written there instead: as a .npy file (float32 values, shape [n]) when the name ends in .npy, as CSV (s, value, level, one sample a row) when it ends in .csv, else as JSON.",
+   "brief": "Samples any field the view can show along a line from `from` to `to` (or a line placed in the page, by `line`). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON",
+   "description": "A field along a straight line through the box, from the view’s own field code: any field the view can show (describe().fields), not only slice()’s variables. Each sample is the cell under it (the finest leaf on an adaptive mesh); by default two samples per cell of the finest level. Returns `s`, the distance from `from` in code length, `values` in code units, `level` the refinement level of each sample, and `solid` when samples lie inside an obstacle. With no `from` and `to`: a line on show in the page (placed with the Profile tool; `line` picks which). Returns the length, min and max, and `s` (distance from `from`), `values` and `level` when there are at most 256 samples or include_values is set; with save_path they are written there instead: as a .npy file (float32 values, shape [n]) when the name ends in .npy, as CSV (s, value, level, one sample a row) when it ends in .csv, else as JSON.",
    "inputSchema": {
     "type": "object",
     "properties": {
@@ -1946,9 +1975,18 @@
       "maximum": 2,
       "description": "3D only: sample the projection along this axis through each point (column density for density, the mass-weighted mean for any other field), as the projection view draws it"
      },
+     "line": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 5,
+      "description": "With no `from` and `to`: which line on show in the page to read, from 0 in the order placed (default 0)"
+     },
      "show": {
-      "type": "boolean",
-      "description": "Also put the line and its plot on show in the page (screenshots do not draw it)"
+      "type": [
+       "boolean",
+       "string"
+      ],
+      "description": "Also put the line on show in the page with its plot: true alone, \"add\" beside the lines already on show (at most 6, one field for all; screenshots do not draw them)"
      },
      "include_values": {
       "type": "boolean",

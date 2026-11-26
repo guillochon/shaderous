@@ -30,7 +30,7 @@ A setup is described with the same keys as a share link (`describe` gives each o
 <!-- gen:link-key-list -->
 - The run: `problem`, `setup`, `dim`, `n`, `amr`
 - Settings, each an override of the preset's own: `tend`, `sym`, `eos`, `material`, `gamma`, `K`, `lc`, `lrho`, `arad`, `degrho`, `degp`, `coulomb`, `hherad`, `iont`, `ionrho`, `frho`, `fu`, `fv`, `fva`, `cool`, `crate`, `calpha`, `cheat`, `ctunit`, `ctfloor`, `rad`, `kap`, `kapa`, `kaps`, `kapk`, `kapt`, `clight`, `chat`, `clocal`, `radflux`, `rsweeps`, `nu`, `kappa`, `eta`, `drive`, `dtau`, `dkmin`, `dkmax`, `dzeta`, `dseed`, `gravity`, `G`, `vcycles`, `jfloor`, `jcells`, `fluxwork`, `refhi`, `reflo`, `refrho`, `tbins`, `riemann`, `limiter`, `cfl`, `sdr`, `sdt`, `psplit`, `cut`, `pcycles`, `ptol`, `acfl`, `dampr`, `damprate`, `wb`, `bc`, `p.<id>`
-- The view: `mode`, `field`, `species`, `log`, `lo`, `hi`, `axis`, `slice`, `rhocut`, `opacity`, `yaw`, `pitch`, `dist`, `tx`, `ty`, `tz`, `zoom`, `cx`, `cy`, `blocks`, `contours`, `ncont`, `fog`, `isoa`, `exact`, `light`, `box`, `flines`, `nflines`, `flfloor`, `mirror`, `turn`, `cmap`, `tf`
+- The view: `mode`, `field`, `species`, `log`, `lo`, `hi`, `axis`, `slice`, `rhocut`, `opacity`, `yaw`, `pitch`, `dist`, `tx`, `ty`, `tz`, `zoom`, `cx`, `cy`, `blocks`, `contours`, `ncont`, `fog`, `isoa`, `exact`, `light`, `box`, `flines`, `nflines`, `flfloor`, `mirror`, `turn`, `cmap`, `tf`, `prof`, `proff`, `profsp`, `proflog`
 <!-- /gen:link-key-list -->
 
 Also `p.<param>` for a preset's own parameters. Unknown keys are ignored and out-of-range
@@ -197,7 +197,7 @@ Typical sequence: `describe` → `load {setup}` → `run {until}` → `diagnosti
 | `stats` | Gives each variable’s min, max and volume-weighted mean over the box |
 | `slice` | Samples a variable on a plane. Returns min, max and mean, with the values as rows when `res` is at most 64; `save_path` writes the full slice to a file instead: a `.npy` file (float32, shape `[res, res]`) if the name ends in `.npy`, else JSON |
 | `probe` | Gives the gas at given points |
-| `profile` | Samples any field the view can show along a line from `from` to `to` (or the line placed in the page). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON |
+| `profile` | Samples any field the view can show along a line from `from` to `to` (or a line placed in the page, by `line`). Returns its length, min and max, with the values when there are at most 256; `save_path` writes them to a file: `.npy` (float32, shape `[n]`), `.csv` (distance, value, level), else JSON |
 | `screenshot` | Returns a PNG image of the view, optionally changing the `view` first and saving to `save_path` |
 | `view` | Changes what screenshots show, leaving the run alone |
 | `controls` | Lists the panel’s controls and the settings of the option table that can change mid-run |
@@ -244,7 +244,7 @@ Every flag (`npx -y shaderous --help` says what each takes):
 <!-- gen:cli-flag-list -->
 - Setup: `--problem ID`, `--dim 2|3`, `--n CELLS`, `--amr LEVELS`, `--set KEY=VALUE`, `--setup FILE`, `--from FILE`, `--switch-burn`
 - Stopping: `--until T`, `--steps N`, `--every DT`, `--every-wall SECONDS`, `--timeout SECONDS`, `--wall SECONDS`
-- Outputs: `--out DIR`, `--png`, `--width PX`, `--height PX`, `--overlays`, `--native`, `--view KEY=VALUE`, `--shot NAME:KEY=VALUE,..`, `--slice VAR`, `--slice-axis A`, `--slice-pos P`, `--slice-res R`, `--slice-format F`, `--athdf`, `--athdf-every N`, `--debris`
+- Outputs: `--out DIR`, `--png`, `--width PX`, `--height PX`, `--overlays`, `--native`, `--view KEY=VALUE`, `--shot NAME:KEY=VALUE,..`, `--slice VAR`, `--slice-axis A`, `--slice-pos P`, `--slice-res R`, `--slice-format F`, `--profile NAME:FROM:TO[:FIELD,..]`, `--profile-n N`, `--profile-format F`, `--athdf`, `--athdf-every N`, `--debris`
 - Movie: `--mp4`, `--frame-dt DT`, `--frame-every N`, `--fps F`, `--bitrate M`, `--no-overlays`
 - Sweeps: `--vary KEY=V1,V2,..`
 - Other: `--url URL`, `--headed`, `--low-priority`, `--gpu-memory GB`, `--quiet`
